@@ -246,10 +246,7 @@ void Position::update_slider_blockers(Color c) const {
     }
 }
 
-// Check if bitboard has more than one bit set
-inline bool more_than_one(Bitboard b) {
-    return b & (b - 1);
-}
+// more_than_one is now defined in bitboard.h
 
 // Get attackers to a square
 Bitboard Position::attackers_to(Square s) const {
@@ -446,7 +443,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
 
     if (m.type_of() == CASTLING) {
         Square rfrom, rto;
-        do_castling<true>(us, from, to, rfrom, rto);
+        do_castling_helper(true, us, from, to, rfrom, rto);
         k ^= Zobrist::psq[captured][rfrom] ^ Zobrist::psq[captured][rto];
         captured = NO_PIECE;
     }
@@ -548,7 +545,7 @@ void Position::undo_move(Move m) {
 
     if (m.type_of() == CASTLING) {
         Square rfrom, rto;
-        do_castling<false>(us, from, to, rfrom, rto);
+        do_castling_helper(false, us, from, to, rfrom, rto);
     }
     else {
         move_piece(to, from);
@@ -626,14 +623,13 @@ void Position::move_piece(Square from, Square to) {
 }
 
 // Castling helper
-template<bool Do>
-void Position::do_castling(Color us, Square from, Square& to, Square& rfrom, Square& rto) {
+void Position::do_castling_helper(bool doCastling, Color us, Square from, Square& to, Square& rfrom, Square& rto) {
     bool kingSide = to > from;
     rfrom = to;
     rto = relative_square(us, kingSide ? SQ_F1 : SQ_D1);
     to = relative_square(us, kingSide ? SQ_G1 : SQ_C1);
 
-    if (Do) {
+    if (doCastling) {
         remove_piece(from);
         remove_piece(rfrom);
         put_piece(make_piece(us, KING), to);
@@ -711,8 +707,6 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
     return os;
 }
 
-// Explicit template instantiations
-template void Position::do_castling<true>(Color, Square, Square&, Square&, Square&);
-template void Position::do_castling<false>(Color, Square, Square&, Square&, Square&);
+// No template instantiations needed
 
 } // namespace MetalFish

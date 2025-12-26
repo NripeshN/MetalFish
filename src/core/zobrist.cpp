@@ -11,6 +11,7 @@
 */
 
 #include "core/zobrist.h"
+#include "core/bitboard.h"
 #include <random>
 
 namespace MetalFish {

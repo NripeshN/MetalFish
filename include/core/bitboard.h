@@ -44,6 +44,13 @@ constexpr Bitboard square_bb(Square s) {
     return 1ULL << s;
 }
 
+// Rank and file bitboards
+constexpr Bitboard rank_bb(Rank r) { return Rank1BB << (8 * r); }
+constexpr Bitboard rank_bb(Square s) { return rank_bb(rank_of(s)); }
+constexpr Bitboard file_bb(File f) { return FileABB << f; }
+constexpr Bitboard file_bb(Square s) { return file_bb(file_of(s)); }
+constexpr bool more_than_one(Bitboard b) { return b & (b - 1); }
+
 // Pre-computed attack tables
 extern Bitboard PseudoAttacks[PIECE_TYPE_NB][SQUARE_NB];
 extern Bitboard PawnAttacks[COLOR_NB][SQUARE_NB];

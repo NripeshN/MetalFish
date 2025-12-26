@@ -1,178 +1,142 @@
 /*
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
+  
+  Based on Stockfish, Copyright (C) 2004-2025 The Stockfish developers
 
-  Transposition Table implementation using unified memory for
-  zero-copy CPU-GPU access.
+  MetalFish is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
 */
 
-#include "core/types.h"
-#include "metal/allocator.h"
+#include "search/tt.h"
+#include <cstdlib>
 #include <cstring>
-#include <atomic>
+#include <thread>
+#include <vector>
 
 namespace MetalFish {
 
-/**
- * Transposition Table Entry
- * Packed into 16 bytes for cache efficiency and atomic access
- */
-struct TTEntry {
-    Key key16;        // 16 bits of the position key
-    Move move;        // Best move
-    int16_t value;    // Search value
-    int16_t eval;     // Static evaluation
-    uint8_t genBound; // Generation (6 bits) + Bound type (2 bits)
-    int8_t depth;     // Search depth
-    
-    void save(Key k, Value v, bool pv, Bound b, Depth d, Move m, Value ev, uint8_t gen) {
-        key16 = (uint16_t)k;
-        move = m;
-        value = (int16_t)v;
-        eval = (int16_t)ev;
-        genBound = uint8_t(gen << 2) | uint8_t(b) | (pv ? 4 : 0);
-        depth = (int8_t)d;
-    }
-    
-    Move get_move() const { return move; }
-    Value get_value() const { return value; }
-    Value get_eval() const { return eval; }
-    Depth get_depth() const { return depth; }
-    Bound get_bound() const { return Bound(genBound & 3); }
-    bool is_pv() const { return genBound & 4; }
-};
+TranspositionTable TT;
 
-/**
- * Transposition Table Cluster
- * Each cluster contains 3 entries for better cache utilization
- */
-struct TTCluster {
-    TTEntry entry[3];
-    char padding[64 - 3 * sizeof(TTEntry)]; // Align to 64 bytes (cache line)
-};
+// Save data to a TT entry
+void TTEntry::save(Key k, Value v, bool pv, Bound b, Depth d, Move m, Value ev, uint8_t generation) {
+    // Preserve any existing move if we don't have a new one
+    if (m || uint16_t(k) != key16)
+        move16 = uint16_t(m.raw());
 
-static_assert(sizeof(TTCluster) == 64, "TTCluster must be 64 bytes");
+    // Overwrite less valuable entries
+    if (b == BOUND_EXACT || uint16_t(k) != key16 
+        || d - DEPTH_ENTRY_OFFSET + 2 * pv > depth8 - 4) {
+        key16    = uint16_t(k);
+        depth8   = int8_t(d - DEPTH_ENTRY_OFFSET);
+        genBound8 = uint8_t(generation | (pv << 2) | b);
+        value16  = int16_t(v);
+        eval16   = int16_t(ev);
+    }
+}
 
-/**
- * Transposition Table
- * Uses unified memory for shared CPU-GPU access
- */
-class TranspositionTable {
-public:
-    TranspositionTable() = default;
-    ~TranspositionTable() { free(); }
-    
-    /**
-     * Resize the table to the specified size in MB
-     */
-    void resize(size_t mb_size) {
-        free();
-        
-        cluster_count_ = mb_size * 1024 * 1024 / sizeof(TTCluster);
-        
-        // Allocate using Metal unified memory
-        buffer_ = Metal::MetalAllocator::instance().allocate(
-            cluster_count_ * sizeof(TTCluster));
-        
-        table_ = static_cast<TTCluster*>(buffer_.contents());
-        clear();
+TranspositionTable::~TranspositionTable() {
+    if (table) {
+#ifdef _WIN32
+        _aligned_free(table);
+#else
+        std::free(table);
+#endif
     }
-    
-    /**
-     * Clear all entries
-     */
-    void clear() {
-        if (table_) {
-            std::memset(table_, 0, cluster_count_ * sizeof(TTCluster));
-        }
-        generation_ = 0;
-    }
-    
-    /**
-     * Probe the table for a position
-     */
-    TTEntry* probe(Key key, bool& found) const {
-        TTEntry* tte = first_entry(key);
-        uint16_t key16 = (uint16_t)key;
-        
-        for (int i = 0; i < 3; ++i) {
-            if (tte[i].key16 == key16 || !tte[i].get_move()) {
-                found = tte[i].key16 == key16;
-                return &tte[i];
-            }
-        }
-        
-        // Return entry with lowest depth for replacement
-        TTEntry* replace = tte;
-        for (int i = 1; i < 3; ++i) {
-            if (replacement_score(replace) > replacement_score(&tte[i])) {
-                replace = &tte[i];
-            }
-        }
-        
-        found = false;
-        return replace;
-    }
-    
-    /**
-     * Increment generation counter (called each new search)
-     */
-    void new_search() {
-        generation_ += 8; // High bits for generation
-    }
-    
-    uint8_t generation() const { return generation_; }
-    
-    /**
-     * Get hashfull (permill)
-     */
-    int hashfull() const {
-        int count = 0;
-        for (size_t i = 0; i < 1000 && i < cluster_count_; ++i) {
-            for (int j = 0; j < 3; ++j) {
-                if ((table_[i].entry[j].genBound >> 2) == (generation_ >> 2)) {
-                    ++count;
-                }
-            }
-        }
-        return count / 3;
-    }
-    
-    // Get pointer for GPU access
-    void* gpu_ptr() const { return table_; }
-    size_t size_bytes() const { return cluster_count_ * sizeof(TTCluster); }
+}
 
-private:
-    TTCluster* table_ = nullptr;
-    Metal::Buffer buffer_;
-    size_t cluster_count_ = 0;
-    uint8_t generation_ = 0;
-    
-    TTEntry* first_entry(Key key) const {
-        return &table_[((size_t)key) % cluster_count_].entry[0];
+// Resize the transposition table
+void TranspositionTable::resize(size_t mbSize) {
+    if (table) {
+#ifdef _WIN32
+        _aligned_free(table);
+#else
+        std::free(table);
+#endif
+        table = nullptr;
     }
-    
-    int replacement_score(const TTEntry* tte) const {
-        return tte->get_depth() - ((generation_ - tte->genBound) & 0xFC);
+
+    clusterCount = mbSize * 1024 * 1024 / sizeof(TTCluster);
+
+    // Allocate aligned memory for cache efficiency
+#ifdef _WIN32
+    table = static_cast<TTCluster*>(_aligned_malloc(clusterCount * sizeof(TTCluster), 64));
+#else
+    void* mem = nullptr;
+    if (posix_memalign(&mem, 64, clusterCount * sizeof(TTCluster)) == 0) {
+        table = static_cast<TTCluster*>(mem);
     }
-    
-    void free() {
-        if (buffer_.valid()) {
-            Metal::MetalAllocator::instance().free(buffer_);
-            buffer_ = Metal::Buffer{};
-            table_ = nullptr;
-            cluster_count_ = 0;
+#endif
+
+    if (!table) {
+        clusterCount = 0;
+        return;
+    }
+
+    clear();
+}
+
+// Clear the transposition table using multiple threads
+void TranspositionTable::clear() {
+    if (!table || clusterCount == 0)
+        return;
+
+    // Use multiple threads to clear faster
+    unsigned threadCount = std::max(1u, std::thread::hardware_concurrency());
+    std::vector<std::thread> threads;
+
+    for (unsigned i = 0; i < threadCount; ++i) {
+        threads.emplace_back([this, i, threadCount]() {
+            size_t start = i * clusterCount / threadCount;
+            size_t end = (i + 1) * clusterCount / threadCount;
+            std::memset(&table[start], 0, (end - start) * sizeof(TTCluster));
+        });
+    }
+
+    for (auto& t : threads)
+        t.join();
+
+    generation8 = 0;
+}
+
+// Probe the transposition table
+TTEntry* TranspositionTable::probe(Key key, bool& found) const {
+    TTEntry* const tte = &table[key & (clusterCount - 1)].entry[0];
+    const uint16_t key16 = uint16_t(key);
+
+    for (int i = 0; i < ClusterSize; ++i) {
+        if (tte[i].key16 == key16 || !tte[i].depth8) {
+            // Refresh entry age
+            tte[i].genBound8 = uint8_t(generation8 | (tte[i].genBound8 & 0x7));
+            found = tte[i].depth8 != 0 && tte[i].key16 == key16;
+            return &tte[i];
         }
     }
-};
 
-// Global transposition table
-static TranspositionTable TT;
+    // Find replacement entry (lowest depth/oldest)
+    TTEntry* replace = tte;
+    for (int i = 1; i < ClusterSize; ++i) {
+        if (replace->depth8 - ((generation8 - replace->genBound8) & 0xF8)
+            > tte[i].depth8 - ((generation8 - tte[i].genBound8) & 0xF8))
+            replace = &tte[i];
+    }
 
-void tt_resize(size_t mb) { TT.resize(mb); }
-void tt_clear() { TT.clear(); }
-void tt_new_search() { TT.new_search(); }
-int tt_hashfull() { return TT.hashfull(); }
+    found = false;
+    return replace;
+}
+
+// Calculate how full the hash table is (per mille)
+int TranspositionTable::hashfull() const {
+    int count = 0;
+    for (size_t i = 0; i < 1000; ++i) {
+        for (int j = 0; j < ClusterSize; ++j) {
+            if ((table[i].entry[j].genBound8 & 0xF8) == generation8)
+                ++count;
+        }
+    }
+    return count * 1000 / (1000 * ClusterSize);
+}
 
 } // namespace MetalFish
-

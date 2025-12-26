@@ -10,6 +10,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OBJCXX_STANDARD 20)
 set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
 
+# Build type
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
 # macOS specific settings
 if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS deployment version")
@@ -93,6 +98,7 @@ set(METAL_SHADERS
 
 # Option to build Metal shaders (requires Metal toolchain)
 option(BUILD_METAL_SHADERS "Build Metal shaders (requires xcrun metal)" OFF)
+option(BUILD_TESTS "Build test suite" ON)
 
 # Compile Metal shaders to .metallib
 if(APPLE AND BUILD_METAL_SHADERS)
@@ -167,12 +173,59 @@ target_compile_options(metalfish PRIVATE
     -Wextra
     -O3
     -DNDEBUG
-    -march=native
+    $<$<CONFIG:Debug>:-g -O0>
 )
+
+# Test executable
+if(BUILD_TESTS)
+    add_executable(metalfish_tests
+        tests/test_main.cpp
+        tests/test_bitboard.cpp
+        tests/test_position.cpp
+        tests/test_movegen.cpp
+        tests/test_search.cpp
+        tests/test_metal.cpp
+        ${METAL_SOURCES}
+        ${CORE_SOURCES}
+        ${SEARCH_SOURCES}
+        ${EVAL_SOURCES}
+        ${UCI_SOURCES}
+    )
+    
+    target_include_directories(metalfish_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${METAL_CPP_DIR}
+    )
+    
+    if(APPLE)
+        target_link_libraries(metalfish_tests
+            ${METAL_LIBRARY}
+            ${FOUNDATION_LIBRARY}
+            ${QUARTZCORE_LIBRARY}
+            "-framework MetalPerformanceShaders"
+        )
+        
+        target_compile_definitions(metalfish_tests PRIVATE
+            METAL_PATH="${CMAKE_BINARY_DIR}/metalfish.metallib"
+        )
+    endif()
+    
+    target_compile_options(metalfish_tests PRIVATE
+        -Wall
+        -Wextra
+        -g
+    )
+    
+    # Enable CTest
+    enable_testing()
+    add_test(NAME MetalFishTests COMMAND metalfish_tests)
+endif()
 
 # Install
 install(TARGETS metalfish DESTINATION bin)
-install(FILES ${METALLIB_OUTPUT} DESTINATION lib)
+if(EXISTS ${METALLIB_OUTPUT})
+    install(FILES ${METALLIB_OUTPUT} DESTINATION lib)
+endif()
 
 # Print configuration summary
 message(STATUS "")
@@ -181,5 +234,6 @@ message(STATUS "  Version: ${PROJECT_VERSION}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  macOS Deployment Target: ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+message(STATUS "  Build Tests: ${BUILD_TESTS}")
+message(STATUS "  Build Metal Shaders: ${BUILD_METAL_SHADERS}")
 message(STATUS "")
-

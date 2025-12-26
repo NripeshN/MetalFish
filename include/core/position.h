@@ -110,8 +110,11 @@ public:
     // Properties of moves
     bool legal(Move m) const;
     bool pseudo_legal(Move m) const;
-    bool capture(Move m) const;
     bool gives_check(Move m) const;
+    
+    bool capture(Move m) const {
+        return (!empty(m.to_sq()) && m.type_of() != CASTLING) || m.type_of() == EN_PASSANT;
+    }
     Piece moved_piece(Move m) const { return piece_on(m.from_sq()); }
     Piece captured_piece() const { return st->capturedPiece; }
 
@@ -151,6 +154,8 @@ public:
     void move_piece(Square from, Square to);
 
 private:
+    // Castling helper
+    void do_castling_helper(bool doCastling, Color us, Square from, Square& to, Square& rfrom, Square& rto);
     void set_castling_right(Color c, Square rfrom);
     void set_state() const;
     void set_check_info() const;
