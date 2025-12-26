@@ -253,14 +253,15 @@ Move* generate<LEGAL>(const Position& pos, Move* moveList) {
     Move* end = pos.checkers() ? generate<EVASIONS>(pos, moveList)
                                : generate<NON_EVASIONS>(pos, moveList);
 
+    // Filter out illegal moves in place
     while (cur != end) {
-        if (pos.legal(*cur))
-            *moveList++ = *cur++;
+        if (!pos.legal(*cur))
+            *cur = *--end;  // Replace with last move and shrink the list
         else
-            *cur++ = *--end;
+            ++cur;  // Move is legal, advance to next
     }
 
-    return moveList;
+    return cur;  // Return pointer to end of legal moves
 }
 
 } // namespace MetalFish

@@ -281,12 +281,17 @@ bool Position::legal(Move m) const {
     // Castling moves
     if (m.type_of() == CASTLING) {
         // Check that path is not attacked
+        // The king can't castle out of check, through check, or into check
         to = relative_square(us, to > from ? SQ_G1 : SQ_C1);
         Direction step = (to > from ? EAST : WEST);
 
-        for (Square s = from; s != to; s += step)
+        // Check all squares from king's current position to destination (inclusive)
+        for (Square s = from; ; s += step) {
             if (attackers_to(s) & pieces(~us))
                 return false;
+            if (s == to)
+                break;
+        }
 
         return !chess960 || !(attacks_bb(ROOK, to, pieces() ^ square_bb(to)) & pieces(~us, ROOK));
     }
@@ -440,6 +445,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
     Square to = m.to_sq();
     Piece pc = piece_on(from);
     Piece captured = m.type_of() == EN_PASSANT ? make_piece(them, PAWN) : piece_on(to);
+
 
     if (m.type_of() == CASTLING) {
         Square rfrom, rto;

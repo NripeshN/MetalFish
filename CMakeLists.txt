@@ -68,6 +68,7 @@ set(CORE_SOURCES
     src/core/position.cpp
     src/core/movegen.cpp
     src/core/zobrist.cpp
+    src/core/perft.cpp
 )
 
 # Source files - Search

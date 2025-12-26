@@ -15,6 +15,7 @@
 #include "types.h"
 #include "bitboard.h"
 #include <array>
+#include <cassert>
 #include <deque>
 #include <memory>
 #include <string>
@@ -86,7 +87,10 @@ public:
     int count() const { return count<Pt>(WHITE) + count<Pt>(BLACK); }
 
     template<PieceType Pt>
-    Square square(Color c) const { return lsb(pieces(c, Pt)); }
+    Square square(Color c) const {
+        assert(pieces(c, Pt));
+        return lsb(pieces(c, Pt));
+    }
 
     // Castling
     bool can_castle(CastlingRights cr) const { return st->castlingRights & cr; }
