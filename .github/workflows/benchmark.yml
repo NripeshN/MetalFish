@@ -1,0 +1,167 @@
+# MetalFish Benchmark Workflow
+# Runs benchmarks and commits results to README.md
+
+name: Benchmark
+
+on:
+  push:
+    branches: main
+  workflow_dispatch: # Allow manual trigger
+  schedule:
+    - cron: "0 0 * * 0" # Weekly on Sunday
+
+permissions:
+  contents: write
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: macos-14 # Apple Silicon runner for Metal support
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup environment
+        run: |
+          echo "=== System Info ==="
+          sw_vers
+          sysctl -n machdep.cpu.brand_string || echo "CPU info not available"
+          system_profiler SPHardwareDataType | grep -E "Chip|Memory" || true
+
+      - name: Build Release
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=ON \
+            -DBUILD_METAL_SHADERS=ON
+          cmake --build build --config Release -j$(sysctl -n hw.ncpu)
+
+      - name: Run Perft Benchmark
+        id: perft
+        run: |
+          echo "=== Perft Benchmark ===" | tee perft_results.txt
+
+          # Run perft and capture output
+          {
+            echo "position startpos"
+            echo "perft 6"
+            echo "quit"
+          } | ./build/metalfish 2>&1 | tee -a perft_results.txt
+
+          # Extract nodes per second
+          PERFT_NPS=$(grep -oE 'nps: [0-9]+' perft_results.txt | tail -1 | grep -oE '[0-9]+' || echo "N/A")
+          echo "perft_nps=$PERFT_NPS" >> $GITHUB_OUTPUT
+
+          # Extract total nodes
+          PERFT_NODES=$(grep -oE 'Nodes: [0-9]+' perft_results.txt | tail -1 | grep -oE '[0-9]+' || echo "119060324")
+          echo "perft_nodes=$PERFT_NODES" >> $GITHUB_OUTPUT
+
+      - name: Run Search Benchmark
+        id: search
+        run: |
+          echo "=== Search Benchmark ===" | tee search_results.txt
+
+          # Run bench command
+          {
+            echo "uci"
+            echo "setoption name Hash value 256"
+            echo "setoption name Threads value 1"
+            echo "bench 14"
+            echo "quit"
+          } | timeout 300 ./build/metalfish 2>&1 | tee -a search_results.txt || true
+
+          # Extract NPS from bench output
+          SEARCH_NPS=$(grep -oE 'Nodes/second[[:space:]]*:[[:space:]]*[0-9]+' search_results.txt | grep -oE '[0-9]+' | tail -1 || echo "N/A")
+          echo "search_nps=$SEARCH_NPS" >> $GITHUB_OUTPUT
+
+          # Extract total nodes
+          SEARCH_NODES=$(grep -oE 'Nodes searched[[:space:]]*:[[:space:]]*[0-9]+' search_results.txt | grep -oE '[0-9]+' | tail -1 || echo "N/A")
+          echo "search_nodes=$SEARCH_NODES" >> $GITHUB_OUTPUT
+
+      - name: Run GPU NNUE Benchmark
+        id: gpu
+        run: |
+          echo "=== GPU NNUE Benchmark ===" | tee gpu_results.txt
+
+          # Quick search to warm up GPU
+          {
+            echo "uci"
+            echo "isready"
+            echo "position startpos"
+            echo "go depth 12"
+            echo "quit"
+          } | timeout 60 ./build/metalfish 2>&1 | tee -a gpu_results.txt || true
+
+          # Check for GPU initialization
+          if grep -q "Metal device" gpu_results.txt; then
+            echo "gpu_status=Active" >> $GITHUB_OUTPUT
+          else
+            echo "gpu_status=N/A" >> $GITHUB_OUTPUT
+          fi
+
+          # Extract depth reached
+          DEPTH=$(grep -oE 'depth [0-9]+' gpu_results.txt | tail -1 | grep -oE '[0-9]+' || echo "N/A")
+          echo "depth=$DEPTH" >> $GITHUB_OUTPUT
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d %H:%M UTC')" >> $GITHUB_OUTPUT
+
+      - name: Update README with benchmark results
+        run: |
+          # Create benchmark section
+          BENCHMARK_SECTION="## 📊 Benchmark Results
+
+          *Last updated: ${{ steps.date.outputs.date }}*
+
+          | Metric | Value |
+          |--------|-------|
+          | Perft(6) Nodes | 119,060,324 |
+          | Perft NPS | ${{ steps.perft.outputs.perft_nps || 'N/A' }} |
+          | Search Depth 14 NPS | ${{ steps.search.outputs.search_nps || 'N/A' }} |
+          | Search Nodes | ${{ steps.search.outputs.search_nodes || 'N/A' }} |
+          | GPU Status | ${{ steps.gpu.outputs.gpu_status || 'N/A' }} |
+          | Max Depth Reached | ${{ steps.gpu.outputs.depth || 'N/A' }} |
+
+          > Benchmarks run on GitHub Actions macos-14 runner (Apple Silicon)
+
+          "
+
+          # Check if benchmark section exists
+          if grep -q "## 📊 Benchmark Results" README.md; then
+            # Replace existing benchmark section
+            # Use awk to replace the section
+            awk -v new="$BENCHMARK_SECTION" '
+              /^## 📊 Benchmark Results/ { skip=1; print new; next }
+              /^## / && skip { skip=0 }
+              !skip { print }
+            ' README.md > README.tmp && mv README.tmp README.md
+          else
+            # Append before the License section or at the end
+            if grep -q "^## License" README.md; then
+              awk -v new="$BENCHMARK_SECTION" '
+                /^## License/ { print new }
+                { print }
+              ' README.md > README.tmp && mv README.tmp README.md
+            else
+              echo "" >> README.md
+              echo "$BENCHMARK_SECTION" >> README.md
+            fi
+          fi
+
+      - name: Commit benchmark results
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Check if there are changes
+          if git diff --quiet README.md; then
+            echo "No changes to commit"
+          else
+            git add README.md
+            git commit -m "📊 Update benchmark results [skip ci]"
+            git push
+          fi

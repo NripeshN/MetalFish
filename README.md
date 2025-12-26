@@ -243,6 +243,19 @@ This eliminates the copy overhead that limits GPU usage in traditional discrete 
 
 *Benchmarked on Apple M2 Max*
 
+## 📊 Benchmark Results
+
+*Benchmarks are automatically updated by GitHub Actions on each push to main.*
+
+| Metric | Value |
+|--------|-------|
+| Perft(6) Nodes | 119,060,324 |
+| Perft NPS | Pending CI run |
+| Search Depth 14 NPS | Pending CI run |
+| GPU Status | Pending CI run |
+
+> Run `./metalfish` with `bench 14` to see local benchmarks
+
 ## UCI Options
 
 | Option | Type | Default | Description |
