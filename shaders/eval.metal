@@ -281,3 +281,4 @@ kernel void batch_static_eval(
     scores[tid] = score;
 }
 
+

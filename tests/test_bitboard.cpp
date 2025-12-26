@@ -96,3 +96,4 @@ bool test_bitboard() {
     return true;
 }
 
+

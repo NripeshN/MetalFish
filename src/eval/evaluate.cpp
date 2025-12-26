@@ -12,8 +12,11 @@
 
 #include "eval/evaluate.h"
 #include "eval/nnue.h"
+#include "eval/nnue_gpu.h"
+#include "eval/gpu_nnue.h"
 #include "core/bitboard.h"
 #include <sstream>
+#include <iostream>
 
 namespace MetalFish {
 
@@ -164,6 +167,12 @@ Value classical_eval(const Position& pos) {
 void init() {
     // Initialize NNUE if available
     NNUE::init();
+    
+    // Initialize GPU NNUE evaluator (the primary evaluator)
+    auto& gpu = gpu_nnue();
+    if (gpu.is_ready()) {
+        std::cout << "[Eval] GPU NNUE acceleration ready (unified memory)" << std::endl;
+    }
 }
 
 bool load_network(const std::string& path) {
@@ -179,18 +188,45 @@ std::string network_info() {
 }
 
 Value evaluate(const Position& pos) {
-    // Use NNUE if loaded, otherwise fall back to classical
+    // For single-position evaluation during search, classical eval is faster
+    // due to GPU command buffer overhead. GPU is used for batch evaluation.
+    
+    // Use CPU NNUE if loaded
     if (NNUE::network && NNUE::network->is_loaded()) {
         return NNUE::evaluate(pos);
     }
+    
+    // Classical evaluation (fast for single positions)
     return classical_eval(pos);
 }
 
+// GPU-accelerated evaluation - use for batch processing
+Value evaluate_gpu(const Position& pos) {
+    auto& gpu = gpu_nnue();
+    if (gpu.is_ready()) {
+        return gpu.evaluate(pos);
+    }
+    return evaluate(pos);
+}
+
 void batch_evaluate(const Position* positions, Value* scores, size_t count) {
-    // GPU batch evaluation would be done here
-    // For now, evaluate sequentially
-    for (size_t i = 0; i < count; ++i) {
-        scores[i] = evaluate(positions[i]);
+    // Try GPU batch evaluation first
+    auto& gpu_nnue = NNUE::get_gpu_nnue();
+    if (gpu_nnue.is_gpu_available()) {
+        std::vector<const Position*> pos_ptrs(count);
+        for (size_t i = 0; i < count; ++i) {
+            pos_ptrs[i] = &positions[i];
+        }
+        std::vector<Value> results;
+        gpu_nnue.evaluate_batch(pos_ptrs, results);
+        for (size_t i = 0; i < count; ++i) {
+            scores[i] = results[i];
+        }
+    } else {
+        // Fallback to sequential evaluation
+        for (size_t i = 0; i < count; ++i) {
+            scores[i] = evaluate(positions[i]);
+        }
     }
 }
 

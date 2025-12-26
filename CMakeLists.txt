@@ -76,12 +76,15 @@ set(SEARCH_SOURCES
     src/search/search.cpp
     src/search/thread.cpp
     src/search/tt.cpp
+    src/search/hybrid_search.cpp
 )
 
 # Source files - Evaluation
 set(EVAL_SOURCES
     src/eval/evaluate.cpp
     src/eval/nnue.cpp
+    src/eval/nnue_gpu.cpp
+    src/eval/gpu_nnue.cpp
 )
 
 # Source files - UCI

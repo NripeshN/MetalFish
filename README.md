@@ -99,3 +99,4 @@ Nripesh Niketan (2025)
 - Apple for the MLX framework demonstrating Metal compute patterns
 - The computer chess community for decades of research
 
+
