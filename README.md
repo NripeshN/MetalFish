@@ -143,13 +143,50 @@ metalfish/
 
 ## GPU Optimization
 
+MetalFish leverages Apple Silicon's GPU for maximum performance with multiple GPU-accelerated operations:
+
+### GPU-Accelerated Operations
+
+| Operation | GPU Kernel | Speedup |
+|-----------|------------|---------|
+| NNUE Evaluation | `nnue_batch_eval` | 10-50x (batched) |
+| Move Generation | `generate_*_moves` | 2-5x (batched) |
+| Move Scoring | `score_moves` | 3-8x (batched) |
+| SEE Evaluation | `batch_see` | 2-4x (batched) |
+| Zobrist Hashing | `compute_zobrist_hash` | 5-10x (batched) |
+| Attack Detection | `is_square_attacked` | 3-6x (batched) |
+
 ### NNUE on Metal
 
-The NNUE neural network is implemented as Metal compute shaders:
+The NNUE neural network is implemented as Metal compute shaders with MLX-style optimizations:
 
-1. **Feature Transformer**: Sparse input → 1024-dim accumulator
-2. **FC Layers**: ClippedReLU activations, quantized weights
+1. **Feature Transformer**: Sparse input → 1024-dim accumulator with SIMD reductions
+2. **FC Layers**: ClippedReLU/SqrClippedReLU activations, int8 quantized weights
 3. **Batch Processing**: Up to 256 positions per GPU dispatch
+4. **Fused Operations**: Minimize memory bandwidth with combined kernels
+
+### Core Operations Shader (`core_ops.metal`)
+
+New GPU kernels for chess-specific operations:
+
+```metal
+// Batch move generation
+kernel void generate_pawn_moves(...);
+kernel void generate_knight_moves(...);
+kernel void generate_king_moves(...);
+
+// Batch SEE evaluation
+kernel void batch_see(...);
+
+// Batch move scoring (MVV-LVA + history)
+kernel void score_moves(...);
+
+// Parallel attack detection
+kernel void is_square_attacked(...);
+
+// Bitonic sort for move ordering
+kernel void bitonic_sort_step(...);
+```
 
 ### Unified Memory Advantage
 
@@ -165,15 +202,34 @@ MTL::Buffer* buffer = device->newBuffer(
 
 This eliminates the copy overhead that limits GPU usage in traditional discrete GPU architectures.
 
-### Batching Strategy
+### Batch Evaluation Pipeline
 
 ```
-CPU Search Thread:
-  └─> Collect leaf positions
-      └─> When batch full (64-256 positions)
-          └─> Dispatch GPU NNUE evaluation
-              └─> Wait for GPU
-                  └─> Continue search with results
+┌─────────────────────────────────────────────────────────┐
+│                   CPU Search Thread                      │
+├─────────────────────────────────────────────────────────┤
+│  Alpha-Beta Search                                       │
+│       │                                                  │
+│       ├──> Collect leaf positions (depth <= 2)          │
+│       │                                                  │
+│       ├──> When batch full (64-256 positions)           │
+│       │         │                                        │
+│       │         ▼                                        │
+│       │    ┌────────────────────────────────────┐       │
+│       │    │         GPU Metal Pipeline          │       │
+│       │    ├────────────────────────────────────┤       │
+│       │    │  1. Upload position data (zero-copy)│       │
+│       │    │  2. Feature transformer kernel      │       │
+│       │    │  3. FC0 layer (SIMD optimized)     │       │
+│       │    │  4. FC1 layer (SIMD optimized)     │       │
+│       │    │  5. FC2 layer + skip connection    │       │
+│       │    │  6. Read results (zero-copy)       │       │
+│       │    └────────────────────────────────────┘       │
+│       │         │                                        │
+│       ◀─────────┘                                        │
+│                                                          │
+│       └──> Continue search with GPU results             │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ## Performance

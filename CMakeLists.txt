@@ -56,7 +56,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include ${METAL_CPP_DIR})
 
 # Source files - Metal backend
 set(METAL_SOURCES src/metal/device.cpp src/metal/allocator.cpp
-                  src/metal/kernels.cpp)
+                  src/metal/kernels.cpp src/metal/gpu_ops.cpp)
 
 # Source files - Core chess engine
 set(CORE_SOURCES src/core/bitboard.cpp src/core/position.cpp
@@ -64,7 +64,8 @@ set(CORE_SOURCES src/core/bitboard.cpp src/core/position.cpp
 
 # Source files - Search
 set(SEARCH_SOURCES src/search/search.cpp src/search/thread.cpp
-                   src/search/tt.cpp src/search/movepick.cpp)
+                   src/search/tt.cpp src/search/movepick.cpp
+                   src/search/batch_eval.cpp)
 
 # Source files - Evaluation
 set(EVAL_SOURCES src/eval/evaluate.cpp src/eval/nnue.cpp src/eval/nnue_gpu.cpp
@@ -74,7 +75,8 @@ set(EVAL_SOURCES src/eval/evaluate.cpp src/eval/nnue.cpp src/eval/nnue_gpu.cpp
 set(UCI_SOURCES src/uci/uci.cpp src/uci/benchmark.cpp)
 
 # Metal shaders
-set(METAL_SHADERS shaders/nnue_stockfish.metal shaders/nnue.metal)
+set(METAL_SHADERS shaders/nnue_stockfish.metal shaders/nnue.metal
+                  shaders/core_ops.metal)
 
 # Option to build Metal shaders (requires Metal toolchain)
 option(BUILD_METAL_SHADERS "Build Metal shaders (requires xcrun metal)" OFF)

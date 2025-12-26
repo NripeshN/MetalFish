@@ -94,6 +94,7 @@ public:
   }
 
   // Castling
+  int castling_rights() const { return st->castlingRights; }
   bool can_castle(CastlingRights cr) const { return st->castlingRights & cr; }
   bool castling_impeded(CastlingRights cr) const {
     return pieces() & castlingPath[cr];
