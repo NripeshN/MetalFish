@@ -2,7 +2,7 @@
 
 A GPU-accelerated UCI chess engine using Apple Metal, designed for Apple Silicon.
 
-[![CI](https://github.com/yourusername/metalfish/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/metalfish/actions/workflows/ci.yml)
+[![CI](https://github.com/nripeshn/metalfish/actions/workflows/ci.yml/badge.svg)](https://github.com/nripeshn/metalfish/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 ## Overview
