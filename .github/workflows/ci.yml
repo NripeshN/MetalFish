@@ -1,0 +1,140 @@
+# MetalFish CI/CD Pipeline
+# Build and test the GPU-accelerated chess engine on macOS with Metal
+
+name: MetalFish CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: main
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build-macos:
+    name: Build & Test (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup environment
+        run: |
+          echo "macOS version:"
+          sw_vers
+          echo ""
+          echo "Xcode version:"
+          xcodebuild -version
+          echo ""
+          echo "Available Metal devices:"
+          system_profiler SPDisplaysDataType | grep -A 5 "Metal"
+
+      - name: Configure CMake
+        working-directory: metalfish
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DBUILD_TESTS=ON \
+            -DBUILD_METAL_SHADERS=ON
+
+      - name: Build
+        working-directory: metalfish
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
+
+      - name: Run C++ Tests
+        working-directory: metalfish/build
+        run: ./metalfish_tests
+
+      - name: Run Perft Tests
+        working-directory: metalfish
+        run: python3 tests/testing.py
+
+      - name: Run UCI Protocol Test
+        working-directory: metalfish/build
+        run: |
+          echo -e "uci\nisready\nposition startpos\ngo depth 5\nquit" | ./metalfish
+
+      - name: Run Benchmark
+        working-directory: metalfish/build
+        run: |
+          echo -e "uci\nsetoption name Threads value 1\nbench 12\nquit" | ./metalfish
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: metalfish-macos
+          path: |
+            metalfish/build/metalfish
+            metalfish/build/metalfish.metallib
+          if-no-files-found: warn
+
+  lint-and-format:
+    name: Lint & Format Check
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check for clang-format
+        run: |
+          if command -v clang-format &> /dev/null; then
+            echo "clang-format found"
+            clang-format --version
+          else
+            echo "clang-format not found, skipping format check"
+            exit 0
+          fi
+
+      - name: Check Metal shader syntax
+        working-directory: metalfish
+        run: |
+          for shader in shaders/*.metal; do
+            echo "Checking $shader..."
+            xcrun -sdk macosx metal -std=metal3.1 -c "$shader" -o /dev/null || exit 1
+          done
+          echo "All shaders compile successfully"
+
+  release:
+    name: Create Release
+    needs: [build-macos]
+    runs-on: macos-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Build Release
+        working-directory: metalfish
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_METAL_SHADERS=ON
+          cmake --build build --config Release -j$(sysctl -n hw.ncpu)
+
+      - name: Package Release
+        working-directory: metalfish
+        run: |
+          mkdir -p release
+          cp build/metalfish release/
+          cp build/metalfish.metallib release/ 2>/dev/null || true
+          cp README.md release/
+          tar -czvf metalfish-${{ github.ref_name }}-macos.tar.gz -C release .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: metalfish/metalfish-${{ github.ref_name }}-macos.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
