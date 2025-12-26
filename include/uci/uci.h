@@ -50,10 +50,10 @@ public:
     operator std::string() const;
     bool operator==(const char*) const;
 
+    OnChange on_change;
     std::string defaultValue, currentValue, type;
     int min, max;
     size_t idx;
-    OnChange on_change;
 };
 
 // UCI Options map

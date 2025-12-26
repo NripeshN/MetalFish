@@ -109,17 +109,26 @@ Move* generate_pawn_moves(const Position& pos, Move* moveList, Bitboard target) 
 
         // En passant captures
         if (pos.ep_square() != SQ_NONE) {
+            // For evasions: en passant is allowed only if capturing the pawn resolves the check.
+            // The captured pawn is at ep_square - Up (e.g., if ep is c6, pawn is on c5)
+            Square capsq = pos.ep_square() - Up;
+            
             if constexpr (Type == EVASIONS) {
-                if (!(target & (pos.ep_square() - Up)))
-                    return moveList;
+                // If the pawn that gave check is the one we can capture via en passant,
+                // then en passant is a valid evasion (it removes the attacker)
+                if (!(target & square_bb(capsq)))
+                    goto skip_ep;
             }
 
-            Bitboard b = pawnsNotOn7 & pawn_attacks_bb(Them, pos.ep_square());
+            {
+                Bitboard b = pawnsNotOn7 & pawn_attacks_bb(Them, pos.ep_square());
 
-            while (b) {
-                Square from = pop_lsb(b);
-                *moveList++ = Move::make<EN_PASSANT>(from, pos.ep_square());
+                while (b) {
+                    Square from = pop_lsb(b);
+                    *moveList++ = Move::make<EN_PASSANT>(from, pos.ep_square());
+                }
             }
+            skip_ep:;
         }
     }
 

@@ -9,6 +9,7 @@
 */
 
 #include "eval/gpu_nnue.h"
+#include "eval/nnue_loader.h"
 #include "metal/device.h"
 #include "core/bitboard.h"
 #include <fstream>
@@ -36,32 +37,71 @@ GPUNNUEWeights::~GPUNNUEWeights() {
 }
 
 bool GPUNNUEWeights::load(MTL::Device* device, const std::string& path) {
-    // For now, create placeholder weights
-    // TODO: Implement actual Stockfish NNUE file loading
-    
     MTL::ResourceOptions options = MTL::ResourceStorageModeShared;
     
+    // Try to load NNUE weights from file
+    NNUE::NNUEWeights nnue;
+    bool has_weights = false;
+    
+    if (!path.empty()) {
+        has_weights = NNUE::load_network(path, nnue);
+    }
+    
+    // Determine dimensions
+    int half_dims = has_weights ? nnue.half_dimensions : FT_OUT_DIMS;
+    
     // Allocate buffers
-    ft_weights = device->newBuffer(FT_IN_DIMS * FT_OUT_DIMS * sizeof(int16_t), options);
-    ft_biases = device->newBuffer(FT_OUT_DIMS * sizeof(int16_t), options);
+    ft_weights = device->newBuffer(FT_IN_DIMS * half_dims * sizeof(int16_t), options);
+    ft_biases = device->newBuffer(half_dims * sizeof(int16_t), options);
     psqt_weights = device->newBuffer(FT_IN_DIMS * PSQT_BUCKETS * sizeof(int16_t), options);
     
-    fc0_weights = device->newBuffer(FT_OUT_DIMS * 2 * FC0_OUT * sizeof(int8_t), options);
+    fc0_weights = device->newBuffer(half_dims * 2 * FC0_OUT * sizeof(int8_t), options);
     fc0_biases = device->newBuffer(FC0_OUT * sizeof(int32_t), options);
     fc1_weights = device->newBuffer(30 * FC1_OUT * sizeof(int8_t), options);
     fc1_biases = device->newBuffer(FC1_OUT * sizeof(int32_t), options);
     fc2_weights = device->newBuffer(FC1_OUT * sizeof(int8_t), options);
     fc2_bias = device->newBuffer(sizeof(int32_t), options);
     
-    // Initialize with zeros (placeholder)
-    memset(ft_weights->contents(), 0, ft_weights->length());
-    memset(ft_biases->contents(), 0, ft_biases->length());
-    memset(fc0_weights->contents(), 0, fc0_weights->length());
-    memset(fc0_biases->contents(), 0, fc0_biases->length());
-    memset(fc1_weights->contents(), 0, fc1_weights->length());
-    memset(fc1_biases->contents(), 0, fc1_biases->length());
-    memset(fc2_weights->contents(), 0, fc2_weights->length());
-    memset(fc2_bias->contents(), 0, fc2_bias->length());
+    if (has_weights) {
+        // Copy loaded weights to GPU buffers
+        memcpy(ft_weights->contents(), nnue.ft_weights.data(), 
+               nnue.ft_weights.size() * sizeof(int16_t));
+        memcpy(ft_biases->contents(), nnue.ft_biases.data(),
+               nnue.ft_biases.size() * sizeof(int16_t));
+        memcpy(psqt_weights->contents(), nnue.psqt_weights.data(),
+               std::min(nnue.psqt_weights.size() * sizeof(int16_t), psqt_weights->length()));
+        
+        // Copy first layer stack weights (stack 0 for now)
+        size_t fc0_size = std::min(nnue.fc0_weights.size() * sizeof(int8_t), fc0_weights->length());
+        memcpy(fc0_weights->contents(), nnue.fc0_weights.data(), fc0_size);
+        
+        size_t fc0_bias_size = std::min(nnue.fc0_biases.size() * sizeof(int32_t), fc0_biases->length());
+        memcpy(fc0_biases->contents(), nnue.fc0_biases.data(), fc0_bias_size);
+        
+        size_t fc1_size = std::min(nnue.fc1_weights.size() * sizeof(int8_t), fc1_weights->length());
+        memcpy(fc1_weights->contents(), nnue.fc1_weights.data(), fc1_size);
+        
+        size_t fc1_bias_size = std::min(nnue.fc1_biases.size() * sizeof(int32_t), fc1_biases->length());
+        memcpy(fc1_biases->contents(), nnue.fc1_biases.data(), fc1_bias_size);
+        
+        size_t fc2_size = std::min(nnue.fc2_weights.size() * sizeof(int8_t), fc2_weights->length());
+        memcpy(fc2_weights->contents(), nnue.fc2_weights.data(), fc2_size);
+        
+        memcpy(fc2_bias->contents(), nnue.fc2_biases.data(), sizeof(int32_t));
+        
+        std::cout << "[GPU_NNUE] Loaded weights from: " << path << std::endl;
+    } else {
+        // Initialize with zeros (placeholder for classical eval)
+        memset(ft_weights->contents(), 0, ft_weights->length());
+        memset(ft_biases->contents(), 0, ft_biases->length());
+        memset(psqt_weights->contents(), 0, psqt_weights->length());
+        memset(fc0_weights->contents(), 0, fc0_weights->length());
+        memset(fc0_biases->contents(), 0, fc0_biases->length());
+        memset(fc1_weights->contents(), 0, fc1_weights->length());
+        memset(fc1_biases->contents(), 0, fc1_biases->length());
+        memset(fc2_weights->contents(), 0, fc2_weights->length());
+        memset(fc2_bias->contents(), 0, fc2_bias->length());
+    }
     
     loaded_ = true;
     return true;

@@ -76,7 +76,7 @@ set(SEARCH_SOURCES
     src/search/search.cpp
     src/search/thread.cpp
     src/search/tt.cpp
-    src/search/hybrid_search.cpp
+    src/search/movepick.cpp
 )
 
 # Source files - Evaluation
@@ -85,6 +85,7 @@ set(EVAL_SOURCES
     src/eval/nnue.cpp
     src/eval/nnue_gpu.cpp
     src/eval/gpu_nnue.cpp
+    src/eval/nnue_loader.cpp
 )
 
 # Source files - UCI
@@ -95,9 +96,8 @@ set(UCI_SOURCES
 
 # Metal shaders
 set(METAL_SHADERS
+    shaders/nnue_stockfish.metal
     shaders/nnue.metal
-    shaders/eval.metal
-    shaders/movegen.metal
 )
 
 # Option to build Metal shaders (requires Metal toolchain)

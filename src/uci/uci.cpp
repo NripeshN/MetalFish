@@ -80,6 +80,15 @@ void OptionsMap::init() {
     options["UCI_Chess960"] = Option(false);
     options["MultiPV"] = Option(1, 1, 500);
     
+    // NNUE options
+    options["EvalFile"] = Option("<internal>", Option::OnChange([](const Option& o) {
+        std::string path = std::string(o);
+        if (path != "<internal>") {
+            // GPU NNUE will be reloaded with this path
+            std::cout << "info string Loading NNUE from " << path << std::endl;
+        }
+    }));
+    
     // GPU-specific options
     options["GPU_BatchSize"] = Option(64, 1, 4096);
     options["GPU_UseUnifiedMemory"] = Option(true);

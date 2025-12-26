@@ -345,6 +345,99 @@ bool Position::gives_check(Move m) const {
     }
 }
 
+// Check if a move is pseudo-legal (could be legal in some position with same piece placement)
+bool Position::pseudo_legal(Move m) const {
+    if (!m.is_ok())
+        return false;
+    
+    Color us = sideToMove;
+    Square from = m.from_sq();
+    Square to = m.to_sq();
+    Piece pc = piece_on(from);
+    
+    // Check that we have a piece on the from square
+    if (pc == NO_PIECE || color_of(pc) != us)
+        return false;
+    
+    // Destination cannot have our own piece
+    if (pieces(us) & square_bb(to))
+        return false;
+    
+    // Handle special moves
+    if (m.type_of() == CASTLING) {
+        // Castling checks
+        if (pc != make_piece(us, KING))
+            return false;
+        
+        CastlingRights cr = (to > from) ? (us == WHITE ? WHITE_OO : BLACK_OO)
+                                        : (us == WHITE ? WHITE_OOO : BLACK_OOO);
+        return can_castle(cr);
+    }
+    
+    if (m.type_of() == EN_PASSANT) {
+        if (type_of(pc) != PAWN)
+            return false;
+        if (to != ep_square())
+            return false;
+        return true;
+    }
+    
+    if (m.type_of() == PROMOTION) {
+        if (type_of(pc) != PAWN)
+            return false;
+        if (relative_rank(us, to) != RANK_8)
+            return false;
+    }
+    
+    PieceType pt = type_of(pc);
+    
+    // Check if move is valid for this piece type
+    if (pt == PAWN) {
+        // Pawn moves
+        int dir = (us == WHITE) ? 8 : -8;
+        
+        // Capture
+        if (file_of(from) != file_of(to)) {
+            if ((pieces(~us) & square_bb(to)) == 0 && to != ep_square())
+                return false;
+            int df = std::abs(int(file_of(from)) - int(file_of(to)));
+            if (df != 1)
+                return false;
+        }
+        // Push
+        else {
+            if (pieces() & square_bb(to))
+                return false;
+            int dist = int(to) - int(from);
+            if (us == WHITE) {
+                if (dist != 8 && dist != 16)
+                    return false;
+                if (dist == 16 && (relative_rank(us, from) != RANK_2 || (pieces() & square_bb(Square(int(from) + 8)))))
+                    return false;
+            } else {
+                if (dist != -8 && dist != -16)
+                    return false;
+                if (dist == -16 && (relative_rank(us, from) != RANK_2 || (pieces() & square_bb(Square(int(from) - 8)))))
+                    return false;
+            }
+        }
+        return true;
+    }
+    
+    // For non-pawn pieces, check if destination is reachable
+    Bitboard attacks;
+    switch (pt) {
+        case KNIGHT: attacks = KnightAttacks[from]; break;
+        case BISHOP: attacks = attacks_bb(BISHOP, from, pieces()); break;
+        case ROOK:   attacks = attacks_bb(ROOK, from, pieces()); break;
+        case QUEEN:  attacks = attacks_bb(QUEEN, from, pieces()); break;
+        case KING:   attacks = KingAttacks[from]; break;
+        default:     return false;
+    }
+    
+    return attacks & square_bb(to);
+}
+
 // Static exchange evaluation
 bool Position::see_ge(Move m, int threshold) const {
     if (m.type_of() != NORMAL)
