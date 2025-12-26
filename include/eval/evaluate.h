@@ -1,7 +1,7 @@
 /*
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
-  
+
   Based on Stockfish, Copyright (C) 2004-2025 The Stockfish developers
 
   MetalFish is free software: you can redistribute it and/or modify
@@ -12,8 +12,8 @@
 
 #pragma once
 
-#include "core/types.h"
 #include "core/position.h"
+#include "core/types.h"
 #include <string>
 
 namespace MetalFish {
@@ -21,24 +21,22 @@ namespace MetalFish {
 namespace Eval {
 
 // Evaluate the position using GPU-accelerated NNUE
-Value evaluate(const Position& pos);
+Value evaluate(const Position &pos);
 
 // Batch evaluation for GPU parallelism
-void batch_evaluate(const Position* positions, Value* scores, size_t count);
+void batch_evaluate(const Position *positions, Value *scores, size_t count);
 
 // Get tracing info for debugging
-std::string trace(const Position& pos);
+std::string trace(const Position &pos);
 
 // Initialize evaluation
 void init();
 
 // NNUE network file handling
-bool load_network(const std::string& path);
+bool load_network(const std::string &path);
 bool is_network_loaded();
 std::string network_info();
 
 } // namespace Eval
 
 } // namespace MetalFish
-
-

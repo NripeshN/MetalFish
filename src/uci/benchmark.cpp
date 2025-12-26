@@ -1,7 +1,7 @@
 /*
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
-  
+
   Based on Stockfish, Copyright (C) 2004-2025 The Stockfish developers
 
   MetalFish is free software: you can redistribute it and/or modify
@@ -10,9 +10,9 @@
   (at your option) any later version.
 */
 
-#include "uci/uci.h"
 #include "search/search.h"
 #include "search/tt.h"
+#include "uci/uci.h"
 #include <iostream>
 #include <vector>
 
@@ -37,23 +37,20 @@ const std::vector<std::string> BenchPositions = {
     "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
     "r1bqk2r/ppp2ppp/2n1pn2/3p4/1bPP4/2N1PN2/PP3PPP/R1BQKB1R w KQkq - 2 6",
     "r1b1kb1r/pp1n1ppp/1qn1p3/3pP3/3P4/2N2N2/PP3PPP/R1BQKB1R w KQkq - 0 8",
-    "r1bq1rk1/ppp1nppp/4p3/3pP3/3Pn3/2N2N2/PP2BPPP/R1BQ1RK1 w - - 1 10"
-};
+    "r1bq1rk1/ppp1nppp/4p3/3pP3/3Pn3/2N2N2/PP2BPPP/R1BQ1RK1 w - - 1 10"};
 
 // Extended benchmark with more positions
 const std::vector<std::string> ExtendedBenchPositions = {
     // Tactical positions
     "r2qk2r/pp1n1ppp/2pbpn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w kq - 2 9",
     "r1bq1rk1/pp2nppp/2n1p3/2ppP3/3P4/2P2N2/PP3PPP/RNBQR1K1 w - c6 0 10",
-    
+
     // Endgame positions
-    "8/8/4k3/8/2p5/8/1P2K3/8 w - - 0 1",
-    "8/p7/1p6/1P6/5k2/8/5K2/8 w - - 0 1",
+    "8/8/4k3/8/2p5/8/1P2K3/8 w - - 0 1", "8/p7/1p6/1P6/5k2/8/5K2/8 w - - 0 1",
     "8/2k5/8/8/8/8/R7/4K3 w - - 0 1",
-    
+
     // Complex middlegame
-    "r1bqr1k1/ppp2ppp/2nb1n2/3pp3/8/2NPBN2/PPP1BPPP/R2Q1RK1 w - - 0 9"
-};
+    "r1bqr1k1/ppp2ppp/2nb1n2/3pp3/8/2NPBN2/PPP1BPPP/R2Q1RK1 w - - 0 9"};
 
 } // namespace UCI
 

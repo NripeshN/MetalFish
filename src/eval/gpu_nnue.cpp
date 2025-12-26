@@ -9,13 +9,13 @@
 */
 
 #include "eval/gpu_nnue.h"
+#include "core/bitboard.h"
 #include "eval/nnue_loader.h"
 #include "metal/device.h"
-#include "core/bitboard.h"
+#include <chrono>
+#include <cstring>
 #include <fstream>
 #include <iostream>
-#include <cstring>
-#include <chrono>
 
 namespace MetalFish {
 namespace Eval {
@@ -25,86 +25,104 @@ namespace Eval {
 // ============================================================================
 
 GPUNNUEWeights::~GPUNNUEWeights() {
-    if (ft_weights) ft_weights->release();
-    if (ft_biases) ft_biases->release();
-    if (psqt_weights) psqt_weights->release();
-    if (fc0_weights) fc0_weights->release();
-    if (fc0_biases) fc0_biases->release();
-    if (fc1_weights) fc1_weights->release();
-    if (fc1_biases) fc1_biases->release();
-    if (fc2_weights) fc2_weights->release();
-    if (fc2_bias) fc2_bias->release();
+  if (ft_weights)
+    ft_weights->release();
+  if (ft_biases)
+    ft_biases->release();
+  if (psqt_weights)
+    psqt_weights->release();
+  if (fc0_weights)
+    fc0_weights->release();
+  if (fc0_biases)
+    fc0_biases->release();
+  if (fc1_weights)
+    fc1_weights->release();
+  if (fc1_biases)
+    fc1_biases->release();
+  if (fc2_weights)
+    fc2_weights->release();
+  if (fc2_bias)
+    fc2_bias->release();
 }
 
-bool GPUNNUEWeights::load(MTL::Device* device, const std::string& path) {
-    MTL::ResourceOptions options = MTL::ResourceStorageModeShared;
-    
-    // Try to load NNUE weights from file
-    NNUE::NNUEWeights nnue;
-    bool has_weights = false;
-    
-    if (!path.empty()) {
-        has_weights = NNUE::load_network(path, nnue);
-    }
-    
-    // Determine dimensions
-    int half_dims = has_weights ? nnue.half_dimensions : FT_OUT_DIMS;
-    
-    // Allocate buffers
-    ft_weights = device->newBuffer(FT_IN_DIMS * half_dims * sizeof(int16_t), options);
-    ft_biases = device->newBuffer(half_dims * sizeof(int16_t), options);
-    psqt_weights = device->newBuffer(FT_IN_DIMS * PSQT_BUCKETS * sizeof(int16_t), options);
-    
-    fc0_weights = device->newBuffer(half_dims * 2 * FC0_OUT * sizeof(int8_t), options);
-    fc0_biases = device->newBuffer(FC0_OUT * sizeof(int32_t), options);
-    fc1_weights = device->newBuffer(30 * FC1_OUT * sizeof(int8_t), options);
-    fc1_biases = device->newBuffer(FC1_OUT * sizeof(int32_t), options);
-    fc2_weights = device->newBuffer(FC1_OUT * sizeof(int8_t), options);
-    fc2_bias = device->newBuffer(sizeof(int32_t), options);
-    
-    if (has_weights) {
-        // Copy loaded weights to GPU buffers
-        memcpy(ft_weights->contents(), nnue.ft_weights.data(), 
-               nnue.ft_weights.size() * sizeof(int16_t));
-        memcpy(ft_biases->contents(), nnue.ft_biases.data(),
-               nnue.ft_biases.size() * sizeof(int16_t));
-        memcpy(psqt_weights->contents(), nnue.psqt_weights.data(),
-               std::min(nnue.psqt_weights.size() * sizeof(int16_t), psqt_weights->length()));
-        
-        // Copy first layer stack weights (stack 0 for now)
-        size_t fc0_size = std::min(nnue.fc0_weights.size() * sizeof(int8_t), fc0_weights->length());
-        memcpy(fc0_weights->contents(), nnue.fc0_weights.data(), fc0_size);
-        
-        size_t fc0_bias_size = std::min(nnue.fc0_biases.size() * sizeof(int32_t), fc0_biases->length());
-        memcpy(fc0_biases->contents(), nnue.fc0_biases.data(), fc0_bias_size);
-        
-        size_t fc1_size = std::min(nnue.fc1_weights.size() * sizeof(int8_t), fc1_weights->length());
-        memcpy(fc1_weights->contents(), nnue.fc1_weights.data(), fc1_size);
-        
-        size_t fc1_bias_size = std::min(nnue.fc1_biases.size() * sizeof(int32_t), fc1_biases->length());
-        memcpy(fc1_biases->contents(), nnue.fc1_biases.data(), fc1_bias_size);
-        
-        size_t fc2_size = std::min(nnue.fc2_weights.size() * sizeof(int8_t), fc2_weights->length());
-        memcpy(fc2_weights->contents(), nnue.fc2_weights.data(), fc2_size);
-        
-        memcpy(fc2_bias->contents(), nnue.fc2_biases.data(), sizeof(int32_t));
-        
-        std::cout << "[GPU_NNUE] Loaded weights from: " << path << std::endl;
-    } else {
-        // Initialize with zeros (placeholder for classical eval)
-        memset(ft_weights->contents(), 0, ft_weights->length());
-        memset(ft_biases->contents(), 0, ft_biases->length());
-        memset(psqt_weights->contents(), 0, psqt_weights->length());
-        memset(fc0_weights->contents(), 0, fc0_weights->length());
-        memset(fc0_biases->contents(), 0, fc0_biases->length());
-        memset(fc1_weights->contents(), 0, fc1_weights->length());
-        memset(fc1_biases->contents(), 0, fc1_biases->length());
-        memset(fc2_weights->contents(), 0, fc2_weights->length());
-        memset(fc2_bias->contents(), 0, fc2_bias->length());
-    }
-    
-    loaded_ = true;
-    return true;
+bool GPUNNUEWeights::load(MTL::Device *device, const std::string &path) {
+  MTL::ResourceOptions options = MTL::ResourceStorageModeShared;
+
+  // Try to load NNUE weights from file
+  NNUE::NNUEWeights nnue;
+  bool has_weights = false;
+
+  if (!path.empty()) {
+    has_weights = NNUE::load_network(path, nnue);
+  }
+
+  // Determine dimensions
+  int half_dims = has_weights ? nnue.half_dimensions : FT_OUT_DIMS;
+
+  // Allocate buffers
+  ft_weights =
+      device->newBuffer(FT_IN_DIMS * half_dims * sizeof(int16_t), options);
+  ft_biases = device->newBuffer(half_dims * sizeof(int16_t), options);
+  psqt_weights =
+      device->newBuffer(FT_IN_DIMS * PSQT_BUCKETS * sizeof(int16_t), options);
+
+  fc0_weights =
+      device->newBuffer(half_dims * 2 * FC0_OUT * sizeof(int8_t), options);
+  fc0_biases = device->newBuffer(FC0_OUT * sizeof(int32_t), options);
+  fc1_weights = device->newBuffer(30 * FC1_OUT * sizeof(int8_t), options);
+  fc1_biases = device->newBuffer(FC1_OUT * sizeof(int32_t), options);
+  fc2_weights = device->newBuffer(FC1_OUT * sizeof(int8_t), options);
+  fc2_bias = device->newBuffer(sizeof(int32_t), options);
+
+  if (has_weights) {
+    // Copy loaded weights to GPU buffers
+    memcpy(ft_weights->contents(), nnue.ft_weights.data(),
+           nnue.ft_weights.size() * sizeof(int16_t));
+    memcpy(ft_biases->contents(), nnue.ft_biases.data(),
+           nnue.ft_biases.size() * sizeof(int16_t));
+    memcpy(psqt_weights->contents(), nnue.psqt_weights.data(),
+           std::min(nnue.psqt_weights.size() * sizeof(int16_t),
+                    psqt_weights->length()));
+
+    // Copy first layer stack weights (stack 0 for now)
+    size_t fc0_size = std::min(nnue.fc0_weights.size() * sizeof(int8_t),
+                               fc0_weights->length());
+    memcpy(fc0_weights->contents(), nnue.fc0_weights.data(), fc0_size);
+
+    size_t fc0_bias_size = std::min(nnue.fc0_biases.size() * sizeof(int32_t),
+                                    fc0_biases->length());
+    memcpy(fc0_biases->contents(), nnue.fc0_biases.data(), fc0_bias_size);
+
+    size_t fc1_size = std::min(nnue.fc1_weights.size() * sizeof(int8_t),
+                               fc1_weights->length());
+    memcpy(fc1_weights->contents(), nnue.fc1_weights.data(), fc1_size);
+
+    size_t fc1_bias_size = std::min(nnue.fc1_biases.size() * sizeof(int32_t),
+                                    fc1_biases->length());
+    memcpy(fc1_biases->contents(), nnue.fc1_biases.data(), fc1_bias_size);
+
+    size_t fc2_size = std::min(nnue.fc2_weights.size() * sizeof(int8_t),
+                               fc2_weights->length());
+    memcpy(fc2_weights->contents(), nnue.fc2_weights.data(), fc2_size);
+
+    memcpy(fc2_bias->contents(), nnue.fc2_biases.data(), sizeof(int32_t));
+
+    std::cout << "[GPU_NNUE] Loaded weights from: " << path << std::endl;
+  } else {
+    // Initialize with zeros (placeholder for classical eval)
+    memset(ft_weights->contents(), 0, ft_weights->length());
+    memset(ft_biases->contents(), 0, ft_biases->length());
+    memset(psqt_weights->contents(), 0, psqt_weights->length());
+    memset(fc0_weights->contents(), 0, fc0_weights->length());
+    memset(fc0_biases->contents(), 0, fc0_biases->length());
+    memset(fc1_weights->contents(), 0, fc1_weights->length());
+    memset(fc1_biases->contents(), 0, fc1_biases->length());
+    memset(fc2_weights->contents(), 0, fc2_weights->length());
+    memset(fc2_bias->contents(), 0, fc2_bias->length());
+  }
+
+  loaded_ = true;
+  return true;
 }
 
 // ============================================================================
@@ -115,30 +133,38 @@ GPUNNUEEvaluator::GPUNNUEEvaluator()
     : weights_(std::make_unique<GPUNNUEWeights>()) {}
 
 GPUNNUEEvaluator::~GPUNNUEEvaluator() {
-    if (acc_buffer_) acc_buffer_->release();
-    if (features_buffer_) features_buffer_->release();
-    if (output_buffer_) output_buffer_->release();
-    if (scratch_buffer_) scratch_buffer_->release();
-    
-    if (ft_kernel_) ft_kernel_->release();
-    if (ft_update_kernel_) ft_update_kernel_->release();
-    if (forward_kernel_) forward_kernel_->release();
-    if (library_) library_->release();
+  if (acc_buffer_)
+    acc_buffer_->release();
+  if (features_buffer_)
+    features_buffer_->release();
+  if (output_buffer_)
+    output_buffer_->release();
+  if (scratch_buffer_)
+    scratch_buffer_->release();
+
+  if (ft_kernel_)
+    ft_kernel_->release();
+  if (ft_update_kernel_)
+    ft_update_kernel_->release();
+  if (forward_kernel_)
+    forward_kernel_->release();
+  if (library_)
+    library_->release();
 }
 
 bool GPUNNUEEvaluator::init() {
-    try {
-        Metal::Device& metal = Metal::get_device();
-        device_ = metal.mtl_device();
-        queue_ = metal.get_queue();
-        
-        if (!device_ || !queue_) {
-            std::cerr << "[GPU_NNUE] Failed to get Metal device" << std::endl;
-            return false;
-        }
-        
-        // Compile shaders
-        std::string shader_source = R"(
+  try {
+    Metal::Device &metal = Metal::get_device();
+    device_ = metal.mtl_device();
+    queue_ = metal.get_queue();
+
+    if (!device_ || !queue_) {
+      std::cerr << "[GPU_NNUE] Failed to get Metal device" << std::endl;
+      return false;
+    }
+
+    // Compile shaders
+    std::string shader_source = R"(
 #include <metal_stdlib>
 #include <metal_simdgroup>
 using namespace metal;
@@ -239,246 +265,252 @@ kernel void nnue_forward(
     }
 }
 )";
-        
-        NS::Error* error = nullptr;
-        auto source = NS::String::string(shader_source.c_str(), NS::UTF8StringEncoding);
-        MTL::CompileOptions* options = MTL::CompileOptions::alloc()->init();
-        
-        library_ = device_->newLibrary(source, options, &error);
-        options->release();
-        
-        if (!library_) {
-            if (error) {
-                std::cerr << "[GPU_NNUE] Shader error: " 
-                          << error->localizedDescription()->utf8String() << std::endl;
-            }
-            return false;
+
+    NS::Error *error = nullptr;
+    auto source =
+        NS::String::string(shader_source.c_str(), NS::UTF8StringEncoding);
+    MTL::CompileOptions *options = MTL::CompileOptions::alloc()->init();
+
+    library_ = device_->newLibrary(source, options, &error);
+    options->release();
+
+    if (!library_) {
+      if (error) {
+        std::cerr << "[GPU_NNUE] Shader error: "
+                  << error->localizedDescription()->utf8String() << std::endl;
+      }
+      return false;
+    }
+
+    // Get kernels
+    auto get_kernel = [this](const char *name) -> MTL::ComputePipelineState * {
+      auto fn = library_->newFunction(
+          NS::String::string(name, NS::UTF8StringEncoding));
+      if (!fn)
+        return nullptr;
+      NS::Error *err = nullptr;
+      auto pso = device_->newComputePipelineState(fn, &err);
+      fn->release();
+      return pso;
+    };
+
+    ft_kernel_ = get_kernel("feature_transform");
+    forward_kernel_ = get_kernel("nnue_forward");
+
+    if (!ft_kernel_ || !forward_kernel_) {
+      std::cerr << "[GPU_NNUE] Failed to create kernels" << std::endl;
+      return false;
+    }
+
+    // Allocate working buffers
+    MTL::ResourceOptions buf_opts = MTL::ResourceStorageModeShared;
+    acc_buffer_ =
+        device_->newBuffer(2 * FT_OUT_DIMS * sizeof(int32_t), buf_opts);
+    features_buffer_ =
+        device_->newBuffer(64 * sizeof(int), buf_opts); // Max 64 features
+    output_buffer_ = device_->newBuffer(sizeof(int32_t), buf_opts);
+    scratch_buffer_ = device_->newBuffer(1024, buf_opts);
+
+    // Load placeholder weights
+    weights_->load(device_, "");
+
+    ready_ = true;
+    std::cout << "[GPU_NNUE] Initialized successfully" << std::endl;
+    return true;
+
+  } catch (const std::exception &e) {
+    std::cerr << "[GPU_NNUE] Exception: " << e.what() << std::endl;
+    return false;
+  }
+}
+
+bool GPUNNUEEvaluator::load_network(const std::string &path) {
+  return weights_->load(device_, path);
+}
+
+void GPUNNUEEvaluator::get_features(const Position &pos, Color perspective,
+                                    std::vector<int> &features) {
+  features.clear();
+
+  Square ksq = pos.square<KING>(perspective);
+
+  for (Color c : {WHITE, BLACK}) {
+    for (PieceType pt = PAWN; pt <= QUEEN; ++pt) {
+      Bitboard bb = pos.pieces(c, pt);
+      while (bb) {
+        Square sq = pop_lsb(bb);
+
+        // Mirror for black perspective
+        Square oriented_sq = (perspective == WHITE) ? sq : Square(sq ^ 56);
+        Square oriented_ksq = (perspective == WHITE) ? ksq : Square(ksq ^ 56);
+
+        // HalfKAv2_hm index
+        int piece_idx = (c == perspective) ? int(pt) - 1 : int(pt) + 5;
+        int feature =
+            int(oriented_ksq) * 641 + int(oriented_sq) * 10 + piece_idx;
+
+        if (feature < FT_IN_DIMS) {
+          features.push_back(feature);
         }
-        
-        // Get kernels
-        auto get_kernel = [this](const char* name) -> MTL::ComputePipelineState* {
-            auto fn = library_->newFunction(NS::String::string(name, NS::UTF8StringEncoding));
-            if (!fn) return nullptr;
-            NS::Error* err = nullptr;
-            auto pso = device_->newComputePipelineState(fn, &err);
-            fn->release();
-            return pso;
-        };
-        
-        ft_kernel_ = get_kernel("feature_transform");
-        forward_kernel_ = get_kernel("nnue_forward");
-        
-        if (!ft_kernel_ || !forward_kernel_) {
-            std::cerr << "[GPU_NNUE] Failed to create kernels" << std::endl;
-            return false;
-        }
-        
-        // Allocate working buffers
-        MTL::ResourceOptions buf_opts = MTL::ResourceStorageModeShared;
-        acc_buffer_ = device_->newBuffer(2 * FT_OUT_DIMS * sizeof(int32_t), buf_opts);
-        features_buffer_ = device_->newBuffer(64 * sizeof(int), buf_opts);  // Max 64 features
-        output_buffer_ = device_->newBuffer(sizeof(int32_t), buf_opts);
-        scratch_buffer_ = device_->newBuffer(1024, buf_opts);
-        
-        // Load placeholder weights
-        weights_->load(device_, "");
-        
-        ready_ = true;
-        std::cout << "[GPU_NNUE] Initialized successfully" << std::endl;
-        return true;
-        
-    } catch (const std::exception& e) {
-        std::cerr << "[GPU_NNUE] Exception: " << e.what() << std::endl;
-        return false;
+      }
     }
+  }
 }
 
-bool GPUNNUEEvaluator::load_network(const std::string& path) {
-    return weights_->load(device_, path);
+void GPUNNUEEvaluator::compute_accumulator(const Position &pos,
+                                           GPUAccumulator &acc) {
+  if (!ready_) {
+    acc.computed = false;
+    return;
+  }
+
+  // Get features for both perspectives
+  std::vector<int> white_features, black_features;
+  get_features(pos, WHITE, white_features);
+  get_features(pos, BLACK, black_features);
+
+  auto cmd = queue_->commandBuffer();
+  auto enc = cmd->computeCommandEncoder();
+
+  enc->setComputePipelineState(ft_kernel_);
+
+  int ft_dims = FT_OUT_DIMS;
+
+  // White accumulator
+  int *feat_ptr = static_cast<int *>(features_buffer_->contents());
+  memcpy(feat_ptr, white_features.data(), white_features.size() * sizeof(int));
+
+  int32_t *acc_ptr = static_cast<int32_t *>(acc_buffer_->contents());
+
+  enc->setBuffer(weights_->ft_weights, 0, 0);
+  enc->setBuffer(weights_->ft_biases, 0, 1);
+  enc->setBuffer(features_buffer_, 0, 2);
+  enc->setBuffer(acc_buffer_, 0, 3);
+
+  int num_feat = static_cast<int>(white_features.size());
+  enc->setBytes(&num_feat, sizeof(int), 4);
+  enc->setBytes(&ft_dims, sizeof(int), 5);
+
+  enc->dispatchThreads(MTL::Size(FT_OUT_DIMS, 1, 1), MTL::Size(256, 1, 1));
+
+  enc->endEncoding();
+  cmd->commit();
+  cmd->waitUntilCompleted();
+
+  // Copy to accumulator
+  memcpy(acc.white.data(), acc_ptr, FT_OUT_DIMS * sizeof(int32_t));
+
+  // Black accumulator
+  memcpy(feat_ptr, black_features.data(), black_features.size() * sizeof(int));
+
+  cmd = queue_->commandBuffer();
+  enc = cmd->computeCommandEncoder();
+  enc->setComputePipelineState(ft_kernel_);
+
+  enc->setBuffer(weights_->ft_weights, 0, 0);
+  enc->setBuffer(weights_->ft_biases, 0, 1);
+  enc->setBuffer(features_buffer_, 0, 2);
+  enc->setBuffer(acc_buffer_, FT_OUT_DIMS * sizeof(int32_t), 3);
+
+  num_feat = static_cast<int>(black_features.size());
+  enc->setBytes(&num_feat, sizeof(int), 4);
+  enc->setBytes(&ft_dims, sizeof(int), 5);
+
+  enc->dispatchThreads(MTL::Size(FT_OUT_DIMS, 1, 1), MTL::Size(256, 1, 1));
+
+  enc->endEncoding();
+  cmd->commit();
+  cmd->waitUntilCompleted();
+
+  memcpy(acc.black.data(), acc_ptr + FT_OUT_DIMS,
+         FT_OUT_DIMS * sizeof(int32_t));
+
+  acc.computed = true;
 }
 
-void GPUNNUEEvaluator::get_features(const Position& pos, Color perspective,
-                                     std::vector<int>& features) {
-    features.clear();
-    
-    Square ksq = pos.square<KING>(perspective);
-    
-    for (Color c : {WHITE, BLACK}) {
-        for (PieceType pt = PAWN; pt <= QUEEN; ++pt) {
-            Bitboard bb = pos.pieces(c, pt);
-            while (bb) {
-                Square sq = pop_lsb(bb);
-                
-                // Mirror for black perspective
-                Square oriented_sq = (perspective == WHITE) ? sq : Square(sq ^ 56);
-                Square oriented_ksq = (perspective == WHITE) ? ksq : Square(ksq ^ 56);
-                
-                // HalfKAv2_hm index
-                int piece_idx = (c == perspective) ? int(pt) - 1 : int(pt) + 5;
-                int feature = int(oriented_ksq) * 641 + int(oriented_sq) * 10 + piece_idx;
-                
-                if (feature < FT_IN_DIMS) {
-                    features.push_back(feature);
-                }
-            }
-        }
-    }
+Value GPUNNUEEvaluator::forward_pass(const GPUAccumulator &acc, Color stm) {
+  if (!ready_ || !acc.computed) {
+    return VALUE_ZERO;
+  }
+
+  // Copy accumulator to GPU buffer
+  int32_t *buf = static_cast<int32_t *>(acc_buffer_->contents());
+  memcpy(buf, acc.white.data(), FT_OUT_DIMS * sizeof(int32_t));
+  memcpy(buf + FT_OUT_DIMS, acc.black.data(), FT_OUT_DIMS * sizeof(int32_t));
+
+  auto cmd = queue_->commandBuffer();
+  auto enc = cmd->computeCommandEncoder();
+
+  enc->setComputePipelineState(forward_kernel_);
+
+  enc->setBuffer(acc_buffer_, 0, 0);
+  enc->setBuffer(acc_buffer_, FT_OUT_DIMS * sizeof(int32_t), 1);
+  enc->setBuffer(weights_->fc0_weights, 0, 2);
+  enc->setBuffer(weights_->fc0_biases, 0, 3);
+  enc->setBuffer(weights_->fc1_weights, 0, 4);
+  enc->setBuffer(weights_->fc1_biases, 0, 5);
+  enc->setBuffer(weights_->fc2_weights, 0, 6);
+  enc->setBuffer(weights_->fc2_bias, 0, 7);
+  enc->setBuffer(output_buffer_, 0, 8);
+
+  int ft_dims = FT_OUT_DIMS;
+  int stm_int = (stm == WHITE) ? 0 : 1;
+  enc->setBytes(&ft_dims, sizeof(int), 9);
+  enc->setBytes(&stm_int, sizeof(int), 10);
+
+  enc->dispatchThreadgroups(MTL::Size(1, 1, 1), MTL::Size(64, 1, 1));
+
+  enc->endEncoding();
+  cmd->commit();
+  cmd->waitUntilCompleted();
+
+  int32_t *out = static_cast<int32_t *>(output_buffer_->contents());
+
+  evaluations_++;
+  return Value(*out / 16); // Scale down
 }
 
-void GPUNNUEEvaluator::compute_accumulator(const Position& pos, GPUAccumulator& acc) {
-    if (!ready_) {
-        acc.computed = false;
-        return;
-    }
-    
-    // Get features for both perspectives
-    std::vector<int> white_features, black_features;
-    get_features(pos, WHITE, white_features);
-    get_features(pos, BLACK, black_features);
-    
-    auto cmd = queue_->commandBuffer();
-    auto enc = cmd->computeCommandEncoder();
-    
-    enc->setComputePipelineState(ft_kernel_);
-    
-    int ft_dims = FT_OUT_DIMS;
-    
-    // White accumulator
-    int* feat_ptr = static_cast<int*>(features_buffer_->contents());
-    memcpy(feat_ptr, white_features.data(), white_features.size() * sizeof(int));
-    
-    int32_t* acc_ptr = static_cast<int32_t*>(acc_buffer_->contents());
-    
-    enc->setBuffer(weights_->ft_weights, 0, 0);
-    enc->setBuffer(weights_->ft_biases, 0, 1);
-    enc->setBuffer(features_buffer_, 0, 2);
-    enc->setBuffer(acc_buffer_, 0, 3);
-    
-    int num_feat = static_cast<int>(white_features.size());
-    enc->setBytes(&num_feat, sizeof(int), 4);
-    enc->setBytes(&ft_dims, sizeof(int), 5);
-    
-    enc->dispatchThreads(MTL::Size(FT_OUT_DIMS, 1, 1), MTL::Size(256, 1, 1));
-    
-    enc->endEncoding();
-    cmd->commit();
-    cmd->waitUntilCompleted();
-    
-    // Copy to accumulator
-    memcpy(acc.white.data(), acc_ptr, FT_OUT_DIMS * sizeof(int32_t));
-    
-    // Black accumulator
-    memcpy(feat_ptr, black_features.data(), black_features.size() * sizeof(int));
-    
-    cmd = queue_->commandBuffer();
-    enc = cmd->computeCommandEncoder();
-    enc->setComputePipelineState(ft_kernel_);
-    
-    enc->setBuffer(weights_->ft_weights, 0, 0);
-    enc->setBuffer(weights_->ft_biases, 0, 1);
-    enc->setBuffer(features_buffer_, 0, 2);
-    enc->setBuffer(acc_buffer_, FT_OUT_DIMS * sizeof(int32_t), 3);
-    
-    num_feat = static_cast<int>(black_features.size());
-    enc->setBytes(&num_feat, sizeof(int), 4);
-    enc->setBytes(&ft_dims, sizeof(int), 5);
-    
-    enc->dispatchThreads(MTL::Size(FT_OUT_DIMS, 1, 1), MTL::Size(256, 1, 1));
-    
-    enc->endEncoding();
-    cmd->commit();
-    cmd->waitUntilCompleted();
-    
-    memcpy(acc.black.data(), acc_ptr + FT_OUT_DIMS, FT_OUT_DIMS * sizeof(int32_t));
-    
-    acc.computed = true;
+Value GPUNNUEEvaluator::evaluate(const Position &pos, GPUAccumulator *acc) {
+  if (!ready_) {
+    return cpu_evaluate(pos);
+  }
+
+  GPUAccumulator local_acc;
+  GPUAccumulator &use_acc = acc ? *acc : local_acc;
+
+  if (!use_acc.computed) {
+    compute_accumulator(pos, use_acc);
+  }
+
+  return forward_pass(use_acc, pos.side_to_move());
 }
 
-Value GPUNNUEEvaluator::forward_pass(const GPUAccumulator& acc, Color stm) {
-    if (!ready_ || !acc.computed) {
-        return VALUE_ZERO;
-    }
-    
-    // Copy accumulator to GPU buffer
-    int32_t* buf = static_cast<int32_t*>(acc_buffer_->contents());
-    memcpy(buf, acc.white.data(), FT_OUT_DIMS * sizeof(int32_t));
-    memcpy(buf + FT_OUT_DIMS, acc.black.data(), FT_OUT_DIMS * sizeof(int32_t));
-    
-    auto cmd = queue_->commandBuffer();
-    auto enc = cmd->computeCommandEncoder();
-    
-    enc->setComputePipelineState(forward_kernel_);
-    
-    enc->setBuffer(acc_buffer_, 0, 0);
-    enc->setBuffer(acc_buffer_, FT_OUT_DIMS * sizeof(int32_t), 1);
-    enc->setBuffer(weights_->fc0_weights, 0, 2);
-    enc->setBuffer(weights_->fc0_biases, 0, 3);
-    enc->setBuffer(weights_->fc1_weights, 0, 4);
-    enc->setBuffer(weights_->fc1_biases, 0, 5);
-    enc->setBuffer(weights_->fc2_weights, 0, 6);
-    enc->setBuffer(weights_->fc2_bias, 0, 7);
-    enc->setBuffer(output_buffer_, 0, 8);
-    
-    int ft_dims = FT_OUT_DIMS;
-    int stm_int = (stm == WHITE) ? 0 : 1;
-    enc->setBytes(&ft_dims, sizeof(int), 9);
-    enc->setBytes(&stm_int, sizeof(int), 10);
-    
-    enc->dispatchThreadgroups(MTL::Size(1, 1, 1), MTL::Size(64, 1, 1));
-    
-    enc->endEncoding();
-    cmd->commit();
-    cmd->waitUntilCompleted();
-    
-    int32_t* out = static_cast<int32_t*>(output_buffer_->contents());
-    
-    evaluations_++;
-    return Value(*out / 16);  // Scale down
-}
+Value GPUNNUEEvaluator::cpu_evaluate(const Position &pos) {
+  // Simple material evaluation as fallback
+  Value score = VALUE_ZERO;
 
-Value GPUNNUEEvaluator::evaluate(const Position& pos, GPUAccumulator* acc) {
-    if (!ready_) {
-        return cpu_evaluate(pos);
-    }
-    
-    GPUAccumulator local_acc;
-    GPUAccumulator& use_acc = acc ? *acc : local_acc;
-    
-    if (!use_acc.computed) {
-        compute_accumulator(pos, use_acc);
-    }
-    
-    return forward_pass(use_acc, pos.side_to_move());
-}
+  for (Color c : {WHITE, BLACK}) {
+    int sign = (c == WHITE) ? 1 : -1;
+    score += sign * popcount(pos.pieces(c, PAWN)) * PawnValue;
+    score += sign * popcount(pos.pieces(c, KNIGHT)) * KnightValue;
+    score += sign * popcount(pos.pieces(c, BISHOP)) * BishopValue;
+    score += sign * popcount(pos.pieces(c, ROOK)) * RookValue;
+    score += sign * popcount(pos.pieces(c, QUEEN)) * QueenValue;
+  }
 
-Value GPUNNUEEvaluator::cpu_evaluate(const Position& pos) {
-    // Simple material evaluation as fallback
-    Value score = VALUE_ZERO;
-    
-    for (Color c : {WHITE, BLACK}) {
-        int sign = (c == WHITE) ? 1 : -1;
-        score += sign * popcount(pos.pieces(c, PAWN)) * PawnValue;
-        score += sign * popcount(pos.pieces(c, KNIGHT)) * KnightValue;
-        score += sign * popcount(pos.pieces(c, BISHOP)) * BishopValue;
-        score += sign * popcount(pos.pieces(c, ROOK)) * RookValue;
-        score += sign * popcount(pos.pieces(c, QUEEN)) * QueenValue;
-    }
-    
-    return pos.side_to_move() == WHITE ? score : -score;
+  return pos.side_to_move() == WHITE ? score : -score;
 }
 
 // Global instance
 static std::unique_ptr<GPUNNUEEvaluator> g_gpu_nnue;
 
-GPUNNUEEvaluator& gpu_nnue() {
-    if (!g_gpu_nnue) {
-        g_gpu_nnue = std::make_unique<GPUNNUEEvaluator>();
-        g_gpu_nnue->init();
-    }
-    return *g_gpu_nnue;
+GPUNNUEEvaluator &gpu_nnue() {
+  if (!g_gpu_nnue) {
+    g_gpu_nnue = std::make_unique<GPUNNUEEvaluator>();
+    g_gpu_nnue->init();
+  }
+  return *g_gpu_nnue;
 }
 
 } // namespace Eval
 } // namespace MetalFish
-
-
