@@ -245,16 +245,31 @@ This eliminates the copy overhead that limits GPU usage in traditional discrete 
 
 ## 📊 Benchmark Results
 
-*Benchmarks are automatically updated by GitHub Actions on each push to main.*
+*Last updated: Pending first CI run | Runner: GitHub Actions macos-14 (Apple Silicon)*
+
+### Engine Comparison
+
+| Metric | MetalFish | Stockfish | LC0 |
+|--------|-----------|-----------|-----|
+| **Perft(6) NPS** | Pending | Pending | N/A |
+| **Search NPS** | Pending | Pending | Pending |
+| **GPU Acceleration** | ✅ Metal | ❌ CPU Only | ⚠️ Optional |
+
+### MetalFish Details
 
 | Metric | Value |
 |--------|-------|
 | Perft(6) Nodes | 119,060,324 |
 | Perft NPS | Pending CI run |
-| Search Depth 14 NPS | Pending CI run |
+| Search NPS (depth 14) | Pending CI run |
 | GPU Status | Pending CI run |
 
-> Run `./metalfish` with `bench 14` to see local benchmarks
+### Notes
+- All benchmarks run on identical GitHub Actions `macos-14` runners (Apple Silicon)
+- Hash size: 256 MB, Threads: 1 (single-threaded for fair comparison)
+- MetalFish uses GPU acceleration via Metal for NNUE evaluation
+- Stockfish is the official build with Apple Silicon optimizations
+- Run locally: `./metalfish` then `bench 14`
 
 ## UCI Options
 

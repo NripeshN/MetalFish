@@ -39,16 +39,65 @@ set(METAL_CPP_DIR "${CMAKE_SOURCE_DIR}/external/metal-cpp")
 # Download metal-cpp if not present
 if(NOT EXISTS "${METAL_CPP_DIR}/Metal/Metal.hpp")
   message(STATUS "Downloading metal-cpp...")
+  
+  # Create external directory if needed
+  file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/external")
+  
+  # Download
   file(DOWNLOAD
        "https://developer.apple.com/metal/cpp/files/metal-cpp_macOS15_iOS18.zip"
-       "${CMAKE_BINARY_DIR}/metal-cpp.zip" SHOW_PROGRESS)
-  file(ARCHIVE_EXTRACT INPUT "${CMAKE_BINARY_DIR}/metal-cpp.zip" DESTINATION
-       "${CMAKE_BINARY_DIR}/metal-cpp-extract")
-  # Find the extracted directory
-  file(GLOB METAL_CPP_EXTRACTED "${CMAKE_BINARY_DIR}/metal-cpp-extract/*")
-  if(METAL_CPP_EXTRACTED AND NOT EXISTS "${METAL_CPP_DIR}")
-    file(RENAME "${METAL_CPP_EXTRACTED}" "${METAL_CPP_DIR}")
+       "${CMAKE_BINARY_DIR}/metal-cpp.zip" 
+       SHOW_PROGRESS
+       STATUS DOWNLOAD_STATUS)
+  
+  list(GET DOWNLOAD_STATUS 0 DOWNLOAD_ERROR)
+  if(DOWNLOAD_ERROR)
+    message(FATAL_ERROR "Failed to download metal-cpp: ${DOWNLOAD_STATUS}")
   endif()
+  
+  # Extract to temp location
+  file(ARCHIVE_EXTRACT INPUT "${CMAKE_BINARY_DIR}/metal-cpp.zip" 
+       DESTINATION "${CMAKE_BINARY_DIR}/metal-cpp-extract")
+  
+  # Find extracted content (could be in a subdirectory)
+  file(GLOB METAL_CPP_CONTENTS "${CMAKE_BINARY_DIR}/metal-cpp-extract/*/Metal/Metal.hpp")
+  if(METAL_CPP_CONTENTS)
+    # Get the parent directory of Metal/Metal.hpp
+    get_filename_component(METAL_PARENT "${METAL_CPP_CONTENTS}" DIRECTORY)
+    get_filename_component(METAL_CPP_SRC "${METAL_PARENT}" DIRECTORY)
+    message(STATUS "Found metal-cpp at: ${METAL_CPP_SRC}")
+  else()
+    # Check if it's directly in the extract folder
+    file(GLOB METAL_CPP_CONTENTS "${CMAKE_BINARY_DIR}/metal-cpp-extract/Metal/Metal.hpp")
+    if(METAL_CPP_CONTENTS)
+      set(METAL_CPP_SRC "${CMAKE_BINARY_DIR}/metal-cpp-extract")
+    else()
+      # Last resort - find any directory with Metal.hpp
+      file(GLOB_RECURSE METAL_HPP "${CMAKE_BINARY_DIR}/metal-cpp-extract/**/Metal.hpp")
+      if(METAL_HPP)
+        list(GET METAL_HPP 0 FIRST_METAL_HPP)
+        get_filename_component(METAL_DIR "${FIRST_METAL_HPP}" DIRECTORY)
+        get_filename_component(METAL_CPP_SRC "${METAL_DIR}" DIRECTORY)
+      else()
+        message(FATAL_ERROR "Could not find Metal.hpp in downloaded archive")
+      endif()
+    endif()
+  endif()
+  
+  # Remove old directory if it exists
+  if(EXISTS "${METAL_CPP_DIR}")
+    file(REMOVE_RECURSE "${METAL_CPP_DIR}")
+  endif()
+  
+  # Copy to final location
+  file(COPY "${METAL_CPP_SRC}/" DESTINATION "${METAL_CPP_DIR}")
+  
+  # Verify
+  if(NOT EXISTS "${METAL_CPP_DIR}/Metal/Metal.hpp")
+    message(FATAL_ERROR "metal-cpp installation failed - Metal.hpp not found")
+  endif()
+  
+  message(STATUS "metal-cpp installed to ${METAL_CPP_DIR}")
 endif()
 
 # Include directories
