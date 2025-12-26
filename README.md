@@ -245,32 +245,32 @@ This eliminates the copy overhead that limits GPU usage in traditional discrete 
 
 ## 📊 Benchmark Results
 
-*Last updated: Pending first CI run | Runner: GitHub Actions macos-14 (Apple Silicon)*
+*Last updated: 2025-12-26 17:34 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
 
 ### Engine Comparison
 
 | Metric | MetalFish | Stockfish | LC0 |
 |--------|-----------|-----------|-----|
-| **Perft(6) NPS** | Pending | Pending | N/A |
-| **Search NPS** | Pending | Pending | Pending |
-| **GPU Acceleration** | ✅ Metal | ❌ CPU Only | ⚠️ Optional |
+| **Perft(6) NPS** | 119060324000 | 119060324000 | N/A |
+| **Search NPS** |  |  | N/A |
+| **GPU Acceleration** | ❌ N/A | ❌ CPU Only | ⚠️ No Network |
 
 ### MetalFish Details
 
 | Metric | Value |
 |--------|-------|
 | Perft(6) Nodes | 119,060,324 |
-| Perft NPS | Pending CI run |
-| Search NPS (depth 14) | Pending CI run |
-| GPU Status | Pending CI run |
+| Perft NPS | 119060324000 |
+| Search NPS (depth 14) |  |
+| Total Search Nodes |  |
+| GPU Status | ❌ N/A |
 
 ### Notes
 - All benchmarks run on identical GitHub Actions `macos-14` runners (Apple Silicon)
 - Hash size: 256 MB, Threads: 1 (single-threaded for fair comparison)
 - MetalFish uses GPU acceleration via Metal for NNUE evaluation
 - Stockfish is the official build with Apple Silicon optimizations
-- Run locally: `./metalfish` then `bench 14`
-
+- LC0 requires neural network weights (may not build in CI)
 ## UCI Options
 
 | Option | Type | Default | Description |
