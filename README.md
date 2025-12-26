@@ -245,7 +245,7 @@ This eliminates the copy overhead that limits GPU usage in traditional discrete 
 
 ## 📊 Benchmark Results
 
-*Last updated: 2025-12-26 17:37 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
+*Last updated: 2025-12-26 17:43 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
 
 ### Engine Comparison
 
