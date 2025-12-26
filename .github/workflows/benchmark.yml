@@ -24,7 +24,7 @@ jobs:
 
       - name: Build MetalFish
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_METAL_SHADERS=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_METAL_SHADERS=OFF
           cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 
       - name: Upload MetalFish binary

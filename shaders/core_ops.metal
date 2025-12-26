@@ -53,7 +53,8 @@ constant int PIECE_VALUES[7] = {0, 100, 320, 330, 500, 900, 20000};
 
 typedef uint64_t Bitboard;
 
-inline int popcount(Bitboard b) { return popcount(b); }
+// Use Metal's built-in popcount for uint64_t
+inline int bitcount(Bitboard b) { return metal::popcount(b); }
 
 inline int lsb(Bitboard b) { return ctz(b); }
 
@@ -477,7 +478,7 @@ kernel void perft_expand(device const PerftNode *input_nodes [[buffer(0)]],
 
   if (node.depth <= 0) {
     // Leaf node - count it
-    atomic_fetch_add_explicit(node_count, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(node_count, 1UL, memory_order_relaxed);
     return;
   }
 
@@ -491,7 +492,7 @@ kernel void perft_expand(device const PerftNode *input_nodes [[buffer(0)]],
     if (node.depth == 1) {
       // At depth 1, just count legal moves
       // TODO: Implement actual move counting
-      atomic_fetch_add_explicit(node_count, 20, memory_order_relaxed);
+      atomic_fetch_add_explicit(node_count, 20UL, memory_order_relaxed);
     }
   }
 }
@@ -523,11 +524,11 @@ kernel void batch_evaluate_positions(
     // Material counting
     for (int c = 0; c < 2; c++) {
       int sign = (c == WHITE) ? 1 : -1;
-      score += sign * popcount(pos.pieces[c][PAWN]) * 100;
-      score += sign * popcount(pos.pieces[c][KNIGHT]) * 320;
-      score += sign * popcount(pos.pieces[c][BISHOP]) * 330;
-      score += sign * popcount(pos.pieces[c][ROOK]) * 500;
-      score += sign * popcount(pos.pieces[c][QUEEN]) * 900;
+      score += sign * bitcount(pos.pieces[c][PAWN]) * 100;
+      score += sign * bitcount(pos.pieces[c][KNIGHT]) * 320;
+      score += sign * bitcount(pos.pieces[c][BISHOP]) * 330;
+      score += sign * bitcount(pos.pieces[c][ROOK]) * 500;
+      score += sign * bitcount(pos.pieces[c][QUEEN]) * 900;
     }
 
     // Adjust for side to move

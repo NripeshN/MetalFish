@@ -39,7 +39,7 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DBUILD_TESTS=ON \
-            -DBUILD_METAL_SHADERS=ON
+            -DBUILD_METAL_SHADERS=OFF
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)

@@ -77,9 +77,7 @@ kernel void feature_transformer_full(
     device ft_acc_t *accumulators [[buffer(4)]], // [batch x 2 x FT_OUT_DIMS]
     constant int &ft_out_dims [[buffer(5)]],
     constant int &batch_size [[buffer(6)]],
-    uint2 gid [[thread_position_in_grid]],
-    uint lid [[thread_position_in_threadgroup]],
-    uint simd_lane [[thread_index_in_simdgroup]]) {
+    uint2 gid [[thread_position_in_grid]]) {
   int pos_idx = gid.y;
   int hidden_idx = gid.x;
 
