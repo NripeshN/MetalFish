@@ -1,0 +1,9 @@
+/Users/nripeshn/Documents/PythonPrograms/chess_with_gpu/metalfish/build_debug/CMakeFiles/metalfish.dir
+/Users/nripeshn/Documents/PythonPrograms/chess_with_gpu/metalfish/build_debug/CMakeFiles/metalfish_tests.dir
+/Users/nripeshn/Documents/PythonPrograms/chess_with_gpu/metalfish/build_debug/CMakeFiles/test.dir
+/Users/nripeshn/Documents/PythonPrograms/chess_with_gpu/metalfish/build_debug/CMakeFiles/edit_cache.dir
+/Users/nripeshn/Documents/PythonPrograms/chess_with_gpu/metalfish/build_debug/CMakeFiles/rebuild_cache.dir
+/Users/nripeshn/Documents/PythonPrograms/chess_with_gpu/metalfish/build_debug/CMakeFiles/list_install_components.dir
+/Users/nripeshn/Documents/PythonPrograms/chess_with_gpu/metalfish/build_debug/CMakeFiles/install.dir
+/Users/nripeshn/Documents/PythonPrograms/chess_with_gpu/metalfish/build_debug/CMakeFiles/install/local.dir
+/Users/nripeshn/Documents/PythonPrograms/chess_with_gpu/metalfish/build_debug/CMakeFiles/install/strip.dir

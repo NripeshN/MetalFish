@@ -371,18 +371,43 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     bool givesCheck = pos.gives_check(move);
     pos.do_move(move, st, givesCheck);
 
-    // Late move reductions
-    Depth newDepth = depth - 1;
+    // Extensions
+    Depth extension = 0;
+
+    // Check extension - extend search when giving check
+    if (givesCheck)
+      extension = 1;
+
+    // New depth with extension
+    Depth newDepth = depth - 1 + extension;
     Value value;
 
     if (depth >= 2 && moveCount > 1 + (PvNode ? 1 : 0)) {
       int reduction =
           reductions[std::min(moveCount, MAX_MOVES - 1)] * depth / 16;
 
+      // Factor 1: Decrease for checks
       if (givesCheck)
         reduction--;
 
+      // Factor 2: Decrease for captures
       if (pos.capture(move))
+        reduction--;
+
+      // Factor 3: Decrease for killer moves
+      if (move == ss->killers[0] || move == ss->killers[1])
+        reduction--;
+
+      // Factor 4: Increase for cut nodes
+      if (cutNode)
+        reduction += 2;
+
+      // Factor 5: Decrease/Increase based on improving
+      if (!improving)
+        reduction++;
+
+      // Factor 6: Decrease for TT move
+      if (move == ttMove)
         reduction--;
 
       reduction = std::max(0, std::min(reduction, newDepth - 1));
@@ -427,7 +452,11 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         }
 
         if (value >= beta) {
-          // Beta cutoff
+          // Beta cutoff - update killer moves for quiet moves
+          if (!pos.capture(move) && move != ss->killers[0]) {
+            ss->killers[1] = ss->killers[0];
+            ss->killers[0] = move;
+          }
           break;
         }
 
