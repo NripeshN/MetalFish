@@ -144,6 +144,37 @@ Areas that might actually benefit from GPU:
 3. **Analysis mode** - deep analysis where latency matters less
 4. **Neural network training** - obvious GPU benefit
 
+## 📊 Benchmark Results
+
+*Last updated: 2025-12-27 01:48 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
+
+### Engine Comparison
+
+| Metric | MetalFish | Stockfish | LC0 |
+|--------|-----------|-----------|-----|
+| **Perft(6) NPS** | 119060324000 | 119060324000 | N/A |
+| **Search NPS** |  |  | N/A |
+| **GPU Acceleration** | ❌ N/A | ❌ CPU Only | ⚠️ No Network |
+
+### MetalFish Details
+
+| Metric | Value |
+|--------|-------|
+| Perft(6) Nodes | 119,060,324 |
+| Perft NPS | 119060324000 |
+| Search NPS (depth 14) |  |
+| Total Search Nodes |  |
+| GPU Status | ❌ N/A |
+
+### Notes
+- All benchmarks run on identical GitHub Actions `macos-14` runners (Apple Silicon)
+- Hash size: 256 MB, Threads: 1 (single-threaded for fair comparison)
+- MetalFish uses GPU acceleration via Metal for NNUE evaluation
+- Stockfish is the official build with Apple Silicon optimizations
+- LC0 requires neural network weights (may not build in CI)
+
+
+
 ## License
 
 GPL-3.0 - Same as Stockfish
