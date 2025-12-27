@@ -382,6 +382,8 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     Depth newDepth = depth - 1 + extension;
     Value value;
 
+    bool isCapture = pos.capture(move);
+
     if (depth >= 2 && moveCount > 1 + (PvNode ? 1 : 0)) {
       int reduction =
           reductions[std::min(moveCount, MAX_MOVES - 1)] * depth / 16;
@@ -391,7 +393,7 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         reduction--;
 
       // Factor 2: Decrease for captures
-      if (pos.capture(move))
+      if (isCapture)
         reduction--;
 
       // Factor 3: Decrease for killer moves
@@ -402,12 +404,35 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
       if (cutNode)
         reduction += 2;
 
-      // Factor 5: Decrease/Increase based on improving
+      // Factor 5: Increase for non-improving nodes
       if (!improving)
         reduction++;
 
       // Factor 6: Decrease for TT move
       if (move == ttMove)
+        reduction--;
+
+      // Factor 7: Decrease for PV nodes
+      if (PvNode)
+        reduction--;
+
+      // Factor 8: Increase for quiet moves after many quiet moves
+      if (!isCapture && moveCount > 4)
+        reduction++;
+
+      // Factor 9: Decrease for passed pawn pushes
+      if (!isCapture && type_of(pos.moved_piece(move)) == PAWN) {
+        Square to = move.to_sq();
+        // Rank bonus for advanced pawns
+        int rank = relative_rank(pos.side_to_move(), rank_of(to));
+        if (rank >= RANK_6)
+          reduction -= 2;
+        else if (rank >= RANK_5)
+          reduction--;
+      }
+
+      // Factor 10: Decrease for recaptures
+      if (isCapture && move.to_sq() == (ss - 1)->currentMove.to_sq())
         reduction--;
 
       reduction = std::max(0, std::min(reduction, newDepth - 1));
