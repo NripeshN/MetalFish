@@ -432,8 +432,33 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
       }
 
       // Factor 10: Decrease for recaptures
-      if (isCapture && move.to_sq() == (ss - 1)->currentMove.to_sq())
+      if (isCapture && ss->ply >= 1 && move.to_sq() == (ss - 1)->currentMove.to_sq())
         reduction--;
+
+      // Factor 11: Decrease for TT PV moves
+      if (ss->ttPv)
+        reduction--;
+
+      // Factor 12: Increase when previous move was a null move (opponent passed)
+      if ((ss - 1)->currentMove == Move::null())
+        reduction++;
+
+      // Factor 13: Decrease for promotions
+      if (move.type_of() == PROMOTION)
+        reduction -= 2;
+
+      // Factor 14: Increase more for very late moves
+      if (moveCount > 10)
+        reduction++;
+
+      // Factor 15: Decrease for moves to central squares
+      {
+        Square to = move.to_sq();
+        int f = file_of(to);
+        int r = rank_of(to);
+        if (f >= FILE_C && f <= FILE_F && r >= RANK_3 && r <= RANK_6)
+          reduction--;
+      }
 
       reduction = std::max(0, std::min(reduction, newDepth - 1));
 
