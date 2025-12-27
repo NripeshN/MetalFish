@@ -54,3 +54,4 @@ external/
 
 # jetbrains files
 .cache/
+build_debug/
