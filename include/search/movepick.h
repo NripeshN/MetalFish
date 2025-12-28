@@ -40,6 +40,17 @@ using CapturePieceToHistory = int16_t[PIECE_NB][SQUARE_NB][PIECE_TYPE_NB];
 constexpr int PAWN_HISTORY_SIZE = 128;
 using PawnHistory = int16_t[PAWN_HISTORY_SIZE][PIECE_NB][SQUARE_NB];
 
+// Correction history: adjusts static eval based on search results
+// Indexed by pawn structure hash, per side
+constexpr int CORRECTION_HISTORY_SIZE = 16384;
+constexpr int CORRECTION_HISTORY_LIMIT = 1024;
+using CorrectionHistory = int16_t[CORRECTION_HISTORY_SIZE][COLOR_NB];
+
+// Get correction history index from pawn key
+inline int correction_history_index(Key pawnKey) {
+  return pawnKey & (CORRECTION_HISTORY_SIZE - 1);
+}
+
 // Get pawn history index from position's pawn key
 inline int pawn_history_index(const Position &pos) {
   return pos.pawn_key() & (PAWN_HISTORY_SIZE - 1);

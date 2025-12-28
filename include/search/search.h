@@ -46,6 +46,7 @@ struct Stack {
   bool ttPv;
   bool ttHit;
   int cutoffCnt;
+  PieceToHistory *continuationHistory; // For continuation heuristic
 };
 
 // RootMove stores information about root moves
@@ -172,6 +173,10 @@ private:
   CounterMoveHistory counterMoves;
   CapturePieceToHistory captureHistory;
   PawnHistory pawnHistory;
+  CorrectionHistory correctionHistory;
+
+  // Continuation history: indexed by [piece][to], for tracking move sequences
+  PieceToHistory continuationHistoryTable[PIECE_NB][SQUARE_NB];
 };
 
 // Global search control

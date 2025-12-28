@@ -106,6 +106,8 @@ Worker::Worker(size_t idx) : threadIdx(idx) {
   std::memset(counterMoves, 0, sizeof(counterMoves));
   std::memset(captureHistory, 0, sizeof(captureHistory));
   std::memset(pawnHistory, 0, sizeof(pawnHistory));
+  std::memset(correctionHistory, 0, sizeof(correctionHistory));
+  std::memset(continuationHistoryTable, 0, sizeof(continuationHistoryTable));
 
   for (int i = 0; i < MAX_MOVES; ++i)
     reductions[i] = Reductions[i];
@@ -127,6 +129,8 @@ void Worker::clear() {
   std::memset(counterMoves, 0, sizeof(counterMoves));
   std::memset(captureHistory, 0, sizeof(captureHistory));
   std::memset(pawnHistory, 0, sizeof(pawnHistory));
+  std::memset(correctionHistory, 0, sizeof(correctionHistory));
+  std::memset(continuationHistoryTable, 0, sizeof(continuationHistoryTable));
   killers.clear();
 }
 
@@ -147,6 +151,18 @@ void Worker::update_quiet_stats(Stack *ss, Move move, int bonus) {
   if (movedPiece != NO_PIECE) {
     int16_t &pawnEntry = pawnHistory[pawnIdx][movedPiece][move.to_sq()];
     pawnEntry += bonus - pawnEntry * std::abs(bonus) / 16384;
+  }
+
+  // Update continuation history (previous moves -> this move)
+  if (movedPiece != NO_PIECE && ss->continuationHistory) {
+    Square to = move.to_sq();
+    // Update continuation history for this move relative to previous moves
+    for (int i : {1, 2, 4}) {
+      if (ss->ply >= i && (ss - i)->continuationHistory) {
+        int16_t &contEntry = (*(ss - i)->continuationHistory)[movedPiece][to];
+        contEntry += bonus - contEntry * std::abs(bonus) / 16384;
+      }
+    }
   }
 
   // Update killer moves
@@ -209,8 +225,15 @@ void Worker::iterative_deepening() {
 
   std::memset(ss - 7, 0, 10 * sizeof(Stack));
 
-  for (int i = 0; i <= MAX_PLY + 2; ++i)
+  for (int i = 0; i <= MAX_PLY + 2; ++i) {
     (ss + i)->ply = i;
+    (ss + i)->continuationHistory =
+        &continuationHistoryTable[NO_PIECE][SQ_A1]; // Default empty
+  }
+
+  // Set up initial continuation history for root
+  for (int i = -7; i < 0; ++i)
+    (ss + i)->continuationHistory = &continuationHistoryTable[NO_PIECE][SQ_A1];
 
   ss->pv = pv;
 
@@ -367,6 +390,12 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     } else {
       ss->staticEval = eval = evaluate(pos);
     }
+
+    // Apply correction history adjustment
+    int corrIdx = correction_history_index(pos.pawn_key());
+    int correction = correctionHistory[corrIdx][pos.side_to_move()];
+    eval += correction / 2; // Scale down correction
+    ss->staticEval = eval;
 
     improving = ss->ply >= 2 && ss->staticEval > (ss - 2)->staticEval;
   }
@@ -548,6 +577,12 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
 
     // Make the move
     ss->currentMove = move;
+
+    // Set up continuation history for this ply
+    Piece movedPc = pos.moved_piece(move);
+    (ss + 1)->continuationHistory =
+        &continuationHistoryTable[movedPc][move.to_sq()];
+
     StateInfo st;
     pos.do_move(move, st, givesCheck);
 
@@ -704,6 +739,19 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   // Checkmate/stalemate detection
   if (moveCount == 0)
     bestValue = pos.checkers() ? mated_in(ss->ply) : value_draw(nodes);
+
+  // Update correction history when search result differs from static eval
+  if (!pos.checkers() && bestMove && !pos.capture(bestMove) &&
+      std::abs(bestValue) < VALUE_TB_WIN_IN_MAX_PLY) {
+    int corrIdx = correction_history_index(pos.pawn_key());
+    Color us = pos.side_to_move();
+    int diff = bestValue - ss->staticEval;
+    int bonus = std::clamp(diff * depth / 8, -CORRECTION_HISTORY_LIMIT / 4,
+                           CORRECTION_HISTORY_LIMIT / 4);
+    int16_t &entry = correctionHistory[corrIdx][us];
+    entry = std::clamp(entry + bonus - entry * std::abs(bonus) / 16384,
+                       -CORRECTION_HISTORY_LIMIT, CORRECTION_HISTORY_LIMIT);
+  }
 
   // Update TT
   tte->save(posKey, bestValue, ss->ttPv,
