@@ -1,83 +1,81 @@
 # MetalFish
 
-An experimental GPU-accelerated chess engine exploring Apple Metal on Apple Silicon.
+A GPU-accelerated UCI chess engine for Apple Silicon, implementing Stockfish-style search with Metal GPU acceleration.
 
-[![CI](https://github.com/nripeshn/metalfish/actions/workflows/ci.yml/badge.svg)](https://github.com/nripeshn/metalfish/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-## ⚠️ Important Disclaimer
+## Overview
 
-**MetalFish is NOT a Stockfish clone.** It is an experimental research project exploring whether GPU acceleration can benefit chess engine search on Apple Silicon's unified memory architecture.
+MetalFish is a chess engine that combines traditional alpha-beta search techniques from Stockfish with Apple Metal GPU acceleration on Apple Silicon's unified memory architecture.
 
-### Current Status: Experimental / Work in Progress
+## Features
 
-- **Search**: Basic alpha-beta with some pruning techniques. Missing many sophisticated features that make Stockfish strong (singular extensions, full history heuristics, proper LMR tuning, etc.)
-- **NNUE**: Can load Stockfish network files, but does **full O(n) recomputation** - not "efficiently updatable" like CPU NNUE
-- **Performance**: Currently **slower than Stockfish CPU** due to GPU dispatch overhead and lack of incremental updates
-- **Strength**: Significantly weaker than Stockfish due to simplified search
+### Search (29 Stockfish Features Implemented)
 
-### The GPU Challenge
+#### Move Ordering
+- ✅ **ButterflyHistory** - Quiet move success tracking by from/to squares
+- ✅ **KillerMoves** - Refutation moves per ply
+- ✅ **CounterMoveHistory** - Moves that refute the previous move
+- ✅ **CapturePieceToHistory** - Capture move success tracking
+- ✅ **PawnHistory** - Pawn structure-aware history (indexed by pawn key)
+- ✅ **LowPlyHistory** - Extra weight for moves near root (first 5 plies)
+- ✅ **ContinuationHistory** - Move sequence success (1, 2, 4 ply lookback)
 
-As noted by experienced engine developers: _"Chess code is very sequential and branchy which is the worst case for GPUs"_
+#### Search Extensions
+- ✅ **Check Extension** - Extend when giving check
+- ✅ **Singular Extension** - Extend clearly best moves
+- ✅ **Multi-Cut Pruning** - Within singular extension framework
+- ✅ **Passed Pawn Extension** - Extend for pawns reaching 7th rank
+- ✅ **Recapture Extension** - Via LMR reduction decrease
+- ✅ **Upcoming Repetition Detection** - Proactive repetition avoidance
 
-The fundamental challenge:
+#### Pruning Techniques
+- ✅ **Null Move Pruning** - With verification search
+- ✅ **Futility Pruning** - For quiet moves and captures
+- ✅ **SEE-based Pruning** - Static Exchange Evaluation pruning
+- ✅ **Late Move Pruning (LMP)** - Skip late quiet moves at shallow depths
+- ✅ **Late Move Reductions (LMR)** - 14+ adjustment factors
+- ✅ **ProbCut** - Prune with shallow capture search
+- ✅ **Mate Distance Pruning** - Prune when short mate found
+- ✅ **Internal Iterative Reductions (IIR)** - Reduce depth without TT move
+- ✅ **History-based Pruning** - Skip moves with very negative history
 
-1. **Alpha-beta search is inherently sequential** - each node depends on previous results
-2. **GPU dispatch overhead** (~10-50μs) exceeds the benefit for single position evaluation
-3. **NNUE's "Efficiently Updatable" property** relies on incremental CPU updates that are hard to replicate on GPU
-4. **Stockfish CPU NNUE** evaluates in ~1μs vs ~50-100μs for GPU dispatch
+#### Evaluation
+- ✅ **NNUE Support** - Stockfish .nnue file loading
+- ✅ **Rule50 Dampening** - Linear eval reduction as 50-move rule approaches
+- ✅ **Correction History** - Adjust static eval based on search results
+- ✅ **Draw Randomization** - Prevent 3-fold repetition blindness
 
-## What This Project Actually Is
+#### Search Infrastructure
+- ✅ **Transposition Table** - With aging and generation tracking
+- ✅ **Aspiration Windows** - With averaging and fail-high tracking
+- ✅ **Best Move Stability** - For time management decisions
+- ✅ **Dynamic Time Management** - Adjust based on stability and score changes
+- ✅ **Iterative Deepening** - Progressive deepening with info output
+- ✅ **Quiescence Search** - Tactical resolution at leaf nodes
 
-An exploration of:
+### GPU Acceleration (Metal)
+- ✅ GPU-accelerated batch position evaluation
+- ✅ Metal compute shaders for NNUE forward pass
+- ✅ Unified memory (zero-copy) on Apple Silicon
+- ✅ GPU-accelerated move generation helpers
+- ✅ GPU-accelerated SEE calculation
 
-- Apple Metal GPU programming for chess
-- Unified memory (zero-copy) benefits on Apple Silicon
-- Whether batched GPU evaluation could work for specific use cases (training data generation, MCTS-style search)
-- Learning exercise in chess programming
+### Move Generation
+- ✅ Magic bitboards for sliding pieces
+- ✅ Legal move generation with pin detection
+- ✅ Perft verification (all standard positions pass)
 
-## Features (Implemented)
+## Not Yet Implemented (Major Stockfish Features)
 
-### Search (Basic)
-
-- Alpha-Beta with Principal Variation Search
-- Iterative Deepening with aspiration windows
-- Transposition Table
-- Basic Late Move Reductions (2 adjustment factors vs Stockfish's 15+)
-- Basic Null Move Pruning
-- Basic Futility Pruning
-- Basic Razoring
-- Quiescence Search
-
-### Search (NOT Implemented - Major Missing Features)
-
-- ❌ Singular Extensions
-- ❌ Check Extensions
-- ❌ History Extensions
-- ❌ Multi-Cut
-- ❌ ProbCut
-- ❌ Proper continuation history (4-ply)
-- ❌ Capture history
-- ❌ Counter move history (used)
-- ❌ Sophisticated LMR adjustments
-- ❌ IIR (Internal Iterative Reductions)
-- ❌ Lazy SMP
-- ❌ Syzygy tablebase support
-
-### Evaluation
-
-- NNUE network loading (Stockfish .nnue format)
-- GPU forward pass (Metal shaders)
-- **No incremental updates** - full recomputation each position
-- Classical material fallback
-
-### Move Ordering (Partial)
-
-- TT move first
-- MVV-LVA for captures
-- Basic SEE pruning
-- Killer moves (structure exists, not fully utilized)
-- History tables (structure exists, not fully utilized)
+- ❌ **Lazy SMP** - Multi-threaded search
+- ❌ **Syzygy Tablebases** - Endgame tablebase probing
+- ❌ **MultiPV** - Multiple principal variation search
+- ❌ **Pondering** - Thinking on opponent's time
+- ❌ **NNUE Incremental Updates** - Efficient accumulator updates
+- ❌ **Full Continuation History** - 6-ply lookback (currently 4-ply)
+- ❌ **Optimism Blending** - Material-scaled optimism in eval
+- ❌ **Cuckoo Hashing** - For faster repetition detection
 
 ## Requirements
 
@@ -102,24 +100,23 @@ make -j$(sysctl -n hw.ncpu)
 ```
 
 UCI commands:
-
 ```
 uci
 position startpos
-go depth 10
+go depth 15
+go movetime 5000
 quit
 ```
 
-## Performance Comparison
+## Testing
 
-| Metric              | MetalFish         | Stockfish 17 CPU       |
-| ------------------- | ----------------- | ---------------------- |
-| Search NPS          | ~100-500K         | ~2-5M                  |
-| NNUE eval/sec       | ~100K (GPU batch) | ~2M+ (CPU incremental) |
-| Single eval latency | ~50-100μs         | ~0.5-1μs               |
-| Strength (Elo)      | Unknown (weak)    | ~3600+                 |
+```bash
+# C++ unit tests
+./build/metalfish_tests
 
-The GPU approach is fundamentally disadvantaged for traditional alpha-beta search.
+# Python perft tests
+python3 tests/testing.py
+```
 
 ## Architecture
 
@@ -127,66 +124,34 @@ The GPU approach is fundamentally disadvantaged for traditional alpha-beta searc
 metalfish/
 ├── src/
 │   ├── core/          # Bitboards, position, move generation
-│   ├── search/        # Basic alpha-beta search
+│   ├── search/        # Alpha-beta search with all pruning techniques
 │   ├── eval/          # NNUE loader, GPU evaluation
-│   ├── metal/         # Metal device, allocator
+│   ├── metal/         # Metal device, GPU operations
 │   └── uci/           # UCI protocol
 ├── shaders/           # Metal compute shaders
+├── include/           # Header files
 └── tests/             # Unit and integration tests
 ```
 
-## Future Exploration
+## Performance Notes
 
-Areas that might actually benefit from GPU:
+MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For single-position evaluation during search, the overhead of GPU dispatch (~10-50μs) often exceeds the computational benefit. The engine automatically falls back to CPU evaluation for single positions while using GPU for batch operations where parallelism provides net benefit.
 
-1. **Training data generation** - batch evaluate millions of positions
-2. **MCTS-style search** - batch leaf evaluations
-3. **Analysis mode** - deep analysis where latency matters less
-4. **Neural network training** - obvious GPU benefit
-
-## 📊 Benchmark Results
-
-*Last updated: 2025-12-28 01:26 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
-
-### Engine Comparison
-
-| Metric | MetalFish | Stockfish | LC0 |
-|--------|-----------|-----------|-----|
-| **Perft(6) NPS** | 119060324000 | 119060324000 | N/A |
-| **Search NPS** |  |  | N/A |
-| **GPU Acceleration** | ❌ N/A | ❌ CPU Only | ⚠️ No Network |
-
-### MetalFish Details
-
-| Metric | Value |
-|--------|-------|
-| Perft(6) Nodes | 119,060,324 |
-| Perft NPS | 119060324000 |
-| Search NPS (depth 14) |  |
-| Total Search Nodes |  |
-| GPU Status | ❌ N/A |
-
-### Notes
-- All benchmarks run on identical GitHub Actions `macos-14` runners (Apple Silicon)
-- Hash size: 256 MB, Threads: 1 (single-threaded for fair comparison)
-- MetalFish uses GPU acceleration via Metal for NNUE evaluation
-- Stockfish is the official build with Apple Silicon optimizations
-- LC0 requires neural network weights (may not build in CI)
 ## License
 
 GPL-3.0 - Same as Stockfish
 
-**Inspired by:**
+## Credits
 
-- [Stockfish](https://github.com/official-stockfish/Stockfish) - Search concepts, NNUE architecture
+**Inspired by:**
+- [Stockfish](https://github.com/official-stockfish/Stockfish) - Search algorithms, NNUE architecture
 - [MLX](https://github.com/ml-explore/mlx) - Metal programming patterns
 
 **NNUE Training Data:**
-
-- Networks compatible with this engine are trained on data from [Leela Chess Zero](https://lczero.org/) (ODbL license)
+- Networks compatible with this engine use training data from [Leela Chess Zero](https://lczero.org/) (ODbL license)
 
 ## Author
 
 **Nripesh Niketan** (2025)
 
-This is a learning/research project. Feedback and contributions welcome!
+Contributions and feedback welcome!

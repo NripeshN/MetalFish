@@ -414,6 +414,14 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   if (!rootNode && pos.is_draw(ss->ply))
     return value_draw(nodes);
 
+  // Check if we have an upcoming move that draws by repetition
+  // If so, adjust alpha to avoid repetition blindness
+  if (!rootNode && alpha < VALUE_DRAW && pos.upcoming_repetition(ss->ply)) {
+    alpha = value_draw(nodes);
+    if (alpha >= beta)
+      return alpha;
+  }
+
   // Max ply check
   if (ss->ply >= MAX_PLY)
     return pos.checkers() ? value_draw(nodes) : evaluate(pos);

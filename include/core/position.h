@@ -149,6 +149,7 @@ public:
   bool is_chess960() const { return chess960; }
   bool is_draw(int ply) const;
   bool has_game_cycle(int ply) const;
+  bool upcoming_repetition(int ply) const;
   int rule50_count() const { return st->rule50; }
   Value non_pawn_material(Color c) const { return st->nonPawnMaterial[c]; }
   Value non_pawn_material() const {

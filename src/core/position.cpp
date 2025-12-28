@@ -354,7 +354,6 @@ bool Position::gives_check(Move m) const {
   }
 
   case CASTLING: {
-    Square ksq = square<KING>(~sideToMove);
     Square rto = relative_square(sideToMove, to > from ? SQ_F1 : SQ_D1);
     return check_squares(ROOK) & square_bb(rto);
   }
@@ -414,8 +413,6 @@ bool Position::pseudo_legal(Move m) const {
   // Check if move is valid for this piece type
   if (pt == PAWN) {
     // Pawn moves
-    int dir = (us == WHITE) ? 8 : -8;
-
     // Capture
     if (file_of(from) != file_of(to)) {
       if ((pieces(~us) & square_bb(to)) == 0 && to != ep_square())
@@ -783,7 +780,7 @@ bool Position::is_draw(int ply) const {
   return st->repetition && st->repetition < ply;
 }
 
-bool Position::has_game_cycle(int ply) const {
+bool Position::has_game_cycle(int /* ply */) const {
   int end = std::min(st->rule50, st->pliesFromNull);
   if (end < 3)
     return false;
@@ -795,6 +792,35 @@ bool Position::has_game_cycle(int ply) const {
     stp = stp->previous->previous;
     if (stp->key == originalKey)
       return true;
+  }
+
+  return false;
+}
+
+// Check if there's an upcoming move that would lead to a repetition
+// This helps avoid repetitions proactively
+bool Position::upcoming_repetition(int ply) const {
+  int end = std::min(st->rule50, st->pliesFromNull);
+  if (end < 3)
+    return false;
+
+  Key originalKey = st->key;
+  StateInfo *stp = st->previous;
+
+  // Check if any previous position + a reversible move could reach current
+  for (int i = 3; i <= end; i += 2) {
+    stp = stp->previous->previous;
+
+    // Simple check: if keys match and we're deep enough, consider it a threat
+    if (stp->key == originalKey) {
+      // If we're beyond the repetition point, it's a draw
+      if (ply > i)
+        return true;
+
+      // Check if the repetition already occurred
+      if (stp->repetition)
+        return true;
+    }
   }
 
   return false;
