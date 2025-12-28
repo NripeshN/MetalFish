@@ -169,16 +169,24 @@ std::string network_info() {
 }
 
 Value evaluate(const Position &pos) {
+  Value v;
+
   // For single-position evaluation during search, classical eval is faster
   // due to GPU command buffer overhead. GPU is used for batch evaluation.
 
   // Use CPU NNUE if loaded
   if (NNUE::network && NNUE::network->is_loaded()) {
-    return NNUE::evaluate(pos);
+    v = NNUE::evaluate(pos);
+  } else {
+    // Classical evaluation (fast for single positions)
+    v = classical_eval(pos);
   }
 
-  // Classical evaluation (fast for single positions)
-  return classical_eval(pos);
+  // Rule 50 dampening: linearly reduce eval as 50-move rule approaches
+  // This helps avoid draws when winning and correctly assess draw-ish positions
+  v -= v * pos.rule50_count() / 199;
+
+  return v;
 }
 
 // GPU-accelerated evaluation - use for batch processing

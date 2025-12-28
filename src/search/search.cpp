@@ -615,6 +615,26 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
             ss->staticEval + 100 + 150 * lmrDepth <= alpha)
           continue;
 
+        // History-based pruning: skip quiet moves with very bad history
+        if (!givesCheck && depth <= 5) {
+          Piece movedPc = pos.moved_piece(move);
+          if (movedPc != NO_PIECE) {
+            int histIdx = move.from_sq() * 64 + move.to_sq();
+            Color us = pos.side_to_move();
+            int histScore = mainHistory[us][histIdx];
+
+            // Prune moves with very negative history
+            if (histScore < -4000 * depth)
+              continue;
+
+            // Also check pawn history
+            int pawnIdx = pawn_history_index(pos);
+            int pawnHistScore = pawnHistory[pawnIdx][movedPc][move.to_sq()];
+            if (histScore + pawnHistScore < -6000 * depth)
+              continue;
+          }
+        }
+
         // SEE-based pruning for quiet moves
         if (!pos.see_ge(move, -30 * lmrDepth * lmrDepth))
           continue;
@@ -875,6 +895,7 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
   TTEntry *tte = TT->probe(posKey, ttHit);
   Value ttValue = ttHit ? tte->value() : VALUE_NONE;
   Move ttMove = ttHit ? tte->move() : Move::none();
+  (void)ttMove; // Unused for now, could be used for move ordering in qsearch
 
   // TT cutoff
   if (!PvNode && ttHit && tte->depth() >= DEPTH_QS) {
