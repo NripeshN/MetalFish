@@ -97,6 +97,11 @@ void TimeManager::adjust_time(double ratio) {
 
 // Worker constructor
 Worker::Worker(size_t idx) : threadIdx(idx) {
+  // Initialize history tables
+  std::memset(mainHistory, 0, sizeof(mainHistory));
+  std::memset(counterMoves, 0, sizeof(counterMoves));
+  std::memset(captureHistory, 0, sizeof(captureHistory));
+
   for (int i = 0; i < MAX_MOVES; ++i)
     reductions[i] = Reductions[i];
 }
@@ -111,6 +116,43 @@ void Worker::clear() {
   rootMoves.clear();
   rootDepth = 0;
   completedDepth = 0;
+
+  // Clear history tables
+  std::memset(mainHistory, 0, sizeof(mainHistory));
+  std::memset(counterMoves, 0, sizeof(counterMoves));
+  std::memset(captureHistory, 0, sizeof(captureHistory));
+  killers.clear();
+}
+
+// Update quiet move history on beta cutoff
+void Worker::update_quiet_stats(Stack *ss, Move move, int bonus) {
+  // Clamp bonus
+  bonus = std::clamp(bonus, -1200, 1200);
+
+  // Update main history with gravity formula
+  Color us = rootPos->side_to_move();
+  int idx = move.from_sq() * 64 + move.to_sq();
+  int16_t &entry = mainHistory[us][idx];
+  entry += bonus - entry * std::abs(bonus) / 16384;
+
+  // Update killer moves
+  killers.update(ss->ply, move);
+
+  // Update counter moves
+  if (ss->ply >= 1 && (ss - 1)->currentMove.is_ok()) {
+    Piece prevPiece = rootPos->piece_on((ss - 1)->currentMove.to_sq());
+    if (prevPiece != NO_PIECE) {
+      counterMoves[prevPiece][(ss - 1)->currentMove.to_sq()] = move;
+    }
+  }
+}
+
+// Update capture history on beta cutoff
+void Worker::update_capture_stats(Piece piece, Square to, PieceType captured,
+                                  int bonus) {
+  bonus = std::clamp(bonus, -1200, 1200);
+  int16_t &entry = captureHistory[piece][to][captured];
+  entry += bonus - entry * std::abs(bonus) / 16384;
 }
 
 // Start searching
@@ -263,6 +305,17 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   if (ss->ply >= MAX_PLY)
     return pos.checkers() ? VALUE_DRAW : evaluate(pos);
 
+  // Mate distance pruning
+  // Even if we mate at the next move, our score would be at best mate_in(ss->ply+1).
+  // If alpha is already bigger because a shorter mate was found upward in the tree,
+  // there is no need to search because we will never beat current alpha.
+  if (!rootNode) {
+    alpha = std::max(mated_in(ss->ply), alpha);
+    beta = std::min(mate_in(ss->ply + 1), beta);
+    if (alpha >= beta)
+      return alpha;
+  }
+
   // Transposition table lookup
   Key posKey = pos.key();
   bool ttHit;
@@ -279,6 +332,11 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
                         : tte->bound() & BOUND_UPPER)
       return ttValue;
   }
+
+  // Internal Iterative Reductions (IIR)
+  // Reduce depth for PV/Cut nodes without a TT move
+  if (depth >= 4 && !ttMove && !pos.checkers())
+    depth--;
 
   // Static evaluation
   Value eval;
@@ -326,6 +384,44 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
       return nullValue < VALUE_TB_WIN_IN_MAX_PLY ? nullValue : beta;
   }
 
+  // ProbCut
+  // If we have a good enough capture and a reduced search returns a value
+  // much above beta, we can prune the previous move safely.
+  Value probCutBeta = beta + 200 - 50 * improving;
+  if (!PvNode && depth >= 4 && !pos.checkers() &&
+      std::abs(beta) < VALUE_TB_WIN_IN_MAX_PLY) {
+
+    Move probCutMoves[MAX_MOVES];
+    Move *probCutEnd = generate<CAPTURES>(pos, probCutMoves);
+
+    for (Move *pm = probCutMoves; pm != probCutEnd; ++pm) {
+      Move probCutMove = *pm;
+
+      if (!pos.legal(probCutMove))
+        continue;
+
+      // Skip captures with bad SEE
+      if (!pos.see_ge(probCutMove, probCutBeta - ss->staticEval))
+        continue;
+
+      StateInfo st;
+      pos.do_move(probCutMove, st);
+
+      // Verify with qsearch first
+      Value value = -qsearch<NonPV>(pos, ss + 1, -probCutBeta, -probCutBeta + 1);
+
+      // If qsearch doesn't refute, do a reduced search
+      if (value >= probCutBeta)
+        value = -search<NonPV>(pos, ss + 1, -probCutBeta, -probCutBeta + 1,
+                               depth - 4, !cutNode);
+
+      pos.undo_move(probCutMove);
+
+      if (value >= probCutBeta)
+        return value > VALUE_TB_WIN_IN_MAX_PLY ? probCutBeta : value;
+    }
+  }
+
   // Move generation and ordering
   Move pv[MAX_PLY + 1];
   ss->pv = pv;
@@ -355,6 +451,10 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   for (Move *m = moves; m != end; ++m) {
     move = *m;
 
+    // Skip excluded move (for singular extension search)
+    if (move == ss->excludedMove)
+      continue;
+
     if (!pos.legal(move))
       continue;
 
@@ -366,24 +466,116 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         continue;
     }
 
+    // Extensions
+    Depth extension = 0;
+
+    // Singular extension search
+    // If the TT move is significantly better than all other moves,
+    // extend its search
+    if (!rootNode && depth >= 6 && move == ttMove && ttHit &&
+        ss->excludedMove == Move::none() && (tte->bound() & BOUND_LOWER) &&
+        tte->depth() >= depth - 3 && std::abs(ttValue) < VALUE_TB_WIN_IN_MAX_PLY) {
+
+      Value singularBeta = ttValue - 2 * depth;
+      Depth singularDepth = (depth - 1) / 2;
+
+      ss->excludedMove = move;
+      Value singularValue =
+          search<NonPV>(pos, ss, singularBeta - 1, singularBeta, singularDepth,
+                        cutNode);
+      ss->excludedMove = Move::none();
+
+      if (singularValue < singularBeta) {
+        extension = 1;
+      } else if (singularBeta >= beta) {
+        // Multi-cut pruning: singular beta >= beta means all moves fail high
+        return singularBeta;
+      } else if (ttValue >= beta) {
+        // Negative extension if TT value >= beta but no singular move
+        extension = -1;
+      }
+    }
+
     // Make the move
+    ss->currentMove = move;
     StateInfo st;
     bool givesCheck = pos.gives_check(move);
     pos.do_move(move, st, givesCheck);
 
-    // Late move reductions
-    Depth newDepth = depth - 1;
+    // Check extension - extend when giving check (if not already extended)
+    if (givesCheck && extension <= 0)
+      extension = 1;
+
+    // New depth with extension
+    Depth newDepth = depth - 1 + extension;
     Value value;
+
+    bool isCapture = pos.capture(move);
 
     if (depth >= 2 && moveCount > 1 + (PvNode ? 1 : 0)) {
       int reduction =
           reductions[std::min(moveCount, MAX_MOVES - 1)] * depth / 16;
 
+      // Factor 1: Decrease for checks
       if (givesCheck)
         reduction--;
 
-      if (pos.capture(move))
+      // Factor 2: Decrease for captures
+      if (isCapture)
         reduction--;
+
+      // Factor 3: Decrease for killer moves
+      if (killers.is_killer(ss->ply, move))
+        reduction--;
+
+      // Factor 4: Increase for cut nodes
+      if (cutNode)
+        reduction += 2;
+
+      // Factor 5: Increase for non-improving positions
+      if (!improving)
+        reduction++;
+
+      // Factor 6: Decrease for TT move
+      if (move == ttMove)
+        reduction--;
+
+      // Factor 7: Decrease for PV nodes
+      if (PvNode)
+        reduction--;
+
+      // Factor 8: Increase for quiet moves after many moves
+      if (!isCapture && moveCount > 4)
+        reduction++;
+
+      // Factor 9: Decrease for pawn pushes to 6th/7th rank
+      if (!isCapture && type_of(pos.moved_piece(move)) == PAWN) {
+        Rank r = relative_rank(pos.side_to_move(), rank_of(move.to_sq()));
+        if (r >= RANK_6)
+          reduction -= 2;
+        else if (r >= RANK_5)
+          reduction--;
+      }
+
+      // Factor 10: Decrease for TT PV moves
+      if (ss->ttPv)
+        reduction--;
+
+      // Factor 11: Decrease for promotions
+      if (move.type_of() == PROMOTION)
+        reduction -= 2;
+
+      // Factor 12: Increase for very late moves
+      if (moveCount > 10)
+        reduction++;
+
+      // Factor 13: Decrease for moves to central squares
+      {
+        File f = file_of(move.to_sq());
+        Rank r = rank_of(move.to_sq());
+        if (f >= FILE_C && f <= FILE_F && r >= RANK_3 && r <= RANK_6)
+          reduction--;
+      }
 
       reduction = std::max(0, std::min(reduction, newDepth - 1));
 
@@ -427,7 +619,21 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         }
 
         if (value >= beta) {
-          // Beta cutoff
+          // Beta cutoff - update history statistics
+          int bonus = std::min(16 * depth * depth, 1200);
+
+          if (!pos.capture(move)) {
+            // Update quiet move statistics
+            update_quiet_stats(ss, move, bonus);
+          } else {
+            // Update capture statistics
+            Piece moved = pos.moved_piece(move);
+            Square to = move.to_sq();
+            Piece captured = pos.piece_on(to);
+            PieceType capturedType =
+                captured != NO_PIECE ? type_of(captured) : PAWN;
+            update_capture_stats(moved, to, capturedType, bonus);
+          }
           break;
         }
 
