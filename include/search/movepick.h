@@ -34,6 +34,17 @@ using ButterflyHistory = int16_t[COLOR_NB][SQUARE_NB * SQUARE_NB];
 // Capture history: [piece][to][captured_type]
 using CapturePieceToHistory = int16_t[PIECE_NB][SQUARE_NB][PIECE_TYPE_NB];
 
+// Pawn history: indexed by pawn structure hash, [piece][to]
+// Size must be power of 2 for efficient modulo operation
+// Reduced size for memory efficiency (128 * 16 * 64 * 2 = 256KB)
+constexpr int PAWN_HISTORY_SIZE = 128;
+using PawnHistory = int16_t[PAWN_HISTORY_SIZE][PIECE_NB][SQUARE_NB];
+
+// Get pawn history index from position's pawn key
+inline int pawn_history_index(const Position &pos) {
+  return pos.pawn_key() & (PAWN_HISTORY_SIZE - 1);
+}
+
 // Piece to history for continuation
 using PieceToHistory = int16_t[PIECE_NB][SQUARE_NB];
 

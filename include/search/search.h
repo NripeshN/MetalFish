@@ -171,6 +171,7 @@ private:
   KillerMoves killers;
   CounterMoveHistory counterMoves;
   CapturePieceToHistory captureHistory;
+  PawnHistory pawnHistory;
 };
 
 // Global search control

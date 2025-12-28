@@ -42,6 +42,10 @@ Value futility_margin(Depth d, bool noTtCutNode, bool improving,
 // Late move reductions table
 int Reductions[MAX_MOVES];
 
+// Add a small random component to draw evaluations to avoid 3-fold blindness
+// This prevents the engine from being overly repetition-prone
+Value value_draw(uint64_t nodes) { return VALUE_DRAW - 1 + Value(nodes & 0x2); }
+
 void init_reductions() {
   Reductions[0] = 0;
   for (int i = 1; i < MAX_MOVES; ++i)
@@ -101,6 +105,7 @@ Worker::Worker(size_t idx) : threadIdx(idx) {
   std::memset(mainHistory, 0, sizeof(mainHistory));
   std::memset(counterMoves, 0, sizeof(counterMoves));
   std::memset(captureHistory, 0, sizeof(captureHistory));
+  std::memset(pawnHistory, 0, sizeof(pawnHistory));
 
   for (int i = 0; i < MAX_MOVES; ++i)
     reductions[i] = Reductions[i];
@@ -121,6 +126,7 @@ void Worker::clear() {
   std::memset(mainHistory, 0, sizeof(mainHistory));
   std::memset(counterMoves, 0, sizeof(counterMoves));
   std::memset(captureHistory, 0, sizeof(captureHistory));
+  std::memset(pawnHistory, 0, sizeof(pawnHistory));
   killers.clear();
 }
 
@@ -134,6 +140,14 @@ void Worker::update_quiet_stats(Stack *ss, Move move, int bonus) {
   int idx = move.from_sq() * 64 + move.to_sq();
   int16_t &entry = mainHistory[us][idx];
   entry += bonus - entry * std::abs(bonus) / 16384;
+
+  // Update pawn history (indexed by pawn structure)
+  int pawnIdx = pawn_history_index(*rootPos);
+  Piece movedPiece = rootPos->piece_on(move.from_sq());
+  if (movedPiece != NO_PIECE) {
+    int16_t &pawnEntry = pawnHistory[pawnIdx][movedPiece][move.to_sq()];
+    pawnEntry += bonus - pawnEntry * std::abs(bonus) / 16384;
+  }
 
   // Update killer moves
   killers.update(ss->ply, move);
@@ -297,13 +311,13 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   if (PvNode && ss->ply > selDepth)
     selDepth = ss->ply;
 
-  // Draw detection
+  // Draw detection with randomization to avoid 3-fold blindness
   if (!rootNode && pos.is_draw(ss->ply))
-    return VALUE_DRAW;
+    return value_draw(nodes);
 
   // Max ply check
   if (ss->ply >= MAX_PLY)
-    return pos.checkers() ? VALUE_DRAW : evaluate(pos);
+    return pos.checkers() ? value_draw(nodes) : evaluate(pos);
 
   // Mate distance pruning
   // Even if we mate at the next move, our score would be at best mate_in(ss->ply+1).
@@ -460,10 +474,46 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
 
     moveCount++;
 
-    // Late move pruning
-    if (!rootNode && bestValue > VALUE_MATED_IN_MAX_PLY) {
-      if (depth <= 6 && moveCount > (3 + 2 * depth * depth))
+    bool isCapture = pos.capture(move);
+    bool givesCheck = pos.gives_check(move);
+
+    // Pruning at shallow depths
+    if (!rootNode && bestValue > VALUE_MATED_IN_MAX_PLY &&
+        pos.non_pawn_material(pos.side_to_move())) {
+
+      // Late move pruning: skip quiet moves after enough have been searched
+      if (depth <= 6 && moveCount > (3 + depth * depth) / (2 - improving))
         continue;
+
+      // Reduced depth for pruning decisions
+      int lmrDepth = std::max(
+          0, depth - 1 - reductions[std::min(moveCount, MAX_MOVES - 1)] / 16);
+
+      if (isCapture) {
+        // Futility pruning for captures
+        if (!givesCheck && lmrDepth < 6) {
+          Piece captured = pos.piece_on(move.to_sq());
+          PieceType capturedType =
+              captured != NO_PIECE ? type_of(captured) : PAWN;
+          Value futilityValue = ss->staticEval + 200 + 200 * lmrDepth +
+                                PieceValue[make_piece(WHITE, capturedType)];
+          if (futilityValue <= alpha)
+            continue;
+        }
+
+        // SEE-based pruning for captures
+        if (!pos.see_ge(move, -200 * depth))
+          continue;
+      } else {
+        // Futility pruning for quiet moves
+        if (!givesCheck && lmrDepth < 10 &&
+            ss->staticEval + 100 + 150 * lmrDepth <= alpha)
+          continue;
+
+        // SEE-based pruning for quiet moves
+        if (!pos.see_ge(move, -30 * lmrDepth * lmrDepth))
+          continue;
+      }
     }
 
     // Extensions
@@ -499,18 +549,22 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     // Make the move
     ss->currentMove = move;
     StateInfo st;
-    bool givesCheck = pos.gives_check(move);
     pos.do_move(move, st, givesCheck);
 
     // Check extension - extend when giving check (if not already extended)
     if (givesCheck && extension <= 0)
       extension = 1;
 
+    // Passed pawn extension - extend for pawns pushing to 7th rank
+    if (extension <= 0 && type_of(pos.moved_piece(move)) == PAWN) {
+      Rank r = relative_rank(pos.side_to_move(), rank_of(move.to_sq()));
+      if (r == RANK_7)
+        extension = 1;
+    }
+
     // New depth with extension
     Depth newDepth = depth - 1 + extension;
     Value value;
-
-    bool isCapture = pos.capture(move);
 
     if (depth >= 2 && moveCount > 1 + (PvNode ? 1 : 0)) {
       int reduction =
@@ -576,6 +630,11 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         if (f >= FILE_C && f <= FILE_F && r >= RANK_3 && r <= RANK_6)
           reduction--;
       }
+
+      // Factor 14: Decrease for recaptures (capturing on same square as previous)
+      if (isCapture && ss->ply >= 1 && (ss - 1)->currentMove.is_ok() &&
+          move.to_sq() == (ss - 1)->currentMove.to_sq())
+        reduction--;
 
       reduction = std::max(0, std::min(reduction, newDepth - 1));
 
@@ -644,7 +703,7 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
 
   // Checkmate/stalemate detection
   if (moveCount == 0)
-    bestValue = pos.checkers() ? mated_in(ss->ply) : VALUE_DRAW;
+    bestValue = pos.checkers() ? mated_in(ss->ply) : value_draw(nodes);
 
   // Update TT
   tte->save(posKey, bestValue, ss->ttPv,
@@ -678,13 +737,13 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
 
   nodes++;
 
-  // Draw detection
+  // Draw detection with randomization
   if (pos.is_draw(ss->ply))
-    return VALUE_DRAW;
+    return value_draw(nodes);
 
   // Max ply
   if (ss->ply >= MAX_PLY)
-    return pos.checkers() ? VALUE_DRAW : evaluate(pos);
+    return pos.checkers() ? value_draw(nodes) : evaluate(pos);
 
   // TT probe
   Key posKey = pos.key();

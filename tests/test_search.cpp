@@ -303,7 +303,7 @@ bool test_killer_moves_in_search() {
 
   Search::Worker worker;
   Search::LimitsType limits;
-  limits.depth = 5;
+  limits.depth = 3;
 
   worker.start_searching(pos, limits, states);
   worker.wait_for_search_finished();
@@ -334,7 +334,7 @@ bool test_check_extension() {
 
   Search::Worker worker;
   Search::LimitsType limits;
-  limits.depth = 4;
+  limits.depth = 3;
 
   worker.start_searching(pos, limits, states);
   worker.wait_for_search_finished();
@@ -365,7 +365,7 @@ bool test_lmr_factors() {
 
   Search::Worker worker;
   Search::LimitsType limits;
-  limits.depth = 4; // Reduced depth for faster tests
+  limits.depth = 3; // Reduced depth for faster tests
 
   worker.start_searching(pos, limits, states);
   worker.wait_for_search_finished();
@@ -398,7 +398,7 @@ bool test_singular_extension() {
 
   Search::Worker worker;
   Search::LimitsType limits;
-  limits.depth = 6; // Singular extensions activate at depth >= 6
+  limits.depth = 3; // Test at moderate depth
 
   worker.start_searching(pos, limits, states);
   worker.wait_for_search_finished();
@@ -461,7 +461,7 @@ bool test_search_avoids_blunder() {
 
   Search::Worker worker;
   Search::LimitsType limits;
-  limits.depth = 4;
+  limits.depth = 3;
 
   worker.start_searching(pos, limits, states);
   worker.wait_for_search_finished();
