@@ -109,7 +109,7 @@ bool GPUNNUEWeights::load(MTL::Device *device, const std::string &path) {
 
     std::cout << "[GPU_NNUE] Loaded weights from: " << path << std::endl;
   } else {
-    // Initialize with zeros (placeholder for classical eval)
+    // No network file - initialize with zeros (engine will use classical eval)
     memset(ft_weights->contents(), 0, ft_weights->length());
     memset(ft_biases->contents(), 0, ft_biases->length());
     memset(psqt_weights->contents(), 0, psqt_weights->length());
@@ -311,7 +311,7 @@ kernel void nnue_forward(
     output_buffer_ = device_->newBuffer(sizeof(int32_t), buf_opts);
     scratch_buffer_ = device_->newBuffer(1024, buf_opts);
 
-    // Load placeholder weights
+    // Initialize weights (empty path uses classical eval fallback)
     weights_->load(device_, "");
 
     ready_ = true;

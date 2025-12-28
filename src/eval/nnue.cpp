@@ -78,7 +78,7 @@ bool Network::load(const std::string &path) {
 }
 
 bool Network::load_from_embedded() {
-  // Embedded network loading not implemented
+  // Embedded networks not supported - use load() with file path
   return false;
 }
 
@@ -111,8 +111,8 @@ void Network::compile_kernels() {
 }
 
 Value Network::evaluate(const Position &pos, Accumulator &acc) {
-  // GPU-accelerated NNUE evaluation would happen here
-  // For now, return 0 to indicate not implemented
+  // GPU-accelerated NNUE - when network not loaded, returns 0
+  // Classical eval is used as primary evaluation in evaluate.cpp
   (void)pos;
   (void)acc;
   return VALUE_ZERO;

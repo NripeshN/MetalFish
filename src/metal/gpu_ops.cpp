@@ -200,13 +200,12 @@ bool GPUOps::load_kernels() {
   library_ = device_->newLibrary(libURL, &error);
 
   if (!library_) {
-    // Try loading from source
+    // Shader file not found - create minimal fallback library
     NS::String *source = NS::String::string(R"(
       #include <metal_stdlib>
       using namespace metal;
 
-      // Minimal kernels for fallback
-      kernel void dummy_kernel() {}
+      kernel void noop_kernel() {}
     )",
                                             NS::UTF8StringEncoding);
 
