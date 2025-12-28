@@ -177,6 +177,9 @@ private:
 
   // Continuation history: indexed by [piece][to], for tracking move sequences
   PieceToHistory continuationHistoryTable[PIECE_NB][SQUARE_NB];
+
+  // Low ply history: extra weight for moves near root
+  LowPlyHistory lowPlyHistory;
 };
 
 // Global search control

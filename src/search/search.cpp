@@ -108,6 +108,7 @@ Worker::Worker(size_t idx) : threadIdx(idx) {
   std::memset(pawnHistory, 0, sizeof(pawnHistory));
   std::memset(correctionHistory, 0, sizeof(correctionHistory));
   std::memset(continuationHistoryTable, 0, sizeof(continuationHistoryTable));
+  std::memset(lowPlyHistory, 0, sizeof(lowPlyHistory));
 
   for (int i = 0; i < MAX_MOVES; ++i)
     reductions[i] = Reductions[i];
@@ -131,6 +132,7 @@ void Worker::clear() {
   std::memset(pawnHistory, 0, sizeof(pawnHistory));
   std::memset(correctionHistory, 0, sizeof(correctionHistory));
   std::memset(continuationHistoryTable, 0, sizeof(continuationHistoryTable));
+  std::memset(lowPlyHistory, 0, sizeof(lowPlyHistory));
   killers.clear();
 }
 
@@ -163,6 +165,13 @@ void Worker::update_quiet_stats(Stack *ss, Move move, int bonus) {
         contEntry += bonus - contEntry * std::abs(bonus) / 16384;
       }
     }
+  }
+
+  // Update low ply history for moves near root
+  if (ss->ply < LOW_PLY_HISTORY_SIZE) {
+    int moveIdx = move.from_sq() * 64 + move.to_sq();
+    int16_t &lowEntry = lowPlyHistory[ss->ply][moveIdx];
+    lowEntry += bonus - lowEntry * std::abs(bonus) / 16384;
   }
 
   // Update killer moves

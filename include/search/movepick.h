@@ -51,6 +51,11 @@ inline int correction_history_index(Key pawnKey) {
   return pawnKey & (CORRECTION_HISTORY_SIZE - 1);
 }
 
+// Low ply history: extra weight for moves at low search depths (near root)
+// Only applies to first few plies
+constexpr int LOW_PLY_HISTORY_SIZE = 5;
+using LowPlyHistory = int16_t[LOW_PLY_HISTORY_SIZE][SQUARE_NB * SQUARE_NB];
+
 // Get pawn history index from position's pawn key
 inline int pawn_history_index(const Position &pos) {
   return pos.pawn_key() & (PAWN_HISTORY_SIZE - 1);
