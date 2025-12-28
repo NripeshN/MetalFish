@@ -278,14 +278,9 @@ top:
     [[fallthrough]];
 
   case BAD_QUIET:
-    if (!skipQuiets) {
-      cur = endBadCaptures;
-      while (cur < endMoves) {
-        Move m = *(cur++);
-        if (m != ttMove)
-          return m;
-      }
-    }
+    // All quiet moves already returned in GOOD_QUIET
+    // BAD_QUIET stage is kept for compatibility but not used
+    // since we don't split quiets into good/bad in this implementation
     return Move::none();
 
   case EVASION_INIT:
