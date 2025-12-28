@@ -251,7 +251,14 @@ void Worker::iterative_deepening() {
   Value bestValue = -VALUE_INFINITE;
   Value alpha = -VALUE_INFINITE;
   Value beta = VALUE_INFINITE;
-  Value delta = 0;
+  int delta = 0;
+  int failedHighCnt = 0;
+
+  // Best move stability tracking for time management
+  Move lastBestMove = Move::none();
+  int bestMoveChanges = 0;
+  int stableBestMoveCount = 0;
+  Value lastScore = -VALUE_INFINITE;
 
   // Iterative deepening
   for (rootDepth = 1; rootDepth <= (limits.depth ? limits.depth : MAX_PLY);
@@ -260,16 +267,25 @@ void Worker::iterative_deepening() {
     if (stopRequested || Signals_stop)
       break;
 
+    // Reset fail high counter and aspiration window for new depth
+    failedHighCnt = 0;
+
     // Aspiration window search
-    if (rootDepth >= 4) {
-      delta = 16 + bestValue * bestValue / 21367;
-      alpha = std::max(bestValue - delta, -VALUE_INFINITE);
-      beta = std::min(bestValue + delta, VALUE_INFINITE);
+    if (rootDepth >= 4 && !rootMoves.empty()) {
+      // Use average score for more stable aspiration windows
+      Value avg = rootMoves[0].averageScore != -VALUE_INFINITE
+                      ? rootMoves[0].averageScore
+                      : bestValue;
+      delta = 16 + std::abs(avg) * std::abs(avg) / 21367;
+      alpha = std::max(avg - delta, -VALUE_INFINITE);
+      beta = std::min(avg + delta, VALUE_INFINITE);
     }
 
     // Main search
     while (true) {
-      bestValue = search<Root>(*rootPos, ss, alpha, beta, rootDepth, false);
+      // Reduce depth after multiple fail-highs (like Stockfish)
+      Depth adjustedDepth = std::max(1, rootDepth - failedHighCnt);
+      bestValue = search<Root>(*rootPos, ss, alpha, beta, adjustedDepth, false);
 
       // Sort root moves by score
       std::stable_sort(rootMoves.begin(), rootMoves.end());
@@ -277,16 +293,31 @@ void Worker::iterative_deepening() {
       if (stopRequested || Signals_stop)
         break;
 
-      // Aspiration window handling
+      // Aspiration window handling with improved fail-high logic
       if (bestValue <= alpha) {
+        // Fail low: expand window downward, reset fail high count
         beta = (alpha + beta) / 2;
         alpha = std::max(bestValue - delta, -VALUE_INFINITE);
+        failedHighCnt = 0;
       } else if (bestValue >= beta) {
+        // Fail high: expand window upward, increment fail high count
+        // Keep alpha stable on fail-high (Stockfish behavior)
+        alpha = std::max(beta - delta, alpha);
         beta = std::min(bestValue + delta, VALUE_INFINITE);
+        ++failedHighCnt;
       } else
         break;
 
       delta += delta / 3;
+    }
+
+    // Update average score (exponential moving average)
+    if (!rootMoves.empty()) {
+      Value prevAvg = rootMoves[0].averageScore;
+      if (prevAvg == -VALUE_INFINITE)
+        rootMoves[0].averageScore = bestValue;
+      else
+        rootMoves[0].averageScore = (prevAvg * 2 + bestValue) / 3;
     }
 
     completedDepth = rootDepth;
@@ -309,10 +340,46 @@ void Worker::iterative_deepening() {
       std::cout << std::endl;
     }
 
-    // Time management
-    if (!limits.infinite && limits.use_time_management()) {
-      if (timeManager.elapsed() > timeManager.optimum())
-        break;
+    // Track best move stability for time management
+    if (!rootMoves.empty()) {
+      Move currentBestMove = rootMoves[0].pv[0];
+      if (currentBestMove != lastBestMove) {
+        lastBestMove = currentBestMove;
+        bestMoveChanges++;
+        stableBestMoveCount = 0;
+      } else {
+        stableBestMoveCount++;
+      }
+
+      // Track score changes (falling eval)
+      Value currentScore = rootMoves[0].score;
+      Value scoreDiff = currentScore - lastScore;
+      lastScore = currentScore;
+
+      // Time management with stability and falling eval considerations
+      if (!limits.infinite && limits.use_time_management()) {
+        TimePoint elapsed = timeManager.elapsed();
+        TimePoint optimum = timeManager.optimum();
+
+        // Early termination if best move is stable and score is not falling
+        if (stableBestMoveCount >= 3 && scoreDiff >= -20) {
+          // Reduce time if very stable (adjust by 0.8x)
+          if (elapsed > optimum * 0.8)
+            break;
+        }
+
+        // Extend time if best move changed recently or score is falling
+        double timeScale = 1.0;
+        if (bestMoveChanges > 2 && stableBestMoveCount < 2)
+          timeScale = 1.3; // Unstable, use more time
+        else if (scoreDiff < -50)
+          timeScale = 1.2; // Falling eval, use more time
+        else if (stableBestMoveCount >= 5)
+          timeScale = 0.75; // Very stable, use less time
+
+        if (elapsed > optimum * timeScale)
+          break;
+      }
     }
 
     // Node limit
