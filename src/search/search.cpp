@@ -97,11 +97,6 @@ void TimeManager::adjust_time(double ratio) {
 
 // Worker constructor
 Worker::Worker(size_t idx) : threadIdx(idx) {
-  // Initialize history tables
-  std::memset(mainHistory, 0, sizeof(mainHistory));
-  std::memset(counterMoves, 0, sizeof(counterMoves));
-  std::memset(captureHistory, 0, sizeof(captureHistory));
-
   for (int i = 0; i < MAX_MOVES; ++i)
     reductions[i] = Reductions[i];
 }
@@ -116,12 +111,6 @@ void Worker::clear() {
   rootMoves.clear();
   rootDepth = 0;
   completedDepth = 0;
-
-  // Clear history tables
-  std::memset(mainHistory, 0, sizeof(mainHistory));
-  std::memset(counterMoves, 0, sizeof(counterMoves));
-  std::memset(captureHistory, 0, sizeof(captureHistory));
-  killers.clear();
 }
 
 // Start searching
@@ -337,45 +326,6 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
       return nullValue < VALUE_TB_WIN_IN_MAX_PLY ? nullValue : beta;
   }
 
-  // ProbCut (~10 Elo)
-  // If a reduced search (depth - 4) with a raised beta (beta + 189)
-  // already finds a value >= beta, we can prune this node
-  if (!PvNode && depth > 4 && !pos.checkers() &&
-      std::abs(beta) < VALUE_TB_WIN_IN_MAX_PLY) {
-
-    Value probCutBeta = beta + 189 - 44 * improving;
-
-    Move probCutMoves[MAX_MOVES];
-    Move *probCutEnd = generate<CAPTURES>(pos, probCutMoves);
-
-    for (Move *m = probCutMoves; m != probCutEnd; ++m) {
-      Move probCutMove = *m;
-
-      if (!pos.legal(probCutMove))
-        continue;
-
-      // Only consider captures with good SEE
-      if (!pos.see_ge(probCutMove, probCutBeta - ss->staticEval))
-        continue;
-
-      StateInfo st;
-      pos.do_move(probCutMove, st);
-
-      // Verify with qsearch
-      Value value = -qsearch<NonPV>(pos, ss + 1, -probCutBeta, -probCutBeta + 1);
-
-      // If qsearch doesn't refute, do a proper reduced search
-      if (value >= probCutBeta)
-        value = -search<NonPV>(pos, ss + 1, -probCutBeta, -probCutBeta + 1,
-                               depth - 4, !cutNode);
-
-      pos.undo_move(probCutMove);
-
-      if (value >= probCutBeta)
-        return value > VALUE_TB_WIN_IN_MAX_PLY ? probCutBeta : value;
-    }
-  }
-
   // Move generation and ordering
   Move pv[MAX_PLY + 1];
   ss->pv = pv;
@@ -416,133 +366,24 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         continue;
     }
 
-    // Extensions
-    Depth extension = 0;
-
-    // Singular extension search:
-    // If the TT move is significantly better than all other moves,
-    // extend its search
-    bool singularQuietLMR = false;
-    if (!rootNode && depth >= 6 && move == ttMove && ttHit &&
-        ss->excludedMove == Move::none() && (tte->bound() & BOUND_LOWER) &&
-        tte->depth() >= depth - 3 && std::abs(ttValue) < VALUE_TB_WIN_IN_MAX_PLY) {
-
-      Value singularBeta = ttValue - 2 * depth;
-      Depth singularDepth = (depth - 1) / 2;
-
-      ss->excludedMove = move;
-      Value singularValue =
-          search<NonPV>(pos, ss, singularBeta - 1, singularBeta, singularDepth,
-                        cutNode);
-      ss->excludedMove = Move::none();
-
-      if (singularValue < singularBeta) {
-        extension = 1;
-        singularQuietLMR = !pos.capture(move);
-      } else if (singularBeta >= beta) {
-        // Multi-cut pruning
-        return singularBeta;
-      } else if (ttValue >= beta) {
-        // Negative extension if TT value >= beta but singular search didn't
-        extension = -1;
-      }
-    }
-
-    // Check extension - extend search when giving check
-    bool givesCheck = pos.gives_check(move);
-    if (givesCheck && extension < 1)
-      extension = 1;
-
     // Make the move
-    ss->currentMove = move;
     StateInfo st;
+    bool givesCheck = pos.gives_check(move);
     pos.do_move(move, st, givesCheck);
 
-    // New depth with extension
-    Depth newDepth = depth - 1 + extension;
+    // Late move reductions
+    Depth newDepth = depth - 1;
     Value value;
-
-    bool isCapture = pos.capture(move);
 
     if (depth >= 2 && moveCount > 1 + (PvNode ? 1 : 0)) {
       int reduction =
           reductions[std::min(moveCount, MAX_MOVES - 1)] * depth / 16;
 
-      // Factor 1: Decrease for checks
       if (givesCheck)
         reduction--;
 
-      // Factor 2: Decrease for captures
-      if (isCapture)
+      if (pos.capture(move))
         reduction--;
-
-      // Factor 3: Decrease for killer moves
-      if (move == ss->killers[0] || move == ss->killers[1])
-        reduction--;
-
-      // Factor 4: Increase for cut nodes
-      if (cutNode)
-        reduction += 2;
-
-      // Factor 5: Increase for non-improving nodes
-      if (!improving)
-        reduction++;
-
-      // Factor 6: Decrease for TT move
-      if (move == ttMove)
-        reduction--;
-
-      // Factor 7: Decrease for PV nodes
-      if (PvNode)
-        reduction--;
-
-      // Factor 8: Increase for quiet moves after many quiet moves
-      if (!isCapture && moveCount > 4)
-        reduction++;
-
-      // Factor 9: Decrease for passed pawn pushes
-      if (!isCapture && type_of(pos.moved_piece(move)) == PAWN) {
-        Square to = move.to_sq();
-        // Rank bonus for advanced pawns
-        Rank relRank = relative_rank(pos.side_to_move(), rank_of(to));
-        if (relRank >= RANK_6)
-          reduction -= 2;
-        else if (relRank >= RANK_5)
-          reduction--;
-      }
-
-      // Factor 16: Decrease for singular extension candidate that failed
-      if (singularQuietLMR)
-        reduction--;
-
-      // Factor 10: Decrease for recaptures
-      if (isCapture && ss->ply >= 1 && move.to_sq() == (ss - 1)->currentMove.to_sq())
-        reduction--;
-
-      // Factor 11: Decrease for TT PV moves
-      if (ss->ttPv)
-        reduction--;
-
-      // Factor 12: Increase when previous move was a null move (opponent passed)
-      if ((ss - 1)->currentMove == Move::null())
-        reduction++;
-
-      // Factor 13: Decrease for promotions
-      if (move.type_of() == PROMOTION)
-        reduction -= 2;
-
-      // Factor 14: Increase more for very late moves
-      if (moveCount > 10)
-        reduction++;
-
-      // Factor 15: Decrease for moves to central squares
-      {
-        Square to = move.to_sq();
-        int f = file_of(to);
-        int r = rank_of(to);
-        if (f >= FILE_C && f <= FILE_F && r >= RANK_3 && r <= RANK_6)
-          reduction--;
-      }
 
       reduction = std::max(0, std::min(reduction, newDepth - 1));
 
@@ -586,37 +427,7 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         }
 
         if (value >= beta) {
-          // Beta cutoff - update statistics for quiet moves
-          if (!pos.capture(move)) {
-            // Update killer moves
-            if (move != ss->killers[0]) {
-              ss->killers[1] = ss->killers[0];
-              ss->killers[0] = move;
-            }
-
-            // Update counter moves (refutation of opponent's previous move)
-            if (ss->ply >= 1 && (ss - 1)->currentMove.is_ok()) {
-              Piece prevPiece = pos.piece_on((ss - 1)->currentMove.to_sq());
-              if (prevPiece != NO_PIECE) {
-                counterMoves[prevPiece][(ss - 1)->currentMove.to_sq()] = move;
-              }
-            }
-
-            // Update main history
-            int bonus = std::min(16 * depth * depth, 1200);
-            Color us = pos.side_to_move();
-            int idx = move.from_sq() * 64 + move.to_sq();
-            int16_t &entry = mainHistory[us][idx];
-            entry += bonus - entry * std::abs(bonus) / 16384;
-          } else {
-            // Update capture history
-            Piece moved = pos.moved_piece(move);
-            Square to = move.to_sq();
-            PieceType captured = type_of(pos.piece_on(to));
-            int bonus = std::min(16 * depth * depth, 1200);
-            int16_t &entry = captureHistory[moved][to][captured];
-            entry += bonus - entry * std::abs(bonus) / 16384;
-          }
+          // Beta cutoff
           break;
         }
 

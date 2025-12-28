@@ -14,7 +14,6 @@
 
 #include "core/position.h"
 #include "core/types.h"
-#include "search/movepick.h"
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -154,21 +153,11 @@ private:
 
   Value evaluate(const Position &pos);
 
-  // Update history tables on beta cutoff
-  void update_quiet_stats(const Position &pos, Stack *ss, Move bestMove,
-                          int bonus);
-
   size_t threadIdx;
   TimeManager timeManager;
 
   // Reductions table
   int reductions[MAX_MOVES];
-
-  // History tables for move ordering
-  ButterflyHistory mainHistory;
-  KillerMoves killers;
-  CounterMoveHistory counterMoves;
-  CapturePieceToHistory captureHistory;
 };
 
 // Global search control

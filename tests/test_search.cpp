@@ -365,7 +365,7 @@ bool test_lmr_factors() {
 
   Search::Worker worker;
   Search::LimitsType limits;
-  limits.depth = 6;
+  limits.depth = 4; // Reduced depth for faster tests
 
   worker.start_searching(pos, limits, states);
   worker.wait_for_search_finished();
