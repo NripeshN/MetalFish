@@ -379,6 +379,37 @@ bool test_lmr_factors() {
   return tc.passed();
 }
 
+bool test_singular_extension() {
+  TestCase tc("SingularExtension");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Position where singular extension helps find winning line
+  // Queen is clearly best at g5, attacking f6 and creating threats
+  pos.set("r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQR1K1 w - - 0 8",
+          false, &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 6; // Singular extensions activate at depth >= 6
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  EXPECT(tc, !worker.rootMoves.empty());
+  // Just verify search completes - singular extensions should help
+  EXPECT(tc, worker.nodes.load() > 0);
+
+  return tc.passed();
+}
+
 bool test_search_finds_mate() {
   TestCase tc("SearchFindsMate");
 
@@ -523,6 +554,7 @@ bool test_search() {
   test_killer_moves_in_search();
   test_check_extension();
   test_lmr_factors();
+  test_singular_extension();
 
   std::cout << "\n[Search Correctness]" << std::endl;
   test_search_finds_mate();

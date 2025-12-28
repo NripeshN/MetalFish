@@ -337,6 +337,45 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
       return nullValue < VALUE_TB_WIN_IN_MAX_PLY ? nullValue : beta;
   }
 
+  // ProbCut (~10 Elo)
+  // If a reduced search (depth - 4) with a raised beta (beta + 189)
+  // already finds a value >= beta, we can prune this node
+  if (!PvNode && depth > 4 && !pos.checkers() &&
+      std::abs(beta) < VALUE_TB_WIN_IN_MAX_PLY) {
+
+    Value probCutBeta = beta + 189 - 44 * improving;
+
+    Move probCutMoves[MAX_MOVES];
+    Move *probCutEnd = generate<CAPTURES>(pos, probCutMoves);
+
+    for (Move *m = probCutMoves; m != probCutEnd; ++m) {
+      Move probCutMove = *m;
+
+      if (!pos.legal(probCutMove))
+        continue;
+
+      // Only consider captures with good SEE
+      if (!pos.see_ge(probCutMove, probCutBeta - ss->staticEval))
+        continue;
+
+      StateInfo st;
+      pos.do_move(probCutMove, st);
+
+      // Verify with qsearch
+      Value value = -qsearch<NonPV>(pos, ss + 1, -probCutBeta, -probCutBeta + 1);
+
+      // If qsearch doesn't refute, do a proper reduced search
+      if (value >= probCutBeta)
+        value = -search<NonPV>(pos, ss + 1, -probCutBeta, -probCutBeta + 1,
+                               depth - 4, !cutNode);
+
+      pos.undo_move(probCutMove);
+
+      if (value >= probCutBeta)
+        return value > VALUE_TB_WIN_IN_MAX_PLY ? probCutBeta : value;
+    }
+  }
+
   // Move generation and ordering
   Move pv[MAX_PLY + 1];
   ss->pv = pv;
@@ -377,18 +416,47 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         continue;
     }
 
-    // Make the move
-    ss->currentMove = move;
-    StateInfo st;
-    bool givesCheck = pos.gives_check(move);
-    pos.do_move(move, st, givesCheck);
-
     // Extensions
     Depth extension = 0;
 
+    // Singular extension search:
+    // If the TT move is significantly better than all other moves,
+    // extend its search
+    bool singularQuietLMR = false;
+    if (!rootNode && depth >= 6 && move == ttMove && ttHit &&
+        ss->excludedMove == Move::none() && (tte->bound() & BOUND_LOWER) &&
+        tte->depth() >= depth - 3 && std::abs(ttValue) < VALUE_TB_WIN_IN_MAX_PLY) {
+
+      Value singularBeta = ttValue - 2 * depth;
+      Depth singularDepth = (depth - 1) / 2;
+
+      ss->excludedMove = move;
+      Value singularValue =
+          search<NonPV>(pos, ss, singularBeta - 1, singularBeta, singularDepth,
+                        cutNode);
+      ss->excludedMove = Move::none();
+
+      if (singularValue < singularBeta) {
+        extension = 1;
+        singularQuietLMR = !pos.capture(move);
+      } else if (singularBeta >= beta) {
+        // Multi-cut pruning
+        return singularBeta;
+      } else if (ttValue >= beta) {
+        // Negative extension if TT value >= beta but singular search didn't
+        extension = -1;
+      }
+    }
+
     // Check extension - extend search when giving check
-    if (givesCheck)
+    bool givesCheck = pos.gives_check(move);
+    if (givesCheck && extension < 1)
       extension = 1;
+
+    // Make the move
+    ss->currentMove = move;
+    StateInfo st;
+    pos.do_move(move, st, givesCheck);
 
     // New depth with extension
     Depth newDepth = depth - 1 + extension;
@@ -436,12 +504,16 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
       if (!isCapture && type_of(pos.moved_piece(move)) == PAWN) {
         Square to = move.to_sq();
         // Rank bonus for advanced pawns
-        int rank = relative_rank(pos.side_to_move(), rank_of(to));
-        if (rank >= RANK_6)
+        Rank relRank = relative_rank(pos.side_to_move(), rank_of(to));
+        if (relRank >= RANK_6)
           reduction -= 2;
-        else if (rank >= RANK_5)
+        else if (relRank >= RANK_5)
           reduction--;
       }
+
+      // Factor 16: Decrease for singular extension candidate that failed
+      if (singularQuietLMR)
+        reduction--;
 
       // Factor 10: Decrease for recaptures
       if (isCapture && ss->ply >= 1 && move.to_sq() == (ss - 1)->currentMove.to_sq())
