@@ -97,6 +97,11 @@ void TimeManager::adjust_time(double ratio) {
 
 // Worker constructor
 Worker::Worker(size_t idx) : threadIdx(idx) {
+  // Initialize history tables
+  std::memset(mainHistory, 0, sizeof(mainHistory));
+  std::memset(counterMoves, 0, sizeof(counterMoves));
+  std::memset(captureHistory, 0, sizeof(captureHistory));
+
   for (int i = 0; i < MAX_MOVES; ++i)
     reductions[i] = Reductions[i];
 }
@@ -111,6 +116,12 @@ void Worker::clear() {
   rootMoves.clear();
   rootDepth = 0;
   completedDepth = 0;
+
+  // Clear history tables
+  std::memset(mainHistory, 0, sizeof(mainHistory));
+  std::memset(counterMoves, 0, sizeof(counterMoves));
+  std::memset(captureHistory, 0, sizeof(captureHistory));
+  killers.clear();
 }
 
 // Start searching
@@ -367,6 +378,7 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     }
 
     // Make the move
+    ss->currentMove = move;
     StateInfo st;
     bool givesCheck = pos.gives_check(move);
     pos.do_move(move, st, givesCheck);
@@ -502,10 +514,36 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         }
 
         if (value >= beta) {
-          // Beta cutoff - update killer moves for quiet moves
-          if (!pos.capture(move) && move != ss->killers[0]) {
-            ss->killers[1] = ss->killers[0];
-            ss->killers[0] = move;
+          // Beta cutoff - update statistics for quiet moves
+          if (!pos.capture(move)) {
+            // Update killer moves
+            if (move != ss->killers[0]) {
+              ss->killers[1] = ss->killers[0];
+              ss->killers[0] = move;
+            }
+
+            // Update counter moves (refutation of opponent's previous move)
+            if (ss->ply >= 1 && (ss - 1)->currentMove.is_ok()) {
+              Piece prevPiece = pos.piece_on((ss - 1)->currentMove.to_sq());
+              if (prevPiece != NO_PIECE) {
+                counterMoves[prevPiece][(ss - 1)->currentMove.to_sq()] = move;
+              }
+            }
+
+            // Update main history
+            int bonus = std::min(16 * depth * depth, 1200);
+            Color us = pos.side_to_move();
+            int idx = move.from_sq() * 64 + move.to_sq();
+            int16_t &entry = mainHistory[us][idx];
+            entry += bonus - entry * std::abs(bonus) / 16384;
+          } else {
+            // Update capture history
+            Piece moved = pos.moved_piece(move);
+            Square to = move.to_sq();
+            PieceType captured = type_of(pos.piece_on(to));
+            int bonus = std::min(16 * depth * depth, 1200);
+            int16_t &entry = captureHistory[moved][to][captured];
+            entry += bonus - entry * std::abs(bonus) / 16384;
           }
           break;
         }

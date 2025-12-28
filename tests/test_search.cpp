@@ -285,6 +285,100 @@ bool test_tt_generation() {
 // Search Feature Tests
 //==============================================================================
 
+bool test_killer_moves_in_search() {
+  TestCase tc("KillerMovesInSearch");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Position where a particular move might be a killer
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 5;
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  // After search, there should be a best move
+  EXPECT(tc, !worker.rootMoves.empty());
+  EXPECT(tc, worker.rootMoves[0].pv.size() > 0);
+
+  return tc.passed();
+}
+
+bool test_check_extension() {
+  TestCase tc("CheckExtension");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Position where check extension is important for finding mate
+  // This is a position where superficial search might miss forced mate
+  pos.set("r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+          false, &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 4;
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  // Should find the mate (Qxf7#)
+  EXPECT(tc, !worker.rootMoves.empty());
+  // Score should be very high (mate)
+  EXPECT(tc, worker.rootMoves[0].score > 10000);
+
+  return tc.passed();
+}
+
+bool test_lmr_factors() {
+  TestCase tc("LMRFactors");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // A middle game position where LMR should be active
+  pos.set("r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+          false, &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 6;
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  // Verify search completes with reasonable node count (LMR saves nodes)
+  EXPECT(tc, !worker.rootMoves.empty());
+  // The node count should be less than it would be without LMR
+  // This is a soft test - just verify it completes
+  EXPECT(tc, worker.nodes.load() > 0);
+
+  return tc.passed();
+}
+
 bool test_search_finds_mate() {
   TestCase tc("SearchFindsMate");
 
@@ -425,7 +519,12 @@ bool test_search() {
   test_tt_basic();
   test_tt_generation();
 
-  std::cout << "\n[Search]" << std::endl;
+  std::cout << "\n[Search Features]" << std::endl;
+  test_killer_moves_in_search();
+  test_check_extension();
+  test_lmr_factors();
+
+  std::cout << "\n[Search Correctness]" << std::endl;
   test_search_finds_mate();
   test_search_avoids_blunder();
 
