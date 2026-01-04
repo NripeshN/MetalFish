@@ -167,7 +167,7 @@ MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For si
 - LC0 requires neural network weights (may not build in CI)
 ## 📊 Benchmark Results
 
-*Last updated: 2025-12-28 06:47 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
+*Last updated: 2026-01-04 00:43 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
 
 ### Engine Comparison
 
@@ -193,9 +193,6 @@ MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For si
 - MetalFish uses GPU acceleration via Metal for NNUE evaluation
 - Stockfish is the official build with Apple Silicon optimizations
 - LC0 requires neural network weights (may not build in CI)
-
-
-
 ## License
 
 GPL-3.0 - Same as Stockfish
