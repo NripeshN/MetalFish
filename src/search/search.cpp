@@ -597,10 +597,21 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   Value bestValue = -VALUE_INFINITE;
   Move bestMove = Move::none();
 
-  // Generate moves
+  // Generate moves - at root, use rootMoves; otherwise generate all
   Move moves[MAX_MOVES];
-  Move *end = pos.checkers() ? generate<EVASIONS>(pos, moves)
-                             : generate<NON_EVASIONS>(pos, moves);
+  Move *end;
+  
+  if (rootNode) {
+    // At root, only search moves in rootMoves
+    end = moves;
+    for (const auto &rm : rootMoves) {
+      if (!rm.pv.empty())
+        *end++ = rm.pv[0];
+    }
+  } else {
+    end = pos.checkers() ? generate<EVASIONS>(pos, moves)
+                         : generate<NON_EVASIONS>(pos, moves);
+  }
 
   // Move ordering: TT move first
   if (ttMove != Move::none()) {
@@ -633,7 +644,8 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         continue;
     }
 
-    if (!pos.legal(move))
+    // Root moves are already legal; non-root need legality check
+    if (!rootNode && !pos.legal(move))
       continue;
 
     moveCount++;
@@ -917,16 +929,23 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
 
   // Update root move scores
   if (rootNode) {
-    RootMove &rm = *std::find(rootMoves.begin(), rootMoves.end(),
-                              bestMove ? bestMove : moves[0]);
-    rm.score = bestValue;
-    rm.selDepth = selDepth;
+    // Find the move to update - use bestMove if found, otherwise first root move
+    Move moveToUpdate = bestMove ? bestMove : (rootMoves.empty() ? Move::none() : rootMoves[pvIdx].pv[0]);
+    
+    if (moveToUpdate != Move::none()) {
+      auto it = std::find(rootMoves.begin(), rootMoves.end(), moveToUpdate);
+      if (it != rootMoves.end()) {
+        RootMove &rm = *it;
+        rm.score = bestValue;
+        rm.selDepth = selDepth;
 
-    if (bestMove) {
-      rm.pv.clear();
-      rm.pv.push_back(bestMove);
-      for (int i = 0; ss->pv[i + 1] != Move::none(); ++i)
-        rm.pv.push_back(ss->pv[i + 1]);
+        if (bestMove) {
+          rm.pv.clear();
+          rm.pv.push_back(bestMove);
+          for (int i = 0; ss->pv[i + 1] != Move::none(); ++i)
+            rm.pv.push_back(ss->pv[i + 1]);
+        }
+      }
     }
   }
 
