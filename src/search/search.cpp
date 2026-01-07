@@ -983,8 +983,8 @@ moves_loop: // When in check, search starts here
         pos.non_pawn_material(pos.side_to_move())) {
 
       // Late move pruning: skip quiet moves after enough have been searched
-      if (depth <= 6 && moveCount > (3 + depth * depth) / (2 - improving))
-        continue;
+      // Note: Only skip quiet moves, not captures
+      bool skipQuiets = (depth <= 6 && moveCount > (3 + depth * depth) / (2 - improving));
 
       // Reduced depth for pruning decisions
       int lmrDepth = std::max(
@@ -1006,6 +1006,10 @@ moves_loop: // When in check, search starts here
         if (!pos.see_ge(move, -200 * depth))
           continue;
       } else {
+        // Skip quiet moves if we've searched enough
+        if (skipQuiets)
+          continue;
+          
         // Futility pruning for quiet moves
         if (!givesCheck && lmrDepth < 10 &&
             ss->staticEval + 100 + 150 * lmrDepth <= alpha)
@@ -1202,7 +1206,9 @@ moves_loop: // When in check, search starts here
 
     // Full window search for PV nodes
     if (PvNode && (moveCount == 1 || value > alpha)) {
-      (ss + 1)->pv = nullptr;
+      Move childPv[MAX_PLY + 1];
+      childPv[0] = Move::none();
+      (ss + 1)->pv = childPv;
       value = -search<PV>(pos, ss + 1, -beta, -alpha, newDepth, false);
     }
 
@@ -1414,11 +1420,21 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
   if (ss->inCheck) {
     bestValue = futilityBase = -VALUE_INFINITE;
   } else {
+    // Compute correction value for static eval adjustment
+    Move prevMove = ss->ply >= 1 ? (ss - 1)->currentMove : Move::none();
+    ContinuationCorrectionHistory *contCorr2 =
+        ss->ply >= 2 ? (ss - 2)->continuationCorrectionHistory : nullptr;
+    ContinuationCorrectionHistory *contCorr4 =
+        ss->ply >= 4 ? (ss - 4)->continuationCorrectionHistory : nullptr;
+    int correctionValue = compute_full_correction_value(
+        *correctionHistory, contCorr2, contCorr4, pos, prevMove);
+    
     if (ttHit) {
       unadjustedStaticEval = tte->eval();
       if (unadjustedStaticEval == VALUE_NONE)
         unadjustedStaticEval = evaluate(pos);
-      ss->staticEval = bestValue = unadjustedStaticEval;
+      ss->staticEval = bestValue = 
+          to_corrected_static_eval(unadjustedStaticEval, correctionValue);
       
       // ttValue can be used as a better position evaluation
       if (ttValue != VALUE_NONE && !is_decisive(ttValue) &&
@@ -1426,7 +1442,8 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
         bestValue = ttValue;
     } else {
       unadjustedStaticEval = evaluate(pos);
-      ss->staticEval = bestValue = unadjustedStaticEval;
+      ss->staticEval = bestValue = 
+          to_corrected_static_eval(unadjustedStaticEval, correctionValue);
     }
 
     // Stand pat
@@ -1498,6 +1515,10 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
   // Checkmate detection
   if (ss->inCheck && bestValue == -VALUE_INFINITE)
     return mated_in(ss->ply);
+
+  // Adjust bestValue for fail high
+  if (!is_decisive(bestValue) && bestValue > beta)
+    bestValue = (bestValue + beta) / 2;
 
   // Update TT
   tte->save(posKey, value_to_tt(bestValue, ss->ply), pvHit,
