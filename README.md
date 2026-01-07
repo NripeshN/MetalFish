@@ -61,11 +61,15 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 
 - **Transposition Table** - With aging, generation tracking, and rule50 handling
 - **Proper TT Value Handling** - value_to_tt/value_from_tt with rule50 adjustment
+- **TT Cutoff with History Bonus** - Update quiet histories on TT hit
 - **Aspiration Windows** - With meanSquaredScore-based delta sizing
 - **Best Move Stability** - For time management decisions
 - **Dynamic Time Management** - Adjust based on stability and score changes
 - **Effort Tracking** - Nodes per root move for time allocation
-- **Hindsight Depth Adjustment** - searchAgainCounter for re-searching at same depth
+- **Hindsight Depth Adjustment** - priorReduction-based depth changes
+- **opponentWorsening Flag** - For improved pruning decisions
+- **allNode Flag** - For LMR scaling on ALL nodes
+- **evalDiff History Update** - Static eval difference improves quiet ordering
 - **Iterative Deepening** - Progressive deepening with info output
 - **Quiescence Search** - Tactical resolution at leaf nodes
 - **MultiPV** - Multiple principal variation search
