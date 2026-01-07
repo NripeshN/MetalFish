@@ -10,7 +10,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 
 ## Features
 
-### Search (50+ Stockfish Features Implemented)
+### Search (60+ Stockfish Features Implemented)
 
 #### Move Ordering
 
@@ -27,12 +27,13 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 #### Search Extensions
 
 - **Check Extension** - Extend when giving check
-- **Singular Extension** - Extend clearly best moves (with double extension)
+- **Singular Extension** - Extend clearly best moves (with double and triple extension)
 - **Shuffling Detection** - Avoid over-extending in repetitive positions
 - **Multi-Cut Pruning** - Within singular extension framework
 - **Passed Pawn Extension** - Extend for pawns reaching 7th rank
 - **Recapture Extension** - Via LMR reduction decrease
-- **Upcoming Repetition Detection** - Proactive repetition avoidance
+- **Upcoming Repetition Detection** - Proactive repetition avoidance (search and qsearch)
+- **Negative Extensions** - Reduce ttMove when not singular
 
 #### Pruning Techniques
 
@@ -62,6 +63,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Transposition Table** - With aging, generation tracking, and rule50 handling
 - **Proper TT Value Handling** - value_to_tt/value_from_tt with rule50 adjustment
 - **TT Cutoff with History Bonus** - Update quiet histories on TT hit
+- **Graph History Interaction Workaround** - Avoid TT cutoffs at high rule50
 - **Aspiration Windows** - With meanSquaredScore-based delta sizing
 - **Best Move Stability** - For time management decisions
 - **Dynamic Time Management** - Adjust based on stability and score changes
@@ -69,16 +71,22 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Hindsight Depth Adjustment** - priorReduction-based depth changes
 - **opponentWorsening Flag** - For improved pruning decisions
 - **allNode Flag** - For LMR scaling on ALL nodes
-- **evalDiff History Update** - Static eval difference improves quiet ordering
+- **evalDiff History Update** - Static eval difference improves quiet ordering (with pawn history)
 - **Iterative Deepening** - Progressive deepening with info output
-- **Quiescence Search** - Tactical resolution at leaf nodes
+- **Quiescence Search** - Tactical resolution at leaf nodes with repetition check
 - **MultiPV** - Multiple principal variation search
 - **Pondering** - Think on opponent's time
 - **CutoffCnt Tracking** - For LMR adjustment based on child node behavior
 - **update_all_stats** - Comprehensive history updates matching Stockfish
+- **Fail-Low Countermove Bonuses** - For quiet and capture countermoves
+- **ttMoveHistory Updates** - Track TT move success for singular extension
+- **ttPv Propagation** - Propagate PV status on fail low
+- **Depth Reduction After Alpha Improvement** - Reduce depth after finding good move
+- **bestValue Adjustment** - For fail high cases
 - **Lazy SMP** - Multi-threaded parallel search with per-thread Position copies
 - **Skill Level** - Playing strength handicap (0-20, Elo 1320-3190)
 - **statScore** - History-based LMR adjustment
+- **Post-LMR Continuation History Updates** - Update history after LMR re-search
 - **Syzygy Tablebases** - Endgame tablebase probing interface
 
 ### GPU Acceleration (Metal)
@@ -178,7 +186,7 @@ _Last updated: 2025-01-07_
 | --------------- | ---------------------- |
 | Perft(6) Nodes  | 119,060,324            |
 | All Perft Tests | 30/30 Passing          |
-| Unit Tests      | 28/28 Search, 5/5 Core |
+| Unit Tests      | 46/46 Search, 5/5 Core |
 
 ### Notes
 
