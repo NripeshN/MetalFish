@@ -161,6 +161,8 @@ private:
   Value qsearch(Position &pos, Stack *ss, Value alpha, Value beta);
 
   Value evaluate(const Position &pos);
+  
+  Depth reduction(bool improving, Depth depth, int moveCount, int delta) const;
 
   void update_quiet_stats(Stack *ss, Move move, int bonus);
   void update_capture_stats(Piece piece, Square to, PieceType captured,

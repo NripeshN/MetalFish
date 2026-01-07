@@ -119,7 +119,7 @@ Worker::Worker(size_t idx) : threadIdx(idx) {
   ttMoveHistory = 0;
 
   for (int i = 0; i < MAX_MOVES; ++i)
-    reductions[i] = int(19.41 * std::log(i + 1));
+    reductions[i] = int(2747 / 128.0 * std::log(i + 1));
 
   // Initialize time management tracking
   iterValue.fill(VALUE_ZERO);
@@ -1386,6 +1386,12 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
   if (ss->ply >= MAX_PLY)
     return pos.checkers() ? value_draw(nodes) : evaluate(pos);
 
+  // Initialize
+  ss->inCheck = pos.checkers();
+  Move bestMove = Move::none();
+  Value bestValue;
+  int moveCount = 0;
+
   // TT probe
   Key posKey = pos.key();
   bool ttHit;
@@ -1393,58 +1399,83 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
   Value ttValue = ttHit
                       ? value_from_tt(tte->value(), ss->ply, pos.rule50_count())
                       : VALUE_NONE;
-  Move ttMove = ttHit ? tte->move() : Move::none();
-  (void)ttMove; // Unused for now, could be used for move ordering in qsearch
+  bool pvHit = ttHit && tte->is_pv();
 
-  // TT cutoff
-  if (!PvNode && ttHit && tte->depth() >= DEPTH_QS && pos.rule50_count() < 90) {
-    if (ttValue >= beta ? tte->bound() & BOUND_LOWER
-                        : tte->bound() & BOUND_UPPER)
-      return ttValue;
-  }
+  // TT cutoff at non-PV nodes
+  if (!PvNode && ttHit && tte->depth() >= DEPTH_QS &&
+      ttValue != VALUE_NONE &&
+      (tte->bound() & (ttValue >= beta ? BOUND_LOWER : BOUND_UPPER)))
+    return ttValue;
 
   // Static evaluation
-  Value bestValue;
-
-  if (pos.checkers()) {
-    ss->staticEval = VALUE_NONE;
-    bestValue = -VALUE_INFINITE;
+  Value unadjustedStaticEval = VALUE_NONE;
+  Value futilityBase;
+  
+  if (ss->inCheck) {
+    bestValue = futilityBase = -VALUE_INFINITE;
   } else {
     if (ttHit) {
-      ss->staticEval = bestValue = tte->eval();
-      if (bestValue == VALUE_NONE)
-        ss->staticEval = bestValue = evaluate(pos);
+      unadjustedStaticEval = tte->eval();
+      if (unadjustedStaticEval == VALUE_NONE)
+        unadjustedStaticEval = evaluate(pos);
+      ss->staticEval = bestValue = unadjustedStaticEval;
+      
+      // ttValue can be used as a better position evaluation
+      if (ttValue != VALUE_NONE && !is_decisive(ttValue) &&
+          (tte->bound() & (ttValue > bestValue ? BOUND_LOWER : BOUND_UPPER)))
+        bestValue = ttValue;
     } else {
-      ss->staticEval = bestValue = evaluate(pos);
+      unadjustedStaticEval = evaluate(pos);
+      ss->staticEval = bestValue = unadjustedStaticEval;
     }
 
-    if (bestValue >= beta)
+    // Stand pat
+    if (bestValue >= beta) {
+      if (!is_decisive(bestValue))
+        bestValue = (bestValue + beta) / 2;
+      
+      if (!ttHit)
+        tte->save(posKey, value_to_tt(bestValue, ss->ply), false, BOUND_LOWER,
+                  DEPTH_QS, Move::none(), unadjustedStaticEval, TT->generation());
       return bestValue;
+    }
 
     if (bestValue > alpha)
       alpha = bestValue;
+
+    futilityBase = ss->staticEval + 351;
   }
 
   // Generate captures or evasions
   Move moves[MAX_MOVES];
-  Move *end = pos.checkers() ? generate<EVASIONS>(pos, moves)
-                             : generate<CAPTURES>(pos, moves);
+  Move *end = ss->inCheck ? generate<EVASIONS>(pos, moves)
+                          : generate<CAPTURES>(pos, moves);
 
-  Move bestMove = Move::none();
-
-  // Search captures
+  // Search moves
   for (Move *m = moves; m != end; ++m) {
     Move move = *m;
 
     if (!pos.legal(move))
       continue;
 
-    // Futility pruning for captures
-    if (!pos.checkers() && !pos.see_ge(move))
-      continue;
+    bool givesCheck = pos.gives_check(move);
+    moveCount++;
 
+    // Pruning (not in check and not losing)
+    if (bestValue > VALUE_MATED_IN_MAX_PLY && !ss->inCheck) {
+      // Futility pruning
+      if (!givesCheck && move.type_of() != PROMOTION && moveCount > 2)
+        continue;
+      
+      // SEE pruning
+      if (!pos.see_ge(move, -80))
+        continue;
+    }
+
+    // Make the move
     StateInfo st;
-    pos.do_move(move, st);
+    ss->currentMove = move;
+    pos.do_move(move, st, givesCheck);
 
     Value value = -qsearch<nodeType>(pos, ss + 1, -beta, -alpha);
 
@@ -1465,13 +1496,13 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
   }
 
   // Checkmate detection
-  if (pos.checkers() && bestValue == -VALUE_INFINITE)
+  if (ss->inCheck && bestValue == -VALUE_INFINITE)
     return mated_in(ss->ply);
 
-  // Update TT with adjusted value for storage
-  tte->save(posKey, value_to_tt(bestValue, ss->ply), false,
+  // Update TT
+  tte->save(posKey, value_to_tt(bestValue, ss->ply), pvHit,
             bestValue >= beta ? BOUND_LOWER : BOUND_UPPER, DEPTH_QS, bestMove,
-            ss->staticEval, TT->generation());
+            unadjustedStaticEval, TT->generation());
 
   return bestValue;
 }
@@ -1494,6 +1525,13 @@ Value Worker::evaluate(const Position &pos) {
   // Guarantee evaluation does not hit tablebase range
   return std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1,
                     VALUE_TB_WIN_IN_MAX_PLY - 1);
+}
+
+// Reduction function matching Stockfish formula
+Depth Worker::reduction(bool improving, Depth depth, int moveCount, int delta) const {
+  int reductionScale = reductions[std::min(depth, MAX_PLY - 1)] * reductions[std::min(moveCount, MAX_MOVES - 1)];
+  int rd = std::max(1, int(rootDelta));
+  return (reductionScale - delta * 608 / rd + !improving * reductionScale * 238 / 512 + 1182) / 1024;
 }
 
 // =============================================================================
