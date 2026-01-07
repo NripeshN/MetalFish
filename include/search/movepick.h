@@ -7,13 +7,7 @@
   MovePicker - Sophisticated move ordering
   ========================================
 
-  Orders moves for optimal alpha-beta pruning efficiency:
-  1. TT move (hash move)
-  2. Good captures (MVV-LVA + SEE)
-  3. Killer moves
-  4. Counter moves
-  5. Quiet moves by history
-  6. Bad captures
+  Orders moves for optimal alpha-beta pruning efficiency.
 */
 
 #pragma once
@@ -21,181 +15,260 @@
 #include "core/movegen.h"
 #include "core/position.h"
 #include "core/types.h"
+#include "search/history.h"
 #include <algorithm>
+#include <limits>
 
 namespace MetalFish {
 
-// Forward declarations for history tables
-template <typename T, int D> class StatsEntry;
-
-// Simple butterfly history (indexed by [color][from*64+to])
-using ButterflyHistory = int16_t[COLOR_NB][SQUARE_NB * SQUARE_NB];
-
-// Capture history: [piece][to][captured_type]
-using CapturePieceToHistory = int16_t[PIECE_NB][SQUARE_NB][PIECE_TYPE_NB];
-
-// Pawn history: indexed by pawn structure hash, [piece][to]
-// Size must be power of 2 for efficient modulo operation
-// Reduced size for memory efficiency (128 * 16 * 64 * 2 = 256KB)
-constexpr int PAWN_HISTORY_SIZE = 128;
-using PawnHistory = int16_t[PAWN_HISTORY_SIZE][PIECE_NB][SQUARE_NB];
-
-// Correction history: adjusts static eval based on search results
-// Indexed by pawn structure hash, per side
-constexpr int CORRECTION_HISTORY_SIZE = 16384;
-constexpr int CORRECTION_HISTORY_LIMIT = 1024;
-using CorrectionHistory = int16_t[CORRECTION_HISTORY_SIZE][COLOR_NB];
-
-// Get correction history index from pawn key
-inline int correction_history_index(Key pawnKey) {
-  return pawnKey & (CORRECTION_HISTORY_SIZE - 1);
-}
-
-// Low ply history: extra weight for moves at low search depths (near root)
-// Only applies to first few plies
-constexpr int LOW_PLY_HISTORY_SIZE = 5;
-using LowPlyHistory = int16_t[LOW_PLY_HISTORY_SIZE][SQUARE_NB * SQUARE_NB];
-
-// Get pawn history index from position's pawn key
-inline int pawn_history_index(const Position &pos) {
-  return pos.pawn_key() & (PAWN_HISTORY_SIZE - 1);
-}
-
-// Piece to history for continuation
-using PieceToHistory = int16_t[PIECE_NB][SQUARE_NB];
-
-// Killer moves structure
-struct KillerMoves {
-  static constexpr int MAX_PLY = 128;
-  static constexpr int NUM_KILLERS = 2;
-
-  Move killers[MAX_PLY][NUM_KILLERS];
-
-  KillerMoves() { clear(); }
-
-  void clear() {
-    for (int i = 0; i < MAX_PLY; ++i)
-      for (int j = 0; j < NUM_KILLERS; ++j)
-        killers[i][j] = Move::none();
-  }
-
-  void update(int ply, Move move) {
-    if (ply >= MAX_PLY)
-      return;
-    if (killers[ply][0] != move) {
-      killers[ply][1] = killers[ply][0];
-      killers[ply][0] = move;
-    }
-  }
-
-  bool is_killer(int ply, Move move) const {
-    if (ply >= MAX_PLY)
-      return false;
-    return killers[ply][0] == move || killers[ply][1] == move;
-  }
-};
-
-// Counter moves: [piece][to]
-using CounterMoveHistory = Move[PIECE_NB][SQUARE_NB];
-
 // MovePicker stages
 enum Stages {
-  // Main search
-  MAIN_TT,
-  CAPTURE_INIT,
-  GOOD_CAPTURE,
-  QUIET_INIT,
-  GOOD_QUIET,
-  BAD_CAPTURE,
-  BAD_QUIET,
-
-  // Evasion search
-  EVASION_TT,
-  EVASION_INIT,
-  EVASION,
-
-  // Probcut
-  PROBCUT_TT,
-  PROBCUT_INIT,
-  PROBCUT,
-
-  // Quiescence search
-  QSEARCH_TT,
-  QCAPTURE_INIT,
-  QCAPTURE
+  MAIN_TT, CAPTURE_INIT, GOOD_CAPTURE, QUIET_INIT, GOOD_QUIET, BAD_CAPTURE, BAD_QUIET,
+  EVASION_TT, EVASION_INIT, EVASION,
+  PROBCUT_TT, PROBCUT_INIT, PROBCUT,
+  QSEARCH_TT, QCAPTURE_INIT, QCAPTURE
 };
+
+// Partial insertion sort
+inline void partial_insertion_sort(ExtMove *begin, ExtMove *end, int limit) {
+  for (ExtMove *sortedEnd = begin, *p = begin + 1; p < end; ++p) {
+    if (p->value >= limit) {
+      ExtMove tmp = *p, *q;
+      *p = *++sortedEnd;
+      for (q = sortedEnd; q != begin && (q - 1)->value < tmp.value; --q)
+        *q = *(q - 1);
+      *q = tmp;
+    }
+  }
+}
 
 class MovePicker {
 public:
   // Constructor for main search
-  MovePicker(const Position &p, Move ttm, int depth, const ButterflyHistory *mh,
-             const KillerMoves *km, const CounterMoveHistory *cmh,
-             const CapturePieceToHistory *cph, const PieceToHistory **ch,
-             int ply);
+  MovePicker(const Position &p, Move ttm, Depth d,
+             const ButterflyHistory *mh, const KillerMoves *km,
+             const CounterMoveHistory *cmh, const CapturePieceToHistory *cph,
+             const PieceToHistory **ch, int pl);
 
-  // Constructor for quiescence search
-  MovePicker(const Position &p, Move ttm, int depth,
+  // Constructor for quiescence/probcut
+  MovePicker(const Position &p, Move ttm, Depth d,
              const CapturePieceToHistory *cph);
 
-  // Constructor for probcut
-  MovePicker(const Position &p, Move ttm, int threshold,
-             const CapturePieceToHistory *cph, bool probcut);
-
-  // Get next move
   Move next_move();
-
-  // Skip remaining quiet moves
   void skip_quiet_moves() { skipQuiets = true; }
 
 private:
-  // Generate moves into internal array
-  void generate_moves(GenType type);
-
-  // Score moves for ordering
-  template <GenType> void score();
-
-  // Select best remaining move
+  template <GenType Type> void score();
   ExtMove *select_best(ExtMove *begin, ExtMove *end);
 
-  // Position reference
   const Position &pos;
-
-  // History tables
   const ButterflyHistory *mainHistory;
   const KillerMoves *killers;
   const CounterMoveHistory *counterMoves;
   const CapturePieceToHistory *captureHistory;
   const PieceToHistory *const *continuationHistory;
 
-  // Move lists
   ExtMove moves[MAX_MOVES];
-  ExtMove *cur;
-  ExtMove *endMoves;
-  ExtMove *endBadCaptures;
+  ExtMove *cur, *endMoves, *endBadCaptures;
 
-  // State
   Move ttMove;
-  int depth;
+  Depth depth;
   int ply;
   int threshold;
-  Stages stage;
+  int stage;
   bool skipQuiets = false;
 };
 
-// Helper to check if a move is pseudo-legal
-inline bool is_pseudo_legal(const Position &pos, Move m) {
-  if (!m.is_ok())
-    return false;
+// Inline implementations
+inline MovePicker::MovePicker(const Position &p, Move ttm, Depth d,
+                              const ButterflyHistory *mh, const KillerMoves *km,
+                              const CounterMoveHistory *cmh, const CapturePieceToHistory *cph,
+                              const PieceToHistory **ch, int pl)
+    : pos(p), mainHistory(mh), killers(km), counterMoves(cmh),
+      captureHistory(cph), continuationHistory(ch), ttMove(ttm), depth(d), ply(pl) {
+  cur = endMoves = endBadCaptures = moves;
+  if (pos.checkers())
+    stage = EVASION_TT + !(ttm.is_ok() && pos.pseudo_legal(ttm));
+  else
+    stage = (d > 0 ? MAIN_TT : QSEARCH_TT) + !(ttm.is_ok() && pos.pseudo_legal(ttm));
+}
 
+inline MovePicker::MovePicker(const Position &p, Move ttm, Depth d,
+                              const CapturePieceToHistory *cph)
+    : pos(p), mainHistory(nullptr), killers(nullptr), counterMoves(nullptr),
+      captureHistory(cph), continuationHistory(nullptr), ttMove(ttm), depth(d), ply(0) {
+  cur = endMoves = endBadCaptures = moves;
+  if (pos.checkers())
+    stage = EVASION_TT + !(ttm.is_ok() && pos.pseudo_legal(ttm));
+  else
+    stage = QSEARCH_TT + !(ttm.is_ok() && pos.pseudo_legal(ttm));
+}
+
+template <> inline void MovePicker::score<CAPTURES>() {
+  for (ExtMove *it = cur; it != endMoves; ++it) {
+    Move m = *it;
+    Square to = m.to_sq();
+    Piece captured = pos.piece_on(to);
+    PieceType capturedType = (captured != NO_PIECE) ? type_of(captured) : PAWN;
+    Piece moved = pos.moved_piece(m);
+    it->value = int(PieceValue[captured]) * 6 - int(type_of(moved));
+    if (captureHistory)
+      it->value += (*captureHistory)[moved][to][capturedType] / 8;
+  }
+}
+
+template <> inline void MovePicker::score<QUIETS>() {
   Color us = pos.side_to_move();
-  Square from = m.from_sq();
+  for (ExtMove *it = cur; it != endMoves; ++it) {
+    Move m = *it;
+    Square to = m.to_sq();
+    Piece moved = pos.moved_piece(m);
+    int value = 0;
+    if (mainHistory)
+      value = (*mainHistory)[us][m.from_sq() * 64 + to];
+    if (continuationHistory) {
+      for (int i = 0; i < 4 && continuationHistory[i]; ++i)
+        value += (*continuationHistory[i])[moved][to];
+    }
+    if (killers && killers->is_killer(ply, m))
+      value += 10000;
+    it->value = value;
+  }
+}
 
-  Piece pc = pos.piece_on(from);
-  if (pc == NO_PIECE || color_of(pc) != us)
-    return false;
+template <> inline void MovePicker::score<EVASIONS>() {
+  for (ExtMove *it = cur; it != endMoves; ++it) {
+    Move m = *it;
+    if (pos.capture(m)) {
+      Piece captured = pos.piece_on(m.to_sq());
+      it->value = int(PieceValue[captured]) + (1 << 28);
+    } else {
+      Color us = pos.side_to_move();
+      it->value = mainHistory ? (*mainHistory)[us][m.from_sq() * 64 + m.to_sq()] : 0;
+    }
+  }
+}
 
-  // Basic validity checks - use pos.pseudo_legal() for full check
-  return true;
+inline ExtMove *MovePicker::select_best(ExtMove *begin, ExtMove *end) {
+  std::swap(*begin, *std::max_element(begin, end));
+  return begin;
+}
+
+inline Move MovePicker::next_move() {
+top:
+  switch (stage) {
+  case MAIN_TT: case EVASION_TT: case PROBCUT_TT: case QSEARCH_TT:
+    ++stage;
+    return ttMove;
+
+  case CAPTURE_INIT: case PROBCUT_INIT: case QCAPTURE_INIT: {
+    cur = endBadCaptures = moves;
+    Move tmp[MAX_MOVES];
+    Move *end = generate<CAPTURES>(pos, tmp);
+    for (Move *m = tmp; m != end; ++m) {
+      endMoves->operator=(*m);
+      endMoves->value = 0;
+      ++endMoves;
+    }
+    score<CAPTURES>();
+    partial_insertion_sort(cur, endMoves, -3000);
+    ++stage;
+    goto top;
+  }
+
+  case GOOD_CAPTURE:
+    while (cur < endMoves) {
+      ExtMove *best = select_best(cur++, endMoves);
+      if (*best != ttMove) {
+        if (pos.see_ge(*best, -best->value / 16))
+          return *best;
+        *endBadCaptures++ = *best;
+      }
+    }
+    ++stage;
+    [[fallthrough]];
+
+  case QUIET_INIT:
+    if (!skipQuiets) {
+      cur = endBadCaptures;
+      endMoves = endBadCaptures;
+      Move tmp[MAX_MOVES];
+      Move *end = generate<QUIETS>(pos, tmp);
+      for (Move *m = tmp; m != end; ++m) {
+        endMoves->operator=(*m);
+        endMoves->value = 0;
+        ++endMoves;
+      }
+      score<QUIETS>();
+      partial_insertion_sort(cur, endMoves, -2000);
+    }
+    ++stage;
+    [[fallthrough]];
+
+  case GOOD_QUIET:
+    if (!skipQuiets) {
+      while (cur < endMoves) {
+        Move m = *(cur++);
+        if (m != ttMove)
+          return m;
+      }
+    }
+    ++stage;
+    [[fallthrough]];
+
+  case BAD_CAPTURE:
+    cur = moves;
+    while (cur < endBadCaptures) {
+      Move m = *(cur++);
+      if (m != ttMove)
+        return m;
+    }
+    ++stage;
+    [[fallthrough]];
+
+  case BAD_QUIET:
+    return Move::none();
+
+  case EVASION_INIT: {
+    cur = moves;
+    endMoves = moves;
+    Move tmp[MAX_MOVES];
+    Move *end = generate<EVASIONS>(pos, tmp);
+    for (Move *m = tmp; m != end; ++m) {
+      endMoves->operator=(*m);
+      endMoves->value = 0;
+      ++endMoves;
+    }
+    score<EVASIONS>();
+    ++stage;
+    [[fallthrough]];
+  }
+
+  case EVASION:
+    while (cur < endMoves) {
+      Move m = *select_best(cur++, endMoves);
+      if (m != ttMove)
+        return m;
+    }
+    return Move::none();
+
+  case PROBCUT:
+    while (cur < endMoves) {
+      Move m = *select_best(cur++, endMoves);
+      if (m != ttMove && pos.see_ge(m, threshold))
+        return m;
+    }
+    return Move::none();
+
+  case QCAPTURE:
+    while (cur < endMoves) {
+      Move m = *select_best(cur++, endMoves);
+      if (m != ttMove)
+        return m;
+    }
+    return Move::none();
+  }
+  return Move::none();
 }
 
 } // namespace MetalFish

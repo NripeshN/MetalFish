@@ -10,7 +10,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 
 ## Features
 
-### Search (32+ Stockfish Features Implemented)
+### Search (40+ Stockfish Features Implemented)
 
 #### Move Ordering
 - **ButterflyHistory** - Quiet move success tracking by from/to squares
@@ -19,35 +19,40 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **CapturePieceToHistory** - Capture move success tracking
 - **PawnHistory** - Pawn structure-aware history (indexed by pawn key)
 - **LowPlyHistory** - Extra weight for moves near root (first 5 plies)
-- **ContinuationHistory** - Move sequence success (1, 2, 4, 6 ply lookback)
+- **ContinuationHistory** - Move sequence success with Stockfish weights (1133, 683, 312, 582, 149, 474 for plies 1-6)
+- **Staged Move Generation** - Efficient MovePicker with capture/quiet phases
 
 #### Search Extensions
 - **Check Extension** - Extend when giving check
-- **Singular Extension** - Extend clearly best moves
+- **Singular Extension** - Extend clearly best moves (with double extension)
+- **Shuffling Detection** - Avoid over-extending in repetitive positions
 - **Multi-Cut Pruning** - Within singular extension framework
 - **Passed Pawn Extension** - Extend for pawns reaching 7th rank
 - **Recapture Extension** - Via LMR reduction decrease
 - **Upcoming Repetition Detection** - Proactive repetition avoidance
 
 #### Pruning Techniques
-- **Null Move Pruning** - With verification search
+- **Null Move Pruning** - With verification search at high depths
 - **Futility Pruning** - For quiet moves and captures
 - **SEE-based Pruning** - Static Exchange Evaluation pruning
 - **Late Move Pruning (LMP)** - Skip late quiet moves at shallow depths
-- **Late Move Reductions (LMR)** - 14+ adjustment factors
+- **Late Move Reductions (LMR)** - 15+ adjustment factors including cutoffCnt
 - **ProbCut** - Prune with shallow capture search
+- **Razoring** - Drop to qsearch for low eval positions
 - **Mate Distance Pruning** - Prune when short mate found
 - **Internal Iterative Reductions (IIR)** - Reduce depth without TT move
 - **History-based Pruning** - Skip moves with very negative history
 
 #### Evaluation
 - **NNUE Support** - Stockfish .nnue file loading with GPU acceleration
+- **Classical Evaluation** - Material + piece-square tables fallback
 - **Rule50 Dampening** - Linear eval reduction as 50-move rule approaches
 - **Correction History** - Adjust static eval based on search results
 - **Draw Randomization** - Prevent 3-fold repetition blindness
 
 #### Search Infrastructure
-- **Transposition Table** - With aging and generation tracking
+- **Transposition Table** - With aging, generation tracking, and rule50 handling
+- **Proper TT Value Handling** - value_to_tt/value_from_tt with rule50 adjustment
 - **Aspiration Windows** - With averaging and fail-high tracking
 - **Best Move Stability** - For time management decisions
 - **Dynamic Time Management** - Adjust based on stability and score changes
@@ -55,6 +60,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Quiescence Search** - Tactical resolution at leaf nodes
 - **MultiPV** - Multiple principal variation search
 - **Pondering** - Think on opponent's time
+- **CutoffCnt Tracking** - For LMR adjustment based on child node behavior
 - **Thread Pool** - Infrastructure for multi-threaded search
 - **Syzygy Tablebases** - Endgame tablebase probing interface
 
@@ -62,13 +68,16 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - GPU-accelerated batch position evaluation
 - Metal compute shaders for NNUE forward pass
 - **GPU incremental accumulator updates** - Efficient NNUE updates
+- GPU move scoring kernel (MVV-LVA + history)
+- GPU SEE calculation kernel
 - Unified memory (zero-copy) on Apple Silicon
 - GPU-accelerated move generation helpers
-- GPU-accelerated SEE calculation
+- GPU perft for verification
 
 ### Move Generation
 - Magic bitboards for sliding pieces
 - Legal move generation with pin detection
+- Staged move generation (captures, killers, quiets)
 - Perft verification (all standard positions pass)
 
 ## Not Yet Implemented (Major Stockfish Features)
@@ -76,6 +85,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Lazy SMP** - Multi-threaded parallel search (infrastructure ready)
 - **Optimism Blending** - Material-scaled optimism in eval
 - **Full Syzygy TB Loading** - Currently interface only, file loading TBD
+- **Skill Level** - Playing strength handicap
 
 ## Requirements
 

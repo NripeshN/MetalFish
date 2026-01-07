@@ -14,7 +14,7 @@
 
 #include "core/position.h"
 #include "core/types.h"
-#include "search/movepick.h" // For history tables
+#include "search/history.h"
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -38,7 +38,6 @@ struct Stack {
   int ply;
   Move currentMove;
   Move excludedMove;
-  Move killers[2];
   Value staticEval;
   int statScore;
   int moveCount;
@@ -46,7 +45,9 @@ struct Stack {
   bool ttPv;
   bool ttHit;
   int cutoffCnt;
-  PieceToHistory *continuationHistory; // For continuation heuristic
+  int reduction;
+  PieceToHistory *continuationHistory;
+  ContinuationCorrectionHistory *continuationCorrectionHistory;
 };
 
 // RootMove stores information about root moves
@@ -58,13 +59,15 @@ struct RootMove {
     return m.score != score ? m.score < score : m.previousScore < previousScore;
   }
 
+  uint64_t effort = 0;
   Value score = -VALUE_INFINITE;
   Value previousScore = -VALUE_INFINITE;
   Value averageScore = -VALUE_INFINITE;
+  Value uciScore = -VALUE_INFINITE;
+  bool scoreLowerbound = false;
+  bool scoreUpperbound = false;
   int selDepth = 0;
   std::vector<Move> pv;
-
-  // Tablebase information
   int tbRank = 0;
   Value tbScore = VALUE_ZERO;
 };
@@ -104,11 +107,9 @@ inline TimePoint now() {
 class TimeManager {
 public:
   void init(const LimitsType &limits, Color us, int ply);
-
   TimePoint optimum() const { return optimumTime; }
   TimePoint maximum() const { return maximumTime; }
   TimePoint elapsed() const { return now() - startTime; }
-
   void adjust_time(double ratio);
 
 private:
@@ -124,30 +125,28 @@ public:
   ~Worker();
 
   void clear();
-  void start_searching(Position &pos, const LimitsType &limits,
-                       StateListPtr &states);
+  void start_searching(Position &pos, const LimitsType &limits, StateListPtr &states);
   void wait_for_search_finished();
-
   bool is_main_thread() const { return threadIdx == 0; }
 
-  // Search statistics
   std::atomic<uint64_t> nodes{0};
   std::atomic<uint64_t> tbHits{0};
+  std::atomic<double> bestMoveChanges{0};
 
   int selDepth = 0;
   int nmpMinPly = 0;
-  int pvIdx = 0;  // Current MultiPV index being searched
+  int pvIdx = 0;
+  int pvLast = 0;
 
   RootMoves rootMoves;
   Depth rootDepth;
   Depth completedDepth;
+  Value rootDelta = VALUE_INFINITE;
 
-  // Search state
   Position *rootPos;
   LimitsType limits;
   StateListPtr *states;
 
-  // Thread control
   std::atomic<bool> searching{false};
   std::atomic<bool> stopRequested{false};
 
@@ -155,38 +154,33 @@ private:
   void iterative_deepening();
 
   template <NodeType nodeType>
-  Value search(Position &pos, Stack *ss, Value alpha, Value beta, Depth depth,
-               bool cutNode);
+  Value search(Position &pos, Stack *ss, Value alpha, Value beta, Depth depth, bool cutNode);
 
   template <NodeType nodeType>
   Value qsearch(Position &pos, Stack *ss, Value alpha, Value beta);
 
   Value evaluate(const Position &pos);
 
-  // Update history on beta cutoff
   void update_quiet_stats(Stack *ss, Move move, int bonus);
-  void update_capture_stats(Piece piece, Square to, PieceType captured,
-                            int bonus);
+  void update_capture_stats(Piece piece, Square to, PieceType captured, int bonus);
+  void update_continuation_histories(Stack *ss, Piece pc, Square to, int bonus);
 
   size_t threadIdx;
   TimeManager timeManager;
 
-  // Reductions table
   int reductions[MAX_MOVES];
 
-  // History tables for move ordering
+  // History tables
   ButterflyHistory mainHistory;
-  KillerMoves killers;
-  CounterMoveHistory counterMoves;
+  LowPlyHistory lowPlyHistory;
   CapturePieceToHistory captureHistory;
   PawnHistory pawnHistory;
   CorrectionHistory correctionHistory;
-
-  // Continuation history: indexed by [piece][to], for tracking move sequences
   PieceToHistory continuationHistoryTable[PIECE_NB][SQUARE_NB];
-
-  // Low ply history: extra weight for moves near root
-  LowPlyHistory lowPlyHistory;
+  ContinuationCorrectionHistory continuationCorrectionHistory[PIECE_NB][SQUARE_NB];
+  TTMoveHistory ttMoveHistory;
+  KillerMoves killers;
+  CounterMoveHistory counterMoves;
 };
 
 // Global search control
@@ -197,20 +191,42 @@ extern TranspositionTable *TT;
 void init();
 void clear();
 
-// Thread management
 void set_thread_count(size_t count);
 size_t thread_count();
 Worker *main_thread();
 Worker *best_thread();
 uint64_t total_nodes();
 
-// Search control
-void start_search(Position &pos, const LimitsType &limits,
-                  StateListPtr &states);
+void start_search(Position &pos, const LimitsType &limits, StateListPtr &states);
 void stop_search();
 void wait_for_search();
 void clear_threads();
 
-} // namespace Search
+// Helper functions
+inline Value value_to_tt(Value v, int ply) {
+  return v >= VALUE_TB_WIN_IN_MAX_PLY  ? v + ply
+       : v <= VALUE_TB_LOSS_IN_MAX_PLY ? v - ply
+       : v;
+}
 
+inline Value value_from_tt(Value v, int ply, int r50c) {
+  if (v == VALUE_NONE) return VALUE_NONE;
+  if (v >= VALUE_TB_WIN_IN_MAX_PLY) {
+    if (v >= VALUE_MATE_IN_MAX_PLY && VALUE_MATE - v > 100 - r50c)
+      return VALUE_TB_WIN_IN_MAX_PLY - 1;
+    if (VALUE_TB - v > 100 - r50c)
+      return VALUE_TB_WIN_IN_MAX_PLY - 1;
+    return v - ply;
+  }
+  if (v <= VALUE_TB_LOSS_IN_MAX_PLY) {
+    if (v <= VALUE_MATED_IN_MAX_PLY && VALUE_MATE + v > 100 - r50c)
+      return VALUE_TB_LOSS_IN_MAX_PLY + 1;
+    if (VALUE_TB + v > 100 - r50c)
+      return VALUE_TB_LOSS_IN_MAX_PLY + 1;
+    return v + ply;
+  }
+  return v;
+}
+
+} // namespace Search
 } // namespace MetalFish
