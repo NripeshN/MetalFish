@@ -67,7 +67,9 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Pondering** - Think on opponent's time
 - **CutoffCnt Tracking** - For LMR adjustment based on child node behavior
 - **update_all_stats** - Comprehensive history updates matching Stockfish
-- **Thread Pool** - Infrastructure for multi-threaded search
+- **Lazy SMP** - Multi-threaded parallel search with per-thread Position copies
+- **Skill Level** - Playing strength handicap (0-20, Elo 1320-3190)
+- **statScore** - History-based LMR adjustment
 - **Syzygy Tablebases** - Endgame tablebase probing interface
 
 ### GPU Acceleration (Metal)
@@ -88,9 +90,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 
 ## Not Yet Implemented (Major Stockfish Features)
 
-- **Lazy SMP** - Multi-threaded parallel search (infrastructure ready)
 - **Full Syzygy TB Loading** - Currently interface only, file loading TBD
-- **Skill Level** - Playing strength handicap
 
 ## Requirements
 
