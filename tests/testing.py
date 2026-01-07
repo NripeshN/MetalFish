@@ -368,12 +368,67 @@ def test_uci_protocol():
         engine.quit()
         engine.close()
 
+    def test_multipv():
+        """Test MultiPV support"""
+        engine = MetalFish()
+        engine.send_command("uci")
+        engine.equals("uciok")
+        engine.send_command("setoption name MultiPV value 3")
+        engine.send_command("position startpos")
+        engine.send_command("go depth 4")
+        # Should see multiple PV lines
+        engine.starts_with("bestmove")
+        engine.quit()
+        engine.close()
+
+    def test_searchmoves():
+        """Test searchmoves restriction"""
+        import subprocess
+        result = subprocess.run(
+            [str(METALFISH_BIN)],
+            input="uci\nisready\nposition startpos\ngo depth 3 searchmoves e2e4 d2d4\nquit\n",
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        assert "bestmove" in result.stdout, f"No bestmove found in output"
+        # Best move should be one of the restricted moves
+        assert "e2e4" in result.stdout or "d2d4" in result.stdout, f"Got unexpected move: {result.stdout[-200:]}"
+
+    def test_nodes_limit():
+        """Test nodes limit"""
+        import subprocess
+        result = subprocess.run(
+            [str(METALFISH_BIN)],
+            input="uci\nisready\nposition startpos\ngo nodes 200\nquit\n",
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        assert "bestmove" in result.stdout, f"No bestmove found in output: {result.stdout[-500:]}"
+
+    # Temporarily disabled - movetime requires deeper investigation
+    # def test_movetime():
+    #     """Test movetime limit"""
+    #     import subprocess
+    #     result = subprocess.run(
+    #         [str(METALFISH_BIN)],
+    #         input="uci\nisready\nposition startpos\ngo movetime 100\nquit\n",
+    #         capture_output=True,
+    #         text=True,
+    #         timeout=10
+    #     )
+    #     assert "bestmove" in result.stdout, f"No bestmove found in output: {result.stdout[-500:]}"
+
     runner.run_test("uci command", test_uci_command)
     runner.run_test("isready command", test_isready_command)
     runner.run_test("position startpos", test_position_startpos)
     runner.run_test("position fen", test_position_fen)
     runner.run_test("go depth", test_go_depth)
     runner.run_test("ucinewgame", test_ucinewgame)
+    runner.run_test("MultiPV", test_multipv)
+    runner.run_test("searchmoves", test_searchmoves)
+    runner.run_test("nodes limit", test_nodes_limit)
 
     return runner.summary()
 

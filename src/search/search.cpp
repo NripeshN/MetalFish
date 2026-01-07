@@ -431,6 +431,19 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   // Node count
   nodes++;
 
+  // Check node limit and time limit every 64 nodes for efficiency
+  if ((nodes.load() & 63) == 0) {
+    if (limits.nodes && nodes.load() >= limits.nodes) {
+      stopRequested = true;
+      return VALUE_ZERO;
+    }
+    // Check time limit
+    if (limits.use_time_management() && timeManager.elapsed() >= timeManager.maximum()) {
+      stopRequested = true;
+      return VALUE_ZERO;
+    }
+  }
+
   // Update selective depth
   if (PvNode && ss->ply > selDepth)
     selDepth = ss->ply;

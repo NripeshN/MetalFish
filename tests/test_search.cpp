@@ -520,6 +520,365 @@ bool test_eval_material() {
 }
 
 //==============================================================================
+// MultiPV Tests
+//==============================================================================
+
+bool test_multipv_basic() {
+  TestCase tc("MultiPVBasic");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Position with multiple reasonable moves
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 4;
+  limits.multiPV = 3;
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  // Should have multiple root moves
+  EXPECT(tc, !worker.rootMoves.empty());
+  // With MultiPV=3, we should have at least 3 moves (if available)
+  EXPECT(tc, worker.rootMoves.size() >= 3);
+
+  return tc.passed();
+}
+
+bool test_multipv_ordering() {
+  TestCase tc("MultiPVOrdering");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Position with multiple moves
+  pos.set("r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+          false, &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 3;
+  limits.multiPV = 5;
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  // Verify moves are sorted by score (best first)
+  if (worker.rootMoves.size() >= 2) {
+    for (size_t i = 0; i < worker.rootMoves.size() - 1; ++i) {
+      // First move should have >= score than second
+      EXPECT(tc, worker.rootMoves[i].score >= worker.rootMoves[i + 1].score);
+    }
+  }
+
+  return tc.passed();
+}
+
+//==============================================================================
+// Continuation History Tests
+//==============================================================================
+
+bool test_continuation_history_update() {
+  TestCase tc("ContinuationHistoryUpdate");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Run a search to populate continuation history
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 5;
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  // After search, continuation history should have some non-zero entries
+  // This is a soft test - just verify search completes
+  EXPECT(tc, !worker.rootMoves.empty());
+  EXPECT(tc, worker.nodes.load() > 0);
+
+  return tc.passed();
+}
+
+//==============================================================================
+// Pawn History Tests
+//==============================================================================
+
+bool test_pawn_history() {
+  TestCase tc("PawnHistory");
+
+  init_bitboards();
+  Position::init();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Test pawn history index calculation
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
+  int idx1 = pawn_history_index(pos);
+  EXPECT(tc, idx1 >= 0 && idx1 < PAWN_HISTORY_SIZE);
+
+  // Different pawn structure should (usually) give different index
+  pos.set("rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", false,
+          &states->back());
+
+  int idx2 = pawn_history_index(pos);
+  EXPECT(tc, idx2 >= 0 && idx2 < PAWN_HISTORY_SIZE);
+
+  return tc.passed();
+}
+
+//==============================================================================
+// Correction History Tests
+//==============================================================================
+
+bool test_correction_history() {
+  TestCase tc("CorrectionHistory");
+
+  init_bitboards();
+  Position::init();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
+  // Test correction history index calculation
+  int idx = correction_history_index(pos.pawn_key());
+  EXPECT(tc, idx >= 0 && idx < CORRECTION_HISTORY_SIZE);
+
+  // Test that correction history can be updated
+  CorrectionHistory corrHist;
+  std::memset(corrHist, 0, sizeof(corrHist));
+
+  corrHist[idx][WHITE] = 50;
+  EXPECT(tc, corrHist[idx][WHITE] == 50);
+  EXPECT(tc, corrHist[idx][BLACK] == 0);
+
+  return tc.passed();
+}
+
+//==============================================================================
+// Low Ply History Tests
+//==============================================================================
+
+bool test_low_ply_history() {
+  TestCase tc("LowPlyHistory");
+
+  LowPlyHistory lowHist;
+  std::memset(lowHist, 0, sizeof(lowHist));
+
+  // Test that we can store values at different plies
+  Move m1(SQ_E2, SQ_E4);
+  int moveIdx = m1.from_sq() * 64 + m1.to_sq();
+
+  for (int ply = 0; ply < LOW_PLY_HISTORY_SIZE; ++ply) {
+    lowHist[ply][moveIdx] = (ply + 1) * 100;
+  }
+
+  // Verify stored values
+  for (int ply = 0; ply < LOW_PLY_HISTORY_SIZE; ++ply) {
+    EXPECT(tc, lowHist[ply][moveIdx] == (ply + 1) * 100);
+  }
+
+  return tc.passed();
+}
+
+//==============================================================================
+// Time Management Tests
+//==============================================================================
+
+bool test_time_management_basic() {
+  TestCase tc("TimeManagementBasic");
+
+  Search::TimeManager tm;
+  Search::LimitsType limits;
+
+  // Test with fixed move time
+  limits.movetime = 1000;
+  tm.init(limits, WHITE, 10);
+
+  EXPECT(tc, tm.optimum() > 0);
+  EXPECT(tc, tm.maximum() > 0);
+  EXPECT(tc, tm.optimum() <= limits.movetime);
+
+  return tc.passed();
+}
+
+bool test_time_management_increment() {
+  TestCase tc("TimeManagementIncrement");
+
+  Search::TimeManager tm;
+  Search::LimitsType limits;
+
+  // Test with time + increment
+  limits.time[WHITE] = 60000; // 60 seconds
+  limits.inc[WHITE] = 1000;   // 1 second increment
+  limits.movestogo = 0;       // Sudden death
+
+  tm.init(limits, WHITE, 20);
+
+  EXPECT(tc, tm.optimum() > 0);
+  EXPECT(tc, tm.maximum() > 0);
+  EXPECT(tc, tm.maximum() >= tm.optimum());
+
+  return tc.passed();
+}
+
+//==============================================================================
+// Pruning Tests
+//==============================================================================
+
+bool test_futility_pruning() {
+  TestCase tc("FutilityPruning");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Position where futility pruning should help
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 4; // Reduced for faster tests
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  // Futility pruning should reduce node count
+  // This is a soft test - just verify search completes
+  EXPECT(tc, !worker.rootMoves.empty());
+  EXPECT(tc, worker.nodes.load() > 0);
+
+  return tc.passed();
+}
+
+bool test_null_move_pruning() {
+  TestCase tc("NullMovePruning");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Position where null move pruning is effective (not zugzwang)
+  pos.set("r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+          false, &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 3; // Reduced for faster tests
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  EXPECT(tc, !worker.rootMoves.empty());
+
+  return tc.passed();
+}
+
+//==============================================================================
+// Search Depth Tests
+//==============================================================================
+
+bool test_iterative_deepening() {
+  TestCase tc("IterativeDeepening");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 4; // Reduced for faster tests
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  // Should have searched to the requested depth
+  EXPECT(tc, worker.completedDepth >= 1);
+  EXPECT(tc, !worker.rootMoves.empty());
+
+  return tc.passed();
+}
+
+bool test_selective_depth() {
+  TestCase tc("SelectiveDepth");
+
+  init_bitboards();
+  Position::init();
+  Search::init();
+  TT.resize(16);
+  TT.clear();
+
+  StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
+  Position pos;
+
+  // Position with forcing moves that should extend
+  pos.set("r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+          false, &states->back());
+
+  Search::Worker worker;
+  Search::LimitsType limits;
+  limits.depth = 3; // Reduced for faster tests
+
+  worker.start_searching(pos, limits, states);
+  worker.wait_for_search_finished();
+
+  // Selective depth should be >= nominal depth due to extensions
+  EXPECT(tc, worker.selDepth >= 1);
+
+  return tc.passed();
+}
+
+//==============================================================================
 // Main Test Runner
 //==============================================================================
 
@@ -563,6 +922,28 @@ bool test_search() {
   std::cout << "\n[Evaluation]" << std::endl;
   test_eval_symmetry();
   test_eval_material();
+
+  std::cout << "\n[MultiPV]" << std::endl;
+  test_multipv_basic();
+  test_multipv_ordering();
+
+  std::cout << "\n[Advanced History]" << std::endl;
+  test_continuation_history_update();
+  test_pawn_history();
+  test_correction_history();
+  test_low_ply_history();
+
+  std::cout << "\n[Time Management]" << std::endl;
+  test_time_management_basic();
+  test_time_management_increment();
+
+  std::cout << "\n[Pruning]" << std::endl;
+  test_futility_pruning();
+  test_null_move_pruning();
+
+  std::cout << "\n[Iterative Deepening]" << std::endl;
+  test_iterative_deepening();
+  test_selective_depth();
 
   // Summary
   std::cout << "\n=== Search Test Summary ===" << std::endl;

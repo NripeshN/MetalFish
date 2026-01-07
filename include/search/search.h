@@ -63,6 +63,10 @@ struct RootMove {
   Value averageScore = -VALUE_INFINITE;
   int selDepth = 0;
   std::vector<Move> pv;
+
+  // Tablebase information
+  int tbRank = 0;
+  Value tbScore = VALUE_ZERO;
 };
 
 using RootMoves = std::vector<RootMove>;
@@ -78,7 +82,7 @@ struct LimitsType {
     multiPV = 1;
   }
 
-  bool use_time_management() const { return time[WHITE] || time[BLACK]; }
+  bool use_time_management() const { return time[WHITE] || time[BLACK] || movetime; }
 
   std::vector<Move> searchmoves;
   int64_t time[COLOR_NB], inc[COLOR_NB], movetime;

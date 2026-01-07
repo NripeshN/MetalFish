@@ -15,6 +15,7 @@
 #include "core/perft.h"
 #include "eval/evaluate.h"
 #include "search/tt.h"
+#include "syzygy/tbprobe.h"
 #include <chrono>
 #include <iostream>
 #include <sstream>
@@ -90,6 +91,18 @@ void OptionsMap::init() {
                            << std::endl;
                }
              }));
+
+  // Syzygy tablebase options
+  options["SyzygyPath"] =
+      Option("<empty>", Option::OnChange([](const Option &o) {
+               std::string path = std::string(o);
+               if (path != "<empty>") {
+                 Tablebases::init(path);
+               }
+             }));
+  options["SyzygyProbeDepth"] = Option(1, 1, 100);
+  options["Syzygy50MoveRule"] = Option(true);
+  options["SyzygyProbeLimit"] = Option(7, 0, 7);
 
   // GPU-specific options
   options["GPU_BatchSize"] = Option(64, 1, 4096);
@@ -314,39 +327,37 @@ void go(Position &pos, std::istringstream &is, StateListPtr &states) {
   Search::Signals_stop = false;
   Search::Signals_ponder = limits.ponderMode;
 
-  // Run search in a separate thread using the thread pool
-  std::thread([&pos, limits, &states]() mutable {
-    // Use thread pool if more than 1 thread configured
-    if (Search::thread_count() > 1) {
-      Search::start_search(pos, limits, states);
-      Search::wait_for_search();
+  // Run search synchronously for single-threaded mode
+  // This ensures bestmove is output before the next command is processed
+  if (Search::thread_count() <= 1) {
+    Search::Worker *main = Search::main_thread();
+    if (main) {
+      main->clear();
+      main->start_searching(pos, limits, states);
 
-      // Get best move from best thread
-      Search::Worker *best = Search::best_thread();
-      if (best && !best->rootMoves.empty()) {
-        std::cout << "bestmove " << move_to_uci(best->rootMoves[0].pv[0], false);
-        if (best->rootMoves[0].pv.size() > 1)
+      if (!main->rootMoves.empty()) {
+        std::cout << "bestmove " << move_to_uci(main->rootMoves[0].pv[0], false);
+        if (main->rootMoves[0].pv.size() > 1)
           std::cout << " ponder "
-                    << move_to_uci(best->rootMoves[0].pv[1], false);
+                    << move_to_uci(main->rootMoves[0].pv[1], false);
         std::cout << std::endl;
       }
-    } else {
-      // Single-threaded: use main thread directly
-      Search::Worker *main = Search::main_thread();
-      if (main) {
-        main->clear();
-        main->start_searching(pos, limits, states);
-
-        if (!main->rootMoves.empty()) {
-          std::cout << "bestmove " << move_to_uci(main->rootMoves[0].pv[0], false);
-          if (main->rootMoves[0].pv.size() > 1)
-            std::cout << " ponder "
-                      << move_to_uci(main->rootMoves[0].pv[1], false);
-          std::cout << std::endl;
-        }
-      }
     }
-  }).detach();
+  } else {
+    // Multi-threaded: use thread pool
+    Search::start_search(pos, limits, states);
+    Search::wait_for_search();
+
+    // Get best move from best thread
+    Search::Worker *best = Search::best_thread();
+    if (best && !best->rootMoves.empty()) {
+      std::cout << "bestmove " << move_to_uci(best->rootMoves[0].pv[0], false);
+      if (best->rootMoves[0].pv.size() > 1)
+        std::cout << " ponder "
+                  << move_to_uci(best->rootMoves[0].pv[1], false);
+      std::cout << std::endl;
+    }
+  }
 }
 
 void bench(Position &pos, std::istringstream &is, StateListPtr &states) {

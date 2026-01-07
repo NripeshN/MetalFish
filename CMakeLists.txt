@@ -123,6 +123,9 @@ set(EVAL_SOURCES src/eval/evaluate.cpp src/eval/nnue.cpp src/eval/nnue_gpu.cpp
 # Source files - UCI
 set(UCI_SOURCES src/uci/uci.cpp src/uci/benchmark.cpp)
 
+# Source files - Syzygy Tablebases
+set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
+
 # Metal shaders
 set(METAL_SHADERS shaders/nnue_stockfish.metal shaders/nnue.metal
                   shaders/core_ops.metal)
@@ -167,7 +170,8 @@ endif()
 
 # Main executable
 add_executable(metalfish src/main.cpp ${METAL_SOURCES} ${CORE_SOURCES}
-                         ${SEARCH_SOURCES} ${EVAL_SOURCES} ${UCI_SOURCES})
+                         ${SEARCH_SOURCES} ${EVAL_SOURCES} ${UCI_SOURCES}
+                         ${SYZYGY_SOURCES})
 
 if(APPLE)
   if(BUILD_METAL_SHADERS AND TARGET metal_shaders)
@@ -209,7 +213,8 @@ if(BUILD_TESTS)
     ${CORE_SOURCES}
     ${SEARCH_SOURCES}
     ${EVAL_SOURCES}
-    ${UCI_SOURCES})
+    ${UCI_SOURCES}
+    ${SYZYGY_SOURCES})
 
   target_include_directories(metalfish_tests PRIVATE ${CMAKE_SOURCE_DIR}/include
                                                      ${METAL_CPP_DIR})
