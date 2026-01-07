@@ -81,6 +81,11 @@ void OptionsMap::init() {
   options["UCI_Chess960"] = Option(false);
   options["MultiPV"] = Option(1, 1, 500);
 
+  // Skill Level options
+  options["Skill Level"] = Option(20, 0, 20);  // 0-20, 20 = full strength
+  options["UCI_LimitStrength"] = Option(false);
+  options["UCI_Elo"] = Option(1320, 1320, 3190);  // Elo range
+
   // NNUE options
   options["EvalFile"] =
       Option("<internal>", Option::OnChange([](const Option &o) {

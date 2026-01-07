@@ -1296,6 +1296,49 @@ Value Worker::evaluate(const Position &pos) {
   return std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);
 }
 
+// =============================================================================
+// Skill Level Implementation
+// =============================================================================
+// When playing with strength handicap, choose the best move among a set of
+// RootMoves using a statistical rule dependent on 'level'. Idea by Heinz van Saanen.
+
+Move Skill::pick_best(const RootMoves &rootMoves, size_t multiPV) {
+  // Simple PRNG for randomization
+  static uint64_t seed = now();
+  auto rand = [&]() {
+    seed ^= seed >> 12;
+    seed ^= seed << 25;
+    seed ^= seed >> 27;
+    return seed * 0x2545F4914F6CDD1DULL;
+  };
+
+  if (rootMoves.empty())
+    return Move::none();
+
+  // RootMoves are already sorted by score in descending order
+  Value topScore = rootMoves[0].score;
+  int delta = std::min(topScore - rootMoves[std::min(multiPV - 1, rootMoves.size() - 1)].score, 
+                       int(PawnValue));
+  int maxScore = -VALUE_INFINITE;
+  double weakness = 120 - 2 * level;
+
+  // Choose best move. For each move score we add two terms, both dependent on
+  // weakness. One is deterministic and bigger for weaker levels, and one is
+  // random. Then we choose the move with the resulting highest score.
+  for (size_t i = 0; i < std::min(multiPV, rootMoves.size()); ++i) {
+    // This is the magic formula from Stockfish
+    int push = int(weakness * int(topScore - rootMoves[i].score)
+                   + delta * (rand() % int(weakness + 1))) / 128;
+
+    if (rootMoves[i].score + push >= maxScore) {
+      maxScore = rootMoves[i].score + push;
+      best = rootMoves[i].pv[0];
+    }
+  }
+
+  return best;
+}
+
 // Explicit template instantiations
 template Value Worker::search<Root>(Position &, Stack *, Value, Value, Depth,
                                     bool);

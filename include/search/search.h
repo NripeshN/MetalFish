@@ -241,5 +241,32 @@ inline Value value_from_tt(Value v, int ply, int r50c) {
   return v;
 }
 
+// =============================================================================
+// Skill Level - Playing strength handicap
+// =============================================================================
+// Skill 0..19 covers CCRL Blitz Elo from 1320 to 3190
+// Reference: Stockfish skill level implementation
+
+struct Skill {
+  static constexpr int LowestElo = 1320;
+  static constexpr int HighestElo = 3190;
+
+  Skill(int skillLevel, int uciElo) {
+    if (uciElo) {
+      double e = double(uciElo - LowestElo) / (HighestElo - LowestElo);
+      level = std::clamp((((37.2473 * e - 40.8525) * e + 22.2943) * e - 0.311438), 0.0, 19.0);
+    } else {
+      level = double(skillLevel);
+    }
+  }
+
+  bool enabled() const { return level < 20.0; }
+  bool time_to_pick(Depth depth) const { return depth == 1 + int(level); }
+  Move pick_best(const RootMoves &rootMoves, size_t multiPV);
+
+  double level = 20.0;
+  Move best = Move::none();
+};
+
 } // namespace Search
 } // namespace MetalFish
