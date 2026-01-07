@@ -2,12 +2,8 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Based on Stockfish, Copyright (C) 2004-2025 The Stockfish developers
+  Licensed under GPL-3.0
 
-  MetalFish is free software: you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation, either version 3 of the License, or
-  (at your option) any later version.
 */
 
 #include <iostream>

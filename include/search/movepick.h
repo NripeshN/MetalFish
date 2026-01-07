@@ -2,7 +2,7 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Based on Stockfish, Copyright (C) 2004-2025 The Stockfish developers
+  Licensed under GPL-3.0
 
   MovePicker - Sophisticated move ordering
   ========================================
