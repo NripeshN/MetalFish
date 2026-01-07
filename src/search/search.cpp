@@ -374,6 +374,9 @@ void Worker::iterative_deepening() {
   multiPV = std::max(1, multiPV);
 
   // Iterative deepening
+  int searchAgainCounter = 0;
+  bool increaseDepth = true;
+  
   for (rootDepth = 1; rootDepth <= (limits.depth ? limits.depth : MAX_PLY);
        ++rootDepth) {
     // Check for stop conditions
@@ -383,6 +386,10 @@ void Worker::iterative_deepening() {
     // Save previous scores for all root moves
     for (auto &rm : rootMoves)
       rm.previousScore = rm.score;
+    
+    // Hindsight depth adjustment: if time allows, search again at same depth
+    if (!increaseDepth)
+      searchAgainCounter++;
 
     // MultiPV loop
     for (pvIdx = 0; pvIdx < multiPV && !stopRequested && !Signals_stop;
@@ -415,10 +422,12 @@ void Worker::iterative_deepening() {
         optimism[WHITE] = optimism[BLACK] = VALUE_ZERO;
       }
 
-      // Main search
+      // Main search with hindsight depth adjustment
       while (true) {
-        // Reduce depth after multiple fail-highs (like Stockfish)
-        Depth adjustedDepth = std::max(1, rootDepth - failedHighCnt);
+        // Adjust depth based on fail-high count and searchAgain counter
+        // Ensure at least one effective increment for every four searchAgain steps
+        Depth adjustedDepth = std::max(1, rootDepth - failedHighCnt - 
+                                       3 * (searchAgainCounter + 1) / 4);
         bestValue =
             search<Root>(*rootPos, ss, alpha, beta, adjustedDepth, false);
 
@@ -506,11 +515,21 @@ void Worker::iterative_deepening() {
       if (!limits.infinite && !limits.ponderMode && limits.use_time_management()) {
         TimePoint elapsed = timeManager.elapsed();
         TimePoint optimum = timeManager.optimum();
+        TimePoint maximum = timeManager.maximum();
+
+        // Decide whether to increase depth or search again at same depth
+        // Based on Stockfish: increaseDepth = ponder || elapsed <= totalTime * 0.50
+        increaseDepth = limits.ponderMode || elapsed <= maximum * 0.50;
+        
+        // Calculate effort-based adjustment (Stockfish formula)
+        uint64_t totalNodes = nodes.load();
+        uint64_t nodesEffort = rootMoves[0].effort * 100000 / std::max(uint64_t(1), totalNodes);
+        double highBestMoveEffort = nodesEffort >= 93340 ? 0.76 : 1.0;
 
         // Early termination if best move is stable and score is not falling
         if (stableBestMoveCount >= 3 && scoreDiff >= -20) {
           // Reduce time if very stable (adjust by 0.8x)
-          if (elapsed > optimum * 0.8)
+          if (elapsed > optimum * 0.8 * highBestMoveEffort)
             break;
         }
 
@@ -523,7 +542,7 @@ void Worker::iterative_deepening() {
         else if (stableBestMoveCount >= 5)
           timeScale = 0.75; // Very stable, use less time
 
-        if (elapsed > optimum * timeScale)
+        if (elapsed > optimum * timeScale * highBestMoveEffort)
           break;
       }
     }
@@ -762,6 +781,7 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   }
 
   // Search moves
+  uint64_t prevNodes = nodes.load(); // For effort tracking at root
   for (Move *m = moves; m != end; ++m) {
     move = *m;
 
@@ -1083,7 +1103,7 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
               depth, bestMove, ss->staticEval, TT->generation());
   }
 
-  // Update root move scores
+  // Update root move scores and effort
   if (rootNode) {
     // Find the move to update - use bestMove if found, otherwise first root move
     Move moveToUpdate = bestMove ? bestMove : (rootMoves.empty() ? Move::none() : rootMoves[pvIdx].pv[0]);
@@ -1092,6 +1112,10 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
       auto it = std::find(rootMoves.begin(), rootMoves.end(), moveToUpdate);
       if (it != rootMoves.end()) {
         RootMove &rm = *it;
+        
+        // Track effort (nodes spent on this move)
+        rm.effort += nodes.load() - prevNodes;
+        
         rm.score = bestValue;
         rm.selDepth = selDepth;
 
