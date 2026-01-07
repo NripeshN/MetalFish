@@ -10,7 +10,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 
 ## Features
 
-### Search (40+ Stockfish Features Implemented)
+### Search (50+ Stockfish Features Implemented)
 
 #### Move Ordering
 - **ButterflyHistory** - Quiet move success tracking by from/to squares
@@ -21,6 +21,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **LowPlyHistory** - Extra weight for moves near root (first 5 plies)
 - **ContinuationHistory** - Move sequence success with Stockfish weights (1133, 683, 312, 582, 149, 474 for plies 1-6)
 - **Staged Move Generation** - Efficient MovePicker with capture/quiet phases
+- **SearchedList** - Fixed-size list for tracking searched moves (32 capacity)
 
 #### Search Extensions
 - **Check Extension** - Extend when giving check
@@ -38,6 +39,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Late Move Pruning (LMP)** - Skip late quiet moves at shallow depths
 - **Late Move Reductions (LMR)** - 15+ adjustment factors including cutoffCnt
 - **ProbCut** - Prune with shallow capture search
+- **Small ProbCut** - TT-based pruning (beta + 418 threshold)
 - **Razoring** - Drop to qsearch for low eval positions
 - **Mate Distance Pruning** - Prune when short mate found
 - **Internal Iterative Reductions (IIR)** - Reduce depth without TT move
@@ -47,20 +49,24 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **NNUE Support** - Stockfish .nnue file loading with GPU acceleration
 - **Classical Evaluation** - Material + piece-square tables fallback
 - **Rule50 Dampening** - Linear eval reduction as 50-move rule approaches
-- **Correction History** - Adjust static eval based on search results
+- **Full Correction History** - Pawn, minor piece, non-pawn (white/black), continuation
 - **Draw Randomization** - Prevent 3-fold repetition blindness
+- **Optimism Blending** - Material-scaled optimism: (nnue * (77871 + mat) + opt * (7191 + mat)) / 77871
 
 #### Search Infrastructure
 - **Transposition Table** - With aging, generation tracking, and rule50 handling
 - **Proper TT Value Handling** - value_to_tt/value_from_tt with rule50 adjustment
-- **Aspiration Windows** - With averaging and fail-high tracking
+- **Aspiration Windows** - With meanSquaredScore-based delta sizing
 - **Best Move Stability** - For time management decisions
 - **Dynamic Time Management** - Adjust based on stability and score changes
+- **Effort Tracking** - Nodes per root move for time allocation
+- **Hindsight Depth Adjustment** - searchAgainCounter for re-searching at same depth
 - **Iterative Deepening** - Progressive deepening with info output
 - **Quiescence Search** - Tactical resolution at leaf nodes
 - **MultiPV** - Multiple principal variation search
 - **Pondering** - Think on opponent's time
 - **CutoffCnt Tracking** - For LMR adjustment based on child node behavior
+- **update_all_stats** - Comprehensive history updates matching Stockfish
 - **Thread Pool** - Infrastructure for multi-threaded search
 - **Syzygy Tablebases** - Endgame tablebase probing interface
 
@@ -83,7 +89,6 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 ## Not Yet Implemented (Major Stockfish Features)
 
 - **Lazy SMP** - Multi-threaded parallel search (infrastructure ready)
-- **Optimism Blending** - Material-scaled optimism in eval
 - **Full Syzygy TB Loading** - Currently interface only, file loading TBD
 - **Skill Level** - Playing strength handicap
 
@@ -161,7 +166,7 @@ MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For si
 |--------|-------|
 | Perft(6) Nodes | 119,060,324 |
 | All Perft Tests | 30/30 Passing |
-| Unit Tests | 5/5 Passing |
+| Unit Tests | 28/28 Search, 5/5 Core |
 
 ### Notes
 - Benchmarks run on Apple Silicon (M-series)
