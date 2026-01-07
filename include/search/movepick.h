@@ -23,10 +23,22 @@ namespace MetalFish {
 
 // MovePicker stages
 enum Stages {
-  MAIN_TT, CAPTURE_INIT, GOOD_CAPTURE, QUIET_INIT, GOOD_QUIET, BAD_CAPTURE, BAD_QUIET,
-  EVASION_TT, EVASION_INIT, EVASION,
-  PROBCUT_TT, PROBCUT_INIT, PROBCUT,
-  QSEARCH_TT, QCAPTURE_INIT, QCAPTURE
+  MAIN_TT,
+  CAPTURE_INIT,
+  GOOD_CAPTURE,
+  QUIET_INIT,
+  GOOD_QUIET,
+  BAD_CAPTURE,
+  BAD_QUIET,
+  EVASION_TT,
+  EVASION_INIT,
+  EVASION,
+  PROBCUT_TT,
+  PROBCUT_INIT,
+  PROBCUT,
+  QSEARCH_TT,
+  QCAPTURE_INIT,
+  QCAPTURE
 };
 
 // Partial insertion sort
@@ -45,10 +57,10 @@ inline void partial_insertion_sort(ExtMove *begin, ExtMove *end, int limit) {
 class MovePicker {
 public:
   // Constructor for main search
-  MovePicker(const Position &p, Move ttm, Depth d,
-             const ButterflyHistory *mh, const KillerMoves *km,
-             const CounterMoveHistory *cmh, const CapturePieceToHistory *cph,
-             const PieceToHistory **ch, int pl);
+  MovePicker(const Position &p, Move ttm, Depth d, const ButterflyHistory *mh,
+             const KillerMoves *km, const CounterMoveHistory *cmh,
+             const CapturePieceToHistory *cph, const PieceToHistory **ch,
+             int pl);
 
   // Constructor for quiescence/probcut
   MovePicker(const Position &p, Move ttm, Depth d,
@@ -82,21 +94,25 @@ private:
 // Inline implementations
 inline MovePicker::MovePicker(const Position &p, Move ttm, Depth d,
                               const ButterflyHistory *mh, const KillerMoves *km,
-                              const CounterMoveHistory *cmh, const CapturePieceToHistory *cph,
+                              const CounterMoveHistory *cmh,
+                              const CapturePieceToHistory *cph,
                               const PieceToHistory **ch, int pl)
     : pos(p), mainHistory(mh), killers(km), counterMoves(cmh),
-      captureHistory(cph), continuationHistory(ch), ttMove(ttm), depth(d), ply(pl) {
+      captureHistory(cph), continuationHistory(ch), ttMove(ttm), depth(d),
+      ply(pl) {
   cur = endMoves = endBadCaptures = moves;
   if (pos.checkers())
     stage = EVASION_TT + !(ttm.is_ok() && pos.pseudo_legal(ttm));
   else
-    stage = (d > 0 ? MAIN_TT : QSEARCH_TT) + !(ttm.is_ok() && pos.pseudo_legal(ttm));
+    stage = (d > 0 ? MAIN_TT : QSEARCH_TT) +
+            !(ttm.is_ok() && pos.pseudo_legal(ttm));
 }
 
 inline MovePicker::MovePicker(const Position &p, Move ttm, Depth d,
                               const CapturePieceToHistory *cph)
     : pos(p), mainHistory(nullptr), killers(nullptr), counterMoves(nullptr),
-      captureHistory(cph), continuationHistory(nullptr), ttMove(ttm), depth(d), ply(0) {
+      captureHistory(cph), continuationHistory(nullptr), ttMove(ttm), depth(d),
+      ply(0) {
   cur = endMoves = endBadCaptures = moves;
   if (pos.checkers())
     stage = EVASION_TT + !(ttm.is_ok() && pos.pseudo_legal(ttm));
@@ -119,14 +135,14 @@ template <> inline void MovePicker::score<CAPTURES>() {
 
 template <> inline void MovePicker::score<QUIETS>() {
   Color us = pos.side_to_move();
-  
+
   for (ExtMove *it = cur; it != endMoves; ++it) {
     Move m = *it;
     Square from = m.from_sq();
     Square to = m.to_sq();
     Piece moved = pos.moved_piece(m);
     int value = 0;
-    
+
     // History scores (Stockfish weights)
     if (mainHistory)
       value = 2 * (*mainHistory)[us][from * 64 + to];
@@ -140,11 +156,11 @@ template <> inline void MovePicker::score<QUIETS>() {
       if (continuationHistory[3])
         value += (*continuationHistory[3])[moved][to];
     }
-    
+
     // Killer move bonus
     if (killers && killers->is_killer(ply, m))
       value += 10000;
-    
+
     it->value = value;
   }
 }
@@ -157,7 +173,8 @@ template <> inline void MovePicker::score<EVASIONS>() {
       it->value = int(PieceValue[captured]) + (1 << 28);
     } else {
       Color us = pos.side_to_move();
-      it->value = mainHistory ? (*mainHistory)[us][m.from_sq() * 64 + m.to_sq()] : 0;
+      it->value =
+          mainHistory ? (*mainHistory)[us][m.from_sq() * 64 + m.to_sq()] : 0;
     }
   }
 }
@@ -170,11 +187,16 @@ inline ExtMove *MovePicker::select_best(ExtMove *begin, ExtMove *end) {
 inline Move MovePicker::next_move() {
 top:
   switch (stage) {
-  case MAIN_TT: case EVASION_TT: case PROBCUT_TT: case QSEARCH_TT:
+  case MAIN_TT:
+  case EVASION_TT:
+  case PROBCUT_TT:
+  case QSEARCH_TT:
     ++stage;
     return ttMove;
 
-  case CAPTURE_INIT: case PROBCUT_INIT: case QCAPTURE_INIT: {
+  case CAPTURE_INIT:
+  case PROBCUT_INIT:
+  case QCAPTURE_INIT: {
     cur = endBadCaptures = moves;
     Move tmp[MAX_MOVES];
     Move *end = generate<CAPTURES>(pos, tmp);

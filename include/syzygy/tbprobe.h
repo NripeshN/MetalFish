@@ -31,10 +31,10 @@ namespace Tablebases {
 
 // Tablebase configuration
 struct Config {
-  int cardinality = 0;  // Max number of pieces in available tablebases
-  bool rootInTB = false; // Is root position in tablebase?
+  int cardinality = 0;    // Max number of pieces in available tablebases
+  bool rootInTB = false;  // Is root position in tablebase?
   bool useRule50 = false; // Use 50-move rule in TB probing
-  int probeDepth = 0;    // Minimum depth to probe TB
+  int probeDepth = 0;     // Minimum depth to probe TB
 };
 
 // WDL (Win/Draw/Loss) scores from tablebase
@@ -82,13 +82,10 @@ bool root_probe(Position &pos, Search::RootMoves &rootMoves, bool rule50,
 bool root_probe_wdl(Position &pos, Search::RootMoves &rootMoves, bool rule50);
 
 // Rank root moves using tablebase information
-Config rank_root_moves(Position &pos, Search::RootMoves &rootMoves,
-                       bool rankDTZ = false,
-                       const std::function<bool()> &time_abort = []() {
-                         return false;
-                       });
+Config rank_root_moves(
+    Position &pos, Search::RootMoves &rootMoves, bool rankDTZ = false,
+    const std::function<bool()> &time_abort = []() { return false; });
 
 } // namespace Tablebases
 
 } // namespace MetalFish
-

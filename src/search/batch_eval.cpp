@@ -151,4 +151,3 @@ void BatchEvaluator::evaluate_batch(std::vector<EvalRequest> &batch) {
 
 } // namespace Search
 } // namespace MetalFish
-

@@ -86,8 +86,8 @@ GPUMove GPUMove::from_move(Move m) {
     type = 3;
   }
 
-  gm.data =
-      (from & 0x3F) | ((to & 0x3F) << 6) | ((type & 0x3) << 12) | ((promo & 0x3) << 14);
+  gm.data = (from & 0x3F) | ((to & 0x3F) << 6) | ((type & 0x3) << 12) |
+            ((promo & 0x3) << 14);
   gm.score = 0;
   return gm;
 }
@@ -169,8 +169,9 @@ bool GPUOps::init(MTL::Device *device, const GPUOpsConfig &config) {
 
   // Load kernels
   if (!load_kernels()) {
-    std::cerr << "[GPU_OPS] Warning: Failed to load some kernels, using CPU fallback"
-              << std::endl;
+    std::cerr
+        << "[GPU_OPS] Warning: Failed to load some kernels, using CPU fallback"
+        << std::endl;
   }
 
   // Allocate buffers
@@ -184,8 +185,8 @@ bool GPUOps::init(MTL::Device *device, const GPUOpsConfig &config) {
   upload_zobrist_keys();
 
   initialized_ = true;
-  std::cout << "[GPU_OPS] Initialized with batch size: " << config_.max_batch_size
-            << std::endl;
+  std::cout << "[GPU_OPS] Initialized with batch size: "
+            << config_.max_batch_size << std::endl;
 
   return true;
 }
@@ -255,7 +256,8 @@ bool GPUOps::allocate_buffers() {
   positions_buffer_ = device_->newBuffer(batch * sizeof(GPUPosition), options);
 
   // Move buffers
-  moves_buffer_ = device_->newBuffer(batch * max_moves * sizeof(GPUMove), options);
+  moves_buffer_ =
+      device_->newBuffer(batch * max_moves * sizeof(GPUMove), options);
   move_counts_buffer_ = device_->newBuffer(batch * sizeof(int32_t), options);
 
   // Attack tables
@@ -265,11 +267,11 @@ bool GPUOps::allocate_buffers() {
   results_buffer_ = device_->newBuffer(batch * sizeof(int32_t), options);
 
   // History buffer
-  history_buffer_ =
-      device_->newBuffer(2 * 64 * 64 * sizeof(int16_t), options);
+  history_buffer_ = device_->newBuffer(2 * 64 * 64 * sizeof(int16_t), options);
 
   // Zobrist buffers
-  zobrist_pieces_buffer_ = device_->newBuffer(16 * 64 * sizeof(uint64_t), options);
+  zobrist_pieces_buffer_ =
+      device_->newBuffer(16 * 64 * sizeof(uint64_t), options);
   zobrist_castling_buffer_ = device_->newBuffer(16 * sizeof(uint64_t), options);
   zobrist_ep_buffer_ = device_->newBuffer(8 * sizeof(uint64_t), options);
 
@@ -280,7 +282,8 @@ void GPUOps::upload_attack_tables() {
   if (!attack_tables_buffer_)
     return;
 
-  AttackTables *tables = static_cast<AttackTables *>(attack_tables_buffer_->contents());
+  AttackTables *tables =
+      static_cast<AttackTables *>(attack_tables_buffer_->contents());
 
   // Copy pawn attacks
   for (int c = 0; c < 2; c++) {
@@ -308,7 +311,8 @@ void GPUOps::upload_zobrist_keys() {
     return;
 
   // Copy Zobrist piece keys
-  uint64_t *pieces = static_cast<uint64_t *>(zobrist_pieces_buffer_->contents());
+  uint64_t *pieces =
+      static_cast<uint64_t *>(zobrist_pieces_buffer_->contents());
   for (int p = 0; p < 16; p++) {
     for (int sq = 0; sq < 64; sq++) {
       pieces[p * 64 + sq] = Zobrist::psq[p][sq];
@@ -316,7 +320,8 @@ void GPUOps::upload_zobrist_keys() {
   }
 
   // Copy castling keys
-  uint64_t *castling = static_cast<uint64_t *>(zobrist_castling_buffer_->contents());
+  uint64_t *castling =
+      static_cast<uint64_t *>(zobrist_castling_buffer_->contents());
   for (int i = 0; i < 16; i++) {
     castling[i] = Zobrist::castling[i];
   }
@@ -430,13 +435,13 @@ GPUOps::batch_generate_moves(const std::vector<Position *> &positions,
     result[i] = counts[i];
     moves[i].clear();
     for (int j = 0; j < counts[i]; j++) {
-      moves[i].push_back(gpu_moves[i * config_.max_moves_per_position + j].to_move());
+      moves[i].push_back(
+          gpu_moves[i * config_.max_moves_per_position + j].to_move());
     }
   }
 
   auto end = std::chrono::high_resolution_clock::now();
-  total_time_ +=
-      std::chrono::duration<double, std::milli>(end - start).count();
+  total_time_ += std::chrono::duration<double, std::milli>(end - start).count();
   batch_count_++;
 
   return result;
@@ -734,4 +739,3 @@ bool init_gpu_ops() {
 
 } // namespace GPU
 } // namespace MetalFish
-

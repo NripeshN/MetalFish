@@ -103,17 +103,15 @@ void scan_for_tablebases(const std::string &paths) {
 
 // DTZ before zeroing move based on WDL score
 int dtz_before_zeroing(WDLScore wdl) {
-  return wdl == WDLWin         ? 1
-         : wdl == WDLCursedWin ? 101
+  return wdl == WDLWin           ? 1
+         : wdl == WDLCursedWin   ? 101
          : wdl == WDLBlessedLoss ? -101
          : wdl == WDLLoss        ? -1
                                  : 0;
 }
 
 // Sign of a value
-template <typename T> int sign_of(T val) {
-  return (T(0) < val) - (val < T(0));
-}
+template <typename T> int sign_of(T val) { return (T(0) < val) - (val < T(0)); }
 
 } // anonymous namespace
 
@@ -250,9 +248,7 @@ bool root_probe(Position &pos, Search::RootMoves &rootMoves, bool /*rule50*/,
       return false;
 
     // Rank moves by DTZ
-    m.tbRank = dtz > 0   ? (1000 - dtz)
-               : dtz < 0 ? (-1000 - dtz)
-                         : 0;
+    m.tbRank = dtz > 0 ? (1000 - dtz) : dtz < 0 ? (-1000 - dtz) : 0;
     m.tbScore = WDL_to_value[2 + sign_of(dtz)]; // Convert to approximate score
   }
 
@@ -265,7 +261,8 @@ bool root_probe(Position &pos, Search::RootMoves &rootMoves, bool /*rule50*/,
   return true;
 }
 
-bool root_probe_wdl(Position &pos, Search::RootMoves &rootMoves, bool /*rule50*/) {
+bool root_probe_wdl(Position &pos, Search::RootMoves &rootMoves,
+                    bool /*rule50*/) {
   if (!tbInitialized || MaxCardinality == 0 || rootMoves.empty()) {
     return false;
   }
@@ -324,7 +321,8 @@ Config rank_root_moves(Position &pos, Search::RootMoves &rootMoves,
     return config;
 
   // Try DTZ probe first
-  config.rootInTB = root_probe(pos, rootMoves, config.useRule50, rankDTZ, time_abort);
+  config.rootInTB =
+      root_probe(pos, rootMoves, config.useRule50, rankDTZ, time_abort);
 
   if (!config.rootInTB && !time_abort()) {
     // Fall back to WDL probe
@@ -345,4 +343,3 @@ Config rank_root_moves(Position &pos, Search::RootMoves &rootMoves,
 
 } // namespace Tablebases
 } // namespace MetalFish
-

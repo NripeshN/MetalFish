@@ -6,9 +6,9 @@
 
 */
 
+#include "core/movegen.h"
 #include "search/search.h"
 #include "search/tt.h"
-#include "core/movegen.h"
 #include <algorithm>
 #include <condition_variable>
 #include <mutex>
@@ -80,17 +80,17 @@ public:
     // Start helper threads (index 1 onwards)
     for (size_t i = 1; i < workers_.size(); ++i) {
       Worker *w = workers_[i].get();
-      
+
       // Each helper thread gets a copy of the position
       threads_.emplace_back([this, w, &pos, &limits]() {
         // Copy position for this thread
         StateListPtr localStates = std::make_unique<std::deque<StateInfo>>(1);
         Position localPos;
         localPos.set(pos.fen(), pos.is_chess960(), &localStates->back());
-        
+
         // Copy root moves from main thread
         w->rootMoves = workers_[0]->rootMoves;
-        
+
         // Start searching with local position copy
         w->start_searching(localPos, limits, localStates);
       });
@@ -146,7 +146,8 @@ public:
       return workers_[0].get();
 
     Worker *best = workers_[0].get();
-    int bestScore = best->rootMoves.empty() ? -VALUE_INFINITE : best->rootMoves[0].score;
+    int bestScore =
+        best->rootMoves.empty() ? -VALUE_INFINITE : best->rootMoves[0].score;
     Depth bestDepth = best->completedDepth;
 
     for (size_t i = 1; i < workers_.size(); ++i) {

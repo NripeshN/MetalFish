@@ -29,9 +29,9 @@ namespace GPU {
 
 // GPU-friendly position representation (mirrors Metal struct)
 struct alignas(8) GPUPosition {
-  uint64_t pieces[2][7];  // [color][piece_type]
-  uint64_t occupied[3];   // [white, black, all]
-  int8_t board[64];       // Piece on each square
+  uint64_t pieces[2][7]; // [color][piece_type]
+  uint64_t occupied[3];  // [white, black, all]
+  int8_t board[64];      // Piece on each square
   int32_t sideToMove;
   int32_t castlingRights;
   int32_t epSquare;
@@ -42,8 +42,8 @@ struct alignas(8) GPUPosition {
 
 // GPU move representation
 struct alignas(4) GPUMove {
-  uint16_t data;   // from:6, to:6, type:2, promo:2
-  int16_t score;   // Move ordering score
+  uint16_t data; // from:6, to:6, type:2, promo:2
+  int16_t score; // Move ordering score
 
   Move to_move() const;
   static GPUMove from_move(Move m);
@@ -88,8 +88,9 @@ public:
 
   // Generate moves for a batch of positions on GPU
   // Returns number of legal moves per position
-  std::vector<int> batch_generate_moves(const std::vector<Position *> &positions,
-                                        std::vector<std::vector<Move>> &moves);
+  std::vector<int>
+  batch_generate_moves(const std::vector<Position *> &positions,
+                       std::vector<std::vector<Move>> &moves);
 
   // ==================== Move Scoring ====================
 
@@ -196,4 +197,3 @@ bool init_gpu_ops();
 
 } // namespace GPU
 } // namespace MetalFish
-

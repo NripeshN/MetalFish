@@ -3,7 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Licensed under GPL-3.0
-  
+
   MovePicker implementation is now in the header file for inlining.
 */
 

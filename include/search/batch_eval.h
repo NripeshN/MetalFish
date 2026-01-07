@@ -32,10 +32,10 @@ namespace Search {
 
 // Configuration for batch evaluation
 struct BatchEvalConfig {
-  int batch_size = 64;           // Positions per batch
-  int max_pending = 256;         // Max positions waiting for eval
-  bool async_eval = true;        // Use async GPU evaluation
-  int prefetch_depth = 2;        // Depth to start collecting positions
+  int batch_size = 64;    // Positions per batch
+  int max_pending = 256;  // Max positions waiting for eval
+  bool async_eval = true; // Use async GPU evaluation
+  int prefetch_depth = 2; // Depth to start collecting positions
 };
 
 // Pending evaluation request
@@ -57,7 +57,8 @@ public:
 
   // Submit position for evaluation
   // Returns immediately, result available when ready flag is set
-  int submit(Position &pos, std::atomic<bool> &ready, std::atomic<Value> &result);
+  int submit(Position &pos, std::atomic<bool> &ready,
+             std::atomic<Value> &result);
 
   // Get evaluation synchronously (blocks until ready)
   Value evaluate_sync(Position &pos);
@@ -112,4 +113,3 @@ inline Value lazy_evaluate(Position &pos, BatchEvaluator &evaluator) {
 
 } // namespace Search
 } // namespace MetalFish
-

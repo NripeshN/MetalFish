@@ -66,17 +66,17 @@ inline int file_of(int sq) { return sq & 7; }
 
 // Pre-computed attack tables (to be loaded from CPU)
 struct AttackTables {
-  Bitboard pawnAttacks[2][64];    // [color][square]
-  Bitboard knightAttacks[64];     // [square]
-  Bitboard kingAttacks[64];       // [square]
-  Bitboard bishopMagics[64];      // Magic numbers
-  Bitboard rookMagics[64];        // Magic numbers
-  Bitboard bishopMasks[64];       // Occupancy masks
-  Bitboard rookMasks[64];         // Occupancy masks
-  int bishopShifts[64];           // Bit shifts
-  int rookShifts[64];             // Bit shifts
-  uint bishopOffsets[64];         // Table offsets
-  uint rookOffsets[64];           // Table offsets
+  Bitboard pawnAttacks[2][64]; // [color][square]
+  Bitboard knightAttacks[64];  // [square]
+  Bitboard kingAttacks[64];    // [square]
+  Bitboard bishopMagics[64];   // Magic numbers
+  Bitboard rookMagics[64];     // Magic numbers
+  Bitboard bishopMasks[64];    // Occupancy masks
+  Bitboard rookMasks[64];      // Occupancy masks
+  int bishopShifts[64];        // Bit shifts
+  int rookShifts[64];          // Bit shifts
+  uint bishopOffsets[64];      // Table offsets
+  uint rookOffsets[64];        // Table offsets
 };
 
 // ============================================================================
@@ -84,9 +84,9 @@ struct AttackTables {
 // ============================================================================
 
 struct GPUPosition {
-  Bitboard pieces[2][7];  // [color][piece_type] bitboards
-  Bitboard occupied[3];   // [white, black, all]
-  int8_t board[64];       // Piece on each square
+  Bitboard pieces[2][7]; // [color][piece_type] bitboards
+  Bitboard occupied[3];  // [white, black, all]
+  int8_t board[64];      // Piece on each square
   int sideToMove;
   int castlingRights;
   int epSquare;
@@ -98,8 +98,8 @@ struct GPUPosition {
 // ============================================================================
 
 struct GPUMove {
-  uint16_t data;  // from:6, to:6, type:2, promo:2
-  int16_t score;  // Move ordering score
+  uint16_t data; // from:6, to:6, type:2, promo:2
+  int16_t score; // Move ordering score
 };
 
 inline GPUMove make_move(int from, int to, int type, int promo) {
@@ -170,7 +170,8 @@ kernel void generate_pawn_moves(device const GPUPosition *positions
         int idx = atomic_fetch_add_explicit(move_counts + pos_idx, 1,
                                             memory_order_relaxed);
         if (idx < MAX_MOVES) {
-          moves[pos_idx * MAX_MOVES + idx] = make_move(sq, to, PROMOTION, p - 2);
+          moves[pos_idx * MAX_MOVES + idx] =
+              make_move(sq, to, PROMOTION, p - 2);
         }
       }
     } else {
@@ -215,8 +216,7 @@ kernel void generate_pawn_moves(device const GPUPosition *positions
       int idx = atomic_fetch_add_explicit(move_counts + pos_idx, 1,
                                           memory_order_relaxed);
       if (idx < MAX_MOVES) {
-        moves[pos_idx * MAX_MOVES + idx] =
-            make_move(sq, capture_sq, NORMAL, 0);
+        moves[pos_idx * MAX_MOVES + idx] = make_move(sq, capture_sq, NORMAL, 0);
       }
     }
   }
@@ -483,8 +483,8 @@ kernel void perft_expand(device const PerftNode *input_nodes [[buffer(0)]],
   }
 
   // Generate moves for this position
-  // Note: Full GPU perft uses CPU move generation with GPU acceleration for batch eval
-  // This kernel provides basic counting for shallow depths
+  // Note: Full GPU perft uses CPU move generation with GPU acceleration for
+  // batch eval This kernel provides basic counting for shallow depths
 
   if (move_idx == 0) {
     if (node.depth == 1) {
@@ -498,13 +498,14 @@ kernel void perft_expand(device const PerftNode *input_nodes [[buffer(0)]],
 // GPU Batch Position Evaluation (Combined NNUE + Classical)
 // ============================================================================
 
-kernel void batch_evaluate_positions(
-    device const GPUPosition *positions [[buffer(0)]],
-    device const int32_t *nnue_scores [[buffer(1)]],
-    device int32_t *final_scores [[buffer(2)]],
-    constant int &batch_size [[buffer(3)]],
-    constant int &use_nnue [[buffer(4)]],
-    uint gid [[thread_position_in_grid]]) {
+kernel void batch_evaluate_positions(device const GPUPosition *positions
+                                     [[buffer(0)]],
+                                     device const int32_t *nnue_scores
+                                     [[buffer(1)]],
+                                     device int32_t *final_scores [[buffer(2)]],
+                                     constant int &batch_size [[buffer(3)]],
+                                     constant int &use_nnue [[buffer(4)]],
+                                     uint gid [[thread_position_in_grid]]) {
   int idx = gid;
   if (idx >= batch_size)
     return;
@@ -569,8 +570,7 @@ kernel void is_square_attacked(device const GPUPosition *positions
                                [[buffer(0)]],
                                device const int *squares [[buffer(1)]],
                                device const int *attackers [[buffer(2)]],
-                               device const AttackTables *attacks
-                               [[buffer(3)]],
+                               device const AttackTables *attacks [[buffer(3)]],
                                device const Bitboard *bishopTable [[buffer(4)]],
                                device const Bitboard *rookTable [[buffer(5)]],
                                device bool *results [[buffer(6)]],
@@ -634,8 +634,7 @@ kernel void filter_legal_moves(device const GPUPosition *positions
                                device const int *pseudo_counts [[buffer(2)]],
                                device GPUMove *legal_moves [[buffer(3)]],
                                device atomic_int *legal_counts [[buffer(4)]],
-                               device const AttackTables *attacks
-                               [[buffer(5)]],
+                               device const AttackTables *attacks [[buffer(5)]],
                                device const Bitboard *bishopTable [[buffer(6)]],
                                device const Bitboard *rookTable [[buffer(7)]],
                                constant int &batch_size [[buffer(8)]],
@@ -719,18 +718,15 @@ kernel void bitonic_sort_step(device GPUMove *moves [[buffer(0)]],
 // GPU Hash/Zobrist Computation
 // ============================================================================
 
-kernel void compute_zobrist_hash(device const GPUPosition *positions
-                                 [[buffer(0)]],
-                                 device const uint64_t *zobrist_pieces
-                                 [[buffer(1)]],
-                                 device const uint64_t *zobrist_castling
-                                 [[buffer(2)]],
-                                 device const uint64_t *zobrist_ep
-                                 [[buffer(3)]],
-                                 constant uint64_t &zobrist_side [[buffer(4)]],
-                                 device uint64_t *hashes [[buffer(5)]],
-                                 constant int &batch_size [[buffer(6)]],
-                                 uint gid [[thread_position_in_grid]]) {
+kernel void
+compute_zobrist_hash(device const GPUPosition *positions [[buffer(0)]],
+                     device const uint64_t *zobrist_pieces [[buffer(1)]],
+                     device const uint64_t *zobrist_castling [[buffer(2)]],
+                     device const uint64_t *zobrist_ep [[buffer(3)]],
+                     constant uint64_t &zobrist_side [[buffer(4)]],
+                     device uint64_t *hashes [[buffer(5)]],
+                     constant int &batch_size [[buffer(6)]],
+                     uint gid [[thread_position_in_grid]]) {
   int idx = gid;
   if (idx >= batch_size)
     return;
@@ -762,4 +758,3 @@ kernel void compute_zobrist_hash(device const GPUPosition *positions
 
   hashes[idx] = hash;
 }
-

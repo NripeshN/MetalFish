@@ -60,7 +60,7 @@ struct RootMove {
   Value previousScore = -VALUE_INFINITE;
   Value averageScore = -VALUE_INFINITE;
   Value uciScore = -VALUE_INFINITE;
-  int64_t meanSquaredScore = 0;  // For aspiration window sizing
+  int64_t meanSquaredScore = 0; // For aspiration window sizing
   bool scoreLowerbound = false;
   bool scoreUpperbound = false;
   int selDepth = 0;
@@ -82,7 +82,9 @@ struct LimitsType {
     multiPV = 1;
   }
 
-  bool use_time_management() const { return time[WHITE] || time[BLACK] || movetime; }
+  bool use_time_management() const {
+    return time[WHITE] || time[BLACK] || movetime;
+  }
 
   std::vector<Move> searchmoves;
   int64_t time[COLOR_NB], inc[COLOR_NB], movetime;
@@ -122,7 +124,8 @@ public:
   ~Worker();
 
   void clear();
-  void start_searching(Position &pos, const LimitsType &limits, StateListPtr &states);
+  void start_searching(Position &pos, const LimitsType &limits,
+                       StateListPtr &states);
   void wait_for_search_finished();
   bool is_main_thread() const { return threadIdx == 0; }
 
@@ -151,7 +154,8 @@ private:
   void iterative_deepening();
 
   template <NodeType nodeType>
-  Value search(Position &pos, Stack *ss, Value alpha, Value beta, Depth depth, bool cutNode);
+  Value search(Position &pos, Stack *ss, Value alpha, Value beta, Depth depth,
+               bool cutNode);
 
   template <NodeType nodeType>
   Value qsearch(Position &pos, Stack *ss, Value alpha, Value beta);
@@ -159,12 +163,15 @@ private:
   Value evaluate(const Position &pos);
 
   void update_quiet_stats(Stack *ss, Move move, int bonus);
-  void update_capture_stats(Piece piece, Square to, PieceType captured, int bonus);
+  void update_capture_stats(Piece piece, Square to, PieceType captured,
+                            int bonus);
   void update_continuation_histories(Stack *ss, Piece pc, Square to, int bonus);
-  void update_quiet_histories(const Position &pos, Stack *ss, Move move, int bonus);
-  void update_all_stats(const Position &pos, Stack *ss, Move bestMove, Square prevSq,
-                        SearchedList &quietsSearched, SearchedList &capturesSearched,
-                        Depth depth, Move ttMove, int moveCount);
+  void update_quiet_histories(const Position &pos, Stack *ss, Move move,
+                              int bonus);
+  void update_all_stats(const Position &pos, Stack *ss, Move bestMove,
+                        Square prevSq, SearchedList &quietsSearched,
+                        SearchedList &capturesSearched, Depth depth,
+                        Move ttMove, int moveCount);
 
   size_t threadIdx;
   TimeManager timeManager;
@@ -176,21 +183,22 @@ private:
   LowPlyHistory lowPlyHistory;
   CapturePieceToHistory captureHistory;
   PawnHistory pawnHistory;
-  
+
   // Full correction history system (heap allocated due to size)
   std::unique_ptr<UnifiedCorrectionHistory> correctionHistory;
-  
+
   // Continuation histories
   PieceToHistory continuationHistoryTable[PIECE_NB][SQUARE_NB];
-  ContinuationCorrectionHistory continuationCorrectionHistory[PIECE_NB][SQUARE_NB];
-  
+  ContinuationCorrectionHistory continuationCorrectionHistory[PIECE_NB]
+                                                             [SQUARE_NB];
+
   TTMoveHistory ttMoveHistory;
   KillerMoves killers;
   CounterMoveHistory counterMoves;
-  
+
   // Optimism values for evaluation blending
   Value optimism[COLOR_NB] = {VALUE_ZERO, VALUE_ZERO};
-  
+
   // Time management tracking (matching Stockfish)
   std::array<Value, 4> iterValue;
   double previousTimeReduction = 0.85;
@@ -210,20 +218,22 @@ Worker *main_thread();
 Worker *best_thread();
 uint64_t total_nodes();
 
-void start_search(Position &pos, const LimitsType &limits, StateListPtr &states);
+void start_search(Position &pos, const LimitsType &limits,
+                  StateListPtr &states);
 void stop_search();
 void wait_for_search();
 void clear_threads();
 
 // Helper functions
 inline Value value_to_tt(Value v, int ply) {
-  return v >= VALUE_TB_WIN_IN_MAX_PLY  ? v + ply
-       : v <= VALUE_TB_LOSS_IN_MAX_PLY ? v - ply
-       : v;
+  return v >= VALUE_TB_WIN_IN_MAX_PLY    ? v + ply
+         : v <= VALUE_TB_LOSS_IN_MAX_PLY ? v - ply
+                                         : v;
 }
 
 inline Value value_from_tt(Value v, int ply, int r50c) {
-  if (v == VALUE_NONE) return VALUE_NONE;
+  if (v == VALUE_NONE)
+    return VALUE_NONE;
   if (v >= VALUE_TB_WIN_IN_MAX_PLY) {
     if (v >= VALUE_MATE_IN_MAX_PLY && VALUE_MATE - v > 100 - r50c)
       return VALUE_TB_WIN_IN_MAX_PLY - 1;
@@ -254,7 +264,8 @@ struct Skill {
   Skill(int skillLevel, int uciElo) {
     if (uciElo) {
       double e = double(uciElo - LowestElo) / (HighestElo - LowestElo);
-      level = std::clamp((((37.2473 * e - 40.8525) * e + 22.2943) * e - 0.311438), 0.0, 19.0);
+      level = std::clamp(
+          (((37.2473 * e - 40.8525) * e + 22.2943) * e - 0.311438), 0.0, 19.0);
     } else {
       level = double(skillLevel);
     }

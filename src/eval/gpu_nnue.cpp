@@ -482,7 +482,8 @@ void GPUNNUEEvaluator::update_accumulator(GPUAccumulator &acc,
   }
 
   // Get the accumulator to update
-  int32_t *acc_data = (perspective == WHITE) ? acc.white.data() : acc.black.data();
+  int32_t *acc_data =
+      (perspective == WHITE) ? acc.white.data() : acc.black.data();
 
   // Copy accumulator to GPU buffer
   int32_t *buf = static_cast<int32_t *>(acc_buffer_->contents());

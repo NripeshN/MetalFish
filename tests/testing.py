@@ -384,28 +384,34 @@ def test_uci_protocol():
     def test_searchmoves():
         """Test searchmoves restriction"""
         import subprocess
+
         result = subprocess.run(
             [str(METALFISH_BIN)],
             input="uci\nisready\nposition startpos\ngo depth 3 searchmoves e2e4 d2d4\nquit\n",
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
         )
         assert "bestmove" in result.stdout, f"No bestmove found in output"
         # Best move should be one of the restricted moves
-        assert "e2e4" in result.stdout or "d2d4" in result.stdout, f"Got unexpected move: {result.stdout[-200:]}"
+        assert (
+            "e2e4" in result.stdout or "d2d4" in result.stdout
+        ), f"Got unexpected move: {result.stdout[-200:]}"
 
     def test_nodes_limit():
         """Test nodes limit"""
         import subprocess
+
         result = subprocess.run(
             [str(METALFISH_BIN)],
             input="uci\nisready\nposition startpos\ngo nodes 200\nquit\n",
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
         )
-        assert "bestmove" in result.stdout, f"No bestmove found in output: {result.stdout[-500:]}"
+        assert (
+            "bestmove" in result.stdout
+        ), f"No bestmove found in output: {result.stdout[-500:]}"
 
     # Temporarily disabled - movetime requires deeper investigation
     # def test_movetime():

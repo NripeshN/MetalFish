@@ -159,10 +159,11 @@ bool test_capture_history() {
   // Test gravity update
   history_update(captureHistory[W_QUEEN][SQ_E5][ROOK], 500);
   EXPECT(tc, captureHistory[W_QUEEN][SQ_E5][ROOK] > 0);
-  
+
   // Test negative bonus
   history_update(captureHistory[W_QUEEN][SQ_E5][ROOK], -300);
-  EXPECT(tc, captureHistory[W_QUEEN][SQ_E5][ROOK] > 0); // Should still be positive but reduced
+  EXPECT(tc, captureHistory[W_QUEEN][SQ_E5][ROOK] >
+                 0); // Should still be positive but reduced
 
   return tc.passed();
 }
@@ -173,44 +174,44 @@ bool test_capture_history() {
 
 bool test_history_gravity_update() {
   TestCase tc("HistoryGravityUpdate");
-  
+
   int16_t entry = 0;
-  
+
   // Test positive bonus
   history_update(entry, 1000);
   EXPECT(tc, entry > 0);
   int16_t after_positive = entry;
-  
+
   // Test that subsequent bonuses decay
   history_update(entry, 1000);
   EXPECT(tc, entry > after_positive);
   EXPECT(tc, entry < after_positive + 1000); // Should be less than linear sum
-  
+
   // Test negative bonus
   history_update(entry, -500);
   EXPECT(tc, entry < after_positive + 1000);
-  
+
   // Test clamping
   entry = 0;
   for (int i = 0; i < 100; i++)
     history_update(entry, 16384);
   EXPECT(tc, entry <= 16384); // Should not exceed max
-  
+
   return tc.passed();
 }
 
 bool test_stats_entry() {
   TestCase tc("StatsEntry");
-  
+
   StatsEntry<int16_t, 16384> entry;
   EXPECT(tc, int16_t(entry) == 0);
-  
+
   entry << 1000;
   EXPECT(tc, int16_t(entry) > 0);
-  
+
   entry << -500;
   EXPECT(tc, int16_t(entry) > 0); // Should still be positive
-  
+
   return tc.passed();
 }
 
@@ -220,21 +221,21 @@ bool test_stats_entry() {
 
 bool test_searched_list() {
   TestCase tc("SearchedList");
-  
+
   SearchedList list;
   EXPECT(tc, list.size() == 0);
-  
+
   Move m1(SQ_E2, SQ_E4);
   Move m2(SQ_D2, SQ_D4);
-  
+
   list.push_back(m1);
   EXPECT(tc, list.size() == 1);
   EXPECT(tc, list[0] == m1);
-  
+
   list.push_back(m2);
   EXPECT(tc, list.size() == 2);
   EXPECT(tc, list[1] == m2);
-  
+
   // Test iteration
   int count = 0;
   for (Move m : list) {
@@ -242,10 +243,10 @@ bool test_searched_list() {
     count++;
   }
   EXPECT(tc, count == 2);
-  
+
   list.clear();
   EXPECT(tc, list.size() == 0);
-  
+
   return tc.passed();
 }
 
@@ -485,8 +486,9 @@ bool test_singular_extension() {
 
   // Position where singular extension helps find winning line
   // Queen is clearly best at g5, attacking f6 and creating threats
-  pos.set("r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQR1K1 w - - 0 8",
-          false, &states->back());
+  pos.set(
+      "r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQR1K1 w - - 0 8",
+      false, &states->back());
 
   Search::Worker worker;
   Search::LimitsType limits;
@@ -809,98 +811,101 @@ bool test_low_ply_history() {
 
 bool test_correction_bundle() {
   TestCase tc("CorrectionBundle");
-  
+
   CorrectionBundle bundle;
   bundle.clear();
-  
+
   EXPECT(tc, bundle.pawn.load() == 0);
   EXPECT(tc, bundle.minor.load() == 0);
   EXPECT(tc, bundle.nonPawnWhite.load() == 0);
   EXPECT(tc, bundle.nonPawnBlack.load() == 0);
-  
+
   // Test pawn update
   bundle.update_pawn(100);
   EXPECT(tc, bundle.pawn.load() != 0);
-  
+
   // Test minor update
   bundle.update_minor(200);
   EXPECT(tc, bundle.minor.load() != 0);
-  
+
   // Test non-pawn updates
   bundle.update_nonpawn_white(150);
   bundle.update_nonpawn_black(150);
   EXPECT(tc, bundle.nonPawnWhite.load() != 0);
   EXPECT(tc, bundle.nonPawnBlack.load() != 0);
-  
+
   return tc.passed();
 }
 
 bool test_unified_correction_history() {
   TestCase tc("UnifiedCorrectionHistory");
-  
+
   UnifiedCorrectionHistory corrHist;
   corrHist.clear();
-  
+
   // Test indexing
   int idx = 100;
   corrHist.at(idx, WHITE).update_pawn(50);
   EXPECT(tc, corrHist.at(idx, WHITE).pawn.load() != 0);
   EXPECT(tc, corrHist.at(idx, BLACK).pawn.load() == 0); // Different color
-  
+
   // Test index wrapping
   int wrappedIdx = idx + CORRECTION_HISTORY_SIZE;
   EXPECT(tc, &corrHist.at(idx, WHITE) == &corrHist.at(wrappedIdx, WHITE));
-  
+
   return tc.passed();
 }
 
 bool test_correction_value_computation() {
   TestCase tc("CorrectionValueComputation");
-  
+
   init_bitboards();
   Position::init();
-  
+
   StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
   Position pos;
-  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false, &states->back());
-  
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
   UnifiedCorrectionHistory corrHist;
   corrHist.clear();
-  
+
   // Compute correction value with empty history
-  int corrValue = compute_full_correction_value(corrHist, nullptr, nullptr, pos, Move::none());
+  int corrValue = compute_full_correction_value(corrHist, nullptr, nullptr, pos,
+                                                Move::none());
   EXPECT(tc, corrValue != 0); // Should have default continuation value
-  
+
   // Add some corrections
   int pawnIdx = correction_history_index(pos.pawn_key());
   corrHist.at(pawnIdx, WHITE).update_pawn(100);
-  
-  int newCorrValue = compute_full_correction_value(corrHist, nullptr, nullptr, pos, Move::none());
+
+  int newCorrValue = compute_full_correction_value(corrHist, nullptr, nullptr,
+                                                   pos, Move::none());
   EXPECT(tc, newCorrValue != corrValue); // Should be different now
-  
+
   return tc.passed();
 }
 
 bool test_corrected_static_eval() {
   TestCase tc("CorrectedStaticEval");
-  
+
   Value rawEval = 100;
-  
+
   // Test with zero correction
   Value corrected = to_corrected_static_eval(rawEval, 0);
   EXPECT(tc, corrected == rawEval);
-  
+
   // Test with positive correction
   corrected = to_corrected_static_eval(rawEval, 131072); // Should add 1
   EXPECT(tc, corrected == rawEval + 1);
-  
+
   // Test clamping
   corrected = to_corrected_static_eval(VALUE_TB_WIN_IN_MAX_PLY, 1000000);
   EXPECT(tc, corrected <= VALUE_TB_WIN_IN_MAX_PLY - 1);
-  
+
   corrected = to_corrected_static_eval(VALUE_TB_LOSS_IN_MAX_PLY, -1000000);
   EXPECT(tc, corrected >= VALUE_TB_LOSS_IN_MAX_PLY + 1);
-  
+
   return tc.passed();
 }
 
@@ -951,49 +956,49 @@ bool test_time_management_increment() {
 
 bool test_tt_value_conversion() {
   TestCase tc("TTValueConversion");
-  
+
   // Test normal values
   Value v = 100;
   int ply = 5;
   Value ttVal = Search::value_to_tt(v, ply);
   Value recovered = Search::value_from_tt(ttVal, ply, 0);
   EXPECT(tc, recovered == v);
-  
+
   // Test mate values
   Value mateVal = VALUE_MATE - 10;
   ttVal = Search::value_to_tt(mateVal, ply);
   recovered = Search::value_from_tt(ttVal, ply, 0);
   EXPECT(tc, recovered == mateVal);
-  
+
   // Test mated values
   Value matedVal = -VALUE_MATE + 10;
   ttVal = Search::value_to_tt(matedVal, ply);
   recovered = Search::value_from_tt(ttVal, ply, 0);
   EXPECT(tc, recovered == matedVal);
-  
+
   // Test VALUE_NONE
   EXPECT(tc, Search::value_from_tt(VALUE_NONE, ply, 0) == VALUE_NONE);
-  
+
   return tc.passed();
 }
 
 bool test_tt_rule50_handling() {
   TestCase tc("TTRule50Handling");
-  
+
   // High rule50 count should affect mate scores
   Value mateVal = VALUE_MATE - 10;
   int ply = 5;
   Value ttVal = Search::value_to_tt(mateVal, ply);
-  
+
   // With low rule50, should recover mate
   Value recovered = Search::value_from_tt(ttVal, ply, 10);
   EXPECT(tc, recovered > VALUE_TB_WIN_IN_MAX_PLY);
-  
+
   // With very high rule50, mate might be adjusted
   recovered = Search::value_from_tt(ttVal, ply, 95);
   // Just verify it doesn't crash and returns something reasonable
   EXPECT(tc, recovered != VALUE_NONE);
-  
+
   return tc.passed();
 }
 
@@ -1003,24 +1008,24 @@ bool test_tt_rule50_handling() {
 
 bool test_draw_detection() {
   TestCase tc("DrawDetection");
-  
+
   init_bitboards();
   Position::init();
-  
+
   StateListPtr states = std::make_unique<std::deque<StateInfo>>(10);
   Position pos;
-  
+
   // Test 50-move rule (not yet triggered)
   pos.set("8/8/8/8/8/8/8/4K2k w - - 99 100", false, &states->back());
   // 99 half-moves, not yet draw
   EXPECT(tc, !pos.is_draw(0));
-  
+
   // Test insufficient material (K vs K)
   pos.set("8/8/8/8/8/8/8/4K2k w - - 0 1", false, &states->back());
   // This depends on implementation - just verify it runs
   bool isDraw = pos.is_draw(0);
   (void)isDraw; // May or may not be draw depending on implementation
-  
+
   return tc.passed();
 }
 
@@ -1030,40 +1035,42 @@ bool test_draw_detection() {
 
 bool test_see_basic() {
   TestCase tc("SEEBasic");
-  
+
   init_bitboards();
   Position::init();
-  
+
   StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
   Position pos;
-  
+
   // Position where pawn captures pawn (equal exchange)
-  pos.set("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2", false, &states->back());
-  
+  pos.set("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2",
+          false, &states->back());
+
   Move capture(SQ_E4, SQ_D5);
   // Pawn takes pawn should be >= 0
   EXPECT(tc, pos.see_ge(capture, 0));
-  
+
   return tc.passed();
 }
 
 bool test_see_losing_capture() {
   TestCase tc("SEELosingCapture");
-  
+
   init_bitboards();
   Position::init();
-  
+
   StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
   Position pos;
-  
+
   // Position where queen captures defended pawn (losing)
-  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false, &states->back());
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
   // No obvious losing capture in starting position, just verify SEE works
-  
+
   MoveList<CAPTURES> captures(pos);
   // Starting position has no captures
   EXPECT(tc, captures.size() == 0);
-  
+
   return tc.passed();
 }
 
@@ -1198,28 +1205,30 @@ bool test_selective_depth() {
 
 bool test_aspiration_windows() {
   TestCase tc("AspirationWindows");
-  
+
   init_bitboards();
   Position::init();
   Search::init();
   TT.resize(16);
   TT.clear();
-  
+
   StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
   Position pos;
-  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false, &states->back());
-  
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
   Search::Worker worker;
   Search::LimitsType limits;
   limits.depth = 6; // Deep enough to use aspiration windows
-  
+
   worker.start_searching(pos, limits, states);
   worker.wait_for_search_finished();
-  
+
   // Verify search completed and has reasonable score
   EXPECT(tc, !worker.rootMoves.empty());
-  EXPECT(tc, std::abs(worker.rootMoves[0].score) < 100); // Starting pos should be near 0
-  
+  EXPECT(tc, std::abs(worker.rootMoves[0].score) <
+                 100); // Starting pos should be near 0
+
   return tc.passed();
 }
 
@@ -1229,10 +1238,10 @@ bool test_aspiration_windows() {
 
 bool test_root_move_structure() {
   TestCase tc("RootMoveStructure");
-  
+
   Move m(SQ_E2, SQ_E4);
   Search::RootMove rm(m);
-  
+
   EXPECT(tc, rm.pv.size() == 1);
   EXPECT(tc, rm.pv[0] == m);
   EXPECT(tc, rm.score == -VALUE_INFINITE);
@@ -1240,13 +1249,13 @@ bool test_root_move_structure() {
   EXPECT(tc, rm.averageScore == -VALUE_INFINITE);
   EXPECT(tc, rm.effort == 0);
   EXPECT(tc, rm.meanSquaredScore == 0);
-  
+
   // Test comparison
   Search::RootMove rm2(Move(SQ_D2, SQ_D4));
   rm.score = 100;
   rm2.score = 50;
   EXPECT(tc, rm < rm2); // Higher score should sort first
-  
+
   return tc.passed();
 }
 
@@ -1256,26 +1265,26 @@ bool test_root_move_structure() {
 
 bool test_skill_level() {
   TestCase tc("SkillLevel");
-  
+
   // Test full strength
   Search::Skill fullStrength(20, 0);
   EXPECT(tc, !fullStrength.enabled());
-  
+
   // Test reduced strength
   Search::Skill reduced(10, 0);
   EXPECT(tc, reduced.enabled());
   EXPECT(tc, reduced.level == 10.0);
-  
+
   // Test UCI Elo
   Search::Skill eloSkill(20, 2000);
   EXPECT(tc, eloSkill.enabled());
   EXPECT(tc, eloSkill.level < 20.0);
-  
+
   // Test time_to_pick
   Search::Skill skill5(5, 0);
   EXPECT(tc, skill5.time_to_pick(6)); // depth = 1 + level
   EXPECT(tc, !skill5.time_to_pick(5));
-  
+
   return tc.passed();
 }
 
@@ -1285,32 +1294,33 @@ bool test_skill_level() {
 
 bool test_index_functions() {
   TestCase tc("IndexFunctions");
-  
+
   init_bitboards();
   Position::init();
-  
+
   StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
   Position pos;
-  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false, &states->back());
-  
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &states->back());
+
   // Test pawn_history_index
   int pawnIdx = pawn_history_index(pos);
   EXPECT(tc, pawnIdx >= 0 && pawnIdx < PAWN_HISTORY_SIZE);
-  
+
   // Test correction_history_index
   int corrIdx = correction_history_index(pos.pawn_key());
   EXPECT(tc, corrIdx >= 0 && corrIdx < CORRECTION_HISTORY_SIZE);
-  
+
   // Test minor_piece_key
   Key minorKey = minor_piece_key(pos);
   EXPECT(tc, minorKey != 0); // Starting position has minor pieces
-  
+
   // Test non_pawn_key
   Key whiteNonPawn = non_pawn_key(pos, WHITE);
   Key blackNonPawn = non_pawn_key(pos, BLACK);
   EXPECT(tc, whiteNonPawn != 0);
   EXPECT(tc, blackNonPawn != 0);
-  
+
   return tc.passed();
 }
 
@@ -1320,28 +1330,28 @@ bool test_index_functions() {
 
 bool test_mate_values() {
   TestCase tc("MateValues");
-  
+
   // Test mate_in
   Value mateIn5 = mate_in(5);
   EXPECT(tc, mateIn5 > VALUE_TB_WIN_IN_MAX_PLY);
   EXPECT(tc, mateIn5 < VALUE_MATE);
-  
+
   // Test mated_in
   Value matedIn5 = mated_in(5);
   EXPECT(tc, matedIn5 < VALUE_TB_LOSS_IN_MAX_PLY);
   EXPECT(tc, matedIn5 > -VALUE_MATE);
-  
+
   // Test is_win/is_loss
   EXPECT(tc, is_win(VALUE_MATE - 10));
   EXPECT(tc, !is_win(100));
   EXPECT(tc, is_loss(-VALUE_MATE + 10));
   EXPECT(tc, !is_loss(-100));
-  
+
   // Test is_decisive
   EXPECT(tc, is_decisive(VALUE_MATE - 10));
   EXPECT(tc, is_decisive(-VALUE_MATE + 10));
   EXPECT(tc, !is_decisive(100));
-  
+
   return tc.passed();
 }
 
@@ -1351,7 +1361,7 @@ bool test_mate_values() {
 
 bool test_continuation_history_weights() {
   TestCase tc("ContinuationHistoryWeights");
-  
+
   // Verify the weights are defined correctly
   EXPECT(tc, CONTHIST_BONUSES.size() == 6);
   EXPECT(tc, CONTHIST_BONUSES[0].ply == 1);
@@ -1366,7 +1376,7 @@ bool test_continuation_history_weights() {
   EXPECT(tc, CONTHIST_BONUSES[4].weight == 149);
   EXPECT(tc, CONTHIST_BONUSES[5].ply == 6);
   EXPECT(tc, CONTHIST_BONUSES[5].weight == 474);
-  
+
   return tc.passed();
 }
 

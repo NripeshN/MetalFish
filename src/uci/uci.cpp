@@ -78,9 +78,9 @@ void OptionsMap::init() {
   options["MultiPV"] = Option(1, 1, 500);
 
   // Skill Level options
-  options["Skill Level"] = Option(20, 0, 20);  // 0-20, 20 = full strength
+  options["Skill Level"] = Option(20, 0, 20); // 0-20, 20 = full strength
   options["UCI_LimitStrength"] = Option(false);
-  options["UCI_Elo"] = Option(1320, 1320, 3190);  // Elo range
+  options["UCI_Elo"] = Option(1320, 1320, 3190); // Elo range
 
   // NNUE options
   options["EvalFile"] =
@@ -337,7 +337,8 @@ void go(Position &pos, std::istringstream &is, StateListPtr &states) {
       main->start_searching(pos, limits, states);
 
       if (!main->rootMoves.empty()) {
-        std::cout << "bestmove " << move_to_uci(main->rootMoves[0].pv[0], false);
+        std::cout << "bestmove "
+                  << move_to_uci(main->rootMoves[0].pv[0], false);
         if (main->rootMoves[0].pv.size() > 1)
           std::cout << " ponder "
                     << move_to_uci(main->rootMoves[0].pv[1], false);
@@ -354,8 +355,7 @@ void go(Position &pos, std::istringstream &is, StateListPtr &states) {
     if (best && !best->rootMoves.empty()) {
       std::cout << "bestmove " << move_to_uci(best->rootMoves[0].pv[0], false);
       if (best->rootMoves[0].pv.size() > 1)
-        std::cout << " ponder "
-                  << move_to_uci(best->rootMoves[0].pv[1], false);
+        std::cout << " ponder " << move_to_uci(best->rootMoves[0].pv[1], false);
       std::cout << std::endl;
     }
   }
@@ -372,7 +372,8 @@ void bench(Position &pos, std::istringstream &is, StateListPtr &states) {
       "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
       "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
       "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-      "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10"};
+      "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 "
+      "10"};
 
   uint64_t totalNodes = 0;
   auto startTime = Search::now();
