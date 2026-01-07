@@ -267,18 +267,19 @@ bool test_move_ordering_tt_first() {
 
   // Set up history tables
   ButterflyHistory mainHistory;
-  KillerMoves killers;
-  CounterMoveHistory counterMoves;
+  LowPlyHistory lowPlyHistory;
   CapturePieceToHistory captureHistory;
+  PawnHistory pawnHistory;
   std::memset(mainHistory, 0, sizeof(mainHistory));
-  std::memset(counterMoves, 0, sizeof(counterMoves));
+  std::memset(lowPlyHistory, 0, sizeof(lowPlyHistory));
   std::memset(captureHistory, 0, sizeof(captureHistory));
+  std::memset(pawnHistory, 0, sizeof(pawnHistory));
 
   Move ttMove(SQ_E2, SQ_E4);
-  const PieceToHistory *contHist[4] = {nullptr, nullptr, nullptr, nullptr};
+  const PieceToHistory *contHist[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
-  MovePicker mp(pos, ttMove, 10, &mainHistory, &killers, &counterMoves,
-                &captureHistory, contHist, 0);
+  MovePicker mp(pos, ttMove, 10, &mainHistory, &lowPlyHistory, &captureHistory,
+                contHist, &pawnHistory, 0);
 
   Move first = mp.next_move();
   EXPECT(tc, first == ttMove); // TT move should be first
@@ -299,17 +300,18 @@ bool test_movepicker_basic() {
           &states->back());
 
   ButterflyHistory mainHistory;
-  KillerMoves killers;
-  CounterMoveHistory counterMoves;
+  LowPlyHistory lowPlyHistory;
   CapturePieceToHistory captureHistory;
+  PawnHistory pawnHistory;
   std::memset(mainHistory, 0, sizeof(mainHistory));
-  std::memset(counterMoves, 0, sizeof(counterMoves));
+  std::memset(lowPlyHistory, 0, sizeof(lowPlyHistory));
   std::memset(captureHistory, 0, sizeof(captureHistory));
+  std::memset(pawnHistory, 0, sizeof(pawnHistory));
 
-  const PieceToHistory *contHist[4] = {nullptr, nullptr, nullptr, nullptr};
+  const PieceToHistory *contHist[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
-  MovePicker mp(pos, Move::none(), 10, &mainHistory, &killers, &counterMoves,
-                &captureHistory, contHist, 0);
+  MovePicker mp(pos, Move::none(), 10, &mainHistory, &lowPlyHistory, &captureHistory,
+                contHist, &pawnHistory, 0);
 
   // Count moves - should be 20 for starting position
   int count = 0;

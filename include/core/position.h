@@ -121,6 +121,10 @@ public:
     return (!empty(m.to_sq()) && m.type_of() != CASTLING) ||
            m.type_of() == EN_PASSANT;
   }
+  // capture_stage includes queen promotions for consistency with move generation
+  bool capture_stage(Move m) const {
+    return capture(m) || m.promotion_type() == QUEEN;
+  }
   Piece moved_piece(Move m) const { return piece_on(m.from_sq()); }
   Piece captured_piece() const { return st->capturedPiece; }
 
@@ -185,5 +189,20 @@ private:
 };
 
 std::ostream &operator<<(std::ostream &os, const Position &pos);
+
+// Inline implementation of attacks_by template
+template <PieceType Pt>
+inline Bitboard Position::attacks_by(Color c) const {
+  if constexpr (Pt == PAWN) {
+    return c == WHITE ? pawn_attacks_bb<WHITE>(pieces(WHITE, PAWN))
+                      : pawn_attacks_bb<BLACK>(pieces(BLACK, PAWN));
+  } else {
+    Bitboard threats = 0;
+    Bitboard attackers = pieces(c, Pt);
+    while (attackers)
+      threats |= attacks_bb(Pt, pop_lsb(attackers), pieces());
+    return threats;
+  }
+}
 
 } // namespace MetalFish
