@@ -780,6 +780,16 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     }
   }
 
+  // Small ProbCut idea: TT-based pruning before move loop
+  // If TT has a lower bound significantly above beta, we can return early
+  if (!PvNode && ttHit && (tte->bound() & BOUND_LOWER) && 
+      tte->depth() >= depth - 4 && !ss->excludedMove) {
+    Value probCutBeta = beta + 418;
+    if (ttValue >= probCutBeta && std::abs(beta) < VALUE_TB_WIN_IN_MAX_PLY &&
+        std::abs(ttValue) < VALUE_TB_WIN_IN_MAX_PLY)
+      return probCutBeta;
+  }
+
   // Search moves
   uint64_t prevNodes = nodes.load(); // For effort tracking at root
   for (Move *m = moves; m != end; ++m) {
