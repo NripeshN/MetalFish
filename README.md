@@ -13,6 +13,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 ### Search (50+ Stockfish Features Implemented)
 
 #### Move Ordering
+
 - **ButterflyHistory** - Quiet move success tracking by from/to squares
 - **KillerMoves** - Refutation moves per ply
 - **CounterMoveHistory** - Moves that refute the previous move
@@ -24,6 +25,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **SearchedList** - Fixed-size list for tracking searched moves (32 capacity)
 
 #### Search Extensions
+
 - **Check Extension** - Extend when giving check
 - **Singular Extension** - Extend clearly best moves (with double extension)
 - **Shuffling Detection** - Avoid over-extending in repetitive positions
@@ -33,6 +35,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Upcoming Repetition Detection** - Proactive repetition avoidance
 
 #### Pruning Techniques
+
 - **Null Move Pruning** - With verification search at high depths
 - **Futility Pruning** - For quiet moves and captures
 - **SEE-based Pruning** - Static Exchange Evaluation pruning
@@ -46,14 +49,16 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **History-based Pruning** - Skip moves with very negative history
 
 #### Evaluation
+
 - **NNUE Support** - Stockfish .nnue file loading with GPU acceleration
 - **Classical Evaluation** - Material + piece-square tables fallback
 - **Rule50 Dampening** - Linear eval reduction as 50-move rule approaches
 - **Full Correction History** - Pawn, minor piece, non-pawn (white/black), continuation
 - **Draw Randomization** - Prevent 3-fold repetition blindness
-- **Optimism Blending** - Material-scaled optimism: (nnue * (77871 + mat) + opt * (7191 + mat)) / 77871
+- **Optimism Blending** - Material-scaled optimism: (nnue _ (77871 + mat) + opt _ (7191 + mat)) / 77871
 
 #### Search Infrastructure
+
 - **Transposition Table** - With aging, generation tracking, and rule50 handling
 - **Proper TT Value Handling** - value_to_tt/value_from_tt with rule50 adjustment
 - **Aspiration Windows** - With meanSquaredScore-based delta sizing
@@ -73,6 +78,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Syzygy Tablebases** - Endgame tablebase probing interface
 
 ### GPU Acceleration (Metal)
+
 - GPU-accelerated batch position evaluation
 - Metal compute shaders for NNUE forward pass
 - **GPU incremental accumulator updates** - Efficient NNUE updates
@@ -83,6 +89,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - GPU perft for verification
 
 ### Move Generation
+
 - Magic bitboards for sliding pieces
 - Legal move generation with pin detection
 - Staged move generation (captures, killers, quiets)
@@ -115,6 +122,7 @@ make -j$(sysctl -n hw.ncpu)
 ```
 
 UCI commands:
+
 ```
 uci
 setoption name MultiPV value 3
@@ -158,17 +166,18 @@ MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For si
 
 ## Benchmark Results
 
-*Last updated: 2025-01-07*
+_Last updated: 2025-01-07_
 
 ### Performance
 
-| Metric | Value |
-|--------|-------|
-| Perft(6) Nodes | 119,060,324 |
-| All Perft Tests | 30/30 Passing |
-| Unit Tests | 28/28 Search, 5/5 Core |
+| Metric          | Value                  |
+| --------------- | ---------------------- |
+| Perft(6) Nodes  | 119,060,324            |
+| All Perft Tests | 30/30 Passing          |
+| Unit Tests      | 28/28 Search, 5/5 Core |
 
 ### Notes
+
 - Benchmarks run on Apple Silicon (M-series)
 - Hash size: 64 MB (default), Threads: 1 (single-threaded)
 - GPU acceleration via Metal for batch evaluation
@@ -181,10 +190,12 @@ GPL-3.0 - Same as Stockfish
 ## Credits
 
 **Inspired by:**
+
 - [Stockfish](https://github.com/official-stockfish/Stockfish) - Search algorithms, NNUE architecture
 - [MLX](https://github.com/ml-explore/mlx) - Metal programming patterns
 
 **NNUE Training Data:**
+
 - Networks compatible with this engine use training data from [Leela Chess Zero](https://lczero.org/) (ODbL license)
 
 ## Author

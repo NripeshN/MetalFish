@@ -119,19 +119,32 @@ template <> inline void MovePicker::score<CAPTURES>() {
 
 template <> inline void MovePicker::score<QUIETS>() {
   Color us = pos.side_to_move();
+  
   for (ExtMove *it = cur; it != endMoves; ++it) {
     Move m = *it;
+    Square from = m.from_sq();
     Square to = m.to_sq();
     Piece moved = pos.moved_piece(m);
     int value = 0;
+    
+    // History scores (Stockfish weights)
     if (mainHistory)
-      value = (*mainHistory)[us][m.from_sq() * 64 + to];
+      value = 2 * (*mainHistory)[us][from * 64 + to];
     if (continuationHistory) {
-      for (int i = 0; i < 4 && continuationHistory[i]; ++i)
-        value += (*continuationHistory[i])[moved][to];
+      if (continuationHistory[0])
+        value += (*continuationHistory[0])[moved][to];
+      if (continuationHistory[1])
+        value += (*continuationHistory[1])[moved][to];
+      if (continuationHistory[2])
+        value += (*continuationHistory[2])[moved][to];
+      if (continuationHistory[3])
+        value += (*continuationHistory[3])[moved][to];
     }
+    
+    // Killer move bonus
     if (killers && killers->is_killer(ply, m))
       value += 10000;
+    
     it->value = value;
   }
 }
