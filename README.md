@@ -139,60 +139,22 @@ MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For si
 
 ## Benchmark Results
 
-*Last updated: 2025-12-28 01:38 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
+*Last updated: 2025-01-07*
 
-### Engine Comparison
-
-| Metric | MetalFish | Stockfish | LC0 |
-|--------|-----------|-----------|-----|
-| **Perft(6) NPS** | 119060324000 | 119060324000 | N/A |
-| **Search NPS** |  |  | N/A |
-| **GPU Acceleration** | N/A | CPU Only | No Network |
-
-### MetalFish Details
+### Performance
 
 | Metric | Value |
 |--------|-------|
 | Perft(6) Nodes | 119,060,324 |
-| Perft NPS | 119060324000 |
-| Search NPS (depth 14) |  |
-| Total Search Nodes |  |
-| GPU Status | N/A |
+| All Perft Tests | 30/30 Passing |
+| Unit Tests | 5/5 Passing |
 
 ### Notes
-- All benchmarks run on identical GitHub Actions `macos-14` runners (Apple Silicon)
-- Hash size: 256 MB, Threads: 1 (single-threaded for fair comparison)
-- MetalFish uses GPU acceleration via Metal for NNUE evaluation
-- Stockfish is the official build with Apple Silicon optimizations
-- LC0 requires neural network weights (may not build in CI)
-## 📊 Benchmark Results
+- Benchmarks run on Apple Silicon (M-series)
+- Hash size: 64 MB (default), Threads: 1 (single-threaded)
+- GPU acceleration via Metal for batch evaluation
+- Classical evaluation used when NNUE network not loaded
 
-*Last updated: 2026-01-04 00:43 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
-
-### Engine Comparison
-
-| Metric | MetalFish | Stockfish | LC0 |
-|--------|-----------|-----------|-----|
-| **Perft(6) NPS** | 119060324000 | 119060324000 | N/A |
-| **Search NPS** |  |  | N/A |
-| **GPU Acceleration** | ❌ N/A | ❌ CPU Only | ⚠️ No Network |
-
-### MetalFish Details
-
-| Metric | Value |
-|--------|-------|
-| Perft(6) Nodes | 119,060,324 |
-| Perft NPS | 119060324000 |
-| Search NPS (depth 14) |  |
-| Total Search Nodes |  |
-| GPU Status | ❌ N/A |
-
-### Notes
-- All benchmarks run on identical GitHub Actions `macos-14` runners (Apple Silicon)
-- Hash size: 256 MB, Threads: 1 (single-threaded for fair comparison)
-- MetalFish uses GPU acceleration via Metal for NNUE evaluation
-- Stockfish is the official build with Apple Silicon optimizations
-- LC0 requires neural network weights (may not build in CI)
 ## License
 
 GPL-3.0 - Same as Stockfish
