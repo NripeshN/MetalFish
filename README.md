@@ -10,7 +10,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 
 ## Features
 
-### Search (29 Stockfish Features Implemented)
+### Search (32+ Stockfish Features Implemented)
 
 #### Move Ordering
 - **ButterflyHistory** - Quiet move success tracking by from/to squares
@@ -19,7 +19,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **CapturePieceToHistory** - Capture move success tracking
 - **PawnHistory** - Pawn structure-aware history (indexed by pawn key)
 - **LowPlyHistory** - Extra weight for moves near root (first 5 plies)
-- **ContinuationHistory** - Move sequence success (1, 2, 4 ply lookback)
+- **ContinuationHistory** - Move sequence success (1, 2, 4, 6 ply lookback)
 
 #### Search Extensions
 - **Check Extension** - Extend when giving check
@@ -41,7 +41,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **History-based Pruning** - Skip moves with very negative history
 
 #### Evaluation
-- **NNUE Support** - Stockfish .nnue file loading
+- **NNUE Support** - Stockfish .nnue file loading with GPU acceleration
 - **Rule50 Dampening** - Linear eval reduction as 50-move rule approaches
 - **Correction History** - Adjust static eval based on search results
 - **Draw Randomization** - Prevent 3-fold repetition blindness
@@ -53,10 +53,14 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Dynamic Time Management** - Adjust based on stability and score changes
 - **Iterative Deepening** - Progressive deepening with info output
 - **Quiescence Search** - Tactical resolution at leaf nodes
+- **MultiPV** - Multiple principal variation search
+- **Pondering** - Think on opponent's time
+- **Thread Pool** - Infrastructure for multi-threaded search
 
 ### GPU Acceleration (Metal)
 - GPU-accelerated batch position evaluation
 - Metal compute shaders for NNUE forward pass
+- **GPU incremental accumulator updates** - Efficient NNUE updates
 - Unified memory (zero-copy) on Apple Silicon
 - GPU-accelerated move generation helpers
 - GPU-accelerated SEE calculation
@@ -68,14 +72,9 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 
 ## Not Yet Implemented (Major Stockfish Features)
 
-- **Lazy SMP** - Multi-threaded search
+- **Lazy SMP** - Multi-threaded parallel search (infrastructure ready)
 - **Syzygy Tablebases** - Endgame tablebase probing
-- **MultiPV** - Multiple principal variation search
-- **Pondering** - Thinking on opponent's time
-- **NNUE Incremental Updates** - Efficient accumulator updates
-- **Full Continuation History** - 6-ply lookback (currently 4-ply)
 - **Optimism Blending** - Material-scaled optimism in eval
-- **Cuckoo Hashing** - For faster repetition detection
 
 ## Requirements
 
@@ -102,9 +101,13 @@ make -j$(sysctl -n hw.ncpu)
 UCI commands:
 ```
 uci
+setoption name MultiPV value 3
 position startpos
 go depth 15
 go movetime 5000
+go ponder
+ponderhit
+stop
 quit
 ```
 
@@ -154,37 +157,6 @@ MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For si
 - Hash size: 64 MB (default), Threads: 1 (single-threaded)
 - GPU acceleration via Metal for batch evaluation
 - Classical evaluation used when NNUE network not loaded
-
-## 📊 Benchmark Results
-
-*Last updated: 2026-01-07 16:00 UTC | Runner: GitHub Actions macos-14 (Apple Silicon)*
-
-### Engine Comparison
-
-| Metric | MetalFish | Stockfish | LC0 |
-|--------|-----------|-----------|-----|
-| **Perft(6) NPS** | 119060324000 | 119060324000 | N/A |
-| **Search NPS** |  |  | N/A |
-| **GPU Acceleration** | ❌ N/A | ❌ CPU Only | ⚠️ No Network |
-
-### MetalFish Details
-
-| Metric | Value |
-|--------|-------|
-| Perft(6) Nodes | 119,060,324 |
-| Perft NPS | 119060324000 |
-| Search NPS (depth 14) |  |
-| Total Search Nodes |  |
-| GPU Status | ❌ N/A |
-
-### Notes
-- All benchmarks run on identical GitHub Actions `macos-14` runners (Apple Silicon)
-- Hash size: 256 MB, Threads: 1 (single-threaded for fair comparison)
-- MetalFish uses GPU acceleration via Metal for NNUE evaluation
-- Stockfish is the official build with Apple Silicon optimizations
-- LC0 requires neural network weights (may not build in CI)
-
-
 
 ## License
 

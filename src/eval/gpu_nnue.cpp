@@ -204,6 +204,38 @@ kernel void feature_transform(
     acc[h] = sum;
 }
 
+// Incremental accumulator update kernel
+// Adds features from 'added' and removes features from 'removed'
+kernel void feature_update(
+    device const int16_t* weights [[buffer(0)]],
+    device int32_t* acc [[buffer(1)]],
+    device const int* added [[buffer(2)]],
+    device const int* removed [[buffer(3)]],
+    constant int& num_added [[buffer(4)]],
+    constant int& num_removed [[buffer(5)]],
+    constant int& ft_dims [[buffer(6)]],
+    uint gid [[thread_position_in_grid]])
+{
+    int h = gid;
+    if (h >= ft_dims) return;
+    
+    int32_t delta = 0;
+    
+    // Add new features
+    for (int i = 0; i < num_added; i++) {
+        int f = added[i];
+        delta += weights[f * ft_dims + h];
+    }
+    
+    // Remove old features
+    for (int i = 0; i < num_removed; i++) {
+        int f = removed[i];
+        delta -= weights[f * ft_dims + h];
+    }
+    
+    acc[h] += delta;
+}
+
 // Forward pass kernel
 kernel void nnue_forward(
     device const int32_t* acc_white [[buffer(0)]],
@@ -295,9 +327,10 @@ kernel void nnue_forward(
     };
 
     ft_kernel_ = get_kernel("feature_transform");
+    ft_update_kernel_ = get_kernel("feature_update");
     forward_kernel_ = get_kernel("nnue_forward");
 
-    if (!ft_kernel_ || !forward_kernel_) {
+    if (!ft_kernel_ || !ft_update_kernel_ || !forward_kernel_) {
       std::cerr << "[GPU_NNUE] Failed to create kernels" << std::endl;
       return false;
     }
@@ -426,6 +459,69 @@ void GPUNNUEEvaluator::compute_accumulator(const Position &pos,
          FT_OUT_DIMS * sizeof(int32_t));
 
   acc.computed = true;
+}
+
+void GPUNNUEEvaluator::update_accumulator(GPUAccumulator &acc,
+                                          const std::vector<int> &added,
+                                          const std::vector<int> &removed,
+                                          Color perspective) {
+  if (!ready_ || (added.empty() && removed.empty())) {
+    return;
+  }
+
+  // Allocate buffers for added/removed features
+  MTL::ResourceOptions buf_opts = MTL::ResourceStorageModeShared;
+  MTL::Buffer *added_buf = device_->newBuffer(
+      std::max(added.size(), size_t(1)) * sizeof(int), buf_opts);
+  MTL::Buffer *removed_buf = device_->newBuffer(
+      std::max(removed.size(), size_t(1)) * sizeof(int), buf_opts);
+
+  // Copy feature indices
+  if (!added.empty()) {
+    memcpy(added_buf->contents(), added.data(), added.size() * sizeof(int));
+  }
+  if (!removed.empty()) {
+    memcpy(removed_buf->contents(), removed.data(),
+           removed.size() * sizeof(int));
+  }
+
+  // Get the accumulator to update
+  int32_t *acc_data = (perspective == WHITE) ? acc.white.data() : acc.black.data();
+
+  // Copy accumulator to GPU buffer
+  int32_t *buf = static_cast<int32_t *>(acc_buffer_->contents());
+  memcpy(buf, acc_data, FT_OUT_DIMS * sizeof(int32_t));
+
+  auto cmd = queue_->commandBuffer();
+  auto enc = cmd->computeCommandEncoder();
+
+  enc->setComputePipelineState(ft_update_kernel_);
+
+  enc->setBuffer(weights_->ft_weights, 0, 0);
+  enc->setBuffer(acc_buffer_, 0, 1);
+  enc->setBuffer(added_buf, 0, 2);
+  enc->setBuffer(removed_buf, 0, 3);
+
+  int num_added = static_cast<int>(added.size());
+  int num_removed = static_cast<int>(removed.size());
+  int ft_dims = FT_OUT_DIMS;
+
+  enc->setBytes(&num_added, sizeof(int), 4);
+  enc->setBytes(&num_removed, sizeof(int), 5);
+  enc->setBytes(&ft_dims, sizeof(int), 6);
+
+  enc->dispatchThreads(MTL::Size(FT_OUT_DIMS, 1, 1), MTL::Size(256, 1, 1));
+
+  enc->endEncoding();
+  cmd->commit();
+  cmd->waitUntilCompleted();
+
+  // Copy back to accumulator
+  memcpy(acc_data, buf, FT_OUT_DIMS * sizeof(int32_t));
+
+  // Cleanup
+  added_buf->release();
+  removed_buf->release();
 }
 
 Value GPUNNUEEvaluator::forward_pass(const GPUAccumulator &acc, Color stm) {
