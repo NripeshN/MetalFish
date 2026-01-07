@@ -377,11 +377,23 @@ void Worker::iterative_deepening() {
   int searchAgainCounter = 0;
   bool increaseDepth = true;
   
+  // Lazy SMP: helper threads skip some depths for diversity
+  // Main thread (idx 0) searches all depths, helpers skip based on their index
+  const int skipSize[] = {1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4};
+  const int skipPhase[] = {0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7};
+  
   for (rootDepth = 1; rootDepth <= (limits.depth ? limits.depth : MAX_PLY);
        ++rootDepth) {
     // Check for stop conditions
     if (stopRequested || Signals_stop)
       break;
+    
+    // Lazy SMP: skip some depths for helper threads
+    if (threadIdx > 0) {
+      int idx = std::min(size_t(19), threadIdx - 1);
+      if ((rootDepth + skipPhase[idx]) % skipSize[idx] != 0)
+        continue;
+    }
 
     // Save previous scores for all root moves
     for (auto &rm : rootMoves)
@@ -945,6 +957,23 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     // New depth with extension
     Depth newDepth = depth - 1 + extension;
     Value value;
+    
+    // Calculate statScore for LMR adjustment
+    Color us = pos.side_to_move();
+    int moveIdx = move.from_sq() * 64 + move.to_sq();
+    
+    if (isCapture) {
+      Piece captured = pos.piece_on(move.to_sq());
+      PieceType capturedType = captured != NO_PIECE ? type_of(captured) : PAWN;
+      ss->statScore = 868 * PieceValue[make_piece(WHITE, capturedType)] / 128
+                    + captureHistory[movedPc][move.to_sq()][capturedType];
+    } else {
+      ss->statScore = 2 * mainHistory[us][moveIdx];
+      if (ss->ply >= 1 && (ss - 1)->continuationHistory)
+        ss->statScore += (*(ss - 1)->continuationHistory)[movedPc][move.to_sq()];
+      if (ss->ply >= 2 && (ss - 2)->continuationHistory)
+        ss->statScore += (*(ss - 2)->continuationHistory)[movedPc][move.to_sq()];
+    }
 
     if (depth >= 2 && moveCount > 1 + (PvNode ? 1 : 0)) {
       int reduction =
@@ -999,15 +1028,15 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
       if ((ss + 1)->cutoffCnt > 1)
         reduction += 1 + ((ss + 1)->cutoffCnt > 2) + ((ss + 1)->cutoffCnt > 3);
 
-      // Factor 11: Decrease for promotions
+      // Factor 12: Decrease for promotions
       if (move.type_of() == PROMOTION)
         reduction -= 2;
 
-      // Factor 12: Increase for very late moves
+      // Factor 13: Increase for very late moves
       if (moveCount > 10)
         reduction++;
 
-      // Factor 13: Decrease for moves to central squares
+      // Factor 14: Decrease for moves to central squares
       {
         File f = file_of(move.to_sq());
         Rank r = rank_of(move.to_sq());
@@ -1015,10 +1044,14 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
           reduction--;
       }
 
-      // Factor 14: Decrease for recaptures (capturing on same square as previous)
+      // Factor 15: Decrease for recaptures (capturing on same square as previous)
       if (isCapture && ss->ply >= 1 && (ss - 1)->currentMove.is_ok() &&
           move.to_sq() == (ss - 1)->currentMove.to_sq())
         reduction--;
+      
+      // Factor 16: Adjust based on statScore (history-based)
+      // Decrease for moves with good history, increase for bad history
+      reduction -= ss->statScore * 850 / 8192;
 
       reduction = std::max(0, std::min(reduction, newDepth - 1));
 
