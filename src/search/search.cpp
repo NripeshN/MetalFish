@@ -220,6 +220,84 @@ void Worker::update_capture_stats(Piece piece, Square to, PieceType captured, in
   history_update(captureHistory[piece][to][captured], bonus);
 }
 
+// Update quiet histories (matching Stockfish)
+void Worker::update_quiet_histories(const Position &pos, Stack *ss, Move move, int bonus) {
+  Color us = pos.side_to_move();
+  int idx = move.from_sq() * 64 + move.to_sq();
+  
+  // Update main history
+  history_update(mainHistory[us][idx], bonus);
+  
+  // Update low ply history
+  if (ss->ply < LOW_PLY_HISTORY_SIZE)
+    history_update(lowPlyHistory[ss->ply][idx], bonus * 805 / 1024);
+  
+  // Update continuation histories
+  update_continuation_histories(ss, pos.moved_piece(move), move.to_sq(), bonus * 896 / 1024);
+  
+  // Update pawn history with asymmetric bonus (higher for positive)
+  int pIdx = pawn_history_index(pos);
+  history_update(pawnHistory[pIdx][pos.moved_piece(move)][move.to_sq()], 
+                 bonus * (bonus > 0 ? 905 : 505) / 1024);
+}
+
+// Update all statistics after a move (matching Stockfish)
+void Worker::update_all_stats(const Position &pos, Stack *ss, Move bestMove, Square prevSq,
+                              SearchedList &quietsSearched, SearchedList &capturesSearched,
+                              Depth depth, Move ttMove, int moveCount) {
+  
+  Piece movedPiece = pos.moved_piece(bestMove);
+  
+  // Calculate bonus and malus based on depth and other factors
+  int bonus = std::min(116 * depth - 81, 1515) + 347 * (bestMove == ttMove) + 
+              (ss - 1)->statScore / 32;
+  int malus = std::min(848 * depth - 207, 2446) - 17 * moveCount;
+  
+  if (!pos.capture(bestMove)) {
+    // Best move is quiet - update quiet histories
+    update_quiet_histories(pos, ss, bestMove, bonus * 910 / 1024);
+    
+    // Update killer and counter moves
+    killers.update(ss->ply, bestMove);
+    if (ss->ply >= 1 && (ss - 1)->currentMove.is_ok()) {
+      Piece prevPiece = pos.piece_on((ss - 1)->currentMove.to_sq());
+      if (prevPiece != NO_PIECE)
+        counterMoves[prevPiece][(ss - 1)->currentMove.to_sq()] = bestMove;
+    }
+    
+    // Decrease stats for all non-best quiet moves
+    int i = 0;
+    for (Move move : quietsSearched) {
+      i++;
+      int actualMalus = malus * 1085 / 1024;
+      if (i > 5)
+        actualMalus -= actualMalus * (i - 5) / i;
+      update_quiet_histories(pos, ss, move, -actualMalus);
+    }
+  } else {
+    // Best move is capture - update capture history
+    PieceType capturedPiece = type_of(pos.piece_on(bestMove.to_sq()));
+    history_update(captureHistory[movedPiece][bestMove.to_sq()][capturedPiece], 
+                   bonus * 1395 / 1024);
+  }
+  
+  // Extra penalty for a quiet early move that was not a TT move in
+  // previous ply when it gets refuted
+  if (prevSq != SQ_NONE && ((ss - 1)->moveCount == 1 + (ss - 1)->ttHit) && 
+      !pos.captured_piece()) {
+    Piece pc = pos.piece_on(prevSq);
+    if (pc != NO_PIECE)
+      update_continuation_histories(ss - 1, pc, prevSq, -malus * 602 / 1024);
+  }
+  
+  // Decrease stats for all non-best capture moves
+  for (Move move : capturesSearched) {
+    Piece mp = pos.moved_piece(move);
+    PieceType capturedPiece = type_of(pos.piece_on(move.to_sq()));
+    history_update(captureHistory[mp][move.to_sq()][capturedPiece], -malus * 1448 / 1024);
+  }
+}
+
 // Start searching
 void Worker::start_searching(Position &pos, const LimitsType &lim,
                              StateListPtr &st) {
@@ -319,12 +397,22 @@ void Worker::iterative_deepening() {
         Value avg = rootMoves[pvIdx].averageScore != -VALUE_INFINITE
                         ? rootMoves[pvIdx].averageScore
                         : (pvIdx == 0 ? bestValue : rootMoves[pvIdx].score);
-        delta = 16 + std::abs(avg) * std::abs(avg) / 21367;
+        
+        // Use meanSquaredScore for delta calculation (matching Stockfish)
+        int64_t mss = rootMoves[pvIdx].meanSquaredScore;
+        delta = 5 + threadIdx % 8 + std::abs(mss) / 9000;
         alpha = std::max(avg - delta, -VALUE_INFINITE);
         beta = std::min(avg + delta, VALUE_INFINITE);
+        
+        // Calculate optimism based on average score (matching Stockfish)
+        Color us = rootPos->side_to_move();
+        optimism[us] = 142 * avg / (std::abs(avg) + 91);
+        optimism[~us] = -optimism[us];
       } else {
         alpha = -VALUE_INFINITE;
         beta = VALUE_INFINITE;
+        // Reset optimism for shallow depths
+        optimism[WHITE] = optimism[BLACK] = VALUE_ZERO;
       }
 
       // Main search
@@ -357,13 +445,18 @@ void Worker::iterative_deepening() {
         delta += delta / 3;
       }
 
-      // Update average score (exponential moving average)
+      // Update average score (exponential moving average) and mean squared score
       if (pvIdx < int(rootMoves.size())) {
         Value prevAvg = rootMoves[pvIdx].averageScore;
         if (prevAvg == -VALUE_INFINITE)
           rootMoves[pvIdx].averageScore = bestValue;
         else
           rootMoves[pvIdx].averageScore = (prevAvg * 2 + bestValue) / 3;
+        
+        // Update mean squared score for aspiration window sizing
+        int64_t diff = bestValue - rootMoves[pvIdx].averageScore;
+        rootMoves[pvIdx].meanSquaredScore = 
+            (rootMoves[pvIdx].meanSquaredScore * 3 + diff * diff) / 4;
       }
 
       // Output search info for this PV line
@@ -635,6 +728,12 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   int moveCount = 0;
   Value bestValue = -VALUE_INFINITE;
   Move bestMove = Move::none();
+  
+  // Track searched moves for history updates
+  SearchedList quietsSearched;
+  SearchedList capturesSearched;
+  Square prevSq = ss->ply >= 1 && (ss - 1)->currentMove.is_ok() 
+                  ? (ss - 1)->currentMove.to_sq() : SQ_NONE;
 
   // Generate moves - at root, use rootMoves; otherwise generate all
   Move moves[MAX_MOVES];
@@ -915,6 +1014,15 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     if (stopRequested || Signals_stop)
       return VALUE_ZERO;
 
+    // Track searched moves for history updates (before checking if it improves)
+    if (move != bestMove) {
+      if (pos.capture(move)) {
+        capturesSearched.push_back(move);
+      } else {
+        quietsSearched.push_back(move);
+      }
+    }
+
     // Update best value
     if (value > bestValue) {
       bestValue = value;
@@ -933,21 +1041,9 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
         }
 
         if (value >= beta) {
-          // Beta cutoff - update history statistics
-          int bonus = std::min(16 * depth * depth, 1200);
-
-          if (!pos.capture(move)) {
-            // Update quiet move statistics
-            update_quiet_stats(ss, move, bonus);
-          } else {
-            // Update capture statistics
-            Piece moved = pos.moved_piece(move);
-            Square to = move.to_sq();
-            Piece captured = pos.piece_on(to);
-            PieceType capturedType =
-                captured != NO_PIECE ? type_of(captured) : PAWN;
-            update_capture_stats(moved, to, capturedType, bonus);
-          }
+          // Beta cutoff - use update_all_stats for comprehensive history updates
+          update_all_stats(pos, ss, move, prevSq, quietsSearched, capturesSearched,
+                           depth, ttMove, moveCount);
           
           // Increment cutoffCnt for LMR adjustment in parent
           ss->cutoffCnt += (extension < 2) || PvNode;
@@ -1115,8 +1211,23 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
   return bestValue;
 }
 
-// Evaluate position using GPU-accelerated NNUE
-Value Worker::evaluate(const Position &pos) { return Eval::evaluate(pos); }
+// Evaluate position using GPU-accelerated NNUE with optimism blending
+Value Worker::evaluate(const Position &pos) { 
+  Value rawEval = Eval::evaluate(pos);
+  
+  // Blend optimism with evaluation based on material
+  int material = 534 * pos.count<PAWN>() + pos.non_pawn_material();
+  int opt = optimism[pos.side_to_move()];
+  
+  // Stockfish formula: (nnue * (77871 + material) + optimism * (7191 + material)) / 77871
+  Value v = (rawEval * (77871 + material) + opt * (7191 + material)) / 77871;
+  
+  // Damp down evaluation linearly when shuffling (rule50)
+  v -= v * pos.rule50_count() / 199;
+  
+  // Guarantee evaluation does not hit tablebase range
+  return std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);
+}
 
 // Explicit template instantiations
 template Value Worker::search<Root>(Position &, Stack *, Value, Value, Depth,

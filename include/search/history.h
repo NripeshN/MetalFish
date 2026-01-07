@@ -31,6 +31,50 @@ constexpr int LOW_PLY_HISTORY_SIZE = 5;
 constexpr int BUTTERFLY_HISTORY_LIMIT = 7183;
 constexpr int CAPTURE_HISTORY_LIMIT = 10692;
 constexpr int CONTINUATION_HISTORY_LIMIT = 30000;
+constexpr int SEARCHEDLIST_CAPACITY = 32;
+constexpr int MAIN_HISTORY_DEFAULT = 68;
+
+// =============================================================================
+// SearchedList - Fixed-size list for tracking searched moves
+// =============================================================================
+
+template<typename T, std::size_t MaxSize>
+class ValueList {
+public:
+  std::size_t size() const { return size_; }
+  int ssize() const { return int(size_); }
+  void clear() { size_ = 0; }
+  
+  void push_back(const T& value) {
+    if (size_ < MaxSize)
+      values_[size_++] = value;
+  }
+  
+  const T* begin() const { return values_; }
+  const T* end() const { return values_ + size_; }
+  T* begin() { return values_; }
+  T* end() { return values_ + size_; }
+  
+  const T& operator[](int index) const { return values_[index]; }
+  T& operator[](int index) { return values_[index]; }
+
+private:
+  T values_[MaxSize];
+  std::size_t size_ = 0;
+};
+
+using SearchedList = ValueList<Move, SEARCHEDLIST_CAPACITY>;
+
+// Continuation history bonus structure (matching Stockfish)
+struct ConthistBonus {
+  int ply;
+  int weight;
+};
+
+// Stockfish continuation history bonuses
+constexpr std::array<ConthistBonus, 6> CONTHIST_BONUSES = {{
+  {1, 1133}, {2, 683}, {3, 312}, {4, 582}, {5, 149}, {6, 474}
+}};
 
 // StatsEntry with gravity update (matching Stockfish)
 template<typename T, int D>

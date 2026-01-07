@@ -64,6 +64,7 @@ struct RootMove {
   Value previousScore = -VALUE_INFINITE;
   Value averageScore = -VALUE_INFINITE;
   Value uciScore = -VALUE_INFINITE;
+  int64_t meanSquaredScore = 0;  // For aspiration window sizing
   bool scoreLowerbound = false;
   bool scoreUpperbound = false;
   int selDepth = 0;
@@ -164,6 +165,10 @@ private:
   void update_quiet_stats(Stack *ss, Move move, int bonus);
   void update_capture_stats(Piece piece, Square to, PieceType captured, int bonus);
   void update_continuation_histories(Stack *ss, Piece pc, Square to, int bonus);
+  void update_quiet_histories(const Position &pos, Stack *ss, Move move, int bonus);
+  void update_all_stats(const Position &pos, Stack *ss, Move bestMove, Square prevSq,
+                        SearchedList &quietsSearched, SearchedList &capturesSearched,
+                        Depth depth, Move ttMove, int moveCount);
 
   size_t threadIdx;
   TimeManager timeManager;
@@ -186,6 +191,9 @@ private:
   TTMoveHistory ttMoveHistory;
   KillerMoves killers;
   CounterMoveHistory counterMoves;
+  
+  // Optimism values for evaluation blending
+  Value optimism[COLOR_NB] = {VALUE_ZERO, VALUE_ZERO};
 };
 
 // Global search control
