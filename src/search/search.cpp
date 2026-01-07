@@ -120,7 +120,11 @@ Worker::Worker(size_t idx) : threadIdx(idx) {
   std::memset(lowPlyHistory, 0, sizeof(lowPlyHistory));
   std::memset(captureHistory, 0, sizeof(captureHistory));
   std::memset(pawnHistory, 0, sizeof(pawnHistory));
-  std::memset(correctionHistory, 0, sizeof(correctionHistory));
+  
+  // Allocate correction history on heap
+  correctionHistory = std::make_unique<UnifiedCorrectionHistory>();
+  correctionHistory->clear();
+  
   std::memset(continuationHistoryTable, 0, sizeof(continuationHistoryTable));
   std::memset(continuationCorrectionHistory, 0, sizeof(continuationCorrectionHistory));
   std::memset(counterMoves, 0, sizeof(counterMoves));
@@ -149,7 +153,8 @@ void Worker::clear() {
   std::memset(lowPlyHistory, 0, sizeof(lowPlyHistory));
   std::memset(captureHistory, 0, sizeof(captureHistory));
   std::memset(pawnHistory, 0, sizeof(pawnHistory));
-  std::memset(correctionHistory, 0, sizeof(correctionHistory));
+  if (correctionHistory)
+    correctionHistory->clear();
   std::memset(continuationHistoryTable, 0, sizeof(continuationHistoryTable));
   std::memset(continuationCorrectionHistory, 0, sizeof(continuationCorrectionHistory));
   std::memset(counterMoves, 0, sizeof(counterMoves));
@@ -259,12 +264,16 @@ void Worker::iterative_deepening() {
     (ss + i)->ply = i;
     (ss + i)->continuationHistory =
         &continuationHistoryTable[NO_PIECE][SQ_A1]; // Default empty
+    (ss + i)->continuationCorrectionHistory =
+        &continuationCorrectionHistory[NO_PIECE][SQ_A1];
     (ss + i)->cutoffCnt = 0;
   }
 
   // Set up initial continuation history for root
-  for (int i = -7; i < 0; ++i)
+  for (int i = -7; i < 0; ++i) {
     (ss + i)->continuationHistory = &continuationHistoryTable[NO_PIECE][SQ_A1];
+    (ss + i)->continuationCorrectionHistory = &continuationCorrectionHistory[NO_PIECE][SQ_A1];
+  }
 
   ss->pv = pv;
 
@@ -539,10 +548,14 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
       ss->staticEval = eval = evaluate(pos);
     }
 
-    // Apply correction history adjustment
-    int corrIdx = correction_history_index(pos.pawn_key());
-    int correction = correctionHistory[corrIdx][pos.side_to_move()];
-    eval += correction / 2; // Scale down correction
+    // Apply full correction history adjustment (matching Stockfish)
+    Move prevMove = ss->ply >= 1 ? (ss - 1)->currentMove : Move::none();
+    ContinuationCorrectionHistory *contCorr2 = ss->ply >= 2 ? (ss - 2)->continuationCorrectionHistory : nullptr;
+    ContinuationCorrectionHistory *contCorr4 = ss->ply >= 4 ? (ss - 4)->continuationCorrectionHistory : nullptr;
+    
+    int correctionValue = compute_full_correction_value(
+        *correctionHistory, contCorr2, contCorr4, pos, prevMove);
+    eval = to_corrected_static_eval(eval, correctionValue);
     ss->staticEval = eval;
 
     improving = ss->ply >= 2 && ss->staticEval > (ss - 2)->staticEval;
@@ -783,6 +796,8 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     Piece movedPc = pos.moved_piece(move);
     (ss + 1)->continuationHistory =
         &continuationHistoryTable[movedPc][move.to_sq()];
+    (ss + 1)->continuationCorrectionHistory =
+        &continuationCorrectionHistory[movedPc][move.to_sq()];
 
     StateInfo st;
     pos.do_move(move, st, givesCheck);
@@ -949,17 +964,18 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   if (moveCount == 0)
     bestValue = pos.checkers() ? mated_in(ss->ply) : value_draw(nodes);
 
-  // Update correction history when search result differs from static eval
+  // Update full correction history when search result differs from static eval
   if (!pos.checkers() && bestMove && !pos.capture(bestMove) &&
       std::abs(bestValue) < VALUE_TB_WIN_IN_MAX_PLY) {
-    int corrIdx = correction_history_index(pos.pawn_key());
-    Color us = pos.side_to_move();
     int diff = bestValue - ss->staticEval;
     int bonus = std::clamp(diff * depth / 8, -CORRECTION_HISTORY_LIMIT / 4,
                            CORRECTION_HISTORY_LIMIT / 4);
-    int16_t &entry = correctionHistory[corrIdx][us];
-    entry = std::clamp(entry + bonus - entry * std::abs(bonus) / 16384,
-                       -CORRECTION_HISTORY_LIMIT, CORRECTION_HISTORY_LIMIT);
+    
+    Move prevMove = ss->ply >= 1 ? (ss - 1)->currentMove : Move::none();
+    ContinuationCorrectionHistory *contCorr2 = ss->ply >= 2 ? (ss - 2)->continuationCorrectionHistory : nullptr;
+    ContinuationCorrectionHistory *contCorr4 = ss->ply >= 4 ? (ss - 4)->continuationCorrectionHistory : nullptr;
+    
+    update_full_correction_history(*correctionHistory, contCorr2, contCorr4, pos, prevMove, bonus);
   }
 
   // Update TT with adjusted value for storage

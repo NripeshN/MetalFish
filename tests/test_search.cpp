@@ -675,13 +675,12 @@ bool test_correction_history() {
   int idx = correction_history_index(pos.pawn_key());
   EXPECT(tc, idx >= 0 && idx < CORRECTION_HISTORY_SIZE);
 
-  // Test that correction history can be updated
-  CorrectionHistory corrHist;
-  std::memset(corrHist, 0, sizeof(corrHist));
+  // Test unified correction history
+  UnifiedCorrectionHistory corrHist;
+  corrHist.clear();
 
-  corrHist[idx][WHITE] = 50;
-  EXPECT(tc, corrHist[idx][WHITE] == 50);
-  EXPECT(tc, corrHist[idx][BLACK] == 0);
+  corrHist.at(idx, WHITE).update_pawn(50);
+  EXPECT(tc, corrHist.at(idx, WHITE).pawn.load() != 0);
 
   return tc.passed();
 }

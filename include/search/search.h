@@ -170,14 +170,19 @@ private:
 
   int reductions[MAX_MOVES];
 
-  // History tables
+  // History tables (stack allocated - smaller tables)
   ButterflyHistory mainHistory;
   LowPlyHistory lowPlyHistory;
   CapturePieceToHistory captureHistory;
   PawnHistory pawnHistory;
-  CorrectionHistory correctionHistory;
+  
+  // Full correction history system (heap allocated due to size)
+  std::unique_ptr<UnifiedCorrectionHistory> correctionHistory;
+  
+  // Continuation histories
   PieceToHistory continuationHistoryTable[PIECE_NB][SQUARE_NB];
   ContinuationCorrectionHistory continuationCorrectionHistory[PIECE_NB][SQUARE_NB];
+  
   TTMoveHistory ttMoveHistory;
   KillerMoves killers;
   CounterMoveHistory counterMoves;
