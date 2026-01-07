@@ -75,6 +75,7 @@ struct LimitsType {
     movestogo = depth = mate = infinite = 0;
     nodes = 0;
     ponderMode = false;
+    multiPV = 1;
   }
 
   bool use_time_management() const { return time[WHITE] || time[BLACK]; }
@@ -84,6 +85,7 @@ struct LimitsType {
   int movestogo, depth, mate, infinite;
   uint64_t nodes;
   bool ponderMode;
+  int multiPV;
 };
 
 // Time management
@@ -130,6 +132,7 @@ public:
 
   int selDepth = 0;
   int nmpMinPly = 0;
+  int pvIdx = 0;  // Current MultiPV index being searched
 
   RootMoves rootMoves;
   Depth rootDepth;
@@ -184,10 +187,25 @@ private:
 
 // Global search control
 extern std::atomic<bool> Signals_stop;
+extern std::atomic<bool> Signals_ponder;
 extern TranspositionTable *TT;
 
 void init();
 void clear();
+
+// Thread management
+void set_thread_count(size_t count);
+size_t thread_count();
+Worker *main_thread();
+Worker *best_thread();
+uint64_t total_nodes();
+
+// Search control
+void start_search(Position &pos, const LimitsType &limits,
+                  StateListPtr &states);
+void stop_search();
+void wait_for_search();
+void clear_threads();
 
 } // namespace Search
 

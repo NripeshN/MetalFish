@@ -74,7 +74,9 @@ void OptionsMap::init() {
   options["Clear Hash"] =
       Option(Option::OnChange([](const Option &) { TT.clear(); }));
 
-  options["Threads"] = Option(1, 1, 512);
+  options["Threads"] = Option(1, 1, 512, Option::OnChange([](const Option &o) {
+                                Search::set_thread_count(int(o));
+                              }));
   options["UCI_Chess960"] = Option(false);
   options["MultiPV"] = Option(1, 1, 500);
 
@@ -306,23 +308,43 @@ void go(Position &pos, std::istringstream &is, StateListPtr &states) {
     }
   }
 
-  // Create a worker and start searching
-  static Search::Worker worker;
-  worker.clear();
+  // Set MultiPV from options
+  limits.multiPV = int(Options["MultiPV"]);
 
   Search::Signals_stop = false;
+  Search::Signals_ponder = limits.ponderMode;
 
-  // Run search in a separate thread
+  // Run search in a separate thread using the thread pool
   std::thread([&pos, limits, &states]() mutable {
-    worker.start_searching(pos, limits, states);
+    // Use thread pool if more than 1 thread configured
+    if (Search::thread_count() > 1) {
+      Search::start_search(pos, limits, states);
+      Search::wait_for_search();
 
-    // Output best move
-    if (!worker.rootMoves.empty()) {
-      std::cout << "bestmove " << move_to_uci(worker.rootMoves[0].pv[0], false);
-      if (worker.rootMoves[0].pv.size() > 1)
-        std::cout << " ponder "
-                  << move_to_uci(worker.rootMoves[0].pv[1], false);
-      std::cout << std::endl;
+      // Get best move from best thread
+      Search::Worker *best = Search::best_thread();
+      if (best && !best->rootMoves.empty()) {
+        std::cout << "bestmove " << move_to_uci(best->rootMoves[0].pv[0], false);
+        if (best->rootMoves[0].pv.size() > 1)
+          std::cout << " ponder "
+                    << move_to_uci(best->rootMoves[0].pv[1], false);
+        std::cout << std::endl;
+      }
+    } else {
+      // Single-threaded: use main thread directly
+      Search::Worker *main = Search::main_thread();
+      if (main) {
+        main->clear();
+        main->start_searching(pos, limits, states);
+
+        if (!main->rootMoves.empty()) {
+          std::cout << "bestmove " << move_to_uci(main->rootMoves[0].pv[0], false);
+          if (main->rootMoves[0].pv.size() > 1)
+            std::cout << " ponder "
+                      << move_to_uci(main->rootMoves[0].pv[1], false);
+          std::cout << std::endl;
+        }
+      }
     }
   }).detach();
 }
@@ -378,6 +400,9 @@ void loop(int argc, char *argv[]) {
   // Initialize search
   Search::init();
 
+  // Initialize thread pool with default thread count
+  Search::set_thread_count(int(Options["Threads"]));
+
   Position pos;
   StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
   pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
@@ -404,8 +429,13 @@ void loop(int argc, char *argv[]) {
 
     if (token == "quit" || token == "stop") {
       Search::Signals_stop = true;
+      Search::Signals_ponder = false;
+      Search::stop_search();
       if (token == "quit")
         break;
+    } else if (token == "ponderhit") {
+      // Switch from pondering to normal search
+      Search::Signals_ponder = false;
     } else if (token == "uci")
       uci();
     else if (token == "setoption")
@@ -414,6 +444,7 @@ void loop(int argc, char *argv[]) {
       std::cout << "readyok" << std::endl;
     else if (token == "ucinewgame") {
       Search::clear();
+      Search::clear_threads();
       states = std::make_unique<std::deque<StateInfo>>(1);
       pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
               &states->back());

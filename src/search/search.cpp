@@ -26,6 +26,7 @@ namespace MetalFish {
 namespace Search {
 
 std::atomic<bool> Signals_stop{false};
+std::atomic<bool> Signals_ponder{false};
 TranspositionTable *TT = &MetalFish::TT;
 
 namespace {
@@ -121,6 +122,7 @@ void Worker::clear() {
   tbHits = 0;
   selDepth = 0;
   nmpMinPly = 0;
+  pvIdx = 0;
   rootMoves.clear();
   rootDepth = 0;
   completedDepth = 0;
@@ -159,7 +161,8 @@ void Worker::update_quiet_stats(Stack *ss, Move move, int bonus) {
   if (movedPiece != NO_PIECE && ss->continuationHistory) {
     Square to = move.to_sq();
     // Update continuation history for this move relative to previous moves
-    for (int i : {1, 2, 4}) {
+    // Stockfish uses 1, 2, 4, 6 ply lookback
+    for (int i : {1, 2, 4, 6}) {
       if (ss->ply >= i && (ss - i)->continuationHistory) {
         int16_t &contEntry = (*(ss - i)->continuationHistory)[movedPiece][to];
         contEntry += bonus - contEntry * std::abs(bonus) / 16384;
@@ -260,6 +263,10 @@ void Worker::iterative_deepening() {
   int stableBestMoveCount = 0;
   Value lastScore = -VALUE_INFINITE;
 
+  // MultiPV support
+  int multiPV = std::min(limits.multiPV, int(rootMoves.size()));
+  multiPV = std::max(1, multiPV);
+
   // Iterative deepening
   for (rootDepth = 1; rootDepth <= (limits.depth ? limits.depth : MAX_PLY);
        ++rootDepth) {
@@ -267,80 +274,97 @@ void Worker::iterative_deepening() {
     if (stopRequested || Signals_stop)
       break;
 
-    // Reset fail high counter and aspiration window for new depth
-    failedHighCnt = 0;
+    // Save previous scores for all root moves
+    for (auto &rm : rootMoves)
+      rm.previousScore = rm.score;
 
-    // Aspiration window search
-    if (rootDepth >= 4 && !rootMoves.empty()) {
-      // Use average score for more stable aspiration windows
-      Value avg = rootMoves[0].averageScore != -VALUE_INFINITE
-                      ? rootMoves[0].averageScore
-                      : bestValue;
-      delta = 16 + std::abs(avg) * std::abs(avg) / 21367;
-      alpha = std::max(avg - delta, -VALUE_INFINITE);
-      beta = std::min(avg + delta, VALUE_INFINITE);
-    }
+    // MultiPV loop
+    for (pvIdx = 0; pvIdx < multiPV && !stopRequested && !Signals_stop;
+         ++pvIdx) {
+      // Reset fail high counter and aspiration window for new depth
+      failedHighCnt = 0;
+      selDepth = 0;
 
-    // Main search
-    while (true) {
-      // Reduce depth after multiple fail-highs (like Stockfish)
-      Depth adjustedDepth = std::max(1, rootDepth - failedHighCnt);
-      bestValue = search<Root>(*rootPos, ss, alpha, beta, adjustedDepth, false);
+      // Aspiration window search
+      if (rootDepth >= 4) {
+        // Use average score for more stable aspiration windows
+        Value avg = rootMoves[pvIdx].averageScore != -VALUE_INFINITE
+                        ? rootMoves[pvIdx].averageScore
+                        : (pvIdx == 0 ? bestValue : rootMoves[pvIdx].score);
+        delta = 16 + std::abs(avg) * std::abs(avg) / 21367;
+        alpha = std::max(avg - delta, -VALUE_INFINITE);
+        beta = std::min(avg + delta, VALUE_INFINITE);
+      } else {
+        alpha = -VALUE_INFINITE;
+        beta = VALUE_INFINITE;
+      }
 
-      // Sort root moves by score
-      std::stable_sort(rootMoves.begin(), rootMoves.end());
+      // Main search
+      while (true) {
+        // Reduce depth after multiple fail-highs (like Stockfish)
+        Depth adjustedDepth = std::max(1, rootDepth - failedHighCnt);
+        bestValue =
+            search<Root>(*rootPos, ss, alpha, beta, adjustedDepth, false);
 
-      if (stopRequested || Signals_stop)
-        break;
+        // Sort root moves by score (only moves from pvIdx onwards)
+        std::stable_sort(rootMoves.begin() + pvIdx, rootMoves.end());
 
-      // Aspiration window handling with improved fail-high logic
-      if (bestValue <= alpha) {
-        // Fail low: expand window downward, reset fail high count
-        beta = (alpha + beta) / 2;
-        alpha = std::max(bestValue - delta, -VALUE_INFINITE);
-        failedHighCnt = 0;
-      } else if (bestValue >= beta) {
-        // Fail high: expand window upward, increment fail high count
-        // Keep alpha stable on fail-high (Stockfish behavior)
-        alpha = std::max(beta - delta, alpha);
-        beta = std::min(bestValue + delta, VALUE_INFINITE);
-        ++failedHighCnt;
-      } else
-        break;
+        if (stopRequested || Signals_stop)
+          break;
 
-      delta += delta / 3;
-    }
+        // Aspiration window handling with improved fail-high logic
+        if (bestValue <= alpha) {
+          // Fail low: expand window downward, reset fail high count
+          beta = (alpha + beta) / 2;
+          alpha = std::max(bestValue - delta, -VALUE_INFINITE);
+          failedHighCnt = 0;
+        } else if (bestValue >= beta) {
+          // Fail high: expand window upward, increment fail high count
+          alpha = std::max(beta - delta, alpha);
+          beta = std::min(bestValue + delta, VALUE_INFINITE);
+          ++failedHighCnt;
+        } else
+          break;
 
-    // Update average score (exponential moving average)
-    if (!rootMoves.empty()) {
-      Value prevAvg = rootMoves[0].averageScore;
-      if (prevAvg == -VALUE_INFINITE)
-        rootMoves[0].averageScore = bestValue;
-      else
-        rootMoves[0].averageScore = (prevAvg * 2 + bestValue) / 3;
+        delta += delta / 3;
+      }
+
+      // Update average score (exponential moving average)
+      if (pvIdx < int(rootMoves.size())) {
+        Value prevAvg = rootMoves[pvIdx].averageScore;
+        if (prevAvg == -VALUE_INFINITE)
+          rootMoves[pvIdx].averageScore = bestValue;
+        else
+          rootMoves[pvIdx].averageScore = (prevAvg * 2 + bestValue) / 3;
+      }
+
+      // Output search info for this PV line
+      if (is_main_thread() && pvIdx < int(rootMoves.size())) {
+        TimePoint elapsed = timeManager.elapsed();
+        uint64_t nodeCount = nodes.load();
+
+        std::cout << "info"
+                  << " depth " << rootDepth << " seldepth " << selDepth;
+
+        if (multiPV > 1)
+          std::cout << " multipv " << (pvIdx + 1);
+
+        std::cout << " score cp " << rootMoves[pvIdx].score << " nodes "
+                  << nodeCount
+                  << " nps " << (elapsed > 0 ? nodeCount * 1000 / elapsed : 0)
+                  << " time " << elapsed << " hashfull " << TT->hashfull()
+                  << " pv";
+
+        for (const auto &m : rootMoves[pvIdx].pv)
+          std::cout << " " << UCI::move_to_uci(m, false);
+
+        std::cout << std::endl;
+      }
     }
 
     completedDepth = rootDepth;
 
-    // Output search info
-    if (is_main_thread()) {
-      TimePoint elapsed = timeManager.elapsed();
-      uint64_t nodeCount = nodes.load();
-
-      std::cout << "info"
-                << " depth " << rootDepth << " seldepth " << selDepth
-                << " score cp " << bestValue << " nodes " << nodeCount
-                << " nps " << (elapsed > 0 ? nodeCount * 1000 / elapsed : 0)
-                << " time " << elapsed << " hashfull " << TT->hashfull()
-                << " pv";
-
-      for (const auto &m : rootMoves[0].pv)
-        std::cout << " " << UCI::move_to_uci(m, false);
-
-      std::cout << std::endl;
-    }
-
-    // Track best move stability for time management
+    // Track best move stability for time management (only for first PV)
     if (!rootMoves.empty()) {
       Move currentBestMove = rootMoves[0].pv[0];
       if (currentBestMove != lastBestMove) {
@@ -357,7 +381,8 @@ void Worker::iterative_deepening() {
       lastScore = currentScore;
 
       // Time management with stability and falling eval considerations
-      if (!limits.infinite && limits.use_time_management()) {
+      // Skip time management in ponder mode
+      if (!limits.infinite && !limits.ponderMode && limits.use_time_management()) {
         TimePoint elapsed = timeManager.elapsed();
         TimePoint optimum = timeManager.optimum();
 
@@ -581,6 +606,19 @@ Value Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
     // Skip excluded move (for singular extension search)
     if (move == ss->excludedMove)
       continue;
+
+    // For MultiPV at root, skip moves already searched in previous PVs
+    if (rootNode && pvIdx > 0) {
+      bool skipMove = false;
+      for (int i = 0; i < pvIdx; ++i) {
+        if (!rootMoves[i].pv.empty() && rootMoves[i].pv[0] == move) {
+          skipMove = true;
+          break;
+        }
+      }
+      if (skipMove)
+        continue;
+    }
 
     if (!pos.legal(move))
       continue;
