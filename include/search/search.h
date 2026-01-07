@@ -194,6 +194,10 @@ private:
   
   // Optimism values for evaluation blending
   Value optimism[COLOR_NB] = {VALUE_ZERO, VALUE_ZERO};
+  
+  // Time management tracking (matching Stockfish)
+  std::array<Value, 4> iterValue;
+  double previousTimeReduction = 0.85;
 };
 
 // Global search control

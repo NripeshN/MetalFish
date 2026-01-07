@@ -123,6 +123,10 @@ Worker::Worker(size_t idx) : threadIdx(idx) {
 
   for (int i = 0; i < MAX_MOVES; ++i)
     reductions[i] = int(19.41 * std::log(i + 1));
+  
+  // Initialize time management tracking
+  iterValue.fill(VALUE_ZERO);
+  previousTimeReduction = 0.85;
 }
 
 Worker::~Worker() {}
@@ -151,6 +155,10 @@ void Worker::clear() {
   std::memset(counterMoves, 0, sizeof(counterMoves));
   ttMoveHistory = 0;
   killers.clear();
+  
+  // Reset time management tracking
+  iterValue.fill(VALUE_ZERO);
+  previousTimeReduction = 0.85;
 }
 
 // Update quiet move history on beta cutoff
