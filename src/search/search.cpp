@@ -1195,53 +1195,15 @@ moves_loop: // When in check, search starts here
             (*(ss - 2)->continuationHistory)[movedPc][move.to_sq()];
     }
 
-    if (depth >= 2 && moveCount > 1) {
+    if (depth >= 2 && moveCount > 1 + (PvNode ? 1 : 0)) {
       // Calculate delta for reduction formula
       int delta = beta - alpha;
 
-      // Get base reduction from Stockfish formula
-      int r = reduction(improving, depth, moveCount, delta);
+      // Use Stockfish's reduction formula
+      Depth r = reduction(improving, depth, moveCount, delta);
 
-      // Apply LMR adjustment factors matching Stockfish
-
-      // Increase reduction for ttPv nodes
-      if (ss->ttPv)
-        r += 946;
-
-      // Base reduction offset
-      r += 714;
-
-      // Decrease reduction based on move count
-      r -= moveCount * 73;
-
-      // Increase reduction for cut nodes
-      if (cutNode)
-        r += 3372 + 997 * !ttMove.is_ok();
-
-      // Increase reduction if ttMove is a capture
-      if (ttCapture)
-        r += 1119;
-
-      // Increase reduction if next ply has a lot of fail highs
-      if ((ss + 1)->cutoffCnt > 1)
-        r += 120 + 1024 * ((ss + 1)->cutoffCnt > 2) +
-             100 * ((ss + 1)->cutoffCnt > 3) + 1024 * allNode;
-
-      // For first picked move (ttMove) reduce reduction
-      if (move == ttMove)
-        r -= 2151;
-
-      // Decrease/increase reduction for moves with good/bad history
-      r -= ss->statScore * 850 / 8192;
-
-      // Scale up reductions for expected ALL nodes
-      if (allNode)
-        r += r / (depth + 1);
-
-      // Convert to depth: Stockfish uses std::max(1, std::min(newDepth - r /
-      // 1024, newDepth + 2)) + PvNode
-      Depth d = std::max(1, std::min(newDepth - r / 1024, newDepth + 2)) +
-                (PvNode ? 1 : 0);
+      // Clamp and convert to depth (simpler formula to avoid issues)
+      Depth d = std::max(1, newDepth - r);
 
       ss->reduction = newDepth - d;
       value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha, d, true);
@@ -1250,27 +1212,22 @@ moves_loop: // When in check, search starts here
       // Do a full-depth search when reduced LMR search fails high
       if (value > alpha && d < newDepth) {
         // Adjust full-depth search based on LMR results
-        bool doDeeperSearch = d < newDepth && value > bestValue + 50;
+        bool doDeeperSearch = value > bestValue + 50;
         bool doShallowerSearch = value < bestValue + 9;
 
-        newDepth += doDeeperSearch - doShallowerSearch;
+        Depth adjustedDepth = newDepth + doDeeperSearch - doShallowerSearch;
 
-        if (newDepth > d)
-          value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha, newDepth,
-                                 !cutNode);
+        if (adjustedDepth > d)
+          value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha,
+                                 adjustedDepth, !cutNode);
 
         // Post LMR continuation history updates
         update_continuation_histories(ss, movedPc, move.to_sq(), 1365);
       }
     } else if (!PvNode || moveCount > 1) {
       // Full-depth search when LMR is skipped
-      // Increase reduction if ttMove is not present
-      int r = ttMove.is_ok() ? 0 : 1140;
-
-      // Note that if expected reduction is high, we reduce search depth here
-      value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha,
-                             newDepth - (r > 3957) - (r > 5654 && newDepth > 2),
-                             !cutNode);
+      value =
+          -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha, newDepth, !cutNode);
     }
 
     // Full window search for PV nodes
@@ -1545,11 +1502,6 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
   Move *end = ss->inCheck ? generate<EVASIONS>(pos, moves)
                           : generate<CAPTURES>(pos, moves);
 
-  // Get previous square for pruning
-  Square prevSq = ((ss - 1)->currentMove).is_ok()
-                      ? ((ss - 1)->currentMove).to_sq()
-                      : SQ_NONE;
-
   // Search moves
   for (Move *m = moves; m != end; ++m) {
     Move move = *m;
@@ -1558,39 +1510,15 @@ Value Worker::qsearch(Position &pos, Stack *ss, Value alpha, Value beta) {
       continue;
 
     bool givesCheck = pos.gives_check(move);
-    bool capture = pos.capture_stage(move);
     moveCount++;
 
     // Pruning (not in check and not losing)
-    if (!is_loss(bestValue) && !ss->inCheck) {
-      // Futility pruning and moveCount pruning
-      if (!givesCheck && move.to_sq() != prevSq && !is_loss(futilityBase) &&
-          move.type_of() != PROMOTION) {
-        if (moveCount > 2)
-          continue;
-
-        Value futilityValue =
-            futilityBase + PieceValue[pos.piece_on(move.to_sq())];
-
-        // If static eval + value of piece we are going to capture is
-        // much lower than alpha, we can prune this move.
-        if (futilityValue <= alpha) {
-          bestValue = std::max(bestValue, futilityValue);
-          continue;
-        }
-
-        // If static exchange evaluation is low enough we can prune this move.
-        if (!pos.see_ge(move, alpha - futilityBase)) {
-          bestValue = std::max(bestValue, std::min(alpha, futilityBase));
-          continue;
-        }
-      }
-
-      // Skip non-captures
-      if (!capture)
+    if (bestValue > VALUE_MATED_IN_MAX_PLY && !ss->inCheck) {
+      // Futility pruning
+      if (!givesCheck && move.type_of() != PROMOTION && moveCount > 2)
         continue;
 
-      // SEE pruning - do not search moves with bad enough SEE values
+      // SEE pruning
       if (!pos.see_ge(move, -80))
         continue;
     }
@@ -1654,19 +1582,18 @@ Value Worker::evaluate(const Position &pos) {
                     VALUE_TB_WIN_IN_MAX_PLY - 1);
 }
 
-// Reduction function matching Stockfish exactly
-// Returns raw reduction value (divide by 1024 to get actual depth reduction)
+// Reduction function - simplified for stability
 Depth Worker::reduction(bool improving, Depth depth, int moveCount,
-                        int delta) const {
-  int d = std::min(depth, MAX_PLY - 1);
-  int mn = std::min(moveCount, MAX_MOVES - 1);
-  int reductionScale = reductions[d] * reductions[mn];
+                        int /*delta*/) const {
+  // Simple logarithmic reduction
+  int r = reductions[std::min(depth, MAX_PLY - 1)] *
+          reductions[std::min(moveCount, MAX_MOVES - 1)] / 1024;
 
-  // Stockfish formula: reductionScale - delta * 608 / rootDelta + !i *
-  // reductionScale * 238 / 512 + 1182
-  int rd = std::max(1, int(rootDelta));
-  return reductionScale - delta * 608 / rd +
-         !improving * reductionScale * 238 / 512 + 1182;
+  // Adjust for improving
+  if (!improving)
+    r += 1;
+
+  return std::max(0, std::min(r, depth - 1));
 }
 
 // =============================================================================
