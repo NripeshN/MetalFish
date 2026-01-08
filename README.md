@@ -159,12 +159,12 @@ python3 tests/testing.py --quick
 
 ### Test Coverage
 
-| Category | Tests | Status |
-|----------|-------|--------|
-| C++ Unit Tests | 63 | Passing |
-| UCI Protocol Tests | 9 | Passing |
-| Perft Tests | 30 | Passing |
-| **Total** | **102** | **All Passing** |
+| Category           | Tests   | Status          |
+| ------------------ | ------- | --------------- |
+| C++ Unit Tests     | 63      | Passing         |
+| UCI Protocol Tests | 9       | Passing         |
+| Perft Tests        | 30      | Passing         |
+| **Total**          | **102** | **All Passing** |
 
 ## Architecture
 
@@ -189,12 +189,12 @@ MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For si
 
 ### Performance
 
-| Metric | Value |
-|--------|-------|
-| Perft(6) Nodes | 119,060,324 |
+| Metric          | Value         |
+| --------------- | ------------- |
+| Perft(6) Nodes  | 119,060,324   |
 | All Perft Tests | 30/30 Passing |
-| C++ Unit Tests | 63/63 Passing |
-| UCI Tests | 9/9 Passing |
+| C++ Unit Tests  | 63/63 Passing |
+| UCI Tests       | 9/9 Passing   |
 
 ### Notes
 
