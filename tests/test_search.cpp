@@ -276,7 +276,8 @@ bool test_move_ordering_tt_first() {
   std::memset(pawnHistory, 0, sizeof(pawnHistory));
 
   Move ttMove(SQ_E2, SQ_E4);
-  const PieceToHistory *contHist[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+  const PieceToHistory *contHist[6] = {nullptr, nullptr, nullptr,
+                                       nullptr, nullptr, nullptr};
 
   MovePicker mp(pos, ttMove, 10, &mainHistory, &lowPlyHistory, &captureHistory,
                 contHist, &pawnHistory, 0);
@@ -308,10 +309,11 @@ bool test_movepicker_basic() {
   std::memset(captureHistory, 0, sizeof(captureHistory));
   std::memset(pawnHistory, 0, sizeof(pawnHistory));
 
-  const PieceToHistory *contHist[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+  const PieceToHistory *contHist[6] = {nullptr, nullptr, nullptr,
+                                       nullptr, nullptr, nullptr};
 
-  MovePicker mp(pos, Move::none(), 10, &mainHistory, &lowPlyHistory, &captureHistory,
-                contHist, &pawnHistory, 0);
+  MovePicker mp(pos, Move::none(), 10, &mainHistory, &lowPlyHistory,
+                &captureHistory, contHist, &pawnHistory, 0);
 
   // Count moves - should be 20 for starting position
   int count = 0;
@@ -1451,7 +1453,7 @@ bool test_qsearch_evasions() {
   // We test indirectly by verifying that search from check positions completes
   init_bitboards();
   Position::init();
-  
+
   // Just verify the test framework works
   EXPECT(tc, true);
 
@@ -1468,7 +1470,7 @@ bool test_history_init_values() {
   // History initialization is tested indirectly through search behavior
   // The actual values are private members, so we test that search
   // completes correctly after initialization
-  
+
   init_bitboards();
   Position::init();
   Search::init();
@@ -1482,7 +1484,7 @@ bool test_history_init_values() {
 
   Search::Worker worker;
   worker.clear(); // This should initialize histories to Stockfish defaults
-  
+
   Search::LimitsType limits;
   limits.depth = 3;
 
@@ -1501,7 +1503,7 @@ bool test_lowply_history_init() {
 
   // After iterative_deepening starts, lowPlyHistory should be filled with 97
   // This is tested indirectly through search completion
-  
+
   init_bitboards();
   Position::init();
   Search::init();
@@ -1552,7 +1554,8 @@ bool test_optimism_calculation() {
   worker.wait_for_search_finished();
 
   // Optimism is calculated during search based on average score
-  // We verify this indirectly by checking search completes with reasonable score
+  // We verify this indirectly by checking search completes with reasonable
+  // score
   EXPECT(tc, !worker.rootMoves.empty());
   // Starting position should have small evaluation
   EXPECT(tc, std::abs(worker.rootMoves[0].score) < 200);
@@ -1685,7 +1688,7 @@ bool test_repetition_detection() {
   // After 4 moves, we're back to the same position
   // This should be detected as a draw by repetition
   bool isDraw = pos.is_draw(4);
-  
+
   // Just verify the function runs without error
   // The actual repetition detection depends on implementation
   EXPECT(tc, true); // Simplified test
@@ -1755,19 +1758,19 @@ bool test_value_draw() {
   // Test that draw values are close to VALUE_DRAW
   // The actual value_draw function adds slight randomization
   // We test that draws are properly detected and handled
-  
+
   init_bitboards();
   Position::init();
-  
+
   StateListPtr states = std::make_unique<std::deque<StateInfo>>(1);
   Position pos;
-  
+
   // K vs K is a draw
   pos.set("8/8/8/8/8/8/8/4K2k w - - 0 1", false, &states->back());
-  
+
   // VALUE_DRAW should be 0
   EXPECT(tc, VALUE_DRAW == 0);
-  
+
   return tc.passed();
 }
 

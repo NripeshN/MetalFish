@@ -14,13 +14,13 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 
 #### Move Ordering
 
-- **ButterflyHistory** - Quiet move success tracking by from/to squares
+- **ButterflyHistory** - Quiet move success tracking by from/to squares (initialized to 68)
 - **KillerMoves** - Refutation moves per ply
 - **CounterMoveHistory** - Moves that refute the previous move
-- **CapturePieceToHistory** - Capture move success tracking
-- **PawnHistory** - Pawn structure-aware history (indexed by pawn key)
-- **LowPlyHistory** - Extra weight for moves near root (first 5 plies)
-- **ContinuationHistory** - Move sequence success with Stockfish weights (1133, 683, 312, 582, 149, 474 for plies 1-6)
+- **CapturePieceToHistory** - Capture move success tracking (initialized to -689)
+- **PawnHistory** - Pawn structure-aware history indexed by pawn key (initialized to -1238)
+- **LowPlyHistory** - Extra weight for moves near root (first 5 plies, filled with 97)
+- **ContinuationHistory** - Move sequence success with Stockfish weights (1133, 683, 312, 582, 149, 474 for plies 1-6, initialized to -529)
 - **Staged Move Generation** - Efficient MovePicker with capture/quiet phases
 - **SearchedList** - Fixed-size list for tracking searched moves (32 capacity)
 
@@ -41,7 +41,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Futility Pruning** - For quiet moves and captures
 - **SEE-based Pruning** - Static Exchange Evaluation pruning
 - **Late Move Pruning (LMP)** - Skip late quiet moves at shallow depths
-- **Late Move Reductions (LMR)** - 15+ adjustment factors including cutoffCnt
+- **Late Move Reductions (LMR)** - Multiple adjustment factors including cutoffCnt
 - **ProbCut** - Prune with shallow capture search
 - **Small ProbCut** - TT-based pruning (beta + 418 threshold)
 - **Razoring** - Drop to qsearch for low eval positions
@@ -54,9 +54,9 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **NNUE Support** - Stockfish .nnue file loading with GPU acceleration
 - **Classical Evaluation** - Material + piece-square tables fallback
 - **Rule50 Dampening** - Linear eval reduction as 50-move rule approaches
-- **Full Correction History** - Pawn, minor piece, non-pawn (white/black), continuation
+- **Full Correction History** - Pawn, minor piece, non-pawn (white/black), continuation (initialized to 8)
 - **Draw Randomization** - Prevent 3-fold repetition blindness
-- **Optimism Blending** - Material-scaled optimism: (nnue _ (77871 + mat) + opt _ (7191 + mat)) / 77871
+- **Optimism Blending** - Material-scaled optimism formula
 
 #### Search Infrastructure
 
@@ -71,13 +71,13 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - **Hindsight Depth Adjustment** - priorReduction-based depth changes
 - **opponentWorsening Flag** - For improved pruning decisions
 - **allNode Flag** - For LMR scaling on ALL nodes
-- **evalDiff History Update** - Static eval difference improves quiet ordering (with pawn history)
+- **evalDiff History Update** - Static eval difference improves quiet ordering
 - **Iterative Deepening** - Progressive deepening with info output
 - **Quiescence Search** - Tactical resolution at leaf nodes with repetition check
 - **MultiPV** - Multiple principal variation search
 - **Pondering** - Think on opponent's time
 - **CutoffCnt Tracking** - For LMR adjustment based on child node behavior
-- **update_all_stats** - Comprehensive history updates matching Stockfish
+- **update_all_stats** - Comprehensive history updates
 - **Fail-Low Countermove Bonuses** - For quiet and capture countermoves
 - **ttMoveHistory Updates** - Track TT move success for singular extension
 - **ttPv Propagation** - Propagate PV status on fail low
@@ -93,7 +93,7 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 
 - GPU-accelerated batch position evaluation
 - Metal compute shaders for NNUE forward pass
-- **GPU incremental accumulator updates** - Efficient NNUE updates
+- GPU incremental accumulator updates
 - GPU move scoring kernel (MVV-LVA + history)
 - GPU SEE calculation kernel
 - Unified memory (zero-copy) on Apple Silicon
@@ -107,9 +107,9 @@ MetalFish is a chess engine that combines traditional alpha-beta search techniqu
 - Staged move generation (captures, killers, quiets)
 - Perft verification (all standard positions pass)
 
-## Not Yet Implemented (Major Stockfish Features)
+## Not Yet Implemented
 
-- **Full Syzygy TB Loading** - Currently interface only, file loading TBD
+- **Full Syzygy TB Loading** - Currently interface only, file loading pending
 
 ## Requirements
 
@@ -150,12 +150,21 @@ quit
 ## Testing
 
 ```bash
-# C++ unit tests
+# C++ unit tests (63 tests)
 ./build/metalfish_tests
 
-# Python perft tests
-python3 tests/testing.py
+# Python UCI and perft tests (39 tests)
+python3 tests/testing.py --quick
 ```
+
+### Test Coverage
+
+| Category | Tests | Status |
+|----------|-------|--------|
+| C++ Unit Tests | 63 | Passing |
+| UCI Protocol Tests | 9 | Passing |
+| Perft Tests | 30 | Passing |
+| **Total** | **102** | **All Passing** |
 
 ## Architecture
 
@@ -174,19 +183,18 @@ metalfish/
 
 ## Performance Notes
 
-MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For single-position evaluation during search, the overhead of GPU dispatch (~10-50μs) often exceeds the computational benefit. The engine automatically falls back to CPU evaluation for single positions while using GPU for batch operations where parallelism provides net benefit.
+MetalFish uses GPU acceleration primarily for batch evaluation scenarios. For single-position evaluation during search, the overhead of GPU dispatch can exceed the computational benefit. The engine automatically falls back to CPU evaluation for single positions while using GPU for batch operations where parallelism provides net benefit.
 
 ## Benchmark Results
 
-_Last updated: 2025-01-07_
-
 ### Performance
 
-| Metric          | Value                  |
-| --------------- | ---------------------- |
-| Perft(6) Nodes  | 119,060,324            |
-| All Perft Tests | 30/30 Passing          |
-| Unit Tests      | 46/46 Search, 5/5 Core |
+| Metric | Value |
+|--------|-------|
+| Perft(6) Nodes | 119,060,324 |
+| All Perft Tests | 30/30 Passing |
+| C++ Unit Tests | 63/63 Passing |
+| UCI Tests | 9/9 Passing |
 
 ### Notes
 
@@ -214,4 +222,4 @@ GPL-3.0 - Same as Stockfish
 
 **Nripesh Niketan** (2025)
 
-Contributions and feedback welcome!
+Contributions and feedback welcome.

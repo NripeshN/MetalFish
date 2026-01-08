@@ -121,7 +121,8 @@ public:
     return (!empty(m.to_sq()) && m.type_of() != CASTLING) ||
            m.type_of() == EN_PASSANT;
   }
-  // capture_stage includes queen promotions for consistency with move generation
+  // capture_stage includes queen promotions for consistency with move
+  // generation
   bool capture_stage(Move m) const {
     return capture(m) || m.promotion_type() == QUEEN;
   }
@@ -191,8 +192,7 @@ private:
 std::ostream &operator<<(std::ostream &os, const Position &pos);
 
 // Inline implementation of attacks_by template
-template <PieceType Pt>
-inline Bitboard Position::attacks_by(Color c) const {
+template <PieceType Pt> inline Bitboard Position::attacks_by(Color c) const {
   if constexpr (Pt == PAWN) {
     return c == WHITE ? pawn_attacks_bb<WHITE>(pieces(WHITE, PAWN))
                       : pawn_attacks_bb<BLACK>(pieces(BLACK, PAWN));
