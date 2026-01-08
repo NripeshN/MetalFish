@@ -50,7 +50,7 @@ bool is_shuffling(Move move, Stack *ss, const Position &pos) {
 void init_reductions() {
   Reductions[0] = 0;
   for (int i = 1; i < MAX_MOVES; ++i)
-    Reductions[i] = int(19.41 * std::log(i));
+    Reductions[i] = int(2747 / 128.0 * std::log(i)); // Stockfish formula
 }
 
 } // anonymous namespace
@@ -542,6 +542,12 @@ void Worker::iterative_deepening() {
           break;
 
         delta += delta / 3;
+
+        // Safety: prevent infinite loop
+        if (delta > 10000) {
+          alpha = -VALUE_INFINITE;
+          beta = VALUE_INFINITE;
+        }
       }
 
       // Update average score (exponential moving average) and mean squared
@@ -1196,13 +1202,35 @@ moves_loop: // When in check, search starts here
     }
 
     if (depth >= 2 && moveCount > 1 + (PvNode ? 1 : 0)) {
-      // Calculate delta for reduction formula
-      int delta = beta - alpha;
+      // Get base reduction (in plies)
+      int r = reduction(improving, depth, moveCount, 0);
 
-      // Use Stockfish's reduction formula
-      Depth r = reduction(improving, depth, moveCount, delta);
+      // === LMR Adjustment Factors (in plies) ===
 
-      // Clamp and convert to depth (simpler formula to avoid issues)
+      // Decrease reduction for PvNodes
+      if (ss->ttPv)
+        r -= 1;
+      if (PvNode)
+        r -= 1;
+
+      // For TT move reduce reduction
+      if (move == ttMove)
+        r -= 1;
+
+      // Increase reduction for cut nodes
+      if (cutNode)
+        r += 1;
+
+      // Decrease/increase reduction for moves with good/bad history
+      if (ss->statScore > 10000)
+        r -= 1;
+      else if (ss->statScore < -10000)
+        r += 1;
+
+      // Ensure r is non-negative
+      r = std::max(0, r);
+
+      // Convert to depth
       Depth d = std::max(1, newDepth - r);
 
       ss->reduction = newDepth - d;
@@ -1212,14 +1240,14 @@ moves_loop: // When in check, search starts here
       // Do a full-depth search when reduced LMR search fails high
       if (value > alpha && d < newDepth) {
         // Adjust full-depth search based on LMR results
-        bool doDeeperSearch = value > bestValue + 50;
+        bool doDeeperSearch = d < newDepth && value > bestValue + 50;
         bool doShallowerSearch = value < bestValue + 9;
 
-        Depth adjustedDepth = newDepth + doDeeperSearch - doShallowerSearch;
+        newDepth += doDeeperSearch - doShallowerSearch;
 
-        if (adjustedDepth > d)
-          value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha,
-                                 adjustedDepth, !cutNode);
+        if (newDepth > d)
+          value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha, newDepth,
+                                 !cutNode);
 
         // Post LMR continuation history updates
         update_continuation_histories(ss, movedPc, move.to_sq(), 1365);
@@ -1582,18 +1610,21 @@ Value Worker::evaluate(const Position &pos) {
                     VALUE_TB_WIN_IN_MAX_PLY - 1);
 }
 
-// Reduction function - simplified for stability
+// Reduction function - returns value in plies (not scaled)
+// Simplified version for stability
 Depth Worker::reduction(bool improving, Depth depth, int moveCount,
                         int /*delta*/) const {
-  // Simple logarithmic reduction
-  int r = reductions[std::min(depth, MAX_PLY - 1)] *
-          reductions[std::min(moveCount, MAX_MOVES - 1)] / 1024;
+  int d = std::min(depth, MAX_PLY - 1);
+  int mn = std::min(moveCount, MAX_MOVES - 1);
+
+  // Simple logarithmic reduction based on depth and move count
+  int r = reductions[d] * reductions[mn] / 1024;
 
   // Adjust for improving
   if (!improving)
     r += 1;
 
-  return std::max(0, std::min(r, depth - 1));
+  return std::max(0, r);
 }
 
 // =============================================================================
