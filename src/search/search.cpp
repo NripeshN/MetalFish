@@ -102,19 +102,44 @@ void TimeManager::adjust_time(double ratio) {
 
 // Worker constructor
 Worker::Worker(size_t idx) : threadIdx(idx) {
-  // Initialize history tables
-  std::memset(mainHistory, 0, sizeof(mainHistory));
+  // Initialize history tables with Stockfish default values
+  constexpr int mainHistoryDefault = 68;
+  for (int c = 0; c < 2; ++c)
+    for (int i = 0; i < 4096; ++i)
+      mainHistory[c][i] = mainHistoryDefault;
+  
   std::memset(lowPlyHistory, 0, sizeof(lowPlyHistory));
-  std::memset(captureHistory, 0, sizeof(captureHistory));
-  std::memset(pawnHistory, 0, sizeof(pawnHistory));
+  
+  // Stockfish initializes captureHistory to -689
+  for (int p = 0; p < 16; ++p)
+    for (int s = 0; s < 64; ++s)
+      for (int pt = 0; pt < 8; ++pt)
+        captureHistory[p][s][pt] = -689;
+  
+  // Stockfish initializes pawnHistory to -1238
+  for (int i = 0; i < PAWN_HISTORY_SIZE; ++i)
+    for (int p = 0; p < 16; ++p)
+      for (int s = 0; s < 64; ++s)
+        pawnHistory[i][p][s] = -1238;
 
   // Allocate correction history on heap
   correctionHistory = std::make_unique<UnifiedCorrectionHistory>();
   correctionHistory->clear();
 
-  std::memset(continuationHistoryTable, 0, sizeof(continuationHistoryTable));
-  std::memset(continuationCorrectionHistory, 0,
-              sizeof(continuationCorrectionHistory));
+  // Stockfish initializes continuationHistory to -529
+  for (int p = 0; p < 16; ++p)
+    for (int s = 0; s < 64; ++s)
+      for (int p2 = 0; p2 < 16; ++p2)
+        for (int s2 = 0; s2 < 64; ++s2)
+          continuationHistoryTable[p][s][p2][s2] = -529;
+  
+  // Stockfish initializes continuationCorrectionHistory to 8
+  for (int p = 0; p < 16; ++p)
+    for (int s = 0; s < 64; ++s)
+      for (int p2 = 0; p2 < 16; ++p2)
+        for (int s2 = 0; s2 < 64; ++s2)
+          continuationCorrectionHistory[p][s][p2][s2] = 8;
+  
   std::memset(counterMoves, 0, sizeof(counterMoves));
   ttMoveHistory = 0;
 
@@ -141,15 +166,43 @@ void Worker::clear() {
   completedDepth = 0;
   rootDelta = VALUE_INFINITE;
 
-  std::memset(mainHistory, 0, sizeof(mainHistory));
+  // Initialize history tables with Stockfish default values
+  constexpr int mainHistoryDefault = 68;
+  for (int c = 0; c < 2; ++c)
+    for (int i = 0; i < 4096; ++i)
+      mainHistory[c][i] = mainHistoryDefault;
+  
   std::memset(lowPlyHistory, 0, sizeof(lowPlyHistory));
-  std::memset(captureHistory, 0, sizeof(captureHistory));
-  std::memset(pawnHistory, 0, sizeof(pawnHistory));
+  
+  // Stockfish initializes captureHistory to -689
+  for (int p = 0; p < 16; ++p)
+    for (int s = 0; s < 64; ++s)
+      for (int pt = 0; pt < 8; ++pt)
+        captureHistory[p][s][pt] = -689;
+  
+  // Stockfish initializes pawnHistory to -1238
+  for (int i = 0; i < PAWN_HISTORY_SIZE; ++i)
+    for (int p = 0; p < 16; ++p)
+      for (int s = 0; s < 64; ++s)
+        pawnHistory[i][p][s] = -1238;
+  
   if (correctionHistory)
     correctionHistory->clear();
-  std::memset(continuationHistoryTable, 0, sizeof(continuationHistoryTable));
-  std::memset(continuationCorrectionHistory, 0,
-              sizeof(continuationCorrectionHistory));
+  
+  // Stockfish initializes continuationHistory to -529
+  for (int p = 0; p < 16; ++p)
+    for (int s = 0; s < 64; ++s)
+      for (int p2 = 0; p2 < 16; ++p2)
+        for (int s2 = 0; s2 < 64; ++s2)
+          continuationHistoryTable[p][s][p2][s2] = -529;
+  
+  // Stockfish initializes continuationCorrectionHistory to 8
+  for (int p = 0; p < 16; ++p)
+    for (int s = 0; s < 64; ++s)
+      for (int p2 = 0; p2 < 16; ++p2)
+        for (int s2 = 0; s2 < 64; ++s2)
+          continuationCorrectionHistory[p][s][p2][s2] = 8;
+  
   std::memset(counterMoves, 0, sizeof(counterMoves));
   ttMoveHistory = 0;
   killers.clear();
@@ -356,11 +409,24 @@ void Worker::iterative_deepening() {
     (ss + i)->continuationHistory = &continuationHistoryTable[NO_PIECE][SQ_A1];
     (ss + i)->continuationCorrectionHistory =
         &continuationCorrectionHistory[NO_PIECE][SQ_A1];
+    (ss + i)->staticEval = VALUE_NONE;
   }
 
   ss->pv = pv;
 
   TT->new_search();
+
+  // Initialize lowPlyHistory (matching Stockfish)
+  for (int i = 0; i < LOW_PLY_HISTORY_SIZE; ++i)
+    for (int j = 0; j < 4096; ++j)
+      lowPlyHistory[i][j] = 97;
+
+  // Age mainHistory (matching Stockfish)
+  constexpr int mainHistoryDefault = 68;
+  Color us = rootPos->side_to_move();
+  for (Color c : {WHITE, BLACK})
+    for (int i = 0; i < 4096; ++i)
+      mainHistory[c][i] = (mainHistory[c][i] - mainHistoryDefault) * 3 / 4 + mainHistoryDefault;
 
   Value bestValue = -VALUE_INFINITE;
   Value alpha = -VALUE_INFINITE;
@@ -431,7 +497,6 @@ void Worker::iterative_deepening() {
         beta = std::min(avg + delta, VALUE_INFINITE);
 
         // Calculate optimism based on average score (matching Stockfish)
-        Color us = rootPos->side_to_move();
         optimism[us] = 142 * avg / (std::abs(avg) + 91);
         optimism[~us] = -optimism[us];
       } else {
@@ -448,6 +513,10 @@ void Worker::iterative_deepening() {
         // steps
         Depth adjustedDepth = std::max(1, rootDepth - failedHighCnt -
                                               3 * (searchAgainCounter + 1) / 4);
+        
+        // Set rootDelta before search (needed for reduction formula)
+        rootDelta = beta - alpha;
+        
         bestValue =
             search<Root>(*rootPos, ss, alpha, beta, adjustedDepth, false);
 
@@ -1010,33 +1079,13 @@ moves_loop: // When in check, search starts here
         if (skipQuiets)
           continue;
           
-        // Futility pruning for quiet moves
-        if (!givesCheck && lmrDepth < 10 &&
-            ss->staticEval + 100 + 150 * lmrDepth <= alpha)
+        // Futility pruning for quiet moves (less aggressive)
+        if (!givesCheck && lmrDepth < 8 &&
+            ss->staticEval + 150 + 200 * lmrDepth <= alpha)
           continue;
 
-        // History-based pruning: skip quiet moves with very bad history
-        if (!givesCheck && depth <= 5) {
-          Piece movedPc = pos.moved_piece(move);
-          if (movedPc != NO_PIECE) {
-            int histIdx = move.from_sq() * 64 + move.to_sq();
-            Color us = pos.side_to_move();
-            int histScore = mainHistory[us][histIdx];
-
-            // Prune moves with very negative history
-            if (histScore < -4000 * depth)
-              continue;
-
-            // Also check pawn history
-            int pawnIdx = pawn_history_index(pos);
-            int pawnHistScore = pawnHistory[pawnIdx][movedPc][move.to_sq()];
-            if (histScore + pawnHistScore < -6000 * depth)
-              continue;
-          }
-        }
-
         // SEE-based pruning for quiet moves
-        if (!pos.see_ge(move, -30 * lmrDepth * lmrDepth))
+        if (lmrDepth > 0 && !pos.see_ge(move, -30 * lmrDepth * lmrDepth))
           continue;
       }
     }
@@ -1139,69 +1188,36 @@ moves_loop: // When in check, search starts here
     }
 
     if (depth >= 2 && moveCount > 1 + (PvNode ? 1 : 0)) {
-      int r = reductions[std::min(moveCount, MAX_MOVES - 1)] * depth / 16;
-
-      // Decrease for checks
-      if (givesCheck)
-        r--;
-
-      // Decrease for captures
-      if (isCapture)
-        r--;
-
-      // Increase for cut nodes
-      if (cutNode)
-        r += 2;
-
-      // Increase for non-improving positions
-      if (!improving)
-        r++;
-
-      // Decrease for TT move
-      if (move == ttMove)
-        r -= 2;
-
-      // Decrease for PV nodes
-      if (PvNode)
-        r--;
-
-      // Decrease for ttPv
-      if (ss->ttPv)
-        r--;
-
-      // Increase if next ply has a lot of fail highs
-      if ((ss + 1)->cutoffCnt > 1)
-        r += 1 + ((ss + 1)->cutoffCnt > 2) + ((ss + 1)->cutoffCnt > 3);
-
-      // Increase for all nodes
-      if (allNode)
-        r++;
-
-      // Decrease/increase reduction for moves with a good/bad history
-      r -= ss->statScore / 8192;
-
-      r = std::max(0, std::min(r, newDepth - 1));
+      // Calculate delta for reduction formula
+      int delta = beta - alpha;
       
-      ss->reduction = r;
-      value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha, newDepth - r, true);
+      // Use Stockfish's reduction formula
+      Depth r = reduction(improving, depth, moveCount, delta);
+      
+      // Clamp and convert to depth (simpler formula to avoid issues)
+      Depth d = std::max(1, newDepth - r);
+      
+      ss->reduction = newDepth - d;
+      value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha, d, true);
       ss->reduction = 0;
 
       // Do a full-depth search when reduced LMR search fails high
-      if (value > alpha && r > 0) {
+      if (value > alpha && d < newDepth) {
         // Adjust full-depth search based on LMR results
-        bool doDeeperSearch = newDepth - r < newDepth && value > bestValue + 50;
+        bool doDeeperSearch = value > bestValue + 50;
         bool doShallowerSearch = value < bestValue + 9;
         
         Depth adjustedDepth = newDepth + doDeeperSearch - doShallowerSearch;
         
-        if (adjustedDepth > newDepth - r)
+        if (adjustedDepth > d)
           value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha, adjustedDepth, !cutNode);
         
         // Post LMR continuation history updates
         update_continuation_histories(ss, movedPc, move.to_sq(), 1365);
       }
-    } else {
-      value = alpha + 1; // Force full search
+    } else if (!PvNode || moveCount > 1) {
+      // Full-depth search when LMR is skipped
+      value = -search<NonPV>(pos, ss + 1, -(alpha + 1), -alpha, newDepth, !cutNode);
     }
 
     // Full window search for PV nodes
@@ -1548,11 +1564,16 @@ Value Worker::evaluate(const Position &pos) {
                     VALUE_TB_WIN_IN_MAX_PLY - 1);
 }
 
-// Reduction function matching Stockfish formula
-Depth Worker::reduction(bool improving, Depth depth, int moveCount, int delta) const {
-  int reductionScale = reductions[std::min(depth, MAX_PLY - 1)] * reductions[std::min(moveCount, MAX_MOVES - 1)];
-  int rd = std::max(1, int(rootDelta));
-  return (reductionScale - delta * 608 / rd + !improving * reductionScale * 238 / 512 + 1182) / 1024;
+// Reduction function - simplified for stability
+Depth Worker::reduction(bool improving, Depth depth, int moveCount, int /*delta*/) const {
+  // Simple logarithmic reduction
+  int r = reductions[std::min(depth, MAX_PLY - 1)] * reductions[std::min(moveCount, MAX_MOVES - 1)] / 1024;
+  
+  // Adjust for improving
+  if (!improving)
+    r += 1;
+  
+  return std::max(0, std::min(r, depth - 1));
 }
 
 // =============================================================================
