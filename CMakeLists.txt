@@ -134,7 +134,8 @@ set(GPU_SOURCES
     src/gpu/nnue_eval.cpp
     src/gpu/batch_ops.cpp
     src/gpu/gpu_nnue.cpp
-    src/gpu/gpu_nnue_integration.cpp)
+    src/gpu/gpu_nnue_integration.cpp
+    src/gpu/gpu_accumulator.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
