@@ -614,3 +614,324 @@ kernel void batch_nnue_evaluate(
     // In practice, we'll dispatch separate kernels for better occupancy
     // and easier debugging
 }
+
+// ============================================================================
+// Threat Feature Extraction (FullThreats)
+// ============================================================================
+
+// Extract threat features from position
+kernel void extract_threat_features(
+    device const GPUPosition* positions [[buffer(0)]],
+    device int32_t* threat_features [[buffer(1)]],
+    device uint32_t* feature_counts [[buffer(2)]],
+    constant uint& batch_size [[buffer(3)]],
+    constant uint& max_features [[buffer(4)]],
+    uint gid [[thread_position_in_grid]]) {
+    
+    if (gid >= batch_size) return;
+    
+    GPUPosition pos = positions[gid];
+    uint count = 0;
+    uint base_idx = gid * max_features;
+    
+    // Threat feature extraction based on piece attacks
+    // Simplified version - full implementation requires attack tables
+    for (uint attacker_color = 0; attacker_color < 2; attacker_color++) {
+        for (uint pt = 1; pt <= 6 && count < max_features; pt++) {
+            uint64_t attackers = pos.pieces[attacker_color][pt];
+            while (attackers && count < max_features) {
+                uint from = lsb64(attackers);
+                attackers &= attackers - 1;
+                
+                // For each attacker, check what it threatens
+                for (uint target_color = 0; target_color < 2; target_color++) {
+                    for (uint target_pt = 1; target_pt <= 6 && count < max_features; target_pt++) {
+                        uint64_t targets = pos.pieces[target_color][target_pt];
+                        while (targets && count < max_features) {
+                            uint to = lsb64(targets);
+                            targets &= targets - 1;
+                            
+                            // Simplified threat index calculation
+                            int32_t threat_idx = int32_t(attacker_color * 768 + pt * 128 + target_pt * 16 + (from % 8) + (to % 8));
+                            if (threat_idx >= 0 && threat_idx < int32_t(THREAT_DIMS)) {
+                                threat_features[base_idx + count++] = threat_idx;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    feature_counts[gid] = count;
+}
+
+// ============================================================================
+// Double Incremental Update (Optimized for consecutive moves)
+// ============================================================================
+
+// Double incremental update - combines two consecutive move updates
+kernel void double_incremental_update(
+    device const weight_t* weights [[buffer(0)]],
+    device const int32_t* added1 [[buffer(1)]],
+    device const int32_t* removed1 [[buffer(2)]],
+    device const int32_t* added2 [[buffer(3)]],
+    device const int32_t* removed2 [[buffer(4)]],
+    device const uint32_t* counts [[buffer(5)]],  // [add1, rem1, add2, rem2]
+    device const accumulator_t* src_acc [[buffer(6)]],
+    device accumulator_t* dst_acc [[buffer(7)]],
+    constant uint& hidden_dim [[buffer(8)]],
+    constant uint& perspective [[buffer(9)]],
+    uint gid [[thread_position_in_grid]]) {
+    
+    if (gid >= hidden_dim) return;
+    
+    uint num_added1 = counts[0];
+    uint num_removed1 = counts[1];
+    uint num_added2 = counts[2];
+    uint num_removed2 = counts[3];
+    
+    accumulator_t acc = src_acc[perspective * hidden_dim + gid];
+    
+    // First move: remove then add
+    for (uint i = 0; i < num_removed1; i++) {
+        int32_t feat_idx = removed1[i];
+        if (feat_idx >= 0) {
+            acc -= weights[feat_idx * hidden_dim + gid];
+        }
+    }
+    for (uint i = 0; i < num_added1; i++) {
+        int32_t feat_idx = added1[i];
+        if (feat_idx >= 0) {
+            acc += weights[feat_idx * hidden_dim + gid];
+        }
+    }
+    
+    // Second move: remove then add
+    for (uint i = 0; i < num_removed2; i++) {
+        int32_t feat_idx = removed2[i];
+        if (feat_idx >= 0) {
+            acc -= weights[feat_idx * hidden_dim + gid];
+        }
+    }
+    for (uint i = 0; i < num_added2; i++) {
+        int32_t feat_idx = added2[i];
+        if (feat_idx >= 0) {
+            acc += weights[feat_idx * hidden_dim + gid];
+        }
+    }
+    
+    dst_acc[perspective * hidden_dim + gid] = acc;
+}
+
+// ============================================================================
+// SIMD-Optimized Feature Transform (using simdgroups)
+// ============================================================================
+
+// Feature transform using SIMD operations for better throughput
+kernel void feature_transform_simd_optimized(
+    device const weight_t* weights [[buffer(0)]],
+    device const weight_t* biases [[buffer(1)]],
+    device const int32_t* features [[buffer(2)]],
+    device const uint32_t* feature_counts [[buffer(3)]],
+    device accumulator_t* accumulators [[buffer(4)]],
+    constant uint& hidden_dim [[buffer(5)]],
+    constant uint& batch_size [[buffer(6)]],
+    uint2 tg_pos [[threadgroup_position_in_grid]],
+    uint2 tg_size [[threads_per_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
+    
+    uint pos_idx = tg_pos.y;
+    if (pos_idx >= batch_size) return;
+    
+    // Each SIMD group processes 32 hidden dimensions
+    uint hidden_base = (tg_pos.x * tg_size.x / 32 + simd_group) * 32;
+    uint hidden_idx = hidden_base + simd_lane;
+    
+    if (hidden_idx >= hidden_dim) return;
+    
+    // Start with bias
+    accumulator_t acc = accumulator_t(biases[hidden_idx]);
+    
+    uint count = feature_counts[pos_idx];
+    device const int32_t* pos_features = features + pos_idx * 32;  // Max 32 features per position
+    
+    // Accumulate weights for active features
+    for (uint i = 0; i < count; i++) {
+        int32_t feat_idx = pos_features[i];
+        if (feat_idx >= 0 && feat_idx < int32_t(HALFKA_DIMS)) {
+            acc += weights[feat_idx * hidden_dim + hidden_idx];
+        }
+    }
+    
+    accumulators[pos_idx * hidden_dim * 2 + hidden_idx] = acc;
+}
+
+// ============================================================================
+// Accumulator Clipping and Pairwise Multiplication (Transform Output)
+// ============================================================================
+
+// Transform accumulator to network input with clipping and pairwise multiplication
+kernel void transform_accumulator_output(
+    device const accumulator_t* accumulators [[buffer(0)]],
+    device const accumulator_t* threat_accumulators [[buffer(1)]],
+    device uint8_t* output [[buffer(2)]],
+    constant uint& hidden_dim [[buffer(3)]],
+    constant uint& batch_size [[buffer(4)]],
+    constant uint& use_threats [[buffer(5)]],
+    constant uint& perspective [[buffer(6)]],
+    uint2 gid [[thread_position_in_grid]]) {
+    
+    uint pos_idx = gid.y;
+    uint out_idx = gid.x;
+    
+    if (pos_idx >= batch_size || out_idx >= hidden_dim / 2) return;
+    
+    uint half_dim = hidden_dim / 2;
+    device const accumulator_t* acc = accumulators + pos_idx * hidden_dim * 2 + perspective * hidden_dim;
+    
+    int16_t sum0, sum1;
+    
+    if (use_threats) {
+        device const accumulator_t* threat_acc = threat_accumulators + pos_idx * hidden_dim * 2 + perspective * hidden_dim;
+        sum0 = clamp(int(acc[out_idx] + threat_acc[out_idx]), 0, 255);
+        sum1 = clamp(int(acc[out_idx + half_dim] + threat_acc[out_idx + half_dim]), 0, 255);
+    } else {
+        sum0 = clamp(int(acc[out_idx]) >> WEIGHT_SCALE_BITS, 0, 254);
+        sum1 = clamp(int(acc[out_idx + half_dim]) >> WEIGHT_SCALE_BITS, 0, 254);
+    }
+    
+    // Pairwise multiplication with division by 512
+    output[pos_idx * hidden_dim + perspective * half_dim + out_idx] = uint8_t((sum0 * sum1) / 512);
+}
+
+// ============================================================================
+// Batch FC Layer with Multiple Buckets
+// ============================================================================
+
+// FC0 layer with per-position bucket selection
+kernel void fc0_layer_batched(
+    device const uint8_t* input [[buffer(0)]],
+    device const layer_weight_t* weights [[buffer(1)]],  // [LAYER_STACKS][hidden_dim*2][FC0_OUT+1]
+    device const int32_t* biases [[buffer(2)]],          // [LAYER_STACKS][FC0_OUT+1]
+    device const int32_t* buckets [[buffer(3)]],
+    device int8_t* output_sqr [[buffer(4)]],
+    device int8_t* output_linear [[buffer(5)]],
+    constant uint& hidden_dim [[buffer(6)]],
+    constant uint& batch_size [[buffer(7)]],
+    uint2 gid [[thread_position_in_grid]]) {
+    
+    uint pos_idx = gid.y;
+    uint out_idx = gid.x;
+    
+    if (pos_idx >= batch_size || out_idx > FC0_OUT) return;
+    
+    int bucket = buckets[pos_idx];
+    
+    // Get weights and biases for this bucket
+    device const layer_weight_t* bucket_weights = weights + bucket * hidden_dim * 2 * (FC0_OUT + 1);
+    device const int32_t* bucket_biases = biases + bucket * (FC0_OUT + 1);
+    
+    device const uint8_t* in_ptr = input + pos_idx * hidden_dim * 2;
+    
+    int32_t sum = bucket_biases[out_idx];
+    
+    // Sparse input: only process non-zero values
+    for (uint i = 0; i < hidden_dim * 2; i++) {
+        if (in_ptr[i] != 0) {
+            sum += in_ptr[i] * bucket_weights[i * (FC0_OUT + 1) + out_idx];
+        }
+    }
+    
+    int16_t result = int16_t(sum >> WEIGHT_SCALE_BITS);
+    output_sqr[pos_idx * (FC0_OUT + 1) + out_idx] = sqr_clipped_relu(result);
+    output_linear[pos_idx * (FC0_OUT + 1) + out_idx] = clipped_relu(result);
+}
+
+// ============================================================================
+// Complete Evaluation Pipeline
+// ============================================================================
+
+// Full evaluation combining all steps
+kernel void evaluate_position_full(
+    device const GPUPosition* positions [[buffer(0)]],
+    device const weight_t* ft_weights [[buffer(1)]],
+    device const weight_t* ft_biases [[buffer(2)]],
+    device const int8_t* threat_weights [[buffer(3)]],
+    device const int32_t* ft_psqt [[buffer(4)]],
+    device const int32_t* threat_psqt [[buffer(5)]],
+    device const layer_weight_t* fc0_weights [[buffer(6)]],
+    device const int32_t* fc0_biases [[buffer(7)]],
+    device const layer_weight_t* fc1_weights [[buffer(8)]],
+    device const int32_t* fc1_biases [[buffer(9)]],
+    device const layer_weight_t* fc2_weights [[buffer(10)]],
+    device const int32_t* fc2_biases [[buffer(11)]],
+    device int32_t* psqt_output [[buffer(12)]],
+    device int32_t* positional_output [[buffer(13)]],
+    constant uint& hidden_dim [[buffer(14)]],
+    constant uint& batch_size [[buffer(15)]],
+    constant uint& use_threats [[buffer(16)]],
+    uint gid [[threadgroup_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]]) {
+    
+    uint pos_idx = gid;
+    if (pos_idx >= batch_size) return;
+    
+    // This kernel orchestrates the full evaluation
+    // Individual steps are better done as separate kernel dispatches
+    // for flexibility and debugging
+}
+
+// ============================================================================
+// Memory Copy Utilities
+// ============================================================================
+
+// Fast memory copy for accumulator states
+kernel void copy_accumulator_fast(
+    device const accumulator_t* src [[buffer(0)]],
+    device accumulator_t* dst [[buffer(1)]],
+    constant uint& count [[buffer(2)]],
+    uint gid [[thread_position_in_grid]],
+    uint simd_lane [[thread_index_in_simdgroup]]) {
+    
+    // Each thread copies 4 elements for better memory coalescing
+    uint base = gid * 4;
+    if (base + 3 < count) {
+        dst[base] = src[base];
+        dst[base + 1] = src[base + 1];
+        dst[base + 2] = src[base + 2];
+        dst[base + 3] = src[base + 3];
+    } else {
+        for (uint i = 0; i < 4 && base + i < count; i++) {
+            dst[base + i] = src[base + i];
+        }
+    }
+}
+
+// ============================================================================
+// Reduction Kernels for PSQT Computation
+// ============================================================================
+
+// Parallel reduction for PSQT accumulation
+kernel void psqt_reduce(
+    device const int32_t* partial_sums [[buffer(0)]],
+    device int32_t* output [[buffer(1)]],
+    constant uint& num_partials [[buffer(2)]],
+    constant uint& batch_size [[buffer(3)]],
+    uint2 gid [[thread_position_in_grid]],
+    uint simd_lane [[thread_index_in_simdgroup]]) {
+    
+    uint pos_idx = gid.y;
+    uint bucket = gid.x;
+    
+    if (pos_idx >= batch_size || bucket >= PSQT_BUCKETS) return;
+    
+    int32_t sum = 0;
+    for (uint i = 0; i < num_partials; i++) {
+        sum += partial_sums[i * batch_size * PSQT_BUCKETS + pos_idx * PSQT_BUCKETS + bucket];
+    }
+    
+    output[pos_idx * PSQT_BUCKETS + bucket] = sum;
+}
