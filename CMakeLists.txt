@@ -15,25 +15,83 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   )
 endif()
 
-# Metal GPU acceleration option (macOS only)
-option(USE_METAL "Enable Metal GPU acceleration" OFF)
-
-# Check if metal-cpp headers exist
-if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp/Metal/Metal.hpp")
-  set(METAL_CPP_AVAILABLE ON)
+# Metal GPU acceleration option (macOS only, defaults to ON for Apple devices)
+if(APPLE)
+  option(USE_METAL "Enable Metal GPU acceleration" ON)
 else()
-  set(METAL_CPP_AVAILABLE OFF)
+  option(USE_METAL "Enable Metal GPU acceleration" OFF)
 endif()
 
-# Auto-enable Metal if headers are available and not explicitly disabled
-if(APPLE AND METAL_CPP_AVAILABLE AND NOT DEFINED USE_METAL)
-  set(USE_METAL ON)
+# Metal-cpp headers location
+set(METAL_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp")
+set(METAL_CPP_HEADER "${METAL_CPP_DIR}/Metal/Metal.hpp")
+
+# Download metal-cpp if USE_METAL is ON and headers don't exist
+if(APPLE AND USE_METAL)
+  if(NOT EXISTS "${METAL_CPP_HEADER}")
+    message(STATUS "metal-cpp headers not found, downloading...")
+    
+    # Create external directory if it doesn't exist
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external")
+    
+    # Download metal-cpp from Apple's GitHub
+    set(METAL_CPP_URL "https://developer.apple.com/metal/cpp/files/metal-cpp_macOS14.2_iOS17.2.zip")
+    set(METAL_CPP_ZIP "${CMAKE_CURRENT_BINARY_DIR}/metal-cpp.zip")
+    set(METAL_CPP_EXTRACT_DIR "${CMAKE_CURRENT_BINARY_DIR}/metal-cpp-extract")
+    
+    # Download
+    file(DOWNLOAD 
+      ${METAL_CPP_URL}
+      ${METAL_CPP_ZIP}
+      STATUS DOWNLOAD_STATUS
+      SHOW_PROGRESS
+    )
+    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_RESULT)
+    
+    if(NOT DOWNLOAD_RESULT EQUAL 0)
+      message(WARNING "Failed to download metal-cpp. Metal support will be disabled.")
+      set(USE_METAL OFF)
+    else()
+      # Extract
+      message(STATUS "Extracting metal-cpp...")
+      file(ARCHIVE_EXTRACT INPUT ${METAL_CPP_ZIP} DESTINATION ${METAL_CPP_EXTRACT_DIR})
+      
+      # Move to external/metal-cpp
+      file(GLOB METAL_CPP_EXTRACTED_DIR "${METAL_CPP_EXTRACT_DIR}/metal-cpp*")
+      if(METAL_CPP_EXTRACTED_DIR)
+        # Remove old directory if exists
+        if(EXISTS "${METAL_CPP_DIR}")
+          file(REMOVE_RECURSE "${METAL_CPP_DIR}")
+        endif()
+        file(RENAME "${METAL_CPP_EXTRACTED_DIR}" "${METAL_CPP_DIR}")
+        message(STATUS "metal-cpp installed to ${METAL_CPP_DIR}")
+      else()
+        message(WARNING "Failed to extract metal-cpp. Metal support will be disabled.")
+        set(USE_METAL OFF)
+      endif()
+      
+      # Cleanup
+      file(REMOVE ${METAL_CPP_ZIP})
+      file(REMOVE_RECURSE ${METAL_CPP_EXTRACT_DIR})
+    endif()
+  endif()
+  
+  # Verify headers exist after potential download
+  if(EXISTS "${METAL_CPP_HEADER}")
+    set(METAL_CPP_AVAILABLE ON)
+  else()
+    set(METAL_CPP_AVAILABLE OFF)
+    message(WARNING "metal-cpp headers still not available. Metal support will be disabled.")
+    set(USE_METAL OFF)
+  endif()
+else()
+  set(METAL_CPP_AVAILABLE OFF)
 endif()
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp)
+  include_directories(${METAL_CPP_DIR})
 endif()
 
 # Core source files
