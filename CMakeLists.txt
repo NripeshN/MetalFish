@@ -95,11 +95,23 @@ if(APPLE)
   # add_dependencies(metalfish metal_shaders)
 endif()
 
-# Copy NNUE files to build directory
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/nn-c288c895ea92.nnue
-               ${CMAKE_CURRENT_BINARY_DIR}/nn-c288c895ea92.nnue COPYONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/nn-37f18f62d772.nnue
-               ${CMAKE_CURRENT_BINARY_DIR}/nn-37f18f62d772.nnue COPYONLY)
+# Copy NNUE files to build directory (if they exist)
+set(NNUE_FILE1 ${CMAKE_CURRENT_SOURCE_DIR}/src/nn-c288c895ea92.nnue)
+set(NNUE_FILE2 ${CMAKE_CURRENT_SOURCE_DIR}/src/nn-37f18f62d772.nnue)
+
+if(EXISTS ${NNUE_FILE1})
+  configure_file(${NNUE_FILE1} ${CMAKE_CURRENT_BINARY_DIR}/nn-c288c895ea92.nnue COPYONLY)
+  message(STATUS "Found NNUE file: nn-c288c895ea92.nnue")
+else()
+  message(WARNING "NNUE file not found: nn-c288c895ea92.nnue - download from https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue")
+endif()
+
+if(EXISTS ${NNUE_FILE2})
+  configure_file(${NNUE_FILE2} ${CMAKE_CURRENT_BINARY_DIR}/nn-37f18f62d772.nnue COPYONLY)
+  message(STATUS "Found NNUE file: nn-37f18f62d772.nnue")
+else()
+  message(WARNING "NNUE file not found: nn-37f18f62d772.nnue - download from https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue")
+endif()
 
 # Tests
 option(BUILD_TESTS "Build tests" ON)

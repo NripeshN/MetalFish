@@ -34,6 +34,13 @@ jobs:
           echo "Available Metal devices:"
           system_profiler SPDisplaysDataType | grep -A 5 "Metal" || echo "Metal info not available in CI"
 
+      - name: Download NNUE files
+        run: |
+          cd src
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          ls -la *.nnue
+
       - name: Configure CMake
         run: |
           cmake -B build \
@@ -92,6 +99,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Download NNUE files
+        run: |
+          cd src
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
 
       - name: Build Release
         run: |
