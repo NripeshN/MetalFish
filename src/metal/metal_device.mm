@@ -42,7 +42,8 @@ struct MetalDevice::Impl {
             NSString* shaderPath = [[NSBundle mainBundle] pathForResource:@"nnue" ofType:@"metallib"];
             
             if (shaderPath) {
-                library = [device newLibraryWithFile:shaderPath error:&error];
+                NSURL* shaderURL = [NSURL fileURLWithPath:shaderPath];
+                library = [device newLibraryWithURL:shaderURL error:&error];
             }
             
             if (!library) {
