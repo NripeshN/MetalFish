@@ -677,6 +677,8 @@ All performance projections in this paper are \textbf{theoretical estimates} bas
 
 Actual performance may vary significantly based on implementation details, hardware variations, and workload characteristics. Empirical validation is required to confirm these theoretical projections.
 
+Additionally, real-world performance is influenced by hybrid CPU--GPU execution decisions, where certain search and evaluation workloads may execute on the CPU despite GPU availability.
+
 \section{Theoretical Performance Analysis and Modeling}
 
 \subsection{Performance Model Development}
@@ -826,6 +828,8 @@ Based on our theoretical analysis, we project the following performance improvem
 \end{itemize}
 
 These improvements should translate to an estimated 50-100 Elo point strength increase over current engines, primarily due to more efficient search and better evaluation utilization.
+
+These projections assume effective workload partitioning between CPU and GPU components, and actual gains depend on the frequency with which search and evaluation tasks are executed on each processing unit.
 
 \section{Evaluation Plan and Methodology}
 
