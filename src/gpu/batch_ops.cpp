@@ -6,6 +6,10 @@
 */
 
 #include "batch_ops.h"
+
+#ifdef USE_METAL
+
+#include "backend.h"
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
@@ -431,3 +435,70 @@ size_t GPUOperations::total_gpu_memory() const {
 
 } // namespace GPU
 } // namespace MetalFish
+
+#else // !USE_METAL
+
+// Stub implementation when Metal is not available
+#include "core/bitboard.h"
+#include "core/movegen.h"
+#include "core/position.h"
+
+namespace MetalFish {
+namespace GPU {
+
+void GPUPosition::from_position(const Position &pos) {
+  // Stub - no GPU available
+  (void)pos;
+}
+
+GPUMove GPUMove::from_move(Move m) {
+  GPUMove gm;
+  gm.data = m.raw();
+  gm.score = 0;
+  return gm;
+}
+
+Move GPUMove::to_move() const {
+  return Move(data);
+}
+
+BatchSEE::BatchSEE() {}
+BatchSEE::~BatchSEE() {}
+bool BatchSEE::initialize() { return false; }
+bool BatchSEE::load_kernels() { return false; }
+bool BatchSEE::allocate_buffers() { return false; }
+void BatchSEE::upload_attack_tables() {}
+
+bool BatchSEE::compute(const Position *positions[], const Move moves[],
+                       const int thresholds[], bool results[], int count) {
+  // CPU fallback
+  for (int i = 0; i < count; i++) {
+    results[i] = positions[i]->see_ge(moves[i], Value(thresholds[i]));
+  }
+  cpu_computations_ += count;
+  return false;
+}
+
+BatchMoveScorer::BatchMoveScorer() {}
+BatchMoveScorer::~BatchMoveScorer() {}
+bool BatchMoveScorer::initialize() { return false; }
+
+bool BatchMoveScorer::score_moves(const Position *positions[], GPUMove *moves[],
+                                  const int move_counts[],
+                                  const int16_t *history, int count) {
+  return false;
+}
+
+GPUOperations &GPUOperations::instance() {
+  static GPUOperations instance;
+  return instance;
+}
+
+bool GPUOperations::initialize() { return false; }
+
+size_t GPUOperations::total_gpu_memory() const { return 0; }
+
+} // namespace GPU
+} // namespace MetalFish
+
+#endif // USE_METAL

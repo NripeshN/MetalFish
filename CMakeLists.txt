@@ -130,15 +130,15 @@ set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
 # GPU source files (backend-agnostic interface)
-set(GPU_SOURCES)
+set(GPU_SOURCES
+    src/gpu/nnue_eval.cpp
+    src/gpu/batch_ops.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(GPU_SOURCES
       ${GPU_SOURCES}
       src/gpu/metal/metal_backend.mm
-      src/gpu/nnue_eval.cpp
-      src/gpu/batch_ops.cpp
       src/metal/metal_device.mm
       src/metal/device.cpp
       src/metal/allocator.cpp)
@@ -169,7 +169,9 @@ if(USE_METAL AND METAL_CPP_AVAILABLE)
     add_custom_target(metal_shaders DEPENDS ${SHADER_OUTPUT})
   endif()
 else()
-  message(STATUS "Metal GPU acceleration: DISABLED")
+  # CPU fallback backend
+  set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cpu_backend.cpp)
+  message(STATUS "Metal GPU acceleration: DISABLED (CPU fallback)")
 endif()
 
 # Future: CUDA sources
