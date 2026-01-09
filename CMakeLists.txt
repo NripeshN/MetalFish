@@ -34,8 +34,8 @@ if(APPLE AND USE_METAL)
     # Create external directory if it doesn't exist
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external")
     
-    # Download metal-cpp from Apple's GitHub
-    set(METAL_CPP_URL "https://developer.apple.com/metal/cpp/files/metal-cpp_macOS14.2_iOS17.2.zip")
+    # Download metal-cpp from Apple (latest version 26)
+    set(METAL_CPP_URL "https://developer.apple.com/metal/cpp/files/metal-cpp_26.zip")
     set(METAL_CPP_ZIP "${CMAKE_CURRENT_BINARY_DIR}/metal-cpp.zip")
     set(METAL_CPP_EXTRACT_DIR "${CMAKE_CURRENT_BINARY_DIR}/metal-cpp-extract")
     
