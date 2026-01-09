@@ -645,6 +645,10 @@ The proposed GPU-optimized architecture exhibits favorable computational complex
 
 \textbf{Communication Complexity:} Unlike distributed approaches that require $O(p \log p)$ communication overhead, the unified memory architecture reduces communication complexity to $O(1)$ for data sharing between CPU and GPU components.
 
+\subsection{Practical Execution Model in MetalFish}
+
+In practice, MetalFish adopts a hybrid CPU--GPU execution strategy rather than relying exclusively on GPU acceleration. While GPU kernels provide substantial throughput advantages for batch evaluation, single-position evaluation during alpha--beta search often remains more efficient on the CPU due to kernel dispatch, synchronization, and control-flow divergence overhead. Although unified memory architectures eliminate explicit host--device data transfers, execution overheads still influence performance trade-offs. Consequently, MetalFish dynamically selects between CPU and GPU execution paths based on workload granularity to balance latency and throughput.
+
 \section{Scope and Assumptions}
 
 Before presenting our theoretical performance analysis, we establish the scope and key assumptions underlying our models:
