@@ -3,231 +3,116 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Licensed under GPL-3.0
-
 */
 
 #include "eval/evaluate.h"
-#include "core/bitboard.h"
-#include "eval/gpu_nnue.h"
-#include "eval/nnue.h"
-#include "eval/nnue_gpu.h"
+
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstdlib>
+#include <iomanip>
 #include <iostream>
+#include <memory>
 #include <sstream>
+#include <tuple>
+
+#include "core/position.h"
+#include "core/types.h"
+#include "eval/nnue/network.h"
+#include "eval/nnue/nnue_accumulator.h"
+#include "eval/nnue/nnue_misc.h"
+#include "uci/uci.h"
 
 namespace MetalFish {
 
-namespace Eval {
-
-namespace {
-
-// Material piece values for classical evaluation (used as fallback)
-constexpr int PieceValues[PIECE_TYPE_NB] = {0, 100, 320, 330, 500, 900, 20000};
-
-// Piece-square tables for classical evaluation
-constexpr int PawnTable[SQUARE_NB] = {
-    0,  0,  0,  0,   0,   0,  0,  0,  50, 50, 50,  50, 50, 50,  50, 50,
-    10, 10, 20, 30,  30,  20, 10, 10, 5,  5,  10,  25, 25, 10,  5,  5,
-    0,  0,  0,  20,  20,  0,  0,  0,  5,  -5, -10, 0,  0,  -10, -5, 5,
-    5,  10, 10, -20, -20, 10, 10, 5,  0,  0,  0,   0,  0,  0,   0,  0};
-
-constexpr int KnightTable[SQUARE_NB] = {
-    -50, -40, -30, -30, -30, -30, -40, -50, -40, -20, 0,   0,   0,
-    0,   -20, -40, -30, 0,   10,  15,  15,  10,  0,   -30, -30, 5,
-    15,  20,  20,  15,  5,   -30, -30, 0,   15,  20,  20,  15,  0,
-    -30, -30, 5,   10,  15,  15,  10,  5,   -30, -40, -20, 0,   5,
-    5,   0,   -20, -40, -50, -40, -30, -30, -30, -30, -40, -50};
-
-constexpr int BishopTable[SQUARE_NB] = {
-    -20, -10, -10, -10, -10, -10, -10, -20, -10, 0,   0,   0,   0,
-    0,   0,   -10, -10, 0,   5,   10,  10,  5,   0,   -10, -10, 5,
-    5,   10,  10,  5,   5,   -10, -10, 0,   10,  10,  10,  10,  0,
-    -10, -10, 10,  10,  10,  10,  10,  10,  -10, -10, 5,   0,   0,
-    0,   0,   5,   -10, -20, -10, -10, -10, -10, -10, -10, -20};
-
-constexpr int RookTable[SQUARE_NB] = {
-    0,  0, 0, 0, 0, 0, 0, 0,  5,  10, 10, 10, 10, 10, 10, 5,
-    -5, 0, 0, 0, 0, 0, 0, -5, -5, 0,  0,  0,  0,  0,  0,  -5,
-    -5, 0, 0, 0, 0, 0, 0, -5, -5, 0,  0,  0,  0,  0,  0,  -5,
-    -5, 0, 0, 0, 0, 0, 0, -5, 0,  0,  0,  5,  5,  0,  0,  0};
-
-constexpr int QueenTable[SQUARE_NB] = {
-    -20, -10, -10, -5, -5, -10, -10, -20, -10, 0,   0,   0,  0,  0,   0,   -10,
-    -10, 0,   5,   5,  5,  5,   0,   -10, -5,  0,   5,   5,  5,  5,   0,   -5,
-    0,   0,   5,   5,  5,  5,   0,   -5,  -10, 5,   5,   5,  5,  5,   0,   -10,
-    -10, 0,   5,   0,  0,  0,   0,   -10, -20, -10, -10, -5, -5, -10, -10, -20};
-
-constexpr int KingMiddleGameTable[SQUARE_NB] = {
-    -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50,
-    -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40,
-    -40, -50, -50, -40, -40, -30, -20, -30, -30, -40, -40, -30, -30,
-    -20, -10, -20, -20, -20, -20, -20, -20, -10, 20,  20,  0,   0,
-    0,   0,   20,  20,  20,  30,  10,  0,   0,   10,  30,  20};
-
-// Get piece-square value
-int psq_value(Piece pc, Square s) {
-  Color c = color_of(pc);
-  PieceType pt = type_of(pc);
-  Square rs = c == WHITE ? s : flip_rank(s);
-
-  switch (pt) {
-  case PAWN:
-    return PawnTable[rs];
-  case KNIGHT:
-    return KnightTable[rs];
-  case BISHOP:
-    return BishopTable[rs];
-  case ROOK:
-    return RookTable[rs];
-  case QUEEN:
-    return QueenTable[rs];
-  case KING:
-    return KingMiddleGameTable[rs];
-  default:
-    return 0;
-  }
+// Returns a static, purely materialistic evaluation of the position from
+// the point of view of the side to move. It can be divided by PawnValue to get
+// an approximation of the material advantage on the board in terms of pawns.
+int Eval::simple_eval(const Position &pos) {
+  Color c = pos.side_to_move();
+  return PawnValue * (pos.count<PAWN>(c) - pos.count<PAWN>(~c)) +
+         pos.non_pawn_material(c) - pos.non_pawn_material(~c);
 }
 
-// Classical evaluation (fallback when NNUE is not loaded)
-Value classical_eval(const Position &pos) {
-  Value score = VALUE_ZERO;
-
-  // Material and piece-square tables
-  for (Square s = SQ_A1; s <= SQ_H8; ++s) {
-    Piece pc = pos.piece_on(s);
-    if (pc == NO_PIECE)
-      continue;
-
-    Value pieceValue = PieceValues[type_of(pc)] + psq_value(pc, s);
-    score += (color_of(pc) == WHITE) ? pieceValue : -pieceValue;
-  }
-
-  // Mobility bonus
-  Color us = pos.side_to_move();
-  Bitboard occupied = pos.pieces();
-
-  for (Square s = SQ_A1; s <= SQ_H8; ++s) {
-    Piece pc = pos.piece_on(s);
-    if (pc == NO_PIECE)
-      continue;
-
-    Color c = color_of(pc);
-    PieceType pt = type_of(pc);
-
-    if (pt == KNIGHT || pt == BISHOP || pt == ROOK || pt == QUEEN) {
-      Bitboard attacks = attacks_bb(pt, s, occupied);
-      int mobility = popcount(attacks & ~pos.pieces(c));
-      Value bonus = Value(mobility * (pt == QUEEN ? 1 : (pt == ROOK ? 2 : 3)));
-      score += (c == WHITE) ? bonus : -bonus;
-    }
-  }
-
-  // King safety (simplified)
-  Square wKing = pos.square<KING>(WHITE);
-  Square bKing = pos.square<KING>(BLACK);
-
-  Bitboard wKingZone = KingAttacks[wKing];
-  Bitboard bKingZone = KingAttacks[bKing];
-
-  int wKingAttackers = popcount(pos.pieces(BLACK, QUEEN, ROOK) & wKingZone);
-  int bKingAttackers = popcount(pos.pieces(WHITE, QUEEN, ROOK) & bKingZone);
-
-  score -= wKingAttackers * 50;
-  score += bKingAttackers * 50;
-
-  // Tempo
-  score += (us == WHITE) ? 15 : -15;
-
-  return us == WHITE ? score : -score;
+bool Eval::use_smallnet(const Position &pos) {
+  return std::abs(simple_eval(pos)) > 962;
 }
 
-} // anonymous namespace
+// Evaluate is the evaluator for the outer world. It returns a static evaluation
+// of the position from the point of view of the side to move.
+Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
+                     Eval::NNUE::AccumulatorStack &accumulators,
+                     Eval::NNUE::AccumulatorCaches &caches, int optimism) {
 
-void init() {
-  // Initialize NNUE if available
-  NNUE::init();
+  assert(!pos.checkers());
 
-  // Initialize GPU NNUE evaluator (the primary evaluator)
-  auto &gpu = gpu_nnue();
-  if (gpu.is_ready()) {
-    std::cout << "[Eval] GPU NNUE acceleration ready (unified memory)"
-              << std::endl;
-  }
-}
+  bool smallNet = use_smallnet(pos);
+  auto [psqt, positional] =
+      smallNet ? networks.small.evaluate(pos, accumulators, caches.small)
+               : networks.big.evaluate(pos, accumulators, caches.big);
 
-bool load_network(const std::string &path) {
-  return NNUE::network && NNUE::network->load(path);
-}
+  Value nnue = (125 * psqt + 131 * positional) / 128;
 
-bool is_network_loaded() { return NNUE::network && NNUE::network->is_loaded(); }
-
-std::string network_info() {
-  return NNUE::network ? NNUE::network->info() : "No network loaded";
-}
-
-Value evaluate(const Position &pos) {
-  Value v;
-
-  // For single-position evaluation during search, classical eval is faster
-  // due to GPU command buffer overhead. GPU is used for batch evaluation.
-
-  // Use CPU NNUE if loaded
-  if (NNUE::network && NNUE::network->is_loaded()) {
-    v = NNUE::evaluate(pos);
-  } else {
-    // Classical evaluation (fast for single positions)
-    v = classical_eval(pos);
+  // Re-evaluate the position when higher eval accuracy is worth the time spent
+  if (smallNet && (std::abs(nnue) < 277)) {
+    std::tie(psqt, positional) =
+        networks.big.evaluate(pos, accumulators, caches.big);
+    nnue = (125 * psqt + 131 * positional) / 128;
+    smallNet = false;
   }
 
-  // Rule 50 dampening: linearly reduce eval as 50-move rule approaches
-  // This helps avoid draws when winning and correctly assess draw-ish positions
+  // Blend optimism and eval with nnue complexity
+  int nnueComplexity = std::abs(psqt - positional);
+  optimism += optimism * nnueComplexity / 476;
+  nnue -= nnue * nnueComplexity / 18236;
+
+  int material = 534 * pos.count<PAWN>() + pos.non_pawn_material();
+  int v = (nnue * (77871 + material) + optimism * (7191 + material)) / 77871;
+
+  // Damp down the evaluation linearly when shuffling
   v -= v * pos.rule50_count() / 199;
+
+  // Guarantee evaluation does not hit the tablebase range
+  v = std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);
 
   return v;
 }
 
-// GPU-accelerated evaluation - use for batch processing
-Value evaluate_gpu(const Position &pos) {
-  auto &gpu = gpu_nnue();
-  if (gpu.is_ready()) {
-    return gpu.evaluate(pos);
-  }
-  return evaluate(pos);
-}
+// Like evaluate(), but instead of returning a value, it returns
+// a string (suitable for outputting to stdout) that contains the detailed
+// descriptions and values of each evaluation term. Useful for debugging.
+// Trace scores are from white's point of view
+std::string Eval::trace(Position &pos, const Eval::NNUE::Networks &networks) {
 
-void batch_evaluate(const Position *positions, Value *scores, size_t count) {
-  // Try GPU batch evaluation first
-  auto &gpu_nnue = NNUE::get_gpu_nnue();
-  if (gpu_nnue.is_gpu_available()) {
-    std::vector<const Position *> pos_ptrs(count);
-    for (size_t i = 0; i < count; ++i) {
-      pos_ptrs[i] = &positions[i];
-    }
-    std::vector<Value> results;
-    gpu_nnue.evaluate_batch(pos_ptrs, results);
-    for (size_t i = 0; i < count; ++i) {
-      scores[i] = results[i];
-    }
-  } else {
-    // Fallback to sequential evaluation
-    for (size_t i = 0; i < count; ++i) {
-      scores[i] = evaluate(positions[i]);
-    }
-  }
-}
+  if (pos.checkers())
+    return "Final evaluation: none (in check)";
 
-std::string trace(const Position &pos) {
-  std::ostringstream ss;
-  ss << "Evaluation: " << evaluate(pos) << "\n";
+  auto accumulators = std::make_unique<Eval::NNUE::AccumulatorStack>();
+  auto caches = std::make_unique<Eval::NNUE::AccumulatorCaches>(networks);
 
-  if (is_network_loaded()) {
-    ss << "Using NNUE: " << network_info() << "\n";
-  } else {
-    ss << "Using classical evaluation\n";
-  }
+  std::stringstream ss;
+  ss << std::showpoint << std::noshowpos << std::fixed << std::setprecision(2);
+  ss << '\n' << NNUE::trace(pos, networks, *caches) << '\n';
+
+  ss << std::showpoint << std::showpos << std::fixed << std::setprecision(2)
+     << std::setw(15);
+
+  auto [psqt, positional] =
+      networks.big.evaluate(pos, *accumulators, caches->big);
+  Value v = psqt + positional;
+  v = pos.side_to_move() == WHITE ? v : -v;
+  ss << "NNUE evaluation        " << 0.01 * UCIEngine::to_cp(v, pos)
+     << " (white side)\n";
+
+  v = evaluate(networks, pos, *accumulators, *caches, VALUE_ZERO);
+  v = pos.side_to_move() == WHITE ? v : -v;
+  ss << "Final evaluation       " << 0.01 * UCIEngine::to_cp(v, pos)
+     << " (white side)";
+  ss << " [with scaled NNUE, ...]";
+  ss << "\n";
 
   return ss.str();
 }
-
-} // namespace Eval
 
 } // namespace MetalFish

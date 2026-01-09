@@ -3,7 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 */
 
-#include "metal/gpu_ops.h"
+#include "gpu_ops.h"
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/zobrist.h"
@@ -303,7 +303,7 @@ void GPUOps::upload_attack_tables() {
   }
 
   // Magic numbers and shifts would be copied here
-  // (using Stockfish-style magic bitboards)
+  // (using traditional magic bitboards)
 }
 
 void GPUOps::upload_zobrist_keys() {

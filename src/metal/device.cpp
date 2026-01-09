@@ -8,7 +8,7 @@
 #define CA_PRIVATE_IMPLEMENTATION
 #define MTL_PRIVATE_IMPLEMENTATION
 
-#include "metal/device.h"
+#include "device.h"
 #include <iostream>
 #include <stdexcept>
 

@@ -2,34 +2,13 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  MetalFish is free software: you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation, either version 3 of the License, or
-  (at your option) any later version.
-
-  MetalFish is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program. If not, see <http://www.gnu.org/licenses/>.
-
-  NNUE (Efficiently Updatable Neural Network) evaluation kernels for Metal.
-
-  The NNUE architecture:
-  - Input: 45056 features (HalfKAv2_hm) -> 1024 hidden units (big) or 128
-  (small)
-  - Hidden layers with ClippedReLU activation
-  - Output: single scalar evaluation
-
-  For GPU, we batch multiple positions and process them in parallel.
+  Licensed under GPL-3.0
 */
 
 #include <metal_stdlib>
 using namespace metal;
 
-// Constants matching Stockfish NNUE architecture
+// Constants matching MetalFish NNUE architecture
 constant int FEATURE_DIM_BIG = 1024;
 constant int FEATURE_DIM_SMALL = 128;
 constant int FC0_OUT = 15;

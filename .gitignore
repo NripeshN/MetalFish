@@ -55,3 +55,6 @@ external/
 # jetbrains files
 .cache/
 build_debug/
+
+# NNUE network files (too large for GitHub, download separately)
+*.nnue

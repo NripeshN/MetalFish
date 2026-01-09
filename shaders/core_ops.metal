@@ -2,14 +2,7 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  GPU-accelerated core chess operations:
-  - Move generation
-  - Static Exchange Evaluation (SEE)
-  - Move scoring
-  - Parallel perft
-  - Batch position processing
-
-  Designed for maximum parallelism on Apple Silicon GPU.
+  Licensed under GPL-3.0
 */
 
 #include <metal_simdgroup>

@@ -4,7 +4,7 @@
 
 */
 
-#include "metal/allocator.h"
+#include "allocator.h"
 #include "metal/device.h"
 #include <iostream>
 #include <vector>

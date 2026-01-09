@@ -14,7 +14,7 @@ using namespace MetalFish;
 
 bool test_bitboard() {
   // Initialize bitboards
-  init_bitboards();
+  Bitboards::init();
 
   // Test square_bb
   assert(square_bb(SQ_A1) == 1ULL);
@@ -50,24 +50,24 @@ bool test_bitboard() {
   assert(shift<EAST>(square_bb(SQ_E4)) == square_bb(SQ_F4));
   assert(shift<WEST>(square_bb(SQ_E4)) == square_bb(SQ_D4));
 
-  // Test knight attacks
-  Bitboard knightOnE4 = KnightAttacks[SQ_E4];
+  // Test knight attacks using PseudoAttacks
+  Bitboard knightOnE4 = PseudoAttacks[KNIGHT][SQ_E4];
   assert(knightOnE4 & square_bb(SQ_D6));
   assert(knightOnE4 & square_bb(SQ_F6));
   assert(knightOnE4 & square_bb(SQ_G5));
   assert(knightOnE4 & square_bb(SQ_G3));
 
-  // Test king attacks
-  Bitboard kingOnE4 = KingAttacks[SQ_E4];
+  // Test king attacks using PseudoAttacks
+  Bitboard kingOnE4 = PseudoAttacks[KING][SQ_E4];
   assert(kingOnE4 & square_bb(SQ_E5));
   assert(kingOnE4 & square_bb(SQ_F5));
   assert(kingOnE4 & square_bb(SQ_D4));
 
   // Test pawn attacks
-  assert(PawnAttacks[WHITE][SQ_E4] & square_bb(SQ_D5));
-  assert(PawnAttacks[WHITE][SQ_E4] & square_bb(SQ_F5));
-  assert(PawnAttacks[BLACK][SQ_E4] & square_bb(SQ_D3));
-  assert(PawnAttacks[BLACK][SQ_E4] & square_bb(SQ_F3));
+  assert(pawn_attacks_bb(WHITE, square_bb(SQ_E4)) & square_bb(SQ_D5));
+  assert(pawn_attacks_bb(WHITE, square_bb(SQ_E4)) & square_bb(SQ_F5));
+  assert(pawn_attacks_bb(BLACK, square_bb(SQ_E4)) & square_bb(SQ_D3));
+  assert(pawn_attacks_bb(BLACK, square_bb(SQ_E4)) & square_bb(SQ_F3));
 
   // Test rook attacks (with occupancy)
   Bitboard occupied = square_bb(SQ_E6);
