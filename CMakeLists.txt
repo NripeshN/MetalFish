@@ -15,12 +15,15 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   )
 endif()
 
-# Metal GPU acceleration option (macOS only, defaults to ON for Apple devices)
+# GPU acceleration options
 if(APPLE)
   option(USE_METAL "Enable Metal GPU acceleration" ON)
 else()
   option(USE_METAL "Enable Metal GPU acceleration" OFF)
 endif()
+
+# Future: CUDA support
+option(USE_CUDA "Enable CUDA GPU acceleration (future)" OFF)
 
 # Metal-cpp headers location
 set(METAL_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp")
@@ -95,13 +98,21 @@ if(USE_METAL AND METAL_CPP_AVAILABLE)
 endif()
 
 # Core source files
-set(CORE_SOURCES src/core/bitboard.cpp src/core/misc.cpp src/core/movegen.cpp
-                 src/core/position.cpp src/core/memory.cpp)
+set(CORE_SOURCES 
+    src/core/bitboard.cpp 
+    src/core/misc.cpp 
+    src/core/movegen.cpp
+    src/core/position.cpp 
+    src/core/memory.cpp)
 
 # Search source files
 set(SEARCH_SOURCES
-    src/search/search.cpp src/search/movepick.cpp src/search/thread.cpp
-    src/search/tt.cpp src/search/timeman.cpp src/search/tune.cpp)
+    src/search/search.cpp 
+    src/search/movepick.cpp 
+    src/search/thread.cpp
+    src/search/tt.cpp 
+    src/search/timeman.cpp 
+    src/search/tune.cpp)
 
 # Evaluation source files
 set(EVAL_SOURCES
@@ -114,21 +125,54 @@ set(EVAL_SOURCES
     src/eval/nnue/features/half_ka_v2_hm.cpp)
 
 # UCI source files
-set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
-                src/uci/benchmark.cpp)
+set(UCI_SOURCES 
+    src/uci/uci.cpp 
+    src/uci/ucioption.cpp 
+    src/uci/engine.cpp
+    src/uci/benchmark.cpp)
 
 # Syzygy source files
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
-# Metal GPU acceleration source files (macOS only, when enabled)
-set(METAL_SOURCES)
+# GPU source files (backend-agnostic interface)
+set(GPU_SOURCES)
+
+# Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
-  set(METAL_SOURCES src/metal/metal_device.mm src/metal/device.cpp
-                    src/metal/allocator.cpp)
+  set(GPU_SOURCES 
+      ${GPU_SOURCES}
+      src/gpu/metal/metal_backend.mm
+      src/metal/metal_device.mm
+      src/metal/device.cpp
+      src/metal/allocator.cpp)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
   message(STATUS "Metal GPU acceleration: ENABLED")
+  
+  # Compile Metal shaders
+  set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels)
+  set(SHADER_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/metalfish.metallib)
+  
+  # Check if Metal compiler is available
+  find_program(METAL_COMPILER xcrun)
+  if(METAL_COMPILER)
+    add_custom_command(
+      OUTPUT ${SHADER_OUTPUT}
+      COMMAND xcrun -sdk macosx metal -c ${SHADER_DIR}/nnue.metal -o ${CMAKE_CURRENT_BINARY_DIR}/nnue.air 2>/dev/null || true
+      COMMAND xcrun -sdk macosx metallib ${CMAKE_CURRENT_BINARY_DIR}/nnue.air -o ${SHADER_OUTPUT} 2>/dev/null || true
+      DEPENDS ${SHADER_DIR}/nnue.metal
+      COMMENT "Compiling Metal shaders"
+      VERBATIM
+    )
+    add_custom_target(metal_shaders DEPENDS ${SHADER_OUTPUT})
+  endif()
 else()
   message(STATUS "Metal GPU acceleration: DISABLED")
+endif()
+
+# Future: CUDA sources
+if(USE_CUDA)
+  # set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cuda/cuda_backend.cu)
+  message(STATUS "CUDA GPU acceleration: ENABLED (placeholder)")
 endif()
 
 # All source files
@@ -139,10 +183,15 @@ set(SOURCES
     ${EVAL_SOURCES}
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
-    ${METAL_SOURCES})
+    ${GPU_SOURCES})
 
 # Create executable
 add_executable(metalfish ${SOURCES})
+
+# Add shader dependency if available
+if(TARGET metal_shaders)
+  add_dependencies(metalfish metal_shaders)
+endif()
 
 # Link pthread
 find_package(Threads REQUIRED)
@@ -185,8 +234,12 @@ if(BUILD_TESTS)
   enable_testing()
 
   set(TEST_SOURCES
-      tests/test_main.cpp tests/test_bitboard.cpp tests/test_position.cpp
-      tests/test_movegen.cpp tests/test_search.cpp tests/test_metal.cpp)
+      tests/test_main.cpp 
+      tests/test_bitboard.cpp 
+      tests/test_position.cpp
+      tests/test_movegen.cpp 
+      tests/test_search.cpp 
+      tests/test_metal.cpp)
 
   add_executable(
     metalfish_tests
@@ -196,7 +249,7 @@ if(BUILD_TESTS)
     ${EVAL_SOURCES}
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
-    ${METAL_SOURCES})
+    ${GPU_SOURCES})
   target_link_libraries(metalfish_tests Threads::Threads)
 
   if(APPLE AND USE_METAL AND METAL_CPP_AVAILABLE)
@@ -207,3 +260,13 @@ if(BUILD_TESTS)
 
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
 endif()
+
+# Print configuration summary
+message(STATUS "")
+message(STATUS "MetalFish Configuration Summary:")
+message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
+message(STATUS "  Metal GPU: ${USE_METAL}")
+message(STATUS "  CUDA GPU: ${USE_CUDA}")
+message(STATUS "  Tests: ${BUILD_TESTS}")
+message(STATUS "")
