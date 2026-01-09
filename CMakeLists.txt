@@ -132,7 +132,9 @@ set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 # GPU source files (backend-agnostic interface)
 set(GPU_SOURCES
     src/gpu/nnue_eval.cpp
-    src/gpu/batch_ops.cpp)
+    src/gpu/batch_ops.cpp
+    src/gpu/gpu_nnue.cpp
+    src/gpu/gpu_nnue_integration.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)

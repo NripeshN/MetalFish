@@ -19,6 +19,11 @@
 #include "../simd.h"
 #include "core/bitboard.h"
 
+// Forward declaration for GPU integration
+namespace MetalFish::GPU {
+template<typename N> class GPUNNUEWeightExtractor;
+}
+
 /*
   This file contains the definition for a fully connected layer (aka affine
   transform) with block sparse input.
@@ -353,6 +358,8 @@ public:
   }
 
 private:
+  // Friend for GPU weight extraction
+  template<typename N> friend class ::MetalFish::GPU::GPUNNUEWeightExtractor;
   using BiasType = OutputType;
   using WeightType = std::int8_t;
 

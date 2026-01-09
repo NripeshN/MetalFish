@@ -30,6 +30,8 @@
 #include "eval/nnue/nnue_misc.h"
 #include "gpu/backend.h"
 #include "gpu/nnue_eval.h"
+#include "gpu/gpu_nnue.h"
+#include "gpu/gpu_nnue_integration.h"
 #include "search/search.h"
 #include "syzygy/tbprobe.h"
 #include "uci/uci.h"
@@ -297,6 +299,22 @@ void Engine::load_networks() {
   });
   threads.clear();
   threads.ensure_network_replicated();
+  
+  // Initialize GPU NNUE if available
+  if (GPU::gpu_available() && options["UseGPU"]) {
+    // Get access to networks for GPU initialization
+    // Use a lambda to access the networks
+    bool gpu_init_success = false;
+    networks.modify_and_replicate([&gpu_init_success](NN::Networks &networks_) {
+      if (GPU::initialize_gpu_nnue(networks_)) {
+        gpu_init_success = true;
+      }
+    });
+    
+    if (gpu_init_success) {
+      sync_cout << "info string GPU NNUE: initialized" << sync_endl;
+    }
+  }
 }
 
 void Engine::load_big_network(const std::string &file) {
