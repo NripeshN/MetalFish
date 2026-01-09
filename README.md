@@ -91,6 +91,16 @@ cmake ..
 make -j8
 ```
 
+### NNUE Network Files
+
+The NNUE network files are required but not included in the repository due to size. Download them and place in the `src/` directory:
+
+```bash
+cd src
+curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+```
+
 ### Running Tests
 
 ```bash
