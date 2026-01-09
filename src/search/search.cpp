@@ -2074,8 +2074,6 @@ void syzygy_extend_pv(const OptionsMap &options,
   // position is draw due to the 50 move rule if it has been been reached on the
   // board with a non-optimal 50 move counter (e.g. 8/8/6k1/3B4/3K4/4N3/8/8 w -
   // - 54 106 ) which TB with dtz counter rounding cannot always correctly rank.
-  // See also
-  // https://github.com/official-stockfish/MetalFish/issues/5175#issuecomment-2058893495
   // We adjust the score to match the found PV. Note that a TB loss score can be
   // displayed if the engine did not find a drawing move yet, but eventually
   // search will figure it out (e.g. 1kq5/q2r4/5K2/8/8/8/8/7Q w - - 96 1 )
