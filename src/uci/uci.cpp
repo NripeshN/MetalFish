@@ -23,6 +23,8 @@
 #include "core/position.h"
 #include "core/types.h"
 #include "eval/score.h"
+#include "gpu/backend.h"
+#include "gpu/nnue_eval.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
 #include "uci/engine.h"
@@ -133,6 +135,8 @@ void UCIEngine::loop() {
       sync_cout << engine.visualize() << sync_endl;
     else if (token == "eval")
       engine.trace_eval();
+    else if (token == "gpu")
+      gpu_info();
     else if (token == "compiler")
       sync_cout << compiler_info() << sync_endl;
     else if (token == "export_net") {
@@ -645,6 +649,54 @@ void UCIEngine::on_bestmove(std::string_view bestmove,
   if (!ponder.empty())
     std::cout << " ponder " << ponder;
   std::cout << sync_endl;
+}
+
+void UCIEngine::gpu_info() {
+  std::stringstream ss;
+  
+  ss << "\nGPU Information\n";
+  ss << "===============\n";
+  
+  if (GPU::gpu_available()) {
+    auto& backend = GPU::gpu();
+    
+    ss << "Status: Available\n";
+    ss << "Backend: ";
+    switch (backend.type()) {
+      case GPU::BackendType::Metal: ss << "Metal"; break;
+      case GPU::BackendType::CUDA: ss << "CUDA"; break;
+      default: ss << "None"; break;
+    }
+    ss << "\n";
+    
+    ss << "Device: " << backend.device_name() << "\n";
+    ss << "Unified Memory: " << (backend.has_unified_memory() ? "Yes" : "No") << "\n";
+    ss << "Max Buffer Size: " << (backend.max_buffer_size() / (1024*1024)) << " MB\n";
+    ss << "Max Threadgroup Memory: " << backend.max_threadgroup_memory() << " bytes\n";
+    ss << "Allocated Memory: " << (backend.allocated_memory() / 1024) << " KB\n";
+    ss << "Peak Memory: " << (backend.peak_memory() / 1024) << " KB\n";
+    
+    // NNUE GPU stats
+    if (GPU::gpu_nnue_available()) {
+      auto& nnue = GPU::gpu_nnue();
+      ss << "\nNNUE GPU Evaluator:\n";
+      ss << "  Status: Available\n";
+      ss << "  GPU Evaluations: " << nnue.gpu_evaluations() << "\n";
+      ss << "  CPU Evaluations: " << nnue.cpu_evaluations() << "\n";
+      if (nnue.batch_count() > 0) {
+        ss << "  Batch Count: " << nnue.batch_count() << "\n";
+        ss << "  Avg Batch Time: " << nnue.avg_batch_time_ms() << " ms\n";
+      }
+    } else {
+      ss << "\nNNUE GPU Evaluator: Not initialized\n";
+    }
+  } else {
+    ss << "Status: Not available\n";
+    ss << "Reason: No compatible GPU backend found\n";
+    ss << "Note: Engine will use CPU-only evaluation\n";
+  }
+  
+  sync_cout << ss.str() << sync_endl;
 }
 
 } // namespace MetalFish

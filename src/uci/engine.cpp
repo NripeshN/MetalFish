@@ -28,6 +28,8 @@
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_common.h"
 #include "eval/nnue/nnue_misc.h"
+#include "gpu/backend.h"
+#include "gpu/nnue_eval.h"
 #include "search/search.h"
 #include "syzygy/tbprobe.h"
 #include "uci/uci.h"
@@ -132,8 +134,25 @@ Engine::Engine(std::optional<std::string> path)
         return std::nullopt;
       }));
 
+  // GPU acceleration options
+  options.add("UseGPU", Option(GPU::gpu_available(), [](const Option &o) {
+    // This option is informational - GPU is auto-detected
+    if (o && !GPU::gpu_available()) {
+      return std::optional<std::string>("GPU not available on this system");
+    }
+    return std::optional<std::string>(std::nullopt);
+  }));
+
   load_networks();
   resize_threads();
+  
+  // Initialize GPU if available
+  if (GPU::gpu_available()) {
+    sync_cout << "info string GPU: " << GPU::gpu().device_name() << sync_endl;
+    if (GPU::gpu().has_unified_memory()) {
+      sync_cout << "info string GPU unified memory: enabled" << sync_endl;
+    }
+  }
 }
 
 std::uint64_t Engine::perft(const std::string &fen, Depth depth,

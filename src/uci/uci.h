@@ -55,6 +55,7 @@ private:
   void position(std::istringstream &is);
   void setoption(std::istringstream &is);
   std::uint64_t perft(const Search::LimitsType &);
+  void gpu_info();
 
   static void on_update_no_moves(const Engine::InfoShort &info);
   static void on_update_full(const Engine::InfoFull &info, bool showWDL);
