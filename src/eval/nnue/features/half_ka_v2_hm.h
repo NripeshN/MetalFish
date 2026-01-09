@@ -5,16 +5,16 @@
   Licensed under GPL-3.0
 */
 
-//Definition of input features HalfKP of NNUE evaluation function
+// Definition of input features HalfKP of NNUE evaluation function
 
 #ifndef NNUE_FEATURES_HALF_KA_V2_HM_H_INCLUDED
 #define NNUE_FEATURES_HALF_KA_V2_HM_H_INCLUDED
 
 #include <cstdint>
 
+#include "../nnue_common.h"
 #include "core/misc.h"
 #include "core/types.h"
-#include "../nnue_common.h"
 
 namespace MetalFish {
 class Position;
@@ -26,44 +26,46 @@ namespace MetalFish::Eval::NNUE::Features {
 // position of pieces. Position mirrored such that king is always on e..h files.
 class HalfKAv2_hm {
 
-    // Unique number for each piece type on each square
-    enum {
-        PS_NONE     = 0,
-        PS_W_PAWN   = 0,
-        PS_B_PAWN   = 1 * SQUARE_NB,
-        PS_W_KNIGHT = 2 * SQUARE_NB,
-        PS_B_KNIGHT = 3 * SQUARE_NB,
-        PS_W_BISHOP = 4 * SQUARE_NB,
-        PS_B_BISHOP = 5 * SQUARE_NB,
-        PS_W_ROOK   = 6 * SQUARE_NB,
-        PS_B_ROOK   = 7 * SQUARE_NB,
-        PS_W_QUEEN  = 8 * SQUARE_NB,
-        PS_B_QUEEN  = 9 * SQUARE_NB,
-        PS_KING     = 10 * SQUARE_NB,
-        PS_NB       = 11 * SQUARE_NB
-    };
+  // Unique number for each piece type on each square
+  enum {
+    PS_NONE = 0,
+    PS_W_PAWN = 0,
+    PS_B_PAWN = 1 * SQUARE_NB,
+    PS_W_KNIGHT = 2 * SQUARE_NB,
+    PS_B_KNIGHT = 3 * SQUARE_NB,
+    PS_W_BISHOP = 4 * SQUARE_NB,
+    PS_B_BISHOP = 5 * SQUARE_NB,
+    PS_W_ROOK = 6 * SQUARE_NB,
+    PS_B_ROOK = 7 * SQUARE_NB,
+    PS_W_QUEEN = 8 * SQUARE_NB,
+    PS_B_QUEEN = 9 * SQUARE_NB,
+    PS_KING = 10 * SQUARE_NB,
+    PS_NB = 11 * SQUARE_NB
+  };
 
-    static constexpr IndexType PieceSquareIndex[COLOR_NB][PIECE_NB] = {
+  static constexpr IndexType PieceSquareIndex[COLOR_NB][PIECE_NB] = {
       // Convention: W - us, B - them
       // Viewed from other side, W and B are reversed
-      {PS_NONE, PS_W_PAWN, PS_W_KNIGHT, PS_W_BISHOP, PS_W_ROOK, PS_W_QUEEN, PS_KING, PS_NONE,
-       PS_NONE, PS_B_PAWN, PS_B_KNIGHT, PS_B_BISHOP, PS_B_ROOK, PS_B_QUEEN, PS_KING, PS_NONE},
-      {PS_NONE, PS_B_PAWN, PS_B_KNIGHT, PS_B_BISHOP, PS_B_ROOK, PS_B_QUEEN, PS_KING, PS_NONE,
-       PS_NONE, PS_W_PAWN, PS_W_KNIGHT, PS_W_BISHOP, PS_W_ROOK, PS_W_QUEEN, PS_KING, PS_NONE}};
+      {PS_NONE, PS_W_PAWN, PS_W_KNIGHT, PS_W_BISHOP, PS_W_ROOK, PS_W_QUEEN,
+       PS_KING, PS_NONE, PS_NONE, PS_B_PAWN, PS_B_KNIGHT, PS_B_BISHOP,
+       PS_B_ROOK, PS_B_QUEEN, PS_KING, PS_NONE},
+      {PS_NONE, PS_B_PAWN, PS_B_KNIGHT, PS_B_BISHOP, PS_B_ROOK, PS_B_QUEEN,
+       PS_KING, PS_NONE, PS_NONE, PS_W_PAWN, PS_W_KNIGHT, PS_W_BISHOP,
+       PS_W_ROOK, PS_W_QUEEN, PS_KING, PS_NONE}};
 
-   public:
-    // Feature name
-    static constexpr const char* Name = "HalfKAv2_hm(Friend)";
+public:
+  // Feature name
+  static constexpr const char *Name = "HalfKAv2_hm(Friend)";
 
-    // Hash value embedded in the evaluation file
-    static constexpr std::uint32_t HashValue = 0x7f234cb8u;
+  // Hash value embedded in the evaluation file
+  static constexpr std::uint32_t HashValue = 0x7f234cb8u;
 
-    // Number of feature dimensions
-    static constexpr IndexType Dimensions =
+  // Number of feature dimensions
+  static constexpr IndexType Dimensions =
       static_cast<IndexType>(SQUARE_NB) * static_cast<IndexType>(PS_NB) / 2;
 
 #define B(v) (v * PS_NB)
-    // clang-format off
+  // clang-format off
     static constexpr IndexType KingBuckets[SQUARE_NB] = {
         B(28), B(29), B(30), B(31), B(31), B(30), B(29), B(28),
         B(24), B(25), B(26), B(27), B(27), B(26), B(25), B(24),
@@ -74,9 +76,9 @@ class HalfKAv2_hm {
         B( 4), B( 5), B( 6), B( 7), B( 7), B( 6), B( 5), B( 4),
         B( 0), B( 1), B( 2), B( 3), B( 3), B( 2), B( 1), B( 0),
     };
-    // clang-format on
+  // clang-format on
 #undef B
-    // clang-format off
+  // clang-format off
     // Orient a square according to perspective (rotates by 180 for black)
     static constexpr IndexType OrientTBL[SQUARE_NB] = {
         SQ_H1, SQ_H1, SQ_H1, SQ_H1, SQ_A1, SQ_A1, SQ_A1, SQ_A1,
@@ -88,30 +90,34 @@ class HalfKAv2_hm {
         SQ_H1, SQ_H1, SQ_H1, SQ_H1, SQ_A1, SQ_A1, SQ_A1, SQ_A1,
         SQ_H1, SQ_H1, SQ_H1, SQ_H1, SQ_A1, SQ_A1, SQ_A1, SQ_A1 ,
     };
-    // clang-format on
+  // clang-format on
 
-    // Maximum number of simultaneously active features.
-    static constexpr IndexType MaxActiveDimensions = 32;
-    using IndexList                                = ValueList<IndexType, MaxActiveDimensions>;
-    using DiffType                                 = DirtyPiece;
+  // Maximum number of simultaneously active features.
+  static constexpr IndexType MaxActiveDimensions = 32;
+  using IndexList = ValueList<IndexType, MaxActiveDimensions>;
+  using DiffType = DirtyPiece;
 
-    // Index of a feature for a given king position and another piece on some square
+  // Index of a feature for a given king position and another piece on some
+  // square
 
-    static IndexType make_index(Color perspective, Square s, Piece pc, Square ksq);
+  static IndexType make_index(Color perspective, Square s, Piece pc,
+                              Square ksq);
 
-    // Get a list of indices for active features
+  // Get a list of indices for active features
 
-    static void append_active_indices(Color perspective, const Position& pos, IndexList& active);
+  static void append_active_indices(Color perspective, const Position &pos,
+                                    IndexList &active);
 
-    // Get a list of indices for recently changed features
-    static void append_changed_indices(
-      Color perspective, Square ksq, const DiffType& diff, IndexList& removed, IndexList& added);
+  // Get a list of indices for recently changed features
+  static void append_changed_indices(Color perspective, Square ksq,
+                                     const DiffType &diff, IndexList &removed,
+                                     IndexList &added);
 
-    // Returns whether the change stored in this DirtyPiece means
-    // that a full accumulator refresh is required.
-    static bool requires_refresh(const DiffType& diff, Color perspective);
+  // Returns whether the change stored in this DirtyPiece means
+  // that a full accumulator refresh is required.
+  static bool requires_refresh(const DiffType &diff, Color perspective);
 };
 
-}  // namespace MetalFish::Eval::NNUE::Features
+} // namespace MetalFish::Eval::NNUE::Features
 
-#endif  // #ifndef NNUE_FEATURES_HALF_KA_V2_HM_H_INCLUDED
+#endif // #ifndef NNUE_FEATURES_HALF_KA_V2_HM_H_INCLUDED

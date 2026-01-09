@@ -399,7 +399,8 @@ public:
   }
 
   // Compile shader from source
-  bool compile_library(const std::string &name, const std::string &source) override {
+  bool compile_library(const std::string &name,
+                       const std::string &source) override {
     if (!device_)
       return false;
 
@@ -408,11 +409,12 @@ public:
       MTLCompileOptions *options = [[MTLCompileOptions alloc] init];
 
       // Use fastMathEnabled for compatibility with older macOS versions
-      // mathMode is only available on macOS 15+ but we need to support older versions
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-      [options setFastMathEnabled:YES];
-#pragma clang diagnostic pop
+      // mathMode is only available on macOS 15+ but we need to support older
+      // versions
+      #pragma clang diagnostic push
+      #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        [options setFastMathEnabled:YES];
+      #pragma clang diagnostic pop
 
       NSError *error = nil;
       id<MTLLibrary> lib = [device_ newLibraryWithSource:ns_source

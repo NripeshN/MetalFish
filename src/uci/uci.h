@@ -13,9 +13,9 @@
 #include <string>
 #include <string_view>
 
-#include "uci/engine.h"
 #include "core/misc.h"
 #include "search/search.h"
+#include "uci/engine.h"
 
 namespace MetalFish {
 
@@ -26,44 +26,44 @@ enum Square : int8_t;
 using Value = int;
 
 class UCIEngine {
-   public:
-    UCIEngine(int argc, char** argv);
+public:
+  UCIEngine(int argc, char **argv);
 
-    void loop();
+  void loop();
 
-    static int         to_cp(Value v, const Position& pos);
-    static std::string format_score(const Score& s);
-    static std::string square(Square s);
-    static std::string move(Move m, bool chess960);
-    static std::string wdl(Value v, const Position& pos);
-    static std::string to_lower(std::string str);
-    static Move        to_move(const Position& pos, std::string str);
+  static int to_cp(Value v, const Position &pos);
+  static std::string format_score(const Score &s);
+  static std::string square(Square s);
+  static std::string move(Move m, bool chess960);
+  static std::string wdl(Value v, const Position &pos);
+  static std::string to_lower(std::string str);
+  static Move to_move(const Position &pos, std::string str);
 
-    static Search::LimitsType parse_limits(std::istream& is);
+  static Search::LimitsType parse_limits(std::istream &is);
 
-    auto& engine_options() { return engine.get_options(); }
+  auto &engine_options() { return engine.get_options(); }
 
-   private:
-    Engine      engine;
-    CommandLine cli;
+private:
+  Engine engine;
+  CommandLine cli;
 
-    static void print_info_string(std::string_view str);
+  static void print_info_string(std::string_view str);
 
-    void          go(std::istringstream& is);
-    void          bench(std::istream& args);
-    void          benchmark(std::istream& args);
-    void          position(std::istringstream& is);
-    void          setoption(std::istringstream& is);
-    std::uint64_t perft(const Search::LimitsType&);
+  void go(std::istringstream &is);
+  void bench(std::istream &args);
+  void benchmark(std::istream &args);
+  void position(std::istringstream &is);
+  void setoption(std::istringstream &is);
+  std::uint64_t perft(const Search::LimitsType &);
 
-    static void on_update_no_moves(const Engine::InfoShort& info);
-    static void on_update_full(const Engine::InfoFull& info, bool showWDL);
-    static void on_iter(const Engine::InfoIter& info);
-    static void on_bestmove(std::string_view bestmove, std::string_view ponder);
+  static void on_update_no_moves(const Engine::InfoShort &info);
+  static void on_update_full(const Engine::InfoFull &info, bool showWDL);
+  static void on_iter(const Engine::InfoIter &info);
+  static void on_bestmove(std::string_view bestmove, std::string_view ponder);
 
-    void init_search_update_listeners();
+  void init_search_update_listeners();
 };
 
-}  // namespace MetalFish
+} // namespace MetalFish
 
-#endif  // #ifndef UCI_H_INCLUDED
+#endif // #ifndef UCI_H_INCLUDED

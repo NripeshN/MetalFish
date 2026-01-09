@@ -21,25 +21,21 @@
 #include <string_view>
 #include <vector>
 
-#include "search/history.h"
 #include "core/misc.h"
-#include "eval/nnue/network.h"
-#include "eval/nnue/nnue_accumulator.h"
 #include "core/numa.h"
 #include "core/position.h"
-#include "eval/score.h"
-#include "syzygy/tbprobe.h"
-#include "search/timeman.h"
 #include "core/types.h"
+#include "eval/nnue/network.h"
+#include "eval/nnue/nnue_accumulator.h"
+#include "eval/score.h"
+#include "search/history.h"
+#include "search/timeman.h"
+#include "syzygy/tbprobe.h"
 
 namespace MetalFish {
 
 // Different node types, used as a template parameter
-enum NodeType {
-    NonPV,
-    PV,
-    Root
-};
+enum NodeType { NonPV, PV, Root };
 
 class TranspositionTable;
 class ThreadPool;
@@ -51,94 +47,88 @@ namespace Search {
 // shallower and deeper in the tree during the search. Each search thread has
 // its own array of Stack objects, indexed by the current ply.
 struct Stack {
-    Move*                       pv;
-    PieceToHistory*             continuationHistory;
-    CorrectionHistory<PieceTo>* continuationCorrectionHistory;
-    int                         ply;
-    Move                        currentMove;
-    Move                        excludedMove;
-    Value                       staticEval;
-    int                         statScore;
-    int                         moveCount;
-    bool                        inCheck;
-    bool                        ttPv;
-    bool                        ttHit;
-    int                         cutoffCnt;
-    int                         reduction;
+  Move *pv;
+  PieceToHistory *continuationHistory;
+  CorrectionHistory<PieceTo> *continuationCorrectionHistory;
+  int ply;
+  Move currentMove;
+  Move excludedMove;
+  Value staticEval;
+  int statScore;
+  int moveCount;
+  bool inCheck;
+  bool ttPv;
+  bool ttHit;
+  int cutoffCnt;
+  int reduction;
 };
-
 
 // RootMove struct is used for moves at the root of the tree. For each root move
 // we store a score and a PV (really a refutation in the case of moves which
 // fail low). Score is normally set at -VALUE_INFINITE for all non-pv moves.
 struct RootMove {
 
-    explicit RootMove(Move m) :
-        pv(1, m) {}
-    bool extract_ponder_from_tt(const TranspositionTable& tt, Position& pos);
-    bool operator==(const Move& m) const { return pv[0] == m; }
-    // Sort in descending order
-    bool operator<(const RootMove& m) const {
-        return m.score != score ? m.score < score : m.previousScore < previousScore;
-    }
+  explicit RootMove(Move m) : pv(1, m) {}
+  bool extract_ponder_from_tt(const TranspositionTable &tt, Position &pos);
+  bool operator==(const Move &m) const { return pv[0] == m; }
+  // Sort in descending order
+  bool operator<(const RootMove &m) const {
+    return m.score != score ? m.score < score : m.previousScore < previousScore;
+  }
 
-    uint64_t          effort           = 0;
-    Value             score            = -VALUE_INFINITE;
-    Value             previousScore    = -VALUE_INFINITE;
-    Value             averageScore     = -VALUE_INFINITE;
-    Value             meanSquaredScore = -VALUE_INFINITE * VALUE_INFINITE;
-    Value             uciScore         = -VALUE_INFINITE;
-    bool              scoreLowerbound  = false;
-    bool              scoreUpperbound  = false;
-    int               selDepth         = 0;
-    int               tbRank           = 0;
-    Value             tbScore;
-    std::vector<Move> pv;
+  uint64_t effort = 0;
+  Value score = -VALUE_INFINITE;
+  Value previousScore = -VALUE_INFINITE;
+  Value averageScore = -VALUE_INFINITE;
+  Value meanSquaredScore = -VALUE_INFINITE * VALUE_INFINITE;
+  Value uciScore = -VALUE_INFINITE;
+  bool scoreLowerbound = false;
+  bool scoreUpperbound = false;
+  int selDepth = 0;
+  int tbRank = 0;
+  Value tbScore;
+  std::vector<Move> pv;
 };
 
 using RootMoves = std::vector<RootMove>;
 
-
-// LimitsType struct stores information sent by the caller about the analysis required.
+// LimitsType struct stores information sent by the caller about the analysis
+// required.
 struct LimitsType {
 
-    // Init explicitly due to broken value-initialization of non POD in MSVC
-    LimitsType() {
-        time[WHITE] = time[BLACK] = inc[WHITE] = inc[BLACK] = npmsec = movetime = TimePoint(0);
-        movestogo = depth = mate = perft = infinite = 0;
-        nodes                                       = 0;
-        ponderMode                                  = false;
-    }
+  // Init explicitly due to broken value-initialization of non POD in MSVC
+  LimitsType() {
+    time[WHITE] = time[BLACK] = inc[WHITE] = inc[BLACK] = npmsec = movetime =
+        TimePoint(0);
+    movestogo = depth = mate = perft = infinite = 0;
+    nodes = 0;
+    ponderMode = false;
+  }
 
-    bool use_time_management() const { return time[WHITE] || time[BLACK]; }
+  bool use_time_management() const { return time[WHITE] || time[BLACK]; }
 
-    std::vector<std::string> searchmoves;
-    TimePoint                time[COLOR_NB], inc[COLOR_NB], npmsec, movetime, startTime;
-    int                      movestogo, depth, mate, perft, infinite;
-    uint64_t                 nodes;
-    bool                     ponderMode;
+  std::vector<std::string> searchmoves;
+  TimePoint time[COLOR_NB], inc[COLOR_NB], npmsec, movetime, startTime;
+  int movestogo, depth, mate, perft, infinite;
+  uint64_t nodes;
+  bool ponderMode;
 };
-
 
 // The UCI stores the uci options, thread pool, and transposition table.
 // This struct is used to easily forward data to the Search::Worker class.
 struct SharedState {
-    SharedState(const OptionsMap&                                         optionsMap,
-                ThreadPool&                                               threadPool,
-                TranspositionTable&                                       transpositionTable,
-                std::map<NumaIndex, SharedHistories>&                     sharedHists,
-                const LazyNumaReplicatedSystemWide<Eval::NNUE::Networks>& nets) :
-        options(optionsMap),
-        threads(threadPool),
-        tt(transpositionTable),
-        sharedHistories(sharedHists),
-        networks(nets) {}
+  SharedState(const OptionsMap &optionsMap, ThreadPool &threadPool,
+              TranspositionTable &transpositionTable,
+              std::map<NumaIndex, SharedHistories> &sharedHists,
+              const LazyNumaReplicatedSystemWide<Eval::NNUE::Networks> &nets)
+      : options(optionsMap), threads(threadPool), tt(transpositionTable),
+        sharedHistories(sharedHists), networks(nets) {}
 
-    const OptionsMap&                                         options;
-    ThreadPool&                                               threads;
-    TranspositionTable&                                       tt;
-    std::map<NumaIndex, SharedHistories>&                     sharedHistories;
-    const LazyNumaReplicatedSystemWide<Eval::NNUE::Networks>& networks;
+  const OptionsMap &options;
+  ThreadPool &threads;
+  TranspositionTable &tt;
+  std::map<NumaIndex, SharedHistories> &sharedHistories;
+  const LazyNumaReplicatedSystemWide<Eval::NNUE::Networks> &networks;
 };
 
 class Worker;
@@ -146,33 +136,33 @@ class Worker;
 // Null Object Pattern, implement a common interface for the SearchManagers.
 // A Null Object will be given to non-mainthread workers.
 class ISearchManager {
-   public:
-    virtual ~ISearchManager() {}
-    virtual void check_time(Search::Worker&) = 0;
+public:
+  virtual ~ISearchManager() {}
+  virtual void check_time(Search::Worker &) = 0;
 };
 
 struct InfoShort {
-    int   depth;
-    Score score;
+  int depth;
+  Score score;
 };
 
-struct InfoFull: InfoShort {
-    int              selDepth;
-    size_t           multiPV;
-    std::string_view wdl;
-    std::string_view bound;
-    size_t           timeMs;
-    size_t           nodes;
-    size_t           nps;
-    size_t           tbHits;
-    std::string_view pv;
-    int              hashfull;
+struct InfoFull : InfoShort {
+  int selDepth;
+  size_t multiPV;
+  std::string_view wdl;
+  std::string_view bound;
+  size_t timeMs;
+  size_t nodes;
+  size_t nps;
+  size_t tbHits;
+  std::string_view pv;
+  int hashfull;
 };
 
 struct InfoIteration {
-    int              depth;
-    std::string_view currmove;
-    size_t           currmovenumber;
+  int depth;
+  std::string_view currmove;
+  size_t currmovenumber;
 };
 
 // Skill structure is used to implement strength limit. If we have a UCI_Elo,
@@ -182,187 +172,180 @@ struct InfoIteration {
 // Skill 0 .. 19 now covers CCRL Blitz Elo from 1320 to 3190, approximately
 // Reference: https://github.com/vondele/MetalFish/commit/a08b8d4e9711c2
 struct Skill {
-    // Lowest and highest Elo ratings used in the skill level calculation
-    constexpr static int LowestElo  = 1320;
-    constexpr static int HighestElo = 3190;
+  // Lowest and highest Elo ratings used in the skill level calculation
+  constexpr static int LowestElo = 1320;
+  constexpr static int HighestElo = 3190;
 
-    Skill(int skill_level, int uci_elo) {
-        if (uci_elo)
-        {
-            double e = double(uci_elo - LowestElo) / (HighestElo - LowestElo);
-            level = std::clamp((((37.2473 * e - 40.8525) * e + 22.2943) * e - 0.311438), 0.0, 19.0);
-        }
-        else
-            level = double(skill_level);
-    }
-    bool enabled() const { return level < 20.0; }
-    bool time_to_pick(Depth depth) const { return depth == 1 + int(level); }
-    Move pick_best(const RootMoves&, size_t multiPV);
+  Skill(int skill_level, int uci_elo) {
+    if (uci_elo) {
+      double e = double(uci_elo - LowestElo) / (HighestElo - LowestElo);
+      level = std::clamp(
+          (((37.2473 * e - 40.8525) * e + 22.2943) * e - 0.311438), 0.0, 19.0);
+    } else
+      level = double(skill_level);
+  }
+  bool enabled() const { return level < 20.0; }
+  bool time_to_pick(Depth depth) const { return depth == 1 + int(level); }
+  Move pick_best(const RootMoves &, size_t multiPV);
 
-    double level;
-    Move   best = Move::none();
+  double level;
+  Move best = Move::none();
 };
 
 // SearchManager manages the search from the main thread. It is responsible for
-// keeping track of the time, and storing data strictly related to the main thread.
-class SearchManager: public ISearchManager {
-   public:
-    using UpdateShort    = std::function<void(const InfoShort&)>;
-    using UpdateFull     = std::function<void(const InfoFull&)>;
-    using UpdateIter     = std::function<void(const InfoIteration&)>;
-    using UpdateBestmove = std::function<void(std::string_view, std::string_view)>;
+// keeping track of the time, and storing data strictly related to the main
+// thread.
+class SearchManager : public ISearchManager {
+public:
+  using UpdateShort = std::function<void(const InfoShort &)>;
+  using UpdateFull = std::function<void(const InfoFull &)>;
+  using UpdateIter = std::function<void(const InfoIteration &)>;
+  using UpdateBestmove =
+      std::function<void(std::string_view, std::string_view)>;
 
-    struct UpdateContext {
-        UpdateShort    onUpdateNoMoves;
-        UpdateFull     onUpdateFull;
-        UpdateIter     onIter;
-        UpdateBestmove onBestmove;
-    };
+  struct UpdateContext {
+    UpdateShort onUpdateNoMoves;
+    UpdateFull onUpdateFull;
+    UpdateIter onIter;
+    UpdateBestmove onBestmove;
+  };
 
+  SearchManager(const UpdateContext &updateContext) : updates(updateContext) {}
 
-    SearchManager(const UpdateContext& updateContext) :
-        updates(updateContext) {}
+  void check_time(Search::Worker &worker) override;
 
-    void check_time(Search::Worker& worker) override;
+  void pv(Search::Worker &worker, const ThreadPool &threads,
+          const TranspositionTable &tt, Depth depth);
 
-    void pv(Search::Worker&           worker,
-            const ThreadPool&         threads,
-            const TranspositionTable& tt,
-            Depth                     depth);
+  MetalFish::TimeManagement tm;
+  double originalTimeAdjust;
+  int callsCnt;
+  std::atomic_bool ponder;
 
-    MetalFish::TimeManagement tm;
-    double                    originalTimeAdjust;
-    int                       callsCnt;
-    std::atomic_bool          ponder;
+  std::array<Value, 4> iterValue;
+  double previousTimeReduction;
+  Value bestPreviousScore;
+  Value bestPreviousAverageScore;
+  bool stopOnPonderhit;
 
-    std::array<Value, 4> iterValue;
-    double               previousTimeReduction;
-    Value                bestPreviousScore;
-    Value                bestPreviousAverageScore;
-    bool                 stopOnPonderhit;
+  size_t id;
 
-    size_t id;
-
-    const UpdateContext& updates;
+  const UpdateContext &updates;
 };
 
-class NullSearchManager: public ISearchManager {
-   public:
-    void check_time(Search::Worker&) override {}
+class NullSearchManager : public ISearchManager {
+public:
+  void check_time(Search::Worker &) override {}
 };
 
 // Search::Worker is the class that does the actual search.
 // It is instantiated once per thread, and it is responsible for keeping track
 // of the search history, and storing data required for the search.
 class Worker {
-   public:
-    Worker(SharedState&,
-           std::unique_ptr<ISearchManager>,
-           size_t,
-           size_t,
-           size_t,
-           NumaReplicatedAccessToken);
+public:
+  Worker(SharedState &, std::unique_ptr<ISearchManager>, size_t, size_t, size_t,
+         NumaReplicatedAccessToken);
 
-    // Called at instantiation to initialize reductions tables.
-    // Reset histories, usually before a new game.
-    void clear();
+  // Called at instantiation to initialize reductions tables.
+  // Reset histories, usually before a new game.
+  void clear();
 
-    // Called when the program receives the UCI 'go' command.
-    // It searches from the root position and outputs the "bestmove".
-    void start_searching();
+  // Called when the program receives the UCI 'go' command.
+  // It searches from the root position and outputs the "bestmove".
+  void start_searching();
 
-    bool is_mainthread() const { return threadIdx == 0; }
+  bool is_mainthread() const { return threadIdx == 0; }
 
-    void ensure_network_replicated();
+  void ensure_network_replicated();
 
-    // Public because they need to be updatable by the stats
-    ButterflyHistory mainHistory;
-    LowPlyHistory    lowPlyHistory;
+  // Public because they need to be updatable by the stats
+  ButterflyHistory mainHistory;
+  LowPlyHistory lowPlyHistory;
 
-    CapturePieceToHistory           captureHistory;
-    ContinuationHistory             continuationHistory[2][2];
-    CorrectionHistory<Continuation> continuationCorrectionHistory;
+  CapturePieceToHistory captureHistory;
+  ContinuationHistory continuationHistory[2][2];
+  CorrectionHistory<Continuation> continuationCorrectionHistory;
 
-    TTMoveHistory    ttMoveHistory;
-    SharedHistories& sharedHistory;
+  TTMoveHistory ttMoveHistory;
+  SharedHistories &sharedHistory;
 
-   private:
-    void iterative_deepening();
+private:
+  void iterative_deepening();
 
-    void do_move(Position& pos, const Move move, StateInfo& st, Stack* const ss);
-    void
-    do_move(Position& pos, const Move move, StateInfo& st, const bool givesCheck, Stack* const ss);
-    void do_null_move(Position& pos, StateInfo& st, Stack* const ss);
-    void undo_move(Position& pos, const Move move);
-    void undo_null_move(Position& pos);
+  void do_move(Position &pos, const Move move, StateInfo &st, Stack *const ss);
+  void do_move(Position &pos, const Move move, StateInfo &st,
+               const bool givesCheck, Stack *const ss);
+  void do_null_move(Position &pos, StateInfo &st, Stack *const ss);
+  void undo_move(Position &pos, const Move move);
+  void undo_null_move(Position &pos);
 
-    // This is the main search function, for both PV and non-PV nodes
-    template<NodeType nodeType>
-    Value search(Position& pos, Stack* ss, Value alpha, Value beta, Depth depth, bool cutNode);
+  // This is the main search function, for both PV and non-PV nodes
+  template <NodeType nodeType>
+  Value search(Position &pos, Stack *ss, Value alpha, Value beta, Depth depth,
+               bool cutNode);
 
-    // Quiescence search function, which is called by the main search
-    template<NodeType nodeType>
-    Value qsearch(Position& pos, Stack* ss, Value alpha, Value beta);
+  // Quiescence search function, which is called by the main search
+  template <NodeType nodeType>
+  Value qsearch(Position &pos, Stack *ss, Value alpha, Value beta);
 
-    Depth reduction(bool i, Depth d, int mn, int delta) const;
+  Depth reduction(bool i, Depth d, int mn, int delta) const;
 
-    // Pointer to the search manager, only allowed to be called by the main thread
-    SearchManager* main_manager() const {
-        assert(threadIdx == 0);
-        return static_cast<SearchManager*>(manager.get());
-    }
+  // Pointer to the search manager, only allowed to be called by the main thread
+  SearchManager *main_manager() const {
+    assert(threadIdx == 0);
+    return static_cast<SearchManager *>(manager.get());
+  }
 
-    TimePoint elapsed() const;
-    TimePoint elapsed_time() const;
+  TimePoint elapsed() const;
+  TimePoint elapsed_time() const;
 
-    Value evaluate(const Position&);
+  Value evaluate(const Position &);
 
-    LimitsType limits;
+  LimitsType limits;
 
-    size_t                pvIdx, pvLast;
-    std::atomic<uint64_t> nodes, tbHits, bestMoveChanges;
-    int                   selDepth, nmpMinPly;
+  size_t pvIdx, pvLast;
+  std::atomic<uint64_t> nodes, tbHits, bestMoveChanges;
+  int selDepth, nmpMinPly;
 
-    Value optimism[COLOR_NB];
+  Value optimism[COLOR_NB];
 
-    Position  rootPos;
-    StateInfo rootState;
-    RootMoves rootMoves;
-    Depth     rootDepth, completedDepth;
-    Value     rootDelta;
+  Position rootPos;
+  StateInfo rootState;
+  RootMoves rootMoves;
+  Depth rootDepth, completedDepth;
+  Value rootDelta;
 
-    size_t                    threadIdx, numaThreadIdx, numaTotal;
-    NumaReplicatedAccessToken numaAccessToken;
+  size_t threadIdx, numaThreadIdx, numaTotal;
+  NumaReplicatedAccessToken numaAccessToken;
 
-    // Reductions lookup table initialized at startup
-    std::array<int, MAX_MOVES> reductions;  // [depth or moveNumber]
+  // Reductions lookup table initialized at startup
+  std::array<int, MAX_MOVES> reductions; // [depth or moveNumber]
 
-    // The main thread has a SearchManager, the others have a NullSearchManager
-    std::unique_ptr<ISearchManager> manager;
+  // The main thread has a SearchManager, the others have a NullSearchManager
+  std::unique_ptr<ISearchManager> manager;
 
-    Tablebases::Config tbConfig;
+  Tablebases::Config tbConfig;
 
-    const OptionsMap&                                         options;
-    ThreadPool&                                               threads;
-    TranspositionTable&                                       tt;
-    const LazyNumaReplicatedSystemWide<Eval::NNUE::Networks>& networks;
+  const OptionsMap &options;
+  ThreadPool &threads;
+  TranspositionTable &tt;
+  const LazyNumaReplicatedSystemWide<Eval::NNUE::Networks> &networks;
 
-    // Used by NNUE
-    Eval::NNUE::AccumulatorStack  accumulatorStack;
-    Eval::NNUE::AccumulatorCaches refreshTable;
+  // Used by NNUE
+  Eval::NNUE::AccumulatorStack accumulatorStack;
+  Eval::NNUE::AccumulatorCaches refreshTable;
 
-    friend class MetalFish::ThreadPool;
-    friend class SearchManager;
+  friend class MetalFish::ThreadPool;
+  friend class SearchManager;
 };
 
 struct ConthistBonus {
-    int index;
-    int weight;
+  int index;
+  int weight;
 };
 
+} // namespace Search
 
-}  // namespace Search
+} // namespace MetalFish
 
-}  // namespace MetalFish
-
-#endif  // #ifndef SEARCH_H_INCLUDED
+#endif // #ifndef SEARCH_H_INCLUDED

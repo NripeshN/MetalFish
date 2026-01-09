@@ -3,7 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 
   GPU-accelerated NNUE Evaluation Implementation
-  
+
   This module provides batch NNUE evaluation on the GPU.
   Key optimizations:
   - Unified memory: Zero-copy access between CPU and GPU
@@ -24,7 +24,7 @@ namespace MetalFish {
 namespace GPU {
 
 // Embedded shader source for runtime compilation
-static const char* NNUE_SHADER_SOURCE = R"(
+static const char *NNUE_SHADER_SOURCE = R"(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -202,126 +202,132 @@ NNUEEvaluator::NNUEEvaluator() {}
 
 NNUEEvaluator::~NNUEEvaluator() {}
 
-bool NNUEEvaluator::initialize(const void* big_weights, size_t big_size,
-                               const void* small_weights, size_t small_size) {
-    if (!gpu_available()) {
-        std::cerr << "[GPU NNUE] GPU not available" << std::endl;
-        return false;
-    }
-    
-    // Compile shaders
-    if (!load_kernels()) {
-        std::cerr << "[GPU NNUE] Failed to load kernels" << std::endl;
-        return false;
-    }
-    
-    // Allocate buffers
-    if (!allocate_buffers()) {
-        std::cerr << "[GPU NNUE] Failed to allocate buffers" << std::endl;
-        return false;
-    }
-    
-    initialized_ = true;
-    std::cout << "[GPU NNUE] Initialized successfully" << std::endl;
-    return true;
+bool NNUEEvaluator::initialize(const void *big_weights, size_t big_size,
+                               const void *small_weights, size_t small_size) {
+  if (!gpu_available()) {
+    std::cerr << "[GPU NNUE] GPU not available" << std::endl;
+    return false;
+  }
+
+  // Compile shaders
+  if (!load_kernels()) {
+    std::cerr << "[GPU NNUE] Failed to load kernels" << std::endl;
+    return false;
+  }
+
+  // Allocate buffers
+  if (!allocate_buffers()) {
+    std::cerr << "[GPU NNUE] Failed to allocate buffers" << std::endl;
+    return false;
+  }
+
+  initialized_ = true;
+  std::cout << "[GPU NNUE] Initialized successfully" << std::endl;
+  return true;
 }
 
 bool NNUEEvaluator::load_kernels() {
-    auto& backend = gpu();
-    
-    // Compile shader source
-    if (!backend.compile_library("nnue", NNUE_SHADER_SOURCE)) {
-        std::cerr << "[GPU NNUE] Failed to compile NNUE shaders" << std::endl;
-        return false;
-    }
-    
-    // Create kernels
-    feature_transform_kernel_ = backend.create_kernel("feature_transform_full", "nnue");
-    nnue_batch_kernel_ = backend.create_kernel("nnue_forward_fused", "nnue");
-    
-    if (!feature_transform_kernel_ || !feature_transform_kernel_->valid()) {
-        std::cerr << "[GPU NNUE] Failed to create feature_transform kernel" << std::endl;
-        return false;
-    }
-    
-    if (!nnue_batch_kernel_ || !nnue_batch_kernel_->valid()) {
-        std::cerr << "[GPU NNUE] Failed to create nnue_forward kernel" << std::endl;
-        return false;
-    }
-    
-    std::cout << "[GPU NNUE] Kernels loaded successfully" << std::endl;
-    return true;
+  auto &backend = gpu();
+
+  // Compile shader source
+  if (!backend.compile_library("nnue", NNUE_SHADER_SOURCE)) {
+    std::cerr << "[GPU NNUE] Failed to compile NNUE shaders" << std::endl;
+    return false;
+  }
+
+  // Create kernels
+  feature_transform_kernel_ =
+      backend.create_kernel("feature_transform_full", "nnue");
+  nnue_batch_kernel_ = backend.create_kernel("nnue_forward_fused", "nnue");
+
+  if (!feature_transform_kernel_ || !feature_transform_kernel_->valid()) {
+    std::cerr << "[GPU NNUE] Failed to create feature_transform kernel"
+              << std::endl;
+    return false;
+  }
+
+  if (!nnue_batch_kernel_ || !nnue_batch_kernel_->valid()) {
+    std::cerr << "[GPU NNUE] Failed to create nnue_forward kernel" << std::endl;
+    return false;
+  }
+
+  std::cout << "[GPU NNUE] Kernels loaded successfully" << std::endl;
+  return true;
 }
 
 bool NNUEEvaluator::allocate_buffers() {
-    auto& backend = gpu();
-    
-    // Allocate input/output buffers for batch processing
-    size_t max_features = MAX_BATCH_SIZE * MAX_FEATURES_PER_POSITION * 2;
-    
-    features_buffer_ = backend.create_buffer(max_features * sizeof(int32_t));
-    feature_counts_buffer_ = backend.create_buffer(MAX_BATCH_SIZE * sizeof(int32_t));
-    accumulators_buffer_ = backend.create_buffer(MAX_BATCH_SIZE * 2 * NNUE_FEATURE_DIM_BIG * sizeof(int32_t));
-    output_buffer_ = backend.create_buffer(MAX_BATCH_SIZE * sizeof(int32_t));
-    
-    if (!features_buffer_ || !feature_counts_buffer_ || 
-        !accumulators_buffer_ || !output_buffer_) {
-        return false;
-    }
-    
-    std::cout << "[GPU NNUE] Buffers allocated: " 
-              << backend.allocated_memory() / 1024 << " KB" << std::endl;
-    return true;
+  auto &backend = gpu();
+
+  // Allocate input/output buffers for batch processing
+  size_t max_features = MAX_BATCH_SIZE * MAX_FEATURES_PER_POSITION * 2;
+
+  features_buffer_ = backend.create_buffer(max_features * sizeof(int32_t));
+  feature_counts_buffer_ =
+      backend.create_buffer(MAX_BATCH_SIZE * sizeof(int32_t));
+  accumulators_buffer_ = backend.create_buffer(
+      MAX_BATCH_SIZE * 2 * NNUE_FEATURE_DIM_BIG * sizeof(int32_t));
+  output_buffer_ = backend.create_buffer(MAX_BATCH_SIZE * sizeof(int32_t));
+
+  if (!features_buffer_ || !feature_counts_buffer_ || !accumulators_buffer_ ||
+      !output_buffer_) {
+    return false;
+  }
+
+  std::cout << "[GPU NNUE] Buffers allocated: "
+            << backend.allocated_memory() / 1024 << " KB" << std::endl;
+  return true;
 }
 
-bool NNUEEvaluator::evaluate_batch(EvalBatch& batch) {
-    if (!initialized_ || batch.count == 0) {
-        return false;
-    }
-    
-    auto start = std::chrono::high_resolution_clock::now();
-    
-    auto& backend = gpu();
-    
-    // Upload features to GPU (unified memory - just copy to buffer)
-    if (batch.features.size() > 0) {
-        int32_t* feature_ptr = features_buffer_->as<int32_t>();
-        std::copy(batch.features.begin(), batch.features.end(), feature_ptr);
-    }
-    
-    // Upload feature counts
-    int32_t* counts_ptr = feature_counts_buffer_->as<int32_t>();
-    std::copy(batch.feature_counts.begin(), batch.feature_counts.end(), counts_ptr);
-    
-    // Create command encoder and dispatch
-    auto encoder = backend.create_encoder();
-    
-    // For now, just return false to indicate GPU eval not fully implemented
-    // The actual kernel dispatch would go here once we have the weight buffers
-    
-    auto end = std::chrono::high_resolution_clock::now();
-    total_time_ms_ += std::chrono::duration<double, std::milli>(end - start).count();
-    batch_count_++;
-    gpu_evals_ += batch.count;
-    
-    return false; // Fall back to CPU for now
+bool NNUEEvaluator::evaluate_batch(EvalBatch &batch) {
+  if (!initialized_ || batch.count == 0) {
+    return false;
+  }
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto &backend = gpu();
+
+  // Upload features to GPU (unified memory - just copy to buffer)
+  if (batch.features.size() > 0) {
+    int32_t *feature_ptr = features_buffer_->as<int32_t>();
+    std::copy(batch.features.begin(), batch.features.end(), feature_ptr);
+  }
+
+  // Upload feature counts
+  int32_t *counts_ptr = feature_counts_buffer_->as<int32_t>();
+  std::copy(batch.feature_counts.begin(), batch.feature_counts.end(),
+            counts_ptr);
+
+  // Create command encoder and dispatch
+  auto encoder = backend.create_encoder();
+
+  // For now, just return false to indicate GPU eval not fully implemented
+  // The actual kernel dispatch would go here once we have the weight buffers
+
+  auto end = std::chrono::high_resolution_clock::now();
+  total_time_ms_ +=
+      std::chrono::duration<double, std::milli>(end - start).count();
+  batch_count_++;
+  gpu_evals_ += batch.count;
+
+  return false; // Fall back to CPU for now
 }
 
-int32_t NNUEEvaluator::evaluate(const Position& pos) {
-    // Single position evaluation - not efficient on GPU
-    // Should use CPU path
-    cpu_evals_++;
-    return 0;
+int32_t NNUEEvaluator::evaluate(const Position &pos) {
+  // Single position evaluation - not efficient on GPU
+  // Should use CPU path
+  cpu_evals_++;
+  return 0;
 }
 
 // Global instance
 static std::unique_ptr<NNUEEvaluator> g_gpu_nnue;
 
-NNUEEvaluator& gpu_nnue() {
-    if (!g_gpu_nnue) {
-        g_gpu_nnue = std::make_unique<NNUEEvaluator>();
-    }
-    return *g_gpu_nnue;
+NNUEEvaluator &gpu_nnue() {
+  if (!g_gpu_nnue) {
+    g_gpu_nnue = std::make_unique<NNUEEvaluator>();
+  }
+  return *g_gpu_nnue;
 }
 
 } // namespace GPU
@@ -332,7 +338,7 @@ namespace MetalFish {
 namespace GPU {
 class MetalBackend;
 }
-}
+} // namespace MetalFish
 
 #else
 
@@ -343,28 +349,24 @@ namespace GPU {
 NNUEEvaluator::NNUEEvaluator() {}
 NNUEEvaluator::~NNUEEvaluator() {}
 
-bool NNUEEvaluator::initialize(const void*, size_t, const void*, size_t) {
-    return false;
+bool NNUEEvaluator::initialize(const void *, size_t, const void *, size_t) {
+  return false;
 }
 
-bool NNUEEvaluator::evaluate_batch(EvalBatch&) {
-    return false;
-}
+bool NNUEEvaluator::evaluate_batch(EvalBatch &) { return false; }
 
-int32_t NNUEEvaluator::evaluate(const Position&) {
-    return 0;
-}
+int32_t NNUEEvaluator::evaluate(const Position &) { return 0; }
 
 bool NNUEEvaluator::load_kernels() { return false; }
 bool NNUEEvaluator::allocate_buffers() { return false; }
 
 static std::unique_ptr<NNUEEvaluator> g_gpu_nnue;
 
-NNUEEvaluator& gpu_nnue() {
-    if (!g_gpu_nnue) {
-        g_gpu_nnue = std::make_unique<NNUEEvaluator>();
-    }
-    return *g_gpu_nnue;
+NNUEEvaluator &gpu_nnue() {
+  if (!g_gpu_nnue) {
+    g_gpu_nnue = std::make_unique<NNUEEvaluator>();
+  }
+  return *g_gpu_nnue;
 }
 
 } // namespace GPU
