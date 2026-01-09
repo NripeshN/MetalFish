@@ -51,9 +51,24 @@ MetalFish is a chess engine designed to leverage Apple Silicon's unified memory 
 
 ### GPU Acceleration (Metal)
 
-- Unified memory for zero-copy CPU/GPU data sharing
-- Metal compute shaders for batch operations
-- GPU-accelerated NNUE evaluation infrastructure
+MetalFish includes a comprehensive GPU acceleration framework designed for Apple Silicon's unified memory architecture:
+
+**Architecture:**
+- Backend-agnostic GPU interface (designed for future CUDA support)
+- Zero-copy CPU/GPU data sharing via unified memory
+- Runtime shader compilation for flexibility
+- Batch processing for efficient GPU utilization
+
+**GPU-Accelerated Operations:**
+- NNUE batch evaluation infrastructure
+- Batch SEE (Static Exchange Evaluation)
+- Feature transformer kernels for sparse input
+- Fused forward pass for neural network inference
+
+**Performance (Apple M2 Max):**
+- GPU compute bandwidth: up to 52.7 GB/s
+- Unified memory write: 10.9 GB/s from CPU
+- Unified memory read: 4.2 GB/s from CPU
 
 ## Project Structure
 
@@ -65,10 +80,15 @@ metalfish/
 │   ├── eval/           # NNUE evaluation
 │   │   └── nnue/       # Neural network implementation
 │   ├── uci/            # UCI protocol
-│   ├── metal/          # Metal GPU acceleration
+│   ├── gpu/            # GPU acceleration framework
+│   │   ├── backend.h   # Abstract GPU interface
+│   │   ├── nnue_eval   # GPU NNUE evaluation
+│   │   ├── batch_ops   # Batch GPU operations
+│   │   └── metal/      # Metal backend implementation
+│   │       └── kernels/# Metal compute shaders
+│   ├── metal/          # Legacy Metal device management
 │   └── syzygy/         # Tablebase probing
-├── shaders/            # Metal compute shaders
-├── external/           # External dependencies
+├── external/           # External dependencies (metal-cpp)
 ├── tests/              # Test suite
 └── reference/          # Reference implementations
 ```
@@ -86,10 +106,17 @@ metalfish/
 
 ```bash
 cd metalfish
-mkdir build && cd build
-cmake ..
-make -j8
+cmake -B build -DUSE_METAL=ON
+cmake --build build -j8
 ```
+
+### Build Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| USE_METAL | ON (macOS) | Enable Metal GPU acceleration |
+| BUILD_TESTS | ON | Build test suite |
+| BUILD_GPU_BENCHMARK | OFF | Build GPU benchmark utility |
 
 ### NNUE Network Files
 
@@ -105,10 +132,13 @@ curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
 
 ```bash
 # C++ unit tests
-./metalfish_tests
+./build/metalfish_tests
 
 # Python integration tests
-python3 ../tests/testing.py
+python3 tests/testing.py
+
+# GPU benchmark (if built)
+./build/metalfish_gpu_bench
 ```
 
 ## Usage
@@ -124,7 +154,7 @@ MetalFish implements the Universal Chess Interface (UCI) protocol and is compati
 ### Command Line
 
 ```bash
-./metalfish
+./build/metalfish
 ```
 
 Example UCI session:
@@ -157,10 +187,25 @@ Benchmark results on Apple Silicon:
 | Metric | Value |
 |--------|-------|
 | Nodes/second | ~1.5M (single thread) |
-| Benchmark nodes | 2,351,490 |
+| Benchmark nodes | 2,477,446 |
 | SIMD | NEON with dot product |
+| GPU Bandwidth | 52.7 GB/s |
 
 The engine produces identical search results to reference implementations, ensuring correctness of the search algorithm and evaluation function.
+
+## GPU Development Roadmap
+
+Current GPU acceleration status:
+
+| Feature | Status |
+|---------|--------|
+| GPU Backend Abstraction | Complete |
+| Unified Memory Support | Complete |
+| Runtime Shader Compilation | Complete |
+| Batch SEE Infrastructure | Complete |
+| NNUE Batch Evaluation | In Progress |
+| Search Integration | Planned |
+| CUDA Backend | Planned |
 
 ## Testing
 
@@ -171,6 +216,7 @@ The test suite includes:
 - Move generation (perft verified)
 - Search components
 - Metal GPU functionality
+- GPU shader compilation and execution
 - UCI protocol compliance
 
 All 30 standard perft positions pass with correct node counts.
