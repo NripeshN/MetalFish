@@ -12,6 +12,10 @@
 #include "metal/allocator.h"
 #include "metal/device.h"
 #include "gpu/backend.h"
+#include "gpu/batch_ops.h"
+#include "gpu/nnue_eval.h"
+#include "core/bitboard.h"
+#include "core/position.h"
 #include <cstring>
 #include <vector>
 
@@ -169,6 +173,89 @@ bool test_metal() {
     
     std::cout << "GPU Backend tests passed!" << std::endl;
     
+    // ========================================
+    // Test GPU Operations (Batch SEE, etc.)
+    // ========================================
+    std::cout << "\n=== Testing GPU Operations ===" << std::endl;
+    
+    // Initialize GPU operations
+    GPU::GPUOperations& ops = GPU::gpu_ops();
+    if (ops.initialize()) {
+      std::cout << "GPU Operations initialized" << std::endl;
+      std::cout << "  SEE available: " << (ops.see_available() ? "Yes" : "No") << std::endl;
+      std::cout << "  Scorer available: " << (ops.scorer_available() ? "Yes" : "No") << std::endl;
+      std::cout << "  Total GPU memory: " << ops.total_gpu_memory() / 1024 << " KB" << std::endl;
+    } else {
+      std::cout << "GPU Operations not available (OK for CI)" << std::endl;
+    }
+    
+    // Test NNUE GPU evaluator initialization
+    std::cout << "\n=== Testing GPU NNUE ===" << std::endl;
+    GPU::NNUEEvaluator& nnue = GPU::gpu_nnue();
+    // Note: Full initialization requires NNUE weights, which may not be available in tests
+    std::cout << "GPU NNUE evaluator created" << std::endl;
+    
+    // Test shader compilation
+    std::cout << "\n=== Testing Shader Compilation ===" << std::endl;
+    const char* test_shader = R"(
+      #include <metal_stdlib>
+      using namespace metal;
+      
+      kernel void test_kernel(device float* output [[buffer(0)]],
+                              constant int& count [[buffer(1)]],
+                              uint gid [[thread_position_in_grid]]) {
+        if (gid < uint(count)) {
+          output[gid] = float(gid) * 2.0f;
+        }
+      }
+    )";
+    
+    if (gpu.compile_library("test", test_shader)) {
+      std::cout << "Shader compilation: SUCCESS" << std::endl;
+      
+      // Try to create kernel from compiled library
+      auto test_kernel = gpu.create_kernel("test_kernel", "test");
+      if (test_kernel && test_kernel->valid()) {
+        std::cout << "Kernel creation: SUCCESS" << std::endl;
+        std::cout << "  Max threads per threadgroup: " << test_kernel->max_threads_per_threadgroup() << std::endl;
+        
+        // Test kernel execution
+        const int count = 256;
+        auto output_buf = gpu.create_buffer(count * sizeof(float));
+        
+        auto enc = gpu.create_encoder();
+        enc->set_kernel(test_kernel.get());
+        enc->set_buffer(output_buf.get(), 0);
+        enc->set_value(count, 1);
+        enc->dispatch_threads(count);
+        
+        gpu.submit_and_wait(enc.get());
+        
+        // Verify results
+        float* results = output_buf->as<float>();
+        bool correct = true;
+        for (int i = 0; i < count && correct; i++) {
+          if (results[i] != float(i) * 2.0f) {
+            correct = false;
+            std::cerr << "Mismatch at " << i << ": expected " << float(i) * 2.0f 
+                      << ", got " << results[i] << std::endl;
+          }
+        }
+        
+        if (correct) {
+          std::cout << "Kernel execution: SUCCESS (verified " << count << " values)" << std::endl;
+        } else {
+          std::cerr << "Kernel execution: FAILED" << std::endl;
+          return false;
+        }
+      } else {
+        std::cerr << "Kernel creation: FAILED" << std::endl;
+        return false;
+      }
+    } else {
+      std::cout << "Shader compilation: SKIPPED (may not be available in CI)" << std::endl;
+    }
+
     std::cout << "\nAll Metal tests passed!" << std::endl;
     return true;
   } catch (const std::exception &e) {

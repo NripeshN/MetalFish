@@ -370,7 +370,7 @@ public:
   bool is_available() const { return device_ != nil && queue_ != nil; }
 
   // Load or compile a shader library
-  bool load_library(const std::string &name, const std::string &path) {
+  bool load_library(const std::string &name, const std::string &path) override {
     if (!device_)
       return false;
 
@@ -399,7 +399,7 @@ public:
   }
 
   // Compile shader from source
-  bool compile_library(const std::string &name, const std::string &source) {
+  bool compile_library(const std::string &name, const std::string &source) override {
     if (!device_)
       return false;
 
@@ -407,15 +407,12 @@ public:
       NSString *ns_source = [NSString stringWithUTF8String:source.c_str()];
       MTLCompileOptions *options = [[MTLCompileOptions alloc] init];
 
-      // Use mathMode instead of deprecated fastMathEnabled
-      if (@available(macOS 15.0, iOS 18.0, *)) {
-        [options setMathMode:MTLMathModeFast];
-      } else {
+      // Use fastMathEnabled for compatibility with older macOS versions
+      // mathMode is only available on macOS 15+ but we need to support older versions
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        [options setFastMathEnabled:YES];
+      [options setFastMathEnabled:YES];
 #pragma clang diagnostic pop
-      }
 
       NSError *error = nil;
       id<MTLLibrary> lib = [device_ newLibraryWithSource:ns_source

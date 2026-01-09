@@ -142,25 +142,30 @@ if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(GPU_SOURCES 
       ${GPU_SOURCES}
       src/gpu/metal/metal_backend.mm
+      src/gpu/nnue_eval.cpp
+      src/gpu/batch_ops.cpp
       src/metal/metal_device.mm
       src/metal/device.cpp
       src/metal/allocator.cpp)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
   message(STATUS "Metal GPU acceleration: ENABLED")
   
-  # Compile Metal shaders
+  # Compile Metal shaders (optional - shaders can also be compiled at runtime)
   set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels)
   set(SHADER_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/metalfish.metallib)
   
   # Check if Metal compiler is available
   find_program(METAL_COMPILER xcrun)
   if(METAL_COMPILER)
+    # Create a shell script to compile shaders with proper error handling
     add_custom_command(
       OUTPUT ${SHADER_OUTPUT}
-      COMMAND xcrun -sdk macosx metal -c ${SHADER_DIR}/nnue.metal -o ${CMAKE_CURRENT_BINARY_DIR}/nnue.air 2>/dev/null || true
-      COMMAND xcrun -sdk macosx metallib ${CMAKE_CURRENT_BINARY_DIR}/nnue.air -o ${SHADER_OUTPUT} 2>/dev/null || true
+      COMMAND ${CMAKE_COMMAND} -E echo "Compiling Metal shaders..."
+      COMMAND sh -c "xcrun -sdk macosx metal -c ${SHADER_DIR}/nnue.metal -o ${CMAKE_CURRENT_BINARY_DIR}/nnue.air 2>&1 || echo 'Metal shader compilation skipped'"
+      COMMAND sh -c "if [ -f ${CMAKE_CURRENT_BINARY_DIR}/nnue.air ]; then xcrun -sdk macosx metallib ${CMAKE_CURRENT_BINARY_DIR}/nnue.air -o ${SHADER_OUTPUT} 2>&1 || echo 'Metallib creation skipped'; fi"
+      COMMAND ${CMAKE_COMMAND} -E touch ${SHADER_OUTPUT}
       DEPENDS ${SHADER_DIR}/nnue.metal
-      COMMENT "Compiling Metal shaders"
+      COMMENT "Compiling Metal shaders (optional)"
       VERBATIM
     )
     add_custom_target(metal_shaders DEPENDS ${SHADER_OUTPUT})

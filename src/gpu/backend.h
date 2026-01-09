@@ -167,6 +167,12 @@ public:
     virtual std::unique_ptr<ComputeKernel> create_kernel(const std::string& name,
                                                           const std::string& library = "") = 0;
     
+    // Compile shader from source (returns true if successful)
+    virtual bool compile_library(const std::string& name, const std::string& source) = 0;
+    
+    // Load shader library from file
+    virtual bool load_library(const std::string& name, const std::string& path) = 0;
+    
     // Command encoding
     virtual std::unique_ptr<CommandEncoder> create_encoder() = 0;
     
