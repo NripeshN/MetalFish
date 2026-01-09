@@ -4,9 +4,15 @@
 
 */
 
+#ifdef USE_METAL
+
 #define NS_PRIVATE_IMPLEMENTATION
 #define CA_PRIVATE_IMPLEMENTATION
 #define MTL_PRIVATE_IMPLEMENTATION
+
+#include <Foundation/Foundation.hpp>
+#include <Metal/Metal.hpp>
+#include <QuartzCore/QuartzCore.hpp>
 
 #include "device.h"
 #include <iostream>
@@ -14,6 +20,35 @@
 
 namespace MetalFish {
 namespace Metal {
+
+// DeviceStream implementation
+DeviceStream::DeviceStream(MTL::CommandQueue *q)
+    : queue(q), buffer(nullptr), encoder(nullptr) {}
+
+DeviceStream::~DeviceStream() {
+  if (buffer)
+    buffer->release();
+}
+
+DeviceStream::DeviceStream(DeviceStream &&other) noexcept
+    : queue(other.queue), buffer(other.buffer),
+      encoder(std::move(other.encoder)) {
+  other.queue = nullptr;
+  other.buffer = nullptr;
+}
+
+DeviceStream &DeviceStream::operator=(DeviceStream &&other) noexcept {
+  if (this != &other) {
+    if (buffer)
+      buffer->release();
+    queue = other.queue;
+    buffer = other.buffer;
+    encoder = std::move(other.encoder);
+    other.queue = nullptr;
+    other.buffer = nullptr;
+  }
+  return *this;
+}
 
 // CommandEncoder implementation
 CommandEncoder::CommandEncoder(DeviceStream &stream)
@@ -77,8 +112,6 @@ void CommandEncoder::set_bytes(const void *data, size_t size, int idx) {
   }
 }
 
-// DeviceStream implementation is inline in header
-
 // Device implementation
 Device::Device() {
   // Get the default Metal device
@@ -137,6 +170,10 @@ Device::~Device() {
 }
 
 MTL::Device *Device::mtl_device() { return device_; }
+
+bool Device::has_unified_memory() const {
+  return device_ ? device_->hasUnifiedMemory() : false;
+}
 
 MTL::CommandQueue *Device::get_queue(int index) {
   auto it = stream_map_.find(index);
@@ -282,3 +319,5 @@ Device &get_device() {
 
 } // namespace Metal
 } // namespace MetalFish
+
+#endif // USE_METAL

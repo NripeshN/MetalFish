@@ -4,6 +4,11 @@
 
 */
 
+#ifdef USE_METAL
+
+#include <Foundation/Foundation.hpp>
+#include <Metal/Metal.hpp>
+
 #include "allocator.h"
 #include "metal/device.h"
 #include <algorithm>
@@ -11,6 +16,9 @@
 
 namespace MetalFish {
 namespace Metal {
+
+// Buffer::contents() implementation
+void *Buffer::contents() const { return ptr ? ptr->contents() : nullptr; }
 
 MetalAllocator::MetalAllocator() { device_ = get_device().mtl_device(); }
 
@@ -121,3 +129,5 @@ MetalAllocator &get_allocator() {
 
 } // namespace Metal
 } // namespace MetalFish
+
+#endif // USE_METAL

@@ -6,8 +6,27 @@
 
 #pragma once
 
-#include <Foundation/Foundation.hpp>
-#include <Metal/Metal.hpp>
+#ifdef USE_METAL
+
+// Forward declarations only - don't include Metal headers here
+namespace MTL {
+class Device;
+class Buffer;
+class CommandQueue;
+class CommandBuffer;
+class ComputeCommandEncoder;
+class ComputePipelineState;
+class Library;
+class Function;
+struct Size;
+} // namespace MTL
+
+namespace NS {
+class Error;
+class String;
+class URL;
+} // namespace NS
+
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -36,32 +55,12 @@ private:
 
 // Stream for command buffer management
 struct DeviceStream {
-  DeviceStream(MTL::CommandQueue *q)
-      : queue(q), buffer(nullptr), encoder(nullptr) {}
-  ~DeviceStream() {
-    if (buffer)
-      buffer->release();
-  }
+  DeviceStream(MTL::CommandQueue *q);
+  ~DeviceStream();
 
   // Move only
-  DeviceStream(DeviceStream &&other) noexcept
-      : queue(other.queue), buffer(other.buffer),
-        encoder(std::move(other.encoder)) {
-    other.queue = nullptr;
-    other.buffer = nullptr;
-  }
-  DeviceStream &operator=(DeviceStream &&other) noexcept {
-    if (this != &other) {
-      if (buffer)
-        buffer->release();
-      queue = other.queue;
-      buffer = other.buffer;
-      encoder = std::move(other.encoder);
-      other.queue = nullptr;
-      other.buffer = nullptr;
-    }
-    return *this;
-  }
+  DeviceStream(DeviceStream &&other) noexcept;
+  DeviceStream &operator=(DeviceStream &&other) noexcept;
 
   // Non-copyable
   DeviceStream(const DeviceStream &) = delete;
@@ -98,6 +97,9 @@ public:
   const std::string &get_architecture() const;
   const std::string &get_architecture_gen() const;
 
+  // Check if device has unified memory
+  bool has_unified_memory() const;
+
 private:
   MTL::Device *device_;
   std::unordered_map<int32_t, DeviceStream> stream_map_;
@@ -112,3 +114,5 @@ Device &get_device();
 
 } // namespace Metal
 } // namespace MetalFish
+
+#endif // USE_METAL

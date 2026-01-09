@@ -6,8 +6,22 @@
 
 #pragma once
 
-#include <Metal/Metal.hpp>
+#ifdef USE_METAL
+
+// Forward declarations only - don't include Metal headers here
+namespace MTL {
+class Device;
+class Buffer;
+class CommandQueue;
+class CommandBuffer;
+class ComputeCommandEncoder;
+class ComputePipelineState;
+class Library;
+struct Size;
+} // namespace MTL
+
 #include <atomic>
+#include <cstddef>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -21,7 +35,7 @@ struct Buffer {
   size_t size = 0;
 
   bool is_valid() const { return ptr != nullptr; }
-  void *contents() const { return ptr ? ptr->contents() : nullptr; }
+  void *contents() const;
 
   template <typename T> T *as() const { return static_cast<T *>(contents()); }
 };
@@ -75,3 +89,5 @@ MetalAllocator &get_allocator();
 
 } // namespace Metal
 } // namespace MetalFish
+
+#endif // USE_METAL

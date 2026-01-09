@@ -5,11 +5,14 @@
   Metal GPU tests
 */
 
+#include <cassert>
+#include <iostream>
+
+#ifdef USE_METAL
 #include "metal/allocator.h"
 #include "metal/device.h"
-#include <cassert>
 #include <cstring>
-#include <iostream>
+#include <vector>
 
 using namespace MetalFish;
 
@@ -18,14 +21,13 @@ bool test_metal() {
     // Test device initialization
     Metal::Device &device = Metal::get_device();
 
-    MTL::Device *mtlDevice = device.mtl_device();
-    assert(mtlDevice != nullptr);
+    assert(device.mtl_device() != nullptr);
 
     std::cout << "Metal device: " << device.get_architecture() << std::endl;
     std::cout << "Architecture: " << device.get_architecture_gen() << std::endl;
 
     // Test unified memory (should be true for Apple Silicon)
-    bool hasUnifiedMemory = mtlDevice->hasUnifiedMemory();
+    bool hasUnifiedMemory = device.has_unified_memory();
     std::cout << "Unified memory: " << (hasUnifiedMemory ? "Yes" : "No")
               << std::endl;
 
@@ -76,8 +78,7 @@ bool test_metal() {
     assert(allocator.get_cache_memory() == 0);
 
     // Test command queue
-    MTL::CommandQueue *queue = device.get_queue(0);
-    assert(queue != nullptr);
+    assert(device.get_queue(0) != nullptr);
 
     // Test multiple buffer allocations
     std::vector<Metal::Buffer> buffers;
@@ -101,3 +102,13 @@ bool test_metal() {
     return false;
   }
 }
+
+#else
+
+// Stub when Metal is not available
+bool test_metal() {
+  std::cout << "Metal tests skipped (USE_METAL not defined)" << std::endl;
+  return true;
+}
+
+#endif // USE_METAL

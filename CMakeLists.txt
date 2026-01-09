@@ -15,9 +15,26 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   )
 endif()
 
+# Metal GPU acceleration option (macOS only)
+option(USE_METAL "Enable Metal GPU acceleration" OFF)
+
+# Check if metal-cpp headers exist
+if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp/Metal/Metal.hpp")
+  set(METAL_CPP_AVAILABLE ON)
+else()
+  set(METAL_CPP_AVAILABLE OFF)
+endif()
+
+# Auto-enable Metal if headers are available and not explicitly disabled
+if(APPLE AND METAL_CPP_AVAILABLE AND NOT DEFINED USE_METAL)
+  set(USE_METAL ON)
+endif()
+
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp)
+if(USE_METAL AND METAL_CPP_AVAILABLE)
+  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp)
+endif()
 
 # Core source files
 set(CORE_SOURCES src/core/bitboard.cpp src/core/misc.cpp src/core/movegen.cpp
@@ -45,12 +62,15 @@ set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
 # Syzygy source files
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
-# Metal GPU acceleration source files (macOS only)
+# Metal GPU acceleration source files (macOS only, when enabled)
 set(METAL_SOURCES)
-if(APPLE)
+if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(METAL_SOURCES src/metal/metal_device.mm src/metal/device.cpp
                     src/metal/allocator.cpp)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
+  message(STATUS "Metal GPU acceleration: ENABLED")
+else()
+  message(STATUS "Metal GPU acceleration: DISABLED")
 endif()
 
 # All source files
@@ -77,22 +97,10 @@ if(APPLE)
   find_library(COREFOUNDATION_FRAMEWORK CoreFoundation)
   find_library(QUARTZCORE_FRAMEWORK QuartzCore)
 
-  target_link_libraries(metalfish ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
-                        ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
-
-  # Compile Metal shaders (disabled - requires Metal toolchain) set(SHADER_DIR
-  # ${CMAKE_CURRENT_SOURCE_DIR}/shaders) set(SHADER_OUTPUT
-  # ${CMAKE_CURRENT_BINARY_DIR}/default.metallib)
-  #
-  # add_custom_command( OUTPUT ${SHADER_OUTPUT} COMMAND xcrun -sdk macosx metal
-  # -c ${SHADER_DIR}/core_ops.metal -o ${CMAKE_CURRENT_BINARY_DIR}/core_ops.air
-  # 2>/dev/null || true COMMAND xcrun -sdk macosx metal -c
-  # ${SHADER_DIR}/nnue.metal -o ${CMAKE_CURRENT_BINARY_DIR}/nnue.air 2>/dev/null
-  # || true COMMAND xcrun -sdk macosx metallib ${CMAKE_CURRENT_BINARY_DIR}/*.air
-  # -o ${SHADER_OUTPUT} 2>/dev/null || true DEPENDS ${SHADER_DIR}/core_ops.metal
-  # ${SHADER_DIR}/nnue.metal COMMENT "Compiling Metal shaders" VERBATIM )
-  # add_custom_target(metal_shaders DEPENDS ${SHADER_OUTPUT})
-  # add_dependencies(metalfish metal_shaders)
+  if(USE_METAL AND METAL_CPP_AVAILABLE)
+    target_link_libraries(metalfish ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
+                          ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+  endif()
 endif()
 
 # Copy NNUE files to build directory (if they exist)
@@ -133,7 +141,7 @@ if(BUILD_TESTS)
     ${METAL_SOURCES})
   target_link_libraries(metalfish_tests Threads::Threads)
 
-  if(APPLE)
+  if(APPLE AND USE_METAL AND METAL_CPP_AVAILABLE)
     target_link_libraries(
       metalfish_tests ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
       ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
