@@ -266,6 +266,19 @@ if(BUILD_TESTS)
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
 endif()
 
+# GPU Benchmark (optional)
+option(BUILD_GPU_BENCHMARK "Build GPU benchmark" OFF)
+if(BUILD_GPU_BENCHMARK AND USE_METAL AND METAL_CPP_AVAILABLE)
+  add_executable(
+    metalfish_gpu_bench
+    src/benchmark_gpu.cpp
+    ${CORE_SOURCES}
+    ${GPU_SOURCES})
+  target_link_libraries(metalfish_gpu_bench Threads::Threads
+    ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
+    ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+endif()
+
 # Print configuration summary
 message(STATUS "")
 message(STATUS "MetalFish Configuration Summary:")
