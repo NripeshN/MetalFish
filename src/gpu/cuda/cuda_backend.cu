@@ -11,6 +11,7 @@
 #ifdef USE_CUDA
 
 #include "../backend.h"
+#include <cuda.h>
 #include <cuda_runtime.h>
 #include <nvrtc.h>
 #include <atomic>
@@ -18,9 +19,9 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <sstream>
-#include <unordered_map>
 #include <vector>
 
 namespace MetalFish {
@@ -36,32 +37,24 @@ namespace GPU {
     }                                                                          \
   } while (0)
 
+// Forward declaration
+class CUDABackend;
+
 // ============================================================================
 // CUDA Buffer Implementation
 // ============================================================================
 
 class CUDABuffer : public Buffer {
 public:
-  CUDABuffer(void *device_ptr, void *host_ptr, size_t size, MemoryMode mode)
+  CUDABuffer(void *device_ptr, void *host_ptr, size_t size, MemoryMode mode,
+             CUDABackend *backend)
       : device_ptr_(device_ptr), host_ptr_(host_ptr), size_(size),
-        mode_(mode) {}
+        mode_(mode), backend_(backend) {}
 
-  ~CUDABuffer() override {
-    if (mode_ == MemoryMode::Shared) {
-      // Unified memory - single free
-      if (device_ptr_) {
-        CUDA_CHECK(cudaFree(device_ptr_));
-      }
-    } else {
-      // Separate device and host memory
-      if (device_ptr_) {
-        CUDA_CHECK(cudaFree(device_ptr_));
-      }
-      if (host_ptr_) {
-        delete[] static_cast<uint8_t *>(host_ptr_);
-      }
-    }
-  }
+  ~CUDABuffer() override;
+
+  // Get size for memory tracking
+  size_t tracked_size() const { return size_; }
 
   void *data() override {
     // For unified memory, device_ptr is accessible from CPU
@@ -100,6 +93,7 @@ private:
   void *host_ptr_;
   size_t size_;
   MemoryMode mode_;
+  CUDABackend *backend_;
 };
 
 // ============================================================================
@@ -153,6 +147,10 @@ public:
     auto *cuda_buffer = static_cast<CUDABuffer *>(buffer);
     if (cuda_buffer) {
       void *ptr = static_cast<uint8_t *>(cuda_buffer->device_ptr()) + offset;
+      // Ensure we have space in the args vector
+      if (static_cast<size_t>(index) >= kernel_args_.size()) {
+        kernel_args_.resize(index + 1);
+      }
       kernel_args_[index] = ptr;
     }
   }
@@ -161,6 +159,10 @@ public:
     // Store inline data in a persistent buffer
     inline_data_storage_.emplace_back(size);
     std::memcpy(inline_data_storage_.back().data(), data, size);
+    // Ensure we have space in the args vector
+    if (static_cast<size_t>(index) >= kernel_args_.size()) {
+      kernel_args_.resize(index + 1);
+    }
     kernel_args_[index] = inline_data_storage_.back().data();
   }
 
@@ -178,10 +180,10 @@ public:
     dim3 grid(num_blocks);
     dim3 block(block_size);
 
-    // Prepare kernel arguments
-    std::vector<void *> args;
-    for (auto &kv : kernel_args_) {
-      args.push_back(&kv.second);
+    // Prepare kernel arguments in order
+    std::vector<void *> args(kernel_args_.size());
+    for (size_t i = 0; i < kernel_args_.size(); ++i) {
+      args[i] = &kernel_args_[i];
     }
 
     // Launch kernel
@@ -205,10 +207,10 @@ public:
     dim3 grid(groups_x, groups_y, groups_z);
     dim3 block(threads_x, threads_y, threads_z);
 
-    // Prepare kernel arguments
-    std::vector<void *> args;
-    for (auto &kv : kernel_args_) {
-      args.push_back(&kv.second);
+    // Prepare kernel arguments in order
+    std::vector<void *> args(kernel_args_.size());
+    for (size_t i = 0; i < kernel_args_.size(); ++i) {
+      args[i] = &kernel_args_[i];
     }
 
     // Launch kernel
@@ -233,7 +235,7 @@ public:
 private:
   CUstream stream_;
   CUDAKernel *current_kernel_;
-  std::unordered_map<int, void *> kernel_args_;
+  std::vector<void *> kernel_args_;
   std::vector<std::vector<uint8_t>> inline_data_storage_;
 };
 
@@ -259,13 +261,18 @@ public:
     return std::string(prop.name);
   }
 
+  // Method to deallocate buffer memory tracking
+  void deallocate_buffer(size_t size) {
+    allocated_memory_.fetch_sub(size, std::memory_order_relaxed);
+  }
+
   bool has_unified_memory() const override {
     if (!initialized_)
       return false;
 
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device_id_));
-    return prop.unifiedAddressing != 0;
+    return prop.managedMemory != 0;
   }
 
   size_t max_buffer_size() const override {
@@ -309,9 +316,15 @@ public:
     }
 
     if (device_ptr) {
-      allocated_memory_ += size;
-      peak_memory_ = std::max(peak_memory_.load(), allocated_memory_.load());
-      return std::make_unique<CUDABuffer>(device_ptr, host_ptr, size, mode);
+      // Thread-safe memory tracking
+      size_t new_allocated = allocated_memory_.fetch_add(size, std::memory_order_relaxed) + size;
+      size_t old_peak = peak_memory_.load(std::memory_order_relaxed);
+      while (new_allocated > old_peak &&
+             !peak_memory_.compare_exchange_weak(old_peak, new_allocated,
+                                                 std::memory_order_relaxed)) {
+        // old_peak is updated with the current value of peak_memory_
+      }
+      return std::make_unique<CUDABuffer>(device_ptr, host_ptr, size, mode, this);
     }
 
     return nullptr;
@@ -330,6 +343,8 @@ public:
       // For non-unified memory, sync to device
       auto *cuda_buffer = static_cast<CUDABuffer *>(buffer.get());
       cuda_buffer->sync_to_device();
+
+      // Memory already tracked in create_buffer
     }
 
     return buffer;
@@ -387,7 +402,7 @@ public:
 
     // Compile options
     std::vector<const char *> opts = {
-        "--gpu-architecture=compute_50", // Minimum compute capability
+        "--gpu-architecture=compute_60", // Minimum compute capability (Pascal and above)
         "--std=c++14"};
 
     result = nvrtcCompileProgram(prog, opts.size(), opts.data());
@@ -541,6 +556,29 @@ private:
 // ============================================================================
 // Backend static methods
 // ============================================================================
+
+// CUDABuffer destructor implementation (after CUDABackend is defined)
+CUDABuffer::~CUDABuffer() {
+  // Decrement memory tracking before freeing
+  if (backend_) {
+    backend_->deallocate_buffer(size_);
+  }
+
+  if (mode_ == MemoryMode::Shared) {
+    // Unified memory - single free
+    if (device_ptr_) {
+      CUDA_CHECK(cudaFree(device_ptr_));
+    }
+  } else {
+    // Separate device and host memory
+    if (device_ptr_) {
+      CUDA_CHECK(cudaFree(device_ptr_));
+    }
+    if (host_ptr_) {
+      delete[] static_cast<uint8_t *>(host_ptr_);
+    }
+  }
+}
 
 Backend &Backend::get() { return CUDABackend::instance(); }
 

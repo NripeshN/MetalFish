@@ -194,25 +194,30 @@ if(USE_CUDA)
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -DUSE_CUDA")
     
     # Set CUDA architectures (supporting common GPUs)
-    # Pascal (6.0, 6.1), Volta (7.0), Turing (7.5), Ampere (8.0, 8.6), Ada (8.9), Hopper (9.0)
-    set(CMAKE_CUDA_ARCHITECTURES "60;61;70;75;80;86;89;90")
+    # Pascal (6.0, 6.1), Volta (7.0), Turing (7.5), Ampere (8.0, 8.6), Ada (8.9)
+    set(CMAKE_CUDA_ARCHITECTURES "60;61;70;75;80;86;89")
+    
+    # Add Hopper (9.0) only if CUDA 11.8+ is available
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 11.8)
+      list(APPEND CMAKE_CUDA_ARCHITECTURES 90)
+      message(STATUS "CUDA 11.8+ detected, adding Hopper (9.0) architecture support")
+    endif()
     
     message(STATUS "CUDA GPU acceleration: ENABLED")
     message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
+    message(STATUS "CUDA Version: ${CMAKE_CUDA_COMPILER_VERSION}")
     message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
   else()
     message(WARNING "CUDA compiler not found. CUDA support will be disabled.")
     set(USE_CUDA OFF)
   endif()
-elseif(NOT USE_METAL OR NOT METAL_CPP_AVAILABLE)
-  # Only add CPU backend if neither Metal nor CUDA is enabled
-  # and it hasn't been added already
-  if(NOT USE_METAL OR NOT METAL_CPP_AVAILABLE)
-    # Check if cpu_backend.cpp is not already in GPU_SOURCES
-    list(FIND GPU_SOURCES "src/gpu/cpu_backend.cpp" _index)
-    if(_index EQUAL -1)
-      set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cpu_backend.cpp)
-    endif()
+endif()
+
+# Add CPU backend if neither Metal nor CUDA is enabled
+if((NOT USE_METAL OR NOT METAL_CPP_AVAILABLE) AND NOT USE_CUDA)
+  list(FIND GPU_SOURCES "src/gpu/cpu_backend.cpp" _index)
+  if(_index EQUAL -1)
+    set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cpu_backend.cpp)
   endif()
 endif()
 

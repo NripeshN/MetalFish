@@ -103,6 +103,8 @@ __device__ inline uint32_t popcount64(uint64_t x) {
 }
 
 __device__ inline uint32_t lsb(uint64_t x) {
+  if (x == 0)
+    return UINT32_MAX;  // Return max value for invalid input
   return __ffsll(x) - 1;
 }
 
@@ -119,6 +121,7 @@ __device__ inline uint64_t pop_lsb(uint64_t *x) {
 /**
  * Extract HalfKAv2_hm features from position
  * Maps (king_square, piece, square) to feature indices
+ * Maximum features per position: 64 pieces across both perspectives
  */
 __global__ void extract_halfka_features(const GPUPosition *positions,
                                         int32_t *feature_indices,
@@ -130,7 +133,7 @@ __global__ void extract_halfka_features(const GPUPosition *positions,
 
   const GPUPosition &pos = positions[pos_idx];
   uint32_t feature_count = 0;
-  int32_t *features = &feature_indices[pos_idx * 32]; // Max 32 features
+  int32_t *features = &feature_indices[pos_idx * 64]; // Max 64 features (32 pieces * 2 perspectives)
 
   // Extract features for both perspectives
   for (int perspective = 0; perspective < 2; perspective++) {
@@ -150,13 +153,13 @@ __global__ void extract_halfka_features(const GPUPosition *positions,
           int32_t feature = ksq * 704 + (color * 6 + piece_type) * 64 + sq;
           features[feature_count++] = feature;
 
-          if (feature_count >= 32)
-            break; // Safety limit
+          if (feature_count >= 64)
+            break; // Safety limit (max pieces)
         }
-        if (feature_count >= 32)
+        if (feature_count >= 64)
           break;
       }
-      if (feature_count >= 32)
+      if (feature_count >= 64)
         break;
     }
   }
@@ -184,7 +187,7 @@ __global__ void feature_transformer(const int32_t *feature_indices,
   accumulator_t acc = bias[dim_idx];
 
   // Add weighted features
-  const int32_t *features = &feature_indices[pos_idx * 32];
+  const int32_t *features = &feature_indices[pos_idx * 64];
   uint32_t num_features = feature_counts[pos_idx];
 
   for (uint32_t i = 0; i < num_features; i++) {
