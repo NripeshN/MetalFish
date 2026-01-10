@@ -136,9 +136,7 @@ set(GPU_SOURCES
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
-  set(GPU_SOURCES
-      ${GPU_SOURCES} src/gpu/metal/metal_backend.mm src/metal/metal_device.mm
-      src/metal/device.cpp src/metal/allocator.cpp)
+  set(GPU_SOURCES ${GPU_SOURCES} src/gpu/metal/metal_backend.mm)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
   message(STATUS "Metal GPU acceleration: ENABLED")
 
