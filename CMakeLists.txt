@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
-project(metalfish CXX OBJCXX)
+
+# Only enable OBJCXX on macOS (needed for Metal)
+if(APPLE)
+  project(metalfish CXX OBJCXX)
+else()
+  project(metalfish CXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,8 +28,8 @@ else()
   option(USE_METAL "Enable Metal GPU acceleration" OFF)
 endif()
 
-# Future: CUDA support
-option(USE_CUDA "Enable CUDA GPU acceleration (future)" OFF)
+# CUDA support
+option(USE_CUDA "Enable CUDA GPU acceleration" OFF)
 
 # Metal-cpp headers location
 set(METAL_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp")
@@ -169,10 +175,50 @@ else()
   message(STATUS "Metal GPU acceleration: DISABLED (CPU fallback)")
 endif()
 
-# Future: CUDA sources
+# CUDA GPU acceleration
 if(USE_CUDA)
-  # set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cuda/cuda_backend.cu)
-  message(STATUS "CUDA GPU acceleration: ENABLED (placeholder)")
+  # Check if CUDA is available
+  include(CheckLanguage)
+  check_language(CUDA)
+  
+  if(CMAKE_CUDA_COMPILER)
+    enable_language(CUDA)
+    
+    # Set CUDA standard
+    set(CMAKE_CUDA_STANDARD 14)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    
+    # Add CUDA backend source
+    set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cuda/cuda_backend.cu)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_CUDA")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -DUSE_CUDA")
+    
+    # Set CUDA architectures (supporting common GPUs)
+    # Pascal (6.0, 6.1), Volta (7.0), Turing (7.5), Ampere (8.0, 8.6), Ada (8.9)
+    set(CMAKE_CUDA_ARCHITECTURES "60;61;70;75;80;86;89")
+    
+    # Add Hopper (9.0) only if CUDA 11.8+ is available
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 11.8)
+      list(APPEND CMAKE_CUDA_ARCHITECTURES 90)
+      message(STATUS "CUDA 11.8+ detected, adding Hopper (9.0) architecture support")
+    endif()
+    
+    message(STATUS "CUDA GPU acceleration: ENABLED")
+    message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
+    message(STATUS "CUDA Version: ${CMAKE_CUDA_COMPILER_VERSION}")
+    message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+  else()
+    message(WARNING "CUDA compiler not found. CUDA support will be disabled.")
+    set(USE_CUDA OFF)
+  endif()
+endif()
+
+# Add CPU backend if neither Metal nor CUDA is enabled
+if((NOT USE_METAL OR NOT METAL_CPP_AVAILABLE) AND NOT USE_CUDA)
+  list(FIND GPU_SOURCES "src/gpu/cpu_backend.cpp" _index)
+  if(_index EQUAL -1)
+    set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cpu_backend.cpp)
+  endif()
 endif()
 
 # All source files
@@ -208,6 +254,13 @@ if(APPLE)
     target_link_libraries(metalfish ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
                           ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
   endif()
+endif()
+
+# CUDA specific
+if(USE_CUDA AND CMAKE_CUDA_COMPILER)
+  # Find CUDA libraries
+  find_package(CUDAToolkit REQUIRED)
+  target_link_libraries(metalfish CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
 endif()
 
 # Copy NNUE files to build directory (if they exist)
@@ -248,6 +301,7 @@ if(BUILD_TESTS)
       tests/test_movegen.cpp
       tests/test_search.cpp
       tests/test_metal.cpp
+      tests/test_cuda.cpp
       tests/test_gpu_nnue.cpp)
 
   add_executable(
@@ -267,6 +321,10 @@ if(BUILD_TESTS)
     target_link_libraries(
       metalfish_tests ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
       ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+  endif()
+  
+  if(USE_CUDA AND CMAKE_CUDA_COMPILER)
+    target_link_libraries(metalfish_tests CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
   endif()
 
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
