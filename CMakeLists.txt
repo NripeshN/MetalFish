@@ -1,10 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
-project(metalfish CXX OBJCXX CUDA)
+
+# Only enable OBJCXX on macOS (needed for Metal)
+if(APPLE)
+  project(metalfish CXX OBJCXX)
+else()
+  project(metalfish CXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 14)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
@@ -179,6 +183,10 @@ if(USE_CUDA)
   
   if(CMAKE_CUDA_COMPILER)
     enable_language(CUDA)
+    
+    # Set CUDA standard
+    set(CMAKE_CUDA_STANDARD 14)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     
     # Add CUDA backend source
     set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cuda/cuda_backend.cu)

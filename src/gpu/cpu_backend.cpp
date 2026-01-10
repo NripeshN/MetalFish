@@ -12,6 +12,7 @@
 
 #include "backend.h"
 #include <chrono>
+#include <cstring>
 #include <iostream>
 
 namespace MetalFish {
