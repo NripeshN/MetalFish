@@ -21,8 +21,9 @@ jobs:
       contents: read
     
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-14]
         include:
           - os: ubuntu-latest
             artifact_name: metalfish-ubuntu
