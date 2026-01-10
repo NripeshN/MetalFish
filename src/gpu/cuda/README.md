@@ -85,7 +85,7 @@ The backend is compiled for the following CUDA architectures:
 - Turing: 7.5
 - Ampere: 8.0, 8.6
 - Ada: 8.9
-- Hopper: 9.0
+- Hopper: 9.0 (requires CUDA Toolkit 11.8 or later)
 
 ## Implementation Details
 

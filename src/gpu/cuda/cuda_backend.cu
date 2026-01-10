@@ -491,11 +491,11 @@ public:
     CUDA_CHECK(cudaDeviceSynchronize());
   }
 
-  size_t allocated_memory() const override { return allocated_memory_; }
+  size_t allocated_memory() const override { return allocated_memory_.load(); }
 
-  size_t peak_memory() const override { return peak_memory_; }
+  size_t peak_memory() const override { return peak_memory_.load(); }
 
-  void reset_peak_memory() override { peak_memory_ = allocated_memory_; }
+  void reset_peak_memory() override { peak_memory_.store(allocated_memory_.load()); }
 
 private:
   CUDABackend() : initialized_(false), device_id_(0), allocated_memory_(0), peak_memory_(0) {
