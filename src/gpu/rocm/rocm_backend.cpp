@@ -109,7 +109,8 @@ public:
       : stream_(stream), current_kernel_(nullptr) {}
 
   ~ROCmCommandEncoder() override {
-    // Stream cleanup handled by backend
+    // Clean up any temporary allocations
+    cleanup_temp_allocations();
   }
 
   void set_kernel(ComputeKernel *kernel) override {
@@ -349,6 +350,10 @@ public:
 
   void reset_peak_memory() override { peak_memory_ = allocated_; }
 
+  bool is_available() const { 
+    return stream_ != nullptr;
+  }
+
 private:
   ROCmBackend() : device_(0), allocated_(0), peak_memory_(0) {
     // Initialize HIP
@@ -366,8 +371,12 @@ private:
     // Create a stream for async operations
     HIP_CHECK(hipStreamCreate(&stream_));
 
-    std::cout << "ROCm backend initialized with device: " << device_name()
+    std::cout << "[ROCmBackend] Initialized: " << device_name()
               << std::endl;
+    std::cout << "[ROCmBackend] Unified memory: "
+              << (has_unified_memory() ? "Yes" : "No") << std::endl;
+    std::cout << "[ROCmBackend] Max threadgroup memory: "
+              << max_threadgroup_memory() << " bytes" << std::endl;
   }
 
   ~ROCmBackend() {
@@ -404,9 +413,11 @@ Backend &Backend::get() {
 
 bool Backend::available() {
 #ifdef USE_ROCM
-  int device_count;
-  hipError_t err = hipGetDeviceCount(&device_count);
-  return err == hipSuccess && device_count > 0;
+  try {
+    return ROCmBackend::instance().is_available();
+  } catch (...) {
+    return false;
+  }
 #else
   return false;
 #endif
