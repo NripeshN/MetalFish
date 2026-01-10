@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
-project(metalfish CXX OBJCXX)
+
+# Enable OBJCXX only on macOS (needed for Metal backend)
+if(APPLE)
+  project(metalfish CXX OBJCXX)
+else()
+  project(metalfish CXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +30,9 @@ endif()
 
 # Future: CUDA support
 option(USE_CUDA "Enable CUDA GPU acceleration (future)" OFF)
+
+# ROCm/HIP support
+option(USE_ROCM "Enable ROCm/HIP GPU acceleration" OFF)
 
 # Metal-cpp headers location
 set(METAL_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp")
@@ -163,10 +172,39 @@ if(USE_METAL AND METAL_CPP_AVAILABLE)
       VERBATIM)
     add_custom_target(metal_shaders DEPENDS ${SHADER_OUTPUT})
   endif()
-else()
-  # CPU fallback backend
+endif()
+
+# ROCm/HIP GPU acceleration
+if(USE_ROCM)
+  # Check for ROCm installation
+  find_package(hip QUIET)
+  
+  if(hip_FOUND)
+    set(GPU_SOURCES ${GPU_SOURCES} src/gpu/rocm/rocm_backend.cpp)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_ROCM")
+    
+    # Add HIP include directories
+    include_directories(${HIP_INCLUDE_DIRS})
+    
+    message(STATUS "ROCm/HIP GPU acceleration: ENABLED")
+    
+    # Optional: Compile HIP kernels
+    set(HIP_KERNEL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/rocm/kernels)
+    set(HIP_KERNEL_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/nnue_kernels.hipfb)
+    
+    # Note: HIP kernel compilation would be done here
+    # For now, we'll support runtime compilation
+    message(STATUS "HIP kernels will be compiled at runtime or offline")
+  else()
+    message(WARNING "ROCm/HIP not found. GPU acceleration will be disabled.")
+    set(USE_ROCM OFF)
+  endif()
+endif()
+
+# CPU fallback backend (if no GPU backend is enabled)
+if(NOT USE_METAL AND NOT USE_ROCM)
   set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cpu_backend.cpp)
-  message(STATUS "Metal GPU acceleration: DISABLED (CPU fallback)")
+  message(STATUS "GPU acceleration: DISABLED (CPU fallback)")
 endif()
 
 # Future: CUDA sources
@@ -208,6 +246,11 @@ if(APPLE)
     target_link_libraries(metalfish ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
                           ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
   endif()
+endif()
+
+# ROCm specific
+if(USE_ROCM AND hip_FOUND)
+  target_link_libraries(metalfish hip::host)
 endif()
 
 # Copy NNUE files to build directory (if they exist)
@@ -269,6 +312,10 @@ if(BUILD_TESTS)
       ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
   endif()
 
+  if(USE_ROCM AND hip_FOUND)
+    target_link_libraries(metalfish_tests hip::host)
+  endif()
+
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
 endif()
 
@@ -291,5 +338,6 @@ message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Metal GPU: ${USE_METAL}")
 message(STATUS "  CUDA GPU: ${USE_CUDA}")
+message(STATUS "  ROCm GPU: ${USE_ROCM}")
 message(STATUS "  Tests: ${BUILD_TESTS}")
 message(STATUS "")

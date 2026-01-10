@@ -5,7 +5,7 @@
   GPU Backend Abstraction Layer
 
   This provides a backend-agnostic interface for GPU operations.
-  Currently supports Metal (Apple Silicon), with CUDA support planned.
+  Currently supports Metal (Apple Silicon), with CUDA and ROCm support planned.
 */
 
 #pragma once
@@ -29,7 +29,8 @@ class ComputeKernel;
 enum class BackendType {
   None,  // CPU fallback
   Metal, // Apple Metal
-  CUDA   // NVIDIA CUDA (future)
+  CUDA,  // NVIDIA CUDA (future)
+  ROCm   // AMD ROCm/HIP
 };
 
 // Buffer usage hints for optimal memory allocation

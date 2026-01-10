@@ -8,10 +8,11 @@
   All GPU operations gracefully fall back to CPU.
 */
 
-#ifndef USE_METAL
+#if !defined(USE_METAL) && !defined(USE_ROCM)
 
 #include "backend.h"
 #include <chrono>
+#include <cstring>
 #include <iostream>
 
 namespace MetalFish {
@@ -161,4 +162,4 @@ double ScopedTimer::elapsed_ms() const {
 } // namespace GPU
 } // namespace MetalFish
 
-#endif // !USE_METAL
+#endif // !USE_METAL && !USE_ROCM

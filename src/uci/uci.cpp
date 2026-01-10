@@ -671,6 +671,9 @@ void UCIEngine::gpu_info() {
     case GPU::BackendType::CUDA:
       ss << "CUDA";
       break;
+    case GPU::BackendType::ROCm:
+      ss << "ROCm";
+      break;
     default:
       ss << "None";
       break;
