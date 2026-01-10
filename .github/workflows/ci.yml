@@ -1,5 +1,7 @@
 # MetalFish CI/CD Pipeline
-# Build and test the GPU-accelerated chess engine on macOS with Metal
+# Build and test the GPU-accelerated chess engine across platforms
+# - macOS: Metal GPU acceleration
+# - Ubuntu/Windows: CUDA GPU support ready (uses larger runners for future GPU workloads)
 
 name: MetalFish CI
 
@@ -15,7 +17,7 @@ env:
 jobs:
   build-and-test:
     name: Build & Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     
     permissions:
       contents: read
@@ -26,17 +28,23 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - os: ubuntu-latest
+            runner: ubuntu-latest-4-cores
             artifact_name: metalfish-ubuntu
             executable: metalfish
             use_metal: OFF
+            use_cuda: OFF
           - os: windows-latest
+            runner: windows-latest-8-cores
             artifact_name: metalfish-windows
             executable: metalfish.exe
             use_metal: OFF
+            use_cuda: OFF
           - os: macos-latest
+            runner: macos-latest
             artifact_name: metalfish-macos
             executable: metalfish
             use_metal: ON
+            use_cuda: OFF
 
     steps:
       - name: Checkout repository
@@ -67,6 +75,14 @@ jobs:
           echo ""
           echo "CMake version:"
           cmake --version
+          echo ""
+          echo "GPU Information:"
+          if command -v nvidia-smi &> /dev/null; then
+            nvidia-smi || echo "nvidia-smi found but failed to run"
+          else
+            echo "No NVIDIA GPU detected (nvidia-smi not found)"
+            echo "CUDA support will be available when GPU runners are used"
+          fi
 
       - name: Setup environment (Windows)
         if: runner.os == 'Windows'
@@ -76,6 +92,15 @@ jobs:
           echo ""
           echo "CMake version:"
           cmake --version
+          echo ""
+          echo "GPU Information:"
+          if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+            nvidia-smi
+          } else {
+            Write-Host "No NVIDIA GPU detected (nvidia-smi not found)"
+            Write-Host "CUDA support will be available when GPU runners are used"
+          }
+        shell: pwsh
 
       - name: Download NNUE files
         run: |
@@ -89,6 +114,7 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DUSE_METAL=${{ matrix.use_metal }} \
+            -DUSE_CUDA=${{ matrix.use_cuda }} \
             -DBUILD_TESTS=ON
         shell: bash
 
