@@ -291,6 +291,8 @@ if(BUILD_TESTS)
       tests/test_movegen.cpp
       tests/test_search.cpp
       tests/test_metal.cpp
+      tests/test_rocm.cpp
+      tests/test_rocm_unit.cpp
       tests/test_gpu_nnue.cpp)
 
   add_executable(

@@ -15,6 +15,8 @@ bool test_position();
 bool test_movegen();
 bool test_search();
 bool test_metal();
+bool test_rocm();
+bool run_rocm_unit_tests();
 bool run_all_gpu_tests();
 
 int main() {
@@ -31,9 +33,14 @@ int main() {
   };
 
   Test tests[] = {
-      {"Bitboard", test_bitboard},       {"Position", test_position},
-      {"Move Generation", test_movegen}, {"Search", test_search},
-      {"Metal GPU", test_metal},         {"GPU NNUE", run_all_gpu_tests}};
+      {"Bitboard", test_bitboard},
+      {"Position", test_position},
+      {"Move Generation", test_movegen},
+      {"Search", test_search},
+      {"Metal GPU", test_metal},
+      {"ROCm GPU", test_rocm},
+      {"ROCm Unit Tests", run_rocm_unit_tests},
+      {"GPU NNUE", run_all_gpu_tests}};
 
   for (const auto &test : tests) {
     std::cout << "Running " << test.name << " tests... ";
