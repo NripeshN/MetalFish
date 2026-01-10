@@ -3,9 +3,6 @@
   Copyright (C) 2025 Nripesh Niketan
 
   GPU NNUE Weight Manager
-
-  This module handles loading NNUE weights to GPU memory and provides
-  the interface for GPU-accelerated evaluation.
 */
 
 #pragma once
@@ -18,6 +15,7 @@
 #include <vector>
 
 #include "backend.h"
+#include "gpu_constants.h"
 
 // Forward declarations
 namespace MetalFish {
@@ -29,23 +27,6 @@ struct Networks;
 }
 
 namespace MetalFish::GPU {
-
-// NNUE Architecture constants
-#ifndef GPU_NNUE_CONSTANTS_DEFINED
-#define GPU_NNUE_CONSTANTS_DEFINED
-
-constexpr int GPU_FT_DIM_BIG = 1024;
-constexpr int GPU_FT_DIM_SMALL = 128;
-constexpr int GPU_FC0_OUT = 15;
-constexpr int GPU_FC1_OUT = 32;
-constexpr int GPU_PSQT_BUCKETS = 8;
-constexpr int GPU_LAYER_STACKS = 8;
-constexpr int GPU_HALFKA_DIMS = 45056;
-constexpr int GPU_THREAT_DIMS = 1536;
-constexpr int GPU_MAX_BATCH_SIZE = 256;
-constexpr int GPU_MAX_FEATURES = 32;
-
-#endif // GPU_NNUE_CONSTANTS_DEFINED
 
 /**
  * GPU Network Weights

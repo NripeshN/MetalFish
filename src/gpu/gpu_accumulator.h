@@ -3,18 +3,6 @@
   Copyright (C) 2025 Nripesh Niketan
 
   GPU Accumulator Cache
-
-  This module provides GPU-accelerated accumulator management for NNUE
-  evaluation. It mirrors the CPU AccumulatorStack but uses GPU memory and
-  compute for:
-  - Full accumulator computation from scratch
-  - Incremental updates for move-by-move evaluation
-  - Batch accumulator computation for parallel search
-
-  Key optimizations:
-  - Unified memory for zero-copy access
-  - Incremental updates minimize computation
-  - Batch processing for parallel search threads
 */
 
 #pragma once
@@ -27,6 +15,7 @@
 
 #include "backend.h"
 #include "core/types.h"
+#include "gpu_constants.h"
 #include "gpu_nnue_integration.h"
 
 namespace MetalFish {

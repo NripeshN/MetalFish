@@ -3,8 +3,6 @@
   Copyright (C) 2025 Nripesh Niketan
 
   GPU NNUE Evaluation Header (Legacy interface)
-
-  This provides backward compatibility. New code should use gpu_nnue.h
 */
 
 #pragma once
@@ -15,20 +13,13 @@
 #include <vector>
 
 #include "backend.h"
+#include "gpu_constants.h"
 
 namespace MetalFish {
 class Position;
 }
 
 namespace MetalFish::GPU {
-
-// Legacy constants
-constexpr int NNUE_FEATURE_DIM_BIG = 1024;
-constexpr int NNUE_FEATURE_DIM_SMALL = 128;
-constexpr int MAX_BATCH_SIZE = 256;
-constexpr int MAX_FEATURES_PER_POSITION = 32;
-constexpr int HALFKA_DIMS = 45056;
-constexpr int PSQT_DIMS = 8;
 
 // Legacy batch structure
 struct EvalBatch {

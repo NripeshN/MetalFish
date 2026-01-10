@@ -3,13 +3,6 @@
   Copyright (C) 2025 Nripesh Niketan
 
   GPU NNUE Integration Header
-
-  This module provides full integration between the CPU NNUE implementation
-  and GPU acceleration. It handles:
-  - Weight extraction from CPU networks
-  - GPU buffer management
-  - Batch evaluation dispatch
-  - Seamless CPU fallback
 */
 
 #pragma once
@@ -23,6 +16,7 @@
 
 #include "backend.h"
 #include "core/types.h"
+#include "gpu_constants.h"
 
 namespace MetalFish {
 class Position;
@@ -34,31 +28,6 @@ template <typename Arch, typename Transformer> class Network;
 } // namespace MetalFish
 
 namespace MetalFish::GPU {
-
-// ============================================================================
-// Constants (use from gpu_nnue.h if already defined)
-// ============================================================================
-
-#ifndef GPU_NNUE_CONSTANTS_DEFINED
-#define GPU_NNUE_CONSTANTS_DEFINED
-
-// Network architecture
-constexpr int GPU_FT_DIM_BIG = 1024;
-constexpr int GPU_FT_DIM_SMALL = 128;
-constexpr int GPU_FC0_OUT = 15;
-constexpr int GPU_FC1_OUT = 32;
-constexpr int GPU_PSQT_BUCKETS = 8;
-constexpr int GPU_LAYER_STACKS = 8;
-
-// Feature dimensions
-constexpr int GPU_HALFKA_DIMS = 45056;
-constexpr int GPU_THREAT_DIMS = 1536;
-
-// Batch processing
-constexpr int GPU_MAX_BATCH_SIZE = 256;
-constexpr int GPU_MAX_FEATURES = 32;
-
-#endif // GPU_NNUE_CONSTANTS_DEFINED
 
 // ============================================================================
 // GPU Position Representation
