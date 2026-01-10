@@ -17,6 +17,9 @@ jobs:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     
+    permissions:
+      contents: read
+    
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-14]
@@ -148,6 +151,9 @@ jobs:
   lint-and-format:
     name: Lint & Format Check
     runs-on: macos-14
+    
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -166,6 +172,9 @@ jobs:
     needs: [build-and-test]
     runs-on: macos-14
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
