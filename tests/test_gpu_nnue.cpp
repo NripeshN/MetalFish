@@ -3,7 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Comprehensive GPU NNUE Test Suite
-  
+
   Tests all GPU-accelerated NNUE functionality including:
   - Feature extraction
   - Feature transformation
@@ -485,9 +485,8 @@ void run_gpu_benchmarks() {
           double bw = (3.0 * size * sizeof(float) * iters) / (time / 1000.0) /
                       (1024.0 * 1024.0 * 1024.0);
 
-          std::cout << "    Size " << std::setw(8) << size << ": "
-                    << std::fixed << std::setprecision(2) << bw << " GB/s"
-                    << std::endl;
+          std::cout << "    Size " << std::setw(8) << size << ": " << std::fixed
+                    << std::setprecision(2) << bw << " GB/s" << std::endl;
         }
       }
     }
@@ -544,7 +543,8 @@ void run_cpu_gpu_comparison() {
             << std::endl;
   std::cout << "    GPU Memory: " << manager.gpu_memory_used() / 1024 << " KB"
             << std::endl;
-  std::cout << "    GPU Evaluations: " << manager.gpu_evaluations() << std::endl;
+  std::cout << "    GPU Evaluations: " << manager.gpu_evaluations()
+            << std::endl;
   std::cout << "    CPU Fallbacks: " << manager.cpu_fallback_evaluations()
             << std::endl;
 }
@@ -570,8 +570,8 @@ bool run_all_gpu_tests() {
   run_cpu_gpu_comparison();
 
   std::cout << "\n============================================" << std::endl;
-  std::cout << "   Test Results: " << (all_passed ? "ALL PASSED" : "SOME FAILED")
-            << std::endl;
+  std::cout << "   Test Results: "
+            << (all_passed ? "ALL PASSED" : "SOME FAILED") << std::endl;
   std::cout << "============================================" << std::endl;
 
   return all_passed;
