@@ -78,10 +78,71 @@ bool test_cuda() {
 
     // Test memory tracking
     size_t allocated = gpu.allocated_memory();
-    std::cout << "Allocated Memory: " << (allocated / 1024) << " KB"
-              << std::endl;
-    assert(allocated > 0);
+    assert(allocated >= 4096 + test_data.size() * sizeof(float));
 
+    std::cout << "Allocated GPU memory: " << allocated << " bytes" << std::endl;
+
+    // Test command encoder creation
+    auto encoder_test = gpu.create_encoder();
+    assert(encoder_test != nullptr);
+
+    std::cout << "GPU Backend tests passed!" << std::endl;
+
+    // ========================================
+    // Test GPU Operations (Batch SEE, etc.)
+    // ========================================
+    std::cout << "\n=== Testing GPU Operations ===" << std::endl;
+
+    // Initialize GPU operations
+    GPU::GPUOperations &ops = GPU::gpu_ops();
+    if (ops.initialize()) {
+      std::cout << "GPU Operations initialized" << std::endl;
+      std::cout << "  SEE available: " << (ops.see_available() ? "Yes" : "No")
+                << std::endl;
+      std::cout << "  Scorer available: "
+                << (ops.scorer_available() ? "Yes" : "No") << std::endl;
+      std::cout << "  Total GPU memory: " << ops.total_gpu_memory() / 1024
+                << " KB" << std::endl;
+    } else {
+      std::cout << "GPU Operations not available (OK for CI)" << std::endl;
+    }
+
+    // Test NNUE GPU evaluator initialization
+    std::cout << "\n=== Testing GPU NNUE ===" << std::endl;
+    GPU::NNUEEvaluator &nnue = GPU::gpu_nnue();
+    std::cout << "GPU NNUE evaluator created" << std::endl;
+
+    std::cout << "\n=== Testing GPU NNUE Integration ===" << std::endl;
+    {
+      auto &manager = GPU::gpu_nnue_manager();
+      if (manager.initialize()) {
+        std::cout << "GPU NNUE Manager: Initialized" << std::endl;
+
+        // Test batch creation
+        GPU::GPUEvalBatch batch;
+        batch.reserve(16);
+
+        // Create a simple test position
+        StateListPtr states(new std::deque<StateInfo>(1));
+        Position pos;
+        pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                false, &states->back());
+
+        // Add position to batch
+        batch.add_position(pos);
+        std::cout << "  Batch created with " << batch.count << " position(s)"
+                  << std::endl;
+
+        // Status
+        std::cout << manager.status_string();
+      } else {
+        std::cout
+            << "GPU NNUE Manager: Not initialized (expected without networks)"
+            << std::endl;
+      }
+    }
+
+    std::cout << "\n=== Testing Shader Compilation ===" << std::endl;
     // Test kernel compilation (simple test kernel)
     const char *test_kernel_source = R"(
       extern "C" __global__ void test_kernel(float* input, float* output, int n) {
@@ -92,63 +153,64 @@ bool test_cuda() {
       }
     )";
 
-    bool compiled = gpu.compile_library("test_lib", test_kernel_source);
+    bool compiled = gpu.compile_library("test", test_kernel_source);
     if (compiled) {
-      std::cout << "CUDA kernel compilation: Success" << std::endl;
+      std::cout << "Shader compilation: SUCCESS" << std::endl;
 
-      // Test kernel creation
-      auto kernel = gpu.create_kernel("test_kernel", "test_lib");
-      assert(kernel != nullptr);
-      assert(kernel->valid());
-      std::cout << "Kernel name: " << kernel->name() << std::endl;
-      std::cout << "Max threads per block: "
-                << kernel->max_threads_per_threadgroup() << std::endl;
+      // Try to create kernel from compiled library
+      auto test_kernel = gpu.create_kernel("test_kernel", "test");
+      if (test_kernel && test_kernel->valid()) {
+        std::cout << "Kernel creation: SUCCESS" << std::endl;
+        std::cout << "  Max threads per threadgroup: "
+                  << test_kernel->max_threads_per_threadgroup() << std::endl;
 
-      // Test kernel execution
-      const int N = 1024;
-      std::vector<float> input(N);
-      for (int i = 0; i < N; i++) {
-        input[i] = static_cast<float>(i);
-      }
+        // Test kernel execution
+        const int count = 256;
+        std::vector<float> input_data(count);
+        for (int i = 0; i < count; i++) {
+          input_data[i] = static_cast<float>(i);
+        }
 
-      auto input_buf = gpu.create_buffer(input);
-      auto output_buf = gpu.create_buffer(N * sizeof(float));
+        auto input_buf = gpu.create_buffer(input_data);
+        auto output_buf = gpu.create_buffer(count * sizeof(float));
 
-      assert(input_buf != nullptr);
-      assert(output_buf != nullptr);
+        auto enc = gpu.create_encoder();
+        enc->set_kernel(test_kernel.get());
+        enc->set_buffer(input_buf.get(), 0);
+        enc->set_buffer(output_buf.get(), 1);
+        enc->set_value(count, 2);
+        enc->dispatch_threads(count);
 
-      auto encoder = gpu.create_encoder();
-      encoder->set_kernel(kernel.get());
-      encoder->set_buffer(input_buf.get(), 0);
-      encoder->set_buffer(output_buf.get(), 1);
-      encoder->set_value(N, 2);
-      encoder->dispatch_threads(N);
+        gpu.submit_and_wait(enc.get());
 
-      gpu.submit_and_wait(encoder.get());
-
-      // Verify results
-      if (gpu.has_unified_memory()) {
-        const float *output = output_buf->as<float>();
+        // Verify results
+        float *results = output_buf->as<float>();
         bool correct = true;
-        for (int i = 0; i < 10 && i < N; i++) {
-          if (output[i] != input[i] * 2.0f) {
+        for (int i = 0; i < count && correct; i++) {
+          if (results[i] != float(i) * 2.0f) {
             correct = false;
-            std::cout << "Mismatch at " << i << ": expected " << input[i] * 2.0f
-                      << ", got " << output[i] << std::endl;
+            std::cerr << "Mismatch at " << i << ": expected " << float(i) * 2.0f
+                      << ", got " << results[i] << std::endl;
           }
         }
+
         if (correct) {
-          std::cout << "Kernel execution test: PASSED" << std::endl;
+          std::cout << "Kernel execution: SUCCESS (verified " << count
+                    << " values)" << std::endl;
         } else {
-          std::cout << "Kernel execution test: FAILED" << std::endl;
+          std::cerr << "Kernel execution: FAILED" << std::endl;
+          return false;
         }
+      } else {
+        std::cerr << "Kernel creation: FAILED" << std::endl;
+        return false;
       }
     } else {
-      std::cout << "CUDA kernel compilation: Failed (may not be available)"
+      std::cout << "Shader compilation: SKIPPED (may not be available in CI)"
                 << std::endl;
     }
 
-    std::cout << "\n=== CUDA Backend Tests PASSED ===" << std::endl;
+    std::cout << "\nAll CUDA tests passed!" << std::endl;
     return true;
 
   } catch (const std::exception &e) {
