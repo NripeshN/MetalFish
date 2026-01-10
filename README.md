@@ -49,15 +49,20 @@ MetalFish is a chess engine designed to leverage Apple Silicon's unified memory 
 - Pondering
 - Time management with sudden death and increment support
 
-### GPU Acceleration (Metal)
+### GPU Acceleration (Metal & CUDA)
 
-MetalFish includes a comprehensive GPU acceleration framework designed for Apple Silicon's unified memory architecture:
+MetalFish includes a comprehensive GPU acceleration framework with support for both Apple Metal (Apple Silicon) and NVIDIA CUDA:
 
 **Architecture:**
-- Backend-agnostic GPU interface (designed for future CUDA support)
-- Zero-copy CPU/GPU data sharing via unified memory
+- Backend-agnostic GPU interface supporting multiple backends
+- Zero-copy CPU/GPU data sharing via unified memory (when available)
 - Runtime shader compilation for flexibility
 - Batch processing for efficient GPU utilization
+
+**Supported Backends:**
+- **Metal**: Optimized for Apple Silicon unified memory architecture
+- **CUDA**: Support for NVIDIA GPUs (compute capability 6.0+)
+- **CPU Fallback**: Graceful fallback when no GPU is available
 
 **GPU-Accelerated Operations:**
 - NNUE batch evaluation infrastructure
@@ -84,9 +89,10 @@ metalfish/
 │   │   ├── backend.h   # Abstract GPU interface
 │   │   ├── nnue_eval   # GPU NNUE evaluation
 │   │   ├── batch_ops   # Batch GPU operations
-│   │   └── metal/      # Metal backend implementation
-│   │       └── kernels/# Metal compute shaders
-│   ├── metal/          # Legacy Metal device management
+│   │   ├── metal/      # Metal backend implementation
+│   │   │   └── kernels/# Metal compute shaders
+│   │   └── cuda/       # CUDA backend implementation
+│   │       └── kernels/# CUDA compute kernels
 │   └── syzygy/         # Tablebase probing
 ├── external/           # External dependencies (metal-cpp)
 ├── tests/              # Test suite
@@ -97,16 +103,38 @@ metalfish/
 
 ### Requirements
 
+**For Metal (macOS):**
 - macOS 12.0 or later
 - Xcode Command Line Tools
 - CMake 3.20 or later
 - Apple Silicon (M1/M2/M3/M4) recommended
 
+**For CUDA (Linux/Windows):**
+- CUDA Toolkit 11.0 or later
+- NVIDIA GPU with compute capability 6.0+ (Pascal or newer)
+- CMake 3.20 or later
+- C++ compiler with C++20 support
+
 ### Build Instructions
 
+**With Metal (macOS):**
 ```bash
 cd metalfish
 cmake -B build -DUSE_METAL=ON
+cmake --build build -j8
+```
+
+**With CUDA (Linux/Windows):**
+```bash
+cd metalfish
+cmake -B build -DUSE_CUDA=ON
+cmake --build build -j8
+```
+
+**CPU only (no GPU):**
+```bash
+cd metalfish
+cmake -B build -DUSE_METAL=OFF -DUSE_CUDA=OFF
 cmake --build build -j8
 ```
 
@@ -115,6 +143,7 @@ cmake --build build -j8
 | Option | Default | Description |
 |--------|---------|-------------|
 | USE_METAL | ON (macOS) | Enable Metal GPU acceleration |
+| USE_CUDA | OFF | Enable CUDA GPU acceleration |
 | BUILD_TESTS | ON | Build test suite |
 | BUILD_GPU_BENCHMARK | OFF | Build GPU benchmark utility |
 
@@ -200,12 +229,13 @@ Current GPU acceleration status:
 | Feature | Status |
 |---------|--------|
 | GPU Backend Abstraction | Complete |
+| Metal Backend | Complete |
+| CUDA Backend | Initial Implementation |
 | Unified Memory Support | Complete |
 | Runtime Shader Compilation | Complete |
 | Batch SEE Infrastructure | Complete |
 | NNUE Batch Evaluation | In Progress |
 | Search Integration | Planned |
-| CUDA Backend | Planned |
 
 ## Testing
 
