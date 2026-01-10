@@ -13,9 +13,9 @@
 #include "core/position.h"
 #include "eval/nnue/network.h"
 
-#include <iostream>
 #include <chrono>
 #include <cstring>
+#include <iostream>
 
 namespace MetalFish::GPU {
 
@@ -24,20 +24,20 @@ namespace MetalFish::GPU {
 // ============================================================================
 
 void GPUPositionBatch::clear() {
-    white_features.clear();
-    black_features.clear();
-    feature_counts.clear();
-    buckets.clear();
-    stm.clear();
-    count = 0;
+  white_features.clear();
+  black_features.clear();
+  feature_counts.clear();
+  buckets.clear();
+  stm.clear();
+  count = 0;
 }
 
 void GPUPositionBatch::reserve(int n, int features_per_pos) {
-    white_features.reserve(n * features_per_pos);
-    black_features.reserve(n * features_per_pos);
-    feature_counts.reserve(n);
-    buckets.reserve(n);
-    stm.reserve(n);
+  white_features.reserve(n * features_per_pos);
+  black_features.reserve(n * features_per_pos);
+  feature_counts.reserve(n);
+  buckets.reserve(n);
+  stm.reserve(n);
 }
 
 // ============================================================================
@@ -47,83 +47,95 @@ void GPUPositionBatch::reserve(int n, int features_per_pos) {
 GPUNNUEWeightManager::GPUNNUEWeightManager() = default;
 GPUNNUEWeightManager::~GPUNNUEWeightManager() = default;
 
-bool GPUNNUEWeightManager::allocate_network_buffers(GPUNetworkWeights& weights, 
-                                                    int hidden_dim, bool has_threats) {
-    if (!gpu_available()) return false;
-    
-    auto& backend = gpu();
-    
-    weights.hidden_dim = hidden_dim;
-    weights.has_threats = has_threats;
-    weights.layers.resize(GPU_LAYER_STACKS);
-    
-    // Feature transformer buffers
-    weights.ft_weights = backend.create_buffer(GPU_HALFKA_DIMS * hidden_dim * sizeof(int16_t));
-    weights.ft_biases = backend.create_buffer(hidden_dim * sizeof(int16_t));
-    weights.ft_psqt = backend.create_buffer(GPU_HALFKA_DIMS * GPU_PSQT_BUCKETS * sizeof(int32_t));
-    
-    if (!weights.ft_weights || !weights.ft_biases || !weights.ft_psqt) {
-        return false;
+bool GPUNNUEWeightManager::allocate_network_buffers(GPUNetworkWeights &weights,
+                                                    int hidden_dim,
+                                                    bool has_threats) {
+  if (!gpu_available())
+    return false;
+
+  auto &backend = gpu();
+
+  weights.hidden_dim = hidden_dim;
+  weights.has_threats = has_threats;
+  weights.layers.resize(GPU_LAYER_STACKS);
+
+  // Feature transformer buffers
+  weights.ft_weights =
+      backend.create_buffer(GPU_HALFKA_DIMS * hidden_dim * sizeof(int16_t));
+  weights.ft_biases = backend.create_buffer(hidden_dim * sizeof(int16_t));
+  weights.ft_psqt = backend.create_buffer(GPU_HALFKA_DIMS * GPU_PSQT_BUCKETS *
+                                          sizeof(int32_t));
+
+  if (!weights.ft_weights || !weights.ft_biases || !weights.ft_psqt) {
+    return false;
+  }
+
+  if (has_threats) {
+    weights.threat_weights =
+        backend.create_buffer(GPU_THREAT_DIMS * hidden_dim * sizeof(int8_t));
+    weights.threat_psqt = backend.create_buffer(
+        GPU_THREAT_DIMS * GPU_PSQT_BUCKETS * sizeof(int32_t));
+    if (!weights.threat_weights || !weights.threat_psqt) {
+      return false;
     }
-    
-    if (has_threats) {
-        weights.threat_weights = backend.create_buffer(GPU_THREAT_DIMS * hidden_dim * sizeof(int8_t));
-        weights.threat_psqt = backend.create_buffer(GPU_THREAT_DIMS * GPU_PSQT_BUCKETS * sizeof(int32_t));
-        if (!weights.threat_weights || !weights.threat_psqt) {
-            return false;
-        }
+  }
+
+  // FC layer buffers for each bucket
+  for (int bucket = 0; bucket < GPU_LAYER_STACKS; bucket++) {
+    auto &layer = weights.layers[bucket];
+
+    layer.fc0_weights = backend.create_buffer(
+        hidden_dim * 2 * (GPU_FC0_OUT + 1) * sizeof(int16_t));
+    layer.fc0_biases =
+        backend.create_buffer((GPU_FC0_OUT + 1) * sizeof(int32_t));
+    layer.fc1_weights =
+        backend.create_buffer(GPU_FC0_OUT * 2 * GPU_FC1_OUT * sizeof(int16_t));
+    layer.fc1_biases = backend.create_buffer(GPU_FC1_OUT * sizeof(int32_t));
+    layer.fc2_weights = backend.create_buffer(GPU_FC1_OUT * sizeof(int16_t));
+    layer.fc2_biases = backend.create_buffer(sizeof(int32_t));
+
+    if (!layer.fc0_weights || !layer.fc0_biases || !layer.fc1_weights ||
+        !layer.fc1_biases || !layer.fc2_weights || !layer.fc2_biases) {
+      return false;
     }
-    
-    // FC layer buffers for each bucket
-    for (int bucket = 0; bucket < GPU_LAYER_STACKS; bucket++) {
-        auto& layer = weights.layers[bucket];
-        
-        layer.fc0_weights = backend.create_buffer(hidden_dim * 2 * (GPU_FC0_OUT + 1) * sizeof(int16_t));
-        layer.fc0_biases = backend.create_buffer((GPU_FC0_OUT + 1) * sizeof(int32_t));
-        layer.fc1_weights = backend.create_buffer(GPU_FC0_OUT * 2 * GPU_FC1_OUT * sizeof(int16_t));
-        layer.fc1_biases = backend.create_buffer(GPU_FC1_OUT * sizeof(int32_t));
-        layer.fc2_weights = backend.create_buffer(GPU_FC1_OUT * sizeof(int16_t));
-        layer.fc2_biases = backend.create_buffer(sizeof(int32_t));
-        
-        if (!layer.fc0_weights || !layer.fc0_biases ||
-            !layer.fc1_weights || !layer.fc1_biases ||
-            !layer.fc2_weights || !layer.fc2_biases) {
-            return false;
-        }
-    }
-    
-    weights.valid = true;
-    return true;
+  }
+
+  weights.valid = true;
+  return true;
 }
 
-bool GPUNNUEWeightManager::load_networks(const Eval::NNUE::Networks& networks) {
-    std::cout << "[GPU NNUE] Loading networks to GPU..." << std::endl;
-    
-    // Allocate buffers for big network
-    if (!allocate_network_buffers(big_weights_, GPU_FT_DIM_BIG, true)) {
-        std::cerr << "[GPU NNUE] Failed to allocate big network buffers" << std::endl;
-        return false;
-    }
-    std::cout << "[GPU NNUE] Big network buffers allocated" << std::endl;
-    
-    // Allocate buffers for small network
-    if (!allocate_network_buffers(small_weights_, GPU_FT_DIM_SMALL, false)) {
-        std::cerr << "[GPU NNUE] Failed to allocate small network buffers" << std::endl;
-        return false;
-    }
-    std::cout << "[GPU NNUE] Small network buffers allocated" << std::endl;
-    
-    // Note: Actual weight copying would require access to network internals
-    // For now, buffers are allocated but not filled with actual weights
-    // This allows the infrastructure to be tested
-    
-    std::cout << "[GPU NNUE] Networks loaded: " << gpu_memory_used() / 1024 << " KB" << std::endl;
-    return true;
+bool GPUNNUEWeightManager::load_networks(const Eval::NNUE::Networks &networks) {
+  std::cout << "[GPU NNUE] Loading networks to GPU..." << std::endl;
+
+  // Allocate buffers for big network
+  if (!allocate_network_buffers(big_weights_, GPU_FT_DIM_BIG, true)) {
+    std::cerr << "[GPU NNUE] Failed to allocate big network buffers"
+              << std::endl;
+    return false;
+  }
+  std::cout << "[GPU NNUE] Big network buffers allocated" << std::endl;
+
+  // Allocate buffers for small network
+  if (!allocate_network_buffers(small_weights_, GPU_FT_DIM_SMALL, false)) {
+    std::cerr << "[GPU NNUE] Failed to allocate small network buffers"
+              << std::endl;
+    return false;
+  }
+  std::cout << "[GPU NNUE] Small network buffers allocated" << std::endl;
+
+  // Note: Actual weight copying would require access to network internals
+  // For now, buffers are allocated but not filled with actual weights
+  // This allows the infrastructure to be tested
+
+  std::cout << "[GPU NNUE] Networks loaded: " << gpu_memory_used() / 1024
+            << " KB" << std::endl;
+  return true;
 }
 
 size_t GPUNNUEWeightManager::gpu_memory_used() const {
-    if (!gpu_available()) return 0;
-    return gpu().allocated_memory();
+  if (!gpu_available())
+    return 0;
+  return gpu().allocated_memory();
 }
 
 // ============================================================================
@@ -133,33 +145,33 @@ size_t GPUNNUEWeightManager::gpu_memory_used() const {
 GPUNNUEBatchEvaluator::GPUNNUEBatchEvaluator() = default;
 GPUNNUEBatchEvaluator::~GPUNNUEBatchEvaluator() = default;
 
-bool GPUNNUEBatchEvaluator::initialize(GPUNNUEWeightManager& weights) {
-    if (!gpu_available()) {
-        std::cerr << "[GPU NNUE Eval] GPU not available" << std::endl;
-        return false;
-    }
-    
-    weights_ = &weights;
-    
-    if (!compile_kernels()) {
-        std::cerr << "[GPU NNUE Eval] Failed to compile kernels" << std::endl;
-        return false;
-    }
-    
-    if (!allocate_buffers(256)) {
-        std::cerr << "[GPU NNUE Eval] Failed to allocate buffers" << std::endl;
-        return false;
-    }
-    
-    initialized_ = true;
-    std::cout << "[GPU NNUE Eval] Initialized successfully" << std::endl;
-    return true;
+bool GPUNNUEBatchEvaluator::initialize(GPUNNUEWeightManager &weights) {
+  if (!gpu_available()) {
+    std::cerr << "[GPU NNUE Eval] GPU not available" << std::endl;
+    return false;
+  }
+
+  weights_ = &weights;
+
+  if (!compile_kernels()) {
+    std::cerr << "[GPU NNUE Eval] Failed to compile kernels" << std::endl;
+    return false;
+  }
+
+  if (!allocate_buffers(256)) {
+    std::cerr << "[GPU NNUE Eval] Failed to allocate buffers" << std::endl;
+    return false;
+  }
+
+  initialized_ = true;
+  std::cout << "[GPU NNUE Eval] Initialized successfully" << std::endl;
+  return true;
 }
 
 bool GPUNNUEBatchEvaluator::compile_kernels() {
-    auto& backend = gpu();
-    
-    static const char* EVAL_SHADER = R"(
+  auto &backend = gpu();
+
+  static const char *EVAL_SHADER = R"(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -273,229 +285,233 @@ kernel void gpu_nnue_forward(
     }
 }
 )";
-    
-    if (!backend.compile_library("gpu_nnue_eval", EVAL_SHADER)) {
-        std::cerr << "[GPU NNUE Eval] Failed to compile shader" << std::endl;
-        return false;
-    }
-    
-    ft_kernel_ = backend.create_kernel("gpu_feature_transform", "gpu_nnue_eval");
-    forward_kernel_ = backend.create_kernel("gpu_nnue_forward", "gpu_nnue_eval");
-    
-    if (!ft_kernel_ || !ft_kernel_->valid()) {
-        std::cerr << "[GPU NNUE Eval] Failed to create feature transform kernel" << std::endl;
-        return false;
-    }
-    
-    if (!forward_kernel_ || !forward_kernel_->valid()) {
-        std::cerr << "[GPU NNUE Eval] Failed to create forward kernel" << std::endl;
-        return false;
-    }
-    
-    std::cout << "[GPU NNUE Eval] Kernels compiled successfully" << std::endl;
-    return true;
+
+  if (!backend.compile_library("gpu_nnue_eval", EVAL_SHADER)) {
+    std::cerr << "[GPU NNUE Eval] Failed to compile shader" << std::endl;
+    return false;
+  }
+
+  ft_kernel_ = backend.create_kernel("gpu_feature_transform", "gpu_nnue_eval");
+  forward_kernel_ = backend.create_kernel("gpu_nnue_forward", "gpu_nnue_eval");
+
+  if (!ft_kernel_ || !ft_kernel_->valid()) {
+    std::cerr << "[GPU NNUE Eval] Failed to create feature transform kernel"
+              << std::endl;
+    return false;
+  }
+
+  if (!forward_kernel_ || !forward_kernel_->valid()) {
+    std::cerr << "[GPU NNUE Eval] Failed to create forward kernel" << std::endl;
+    return false;
+  }
+
+  std::cout << "[GPU NNUE Eval] Kernels compiled successfully" << std::endl;
+  return true;
 }
 
 bool GPUNNUEBatchEvaluator::allocate_buffers(int max_batch_size) {
-    auto& backend = gpu();
-    
-    const int max_features = max_batch_size * 64;
-    const int max_hidden = GPU_FT_DIM_BIG;
-    
-    features_buffer_ = backend.create_buffer(max_features * sizeof(int32_t));
-    feature_offsets_buffer_ = backend.create_buffer(max_batch_size * sizeof(int32_t));
-    accumulators_buffer_ = backend.create_buffer(max_batch_size * 2 * max_hidden * sizeof(int32_t));
-    output_buffer_ = backend.create_buffer(max_batch_size * sizeof(int32_t));
-    
-    if (!features_buffer_ || !feature_offsets_buffer_ || 
-        !accumulators_buffer_ || !output_buffer_) {
-        return false;
-    }
-    
-    std::cout << "[GPU NNUE Eval] Buffers allocated: " 
-              << backend.allocated_memory() / 1024 << " KB" << std::endl;
-    return true;
+  auto &backend = gpu();
+
+  const int max_features = max_batch_size * 64;
+  const int max_hidden = GPU_FT_DIM_BIG;
+
+  features_buffer_ = backend.create_buffer(max_features * sizeof(int32_t));
+  feature_offsets_buffer_ =
+      backend.create_buffer(max_batch_size * sizeof(int32_t));
+  accumulators_buffer_ =
+      backend.create_buffer(max_batch_size * 2 * max_hidden * sizeof(int32_t));
+  output_buffer_ = backend.create_buffer(max_batch_size * sizeof(int32_t));
+
+  if (!features_buffer_ || !feature_offsets_buffer_ || !accumulators_buffer_ ||
+      !output_buffer_) {
+    return false;
+  }
+
+  std::cout << "[GPU NNUE Eval] Buffers allocated: "
+            << backend.allocated_memory() / 1024 << " KB" << std::endl;
+  return true;
 }
 
-void GPUNNUEBatchEvaluator::add_position(const Position& pos) {
-    int feature_start = batch_.white_features.size();
-    
-    // Extract features from position (simplified HalfKA)
-    Square wksq = pos.square<KING>(WHITE);
-    Square bksq = pos.square<KING>(BLACK);
-    
-    for (Square s = SQ_A1; s <= SQ_H8; ++s) {
-        Piece p = pos.piece_on(s);
-        if (p != NO_PIECE && type_of(p) != KING) {
-            Color pc = color_of(p);
-            PieceType pt = type_of(p);
-            
-            // Simplified feature index
-            int white_feature = int(wksq) * 640 + int(pc) * 320 + int(pt - 1) * 64 + int(s);
-            int black_feature = int(flip_rank(bksq)) * 640 + int(~pc) * 320 + int(pt - 1) * 64 + int(flip_rank(s));
-            
-            if (white_feature >= 0 && white_feature < GPU_HALFKA_DIMS) {
-                batch_.white_features.push_back(white_feature);
-            }
-            if (black_feature >= 0 && black_feature < GPU_HALFKA_DIMS) {
-                batch_.black_features.push_back(black_feature);
-            }
-        }
+void GPUNNUEBatchEvaluator::add_position(const Position &pos) {
+  int feature_start = batch_.white_features.size();
+
+  // Extract features from position (simplified HalfKA)
+  Square wksq = pos.square<KING>(WHITE);
+  Square bksq = pos.square<KING>(BLACK);
+
+  for (Square s = SQ_A1; s <= SQ_H8; ++s) {
+    Piece p = pos.piece_on(s);
+    if (p != NO_PIECE && type_of(p) != KING) {
+      Color pc = color_of(p);
+      PieceType pt = type_of(p);
+
+      // Simplified feature index
+      int white_feature =
+          int(wksq) * 640 + int(pc) * 320 + int(pt - 1) * 64 + int(s);
+      int black_feature = int(flip_rank(bksq)) * 640 + int(~pc) * 320 +
+                          int(pt - 1) * 64 + int(flip_rank(s));
+
+      if (white_feature >= 0 && white_feature < GPU_HALFKA_DIMS) {
+        batch_.white_features.push_back(white_feature);
+      }
+      if (black_feature >= 0 && black_feature < GPU_HALFKA_DIMS) {
+        batch_.black_features.push_back(black_feature);
+      }
     }
-    
-    batch_.feature_counts.push_back(batch_.white_features.size());
-    batch_.buckets.push_back((pos.count<ALL_PIECES>() - 1) / 4);
-    batch_.stm.push_back(pos.side_to_move() == WHITE ? 0 : 1);
-    batch_.count++;
+  }
+
+  batch_.feature_counts.push_back(batch_.white_features.size());
+  batch_.buckets.push_back((pos.count<ALL_PIECES>() - 1) / 4);
+  batch_.stm.push_back(pos.side_to_move() == WHITE ? 0 : 1);
+  batch_.count++;
 }
 
-bool GPUNNUEBatchEvaluator::evaluate_big(GPUEvalResults& results) {
-    if (!initialized_ || !weights_ || !weights_->big_network_ready()) {
-        return false;
-    }
-    if (batch_.count < min_batch_size_) {
-        return false;
-    }
-    return dispatch_evaluation(weights_->big_weights(), results);
+bool GPUNNUEBatchEvaluator::evaluate_big(GPUEvalResults &results) {
+  if (!initialized_ || !weights_ || !weights_->big_network_ready()) {
+    return false;
+  }
+  if (batch_.count < min_batch_size_) {
+    return false;
+  }
+  return dispatch_evaluation(weights_->big_weights(), results);
 }
 
-bool GPUNNUEBatchEvaluator::evaluate_small(GPUEvalResults& results) {
-    if (!initialized_ || !weights_ || !weights_->small_network_ready()) {
-        return false;
-    }
-    if (batch_.count < min_batch_size_) {
-        return false;
-    }
-    return dispatch_evaluation(weights_->small_weights(), results);
+bool GPUNNUEBatchEvaluator::evaluate_small(GPUEvalResults &results) {
+  if (!initialized_ || !weights_ || !weights_->small_network_ready()) {
+    return false;
+  }
+  if (batch_.count < min_batch_size_) {
+    return false;
+  }
+  return dispatch_evaluation(weights_->small_weights(), results);
 }
 
-bool GPUNNUEBatchEvaluator::dispatch_evaluation(const GPUNetworkWeights& weights, 
-                                                 GPUEvalResults& results) {
-    auto start = std::chrono::high_resolution_clock::now();
-    
-    auto& backend = gpu();
-    int batch_size = batch_.count;
-    int hidden_dim = weights.hidden_dim;
-    
-    // Upload features
-    std::memcpy(features_buffer_->data(), batch_.white_features.data(),
-                batch_.white_features.size() * sizeof(int32_t));
-    std::memcpy(feature_offsets_buffer_->data(), batch_.feature_counts.data(),
-                batch_.feature_counts.size() * sizeof(int32_t));
-    
-    auto encoder = backend.create_encoder();
-    
-    // Feature transform
-    encoder->set_kernel(ft_kernel_.get());
-    encoder->set_buffer(weights.ft_weights.get(), 0);
-    encoder->set_buffer(weights.ft_biases.get(), 1);
-    encoder->set_buffer(features_buffer_.get(), 2);
-    encoder->set_buffer(feature_offsets_buffer_.get(), 3);
-    encoder->set_buffer(accumulators_buffer_.get(), 4);
-    encoder->set_value(hidden_dim, 5);
-    encoder->set_value(batch_size, 6);
-    encoder->dispatch_threads(hidden_dim, batch_size);
-    encoder->barrier();
-    
-    // Forward pass
-    const auto& layer = weights.layers[0];
-    encoder->set_kernel(forward_kernel_.get());
-    encoder->set_buffer(accumulators_buffer_.get(), 0);
-    encoder->set_buffer(layer.fc0_weights.get(), 1);
-    encoder->set_buffer(layer.fc0_biases.get(), 2);
-    encoder->set_buffer(layer.fc1_weights.get(), 3);
-    encoder->set_buffer(layer.fc1_biases.get(), 4);
-    encoder->set_buffer(layer.fc2_weights.get(), 5);
-    encoder->set_buffer(layer.fc2_biases.get(), 6);
-    encoder->set_buffer(output_buffer_.get(), 7);
-    encoder->set_value(hidden_dim, 8);
-    encoder->set_value(batch_size, 9);
-    encoder->dispatch_threadgroups(batch_size, 1, 1, 64, 1, 1);
-    
-    backend.submit_and_wait(encoder.get());
-    
-    // Read results
-    results.final_scores.resize(batch_size);
-    std::memcpy(results.final_scores.data(), output_buffer_->data(),
-                batch_size * sizeof(int32_t));
-    
-    auto end = std::chrono::high_resolution_clock::now();
-    total_time_ms_ += std::chrono::duration<double, std::milli>(end - start).count();
-    batch_count_++;
-    gpu_evals_ += batch_size;
-    
-    return true;
+bool GPUNNUEBatchEvaluator::dispatch_evaluation(
+    const GPUNetworkWeights &weights, GPUEvalResults &results) {
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto &backend = gpu();
+  int batch_size = batch_.count;
+  int hidden_dim = weights.hidden_dim;
+
+  // Upload features
+  std::memcpy(features_buffer_->data(), batch_.white_features.data(),
+              batch_.white_features.size() * sizeof(int32_t));
+  std::memcpy(feature_offsets_buffer_->data(), batch_.feature_counts.data(),
+              batch_.feature_counts.size() * sizeof(int32_t));
+
+  auto encoder = backend.create_encoder();
+
+  // Feature transform
+  encoder->set_kernel(ft_kernel_.get());
+  encoder->set_buffer(weights.ft_weights.get(), 0);
+  encoder->set_buffer(weights.ft_biases.get(), 1);
+  encoder->set_buffer(features_buffer_.get(), 2);
+  encoder->set_buffer(feature_offsets_buffer_.get(), 3);
+  encoder->set_buffer(accumulators_buffer_.get(), 4);
+  encoder->set_value(hidden_dim, 5);
+  encoder->set_value(batch_size, 6);
+  encoder->dispatch_threads(hidden_dim, batch_size);
+  encoder->barrier();
+
+  // Forward pass
+  const auto &layer = weights.layers[0];
+  encoder->set_kernel(forward_kernel_.get());
+  encoder->set_buffer(accumulators_buffer_.get(), 0);
+  encoder->set_buffer(layer.fc0_weights.get(), 1);
+  encoder->set_buffer(layer.fc0_biases.get(), 2);
+  encoder->set_buffer(layer.fc1_weights.get(), 3);
+  encoder->set_buffer(layer.fc1_biases.get(), 4);
+  encoder->set_buffer(layer.fc2_weights.get(), 5);
+  encoder->set_buffer(layer.fc2_biases.get(), 6);
+  encoder->set_buffer(output_buffer_.get(), 7);
+  encoder->set_value(hidden_dim, 8);
+  encoder->set_value(batch_size, 9);
+  encoder->dispatch_threadgroups(batch_size, 1, 1, 64, 1, 1);
+
+  backend.submit_and_wait(encoder.get());
+
+  // Read results
+  results.final_scores.resize(batch_size);
+  std::memcpy(results.final_scores.data(), output_buffer_->data(),
+              batch_size * sizeof(int32_t));
+
+  auto end = std::chrono::high_resolution_clock::now();
+  total_time_ms_ +=
+      std::chrono::duration<double, std::milli>(end - start).count();
+  batch_count_++;
+  gpu_evals_ += batch_size;
+
+  return true;
 }
 
 double GPUNNUEBatchEvaluator::avg_batch_time_ms() const {
-    return batch_count_ > 0 ? total_time_ms_ / batch_count_ : 0;
+  return batch_count_ > 0 ? total_time_ms_ / batch_count_ : 0;
 }
 
 void GPUNNUEBatchEvaluator::reset_stats() {
-    gpu_evals_ = 0;
-    batch_count_ = 0;
-    total_time_ms_ = 0;
+  gpu_evals_ = 0;
+  batch_count_ = 0;
+  total_time_ms_ = 0;
 }
 
 // ============================================================================
 // GPUNNUEInterface
 // ============================================================================
 
-GPUNNUEInterface& GPUNNUEInterface::instance() {
-    static GPUNNUEInterface inst;
-    return inst;
+GPUNNUEInterface &GPUNNUEInterface::instance() {
+  static GPUNNUEInterface inst;
+  return inst;
 }
 
-bool GPUNNUEInterface::initialize(const Eval::NNUE::Networks& networks) {
-    if (!gpu_available()) {
-        std::cout << "[GPU NNUE] GPU not available" << std::endl;
-        return false;
-    }
-    
-    std::cout << "[GPU NNUE] Initializing..." << std::endl;
-    
-    if (!weights_.load_networks(networks)) {
-        std::cerr << "[GPU NNUE] Failed to load networks" << std::endl;
-        return false;
-    }
-    
-    if (!evaluator_.initialize(weights_)) {
-        std::cerr << "[GPU NNUE] Failed to initialize evaluator" << std::endl;
-        return false;
-    }
-    
-    initialized_ = true;
-    std::cout << "[GPU NNUE] Initialization complete" << std::endl;
-    return true;
+bool GPUNNUEInterface::initialize(const Eval::NNUE::Networks &networks) {
+  if (!gpu_available()) {
+    std::cout << "[GPU NNUE] GPU not available" << std::endl;
+    return false;
+  }
+
+  std::cout << "[GPU NNUE] Initializing..." << std::endl;
+
+  if (!weights_.load_networks(networks)) {
+    std::cerr << "[GPU NNUE] Failed to load networks" << std::endl;
+    return false;
+  }
+
+  if (!evaluator_.initialize(weights_)) {
+    std::cerr << "[GPU NNUE] Failed to initialize evaluator" << std::endl;
+    return false;
+  }
+
+  initialized_ = true;
+  std::cout << "[GPU NNUE] Initialization complete" << std::endl;
+  return true;
 }
 
 std::string GPUNNUEInterface::status_string() const {
-    std::stringstream ss;
-    ss << "GPU NNUE Status:\n";
-    ss << "  Initialized: " << (initialized_ ? "Yes" : "No") << "\n";
-    ss << "  Big Network: " << (weights_.big_network_ready() ? "Ready" : "Not loaded") << "\n";
-    ss << "  Small Network: " << (weights_.small_network_ready() ? "Ready" : "Not loaded") << "\n";
-    ss << "  GPU Memory: " << weights_.gpu_memory_used() / 1024 << " KB\n";
-    if (initialized_) {
-        ss << "  GPU Evals: " << evaluator_.total_gpu_evals() << "\n";
-        ss << "  Batches: " << evaluator_.total_batches() << "\n";
-        ss << "  Avg Batch Time: " << evaluator_.avg_batch_time_ms() << " ms\n";
-    }
-    return ss.str();
+  std::stringstream ss;
+  ss << "GPU NNUE Status:\n";
+  ss << "  Initialized: " << (initialized_ ? "Yes" : "No") << "\n";
+  ss << "  Big Network: "
+     << (weights_.big_network_ready() ? "Ready" : "Not loaded") << "\n";
+  ss << "  Small Network: "
+     << (weights_.small_network_ready() ? "Ready" : "Not loaded") << "\n";
+  ss << "  GPU Memory: " << weights_.gpu_memory_used() / 1024 << " KB\n";
+  if (initialized_) {
+    ss << "  GPU Evals: " << evaluator_.total_gpu_evals() << "\n";
+    ss << "  Batches: " << evaluator_.total_batches() << "\n";
+    ss << "  Avg Batch Time: " << evaluator_.avg_batch_time_ms() << " ms\n";
+  }
+  return ss.str();
 }
 
 // Convenience functions
-bool init_gpu_nnue(const Eval::NNUE::Networks& networks) {
-    return GPUNNUEInterface::instance().initialize(networks);
+bool init_gpu_nnue(const Eval::NNUE::Networks &networks) {
+  return GPUNNUEInterface::instance().initialize(networks);
 }
 
-bool gpu_nnue_ready() {
-    return GPUNNUEInterface::instance().available();
-}
+bool gpu_nnue_ready() { return GPUNNUEInterface::instance().available(); }
 
-GPUNNUEInterface& gpu_nnue_interface() {
-    return GPUNNUEInterface::instance();
-}
+GPUNNUEInterface &gpu_nnue_interface() { return GPUNNUEInterface::instance(); }
 
 } // namespace MetalFish::GPU
 
@@ -508,32 +524,44 @@ void GPUPositionBatch::reserve(int, int) {}
 
 GPUNNUEWeightManager::GPUNNUEWeightManager() = default;
 GPUNNUEWeightManager::~GPUNNUEWeightManager() = default;
-bool GPUNNUEWeightManager::load_networks(const Eval::NNUE::Networks&) { return false; }
-bool GPUNNUEWeightManager::allocate_network_buffers(GPUNetworkWeights&, int, bool) { return false; }
+bool GPUNNUEWeightManager::load_networks(const Eval::NNUE::Networks &) {
+  return false;
+}
+bool GPUNNUEWeightManager::allocate_network_buffers(GPUNetworkWeights &, int,
+                                                    bool) {
+  return false;
+}
 size_t GPUNNUEWeightManager::gpu_memory_used() const { return 0; }
 
 GPUNNUEBatchEvaluator::GPUNNUEBatchEvaluator() = default;
 GPUNNUEBatchEvaluator::~GPUNNUEBatchEvaluator() = default;
-bool GPUNNUEBatchEvaluator::initialize(GPUNNUEWeightManager&) { return false; }
-void GPUNNUEBatchEvaluator::add_position(const Position&) {}
-bool GPUNNUEBatchEvaluator::evaluate_big(GPUEvalResults&) { return false; }
-bool GPUNNUEBatchEvaluator::evaluate_small(GPUEvalResults&) { return false; }
+bool GPUNNUEBatchEvaluator::initialize(GPUNNUEWeightManager &) { return false; }
+void GPUNNUEBatchEvaluator::add_position(const Position &) {}
+bool GPUNNUEBatchEvaluator::evaluate_big(GPUEvalResults &) { return false; }
+bool GPUNNUEBatchEvaluator::evaluate_small(GPUEvalResults &) { return false; }
 bool GPUNNUEBatchEvaluator::compile_kernels() { return false; }
 bool GPUNNUEBatchEvaluator::allocate_buffers(int) { return false; }
-bool GPUNNUEBatchEvaluator::dispatch_evaluation(const GPUNetworkWeights&, GPUEvalResults&) { return false; }
+bool GPUNNUEBatchEvaluator::dispatch_evaluation(const GPUNetworkWeights &,
+                                                GPUEvalResults &) {
+  return false;
+}
 double GPUNNUEBatchEvaluator::avg_batch_time_ms() const { return 0; }
 void GPUNNUEBatchEvaluator::reset_stats() {}
 
-GPUNNUEInterface& GPUNNUEInterface::instance() {
-    static GPUNNUEInterface inst;
-    return inst;
+GPUNNUEInterface &GPUNNUEInterface::instance() {
+  static GPUNNUEInterface inst;
+  return inst;
 }
-bool GPUNNUEInterface::initialize(const Eval::NNUE::Networks&) { return false; }
-std::string GPUNNUEInterface::status_string() const { return "GPU NNUE: Not available\n"; }
+bool GPUNNUEInterface::initialize(const Eval::NNUE::Networks &) {
+  return false;
+}
+std::string GPUNNUEInterface::status_string() const {
+  return "GPU NNUE: Not available\n";
+}
 
-bool init_gpu_nnue(const Eval::NNUE::Networks&) { return false; }
+bool init_gpu_nnue(const Eval::NNUE::Networks &) { return false; }
 bool gpu_nnue_ready() { return false; }
-GPUNNUEInterface& gpu_nnue_interface() { return GPUNNUEInterface::instance(); }
+GPUNNUEInterface &gpu_nnue_interface() { return GPUNNUEInterface::instance(); }
 
 } // namespace MetalFish::GPU
 

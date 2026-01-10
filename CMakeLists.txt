@@ -131,20 +131,14 @@ set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
 # GPU source files (backend-agnostic interface)
 set(GPU_SOURCES
-    src/gpu/nnue_eval.cpp
-    src/gpu/batch_ops.cpp
-    src/gpu/gpu_nnue.cpp
-    src/gpu/gpu_nnue_integration.cpp
-    src/gpu/gpu_accumulator.cpp)
+    src/gpu/nnue_eval.cpp src/gpu/batch_ops.cpp src/gpu/gpu_nnue.cpp
+    src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_accumulator.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(GPU_SOURCES
-      ${GPU_SOURCES}
-      src/gpu/metal/metal_backend.mm
-      src/metal/metal_device.mm
-      src/metal/device.cpp
-      src/metal/allocator.cpp)
+      ${GPU_SOURCES} src/gpu/metal/metal_backend.mm src/metal/metal_device.mm
+      src/metal/device.cpp src/metal/allocator.cpp)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
   message(STATUS "Metal GPU acceleration: ENABLED")
 
@@ -250,8 +244,13 @@ if(BUILD_TESTS)
   enable_testing()
 
   set(TEST_SOURCES
-      tests/test_main.cpp tests/test_bitboard.cpp tests/test_position.cpp
-      tests/test_movegen.cpp tests/test_search.cpp tests/test_metal.cpp)
+      tests/test_main.cpp
+      tests/test_bitboard.cpp
+      tests/test_position.cpp
+      tests/test_movegen.cpp
+      tests/test_search.cpp
+      tests/test_metal.cpp
+      tests/test_gpu_nnue.cpp)
 
   add_executable(
     metalfish_tests

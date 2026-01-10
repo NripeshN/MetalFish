@@ -13,8 +13,8 @@
 #include "core/position.h"
 #include "gpu/backend.h"
 #include "gpu/batch_ops.h"
-#include "gpu/nnue_eval.h"
 #include "gpu/gpu_nnue_integration.h"
+#include "gpu/nnue_eval.h"
 #include "metal/allocator.h"
 #include "metal/device.h"
 #include <cstring>
@@ -24,7 +24,7 @@ using namespace MetalFish;
 
 bool test_metal() {
   try {
-    std::cout << "=== Testing Legacy Metal Interface ===" << std::endl; 
+    std::cout << "=== Testing Legacy Metal Interface ===" << std::endl;
 
     // Test device initialization
     Metal::Device &device = Metal::get_device();
@@ -205,27 +205,31 @@ bool test_metal() {
 
     std::cout << "\n=== Testing GPU NNUE Integration ===" << std::endl;
     {
-      auto& manager = GPU::gpu_nnue_manager();
+      auto &manager = GPU::gpu_nnue_manager();
       if (manager.initialize()) {
         std::cout << "GPU NNUE Manager: Initialized" << std::endl;
-        
+
         // Test batch creation
         GPU::GPUEvalBatch batch;
         batch.reserve(16);
-        
+
         // Create a simple test position
         StateListPtr states(new std::deque<StateInfo>(1));
         Position pos;
-        pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false, &states->back());
-        
+        pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                false, &states->back());
+
         // Add position to batch
         batch.add_position(pos);
-        std::cout << "  Batch created with " << batch.count << " position(s)" << std::endl;
-        
+        std::cout << "  Batch created with " << batch.count << " position(s)"
+                  << std::endl;
+
         // Status
         std::cout << manager.status_string();
       } else {
-        std::cout << "GPU NNUE Manager: Not initialized (expected without networks)" << std::endl;
+        std::cout
+            << "GPU NNUE Manager: Not initialized (expected without networks)"
+            << std::endl;
       }
     }
 

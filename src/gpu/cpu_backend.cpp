@@ -3,7 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 
   CPU Fallback Backend Implementation
-  
+
   This provides stub implementations when no GPU backend is available.
   All GPU operations gracefully fall back to CPU.
 */

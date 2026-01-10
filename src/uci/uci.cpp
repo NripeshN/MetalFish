@@ -24,9 +24,9 @@
 #include "core/types.h"
 #include "eval/score.h"
 #include "gpu/backend.h"
-#include "gpu/nnue_eval.h"
 #include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
+#include "gpu/nnue_eval.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
 #include "uci/engine.h"
@@ -655,29 +655,39 @@ void UCIEngine::on_bestmove(std::string_view bestmove,
 
 void UCIEngine::gpu_info() {
   std::stringstream ss;
-  
+
   ss << "\nGPU Information\n";
   ss << "===============\n";
-  
+
   if (GPU::gpu_available()) {
-    auto& backend = GPU::gpu();
-    
+    auto &backend = GPU::gpu();
+
     ss << "Status: Available\n";
     ss << "Backend: ";
     switch (backend.type()) {
-      case GPU::BackendType::Metal: ss << "Metal"; break;
-      case GPU::BackendType::CUDA: ss << "CUDA"; break;
-      default: ss << "None"; break;
+    case GPU::BackendType::Metal:
+      ss << "Metal";
+      break;
+    case GPU::BackendType::CUDA:
+      ss << "CUDA";
+      break;
+    default:
+      ss << "None";
+      break;
     }
     ss << "\n";
-    
+
     ss << "Device: " << backend.device_name() << "\n";
-    ss << "Unified Memory: " << (backend.has_unified_memory() ? "Yes" : "No") << "\n";
-    ss << "Max Buffer Size: " << (backend.max_buffer_size() / (1024*1024)) << " MB\n";
-    ss << "Max Threadgroup Memory: " << backend.max_threadgroup_memory() << " bytes\n";
-    ss << "Allocated Memory: " << (backend.allocated_memory() / 1024) << " KB\n";
+    ss << "Unified Memory: " << (backend.has_unified_memory() ? "Yes" : "No")
+       << "\n";
+    ss << "Max Buffer Size: " << (backend.max_buffer_size() / (1024 * 1024))
+       << " MB\n";
+    ss << "Max Threadgroup Memory: " << backend.max_threadgroup_memory()
+       << " bytes\n";
+    ss << "Allocated Memory: " << (backend.allocated_memory() / 1024)
+       << " KB\n";
     ss << "Peak Memory: " << (backend.peak_memory() / 1024) << " KB\n";
-    
+
     // New GPU NNUE interface
     if (GPU::gpu_nnue_manager_available()) {
       ss << "\n" << GPU::gpu_nnue_manager().status_string();
@@ -691,7 +701,7 @@ void UCIEngine::gpu_info() {
     ss << "Reason: No compatible GPU backend found\n";
     ss << "Note: Engine will use CPU-only evaluation\n";
   }
-  
+
   sync_cout << ss.str() << sync_endl;
 }
 

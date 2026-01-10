@@ -29,9 +29,9 @@
 #include "eval/nnue/nnue_common.h"
 #include "eval/nnue/nnue_misc.h"
 #include "gpu/backend.h"
-#include "gpu/nnue_eval.h"
 #include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
+#include "gpu/nnue_eval.h"
 #include "search/search.h"
 #include "syzygy/tbprobe.h"
 #include "uci/uci.h"
@@ -138,16 +138,17 @@ Engine::Engine(std::optional<std::string> path)
 
   // GPU acceleration options
   options.add("UseGPU", Option(GPU::gpu_available(), [](const Option &o) {
-    // This option is informational - GPU is auto-detected
-    if (o && !GPU::gpu_available()) {
-      return std::optional<std::string>("GPU not available on this system");
-    }
-    return std::optional<std::string>(std::nullopt);
-  }));
+                // This option is informational - GPU is auto-detected
+                if (o && !GPU::gpu_available()) {
+                  return std::optional<std::string>(
+                      "GPU not available on this system");
+                }
+                return std::optional<std::string>(std::nullopt);
+              }));
 
   load_networks();
   resize_threads();
-  
+
   // Initialize GPU if available
   if (GPU::gpu_available()) {
     sync_cout << "info string GPU: " << GPU::gpu().device_name() << sync_endl;
@@ -299,7 +300,7 @@ void Engine::load_networks() {
   });
   threads.clear();
   threads.ensure_network_replicated();
-  
+
   // Initialize GPU NNUE if available
   if (GPU::gpu_available() && options["UseGPU"]) {
     // Get access to networks for GPU initialization
@@ -310,7 +311,7 @@ void Engine::load_networks() {
         gpu_init_success = true;
       }
     });
-    
+
     if (gpu_init_success) {
       sync_cout << "info string GPU NNUE: initialized" << sync_endl;
     }

@@ -408,13 +408,13 @@ public:
       NSString *ns_source = [NSString stringWithUTF8String:source.c_str()];
       MTLCompileOptions *options = [[MTLCompileOptions alloc] init];
 
-      // Use fastMathEnabled for compatibility with older macOS versions
-      // mathMode is only available on macOS 15+ but we need to support older
-      // versions
-      #pragma clang diagnostic push
-      #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        [options setFastMathEnabled:YES];
-      #pragma clang diagnostic pop
+// Use fastMathEnabled for compatibility with older macOS versions
+// mathMode is only available on macOS 15+ but we need to support older
+// versions
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+      [options setFastMathEnabled:YES];
+#pragma clang diagnostic pop
 
       NSError *error = nil;
       id<MTLLibrary> lib = [device_ newLibraryWithSource:ns_source

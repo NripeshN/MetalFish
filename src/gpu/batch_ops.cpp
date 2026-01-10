@@ -458,9 +458,7 @@ GPUMove GPUMove::from_move(Move m) {
   return gm;
 }
 
-Move GPUMove::to_move() const {
-  return Move(data);
-}
+Move GPUMove::to_move() const { return Move(data); }
 
 BatchSEE::BatchSEE() {}
 BatchSEE::~BatchSEE() {}

@@ -427,45 +427,46 @@ kernel void zero_buffer(device int32_t *buffer [[buffer(0)]],
 
 /**
  * SIMD-optimized feature transform using simdgroup operations
- * 
+ *
  * Apple Silicon GPUs have 32-wide SIMD groups. This kernel uses
  * simd_sum for efficient reduction across the group.
  */
-kernel void feature_transform_simd(
-    device const weight_t *weights [[buffer(0)]],
-    device const weight_t *biases [[buffer(1)]],
-    device const int32_t *features [[buffer(2)]],
-    device const int32_t *feature_offsets [[buffer(3)]],
-    device accumulator_t *output [[buffer(4)]],
-    constant int &hidden_dim [[buffer(5)]],
-    constant int &batch_size [[buffer(6)]],
-    uint2 gid [[thread_position_in_grid]],
-    uint simd_lane [[thread_index_in_simdgroup]],
-    uint simd_group [[simdgroup_index_in_threadgroup]]) {
-  
+kernel void feature_transform_simd(device const weight_t *weights [[buffer(0)]],
+                                   device const weight_t *biases [[buffer(1)]],
+                                   device const int32_t *features [[buffer(2)]],
+                                   device const int32_t *feature_offsets
+                                   [[buffer(3)]],
+                                   device accumulator_t *output [[buffer(4)]],
+                                   constant int &hidden_dim [[buffer(5)]],
+                                   constant int &batch_size [[buffer(6)]],
+                                   uint2 gid [[thread_position_in_grid]],
+                                   uint simd_lane [[thread_index_in_simdgroup]],
+                                   uint simd_group
+                                   [[simdgroup_index_in_threadgroup]]) {
+
   int pos_idx = gid.y;
-  int hidden_base = gid.x * 32;  // Process 32 elements per SIMD group
-  
+  int hidden_base = gid.x * 32; // Process 32 elements per SIMD group
+
   if (pos_idx >= batch_size)
     return;
-  
+
   int hidden_idx = hidden_base + simd_lane;
   if (hidden_idx >= hidden_dim)
     return;
-  
+
   // Start with bias
   accumulator_t acc = accumulator_t(biases[hidden_idx]);
-  
+
   // Get feature range
   int start = (pos_idx > 0) ? feature_offsets[pos_idx - 1] : 0;
   int end = feature_offsets[pos_idx];
-  
+
   // Accumulate - each lane processes one hidden dimension
   for (int i = start; i < end; i++) {
     int feature_idx = features[i];
     acc += weights[feature_idx * hidden_dim + hidden_idx];
   }
-  
+
   output[pos_idx * hidden_dim + hidden_idx] = acc;
 }
 
@@ -473,99 +474,100 @@ kernel void feature_transform_simd(
  * Vectorized dot product for FC layers
  * Uses float4 for coalesced memory access
  */
-kernel void fc_layer_vectorized(
-    device const int8_t *input [[buffer(0)]],
-    device const weight_t *weights [[buffer(1)]],
-    device const weight_t *biases [[buffer(2)]],
-    device int8_t *output [[buffer(3)]],
-    constant int &input_dim [[buffer(4)]],
-    constant int &output_dim [[buffer(5)]],
-    constant int &batch_size [[buffer(6)]],
-    uint2 gid [[thread_position_in_grid]],
-    uint lid [[thread_position_in_threadgroup]],
-    uint simd_lane [[thread_index_in_simdgroup]]) {
-  
+kernel void fc_layer_vectorized(device const int8_t *input [[buffer(0)]],
+                                device const weight_t *weights [[buffer(1)]],
+                                device const weight_t *biases [[buffer(2)]],
+                                device int8_t *output [[buffer(3)]],
+                                constant int &input_dim [[buffer(4)]],
+                                constant int &output_dim [[buffer(5)]],
+                                constant int &batch_size [[buffer(6)]],
+                                uint2 gid [[thread_position_in_grid]],
+                                uint lid [[thread_position_in_threadgroup]],
+                                uint simd_lane [[thread_index_in_simdgroup]]) {
+
   int pos_idx = gid.y;
   int out_idx = gid.x;
-  
+
   if (pos_idx >= batch_size || out_idx >= output_dim)
     return;
-  
+
   accumulator_t acc = biases[out_idx];
-  
+
   device const int8_t *in_ptr = input + pos_idx * input_dim;
   device const weight_t *w_ptr = weights + out_idx;
-  
+
   // Process 4 elements at a time when possible
   int i = 0;
   int aligned_end = (input_dim / 4) * 4;
-  
+
   for (; i < aligned_end; i += 4) {
     acc += in_ptr[i] * w_ptr[i * output_dim];
-    acc += in_ptr[i+1] * w_ptr[(i+1) * output_dim];
-    acc += in_ptr[i+2] * w_ptr[(i+2) * output_dim];
-    acc += in_ptr[i+3] * w_ptr[(i+3) * output_dim];
+    acc += in_ptr[i + 1] * w_ptr[(i + 1) * output_dim];
+    acc += in_ptr[i + 2] * w_ptr[(i + 2) * output_dim];
+    acc += in_ptr[i + 3] * w_ptr[(i + 3) * output_dim];
   }
-  
+
   // Handle remaining elements
   for (; i < input_dim; i++) {
     acc += in_ptr[i] * w_ptr[i * output_dim];
   }
-  
+
   output[pos_idx * output_dim + out_idx] = clipped_relu(int16_t(acc >> 6));
 }
 
 /**
  * Optimized NNUE forward pass with SIMD reductions
- * 
+ *
  * Uses simd_sum for efficient parallel reduction within each SIMD group.
  * Best performance on Apple Silicon M1/M2/M3 GPUs.
  */
-kernel void nnue_forward_simd(
-    device const accumulator_t *accumulators [[buffer(0)]],
-    device const weight_t *fc0_weights [[buffer(1)]],
-    device const weight_t *fc0_biases [[buffer(2)]],
-    device const weight_t *fc1_weights [[buffer(3)]],
-    device const weight_t *fc1_biases [[buffer(4)]],
-    device const weight_t *fc2_weights [[buffer(5)]],
-    device const weight_t *fc2_biases [[buffer(6)]],
-    device int32_t *output [[buffer(7)]],
-    constant int &hidden_dim [[buffer(8)]],
-    constant int &batch_size [[buffer(9)]],
-    uint gid [[threadgroup_position_in_grid]],
-    uint lid [[thread_position_in_threadgroup]],
-    uint tg_size [[threads_per_threadgroup]],
-    uint simd_lane [[thread_index_in_simdgroup]],
-    uint simd_group [[simdgroup_index_in_threadgroup]]) {
-  
+kernel void nnue_forward_simd(device const accumulator_t *accumulators
+                              [[buffer(0)]],
+                              device const weight_t *fc0_weights [[buffer(1)]],
+                              device const weight_t *fc0_biases [[buffer(2)]],
+                              device const weight_t *fc1_weights [[buffer(3)]],
+                              device const weight_t *fc1_biases [[buffer(4)]],
+                              device const weight_t *fc2_weights [[buffer(5)]],
+                              device const weight_t *fc2_biases [[buffer(6)]],
+                              device int32_t *output [[buffer(7)]],
+                              constant int &hidden_dim [[buffer(8)]],
+                              constant int &batch_size [[buffer(9)]],
+                              uint gid [[threadgroup_position_in_grid]],
+                              uint lid [[thread_position_in_threadgroup]],
+                              uint tg_size [[threads_per_threadgroup]],
+                              uint simd_lane [[thread_index_in_simdgroup]],
+                              uint simd_group
+                              [[simdgroup_index_in_threadgroup]]) {
+
   int pos_idx = gid;
   if (pos_idx >= batch_size)
     return;
-  
+
   // Shared memory
   threadgroup int8_t fc0_sqr[2 * FC0_OUT];
   threadgroup int8_t fc0_skip[2];
   threadgroup int8_t fc1_out[FC1_OUT];
-  threadgroup accumulator_t partial_sums[64];  // For SIMD reduction
-  
-  device const accumulator_t *white_acc = accumulators + pos_idx * 2 * hidden_dim;
+  threadgroup accumulator_t partial_sums[64]; // For SIMD reduction
+
+  device const accumulator_t *white_acc =
+      accumulators + pos_idx * 2 * hidden_dim;
   device const accumulator_t *black_acc = white_acc + hidden_dim;
-  
+
   // ========== FC0 Layer with SIMD reduction ==========
   for (int out = lid; out <= FC0_OUT; out += tg_size) {
     for (int p = 0; p < 2; p++) {
       device const accumulator_t *acc = (p == 0) ? white_acc : black_acc;
-      
+
       // Each thread processes a portion of the input
       accumulator_t local_sum = 0;
       for (int i = simd_lane; i < hidden_dim; i += 32) {
         int8_t clipped = clipped_relu(int16_t(acc[i] >> 6));
         local_sum += clipped * fc0_weights[i * (FC0_OUT + 1) + out];
       }
-      
+
       // SIMD reduction
       accumulator_t sum = simd_sum(local_sum) + fc0_biases[out];
-      
+
       // First lane writes result
       if (simd_lane == 0) {
         int16_t result = int16_t(sum >> 6);
@@ -578,7 +580,7 @@ kernel void nnue_forward_simd(
     }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  
+
   // ========== FC1 Layer ==========
   for (int out = lid; out < FC1_OUT; out += tg_size) {
     accumulator_t sum = fc1_biases[out];
@@ -588,17 +590,17 @@ kernel void nnue_forward_simd(
     fc1_out[out] = clipped_relu(int16_t(sum >> 6));
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  
+
   // ========== FC2 Layer ==========
   if (lid == 0) {
     accumulator_t sum = fc2_biases[0];
     for (int i = 0; i < FC1_OUT; i++) {
       sum += fc1_out[i] * fc2_weights[i];
     }
-    
+
     int32_t skip_val = ((fc0_skip[0] + fc0_skip[1]) * 600 * OUTPUT_SCALE) /
                        (2 * 127 * WEIGHT_SCALE);
-    
+
     output[pos_idx] = sum + skip_val;
   }
 }
@@ -607,29 +609,31 @@ kernel void nnue_forward_simd(
  * Batch accumulator copy with perspective awareness
  * Efficiently copies accumulators for multiple positions
  */
-kernel void batch_accumulator_copy(
-    device const accumulator_t *src [[buffer(0)]],
-    device accumulator_t *dst [[buffer(1)]],
-    device const int32_t *src_indices [[buffer(2)]],  // Source position index per dest
-    device const int32_t *perspectives [[buffer(3)]], // 0=same, 1=swap
-    constant int &hidden_dim [[buffer(4)]],
-    constant int &batch_size [[buffer(5)]],
-    uint2 gid [[thread_position_in_grid]]) {
-  
+kernel void
+batch_accumulator_copy(device const accumulator_t *src [[buffer(0)]],
+                       device accumulator_t *dst [[buffer(1)]],
+                       device const int32_t *src_indices
+                       [[buffer(2)]], // Source position index per dest
+                       device const int32_t *perspectives
+                       [[buffer(3)]], // 0=same, 1=swap
+                       constant int &hidden_dim [[buffer(4)]],
+                       constant int &batch_size [[buffer(5)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+
   int dst_pos = gid.y;
   int hidden_idx = gid.x;
-  
+
   if (dst_pos >= batch_size || hidden_idx >= hidden_dim * 2)
     return;
-  
+
   int src_pos = src_indices[dst_pos];
   int swap = perspectives[dst_pos];
-  
+
   int perspective = hidden_idx / hidden_dim;
   int offset = hidden_idx % hidden_dim;
-  
+
   int src_perspective = swap ? (1 - perspective) : perspective;
-  
-  dst[dst_pos * 2 * hidden_dim + hidden_idx] = 
+
+  dst[dst_pos * 2 * hidden_dim + hidden_idx] =
       src[src_pos * 2 * hidden_dim + src_perspective * hidden_dim + offset];
 }

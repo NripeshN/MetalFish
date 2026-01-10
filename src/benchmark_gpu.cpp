@@ -9,8 +9,8 @@
 #include "core/position.h"
 #include "gpu/backend.h"
 #include "gpu/batch_ops.h"
-#include "gpu/gpu_nnue_integration.h"
 #include "gpu/gpu_accumulator.h"
+#include "gpu/gpu_nnue_integration.h"
 #include <chrono>
 #include <iostream>
 #include <random>
@@ -170,21 +170,22 @@ void benchmark_gpu_nnue() {
 
   std::cout << "\n=== GPU NNUE Benchmark ===" << std::endl;
 
-  auto& manager = GPU::gpu_nnue_manager();
+  auto &manager = GPU::gpu_nnue_manager();
   if (!manager.is_ready()) {
     std::cout << "GPU NNUE not initialized (networks not loaded)" << std::endl;
-    std::cout << "Run 'metalfish' and use 'bench' command for full NNUE benchmarks" << std::endl;
+    std::cout
+        << "Run 'metalfish' and use 'bench' command for full NNUE benchmarks"
+        << std::endl;
     return;
   }
 
   // Create test positions
   std::vector<std::string> test_fens = {
-    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-    "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
-    "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
-    "rnbqkb1r/pp1p1ppp/4pn2/2p5/2PP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 0 4",
-    "r1bqkbnr/pp1ppppp/2n5/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
-  };
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+      "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+      "rnbqkb1r/pp1p1ppp/4pn2/2p5/2PP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 0 4",
+      "r1bqkbnr/pp1ppppp/2n5/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"};
 
   // Benchmark batch sizes
   std::vector<int> batch_sizes = {1, 4, 8, 16, 32, 64};
@@ -201,7 +202,8 @@ void benchmark_gpu_nnue() {
 
     for (int i = 0; i < batch_size; i++) {
       states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
-      positions[i].set(test_fens[i % test_fens.size()], false, &states_vec.back()->back());
+      positions[i].set(test_fens[i % test_fens.size()], false,
+                       &states_vec.back()->back());
       batch.add_position(positions[i]);
     }
 
@@ -221,27 +223,32 @@ void benchmark_gpu_nnue() {
     }
 
     auto end = std::chrono::high_resolution_clock::now();
-    double total_ms = std::chrono::duration<double, std::milli>(end - start).count();
+    double total_ms =
+        std::chrono::duration<double, std::milli>(end - start).count();
     double avg_ms = total_ms / iterations;
     double positions_per_sec = (batch_size * 1000.0) / avg_ms;
 
-    std::cout << batch_size << "\t\t" << avg_ms << "\t\t" << positions_per_sec << std::endl;
+    std::cout << batch_size << "\t\t" << avg_ms << "\t\t" << positions_per_sec
+              << std::endl;
   }
 
   // Print statistics
   std::cout << "\nGPU NNUE Statistics:" << std::endl;
   std::cout << "  GPU Evaluations: " << manager.gpu_evaluations() << std::endl;
-  std::cout << "  CPU Fallbacks: " << manager.cpu_fallback_evaluations() << std::endl;
+  std::cout << "  CPU Fallbacks: " << manager.cpu_fallback_evaluations()
+            << std::endl;
   std::cout << "  Total Batches: " << manager.total_batches() << std::endl;
   if (manager.total_batches() > 0) {
-    std::cout << "  Avg Batch Time: " << manager.avg_batch_time_ms() << " ms" << std::endl;
+    std::cout << "  Avg Batch Time: " << manager.avg_batch_time_ms() << " ms"
+              << std::endl;
   }
 }
 
 // Benchmark GPU accumulator operations
 void benchmark_gpu_accumulator() {
   if (!GPU::gpu_available()) {
-    std::cout << "GPU not available, skipping accumulator benchmark" << std::endl;
+    std::cout << "GPU not available, skipping accumulator benchmark"
+              << std::endl;
     return;
   }
 
