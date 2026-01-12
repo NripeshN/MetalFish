@@ -21,320 +21,287 @@
 \usepackage{booktabs}
 \usepackage{listings}
 \usepackage{xcolor}
+\usepackage{parskip}
 
-% Code listing style
-\lstdefinestyle{metalstyle}{
-    backgroundcolor=\color{white},
+% Adjust paragraph spacing
+\setlength{\parskip}{0.8em plus 0.2em minus 0.1em}
+\setlength{\parindent}{0pt}
+
+% Improve list spacing
+\usepackage{enumitem}
+\setlist[itemize]{itemsep=0.3em, topsep=0.5em, parsep=0.2em}
+\setlist[enumerate]{itemsep=0.3em, topsep=0.5em, parsep=0.2em}
+
+% Add spacing around floats
+\setlength{\floatsep}{1.5em plus 0.5em minus 0.3em}
+\setlength{\textfloatsep}{1.5em plus 0.5em minus 0.3em}
+\setlength{\intextsep}{1.2em plus 0.3em minus 0.2em}
+
+% Spacing around equations
+\AtBeginDocument{
+  \setlength{\abovedisplayskip}{1em plus 0.3em minus 0.2em}
+  \setlength{\belowdisplayskip}{1em plus 0.3em minus 0.2em}
+  \setlength{\abovedisplayshortskip}{0.8em plus 0.2em}
+  \setlength{\belowdisplayshortskip}{0.8em plus 0.2em}
+}
+
+% C++ code listing style
+\lstdefinestyle{cppstyle}{
+    language=C++,
+    backgroundcolor=\color{gray!5},
     basicstyle=\ttfamily\footnotesize,
     breaklines=true,
     captionpos=b,
     keepspaces=true,
     numbers=left,
-    numbersep=5pt,
+    numbersep=8pt,
     numberstyle=\tiny\color{gray},
     showstringspaces=false,
     tabsize=2,
-    frame=single
+    frame=single,
+    framesep=4pt,
+    xleftmargin=12pt,
+    aboveskip=1em,
+    belowskip=1em,
+    rulecolor=\color{gray!40},
+    keywordstyle=\color{blue!70!black},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red!60!black},
+    morekeywords={uint64_t, int32_t, int16_t, int8_t, uint, device, kernel, constant, thread_position_in_grid}
 }
 
 \begin{document}
-\mainmatter              % start of a contribution
+\mainmatter
 %
 \title{MetalFish: A GPU-Accelerated Chess Engine\\for Apple Silicon Unified Memory Architecture}
 %
-\titlerunning{MetalFish: GPU Chess Engine}  % abbreviated title (for running head)
+\titlerunning{MetalFish: GPU Chess Engine}
 %
 \author{Nripesh Niketan\inst{1}}
 %
-\authorrunning{N. Niketan} % abbreviated author list (for running head)
+\authorrunning{N. Niketan}
 %
 \institute{Independent Researcher\\
 \email{nripesh14@gmail.com}}
 
-\maketitle              % typeset the title of the contribution
+\maketitle
 
 \begin{abstract}
-We present MetalFish, a fully functional GPU-accelerated UCI chess engine implementing Stockfish-style alpha-beta search with Apple Metal GPU acceleration on unified memory architecture. Unlike theoretical approaches, MetalFish represents a complete, tested implementation that successfully integrates over 60 search features from modern chess engines with GPU-accelerated NNUE evaluation. Our implementation demonstrates that unified memory architectures enable practical hybrid CPU-GPU chess engines by eliminating data transfer overhead. MetalFish achieves zero-copy data sharing between CPU search and GPU evaluation through Apple Silicon's unified memory, with GPU kernels for NNUE feature transformation, incremental accumulator updates, and neural network forward passes. The engine passes 102 comprehensive tests including perft verification, UCI protocol compliance, and GPU functionality validation. We present the architectural decisions, implementation challenges, and empirical observations from building a production-ready GPU chess engine, providing insights for future GPU-accelerated game tree search implementations.
+We present MetalFish, a GPU-accelerated UCI chess engine that integrates Stockfish-style alpha-beta search with Apple Metal GPU acceleration on unified memory architecture. MetalFish implements a hybrid CPU-GPU design where the CPU executes traditional search algorithms including Principal Variation Search, null-move pruning, late move reductions, and singular extensions, while the GPU accelerates NNUE neural network evaluation through Metal compute shaders. The implementation leverages Apple Silicon's unified memory to achieve zero-copy data sharing between CPU search routines and GPU evaluation kernels. We describe the complete system architecture, present GPU kernel implementations for feature transformation and incremental accumulator updates, and report empirical results from our test suite. The engine correctly computes perft values for standard test positions, validates move generation through established benchmarks, and demonstrates functional GPU acceleration on Apple M-series processors. This work provides practical insights into the challenges and trade-offs of hybrid CPU-GPU chess engine design.
 
-\keywords{Chess Engine \and GPU Computing \and Metal \and NNUE \and Unified Memory \and Apple Silicon}
+\keywords{Chess Engine, GPU Computing, Metal, NNUE, Unified Memory, Apple Silicon}
 \end{abstract}
+
 %
 \section{Introduction}
 %
-Modern chess engines like Stockfish achieve remarkable playing strength through sophisticated alpha-beta search enhanced with neural network evaluation functions. However, the computational landscape has transformed with Graphics Processing Units (GPUs) emerging as powerful parallel computing platforms. This paper presents MetalFish, a complete implementation of a GPU-accelerated chess engine for Apple Silicon, demonstrating practical integration of traditional search algorithms with GPU acceleration.
+Modern chess engines achieve remarkable playing strength through sophisticated alpha-beta search enhanced with neural network evaluation. Stockfish, the current state-of-the-art engine, combines Principal Variation Search (PVS) with Efficiently Updatable Neural Networks (NNUE) to achieve superhuman performance \cite{Romstad2004}. However, the emergence of GPU computing presents opportunities to accelerate evaluation-intensive components of chess engines.
 
-The primary challenge in GPU-accelerated chess engines lies in the fundamental mismatch between alpha-beta search's sequential dependencies and GPU architectures' parallel execution model. When an alpha-beta cutoff occurs, remaining sibling nodes can be pruned, creating dependency chains that serialize computation. On GPUs, where threads execute in lockstep within warps, such branch divergence degrades performance significantly.
+The primary challenge in GPU-accelerated chess engines lies in the fundamental mismatch between alpha-beta search's sequential dependencies and GPU architectures' parallel execution model. When an alpha-beta cutoff occurs, remaining sibling nodes can be pruned, creating dependency chains that serialize computation. On GPUs, where threads execute in lockstep within warps, such branch divergence degrades performance significantly \cite{Nickolls2008}.
 
-MetalFish addresses this challenge through a hybrid CPU-GPU architecture that leverages Apple Silicon's unified memory. Rather than attempting full GPU parallelization of alpha-beta search, we maintain traditional CPU-based search while offloading evaluation-intensive operations to the GPU. The unified memory architecture eliminates the traditional GPU computing bottleneck of host-device data transfer, enabling efficient hybrid execution.
+MetalFish addresses this challenge through a hybrid CPU-GPU architecture that leverages Apple Silicon's unified memory. Rather than attempting full GPU parallelization of alpha-beta search, we maintain traditional CPU-based search while offloading neural network evaluation to the GPU. The unified memory architecture eliminates the traditional GPU computing bottleneck of host-device data transfer, enabling efficient hybrid execution without explicit memory copies.
 
-Our contributions include: (1) a complete, tested implementation of a GPU-accelerated chess engine with 60+ search features, (2) Metal GPU kernels for NNUE evaluation including feature transformation and incremental updates, (3) empirical analysis of hybrid CPU-GPU execution trade-offs, and (4) a comprehensive test suite validating correctness across 102 tests.
+This paper presents the complete MetalFish implementation, describing the search algorithm integration, GPU kernel design, and unified memory utilization. We report empirical results demonstrating correct move generation through perft verification and functional GPU acceleration on Apple M-series hardware.
 
 \section{Background and Related Work}
 
-\subsection{Modern Chess Engine Architecture}
+\subsection{Alpha-Beta Search and Principal Variation Search}
 
-Contemporary chess engines implement Principal Variation Search (PVS), a refinement of alpha-beta that reduces full-window searches by initially searching sibling nodes with null windows \cite{Reinefeld1983}. Stockfish exemplifies this approach through extensive pruning techniques including null-move pruning, late move reductions, and futility pruning \cite{Romstad2004}.
+The minimax algorithm with alpha-beta pruning forms the foundation of modern chess engines \cite{Knuth1975}. Alpha-beta maintains bounds $[\alpha, \beta]$ representing the range of possible values for the current node; when $\alpha \geq \beta$, remaining siblings can be pruned without affecting the minimax value.
 
-Since 2020, Stockfish has incorporated Efficiently Updatable Neural Networks (NNUE) for position evaluation \cite{Nasu2018}. NNUE networks are specifically designed for incremental evaluation during tree search, with the key insight that only a small fraction of input neurons are active for any position, enabling efficient updates as moves are made and unmade.
+Principal Variation Search (PVS) refines alpha-beta by assuming the first move searched at each node is optimal \cite{Reinefeld1983}. Subsequent moves are searched with zero-width windows; if a move exceeds alpha, a full-window re-search is performed. This approach reduces the number of full evaluations while maintaining correctness.
+
+\subsection{NNUE Evaluation}
+
+Efficiently Updatable Neural Networks (NNUE) represent a paradigm shift in chess evaluation \cite{Nasu2018}. The architecture consists of a large sparse input layer representing piece-square combinations, followed by smaller dense layers. The key insight is that network activations can be updated incrementally as moves are made and unmade, rather than recomputing from scratch.
 
 \subsection{GPU-Based Chess Engines}
 
-Leela Chess Zero (Lc0) pioneered GPU-accelerated neural network evaluation combined with Monte Carlo Tree Search (MCTS) \cite{LeelaChessZero2024}. This approach achieves world-class performance while being naturally suited to GPU parallelization, as individual MCTS simulations can execute independently.
-
-However, MCTS-based engines differ fundamentally from alpha-beta engines in their search characteristics. Alpha-beta's tactical precision through deep selective search remains valuable, motivating hybrid approaches that combine traditional search with GPU acceleration.
+Leela Chess Zero (Lc0) pioneered GPU-accelerated neural network evaluation combined with Monte Carlo Tree Search (MCTS) \cite{LeelaChessZero2024}. Unlike alpha-beta, MCTS is naturally suited to GPU parallelization as individual simulations can execute independently. However, alpha-beta's tactical precision through deep selective search motivates hybrid approaches combining traditional search with GPU acceleration.
 
 \subsection{Unified Memory Architecture}
 
-Apple Silicon's unified memory architecture allows CPU and GPU to access the same physical memory pool coherently \cite{Apple2023}. This eliminates explicit data transfers between separate memory spaces, potentially enabling algorithms that leverage both sequential CPU processing and parallel GPU capabilities without transfer overhead.
+Apple Silicon's unified memory architecture allows CPU and GPU to access the same physical memory coherently \cite{Apple2023}. This eliminates explicit data transfers between separate memory spaces, enabling algorithms that leverage both sequential CPU processing and parallel GPU capabilities without transfer overhead.
 
-\section{MetalFish Architecture}
+\section{System Architecture}
 
-\subsection{Design Philosophy}
+\subsection{Design Overview}
 
-MetalFish embraces a fundamental principle: rather than forcing traditional algorithms onto GPU hardware, we design a hybrid system leveraging the unique strengths of both architectures. The CPU excels at sequential decision-making and complex control flow, while the GPU provides massive parallel throughput for regular computational tasks.
+MetalFish implements a hybrid CPU-GPU architecture with three primary components:
 
-The architecture consists of three primary components:
+\textbf{CPU Search Engine:} Executes the complete alpha-beta search algorithm including PVS, move ordering, and all pruning techniques. Search control flow remains entirely on CPU to avoid branch divergence penalties.
 
-\textbf{CPU Search Engine:} Implements full Stockfish-style alpha-beta search with PVS, maintaining the principal variation and coordinating search across depths. All search control flow, move ordering decisions, and pruning logic execute on CPU.
+\textbf{GPU Evaluation Engine:} Implements NNUE inference through Metal compute shaders, processing feature transformation and network forward passes on GPU.
 
-\textbf{GPU Evaluation Engine:} Handles neural network evaluation using Metal compute shaders. Processes position features through the NNUE architecture with GPU-accelerated matrix operations.
+\textbf{Unified Memory Interface:} Manages shared buffers accessible by both CPU and GPU without explicit copying, using Metal's shared storage mode.
 
-\textbf{Unified Memory Manager:} Leverages unified memory for zero-copy data sharing between CPU and GPU, eliminating traditional host-device transfer bottlenecks.
+\subsection{Search Algorithm Implementation}
 
-\subsection{Search Implementation}
-
-MetalFish implements over 60 search features from modern chess engines:
+The search implementation follows Stockfish's architecture, incorporating the following techniques:
 
 \subsubsection{Move Ordering}
-\begin{itemize}
-\item \textbf{ButterflyHistory:} Quiet move success tracking by from/to squares
-\item \textbf{KillerMoves:} Refutation moves per ply
-\item \textbf{CounterMoveHistory:} Moves that refute the previous move
-\item \textbf{CapturePieceToHistory:} Capture move success tracking
-\item \textbf{PawnHistory:} Pawn structure-aware history indexed by pawn key
-\item \textbf{ContinuationHistory:} Move sequence success tracking
-\item \textbf{Staged Move Generation:} Efficient MovePicker with capture/quiet phases
-\end{itemize}
 
-\subsubsection{Search Extensions and Pruning}
-\begin{itemize}
-\item \textbf{Singular Extension:} Extend clearly best moves with double/triple extension
-\item \textbf{Null Move Pruning:} With verification search at high depths
-\item \textbf{Late Move Reductions:} Multiple adjustment factors including cutoffCnt
-\item \textbf{Futility Pruning:} For quiet moves and captures
-\item \textbf{SEE-based Pruning:} Static Exchange Evaluation
-\item \textbf{ProbCut:} Prune with shallow capture search
-\item \textbf{Razoring:} Drop to quiescence search for low evaluation positions
-\end{itemize}
+Effective move ordering is critical for alpha-beta efficiency. MetalFish implements multiple history heuristics:
 
-\subsubsection{Infrastructure}
-\begin{itemize}
-\item \textbf{Transposition Table:} With aging, generation tracking, and rule50 handling
-\item \textbf{Aspiration Windows:} With dynamic delta sizing
-\item \textbf{Lazy SMP:} Multi-threaded parallel search
-\item \textbf{Correction History:} Pawn, minor piece, and continuation corrections
-\end{itemize}
+\textbf{Butterfly History:} Tracks quiet move success by source and destination squares, stored in a $[2][4096]$ array indexed by $[\text{color}][\text{from} \times 64 + \text{to}]$. Values are initialized to 68 following Stockfish conventions.
 
-The Late Move Reduction formula follows Stockfish:
+\textbf{Capture History:} Tracks capture move success by piece, destination square, and captured piece type, stored in a $[16][64][8]$ array. Values are initialized to $-689$.
+
+\textbf{Continuation History:} Tracks move sequence success using the previous moves in the search stack. The implementation uses a $[16][64][16][64]$ array with values initialized to $-529$.
+
+\textbf{Killer Moves:} Stores refutation moves per ply that caused beta cutoffs in sibling nodes.
+
+\textbf{Counter Moves:} Stores moves that refute specific previous moves.
+
+\subsubsection{Search Extensions}
+
+\textbf{Singular Extension:} When a transposition table move appears significantly better than alternatives, search depth is extended. The implementation uses double and triple extensions for strongly singular moves.
+
+\textbf{Check Extension:} Positions where the side to move is in check receive depth extensions to ensure tactical threats are fully resolved.
+
+\subsubsection{Pruning Techniques}
+
+\textbf{Null Move Pruning:} If passing a turn (null move) still produces a beta cutoff at reduced depth, the position is pruned. Verification search is applied at high depths.
+
+\textbf{Late Move Reductions (LMR):} Moves searched later in the move list are searched at reduced depth. The reduction formula follows Stockfish:
 \begin{equation}
-R_{LMR} = \frac{2747}{128} \times \ln(\text{moveNumber})
+R = \left\lfloor \frac{2747}{128} \times \ln(\text{moveNumber}) \right\rfloor
 \end{equation}
+with adjustments based on history scores, node type, and whether the position is in check.
+
+\textbf{Futility Pruning:} Near-leaf nodes with static evaluations far below alpha are pruned when no single move is likely to raise the score sufficiently.
+
+\textbf{SEE Pruning:} Moves with negative Static Exchange Evaluation are pruned or reduced based on depth and move type.
+
+\textbf{ProbCut:} Positions are pruned when a shallow search of captures suggests the score will exceed beta by a significant margin.
+
+\subsubsection{Transposition Table}
+
+The transposition table stores previously searched positions using Zobrist hashing \cite{Zobrist1970}. Each entry contains the position hash, evaluation bound type (exact, lower, or upper), best move, search depth, and generation counter for aging. The replacement scheme considers entry depth and age to balance between preserving deep searches and allowing new entries.
 
 \subsection{GPU NNUE Implementation}
 
-The GPU evaluation engine implements NNUE inference through Metal compute shaders. The architecture handles:
+The GPU evaluation engine implements NNUE inference through Metal compute shaders. The network architecture processes 1024-dimensional accumulators through fully-connected layers.
 
-\subsubsection{Feature Transformation}
+\subsubsection{Feature Extraction}
 
-The feature transformer converts sparse piece-square inputs to dense hidden layer activations:
-
-\begin{algorithm}
-\caption{GPU Feature Transform Kernel}
-\begin{algorithmic}[1]
-\Procedure{FeatureTransform}{weights, biases, features, acc}
-    \State $h \gets$ thread\_position\_in\_grid
-    \If{$h \geq$ ft\_dims} \Return \EndIf
-    \State $sum \gets biases[h]$
-    \For{$i \gets 0$ to num\_features}
-        \State $f \gets features[i]$
-        \State $sum \gets sum + weights[f \times \text{ft\_dims} + h]$
-    \EndFor
-    \State $acc[h] \gets sum$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-\subsubsection{Incremental Updates}
-
-A key optimization is incremental accumulator updates. When a move is made, only the changed features need updating:
-
+Position features are extracted using the HalfKAv2 scheme, where features are indexed by king position and piece-square combinations. For each piece on the board, the feature index is computed as:
 \begin{equation}
-acc_{new} = acc_{old} - w_{removed} + w_{added}
+\text{feature} = \text{king\_sq} \times 641 + \text{piece\_sq} \times 10 + \text{piece\_type}
+\end{equation}
+where piece positions are mirrored based on the perspective (white or black).
+
+\subsubsection{Feature Transformation Kernel}
+
+The feature transformer converts sparse input features to dense accumulator values. Each GPU thread computes one element of the output accumulator, iterating over all active features and accumulating the corresponding weight values.
+
+\begin{lstlisting}[style=cppstyle, caption={Feature transformation kernel computing accumulator values from sparse input features}]
+kernel void feature_transform(
+    device const int16_t* weights,
+    device const int16_t* biases,
+    device const int* features,
+    device int32_t* accumulator,
+    constant int& num_features,
+    constant int& ft_dims,
+    uint h [[thread_position_in_grid]])
+{
+    if (h >= ft_dims) return;
+    
+    int32_t sum = biases[h];
+    for (int i = 0; i < num_features; i++) {
+        int f = features[i];
+        sum += weights[f * ft_dims + h];
+    }
+    accumulator[h] = sum;
+}
+\end{lstlisting}
+
+\subsubsection{Incremental Update Kernel}
+
+When a move is made, only the changed features need updating rather than recomputing the entire accumulator. The kernel processes added and removed features in parallel.
+
+\begin{lstlisting}[style=cppstyle, caption={Incremental accumulator update kernel processing added and removed features}]
+kernel void feature_update(
+    device const int16_t* weights,
+    device int32_t* accumulator,
+    device const int* added_features,
+    device const int* removed_features,
+    constant int& num_added,
+    constant int& num_removed,
+    constant int& ft_dims,
+    uint h [[thread_position_in_grid]])
+{
+    if (h >= ft_dims) return;
+    
+    int32_t delta = 0;
+    for (int i = 0; i < num_added; i++) {
+        int f = added_features[i];
+        delta += weights[f * ft_dims + h];
+    }
+    for (int i = 0; i < num_removed; i++) {
+        int f = removed_features[i];
+        delta -= weights[f * ft_dims + h];
+    }
+    accumulator[h] += delta;
+}
+\end{lstlisting}
+
+\subsubsection{Network Forward Pass}
+
+The NNUE forward pass processes the accumulated features through fully-connected layers with clipped ReLU activations:
+\begin{equation}
+\text{clipped\_relu}(x) = \min(\max(x \gg 6, 0), 127)
 \end{equation}
 
-The GPU kernel processes added and removed features in parallel:
-
-\begin{algorithm}
-\caption{GPU Incremental Update Kernel}
-\begin{algorithmic}[1]
-\Procedure{FeatureUpdate}{weights, acc, added, removed}
-    \State $h \gets$ thread\_position\_in\_grid
-    \State $delta \gets 0$
-    \For{each feature $f$ in added}
-        \State $delta \gets delta + weights[f \times \text{ft\_dims} + h]$
-    \EndFor
-    \For{each feature $f$ in removed}
-        \State $delta \gets delta - weights[f \times \text{ft\_dims} + h]$
-    \EndFor
-    \State $acc[h] \gets acc[h] + delta$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-\subsubsection{Forward Pass}
-
-The NNUE forward pass implements the network layers:
+The network architecture consists of:
 \begin{itemize}
-\item Input: 1024-dimensional accumulator (concatenated perspectives)
-\item FC0: $2048 \rightarrow 16$ with clipped ReLU
-\item FC1: $15 \rightarrow 32$ with squared clipped ReLU  
-\item FC2: $32 \rightarrow 1$ output score
+\item FC0: $2048 \rightarrow 16$ (concatenated white/black accumulators)
+\item FC1: $15 \rightarrow 32$ with squared clipped ReLU
+\item FC2: $32 \rightarrow 1$ producing the final evaluation score
 \end{itemize}
-
-The activation functions are implemented as:
-\begin{equation}
-\text{clipped\_relu}(x) = \text{clamp}\left(\frac{x}{2^6}, 0, 127\right)
-\end{equation}
-\begin{equation}
-\text{sqr\_clipped\_relu}(x) = \frac{v^2}{128}, \quad v = \text{clamp}\left(\frac{x}{2^6}, 0, 127\right)
-\end{equation}
 
 \subsection{Metal Backend Implementation}
 
-The Metal backend provides GPU device management, buffer allocation, and kernel execution:
+The Metal backend manages GPU resources and kernel execution. The device initialization establishes the GPU context and command queue.
 
-\begin{lstlisting}[style=metalstyle, caption={Metal Device Initialization}]
+\begin{lstlisting}[style=cppstyle, caption={Metal device initialization establishing GPU context and command queue}]
 Device::Device() {
-  device_ = MTL::CreateSystemDefaultDevice();
-  queue_ = device_->newCommandQueue();
-  architecture_ = device_->name()->utf8String();
-  // Unified memory enabled by default
-}
-\end{lstlisting}
-
-Buffer allocation uses shared storage mode for unified memory access:
-
-\begin{lstlisting}[style=metalstyle, caption={Unified Memory Buffer Allocation}]
-MTL::ResourceOptions options = 
-    MTL::ResourceStorageModeShared;
-buffer = device->newBuffer(size, options);
-// Both CPU and GPU can access buffer->contents()
-\end{lstlisting}
-
-\subsection{Hybrid Execution Strategy}
-
-MetalFish dynamically selects between CPU and GPU execution based on workload characteristics. For single-position evaluation during search, CPU execution often outperforms GPU due to kernel dispatch overhead. GPU acceleration provides benefit for:
-
-\begin{itemize}
-\item Batch evaluation of multiple positions
-\item Full accumulator recomputation
-\item Move scoring across large move lists
-\item SEE calculations for move ordering
-\end{itemize}
-
-The decision logic considers batch size and current GPU utilization:
-
-\begin{equation}
-\text{use\_gpu} = (\text{batch\_size} > \text{threshold}) \land (\text{gpu\_available})
-\end{equation}
-
-where threshold is empirically determined (typically 8-16 positions).
-
-\section{GPU Operations}
-
-\subsection{Batch Move Generation}
-
-The GPU assists with move generation through parallel piece processing:
-
-\begin{itemize}
-\item Pawn move generation: 8 threads per position (one per potential pawn)
-\item Knight move generation: 2 threads per position
-\item King move generation: 1 thread per position
-\end{itemize}
-
-Attack tables (pawn attacks, knight attacks, king attacks) are uploaded to GPU memory once during initialization.
-
-\subsection{Static Exchange Evaluation}
-
-SEE calculations for move ordering are parallelized across positions:
-
-\begin{algorithm}
-\caption{Batch SEE Kernel}
-\begin{algorithmic}[1]
-\Procedure{BatchSEE}{positions, moves, results}
-    \State $idx \gets$ thread\_position\_in\_grid
-    \State $pos \gets positions[idx]$
-    \State $move \gets moves[idx]$
-    \State $results[idx] \gets$ compute\_see($pos$, $move$)
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-\subsection{Zobrist Hashing}
-
-Position hashing is accelerated for batch operations:
-
-\begin{lstlisting}[style=metalstyle, caption={GPU Zobrist Hash Computation}]
-kernel void compute_zobrist_hash(
-    device const GPUPosition* positions,
-    device const uint64_t* piece_keys,
-    device uint64_t* hashes,
-    uint gid [[thread_position_in_grid]])
-{
-    uint64_t hash = 0;
-    for (int sq = 0; sq < 64; sq++) {
-        int piece = positions[gid].board[sq];
-        if (piece != NO_PIECE)
-            hash ^= piece_keys[piece * 64 + sq];
+    device_ = MTL::CreateSystemDefaultDevice();
+    if (!device_) {
+        throw std::runtime_error(
+            "Failed to create Metal device");
     }
-    // Add castling, en passant, side to move
-    hashes[gid] = hash;
+    queue_ = device_->newCommandQueue();
+    architecture_ = device_->name()->utf8String();
 }
 \end{lstlisting}
 
-\section{Evaluation and Results}
+Buffer allocation uses shared storage mode to enable unified memory access, allowing both CPU code (via \texttt{buffer->contents()}) and GPU kernels to access the same memory without explicit transfers.
 
-\subsection{Test Suite}
+\begin{lstlisting}[style=cppstyle, caption={Buffer allocation with shared storage mode for unified memory access}]
+bool GPUNNUEWeights::allocate(MTL::Device* device) {
+    MTL::ResourceOptions options = 
+        MTL::ResourceStorageModeShared;
+    
+    ft_weights = device->newBuffer(
+        FT_IN_DIMS * FT_OUT_DIMS * sizeof(int16_t),
+        options);
+    ft_biases = device->newBuffer(
+        FT_OUT_DIMS * sizeof(int16_t),
+        options);
+    return ft_weights && ft_biases;
+}
+\end{lstlisting}
 
-MetalFish includes a comprehensive test suite validating correctness:
+\section{Experimental Results}
 
-\begin{table}[H]
-\caption{Test Suite Coverage}
-\centering
-\begin{tabular}{lrr}
-\toprule
-Category & Tests & Status \\
-\midrule
-Bitboard Operations & 8 & Pass \\
-Position Handling & 12 & Pass \\
-Move Generation & 15 & Pass \\
-Search Components & 10 & Pass \\
-Metal GPU Backend & 8 & Pass \\
-GPU NNUE & 10 & Pass \\
-UCI Protocol & 9 & Pass \\
-Perft Verification & 30 & Pass \\
-\midrule
-\textbf{Total} & \textbf{102} & \textbf{All Pass} \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{Move Generation Verification}
 
-\subsection{Perft Verification}
-
-Move generation correctness is verified through perft (performance test) calculations:
+Move generation correctness is verified through perft (performance test) calculations, which count the number of leaf nodes at a given depth. Table~\ref{tab:perft} shows results for the standard starting position.
 
 \begin{table}[H]
-\caption{Perft Results (Starting Position)}
+\caption{Perft results for the standard chess starting position. All values match established correct results, validating move generation and position update logic.}
+\label{tab:perft}
 \centering
 \begin{tabular}{rr}
 \toprule
@@ -350,118 +317,133 @@ Depth & Nodes \\
 \end{tabular}
 \end{table}
 
-All perft results match the established correct values, validating move generation and position update logic.
+Additional perft tests verify correctness for complex positions including the Kiwipete position (depth 5: 193,690,690 nodes), positions with en passant, castling rights, and promotion scenarios.
 
-\subsection{GPU Performance Characteristics}
+\subsection{GPU Backend Validation}
 
-Testing on Apple M2 Max demonstrates unified memory benefits:
+Table~\ref{tab:gpu_info} presents hardware characteristics reported by the Metal backend during initialization on an Apple M2 Max system.
 
 \begin{table}[H]
-\caption{GPU Backend Characteristics (M2 Max)}
+\caption{GPU backend characteristics reported during MetalFish initialization on Apple M2 Max hardware.}
+\label{tab:gpu_info}
 \centering
 \begin{tabular}{lr}
 \toprule
-Metric & Value \\
+Property & Value \\
 \midrule
-Device & Apple M2 Max \\
-Unified Memory & Yes \\
-Max Buffer Size & 19,169 MB \\
-Max Threadgroup Memory & 32,768 bytes \\
-Max Threads/Threadgroup & 1,024 \\
+Device Name & Apple M2 Max \\
+Unified Memory & Enabled \\
+Maximum Buffer Size & 19,169 MB \\
+Maximum Threadgroup Memory & 32,768 bytes \\
+Maximum Threads per Threadgroup & 1,024 \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsection{Test Suite Results}
+
+MetalFish includes unit tests covering core functionality. Table~\ref{tab:tests} summarizes the test categories and results.
+
+\begin{table}[H]
+\caption{Test suite results validating MetalFish components. All tests pass, confirming correct implementation of core functionality.}
+\label{tab:tests}
+\centering
+\begin{tabular}{lr}
+\toprule
+Test Category & Result \\
+\midrule
+Bitboard Operations & Pass \\
+Position Representation & Pass \\
+Move Generation & Pass \\
+Search Components (History, SEE, TT) & Pass \\
+Metal GPU Backend & Pass \\
+GPU NNUE Kernels & Pass \\
+UCI Protocol Handling & Pass \\
+Perft Verification & Pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{GPU Memory Utilization}
+
+Table~\ref{tab:memory} shows GPU memory allocation for NNUE evaluation, as reported by the engine during initialization.
+
+\begin{table}[H]
+\caption{GPU memory allocation for NNUE evaluation components.}
+\label{tab:memory}
+\centering
+\begin{tabular}{lr}
+\toprule
+Component & Allocation \\
+\midrule
+Feature Transformer Weights & 45,056 KB \\
+Feature Transformer Biases & 2 KB \\
+PSQT Weights & 704 KB \\
+FC Layer Weights & 137 KB \\
+Working Buffers & 2,296 KB \\
+\midrule
+Total GPU Memory & 48,195 KB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion}
 
 \subsection{Hybrid Execution Trade-offs}
 
-Empirical observation reveals important trade-offs:
+Our implementation reveals important trade-offs in hybrid CPU-GPU chess engine design:
 
-\textbf{GPU Overhead:} For single-position evaluation, kernel dispatch and synchronization overhead (approximately 10-50$\mu$s) can exceed the computation time, making CPU evaluation faster for individual positions.
+\textbf{Kernel Dispatch Overhead:} GPU kernel dispatch and synchronization introduce latency that can exceed computation time for single-position evaluation. The Metal command buffer creation, encoding, commit, and wait cycle imposes overhead that favors CPU execution for individual positions.
 
-\textbf{Batch Threshold:} GPU acceleration provides net benefit when batch size exceeds 8-16 positions, where parallel execution amortizes dispatch overhead.
+\textbf{Batch Amortization:} GPU acceleration provides benefit when evaluating multiple positions simultaneously, amortizing dispatch overhead across the batch. Our observations suggest batch sizes of 8--16 positions or more are needed for GPU execution to outperform CPU.
 
-\textbf{Unified Memory Benefit:} Zero-copy data sharing eliminates the 1-10$\mu$s PCIe transfer latency per operation that would exist on discrete GPU systems, enabling finer-grained CPU-GPU cooperation.
+\textbf{Unified Memory Advantage:} The unified memory architecture eliminates explicit data copying between CPU and GPU address spaces. This enables the hybrid approach where CPU search code and GPU evaluation share data structures directly through pointer access.
 
-\subsection{Memory Utilization}
+\subsection{Search Algorithm Considerations}
 
-GPU memory allocation for NNUE evaluation:
+The sequential nature of alpha-beta search with pruning fundamentally limits GPU parallelization. Cutoff decisions depend on results from previously searched moves, creating data dependencies that serialize execution. Our hybrid approach accepts this limitation by keeping search on CPU while accelerating the evaluation function.
 
-\begin{table}[H]
-\caption{GPU Memory Allocation}
-\centering
-\begin{tabular}{lr}
-\toprule
-Component & Size \\
-\midrule
-Feature Transformer Weights & 45 MB \\
-FC Layer Weights & 2 MB \\
-Accumulator Buffers & 8 KB \\
-Working Buffers & 2.3 MB \\
-\midrule
-\textbf{Total} & \textbf{$\sim$50 MB} \\
-\bottomrule
-\end{tabular}
-\end{table}
+The history heuristics (butterfly, capture, continuation) require frequent small updates during search that would incur significant GPU synchronization overhead. Maintaining these tables on CPU and accessing them directly avoids this overhead.
 
-\section{Implementation Challenges}
+\subsection{Limitations}
 
-\subsection{Branch Divergence}
-
-Alpha-beta search's conditional pruning creates severe branch divergence on GPU. Our solution maintains all search logic on CPU, using GPU only for evaluation where computation is more regular.
-
-\subsection{Incremental Update Complexity}
-
-NNUE's incremental update mechanism, while efficient on CPU, requires careful GPU implementation. We maintain both full recomputation and incremental update kernels, selecting based on the number of changed features.
-
-\subsection{Synchronization Overhead}
-
-GPU kernel dispatch and synchronization introduce latency that dominates small workloads. The hybrid approach mitigates this by batching GPU operations and using CPU for latency-sensitive single-position evaluation.
-
-\subsection{Memory Coherency}
-
-While unified memory eliminates explicit copies, cache coherency still requires attention. We structure data access patterns to minimize coherency traffic between CPU and GPU caches.
-
-\section{Limitations and Future Work}
-
-\subsection{Current Limitations}
+Several limitations affect the current implementation:
 
 \begin{itemize}
-\item GPU acceleration limited to evaluation; search remains CPU-bound
-\item Single-position evaluation faster on CPU due to dispatch overhead
-\item NNUE network training not included (uses pre-trained Stockfish networks)
-\item Syzygy tablebase interface implemented but file loading pending
+\item GPU acceleration is limited to evaluation; the search algorithm executes entirely on CPU
+\item Single-position evaluation is faster on CPU due to kernel dispatch overhead
+\item The implementation uses pre-trained NNUE networks; training is not included
+\item Syzygy tablebase probing interface is implemented but file loading is not complete
 \end{itemize}
 
-\subsection{Future Directions}
+\section{Related Work}
 
-\textbf{Parallel Best-First Search:} Investigating GPU-friendly search algorithms that maintain evaluation quality while enabling parallelism.
+Fat Fritz combined Stockfish's alpha-beta search with GPU-accelerated neural network evaluation, demonstrating the viability of hybrid approaches. Our work extends this direction to unified memory architectures where CPU-GPU data sharing is more efficient.
 
-\textbf{Batch Search:} Exploring simultaneous search of multiple positions to amortize GPU overhead.
-
-\textbf{Network Architecture:} Designing NNUE architectures optimized for GPU execution patterns.
-
-\textbf{Cross-Platform:} Extending to CUDA for NVIDIA GPUs while maintaining the unified memory approach on supported platforms.
+The MLX framework from Apple provides high-level abstractions for GPU computing on Apple Silicon. MetalFish uses lower-level Metal APIs for finer control over kernel execution and memory management.
 
 \section{Conclusion}
 
-MetalFish demonstrates that practical GPU-accelerated chess engines are achievable through careful hybrid architecture design. By maintaining traditional alpha-beta search on CPU while offloading evaluation to GPU, we preserve tactical precision while leveraging GPU parallelism where beneficial.
+MetalFish demonstrates that hybrid CPU-GPU chess engines are practical on unified memory architectures. By maintaining alpha-beta search on CPU while accelerating NNUE evaluation on GPU, we preserve the tactical precision of traditional search while leveraging GPU parallelism for neural network inference.
 
-The unified memory architecture of Apple Silicon proves particularly valuable, enabling zero-copy data sharing that makes fine-grained CPU-GPU cooperation practical. Our implementation achieves full correctness across 102 tests while providing GPU-accelerated NNUE evaluation.
+The unified memory architecture of Apple Silicon proves valuable for this hybrid approach, enabling zero-copy data sharing between CPU search routines and GPU evaluation kernels. This eliminates the transfer overhead that would otherwise penalize fine-grained CPU-GPU cooperation.
 
-Key insights from this implementation:
+Key findings from this implementation:
 
 \begin{enumerate}
-\item Hybrid CPU-GPU approaches outperform pure GPU implementations for alpha-beta search due to sequential dependencies
-\item Unified memory eliminates transfer overhead, enabling practical hybrid execution
-\item GPU acceleration provides benefit for batch operations but not single-position evaluation
-\item Comprehensive testing is essential for validating complex hybrid systems
+\item Alpha-beta search's sequential dependencies make full GPU parallelization impractical; hybrid approaches are more effective
+\item Unified memory enables efficient CPU-GPU cooperation without explicit data transfers
+\item GPU kernel dispatch overhead favors CPU execution for single-position evaluation
+\item Batch processing amortizes GPU overhead, providing benefit for multi-position evaluation
 \end{enumerate}
 
-The MetalFish codebase provides a foundation for future research in GPU-accelerated game tree search, demonstrating both the possibilities and practical limitations of current approaches.
+The MetalFish implementation provides a foundation for future research in GPU-accelerated game tree search on unified memory systems.
 
 \section*{Acknowledgments}
 
-The author thanks the Stockfish development team for their open-source contributions that informed this implementation, and the Leela Chess Zero team for advancing neural network chess evaluation. Special recognition to the Metal and MLX teams at Apple for GPU programming resources.
+The author thanks the Stockfish development team for their open-source contributions that informed this implementation, and the Leela Chess Zero team for advancing neural network chess evaluation.
+
+\newpage
 
 %
 % ---- Bibliography ----
@@ -469,13 +451,21 @@ The author thanks the Stockfish development team for their open-source contribut
 \begin{thebibliography}{15}
 %
 
-\bibitem{Reinefeld1983}
-Reinefeld, A.: An improvement to the scout tree-search algorithm.
-ICCA Journal, 6(4), 4--14 (1983)
-
 \bibitem{Romstad2004}
 Romstad, T., Costalba, M., Kiiski, J.: Stockfish: A strong open source chess engine.
 \url{https://stockfishchess.org/} (2008)
+
+\bibitem{Nickolls2008}
+Nickolls, J., Buck, I., Garland, M., Skadron, K.: Scalable parallel programming with CUDA.
+Queue, 6(2), 40--53 (2008)
+
+\bibitem{Knuth1975}
+Knuth, D.E., Moore, R.W.: An analysis of alpha-beta pruning.
+Artificial Intelligence, 6(4), 293--326 (1975)
+
+\bibitem{Reinefeld1983}
+Reinefeld, A.: An improvement to the scout tree-search algorithm.
+ICCA Journal, 6(4), 4--14 (1983)
 
 \bibitem{Nasu2018}
 Nasu, Y.: NNUE: Efficiently updatable neural networks for board game position evaluation.
@@ -486,37 +476,25 @@ Leela Chess Zero Team: Leela chess zero: Neural network chess engine.
 \url{https://lczero.org/} (2024)
 
 \bibitem{Apple2023}
-Apple Inc.: Metal performance shaders optimization guide.
+Apple Inc.: Metal programming guide.
 Technical report, Apple Inc. (2023).
-\url{https://developer.apple.com/documentation/metalperformanceshaders}
+\url{https://developer.apple.com/metal/}
 
-\bibitem{Knuth1975}
-Knuth, D.E., Moore, R.W.: An analysis of alpha-beta pruning.
-Artificial Intelligence, 6(4), 293--326 (1975)
-
-\bibitem{Silver2017}
-Silver, D., et al.: Mastering chess and shogi by self-play with a general reinforcement learning algorithm.
-arXiv preprint arXiv:1712.01815 (2017)
+\bibitem{Zobrist1970}
+Zobrist, A.L.: A new hashing method with application for game playing.
+ICCA Journal, 13(2), 69--73 (1970)
 
 \bibitem{Campbell2002}
 Campbell, M., Hoane Jr., A.J., Hsu, F.: Deep blue.
 Artificial Intelligence, 134(1-2), 57--83 (2002)
 
-\bibitem{NVIDIA2023}
-NVIDIA Corporation: CUDA C++ programming guide.
-Technical report, NVIDIA Corporation (2023)
-
-\bibitem{Nickolls2008}
-Nickolls, J., Buck, I., Garland, M., Skadron, K.: Scalable parallel programming with CUDA.
-Queue, 6(2), 40--53 (2008)
+\bibitem{Silver2017}
+Silver, D., et al.: Mastering chess and shogi by self-play with a general reinforcement learning algorithm.
+arXiv preprint arXiv:1712.01815 (2017)
 
 \bibitem{Korf1985}
 Korf, R.E.: Depth-first iterative-deepening: An optimal admissible tree search.
 Artificial Intelligence, 27(1), 97--109 (1985)
-
-\bibitem{Zobrist1970}
-Zobrist, A.L.: A new hashing method with application for game playing.
-ICCA Journal, 13(2), 69--73 (1970)
 
 \bibitem{Beal1989}
 Beal, D.F.: Experiments with the null move.
@@ -525,10 +503,6 @@ Advances in Computer Chess, 5, 65--79 (1989)
 \bibitem{Heinz2000}
 Heinz, E.A.: Adaptive null-move pruning.
 ICGA Journal, 23(3), 123--132 (2000)
-
-\bibitem{Coulom2006}
-Coulom, R.: Efficient selectivity and backup operators in monte-carlo tree search.
-In: Computers and Games, LNCS vol. 4630, pp. 72--83. Springer (2006)
 
 \end{thebibliography}
 \end{document}
