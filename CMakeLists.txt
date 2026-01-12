@@ -246,6 +246,32 @@ if(BUILD_TESTS)
   add_test(NAME MetalFishTests COMMAND metalfish_tests)
 endif()
 
+# Paper benchmark executable
+add_executable(
+  paper_benchmark
+  src/paper_benchmark.cpp
+  ${METAL_SOURCES}
+  ${CORE_SOURCES}
+  ${SEARCH_SOURCES}
+  ${EVAL_SOURCES}
+  ${UCI_SOURCES}
+  ${SYZYGY_SOURCES})
+
+target_include_directories(paper_benchmark PRIVATE ${CMAKE_SOURCE_DIR}/include
+                                                   ${METAL_CPP_DIR})
+
+if(APPLE)
+  target_link_libraries(
+    paper_benchmark ${METAL_LIBRARY} ${FOUNDATION_LIBRARY}
+    ${QUARTZCORE_LIBRARY} "-framework MetalPerformanceShaders")
+
+  target_compile_definitions(
+    paper_benchmark
+    PRIVATE METAL_PATH="${CMAKE_BINARY_DIR}/metalfish.metallib")
+endif()
+
+target_compile_options(paper_benchmark PRIVATE -Wall -Wextra -O3 -DNDEBUG)
+
 # Install
 install(TARGETS metalfish DESTINATION bin)
 if(EXISTS ${METALLIB_OUTPUT})
