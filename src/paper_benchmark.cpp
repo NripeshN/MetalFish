@@ -22,6 +22,7 @@
 #include "search/search.h"
 #include "search/tt.h"
 #include "uci/uci.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -46,22 +47,33 @@ const std::vector<std::string> TestPositions = {
 
 struct BenchmarkResult {
   double mean_us;
+  double median_us;
   double stddev_us;
   double min_us;
   double max_us;
+  double p95_us;
+  double p99_us;
   int samples;
 };
 
-BenchmarkResult compute_stats(const std::vector<double> &times) {
+BenchmarkResult compute_stats(std::vector<double> times) {
   BenchmarkResult r;
   r.samples = times.size();
   if (times.empty()) {
-    r.mean_us = r.stddev_us = r.min_us = r.max_us = 0;
+    r.mean_us = r.median_us = r.stddev_us = r.min_us = r.max_us = r.p95_us =
+        r.p99_us = 0;
     return r;
   }
+
+  // Sort for percentiles
+  std::sort(times.begin(), times.end());
+
   r.mean_us = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
-  r.min_us = *std::min_element(times.begin(), times.end());
-  r.max_us = *std::max_element(times.begin(), times.end());
+  r.min_us = times.front();
+  r.max_us = times.back();
+  r.median_us = times[times.size() / 2];
+  r.p95_us = times[static_cast<size_t>(times.size() * 0.95)];
+  r.p99_us = times[static_cast<size_t>(times.size() * 0.99)];
 
   double sq_sum = 0;
   for (auto t : times)
@@ -71,29 +83,66 @@ BenchmarkResult compute_stats(const std::vector<double> &times) {
   return r;
 }
 
-void print_result(const std::string &name, const BenchmarkResult &r) {
+void print_result(const std::string &name, const BenchmarkResult &r,
+                  bool use_ns = false) {
   std::cout << std::fixed << std::setprecision(2);
-  std::cout << name << ": " << r.mean_us << " us (+/-" << r.stddev_us
-            << "), min=" << r.min_us << ", max=" << r.max_us
-            << " [n=" << r.samples << "]" << std::endl;
+  if (use_ns) {
+    // Convert to nanoseconds for CPU measurements
+    std::cout << name << ":" << std::endl;
+    std::cout << "  Mean:   " << (r.mean_us * 1000) << " ns" << std::endl;
+    std::cout << "  Median: " << (r.median_us * 1000) << " ns" << std::endl;
+    std::cout << "  Std:    " << (r.stddev_us * 1000) << " ns" << std::endl;
+    std::cout << "  Min:    " << (r.min_us * 1000) << " ns" << std::endl;
+    std::cout << "  Max:    " << (r.max_us * 1000) << " ns" << std::endl;
+    std::cout << "  P95:    " << (r.p95_us * 1000) << " ns" << std::endl;
+    std::cout << "  P99:    " << (r.p99_us * 1000) << " ns" << std::endl;
+    std::cout << "  [n=" << r.samples << "]" << std::endl;
+  } else {
+    std::cout << name << ":" << std::endl;
+    std::cout << "  Mean:   " << r.mean_us << " us" << std::endl;
+    std::cout << "  Median: " << r.median_us << " us" << std::endl;
+    std::cout << "  Std:    " << r.stddev_us << " us" << std::endl;
+    std::cout << "  Min:    " << r.min_us << " us" << std::endl;
+    std::cout << "  Max:    " << r.max_us << " us" << std::endl;
+    std::cout << "  P95:    " << r.p95_us << " us" << std::endl;
+    std::cout << "  P99:    " << r.p99_us << " us" << std::endl;
+    std::cout << "  [n=" << r.samples << "]" << std::endl;
+  }
+}
+
+void print_latex_table_row(const std::string &name, const BenchmarkResult &r,
+                           bool use_ns = false) {
+  std::cout << std::fixed << std::setprecision(0);
+  if (use_ns) {
+    std::cout << name << " & " << (r.mean_us * 1000) << " & "
+              << (r.median_us * 1000) << " & " << (r.p95_us * 1000) << " & "
+              << (r.p99_us * 1000) << " & " << (r.min_us * 1000) << " & "
+              << (r.max_us * 1000) << " \\\\" << std::endl;
+  } else {
+    std::cout << std::setprecision(1);
+    std::cout << name << " & " << r.mean_us << " & " << r.median_us << " & "
+              << r.p95_us << " & " << r.p99_us << " & " << r.min_us << " & "
+              << r.max_us << " \\\\" << std::endl;
+  }
 }
 
 // ============================================================================
 // Benchmark 1: CPU Single-Position Evaluation (end-to-end)
 // ============================================================================
 void benchmark_cpu_eval(const std::vector<Position *> &positions) {
-  std::cout << "\n=== CPU Single-Position Evaluation (End-to-End) ==="
+  std::cout << "\n=== CPU Single-Position Evaluation ===" << std::endl;
+  std::cout << "Timing scope: Eval::evaluate() call" << std::endl;
+  std::cout << "  - Includes: NNUE accumulator lookup/refresh + forward pass"
             << std::endl;
-  std::cout << "Measures: Full CPU NNUE evaluation including all layers"
-            << std::endl;
+  std::cout << "  - Excludes: Position setup, move generation" << std::endl;
 
-  const int warmup = 100;
-  const int iterations = 10000;
+  const int warmup = 1000;
+  const int iterations = 50000;
 
   std::vector<double> times;
   times.reserve(iterations * positions.size());
 
-  // Warmup
+  // Warmup - also primes NNUE accumulators
   for (int i = 0; i < warmup; i++) {
     for (auto *pos : positions) {
       volatile Value v = Eval::evaluate(*pos);
@@ -113,33 +162,26 @@ void benchmark_cpu_eval(const std::vector<Position *> &positions) {
   }
 
   auto stats = compute_stats(times);
-  print_result("CPU eval (single position)", stats);
+  print_result("CPU eval (Eval::evaluate call)", stats, true); // Use ns
 
-  // Also measure batch timing to get more stable numbers
-  std::vector<double> batch_times;
-  for (int i = 0; i < 1000; i++) {
-    auto start = high_resolution_clock::now();
-    for (auto *pos : positions) {
-      volatile Value v = Eval::evaluate(*pos);
-      (void)v;
-    }
-    auto end = high_resolution_clock::now();
-    batch_times.push_back(duration<double, std::micro>(end - start).count() /
-                          positions.size());
-  }
-  auto batch_stats = compute_stats(batch_times);
-  print_result("CPU eval (batch avg)", batch_stats);
+  std::cout << "\nLaTeX table row (ns):" << std::endl;
+  print_latex_table_row("CPU NNUE", stats, true);
 }
 
 // ============================================================================
 // Benchmark 2: GPU Single-Position Evaluation (end-to-end)
 // ============================================================================
 void benchmark_gpu_eval_single(const std::vector<Position *> &positions) {
-  std::cout << "\n=== GPU Single-Position Evaluation (End-to-End) ==="
+  std::cout << "\n=== GPU Single-Position Evaluation (Synchronous) ==="
             << std::endl;
-  std::cout << "Measures: Command buffer create + encode + commit + "
-               "waitUntilCompleted"
+  std::cout << "Timing scope: Full Metal dispatch cycle" << std::endl;
+  std::cout << "  - Includes: Feature extraction, buffer copy, command buffer "
+               "create,"
             << std::endl;
+  std::cout << "              encoder setup, buffer binding, commit(), "
+               "waitUntilCompleted()"
+            << std::endl;
+  std::cout << "  - This is BLOCKING latency (not async)" << std::endl;
 
   auto &gpu = Eval::gpu_nnue();
   if (!gpu.is_ready()) {
@@ -147,8 +189,8 @@ void benchmark_gpu_eval_single(const std::vector<Position *> &positions) {
     return;
   }
 
-  const int warmup = 20;
-  const int iterations = 200; // Fewer iterations since GPU is slow
+  const int warmup = 50;
+  const int iterations = 500; // Fewer iterations since GPU is slow
 
   std::vector<double> times;
   times.reserve(iterations * positions.size());
@@ -173,23 +215,21 @@ void benchmark_gpu_eval_single(const std::vector<Position *> &positions) {
   }
 
   auto stats = compute_stats(times);
-  print_result("GPU eval (single position, end-to-end)", stats);
+  print_result("GPU eval (synchronous dispatch)", stats, false); // Use us
 
-  // Calculate overhead ratio
-  std::cout << "\nNote: This includes full Metal dispatch overhead:" << std::endl;
-  std::cout << "  - MTLCommandBuffer creation" << std::endl;
-  std::cout << "  - Compute encoder setup" << std::endl;
-  std::cout << "  - Buffer binding" << std::endl;
-  std::cout << "  - commit() + waitUntilCompleted()" << std::endl;
+  std::cout << "\nLaTeX table row (us):" << std::endl;
+  print_latex_table_row("GPU NNUE (sync)", stats, false);
 }
 
 // ============================================================================
 // Benchmark 3: GPU Batch Evaluation (varying batch sizes)
 // ============================================================================
 void benchmark_gpu_batch(const std::vector<Position *> &positions) {
-  std::cout << "\n=== GPU Batch Evaluation (End-to-End) ===" << std::endl;
-  std::cout << "Measures: Full batch dispatch including all overhead"
+  std::cout << "\n=== GPU Batch Evaluation (Sequential Dispatches) ==="
             << std::endl;
+  std::cout << "Note: Each position triggers a separate command buffer cycle."
+            << std::endl;
+  std::cout << "      This is NOT true kernel-level batching." << std::endl;
 
   auto &gpu = Eval::gpu_nnue();
   if (!gpu.is_ready()) {
@@ -201,7 +241,7 @@ void benchmark_gpu_batch(const std::vector<Position *> &positions) {
   const int iterations = 100;
 
   std::cout << std::endl;
-  std::cout << std::setw(10) << "Batch" << std::setw(18) << "Total Time (us)"
+  std::cout << std::setw(10) << "Batch" << std::setw(18) << "Total (us)"
             << std::setw(18) << "Per-pos (us)" << std::setw(18) << "Throughput"
             << std::endl;
   std::cout << std::string(64, '-') << std::endl;
@@ -239,27 +279,32 @@ void benchmark_gpu_batch(const std::vector<Position *> &positions) {
     double per_pos = stats.mean_us / batch_size;
     double throughput = 1000000.0 / per_pos; // positions per second
 
-    std::cout << std::fixed << std::setprecision(2);
+    std::cout << std::fixed << std::setprecision(1);
     std::cout << std::setw(10) << batch_size << std::setw(18) << stats.mean_us
               << std::setw(18) << per_pos << std::setw(18) << (int)throughput
               << std::endl;
   }
 
-  std::cout << "\nNote: Sequential GPU calls - no true batching yet." << std::endl;
-  std::cout << "Throughput limited by per-call dispatch overhead." << std::endl;
+  std::cout << "\nConclusion: Per-position cost is constant (~750 us) because"
+            << std::endl;
+  std::cout << "each evaluation requires a full dispatch cycle." << std::endl;
 }
 
 // ============================================================================
 // Benchmark 4: CPU/GPU Evaluation Equivalence Check
 // ============================================================================
 void benchmark_eval_equivalence(const std::vector<Position *> &positions) {
-  std::cout << "\n=== CPU/GPU Evaluation Equivalence ===" << std::endl;
+  std::cout << "\n=== CPU/GPU Evaluation Comparison ===" << std::endl;
 
   auto &gpu = Eval::gpu_nnue();
   if (!gpu.is_ready()) {
     std::cout << "GPU NNUE not available, skipping" << std::endl;
     return;
   }
+
+  std::cout << "Note: CPU uses full NNUE with loaded weights." << std::endl;
+  std::cout << "      GPU uses separate weight loading (may differ)."
+            << std::endl;
 
   int matches = 0;
   int total = 0;
@@ -289,10 +334,11 @@ void benchmark_eval_equivalence(const std::vector<Position *> &positions) {
             << std::endl;
 
   if (max_diff > 100) {
-    std::cout << "\n  WARNING: Large differences indicate GPU NNUE weights may "
-                 "not be loaded."
-              << std::endl;
-    std::cout << "  GPU is likely using fallback material evaluation."
+    std::cout
+        << "\n  Note: Differences indicate GPU path uses different weights"
+        << std::endl;
+    std::cout << "  or fallback evaluation. This is expected in current "
+                 "implementation."
               << std::endl;
   }
 }
@@ -309,10 +355,12 @@ void benchmark_crossover(const std::vector<Position *> &positions) {
     return;
   }
 
-  // Measure CPU single eval
-  const int iterations = 5000;
+  // Measure CPU single eval with high precision
+  const int cpu_iterations = 100000;
   std::vector<double> cpu_times;
-  for (int i = 0; i < iterations; i++) {
+  cpu_times.reserve(cpu_iterations);
+
+  for (int i = 0; i < cpu_iterations; i++) {
     auto start = high_resolution_clock::now();
     volatile Value v = Eval::evaluate(*positions[0]);
     (void)v;
@@ -322,8 +370,11 @@ void benchmark_crossover(const std::vector<Position *> &positions) {
   auto cpu_stats = compute_stats(cpu_times);
 
   // Measure GPU single eval
+  const int gpu_iterations = 500;
   std::vector<double> gpu_times;
-  for (int i = 0; i < 200; i++) {
+  gpu_times.reserve(gpu_iterations);
+
+  for (int i = 0; i < gpu_iterations; i++) {
     auto start = high_resolution_clock::now();
     volatile Value v = gpu.evaluate(*positions[0]);
     (void)v;
@@ -332,16 +383,22 @@ void benchmark_crossover(const std::vector<Position *> &positions) {
   }
   auto gpu_stats = compute_stats(gpu_times);
 
-  double ratio = gpu_stats.mean_us / cpu_stats.mean_us;
+  double ratio = gpu_stats.median_us / cpu_stats.median_us;
 
   std::cout << std::fixed << std::setprecision(2);
-  std::cout << "CPU single eval: " << cpu_stats.mean_us << " us" << std::endl;
-  std::cout << "GPU single eval: " << gpu_stats.mean_us << " us" << std::endl;
+  std::cout << "CPU single eval (median): " << (cpu_stats.median_us * 1000)
+            << " ns" << std::endl;
+  std::cout << "GPU single eval (median): " << gpu_stats.median_us << " us"
+            << std::endl;
   std::cout << "Ratio (GPU/CPU): " << ratio << "x" << std::endl;
   std::cout << "\nCrossover batch size (theoretical): " << (int)ratio
             << " positions" << std::endl;
-  std::cout << "  (GPU becomes competitive when amortizing " << (int)ratio
-            << " positions per dispatch)" << std::endl;
+  std::cout << "  For GPU to match CPU throughput, each dispatch must"
+            << std::endl;
+  std::cout << "  evaluate ~" << (int)ratio
+            << " positions in a single kernel invocation." << std::endl;
+  std::cout << "  (Current implementation dispatches one position per call.)"
+            << std::endl;
 }
 
 // ============================================================================

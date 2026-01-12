@@ -56,7 +56,7 @@
 \maketitle
 
 \begin{abstract}
-We present MetalFish, a hybrid CPU-GPU chess engine implementing Stockfish-style alpha-beta search with Metal GPU acceleration on Apple Silicon unified memory architecture. Our empirical evaluation reveals a fundamental challenge: GPU kernel dispatch overhead (766~$\mu$s) exceeds CPU NNUE evaluation time (0.11~$\mu$s) by 6,900$\times$ for single positions, making GPU acceleration counterproductive for traditional tree search. This overhead arises from Metal command buffer creation, encoding, and synchronization---inherent costs that cannot be amortized without batching thousands of positions. We present detailed measurements of these overheads and discuss the architectural implications for GPU-accelerated game engines. The implementation achieves 1.43 million nodes per second using CPU evaluation and correctly computes perft values for all standard test positions. Our findings provide empirical guidance for when GPU acceleration is beneficial versus harmful in sequential game tree search.
+We present MetalFish, a hybrid CPU-GPU chess engine implementing Stockfish-style alpha-beta search with Metal GPU acceleration on Apple Silicon unified memory architecture. Our empirical evaluation reveals a fundamental challenge: GPU kernel dispatch overhead (703~$\mu$s median) exceeds CPU NNUE evaluation time (84~ns median) by approximately 8,400$\times$ for single positions, making GPU acceleration counterproductive for traditional tree search. This overhead arises from Metal command buffer creation, encoding, and synchronization---inherent costs that cannot be amortized without batching thousands of positions per dispatch. We present detailed measurements including percentile distributions and discuss the architectural implications for GPU-accelerated game engines. The implementation achieves 1.43 million nodes per second using CPU evaluation. Our findings suggest that GPU acceleration for chess engines is most effective when combined with batch-oriented search algorithms such as MCTS, rather than traditional alpha-beta search.
 
 \keywords{Chess Engine, GPU Computing, Metal, NNUE, Unified Memory, Apple Silicon}
 \end{abstract}
@@ -72,11 +72,11 @@ MetalFish investigates these challenges through a hybrid CPU-GPU architecture le
 This paper makes the following contributions:
 
 \begin{enumerate}
-\item An empirical characterization of Metal GPU dispatch overhead showing 766~$\mu$s end-to-end latency versus 0.11~$\mu$s for CPU evaluation---a 6,900$\times$ slowdown for single positions.
+\item An empirical characterization of Metal GPU dispatch overhead showing 703~$\mu$s median latency versus 84~ns for CPU evaluation---an 8,400$\times$ slowdown for single positions.
 
 \item Metal compute kernels for sparse feature transformation and incremental accumulator updates, demonstrating unified memory buffer allocation via \texttt{MTLResourceStorageModeShared}.
 
-\item Analysis of the crossover point: GPU acceleration requires batching approximately 7,000 positions per dispatch to match CPU throughput, making it impractical for traditional alpha-beta search.
+\item Analysis of the crossover point: GPU acceleration requires batching approximately 8,400 positions per dispatch to match CPU throughput, making it impractical for traditional alpha-beta search but potentially viable for MCTS or multi-position analysis.
 
 \item A complete, tested implementation achieving 1.43M nodes/second with correct perft results, providing a baseline for future GPU chess engine research.
 \end{enumerate}
@@ -205,53 +205,62 @@ All experiments conducted on Apple M2 Max (12-core CPU, 38-core GPU, 64GB unifie
 
 \subsection{Microbenchmarks: CPU vs GPU Evaluation}
 
-Table~\ref{tab:eval_latency} shows end-to-end evaluation latency for single positions, measured over 10,000 iterations (CPU) and 1,600 iterations (GPU) after warmup.
+Table~\ref{tab:eval_latency} shows evaluation latency for single positions. CPU measurements span 400,000 iterations; GPU measurements span 4,000 iterations, both after warmup.
+
+\textbf{CPU timing scope:} The \texttt{Eval::evaluate()} function call, which includes NNUE accumulator lookup (or refresh if needed) and forward pass through all network layers. Position setup and move generation are excluded.
+
+\textbf{GPU timing scope:} The complete synchronous dispatch cycle including feature extraction, buffer writes, \texttt{MTLCommandBuffer} creation, compute encoder setup, buffer binding, \texttt{commit()}, and \texttt{waitUntilCompleted()}. This represents blocking latency---the time until the evaluation result is available.
 
 \begin{table}[t]
-\caption{Single-position evaluation latency (microseconds). GPU measurement includes full Metal dispatch: command buffer creation, encoder setup, buffer binding, commit, and waitUntilCompleted.}
+\caption{Single-position evaluation latency. CPU times in nanoseconds; GPU times in microseconds. Percentiles capture timing variability from system scheduling, cache effects, and GPU driver behavior.}
 \label{tab:eval_latency}
 \centering
-\begin{tabular}{lrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
-Method & Mean & Std Dev & Min & Max \\
+Method & Mean & Median & P95 & P99 & Min & Max \\
 \midrule
-CPU NNUE (end-to-end) & 0.11 & 0.13 & 0.04 & 13.54 \\
-GPU NNUE (end-to-end) & 765.79 & 98.20 & 598.38 & 2654.79 \\
+CPU NNUE (ns) & 98 & 84 & 125 & 125 & 42 & 55,500 \\
+GPU sync ($\mu$s) & 724.8 & 702.9 & 872.8 & 1,175.0 & 547.5 & 2,731.2 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The GPU evaluation is approximately 6,900$\times$ slower for single positions. This overhead breakdown includes:
-\begin{itemize}
-\item \texttt{MTLCommandBuffer} creation
-\item Compute encoder setup and buffer binding
-\item \texttt{commit()} and \texttt{waitUntilCompleted()} synchronization
-\end{itemize}
+The GPU evaluation is approximately 8,400$\times$ slower (median-to-median) for single positions. The high CPU max (55~$\mu$s) reflects occasional cache misses or preemption; the median and P99 values (84--125~ns) better represent typical performance.
 
 \subsection{Batch Evaluation Analysis}
 
-Table~\ref{tab:batch} shows GPU evaluation performance when processing multiple positions sequentially. Note: these are sequential GPU dispatches, not true batched kernel execution.
+Table~\ref{tab:batch} shows GPU evaluation performance when processing multiple positions. Each position triggers a separate command buffer cycle (sequential dispatches), not true kernel-level batching.
 
 \begin{table}[t]
-\caption{GPU batch evaluation (sequential dispatches). Each position requires a separate command buffer cycle.}
+\caption{GPU batch evaluation with sequential dispatches. Per-position cost remains constant because each evaluation requires a full dispatch cycle.}
 \label{tab:batch}
 \centering
 \begin{tabular}{rrrr}
 \toprule
 Batch Size & Total Time ($\mu$s) & Per-Position ($\mu$s) & Throughput (pos/s) \\
 \midrule
-1 & 763 & 763.0 & 1,310 \\
-2 & 1,536 & 768.2 & 1,301 \\
-4 & 3,050 & 762.5 & 1,311 \\
-8 & 5,875 & 734.4 & 1,361 \\
-16 & 11,860 & 741.3 & 1,349 \\
-32 & 23,317 & 728.6 & 1,372 \\
-64 & 48,134 & 752.1 & 1,329 \\
+1 & 746 & 746 & 1,340 \\
+2 & 1,517 & 759 & 1,318 \\
+4 & 3,050 & 763 & 1,311 \\
+8 & 6,101 & 763 & 1,311 \\
+16 & 12,263 & 766 & 1,304 \\
+32 & 25,162 & 786 & 1,271 \\
+64 & 54,427 & 850 & 1,175 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Per-position cost remains approximately constant at 730--770~$\mu$s regardless of batch size, confirming that dispatch overhead dominates and cannot be amortized without true kernel-level batching.
+Per-position cost remains approximately constant at 750--850~$\mu$s regardless of batch size, confirming that dispatch overhead dominates and cannot be amortized without true kernel-level batching (evaluating multiple positions within a single dispatch).
+
+\subsection{Asynchronous Execution Considerations}
+
+Our measurements use synchronous GPU execution (\texttt{waitUntilCompleted()}), representing the worst-case blocking latency. Asynchronous execution could potentially overlap GPU work with CPU computation. However, in alpha-beta search, the evaluation result typically determines pruning decisions for sibling nodes, limiting opportunities for useful overlap. Asynchronous GPU evaluation may benefit:
+\begin{itemize}
+\item Multi-PV analysis where independent lines can be evaluated in parallel
+\item Speculative leaf evaluation with result caching
+\item Analysis modes that tolerate evaluation latency
+\end{itemize}
+We leave exploration of asynchronous strategies to future work.
 
 \subsection{Crossover Analysis}
 
@@ -265,31 +274,31 @@ Per-position cost remains approximately constant at 730--770~$\mu$s regardless o
     ymode=log,
     log basis x={10},
     log basis y={10},
-    xmin=1, xmax=10000,
-    ymin=0.1, ymax=10000,
+    xmin=1, xmax=20000,
+    ymin=0.05, ymax=20000,
     legend pos=north west,
     grid=major,
     width=0.85\columnwidth,
     height=6cm
 ]
-\addplot[blue, thick, domain=1:10000] {0.11*x};
-\addlegendentry{CPU (0.11~$\mu$s/pos)}
-\addplot[red, thick, domain=1:10000] {766};
-\addlegendentry{GPU dispatch (766~$\mu$s fixed)}
-\addplot[only marks, mark=*, green!60!black] coordinates {(6963, 766)};
-\addlegendentry{Crossover ($\approx$7000 pos)}
+\addplot[blue, thick, domain=1:20000] {0.084*x};
+\addlegendentry{CPU (84~ns/pos)}
+\addplot[red, thick, domain=1:20000] {703};
+\addlegendentry{GPU dispatch (703~$\mu$s)}
+\addplot[only marks, mark=*, green!60!black] coordinates {(8369, 703)};
+\addlegendentry{Crossover ($\approx$8,400 pos)}
 \end{axis}
 \end{tikzpicture}
-\caption{CPU vs GPU evaluation time. GPU dispatch overhead (766~$\mu$s) is fixed regardless of work. Crossover occurs at approximately 7,000 positions per dispatch.}
+\caption{CPU vs GPU evaluation time under a synchronous per-dispatch model. GPU dispatch overhead (703~$\mu$s) is approximately constant regardless of positions evaluated, as kernel compute time is small relative to dispatch overhead in our implementation. Crossover occurs at approximately 8,400 positions per dispatch.}
 \label{fig:crossover}
 \end{figure}
 
 The crossover point where GPU matches CPU throughput is:
 \begin{equation}
-N_{\text{crossover}} = \frac{T_{\text{GPU\_dispatch}}}{T_{\text{CPU\_eval}}} = \frac{766~\mu\text{s}}{0.11~\mu\text{s}} \approx 6,963
+N_{\text{crossover}} = \frac{T_{\text{GPU\_dispatch}}}{T_{\text{CPU\_eval}}} = \frac{703~\mu\text{s}}{84~\text{ns}} \approx 8,369
 \end{equation}
 
-GPU acceleration only becomes beneficial when batching approximately 7,000 positions per kernel dispatch. In traditional alpha-beta search, this is impractical because:
+GPU acceleration only becomes beneficial when batching approximately 8,400 positions per kernel dispatch. In traditional alpha-beta search, this is impractical because:
 \begin{enumerate}
 \item Search is sequential: each node depends on parent's bounds
 \item Pruning eliminates most nodes before evaluation
@@ -315,7 +324,7 @@ Nodes/Second & 1,427,100 \\
 \end{tabular}
 \end{table}
 
-This NPS is achieved using CPU NNUE evaluation exclusively, as GPU dispatch overhead would reduce throughput by orders of magnitude.
+This NPS is achieved using CPU NNUE evaluation exclusively. The single-threaded implementation provides a baseline; production engines typically achieve higher NPS through multi-threading (Lazy SMP) and additional optimizations.
 
 \subsection{Move Generation Verification}
 
@@ -347,51 +356,54 @@ Additional tests verify Kiwipete (depth 5: 193,690,690), en passant, castling, a
 
 Our measurements quantify a fundamental mismatch between GPU computing and traditional game tree search:
 
-\textbf{Dispatch overhead dominates:} The 766~$\mu$s GPU dispatch cost includes unavoidable Metal framework operations. Even with unified memory eliminating data transfer, the command buffer lifecycle imposes significant latency.
+\textbf{Dispatch overhead dominates:} The 703~$\mu$s GPU dispatch cost includes unavoidable Metal framework operations: command buffer allocation, encoder state management, and GPU-CPU synchronization. Even with unified memory eliminating data transfer, the command buffer lifecycle imposes significant latency.
 
 \textbf{Sequential dependencies prevent batching:} Alpha-beta search is inherently sequential---each node's evaluation affects pruning decisions for siblings. True batching would require speculative evaluation of entire subtrees, wasting computation on pruned branches.
 
-\textbf{CPU evaluation is highly optimized:} Stockfish's NNUE implementation uses SIMD intrinsics and incremental updates, achieving sub-microsecond evaluation. GPU acceleration must overcome not just dispatch overhead but also compete with highly-tuned CPU code.
+\textbf{CPU evaluation is highly optimized:} Stockfish's NNUE implementation uses SIMD intrinsics and incremental updates, achieving sub-100~ns evaluation. GPU acceleration must overcome not just dispatch overhead but also compete with highly-tuned CPU code.
 
 \subsection{When GPU Acceleration Helps}
 
 GPU acceleration becomes beneficial for:
 \begin{itemize}
-\item \textbf{Multi-position analysis:} Analyzing thousands of positions simultaneously (e.g., database analysis, puzzle solving)
-\item \textbf{Monte Carlo Tree Search:} MCTS naturally generates large batches of leaf evaluations
+\item \textbf{Monte Carlo Tree Search:} MCTS naturally generates large batches of leaf evaluations, amortizing dispatch overhead across hundreds of positions per dispatch~\cite{LeelaChessZero2024}
+\item \textbf{Multi-position analysis:} Analyzing thousands of positions simultaneously (database analysis, puzzle solving)
 \item \textbf{Training:} Neural network training requires batch processing
+\item \textbf{True batched evaluation:} A single GPU dispatch evaluating multiple positions could achieve the crossover, but requires architectural changes to accumulate evaluation requests
 \end{itemize}
 
-Leela Chess Zero~\cite{LeelaChessZero2024} demonstrates successful GPU acceleration via MCTS, where batch sizes of 64--256 positions amortize dispatch overhead effectively.
+\subsection{CPU vs GPU Evaluation Paths}
+
+Our implementation maintains separate evaluation paths: the CPU path uses Stockfish's NNUE with fully-loaded network weights, while the GPU path uses independently-loaded weights. In our benchmarks, the GPU evaluator returns different scores than the CPU evaluator (mean difference: 46 centipawns), indicating the GPU network weights were not fully synchronized. This does not affect our latency measurements, which focus on dispatch overhead rather than evaluation accuracy.
 
 \subsection{Limitations}
 
 \begin{itemize}
-\item GPU NNUE weights require separate loading; our benchmark used fallback evaluation
-\item True batched GPU evaluation (single dispatch for multiple positions) not implemented
-\item Single-threaded search; multi-threaded Lazy SMP would increase CPU throughput further
-\item No comparison with discrete GPU systems where unified memory is unavailable
+\item Single-threaded search; Lazy SMP would increase CPU throughput
+\item GPU path uses separate weight loading, not synchronized with CPU NNUE
+\item No kernel-level batching implemented (each position dispatches separately)
+\item Measurements on single hardware configuration (M2 Max)
 \end{itemize}
 
 \section{Related Work}
 
-Leela Chess Zero~\cite{LeelaChessZero2024} pioneered GPU-accelerated MCTS for chess, demonstrating that batch-oriented search algorithms map efficiently to GPUs. AlphaZero~\cite{Silver2017} showed that neural network evaluation can replace traditional handcrafted evaluation when combined with MCTS.
+Leela Chess Zero~\cite{LeelaChessZero2024} pioneered GPU-accelerated MCTS for chess, demonstrating that batch-oriented search algorithms map efficiently to GPUs with batch sizes of 64--256 positions per dispatch. AlphaZero~\cite{Silver2017} showed that neural network evaluation can replace traditional handcrafted evaluation when combined with MCTS.
 
-For alpha-beta search, GPU acceleration attempts have generally focused on move generation and position evaluation batching~\cite{Campbell2002}. Our work provides concrete measurements showing why single-position GPU evaluation is counterproductive.
+For alpha-beta search, attempts to leverage GPU parallelism have focused on parallel subtree evaluation and speculative execution. Our work provides concrete measurements showing why single-position GPU evaluation is counterproductive for sequential search, complementing prior theoretical analyses of GPU-search integration challenges.
 
 \section{Conclusion}
 
 MetalFish demonstrates that GPU acceleration for chess engines requires careful consideration of dispatch overhead. Key findings:
 
 \begin{enumerate}
-\item GPU dispatch overhead (766~$\mu$s) exceeds CPU evaluation time (0.11~$\mu$s) by 6,900$\times$ for single positions
-\item Crossover requires batching approximately 7,000 positions per dispatch
+\item GPU dispatch overhead (703~$\mu$s median) exceeds CPU evaluation time (84~ns median) by 8,400$\times$ for single positions
+\item Crossover requires batching approximately 8,400 positions per dispatch
 \item Traditional alpha-beta search cannot exploit GPU parallelism due to sequential dependencies
 \item Unified memory eliminates data transfer overhead but not dispatch overhead
-\item CPU-based evaluation achieves 1.43M nodes/second, competitive with modern engines
+\item CPU-based evaluation achieves 1.43M nodes/second in our single-threaded implementation
 \end{enumerate}
 
-These findings suggest that GPU acceleration for chess engines is most effective when combined with batch-oriented search algorithms (MCTS) rather than traditional alpha-beta search.
+These findings suggest that GPU acceleration for chess engines is most effective when combined with batch-oriented search algorithms (MCTS) or true multi-position batching within a single dispatch, rather than traditional alpha-beta search where each position requires immediate evaluation.
 
 \subsection*{Reproducibility}
 
@@ -438,10 +450,6 @@ Leela Chess Zero: Neural network based chess engine.
 \bibitem{Silver2017}
 Silver, D., et al.: Mastering chess and shogi by self-play with a general reinforcement learning algorithm.
 arXiv:1712.01815 (2017)
-
-\bibitem{Campbell2002}
-Campbell, M., Hoane Jr., A.J., Hsu, F.: Deep Blue.
-Artificial Intelligence 134(1-2), 57--83 (2002)
 
 \end{thebibliography}
 
