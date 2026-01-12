@@ -935,6 +935,8 @@ This theoretical analysis has several important limitations:
 
 \textbf{Hardware Specificity:} Performance projections are based on specific unified memory architectures (Apple Silicon) and may not generalize to other GPU systems or future hardware generations.
 
+\textbf{Hybrid Execution Trade-offs:} The use of a hybrid CPU--GPU execution model introduces dynamic performance trade-offs, as certain workloads may execute more efficiently on the CPU despite GPU availability. This can lead to variability in realized speedups compared to idealized GPU-only performance models.
+
 \textbf{Neural Network Training:} The approach assumes successful training of GPU-optimized neural networks for chess evaluation, which requires significant computational resources and expertise.
 
 \textbf{Workload Assumptions:} Models assume middle-game positions with specific branching factors and may not hold for opening or endgame phases with different characteristics.
