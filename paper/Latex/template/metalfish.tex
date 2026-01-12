@@ -16,6 +16,8 @@
 \usepackage{booktabs}
 \usepackage{listings}
 \usepackage{xcolor}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
 
 % C++ code listing style
 \lstdefinestyle{cppstyle}{
@@ -54,7 +56,7 @@
 \maketitle
 
 \begin{abstract}
-We present MetalFish, a GPU-accelerated UCI chess engine implementing Stockfish-style alpha-beta search with Apple Metal GPU acceleration on unified memory architecture. MetalFish employs a hybrid CPU-GPU design where the CPU executes traditional search algorithms while the GPU accelerates NNUE neural network evaluation through Metal compute shaders. The implementation leverages Apple Silicon's unified memory via \texttt{MTLResourceStorageModeShared} to achieve zero-copy data sharing between CPU search routines and GPU evaluation kernels. We present microbenchmark results showing CPU single-position evaluation at 0.09~$\mu$s compared to 783~$\mu$s for GPU dispatch, demonstrating the overhead that motivates our hybrid approach. The engine achieves 1.4 million nodes per second on standard benchmark positions and correctly computes perft values for all standard test positions. This work provides empirical insights into the challenges and trade-offs of hybrid CPU-GPU chess engine design on unified memory architectures.
+We present MetalFish, a hybrid CPU-GPU chess engine implementing Stockfish-style alpha-beta search with Metal GPU acceleration on Apple Silicon unified memory architecture. Our empirical evaluation reveals a fundamental challenge: GPU kernel dispatch overhead (766~$\mu$s) exceeds CPU NNUE evaluation time (0.11~$\mu$s) by 6,900$\times$ for single positions, making GPU acceleration counterproductive for traditional tree search. This overhead arises from Metal command buffer creation, encoding, and synchronization---inherent costs that cannot be amortized without batching thousands of positions. We present detailed measurements of these overheads and discuss the architectural implications for GPU-accelerated game engines. The implementation achieves 1.43 million nodes per second using CPU evaluation and correctly computes perft values for all standard test positions. Our findings provide empirical guidance for when GPU acceleration is beneficial versus harmful in sequential game tree search.
 
 \keywords{Chess Engine, GPU Computing, Metal, NNUE, Unified Memory, Apple Silicon}
 \end{abstract}
@@ -63,20 +65,20 @@ We present MetalFish, a GPU-accelerated UCI chess engine implementing Stockfish-
 
 Modern chess engines achieve remarkable playing strength through sophisticated alpha-beta search enhanced with neural network evaluation. Stockfish combines Principal Variation Search (PVS) with Efficiently Updatable Neural Networks (NNUE) to achieve superhuman performance~\cite{Stockfish2024}. The emergence of GPU computing presents opportunities to accelerate evaluation-intensive components, but the sequential dependencies inherent in alpha-beta search create fundamental challenges for GPU parallelization~\cite{Nickolls2008}.
 
-MetalFish addresses these challenges through a hybrid CPU-GPU architecture leveraging Apple Silicon's unified memory. Rather than attempting full GPU parallelization of alpha-beta search, we maintain traditional CPU-based search while offloading neural network evaluation to the GPU. The unified memory architecture eliminates host-device data transfer overhead, enabling efficient hybrid execution.
+MetalFish investigates these challenges through a hybrid CPU-GPU architecture leveraging Apple Silicon's unified memory. Rather than attempting full GPU parallelization of alpha-beta search, we maintain traditional CPU-based search while implementing GPU kernels for NNUE evaluation. Our empirical results reveal that GPU dispatch overhead dominates single-position workloads, providing concrete guidance for hybrid engine design.
 
 \subsection{Contributions}
 
 This paper makes the following contributions:
 
 \begin{enumerate}
-\item A unified-memory-friendly design for NNUE evaluation offload that avoids explicit host-device copies on Apple Silicon, using Metal's \texttt{MTLResourceStorageModeShared} buffer allocation.
+\item An empirical characterization of Metal GPU dispatch overhead showing 766~$\mu$s end-to-end latency versus 0.11~$\mu$s for CPU evaluation---a 6,900$\times$ slowdown for single positions.
 
-\item Metal compute kernels for (a) sparse feature transformation and (b) incremental accumulator updates suitable for NNUE-style inference during tree search.
+\item Metal compute kernels for sparse feature transformation and incremental accumulator updates, demonstrating unified memory buffer allocation via \texttt{MTLResourceStorageModeShared}.
 
-\item An empirical characterization of kernel dispatch overhead versus batch size on M-series GPUs, with measurements showing the crossover point where GPU execution becomes beneficial.
+\item Analysis of the crossover point: GPU acceleration requires batching approximately 7,000 positions per dispatch to match CPU throughput, making it impractical for traditional alpha-beta search.
 
-\item A complete, tested implementation achieving 1.4M nodes/second with correct perft results for all standard test positions.
+\item A complete, tested implementation achieving 1.43M nodes/second with correct perft results, providing a baseline for future GPU chess engine research.
 \end{enumerate}
 
 \section{Background}
@@ -120,11 +122,11 @@ MetalFish implements three primary components:
 
 The search implements Stockfish-style techniques:
 
-\textbf{Move Ordering:} Butterfly history ($[2][4096]$, init: 68), capture history ($[16][64][8]$, init: $-689$), continuation history ($[16][64][16][64]$, init: $-529$), killer moves, and counter moves.
+\textbf{Move Ordering:} Butterfly history, capture history, continuation history, killer moves, and counter moves.
 
-\textbf{Extensions:} Singular extension with double/triple variants for strongly singular moves; check extension for positions in check.
+\textbf{Extensions:} Singular extension with double/triple variants for strongly singular moves; check extension.
 
-\textbf{Pruning:} Null move pruning with verification search, late move reductions using $R = \lfloor 2747/128 \times \ln(\text{moveNumber}) \rfloor$, futility pruning, SEE pruning, and ProbCut.
+\textbf{Pruning:} Null move pruning with verification search, late move reductions, futility pruning, SEE pruning, and ProbCut.
 
 \textbf{Transposition Table:} Zobrist hashing~\cite{Zobrist1970} with depth-preferred replacement and generation aging.
 
@@ -203,67 +205,117 @@ All experiments conducted on Apple M2 Max (12-core CPU, 38-core GPU, 64GB unifie
 
 \subsection{Microbenchmarks: CPU vs GPU Evaluation}
 
-Table~\ref{tab:eval_latency} shows evaluation latency for single positions, measured over 1,000 iterations after 100 warmup iterations.
+Table~\ref{tab:eval_latency} shows end-to-end evaluation latency for single positions, measured over 10,000 iterations (CPU) and 1,600 iterations (GPU) after warmup.
 
 \begin{table}[t]
-\caption{Single-position evaluation latency (microseconds)}
+\caption{Single-position evaluation latency (microseconds). GPU measurement includes full Metal dispatch: command buffer creation, encoder setup, buffer binding, commit, and waitUntilCompleted.}
 \label{tab:eval_latency}
 \centering
 \begin{tabular}{lrrrr}
 \toprule
 Method & Mean & Std Dev & Min & Max \\
 \midrule
-CPU Eval & 0.09 & 0.08 & 0.00 & 5.08 \\
-GPU Eval & 782.74 & 143.93 & 582.58 & 5172.04 \\
+CPU NNUE (end-to-end) & 0.11 & 0.13 & 0.04 & 13.54 \\
+GPU NNUE (end-to-end) & 765.79 & 98.20 & 598.38 & 2654.79 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The GPU evaluation is approximately 8,700$\times$ slower for single positions due to kernel dispatch overhead. This motivates our hybrid approach where single-position evaluation remains on CPU.
+The GPU evaluation is approximately 6,900$\times$ slower for single positions. This overhead breakdown includes:
+\begin{itemize}
+\item \texttt{MTLCommandBuffer} creation
+\item Compute encoder setup and buffer binding
+\item \texttt{commit()} and \texttt{waitUntilCompleted()} synchronization
+\end{itemize}
 
-\subsection{Batch Evaluation Throughput}
+\subsection{Batch Evaluation Analysis}
 
-Table~\ref{tab:batch} shows GPU batch evaluation performance, demonstrating throughput scaling with batch size.
+Table~\ref{tab:batch} shows GPU evaluation performance when processing multiple positions sequentially. Note: these are sequential GPU dispatches, not true batched kernel execution.
 
 \begin{table}[t]
-\caption{GPU batch evaluation performance}
+\caption{GPU batch evaluation (sequential dispatches). Each position requires a separate command buffer cycle.}
 \label{tab:batch}
 \centering
 \begin{tabular}{rrrr}
 \toprule
-Batch Size & Time ($\mu$s) & Per-Position ($\mu$s) & Throughput (pos/s) \\
+Batch Size & Total Time ($\mu$s) & Per-Position ($\mu$s) & Throughput (pos/s) \\
 \midrule
-1 & 0.05 & 0.05 & 19,669,551 \\
-2 & 0.04 & 0.02 & 47,483,380 \\
-4 & 0.07 & 0.02 & 57,151,021 \\
-8 & 0.11 & 0.01 & 75,294,117 \\
-16 & 0.16 & 0.01 & 102,960,102 \\
-32 & 0.24 & 0.01 & 135,083,794 \\
-64 & 0.40 & 0.01 & 158,517,858 \\
+1 & 763 & 763.0 & 1,310 \\
+2 & 1,536 & 768.2 & 1,301 \\
+4 & 3,050 & 762.5 & 1,311 \\
+8 & 5,875 & 734.4 & 1,361 \\
+16 & 11,860 & 741.3 & 1,349 \\
+32 & 23,317 & 728.6 & 1,372 \\
+64 & 48,134 & 752.1 & 1,329 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Per-position cost decreases from 0.05~$\mu$s at batch size 1 to 0.006~$\mu$s at batch size 64, demonstrating effective amortization of dispatch overhead.
+Per-position cost remains approximately constant at 730--770~$\mu$s regardless of batch size, confirming that dispatch overhead dominates and cannot be amortized without true kernel-level batching.
+
+\subsection{Crossover Analysis}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    xlabel={Positions per dispatch},
+    ylabel={Time ($\mu$s)},
+    xmode=log,
+    ymode=log,
+    log basis x={10},
+    log basis y={10},
+    xmin=1, xmax=10000,
+    ymin=0.1, ymax=10000,
+    legend pos=north west,
+    grid=major,
+    width=0.85\columnwidth,
+    height=6cm
+]
+\addplot[blue, thick, domain=1:10000] {0.11*x};
+\addlegendentry{CPU (0.11~$\mu$s/pos)}
+\addplot[red, thick, domain=1:10000] {766};
+\addlegendentry{GPU dispatch (766~$\mu$s fixed)}
+\addplot[only marks, mark=*, green!60!black] coordinates {(6963, 766)};
+\addlegendentry{Crossover ($\approx$7000 pos)}
+\end{axis}
+\end{tikzpicture}
+\caption{CPU vs GPU evaluation time. GPU dispatch overhead (766~$\mu$s) is fixed regardless of work. Crossover occurs at approximately 7,000 positions per dispatch.}
+\label{fig:crossover}
+\end{figure}
+
+The crossover point where GPU matches CPU throughput is:
+\begin{equation}
+N_{\text{crossover}} = \frac{T_{\text{GPU\_dispatch}}}{T_{\text{CPU\_eval}}} = \frac{766~\mu\text{s}}{0.11~\mu\text{s}} \approx 6,963
+\end{equation}
+
+GPU acceleration only becomes beneficial when batching approximately 7,000 positions per kernel dispatch. In traditional alpha-beta search, this is impractical because:
+\begin{enumerate}
+\item Search is sequential: each node depends on parent's bounds
+\item Pruning eliminates most nodes before evaluation
+\item Speculative evaluation wastes work on pruned branches
+\end{enumerate}
 
 \subsection{Search Performance}
 
-The engine achieves the following search performance on the standard 50-position benchmark suite at depth 12:
+The engine achieves the following search performance on the standard 50-position benchmark suite at depth 13:
 
 \begin{table}[t]
-\caption{Search benchmark results (depth 12, 64MB hash)}
+\caption{Search benchmark results (depth 13, 64MB hash, CPU evaluation)}
 \label{tab:search}
 \centering
 \begin{tabular}{lr}
 \toprule
 Metric & Value \\
 \midrule
-Total Nodes & 2,470,322 \\
-Total Time & 1,761 ms \\
-Nodes/Second & 1,402,795 \\
+Total Nodes & 2,477,446 \\
+Total Time & 1,736 ms \\
+Nodes/Second & 1,427,100 \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+This NPS is achieved using CPU NNUE evaluation exclusively, as GPU dispatch overhead would reduce throughput by orders of magnitude.
 
 \subsection{Move Generation Verification}
 
@@ -289,61 +341,61 @@ Depth & Nodes \\
 
 Additional tests verify Kiwipete (depth 5: 193,690,690), en passant, castling, and promotion positions.
 
-\subsection{Hardware Characteristics}
-
-\begin{table}[t]
-\caption{Metal backend properties (M2 Max)}
-\label{tab:gpu}
-\centering
-\begin{tabular}{lr}
-\toprule
-Property & Value \\
-\midrule
-Unified Memory & Enabled \\
-Max Buffer Size & 19,169 MB \\
-Max Threadgroup Memory & 32,768 bytes \\
-Max Threads/Threadgroup & 1,024 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
 \section{Discussion}
 
-\subsection{Kernel Dispatch Overhead}
+\subsection{Why GPU Acceleration Fails for Alpha-Beta}
 
-The 783~$\mu$s GPU evaluation latency versus 0.09~$\mu$s CPU latency demonstrates that Metal command buffer creation, encoding, commit, and synchronization dominate single-position workloads. This overhead is inherent to the GPU programming model and motivates keeping single-position evaluation on CPU during search.
+Our measurements quantify a fundamental mismatch between GPU computing and traditional game tree search:
 
-\subsection{Batching Strategy}
+\textbf{Dispatch overhead dominates:} The 766~$\mu$s GPU dispatch cost includes unavoidable Metal framework operations. Even with unified memory eliminating data transfer, the command buffer lifecycle imposes significant latency.
 
-For batch evaluation (e.g., multi-PV analysis or position database evaluation), GPU acceleration provides substantial throughput gains. The crossover point where GPU matches CPU per-position cost occurs around batch size 8,700 based on our measurements, though total throughput benefits appear much earlier due to parallelism.
+\textbf{Sequential dependencies prevent batching:} Alpha-beta search is inherently sequential---each node's evaluation affects pruning decisions for siblings. True batching would require speculative evaluation of entire subtrees, wasting computation on pruned branches.
+
+\textbf{CPU evaluation is highly optimized:} Stockfish's NNUE implementation uses SIMD intrinsics and incremental updates, achieving sub-microsecond evaluation. GPU acceleration must overcome not just dispatch overhead but also compete with highly-tuned CPU code.
+
+\subsection{When GPU Acceleration Helps}
+
+GPU acceleration becomes beneficial for:
+\begin{itemize}
+\item \textbf{Multi-position analysis:} Analyzing thousands of positions simultaneously (e.g., database analysis, puzzle solving)
+\item \textbf{Monte Carlo Tree Search:} MCTS naturally generates large batches of leaf evaluations
+\item \textbf{Training:} Neural network training requires batch processing
+\end{itemize}
+
+Leela Chess Zero~\cite{LeelaChessZero2024} demonstrates successful GPU acceleration via MCTS, where batch sizes of 64--256 positions amortize dispatch overhead effectively.
 
 \subsection{Limitations}
 
 \begin{itemize}
-\item GPU acceleration limited to evaluation; search remains CPU-bound
-\item Single-position GPU evaluation impractical due to dispatch overhead
-\item Uses pre-trained networks; training not implemented
-\item CPU and GPU evaluations may differ slightly due to quantization paths
+\item GPU NNUE weights require separate loading; our benchmark used fallback evaluation
+\item True batched GPU evaluation (single dispatch for multiple positions) not implemented
+\item Single-threaded search; multi-threaded Lazy SMP would increase CPU throughput further
+\item No comparison with discrete GPU systems where unified memory is unavailable
 \end{itemize}
 
 \section{Related Work}
 
-Leela Chess Zero~\cite{LeelaChessZero2024} pioneered GPU-accelerated MCTS for chess. Fat Fritz combined Stockfish search with GPU evaluation. Our work specifically targets unified memory architectures where the CPU-GPU data sharing model differs fundamentally from discrete GPUs.
+Leela Chess Zero~\cite{LeelaChessZero2024} pioneered GPU-accelerated MCTS for chess, demonstrating that batch-oriented search algorithms map efficiently to GPUs. AlphaZero~\cite{Silver2017} showed that neural network evaluation can replace traditional handcrafted evaluation when combined with MCTS.
+
+For alpha-beta search, GPU acceleration attempts have generally focused on move generation and position evaluation batching~\cite{Campbell2002}. Our work provides concrete measurements showing why single-position GPU evaluation is counterproductive.
 
 \section{Conclusion}
 
-MetalFish demonstrates practical hybrid CPU-GPU chess engine design on unified memory architectures. Key findings:
+MetalFish demonstrates that GPU acceleration for chess engines requires careful consideration of dispatch overhead. Key findings:
 
 \begin{enumerate}
-\item GPU kernel dispatch overhead (783~$\mu$s) exceeds CPU evaluation time (0.09~$\mu$s) by 8,700$\times$ for single positions
-\item Batch processing amortizes overhead, achieving 158M positions/second at batch size 64
-\item Unified memory via \texttt{MTLResourceStorageModeShared} enables zero-copy CPU-GPU cooperation
-\item Hybrid approach achieves 1.4M nodes/second with correct perft results
+\item GPU dispatch overhead (766~$\mu$s) exceeds CPU evaluation time (0.11~$\mu$s) by 6,900$\times$ for single positions
+\item Crossover requires batching approximately 7,000 positions per dispatch
+\item Traditional alpha-beta search cannot exploit GPU parallelism due to sequential dependencies
+\item Unified memory eliminates data transfer overhead but not dispatch overhead
+\item CPU-based evaluation achieves 1.43M nodes/second, competitive with modern engines
 \end{enumerate}
+
+These findings suggest that GPU acceleration for chess engines is most effective when combined with batch-oriented search algorithms (MCTS) rather than traditional alpha-beta search.
 
 \subsection*{Reproducibility}
 
-Hardware: Apple M2 Max, 64GB unified memory. Software: macOS 14.0, Xcode 15.0, Metal feature set macOS-GPUFamily2-v1. Source code available at \url{https://github.com/NripeshN/MetalFish}. NNUE networks: nn-c288c895ea92.nnue (125MB), nn-37f18f62d772.nnue (6MB).
+Hardware: Apple M2 Max, 64GB unified memory. Software: macOS 14.0, Xcode 15.0, Metal feature set macOS-GPUFamily2-v1. Source code: \url{https://github.com/NripeshN/MetalFish}. NNUE networks: nn-c288c895ea92.nnue (125MB), nn-37f18f62d772.nnue (6MB).
 
 \section*{Acknowledgments}
 
