@@ -203,8 +203,8 @@ void HybridSearch::start_search(const MCTSPositionHistory& history,
     search_threads_.emplace_back(&HybridSearch::search_thread_main, this);
   }
   
-  // Start evaluation thread
-  eval_thread_ = std::thread(&HybridSearch::eval_thread_main, this);
+  // Don't start eval thread - we're doing direct evaluation now
+  // eval_thread_ = std::thread(&HybridSearch::eval_thread_main, this);
 }
 
 void HybridSearch::stop() {
@@ -261,6 +261,25 @@ std::vector<MCTSMove> HybridSearch::get_pv() const {
 void HybridSearch::search_thread_main() {
   MCTSPosition pos = tree_->history().current();
   
+  // Expand root node first
+  HybridNode* root = tree_->root();
+  if (!root) {
+    if (best_move_callback_) {
+      best_move_callback_(MCTSMove(), MCTSMove());
+    }
+    return;
+  }
+  
+  if (!root->has_children()) {
+    expand_node(root, pos);
+    // Simple evaluation for root children
+    int num_edges = static_cast<int>(root->edges().size());
+    for (auto& edge : root->edges()) {
+      edge.set_policy(1.0f / num_edges);
+    }
+  }
+  
+  int iterations = 0;
   while (!should_stop()) {
     // Selection: traverse tree to find leaf
     HybridNode* node = tree_->root();
@@ -268,7 +287,11 @@ void HybridSearch::search_thread_main() {
     
     node = select_node(node, search_pos);
     
-    if (!node) continue;
+    if (!node) {
+      iterations++;
+      if (iterations > 100) break;  // Safety break
+      continue;
+    }
     
     // Check if terminal
     if (search_pos.is_terminal()) {
@@ -292,12 +315,27 @@ void HybridSearch::search_thread_main() {
     // Expansion: add children
     if (!node->has_children()) {
       expand_node(node, search_pos);
+      // Uniform policy for new children
+      int num_edges = static_cast<int>(node->edges().size());
+      for (auto& edge : node->edges()) {
+        edge.set_policy(1.0f / num_edges);
+      }
     }
     
-    // Add to batch for evaluation
-    add_to_batch(node, search_pos);
+    // Simple evaluation using GPU NNUE directly (skip batching for now)
+    float value = 0.0f;
+    if (gpu_nnue_) {
+      auto [psqt, score] = gpu_nnue_->evaluate_single(search_pos.stockfish_position(), true);
+      // Convert centipawn score to value in [-1, 1]
+      value = std::tanh(score / 400.0f);
+      if (search_pos.is_black_to_move()) {
+        value = -value;
+      }
+    }
     
+    backpropagate(node, value, 0.0f, 0.0f);
     stats_.mcts_nodes.fetch_add(1, std::memory_order_relaxed);
+    iterations++;
   }
   
   // Report best move when done
@@ -606,10 +644,8 @@ void HybridSearch::add_to_batch(HybridNode* node, const MCTSPosition& pos) {
   current_batch_.positions.push_back(pos);
   current_batch_.legal_moves.push_back(pos.generate_legal_moves());
   
-  // Notify if batch is ready
-  if (current_batch_.size() >= static_cast<size_t>(config_.min_batch_size)) {
-    batch_cv_.notify_one();
-  }
+  // Always notify - let eval thread decide when to process
+  batch_cv_.notify_one();
 }
 
 void HybridSearch::process_batch() {

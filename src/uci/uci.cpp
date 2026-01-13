@@ -34,6 +34,8 @@
 #include "gpu/gpu_nnue_integration.h"
 #include "gpu/nnue_eval.h"
 #include "mcts/hybrid_search.h"
+#include "mcts/enhanced_hybrid_search.h"
+#include "mcts/position_classifier.h"
 #include "mcts/stockfish_adapter.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
@@ -1252,14 +1254,10 @@ void UCIEngine::gpu_benchmark() {
 // MCTS Hybrid Search Command
 // ============================================================================
 void UCIEngine::mcts_go(std::istringstream &is) {
-  sync_cout << "info string Starting MCTS hybrid search..." << sync_endl;
+  sync_cout << "info string Starting Enhanced Hybrid Search..." << sync_endl;
   
   // Parse search limits
   Search::LimitsType limits = parse_limits(is);
-  
-  // Create MCTS position history from current position
-  MCTS::MCTSPositionHistory history;
-  history.reset(engine.fen());
   
   // Get GPU NNUE manager
   GPU::GPUNNUEManager* gpu_manager = nullptr;
@@ -1267,41 +1265,42 @@ void UCIEngine::mcts_go(std::istringstream &is) {
     gpu_manager = &GPU::gpu_nnue_manager();
   }
   
-  // Create GPU MCTS backend
-  std::unique_ptr<GPU::GPUMCTSBackend> gpu_backend;
-  if (gpu_manager) {
-    gpu_backend = GPU::create_gpu_mcts_backend(gpu_manager);
-    if (gpu_backend) {
-      sync_cout << "info string GPU MCTS backend initialized" << sync_endl;
-    }
+  if (!gpu_manager) {
+    sync_cout << "info string ERROR: GPU NNUE not available" << sync_endl;
+    return;
   }
   
-  // Configure hybrid search
-  MCTS::HybridSearchConfig config;
-  config.min_batch_size = 8;
-  config.max_batch_size = 256;
-  config.cpuct = 2.5f;
-  config.add_dirichlet_noise = true;
-  config.use_ab_for_tactics = true;
-  config.num_search_threads = 1;  // Single-threaded for now
+  // Configure enhanced hybrid search
+  MCTS::EnhancedHybridConfig config;
+  config.mcts_config.min_batch_size = 8;
+  config.mcts_config.max_batch_size = 256;
+  config.mcts_config.cpuct = 2.5f;
+  config.mcts_config.add_dirichlet_noise = true;
+  config.enable_ab_verify = true;
+  config.ab_verify_depth = 6;
+  config.ab_override_threshold = 0.5f;
+  config.use_position_classifier = true;
+  config.dynamic_strategy = true;
   
-  // Create hybrid search
-  MCTS::HybridSearch search(config);
+  // Create enhanced hybrid search
+  auto search = MCTS::create_enhanced_hybrid_search(gpu_manager, config);
   
-  // Set GPU NNUE manager
-  if (gpu_manager) {
-    search.set_gpu_nnue(gpu_manager);
+  if (!search) {
+    sync_cout << "info string ERROR: Failed to create hybrid search" << sync_endl;
+    return;
   }
   
-  // Set neural network backend if available
-  if (gpu_backend) {
-    search.set_neural_network(std::move(gpu_backend));
-  }
+  sync_cout << "info string Enhanced hybrid search initialized" << sync_endl;
+  
+  // Get current position from engine
+  Position pos;
+  StateInfo st;
+  pos.set(engine.fen(), false, &st);
   
   // Callbacks for UCI output
-  auto best_move_cb = [](MCTS::MCTSMove best, MCTS::MCTSMove ponder) {
-    std::string best_str = best.to_string();
-    std::string ponder_str = ponder.is_null() ? "" : " ponder " + ponder.to_string();
+  auto best_move_cb = [](Move best, Move ponder) {
+    std::string best_str = UCIEngine::move(best, false);
+    std::string ponder_str = ponder != Move::none() ? " ponder " + UCIEngine::move(ponder, false) : "";
     sync_cout << "bestmove " << best_str << ponder_str << sync_endl;
   };
   
@@ -1310,17 +1309,21 @@ void UCIEngine::mcts_go(std::istringstream &is) {
   };
   
   // Start search
-  search.start_search(history, limits, best_move_cb, info_cb);
+  search->start_search(pos, limits, best_move_cb, info_cb);
   
   // Wait for completion
-  search.wait();
+  search->wait();
   
-  // Print statistics
-  const auto& stats = search.stats();
-  sync_cout << "info string MCTS nodes: " << stats.mcts_nodes 
-            << " AB nodes: " << stats.ab_nodes
-            << " NN evals: " << stats.nn_evaluations
-            << " batches: " << stats.nn_batches << sync_endl;
+  // Print final statistics
+  const auto& stats = search->stats();
+  sync_cout << "info string Final stats: MCTS=" << stats.mcts_nodes 
+            << " AB=" << stats.ab_nodes
+            << " verifications=" << stats.ab_verifications
+            << " overrides=" << stats.ab_overrides
+            << " GPU batches=" << stats.gpu_batches << sync_endl;
+  sync_cout << "info string Time: MCTS=" << std::fixed << std::setprecision(1) 
+            << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms 
+            << "ms Total=" << stats.total_time_ms << "ms" << sync_endl;
 }
 
 } // namespace MetalFish
