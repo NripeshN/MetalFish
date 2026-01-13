@@ -265,6 +265,7 @@ if(BUILD_TESTS)
       tests/test_position.cpp
       tests/test_movegen.cpp
       tests/test_search.cpp
+      tests/test_mcts.cpp
       tests/test_metal.cpp
       tests/test_gpu_nnue.cpp)
 
@@ -276,7 +277,8 @@ if(BUILD_TESTS)
     ${EVAL_SOURCES}
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
-    ${GPU_SOURCES})
+    ${GPU_SOURCES}
+    ${MCTS_SOURCES})
   target_link_libraries(metalfish_tests Threads::Threads)
 
   if(APPLE
