@@ -160,6 +160,15 @@ public:
   void stop();
   void wait();
   
+  // Pondering support
+  void start_ponder(const Position& pos, Move ponder_move);
+  void ponder_hit();  // Called when opponent plays the expected move
+  bool is_pondering() const { return pondering_; }
+  
+  // Tree reuse
+  void apply_move(Move move);  // Apply opponent's move for tree reuse
+  void new_game();             // Clear tree for new game
+  
   // Get results
   HybridEvalResult get_result() const { return result_; }
   const EnhancedSearchStats& stats() const { return stats_; }
@@ -186,7 +195,12 @@ private:
   // Threading
   std::atomic<bool> stop_flag_{false};
   std::atomic<bool> searching_{false};
+  std::atomic<bool> pondering_{false};
   std::thread search_thread_;
+  
+  // Pondering state
+  Move ponder_move_ = Move::none();
+  std::chrono::steady_clock::time_point ponder_start_;
   
   // Callbacks
   BestMoveCallback best_move_callback_;

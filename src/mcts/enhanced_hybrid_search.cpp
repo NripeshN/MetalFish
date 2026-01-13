@@ -430,6 +430,85 @@ void EnhancedHybridSearch::send_info_string(const std::string& msg) {
   }
 }
 
+// ============================================================================
+// Pondering Support
+// ============================================================================
+
+void EnhancedHybridSearch::start_ponder(const Position& pos, Move ponder_move) {
+  if (!initialized_ || searching_) return;
+  
+  // Apply the ponder move to get the expected position
+  StateInfo st;
+  Position ponder_pos;
+  ponder_pos.set(pos.fen(), false, &st);
+  
+  if (!pos.pseudo_legal(ponder_move) || !pos.legal(ponder_move)) {
+    return;  // Invalid ponder move
+  }
+  
+  StateInfo st2;
+  ponder_pos.do_move(ponder_move, st2);
+  
+  pondering_ = true;
+  ponder_move_ = ponder_move;
+  ponder_start_ = std::chrono::steady_clock::now();
+  
+  // Start search on the ponder position with infinite time
+  Search::LimitsType ponder_limits;
+  ponder_limits.infinite = true;
+  
+  // Start search without sending bestmove
+  start_search(ponder_pos, ponder_limits, nullptr, info_callback_);
+}
+
+void EnhancedHybridSearch::ponder_hit() {
+  if (!pondering_) return;
+  
+  pondering_ = false;
+  
+  // Calculate remaining time from ponder
+  auto now = std::chrono::steady_clock::now();
+  auto ponder_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+      now - ponder_start_).count();
+  
+  send_info_string("Ponder hit after " + std::to_string(ponder_time) + "ms");
+  
+  // Continue searching with the actual time limits
+  // The search is already running, just let it continue
+}
+
+void EnhancedHybridSearch::apply_move(Move move) {
+  if (!mcts_search_) return;
+  
+  // Convert to MCTS move and apply to tree
+  MCTSMove mcts_move = MCTSMove::FromStockfish(move);
+  
+  // Get the tree from the MCTS search
+  // Note: This requires accessing the internal tree, which we'll need to expose
+  // For now, we'll just reset the search state
+  
+  // Reset for next search
+  stop();
+  wait();
+}
+
+void EnhancedHybridSearch::new_game() {
+  stop();
+  wait();
+  
+  // Reset statistics
+  stats_.reset();
+  result_ = HybridEvalResult();
+  
+  // Clear MCTS tree
+  mcts_search_.reset();
+  mcts_search_ = std::make_unique<HybridSearch>();
+  mcts_search_->set_gpu_nnue(gpu_manager_);
+  
+  // Clear TT
+  mcts_tt().clear();
+}
+
 // Factory function
 std::unique_ptr<EnhancedHybridSearch> create_enhanced_hybrid_search(
     GPU::GPUNNUEManager* gpu_manager,
