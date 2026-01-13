@@ -812,6 +812,10 @@ void UCIEngine::gpu_benchmark() {
     std::cout << "  P99:    " << cpu_feat_samples[99000] << " µs\n\n" << std::flush;
   }
 
+  // Note: CPU NNUE full eval requires access to engine's networks which are private.
+  // The CPU baseline for comparison is simple_eval (material + PST).
+  // For scope-matched comparison, see search benchmark which uses full NNUE.
+
   // ========================================================================
   // BENCHMARK 3: Feature Count Distribution
   // ========================================================================
@@ -970,7 +974,7 @@ void UCIEngine::gpu_benchmark() {
 
   std::vector<int> batch_sizes = {1,   2,   4,    8,    16,   32,
                                   64,  128, 256,  512,  768,  1024,
-                                  1536, 2048};
+                                  1536, 2048, 3072, 4096};
 
   for (int batch_size : batch_sizes) {
     std::vector<double> samples;
@@ -1048,6 +1052,108 @@ void UCIEngine::gpu_benchmark() {
        << std::setw(10) << (seq_med / batch_med) << "×" << std::setw(10) << N
        << ":1\n" << std::flush;
   }
+
+  // ========================================================================
+  // BENCHMARK 8: GPU Eval Correctness Check
+  // ========================================================================
+  std::cout << "\n=== BENCHMARK 8: GPU Eval Correctness Check ===\n";
+  std::cout << "Comparing CPU simple_eval vs GPU batch scores\n";
+  std::cout << "Note: GPU uses NNUE, CPU uses material+PST, so values differ\n";
+  std::cout << "This verifies GPU returns consistent, non-zero scores\n\n" << std::flush;
+
+  {
+    const int CHECK_SIZE = 100;
+    GPU::GPUEvalBatch batch;
+    batch.reserve(CHECK_SIZE);
+    
+    std::vector<Value> cpu_scores;
+    cpu_scores.reserve(CHECK_SIZE);
+    
+    for (int i = 0; i < CHECK_SIZE; i++) {
+      batch.add_position(positions[i]);
+      cpu_scores.push_back(Eval::simple_eval(positions[i]));
+    }
+    
+    manager.evaluate_batch(batch, true);
+    
+    int non_zero = 0;
+    int consistent = 0;
+    double sum_abs_gpu = 0;
+    
+    for (int i = 0; i < CHECK_SIZE; i++) {
+      int32_t gpu_score = batch.positional_scores[i];
+      if (gpu_score != 0) non_zero++;
+      sum_abs_gpu += std::abs(gpu_score);
+    }
+    
+    // Run same batch twice to check consistency
+    GPU::GPUEvalBatch batch2;
+    batch2.reserve(CHECK_SIZE);
+    for (int i = 0; i < CHECK_SIZE; i++) {
+      batch2.add_position(positions[i]);
+    }
+    manager.evaluate_batch(batch2, true);
+    
+    for (int i = 0; i < CHECK_SIZE; i++) {
+      if (batch.positional_scores[i] == batch2.positional_scores[i])
+        consistent++;
+    }
+    
+    std::cout << "Positions checked: " << CHECK_SIZE << "\n";
+    std::cout << "Non-zero GPU scores: " << non_zero << " (" 
+       << (100.0 * non_zero / CHECK_SIZE) << "%)\n";
+    std::cout << "Consistent across runs: " << consistent << " ("
+       << (100.0 * consistent / CHECK_SIZE) << "%)\n";
+    std::cout << "Mean |GPU score|: " << std::fixed << std::setprecision(1) 
+       << (sum_abs_gpu / CHECK_SIZE) << "\n";
+    std::cout << "\nSample scores (first 5 positions):\n";
+    std::cout << "  Pos  CPU(simple)  GPU(NNUE)\n";
+    for (int i = 0; i < 5; i++) {
+      std::cout << "  " << std::setw(3) << i << "  " << std::setw(10) 
+         << int(cpu_scores[i]) << "  " << std::setw(10) 
+         << batch.positional_scores[i] << "\n";
+    }
+    std::cout << "\n" << std::flush;
+  }
+
+  // ========================================================================
+  // BENCHMARK 9: Dataset Description
+  // ========================================================================
+  std::cout << "=== BENCHMARK 9: Dataset Description ===\n";
+  std::cout << "Position source: Standard benchmark FENs (diverse openings/middlegames)\n";
+  std::cout << "Total unique positions: " << NUM_FENS << "\n";
+  std::cout << "Positions used in benchmarks: 2048 (cycled from " << NUM_FENS << " unique)\n\n";
+  
+  // Piece count distribution
+  std::vector<int> piece_counts(33, 0);
+  for (int i = 0; i < NUM_FENS && i < 2048; i++) {
+    int pc = positions[i].count<ALL_PIECES>();
+    if (pc < 33) piece_counts[pc]++;
+  }
+  
+  std::cout << "Piece count distribution:\n";
+  int min_pc = 33, max_pc = 0;
+  for (int i = 2; i < 33; i++) {
+    if (piece_counts[i] > 0) {
+      min_pc = std::min(min_pc, i);
+      max_pc = std::max(max_pc, i);
+    }
+  }
+  std::cout << "  Range: " << min_pc << " - " << max_pc << " pieces\n";
+  
+  // Show top 5 most common piece counts
+  std::vector<std::pair<int, int>> pc_sorted;
+  for (int i = 2; i < 33; i++) {
+    if (piece_counts[i] > 0)
+      pc_sorted.push_back({piece_counts[i], i});
+  }
+  std::sort(pc_sorted.rbegin(), pc_sorted.rend());
+  std::cout << "  Most common piece counts:\n";
+  for (int i = 0; i < std::min(5, (int)pc_sorted.size()); i++) {
+    std::cout << "    " << pc_sorted[i].second << " pieces: " 
+       << pc_sorted[i].first << " positions\n";
+  }
+  std::cout << "\n" << std::flush;
 
   std::cout << "\nBenchmark complete.\n" << std::flush;
 }
