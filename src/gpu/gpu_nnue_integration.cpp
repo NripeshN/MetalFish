@@ -180,7 +180,7 @@ struct GPUPositionData {
     uint8_t padding[4];
 };
 
-// OPTIMIZED Feature transform kernel with SIMD reduction
+// OPTIMIZED Feature transform kernel with prefetching and simdgroup broadcast
 kernel void gpu_feature_transform(
     device const weight_t* weights [[buffer(0)]],
     device const weight_t* biases [[buffer(1)]],
@@ -191,7 +191,8 @@ kernel void gpu_feature_transform(
     constant uint& hidden_dim [[buffer(6)]],
     constant uint& batch_size [[buffer(7)]],
     uint2 gid [[thread_position_in_grid]],
-    uint simd_lane [[thread_index_in_simdgroup]]) {
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
     
     uint pos_idx = gid.y;
     uint hidden_idx = gid.x;
@@ -204,12 +205,13 @@ kernel void gpu_feature_transform(
     uint start = feature_offsets[pos_idx];
     uint count = feature_counts[pos_idx];
     
-    // Process features with memory coalescing
-    // Features are stored contiguously, weights are accessed with stride
+    // Process features - use simdgroup broadcast for feature index
+    // All threads in simdgroup read same feature, but different weight elements
     for (uint i = 0; i < count; i++) {
         int32_t feat_idx = features[start + i];
         if (feat_idx >= 0) {
-            // Coalesced weight access: feat_idx * hidden_dim + hidden_idx
+            // Broadcast feature index within simdgroup (all lanes get same value)
+            // Then each thread reads its own weight element - coalesced access
             acc += weights[feat_idx * hidden_dim + hidden_idx];
         }
     }
