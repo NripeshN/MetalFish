@@ -139,6 +139,8 @@ void UCIEngine::loop() {
       engine.trace_eval();
     else if (token == "gpu")
       gpu_info();
+    else if (token == "gpubench")
+      gpu_benchmark();
     else if (token == "compiler")
       sync_cout << compiler_info() << sync_endl;
     else if (token == "export_net") {
@@ -700,6 +702,124 @@ void UCIEngine::gpu_info() {
     ss << "Status: Not available\n";
     ss << "Reason: No compatible GPU backend found\n";
     ss << "Note: Engine will use CPU-only evaluation\n";
+  }
+
+  sync_cout << ss.str() << sync_endl;
+}
+
+void UCIEngine::gpu_benchmark() {
+  std::stringstream ss;
+  ss << "\n=== GPU NNUE Benchmark ===\n\n";
+
+  if (!GPU::gpu_available()) {
+    ss << "GPU not available\n";
+    sync_cout << ss.str() << sync_endl;
+    return;
+  }
+
+  auto &manager = GPU::gpu_nnue_manager();
+  if (!manager.is_ready()) {
+    ss << "GPU NNUE not initialized (networks not loaded)\n";
+    sync_cout << ss.str() << sync_endl;
+    return;
+  }
+
+  // Create test positions
+  const char *fens[] = {
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+      "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+      "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+  };
+
+  std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
+  std::vector<Position> positions(2048);
+  for (int i = 0; i < 2048; i++) {
+    states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
+    positions[i].set(fens[i % 4], false, &states_vec.back()->back());
+  }
+
+  manager.set_min_batch_size(1);
+
+  // Batch latency table
+  ss << "GPU Batch Latency Table (100 iterations each):\n";
+  ss << "Batch   Median    P95       P99       Per-Pos\n";
+  ss << "Size    (µs)      (µs)      (µs)      (µs)\n";
+  ss << "------------------------------------------------\n";
+
+  std::vector<int> batch_sizes = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024};
+
+  for (int batch_size : batch_sizes) {
+    std::vector<double> samples;
+    for (int iter = 0; iter < 100; iter++) {
+      GPU::GPUEvalBatch batch;
+      batch.reserve(batch_size);
+      for (int i = 0; i < batch_size; i++) {
+        batch.add_position(positions[i]);
+      }
+      auto start = std::chrono::high_resolution_clock::now();
+      manager.evaluate_batch(batch, true);
+      auto end = std::chrono::high_resolution_clock::now();
+      samples.push_back(
+          std::chrono::duration<double, std::micro>(end - start).count());
+    }
+
+    std::sort(samples.begin(), samples.end());
+    double median = samples[samples.size() / 2];
+    double p95 = samples[size_t(samples.size() * 0.95)];
+    double p99 = samples[size_t(samples.size() * 0.99)];
+
+    ss << std::setw(5) << batch_size << std::fixed << std::setprecision(1)
+       << std::setw(10) << median << std::setw(10) << p95 << std::setw(10)
+       << p99 << std::setw(10) << (median / batch_size) << "\n";
+  }
+
+  // True batching verification
+  ss << "\nTrue Batching Verification:\n";
+  ss << "N       Sequential  Batched     Speedup\n";
+  ss << "        (N×1)       (1×N)\n";
+  ss << "----------------------------------------\n";
+
+  std::vector<int> verify_sizes = {16, 64, 256, 1024};
+  for (int N : verify_sizes) {
+    // Sequential
+    std::vector<double> seq_samples;
+    for (int iter = 0; iter < 50; iter++) {
+      auto start = std::chrono::high_resolution_clock::now();
+      for (int i = 0; i < N; i++) {
+        GPU::GPUEvalBatch batch;
+        batch.reserve(1);
+        batch.add_position(positions[i]);
+        manager.evaluate_batch(batch, true);
+      }
+      auto end = std::chrono::high_resolution_clock::now();
+      seq_samples.push_back(
+          std::chrono::duration<double, std::micro>(end - start).count());
+    }
+
+    // Batched
+    std::vector<double> batch_samples;
+    for (int iter = 0; iter < 50; iter++) {
+      GPU::GPUEvalBatch batch;
+      batch.reserve(N);
+      for (int i = 0; i < N; i++) {
+        batch.add_position(positions[i]);
+      }
+      auto start = std::chrono::high_resolution_clock::now();
+      manager.evaluate_batch(batch, true);
+      auto end = std::chrono::high_resolution_clock::now();
+      batch_samples.push_back(
+          std::chrono::duration<double, std::micro>(end - start).count());
+    }
+
+    std::sort(seq_samples.begin(), seq_samples.end());
+    std::sort(batch_samples.begin(), batch_samples.end());
+    double seq_med = seq_samples[seq_samples.size() / 2];
+    double batch_med = batch_samples[batch_samples.size() / 2];
+
+    ss << std::setw(5) << N << std::fixed << std::setprecision(1)
+       << std::setw(12) << seq_med << std::setw(12) << batch_med
+       << std::setw(10) << (seq_med / batch_med) << "×\n";
   }
 
   sync_cout << ss.str() << sync_endl;

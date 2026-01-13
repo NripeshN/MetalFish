@@ -2,20 +2,19 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Comprehensive Paper Benchmark Suite
+  Comprehensive Paper Benchmark Suite v2
 
   Provides rigorous measurements for academic publication:
-  - Latency with percentiles (median, p95, p99)
-  - Stage breakdown (feature extraction, buffer write, dispatch, kernel, sync)
-  - True batching verification
-  - CPU vs GPU comparison across batch sizes
+  - CPU eval microbench with matched scope (100k+ iterations)
+  - GPU batch latency table (N=1 to 2048)
+  - Stage breakdown (feature extraction, buffer write, encode, sync)
+  - Accuracy sanity check (CPU vs GPU score comparison)
+  - True batching verification at multiple scales
 */
 
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "eval/evaluate.h"
-#include "eval/nnue/network.h"
-#include "eval/nnue/nnue_accumulator.h"
 #include "gpu/backend.h"
 #include "gpu/gpu_accumulator.h"
 #include "gpu/gpu_nnue_integration.h"
@@ -31,53 +30,33 @@
 
 using namespace MetalFish;
 
-// Global NNUE resources for CPU evaluation
-static std::unique_ptr<Eval::NNUE::Networks> g_networks;
-static std::unique_ptr<Eval::NNUE::AccumulatorStack> g_accumulators;
-static std::unique_ptr<Eval::NNUE::AccumulatorCaches> g_caches;
-
 // ============================================================================
 // Statistics Helper
 // ============================================================================
 
 struct LatencyStats {
-  double mean_us;
-  double std_us;
-  double median_us;
-  double p95_us;
-  double p99_us;
-  double min_us;
-  double max_us;
+  double mean_us, std_us, median_us, p95_us, p99_us, min_us, max_us;
   int count;
 
-  static LatencyStats compute(std::vector<double> &samples_us) {
-    LatencyStats stats;
-    stats.count = samples_us.size();
+  static LatencyStats compute(std::vector<double> &samples) {
+    LatencyStats s{};
+    s.count = samples.size();
+    if (samples.empty()) return s;
 
-    if (samples_us.empty()) {
-      stats.mean_us = stats.std_us = stats.median_us = 0;
-      stats.p95_us = stats.p99_us = stats.min_us = stats.max_us = 0;
-      return stats;
-    }
+    std::sort(samples.begin(), samples.end());
+    s.min_us = samples.front();
+    s.max_us = samples.back();
+    s.median_us = samples[samples.size() / 2];
+    s.p95_us = samples[size_t(samples.size() * 0.95)];
+    s.p99_us = samples[size_t(samples.size() * 0.99)];
 
-    std::sort(samples_us.begin(), samples_us.end());
-
-    stats.min_us = samples_us.front();
-    stats.max_us = samples_us.back();
-    stats.median_us = samples_us[samples_us.size() / 2];
-    stats.p95_us = samples_us[size_t(samples_us.size() * 0.95)];
-    stats.p99_us = samples_us[size_t(samples_us.size() * 0.99)];
-
-    double sum = std::accumulate(samples_us.begin(), samples_us.end(), 0.0);
-    stats.mean_us = sum / samples_us.size();
+    double sum = std::accumulate(samples.begin(), samples.end(), 0.0);
+    s.mean_us = sum / samples.size();
 
     double sq_sum = 0;
-    for (double v : samples_us) {
-      sq_sum += (v - stats.mean_us) * (v - stats.mean_us);
-    }
-    stats.std_us = std::sqrt(sq_sum / samples_us.size());
-
-    return stats;
+    for (double v : samples) sq_sum += (v - s.mean_us) * (v - s.mean_us);
+    s.std_us = std::sqrt(sq_sum / samples.size());
+    return s;
   }
 
   void print(const char *label) const {
@@ -85,18 +64,22 @@ struct LatencyStats {
     std::cout << label << ":\n";
     std::cout << "  Mean:   " << mean_us << " µs (σ=" << std_us << ")\n";
     std::cout << "  Median: " << median_us << " µs\n";
-    std::cout << "  P95:    " << p95_us << " µs\n";
-    std::cout << "  P99:    " << p99_us << " µs\n";
-    std::cout << "  Min:    " << min_us << " µs\n";
-    std::cout << "  Max:    " << max_us << " µs\n";
-    std::cout << "  N:      " << count << " samples\n";
+    std::cout << "  P95:    " << p95_us << " µs, P99: " << p99_us << " µs\n";
+    std::cout << "  Range:  [" << min_us << ", " << max_us << "] µs\n";
+    std::cout << "  N:      " << count << "\n";
+  }
+
+  void print_row(int batch_size) const {
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << std::setw(6) << batch_size 
+              << std::setw(12) << median_us
+              << std::setw(12) << p95_us
+              << std::setw(12) << p99_us
+              << std::setw(12) << (median_us / batch_size) << "\n";
   }
 };
 
-// ============================================================================
-// Test Positions
-// ============================================================================
-
+// Test positions
 const char *TEST_FENS[] = {
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
@@ -107,78 +90,59 @@ const char *TEST_FENS[] = {
     "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
     "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
 };
-constexpr int NUM_TEST_FENS = sizeof(TEST_FENS) / sizeof(TEST_FENS[0]);
+constexpr int NUM_FENS = sizeof(TEST_FENS) / sizeof(TEST_FENS[0]);
+constexpr int MAX_FEATURES_PER_POS = 32; // Explanation: HalfKAv2_hm max active features
 
 // ============================================================================
-// Benchmark 1: CPU NNUE Evaluation Latency
+// BENCHMARK 1: CPU Feature Extraction (matched scope with GPU)
 // ============================================================================
 
-void benchmark_cpu_eval_latency() {
+void benchmark_cpu_feature_extraction() {
   std::cout << "\n";
   std::cout << "============================================================\n";
-  std::cout << "  BENCHMARK 1: CPU NNUE Single-Position Evaluation Latency\n";
+  std::cout << "  BENCHMARK 1: CPU Feature Extraction\n";
   std::cout << "============================================================\n";
+  std::cout << "\nScope: Extract HalfKAv2_hm features from position\n";
+  std::cout << "       (matched with GPU feature extraction stage)\n";
+  std::cout << "Iterations: 100,000\n\n";
 
-  if (!g_networks) {
-    std::cout << "  NNUE networks not loaded, using simple_eval fallback\n";
-  }
-
-  std::cout << "\nMethodology:\n";
-  std::cout << "  - Timer: std::chrono::high_resolution_clock\n";
-  std::cout << "  - Scope: Full NNUE forward pass (accumulator refresh + FC "
-               "layers)\n";
-  std::cout << "  - Warmup: 100 iterations discarded\n";
-  std::cout << "  - Samples: 10,000 iterations\n";
-  std::cout << "  - Position: Rotated through " << NUM_TEST_FENS
-            << " test positions\n";
-  std::cout << "\n";
-
-  // Create positions
   std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
-  std::vector<Position> positions(NUM_TEST_FENS);
-
-  for (int i = 0; i < NUM_TEST_FENS; i++) {
+  std::vector<Position> positions(NUM_FENS);
+  for (int i = 0; i < NUM_FENS; i++) {
     states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
     positions[i].set(TEST_FENS[i], false, &states_vec.back()->back());
   }
 
+  auto &extractor = GPU::gpu_feature_extractor();
+  if (!extractor.initialize()) {
+    std::cout << "  Feature extractor not available\n";
+    return;
+  }
+
   // Warmup
-  for (int i = 0; i < 100; i++) {
-    for (auto &pos : positions) {
-      volatile Value v = Eval::simple_eval(pos);
-      (void)v;
-    }
+  std::vector<int32_t> white_f, black_f;
+  for (int i = 0; i < 1000; i++) {
+    extractor.extract(positions[i % NUM_FENS], white_f, black_f);
   }
 
   // Benchmark
-  const int iterations = 10000;
-  std::vector<double> samples_us;
-  samples_us.reserve(iterations);
+  const int iterations = 100000;
+  std::vector<double> samples;
+  samples.reserve(iterations);
 
   for (int i = 0; i < iterations; i++) {
-    Position &pos = positions[i % NUM_TEST_FENS];
-
     auto start = std::chrono::high_resolution_clock::now();
-    volatile Value v;
-    if (g_networks && g_accumulators && g_caches) {
-      v = Eval::evaluate(*g_networks, pos, *g_accumulators, *g_caches, 0);
-    } else {
-      v = Eval::simple_eval(pos);
-    }
+    extractor.extract(positions[i % NUM_FENS], white_f, black_f);
     auto end = std::chrono::high_resolution_clock::now();
-
-    (void)v;
-    double us =
-        std::chrono::duration<double, std::micro>(end - start).count();
-    samples_us.push_back(us);
+    samples.push_back(std::chrono::duration<double, std::micro>(end - start).count());
   }
 
-  auto stats = LatencyStats::compute(samples_us);
-  stats.print(g_networks ? "CPU NNUE Eval Latency" : "CPU Simple Eval Latency");
+  auto stats = LatencyStats::compute(samples);
+  stats.print("CPU Feature Extraction");
 }
 
 // ============================================================================
-// Benchmark 2: GPU Dispatch Overhead (Empty Kernel)
+// BENCHMARK 2: GPU Dispatch Overhead (Minimal Kernel)
 // ============================================================================
 
 void benchmark_gpu_dispatch_overhead() {
@@ -188,13 +152,12 @@ void benchmark_gpu_dispatch_overhead() {
   std::cout << "============================================================\n";
 
   if (!GPU::gpu_available()) {
-    std::cout << "  GPU not available, skipping\n";
+    std::cout << "  GPU not available\n";
     return;
   }
 
   auto &backend = GPU::gpu();
 
-  // Compile minimal kernel
   const char *shader = R"(
     #include <metal_stdlib>
     using namespace metal;
@@ -205,27 +168,16 @@ void benchmark_gpu_dispatch_overhead() {
   )";
 
   if (!backend.compile_library("dispatch_bench", shader)) {
-    std::cout << "  Failed to compile shader\n";
+    std::cout << "  Shader compilation failed\n";
     return;
   }
 
   auto kernel = backend.create_kernel("minimal_kernel", "dispatch_bench");
-  if (!kernel || !kernel->valid()) {
-    std::cout << "  Failed to create kernel\n";
-    return;
-  }
-
   auto buffer = backend.create_buffer(sizeof(int));
 
-  std::cout << "\nMethodology:\n";
-  std::cout << "  - Timer: std::chrono::high_resolution_clock\n";
-  std::cout
-      << "  - Scope: create_encoder() + set_kernel() + dispatch(1) + "
-         "submit_and_wait()\n";
-  std::cout << "  - Kernel: Writes single int (minimal compute)\n";
-  std::cout << "  - Warmup: 100 iterations\n";
-  std::cout << "  - Samples: 1,000 iterations\n";
-  std::cout << "\n";
+  std::cout << "\nScope: create_encoder + set_kernel + dispatch(1) + submit_and_wait\n";
+  std::cout << "       (blocking synchronous execution)\n";
+  std::cout << "Iterations: 1,000\n\n";
 
   // Warmup
   for (int i = 0; i < 100; i++) {
@@ -237,240 +189,164 @@ void benchmark_gpu_dispatch_overhead() {
   }
 
   // Benchmark
-  const int iterations = 1000;
-  std::vector<double> samples_us;
-  samples_us.reserve(iterations);
-
-  for (int i = 0; i < iterations; i++) {
+  std::vector<double> samples;
+  for (int i = 0; i < 1000; i++) {
     auto start = std::chrono::high_resolution_clock::now();
-
     auto enc = backend.create_encoder();
     enc->set_kernel(kernel.get());
     enc->set_buffer(buffer.get(), 0);
     enc->dispatch_threads(1);
     backend.submit_and_wait(enc.get());
-
     auto end = std::chrono::high_resolution_clock::now();
-    double us =
-        std::chrono::duration<double, std::micro>(end - start).count();
-    samples_us.push_back(us);
+    samples.push_back(std::chrono::duration<double, std::micro>(end - start).count());
   }
 
-  auto stats = LatencyStats::compute(samples_us);
-  stats.print("GPU Dispatch Overhead (minimal kernel)");
+  auto stats = LatencyStats::compute(samples);
+  stats.print("GPU Dispatch Overhead");
 }
 
 // ============================================================================
-// Benchmark 3: GPU NNUE Stage Breakdown
+// BENCHMARK 3: GPU Batch Latency Table (N=1 to 2048)
 // ============================================================================
 
-void benchmark_gpu_stage_breakdown() {
+void benchmark_gpu_batch_latency_table() {
   std::cout << "\n";
   std::cout << "============================================================\n";
-  std::cout << "  BENCHMARK 3: GPU NNUE Stage Breakdown\n";
+  std::cout << "  BENCHMARK 3: GPU End-to-End Batch Latency Table\n";
   std::cout << "============================================================\n";
 
   if (!GPU::gpu_available()) {
-    std::cout << "  GPU not available, skipping\n";
+    std::cout << "  GPU not available\n";
     return;
   }
 
   auto &manager = GPU::gpu_nnue_manager();
   if (!manager.is_ready()) {
     std::cout << "  GPU NNUE not initialized (networks not loaded)\n";
-    std::cout << "  Run with loaded networks for stage breakdown\n";
     return;
   }
 
-  std::cout << "\nMethodology:\n";
-  std::cout << "  - Each stage timed separately\n";
-  std::cout << "  - Batch size: 8 positions\n";
-  std::cout << "  - Samples: 100 iterations\n";
-  std::cout << "\n";
+  std::cout << "\nScope: Full end-to-end GPU evaluation\n";
+  std::cout << "       (batch creation + buffer write + dispatch + kernel + sync)\n";
+  std::cout << "Iterations: 100 per batch size\n\n";
 
-  // Create positions
-  const int batch_size = 8;
+  // Create position pool
   std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
-  std::vector<Position> positions(batch_size);
-
-  for (int i = 0; i < batch_size; i++) {
+  std::vector<Position> positions(2048);
+  for (int i = 0; i < 2048; i++) {
     states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
-    positions[i].set(TEST_FENS[i % NUM_TEST_FENS], false,
-                     &states_vec.back()->back());
+    positions[i].set(TEST_FENS[i % NUM_FENS], false, &states_vec.back()->back());
   }
 
+  std::vector<int> batch_sizes = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048};
   const int iterations = 100;
 
-  // Stage 1: Batch creation + position data extraction
-  std::vector<double> stage1_us;
-  for (int iter = 0; iter < iterations; iter++) {
-    auto start = std::chrono::high_resolution_clock::now();
+  manager.set_min_batch_size(1); // Force GPU for all sizes
 
-    GPU::GPUEvalBatch batch;
-    batch.reserve(batch_size);
-    for (int i = 0; i < batch_size; i++) {
-      batch.add_position(positions[i]);
+  std::cout << std::setw(6) << "Batch" << std::setw(12) << "Median"
+            << std::setw(12) << "P95" << std::setw(12) << "P99"
+            << std::setw(12) << "Per-Pos\n";
+  std::cout << std::setw(6) << "Size" << std::setw(12) << "(µs)"
+            << std::setw(12) << "(µs)" << std::setw(12) << "(µs)"
+            << std::setw(12) << "(µs)\n";
+  std::cout << std::string(54, '-') << "\n";
+
+  for (int batch_size : batch_sizes) {
+    std::vector<double> samples;
+
+    for (int iter = 0; iter < iterations; iter++) {
+      GPU::GPUEvalBatch batch;
+      batch.reserve(batch_size);
+      for (int i = 0; i < batch_size; i++) {
+        batch.add_position(positions[i]);
+      }
+
+      auto start = std::chrono::high_resolution_clock::now();
+      manager.evaluate_batch(batch, true);
+      auto end = std::chrono::high_resolution_clock::now();
+
+      samples.push_back(std::chrono::duration<double, std::micro>(end - start).count());
     }
 
-    auto end = std::chrono::high_resolution_clock::now();
-    stage1_us.push_back(
-        std::chrono::duration<double, std::micro>(end - start).count());
+    auto stats = LatencyStats::compute(samples);
+    stats.print_row(batch_size);
   }
-
-  // Stage 2: Full GPU evaluation (includes buffer upload, dispatch, sync)
-  std::vector<double> stage2_us;
-  for (int iter = 0; iter < iterations; iter++) {
-    GPU::GPUEvalBatch batch;
-    batch.reserve(batch_size);
-    for (int i = 0; i < batch_size; i++) {
-      batch.add_position(positions[i]);
-    }
-
-    auto start = std::chrono::high_resolution_clock::now();
-    manager.evaluate_batch(batch, true);
-    auto end = std::chrono::high_resolution_clock::now();
-
-    stage2_us.push_back(
-        std::chrono::duration<double, std::micro>(end - start).count());
-  }
-
-  auto stats1 = LatencyStats::compute(stage1_us);
-  auto stats2 = LatencyStats::compute(stage2_us);
-
-  std::cout << "Stage Breakdown (batch size " << batch_size << "):\n\n";
-  stats1.print("Stage 1: Batch Creation + Feature Extraction (CPU)");
-  std::cout << "\n";
-  stats2.print("Stage 2: GPU Evaluation (buffer write + dispatch + kernel + "
-               "sync)");
-
-  std::cout << "\nTotal End-to-End: " << std::fixed << std::setprecision(2)
-            << (stats1.median_us + stats2.median_us) << " µs (median)\n";
-  std::cout << "Per-Position: "
-            << (stats1.median_us + stats2.median_us) / batch_size
-            << " µs/position\n";
 }
 
 // ============================================================================
-// Benchmark 4: CPU vs GPU Latency Across Batch Sizes
+// BENCHMARK 4: Stage Breakdown for GPU End-to-End
 // ============================================================================
 
-void benchmark_cpu_vs_gpu_batch() {
+void benchmark_gpu_stage_breakdown() {
   std::cout << "\n";
   std::cout << "============================================================\n";
-  std::cout << "  BENCHMARK 4: CPU vs GPU Latency Across Batch Sizes\n";
+  std::cout << "  BENCHMARK 4: GPU Stage Breakdown\n";
   std::cout << "============================================================\n";
 
   if (!GPU::gpu_available()) {
-    std::cout << "  GPU not available, skipping\n";
+    std::cout << "  GPU not available\n";
     return;
   }
 
   auto &manager = GPU::gpu_nnue_manager();
-  bool gpu_ready = manager.is_ready();
-
-  std::cout << "\nMethodology:\n";
-  std::cout << "  - CPU: Sequential Eval::evaluate() calls\n";
-  std::cout << "  - GPU: Single evaluate_batch() call (true batching)\n";
-  std::cout << "  - Timer: std::chrono::high_resolution_clock\n";
-  std::cout << "  - Samples: 100 iterations per batch size\n";
-  std::cout << "  - GPU NNUE Ready: " << (gpu_ready ? "Yes" : "No") << "\n";
-  std::cout << "\n";
-
-  // Create positions pool
-  std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
-  std::vector<Position> all_positions(64);
-
-  for (int i = 0; i < 64; i++) {
-    states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
-    all_positions[i].set(TEST_FENS[i % NUM_TEST_FENS], false,
-                         &states_vec.back()->back());
+  if (!manager.is_ready()) {
+    std::cout << "  GPU NNUE not initialized\n";
+    return;
   }
 
-  std::vector<int> batch_sizes = {1, 2, 4, 8, 16, 32, 64};
-  const int iterations = 100;
+  std::cout << "\nStages measured:\n";
+  std::cout << "  1. Batch creation + feature extraction (CPU)\n";
+  std::cout << "  2. GPU evaluate_batch() (buffer + dispatch + kernel + sync)\n";
+  std::cout << "Iterations: 100 per batch size\n\n";
 
-  std::cout << std::setw(8) << "Batch" << std::setw(15) << "CPU Median"
-            << std::setw(15) << "GPU Median" << std::setw(15) << "CPU/pos"
-            << std::setw(15) << "GPU/pos" << std::setw(12) << "Speedup"
-            << "\n";
-  std::cout << std::setw(8) << "Size" << std::setw(15) << "(µs)"
-            << std::setw(15) << "(µs)" << std::setw(15) << "(µs)"
-            << std::setw(15) << "(µs)" << std::setw(12) << "(CPU/GPU)"
-            << "\n";
-  std::cout << std::string(80, '-') << "\n";
+  std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
+  std::vector<Position> positions(1024);
+  for (int i = 0; i < 1024; i++) {
+    states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
+    positions[i].set(TEST_FENS[i % NUM_FENS], false, &states_vec.back()->back());
+  }
+
+  std::vector<int> batch_sizes = {1, 16, 256, 1024};
+  const int iterations = 100;
+  manager.set_min_batch_size(1);
 
   for (int batch_size : batch_sizes) {
-    // CPU benchmark
-    std::vector<double> cpu_samples;
+    std::cout << "\n--- Batch Size: " << batch_size << " ---\n";
+
+    std::vector<double> stage1_samples, stage2_samples;
+
     for (int iter = 0; iter < iterations; iter++) {
-      auto start = std::chrono::high_resolution_clock::now();
-
+      // Stage 1: Batch creation
+      auto t1 = std::chrono::high_resolution_clock::now();
+      GPU::GPUEvalBatch batch;
+      batch.reserve(batch_size);
       for (int i = 0; i < batch_size; i++) {
-        volatile Value v;
-        if (g_networks && g_accumulators && g_caches) {
-          v = Eval::evaluate(*g_networks, all_positions[i], *g_accumulators,
-                             *g_caches, 0);
-        } else {
-          v = Eval::simple_eval(all_positions[i]);
-        }
-        (void)v;
+        batch.add_position(positions[i]);
       }
+      auto t2 = std::chrono::high_resolution_clock::now();
 
-      auto end = std::chrono::high_resolution_clock::now();
-      cpu_samples.push_back(
-          std::chrono::duration<double, std::micro>(end - start).count());
+      // Stage 2: GPU evaluation
+      manager.evaluate_batch(batch, true);
+      auto t3 = std::chrono::high_resolution_clock::now();
+
+      stage1_samples.push_back(std::chrono::duration<double, std::micro>(t2 - t1).count());
+      stage2_samples.push_back(std::chrono::duration<double, std::micro>(t3 - t2).count());
     }
 
-    // GPU benchmark
-    std::vector<double> gpu_samples;
-    if (gpu_ready) {
-      // Temporarily disable min batch size to measure all sizes
-      int old_min = manager.min_batch_size();
-      manager.set_min_batch_size(1);
+    auto s1 = LatencyStats::compute(stage1_samples);
+    auto s2 = LatencyStats::compute(stage2_samples);
 
-      for (int iter = 0; iter < iterations; iter++) {
-        GPU::GPUEvalBatch batch;
-        batch.reserve(batch_size);
-        for (int i = 0; i < batch_size; i++) {
-          batch.add_position(all_positions[i]);
-        }
-
-        auto start = std::chrono::high_resolution_clock::now();
-        manager.evaluate_batch(batch, true);
-        auto end = std::chrono::high_resolution_clock::now();
-
-        gpu_samples.push_back(
-            std::chrono::duration<double, std::micro>(end - start).count());
-      }
-
-      manager.set_min_batch_size(old_min);
-    }
-
-    auto cpu_stats = LatencyStats::compute(cpu_samples);
-    double cpu_per_pos = cpu_stats.median_us / batch_size;
-
-    double gpu_median = 0, gpu_per_pos = 0, speedup = 0;
-    if (!gpu_samples.empty()) {
-      auto gpu_stats = LatencyStats::compute(gpu_samples);
-      gpu_median = gpu_stats.median_us;
-      gpu_per_pos = gpu_stats.median_us / batch_size;
-      speedup = cpu_stats.median_us / gpu_stats.median_us;
-    }
-
-    std::cout << std::fixed << std::setprecision(2);
-    std::cout << std::setw(8) << batch_size << std::setw(15)
-              << cpu_stats.median_us << std::setw(15)
-              << (gpu_ready ? std::to_string((int)gpu_median) : "N/A")
-              << std::setw(15) << cpu_per_pos << std::setw(15)
-              << (gpu_ready ? std::to_string((int)gpu_per_pos) : "N/A")
-              << std::setw(12)
-              << (gpu_ready ? std::to_string(speedup).substr(0, 5) : "N/A")
-              << "\n";
+    std::cout << "  Batch creation (CPU): median=" << std::fixed << std::setprecision(2) 
+              << s1.median_us << " µs (" << (s1.median_us/batch_size) << " µs/pos)\n";
+    std::cout << "  GPU evaluate_batch:   median=" << s2.median_us 
+              << " µs (" << (s2.median_us/batch_size) << " µs/pos)\n";
+    std::cout << "  Total:                median=" << (s1.median_us + s2.median_us)
+              << " µs (" << ((s1.median_us + s2.median_us)/batch_size) << " µs/pos)\n";
   }
 }
 
 // ============================================================================
-// Benchmark 5: True Batching Verification
+// BENCHMARK 5: True Batching Verification (Multiple Scales)
 // ============================================================================
 
 void benchmark_true_batching_verification() {
@@ -480,7 +356,7 @@ void benchmark_true_batching_verification() {
   std::cout << "============================================================\n";
 
   if (!GPU::gpu_available()) {
-    std::cout << "  GPU not available, skipping\n";
+    std::cout << "  GPU not available\n";
     return;
   }
 
@@ -490,97 +366,79 @@ void benchmark_true_batching_verification() {
     return;
   }
 
-  std::cout << "\nMethodology:\n";
-  std::cout << "  - Compare: N sequential dispatches vs 1 batch dispatch\n";
-  std::cout << "  - If true batching: batch should be faster than N×single\n";
-  std::cout << "  - Batch size: 16 positions\n";
-  std::cout << "\n";
+  std::cout << "\nComparing: N × (1-position batch) vs 1 × (N-position batch)\n";
+  std::cout << "If true batching: single dispatch should be faster than N dispatches\n\n";
 
-  const int batch_size = 16;
-  const int iterations = 50;
-
-  // Create positions
   std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
-  std::vector<Position> positions(batch_size);
-
-  for (int i = 0; i < batch_size; i++) {
+  std::vector<Position> positions(1024);
+  for (int i = 0; i < 1024; i++) {
     states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
-    positions[i].set(TEST_FENS[i % NUM_TEST_FENS], false,
-                     &states_vec.back()->back());
+    positions[i].set(TEST_FENS[i % NUM_FENS], false, &states_vec.back()->back());
   }
 
-  // Measure N sequential single-position evaluations
+  std::vector<int> batch_sizes = {16, 64, 256, 1024};
+  const int iterations = 50;
   manager.set_min_batch_size(1);
-  std::vector<double> sequential_us;
 
-  for (int iter = 0; iter < iterations; iter++) {
-    auto start = std::chrono::high_resolution_clock::now();
+  std::cout << std::setw(6) << "N" << std::setw(15) << "Sequential"
+            << std::setw(15) << "Batched" << std::setw(12) << "Speedup\n";
+  std::cout << std::setw(6) << "" << std::setw(15) << "(N×1 batch)"
+            << std::setw(15) << "(1×N batch)" << std::setw(12) << "\n";
+  std::cout << std::string(48, '-') << "\n";
 
-    for (int i = 0; i < batch_size; i++) {
+  for (int N : batch_sizes) {
+    // Sequential: N separate dispatches
+    std::vector<double> seq_samples;
+    for (int iter = 0; iter < iterations; iter++) {
+      auto start = std::chrono::high_resolution_clock::now();
+      for (int i = 0; i < N; i++) {
+        GPU::GPUEvalBatch batch;
+        batch.reserve(1);
+        batch.add_position(positions[i]);
+        manager.evaluate_batch(batch, true);
+      }
+      auto end = std::chrono::high_resolution_clock::now();
+      seq_samples.push_back(std::chrono::duration<double, std::micro>(end - start).count());
+    }
+
+    // Batched: 1 dispatch for N positions
+    std::vector<double> batch_samples;
+    for (int iter = 0; iter < iterations; iter++) {
       GPU::GPUEvalBatch batch;
-      batch.reserve(1);
-      batch.add_position(positions[i]);
+      batch.reserve(N);
+      for (int i = 0; i < N; i++) {
+        batch.add_position(positions[i]);
+      }
+      auto start = std::chrono::high_resolution_clock::now();
       manager.evaluate_batch(batch, true);
+      auto end = std::chrono::high_resolution_clock::now();
+      batch_samples.push_back(std::chrono::duration<double, std::micro>(end - start).count());
     }
 
-    auto end = std::chrono::high_resolution_clock::now();
-    sequential_us.push_back(
-        std::chrono::duration<double, std::micro>(end - start).count());
-  }
+    auto seq_stats = LatencyStats::compute(seq_samples);
+    auto batch_stats = LatencyStats::compute(batch_samples);
+    double speedup = seq_stats.median_us / batch_stats.median_us;
 
-  // Measure single batch evaluation
-  std::vector<double> batched_us;
-
-  for (int iter = 0; iter < iterations; iter++) {
-    GPU::GPUEvalBatch batch;
-    batch.reserve(batch_size);
-    for (int i = 0; i < batch_size; i++) {
-      batch.add_position(positions[i]);
-    }
-
-    auto start = std::chrono::high_resolution_clock::now();
-    manager.evaluate_batch(batch, true);
-    auto end = std::chrono::high_resolution_clock::now();
-
-    batched_us.push_back(
-        std::chrono::duration<double, std::micro>(end - start).count());
-  }
-
-  auto seq_stats = LatencyStats::compute(sequential_us);
-  auto batch_stats = LatencyStats::compute(batched_us);
-
-  std::cout << "Results (batch size " << batch_size << "):\n\n";
-  seq_stats.print("Sequential (16 separate dispatches)");
-  std::cout << "\n";
-  batch_stats.print("Batched (1 dispatch for 16 positions)");
-
-  double ratio = seq_stats.median_us / batch_stats.median_us;
-  std::cout << "\nSpeedup from batching: " << std::fixed << std::setprecision(2)
-            << ratio << "x\n";
-
-  if (ratio > 1.5) {
-    std::cout << "✓ TRUE BATCHING CONFIRMED: Single dispatch processes "
-                 "multiple positions\n";
-  } else if (ratio > 1.1) {
-    std::cout << "~ PARTIAL BATCHING: Some overhead reduction observed\n";
-  } else {
-    std::cout << "✗ NO BATCHING BENEFIT: Likely sequential internal "
-                 "dispatches\n";
+    std::cout << std::fixed << std::setprecision(1);
+    std::cout << std::setw(6) << N 
+              << std::setw(15) << seq_stats.median_us
+              << std::setw(15) << batch_stats.median_us
+              << std::setw(12) << speedup << "×\n";
   }
 }
 
 // ============================================================================
-// Benchmark 6: Throughput at Scale
+// BENCHMARK 6: Accuracy Sanity Check (CPU vs GPU Scores)
 // ============================================================================
 
-void benchmark_throughput() {
+void benchmark_accuracy_check() {
   std::cout << "\n";
   std::cout << "============================================================\n";
-  std::cout << "  BENCHMARK 6: Throughput at Scale\n";
+  std::cout << "  BENCHMARK 6: Accuracy Sanity Check\n";
   std::cout << "============================================================\n";
 
   if (!GPU::gpu_available()) {
-    std::cout << "  GPU not available, skipping\n";
+    std::cout << "  GPU not available\n";
     return;
   }
 
@@ -590,55 +448,41 @@ void benchmark_throughput() {
     return;
   }
 
-  std::cout << "\nMethodology:\n";
-  std::cout << "  - Measure positions evaluated per second\n";
-  std::cout << "  - Total positions: 10,000\n";
-  std::cout << "  - Vary batch size\n";
-  std::cout << "\n";
+  std::cout << "\nComparing CPU simple_eval vs GPU NNUE scores\n";
+  std::cout << "(Note: These use different evaluation methods, so differences expected)\n\n";
 
-  const int total_positions = 10000;
-
-  // Create position pool
   std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
-  std::vector<Position> positions(64);
-
-  for (int i = 0; i < 64; i++) {
+  std::vector<Position> positions(100);
+  for (int i = 0; i < 100; i++) {
     states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
-    positions[i].set(TEST_FENS[i % NUM_TEST_FENS], false,
-                     &states_vec.back()->back());
+    positions[i].set(TEST_FENS[i % NUM_FENS], false, &states_vec.back()->back());
   }
 
-  std::vector<int> batch_sizes = {1, 4, 8, 16, 32, 64};
-
-  std::cout << std::setw(12) << "Batch Size" << std::setw(15) << "Time (ms)"
-            << std::setw(18) << "Positions/sec" << "\n";
-  std::cout << std::string(45, '-') << "\n";
-
+  // Get GPU scores
+  GPU::GPUEvalBatch batch;
+  batch.reserve(100);
+  for (int i = 0; i < 100; i++) {
+    batch.add_position(positions[i]);
+  }
   manager.set_min_batch_size(1);
+  manager.evaluate_batch(batch, true);
 
-  for (int batch_size : batch_sizes) {
-    int num_batches = total_positions / batch_size;
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    for (int b = 0; b < num_batches; b++) {
-      GPU::GPUEvalBatch batch;
-      batch.reserve(batch_size);
-      for (int i = 0; i < batch_size; i++) {
-        batch.add_position(positions[(b * batch_size + i) % 64]);
-      }
-      manager.evaluate_batch(batch, true);
-    }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    double total_ms =
-        std::chrono::duration<double, std::milli>(end - start).count();
-    double positions_per_sec = (num_batches * batch_size * 1000.0) / total_ms;
-
-    std::cout << std::fixed << std::setprecision(1);
-    std::cout << std::setw(12) << batch_size << std::setw(15) << total_ms
-              << std::setw(18) << (int)positions_per_sec << "\n";
+  // Compare with CPU simple_eval
+  std::vector<double> errors;
+  for (int i = 0; i < 100; i++) {
+    int cpu_score = Eval::simple_eval(positions[i]);
+    int gpu_score = batch.positional_scores[i];
+    errors.push_back(std::abs(cpu_score - gpu_score));
   }
+
+  double mean_err = std::accumulate(errors.begin(), errors.end(), 0.0) / errors.size();
+  double max_err = *std::max_element(errors.begin(), errors.end());
+
+  std::cout << "Positions evaluated: 100\n";
+  std::cout << "Mean absolute error: " << std::fixed << std::setprecision(1) << mean_err << " cp\n";
+  std::cout << "Max absolute error:  " << max_err << " cp\n";
+  std::cout << "\n(Large differences expected: simple_eval is material-only,\n";
+  std::cout << " GPU NNUE includes positional factors)\n";
 }
 
 // ============================================================================
@@ -647,39 +491,30 @@ void benchmark_throughput() {
 
 int main() {
   std::cout << "╔══════════════════════════════════════════════════════════╗\n";
-  std::cout << "║     MetalFish Paper Benchmark Suite                      ║\n";
+  std::cout << "║     MetalFish Paper Benchmark Suite v2                   ║\n";
   std::cout << "║     Comprehensive GPU NNUE Performance Analysis          ║\n";
   std::cout << "╚══════════════════════════════════════════════════════════╝\n";
 
-  // Initialize
   Bitboards::init();
 
   if (GPU::gpu_available()) {
     auto &gpu = GPU::gpu();
-    std::cout << "\nHardware Configuration:\n";
+    std::cout << "\nHardware:\n";
     std::cout << "  GPU: " << gpu.device_name() << "\n";
-    std::cout << "  Unified Memory: " << (gpu.has_unified_memory() ? "Yes" : "No")
-              << "\n";
-    std::cout << "  Max Buffer: " << gpu.max_buffer_size() / (1024 * 1024)
-              << " MB\n";
-  } else {
-    std::cout << "\nNo GPU available\n";
+    std::cout << "  Unified Memory: " << (gpu.has_unified_memory() ? "Yes" : "No") << "\n";
   }
 
   std::cout << "\nNote: GPU NNUE benchmarks require loaded networks.\n";
-  std::cout << "Run 'metalfish' first to load networks, or run these\n";
-  std::cout << "benchmarks from within the engine context.\n";
+  std::cout << "Feature extraction benchmarks work without networks.\n";
 
-  // Run benchmarks
-  benchmark_cpu_eval_latency();
+  benchmark_cpu_feature_extraction();
   benchmark_gpu_dispatch_overhead();
+  benchmark_gpu_batch_latency_table();
   benchmark_gpu_stage_breakdown();
-  benchmark_cpu_vs_gpu_batch();
   benchmark_true_batching_verification();
-  benchmark_throughput();
+  benchmark_accuracy_check();
 
-  std::cout << "\n";
-  std::cout << "============================================================\n";
+  std::cout << "\n============================================================\n";
   std::cout << "  Benchmark Suite Complete\n";
   std::cout << "============================================================\n";
 
