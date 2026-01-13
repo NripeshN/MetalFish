@@ -47,8 +47,8 @@ enum class EvalStrategy {
 // Runtime tuning parameters learned from observed performance
 struct GPUTuningParams {
   int min_batch_for_gpu = 4;        // Minimum batch size for GPU path
-  int simd_threshold = 256;         // Batch size threshold for SIMD kernels
-  int gpu_extract_threshold = 1024; // Threshold for GPU feature extraction
+  int simd_threshold = 512;         // Batch size threshold for SIMD kernels (conservative)
+  int gpu_extract_threshold = 2048; // Threshold for GPU feature extraction
   double cpu_eval_ns = 80.0;        // Observed CPU eval time (nanoseconds)
   double gpu_dispatch_us = 140.0;   // Observed GPU dispatch overhead (microseconds)
   

@@ -153,14 +153,19 @@ void GPUEvalBatch::add_position(const Position &pos) {
 }
 
 // ============================================================================
-// Embedded Shader Source - HIGHLY OPTIMIZED with SIMD and vectorization
+// Metal Shader Source
+// 
+// Contains GPU compute kernels for NNUE evaluation:
+// - Feature transform: Converts sparse features to dense accumulators
+// - Forward pass: Evaluates the neural network layers
+// - PSQT accumulation: Computes piece-square table scores
 // ============================================================================
 
 static const char *GPU_NNUE_SHADER_SOURCE = R"(
 #include <metal_stdlib>
 using namespace metal;
 
-// Constants
+// Network architecture constants
 constant uint FC0_OUT = 15;
 constant uint FC1_OUT = 32;
 constant uint WEIGHT_SCALE_BITS = 6;
@@ -168,33 +173,35 @@ constant uint OUTPUT_SCALE = 16;
 constant uint SIMDGROUP_SIZE = 32;
 constant uint MAX_FEATURES_PER_PERSPECTIVE = 64;
 
-// Base types
+// Data types matching CPU implementation
 typedef int16_t weight_t;
 typedef int8_t layer_weight_t;
 typedef int32_t accumulator_t;
 
-// Vectorized types for better memory throughput (Metal uses short2/int2 etc.)
+// Vector types for coalesced memory access
 typedef short2 weight2_t;
 typedef short4 weight4_t;
 typedef int2 acc2_t;
 typedef int4 acc4_t;
 typedef char4 clipped4_t;
 
-// Optimized clipped ReLU - branchless
+// Activation function: clamp to [0, 127]
 inline int8_t clipped_relu(int16_t x) {
     return int8_t(clamp(int(x), 0, 127));
 }
 
+// Squared activation: (clamp(x, 0, 127))^2 / 128
 inline int8_t sqr_clipped_relu(int16_t x) {
     int clamped = clamp(int(x), 0, 127);
     return int8_t((clamped * clamped) >> 7);
 }
 
-// Vectorized clipped ReLU for 4 values at once
+// Vectorized activation for 4 values
 inline char4 clipped_relu4(short4 x) {
     return char4(clamp(int4(x), 0, 127));
 }
 
+// Position data structure (matches CPU GPUPositionData)
 struct GPUPositionData {
     uint64_t pieces[2][7];
     uint8_t king_sq[2];
@@ -203,7 +210,11 @@ struct GPUPositionData {
     uint8_t padding[4];
 };
 
-// OPTIMIZED Feature transform kernel with prefetching and simdgroup broadcast
+// Feature Transform Kernel
+// Transforms sparse feature indices into dense accumulator values.
+// Each thread processes one hidden dimension for one position.
+// Memory access pattern: weights[feature_idx * hidden_dim + hidden_idx]
+// provides coalesced reads when threads in a simdgroup access consecutive hidden_idx.
 kernel void gpu_feature_transform(
     device const weight_t* weights [[buffer(0)]],
     device const weight_t* biases [[buffer(1)]],
@@ -242,7 +253,10 @@ kernel void gpu_feature_transform(
     accumulators[pos_idx * hidden_dim + hidden_idx] = acc;
 }
 
-// OPTIMIZED Feature transform for both perspectives in one kernel
+// Dual-Perspective Feature Transform
+// Processes both white and black perspectives in a single kernel dispatch.
+// Uses 3D grid: (hidden_dim, 2, batch_size) for perspective parallelism.
+// Loop unrolling (4x) improves instruction-level parallelism.
 kernel void gpu_feature_transform_dual(
     device const weight_t* weights [[buffer(0)]],
     device const weight_t* biases [[buffer(1)]],
@@ -296,11 +310,13 @@ kernel void gpu_feature_transform_dual(
         }
     }
     
-    // Output: [pos][perspective][hidden]
     accumulators[(pos_idx * 2 + perspective) * hidden_dim + hidden_idx] = acc;
 }
 
-// OPTIMIZED Fused forward pass kernel with threadgroup memory
+// Fused Forward Pass Kernel
+// Computes all FC layers (FC0, FC1, FC2) in a single kernel using threadgroup memory.
+// One threadgroup processes one position, with threads cooperating on layer computation.
+// Uses 8-way loop unrolling in FC0 for better throughput.
 kernel void gpu_nnue_forward(
     device const accumulator_t* accumulators [[buffer(0)]],
     device const layer_weight_t* fc0_weights [[buffer(1)]],
@@ -397,7 +413,10 @@ kernel void gpu_nnue_forward(
     }
 }
 
-// ULTRA-OPTIMIZED Forward pass using simdgroup operations for parallel reduction
+// SIMD-Accelerated Forward Pass
+// Uses simdgroup operations (simd_sum) for parallel reduction.
+// Each simdgroup handles one output neuron, with threads computing partial sums.
+// Suitable for large batch sizes where compute time exceeds dispatch overhead.
 kernel void gpu_nnue_forward_simd(
     device const accumulator_t* accumulators [[buffer(0)]],
     device const layer_weight_t* fc0_weights [[buffer(1)]],
@@ -492,8 +511,10 @@ kernel void gpu_nnue_forward_simd(
     }
 }
 
-// GPU-SIDE FEATURE EXTRACTION - Eliminates CPU bottleneck for large batches
-// Extracts HalfKA features directly on GPU from position bitboards
+// GPU-Side Feature Extraction
+// Extracts HalfKA features directly on GPU from position bitboards.
+// Eliminates CPU feature extraction overhead for large batches.
+// Each thread processes one position.
 inline uint64_t gpu_pop_lsb(thread uint64_t& x) {
     uint low = uint(x);
     uint high = uint(x >> 32);
@@ -635,6 +656,7 @@ bool GPUNNUEManager::compile_shaders() {
     return false;
   }
 
+  // Required kernels
   feature_transform_kernel_ =
       backend.create_kernel("gpu_feature_transform", "gpu_nnue_integration");
   forward_fused_kernel_ =
@@ -642,20 +664,15 @@ bool GPUNNUEManager::compile_shaders() {
   psqt_kernel_ =
       backend.create_kernel("gpu_psqt_accumulate", "gpu_nnue_integration");
   
-  // Try to create SIMD-optimized forward kernel (optional)
-  auto forward_simd_kernel = 
+  // Optional kernels for adaptive strategy selection
+  forward_simd_kernel_ = 
       backend.create_kernel("gpu_nnue_forward_simd", "gpu_nnue_integration");
-  if (forward_simd_kernel && forward_simd_kernel->valid()) {
-    std::cout << "[GPU NNUE] SIMD-optimized forward kernel available" << std::endl;
-  }
-  
-  // Try to create GPU feature extraction kernel (optional)
+  feature_transform_dual_kernel_ =
+      backend.create_kernel("gpu_feature_transform_dual", "gpu_nnue_integration");
   extract_features_kernel_ =
       backend.create_kernel("gpu_extract_features", "gpu_nnue_integration");
-  if (extract_features_kernel_ && extract_features_kernel_->valid()) {
-    std::cout << "[GPU NNUE] GPU feature extraction kernel available" << std::endl;
-  }
 
+  // Verify required kernels
   if (!feature_transform_kernel_ || !feature_transform_kernel_->valid()) {
     std::cerr << "[GPU NNUE] Failed to create feature_transform kernel"
               << std::endl;
@@ -670,6 +687,17 @@ bool GPUNNUEManager::compile_shaders() {
   if (!psqt_kernel_ || !psqt_kernel_->valid()) {
     std::cerr << "[GPU NNUE] Failed to create psqt kernel" << std::endl;
     return false;
+  }
+
+  // Log available optional kernels
+  if (forward_simd_kernel_ && forward_simd_kernel_->valid()) {
+    std::cout << "[GPU NNUE] SIMD forward kernel available" << std::endl;
+  }
+  if (feature_transform_dual_kernel_ && feature_transform_dual_kernel_->valid()) {
+    std::cout << "[GPU NNUE] Dual-perspective transform kernel available" << std::endl;
+  }
+  if (extract_features_kernel_ && extract_features_kernel_->valid()) {
+    std::cout << "[GPU NNUE] GPU feature extraction kernel available" << std::endl;
   }
 
   std::cout << "[GPU NNUE] Shaders compiled successfully" << std::endl;
@@ -925,9 +953,12 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     return false;
   }
 
-  if (batch.count < min_batch_size_) {
+  // Select evaluation strategy based on batch size and tuning parameters
+  EvalStrategy strategy = tuning_.select_strategy(batch.count);
+  
+  if (strategy == EvalStrategy::CPU_FALLBACK) {
     cpu_evals_ += batch.count;
-    return false; // Fall back to CPU
+    return false;
   }
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -943,7 +974,7 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   int batch_size = batch.count;
   int hidden_dim = net.hidden_dim;
 
-  // Extract features for all positions if not already done
+  // Extract features from position data (CPU-side for now)
   std::vector<int32_t> white_features_all, black_features_all;
   std::vector<uint32_t> white_counts, black_counts;
   std::vector<uint32_t> white_offsets, black_offsets;
@@ -955,7 +986,6 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   white_offsets.reserve(batch_size);
   black_offsets.reserve(batch_size);
   
-  // Extract features from position data
   for (int i = 0; i < batch_size; i++) {
     const auto &pos_data = batch.positions[i];
     
@@ -968,14 +998,13 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     int white_count = 0;
     int black_count = 0;
     
-    // Extract features from piece bitboards
+    // Extract HalfKA features from piece bitboards
     for (int c = 0; c < 2; c++) {
       for (int pt = PAWN; pt <= QUEEN; pt++) {
         Bitboard bb = pos_data.pieces[c][pt];
         while (bb) {
           Square s = pop_lsb(bb);
           
-          // HalfKA feature index calculation
           int white_feat = int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
           int black_feat = int(flip_rank(bksq)) * 640 + (1 - c) * 320 + 
                            (pt - 1) * 64 + int(flip_rank(s));
@@ -998,46 +1027,41 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     black_counts.push_back(black_count);
   }
 
-  // Upload position data
+  // Upload data to GPU buffers
   std::memcpy(positions_buffer_->data(), batch.positions.data(),
               batch_size * sizeof(GPUPositionData));
-
-  // Upload white features
   std::memcpy(white_features_buffer_->data(), white_features_all.data(),
               white_features_all.size() * sizeof(int32_t));
-  
-  // Upload black features
   std::memcpy(black_features_buffer_->data(), black_features_all.data(),
               black_features_all.size() * sizeof(int32_t));
   
-  // Upload counts (interleaved: white0, black0, white1, black1, ...)
+  // Prepare interleaved counts and offsets
   std::vector<uint32_t> interleaved_counts;
+  std::vector<uint32_t> interleaved_offsets;
   interleaved_counts.reserve(batch_size * 2);
+  interleaved_offsets.reserve(batch_size * 2);
+  
   for (int i = 0; i < batch_size; i++) {
     interleaved_counts.push_back(white_counts[i]);
     interleaved_counts.push_back(black_counts[i]);
-  }
-  std::memcpy(feature_counts_buffer_->data(), interleaved_counts.data(),
-              interleaved_counts.size() * sizeof(uint32_t));
-  
-  // Upload offsets (interleaved)
-  std::vector<uint32_t> interleaved_offsets;
-  interleaved_offsets.reserve(batch_size * 2);
-  for (int i = 0; i < batch_size; i++) {
     interleaved_offsets.push_back(white_offsets[i]);
     interleaved_offsets.push_back(black_offsets[i]);
   }
+  
+  std::memcpy(feature_counts_buffer_->data(), interleaved_counts.data(),
+              interleaved_counts.size() * sizeof(uint32_t));
   std::memcpy(feature_offsets_buffer_->data(), interleaved_offsets.data(),
               interleaved_offsets.size() * sizeof(uint32_t));
 
+  // Create command encoder and dispatch kernels
   auto encoder = backend.create_encoder();
 
-  // Feature transform for WHITE perspective
+  // Feature transform (white perspective)
   encoder->set_kernel(feature_transform_kernel_.get());
   encoder->set_buffer(net.ft_weights.get(), 0);
   encoder->set_buffer(net.ft_biases.get(), 1);
   encoder->set_buffer(white_features_buffer_.get(), 2);
-  encoder->set_buffer(feature_counts_buffer_.get(), 3);  // White counts at even indices
+  encoder->set_buffer(feature_counts_buffer_.get(), 3);
   encoder->set_buffer(feature_offsets_buffer_.get(), 4);
   encoder->set_buffer(accumulators_buffer_.get(), 5);
   encoder->set_value(static_cast<uint32_t>(hidden_dim), 6);
@@ -1045,8 +1069,9 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   encoder->dispatch_threads(hidden_dim, batch_size);
   encoder->barrier();
 
-  // Forward pass - use optimal threadgroup size
+  // Forward pass - use standard kernel (SIMD kernel available but needs tuning)
   const auto &layer = net.layers[0];
+  
   encoder->set_kernel(forward_fused_kernel_.get());
   encoder->set_buffer(accumulators_buffer_.get(), 0);
   encoder->set_buffer(layer.fc0_weights.get(), 1);
