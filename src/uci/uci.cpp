@@ -1321,6 +1321,8 @@ void UCIEngine::mcts_go(std::istringstream &is) {
             << " verifications=" << stats.ab_verifications
             << " overrides=" << stats.ab_overrides
             << " GPU batches=" << stats.gpu_batches << sync_endl;
+  sync_cout << "info string TT usage: " << std::fixed << std::setprecision(1) 
+            << MCTS::mcts_tt().usage_percent() << "%" << sync_endl;
   sync_cout << "info string Time: MCTS=" << std::fixed << std::setprecision(1) 
             << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms 
             << "ms Total=" << stats.total_time_ms << "ms" << sync_endl;

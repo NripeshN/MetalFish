@@ -272,10 +272,11 @@ void HybridSearch::search_thread_main() {
   
   if (!root->has_children()) {
     expand_node(root, pos);
-    // Simple evaluation for root children
+    // Uniform policy for initial expansion (fast path)
     int num_edges = static_cast<int>(root->edges().size());
+    float uniform_policy = 1.0f / std::max(1, num_edges);
     for (auto& edge : root->edges()) {
-      edge.set_policy(1.0f / num_edges);
+      edge.set_policy(uniform_policy);
     }
   }
   
@@ -315,25 +316,48 @@ void HybridSearch::search_thread_main() {
     // Expansion: add children
     if (!node->has_children()) {
       expand_node(node, search_pos);
-      // Uniform policy for new children
+      // Uniform policy for fast expansion
       int num_edges = static_cast<int>(node->edges().size());
+      float uniform_policy = 1.0f / std::max(1, num_edges);
       for (auto& edge : node->edges()) {
-        edge.set_policy(1.0f / num_edges);
+        edge.set_policy(uniform_policy);
       }
     }
     
-    // Simple evaluation using GPU NNUE directly (skip batching for now)
+    // Check TT for cached evaluation (fast path)
     float value = 0.0f;
-    if (gpu_nnue_) {
-      auto [psqt, score] = gpu_nnue_->evaluate_single(search_pos.stockfish_position(), true);
-      // Convert centipawn score to value in [-1, 1]
-      value = std::tanh(score / 400.0f);
-      if (search_pos.is_black_to_move()) {
-        value = -value;
+    float draw = 0.0f;
+    float moves_left = 30.0f;
+    
+    uint64_t hash = search_pos.hash();
+    MCTSStats cached_stats;
+    bool found_in_tt = mcts_tt().probe_mcts(hash, cached_stats);
+    
+    if (found_in_tt && cached_stats.n > 0) {
+      // Use cached value
+      value = cached_stats.q;
+      draw = cached_stats.d;
+      moves_left = cached_stats.m;
+      stats_.cache_hits.fetch_add(1, std::memory_order_relaxed);
+    } else {
+      // Evaluate using GPU NNUE
+      if (gpu_nnue_) {
+        auto [psqt, score] = gpu_nnue_->evaluate_single(search_pos.stockfish_position(), true);
+        // Convert centipawn score to value in [-1, 1]
+        value = std::tanh(score / 400.0f);
+        if (search_pos.is_black_to_move()) {
+          value = -value;
+        }
+        // Estimate draw probability from score magnitude
+        draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
       }
+      
+      // Store in TT
+      mcts_tt().update_mcts(hash, value, draw, moves_left);
+      stats_.cache_misses.fetch_add(1, std::memory_order_relaxed);
     }
     
-    backpropagate(node, value, 0.0f, 0.0f);
+    backpropagate(node, value, draw, moves_left);
     stats_.mcts_nodes.fetch_add(1, std::memory_order_relaxed);
     iterations++;
   }
