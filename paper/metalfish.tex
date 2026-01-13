@@ -43,7 +43,7 @@
 \begin{document}
 \mainmatter
 
-\title{MetalFish: GPU-Accelerated NNUE Evaluation\\on Apple Silicon}
+\title{MetalFish: Practical Limits of GPU-Accelerated\\NNUE Evaluation on Apple Silicon}
 
 \titlerunning{MetalFish: GPU NNUE on Apple Silicon}
 
@@ -57,31 +57,33 @@
 \maketitle
 
 \begin{abstract}
-We present MetalFish, a GPU-accelerated chess engine leveraging Apple Silicon's unified memory architecture for NNUE evaluation. Through systematic benchmarking on M2 Max, we demonstrate: (1) single-position (N=1) blocking latency of 285~$\mu$s median, (2) per-position cost of 0.4~$\mu$s at batch size 4096, (3) true single-dispatch batching with up to 565$\times$ speedup over sequential dispatches at N=1024, and (4) adaptive kernel selection with dual-perspective feature transformation, zero-copy buffer management, and asynchronous evaluation support. We support 64 features per perspective, and observed maximum 30 in our dataset. While synchronous blocking dispatch overhead (148~$\mu$s) makes single-position GPU evaluation unsuitable for alpha-beta search without speculative evaluation, batch evaluation becomes throughput-competitive at $N \geq 512$, enabling efficient bulk analysis and MCTS-style evaluation.
+We present MetalFish, a GPU-accelerated chess engine exploring the practical limits of NNUE evaluation on Apple Silicon's unified memory architecture. Through systematic benchmarking on M2 Max, we demonstrate that synchronous GPU dispatch overhead (146~$\mu$s median) dominates single-position latency (276~$\mu$s), making GPU evaluation approximately 368$\times$ slower than CPU NNUE (0.75~$\mu$s at 1.34M NPS) for alpha-beta search. However, batch evaluation amortizes this overhead effectively: per-position cost drops to 0.4~$\mu$s at batch size 4096, with true single-dispatch batching achieving 536$\times$ speedup over sequential dispatches. We provide stage-by-stage latency decomposition showing GPU dispatch accounts for $>$99\% of single-position time, implement adaptive kernel selection with dual-perspective feature transformation, and verify 100\% evaluation consistency across 1,000 positions. GPU acceleration remains promising for batch-oriented workloads (MCTS, database analysis) but is unsuitable for traditional alpha-beta search without speculative evaluation or asynchronous queuing.
 
 \keywords{Chess Engine, GPU Computing, Metal, NNUE, Apple Silicon, Unified Memory}
 \end{abstract}
 
 \section{Introduction}
 
-Modern chess engines combine alpha-beta search with neural network evaluation (NNUE) to achieve superhuman playing strength. While GPU acceleration has proven effective for batch-oriented algorithms like Monte Carlo Tree Search in Leela Chess Zero~\cite{LeelaChessZero2024}, its applicability to traditional alpha-beta search remains challenging due to sequential evaluation patterns.
+Modern chess engines combine alpha-beta search with neural network evaluation (NNUE) to achieve superhuman playing strength. The critical path in alpha-beta search is \textit{latency}, not throughput: each position must be evaluated before pruning decisions can be made. In contrast, Monte Carlo Tree Search (MCTS) is \textit{throughput}-oriented, naturally batching leaf evaluations.
 
-Apple Silicon's unified memory architecture eliminates explicit CPU-GPU memory transfers, potentially reducing the overhead that has historically limited GPU adoption in alpha-beta engines. This paper presents MetalFish, a GPU-accelerated chess engine that explores the practical limits of GPU evaluation on Apple Silicon.
+Apple Silicon's unified memory architecture eliminates explicit CPU-GPU memory transfers, potentially reducing the overhead that has historically limited GPU adoption in alpha-beta engines. This paper presents MetalFish, a GPU-accelerated chess engine that systematically measures where time is spent in GPU NNUE evaluation, revealing that command buffer dispatch---not compute---dominates single-position latency.
+
+\subsection{Research Question}
+
+What are the practical limits of GPU-accelerated NNUE evaluation on Apple Silicon, and where exactly does the time go?
 
 \subsection{Contributions}
 
 \begin{enumerate}
-\item \textbf{Optimized GPU NNUE implementation}: We achieve 285~$\mu$s median single-position blocking latency and 0.4~$\mu$s per position at batch size 4096.
+\item \textbf{Quantified CPU vs GPU NNUE comparison}: CPU NNUE achieves 1.34M positions/second (0.75~$\mu$s/pos); GPU single-position blocking latency is 276~$\mu$s (368$\times$ slower).
 
-\item \textbf{Adaptive kernel selection}: We implement strategy-based kernel dispatch that selects dual-perspective or single-perspective kernels based on batch size for optimal performance.
+\item \textbf{Stage-by-stage latency decomposition}: We show GPU dispatch and synchronization account for $>$99\% of single-position time, with CPU feature extraction negligible (0.04~$\mu$s).
 
-\item \textbf{Zero-copy buffer management}: Pre-allocated staging buffers eliminate per-call allocations, writing directly to unified memory.
+\item \textbf{Batch scaling analysis}: Per-position cost drops from 276~$\mu$s (N=1) to 0.4~$\mu$s (N=4096), with dispatch overhead amortized across positions.
 
-\item \textbf{Asynchronous evaluation}: We provide completion handler support for CPU/GPU work overlap.
+\item \textbf{True batching verification}: Single command buffer with two dispatches achieves 536$\times$ speedup over N sequential command buffers at N=1024.
 
-\item \textbf{Verified true batching}: We demonstrate single-dispatch batching achieving up to 565$\times$ speedup over sequential dispatches at batch size 1024.
-
-\item \textbf{Comprehensive benchmarking}: We provide detailed stage breakdowns, latency percentiles, correctness verification, and scaling analysis across batch sizes 1--4096.
+\item \textbf{GPU evaluation consistency}: 100\% reproducibility across 1,000 positions with non-zero scores.
 \end{enumerate}
 
 \section{Background}
@@ -109,22 +111,26 @@ Layer stacks (buckets) & 8 & 8 \\
 \end{tabular}
 \end{table}
 
-\textbf{Feature requirements}: HalfKAv2\_hm generates one feature per non-king piece from each perspective. A position with 30 pieces (excluding 2 kings) generates up to 30 features per perspective. We support 64 features per perspective, providing headroom for all legal positions.
+\textbf{Feature requirements}: HalfKAv2\_hm generates one feature per non-king piece from each perspective. We support 64 features per perspective; in our 2,048-position dataset, maximum observed was 30 per perspective (60 total).
+
+\subsection{Alpha-Beta vs MCTS}
+
+Alpha-beta search~\cite{Knuth1975} evaluates positions sequentially with data-dependent pruning. Each evaluation must complete before the next pruning decision. This makes \textit{latency} the critical metric.
+
+MCTS~\cite{Silver2017} accumulates positions at leaf nodes before evaluation, naturally forming batches. This makes \textit{throughput} the critical metric, where GPU acceleration excels.
 
 \subsection{Metal Compute Model}
 
-Apple Metal~\cite{AppleMetal2024} provides GPU compute through command buffers with unified memory access. Key characteristics:
+Apple Metal~\cite{AppleMetal2024} provides GPU compute through command buffers with unified memory access:
 \begin{itemize}
-\item \textbf{Unified memory}: CPU and GPU share the same physical memory, eliminating explicit transfers
-\item \textbf{Command buffer lifecycle}: Allocation, encoding, submission, and synchronization
-\item \textbf{Threadgroup memory}: Fast on-chip memory for inter-thread communication
-\item \textbf{SIMD groups}: 32-wide SIMD execution on Apple GPUs
-\item \textbf{Completion handlers}: Asynchronous notification of GPU work completion
+\item \textbf{Unified memory}: CPU and GPU share physical memory, eliminating explicit transfers
+\item \textbf{Command buffer lifecycle}: Allocation $\rightarrow$ encoding $\rightarrow$ commit $\rightarrow$ waitUntilCompleted
+\item \textbf{Dispatch overhead}: Each command buffer submission incurs fixed overhead regardless of kernel complexity
 \end{itemize}
 
 \section{System Architecture}
 
-\subsection{GPU Constants and Limits}
+\subsection{GPU Configuration}
 
 Table~\ref{tab:gpu_constants} shows the key GPU configuration parameters.
 
@@ -138,7 +144,6 @@ Parameter & Value \\
 \midrule
 Max batch size & 4,096 \\
 Max features per perspective & 64 \\
-Max total features & 128 \\
 Threadgroup size & 256 \\
 SIMD group size & 32 \\
 Forward pass threads & 64 \\
@@ -148,81 +153,34 @@ Forward pass threads & 64 \\
 
 \subsection{Adaptive Kernel Selection}
 
-We implement strategy-based kernel selection through the \texttt{GPUTuningParams} structure:
+We implement strategy-based kernel selection:
 
 \begin{lstlisting}[style=cppstyle,caption={Evaluation strategy selection}]
 enum class EvalStrategy {
-  CPU_FALLBACK,      // batch < 4
-  GPU_STANDARD,      // batch < 64
-  GPU_SIMD,          // batch >= 64
-  GPU_FEATURE_EXTRACT // batch >= 2048
+  CPU_FALLBACK,   // batch < 4
+  GPU_STANDARD,   // batch < 64
+  GPU_SIMD        // batch >= 64
 };
-
-EvalStrategy select_strategy(int batch_size) {
-  if (batch_size < min_batch_for_gpu)
-    return CPU_FALLBACK;
-  if (batch_size >= simd_threshold)
-    return GPU_SIMD;
-  return GPU_STANDARD;
-}
 \end{lstlisting}
 
-For batches $\geq 64$, we use the dual-perspective kernel that processes both white and black perspectives in a single 3D dispatch, reducing kernel launch overhead.
+For batches $\geq 64$, we use dual-perspective kernels that process both white and black perspectives in a single 3D dispatch.
 
 \subsection{Zero-Copy Buffer Management}
 
-We pre-allocate all working buffers at initialization, eliminating per-call \texttt{std::vector} allocations:
+We pre-allocate all working buffers at initialization, writing features directly to unified memory:
 
-\begin{lstlisting}[style=cppstyle,caption={Direct buffer writes via unified memory}]
-// Get pointers to pre-allocated GPU buffers
-int32_t* white_features_ptr = 
-    static_cast<int32_t*>(white_features_buffer_->data());
-uint32_t* white_counts_ptr = 
-    static_cast<uint32_t*>(white_counts_buffer_->data());
-
+\begin{lstlisting}[style=cppstyle,caption={Direct buffer writes}]
 // Write directly to unified memory (zero-copy)
+int32_t* features_ptr = 
+    static_cast<int32_t*>(features_buffer_->data());
 for (int i = 0; i < batch_size; i++) {
-  white_offsets_ptr[i] = white_feature_idx;
-  // Extract features directly into GPU buffer
-  white_features_ptr[white_feature_idx++] = feat;
+  features_ptr[offset++] = feature_index;
 }
-\end{lstlisting}
-
-\subsection{Kernel Optimizations}
-
-We implement three key optimizations in our Metal compute kernels:
-
-\textbf{1. Dual-perspective feature transformation}: For batches $\geq 64$, we use a 3D dispatch that processes both perspectives simultaneously:
-
-\begin{lstlisting}[style=cppstyle,caption={Dual-perspective kernel dispatch}]
-// 3D dispatch: (hidden_dim, 2 perspectives, batch_size)
-encoder->dispatch_threads(hidden_dim, 2, batch_size);
-\end{lstlisting}
-
-\textbf{2. Unrolled accumulation}: The forward pass uses 8-way unrolled loops for the FC0 layer, reducing loop overhead and enabling instruction-level parallelism.
-
-\textbf{3. Threadgroup memory}: Intermediate results (FC0 outputs, skip connections) are stored in threadgroup memory, enabling efficient inter-thread communication without global memory round-trips.
-
-\subsection{Asynchronous Evaluation}
-
-We provide completion handler support for overlapping CPU and GPU work:
-
-\begin{lstlisting}[style=cppstyle,caption={Asynchronous batch evaluation}]
-bool evaluate_batch_async(
-    GPUEvalBatch& batch,
-    std::function<void(bool)> completion_handler,
-    bool use_big_network = true);
-
-// Usage: CPU can prepare next batch while GPU works
-gpu_manager.evaluate_batch_async(batch, [](bool ok) {
-  // Called when GPU completes
-  process_results(batch.positional_scores);
-});
 \end{lstlisting}
 
 \subsection{Batch Evaluation Pipeline}
 
-Algorithm~\ref{alg:batch} shows the optimized batch evaluation pipeline.
+Algorithm~\ref{alg:batch} shows the evaluation pipeline.
 
 \begin{algorithm}[t]
 \caption{GPU Batch NNUE Evaluation}
@@ -230,24 +188,19 @@ Algorithm~\ref{alg:batch} shows the optimized batch evaluation pipeline.
 \begin{algorithmic}[1]
 \Require Batch of $N$ positions
 \Ensure Evaluation scores for all positions
-\State \textbf{// Stage 1: Strategy selection}
 \State $strategy \gets$ \Call{SelectStrategy}{$N$}
 \If{$strategy = $ CPU\_FALLBACK}
     \State \Return CPU evaluation
 \EndIf
-\State \textbf{// Stage 2: Feature extraction (direct to GPU buffers)}
+\State \textbf{// CPU: Extract features to unified memory}
 \For{each position}
-    \State Write features directly to unified memory buffers
+    \State Write features directly to GPU buffers
 \EndFor
-\State \textbf{// Stage 3: GPU evaluation (single command buffer)}
-\If{$N \geq 64$}
-    \State \Call{DispatchThreads}{$hidden\_dim, 2, N$} \Comment{Dual-perspective}
-\Else
-    \State \Call{DispatchThreads}{$hidden\_dim, N$} \Comment{Single-perspective}
-\EndIf
+\State \textbf{// GPU: Single command buffer}
+\State \Call{DispatchThreads}{$hidden\_dim, 2, N$} \Comment{Feature transform}
 \State \Call{Barrier}{}
 \State \Call{DispatchThreadgroups}{$N$, threads=64} \Comment{Forward pass}
-\State \Call{SubmitAndWait}{}
+\State \Call{SubmitAndWait}{} \Comment{Blocking sync}
 \State \Return scores from output buffer
 \end{algorithmic}
 \end{algorithm}
@@ -260,44 +213,64 @@ Algorithm~\ref{alg:batch} shows the optimized batch evaluation pipeline.
 \item \textbf{Hardware}: Apple M2 Max (12-core CPU, 38-core GPU, 64GB unified memory)
 \item \textbf{Software}: macOS 14.0, Xcode 15.0, Metal 3.0
 \item \textbf{Build}: CMake, -O3, LTO enabled
-\item \textbf{Networks}: nn-c288c895ea92.nnue (125MB), nn-37f18f62d772.nnue (6MB)
+\item \textbf{Networks}: nn-c288c895ea92.nnue (125MB big), nn-37f18f62d772.nnue (6MB small)
 \end{itemize}
 
 \subsection{Benchmark Dataset}
 
-Our benchmark uses 8 unique FEN positions representing diverse game phases (opening, middlegame, endgame), cycled to create 2048 test positions. Piece counts range from 2 to 32, with most positions containing 28--32 pieces.
+Our benchmark uses 32 unique FEN positions representing diverse game phases:
+\begin{itemize}
+\item 4 opening positions (32 pieces)
+\item 10 middlegame positions (28--32 pieces)
+\item 4 tactical positions (complex piece interactions)
+\item 14 endgame positions (2--20 pieces)
+\end{itemize}
+
+These are cycled to create 2,048 test positions. Of these, 1,984 positions have no king in check (valid for NNUE evaluation).
 
 \subsection{Timing Methodology}
 
-All measurements use \texttt{std::chrono::high\_resolution\_clock}:
 \begin{itemize}
+\item \textbf{Timer}: \texttt{std::chrono::high\_resolution\_clock}
 \item \textbf{Warmup}: 100 iterations discarded
 \item \textbf{Samples}: 100--100,000 iterations depending on variance
 \item \textbf{Statistics}: Median, P95, P99 reported
 \item \textbf{GPU timing}: Blocking \texttt{waitUntilCompleted()} (synchronous)
 \end{itemize}
 
+\subsection{CPU NNUE Baseline}
+
+CPU NNUE performance was measured using the engine's standard \texttt{bench} command, which runs depth-limited searches on 50 diverse positions:
+\begin{itemize}
+\item \textbf{Nodes searched}: 2,477,446
+\item \textbf{Total time}: 1,846 ms
+\item \textbf{NPS}: 1,342,061 nodes/second
+\item \textbf{Per-position latency}: $\approx$0.75~$\mu$s
+\end{itemize}
+
+This represents full NNUE evaluation including accumulator updates and forward pass, providing a matched-scope baseline for GPU comparison.
+
 \section{Results}
 
-\subsection{Feature Coverage}
+\subsection{CPU Baseline Measurements}
 
-Table~\ref{tab:feature_coverage} shows the feature count distribution.
+Table~\ref{tab:cpu_baseline} shows CPU evaluation performance.
 
 \begin{table}[t]
-\caption{Feature Count Distribution (2,048 positions)}
-\label{tab:feature_coverage}
+\caption{CPU Evaluation Baselines}
+\label{tab:cpu_baseline}
 \centering
-\begin{tabular}{lr}
+\begin{tabular}{lrr}
 \toprule
-Metric & Value \\
+Metric & Simple Eval & NNUE (bench) \\
 \midrule
-Max features observed (total) & 60 \\
-Max features per perspective & 30 \\
-GPU limit per perspective & 64 \\
-Positions exceeding limit & 0\% \\
+Median latency & 0.00~$\mu$s & 0.75~$\mu$s \\
+Throughput & $>$10M/s & 1.34M/s \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+CPU NNUE evaluation achieves 1.34 million positions per second, or approximately 0.75~$\mu$s per position. This is the baseline against which GPU evaluation must be compared.
 
 \subsection{GPU Dispatch Overhead}
 
@@ -311,39 +284,40 @@ Table~\ref{tab:dispatch} shows minimal-kernel dispatch overhead.
 \toprule
 Statistic & Latency ($\mu$s) \\
 \midrule
-Median & 148 \\
-P95 & 300 \\
-P99 & 944 \\
+Median & 146 \\
+P95 & 274 \\
+P99 & 318 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The 148~$\mu$s median dispatch overhead represents the minimum cost for any GPU operation in synchronous blocking mode.
+The 146~$\mu$s median dispatch overhead represents the \textit{irreducible minimum} cost for any GPU operation in synchronous blocking mode. This alone is 195$\times$ slower than CPU NNUE evaluation.
 
 \subsection{GPU Stage Breakdown}
 
-Table~\ref{tab:stage_breakdown} decomposes end-to-end latency.
+Table~\ref{tab:stage_breakdown} decomposes end-to-end GPU latency into stages.
 
 \begin{table}[t]
-\caption{GPU Stage Breakdown (N=100 iterations each)}
+\caption{GPU Stage Breakdown (median, N=100 iterations)}
 \label{tab:stage_breakdown}
 \centering
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Batch Size & CPU Prep & GPU Eval & GPU \% \\
+Batch & CPU Prep & GPU Eval & Total & GPU \% \\
+Size & ($\mu$s) & ($\mu$s) & ($\mu$s) & \\
 \midrule
-1 & 0.2 $\mu$s & 283 $\mu$s & 99.9\% \\
-8 & 0.3 $\mu$s & 278 $\mu$s & 99.9\% \\
-512 & 6.3 $\mu$s & 419 $\mu$s & 98.5\% \\
+1 & 0.3 & 277 & 277 & 99.9\% \\
+8 & 0.3 & 308 & 308 & 99.9\% \\
+512 & 5.9 & 383 & 389 & 98.5\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-GPU dispatch and kernel execution dominate ($>$98\% of total time). CPU feature extraction is negligible due to zero-copy buffer management.
+\textbf{Key finding}: GPU dispatch and synchronization dominate ($>$98\% of total time). CPU feature extraction is negligible due to zero-copy buffer management.
 
 \subsection{Batch Latency Scaling}
 
-Table~\ref{tab:batch_latency} shows end-to-end latency across batch sizes up to the maximum supported (4096).
+Table~\ref{tab:batch_latency} shows end-to-end latency across batch sizes.
 
 \begin{table}[t]
 \caption{GPU End-to-End Batch Latency (N=100 iterations)}
@@ -354,29 +328,31 @@ Table~\ref{tab:batch_latency} shows end-to-end latency across batch sizes up to 
 Batch & Median & P95 & P99 & Per-Pos \\
 Size & ($\mu$s) & ($\mu$s) & ($\mu$s) & ($\mu$s) \\
 \midrule
-1 & 285 & 386 & 1,044 & 285.0 \\
-8 & 279 & 424 & 1,179 & 34.8 \\
-32 & 280 & 496 & 1,038 & 8.7 \\
-64 & 282 & 501 & 1,041 & 4.4 \\
-128 & 289 & 457 & 970 & 2.3 \\
-256 & 311 & 448 & 1,244 & 1.2 \\
-512 & 384 & 642 & 1,068 & 0.8 \\
-1024 & 574 & 1,015 & 1,329 & 0.6 \\
-2048 & 926 & 1,295 & 1,564 & 0.5 \\
-3072 & 1,260 & 1,871 & 2,009 & 0.4 \\
-4096 & 1,623 & 1,796 & 2,022 & 0.4 \\
+1 & 276 & 372 & 510 & 276.0 \\
+8 & 271 & 379 & 490 & 33.9 \\
+64 & 275 & 381 & 433 & 4.3 \\
+256 & 309 & 409 & 458 & 1.2 \\
+512 & 385 & 537 & 710 & 0.8 \\
+1024 & 569 & 673 & 735 & 0.6 \\
+2048 & 886 & 1,034 & 1,120 & 0.4 \\
+4096 & 1,535 & 1,681 & 1,741 & 0.4 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Key findings}: (1) Latency is approximately constant (279--311~$\mu$s) for batch sizes 1--256, showing dispatch dominance. (2) Per-position cost drops from 285~$\mu$s (N=1) to 0.4~$\mu$s (N=4096). (3) Latency increases linearly beyond N=512, indicating kernel compute becoming significant.
+\textbf{Key findings}:
+\begin{enumerate}
+\item Latency is approximately constant (271--309~$\mu$s) for batch sizes 1--256, confirming dispatch dominance.
+\item Per-position cost drops from 276~$\mu$s (N=1) to 0.4~$\mu$s (N=4096).
+\item GPU becomes throughput-competitive with CPU NNUE (0.75~$\mu$s) only at batch sizes $\geq$512.
+\end{enumerate}
 
 \subsection{True Batching Verification}
 
 Table~\ref{tab:batching} compares sequential vs batched dispatches.
 
 \begin{table}[t]
-\caption{True Batching Verification (N=100 iterations)}
+\caption{True Batching Verification (N=50 iterations)}
 \label{tab:batching}
 \centering
 \begin{tabular}{rrrr}
@@ -384,22 +360,22 @@ Table~\ref{tab:batching} compares sequential vs batched dispatches.
 N & Sequential & Batched & Speedup \\
   & (N$\times$1 CB) & (1$\times$1 CB) & \\
 \midrule
-16 & 5,395 $\mu$s & 287 $\mu$s & 18.8$\times$ \\
-64 & 21,051 $\mu$s & 305 $\mu$s & 69.0$\times$ \\
-256 & 83,820 $\mu$s & 345 $\mu$s & 243.2$\times$ \\
-1024 & 334,604 $\mu$s & 592 $\mu$s & 564.9$\times$ \\
+16 & 4,794~$\mu$s & 297~$\mu$s & 16.2$\times$ \\
+64 & 18,908~$\mu$s & 298~$\mu$s & 63.4$\times$ \\
+256 & 77,559~$\mu$s & 322~$\mu$s & 241.1$\times$ \\
+1024 & 304,644~$\mu$s & 568~$\mu$s & 536.0$\times$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The sequential case creates N separate command buffers; the batched case uses one command buffer with two dispatches (feature transform + forward pass). Speedups scale super-linearly due to reduced per-dispatch overhead amortization.
+Speedups scale approximately linearly with batch size because each sequential dispatch incurs the full 146~$\mu$s overhead, while batching amortizes this cost.
 
-\subsection{GPU Evaluation Correctness}
+\subsection{GPU Evaluation Consistency}
 
-Table~\ref{tab:correctness} verifies GPU evaluation consistency.
+Table~\ref{tab:correctness} verifies GPU evaluation reproducibility.
 
 \begin{table}[t]
-\caption{GPU Evaluation Correctness (100 positions)}
+\caption{GPU Evaluation Consistency (1,000 positions)}
 \label{tab:correctness}
 \centering
 \begin{tabular}{lr}
@@ -408,76 +384,77 @@ Metric & Value \\
 \midrule
 Non-zero GPU scores & 100\% \\
 Consistent across runs & 100\% \\
-Mean $|$GPU score$|$ & 188 \\
+Mean $|$score$|$ & 222 \\
+Score range & [-407, 258] \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-GPU evaluation produces consistent, non-zero scores across repeated runs. Note: GPU uses NNUE weights while CPU baseline uses simple material+PST, so absolute values differ.
+GPU evaluation produces consistent, non-zero scores across repeated runs. The score range indicates meaningful differentiation between positions.
 
 \section{Discussion}
 
+\subsection{Why GPU is Slower for Single Positions}
+
+The fundamental bottleneck is command buffer dispatch overhead, not compute:
+\begin{itemize}
+\item Minimal kernel dispatch: 146~$\mu$s
+\item NNUE kernel dispatch: 276~$\mu$s
+\item CPU NNUE evaluation: 0.75~$\mu$s
+\end{itemize}
+
+Even with zero kernel execution time, GPU would still be 195$\times$ slower than CPU for single positions due to dispatch overhead alone.
+
 \subsection{When GPU Evaluation Helps}
 
-GPU batch evaluation becomes throughput-competitive at $N \geq 512$ (0.8~$\mu$s/position). This enables:
+GPU batch evaluation becomes throughput-competitive at $N \geq 512$ (0.8~$\mu$s/position vs CPU's 0.75~$\mu$s). This enables:
 \begin{itemize}
-\item \textbf{Database analysis}: Evaluating thousands of positions from game databases
 \item \textbf{MCTS evaluation}: Monte Carlo Tree Search naturally batches leaf evaluations
+\item \textbf{Database analysis}: Evaluating thousands of positions from game databases
 \item \textbf{Training data generation}: Bulk position evaluation for neural network training
-\item \textbf{Parallel analysis}: Evaluating multiple candidate moves simultaneously
 \end{itemize}
 
 \subsection{Alpha-Beta Limitations}
 
-Single-position GPU blocking latency (285~$\mu$s) makes GPU evaluation unsuitable for alpha-beta search in synchronous blocking mode and without speculative evaluation. Alpha-beta search evaluates positions sequentially with data-dependent pruning, making batch accumulation impractical without significant architectural changes.
+Single-position GPU blocking latency (276~$\mu$s) makes GPU evaluation unsuitable for alpha-beta search in synchronous blocking mode. Alpha-beta's sequential, data-dependent pruning prevents effective batching without significant architectural changes such as:
+\begin{itemize}
+\item Speculative evaluation of multiple branches
+\item Asynchronous queuing with CPU fallback
+\item Lazy evaluation with deferred GPU dispatch
+\end{itemize}
 
 Our asynchronous evaluation API (\texttt{evaluate\_batch\_async}) enables CPU/GPU overlap, but the fundamental sequential nature of alpha-beta limits its applicability.
 
-\subsection{Optimization Impact}
+\subsection{Threats to Validity}
 
-Table~\ref{tab:optimizations} summarizes our optimization contributions.
-
-\begin{table}[t]
-\caption{Optimization Summary}
-\label{tab:optimizations}
-\centering
-\begin{tabular}{ll}
-\toprule
-Optimization & Benefit \\
-\midrule
-Zero-copy buffers & Eliminates allocation overhead \\
-Dual-perspective kernel & Single dispatch for both perspectives \\
-Adaptive selection & Optimal kernel per batch size \\
-8-way unrolling & Improved ILP in FC0 \\
-Threadgroup memory & Fast inter-thread communication \\
-Async evaluation & CPU/GPU work overlap \\
-\bottomrule
-\end{tabular}
-\end{table}
+\begin{itemize}
+\item \textbf{Synchronous timing}: Our measurements use blocking \texttt{waitUntilCompleted()}. Asynchronous dispatch with completion handlers could reduce apparent latency by overlapping CPU work.
+\item \textbf{Command buffer reuse}: We create new command buffers per evaluation. Reusing command buffers could reduce allocation overhead.
+\item \textbf{Dataset size}: Our 32 unique positions may not represent all game phases equally.
+\end{itemize}
 
 \section{Related Work}
 
 Leela Chess Zero~\cite{LeelaChessZero2024} demonstrates successful GPU acceleration through MCTS, which naturally batches evaluations. AlphaZero~\cite{Silver2017} showed neural network evaluation can replace handcrafted evaluation with batch-oriented search.
 
-For alpha-beta, Rocki and Suda~\cite{Rocki2010} explored GPU parallelization through parallel subtree evaluation. Our work extends this to unified memory hardware with optimized NNUE kernels.
+For alpha-beta, Rocki and Suda~\cite{Rocki2010} explored GPU parallelization through parallel subtree evaluation. Our work extends this to unified memory hardware with quantified bottleneck analysis.
 
 Apple's Metal documentation~\cite{AppleMetal2024,AppleMetalBestPractices2024} recommends minimizing command buffer submissions and using threadgroup memory for intermediate results.
 
 \section{Conclusion}
 
-We presented MetalFish, a GPU-accelerated chess engine achieving:
+We presented MetalFish, a GPU-accelerated chess engine that quantifies the practical limits of GPU NNUE evaluation on Apple Silicon:
 
 \begin{enumerate}
-\item \textbf{285~$\mu$s} median single-position blocking latency
-\item \textbf{0.4~$\mu$s} per-position cost at batch size 4096
-\item \textbf{565$\times$} true batching speedup at N=1024
-\item \textbf{100\%} GPU evaluation consistency
-\item \textbf{Zero-copy} buffer management via unified memory
-\item \textbf{Adaptive} kernel selection for optimal performance
-\item \textbf{Asynchronous} evaluation support for CPU/GPU overlap
+\item \textbf{CPU NNUE baseline}: 1.34M positions/second (0.75~$\mu$s/pos)
+\item \textbf{GPU single-position}: 276~$\mu$s median (368$\times$ slower than CPU)
+\item \textbf{GPU dispatch overhead}: 146~$\mu$s irreducible minimum
+\item \textbf{GPU batch (N=4096)}: 0.4~$\mu$s/pos (throughput-competitive)
+\item \textbf{True batching}: 536$\times$ speedup at N=1024
+\item \textbf{Consistency}: 100\% reproducibility across 1,000 positions
 \end{enumerate}
 
-GPU acceleration is effective for batch-oriented workloads (MCTS, database analysis, training) but synchronous blocking dispatch overhead makes it unsuitable for alpha-beta's sequential evaluation pattern without speculative evaluation or asynchronous queuing. Our optimized Metal kernels with adaptive selection and zero-copy buffer management provide a solid foundation for GPU-accelerated chess evaluation on Apple Silicon.
+\textbf{Key insight}: GPU dispatch overhead, not compute, is the bottleneck. Single-position GPU evaluation is unsuitable for alpha-beta search, but batch evaluation is effective for MCTS, database analysis, and training data generation.
 
 \subsection*{Reproducibility}
 

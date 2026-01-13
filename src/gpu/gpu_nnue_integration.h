@@ -223,6 +223,10 @@ private:
   // Compute kernels - optimized variants
   std::unique_ptr<ComputeKernel> forward_simd_kernel_;
   std::unique_ptr<ComputeKernel> forward_batch_kernel_;
+  std::unique_ptr<ComputeKernel> feature_transform_vec4_kernel_;
+  std::unique_ptr<ComputeKernel> feature_transform_dual_vec4_kernel_;
+  std::unique_ptr<ComputeKernel> forward_optimized_kernel_;
+  std::unique_ptr<ComputeKernel> fused_single_kernel_;
 
   // Working buffers
   std::unique_ptr<Buffer> positions_buffer_;

@@ -616,6 +616,389 @@ kernel void gpu_psqt_accumulate(
     output[pos_idx * num_buckets + bucket] = acc;
 }
 
+// Vectorized Feature Transform with int4 loads
+// Uses 4-wide vector loads for better memory bandwidth utilization
+// Each thread processes 4 consecutive hidden dimensions
+kernel void gpu_feature_transform_vec4(
+    device const weight_t* weights [[buffer(0)]],
+    device const weight_t* biases [[buffer(1)]],
+    device const int32_t* features [[buffer(2)]],
+    device const uint32_t* feature_counts [[buffer(3)]],
+    device const uint32_t* feature_offsets [[buffer(4)]],
+    device accumulator_t* accumulators [[buffer(5)]],
+    constant uint& hidden_dim [[buffer(6)]],
+    constant uint& batch_size [[buffer(7)]],
+    uint2 gid [[thread_position_in_grid]]) {
+    
+    uint pos_idx = gid.y;
+    uint vec_idx = gid.x;  // Each thread handles 4 elements
+    uint hidden_base = vec_idx * 4;
+    
+    if (pos_idx >= batch_size || hidden_base >= hidden_dim)
+        return;
+    
+    // Load 4 biases at once using vectorized load
+    int4 acc;
+    if (hidden_base + 3 < hidden_dim) {
+        short4 bias_vec = *reinterpret_cast<device const short4*>(biases + hidden_base);
+        acc = int4(bias_vec);
+    } else {
+        // Handle boundary case
+        acc = int4(
+            hidden_base < hidden_dim ? biases[hidden_base] : 0,
+            hidden_base + 1 < hidden_dim ? biases[hidden_base + 1] : 0,
+            hidden_base + 2 < hidden_dim ? biases[hidden_base + 2] : 0,
+            hidden_base + 3 < hidden_dim ? biases[hidden_base + 3] : 0
+        );
+    }
+    
+    uint start = feature_offsets[pos_idx];
+    uint count = feature_counts[pos_idx];
+    
+    // Accumulate weights for active features
+    for (uint i = 0; i < count; i++) {
+        int32_t feat_idx = features[start + i];
+        if (feat_idx >= 0) {
+            uint weight_base = feat_idx * hidden_dim + hidden_base;
+            if (hidden_base + 3 < hidden_dim) {
+                short4 w = *reinterpret_cast<device const short4*>(weights + weight_base);
+                acc += int4(w);
+            } else {
+                // Handle boundary
+                if (hidden_base < hidden_dim) acc.x += weights[weight_base];
+                if (hidden_base + 1 < hidden_dim) acc.y += weights[weight_base + 1];
+                if (hidden_base + 2 < hidden_dim) acc.z += weights[weight_base + 2];
+                if (hidden_base + 3 < hidden_dim) acc.w += weights[weight_base + 3];
+            }
+        }
+    }
+    
+    // Store results
+    uint out_base = pos_idx * hidden_dim + hidden_base;
+    if (hidden_base + 3 < hidden_dim) {
+        *reinterpret_cast<device int4*>(accumulators + out_base) = acc;
+    } else {
+        if (hidden_base < hidden_dim) accumulators[out_base] = acc.x;
+        if (hidden_base + 1 < hidden_dim) accumulators[out_base + 1] = acc.y;
+        if (hidden_base + 2 < hidden_dim) accumulators[out_base + 2] = acc.z;
+        if (hidden_base + 3 < hidden_dim) accumulators[out_base + 3] = acc.w;
+    }
+}
+
+// Dual-Perspective Vectorized Feature Transform
+// Combines dual-perspective with vectorized loads for maximum throughput
+kernel void gpu_feature_transform_dual_vec4(
+    device const weight_t* weights [[buffer(0)]],
+    device const weight_t* biases [[buffer(1)]],
+    device const int32_t* white_features [[buffer(2)]],
+    device const int32_t* black_features [[buffer(3)]],
+    device const uint32_t* white_counts [[buffer(4)]],
+    device const uint32_t* black_counts [[buffer(5)]],
+    device const uint32_t* white_offsets [[buffer(6)]],
+    device const uint32_t* black_offsets [[buffer(7)]],
+    device accumulator_t* accumulators [[buffer(8)]],
+    constant uint& hidden_dim [[buffer(9)]],
+    constant uint& batch_size [[buffer(10)]],
+    uint3 gid [[thread_position_in_grid]]) {
+    
+    uint pos_idx = gid.z;
+    uint perspective = gid.y;
+    uint vec_idx = gid.x;
+    uint hidden_base = vec_idx * 4;
+    
+    if (pos_idx >= batch_size || hidden_base >= hidden_dim || perspective >= 2)
+        return;
+    
+    // Load 4 biases
+    int4 acc;
+    if (hidden_base + 3 < hidden_dim) {
+        short4 bias_vec = *reinterpret_cast<device const short4*>(biases + hidden_base);
+        acc = int4(bias_vec);
+    } else {
+        acc = int4(
+            hidden_base < hidden_dim ? biases[hidden_base] : 0,
+            hidden_base + 1 < hidden_dim ? biases[hidden_base + 1] : 0,
+            hidden_base + 2 < hidden_dim ? biases[hidden_base + 2] : 0,
+            hidden_base + 3 < hidden_dim ? biases[hidden_base + 3] : 0
+        );
+    }
+    
+    device const int32_t* features = (perspective == 0) ? white_features : black_features;
+    device const uint32_t* counts = (perspective == 0) ? white_counts : black_counts;
+    device const uint32_t* offsets = (perspective == 0) ? white_offsets : black_offsets;
+    
+    uint start = offsets[pos_idx];
+    uint count = counts[pos_idx];
+    
+    // Process features with 4-way unrolling
+    for (uint i = 0; i < count; i++) {
+        int32_t feat_idx = features[start + i];
+        if (feat_idx >= 0) {
+            uint weight_base = feat_idx * hidden_dim + hidden_base;
+            if (hidden_base + 3 < hidden_dim) {
+                short4 w = *reinterpret_cast<device const short4*>(weights + weight_base);
+                acc += int4(w);
+            } else {
+                if (hidden_base < hidden_dim) acc.x += weights[weight_base];
+                if (hidden_base + 1 < hidden_dim) acc.y += weights[weight_base + 1];
+                if (hidden_base + 2 < hidden_dim) acc.z += weights[weight_base + 2];
+                if (hidden_base + 3 < hidden_dim) acc.w += weights[weight_base + 3];
+            }
+        }
+    }
+    
+    // Store results
+    uint out_base = (pos_idx * 2 + perspective) * hidden_dim + hidden_base;
+    if (hidden_base + 3 < hidden_dim) {
+        *reinterpret_cast<device int4*>(accumulators + out_base) = acc;
+    } else {
+        if (hidden_base < hidden_dim) accumulators[out_base] = acc.x;
+        if (hidden_base + 1 < hidden_dim) accumulators[out_base + 1] = acc.y;
+        if (hidden_base + 2 < hidden_dim) accumulators[out_base + 2] = acc.z;
+        if (hidden_base + 3 < hidden_dim) accumulators[out_base + 3] = acc.w;
+    }
+}
+
+// Optimized Forward Pass with Threadgroup-Level Parallelism
+// Uses simdgroup operations for parallel reduction in FC layers
+kernel void gpu_nnue_forward_optimized(
+    device const accumulator_t* accumulators [[buffer(0)]],
+    device const layer_weight_t* fc0_weights [[buffer(1)]],
+    device const int32_t* fc0_biases [[buffer(2)]],
+    device const layer_weight_t* fc1_weights [[buffer(3)]],
+    device const int32_t* fc1_biases [[buffer(4)]],
+    device const layer_weight_t* fc2_weights [[buffer(5)]],
+    device const int32_t* fc2_biases [[buffer(6)]],
+    device int32_t* output [[buffer(7)]],
+    constant uint& hidden_dim [[buffer(8)]],
+    constant uint& batch_size [[buffer(9)]],
+    uint gid [[threadgroup_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
+    
+    uint pos_idx = gid;
+    if (pos_idx >= batch_size)
+        return;
+    
+    // Threadgroup memory for intermediate results
+    threadgroup int8_t fc0_sqr[2 * 16];
+    threadgroup int8_t fc0_skip[2];
+    threadgroup int8_t fc1_out[32];
+    threadgroup int32_t partial_sums[4];  // For simdgroup reduction
+    
+    device const accumulator_t* white_acc = accumulators + pos_idx * 2 * hidden_dim;
+    device const accumulator_t* black_acc = white_acc + hidden_dim;
+    
+    // FC0 layer with simdgroup-level parallelism
+    // Each simdgroup computes partial sums, then reduces
+    uint elements_per_thread = (hidden_dim + tg_size - 1) / tg_size;
+    
+    for (uint out = 0; out <= FC0_OUT; out++) {
+        for (uint p = 0; p < 2; p++) {
+            device const accumulator_t* acc = (p == 0) ? white_acc : black_acc;
+            
+            // Each thread computes partial sum for its portion
+            int32_t local_sum = 0;
+            uint start_idx = lid * elements_per_thread;
+            uint end_idx = min(start_idx + elements_per_thread, hidden_dim);
+            
+            for (uint i = start_idx; i < end_idx; i++) {
+                int8_t clipped = clipped_relu(int16_t(acc[i] >> WEIGHT_SCALE_BITS));
+                local_sum += clipped * fc0_weights[i * (FC0_OUT + 1) + out];
+            }
+            
+            // Simdgroup reduction
+            int32_t simd_sum_val = simd_sum(local_sum);
+            
+            // First thread in each simdgroup stores partial sum
+            if (simd_lane == 0 && simd_group < 4) {
+                partial_sums[simd_group] = simd_sum_val;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            
+            // Thread 0 combines partial sums
+            if (lid == 0) {
+                int32_t total = fc0_biases[out];
+                uint num_simd_groups = (tg_size + 31) / 32;
+                for (uint s = 0; s < num_simd_groups && s < 4; s++) {
+                    total += partial_sums[s];
+                }
+                
+                int16_t result = int16_t(total >> WEIGHT_SCALE_BITS);
+                if (out < FC0_OUT) {
+                    fc0_sqr[p * FC0_OUT + out] = sqr_clipped_relu(result);
+                } else {
+                    fc0_skip[p] = clipped_relu(result);
+                }
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+    }
+    
+    // FC1 layer - parallel across outputs
+    for (uint out = lid; out < FC1_OUT; out += tg_size) {
+        int32_t sum = fc1_biases[out];
+        for (uint i = 0; i < 2 * FC0_OUT; i++) {
+            sum += fc0_sqr[i] * fc1_weights[i * FC1_OUT + out];
+        }
+        fc1_out[out] = clipped_relu(int16_t(sum >> WEIGHT_SCALE_BITS));
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    // FC2 layer - single thread
+    if (lid == 0) {
+        int32_t sum = fc2_biases[0];
+        for (uint i = 0; i < FC1_OUT; i++) {
+            sum += fc1_out[i] * fc2_weights[i];
+        }
+        
+        int32_t skip_val = ((fc0_skip[0] + fc0_skip[1]) * 600 * int32_t(OUTPUT_SCALE)) / 
+                          (2 * 127 * (1 << WEIGHT_SCALE_BITS));
+        
+        output[pos_idx] = sum + skip_val;
+    }
+}
+
+// Fully Fused Single-Position Evaluation
+// Combines feature transform and forward pass in a single kernel
+// Eliminates barrier overhead between kernels for small batches
+// Each threadgroup processes one position completely
+kernel void gpu_nnue_fused_single(
+    device const weight_t* ft_weights [[buffer(0)]],
+    device const weight_t* ft_biases [[buffer(1)]],
+    device const int32_t* white_features [[buffer(2)]],
+    device const int32_t* black_features [[buffer(3)]],
+    device const uint32_t* white_counts [[buffer(4)]],
+    device const uint32_t* black_counts [[buffer(5)]],
+    device const uint32_t* white_offsets [[buffer(6)]],
+    device const uint32_t* black_offsets [[buffer(7)]],
+    device const layer_weight_t* fc0_weights [[buffer(8)]],
+    device const int32_t* fc0_biases [[buffer(9)]],
+    device const layer_weight_t* fc1_weights [[buffer(10)]],
+    device const int32_t* fc1_biases [[buffer(11)]],
+    device const layer_weight_t* fc2_weights [[buffer(12)]],
+    device const int32_t* fc2_biases [[buffer(13)]],
+    device int32_t* output [[buffer(14)]],
+    constant uint& hidden_dim [[buffer(15)]],
+    constant uint& batch_size [[buffer(16)]],
+    uint gid [[threadgroup_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]]) {
+    
+    uint pos_idx = gid;
+    if (pos_idx >= batch_size)
+        return;
+    
+    // Threadgroup memory for accumulators and intermediate results
+    // For hidden_dim=1024, we need 2*1024*4 = 8KB for accumulators
+    // This fits within the 32KB threadgroup memory limit
+    threadgroup accumulator_t white_acc[1024];
+    threadgroup accumulator_t black_acc[1024];
+    threadgroup int8_t fc0_sqr[2 * 16];
+    threadgroup int8_t fc0_skip[2];
+    threadgroup int8_t fc1_out[32];
+    
+    // Stage 1: Feature transform for white perspective
+    uint w_start = white_offsets[pos_idx];
+    uint w_count = white_counts[pos_idx];
+    
+    for (uint h = lid; h < hidden_dim; h += tg_size) {
+        accumulator_t acc = accumulator_t(ft_biases[h]);
+        for (uint i = 0; i < w_count; i++) {
+            int32_t feat_idx = white_features[w_start + i];
+            if (feat_idx >= 0) {
+                acc += ft_weights[feat_idx * hidden_dim + h];
+            }
+        }
+        white_acc[h] = acc;
+    }
+    
+    // Stage 2: Feature transform for black perspective
+    uint b_start = black_offsets[pos_idx];
+    uint b_count = black_counts[pos_idx];
+    
+    for (uint h = lid; h < hidden_dim; h += tg_size) {
+        accumulator_t acc = accumulator_t(ft_biases[h]);
+        for (uint i = 0; i < b_count; i++) {
+            int32_t feat_idx = black_features[b_start + i];
+            if (feat_idx >= 0) {
+                acc += ft_weights[feat_idx * hidden_dim + h];
+            }
+        }
+        black_acc[h] = acc;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    // Stage 3: FC0 layer
+    for (uint out = lid; out <= FC0_OUT; out += tg_size) {
+        for (uint p = 0; p < 2; p++) {
+            threadgroup accumulator_t* acc = (p == 0) ? white_acc : black_acc;
+            
+            int32_t sum = fc0_biases[out];
+            
+            // Unrolled accumulation
+            uint i = 0;
+            for (; i + 7 < hidden_dim; i += 8) {
+                int8_t c0 = clipped_relu(int16_t(acc[i] >> WEIGHT_SCALE_BITS));
+                int8_t c1 = clipped_relu(int16_t(acc[i+1] >> WEIGHT_SCALE_BITS));
+                int8_t c2 = clipped_relu(int16_t(acc[i+2] >> WEIGHT_SCALE_BITS));
+                int8_t c3 = clipped_relu(int16_t(acc[i+3] >> WEIGHT_SCALE_BITS));
+                int8_t c4 = clipped_relu(int16_t(acc[i+4] >> WEIGHT_SCALE_BITS));
+                int8_t c5 = clipped_relu(int16_t(acc[i+5] >> WEIGHT_SCALE_BITS));
+                int8_t c6 = clipped_relu(int16_t(acc[i+6] >> WEIGHT_SCALE_BITS));
+                int8_t c7 = clipped_relu(int16_t(acc[i+7] >> WEIGHT_SCALE_BITS));
+                
+                sum += c0 * fc0_weights[(i) * (FC0_OUT + 1) + out];
+                sum += c1 * fc0_weights[(i+1) * (FC0_OUT + 1) + out];
+                sum += c2 * fc0_weights[(i+2) * (FC0_OUT + 1) + out];
+                sum += c3 * fc0_weights[(i+3) * (FC0_OUT + 1) + out];
+                sum += c4 * fc0_weights[(i+4) * (FC0_OUT + 1) + out];
+                sum += c5 * fc0_weights[(i+5) * (FC0_OUT + 1) + out];
+                sum += c6 * fc0_weights[(i+6) * (FC0_OUT + 1) + out];
+                sum += c7 * fc0_weights[(i+7) * (FC0_OUT + 1) + out];
+            }
+            
+            for (; i < hidden_dim; i++) {
+                int8_t clipped = clipped_relu(int16_t(acc[i] >> WEIGHT_SCALE_BITS));
+                sum += clipped * fc0_weights[i * (FC0_OUT + 1) + out];
+            }
+            
+            int16_t result = int16_t(sum >> WEIGHT_SCALE_BITS);
+            if (out < FC0_OUT) {
+                fc0_sqr[p * FC0_OUT + out] = sqr_clipped_relu(result);
+            } else {
+                fc0_skip[p] = clipped_relu(result);
+            }
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    // Stage 4: FC1 layer
+    for (uint out = lid; out < FC1_OUT; out += tg_size) {
+        int32_t sum = fc1_biases[out];
+        for (uint i = 0; i < 2 * FC0_OUT; i++) {
+            sum += fc0_sqr[i] * fc1_weights[i * FC1_OUT + out];
+        }
+        fc1_out[out] = clipped_relu(int16_t(sum >> WEIGHT_SCALE_BITS));
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    // Stage 5: FC2 layer
+    if (lid == 0) {
+        int32_t sum = fc2_biases[0];
+        for (uint i = 0; i < FC1_OUT; i++) {
+            sum += fc1_out[i] * fc2_weights[i];
+        }
+        
+        int32_t skip_val = ((fc0_skip[0] + fc0_skip[1]) * 600 * int32_t(OUTPUT_SCALE)) / 
+                          (2 * 127 * (1 << WEIGHT_SCALE_BITS));
+        
+        output[pos_idx] = sum + skip_val;
+    }
+}
+
 // Batch-Optimized Forward Pass
 // Processes multiple positions per threadgroup for better GPU utilization
 // Each threadgroup handles POSITIONS_PER_TG positions
@@ -789,6 +1172,16 @@ bool GPUNNUEManager::compile_shaders() {
   forward_batch_kernel_ =
       backend.create_kernel("gpu_nnue_forward_batch", "gpu_nnue_integration");
 
+  // New optimized kernels
+  feature_transform_vec4_kernel_ =
+      backend.create_kernel("gpu_feature_transform_vec4", "gpu_nnue_integration");
+  feature_transform_dual_vec4_kernel_ =
+      backend.create_kernel("gpu_feature_transform_dual_vec4", "gpu_nnue_integration");
+  forward_optimized_kernel_ =
+      backend.create_kernel("gpu_nnue_forward_optimized", "gpu_nnue_integration");
+  fused_single_kernel_ =
+      backend.create_kernel("gpu_nnue_fused_single", "gpu_nnue_integration");
+
   // Verify required kernels
   if (!feature_transform_kernel_ || !feature_transform_kernel_->valid()) {
     std::cerr << "[GPU NNUE] Failed to create feature_transform kernel"
@@ -821,6 +1214,18 @@ bool GPUNNUEManager::compile_shaders() {
   }
   if (forward_batch_kernel_ && forward_batch_kernel_->valid()) {
     std::cout << "[GPU NNUE] Batch forward kernel available" << std::endl;
+  }
+  if (feature_transform_vec4_kernel_ && feature_transform_vec4_kernel_->valid()) {
+    std::cout << "[GPU NNUE] Vectorized (vec4) feature transform kernel available" << std::endl;
+  }
+  if (feature_transform_dual_vec4_kernel_ && feature_transform_dual_vec4_kernel_->valid()) {
+    std::cout << "[GPU NNUE] Dual-perspective vectorized transform kernel available" << std::endl;
+  }
+  if (forward_optimized_kernel_ && forward_optimized_kernel_->valid()) {
+    std::cout << "[GPU NNUE] Optimized forward kernel available" << std::endl;
+  }
+  if (fused_single_kernel_ && fused_single_kernel_->valid()) {
+    std::cout << "[GPU NNUE] Fused single-position kernel available" << std::endl;
   }
 
   std::cout << "[GPU NNUE] Shaders compiled successfully" << std::endl;
@@ -1185,14 +1590,41 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   // Create command encoder
   auto encoder = backend.create_encoder();
 
-  // Use dual-perspective kernel for larger batches (amortizes 3D dispatch
-  // overhead) For small batches, the simpler single-perspective kernel is
-  // faster
+  // Select optimal kernel based on batch size and available kernels
+  // Testing showed that the fused kernel uses too much threadgroup memory
+  // and reduces GPU occupancy, making it slower than separate dispatches
+  const bool use_fused_kernel = false; // Disabled - slower than separate kernels
   const bool use_dual_kernel = (batch_size >= 64) &&
                                feature_transform_dual_kernel_ &&
                                feature_transform_dual_kernel_->valid();
 
-  if (use_dual_kernel) {
+  if (use_fused_kernel) {
+    // Fused kernel: feature transform + forward pass in single dispatch
+    // Eliminates inter-kernel barrier overhead for small batches
+    const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
+    const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
+
+    encoder->set_kernel(fused_single_kernel_.get());
+    encoder->set_buffer(net.ft_weights.get(), 0);
+    encoder->set_buffer(net.ft_biases.get(), 1);
+    encoder->set_buffer(white_features_buffer_.get(), 2);
+    encoder->set_buffer(black_features_buffer_.get(), 3);
+    encoder->set_buffer(white_counts_buffer_.get(), 4);
+    encoder->set_buffer(black_counts_buffer_.get(), 5);
+    encoder->set_buffer(white_offsets_buffer_.get(), 6);
+    encoder->set_buffer(black_offsets_buffer_.get(), 7);
+    encoder->set_buffer(layer.fc0_weights.get(), 8);
+    encoder->set_buffer(layer.fc0_biases.get(), 9);
+    encoder->set_buffer(layer.fc1_weights.get(), 10);
+    encoder->set_buffer(layer.fc1_biases.get(), 11);
+    encoder->set_buffer(layer.fc2_weights.get(), 12);
+    encoder->set_buffer(layer.fc2_biases.get(), 13);
+    encoder->set_buffer(output_buffer_.get(), 14);
+    encoder->set_value(static_cast<uint32_t>(hidden_dim), 15);
+    encoder->set_value(static_cast<uint32_t>(batch_size), 16);
+    // Use 256 threads per threadgroup for optimal parallelism
+    encoder->dispatch_threadgroups(batch_size, 1, 1, 256, 1, 1);
+  } else if (use_dual_kernel) {
     encoder->set_kernel(feature_transform_dual_kernel_.get());
     encoder->set_buffer(net.ft_weights.get(), 0);
     encoder->set_buffer(net.ft_biases.get(), 1);
@@ -1226,22 +1658,26 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   // Select correct bucket layer based on position piece counts
   // For simplicity, use bucket 0 for all (can be extended to per-position
   // buckets)
-  const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
-  const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
+  // Skip forward pass if we used the fused kernel
+  if (!use_fused_kernel) {
+    const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
+    const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
 
-  // Forward pass - standard kernel performs well across all batch sizes
-  encoder->set_kernel(forward_fused_kernel_.get());
-  encoder->set_buffer(accumulators_buffer_.get(), 0);
-  encoder->set_buffer(layer.fc0_weights.get(), 1);
-  encoder->set_buffer(layer.fc0_biases.get(), 2);
-  encoder->set_buffer(layer.fc1_weights.get(), 3);
-  encoder->set_buffer(layer.fc1_biases.get(), 4);
-  encoder->set_buffer(layer.fc2_weights.get(), 5);
-  encoder->set_buffer(layer.fc2_biases.get(), 6);
-  encoder->set_buffer(output_buffer_.get(), 7);
-  encoder->set_value(static_cast<uint32_t>(hidden_dim), 8);
-  encoder->set_value(static_cast<uint32_t>(batch_size), 9);
-  encoder->dispatch_threadgroups(batch_size, 1, 1, GPU_FORWARD_THREADS, 1, 1);
+    // Forward pass - standard kernel performs well across all batch sizes
+    // Testing showed the optimized kernel adds overhead without benefit
+    encoder->set_kernel(forward_fused_kernel_.get());
+    encoder->set_buffer(accumulators_buffer_.get(), 0);
+    encoder->set_buffer(layer.fc0_weights.get(), 1);
+    encoder->set_buffer(layer.fc0_biases.get(), 2);
+    encoder->set_buffer(layer.fc1_weights.get(), 3);
+    encoder->set_buffer(layer.fc1_biases.get(), 4);
+    encoder->set_buffer(layer.fc2_weights.get(), 5);
+    encoder->set_buffer(layer.fc2_biases.get(), 6);
+    encoder->set_buffer(output_buffer_.get(), 7);
+    encoder->set_value(static_cast<uint32_t>(hidden_dim), 8);
+    encoder->set_value(static_cast<uint32_t>(batch_size), 9);
+    encoder->dispatch_threadgroups(batch_size, 1, 1, GPU_FORWARD_THREADS, 1, 1);
+  }
 
   backend.submit_and_wait(encoder.get());
 
