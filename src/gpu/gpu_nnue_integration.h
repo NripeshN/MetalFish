@@ -210,8 +210,9 @@ private:
   std::unique_ptr<ComputeKernel> psqt_kernel_;
   std::unique_ptr<ComputeKernel> forward_fused_kernel_;
   
-  // Compute kernels - SIMD variants
+  // Compute kernels - optimized variants
   std::unique_ptr<ComputeKernel> forward_simd_kernel_;
+  std::unique_ptr<ComputeKernel> forward_batch_kernel_;
 
   // Working buffers
   std::unique_ptr<Buffer> positions_buffer_;
@@ -222,6 +223,12 @@ private:
   std::unique_ptr<Buffer> accumulators_buffer_;
   std::unique_ptr<Buffer> psqt_buffer_;
   std::unique_ptr<Buffer> output_buffer_;
+  
+  // Pre-allocated staging buffers (avoid per-call allocations)
+  std::unique_ptr<Buffer> white_counts_buffer_;
+  std::unique_ptr<Buffer> black_counts_buffer_;
+  std::unique_ptr<Buffer> white_offsets_buffer_;
+  std::unique_ptr<Buffer> black_offsets_buffer_;
 
   // Statistics
   std::atomic<size_t> gpu_evals_{0};

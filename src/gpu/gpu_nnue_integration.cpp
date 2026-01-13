@@ -614,6 +614,120 @@ kernel void gpu_psqt_accumulate(
     
     output[pos_idx * num_buckets + bucket] = acc;
 }
+
+// Batch-Optimized Forward Pass
+// Processes multiple positions per threadgroup for better GPU utilization
+// Each threadgroup handles POSITIONS_PER_TG positions
+constant uint POSITIONS_PER_TG = 4;
+
+kernel void gpu_nnue_forward_batch(
+    device const accumulator_t* accumulators [[buffer(0)]],
+    device const layer_weight_t* fc0_weights [[buffer(1)]],
+    device const int32_t* fc0_biases [[buffer(2)]],
+    device const layer_weight_t* fc1_weights [[buffer(3)]],
+    device const int32_t* fc1_biases [[buffer(4)]],
+    device const layer_weight_t* fc2_weights [[buffer(5)]],
+    device const int32_t* fc2_biases [[buffer(6)]],
+    device int32_t* output [[buffer(7)]],
+    constant uint& hidden_dim [[buffer(8)]],
+    constant uint& batch_size [[buffer(9)]],
+    uint gid [[threadgroup_position_in_grid]],
+    uint lid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]]) {
+    
+    // Each threadgroup processes POSITIONS_PER_TG positions
+    uint base_pos = gid * POSITIONS_PER_TG;
+    
+    // Shared memory for all positions in this threadgroup
+    threadgroup int8_t fc0_sqr[POSITIONS_PER_TG][2 * 16];
+    threadgroup int8_t fc0_skip[POSITIONS_PER_TG][2];
+    threadgroup int8_t fc1_out[POSITIONS_PER_TG][32];
+    
+    // Process each position
+    for (uint p_offset = 0; p_offset < POSITIONS_PER_TG; p_offset++) {
+        uint pos_idx = base_pos + p_offset;
+        if (pos_idx >= batch_size) continue;
+        
+        device const accumulator_t* white_acc = accumulators + pos_idx * 2 * hidden_dim;
+        device const accumulator_t* black_acc = white_acc + hidden_dim;
+        
+        // FC0 layer
+        for (uint out = lid; out <= FC0_OUT; out += tg_size) {
+            for (uint p = 0; p < 2; p++) {
+                device const accumulator_t* acc = (p == 0) ? white_acc : black_acc;
+                
+                int32_t sum = fc0_biases[out];
+                
+                uint i = 0;
+                for (; i + 7 < hidden_dim; i += 8) {
+                    int8_t c0 = clipped_relu(int16_t(acc[i] >> WEIGHT_SCALE_BITS));
+                    int8_t c1 = clipped_relu(int16_t(acc[i+1] >> WEIGHT_SCALE_BITS));
+                    int8_t c2 = clipped_relu(int16_t(acc[i+2] >> WEIGHT_SCALE_BITS));
+                    int8_t c3 = clipped_relu(int16_t(acc[i+3] >> WEIGHT_SCALE_BITS));
+                    int8_t c4 = clipped_relu(int16_t(acc[i+4] >> WEIGHT_SCALE_BITS));
+                    int8_t c5 = clipped_relu(int16_t(acc[i+5] >> WEIGHT_SCALE_BITS));
+                    int8_t c6 = clipped_relu(int16_t(acc[i+6] >> WEIGHT_SCALE_BITS));
+                    int8_t c7 = clipped_relu(int16_t(acc[i+7] >> WEIGHT_SCALE_BITS));
+                    
+                    sum += c0 * fc0_weights[(i) * (FC0_OUT + 1) + out];
+                    sum += c1 * fc0_weights[(i+1) * (FC0_OUT + 1) + out];
+                    sum += c2 * fc0_weights[(i+2) * (FC0_OUT + 1) + out];
+                    sum += c3 * fc0_weights[(i+3) * (FC0_OUT + 1) + out];
+                    sum += c4 * fc0_weights[(i+4) * (FC0_OUT + 1) + out];
+                    sum += c5 * fc0_weights[(i+5) * (FC0_OUT + 1) + out];
+                    sum += c6 * fc0_weights[(i+6) * (FC0_OUT + 1) + out];
+                    sum += c7 * fc0_weights[(i+7) * (FC0_OUT + 1) + out];
+                }
+                
+                for (; i < hidden_dim; i++) {
+                    int8_t clipped = clipped_relu(int16_t(acc[i] >> WEIGHT_SCALE_BITS));
+                    sum += clipped * fc0_weights[i * (FC0_OUT + 1) + out];
+                }
+                
+                int16_t result = int16_t(sum >> WEIGHT_SCALE_BITS);
+                if (out < FC0_OUT) {
+                    fc0_sqr[p_offset][p * FC0_OUT + out] = sqr_clipped_relu(result);
+                } else {
+                    fc0_skip[p_offset][p] = clipped_relu(result);
+                }
+            }
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    // FC1 layer for all positions
+    for (uint p_offset = 0; p_offset < POSITIONS_PER_TG; p_offset++) {
+        uint pos_idx = base_pos + p_offset;
+        if (pos_idx >= batch_size) continue;
+        
+        for (uint out = lid; out < FC1_OUT; out += tg_size) {
+            int32_t sum = fc1_biases[out];
+            for (uint i = 0; i < 2 * FC0_OUT; i++) {
+                sum += fc0_sqr[p_offset][i] * fc1_weights[i * FC1_OUT + out];
+            }
+            fc1_out[p_offset][out] = clipped_relu(int16_t(sum >> WEIGHT_SCALE_BITS));
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    // FC2 layer for all positions
+    for (uint p_offset = 0; p_offset < POSITIONS_PER_TG; p_offset++) {
+        uint pos_idx = base_pos + p_offset;
+        if (pos_idx >= batch_size) continue;
+        
+        if (lid == 0) {
+            int32_t sum = fc2_biases[0];
+            for (uint i = 0; i < FC1_OUT; i++) {
+                sum += fc1_out[p_offset][i] * fc2_weights[i];
+            }
+            
+            int32_t skip_val = ((fc0_skip[p_offset][0] + fc0_skip[p_offset][1]) * 600 * int32_t(OUTPUT_SCALE)) / 
+                              (2 * 127 * (1 << WEIGHT_SCALE_BITS));
+            
+            output[pos_idx] = sum + skip_val;
+        }
+    }
+}
 )";
 
 // ============================================================================
@@ -671,6 +785,8 @@ bool GPUNNUEManager::compile_shaders() {
       backend.create_kernel("gpu_feature_transform_dual", "gpu_nnue_integration");
   extract_features_kernel_ =
       backend.create_kernel("gpu_extract_features", "gpu_nnue_integration");
+  forward_batch_kernel_ =
+      backend.create_kernel("gpu_nnue_forward_batch", "gpu_nnue_integration");
 
   // Verify required kernels
   if (!feature_transform_kernel_ || !feature_transform_kernel_->valid()) {
@@ -699,6 +815,9 @@ bool GPUNNUEManager::compile_shaders() {
   if (extract_features_kernel_ && extract_features_kernel_->valid()) {
     std::cout << "[GPU NNUE] GPU feature extraction kernel available" << std::endl;
   }
+  if (forward_batch_kernel_ && forward_batch_kernel_->valid()) {
+    std::cout << "[GPU NNUE] Batch forward kernel available" << std::endl;
+  }
 
   std::cout << "[GPU NNUE] Shaders compiled successfully" << std::endl;
   return true;
@@ -708,23 +827,37 @@ bool GPUNNUEManager::allocate_working_buffers() {
   auto &backend = gpu();
 
   const size_t max_positions = GPU_MAX_BATCH_SIZE;
-  // Use new larger feature limits: 64 features per perspective
   const size_t max_features_per_perspective = max_positions * GPU_MAX_FEATURES_PER_PERSPECTIVE;
   const size_t max_hidden = GPU_FT_DIM_BIG;
 
+  // Position data buffer
   positions_buffer_ =
       backend.create_buffer(max_positions * sizeof(GPUPositionData));
-  // Separate buffers for white and black features
+      
+  // Feature buffers (separate for white and black)
   white_features_buffer_ =
       backend.create_buffer(max_features_per_perspective * sizeof(int32_t));
   black_features_buffer_ =
       backend.create_buffer(max_features_per_perspective * sizeof(int32_t));
-  // Separate counts for white and black
+      
+  // Counts buffers (separate for dual-perspective kernel)
+  white_counts_buffer_ =
+      backend.create_buffer(max_positions * sizeof(uint32_t));
+  black_counts_buffer_ =
+      backend.create_buffer(max_positions * sizeof(uint32_t));
+      
+  // Offsets buffers (separate for dual-perspective kernel)
+  white_offsets_buffer_ =
+      backend.create_buffer(max_positions * sizeof(uint32_t));
+  black_offsets_buffer_ =
+      backend.create_buffer(max_positions * sizeof(uint32_t));
+      
+  // Legacy interleaved buffers (for backward compatibility)
   feature_counts_buffer_ =
       backend.create_buffer(max_positions * 2 * sizeof(uint32_t));
-  // Separate offsets for white and black
   feature_offsets_buffer_ =
       backend.create_buffer(max_positions * 2 * sizeof(uint32_t));
+      
   // Accumulators: [batch][2 perspectives][hidden_dim]
   accumulators_buffer_ =
       backend.create_buffer(max_positions * 2 * max_hidden * sizeof(int32_t));
@@ -735,7 +868,8 @@ bool GPUNNUEManager::allocate_working_buffers() {
   if (!positions_buffer_ || !white_features_buffer_ ||
       !black_features_buffer_ || !feature_counts_buffer_ ||
       !feature_offsets_buffer_ || !accumulators_buffer_ || !psqt_buffer_ ||
-      !output_buffer_) {
+      !output_buffer_ || !white_counts_buffer_ || !black_counts_buffer_ ||
+      !white_offsets_buffer_ || !black_offsets_buffer_) {
     return false;
   }
 
@@ -953,7 +1087,7 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     return false;
   }
 
-  // Select evaluation strategy based on batch size and tuning parameters
+  // Select evaluation strategy based on batch size
   EvalStrategy strategy = tuning_.select_strategy(batch.count);
   
   if (strategy == EvalStrategy::CPU_FALLBACK) {
@@ -971,29 +1105,30 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     return false;
   }
 
-  int batch_size = batch.count;
-  int hidden_dim = net.hidden_dim;
+  const int batch_size = batch.count;
+  const int hidden_dim = net.hidden_dim;
 
-  // Extract features from position data (CPU-side for now)
-  std::vector<int32_t> white_features_all, black_features_all;
-  std::vector<uint32_t> white_counts, black_counts;
-  std::vector<uint32_t> white_offsets, black_offsets;
+  // Use pre-allocated buffer pointers for direct writes (avoid std::vector allocations)
+  int32_t* white_features_ptr = static_cast<int32_t*>(white_features_buffer_->data());
+  int32_t* black_features_ptr = static_cast<int32_t*>(black_features_buffer_->data());
+  uint32_t* white_counts_ptr = static_cast<uint32_t*>(white_counts_buffer_->data());
+  uint32_t* black_counts_ptr = static_cast<uint32_t*>(black_counts_buffer_->data());
+  uint32_t* white_offsets_ptr = static_cast<uint32_t*>(white_offsets_buffer_->data());
+  uint32_t* black_offsets_ptr = static_cast<uint32_t*>(black_offsets_buffer_->data());
   
-  white_features_all.reserve(batch_size * GPU_MAX_FEATURES_PER_PERSPECTIVE);
-  black_features_all.reserve(batch_size * GPU_MAX_FEATURES_PER_PERSPECTIVE);
-  white_counts.reserve(batch_size);
-  black_counts.reserve(batch_size);
-  white_offsets.reserve(batch_size);
-  black_offsets.reserve(batch_size);
+  // Extract features directly into GPU buffers (zero-copy on unified memory)
+  size_t white_feature_idx = 0;
+  size_t black_feature_idx = 0;
   
   for (int i = 0; i < batch_size; i++) {
     const auto &pos_data = batch.positions[i];
     
-    white_offsets.push_back(white_features_all.size());
-    black_offsets.push_back(black_features_all.size());
+    white_offsets_ptr[i] = static_cast<uint32_t>(white_feature_idx);
+    black_offsets_ptr[i] = static_cast<uint32_t>(black_feature_idx);
     
-    Square wksq = Square(pos_data.king_sq[0]);
-    Square bksq = Square(pos_data.king_sq[1]);
+    const Square wksq = Square(pos_data.king_sq[0]);
+    const Square bksq = Square(pos_data.king_sq[1]);
+    const Square bksq_flip = flip_rank(bksq);
     
     int white_count = 0;
     int black_count = 0;
@@ -1003,75 +1138,83 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
       for (int pt = PAWN; pt <= QUEEN; pt++) {
         Bitboard bb = pos_data.pieces[c][pt];
         while (bb) {
-          Square s = pop_lsb(bb);
+          const Square s = pop_lsb(bb);
+          const Square s_flip = flip_rank(s);
           
-          int white_feat = int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
-          int black_feat = int(flip_rank(bksq)) * 640 + (1 - c) * 320 + 
-                           (pt - 1) * 64 + int(flip_rank(s));
-          
+          // White perspective feature
+          const int white_feat = int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
           if (white_feat >= 0 && white_feat < GPU_HALFKA_DIMS && 
               white_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
-            white_features_all.push_back(white_feat);
+            white_features_ptr[white_feature_idx++] = white_feat;
             white_count++;
           }
+          
+          // Black perspective feature (mirrored)
+          const int black_feat = int(bksq_flip) * 640 + (1 - c) * 320 + 
+                                 (pt - 1) * 64 + int(s_flip);
           if (black_feat >= 0 && black_feat < GPU_HALFKA_DIMS && 
               black_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
-            black_features_all.push_back(black_feat);
+            black_features_ptr[black_feature_idx++] = black_feat;
             black_count++;
           }
         }
       }
     }
     
-    white_counts.push_back(white_count);
-    black_counts.push_back(black_count);
+    white_counts_ptr[i] = static_cast<uint32_t>(white_count);
+    black_counts_ptr[i] = static_cast<uint32_t>(black_count);
   }
 
-  // Upload data to GPU buffers
+  // Upload position data
   std::memcpy(positions_buffer_->data(), batch.positions.data(),
               batch_size * sizeof(GPUPositionData));
-  std::memcpy(white_features_buffer_->data(), white_features_all.data(),
-              white_features_all.size() * sizeof(int32_t));
-  std::memcpy(black_features_buffer_->data(), black_features_all.data(),
-              black_features_all.size() * sizeof(int32_t));
-  
-  // Prepare interleaved counts and offsets
-  std::vector<uint32_t> interleaved_counts;
-  std::vector<uint32_t> interleaved_offsets;
-  interleaved_counts.reserve(batch_size * 2);
-  interleaved_offsets.reserve(batch_size * 2);
-  
-  for (int i = 0; i < batch_size; i++) {
-    interleaved_counts.push_back(white_counts[i]);
-    interleaved_counts.push_back(black_counts[i]);
-    interleaved_offsets.push_back(white_offsets[i]);
-    interleaved_offsets.push_back(black_offsets[i]);
-  }
-  
-  std::memcpy(feature_counts_buffer_->data(), interleaved_counts.data(),
-              interleaved_counts.size() * sizeof(uint32_t));
-  std::memcpy(feature_offsets_buffer_->data(), interleaved_offsets.data(),
-              interleaved_offsets.size() * sizeof(uint32_t));
 
-  // Create command encoder and dispatch kernels
+  // Create command encoder
   auto encoder = backend.create_encoder();
 
-  // Feature transform (white perspective)
-  encoder->set_kernel(feature_transform_kernel_.get());
-  encoder->set_buffer(net.ft_weights.get(), 0);
-  encoder->set_buffer(net.ft_biases.get(), 1);
-  encoder->set_buffer(white_features_buffer_.get(), 2);
-  encoder->set_buffer(feature_counts_buffer_.get(), 3);
-  encoder->set_buffer(feature_offsets_buffer_.get(), 4);
-  encoder->set_buffer(accumulators_buffer_.get(), 5);
-  encoder->set_value(static_cast<uint32_t>(hidden_dim), 6);
-  encoder->set_value(static_cast<uint32_t>(batch_size), 7);
-  encoder->dispatch_threads(hidden_dim, batch_size);
-  encoder->barrier();
-
-  // Forward pass - use standard kernel (SIMD kernel available but needs tuning)
-  const auto &layer = net.layers[0];
+  // Use dual-perspective kernel for larger batches (amortizes 3D dispatch overhead)
+  // For small batches, the simpler single-perspective kernel is faster
+  const bool use_dual_kernel = (batch_size >= 64) && 
+                                feature_transform_dual_kernel_ && 
+                                feature_transform_dual_kernel_->valid();
   
+  if (use_dual_kernel) {
+    encoder->set_kernel(feature_transform_dual_kernel_.get());
+    encoder->set_buffer(net.ft_weights.get(), 0);
+    encoder->set_buffer(net.ft_biases.get(), 1);
+    encoder->set_buffer(white_features_buffer_.get(), 2);
+    encoder->set_buffer(black_features_buffer_.get(), 3);
+    encoder->set_buffer(white_counts_buffer_.get(), 4);
+    encoder->set_buffer(black_counts_buffer_.get(), 5);
+    encoder->set_buffer(white_offsets_buffer_.get(), 6);
+    encoder->set_buffer(black_offsets_buffer_.get(), 7);
+    encoder->set_buffer(accumulators_buffer_.get(), 8);
+    encoder->set_value(static_cast<uint32_t>(hidden_dim), 9);
+    encoder->set_value(static_cast<uint32_t>(batch_size), 10);
+    // 3D dispatch: (hidden_dim, 2 perspectives, batch_size)
+    encoder->dispatch_threads(hidden_dim, 2, batch_size);
+    encoder->barrier();
+  } else {
+    // Single-perspective kernel: faster for small batches
+    encoder->set_kernel(feature_transform_kernel_.get());
+    encoder->set_buffer(net.ft_weights.get(), 0);
+    encoder->set_buffer(net.ft_biases.get(), 1);
+    encoder->set_buffer(white_features_buffer_.get(), 2);
+    encoder->set_buffer(white_counts_buffer_.get(), 3);
+    encoder->set_buffer(white_offsets_buffer_.get(), 4);
+    encoder->set_buffer(accumulators_buffer_.get(), 5);
+    encoder->set_value(static_cast<uint32_t>(hidden_dim), 6);
+    encoder->set_value(static_cast<uint32_t>(batch_size), 7);
+    encoder->dispatch_threads(hidden_dim, batch_size);
+    encoder->barrier();
+  }
+
+  // Select correct bucket layer based on position piece counts
+  // For simplicity, use bucket 0 for all (can be extended to per-position buckets)
+  const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
+  const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
+  
+  // Forward pass - standard kernel performs well across all batch sizes
   encoder->set_kernel(forward_fused_kernel_.get());
   encoder->set_buffer(accumulators_buffer_.get(), 0);
   encoder->set_buffer(layer.fc0_weights.get(), 1);
@@ -1087,7 +1230,7 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
 
   backend.submit_and_wait(encoder.get());
 
-  // Read results
+  // Read results (zero-copy on unified memory)
   batch.positional_scores.resize(batch_size);
   std::memcpy(batch.positional_scores.data(), output_buffer_->data(),
               batch_size * sizeof(int32_t));
