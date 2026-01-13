@@ -67,7 +67,7 @@ struct HybridSearchConfig {
   int batch_timeout_us = 1000;           // Timeout for batch collection (microseconds)
   
   // Threading
-  int num_search_threads = 1;            // Number of search threads
+  int num_search_threads = 1;            // Number of search threads (multi-thread requires thread-safe Position)
   int num_eval_threads = 1;              // Number of evaluation threads
   
   // Time management
@@ -173,6 +173,9 @@ public:
   
   // Reset parent (for tree reuse)
   void reset_parent() { parent_ = nullptr; edge_index_ = -1; }
+  
+  // Get mutex for thread-safe operations
+  std::mutex& mutex() { return mutex_; }
   
 private:
   HybridNode* parent_;

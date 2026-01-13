@@ -261,7 +261,7 @@ std::vector<MCTSMove> HybridSearch::get_pv() const {
 void HybridSearch::search_thread_main() {
   MCTSPosition pos = tree_->history().current();
   
-  // Expand root node first
+  // Expand root node first (with synchronization)
   HybridNode* root = tree_->root();
   if (!root) {
     if (best_move_callback_) {
@@ -270,13 +270,17 @@ void HybridSearch::search_thread_main() {
     return;
   }
   
-  if (!root->has_children()) {
-    expand_node(root, pos);
-    // Uniform policy for initial expansion (fast path)
-    int num_edges = static_cast<int>(root->edges().size());
-    float uniform_policy = 1.0f / std::max(1, num_edges);
-    for (auto& edge : root->edges()) {
-      edge.set_policy(uniform_policy);
+  // Synchronize root expansion across threads
+  {
+    std::lock_guard<std::mutex> lock(root->mutex());
+    if (!root->has_children()) {
+      expand_node(root, pos);
+      // Uniform policy for initial expansion (fast path)
+      int num_edges = static_cast<int>(root->edges().size());
+      float uniform_policy = 1.0f / std::max(1, num_edges);
+      for (auto& edge : root->edges()) {
+        edge.set_policy(uniform_policy);
+      }
     }
   }
   
@@ -313,14 +317,18 @@ void HybridSearch::search_thread_main() {
       continue;
     }
     
-    // Expansion: add children
+    // Expansion: add children (with per-node locking)
     if (!node->has_children()) {
-      expand_node(node, search_pos);
-      // Uniform policy for fast expansion
-      int num_edges = static_cast<int>(node->edges().size());
-      float uniform_policy = 1.0f / std::max(1, num_edges);
-      for (auto& edge : node->edges()) {
-        edge.set_policy(uniform_policy);
+      std::lock_guard<std::mutex> lock(node->mutex());
+      // Double check after acquiring lock
+      if (!node->has_children()) {
+        expand_node(node, search_pos);
+        // Uniform policy for fast expansion
+        int num_edges = static_cast<int>(node->edges().size());
+        float uniform_policy = 1.0f / std::max(1, num_edges);
+        for (auto& edge : node->edges()) {
+          edge.set_policy(uniform_policy);
+        }
       }
     }
     
@@ -535,14 +543,18 @@ HybridNode* HybridSearch::select_node(HybridNode* node, MCTSPosition& pos) {
     
     if (best_idx < 0) break;
     
-    // Get or create child node
+    // Get or create child node (with synchronization)
     auto& edge = node->edges()[best_idx];
     HybridNode* child = edge.child();
     
     if (!child) {
-      // Create new node
-      child = tree_->allocate_node(node, best_idx);
-      edge.set_child(child);
+      // Use parent's mutex to protect child creation
+      std::lock_guard<std::mutex> lock(node->mutex());
+      child = edge.child();  // Double-check after lock
+      if (!child) {
+        child = tree_->allocate_node(node, best_idx);
+        edge.set_child(child);
+      }
     }
     
     // Apply move

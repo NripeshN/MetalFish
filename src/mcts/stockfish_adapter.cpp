@@ -39,28 +39,23 @@ MCTSPosition::MCTSPosition() {
 }
 
 MCTSPosition::MCTSPosition(const MCTSPosition& other) {
-  state_stack_ = other.state_stack_;
-  move_stack_ = other.move_stack_;
+  // Use FEN to copy - simpler and safer
+  std::string current_fen = other.pos_.fen();
+  pos_.set(current_fen, false, &st_);
   
-  // Rebuild position from scratch
-  pos_.set(StartFEN, false, &st_);
-  for (size_t i = 0; i < move_stack_.size(); ++i) {
-    state_stack_.push_back(StateInfo());
-    pos_.do_move(move_stack_[i], state_stack_.back());
-  }
+  // Copy move stack for undo support
+  move_stack_ = other.move_stack_;
 }
 
 MCTSPosition& MCTSPosition::operator=(const MCTSPosition& other) {
   if (this != &other) {
-    state_stack_ = other.state_stack_;
-    move_stack_ = other.move_stack_;
+    // Use FEN to copy - simpler and safer
+    std::string current_fen = other.pos_.fen();
+    state_stack_.clear();
+    pos_.set(current_fen, false, &st_);
     
-    // Rebuild position from scratch
-    pos_.set(StartFEN, false, &st_);
-    for (size_t i = 0; i < move_stack_.size(); ++i) {
-      state_stack_.push_back(StateInfo());
-      pos_.do_move(move_stack_[i], state_stack_.back());
-    }
+    // Copy move stack for undo support
+    move_stack_ = other.move_stack_;
   }
   return *this;
 }
