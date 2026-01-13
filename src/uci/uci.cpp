@@ -1505,6 +1505,129 @@ void UCIEngine::hybrid_benchmark() {
   }
 
   // ========================================================================
+  // 4. Tactical Test Suite - Verifier Validation
+  // ========================================================================
+  std::cout << "\n=== 4. Tactical Test Suite (AB Verifier Validation) ===\n";
+
+  // Tactical positions where correct move is clear
+  static const char *TACTICAL_FENS[] = {
+      // Mate in 1
+      "6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1", // Re8#
+      // Hanging piece
+      "r1bqkbnr/pppp1ppp/2n5/4N3/4P3/8/PPPP1PPP/RNBQKB1R b KQkq - 0 3",
+      // Fork
+      "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+      // Pin
+      "r2qkb1r/ppp2ppp/2n1bn2/3pp3/4P3/2NP1N2/PPP2PPP/R1BQKB1R w KQkq - 0 6",
+  };
+  const int NUM_TACTICAL = 4;
+
+  int tactical_correct = 0;
+  int verifier_overrides = 0;
+
+  for (int i = 0; i < NUM_TACTICAL; i++) {
+    Position pos;
+    StateInfo st;
+    pos.set(TACTICAL_FENS[i], false, &st);
+
+    // Run hybrid with verifier
+    MCTS::EnhancedHybridConfig hybrid_config;
+    hybrid_config.enable_ab_verify = true;
+    hybrid_config.ab_verify_depth = 8;
+    hybrid_config.ab_override_threshold = 0.3f;
+
+    auto hybrid =
+        MCTS::create_enhanced_hybrid_search(gpu_manager, hybrid_config);
+    Move hybrid_move = Move::none();
+    if (hybrid) {
+      Search::LimitsType tac_limits;
+      tac_limits.movetime = 2000;
+      hybrid->start_search(
+          pos, tac_limits, [&](Move m, Move p) { hybrid_move = m; }, nullptr);
+      hybrid->wait();
+      verifier_overrides += hybrid->stats().ab_overrides.load();
+    }
+
+    // Check if move looks reasonable (captures, checks, or central moves)
+    bool is_capture = pos.capture(hybrid_move);
+    bool gives_check =
+        hybrid_move != Move::none() && pos.gives_check(hybrid_move);
+    if (is_capture || gives_check) {
+      tactical_correct++;
+    }
+
+    std::string move_str = hybrid_move == Move::none()
+                               ? "null"
+                               : UCIEngine::move(hybrid_move, false);
+    std::cout << "  Tactical " << i << ": " << std::setw(6) << move_str
+              << (is_capture ? " [capture]" : "")
+              << (gives_check ? " [check]" : "") << "\n";
+  }
+
+  std::cout << "  Tactical moves found: " << tactical_correct << "/"
+            << NUM_TACTICAL << "\n";
+  std::cout << "  Verifier overrides: " << verifier_overrides << "\n";
+
+  // ========================================================================
+  // 5. Ablation Study
+  // ========================================================================
+  std::cout << "\n=== 5. Ablation Study (1s per position, 4 positions) ===\n";
+
+  struct AblationConfig {
+    const char *name;
+    bool use_classifier;
+    bool use_verifier;
+  };
+
+  AblationConfig ablations[] = {
+      {"Full Hybrid (classifier + verifier)", true, true},
+      {"No Classifier (fixed weights)", false, true},
+      {"No Verifier (MCTS only)", true, false},
+      {"Pure MCTS (no classifier, no verifier)", false, false},
+  };
+
+  std::cout << std::setw(40) << "Configuration" << std::setw(12) << "Avg Nodes"
+            << std::setw(12) << "Avg NPS" << "\n";
+  std::cout << std::string(64, '-') << "\n";
+
+  for (const auto &abl : ablations) {
+    uint64_t total_nodes = 0;
+    double total_time = 0;
+
+    for (int i = 0; i < std::min(4, NUM_TEST_FENS); i++) {
+      Position pos;
+      StateInfo st;
+      pos.set(TEST_FENS[i], false, &st);
+
+      MCTS::EnhancedHybridConfig config;
+      config.use_position_classifier = abl.use_classifier;
+      config.enable_ab_verify = abl.use_verifier;
+
+      auto search = MCTS::create_enhanced_hybrid_search(gpu_manager, config);
+      if (search) {
+        Search::LimitsType lim;
+        lim.movetime = 1000;
+
+        auto t_start = std::chrono::steady_clock::now();
+        search->start_search(pos, lim, [](Move m, Move p) {}, nullptr);
+        search->wait();
+        auto t_end = std::chrono::steady_clock::now();
+
+        total_nodes += search->stats().mcts_nodes.load();
+        total_time +=
+            std::chrono::duration<double, std::milli>(t_end - t_start).count();
+      }
+    }
+
+    double avg_nodes = total_nodes / 4.0;
+    double avg_nps = total_time > 0 ? (total_nodes * 1000.0 / total_time) : 0;
+
+    std::cout << std::setw(40) << abl.name << std::setw(12) << std::fixed
+              << std::setprecision(0) << avg_nodes << std::setw(12) << avg_nps
+              << "\n";
+  }
+
+  // ========================================================================
   // Summary
   // ========================================================================
   std::cout << "\n=== Summary ===\n";
@@ -1513,6 +1636,8 @@ void UCIEngine::hybrid_benchmark() {
             << "\n";
   std::cout << "  Evaluation dominates: " << std::fixed << std::setprecision(1)
             << eval_pct << "% of MCTS time\n";
+  std::cout << "  Tactical test: " << tactical_correct << "/" << NUM_TACTICAL
+            << " forcing moves found\n";
 
   std::cout << "\nNote: For full Elo testing, use external tools like "
                "cutechess-cli\n";
