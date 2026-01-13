@@ -1,0 +1,87 @@
+\relax 
+\citation{Stockfish2024}
+\citation{LeelaChessZero2024}
+\@writefile{toc}{\contentsline {title}{MetalFish: A Hybrid MCTS-Alpha-Beta Chess Engine\unskip \ \ignorespaces with GPU-Accelerated NNUE on Apple Silicon}{1}{}\protected@file@percent }
+\@writefile{toc}{\authcount {1}}
+\@writefile{toc}{\contentsline {author}{Nripesh Niketan\unskip {}}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{}\protected@file@percent }
+\citation{Knuth1975}
+\citation{Silver2017}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Research Questions}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Contributions}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Alpha-Beta Search}{2}{}\protected@file@percent }
+\citation{Nasu2018}
+\citation{AppleMetal2024}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces NNUE Network Architecture}}{3}{}\protected@file@percent }
+\newlabel{tab:nnue_arch}{{1}{3}{}{table.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Monte Carlo Tree Search}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}NNUE Architecture}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Metal Compute Model}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}System Architecture}{3}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Position Type to Search Strategy Mapping}}{4}{}\protected@file@percent }
+\newlabel{tab:strategy}{{2}{4}{}{table.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Position Classifier}{4}{}\protected@file@percent }
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.1}Position classification}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Strategy Selection}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Hybrid Search Pipeline}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}MCTS Implementation}{4}{}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces Hybrid MCTS-Alpha-Beta Search}}{5}{}\protected@file@percent }
+\newlabel{alg:hybrid}{{1}{5}{}{algorithm.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Alpha-Beta Verifier}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}GPU NNUE Integration}{5}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GPU Configuration Constants}}{6}{}\protected@file@percent }
+\newlabel{tab:gpu_constants}{{3}{6}{}{table.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Methodology}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Hardware and Software}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Benchmark Dataset}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Timing Methodology}{6}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Hybrid Search Performance by Position Type}}{7}{}\protected@file@percent }
+\newlabel{tab:hybrid_perf}{{4}{7}{}{table.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Position Classification Examples}}{7}{}\protected@file@percent }
+\newlabel{tab:classification}{{5}{7}{}{table.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Hybrid Search Evaluation}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Results}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Hybrid Search Performance}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Position Classification Results}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}GPU Dispatch Overhead}{7}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces GPU Dispatch Overhead---Minimal Kernel (N=1,000)}}{8}{}\protected@file@percent }
+\newlabel{tab:dispatch}{{6}{8}{}{table.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces GPU Stage Breakdown (median, N=100 iterations)}}{8}{}\protected@file@percent }
+\newlabel{tab:stage_breakdown}{{7}{8}{}{table.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}GPU Stage Breakdown}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Batch Latency Scaling}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}True Batching Verification}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.7}GPU Evaluation Consistency}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Why Hybrid Search?}{8}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces GPU End-to-End Batch Latency (N=100 iterations)}}{9}{}\protected@file@percent }
+\newlabel{tab:batch_latency}{{8}{9}{}{table.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces True Batching Verification (N=50 iterations)}}{9}{}\protected@file@percent }
+\newlabel{tab:batching}{{9}{9}{}{table.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}GPU Acceleration Trade-offs}{9}{}\protected@file@percent }
+\citation{Silver2017}
+\citation{LeelaChessZero2024}
+\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces GPU Evaluation Consistency (1,000 positions)}}{10}{}\protected@file@percent }
+\newlabel{tab:correctness}{{10}{10}{}{table.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Alpha-Beta Verification Benefits}{10}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Limitations}{10}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Future Work}{10}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Related Work}{10}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Hybrid Search Approaches}{10}{}\protected@file@percent }
+\citation{Stockfish2024}
+\citation{Rocki2010}
+\citation{Nasu2018}
+\citation{AppleMetal2024,AppleMetalBestPractices2024}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}GPU Chess Engines}{11}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Neural Network Evaluation}{11}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{11}{}\protected@file@percent }
+\bibcite{Stockfish2024}{1}
+\bibcite{LeelaChessZero2024}{2}
+\bibcite{Silver2017}{3}
+\bibcite{Rocki2010}{4}
+\bibcite{Nasu2018}{5}
+\bibcite{AppleMetal2024}{6}
+\bibcite{AppleMetalBestPractices2024}{7}
+\bibcite{Knuth1975}{8}
+\gdef \@abspage@last{12}

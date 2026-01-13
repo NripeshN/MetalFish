@@ -332,10 +332,57 @@ bool PersistentNNUEPipeline::evaluate(Buffer *features, Buffer *counts,
     return false;
   }
 
+  // Validate required weight buffers are set
+  if (!ft_weights_ || !ft_biases_ || !fc_weights_ || !fc_biases_) {
+    return false;
+  }
+
+  // Validate input/output buffers
+  if (!features || !counts || !offsets || !scores) {
+    return false;
+  }
+
   auto start = std::chrono::high_resolution_clock::now();
 
-  // For now, delegate to the standard GPU NNUE path
-  // In a full implementation, we'd use persistent command buffers here
+  auto &backend = gpu();
+  auto encoder = backend.create_encoder();
+  if (!encoder) {
+    return false;
+  }
+
+  // Stage 1: Feature transform - accumulate features into hidden layer
+  if (feature_transform_kernel_ && feature_transform_kernel_->valid()) {
+    encoder->set_kernel(feature_transform_kernel_.get());
+    encoder->set_buffer(ft_weights_, 0);
+    encoder->set_buffer(ft_biases_, 1);
+    encoder->set_buffer(features, 2);
+    encoder->set_buffer(offsets, 3);
+    encoder->set_buffer(accumulator_buffer_.get(), 4);
+    encoder->set_value(static_cast<int>(GPU_FT_DIM_BIG), 5);
+    encoder->set_value(batch_size, 6);
+    encoder->dispatch_threads(GPU_FT_DIM_BIG, batch_size);
+    encoder->barrier();
+  } else {
+    // Feature transform kernel not available
+    return false;
+  }
+
+  // Stage 2: Forward pass through FC layers
+  if (forward_kernel_ && forward_kernel_->valid()) {
+    encoder->set_kernel(forward_kernel_.get());
+    encoder->set_buffer(accumulator_buffer_.get(), 0);
+    encoder->set_buffer(fc_weights_, 1);
+    encoder->set_buffer(fc_biases_, 2);
+    encoder->set_buffer(scores, 3);
+    encoder->set_value(static_cast<int>(GPU_FT_DIM_BIG), 4);
+    encoder->set_value(batch_size, 5);
+    encoder->dispatch_threadgroups(batch_size, 1, 1, 64, 1, 1);
+  } else {
+    // Forward kernel not available
+    return false;
+  }
+
+  backend.submit_and_wait(encoder.get());
 
   auto end = std::chrono::high_resolution_clock::now();
   double latency =
@@ -350,11 +397,12 @@ bool PersistentNNUEPipeline::evaluate(Buffer *features, Buffer *counts,
   return true;
 }
 
-void PersistentNNUEPipeline::evaluate_async(Buffer *features, Buffer *counts,
+bool PersistentNNUEPipeline::evaluate_async(Buffer *features, Buffer *counts,
                                             Buffer *offsets, Buffer *scores,
                                             int batch_size) {
-  // For now, just do synchronous evaluation
-  evaluate(features, counts, offsets, scores, batch_size);
+  // Currently performs synchronous evaluation
+  // TODO: Implement true async evaluation with completion handlers
+  return evaluate(features, counts, offsets, scores, batch_size);
 }
 
 void PersistentNNUEPipeline::wait() {

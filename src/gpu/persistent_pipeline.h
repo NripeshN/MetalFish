@@ -189,7 +189,8 @@ public:
                 Buffer *scores, int batch_size);
 
   // Async evaluation (returns immediately)
-  void evaluate_async(Buffer *features, Buffer *counts, Buffer *offsets,
+  // Returns false if evaluation cannot be started
+  bool evaluate_async(Buffer *features, Buffer *counts, Buffer *offsets,
                       Buffer *scores, int batch_size);
 
   // Wait for async evaluation

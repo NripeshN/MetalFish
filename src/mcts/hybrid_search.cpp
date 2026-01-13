@@ -28,10 +28,10 @@ HybridNode::HybridNode(HybridNode *parent, int edge_index)
     : parent_(parent), edge_index_(edge_index) {}
 
 HybridNode::~HybridNode() {
-  // Children are owned by edges, need to delete them
-  for (auto &edge : edges_) {
-    delete edge.child();
-  }
+  // Children are NOT deleted here - they are owned by node_pool_ in HybridTree.
+  // The node_pool_ uses unique_ptr to manage all allocated nodes, so manual
+  // deletion here would cause double-free when both the destructor and the
+  // unique_ptr try to delete the same node.
 }
 
 void HybridNode::create_edges(const MCTSMoveList &moves) {
@@ -113,38 +113,20 @@ HybridTree::HybridTree() : root_(std::make_unique<HybridNode>()) {}
 HybridTree::~HybridTree() = default;
 
 void HybridTree::reset(const MCTSPositionHistory &history) {
+  // Clear the node pool first (this deletes all allocated nodes)
+  node_pool_.clear();
   root_ = std::make_unique<HybridNode>();
   history_ = history;
   node_count_ = 1;
 }
 
 bool HybridTree::apply_move(MCTSMove move) {
-  if (!root_->has_children()) {
-    // No children, can't reuse tree
-    history_.do_move(move);
-    root_ = std::make_unique<HybridNode>();
-    node_count_ = 1;
-    return false;
-  }
-
-  // Find the edge with this move
-  for (auto &edge : root_->edges()) {
-    if (edge.move() == move && edge.child() != nullptr) {
-      // Found it! Promote this child to root
-      HybridNode *new_root = edge.child();
-      edge.set_child(nullptr); // Prevent deletion
-
-      // Delete old root (and all other children)
-      root_.reset(new_root);
-      new_root->reset_parent();
-
-      history_.do_move(move);
-      return true;
-    }
-  }
-
-  // Move not in tree, reset
+  // Tree reuse is disabled because child nodes are owned by node_pool_,
+  // not by their parent nodes. Extracting a subtree would require complex
+  // ownership transfer from node_pool_. For simplicity, we always reset.
+  // This is a common trade-off in MCTS implementations.
   history_.do_move(move);
+  node_pool_.clear();
   root_ = std::make_unique<HybridNode>();
   node_count_ = 1;
   return false;
