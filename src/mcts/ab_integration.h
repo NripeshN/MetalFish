@@ -57,17 +57,17 @@ struct ABSearchResult {
 
 // Configuration for AB search in hybrid context
 struct ABSearchConfig {
-  int max_depth = 12;             // Maximum search depth
-  int quiescence_depth = 6;       // Quiescence search depth
-  int aspiration_window = 25;     // Initial aspiration window
-  bool use_tt = true;             // Use transposition table
-  bool use_null_move = true;      // Use null move pruning
-  bool use_lmr = true;            // Use late move reductions
-  bool use_futility = true;       // Use futility pruning
-  bool use_history = true;        // Use history heuristics
-  int64_t max_nodes = 0;          // Node limit (0 = unlimited)
-  int64_t max_time_ms = 0;        // Time limit (0 = unlimited)
-  bool verify_only = false;       // Only verify a specific move
+  int max_depth = 12;         // Maximum search depth
+  int quiescence_depth = 6;   // Quiescence search depth
+  int aspiration_window = 25; // Initial aspiration window
+  bool use_tt = true;         // Use transposition table
+  bool use_null_move = true;  // Use null move pruning
+  bool use_lmr = true;        // Use late move reductions
+  bool use_futility = true;   // Use futility pruning
+  bool use_history = true;    // Use history heuristics
+  int64_t max_nodes = 0;      // Node limit (0 = unlimited)
+  int64_t max_time_ms = 0;    // Time limit (0 = unlimited)
+  bool verify_only = false;   // Only verify a specific move
   Move move_to_verify = Move::none();
 };
 
@@ -234,8 +234,8 @@ public:
 
   // Verify MCTS best move with AB search
   struct VerificationResult {
-    bool verified = false;       // MCTS move is verified as good
-    bool override_mcts = false;  // AB found significantly better move
+    bool verified = false;      // MCTS move is verified as good
+    bool override_mcts = false; // AB found significantly better move
     Move mcts_move = Move::none();
     Move ab_move = Move::none();
     Value mcts_score = VALUE_NONE;
