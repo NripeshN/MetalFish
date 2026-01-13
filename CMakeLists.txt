@@ -273,7 +273,7 @@ if(BUILD_TESTS)
 endif()
 
 # GPU Benchmark (optional)
-option(BUILD_GPU_BENCHMARK "Build GPU benchmark" OFF)
+option(BUILD_GPU_BENCHMARK "Build GPU benchmark" ON)
 if(BUILD_GPU_BENCHMARK
    AND USE_METAL
    AND METAL_CPP_AVAILABLE)
