@@ -823,31 +823,37 @@ void UCIEngine::gpu_benchmark() {
     int total_positions = 0;
     int capped_positions = 0;
     int max_features_seen = 0;
-    std::vector<int> feature_histogram(65, 0);
+    int max_per_perspective = 0;
+    std::vector<int> feature_histogram(129, 0);  // Up to 128 total features
 
     for (int i = 0; i < 2048; i++) {
       extractor.extract(positions[i], white_f, black_f);
       int white_count = white_f.size();
       int black_count = black_f.size();
       int total = white_count + black_count;
+      int max_perspective = std::max(white_count, black_count);
 
       max_features_seen = std::max(max_features_seen, total);
-      if (total < 65)
+      max_per_perspective = std::max(max_per_perspective, max_perspective);
+      if (total < 129)
         feature_histogram[total]++;
-      if (total > 32)
+      // Check against new GPU limit: 64 per perspective, 128 total
+      if (max_perspective > GPU::GPU_MAX_FEATURES_PER_PERSPECTIVE)
         capped_positions++;
       total_positions++;
     }
 
     std::cout << "\nPositions analyzed: " << total_positions << "\n";
-    std::cout << "Max features seen:  " << max_features_seen << "\n";
-    std::cout << "Positions capped (>32 features): " << capped_positions;
+    std::cout << "Max features seen (total):  " << max_features_seen << "\n";
+    std::cout << "Max features per perspective: " << max_per_perspective << "\n";
+    std::cout << "GPU limit per perspective: " << GPU::GPU_MAX_FEATURES_PER_PERSPECTIVE << "\n";
+    std::cout << "Positions exceeding GPU limit: " << capped_positions;
     std::cout << " (" << std::fixed << std::setprecision(2)
        << (100.0 * capped_positions / total_positions) << "%)\n";
     std::cout << "Feature distribution (top 5):\n";
 
     std::vector<std::pair<int, int>> sorted_hist;
-    for (int i = 0; i < 65; i++) {
+    for (int i = 0; i < 129; i++) {
       if (feature_histogram[i] > 0)
         sorted_hist.push_back({feature_histogram[i], i});
     }

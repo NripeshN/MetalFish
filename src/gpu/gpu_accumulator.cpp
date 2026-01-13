@@ -197,10 +197,11 @@ kernel void acc_copy(
 bool GPUAccumulatorStack::allocate_buffers() {
   auto &backend = gpu();
 
-  features_buffer_ = backend.create_buffer(GPU_MAX_FEATURES * sizeof(int32_t));
+  // Use the new larger feature limits
+  features_buffer_ = backend.create_buffer(GPU_MAX_FEATURES_PER_PERSPECTIVE * sizeof(int32_t));
   feature_counts_buffer_ = backend.create_buffer(sizeof(uint32_t));
   update_buffer_ = backend.create_buffer(
-      2 * GPU_MAX_FEATURES * sizeof(int32_t) + 2 * sizeof(uint32_t));
+      2 * GPU_MAX_FEATURES_PER_PERSPECTIVE * sizeof(int32_t) + 2 * sizeof(uint32_t));
 
   return features_buffer_ && feature_counts_buffer_ && update_buffer_;
 }
