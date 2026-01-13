@@ -494,7 +494,6 @@ int PersistentBatchEvaluator::evaluate(const GPUPositionData *positions,
 
   // Create batch and evaluate
   GPUEvalBatch batch;
-  batch.count = count;
   batch.reserve(count);
 
   // Add position data directly to batch
@@ -526,6 +525,10 @@ int PersistentBatchEvaluator::evaluate(const GPUPositionData *positions,
 
 void PersistentBatchEvaluator::evaluate_async(const GPUPositionData *positions,
                                               int count) {
+  if (!initialized_ || count <= 0) {
+    return;
+  }
+
   // Copy to persistent buffer
   count = std::min(count, max_batch_size_);
   std::memcpy(position_buffer_->data(), positions,

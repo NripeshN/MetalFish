@@ -42,8 +42,8 @@ class EnhancedHybridSearch;
 // Result from alpha-beta verification
 struct ABVerifyResult {
   Move best_move;
-  int score;
-  int depth;
+  int score = 0;
+  int depth = 0;
   bool is_mate = false;
   int mate_in = 0;
   std::vector<Move> pv;

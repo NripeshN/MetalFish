@@ -167,11 +167,22 @@ void EnhancedHybridSearch::search_thread_main() {
       "MCTS phase complete: " + std::to_string(stats_.mcts_time_ms) +
       "ms, move=" + (mcts_move.is_null() ? "null" : mcts_move.to_string()));
 
-  // Check if we should stop
-  if (stop_flag_) {
-    // Just return MCTS result
-    if (best_move_callback_ && !mcts_move.is_null()) {
-      best_move_callback_(mcts_move.to_stockfish(), Move::none());
+  // Check if we should stop or if MCTS returned a null move
+  if (stop_flag_ || mcts_move.is_null()) {
+    // Return MCTS result if valid, otherwise report no move
+    if (best_move_callback_) {
+      if (!mcts_move.is_null()) {
+        best_move_callback_(mcts_move.to_stockfish(), Move::none());
+      } else {
+        // Null move from MCTS (e.g., checkmate position or search error)
+        // Try to find any legal move as fallback
+        MoveList<LEGAL> moves(root_pos);
+        if (moves.size() > 0) {
+          best_move_callback_(*moves.begin(), Move::none());
+        }
+        // If no legal moves, this is checkmate/stalemate - no bestmove to
+        // report
+      }
     }
     return;
   }
@@ -294,6 +305,38 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(const Position &pos,
   result.depth = depth;
   result.agrees_with_mcts = true;
 
+  // Guard against null move - cannot verify a null move
+  if (mcts_move.is_null()) {
+    // Find the best legal move using NNUE evaluation
+    if (gpu_manager_) {
+      MoveList<LEGAL> moves(pos);
+      int best_score = -32000;
+      for (const auto &m : moves) {
+        Position test_pos;
+        StateInfo test_st;
+        test_pos.set(pos.fen(), false, &test_st);
+        StateInfo test_st2;
+        test_pos.do_move(m, test_st2);
+
+        auto [test_psqt, test_score] =
+            gpu_manager_->evaluate_single(test_pos, true);
+        int score = -test_score;
+
+        if (score > best_score) {
+          best_score = score;
+          result.best_move = m;
+          result.score = score;
+        }
+        stats_.ab_nodes++;
+      }
+      if (result.best_move != Move::none()) {
+        result.agrees_with_mcts = false;
+        result.pv.push_back(result.best_move);
+      }
+    }
+    return result;
+  }
+
   // Simple alpha-beta search for verification
   // In a full implementation, this would use Stockfish's search
 
@@ -316,6 +359,8 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(const Position &pos,
 
     // Check all legal moves for better options
     MoveList<LEGAL> moves(pos);
+    int mcts_score =
+        result.score; // Original MCTS score for threshold comparison
     int best_score = result.score;
     Move best_move = mcts_move.to_stockfish();
 
@@ -333,7 +378,10 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(const Position &pos,
           gpu_manager_->evaluate_single(test_pos, true);
       int score = -test_score;
 
-      if (score > best_score + 50) { // 0.5 pawn threshold
+      // Compare against original MCTS score (not sliding best_score) to find
+      // moves that are significantly better than MCTS, then track the actual
+      // best
+      if (score > mcts_score + 50 && score > best_score) { // 0.5 pawn threshold
         best_score = score;
         best_move = m;
       }
