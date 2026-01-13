@@ -33,8 +33,8 @@
 #include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "gpu/nnue_eval.h"
-#include "mcts/hybrid_search.h"
 #include "mcts/enhanced_hybrid_search.h"
+#include "mcts/hybrid_search.h"
 #include "mcts/position_classifier.h"
 #include "mcts/stockfish_adapter.h"
 #include "search/search.h"
@@ -755,7 +755,8 @@ void UCIEngine::gpu_benchmark() {
       "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
       "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
       "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-      "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+      "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 "
+      "10",
       "r2q1rk1/ppp2ppp/2n1bn2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 9",
       "r1bq1rk1/pp2bppp/2n1pn2/2pp4/3P4/2NBPN2/PPP2PPP/R1BQ1RK1 w - - 0 8",
       // Tactical positions
@@ -795,7 +796,8 @@ void UCIEngine::gpu_benchmark() {
     positions[i].set(fens[i % NUM_FENS], false, &states_vec.back()->back());
   }
 
-  std::cout << "Positions created: 2048 (from " << NUM_FENS << " unique FENs)\n\n"
+  std::cout << "Positions created: 2048 (from " << NUM_FENS
+            << " unique FENs)\n\n"
             << std::flush;
 
   manager.set_min_batch_size(1);
@@ -838,8 +840,9 @@ void UCIEngine::gpu_benchmark() {
   std::cout << "Note: CPU NNUE benchmark requires separate network loading.\n";
   std::cout << "For scope-matched comparison, use 'bench' command NPS.\n";
   std::cout << "GPU NNUE latency should be compared against CPU NNUE latency\n";
-  std::cout << "from engine search, which is approximately 1-5 µs per position.\n\n"
-            << std::flush;
+  std::cout
+      << "from engine search, which is approximately 1-5 µs per position.\n\n"
+      << std::flush;
 
   // We store placeholder scores for correctness comparison
   // The GPU scores will be compared for consistency only
@@ -850,7 +853,8 @@ void UCIEngine::gpu_benchmark() {
     }
   }
   std::cout << "Valid positions (no check): " << valid_pos_indices.size()
-            << " / 2048\n\n" << std::flush;
+            << " / 2048\n\n"
+            << std::flush;
 
   // ========================================================================
   // BENCHMARK 2: CPU Feature Extraction
@@ -1148,7 +1152,7 @@ void UCIEngine::gpu_benchmark() {
     std::cout << "ERROR: No valid positions for comparison\n\n";
   } else {
     const int CHECK_SIZE = std::min(1000, (int)valid_pos_indices.size());
-    
+
     // First evaluation
     GPU::GPUEvalBatch batch1;
     batch1.reserve(CHECK_SIZE);
@@ -1174,22 +1178,25 @@ void UCIEngine::gpu_benchmark() {
     for (int i = 0; i < CHECK_SIZE; i++) {
       int score1 = batch1.positional_scores[i];
       int score2 = batch2.positional_scores[i];
-      
-      if (score1 != 0) non_zero++;
-      if (score1 == score2) consistent++;
-      
+
+      if (score1 != 0)
+        non_zero++;
+      if (score1 == score2)
+        consistent++;
+
       sum_abs_score += std::abs(score1);
       min_score = std::min(min_score, score1);
       max_score = std::max(max_score, score1);
     }
 
     std::cout << "Positions checked: " << CHECK_SIZE << "\n";
-    std::cout << "Non-zero GPU scores: " << non_zero << " ("
-              << std::fixed << std::setprecision(1)
-              << (100.0 * non_zero / CHECK_SIZE) << "%)\n";
+    std::cout << "Non-zero GPU scores: " << non_zero << " (" << std::fixed
+              << std::setprecision(1) << (100.0 * non_zero / CHECK_SIZE)
+              << "%)\n";
     std::cout << "Consistent across runs: " << consistent << " ("
               << (100.0 * consistent / CHECK_SIZE) << "%)\n";
-    std::cout << "Mean |GPU score|: " << (double(sum_abs_score) / CHECK_SIZE) << "\n";
+    std::cout << "Mean |GPU score|: " << (double(sum_abs_score) / CHECK_SIZE)
+              << "\n";
     std::cout << "Score range: [" << min_score << ", " << max_score << "]\n";
 
     std::cout << "\nSample scores (first 10 positions):\n";
@@ -1197,10 +1204,9 @@ void UCIEngine::gpu_benchmark() {
     for (int i = 0; i < std::min(10, CHECK_SIZE); i++) {
       int score1 = batch1.positional_scores[i];
       int score2 = batch2.positional_scores[i];
-      std::cout << "  " << std::setw(3) << i 
-                << "  " << std::setw(8) << score1
-                << "  " << std::setw(8) << score2
-                << "  " << (score1 == score2 ? "Yes" : "NO") << "\n";
+      std::cout << "  " << std::setw(3) << i << "  " << std::setw(8) << score1
+                << "  " << std::setw(8) << score2 << "  "
+                << (score1 == score2 ? "Yes" : "NO") << "\n";
     }
     std::cout << "\n" << std::flush;
   }
@@ -1255,21 +1261,21 @@ void UCIEngine::gpu_benchmark() {
 // ============================================================================
 void UCIEngine::mcts_go(std::istringstream &is) {
   sync_cout << "info string Starting Enhanced Hybrid Search..." << sync_endl;
-  
+
   // Parse search limits
   Search::LimitsType limits = parse_limits(is);
-  
+
   // Get GPU NNUE manager
-  GPU::GPUNNUEManager* gpu_manager = nullptr;
+  GPU::GPUNNUEManager *gpu_manager = nullptr;
   if (GPU::gpu_nnue_manager_available()) {
     gpu_manager = &GPU::gpu_nnue_manager();
   }
-  
+
   if (!gpu_manager) {
     sync_cout << "info string ERROR: GPU NNUE not available" << sync_endl;
     return;
   }
-  
+
   // Configure enhanced hybrid search
   MCTS::EnhancedHybridConfig config;
   config.mcts_config.min_batch_size = 8;
@@ -1281,50 +1287,53 @@ void UCIEngine::mcts_go(std::istringstream &is) {
   config.ab_override_threshold = 0.5f;
   config.use_position_classifier = true;
   config.dynamic_strategy = true;
-  
+
   // Create enhanced hybrid search
   auto search = MCTS::create_enhanced_hybrid_search(gpu_manager, config);
-  
+
   if (!search) {
-    sync_cout << "info string ERROR: Failed to create hybrid search" << sync_endl;
+    sync_cout << "info string ERROR: Failed to create hybrid search"
+              << sync_endl;
     return;
   }
-  
+
   sync_cout << "info string Enhanced hybrid search initialized" << sync_endl;
-  
+
   // Get current position from engine
   Position pos;
   StateInfo st;
   pos.set(engine.fen(), false, &st);
-  
+
   // Callbacks for UCI output
   auto best_move_cb = [](Move best, Move ponder) {
     std::string best_str = UCIEngine::move(best, false);
-    std::string ponder_str = ponder != Move::none() ? " ponder " + UCIEngine::move(ponder, false) : "";
+    std::string ponder_str = ponder != Move::none()
+                                 ? " ponder " + UCIEngine::move(ponder, false)
+                                 : "";
     sync_cout << "bestmove " << best_str << ponder_str << sync_endl;
   };
-  
-  auto info_cb = [](const std::string& info) {
+
+  auto info_cb = [](const std::string &info) {
     sync_cout << info << sync_endl;
   };
-  
+
   // Start search
   search->start_search(pos, limits, best_move_cb, info_cb);
-  
+
   // Wait for completion
   search->wait();
-  
+
   // Print final statistics
-  const auto& stats = search->stats();
-  sync_cout << "info string Final stats: MCTS=" << stats.mcts_nodes 
+  const auto &stats = search->stats();
+  sync_cout << "info string Final stats: MCTS=" << stats.mcts_nodes
             << " AB=" << stats.ab_nodes
             << " verifications=" << stats.ab_verifications
             << " overrides=" << stats.ab_overrides
             << " GPU batches=" << stats.gpu_batches << sync_endl;
-  sync_cout << "info string TT usage: " << std::fixed << std::setprecision(1) 
+  sync_cout << "info string TT usage: " << std::fixed << std::setprecision(1)
             << MCTS::mcts_tt().usage_percent() << "%" << sync_endl;
-  sync_cout << "info string Time: MCTS=" << std::fixed << std::setprecision(1) 
-            << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms 
+  sync_cout << "info string Time: MCTS=" << std::fixed << std::setprecision(1)
+            << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms
             << "ms Total=" << stats.total_time_ms << "ms" << sync_endl;
 }
 

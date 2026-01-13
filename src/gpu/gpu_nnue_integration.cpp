@@ -1211,12 +1211,12 @@ bool GPUNNUEManager::compile_shaders() {
       backend.create_kernel("gpu_nnue_forward_batch", "gpu_nnue_integration");
 
   // New optimized kernels
-  feature_transform_vec4_kernel_ =
-      backend.create_kernel("gpu_feature_transform_vec4", "gpu_nnue_integration");
-  feature_transform_dual_vec4_kernel_ =
-      backend.create_kernel("gpu_feature_transform_dual_vec4", "gpu_nnue_integration");
-  forward_optimized_kernel_ =
-      backend.create_kernel("gpu_nnue_forward_optimized", "gpu_nnue_integration");
+  feature_transform_vec4_kernel_ = backend.create_kernel(
+      "gpu_feature_transform_vec4", "gpu_nnue_integration");
+  feature_transform_dual_vec4_kernel_ = backend.create_kernel(
+      "gpu_feature_transform_dual_vec4", "gpu_nnue_integration");
+  forward_optimized_kernel_ = backend.create_kernel(
+      "gpu_nnue_forward_optimized", "gpu_nnue_integration");
   fused_single_kernel_ =
       backend.create_kernel("gpu_nnue_fused_single", "gpu_nnue_integration");
 
@@ -1253,17 +1253,24 @@ bool GPUNNUEManager::compile_shaders() {
   if (forward_batch_kernel_ && forward_batch_kernel_->valid()) {
     std::cout << "[GPU NNUE] Batch forward kernel available" << std::endl;
   }
-  if (feature_transform_vec4_kernel_ && feature_transform_vec4_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Vectorized (vec4) feature transform kernel available" << std::endl;
+  if (feature_transform_vec4_kernel_ &&
+      feature_transform_vec4_kernel_->valid()) {
+    std::cout
+        << "[GPU NNUE] Vectorized (vec4) feature transform kernel available"
+        << std::endl;
   }
-  if (feature_transform_dual_vec4_kernel_ && feature_transform_dual_vec4_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Dual-perspective vectorized transform kernel available" << std::endl;
+  if (feature_transform_dual_vec4_kernel_ &&
+      feature_transform_dual_vec4_kernel_->valid()) {
+    std::cout
+        << "[GPU NNUE] Dual-perspective vectorized transform kernel available"
+        << std::endl;
   }
   if (forward_optimized_kernel_ && forward_optimized_kernel_->valid()) {
     std::cout << "[GPU NNUE] Optimized forward kernel available" << std::endl;
   }
   if (fused_single_kernel_ && fused_single_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Fused single-position kernel available" << std::endl;
+    std::cout << "[GPU NNUE] Fused single-position kernel available"
+              << std::endl;
   }
 
   std::cout << "[GPU NNUE] Shaders compiled successfully" << std::endl;
@@ -1593,23 +1600,26 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     // Unrolled color loop for better branch prediction
     for (int pt = PAWN; pt <= QUEEN; pt++) {
       const int pt_offset = (pt - 1) * 64;
-      
+
       // White pieces
       Bitboard bb_w = pos_data.pieces[0][pt];
       while (bb_w) {
         const int s = pop_lsb(bb_w);
         white_features_ptr[white_feature_idx++] = wksq * 640 + pt_offset + s;
-        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
+        black_features_ptr[black_feature_idx++] =
+            bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
         white_count++;
         black_count++;
       }
-      
+
       // Black pieces
       Bitboard bb_b = pos_data.pieces[1][pt];
       while (bb_b) {
         const int s = pop_lsb(bb_b);
-        white_features_ptr[white_feature_idx++] = wksq * 640 + 320 + pt_offset + s;
-        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + pt_offset + (s ^ 56);
+        white_features_ptr[white_feature_idx++] =
+            wksq * 640 + 320 + pt_offset + s;
+        black_features_ptr[black_feature_idx++] =
+            bksq_flip * 640 + pt_offset + (s ^ 56);
         white_count++;
         black_count++;
       }
@@ -1629,9 +1639,10 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   // Testing showed that the fused kernel uses too much threadgroup memory
   // and reduces GPU occupancy, making it slower than separate dispatches
   // Always use dual-perspective kernel since it processes both perspectives
-  const bool use_fused_kernel = false; // Disabled - slower than separate kernels
-  const bool use_dual_kernel = feature_transform_dual_kernel_ &&
-                               feature_transform_dual_kernel_->valid();
+  const bool use_fused_kernel =
+      false; // Disabled - slower than separate kernels
+  const bool use_dual_kernel =
+      feature_transform_dual_kernel_ && feature_transform_dual_kernel_->valid();
 
   if (use_fused_kernel) {
     // Fused kernel: feature transform + forward pass in single dispatch
@@ -1797,23 +1808,26 @@ bool GPUNNUEManager::evaluate_batch_async(
 
     for (int pt = PAWN; pt <= QUEEN; pt++) {
       const int pt_offset = (pt - 1) * 64;
-      
+
       // White pieces
       Bitboard bb_w = pos_data.pieces[0][pt];
       while (bb_w) {
         const int s = pop_lsb(bb_w);
         white_features_ptr[white_feature_idx++] = wksq * 640 + pt_offset + s;
-        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
+        black_features_ptr[black_feature_idx++] =
+            bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
         white_count++;
         black_count++;
       }
-      
+
       // Black pieces
       Bitboard bb_b = pos_data.pieces[1][pt];
       while (bb_b) {
         const int s = pop_lsb(bb_b);
-        white_features_ptr[white_feature_idx++] = wksq * 640 + 320 + pt_offset + s;
-        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + pt_offset + (s ^ 56);
+        white_features_ptr[white_feature_idx++] =
+            wksq * 640 + 320 + pt_offset + s;
+        black_features_ptr[black_feature_idx++] =
+            bksq_flip * 640 + pt_offset + (s ^ 56);
         white_count++;
         black_count++;
       }
@@ -1829,8 +1843,8 @@ bool GPUNNUEManager::evaluate_batch_async(
   auto encoder = backend.create_encoder();
 
   // Feature transform - always use dual kernel for both perspectives
-  const bool use_dual_kernel = feature_transform_dual_kernel_ &&
-                               feature_transform_dual_kernel_->valid();
+  const bool use_dual_kernel =
+      feature_transform_dual_kernel_ && feature_transform_dual_kernel_->valid();
 
   if (use_dual_kernel) {
     encoder->set_kernel(feature_transform_dual_kernel_.get());

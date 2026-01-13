@@ -32,14 +32,10 @@ int main() {
   };
 
   Test tests[] = {
-      {"Bitboard", test_bitboard},       
-      {"Position", test_position},
-      {"Move Generation", test_movegen}, 
-      {"Search", test_search},
-      {"Metal GPU", test_metal},         
-      {"GPU NNUE", run_all_gpu_tests},
-      {"MCTS Hybrid", test_mcts}
-  };
+      {"Bitboard", test_bitboard},       {"Position", test_position},
+      {"Move Generation", test_movegen}, {"Search", test_search},
+      {"Metal GPU", test_metal},         {"GPU NNUE", run_all_gpu_tests},
+      {"MCTS Hybrid", test_mcts}};
 
   for (const auto &test : tests) {
     std::cout << "Running " << test.name << " tests... ";
