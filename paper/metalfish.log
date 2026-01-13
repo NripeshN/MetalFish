@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  13 JAN 2026 22:53
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  13 JAN 2026 23:15
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -801,6 +801,12 @@ Package pgfplots notification 'compat/show suggested version=true': document ha
 s been generated with the most recent feature set (\pgfplotsset{compat=1.18}).
 
 
+Overfull \hbox (11.02951pt too wide) in paragraph at lines 60--61
+\OT1/cmr/m/n/9 Carlo Tree Search (MCTS) with alpha-beta prun-ing, us-ing GPU-ac
+celerated
+ []
+
+
 
 [1
 
@@ -828,7 +834,7 @@ File: lstmisc.sty 2024/09/23 1.10c (Carsten Heinz)
 [4]
 
 [5]
-Overfull \hbox (2.65497pt too wide) in paragraph at lines 307--308
+Overfull \hbox (2.65497pt too wide) in paragraph at lines 310--311
 []\OT1/cmr/bx/n/10 Networks\OT1/cmr/m/n/10 : nn-c288c895ea92.nnue (125MB big), 
 nn-37f18f62d772.nnue (6MB
  []
@@ -842,7 +848,7 @@ nn-37f18f62d772.nnue (6MB
 [8]
 
 [9]
-Overfull \hbox (6.15372pt too wide) in paragraph at lines 542--543
+Overfull \hbox (6.15372pt too wide) in paragraph at lines 573--574
 \OT1/cmr/m/n/10 MCTS due to Po-si-tion ob-ject thread-safety con-straints. Mult
 i-threaded MCTS
  []
@@ -850,47 +856,49 @@ i-threaded MCTS
 
 
 [10]
-Overfull \hbox (2.59924pt too wide) in paragraph at lines 569--570
+Overfull \hbox (2.59924pt too wide) in paragraph at lines 600--601
 []\OT1/cmr/m/n/10 Stockfish [1] rep-re-sents the state-of-the-art in alpha-beta
  en-gines, us-ing NNUE
  []
 
 
-Overfull \hbox (1.28075pt too wide) in paragraph at lines 599--600
-[]\OT1/cmr/bx/n/10 Key in-sight\OT1/cmr/m/n/10 : The hy-brid MCTS-alpha-beta ar
--chi-tec-ture com-bines the strate-
+
+[11]
+Overfull \hbox (11.69653pt too wide) in paragraph at lines 632--633
+\OT1/cmr/m/n/10 work for com-bin-ing strate-gic ex-plo-ration with tac-ti-cal p
+re-ci-sion on GPU-accelerated
  []
 
 
-
-[11]
-Underfull \hbox (badness 2285) in paragraph at lines 628--630
+Underfull \hbox (badness 2285) in paragraph at lines 661--663
 []\OT1/cmr/m/n/9 Apple Inc.: Metal Pro-gram-ming Guide. $https : / / developer 
 . apple . com / metal/$
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 632--634
+Underfull \hbox (badness 10000) in paragraph at lines 665--667
 \OT1/cmr/m/n/9 archive / documentation / 3DDrawing / Conceptual / MTLBestPracti
 cesGuide/$
  []
 
 
 
-[12] (./metalfish.aux)
+[12]
+
+[13] (./metalfish.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 25603 strings out of 473190
- 639928 string characters out of 5715801
- 1366248 words of memory out of 5000000
- 48467 multiletter control sequences out of 15000+600000
+ 25604 strings out of 473190
+ 639946 string characters out of 5715801
+ 1365418 words of memory out of 5000000
+ 48468 multiletter control sequences out of 15000+600000
  564374 words of font info for 56 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 84i,9n,87p,1211b,1910s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 84i,9n,87p,1376b,1339s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb
 ></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb>
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></
@@ -909,10 +917,10 @@ e/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/2
 /texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/2025/
 texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/2025/t
 exmf-dist/fonts/type1/public/amsfonts/cm/cmtt9.pfb>
-Output written on metalfish.pdf (12 pages, 268209 bytes).
+Output written on metalfish.pdf (13 pages, 272333 bytes).
 PDF statistics:
- 136 PDF objects out of 1000 (max. 8388607)
- 85 compressed objects within 1 object stream
+ 140 PDF objects out of 1000 (max. 8388607)
+ 88 compressed objects within 1 object stream
  0 named destinations out of 1000 (max. 500000)
  13 words of extra memory for PDF output out of 10000 (max. 10000000)
 

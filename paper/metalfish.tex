@@ -57,7 +57,7 @@
 \maketitle
 
 \begin{abstract}
-We present MetalFish, a novel chess engine that combines Monte Carlo Tree Search (MCTS) with traditional alpha-beta pruning, using GPU-accelerated NNUE evaluation on Apple Silicon's unified memory architecture. Our hybrid approach dynamically classifies positions as tactical or strategic, allocating search resources accordingly: MCTS for exploration in strategic positions, alpha-beta for tactical verification. On Apple M2 Max, our GPU NNUE implementation achieves 572$\times$ speedup through batch evaluation (0.3~$\mu$s/position at N=4096 vs 258~$\mu$s for single positions), enabling MCTS throughput of 190K--280K nodes/second. The position classifier identifies five position types with distinct search strategies, while the alpha-beta verifier provides tactical oversight with configurable override thresholds. We demonstrate that GPU dispatch overhead (140~$\mu$s median) makes single-position GPU evaluation unsuitable for pure alpha-beta search, but batch-oriented MCTS effectively amortizes this cost. Our hybrid architecture achieves competitive play while providing a framework for combining the strategic depth of MCTS with the tactical precision of alpha-beta.
+We present MetalFish, a chess engine that combines Monte Carlo Tree Search (MCTS) with alpha-beta pruning, using GPU-accelerated NNUE evaluation on Apple Silicon's unified memory architecture. Our hybrid approach dynamically classifies positions and allocates search resources accordingly: MCTS for exploration, alpha-beta for tactical verification. On Apple M2 Max, our GPU NNUE implementation achieves 572$\times$ speedup through batch evaluation (0.3~$\mu$s/position at N=4096 vs 258~$\mu$s for single positions). MCTS achieves 259K nodes/second with 99\% transposition table hit rate; profiling shows selection (tree traversal) dominates at 96.3\% of iteration time, explaining why raw GPU throughput does not directly translate to search speed. We demonstrate that GPU dispatch overhead (140~$\mu$s median) makes single-position GPU evaluation unsuitable for pure alpha-beta search, but batch-oriented MCTS effectively amortizes this cost. The position classifier categorizes positions into five types with distinct search strategies. We use uniform policy priors with Dirichlet noise; a trained policy network would significantly improve MCTS efficiency. This work provides a framework for combining MCTS with alpha-beta on GPU-accelerated unified memory systems; playing strength validation against established engines is future work.
 
 \keywords{Chess Engine, Hybrid Search, MCTS, Alpha-Beta, GPU Computing, Metal, NNUE, Apple Silicon}
 \end{abstract}
@@ -239,12 +239,15 @@ PUCT(s, a) = Q(s, a) + c_{puct} \cdot P(s, a) \cdot \frac{\sqrt{N(s)}}{1 + N(s, 
 
 where $Q(s, a)$ is the action value, $P(s, a)$ is the prior probability, $N(s)$ is the parent visit count, and $N(s, a)$ is the edge visit count.
 
+\textbf{Important limitation}: We use \textit{uniform policy priors} ($P(s, a) = 1/|A|$ for all legal moves $a$), not a trained policy network. This makes our MCTS similar to UCT with exploration noise. A trained policy network would significantly improve search efficiency by focusing exploration on promising moves.
+
 Key implementation features:
 \begin{itemize}
-\item \textbf{Virtual loss}: Prevents multiple threads from selecting the same path
+\item \textbf{Uniform priors}: All legal moves have equal prior probability
 \item \textbf{Dirichlet noise}: Added at root for exploration ($\alpha = 0.3$, $\epsilon = 0.25$)
+\item \textbf{Virtual loss}: Prevents multiple threads from selecting the same path
 \item \textbf{Tree reuse}: Previous search tree preserved between moves
-\item \textbf{MCTS transposition table}: Caches evaluations across searches
+\item \textbf{MCTS transposition table}: Caches evaluations across searches (99\% hit rate observed)
 \end{itemize}
 
 \subsection{Alpha-Beta Verifier}
@@ -361,6 +364,34 @@ Endgame (KRK) & 127,440 & 283K & 450 \\
 \end{table}
 
 The MCTS component achieves 190K--283K nodes per second, with throughput varying based on position complexity and tree structure.
+
+\subsection{MCTS Profiling Breakdown}
+
+Table~\ref{tab:mcts_profile} shows where time is spent during MCTS search, explaining why throughput is 259K nodes/second rather than the millions suggested by raw GPU evaluation speed.
+
+\begin{table}[t]
+\caption{MCTS Time Breakdown (3 second search, starting position)}
+\label{tab:mcts_profile}
+\centering
+\begin{tabular}{lrr}
+\toprule
+Phase & Time \% & Description \\
+\midrule
+Selection & 96.3\% & Tree traversal with PUCT \\
+Expansion & 2.6\% & Move generation, node creation \\
+Evaluation & 0.4\% & GPU NNUE (mostly TT hits) \\
+Backpropagation & 0.8\% & Statistics update \\
+\midrule
+Total nodes & \multicolumn{2}{r}{776,167} \\
+NPS & \multicolumn{2}{r}{258,718} \\
+TT hit rate & \multicolumn{2}{r}{99.0\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key finding}: Selection dominates at 96.3\% because each MCTS iteration traverses the tree from root to leaf. The MCTS transposition table achieves 99\% hit rate, reducing evaluation time to just 0.4\%. This explains the apparent discrepancy between GPU batch throughput (0.3~$\mu$s/position at N=4096) and MCTS throughput (259K nodes/second): most time is spent in tree traversal, not evaluation.
+
+\textbf{Definition}: An MCTS ``node'' in our throughput measurement represents one complete iteration: selection from root to leaf, expansion of the leaf node, evaluation (often cached), and backpropagation of the result.
 
 \subsection{Position Classification Results}
 
@@ -587,7 +618,7 @@ We presented MetalFish, a hybrid chess engine combining MCTS with alpha-beta sea
 \begin{enumerate}
 \item \textbf{Hybrid architecture}: Position classification enables dynamic allocation between MCTS exploration (40\% for strategic positions) and alpha-beta verification (up to 85\% for tactical positions).
 
-\item \textbf{MCTS throughput}: 190K--280K nodes/second with GPU NNUE evaluation, leveraging batch processing to amortize dispatch overhead.
+\item \textbf{MCTS throughput}: 259K nodes/second with GPU NNUE evaluation. Profiling shows selection (tree traversal) dominates at 96.3\%, with 99\% TT hit rate reducing evaluation overhead.
 
 \item \textbf{GPU batch efficiency}: 572$\times$ speedup through batching (0.3~$\mu$s/position at N=4096 vs 258~$\mu$s for single positions).
 
@@ -596,7 +627,9 @@ We presented MetalFish, a hybrid chess engine combining MCTS with alpha-beta sea
 \item \textbf{Evaluation consistency}: 100\% reproducibility across 1,000 positions with meaningful score differentiation.
 \end{enumerate}
 
-\textbf{Key insight}: The hybrid MCTS-alpha-beta architecture combines the strategic exploration of MCTS with the tactical precision of alpha-beta, while GPU acceleration provides efficient batch evaluation for MCTS leaf nodes. This architecture demonstrates a practical approach to leveraging GPU compute for chess engines on unified memory systems.
+\textbf{Limitations}: We use uniform policy priors, which limits MCTS efficiency compared to engines with trained policy networks. Playing strength has not been validated against established engines; this is future work.
+
+\textbf{Key insight}: The hybrid MCTS-alpha-beta architecture provides a framework for combining strategic exploration with tactical precision on GPU-accelerated unified memory systems. The primary bottleneck is tree traversal (selection), not GPU evaluation, suggesting that algorithmic improvements to MCTS selection would have greater impact than further GPU optimization.
 
 \subsection*{Reproducibility}
 
