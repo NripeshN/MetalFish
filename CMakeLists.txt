@@ -146,7 +146,9 @@ set(MCTS_SOURCES
     src/mcts/stockfish_adapter.cpp
     src/mcts/hybrid_search.cpp
     src/mcts/position_classifier.cpp
-    src/mcts/enhanced_hybrid_search.cpp)
+    src/mcts/enhanced_hybrid_search.cpp
+    src/mcts/mcts_batch_evaluator.cpp
+    src/mcts/mcts_tt.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)

@@ -28,6 +28,8 @@
 #include <vector>
 
 #include "stockfish_adapter.h"
+#include "mcts_batch_evaluator.h"
+#include "mcts_tt.h"
 #include "../search/search.h"
 #include "../gpu/gpu_nnue_integration.h"
 
