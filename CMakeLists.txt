@@ -147,7 +147,9 @@ set(MCTS_SOURCES
     src/mcts/enhanced_hybrid_search.cpp
     src/mcts/mcts_batch_evaluator.cpp
     src/mcts/mcts_tt.cpp
-    src/mcts/parallel_search.cpp)
+    src/mcts/parallel_search.cpp
+    src/mcts/ab_integration.cpp
+    src/mcts/ab_integration_part2.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
