@@ -168,6 +168,12 @@ public:
 
   // Batch evaluation with automatic strategy selection
   bool evaluate_batch(GPUEvalBatch &batch, bool use_big_network = true);
+  
+  // Asynchronous batch evaluation (returns immediately, calls completion_handler when done)
+  // The batch must remain valid until completion_handler is called
+  bool evaluate_batch_async(GPUEvalBatch &batch, 
+                            std::function<void(bool success)> completion_handler,
+                            bool use_big_network = true);
 
   // Single position (falls back to CPU if batch size is 1)
   std::pair<int32_t, int32_t> evaluate_single(const Position &pos,

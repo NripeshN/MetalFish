@@ -1244,6 +1244,168 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   return true;
 }
 
+bool GPUNNUEManager::evaluate_batch_async(GPUEvalBatch &batch,
+                                          std::function<void(bool success)> completion_handler,
+                                          bool use_big_network) {
+  if (!is_ready() || batch.count == 0) {
+    if (completion_handler) completion_handler(false);
+    return false;
+  }
+
+  // Select evaluation strategy based on batch size
+  EvalStrategy strategy = tuning_.select_strategy(batch.count);
+  
+  if (strategy == EvalStrategy::CPU_FALLBACK) {
+    cpu_evals_ += batch.count;
+    if (completion_handler) completion_handler(false);
+    return false;
+  }
+
+  auto &backend = gpu();
+  const GPUNetworkData &net = use_big_network ? big_network_ : small_network_;
+
+  if (!net.valid) {
+    cpu_evals_ += batch.count;
+    if (completion_handler) completion_handler(false);
+    return false;
+  }
+
+  const int batch_size = batch.count;
+  const int hidden_dim = net.hidden_dim;
+
+  // Use pre-allocated buffer pointers for direct writes
+  int32_t* white_features_ptr = static_cast<int32_t*>(white_features_buffer_->data());
+  int32_t* black_features_ptr = static_cast<int32_t*>(black_features_buffer_->data());
+  uint32_t* white_counts_ptr = static_cast<uint32_t*>(white_counts_buffer_->data());
+  uint32_t* black_counts_ptr = static_cast<uint32_t*>(black_counts_buffer_->data());
+  uint32_t* white_offsets_ptr = static_cast<uint32_t*>(white_offsets_buffer_->data());
+  uint32_t* black_offsets_ptr = static_cast<uint32_t*>(black_offsets_buffer_->data());
+  
+  // Extract features directly into GPU buffers
+  size_t white_feature_idx = 0;
+  size_t black_feature_idx = 0;
+  
+  for (int i = 0; i < batch_size; i++) {
+    const auto &pos_data = batch.positions[i];
+    
+    white_offsets_ptr[i] = static_cast<uint32_t>(white_feature_idx);
+    black_offsets_ptr[i] = static_cast<uint32_t>(black_feature_idx);
+    
+    const Square wksq = Square(pos_data.king_sq[0]);
+    const Square bksq = Square(pos_data.king_sq[1]);
+    const Square bksq_flip = flip_rank(bksq);
+    
+    int white_count = 0;
+    int black_count = 0;
+    
+    for (int c = 0; c < 2; c++) {
+      for (int pt = PAWN; pt <= QUEEN; pt++) {
+        Bitboard bb = pos_data.pieces[c][pt];
+        while (bb) {
+          const Square s = pop_lsb(bb);
+          const Square s_flip = flip_rank(s);
+          
+          const int white_feat = int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
+          if (white_feat >= 0 && white_feat < GPU_HALFKA_DIMS && 
+              white_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
+            white_features_ptr[white_feature_idx++] = white_feat;
+            white_count++;
+          }
+          
+          const int black_feat = int(bksq_flip) * 640 + (1 - c) * 320 + 
+                                 (pt - 1) * 64 + int(s_flip);
+          if (black_feat >= 0 && black_feat < GPU_HALFKA_DIMS && 
+              black_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
+            black_features_ptr[black_feature_idx++] = black_feat;
+            black_count++;
+          }
+        }
+      }
+    }
+    
+    white_counts_ptr[i] = static_cast<uint32_t>(white_count);
+    black_counts_ptr[i] = static_cast<uint32_t>(black_count);
+  }
+
+  std::memcpy(positions_buffer_->data(), batch.positions.data(),
+              batch_size * sizeof(GPUPositionData));
+
+  auto encoder = backend.create_encoder();
+
+  // Feature transform
+  const bool use_dual_kernel = (batch_size >= 64) && 
+                                feature_transform_dual_kernel_ && 
+                                feature_transform_dual_kernel_->valid();
+  
+  if (use_dual_kernel) {
+    encoder->set_kernel(feature_transform_dual_kernel_.get());
+    encoder->set_buffer(net.ft_weights.get(), 0);
+    encoder->set_buffer(net.ft_biases.get(), 1);
+    encoder->set_buffer(white_features_buffer_.get(), 2);
+    encoder->set_buffer(black_features_buffer_.get(), 3);
+    encoder->set_buffer(white_counts_buffer_.get(), 4);
+    encoder->set_buffer(black_counts_buffer_.get(), 5);
+    encoder->set_buffer(white_offsets_buffer_.get(), 6);
+    encoder->set_buffer(black_offsets_buffer_.get(), 7);
+    encoder->set_buffer(accumulators_buffer_.get(), 8);
+    encoder->set_value(static_cast<uint32_t>(hidden_dim), 9);
+    encoder->set_value(static_cast<uint32_t>(batch_size), 10);
+    encoder->dispatch_threads(hidden_dim, 2, batch_size);
+    encoder->barrier();
+  } else {
+    encoder->set_kernel(feature_transform_kernel_.get());
+    encoder->set_buffer(net.ft_weights.get(), 0);
+    encoder->set_buffer(net.ft_biases.get(), 1);
+    encoder->set_buffer(white_features_buffer_.get(), 2);
+    encoder->set_buffer(white_counts_buffer_.get(), 3);
+    encoder->set_buffer(white_offsets_buffer_.get(), 4);
+    encoder->set_buffer(accumulators_buffer_.get(), 5);
+    encoder->set_value(static_cast<uint32_t>(hidden_dim), 6);
+    encoder->set_value(static_cast<uint32_t>(batch_size), 7);
+    encoder->dispatch_threads(hidden_dim, batch_size);
+    encoder->barrier();
+  }
+
+  const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
+  const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
+  
+  encoder->set_kernel(forward_fused_kernel_.get());
+  encoder->set_buffer(accumulators_buffer_.get(), 0);
+  encoder->set_buffer(layer.fc0_weights.get(), 1);
+  encoder->set_buffer(layer.fc0_biases.get(), 2);
+  encoder->set_buffer(layer.fc1_weights.get(), 3);
+  encoder->set_buffer(layer.fc1_biases.get(), 4);
+  encoder->set_buffer(layer.fc2_weights.get(), 5);
+  encoder->set_buffer(layer.fc2_biases.get(), 6);
+  encoder->set_buffer(output_buffer_.get(), 7);
+  encoder->set_value(static_cast<uint32_t>(hidden_dim), 8);
+  encoder->set_value(static_cast<uint32_t>(batch_size), 9);
+  encoder->dispatch_threadgroups(batch_size, 1, 1, GPU_FORWARD_THREADS, 1, 1);
+
+  // Capture necessary data for completion handler
+  Buffer* output_buf = output_buffer_.get();
+  GPUEvalBatch* batch_ptr = &batch;
+  std::atomic<size_t>* gpu_evals_ptr = &gpu_evals_;
+  std::atomic<size_t>* batch_count_ptr = &batch_count_;
+  
+  // Submit with async completion handler
+  backend.submit_async(encoder.get(), [=]() {
+    // Read results in completion handler
+    batch_ptr->positional_scores.resize(batch_size);
+    std::memcpy(batch_ptr->positional_scores.data(), output_buf->data(),
+                batch_size * sizeof(int32_t));
+    
+    (*gpu_evals_ptr) += batch_size;
+    (*batch_count_ptr)++;
+    
+    if (completion_handler) {
+      completion_handler(true);
+    }
+  });
+
+  return true;
+}
+
 std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &pos,
                                                             bool use_big) {
   // Single position evaluation is not efficient on GPU

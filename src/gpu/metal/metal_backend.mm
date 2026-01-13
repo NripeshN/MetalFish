@@ -369,6 +369,24 @@ public:
       mtl_encoder->commit();
     }
   }
+  
+  void submit_async(CommandEncoder *encoder, 
+                    std::function<void()> completion_handler) override {
+    auto *mtl_encoder = static_cast<MetalCommandEncoder *>(encoder);
+    if (mtl_encoder) {
+      mtl_encoder->end_encoding();
+      
+      // Add completion handler before commit
+      id<MTLCommandBuffer> buffer = mtl_encoder->mtl_buffer();
+      if (buffer && completion_handler) {
+        [buffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull) {
+          completion_handler();
+        }];
+      }
+      
+      mtl_encoder->commit();
+    }
+  }
 
   void synchronize() override {
     // Create and immediately complete a command buffer to ensure all work is

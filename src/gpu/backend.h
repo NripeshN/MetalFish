@@ -184,6 +184,10 @@ public:
 
   // Submit without waiting (for pipelining)
   virtual void submit(CommandEncoder *encoder) = 0;
+  
+  // Submit with completion handler (for async evaluation)
+  virtual void submit_async(CommandEncoder *encoder, 
+                            std::function<void()> completion_handler) = 0;
 
   // Wait for all submitted work to complete
   virtual void synchronize() = 0;
