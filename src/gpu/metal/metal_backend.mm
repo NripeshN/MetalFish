@@ -151,12 +151,13 @@ public:
     // Calculate optimal threadgroup size for the grid dimensions
     NSUInteger max_threads = current_kernel_->max_threads_per_threadgroup();
     NSUInteger thread_width, thread_height, thread_depth;
-    
+
     if (depth > 1) {
       // 3D dispatch - balance across all dimensions
       thread_depth = std::min(depth, (size_t)4);
       thread_height = std::min(height, (size_t)4);
-      thread_width = std::min(width, max_threads / (thread_height * thread_depth));
+      thread_width =
+          std::min(width, max_threads / (thread_height * thread_depth));
     } else if (height > 1) {
       // 2D dispatch - use square-ish threadgroups for better cache locality
       // For feature transform: width=hidden_dim (1024), height=batch_size
@@ -369,13 +370,13 @@ public:
       mtl_encoder->commit();
     }
   }
-  
-  void submit_async(CommandEncoder *encoder, 
+
+  void submit_async(CommandEncoder *encoder,
                     std::function<void()> completion_handler) override {
     auto *mtl_encoder = static_cast<MetalCommandEncoder *>(encoder);
     if (mtl_encoder) {
       mtl_encoder->end_encoding();
-      
+
       // Add completion handler before commit
       id<MTLCommandBuffer> buffer = mtl_encoder->mtl_buffer();
       if (buffer && completion_handler) {
@@ -383,7 +384,7 @@ public:
           completion_handler();
         }];
       }
-      
+
       mtl_encoder->commit();
     }
   }
