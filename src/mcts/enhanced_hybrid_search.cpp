@@ -403,8 +403,9 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
 
       // Compare against original MCTS score (not sliding best_score) to find
       // moves that are significantly better than MCTS, then track the actual
-      // best
-      if (score > mcts_score + 50 && score > best_score) { // 0.5 pawn threshold
+      // best. Use configurable threshold (convert from pawns to centipawns).
+      int threshold_cp = static_cast<int>(config_.ab_override_threshold * 100);
+      if (score > mcts_score + threshold_cp && score > best_score) {
         best_score = score;
         best_move = m;
       }

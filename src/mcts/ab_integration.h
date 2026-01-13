@@ -162,6 +162,9 @@ private:
 
   // State stack for search
   std::vector<StateInfo> state_stack_;
+
+  // Per-ply static evaluation for improving flag calculation
+  Value static_eval_stack_[MAX_PLY];
 };
 
 // Policy generator using AB search heuristics
