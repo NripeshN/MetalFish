@@ -100,11 +100,11 @@ class MetalCommandEncoder : public CommandEncoder {
 public:
   MetalCommandEncoder(id<MTLCommandQueue> queue)
       : queue_(queue), buffer_(nil), encoder_(nil), ended_(false) {
-    // Create command buffer without autoreleasepool for faster allocation
-    buffer_ = [queue_ commandBuffer];
-    [buffer_ retain];
+    // Use commandBufferWithUnretainedReferences for faster allocation
+    // This avoids the overhead of retaining/releasing all referenced objects
+    // We manage object lifetimes manually, so this is safe
+    buffer_ = [queue_ commandBufferWithUnretainedReferences];
     encoder_ = [buffer_ computeCommandEncoder];
-    [encoder_ retain];
   }
 
   ~MetalCommandEncoder() override {
@@ -112,12 +112,7 @@ public:
     if (encoder_ && !ended_) {
       [encoder_ endEncoding];
     }
-    if (encoder_) {
-      [encoder_ release];
-    }
-    if (buffer_) {
-      [buffer_ release];
-    }
+    // No need to release - we're using unretained references
   }
 
   void set_kernel(ComputeKernel *kernel) override {

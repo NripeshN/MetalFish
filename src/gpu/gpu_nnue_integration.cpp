@@ -1674,6 +1674,8 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     encoder->set_value(static_cast<uint32_t>(batch_size), 10);
     // 3D dispatch: (hidden_dim, 2 perspectives, batch_size)
     encoder->dispatch_threads(hidden_dim, 2, batch_size);
+    // Barrier required for untracked hazard mode - ensures feature transform
+    // completes before forward pass reads accumulators
     encoder->barrier();
   } else {
     // Single-perspective kernel: faster for small batches
