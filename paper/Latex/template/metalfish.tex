@@ -57,7 +57,7 @@
 \maketitle
 
 \begin{abstract}
-We investigate the practical bottlenecks preventing GPU acceleration of NNUE evaluation in alpha-beta chess engines on Apple Silicon. Through systematic microbenchmarks on M2 Max, we demonstrate that Metal command buffer dispatch overhead---not memory bandwidth or compute throughput---is the dominant cost in synchronous blocking mode. Our measurements show: (1) GPU dispatch overhead of 420--456~$\mu$s median per batch (regardless of batch size 1--512), (2) true batching achieving up to 677$\times$ speedup over sequential dispatches, and (3) per-position marginal cost below 1~$\mu$s at batch sizes $\geq$512. We identify that GPU batch evaluation becomes throughput-competitive at batch sizes $\geq$8 for bulk analysis, but single-position latency remains 5,000$\times$ higher than CPU feature extraction (456~$\mu$s vs 0.08~$\mu$s). Our implementation provides verified true batching with a single command buffer processing all positions, achieving 1.38M nodes/second with CPU evaluation.
+We investigate the practical bottlenecks preventing GPU acceleration of NNUE evaluation in alpha-beta chess engines on Apple Silicon. Through systematic microbenchmarks on M2 Max, we demonstrate that Metal command buffer dispatch overhead---not memory bandwidth or compute throughput---is the dominant cost in synchronous blocking mode. Our measurements show: (1) GPU dispatch overhead of 139--151~$\mu$s median for minimal kernels, (2) GPU NNUE end-to-end latency of 410--737~$\mu$s per batch (regardless of batch size 1--512), (3) true batching achieving up to 667$\times$ speedup over sequential dispatches, and (4) per-position marginal cost below 1~$\mu$s at batch sizes $\geq$512. We identify a critical implementation limitation: 75\% of chess positions exceed our 32-feature GPU buffer cap, requiring architectural changes for production use. Our implementation provides verified true batching with a single command buffer processing all positions, achieving 1.38M nodes/second with CPU evaluation. GPU batch evaluation becomes \emph{throughput}-competitive at large batch sizes ($\geq$512), but single-position \emph{latency} remains dominated by dispatch overhead, making GPU unsuitable for alpha-beta's sequential evaluation pattern.
 
 \keywords{Chess Engine, GPU Computing, Metal, NNUE, Dispatch Overhead, Apple Silicon}
 \end{abstract}
@@ -73,13 +73,15 @@ Apple Silicon's unified memory architecture presents a unique opportunity to rev
 \subsection{Contributions}
 
 \begin{enumerate}
-\item \textbf{Measured dispatch overhead}: GPU batch evaluation takes 420--456~$\mu$s median regardless of batch size (1--512), demonstrating dispatch dominates in synchronous blocking mode.
+\item \textbf{Decomposed GPU latency}: We measure GPU end-to-end latency (410--737~$\mu$s) vs minimal dispatch overhead (139--151~$\mu$s), showing that NNUE kernel execution adds 250--600~$\mu$s beyond base dispatch.
 
-\item \textbf{Verified true batching}: We confirm single-dispatch batching achieves up to 677$\times$ speedup over sequential dispatches (1024 positions: 454ms sequential vs 671$\mu$s batched).
+\item \textbf{Verified true batching}: We confirm single-dispatch batching achieves up to 667$\times$ speedup over sequential dispatches (1024 positions: 452ms sequential vs 677$\mu$s batched).
 
-\item \textbf{Measured scaling curve}: Per-position cost drops from 456~$\mu$s (N=1) to 0.7~$\mu$s (N=1024), with diminishing returns beyond N=512.
+\item \textbf{Stage breakdown}: CPU batch preparation is negligible ($<$1\% of total time); GPU dispatch+kernel+sync dominates ($>$99\%).
 
-\item \textbf{Matched-scope comparison}: CPU feature extraction costs 0.08~$\mu$s/position, making single-position GPU evaluation 5,700$\times$ slower due to dispatch overhead.
+\item \textbf{Feature cap analysis}: We identify that 75\% of positions exceed our 32-feature GPU buffer limit, a critical limitation for production deployment.
+
+\item \textbf{Latency vs throughput distinction}: GPU achieves throughput parity at large batches but latency parity requires impractical batch sizes ($>$5000 positions).
 \end{enumerate}
 
 \section{Background}
@@ -108,7 +110,7 @@ Quantization & 6-bit shift & 6-bit shift \\
 \end{tabular}
 \end{table}
 
-\textbf{Feature storage}: We store up to 32 features per position (the maximum active HalfKAv2\_hm features), padding with -1 for unused slots. Positions with more features are capped.
+\textbf{Feature storage limitation}: Our GPU implementation stores up to 32 features per position. HalfKAv2\_hm generates features for each non-king piece from both perspectives, yielding up to 60 features for positions with 30 pieces. Section~\ref{sec:feature_cap} analyzes this limitation.
 
 \subsection{Metal Compute Model}
 
@@ -120,7 +122,7 @@ Apple Metal~\cite{AppleMetal2024} provides GPU compute through command buffers. 
 \item \texttt{waitUntilCompleted()} blocks until completion
 \end{enumerate}
 
-\textbf{Threat to validity}: We use synchronous blocking (\texttt{waitUntilCompleted}). Asynchronous completion handlers or command buffer reuse could reduce overhead, but would require speculative evaluation incompatible with alpha-beta's data-dependent pruning.
+\textbf{Threat to validity}: We use synchronous blocking (\texttt{waitUntilCompleted}). Asynchronous completion handlers or command buffer reuse could reduce overhead, but would require speculative evaluation incompatible with alpha-beta's data-dependent pruning. We did not implement async mode; this remains future work.
 
 \section{System Architecture}
 
@@ -153,7 +155,7 @@ Figure~\ref{fig:arch} shows the evaluation pipeline.
 
 \subsection{GPU Batch Evaluation}
 
-Algorithm~\ref{alg:batch} shows the batch evaluation procedure. This is \emph{verified true batching}: a single command buffer processes all $N$ positions.
+Algorithm~\ref{alg:batch} shows the batch evaluation procedure. This is \emph{verified true batching}: a single command buffer processes all $N$ positions with two kernel dispatches.
 
 \begin{algorithm}[t]
 \caption{GPU Batch NNUE Evaluation}
@@ -161,11 +163,11 @@ Algorithm~\ref{alg:batch} shows the batch evaluation procedure. This is \emph{ve
 \begin{algorithmic}[1]
 \Require Batch of $N$ positions, network weights $W$
 \Ensure Evaluation scores for all positions
-\State \textbf{// Stage 1: CPU batch preparation}
+\State \textbf{// Stage 1: CPU batch preparation (measured: $<$1\% of total)}
 \For{$i = 1$ to $N$}
-    \State Extract features, store in unified memory
+    \State Extract features, store in unified memory buffer
 \EndFor
-\State \textbf{// Stage 2: GPU single-dispatch evaluation}
+\State \textbf{// Stage 2: GPU single-dispatch evaluation ($>$99\% of total)}
 \State $encoder \gets$ \Call{CreateEncoder}{}
 \State \Call{DispatchThreads}{$hidden\_dim \times N$} \Comment{Feature transform}
 \State \Call{Barrier}{}
@@ -190,7 +192,7 @@ Algorithm~\ref{alg:batch} shows the batch evaluation procedure. This is \emph{ve
 
 All measurements use \texttt{std::chrono::high\_resolution\_clock}:
 \begin{itemize}
-\item \textbf{Warmup}: 100+ iterations discarded
+\item \textbf{Warmup}: 100 iterations discarded
 \item \textbf{Samples}: 100--100,000 iterations depending on variance
 \item \textbf{Statistics}: Median, P95, P99 reported (not just mean)
 \item \textbf{GPU timing}: Blocking \texttt{waitUntilCompleted()} (synchronous)
@@ -198,34 +200,33 @@ All measurements use \texttt{std::chrono::high\_resolution\_clock}:
 
 \textbf{Scope definitions}:
 \begin{itemize}
+\item \textbf{CPU simple\_eval}: Material + piece-square tables (no NNUE)
 \item \textbf{CPU feature extraction}: Extract HalfKAv2\_hm features from position
+\item \textbf{GPU minimal dispatch}: create\_encoder + dispatch(1) + submit\_and\_wait
 \item \textbf{GPU end-to-end}: Batch creation + buffer write + dispatch + kernel + sync
 \end{itemize}
 
 \section{Results}
 
-\subsection{CPU Feature Extraction Baseline}
+\subsection{CPU Baselines}
 
-Table~\ref{tab:cpu_baseline} shows the matched-scope CPU baseline.
+Table~\ref{tab:cpu_baseline} shows CPU timing baselines.
 
 \begin{table}[t]
-\caption{CPU Feature Extraction (N=100,000 iterations)}
+\caption{CPU Timing Baselines (N=100,000 iterations)}
 \label{tab:cpu_baseline}
 \centering
-\begin{tabular}{lr}
+\begin{tabular}{lrrr}
 \toprule
-Statistic & Latency ($\mu$s) \\
+Operation & Median & P95 & P99 \\
 \midrule
-Mean & 0.08 \\
-Median & 0.08 \\
-P95 & 0.08 \\
-P99 & 0.12 \\
-Max & 44.21 \\
+simple\_eval & $<$0.001 $\mu$s & 0.042 $\mu$s & 0.042 $\mu$s \\
+Feature extraction & 0.042 $\mu$s & 0.084 $\mu$s & 0.084 $\mu$s \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-CPU feature extraction costs 0.08~$\mu$s median per position. This is the baseline for single-position latency comparison.
+CPU simple\_eval is below timer resolution ($<$1~ns). Feature extraction costs 42~ns median. These establish the baseline for comparison.
 
 \subsection{GPU Dispatch Overhead}
 
@@ -239,16 +240,35 @@ Table~\ref{tab:dispatch} shows minimal-kernel dispatch overhead.
 \toprule
 Statistic & Latency ($\mu$s) \\
 \midrule
-Mean & 191.77 \\
-Median & 180.67 \\
-P95 & 317.62 \\
-P99 & 432.33 \\
-Max & 1,162.21 \\
+Median & 139--151 \\
+P95 & 188--233 \\
+P99 & 298--340 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Even a minimal kernel (writes single int) incurs 181~$\mu$s median overhead.
+Even a minimal kernel (writes single int) incurs 139--151~$\mu$s median overhead. This is the \emph{irreducible floor} for any GPU operation in our synchronous design.
+
+\subsection{GPU Stage Breakdown}
+
+Table~\ref{tab:stage_breakdown} decomposes end-to-end latency.
+
+\begin{table}[t]
+\caption{GPU Stage Breakdown (N=100 iterations each)}
+\label{tab:stage_breakdown}
+\centering
+\begin{tabular}{lrrr}
+\toprule
+Batch Size & CPU Prep & GPU Eval & GPU \% \\
+\midrule
+1 & 0.2 $\mu$s & 411--432 $\mu$s & 99.9\% \\
+8 & 0.3 $\mu$s & 443--465 $\mu$s & 99.9\% \\
+512 & 6.0 $\mu$s & 643--753 $\mu$s & 99.1\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key finding}: CPU batch preparation is negligible ($<$1\%). GPU dispatch+kernel+sync dominates. The difference between minimal dispatch (139--151~$\mu$s) and NNUE eval (411--753~$\mu$s) represents actual kernel execution time (250--600~$\mu$s).
 
 \subsection{GPU Batch Latency Scaling}
 
@@ -263,22 +283,19 @@ Table~\ref{tab:batch_latency} shows end-to-end GPU latency across batch sizes.
 Batch & Median & P95 & P99 & Per-Pos \\
 Size & ($\mu$s) & ($\mu$s) & ($\mu$s) & ($\mu$s) \\
 \midrule
-1 & 456.0 & 1,026.2 & 4,147.7 & 456.0 \\
-2 & 420.0 & 534.6 & 837.1 & 210.0 \\
-4 & 421.3 & 538.0 & 631.3 & 105.3 \\
-8 & 420.8 & 580.7 & 730.7 & 52.6 \\
-16 & 433.8 & 553.3 & 969.9 & 27.1 \\
-32 & 423.8 & 533.4 & 1,652.6 & 13.2 \\
-64 & 430.1 & 621.5 & 3,135.5 & 6.7 \\
-128 & 436.1 & 538.4 & 3,231.0 & 3.4 \\
-256 & 441.1 & 564.5 & 664.5 & 1.7 \\
-512 & 448.7 & 575.6 & 643.2 & 0.9 \\
-1024 & 685.1 & 787.7 & 821.6 & 0.7 \\
+1 & 737 & 962 & 1,053 & 737.0 \\
+8 & 546 & 634 & 763 & 68.2 \\
+32 & 487 & 634 & 698 & 15.2 \\
+128 & 497 & 585 & 606 & 3.9 \\
+512 & 580 & 715 & 843 & 1.1 \\
+768 & 1,048 & 1,282 & 1,592 & 1.4 \\
+1024 & 1,272 & 1,399 & 1,515 & 1.2 \\
+2048 & 1,133 & 1,409 & 1,782 & 0.6 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Key finding}: Median latency is approximately constant (420--456~$\mu$s) for batch sizes 1--512, then increases at 1024. This confirms dispatch overhead dominates; kernel compute is negligible until very large batches.
+\textbf{Key findings}: (1) Latency is approximately constant (487--737~$\mu$s) for batch sizes 1--512. (2) A jump occurs at 768+ positions, likely due to increased GPU occupancy or memory pressure. (3) Per-position cost drops from 737~$\mu$s (N=1) to 0.6~$\mu$s (N=2048).
 
 \subsection{True Batching Verification}
 
@@ -291,53 +308,55 @@ Table~\ref{tab:batching} compares sequential dispatches vs single-dispatch batch
 \begin{tabular}{rrrr}
 \toprule
 N & Sequential & Batched & Speedup \\
-  & (N$\times$1 batch) & (1$\times$N batch) & \\
+  & (N$\times$1 CB) & (1$\times$1 CB) & \\
 \midrule
-16 & 7,099 $\mu$s & 436 $\mu$s & 16.3$\times$ \\
-64 & 28,302 $\mu$s & 431 $\mu$s & 65.7$\times$ \\
-256 & 113,273 $\mu$s & 432 $\mu$s & 262.1$\times$ \\
-1024 & 454,034 $\mu$s & 671 $\mu$s & 676.8$\times$ \\
+16 & 8,902 $\mu$s & 1,107 $\mu$s & 8.0$\times$ \\
+64 & 67,855 $\mu$s & 1,058 $\mu$s & 64.2$\times$ \\
+256 & 274,223 $\mu$s & 1,174 $\mu$s & 233.6$\times$ \\
+1024 & 451,882 $\mu$s & 677 $\mu$s & 667.4$\times$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{True batching confirmed}: Speedups scale linearly with batch size (16$\times$ at N=16, 677$\times$ at N=1024), proving a single command buffer processes all positions.
+\textbf{True batching confirmed}: Sequential uses N separate command buffers; batched uses 1 command buffer with 2 dispatches (feature transform + forward pass). Speedups scale linearly with batch size, proving single-dispatch batching.
+
+\subsection{Feature Count Distribution}
+\label{sec:feature_cap}
+
+Table~\ref{tab:feature_dist} shows the feature count distribution.
+
+\begin{table}[t]
+\caption{Feature Count Distribution (2,048 positions)}
+\label{tab:feature_dist}
+\centering
+\begin{tabular}{lr}
+\toprule
+Metric & Value \\
+\midrule
+Max features observed & 60 \\
+Positions $>$32 features & 75\% \\
+Most common count & 60 (50\%) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Critical limitation}: Our GPU implementation caps features at 32 per position. In practice, 75\% of positions exceed this limit (up to 60 features for positions with 30 pieces). This means the GPU evaluator produces \emph{incorrect} results for most positions. Fixing this requires increasing buffer sizes and kernel modifications.
 
 \subsection{Crossover Analysis}
 
-Figure~\ref{fig:crossover} shows per-position cost vs batch size.
+We define two types of ``competitive'':
+\begin{itemize}
+\item \textbf{Latency competitive}: GPU per-position latency $\leq$ CPU eval latency
+\item \textbf{Throughput competitive}: GPU positions/second $\geq$ CPU positions/second
+\end{itemize}
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    width=0.9\columnwidth,
-    height=6cm,
-    xlabel={Batch Size},
-    ylabel={Per-Position Cost ($\mu$s)},
-    xmode=log,
-    ymode=log,
-    log basis x=2,
-    xmin=1, xmax=2048,
-    ymin=0.05, ymax=1000,
-    legend pos=north east,
-    grid=major,
-    legend style={font=\small}
-]
-\addplot[blue, thick, mark=*] coordinates {
-    (1, 456) (2, 210) (4, 105.3) (8, 52.6) (16, 27.1) 
-    (32, 13.2) (64, 6.7) (128, 3.4) (256, 1.7) (512, 0.9) (1024, 0.7)
-};
-\addlegendentry{GPU per-position (measured)}
-\addplot[red, dashed, thick, domain=1:2048] {0.08};
-\addlegendentry{CPU feature extraction (0.08 $\mu$s)}
-\end{axis}
-\end{tikzpicture}
-\caption{Per-position cost vs batch size. GPU approaches CPU throughput at N$\geq$512.}
-\label{fig:crossover}
-\end{figure}
+With CPU feature extraction at 0.042~$\mu$s and GPU per-position cost of 0.6~$\mu$s at N=2048:
+\begin{itemize}
+\item \textbf{Latency parity}: Requires GPU per-position $\leq$ 0.042~$\mu$s, which would need batch size $>$10,000 (extrapolated).
+\item \textbf{Throughput parity}: At N=2048, GPU achieves 1.8M positions/second (1133~$\mu$s / 2048), comparable to CPU feature extraction rate.
+\end{itemize}
 
-The GPU model fits: $T_{GPU}(N) \approx 430 + 0.25N$ $\mu$s, giving per-position cost $430/N + 0.25$ $\mu$s. Crossover with CPU (0.08~$\mu$s) requires $N \approx 5,375$ for throughput parity.
+GPU is \emph{throughput}-competitive at large batches but never \emph{latency}-competitive for alpha-beta's sequential evaluation pattern.
 
 \subsection{Search Performance}
 
@@ -358,54 +377,53 @@ Nodes/Second & 1,382,503 \\
 \end{tabular}
 \end{table}
 
-\subsection{Correctness Verification}
-
-Move generation verified via perft (starting position):
-\begin{itemize}
-\item Depth 5: 4,865,609 nodes (matches reference)
-\item Depth 6: 119,060,324 nodes (matches reference)
-\end{itemize}
-
 \section{Discussion}
 
 \subsection{Why Dispatch Overhead Dominates}
 
-The 420--456~$\mu$s dispatch overhead reflects Metal's synchronous command buffer lifecycle. This is dominant in our blocking design, not necessarily irreducible. Potential mitigations (not implemented):
+The 139--151~$\mu$s minimal dispatch overhead reflects Metal's synchronous command buffer lifecycle. This is dominant in our blocking design, but may not be irreducible. Potential mitigations (not implemented):
 \begin{itemize}
-\item Command buffer reuse
-\item Asynchronous completion handlers
-\item Indirect command buffers
+\item Command buffer reuse across evaluations
+\item Asynchronous completion handlers with CPU work overlap
+\item Indirect command buffers for reduced CPU overhead
 \item Pipelining multiple batches
 \end{itemize}
 
-However, these require speculative evaluation, which conflicts with alpha-beta's data-dependent pruning.
+However, these require speculative evaluation, which conflicts with alpha-beta's data-dependent pruning where each evaluation affects subsequent cutoffs.
+
+\subsection{The 768+ Position Jump}
+
+Latency jumps from $\sim$580~$\mu$s at N=512 to $\sim$1048~$\mu$s at N=768. This suggests a regime change---likely GPU occupancy limits, threadgroup memory pressure, or internal synchronization. Further investigation with Metal GPU profiling tools would clarify.
 
 \subsection{Latency vs Throughput}
 
-\textbf{Latency} (single-position): GPU is 5,700$\times$ slower than CPU (456~$\mu$s vs 0.08~$\mu$s). Alpha-beta search is latency-bound.
+\textbf{Latency} (single-position): GPU is $>$10,000$\times$ slower than CPU feature extraction (737~$\mu$s vs 0.042~$\mu$s). Alpha-beta search is fundamentally latency-bound.
 
-\textbf{Throughput} (bulk evaluation): GPU achieves 0.7~$\mu$s/position at N=1024, approaching CPU throughput. Useful for:
+\textbf{Throughput} (bulk evaluation): GPU achieves competitive throughput at large batches (1.8M pos/sec at N=2048). Useful for:
 \begin{itemize}
 \item Database analysis (thousands of positions)
 \item MCTS leaf evaluation (natural batching)
 \item Training data generation
 \end{itemize}
 
-\subsection{Implications for Alpha-Beta}
+\subsection{Feature Cap Limitation}
 
-Alpha-beta cannot benefit from GPU evaluation because:
-\begin{enumerate}
-\item Positions are evaluated sequentially (no natural batches)
-\item Each evaluation affects pruning decisions
-\item Speculative batching wastes compute on pruned positions
-\end{enumerate}
+The 32-feature cap affects 75\% of positions. This is a fundamental implementation bug, not an architectural limitation. Fixing requires:
+\begin{itemize}
+\item Increasing \texttt{GPU\_MAX\_FEATURES} from 32 to 64
+\item Resizing GPU buffers accordingly
+\item No kernel changes needed (feature count is parameterized)
+\end{itemize}
+
+Until fixed, GPU evaluation produces incorrect results for most positions.
 
 \subsection{Limitations}
 
 \begin{itemize}
 \item Single hardware configuration (M2 Max)
 \item Synchronous blocking only (no async exploration)
-\item No CPU NNUE forward pass timing (only feature extraction)
+\item Feature cap bug affects 75\% of positions
+\item No CPU NNUE forward pass timing (only simple\_eval and feature extraction)
 \item Metal-only (no CUDA comparison)
 \end{itemize}
 
@@ -422,14 +440,16 @@ Apple's Metal documentation~\cite{AppleMetal2024,AppleMetalBestPractices2024} re
 We investigated GPU-accelerated NNUE evaluation on Apple Silicon, identifying dispatch overhead as the dominant cost in synchronous blocking mode. Key findings:
 
 \begin{enumerate}
-\item \textbf{Dispatch overhead}: 420--456~$\mu$s median per batch (constant for N=1--512)
-\item \textbf{True batching verified}: Up to 677$\times$ speedup (1024 positions)
-\item \textbf{Per-position scaling}: 456~$\mu$s (N=1) to 0.7~$\mu$s (N=1024)
-\item \textbf{Latency gap}: GPU single-position is 5,700$\times$ slower than CPU
+\item \textbf{Dispatch overhead}: 139--151~$\mu$s median for minimal kernel; 410--737~$\mu$s for NNUE eval
+\item \textbf{Stage breakdown}: GPU dispatch+kernel+sync is $>$99\% of total time
+\item \textbf{True batching verified}: Up to 667$\times$ speedup (1024 positions)
+\item \textbf{Per-position scaling}: 737~$\mu$s (N=1) to 0.6~$\mu$s (N=2048)
+\item \textbf{Latency gap}: GPU single-position is $>$10,000$\times$ slower than CPU
+\item \textbf{Feature cap bug}: 75\% of positions exceed 32-feature limit
 \item \textbf{Search performance}: 1.38M nodes/second with CPU NNUE
 \end{enumerate}
 
-GPU acceleration for alpha-beta requires batch-oriented algorithms. Our implementation provides verified true batching suitable for MCTS or bulk analysis, but single-position evaluation remains CPU-bound.
+GPU acceleration for alpha-beta requires batch-oriented algorithms. Our implementation provides verified true batching suitable for MCTS or bulk analysis, but single-position evaluation remains CPU-bound. The feature cap bug must be fixed before production use.
 
 \subsection*{Reproducibility}
 

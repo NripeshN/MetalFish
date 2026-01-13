@@ -22,8 +22,10 @@
 #include "core/movegen.h"
 #include "core/position.h"
 #include "core/types.h"
+#include "eval/evaluate.h"
 #include "eval/score.h"
 #include "gpu/backend.h"
+#include "gpu/gpu_accumulator.h"
 #include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "gpu/nnue_eval.h"
@@ -708,21 +710,25 @@ void UCIEngine::gpu_info() {
 }
 
 void UCIEngine::gpu_benchmark() {
-  std::stringstream ss;
-  ss << "\n=== GPU NNUE Benchmark ===\n\n";
+  // Use cout directly for incremental output
+  std::cout << "\n";
+  std::cout << "╔══════════════════════════════════════════════════════════╗\n";
+  std::cout << "║     MetalFish GPU NNUE Benchmark Suite                   ║\n";
+  std::cout << "╚══════════════════════════════════════════════════════════╝\n\n";
+  std::cout.flush();
 
   if (!GPU::gpu_available()) {
-    ss << "GPU not available\n";
-    sync_cout << ss.str() << sync_endl;
+    std::cout << "GPU not available\n";
     return;
   }
 
   auto &manager = GPU::gpu_nnue_manager();
   if (!manager.is_ready()) {
-    ss << "GPU NNUE not initialized (networks not loaded)\n";
-    sync_cout << ss.str() << sync_endl;
+    std::cout << "GPU NNUE not initialized (networks not loaded)\n";
     return;
   }
+
+  auto &backend = GPU::gpu();
 
   // Create test positions
   const char *fens[] = {
@@ -730,24 +736,235 @@ void UCIEngine::gpu_benchmark() {
       "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
       "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
       "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+      "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+      "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+      "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+      "8/8/8/8/8/8/8/4K2k w - - 0 1",
   };
+  constexpr int NUM_FENS = 8;
 
   std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
   std::vector<Position> positions(2048);
   for (int i = 0; i < 2048; i++) {
     states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
-    positions[i].set(fens[i % 4], false, &states_vec.back()->back());
+    positions[i].set(fens[i % NUM_FENS], false, &states_vec.back()->back());
   }
 
   manager.set_min_batch_size(1);
 
-  // Batch latency table
-  ss << "GPU Batch Latency Table (100 iterations each):\n";
-  ss << "Batch   Median    P95       P99       Per-Pos\n";
-  ss << "Size    (µs)      (µs)      (µs)      (µs)\n";
-  ss << "------------------------------------------------\n";
+  // ========================================================================
+  // BENCHMARK 1: CPU Simple Eval (baseline)
+  // ========================================================================
+  std::cout << "=== BENCHMARK 1: CPU Simple Eval (baseline) ===\n";
+  std::cout << "Scope: Eval::simple_eval() - material + piece-square tables\n";
+  std::cout << "Iterations: 100,000\n" << std::flush;
 
-  std::vector<int> batch_sizes = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024};
+  std::vector<double> cpu_simple_samples;
+  cpu_simple_samples.reserve(100000);
+  for (int i = 0; i < 100; i++) { // warmup
+    volatile Value v = Eval::simple_eval(positions[i % NUM_FENS]);
+    (void)v;
+  }
+  for (int i = 0; i < 100000; i++) {
+    auto start = std::chrono::high_resolution_clock::now();
+    volatile Value v = Eval::simple_eval(positions[i % NUM_FENS]);
+    (void)v;
+    auto end = std::chrono::high_resolution_clock::now();
+    cpu_simple_samples.push_back(
+        std::chrono::duration<double, std::micro>(end - start).count());
+  }
+  std::sort(cpu_simple_samples.begin(), cpu_simple_samples.end());
+  std::cout << std::fixed << std::setprecision(3);
+  std::cout << "\nCPU simple_eval:\n";
+  std::cout << "  Median: " << cpu_simple_samples[50000] << " µs\n";
+  std::cout << "  P95:    " << cpu_simple_samples[95000] << " µs\n";
+  std::cout << "  P99:    " << cpu_simple_samples[99000] << " µs\n";
+  std::cout << "  Min:    " << cpu_simple_samples.front() << " µs\n";
+  std::cout << "  Max:    " << cpu_simple_samples.back() << " µs\n\n" << std::flush;
+
+  // ========================================================================
+  // BENCHMARK 2: CPU Feature Extraction
+  // ========================================================================
+  std::cout << "=== BENCHMARK 2: CPU Feature Extraction ===\n";
+  std::cout << "Scope: Extract HalfKAv2_hm features from position\n";
+  std::cout << "Iterations: 100,000\n" << std::flush;
+
+  auto &extractor = GPU::gpu_feature_extractor();
+  if (extractor.initialize()) {
+    std::vector<int32_t> white_f, black_f;
+    std::vector<double> cpu_feat_samples;
+    cpu_feat_samples.reserve(100000);
+
+    for (int i = 0; i < 100; i++) { // warmup
+      extractor.extract(positions[i % NUM_FENS], white_f, black_f);
+    }
+    for (int i = 0; i < 100000; i++) {
+      auto start = std::chrono::high_resolution_clock::now();
+      extractor.extract(positions[i % NUM_FENS], white_f, black_f);
+      auto end = std::chrono::high_resolution_clock::now();
+      cpu_feat_samples.push_back(
+          std::chrono::duration<double, std::micro>(end - start).count());
+    }
+    std::sort(cpu_feat_samples.begin(), cpu_feat_samples.end());
+    std::cout << "\nCPU feature extraction:\n";
+    std::cout << "  Median: " << cpu_feat_samples[50000] << " µs\n";
+    std::cout << "  P95:    " << cpu_feat_samples[95000] << " µs\n";
+    std::cout << "  P99:    " << cpu_feat_samples[99000] << " µs\n\n" << std::flush;
+  }
+
+  // ========================================================================
+  // BENCHMARK 3: Feature Count Distribution
+  // ========================================================================
+  std::cout << "=== BENCHMARK 3: Feature Count Distribution ===\n";
+  std::cout << "Checking if 32-feature cap is ever hit\n" << std::flush;
+
+  if (extractor.initialize()) {
+    std::vector<int32_t> white_f, black_f;
+    int total_positions = 0;
+    int capped_positions = 0;
+    int max_features_seen = 0;
+    std::vector<int> feature_histogram(65, 0);
+
+    for (int i = 0; i < 2048; i++) {
+      extractor.extract(positions[i], white_f, black_f);
+      int white_count = white_f.size();
+      int black_count = black_f.size();
+      int total = white_count + black_count;
+
+      max_features_seen = std::max(max_features_seen, total);
+      if (total < 65)
+        feature_histogram[total]++;
+      if (total > 32)
+        capped_positions++;
+      total_positions++;
+    }
+
+    std::cout << "\nPositions analyzed: " << total_positions << "\n";
+    std::cout << "Max features seen:  " << max_features_seen << "\n";
+    std::cout << "Positions capped (>32 features): " << capped_positions;
+    std::cout << " (" << std::fixed << std::setprecision(2)
+       << (100.0 * capped_positions / total_positions) << "%)\n";
+    std::cout << "Feature distribution (top 5):\n";
+
+    std::vector<std::pair<int, int>> sorted_hist;
+    for (int i = 0; i < 65; i++) {
+      if (feature_histogram[i] > 0)
+        sorted_hist.push_back({feature_histogram[i], i});
+    }
+    std::sort(sorted_hist.rbegin(), sorted_hist.rend());
+    for (int i = 0; i < std::min(5, (int)sorted_hist.size()); i++) {
+      std::cout << "  " << sorted_hist[i].second
+         << " features: " << sorted_hist[i].first << " positions\n";
+    }
+    std::cout << "\n" << std::flush;
+  }
+
+  // ========================================================================
+  // BENCHMARK 4: GPU Dispatch Overhead (Minimal Kernel)
+  // ========================================================================
+  std::cout << "=== BENCHMARK 4: GPU Dispatch Overhead (Minimal Kernel) ===\n";
+  std::cout << "Scope: create_encoder + dispatch(1) + submit_and_wait\n";
+  std::cout << "Iterations: 1,000\n" << std::flush;
+
+  const char *shader = R"(
+    #include <metal_stdlib>
+    using namespace metal;
+    kernel void minimal_kernel(device int* out [[buffer(0)]],
+                               uint gid [[thread_position_in_grid]]) {
+      if (gid == 0) out[0] = 1;
+    }
+  )";
+
+  if (backend.compile_library("bench_minimal", shader)) {
+    auto kernel = backend.create_kernel("minimal_kernel", "bench_minimal");
+    auto buffer = backend.create_buffer(sizeof(int));
+
+    std::vector<double> dispatch_samples;
+    for (int i = 0; i < 100; i++) { // warmup
+      auto enc = backend.create_encoder();
+      enc->set_kernel(kernel.get());
+      enc->set_buffer(buffer.get(), 0);
+      enc->dispatch_threads(1);
+      backend.submit_and_wait(enc.get());
+    }
+    for (int i = 0; i < 1000; i++) {
+      auto start = std::chrono::high_resolution_clock::now();
+      auto enc = backend.create_encoder();
+      enc->set_kernel(kernel.get());
+      enc->set_buffer(buffer.get(), 0);
+      enc->dispatch_threads(1);
+      backend.submit_and_wait(enc.get());
+      auto end = std::chrono::high_resolution_clock::now();
+      dispatch_samples.push_back(
+          std::chrono::duration<double, std::micro>(end - start).count());
+    }
+    std::sort(dispatch_samples.begin(), dispatch_samples.end());
+    std::cout << "\nGPU minimal dispatch:\n";
+    std::cout << "  Median: " << std::fixed << std::setprecision(1)
+       << dispatch_samples[500] << " µs\n";
+    std::cout << "  P95:    " << dispatch_samples[950] << " µs\n";
+    std::cout << "  P99:    " << dispatch_samples[990] << " µs\n\n" << std::flush;
+  }
+
+  // ========================================================================
+  // BENCHMARK 5: GPU Stage Breakdown (N=1, 8, 512)
+  // ========================================================================
+  std::cout << "=== BENCHMARK 5: GPU Stage Breakdown ===\n";
+  std::cout << "Breaking down end-to-end latency into stages\n";
+  std::cout << "Iterations: 100 per batch size\n\n" << std::flush;
+
+  std::vector<int> breakdown_sizes = {1, 8, 512};
+  for (int N : breakdown_sizes) {
+    std::vector<double> stage_prep, stage_gpu;
+
+    for (int iter = 0; iter < 100; iter++) {
+      // Stage 1: Batch preparation (CPU)
+      auto t1 = std::chrono::high_resolution_clock::now();
+      GPU::GPUEvalBatch batch;
+      batch.reserve(N);
+      for (int i = 0; i < N; i++) {
+        batch.add_position(positions[i]);
+      }
+      auto t2 = std::chrono::high_resolution_clock::now();
+
+      // Stage 2: GPU evaluation (buffer + dispatch + kernel + sync)
+      manager.evaluate_batch(batch, true);
+      auto t3 = std::chrono::high_resolution_clock::now();
+
+      stage_prep.push_back(
+          std::chrono::duration<double, std::micro>(t2 - t1).count());
+      stage_gpu.push_back(
+          std::chrono::duration<double, std::micro>(t3 - t2).count());
+    }
+
+    std::sort(stage_prep.begin(), stage_prep.end());
+    std::sort(stage_gpu.begin(), stage_gpu.end());
+
+    std::cout << "Batch Size " << N << ":\n";
+    std::cout << "  CPU prep (batch creation):  " << std::fixed << std::setprecision(1)
+       << stage_prep[50] << " µs (" << (stage_prep[50] / N) << " µs/pos)\n";
+    std::cout << "  GPU eval (buf+disp+kernel): " << stage_gpu[50] << " µs ("
+       << (stage_gpu[50] / N) << " µs/pos)\n";
+    std::cout << "  Total:                      " << (stage_prep[50] + stage_gpu[50])
+       << " µs (" << ((stage_prep[50] + stage_gpu[50]) / N) << " µs/pos)\n";
+    std::cout << "  GPU fraction:               " << std::setprecision(1)
+       << (100.0 * stage_gpu[50] / (stage_prep[50] + stage_gpu[50])) << "%\n\n" << std::flush;
+  }
+
+  // ========================================================================
+  // BENCHMARK 6: GPU Batch Latency Table (extended)
+  // ========================================================================
+  std::cout << "=== BENCHMARK 6: GPU End-to-End Batch Latency Table ===\n";
+  std::cout << "Including batch sizes 768, 1536, 2048 to explain 1024 jump\n";
+  std::cout << "Iterations: 100 per batch size\n\n";
+
+  std::cout << "Batch   Median    P95       P99       Per-Pos\n";
+  std::cout << "Size    (µs)      (µs)      (µs)      (µs)\n";
+  std::cout << "------------------------------------------------\n" << std::flush;
+
+  std::vector<int> batch_sizes = {1,   2,   4,    8,    16,   32,
+                                  64,  128, 256,  512,  768,  1024,
+                                  1536, 2048};
 
   for (int batch_size : batch_sizes) {
     std::vector<double> samples;
@@ -755,7 +972,7 @@ void UCIEngine::gpu_benchmark() {
       GPU::GPUEvalBatch batch;
       batch.reserve(batch_size);
       for (int i = 0; i < batch_size; i++) {
-        batch.add_position(positions[i]);
+        batch.add_position(positions[i % 2048]);
       }
       auto start = std::chrono::high_resolution_clock::now();
       manager.evaluate_batch(batch, true);
@@ -765,24 +982,28 @@ void UCIEngine::gpu_benchmark() {
     }
 
     std::sort(samples.begin(), samples.end());
-    double median = samples[samples.size() / 2];
-    double p95 = samples[size_t(samples.size() * 0.95)];
-    double p99 = samples[size_t(samples.size() * 0.99)];
+    double median = samples[50];
+    double p95 = samples[95];
+    double p99 = samples[99];
 
-    ss << std::setw(5) << batch_size << std::fixed << std::setprecision(1)
+    std::cout << std::setw(5) << batch_size << std::fixed << std::setprecision(1)
        << std::setw(10) << median << std::setw(10) << p95 << std::setw(10)
-       << p99 << std::setw(10) << (median / batch_size) << "\n";
+       << p99 << std::setw(10) << (median / batch_size) << "\n" << std::flush;
   }
 
-  // True batching verification
-  ss << "\nTrue Batching Verification:\n";
-  ss << "N       Sequential  Batched     Speedup\n";
-  ss << "        (N×1)       (1×N)\n";
-  ss << "----------------------------------------\n";
+  // ========================================================================
+  // BENCHMARK 7: True Batching Verification
+  // ========================================================================
+  std::cout << "\n=== BENCHMARK 7: True Batching Verification ===\n";
+  std::cout << "Sequential: N separate command buffers\n";
+  std::cout << "Batched: 1 command buffer with 2 dispatches (feature + forward)\n\n";
+
+  std::cout << "N       Sequential  Batched     Speedup   CB Ratio\n";
+  std::cout << "        (N×1 CB)    (1×1 CB)              (N:1)\n";
+  std::cout << "----------------------------------------------------\n" << std::flush;
 
   std::vector<int> verify_sizes = {16, 64, 256, 1024};
   for (int N : verify_sizes) {
-    // Sequential
     std::vector<double> seq_samples;
     for (int iter = 0; iter < 50; iter++) {
       auto start = std::chrono::high_resolution_clock::now();
@@ -797,7 +1018,6 @@ void UCIEngine::gpu_benchmark() {
           std::chrono::duration<double, std::micro>(end - start).count());
     }
 
-    // Batched
     std::vector<double> batch_samples;
     for (int iter = 0; iter < 50; iter++) {
       GPU::GPUEvalBatch batch;
@@ -814,15 +1034,16 @@ void UCIEngine::gpu_benchmark() {
 
     std::sort(seq_samples.begin(), seq_samples.end());
     std::sort(batch_samples.begin(), batch_samples.end());
-    double seq_med = seq_samples[seq_samples.size() / 2];
-    double batch_med = batch_samples[batch_samples.size() / 2];
+    double seq_med = seq_samples[25];
+    double batch_med = batch_samples[25];
 
-    ss << std::setw(5) << N << std::fixed << std::setprecision(1)
+    std::cout << std::setw(5) << N << std::fixed << std::setprecision(1)
        << std::setw(12) << seq_med << std::setw(12) << batch_med
-       << std::setw(10) << (seq_med / batch_med) << "×\n";
+       << std::setw(10) << (seq_med / batch_med) << "×" << std::setw(10) << N
+       << ":1\n" << std::flush;
   }
 
-  sync_cout << ss.str() << sync_endl;
+  std::cout << "\nBenchmark complete.\n" << std::flush;
 }
 
 } // namespace MetalFish

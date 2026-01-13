@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  13 JAN 2026 07:59
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  13 JAN 2026 08:19
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -806,78 +806,80 @@ s been generated with the most recent feature set (\pgfplotsset{compat=1.18}).
 
 
 {/usr/local/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map}]
-Overfull \hbox (8.15323pt too wide) in paragraph at lines 82--83
-[]\OT1/cmr/bx/n/10 Matched-scope com-par-i-son\OT1/cmr/m/n/10 : CPU fea-ture ex
--trac-tion costs 0.08 $\OML/cmm/m/it/10 ^^V$\OT1/cmr/m/n/10 s/position,
- []
-
-
 
 [2]
 
 [3]
 
 [4]
-Package pgfplots info on input line 326: Using 'lua backend=false' for axis: xm
-ode=log unsupported (yet).
-Package pgfplots info on input line 326: Using 'lua backend=false' for axis: ym
-ode=log unsupported (yet).
+Overfull \hbox (41.31902pt too wide) in paragraph at lines 271--272
+[]\OT1/cmr/bx/n/10 Key find-ing\OT1/cmr/m/n/10 : CPU batch prepa-ra-tion is neg
+-li-gi-ble ($\OML/cmm/m/it/10 <$\OT1/cmr/m/n/10 1%). GPU dis-patch+kernel+sync
+ []
+
 
 
 [5]
+Overfull \hbox (2.43355pt too wide) in paragraph at lines 359--360
+[]\OT1/cmr/m/n/10 GPU is \OT1/cmr/m/it/10 through-put\OT1/cmr/m/n/10 -competiti
+ve at large batches but never \OT1/cmr/m/it/10 la-tency\OT1/cmr/m/n/10 -competi
+tive
+ []
+
+
 
 [6]
 
 [7]
-Underfull \hbox (badness 2285) in paragraph at lines 461--463
+
+[8]
+Underfull \hbox (badness 2285) in paragraph at lines 481--483
 []\OT1/cmr/m/n/9 Apple Inc.: Metal Pro-gram-ming Guide. $https : / / developer 
 . apple . com / metal/$
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 465--467
+Underfull \hbox (badness 10000) in paragraph at lines 485--487
 \OT1/cmr/m/n/9 archive / documentation / 3DDrawing / Conceptual / MTLBestPracti
 cesGuide/$
  []
 
 
 
-[8] (./metalfish.aux)
+[9] (./metalfish.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 25697 strings out of 473190
- 649708 string characters out of 5715801
- 1184193 words of memory out of 5000000
- 48568 multiletter control sequences out of 15000+600000
- 564374 words of font info for 56 fonts, out of 8000000 for 9000
+ 25275 strings out of 473190
+ 637627 string characters out of 5715801
+ 1176194 words of memory out of 5000000
+ 48145 multiletter control sequences out of 15000+600000
+ 564719 words of font info for 57 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 84i,19n,87p,1030b,2233s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 84i,9n,87p,1279b,734s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb
 ></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb>
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></
 usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmcsc10.pfb></
 usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></u
-sr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr
-/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/l
-ocal/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/loc
-al/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/
-texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/tex
-live/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texliv
-e/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive
-/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/local/texlive/2
-025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/202
-5/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive/2025/
-texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/2025/t
-exmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/2025/te
-xmf-dist/fonts/type1/public/amsfonts/cm/cmtt9.pfb>
-Output written on metalfish.pdf (8 pages, 257259 bytes).
+sr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr
+/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/l
+ocal/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/loca
+l/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/t
+exlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/te
+xlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texl
+ive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texliv
+e/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive
+/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmti9.pfb></usr/local/texlive/2
+025/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/20
+25/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt9.pfb>
+Output written on metalfish.pdf (9 pages, 246101 bytes).
 PDF statistics:
- 124 PDF objects out of 1000 (max. 8388607)
- 77 compressed objects within 1 object stream
+ 117 PDF objects out of 1000 (max. 8388607)
+ 73 compressed objects within 1 object stream
  0 named destinations out of 1000 (max. 500000)
  13 words of extra memory for PDF output out of 10000 (max. 10000000)
 
