@@ -50,8 +50,7 @@ void GPUMCTSBackend::score_to_wdl(int score, float &win, float &draw,
   float draw_prob = std::max(0.0f, 0.4f - 0.1f * score_mag);
   draw_prob = std::min(draw_prob, 0.4f);
 
-  // Normalize
-  float total = win_prob + (1.0f - win_prob);
+  // Distribute remaining probability (after draw) between win and loss
   win = win_prob * (1.0f - draw_prob);
   loss = (1.0f - win_prob) * (1.0f - draw_prob);
   draw = draw_prob;

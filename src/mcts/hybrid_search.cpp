@@ -67,6 +67,11 @@ void HybridNode::update_stats(float value, float draw_prob, float moves_left) {
     d_ = (d_ * n_f + draw_prob) / (n_f + 1.0f);
     m_ = (m_ * n_f + moves_left) / (n_f + 1.0f);
   }
+  // Increment visit count atomically while still holding the mutex.
+  // This ensures that n_ and the statistics (q_, d_, m_) are always consistent
+  // when read by other threads, preventing race conditions where another thread
+  // could read updated statistics but a stale visit count.
+  n_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void HybridNode::set_terminal(Terminal type, float value) {
@@ -210,6 +215,31 @@ void HybridSearch::wait() {
 }
 
 MCTSMove HybridSearch::get_best_move() const { return select_best_move(); }
+
+float HybridSearch::get_best_move_q() const {
+  const HybridNode *root = tree_->root();
+  if (!root || !root->has_children())
+    return 0.0f;
+
+  // Find child with most visits (same logic as select_best_move)
+  int best_idx = -1;
+  uint32_t best_n = 0;
+
+  for (size_t i = 0; i < root->edges().size(); ++i) {
+    const auto &edge = root->edges()[i];
+    if (edge.child() && edge.child()->n() > best_n) {
+      best_n = edge.child()->n();
+      best_idx = static_cast<int>(i);
+    }
+  }
+
+  if (best_idx < 0 || !root->edges()[best_idx].child())
+    return 0.0f;
+
+  // Return the Q value of the best child (negated since it's from opponent's
+  // perspective)
+  return -root->edges()[best_idx].child()->q();
+}
 
 std::vector<MCTSMove> HybridSearch::get_pv() const {
   std::vector<MCTSMove> pv;
@@ -598,8 +628,9 @@ void HybridSearch::backpropagate(HybridNode *node, float value, float draw_prob,
                                  float moves_left) {
   while (node) {
     node->remove_virtual_loss();
+    // update_stats now atomically updates statistics and increments visit count
+    // under the same mutex lock to prevent race conditions
     node->update_stats(value, draw_prob, moves_left);
-    node->add_visit();
 
     // Flip value for opponent
     value = -value;

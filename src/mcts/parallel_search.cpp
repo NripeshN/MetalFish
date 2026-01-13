@@ -54,24 +54,48 @@ bool ParallelGPUEvaluator::initialize(GPU::GPUNNUEManager *gpu_manager,
   return true;
 }
 
-void ParallelGPUEvaluator::submit(const EvalRequest &request) {
+uint64_t ParallelGPUEvaluator::submit(const EvalRequest &request) {
   if (!initialized_)
-    return;
+    return 0;
+
+  // Generate unique request ID
+  uint64_t request_id =
+      next_request_id_.fetch_add(1, std::memory_order_relaxed);
+
+  // Create a copy with the assigned request_id
+  EvalRequest tagged_request = request;
+  tagged_request.request_id = request_id;
 
   {
     std::lock_guard<std::mutex> lock(request_mutex_);
-    request_queue_.push(request);
+    request_queue_.push(std::move(tagged_request));
   }
   request_cv_.notify_one();
+
+  return request_id;
+}
+
+bool ParallelGPUEvaluator::get_result_for_request(uint64_t request_id,
+                                                  EvalResult &result) {
+  std::lock_guard<std::mutex> lock(result_mutex_);
+  auto it = result_map_.find(request_id);
+  if (it == result_map_.end()) {
+    return false;
+  }
+  result = std::move(it->second);
+  result_map_.erase(it);
+  return true;
 }
 
 bool ParallelGPUEvaluator::get_result(EvalResult &result) {
   std::lock_guard<std::mutex> lock(result_mutex_);
-  if (result_queue_.empty()) {
+  if (result_map_.empty()) {
     return false;
   }
-  result = std::move(result_queue_.front());
-  result_queue_.pop();
+  // Return any result (legacy behavior - not recommended for concurrent use)
+  auto it = result_map_.begin();
+  result = std::move(it->second);
+  result_map_.erase(it);
   return true;
 }
 
@@ -167,6 +191,7 @@ void ParallelGPUEvaluator::process_batch(PersistentBatch &batch) {
     for (int i = 0; i < batch.size(); ++i) {
       EvalResult result;
       result.node = batch.requests[i].node;
+      result.request_id = batch.requests[i].request_id;
 
       // Convert NNUE score to value in [-1, 1]
       int score = batch.gpu_batch.positional_scores[i];
@@ -224,7 +249,7 @@ void ParallelGPUEvaluator::process_batch(PersistentBatch &batch) {
         }
       }
 
-      result_queue_.push(std::move(result));
+      result_map_[result.request_id] = std::move(result);
     }
   }
 
@@ -381,8 +406,9 @@ void SearchWorker::backpropagate(HybridNode *node, float value, float draw_prob,
                                  float moves_left) {
   while (node) {
     node->remove_virtual_loss();
+    // update_stats now atomically updates statistics and increments visit count
+    // under the same mutex lock to prevent race conditions
     node->update_stats(value, draw_prob, moves_left);
-    node->add_visit();
 
     // Flip value for opponent
     value = -value;
@@ -419,11 +445,12 @@ float SearchWorker::evaluate_position(const Position &pos) {
     request.fen = pos.fen();
     request.thread_id = id_;
 
-    evaluator_->submit(request);
+    // Submit and get unique request ID for matching
+    uint64_t request_id = evaluator_->submit(request);
 
-    // Wait for result (blocking for now)
+    // Wait for OUR specific result (not any result)
     EvalResult result;
-    while (!evaluator_->get_result(result)) {
+    while (!evaluator_->get_result_for_request(request_id, result)) {
       std::this_thread::sleep_for(std::chrono::microseconds(10));
     }
 

@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstring>
 #include <deque>
+#include <iostream>
 
 namespace MetalFish {
 namespace GPU {
@@ -312,6 +313,28 @@ bool PersistentNNUEPipeline::initialize(int max_batch_size) {
     return false;
   }
 
+  // Create kernels from the gpu_nnue_integration library (must be compiled
+  // first) The library is compiled by GPUNNUEManager::initialize(), so we reuse
+  // it
+  feature_transform_kernel_ =
+      backend.create_kernel("gpu_feature_transform", "gpu_nnue_integration");
+  forward_kernel_ =
+      backend.create_kernel("gpu_nnue_forward", "gpu_nnue_integration");
+
+  if (!feature_transform_kernel_ || !feature_transform_kernel_->valid()) {
+    std::cerr << "[PersistentNNUEPipeline] Failed to create feature_transform "
+                 "kernel. Ensure GPUNNUEManager is initialized first."
+              << std::endl;
+    return false;
+  }
+
+  if (!forward_kernel_ || !forward_kernel_->valid()) {
+    std::cerr << "[PersistentNNUEPipeline] Failed to create forward kernel. "
+                 "Ensure GPUNNUEManager is initialized first."
+              << std::endl;
+    return false;
+  }
+
   initialized_ = true;
   return true;
 }
@@ -474,15 +497,9 @@ int PersistentBatchEvaluator::evaluate(const GPUPositionData *positions,
   batch.count = count;
   batch.reserve(count);
 
-  // Build position objects and extract features
-  std::deque<StateInfo> states(count);
+  // Add position data directly to batch
   for (int i = 0; i < count; ++i) {
-    Position pos;
-    // Use starting position as placeholder for position reconstruction
-    std::string fen =
-        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    pos.set(fen, false, &states[i]);
-    batch.add_position(pos);
+    batch.add_position_data(positions[i]);
   }
 
   // Evaluate

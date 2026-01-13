@@ -217,9 +217,8 @@ void EnhancedHybridSearch::search_thread_main() {
 
   // Store result
   result_.mcts_best = mcts_move;
-  result_.mcts_score =
-      mcts_search_ ? mcts_search_->stats().mcts_nodes.load() > 0 ? 0.0f : 0.0f
-                   : 0.0f;
+  // Get Q value from the best move's child node in the MCTS tree
+  result_.mcts_score = mcts_search_ ? mcts_search_->get_best_move_q() : 0.0f;
   result_.ab_best = ab_result.best_move;
   result_.ab_score = ab_result.score;
   result_.ab_depth = ab_result.depth;
@@ -521,10 +520,18 @@ void EnhancedHybridSearch::new_game() {
   stats_.reset();
   result_ = HybridEvalResult();
 
-  // Clear MCTS tree
+  // Clear MCTS tree and recreate with proper configuration
   mcts_search_.reset();
-  mcts_search_ = std::make_unique<HybridSearch>();
+  mcts_search_ = std::make_unique<HybridSearch>(config_.mcts_config);
   mcts_search_->set_gpu_nnue(gpu_manager_);
+
+  // Recreate GPU backend and set neural network (matching initialize())
+  if (gpu_manager_) {
+    gpu_backend_ = GPU::create_gpu_mcts_backend(gpu_manager_);
+    if (gpu_backend_) {
+      mcts_search_->set_neural_network(std::move(gpu_backend_));
+    }
+  }
 
   // Clear TT
   mcts_tt().clear();

@@ -377,6 +377,7 @@ Value ABSearcher::search_internal(Position &pos, int depth, Value alpha,
   Value best_value = -VALUE_INFINITE;
   int move_count = 0;
   bool improving = !in_check && static_eval > alpha;
+  Value original_alpha = alpha; // Save for TT bound calculation
 
   Move child_pv[MAX_PLY];
   int child_pv_len = 0;
@@ -464,9 +465,9 @@ Value ABSearcher::search_internal(Position &pos, int depth, Value alpha,
 
   // Store in TT
   if (config_.use_tt && tt_ && !should_stop()) {
-    Bound bound = best_value >= beta   ? BOUND_LOWER
-                  : best_value > alpha ? BOUND_EXACT
-                                       : BOUND_UPPER;
+    Bound bound = best_value >= beta            ? BOUND_LOWER
+                  : best_value > original_alpha ? BOUND_EXACT
+                                                : BOUND_UPPER;
 
     auto [found, tt_data, writer] = tt_->probe(pos.key());
     writer.write(pos.key(), best_value, PvNode, bound, Depth(depth), best_move,

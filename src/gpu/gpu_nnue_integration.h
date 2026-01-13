@@ -149,6 +149,7 @@ struct GPUEvalBatch {
   void clear();
   void reserve(int n);
   void add_position(const Position &pos);
+  void add_position_data(const GPUPositionData &data);
   int get_bucket(int idx) const { return buckets[idx]; }
 };
 

@@ -31,6 +31,7 @@
 #include <queue>
 #include <random>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace MetalFish {
@@ -84,10 +85,11 @@ struct EvalRequest {
   HybridNode *node;
   std::string fen;
   int thread_id;
+  uint64_t request_id; // Unique ID for matching request to result
 
-  EvalRequest() : node(nullptr), thread_id(-1) {}
-  EvalRequest(HybridNode *n, const std::string &f, int tid)
-      : node(n), fen(f), thread_id(tid) {}
+  EvalRequest() : node(nullptr), thread_id(-1), request_id(0) {}
+  EvalRequest(HybridNode *n, const std::string &f, int tid, uint64_t rid = 0)
+      : node(n), fen(f), thread_id(tid), request_id(rid) {}
 };
 
 // ============================================================================
@@ -100,8 +102,10 @@ struct EvalResult {
   float draw_prob;
   float moves_left;
   std::vector<std::pair<Move, float>> policy; // Move -> prior probability
+  uint64_t request_id;                        // Matching ID from the request
 
-  EvalResult() : node(nullptr), value(0), draw_prob(0), moves_left(30) {}
+  EvalResult()
+      : node(nullptr), value(0), draw_prob(0), moves_left(30), request_id(0) {}
 };
 
 // ============================================================================
@@ -128,9 +132,14 @@ public:
                   const ParallelEvalConfig &config);
 
   // Submit evaluation request (thread-safe)
-  void submit(const EvalRequest &request);
+  // Returns a unique request ID for matching the result
+  uint64_t submit(const EvalRequest &request);
 
-  // Get completed results (thread-safe)
+  // Get completed result for a specific request ID (thread-safe)
+  // Returns true if the result for this request_id was found
+  bool get_result_for_request(uint64_t request_id, EvalResult &result);
+
+  // Get any completed result (thread-safe) - legacy interface
   bool get_result(EvalResult &result);
 
   // Wait for all pending evaluations
@@ -162,10 +171,13 @@ private:
   std::mutex request_mutex_;
   std::condition_variable request_cv_;
 
-  // Result queue
-  std::queue<EvalResult> result_queue_;
+  // Result storage - map from request_id to result for efficient lookup
+  std::unordered_map<uint64_t, EvalResult> result_map_;
   std::mutex result_mutex_;
   std::condition_variable result_cv_;
+
+  // Atomic counter for generating unique request IDs
+  std::atomic<uint64_t> next_request_id_{1};
 
   // Evaluation thread
   std::vector<std::thread> eval_threads_;

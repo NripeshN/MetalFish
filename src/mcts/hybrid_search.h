@@ -287,6 +287,9 @@ public:
   // Get PV (principal variation)
   std::vector<MCTSMove> get_pv() const;
 
+  // Get Q value of the best move (from root's perspective)
+  float get_best_move_q() const;
+
   // Get statistics
   const HybridSearchStats &stats() const { return stats_; }
 

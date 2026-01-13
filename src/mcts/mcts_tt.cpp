@@ -23,6 +23,11 @@ MCTSTranspositionTable::MCTSTranspositionTable() = default;
 MCTSTranspositionTable::~MCTSTranspositionTable() = default;
 
 bool MCTSTranspositionTable::initialize(const MCTSTTConfig &config) {
+  // Validate num_buckets before any division to prevent division by zero
+  if (config.num_buckets <= 0) {
+    return false;
+  }
+
   num_buckets_ = config.num_buckets;
 
   // Calculate table size (round down to multiple of buckets)
@@ -216,7 +221,7 @@ MCTSTTEntry *MCTSTranspositionTable::find_or_create(uint64_t key) {
 
   // Look for existing entry or empty slot
   MCTSTTEntry *replace = nullptr;
-  int min_score = INT32_MAX;
+  int max_score = INT32_MIN;
 
   for (int i = 0; i < num_buckets_; ++i) {
     MCTSTTEntry *entry = &bucket[i];
@@ -231,7 +236,7 @@ MCTSTTEntry *MCTSTranspositionTable::find_or_create(uint64_t key) {
       return entry;
     }
 
-    // Replacement scoring
+    // Replacement scoring: higher score = more replaceable
     int score = 0;
 
     // Prefer to replace old entries
@@ -248,8 +253,9 @@ MCTSTTEntry *MCTSTranspositionTable::find_or_create(uint64_t key) {
       score -= entry->ab.depth * 10;
     }
 
-    if (score < min_score) {
-      min_score = score;
+    // Select entry with highest score (most replaceable)
+    if (score > max_score) {
+      max_score = score;
       replace = entry;
     }
   }

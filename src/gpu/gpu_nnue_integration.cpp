@@ -153,6 +153,18 @@ void GPUEvalBatch::add_position(const Position &pos) {
   count++;
 }
 
+void GPUEvalBatch::add_position_data(const GPUPositionData &data) {
+  positions.push_back(data);
+
+  // Calculate bucket based on piece count (8 buckets, 4 pieces per bucket)
+  int bucket = (data.piece_count - 1) / 4;
+  bucket = std::clamp(bucket, 0, GPU_LAYER_STACKS - 1);
+  buckets.push_back(bucket);
+
+  feature_offsets.push_back(white_features.size());
+  count++;
+}
+
 // ============================================================================
 // Metal Shader Source
 //
@@ -1995,6 +2007,7 @@ size_t GPUNetworkData::memory_usage() const { return 0; }
 void GPUEvalBatch::clear() { count = 0; }
 void GPUEvalBatch::reserve(int) {}
 void GPUEvalBatch::add_position(const Position &) {}
+void GPUEvalBatch::add_position_data(const GPUPositionData &) {}
 
 GPUNNUEManager::GPUNNUEManager() = default;
 GPUNNUEManager::~GPUNNUEManager() = default;
