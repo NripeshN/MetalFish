@@ -134,6 +134,11 @@ set(GPU_SOURCES
     src/gpu/nnue_eval.cpp src/gpu/batch_ops.cpp src/gpu/gpu_nnue.cpp
     src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_accumulator.cpp)
 
+# MCTS source files (hybrid search)
+set(MCTS_SOURCES
+    src/mcts/stockfish_adapter.cpp
+    src/mcts/hybrid_search.cpp)
+
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(GPU_SOURCES ${GPU_SOURCES} src/gpu/metal/metal_backend.mm)
@@ -183,7 +188,8 @@ set(SOURCES
     ${EVAL_SOURCES}
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
-    ${GPU_SOURCES})
+    ${GPU_SOURCES}
+    ${MCTS_SOURCES})
 
 # Create executable
 add_executable(metalfish ${SOURCES})
