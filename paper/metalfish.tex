@@ -165,6 +165,15 @@ enum class EvalStrategy {
 
 For batches $\geq 64$, we use dual-perspective kernels that process both white and black perspectives in a single 3D dispatch. The feature transform kernel uses 8-way loop unrolling for maximum instruction-level parallelism, with feature index bounds checking removed since CPU extraction guarantees valid indices.
 
+\subsection{Command Buffer Optimization}
+
+We minimize dispatch overhead through several techniques:
+\begin{itemize}
+\item \textbf{Unretained references}: Use \texttt{commandBufferWithUnretainedReferences} to avoid Objective-C retain/release overhead
+\item \textbf{Hazard tracking disabled}: Use \texttt{MTLResourceHazardTrackingModeUntracked} for unified memory buffers with explicit barriers
+\item \textbf{Pre-allocated buffers}: All working buffers allocated at initialization to avoid per-dispatch allocation
+\end{itemize}
+
 \subsection{Zero-Copy Buffer Management}
 
 We pre-allocate all working buffers at initialization, writing features directly to unified memory:
