@@ -1,290 +1,295 @@
-# MetalFish - GPU-accelerated Chess Engine Copyright (c) 2025 Nripesh Niketan
-# Licensed under GPL-3.0
-
 cmake_minimum_required(VERSION 3.20)
-project(
-  metalfish
-  VERSION 1.0.0
-  LANGUAGES CXX OBJCXX)
+project(metalfish CXX OBJCXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_OBJCXX_STANDARD 20)
-set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
 
-# Build type
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release)
+# Compiler flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto")
+
+# Enable NEON for Apple Silicon
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+  set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} -DUSE_NEON=8 -DUSE_NEON_DOTPROD -march=armv8.2-a+dotprod"
+  )
 endif()
 
-# macOS specific settings
+# GPU acceleration options
 if(APPLE)
-  set(CMAKE_OSX_DEPLOYMENT_TARGET
-      "14.0"
-      CACHE STRING "Minimum macOS deployment version")
-
-  # Find Metal framework
-  find_library(METAL_LIBRARY Metal REQUIRED)
-  find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
-  find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)
-
-  message(STATUS "Metal library: ${METAL_LIBRARY}")
-  message(STATUS "Foundation library: ${FOUNDATION_LIBRARY}")
-  message(STATUS "QuartzCore library: ${QUARTZCORE_LIBRARY}")
+  option(USE_METAL "Enable Metal GPU acceleration" ON)
+else()
+  option(USE_METAL "Enable Metal GPU acceleration" OFF)
 endif()
 
-# Metal-cpp header-only library path
-set(METAL_CPP_DIR "${CMAKE_SOURCE_DIR}/external/metal-cpp")
+# Future: CUDA support
+option(USE_CUDA "Enable CUDA GPU acceleration (future)" OFF)
 
-# Download metal-cpp if not present
-if(NOT EXISTS "${METAL_CPP_DIR}/Metal/Metal.hpp")
-  message(STATUS "Downloading metal-cpp...")
+# Metal-cpp headers location
+set(METAL_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp")
+set(METAL_CPP_HEADER "${METAL_CPP_DIR}/Metal/Metal.hpp")
 
-  # Create external directory if needed
-  file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/external")
+# Download metal-cpp if USE_METAL is ON and headers don't exist
+if(APPLE AND USE_METAL)
+  if(NOT EXISTS "${METAL_CPP_HEADER}")
+    message(STATUS "metal-cpp headers not found, downloading...")
 
-  # Download
-  file(
-    DOWNLOAD
-    "https://developer.apple.com/metal/cpp/files/metal-cpp_macOS15_iOS18.zip"
-    "${CMAKE_BINARY_DIR}/metal-cpp.zip"
-    SHOW_PROGRESS
-    STATUS DOWNLOAD_STATUS)
+    # Create external directory if it doesn't exist
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external")
 
-  list(GET DOWNLOAD_STATUS 0 DOWNLOAD_ERROR)
-  if(DOWNLOAD_ERROR)
-    message(FATAL_ERROR "Failed to download metal-cpp: ${DOWNLOAD_STATUS}")
-  endif()
+    # Download metal-cpp from Apple (latest version 26)
+    set(METAL_CPP_URL
+        "https://developer.apple.com/metal/cpp/files/metal-cpp_26.zip")
+    set(METAL_CPP_ZIP "${CMAKE_CURRENT_BINARY_DIR}/metal-cpp.zip")
+    set(METAL_CPP_EXTRACT_DIR "${CMAKE_CURRENT_BINARY_DIR}/metal-cpp-extract")
 
-  # Extract to temp location
-  file(ARCHIVE_EXTRACT INPUT "${CMAKE_BINARY_DIR}/metal-cpp.zip" DESTINATION
-       "${CMAKE_BINARY_DIR}/metal-cpp-extract")
+    # Download
+    file(
+      DOWNLOAD ${METAL_CPP_URL} ${METAL_CPP_ZIP}
+      STATUS DOWNLOAD_STATUS
+      SHOW_PROGRESS)
+    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_RESULT)
 
-  # Find extracted content (could be in a subdirectory)
-  file(GLOB METAL_CPP_CONTENTS
-       "${CMAKE_BINARY_DIR}/metal-cpp-extract/*/Metal/Metal.hpp")
-  if(METAL_CPP_CONTENTS)
-    # Get the parent directory of Metal/Metal.hpp
-    get_filename_component(METAL_PARENT "${METAL_CPP_CONTENTS}" DIRECTORY)
-    get_filename_component(METAL_CPP_SRC "${METAL_PARENT}" DIRECTORY)
-    message(STATUS "Found metal-cpp at: ${METAL_CPP_SRC}")
-  else()
-    # Check if it's directly in the extract folder
-    file(GLOB METAL_CPP_CONTENTS
-         "${CMAKE_BINARY_DIR}/metal-cpp-extract/Metal/Metal.hpp")
-    if(METAL_CPP_CONTENTS)
-      set(METAL_CPP_SRC "${CMAKE_BINARY_DIR}/metal-cpp-extract")
+    if(NOT DOWNLOAD_RESULT EQUAL 0)
+      message(
+        WARNING "Failed to download metal-cpp. Metal support will be disabled.")
+      set(USE_METAL OFF)
     else()
-      # Last resort - find any directory with Metal.hpp
-      file(GLOB_RECURSE METAL_HPP
-           "${CMAKE_BINARY_DIR}/metal-cpp-extract/**/Metal.hpp")
-      if(METAL_HPP)
-        list(GET METAL_HPP 0 FIRST_METAL_HPP)
-        get_filename_component(METAL_DIR "${FIRST_METAL_HPP}" DIRECTORY)
-        get_filename_component(METAL_CPP_SRC "${METAL_DIR}" DIRECTORY)
+      # Extract
+      message(STATUS "Extracting metal-cpp...")
+      file(ARCHIVE_EXTRACT INPUT ${METAL_CPP_ZIP} DESTINATION
+           ${METAL_CPP_EXTRACT_DIR})
+
+      # Move to external/metal-cpp
+      file(GLOB METAL_CPP_EXTRACTED_DIR "${METAL_CPP_EXTRACT_DIR}/metal-cpp*")
+      if(METAL_CPP_EXTRACTED_DIR)
+        # Remove old directory if exists
+        if(EXISTS "${METAL_CPP_DIR}")
+          file(REMOVE_RECURSE "${METAL_CPP_DIR}")
+        endif()
+        file(RENAME "${METAL_CPP_EXTRACTED_DIR}" "${METAL_CPP_DIR}")
+        message(STATUS "metal-cpp installed to ${METAL_CPP_DIR}")
       else()
-        message(FATAL_ERROR "Could not find Metal.hpp in downloaded archive")
+        message(
+          WARNING "Failed to extract metal-cpp. Metal support will be disabled."
+        )
+        set(USE_METAL OFF)
       endif()
+
+      # Cleanup
+      file(REMOVE ${METAL_CPP_ZIP})
+      file(REMOVE_RECURSE ${METAL_CPP_EXTRACT_DIR})
     endif()
   endif()
 
-  # Remove old directory if it exists
-  if(EXISTS "${METAL_CPP_DIR}")
-    file(REMOVE_RECURSE "${METAL_CPP_DIR}")
+  # Verify headers exist after potential download
+  if(EXISTS "${METAL_CPP_HEADER}")
+    set(METAL_CPP_AVAILABLE ON)
+  else()
+    set(METAL_CPP_AVAILABLE OFF)
+    message(
+      WARNING
+        "metal-cpp headers still not available. Metal support will be disabled."
+    )
+    set(USE_METAL OFF)
   endif()
-
-  # Copy to final location
-  file(COPY "${METAL_CPP_SRC}/" DESTINATION "${METAL_CPP_DIR}")
-
-  # Verify
-  if(NOT EXISTS "${METAL_CPP_DIR}/Metal/Metal.hpp")
-    message(FATAL_ERROR "metal-cpp installation failed - Metal.hpp not found")
-  endif()
-
-  message(STATUS "metal-cpp installed to ${METAL_CPP_DIR}")
+else()
+  set(METAL_CPP_AVAILABLE OFF)
 endif()
 
 # Include directories
-include_directories(${CMAKE_SOURCE_DIR}/include ${METAL_CPP_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
+if(USE_METAL AND METAL_CPP_AVAILABLE)
+  include_directories(${METAL_CPP_DIR})
+endif()
 
-# Source files - Metal backend
-set(METAL_SOURCES src/metal/device.cpp src/metal/allocator.cpp
-                  src/metal/kernels.cpp src/metal/gpu_ops.cpp)
+# Core source files
+set(CORE_SOURCES src/core/bitboard.cpp src/core/misc.cpp src/core/movegen.cpp
+                 src/core/position.cpp src/core/memory.cpp)
 
-# Source files - Core chess engine
-set(CORE_SOURCES src/core/bitboard.cpp src/core/position.cpp
-                 src/core/movegen.cpp src/core/zobrist.cpp src/core/perft.cpp)
-
-# Source files - Search
+# Search source files
 set(SEARCH_SOURCES
-    src/search/search.cpp src/search/thread.cpp src/search/tt.cpp
-    src/search/movepick.cpp src/search/batch_eval.cpp)
+    src/search/search.cpp src/search/movepick.cpp src/search/thread.cpp
+    src/search/tt.cpp src/search/timeman.cpp src/search/tune.cpp)
 
-# Source files - Evaluation
-set(EVAL_SOURCES src/eval/evaluate.cpp src/eval/nnue.cpp src/eval/nnue_gpu.cpp
-                 src/eval/gpu_nnue.cpp src/eval/nnue_loader.cpp)
+# Evaluation source files
+set(EVAL_SOURCES
+    src/eval/evaluate.cpp
+    src/eval/score.cpp
+    src/eval/nnue/network.cpp
+    src/eval/nnue/nnue_accumulator.cpp
+    src/eval/nnue/nnue_misc.cpp
+    src/eval/nnue/features/full_threats.cpp
+    src/eval/nnue/features/half_ka_v2_hm.cpp)
 
-# Source files - UCI
-set(UCI_SOURCES src/uci/uci.cpp src/uci/benchmark.cpp)
+# UCI source files
+set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
+                src/uci/benchmark.cpp)
 
-# Source files - Syzygy Tablebases
+# Syzygy source files
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
-# Metal shaders
-set(METAL_SHADERS shaders/nnue_stockfish.metal shaders/nnue.metal
-                  shaders/core_ops.metal)
+# GPU source files (backend-agnostic interface)
+set(GPU_SOURCES
+    src/gpu/nnue_eval.cpp src/gpu/batch_ops.cpp src/gpu/gpu_nnue.cpp
+    src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_accumulator.cpp)
 
-# Option to build Metal shaders (requires Metal toolchain)
-option(BUILD_METAL_SHADERS "Build Metal shaders (requires xcrun metal)" OFF)
-option(BUILD_TESTS "Build test suite" ON)
+# Metal GPU acceleration (macOS only)
+if(USE_METAL AND METAL_CPP_AVAILABLE)
+  set(GPU_SOURCES ${GPU_SOURCES} src/gpu/metal/metal_backend.mm)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
+  message(STATUS "Metal GPU acceleration: ENABLED")
 
-# Compile Metal shaders to .metallib
-if(APPLE AND BUILD_METAL_SHADERS)
-  set(METALLIB_OUTPUT "${CMAKE_BINARY_DIR}/metalfish.metallib")
+  # Compile Metal shaders (optional - shaders can also be compiled at runtime)
+  set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels)
+  set(SHADER_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/metalfish.metallib)
 
-  # First compile to .air files
-  set(AIR_FILES "")
-  foreach(SHADER ${METAL_SHADERS})
-    get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
-    set(AIR_FILE "${CMAKE_BINARY_DIR}/${SHADER_NAME}.air")
+  # Check if Metal compiler is available
+  find_program(METAL_COMPILER xcrun)
+  if(METAL_COMPILER)
+    # Create a shell script to compile shaders with proper error handling
     add_custom_command(
-      OUTPUT ${AIR_FILE}
-      COMMAND xcrun -sdk macosx metal -c "${CMAKE_SOURCE_DIR}/${SHADER}" -o
-              ${AIR_FILE}
-      DEPENDS "${CMAKE_SOURCE_DIR}/${SHADER}"
-      COMMENT "Compiling ${SHADER} to AIR")
-    list(APPEND AIR_FILES ${AIR_FILE})
-  endforeach()
-
-  # Link .air files into .metallib
-  add_custom_command(
-    OUTPUT ${METALLIB_OUTPUT}
-    COMMAND xcrun -sdk macosx metallib ${AIR_FILES} -o ${METALLIB_OUTPUT}
-    DEPENDS ${AIR_FILES}
-    COMMENT "Linking Metal shaders into metallib")
-
-  add_custom_target(metal_shaders DEPENDS ${METALLIB_OUTPUT})
-elseif(APPLE)
-  message(
-    STATUS
-      "Metal shader compilation disabled. Enable with -DBUILD_METAL_SHADERS=ON")
-  # Create placeholder metallib path
-  set(METALLIB_OUTPUT "${CMAKE_BINARY_DIR}/metalfish.metallib")
-endif()
-
-# Main executable
-add_executable(
-  metalfish
-  src/main.cpp
-  ${METAL_SOURCES}
-  ${CORE_SOURCES}
-  ${SEARCH_SOURCES}
-  ${EVAL_SOURCES}
-  ${UCI_SOURCES}
-  ${SYZYGY_SOURCES})
-
-if(APPLE)
-  if(BUILD_METAL_SHADERS AND TARGET metal_shaders)
-    add_dependencies(metalfish metal_shaders)
-
-    # Copy metallib to output directory
-    add_custom_command(
-      TARGET metalfish
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy ${METALLIB_OUTPUT}
-              $<TARGET_FILE_DIR:metalfish>/
-      COMMENT "Copying metallib to output directory")
+      OUTPUT ${SHADER_OUTPUT}
+      COMMAND ${CMAKE_COMMAND} -E echo "Compiling Metal shaders..."
+      COMMAND
+        sh -c
+        "xcrun -sdk macosx metal -c ${SHADER_DIR}/nnue_full.metal -o ${CMAKE_CURRENT_BINARY_DIR}/nnue.air 2>&1 || echo 'Metal shader compilation skipped'"
+      COMMAND
+        sh -c
+        "if [ -f ${CMAKE_CURRENT_BINARY_DIR}/nnue.air ]; then xcrun -sdk macosx metallib ${CMAKE_CURRENT_BINARY_DIR}/nnue.air -o ${SHADER_OUTPUT} 2>&1 || echo 'Metallib creation skipped'; fi"
+      COMMAND ${CMAKE_COMMAND} -E touch ${SHADER_OUTPUT}
+      DEPENDS ${SHADER_DIR}/nnue_full.metal
+      COMMENT "Compiling Metal shaders (optional)"
+      VERBATIM)
+    add_custom_target(metal_shaders DEPENDS ${SHADER_OUTPUT})
   endif()
-
-  target_link_libraries(
-    metalfish ${METAL_LIBRARY} ${FOUNDATION_LIBRARY} ${QUARTZCORE_LIBRARY}
-    "-framework MetalPerformanceShaders")
-
-  # Define Metal path for runtime
-  target_compile_definitions(
-    metalfish PRIVATE METAL_PATH="${CMAKE_BINARY_DIR}/metalfish.metallib")
+else()
+  # CPU fallback backend
+  set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cpu_backend.cpp)
+  message(STATUS "Metal GPU acceleration: DISABLED (CPU fallback)")
 endif()
 
-# Compiler flags
-target_compile_options(metalfish PRIVATE -Wall -Wextra -O3 -DNDEBUG
-                                         $<$<CONFIG:Debug>:-g -O0>)
+# Future: CUDA sources
+if(USE_CUDA)
+  # set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cuda/cuda_backend.cu)
+  message(STATUS "CUDA GPU acceleration: ENABLED (placeholder)")
+endif()
 
-# Test executable
-if(BUILD_TESTS)
-  add_executable(
-    metalfish_tests
-    tests/test_main.cpp
-    tests/test_bitboard.cpp
-    tests/test_position.cpp
-    tests/test_movegen.cpp
-    tests/test_search.cpp
-    tests/test_metal.cpp
-    ${METAL_SOURCES}
+# All source files
+set(SOURCES
+    src/main.cpp
     ${CORE_SOURCES}
     ${SEARCH_SOURCES}
     ${EVAL_SOURCES}
     ${UCI_SOURCES}
-    ${SYZYGY_SOURCES})
+    ${SYZYGY_SOURCES}
+    ${GPU_SOURCES})
 
-  target_include_directories(metalfish_tests PRIVATE ${CMAKE_SOURCE_DIR}/include
-                                                     ${METAL_CPP_DIR})
+# Create executable
+add_executable(metalfish ${SOURCES})
 
-  if(APPLE)
+# Add shader dependency if available
+if(TARGET metal_shaders)
+  add_dependencies(metalfish metal_shaders)
+endif()
+
+# Link pthread
+find_package(Threads REQUIRED)
+target_link_libraries(metalfish Threads::Threads)
+
+# macOS specific
+if(APPLE)
+  find_library(METAL_FRAMEWORK Metal)
+  find_library(FOUNDATION_FRAMEWORK Foundation)
+  find_library(COREFOUNDATION_FRAMEWORK CoreFoundation)
+  find_library(QUARTZCORE_FRAMEWORK QuartzCore)
+
+  if(USE_METAL AND METAL_CPP_AVAILABLE)
+    target_link_libraries(metalfish ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
+                          ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+  endif()
+endif()
+
+# Copy NNUE files to build directory (if they exist)
+set(NNUE_FILE1 ${CMAKE_CURRENT_SOURCE_DIR}/src/nn-c288c895ea92.nnue)
+set(NNUE_FILE2 ${CMAKE_CURRENT_SOURCE_DIR}/src/nn-37f18f62d772.nnue)
+
+if(EXISTS ${NNUE_FILE1})
+  configure_file(${NNUE_FILE1} ${CMAKE_CURRENT_BINARY_DIR}/nn-c288c895ea92.nnue
+                 COPYONLY)
+  message(STATUS "Found NNUE file: nn-c288c895ea92.nnue")
+else()
+  message(
+    WARNING
+      "NNUE file not found: nn-c288c895ea92.nnue - download from https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue"
+  )
+endif()
+
+if(EXISTS ${NNUE_FILE2})
+  configure_file(${NNUE_FILE2} ${CMAKE_CURRENT_BINARY_DIR}/nn-37f18f62d772.nnue
+                 COPYONLY)
+  message(STATUS "Found NNUE file: nn-37f18f62d772.nnue")
+else()
+  message(
+    WARNING
+      "NNUE file not found: nn-37f18f62d772.nnue - download from https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue"
+  )
+endif()
+
+# Tests
+option(BUILD_TESTS "Build tests" ON)
+if(BUILD_TESTS)
+  enable_testing()
+
+  set(TEST_SOURCES
+      tests/test_main.cpp
+      tests/test_bitboard.cpp
+      tests/test_position.cpp
+      tests/test_movegen.cpp
+      tests/test_search.cpp
+      tests/test_metal.cpp
+      tests/test_gpu_nnue.cpp)
+
+  add_executable(
+    metalfish_tests
+    ${TEST_SOURCES}
+    ${CORE_SOURCES}
+    ${SEARCH_SOURCES}
+    ${EVAL_SOURCES}
+    ${UCI_SOURCES}
+    ${SYZYGY_SOURCES}
+    ${GPU_SOURCES})
+  target_link_libraries(metalfish_tests Threads::Threads)
+
+  if(APPLE
+     AND USE_METAL
+     AND METAL_CPP_AVAILABLE)
     target_link_libraries(
-      metalfish_tests ${METAL_LIBRARY} ${FOUNDATION_LIBRARY}
-      ${QUARTZCORE_LIBRARY} "-framework MetalPerformanceShaders")
-
-    target_compile_definitions(
-      metalfish_tests
-      PRIVATE METAL_PATH="${CMAKE_BINARY_DIR}/metalfish.metallib")
+      metalfish_tests ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
+      ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
   endif()
 
-  target_compile_options(metalfish_tests PRIVATE -Wall -Wextra -g)
-
-  # Enable CTest
-  enable_testing()
-  add_test(NAME MetalFishTests COMMAND metalfish_tests)
+  add_test(NAME metalfish_tests COMMAND metalfish_tests)
 endif()
 
-# Paper benchmark executable
-add_executable(
-  paper_benchmark
-  src/paper_benchmark.cpp
-  ${METAL_SOURCES}
-  ${CORE_SOURCES}
-  ${SEARCH_SOURCES}
-  ${EVAL_SOURCES}
-  ${UCI_SOURCES}
-  ${SYZYGY_SOURCES})
-
-target_include_directories(paper_benchmark PRIVATE ${CMAKE_SOURCE_DIR}/include
-                                                   ${METAL_CPP_DIR})
-
-if(APPLE)
+# GPU Benchmark (optional)
+option(BUILD_GPU_BENCHMARK "Build GPU benchmark" OFF)
+if(BUILD_GPU_BENCHMARK
+   AND USE_METAL
+   AND METAL_CPP_AVAILABLE)
+  add_executable(metalfish_gpu_bench src/benchmark_gpu.cpp ${CORE_SOURCES}
+                                     ${GPU_SOURCES})
   target_link_libraries(
-    paper_benchmark ${METAL_LIBRARY} ${FOUNDATION_LIBRARY}
-    ${QUARTZCORE_LIBRARY} "-framework MetalPerformanceShaders")
-
-  target_compile_definitions(
-    paper_benchmark
-    PRIVATE METAL_PATH="${CMAKE_BINARY_DIR}/metalfish.metallib")
-endif()
-
-target_compile_options(paper_benchmark PRIVATE -Wall -Wextra -O3 -DNDEBUG)
-
-# Install
-install(TARGETS metalfish DESTINATION bin)
-if(EXISTS ${METALLIB_OUTPUT})
-  install(FILES ${METALLIB_OUTPUT} DESTINATION lib)
+    metalfish_gpu_bench Threads::Threads ${METAL_FRAMEWORK}
+    ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
 endif()
 
 # Print configuration summary
 message(STATUS "")
-message(STATUS "MetalFish Configuration:")
-message(STATUS "  Version: ${PROJECT_VERSION}")
+message(STATUS "MetalFish Configuration Summary:")
+message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "  macOS Deployment Target: ${CMAKE_OSX_DEPLOYMENT_TARGET}")
-message(STATUS "  Build Tests: ${BUILD_TESTS}")
-message(STATUS "  Build Metal Shaders: ${BUILD_METAL_SHADERS}")
+message(STATUS "  Metal GPU: ${USE_METAL}")
+message(STATUS "  CUDA GPU: ${USE_CUDA}")
+message(STATUS "  Tests: ${BUILD_TESTS}")
 message(STATUS "")

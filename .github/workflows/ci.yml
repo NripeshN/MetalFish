@@ -1,5 +1,7 @@
 # MetalFish CI/CD Pipeline
-# Build and test the GPU-accelerated chess engine on macOS with Metal
+# Build and test the GPU-accelerated chess engine across platforms
+# - macOS: Metal GPU acceleration
+# - Ubuntu/Windows: CUDA GPU support ready (uses larger runners for future GPU workloads)
 
 name: MetalFish CI
 
@@ -13,9 +15,36 @@ env:
   BUILD_TYPE: Release
 
 jobs:
-  build-macos:
-    name: Build & Test (macOS)
-    runs-on: macos-14 # Apple Silicon runner
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    
+    permissions:
+      contents: read
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            runner: ubuntu-latest-4-cores
+            artifact_name: metalfish-ubuntu
+            executable: metalfish
+            use_metal: OFF
+            use_cuda: OFF
+          - os: windows-latest
+            runner: windows-latest-8-cores
+            artifact_name: metalfish-windows
+            executable: metalfish.exe
+            use_metal: OFF
+            use_cuda: OFF
+          - os: macos-latest
+            runner: macos-latest
+            artifact_name: metalfish-macos
+            executable: metalfish
+            use_metal: ON
+            use_cuda: OFF
 
     steps:
       - name: Checkout repository
@@ -23,7 +52,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup environment
+      - name: Setup environment (macOS)
+        if: runner.os == 'macOS'
         run: |
           echo "macOS version:"
           sw_vers
@@ -34,40 +64,123 @@ jobs:
           echo "Available Metal devices:"
           system_profiler SPDisplaysDataType | grep -A 5 "Metal" || echo "Metal info not available in CI"
 
+      - name: Setup environment (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          echo "Ubuntu version:"
+          lsb_release -a
+          echo ""
+          echo "GCC version:"
+          gcc --version
+          echo ""
+          echo "CMake version:"
+          cmake --version
+          echo ""
+          echo "GPU Information:"
+          if command -v nvidia-smi &> /dev/null; then
+            nvidia-smi || echo "nvidia-smi found but failed to run"
+          else
+            echo "No NVIDIA GPU detected (nvidia-smi not found)"
+            echo "CUDA support will be available when GPU runners are used"
+          fi
+
+      - name: Setup environment (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "Windows version:"
+          systeminfo | findstr /B /C:"OS Name" /C:"OS Version"
+          echo ""
+          echo "CMake version:"
+          cmake --version
+          echo ""
+          echo "GPU Information:"
+          if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+            nvidia-smi
+          } else {
+            Write-Host "No NVIDIA GPU detected (nvidia-smi not found)"
+            Write-Host "CUDA support will be available when GPU runners are used"
+          }
+        shell: pwsh
+
+      - name: Download NNUE files
+        run: |
+          cd src
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+        shell: bash
+
       - name: Configure CMake
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DBUILD_TESTS=ON \
-            -DBUILD_METAL_SHADERS=OFF
+            -DUSE_METAL=${{ matrix.use_metal }} \
+            -DUSE_CUDA=${{ matrix.use_cuda }} \
+            -DBUILD_TESTS=ON
+        shell: bash
 
-      - name: Build
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+        shell: bash
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$env:NUMBER_OF_PROCESSORS
 
       - name: Run C++ Tests
         working-directory: build
         run: ./metalfish_tests
+        shell: bash
+        if: runner.os != 'Windows'
+
+      - name: Run C++ Tests (Windows)
+        working-directory: build/${{ env.BUILD_TYPE }}
+        run: ./metalfish_tests.exe
+        shell: bash
+        if: runner.os == 'Windows'
 
       - name: Run Perft Tests
         run: python3 tests/testing.py --quick
+        if: runner.os != 'Windows'
 
-      - name: Run UCI Protocol Test
+      - name: Run Perft Tests (Windows)
+        run: python tests/testing.py --quick
+        if: runner.os == 'Windows'
+
+      - name: Run UCI Protocol Test (Unix)
         working-directory: build
         run: |
-          echo -e "uci\nisready\nposition startpos\ngo depth 5\nquit" | ./metalfish
+          echo -e "uci\nisready\nposition startpos\ngo depth 5\nquit" | ./${{ matrix.executable }}
+        shell: bash
+        if: runner.os != 'Windows'
+
+      - name: Run UCI Protocol Test (Windows)
+        working-directory: build/${{ env.BUILD_TYPE }}
+        run: |
+          echo "uci" | ./metalfish.exe
+          echo "isready" | ./metalfish.exe
+          echo "position startpos" | ./metalfish.exe
+          echo "go depth 5" | ./metalfish.exe
+          echo "quit" | ./metalfish.exe
+        shell: bash
+        if: runner.os == 'Windows'
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: metalfish-macos
+          name: ${{ matrix.artifact_name }}
           path: |
-            build/metalfish
+            build/${{ matrix.executable }}
             build/metalfish.metallib
+            build/${{ env.BUILD_TYPE }}/${{ matrix.executable }}
           if-no-files-found: warn
 
   lint-and-format:
     name: Lint & Format Check
     runs-on: macos-14
+    
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -83,9 +196,12 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-macos]
+    needs: [build-and-test]
     runs-on: macos-14
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -93,11 +209,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Download NNUE files
+        run: |
+          cd src
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+
       - name: Build Release
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_METAL_SHADERS=ON
+            -DUSE_METAL=ON
           cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 
       - name: Package Release

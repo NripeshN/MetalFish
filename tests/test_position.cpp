@@ -8,7 +8,6 @@
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "core/types.h"
-#include "core/zobrist.h"
 #include <cassert>
 #include <iostream>
 
@@ -16,7 +15,7 @@ using namespace MetalFish;
 
 bool test_position() {
   // Initialize
-  init_bitboards();
+  Bitboards::init();
   Position::init();
 
   Position pos;
@@ -73,7 +72,7 @@ bool test_position() {
   assert(pos.piece_on(SQ_E2) == W_PAWN);
   assert(pos.piece_on(SQ_E4) == NO_PIECE);
 
-  // Test complex position
+  // Test complex position (Kiwipete)
   pos.set(
       "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
       false, &st);

@@ -15,6 +15,7 @@ bool test_position();
 bool test_movegen();
 bool test_search();
 bool test_metal();
+bool run_all_gpu_tests();
 
 int main() {
   std::cout << "MetalFish Test Suite\n";
@@ -29,11 +30,10 @@ int main() {
     bool (*func)();
   };
 
-  Test tests[] = {{"Bitboard", test_bitboard},
-                  {"Position", test_position},
-                  {"Move Generation", test_movegen},
-                  {"Search", test_search},
-                  {"Metal GPU", test_metal}};
+  Test tests[] = {
+      {"Bitboard", test_bitboard},       {"Position", test_position},
+      {"Move Generation", test_movegen}, {"Search", test_search},
+      {"Metal GPU", test_metal},         {"GPU NNUE", run_all_gpu_tests}};
 
   for (const auto &test : tests) {
     std::cout << "Running " << test.name << " tests... ";
