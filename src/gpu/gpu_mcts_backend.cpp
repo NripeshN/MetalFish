@@ -94,7 +94,10 @@ GPUMCTSBackend::generate_policy(const MCTS::MCTSPosition &pos) {
 
     // Captures get bonus based on captured piece value
     if (stockfish_pos.capture(m)) {
-      PieceType captured = type_of(stockfish_pos.piece_on(m.to_sq()));
+      // For en passant, the captured pawn is not on the destination square
+      PieceType captured = m.type_of() == EN_PASSANT
+                               ? PAWN
+                               : type_of(stockfish_pos.piece_on(m.to_sq()));
       static const float piece_values[] = {0, 1, 3, 3, 5, 9, 0}; // PNBRQK
       score += piece_values[captured] * 0.5f;
     }

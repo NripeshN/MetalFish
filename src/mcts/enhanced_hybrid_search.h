@@ -217,8 +217,10 @@ private:
   MCTSMove run_mcts_phase(const MCTSPositionHistory &history, int time_ms);
 
   // Alpha-beta verification
-  ABVerifyResult verify_with_alphabeta(const Position &pos, MCTSMove mcts_move,
-                                       int depth);
+  ABVerifyResult
+  verify_with_alphabeta(const Position &pos, MCTSMove mcts_move, int depth,
+                        std::chrono::steady_clock::time_point ab_start,
+                        int ab_time_budget_ms);
 
   // Combined decision
   Move make_final_decision(MCTSMove mcts_move, const ABVerifyResult &ab_result);

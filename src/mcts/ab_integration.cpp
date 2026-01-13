@@ -350,7 +350,9 @@ Value ABSearcher::search_internal(Position &pos, int depth, Value alpha,
     if (m == tt_move) {
       score = 100000;
     } else if (pos.capture(m)) {
-      PieceType captured = type_of(pos.piece_on(m.to_sq()));
+      // For en passant, the captured pawn is not on the destination square
+      PieceType captured =
+          m.type_of() == EN_PASSANT ? PAWN : type_of(pos.piece_on(m.to_sq()));
       PieceType attacker = type_of(pos.piece_on(m.from_sq()));
       static const int pv[] = {0, 100, 320, 330, 500, 900, 0};
       score = 50000 + pv[captured] * 10 - pv[attacker];

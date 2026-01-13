@@ -196,25 +196,34 @@ void EnhancedHybridSearch::search_thread_main() {
     int ab_time = calculate_ab_time(total_time_ms);
     auto ab_start = std::chrono::steady_clock::now();
 
-    // Determine verification depth based on position type and time
-    int verify_depth = config_.ab_verify_depth;
-    if (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
-        current_strategy_.position_type == PositionType::TACTICAL) {
-      verify_depth += 2; // Deeper verification for tactical positions
-    }
+    // Skip AB verification if insufficient time budget
+    if (ab_time < 10) {
+      send_info_string("Skipping AB verification: insufficient time budget");
+    } else {
+      send_info_string("Starting AB verification: " + std::to_string(ab_time) +
+                       "ms budget");
 
-    ab_result = verify_with_alphabeta(root_pos, mcts_move, verify_depth);
+      // Determine verification depth based on position type and time
+      int verify_depth = config_.ab_verify_depth;
+      if (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
+          current_strategy_.position_type == PositionType::TACTICAL) {
+        verify_depth += 2; // Deeper verification for tactical positions
+      }
 
-    auto ab_end = std::chrono::steady_clock::now();
-    stats_.ab_time_ms =
-        std::chrono::duration<double, std::milli>(ab_end - ab_start).count();
-    stats_.ab_verifications++;
+      ab_result = verify_with_alphabeta(root_pos, mcts_move, verify_depth,
+                                        ab_start, ab_time);
 
-    // Check if AB disagrees significantly
-    if (!ab_result.agrees_with_mcts) {
-      stats_.ab_overrides++;
-      send_info_string("AB override: score diff = " +
-                       std::to_string(ab_result.score_difference) + " pawns");
+      auto ab_end = std::chrono::steady_clock::now();
+      stats_.ab_time_ms =
+          std::chrono::duration<double, std::milli>(ab_end - ab_start).count();
+      stats_.ab_verifications++;
+
+      // Check if AB disagrees significantly
+      if (!ab_result.agrees_with_mcts) {
+        stats_.ab_overrides++;
+        send_info_string("AB override: score diff = " +
+                         std::to_string(ab_result.score_difference) + " pawns");
+      }
     }
   }
 
@@ -281,7 +290,13 @@ EnhancedHybridSearch::run_mcts_phase(const MCTSPositionHistory &history,
   auto mcts_info_cb = [this](const std::string &info) {
     // Forward MCTS info with prefix
     if (info_callback_) {
-      info_callback_("info string [MCTS] " + info.substr(5)); // Skip "info "
+      // Check if string starts with "info " before stripping prefix
+      if (info.size() >= 5 && info.substr(0, 5) == "info ") {
+        info_callback_("info string [MCTS] " + info.substr(5));
+      } else {
+        // Forward as-is if it doesn't have the expected prefix
+        info_callback_("info string [MCTS] " + info);
+      }
     }
   };
 
@@ -297,9 +312,17 @@ EnhancedHybridSearch::run_mcts_phase(const MCTSPositionHistory &history,
   return best_move;
 }
 
-ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(const Position &pos,
-                                                           MCTSMove mcts_move,
-                                                           int depth) {
+ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
+    const Position &pos, MCTSMove mcts_move, int depth,
+    std::chrono::steady_clock::time_point ab_start, int ab_time_budget_ms) {
+  // Helper lambda to check if time budget is exceeded
+  auto time_exceeded = [&]() {
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed_ms =
+        std::chrono::duration<double, std::milli>(now - ab_start).count();
+    return elapsed_ms >= ab_time_budget_ms;
+  };
+
   ABVerifyResult result;
   result.best_move = mcts_move.to_stockfish();
   result.depth = depth;
@@ -365,7 +388,7 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(const Position &pos,
     Move best_move = mcts_move.to_stockfish();
 
     for (const auto &m : moves) {
-      if (stop_flag_)
+      if (stop_flag_ || time_exceeded())
         break;
 
       Position test_pos;
@@ -452,11 +475,18 @@ int EnhancedHybridSearch::calculate_time_budget(const Position &pos) const {
 }
 
 int EnhancedHybridSearch::calculate_mcts_time(int total_time) const {
-  // Allocate time based on strategy weights
+  // Allocate time based on strategy weights from position classifier
+  // The strategy weights are already tuned per position type:
+  // - HIGHLY_TACTICAL: 20% MCTS, 80% AB
+  // - TACTICAL: 35% MCTS, 65% AB
+  // - BALANCED: 50% MCTS, 50% AB
+  // - STRATEGIC: 65% MCTS, 35% AB
+  // - HIGHLY_STRATEGIC: 80% MCTS, 20% AB
   float mcts_fraction = current_strategy_.mcts_weight;
 
-  // Minimum 30% for MCTS
-  mcts_fraction = std::max(0.3f, mcts_fraction);
+  // Use a minimal floor (10%) only to prevent zero allocation,
+  // but respect the position-based strategy weights
+  mcts_fraction = std::max(0.1f, mcts_fraction);
 
   return static_cast<int>(total_time * mcts_fraction);
 }
