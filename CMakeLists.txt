@@ -139,7 +139,7 @@ set(UTILS_SOURCES
 set(GPU_SOURCES
     src/gpu/nnue_eval.cpp src/gpu/batch_ops.cpp src/gpu/gpu_nnue.cpp
     src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_accumulator.cpp
-    src/gpu/gpu_mcts_backend.cpp)
+    src/gpu/gpu_mcts_backend.cpp src/gpu/persistent_pipeline.cpp)
 
 # MCTS source files (hybrid search)
 set(MCTS_SOURCES
@@ -148,7 +148,8 @@ set(MCTS_SOURCES
     src/mcts/position_classifier.cpp
     src/mcts/enhanced_hybrid_search.cpp
     src/mcts/mcts_batch_evaluator.cpp
-    src/mcts/mcts_tt.cpp)
+    src/mcts/mcts_tt.cpp
+    src/mcts/parallel_search.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
