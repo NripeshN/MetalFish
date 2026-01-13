@@ -1,0 +1,67 @@
+\relax 
+\citation{LeelaChessZero2024}
+\@writefile{toc}{\contentsline {title}{MetalFish: What is the Real Bottleneck for GPU-Accelerated\unskip \ \ignorespaces NNUE Evaluation on Apple Silicon?}{1}{}\protected@file@percent }
+\@writefile{toc}{\authcount {1}}
+\@writefile{toc}{\contentsline {author}{Nripesh Niketan\unskip {}}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{}\protected@file@percent }
+\citation{Stockfish2024,Nasu2018}
+\citation{AppleMetal2024}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces NNUE Network Architecture (Stockfish-compatible)}}{2}{}\protected@file@percent }
+\newlabel{tab:nnue_arch}{{1}{2}{}{table.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Contributions}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}NNUE Architecture}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Metal Compute Model}{2}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Evaluation routing: single positions use CPU NNUE; batches $\geq N$ positions use GPU.}}{3}{}\protected@file@percent }
+\newlabel{fig:arch}{{1}{3}{}{figure.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}System Architecture}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Architecture Overview}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}GPU Batch Evaluation}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Metal Kernel Implementation}{3}{}\protected@file@percent }
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.1}Feature Transform Kernel (simplified)}{3}{}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces GPU Batch NNUE Evaluation}}{4}{}\protected@file@percent }
+\newlabel{alg:batch}{{1}{4}{}{algorithm.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Methodology}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Hardware and Software}{4}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces GPU Dispatch Overhead (Minimal Kernel, N=1,000)}}{5}{}\protected@file@percent }
+\newlabel{tab:dispatch}{{2}{5}{}{table.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GPU Shader Throughput (Vector Addition)}}{5}{}\protected@file@percent }
+\newlabel{tab:throughput}{{3}{5}{}{table.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Timing Methodology}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Results}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}GPU Dispatch Overhead}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}GPU Compute Throughput}{5}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces True Batching Verification (16 positions)}}{6}{}\protected@file@percent }
+\newlabel{tab:batching}{{4}{6}{}{table.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces CPU vs GPU evaluation time. Crossover occurs at $\approx $1,875 positions where dispatch overhead is amortized.}}{6}{}\protected@file@percent }
+\newlabel{fig:crossover}{{2}{6}{}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}True Batching Verification}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}CPU vs GPU Crossover Analysis}{6}{}\protected@file@percent }
+\citation{AppleMetalBestPractices2024}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Search Benchmark Results}}{7}{}\protected@file@percent }
+\newlabel{tab:search}{{5}{7}{}{table.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces GPU Memory Allocation}}{7}{}\protected@file@percent }
+\newlabel{tab:memory}{{6}{7}{}{table.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Search Performance}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}GPU Memory Usage}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Why Dispatch Overhead is Irreducible}{7}{}\protected@file@percent }
+\citation{LeelaChessZero2024}
+\citation{LeelaChessZero2024}
+\citation{Silver2017}
+\citation{Rocki2010}
+\citation{AppleMetal2024,AppleMetalBestPractices2024}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Implications for Alpha-Beta Search}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}When GPU Acceleration Helps}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Limitations}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Related Work}{8}{}\protected@file@percent }
+\bibcite{Stockfish2024}{1}
+\bibcite{LeelaChessZero2024}{2}
+\bibcite{Silver2017}{3}
+\bibcite{Rocki2010}{4}
+\bibcite{Nasu2018}{5}
+\bibcite{AppleMetal2024}{6}
+\bibcite{AppleMetalBestPractices2024}{7}
+\bibcite{Knuth1975}{8}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{9}{}\protected@file@percent }
+\gdef \@abspage@last{9}
