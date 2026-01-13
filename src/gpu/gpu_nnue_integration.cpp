@@ -343,7 +343,7 @@ kernel void gpu_feature_transform_dual(
 // Fused Forward Pass Kernel
 // Computes all FC layers (FC0, FC1, FC2) in a single kernel using threadgroup memory.
 // One threadgroup processes one position, with threads cooperating on layer computation.
-// Uses 8-way loop unrolling in FC0 for better throughput.
+// Uses 8-way loop unrolling in all layers for better throughput.
 kernel void gpu_nnue_forward(
     device const accumulator_t* accumulators [[buffer(0)]],
     device const layer_weight_t* fc0_weights [[buffer(1)]],
@@ -371,14 +371,14 @@ kernel void gpu_nnue_forward(
     device const accumulator_t* white_acc = accumulators + pos_idx * 2 * hidden_dim;
     device const accumulator_t* black_acc = white_acc + hidden_dim;
     
-    // FC0 layer - process both perspectives
+    // FC0 layer - process both perspectives with 8-way unrolling
     for (uint out = lid; out <= FC0_OUT; out += tg_size) {
         for (uint p = 0; p < 2; p++) {
             device const accumulator_t* acc = (p == 0) ? white_acc : black_acc;
             
             int32_t sum = fc0_biases[out];
             
-            // SIMD-friendly accumulation with manual unrolling
+            // 8-way unrolled loop - no sparse check (branch divergence hurts more)
             uint i = 0;
             for (; i + 7 < hidden_dim; i += 8) {
                 int8_t c0 = clipped_relu(int16_t(acc[i] >> WEIGHT_SCALE_BITS));
@@ -415,21 +415,33 @@ kernel void gpu_nnue_forward(
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     
-    // FC1 layer
+    // FC1 layer - unrolled by 6 for 30 inputs (2 * FC0_OUT)
     for (uint out = lid; out < FC1_OUT; out += tg_size) {
         int32_t sum = fc1_biases[out];
-        for (uint i = 0; i < 2 * FC0_OUT; i++) {
+        for (uint i = 0; i < 30; i += 6) {
             sum += fc0_sqr[i] * fc1_weights[i * FC1_OUT + out];
+            sum += fc0_sqr[i+1] * fc1_weights[(i+1) * FC1_OUT + out];
+            sum += fc0_sqr[i+2] * fc1_weights[(i+2) * FC1_OUT + out];
+            sum += fc0_sqr[i+3] * fc1_weights[(i+3) * FC1_OUT + out];
+            sum += fc0_sqr[i+4] * fc1_weights[(i+4) * FC1_OUT + out];
+            sum += fc0_sqr[i+5] * fc1_weights[(i+5) * FC1_OUT + out];
         }
         fc1_out[out] = clipped_relu(int16_t(sum >> WEIGHT_SCALE_BITS));
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     
-    // FC2 layer - single thread computes final output
+    // FC2 layer - single thread with 8-way unrolling
     if (lid == 0) {
         int32_t sum = fc2_biases[0];
-        for (uint i = 0; i < FC1_OUT; i++) {
+        for (uint i = 0; i < 32; i += 8) {
             sum += fc1_out[i] * fc2_weights[i];
+            sum += fc1_out[i+1] * fc2_weights[i+1];
+            sum += fc1_out[i+2] * fc2_weights[i+2];
+            sum += fc1_out[i+3] * fc2_weights[i+3];
+            sum += fc1_out[i+4] * fc2_weights[i+4];
+            sum += fc1_out[i+5] * fc2_weights[i+5];
+            sum += fc1_out[i+6] * fc2_weights[i+6];
+            sum += fc1_out[i+7] * fc2_weights[i+7];
         }
         
         // Skip connection
