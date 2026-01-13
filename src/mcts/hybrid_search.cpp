@@ -296,11 +296,20 @@ void HybridSearch::search_thread_main() {
 
   int iterations = 0;
   while (!should_stop()) {
+    auto iter_start = std::chrono::steady_clock::now();
+
     // Selection: traverse tree to find leaf
+    auto select_start = std::chrono::steady_clock::now();
     HybridNode *node = tree_->root();
     MCTSPosition search_pos = pos;
 
     node = select_node(node, search_pos);
+    auto select_end = std::chrono::steady_clock::now();
+    stats_.selection_time_us.fetch_add(
+        std::chrono::duration_cast<std::chrono::microseconds>(select_end -
+                                                              select_start)
+            .count(),
+        std::memory_order_relaxed);
 
     if (!node) {
       iterations++;
@@ -332,6 +341,7 @@ void HybridSearch::search_thread_main() {
     }
 
     // Expansion: add children (with per-node locking)
+    auto expand_start = std::chrono::steady_clock::now();
     if (!node->has_children()) {
       std::lock_guard<std::mutex> lock(node->mutex());
       // Double check after acquiring lock
@@ -345,8 +355,15 @@ void HybridSearch::search_thread_main() {
         }
       }
     }
+    auto expand_end = std::chrono::steady_clock::now();
+    stats_.expansion_time_us.fetch_add(
+        std::chrono::duration_cast<std::chrono::microseconds>(expand_end -
+                                                              expand_start)
+            .count(),
+        std::memory_order_relaxed);
 
-    // Check TT for cached evaluation (fast path)
+    // Evaluation: Check TT for cached evaluation (fast path)
+    auto eval_start = std::chrono::steady_clock::now();
     float value = 0.0f;
     float draw = 0.0f;
     float moves_left = 30.0f;
@@ -379,9 +396,25 @@ void HybridSearch::search_thread_main() {
       mcts_tt().update_mcts(hash, value, draw, moves_left);
       stats_.cache_misses.fetch_add(1, std::memory_order_relaxed);
     }
+    auto eval_end = std::chrono::steady_clock::now();
+    stats_.evaluation_time_us.fetch_add(
+        std::chrono::duration_cast<std::chrono::microseconds>(eval_end -
+                                                              eval_start)
+            .count(),
+        std::memory_order_relaxed);
 
+    // Backpropagation
+    auto backprop_start = std::chrono::steady_clock::now();
     backpropagate(node, value, draw, moves_left);
+    auto backprop_end = std::chrono::steady_clock::now();
+    stats_.backprop_time_us.fetch_add(
+        std::chrono::duration_cast<std::chrono::microseconds>(backprop_end -
+                                                              backprop_start)
+            .count(),
+        std::memory_order_relaxed);
+
     stats_.mcts_nodes.fetch_add(1, std::memory_order_relaxed);
+    stats_.total_iterations.fetch_add(1, std::memory_order_relaxed);
     iterations++;
   }
 

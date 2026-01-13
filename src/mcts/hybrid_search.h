@@ -91,6 +91,14 @@ struct HybridSearchStats {
   std::atomic<uint64_t> tactical_positions{0};
   std::atomic<uint64_t> ab_overrides{0};
 
+  // Profiling breakdown (in microseconds)
+  std::atomic<uint64_t> selection_time_us{0};
+  std::atomic<uint64_t> expansion_time_us{0};
+  std::atomic<uint64_t> evaluation_time_us{0};
+  std::atomic<uint64_t> backprop_time_us{0};
+  std::atomic<uint64_t> batch_queue_time_us{0};
+  std::atomic<uint64_t> total_iterations{0};
+
   void reset() {
     mcts_nodes = 0;
     ab_nodes = 0;
@@ -100,6 +108,30 @@ struct HybridSearchStats {
     cache_misses = 0;
     tactical_positions = 0;
     ab_overrides = 0;
+    selection_time_us = 0;
+    expansion_time_us = 0;
+    evaluation_time_us = 0;
+    backprop_time_us = 0;
+    batch_queue_time_us = 0;
+    total_iterations = 0;
+  }
+
+  // Get profiling breakdown as percentages
+  void get_profile_breakdown(double &selection_pct, double &expansion_pct,
+                             double &eval_pct, double &backprop_pct,
+                             double &queue_pct) const {
+    uint64_t total = selection_time_us + expansion_time_us +
+                     evaluation_time_us + backprop_time_us +
+                     batch_queue_time_us;
+    if (total == 0) {
+      selection_pct = expansion_pct = eval_pct = backprop_pct = queue_pct = 0.0;
+      return;
+    }
+    selection_pct = 100.0 * selection_time_us / total;
+    expansion_pct = 100.0 * expansion_time_us / total;
+    eval_pct = 100.0 * evaluation_time_us / total;
+    backprop_pct = 100.0 * backprop_time_us / total;
+    queue_pct = 100.0 * batch_queue_time_us / total;
   }
 };
 

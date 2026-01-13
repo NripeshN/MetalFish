@@ -153,6 +153,8 @@ void UCIEngine::loop() {
       gpu_benchmark();
     else if (token == "mcts")
       mcts_go(is);
+    else if (token == "hybridbench")
+      hybrid_benchmark();
     else if (token == "compiler")
       sync_cout << compiler_info() << sync_endl;
     else if (token == "export_net") {
@@ -1335,6 +1337,188 @@ void UCIEngine::mcts_go(std::istringstream &is) {
   sync_cout << "info string Time: MCTS=" << std::fixed << std::setprecision(1)
             << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms
             << "ms Total=" << stats.total_time_ms << "ms" << sync_endl;
+}
+
+// ============================================================================
+// Hybrid Search Validation Benchmark
+// ============================================================================
+void UCIEngine::hybrid_benchmark() {
+  std::cout << "\n";
+  std::cout << "╔══════════════════════════════════════════════════════════╗\n";
+  std::cout << "║     MetalFish Hybrid Search Validation Suite             ║\n";
+  std::cout << "╚══════════════════════════════════════════════════════════╝\n";
+
+  // Get GPU NNUE manager
+  GPU::GPUNNUEManager *gpu_manager = nullptr;
+  if (GPU::gpu_nnue_manager_available()) {
+    gpu_manager = &GPU::gpu_nnue_manager();
+  }
+
+  if (!gpu_manager || !gpu_manager->is_ready()) {
+    std::cout << "ERROR: GPU NNUE not available\n";
+    return;
+  }
+
+  // Test positions
+  static const char *TEST_FENS[] = {
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+      "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+      "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 5 5",
+      "r2qkb1r/ppp1pppp/2n2n2/3p1b2/3P1B2/2N2N2/PPP1PPPP/R2QKB1R w KQkq - 4 5",
+      "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+      "8/8/8/8/8/5K2/8/4k2R w - - 0 1",
+      "8/8/8/4k3/8/8/4K3/4Q3 w - - 0 1",
+  };
+  const int NUM_TEST_FENS = 8;
+
+  // ========================================================================
+  // 1. Classifier Distribution Analysis
+  // ========================================================================
+  std::cout << "\n=== 1. Classifier Distribution Analysis ===\n";
+
+  PositionClassifier classifier;
+  int class_counts[5] = {0, 0, 0, 0, 0};
+  int stability_tests = 0, stability_flips = 0;
+
+  for (int i = 0; i < NUM_TEST_FENS; i++) {
+    Position pos;
+    StateInfo st;
+    pos.set(TEST_FENS[i], false, &st);
+
+    auto type = classifier.quick_classify(pos);
+    class_counts[static_cast<int>(type)]++;
+
+    // Stability test
+    MoveList<LEGAL> moves(pos);
+    if (moves.size() > 0) {
+      StateInfo st2;
+      pos.do_move(*moves.begin(), st2);
+      auto type_after = classifier.quick_classify(pos);
+      stability_tests++;
+      if (type_after != type)
+        stability_flips++;
+      pos.undo_move(*moves.begin());
+    }
+  }
+
+  const char *type_names[] = {"HIGHLY_TACTICAL", "TACTICAL", "BALANCED",
+                              "STRATEGIC", "HIGHLY_STRATEGIC"};
+  for (int i = 0; i < 5; i++) {
+    double pct = 100.0 * class_counts[i] / NUM_TEST_FENS;
+    std::cout << "  " << std::setw(18) << type_names[i] << ": " << std::setw(3)
+              << class_counts[i] << " (" << std::fixed << std::setprecision(1)
+              << pct << "%)\n";
+  }
+  std::cout << "  Stability: " << stability_flips << "/" << stability_tests
+            << " flips\n";
+
+  // ========================================================================
+  // 2. MCTS Profiling
+  // ========================================================================
+  std::cout << "\n=== 2. MCTS Profiling (3 second search) ===\n";
+
+  MCTS::HybridSearchConfig mcts_config;
+  mcts_config.num_search_threads = 1;
+  auto mcts_search = MCTS::create_hybrid_search(gpu_manager, mcts_config);
+
+  MCTS::MCTSPositionHistory history;
+  history.reset(StartFEN);
+
+  Search::LimitsType limits;
+  limits.movetime = 3000;
+
+  MCTS::MCTSMove best_move;
+  auto start = std::chrono::steady_clock::now();
+
+  mcts_search->start_search(
+      history, limits,
+      [&](MCTS::MCTSMove move, MCTS::MCTSMove ponder) { best_move = move; },
+      nullptr);
+  mcts_search->wait();
+
+  auto end = std::chrono::steady_clock::now();
+  double elapsed_ms =
+      std::chrono::duration<double, std::milli>(end - start).count();
+
+  const auto &mcts_stats = mcts_search->stats();
+  double sel_pct, exp_pct, eval_pct, bp_pct, q_pct;
+  mcts_stats.get_profile_breakdown(sel_pct, exp_pct, eval_pct, bp_pct, q_pct);
+
+  uint64_t total_nodes = mcts_stats.mcts_nodes.load();
+  double nps = elapsed_ms > 0 ? total_nodes * 1000.0 / elapsed_ms : 0;
+
+  std::cout << "  Selection:    " << std::fixed << std::setprecision(1)
+            << sel_pct << "%\n";
+  std::cout << "  Expansion:    " << exp_pct << "%\n";
+  std::cout << "  Evaluation:   " << eval_pct << "%\n";
+  std::cout << "  Backprop:     " << bp_pct << "%\n";
+  std::cout << "  Total nodes:  " << total_nodes << "\n";
+  std::cout << "  NPS:          " << std::fixed << std::setprecision(0) << nps
+            << "\n";
+  std::cout << "  Cache hits:   " << mcts_stats.cache_hits.load() << "\n";
+  std::cout << "  Cache misses: " << mcts_stats.cache_misses.load() << "\n";
+
+  // ========================================================================
+  // 3. Hybrid vs Pure MCTS comparison (quick test)
+  // ========================================================================
+  std::cout << "\n=== 3. Move Comparison: Hybrid vs Pure MCTS ===\n";
+
+  for (int i = 0; i < std::min(4, NUM_TEST_FENS); i++) {
+    Position pos;
+    StateInfo st;
+    pos.set(TEST_FENS[i], false, &st);
+
+    // Pure MCTS
+    MCTS::MCTSPositionHistory hist_mcts;
+    hist_mcts.reset(TEST_FENS[i]);
+    Search::LimitsType lim;
+    lim.movetime = 1000;
+
+    auto pure_mcts = MCTS::create_hybrid_search(gpu_manager, mcts_config);
+    MCTS::MCTSMove mcts_move;
+    pure_mcts->start_search(
+        hist_mcts, lim,
+        [&](MCTS::MCTSMove m, MCTS::MCTSMove p) { mcts_move = m; }, nullptr);
+    pure_mcts->wait();
+    uint64_t mcts_nodes = pure_mcts->stats().mcts_nodes.load();
+
+    // Hybrid
+    auto hybrid = MCTS::create_enhanced_hybrid_search(gpu_manager);
+    Move hybrid_move = Move::none();
+    if (hybrid) {
+      hybrid->start_search(
+          pos, lim, [&](Move m, Move p) { hybrid_move = m; }, nullptr);
+      hybrid->wait();
+    }
+
+    std::string mcts_str = mcts_move.is_null() ? "null" : mcts_move.to_string();
+    std::string hybrid_str = hybrid_move == Move::none()
+                                 ? "null"
+                                 : UCIEngine::move(hybrid_move, false);
+    bool agree = (mcts_move.to_stockfish() == hybrid_move);
+
+    std::cout << "  Pos " << i << ": MCTS=" << std::setw(6) << mcts_str
+              << " Hybrid=" << std::setw(6) << hybrid_str
+              << " Agree=" << (agree ? "Yes" : "No") << " Nodes=" << mcts_nodes
+              << "\n";
+  }
+
+  // ========================================================================
+  // Summary
+  // ========================================================================
+  std::cout << "\n=== Summary ===\n";
+  std::cout << "  Classifier tested: " << NUM_TEST_FENS << " positions\n";
+  std::cout << "  MCTS NPS: " << std::fixed << std::setprecision(0) << nps
+            << "\n";
+  std::cout << "  Evaluation dominates: " << std::fixed << std::setprecision(1)
+            << eval_pct << "% of MCTS time\n";
+
+  std::cout << "\nNote: For full Elo testing, use external tools like "
+               "cutechess-cli\n";
+  std::cout << "with 'mcts' command for hybrid and 'go' for pure AB.\n";
+
+  std::cout << "\nBenchmark complete.\n";
 }
 
 } // namespace MetalFish
