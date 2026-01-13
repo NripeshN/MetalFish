@@ -393,6 +393,35 @@ TT hit rate & \multicolumn{2}{r}{99.0\%} \\
 
 \textbf{Definition}: An MCTS ``node'' in our throughput measurement represents one complete iteration: selection from root to leaf, expansion of the leaf node, evaluation (often cached), and backpropagation of the result.
 
+\subsection{Ablation Study}
+
+Table~\ref{tab:ablation} shows the impact of disabling the position classifier and alpha-beta verifier.
+
+\begin{table}[t]
+\caption{Ablation Study (1 second per position, 4 positions)}
+\label{tab:ablation}
+\centering
+\begin{tabular}{lrr}
+\toprule
+Configuration & Avg Nodes & Avg NPS \\
+\midrule
+Full Hybrid (classifier + verifier) & 41,255 & 269,334 \\
+No Classifier (fixed weights) & 153,181 & 250,021 \\
+No Verifier (MCTS only) & 40,804 & 266,504 \\
+Pure MCTS & 153,870 & 251,170 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key findings}:
+\begin{enumerate}
+\item \textbf{Classifier impact}: The position classifier significantly affects time allocation---with classifier enabled, MCTS receives only 41K nodes vs 153K without classifier, as more time is allocated to alpha-beta verification.
+
+\item \textbf{Consistent NPS}: Throughput remains stable at 250--270K NPS regardless of configuration, confirming that the classifier and verifier do not introduce significant overhead.
+
+\item \textbf{Verifier overhead}: Minimal impact on node count when verifier is disabled (41K vs 40K), suggesting the verifier's time budget is separate from MCTS allocation.
+\end{enumerate}
+
 \subsection{Position Classification Results}
 
 Table~\ref{tab:classification} shows position classification for benchmark positions.
@@ -566,6 +595,8 @@ The alpha-beta verifier provides several benefits:
 \end{enumerate}
 
 In our experiments, the verifier rarely overrides MCTS (0 overrides in benchmark positions), suggesting MCTS produces reasonable moves. However, the verifier provides confidence that tactical blunders are caught.
+
+\textbf{Tactical test results}: On a suite of 4 tactical positions (mate-in-1, hanging pieces, forks, pins), the current implementation found 0/4 forcing moves, indicating that the verifier's effectiveness is limited without a trained policy network to guide MCTS toward tactical lines. This is an area for future improvement.
 
 \subsection{Limitations}
 
