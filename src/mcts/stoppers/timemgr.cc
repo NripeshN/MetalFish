@@ -25,11 +25,11 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/stoppers/timemgr.h"
+#include "stoppers/timemgr.h"
 
-#include "search/classic/stoppers/stoppers.h"
+#include "stoppers.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 StoppersHints::StoppersHints() { Reset(); }
@@ -66,4 +66,4 @@ void StoppersHints::Reset() {
 }
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

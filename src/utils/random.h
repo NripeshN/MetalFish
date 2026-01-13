@@ -1,6 +1,6 @@
 /*
   This file is part of Leela Chess Zero.
-  Copyright (C) 2020 The LCZero Authors
+  Copyright (C) 2018 The LCZero Authors
 
   Leela Chess is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -27,14 +27,37 @@
 
 #pragma once
 
-#include "stoppers/timemgr.h"
-#include "../../utils/optionsdict.h"
+#include <algorithm>
+#include <random>
+#include <string>
+#include "mutex.h"
 
 namespace MetalFish {
-namespace classic {
 
-std::unique_ptr<TimeManager> MakeSmoothTimeManager(int64_t move_overhead,
-                                                   const OptionsDict& params);
+class Random {
+ public:
+  static Random& Get();
+  double GetDouble(double max_val);
+  float GetFloat(float max_val);
+  double GetGamma(double alpha, double beta);
+  // Both sides are included.
+  int GetInt(int min, int max);
+  std::string GetString(int length);
+  bool GetBool();
+  template <class RandomAccessIterator>
+  void Shuffle(RandomAccessIterator s, RandomAccessIterator e);
 
-}  // namespace classic
+ private:
+  Random();
+
+  Mutex mutex_;
+  std::mt19937 gen_ GUARDED_BY(mutex_);
+};
+
+template <class RandomAccessIterator>
+void Random::Shuffle(RandomAccessIterator s, RandomAccessIterator e) {
+  Mutex::Lock lock(mutex_);
+  std::shuffle(s, e, gen_);
+}
+
 }  // namespace MetalFish

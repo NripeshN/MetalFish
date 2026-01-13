@@ -33,11 +33,11 @@
 #include <string>
 #include <vector>
 
-#include "chess/bitboard.h"
-#include "chess/position.h"
-#include "utils/exception.h"
+#include "stockfish_adapter.h"
+#include "stockfish_adapter.h"
+#include "../utils/exception.h"
 
-namespace lczero {
+namespace MetalFish {
 
 // Is sent when search decides on the best move.
 struct BestMoveInfo {
@@ -233,4 +233,4 @@ class TransformingUciResponder : public UciResponder {
   std::unique_ptr<UciResponder> parent_;
 };
 
-}  // namespace lczero
+}  // namespace MetalFish

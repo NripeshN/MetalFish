@@ -129,10 +129,17 @@ set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
 # Syzygy source files
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
+# Utils source files (common utilities)
+set(UTILS_SOURCES
+    src/utils/logging.cc
+    src/utils/random.cc
+    src/utils/string.cc)
+
 # GPU source files (backend-agnostic interface)
 set(GPU_SOURCES
     src/gpu/nnue_eval.cpp src/gpu/batch_ops.cpp src/gpu/gpu_nnue.cpp
-    src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_accumulator.cpp)
+    src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_accumulator.cpp
+    src/gpu/gpu_mcts_backend.cpp)
 
 # MCTS source files (hybrid search)
 set(MCTS_SOURCES
@@ -188,6 +195,7 @@ set(SOURCES
     ${EVAL_SOURCES}
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
+    ${UTILS_SOURCES}
     ${GPU_SOURCES}
     ${MCTS_SOURCES})
 

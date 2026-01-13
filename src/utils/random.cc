@@ -1,6 +1,6 @@
 /*
   This file is part of Leela Chess Zero.
-  Copyright (C) 2020 The LCZero Authors
+  Copyright (C) 2018 The LCZero Authors
 
   Leela Chess is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -25,16 +25,50 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#pragma once
-
-#include "stoppers/timemgr.h"
-#include "../../utils/optionsdict.h"
+#include "random.h"
+#include <random>
 
 namespace MetalFish {
-namespace classic {
 
-std::unique_ptr<TimeManager> MakeSmoothTimeManager(int64_t move_overhead,
-                                                   const OptionsDict& params);
+Random::Random() : gen_(std::random_device()()) {}
 
-}  // namespace classic
+Random& Random::Get() {
+  static Random rand;
+  return rand;
+}
+
+int Random::GetInt(int min, int max) {
+  Mutex::Lock lock(mutex_);
+  std::uniform_int_distribution<> dist(min, max);
+  return dist(gen_);
+}
+
+bool Random::GetBool() { return GetInt(0, 1) != 0; }
+
+double Random::GetDouble(double maxval) {
+  Mutex::Lock lock(mutex_);
+  std::uniform_real_distribution<> dist(0.0, maxval);
+  return dist(gen_);
+}
+
+float Random::GetFloat(float maxval) {
+  Mutex::Lock lock(mutex_);
+  std::uniform_real_distribution<> dist(0.0, maxval);
+  return dist(gen_);
+}
+
+std::string Random::GetString(int length) {
+  std::string result;
+  for (int i = 0; i < length; ++i) {
+    result += 'a' + GetInt(0, 25);
+  }
+  return result;
+}
+
+double Random::GetGamma(double alpha, double beta) {
+  Mutex::Lock lock(mutex_);
+  std::gamma_distribution<double> dist(alpha, beta);
+  return dist(gen_);
+}
+
 }  // namespace MetalFish

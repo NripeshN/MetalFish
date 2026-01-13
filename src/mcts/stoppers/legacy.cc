@@ -25,13 +25,13 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/stoppers/legacy.h"
+#include "legacy.h"
 
 #include <cmath>
 
-#include "search/classic/stoppers/stoppers.h"
+#include "stoppers.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 float ComputeEstimatedMovesToGo(int ply, float midpoint, float steepness) {
@@ -176,4 +176,4 @@ std::unique_ptr<TimeManager> MakeLegacyTimeManager(int64_t move_overhead,
   return std::make_unique<LegacyTimeManager>(move_overhead, params);
 }
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

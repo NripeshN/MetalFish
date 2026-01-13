@@ -25,11 +25,11 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/stoppers/stoppers.h"
+#include "stoppers.h"
 
 #include <cmath>
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 ///////////////////////////
@@ -266,4 +266,4 @@ bool SmartPruningStopper::ShouldStop(const IterationStats& stats,
 }
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

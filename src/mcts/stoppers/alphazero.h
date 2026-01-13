@@ -27,13 +27,13 @@
 
 #pragma once
 
-#include "utils/optionsdict.h"
+#include "../../utils/optionsdict.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 std::unique_ptr<TimeManager> MakeAlphazeroTimeManager(
     int64_t move_overhead, const OptionsDict& params);
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

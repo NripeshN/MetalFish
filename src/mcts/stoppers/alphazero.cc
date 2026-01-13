@@ -25,9 +25,9 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/stoppers/stoppers.h"
+#include "stoppers.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 namespace {
@@ -78,4 +78,4 @@ std::unique_ptr<TimeManager> MakeAlphazeroTimeManager(
   return std::make_unique<AlphazeroTimeManager>(move_overhead, params);
 }
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

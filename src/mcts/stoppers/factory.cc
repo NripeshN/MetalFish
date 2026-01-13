@@ -25,19 +25,19 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/stoppers/factory.h"
+#include "stoppers/factory.h"
 
 #include <optional>
 
 #include "factory.h"
-#include "search/classic/stoppers/alphazero.h"
-#include "search/classic/stoppers/legacy.h"
-#include "search/classic/stoppers/simple.h"
-#include "search/classic/stoppers/smooth.h"
-#include "search/classic/stoppers/stoppers.h"
-#include "utils/exception.h"
+#include "alphazero.h"
+#include "legacy.h"
+#include "simple.h"
+#include "smooth.h"
+#include "stoppers.h"
+#include "../../utils/exception.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 namespace {
 
@@ -116,4 +116,4 @@ std::unique_ptr<TimeManager> MakeTimeManager(const OptionsDict& options) {
 }
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

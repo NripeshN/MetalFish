@@ -27,11 +27,11 @@
 
 #pragma once
 
-#include "neural/encoder.h"
-#include "utils/optionsdict.h"
-#include "utils/optionsparser.h"
+#include "../neural/encoder.h"
+#include "../utils/optionsdict.h"
+#include "../utils/optionsparser.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 enum class ContemptMode { PLAY, WHITE, BLACK, NONE };
@@ -314,4 +314,4 @@ class SearchParams : public BaseSearchParams {
   const int kSolidTreeThreshold;
 };
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

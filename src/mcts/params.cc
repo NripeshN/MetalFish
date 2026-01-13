@@ -25,25 +25,25 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/params.h"
+#include "params.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 
-#include "neural/shared_params.h"
-#include "utils/exception.h"
-#include "utils/string.h"
+// Removed: neural/shared_params.h
+#include "../utils/exception.h"
+#include "../utils/string.h"
 
 #if __has_include("params_override.h")
-#include "params_override.h"
+// Removed: params_override.h
 #endif
 
 #ifndef DEFAULT_MAX_PREFETCH
 #define DEFAULT_MAX_PREFETCH 32
 #endif
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 namespace {
@@ -731,4 +731,4 @@ SearchParams::SearchParams(const OptionsDict& options)
     : BaseSearchParams(options),
       kSolidTreeThreshold(options.Get<int>(kSolidTreeThresholdId)) {}
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

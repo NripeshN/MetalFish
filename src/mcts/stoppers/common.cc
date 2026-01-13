@@ -25,11 +25,11 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/stoppers/common.h"
+#include "common.h"
 
-#include "neural/shared_params.h"
+// Removed: neural/shared_params.h
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 namespace {
@@ -202,4 +202,4 @@ std::unique_ptr<TimeManager> MakeCommonTimeManager(
 }
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

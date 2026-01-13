@@ -25,18 +25,18 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/stoppers/smooth.h"
+#include "smooth.h"
 
 #include <cmath>
 #include <functional>
 #include <iomanip>
 #include <optional>
 
-#include "search/classic/stoppers/legacy.h"
-#include "search/classic/stoppers/stoppers.h"
-#include "utils/mutex.h"
+#include "legacy.h"
+#include "stoppers.h"
+#include "../../utils/mutex.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 namespace {
 
@@ -640,4 +640,4 @@ std::unique_ptr<TimeManager> MakeSmoothTimeManager(int64_t move_overhead,
 }
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

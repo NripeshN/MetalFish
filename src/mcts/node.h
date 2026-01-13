@@ -33,15 +33,15 @@
 #include <memory>
 #include <mutex>
 
-#include "chess/board.h"
-#include "chess/callbacks.h"
-#include "chess/gamestate.h"
-#include "chess/position.h"
-#include "neural/encoder.h"
-#include "proto/net.pb.h"
-#include "utils/mutex.h"
+#include "stockfish_adapter.h"
+#include "callbacks.h"
+#include "stockfish_adapter.h"
+#include "stockfish_adapter.h"
+#include "../neural/encoder.h"
+// Removed: proto/net.pb.h
+#include "../utils/mutex.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 // Children of a node are stored the following way:
@@ -667,4 +667,4 @@ class NodeTree {
 };
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

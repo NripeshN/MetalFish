@@ -27,11 +27,11 @@
 
 #pragma once
 
-#include "search/classic/stoppers/stoppers.h"
-#include "utils/optionsdict.h"
-#include "utils/optionsparser.h"
+#include "stoppers.h"
+#include "../../utils/optionsdict.h"
+#include "../../utils/optionsparser.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 enum class RunType { kUci, kSelfplay };
@@ -46,4 +46,4 @@ std::unique_ptr<TimeManager> MakeCommonTimeManager(
     int64_t move_overhead);
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

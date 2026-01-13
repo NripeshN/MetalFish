@@ -32,10 +32,10 @@
 #include <optional>
 #include <vector>
 
-#include "chess/uciloop.h"
-#include "utils/optionsdict.h"
+// Removed: chess/uciloop.h
+#include "../../utils/optionsdict.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 // Various statistics that search sends to stoppers for their stopping decision.
@@ -112,4 +112,4 @@ class TimeManager {
 };
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

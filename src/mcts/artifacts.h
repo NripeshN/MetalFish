@@ -27,11 +27,11 @@
 
 #pragma once
 
-namespace lczero {
+namespace MetalFish {
 
 // Contains the search artifacts that are needed e.g. to build the training
 // data. The selfplay loop would fetch this from search to build training data
 // frames.
 struct SearchArtifacts {};
 
-}  // namespace lczero
+}  // namespace MetalFish

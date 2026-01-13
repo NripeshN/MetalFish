@@ -29,9 +29,12 @@
 #include "eval/score.h"
 #include "gpu/backend.h"
 #include "gpu/gpu_accumulator.h"
+#include "gpu/gpu_mcts_backend.h"
 #include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "gpu/nnue_eval.h"
+#include "mcts/hybrid_search.h"
+#include "mcts/stockfish_adapter.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
 #include "uci/engine.h"
@@ -146,6 +149,8 @@ void UCIEngine::loop() {
       gpu_info();
     else if (token == "gpubench")
       gpu_benchmark();
+    else if (token == "mcts")
+      mcts_go(is);
     else if (token == "compiler")
       sync_cout << compiler_info() << sync_endl;
     else if (token == "export_net") {
@@ -1241,6 +1246,81 @@ void UCIEngine::gpu_benchmark() {
   std::cout << "\n" << std::flush;
 
   std::cout << "\nBenchmark complete.\n" << std::flush;
+}
+
+// ============================================================================
+// MCTS Hybrid Search Command
+// ============================================================================
+void UCIEngine::mcts_go(std::istringstream &is) {
+  sync_cout << "info string Starting MCTS hybrid search..." << sync_endl;
+  
+  // Parse search limits
+  Search::LimitsType limits = parse_limits(is);
+  
+  // Create MCTS position history from current position
+  MCTS::MCTSPositionHistory history;
+  history.reset(engine.fen());
+  
+  // Get GPU NNUE manager
+  GPU::GPUNNUEManager* gpu_manager = nullptr;
+  if (GPU::gpu_nnue_manager_available()) {
+    gpu_manager = &GPU::gpu_nnue_manager();
+  }
+  
+  // Create GPU MCTS backend
+  std::unique_ptr<GPU::GPUMCTSBackend> gpu_backend;
+  if (gpu_manager) {
+    gpu_backend = GPU::create_gpu_mcts_backend(gpu_manager);
+    if (gpu_backend) {
+      sync_cout << "info string GPU MCTS backend initialized" << sync_endl;
+    }
+  }
+  
+  // Configure hybrid search
+  MCTS::HybridSearchConfig config;
+  config.min_batch_size = 8;
+  config.max_batch_size = 256;
+  config.cpuct = 2.5f;
+  config.add_dirichlet_noise = true;
+  config.use_ab_for_tactics = true;
+  config.num_search_threads = 1;  // Single-threaded for now
+  
+  // Create hybrid search
+  MCTS::HybridSearch search(config);
+  
+  // Set GPU NNUE manager
+  if (gpu_manager) {
+    search.set_gpu_nnue(gpu_manager);
+  }
+  
+  // Set neural network backend if available
+  if (gpu_backend) {
+    search.set_neural_network(std::move(gpu_backend));
+  }
+  
+  // Callbacks for UCI output
+  auto best_move_cb = [](MCTS::MCTSMove best, MCTS::MCTSMove ponder) {
+    std::string best_str = best.to_string();
+    std::string ponder_str = ponder.is_null() ? "" : " ponder " + ponder.to_string();
+    sync_cout << "bestmove " << best_str << ponder_str << sync_endl;
+  };
+  
+  auto info_cb = [](const std::string& info) {
+    sync_cout << info << sync_endl;
+  };
+  
+  // Start search
+  search.start_search(history, limits, best_move_cb, info_cb);
+  
+  // Wait for completion
+  search.wait();
+  
+  // Print statistics
+  const auto& stats = search.stats();
+  sync_cout << "info string MCTS nodes: " << stats.mcts_nodes 
+            << " AB nodes: " << stats.ab_nodes
+            << " NN evals: " << stats.nn_evaluations
+            << " batches: " << stats.nn_batches << sync_endl;
 }
 
 } // namespace MetalFish

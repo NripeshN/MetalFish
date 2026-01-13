@@ -25,7 +25,7 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/search.h"
+#include "search.h"
 
 #include <algorithm>
 #include <array>
@@ -36,14 +36,14 @@
 #include <sstream>
 #include <thread>
 
-#include "neural/encoder.h"
-#include "search/classic/node.h"
-#include "utils/fastmath.h"
-#include "utils/random.h"
-#include "utils/spinhelper.h"
-#include "utils/trace.h"
+#include "../neural/encoder.h"
+#include "node.h"
+#include "../utils/fastmath.h"
+#include "../utils/random.h"
+#include "../utils/spinhelper.h"
+// Removed: utils/trace.h
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 namespace {
@@ -2394,4 +2394,4 @@ void SearchWorker::UpdateCounters() {
 }
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

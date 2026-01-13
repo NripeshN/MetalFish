@@ -25,15 +25,15 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "chess/gamestate.h"
-#include "search/classic/search.h"
-#include "search/classic/stoppers/factory.h"
-#include "search/register.h"
-#include "search/search.h"
-#include "neural/shared_params.h"
-#include "utils/trace.h"
+#include "stockfish_adapter.h"
+#include "search.h"
+#include "stoppers/factory.h"
+// Removed: search/register.h
+#include "search.h"
+// Removed: neural/shared_params.h
+// Removed: utils/trace.h
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 namespace {
 
@@ -161,4 +161,4 @@ REGISTER_SEARCH(ClassicSearchFactory);
 
 }  // namespace
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

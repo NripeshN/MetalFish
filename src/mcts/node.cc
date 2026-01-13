@@ -25,7 +25,7 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "search/classic/node.h"
+#include "node.h"
 
 #include <algorithm>
 #include <cassert>
@@ -35,12 +35,12 @@
 #include <sstream>
 #include <thread>
 
-#include "neural/encoder.h"
-#include "neural/network.h"
-#include "utils/exception.h"
-#include "utils/hashcat.h"
+#include "../neural/encoder.h"
+#include "../neural/network.h"
+#include "../utils/exception.h"
+#include "../utils/hashcat.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 /////////////////////////////////////////////////////////////////////////
@@ -543,4 +543,4 @@ void NodeTree::DeallocateTree() {
 }
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

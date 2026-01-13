@@ -1,6 +1,6 @@
 /*
   This file is part of Leela Chess Zero.
-  Copyright (C) 2020 The LCZero Authors
+  Copyright (C) 2018 The LCZero Authors
 
   Leela Chess is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -27,14 +27,17 @@
 
 #pragma once
 
-#include "stoppers/timemgr.h"
-#include "../../utils/optionsdict.h"
+#include <stdexcept>
+#include "logging.h"
 
 namespace MetalFish {
-namespace classic {
 
-std::unique_ptr<TimeManager> MakeSmoothTimeManager(int64_t move_overhead,
-                                                   const OptionsDict& params);
+// Exception to throw around.
+class Exception : public std::runtime_error {
+ public:
+  Exception(const std::string& what) : std::runtime_error(what) {
+    LOGFILE << "Exception: " << what;
+  }
+};
 
-}  // namespace classic
 }  // namespace MetalFish

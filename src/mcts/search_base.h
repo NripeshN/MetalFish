@@ -30,10 +30,10 @@
 #include <memory>
 #include <span>
 
-#include "search/artifacts.h"
-#include "utils/exception.h"
+#include "artifacts.h"
+#include "../utils/exception.h"
 
-namespace lczero {
+namespace MetalFish {
 
 class Backend;
 struct GameState;
@@ -101,4 +101,4 @@ class SearchFactory {
       UciResponder*, const OptionsDict*) const = 0;
 };
 
-}  // namespace lczero
+}  // namespace MetalFish

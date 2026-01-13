@@ -27,12 +27,12 @@
 
 #pragma once
 
-#include "search/classic/stoppers/common.h"
-#include "search/classic/stoppers/timemgr.h"
-#include "utils/optionsdict.h"
-#include "utils/optionsparser.h"
+#include "common.h"
+#include "stoppers/timemgr.h"
+#include "../../utils/optionsdict.h"
+#include "../../utils/optionsparser.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 // Populates UCI/command line flags with time management options.
@@ -42,4 +42,4 @@ void PopulateTimeManagementOptions(RunType for_what, OptionsParser* options);
 std::unique_ptr<TimeManager> MakeTimeManager(const OptionsDict& dict);
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

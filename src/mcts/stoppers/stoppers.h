@@ -30,9 +30,9 @@
 #include <optional>
 #include <vector>
 
-#include "search/classic/stoppers/timemgr.h"
+#include "stoppers/timemgr.h"
 
-namespace lczero {
+namespace MetalFish {
 namespace classic {
 
 // Combines multiple stoppers into one.
@@ -153,4 +153,4 @@ class SmartPruningStopper : public SearchStopper {
 };
 
 }  // namespace classic
-}  // namespace lczero
+}  // namespace MetalFish

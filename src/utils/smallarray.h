@@ -1,6 +1,6 @@
 /*
   This file is part of Leela Chess Zero.
-  Copyright (C) 2020 The LCZero Authors
+  Copyright (C) 2018 The LCZero Authors
 
   Leela Chess is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -27,14 +27,24 @@
 
 #pragma once
 
-#include "stoppers/timemgr.h"
-#include "../../utils/optionsdict.h"
+#include <memory>
 
 namespace MetalFish {
-namespace classic {
 
-std::unique_ptr<TimeManager> MakeSmoothTimeManager(int64_t move_overhead,
-                                                   const OptionsDict& params);
+// Non resizeable array which can contain up to 255 elements.
+template <typename T>
+class SmallArray {
+ public:
+  SmallArray() = delete;
+  SmallArray(size_t size) : size_(size), data_(std::make_unique<T[]>(size)) {}
+  SmallArray(SmallArray&&);  // TODO implement when needed
+  T& operator[](int idx) { return data_[idx]; }
+  const T& operator[](int idx) const { return data_[idx]; }
+  int size() const { return size_; }
 
-}  // namespace classic
+ private:
+  unsigned char size_;
+  std::unique_ptr<T[]> data_;
+};
+
 }  // namespace MetalFish
