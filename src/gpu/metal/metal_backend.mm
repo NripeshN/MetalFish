@@ -148,12 +148,31 @@ public:
 
     MTLSize grid_size = MTLSizeMake(width, height, depth);
 
-    // Calculate optimal threadgroup size
+    // Calculate optimal threadgroup size for the grid dimensions
     NSUInteger max_threads = current_kernel_->max_threads_per_threadgroup();
-    NSUInteger thread_width = std::min(width, max_threads);
-    NSUInteger thread_height = std::min(height, max_threads / thread_width);
-    NSUInteger thread_depth =
-        std::min(depth, max_threads / (thread_width * thread_height));
+    NSUInteger thread_width, thread_height, thread_depth;
+    
+    if (depth > 1) {
+      // 3D dispatch - balance across all dimensions
+      thread_depth = std::min(depth, (size_t)4);
+      thread_height = std::min(height, (size_t)4);
+      thread_width = std::min(width, max_threads / (thread_height * thread_depth));
+    } else if (height > 1) {
+      // 2D dispatch - use square-ish threadgroups for better cache locality
+      // For feature transform: width=hidden_dim (1024), height=batch_size
+      thread_height = std::min(height, (size_t)8);
+      thread_width = std::min(width, max_threads / thread_height);
+      // Ensure thread_width is a multiple of 32 (simdgroup size) when possible
+      if (thread_width >= 32) {
+        thread_width = (thread_width / 32) * 32;
+      }
+      thread_depth = 1;
+    } else {
+      // 1D dispatch
+      thread_width = std::min(width, max_threads);
+      thread_height = 1;
+      thread_depth = 1;
+    }
 
     MTLSize threadgroup_size =
         MTLSizeMake(thread_width, thread_height, thread_depth);
