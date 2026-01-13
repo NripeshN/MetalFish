@@ -100,12 +100,11 @@ class MetalCommandEncoder : public CommandEncoder {
 public:
   MetalCommandEncoder(id<MTLCommandQueue> queue)
       : queue_(queue), buffer_(nil), encoder_(nil), ended_(false) {
-    @autoreleasepool {
-      buffer_ = [queue_ commandBuffer];
-      [buffer_ retain];
-      encoder_ = [buffer_ computeCommandEncoder];
-      [encoder_ retain];
-    }
+    // Create command buffer without autoreleasepool for faster allocation
+    buffer_ = [queue_ commandBuffer];
+    [buffer_ retain];
+    encoder_ = [buffer_ computeCommandEncoder];
+    [encoder_ retain];
   }
 
   ~MetalCommandEncoder() override {
@@ -295,8 +294,13 @@ public:
       break;
     }
 
-    // Add hazard tracking for safety
-    options |= MTLResourceHazardTrackingModeTracked;
+    // On unified memory systems, disable hazard tracking for better performance
+    // We manage synchronization manually via barriers
+    if (has_unified_memory()) {
+      options |= MTLResourceHazardTrackingModeUntracked;
+    } else {
+      options |= MTLResourceHazardTrackingModeTracked;
+    }
 
     @autoreleasepool {
       id<MTLBuffer> buffer = [device_ newBufferWithLength:size options:options];
@@ -316,7 +320,13 @@ public:
       return nullptr;
 
     MTLResourceOptions options = MTLResourceStorageModeShared;
-    options |= MTLResourceHazardTrackingModeTracked;
+
+    // On unified memory systems, disable hazard tracking for better performance
+    if (has_unified_memory()) {
+      options |= MTLResourceHazardTrackingModeUntracked;
+    } else {
+      options |= MTLResourceHazardTrackingModeTracked;
+    }
 
     @autoreleasepool {
       id<MTLBuffer> buffer = [device_ newBufferWithBytes:data
@@ -410,11 +420,9 @@ public:
     // Create and immediately complete a command buffer to ensure all work is
     // done
     if (queue_) {
-      @autoreleasepool {
-        id<MTLCommandBuffer> buffer = [queue_ commandBuffer];
-        [buffer commit];
-        [buffer waitUntilCompleted];
-      }
+      id<MTLCommandBuffer> buffer = [queue_ commandBuffer];
+      [buffer commit];
+      [buffer waitUntilCompleted];
     }
   }
 

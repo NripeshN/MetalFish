@@ -216,6 +216,7 @@ struct GPUPositionData {
 // Each thread processes one hidden dimension for one position.
 // Memory access pattern: weights[feature_idx * hidden_dim + hidden_idx]
 // provides coalesced reads when threads in a simdgroup access consecutive hidden_idx.
+// Feature indices are guaranteed valid by CPU extraction, so no bounds checks needed.
 kernel void gpu_feature_transform(
     device const weight_t* weights [[buffer(0)]],
     device const weight_t* biases [[buffer(1)]],
@@ -240,15 +241,32 @@ kernel void gpu_feature_transform(
     uint start = feature_offsets[pos_idx];
     uint count = feature_counts[pos_idx];
     
-    // Process features - use simdgroup broadcast for feature index
-    // All threads in simdgroup read same feature, but different weight elements
-    for (uint i = 0; i < count; i++) {
+    // 8-way unrolled loop for maximum throughput
+    uint i = 0;
+    for (; i + 7 < count; i += 8) {
+        int32_t f0 = features[start + i];
+        int32_t f1 = features[start + i + 1];
+        int32_t f2 = features[start + i + 2];
+        int32_t f3 = features[start + i + 3];
+        int32_t f4 = features[start + i + 4];
+        int32_t f5 = features[start + i + 5];
+        int32_t f6 = features[start + i + 6];
+        int32_t f7 = features[start + i + 7];
+        
+        acc += weights[f0 * hidden_dim + hidden_idx];
+        acc += weights[f1 * hidden_dim + hidden_idx];
+        acc += weights[f2 * hidden_dim + hidden_idx];
+        acc += weights[f3 * hidden_dim + hidden_idx];
+        acc += weights[f4 * hidden_dim + hidden_idx];
+        acc += weights[f5 * hidden_dim + hidden_idx];
+        acc += weights[f6 * hidden_dim + hidden_idx];
+        acc += weights[f7 * hidden_dim + hidden_idx];
+    }
+    
+    // Handle remaining features
+    for (; i < count; i++) {
         int32_t feat_idx = features[start + i];
-        if (feat_idx >= 0) {
-            // Broadcast feature index within simdgroup (all lanes get same value)
-            // Then each thread reads its own weight element - coalesced access
-            acc += weights[feat_idx * hidden_dim + hidden_idx];
-        }
+        acc += weights[feat_idx * hidden_dim + hidden_idx];
     }
     
     accumulators[pos_idx * hidden_dim + hidden_idx] = acc;
@@ -257,7 +275,8 @@ kernel void gpu_feature_transform(
 // Dual-Perspective Feature Transform
 // Processes both white and black perspectives in a single kernel dispatch.
 // Uses 3D grid: (hidden_dim, 2, batch_size) for perspective parallelism.
-// Loop unrolling (4x) improves instruction-level parallelism.
+// 8-way loop unrolling maximizes instruction-level parallelism.
+// Feature indices are guaranteed valid by CPU extraction, so no bounds checks needed.
 kernel void gpu_feature_transform_dual(
     device const weight_t* weights [[buffer(0)]],
     device const weight_t* biases [[buffer(1)]],
@@ -289,26 +308,33 @@ kernel void gpu_feature_transform_dual(
     uint start = offsets[pos_idx];
     uint count = counts[pos_idx];
     
-    // Unrolled loop for better performance
+    // 8-way unrolled loop for maximum throughput
     uint i = 0;
-    for (; i + 3 < count; i += 4) {
+    for (; i + 7 < count; i += 8) {
         int32_t f0 = features[start + i];
         int32_t f1 = features[start + i + 1];
         int32_t f2 = features[start + i + 2];
         int32_t f3 = features[start + i + 3];
+        int32_t f4 = features[start + i + 4];
+        int32_t f5 = features[start + i + 5];
+        int32_t f6 = features[start + i + 6];
+        int32_t f7 = features[start + i + 7];
         
-        if (f0 >= 0) acc += weights[f0 * hidden_dim + hidden_idx];
-        if (f1 >= 0) acc += weights[f1 * hidden_dim + hidden_idx];
-        if (f2 >= 0) acc += weights[f2 * hidden_dim + hidden_idx];
-        if (f3 >= 0) acc += weights[f3 * hidden_dim + hidden_idx];
+        // No bounds check needed - CPU guarantees valid indices
+        acc += weights[f0 * hidden_dim + hidden_idx];
+        acc += weights[f1 * hidden_dim + hidden_idx];
+        acc += weights[f2 * hidden_dim + hidden_idx];
+        acc += weights[f3 * hidden_dim + hidden_idx];
+        acc += weights[f4 * hidden_dim + hidden_idx];
+        acc += weights[f5 * hidden_dim + hidden_idx];
+        acc += weights[f6 * hidden_dim + hidden_idx];
+        acc += weights[f7 * hidden_dim + hidden_idx];
     }
     
-    // Handle remaining features
+    // Handle remaining features (0-7 iterations)
     for (; i < count; i++) {
         int32_t feat_idx = features[start + i];
-        if (feat_idx >= 0) {
-            acc += weights[feat_idx * hidden_dim + hidden_idx];
-        }
+        acc += weights[feat_idx * hidden_dim + hidden_idx];
     }
     
     accumulators[(pos_idx * 2 + perspective) * hidden_dim + hidden_idx] = acc;
@@ -1534,6 +1560,8 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
       static_cast<uint32_t *>(black_offsets_buffer_->data());
 
   // Extract features directly into GPU buffers (zero-copy on unified memory)
+  // Optimized: removed redundant bounds checks since feature indices are
+  // mathematically guaranteed to be in range for valid chess positions
   size_t white_feature_idx = 0;
   size_t black_feature_idx = 0;
 
@@ -1543,39 +1571,35 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     white_offsets_ptr[i] = static_cast<uint32_t>(white_feature_idx);
     black_offsets_ptr[i] = static_cast<uint32_t>(black_feature_idx);
 
-    const Square wksq = Square(pos_data.king_sq[0]);
-    const Square bksq = Square(pos_data.king_sq[1]);
-    const Square bksq_flip = flip_rank(bksq);
+    const int wksq = pos_data.king_sq[0];
+    const int bksq_flip = pos_data.king_sq[1] ^ 56; // flip_rank inline
 
     int white_count = 0;
     int black_count = 0;
 
     // Extract HalfKA features from piece bitboards
-    for (int c = 0; c < 2; c++) {
-      for (int pt = PAWN; pt <= QUEEN; pt++) {
-        Bitboard bb = pos_data.pieces[c][pt];
-        while (bb) {
-          const Square s = pop_lsb(bb);
-          const Square s_flip = flip_rank(s);
-
-          // White perspective feature
-          const int white_feat =
-              int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
-          if (white_feat >= 0 && white_feat < GPU_HALFKA_DIMS &&
-              white_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
-            white_features_ptr[white_feature_idx++] = white_feat;
-            white_count++;
-          }
-
-          // Black perspective feature (mirrored)
-          const int black_feat = int(bksq_flip) * 640 + (1 - c) * 320 +
-                                 (pt - 1) * 64 + int(s_flip);
-          if (black_feat >= 0 && black_feat < GPU_HALFKA_DIMS &&
-              black_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
-            black_features_ptr[black_feature_idx++] = black_feat;
-            black_count++;
-          }
-        }
+    // Unrolled color loop for better branch prediction
+    for (int pt = PAWN; pt <= QUEEN; pt++) {
+      const int pt_offset = (pt - 1) * 64;
+      
+      // White pieces
+      Bitboard bb_w = pos_data.pieces[0][pt];
+      while (bb_w) {
+        const int s = pop_lsb(bb_w);
+        white_features_ptr[white_feature_idx++] = wksq * 640 + pt_offset + s;
+        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
+        white_count++;
+        black_count++;
+      }
+      
+      // Black pieces
+      Bitboard bb_b = pos_data.pieces[1][pt];
+      while (bb_b) {
+        const int s = pop_lsb(bb_b);
+        white_features_ptr[white_feature_idx++] = wksq * 640 + 320 + pt_offset + s;
+        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + pt_offset + (s ^ 56);
+        white_count++;
+        black_count++;
       }
     }
 
@@ -1583,9 +1607,8 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     black_counts_ptr[i] = static_cast<uint32_t>(black_count);
   }
 
-  // Upload position data
-  std::memcpy(positions_buffer_->data(), batch.positions.data(),
-              batch_size * sizeof(GPUPositionData));
+  // Note: positions_buffer_ upload removed - feature extraction is done on CPU
+  // and features are written directly to GPU buffers via unified memory
 
   // Create command encoder
   auto encoder = backend.create_encoder();
@@ -1593,9 +1616,9 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   // Select optimal kernel based on batch size and available kernels
   // Testing showed that the fused kernel uses too much threadgroup memory
   // and reduces GPU occupancy, making it slower than separate dispatches
+  // Always use dual-perspective kernel since it processes both perspectives
   const bool use_fused_kernel = false; // Disabled - slower than separate kernels
-  const bool use_dual_kernel = (batch_size >= 64) &&
-                               feature_transform_dual_kernel_ &&
+  const bool use_dual_kernel = feature_transform_dual_kernel_ &&
                                feature_transform_dual_kernel_->valid();
 
   if (use_fused_kernel) {
@@ -1742,6 +1765,7 @@ bool GPUNNUEManager::evaluate_batch_async(
       static_cast<uint32_t *>(black_offsets_buffer_->data());
 
   // Extract features directly into GPU buffers
+  // Optimized: removed redundant bounds checks
   size_t white_feature_idx = 0;
   size_t black_feature_idx = 0;
 
@@ -1751,36 +1775,33 @@ bool GPUNNUEManager::evaluate_batch_async(
     white_offsets_ptr[i] = static_cast<uint32_t>(white_feature_idx);
     black_offsets_ptr[i] = static_cast<uint32_t>(black_feature_idx);
 
-    const Square wksq = Square(pos_data.king_sq[0]);
-    const Square bksq = Square(pos_data.king_sq[1]);
-    const Square bksq_flip = flip_rank(bksq);
+    const int wksq = pos_data.king_sq[0];
+    const int bksq_flip = pos_data.king_sq[1] ^ 56;
 
     int white_count = 0;
     int black_count = 0;
 
-    for (int c = 0; c < 2; c++) {
-      for (int pt = PAWN; pt <= QUEEN; pt++) {
-        Bitboard bb = pos_data.pieces[c][pt];
-        while (bb) {
-          const Square s = pop_lsb(bb);
-          const Square s_flip = flip_rank(s);
-
-          const int white_feat =
-              int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
-          if (white_feat >= 0 && white_feat < GPU_HALFKA_DIMS &&
-              white_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
-            white_features_ptr[white_feature_idx++] = white_feat;
-            white_count++;
-          }
-
-          const int black_feat = int(bksq_flip) * 640 + (1 - c) * 320 +
-                                 (pt - 1) * 64 + int(s_flip);
-          if (black_feat >= 0 && black_feat < GPU_HALFKA_DIMS &&
-              black_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
-            black_features_ptr[black_feature_idx++] = black_feat;
-            black_count++;
-          }
-        }
+    for (int pt = PAWN; pt <= QUEEN; pt++) {
+      const int pt_offset = (pt - 1) * 64;
+      
+      // White pieces
+      Bitboard bb_w = pos_data.pieces[0][pt];
+      while (bb_w) {
+        const int s = pop_lsb(bb_w);
+        white_features_ptr[white_feature_idx++] = wksq * 640 + pt_offset + s;
+        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
+        white_count++;
+        black_count++;
+      }
+      
+      // Black pieces
+      Bitboard bb_b = pos_data.pieces[1][pt];
+      while (bb_b) {
+        const int s = pop_lsb(bb_b);
+        white_features_ptr[white_feature_idx++] = wksq * 640 + 320 + pt_offset + s;
+        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + pt_offset + (s ^ 56);
+        white_count++;
+        black_count++;
       }
     }
 
@@ -1793,9 +1814,8 @@ bool GPUNNUEManager::evaluate_batch_async(
 
   auto encoder = backend.create_encoder();
 
-  // Feature transform
-  const bool use_dual_kernel = (batch_size >= 64) &&
-                               feature_transform_dual_kernel_ &&
+  // Feature transform - always use dual kernel for both perspectives
+  const bool use_dual_kernel = feature_transform_dual_kernel_ &&
                                feature_transform_dual_kernel_->valid();
 
   if (use_dual_kernel) {
