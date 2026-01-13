@@ -3,7 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 
   GPU NNUE Integration Implementation
-  
+
   This module provides GPU-accelerated NNUE evaluation using Metal compute
   shaders. Key features:
   - Adaptive kernel selection based on batch size
@@ -39,14 +39,15 @@ EvalStrategy GPUTuningParams::select_strategy(int batch_size) const {
   if (batch_size < min_batch_for_gpu) {
     return EvalStrategy::CPU_FALLBACK;
   }
-  
+
   // Calculate expected costs
   // CPU cost: batch_size * cpu_eval_ns (nanoseconds)
-  // GPU cost: gpu_dispatch_us * 1000 (nanoseconds) + batch_size * marginal_gpu_cost
-  
+  // GPU cost: gpu_dispatch_us * 1000 (nanoseconds) + batch_size *
+  // marginal_gpu_cost
+
   // For small batches, dispatch overhead dominates - use standard kernels
   // For large batches, compute dominates - use SIMD kernels
-  
+
   if (batch_size >= gpu_extract_threshold) {
     return EvalStrategy::GPU_FEATURE_EXTRACT;
   } else if (batch_size >= simd_threshold) {
@@ -154,7 +155,7 @@ void GPUEvalBatch::add_position(const Position &pos) {
 
 // ============================================================================
 // Metal Shader Source
-// 
+//
 // Contains GPU compute kernels for NNUE evaluation:
 // - Feature transform: Converts sparse features to dense accumulators
 // - Forward pass: Evaluates the neural network layers
@@ -777,12 +778,12 @@ bool GPUNNUEManager::compile_shaders() {
       backend.create_kernel("gpu_nnue_forward", "gpu_nnue_integration");
   psqt_kernel_ =
       backend.create_kernel("gpu_psqt_accumulate", "gpu_nnue_integration");
-  
+
   // Optional kernels for adaptive strategy selection
-  forward_simd_kernel_ = 
+  forward_simd_kernel_ =
       backend.create_kernel("gpu_nnue_forward_simd", "gpu_nnue_integration");
-  feature_transform_dual_kernel_ =
-      backend.create_kernel("gpu_feature_transform_dual", "gpu_nnue_integration");
+  feature_transform_dual_kernel_ = backend.create_kernel(
+      "gpu_feature_transform_dual", "gpu_nnue_integration");
   extract_features_kernel_ =
       backend.create_kernel("gpu_extract_features", "gpu_nnue_integration");
   forward_batch_kernel_ =
@@ -809,11 +810,14 @@ bool GPUNNUEManager::compile_shaders() {
   if (forward_simd_kernel_ && forward_simd_kernel_->valid()) {
     std::cout << "[GPU NNUE] SIMD forward kernel available" << std::endl;
   }
-  if (feature_transform_dual_kernel_ && feature_transform_dual_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Dual-perspective transform kernel available" << std::endl;
+  if (feature_transform_dual_kernel_ &&
+      feature_transform_dual_kernel_->valid()) {
+    std::cout << "[GPU NNUE] Dual-perspective transform kernel available"
+              << std::endl;
   }
   if (extract_features_kernel_ && extract_features_kernel_->valid()) {
-    std::cout << "[GPU NNUE] GPU feature extraction kernel available" << std::endl;
+    std::cout << "[GPU NNUE] GPU feature extraction kernel available"
+              << std::endl;
   }
   if (forward_batch_kernel_ && forward_batch_kernel_->valid()) {
     std::cout << "[GPU NNUE] Batch forward kernel available" << std::endl;
@@ -827,37 +831,38 @@ bool GPUNNUEManager::allocate_working_buffers() {
   auto &backend = gpu();
 
   const size_t max_positions = GPU_MAX_BATCH_SIZE;
-  const size_t max_features_per_perspective = max_positions * GPU_MAX_FEATURES_PER_PERSPECTIVE;
+  const size_t max_features_per_perspective =
+      max_positions * GPU_MAX_FEATURES_PER_PERSPECTIVE;
   const size_t max_hidden = GPU_FT_DIM_BIG;
 
   // Position data buffer
   positions_buffer_ =
       backend.create_buffer(max_positions * sizeof(GPUPositionData));
-      
+
   // Feature buffers (separate for white and black)
   white_features_buffer_ =
       backend.create_buffer(max_features_per_perspective * sizeof(int32_t));
   black_features_buffer_ =
       backend.create_buffer(max_features_per_perspective * sizeof(int32_t));
-      
+
   // Counts buffers (separate for dual-perspective kernel)
   white_counts_buffer_ =
       backend.create_buffer(max_positions * sizeof(uint32_t));
   black_counts_buffer_ =
       backend.create_buffer(max_positions * sizeof(uint32_t));
-      
+
   // Offsets buffers (separate for dual-perspective kernel)
   white_offsets_buffer_ =
       backend.create_buffer(max_positions * sizeof(uint32_t));
   black_offsets_buffer_ =
       backend.create_buffer(max_positions * sizeof(uint32_t));
-      
+
   // Legacy interleaved buffers (for backward compatibility)
   feature_counts_buffer_ =
       backend.create_buffer(max_positions * 2 * sizeof(uint32_t));
   feature_offsets_buffer_ =
       backend.create_buffer(max_positions * 2 * sizeof(uint32_t));
-      
+
   // Accumulators: [batch][2 perspectives][hidden_dim]
   accumulators_buffer_ =
       backend.create_buffer(max_positions * 2 * max_hidden * sizeof(int32_t));
@@ -1089,7 +1094,7 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
 
   // Select evaluation strategy based on batch size
   EvalStrategy strategy = tuning_.select_strategy(batch.count);
-  
+
   if (strategy == EvalStrategy::CPU_FALLBACK) {
     cpu_evals_ += batch.count;
     return false;
@@ -1108,31 +1113,38 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   const int batch_size = batch.count;
   const int hidden_dim = net.hidden_dim;
 
-  // Use pre-allocated buffer pointers for direct writes (avoid std::vector allocations)
-  int32_t* white_features_ptr = static_cast<int32_t*>(white_features_buffer_->data());
-  int32_t* black_features_ptr = static_cast<int32_t*>(black_features_buffer_->data());
-  uint32_t* white_counts_ptr = static_cast<uint32_t*>(white_counts_buffer_->data());
-  uint32_t* black_counts_ptr = static_cast<uint32_t*>(black_counts_buffer_->data());
-  uint32_t* white_offsets_ptr = static_cast<uint32_t*>(white_offsets_buffer_->data());
-  uint32_t* black_offsets_ptr = static_cast<uint32_t*>(black_offsets_buffer_->data());
-  
+  // Use pre-allocated buffer pointers for direct writes (avoid std::vector
+  // allocations)
+  int32_t *white_features_ptr =
+      static_cast<int32_t *>(white_features_buffer_->data());
+  int32_t *black_features_ptr =
+      static_cast<int32_t *>(black_features_buffer_->data());
+  uint32_t *white_counts_ptr =
+      static_cast<uint32_t *>(white_counts_buffer_->data());
+  uint32_t *black_counts_ptr =
+      static_cast<uint32_t *>(black_counts_buffer_->data());
+  uint32_t *white_offsets_ptr =
+      static_cast<uint32_t *>(white_offsets_buffer_->data());
+  uint32_t *black_offsets_ptr =
+      static_cast<uint32_t *>(black_offsets_buffer_->data());
+
   // Extract features directly into GPU buffers (zero-copy on unified memory)
   size_t white_feature_idx = 0;
   size_t black_feature_idx = 0;
-  
+
   for (int i = 0; i < batch_size; i++) {
     const auto &pos_data = batch.positions[i];
-    
+
     white_offsets_ptr[i] = static_cast<uint32_t>(white_feature_idx);
     black_offsets_ptr[i] = static_cast<uint32_t>(black_feature_idx);
-    
+
     const Square wksq = Square(pos_data.king_sq[0]);
     const Square bksq = Square(pos_data.king_sq[1]);
     const Square bksq_flip = flip_rank(bksq);
-    
+
     int white_count = 0;
     int black_count = 0;
-    
+
     // Extract HalfKA features from piece bitboards
     for (int c = 0; c < 2; c++) {
       for (int pt = PAWN; pt <= QUEEN; pt++) {
@@ -1140,19 +1152,20 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
         while (bb) {
           const Square s = pop_lsb(bb);
           const Square s_flip = flip_rank(s);
-          
+
           // White perspective feature
-          const int white_feat = int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
-          if (white_feat >= 0 && white_feat < GPU_HALFKA_DIMS && 
+          const int white_feat =
+              int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
+          if (white_feat >= 0 && white_feat < GPU_HALFKA_DIMS &&
               white_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
             white_features_ptr[white_feature_idx++] = white_feat;
             white_count++;
           }
-          
+
           // Black perspective feature (mirrored)
-          const int black_feat = int(bksq_flip) * 640 + (1 - c) * 320 + 
+          const int black_feat = int(bksq_flip) * 640 + (1 - c) * 320 +
                                  (pt - 1) * 64 + int(s_flip);
-          if (black_feat >= 0 && black_feat < GPU_HALFKA_DIMS && 
+          if (black_feat >= 0 && black_feat < GPU_HALFKA_DIMS &&
               black_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
             black_features_ptr[black_feature_idx++] = black_feat;
             black_count++;
@@ -1160,7 +1173,7 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
         }
       }
     }
-    
+
     white_counts_ptr[i] = static_cast<uint32_t>(white_count);
     black_counts_ptr[i] = static_cast<uint32_t>(black_count);
   }
@@ -1172,12 +1185,13 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   // Create command encoder
   auto encoder = backend.create_encoder();
 
-  // Use dual-perspective kernel for larger batches (amortizes 3D dispatch overhead)
-  // For small batches, the simpler single-perspective kernel is faster
-  const bool use_dual_kernel = (batch_size >= 64) && 
-                                feature_transform_dual_kernel_ && 
-                                feature_transform_dual_kernel_->valid();
-  
+  // Use dual-perspective kernel for larger batches (amortizes 3D dispatch
+  // overhead) For small batches, the simpler single-perspective kernel is
+  // faster
+  const bool use_dual_kernel = (batch_size >= 64) &&
+                               feature_transform_dual_kernel_ &&
+                               feature_transform_dual_kernel_->valid();
+
   if (use_dual_kernel) {
     encoder->set_kernel(feature_transform_dual_kernel_.get());
     encoder->set_buffer(net.ft_weights.get(), 0);
@@ -1210,10 +1224,11 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   }
 
   // Select correct bucket layer based on position piece counts
-  // For simplicity, use bucket 0 for all (can be extended to per-position buckets)
+  // For simplicity, use bucket 0 for all (can be extended to per-position
+  // buckets)
   const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
   const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
-  
+
   // Forward pass - standard kernel performs well across all batch sizes
   encoder->set_kernel(forward_fused_kernel_.get());
   encoder->set_buffer(accumulators_buffer_.get(), 0);
@@ -1244,20 +1259,22 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   return true;
 }
 
-bool GPUNNUEManager::evaluate_batch_async(GPUEvalBatch &batch,
-                                          std::function<void(bool success)> completion_handler,
-                                          bool use_big_network) {
+bool GPUNNUEManager::evaluate_batch_async(
+    GPUEvalBatch &batch, std::function<void(bool success)> completion_handler,
+    bool use_big_network) {
   if (!is_ready() || batch.count == 0) {
-    if (completion_handler) completion_handler(false);
+    if (completion_handler)
+      completion_handler(false);
     return false;
   }
 
   // Select evaluation strategy based on batch size
   EvalStrategy strategy = tuning_.select_strategy(batch.count);
-  
+
   if (strategy == EvalStrategy::CPU_FALLBACK) {
     cpu_evals_ += batch.count;
-    if (completion_handler) completion_handler(false);
+    if (completion_handler)
+      completion_handler(false);
     return false;
   }
 
@@ -1266,7 +1283,8 @@ bool GPUNNUEManager::evaluate_batch_async(GPUEvalBatch &batch,
 
   if (!net.valid) {
     cpu_evals_ += batch.count;
-    if (completion_handler) completion_handler(false);
+    if (completion_handler)
+      completion_handler(false);
     return false;
   }
 
@@ -1274,47 +1292,54 @@ bool GPUNNUEManager::evaluate_batch_async(GPUEvalBatch &batch,
   const int hidden_dim = net.hidden_dim;
 
   // Use pre-allocated buffer pointers for direct writes
-  int32_t* white_features_ptr = static_cast<int32_t*>(white_features_buffer_->data());
-  int32_t* black_features_ptr = static_cast<int32_t*>(black_features_buffer_->data());
-  uint32_t* white_counts_ptr = static_cast<uint32_t*>(white_counts_buffer_->data());
-  uint32_t* black_counts_ptr = static_cast<uint32_t*>(black_counts_buffer_->data());
-  uint32_t* white_offsets_ptr = static_cast<uint32_t*>(white_offsets_buffer_->data());
-  uint32_t* black_offsets_ptr = static_cast<uint32_t*>(black_offsets_buffer_->data());
-  
+  int32_t *white_features_ptr =
+      static_cast<int32_t *>(white_features_buffer_->data());
+  int32_t *black_features_ptr =
+      static_cast<int32_t *>(black_features_buffer_->data());
+  uint32_t *white_counts_ptr =
+      static_cast<uint32_t *>(white_counts_buffer_->data());
+  uint32_t *black_counts_ptr =
+      static_cast<uint32_t *>(black_counts_buffer_->data());
+  uint32_t *white_offsets_ptr =
+      static_cast<uint32_t *>(white_offsets_buffer_->data());
+  uint32_t *black_offsets_ptr =
+      static_cast<uint32_t *>(black_offsets_buffer_->data());
+
   // Extract features directly into GPU buffers
   size_t white_feature_idx = 0;
   size_t black_feature_idx = 0;
-  
+
   for (int i = 0; i < batch_size; i++) {
     const auto &pos_data = batch.positions[i];
-    
+
     white_offsets_ptr[i] = static_cast<uint32_t>(white_feature_idx);
     black_offsets_ptr[i] = static_cast<uint32_t>(black_feature_idx);
-    
+
     const Square wksq = Square(pos_data.king_sq[0]);
     const Square bksq = Square(pos_data.king_sq[1]);
     const Square bksq_flip = flip_rank(bksq);
-    
+
     int white_count = 0;
     int black_count = 0;
-    
+
     for (int c = 0; c < 2; c++) {
       for (int pt = PAWN; pt <= QUEEN; pt++) {
         Bitboard bb = pos_data.pieces[c][pt];
         while (bb) {
           const Square s = pop_lsb(bb);
           const Square s_flip = flip_rank(s);
-          
-          const int white_feat = int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
-          if (white_feat >= 0 && white_feat < GPU_HALFKA_DIMS && 
+
+          const int white_feat =
+              int(wksq) * 640 + c * 320 + (pt - 1) * 64 + int(s);
+          if (white_feat >= 0 && white_feat < GPU_HALFKA_DIMS &&
               white_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
             white_features_ptr[white_feature_idx++] = white_feat;
             white_count++;
           }
-          
-          const int black_feat = int(bksq_flip) * 640 + (1 - c) * 320 + 
+
+          const int black_feat = int(bksq_flip) * 640 + (1 - c) * 320 +
                                  (pt - 1) * 64 + int(s_flip);
-          if (black_feat >= 0 && black_feat < GPU_HALFKA_DIMS && 
+          if (black_feat >= 0 && black_feat < GPU_HALFKA_DIMS &&
               black_count < GPU_MAX_FEATURES_PER_PERSPECTIVE) {
             black_features_ptr[black_feature_idx++] = black_feat;
             black_count++;
@@ -1322,7 +1347,7 @@ bool GPUNNUEManager::evaluate_batch_async(GPUEvalBatch &batch,
         }
       }
     }
-    
+
     white_counts_ptr[i] = static_cast<uint32_t>(white_count);
     black_counts_ptr[i] = static_cast<uint32_t>(black_count);
   }
@@ -1333,10 +1358,10 @@ bool GPUNNUEManager::evaluate_batch_async(GPUEvalBatch &batch,
   auto encoder = backend.create_encoder();
 
   // Feature transform
-  const bool use_dual_kernel = (batch_size >= 64) && 
-                                feature_transform_dual_kernel_ && 
-                                feature_transform_dual_kernel_->valid();
-  
+  const bool use_dual_kernel = (batch_size >= 64) &&
+                               feature_transform_dual_kernel_ &&
+                               feature_transform_dual_kernel_->valid();
+
   if (use_dual_kernel) {
     encoder->set_kernel(feature_transform_dual_kernel_.get());
     encoder->set_buffer(net.ft_weights.get(), 0);
@@ -1368,7 +1393,7 @@ bool GPUNNUEManager::evaluate_batch_async(GPUEvalBatch &batch,
 
   const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
   const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
-  
+
   encoder->set_kernel(forward_fused_kernel_.get());
   encoder->set_buffer(accumulators_buffer_.get(), 0);
   encoder->set_buffer(layer.fc0_weights.get(), 1);
@@ -1383,21 +1408,21 @@ bool GPUNNUEManager::evaluate_batch_async(GPUEvalBatch &batch,
   encoder->dispatch_threadgroups(batch_size, 1, 1, GPU_FORWARD_THREADS, 1, 1);
 
   // Capture necessary data for completion handler
-  Buffer* output_buf = output_buffer_.get();
-  GPUEvalBatch* batch_ptr = &batch;
-  std::atomic<size_t>* gpu_evals_ptr = &gpu_evals_;
-  std::atomic<size_t>* batch_count_ptr = &batch_count_;
-  
+  Buffer *output_buf = output_buffer_.get();
+  GPUEvalBatch *batch_ptr = &batch;
+  std::atomic<size_t> *gpu_evals_ptr = &gpu_evals_;
+  std::atomic<size_t> *batch_count_ptr = &batch_count_;
+
   // Submit with async completion handler
   backend.submit_async(encoder.get(), [=]() {
     // Read results in completion handler
     batch_ptr->positional_scores.resize(batch_size);
     std::memcpy(batch_ptr->positional_scores.data(), output_buf->data(),
                 batch_size * sizeof(int32_t));
-    
+
     (*gpu_evals_ptr) += batch_size;
     (*batch_count_ptr)++;
-    
+
     if (completion_handler) {
       completion_handler(true);
     }

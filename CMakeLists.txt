@@ -284,12 +284,8 @@ if(BUILD_GPU_BENCHMARK
     ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
 
   # Paper benchmark with full NNUE support
-  add_executable(
-    metalfish_paper_bench
-    src/paper_benchmark.cpp
-    ${CORE_SOURCES}
-    ${EVAL_SOURCES}
-    ${GPU_SOURCES})
+  add_executable(metalfish_paper_bench src/paper_benchmark.cpp ${CORE_SOURCES}
+                                       ${EVAL_SOURCES} ${GPU_SOURCES})
   target_link_libraries(
     metalfish_paper_bench Threads::Threads ${METAL_FRAMEWORK}
     ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})

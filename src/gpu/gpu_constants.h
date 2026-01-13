@@ -24,18 +24,19 @@ constexpr int GPU_HALFKA_DIMS = 45056;
 constexpr int GPU_THREAT_DIMS = 1536;
 
 // Batch Processing - OPTIMIZED
-constexpr int GPU_MAX_BATCH_SIZE = 4096;  // Increased from 256
+constexpr int GPU_MAX_BATCH_SIZE = 4096; // Increased from 256
 
 // Feature limits per position:
 // HalfKAv2_hm: max 30 non-king pieces × 1 feature each = 30 per perspective
 // Total per position (both perspectives): 60 features
 // Add safety margin: 64 features per perspective, 128 total per position
 constexpr int GPU_MAX_FEATURES_PER_PERSPECTIVE = 64;
-constexpr int GPU_MAX_FEATURES = 128;  // Increased from 32 to handle all positions
+constexpr int GPU_MAX_FEATURES =
+    128; // Increased from 32 to handle all positions
 
 // SIMD/Threadgroup optimization constants
-constexpr int GPU_THREADGROUP_SIZE = 256;  // Optimal for M-series GPUs
-constexpr int GPU_SIMDGROUP_SIZE = 32;     // Apple GPU SIMD width
+constexpr int GPU_THREADGROUP_SIZE = 256; // Optimal for M-series GPUs
+constexpr int GPU_SIMDGROUP_SIZE = 32;    // Apple GPU SIMD width
 constexpr int GPU_FEATURE_TRANSFORM_THREADS = 256;
 constexpr int GPU_FORWARD_THREADS = 64;
 

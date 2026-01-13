@@ -714,7 +714,8 @@ void UCIEngine::gpu_benchmark() {
   std::cout << "\n";
   std::cout << "╔══════════════════════════════════════════════════════════╗\n";
   std::cout << "║     MetalFish GPU NNUE Benchmark Suite                   ║\n";
-  std::cout << "╚══════════════════════════════════════════════════════════╝\n\n";
+  std::cout
+      << "╚══════════════════════════════════════════════════════════╝\n\n";
   std::cout.flush();
 
   if (!GPU::gpu_available()) {
@@ -738,7 +739,8 @@ void UCIEngine::gpu_benchmark() {
       "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
       "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
       "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-      "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+      "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 "
+      "10",
       "8/8/8/8/8/8/8/4K2k w - - 0 1",
   };
   constexpr int NUM_FENS = 8;
@@ -780,7 +782,8 @@ void UCIEngine::gpu_benchmark() {
   std::cout << "  P95:    " << cpu_simple_samples[95000] << " µs\n";
   std::cout << "  P99:    " << cpu_simple_samples[99000] << " µs\n";
   std::cout << "  Min:    " << cpu_simple_samples.front() << " µs\n";
-  std::cout << "  Max:    " << cpu_simple_samples.back() << " µs\n\n" << std::flush;
+  std::cout << "  Max:    " << cpu_simple_samples.back() << " µs\n\n"
+            << std::flush;
 
   // ========================================================================
   // BENCHMARK 2: CPU Feature Extraction
@@ -809,11 +812,12 @@ void UCIEngine::gpu_benchmark() {
     std::cout << "\nCPU feature extraction:\n";
     std::cout << "  Median: " << cpu_feat_samples[50000] << " µs\n";
     std::cout << "  P95:    " << cpu_feat_samples[95000] << " µs\n";
-    std::cout << "  P99:    " << cpu_feat_samples[99000] << " µs\n\n" << std::flush;
+    std::cout << "  P99:    " << cpu_feat_samples[99000] << " µs\n\n"
+              << std::flush;
   }
 
-  // Note: CPU NNUE full eval requires access to engine's networks which are private.
-  // The CPU baseline for comparison is simple_eval (material + PST).
+  // Note: CPU NNUE full eval requires access to engine's networks which are
+  // private. The CPU baseline for comparison is simple_eval (material + PST).
   // For scope-matched comparison, see search benchmark which uses full NNUE.
 
   // ========================================================================
@@ -828,7 +832,7 @@ void UCIEngine::gpu_benchmark() {
     int capped_positions = 0;
     int max_features_seen = 0;
     int max_per_perspective = 0;
-    std::vector<int> feature_histogram(129, 0);  // Up to 128 total features
+    std::vector<int> feature_histogram(129, 0); // Up to 128 total features
 
     for (int i = 0; i < 2048; i++) {
       extractor.extract(positions[i], white_f, black_f);
@@ -849,11 +853,13 @@ void UCIEngine::gpu_benchmark() {
 
     std::cout << "\nPositions analyzed: " << total_positions << "\n";
     std::cout << "Max features seen (total):  " << max_features_seen << "\n";
-    std::cout << "Max features per perspective: " << max_per_perspective << "\n";
-    std::cout << "GPU limit per perspective: " << GPU::GPU_MAX_FEATURES_PER_PERSPECTIVE << "\n";
+    std::cout << "Max features per perspective: " << max_per_perspective
+              << "\n";
+    std::cout << "GPU limit per perspective: "
+              << GPU::GPU_MAX_FEATURES_PER_PERSPECTIVE << "\n";
     std::cout << "Positions exceeding GPU limit: " << capped_positions;
     std::cout << " (" << std::fixed << std::setprecision(2)
-       << (100.0 * capped_positions / total_positions) << "%)\n";
+              << (100.0 * capped_positions / total_positions) << "%)\n";
     std::cout << "Feature distribution (top 5):\n";
 
     std::vector<std::pair<int, int>> sorted_hist;
@@ -864,7 +870,7 @@ void UCIEngine::gpu_benchmark() {
     std::sort(sorted_hist.rbegin(), sorted_hist.rend());
     for (int i = 0; i < std::min(5, (int)sorted_hist.size()); i++) {
       std::cout << "  " << sorted_hist[i].second
-         << " features: " << sorted_hist[i].first << " positions\n";
+                << " features: " << sorted_hist[i].first << " positions\n";
     }
     std::cout << "\n" << std::flush;
   }
@@ -911,9 +917,10 @@ void UCIEngine::gpu_benchmark() {
     std::sort(dispatch_samples.begin(), dispatch_samples.end());
     std::cout << "\nGPU minimal dispatch:\n";
     std::cout << "  Median: " << std::fixed << std::setprecision(1)
-       << dispatch_samples[500] << " µs\n";
+              << dispatch_samples[500] << " µs\n";
     std::cout << "  P95:    " << dispatch_samples[950] << " µs\n";
-    std::cout << "  P99:    " << dispatch_samples[990] << " µs\n\n" << std::flush;
+    std::cout << "  P99:    " << dispatch_samples[990] << " µs\n\n"
+              << std::flush;
   }
 
   // ========================================================================
@@ -951,14 +958,18 @@ void UCIEngine::gpu_benchmark() {
     std::sort(stage_gpu.begin(), stage_gpu.end());
 
     std::cout << "Batch Size " << N << ":\n";
-    std::cout << "  CPU prep (batch creation):  " << std::fixed << std::setprecision(1)
-       << stage_prep[50] << " µs (" << (stage_prep[50] / N) << " µs/pos)\n";
+    std::cout << "  CPU prep (batch creation):  " << std::fixed
+              << std::setprecision(1) << stage_prep[50] << " µs ("
+              << (stage_prep[50] / N) << " µs/pos)\n";
     std::cout << "  GPU eval (buf+disp+kernel): " << stage_gpu[50] << " µs ("
-       << (stage_gpu[50] / N) << " µs/pos)\n";
-    std::cout << "  Total:                      " << (stage_prep[50] + stage_gpu[50])
-       << " µs (" << ((stage_prep[50] + stage_gpu[50]) / N) << " µs/pos)\n";
+              << (stage_gpu[50] / N) << " µs/pos)\n";
+    std::cout << "  Total:                      "
+              << (stage_prep[50] + stage_gpu[50]) << " µs ("
+              << ((stage_prep[50] + stage_gpu[50]) / N) << " µs/pos)\n";
     std::cout << "  GPU fraction:               " << std::setprecision(1)
-       << (100.0 * stage_gpu[50] / (stage_prep[50] + stage_gpu[50])) << "%\n\n" << std::flush;
+              << (100.0 * stage_gpu[50] / (stage_prep[50] + stage_gpu[50]))
+              << "%\n\n"
+              << std::flush;
   }
 
   // ========================================================================
@@ -970,11 +981,11 @@ void UCIEngine::gpu_benchmark() {
 
   std::cout << "Batch   Median    P95       P99       Per-Pos\n";
   std::cout << "Size    (µs)      (µs)      (µs)      (µs)\n";
-  std::cout << "------------------------------------------------\n" << std::flush;
+  std::cout << "------------------------------------------------\n"
+            << std::flush;
 
-  std::vector<int> batch_sizes = {1,   2,   4,    8,    16,   32,
-                                  64,  128, 256,  512,  768,  1024,
-                                  1536, 2048, 3072, 4096};
+  std::vector<int> batch_sizes = {1,   2,   4,   8,    16,   32,   64,   128,
+                                  256, 512, 768, 1024, 1536, 2048, 3072, 4096};
 
   for (int batch_size : batch_sizes) {
     std::vector<double> samples;
@@ -996,9 +1007,11 @@ void UCIEngine::gpu_benchmark() {
     double p95 = samples[95];
     double p99 = samples[99];
 
-    std::cout << std::setw(5) << batch_size << std::fixed << std::setprecision(1)
-       << std::setw(10) << median << std::setw(10) << p95 << std::setw(10)
-       << p99 << std::setw(10) << (median / batch_size) << "\n" << std::flush;
+    std::cout << std::setw(5) << batch_size << std::fixed
+              << std::setprecision(1) << std::setw(10) << median
+              << std::setw(10) << p95 << std::setw(10) << p99 << std::setw(10)
+              << (median / batch_size) << "\n"
+              << std::flush;
   }
 
   // ========================================================================
@@ -1006,11 +1019,13 @@ void UCIEngine::gpu_benchmark() {
   // ========================================================================
   std::cout << "\n=== BENCHMARK 7: True Batching Verification ===\n";
   std::cout << "Sequential: N separate command buffers\n";
-  std::cout << "Batched: 1 command buffer with 2 dispatches (feature + forward)\n\n";
+  std::cout
+      << "Batched: 1 command buffer with 2 dispatches (feature + forward)\n\n";
 
   std::cout << "N       Sequential  Batched     Speedup   CB Ratio\n";
   std::cout << "        (N×1 CB)    (1×1 CB)              (N:1)\n";
-  std::cout << "----------------------------------------------------\n" << std::flush;
+  std::cout << "----------------------------------------------------\n"
+            << std::flush;
 
   std::vector<int> verify_sizes = {16, 64, 256, 1024};
   for (int N : verify_sizes) {
@@ -1048,9 +1063,10 @@ void UCIEngine::gpu_benchmark() {
     double batch_med = batch_samples[25];
 
     std::cout << std::setw(5) << N << std::fixed << std::setprecision(1)
-       << std::setw(12) << seq_med << std::setw(12) << batch_med
-       << std::setw(10) << (seq_med / batch_med) << "×" << std::setw(10) << N
-       << ":1\n" << std::flush;
+              << std::setw(12) << seq_med << std::setw(12) << batch_med
+              << std::setw(10) << (seq_med / batch_med) << "×" << std::setw(10)
+              << N << ":1\n"
+              << std::flush;
   }
 
   // ========================================================================
@@ -1059,33 +1075,35 @@ void UCIEngine::gpu_benchmark() {
   std::cout << "\n=== BENCHMARK 8: GPU Eval Correctness Check ===\n";
   std::cout << "Comparing CPU simple_eval vs GPU batch scores\n";
   std::cout << "Note: GPU uses NNUE, CPU uses material+PST, so values differ\n";
-  std::cout << "This verifies GPU returns consistent, non-zero scores\n\n" << std::flush;
+  std::cout << "This verifies GPU returns consistent, non-zero scores\n\n"
+            << std::flush;
 
   {
     const int CHECK_SIZE = 100;
     GPU::GPUEvalBatch batch;
     batch.reserve(CHECK_SIZE);
-    
+
     std::vector<Value> cpu_scores;
     cpu_scores.reserve(CHECK_SIZE);
-    
+
     for (int i = 0; i < CHECK_SIZE; i++) {
       batch.add_position(positions[i]);
       cpu_scores.push_back(Eval::simple_eval(positions[i]));
     }
-    
+
     manager.evaluate_batch(batch, true);
-    
+
     int non_zero = 0;
     int consistent = 0;
     double sum_abs_gpu = 0;
-    
+
     for (int i = 0; i < CHECK_SIZE; i++) {
       int32_t gpu_score = batch.positional_scores[i];
-      if (gpu_score != 0) non_zero++;
+      if (gpu_score != 0)
+        non_zero++;
       sum_abs_gpu += std::abs(gpu_score);
     }
-    
+
     // Run same batch twice to check consistency
     GPU::GPUEvalBatch batch2;
     batch2.reserve(CHECK_SIZE);
@@ -1093,25 +1111,25 @@ void UCIEngine::gpu_benchmark() {
       batch2.add_position(positions[i]);
     }
     manager.evaluate_batch(batch2, true);
-    
+
     for (int i = 0; i < CHECK_SIZE; i++) {
       if (batch.positional_scores[i] == batch2.positional_scores[i])
         consistent++;
     }
-    
+
     std::cout << "Positions checked: " << CHECK_SIZE << "\n";
-    std::cout << "Non-zero GPU scores: " << non_zero << " (" 
-       << (100.0 * non_zero / CHECK_SIZE) << "%)\n";
+    std::cout << "Non-zero GPU scores: " << non_zero << " ("
+              << (100.0 * non_zero / CHECK_SIZE) << "%)\n";
     std::cout << "Consistent across runs: " << consistent << " ("
-       << (100.0 * consistent / CHECK_SIZE) << "%)\n";
-    std::cout << "Mean |GPU score|: " << std::fixed << std::setprecision(1) 
-       << (sum_abs_gpu / CHECK_SIZE) << "\n";
+              << (100.0 * consistent / CHECK_SIZE) << "%)\n";
+    std::cout << "Mean |GPU score|: " << std::fixed << std::setprecision(1)
+              << (sum_abs_gpu / CHECK_SIZE) << "\n";
     std::cout << "\nSample scores (first 5 positions):\n";
     std::cout << "  Pos  CPU(simple)  GPU(NNUE)\n";
     for (int i = 0; i < 5; i++) {
-      std::cout << "  " << std::setw(3) << i << "  " << std::setw(10) 
-         << int(cpu_scores[i]) << "  " << std::setw(10) 
-         << batch.positional_scores[i] << "\n";
+      std::cout << "  " << std::setw(3) << i << "  " << std::setw(10)
+                << int(cpu_scores[i]) << "  " << std::setw(10)
+                << batch.positional_scores[i] << "\n";
     }
     std::cout << "\n" << std::flush;
   }
@@ -1120,17 +1138,20 @@ void UCIEngine::gpu_benchmark() {
   // BENCHMARK 9: Dataset Description
   // ========================================================================
   std::cout << "=== BENCHMARK 9: Dataset Description ===\n";
-  std::cout << "Position source: Standard benchmark FENs (diverse openings/middlegames)\n";
+  std::cout << "Position source: Standard benchmark FENs (diverse "
+               "openings/middlegames)\n";
   std::cout << "Total unique positions: " << NUM_FENS << "\n";
-  std::cout << "Positions used in benchmarks: 2048 (cycled from " << NUM_FENS << " unique)\n\n";
-  
+  std::cout << "Positions used in benchmarks: 2048 (cycled from " << NUM_FENS
+            << " unique)\n\n";
+
   // Piece count distribution
   std::vector<int> piece_counts(33, 0);
   for (int i = 0; i < NUM_FENS && i < 2048; i++) {
     int pc = positions[i].count<ALL_PIECES>();
-    if (pc < 33) piece_counts[pc]++;
+    if (pc < 33)
+      piece_counts[pc]++;
   }
-  
+
   std::cout << "Piece count distribution:\n";
   int min_pc = 33, max_pc = 0;
   for (int i = 2; i < 33; i++) {
@@ -1140,7 +1161,7 @@ void UCIEngine::gpu_benchmark() {
     }
   }
   std::cout << "  Range: " << min_pc << " - " << max_pc << " pieces\n";
-  
+
   // Show top 5 most common piece counts
   std::vector<std::pair<int, int>> pc_sorted;
   for (int i = 2; i < 33; i++) {
@@ -1150,8 +1171,8 @@ void UCIEngine::gpu_benchmark() {
   std::sort(pc_sorted.rbegin(), pc_sorted.rend());
   std::cout << "  Most common piece counts:\n";
   for (int i = 0; i < std::min(5, (int)pc_sorted.size()); i++) {
-    std::cout << "    " << pc_sorted[i].second << " pieces: " 
-       << pc_sorted[i].first << " positions\n";
+    std::cout << "    " << pc_sorted[i].second
+              << " pieces: " << pc_sorted[i].first << " positions\n";
   }
   std::cout << "\n" << std::flush;
 
