@@ -3,6 +3,13 @@
   Copyright (C) 2025 Nripesh Niketan
 
   GPU NNUE Integration Implementation
+  
+  This module provides GPU-accelerated NNUE evaluation using Metal compute
+  shaders. Key features:
+  - Adaptive kernel selection based on batch size
+  - Dual-perspective feature transform for efficiency
+  - SIMD-optimized forward pass for large batches
+  - Runtime tuning based on observed performance
 */
 
 #include "gpu_nnue_integration.h"
@@ -25,11 +32,35 @@
 namespace MetalFish::GPU {
 
 // ============================================================================
+// GPUTuningParams Implementation
+// ============================================================================
+
+EvalStrategy GPUTuningParams::select_strategy(int batch_size) const {
+  if (batch_size < min_batch_for_gpu) {
+    return EvalStrategy::CPU_FALLBACK;
+  }
+  
+  // Calculate expected costs
+  // CPU cost: batch_size * cpu_eval_ns (nanoseconds)
+  // GPU cost: gpu_dispatch_us * 1000 (nanoseconds) + batch_size * marginal_gpu_cost
+  
+  // For small batches, dispatch overhead dominates - use standard kernels
+  // For large batches, compute dominates - use SIMD kernels
+  
+  if (batch_size >= gpu_extract_threshold) {
+    return EvalStrategy::GPU_FEATURE_EXTRACT;
+  } else if (batch_size >= simd_threshold) {
+    return EvalStrategy::GPU_SIMD;
+  } else {
+    return EvalStrategy::GPU_STANDARD;
+  }
+}
+
+// ============================================================================
 // GPUPositionData Implementation
 // ============================================================================
 
 void GPUPositionData::from_position(const Position &pos) {
-  // Clear
   std::memset(this, 0, sizeof(GPUPositionData));
 
   // Copy piece bitboards
@@ -39,14 +70,9 @@ void GPUPositionData::from_position(const Position &pos) {
     }
   }
 
-  // King squares
   king_sq[0] = pos.square<KING>(WHITE);
   king_sq[1] = pos.square<KING>(BLACK);
-
-  // Side to move
   stm = pos.side_to_move();
-
-  // Piece count
   piece_count = pos.count<ALL_PIECES>();
 }
 
@@ -103,7 +129,6 @@ void GPUEvalBatch::clear() {
 
 void GPUEvalBatch::reserve(int n) {
   positions.reserve(n);
-  // Use the larger feature limits - 64 features per perspective
   white_features.reserve(n * GPU_MAX_FEATURES_PER_PERSPECTIVE);
   black_features.reserve(n * GPU_MAX_FEATURES_PER_PERSPECTIVE);
   feature_counts.reserve(n * 2);
@@ -118,14 +143,12 @@ void GPUEvalBatch::add_position(const Position &pos) {
   data.from_position(pos);
   positions.push_back(data);
 
-  // Calculate bucket based on piece count
+  // Calculate bucket based on piece count (8 buckets, 4 pieces per bucket)
   int bucket = (pos.count<ALL_PIECES>() - 1) / 4;
   bucket = std::clamp(bucket, 0, GPU_LAYER_STACKS - 1);
   buckets.push_back(bucket);
 
-  // Track feature offset
   feature_offsets.push_back(white_features.size());
-
   count++;
 }
 
