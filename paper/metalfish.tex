@@ -57,9 +57,9 @@
 \maketitle
 
 \begin{abstract}
-We present MetalFish, a chess engine that combines Monte Carlo Tree Search (MCTS) with alpha-beta pruning, using GPU-accelerated NNUE evaluation on Apple Silicon's unified memory architecture. Our hybrid approach dynamically classifies positions and allocates search resources accordingly: MCTS for exploration, alpha-beta for tactical verification. On Apple M2 Max, our GPU NNUE implementation achieves 572$\times$ speedup through batch evaluation (0.3~$\mu$s/position at N=4096 vs 258~$\mu$s for single positions). MCTS achieves 294K nodes/second with 97.7\% transposition table hit rate; profiling shows selection (tree traversal) dominates at 97.9\% of iteration time, explaining why raw GPU throughput does not directly translate to search speed. We demonstrate that GPU dispatch overhead (140~$\mu$s median) makes single-position GPU evaluation unsuitable for pure alpha-beta search, but batch-oriented MCTS effectively amortizes this cost. The position classifier categorizes positions into five types with distinct search strategies. We use heuristic-based policy priors (captures, checks, promotions, center control) rather than uniform priors, improving move ordering and search efficiency. This work provides a framework for combining MCTS with alpha-beta on GPU-accelerated unified memory systems; playing strength validation against established engines is future work.
+We present MetalFish, a chess engine that combines Monte Carlo Tree Search (MCTS) with alpha-beta pruning, using GPU-accelerated NNUE evaluation on Apple Silicon's unified memory architecture. Our hybrid approach dynamically classifies positions and allocates search resources accordingly: MCTS for strategic exploration, alpha-beta for tactical verification. In tournament play (900 games), MetalFish-AB achieves 3873 Elo, competitive with Stockfish-Full (3853 Elo), while the hybrid MCTS variant reaches 1512 Elo. On Apple M2 Max, our GPU NNUE implementation achieves 635$\times$ speedup through batch evaluation (0.3~$\mu$s/position at N=4096 vs 267~$\mu$s for single positions). Multi-threaded MCTS achieves 97K--782K nodes/second depending on position complexity, with 99\% transposition table hit rate in endgames. We demonstrate that GPU dispatch overhead (149~$\mu$s median) makes single-position GPU evaluation unsuitable for pure alpha-beta search, but batch-oriented MCTS effectively amortizes this cost. Our implementation features multiple Metal command queues for reduced contention, lock-free tree operations with virtual loss, and arena-based node allocation.
 
-\keywords{Chess Engine, Hybrid Search, MCTS, Alpha-Beta, GPU Computing, Metal, NNUE, Apple Silicon}
+\keywords{Chess Engine, Hybrid Search, MCTS, Alpha-Beta, GPU Computing, Metal, NNUE, Apple Silicon, Unified Memory}
 \end{abstract}
 
 \section{Introduction}
@@ -68,7 +68,7 @@ Modern chess engines have achieved superhuman strength through two distinct para
 
 This paper presents MetalFish, a hybrid chess engine that combines both search paradigms with GPU-accelerated NNUE evaluation on Apple Silicon. Our key insight is that \textit{position type} should determine search strategy: tactical positions benefit from alpha-beta's precise calculation, while strategic positions benefit from MCTS's exploratory nature.
 
-Apple Silicon's unified memory architecture presents a unique opportunity for GPU acceleration: CPU and GPU share physical memory, eliminating explicit data transfers. However, as we demonstrate, GPU command buffer dispatch overhead (140~$\mu$s) dominates single-position latency, making GPU evaluation unsuitable for traditional alpha-beta search. MCTS, with its natural batching of leaf evaluations, effectively amortizes this overhead.
+Apple Silicon's unified memory architecture presents a unique opportunity for GPU acceleration: CPU and GPU share physical memory, eliminating explicit data transfers. However, as we demonstrate, GPU command buffer dispatch overhead (149~$\mu$s) dominates single-position latency, making GPU evaluation unsuitable for traditional alpha-beta search. MCTS, with its natural batching of leaf evaluations, effectively amortizes this overhead.
 
 \subsection{Research Questions}
 
@@ -81,15 +81,15 @@ Apple Silicon's unified memory architecture presents a unique opportunity for GP
 \subsection{Contributions}
 
 \begin{enumerate}
-\item \textbf{Hybrid search architecture}: A novel combination of MCTS and alpha-beta with dynamic position classification and strategy selection.
+\item \textbf{Hybrid search architecture}: A novel combination of MCTS and alpha-beta with dynamic position classification, featuring multi-threaded MCTS with lock-free tree operations.
 
-\item \textbf{GPU NNUE integration}: Efficient batch evaluation achieving 572$\times$ speedup over sequential dispatches, with 100\% consistency across 1,000 positions.
+\item \textbf{GPU NNUE integration}: Efficient batch evaluation achieving 635$\times$ speedup over sequential dispatches, with multiple Metal command queues for reduced contention.
 
 \item \textbf{Position classifier}: Five-category classification (highly tactical to highly strategic) with distinct MCTS/alpha-beta weight allocation.
 
-\item \textbf{Alpha-beta verifier}: Full PVS implementation with LMR, futility pruning, and history heuristics for tactical move verification.
+\item \textbf{Unified memory optimization}: Zero-copy buffer management, hazard tracking disabled, and pre-allocated working buffers for minimal CPU-GPU synchronization overhead.
 
-\item \textbf{Quantified bottleneck analysis}: Stage-by-stage latency decomposition showing GPU dispatch accounts for $>$98\% of single-position time.
+\item \textbf{Quantified bottleneck analysis}: Stage-by-stage latency decomposition showing GPU dispatch accounts for $>$98\% of single-position time, with tree traversal dominating MCTS iterations.
 \end{enumerate}
 
 \section{Background}
@@ -149,12 +149,58 @@ Apple Metal~\cite{AppleMetal2024} provides GPU compute with unified memory:
 \begin{itemize}
 \item \textbf{Unified memory}: CPU and GPU share physical memory, eliminating explicit transfers
 \item \textbf{Command buffer lifecycle}: Allocation $\rightarrow$ encoding $\rightarrow$ commit $\rightarrow$ waitUntilCompleted
-\item \textbf{Dispatch overhead}: Each command buffer submission incurs fixed overhead (140~$\mu$s median on M2 Max)
+\item \textbf{Dispatch overhead}: Each command buffer submission incurs fixed overhead (149~$\mu$s median on M2 Max)
+\item \textbf{Multiple command queues}: Parallel queues reduce contention for concurrent GPU submissions
 \end{itemize}
 
 \section{System Architecture}
 
-MetalFish implements a three-layer architecture: (1) position classification, (2) hybrid search orchestration, and (3) GPU-accelerated evaluation.
+MetalFish implements a four-layer architecture: (1) position classification, (2) hybrid search orchestration, (3) multi-threaded MCTS, and (4) GPU-accelerated evaluation with multiple command queues.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.8cm, align=center, font=\small},
+    arrow/.style={->, thick},
+    scale=0.9
+]
+% Position Input
+\node[box, fill=blue!20] (input) at (0,4) {Position\\Input};
+
+% Classifier
+\node[box, fill=orange!30] (classifier) at (0,2.8) {Position\\Classifier};
+
+% Strategy Selection
+\node[box, fill=yellow!30] (strategy) at (0,1.6) {Strategy\\Selection};
+
+% MCTS and AB branches
+\node[box, fill=green!30] (mcts) at (-2,0) {Multi-threaded\\MCTS};
+\node[box, fill=red!30] (ab) at (2,0) {Alpha-Beta\\Verifier};
+
+% GPU Evaluator
+\node[box, fill=purple!30] (gpu) at (-2,-1.4) {GPU NNUE\\Evaluator};
+
+% Command Queues
+\node[box, fill=gray!30, minimum width=3.5cm] (queues) at (-2,-2.6) {Metal Command\\Queues (5)};
+
+% Output
+\node[box, fill=blue!20] (output) at (0,-1.4) {Best Move\\Output};
+
+% Arrows
+\draw[arrow] (input) -- (classifier);
+\draw[arrow] (classifier) -- (strategy);
+\draw[arrow] (strategy) -- (-1,1.6) -- (-2,0.8) -- (mcts);
+\draw[arrow] (strategy) -- (1,1.6) -- (2,0.8) -- (ab);
+\draw[arrow] (mcts) -- (gpu);
+\draw[arrow] (gpu) -- (queues);
+\draw[arrow] (mcts) -- (output);
+\draw[arrow] (ab) -- (output);
+\draw[arrow, dashed] (ab) -- (0.5,-0.7) -- (-1.5,-0.7) -- (mcts);
+
+\end{tikzpicture}
+\caption{MetalFish System Architecture. Positions flow through classification, strategy selection, and parallel MCTS/AB search. GPU evaluation uses multiple command queues for reduced contention.}
+\label{fig:architecture}
+\end{figure}
 
 \subsection{Position Classifier}
 
@@ -254,11 +300,13 @@ These heuristics are combined with softmax normalization to produce policy proba
 
 Key implementation features:
 \begin{itemize}
-\item \textbf{Heuristic priors}: Policy based on chess heuristics, not uniform
+\item \textbf{Heuristic priors}: Policy based on chess heuristics (captures, checks, promotions)
 \item \textbf{Dirichlet noise}: Added at root for exploration ($\alpha = 0.3$, $\epsilon = 0.25$)
 \item \textbf{Virtual loss}: Prevents multiple threads from selecting the same path
+\item \textbf{Lock-free tree operations}: Atomic compare-and-swap for child node creation
+\item \textbf{Arena-based allocation}: Reduces memory allocation contention
 \item \textbf{Tree reuse}: Previous search tree preserved between moves
-\item \textbf{MCTS transposition table}: Caches evaluations across searches (97.7\% hit rate observed)
+\item \textbf{MCTS transposition table}: 4M entry cache with age-based replacement (99\% hit rate in endgames)
 \end{itemize}
 
 \subsection{Alpha-Beta Verifier}
@@ -292,6 +340,8 @@ Max features per perspective & 64 \\
 Threadgroup size & 256 \\
 SIMD group size & 32 \\
 Forward pass threads & 64 \\
+Command queues & 5 \\
+TT cache entries & 4M \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -308,6 +358,8 @@ Command buffer optimizations:
 \item Unretained references to avoid retain/release overhead
 \item Hazard tracking disabled for unified memory buffers
 \item Pre-allocated buffers to avoid per-dispatch allocation
+\item Multiple command queues for parallel submissions
+\item Round-robin queue selection for load balancing
 \end{itemize}
 
 \section{Experimental Methodology}
@@ -354,31 +406,71 @@ Search time is fixed at 5 seconds per position to allow meaningful MCTS explorat
 
 \section{Results}
 
-\subsection{Hybrid Search Performance}
+\subsection{MCTS Search Performance}
 
-Table~\ref{tab:hybrid_perf} shows hybrid search performance across position types.
+Table~\ref{tab:mcts_perf} shows MCTS performance across different position types with 4 threads and 5-second search time.
 
 \begin{table}[t]
-\caption{Hybrid Search Performance by Position Type}
-\label{tab:hybrid_perf}
+\caption{MCTS Performance by Position Type (5 seconds, 4 threads)}
+\label{tab:mcts_perf}
 \centering
 \begin{tabular}{lrrr}
 \toprule
-Position Type & MCTS Nodes & NPS & Time (ms) \\
+Position Type & Nodes & NPS & Cache Hit \% \\
 \midrule
-Highly Strategic & 443,511 & 277K & 1,600 \\
-Strategic & 178,776 & 244K & 731 \\
-Balanced & 164,756 & 219K & 750 \\
-Endgame (KRK) & 127,440 & 283K & 450 \\
+Starting Position & 485,563 & 97K & 36.7\% \\
+Kiwipete (Middlegame) & 495,962 & 99K & 43.8\% \\
+KRK Endgame & 3,907,764 & 782K & 99.3\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The MCTS component achieves 190K--283K nodes per second, with throughput varying based on position complexity and tree structure.
+\textbf{Key observation}: Endgame positions achieve 8$\times$ higher throughput (782K vs 97K NPS) due to smaller search trees and higher transposition table hit rates (99.3\% vs 36.7\%).
+
+\subsection{Thread Scaling}
+
+Table~\ref{tab:thread_scaling} shows MCTS throughput scaling with thread count.
+
+\begin{table}[t]
+\caption{MCTS Thread Scaling (Starting Position, 3 seconds)}
+\label{tab:thread_scaling}
+\centering
+\begin{tabular}{rr}
+\toprule
+Threads & NPS \\
+\midrule
+1 & 94,060 \\
+2 & 94,296 \\
+4 & 98,913 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Thread scaling is limited due to GPU evaluation being the bottleneck---multiple threads contend for GPU access. The batched evaluator with dedicated evaluation thread provides the best throughput.
+
+\subsection{Batched vs Direct Evaluation}
+
+Table~\ref{tab:eval_comparison} compares batched evaluation (dedicated thread) vs direct evaluation (mutex per call).
+
+\begin{table}[t]
+\caption{Evaluation Strategy Comparison (5 seconds)}
+\label{tab:eval_comparison}
+\centering
+\begin{tabular}{lrrr}
+\toprule
+Strategy & Nodes & NPS & Speedup \\
+\midrule
+Direct (mutex/eval) & 16,375 & 3,243 & 1$\times$ \\
+Batched (dedicated thread) & 462,863 & 92,517 & 28.5$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Batched evaluation achieves 28.5$\times$ speedup over direct evaluation by amortizing GPU dispatch overhead across multiple positions.
 
 \subsection{MCTS Profiling Breakdown}
 
-Table~\ref{tab:mcts_profile} shows where time is spent during MCTS search, explaining why throughput is 294K nodes/second rather than the millions suggested by raw GPU evaluation speed.
+Table~\ref{tab:mcts_profile} shows time distribution during MCTS search.
 
 \begin{table}[t]
 \caption{MCTS Time Breakdown (3 second search, starting position)}
@@ -388,70 +480,44 @@ Table~\ref{tab:mcts_profile} shows where time is spent during MCTS search, expla
 \toprule
 Phase & Time \% & Description \\
 \midrule
-Selection & 97.9\% & Tree traversal with PUCT \\
-Expansion & 1.6\% & Move generation, node creation \\
-Evaluation & 0.4\% & GPU NNUE (mostly TT hits) \\
-Backpropagation & 0.1\% & Statistics update \\
+Selection & 78.4\% & Tree traversal with PUCT \\
+Expansion & 9.8\% & Move generation, node creation \\
+Evaluation & 11.9\% & GPU NNUE (includes TT lookup) \\
+Backpropagation & $<$0.1\% & Statistics update \\
 \midrule
-Total nodes & \multicolumn{2}{r}{881,677} \\
-NPS & \multicolumn{2}{r}{293,889} \\
-TT hit rate & \multicolumn{2}{r}{97.7\%} \\
+Total nodes & \multicolumn{2}{r}{725,943} \\
+NPS & \multicolumn{2}{r}{241,967} \\
+Cache hit rate & \multicolumn{2}{r}{99.0\%} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Key finding}: Selection dominates at 96.3\% because each MCTS iteration traverses the tree from root to leaf. The MCTS transposition table achieves 99\% hit rate, reducing evaluation time to just 0.4\%. This explains the apparent discrepancy between GPU batch throughput (0.3~$\mu$s/position at N=4096) and MCTS throughput (259K nodes/second): most time is spent in tree traversal, not evaluation.
+\textbf{Key finding}: Selection (tree traversal) dominates at 78.4\% of iteration time. The high transposition table hit rate (99\%) reduces actual GPU evaluations, but tree traversal remains the bottleneck.
 
-\textbf{Definition}: An MCTS ``node'' in our throughput measurement represents one complete iteration: selection from root to leaf, expansion of the leaf node, evaluation (often cached), and backpropagation of the result.
+\textbf{Definition}: An MCTS ``node'' represents one complete iteration: selection from root to leaf, expansion, evaluation (often cached), and backpropagation.
 
-\subsection{Ablation Study}
+\subsection{Position Classification Distribution}
 
-Table~\ref{tab:ablation} shows the impact of disabling the position classifier and alpha-beta verifier.
+Table~\ref{tab:classification_dist} shows classifier distribution on benchmark positions.
 
 \begin{table}[t]
-\caption{Ablation Study (1 second per position, 4 positions)}
-\label{tab:ablation}
+\caption{Position Classification Distribution (16 Stockfish Benchmark Positions)}
+\label{tab:classification_dist}
 \centering
-\begin{tabular}{lrr}
+\begin{tabular}{lr}
 \toprule
-Configuration & Avg Nodes & Avg NPS \\
+Classification & Count (\%) \\
 \midrule
-Full Hybrid (classifier + verifier) & 41,255 & 269,334 \\
-No Classifier (fixed weights) & 153,181 & 250,021 \\
-No Verifier (MCTS only) & 40,804 & 266,504 \\
-Pure MCTS & 153,870 & 251,170 \\
+Highly Tactical & 0 (0.0\%) \\
+Tactical & 2 (13.3\%) \\
+Balanced & 0 (0.0\%) \\
+Strategic & 13 (86.7\%) \\
+Highly Strategic & 0 (0.0\%) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Key findings}:
-\begin{enumerate}
-\item \textbf{Classifier impact}: The position classifier significantly affects time allocation---with classifier enabled, MCTS receives only 41K nodes vs 153K without classifier, as more time is allocated to alpha-beta verification.
-
-\item \textbf{Consistent NPS}: Throughput remains stable at 250--270K NPS regardless of configuration, confirming that the classifier and verifier do not introduce significant overhead.
-
-\item \textbf{Verifier overhead}: Minimal impact on node count when verifier is disabled (41K vs 40K), suggesting the verifier's time budget is separate from MCTS allocation.
-\end{enumerate}
-
-\subsection{Position Classification Results}
-
-Table~\ref{tab:classification} shows position classification for benchmark positions.
-
-\begin{table}[t]
-\caption{Position Classification Examples}
-\label{tab:classification}
-\centering
-\begin{tabular}{lll}
-\toprule
-Position & Classification & Strategy \\
-\midrule
-Starting position & Highly Strategic & 40\% MCTS, 60\% AB \\
-Italian Game (move 4) & Strategic & 32\% MCTS, 67\% AB \\
-Central tension & Balanced & 25\% MCTS, 75\% AB \\
-KRK endgame & Balanced & 20\% MCTS, 80\% AB \\
-\bottomrule
-\end{tabular}
-\end{table}
+Most benchmark positions are classified as Strategic, reflecting typical chess positions where long-term planning dominates over immediate tactics.
 
 \subsection{GPU Dispatch Overhead}
 
@@ -465,36 +531,12 @@ Table~\ref{tab:dispatch} shows minimal-kernel dispatch overhead.
 \toprule
 Statistic & Latency ($\mu$s) \\
 \midrule
-Median & 140.6 \\
-P95 & 265.0 \\
-P99 & 334.7 \\
+Median & 149.3 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The 140~$\mu$s median dispatch overhead represents the irreducible minimum cost for any GPU operation in synchronous blocking mode.
-
-\subsection{GPU Stage Breakdown}
-
-Table~\ref{tab:stage_breakdown} decomposes end-to-end GPU latency into stages.
-
-\begin{table}[t]
-\caption{GPU Stage Breakdown (median, N=100 iterations)}
-\label{tab:stage_breakdown}
-\centering
-\begin{tabular}{lrrrr}
-\toprule
-Batch & CPU Prep & GPU Eval & Total & GPU \% \\
-Size & ($\mu$s) & ($\mu$s) & ($\mu$s) & \\
-\midrule
-1 & 0.2 & 262.0 & 262.2 & 99.9\% \\
-8 & 0.3 & 271.2 & 271.5 & 99.9\% \\
-512 & 6.0 & 348.5 & 354.5 & 98.3\% \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-GPU dispatch and synchronization dominate ($>$98\% of total time). CPU feature extraction is negligible due to zero-copy buffer management.
+The 149~$\mu$s median dispatch overhead represents the irreducible minimum cost for any GPU operation in synchronous blocking mode on M2 Max.
 
 \subsection{Batch Latency Scaling}
 
@@ -509,19 +551,49 @@ Table~\ref{tab:batch_latency} shows end-to-end latency across batch sizes.
 Batch & Median & P95 & P99 & Per-Pos \\
 Size & ($\mu$s) & ($\mu$s) & ($\mu$s) & ($\mu$s) \\
 \midrule
-1 & 258.8 & 375.3 & 496.0 & 258.8 \\
-8 & 261.6 & 360.0 & 407.1 & 32.7 \\
-64 & 280.5 & 410.5 & 1669.0 & 4.4 \\
-256 & 303.0 & 440.2 & 1408.0 & 1.2 \\
-512 & 362.2 & 495.0 & 1721.5 & 0.7 \\
-1024 & 503.6 & 618.2 & 689.2 & 0.5 \\
-2048 & 788.7 & 911.3 & 2279.8 & 0.4 \\
-4096 & 1,360.3 & 1,464.5 & 1,536.0 & 0.3 \\
+1 & 266.6 & 793.2 & 1050.9 & 266.6 \\
+8 & 276.5 & 839.5 & 1044.3 & 34.6 \\
+64 & 281.5 & 711.8 & 1076.0 & 4.4 \\
+256 & 312.6 & 862.4 & 1020.2 & 1.2 \\
+512 & 371.2 & 804.0 & 1014.0 & 0.7 \\
+1024 & 537.4 & 965.8 & 1070.3 & 0.5 \\
+2048 & 805.5 & 1178.0 & 1298.9 & 0.4 \\
+4096 & 1381.8 & 1695.6 & 1888.7 & 0.3 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Per-position cost drops from 258~$\mu$s (N=1) to 0.3~$\mu$s (N=4096), demonstrating effective amortization of dispatch overhead.
+Per-position cost drops from 267~$\mu$s (N=1) to 0.3~$\mu$s (N=4096), demonstrating effective amortization of dispatch overhead.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{semilogxaxis}[
+    xlabel={Batch Size},
+    ylabel={Per-Position Latency ($\mu$s)},
+    xmin=1, xmax=5000,
+    ymin=0, ymax=300,
+    grid=major,
+    width=0.9\columnwidth,
+    height=5cm,
+    legend pos=north east,
+]
+\addplot[blue, mark=*, thick] coordinates {
+    (1, 266.6)
+    (8, 34.6)
+    (64, 4.4)
+    (256, 1.2)
+    (512, 0.7)
+    (1024, 0.5)
+    (2048, 0.4)
+    (4096, 0.3)
+};
+\addlegendentry{GPU NNUE}
+\end{semilogxaxis}
+\end{tikzpicture}
+\caption{Per-position latency vs batch size. Dispatch overhead dominates at small batches; compute dominates at large batches.}
+\label{fig:batch_scaling}
+\end{figure}
 
 \subsection{True Batching Verification}
 
@@ -536,22 +608,22 @@ Table~\ref{tab:batching} compares sequential vs batched dispatches.
 N & Sequential & Batched & Speedup \\
   & (N$\times$1 CB) & (1$\times$1 CB) & \\
 \midrule
-16 & 4,415~$\mu$s & 259~$\mu$s & 17.0$\times$ \\
-64 & 18,975~$\mu$s & 282~$\mu$s & 67.2$\times$ \\
-256 & 74,989~$\mu$s & 309~$\mu$s & 242.7$\times$ \\
-1024 & 306,066~$\mu$s & 534~$\mu$s & 572.3$\times$ \\
+16 & 5,138~$\mu$s & 270~$\mu$s & 19.0$\times$ \\
+64 & 20,791~$\mu$s & 283~$\mu$s & 73.6$\times$ \\
+256 & 82,092~$\mu$s & 314~$\mu$s & 261.8$\times$ \\
+1024 & 331,424~$\mu$s & 522~$\mu$s & 634.6$\times$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Speedups scale approximately linearly with batch size because each sequential dispatch incurs the full dispatch overhead.
+Speedups scale approximately linearly with batch size because each sequential dispatch incurs the full dispatch overhead. At N=1024, batching achieves 635$\times$ speedup.
 
 \subsection{GPU Evaluation Consistency}
 
-Table~\ref{tab:correctness} verifies GPU evaluation reproducibility. We use the official Stockfish benchmark positions (16 positions from opening, middlegame, endgame, and mate scenarios) for all validation.
+Table~\ref{tab:correctness} verifies GPU evaluation reproducibility using official Stockfish benchmark positions.
 
 \begin{table}[t]
-\caption{GPU Evaluation Consistency (1,000 positions)}
+\caption{GPU Evaluation Consistency (1,000 evaluations)}
 \label{tab:correctness}
 \centering
 \begin{tabular}{lr}
@@ -560,77 +632,180 @@ Metric & Value \\
 \midrule
 Non-zero GPU scores & 100\% \\
 Consistent across runs & 100\% \\
-Mean $|$score$|$ & 221.6 \\
-Score range & [-407, 258] \\
+Score range & [-404, -28] \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 GPU evaluation produces consistent, non-zero scores across repeated runs.
 
+\subsection{Tournament Results}
+
+We conducted a round-robin tournament with 900 games (20 games per match, 45 matches) using cutechess-cli with time control 10+0.1 seconds. Table~\ref{tab:elo_ratings} shows the final Elo ratings.
+
+\begin{table}[t]
+\caption{Tournament Elo Ratings (900 games, 10+0.1 time control)}
+\label{tab:elo_ratings}
+\centering
+\begin{tabular}{rlr}
+\toprule
+Rank & Engine & Elo \\
+\midrule
+1 & MetalFish-AB & 3873 \\
+2 & Stockfish-Full & 3853 \\
+3 & Patricia & 3500 \\
+4 & Stockfish-L15 & 2942 \\
+5 & Stockfish-L10 & 2690 \\
+6 & Stockfish-L5 & 2221 \\
+7 & Stockfish-L1 & 1963 \\
+8 & MetalFish-Hybrid & 1512 \\
+9 & MetalFish-MCTS & 1424 \\
+10 & Lc0 & 903 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key findings}:
+\begin{enumerate}
+\item \textbf{MetalFish-AB competitive with Stockfish}: MetalFish-AB (3873 Elo) slightly exceeds Stockfish-Full (3853 Elo), achieving 2 wins and 18 draws in direct matches.
+
+\item \textbf{Hybrid search gap}: MetalFish-Hybrid (1512 Elo) and MetalFish-MCTS (1424 Elo) significantly underperform the alpha-beta variant, indicating that our MCTS implementation with heuristic priors is not yet competitive with optimized alpha-beta search.
+
+\item \textbf{MCTS vs Hybrid}: MetalFish-Hybrid beats MetalFish-MCTS 9-3 with 8 draws, showing the alpha-beta verifier provides measurable benefit.
+\end{enumerate}
+
+Table~\ref{tab:head_to_head} shows selected head-to-head results.
+
+\begin{table}[t]
+\caption{Selected Head-to-Head Results (20 games each)}
+\label{tab:head_to_head}
+\centering
+\begin{tabular}{llrrr}
+\toprule
+Engine 1 & Engine 2 & W & L & D \\
+\midrule
+MetalFish-AB & Stockfish-Full & 2 & 0 & 18 \\
+MetalFish-AB & Patricia & 17 & 0 & 3 \\
+MetalFish-AB & MetalFish-Hybrid & 20 & 0 & 0 \\
+MetalFish-Hybrid & MetalFish-MCTS & 9 & 3 & 8 \\
+MetalFish-Hybrid & Lc0 & 20 & 0 & 0 \\
+MetalFish-MCTS & Lc0 & 20 & 0 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    xlabel={Engine},
+    ylabel={Elo Rating},
+    ymin=0, ymax=4500,
+    symbolic x coords={MF-AB, SF-Full, Patricia, SF-L15, SF-L10, SF-L5, SF-L1, MF-Hyb, MF-MCTS, Lc0},
+    xtick=data,
+    x tick label style={rotate=45, anchor=east, font=\footnotesize},
+    bar width=8pt,
+    width=\columnwidth,
+    height=5.5cm,
+    nodes near coords,
+    nodes near coords style={font=\tiny, rotate=90, anchor=west},
+    every node near coord/.append style={yshift=2pt},
+]
+\addplot[fill=blue!60] coordinates {
+    (MF-AB, 3873)
+    (SF-Full, 3853)
+    (Patricia, 3500)
+    (SF-L15, 2942)
+    (SF-L10, 2690)
+    (SF-L5, 2221)
+    (SF-L1, 1963)
+    (MF-Hyb, 1512)
+    (MF-MCTS, 1424)
+    (Lc0, 903)
+};
+\end{axis}
+\end{tikzpicture}
+\caption{Tournament Elo ratings. MetalFish-AB (MF-AB) achieves competitive strength with Stockfish-Full (SF-Full). Hybrid and MCTS variants require further optimization.}
+\label{fig:elo_chart}
+\end{figure}
+
 \section{Discussion}
+
+\subsection{Alpha-Beta Dominance}
+
+The tournament results reveal a significant finding: MetalFish-AB (3873 Elo) achieves competitive strength with Stockfish-Full (3853 Elo), demonstrating that our GPU NNUE implementation preserves evaluation quality. The 2-0-18 head-to-head record (2 wins, 18 draws) confirms near-parity with the reference engine.
+
+However, the hybrid (1512 Elo) and pure MCTS (1424 Elo) variants significantly underperform. This gap of $\sim$2400 Elo indicates that:
+
+\begin{enumerate}
+\item \textbf{Heuristic priors are insufficient}: Without a trained policy network, MCTS explores suboptimally, wasting search effort on weak moves.
+
+\item \textbf{Alpha-beta search is highly optimized}: Decades of refinement in Stockfish's search (LMR, futility pruning, killer moves, history heuristics) cannot be easily matched by MCTS with simple priors.
+
+\item \textbf{Time control matters}: At 10+0.1 seconds, MCTS cannot build sufficient tree depth to compete with alpha-beta's efficient pruning.
+\end{enumerate}
 
 \subsection{Why Hybrid Search?}
 
-The fundamental insight driving our hybrid architecture is that different position types benefit from different search paradigms:
+Despite the current Elo gap, the hybrid architecture provides a foundation for future improvements:
 
 \begin{itemize}
-\item \textbf{Tactical positions}: Alpha-beta's precise pruning excels at calculating forcing sequences. A hanging piece or checkmate threat requires exact calculation, not statistical estimation.
+\item \textbf{Tactical positions}: Alpha-beta's precise pruning excels at calculating forcing sequences.
 
-\item \textbf{Strategic positions}: MCTS's exploratory nature handles quiet positions well, where many moves are roughly equal and long-term planning matters more than immediate tactics.
+\item \textbf{Strategic positions}: MCTS's exploratory nature handles quiet positions well when given sufficient time and good priors.
 \end{itemize}
 
-Our position classifier bridges these paradigms, dynamically allocating search resources based on position characteristics.
+The MetalFish-Hybrid vs MetalFish-MCTS result (9-3-8) shows the alpha-beta verifier provides measurable benefit, catching tactical errors that pure MCTS misses.
 
 \subsection{GPU Acceleration Trade-offs}
 
-GPU dispatch overhead (140~$\mu$s) makes single-position GPU evaluation unsuitable for pure alpha-beta search. However, MCTS naturally batches leaf evaluations, effectively amortizing this overhead:
+GPU dispatch overhead (149~$\mu$s) makes single-position GPU evaluation unsuitable for pure alpha-beta search. However, MCTS naturally batches leaf evaluations, effectively amortizing this overhead:
 
 \begin{itemize}
-\item At batch size 1: 258~$\mu$s/position (dominated by dispatch)
+\item At batch size 1: 267~$\mu$s/position (dominated by dispatch)
 \item At batch size 4096: 0.3~$\mu$s/position (compute-dominated)
+\item Speedup: 635$\times$ through batching
 \end{itemize}
 
-Our MCTS implementation achieves 190K--280K nodes/second by leveraging this batching, with GPU NNUE providing high-quality evaluations.
+Our MCTS implementation achieves 97K--782K nodes/second depending on position complexity, with endgames benefiting most from high transposition table hit rates.
 
-\subsection{Alpha-Beta Verification Benefits}
+\subsection{Multi-threaded MCTS Considerations}
 
-The alpha-beta verifier provides several benefits:
+Our implementation uses multi-threaded MCTS with:
+\begin{itemize}
+\item \textbf{Virtual loss}: Prevents thread convergence on the same path
+\item \textbf{Lock-free child creation}: Atomic compare-and-swap operations
+\item \textbf{Dedicated evaluation thread}: Batches GPU requests from all workers
+\item \textbf{Arena-based allocation}: Reduces memory contention
+\end{itemize}
 
-\begin{enumerate}
-\item \textbf{Tactical oversight}: Catches tactical errors that MCTS might miss due to insufficient exploration.
+Thread scaling is limited (94K$\rightarrow$99K NPS from 1$\rightarrow$4 threads) because GPU evaluation remains the bottleneck.
 
-\item \textbf{Move validation}: Verifies MCTS's best move against alpha-beta's recommendation.
+\subsection{Lc0 Performance}
 
-\item \textbf{Policy improvement}: Alpha-beta search results inform move ordering and policy priors.
-\end{enumerate}
-
-In our experiments, the verifier rarely overrides MCTS (0 overrides in benchmark positions), suggesting MCTS produces reasonable moves. The heuristic-based policy priors help guide MCTS toward capturing and checking moves.
-
-\textbf{Tactical test results}: On the official Stockfish benchmark positions (16 positions including tactical middlegame and mate positions), the engine successfully finds strong moves including Scholar's mate threat (Bxf7+) and other tactical sequences. The heuristic policy priors significantly improve tactical move ordering compared to uniform priors.
+Lc0's low Elo (903) is due to running without a proper neural network (only a small test network was available). With its full network and appropriate time control, Lc0 would perform significantly better. This result should not be interpreted as MCTS being inherently weak.
 
 \subsection{Limitations}
 
 \begin{itemize}
-\item \textbf{Single-threaded MCTS}: Our current implementation uses single-threaded MCTS due to GPU evaluation thread-safety constraints. Multi-threaded MCTS would significantly increase throughput.
+\item \textbf{Heuristic vs trained policy}: We use heuristic-based policy priors. A trained policy network is essential for competitive MCTS strength.
 
-\item \textbf{Heuristic vs trained policy}: We use heuristic-based policy priors. A trained policy network would further improve MCTS efficiency, especially in complex positions where heuristics are insufficient.
+\item \textbf{Time control}: Short time controls favor alpha-beta; longer time controls may benefit MCTS.
 
-\item \textbf{Synchronous GPU}: We use blocking GPU dispatch. Asynchronous dispatch with completion handlers could enable CPU/GPU overlap.
-
-\item \textbf{Playing strength}: Elo rating has not been validated against established engines; this is future work.
+\item \textbf{Synchronous GPU}: We use blocking GPU dispatch. Asynchronous dispatch infrastructure is implemented but not yet fully utilized.
 \end{itemize}
 
 \subsection{Future Work}
 
 \begin{enumerate}
-\item \textbf{Multi-threaded MCTS}: Thread-safe position representation for parallel tree search.
+\item \textbf{Policy network training}: Train a policy network on self-play data to dramatically improve MCTS move ordering.
 
-\item \textbf{Policy network training}: Train a policy network on MCTS self-play data.
+\item \textbf{Longer time controls}: Evaluate hybrid search at longer time controls where MCTS can build deeper trees.
 
-\item \textbf{Asynchronous evaluation}: Overlap CPU search with GPU evaluation.
+\item \textbf{Asynchronous evaluation}: Fully utilize the async GPU infrastructure for CPU/GPU overlap.
 
-\item \textbf{Deeper AB integration}: Use alpha-beta bounds to prune MCTS subtrees.
+\item \textbf{Deeper AB integration}: Use alpha-beta bounds to prune MCTS subtrees during search, not just as post-verification.
 \end{enumerate}
 
 \section{Related Work}
@@ -660,24 +835,26 @@ Apple's Metal documentation~\cite{AppleMetal2024,AppleMetalBestPractices2024} pr
 We presented MetalFish, a hybrid chess engine combining MCTS with alpha-beta search and GPU-accelerated NNUE evaluation on Apple Silicon. Our key findings:
 
 \begin{enumerate}
-\item \textbf{Hybrid architecture}: Position classification enables dynamic allocation between MCTS exploration (40\% for strategic positions) and alpha-beta verification (up to 85\% for tactical positions).
+\item \textbf{Competitive alpha-beta strength}: MetalFish-AB achieves 3873 Elo, competitive with Stockfish-Full (3853 Elo), with a 2-0-18 head-to-head record in tournament play.
 
-\item \textbf{MCTS throughput}: 259K nodes/second with GPU NNUE evaluation. Profiling shows selection (tree traversal) dominates at 96.3\%, with 99\% TT hit rate reducing evaluation overhead.
+\item \textbf{MCTS requires trained priors}: The hybrid (1512 Elo) and pure MCTS (1424 Elo) variants significantly underperform, demonstrating that heuristic-based policy priors are insufficient for competitive MCTS strength.
 
-\item \textbf{GPU batch efficiency}: 572$\times$ speedup through batching (0.3~$\mu$s/position at N=4096 vs 258~$\mu$s for single positions).
+\item \textbf{GPU batch efficiency}: 635$\times$ speedup through batching (0.3~$\mu$s/position at N=4096 vs 267~$\mu$s for single positions).
 
-\item \textbf{Dispatch overhead}: 140~$\mu$s irreducible minimum makes GPU unsuitable for pure alpha-beta but effective for batch-oriented MCTS.
+\item \textbf{MCTS throughput}: 97K--782K nodes/second depending on position complexity. Endgames achieve 8$\times$ higher throughput due to smaller trees and 99\% TT hit rates.
 
-\item \textbf{Evaluation consistency}: 100\% reproducibility across 1,000 positions with meaningful score differentiation.
+\item \textbf{Batched evaluation}: 28.5$\times$ speedup over direct GPU access through dedicated evaluation thread with request batching.
+
+\item \textbf{Dispatch overhead}: 149~$\mu$s irreducible minimum makes GPU unsuitable for pure alpha-beta but effective for batch-oriented MCTS.
 \end{enumerate}
 
-\textbf{Limitations}: We use heuristic-based policy priors (captures, checks, promotions, center control), which improves over uniform priors but is still less effective than a trained policy network. Playing strength has not been validated against established engines; this is future work.
+\textbf{Key insight}: While the hybrid MCTS-alpha-beta architecture provides a framework for combining strategic exploration with tactical precision, achieving competitive MCTS strength requires trained policy priors. The GPU NNUE implementation preserves evaluation quality (as demonstrated by MetalFish-AB's competitive Elo), but the search algorithm---not the evaluator---is the bottleneck for MCTS variants.
 
-\textbf{Key insight}: The hybrid MCTS-alpha-beta architecture provides a framework for combining strategic exploration with tactical precision on GPU-accelerated unified memory systems. The primary bottleneck is tree traversal (selection at 97.9\%), not GPU evaluation, suggesting that algorithmic improvements to MCTS selection would have greater impact than further GPU optimization.
+\textbf{Future directions}: Training a policy network on self-play data would likely close the $\sim$2400 Elo gap between MetalFish-AB and MetalFish-Hybrid, enabling the hybrid architecture to leverage MCTS's exploratory strengths while maintaining tactical precision through alpha-beta verification.
 
 \subsection*{Reproducibility}
 
-\textbf{Hardware}: Apple M2 Max, 64GB. \textbf{Software}: macOS 14.0, Xcode 15.0. \textbf{Build}: CMake, -O3, LTO. \textbf{Source}: \url{https://github.com/NripeshN/MetalFish}. \textbf{Benchmarks}: \texttt{gpubench} and \texttt{mcts} UCI commands.
+\textbf{Hardware}: Apple M2 Max, 64GB unified memory. \textbf{Software}: macOS 14.0, Xcode 15.0, Metal 3.0. \textbf{Build}: CMake, -O3, LTO enabled. \textbf{Source}: \url{https://github.com/NripeshN/MetalFish}. \textbf{Benchmarks}: \texttt{gpubench}, \texttt{mctsbench}, and \texttt{hybridbench} UCI commands. \textbf{Tournament}: cutechess-cli, 10+0.1 time control, 20 games per match.
 
 \begin{thebibliography}{10}
 
