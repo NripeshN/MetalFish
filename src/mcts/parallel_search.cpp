@@ -54,7 +54,7 @@ bool ParallelGPUEvaluator::initialize(GPU::GPUNNUEManager *gpu_manager,
   return true;
 }
 
-uint64_t ParallelGPUEvaluator::submit(const EvalRequest &request) {
+uint64_t ParallelGPUEvaluator::submit(const ParallelEvalRequest &request) {
   if (!initialized_)
     return 0;
 
@@ -63,7 +63,7 @@ uint64_t ParallelGPUEvaluator::submit(const EvalRequest &request) {
       next_request_id_.fetch_add(1, std::memory_order_relaxed);
 
   // Create a copy with the assigned request_id
-  EvalRequest tagged_request = request;
+  ParallelEvalRequest tagged_request = request;
   tagged_request.request_id = request_id;
 
   {
@@ -443,7 +443,7 @@ float SearchWorker::evaluate_position(const Position &pos) {
 
   // Use GPU evaluator if available
   if (evaluator_ && evaluator_->is_running()) {
-    EvalRequest request;
+    ParallelEvalRequest request;
     request.node = nullptr; // We'll handle result inline
     request.fen = pos.fen();
     request.thread_id = id_;

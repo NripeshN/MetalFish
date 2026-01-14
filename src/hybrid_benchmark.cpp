@@ -358,7 +358,11 @@ int play_game(GPU::GPUNNUEManager *gpu_manager, TranspositionTable *tt,
   }
 
   // Max moves reached, evaluate final position
+  // simple_eval returns score from side-to-move's perspective
+  // Convert to white's perspective for consistent result handling
   Value eval = Eval::simple_eval(pos);
+  if (pos.side_to_move() == BLACK)
+    eval = -eval;
   if (eval > 100)
     return 1;
   if (eval < -100)

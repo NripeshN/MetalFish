@@ -81,14 +81,14 @@ struct SearchContext {
 // GPU Evaluation Request
 // ============================================================================
 
-struct EvalRequest {
+struct ParallelEvalRequest {
   HybridNode *node;
   std::string fen;
   int thread_id;
   uint64_t request_id; // Unique ID for matching request to result
 
-  EvalRequest() : node(nullptr), thread_id(-1), request_id(0) {}
-  EvalRequest(HybridNode *n, const std::string &f, int tid, uint64_t rid = 0)
+  ParallelEvalRequest() : node(nullptr), thread_id(-1), request_id(0) {}
+  ParallelEvalRequest(HybridNode *n, const std::string &f, int tid, uint64_t rid = 0)
       : node(n), fen(f), thread_id(tid), request_id(rid) {}
 };
 
@@ -133,7 +133,7 @@ public:
 
   // Submit evaluation request (thread-safe)
   // Returns a unique request ID for matching the result
-  uint64_t submit(const EvalRequest &request);
+  uint64_t submit(const ParallelEvalRequest &request);
 
   // Get completed result for a specific request ID (thread-safe)
   // Returns true if the result for this request_id was found
@@ -167,7 +167,7 @@ private:
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
 
   // Request queue
-  std::queue<EvalRequest> request_queue_;
+  std::queue<ParallelEvalRequest> request_queue_;
   std::mutex request_mutex_;
   std::condition_variable request_cv_;
 
@@ -190,7 +190,7 @@ private:
   // Persistent buffers for reduced allocation overhead
   struct PersistentBatch {
     GPU::GPUEvalBatch gpu_batch;
-    std::vector<EvalRequest> requests;
+    std::vector<ParallelEvalRequest> requests;
 
     void reserve(int size) {
       gpu_batch.reserve(size);

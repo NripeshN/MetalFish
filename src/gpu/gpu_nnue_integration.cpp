@@ -2063,6 +2063,13 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &) {
 bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &, bool, bool) {
   return false;
 }
+bool GPUNNUEManager::evaluate_batch_async(
+    GPUEvalBatch &, std::function<void(bool success)> completion_handler,
+    bool) {
+  if (completion_handler)
+    completion_handler(false);
+  return false;
+}
 std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &,
                                                             bool) {
   return {0, 0};
