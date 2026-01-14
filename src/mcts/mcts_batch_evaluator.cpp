@@ -269,8 +269,11 @@ void MCTSBatchEvaluator::evaluate_batch(UnifiedBatchBuffer &batch) {
 
   if (success) {
     // Copy results back
+    // Note: GPUNNUEManager::evaluate_batch only populates positional_scores,
+    // not psqt_scores. Guard against accessing empty vector.
+    const bool has_psqt = !gpu_batch.psqt_scores.empty();
     for (int i = 0; i < batch.count; ++i) {
-      batch.psqt_scores[i] = gpu_batch.psqt_scores[i];
+      batch.psqt_scores[i] = has_psqt ? gpu_batch.psqt_scores[i] : 0;
       batch.positional_scores[i] = gpu_batch.positional_scores[i];
     }
   }

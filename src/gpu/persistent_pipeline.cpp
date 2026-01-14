@@ -516,8 +516,11 @@ int PersistentBatchEvaluator::evaluate(const GPUPositionData *positions,
 
   if (success) {
     // Copy results
+    // Note: GPUNNUEManager::evaluate_batch only populates positional_scores,
+    // not psqt_scores. Guard against accessing empty vector.
+    const bool has_psqt = !batch.psqt_scores.empty();
     for (int i = 0; i < count; ++i) {
-      psqt_scores[i] = batch.psqt_scores[i];
+      psqt_scores[i] = has_psqt ? batch.psqt_scores[i] : 0;
       positional_scores[i] = batch.positional_scores[i];
     }
   }

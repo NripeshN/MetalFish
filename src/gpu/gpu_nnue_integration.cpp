@@ -1793,7 +1793,11 @@ bool GPUNNUEManager::evaluate_batch_async(
     return false;
   }
 
-  // Lock for thread-safe GPU access - protects shared buffers
+  // Lock for thread-safe GPU access - protects kernel dispatch setup
+  // NOTE: We use a short lock scope here. The gpu_mutex_ is released when this
+  // function returns, but the GPU is still reading from the input buffers.
+  // To avoid race conditions with MAX_INFLIGHT_BATCHES=4 concurrent async calls,
+  // we allocate dedicated input buffers for each async call below.
   std::lock_guard<std::mutex> lock(gpu_mutex_);
 
   auto &backend = gpu();
@@ -1809,19 +1813,63 @@ bool GPUNNUEManager::evaluate_batch_async(
   const int batch_size = batch.count;
   const int hidden_dim = net.hidden_dim;
 
-  // Use pre-allocated buffer pointers for direct writes
+  // Allocate dedicated input buffers for this async call to avoid race conditions.
+  // The shared class member buffers cannot be used because the gpu_mutex_ is
+  // released when this function returns, but the GPU completion handler runs later.
+  // With MAX_INFLIGHT_BATCHES=4 concurrent async evaluations, another thread could
+  // acquire the mutex and overwrite the shared buffers before our GPU work completes.
+  const size_t max_features_per_batch = batch_size * GPU_MAX_FEATURES_PER_PERSPECTIVE;
+
+  auto async_white_features = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(max_features_per_batch * sizeof(int32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_black_features = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(max_features_per_batch * sizeof(int32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_white_counts = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * sizeof(uint32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_black_counts = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * sizeof(uint32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_white_offsets = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * sizeof(uint32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_black_offsets = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * sizeof(uint32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_accumulators = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * 2 * hidden_dim * sizeof(int32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+
+  // Validate all buffer allocations
+  if (!*async_white_features || !(*async_white_features)->valid() ||
+      !*async_black_features || !(*async_black_features)->valid() ||
+      !*async_white_counts || !(*async_white_counts)->valid() ||
+      !*async_black_counts || !(*async_black_counts)->valid() ||
+      !*async_white_offsets || !(*async_white_offsets)->valid() ||
+      !*async_black_offsets || !(*async_black_offsets)->valid() ||
+      !*async_accumulators || !(*async_accumulators)->valid()) {
+    // Fallback to synchronous path if buffer allocation fails
+    cpu_evals_ += batch.count;
+    if (completion_handler)
+      completion_handler(false);
+    return false;
+  }
+
+  // Use the dedicated async buffer pointers for direct writes
   int32_t *white_features_ptr =
-      static_cast<int32_t *>(white_features_buffer_->data());
+      static_cast<int32_t *>((*async_white_features)->data());
   int32_t *black_features_ptr =
-      static_cast<int32_t *>(black_features_buffer_->data());
+      static_cast<int32_t *>((*async_black_features)->data());
   uint32_t *white_counts_ptr =
-      static_cast<uint32_t *>(white_counts_buffer_->data());
+      static_cast<uint32_t *>((*async_white_counts)->data());
   uint32_t *black_counts_ptr =
-      static_cast<uint32_t *>(black_counts_buffer_->data());
+      static_cast<uint32_t *>((*async_black_counts)->data());
   uint32_t *white_offsets_ptr =
-      static_cast<uint32_t *>(white_offsets_buffer_->data());
+      static_cast<uint32_t *>((*async_white_offsets)->data());
   uint32_t *black_offsets_ptr =
-      static_cast<uint32_t *>(black_offsets_buffer_->data());
+      static_cast<uint32_t *>((*async_black_offsets)->data());
 
   // Extract features directly into GPU buffers
   // Optimized: removed redundant bounds checks
@@ -1871,9 +1919,6 @@ bool GPUNNUEManager::evaluate_batch_async(
     black_counts_ptr[i] = static_cast<uint32_t>(black_count);
   }
 
-  std::memcpy(positions_buffer_->data(), batch.positions.data(),
-              batch_size * sizeof(GPUPositionData));
-
   // Use parallel encoder for async work to avoid blocking main queue
   auto encoder = backend.create_parallel_encoder();
 
@@ -1885,13 +1930,13 @@ bool GPUNNUEManager::evaluate_batch_async(
     encoder->set_kernel(feature_transform_dual_kernel_.get());
     encoder->set_buffer(net.ft_weights.get(), 0);
     encoder->set_buffer(net.ft_biases.get(), 1);
-    encoder->set_buffer(white_features_buffer_.get(), 2);
-    encoder->set_buffer(black_features_buffer_.get(), 3);
-    encoder->set_buffer(white_counts_buffer_.get(), 4);
-    encoder->set_buffer(black_counts_buffer_.get(), 5);
-    encoder->set_buffer(white_offsets_buffer_.get(), 6);
-    encoder->set_buffer(black_offsets_buffer_.get(), 7);
-    encoder->set_buffer(accumulators_buffer_.get(), 8);
+    encoder->set_buffer(async_white_features->get(), 2);
+    encoder->set_buffer(async_black_features->get(), 3);
+    encoder->set_buffer(async_white_counts->get(), 4);
+    encoder->set_buffer(async_black_counts->get(), 5);
+    encoder->set_buffer(async_white_offsets->get(), 6);
+    encoder->set_buffer(async_black_offsets->get(), 7);
+    encoder->set_buffer(async_accumulators->get(), 8);
     encoder->set_value(static_cast<uint32_t>(hidden_dim), 9);
     encoder->set_value(static_cast<uint32_t>(batch_size), 10);
     encoder->dispatch_threads(hidden_dim, 2, batch_size);
@@ -1900,10 +1945,10 @@ bool GPUNNUEManager::evaluate_batch_async(
     encoder->set_kernel(feature_transform_kernel_.get());
     encoder->set_buffer(net.ft_weights.get(), 0);
     encoder->set_buffer(net.ft_biases.get(), 1);
-    encoder->set_buffer(white_features_buffer_.get(), 2);
-    encoder->set_buffer(white_counts_buffer_.get(), 3);
-    encoder->set_buffer(white_offsets_buffer_.get(), 4);
-    encoder->set_buffer(accumulators_buffer_.get(), 5);
+    encoder->set_buffer(async_white_features->get(), 2);
+    encoder->set_buffer(async_white_counts->get(), 3);
+    encoder->set_buffer(async_white_offsets->get(), 4);
+    encoder->set_buffer(async_accumulators->get(), 5);
     encoder->set_value(static_cast<uint32_t>(hidden_dim), 6);
     encoder->set_value(static_cast<uint32_t>(batch_size), 7);
     encoder->dispatch_threads(hidden_dim, batch_size);
@@ -1931,7 +1976,7 @@ bool GPUNNUEManager::evaluate_batch_async(
   }
 
   encoder->set_kernel(forward_fused_kernel_.get());
-  encoder->set_buffer(accumulators_buffer_.get(), 0);
+  encoder->set_buffer(async_accumulators->get(), 0);
   encoder->set_buffer(layer.fc0_weights.get(), 1);
   encoder->set_buffer(layer.fc0_biases.get(), 2);
   encoder->set_buffer(layer.fc1_weights.get(), 3);
@@ -1944,16 +1989,27 @@ bool GPUNNUEManager::evaluate_batch_async(
   encoder->dispatch_threadgroups(batch_size, 1, 1, GPU_FORWARD_THREADS, 1, 1);
 
   // Capture necessary data for completion handler
-  // Note: async_output_buffer is a shared_ptr that keeps the buffer alive
+  // Note: All async_* buffers are shared_ptrs that keep the buffers alive
   // until the completion handler finishes executing
   GPUEvalBatch *batch_ptr = &batch;
   std::atomic<size_t> *gpu_evals_ptr = &gpu_evals_;
   std::atomic<size_t> *batch_count_ptr = &batch_count_;
 
   // Submit with async completion handler
-  // The completion handler captures async_output_buffer by value (shared_ptr),
-  // ensuring the buffer remains valid until after results are copied
-  backend.submit_async(encoder.get(), [=]() {
+  // The completion handler captures all async buffers by value (shared_ptr),
+  // ensuring the buffers remain valid until after GPU work completes.
+  // This fixes the race condition where multiple async calls could previously
+  // corrupt each other's input data when using shared class member buffers.
+  backend.submit_async(encoder.get(), [=,
+      // Capture all async buffers to extend their lifetime
+      async_white_features = async_white_features,
+      async_black_features = async_black_features,
+      async_white_counts = async_white_counts,
+      async_black_counts = async_black_counts,
+      async_white_offsets = async_white_offsets,
+      async_black_offsets = async_black_offsets,
+      async_accumulators = async_accumulators,
+      async_output_buffer = async_output_buffer]() {
     // Read results from our dedicated buffer (safe - no other thread can access it)
     batch_ptr->positional_scores.resize(batch_size);
     std::memcpy(batch_ptr->positional_scores.data(),
@@ -1965,7 +2021,7 @@ bool GPUNNUEManager::evaluate_batch_async(
     if (completion_handler) {
       completion_handler(true);
     }
-    // async_output_buffer is automatically freed when this lambda is destroyed
+    // All async buffers are automatically freed when this lambda is destroyed
   });
 
   return true;
