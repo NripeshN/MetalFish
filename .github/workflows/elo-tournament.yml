@@ -67,7 +67,6 @@ jobs:
 
       - name: Build MetalFish
         run: |
-          cd metalfish
           mkdir -p build && cd build
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
           ninja metalfish
@@ -269,7 +268,6 @@ jobs:
       - name: Generate match matrix
         id: generate-matrix
         run: |
-          cd metalfish
           # Get the list of engine pairs
           python3 tools/elo_tournament.py --ci-list-engines > /tmp/engines.json
 
@@ -357,7 +355,6 @@ jobs:
 
       - name: Run match
         run: |
-          cd metalfish
           mkdir -p results
 
           echo "Running match: ${{ matrix.engine1 }} vs ${{ matrix.engine2 }}"
@@ -410,7 +407,6 @@ jobs:
       - name: Aggregate results
         id: aggregate
         run: |
-          cd metalfish
           mkdir -p results
 
           # Copy all results to one directory
