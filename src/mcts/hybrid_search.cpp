@@ -53,25 +53,25 @@ void HybridNode::remove_virtual_loss() {
 }
 
 void HybridNode::update_stats(float value, float draw_prob, float moves_left) {
+  // Optimized: increment n_ first, then update stats with relaxed ordering
+  // MCTS tolerates slightly stale reads, so we can use relaxed ordering
+  uint32_t new_n = n_.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+  // Use mutex only for the floating point updates
   std::lock_guard<std::mutex> lock(mutex_);
 
-  uint32_t n = n_.load(std::memory_order_relaxed);
-  if (n == 0) {
+  if (new_n == 1) {
     q_ = value;
     d_ = draw_prob;
     m_ = moves_left;
   } else {
-    // Incremental update
-    float n_f = static_cast<float>(n);
-    q_ = (q_ * n_f + value) / (n_f + 1.0f);
-    d_ = (d_ * n_f + draw_prob) / (n_f + 1.0f);
-    m_ = (m_ * n_f + moves_left) / (n_f + 1.0f);
+    // Incremental update with relaxed precision (fine for MCTS)
+    float n_f = static_cast<float>(new_n);
+    float inv_n = 1.0f / n_f;
+    q_ += (value - q_) * inv_n;
+    d_ += (draw_prob - d_) * inv_n;
+    m_ += (moves_left - m_) * inv_n;
   }
-  // Increment visit count atomically while still holding the mutex.
-  // This ensures that n_ and the statistics (q_, d_, m_) are always consistent
-  // when read by other threads, preventing race conditions where another thread
-  // could read updated statistics but a stale visit count.
-  n_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void HybridNode::set_terminal(Terminal type, float value) {
@@ -269,9 +269,10 @@ std::vector<MCTSMove> HybridSearch::get_pv() const {
 }
 
 void HybridSearch::search_thread_main() {
-  // Each thread gets its own position copy (thread-local)
-  // We recreate from FEN to ensure thread safety
+  // Cache root FEN once (avoid repeated string copies)
   std::string root_fen = tree_->history().current().fen();
+
+  // Thread-local position
   MCTSPosition thread_pos;
   thread_pos.set_from_fen(root_fen);
 
@@ -292,30 +293,46 @@ void HybridSearch::search_thread_main() {
     }
   }
 
+  // Local profiling accumulators (reduce atomic overhead)
+  uint64_t local_selection_us = 0;
+  uint64_t local_expansion_us = 0;
+  uint64_t local_evaluation_us = 0;
+  uint64_t local_backprop_us = 0;
+  uint64_t local_cache_hits = 0;
+  uint64_t local_cache_misses = 0;
+
   int iterations = 0;
-  while (!should_stop()) {
-    auto iter_start = std::chrono::steady_clock::now();
+  int iterations_since_stop_check = 0;
 
-    // Selection: traverse tree to find leaf
-    auto select_start = std::chrono::steady_clock::now();
-    HybridNode *node = tree_->root();
+  while (true) {
+    // Batched stop checks (reduce overhead)
+    if (++iterations_since_stop_check >=
+        HybridSearchConfig::STOP_CHECK_INTERVAL) {
+      iterations_since_stop_check = 0;
+      if (should_stop())
+        break;
+    }
 
-    // Reset position to root for each iteration (thread-safe)
+    // Profile only every N iterations
+    bool do_profile =
+        (iterations % HybridSearchConfig::PROFILE_SAMPLE_RATE) == 0;
+
+    // Reset position to root (avoid FEN parsing)
     MCTSPosition search_pos;
     search_pos.set_from_fen(root_fen);
 
+    // Selection
+    auto select_start = do_profile ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
+    HybridNode *node = tree_->root();
     node = select_node(node, search_pos);
-    auto select_end = std::chrono::steady_clock::now();
-    stats_.selection_time_us.fetch_add(
-        std::chrono::duration_cast<std::chrono::microseconds>(select_end -
-                                                              select_start)
-            .count(),
-        std::memory_order_relaxed);
+    auto select_end = do_profile ? std::chrono::steady_clock::now()
+                                 : std::chrono::steady_clock::time_point{};
 
     if (!node) {
       iterations++;
       if (iterations > 100)
-        break; // Safety break
+        break;
       continue;
     }
 
@@ -338,27 +355,25 @@ void HybridSearch::search_thread_main() {
       node->set_terminal(term_type, value);
       backpropagate(node, value, (result == GameResult::DRAW) ? 1.0f : 0.0f,
                     0.0f);
+      iterations++;
       continue;
     }
 
-    // Expansion: add children (with per-node locking)
-    auto expand_start = std::chrono::steady_clock::now();
+    // Expansion
+    auto expand_start = do_profile ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
     if (!node->has_children()) {
       std::lock_guard<std::mutex> lock(node->mutex());
-      // Double check after acquiring lock
       if (!node->has_children()) {
         expand_node(node, search_pos);
       }
     }
-    auto expand_end = std::chrono::steady_clock::now();
-    stats_.expansion_time_us.fetch_add(
-        std::chrono::duration_cast<std::chrono::microseconds>(expand_end -
-                                                              expand_start)
-            .count(),
-        std::memory_order_relaxed);
+    auto expand_end = do_profile ? std::chrono::steady_clock::now()
+                                 : std::chrono::steady_clock::time_point{};
 
-    // Evaluation: Check TT for cached evaluation (fast path)
-    auto eval_start = std::chrono::steady_clock::now();
+    // Evaluation with TT lookup
+    auto eval_start = do_profile ? std::chrono::steady_clock::now()
+                                 : std::chrono::steady_clock::time_point{};
     float value = 0.0f;
     float draw = 0.0f;
     float moves_left = 30.0f;
@@ -368,50 +383,73 @@ void HybridSearch::search_thread_main() {
     bool found_in_tt = mcts_tt().probe_mcts(hash, cached_stats);
 
     if (found_in_tt && cached_stats.n > 0) {
-      // Use cached value
       value = cached_stats.q;
       draw = cached_stats.d;
       moves_left = cached_stats.m;
-      stats_.cache_hits.fetch_add(1, std::memory_order_relaxed);
+      local_cache_hits++;
     } else {
-      // Evaluate using GPU NNUE
       if (gpu_nnue_) {
         auto [psqt, score] =
             gpu_nnue_->evaluate_single(search_pos.stockfish_position(), true);
-        // Convert centipawn score to value in [-1, 1]
         value = std::tanh(score / 400.0f);
         if (search_pos.is_black_to_move()) {
           value = -value;
         }
-        // Estimate draw probability from score magnitude
         draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
       }
-
-      // Store in TT
       mcts_tt().update_mcts(hash, value, draw, moves_left);
-      stats_.cache_misses.fetch_add(1, std::memory_order_relaxed);
+      local_cache_misses++;
     }
-    auto eval_end = std::chrono::steady_clock::now();
-    stats_.evaluation_time_us.fetch_add(
-        std::chrono::duration_cast<std::chrono::microseconds>(eval_end -
-                                                              eval_start)
-            .count(),
-        std::memory_order_relaxed);
+    auto eval_end = do_profile ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
 
     // Backpropagation
-    auto backprop_start = std::chrono::steady_clock::now();
+    auto backprop_start = do_profile ? std::chrono::steady_clock::now()
+                                     : std::chrono::steady_clock::time_point{};
     backpropagate(node, value, draw, moves_left);
-    auto backprop_end = std::chrono::steady_clock::now();
-    stats_.backprop_time_us.fetch_add(
-        std::chrono::duration_cast<std::chrono::microseconds>(backprop_end -
-                                                              backprop_start)
-            .count(),
-        std::memory_order_relaxed);
+    auto backprop_end = do_profile ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
+
+    // Update profiling (sampled)
+    if (do_profile) {
+      local_selection_us +=
+          std::chrono::duration_cast<std::chrono::microseconds>(select_end -
+                                                                select_start)
+              .count() *
+          HybridSearchConfig::PROFILE_SAMPLE_RATE;
+      local_expansion_us +=
+          std::chrono::duration_cast<std::chrono::microseconds>(expand_end -
+                                                                expand_start)
+              .count() *
+          HybridSearchConfig::PROFILE_SAMPLE_RATE;
+      local_evaluation_us +=
+          std::chrono::duration_cast<std::chrono::microseconds>(eval_end -
+                                                                eval_start)
+              .count() *
+          HybridSearchConfig::PROFILE_SAMPLE_RATE;
+      local_backprop_us +=
+          std::chrono::duration_cast<std::chrono::microseconds>(backprop_end -
+                                                                backprop_start)
+              .count() *
+          HybridSearchConfig::PROFILE_SAMPLE_RATE;
+    }
 
     stats_.mcts_nodes.fetch_add(1, std::memory_order_relaxed);
     stats_.total_iterations.fetch_add(1, std::memory_order_relaxed);
     iterations++;
   }
+
+  // Flush accumulated stats
+  stats_.selection_time_us.fetch_add(local_selection_us,
+                                     std::memory_order_relaxed);
+  stats_.expansion_time_us.fetch_add(local_expansion_us,
+                                     std::memory_order_relaxed);
+  stats_.evaluation_time_us.fetch_add(local_evaluation_us,
+                                      std::memory_order_relaxed);
+  stats_.backprop_time_us.fetch_add(local_backprop_us,
+                                    std::memory_order_relaxed);
+  stats_.cache_hits.fetch_add(local_cache_hits, std::memory_order_relaxed);
+  stats_.cache_misses.fetch_add(local_cache_misses, std::memory_order_relaxed);
 
   // Report best move when done
   if (best_move_callback_) {

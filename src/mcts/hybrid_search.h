@@ -68,16 +68,28 @@ struct HybridSearchConfig {
   int max_batch_size = 256;    // Maximum batch size
   int batch_timeout_us = 1000; // Timeout for batch collection (microseconds)
 
-  // Threading
-  int num_search_threads = 1; // Number of search threads (multi-thread needs
-                              // Position to be thread-safe - future work)
-  int num_eval_threads = 1;   // Number of evaluation threads
+  // Threading - supports -1 for auto (all cores)
+  int num_search_threads = 1;
+  int num_eval_threads = 1;
+
+  int get_num_threads() const {
+    if (num_search_threads <= 0) {
+      int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
+      return hw_threads > 0 ? hw_threads : 4;
+    }
+    return num_search_threads;
+  }
 
   // Time management
   bool use_smart_pruning = true;       // Prune obviously bad moves early
   float time_curve_peak = 0.3f;        // Peak of time allocation curve
   float time_curve_left_width = 0.2f;  // Left width of time curve
   float time_curve_right_width = 0.3f; // Right width of time curve
+
+  // Profiling control
+  static constexpr int PROFILE_SAMPLE_RATE = 64; // Profile every N iterations
+  static constexpr int STOP_CHECK_INTERVAL =
+      64; // Check stop every N iterations
 };
 
 // Statistics for hybrid search
