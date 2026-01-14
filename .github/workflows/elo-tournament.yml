@@ -51,13 +51,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            metalfish/src/nn-*.nnue
-            metalfish/build/nn-*.nnue
+            src/nn-*.nnue
+            build/nn-*.nnue
           key: nnue-files-v1
 
       - name: Download NNUE files for MetalFish
         run: |
-          cd metalfish/src
+          cd src
           if [ ! -f nn-c288c895ea92.nnue ]; then
             curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
           fi
@@ -76,7 +76,7 @@ jobs:
 
       - name: Build cutechess-cli
         run: |
-          cd metalfish/reference/cutechess
+          cd reference/cutechess
           mkdir -p build && cd build
           # Use Qt6 from Homebrew
           export PATH="/opt/homebrew/opt/qt@6/bin:$PATH"
@@ -87,10 +87,10 @@ jobs:
       - name: Clone and Build Stockfish
         run: |
           # Clone Stockfish if not present as submodule
-          if [ ! -d "metalfish/reference/stockfish/src" ]; then
-            git clone --depth 1 https://github.com/official-stockfish/Stockfish.git metalfish/reference/stockfish
+          if [ ! -d "reference/stockfish/src" ]; then
+            git clone --depth 1 https://github.com/official-stockfish/Stockfish.git reference/stockfish
           fi
-          cd metalfish/reference/stockfish/src
+          cd reference/stockfish/src
           # Download NNUE files for Stockfish
           if [ ! -f nn-c288c895ea92.nnue ]; then
             curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
@@ -105,10 +105,10 @@ jobs:
         continue-on-error: true
         run: |
           # Clone Patricia if not present as submodule
-          if [ ! -d "metalfish/reference/Patricia/engine" ]; then
-            git clone --depth 1 https://github.com/Adam-Kulju/Patricia.git metalfish/reference/Patricia
+          if [ ! -d "reference/Patricia/engine" ]; then
+            git clone --depth 1 https://github.com/Adam-Kulju/Patricia.git reference/Patricia
           fi
-          cd metalfish/reference/Patricia/engine
+          cd reference/Patricia/engine
           # Build Patricia with clang++
           make build CXX=clang++
 
@@ -116,10 +116,10 @@ jobs:
         continue-on-error: true
         run: |
           # Clone lc0 if not present as submodule
-          if [ ! -d "metalfish/reference/lc0/src" ]; then
-            git clone --depth 1 https://github.com/LeelaChessZero/lc0.git metalfish/reference/lc0
+          if [ ! -d "reference/lc0/src" ]; then
+            git clone --depth 1 https://github.com/LeelaChessZero/lc0.git reference/lc0
           fi
-          cd metalfish/reference/lc0
+          cd reference/lc0
 
           # Build lc0 with Metal backend (macOS)
           ./build.sh -Dgtest=false || echo "lc0 build failed, will skip in tournament"
@@ -149,7 +149,7 @@ jobs:
       - name: Create MetalFish wrapper scripts
         run: |
           # Create Hybrid wrapper (uses 'mcts' command)
-          cat > metalfish/tools/metalfish_hybrid_wrapper.sh << 'EOF'
+          cat > tools/metalfish_hybrid_wrapper.sh << 'EOF'
           #!/bin/bash
           # MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
 
@@ -165,10 +165,10 @@ jobs:
               fi
           done | "$ENGINE"
           EOF
-          chmod +x metalfish/tools/metalfish_hybrid_wrapper.sh
+          chmod +x tools/metalfish_hybrid_wrapper.sh
 
           # Create MCTS-MT wrapper (uses 'mctsmt' command with 4 threads)
-          cat > metalfish/tools/metalfish_mctsmt_wrapper.sh << 'EOF'
+          cat > tools/metalfish_mctsmt_wrapper.sh << 'EOF'
           #!/bin/bash
           # MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
 
@@ -184,7 +184,7 @@ jobs:
               fi
           done | "$ENGINE"
           EOF
-          chmod +x metalfish/tools/metalfish_mctsmt_wrapper.sh
+          chmod +x tools/metalfish_mctsmt_wrapper.sh
 
       - name: Verify all engine binaries
         run: |
@@ -194,9 +194,9 @@ jobs:
 
           echo ""
           echo "=== MetalFish (Alpha-Beta) ==="
-          if [ -f "metalfish/build/metalfish" ]; then
-            echo "  ✓ Found at metalfish/build/metalfish"
-            echo -e "uci\nquit" | timeout 5 metalfish/build/metalfish 2>&1 | head -3 || true
+          if [ -f "build/metalfish" ]; then
+            echo "  ✓ Found at build/metalfish"
+            echo -e "uci\nquit" | timeout 5 build/metalfish 2>&1 | head -3 || true
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -204,8 +204,8 @@ jobs:
 
           echo ""
           echo "=== MetalFish Hybrid Wrapper ==="
-          if [ -f "metalfish/tools/metalfish_hybrid_wrapper.sh" ]; then
-            echo "  ✓ Found at metalfish/tools/metalfish_hybrid_wrapper.sh"
+          if [ -f "tools/metalfish_hybrid_wrapper.sh" ]; then
+            echo "  ✓ Found at tools/metalfish_hybrid_wrapper.sh"
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -213,8 +213,8 @@ jobs:
 
           echo ""
           echo "=== MetalFish MCTS-MT Wrapper ==="
-          if [ -f "metalfish/tools/metalfish_mctsmt_wrapper.sh" ]; then
-            echo "  ✓ Found at metalfish/tools/metalfish_mctsmt_wrapper.sh"
+          if [ -f "tools/metalfish_mctsmt_wrapper.sh" ]; then
+            echo "  ✓ Found at tools/metalfish_mctsmt_wrapper.sh"
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -222,9 +222,9 @@ jobs:
 
           echo ""
           echo "=== Stockfish ==="
-          if [ -f "metalfish/reference/stockfish/src/stockfish" ]; then
-            echo "  ✓ Found at metalfish/reference/stockfish/src/stockfish"
-            echo -e "uci\nquit" | timeout 5 metalfish/reference/stockfish/src/stockfish 2>&1 | head -3 || true
+          if [ -f "reference/stockfish/src/stockfish" ]; then
+            echo "  ✓ Found at reference/stockfish/src/stockfish"
+            echo -e "uci\nquit" | timeout 5 reference/stockfish/src/stockfish 2>&1 | head -3 || true
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -232,18 +232,18 @@ jobs:
 
           echo ""
           echo "=== Patricia ==="
-          if [ -f "metalfish/reference/Patricia/engine/patricia" ]; then
-            echo "  ✓ Found at metalfish/reference/Patricia/engine/patricia"
-            echo -e "uci\nquit" | timeout 5 metalfish/reference/Patricia/engine/patricia 2>&1 | head -3 || true
+          if [ -f "reference/Patricia/engine/patricia" ]; then
+            echo "  ✓ Found at reference/Patricia/engine/patricia"
+            echo -e "uci\nquit" | timeout 5 reference/Patricia/engine/patricia 2>&1 | head -3 || true
           else
             echo "  ✗ Not found (optional - will be skipped)"
           fi
 
           echo ""
           echo "=== cutechess-cli ==="
-          if [ -f "metalfish/reference/cutechess/build/cutechess-cli" ]; then
-            echo "  ✓ Found at metalfish/reference/cutechess/build/cutechess-cli"
-            metalfish/reference/cutechess/build/cutechess-cli --version || true
+          if [ -f "reference/cutechess/build/cutechess-cli" ]; then
+            echo "  ✓ Found at reference/cutechess/build/cutechess-cli"
+            reference/cutechess/build/cutechess-cli --version || true
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -251,9 +251,9 @@ jobs:
 
           echo ""
           echo "=== Lc0 (Leela Chess Zero) ==="
-          if [ -f "metalfish/reference/lc0/build/release/lc0" ]; then
-            echo "  ✓ Found at metalfish/reference/lc0/build/release/lc0"
-            if [ -f "metalfish/reference/lc0/build/release/network.pb.gz" ]; then
+          if [ -f "reference/lc0/build/release/lc0" ]; then
+            echo "  ✓ Found at reference/lc0/build/release/lc0"
+            if [ -f "reference/lc0/build/release/network.pb.gz" ]; then
               echo "  ✓ Network file found"
             else
               echo "  ✗ Network file missing - lc0 will be skipped"
@@ -289,26 +289,26 @@ jobs:
         run: |
           # Create a tarball of all necessary files to preserve permissions
           tar -cvf build-artifacts.tar \
-            metalfish/build/metalfish \
-            metalfish/build/nn-*.nnue \
-            metalfish/reference/cutechess/build/cutechess-cli \
-            metalfish/reference/stockfish/src/stockfish \
-            metalfish/reference/stockfish/src/nn-*.nnue \
-            metalfish/tools/elo_tournament.py \
-            metalfish/tools/metalfish_hybrid_wrapper.sh \
-            metalfish/tools/metalfish_mctsmt_wrapper.sh \
+            build/metalfish \
+            build/nn-*.nnue \
+            reference/cutechess/build/cutechess-cli \
+            reference/stockfish/src/stockfish \
+            reference/stockfish/src/nn-*.nnue \
+            tools/elo_tournament.py \
+            tools/metalfish_hybrid_wrapper.sh \
+            tools/metalfish_mctsmt_wrapper.sh \
             2>/dev/null || true
 
           # Add Patricia if it exists
-          if [ -f "metalfish/reference/Patricia/engine/patricia" ]; then
-            tar -rvf build-artifacts.tar metalfish/reference/Patricia/engine/patricia
+          if [ -f "reference/Patricia/engine/patricia" ]; then
+            tar -rvf build-artifacts.tar reference/Patricia/engine/patricia
           fi
 
           # Add lc0 if it exists with network
-          if [ -f "metalfish/reference/lc0/build/release/lc0" ]; then
-            tar -rvf build-artifacts.tar metalfish/reference/lc0/build/release/lc0
-            if [ -f "metalfish/reference/lc0/build/release/network.pb.gz" ]; then
-              tar -rvf build-artifacts.tar metalfish/reference/lc0/build/release/network.pb.gz
+          if [ -f "reference/lc0/build/release/lc0" ]; then
+            tar -rvf build-artifacts.tar reference/lc0/build/release/lc0
+            if [ -f "reference/lc0/build/release/network.pb.gz" ]; then
+              tar -rvf build-artifacts.tar reference/lc0/build/release/network.pb.gz
             fi
           fi
 
@@ -347,13 +347,13 @@ jobs:
           tar -xvf build-artifacts.tar
 
           # Set executable permissions
-          chmod +x metalfish/build/metalfish || true
-          chmod +x metalfish/reference/cutechess/build/cutechess-cli || true
-          chmod +x metalfish/reference/stockfish/src/stockfish || true
-          chmod +x metalfish/reference/Patricia/engine/patricia || true
-          chmod +x metalfish/reference/lc0/build/release/lc0 || true
-          chmod +x metalfish/tools/metalfish_hybrid_wrapper.sh || true
-          chmod +x metalfish/tools/metalfish_mctsmt_wrapper.sh || true
+          chmod +x build/metalfish || true
+          chmod +x reference/cutechess/build/cutechess-cli || true
+          chmod +x reference/stockfish/src/stockfish || true
+          chmod +x reference/Patricia/engine/patricia || true
+          chmod +x reference/lc0/build/release/lc0 || true
+          chmod +x tools/metalfish_hybrid_wrapper.sh || true
+          chmod +x tools/metalfish_mctsmt_wrapper.sh || true
 
       - name: Run match
         run: |
@@ -374,7 +374,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: match-result-${{ matrix.match }}
-          path: metalfish/results/*.json
+          path: results/*.json
           retention-days: 1
 
   # Final job: Aggregate results and post PR comment
@@ -429,7 +429,7 @@ jobs:
             --ci-comment > results/pr_comment.md
 
           # Store comment for next step
-          echo "comment_file=metalfish/results/pr_comment.md" >> $GITHUB_OUTPUT
+          echo "comment_file=results/pr_comment.md" >> $GITHUB_OUTPUT
 
           # Print summary to logs
           echo "╔══════════════════════════════════════════════════════════╗"
@@ -463,6 +463,6 @@ jobs:
         with:
           name: tournament-summary
           path: |
-            metalfish/results/summary.json
-            metalfish/results/pr_comment.md
+            results/summary.json
+            results/pr_comment.md
           retention-days: 30
