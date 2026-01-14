@@ -470,11 +470,15 @@ Value ABSearcher::search_internal(Position &pos, int depth, Value alpha,
             killers_[ply % MAX_PLY][0] = m;
           }
 
-          // Update history
+          // Update history with clamping to prevent int16_t overflow
           if (config_.use_history && !is_capture) {
             int bonus = std::min(depth * depth, 400);
             Color us = pos.side_to_move();
-            main_history_[us][m.from_sq()][m.to_sq()] += bonus;
+            int16_t &entry = main_history_[us][m.from_sq()][m.to_sq()];
+            int new_value = static_cast<int>(entry) + bonus;
+            entry = static_cast<int16_t>(
+                std::clamp(new_value, static_cast<int>(INT16_MIN),
+                           static_cast<int>(INT16_MAX)));
           }
 
           break;
@@ -735,13 +739,21 @@ void ABPolicyGenerator::update_history(const Position &pos, Move best_move,
   Color us = pos.side_to_move();
   int bonus = std::min(depth * depth, 400);
 
-  // Bonus for best move
-  mcts_history_[us][best_move.from_sq()][best_move.to_sq()] += bonus;
+  // Bonus for best move with clamping to prevent int16_t overflow
+  {
+    int16_t &entry = mcts_history_[us][best_move.from_sq()][best_move.to_sq()];
+    int new_value = static_cast<int>(entry) + bonus;
+    entry = static_cast<int16_t>(std::clamp(
+        new_value, static_cast<int>(INT16_MIN), static_cast<int>(INT16_MAX)));
+  }
 
-  // Penalty for other searched moves
+  // Penalty for other searched moves with clamping
   for (const Move &m : searched_moves) {
     if (m != best_move) {
-      mcts_history_[us][m.from_sq()][m.to_sq()] -= bonus / 2;
+      int16_t &entry = mcts_history_[us][m.from_sq()][m.to_sq()];
+      int new_value = static_cast<int>(entry) - bonus / 2;
+      entry = static_cast<int16_t>(std::clamp(
+          new_value, static_cast<int>(INT16_MIN), static_cast<int>(INT16_MAX)));
     }
   }
 }

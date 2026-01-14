@@ -535,7 +535,7 @@ ParallelSearchManager::~ParallelSearchManager() { stop(); }
 bool ParallelSearchManager::initialize(GPU::GPUNNUEManager *gpu_manager,
                                        int num_threads) {
   gpu_manager_ = gpu_manager;
-  num_threads_ = num_threads;
+  num_threads_ = resolve_num_threads(num_threads);
 
   // Initialize GPU evaluator
   ParallelEvalConfig eval_config;

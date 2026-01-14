@@ -267,6 +267,7 @@ public:
   ~ParallelSearchManager();
 
   // Initialize with GPU manager
+  // num_threads: -1 for auto (all available cores), 0 for single-threaded
   bool initialize(GPU::GPUNNUEManager *gpu_manager, int num_threads = 4);
 
   // Start search
@@ -301,6 +302,15 @@ private:
   std::vector<std::unique_ptr<SearchWorker>> workers_;
 
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
+
+  // Resolve num_threads to actual count
+  static int resolve_num_threads(int num_threads) {
+    if (num_threads <= 0) {
+      int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
+      return hw_threads > 0 ? hw_threads : 4;
+    }
+    return num_threads;
+  }
 };
 
 // ============================================================================

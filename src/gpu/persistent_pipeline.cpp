@@ -379,10 +379,11 @@ bool PersistentNNUEPipeline::evaluate(Buffer *features, Buffer *counts,
     encoder->set_buffer(ft_weights_, 0);
     encoder->set_buffer(ft_biases_, 1);
     encoder->set_buffer(features, 2);
-    encoder->set_buffer(offsets, 3);
-    encoder->set_buffer(accumulator_buffer_.get(), 4);
-    encoder->set_value(static_cast<int>(GPU_FT_DIM_BIG), 5);
-    encoder->set_value(batch_size, 6);
+    encoder->set_buffer(counts, 3);
+    encoder->set_buffer(offsets, 4);
+    encoder->set_buffer(accumulator_buffer_.get(), 5);
+    encoder->set_value(static_cast<int>(GPU_FT_DIM_BIG), 6);
+    encoder->set_value(batch_size, 7);
     encoder->dispatch_threads(GPU_FT_DIM_BIG, batch_size);
     encoder->barrier();
   } else {

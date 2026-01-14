@@ -350,14 +350,63 @@ jobs:
           chmod +x tools/metalfish_hybrid_wrapper.sh || true
           chmod +x tools/metalfish_mctsmt_wrapper.sh || true
 
+          # Debug: List what we have
+          echo "=== Directory structure after extraction ==="
+          find . -type f -name "metalfish" -o -name "stockfish" -o -name "patricia" -o -name "cutechess-cli" -o -name "lc0" 2>/dev/null || true
+          echo ""
+          echo "=== Build directory ==="
+          ls -la build/ || echo "build/ not found"
+          echo ""
+          echo "=== Reference directory ==="
+          ls -la reference/ || echo "reference/ not found"
+          echo ""
+          echo "=== Stockfish ==="
+          ls -la reference/stockfish/src/ 2>/dev/null || echo "reference/stockfish/src/ not found"
+          echo ""
+          echo "=== Tools directory ==="
+          ls -la tools/*.sh 2>/dev/null || echo "No wrapper scripts found"
+
+      - name: Verify engines before match
+        run: |
+          echo "=== Verifying engines can run ==="
+
+          echo "MetalFish:"
+          if [ -f "build/metalfish" ]; then
+            echo -e "uci\nquit" | timeout 5 ./build/metalfish 2>&1 | head -5 || echo "MetalFish failed to respond"
+          else
+            echo "ERROR: build/metalfish not found!"
+            exit 1
+          fi
+
+          echo ""
+          echo "Stockfish:"
+          if [ -f "reference/stockfish/src/stockfish" ]; then
+            echo -e "uci\nquit" | timeout 5 ./reference/stockfish/src/stockfish 2>&1 | head -5 || echo "Stockfish failed to respond"
+          else
+            echo "ERROR: reference/stockfish/src/stockfish not found!"
+            exit 1
+          fi
+
+          echo ""
+          echo "cutechess-cli:"
+          if [ -f "reference/cutechess/build/cutechess-cli" ]; then
+            ./reference/cutechess/build/cutechess-cli --version || echo "cutechess-cli failed"
+          else
+            echo "ERROR: reference/cutechess/build/cutechess-cli not found!"
+            exit 1
+          fi
+
       - name: Run match
         run: |
           mkdir -p results
 
           echo "Running match: ${{ matrix.engine1 }} vs ${{ matrix.engine2 }}"
+          echo "Current directory: $(pwd)"
+          echo "Script location: $(ls -la tools/elo_tournament.py)"
 
           python3 tools/elo_tournament.py \
             --ci-match \
+            --base-dir "$(pwd)" \
             --engine1 "${{ matrix.engine1 }}" \
             --engine2 "${{ matrix.engine2 }}" \
             --games ${{ env.GAMES_PER_MATCH }} \

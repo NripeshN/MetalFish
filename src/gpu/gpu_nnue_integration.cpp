@@ -1934,15 +1934,30 @@ bool GPUNNUEManager::evaluate_batch_async(
 
 std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &pos,
                                                             bool use_big) {
-  // Lock for thread-safe GPU access
-  std::lock_guard<std::mutex> lock(gpu_mutex_);
-
   // Create a batch with single position
   GPUEvalBatch batch;
   batch.add_position(pos);
 
-  // For single position, always use CPU since GPU has dispatch overhead
-  // This is more efficient than GPU for N=1
+  // Temporarily allow single-position GPU evaluation
+  // The GPU overhead for N=1 is acceptable for MCTS which needs NNUE-quality
+  // evaluation, not just material counting
+  int saved_min_batch = tuning_.min_batch_for_gpu;
+  tuning_.min_batch_for_gpu = 1;
+
+  bool success = evaluate_batch(batch, use_big);
+
+  // Restore original threshold
+  tuning_.min_batch_for_gpu = saved_min_batch;
+
+  if (success && !batch.positional_scores.empty()) {
+    // Return actual NNUE evaluation from GPU
+    int32_t psqt = batch.psqt_scores.empty() ? 0 : batch.psqt_scores[0];
+    int32_t positional = batch.positional_scores[0];
+    return {psqt, positional};
+  }
+
+  // GPU evaluation failed - fall back to simple eval as last resort
+  // This should rarely happen if GPU is properly initialized
   cpu_evals_++;
   return {0, Eval::simple_eval(pos)};
 }

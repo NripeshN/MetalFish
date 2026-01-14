@@ -156,6 +156,8 @@ void UCIEngine::loop() {
       mcts_go(is);
     else if (token == "mctsmt")
       mcts_mt_go(is);
+    else if (token == "mctsbench")
+      mcts_batch_benchmark(is);
     else if (token == "hybridbench")
       hybrid_benchmark();
     else if (token == "compiler")
@@ -1524,6 +1526,14 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
     }
   }
 
+  // Handle threads=-1 (use all available threads)
+  if (num_threads <= 0) {
+    num_threads = static_cast<int>(std::thread::hardware_concurrency());
+    if (num_threads <= 0) {
+      num_threads = 4; // Fallback if hardware_concurrency() returns 0
+    }
+  }
+
   // Reset stream for limit parsing
   is.clear();
   is.seekg(0);
@@ -1632,6 +1642,179 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
               << std::setprecision(1) << (100.0 * bp_us / total_us) << "%"
               << sync_endl;
   }
+
+  // Batching statistics
+  uint64_t batch_count = stats.batch_count.load();
+  if (batch_count > 0) {
+    sync_cout << "info string   Avg batch size: " << std::fixed
+              << std::setprecision(1) << stats.avg_batch_size() << sync_endl;
+    sync_cout << "info string   Batch wait time: "
+              << (stats.batch_wait_time_us.load() / 1000) << "ms" << sync_endl;
+  }
+}
+
+// ============================================================================
+// MCTS Batch vs Direct Benchmark
+// ============================================================================
+void UCIEngine::mcts_batch_benchmark(std::istringstream &is) {
+  sync_cout << "info string MCTS Batched vs Direct Evaluation Benchmark"
+            << sync_endl;
+  sync_cout << "info string ==========================================="
+            << sync_endl;
+
+  // Get GPU NNUE manager
+  GPU::GPUNNUEManager *gpu_manager = nullptr;
+  if (GPU::gpu_nnue_manager_available()) {
+    gpu_manager = &GPU::gpu_nnue_manager();
+  }
+
+  if (!gpu_manager) {
+    sync_cout << "info string ERROR: GPU NNUE not available" << sync_endl;
+    return;
+  }
+
+  // Parse options
+  std::string token;
+  int num_threads = 4;
+  int duration_ms = 5000;
+
+  while (is >> token) {
+    if (token.find("threads=") == 0) {
+      num_threads = std::stoi(token.substr(8));
+    } else if (token.find("time=") == 0) {
+      duration_ms = std::stoi(token.substr(5));
+    }
+  }
+
+  // Handle threads=-1 (use all available threads)
+  if (num_threads <= 0) {
+    num_threads = static_cast<int>(std::thread::hardware_concurrency());
+    if (num_threads <= 0) {
+      num_threads = 4;
+    }
+  }
+
+  std::string fen = engine.fen();
+  Search::LimitsType limits;
+  limits.movetime = duration_ms;
+
+  sync_cout << "info string Position: " << fen << sync_endl;
+  sync_cout << "info string Threads: " << num_threads << sync_endl;
+  sync_cout << "info string Duration: " << duration_ms << "ms per test"
+            << sync_endl;
+  sync_cout << "" << sync_endl;
+
+  // ============================================
+  // Test 1: Direct evaluation (old approach)
+  // ============================================
+  sync_cout << "info string --- Test 1: Direct Evaluation (mutex per eval) ---"
+            << sync_endl;
+
+  {
+    MCTS::ThreadSafeMCTSConfig config;
+    config.num_threads = num_threads;
+    config.use_batched_eval = false; // Disable batching
+    config.cpuct = 2.5f;
+    config.add_dirichlet_noise = true;
+    config.virtual_loss = 3;
+
+    auto mcts = MCTS::create_thread_safe_mcts(gpu_manager, config);
+
+    auto start = std::chrono::steady_clock::now();
+    mcts->start_search(fen, limits, nullptr, nullptr);
+    mcts->wait();
+    auto end = std::chrono::steady_clock::now();
+
+    auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+            .count();
+    const auto &stats = mcts->stats();
+    uint64_t nodes = stats.total_nodes.load();
+    uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+
+    sync_cout << "info string   Nodes: " << nodes << sync_endl;
+    sync_cout << "info string   NPS: " << nps << sync_endl;
+    sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
+              << sync_endl;
+    sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
+              << " misses: " << stats.cache_misses.load() << sync_endl;
+
+    uint64_t sel_us = stats.selection_time_us.load();
+    uint64_t exp_us = stats.expansion_time_us.load();
+    uint64_t eval_us = stats.evaluation_time_us.load();
+    uint64_t bp_us = stats.backprop_time_us.load();
+    uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
+
+    if (total_us > 0) {
+      sync_cout << "info string   Evaluation time: " << std::fixed
+                << std::setprecision(1) << (100.0 * eval_us / total_us)
+                << "% of iteration" << sync_endl;
+    }
+  }
+
+  sync_cout << "" << sync_endl;
+
+  // ============================================
+  // Test 2: Batched evaluation (new approach)
+  // ============================================
+  sync_cout
+      << "info string --- Test 2: Batched Evaluation (dedicated thread) ---"
+      << sync_endl;
+
+  {
+    MCTS::ThreadSafeMCTSConfig config;
+    config.num_threads = num_threads;
+    config.use_batched_eval = true; // Enable batching
+    config.min_batch_size = 8;
+    config.max_batch_size = 256;
+    config.batch_timeout_us = 500;
+    config.cpuct = 2.5f;
+    config.add_dirichlet_noise = true;
+    config.virtual_loss = 3;
+
+    auto mcts = MCTS::create_thread_safe_mcts(gpu_manager, config);
+
+    auto start = std::chrono::steady_clock::now();
+    mcts->start_search(fen, limits, nullptr, nullptr);
+    mcts->wait();
+    auto end = std::chrono::steady_clock::now();
+
+    auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+            .count();
+    const auto &stats = mcts->stats();
+    uint64_t nodes = stats.total_nodes.load();
+    uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+
+    sync_cout << "info string   Nodes: " << nodes << sync_endl;
+    sync_cout << "info string   NPS: " << nps << sync_endl;
+    sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
+              << sync_endl;
+    sync_cout << "info string   NN batches: " << stats.nn_batches.load()
+              << sync_endl;
+    sync_cout << "info string   Avg batch size: " << std::fixed
+              << std::setprecision(1) << stats.avg_batch_size() << sync_endl;
+    sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
+              << " misses: " << stats.cache_misses.load() << sync_endl;
+    sync_cout << "info string   Batch wait time: "
+              << (stats.batch_wait_time_us.load() / 1000) << "ms total"
+              << sync_endl;
+
+    uint64_t sel_us = stats.selection_time_us.load();
+    uint64_t exp_us = stats.expansion_time_us.load();
+    uint64_t eval_us = stats.evaluation_time_us.load();
+    uint64_t bp_us = stats.backprop_time_us.load();
+    uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
+
+    if (total_us > 0) {
+      sync_cout << "info string   Evaluation time: " << std::fixed
+                << std::setprecision(1) << (100.0 * eval_us / total_us)
+                << "% of iteration" << sync_endl;
+    }
+  }
+
+  sync_cout << "" << sync_endl;
+  sync_cout << "info string Benchmark complete!" << sync_endl;
 }
 
 } // namespace MetalFish

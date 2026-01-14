@@ -40,9 +40,16 @@ void GPUMCTSBackend::score_to_wdl(int score, float &win, float &draw,
   // Clamp extreme scores
   score = std::clamp(score, -10000, 10000);
 
-  // Logistic function: P(win) = 1 / (1 + exp(-score / scale))
+  // Logistic function with bias: P(win) = 1 / (1 + exp(-(score/scale + bias)))
+  // The bias term shifts the curve so that P(win|score=0) = wdl_a_
+  // bias = log(wdl_a_ / (1 - wdl_a_)) is the inverse logit of wdl_a_
   float x = static_cast<float>(score) / wdl_b_;
-  float win_prob = 1.0f / (1.0f + std::exp(-x));
+
+  // Compute bias from wdl_a_ (clamp to avoid log(0) or division by zero)
+  float clamped_a = std::clamp(wdl_a_, 0.001f, 0.999f);
+  float bias = std::log(clamped_a / (1.0f - clamped_a));
+
+  float win_prob = 1.0f / (1.0f + std::exp(-(x + bias)));
 
   // Estimate draw probability based on score magnitude
   // Higher magnitude = lower draw probability

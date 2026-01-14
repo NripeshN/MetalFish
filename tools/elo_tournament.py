@@ -256,7 +256,7 @@ class Tournament:
         """Setup default engine configurations."""
 
         metalfish_path = self.base_dir / "build" / "metalfish"
-        
+
         # MetalFish with standard Alpha-Beta search (best for tactical positions, ~1.5M NPS)
         self.add_engine(
             EngineConfig(
@@ -477,16 +477,18 @@ done | "$ENGINE"
         # Parse results from output
         game_results = []
 
-        # Parse "Score of X vs Y: W - L - D [pct]" line
-        score_match = re.search(
+        # Find ALL score lines and use the LAST one (final result)
+        score_matches = re.findall(
             rf"Score of {re.escape(engine1.name)} vs {re.escape(engine2.name)}: (\d+) - (\d+) - (\d+)",
             output,
         )
 
-        if score_match:
-            wins1 = int(score_match.group(1))
-            wins2 = int(score_match.group(2))
-            draws = int(score_match.group(3))
+        if score_matches:
+            # Use the last match (final score)
+            last_match = score_matches[-1]
+            wins1 = int(last_match[0])
+            wins2 = int(last_match[1])
+            draws = int(last_match[2])
 
             # Create game results
             for _ in range(wins1):
@@ -659,7 +661,7 @@ def get_engine_configs(
     configs = {}
 
     metalfish_path = base_dir / "build" / "metalfish"
-    
+
     # MetalFish with standard Alpha-Beta search (best for tactical positions, ~1.5M NPS)
     configs["MetalFish-AB"] = EngineConfig(
         name="MetalFish-AB",
@@ -776,12 +778,12 @@ def run_ci_match(
     engine2 = configs[engine2_name]
 
     metalfish_path = base_dir / "build" / "metalfish"
-    
+
     # Create wrapper scripts if needed
     if "MetalFish-Hybrid" in [engine1_name, engine2_name]:
         hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
         _create_hybrid_wrapper_file(metalfish_path, hybrid_wrapper)
-    
+
     if "MetalFish-MCTS" in [engine1_name, engine2_name]:
         mctsmt_wrapper = base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
         _create_mctsmt_wrapper_file(metalfish_path, mctsmt_wrapper)
@@ -790,6 +792,18 @@ def run_ci_match(
 
     if not cutechess.exists():
         raise FileNotFoundError(f"cutechess-cli not found at {cutechess}")
+
+    # Verify engine binaries exist
+    print(f"Verifying engine binaries...")
+    print(f"  Engine 1: {engine1.cmd}")
+    if not Path(engine1.cmd).exists():
+        raise FileNotFoundError(f"Engine binary not found: {engine1.cmd}")
+    print(f"    ✓ Found")
+
+    print(f"  Engine 2: {engine2.cmd}")
+    if not Path(engine2.cmd).exists():
+        raise FileNotFoundError(f"Engine binary not found: {engine2.cmd}")
+    print(f"    ✓ Found")
 
     # Run match
     pgn_file = tempfile.NamedTemporaryFile(mode="w", suffix=".pgn", delete=False)
@@ -816,11 +830,24 @@ def run_ci_match(
     )
 
     print(f"Running: {engine1_name} vs {engine2_name} ({games} games)...")
+    print(f"Command: {' '.join(cmd)}")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
         output = result.stdout + result.stderr
+
+        # Always print cutechess output for debugging
+        print(f"\n=== cutechess-cli output ===")
+        print(output[:5000] if len(output) > 5000 else output)  # Limit output length
+        print(f"=== end cutechess-cli output ===\n")
+
+        if result.returncode != 0:
+            print(
+                f"Warning: cutechess-cli returned non-zero exit code: {result.returncode}"
+            )
+
     except subprocess.TimeoutExpired:
+        print(f"ERROR: Match timed out after 7200 seconds")
         return {
             "engine1": engine1_name,
             "engine2": engine2_name,
@@ -833,23 +860,32 @@ def run_ci_match(
     # Parse results
     wins1, wins2, draws = 0, 0, 0
 
-    score_match = re.search(
+    # Find ALL score lines and use the LAST one (final result)
+    score_matches = re.findall(
         rf"Score of {re.escape(engine1_name)} vs {re.escape(engine2_name)}: (\d+) - (\d+) - (\d+)",
         output,
     )
 
-    if score_match:
-        wins1 = int(score_match.group(1))
-        wins2 = int(score_match.group(2))
-        draws = int(score_match.group(3))
+    if score_matches:
+        # Use the last match (final score)
+        last_match = score_matches[-1]
+        wins1 = int(last_match[0])
+        wins2 = int(last_match[1])
+        draws = int(last_match[2])
     else:
+        print(f"Warning: Could not parse score from cutechess output")
         # Try PGN parsing
         try:
             with open(pgn_file.name, "r") as f:
                 pgn_content = f.read()
+            print(f"PGN file contents ({len(pgn_content)} bytes):")
+            print(pgn_content[:2000] if len(pgn_content) > 2000 else pgn_content)
+
             wins1 = pgn_content.count('[Result "1-0"]')
             wins2 = pgn_content.count('[Result "0-1"]')
             draws = pgn_content.count('[Result "1/2-1/2"]')
+        except Exception as e:
+            print(f"Error reading PGN file: {e}")
         except:
             pass
 
@@ -1150,11 +1186,22 @@ def main():
         action="store_true",
         help="Output PR comment markdown instead of JSON",
     )
+    parser.add_argument(
+        "--base-dir",
+        type=str,
+        default=None,
+        help="Override base directory for engine paths (default: auto-detect from script location)",
+    )
 
     args = parser.parse_args()
 
     # Determine base directory
-    base_dir = Path(__file__).parent.parent
+    if args.base_dir:
+        base_dir = Path(args.base_dir)
+    else:
+        base_dir = Path(__file__).parent.parent
+
+    print(f"Base directory: {base_dir.absolute()}", file=sys.stderr)
 
     # Parse Stockfish levels
     stockfish_levels = [int(x) for x in args.stockfish_levels.split(",")]
@@ -1233,7 +1280,7 @@ def main():
     if args.metalfish_only:
         # Test all MetalFish variants against each other
         metalfish_path = base_dir / "build" / "metalfish"
-        
+
         # Alpha-Beta (standard 'go' command)
         tournament.add_engine(
             EngineConfig(
@@ -1249,7 +1296,7 @@ def main():
         tournament.add_engine(
             EngineConfig(name="MetalFish-Hybrid", cmd=str(hybrid_wrapper), options={})
         )
-        
+
         # Multi-threaded MCTS ('mctsmt' command)
         mctsmt_wrapper = base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
         tournament._create_mctsmt_wrapper(metalfish_path, mctsmt_wrapper)

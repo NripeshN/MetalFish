@@ -2,7 +2,7 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Thread-Safe MCTS Implementation
+  Thread-Safe MCTS Implementation - Optimized for Apple Silicon
 
   Licensed under GPL-3.0
 */
@@ -21,6 +21,190 @@
 
 namespace MetalFish {
 namespace MCTS {
+
+// ============================================================================
+// BatchedGPUEvaluator - High-Performance Implementation
+// ============================================================================
+
+BatchedGPUEvaluator::BatchedGPUEvaluator(GPU::GPUNNUEManager *gpu_manager,
+                                         ThreadSafeMCTSStats *stats,
+                                         int min_batch_size, int max_batch_size,
+                                         int batch_timeout_us)
+    : gpu_manager_(gpu_manager), stats_(stats), min_batch_size_(min_batch_size),
+      max_batch_size_(max_batch_size), batch_timeout_us_(batch_timeout_us) {
+  tt_.resize(TT_SIZE);
+  pending_requests_.reserve(max_batch_size);
+}
+
+BatchedGPUEvaluator::~BatchedGPUEvaluator() { stop(); }
+
+void BatchedGPUEvaluator::start() {
+  if (running_.load(std::memory_order_acquire))
+    return;
+
+  running_.store(true, std::memory_order_release);
+  eval_thread_ = std::thread(&BatchedGPUEvaluator::eval_thread_main, this);
+}
+
+void BatchedGPUEvaluator::stop() {
+  running_.store(false, std::memory_order_release);
+  pending_cv_.notify_all();
+
+  if (eval_thread_.joinable()) {
+    eval_thread_.join();
+  }
+}
+
+void BatchedGPUEvaluator::eval_thread_main() {
+  std::vector<EvalRequest *> batch;
+  batch.reserve(max_batch_size_);
+
+  while (running_.load(std::memory_order_acquire)) {
+    batch.clear();
+
+    {
+      std::unique_lock<std::mutex> lock(pending_mutex_);
+
+      auto deadline = std::chrono::steady_clock::now() +
+                      std::chrono::microseconds(batch_timeout_us_);
+
+      // Wait for requests
+      while (pending_requests_.empty() &&
+             running_.load(std::memory_order_acquire)) {
+        if (pending_cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
+          break;
+        }
+      }
+
+      // Collect batch
+      size_t count = std::min(pending_requests_.size(),
+                              static_cast<size_t>(max_batch_size_));
+      if (count > 0) {
+        batch.insert(batch.end(), pending_requests_.begin(),
+                     pending_requests_.begin() + count);
+        pending_requests_.erase(pending_requests_.begin(),
+                                pending_requests_.begin() + count);
+      }
+    }
+
+    if (batch.empty())
+      continue;
+
+    process_batch(batch);
+
+    if (stats_) {
+      stats_->nn_batches.fetch_add(1, std::memory_order_relaxed);
+      stats_->total_batch_size.fetch_add(batch.size(),
+                                         std::memory_order_relaxed);
+      stats_->batch_count.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+
+  // Process remaining
+  {
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+    if (!pending_requests_.empty()) {
+      process_batch(pending_requests_);
+      pending_requests_.clear();
+    }
+  }
+}
+
+void BatchedGPUEvaluator::process_batch(std::vector<EvalRequest *> &batch) {
+  if (!gpu_manager_ || batch.empty())
+    return;
+
+  const size_t batch_size = batch.size();
+
+  GPU::GPUEvalBatch gpu_batch;
+  gpu_batch.reserve(static_cast<int>(batch_size));
+
+  for (size_t i = 0; i < batch_size; ++i) {
+    gpu_batch.add_position_data(batch[i]->pos_data);
+  }
+
+  gpu_manager_->evaluate_batch(gpu_batch, true);
+
+  for (size_t i = 0; i < batch_size; ++i) {
+    EvalRequest *req = batch[i];
+
+    int32_t psqt =
+        gpu_batch.psqt_scores.size() > i ? gpu_batch.psqt_scores[i] : 0;
+    int32_t pos_score = gpu_batch.positional_scores.size() > i
+                            ? gpu_batch.positional_scores[i]
+                            : 0;
+    int32_t raw_score = psqt + pos_score;
+
+    float value = std::tanh(static_cast<float>(raw_score) / 400.0f);
+
+    if (req->side_to_move == BLACK) {
+      value = -value;
+    }
+
+    // Store in TT
+    size_t tt_idx = req->position_key % TT_SIZE;
+    tt_[tt_idx].value = value;
+    tt_[tt_idx].key = req->position_key;
+
+    req->result = value;
+    req->completed.store(true, std::memory_order_release);
+  }
+
+  if (stats_) {
+    stats_->nn_evaluations.fetch_add(batch_size, std::memory_order_relaxed);
+  }
+}
+
+float BatchedGPUEvaluator::evaluate(const Position &pos, WorkerContext &ctx) {
+  uint64_t key = pos.key();
+  size_t tt_idx = key % TT_SIZE;
+
+  if (tt_[tt_idx].key == key) {
+    ctx.cache_hits++;
+    return tt_[tt_idx].value;
+  }
+
+  ctx.cache_misses++;
+
+  auto wait_start = std::chrono::steady_clock::now();
+
+  // Acquire request from pool
+  EvalRequest *req = request_pool_.acquire();
+  req->pos_data.from_position(pos);
+  req->position_key = key;
+  req->side_to_move = pos.side_to_move();
+  req->ready.store(true, std::memory_order_release);
+
+  // Submit request
+  {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    pending_requests_.push_back(req);
+  }
+  pending_cv_.notify_one();
+
+  // Spin-wait for result (faster than condition variable for short waits)
+  int spin_count = 0;
+  while (!req->completed.load(std::memory_order_acquire)) {
+    if (++spin_count > 1000) {
+      std::this_thread::yield();
+      spin_count = 0;
+    }
+  }
+
+  float result = req->result;
+  request_pool_.release(req);
+
+  auto wait_end = std::chrono::steady_clock::now();
+  if (stats_) {
+    stats_->batch_wait_time_us.fetch_add(
+        std::chrono::duration_cast<std::chrono::microseconds>(wait_end -
+                                                              wait_start)
+            .count(),
+        std::memory_order_relaxed);
+  }
+
+  return result;
+}
 
 // ============================================================================
 // ThreadSafeNode Implementation
@@ -89,10 +273,14 @@ void ThreadSafeNode::set_terminal(Terminal type, float value) {
 }
 
 // ============================================================================
-// ThreadSafeTree Implementation
+// ThreadSafeTree Implementation with Arena Allocation
 // ============================================================================
 
-ThreadSafeTree::ThreadSafeTree() { root_ = std::make_unique<ThreadSafeNode>(); }
+ThreadSafeTree::ThreadSafeTree() {
+  root_ = std::make_unique<ThreadSafeNode>();
+  // Pre-allocate first arena
+  arenas_.push_back(std::make_unique<NodeArena>());
+}
 
 ThreadSafeTree::~ThreadSafeTree() = default;
 
@@ -102,23 +290,63 @@ void ThreadSafeTree::reset(const std::string &fen) {
     root_fen_ = fen;
   }
 
-  // Clear node pool
+  // Reset arenas
   {
-    std::lock_guard<std::mutex> lock(pool_mutex_);
-    node_pool_.clear();
+    std::lock_guard<std::mutex> lock(arena_mutex_);
+    arenas_.clear();
+    arenas_.push_back(std::make_unique<NodeArena>());
+    current_arena_.store(0, std::memory_order_relaxed);
   }
 
-  // Reset root
   root_ = std::make_unique<ThreadSafeNode>();
   node_count_.store(1, std::memory_order_relaxed);
 }
 
 ThreadSafeNode *ThreadSafeTree::allocate_node(ThreadSafeNode *parent,
                                               int edge_idx) {
-  std::lock_guard<std::mutex> lock(pool_mutex_);
-  node_pool_.push_back(std::make_unique<ThreadSafeNode>(parent, edge_idx));
+  // Try current arena first (lock-free fast path)
+  size_t arena_idx = current_arena_.load(std::memory_order_acquire);
+
+  if (arena_idx < arenas_.size()) {
+    NodeArena *arena = arenas_[arena_idx].get();
+    size_t slot = arena->next.fetch_add(1, std::memory_order_relaxed);
+
+    if (slot < ARENA_SIZE) {
+      ThreadSafeNode *node = &arena->nodes[slot];
+      new (node) ThreadSafeNode(parent, edge_idx);
+      node_count_.fetch_add(1, std::memory_order_relaxed);
+      return node;
+    }
+  }
+
+  // Need new arena (slow path with lock)
+  std::lock_guard<std::mutex> lock(arena_mutex_);
+
+  // Double-check after acquiring lock
+  arena_idx = current_arena_.load(std::memory_order_acquire);
+  if (arena_idx < arenas_.size()) {
+    NodeArena *arena = arenas_[arena_idx].get();
+    if (arena->next.load(std::memory_order_relaxed) < ARENA_SIZE) {
+      size_t slot = arena->next.fetch_add(1, std::memory_order_relaxed);
+      if (slot < ARENA_SIZE) {
+        ThreadSafeNode *node = &arena->nodes[slot];
+        new (node) ThreadSafeNode(parent, edge_idx);
+        node_count_.fetch_add(1, std::memory_order_relaxed);
+        return node;
+      }
+    }
+  }
+
+  // Create new arena
+  arenas_.push_back(std::make_unique<NodeArena>());
+  current_arena_.store(arenas_.size() - 1, std::memory_order_release);
+
+  NodeArena *arena = arenas_.back().get();
+  size_t slot = arena->next.fetch_add(1, std::memory_order_relaxed);
+  ThreadSafeNode *node = &arena->nodes[slot];
+  new (node) ThreadSafeNode(parent, edge_idx);
   node_count_.fetch_add(1, std::memory_order_relaxed);
-  return node_pool_.back().get();
+  return node;
 }
 
 // ============================================================================
@@ -127,13 +355,18 @@ ThreadSafeNode *ThreadSafeTree::allocate_node(ThreadSafeNode *parent,
 
 ThreadSafeMCTS::ThreadSafeMCTS(const ThreadSafeMCTSConfig &config)
     : config_(config), tree_(std::make_unique<ThreadSafeTree>()) {
-  // Initialize TT
-  tt_.resize(TT_SIZE);
+  // Initialize simple TT for direct evaluation mode
+  simple_tt_.resize(SIMPLE_TT_SIZE);
 }
 
 ThreadSafeMCTS::~ThreadSafeMCTS() {
   stop();
   wait();
+
+  // Stop batched evaluator if running
+  if (batched_evaluator_) {
+    batched_evaluator_->stop();
+  }
 }
 
 void ThreadSafeMCTS::start_search(const std::string &fen,
@@ -159,15 +392,27 @@ void ThreadSafeMCTS::start_search(const std::string &fen,
   // Initialize tree
   tree_->reset(fen);
 
+  // Get actual thread count and auto-tune
+  int actual_threads = config_.get_num_threads();
+  config_.auto_tune(actual_threads);
+
+  // Initialize batched evaluator if enabled
+  if (config_.use_batched_eval && gpu_manager_) {
+    batched_evaluator_ = std::make_unique<BatchedGPUEvaluator>(
+        gpu_manager_, &stats_, config_.min_batch_size, config_.max_batch_size,
+        config_.batch_timeout_us);
+    batched_evaluator_->start();
+  }
+
   // Create worker contexts
   worker_contexts_.clear();
-  for (int i = 0; i < config_.num_threads; ++i) {
+  for (int i = 0; i < actual_threads; ++i) {
     worker_contexts_.push_back(std::make_unique<WorkerContext>());
   }
 
   // Start worker threads
   workers_.clear();
-  for (int i = 0; i < config_.num_threads; ++i) {
+  for (int i = 0; i < actual_threads; ++i) {
     workers_.emplace_back(&ThreadSafeMCTS::worker_thread, this, i);
   }
 }
@@ -183,6 +428,13 @@ void ThreadSafeMCTS::wait() {
     }
   }
   workers_.clear();
+
+  // Stop batched evaluator
+  if (batched_evaluator_) {
+    batched_evaluator_->stop();
+    batched_evaluator_.reset();
+  }
+
   running_.store(false, std::memory_order_release);
 
   // Report best move
@@ -354,7 +606,7 @@ ThreadSafeNode *ThreadSafeMCTS::select_leaf(WorkerContext &ctx) {
 
   while (node->has_children() && !node->is_terminal()) {
     // Select best child using PUCT
-    int best_idx = select_child_puct(node, config_.cpuct);
+    int best_idx = select_child_puct(node, config_.cpuct, ctx);
     if (best_idx < 0)
       break;
 
@@ -385,19 +637,22 @@ ThreadSafeNode *ThreadSafeMCTS::select_leaf(WorkerContext &ctx) {
   return node;
 }
 
-int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct) {
+int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
+                                      WorkerContext &ctx) {
   int num_edges = node->num_edges();
   if (num_edges == 0)
     return -1;
 
   float parent_n = static_cast<float>(node->n() + node->n_in_flight());
   float parent_sqrt = std::sqrt(parent_n + 1.0f);
+  float cpuct_sqrt = cpuct * parent_sqrt;
 
-  float best_score = -1e9f;
-  int best_idx = -1;
+  // Use pre-allocated buffer
+  ctx.puct_scores.resize(num_edges);
 
   const TSEdge *edges = node->edges();
 
+  // Compute all scores (cache-friendly sequential access)
   for (int i = 0; i < num_edges; ++i) {
     const TSEdge &edge = edges[i];
     ThreadSafeNode *child = edge.child.load(std::memory_order_acquire);
@@ -410,22 +665,22 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct) {
       uint32_t n_in_flight = child->n_in_flight();
       float total_n = static_cast<float>(n + n_in_flight);
 
-      if (n > 0) {
-        q = -child->q(); // Negate for opponent's perspective
-      } else {
-        q = config_.fpu_value; // First play urgency
-      }
-
-      u = cpuct * policy * parent_sqrt / (1.0f + total_n);
+      q = (n > 0) ? -child->q() : config_.fpu_value;
+      u = cpuct_sqrt * policy / (1.0f + total_n);
     } else {
-      // Unvisited node
       q = config_.fpu_value;
-      u = cpuct * policy * parent_sqrt;
+      u = cpuct_sqrt * policy;
     }
 
-    float score = q + u;
-    if (score > best_score) {
-      best_score = score;
+    ctx.puct_scores[i] = q + u;
+  }
+
+  // Find best
+  int best_idx = 0;
+  float best_score = ctx.puct_scores[0];
+  for (int i = 1; i < num_edges; ++i) {
+    if (ctx.puct_scores[i] > best_score) {
+      best_score = ctx.puct_scores[i];
       best_idx = i;
     }
   }
@@ -533,11 +788,26 @@ void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
 }
 
 float ThreadSafeMCTS::evaluate_position(WorkerContext &ctx) {
-  // Check TT first
-  uint64_t key = ctx.pos.key();
-  size_t tt_idx = key % TT_SIZE;
+  if (config_.use_batched_eval && batched_evaluator_) {
+    return evaluate_position_batched(ctx);
+  } else {
+    return evaluate_position_direct(ctx);
+  }
+}
 
-  TTEntry &entry = tt_[tt_idx];
+float ThreadSafeMCTS::evaluate_position_batched(WorkerContext &ctx) {
+  return batched_evaluator_->evaluate(ctx.pos, ctx);
+}
+
+float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
+  // Check TT first - lock-free read (may get stale data, but that's OK for
+  // MCTS)
+  uint64_t key = ctx.pos.key();
+  size_t tt_idx = key % SIMPLE_TT_SIZE;
+
+  SimpleTTEntry &entry = simple_tt_[tt_idx];
+
+  // Relaxed read - may see torn write but value will still be valid float
   if (entry.key == key) {
     ctx.cache_hits++;
     return entry.value;
@@ -564,11 +834,9 @@ float ThreadSafeMCTS::evaluate_position(WorkerContext &ctx) {
     value = -value;
   }
 
-  // Store in TT
-  entry.key = key;
+  // Store in TT - lock-free write (benign race - last writer wins)
   entry.value = value;
-  entry.draw = 0.0f;
-  entry.moves_left = 30.0f;
+  entry.key = key; // Write key last to serve as a release
 
   stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
 
