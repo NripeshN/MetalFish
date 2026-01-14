@@ -1913,6 +1913,23 @@ bool GPUNNUEManager::evaluate_batch_async(
   const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
   const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
 
+  // Allocate a dedicated output buffer for this async call to avoid race
+  // conditions. The shared output_buffer_ cannot be used because the gpu_mutex_
+  // is released when this function returns, but the completion handler runs
+  // later. Another thread could acquire the mutex and overwrite output_buffer_
+  // before our completion handler executes.
+  auto async_output_buffer =
+      std::make_shared<std::unique_ptr<Buffer>>(backend.create_buffer(
+          batch_size * sizeof(int32_t), MemoryMode::Shared, BufferUsage::Transient));
+
+  if (!*async_output_buffer || !(*async_output_buffer)->valid()) {
+    // Fallback to synchronous path if buffer allocation fails
+    cpu_evals_ += batch.count;
+    if (completion_handler)
+      completion_handler(false);
+    return false;
+  }
+
   encoder->set_kernel(forward_fused_kernel_.get());
   encoder->set_buffer(accumulators_buffer_.get(), 0);
   encoder->set_buffer(layer.fc0_weights.get(), 1);
@@ -1921,23 +1938,26 @@ bool GPUNNUEManager::evaluate_batch_async(
   encoder->set_buffer(layer.fc1_biases.get(), 4);
   encoder->set_buffer(layer.fc2_weights.get(), 5);
   encoder->set_buffer(layer.fc2_biases.get(), 6);
-  encoder->set_buffer(output_buffer_.get(), 7);
+  encoder->set_buffer(async_output_buffer->get(), 7);
   encoder->set_value(static_cast<uint32_t>(hidden_dim), 8);
   encoder->set_value(static_cast<uint32_t>(batch_size), 9);
   encoder->dispatch_threadgroups(batch_size, 1, 1, GPU_FORWARD_THREADS, 1, 1);
 
   // Capture necessary data for completion handler
-  Buffer *output_buf = output_buffer_.get();
+  // Note: async_output_buffer is a shared_ptr that keeps the buffer alive
+  // until the completion handler finishes executing
   GPUEvalBatch *batch_ptr = &batch;
   std::atomic<size_t> *gpu_evals_ptr = &gpu_evals_;
   std::atomic<size_t> *batch_count_ptr = &batch_count_;
 
   // Submit with async completion handler
+  // The completion handler captures async_output_buffer by value (shared_ptr),
+  // ensuring the buffer remains valid until after results are copied
   backend.submit_async(encoder.get(), [=]() {
-    // Read results in completion handler
+    // Read results from our dedicated buffer (safe - no other thread can access it)
     batch_ptr->positional_scores.resize(batch_size);
-    std::memcpy(batch_ptr->positional_scores.data(), output_buf->data(),
-                batch_size * sizeof(int32_t));
+    std::memcpy(batch_ptr->positional_scores.data(),
+                (*async_output_buffer)->data(), batch_size * sizeof(int32_t));
 
     (*gpu_evals_ptr) += batch_size;
     (*batch_count_ptr)++;
@@ -1945,6 +1965,7 @@ bool GPUNNUEManager::evaluate_batch_async(
     if (completion_handler) {
       completion_handler(true);
     }
+    // async_output_buffer is automatically freed when this lambda is destroyed
   });
 
   return true;
