@@ -173,6 +173,9 @@ MCTSProfile run_mcts_profiling(GPU::GPUNNUEManager *gpu_manager,
   MCTS::HybridSearchConfig config;
   config.num_search_threads = 1;
   auto search = MCTS::create_hybrid_search(gpu_manager, config);
+  if (!search) {
+    return profile;
+  }
 
   Position pos;
   StateInfo st;
@@ -220,6 +223,10 @@ Move run_pure_mcts(GPU::GPUNNUEManager *gpu_manager, const Position &pos,
   MCTS::HybridSearchConfig config;
   config.num_search_threads = 1;
   auto search = MCTS::create_hybrid_search(gpu_manager, config);
+  if (!search) {
+    nodes_out = 0;
+    return Move::none();
+  }
 
   MCTS::MCTSPositionHistory history;
   history.reset(pos.fen());

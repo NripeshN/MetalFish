@@ -489,8 +489,12 @@ int PersistentBatchEvaluator::evaluate(const GPUPositionData *positions,
   auto start = std::chrono::high_resolution_clock::now();
 
   // Copy positions to persistent buffer (unified memory - fast)
-  std::memcpy(position_buffer_->data(), positions,
-              count * sizeof(GPUPositionData));
+  // Skip copy if positions already point to our buffer (e.g., called from
+  // get_results)
+  if (position_buffer_->data() != positions) {
+    std::memcpy(position_buffer_->data(), positions,
+                count * sizeof(GPUPositionData));
+  }
 
   // Create batch and evaluate
   GPUEvalBatch batch;

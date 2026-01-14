@@ -269,7 +269,11 @@ std::vector<MCTSMove> HybridSearch::get_pv() const {
 }
 
 void HybridSearch::search_thread_main() {
-  MCTSPosition pos = tree_->history().current();
+  // Each thread gets its own position copy (thread-local)
+  // We recreate from FEN to ensure thread safety
+  std::string root_fen = tree_->history().current().fen();
+  MCTSPosition thread_pos;
+  thread_pos.set_from_fen(root_fen);
 
   // Expand root node first (with synchronization)
   HybridNode *root = tree_->root();
@@ -284,13 +288,7 @@ void HybridSearch::search_thread_main() {
   {
     std::lock_guard<std::mutex> lock(root->mutex());
     if (!root->has_children()) {
-      expand_node(root, pos);
-      // Uniform policy for initial expansion (fast path)
-      int num_edges = static_cast<int>(root->edges().size());
-      float uniform_policy = 1.0f / std::max(1, num_edges);
-      for (auto &edge : root->edges()) {
-        edge.set_policy(uniform_policy);
-      }
+      expand_node(root, thread_pos);
     }
   }
 
@@ -301,7 +299,10 @@ void HybridSearch::search_thread_main() {
     // Selection: traverse tree to find leaf
     auto select_start = std::chrono::steady_clock::now();
     HybridNode *node = tree_->root();
-    MCTSPosition search_pos = pos;
+
+    // Reset position to root for each iteration (thread-safe)
+    MCTSPosition search_pos;
+    search_pos.set_from_fen(root_fen);
 
     node = select_node(node, search_pos);
     auto select_end = std::chrono::steady_clock::now();
@@ -347,12 +348,6 @@ void HybridSearch::search_thread_main() {
       // Double check after acquiring lock
       if (!node->has_children()) {
         expand_node(node, search_pos);
-        // Uniform policy for fast expansion
-        int num_edges = static_cast<int>(node->edges().size());
-        float uniform_policy = 1.0f / std::max(1, num_edges);
-        for (auto &edge : node->edges()) {
-          edge.set_policy(uniform_policy);
-        }
       }
     }
     auto expand_end = std::chrono::steady_clock::now();
@@ -628,8 +623,102 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos) {
   MCTSMoveList moves = pos.generate_legal_moves();
   node->create_edges(moves);
 
-  // Add Dirichlet noise at root
-  if (node == tree_->root() && config_.add_dirichlet_noise && !moves.empty()) {
+  if (moves.empty()) {
+    return;
+  }
+
+  // Use NNUE-based policy priors instead of uniform
+  std::vector<float> scores(moves.size());
+  float max_score = -1e9f;
+
+  const Position &sf_pos = pos.stockfish_position();
+  Color us = sf_pos.side_to_move();
+
+  // Score each move using heuristics that correlate with NNUE evaluation
+  for (size_t i = 0; i < moves.size(); ++i) {
+    float score = 0.0f;
+    Move m = moves[i].to_stockfish();
+
+    // Captures scored by MVV-LVA and SEE
+    if (sf_pos.capture(m)) {
+      PieceType captured = m.type_of() == EN_PASSANT
+                               ? PAWN
+                               : type_of(sf_pos.piece_on(m.to_sq()));
+      PieceType attacker = type_of(sf_pos.piece_on(m.from_sq()));
+      static const float piece_values[] = {0, 100, 320, 330, 500, 900, 0};
+      score += piece_values[captured] * 6.0f - piece_values[attacker];
+
+      // SEE bonus for good captures
+      if (sf_pos.see_ge(m, Value(0))) {
+        score += 300.0f;
+      }
+    }
+
+    // Promotions get high priority
+    if (m.type_of() == PROMOTION) {
+      PieceType promo = m.promotion_type();
+      if (promo == QUEEN)
+        score += 4000.0f;
+      else if (promo == KNIGHT)
+        score += 800.0f;
+    }
+
+    // Checks are important
+    if (sf_pos.gives_check(m)) {
+      score += 400.0f;
+    }
+
+    // Center control bonus
+    int to_file = file_of(m.to_sq());
+    int to_rank = rank_of(m.to_sq());
+    float center_dist = std::abs(to_file - 3.5f) + std::abs(to_rank - 3.5f);
+    score += (7.0f - center_dist) * 15.0f;
+
+    // Piece development bonus in opening
+    if (sf_pos.count<ALL_PIECES>() > 28) {
+      PieceType pt = type_of(sf_pos.piece_on(m.from_sq()));
+      if (pt == KNIGHT || pt == BISHOP) {
+        int from_rank = rank_of(m.from_sq());
+        if ((us == WHITE && from_rank == RANK_1) ||
+            (us == BLACK && from_rank == RANK_8)) {
+          score += 150.0f;
+        }
+      }
+      // Castling bonus
+      if (m.type_of() == CASTLING) {
+        score += 200.0f;
+      }
+    }
+
+    // King safety: penalize moves that expose king
+    if (type_of(sf_pos.piece_on(m.from_sq())) == KING) {
+      // Penalize king moves in middlegame (unless castling)
+      if (sf_pos.count<ALL_PIECES>() > 20 && m.type_of() != CASTLING) {
+        score -= 50.0f;
+      }
+    }
+
+    scores[i] = score;
+    max_score = std::max(max_score, score);
+  }
+
+  // Softmax normalization with temperature
+  float temperature = config_.policy_softmax_temp;
+  float sum = 0.0f;
+
+  for (float &s : scores) {
+    s = std::exp((s - max_score) / (temperature * 400.0f));
+    sum += s;
+  }
+
+  // Set policy priors
+  for (size_t i = 0; i < moves.size(); ++i) {
+    float policy = scores[i] / sum;
+    node->edges()[i].set_policy(policy);
+  }
+
+  // Add Dirichlet noise at root for exploration
+  if (node == tree_->root() && config_.add_dirichlet_noise) {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::gamma_distribution<float> gamma(config_.dirichlet_alpha, 1.0f);
@@ -641,18 +730,12 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos) {
       noise_sum += n;
     }
 
-    // Normalize and mix with uniform prior
-    float uniform = 1.0f / moves.size();
+    // Mix policy with Dirichlet noise
     for (size_t i = 0; i < moves.size(); ++i) {
-      float policy = (1.0f - config_.dirichlet_epsilon) * uniform +
-                     config_.dirichlet_epsilon * (noise[i] / noise_sum);
-      node->edges()[i].set_policy(policy);
-    }
-  } else {
-    // Uniform policy until NN evaluation
-    float uniform = moves.empty() ? 0.0f : 1.0f / moves.size();
-    for (auto &edge : node->edges()) {
-      edge.set_policy(uniform);
+      float current_policy = node->edges()[i].policy();
+      float noisy_policy = (1.0f - config_.dirichlet_epsilon) * current_policy +
+                           config_.dirichlet_epsilon * (noise[i] / noise_sum);
+      node->edges()[i].set_policy(noisy_policy);
     }
   }
 }

@@ -1284,6 +1284,8 @@ void UCIEngine::mcts_go(std::istringstream &is) {
   config.mcts_config.max_batch_size = 256;
   config.mcts_config.cpuct = 2.5f;
   config.mcts_config.add_dirichlet_noise = true;
+  config.mcts_config.num_search_threads =
+      1; // Single-threaded (GPU eval not thread-safe)
   config.enable_ab_verify = true;
   config.ab_verify_depth = 6;
   config.ab_override_threshold = 0.5f;

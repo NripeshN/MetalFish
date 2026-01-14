@@ -28,13 +28,13 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - os: ubuntu-latest
-            runner: ubuntu-latest-4-cores
+            runner: ubuntu-latest
             artifact_name: metalfish-ubuntu
             executable: metalfish
             use_metal: OFF
             use_cuda: OFF
           - os: windows-latest
-            runner: windows-latest-8-cores
+            runner: windows-latest
             artifact_name: metalfish-windows
             executable: metalfish.exe
             use_metal: OFF

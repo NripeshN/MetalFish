@@ -43,6 +43,11 @@ ABSearcher::ABSearcher() {
   std::memset(capture_history_, 0, sizeof(capture_history_));
   std::memset(killers_, 0, sizeof(killers_));
   std::memset(counter_moves_, 0, sizeof(counter_moves_));
+
+  // Initialize static eval stack to VALUE_NONE
+  for (int i = 0; i < MAX_PLY; ++i) {
+    static_eval_stack_[i] = VALUE_NONE;
+  }
 }
 
 ABSearcher::~ABSearcher() = default;
@@ -219,7 +224,9 @@ ABSearcher::get_move_scores(const Position &pos) {
 
     // Capture bonus (MVV-LVA)
     if (pos.capture(m)) {
-      PieceType captured = type_of(pos.piece_on(m.to_sq()));
+      // For en passant, the captured pawn is not on the destination square
+      PieceType captured =
+          m.type_of() == EN_PASSANT ? PAWN : type_of(pos.piece_on(m.to_sq()));
       PieceType attacker = type_of(pos.piece_on(m.from_sq()));
       static const float pv[] = {0, 100, 320, 330, 500, 900, 0};
       score += pv[captured] * 10 - pv[attacker];
@@ -322,7 +329,13 @@ Value ABSearcher::search_internal(Position &pos, int depth, Value alpha,
 
   if (!in_check) {
     static_eval = evaluate(pos);
+  } else {
+    // When in check, use evaluation from 2 plies ago (same as main search)
+    static_eval = (ply >= 2) ? static_eval_stack_[ply - 2] : VALUE_NONE;
   }
+
+  // Store static evaluation for this ply
+  static_eval_stack_[ply] = static_eval;
 
   // Null move pruning (skip - requires TT for do_null_move)
 
@@ -378,7 +391,12 @@ Value ABSearcher::search_internal(Position &pos, int depth, Value alpha,
   Move best_move = Move::none();
   Value best_value = -VALUE_INFINITE;
   int move_count = 0;
-  bool improving = !in_check && static_eval > alpha;
+  // Improving flag: compare current static eval to eval from 2 plies ago (same
+  // side to move) This is the correct semantic - alpha represents search
+  // window, not previous evaluation
+  bool improving = !in_check && ply >= 2 && static_eval != VALUE_NONE &&
+                   static_eval_stack_[ply - 2] != VALUE_NONE &&
+                   static_eval > static_eval_stack_[ply - 2];
   Value original_alpha = alpha; // Save for TT bound calculation
 
   Move child_pv[MAX_PLY];
@@ -640,7 +658,9 @@ ABPolicyGenerator::generate_policy(const Position &pos) {
 
     // Captures scored by MVV-LVA and SEE
     if (pos.capture(m)) {
-      PieceType captured = type_of(pos.piece_on(m.to_sq()));
+      // For en passant, the captured pawn is not on the destination square
+      PieceType captured =
+          m.type_of() == EN_PASSANT ? PAWN : type_of(pos.piece_on(m.to_sq()));
       PieceType attacker = type_of(pos.piece_on(m.from_sq()));
       static const float piece_values[] = {0, 100, 320, 330, 500, 900, 0};
       score += piece_values[captured] * 6.0f - piece_values[attacker];
