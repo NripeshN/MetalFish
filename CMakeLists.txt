@@ -1,11 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-
-# Only enable Objective-C++ on macOS (needed for Metal)
-if(APPLE)
-  project(metalfish CXX OBJCXX)
-else()
-  project(metalfish CXX)
-endif()
+project(metalfish CXX OBJCXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
