@@ -1793,6 +1793,9 @@ bool GPUNNUEManager::evaluate_batch_async(
     return false;
   }
 
+  // Lock for thread-safe GPU access - protects shared buffers
+  std::lock_guard<std::mutex> lock(gpu_mutex_);
+
   auto &backend = gpu();
   const GPUNetworkData &net = use_big_network ? big_network_ : small_network_;
 
