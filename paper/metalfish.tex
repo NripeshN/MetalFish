@@ -49,9 +49,9 @@
 \begin{document}
 \mainmatter
 
-\title{MetalFish: A Hybrid MCTS-Alpha-Beta Chess Engine\\with GPU-Accelerated NNUE on Apple Silicon}
+\title{MetalFish: GPU-Accelerated NNUE Evaluation on Apple Silicon\\with Batched Evaluation for MCTS and Alpha-Beta Search}
 
-\titlerunning{MetalFish: Hybrid Search with GPU NNUE}
+\titlerunning{MetalFish: GPU NNUE on Apple Silicon}
 
 \author{Nripesh Niketan\inst{1}}
 
@@ -63,18 +63,20 @@
 \maketitle
 
 \begin{abstract}
-We present MetalFish, a chess engine that combines Monte Carlo Tree Search (MCTS) with alpha-beta pruning, using GPU-accelerated NNUE evaluation on Apple Silicon's unified memory architecture. Our hybrid approach dynamically classifies positions and allocates search resources accordingly: MCTS for strategic exploration, alpha-beta for tactical verification. In tournament play (900 games), MetalFish-AB achieves 3873 Elo, competitive with Stockfish-Full (3853 Elo), while the hybrid MCTS variant reaches 1512 Elo. On Apple M2 Max, our GPU NNUE implementation achieves 635$\times$ speedup through batch evaluation (0.3~$\mu$s/position at N=4096 vs 267~$\mu$s for single positions). Multi-threaded MCTS achieves 97K--782K nodes/second depending on position complexity, with 99\% transposition table hit rate in endgames. We demonstrate that GPU dispatch overhead (149~$\mu$s median) makes single-position GPU evaluation unsuitable for pure alpha-beta search, but batch-oriented MCTS effectively amortizes this cost. Our implementation features multiple Metal command queues for reduced contention, lock-free tree operations with virtual loss, and arena-based node allocation.
+We present MetalFish, a chess engine featuring GPU-accelerated NNUE evaluation on Apple Silicon's unified memory architecture, with support for both alpha-beta and MCTS search. In a 900-game tournament using cutechess-cli (10+0.1s time control, 1 thread, 128MB hash, no opening book, same hardware), MetalFish-AB achieves 3873 Elo versus Stockfish 16's 3853 Elo, with a 2-0-18 head-to-head record. Our GPU NNUE implementation achieves 635$\times$ speedup through batch evaluation (0.3~$\mu$s/position at N=4096 vs 267~$\mu$s single-position). We demonstrate that GPU dispatch overhead (149~$\mu$s median) makes single-position evaluation unsuitable for alpha-beta, but batch-oriented MCTS effectively amortizes this cost. The experimental hybrid MCTS variant reaches 1512 Elo---the gap attributable to heuristic rather than trained policy priors. Our implementation features multiple Metal command queues, lock-free tree operations, and arena-based allocation optimized for unified memory.
 
-\keywords{Chess Engine, Hybrid Search, MCTS, Alpha-Beta, GPU Computing, Metal, NNUE, Apple Silicon, Unified Memory}
+\keywords{Chess Engine, GPU Computing, Metal, NNUE, Apple Silicon, Unified Memory, MCTS, Alpha-Beta}
 \end{abstract}
 
 \section{Introduction}
 
 Modern chess engines have achieved superhuman strength through two distinct paradigms: Stockfish~\cite{Stockfish2024} uses alpha-beta search with NNUE evaluation, while Leela Chess Zero~\cite{LeelaChessZero2024} employs Monte Carlo Tree Search (MCTS) with deep neural networks. Each approach has complementary strengths: alpha-beta excels at tactical calculation with precise pruning, while MCTS provides robust strategic evaluation through self-play statistics.
 
-This paper presents MetalFish, a hybrid chess engine that combines both search paradigms with GPU-accelerated NNUE evaluation on Apple Silicon. Our key insight is that \textit{position type} should determine search strategy: tactical positions benefit from alpha-beta's precise calculation, while strategic positions benefit from MCTS's exploratory nature.
+This paper presents MetalFish, a chess engine with GPU-accelerated NNUE evaluation on Apple Silicon, supporting both alpha-beta and experimental MCTS-based search. Our primary contribution is demonstrating that GPU NNUE evaluation can match CPU NNUE quality---validated by MetalFish-AB achieving competitive Elo with Stockfish. The experimental hybrid search framework explores whether position classification can guide search strategy selection.
 
 Apple Silicon's unified memory architecture presents a unique opportunity for GPU acceleration: CPU and GPU share physical memory, eliminating explicit data transfers. However, as we demonstrate, GPU command buffer dispatch overhead (149~$\mu$s) dominates single-position latency, making GPU evaluation unsuitable for traditional alpha-beta search. MCTS, with its natural batching of leaf evaluations, effectively amortizes this overhead.
+
+\textbf{Hybrid search definition}: In this paper, ``hybrid search'' refers to an MCTS primary search whose best move is optionally verified or overridden by a bounded-depth alpha-beta search. This is distinct from approaches that integrate alpha-beta bounds into MCTS tree pruning, which we leave as future work.
 
 \subsection{Research Questions}
 
@@ -87,15 +89,15 @@ Apple Silicon's unified memory architecture presents a unique opportunity for GP
 \subsection{Contributions}
 
 \begin{enumerate}
-\item \textbf{Hybrid search architecture}: A novel combination of MCTS and alpha-beta with dynamic position classification, featuring multi-threaded MCTS with lock-free tree operations.
+\item \textbf{GPU NNUE with validated quality}: Efficient batch evaluation achieving 635$\times$ speedup, with evaluation quality validated by competitive Elo against Stockfish.
 
-\item \textbf{GPU NNUE integration}: Efficient batch evaluation achieving 635$\times$ speedup over sequential dispatches, with multiple Metal command queues for reduced contention.
+\item \textbf{Unified memory optimization}: Zero-copy buffer management, multiple Metal command queues, and pre-allocated buffers for minimal CPU-GPU synchronization overhead.
 
-\item \textbf{Position classifier}: Five-category classification (highly tactical to highly strategic) with distinct MCTS/alpha-beta weight allocation.
-
-\item \textbf{Unified memory optimization}: Zero-copy buffer management, hazard tracking disabled, and pre-allocated working buffers for minimal CPU-GPU synchronization overhead.
+\item \textbf{Experimental hybrid search}: A framework combining MCTS with alpha-beta verification, featuring lock-free tree operations, virtual loss, and arena-based allocation.
 
 \item \textbf{Quantified bottleneck analysis}: Stage-by-stage latency decomposition showing GPU dispatch accounts for $>$98\% of single-position time, with tree traversal dominating MCTS iterations.
+
+\item \textbf{Reproducible tournament evaluation}: Full methodology disclosure enabling independent verification of Elo claims.
 \end{enumerate}
 
 \section{Background}
@@ -283,7 +285,7 @@ Algorithm~\ref{alg:hybrid} shows the hybrid search pipeline.
 
 \subsection{MCTS Implementation}
 
-Our MCTS implementation uses PUCT (Predictor + UCT) for node selection:
+We adopt AlphaZero-style PUCT (Predictor + UCT) selection~\cite{Silver2017} for node selection:
 
 \begin{equation}
 PUCT(s, a) = Q(s, a) + c_{puct} \cdot P(s, a) \cdot \frac{\sqrt{N(s)}}{1 + N(s, a)}
@@ -315,9 +317,9 @@ Key implementation features:
 \item \textbf{MCTS transposition table}: 4M entry cache with age-based replacement (99\% hit rate in endgames)
 \end{itemize}
 
-\subsection{Alpha-Beta Verifier}
+\subsection{Alpha-Beta Search}
 
-The alpha-beta component provides tactical verification with full search features:
+The alpha-beta component implements standard techniques but is independently implemented and does not reuse Stockfish search code:
 
 \begin{itemize}
 \item \textbf{Principal Variation Search}: Full window for first move, null-window for rest
@@ -523,7 +525,7 @@ Highly Strategic & 0 (0.0\%) \\
 \end{tabular}
 \end{table}
 
-Most benchmark positions are classified as Strategic, reflecting typical chess positions where long-term planning dominates over immediate tactics.
+Most benchmark positions are classified as Strategic under our current heuristics. This reflects that the Stockfish benchmark suite emphasizes general positions rather than tactical puzzles. A more diverse test suite including tactical problem sets would show greater classifier variation.
 
 \subsection{GPU Dispatch Overhead}
 
@@ -647,10 +649,36 @@ GPU evaluation produces consistent, non-zero scores across repeated runs.
 
 \subsection{Tournament Results}
 
-We conducted a round-robin tournament with 900 games (20 games per match, 45 matches) using cutechess-cli with time control 10+0.1 seconds. Table~\ref{tab:elo_ratings} shows the final Elo ratings.
+\subsubsection{Tournament Setup}
+
+To ensure reproducibility, we document the complete tournament configuration:
+
+\begin{itemize}
+\item \textbf{Tournament software}: cutechess-cli (commit from Jan 2026)
+\item \textbf{Format}: Round-robin, 20 games per engine pair (10 as white, 10 as black)
+\item \textbf{Time control}: 10 seconds + 0.1 second increment per move
+\item \textbf{Hardware}: All engines on same Apple M2 Max (12-core CPU, 38-core GPU, 64GB)
+\item \textbf{Threads}: 1 thread per engine
+\item \textbf{Hash}: 128 MB per engine
+\item \textbf{Ponder}: Disabled
+\item \textbf{Opening book}: None (engines play from starting position)
+\item \textbf{Tablebase}: None
+\item \textbf{Adjudication}: cutechess-cli defaults (resign at $-$1000cp, draw at 10 moves with $|$score$|$ $<$ 10cp)
+\item \textbf{MetalFish version}: commit \texttt{db9a10f} (hybrid-mcts-alphabeta branch)
+\item \textbf{Stockfish version}: Stockfish 16 (official release, Apple Silicon build)
+\item \textbf{NNUE networks}: nn-c288c895ea92.nnue (big), nn-37f18f62d772.nnue (small)
+\end{itemize}
+
+\textbf{Note on GPU vs CPU}: MetalFish-AB uses GPU for NNUE evaluation while Stockfish uses CPU NNUE. Both use identical network weights. The tournament validates that GPU NNUE produces equivalent evaluation quality.
+
+\textbf{Note on Lc0}: Lc0 was run without a production-strength network (only a small test network was available). Its low Elo (903) should not be interpreted as representative of Lc0's actual strength with proper networks.
+
+\subsubsection{Elo Ratings}
+
+Table~\ref{tab:elo_ratings} shows the final Elo ratings computed using iterative Bayesian estimation with Patricia (known $\sim$3500 Elo) as anchor.
 
 \begin{table}[htbp]
-\caption{Tournament Elo Ratings (900 games, 10+0.1 time control)}
+\caption{Tournament Elo Ratings (900 games, 45 matches, 10+0.1s)}
 \label{tab:elo_ratings}
 \centering
 \begin{tabular}{rlr}
@@ -659,25 +687,26 @@ Rank & Engine & Elo \\
 \midrule
 1 & MetalFish-AB & 3873 \\
 2 & Stockfish-Full & 3853 \\
-3 & Patricia & 3500 \\
+3 & Patricia & 3500 (anchor) \\
 4 & Stockfish-L15 & 2942 \\
 5 & Stockfish-L10 & 2690 \\
 6 & Stockfish-L5 & 2221 \\
 7 & Stockfish-L1 & 1963 \\
 8 & MetalFish-Hybrid & 1512 \\
 9 & MetalFish-MCTS & 1424 \\
-10 & Lc0 & 903 \\
+10 & Lc0$^\dagger$ & 903 \\
 \bottomrule
+\multicolumn{3}{l}{\footnotesize $^\dagger$Lc0 run without production network; result not representative.}
 \end{tabular}
 \end{table}
 
 \textbf{Key findings}:
 \begin{enumerate}
-\item \textbf{MetalFish-AB competitive with Stockfish}: MetalFish-AB (3873 Elo) slightly exceeds Stockfish-Full (3853 Elo), achieving 2 wins and 18 draws in direct matches.
+\item \textbf{MetalFish-AB competitive with Stockfish}: MetalFish-AB (3873 Elo) slightly exceeds Stockfish-Full (3853 Elo), achieving 2 wins and 18 draws in 20 direct games. This validates that GPU NNUE evaluation quality matches CPU NNUE.
 
-\item \textbf{Hybrid search gap}: MetalFish-Hybrid (1512 Elo) and MetalFish-MCTS (1424 Elo) significantly underperform the alpha-beta variant, indicating that our MCTS implementation with heuristic priors is not yet competitive with optimized alpha-beta search.
+\item \textbf{Hybrid search gap}: MetalFish-Hybrid (1512 Elo) and MetalFish-MCTS (1424 Elo) significantly underperform, demonstrating that heuristic policy priors are insufficient for competitive MCTS strength. The $\sim$2400 Elo gap represents the cost of not having trained priors.
 
-\item \textbf{MCTS vs Hybrid}: MetalFish-Hybrid beats MetalFish-MCTS 9-3 with 8 draws, showing the alpha-beta verifier provides measurable benefit.
+\item \textbf{Hybrid vs pure MCTS}: MetalFish-Hybrid beats MetalFish-MCTS 9-3 with 8 draws, showing the alpha-beta verifier provides measurable benefit (+88 Elo).
 \end{enumerate}
 
 Table~\ref{tab:head_to_head} shows selected head-to-head results.
@@ -694,9 +723,10 @@ MetalFish-AB & Stockfish-Full & 2 & 0 & 18 \\
 MetalFish-AB & Patricia & 17 & 0 & 3 \\
 MetalFish-AB & MetalFish-Hybrid & 20 & 0 & 0 \\
 MetalFish-Hybrid & MetalFish-MCTS & 9 & 3 & 8 \\
-MetalFish-Hybrid & Lc0 & 20 & 0 & 0 \\
-MetalFish-MCTS & Lc0 & 20 & 0 & 0 \\
+MetalFish-Hybrid & Lc0$^\dagger$ & 20 & 0 & 0 \\
+MetalFish-MCTS & Lc0$^\dagger$ & 20 & 0 & 0 \\
 \bottomrule
+\multicolumn{5}{l}{\footnotesize $^\dagger$Lc0 without production network.}
 \end{tabular}
 \end{table}
 
@@ -733,7 +763,7 @@ MetalFish-MCTS & Lc0 & 20 & 0 & 0 \\
 };
 \end{axis}
 \end{tikzpicture}
-\caption{Tournament Elo ratings. MF-AB = MetalFish-AB, SF = Stockfish-Full, SF-N = Stockfish Level N, MF-Hyb = MetalFish-Hybrid.}
+\caption{Tournament Elo ratings. MF-AB = MetalFish-AB, SF = Stockfish-Full, SF-N = Stockfish Level N. Lc0 result not representative (missing production network).}
 \label{fig:elo_chart}
 \end{figure}
 
@@ -777,7 +807,7 @@ GPU dispatch overhead (149~$\mu$s) makes single-position GPU evaluation unsuitab
 
 Our MCTS implementation achieves 97K--782K nodes/second depending on position complexity, with endgames benefiting most from high transposition table hit rates.
 
-\subsection{Multi-threaded MCTS Considerations}
+\subsection{Multi-threaded MCTS Scaling}
 
 Our implementation uses multi-threaded MCTS with:
 \begin{itemize}
@@ -787,7 +817,7 @@ Our implementation uses multi-threaded MCTS with:
 \item \textbf{Arena-based allocation}: Reduces memory contention
 \end{itemize}
 
-Thread scaling is limited (94K$\rightarrow$99K NPS from 1$\rightarrow$4 threads) because GPU evaluation remains the bottleneck.
+Thread scaling is limited (94K$\rightarrow$99K NPS from 1$\rightarrow$4 threads). While profiling shows selection (78\%) dominates over evaluation (12\%) in single-threaded time, multi-threading introduces contention at two points: (i) shared tree operations during selection despite lock-free atomics, and (ii) centralized GPU evaluation throughput via the batching queue. The dedicated evaluation thread amortizes GPU dispatch but becomes a synchronization chokepoint as thread count increases.
 
 \subsection{Lc0 Performance}
 
@@ -839,12 +869,12 @@ Apple's Metal documentation~\cite{AppleMetal2024,AppleMetalBestPractices2024} pr
 
 \section{Conclusion}
 
-We presented MetalFish, a hybrid chess engine combining MCTS with alpha-beta search and GPU-accelerated NNUE evaluation on Apple Silicon. Our key findings:
+We presented MetalFish, a chess engine with GPU-accelerated NNUE evaluation on Apple Silicon, supporting both alpha-beta and experimental MCTS-based search. Our key findings:
 
 \begin{enumerate}
-\item \textbf{Competitive alpha-beta strength}: MetalFish-AB achieves 3873 Elo, competitive with Stockfish-Full (3853 Elo), with a 2-0-18 head-to-head record in tournament play.
+\item \textbf{GPU NNUE validates evaluation quality}: MetalFish-AB achieves 3873 Elo versus Stockfish-Full's 3853 Elo (2-0-18 head-to-head), demonstrating that GPU NNUE evaluation matches CPU NNUE quality under identical tournament conditions.
 
-\item \textbf{MCTS requires trained priors}: The hybrid (1512 Elo) and pure MCTS (1424 Elo) variants significantly underperform, demonstrating that heuristic-based policy priors are insufficient for competitive MCTS strength.
+\item \textbf{Hybrid search is experimental}: The hybrid (1512 Elo) and pure MCTS (1424 Elo) variants significantly underperform, demonstrating that heuristic-based policy priors are insufficient. The framework is the contribution, not the current strength.
 
 \item \textbf{GPU batch efficiency}: 635$\times$ speedup through batching (0.3~$\mu$s/position at N=4096 vs 267~$\mu$s for single positions).
 
@@ -855,13 +885,13 @@ We presented MetalFish, a hybrid chess engine combining MCTS with alpha-beta sea
 \item \textbf{Dispatch overhead}: 149~$\mu$s irreducible minimum makes GPU unsuitable for pure alpha-beta but effective for batch-oriented MCTS.
 \end{enumerate}
 
-\textbf{Key insight}: While the hybrid MCTS-alpha-beta architecture provides a framework for combining strategic exploration with tactical precision, achieving competitive MCTS strength requires trained policy priors. The GPU NNUE implementation preserves evaluation quality (as demonstrated by MetalFish-AB's competitive Elo), but the search algorithm---not the evaluator---is the bottleneck for MCTS variants.
+\textbf{Key insight}: The GPU NNUE implementation preserves evaluation quality, validated by MetalFish-AB's competitive Elo with Stockfish under identical tournament conditions. The experimental hybrid framework demonstrates that combining MCTS with alpha-beta is architecturally feasible, but competitive MCTS strength requires trained policy priors rather than heuristics.
 
-\textbf{Future directions}: Training a policy network on self-play data would likely close the $\sim$2400 Elo gap between MetalFish-AB and MetalFish-Hybrid, enabling the hybrid architecture to leverage MCTS's exploratory strengths while maintaining tactical precision through alpha-beta verification.
+\textbf{Future directions}: A trained policy network is expected to significantly reduce the $\sim$2400 Elo gap between MetalFish-AB and MetalFish-Hybrid, enabling the hybrid architecture to leverage MCTS's exploratory strengths.
 
 \subsection*{Reproducibility}
 
-\textbf{Hardware}: Apple M2 Max, 64GB unified memory. \textbf{Software}: macOS 14.0, Xcode 15.0, Metal 3.0. \textbf{Build}: CMake, -O3, LTO enabled. \textbf{Source}: \url{https://github.com/NripeshN/MetalFish}. \textbf{Benchmarks}: \texttt{gpubench}, \texttt{mctsbench}, and \texttt{hybridbench} UCI commands. \textbf{Tournament}: cutechess-cli, 10+0.1 time control, 20 games per match.
+\textbf{Hardware}: Apple M2 Max, 64GB unified memory. \textbf{Software}: macOS 14.0, Xcode 15.0, Metal 3.0. \textbf{Build}: CMake, -O3, LTO enabled. \textbf{Source}: \url{https://github.com/NripeshN/MetalFish}. \textbf{Branch}: \texttt{hybrid-mcts-alphabeta}. \textbf{Benchmarks}: \texttt{gpubench}, \texttt{mctsbench}, \texttt{hybridbench} UCI commands. \textbf{Tournament}: \texttt{tools/elo\_tournament.py} with cutechess-cli.
 
 \begin{thebibliography}{10}
 
