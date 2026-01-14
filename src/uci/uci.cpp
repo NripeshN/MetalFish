@@ -37,6 +37,7 @@
 #include "mcts/hybrid_search.h"
 #include "mcts/position_classifier.h"
 #include "mcts/stockfish_adapter.h"
+#include "mcts/thread_safe_mcts.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
 #include "uci/engine.h"
@@ -153,6 +154,8 @@ void UCIEngine::loop() {
       gpu_benchmark();
     else if (token == "mcts")
       mcts_go(is);
+    else if (token == "mctsmt")
+      mcts_mt_go(is);
     else if (token == "hybridbench")
       hybrid_benchmark();
     else if (token == "compiler")
@@ -1285,7 +1288,7 @@ void UCIEngine::mcts_go(std::istringstream &is) {
   config.mcts_config.cpuct = 2.5f;
   config.mcts_config.add_dirichlet_noise = true;
   config.mcts_config.num_search_threads =
-      1; // Single-threaded (GPU eval not thread-safe)
+      1; // Single-threaded for now (multi-thread needs more debugging)
   config.enable_ab_verify = true;
   config.ab_verify_depth = 6;
   config.ab_override_threshold = 0.5f;
@@ -1504,6 +1507,125 @@ void UCIEngine::hybrid_benchmark() {
   std::cout << "with 'mcts' command for hybrid and 'go' for pure AB.\n";
 
   std::cout << "\nBenchmark complete.\n";
+}
+
+// ============================================================================
+// Multi-Threaded MCTS Search Command
+// ============================================================================
+void UCIEngine::mcts_mt_go(std::istringstream &is) {
+  // Parse threads option
+  std::string token;
+  int num_threads = 4;  // Default to 4 threads
+  
+  // Parse additional options (threads=N)
+  while (is >> token) {
+    if (token.find("threads=") == 0) {
+      num_threads = std::stoi(token.substr(8));
+    }
+  }
+  
+  // Reset stream for limit parsing
+  is.clear();
+  is.seekg(0);
+  Search::LimitsType limits = parse_limits(is);
+
+  sync_cout << "info string Starting Multi-Threaded MCTS Search with " 
+            << num_threads << " threads..." << sync_endl;
+
+  // Get GPU NNUE manager
+  GPU::GPUNNUEManager *gpu_manager = nullptr;
+  if (GPU::gpu_nnue_manager_available()) {
+    gpu_manager = &GPU::gpu_nnue_manager();
+  }
+
+  if (!gpu_manager) {
+    sync_cout << "info string ERROR: GPU NNUE not available" << sync_endl;
+    return;
+  }
+
+  // Configure multi-threaded MCTS
+  MCTS::ThreadSafeMCTSConfig config;
+  config.num_threads = num_threads;
+  config.cpuct = 2.5f;
+  config.fpu_value = -1.0f;
+  config.policy_softmax_temp = 1.0f;
+  config.add_dirichlet_noise = true;
+  config.dirichlet_alpha = 0.3f;
+  config.dirichlet_epsilon = 0.25f;
+  config.virtual_loss = 3;
+  config.min_batch_size = 8;
+  config.max_batch_size = 256;
+
+  // Create thread-safe MCTS
+  auto mcts = MCTS::create_thread_safe_mcts(gpu_manager, config);
+
+  if (!mcts) {
+    sync_cout << "info string ERROR: Failed to create multi-threaded MCTS"
+              << sync_endl;
+    return;
+  }
+
+  sync_cout << "info string Multi-threaded MCTS initialized with "
+            << num_threads << " threads" << sync_endl;
+
+  // Get current position from engine
+  std::string fen = engine.fen();
+
+  // Callbacks for UCI output
+  auto best_move_cb = [](Move best, Move ponder) {
+    std::string best_str = UCIEngine::move(best, false);
+    std::string ponder_str = ponder != Move::none()
+                                 ? " ponder " + UCIEngine::move(ponder, false)
+                                 : "";
+    sync_cout << "bestmove " << best_str << ponder_str << sync_endl;
+  };
+
+  auto info_cb = [](const std::string &info) {
+    sync_cout << info << sync_endl;
+  };
+
+  // Start search
+  auto start_time = std::chrono::steady_clock::now();
+  mcts->start_search(fen, limits, best_move_cb, info_cb);
+
+  // Wait for completion
+  mcts->wait();
+
+  // Print final statistics
+  auto end_time = std::chrono::steady_clock::now();
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      end_time - start_time).count();
+  
+  const auto &stats = mcts->stats();
+  uint64_t nodes = stats.total_nodes.load();
+  uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+  
+  sync_cout << "info string Final stats:" << sync_endl;
+  sync_cout << "info string   Nodes: " << nodes << sync_endl;
+  sync_cout << "info string   NPS: " << nps << sync_endl;
+  sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
+  sync_cout << "info string   Threads: " << num_threads << sync_endl;
+  sync_cout << "info string   NN evals: " << stats.nn_evaluations.load() << sync_endl;
+  sync_cout << "info string   Cache hits: " << stats.cache_hits.load() 
+            << " misses: " << stats.cache_misses.load() << sync_endl;
+  
+  // Profiling breakdown
+  uint64_t sel_us = stats.selection_time_us.load();
+  uint64_t exp_us = stats.expansion_time_us.load();
+  uint64_t eval_us = stats.evaluation_time_us.load();
+  uint64_t bp_us = stats.backprop_time_us.load();
+  uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
+  
+  if (total_us > 0) {
+    sync_cout << "info string   Selection: " << std::fixed << std::setprecision(1)
+              << (100.0 * sel_us / total_us) << "%" << sync_endl;
+    sync_cout << "info string   Expansion: " << std::fixed << std::setprecision(1)
+              << (100.0 * exp_us / total_us) << "%" << sync_endl;
+    sync_cout << "info string   Evaluation: " << std::fixed << std::setprecision(1)
+              << (100.0 * eval_us / total_us) << "%" << sync_endl;
+    sync_cout << "info string   Backprop: " << std::fixed << std::setprecision(1)
+              << (100.0 * bp_us / total_us) << "%" << sync_endl;
+  }
 }
 
 } // namespace MetalFish

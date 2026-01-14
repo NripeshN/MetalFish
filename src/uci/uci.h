@@ -59,6 +59,7 @@ private:
   void gpu_benchmark();
   void hybrid_benchmark();              // Hybrid search validation
   void mcts_go(std::istringstream &is); // Hybrid MCTS search
+  void mcts_mt_go(std::istringstream &is); // Multi-threaded MCTS search
 
   static void on_update_no_moves(const Engine::InfoShort &info);
   static void on_update_full(const Engine::InfoFull &info, bool showWDL);

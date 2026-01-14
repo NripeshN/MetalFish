@@ -19,6 +19,8 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   set(CMAKE_CXX_FLAGS
       "${CMAKE_CXX_FLAGS} -DUSE_NEON=8 -DUSE_NEON_DOTPROD -march=armv8.2-a+dotprod"
   )
+  # Disable x86-specific PEXT instruction for ARM
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_PEXT")
 endif()
 
 # GPU acceleration options
@@ -145,7 +147,7 @@ set(GPU_SOURCES
     src/gpu/gpu_mcts_backend.cpp
     src/gpu/persistent_pipeline.cpp)
 
-# MCTS source files (hybrid search)
+# MCTS source files (hybrid search - old implementation)
 set(MCTS_SOURCES
     src/mcts/stockfish_adapter.cpp
     src/mcts/hybrid_search.cpp
@@ -154,7 +156,8 @@ set(MCTS_SOURCES
     src/mcts/mcts_batch_evaluator.cpp
     src/mcts/mcts_tt.cpp
     src/mcts/parallel_search.cpp
-    src/mcts/ab_integration.cpp)
+    src/mcts/ab_integration.cpp
+    src/mcts/thread_safe_mcts.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
