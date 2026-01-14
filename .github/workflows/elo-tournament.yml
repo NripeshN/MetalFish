@@ -1,0 +1,580 @@
+name: Elo Tournament
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch: # Allow manual trigger
+    inputs:
+      games_per_match:
+        description: "Number of games per match"
+        required: false
+        default: "20"
+      time_control:
+        description: "Time control (e.g., 10+0.1)"
+        required: false
+        default: "10+0.1"
+
+# Cancel in-progress runs for the same PR
+concurrency:
+  group: elo-tournament-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '20' }}
+  TIME_CONTROL: ${{ github.event.inputs.time_control || '10+0.1' }}
+
+jobs:
+  # First job: Build everything and generate the match matrix
+  setup:
+    name: Build & Setup Matrix
+    runs-on: macos-latest # Apple Silicon M1 runner for Metal support
+    outputs:
+      matrix: ${{ steps.generate-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          brew install cmake ninja meson qt@6 coreutils
+          pip3 install meson ninja
+          # coreutils provides gtimeout which we alias to timeout
+          echo "alias timeout=gtimeout" >> ~/.bashrc
+
+      - name: Cache NNUE files
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/nn-*.nnue
+            build/nn-*.nnue
+          key: nnue-files-v1
+
+      - name: Download NNUE files for MetalFish
+        run: |
+          cd src
+          if [ ! -f nn-c288c895ea92.nnue ]; then
+            curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          fi
+          if [ ! -f nn-37f18f62d772.nnue ]; then
+            curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          fi
+
+      - name: Build MetalFish
+        run: |
+          mkdir -p build && cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+          ninja metalfish
+          # Copy NNUE files to build directory
+          cp ../src/nn-*.nnue . 2>/dev/null || true
+
+      - name: Clone and Build cutechess-cli
+        run: |
+          # Clone cutechess (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/cutechess/cutechess.git reference/cutechess
+
+          cd reference/cutechess
+          mkdir -p build && cd build
+
+          # Use Qt6 from Homebrew - set all necessary paths
+          QT_PATH="/opt/homebrew/opt/qt@6"
+          export PATH="$QT_PATH/bin:$PATH"
+          export CMAKE_PREFIX_PATH="$QT_PATH"
+          export Qt6_DIR="$QT_PATH/lib/cmake/Qt6"
+          export LDFLAGS="-L$QT_PATH/lib -Wl,-rpath,$QT_PATH/lib"
+          export CPPFLAGS="-I$QT_PATH/include"
+          export PKG_CONFIG_PATH="$QT_PATH/lib/pkgconfig"
+
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_TESTS=OFF \
+            -DCMAKE_PREFIX_PATH="$QT_PATH" \
+            -DQt6_DIR="$QT_PATH/lib/cmake/Qt6" \
+            -DCMAKE_INSTALL_RPATH="$QT_PATH/lib" \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DCMAKE_MACOSX_RPATH=ON
+          ninja cutechess-cli
+
+          # Fix library paths using install_name_tool to embed absolute paths
+          echo "=== Fixing library paths ==="
+          # Get all Qt framework dependencies
+          for framework in $(otool -L cutechess-cli | grep "@rpath" | awk '{print $1}'); do
+            framework_name=$(basename "$framework" | sed 's/\.framework.*//')
+            new_path="$QT_PATH/lib/${framework_name}.framework/Versions/A/${framework_name}"
+            if [ -f "$new_path" ]; then
+              echo "Fixing: $framework -> $new_path"
+              install_name_tool -change "$framework" "$new_path" cutechess-cli 2>/dev/null || true
+            fi
+          done
+
+          # Check what libraries it links to
+          echo "=== cutechess-cli dependencies after fix ==="
+          otool -L cutechess-cli || true
+
+          # Test it works
+          echo "=== Testing cutechess-cli ==="
+          ./cutechess-cli --version || echo "Version check failed"
+
+      - name: Clone and Build Stockfish
+        run: |
+          # Clone Stockfish (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/official-stockfish/Stockfish.git reference/stockfish
+
+          cd reference/stockfish/src
+          # Download NNUE files for Stockfish
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          # Build for Apple Silicon
+          make -j$(sysctl -n hw.ncpu) build ARCH=apple-silicon
+
+      - name: Clone and Build Patricia
+        continue-on-error: true
+        run: |
+          # Clone Patricia (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/Adam-Kulju/Patricia.git reference/Patricia
+
+          cd reference/Patricia/engine
+          # Build Patricia with clang++
+          make build CXX=clang++
+
+      - name: Clone and Build Leela Chess Zero (lc0)
+        continue-on-error: true
+        run: |
+          # Clone lc0 (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/LeelaChessZero/lc0.git reference/lc0
+
+          cd reference/lc0
+          # Build lc0 with Metal backend (macOS)
+          ./build.sh -Dgtest=false || echo "lc0 build failed, will skip in tournament"
+
+          # Download a network for lc0 (required to run)
+          if [ -f "build/release/lc0" ]; then
+            cd build/release
+            # Try multiple network sources
+            echo "Downloading lc0 network..."
+            # Try the official training server
+            curl -L "https://training.lczero.org/get_network?sha=00af53b081e80147172e6f281c01571e6c3c87c1" -o network.pb.gz 2>/dev/null || \
+            curl -L "https://lczero.org/get/t40/256x10/1" -o network.pb.gz 2>/dev/null || \
+            echo "Warning: Could not download lc0 network, lc0 will be skipped"
+
+            # Verify download
+            if [ -f "network.pb.gz" ]; then
+              file network.pb.gz
+              if file network.pb.gz | grep -q "gzip"; then
+                echo "Network downloaded successfully"
+              else
+                echo "Downloaded file is not a valid gzip, removing"
+                rm -f network.pb.gz
+              fi
+            fi
+          fi
+
+      - name: Create MetalFish wrapper scripts
+        run: |
+          # Create Hybrid wrapper (uses 'mcts' command)
+          cat > tools/metalfish_hybrid_wrapper.sh << 'EOF'
+          #!/bin/bash
+          # MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
+
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          ENGINE="$SCRIPT_DIR/../build/metalfish"
+
+          # Read UCI commands and transform 'go' to 'mcts'
+          while IFS= read -r line; do
+              if [[ "$line" == go* ]]; then
+                  echo "mcts ${line#go}"
+              else
+                  echo "$line"
+              fi
+          done | "$ENGINE"
+          EOF
+          chmod +x tools/metalfish_hybrid_wrapper.sh
+
+          # Create MCTS-MT wrapper (uses 'mctsmt' command with 4 threads)
+          cat > tools/metalfish_mctsmt_wrapper.sh << 'EOF'
+          #!/bin/bash
+          # MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
+
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          ENGINE="$SCRIPT_DIR/../build/metalfish"
+
+          # Read UCI commands and transform 'go' to 'mctsmt threads=4'
+          while IFS= read -r line; do
+              if [[ "$line" == go* ]]; then
+                  echo "mctsmt threads=4 ${line#go}"
+              else
+                  echo "$line"
+              fi
+          done | "$ENGINE"
+          EOF
+          chmod +x tools/metalfish_mctsmt_wrapper.sh
+
+      - name: Verify all engine binaries
+        run: |
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║     Verifying Engine Binaries                            ║"
+          echo "╚══════════════════════════════════════════════════════════╝"
+
+          # Use gtimeout from coreutils on macOS
+          TIMEOUT_CMD="gtimeout"
+          if ! command -v gtimeout &> /dev/null; then
+            TIMEOUT_CMD="timeout"
+          fi
+
+          echo ""
+          echo "=== MetalFish (Alpha-Beta) ==="
+          if [ -f "build/metalfish" ]; then
+            echo "  ✓ Found at build/metalfish"
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 build/metalfish 2>&1 | head -3 || true
+          else
+            echo "  ✗ Not found - REQUIRED"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== MetalFish Hybrid Wrapper ==="
+          if [ -f "tools/metalfish_hybrid_wrapper.sh" ]; then
+            echo "  ✓ Found at tools/metalfish_hybrid_wrapper.sh"
+          else
+            echo "  ✗ Not found - REQUIRED"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== MetalFish MCTS-MT Wrapper ==="
+          if [ -f "tools/metalfish_mctsmt_wrapper.sh" ]; then
+            echo "  ✓ Found at tools/metalfish_mctsmt_wrapper.sh"
+          else
+            echo "  ✗ Not found - REQUIRED"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Stockfish ==="
+          if [ -f "reference/stockfish/src/stockfish" ]; then
+            echo "  ✓ Found at reference/stockfish/src/stockfish"
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/stockfish/src/stockfish 2>&1 | head -3 || true
+          else
+            echo "  ✗ Not found - REQUIRED"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Patricia ==="
+          if [ -f "reference/Patricia/engine/patricia" ]; then
+            echo "  ✓ Found at reference/Patricia/engine/patricia"
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/Patricia/engine/patricia 2>&1 | head -3 || true
+          else
+            echo "  ✗ Not found (optional - will be skipped)"
+          fi
+
+          echo ""
+          echo "=== cutechess-cli ==="
+          if [ -f "reference/cutechess/build/cutechess-cli" ]; then
+            echo "  ✓ Found at reference/cutechess/build/cutechess-cli"
+            reference/cutechess/build/cutechess-cli --version || echo "cutechess-cli version check failed"
+          else
+            echo "  ✗ Not found - REQUIRED"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Lc0 (Leela Chess Zero) ==="
+          if [ -f "reference/lc0/build/release/lc0" ]; then
+            echo "  ✓ Found at reference/lc0/build/release/lc0"
+            if [ -f "reference/lc0/build/release/network.pb.gz" ]; then
+              echo "  ✓ Network file found"
+            else
+              echo "  ✗ Network file missing - lc0 will be skipped"
+            fi
+          else
+            echo "  ✗ Not found (optional - will be skipped)"
+          fi
+
+          echo ""
+          echo "=== Summary ==="
+          echo "All required engines are ready!"
+
+      - name: Generate match matrix
+        id: generate-matrix
+        run: |
+          # Get the list of engine pairs
+          python3 tools/elo_tournament.py --ci-list-engines > /tmp/engines.json
+
+          # Extract the matrix array
+          MATRIX=$(cat /tmp/engines.json | python3 -c "import sys, json; d=json.load(sys.stdin); print(json.dumps({'include': [{'match': m, 'engine1': p['engine1'], 'engine2': p['engine2']} for m, p in zip(d['matrix'], d['pairs'])]}))")
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+          # Print for debugging
+          echo "Generated matrix:"
+          echo "$MATRIX" | python3 -m json.tool
+
+          # Count matches
+          NUM_MATCHES=$(echo "$MATRIX" | python3 -c "import sys, json; d=json.load(sys.stdin); print(len(d['include']))")
+          echo "Total matches to run: $NUM_MATCHES"
+
+      - name: Package build artifacts
+        run: |
+          # Create a tarball of all necessary files to preserve permissions
+          tar -cvf build-artifacts.tar \
+            build/metalfish \
+            build/nn-*.nnue \
+            reference/cutechess/build/cutechess-cli \
+            reference/stockfish/src/stockfish \
+            reference/stockfish/src/nn-*.nnue \
+            tools/elo_tournament.py \
+            tools/metalfish_hybrid_wrapper.sh \
+            tools/metalfish_mctsmt_wrapper.sh \
+            2>/dev/null || true
+
+          # Add Patricia if it exists
+          if [ -f "reference/Patricia/engine/patricia" ]; then
+            tar -rvf build-artifacts.tar reference/Patricia/engine/patricia
+          fi
+
+          # Add lc0 if it exists with network
+          if [ -f "reference/lc0/build/release/lc0" ]; then
+            tar -rvf build-artifacts.tar reference/lc0/build/release/lc0
+            if [ -f "reference/lc0/build/release/network.pb.gz" ]; then
+              tar -rvf build-artifacts.tar reference/lc0/build/release/network.pb.gz
+            fi
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: build-artifacts.tar
+          retention-days: 1
+
+  # Matrix job: Run each match in parallel
+  run-matches:
+    name: Match ${{ matrix.match }}
+    needs: setup
+    runs-on: macos-latest # Apple Silicon for Metal support
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: .
+
+      - name: Extract build artifacts
+        run: |
+          tar -xvf build-artifacts.tar
+
+          # Set executable permissions
+          chmod +x build/metalfish || true
+          chmod +x reference/cutechess/build/cutechess-cli || true
+          chmod +x reference/stockfish/src/stockfish || true
+          chmod +x reference/Patricia/engine/patricia || true
+          chmod +x reference/lc0/build/release/lc0 || true
+          chmod +x tools/metalfish_hybrid_wrapper.sh || true
+          chmod +x tools/metalfish_mctsmt_wrapper.sh || true
+
+          # Debug: List what we have
+          echo "=== Directory structure after extraction ==="
+          find . -type f -name "metalfish" -o -name "stockfish" -o -name "patricia" -o -name "cutechess-cli" -o -name "lc0" 2>/dev/null || true
+          echo ""
+          echo "=== Build directory ==="
+          ls -la build/ || echo "build/ not found"
+          echo ""
+          echo "=== Reference directory ==="
+          ls -la reference/ || echo "reference/ not found"
+          echo ""
+          echo "=== Stockfish ==="
+          ls -la reference/stockfish/src/ 2>/dev/null || echo "reference/stockfish/src/ not found"
+          echo ""
+          echo "=== Tools directory ==="
+          ls -la tools/*.sh 2>/dev/null || echo "No wrapper scripts found"
+
+      - name: Install runtime dependencies
+        run: |
+          # Install Qt6 runtime for cutechess-cli and coreutils for gtimeout
+          brew install qt@6 coreutils
+
+          # Fix cutechess-cli library paths to use the newly installed Qt6
+          QT_PATH="/opt/homebrew/opt/qt@6"
+          if [ -f "reference/cutechess/build/cutechess-cli" ]; then
+            echo "=== Fixing cutechess-cli library paths ==="
+            # Get all Qt framework dependencies and fix them
+            for framework in $(otool -L reference/cutechess/build/cutechess-cli | grep -E "@rpath|Qt" | awk '{print $1}'); do
+              framework_name=$(basename "$framework" | sed 's/\.framework.*//')
+              new_path="$QT_PATH/lib/${framework_name}.framework/Versions/A/${framework_name}"
+              if [ -f "$new_path" ]; then
+                echo "Fixing: $framework -> $new_path"
+                install_name_tool -change "$framework" "$new_path" reference/cutechess/build/cutechess-cli 2>/dev/null || true
+              fi
+            done
+            echo "=== Updated dependencies ==="
+            otool -L reference/cutechess/build/cutechess-cli | head -20
+          fi
+
+      - name: Verify engines before match
+        run: |
+          echo "=== Verifying engines can run ==="
+
+          # Use gtimeout from coreutils on macOS
+          TIMEOUT_CMD="gtimeout"
+          if ! command -v gtimeout &> /dev/null; then
+            TIMEOUT_CMD="timeout"
+          fi
+
+          echo "MetalFish:"
+          if [ -f "build/metalfish" ]; then
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 ./build/metalfish 2>&1 | head -5 || echo "MetalFish failed to respond"
+          else
+            echo "ERROR: build/metalfish not found!"
+            exit 1
+          fi
+
+          echo ""
+          echo "Stockfish:"
+          if [ -f "reference/stockfish/src/stockfish" ]; then
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 ./reference/stockfish/src/stockfish 2>&1 | head -5 || echo "Stockfish failed to respond"
+          else
+            echo "ERROR: reference/stockfish/src/stockfish not found!"
+            exit 1
+          fi
+
+          echo ""
+          echo "cutechess-cli:"
+          if [ -f "reference/cutechess/build/cutechess-cli" ]; then
+            ./reference/cutechess/build/cutechess-cli --version || echo "cutechess-cli failed"
+          else
+            echo "ERROR: reference/cutechess/build/cutechess-cli not found!"
+            exit 1
+          fi
+
+      - name: Run match
+        run: |
+          mkdir -p results
+
+          echo "Running match: ${{ matrix.engine1 }} vs ${{ matrix.engine2 }}"
+          echo "Current directory: $(pwd)"
+          echo "Script location: $(ls -la tools/elo_tournament.py)"
+
+          python3 tools/elo_tournament.py \
+            --ci-match \
+            --base-dir "$(pwd)" \
+            --engine1 "${{ matrix.engine1 }}" \
+            --engine2 "${{ matrix.engine2 }}" \
+            --games ${{ env.GAMES_PER_MATCH }} \
+            --time "${{ env.TIME_CONTROL }}" \
+            --output "results/${{ matrix.match }}.json"
+
+      - name: Upload match results
+        uses: actions/upload-artifact@v4
+        with:
+          name: match-result-${{ matrix.match }}
+          path: results/*.json
+          retention-days: 1
+
+  # Final job: Aggregate results and post PR comment
+  aggregate-results:
+    name: Aggregate & Report
+    needs: run-matches
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download all match results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: match-result-*
+          path: all-results/
+          merge-multiple: true
+
+      - name: List downloaded results
+        run: |
+          echo "Downloaded results:"
+          find all-results -name "*.json" -type f
+          echo ""
+          echo "Total result files: $(find all-results -name "*.json" -type f | wc -l)"
+
+      - name: Aggregate results
+        id: aggregate
+        run: |
+          mkdir -p results
+
+          # Copy all results to one directory
+          find all-results -name "*.json" -exec cp {} results/ \;
+
+          # Generate summary
+          python3 tools/elo_tournament.py \
+            --ci-aggregate \
+            --results-dir results \
+            --output results/summary.json
+
+          # Generate PR comment
+          python3 tools/elo_tournament.py \
+            --ci-aggregate \
+            --results-dir results \
+            --ci-comment > results/pr_comment.md
+
+          # Store comment for next step
+          echo "comment_file=results/pr_comment.md" >> $GITHUB_OUTPUT
+
+          # Print summary to logs
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║     Tournament Summary                                   ║"
+          echo "╚══════════════════════════════════════════════════════════╝"
+          cat results/summary.json | python3 -m json.tool
+          echo ""
+          echo "=== PR Comment Preview ==="
+          cat results/pr_comment.md
+
+      - name: Find existing comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/find-comment@v3
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "github-actions[bot]"
+          body-includes: "🏆 MetalFish Elo Tournament Results"
+
+      - name: Post or update PR comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: ${{ steps.aggregate.outputs.comment_file }}
+          edit-mode: replace
+
+      - name: Upload final summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: tournament-summary
+          path: |
+            results/summary.json
+            results/pr_comment.md
+          retention-days: 30

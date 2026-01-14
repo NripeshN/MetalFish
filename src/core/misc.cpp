@@ -422,6 +422,10 @@ void prefetch(const void *) {}
 
 #else
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 void prefetch(const void *addr) {
 
 #if defined(_MSC_VER)

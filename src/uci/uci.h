@@ -57,6 +57,11 @@ private:
   std::uint64_t perft(const Search::LimitsType &);
   void gpu_info();
   void gpu_benchmark();
+  void hybrid_benchmark();                 // Hybrid search validation
+  void mcts_go(std::istringstream &is);    // Hybrid MCTS search
+  void mcts_mt_go(std::istringstream &is); // Multi-threaded MCTS search
+  void mcts_batch_benchmark(
+      std::istringstream &is); // Batched vs direct eval benchmark
 
   static void on_update_no_moves(const Engine::InfoShort &info);
   static void on_update_full(const Engine::InfoFull &info, bool showWDL);

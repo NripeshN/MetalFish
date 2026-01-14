@@ -179,6 +179,15 @@ public:
   // Command encoding
   virtual std::unique_ptr<CommandEncoder> create_encoder() = 0;
 
+  // Create encoder on a parallel queue for async work (multiple queues reduce
+  // contention)
+  virtual std::unique_ptr<CommandEncoder> create_parallel_encoder() {
+    return create_encoder(); // Default: use main queue
+  }
+
+  // Get number of parallel queues available
+  virtual size_t num_parallel_queues() const { return 1; }
+
   // Submit and wait for completion
   virtual void submit_and_wait(CommandEncoder *encoder) = 0;
 

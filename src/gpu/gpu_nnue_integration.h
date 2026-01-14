@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -149,6 +150,7 @@ struct GPUEvalBatch {
   void clear();
   void reserve(int n);
   void add_position(const Position &pos);
+  void add_position_data(const GPUPositionData &data);
   int get_bucket(int idx) const { return buckets[idx]; }
 };
 
@@ -169,7 +171,9 @@ public:
   }
 
   // Batch evaluation with automatic strategy selection
-  bool evaluate_batch(GPUEvalBatch &batch, bool use_big_network = true);
+  // If force_gpu is true, bypasses the min_batch_for_gpu threshold check
+  bool evaluate_batch(GPUEvalBatch &batch, bool use_big_network = true,
+                      bool force_gpu = false);
 
   // Asynchronous batch evaluation (returns immediately, calls
   // completion_handler when done) The batch must remain valid until
@@ -249,6 +253,9 @@ private:
   std::atomic<size_t> cpu_evals_{0};
   std::atomic<size_t> batch_count_{0};
   double total_time_ms_ = 0;
+
+  // Thread safety for GPU operations
+  mutable std::mutex gpu_mutex_;
 
   // Internal methods
   bool compile_shaders();

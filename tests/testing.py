@@ -26,7 +26,28 @@ MAX_TIMEOUT = 60 * 5
 
 PATH = pathlib.Path(__file__).parent.resolve()
 BUILD_PATH = PATH.parent / "build"
-METALFISH_BIN = BUILD_PATH / "metalfish"
+
+
+# Find MetalFish binary - handle different build configurations
+def find_metalfish_binary():
+    """Find the MetalFish binary across different build configurations."""
+    # Check common locations in order of preference
+    candidates = [
+        BUILD_PATH / "metalfish",  # Unix default
+        BUILD_PATH / "metalfish.exe",  # Windows default
+        BUILD_PATH / "Release" / "metalfish.exe",  # Windows MSVC Release
+        BUILD_PATH / "Debug" / "metalfish.exe",  # Windows MSVC Debug
+        BUILD_PATH / "Release" / "metalfish",  # Unix Release config
+        BUILD_PATH / "Debug" / "metalfish",  # Unix Debug config
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    # Fallback to default path (will fail with helpful error message)
+    return BUILD_PATH / "metalfish"
+
+
+METALFISH_BIN = find_metalfish_binary()
 
 
 class TimeoutException(Exception):
@@ -280,10 +301,10 @@ def test_perft():
             nodes = int(result_line.split(":")[1].strip())
 
             if nodes == expected:
-                print(f"{GREEN_COLOR}{nodes} ✓{RESET_COLOR}")
+                print(f"{GREEN_COLOR}{nodes} OK{RESET_COLOR}")
                 passed += 1
             else:
-                print(f"{RED_COLOR}{nodes} ✗ (expected {expected}){RESET_COLOR}")
+                print(f"{RED_COLOR}{nodes} FAIL (expected {expected}){RESET_COLOR}")
                 failed += 1
         except Exception as e:
             print(f"{RED_COLOR}ERROR: {e}{RESET_COLOR}")

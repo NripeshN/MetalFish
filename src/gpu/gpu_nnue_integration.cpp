@@ -19,6 +19,7 @@
 #include "backend.h"
 #include "core/bitboard.h"
 #include "core/position.h"
+#include "eval/evaluate.h"
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_architecture.h"
 #include "eval/nnue/nnue_feature_transformer.h"
@@ -27,6 +28,7 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 
 namespace MetalFish::GPU {
@@ -62,19 +64,29 @@ EvalStrategy GPUTuningParams::select_strategy(int batch_size) const {
 // ============================================================================
 
 void GPUPositionData::from_position(const Position &pos) {
-  std::memset(this, 0, sizeof(GPUPositionData));
+  // Direct assignment instead of memset+copy (faster for small struct)
+  // Copy piece bitboards - unrolled for better performance
+  pieces[0][0] = pos.pieces(WHITE, NO_PIECE_TYPE);
+  pieces[0][1] = pos.pieces(WHITE, PAWN);
+  pieces[0][2] = pos.pieces(WHITE, KNIGHT);
+  pieces[0][3] = pos.pieces(WHITE, BISHOP);
+  pieces[0][4] = pos.pieces(WHITE, ROOK);
+  pieces[0][5] = pos.pieces(WHITE, QUEEN);
+  pieces[0][6] = pos.pieces(WHITE, KING);
 
-  // Copy piece bitboards
-  for (int c = 0; c < 2; c++) {
-    for (int pt = 0; pt <= 6; pt++) {
-      pieces[c][pt] = pos.pieces(Color(c), PieceType(pt));
-    }
-  }
+  pieces[1][0] = pos.pieces(BLACK, NO_PIECE_TYPE);
+  pieces[1][1] = pos.pieces(BLACK, PAWN);
+  pieces[1][2] = pos.pieces(BLACK, KNIGHT);
+  pieces[1][3] = pos.pieces(BLACK, BISHOP);
+  pieces[1][4] = pos.pieces(BLACK, ROOK);
+  pieces[1][5] = pos.pieces(BLACK, QUEEN);
+  pieces[1][6] = pos.pieces(BLACK, KING);
 
   king_sq[0] = pos.square<KING>(WHITE);
   king_sq[1] = pos.square<KING>(BLACK);
   stm = pos.side_to_move();
   piece_count = pos.count<ALL_PIECES>();
+  padding[0] = padding[1] = padding[2] = padding[3] = 0;
 }
 
 // ============================================================================
@@ -146,6 +158,18 @@ void GPUEvalBatch::add_position(const Position &pos) {
 
   // Calculate bucket based on piece count (8 buckets, 4 pieces per bucket)
   int bucket = (pos.count<ALL_PIECES>() - 1) / 4;
+  bucket = std::clamp(bucket, 0, GPU_LAYER_STACKS - 1);
+  buckets.push_back(bucket);
+
+  feature_offsets.push_back(white_features.size());
+  count++;
+}
+
+void GPUEvalBatch::add_position_data(const GPUPositionData &data) {
+  positions.push_back(data);
+
+  // Calculate bucket based on piece count (8 buckets, 4 pieces per bucket)
+  int bucket = (data.piece_count - 1) / 4;
   bucket = std::clamp(bucket, 0, GPU_LAYER_STACKS - 1);
   buckets.push_back(bucket);
 
@@ -1211,12 +1235,12 @@ bool GPUNNUEManager::compile_shaders() {
       backend.create_kernel("gpu_nnue_forward_batch", "gpu_nnue_integration");
 
   // New optimized kernels
-  feature_transform_vec4_kernel_ =
-      backend.create_kernel("gpu_feature_transform_vec4", "gpu_nnue_integration");
-  feature_transform_dual_vec4_kernel_ =
-      backend.create_kernel("gpu_feature_transform_dual_vec4", "gpu_nnue_integration");
-  forward_optimized_kernel_ =
-      backend.create_kernel("gpu_nnue_forward_optimized", "gpu_nnue_integration");
+  feature_transform_vec4_kernel_ = backend.create_kernel(
+      "gpu_feature_transform_vec4", "gpu_nnue_integration");
+  feature_transform_dual_vec4_kernel_ = backend.create_kernel(
+      "gpu_feature_transform_dual_vec4", "gpu_nnue_integration");
+  forward_optimized_kernel_ = backend.create_kernel(
+      "gpu_nnue_forward_optimized", "gpu_nnue_integration");
   fused_single_kernel_ =
       backend.create_kernel("gpu_nnue_fused_single", "gpu_nnue_integration");
 
@@ -1253,17 +1277,24 @@ bool GPUNNUEManager::compile_shaders() {
   if (forward_batch_kernel_ && forward_batch_kernel_->valid()) {
     std::cout << "[GPU NNUE] Batch forward kernel available" << std::endl;
   }
-  if (feature_transform_vec4_kernel_ && feature_transform_vec4_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Vectorized (vec4) feature transform kernel available" << std::endl;
+  if (feature_transform_vec4_kernel_ &&
+      feature_transform_vec4_kernel_->valid()) {
+    std::cout
+        << "[GPU NNUE] Vectorized (vec4) feature transform kernel available"
+        << std::endl;
   }
-  if (feature_transform_dual_vec4_kernel_ && feature_transform_dual_vec4_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Dual-perspective vectorized transform kernel available" << std::endl;
+  if (feature_transform_dual_vec4_kernel_ &&
+      feature_transform_dual_vec4_kernel_->valid()) {
+    std::cout
+        << "[GPU NNUE] Dual-perspective vectorized transform kernel available"
+        << std::endl;
   }
   if (forward_optimized_kernel_ && forward_optimized_kernel_->valid()) {
     std::cout << "[GPU NNUE] Optimized forward kernel available" << std::endl;
   }
   if (fused_single_kernel_ && fused_single_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Fused single-position kernel available" << std::endl;
+    std::cout << "[GPU NNUE] Fused single-position kernel available"
+              << std::endl;
   }
 
   std::cout << "[GPU NNUE] Shaders compiled successfully" << std::endl;
@@ -1530,18 +1561,23 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
   return true;
 }
 
-bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
+bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
+                                    bool force_gpu) {
   if (!is_ready() || batch.count == 0) {
     return false;
   }
 
   // Select evaluation strategy based on batch size
+  // If force_gpu is true, skip the CPU fallback threshold check
   EvalStrategy strategy = tuning_.select_strategy(batch.count);
 
-  if (strategy == EvalStrategy::CPU_FALLBACK) {
+  if (!force_gpu && strategy == EvalStrategy::CPU_FALLBACK) {
     cpu_evals_ += batch.count;
     return false;
   }
+
+  // Lock for thread-safe GPU access
+  std::lock_guard<std::mutex> lock(gpu_mutex_);
 
   auto start = std::chrono::high_resolution_clock::now();
 
@@ -1593,23 +1629,26 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     // Unrolled color loop for better branch prediction
     for (int pt = PAWN; pt <= QUEEN; pt++) {
       const int pt_offset = (pt - 1) * 64;
-      
+
       // White pieces
       Bitboard bb_w = pos_data.pieces[0][pt];
       while (bb_w) {
         const int s = pop_lsb(bb_w);
         white_features_ptr[white_feature_idx++] = wksq * 640 + pt_offset + s;
-        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
+        black_features_ptr[black_feature_idx++] =
+            bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
         white_count++;
         black_count++;
       }
-      
+
       // Black pieces
       Bitboard bb_b = pos_data.pieces[1][pt];
       while (bb_b) {
         const int s = pop_lsb(bb_b);
-        white_features_ptr[white_feature_idx++] = wksq * 640 + 320 + pt_offset + s;
-        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + pt_offset + (s ^ 56);
+        white_features_ptr[white_feature_idx++] =
+            wksq * 640 + 320 + pt_offset + s;
+        black_features_ptr[black_feature_idx++] =
+            bksq_flip * 640 + pt_offset + (s ^ 56);
         white_count++;
         black_count++;
       }
@@ -1622,16 +1661,19 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
   // Note: positions_buffer_ upload removed - feature extraction is done on CPU
   // and features are written directly to GPU buffers via unified memory
 
-  // Create command encoder
-  auto encoder = backend.create_encoder();
+  // Create command encoder - use parallel encoder for better queue distribution
+  // This reduces contention when multiple batches are submitted in quick
+  // succession
+  auto encoder = backend.create_parallel_encoder();
 
   // Select optimal kernel based on batch size and available kernels
   // Testing showed that the fused kernel uses too much threadgroup memory
   // and reduces GPU occupancy, making it slower than separate dispatches
   // Always use dual-perspective kernel since it processes both perspectives
-  const bool use_fused_kernel = false; // Disabled - slower than separate kernels
-  const bool use_dual_kernel = feature_transform_dual_kernel_ &&
-                               feature_transform_dual_kernel_->valid();
+  const bool use_fused_kernel =
+      false; // Disabled - slower than separate kernels
+  const bool use_dual_kernel =
+      feature_transform_dual_kernel_ && feature_transform_dual_kernel_->valid();
 
   if (use_fused_kernel) {
     // Fused kernel: feature transform + forward pass in single dispatch
@@ -1751,6 +1793,13 @@ bool GPUNNUEManager::evaluate_batch_async(
     return false;
   }
 
+  // Lock for thread-safe GPU access - protects kernel dispatch setup
+  // NOTE: We use a short lock scope here. The gpu_mutex_ is released when this
+  // function returns, but the GPU is still reading from the input buffers.
+  // To avoid race conditions with MAX_INFLIGHT_BATCHES=4 concurrent async calls,
+  // we allocate dedicated input buffers for each async call below.
+  std::lock_guard<std::mutex> lock(gpu_mutex_);
+
   auto &backend = gpu();
   const GPUNetworkData &net = use_big_network ? big_network_ : small_network_;
 
@@ -1764,19 +1813,63 @@ bool GPUNNUEManager::evaluate_batch_async(
   const int batch_size = batch.count;
   const int hidden_dim = net.hidden_dim;
 
-  // Use pre-allocated buffer pointers for direct writes
+  // Allocate dedicated input buffers for this async call to avoid race conditions.
+  // The shared class member buffers cannot be used because the gpu_mutex_ is
+  // released when this function returns, but the GPU completion handler runs later.
+  // With MAX_INFLIGHT_BATCHES=4 concurrent async evaluations, another thread could
+  // acquire the mutex and overwrite the shared buffers before our GPU work completes.
+  const size_t max_features_per_batch = batch_size * GPU_MAX_FEATURES_PER_PERSPECTIVE;
+
+  auto async_white_features = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(max_features_per_batch * sizeof(int32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_black_features = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(max_features_per_batch * sizeof(int32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_white_counts = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * sizeof(uint32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_black_counts = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * sizeof(uint32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_white_offsets = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * sizeof(uint32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_black_offsets = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * sizeof(uint32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+  auto async_accumulators = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * 2 * hidden_dim * sizeof(int32_t),
+                            MemoryMode::Shared, BufferUsage::Transient));
+
+  // Validate all buffer allocations
+  if (!*async_white_features || !(*async_white_features)->valid() ||
+      !*async_black_features || !(*async_black_features)->valid() ||
+      !*async_white_counts || !(*async_white_counts)->valid() ||
+      !*async_black_counts || !(*async_black_counts)->valid() ||
+      !*async_white_offsets || !(*async_white_offsets)->valid() ||
+      !*async_black_offsets || !(*async_black_offsets)->valid() ||
+      !*async_accumulators || !(*async_accumulators)->valid()) {
+    // Fallback to synchronous path if buffer allocation fails
+    cpu_evals_ += batch.count;
+    if (completion_handler)
+      completion_handler(false);
+    return false;
+  }
+
+  // Use the dedicated async buffer pointers for direct writes
   int32_t *white_features_ptr =
-      static_cast<int32_t *>(white_features_buffer_->data());
+      static_cast<int32_t *>((*async_white_features)->data());
   int32_t *black_features_ptr =
-      static_cast<int32_t *>(black_features_buffer_->data());
+      static_cast<int32_t *>((*async_black_features)->data());
   uint32_t *white_counts_ptr =
-      static_cast<uint32_t *>(white_counts_buffer_->data());
+      static_cast<uint32_t *>((*async_white_counts)->data());
   uint32_t *black_counts_ptr =
-      static_cast<uint32_t *>(black_counts_buffer_->data());
+      static_cast<uint32_t *>((*async_black_counts)->data());
   uint32_t *white_offsets_ptr =
-      static_cast<uint32_t *>(white_offsets_buffer_->data());
+      static_cast<uint32_t *>((*async_white_offsets)->data());
   uint32_t *black_offsets_ptr =
-      static_cast<uint32_t *>(black_offsets_buffer_->data());
+      static_cast<uint32_t *>((*async_black_offsets)->data());
 
   // Extract features directly into GPU buffers
   // Optimized: removed redundant bounds checks
@@ -1797,23 +1890,26 @@ bool GPUNNUEManager::evaluate_batch_async(
 
     for (int pt = PAWN; pt <= QUEEN; pt++) {
       const int pt_offset = (pt - 1) * 64;
-      
+
       // White pieces
       Bitboard bb_w = pos_data.pieces[0][pt];
       while (bb_w) {
         const int s = pop_lsb(bb_w);
         white_features_ptr[white_feature_idx++] = wksq * 640 + pt_offset + s;
-        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
+        black_features_ptr[black_feature_idx++] =
+            bksq_flip * 640 + 320 + pt_offset + (s ^ 56);
         white_count++;
         black_count++;
       }
-      
+
       // Black pieces
       Bitboard bb_b = pos_data.pieces[1][pt];
       while (bb_b) {
         const int s = pop_lsb(bb_b);
-        white_features_ptr[white_feature_idx++] = wksq * 640 + 320 + pt_offset + s;
-        black_features_ptr[black_feature_idx++] = bksq_flip * 640 + pt_offset + (s ^ 56);
+        white_features_ptr[white_feature_idx++] =
+            wksq * 640 + 320 + pt_offset + s;
+        black_features_ptr[black_feature_idx++] =
+            bksq_flip * 640 + pt_offset + (s ^ 56);
         white_count++;
         black_count++;
       }
@@ -1823,26 +1919,24 @@ bool GPUNNUEManager::evaluate_batch_async(
     black_counts_ptr[i] = static_cast<uint32_t>(black_count);
   }
 
-  std::memcpy(positions_buffer_->data(), batch.positions.data(),
-              batch_size * sizeof(GPUPositionData));
-
-  auto encoder = backend.create_encoder();
+  // Use parallel encoder for async work to avoid blocking main queue
+  auto encoder = backend.create_parallel_encoder();
 
   // Feature transform - always use dual kernel for both perspectives
-  const bool use_dual_kernel = feature_transform_dual_kernel_ &&
-                               feature_transform_dual_kernel_->valid();
+  const bool use_dual_kernel =
+      feature_transform_dual_kernel_ && feature_transform_dual_kernel_->valid();
 
   if (use_dual_kernel) {
     encoder->set_kernel(feature_transform_dual_kernel_.get());
     encoder->set_buffer(net.ft_weights.get(), 0);
     encoder->set_buffer(net.ft_biases.get(), 1);
-    encoder->set_buffer(white_features_buffer_.get(), 2);
-    encoder->set_buffer(black_features_buffer_.get(), 3);
-    encoder->set_buffer(white_counts_buffer_.get(), 4);
-    encoder->set_buffer(black_counts_buffer_.get(), 5);
-    encoder->set_buffer(white_offsets_buffer_.get(), 6);
-    encoder->set_buffer(black_offsets_buffer_.get(), 7);
-    encoder->set_buffer(accumulators_buffer_.get(), 8);
+    encoder->set_buffer(async_white_features->get(), 2);
+    encoder->set_buffer(async_black_features->get(), 3);
+    encoder->set_buffer(async_white_counts->get(), 4);
+    encoder->set_buffer(async_black_counts->get(), 5);
+    encoder->set_buffer(async_white_offsets->get(), 6);
+    encoder->set_buffer(async_black_offsets->get(), 7);
+    encoder->set_buffer(async_accumulators->get(), 8);
     encoder->set_value(static_cast<uint32_t>(hidden_dim), 9);
     encoder->set_value(static_cast<uint32_t>(batch_size), 10);
     encoder->dispatch_threads(hidden_dim, 2, batch_size);
@@ -1851,10 +1945,10 @@ bool GPUNNUEManager::evaluate_batch_async(
     encoder->set_kernel(feature_transform_kernel_.get());
     encoder->set_buffer(net.ft_weights.get(), 0);
     encoder->set_buffer(net.ft_biases.get(), 1);
-    encoder->set_buffer(white_features_buffer_.get(), 2);
-    encoder->set_buffer(white_counts_buffer_.get(), 3);
-    encoder->set_buffer(white_offsets_buffer_.get(), 4);
-    encoder->set_buffer(accumulators_buffer_.get(), 5);
+    encoder->set_buffer(async_white_features->get(), 2);
+    encoder->set_buffer(async_white_counts->get(), 3);
+    encoder->set_buffer(async_white_offsets->get(), 4);
+    encoder->set_buffer(async_accumulators->get(), 5);
     encoder->set_value(static_cast<uint32_t>(hidden_dim), 6);
     encoder->set_value(static_cast<uint32_t>(batch_size), 7);
     encoder->dispatch_threads(hidden_dim, batch_size);
@@ -1864,31 +1958,62 @@ bool GPUNNUEManager::evaluate_batch_async(
   const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
   const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
 
+  // Allocate a dedicated output buffer for this async call to avoid race
+  // conditions. The shared output_buffer_ cannot be used because the gpu_mutex_
+  // is released when this function returns, but the completion handler runs
+  // later. Another thread could acquire the mutex and overwrite output_buffer_
+  // before our completion handler executes.
+  auto async_output_buffer =
+      std::make_shared<std::unique_ptr<Buffer>>(backend.create_buffer(
+          batch_size * sizeof(int32_t), MemoryMode::Shared, BufferUsage::Transient));
+
+  if (!*async_output_buffer || !(*async_output_buffer)->valid()) {
+    // Fallback to synchronous path if buffer allocation fails
+    cpu_evals_ += batch.count;
+    if (completion_handler)
+      completion_handler(false);
+    return false;
+  }
+
   encoder->set_kernel(forward_fused_kernel_.get());
-  encoder->set_buffer(accumulators_buffer_.get(), 0);
+  encoder->set_buffer(async_accumulators->get(), 0);
   encoder->set_buffer(layer.fc0_weights.get(), 1);
   encoder->set_buffer(layer.fc0_biases.get(), 2);
   encoder->set_buffer(layer.fc1_weights.get(), 3);
   encoder->set_buffer(layer.fc1_biases.get(), 4);
   encoder->set_buffer(layer.fc2_weights.get(), 5);
   encoder->set_buffer(layer.fc2_biases.get(), 6);
-  encoder->set_buffer(output_buffer_.get(), 7);
+  encoder->set_buffer(async_output_buffer->get(), 7);
   encoder->set_value(static_cast<uint32_t>(hidden_dim), 8);
   encoder->set_value(static_cast<uint32_t>(batch_size), 9);
   encoder->dispatch_threadgroups(batch_size, 1, 1, GPU_FORWARD_THREADS, 1, 1);
 
   // Capture necessary data for completion handler
-  Buffer *output_buf = output_buffer_.get();
+  // Note: All async_* buffers are shared_ptrs that keep the buffers alive
+  // until the completion handler finishes executing
   GPUEvalBatch *batch_ptr = &batch;
   std::atomic<size_t> *gpu_evals_ptr = &gpu_evals_;
   std::atomic<size_t> *batch_count_ptr = &batch_count_;
 
   // Submit with async completion handler
-  backend.submit_async(encoder.get(), [=]() {
-    // Read results in completion handler
+  // The completion handler captures all async buffers by value (shared_ptr),
+  // ensuring the buffers remain valid until after GPU work completes.
+  // This fixes the race condition where multiple async calls could previously
+  // corrupt each other's input data when using shared class member buffers.
+  backend.submit_async(encoder.get(), [=,
+      // Capture all async buffers to extend their lifetime
+      async_white_features = async_white_features,
+      async_black_features = async_black_features,
+      async_white_counts = async_white_counts,
+      async_black_counts = async_black_counts,
+      async_white_offsets = async_white_offsets,
+      async_black_offsets = async_black_offsets,
+      async_accumulators = async_accumulators,
+      async_output_buffer = async_output_buffer]() {
+    // Read results from our dedicated buffer (safe - no other thread can access it)
     batch_ptr->positional_scores.resize(batch_size);
-    std::memcpy(batch_ptr->positional_scores.data(), output_buf->data(),
-                batch_size * sizeof(int32_t));
+    std::memcpy(batch_ptr->positional_scores.data(),
+                (*async_output_buffer)->data(), batch_size * sizeof(int32_t));
 
     (*gpu_evals_ptr) += batch_size;
     (*batch_count_ptr)++;
@@ -1896,6 +2021,7 @@ bool GPUNNUEManager::evaluate_batch_async(
     if (completion_handler) {
       completion_handler(true);
     }
+    // All async buffers are automatically freed when this lambda is destroyed
   });
 
   return true;
@@ -1903,10 +2029,30 @@ bool GPUNNUEManager::evaluate_batch_async(
 
 std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &pos,
                                                             bool use_big) {
-  // Single position evaluation is not efficient on GPU
-  // Fall back to CPU
+  // Create a batch with single position
+  GPUEvalBatch batch;
+  batch.add_position(pos);
+
+  // Use force_gpu=true to bypass the min_batch_for_gpu threshold check.
+  // The GPU overhead for N=1 is acceptable for MCTS which needs NNUE-quality
+  // evaluation, not just material counting.
+  // NOTE: We avoid modifying tuning_.min_batch_for_gpu here because that
+  // would cause a race condition when multiple MCTS threads call
+  // evaluate_single concurrently - one thread could save/restore a corrupted
+  // value.
+  bool success = evaluate_batch(batch, use_big, /*force_gpu=*/true);
+
+  if (success && !batch.positional_scores.empty()) {
+    // Return actual NNUE evaluation from GPU
+    int32_t psqt = batch.psqt_scores.empty() ? 0 : batch.psqt_scores[0];
+    int32_t positional = batch.positional_scores[0];
+    return {psqt, positional};
+  }
+
+  // GPU evaluation failed - fall back to simple eval as last resort
+  // This should rarely happen if GPU is properly initialized
   cpu_evals_++;
-  return {0, 0};
+  return {0, Eval::simple_eval(pos)};
 }
 
 double GPUNNUEManager::avg_batch_time_ms() const {
@@ -1981,6 +2127,7 @@ size_t GPUNetworkData::memory_usage() const { return 0; }
 void GPUEvalBatch::clear() { count = 0; }
 void GPUEvalBatch::reserve(int) {}
 void GPUEvalBatch::add_position(const Position &) {}
+void GPUEvalBatch::add_position_data(const GPUPositionData &) {}
 
 GPUNNUEManager::GPUNNUEManager() = default;
 GPUNNUEManager::~GPUNNUEManager() = default;
@@ -1993,7 +2140,16 @@ bool GPUNNUEManager::allocate_network_buffers(GPUNetworkData &, int, bool) {
 bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &) {
   return false;
 }
-bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &, bool) { return false; }
+bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &, bool, bool) {
+  return false;
+}
+bool GPUNNUEManager::evaluate_batch_async(
+    GPUEvalBatch &, std::function<void(bool success)> completion_handler,
+    bool) {
+  if (completion_handler)
+    completion_handler(false);
+  return false;
+}
 std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &,
                                                             bool) {
   return {0, 0};

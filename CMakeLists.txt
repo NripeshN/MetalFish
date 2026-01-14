@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
-project(metalfish CXX OBJCXX)
+
+# Only enable Objective-C++ on macOS (needed for Metal)
+if(APPLE)
+  project(metalfish CXX OBJCXX)
+else()
+  project(metalfish CXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,6 +19,8 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   set(CMAKE_CXX_FLAGS
       "${CMAKE_CXX_FLAGS} -DUSE_NEON=8 -DUSE_NEON_DOTPROD -march=armv8.2-a+dotprod"
   )
+  # Disable x86-specific PEXT instruction for ARM
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_PEXT")
 endif()
 
 # GPU acceleration options
@@ -131,8 +139,25 @@ set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
 # GPU source files (backend-agnostic interface)
 set(GPU_SOURCES
-    src/gpu/nnue_eval.cpp src/gpu/batch_ops.cpp src/gpu/gpu_nnue.cpp
-    src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_accumulator.cpp)
+    src/gpu/nnue_eval.cpp
+    src/gpu/batch_ops.cpp
+    src/gpu/gpu_nnue.cpp
+    src/gpu/gpu_nnue_integration.cpp
+    src/gpu/gpu_accumulator.cpp
+    src/gpu/gpu_mcts_backend.cpp
+    src/gpu/persistent_pipeline.cpp)
+
+# MCTS source files (hybrid search - old implementation)
+set(MCTS_SOURCES
+    src/mcts/stockfish_adapter.cpp
+    src/mcts/hybrid_search.cpp
+    src/mcts/position_classifier.cpp
+    src/mcts/enhanced_hybrid_search.cpp
+    src/mcts/mcts_batch_evaluator.cpp
+    src/mcts/mcts_tt.cpp
+    src/mcts/parallel_search.cpp
+    src/mcts/ab_integration.cpp
+    src/mcts/thread_safe_mcts.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
@@ -183,7 +208,8 @@ set(SOURCES
     ${EVAL_SOURCES}
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
-    ${GPU_SOURCES})
+    ${GPU_SOURCES}
+    ${MCTS_SOURCES})
 
 # Create executable
 add_executable(metalfish ${SOURCES})
@@ -247,6 +273,7 @@ if(BUILD_TESTS)
       tests/test_position.cpp
       tests/test_movegen.cpp
       tests/test_search.cpp
+      tests/test_mcts.cpp
       tests/test_metal.cpp
       tests/test_gpu_nnue.cpp)
 
@@ -258,7 +285,8 @@ if(BUILD_TESTS)
     ${EVAL_SOURCES}
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
-    ${GPU_SOURCES})
+    ${GPU_SOURCES}
+    ${MCTS_SOURCES})
   target_link_libraries(metalfish_tests Threads::Threads)
 
   if(APPLE

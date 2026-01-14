@@ -29,9 +29,15 @@
 #include "eval/score.h"
 #include "gpu/backend.h"
 #include "gpu/gpu_accumulator.h"
+#include "gpu/gpu_mcts_backend.h"
 #include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "gpu/nnue_eval.h"
+#include "mcts/enhanced_hybrid_search.h"
+#include "mcts/hybrid_search.h"
+#include "mcts/position_classifier.h"
+#include "mcts/stockfish_adapter.h"
+#include "mcts/thread_safe_mcts.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
 #include "uci/engine.h"
@@ -146,6 +152,14 @@ void UCIEngine::loop() {
       gpu_info();
     else if (token == "gpubench")
       gpu_benchmark();
+    else if (token == "mcts")
+      mcts_go(is);
+    else if (token == "mctsmt")
+      mcts_mt_go(is);
+    else if (token == "mctsbench")
+      mcts_batch_benchmark(is);
+    else if (token == "hybridbench")
+      hybrid_benchmark();
     else if (token == "compiler")
       sync_cout << compiler_info() << sync_endl;
     else if (token == "export_net") {
@@ -748,7 +762,8 @@ void UCIEngine::gpu_benchmark() {
       "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
       "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
       "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-      "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+      "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 "
+      "10",
       "r2q1rk1/ppp2ppp/2n1bn2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 0 9",
       "r1bq1rk1/pp2bppp/2n1pn2/2pp4/3P4/2NBPN2/PPP2PPP/R1BQ1RK1 w - - 0 8",
       // Tactical positions
@@ -788,7 +803,8 @@ void UCIEngine::gpu_benchmark() {
     positions[i].set(fens[i % NUM_FENS], false, &states_vec.back()->back());
   }
 
-  std::cout << "Positions created: 2048 (from " << NUM_FENS << " unique FENs)\n\n"
+  std::cout << "Positions created: 2048 (from " << NUM_FENS
+            << " unique FENs)\n\n"
             << std::flush;
 
   manager.set_min_batch_size(1);
@@ -831,8 +847,9 @@ void UCIEngine::gpu_benchmark() {
   std::cout << "Note: CPU NNUE benchmark requires separate network loading.\n";
   std::cout << "For scope-matched comparison, use 'bench' command NPS.\n";
   std::cout << "GPU NNUE latency should be compared against CPU NNUE latency\n";
-  std::cout << "from engine search, which is approximately 1-5 µs per position.\n\n"
-            << std::flush;
+  std::cout
+      << "from engine search, which is approximately 1-5 µs per position.\n\n"
+      << std::flush;
 
   // We store placeholder scores for correctness comparison
   // The GPU scores will be compared for consistency only
@@ -843,7 +860,8 @@ void UCIEngine::gpu_benchmark() {
     }
   }
   std::cout << "Valid positions (no check): " << valid_pos_indices.size()
-            << " / 2048\n\n" << std::flush;
+            << " / 2048\n\n"
+            << std::flush;
 
   // ========================================================================
   // BENCHMARK 2: CPU Feature Extraction
@@ -1141,7 +1159,7 @@ void UCIEngine::gpu_benchmark() {
     std::cout << "ERROR: No valid positions for comparison\n\n";
   } else {
     const int CHECK_SIZE = std::min(1000, (int)valid_pos_indices.size());
-    
+
     // First evaluation
     GPU::GPUEvalBatch batch1;
     batch1.reserve(CHECK_SIZE);
@@ -1167,22 +1185,25 @@ void UCIEngine::gpu_benchmark() {
     for (int i = 0; i < CHECK_SIZE; i++) {
       int score1 = batch1.positional_scores[i];
       int score2 = batch2.positional_scores[i];
-      
-      if (score1 != 0) non_zero++;
-      if (score1 == score2) consistent++;
-      
+
+      if (score1 != 0)
+        non_zero++;
+      if (score1 == score2)
+        consistent++;
+
       sum_abs_score += std::abs(score1);
       min_score = std::min(min_score, score1);
       max_score = std::max(max_score, score1);
     }
 
     std::cout << "Positions checked: " << CHECK_SIZE << "\n";
-    std::cout << "Non-zero GPU scores: " << non_zero << " ("
-              << std::fixed << std::setprecision(1)
-              << (100.0 * non_zero / CHECK_SIZE) << "%)\n";
+    std::cout << "Non-zero GPU scores: " << non_zero << " (" << std::fixed
+              << std::setprecision(1) << (100.0 * non_zero / CHECK_SIZE)
+              << "%)\n";
     std::cout << "Consistent across runs: " << consistent << " ("
               << (100.0 * consistent / CHECK_SIZE) << "%)\n";
-    std::cout << "Mean |GPU score|: " << (double(sum_abs_score) / CHECK_SIZE) << "\n";
+    std::cout << "Mean |GPU score|: " << (double(sum_abs_score) / CHECK_SIZE)
+              << "\n";
     std::cout << "Score range: [" << min_score << ", " << max_score << "]\n";
 
     std::cout << "\nSample scores (first 10 positions):\n";
@@ -1190,10 +1211,9 @@ void UCIEngine::gpu_benchmark() {
     for (int i = 0; i < std::min(10, CHECK_SIZE); i++) {
       int score1 = batch1.positional_scores[i];
       int score2 = batch2.positional_scores[i];
-      std::cout << "  " << std::setw(3) << i 
-                << "  " << std::setw(8) << score1
-                << "  " << std::setw(8) << score2
-                << "  " << (score1 == score2 ? "Yes" : "NO") << "\n";
+      std::cout << "  " << std::setw(3) << i << "  " << std::setw(8) << score1
+                << "  " << std::setw(8) << score2 << "  "
+                << (score1 == score2 ? "Yes" : "NO") << "\n";
     }
     std::cout << "\n" << std::flush;
   }
@@ -1241,6 +1261,560 @@ void UCIEngine::gpu_benchmark() {
   std::cout << "\n" << std::flush;
 
   std::cout << "\nBenchmark complete.\n" << std::flush;
+}
+
+// ============================================================================
+// MCTS Hybrid Search Command
+// ============================================================================
+void UCIEngine::mcts_go(std::istringstream &is) {
+  sync_cout << "info string Starting Enhanced Hybrid Search..." << sync_endl;
+
+  // Parse search limits
+  Search::LimitsType limits = parse_limits(is);
+
+  // Get GPU NNUE manager
+  GPU::GPUNNUEManager *gpu_manager = nullptr;
+  if (GPU::gpu_nnue_manager_available()) {
+    gpu_manager = &GPU::gpu_nnue_manager();
+  }
+
+  if (!gpu_manager) {
+    sync_cout << "info string ERROR: GPU NNUE not available" << sync_endl;
+    return;
+  }
+
+  // Configure enhanced hybrid search
+  MCTS::EnhancedHybridConfig config;
+  config.mcts_config.min_batch_size = 8;
+  config.mcts_config.max_batch_size = 256;
+  config.mcts_config.cpuct = 2.5f;
+  config.mcts_config.add_dirichlet_noise = true;
+  config.mcts_config.num_search_threads =
+      1; // Single-threaded for now (multi-thread needs more debugging)
+  config.enable_ab_verify = true;
+  config.ab_verify_depth = 6;
+  config.ab_override_threshold = 0.5f;
+  config.use_position_classifier = true;
+  config.dynamic_strategy = true;
+
+  // Create enhanced hybrid search
+  auto search = MCTS::create_enhanced_hybrid_search(gpu_manager, config);
+
+  if (!search) {
+    sync_cout << "info string ERROR: Failed to create hybrid search"
+              << sync_endl;
+    return;
+  }
+
+  sync_cout << "info string Enhanced hybrid search initialized" << sync_endl;
+
+  // Get current position from engine
+  Position pos;
+  StateInfo st;
+  pos.set(engine.fen(), false, &st);
+
+  // Callbacks for UCI output
+  auto best_move_cb = [](Move best, Move ponder) {
+    std::string best_str = UCIEngine::move(best, false);
+    std::string ponder_str = ponder != Move::none()
+                                 ? " ponder " + UCIEngine::move(ponder, false)
+                                 : "";
+    sync_cout << "bestmove " << best_str << ponder_str << sync_endl;
+  };
+
+  auto info_cb = [](const std::string &info) {
+    sync_cout << info << sync_endl;
+  };
+
+  // Start search
+  search->start_search(pos, limits, best_move_cb, info_cb);
+
+  // Wait for completion
+  search->wait();
+
+  // Print final statistics
+  const auto &stats = search->stats();
+  sync_cout << "info string Final stats: MCTS=" << stats.mcts_nodes
+            << " AB=" << stats.ab_nodes
+            << " verifications=" << stats.ab_verifications
+            << " overrides=" << stats.ab_overrides
+            << " GPU batches=" << stats.gpu_batches << sync_endl;
+  sync_cout << "info string TT usage: " << std::fixed << std::setprecision(1)
+            << MCTS::mcts_tt().usage_percent() << "%" << sync_endl;
+  sync_cout << "info string Time: MCTS=" << std::fixed << std::setprecision(1)
+            << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms
+            << "ms Total=" << stats.total_time_ms << "ms" << sync_endl;
+}
+
+// ============================================================================
+// Hybrid Search Validation Benchmark
+// ============================================================================
+void UCIEngine::hybrid_benchmark() {
+  std::cout << "\n";
+  std::cout << "╔══════════════════════════════════════════════════════════╗\n";
+  std::cout << "║     MetalFish Hybrid Search Validation Suite             ║\n";
+  std::cout << "╚══════════════════════════════════════════════════════════╝\n";
+
+  // Get GPU NNUE manager
+  GPU::GPUNNUEManager *gpu_manager = nullptr;
+  if (GPU::gpu_nnue_manager_available()) {
+    gpu_manager = &GPU::gpu_nnue_manager();
+  }
+
+  if (!gpu_manager || !gpu_manager->is_ready()) {
+    std::cout << "ERROR: GPU NNUE not available\n";
+    return;
+  }
+
+  // Official Stockfish benchmark positions (from
+  // reference/stockfish/src/benchmark.cpp)
+  static const char *TEST_FENS[] = {
+      // Opening and middlegame positions
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 10",
+      "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 11",
+      "4rrk1/pp1n3p/3q2pQ/2p1pb2/2PP4/2P3N1/P2B2PP/4RRK1 b - - 7 19",
+      "r3r1k1/2p2ppp/p1p1bn2/8/1q2P3/2NPQN2/PPP3PP/R4RK1 b - - 2 15",
+      "r1bbk1nr/pp3p1p/2n5/1N4p1/2Np1B2/8/PPP2PPP/2KR1B1R w kq - 0 13",
+      "r1bq1rk1/ppp1nppp/4n3/3p3Q/3P4/1BP1B3/PP1N2PP/R4RK1 w - - 1 16",
+      "4r1k1/r1q2ppp/ppp2n2/4P3/5Rb1/1N1BQ3/PPP3PP/R5K1 w - - 1 17",
+      // Endgame positions
+      "6k1/6p1/6Pp/ppp5/3pn2P/1P3K2/1PP2P2/3N4 b - - 0 1",
+      "3b4/5kp1/1p1p1p1p/pP1PpP1P/P1P1P3/3KN3/8/8 w - - 0 1",
+      "8/6pk/1p6/8/PP3p1p/5P2/4KP1q/3Q4 w - - 0 1",
+      "7k/3p2pp/4q3/8/4Q3/5Kp1/P6b/8 w - - 0 1",
+      // Mate positions
+      "8/8/8/8/5kp1/P7/8/1K1N4 w - - 0 1",
+      "8/8/8/5N2/8/p7/8/2NK3k w - - 0 1",
+      "8/8/1P6/5pr1/8/4R3/7k/2K5 w - - 0 1",
+      "8/2p4P/8/kr6/6R1/8/8/1K6 w - - 0 1",
+  };
+  const int NUM_TEST_FENS = 16;
+
+  // ========================================================================
+  // 1. Classifier Distribution Analysis
+  // ========================================================================
+  std::cout << "\n=== 1. Classifier Distribution Analysis ===\n";
+
+  PositionClassifier classifier;
+  int class_counts[5] = {0, 0, 0, 0, 0};
+  int positions_tested = 0;
+
+  for (int i = 0; i < NUM_TEST_FENS; i++) {
+    Position pos;
+    StateInfo st;
+    pos.set(TEST_FENS[i], false, &st);
+
+    // Skip positions in check (can cause analysis issues)
+    if (pos.checkers()) {
+      continue;
+    }
+
+    auto type = classifier.quick_classify(pos);
+    class_counts[static_cast<int>(type)]++;
+    positions_tested++;
+  }
+
+  const char *type_names[] = {"HIGHLY_TACTICAL", "TACTICAL", "BALANCED",
+                              "STRATEGIC", "HIGHLY_STRATEGIC"};
+  for (int i = 0; i < 5; i++) {
+    double pct =
+        positions_tested > 0 ? 100.0 * class_counts[i] / positions_tested : 0;
+    std::cout << "  " << std::setw(18) << type_names[i] << ": " << std::setw(3)
+              << class_counts[i] << " (" << std::fixed << std::setprecision(1)
+              << pct << "%)\n";
+  }
+  std::cout << "  Positions tested: " << positions_tested << "/"
+            << NUM_TEST_FENS << "\n";
+
+  // ========================================================================
+  // 2. MCTS Profiling
+  // ========================================================================
+  std::cout << "\n=== 2. MCTS Profiling (3 second search) ===\n";
+
+  MCTS::HybridSearchConfig mcts_config;
+  mcts_config.num_search_threads = 1;
+  auto mcts_search = MCTS::create_hybrid_search(gpu_manager, mcts_config);
+
+  MCTS::MCTSPositionHistory history;
+  history.reset(StartFEN);
+
+  Search::LimitsType limits;
+  limits.movetime = 3000;
+
+  MCTS::MCTSMove best_move;
+  auto start = std::chrono::steady_clock::now();
+
+  mcts_search->start_search(
+      history, limits,
+      [&](MCTS::MCTSMove move, MCTS::MCTSMove ponder) { best_move = move; },
+      nullptr);
+  mcts_search->wait();
+
+  auto end = std::chrono::steady_clock::now();
+  double elapsed_ms =
+      std::chrono::duration<double, std::milli>(end - start).count();
+
+  const auto &mcts_stats = mcts_search->stats();
+  double sel_pct, exp_pct, eval_pct, bp_pct;
+  mcts_stats.get_profile_breakdown(sel_pct, exp_pct, eval_pct, bp_pct);
+
+  uint64_t total_nodes = mcts_stats.mcts_nodes.load();
+  double nps = elapsed_ms > 0 ? total_nodes * 1000.0 / elapsed_ms : 0;
+  std::cout << "  Selection:    " << std::fixed << std::setprecision(1)
+            << sel_pct << "%\n";
+  std::cout << "  Expansion:    " << exp_pct << "%\n";
+  std::cout << "  Evaluation:   " << eval_pct << "%\n";
+  std::cout << "  Backprop:     " << bp_pct << "%\n";
+  std::cout << "  Total nodes:  " << total_nodes << "\n";
+  std::cout << "  NPS:          " << std::fixed << std::setprecision(0) << nps
+            << "\n";
+  std::cout << "  Cache hits:   " << mcts_stats.cache_hits.load() << "\n";
+  std::cout << "  Cache misses: " << mcts_stats.cache_misses.load() << "\n";
+  std::cout.flush();
+
+  // ========================================================================
+  // 3. Hybrid vs Pure MCTS comparison (quick test)
+  // ========================================================================
+  std::cout << "\n=== 3. Move Comparison: Hybrid vs Pure MCTS ===\n";
+  std::cout << "  (Skipped - see 'mcts' command for interactive testing)\n";
+  std::cout.flush();
+
+  // ========================================================================
+  // 4. Tactical Test Suite - Verifier Validation
+  // ========================================================================
+  std::cout << "\n=== 4. Tactical Test Suite (AB Verifier Validation) ===\n";
+  std::cout << "  (Skipped - see 'mcts' command for interactive testing)\n";
+  std::cout.flush();
+
+  // ========================================================================
+  // 5. Ablation Study
+  // ========================================================================
+  std::cout << "\n=== 5. Ablation Study ===\n";
+  std::cout << "  (Skipped - see paper for detailed ablation results)\n";
+  std::cout.flush();
+
+  // ========================================================================
+  // Summary
+  // ========================================================================
+  std::cout << "\n=== Summary ===\n";
+  std::cout << "  Classifier tested: " << NUM_TEST_FENS << " positions\n";
+  std::cout << "  MCTS NPS: " << std::fixed << std::setprecision(0) << nps
+            << "\n";
+  std::cout << "  Evaluation dominates: " << std::fixed << std::setprecision(1)
+            << eval_pct << "% of MCTS time\n";
+
+  std::cout << "\nNote: For full Elo testing, use external tools like "
+               "cutechess-cli\n";
+  std::cout << "with 'mcts' command for hybrid and 'go' for pure AB.\n";
+
+  std::cout << "\nBenchmark complete.\n";
+}
+
+// ============================================================================
+// Multi-Threaded MCTS Search Command
+// ============================================================================
+void UCIEngine::mcts_mt_go(std::istringstream &is) {
+  // Parse threads option
+  std::string token;
+  int num_threads = 4; // Default to 4 threads
+
+  // Parse additional options (threads=N)
+  while (is >> token) {
+    if (token.find("threads=") == 0) {
+      num_threads = std::stoi(token.substr(8));
+    }
+  }
+
+  // Handle threads=-1 (use all available threads)
+  if (num_threads <= 0) {
+    num_threads = static_cast<int>(std::thread::hardware_concurrency());
+    if (num_threads <= 0) {
+      num_threads = 4; // Fallback if hardware_concurrency() returns 0
+    }
+  }
+
+  // Reset stream for limit parsing
+  is.clear();
+  is.seekg(0);
+  Search::LimitsType limits = parse_limits(is);
+
+  sync_cout << "info string Starting Multi-Threaded MCTS Search with "
+            << num_threads << " threads..." << sync_endl;
+
+  // Get GPU NNUE manager
+  GPU::GPUNNUEManager *gpu_manager = nullptr;
+  if (GPU::gpu_nnue_manager_available()) {
+    gpu_manager = &GPU::gpu_nnue_manager();
+  }
+
+  if (!gpu_manager) {
+    sync_cout << "info string ERROR: GPU NNUE not available" << sync_endl;
+    return;
+  }
+
+  // Configure multi-threaded MCTS
+  MCTS::ThreadSafeMCTSConfig config;
+  config.num_threads = num_threads;
+  config.cpuct = 2.5f;
+  config.fpu_value = -1.0f;
+  config.policy_softmax_temp = 1.0f;
+  config.add_dirichlet_noise = true;
+  config.dirichlet_alpha = 0.3f;
+  config.dirichlet_epsilon = 0.25f;
+  config.virtual_loss = 3;
+  config.min_batch_size = 8;
+  config.max_batch_size = 256;
+
+  // Create thread-safe MCTS
+  auto mcts = MCTS::create_thread_safe_mcts(gpu_manager, config);
+
+  if (!mcts) {
+    sync_cout << "info string ERROR: Failed to create multi-threaded MCTS"
+              << sync_endl;
+    return;
+  }
+
+  sync_cout << "info string Multi-threaded MCTS initialized with "
+            << num_threads << " threads" << sync_endl;
+
+  // Get current position from engine
+  std::string fen = engine.fen();
+
+  // Callbacks for UCI output
+  auto best_move_cb = [](Move best, Move ponder) {
+    std::string best_str = UCIEngine::move(best, false);
+    std::string ponder_str = ponder != Move::none()
+                                 ? " ponder " + UCIEngine::move(ponder, false)
+                                 : "";
+    sync_cout << "bestmove " << best_str << ponder_str << sync_endl;
+  };
+
+  auto info_cb = [](const std::string &info) {
+    sync_cout << info << sync_endl;
+  };
+
+  // Start search
+  auto start_time = std::chrono::steady_clock::now();
+  mcts->start_search(fen, limits, best_move_cb, info_cb);
+
+  // Wait for completion
+  mcts->wait();
+
+  // Print final statistics
+  auto end_time = std::chrono::steady_clock::now();
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        end_time - start_time)
+                        .count();
+
+  const auto &stats = mcts->stats();
+  uint64_t nodes = stats.total_nodes.load();
+  uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+
+  sync_cout << "info string Final stats:" << sync_endl;
+  sync_cout << "info string   Nodes: " << nodes << sync_endl;
+  sync_cout << "info string   NPS: " << nps << sync_endl;
+  sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
+  sync_cout << "info string   Threads: " << num_threads << sync_endl;
+  sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
+            << sync_endl;
+  sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
+            << " misses: " << stats.cache_misses.load() << sync_endl;
+
+  // Profiling breakdown
+  uint64_t sel_us = stats.selection_time_us.load();
+  uint64_t exp_us = stats.expansion_time_us.load();
+  uint64_t eval_us = stats.evaluation_time_us.load();
+  uint64_t bp_us = stats.backprop_time_us.load();
+  uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
+
+  if (total_us > 0) {
+    sync_cout << "info string   Selection: " << std::fixed
+              << std::setprecision(1) << (100.0 * sel_us / total_us) << "%"
+              << sync_endl;
+    sync_cout << "info string   Expansion: " << std::fixed
+              << std::setprecision(1) << (100.0 * exp_us / total_us) << "%"
+              << sync_endl;
+    sync_cout << "info string   Evaluation: " << std::fixed
+              << std::setprecision(1) << (100.0 * eval_us / total_us) << "%"
+              << sync_endl;
+    sync_cout << "info string   Backprop: " << std::fixed
+              << std::setprecision(1) << (100.0 * bp_us / total_us) << "%"
+              << sync_endl;
+  }
+
+  // Batching statistics
+  uint64_t batch_count = stats.batch_count.load();
+  if (batch_count > 0) {
+    sync_cout << "info string   Avg batch size: " << std::fixed
+              << std::setprecision(1) << stats.avg_batch_size() << sync_endl;
+    sync_cout << "info string   Batch wait time: "
+              << (stats.batch_wait_time_us.load() / 1000) << "ms" << sync_endl;
+  }
+}
+
+// ============================================================================
+// MCTS Batch vs Direct Benchmark
+// ============================================================================
+void UCIEngine::mcts_batch_benchmark(std::istringstream &is) {
+  sync_cout << "info string MCTS Batched vs Direct Evaluation Benchmark"
+            << sync_endl;
+  sync_cout << "info string ==========================================="
+            << sync_endl;
+
+  // Get GPU NNUE manager
+  GPU::GPUNNUEManager *gpu_manager = nullptr;
+  if (GPU::gpu_nnue_manager_available()) {
+    gpu_manager = &GPU::gpu_nnue_manager();
+  }
+
+  if (!gpu_manager) {
+    sync_cout << "info string ERROR: GPU NNUE not available" << sync_endl;
+    return;
+  }
+
+  // Parse options
+  std::string token;
+  int num_threads = 4;
+  int duration_ms = 5000;
+
+  while (is >> token) {
+    if (token.find("threads=") == 0) {
+      num_threads = std::stoi(token.substr(8));
+    } else if (token.find("time=") == 0) {
+      duration_ms = std::stoi(token.substr(5));
+    }
+  }
+
+  // Handle threads=-1 (use all available threads)
+  if (num_threads <= 0) {
+    num_threads = static_cast<int>(std::thread::hardware_concurrency());
+    if (num_threads <= 0) {
+      num_threads = 4;
+    }
+  }
+
+  std::string fen = engine.fen();
+  Search::LimitsType limits;
+  limits.movetime = duration_ms;
+
+  sync_cout << "info string Position: " << fen << sync_endl;
+  sync_cout << "info string Threads: " << num_threads << sync_endl;
+  sync_cout << "info string Duration: " << duration_ms << "ms per test"
+            << sync_endl;
+  sync_cout << "" << sync_endl;
+
+  // ============================================
+  // Test 1: Direct evaluation (old approach)
+  // ============================================
+  sync_cout << "info string --- Test 1: Direct Evaluation (mutex per eval) ---"
+            << sync_endl;
+
+  {
+    MCTS::ThreadSafeMCTSConfig config;
+    config.num_threads = num_threads;
+    config.use_batched_eval = false; // Disable batching
+    config.cpuct = 2.5f;
+    config.add_dirichlet_noise = true;
+    config.virtual_loss = 3;
+
+    auto mcts = MCTS::create_thread_safe_mcts(gpu_manager, config);
+
+    auto start = std::chrono::steady_clock::now();
+    mcts->start_search(fen, limits, nullptr, nullptr);
+    mcts->wait();
+    auto end = std::chrono::steady_clock::now();
+
+    auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+            .count();
+    const auto &stats = mcts->stats();
+    uint64_t nodes = stats.total_nodes.load();
+    uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+
+    sync_cout << "info string   Nodes: " << nodes << sync_endl;
+    sync_cout << "info string   NPS: " << nps << sync_endl;
+    sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
+              << sync_endl;
+    sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
+              << " misses: " << stats.cache_misses.load() << sync_endl;
+
+    uint64_t sel_us = stats.selection_time_us.load();
+    uint64_t exp_us = stats.expansion_time_us.load();
+    uint64_t eval_us = stats.evaluation_time_us.load();
+    uint64_t bp_us = stats.backprop_time_us.load();
+    uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
+
+    if (total_us > 0) {
+      sync_cout << "info string   Evaluation time: " << std::fixed
+                << std::setprecision(1) << (100.0 * eval_us / total_us)
+                << "% of iteration" << sync_endl;
+    }
+  }
+
+  sync_cout << "" << sync_endl;
+
+  // ============================================
+  // Test 2: Batched evaluation (new approach)
+  // ============================================
+  sync_cout
+      << "info string --- Test 2: Batched Evaluation (dedicated thread) ---"
+      << sync_endl;
+
+  {
+    MCTS::ThreadSafeMCTSConfig config;
+    config.num_threads = num_threads;
+    config.use_batched_eval = true; // Enable batching
+    config.min_batch_size = 8;
+    config.max_batch_size = 256;
+    config.batch_timeout_us = 500;
+    config.cpuct = 2.5f;
+    config.add_dirichlet_noise = true;
+    config.virtual_loss = 3;
+
+    auto mcts = MCTS::create_thread_safe_mcts(gpu_manager, config);
+
+    auto start = std::chrono::steady_clock::now();
+    mcts->start_search(fen, limits, nullptr, nullptr);
+    mcts->wait();
+    auto end = std::chrono::steady_clock::now();
+
+    auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+            .count();
+    const auto &stats = mcts->stats();
+    uint64_t nodes = stats.total_nodes.load();
+    uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+
+    sync_cout << "info string   Nodes: " << nodes << sync_endl;
+    sync_cout << "info string   NPS: " << nps << sync_endl;
+    sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
+              << sync_endl;
+    sync_cout << "info string   NN batches: " << stats.nn_batches.load()
+              << sync_endl;
+    sync_cout << "info string   Avg batch size: " << std::fixed
+              << std::setprecision(1) << stats.avg_batch_size() << sync_endl;
+    sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
+              << " misses: " << stats.cache_misses.load() << sync_endl;
+    sync_cout << "info string   Batch wait time: "
+              << (stats.batch_wait_time_us.load() / 1000) << "ms total"
+              << sync_endl;
+
+    uint64_t sel_us = stats.selection_time_us.load();
+    uint64_t exp_us = stats.expansion_time_us.load();
+    uint64_t eval_us = stats.evaluation_time_us.load();
+    uint64_t bp_us = stats.backprop_time_us.load();
+    uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
+
+    if (total_us > 0) {
+      sync_cout << "info string   Evaluation time: " << std::fixed
+                << std::setprecision(1) << (100.0 * eval_us / total_us)
+                << "% of iteration" << sync_endl;
+    }
+  }
+
+  sync_cout << "" << sync_endl;
+  sync_cout << "info string Benchmark complete!" << sync_endl;
 }
 
 } // namespace MetalFish
