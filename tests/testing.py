@@ -299,10 +299,10 @@ def test_perft():
             nodes = int(result_line.split(":")[1].strip())
 
             if nodes == expected:
-                print(f"{GREEN_COLOR}{nodes} ✓{RESET_COLOR}")
+                print(f"{GREEN_COLOR}{nodes} OK{RESET_COLOR}")
                 passed += 1
             else:
-                print(f"{RED_COLOR}{nodes} ✗ (expected {expected}){RESET_COLOR}")
+                print(f"{RED_COLOR}{nodes} FAIL (expected {expected}){RESET_COLOR}")
                 failed += 1
         except Exception as e:
             print(f"{RED_COLOR}ERROR: {e}{RESET_COLOR}")

@@ -256,6 +256,10 @@ std::vector<MCTS::MCTSEvaluation> GPUMCTSBackend::evaluate_batch(
 
 void GPUMCTSBackend::set_wdl_rescale(float win_rate, float draw_rate) {
   wdl_a_ = win_rate;
+  // Clamp draw_rate to [0, 0.99] to prevent division by zero or near-zero
+  // in score_to_wdl. A draw_rate of 1.0 would make wdl_b_ = 0, and values
+  // close to 1.0 would make the logistic function infinitely sensitive.
+  draw_rate = std::clamp(draw_rate, 0.0f, 0.99f);
   // Adjust scaling based on draw rate
   wdl_b_ = 200.0f * (1.0f - draw_rate);
 }

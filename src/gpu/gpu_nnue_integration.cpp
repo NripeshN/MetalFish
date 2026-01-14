@@ -19,6 +19,7 @@
 #include "backend.h"
 #include "core/bitboard.h"
 #include "core/position.h"
+#include "eval/evaluate.h"
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_architecture.h"
 #include "eval/nnue/nnue_feature_transformer.h"
@@ -26,6 +27,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <mutex>
 #include <iostream>
 #include <sstream>
 
@@ -1562,6 +1564,9 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
     return false;
   }
 
+  // Lock for thread-safe GPU access
+  std::lock_guard<std::mutex> lock(gpu_mutex_);
+
   auto start = std::chrono::high_resolution_clock::now();
 
   auto &backend = gpu();
@@ -1929,10 +1934,17 @@ bool GPUNNUEManager::evaluate_batch_async(
 
 std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &pos,
                                                             bool use_big) {
-  // Single position evaluation is not efficient on GPU
-  // Fall back to CPU
+  // Lock for thread-safe GPU access
+  std::lock_guard<std::mutex> lock(gpu_mutex_);
+
+  // Create a batch with single position
+  GPUEvalBatch batch;
+  batch.add_position(pos);
+
+  // For single position, always use CPU since GPU has dispatch overhead
+  // This is more efficient than GPU for N=1
   cpu_evals_++;
-  return {0, 0};
+  return {0, Eval::simple_eval(pos)};
 }
 
 double GPUNNUEManager::avg_batch_time_ms() const {

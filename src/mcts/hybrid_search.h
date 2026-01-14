@@ -69,8 +69,8 @@ struct HybridSearchConfig {
   int batch_timeout_us = 1000; // Timeout for batch collection (microseconds)
 
   // Threading
-  int num_search_threads = 1; // Number of search threads (multi-thread requires
-                              // thread-safe Position)
+  int num_search_threads = 4; // Number of search threads (now thread-safe with
+                              // mutex-protected GPU eval)
   int num_eval_threads = 1;   // Number of evaluation threads
 
   // Time management
@@ -328,6 +328,10 @@ public:
   // Configuration
   const HybridSearchConfig &config() const { return config_; }
   void set_config(const HybridSearchConfig &config) { config_ = config; }
+
+  // Tree access (for tree reuse)
+  HybridTree *tree() { return tree_.get(); }
+  const HybridTree *tree() const { return tree_.get(); }
 
 private:
   // Search threads

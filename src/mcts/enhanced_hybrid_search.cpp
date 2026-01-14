@@ -584,11 +584,13 @@ void EnhancedHybridSearch::apply_move(Move move) {
   if (!mcts_search_)
     return;
 
-  // Apply move to tree for reuse in next search
-
-  // Reset for next search
+  // Stop any ongoing search first
   stop();
   wait();
+
+  // Apply move to tree for reuse in next search
+  MCTSMove mcts_move = MCTSMove::FromStockfish(move);
+  mcts_search_->tree()->apply_move(mcts_move);
 }
 
 void EnhancedHybridSearch::new_game() {

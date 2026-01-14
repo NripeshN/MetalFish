@@ -251,6 +251,9 @@ private:
   std::atomic<size_t> batch_count_{0};
   double total_time_ms_ = 0;
 
+  // Thread safety for GPU operations
+  mutable std::mutex gpu_mutex_;
+
   // Internal methods
   bool compile_shaders();
   bool allocate_working_buffers();
