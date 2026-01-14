@@ -1515,21 +1515,21 @@ void UCIEngine::hybrid_benchmark() {
 void UCIEngine::mcts_mt_go(std::istringstream &is) {
   // Parse threads option
   std::string token;
-  int num_threads = 4;  // Default to 4 threads
-  
+  int num_threads = 4; // Default to 4 threads
+
   // Parse additional options (threads=N)
   while (is >> token) {
     if (token.find("threads=") == 0) {
       num_threads = std::stoi(token.substr(8));
     }
   }
-  
+
   // Reset stream for limit parsing
   is.clear();
   is.seekg(0);
   Search::LimitsType limits = parse_limits(is);
 
-  sync_cout << "info string Starting Multi-Threaded MCTS Search with " 
+  sync_cout << "info string Starting Multi-Threaded MCTS Search with "
             << num_threads << " threads..." << sync_endl;
 
   // Get GPU NNUE manager
@@ -1594,37 +1594,43 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   // Print final statistics
   auto end_time = std::chrono::steady_clock::now();
   auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      end_time - start_time).count();
-  
+                        end_time - start_time)
+                        .count();
+
   const auto &stats = mcts->stats();
   uint64_t nodes = stats.total_nodes.load();
   uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
-  
+
   sync_cout << "info string Final stats:" << sync_endl;
   sync_cout << "info string   Nodes: " << nodes << sync_endl;
   sync_cout << "info string   NPS: " << nps << sync_endl;
   sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
   sync_cout << "info string   Threads: " << num_threads << sync_endl;
-  sync_cout << "info string   NN evals: " << stats.nn_evaluations.load() << sync_endl;
-  sync_cout << "info string   Cache hits: " << stats.cache_hits.load() 
+  sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
+            << sync_endl;
+  sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
             << " misses: " << stats.cache_misses.load() << sync_endl;
-  
+
   // Profiling breakdown
   uint64_t sel_us = stats.selection_time_us.load();
   uint64_t exp_us = stats.expansion_time_us.load();
   uint64_t eval_us = stats.evaluation_time_us.load();
   uint64_t bp_us = stats.backprop_time_us.load();
   uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
-  
+
   if (total_us > 0) {
-    sync_cout << "info string   Selection: " << std::fixed << std::setprecision(1)
-              << (100.0 * sel_us / total_us) << "%" << sync_endl;
-    sync_cout << "info string   Expansion: " << std::fixed << std::setprecision(1)
-              << (100.0 * exp_us / total_us) << "%" << sync_endl;
-    sync_cout << "info string   Evaluation: " << std::fixed << std::setprecision(1)
-              << (100.0 * eval_us / total_us) << "%" << sync_endl;
-    sync_cout << "info string   Backprop: " << std::fixed << std::setprecision(1)
-              << (100.0 * bp_us / total_us) << "%" << sync_endl;
+    sync_cout << "info string   Selection: " << std::fixed
+              << std::setprecision(1) << (100.0 * sel_us / total_us) << "%"
+              << sync_endl;
+    sync_cout << "info string   Expansion: " << std::fixed
+              << std::setprecision(1) << (100.0 * exp_us / total_us) << "%"
+              << sync_endl;
+    sync_cout << "info string   Evaluation: " << std::fixed
+              << std::setprecision(1) << (100.0 * eval_us / total_us) << "%"
+              << sync_endl;
+    sync_cout << "info string   Backprop: " << std::fixed
+              << std::setprecision(1) << (100.0 * bp_us / total_us) << "%"
+              << sync_endl;
   }
 }
 

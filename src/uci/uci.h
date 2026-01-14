@@ -57,8 +57,8 @@ private:
   std::uint64_t perft(const Search::LimitsType &);
   void gpu_info();
   void gpu_benchmark();
-  void hybrid_benchmark();              // Hybrid search validation
-  void mcts_go(std::istringstream &is); // Hybrid MCTS search
+  void hybrid_benchmark();                 // Hybrid search validation
+  void mcts_go(std::istringstream &is);    // Hybrid MCTS search
   void mcts_mt_go(std::istringstream &is); // Multi-threaded MCTS search
 
   static void on_update_no_moves(const Engine::InfoShort &info);

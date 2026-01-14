@@ -550,43 +550,44 @@ bool test_tt_performance() {
 // Test thread-safe MCTS
 bool test_thread_safe_mcts() {
   TestCase tc("ThreadSafeMCTS");
-  
+
   // Configure with 2 threads for testing
   ThreadSafeMCTSConfig config;
   config.num_threads = 2;
   config.cpuct = 2.5f;
-  config.add_dirichlet_noise = false;  // Deterministic for testing
-  
+  config.add_dirichlet_noise = false; // Deterministic for testing
+
   // Create MCTS without GPU (uses simple eval)
   auto mcts = std::make_unique<ThreadSafeMCTS>(config);
   EXPECT(tc, mcts != nullptr);
-  
+
   // Search from starting position for 500ms
   Search::LimitsType limits;
   limits.movetime = 500;
-  
+
   bool got_best_move = false;
   Move best_move = Move::none();
-  
+
   auto best_cb = [&](Move best, Move ponder) {
     got_best_move = true;
     best_move = best;
   };
-  
-  mcts->start_search("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", limits, best_cb, nullptr);
+
+  mcts->start_search("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                     limits, best_cb, nullptr);
   mcts->wait();
-  
+
   EXPECT(tc, got_best_move);
   EXPECT(tc, best_move != Move::none());
-  
+
   // Check that we got some nodes
-  const auto& stats = mcts->stats();
+  const auto &stats = mcts->stats();
   EXPECT(tc, stats.total_nodes > 0);
-  
+
   std::cout << "\n    Nodes: " << stats.total_nodes.load();
   std::cout << "\n    Iterations: " << stats.total_iterations.load();
   std::cout << std::endl << "  ";
-  
+
   return tc.passed();
 }
 

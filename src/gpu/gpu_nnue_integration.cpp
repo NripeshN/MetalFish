@@ -27,8 +27,8 @@
 
 #include <chrono>
 #include <cstring>
-#include <mutex>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 
 namespace MetalFish::GPU {
