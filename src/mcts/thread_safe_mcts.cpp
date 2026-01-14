@@ -25,6 +25,16 @@
 #define CPU_PAUSE() _mm_pause()
 #endif
 
+// Cross-platform prefetch macro
+#if defined(_MSC_VER)
+#include <intrin.h>
+#define PREFETCH(addr) _mm_prefetch(reinterpret_cast<const char*>(addr), _MM_HINT_T0)
+#elif defined(__GNUC__) || defined(__clang__)
+#define PREFETCH(addr) __builtin_prefetch(addr, 0, 3)
+#else
+#define PREFETCH(addr) (void)(addr)
+#endif
+
 #include "../core/movegen.h"
 #include "../eval/evaluate.h"
 #include "../uci/uci.h"
@@ -387,7 +397,7 @@ float BatchedGPUEvaluator::evaluate(const Position &pos, WorkerContext &ctx) {
   size_t tt_idx = key % TT_SIZE;
 
   // Prefetch TT entry for cache efficiency
-  __builtin_prefetch(&tt_[tt_idx], 0, 3);
+  PREFETCH(&tt_[tt_idx]);
 
   if (tt_[tt_idx].key == key) {
     ctx.cache_hits++;
