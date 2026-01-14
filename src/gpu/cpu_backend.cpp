@@ -12,6 +12,7 @@
 
 #include "backend.h"
 #include <chrono>
+#include <cstring>
 #include <iostream>
 
 namespace MetalFish {
@@ -111,6 +112,12 @@ public:
 
   void submit_and_wait(CommandEncoder *) override {}
   void submit(CommandEncoder *) override {}
+  void submit_async(CommandEncoder *, std::function<void()> completion_handler) override {
+    // CPU fallback: just call the completion handler immediately
+    if (completion_handler) {
+      completion_handler();
+    }
+  }
   void synchronize() override {}
 
   size_t allocated_memory() const override { return allocated_; }
