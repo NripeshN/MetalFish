@@ -377,8 +377,8 @@ Command buffer optimizations:
 \subsection{Hardware and Software}
 
 \begin{itemize}
-\item \textbf{Hardware}: Apple M2 Max (12-core CPU, 38-core GPU, 64GB unified memory)
-\item \textbf{Software}: macOS 14.0, Xcode 15.0, Metal 3.0
+\item \textbf{Hardware}: Apple M2 Max (12-core CPU, 38-core GPU, 32GB unified memory)
+\item \textbf{Software}: macOS 26.3, Xcode 26.0, Metal 4.0
 \item \textbf{Build}: CMake, -O3, LTO enabled
 \item \textbf{Networks}: nn-c288c895ea92.nnue (125MB big), nn-37f18f62d772.nnue (6MB small)
 \end{itemize}
@@ -660,7 +660,7 @@ To ensure reproducibility, we document the complete tournament configuration:
 \item \textbf{Tournament software}: cutechess-cli (commit from Jan 2026)
 \item \textbf{Format}: Round-robin, 20 games per engine pair (10 as white, 10 as black)
 \item \textbf{Time control}: 10 seconds + 0.1 second increment per move
-\item \textbf{Hardware}: All engines on same Apple M2 Max (12-core CPU, 38-core GPU, 64GB)
+\item \textbf{Hardware}: All engines on same Apple M2 Max (12-core CPU, 38-core GPU, 32GB)
 \item \textbf{Threads}: 1 thread per engine
 \item \textbf{Hash}: 128 MB per engine
 \item \textbf{Ponder}: Disabled
