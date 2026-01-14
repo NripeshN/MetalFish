@@ -3,10 +3,12 @@
 MetalFish Comprehensive Elo Tournament
 
 Runs a tournament between multiple chess engines to determine Elo ratings:
-- MetalFish (Alpha-Beta search with 'go' command)
-- MetalFish-MCTS (Hybrid MCTS search with 'mcts' command)
+- MetalFish-AB (Alpha-Beta search with 'go' command) - Best for tactical positions, ~1.5M NPS
+- MetalFish-Hybrid (Hybrid MCTS search with 'mcts' command) - General play
+- MetalFish-MCTS (Multi-threaded MCTS with 'mctsmt' command) - Strategic positions, ~700K NPS (4 threads)
 - Stockfish at various skill levels (0-20)
 - Patricia (aggressive engine, ~3500 Elo)
+- Lc0 (Leela Chess Zero - neural network engine)
 
 Uses cutechess-cli for tournament management and calculates Elo ratings.
 
@@ -253,8 +255,9 @@ class Tournament:
     def setup_default_engines(self, stockfish_levels: List[int] = None):
         """Setup default engine configurations."""
 
-        # MetalFish with standard Alpha-Beta search
         metalfish_path = self.base_dir / "build" / "metalfish"
+        
+        # MetalFish with standard Alpha-Beta search (best for tactical positions, ~1.5M NPS)
         self.add_engine(
             EngineConfig(
                 name="MetalFish-AB",
@@ -264,13 +267,25 @@ class Tournament:
             )
         )
 
-        # MetalFish with MCTS hybrid search (using wrapper script)
-        mcts_wrapper = self.base_dir / "tools" / "metalfish_mcts_wrapper.sh"
-        self._create_mcts_wrapper(metalfish_path, mcts_wrapper)
+        # MetalFish with Hybrid MCTS search (general play, combining strengths)
+        hybrid_wrapper = self.base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
+        self._create_hybrid_wrapper(metalfish_path, hybrid_wrapper)
+        self.add_engine(
+            EngineConfig(
+                name="MetalFish-Hybrid",
+                cmd=str(hybrid_wrapper),
+                options={},
+                expected_elo=None,
+            )
+        )
+
+        # MetalFish with Multi-threaded MCTS (strategic positions, ~700K NPS with 4 threads)
+        mctsmt_wrapper = self.base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
+        self._create_mctsmt_wrapper(metalfish_path, mctsmt_wrapper)
         self.add_engine(
             EngineConfig(
                 name="MetalFish-MCTS",
-                cmd=str(mcts_wrapper),
+                cmd=str(mctsmt_wrapper),
                 options={},
                 expected_elo=None,
             )
@@ -290,6 +305,18 @@ class Tournament:
             # Set Patricia as anchor for Elo calculation
             self.elo_calc.anchor_engine = "Patricia"
             self.elo_calc.anchor_elo = 3500
+
+        # Lc0 (Leela Chess Zero) - neural network engine
+        lc0_path = self.base_dir / "reference" / "lc0" / "build" / "release" / "lc0"
+        if lc0_path.exists():
+            self.add_engine(
+                EngineConfig(
+                    name="Lc0",
+                    cmd=str(lc0_path),
+                    options={"Threads": "1"},
+                    expected_elo=3600,  # Depends on network
+                )
+            )
 
         # Stockfish at various skill levels
         stockfish_path = self.base_dir / "reference" / "stockfish" / "src" / "stockfish"
@@ -337,6 +364,48 @@ class Tournament:
                         expected_elo=skill_elo_map.get(level, 3000),
                     )
                 )
+
+    def _create_hybrid_wrapper(self, metalfish_path: Path, wrapper_path: Path):
+        """Create a wrapper script that uses 'mcts' command (hybrid search) instead of 'go'."""
+        wrapper_content = f"""#!/bin/bash
+# MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
+
+ENGINE="{metalfish_path}"
+
+# Read UCI commands and transform 'go' to 'mcts'
+while IFS= read -r line; do
+    if [[ "$line" == go* ]]; then
+        # Replace 'go' with 'mcts' for hybrid search
+        echo "mcts ${{line#go}}"
+    else
+        echo "$line"
+    fi
+done | "$ENGINE"
+"""
+        with open(wrapper_path, "w") as f:
+            f.write(wrapper_content)
+        os.chmod(wrapper_path, 0o755)
+
+    def _create_mctsmt_wrapper(self, metalfish_path: Path, wrapper_path: Path):
+        """Create a wrapper script that uses 'mctsmt' command (multi-threaded MCTS) instead of 'go'."""
+        wrapper_content = f"""#!/bin/bash
+# MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
+
+ENGINE="{metalfish_path}"
+
+# Read UCI commands and transform 'go' to 'mctsmt threads=4'
+while IFS= read -r line; do
+    if [[ "$line" == go* ]]; then
+        # Replace 'go' with 'mctsmt threads=4' for multi-threaded MCTS
+        echo "mctsmt threads=4 ${{line#go}}"
+    else
+        echo "$line"
+    fi
+done | "$ENGINE"
+"""
+        with open(wrapper_path, "w") as f:
+            f.write(wrapper_content)
+        os.chmod(wrapper_path, 0o755)
 
     def _create_mcts_wrapper(self, metalfish_path: Path, wrapper_path: Path):
         """Create a wrapper script that uses 'mcts' command instead of 'go'."""
@@ -589,8 +658,9 @@ def get_engine_configs(
     """Get all available engine configurations for CI mode."""
     configs = {}
 
-    # MetalFish with standard Alpha-Beta search
     metalfish_path = base_dir / "build" / "metalfish"
+    
+    # MetalFish with standard Alpha-Beta search (best for tactical positions, ~1.5M NPS)
     configs["MetalFish-AB"] = EngineConfig(
         name="MetalFish-AB",
         cmd=str(metalfish_path),
@@ -598,13 +668,19 @@ def get_engine_configs(
         expected_elo=None,
     )
 
-    # MetalFish with MCTS hybrid search
-    mcts_wrapper = base_dir / "tools" / "metalfish_mcts_wrapper.sh"
-    configs["MetalFish-MCTS"] = EngineConfig(
-        name="MetalFish-MCTS", cmd=str(mcts_wrapper), options={}, expected_elo=None
+    # MetalFish with Hybrid MCTS search (general play)
+    hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
+    configs["MetalFish-Hybrid"] = EngineConfig(
+        name="MetalFish-Hybrid", cmd=str(hybrid_wrapper), options={}, expected_elo=None
     )
 
-    # Patricia
+    # MetalFish with Multi-threaded MCTS (strategic positions, ~700K NPS with 4 threads)
+    mctsmt_wrapper = base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
+    configs["MetalFish-MCTS"] = EngineConfig(
+        name="MetalFish-MCTS", cmd=str(mctsmt_wrapper), options={}, expected_elo=None
+    )
+
+    # Patricia - aggressive engine (~3500 Elo)
     patricia_path = base_dir / "reference" / "Patricia" / "engine" / "patricia"
     if patricia_path.exists():
         configs["Patricia"] = EngineConfig(
@@ -612,6 +688,16 @@ def get_engine_configs(
             cmd=str(patricia_path),
             options={"Threads": "1", "Hash": "128"},
             expected_elo=3500,
+        )
+
+    # Lc0 (Leela Chess Zero) - neural network engine
+    lc0_path = base_dir / "reference" / "lc0" / "build" / "release" / "lc0"
+    if lc0_path.exists():
+        configs["Lc0"] = EngineConfig(
+            name="Lc0",
+            cmd=str(lc0_path),
+            options={"Threads": "1"},
+            expected_elo=3600,
         )
 
     # Stockfish at various levels
@@ -689,11 +775,16 @@ def run_ci_match(
     engine1 = configs[engine1_name]
     engine2 = configs[engine2_name]
 
-    # Create MCTS wrapper if needed
-    if engine1_name == "MetalFish-MCTS" or engine2_name == "MetalFish-MCTS":
-        metalfish_path = base_dir / "build" / "metalfish"
-        mcts_wrapper = base_dir / "tools" / "metalfish_mcts_wrapper.sh"
-        _create_mcts_wrapper_file(metalfish_path, mcts_wrapper)
+    metalfish_path = base_dir / "build" / "metalfish"
+    
+    # Create wrapper scripts if needed
+    if "MetalFish-Hybrid" in [engine1_name, engine2_name]:
+        hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
+        _create_hybrid_wrapper_file(metalfish_path, hybrid_wrapper)
+    
+    if "MetalFish-MCTS" in [engine1_name, engine2_name]:
+        mctsmt_wrapper = base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
+        _create_mctsmt_wrapper_file(metalfish_path, mctsmt_wrapper)
 
     cutechess = base_dir / "reference" / "cutechess" / "build" / "cutechess-cli"
 
@@ -787,6 +878,50 @@ def run_ci_match(
     print(f"Results saved to: {output_file}")
 
     return match_result
+
+
+def _create_hybrid_wrapper_file(metalfish_path: Path, wrapper_path: Path):
+    """Create a wrapper script that uses 'mcts' command (hybrid search) instead of 'go'."""
+    wrapper_content = f"""#!/bin/bash
+# MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
+
+ENGINE="{metalfish_path}"
+
+# Read UCI commands and transform 'go' to 'mcts'
+while IFS= read -r line; do
+    if [[ "$line" == go* ]]; then
+        # Replace 'go' with 'mcts' for hybrid search
+        echo "mcts ${{line#go}}"
+    else
+        echo "$line"
+    fi
+done | "$ENGINE"
+"""
+    with open(wrapper_path, "w") as f:
+        f.write(wrapper_content)
+    os.chmod(wrapper_path, 0o755)
+
+
+def _create_mctsmt_wrapper_file(metalfish_path: Path, wrapper_path: Path):
+    """Create a wrapper script that uses 'mctsmt' command (multi-threaded MCTS) instead of 'go'."""
+    wrapper_content = f"""#!/bin/bash
+# MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
+
+ENGINE="{metalfish_path}"
+
+# Read UCI commands and transform 'go' to 'mctsmt threads=4'
+while IFS= read -r line; do
+    if [[ "$line" == go* ]]; then
+        # Replace 'go' with 'mctsmt threads=4' for multi-threaded MCTS
+        echo "mctsmt threads=4 ${{line#go}}"
+    else
+        echo "$line"
+    fi
+done | "$ENGINE"
+"""
+    with open(wrapper_path, "w") as f:
+        f.write(wrapper_content)
+    os.chmod(wrapper_path, 0o755)
 
 
 def _create_mcts_wrapper_file(metalfish_path: Path, wrapper_path: Path):
@@ -983,7 +1118,7 @@ def main():
         "--metalfish-only",
         "-m",
         action="store_true",
-        help="Only test MetalFish variants (AB vs MCTS)",
+        help="Only test MetalFish variants (AB vs Hybrid vs MCTS)",
     )
 
     # CI mode arguments
@@ -1096,8 +1231,10 @@ def main():
         sys.exit(1)
 
     if args.metalfish_only:
-        # Just test MetalFish AB vs MCTS
+        # Test all MetalFish variants against each other
         metalfish_path = base_dir / "build" / "metalfish"
+        
+        # Alpha-Beta (standard 'go' command)
         tournament.add_engine(
             EngineConfig(
                 name="MetalFish-AB",
@@ -1106,10 +1243,18 @@ def main():
             )
         )
 
-        mcts_wrapper = base_dir / "tools" / "metalfish_mcts_wrapper.sh"
-        tournament._create_mcts_wrapper(metalfish_path, mcts_wrapper)
+        # Hybrid MCTS ('mcts' command)
+        hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
+        tournament._create_hybrid_wrapper(metalfish_path, hybrid_wrapper)
         tournament.add_engine(
-            EngineConfig(name="MetalFish-MCTS", cmd=str(mcts_wrapper), options={})
+            EngineConfig(name="MetalFish-Hybrid", cmd=str(hybrid_wrapper), options={})
+        )
+        
+        # Multi-threaded MCTS ('mctsmt' command)
+        mctsmt_wrapper = base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
+        tournament._create_mctsmt_wrapper(metalfish_path, mctsmt_wrapper)
+        tournament.add_engine(
+            EngineConfig(name="MetalFish-MCTS", cmd=str(mctsmt_wrapper), options={})
         )
     else:
         tournament.setup_default_engines(stockfish_levels)
