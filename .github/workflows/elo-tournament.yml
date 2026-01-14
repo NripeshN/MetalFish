@@ -18,7 +18,7 @@ on:
 # Cancel in-progress runs for the same PR
 concurrency:
   group: elo-tournament-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '20' }}
