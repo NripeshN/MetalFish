@@ -42,8 +42,10 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install cmake ninja meson qt@6
+          brew install cmake ninja meson qt@6 coreutils
           pip3 install meson ninja
+          # coreutils provides gtimeout which we alias to timeout
+          echo "alias timeout=gtimeout" >> ~/.bashrc
 
       - name: Cache NNUE files
         uses: actions/cache@v4
@@ -79,11 +81,45 @@ jobs:
 
           cd reference/cutechess
           mkdir -p build && cd build
-          # Use Qt6 from Homebrew
-          export PATH="/opt/homebrew/opt/qt@6/bin:$PATH"
-          export CMAKE_PREFIX_PATH="/opt/homebrew/opt/qt@6"
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DWITH_TESTS=OFF
+
+          # Use Qt6 from Homebrew - set all necessary paths
+          QT_PATH="/opt/homebrew/opt/qt@6"
+          export PATH="$QT_PATH/bin:$PATH"
+          export CMAKE_PREFIX_PATH="$QT_PATH"
+          export Qt6_DIR="$QT_PATH/lib/cmake/Qt6"
+          export LDFLAGS="-L$QT_PATH/lib -Wl,-rpath,$QT_PATH/lib"
+          export CPPFLAGS="-I$QT_PATH/include"
+          export PKG_CONFIG_PATH="$QT_PATH/lib/pkgconfig"
+
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_TESTS=OFF \
+            -DCMAKE_PREFIX_PATH="$QT_PATH" \
+            -DQt6_DIR="$QT_PATH/lib/cmake/Qt6" \
+            -DCMAKE_INSTALL_RPATH="$QT_PATH/lib" \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DCMAKE_MACOSX_RPATH=ON
           ninja cutechess-cli
+
+          # Fix library paths using install_name_tool to embed absolute paths
+          echo "=== Fixing library paths ==="
+          # Get all Qt framework dependencies
+          for framework in $(otool -L cutechess-cli | grep "@rpath" | awk '{print $1}'); do
+            framework_name=$(basename "$framework" | sed 's/\.framework.*//')
+            new_path="$QT_PATH/lib/${framework_name}.framework/Versions/A/${framework_name}"
+            if [ -f "$new_path" ]; then
+              echo "Fixing: $framework -> $new_path"
+              install_name_tool -change "$framework" "$new_path" cutechess-cli 2>/dev/null || true
+            fi
+          done
+
+          # Check what libraries it links to
+          echo "=== cutechess-cli dependencies after fix ==="
+          otool -L cutechess-cli || true
+
+          # Test it works
+          echo "=== Testing cutechess-cli ==="
+          ./cutechess-cli --version || echo "Version check failed"
 
       - name: Clone and Build Stockfish
         run: |
@@ -188,11 +224,17 @@ jobs:
           echo "║     Verifying Engine Binaries                            ║"
           echo "╚══════════════════════════════════════════════════════════╝"
 
+          # Use gtimeout from coreutils on macOS
+          TIMEOUT_CMD="gtimeout"
+          if ! command -v gtimeout &> /dev/null; then
+            TIMEOUT_CMD="timeout"
+          fi
+
           echo ""
           echo "=== MetalFish (Alpha-Beta) ==="
           if [ -f "build/metalfish" ]; then
             echo "  ✓ Found at build/metalfish"
-            echo -e "uci\nquit" | timeout 5 build/metalfish 2>&1 | head -3 || true
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 build/metalfish 2>&1 | head -3 || true
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -220,7 +262,7 @@ jobs:
           echo "=== Stockfish ==="
           if [ -f "reference/stockfish/src/stockfish" ]; then
             echo "  ✓ Found at reference/stockfish/src/stockfish"
-            echo -e "uci\nquit" | timeout 5 reference/stockfish/src/stockfish 2>&1 | head -3 || true
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/stockfish/src/stockfish 2>&1 | head -3 || true
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -230,7 +272,7 @@ jobs:
           echo "=== Patricia ==="
           if [ -f "reference/Patricia/engine/patricia" ]; then
             echo "  ✓ Found at reference/Patricia/engine/patricia"
-            echo -e "uci\nquit" | timeout 5 reference/Patricia/engine/patricia 2>&1 | head -3 || true
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/Patricia/engine/patricia 2>&1 | head -3 || true
           else
             echo "  ✗ Not found (optional - will be skipped)"
           fi
@@ -239,7 +281,7 @@ jobs:
           echo "=== cutechess-cli ==="
           if [ -f "reference/cutechess/build/cutechess-cli" ]; then
             echo "  ✓ Found at reference/cutechess/build/cutechess-cli"
-            reference/cutechess/build/cutechess-cli --version || true
+            reference/cutechess/build/cutechess-cli --version || echo "cutechess-cli version check failed"
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -366,13 +408,41 @@ jobs:
           echo "=== Tools directory ==="
           ls -la tools/*.sh 2>/dev/null || echo "No wrapper scripts found"
 
+      - name: Install runtime dependencies
+        run: |
+          # Install Qt6 runtime for cutechess-cli and coreutils for gtimeout
+          brew install qt@6 coreutils
+
+          # Fix cutechess-cli library paths to use the newly installed Qt6
+          QT_PATH="/opt/homebrew/opt/qt@6"
+          if [ -f "reference/cutechess/build/cutechess-cli" ]; then
+            echo "=== Fixing cutechess-cli library paths ==="
+            # Get all Qt framework dependencies and fix them
+            for framework in $(otool -L reference/cutechess/build/cutechess-cli | grep -E "@rpath|Qt" | awk '{print $1}'); do
+              framework_name=$(basename "$framework" | sed 's/\.framework.*//')
+              new_path="$QT_PATH/lib/${framework_name}.framework/Versions/A/${framework_name}"
+              if [ -f "$new_path" ]; then
+                echo "Fixing: $framework -> $new_path"
+                install_name_tool -change "$framework" "$new_path" reference/cutechess/build/cutechess-cli 2>/dev/null || true
+              fi
+            done
+            echo "=== Updated dependencies ==="
+            otool -L reference/cutechess/build/cutechess-cli | head -20
+          fi
+
       - name: Verify engines before match
         run: |
           echo "=== Verifying engines can run ==="
 
+          # Use gtimeout from coreutils on macOS
+          TIMEOUT_CMD="gtimeout"
+          if ! command -v gtimeout &> /dev/null; then
+            TIMEOUT_CMD="timeout"
+          fi
+
           echo "MetalFish:"
           if [ -f "build/metalfish" ]; then
-            echo -e "uci\nquit" | timeout 5 ./build/metalfish 2>&1 | head -5 || echo "MetalFish failed to respond"
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 ./build/metalfish 2>&1 | head -5 || echo "MetalFish failed to respond"
           else
             echo "ERROR: build/metalfish not found!"
             exit 1
@@ -381,7 +451,7 @@ jobs:
           echo ""
           echo "Stockfish:"
           if [ -f "reference/stockfish/src/stockfish" ]; then
-            echo -e "uci\nquit" | timeout 5 ./reference/stockfish/src/stockfish 2>&1 | head -5 || echo "Stockfish failed to respond"
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 ./reference/stockfish/src/stockfish 2>&1 | head -5 || echo "Stockfish failed to respond"
           else
             echo "ERROR: reference/stockfish/src/stockfish not found!"
             exit 1
