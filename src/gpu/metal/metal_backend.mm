@@ -501,19 +501,32 @@ public:
   }
 
 private:
+  static constexpr int NUM_COMMAND_QUEUES =
+      4; // Multiple queues for parallelism
+
   MetalBackend() {
     @autoreleasepool {
       device_ = MTLCreateSystemDefaultDevice();
       if (device_) {
+        // Create primary queue
         queue_ = [device_ newCommandQueue];
         [queue_ retain];
+
+        // Create additional queues for parallel command submission
+        for (int i = 0; i < NUM_COMMAND_QUEUES; ++i) {
+          id<MTLCommandQueue> q = [device_ newCommandQueue];
+          if (q) {
+            [q retain];
+            parallel_queues_.push_back(q);
+          }
+        }
 
         std::cout << "[MetalBackend] Initialized: " << device_name()
                   << std::endl;
         std::cout << "[MetalBackend] Unified memory: "
                   << (has_unified_memory() ? "Yes" : "No") << std::endl;
-        std::cout << "[MetalBackend] Max threadgroup memory: "
-                  << max_threadgroup_memory() << " bytes" << std::endl;
+        std::cout << "[MetalBackend] Command queues: "
+                  << (1 + parallel_queues_.size()) << std::endl;
       }
     }
   }
@@ -523,6 +536,10 @@ private:
       for (auto &[name, lib] : libraries_) {
         if (lib)
           [lib release];
+      }
+      for (auto q : parallel_queues_) {
+        if (q)
+          [q release];
       }
       if (queue_)
         [queue_ release];
@@ -552,8 +569,34 @@ private:
     return nil;
   }
 
+  // Get a command queue for parallel work (round-robin selection)
+  id<MTLCommandQueue> get_parallel_queue() {
+    if (parallel_queues_.empty())
+      return queue_;
+    size_t idx = queue_index_.fetch_add(1, std::memory_order_relaxed) %
+                 parallel_queues_.size();
+    return parallel_queues_[idx];
+  }
+
+public:
+  // Create encoder on a parallel queue for async work
+  std::unique_ptr<CommandEncoder> create_parallel_encoder() override {
+    id<MTLCommandQueue> q = get_parallel_queue();
+    if (!q)
+      return nullptr;
+    return std::make_unique<MetalCommandEncoder>(q);
+  }
+
+  // Get number of parallel queues available
+  size_t num_parallel_queues() const override {
+    return parallel_queues_.size();
+  }
+
+private:
   id<MTLDevice> device_ = nil;
   id<MTLCommandQueue> queue_ = nil;
+  std::vector<id<MTLCommandQueue>> parallel_queues_;
+  std::atomic<size_t> queue_index_{0};
   std::mutex library_mutex_;
   std::mutex pool_mutex_;
   std::unordered_map<std::string, id<MTLLibrary>> libraries_;

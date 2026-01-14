@@ -13,6 +13,7 @@
 #include <cstring>
 #include <deque>
 #include <iostream>
+#include <mutex>
 
 namespace MetalFish {
 namespace GPU {
@@ -261,12 +262,16 @@ Buffer *DoubleBufferedPipeline::get_output_buffer() {
   return buffers_[current_idx_].output.get();
 }
 
-void DoubleBufferedPipeline::submit(int batch_size) {
+bool DoubleBufferedPipeline::submit(int batch_size) {
   auto &buf = buffers_[current_idx_];
   buf.cmd->reset();
-  buf.cmd->encode(batch_size);
+  if (!buf.cmd->encode(batch_size)) {
+    buf.pending = false;
+    return false;
+  }
   buf.cmd->submit_async();
   buf.pending = true;
+  return true;
 }
 
 void DoubleBufferedPipeline::wait_previous() {
@@ -575,11 +580,13 @@ double PersistentBatchEvaluator::avg_batch_latency_us() const {
 
 static std::unique_ptr<PersistentBufferPool> g_buffer_pool;
 static std::unique_ptr<PersistentBatchEvaluator> g_persistent_evaluator;
+static std::once_flag g_buffer_pool_init_flag;
+static std::once_flag g_persistent_evaluator_init_flag;
 
 PersistentBufferPool &persistent_buffer_pool() {
-  if (!g_buffer_pool) {
+  std::call_once(g_buffer_pool_init_flag, []() {
     g_buffer_pool = std::make_unique<PersistentBufferPool>();
-  }
+  });
   return *g_buffer_pool;
 }
 
@@ -596,10 +603,10 @@ bool initialize_persistent_resources() {
 }
 
 PersistentBatchEvaluator &persistent_evaluator() {
-  if (!g_persistent_evaluator) {
+  std::call_once(g_persistent_evaluator_init_flag, []() {
     g_persistent_evaluator = std::make_unique<PersistentBatchEvaluator>();
     g_persistent_evaluator->initialize(256);
-  }
+  });
   return *g_persistent_evaluator;
 }
 

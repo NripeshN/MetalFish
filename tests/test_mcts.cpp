@@ -392,7 +392,8 @@ bool test_hybrid_edge() {
   TestCase tc("HybridEdge");
 
   MCTSMove move = MCTSMove::FromStockfish(Move(SQ_E2, SQ_E4));
-  HybridEdge edge(move);
+  HybridEdge edge;
+  edge.init(move, 0.0f);
 
   EXPECT(tc, edge.move().to_stockfish() == Move(SQ_E2, SQ_E4));
   EXPECT(tc, edge.policy() == 0.0f);
@@ -419,7 +420,7 @@ bool test_hybrid_node() {
   node.create_edges(moves);
 
   EXPECT(tc, node.has_children());
-  EXPECT(tc, node.edges().size() == 2);
+  EXPECT(tc, node.num_edges() == 2);
 
   // Test terminal state
   node.set_terminal(HybridNode::Terminal::Win, 1.0f);

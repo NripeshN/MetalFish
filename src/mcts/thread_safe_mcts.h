@@ -275,32 +275,38 @@ struct ThreadSafeMCTSConfig {
 
   int get_num_threads() const {
     if (num_threads <= 0) {
+      // Auto-select optimal thread count based on benchmarks
+      // Testing shows 2-4 threads is optimal for GPU batching
       int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
-      return hw_threads > 0 ? hw_threads : 4;
+      // Use 2-4 threads for best GPU batching efficiency
+      return std::min(std::max(2, hw_threads / 4), 4);
     }
     return num_threads;
   }
 
   // Batching parameters - auto-tuned based on thread count
-  int min_batch_size = 1;
+  int min_batch_size = 1; // Process immediately if available
   int max_batch_size = 256;
-  int batch_timeout_us = 50;
+  int batch_timeout_us = 25; // Very short timeout - process quickly
   bool use_batched_eval = true;
 
   // Auto-tune batch parameters based on thread count
   void auto_tune(int actual_threads) {
     if (actual_threads <= 2) {
       // Low thread count: minimize latency
-      batch_timeout_us = 20;
-      max_batch_size = 64;
+      min_batch_size = 1;
+      batch_timeout_us = 10;
+      max_batch_size = 32;
     } else if (actual_threads <= 4) {
       // Medium thread count: balance latency and throughput
+      min_batch_size = 1;
+      batch_timeout_us = 25;
+      max_batch_size = 64;
+    } else {
+      // High thread count: more requests arrive, can batch more
+      min_batch_size = 2;
       batch_timeout_us = 50;
       max_batch_size = 128;
-    } else {
-      // High thread count: maximize throughput
-      batch_timeout_us = 100;
-      max_batch_size = 256;
     }
   }
 
@@ -375,23 +381,52 @@ struct alignas(64) EvalRequest {
 // Pre-allocated request pool for zero-allocation evaluation
 class EvalRequestPool {
 public:
-  static constexpr size_t POOL_SIZE = 4096;
+  static constexpr size_t POOL_SIZE = 8192; // Increased for better distribution
 
   EvalRequestPool() { requests_ = std::make_unique<EvalRequest[]>(POOL_SIZE); }
 
   EvalRequest *acquire() {
+    // Use thread-local hint for better cache locality
+    thread_local uint64_t local_hint = 0;
+    uint64_t start_idx = local_hint;
+
+    // Try a few slots before falling back to atomic increment
+    for (int tries = 0; tries < 4; ++tries) {
+      uint64_t idx = (start_idx + tries) % POOL_SIZE;
+      EvalRequest *req = &requests_[idx];
+
+      // Fast path: check if slot is available
+      if (!req->ready.load(std::memory_order_acquire) ||
+          req->completed.load(std::memory_order_acquire)) {
+        // Try to claim it
+        bool expected_ready = false;
+        if (req->ready.compare_exchange_strong(expected_ready, false,
+                                               std::memory_order_acquire)) {
+          req->completed.store(false, std::memory_order_relaxed);
+          local_hint = idx + 1;
+          return req;
+        }
+      }
+    }
+
+    // Fallback: use atomic counter
     uint64_t idx =
         next_idx_.fetch_add(1, std::memory_order_relaxed) % POOL_SIZE;
     EvalRequest *req = &requests_[idx];
 
-    // Wait if slot is still in use (rare)
+    // Wait if slot is still in use (rare with larger pool)
+    int spin = 0;
     while (req->ready.load(std::memory_order_acquire) &&
            !req->completed.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
+      if (++spin > 100) {
+        std::this_thread::yield();
+        spin = 0;
+      }
     }
 
     req->ready.store(false, std::memory_order_relaxed);
     req->completed.store(false, std::memory_order_relaxed);
+    local_hint = idx + 1;
     return req;
   }
 
@@ -414,11 +449,32 @@ public:
   void start();
   void stop();
 
+  // Synchronous evaluation (blocks until result ready)
   float evaluate(const Position &pos, WorkerContext &ctx);
+
+  // Asynchronous evaluation with callback
+  // Returns immediately, callback is invoked when evaluation completes
+  // The callback receives the evaluation value
+  using EvalCallback = std::function<void(float value)>;
+  void evaluate_async(const Position &pos, uint64_t key, Color stm,
+                      EvalCallback callback);
+
+  // Check if async mode is enabled
+  bool async_enabled() const { return use_async_mode_; }
+  void set_async_mode(bool enabled) { use_async_mode_ = enabled; }
+
+  // Increment age for TT replacement policy
+  void new_search() { current_age_.fetch_add(1, std::memory_order_relaxed); }
+
+  // Get number of pending async evaluations
+  size_t pending_async_count() const {
+    return pending_async_count_.load(std::memory_order_relaxed);
+  }
 
 private:
   void eval_thread_main();
   void process_batch(std::vector<EvalRequest *> &batch);
+  void process_batch_async(std::vector<EvalRequest *> &batch);
 
   GPU::GPUNNUEManager *gpu_manager_;
   ThreadSafeMCTSStats *stats_;
@@ -426,6 +482,7 @@ private:
   int min_batch_size_;
   int max_batch_size_;
   int batch_timeout_us_;
+  bool use_async_mode_ = false; // Enable async GPU submission
 
   // Lock-free request submission
   EvalRequestPool request_pool_;
@@ -436,14 +493,34 @@ private:
   std::thread eval_thread_;
   std::atomic<bool> running_{false};
 
-  // TT for caching evaluations
+  // Double-buffering: prepare next batch while current processes
+  std::vector<EvalRequest *> prefetch_buffer_;
+  std::mutex prefetch_mutex_;
+
+  // Async evaluation support
+  struct AsyncEvalRequest {
+    GPU::GPUPositionData pos_data;
+    uint64_t position_key;
+    Color side_to_move;
+    EvalCallback callback;
+  };
+  std::vector<AsyncEvalRequest> async_requests_;
+  std::mutex async_mutex_;
+  std::atomic<size_t> pending_async_count_{0};
+
+  // Multiple in-flight GPU batches for true async
+  static constexpr int MAX_INFLIGHT_BATCHES = 4;
+  std::atomic<int> inflight_batches_{0};
+
+  // TT for caching evaluations - larger cache for better hit rates
   struct alignas(16) TTEntry {
     uint64_t key = 0;
     float value = 0.0f;
-    uint32_t padding = 0;
+    uint32_t age = 0; // For replacement policy
   };
-  static constexpr size_t TT_SIZE = 1 << 20;
+  static constexpr size_t TT_SIZE = 1 << 22; // 4M entries (~64MB)
   std::vector<TTEntry> tt_;
+  std::atomic<uint32_t> current_age_{0};
 };
 
 // ============================================================================

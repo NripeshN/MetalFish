@@ -13,6 +13,7 @@
 #include "../eval/evaluate.h"
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 
 namespace MetalFish {
 namespace MCTS {
@@ -1056,11 +1057,12 @@ Value HybridSearchBridge::get_tactical_score(const Position &pos) {
 // ============================================================================
 
 static std::unique_ptr<HybridSearchBridge> g_hybrid_bridge;
+static std::once_flag g_hybrid_bridge_init_flag;
 
 HybridSearchBridge &hybrid_bridge() {
-  if (!g_hybrid_bridge) {
+  std::call_once(g_hybrid_bridge_init_flag, []() {
     g_hybrid_bridge = std::make_unique<HybridSearchBridge>();
-  }
+  });
   return *g_hybrid_bridge;
 }
 

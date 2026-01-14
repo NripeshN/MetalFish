@@ -1456,8 +1456,8 @@ void UCIEngine::hybrid_benchmark() {
       std::chrono::duration<double, std::milli>(end - start).count();
 
   const auto &mcts_stats = mcts_search->stats();
-  double sel_pct, exp_pct, eval_pct, bp_pct, q_pct;
-  mcts_stats.get_profile_breakdown(sel_pct, exp_pct, eval_pct, bp_pct, q_pct);
+  double sel_pct, exp_pct, eval_pct, bp_pct;
+  mcts_stats.get_profile_breakdown(sel_pct, exp_pct, eval_pct, bp_pct);
 
   uint64_t total_nodes = mcts_stats.mcts_nodes.load();
   double nps = elapsed_ms > 0 ? total_nodes * 1000.0 / elapsed_ms : 0;

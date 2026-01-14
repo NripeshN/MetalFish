@@ -14,6 +14,16 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
+
+#ifdef __aarch64__
+// ARM64 (Apple Silicon) - use yield instruction
+#define CPU_PAUSE() __asm__ __volatile__("yield" ::: "memory")
+#else
+// x86 - use _mm_pause
+#include <immintrin.h>
+#define CPU_PAUSE() _mm_pause()
+#endif
 
 #include "../core/movegen.h"
 #include "../eval/evaluate.h"
@@ -57,56 +67,105 @@ void BatchedGPUEvaluator::stop() {
 
 void BatchedGPUEvaluator::eval_thread_main() {
   std::vector<EvalRequest *> batch;
+  std::vector<EvalRequest *> next_batch;
   batch.reserve(max_batch_size_);
+  next_batch.reserve(max_batch_size_);
 
-  while (running_.load(std::memory_order_acquire)) {
-    batch.clear();
+  // Adaptive timeout: start with configured value, adjust based on queue
+  // pressure
+  int adaptive_timeout_us = batch_timeout_us_;
 
-    {
-      std::unique_lock<std::mutex> lock(pending_mutex_);
+  auto collect_batch = [&](std::vector<EvalRequest *> &target, int timeout_us) {
+    target.clear();
+    std::unique_lock<std::mutex> lock(pending_mutex_);
 
-      auto deadline = std::chrono::steady_clock::now() +
-                      std::chrono::microseconds(batch_timeout_us_);
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::microseconds(timeout_us);
 
-      // Wait for requests
-      while (pending_requests_.empty() &&
-             running_.load(std::memory_order_acquire)) {
-        if (pending_cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
-          break;
-        }
-      }
-
-      // Collect batch
-      size_t count = std::min(pending_requests_.size(),
-                              static_cast<size_t>(max_batch_size_));
-      if (count > 0) {
-        batch.insert(batch.end(), pending_requests_.begin(),
-                     pending_requests_.begin() + count);
-        pending_requests_.erase(pending_requests_.begin(),
-                                pending_requests_.begin() + count);
+    // Wait for minimum batch size OR timeout
+    while (pending_requests_.size() < static_cast<size_t>(min_batch_size_) &&
+           running_.load(std::memory_order_acquire)) {
+      if (pending_cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
+        break;
       }
     }
 
-    if (batch.empty())
-      continue;
+    // Collect batch - take all available up to max
+    size_t count = std::min(pending_requests_.size(),
+                            static_cast<size_t>(max_batch_size_));
+    if (count > 0) {
+      target.insert(target.end(), pending_requests_.begin(),
+                    pending_requests_.begin() + count);
+      pending_requests_.erase(pending_requests_.begin(),
+                              pending_requests_.begin() + count);
+    }
 
-    process_batch(batch);
+    // Adaptive timeout based on queue pressure
+    size_t remaining = pending_requests_.size();
+    if (remaining > 8) {
+      adaptive_timeout_us = std::max(10, adaptive_timeout_us / 2);
+    } else if (remaining == 0 && target.size() < 4) {
+      adaptive_timeout_us =
+          std::min(batch_timeout_us_ * 2, adaptive_timeout_us + 10);
+    }
+  };
 
-    if (stats_) {
-      stats_->nn_batches.fetch_add(1, std::memory_order_relaxed);
-      stats_->total_batch_size.fetch_add(batch.size(),
-                                         std::memory_order_relaxed);
-      stats_->batch_count.fetch_add(1, std::memory_order_relaxed);
+  // Initial batch collection
+  collect_batch(batch, adaptive_timeout_us);
+
+  while (running_.load(std::memory_order_acquire)) {
+    if (!batch.empty()) {
+      // Start collecting next batch in parallel with processing
+      std::thread prefetch_thread([&]() {
+        if (running_.load(std::memory_order_acquire)) {
+          collect_batch(next_batch, adaptive_timeout_us / 2);
+        }
+      });
+
+      // Process current batch - use async if enabled and enough in-flight
+      // capacity
+      if (use_async_mode_ && inflight_batches_.load(std::memory_order_acquire) <
+                                 MAX_INFLIGHT_BATCHES) {
+        process_batch_async(batch);
+      } else {
+        process_batch(batch);
+      }
+
+      if (stats_) {
+        stats_->nn_batches.fetch_add(1, std::memory_order_relaxed);
+        stats_->total_batch_size.fetch_add(batch.size(),
+                                           std::memory_order_relaxed);
+        stats_->batch_count.fetch_add(1, std::memory_order_relaxed);
+      }
+
+      // Wait for prefetch to complete
+      prefetch_thread.join();
+
+      // Swap buffers
+      std::swap(batch, next_batch);
+    } else {
+      // No batch to process, just collect
+      collect_batch(batch, adaptive_timeout_us);
     }
   }
 
-  // Process remaining
+  // Wait for any in-flight async batches to complete
+  while (inflight_batches_.load(std::memory_order_acquire) > 0) {
+    std::this_thread::yield();
+  }
+
+  // Process any remaining requests
   {
     std::unique_lock<std::mutex> lock(pending_mutex_);
     if (!pending_requests_.empty()) {
-      process_batch(pending_requests_);
+      batch.clear();
+      batch.insert(batch.end(), pending_requests_.begin(),
+                   pending_requests_.end());
       pending_requests_.clear();
     }
+  }
+  if (!batch.empty()) {
+    process_batch(batch);
   }
 }
 
@@ -116,17 +175,41 @@ void BatchedGPUEvaluator::process_batch(std::vector<EvalRequest *> &batch) {
 
   const size_t batch_size = batch.size();
 
-  GPU::GPUEvalBatch gpu_batch;
-  gpu_batch.reserve(static_cast<int>(batch_size));
+  // Deduplication: group requests by position key to avoid redundant GPU evals
+  // Use unordered_map for O(1) lookup (faster than sorting for typical batch
+  // sizes)
+  std::unordered_map<uint64_t, std::vector<size_t>> key_to_indices;
+  key_to_indices.reserve(batch_size);
+  std::vector<size_t> unique_indices;
+  unique_indices.reserve(batch_size);
 
   for (size_t i = 0; i < batch_size; ++i) {
-    gpu_batch.add_position_data(batch[i]->pos_data);
+    uint64_t key = batch[i]->position_key;
+    auto it = key_to_indices.find(key);
+    if (it == key_to_indices.end()) {
+      key_to_indices[key] = {i};
+      unique_indices.push_back(i);
+    } else {
+      it->second.push_back(i);
+    }
+  }
+
+  const size_t unique_count = unique_indices.size();
+
+  // Only send unique positions to GPU
+  GPU::GPUEvalBatch gpu_batch;
+  gpu_batch.reserve(static_cast<int>(unique_count));
+
+  for (size_t idx : unique_indices) {
+    gpu_batch.add_position_data(batch[idx]->pos_data);
   }
 
   gpu_manager_->evaluate_batch(gpu_batch, true);
 
-  for (size_t i = 0; i < batch_size; ++i) {
-    EvalRequest *req = batch[i];
+  // Distribute results to all requests (including duplicates)
+  for (size_t i = 0; i < unique_count; ++i) {
+    size_t orig_idx = unique_indices[i];
+    EvalRequest *req = batch[orig_idx];
 
     int32_t psqt =
         gpu_batch.psqt_scores.size() > i ? gpu_batch.psqt_scores[i] : 0;
@@ -135,29 +218,176 @@ void BatchedGPUEvaluator::process_batch(std::vector<EvalRequest *> &batch) {
                             : 0;
     int32_t raw_score = psqt + pos_score;
 
-    float value = std::tanh(static_cast<float>(raw_score) / 400.0f);
+    // Fast tanh using standard library (well-optimized on modern CPUs)
+    float x = static_cast<float>(raw_score) / 400.0f;
+    float value = std::tanh(x);
 
     if (req->side_to_move == BLACK) {
       value = -value;
     }
 
-    // Store in TT
+    // Store in TT with age
+    uint32_t age = current_age_.load(std::memory_order_relaxed);
     size_t tt_idx = req->position_key % TT_SIZE;
     tt_[tt_idx].value = value;
     tt_[tt_idx].key = req->position_key;
+    tt_[tt_idx].age = age;
 
-    req->result = value;
-    req->completed.store(true, std::memory_order_release);
+    // Complete all requests with same key
+    for (size_t dup_idx : key_to_indices[req->position_key]) {
+      batch[dup_idx]->result = value;
+      batch[dup_idx]->completed.store(true, std::memory_order_release);
+    }
   }
 
   if (stats_) {
-    stats_->nn_evaluations.fetch_add(batch_size, std::memory_order_relaxed);
+    stats_->nn_evaluations.fetch_add(unique_count, std::memory_order_relaxed);
+  }
+}
+
+void BatchedGPUEvaluator::evaluate_async(const Position &pos, uint64_t key,
+                                         Color stm, EvalCallback callback) {
+  // Check TT first
+  size_t tt_idx = key % TT_SIZE;
+  if (tt_[tt_idx].key == key) {
+    // Cache hit - invoke callback immediately
+    callback(tt_[tt_idx].value);
+    return;
+  }
+
+  // Add to async queue
+  pending_async_count_.fetch_add(1, std::memory_order_relaxed);
+
+  AsyncEvalRequest async_req;
+  async_req.pos_data.from_position(pos);
+  async_req.position_key = key;
+  async_req.side_to_move = stm;
+  async_req.callback = std::move(callback);
+
+  {
+    std::lock_guard<std::mutex> lock(async_mutex_);
+    async_requests_.push_back(std::move(async_req));
+  }
+  pending_cv_.notify_one();
+}
+
+void BatchedGPUEvaluator::process_batch_async(
+    std::vector<EvalRequest *> &batch) {
+  if (!gpu_manager_ || batch.empty())
+    return;
+
+  // Wait if too many batches in flight
+  while (inflight_batches_.load(std::memory_order_acquire) >=
+         MAX_INFLIGHT_BATCHES) {
+    std::this_thread::yield();
+  }
+
+  const size_t batch_size = batch.size();
+
+  // Deduplication
+  std::unordered_map<uint64_t, std::vector<size_t>> key_to_indices;
+  key_to_indices.reserve(batch_size);
+  std::vector<size_t> unique_indices;
+  unique_indices.reserve(batch_size);
+
+  for (size_t i = 0; i < batch_size; ++i) {
+    uint64_t key = batch[i]->position_key;
+    auto it = key_to_indices.find(key);
+    if (it == key_to_indices.end()) {
+      key_to_indices[key] = {i};
+      unique_indices.push_back(i);
+    } else {
+      it->second.push_back(i);
+    }
+  }
+
+  const size_t unique_count = unique_indices.size();
+
+  // Build GPU batch
+  auto gpu_batch = std::make_shared<GPU::GPUEvalBatch>();
+  gpu_batch->reserve(static_cast<int>(unique_count));
+
+  for (size_t idx : unique_indices) {
+    gpu_batch->add_position_data(batch[idx]->pos_data);
+  }
+
+  // Copy data needed for completion handler
+  auto batch_copy = std::make_shared<std::vector<EvalRequest *>>(batch);
+  auto unique_indices_copy =
+      std::make_shared<std::vector<size_t>>(std::move(unique_indices));
+  auto key_map_copy =
+      std::make_shared<std::unordered_map<uint64_t, std::vector<size_t>>>(
+          std::move(key_to_indices));
+
+  inflight_batches_.fetch_add(1, std::memory_order_release);
+
+  // Submit async with completion handler
+  gpu_manager_->evaluate_batch_async(*gpu_batch, [this, gpu_batch, batch_copy,
+                                                  unique_indices_copy,
+                                                  key_map_copy,
+                                                  unique_count](bool success) {
+    // Completion handler - runs on GPU completion thread
+    if (success) {
+      for (size_t i = 0; i < unique_count; ++i) {
+        size_t orig_idx = (*unique_indices_copy)[i];
+        EvalRequest *req = (*batch_copy)[orig_idx];
+
+        int32_t psqt =
+            gpu_batch->psqt_scores.size() > i ? gpu_batch->psqt_scores[i] : 0;
+        int32_t pos_score = gpu_batch->positional_scores.size() > i
+                                ? gpu_batch->positional_scores[i]
+                                : 0;
+        int32_t raw_score = psqt + pos_score;
+
+        float x = static_cast<float>(raw_score) / 400.0f;
+        float value = std::tanh(x);
+
+        if (req->side_to_move == BLACK) {
+          value = -value;
+        }
+
+        // Store in TT
+        uint32_t age = current_age_.load(std::memory_order_relaxed);
+        size_t tt_idx = req->position_key % TT_SIZE;
+        tt_[tt_idx].value = value;
+        tt_[tt_idx].key = req->position_key;
+        tt_[tt_idx].age = age;
+
+        // Complete all requests with same key
+        for (size_t dup_idx : (*key_map_copy)[req->position_key]) {
+          (*batch_copy)[dup_idx]->result = value;
+          (*batch_copy)[dup_idx]->completed.store(true,
+                                                  std::memory_order_release);
+        }
+      }
+    } else {
+      // On failure, complete with default value
+      for (auto *req : *batch_copy) {
+        req->result = 0.0f;
+        req->completed.store(true, std::memory_order_release);
+      }
+    }
+
+    inflight_batches_.fetch_sub(1, std::memory_order_release);
+
+    if (stats_) {
+      stats_->nn_evaluations.fetch_add(unique_count, std::memory_order_relaxed);
+    }
+  });
+
+  if (stats_) {
+    stats_->nn_batches.fetch_add(1, std::memory_order_relaxed);
+    stats_->total_batch_size.fetch_add(batch_size, std::memory_order_relaxed);
+    stats_->batch_count.fetch_add(1, std::memory_order_relaxed);
   }
 }
 
 float BatchedGPUEvaluator::evaluate(const Position &pos, WorkerContext &ctx) {
   uint64_t key = pos.key();
   size_t tt_idx = key % TT_SIZE;
+
+  // Prefetch TT entry for cache efficiency
+  __builtin_prefetch(&tt_[tt_idx], 0, 3);
 
   if (tt_[tt_idx].key == key) {
     ctx.cache_hits++;
@@ -182,11 +412,19 @@ float BatchedGPUEvaluator::evaluate(const Position &pos, WorkerContext &ctx) {
   }
   pending_cv_.notify_one();
 
-  // Spin-wait for result (faster than condition variable for short waits)
+  // Exponential backoff spin-wait (more efficient than constant yield)
   int spin_count = 0;
+  int backoff = 1;
   while (!req->completed.load(std::memory_order_acquire)) {
-    if (++spin_count > 1000) {
-      std::this_thread::yield();
+    if (++spin_count > backoff) {
+      if (backoff < 1024) {
+        // Exponential backoff
+        backoff *= 2;
+        CPU_PAUSE(); // CPU hint for spin-wait
+      } else {
+        // After enough spins, yield
+        std::this_thread::yield();
+      }
       spin_count = 0;
     }
   }
@@ -236,31 +474,33 @@ void ThreadSafeNode::create_edges(const MoveList<LEGAL> &moves) {
 
 void ThreadSafeNode::update_stats(float value, float draw_prob,
                                   float moves_left) {
-  // Optimized: Use a single fetch_add for n_ first, then update others
-  // This reduces contention on multiple atomics
+  // Optimized: Batch atomic updates to reduce memory barriers
+  // Use a single CAS loop for W update, then derive Q from it
 
-  // Increment visit count first
+  // First, increment visit count (this is the synchronization point)
   uint32_t new_n = n_.fetch_add(1, std::memory_order_acq_rel) + 1;
 
   // Update W using CAS (unavoidable for float addition)
-  float old_w = w_.load(std::memory_order_relaxed);
-  while (!w_.compare_exchange_weak(old_w, old_w + value,
-                                   std::memory_order_release,
-                                   std::memory_order_relaxed)) {
-    // Spin on failure
-  }
+  float old_w, new_w;
+  old_w = w_.load(std::memory_order_relaxed);
+  do {
+    new_w = old_w + value;
+  } while (!w_.compare_exchange_weak(old_w, new_w, std::memory_order_release,
+                                     std::memory_order_relaxed));
 
-  // Update Q value (can use relaxed since readers tolerate stale values)
-  float new_q = (old_w + value) / new_n;
-  q_.store(new_q, std::memory_order_relaxed);
+  // Batch the remaining updates with relaxed ordering
+  // These don't need strong synchronization for MCTS correctness
+  float inv_n = 1.0f / new_n;
+  q_.store(new_w * inv_n, std::memory_order_relaxed);
 
-  // Update draw probability (relaxed is fine for MCTS)
+  // Use exponential moving average for draw and moves_left
+  // More stable than running average for MCTS
+  float alpha = 2.0f * inv_n; // Adaptive smoothing factor
   float old_d = d_.load(std::memory_order_relaxed);
-  d_.store(old_d + (draw_prob - old_d) / new_n, std::memory_order_relaxed);
+  d_.store(old_d + alpha * (draw_prob - old_d), std::memory_order_relaxed);
 
-  // Update moves left estimate (relaxed is fine for MCTS)
   float old_m = m_.load(std::memory_order_relaxed);
-  m_.store(old_m + (moves_left - old_m) / new_n, std::memory_order_relaxed);
+  m_.store(old_m + alpha * (moves_left - old_m), std::memory_order_relaxed);
 }
 
 void ThreadSafeNode::set_terminal(Terminal type, float value) {
@@ -399,6 +639,11 @@ void ThreadSafeMCTS::start_search(const std::string &fen,
     batched_evaluator_ = std::make_unique<BatchedGPUEvaluator>(
         gpu_manager_, &stats_, config_.min_batch_size, config_.max_batch_size,
         config_.batch_timeout_us);
+    // Note: Async mode disabled by default - synchronous batching is more
+    // efficient for MCTS because workers need to wait for evaluation results
+    // anyway. Multiple command queues are still available for future async
+    // workloads.
+    batched_evaluator_->set_async_mode(false);
     batched_evaluator_->start();
   }
 
@@ -640,16 +885,23 @@ ThreadSafeNode *ThreadSafeMCTS::select_leaf(WorkerContext &ctx) {
 
     TSEdge &edge = node->edges()[best_idx];
 
-    // Get or create child node
+    // Get or create child node - use lock-free CAS when possible
     ThreadSafeNode *child = edge.child.load(std::memory_order_acquire);
 
     if (!child) {
-      // Try to create child (use CAS to avoid race)
-      std::lock_guard<std::mutex> lock(node->mutex());
-      child = edge.child.load(std::memory_order_acquire);
-      if (!child) {
-        child = tree_->allocate_node(node, best_idx);
-        edge.child.store(child, std::memory_order_release);
+      // Try to create child using CAS (lock-free fast path)
+      ThreadSafeNode *new_child = tree_->allocate_node(node, best_idx);
+      ThreadSafeNode *expected = nullptr;
+
+      if (edge.child.compare_exchange_strong(expected, new_child,
+                                             std::memory_order_release,
+                                             std::memory_order_acquire)) {
+        // We won the race, use our new child
+        child = new_child;
+      } else {
+        // Another thread created it first, use theirs and recycle ours
+        child = expected;
+        // Note: new_child is "lost" but arena allocation makes this cheap
       }
     }
 
@@ -675,12 +927,12 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   float parent_sqrt = std::sqrt(parent_n + 1.0f);
   float cpuct_sqrt = cpuct * parent_sqrt;
 
-  // Use pre-allocated buffer
-  ctx.puct_scores.resize(num_edges);
-
   const TSEdge *edges = node->edges();
 
-  // Compute all scores (cache-friendly sequential access)
+  // Single-pass selection
+  int best_idx = 0;
+  float best_score = -1e9f;
+
   for (int i = 0; i < num_edges; ++i) {
     const TSEdge &edge = edges[i];
     ThreadSafeNode *child = edge.child.load(std::memory_order_acquire);
@@ -700,15 +952,9 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
       u = cpuct_sqrt * policy;
     }
 
-    ctx.puct_scores[i] = q + u;
-  }
-
-  // Find best
-  int best_idx = 0;
-  float best_score = ctx.puct_scores[0];
-  for (int i = 1; i < num_edges; ++i) {
-    if (ctx.puct_scores[i] > best_score) {
-      best_score = ctx.puct_scores[i];
+    float score = q + u;
+    if (score > best_score) {
+      best_score = score;
       best_idx = i;
     }
   }

@@ -336,9 +336,10 @@ HybridNode *SearchWorker::select_and_expand(Position &pos, StateInfo *states) {
             config_.fpu_reduction * std::sqrt(static_cast<float>(node->n()));
     }
 
-    const auto &edges = node->edges();
-    for (size_t i = 0; i < edges.size(); ++i) {
-      const auto &edge = edges[i];
+    int num_edges = node->num_edges();
+    const HybridEdge *edges = node->edges();
+    for (int i = 0; i < num_edges; ++i) {
+      const HybridEdge &edge = edges[i];
       HybridNode *child = edge.child();
 
       float puct;
@@ -368,14 +369,16 @@ HybridNode *SearchWorker::select_and_expand(Position &pos, StateInfo *states) {
     HybridNode *child = edge.child();
 
     if (!child) {
-      // Create new node (with synchronization)
-      std::lock_guard<std::mutex> lock(node->mutex());
-      child = edge.child(); // Double-check
-      if (!child) {
-        child = tree_->allocate_node(node, best_idx);
-        edge.set_child(child);
-
-        // Expand the new node
+      // Create new node (arena allocation is thread-safe)
+      child = tree_->allocate_node(node, best_idx);
+      HybridNode *expected = nullptr;
+      if (!edge.child_.compare_exchange_strong(expected, child,
+                                               std::memory_order_release,
+                                               std::memory_order_acquire)) {
+        // Another thread created the child first, use their node
+        child = expected;
+      } else {
+        // We successfully set the child, now expand it
         MoveList<LEGAL> moves(pos);
         std::vector<MCTSMove> mcts_moves;
         for (const auto &m : moves) {
@@ -486,11 +489,12 @@ void SearchWorker::generate_policy(HybridNode *node, const Position &pos) {
   if (!node->has_children())
     return;
 
-  auto &edges = node->edges();
+  int num_edges = node->num_edges();
+  HybridEdge *edges = node->edges();
   float total_score = 0.0f;
-  std::vector<float> scores(edges.size());
+  std::vector<float> scores(num_edges);
 
-  for (size_t i = 0; i < edges.size(); ++i) {
+  for (int i = 0; i < num_edges; ++i) {
     Move m = edges[i].move().to_stockfish();
     float score = 1.0f;
 
@@ -518,7 +522,7 @@ void SearchWorker::generate_policy(HybridNode *node, const Position &pos) {
 
   // Normalize and set policies
   if (total_score > 0) {
-    for (size_t i = 0; i < edges.size(); ++i) {
+    for (int i = 0; i < num_edges; ++i) {
       edges[i].set_policy(scores[i] / total_score);
     }
   }

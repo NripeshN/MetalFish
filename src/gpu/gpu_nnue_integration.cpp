@@ -64,19 +64,29 @@ EvalStrategy GPUTuningParams::select_strategy(int batch_size) const {
 // ============================================================================
 
 void GPUPositionData::from_position(const Position &pos) {
-  std::memset(this, 0, sizeof(GPUPositionData));
+  // Direct assignment instead of memset+copy (faster for small struct)
+  // Copy piece bitboards - unrolled for better performance
+  pieces[0][0] = pos.pieces(WHITE, NO_PIECE_TYPE);
+  pieces[0][1] = pos.pieces(WHITE, PAWN);
+  pieces[0][2] = pos.pieces(WHITE, KNIGHT);
+  pieces[0][3] = pos.pieces(WHITE, BISHOP);
+  pieces[0][4] = pos.pieces(WHITE, ROOK);
+  pieces[0][5] = pos.pieces(WHITE, QUEEN);
+  pieces[0][6] = pos.pieces(WHITE, KING);
 
-  // Copy piece bitboards
-  for (int c = 0; c < 2; c++) {
-    for (int pt = 0; pt <= 6; pt++) {
-      pieces[c][pt] = pos.pieces(Color(c), PieceType(pt));
-    }
-  }
+  pieces[1][0] = pos.pieces(BLACK, NO_PIECE_TYPE);
+  pieces[1][1] = pos.pieces(BLACK, PAWN);
+  pieces[1][2] = pos.pieces(BLACK, KNIGHT);
+  pieces[1][3] = pos.pieces(BLACK, BISHOP);
+  pieces[1][4] = pos.pieces(BLACK, ROOK);
+  pieces[1][5] = pos.pieces(BLACK, QUEEN);
+  pieces[1][6] = pos.pieces(BLACK, KING);
 
   king_sq[0] = pos.square<KING>(WHITE);
   king_sq[1] = pos.square<KING>(BLACK);
   stm = pos.side_to_move();
   piece_count = pos.count<ALL_PIECES>();
+  padding[0] = padding[1] = padding[2] = padding[3] = 0;
 }
 
 // ============================================================================
@@ -1651,8 +1661,10 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
   // Note: positions_buffer_ upload removed - feature extraction is done on CPU
   // and features are written directly to GPU buffers via unified memory
 
-  // Create command encoder
-  auto encoder = backend.create_encoder();
+  // Create command encoder - use parallel encoder for better queue distribution
+  // This reduces contention when multiple batches are submitted in quick
+  // succession
+  auto encoder = backend.create_parallel_encoder();
 
   // Select optimal kernel based on batch size and available kernels
   // Testing showed that the fused kernel uses too much threadgroup memory
@@ -1859,7 +1871,8 @@ bool GPUNNUEManager::evaluate_batch_async(
   std::memcpy(positions_buffer_->data(), batch.positions.data(),
               batch_size * sizeof(GPUPositionData));
 
-  auto encoder = backend.create_encoder();
+  // Use parallel encoder for async work to avoid blocking main queue
+  auto encoder = backend.create_parallel_encoder();
 
   // Feature transform - always use dual kernel for both perspectives
   const bool use_dual_kernel =
@@ -2047,7 +2060,9 @@ bool GPUNNUEManager::allocate_network_buffers(GPUNetworkData &, int, bool) {
 bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &) {
   return false;
 }
-bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &, bool) { return false; }
+bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &, bool, bool) {
+  return false;
+}
 std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &,
                                                             bool) {
   return {0, 0};

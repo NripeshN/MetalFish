@@ -3,6 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Implementation of the Hybrid MCTS + Alpha-Beta search.
+  Optimized for Apple Silicon unified memory and Metal GPU.
 
   Licensed under GPL-3.0
 */
@@ -14,6 +15,16 @@
 #include <iomanip>
 #include <random>
 #include <sstream>
+#include <unordered_map>
+
+#ifdef __aarch64__
+// ARM64 (Apple Silicon) - use yield instruction
+#define CPU_PAUSE() __asm__ __volatile__("yield" ::: "memory")
+#else
+// x86 - use _mm_pause
+#include <immintrin.h>
+#define CPU_PAUSE() _mm_pause()
+#endif
 
 using namespace MetalFish;
 
@@ -21,71 +32,300 @@ namespace MetalFish {
 namespace MCTS {
 
 // ============================================================================
+// HybridBatchedEvaluator Implementation
+// ============================================================================
+
+HybridBatchedEvaluator::HybridBatchedEvaluator(GPU::GPUNNUEManager *gpu_manager,
+                                               HybridSearchStats *stats,
+                                               int min_batch_size,
+                                               int max_batch_size,
+                                               int batch_timeout_us)
+    : gpu_manager_(gpu_manager), stats_(stats), min_batch_size_(min_batch_size),
+      max_batch_size_(max_batch_size), batch_timeout_us_(batch_timeout_us) {
+  tt_.resize(TT_SIZE);
+  pending_requests_.reserve(max_batch_size);
+}
+
+HybridBatchedEvaluator::~HybridBatchedEvaluator() { stop(); }
+
+void HybridBatchedEvaluator::start() {
+  if (running_.load(std::memory_order_acquire))
+    return;
+  running_.store(true, std::memory_order_release);
+  eval_thread_ = std::thread(&HybridBatchedEvaluator::eval_thread_main, this);
+}
+
+void HybridBatchedEvaluator::stop() {
+  running_.store(false, std::memory_order_release);
+  pending_cv_.notify_all();
+  if (eval_thread_.joinable()) {
+    eval_thread_.join();
+  }
+}
+
+void HybridBatchedEvaluator::eval_thread_main() {
+  std::vector<HybridEvalRequest *> batch;
+  std::vector<HybridEvalRequest *> next_batch;
+  batch.reserve(max_batch_size_);
+  next_batch.reserve(max_batch_size_);
+
+  int adaptive_timeout_us = batch_timeout_us_;
+
+  auto collect_batch = [&](std::vector<HybridEvalRequest *> &target,
+                           int timeout_us) {
+    target.clear();
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::microseconds(timeout_us);
+
+    while (pending_requests_.size() < static_cast<size_t>(min_batch_size_) &&
+           running_.load(std::memory_order_acquire)) {
+      if (pending_cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
+        break;
+      }
+    }
+
+    size_t count = std::min(pending_requests_.size(),
+                            static_cast<size_t>(max_batch_size_));
+    if (count > 0) {
+      target.insert(target.end(), pending_requests_.begin(),
+                    pending_requests_.begin() + count);
+      pending_requests_.erase(pending_requests_.begin(),
+                              pending_requests_.begin() + count);
+    }
+
+    size_t remaining = pending_requests_.size();
+    if (remaining > 8) {
+      adaptive_timeout_us = std::max(10, adaptive_timeout_us / 2);
+    } else if (remaining == 0 && target.size() < 4) {
+      adaptive_timeout_us =
+          std::min(batch_timeout_us_ * 2, adaptive_timeout_us + 10);
+    }
+  };
+
+  collect_batch(batch, adaptive_timeout_us);
+
+  while (running_.load(std::memory_order_acquire)) {
+    if (!batch.empty()) {
+      std::thread prefetch_thread([&]() {
+        if (running_.load(std::memory_order_acquire)) {
+          collect_batch(next_batch, adaptive_timeout_us / 2);
+        }
+      });
+
+      process_batch(batch);
+
+      if (stats_) {
+        stats_->nn_batches.fetch_add(1, std::memory_order_relaxed);
+        stats_->total_batch_size.fetch_add(batch.size(),
+                                           std::memory_order_relaxed);
+        stats_->batch_count.fetch_add(1, std::memory_order_relaxed);
+      }
+
+      prefetch_thread.join();
+      std::swap(batch, next_batch);
+    } else {
+      collect_batch(batch, adaptive_timeout_us);
+    }
+  }
+
+  {
+    std::unique_lock<std::mutex> lock(pending_mutex_);
+    if (!pending_requests_.empty()) {
+      batch.clear();
+      batch.insert(batch.end(), pending_requests_.begin(),
+                   pending_requests_.end());
+      pending_requests_.clear();
+    }
+  }
+  if (!batch.empty()) {
+    process_batch(batch);
+  }
+}
+
+void HybridBatchedEvaluator::process_batch(
+    std::vector<HybridEvalRequest *> &batch) {
+  if (!gpu_manager_ || batch.empty())
+    return;
+
+  const size_t batch_size = batch.size();
+
+  // Deduplication: group requests by position key
+  std::unordered_map<uint64_t, std::vector<size_t>> key_to_indices;
+  std::vector<size_t> unique_indices;
+  unique_indices.reserve(batch_size);
+
+  for (size_t i = 0; i < batch_size; ++i) {
+    uint64_t key = batch[i]->position_key;
+    auto it = key_to_indices.find(key);
+    if (it == key_to_indices.end()) {
+      key_to_indices[key] = {i};
+      unique_indices.push_back(i);
+    } else {
+      it->second.push_back(i);
+    }
+  }
+
+  const size_t unique_count = unique_indices.size();
+
+  GPU::GPUEvalBatch gpu_batch;
+  gpu_batch.reserve(static_cast<int>(unique_count));
+
+  for (size_t idx : unique_indices) {
+    gpu_batch.add_position_data(batch[idx]->pos_data);
+  }
+
+  gpu_manager_->evaluate_batch(gpu_batch, true);
+
+  for (size_t i = 0; i < unique_count; ++i) {
+    size_t orig_idx = unique_indices[i];
+    HybridEvalRequest *req = batch[orig_idx];
+
+    int32_t psqt =
+        gpu_batch.psqt_scores.size() > i ? gpu_batch.psqt_scores[i] : 0;
+    int32_t pos_score = gpu_batch.positional_scores.size() > i
+                            ? gpu_batch.positional_scores[i]
+                            : 0;
+    int32_t raw_score = psqt + pos_score;
+
+    float value = std::tanh(static_cast<float>(raw_score) / 400.0f);
+
+    if (req->side_to_move == BLACK) {
+      value = -value;
+    }
+
+    // Store in TT with age
+    uint32_t age = current_age_.load(std::memory_order_relaxed);
+    size_t tt_idx = req->position_key % TT_SIZE;
+    tt_[tt_idx].value = value;
+    tt_[tt_idx].key = req->position_key;
+    tt_[tt_idx].age = age;
+
+    // Complete all requests with same key (including duplicates)
+    for (size_t dup_idx : key_to_indices[req->position_key]) {
+      batch[dup_idx]->result = value;
+      batch[dup_idx]->completed.store(true, std::memory_order_release);
+    }
+  }
+
+  if (stats_) {
+    stats_->nn_evaluations.fetch_add(unique_count, std::memory_order_relaxed);
+  }
+}
+
+float HybridBatchedEvaluator::evaluate(const MCTSPosition &pos,
+                                       uint64_t &cache_hits,
+                                       uint64_t &cache_misses) {
+  const Position &sf_pos = pos.stockfish_position();
+  uint64_t key = sf_pos.key();
+  size_t tt_idx = key % TT_SIZE;
+
+  if (tt_[tt_idx].key == key) {
+    cache_hits++;
+    return tt_[tt_idx].value;
+  }
+
+  cache_misses++;
+
+  HybridEvalRequest *req = request_pool_.acquire();
+  req->pos_data.from_position(sf_pos);
+  req->position_key = key;
+  req->side_to_move = sf_pos.side_to_move();
+  req->ready.store(true, std::memory_order_release);
+
+  {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    pending_requests_.push_back(req);
+  }
+  pending_cv_.notify_one();
+
+  // Spin-wait for result
+  int spin_count = 0;
+  while (!req->completed.load(std::memory_order_acquire)) {
+    if (++spin_count > 1000) {
+      std::this_thread::yield();
+      spin_count = 0;
+    }
+  }
+
+  float result = req->result;
+  request_pool_.release(req);
+
+  return result;
+}
+
+// ============================================================================
 // HybridNode Implementation
 // ============================================================================
 
 HybridNode::HybridNode(HybridNode *parent, int edge_index)
-    : parent_(parent), edge_index_(edge_index) {}
-
-HybridNode::~HybridNode() {
-  // Children are NOT deleted here - they are owned by node_pool_ in HybridTree.
-  // The node_pool_ uses unique_ptr to manage all allocated nodes, so manual
-  // deletion here would cause double-free when both the destructor and the
-  // unique_ptr try to delete the same node.
+    : parent_(parent), edge_index_(edge_index) {
+  n_.store(0, std::memory_order_relaxed);
+  n_in_flight_.store(0, std::memory_order_relaxed);
+  w_.store(0.0f, std::memory_order_relaxed);
+  q_.store(0.0f, std::memory_order_relaxed);
+  d_.store(0.0f, std::memory_order_relaxed);
+  m_.store(0.0f, std::memory_order_relaxed);
+  terminal_type_.store(Terminal::NonTerminal, std::memory_order_relaxed);
+  has_ab_score_.store(false, std::memory_order_relaxed);
+  ab_score_.store(0, std::memory_order_relaxed);
+  ab_depth_.store(0, std::memory_order_relaxed);
 }
 
 void HybridNode::create_edges(const MCTSMoveList &moves) {
-  edges_.clear();
-  edges_.reserve(moves.size());
-  for (const auto &move : moves) {
-    edges_.emplace_back(move);
+  if (moves.empty())
+    return;
+
+  int count = static_cast<int>(moves.size());
+  edges_ = std::make_unique<HybridEdge[]>(count);
+
+  float uniform = 1.0f / count;
+  int idx = 0;
+  for (const auto &m : moves) {
+    edges_[idx].init(m, uniform);
+    idx++;
   }
-}
 
-void HybridNode::add_visit() { n_.fetch_add(1, std::memory_order_relaxed); }
-
-void HybridNode::add_virtual_loss() {
-  n_in_flight_.fetch_add(1, std::memory_order_relaxed);
-}
-
-void HybridNode::remove_virtual_loss() {
-  n_in_flight_.fetch_sub(1, std::memory_order_relaxed);
+  num_edges_.store(count, std::memory_order_release);
 }
 
 void HybridNode::update_stats(float value, float draw_prob, float moves_left) {
-  // Optimized: increment n_ first, then update stats with relaxed ordering
-  // MCTS tolerates slightly stale reads, so we can use relaxed ordering
+  // Increment visit count first
   uint32_t new_n = n_.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-  // Use mutex only for the floating point updates
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  if (new_n == 1) {
-    q_ = value;
-    d_ = draw_prob;
-    m_ = moves_left;
-  } else {
-    // Incremental update with relaxed precision (fine for MCTS)
-    float n_f = static_cast<float>(new_n);
-    float inv_n = 1.0f / n_f;
-    q_ += (value - q_) * inv_n;
-    d_ += (draw_prob - d_) * inv_n;
-    m_ += (moves_left - m_) * inv_n;
+  // Update W using CAS
+  float old_w = w_.load(std::memory_order_relaxed);
+  while (!w_.compare_exchange_weak(old_w, old_w + value,
+                                   std::memory_order_release,
+                                   std::memory_order_relaxed)) {
   }
+
+  // Update Q (relaxed is fine for MCTS)
+  float new_q = (old_w + value) / new_n;
+  q_.store(new_q, std::memory_order_relaxed);
+
+  // Update D and M
+  float old_d = d_.load(std::memory_order_relaxed);
+  d_.store(old_d + (draw_prob - old_d) / new_n, std::memory_order_relaxed);
+
+  float old_m = m_.load(std::memory_order_relaxed);
+  m_.store(old_m + (moves_left - old_m) / new_n, std::memory_order_relaxed);
 }
 
 void HybridNode::set_terminal(Terminal type, float value) {
-  terminal_type_ = type;
-  q_ = value;
-  d_ = (type == Terminal::Draw) ? 1.0f : 0.0f;
-  m_ = 0.0f;
+  terminal_type_.store(type, std::memory_order_release);
+  w_.store(value, std::memory_order_release);
+  q_.store(value, std::memory_order_release);
+  n_.store(1, std::memory_order_release);
+  d_.store((type == Terminal::Draw) ? 1.0f : 0.0f, std::memory_order_release);
+  m_.store(0.0f, std::memory_order_release);
 }
 
 void HybridNode::set_ab_score(int score, int depth) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  has_ab_score_ = true;
-  ab_score_ = score;
-  ab_depth_ = depth;
+  has_ab_score_.store(true, std::memory_order_release);
+  ab_score_.store(score, std::memory_order_release);
+  ab_depth_.store(depth, std::memory_order_release);
 }
 
 float HybridNode::get_u(float cpuct, float parent_n_sqrt) const {
@@ -96,52 +336,109 @@ float HybridNode::get_u(float cpuct, float parent_n_sqrt) const {
 
 float HybridNode::get_puct(float cpuct, float parent_n_sqrt, float fpu) const {
   uint32_t n = n_.load(std::memory_order_relaxed);
-  float q = (n > 0) ? q_ : fpu;
+  float q_val = (n > 0) ? q_.load(std::memory_order_relaxed) : fpu;
   float u = get_u(cpuct, parent_n_sqrt);
 
-  // Get policy from parent edge
-  float p = 1.0f; // Default uniform
-  if (parent_ && edge_index_ >= 0 &&
-      edge_index_ < static_cast<int>(parent_->edges_.size())) {
-    p = parent_->edges_[edge_index_].policy();
+  float p = 1.0f;
+  if (parent_ && edge_index_ >= 0 && edge_index_ < parent_->num_edges()) {
+    p = parent_->edges()[edge_index_].policy();
   }
 
-  return q + u * p;
+  return q_val + u * p;
 }
 
 // ============================================================================
-// HybridTree Implementation
+// HybridTree Implementation with Arena Allocation
 // ============================================================================
 
-HybridTree::HybridTree() : root_(std::make_unique<HybridNode>()) {}
+HybridTree::HybridTree() {
+  arenas_.push_back(std::make_unique<NodeArena>());
+  root_ = allocate_node(nullptr, -1);
+}
 
 HybridTree::~HybridTree() = default;
 
 void HybridTree::reset(const MCTSPositionHistory &history) {
-  // Clear the node pool first (this deletes all allocated nodes)
-  node_pool_.clear();
-  root_ = std::make_unique<HybridNode>();
+  {
+    std::unique_lock<std::shared_mutex> lock(fen_mutex_);
+    root_fen_ = history.current().fen();
+  }
+
   history_ = history;
-  node_count_ = 1;
+
+  {
+    std::lock_guard<std::mutex> lock(arena_mutex_);
+    arenas_.clear();
+    arenas_.push_back(std::make_unique<NodeArena>());
+    current_arena_.store(0, std::memory_order_relaxed);
+  }
+
+  node_count_.store(0, std::memory_order_relaxed);
+  root_ = allocate_node(nullptr, -1);
 }
 
 bool HybridTree::apply_move(MCTSMove move) {
-  // Tree reuse is disabled because child nodes are owned by node_pool_,
-  // not by their parent nodes. Extracting a subtree would require complex
-  // ownership transfer from node_pool_. For simplicity, we always reset.
-  // This is a common trade-off in MCTS implementations.
   history_.do_move(move);
-  node_pool_.clear();
-  root_ = std::make_unique<HybridNode>();
-  node_count_ = 1;
+
+  {
+    std::unique_lock<std::shared_mutex> lock(fen_mutex_);
+    root_fen_ = history_.current().fen();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(arena_mutex_);
+    arenas_.clear();
+    arenas_.push_back(std::make_unique<NodeArena>());
+    current_arena_.store(0, std::memory_order_relaxed);
+  }
+
+  node_count_.store(0, std::memory_order_relaxed);
+  root_ = allocate_node(nullptr, -1);
   return false;
 }
 
 HybridNode *HybridTree::allocate_node(HybridNode *parent, int edge_index) {
-  std::lock_guard<std::mutex> lock(pool_mutex_);
-  node_pool_.push_back(std::make_unique<HybridNode>(parent, edge_index));
+  // Try current arena first (lock-free fast path)
+  size_t arena_idx = current_arena_.load(std::memory_order_acquire);
+
+  if (arena_idx < arenas_.size()) {
+    NodeArena *arena = arenas_[arena_idx].get();
+    size_t slot = arena->next.fetch_add(1, std::memory_order_relaxed);
+
+    if (slot < ARENA_SIZE) {
+      HybridNode *node = &arena->nodes[slot];
+      node->init(parent, edge_index);
+      node_count_.fetch_add(1, std::memory_order_relaxed);
+      return node;
+    }
+  }
+
+  // Need new arena (slow path)
+  std::lock_guard<std::mutex> lock(arena_mutex_);
+
+  arena_idx = current_arena_.load(std::memory_order_acquire);
+  if (arena_idx < arenas_.size()) {
+    NodeArena *arena = arenas_[arena_idx].get();
+    if (arena->next.load(std::memory_order_relaxed) < ARENA_SIZE) {
+      size_t slot = arena->next.fetch_add(1, std::memory_order_relaxed);
+      if (slot < ARENA_SIZE) {
+        HybridNode *node = &arena->nodes[slot];
+        node->init(parent, edge_index);
+        node_count_.fetch_add(1, std::memory_order_relaxed);
+        return node;
+      }
+    }
+  }
+
+  arenas_.push_back(std::make_unique<NodeArena>());
+  current_arena_.store(arenas_.size() - 1, std::memory_order_release);
+
+  NodeArena *arena = arenas_.back().get();
+  size_t slot = arena->next.fetch_add(1, std::memory_order_relaxed);
+  HybridNode *node = &arena->nodes[slot];
+  node->init(parent, edge_index);
   node_count_.fetch_add(1, std::memory_order_relaxed);
-  return node_pool_.back().get();
+  return node;
 }
 
 // ============================================================================
@@ -149,11 +446,17 @@ HybridNode *HybridTree::allocate_node(HybridNode *parent, int edge_index) {
 // ============================================================================
 
 HybridSearch::HybridSearch(const HybridSearchConfig &config)
-    : config_(config), tree_(std::make_unique<HybridTree>()) {}
+    : config_(config), tree_(std::make_unique<HybridTree>()) {
+  simple_tt_.resize(SIMPLE_TT_SIZE);
+}
 
 HybridSearch::~HybridSearch() {
   stop();
   wait();
+
+  if (batched_evaluator_) {
+    batched_evaluator_->stop();
+  }
 }
 
 void HybridSearch::set_neural_network(std::shared_ptr<MCTSNeuralNetwork> nn) {
@@ -168,36 +471,51 @@ void HybridSearch::start_search(const MCTSPositionHistory &history,
                                 const Search::LimitsType &limits,
                                 BestMoveCallback best_move_cb,
                                 InfoCallback info_cb) {
-  // Stop any existing search
   stop();
   wait();
 
-  // Reset state
   stats_.reset();
-  stop_flag_ = false;
-  running_ = true;
+  stop_flag_.store(false, std::memory_order_release);
+  running_.store(true, std::memory_order_release);
   limits_ = limits;
   best_move_callback_ = best_move_cb;
   info_callback_ = info_cb;
   search_start_ = std::chrono::steady_clock::now();
 
+  // Calculate time budget
+  time_budget_ms_ = get_time_budget_ms();
+
   // Initialize tree
   tree_->reset(history);
 
-  // Start search threads
-  for (int i = 0; i < config_.num_search_threads; ++i) {
-    search_threads_.emplace_back(&HybridSearch::search_thread_main, this);
+  // Get actual thread count and auto-tune
+  int actual_threads = config_.get_num_threads();
+  config_.auto_tune(actual_threads);
+
+  // Initialize batched evaluator if enabled
+  if (config_.use_batched_eval && gpu_nnue_) {
+    batched_evaluator_ = std::make_unique<HybridBatchedEvaluator>(
+        gpu_nnue_, &stats_, config_.min_batch_size, config_.max_batch_size,
+        config_.batch_timeout_us);
+    batched_evaluator_->start();
   }
 
-  // Don't start eval thread - we're doing direct evaluation now
-  // eval_thread_ = std::thread(&HybridSearch::eval_thread_main, this);
+  // Create worker contexts
+  worker_contexts_.clear();
+  for (int i = 0; i < actual_threads; ++i) {
+    auto ctx = std::make_unique<HybridWorkerContext>();
+    ctx->set_root_fen(tree_->root_fen());
+    worker_contexts_.push_back(std::move(ctx));
+  }
+
+  // Start worker threads
+  search_threads_.clear();
+  for (int i = 0; i < actual_threads; ++i) {
+    search_threads_.emplace_back(&HybridSearch::search_thread_main, this, i);
+  }
 }
 
-void HybridSearch::stop() {
-  stop_flag_ = true;
-  batch_cv_.notify_all();
-  results_cv_.notify_all();
-}
+void HybridSearch::stop() { stop_flag_.store(true, std::memory_order_release); }
 
 void HybridSearch::wait() {
   for (auto &thread : search_threads_) {
@@ -207,11 +525,20 @@ void HybridSearch::wait() {
   }
   search_threads_.clear();
 
-  if (eval_thread_.joinable()) {
-    eval_thread_.join();
+  if (batched_evaluator_) {
+    batched_evaluator_->stop();
+    batched_evaluator_.reset();
   }
 
-  running_ = false;
+  running_.store(false, std::memory_order_release);
+
+  // Report best move
+  if (best_move_callback_) {
+    MCTSMove best = select_best_move();
+    std::vector<MCTSMove> pv = get_pv();
+    MCTSMove ponder = (pv.size() > 1) ? pv[1] : MCTSMove();
+    best_move_callback_(best, ponder);
+  }
 }
 
 MCTSMove HybridSearch::get_best_move() const { return select_best_move(); }
@@ -225,11 +552,11 @@ float HybridSearch::get_best_move_q() const {
   int best_idx = -1;
   uint32_t best_n = 0;
 
-  for (size_t i = 0; i < root->edges().size(); ++i) {
-    const auto &edge = root->edges()[i];
+  for (int i = 0; i < root->num_edges(); ++i) {
+    const HybridEdge &edge = root->edges()[i];
     if (edge.child() && edge.child()->n() > best_n) {
       best_n = edge.child()->n();
-      best_idx = static_cast<int>(i);
+      best_idx = i;
     }
   }
 
@@ -250,11 +577,11 @@ std::vector<MCTSMove> HybridSearch::get_pv() const {
     int best_idx = -1;
     uint32_t best_n = 0;
 
-    for (size_t i = 0; i < node->edges().size(); ++i) {
-      const auto &edge = node->edges()[i];
+    for (int i = 0; i < node->num_edges(); ++i) {
+      const HybridEdge &edge = node->edges()[i];
       if (edge.child() && edge.child()->n() > best_n) {
         best_n = edge.child()->n();
-        best_idx = static_cast<int>(i);
+        best_idx = i;
       }
     }
 
@@ -268,44 +595,32 @@ std::vector<MCTSMove> HybridSearch::get_pv() const {
   return pv;
 }
 
-void HybridSearch::search_thread_main() {
-  // Cache root FEN once (avoid repeated string copies)
-  std::string root_fen = tree_->history().current().fen();
+void HybridSearch::search_thread_main(int thread_id) {
+  HybridWorkerContext &ctx = *worker_contexts_[thread_id];
 
   // Thread-local position
   MCTSPosition thread_pos;
-  thread_pos.set_from_fen(root_fen);
+  thread_pos.set_from_fen(ctx.cached_root_fen);
 
-  // Expand root node first (with synchronization)
+  // Expand root node first
   HybridNode *root = tree_->root();
   if (!root) {
-    if (best_move_callback_) {
-      best_move_callback_(MCTSMove(), MCTSMove());
-    }
     return;
   }
 
   // Synchronize root expansion across threads
+  static std::mutex root_expand_mutex;
   {
-    std::lock_guard<std::mutex> lock(root->mutex());
+    std::lock_guard<std::mutex> lock(root_expand_mutex);
     if (!root->has_children()) {
-      expand_node(root, thread_pos);
+      expand_node(root, thread_pos, ctx);
     }
   }
 
-  // Local profiling accumulators (reduce atomic overhead)
-  uint64_t local_selection_us = 0;
-  uint64_t local_expansion_us = 0;
-  uint64_t local_evaluation_us = 0;
-  uint64_t local_backprop_us = 0;
-  uint64_t local_cache_hits = 0;
-  uint64_t local_cache_misses = 0;
-
-  int iterations = 0;
   int iterations_since_stop_check = 0;
 
   while (true) {
-    // Batched stop checks (reduce overhead)
+    // Batched stop checks
     if (++iterations_since_stop_check >=
         HybridSearchConfig::STOP_CHECK_INTERVAL) {
       iterations_since_stop_check = 0;
@@ -313,25 +628,23 @@ void HybridSearch::search_thread_main() {
         break;
     }
 
-    // Profile only every N iterations
     bool do_profile =
-        (iterations % HybridSearchConfig::PROFILE_SAMPLE_RATE) == 0;
+        (ctx.iterations % HybridSearchConfig::PROFILE_SAMPLE_RATE) == 0;
 
-    // Reset position to root (avoid FEN parsing)
+    // Reset position
     MCTSPosition search_pos;
-    search_pos.set_from_fen(root_fen);
+    search_pos.set_from_fen(ctx.cached_root_fen);
 
     // Selection
     auto select_start = do_profile ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
-    HybridNode *node = tree_->root();
-    node = select_node(node, search_pos);
+    HybridNode *node = select_node(tree_->root(), search_pos, ctx);
     auto select_end = do_profile ? std::chrono::steady_clock::now()
                                  : std::chrono::steady_clock::time_point{};
 
     if (!node) {
-      iterations++;
-      if (iterations > 100)
+      ctx.iterations++;
+      if (ctx.iterations > 100)
         break;
       continue;
     }
@@ -355,7 +668,7 @@ void HybridSearch::search_thread_main() {
       node->set_terminal(term_type, value);
       backpropagate(node, value, (result == GameResult::DRAW) ? 1.0f : 0.0f,
                     0.0f);
-      iterations++;
+      ctx.iterations++;
       continue;
     }
 
@@ -363,71 +676,44 @@ void HybridSearch::search_thread_main() {
     auto expand_start = do_profile ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
     if (!node->has_children()) {
-      std::lock_guard<std::mutex> lock(node->mutex());
-      if (!node->has_children()) {
-        expand_node(node, search_pos);
-      }
+      expand_node(node, search_pos, ctx);
     }
     auto expand_end = do_profile ? std::chrono::steady_clock::now()
                                  : std::chrono::steady_clock::time_point{};
 
-    // Evaluation with TT lookup
+    // Evaluation
     auto eval_start = do_profile ? std::chrono::steady_clock::now()
                                  : std::chrono::steady_clock::time_point{};
-    float value = 0.0f;
-    float draw = 0.0f;
-    float moves_left = 30.0f;
-
-    uint64_t hash = search_pos.hash();
-    MCTSStats cached_stats;
-    bool found_in_tt = mcts_tt().probe_mcts(hash, cached_stats);
-
-    if (found_in_tt && cached_stats.n > 0) {
-      value = cached_stats.q;
-      draw = cached_stats.d;
-      moves_left = cached_stats.m;
-      local_cache_hits++;
-    } else {
-      if (gpu_nnue_) {
-        auto [psqt, score] =
-            gpu_nnue_->evaluate_single(search_pos.stockfish_position(), true);
-        value = std::tanh(score / 400.0f);
-        if (search_pos.is_black_to_move()) {
-          value = -value;
-        }
-        draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
-      }
-      mcts_tt().update_mcts(hash, value, draw, moves_left);
-      local_cache_misses++;
-    }
+    float value = evaluate_position(search_pos, ctx);
     auto eval_end = do_profile ? std::chrono::steady_clock::now()
                                : std::chrono::steady_clock::time_point{};
 
     // Backpropagation
     auto backprop_start = do_profile ? std::chrono::steady_clock::now()
                                      : std::chrono::steady_clock::time_point{};
-    backpropagate(node, value, draw, moves_left);
+    float draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
+    backpropagate(node, value, draw, 30.0f);
     auto backprop_end = do_profile ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
 
     // Update profiling (sampled)
     if (do_profile) {
-      local_selection_us +=
+      ctx.selection_time_acc +=
           std::chrono::duration_cast<std::chrono::microseconds>(select_end -
                                                                 select_start)
               .count() *
           HybridSearchConfig::PROFILE_SAMPLE_RATE;
-      local_expansion_us +=
+      ctx.expansion_time_acc +=
           std::chrono::duration_cast<std::chrono::microseconds>(expand_end -
                                                                 expand_start)
               .count() *
           HybridSearchConfig::PROFILE_SAMPLE_RATE;
-      local_evaluation_us +=
+      ctx.evaluation_time_acc +=
           std::chrono::duration_cast<std::chrono::microseconds>(eval_end -
                                                                 eval_start)
               .count() *
           HybridSearchConfig::PROFILE_SAMPLE_RATE;
-      local_backprop_us +=
+      ctx.backprop_time_acc +=
           std::chrono::duration_cast<std::chrono::microseconds>(backprop_end -
                                                                 backprop_start)
               .count() *
@@ -436,344 +722,179 @@ void HybridSearch::search_thread_main() {
 
     stats_.mcts_nodes.fetch_add(1, std::memory_order_relaxed);
     stats_.total_iterations.fetch_add(1, std::memory_order_relaxed);
-    iterations++;
+    ctx.iterations++;
   }
 
   // Flush accumulated stats
-  stats_.selection_time_us.fetch_add(local_selection_us,
+  stats_.selection_time_us.fetch_add(ctx.selection_time_acc,
                                      std::memory_order_relaxed);
-  stats_.expansion_time_us.fetch_add(local_expansion_us,
+  stats_.expansion_time_us.fetch_add(ctx.expansion_time_acc,
                                      std::memory_order_relaxed);
-  stats_.evaluation_time_us.fetch_add(local_evaluation_us,
+  stats_.evaluation_time_us.fetch_add(ctx.evaluation_time_acc,
                                       std::memory_order_relaxed);
-  stats_.backprop_time_us.fetch_add(local_backprop_us,
+  stats_.backprop_time_us.fetch_add(ctx.backprop_time_acc,
                                     std::memory_order_relaxed);
-  stats_.cache_hits.fetch_add(local_cache_hits, std::memory_order_relaxed);
-  stats_.cache_misses.fetch_add(local_cache_misses, std::memory_order_relaxed);
-
-  // Report best move when done
-  if (best_move_callback_) {
-    MCTSMove best = select_best_move();
-    std::vector<MCTSMove> pv = get_pv();
-    MCTSMove ponder = (pv.size() > 1) ? pv[1] : MCTSMove();
-    best_move_callback_(best, ponder);
-  }
+  stats_.cache_hits.fetch_add(ctx.cache_hits, std::memory_order_relaxed);
+  stats_.cache_misses.fetch_add(ctx.cache_misses, std::memory_order_relaxed);
 }
 
-void HybridSearch::eval_thread_main() {
-  while (!stop_flag_) {
-    EvalBatch batch;
-
-    // Wait for batch or timeout
-    {
-      std::unique_lock<std::mutex> lock(batch_mutex_);
-      batch_cv_.wait_for(
-          lock, std::chrono::microseconds(config_.batch_timeout_us),
-          [this] { return !current_batch_.empty() || stop_flag_; });
-
-      if (stop_flag_ && current_batch_.empty())
-        break;
-
-      // Take the batch
-      batch = std::move(current_batch_);
-      current_batch_.clear();
-    }
-
-    if (batch.empty())
-      continue;
-
-    // Evaluate batch using GPU NNUE
-    if (gpu_nnue_ && !batch.positions.empty()) {
-      // Create GPU eval batch
-      GPU::GPUEvalBatch gpu_batch;
-      gpu_batch.count = static_cast<int>(batch.positions.size());
-      gpu_batch.positions.resize(gpu_batch.count);
-      gpu_batch.buckets.resize(gpu_batch.count, 0);
-
-      // Convert positions to GPU format
-      for (size_t i = 0; i < batch.positions.size(); ++i) {
-        const auto &pos = batch.positions[i].stockfish_position();
-        auto &gpu_pos = gpu_batch.positions[i];
-
-        // Fill piece bitboards
-        for (int c = 0; c < 2; ++c) {
-          for (int pt = 0; pt < 7; ++pt) {
-            gpu_pos.pieces[c][pt] = pos.pieces(Color(c), PieceType(pt));
-          }
-        }
-        gpu_pos.king_sq[0] = pos.square<KING>(WHITE);
-        gpu_pos.king_sq[1] = pos.square<KING>(BLACK);
-        gpu_pos.stm = pos.side_to_move();
-        gpu_pos.piece_count = popcount(pos.pieces());
-      }
-
-      // Evaluate on GPU
-      bool success = gpu_nnue_->evaluate_batch(gpu_batch, true);
-
-      if (success) {
-        stats_.nn_batches.fetch_add(1, std::memory_order_relaxed);
-        stats_.nn_evaluations.fetch_add(batch.size(),
-                                        std::memory_order_relaxed);
-
-        // Process results
-        for (size_t i = 0; i < batch.nodes.size(); ++i) {
-          HybridNode *node = batch.nodes[i];
-
-          // Convert NNUE score to probability
-          int score = gpu_batch.positional_scores[i];
-          float value =
-              std::tanh(static_cast<float>(score) / 400.0f); // Normalize
-
-          // Set uniform policy for now (GPU NNUE doesn't provide policy)
-          if (node->has_children()) {
-            float uniform_p = 1.0f / node->edges().size();
-            for (auto &edge : node->edges()) {
-              edge.set_policy(uniform_p);
-            }
-          }
-
-          // Backpropagate
-          backpropagate(node, value, 0.3f,
-                        30.0f); // Default draw prob and moves left
-        }
-      }
-    }
-    // Fallback to neural network if available
-    else if (neural_network_) {
-      std::vector<const MCTSPosition *> pos_ptrs;
-      for (const auto &pos : batch.positions) {
-        pos_ptrs.push_back(&pos);
-      }
-
-      auto results = neural_network_->evaluate_batch(pos_ptrs);
-
-      stats_.nn_batches.fetch_add(1, std::memory_order_relaxed);
-      stats_.nn_evaluations.fetch_add(batch.size(), std::memory_order_relaxed);
-
-      // Process results
-      for (size_t i = 0; i < batch.nodes.size(); ++i) {
-        HybridNode *node = batch.nodes[i];
-        const auto &eval = results[i];
-
-        // Set policy
-        if (node->has_children() && !eval.policy.empty()) {
-          for (auto &edge : node->edges()) {
-            for (const auto &[move, prob] : eval.policy) {
-              if (edge.move() == move) {
-                edge.set_policy(prob);
-                break;
-              }
-            }
-          }
-        }
-
-        // Backpropagate
-        backpropagate(node, eval.q, eval.wdl[1], eval.m);
-      }
-    }
-    // Last resort: use simple material evaluation
-    else {
-      for (size_t i = 0; i < batch.nodes.size(); ++i) {
-        HybridNode *node = batch.nodes[i];
-        const auto &pos = batch.positions[i];
-
-        // Simple material evaluation
-        Value v = Eval::simple_eval(pos.stockfish_position());
-        float value = std::tanh(static_cast<float>(v) / 400.0f);
-
-        // Uniform policy
-        if (node->has_children()) {
-          float uniform_p = 1.0f / node->edges().size();
-          for (auto &edge : node->edges()) {
-            edge.set_policy(uniform_p);
-          }
-        }
-
-        backpropagate(node, value, 0.3f, 30.0f);
-      }
-    }
+// Evaluation methods
+float HybridSearch::evaluate_position(const MCTSPosition &pos,
+                                      HybridWorkerContext &ctx) {
+  if (config_.use_batched_eval && batched_evaluator_) {
+    return evaluate_position_batched(pos, ctx);
   }
+  return evaluate_position_direct(pos, ctx);
 }
 
-HybridNode *HybridSearch::select_node(HybridNode *node, MCTSPosition &pos) {
+float HybridSearch::evaluate_position_batched(const MCTSPosition &pos,
+                                              HybridWorkerContext &ctx) {
+  return batched_evaluator_->evaluate(pos, ctx.cache_hits, ctx.cache_misses);
+}
+
+float HybridSearch::evaluate_position_direct(const MCTSPosition &pos,
+                                             HybridWorkerContext &ctx) {
+  uint64_t key = pos.stockfish_position().key();
+  size_t tt_idx = key % SIMPLE_TT_SIZE;
+
+  if (simple_tt_[tt_idx].key == key) {
+    ctx.cache_hits++;
+    return simple_tt_[tt_idx].value;
+  }
+
+  ctx.cache_misses++;
+
+  float value = 0.0f;
+  if (gpu_nnue_) {
+    std::lock_guard<std::mutex> lock(gpu_mutex_);
+    auto [psqt, score] =
+        gpu_nnue_->evaluate_single(pos.stockfish_position(), true);
+    value = std::tanh(static_cast<float>(score) / 400.0f);
+    if (pos.is_black_to_move()) {
+      value = -value;
+    }
+  }
+
+  simple_tt_[tt_idx].key = key;
+  simple_tt_[tt_idx].value = value;
+
+  return value;
+}
+
+HybridNode *HybridSearch::select_node(HybridNode *node, MCTSPosition &pos,
+                                      HybridWorkerContext &ctx) {
   while (node->has_children() && !node->is_terminal()) {
-    // Calculate parent N sqrt for PUCT
     float parent_n_sqrt = std::sqrt(static_cast<float>(node->n() + 1));
-
-    // Find best child according to PUCT
-    int best_idx = -1;
-    float best_puct = -std::numeric_limits<float>::infinity();
 
     float fpu = config_.fpu_value;
     if (node->n() > 0) {
       fpu = node->q() - config_.fpu_reduction * std::sqrt(node->n());
     }
 
-    for (size_t i = 0; i < node->edges().size(); ++i) {
-      const auto &edge = node->edges()[i];
-      HybridNode *child = edge.child();
-
-      float puct;
-      if (child) {
-        puct = child->get_puct(config_.cpuct, parent_n_sqrt, fpu);
-      } else {
-        // Unexpanded node - use FPU
-        float u = config_.cpuct * edge.policy() * parent_n_sqrt;
-        puct = fpu + u;
-      }
-
-      if (puct > best_puct) {
-        best_puct = puct;
-        best_idx = static_cast<int>(i);
-      }
-    }
+    int best_idx = select_child_puct(node, config_.cpuct, ctx);
 
     if (best_idx < 0)
       break;
 
-    // Get or create child node (with synchronization)
-    auto &edge = node->edges()[best_idx];
+    HybridEdge &edge = node->edges()[best_idx];
     HybridNode *child = edge.child();
 
     if (!child) {
-      // Use parent's mutex to protect child creation
-      std::lock_guard<std::mutex> lock(node->mutex());
-      child = edge.child(); // Double-check after lock
-      if (!child) {
-        child = tree_->allocate_node(node, best_idx);
-        edge.set_child(child);
-      }
+      child = tree_->allocate_node(node, best_idx);
+      edge.set_child(child);
     }
 
-    // Apply move
-    pos.do_move(edge.move());
-
     // Add virtual loss
-    child->add_virtual_loss();
+    child->add_virtual_loss(config_.virtual_loss);
 
+    // Make the move
+    pos.do_move(edge.move());
     node = child;
   }
 
   return node;
 }
 
-void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos) {
-  MCTSMoveList moves = pos.generate_legal_moves();
-  node->create_edges(moves);
+int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
+                                    HybridWorkerContext &ctx) {
+  int num_edges = node->num_edges();
+  if (num_edges == 0)
+    return -1;
 
+  ctx.puct_scores.resize(num_edges);
+
+  float parent_n_sqrt = std::sqrt(static_cast<float>(node->n() + 1));
+  float fpu = config_.fpu_value;
+  if (node->n() > 0) {
+    fpu = node->q() - config_.fpu_reduction * std::sqrt(node->n());
+  }
+
+  int best_idx = -1;
+  float best_puct = -std::numeric_limits<float>::infinity();
+
+  for (int i = 0; i < num_edges; ++i) {
+    const HybridEdge &edge = node->edges()[i];
+    HybridNode *child = edge.child();
+
+    float puct;
+    if (child) {
+      uint32_t n = child->n();
+      uint32_t n_in_flight = child->n_in_flight();
+      float q = (n > 0) ? child->q() : fpu;
+      float u =
+          cpuct * edge.policy() * parent_n_sqrt / (1.0f + n + n_in_flight);
+      puct = q + u;
+    } else {
+      float u = cpuct * edge.policy() * parent_n_sqrt;
+      puct = fpu + u;
+    }
+
+    ctx.puct_scores[i] = puct;
+    if (puct > best_puct) {
+      best_puct = puct;
+      best_idx = i;
+    }
+  }
+
+  return best_idx;
+}
+
+void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos,
+                               HybridWorkerContext &ctx) {
+  if (node->has_children())
+    return;
+
+  MCTSMoveList moves = pos.generate_legal_moves();
   if (moves.empty()) {
+    if (pos.is_check()) {
+      node->set_terminal(HybridNode::Terminal::Loss, -1.0f);
+    } else {
+      node->set_terminal(HybridNode::Terminal::Draw, 0.0f);
+    }
     return;
   }
 
-  // Use NNUE-based policy priors instead of uniform
-  std::vector<float> scores(moves.size());
-  float max_score = -1e9f;
+  node->create_edges(moves);
 
-  const Position &sf_pos = pos.stockfish_position();
-  Color us = sf_pos.side_to_move();
-
-  // Score each move using heuristics that correlate with NNUE evaluation
-  for (size_t i = 0; i < moves.size(); ++i) {
-    float score = 0.0f;
-    Move m = moves[i].to_stockfish();
-
-    // Captures scored by MVV-LVA and SEE
-    if (sf_pos.capture(m)) {
-      PieceType captured = m.type_of() == EN_PASSANT
-                               ? PAWN
-                               : type_of(sf_pos.piece_on(m.to_sq()));
-      PieceType attacker = type_of(sf_pos.piece_on(m.from_sq()));
-      static const float piece_values[] = {0, 100, 320, 330, 500, 900, 0};
-      score += piece_values[captured] * 6.0f - piece_values[attacker];
-
-      // SEE bonus for good captures
-      if (sf_pos.see_ge(m, Value(0))) {
-        score += 300.0f;
-      }
-    }
-
-    // Promotions get high priority
-    if (m.type_of() == PROMOTION) {
-      PieceType promo = m.promotion_type();
-      if (promo == QUEEN)
-        score += 4000.0f;
-      else if (promo == KNIGHT)
-        score += 800.0f;
-    }
-
-    // Checks are important
-    if (sf_pos.gives_check(m)) {
-      score += 400.0f;
-    }
-
-    // Center control bonus
-    int to_file = file_of(m.to_sq());
-    int to_rank = rank_of(m.to_sq());
-    float center_dist = std::abs(to_file - 3.5f) + std::abs(to_rank - 3.5f);
-    score += (7.0f - center_dist) * 15.0f;
-
-    // Piece development bonus in opening
-    if (sf_pos.count<ALL_PIECES>() > 28) {
-      PieceType pt = type_of(sf_pos.piece_on(m.from_sq()));
-      if (pt == KNIGHT || pt == BISHOP) {
-        int from_rank = rank_of(m.from_sq());
-        if ((us == WHITE && from_rank == RANK_1) ||
-            (us == BLACK && from_rank == RANK_8)) {
-          score += 150.0f;
-        }
-      }
-      // Castling bonus
-      if (m.type_of() == CASTLING) {
-        score += 200.0f;
-      }
-    }
-
-    // King safety: penalize moves that expose king
-    if (type_of(sf_pos.piece_on(m.from_sq())) == KING) {
-      // Penalize king moves in middlegame (unless castling)
-      if (sf_pos.count<ALL_PIECES>() > 20 && m.type_of() != CASTLING) {
-        score -= 50.0f;
-      }
-    }
-
-    scores[i] = score;
-    max_score = std::max(max_score, score);
-  }
-
-  // Softmax normalization with temperature
-  float temperature = config_.policy_softmax_temp;
-  float sum = 0.0f;
-
-  for (float &s : scores) {
-    s = std::exp((s - max_score) / (temperature * 400.0f));
-    sum += s;
-  }
-
-  // Set policy priors
-  for (size_t i = 0; i < moves.size(); ++i) {
-    float policy = scores[i] / sum;
-    node->edges()[i].set_policy(policy);
-  }
-
-  // Add Dirichlet noise at root for exploration
-  if (node == tree_->root() && config_.add_dirichlet_noise) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
+  // Add Dirichlet noise at root
+  if (config_.add_dirichlet_noise && node == tree_->root()) {
     std::gamma_distribution<float> gamma(config_.dirichlet_alpha, 1.0f);
-
-    std::vector<float> noise(moves.size());
+    int num_edges = node->num_edges();
+    std::vector<float> noise(num_edges);
     float noise_sum = 0.0f;
-    for (auto &n : noise) {
-      n = gamma(gen);
-      noise_sum += n;
+
+    for (int i = 0; i < num_edges; ++i) {
+      noise[i] = gamma(ctx.rng);
+      noise_sum += noise[i];
     }
 
-    // Mix policy with Dirichlet noise
-    for (size_t i = 0; i < moves.size(); ++i) {
-      float current_policy = node->edges()[i].policy();
-      float noisy_policy = (1.0f - config_.dirichlet_epsilon) * current_policy +
-                           config_.dirichlet_epsilon * (noise[i] / noise_sum);
-      node->edges()[i].set_policy(noisy_policy);
+    if (noise_sum > 0) {
+      float eps = config_.dirichlet_epsilon;
+      for (int i = 0; i < num_edges; ++i) {
+        float p = node->edges()[i].policy();
+        float noisy_p = (1.0f - eps) * p + eps * (noise[i] / noise_sum);
+        node->edges()[i].set_policy(noisy_p);
+      }
     }
   }
 }
@@ -781,9 +902,7 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos) {
 void HybridSearch::backpropagate(HybridNode *node, float value, float draw_prob,
                                  float moves_left) {
   while (node) {
-    node->remove_virtual_loss();
-    // update_stats now atomically updates statistics and increments visit count
-    // under the same mutex lock to prevent race conditions
+    node->remove_virtual_loss(config_.virtual_loss);
     node->update_stats(value, draw_prob, moves_left);
 
     // Flip value for opponent
@@ -799,13 +918,11 @@ bool HybridSearch::should_use_alphabeta(HybridNode *node,
   if (!config_.use_ab_for_tactics)
     return false;
 
-  // Check if position is tactical (in check, captures available, etc.)
   if (pos.is_check()) {
     stats_.tactical_positions.fetch_add(1, std::memory_order_relaxed);
     return true;
   }
 
-  // Check node visit threshold
   if (node->n() < static_cast<uint32_t>(config_.ab_node_threshold)) {
     return false;
   }
@@ -815,8 +932,6 @@ bool HybridSearch::should_use_alphabeta(HybridNode *node,
 
 int HybridSearch::alphabeta_verify(const MCTSPosition &pos, int depth,
                                    int alpha, int beta) {
-  // Use Stockfish's search for alpha-beta verification
-  // Placeholder for alpha-beta search integration
   stats_.ab_nodes.fetch_add(1, std::memory_order_relaxed);
 
   if (depth <= 0 || pos.is_terminal()) {
@@ -827,7 +942,7 @@ int HybridSearch::alphabeta_verify(const MCTSPosition &pos, int depth,
   MCTSMoveList moves = pos.generate_legal_moves();
   if (moves.empty()) {
     if (pos.is_check()) {
-      return -32000 + depth; // Checkmate
+      return -32000 + depth;
     }
     return 0; // Stalemate
   }
@@ -854,23 +969,8 @@ int HybridSearch::alphabeta_verify(const MCTSPosition &pos, int depth,
   return best_score;
 }
 
-void HybridSearch::add_to_batch(HybridNode *node, const MCTSPosition &pos) {
-  std::lock_guard<std::mutex> lock(batch_mutex_);
-
-  current_batch_.nodes.push_back(node);
-  current_batch_.positions.push_back(pos);
-  current_batch_.legal_moves.push_back(pos.generate_legal_moves());
-
-  // Always notify - let eval thread decide when to process
-  batch_cv_.notify_one();
-}
-
-void HybridSearch::process_batch() {
-  // Handled by eval_thread_main
-}
-
 bool HybridSearch::should_stop() const {
-  if (stop_flag_)
+  if (stop_flag_.load(std::memory_order_acquire))
     return true;
 
   // Check node limit
@@ -879,6 +979,15 @@ bool HybridSearch::should_stop() const {
   }
 
   // Check time limit
+  if (time_budget_ms_ > 0) {
+    auto elapsed = std::chrono::steady_clock::now() - search_start_;
+    auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    if (ms >= time_budget_ms_) {
+      return true;
+    }
+  }
+
   if (limits_.movetime > 0) {
     auto elapsed = std::chrono::steady_clock::now() - search_start_;
     auto ms =
@@ -908,12 +1017,6 @@ int64_t HybridSearch::get_time_budget_ms() const {
   return time_left / 40 + inc;
 }
 
-float HybridSearch::get_q_value(HybridNode *node) const {
-  if (node->n() == 0)
-    return 0.0f;
-  return node->q();
-}
-
 MCTSMove HybridSearch::select_best_move() const {
   const HybridNode *root = tree_->root();
   if (!root->has_children())
@@ -923,11 +1026,11 @@ MCTSMove HybridSearch::select_best_move() const {
   int best_idx = -1;
   uint32_t best_n = 0;
 
-  for (size_t i = 0; i < root->edges().size(); ++i) {
-    const auto &edge = root->edges()[i];
+  for (int i = 0; i < root->num_edges(); ++i) {
+    const HybridEdge &edge = root->edges()[i];
     if (edge.child() && edge.child()->n() > best_n) {
       best_n = edge.child()->n();
-      best_idx = static_cast<int>(i);
+      best_idx = i;
     }
   }
 

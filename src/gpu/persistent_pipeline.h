@@ -140,7 +140,9 @@ public:
   Buffer *get_output_buffer();
 
   // Submit current buffer and swap
-  void submit(int batch_size);
+  // Returns false if encoding failed (invalid kernel, bad batch size, or
+  // encoder creation failure)
+  bool submit(int batch_size);
 
   // Wait for previous submission
   void wait_previous();

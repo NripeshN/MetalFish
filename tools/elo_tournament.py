@@ -308,12 +308,15 @@ class Tournament:
 
         # Lc0 (Leela Chess Zero) - neural network engine
         lc0_path = self.base_dir / "reference" / "lc0" / "build" / "release" / "lc0"
-        if lc0_path.exists():
+        lc0_network = (
+            self.base_dir / "reference" / "lc0" / "build" / "release" / "network.pb.gz"
+        )
+        if lc0_path.exists() and lc0_network.exists():
             self.add_engine(
                 EngineConfig(
                     name="Lc0",
                     cmd=str(lc0_path),
-                    options={"Threads": "1"},
+                    options={"WeightsFile": str(lc0_network), "Threads": "1"},
                     expected_elo=3600,  # Depends on network
                 )
             )
@@ -694,11 +697,12 @@ def get_engine_configs(
 
     # Lc0 (Leela Chess Zero) - neural network engine
     lc0_path = base_dir / "reference" / "lc0" / "build" / "release" / "lc0"
-    if lc0_path.exists():
+    lc0_network = base_dir / "reference" / "lc0" / "build" / "release" / "network.pb.gz"
+    if lc0_path.exists() and lc0_network.exists():
         configs["Lc0"] = EngineConfig(
             name="Lc0",
             cmd=str(lc0_path),
-            options={"Threads": "1"},
+            options={"WeightsFile": str(lc0_network), "Threads": "1"},
             expected_elo=3600,
         )
 
