@@ -34,8 +34,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -73,8 +71,12 @@ jobs:
           # Copy NNUE files to build directory
           cp ../src/nn-*.nnue . 2>/dev/null || true
 
-      - name: Build cutechess-cli
+      - name: Clone and Build cutechess-cli
         run: |
+          # Clone cutechess (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/cutechess/cutechess.git reference/cutechess
+
           cd reference/cutechess
           mkdir -p build && cd build
           # Use Qt6 from Homebrew
@@ -85,28 +87,24 @@ jobs:
 
       - name: Clone and Build Stockfish
         run: |
-          # Clone Stockfish if not present as submodule
-          if [ ! -d "reference/stockfish/src" ]; then
-            git clone --depth 1 https://github.com/official-stockfish/Stockfish.git reference/stockfish
-          fi
+          # Clone Stockfish (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/official-stockfish/Stockfish.git reference/stockfish
+
           cd reference/stockfish/src
           # Download NNUE files for Stockfish
-          if [ ! -f nn-c288c895ea92.nnue ]; then
-            curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-          fi
-          if [ ! -f nn-37f18f62d772.nnue ]; then
-            curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
-          fi
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
           # Build for Apple Silicon
           make -j$(sysctl -n hw.ncpu) build ARCH=apple-silicon
 
       - name: Clone and Build Patricia
         continue-on-error: true
         run: |
-          # Clone Patricia if not present as submodule
-          if [ ! -d "reference/Patricia/engine" ]; then
-            git clone --depth 1 https://github.com/Adam-Kulju/Patricia.git reference/Patricia
-          fi
+          # Clone Patricia (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/Adam-Kulju/Patricia.git reference/Patricia
+
           cd reference/Patricia/engine
           # Build Patricia with clang++
           make build CXX=clang++
@@ -114,12 +112,11 @@ jobs:
       - name: Clone and Build Leela Chess Zero (lc0)
         continue-on-error: true
         run: |
-          # Clone lc0 if not present as submodule
-          if [ ! -d "reference/lc0/src" ]; then
-            git clone --depth 1 https://github.com/LeelaChessZero/lc0.git reference/lc0
-          fi
-          cd reference/lc0
+          # Clone lc0 (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/LeelaChessZero/lc0.git reference/lc0
 
+          cd reference/lc0
           # Build lc0 with Metal backend (macOS)
           ./build.sh -Dgtest=false || echo "lc0 build failed, will skip in tournament"
 
@@ -132,7 +129,7 @@ jobs:
             curl -L "https://training.lczero.org/get_network?sha=00af53b081e80147172e6f281c01571e6c3c87c1" -o network.pb.gz 2>/dev/null || \
             curl -L "https://lczero.org/get/t40/256x10/1" -o network.pb.gz 2>/dev/null || \
             echo "Warning: Could not download lc0 network, lc0 will be skipped"
-            
+
             # Verify download
             if [ -f "network.pb.gz" ]; then
               file network.pb.gz
@@ -410,7 +407,7 @@ jobs:
           mkdir -p results
 
           # Copy all results to one directory
-          find ../all-results -name "*.json" -exec cp {} results/ \;
+          find all-results -name "*.json" -exec cp {} results/ \;
 
           # Generate summary
           python3 tools/elo_tournament.py \
