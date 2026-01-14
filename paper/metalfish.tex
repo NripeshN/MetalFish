@@ -20,6 +20,12 @@
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 
+% Force floats to appear where placed (not at top of page)
+\makeatletter
+\setlength{\@fptop}{0pt}
+\setlength{\@fpbot}{0pt plus 1fil}
+\makeatother
+
 % C++ code listing style
 \lstdefinestyle{cppstyle}{
     language=C++,
@@ -124,7 +130,7 @@ MCTS naturally batches leaf evaluations, making \textit{throughput} the critical
 
 Stockfish's NNUE (Efficiently Updatable Neural Network)~\cite{Nasu2018} uses HalfKAv2\_hm features with sparse input. Table~\ref{tab:nnue_arch} summarizes the architecture.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{NNUE Network Architecture}
 \label{tab:nnue_arch}
 \centering
@@ -157,48 +163,48 @@ Apple Metal~\cite{AppleMetal2024} provides GPU compute with unified memory:
 
 MetalFish implements a four-layer architecture: (1) position classification, (2) hybrid search orchestration, (3) multi-threaded MCTS, and (4) GPU-accelerated evaluation with multiple command queues.
 
-\begin{figure}[t]
+\begin{figure}[H]
 \centering
 \begin{tikzpicture}[
-    box/.style={rectangle, draw, minimum width=2.5cm, minimum height=0.8cm, align=center, font=\small},
-    arrow/.style={->, thick},
-    scale=0.9
+    box/.style={rectangle, draw, rounded corners=3pt, minimum width=2.2cm, minimum height=0.7cm, align=center, font=\footnotesize},
+    arrow/.style={->, >=stealth, thick},
+    scale=0.85, transform shape
 ]
 % Position Input
-\node[box, fill=blue!20] (input) at (0,4) {Position\\Input};
+\node[box, fill=blue!20] (input) at (0,5) {Position\\Input};
 
 % Classifier
-\node[box, fill=orange!30] (classifier) at (0,2.8) {Position\\Classifier};
+\node[box, fill=orange!30] (classifier) at (0,3.8) {Position\\Classifier};
 
 % Strategy Selection
-\node[box, fill=yellow!30] (strategy) at (0,1.6) {Strategy\\Selection};
+\node[box, fill=yellow!30] (strategy) at (0,2.6) {Strategy\\Selection};
 
 % MCTS and AB branches
-\node[box, fill=green!30] (mcts) at (-2,0) {Multi-threaded\\MCTS};
-\node[box, fill=red!30] (ab) at (2,0) {Alpha-Beta\\Verifier};
+\node[box, fill=green!30] (mcts) at (-2.5,1.2) {Multi-threaded\\MCTS};
+\node[box, fill=red!30] (ab) at (2.5,1.2) {Alpha-Beta\\Verifier};
 
 % GPU Evaluator
-\node[box, fill=purple!30] (gpu) at (-2,-1.4) {GPU NNUE\\Evaluator};
+\node[box, fill=purple!30] (gpu) at (-2.5,-0.2) {GPU NNUE\\Evaluator};
 
 % Command Queues
-\node[box, fill=gray!30, minimum width=3.5cm] (queues) at (-2,-2.6) {Metal Command\\Queues (5)};
+\node[box, fill=gray!30, minimum width=2.5cm] (queues) at (-2.5,-1.5) {Metal Queues (5)};
 
 % Output
-\node[box, fill=blue!20] (output) at (0,-1.4) {Best Move\\Output};
+\node[box, fill=blue!20] (output) at (0,-0.2) {Best Move\\Output};
 
 % Arrows
 \draw[arrow] (input) -- (classifier);
 \draw[arrow] (classifier) -- (strategy);
-\draw[arrow] (strategy) -- (-1,1.6) -- (-2,0.8) -- (mcts);
-\draw[arrow] (strategy) -- (1,1.6) -- (2,0.8) -- (ab);
+\draw[arrow] (strategy.south) -- ++(0,-0.3) -| (mcts.north);
+\draw[arrow] (strategy.south) -- ++(0,-0.3) -| (ab.north);
 \draw[arrow] (mcts) -- (gpu);
 \draw[arrow] (gpu) -- (queues);
-\draw[arrow] (mcts) -- (output);
-\draw[arrow] (ab) -- (output);
-\draw[arrow, dashed] (ab) -- (0.5,-0.7) -- (-1.5,-0.7) -- (mcts);
+\draw[arrow] (mcts.south east) -- (output.north west);
+\draw[arrow] (ab.south) -- (output.north east);
+\draw[arrow, dashed] (ab.south west) -- ++(-0.5,-0.5) -- (mcts.east);
 
 \end{tikzpicture}
-\caption{MetalFish System Architecture. Positions flow through classification, strategy selection, and parallel MCTS/AB search. GPU evaluation uses multiple command queues for reduced contention.}
+\caption{MetalFish system architecture. Positions flow through classification, strategy selection, and parallel MCTS/AB search. GPU evaluation uses multiple command queues.}
 \label{fig:architecture}
 \end{figure}
 
@@ -229,7 +235,7 @@ Classification considers:
 
 Each position type maps to a search strategy with specific MCTS/alpha-beta weights:
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{Position Type to Search Strategy Mapping}
 \label{tab:strategy}
 \centering
@@ -252,7 +258,7 @@ The MCTS weight determines time allocation for the MCTS phase, while the AB weig
 
 Algorithm~\ref{alg:hybrid} shows the hybrid search pipeline.
 
-\begin{algorithm}[t]
+\begin{algorithm}[htbp]
 \caption{Hybrid MCTS-Alpha-Beta Search}
 \label{alg:hybrid}
 \begin{algorithmic}[1]
@@ -327,7 +333,7 @@ The alpha-beta component provides tactical verification with full search feature
 
 Table~\ref{tab:gpu_constants} shows GPU configuration parameters.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{GPU Configuration Constants}
 \label{tab:gpu_constants}
 \centering
@@ -410,7 +416,7 @@ Search time is fixed at 5 seconds per position to allow meaningful MCTS explorat
 
 Table~\ref{tab:mcts_perf} shows MCTS performance across different position types with 4 threads and 5-second search time.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{MCTS Performance by Position Type (5 seconds, 4 threads)}
 \label{tab:mcts_perf}
 \centering
@@ -431,7 +437,7 @@ KRK Endgame & 3,907,764 & 782K & 99.3\% \\
 
 Table~\ref{tab:thread_scaling} shows MCTS throughput scaling with thread count.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{MCTS Thread Scaling (Starting Position, 3 seconds)}
 \label{tab:thread_scaling}
 \centering
@@ -452,7 +458,7 @@ Thread scaling is limited due to GPU evaluation being the bottleneck---multiple 
 
 Table~\ref{tab:eval_comparison} compares batched evaluation (dedicated thread) vs direct evaluation (mutex per call).
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{Evaluation Strategy Comparison (5 seconds)}
 \label{tab:eval_comparison}
 \centering
@@ -472,7 +478,7 @@ Batched evaluation achieves 28.5$\times$ speedup over direct evaluation by amort
 
 Table~\ref{tab:mcts_profile} shows time distribution during MCTS search.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{MCTS Time Breakdown (3 second search, starting position)}
 \label{tab:mcts_profile}
 \centering
@@ -500,7 +506,7 @@ Cache hit rate & \multicolumn{2}{r}{99.0\%} \\
 
 Table~\ref{tab:classification_dist} shows classifier distribution on benchmark positions.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{Position Classification Distribution (16 Stockfish Benchmark Positions)}
 \label{tab:classification_dist}
 \centering
@@ -523,7 +529,7 @@ Most benchmark positions are classified as Strategic, reflecting typical chess p
 
 Table~\ref{tab:dispatch} shows minimal-kernel dispatch overhead.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{GPU Dispatch Overhead---Minimal Kernel (N=1,000)}
 \label{tab:dispatch}
 \centering
@@ -542,7 +548,7 @@ The 149~$\mu$s median dispatch overhead represents the irreducible minimum cost 
 
 Table~\ref{tab:batch_latency} shows end-to-end latency across batch sizes.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{GPU End-to-End Batch Latency (N=100 iterations)}
 \label{tab:batch_latency}
 \centering
@@ -565,7 +571,7 @@ Size & ($\mu$s) & ($\mu$s) & ($\mu$s) & ($\mu$s) \\
 
 Per-position cost drops from 267~$\mu$s (N=1) to 0.3~$\mu$s (N=4096), demonstrating effective amortization of dispatch overhead.
 
-\begin{figure}[t]
+\begin{figure}[htbp]
 \centering
 \begin{tikzpicture}
 \begin{semilogxaxis}[
@@ -599,7 +605,7 @@ Per-position cost drops from 267~$\mu$s (N=1) to 0.3~$\mu$s (N=4096), demonstrat
 
 Table~\ref{tab:batching} compares sequential vs batched dispatches.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{True Batching Verification (N=50 iterations)}
 \label{tab:batching}
 \centering
@@ -622,7 +628,7 @@ Speedups scale approximately linearly with batch size because each sequential di
 
 Table~\ref{tab:correctness} verifies GPU evaluation reproducibility using official Stockfish benchmark positions.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{GPU Evaluation Consistency (1,000 evaluations)}
 \label{tab:correctness}
 \centering
@@ -643,7 +649,7 @@ GPU evaluation produces consistent, non-zero scores across repeated runs.
 
 We conducted a round-robin tournament with 900 games (20 games per match, 45 matches) using cutechess-cli with time control 10+0.1 seconds. Table~\ref{tab:elo_ratings} shows the final Elo ratings.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{Tournament Elo Ratings (900 games, 10+0.1 time control)}
 \label{tab:elo_ratings}
 \centering
@@ -676,7 +682,7 @@ Rank & Engine & Elo \\
 
 Table~\ref{tab:head_to_head} shows selected head-to-head results.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \caption{Selected Head-to-Head Results (20 games each)}
 \label{tab:head_to_head}
 \centering
@@ -694,7 +700,7 @@ MetalFish-MCTS & Lc0 & 20 & 0 & 0 \\
 \end{tabular}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure}[htbp]
 \centering
 \begin{tikzpicture}
 \begin{axis}[
@@ -702,31 +708,32 @@ MetalFish-MCTS & Lc0 & 20 & 0 & 0 \\
     xlabel={Engine},
     ylabel={Elo Rating},
     ymin=0, ymax=4500,
-    symbolic x coords={MF-AB, SF-Full, Patricia, SF-L15, SF-L10, SF-L5, SF-L1, MF-Hyb, MF-MCTS, Lc0},
+    symbolic x coords={MF-AB, SF, Patricia, SF-15, SF-10, SF-5, SF-1, MF-Hyb, MF-MCTS, Lc0},
     xtick=data,
-    x tick label style={rotate=45, anchor=east, font=\footnotesize},
-    bar width=8pt,
-    width=\columnwidth,
-    height=5.5cm,
+    x tick label style={rotate=45, anchor=east, font=\scriptsize},
+    bar width=6pt,
+    width=0.95\columnwidth,
+    height=5cm,
+    enlarge x limits=0.08,
     nodes near coords,
     nodes near coords style={font=\tiny, rotate=90, anchor=west},
-    every node near coord/.append style={yshift=2pt},
+    every node near coord/.append style={yshift=1pt},
 ]
 \addplot[fill=blue!60] coordinates {
     (MF-AB, 3873)
-    (SF-Full, 3853)
+    (SF, 3853)
     (Patricia, 3500)
-    (SF-L15, 2942)
-    (SF-L10, 2690)
-    (SF-L5, 2221)
-    (SF-L1, 1963)
+    (SF-15, 2942)
+    (SF-10, 2690)
+    (SF-5, 2221)
+    (SF-1, 1963)
     (MF-Hyb, 1512)
     (MF-MCTS, 1424)
     (Lc0, 903)
 };
 \end{axis}
 \end{tikzpicture}
-\caption{Tournament Elo ratings. MetalFish-AB (MF-AB) achieves competitive strength with Stockfish-Full (SF-Full). Hybrid and MCTS variants require further optimization.}
+\caption{Tournament Elo ratings. MF-AB = MetalFish-AB, SF = Stockfish-Full, SF-N = Stockfish Level N, MF-Hyb = MetalFish-Hybrid.}
 \label{fig:elo_chart}
 \end{figure}
 
