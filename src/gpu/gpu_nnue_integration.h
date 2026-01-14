@@ -171,7 +171,9 @@ public:
   }
 
   // Batch evaluation with automatic strategy selection
-  bool evaluate_batch(GPUEvalBatch &batch, bool use_big_network = true);
+  // If force_gpu is true, bypasses the min_batch_for_gpu threshold check
+  bool evaluate_batch(GPUEvalBatch &batch, bool use_big_network = true,
+                      bool force_gpu = false);
 
   // Asynchronous batch evaluation (returns immediately, calls
   // completion_handler when done) The batch must remain valid until

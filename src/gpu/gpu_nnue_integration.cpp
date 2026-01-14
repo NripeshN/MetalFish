@@ -1551,15 +1551,17 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
   return true;
 }
 
-bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network) {
+bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
+                                    bool force_gpu) {
   if (!is_ready() || batch.count == 0) {
     return false;
   }
 
   // Select evaluation strategy based on batch size
+  // If force_gpu is true, skip the CPU fallback threshold check
   EvalStrategy strategy = tuning_.select_strategy(batch.count);
 
-  if (strategy == EvalStrategy::CPU_FALLBACK) {
+  if (!force_gpu && strategy == EvalStrategy::CPU_FALLBACK) {
     cpu_evals_ += batch.count;
     return false;
   }
@@ -1938,16 +1940,14 @@ std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &pos,
   GPUEvalBatch batch;
   batch.add_position(pos);
 
-  // Temporarily allow single-position GPU evaluation
+  // Use force_gpu=true to bypass the min_batch_for_gpu threshold check.
   // The GPU overhead for N=1 is acceptable for MCTS which needs NNUE-quality
-  // evaluation, not just material counting
-  int saved_min_batch = tuning_.min_batch_for_gpu;
-  tuning_.min_batch_for_gpu = 1;
-
-  bool success = evaluate_batch(batch, use_big);
-
-  // Restore original threshold
-  tuning_.min_batch_for_gpu = saved_min_batch;
+  // evaluation, not just material counting.
+  // NOTE: We avoid modifying tuning_.min_batch_for_gpu here because that
+  // would cause a race condition when multiple MCTS threads call
+  // evaluate_single concurrently - one thread could save/restore a corrupted
+  // value.
+  bool success = evaluate_batch(batch, use_big, /*force_gpu=*/true);
 
   if (success && !batch.positional_scores.empty()) {
     // Return actual NNUE evaluation from GPU

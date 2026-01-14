@@ -210,16 +210,37 @@ struct WorkerContext {
   // Pre-allocated score buffer for PUCT
   std::vector<float> puct_scores;
 
+  // Cached root FEN to avoid repeated string copies
+  std::string cached_root_fen;
+
+  // Profiling samples (reduce chrono overhead by sampling)
+  static constexpr int PROFILE_SAMPLE_RATE = 64;
+  uint64_t selection_time_acc = 0;
+  uint64_t expansion_time_acc = 0;
+  uint64_t evaluation_time_acc = 0;
+  uint64_t backprop_time_acc = 0;
+
   WorkerContext() : rng(std::random_device{}()) {
     state_stack.reserve(256);
     move_stack.reserve(256);
     puct_scores.reserve(256);
   }
 
+  void set_root_fen(const std::string &fen) {
+    cached_root_fen = fen;
+    reset_position(fen);
+  }
+
   void reset_position(const std::string &fen) {
     state_stack.clear();
     move_stack.clear();
     pos.set(fen, false, &root_st);
+  }
+
+  void reset_to_cached_root() {
+    state_stack.clear();
+    move_stack.clear();
+    pos.set(cached_root_fen, false, &root_st);
   }
 
   void do_move(Move m) {

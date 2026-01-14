@@ -285,7 +285,11 @@ private:
   std::unique_ptr<TacticalAnalyzer> tactical_analyzer_;
 
   BridgeStats stats_;
-  std::mutex stats_mutex_;
+  mutable std::mutex stats_mutex_;
+
+  // Mutex to serialize search operations - ABSearcher has non-thread-safe
+  // member state (state_stack_, killers_, main_history_, static_eval_stack_)
+  mutable std::mutex search_mutex_;
 };
 
 // Global hybrid search bridge

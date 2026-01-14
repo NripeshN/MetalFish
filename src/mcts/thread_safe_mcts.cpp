@@ -236,33 +236,31 @@ void ThreadSafeNode::create_edges(const MoveList<LEGAL> &moves) {
 
 void ThreadSafeNode::update_stats(float value, float draw_prob,
                                   float moves_left) {
-  // Lock-free update using fetch_add for w_ and n_
-  // Then compute q_ = w_ / n_
+  // Optimized: Use a single fetch_add for n_ first, then update others
+  // This reduces contention on multiple atomics
 
-  // Add value to sum
-  float old_w = w_.load(std::memory_order_relaxed);
-  float new_w;
-  do {
-    new_w = old_w + value;
-  } while (!w_.compare_exchange_weak(old_w, new_w, std::memory_order_release,
-                                     std::memory_order_relaxed));
-
-  // Increment visit count
+  // Increment visit count first
   uint32_t new_n = n_.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-  // Update Q value (average)
-  float new_q = new_w / new_n;
-  q_.store(new_q, std::memory_order_release);
+  // Update W using CAS (unavoidable for float addition)
+  float old_w = w_.load(std::memory_order_relaxed);
+  while (!w_.compare_exchange_weak(old_w, old_w + value,
+                                   std::memory_order_release,
+                                   std::memory_order_relaxed)) {
+    // Spin on failure
+  }
 
-  // Update draw probability (exponential moving average)
+  // Update Q value (can use relaxed since readers tolerate stale values)
+  float new_q = (old_w + value) / new_n;
+  q_.store(new_q, std::memory_order_relaxed);
+
+  // Update draw probability (relaxed is fine for MCTS)
   float old_d = d_.load(std::memory_order_relaxed);
-  float new_d = old_d + (draw_prob - old_d) / new_n;
-  d_.store(new_d, std::memory_order_release);
+  d_.store(old_d + (draw_prob - old_d) / new_n, std::memory_order_relaxed);
 
-  // Update moves left estimate
+  // Update moves left estimate (relaxed is fine for MCTS)
   float old_m = m_.load(std::memory_order_relaxed);
-  float new_m = old_m + (moves_left - old_m) / new_n;
-  m_.store(new_m, std::memory_order_release);
+  m_.store(old_m + (moves_left - old_m) / new_n, std::memory_order_relaxed);
 }
 
 void ThreadSafeNode::set_terminal(Terminal type, float value) {
@@ -487,14 +485,15 @@ int64_t ThreadSafeMCTS::calculate_time_budget() const {
 
 void ThreadSafeMCTS::worker_thread(int thread_id) {
   WorkerContext &ctx = *worker_contexts_[thread_id];
-  std::string root_fen = tree_->root_fen();
+
+  // Cache root FEN once per search (avoid repeated string copies)
+  ctx.set_root_fen(tree_->root_fen());
 
   // Expand root node if needed (only one thread should do this)
   ThreadSafeNode *root = tree_->root();
   if (!root->has_children()) {
     std::lock_guard<std::mutex> lock(root->mutex());
     if (!root->has_children()) {
-      ctx.reset_position(root_fen);
       MoveList<LEGAL> moves(ctx.pos);
       root->create_edges(moves);
 
@@ -508,10 +507,30 @@ void ThreadSafeMCTS::worker_thread(int thread_id) {
     }
   }
 
-  // Main search loop
-  while (!should_stop()) {
+  // Main search loop with batched stop checks
+  constexpr int STOP_CHECK_INTERVAL = 64;
+  int iterations_since_check = 0;
+
+  while (true) {
+    // Batch stop checks to reduce overhead
+    if (++iterations_since_check >= STOP_CHECK_INTERVAL) {
+      iterations_since_check = 0;
+      if (should_stop())
+        break;
+    }
+
     run_iteration(ctx);
   }
+
+  // Flush accumulated profiling stats
+  stats_.selection_time_us.fetch_add(ctx.selection_time_acc,
+                                     std::memory_order_relaxed);
+  stats_.expansion_time_us.fetch_add(ctx.expansion_time_acc,
+                                     std::memory_order_relaxed);
+  stats_.evaluation_time_us.fetch_add(ctx.evaluation_time_acc,
+                                      std::memory_order_relaxed);
+  stats_.backprop_time_us.fetch_add(ctx.backprop_time_acc,
+                                    std::memory_order_relaxed);
 
   // Aggregate worker stats
   stats_.cache_hits.fetch_add(ctx.cache_hits, std::memory_order_relaxed);
@@ -519,82 +538,91 @@ void ThreadSafeMCTS::worker_thread(int thread_id) {
 }
 
 void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
-  std::string root_fen = tree_->root_fen();
-  ctx.reset_position(root_fen);
+  // Use cached root FEN instead of fetching every time
+  ctx.reset_to_cached_root();
 
-  auto iter_start = std::chrono::steady_clock::now();
+  // Profile only every N iterations to reduce chrono overhead
+  bool do_profile = (ctx.iterations % WorkerContext::PROFILE_SAMPLE_RATE) == 0;
+  auto iter_start = do_profile ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
 
   // 1. Selection - traverse to leaf
-  auto select_start = std::chrono::steady_clock::now();
+  auto select_start = iter_start;
   ThreadSafeNode *leaf = select_leaf(ctx);
-  auto select_end = std::chrono::steady_clock::now();
+  auto select_end = do_profile ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
 
   if (!leaf)
     return;
 
-  // 2. Check for terminal
-  if (ctx.pos.checkers() == 0) {
-    MoveList<LEGAL> moves(ctx.pos);
-    if (moves.size() == 0) {
-      // Stalemate
-      leaf->set_terminal(ThreadSafeNode::Terminal::Draw, 0.0f);
-      backpropagate(leaf, 0.0f, 1.0f, 0.0f);
-      return;
-    }
-  } else {
-    MoveList<LEGAL> moves(ctx.pos);
-    if (moves.size() == 0) {
+  // 2. Check for terminal - generate moves once and reuse
+  MoveList<LEGAL> moves(ctx.pos);
+  bool is_in_check = ctx.pos.checkers() != 0;
+
+  if (moves.size() == 0) {
+    if (is_in_check) {
       // Checkmate
       leaf->set_terminal(ThreadSafeNode::Terminal::Loss, -1.0f);
       backpropagate(leaf, -1.0f, 0.0f, 0.0f);
-      return;
+    } else {
+      // Stalemate
+      leaf->set_terminal(ThreadSafeNode::Terminal::Draw, 0.0f);
+      backpropagate(leaf, 0.0f, 1.0f, 0.0f);
     }
+    return;
   }
 
-  // 3. Expansion - add children if not expanded
-  auto expand_start = std::chrono::steady_clock::now();
+  // 3. Expansion - add children if not expanded (reuse moves list)
+  auto expand_start = do_profile ? std::chrono::steady_clock::now()
+                                 : std::chrono::steady_clock::time_point{};
   if (!leaf->has_children()) {
     std::lock_guard<std::mutex> lock(leaf->mutex());
     if (!leaf->has_children()) {
-      MoveList<LEGAL> moves(ctx.pos);
       leaf->create_edges(moves);
       expand_node(leaf, ctx);
     }
   }
-  auto expand_end = std::chrono::steady_clock::now();
+  auto expand_end = do_profile ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
 
   // 4. Evaluation
-  auto eval_start = std::chrono::steady_clock::now();
+  auto eval_start = do_profile ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
   float value = evaluate_position(ctx);
-  auto eval_end = std::chrono::steady_clock::now();
+  auto eval_end = do_profile ? std::chrono::steady_clock::now()
+                             : std::chrono::steady_clock::time_point{};
 
   // 5. Backpropagation
-  auto backprop_start = std::chrono::steady_clock::now();
+  auto backprop_start = do_profile ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
   float draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
   backpropagate(leaf, value, draw, 30.0f);
-  auto backprop_end = std::chrono::steady_clock::now();
+  auto backprop_end = do_profile ? std::chrono::steady_clock::now()
+                                 : std::chrono::steady_clock::time_point{};
 
-  // Update profiling stats
-  stats_.selection_time_us.fetch_add(
-      std::chrono::duration_cast<std::chrono::microseconds>(select_end -
-                                                            select_start)
-          .count(),
-      std::memory_order_relaxed);
-  stats_.expansion_time_us.fetch_add(
-      std::chrono::duration_cast<std::chrono::microseconds>(expand_end -
-                                                            expand_start)
-          .count(),
-      std::memory_order_relaxed);
-  stats_.evaluation_time_us.fetch_add(
-      std::chrono::duration_cast<std::chrono::microseconds>(eval_end -
-                                                            eval_start)
-          .count(),
-      std::memory_order_relaxed);
-  stats_.backprop_time_us.fetch_add(
-      std::chrono::duration_cast<std::chrono::microseconds>(backprop_end -
-                                                            backprop_start)
-          .count(),
-      std::memory_order_relaxed);
+  // Update profiling stats (sampled)
+  if (do_profile) {
+    ctx.selection_time_acc +=
+        std::chrono::duration_cast<std::chrono::microseconds>(select_end -
+                                                              select_start)
+            .count() *
+        WorkerContext::PROFILE_SAMPLE_RATE;
+    ctx.expansion_time_acc +=
+        std::chrono::duration_cast<std::chrono::microseconds>(expand_end -
+                                                              expand_start)
+            .count() *
+        WorkerContext::PROFILE_SAMPLE_RATE;
+    ctx.evaluation_time_acc +=
+        std::chrono::duration_cast<std::chrono::microseconds>(eval_end -
+                                                              eval_start)
+            .count() *
+        WorkerContext::PROFILE_SAMPLE_RATE;
+    ctx.backprop_time_acc +=
+        std::chrono::duration_cast<std::chrono::microseconds>(backprop_end -
+                                                              backprop_start)
+            .count() *
+        WorkerContext::PROFILE_SAMPLE_RATE;
+  }
 
   stats_.total_nodes.fetch_add(1, std::memory_order_relaxed);
   stats_.total_iterations.fetch_add(1, std::memory_order_relaxed);

@@ -909,6 +909,9 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
 
   auto start = std::chrono::steady_clock::now();
 
+  // Lock to serialize search operations - ABSearcher has non-thread-safe state
+  std::lock_guard<std::mutex> search_lock(search_mutex_);
+
   // Run AB search
   ABSearchConfig config;
   config.max_depth = verification_depth;
@@ -990,6 +993,10 @@ HybridSearchBridge::get_enhanced_policy(const Position &pos) {
     return mcts_policy;
   }
 
+  // Lock to serialize access to policy_generator_ which has mutable
+  // mcts_history_
+  std::lock_guard<std::mutex> search_lock(search_mutex_);
+
   auto ab_policy = policy_generator_->generate_policy(pos);
 
   for (const auto &[move, prob] : ab_policy) {
@@ -1010,6 +1017,9 @@ ABSearchResult HybridSearchBridge::run_ab_search(const Position &pos, int depth,
     return ABSearchResult();
   }
 
+  // Lock to serialize search operations - ABSearcher has non-thread-safe state
+  std::lock_guard<std::mutex> search_lock(search_mutex_);
+
   ABSearchConfig config;
   config.max_depth = depth;
   config.max_time_ms = time_ms;
@@ -1023,6 +1033,9 @@ bool HybridSearchBridge::is_tactical_position(const Position &pos) {
   if (!initialized_) {
     return pos.checkers() != 0;
   }
+  // Lock to serialize access to tactical_analyzer_ which has internal
+  // ABSearcher
+  std::lock_guard<std::mutex> search_lock(search_mutex_);
   return tactical_analyzer_->needs_deep_search(pos);
 }
 
@@ -1031,6 +1044,9 @@ Value HybridSearchBridge::get_tactical_score(const Position &pos) {
     return Eval::simple_eval(pos);
   }
 
+  // Lock to serialize access to tactical_analyzer_ which has internal
+  // ABSearcher
+  std::lock_guard<std::mutex> search_lock(search_mutex_);
   auto info = tactical_analyzer_->analyze(pos);
   return info.quiescence_score;
 }
