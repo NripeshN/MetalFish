@@ -128,6 +128,13 @@ jobs:
         shell: pwsh
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j $env:NUMBER_OF_PROCESSORS
 
+      - name: Copy NNUE files for Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cp build/*.nnue build/${{ env.BUILD_TYPE }}/ 2>/dev/null || true
+          ls -la build/${{ env.BUILD_TYPE }}/
+
       - name: Run C++ Tests
         working-directory: build
         run: ./metalfish_tests
