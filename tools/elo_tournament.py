@@ -822,108 +822,94 @@ def run_ci_match(
         raise FileNotFoundError(f"Engine binary not found: {engine2.cmd}")
     print(f"    ✓ Found")
 
-    # Run match
-    pgn_file = tempfile.NamedTemporaryFile(mode="w", suffix=".pgn", delete=False)
-    pgn_file.close()
+    print(f"\nRunning: {engine1_name} vs {engine2_name} ({games} games total)")
+    print(f"Time control: {time_control}\n")
 
-    cmd = [str(cutechess)]
-    cmd.extend(engine1.to_cutechess_args())
-    cmd.extend(engine2.to_cutechess_args())
-    cmd.extend(
-        [
-            "-each",
-            f"tc={time_control}",
-            "-rounds",
-            str(games // 2),
-            "-games",
-            "2",
-            "-pgnout",
-            pgn_file.name,
-            "-concurrency",
-            "1",
-            "-recover",
-            "-repeat",
-        ]
-    )
+    # Run games individually to print PGN after each game
+    wins1, wins2, draws = 0, 0, 0
+    
+    # Each "round" has 2 games (alternating colors)
+    num_rounds = games // 2
+    
+    for round_num in range(1, num_rounds + 1):
+        print(f"\n{'='*70}")
+        print(f"Round {round_num}/{num_rounds}")
+        print(f"{'='*70}")
+        
+        # Run one round (2 games with alternating colors)
+        pgn_file = tempfile.NamedTemporaryFile(mode="w", suffix=".pgn", delete=False)
+        pgn_file.close()
 
-    print(f"Running: {engine1_name} vs {engine2_name} ({games} games)...")
-    print(f"Command: {' '.join(cmd)}")
+        cmd = [str(cutechess)]
+        cmd.extend(engine1.to_cutechess_args())
+        cmd.extend(engine2.to_cutechess_args())
+        cmd.extend(
+            [
+                "-each",
+                f"tc={time_control}",
+                "-rounds",
+                "1",  # One round at a time
+                "-games",
+                "2",  # 2 games per round
+                "-pgnout",
+                pgn_file.name,
+                "-concurrency",
+                "1",
+                "-recover",
+                "-repeat",
+            ]
+        )
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
-        output = result.stdout + result.stderr
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            output = result.stdout + result.stderr
 
-        # Always print cutechess output for debugging
-        print(f"\n=== cutechess-cli output ===")
-        print(output[:5000] if len(output) > 5000 else output)  # Limit output length
-        print(f"=== end cutechess-cli output ===\n")
+            if result.returncode != 0:
+                print(f"Warning: cutechess-cli returned non-zero exit code: {result.returncode}")
 
-        if result.returncode != 0:
-            print(
-                f"Warning: cutechess-cli returned non-zero exit code: {result.returncode}"
+            # Parse round results
+            score_matches = re.findall(
+                rf"Score of {re.escape(engine1_name)} vs {re.escape(engine2_name)}: (\d+) - (\d+) - (\d+)",
+                output,
             )
 
-    except subprocess.TimeoutExpired:
-        print(f"ERROR: Match timed out after 7200 seconds")
-        return {
-            "engine1": engine1_name,
-            "engine2": engine2_name,
-            "wins1": 0,
-            "wins2": 0,
-            "draws": 0,
-            "error": "timeout",
-        }
+            if score_matches:
+                last_match = score_matches[-1]
+                round_wins1 = int(last_match[0])
+                round_wins2 = int(last_match[1])
+                round_draws = int(last_match[2])
+                
+                wins1 += round_wins1
+                wins2 += round_wins2
+                draws += round_draws
+                
+                print(f"Round result: {round_wins1}-{round_draws}-{round_wins2}")
+                print(f"Total so far: {wins1}-{draws}-{wins2}")
 
-    # Parse results
-    wins1, wins2, draws = 0, 0, 0
+        except subprocess.TimeoutExpired:
+            print(f"ERROR: Round {round_num} timed out")
+            continue
 
-    # Find ALL score lines and use the LAST one (final result)
-    score_matches = re.findall(
-        rf"Score of {re.escape(engine1_name)} vs {re.escape(engine2_name)}: (\d+) - (\d+) - (\d+)",
-        output,
-    )
-
-    if score_matches:
-        # Use the last match (final score)
-        last_match = score_matches[-1]
-        wins1 = int(last_match[0])
-        wins2 = int(last_match[1])
-        draws = int(last_match[2])
-    else:
-        print(f"Warning: Could not parse score from cutechess output")
-        # Try PGN parsing
+        # Print PGN after each round
         try:
             with open(pgn_file.name, "r") as f:
                 pgn_content = f.read()
-            print(f"PGN file contents ({len(pgn_content)} bytes):")
-            print(pgn_content[:2000] if len(pgn_content) > 2000 else pgn_content)
-
-            wins1 = pgn_content.count('[Result "1-0"]')
-            wins2 = pgn_content.count('[Result "0-1"]')
-            draws = pgn_content.count('[Result "1/2-1/2"]')
+            if pgn_content:
+                print(f"\n--- PGN for Round {round_num} ---")
+                print(pgn_content)
+                print(f"--- End PGN for Round {round_num} ---\n")
         except Exception as e:
-            print(f"Error reading PGN file: {e}")
+            print(f"Warning: Could not read PGN file for round {round_num}: {e}")
+
+        # Cleanup round PGN file
+        try:
+            os.unlink(pgn_file.name)
         except:
             pass
 
-    # Print complete PGN content after every match
-    try:
-        with open(pgn_file.name, "r") as f:
-            pgn_content = f.read()
-        if pgn_content:
-            print(f"\n{'='*70}")
-            print(f"PGN for {engine1_name} vs {engine2_name}")
-            print(f"{'='*70}")
-            print(pgn_content)
-            print(f"{'='*70}\n")
-    except Exception as e:
-        print(f"Warning: Could not read PGN file for output: {e}")
-
-    # Cleanup
-    try:
-        os.unlink(pgn_file.name)
-    except:
-        pass
+    print(f"\n{'='*70}")
+    print(f"Match complete: {wins1}-{draws}-{wins2}")
+    print(f"{'='*70}\n")
 
     match_result = {
         "engine1": engine1_name,
@@ -940,7 +926,6 @@ def run_ci_match(
     with open(output_file, "w") as f:
         json.dump(match_result, f, indent=2)
 
-    print(f"Match complete: {wins1}-{wins2}-{draws}")
     print(f"Results saved to: {output_file}")
 
     return match_result
