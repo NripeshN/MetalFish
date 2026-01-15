@@ -529,6 +529,19 @@ done | "$ENGINE"
             except:
                 pass
 
+        # Print PGN content after every match
+        try:
+            with open(pgn_file.name, "r") as f:
+                pgn_content = f.read()
+            if pgn_content:
+                print(f"\n{Colors.BOLD}{'='*70}{Colors.RESET}")
+                print(f"{Colors.BOLD}PGN for {engine1.name} vs {engine2.name}{Colors.RESET}")
+                print(f"{Colors.BOLD}{'='*70}{Colors.RESET}")
+                print(pgn_content)
+                print(f"{Colors.BOLD}{'='*70}{Colors.RESET}\n")
+        except Exception as e:
+            print(f"{Colors.YELLOW}Warning: Could not read PGN file: {e}{Colors.RESET}")
+
         # Clean up
         try:
             os.unlink(pgn_file.name)
@@ -892,6 +905,19 @@ def run_ci_match(
             print(f"Error reading PGN file: {e}")
         except:
             pass
+
+    # Print complete PGN content after every match
+    try:
+        with open(pgn_file.name, "r") as f:
+            pgn_content = f.read()
+        if pgn_content:
+            print(f"\n{'='*70}")
+            print(f"PGN for {engine1_name} vs {engine2_name}")
+            print(f"{'='*70}")
+            print(pgn_content)
+            print(f"{'='*70}\n")
+    except Exception as e:
+        print(f"Warning: Could not read PGN file for output: {e}")
 
     # Cleanup
     try:
