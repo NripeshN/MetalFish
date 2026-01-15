@@ -9,6 +9,7 @@
 #define THREAD_WIN32_OSX_H_INCLUDED
 
 #include <thread>
+#include <stdexcept>
 
 // On OSX threads other than the main thread are created with a reduced stack
 // size of 512KB by default, this is too low for deep searches, which require
@@ -36,8 +37,15 @@ public:
         std::bind(std::forward<Function>(fun), std::forward<Args>(args)...));
 
     pthread_attr_t attr_storage, *attr = &attr_storage;
-    pthread_attr_init(attr);
-    pthread_attr_setstacksize(attr, TH_STACK_SIZE);
+    if (pthread_attr_init(attr) != 0) {
+      delete func;
+      throw std::runtime_error("pthread_attr_init failed");
+    }
+    if (pthread_attr_setstacksize(attr, TH_STACK_SIZE) != 0) {
+      pthread_attr_destroy(attr);
+      delete func;
+      throw std::runtime_error("pthread_attr_setstacksize failed");
+    }
 
     auto start_routine = [](void *ptr) -> void * {
       auto f = reinterpret_cast<std::function<void()> *>(ptr);
@@ -47,7 +55,12 @@ public:
       return nullptr;
     };
 
-    pthread_create(&thread, attr, start_routine, func);
+    if (pthread_create(&thread, attr, start_routine, func) != 0) {
+      pthread_attr_destroy(attr);
+      delete func;
+      throw std::runtime_error("pthread_create failed");
+    }
+    pthread_attr_destroy(attr);
   }
 
   void join() { pthread_join(thread, nullptr); }

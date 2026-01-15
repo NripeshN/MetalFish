@@ -23,16 +23,14 @@ static int LMRTable[64][64];
 
 // Initialize LMR table
 static void init_lmr_table() {
-  static bool initialized = false;
-  if (initialized)
-    return;
-
-  for (int d = 1; d < 64; ++d) {
-    for (int m = 1; m < 64; ++m) {
-      LMRTable[d][m] = static_cast<int>(0.8 + std::log(d) * std::log(m) * 0.4);
+  static std::once_flag init_flag;
+  std::call_once(init_flag, []() {
+    for (int d = 1; d < 64; ++d) {
+      for (int m = 1; m < 64; ++m) {
+        LMRTable[d][m] = static_cast<int>(0.8 + std::log(d) * std::log(m) * 0.4);
+      }
     }
-  }
-  initialized = true;
+  });
 }
 
 ABSearcher::ABSearcher() {
