@@ -125,7 +125,11 @@ if(USE_CUDA)
     # Check which CUDA targets are available
     set(CUDA_LINK_LIBRARIES "")
     
-    if(TARGET CUDA::cudart)
+    if(TARGET CUDA::cudart_static)
+      # Prefer static cudart to avoid runtime dependency issues
+      list(APPEND CUDA_LINK_LIBRARIES CUDA::cudart_static)
+      message(STATUS "  CUDA::cudart_static: available")
+    elseif(TARGET CUDA::cudart)
       list(APPEND CUDA_LINK_LIBRARIES CUDA::cudart)
       message(STATUS "  CUDA::cudart: available")
     else()
@@ -137,17 +141,10 @@ if(USE_CUDA)
       endif()
     endif()
     
-    if(TARGET CUDA::cuda_driver)
-      list(APPEND CUDA_LINK_LIBRARIES CUDA::cuda_driver)
-      message(STATUS "  CUDA::cuda_driver: available")
-    else()
-      # Try to find cuda driver manually
-      find_library(CUDA_DRIVER_LIBRARY cuda HINTS ${CUDAToolkit_LIBRARY_DIR})
-      if(CUDA_DRIVER_LIBRARY)
-        list(APPEND CUDA_LINK_LIBRARIES ${CUDA_DRIVER_LIBRARY})
-        message(STATUS "  cuda driver: ${CUDA_DRIVER_LIBRARY}")
-      endif()
-    endif()
+    # Note: We deliberately do NOT link against CUDA::cuda_driver
+    # The driver library (libcuda.so) requires an actual NVIDIA GPU with drivers
+    # and would prevent running on systems without GPUs (like CI runners)
+    # The runtime API (cudart) handles driver loading dynamically
     
     # Check for nvrtc (optional - only needed for runtime compilation)
     set(HAVE_NVRTC OFF)

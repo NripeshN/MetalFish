@@ -215,9 +215,10 @@ jobs:
             build/${{ env.BUILD_TYPE }}/${{ matrix.executable }}
           if-no-files-found: warn
 
-  # CUDA build job - Ubuntu only (compile + CPU tests, no GPU required)
+  # CUDA build job - Ubuntu only (compile only, no GPU required)
+  # Note: Tests are skipped because libcuda.so requires an actual NVIDIA GPU
   build-cuda:
-    name: Build & Test (Ubuntu CUDA)
+    name: Build (Ubuntu CUDA)
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'test-cuda')
 
@@ -229,11 +230,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
-
-      - name: Setup Python (tests)
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
 
       - name: Setup CUDA Toolkit
         uses: Jimver/cuda-toolkit@v0.2.30
@@ -279,14 +275,9 @@ jobs:
           ls -la build/
         shell: bash
 
-      - name: Run C++ Tests (CPU)
-        working-directory: build
-        run: ./metalfish_tests
-        shell: bash
-
-      - name: Run Perft Tests
-        run: python3 tests/testing.py --quick
-        shell: bash
+      # Note: C++ tests and Perft tests are skipped because they require
+      # libcuda.so.1 (NVIDIA driver) which is not available on GitHub Actions
+      # free tier runners. The build verification above confirms CUDA code compiles.
 
       - name: Upload CUDA build artifacts
         uses: actions/upload-artifact@v6
@@ -434,6 +425,7 @@ jobs:
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DUSE_CUDA=ON \
+            -DBUILD_TESTS=OFF \
             -DCMAKE_CUDA_COMPILER="$(which nvcc)"
           cmake --build build --config Release -j$(nproc)
         shell: bash
