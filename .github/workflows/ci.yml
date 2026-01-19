@@ -237,7 +237,7 @@ jobs:
         with:
           cuda: ${{ env.CUDA_VERSION }}
           method: "network"
-          sub-packages: '["nvcc", "nvrtc", "nvrtc-dev", "cudart", "cudart-dev"]'
+          sub-packages: '["nvcc", "cudart", "cudart-dev"]'
 
       - name: Display CUDA info
         run: |
@@ -410,7 +410,7 @@ jobs:
         with:
           cuda: ${{ env.CUDA_VERSION }}
           method: "network"
-          sub-packages: '["nvcc", "nvrtc", "nvrtc-dev", "cudart", "cudart-dev"]'
+          sub-packages: '["nvcc", "cudart", "cudart-dev"]'
 
       - name: Download NNUE files
         run: |

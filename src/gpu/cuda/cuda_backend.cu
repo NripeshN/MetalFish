@@ -6,19 +6,30 @@
 
   Implements the GPU backend interface for NVIDIA CUDA.
   Optimized for modern NVIDIA GPUs with tensor cores when available.
+  
+  Note: This implementation uses only the CUDA Runtime API to avoid
+  dependency on libcuda.so (driver library) which requires an actual GPU.
+  Runtime kernel compilation (NVRTC) is optional and guarded.
 */
 
 #ifdef USE_CUDA
 
 #include "cuda_backend.h"
-#include <cuda.h>
 #include <cuda_runtime.h>
-#include <nvrtc.h>
 #include <atomic>
 #include <cstring>
 #include <iostream>
 #include <mutex>
 #include <sstream>
+
+// Only include driver API and NVRTC if not building without them
+#ifndef NO_CUDA_DRIVER_API
+#include <cuda.h>
+#endif
+
+#ifndef NO_NVRTC
+#include <nvrtc.h>
+#endif
 
 namespace MetalFish {
 namespace GPU {
@@ -47,6 +58,7 @@ namespace GPU {
     }                                                                          \
   } while (0)
 
+#ifndef NO_NVRTC
 #define NVRTC_CHECK(call)                                                      \
   do {                                                                         \
     nvrtcResult result = call;                                                 \
@@ -56,6 +68,7 @@ namespace GPU {
       return false;                                                            \
     }                                                                          \
   } while (0)
+#endif
 
 // ============================================================================
 // CUDABuffer Implementation
@@ -348,12 +361,14 @@ void CUDABackend::cleanup() {
   }
   parallel_streams_.clear();
 
-  // Unload modules
+  // Unload modules (only if driver API is available)
+#ifndef NO_CUDA_DRIVER_API
   for (auto &[name, module] : modules_) {
     if (module) {
       cuModuleUnload(static_cast<CUmodule>(module));
     }
   }
+#endif
   modules_.clear();
   kernels_.clear();
 
@@ -441,7 +456,8 @@ CUDABackend::create_kernel(const std::string &name,
     return std::make_unique<CUDAKernel>(name, it->second);
   }
 
-  // Try to get from module
+#ifndef NO_CUDA_DRIVER_API
+  // Try to get from module (requires driver API)
   auto mod_it = modules_.find(library_name);
   if (mod_it != modules_.end()) {
     CUfunction func;
@@ -453,12 +469,20 @@ CUDABackend::create_kernel(const std::string &name,
       return std::make_unique<CUDAKernel>(name, func);
     }
   }
+#endif
 
+  // Kernel not found - this is expected when using pre-compiled kernels
+  // The actual kernel dispatch happens through the cuda_* host functions
   return nullptr;
 }
 
 bool CUDABackend::compile_library(const std::string &name,
                                   const std::string &source) {
+#if defined(NO_NVRTC) || defined(NO_CUDA_DRIVER_API)
+  // Runtime compilation not available without NVRTC and driver API
+  std::cerr << "[CUDA] Runtime compilation not available (NO_NVRTC or NO_CUDA_DRIVER_API defined)" << std::endl;
+  return false;
+#else
   if (!initialized_) {
     return false;
   }
@@ -517,10 +541,16 @@ bool CUDABackend::compile_library(const std::string &name,
   modules_[name] = module;
 
   return true;
+#endif
 }
 
 bool CUDABackend::load_library(const std::string &name,
                                const std::string &path) {
+#ifdef NO_CUDA_DRIVER_API
+  // Library loading not available without driver API
+  std::cerr << "[CUDA] Library loading not available (NO_CUDA_DRIVER_API defined)" << std::endl;
+  return false;
+#else
   if (!initialized_) {
     return false;
   }
@@ -538,6 +568,7 @@ bool CUDABackend::load_library(const std::string &name,
   modules_[name] = module;
 
   return true;
+#endif
 }
 
 std::unique_ptr<CommandEncoder> CUDABackend::create_encoder() {

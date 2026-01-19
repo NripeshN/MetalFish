@@ -145,24 +145,13 @@ if(USE_CUDA)
     # The driver library (libcuda.so) requires an actual NVIDIA GPU with drivers
     # and would prevent running on systems without GPUs (like CI runners)
     # The runtime API (cudart) handles driver loading dynamically
+    add_definitions(-DNO_CUDA_DRIVER_API)
     
-    # Check for nvrtc (optional - only needed for runtime compilation)
-    set(HAVE_NVRTC OFF)
-    if(TARGET CUDA::nvrtc)
-      list(APPEND CUDA_LINK_LIBRARIES CUDA::nvrtc)
-      set(HAVE_NVRTC ON)
-      message(STATUS "  CUDA::nvrtc: available")
-    else()
-      find_library(NVRTC_LIBRARY nvrtc HINTS ${CUDAToolkit_LIBRARY_DIR})
-      if(NVRTC_LIBRARY)
-        list(APPEND CUDA_LINK_LIBRARIES ${NVRTC_LIBRARY})
-        set(HAVE_NVRTC ON)
-        message(STATUS "  nvrtc: ${NVRTC_LIBRARY}")
-      else()
-        message(STATUS "  nvrtc: NOT FOUND (runtime compilation disabled)")
-        add_definitions(-DNO_NVRTC)
-      endif()
-    endif()
+    # Note: NVRTC requires the driver API to load compiled PTX, so we disable it too
+    # Runtime kernel compilation is not needed - we use pre-compiled kernels
+    add_definitions(-DNO_NVRTC)
+    message(STATUS "  CUDA Driver API: DISABLED (using Runtime API only)")
+    message(STATUS "  NVRTC: DISABLED (pre-compiled kernels only)")
     
     # Set CUDA architecture (auto-detect or specify)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
