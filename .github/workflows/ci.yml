@@ -361,3 +361,101 @@ jobs:
 
     permissions:
       contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Download NNUE files
+        run: |
+          mkdir -p src
+          cd src
+          curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+        shell: bash
+
+      - name: Build Release
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_METAL=ON
+          cmake --build build --config Release -j$(sysctl -n hw.ncpu)
+        shell: bash
+
+      - name: Package Release
+        run: |
+          mkdir -p release
+          cp build/metalfish release/
+          cp build/metalfish.metallib release/ 2>/dev/null || true
+          cp README.md release/
+          tar -czvf metalfish-${{ github.ref_name }}-macos.tar.gz -C release .
+        shell: bash
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: metalfish-${{ github.ref_name }}-macos.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-cuda:
+    name: Create Release (Linux CUDA)
+    needs: [build-cuda]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.30
+        id: cuda-toolkit
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: "network"
+          sub-packages: '["nvcc", "nvrtc", "cudart"]'
+
+      - name: Download NNUE files
+        run: |
+          mkdir -p src
+          cd src
+          curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+        shell: bash
+
+      - name: Build Release with CUDA
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_CUDA=ON \
+            -DCMAKE_CUDA_COMPILER="$(which nvcc)"
+          cmake --build build --config Release -j$(nproc)
+        shell: bash
+
+      - name: Package CUDA Release
+        run: |
+          mkdir -p release
+          cp build/metalfish release/
+          cp README.md release/
+          tar -czvf metalfish-${{ github.ref_name }}-linux-cuda.tar.gz -C release .
+        shell: bash
+
+      - name: Upload CUDA Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: metalfish-${{ github.ref_name }}-linux-cuda.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
