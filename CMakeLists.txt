@@ -122,6 +122,51 @@ if(USE_CUDA)
     message(STATUS "CUDA Toolkit found: ${CUDAToolkit_VERSION}")
     message(STATUS "CUDA include dirs: ${CUDAToolkit_INCLUDE_DIRS}")
     
+    # Check which CUDA targets are available
+    set(CUDA_LINK_LIBRARIES "")
+    
+    if(TARGET CUDA::cudart)
+      list(APPEND CUDA_LINK_LIBRARIES CUDA::cudart)
+      message(STATUS "  CUDA::cudart: available")
+    else()
+      # Try to find cudart manually
+      find_library(CUDART_LIBRARY cudart HINTS ${CUDAToolkit_LIBRARY_DIR})
+      if(CUDART_LIBRARY)
+        list(APPEND CUDA_LINK_LIBRARIES ${CUDART_LIBRARY})
+        message(STATUS "  cudart: ${CUDART_LIBRARY}")
+      endif()
+    endif()
+    
+    if(TARGET CUDA::cuda_driver)
+      list(APPEND CUDA_LINK_LIBRARIES CUDA::cuda_driver)
+      message(STATUS "  CUDA::cuda_driver: available")
+    else()
+      # Try to find cuda driver manually
+      find_library(CUDA_DRIVER_LIBRARY cuda HINTS ${CUDAToolkit_LIBRARY_DIR})
+      if(CUDA_DRIVER_LIBRARY)
+        list(APPEND CUDA_LINK_LIBRARIES ${CUDA_DRIVER_LIBRARY})
+        message(STATUS "  cuda driver: ${CUDA_DRIVER_LIBRARY}")
+      endif()
+    endif()
+    
+    # Check for nvrtc (optional - only needed for runtime compilation)
+    set(HAVE_NVRTC OFF)
+    if(TARGET CUDA::nvrtc)
+      list(APPEND CUDA_LINK_LIBRARIES CUDA::nvrtc)
+      set(HAVE_NVRTC ON)
+      message(STATUS "  CUDA::nvrtc: available")
+    else()
+      find_library(NVRTC_LIBRARY nvrtc HINTS ${CUDAToolkit_LIBRARY_DIR})
+      if(NVRTC_LIBRARY)
+        list(APPEND CUDA_LINK_LIBRARIES ${NVRTC_LIBRARY})
+        set(HAVE_NVRTC ON)
+        message(STATUS "  nvrtc: ${NVRTC_LIBRARY}")
+      else()
+        message(STATUS "  nvrtc: NOT FOUND (runtime compilation disabled)")
+        add_definitions(-DNO_NVRTC)
+      endif()
+    endif()
+    
     # Set CUDA architecture (auto-detect or specify)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
       # Default to common architectures: Volta, Turing, Ampere, Ada Lovelace, Hopper
@@ -265,7 +310,7 @@ if(USE_CUDA AND CUDA_AVAILABLE)
   set_target_properties(metalfish PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-  target_link_libraries(metalfish CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
+  target_link_libraries(metalfish ${CUDA_LINK_LIBRARIES})
 else()
   add_executable(metalfish ${SOURCES})
 endif()
@@ -352,7 +397,7 @@ if(BUILD_TESTS)
     set_target_properties(metalfish_tests PROPERTIES
       CUDA_SEPARABLE_COMPILATION ON
       CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-    target_link_libraries(metalfish_tests Threads::Threads CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
+    target_link_libraries(metalfish_tests Threads::Threads ${CUDA_LINK_LIBRARIES})
   else()
     add_executable(
       metalfish_tests
@@ -402,7 +447,7 @@ if(BUILD_GPU_BENCHMARK)
     set_target_properties(metalfish_gpu_bench PROPERTIES
       CUDA_SEPARABLE_COMPILATION ON
       CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-    target_link_libraries(metalfish_gpu_bench Threads::Threads CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
+    target_link_libraries(metalfish_gpu_bench Threads::Threads ${CUDA_LINK_LIBRARIES})
 
     # Paper benchmark with full NNUE support
     add_executable(metalfish_paper_bench src/paper_benchmark.cpp ${CORE_SOURCES}
@@ -410,7 +455,7 @@ if(BUILD_GPU_BENCHMARK)
     set_target_properties(metalfish_paper_bench PROPERTIES
       CUDA_SEPARABLE_COMPILATION ON
       CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-    target_link_libraries(metalfish_paper_bench Threads::Threads CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
+    target_link_libraries(metalfish_paper_bench Threads::Threads ${CUDA_LINK_LIBRARIES})
   endif()
 endif()
 
