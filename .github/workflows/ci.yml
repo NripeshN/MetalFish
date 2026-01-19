@@ -200,11 +200,11 @@ jobs:
           submodules: recursive
 
       - name: Setup CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.18
+        uses: Jimver/cuda-toolkit@v0.2.30
         id: cuda-toolkit
         with:
-          cuda: '12.4.0'
-          method: 'network'
+          cuda: "12.4.0"
+          method: "network"
           sub-packages: '["nvcc", "nvrtc", "cudart"]'
 
       - name: Display CUDA info
@@ -234,7 +234,7 @@ jobs:
       - name: Run C++ Tests (CUDA - CPU simulation)
         working-directory: build
         run: ./metalfish_tests
-        continue-on-error: true  # May fail without actual GPU
+        continue-on-error: true # May fail without actual GPU
 
       - name: Run Perft Tests
         run: python3 tests/testing.py --quick
@@ -248,8 +248,8 @@ jobs:
           if-no-files-found: warn
 
   lint-and-format:
-    name: Lint & Format Check
-    runs-on: macos-14
+    name: Lint & Format Check (Metal)
+    runs-on: macos-latest
 
     permissions:
       contents: read
@@ -264,24 +264,42 @@ jobs:
             echo "Checking $shader..."
             xcrun -sdk macosx metal -std=metal3.1 -c "$shader" -o /dev/null 2>&1 || echo "Warning: $shader may have issues"
           done
-          echo "Shader syntax check complete"
+          echo "Metal shader syntax check complete"
 
-      - name: Check CUDA kernel syntax (if nvcc available)
+  lint-cuda:
+    name: Lint & Format Check (CUDA)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.18
+        id: cuda-toolkit
+        with:
+          cuda: "12.4.0"
+          method: "network"
+          sub-packages: '["nvcc"]'
+
+      - name: Check CUDA kernel syntax
         run: |
-          if command -v nvcc &> /dev/null; then
-            for kernel in src/gpu/cuda/kernels/*.cu; do
-              echo "Checking $kernel..."
-              nvcc --syntax-only -x cu "$kernel" 2>&1 || echo "Warning: $kernel may have issues"
-            done
-          else
-            echo "nvcc not available, skipping CUDA syntax check"
-          fi
-        continue-on-error: true
+          echo "CUDA version: ${{ steps.cuda-toolkit.outputs.cuda }}"
+          nvcc --version
+          echo ""
+          for kernel in src/gpu/cuda/kernels/*.cu; do
+            echo "Checking $kernel..."
+            nvcc --syntax-only -x cu "$kernel" 2>&1 || echo "Warning: $kernel may have issues"
+          done
+          echo "CUDA kernel syntax check complete"
 
   release:
     name: Create Release
     needs: [build-and-test]
-    runs-on: macos-14
+    runs-on: macos-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     permissions:
@@ -344,8 +362,8 @@ jobs:
         uses: Jimver/cuda-toolkit@v0.2.18
         id: cuda-toolkit
         with:
-          cuda: '12.4.0'
-          method: 'network'
+          cuda: "12.4.0"
+          method: "network"
           sub-packages: '["nvcc", "nvrtc", "cudart"]'
 
       - name: Download NNUE files
