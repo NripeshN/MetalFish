@@ -66,13 +66,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-          cache: "pip"
-
-      - name: Install Python deps (if any)
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        shell: bash
 
       - name: Setup environment (macOS)
         if: runner.os == 'macOS'
@@ -239,7 +232,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-          cache: "pip"
 
       - name: Setup CUDA Toolkit
         uses: Jimver/cuda-toolkit@v0.2.30
