@@ -24,7 +24,7 @@ env:
 
 jobs:
   build-and-test:
-    name: Build & Test (${{ matrix.os }})
+    name: Build & Test (${{ matrix.os }} ${{ matrix.name_suffix }})
     runs-on: ${{ matrix.runner }}
 
     permissions:
@@ -33,28 +33,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - os: ubuntu-latest
             runner: ubuntu-latest
-            artifact_name: metalfish-ubuntu
+            artifact_name: metalfish-ubuntu-cpu
             executable: metalfish
             use_metal: OFF
             use_cuda: OFF
+            name_suffix: "CPU"
 
           - os: windows-latest
             runner: windows-latest
-            artifact_name: metalfish-windows
+            artifact_name: metalfish-windows-cpu
             executable: metalfish.exe
             use_metal: OFF
             use_cuda: OFF
+            name_suffix: "CPU"
 
           - os: macos-latest
             runner: macos-latest
-            artifact_name: metalfish-macos
+            artifact_name: metalfish-macos-metal
             executable: metalfish
             use_metal: ON
             use_cuda: OFF
+            name_suffix: "Metal"
 
     steps:
       - name: Checkout repository
@@ -213,9 +215,9 @@ jobs:
             build/${{ env.BUILD_TYPE }}/${{ matrix.executable }}
           if-no-files-found: warn
 
-  # CUDA build job - intended for GPU runners or manual runs
+  # CUDA build job - Ubuntu only (compile + CPU tests, no GPU required)
   build-cuda:
-    name: Build & Test (CUDA)
+    name: Build & Test (Ubuntu CUDA)
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'test-cuda')
 
@@ -271,13 +273,15 @@ jobs:
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
         shell: bash
 
-      - name: Run C++ Tests (CUDA)
-        working-directory: build
+      - name: Copy NNUE files into build output
         run: |
-          if command -v nvidia-smi &> /dev/null; then
-            nvidia-smi || true
-          fi
-          ./metalfish_tests
+          cp src/*.nnue build/ 2>/dev/null || true
+          ls -la build/
+        shell: bash
+
+      - name: Run C++ Tests (CPU)
+        working-directory: build
+        run: ./metalfish_tests
         shell: bash
 
       - name: Run Perft Tests
@@ -287,9 +291,8 @@ jobs:
       - name: Upload CUDA build artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: metalfish-cuda
-          path: |
-            build/metalfish
+          name: metalfish-ubuntu-cuda
+          path: build/metalfish
           if-no-files-found: warn
 
   lint-and-format:
