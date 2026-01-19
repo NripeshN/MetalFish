@@ -1,18 +1,26 @@
 # MetalFish CI/CD Pipeline
 # Build and test the GPU-accelerated chess engine across platforms
 # - macOS: Metal GPU acceleration
-# - Ubuntu/Windows: CUDA GPU support (uses larger runners for GPU workloads when available)
+# - Ubuntu/Windows: CPU build by default, optional CUDA jobs when available
 
 name: MetalFish CI
 
 on:
   push:
     branches: [main, master, develop]
+    tags:
+      - "v*"
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: metalfish-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   BUILD_TYPE: Release
+  CUDA_VERSION: "13.1.1"
 
 jobs:
   build-and-test:
@@ -33,12 +41,14 @@ jobs:
             executable: metalfish
             use_metal: OFF
             use_cuda: OFF
+
           - os: windows-latest
             runner: windows-latest
             artifact_name: metalfish-windows
             executable: metalfish.exe
             use_metal: OFF
             use_cuda: OFF
+
           - os: macos-latest
             runner: macos-latest
             artifact_name: metalfish-macos
@@ -51,6 +61,18 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Setup Python (tests)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          cache: "pip"
+
+      - name: Install Python deps (if any)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        shell: bash
 
       - name: Setup environment (macOS)
         if: runner.os == 'macOS'
@@ -68,7 +90,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           echo "Ubuntu version:"
-          lsb_release -a
+          lsb_release -a || cat /etc/os-release
           echo ""
           echo "GCC version:"
           gcc --version
@@ -81,8 +103,8 @@ jobs:
             nvidia-smi || echo "nvidia-smi found but failed to run"
           else
             echo "No NVIDIA GPU detected (nvidia-smi not found)"
-            echo "CUDA support will be available when GPU runners are used"
           fi
+        shell: bash
 
       - name: Setup environment (Windows)
         if: runner.os == 'Windows'
@@ -98,20 +120,29 @@ jobs:
             nvidia-smi
           } else {
             Write-Host "No NVIDIA GPU detected (nvidia-smi not found)"
-            Write-Host "CUDA support will be available when GPU runners are used"
           }
         shell: pwsh
 
       - name: Download NNUE files
         run: |
+          mkdir -p src
           cd src
-          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          ls -la
         shell: bash
+
+      - name: Cache build directory (CMake)
+        uses: actions/cache@v5
+        with:
+          path: build
+          key: ${{ runner.os }}-${{ matrix.os }}-cmake-${{ hashFiles('CMakeLists.txt', '**/*.cmake', 'src/**', 'tests/**') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.os }}-cmake-
 
       - name: Configure CMake
         run: |
-          cmake -B build \
+          cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DUSE_METAL=${{ matrix.use_metal }} \
             -DUSE_CUDA=${{ matrix.use_cuda }} \
@@ -120,7 +151,8 @@ jobs:
 
       - name: Build (Unix)
         if: runner.os != 'Windows'
-        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+        run: |
+          cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
         shell: bash
 
       - name: Build (Windows)
@@ -128,50 +160,55 @@ jobs:
         shell: pwsh
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j $env:NUMBER_OF_PROCESSORS
 
-      - name: Copy NNUE files for Windows
+      - name: Copy NNUE files into build output (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          cp build/*.nnue build/${{ env.BUILD_TYPE }}/ 2>/dev/null || true
+          cp src/*.nnue build/${{ env.BUILD_TYPE }}/ 2>/dev/null || true
           ls -la build/${{ env.BUILD_TYPE }}/
 
-      - name: Run C++ Tests
+      - name: Copy NNUE files into build output (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cp src/*.nnue build/ 2>/dev/null || true
+          ls -la build/
+
+      - name: Run C++ Tests (Unix)
+        if: runner.os != 'Windows'
         working-directory: build
         run: ./metalfish_tests
         shell: bash
-        if: runner.os != 'Windows'
 
       - name: Run C++ Tests (Windows)
+        if: runner.os == 'Windows'
         working-directory: build/${{ env.BUILD_TYPE }}
         run: ./metalfish_tests.exe
         shell: bash
-        if: runner.os == 'Windows'
 
-      - name: Run Perft Tests
-        run: python3 tests/testing.py --quick
+      - name: Run Perft Tests (Unix)
         if: runner.os != 'Windows'
+        run: python3 tests/testing.py --quick
+        shell: bash
 
       - name: Run Perft Tests (Windows)
-        run: python tests/testing.py --quick
         if: runner.os == 'Windows'
+        run: python tests/testing.py --quick
+        shell: bash
 
       - name: Run UCI Protocol Test (Unix)
+        if: runner.os != 'Windows'
         working-directory: build
         run: |
-          echo -e "uci\nisready\nposition startpos\ngo depth 5\nquit" | ./${{ matrix.executable }}
+          printf "uci\nisready\nposition startpos\ngo depth 5\nquit\n" | ./${{ matrix.executable }}
         shell: bash
-        if: runner.os != 'Windows'
 
       - name: Run UCI Protocol Test (Windows)
+        if: runner.os == 'Windows'
         working-directory: build/${{ env.BUILD_TYPE }}
         run: |
-          echo "uci" | ./metalfish.exe
-          echo "isready" | ./metalfish.exe
-          echo "position startpos" | ./metalfish.exe
-          echo "go depth 5" | ./metalfish.exe
-          echo "quit" | ./metalfish.exe
+          printf "uci\nisready\nposition startpos\ngo depth 5\nquit\n" | ./${{ matrix.executable }}
         shell: bash
-        if: runner.os == 'Windows'
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v6
@@ -183,12 +220,11 @@ jobs:
             build/${{ env.BUILD_TYPE }}/${{ matrix.executable }}
           if-no-files-found: warn
 
-  # CUDA build job - runs on self-hosted GPU runners or when CUDA is available
+  # CUDA build job - intended for GPU runners or manual runs
   build-cuda:
     name: Build & Test (CUDA)
     runs-on: ubuntu-latest
-    # Only run on push to main/master or when explicitly requested
-    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'test-cuda')
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'test-cuda')
 
     permissions:
       contents: read
@@ -199,11 +235,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Setup Python (tests)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          cache: "pip"
+
       - name: Setup CUDA Toolkit
         uses: Jimver/cuda-toolkit@v0.2.30
         id: cuda-toolkit
         with:
-          cuda: "12.4.0"
+          cuda: ${{ env.CUDA_VERSION }}
           method: "network"
           sub-packages: '["nvcc", "nvrtc", "cudart"]'
 
@@ -212,32 +254,43 @@ jobs:
           echo "CUDA version: ${{ steps.cuda-toolkit.outputs.cuda }}"
           echo "CUDA path: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
           nvcc --version
+        shell: bash
 
       - name: Download NNUE files
         run: |
+          mkdir -p src
           cd src
-          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          ls -la
+        shell: bash
 
       - name: Configure CMake with CUDA
         run: |
-          cmake -B build \
+          cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DUSE_METAL=OFF \
             -DUSE_CUDA=ON \
             -DBUILD_TESTS=ON \
-            -DCMAKE_CUDA_COMPILER=$(which nvcc)
+            -DCMAKE_CUDA_COMPILER="$(which nvcc)"
+        shell: bash
 
       - name: Build with CUDA
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+        shell: bash
 
-      - name: Run C++ Tests (CUDA - CPU simulation)
+      - name: Run C++ Tests (CUDA)
         working-directory: build
-        run: ./metalfish_tests
-        continue-on-error: true # May fail without actual GPU
+        run: |
+          if command -v nvidia-smi &> /dev/null; then
+            nvidia-smi || true
+          fi
+          ./metalfish_tests
+        shell: bash
 
       - name: Run Perft Tests
         run: python3 tests/testing.py --quick
+        shell: bash
 
       - name: Upload CUDA build artifacts
         uses: actions/upload-artifact@v6
@@ -260,11 +313,13 @@ jobs:
 
       - name: Check Metal shader syntax
         run: |
+          shopt -s nullglob
           for shader in src/gpu/metal/kernels/*.metal; do
             echo "Checking $shader..."
             xcrun -sdk macosx metal -std=metal3.1 -c "$shader" -o /dev/null 2>&1 || echo "Warning: $shader may have issues"
           done
           echo "Metal shader syntax check complete"
+        shell: bash
 
   lint-cuda:
     name: Lint & Format Check (CUDA)
@@ -277,11 +332,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Setup CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.18
+      - name: Setup CUDA Toolkit (nvcc only)
+        uses: Jimver/cuda-toolkit@v0.2.30
         id: cuda-toolkit
         with:
-          cuda: "12.4.0"
+          cuda: ${{ env.CUDA_VERSION }}
           method: "network"
           sub-packages: '["nvcc"]'
 
@@ -290,108 +345,19 @@ jobs:
           echo "CUDA version: ${{ steps.cuda-toolkit.outputs.cuda }}"
           nvcc --version
           echo ""
+          shopt -s nullglob
           for kernel in src/gpu/cuda/kernels/*.cu; do
             echo "Checking $kernel..."
             nvcc --syntax-only -x cu "$kernel" 2>&1 || echo "Warning: $kernel may have issues"
           done
           echo "CUDA kernel syntax check complete"
+        shell: bash
 
   release:
-    name: Create Release
+    name: Create Release (macOS Metal)
     needs: [build-and-test]
     runs-on: macos-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     permissions:
       contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Download NNUE files
-        run: |
-          cd src
-          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
-
-      - name: Build Release
-        run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DUSE_METAL=ON
-          cmake --build build --config Release -j$(sysctl -n hw.ncpu)
-
-      - name: Package Release
-        run: |
-          mkdir -p release
-          cp build/metalfish release/
-          cp build/metalfish.metallib release/ 2>/dev/null || true
-          cp README.md release/
-          tar -czvf metalfish-${{ github.ref_name }}-macos.tar.gz -C release .
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: metalfish-${{ github.ref_name }}-macos.tar.gz
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Optional: CUDA release build (requires GPU runner)
-  release-cuda:
-    name: Create CUDA Release
-    needs: [build-cuda]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Setup CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.18
-        id: cuda-toolkit
-        with:
-          cuda: "12.4.0"
-          method: "network"
-          sub-packages: '["nvcc", "nvrtc", "cudart"]'
-
-      - name: Download NNUE files
-        run: |
-          cd src
-          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
-
-      - name: Build Release with CUDA
-        run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DUSE_CUDA=ON \
-            -DCMAKE_CUDA_COMPILER=$(which nvcc)
-          cmake --build build --config Release -j$(nproc)
-
-      - name: Package CUDA Release
-        run: |
-          mkdir -p release
-          cp build/metalfish release/
-          cp README.md release/
-          tar -czvf metalfish-${{ github.ref_name }}-linux-cuda.tar.gz -C release .
-
-      - name: Upload CUDA Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: metalfish-${{ github.ref_name }}-linux-cuda.tar.gz
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
