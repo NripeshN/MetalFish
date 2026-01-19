@@ -20,7 +20,7 @@ concurrency:
 
 env:
   BUILD_TYPE: Release
-  CUDA_VERSION: "13.1.1"
+  CUDA_VERSION: "13.1.0"
 
 jobs:
   build-and-test:
