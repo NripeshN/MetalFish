@@ -5,7 +5,10 @@
   GPU Backend Abstraction Layer
 
   This provides a backend-agnostic interface for GPU operations.
-  Currently supports Metal (Apple Silicon), with CUDA support planned.
+  Supported backends:
+  - Metal (Apple Silicon) - USE_METAL
+  - CUDA (NVIDIA GPUs) - USE_CUDA
+  - CPU fallback (when no GPU is available)
 */
 
 #pragma once

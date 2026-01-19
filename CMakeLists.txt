@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 
 # Only enable Objective-C++ on macOS (needed for Metal)
+# Enable CUDA language if CUDA support is requested
 if(APPLE)
   project(metalfish CXX OBJCXX)
+elseif(USE_CUDA)
+  project(metalfish CXX CUDA)
 else()
   project(metalfish CXX)
 endif()
@@ -12,7 +15,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto")
+if(NOT MSVC)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto")
+endif()
 
 # Enable NEON for Apple Silicon
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
@@ -30,8 +35,8 @@ else()
   option(USE_METAL "Enable Metal GPU acceleration" OFF)
 endif()
 
-# Future: CUDA support
-option(USE_CUDA "Enable CUDA GPU acceleration (future)" OFF)
+# CUDA support
+option(USE_CUDA "Enable CUDA GPU acceleration" OFF)
 
 # Metal-cpp headers location
 set(METAL_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp")
@@ -105,10 +110,48 @@ else()
   set(METAL_CPP_AVAILABLE OFF)
 endif()
 
+# ============================================================================
+# CUDA Configuration
+# ============================================================================
+if(USE_CUDA)
+  # Find CUDA toolkit
+  find_package(CUDAToolkit QUIET)
+  
+  if(CUDAToolkit_FOUND)
+    set(CUDA_AVAILABLE ON)
+    message(STATUS "CUDA Toolkit found: ${CUDAToolkit_VERSION}")
+    message(STATUS "CUDA include dirs: ${CUDAToolkit_INCLUDE_DIRS}")
+    
+    # Set CUDA architecture (auto-detect or specify)
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+      # Default to common architectures: Volta, Turing, Ampere, Ada Lovelace, Hopper
+      set(CMAKE_CUDA_ARCHITECTURES "70;75;80;86;89;90")
+    endif()
+    
+    # CUDA compiler flags
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 --use_fast_math")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -fPIC")
+    
+    # Enable separable compilation for device code
+    set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+    
+  else()
+    set(CUDA_AVAILABLE OFF)
+    message(WARNING "CUDA Toolkit not found. CUDA support will be disabled.")
+    set(USE_CUDA OFF)
+  endif()
+else()
+  set(CUDA_AVAILABLE OFF)
+endif()
+
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   include_directories(${METAL_CPP_DIR})
+endif()
+if(USE_CUDA AND CUDA_AVAILABLE)
+  include_directories(${CUDAToolkit_INCLUDE_DIRS})
 endif()
 
 # Core source files
@@ -146,6 +189,9 @@ set(GPU_SOURCES
     src/gpu/gpu_accumulator.cpp
     src/gpu/gpu_mcts_backend.cpp
     src/gpu/persistent_pipeline.cpp)
+
+# CUDA source files
+set(CUDA_SOURCES "")
 
 # MCTS source files (hybrid search - old implementation)
 set(MCTS_SOURCES
@@ -188,16 +234,17 @@ if(USE_METAL AND METAL_CPP_AVAILABLE)
       VERBATIM)
     add_custom_target(metal_shaders DEPENDS ${SHADER_OUTPUT})
   endif()
+elseif(USE_CUDA AND CUDA_AVAILABLE)
+  # CUDA GPU acceleration
+  set(CUDA_SOURCES
+      src/gpu/cuda/cuda_backend.cu
+      src/gpu/cuda/kernels/nnue_kernels.cu)
+  add_definitions(-DUSE_CUDA)
+  message(STATUS "CUDA GPU acceleration: ENABLED")
 else()
   # CPU fallback backend
   set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cpu_backend.cpp)
-  message(STATUS "Metal GPU acceleration: DISABLED (CPU fallback)")
-endif()
-
-# Future: CUDA sources
-if(USE_CUDA)
-  # set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cuda/cuda_backend.cu)
-  message(STATUS "CUDA GPU acceleration: ENABLED (placeholder)")
+  message(STATUS "GPU acceleration: DISABLED (CPU fallback)")
 endif()
 
 # All source files
@@ -212,7 +259,16 @@ set(SOURCES
     ${MCTS_SOURCES})
 
 # Create executable
-add_executable(metalfish ${SOURCES})
+if(USE_CUDA AND CUDA_AVAILABLE)
+  # CUDA executable with mixed source files
+  add_executable(metalfish ${SOURCES} ${CUDA_SOURCES})
+  set_target_properties(metalfish PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  target_link_libraries(metalfish CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
+else()
+  add_executable(metalfish ${SOURCES})
+endif()
 
 # Add shader dependency if available
 if(TARGET metal_shaders)
@@ -262,7 +318,9 @@ else()
   )
 endif()
 
+# ============================================================================
 # Tests
+# ============================================================================
 option(BUILD_TESTS "Build tests" ON)
 if(BUILD_TESTS)
   enable_testing()
@@ -275,19 +333,39 @@ if(BUILD_TESTS)
       tests/test_search.cpp
       tests/test_mcts.cpp
       tests/test_metal.cpp
-      tests/test_gpu_nnue.cpp)
+      tests/test_gpu_nnue.cpp
+      tests/test_cuda.cpp)
 
-  add_executable(
-    metalfish_tests
-    ${TEST_SOURCES}
-    ${CORE_SOURCES}
-    ${SEARCH_SOURCES}
-    ${EVAL_SOURCES}
-    ${UCI_SOURCES}
-    ${SYZYGY_SOURCES}
-    ${GPU_SOURCES}
-    ${MCTS_SOURCES})
-  target_link_libraries(metalfish_tests Threads::Threads)
+  if(USE_CUDA AND CUDA_AVAILABLE)
+    # CUDA test executable
+    add_executable(
+      metalfish_tests
+      ${TEST_SOURCES}
+      ${CORE_SOURCES}
+      ${SEARCH_SOURCES}
+      ${EVAL_SOURCES}
+      ${UCI_SOURCES}
+      ${SYZYGY_SOURCES}
+      ${GPU_SOURCES}
+      ${MCTS_SOURCES}
+      ${CUDA_SOURCES})
+    set_target_properties(metalfish_tests PROPERTIES
+      CUDA_SEPARABLE_COMPILATION ON
+      CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    target_link_libraries(metalfish_tests Threads::Threads CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
+  else()
+    add_executable(
+      metalfish_tests
+      ${TEST_SOURCES}
+      ${CORE_SOURCES}
+      ${SEARCH_SOURCES}
+      ${EVAL_SOURCES}
+      ${UCI_SOURCES}
+      ${SYZYGY_SOURCES}
+      ${GPU_SOURCES}
+      ${MCTS_SOURCES})
+    target_link_libraries(metalfish_tests Threads::Threads)
+  endif()
 
   if(APPLE
      AND USE_METAL
@@ -300,31 +378,54 @@ if(BUILD_TESTS)
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
 endif()
 
+# ============================================================================
 # GPU Benchmark (optional)
+# ============================================================================
 option(BUILD_GPU_BENCHMARK "Build GPU benchmark" ON)
-if(BUILD_GPU_BENCHMARK
-   AND USE_METAL
-   AND METAL_CPP_AVAILABLE)
-  add_executable(metalfish_gpu_bench src/benchmark_gpu.cpp ${CORE_SOURCES}
-                                     ${GPU_SOURCES})
-  target_link_libraries(
-    metalfish_gpu_bench Threads::Threads ${METAL_FRAMEWORK}
-    ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+if(BUILD_GPU_BENCHMARK)
+  if(USE_METAL AND METAL_CPP_AVAILABLE)
+    add_executable(metalfish_gpu_bench src/benchmark_gpu.cpp ${CORE_SOURCES}
+                                       ${GPU_SOURCES})
+    target_link_libraries(
+      metalfish_gpu_bench Threads::Threads ${METAL_FRAMEWORK}
+      ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
 
-  # Paper benchmark with full NNUE support
-  add_executable(metalfish_paper_bench src/paper_benchmark.cpp ${CORE_SOURCES}
-                                       ${EVAL_SOURCES} ${GPU_SOURCES})
-  target_link_libraries(
-    metalfish_paper_bench Threads::Threads ${METAL_FRAMEWORK}
-    ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+    # Paper benchmark with full NNUE support
+    add_executable(metalfish_paper_bench src/paper_benchmark.cpp ${CORE_SOURCES}
+                                         ${EVAL_SOURCES} ${GPU_SOURCES})
+    target_link_libraries(
+      metalfish_paper_bench Threads::Threads ${METAL_FRAMEWORK}
+      ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+  elseif(USE_CUDA AND CUDA_AVAILABLE)
+    add_executable(metalfish_gpu_bench src/benchmark_gpu.cpp ${CORE_SOURCES}
+                                       ${GPU_SOURCES} ${CUDA_SOURCES})
+    set_target_properties(metalfish_gpu_bench PROPERTIES
+      CUDA_SEPARABLE_COMPILATION ON
+      CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    target_link_libraries(metalfish_gpu_bench Threads::Threads CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
+
+    # Paper benchmark with full NNUE support
+    add_executable(metalfish_paper_bench src/paper_benchmark.cpp ${CORE_SOURCES}
+                                         ${EVAL_SOURCES} ${GPU_SOURCES} ${CUDA_SOURCES})
+    set_target_properties(metalfish_paper_bench PROPERTIES
+      CUDA_SEPARABLE_COMPILATION ON
+      CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    target_link_libraries(metalfish_paper_bench Threads::Threads CUDA::cudart CUDA::cuda_driver CUDA::nvrtc)
+  endif()
 endif()
 
+# ============================================================================
 # Print configuration summary
+# ============================================================================
 message(STATUS "")
 message(STATUS "MetalFish Configuration Summary:")
 message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Metal GPU: ${USE_METAL}")
 message(STATUS "  CUDA GPU: ${USE_CUDA}")
+if(USE_CUDA AND CUDA_AVAILABLE)
+  message(STATUS "    CUDA Version: ${CUDAToolkit_VERSION}")
+  message(STATUS "    CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+endif()
 message(STATUS "  Tests: ${BUILD_TESTS}")
 message(STATUS "")

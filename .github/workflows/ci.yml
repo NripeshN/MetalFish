@@ -1,7 +1,7 @@
 # MetalFish CI/CD Pipeline
 # Build and test the GPU-accelerated chess engine across platforms
 # - macOS: Metal GPU acceleration
-# - Ubuntu/Windows: CUDA GPU support ready (uses larger runners for future GPU workloads)
+# - Ubuntu/Windows: CUDA GPU support (uses larger runners for GPU workloads when available)
 
 name: MetalFish CI
 
@@ -183,6 +183,70 @@ jobs:
             build/${{ env.BUILD_TYPE }}/${{ matrix.executable }}
           if-no-files-found: warn
 
+  # CUDA build job - runs on self-hosted GPU runners or when CUDA is available
+  build-cuda:
+    name: Build & Test (CUDA)
+    runs-on: ubuntu-latest
+    # Only run on push to main/master or when explicitly requested
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'test-cuda')
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.18
+        id: cuda-toolkit
+        with:
+          cuda: '12.4.0'
+          method: 'network'
+          sub-packages: '["nvcc", "nvrtc", "cudart"]'
+
+      - name: Display CUDA info
+        run: |
+          echo "CUDA version: ${{ steps.cuda-toolkit.outputs.cuda }}"
+          echo "CUDA path: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          nvcc --version
+
+      - name: Download NNUE files
+        run: |
+          cd src
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+
+      - name: Configure CMake with CUDA
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DUSE_METAL=OFF \
+            -DUSE_CUDA=ON \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_CUDA_COMPILER=$(which nvcc)
+
+      - name: Build with CUDA
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+
+      - name: Run C++ Tests (CUDA - CPU simulation)
+        working-directory: build
+        run: ./metalfish_tests
+        continue-on-error: true  # May fail without actual GPU
+
+      - name: Run Perft Tests
+        run: python3 tests/testing.py --quick
+
+      - name: Upload CUDA build artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: metalfish-cuda
+          path: |
+            build/metalfish
+          if-no-files-found: warn
+
   lint-and-format:
     name: Lint & Format Check
     runs-on: macos-14
@@ -196,11 +260,23 @@ jobs:
 
       - name: Check Metal shader syntax
         run: |
-          for shader in shaders/*.metal; do
+          for shader in src/gpu/metal/kernels/*.metal; do
             echo "Checking $shader..."
             xcrun -sdk macosx metal -std=metal3.1 -c "$shader" -o /dev/null 2>&1 || echo "Warning: $shader may have issues"
           done
           echo "Shader syntax check complete"
+
+      - name: Check CUDA kernel syntax (if nvcc available)
+        run: |
+          if command -v nvcc &> /dev/null; then
+            for kernel in src/gpu/cuda/kernels/*.cu; do
+              echo "Checking $kernel..."
+              nvcc --syntax-only -x cu "$kernel" 2>&1 || echo "Warning: $kernel may have issues"
+            done
+          else
+            echo "nvcc not available, skipping CUDA syntax check"
+          fi
+        continue-on-error: true
 
   release:
     name: Create Release
@@ -245,5 +321,59 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Optional: CUDA release build (requires GPU runner)
+  release-cuda:
+    name: Create CUDA Release
+    needs: [build-cuda]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.18
+        id: cuda-toolkit
+        with:
+          cuda: '12.4.0'
+          method: 'network'
+          sub-packages: '["nvcc", "nvrtc", "cudart"]'
+
+      - name: Download NNUE files
+        run: |
+          cd src
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+
+      - name: Build Release with CUDA
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_CUDA=ON \
+            -DCMAKE_CUDA_COMPILER=$(which nvcc)
+          cmake --build build --config Release -j$(nproc)
+
+      - name: Package CUDA Release
+        run: |
+          mkdir -p release
+          cp build/metalfish release/
+          cp README.md release/
+          tar -czvf metalfish-${{ github.ref_name }}-linux-cuda.tar.gz -C release .
+
+      - name: Upload CUDA Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: metalfish-${{ github.ref_name }}-linux-cuda.tar.gz
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

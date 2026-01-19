@@ -15,6 +15,7 @@ bool test_position();
 bool test_movegen();
 bool test_search();
 bool test_metal();
+bool test_cuda();
 bool run_all_gpu_tests();
 bool test_mcts();
 
@@ -34,8 +35,8 @@ int main() {
   Test tests[] = {
       {"Bitboard", test_bitboard},       {"Position", test_position},
       {"Move Generation", test_movegen}, {"Search", test_search},
-      {"Metal GPU", test_metal},         {"GPU NNUE", run_all_gpu_tests},
-      {"MCTS Hybrid", test_mcts}};
+      {"Metal GPU", test_metal},         {"CUDA GPU", test_cuda},
+      {"GPU NNUE", run_all_gpu_tests},   {"MCTS Hybrid", test_mcts}};
 
   for (const auto &test : tests) {
     std::cout << "Running " << test.name << " tests... ";

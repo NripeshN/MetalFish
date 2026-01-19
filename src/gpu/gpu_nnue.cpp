@@ -7,7 +7,7 @@
 
 #include "gpu_nnue.h"
 
-#ifdef USE_METAL
+#if defined(USE_METAL) || defined(USE_CUDA)
 
 #include "backend.h"
 #include "core/position.h"
@@ -16,6 +16,10 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+
+#ifdef USE_CUDA
+#include "cuda/kernels/nnue_kernels.h"
+#endif
 
 namespace MetalFish::GPU {
 
@@ -171,6 +175,7 @@ bool GPUNNUEBatchEvaluator::initialize(GPUNNUEWeightManager &weights) {
 bool GPUNNUEBatchEvaluator::compile_kernels() {
   auto &backend = gpu();
 
+#ifdef USE_METAL
   static const char *EVAL_SHADER = R"(
 #include <metal_stdlib>
 using namespace metal;
@@ -305,7 +310,14 @@ kernel void gpu_nnue_forward(
     return false;
   }
 
-  std::cout << "[GPU NNUE Eval] Kernels compiled successfully" << std::endl;
+  std::cout << "[GPU NNUE Eval] Metal kernels compiled successfully" << std::endl;
+#endif // USE_METAL
+
+#ifdef USE_CUDA
+  // CUDA kernels are pre-compiled, just mark as ready
+  std::cout << "[GPU NNUE Eval] CUDA kernels ready" << std::endl;
+#endif // USE_CUDA
+
   return true;
 }
 
@@ -515,7 +527,7 @@ GPUNNUEInterface &gpu_nnue_interface() { return GPUNNUEInterface::instance(); }
 
 } // namespace MetalFish::GPU
 
-#else // !USE_METAL
+#else // !USE_METAL && !USE_CUDA
 
 namespace MetalFish::GPU {
 
@@ -565,4 +577,4 @@ GPUNNUEInterface &gpu_nnue_interface() { return GPUNNUEInterface::instance(); }
 
 } // namespace MetalFish::GPU
 
-#endif // USE_METAL
+#endif // USE_METAL || USE_CUDA
