@@ -8,8 +8,10 @@
 */
 
 #include "enhanced_hybrid_search.h"
+#include "ab_integration.h"
 #include "../core/misc.h"
 #include "../eval/evaluate.h"
+#include "../uci/engine.h"
 #include "../uci/uci.h"
 #include <algorithm>
 #include <chrono>
@@ -37,12 +39,13 @@ EnhancedHybridSearch::~EnhancedHybridSearch() {
   wait();
 }
 
-bool EnhancedHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager) {
+bool EnhancedHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager, Engine *engine) {
   if (!gpu_manager || !gpu_manager->is_ready()) {
     return false;
   }
 
   gpu_manager_ = gpu_manager;
+  engine_ = engine;
 
   // Create GPU MCTS backend
   gpu_backend_ = GPU::create_gpu_mcts_backend(gpu_manager);
@@ -54,6 +57,11 @@ bool EnhancedHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager) {
   mcts_search_ = std::make_unique<HybridSearch>(config_.mcts_config);
   mcts_search_->set_gpu_nnue(gpu_manager);
   mcts_search_->set_neural_network(std::move(gpu_backend_));
+
+  // Initialize the hybrid bridge with the Engine for powerful AB verification
+  if (engine_) {
+    hybrid_bridge().initialize(tt_, gpu_manager_, engine_);
+  }
 
   initialized_ = true;
   return true;
@@ -330,38 +338,108 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
 
   // Guard against null move - cannot verify a null move
   if (mcts_move.is_null()) {
-    // Find the best legal move using NNUE evaluation
-    if (gpu_manager_) {
-      MoveList<LEGAL> moves(pos);
-      int best_score = -32000;
-      for (const auto &m : moves) {
-        Position test_pos;
-        StateInfo test_st;
-        test_pos.set(pos.fen(), false, &test_st);
-        StateInfo test_st2;
-        test_pos.do_move(m, test_st2);
-
-        auto [test_psqt, test_score] =
-            gpu_manager_->evaluate_single(test_pos, true);
-        int score = -test_score;
-
-        if (score > best_score) {
-          best_score = score;
-          result.best_move = m;
-          result.score = score;
+    // Find the best legal move using Engine or fallback to NNUE
+    MoveList<LEGAL> moves(pos);
+    if (moves.size() > 0) {
+      if (engine_) {
+        // Use real engine to find best move
+        auto search_result = engine_->search_sync(pos.fen(), depth, ab_time_budget_ms);
+        if (search_result.best_move != Move::none()) {
+          result.best_move = search_result.best_move;
+          result.score = search_result.score;
+          result.depth = search_result.depth;
+          result.pv = search_result.pv;
+          result.agrees_with_mcts = false;
+          stats_.ab_nodes += search_result.nodes;
         }
-        stats_.ab_nodes++;
-      }
-      if (result.best_move != Move::none()) {
-        result.agrees_with_mcts = false;
-        result.pv.push_back(result.best_move);
+      } else if (gpu_manager_) {
+        // Fallback to NNUE evaluation
+        int best_score = -32000;
+        for (const auto &m : moves) {
+          Position test_pos;
+          StateInfo test_st;
+          test_pos.set(pos.fen(), false, &test_st);
+          StateInfo test_st2;
+          test_pos.do_move(m, test_st2);
+
+          auto [test_psqt, test_score] =
+              gpu_manager_->evaluate_single(test_pos, true);
+          // Negate because we made a move
+          int score = -test_score;
+
+          if (score > best_score) {
+            best_score = score;
+            result.best_move = m;
+            result.score = score;
+          }
+          stats_.ab_nodes++;
+        }
+        if (result.best_move != Move::none()) {
+          result.agrees_with_mcts = false;
+          result.pv.push_back(result.best_move);
+        }
       }
     }
     return result;
   }
 
-  // IMPROVED: Use deeper iterative search for better move validation
-  // Start with shallow search and deepen if time permits
+  // CRITICAL: Use the real Engine for AB verification when available
+  // This leverages the full Stockfish search with NNUE, pruning, etc.
+  if (engine_) {
+    // Run full Stockfish search on the position
+    auto search_result = engine_->search_sync(pos.fen(), depth, ab_time_budget_ms);
+    
+    result.best_move = search_result.best_move;
+    result.score = search_result.score;
+    result.depth = search_result.depth;
+    result.pv = search_result.pv;
+    stats_.ab_nodes += search_result.nodes;
+    
+    // Check if AB agrees with MCTS
+    Move mcts_sf_move = mcts_move.to_stockfish();
+    if (search_result.best_move == mcts_sf_move) {
+      result.agrees_with_mcts = true;
+      result.score_difference = 0.0f;
+    } else {
+      // Get MCTS move score by searching after making the move
+      Position test_pos;
+      StateInfo st1, st2;
+      test_pos.set(pos.fen(), false, &st1);
+      
+      if (test_pos.pseudo_legal(mcts_sf_move) && test_pos.legal(mcts_sf_move)) {
+        test_pos.do_move(mcts_sf_move, st2);
+        
+        // Quick search to get MCTS move's score
+        auto mcts_result = engine_->search_sync(test_pos.fen(), 
+                                                std::max(1, depth - 2), 
+                                                ab_time_budget_ms / 3);
+        int mcts_score = -mcts_result.score;
+        stats_.ab_nodes += mcts_result.nodes;
+        
+        // Calculate score difference in pawns
+        result.score_difference = 
+            static_cast<float>(search_result.score - mcts_score) / 100.0f;
+        
+        // Determine if we should override MCTS
+        if (result.score_difference > config_.ab_override_threshold) {
+          result.agrees_with_mcts = false;
+        } else {
+          result.agrees_with_mcts = true;
+          // Keep MCTS move if within threshold
+          result.best_move = mcts_sf_move;
+          result.score = mcts_score;
+        }
+      } else {
+        // Invalid MCTS move - use AB result
+        result.agrees_with_mcts = false;
+        result.score_difference = 10.0f; // Large difference to ensure override
+      }
+    }
+    
+    return result;
+  }
+
+  // Fallback: Use GPU NNUE for evaluation (less accurate but works without Engine)
   if (gpu_manager_) {
     // Evaluate current position
     auto [psqt1, pos_score1] = gpu_manager_->evaluate_single(pos, true);
@@ -375,14 +453,13 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
 
     auto [psqt2, pos_score2] = gpu_manager_->evaluate_single(pos_after, true);
 
-    // NNUE returns score from white's perspective, negate only for black to move
-    result.score = pos_after.side_to_move() == BLACK ? -pos_score2 : pos_score2;
+    // Score is negated because we made a move
+    result.score = -pos_score2;
     result.pv.push_back(mcts_move.to_stockfish());
 
-    // IMPROVED: Score all legal moves and find the best one
+    // Score all legal moves and find the best one
     MoveList<LEGAL> moves(pos);
     
-    // Store move scores for sorting
     struct MoveScore {
       Move move;
       int score;
@@ -392,7 +469,6 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
     std::vector<MoveScore> move_scores;
     move_scores.reserve(moves.size());
     
-    // First pass: quick evaluation of all moves
     for (const auto &m : moves) {
       if (stop_flag_ || time_exceeded())
         break;
@@ -405,8 +481,7 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
 
       auto [test_psqt, test_score] =
           gpu_manager_->evaluate_single(test_pos, true);
-      // NNUE returns score from white's perspective, negate only for black to move
-      int score = test_pos.side_to_move() == BLACK ? -test_score : test_score;
+      int score = -test_score;
 
       MoveScore ms;
       ms.move = m;
@@ -429,12 +504,6 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
     int best_score = move_scores.empty() ? mcts_score : move_scores[0].score;
     Move best_move = move_scores.empty() ? mcts_move.to_stockfish() : move_scores[0].move;
     
-    // IMPROVED: More sophisticated override logic
-    // Only override if:
-    // 1. The best move is significantly better than MCTS move
-    // 2. The best move is not just a minor improvement
-    // 3. Consider tactical moves more carefully
-    
     int threshold_cp = static_cast<int>(config_.ab_override_threshold * 100);
     
     // Find MCTS move's rank among all moves
@@ -447,27 +516,21 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
       }
     }
     
-    // Override conditions:
-    // 1. Best move is significantly better (by threshold)
-    // 2. MCTS move is not in top 3 moves
-    // 3. Best move is a tactical move (capture/check) and MCTS missed it
+    // Override conditions
     bool should_override = false;
     float score_diff = 0.0f;
     
     if (!move_scores.empty() && best_move != mcts_move.to_stockfish()) {
       score_diff = (best_score - mcts_score) / 100.0f;
       
-      // Condition 1: Large score difference
       if (score_diff > config_.ab_override_threshold) {
         should_override = true;
       }
       
-      // Condition 2: MCTS move is not competitive (not in top 3)
       if (mcts_rank >= 3 && score_diff > config_.ab_override_threshold * 0.5f) {
         should_override = true;
       }
       
-      // Condition 3: Best move is tactical and MCTS missed it
       if (move_scores[0].is_capture || move_scores[0].gives_check) {
         if (score_diff > config_.ab_override_threshold * 0.7f) {
           should_override = true;
@@ -482,44 +545,6 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
       result.score_difference = score_diff;
       result.pv.clear();
       result.pv.push_back(best_move);
-      
-      // IMPROVED: Try to extend PV with one more move
-      if (!time_exceeded()) {
-        Position pv_pos;
-        StateInfo pv_st;
-        pv_pos.set(pos.fen(), false, &pv_st);
-        StateInfo pv_st2;
-        pv_pos.do_move(best_move, pv_st2);
-        
-        MoveList<LEGAL> pv_moves(pv_pos);
-        int best_reply_score = -32000;
-        Move best_reply = Move::none();
-        
-        for (const auto &m : pv_moves) {
-          if (time_exceeded()) break;
-          
-          Position reply_pos;
-          StateInfo reply_st;
-          reply_pos.set(pv_pos.fen(), false, &reply_st);
-          StateInfo reply_st2;
-          reply_pos.do_move(m, reply_st2);
-          
-          auto [reply_psqt, reply_score] =
-              gpu_manager_->evaluate_single(reply_pos, true);
-          // NNUE returns score from white's perspective, negate only for black to move
-          int score = reply_pos.side_to_move() == BLACK ? -reply_score : reply_score;
-          
-          if (score > best_reply_score) {
-            best_reply_score = score;
-            best_reply = m;
-          }
-          stats_.ab_nodes++;
-        }
-        
-        if (best_reply != Move::none()) {
-          result.pv.push_back(best_reply);
-        }
-      }
     }
   }
 
@@ -781,12 +806,13 @@ void EnhancedHybridSearch::new_game() {
 // Factory function
 std::unique_ptr<EnhancedHybridSearch>
 create_enhanced_hybrid_search(GPU::GPUNNUEManager *gpu_manager,
-                              const EnhancedHybridConfig &config) {
+                              const EnhancedHybridConfig &config,
+                              Engine *engine) {
 
   auto search = std::make_unique<EnhancedHybridSearch>();
   search->set_config(config);
 
-  if (search->initialize(gpu_manager)) {
+  if (search->initialize(gpu_manager, engine)) {
     return search;
   }
 

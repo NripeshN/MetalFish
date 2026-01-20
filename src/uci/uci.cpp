@@ -1297,8 +1297,8 @@ void UCIEngine::mcts_go(std::istringstream &is) {
   config.use_position_classifier = true;
   config.dynamic_strategy = true;
 
-  // Create enhanced hybrid search
-  auto search = MCTS::create_enhanced_hybrid_search(gpu_manager, config);
+  // Create enhanced hybrid search - pass the engine for powerful AB verification
+  auto search = MCTS::create_enhanced_hybrid_search(gpu_manager, config, &engine);
 
   if (!search) {
     sync_cout << "info string ERROR: Failed to create hybrid search"

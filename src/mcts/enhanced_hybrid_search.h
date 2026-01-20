@@ -23,6 +23,7 @@
 #include "../gpu/gpu_nnue_integration.h"
 #include "../search/search.h"
 #include "../search/tt.h"
+#include "ab_integration.h"
 #include "hybrid_search.h"
 #include "position_classifier.h"
 #include "stockfish_adapter.h"
@@ -34,6 +35,10 @@
 #include <vector>
 
 namespace MetalFish {
+
+// Forward declaration
+class Engine;
+
 namespace MCTS {
 
 // Forward declarations
@@ -144,7 +149,7 @@ public:
   ~EnhancedHybridSearch();
 
   // Initialization
-  bool initialize(GPU::GPUNNUEManager *gpu_manager);
+  bool initialize(GPU::GPUNNUEManager *gpu_manager, Engine *engine = nullptr);
   bool is_ready() const { return initialized_; }
 
   // Configuration
@@ -185,6 +190,7 @@ private:
   std::unique_ptr<HybridSearch> mcts_search_;
   std::unique_ptr<GPU::GPUMCTSBackend> gpu_backend_;
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
+  Engine *engine_ = nullptr;  // The real Stockfish engine for AB verification
   TranspositionTable *tt_ = nullptr;
 
   // Position classifier
@@ -239,7 +245,8 @@ private:
 // Factory function
 std::unique_ptr<EnhancedHybridSearch> create_enhanced_hybrid_search(
     GPU::GPUNNUEManager *gpu_manager,
-    const EnhancedHybridConfig &config = EnhancedHybridConfig());
+    const EnhancedHybridConfig &config = EnhancedHybridConfig(),
+    Engine *engine = nullptr);
 
 } // namespace MCTS
 } // namespace MetalFish
