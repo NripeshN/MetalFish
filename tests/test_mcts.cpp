@@ -22,10 +22,10 @@
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "gpu/gpu_nnue_integration.h"
-#include "mcts/enhanced_hybrid_search.h"
 #include "mcts/hybrid_search.h"
 #include "mcts/mcts_batch_evaluator.h"
 #include "mcts/mcts_tt.h"
+#include "mcts/parallel_hybrid_search.h"
 #include "mcts/position_classifier.h"
 #include "mcts/stockfish_adapter.h"
 #include "mcts/thread_safe_mcts.h"
@@ -470,8 +470,8 @@ bool test_hybrid_search_basic() {
   return tc.passed();
 }
 
-bool test_enhanced_hybrid_search() {
-  TestCase tc("EnhancedHybridSearch");
+bool test_parallel_hybrid_search() {
+  TestCase tc("ParallelHybridSearch");
 
   if (!GPU::gpu_available()) {
     std::cout << "(skipped - no GPU) ";
@@ -483,15 +483,11 @@ bool test_enhanced_hybrid_search() {
     gpu_manager.initialize();
   }
 
-  EnhancedHybridSearch search;
-  bool init_ok = search.initialize(&gpu_manager);
-
-  if (!init_ok) {
-    std::cout << "(skipped - init failed) ";
-    return true;
-  }
-
-  EXPECT(tc, init_ok);
+  // ParallelHybridSearch requires an Engine, which we don't have in tests
+  // Just verify the config can be created
+  ParallelHybridConfig config;
+  EXPECT(tc, config.gpu_batch_size > 0);
+  EXPECT(tc, config.ab_min_depth > 0);
 
   return tc.passed();
 }
@@ -630,7 +626,7 @@ bool test_mcts() {
   test_hybrid_node();
   test_hybrid_tree();
   test_hybrid_search_basic();
-  test_enhanced_hybrid_search();
+  test_parallel_hybrid_search();
 
   std::cout << "\n[Performance]" << std::endl;
   test_tt_performance();

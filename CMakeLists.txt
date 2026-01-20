@@ -225,16 +225,24 @@ set(GPU_SOURCES
 set(CUDA_SOURCES "")
 
 # MCTS source files (hybrid search)
+# Core files needed for all MCTS modes:
+# - stockfish_adapter: Interface between Stockfish and MCTS
+# - hybrid_search: Core MCTS tree implementation (HybridNode, HybridTree)
+# - position_classifier: Classifies positions for strategy selection
+# - mcts_batch_evaluator: GPU batch evaluation
+# - mcts_tt: MCTS transposition table
+# - ab_integration: Alpha-beta integration helpers
+# - thread_safe_mcts: Pure MCTS implementation for mctsmt command
+# - parallel_hybrid_search: Parallel MCTS+AB for mcts/hybrid commands
 set(MCTS_SOURCES
     src/mcts/stockfish_adapter.cpp
     src/mcts/hybrid_search.cpp
     src/mcts/position_classifier.cpp
-    src/mcts/enhanced_hybrid_search.cpp
     src/mcts/mcts_batch_evaluator.cpp
     src/mcts/mcts_tt.cpp
-    src/mcts/parallel_search.cpp
     src/mcts/ab_integration.cpp
-    src/mcts/thread_safe_mcts.cpp)
+    src/mcts/thread_safe_mcts.cpp
+    src/mcts/parallel_hybrid_search.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)

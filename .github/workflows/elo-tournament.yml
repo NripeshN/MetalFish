@@ -180,18 +180,18 @@ jobs:
 
       - name: Create MetalFish wrapper scripts
         run: |
-          # Create Hybrid wrapper (uses 'mcts' command)
+          # Create Hybrid wrapper (uses 'parallel_hybrid' command - MCTS + AB in parallel)
           cat > tools/metalfish_hybrid_wrapper.sh << 'EOF'
           #!/bin/bash
-          # MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
+          # MetalFish Hybrid wrapper - intercepts 'go' and runs 'parallel_hybrid' (parallel MCTS+AB) instead
 
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           ENGINE="$SCRIPT_DIR/../build/metalfish"
 
-          # Read UCI commands and transform 'go' to 'mcts'
+          # Read UCI commands and transform 'go' to 'parallel_hybrid'
           while IFS= read -r line; do
               if [[ "$line" == go* ]]; then
-                  echo "mcts ${line#go}"
+                  echo "parallel_hybrid ${line#go}"
               else
                   echo "$line"
               fi
@@ -199,10 +199,10 @@ jobs:
           EOF
           chmod +x tools/metalfish_hybrid_wrapper.sh
 
-          # Create MCTS-MT wrapper (uses 'mctsmt' command with 4 threads)
-          cat > tools/metalfish_mctsmt_wrapper.sh << 'EOF'
+          # Create MCTS wrapper (uses 'mctsmt' command - pure GPU MCTS)
+          cat > tools/metalfish_mcts_wrapper.sh << 'EOF'
           #!/bin/bash
-          # MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
+          # MetalFish MCTS wrapper - intercepts 'go' and runs 'mctsmt' (GPU MCTS) instead
 
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           ENGINE="$SCRIPT_DIR/../build/metalfish"
@@ -216,7 +216,7 @@ jobs:
               fi
           done | "$ENGINE"
           EOF
-          chmod +x tools/metalfish_mctsmt_wrapper.sh
+          chmod +x tools/metalfish_mcts_wrapper.sh
 
       - name: Verify all engine binaries
         run: |
@@ -250,9 +250,9 @@ jobs:
           fi
 
           echo ""
-          echo "=== MetalFish MCTS-MT Wrapper ==="
-          if [ -f "tools/metalfish_mctsmt_wrapper.sh" ]; then
-            echo "  ✓ Found at tools/metalfish_mctsmt_wrapper.sh"
+          echo "=== MetalFish MCTS Wrapper ==="
+          if [ -f "tools/metalfish_mcts_wrapper.sh" ]; then
+            echo "  ✓ Found at tools/metalfish_mcts_wrapper.sh"
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -333,7 +333,7 @@ jobs:
             reference/stockfish/src/nn-*.nnue \
             tools/elo_tournament.py \
             tools/metalfish_hybrid_wrapper.sh \
-            tools/metalfish_mctsmt_wrapper.sh \
+            tools/metalfish_mcts_wrapper.sh \
             2>/dev/null || true
 
           # Add Patricia if it exists
@@ -390,7 +390,7 @@ jobs:
           chmod +x reference/Patricia/engine/patricia || true
           chmod +x reference/lc0/build/release/lc0 || true
           chmod +x tools/metalfish_hybrid_wrapper.sh || true
-          chmod +x tools/metalfish_mctsmt_wrapper.sh || true
+          chmod +x tools/metalfish_mcts_wrapper.sh || true
 
           # Debug: List what we have
           echo "=== Directory structure after extraction ==="

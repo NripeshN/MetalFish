@@ -3,9 +3,9 @@
 MetalFish Comprehensive Elo Tournament
 
 Runs a tournament between multiple chess engines to determine Elo ratings:
-- MetalFish-AB (Alpha-Beta search with 'go' command) - Best for tactical positions, ~1.5M NPS
-- MetalFish-Hybrid (Hybrid MCTS search with 'mcts' command) - General play
-- MetalFish-MCTS (Multi-threaded MCTS with 'mctsmt' command) - Strategic positions, ~700K NPS (4 threads)
+- MetalFish-AB (Alpha-Beta search with 'go' command) - Full Stockfish search with NNUE
+- MetalFish-MCTS (GPU MCTS with 'mctsmt' command) - Pure GPU-accelerated MCTS  
+- MetalFish-Hybrid (Parallel MCTS+AB with 'parallel_hybrid' command) - Best of both worlds
 - Stockfish at various skill levels (0-20)
 - Patricia (aggressive engine, ~3500 Elo)
 - Lc0 (Leela Chess Zero - neural network engine)
@@ -257,7 +257,7 @@ class Tournament:
 
         metalfish_path = self.base_dir / "build" / "metalfish"
 
-        # MetalFish with standard Alpha-Beta search (best for tactical positions, ~1.5M NPS)
+        # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
         self.add_engine(
             EngineConfig(
                 name="MetalFish-AB",
@@ -267,25 +267,25 @@ class Tournament:
             )
         )
 
-        # MetalFish with Hybrid MCTS search (general play, combining strengths)
+        # MetalFish with Pure GPU MCTS (uses 'mctsmt' command)
+        mcts_wrapper = self.base_dir / "tools" / "metalfish_mcts_wrapper.sh"
+        self._create_mcts_wrapper(metalfish_path, mcts_wrapper)
+        self.add_engine(
+            EngineConfig(
+                name="MetalFish-MCTS",
+                cmd=str(mcts_wrapper),
+                options={},
+                expected_elo=None,
+            )
+        )
+
+        # MetalFish with Parallel Hybrid search (MCTS + AB in parallel)
         hybrid_wrapper = self.base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
         self._create_hybrid_wrapper(metalfish_path, hybrid_wrapper)
         self.add_engine(
             EngineConfig(
                 name="MetalFish-Hybrid",
                 cmd=str(hybrid_wrapper),
-                options={},
-                expected_elo=None,
-            )
-        )
-
-        # MetalFish with Multi-threaded MCTS (strategic positions, ~700K NPS with 4 threads)
-        mctsmt_wrapper = self.base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
-        self._create_mctsmt_wrapper(metalfish_path, mctsmt_wrapper)
-        self.add_engine(
-            EngineConfig(
-                name="MetalFish-MCTS",
-                cmd=str(mctsmt_wrapper),
                 options={},
                 expected_elo=None,
             )
@@ -369,38 +369,17 @@ class Tournament:
                 )
 
     def _create_hybrid_wrapper(self, metalfish_path: Path, wrapper_path: Path):
-        """Create a wrapper script that uses 'mcts' command (hybrid search) instead of 'go'."""
+        """Create a wrapper script that uses 'parallel_hybrid' command for parallel MCTS+AB."""
         wrapper_content = f"""#!/bin/bash
-# MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
+# MetalFish Hybrid wrapper - intercepts 'go' and runs 'parallel_hybrid' (parallel MCTS+AB) instead
 
 ENGINE="{metalfish_path}"
 
-# Read UCI commands and transform 'go' to 'mcts'
+# Read UCI commands and transform 'go' to 'parallel_hybrid'
 while IFS= read -r line; do
     if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mcts' for hybrid search
-        echo "mcts ${{line#go}}"
-    else
-        echo "$line"
-    fi
-done | "$ENGINE"
-"""
-        with open(wrapper_path, "w") as f:
-            f.write(wrapper_content)
-        os.chmod(wrapper_path, 0o755)
-
-    def _create_mctsmt_wrapper(self, metalfish_path: Path, wrapper_path: Path):
-        """Create a wrapper script that uses 'mctsmt' command (multi-threaded MCTS) instead of 'go'."""
-        wrapper_content = f"""#!/bin/bash
-# MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
-
-ENGINE="{metalfish_path}"
-
-# Read UCI commands and transform 'go' to 'mctsmt threads=4'
-while IFS= read -r line; do
-    if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mctsmt threads=4' for multi-threaded MCTS
-        echo "mctsmt threads=4 ${{line#go}}"
+        # Replace 'go' with 'parallel_hybrid' for parallel hybrid search
+        echo "parallel_hybrid ${{line#go}}"
     else
         echo "$line"
     fi
@@ -411,17 +390,17 @@ done | "$ENGINE"
         os.chmod(wrapper_path, 0o755)
 
     def _create_mcts_wrapper(self, metalfish_path: Path, wrapper_path: Path):
-        """Create a wrapper script that uses 'mcts' command instead of 'go'."""
+        """Create a wrapper script that uses 'mctsmt' command for pure GPU MCTS."""
         wrapper_content = f"""#!/bin/bash
-# MetalFish MCTS wrapper - intercepts 'go' and runs 'mcts' instead
+# MetalFish MCTS wrapper - intercepts 'go' and runs 'mctsmt' (GPU MCTS) instead
 
 ENGINE="{metalfish_path}"
 
-# Read UCI commands and transform 'go' to 'mcts'
+# Read UCI commands and transform 'go' to 'mctsmt threads=4'
 while IFS= read -r line; do
     if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mcts'
-        echo "mcts ${{line#go}}"
+        # Replace 'go' with 'mctsmt threads=4' for multi-threaded GPU MCTS
+        echo "mctsmt threads=4 ${{line#go}}"
     else
         echo "$line"
     fi
@@ -430,6 +409,10 @@ done | "$ENGINE"
         with open(wrapper_path, "w") as f:
             f.write(wrapper_content)
         os.chmod(wrapper_path, 0o755)
+
+    def _create_mctsmt_wrapper(self, metalfish_path: Path, wrapper_path: Path):
+        """Alias for _create_mcts_wrapper for backwards compatibility."""
+        self._create_mcts_wrapper(metalfish_path, wrapper_path)
 
     def run_match(
         self,
@@ -665,7 +648,7 @@ def get_engine_configs(
 
     metalfish_path = base_dir / "build" / "metalfish"
 
-    # MetalFish with standard Alpha-Beta search (best for tactical positions, ~1.5M NPS)
+    # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
     configs["MetalFish-AB"] = EngineConfig(
         name="MetalFish-AB",
         cmd=str(metalfish_path),
@@ -673,16 +656,16 @@ def get_engine_configs(
         expected_elo=None,
     )
 
-    # MetalFish with Hybrid MCTS search (general play)
+    # MetalFish with Pure GPU MCTS (uses 'mctsmt' command)
+    mcts_wrapper = base_dir / "tools" / "metalfish_mcts_wrapper.sh"
+    configs["MetalFish-MCTS"] = EngineConfig(
+        name="MetalFish-MCTS", cmd=str(mcts_wrapper), options={}, expected_elo=None
+    )
+
+    # MetalFish with Parallel Hybrid search (MCTS + AB in parallel)
     hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
     configs["MetalFish-Hybrid"] = EngineConfig(
         name="MetalFish-Hybrid", cmd=str(hybrid_wrapper), options={}, expected_elo=None
-    )
-
-    # MetalFish with Multi-threaded MCTS (strategic positions, ~700K NPS with 4 threads)
-    mctsmt_wrapper = base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
-    configs["MetalFish-MCTS"] = EngineConfig(
-        name="MetalFish-MCTS", cmd=str(mctsmt_wrapper), options={}, expected_elo=None
     )
 
     # Patricia - aggressive engine (~3500 Elo)
@@ -789,8 +772,8 @@ def run_ci_match(
         _create_hybrid_wrapper_file(metalfish_path, hybrid_wrapper)
 
     if "MetalFish-MCTS" in [engine1_name, engine2_name]:
-        mctsmt_wrapper = base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
-        _create_mctsmt_wrapper_file(metalfish_path, mctsmt_wrapper)
+        mcts_wrapper = base_dir / "tools" / "metalfish_mcts_wrapper.sh"
+        _create_mcts_wrapper_file(metalfish_path, mcts_wrapper)
 
     cutechess = base_dir / "reference" / "cutechess" / "build" / "cutechess-cli"
 
@@ -921,39 +904,17 @@ def run_ci_match(
 
 
 def _create_hybrid_wrapper_file(metalfish_path: Path, wrapper_path: Path):
-    """Create a wrapper script that uses 'mcts' command (hybrid search) instead of 'go'."""
+    """Create a wrapper script that uses 'parallel_hybrid' command for parallel MCTS+AB."""
     wrapper_content = f"""#!/bin/bash
-# MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
+# MetalFish Hybrid wrapper - intercepts 'go' and runs 'parallel_hybrid' (parallel MCTS+AB) instead
 
 ENGINE="{metalfish_path}"
 
-# Read UCI commands and transform 'go' to 'mcts'
+# Read UCI commands and transform 'go' to 'parallel_hybrid'
 while IFS= read -r line; do
     if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mcts' for hybrid search
-        echo "mcts ${{line#go}}"
-    else
-        echo "$line"
-    fi
-done | "$ENGINE"
-"""
-    with open(wrapper_path, "w") as f:
-        f.write(wrapper_content)
-    os.chmod(wrapper_path, 0o755)
-
-
-def _create_mctsmt_wrapper_file(metalfish_path: Path, wrapper_path: Path):
-    """Create a wrapper script that uses 'mctsmt' command (multi-threaded MCTS) instead of 'go'."""
-    wrapper_content = f"""#!/bin/bash
-# MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
-
-ENGINE="{metalfish_path}"
-
-# Read UCI commands and transform 'go' to 'mctsmt threads=4'
-while IFS= read -r line; do
-    if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mctsmt threads=4' for multi-threaded MCTS
-        echo "mctsmt threads=4 ${{line#go}}"
+        # Replace 'go' with 'parallel_hybrid' for parallel hybrid search
+        echo "parallel_hybrid ${{line#go}}"
     else
         echo "$line"
     fi
@@ -965,17 +926,17 @@ done | "$ENGINE"
 
 
 def _create_mcts_wrapper_file(metalfish_path: Path, wrapper_path: Path):
-    """Create a wrapper script that uses 'mcts' command instead of 'go'."""
+    """Create a wrapper script that uses 'mctsmt' command for pure GPU MCTS."""
     wrapper_content = f"""#!/bin/bash
-# MetalFish MCTS wrapper - intercepts 'go' and runs 'mcts' instead
+# MetalFish MCTS wrapper - intercepts 'go' and runs 'mctsmt' (GPU MCTS) instead
 
 ENGINE="{metalfish_path}"
 
-# Read UCI commands and transform 'go' to 'mcts'
+# Read UCI commands and transform 'go' to 'mctsmt threads=4'
 while IFS= read -r line; do
     if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mcts'
-        echo "mcts ${{line#go}}"
+        # Replace 'go' with 'mctsmt threads=4' for multi-threaded GPU MCTS
+        echo "mctsmt threads=4 ${{line#go}}"
     else
         echo "$line"
     fi
@@ -984,6 +945,11 @@ done | "$ENGINE"
     with open(wrapper_path, "w") as f:
         f.write(wrapper_content)
     os.chmod(wrapper_path, 0o755)
+
+
+def _create_mctsmt_wrapper_file(metalfish_path: Path, wrapper_path: Path):
+    """Alias for _create_mcts_wrapper_file for backwards compatibility."""
+    _create_mcts_wrapper_file(metalfish_path, wrapper_path)
 
 
 def aggregate_ci_results(results_dir: Path, output_file: Path = None) -> Dict[str, Any]:
