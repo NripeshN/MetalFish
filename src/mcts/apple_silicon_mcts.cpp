@@ -518,6 +518,15 @@ void AppleSiliconPolicySoftmax::compute_softmax_simd(
   
   if (count <= 0) return;
   
+  // Handle temperature == 0 as argmax (deterministic selection)
+  if (temperature == 0.0f) {
+    float max_score = *std::max_element(scores, scores + count);
+    for (int i = 0; i < count; ++i) {
+      probs_out[i] = (scores[i] == max_score) ? 1.0f : 0.0f;
+    }
+    return;
+  }
+  
 #ifdef __APPLE__
   // Use Accelerate framework for SIMD operations
   

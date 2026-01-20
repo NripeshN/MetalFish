@@ -833,10 +833,8 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
   
   // Lc0-style PUCT with logarithmic growth
   // Formula: cpuct_init + cpuct_factor * log((N + cpuct_base) / cpuct_base)
-  const float cpuct_base = 38739.0f;  // Lc0 default
-  const float cpuct_factor = 3.894f;  // Lc0 default
-  float effective_cpuct = cpuct + cpuct_factor * 
-      std::log((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
+  float effective_cpuct = cpuct + config_.cpuct_factor * 
+      std::log((static_cast<float>(parent_n) + config_.cpuct_base) / config_.cpuct_base);
   
   // Compute U coefficient: cpuct * sqrt(children_visits)
   uint32_t children_visits = node->n() > 0 ? node->n() - 1 : 0;
@@ -984,16 +982,23 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos,
     }
     
     // Softmax normalization with temperature
-    float sum = 0.0f;
-    for (int i = 0; i < num_edges; ++i) {
-      scores[i] = std::exp((scores[i] - max_score) / 
-                           (config_.policy_softmax_temp * 400.0f));
-      sum += scores[i];
-    }
-    
-    // Set policy priors
-    for (int i = 0; i < num_edges; ++i) {
-      node->edges()[i].set_policy(scores[i] / sum);
+    // Handle temperature == 0 as argmax (deterministic selection)
+    if (config_.policy_softmax_temp == 0.0f) {
+      for (int i = 0; i < num_edges; ++i) {
+        node->edges()[i].set_policy((scores[i] == max_score) ? 1.0f : 0.0f);
+      }
+    } else {
+      float sum = 0.0f;
+      for (int i = 0; i < num_edges; ++i) {
+        scores[i] = std::exp((scores[i] - max_score) / 
+                             (config_.policy_softmax_temp * 400.0f));
+        sum += scores[i];
+      }
+      
+      // Set policy priors
+      for (int i = 0; i < num_edges; ++i) {
+        node->edges()[i].set_policy(scores[i] / sum);
+      }
     }
   }
 
