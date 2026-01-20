@@ -213,13 +213,10 @@ set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
 # GPU source files (backend-agnostic interface)
 set(GPU_SOURCES
-    src/gpu/nnue_eval.cpp
-    src/gpu/batch_ops.cpp
     src/gpu/gpu_nnue.cpp
     src/gpu/gpu_nnue_integration.cpp
     src/gpu/gpu_accumulator.cpp
-    src/gpu/gpu_mcts_backend.cpp
-    src/gpu/persistent_pipeline.cpp)
+    src/gpu/gpu_mcts_backend.cpp)
 
 # CUDA source files
 set(CUDA_SOURCES "")
@@ -234,6 +231,7 @@ set(CUDA_SOURCES "")
 # - ab_integration: Alpha-beta integration helpers
 # - thread_safe_mcts: Pure MCTS implementation for mctsmt command
 # - parallel_hybrid_search: Parallel MCTS+AB for mcts/hybrid commands
+# - apple_silicon_mcts: Apple Silicon specific optimizations
 set(MCTS_SOURCES
     src/mcts/stockfish_adapter.cpp
     src/mcts/hybrid_search.cpp
@@ -242,7 +240,8 @@ set(MCTS_SOURCES
     src/mcts/mcts_tt.cpp
     src/mcts/ab_integration.cpp
     src/mcts/thread_safe_mcts.cpp
-    src/mcts/parallel_hybrid_search.cpp)
+    src/mcts/parallel_hybrid_search.cpp
+    src/mcts/apple_silicon_mcts.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
@@ -322,12 +321,14 @@ target_link_libraries(metalfish Threads::Threads)
 if(APPLE)
   find_library(METAL_FRAMEWORK Metal)
   find_library(FOUNDATION_FRAMEWORK Foundation)
+  find_library(ACCELERATE_FRAMEWORK Accelerate)
   find_library(COREFOUNDATION_FRAMEWORK CoreFoundation)
   find_library(QUARTZCORE_FRAMEWORK QuartzCore)
 
   if(USE_METAL AND METAL_CPP_AVAILABLE)
     target_link_libraries(metalfish ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
-                          ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+                          ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK}
+                          ${ACCELERATE_FRAMEWORK})
   endif()
 endif()
 

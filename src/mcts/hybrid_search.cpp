@@ -4,11 +4,16 @@
 
   Implementation of the Hybrid MCTS + Alpha-Beta search.
   Optimized for Apple Silicon unified memory and Metal GPU.
+  
+  This implementation incorporates algorithms from Leela Chess Zero (Lc0),
+  including PUCT with logarithmic growth, FPU reduction strategy, and
+  moves left head (MLH) utility.
 
   Licensed under GPL-3.0
 */
 
 #include "hybrid_search.h"
+#include "lc0_mcts_core.h"
 #include "../eval/evaluate.h"
 #include <algorithm>
 #include <cmath>
@@ -770,17 +775,9 @@ float HybridSearch::evaluate_position_direct(const MCTSPosition &pos,
     auto [psqt, score] =
         gpu_nnue_->evaluate_single(pos.stockfish_position(), true);
     
-    // IMPROVED: Use a more refined score transformation
-    // The raw NNUE score is in centipawns, convert to [-1, 1] range
-    // Use a sigmoid-like function that's more sensitive to small advantages
-    float cp = static_cast<float>(score);
-    
-    // Clamp to reasonable range to avoid extreme values
-    cp = std::clamp(cp, -2000.0f, 2000.0f);
-    
-    // Use tanh with a scaling factor tuned for chess evaluation
-    // 400 cp roughly corresponds to a winning position
-    value = std::tanh(cp / 400.0f);
+    // Use Lc0-style score transformation
+    // This converts NNUE centipawn scores to MCTS Q values in [-1, 1]
+    value = NnueScoreToQ(score);
     
     // CRITICAL: Ensure value is from side-to-move's perspective
     // NNUE returns score from white's perspective, so negate for black
@@ -830,13 +827,45 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
 
   ctx.puct_scores.resize(num_edges);
 
-  float parent_n = static_cast<float>(node->n() + node->n_in_flight());
-  float parent_n_sqrt = std::sqrt(parent_n + 1.0f);
-  
-  // FPU (First Play Urgency) - use parent Q as baseline, reduced for unexplored moves
-  // This encourages exploration of new moves while still being informed by parent value
+  // Get parent statistics
+  uint32_t parent_n = node->n() + node->n_in_flight();
   float parent_q = node->n() > 0 ? node->q() : 0.0f;
-  float fpu = parent_q - config_.fpu_reduction;
+  
+  // Lc0-style PUCT with logarithmic growth
+  // Formula: cpuct_init + cpuct_factor * log((N + cpuct_base) / cpuct_base)
+  const float cpuct_base = 38739.0f;  // Lc0 default
+  const float cpuct_factor = 3.894f;  // Lc0 default
+  float effective_cpuct = cpuct + cpuct_factor * 
+      std::log((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
+  
+  // Compute U coefficient: cpuct * sqrt(children_visits)
+  uint32_t children_visits = node->n() > 0 ? node->n() - 1 : 0;
+  float cpuct_sqrt_n = effective_cpuct * std::sqrt(static_cast<float>(
+      std::max(children_visits, 1u)));
+  
+  // Lc0-style FPU with reduction strategy
+  // FPU = -parent_Q - fpu_value * sqrt(visited_policy)
+  float visited_policy = 0.0f;
+  for (int i = 0; i < num_edges; ++i) {
+    const HybridEdge &edge = node->edges()[i];
+    HybridNode *child = edge.child();
+    if (child && child->n() > 0) {
+      visited_policy += edge.policy();
+    }
+  }
+  
+  // FPU reduction: unvisited nodes get parent Q minus a reduction
+  float fpu = -parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
+  
+  // Set up moves left evaluator for MLH utility
+  Lc0SearchParams lc0_params;
+  lc0_params.moves_left_max_effect = 0.0345f;
+  lc0_params.moves_left_threshold = 0.8f;
+  lc0_params.moves_left_slope = 0.0027f;
+  lc0_params.moves_left_scaled_factor = 1.6521f;
+  lc0_params.moves_left_quadratic_factor = -0.6521f;
+  
+  MovesLeftEvaluator m_eval(lc0_params, node->m(), parent_q);
 
   int best_idx = -1;
   float best_puct = -std::numeric_limits<float>::infinity();
@@ -845,22 +874,31 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
     const HybridEdge &edge = node->edges()[i];
     HybridNode *child = edge.child();
 
-    float puct;
+    float q, m_utility = 0.0f;
+    float policy = edge.policy();
+    int n_started = 0;
+    
     if (child) {
       uint32_t n = child->n();
       uint32_t n_in_flight = child->n_in_flight();
-      float total_n = static_cast<float>(n + n_in_flight);
+      n_started = static_cast<int>(n + n_in_flight);
       
-      // CRITICAL FIX: Negate child Q value because it's from opponent's perspective
-      // Parent wants to maximize, child Q is opponent's evaluation
-      float q = (n > 0) ? -child->q() : fpu;
-      float u = cpuct * edge.policy() * parent_n_sqrt / (1.0f + total_n);
-      puct = q + u;
+      // CRITICAL: Negate child Q value because it's from opponent's perspective
+      q = (n > 0) ? -child->q() : fpu;
+      
+      // Add moves left utility if enabled and child has visits
+      if (n > 0 && m_eval.IsEnabled()) {
+        m_utility = m_eval.GetMUtility(child->m(), q);
+      }
     } else {
-      // Unexplored node - use FPU with full exploration bonus
-      float u = cpuct * edge.policy() * parent_n_sqrt;
-      puct = fpu + u;
+      q = fpu;
+      m_utility = m_eval.GetDefaultMUtility();
     }
+    
+    // Lc0-style PUCT score: Q + U + M
+    // U = cpuct * sqrt(parent_N) * P / (1 + child_N)
+    float u = cpuct_sqrt_n * policy / (1.0f + static_cast<float>(n_started));
+    float puct = q + u + m_utility;
 
     ctx.puct_scores[i] = puct;
     if (puct > best_puct) {
@@ -1124,86 +1162,70 @@ MCTSMove HybridSearch::select_best_move() const {
 
   int num_edges = root->num_edges();
   
-  // IMPROVED: Use a combination of visit count and Q value for move selection
-  // This helps avoid selecting moves that have many visits but poor Q values
-  // (which can happen due to virtual loss or early exploration)
+  // Lc0-style best move selection
+  // Priority: Terminal wins > Most visits > Best Q > Highest policy
+  // Also prefers shorter wins and longer losses
   
-  struct MoveCandidate {
+  struct EdgeInfo {
     int idx;
     uint32_t visits;
     float q;
     float policy;
+    float m;  // Moves left estimate
+    bool is_terminal;
+    bool is_win;
+    bool is_loss;
   };
   
-  std::vector<MoveCandidate> candidates;
+  std::vector<EdgeInfo> candidates;
   candidates.reserve(num_edges);
-  
-  uint32_t max_visits = 0;
-  float best_q = -2.0f;
   
   for (int i = 0; i < num_edges; ++i) {
     const HybridEdge &edge = root->edges()[i];
     HybridNode *child = edge.child();
     
     if (child && child->n() > 0) {
-      MoveCandidate mc;
-      mc.idx = i;
-      mc.visits = child->n();
-      mc.q = -child->q();  // Negate because child Q is from opponent's perspective
-      mc.policy = edge.policy();
-      candidates.push_back(mc);
-      
-      max_visits = std::max(max_visits, mc.visits);
-      best_q = std::max(best_q, mc.q);
+      EdgeInfo info;
+      info.idx = i;
+      info.visits = child->n();
+      info.q = -child->q();  // Negate because child Q is from opponent's perspective
+      info.policy = edge.policy();
+      info.m = child->m();
+      info.is_terminal = child->is_terminal();
+      info.is_win = info.is_terminal && info.q > 0.5f;
+      info.is_loss = info.is_terminal && info.q < -0.5f;
+      candidates.push_back(info);
     }
   }
   
   if (candidates.empty()) {
-    // No visits, return first move (shouldn't happen in practice)
+    // No visits, return first move
     return root->edges()[0].move();
   }
   
-  // If there's a clear winner by visit count (>80% of max), use it
-  int best_idx = -1;
-  uint32_t best_visits = 0;
-  
-  for (const auto &mc : candidates) {
-    if (mc.visits > best_visits) {
-      best_visits = mc.visits;
-      best_idx = mc.idx;
-    }
-  }
-  
-  // Check if the most-visited move has a reasonable Q value
-  // If not, consider other moves with high Q and decent visits
-  MoveCandidate *best_candidate = nullptr;
-  for (auto &mc : candidates) {
-    if (mc.idx == best_idx) {
-      best_candidate = &mc;
-      break;
-    }
-  }
-  
-  if (best_candidate) {
-    // If the best move by visits has a significantly worse Q than the best Q,
-    // and another move has at least 30% of the visits with much better Q,
-    // consider switching
-    float q_threshold = best_q - 0.3f;  // Allow 0.3 Q difference
+  // Sort by Lc0 criteria
+  std::sort(candidates.begin(), candidates.end(), [](const EdgeInfo& a, const EdgeInfo& b) {
+    // Terminal wins first (prefer shorter)
+    if (a.is_win && !b.is_win) return true;
+    if (!a.is_win && b.is_win) return false;
+    if (a.is_win && b.is_win) return a.m < b.m;  // Shorter win
     
-    if (best_candidate->q < q_threshold) {
-      // Look for a better alternative
-      for (const auto &mc : candidates) {
-        if (mc.idx != best_idx && 
-            mc.visits >= max_visits * 0.3 &&  // At least 30% of max visits
-            mc.q > best_candidate->q + 0.15f) {  // Significantly better Q
-          best_idx = mc.idx;
-          break;
-        }
-      }
-    }
-  }
+    // Terminal losses last (prefer longer)
+    if (a.is_loss && !b.is_loss) return false;
+    if (!a.is_loss && b.is_loss) return true;
+    if (a.is_loss && b.is_loss) return a.m > b.m;  // Longer loss
+    
+    // Non-terminal: prefer more visits
+    if (a.visits != b.visits) return a.visits > b.visits;
+    
+    // Then prefer better Q
+    if (std::abs(a.q - b.q) > 0.001f) return a.q > b.q;
+    
+    // Then prefer higher policy
+    return a.policy > b.policy;
+  });
 
-  return root->edges()[best_idx].move();
+  return root->edges()[candidates[0].idx].move();
 }
 
 void HybridSearch::update_info() {

@@ -17,9 +17,7 @@
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "gpu/backend.h"
-#include "gpu/batch_ops.h"
 #include "gpu/gpu_nnue_integration.h"
-#include "gpu/nnue_eval.h"
 #include "gpu/cuda/cuda_backend.h"
 
 using namespace MetalFish;

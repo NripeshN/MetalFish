@@ -1,11 +1,12 @@
 name: Elo Tournament
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch: # Manual trigger only
     inputs:
+      pr_number:
+        description: "PR number to post results to (optional)"
+        required: false
+        default: ""
       games_per_match:
         description: "Number of games per match"
         required: false
@@ -15,10 +16,10 @@ on:
         required: false
         default: "10+0.1"
 
-# Cancel in-progress runs for the same PR
+# Cancel in-progress runs for the same workflow
 concurrency:
-  group: elo-tournament-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: false
+  group: elo-tournament-${{ github.run_id }}
+  cancel-in-progress: true
 
 env:
   GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '20' }}
@@ -553,20 +554,20 @@ jobs:
           cat results/pr_comment.md
 
       - name: Find existing comment
-        if: github.event_name == 'pull_request'
+        if: inputs.pr_number != ''
         uses: peter-evans/find-comment@v3
         id: find-comment
         with:
-          issue-number: ${{ github.event.pull_request.number }}
+          issue-number: ${{ inputs.pr_number }}
           comment-author: "github-actions[bot]"
           body-includes: "🏆 MetalFish Elo Tournament Results"
 
       - name: Post or update PR comment
-        if: github.event_name == 'pull_request'
+        if: inputs.pr_number != ''
         uses: peter-evans/create-or-update-comment@v4
         with:
           comment-id: ${{ steps.find-comment.outputs.comment-id }}
-          issue-number: ${{ github.event.pull_request.number }}
+          issue-number: ${{ inputs.pr_number }}
           body-path: ${{ steps.aggregate.outputs.comment_file }}
           edit-mode: replace
 

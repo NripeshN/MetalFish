@@ -3,11 +3,23 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Thread-Safe MCTS Implementation - Optimized for Apple Silicon
+  
+  This implementation incorporates algorithms from Leela Chess Zero (Lc0),
+  including PUCT with logarithmic growth, FPU reduction strategy, and
+  moves left head (MLH) utility.
+  
+  Apple Silicon Optimizations:
+  - Unified memory zero-copy evaluation batches
+  - SIMD-accelerated policy softmax
+  - Cache-line aligned node structures
+  - Lock-free atomic operations
 
   Licensed under GPL-3.0
 */
 
 #include "thread_safe_mcts.h"
+#include "lc0_mcts_core.h"
+#include "apple_silicon_mcts.h"
 
 #include <algorithm>
 #include <chrono>
@@ -15,6 +27,10 @@
 #include <iomanip>
 #include <sstream>
 #include <unordered_map>
+
+#ifdef __APPLE__
+#include <Accelerate/Accelerate.h>
+#endif
 
 #ifdef __aarch64__
 // ARM64 (Apple Silicon) - use yield instruction
@@ -734,17 +750,17 @@ int64_t ThreadSafeMCTS::calculate_time_budget() const {
   if (time_left <= 0)
     return 1000; // Default 1 second
 
-  // CRITICAL FIX: Use more aggressive time allocation for MCTS
+  // IMPROVED: Use more aggressive time allocation for MCTS
   // MCTS needs more time than alpha-beta to build a good tree
-  // Use ~5% of remaining time + most of increment
-  int64_t base_time = time_left / 20;  // 5% of remaining time
-  int64_t inc_time = inc * 3 / 4;       // Use 75% of increment
+  // Use ~8% of remaining time + most of increment for better tree building
+  int64_t base_time = time_left / 12;  // ~8% of remaining time
+  int64_t inc_time = inc * 4 / 5;       // Use 80% of increment
   
-  // Minimum 500ms for MCTS to be effective
-  int64_t budget = std::max(int64_t(500), base_time + inc_time);
+  // Minimum 1000ms for MCTS to be effective (was 500ms)
+  int64_t budget = std::max(int64_t(1000), base_time + inc_time);
   
-  // Cap at 20% of remaining time to avoid time trouble
-  int64_t max_time = time_left / 5;
+  // Cap at 25% of remaining time to avoid time trouble (was 20%)
+  int64_t max_time = time_left / 4;
   
   return std::min(budget, max_time);
 }
@@ -944,15 +960,44 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   if (num_edges == 0)
     return -1;
 
-  float parent_n = static_cast<float>(node->n() + node->n_in_flight());
-  float parent_sqrt = std::sqrt(parent_n + 1.0f);
-  float cpuct_sqrt = cpuct * parent_sqrt;
-
-  // FPU calculation - use parent Q as baseline, reduced for unexplored moves
+  // Get parent statistics
+  uint32_t parent_n = node->n() + node->n_in_flight();
   float parent_q = node->n() > 0 ? node->q() : 0.0f;
-  float fpu = parent_q - 0.2f;  // Slight penalty for unexplored moves
+  
+  // Lc0-style PUCT with logarithmic growth
+  // Formula: cpuct_init + cpuct_factor * log((N + cpuct_base) / cpuct_base)
+  const float cpuct_base = 38739.0f;  // Lc0 default
+  const float cpuct_factor = 3.894f;  // Lc0 default
+  float effective_cpuct = cpuct + cpuct_factor * 
+      std::log((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
+  
+  // Compute U coefficient: cpuct * sqrt(parent_N)
+  float cpuct_sqrt_n = effective_cpuct * std::sqrt(static_cast<float>(
+      std::max(node->n() > 0 ? node->n() - 1 : 0u, 1u)));
 
+  // Lc0-style FPU with reduction strategy
+  // FPU = -parent_Q - fpu_value * sqrt(visited_policy)
+  float visited_policy = 0.0f;
   const TSEdge *edges = node->edges();
+  for (int i = 0; i < num_edges; ++i) {
+    ThreadSafeNode *child = edges[i].child.load(std::memory_order_acquire);
+    if (child && child->n() > 0) {
+      visited_policy += edges[i].policy.load(std::memory_order_relaxed);
+    }
+  }
+  
+  // FPU reduction: unvisited nodes get parent Q minus a reduction
+  float fpu = -parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
+
+  // Set up moves left evaluator for MLH utility
+  Lc0SearchParams lc0_params;
+  lc0_params.moves_left_max_effect = 0.0345f;
+  lc0_params.moves_left_threshold = 0.8f;
+  lc0_params.moves_left_slope = 0.0027f;
+  lc0_params.moves_left_scaled_factor = 1.6521f;
+  lc0_params.moves_left_quadratic_factor = -0.6521f;
+  
+  MovesLeftEvaluator m_eval(lc0_params, node->m(), parent_q);
 
   // Single-pass selection
   int best_idx = 0;
@@ -962,23 +1007,32 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
     const TSEdge &edge = edges[i];
     ThreadSafeNode *child = edge.child.load(std::memory_order_acquire);
 
-    float q, u;
+    float q, m_utility = 0.0f;
     float policy = edge.policy.load(std::memory_order_relaxed);
+    int n_started = 0;
 
     if (child) {
       uint32_t n = child->n();
       uint32_t n_in_flight = child->n_in_flight();
-      float total_n = static_cast<float>(n + n_in_flight);
+      n_started = static_cast<int>(n + n_in_flight);
 
-      // CRITICAL FIX: Negate child Q value because it's from opponent's perspective
+      // CRITICAL: Negate child Q value because it's from opponent's perspective
       q = (n > 0) ? -child->q() : fpu;
-      u = cpuct_sqrt * policy / (1.0f + total_n);
+      
+      // Add moves left utility if enabled and child has visits
+      if (n > 0 && m_eval.IsEnabled()) {
+        m_utility = m_eval.GetMUtility(child->m(), q);
+      }
     } else {
       q = fpu;
-      u = cpuct_sqrt * policy;
+      m_utility = m_eval.GetDefaultMUtility();
     }
 
-    float score = q + u;
+    // Lc0-style PUCT score: Q + U + M
+    // U = cpuct * sqrt(parent_N) * P / (1 + child_N)
+    float u = cpuct_sqrt_n * policy / (1.0f + static_cast<float>(n_started));
+    float score = q + u + m_utility;
+    
     if (score > best_score) {
       best_score = score;
       best_idx = i;
@@ -997,59 +1051,113 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
   std::vector<float> scores(num_edges);
   float max_score = -1e9f;
 
-  // Score each move using heuristics
+  // Score each move using improved heuristics (closer to Stockfish move ordering)
   for (int i = 0; i < num_edges; ++i) {
     Move m = edges[i].move;
     float score = 0.0f;
 
-    // Captures scored by MVV-LVA and SEE
+    // Captures scored by MVV-LVA and SEE (most important for tactics)
     if (ctx.pos.capture(m)) {
       PieceType captured = m.type_of() == EN_PASSANT
                                ? PAWN
                                : type_of(ctx.pos.piece_on(m.to_sq()));
       PieceType attacker = type_of(ctx.pos.piece_on(m.from_sq()));
-      static const float piece_values[] = {0, 100, 320, 330, 500, 900, 0};
-      score += piece_values[captured] * 6.0f - piece_values[attacker];
+      
+      // Improved piece values matching Stockfish
+      static const float piece_values[] = {0, 100, 320, 330, 500, 1000, 0};
+      
+      // MVV-LVA: Prioritize capturing valuable pieces with less valuable attackers
+      score += piece_values[captured] * 8.0f - piece_values[attacker] * 0.5f;
 
+      // SEE bonus: Good captures get significant boost
       if (ctx.pos.see_ge(m, Value(0))) {
+        score += 500.0f;  // Increased from 300
+      } else {
+        // Bad captures (losing material) get penalty
+        score -= 200.0f;
+      }
+    }
+
+    // Promotions - queens are almost always best
+    if (m.type_of() == PROMOTION) {
+      PieceType promo = m.promotion_type();
+      if (promo == QUEEN)
+        score += 5000.0f;  // Very high priority
+      else if (promo == KNIGHT)
+        score += 1000.0f;  // Knight promotions for discovered attacks
+      else
+        score -= 500.0f;   // Underpromotions rarely good
+    }
+
+    // Checks - very important tactically
+    if (ctx.pos.gives_check(m)) {
+      score += 600.0f;  // Increased from 400
+      
+      // Discovered checks are even more valuable
+      Bitboard blockers = ctx.pos.blockers_for_king(~ctx.pos.side_to_move());
+      if (blockers & m.from_sq()) {
         score += 300.0f;
       }
     }
 
-    // Promotions
-    if (m.type_of() == PROMOTION) {
-      PieceType promo = m.promotion_type();
-      if (promo == QUEEN)
-        score += 4000.0f;
-      else if (promo == KNIGHT)
-        score += 800.0f;
+    // Piece development in opening/middlegame
+    int game_phase = ctx.pos.count<ALL_PIECES>() > 24 ? 0 : 
+                     ctx.pos.count<ALL_PIECES>() > 10 ? 1 : 2;
+    
+    if (game_phase < 2) {  // Not endgame
+      PieceType pt = type_of(ctx.pos.piece_on(m.from_sq()));
+      
+      // Knights and bishops should be developed
+      if (pt == KNIGHT || pt == BISHOP) {
+        Rank from_rank = relative_rank(ctx.pos.side_to_move(), rank_of(m.from_sq()));
+        if (from_rank == RANK_1) {  // Moving from back rank
+          score += 150.0f;
+        }
+      }
+      
+      // Don't move queen too early
+      if (pt == QUEEN && game_phase == 0) {
+        score -= 100.0f;
+      }
     }
 
-    // Checks
-    if (ctx.pos.gives_check(m)) {
-      score += 400.0f;
-    }
-
-    // Center control
+    // Center control (important in all phases)
     int to_file = file_of(m.to_sq());
     int to_rank = rank_of(m.to_sq());
     float center_dist = std::abs(to_file - 3.5f) + std::abs(to_rank - 3.5f);
-    score += (7.0f - center_dist) * 15.0f;
+    score += (7.0f - center_dist) * 20.0f;  // Increased from 15
 
-    // Castling bonus
+    // Castling bonus - king safety is important
     if (m.type_of() == CASTLING) {
-      score += 200.0f;
+      score += 400.0f;  // Increased from 200
+    }
+
+    // Pawn advances (especially passed pawns)
+    if (type_of(ctx.pos.piece_on(m.from_sq())) == PAWN) {
+      Rank to_rank_rel = relative_rank(ctx.pos.side_to_move(), rank_of(m.to_sq()));
+      if (to_rank_rel >= RANK_6) {
+        score += 200.0f * (to_rank_rel - RANK_5);  // Bonus for advanced pawns
+      }
+    }
+
+    // Avoid moving pieces that are well-placed (unless capturing)
+    if (!ctx.pos.capture(m)) {
+      // Small penalty for moving pieces multiple times in opening
+      if (game_phase == 0) {
+        score -= 30.0f;
+      }
     }
 
     scores[i] = score;
     max_score = std::max(max_score, score);
   }
 
-  // Softmax normalization
+  // Softmax normalization with temperature
   float sum = 0.0f;
   for (int i = 0; i < num_edges; ++i) {
-    scores[i] = std::exp((scores[i] - max_score) /
-                         (config_.policy_softmax_temp * 400.0f));
+    // Temperature controls exploration: lower = more exploitation
+    float temp = config_.policy_softmax_temp * 300.0f;  // Adjusted divisor
+    scores[i] = std::exp((scores[i] - max_score) / temp);
     sum += scores[i];
   }
 
@@ -1066,7 +1174,7 @@ void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
 
   TSEdge *edges = root->edges();
 
-  // Generate Dirichlet noise
+  // Lc0-style Dirichlet noise
   std::random_device rd;
   std::mt19937 gen(rd());
   std::gamma_distribution<float> gamma(config_.dirichlet_alpha, 1.0f);
@@ -1078,7 +1186,10 @@ void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
     noise_sum += noise[i];
   }
 
-  // Mix with existing policy
+  // Avoid division by zero
+  if (noise_sum < std::numeric_limits<float>::min()) return;
+
+  // Mix noise with existing policy: P' = (1 - epsilon) * P + epsilon * noise
   for (int i = 0; i < num_edges; ++i) {
     float current = edges[i].policy.load(std::memory_order_relaxed);
     float noisy = (1.0f - config_.dirichlet_epsilon) * current +
@@ -1123,18 +1234,13 @@ float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
     std::lock_guard<std::mutex> lock(gpu_mutex_);
     auto [psqt, score] = gpu_manager_->evaluate_single(ctx.pos, true);
     
-    // IMPROVED: Use a more refined score transformation
-    float cp = static_cast<float>(score);
-    
-    // Clamp to reasonable range
-    cp = std::clamp(cp, -2000.0f, 2000.0f);
-    
-    // Convert to [-1, 1] range using tanh
-    value = std::tanh(cp / 400.0f);
+    // Use Lc0-style score transformation
+    // This converts NNUE centipawn scores to MCTS Q values in [-1, 1]
+    value = NnueScoreToQ(score);
   } else {
     // Fallback to simple eval
     int simple = Eval::simple_eval(ctx.pos);
-    value = std::tanh(simple / 400.0f);
+    value = NnueScoreToQ(simple);
   }
 
   // CRITICAL: Adjust for side to move
@@ -1177,32 +1283,37 @@ Move ThreadSafeMCTS::get_best_move() const {
   int num_edges = root->num_edges();
   const TSEdge *edges = root->edges();
 
-  // IMPROVED: Use a combination of visit count and Q value for move selection
-  struct MoveCandidate {
+  // Lc0-style best move selection
+  // Priority: Terminal wins > Tablebase wins > Most visits > Best Q > Highest policy
+  // Also prefers shorter wins and longer losses
+  
+  struct EdgeInfo {
     int idx;
     uint32_t visits;
     float q;
     float policy;
+    float m;  // Moves left estimate
+    bool is_terminal;
+    bool is_win;
+    bool is_loss;
   };
   
-  std::vector<MoveCandidate> candidates;
+  std::vector<EdgeInfo> candidates;
   candidates.reserve(num_edges);
-  
-  uint32_t max_visits = 0;
-  float best_q = -2.0f;
 
   for (int i = 0; i < num_edges; ++i) {
     ThreadSafeNode *child = edges[i].child.load(std::memory_order_acquire);
     if (child && child->n() > 0) {
-      MoveCandidate mc;
-      mc.idx = i;
-      mc.visits = child->n();
-      mc.q = -child->q();  // Negate because child Q is from opponent's perspective
-      mc.policy = edges[i].policy.load(std::memory_order_relaxed);
-      candidates.push_back(mc);
-      
-      max_visits = std::max(max_visits, mc.visits);
-      best_q = std::max(best_q, mc.q);
+      EdgeInfo info;
+      info.idx = i;
+      info.visits = child->n();
+      info.q = -child->q();  // Negate because child Q is from opponent's perspective
+      info.policy = edges[i].policy.load(std::memory_order_relaxed);
+      info.m = child->m();
+      info.is_terminal = child->is_terminal();
+      info.is_win = info.is_terminal && info.q > 0.5f;
+      info.is_loss = info.is_terminal && info.q < -0.5f;
+      candidates.push_back(info);
     }
   }
 
@@ -1211,43 +1322,29 @@ Move ThreadSafeMCTS::get_best_move() const {
     return edges[0].move;
   }
 
-  // Find move with most visits
-  int best_idx = -1;
-  uint32_t best_visits = 0;
-  
-  for (const auto &mc : candidates) {
-    if (mc.visits > best_visits) {
-      best_visits = mc.visits;
-      best_idx = mc.idx;
-    }
-  }
-
-  // Check if the most-visited move has a reasonable Q value
-  MoveCandidate *best_candidate = nullptr;
-  for (auto &mc : candidates) {
-    if (mc.idx == best_idx) {
-      best_candidate = &mc;
-      break;
-    }
-  }
-  
-  if (best_candidate) {
-    float q_threshold = best_q - 0.3f;
+  // Sort by Lc0 criteria
+  std::sort(candidates.begin(), candidates.end(), [](const EdgeInfo& a, const EdgeInfo& b) {
+    // Terminal wins first (prefer shorter)
+    if (a.is_win && !b.is_win) return true;
+    if (!a.is_win && b.is_win) return false;
+    if (a.is_win && b.is_win) return a.m < b.m;  // Shorter win
     
-    if (best_candidate->q < q_threshold) {
-      // Look for a better alternative
-      for (const auto &mc : candidates) {
-        if (mc.idx != best_idx && 
-            mc.visits >= max_visits * 0.3 &&
-            mc.q > best_candidate->q + 0.15f) {
-          best_idx = mc.idx;
-          break;
-        }
-      }
-    }
-  }
+    // Terminal losses last (prefer longer)
+    if (a.is_loss && !b.is_loss) return false;
+    if (!a.is_loss && b.is_loss) return true;
+    if (a.is_loss && b.is_loss) return a.m > b.m;  // Longer loss
+    
+    // Non-terminal: prefer more visits
+    if (a.visits != b.visits) return a.visits > b.visits;
+    
+    // Then prefer better Q
+    if (std::abs(a.q - b.q) > 0.001f) return a.q > b.q;
+    
+    // Then prefer higher policy
+    return a.policy > b.policy;
+  });
 
-  return edges[best_idx].move;
+  return edges[candidates[0].idx].move;
 }
 
 std::vector<Move> ThreadSafeMCTS::get_pv() const {

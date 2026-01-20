@@ -263,12 +263,20 @@ struct WorkerContext {
 // ============================================================================
 
 struct ThreadSafeMCTSConfig {
-  float cpuct = 1.5f;            // Reduced from 2.5 for less exploration, more exploitation
-  float fpu_value = 0.0f;        // First Play Urgency base value (neutral)
+  // Lc0-style PUCT parameters
+  float cpuct = 1.745f;              // Lc0 default: 1.745
+  float cpuct_base = 38739.0f;       // Lc0 default for log growth
+  float cpuct_factor = 3.894f;       // Lc0 default multiplier
+  
+  // FPU (First Play Urgency) - Lc0 reduction strategy
+  float fpu_value = 0.0f;            // Base FPU value (neutral)
+  float fpu_reduction = 0.330f;      // Lc0 default: 0.330
+  
+  // Policy and exploration
   float policy_softmax_temp = 1.0f;
   bool add_dirichlet_noise = true;
-  float dirichlet_alpha = 0.3f;
-  float dirichlet_epsilon = 0.25f;
+  float dirichlet_alpha = 0.3f;      // Lc0 default
+  float dirichlet_epsilon = 0.25f;   // Lc0 uses 0.25 for training
 
   int num_threads = 4;
   int virtual_loss = 3;

@@ -14,9 +14,7 @@
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "gpu/backend.h"
-#include "gpu/batch_ops.h"
 #include "gpu/gpu_nnue_integration.h"
-#include "gpu/nnue_eval.h"
 
 using namespace MetalFish;
 
@@ -88,29 +86,10 @@ bool test_metal() {
 
     std::cout << "GPU Backend tests passed!" << std::endl;
 
-    // ========================================
-    // Test GPU Operations (Batch SEE, etc.)
-    // ========================================
-    std::cout << "\n=== Testing GPU Operations ===" << std::endl;
-
-    // Initialize GPU operations
-    GPU::GPUOperations &ops = GPU::gpu_ops();
-    if (ops.initialize()) {
-      std::cout << "GPU Operations initialized" << std::endl;
-      std::cout << "  SEE available: " << (ops.see_available() ? "Yes" : "No")
-                << std::endl;
-      std::cout << "  Scorer available: "
-                << (ops.scorer_available() ? "Yes" : "No") << std::endl;
-      std::cout << "  Total GPU memory: " << ops.total_gpu_memory() / 1024
-                << " KB" << std::endl;
-    } else {
-      std::cout << "GPU Operations not available (OK for CI)" << std::endl;
-    }
-
     // Test NNUE GPU evaluator initialization
     std::cout << "\n=== Testing GPU NNUE ===" << std::endl;
-    GPU::NNUEEvaluator &nnue = GPU::gpu_nnue();
-    std::cout << "GPU NNUE evaluator created" << std::endl;
+    // Legacy NNUEEvaluator removed - using GPUNNUEManager instead
+    std::cout << "GPU NNUE: Using GPUNNUEManager (new interface)" << std::endl;
 
     std::cout << "\n=== Testing GPU NNUE Integration ===" << std::endl;
     {

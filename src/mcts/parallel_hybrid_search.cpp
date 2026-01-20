@@ -3,10 +3,16 @@
   Copyright (C) 2025 Nripesh Niketan
   
   Optimized for Apple Silicon with unified memory architecture.
+  
+  This implementation incorporates algorithms from Leela Chess Zero (Lc0),
+  including PUCT with logarithmic growth, FPU reduction strategy, and
+  moves left head (MLH) utility.
+  
   Licensed under GPL-3.0
 */
 
 #include "parallel_hybrid_search.h"
+#include "lc0_mcts_core.h"
 #include "../core/misc.h"
 #include "../eval/evaluate.h"
 #include "../uci/engine.h"
@@ -69,8 +75,12 @@ bool GPUResidentBatch::initialize(int batch_capacity) {
 // ============================================================================
 
 ParallelHybridSearch::ParallelHybridSearch() {
-  config_.mcts_config.cpuct = 1.5f;
-  config_.mcts_config.fpu_reduction = 0.2f;
+  // Lc0-style MCTS parameters
+  config_.mcts_config.cpuct = 1.745f;       // Lc0 default
+  config_.mcts_config.fpu_reduction = 0.330f; // Lc0 default
+  config_.mcts_config.cpuct_base = 38739.0f;
+  config_.mcts_config.cpuct_factor = 3.894f;
+  
   config_.ab_min_depth = 8;
   config_.agreement_threshold = 0.3f;
   config_.override_threshold = 1.0f;
@@ -82,17 +92,43 @@ ParallelHybridSearch::ParallelHybridSearch() {
 }
 
 ParallelHybridSearch::~ParallelHybridSearch() {
-  // Ensure clean shutdown
+  // Set stop flag first
   stop_flag_.store(true, std::memory_order_release);
+  searching_.store(false, std::memory_order_release);
+  
+  // Stop MCTS search first
   if (mcts_search_) {
     mcts_search_->stop();
   }
-  // Don't call engine_->stop() here as engine is not owned by us
   
-  // Wait for all threads
-  if (mcts_thread_.joinable()) mcts_thread_.join();
-  if (ab_thread_.joinable()) ab_thread_.join();
-  if (coordinator_thread_.joinable()) coordinator_thread_.join();
+  // Give threads time to notice stop flag
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  
+  // Wait for MCTS to complete
+  if (mcts_search_) {
+    mcts_search_->wait();
+  }
+  
+  // Join threads in reverse order of creation: workers first, then coordinator
+  // This ensures proper shutdown sequence
+  // Use try-catch to handle any thread errors gracefully
+  try {
+    if (ab_thread_.joinable()) {
+      ab_thread_.join();
+    }
+  } catch (...) {}
+  
+  try {
+    if (mcts_thread_.joinable()) {
+      mcts_thread_.join();
+    }
+  } catch (...) {}
+  
+  try {
+    if (coordinator_thread_.joinable()) {
+      coordinator_thread_.join();
+    }
+  } catch (...) {}
 }
 
 bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
@@ -209,23 +245,23 @@ void ParallelHybridSearch::stop() {
     mcts_search_->stop();
   }
   
-  // Stop engine search (but engine is not owned by us)
-  // Only stop if we're actually searching
-  if (engine_ && searching_.load(std::memory_order_acquire)) {
-    engine_->stop();
-  }
+  // NOTE: We don't call engine_->stop() because:
+  // 1. The engine is not owned by us
+  // 2. Calling stop() while search_sync is running can cause issues
+  // 3. search_sync will return naturally when the AB thread sees should_stop()
 }
 
 void ParallelHybridSearch::wait() {
-  // Wait for all threads to finish
+  // Wait for all threads to finish - but only if they're joinable
+  // This prevents double-join issues
+  if (coordinator_thread_.joinable()) {
+    coordinator_thread_.join();
+  }
   if (mcts_thread_.joinable()) {
     mcts_thread_.join();
   }
   if (ab_thread_.joinable()) {
     ab_thread_.join();
-  }
-  if (coordinator_thread_.joinable()) {
-    coordinator_thread_.join();
   }
   searching_.store(false, std::memory_order_release);
 }
@@ -572,17 +608,17 @@ void ParallelHybridSearch::coordinator_thread_main() {
     mcts_search_->stop();
   }
   
-  // Stop engine safely - but don't call if already stopped
-  // The engine's stop() is idempotent
-  if (engine_) {
-    engine_->stop();
-  }
+  // NOTE: Do NOT call engine_->stop() here - it causes race conditions
+  // The AB thread will naturally finish when search_sync completes
+  // Just wait for it to finish
 
   // Wait for MCTS and AB threads to finish before making decision
   // This ensures we have their final results
-  while (mcts_state_.mcts_running.load(std::memory_order_acquire) ||
-         ab_state_.ab_running.load(std::memory_order_acquire)) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  int wait_count = 0;
+  while ((mcts_state_.mcts_running.load(std::memory_order_acquire) ||
+          ab_state_.ab_running.load(std::memory_order_acquire)) && wait_count < 500) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    wait_count++;
   }
 
   // Make final decision
@@ -620,6 +656,8 @@ Move ParallelHybridSearch::make_final_decision() {
   Move ab_best = ab_state_.get_best_move();
   int ab_score = ab_state_.best_score.load(std::memory_order_relaxed);
   float mcts_q = mcts_state_.best_q.load(std::memory_order_relaxed);
+  int ab_depth = ab_state_.completed_depth.load(std::memory_order_relaxed);
+  uint32_t mcts_visits = mcts_state_.best_visits.load(std::memory_order_relaxed);
 
   // If only one has a result, use it
   if (mcts_best == Move::none() && ab_best != Move::none()) {
@@ -664,24 +702,32 @@ Move ParallelHybridSearch::make_final_decision() {
   }
 
   // Moves disagree - need to decide
-  // Convert MCTS Q to centipawns for comparison
-  int mcts_cp = static_cast<int>(mcts_q * 400);  // Rough conversion
+  // Use Lc0-style Q to centipawn conversion
+  int mcts_cp = QToNnueScore(mcts_q);
+  
   float diff_pawns = std::abs(ab_score - mcts_cp) / 100.0f;
+
+  // Calculate confidence metrics
+  float ab_confidence = std::min(1.0f, static_cast<float>(ab_depth) / 20.0f);
+  float mcts_confidence = std::min(1.0f, static_cast<float>(mcts_visits) / 50000.0f);
 
   Move chosen;
   
   switch (config_.decision_mode) {
   case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
-    if (diff_pawns > config_.override_threshold) {
+    // Always trust AB unless MCTS strongly disagrees
+    if (mcts_cp > ab_score + 150 && mcts_confidence > 0.5f) {
+      chosen = mcts_best;
+      stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+    } else {
       chosen = ab_best;
       stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-    } else {
-      chosen = ab_best;  // AB primary
     }
     break;
 
   case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
-    if (diff_pawns > config_.override_threshold && ab_score > mcts_cp) {
+    // Trust MCTS unless AB strongly disagrees
+    if (ab_score > mcts_cp + 100 && ab_confidence > 0.5f) {
       chosen = ab_best;
       stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
     } else {
@@ -691,23 +737,31 @@ Move ParallelHybridSearch::make_final_decision() {
     break;
 
   case ParallelHybridConfig::DecisionMode::DYNAMIC:
-    // Use position type to decide
+    // Use position type to decide - IMPROVED thresholds
     if (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
         current_strategy_.position_type == PositionType::TACTICAL) {
-      // Tactical: trust AB more
-      if (ab_score > mcts_cp + 30) {  // AB significantly better
+      // Tactical positions: trust AB more (it's better at tactics)
+      // But only override if AB is significantly better
+      if (ab_score > mcts_cp + 50) {  // 0.5 pawn advantage
         chosen = ab_best;
         stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else {
+      } else if (mcts_cp > ab_score + 100 && mcts_confidence > 0.3f) {
+        // MCTS found something AB missed
         chosen = mcts_best;
         stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+      } else {
+        // Close - trust AB in tactical positions
+        chosen = ab_best;
+        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
       }
     } else {
-      // Strategic: trust MCTS more unless AB strongly disagrees
-      if (ab_score > mcts_cp + 100) {  // AB much better (1 pawn)
+      // Strategic positions: trust MCTS more (it's better at long-term planning)
+      // But respect AB's tactical corrections
+      if (ab_score > mcts_cp + 150) {  // 1.5 pawn - AB found a tactic
         chosen = ab_best;
         stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
       } else {
+        // Trust MCTS for strategic decisions
         chosen = mcts_best;
         stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
       }
@@ -716,16 +770,31 @@ Move ParallelHybridSearch::make_final_decision() {
 
   case ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED:
   default:
-    // Weighted by confidence
-    float ab_conf = std::min(1.0f, ab_state_.completed_depth.load() / 15.0f);
-    float mcts_conf = std::min(1.0f, mcts_state_.best_visits.load() / 10000.0f);
+    // IMPROVED: Weighted combination based on confidence and score
+    float ab_weight = ab_confidence * (1.0f + std::max(0.0f, ab_score / 200.0f));
+    float mcts_weight = mcts_confidence * (1.0f + std::max(0.0f, mcts_q));
     
-    if (ab_conf * ab_score > mcts_conf * mcts_cp) {
+    // Normalize
+    float total_weight = ab_weight + mcts_weight;
+    if (total_weight > 0) {
+      ab_weight /= total_weight;
+      mcts_weight /= total_weight;
+    } else {
+      ab_weight = 0.5f;
+      mcts_weight = 0.5f;
+    }
+    
+    // If AB has significantly higher weight and score, use AB
+    if (ab_weight > 0.6f && ab_score > mcts_cp) {
       chosen = ab_best;
       stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-    } else {
+    } else if (mcts_weight > 0.6f && mcts_cp > ab_score) {
       chosen = mcts_best;
       stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+    } else {
+      // Close - default to AB (more reliable for tactics)
+      chosen = ab_best;
+      stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
     }
     break;
   }

@@ -32,7 +32,6 @@
 #include "gpu/gpu_mcts_backend.h"
 #include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
-#include "gpu/nnue_eval.h"
 #include "mcts/hybrid_search.h"
 #include "mcts/parallel_hybrid_search.h"
 #include "mcts/position_classifier.h"
