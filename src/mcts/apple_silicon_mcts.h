@@ -35,6 +35,7 @@
 
 #ifdef __APPLE__
 #include <os/lock.h>  // Apple's unfair lock (fastest on Apple Silicon)
+#include <cstdlib>    // For free() in AlignedDeleter
 #endif
 
 namespace MetalFish {
@@ -325,7 +326,15 @@ public:
   void reset();
 
 private:
+#ifdef __APPLE__
+  // Custom deleter for posix_memalign-allocated memory (must use free(), not delete[])
+  struct AlignedDeleter {
+    void operator()(char* ptr) const { free(ptr); }
+  };
+  std::unique_ptr<char, AlignedDeleter> memory_;
+#else
   std::unique_ptr<char[]> memory_;
+#endif
   size_t capacity_;
   size_t node_size_;
   
