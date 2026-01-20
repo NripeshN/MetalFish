@@ -855,7 +855,7 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
   }
   
   // FPU reduction: unvisited nodes get parent Q minus a reduction
-  float fpu = -parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
+  float fpu = parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
   
   // Set up moves left evaluator for MLH utility
   Lc0SearchParams lc0_params;

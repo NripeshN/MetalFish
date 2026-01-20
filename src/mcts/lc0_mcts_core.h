@@ -132,7 +132,7 @@ inline float ComputeCpuct(const Lc0SearchParams& params, uint32_t N, bool is_roo
 // ============================================================================
 
 // Computes the FPU value for unvisited nodes
-// Reduction strategy: -parent_Q - fpu_value * sqrt(visited_policy)
+// Reduction strategy: parent_Q - fpu_value * sqrt(visited_policy)
 // Absolute strategy: just return fpu_value
 inline float ComputeFpu(const Lc0SearchParams& params, float parent_q, 
                         float visited_policy, bool is_root, float draw_score) {
@@ -143,7 +143,7 @@ inline float ComputeFpu(const Lc0SearchParams& params, float parent_q,
     return value;
   }
   // Reduction strategy: start from parent's Q and reduce based on visited policy
-  return -parent_q - value * std::sqrt(visited_policy);
+  return parent_q - value * std::sqrt(visited_policy);
 }
 
 // Simplified FPU when visited_policy is not available
@@ -156,7 +156,7 @@ inline float ComputeFpuSimple(const Lc0SearchParams& params, float parent_q,
     return value;
   }
   // Use a default visited_policy estimate
-  return -parent_q - value * 0.5f;
+  return parent_q - value * 0.5f;
 }
 
 // ============================================================================
