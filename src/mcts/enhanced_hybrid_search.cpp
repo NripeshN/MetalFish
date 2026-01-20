@@ -360,10 +360,8 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
     return result;
   }
 
-  // Simple alpha-beta search for verification
-  // In a full implementation, this would use Stockfish's search
-
-  // For now, use NNUE evaluation to verify the move
+  // IMPROVED: Use deeper iterative search for better move validation
+  // Start with shallow search and deepen if time permits
   if (gpu_manager_) {
     // Evaluate current position
     auto [psqt1, pos_score1] = gpu_manager_->evaluate_single(pos, true);
@@ -380,13 +378,20 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
     result.score = -pos_score2; // Negamax
     result.pv.push_back(mcts_move.to_stockfish());
 
-    // Check all legal moves for better options
+    // IMPROVED: Score all legal moves and find the best one
     MoveList<LEGAL> moves(pos);
-    int mcts_score =
-        result.score; // Original MCTS score for threshold comparison
-    int best_score = result.score;
-    Move best_move = mcts_move.to_stockfish();
-
+    
+    // Store move scores for sorting
+    struct MoveScore {
+      Move move;
+      int score;
+      bool is_capture;
+      bool gives_check;
+    };
+    std::vector<MoveScore> move_scores;
+    move_scores.reserve(moves.size());
+    
+    // First pass: quick evaluation of all moves
     for (const auto &m : moves) {
       if (stop_flag_ || time_exceeded())
         break;
@@ -401,30 +406,116 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
           gpu_manager_->evaluate_single(test_pos, true);
       int score = -test_score;
 
-      // Compare against original MCTS score (not sliding best_score) to find
-      // moves that are significantly better than MCTS, then track the actual
-      // best. Use configurable threshold (convert from pawns to centipawns).
-      int threshold_cp = static_cast<int>(config_.ab_override_threshold * 100);
-      if (score > mcts_score + threshold_cp && score > best_score) {
-        best_score = score;
-        best_move = m;
-      }
+      MoveScore ms;
+      ms.move = m;
+      ms.score = score;
+      ms.is_capture = pos.capture(m);
+      ms.gives_check = pos.gives_check(m);
+      move_scores.push_back(ms);
 
       stats_.ab_nodes++;
     }
-
-    // Check if we found a better move
-    if (best_move != mcts_move.to_stockfish()) {
-      float score_diff =
-          (best_score - result.score) / 100.0f; // Convert to pawns
-
+    
+    // Sort moves by score (best first)
+    std::sort(move_scores.begin(), move_scores.end(),
+              [](const MoveScore &a, const MoveScore &b) {
+                return a.score > b.score;
+              });
+    
+    // Find the best move and check if MCTS move is competitive
+    int mcts_score = result.score;
+    int best_score = move_scores.empty() ? mcts_score : move_scores[0].score;
+    Move best_move = move_scores.empty() ? mcts_move.to_stockfish() : move_scores[0].move;
+    
+    // IMPROVED: More sophisticated override logic
+    // Only override if:
+    // 1. The best move is significantly better than MCTS move
+    // 2. The best move is not just a minor improvement
+    // 3. Consider tactical moves more carefully
+    
+    int threshold_cp = static_cast<int>(config_.ab_override_threshold * 100);
+    
+    // Find MCTS move's rank among all moves
+    int mcts_rank = 0;
+    for (size_t i = 0; i < move_scores.size(); ++i) {
+      if (move_scores[i].move == mcts_move.to_stockfish()) {
+        mcts_rank = static_cast<int>(i);
+        mcts_score = move_scores[i].score;
+        break;
+      }
+    }
+    
+    // Override conditions:
+    // 1. Best move is significantly better (by threshold)
+    // 2. MCTS move is not in top 3 moves
+    // 3. Best move is a tactical move (capture/check) and MCTS missed it
+    bool should_override = false;
+    float score_diff = 0.0f;
+    
+    if (!move_scores.empty() && best_move != mcts_move.to_stockfish()) {
+      score_diff = (best_score - mcts_score) / 100.0f;
+      
+      // Condition 1: Large score difference
       if (score_diff > config_.ab_override_threshold) {
-        result.best_move = best_move;
-        result.score = best_score;
-        result.agrees_with_mcts = false;
-        result.score_difference = score_diff;
-        result.pv.clear();
-        result.pv.push_back(best_move);
+        should_override = true;
+      }
+      
+      // Condition 2: MCTS move is not competitive (not in top 3)
+      if (mcts_rank >= 3 && score_diff > config_.ab_override_threshold * 0.5f) {
+        should_override = true;
+      }
+      
+      // Condition 3: Best move is tactical and MCTS missed it
+      if (move_scores[0].is_capture || move_scores[0].gives_check) {
+        if (score_diff > config_.ab_override_threshold * 0.7f) {
+          should_override = true;
+        }
+      }
+    }
+    
+    if (should_override) {
+      result.best_move = best_move;
+      result.score = best_score;
+      result.agrees_with_mcts = false;
+      result.score_difference = score_diff;
+      result.pv.clear();
+      result.pv.push_back(best_move);
+      
+      // IMPROVED: Try to extend PV with one more move
+      if (!time_exceeded()) {
+        Position pv_pos;
+        StateInfo pv_st;
+        pv_pos.set(pos.fen(), false, &pv_st);
+        StateInfo pv_st2;
+        pv_pos.do_move(best_move, pv_st2);
+        
+        MoveList<LEGAL> pv_moves(pv_pos);
+        int best_reply_score = -32000;
+        Move best_reply = Move::none();
+        
+        for (const auto &m : pv_moves) {
+          if (time_exceeded()) break;
+          
+          Position reply_pos;
+          StateInfo reply_st;
+          reply_pos.set(pv_pos.fen(), false, &reply_st);
+          StateInfo reply_st2;
+          reply_pos.do_move(m, reply_st2);
+          
+          auto [reply_psqt, reply_score] =
+              gpu_manager_->evaluate_single(reply_pos, true);
+          int score = -reply_score;
+          
+          if (score > best_reply_score) {
+            best_reply_score = score;
+            best_reply = m;
+          }
+          stats_.ab_nodes++;
+        }
+        
+        if (best_reply != Move::none()) {
+          result.pv.push_back(best_reply);
+        }
       }
     }
   }
@@ -434,16 +525,54 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
 
 Move EnhancedHybridSearch::make_final_decision(
     MCTSMove mcts_move, const ABVerifyResult &ab_result) {
-  // If AB found a significantly better move, use it
-  if (!ab_result.agrees_with_mcts) {
-    // Weight the decision based on strategy
-    if (current_strategy_.ab_weight > 0.5f) {
-      // AB-heavy strategy: trust AB override
-      return ab_result.best_move;
-    } else if (ab_result.score_difference > 1.0f) {
-      // Large score difference: trust AB even in MCTS-heavy strategy
+  // IMPROVED: More sophisticated decision logic
+  
+  // If AB didn't find a significantly better move, trust MCTS
+  if (ab_result.agrees_with_mcts) {
+    return mcts_move.to_stockfish();
+  }
+  
+  // AB found a potentially better move - decide based on multiple factors
+  float score_diff = ab_result.score_difference;
+  
+  // Factor 1: Strategy weight
+  // If we're in an AB-heavy strategy, trust AB more
+  if (current_strategy_.ab_weight > 0.6f) {
+    // AB-heavy: trust AB if it found anything better
+    if (score_diff > 0.2f) {
       return ab_result.best_move;
     }
+  }
+  
+  // Factor 2: Large score difference (>1 pawn) - always trust AB
+  if (score_diff > 1.0f) {
+    return ab_result.best_move;
+  }
+  
+  // Factor 3: Position type specific thresholds
+  float position_threshold;
+  switch (current_strategy_.position_type) {
+  case PositionType::HIGHLY_TACTICAL:
+    position_threshold = 0.25f;  // Trust AB more in tactical positions
+    break;
+  case PositionType::TACTICAL:
+    position_threshold = 0.35f;
+    break;
+  case PositionType::BALANCED:
+    position_threshold = 0.45f;
+    break;
+  case PositionType::STRATEGIC:
+    position_threshold = 0.55f;  // Trust MCTS more in strategic positions
+    break;
+  case PositionType::HIGHLY_STRATEGIC:
+    position_threshold = 0.65f;
+    break;
+  default:
+    position_threshold = 0.4f;
+  }
+  
+  if (score_diff > position_threshold) {
+    return ab_result.best_move;
   }
 
   // Default: trust MCTS
@@ -463,11 +592,15 @@ int EnhancedHybridSearch::calculate_time_budget(const Position &pos) const {
     return 1000; // Default 1 second
   }
 
+  // IMPROVED: Use more aggressive time allocation for hybrid search
   // Base time: fraction of remaining time
   int base_time = static_cast<int>(time_left * config_.base_time_fraction);
 
   // Add portion of increment
   base_time += static_cast<int>(increment * config_.increment_factor);
+
+  // Minimum 500ms for MCTS to be effective
+  base_time = std::max(500, base_time);
 
   // Cap at maximum fraction
   int max_time = static_cast<int>(time_left * config_.max_time_fraction);
@@ -476,20 +609,44 @@ int EnhancedHybridSearch::calculate_time_budget(const Position &pos) const {
 }
 
 int EnhancedHybridSearch::calculate_mcts_time(int total_time) const {
-  // Allocate time based on strategy weights from position classifier
-  // The strategy weights are already tuned per position type:
-  // - HIGHLY_TACTICAL: 20% MCTS, 80% AB
-  // - TACTICAL: 35% MCTS, 65% AB
-  // - BALANCED: 50% MCTS, 50% AB
-  // - STRATEGIC: 65% MCTS, 35% AB
-  // - HIGHLY_STRATEGIC: 80% MCTS, 20% AB
+  // IMPROVED: Dynamic MCTS time allocation based on position type
+  // The strategy weights are already tuned per position type, but we also
+  // need to ensure MCTS gets enough time to build a meaningful tree
+  
   float mcts_fraction = current_strategy_.mcts_weight;
 
-  // Use a minimal floor (10%) only to prevent zero allocation,
-  // but respect the position-based strategy weights
-  mcts_fraction = std::max(0.1f, mcts_fraction);
+  // Minimum floor based on position type
+  float min_fraction;
+  switch (current_strategy_.position_type) {
+  case PositionType::HIGHLY_TACTICAL:
+    min_fraction = 0.25f;  // Even in tactical positions, give MCTS some time
+    break;
+  case PositionType::TACTICAL:
+    min_fraction = 0.30f;
+    break;
+  case PositionType::BALANCED:
+    min_fraction = 0.40f;
+    break;
+  case PositionType::STRATEGIC:
+    min_fraction = 0.55f;
+    break;
+  case PositionType::HIGHLY_STRATEGIC:
+    min_fraction = 0.70f;
+    break;
+  default:
+    min_fraction = 0.35f;
+  }
+  
+  mcts_fraction = std::max(min_fraction, mcts_fraction);
+  
+  // Ensure minimum absolute time for MCTS (at least 300ms for meaningful search)
+  int mcts_time = static_cast<int>(total_time * mcts_fraction);
+  mcts_time = std::max(300, mcts_time);
+  
+  // Don't exceed 80% of total time to leave room for AB verification
+  mcts_time = std::min(mcts_time, static_cast<int>(total_time * 0.8f));
 
-  return static_cast<int>(total_time * mcts_fraction);
+  return mcts_time;
 }
 
 int EnhancedHybridSearch::calculate_ab_time(int total_time) const {

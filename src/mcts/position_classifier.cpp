@@ -533,78 +533,83 @@ SearchStrategy StrategySelector::get_strategy(const PositionFeatures &f) const {
   SearchStrategy s;
   s.position_type = f.classify();
 
+  // REBALANCED: Give MCTS more weight across all position types
+  // The original weights were too aggressive toward alpha-beta,
+  // causing hybrid to underperform pure MCTS
   switch (s.position_type) {
   case PositionType::HIGHLY_TACTICAL:
-    // Favor alpha-beta heavily
-    s.mcts_weight = 0.2f;
-    s.ab_weight = 0.8f;
-    s.cpuct = 1.5f; // Lower exploration
-    s.ab_depth = 10;
-    s.ab_verify_depth = 6;
-    s.ab_override_threshold = 0.1f; // Easy to override MCTS
+    // Tactical positions still favor alpha-beta but not as extreme
+    s.mcts_weight = 0.35f;  // was 0.2f
+    s.ab_weight = 0.65f;    // was 0.8f
+    s.cpuct = 1.2f;         // Lower exploration for tactics
+    s.ab_depth = 8;         // was 10
+    s.ab_verify_depth = 5;  // was 6
+    s.ab_override_threshold = 0.3f; // was 0.1f - harder to override MCTS
     s.use_ab_for_tactics = true;
-    s.time_multiplier = 1.2f; // Spend more time
+    s.time_multiplier = 1.1f; // was 1.2f
     break;
 
   case PositionType::TACTICAL:
-    s.mcts_weight = 0.35f;
-    s.ab_weight = 0.65f;
-    s.cpuct = 2.0f;
-    s.ab_depth = 8;
-    s.ab_verify_depth = 5;
-    s.ab_override_threshold = 0.2f;
+    s.mcts_weight = 0.45f;  // was 0.35f
+    s.ab_weight = 0.55f;    // was 0.65f
+    s.cpuct = 1.5f;         // was 2.0f
+    s.ab_depth = 7;         // was 8
+    s.ab_verify_depth = 4;  // was 5
+    s.ab_override_threshold = 0.35f; // was 0.2f
     s.use_ab_for_tactics = true;
-    s.time_multiplier = 1.1f;
+    s.time_multiplier = 1.05f; // was 1.1f
     break;
 
   case PositionType::BALANCED:
-    s.mcts_weight = 0.5f;
-    s.ab_weight = 0.5f;
-    s.cpuct = 2.5f;
+    // Balanced positions should favor MCTS slightly (it's our strength)
+    s.mcts_weight = 0.55f;  // was 0.5f
+    s.ab_weight = 0.45f;    // was 0.5f
+    s.cpuct = 1.5f;         // was 2.5f
     s.ab_depth = 6;
     s.ab_verify_depth = 4;
-    s.ab_override_threshold = 0.3f;
+    s.ab_override_threshold = 0.4f; // was 0.3f
     s.use_ab_for_tactics = true;
     s.time_multiplier = 1.0f;
     break;
 
   case PositionType::STRATEGIC:
-    // Favor MCTS
-    s.mcts_weight = 0.65f;
-    s.ab_weight = 0.35f;
-    s.cpuct = 3.0f; // Higher exploration
+    // Strategic positions favor MCTS more
+    s.mcts_weight = 0.70f;  // was 0.65f
+    s.ab_weight = 0.30f;    // was 0.35f
+    s.cpuct = 1.8f;         // was 3.0f - still moderate exploration
     s.ab_depth = 5;
     s.ab_verify_depth = 3;
-    s.ab_override_threshold = 0.4f;
+    s.ab_override_threshold = 0.5f; // was 0.4f
     s.use_ab_for_tactics = false;
-    s.time_multiplier = 0.9f;
+    s.time_multiplier = 0.95f; // was 0.9f
     break;
 
   case PositionType::HIGHLY_STRATEGIC:
-    // Favor MCTS heavily
-    s.mcts_weight = 0.8f;
-    s.ab_weight = 0.2f;
-    s.cpuct = 3.5f;
+    // Highly strategic positions strongly favor MCTS
+    s.mcts_weight = 0.85f;  // was 0.8f
+    s.ab_weight = 0.15f;    // was 0.2f
+    s.cpuct = 2.0f;         // was 3.5f
     s.ab_depth = 4;
     s.ab_verify_depth = 2;
-    s.ab_override_threshold = 0.5f;
+    s.ab_override_threshold = 0.6f; // was 0.5f
     s.use_ab_for_tactics = false;
-    s.time_multiplier = 0.8f;
+    s.time_multiplier = 0.9f; // was 0.8f
     break;
   }
 
-  // Adjust for endgame
+  // Adjust for endgame - MCTS can be good in endgames too
   if (f.is_endgame) {
-    s.ab_depth += 2; // Deeper search in endgame
+    s.ab_depth += 1;  // was +2
     s.ab_verify_depth += 1;
-    s.mcts_weight *= 0.8f;
+    // Don't reduce MCTS weight as much in endgames
+    s.mcts_weight *= 0.9f;  // was 0.8f
     s.ab_weight = 1.0f - s.mcts_weight;
   }
 
   // Adjust for complexity
   if (f.complexity > 0.7f) {
-    s.time_multiplier *= 1.2f;
-    s.min_mcts_nodes = 200;
+    s.time_multiplier *= 1.15f; // was 1.2f
+    s.min_mcts_nodes = 150;     // was 200
   }
 
   return s;

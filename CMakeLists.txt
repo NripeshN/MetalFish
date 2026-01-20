@@ -234,7 +234,8 @@ set(MCTS_SOURCES
     src/mcts/mcts_tt.cpp
     src/mcts/parallel_search.cpp
     src/mcts/ab_integration.cpp
-    src/mcts/thread_safe_mcts.cpp)
+    src/mcts/thread_safe_mcts.cpp
+    src/mcts/stockfish_search_wrapper.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)

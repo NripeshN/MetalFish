@@ -734,8 +734,19 @@ int64_t ThreadSafeMCTS::calculate_time_budget() const {
   if (time_left <= 0)
     return 1000; // Default 1 second
 
-  // Use ~2.5% of remaining time + increment
-  return time_left / 40 + inc;
+  // CRITICAL FIX: Use more aggressive time allocation for MCTS
+  // MCTS needs more time than alpha-beta to build a good tree
+  // Use ~5% of remaining time + most of increment
+  int64_t base_time = time_left / 20;  // 5% of remaining time
+  int64_t inc_time = inc * 3 / 4;       // Use 75% of increment
+  
+  // Minimum 500ms for MCTS to be effective
+  int64_t budget = std::max(int64_t(500), base_time + inc_time);
+  
+  // Cap at 20% of remaining time to avoid time trouble
+  int64_t max_time = time_left / 5;
+  
+  return std::min(budget, max_time);
 }
 
 void ThreadSafeMCTS::worker_thread(int thread_id) {
@@ -937,6 +948,10 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   float parent_sqrt = std::sqrt(parent_n + 1.0f);
   float cpuct_sqrt = cpuct * parent_sqrt;
 
+  // FPU calculation - use parent Q as baseline, reduced for unexplored moves
+  float parent_q = node->n() > 0 ? node->q() : 0.0f;
+  float fpu = parent_q - 0.2f;  // Slight penalty for unexplored moves
+
   const TSEdge *edges = node->edges();
 
   // Single-pass selection
@@ -955,10 +970,11 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
       uint32_t n_in_flight = child->n_in_flight();
       float total_n = static_cast<float>(n + n_in_flight);
 
-      q = (n > 0) ? -child->q() : config_.fpu_value;
+      // CRITICAL FIX: Negate child Q value because it's from opponent's perspective
+      q = (n > 0) ? -child->q() : fpu;
       u = cpuct_sqrt * policy / (1.0f + total_n);
     } else {
-      q = config_.fpu_value;
+      q = fpu;
       u = cpuct_sqrt * policy;
     }
 
@@ -1106,14 +1122,23 @@ float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
     // Thread-safe GPU evaluation
     std::lock_guard<std::mutex> lock(gpu_mutex_);
     auto [psqt, score] = gpu_manager_->evaluate_single(ctx.pos, true);
-    value = std::tanh(score / 400.0f);
+    
+    // IMPROVED: Use a more refined score transformation
+    float cp = static_cast<float>(score);
+    
+    // Clamp to reasonable range
+    cp = std::clamp(cp, -2000.0f, 2000.0f);
+    
+    // Convert to [-1, 1] range using tanh
+    value = std::tanh(cp / 400.0f);
   } else {
     // Fallback to simple eval
     int simple = Eval::simple_eval(ctx.pos);
     value = std::tanh(simple / 400.0f);
   }
 
-  // Adjust for side to move
+  // CRITICAL: Adjust for side to move
+  // NNUE returns score from white's perspective, so negate for black
   if (ctx.pos.side_to_move() == BLACK) {
     value = -value;
   }
@@ -1152,20 +1177,74 @@ Move ThreadSafeMCTS::get_best_move() const {
   int num_edges = root->num_edges();
   const TSEdge *edges = root->edges();
 
-  int best_idx = -1;
-  uint32_t best_n = 0;
+  // IMPROVED: Use a combination of visit count and Q value for move selection
+  struct MoveCandidate {
+    int idx;
+    uint32_t visits;
+    float q;
+    float policy;
+  };
+  
+  std::vector<MoveCandidate> candidates;
+  candidates.reserve(num_edges);
+  
+  uint32_t max_visits = 0;
+  float best_q = -2.0f;
 
   for (int i = 0; i < num_edges; ++i) {
     ThreadSafeNode *child = edges[i].child.load(std::memory_order_acquire);
-    if (child && child->n() > best_n) {
-      best_n = child->n();
-      best_idx = i;
+    if (child && child->n() > 0) {
+      MoveCandidate mc;
+      mc.idx = i;
+      mc.visits = child->n();
+      mc.q = -child->q();  // Negate because child Q is from opponent's perspective
+      mc.policy = edges[i].policy.load(std::memory_order_relaxed);
+      candidates.push_back(mc);
+      
+      max_visits = std::max(max_visits, mc.visits);
+      best_q = std::max(best_q, mc.q);
     }
   }
 
-  if (best_idx < 0) {
+  if (candidates.empty()) {
     // No visits, return first move
     return edges[0].move;
+  }
+
+  // Find move with most visits
+  int best_idx = -1;
+  uint32_t best_visits = 0;
+  
+  for (const auto &mc : candidates) {
+    if (mc.visits > best_visits) {
+      best_visits = mc.visits;
+      best_idx = mc.idx;
+    }
+  }
+
+  // Check if the most-visited move has a reasonable Q value
+  MoveCandidate *best_candidate = nullptr;
+  for (auto &mc : candidates) {
+    if (mc.idx == best_idx) {
+      best_candidate = &mc;
+      break;
+    }
+  }
+  
+  if (best_candidate) {
+    float q_threshold = best_q - 0.3f;
+    
+    if (best_candidate->q < q_threshold) {
+      // Look for a better alternative
+      for (const auto &mc : candidates) {
+        if (mc.idx != best_idx && 
+            mc.visits >= max_visits * 0.3 &&
+            mc.q > best_candidate->q + 0.15f) {
+          best_idx = mc.idx;
+          break;
+        }
+      }
+    }
   }
 
   return edges[best_idx].move;

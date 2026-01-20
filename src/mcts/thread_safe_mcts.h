@@ -263,8 +263,8 @@ struct WorkerContext {
 // ============================================================================
 
 struct ThreadSafeMCTSConfig {
-  float cpuct = 2.5f;
-  float fpu_value = -1.0f;
+  float cpuct = 1.5f;            // Reduced from 2.5 for less exploration, more exploitation
+  float fpu_value = 0.0f;        // First Play Urgency base value (neutral)
   float policy_softmax_temp = 1.0f;
   bool add_dirichlet_noise = true;
   float dirichlet_alpha = 0.3f;

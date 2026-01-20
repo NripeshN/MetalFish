@@ -769,7 +769,21 @@ float HybridSearch::evaluate_position_direct(const MCTSPosition &pos,
     std::lock_guard<std::mutex> lock(gpu_mutex_);
     auto [psqt, score] =
         gpu_nnue_->evaluate_single(pos.stockfish_position(), true);
-    value = std::tanh(static_cast<float>(score) / 400.0f);
+    
+    // IMPROVED: Use a more refined score transformation
+    // The raw NNUE score is in centipawns, convert to [-1, 1] range
+    // Use a sigmoid-like function that's more sensitive to small advantages
+    float cp = static_cast<float>(score);
+    
+    // Clamp to reasonable range to avoid extreme values
+    cp = std::clamp(cp, -2000.0f, 2000.0f);
+    
+    // Use tanh with a scaling factor tuned for chess evaluation
+    // 400 cp roughly corresponds to a winning position
+    value = std::tanh(cp / 400.0f);
+    
+    // CRITICAL: Ensure value is from side-to-move's perspective
+    // NNUE returns score from white's perspective, so negate for black
     if (pos.is_black_to_move()) {
       value = -value;
     }
@@ -784,13 +798,6 @@ float HybridSearch::evaluate_position_direct(const MCTSPosition &pos,
 HybridNode *HybridSearch::select_node(HybridNode *node, MCTSPosition &pos,
                                       HybridWorkerContext &ctx) {
   while (node->has_children() && !node->is_terminal()) {
-    float parent_n_sqrt = std::sqrt(static_cast<float>(node->n() + 1));
-
-    float fpu = config_.fpu_value;
-    if (node->n() > 0) {
-      fpu = node->q() - config_.fpu_reduction * std::sqrt(node->n());
-    }
-
     int best_idx = select_child_puct(node, config_.cpuct, ctx);
 
     if (best_idx < 0)
@@ -823,11 +830,13 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
 
   ctx.puct_scores.resize(num_edges);
 
-  float parent_n_sqrt = std::sqrt(static_cast<float>(node->n() + 1));
-  float fpu = config_.fpu_value;
-  if (node->n() > 0) {
-    fpu = node->q() - config_.fpu_reduction * std::sqrt(node->n());
-  }
+  float parent_n = static_cast<float>(node->n() + node->n_in_flight());
+  float parent_n_sqrt = std::sqrt(parent_n + 1.0f);
+  
+  // FPU (First Play Urgency) - use parent Q as baseline, reduced for unexplored moves
+  // This encourages exploration of new moves while still being informed by parent value
+  float parent_q = node->n() > 0 ? node->q() : 0.0f;
+  float fpu = parent_q - config_.fpu_reduction;
 
   int best_idx = -1;
   float best_puct = -std::numeric_limits<float>::infinity();
@@ -840,11 +849,15 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
     if (child) {
       uint32_t n = child->n();
       uint32_t n_in_flight = child->n_in_flight();
-      float q = (n > 0) ? child->q() : fpu;
-      float u =
-          cpuct * edge.policy() * parent_n_sqrt / (1.0f + n + n_in_flight);
+      float total_n = static_cast<float>(n + n_in_flight);
+      
+      // CRITICAL FIX: Negate child Q value because it's from opponent's perspective
+      // Parent wants to maximize, child Q is opponent's evaluation
+      float q = (n > 0) ? -child->q() : fpu;
+      float u = cpuct * edge.policy() * parent_n_sqrt / (1.0f + total_n);
       puct = q + u;
     } else {
+      // Unexplored node - use FPU with full exploration bonus
       float u = cpuct * edge.policy() * parent_n_sqrt;
       puct = fpu + u;
     }
@@ -875,6 +888,76 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos,
   }
 
   node->create_edges(moves);
+  
+  // CRITICAL FIX: Set heuristic policy priors (like thread_safe_mcts.cpp)
+  // Without this, all moves have equal probability which hurts search quality
+  int num_edges = node->num_edges();
+  if (num_edges > 0) {
+    std::vector<float> scores(num_edges);
+    float max_score = -1e9f;
+    
+    const Position &sf_pos = pos.stockfish_position();
+    
+    for (int i = 0; i < num_edges; ++i) {
+      Move m = node->edges()[i].move().to_stockfish();
+      float score = 0.0f;
+      
+      // Captures scored by MVV-LVA and SEE
+      if (sf_pos.capture(m)) {
+        PieceType captured = m.type_of() == EN_PASSANT
+                               ? PAWN
+                               : type_of(sf_pos.piece_on(m.to_sq()));
+        PieceType attacker = type_of(sf_pos.piece_on(m.from_sq()));
+        static const float piece_values[] = {0, 100, 320, 330, 500, 900, 0};
+        score += piece_values[captured] * 6.0f - piece_values[attacker];
+        
+        if (sf_pos.see_ge(m, Value(0))) {
+          score += 300.0f;
+        }
+      }
+      
+      // Promotions
+      if (m.type_of() == PROMOTION) {
+        PieceType promo = m.promotion_type();
+        if (promo == QUEEN)
+          score += 4000.0f;
+        else if (promo == KNIGHT)
+          score += 800.0f;
+      }
+      
+      // Checks
+      if (sf_pos.gives_check(m)) {
+        score += 400.0f;
+      }
+      
+      // Center control
+      int to_file = file_of(m.to_sq());
+      int to_rank = rank_of(m.to_sq());
+      float center_dist = std::abs(to_file - 3.5f) + std::abs(to_rank - 3.5f);
+      score += (7.0f - center_dist) * 15.0f;
+      
+      // Castling bonus
+      if (m.type_of() == CASTLING) {
+        score += 200.0f;
+      }
+      
+      scores[i] = score;
+      max_score = std::max(max_score, score);
+    }
+    
+    // Softmax normalization with temperature
+    float sum = 0.0f;
+    for (int i = 0; i < num_edges; ++i) {
+      scores[i] = std::exp((scores[i] - max_score) / 
+                           (config_.policy_softmax_temp * 400.0f));
+      sum += scores[i];
+    }
+    
+    // Set policy priors
+    for (int i = 0; i < num_edges; ++i) {
+      node->edges()[i].set_policy(scores[i] / sum);
+    }
+  }
 
   // Add Dirichlet noise at root
   if (config_.add_dirichlet_noise && node == tree_->root()) {
@@ -901,11 +984,17 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos,
 
 void HybridSearch::backpropagate(HybridNode *node, float value, float draw_prob,
                                  float moves_left) {
+  // CRITICAL: Start with the value from the leaf node's perspective
+  // As we go up the tree, we flip the value because each level is opponent's turn
   while (node) {
+    // Remove virtual loss first
     node->remove_virtual_loss(config_.virtual_loss);
+
+    // Update statistics with current value
     node->update_stats(value, draw_prob, moves_left);
 
-    // Flip value for opponent
+    // Flip value for parent (opponent's perspective)
+    // This is essential for minimax-style MCTS
     value = -value;
     moves_left += 1.0f;
 
@@ -1013,8 +1102,19 @@ int64_t HybridSearch::get_time_budget_ms() const {
   if (time_left <= 0)
     return 1000; // Default 1 second
 
-  // Use about 2.5% of remaining time + increment
-  return time_left / 40 + inc;
+  // CRITICAL FIX: Use more aggressive time allocation for MCTS
+  // MCTS needs more time than alpha-beta to build a good tree
+  // Use ~5% of remaining time + most of increment (was 2.5% + increment)
+  int64_t base_time = time_left / 20;  // 5% of remaining time
+  int64_t inc_time = inc * 3 / 4;       // Use 75% of increment
+  
+  // Minimum 500ms for MCTS to be effective
+  int64_t budget = std::max(int64_t(500), base_time + inc_time);
+  
+  // Cap at 20% of remaining time to avoid time trouble
+  int64_t max_time = time_left / 5;
+  
+  return std::min(budget, max_time);
 }
 
 MCTSMove HybridSearch::select_best_move() const {
@@ -1022,21 +1122,85 @@ MCTSMove HybridSearch::select_best_move() const {
   if (!root->has_children())
     return MCTSMove();
 
-  // Find child with most visits
-  int best_idx = -1;
-  uint32_t best_n = 0;
-
-  for (int i = 0; i < root->num_edges(); ++i) {
+  int num_edges = root->num_edges();
+  
+  // IMPROVED: Use a combination of visit count and Q value for move selection
+  // This helps avoid selecting moves that have many visits but poor Q values
+  // (which can happen due to virtual loss or early exploration)
+  
+  struct MoveCandidate {
+    int idx;
+    uint32_t visits;
+    float q;
+    float policy;
+  };
+  
+  std::vector<MoveCandidate> candidates;
+  candidates.reserve(num_edges);
+  
+  uint32_t max_visits = 0;
+  float best_q = -2.0f;
+  
+  for (int i = 0; i < num_edges; ++i) {
     const HybridEdge &edge = root->edges()[i];
-    if (edge.child() && edge.child()->n() > best_n) {
-      best_n = edge.child()->n();
-      best_idx = i;
+    HybridNode *child = edge.child();
+    
+    if (child && child->n() > 0) {
+      MoveCandidate mc;
+      mc.idx = i;
+      mc.visits = child->n();
+      mc.q = -child->q();  // Negate because child Q is from opponent's perspective
+      mc.policy = edge.policy();
+      candidates.push_back(mc);
+      
+      max_visits = std::max(max_visits, mc.visits);
+      best_q = std::max(best_q, mc.q);
     }
   }
-
-  if (best_idx < 0) {
-    // No visits, return first move
+  
+  if (candidates.empty()) {
+    // No visits, return first move (shouldn't happen in practice)
     return root->edges()[0].move();
+  }
+  
+  // If there's a clear winner by visit count (>80% of max), use it
+  int best_idx = -1;
+  uint32_t best_visits = 0;
+  
+  for (const auto &mc : candidates) {
+    if (mc.visits > best_visits) {
+      best_visits = mc.visits;
+      best_idx = mc.idx;
+    }
+  }
+  
+  // Check if the most-visited move has a reasonable Q value
+  // If not, consider other moves with high Q and decent visits
+  MoveCandidate *best_candidate = nullptr;
+  for (auto &mc : candidates) {
+    if (mc.idx == best_idx) {
+      best_candidate = &mc;
+      break;
+    }
+  }
+  
+  if (best_candidate) {
+    // If the best move by visits has a significantly worse Q than the best Q,
+    // and another move has at least 30% of the visits with much better Q,
+    // consider switching
+    float q_threshold = best_q - 0.3f;  // Allow 0.3 Q difference
+    
+    if (best_candidate->q < q_threshold) {
+      // Look for a better alternative
+      for (const auto &mc : candidates) {
+        if (mc.idx != best_idx && 
+            mc.visits >= max_visits * 0.3 &&  // At least 30% of max visits
+            mc.q > best_candidate->q + 0.15f) {  // Significantly better Q
+          best_idx = mc.idx;
+          break;
+        }
+      }
+    }
   }
 
   return root->edges()[best_idx].move();

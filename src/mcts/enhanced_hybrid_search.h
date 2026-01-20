@@ -121,10 +121,10 @@ struct EnhancedHybridConfig {
   int gpu_batch_size = 64;
   int gpu_batch_timeout_us = 500;
 
-  // Time management
-  float base_time_fraction = 0.025f; // 2.5% of remaining time
-  float max_time_fraction = 0.10f;   // Max 10% of remaining time
-  float increment_factor = 0.8f;     // How much of increment to use
+  // Time management - IMPROVED for MCTS
+  float base_time_fraction = 0.05f;  // 5% of remaining time (was 2.5%)
+  float max_time_fraction = 0.20f;   // Max 20% of remaining time (was 10%)
+  float increment_factor = 0.75f;    // Use 75% of increment (was 80%)
 
   // Transposition table
   bool share_tt = true;

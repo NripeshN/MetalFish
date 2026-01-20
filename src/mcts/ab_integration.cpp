@@ -583,7 +583,12 @@ int ABSearcher::late_move_reduction(int depth, int move_count,
 }
 
 Value ABSearcher::evaluate(const Position &pos) {
-  return Eval::simple_eval(pos);
+  // Use simple_eval for the ABSearcher since we don't have access to 
+  // the full NNUE infrastructure (networks, accumulators, caches).
+  // The main MCTS evaluation uses GPU NNUE for strong evaluation.
+  // This ABSearcher is primarily used for tactical verification where
+  // simple material evaluation is sufficient for move ordering.
+  return Value(Eval::simple_eval(pos));
 }
 
 bool ABSearcher::should_stop() const {
@@ -828,8 +833,8 @@ TacticalAnalyzer::TacticalInfo TacticalAnalyzer::analyze(const Position &pos) {
   ABSearchResult qresult = qsearcher_.search(pos, 0);
   info.quiescence_score = qresult.score;
 
-  // Static eval
-  info.tactical_score = Eval::simple_eval(pos);
+  // Static eval - use simple_eval since we don't have NNUE infrastructure
+  info.tactical_score = Value(Eval::simple_eval(pos));
 
   return info;
 }
