@@ -184,6 +184,14 @@ void ParallelHybridSearch::start_search(const Position &pos,
                                         const Search::LimitsType &limits,
                                         BestMoveCallback best_move_cb,
                                         InfoCallback info_cb) {
+  if (!initialized_) {
+    // Cannot start search without initialization - mcts_search_ would be nullptr
+    if (best_move_cb) {
+      best_move_cb(Move::none(), Move::none());
+    }
+    return;
+  }
+
   stop();
   wait();
 
@@ -770,31 +778,69 @@ Move ParallelHybridSearch::make_final_decision() {
 
   case ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED:
   default:
-    // IMPROVED: Weighted combination based on confidence and score
-    float ab_weight = ab_confidence * (1.0f + std::max(0.0f, ab_score / 200.0f));
-    float mcts_weight = mcts_confidence * (1.0f + std::max(0.0f, mcts_q));
+    // Weighted decision based on confidence
+    // For losing positions, we want to choose the LEAST BAD option
+    // with proper confidence weighting.
+    //
+    // The key insight: compare confidence-weighted PREFERENCES, not raw scores.
+    // Higher confidence should make us more likely to trust that assessment,
+    // regardless of whether the position is winning or losing.
     
-    // Normalize
-    float total_weight = ab_weight + mcts_weight;
-    if (total_weight > 0) {
-      ab_weight /= total_weight;
-      mcts_weight /= total_weight;
+    // Compute weighted scores using absolute values to handle negative scores correctly
+    // We compare which engine is MORE CONFIDENT that their move is BETTER (or less bad)
+    float ab_conf = ab_confidence;
+    float mcts_conf = mcts_confidence;
+    
+    // Normalize confidences
+    float conf_sum = ab_conf + mcts_conf;
+    if (conf_sum > 0) {
+      ab_conf /= conf_sum;
+      mcts_conf /= conf_sum;
     } else {
-      ab_weight = 0.5f;
-      mcts_weight = 0.5f;
+      ab_conf = 0.5f;
+      mcts_conf = 0.5f;
     }
     
-    // If AB has significantly higher weight and score, use AB
-    if (ab_weight > 0.6f && ab_score > mcts_cp) {
-      chosen = ab_best;
-      stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-    } else if (mcts_weight > 0.6f && mcts_cp > ab_score) {
-      chosen = mcts_best;
-      stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+    // Decision: trust the engine with higher confidence, but only if scores
+    // are reasonably close. If scores differ significantly, trust the one
+    // claiming a better position (accounting for confidence).
+    //
+    // For close scores (within ~50cp), prefer higher confidence.
+    // For divergent scores, weight both confidence AND score difference.
+    int score_diff = ab_score - mcts_cp;
+    float score_diff_pawns = std::abs(score_diff) / 100.0f;
+    
+    if (score_diff_pawns < 0.5f) {
+      // Scores are close - trust higher confidence
+      if (ab_conf > mcts_conf + 0.1f) {
+        chosen = ab_best;
+        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+      } else if (mcts_conf > ab_conf + 0.1f) {
+        chosen = mcts_best;
+        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+      } else {
+        // Very close confidence - default to AB (more reliable for tactics)
+        chosen = ab_best;
+        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+      }
     } else {
-      // Close - default to AB (more reliable for tactics)
-      chosen = ab_best;
-      stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+      // Scores diverge significantly - weight confidence against score difference
+      // Use confidence as a "discount factor" on the claimed advantage
+      // Higher confidence means we trust the score more
+      float ab_effective = ab_score * ab_conf;
+      float mcts_effective = mcts_cp * mcts_conf;
+      
+      if (ab_effective > mcts_effective) {
+        chosen = ab_best;
+        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+      } else if (mcts_effective > ab_effective) {
+        chosen = mcts_best;
+        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+      } else {
+        // Equal - default to AB
+        chosen = ab_best;
+        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+      }
     }
     break;
   }
@@ -897,13 +943,18 @@ void ParallelHybridSearch::submit_gpu_batch_async(int batch_idx,
   // Track pending evaluations
   pending_evaluations_.fetch_add(1, std::memory_order_relaxed);
   
-  // Submit async evaluation
+  // Capture batch count before moving eval_batch (batch is a member reference, safe to capture)
+  const int batch_count = batch.count;
+  
+  // Submit async evaluation - move eval_batch into the lambda to avoid use-after-free
+  // (eval_batch is a local variable that would go out of scope before the async callback)
   bool started = gpu_manager_->evaluate_batch_async(eval_batch,
-      [this, batch_idx, completion_handler, &batch, &eval_batch](bool success) {
+      [this, batch_idx, completion_handler, &batch, batch_count,
+       eval_batch = std::move(eval_batch)](bool success) mutable {
         // Copy results back (unified memory = no actual copy needed)
         if (success && batch.results_buffer && batch.results_buffer->valid()) {
           auto* results = batch.results_buffer->as<int32_t>();
-          for (int i = 0; i < batch.count; ++i) {
+          for (int i = 0; i < batch_count; ++i) {
             results[i * 2] = eval_batch.psqt_scores[i];
             results[i * 2 + 1] = eval_batch.positional_scores[i];
           }
