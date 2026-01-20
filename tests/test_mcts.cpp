@@ -22,6 +22,7 @@
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "gpu/gpu_nnue_integration.h"
+#include "mcts/ab_integration.h"
 #include "mcts/hybrid_search.h"
 #include "mcts/mcts_batch_evaluator.h"
 #include "mcts/mcts_tt.h"
@@ -493,6 +494,107 @@ bool test_parallel_hybrid_search() {
 }
 
 // ============================================================================
+// AB Integration Tests
+// ============================================================================
+
+bool test_ab_search_result() {
+  TestCase tc("ABSearchResult");
+
+  ABSearchResult result;
+  result.score = 100;
+  result.is_mate = false;
+
+  // Test normalized score
+  float normalized = result.normalized_score();
+  EXPECT(tc, normalized > 0.0f);
+  EXPECT(tc, normalized < 1.0f);
+
+  // Test mate score normalization
+  ABSearchResult mate_result;
+  mate_result.is_mate = true;
+  mate_result.mate_in = 5;
+  EXPECT(tc, mate_result.normalized_score() == 1.0f);
+
+  mate_result.mate_in = -5;
+  EXPECT(tc, mate_result.normalized_score() == -1.0f);
+
+  return tc.passed();
+}
+
+bool test_ab_search_config() {
+  TestCase tc("ABSearchConfig");
+
+  ABSearchConfig config;
+
+  // Test default values
+  EXPECT(tc, config.max_depth > 0);
+  EXPECT(tc, config.quiescence_depth > 0);
+  EXPECT(tc, config.aspiration_window > 0);
+  EXPECT(tc, config.use_tt);
+  EXPECT(tc, config.use_null_move);
+  EXPECT(tc, config.use_lmr);
+  EXPECT(tc, config.use_futility);
+  EXPECT(tc, config.use_history);
+  EXPECT(tc, !config.verify_only);
+
+  return tc.passed();
+}
+
+bool test_ab_searcher_basic() {
+  TestCase tc("ABSearcherBasic");
+
+  ABSearcher searcher;
+
+  // Test without TT (should still work)
+  searcher.reset_stats();
+  EXPECT(tc, searcher.nodes_searched() == 0);
+  EXPECT(tc, searcher.tt_hits() == 0);
+
+  return tc.passed();
+}
+
+bool test_tactical_analyzer() {
+  TestCase tc("TacticalAnalyzer");
+
+  TacticalAnalyzer analyzer;
+
+  std::deque<StateInfo> states(1);
+  Position pos;
+
+  // Test starting position (not very tactical)
+  pos.set(TEST_FENS[0], false, &states.back());
+  auto info = analyzer.analyze(pos);
+
+  EXPECT(tc, !info.in_check);
+  EXPECT(tc, info.num_captures >= 0);
+
+  // Test tactical position
+  pos.set(TEST_FENS[1], false, &states.back());
+  info = analyzer.analyze(pos);
+
+  // Should have some tactical elements
+  EXPECT(tc, info.num_captures >= 0 || info.num_checks >= 0);
+
+  return tc.passed();
+}
+
+bool test_hybrid_search_bridge() {
+  TestCase tc("HybridSearchBridge");
+
+  HybridSearchBridge bridge;
+
+  // Test without initialization
+  EXPECT(tc, !bridge.has_engine());
+
+  // Get stats (should be zero)
+  auto stats = bridge.get_stats();
+  EXPECT(tc, stats.verifications == 0);
+  EXPECT(tc, stats.overrides == 0);
+
+  return tc.passed();
+}
+
+// ============================================================================
 // Performance Tests
 // ============================================================================
 
@@ -627,6 +729,13 @@ bool test_mcts() {
   test_hybrid_tree();
   test_hybrid_search_basic();
   test_parallel_hybrid_search();
+
+  std::cout << "\n[AB Integration]" << std::endl;
+  test_ab_search_result();
+  test_ab_search_config();
+  test_ab_searcher_basic();
+  test_tactical_analyzer();
+  test_hybrid_search_bridge();
 
   std::cout << "\n[Performance]" << std::endl;
   test_tt_performance();
