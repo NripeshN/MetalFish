@@ -375,7 +375,8 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
 
     auto [psqt2, pos_score2] = gpu_manager_->evaluate_single(pos_after, true);
 
-    result.score = -pos_score2; // Negamax
+    // NNUE returns score from white's perspective, negate only for black to move
+    result.score = pos_after.side_to_move() == BLACK ? -pos_score2 : pos_score2;
     result.pv.push_back(mcts_move.to_stockfish());
 
     // IMPROVED: Score all legal moves and find the best one
@@ -404,7 +405,8 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
 
       auto [test_psqt, test_score] =
           gpu_manager_->evaluate_single(test_pos, true);
-      int score = -test_score;
+      // NNUE returns score from white's perspective, negate only for black to move
+      int score = test_pos.side_to_move() == BLACK ? -test_score : test_score;
 
       MoveScore ms;
       ms.move = m;
@@ -504,7 +506,8 @@ ABVerifyResult EnhancedHybridSearch::verify_with_alphabeta(
           
           auto [reply_psqt, reply_score] =
               gpu_manager_->evaluate_single(reply_pos, true);
-          int score = -reply_score;
+          // NNUE returns score from white's perspective, negate only for black to move
+          int score = reply_pos.side_to_move() == BLACK ? -reply_score : reply_score;
           
           if (score > best_reply_score) {
             best_reply_score = score;

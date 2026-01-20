@@ -1008,7 +1008,7 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
     if (result.override_mcts) {
       stats_.overrides++;
     }
-    stats_.ab_nodes += ab_searcher_->nodes_searched();
+    // Note: ab_nodes is already updated in the engine/fallback branches above
     stats_.avg_verification_time_ms =
         (stats_.avg_verification_time_ms * (stats_.verifications - 1) +
          time_ms) /
