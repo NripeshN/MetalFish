@@ -1129,8 +1129,9 @@ HybridSearchBridge &hybrid_bridge() {
 }
 
 bool initialize_hybrid_bridge(TranspositionTable *tt,
-                              GPU::GPUNNUEManager *gpu_manager) {
-  hybrid_bridge().initialize(tt, gpu_manager);
+                              GPU::GPUNNUEManager *gpu_manager,
+                              Engine *engine) {
+  hybrid_bridge().initialize(tt, gpu_manager, engine);
   return true;
 }
 

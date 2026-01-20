@@ -224,7 +224,7 @@ set(GPU_SOURCES
 # CUDA source files
 set(CUDA_SOURCES "")
 
-# MCTS source files (hybrid search - old implementation)
+# MCTS source files (hybrid search)
 set(MCTS_SOURCES
     src/mcts/stockfish_adapter.cpp
     src/mcts/hybrid_search.cpp
@@ -234,8 +234,7 @@ set(MCTS_SOURCES
     src/mcts/mcts_tt.cpp
     src/mcts/parallel_search.cpp
     src/mcts/ab_integration.cpp
-    src/mcts/thread_safe_mcts.cpp
-    src/mcts/stockfish_search_wrapper.cpp)
+    src/mcts/thread_safe_mcts.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)

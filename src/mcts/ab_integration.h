@@ -308,7 +308,8 @@ private:
 // Global hybrid search bridge
 HybridSearchBridge &hybrid_bridge();
 bool initialize_hybrid_bridge(TranspositionTable *tt,
-                              GPU::GPUNNUEManager *gpu_manager);
+                              GPU::GPUNNUEManager *gpu_manager,
+                              Engine *engine = nullptr);
 
 } // namespace MCTS
 } // namespace MetalFish
