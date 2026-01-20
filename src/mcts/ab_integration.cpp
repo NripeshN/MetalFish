@@ -11,6 +11,7 @@
 #include "../core/bitboard.h"
 #include "../core/movegen.h"
 #include "../eval/evaluate.h"
+#include "../uci/engine.h"
 #include <algorithm>
 #include <cmath>
 #include <mutex>
@@ -890,9 +891,11 @@ HybridSearchBridge::HybridSearchBridge()
 HybridSearchBridge::~HybridSearchBridge() = default;
 
 void HybridSearchBridge::initialize(TranspositionTable *tt,
-                                    GPU::GPUNNUEManager *gpu_manager) {
+                                    GPU::GPUNNUEManager *gpu_manager,
+                                    Engine *engine) {
   tt_ = tt;
   gpu_manager_ = gpu_manager;
+  engine_ = engine;
 
   ab_searcher_->initialize(tt);
   policy_generator_->initialize(nullptr, nullptr, tt);
@@ -915,23 +918,46 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
 
   auto start = std::chrono::steady_clock::now();
 
-  // Lock to serialize search operations - ABSearcher has non-thread-safe state
+  // Lock to serialize search operations
   std::lock_guard<std::mutex> search_lock(search_mutex_);
 
-  // Run AB search
-  ABSearchConfig config;
-  config.max_depth = verification_depth;
-  config.use_tt = true;
-  ab_searcher_->set_config(config);
+  // Use the REAL Engine if available!
+  if (engine_) {
+    // Run the full Stockfish search
+    auto search_result =
+        engine_->search_sync(pos.fen(), verification_depth, 0);
 
-  ABSearchResult ab_result = ab_searcher_->search(pos, verification_depth);
+    result.ab_move = search_result.best_move;
+    result.ab_score = search_result.score;
+    result.ab_depth = search_result.depth;
+    result.ab_pv = search_result.pv;
 
-  result.ab_move = ab_result.best_move;
-  result.ab_score = ab_result.score;
-  result.ab_depth = ab_result.depth;
-  result.ab_pv = ab_result.pv;
+    // Update stats with real node count
+    {
+      std::lock_guard<std::mutex> lock(stats_mutex_);
+      stats_.ab_nodes += search_result.nodes;
+    }
+  } else {
+    // Fallback to simplified ABSearcher
+    ABSearchConfig config;
+    config.max_depth = verification_depth;
+    config.use_tt = true;
+    ab_searcher_->set_config(config);
 
-  // Get MCTS move score
+    ABSearchResult ab_result = ab_searcher_->search(pos, verification_depth);
+
+    result.ab_move = ab_result.best_move;
+    result.ab_score = ab_result.score;
+    result.ab_depth = ab_result.depth;
+    result.ab_pv = ab_result.pv;
+
+    {
+      std::lock_guard<std::mutex> lock(stats_mutex_);
+      stats_.ab_nodes += ab_searcher_->nodes_searched();
+    }
+  }
+
+  // Get MCTS move score by searching after making the move
   Position test_pos;
   StateInfo st1, st2;
   test_pos.set(pos.fen(), false, &st1);
@@ -939,12 +965,19 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
   if (test_pos.pseudo_legal(mcts_move) && test_pos.legal(mcts_move)) {
     test_pos.do_move(mcts_move, st2);
 
-    // Quick qsearch for MCTS move
-    ABSearchConfig qconfig;
-    qconfig.max_depth = 0;
-    ab_searcher_->set_config(qconfig);
-    ABSearchResult mcts_result = ab_searcher_->search(test_pos, 0);
-    result.mcts_score = -mcts_result.score;
+    if (engine_) {
+      // Use real engine for MCTS move evaluation too
+      auto mcts_result = engine_->search_sync(test_pos.fen(), 
+                                              std::max(1, verification_depth - 2), 0);
+      result.mcts_score = -mcts_result.score;
+    } else {
+      // Fallback qsearch
+      ABSearchConfig qconfig;
+      qconfig.max_depth = 0;
+      ab_searcher_->set_config(qconfig);
+      ABSearchResult mcts_result = ab_searcher_->search(test_pos, 0);
+      result.mcts_score = -mcts_result.score;
+    }
   } else {
     result.mcts_score = VALUE_NONE;
   }
@@ -956,7 +989,7 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
   }
 
   // Determine if MCTS move is verified
-  if (mcts_move == ab_result.best_move) {
+  if (mcts_move == result.ab_move) {
     result.verified = true;
   } else if (result.score_difference < override_threshold) {
     result.verified = true;
@@ -1023,9 +1056,33 @@ ABSearchResult HybridSearchBridge::run_ab_search(const Position &pos, int depth,
     return ABSearchResult();
   }
 
-  // Lock to serialize search operations - ABSearcher has non-thread-safe state
+  // Lock to serialize search operations
   std::lock_guard<std::mutex> search_lock(search_mutex_);
 
+  // Use the REAL Engine if available!
+  if (engine_) {
+    auto search_result = engine_->search_sync(pos.fen(), depth, time_ms);
+
+    ABSearchResult result;
+    result.best_move = search_result.best_move;
+    result.score = search_result.score;
+    result.depth = search_result.depth;
+    result.nodes_searched = static_cast<int>(search_result.nodes);
+    result.pv = search_result.pv;
+
+    // Check for mate
+    if (result.score > VALUE_MATE_IN_MAX_PLY) {
+      result.is_mate = true;
+      result.mate_in = (VALUE_MATE - result.score + 1) / 2;
+    } else if (result.score < VALUE_MATED_IN_MAX_PLY) {
+      result.is_mate = true;
+      result.mate_in = -(VALUE_MATE + result.score) / 2;
+    }
+
+    return result;
+  }
+
+  // Fallback to simplified ABSearcher
   ABSearchConfig config;
   config.max_depth = depth;
   config.max_time_ms = time_ms;

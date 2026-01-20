@@ -425,4 +425,48 @@ std::string Engine::thread_allocation_information_as_string() const {
 
   return ss.str();
 }
+
+// ============================================================================
+// Hybrid Search Integration
+// ============================================================================
+
+Engine::QuickSearchResult Engine::search_sync(const std::string &fen, int depth,
+                                              int time_ms) {
+  QuickSearchResult result;
+
+  // Set up the position
+  set_position(fen, {});
+
+  // Set up search limits
+  Search::LimitsType limits;
+  limits.startTime = now();
+  if (depth > 0) {
+    limits.depth = depth;
+  }
+  if (time_ms > 0) {
+    limits.movetime = time_ms;
+  }
+
+  // Run the search
+  go(limits);
+  wait_for_search_finished();
+
+  // Get the best thread's result (Engine is now a friend of Worker)
+  Thread *best_thread = threads.get_best_thread();
+  if (best_thread && !best_thread->worker->rootMoves.empty()) {
+    const auto &root_move = best_thread->worker->rootMoves[0];
+    result.best_move = root_move.pv[0];
+    result.score = root_move.score;
+    result.depth = best_thread->worker->completedDepth;
+    result.nodes = threads.nodes_searched();
+    result.pv = root_move.pv;
+
+    if (root_move.pv.size() > 1) {
+      result.ponder_move = root_move.pv[1];
+    }
+  }
+
+  return result;
+}
+
 } // namespace MetalFish

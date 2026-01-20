@@ -102,6 +102,33 @@ public:
   std::string thread_allocation_information_as_string() const;
   std::string thread_binding_information_as_string() const;
 
+  // ============================================================================
+  // Hybrid Search Integration
+  // ============================================================================
+  // These methods allow the hybrid MCTS search to use the full AB search
+  // implementation for move verification.
+
+  // Run a synchronous search on the given FEN and return the best move
+  // This uses the full Stockfish search with all optimizations
+  struct QuickSearchResult {
+    Move best_move = Move::none();
+    Move ponder_move = Move::none();
+    Value score = VALUE_NONE;
+    int depth = 0;
+    uint64_t nodes = 0;
+    std::vector<Move> pv;
+  };
+
+  QuickSearchResult search_sync(const std::string &fen, int depth,
+                                int time_ms = 0);
+
+  // Get access to the transposition table for sharing with hybrid search
+  TranspositionTable &get_tt() { return tt; }
+  const TranspositionTable &get_tt() const { return tt; }
+
+  // Get access to thread pool for advanced integration
+  ThreadPool &get_threads() { return threads; }
+
 private:
   const std::string binaryDirectory;
 
