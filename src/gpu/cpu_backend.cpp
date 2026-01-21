@@ -139,6 +139,16 @@ Backend &Backend::get() { return CPUBackend::instance(); }
 
 bool Backend::available() { return false; }
 
+// Shutdown functions - no-op for CPU backend since there's nothing to clean up
+void shutdown_gpu_backend() {
+  // No GPU resources to release in CPU fallback mode
+}
+
+bool gpu_backend_shutdown() {
+  // CPU backend is always "shutdown" safe since there's no actual GPU
+  return false;
+}
+
 // ScopedTimer implementation
 struct ScopedTimer::Impl {
   std::string name;
