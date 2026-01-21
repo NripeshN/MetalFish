@@ -1639,54 +1639,16 @@ def run_ci_match(
             
             return game_pgn, game_moves
         
-        # Helper to format evaluation score
-        def format_eval(cp: int, is_mate: bool = False, mate_in: int = 0) -> str:
-            """Format evaluation for display."""
-            if is_mate:
-                if mate_in > 0:
-                    return f"M{mate_in}"
-                else:
-                    return f"M{mate_in}"
-            else:
-                # Convert centipawns to pawns with sign
-                pawns = cp / 100.0
-                if pawns >= 0:
-                    return f"+{pawns:.1f}"
-                else:
-                    return f"{pawns:.1f}"
-        
-        # Track current evaluation
-        current_eval = "0.0"  # Default eval
-        
         # Read stdout line by line
         if process.stdout is not None:
             for line in process.stdout:
                 output_lines.append(line)
                 line_stripped = line.strip()
                 
-                # Parse engine evaluation from info lines
-                # Format: "<Engine(0): info depth 20 ... score cp 45 ..." or "score mate 5"
-                if "info " in line_stripped and " score " in line_stripped:
-                    # Check for mate score
-                    mate_match = re.search(r'score mate (-?\d+)', line_stripped)
-                    if mate_match:
-                        mate_in = int(mate_match.group(1))
-                        current_eval = format_eval(0, is_mate=True, mate_in=mate_in)
-                    else:
-                        # Check for centipawn score
-                        cp_match = re.search(r'score cp (-?\d+)', line_stripped)
-                        if cp_match:
-                            cp = int(cp_match.group(1))
-                            # Negate if it's black's turn (engine reports from its perspective)
-                            if visualizer.current_move % 2 == 1:  # Black just moved
-                                cp = -cp
-                            current_eval = format_eval(cp)
-                
                 # Detect game start
                 if "Started game" in line_stripped:
                     current_game += 1
                     visualizer.reset()  # Reset uses python-chess internally
-                    current_eval = "0.0"  # Reset eval for new game
                     
                     # Parse players from line like "Started game 1 of 20 (Engine1 vs Engine2)"
                     match = re.search(r'\((.+?) vs (.+?)\)', line_stripped)
@@ -1732,9 +1694,8 @@ def run_ci_match(
                         else:
                             move_display = f"{move_num}... {last_san}"
                         
-                        # Show score and current eval
-                        live_score = f"{wins1}-{draws}-{wins2}"
-                        live_info = f"[{live_score}] Eval: {current_eval}"
+                        # Show W-D-L score
+                        live_info = f"[{wins1}-{draws}-{wins2}]"
                         
                         # Update board display
                         visualizer.clear_board_area()
