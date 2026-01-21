@@ -104,7 +104,7 @@ DEFAULT_ENGINES_CONFIG = {
         "depth_plies": 16
     },
     "tournament_defaults": {
-        "games_per_pair": 12,
+        "games_per_pair": 14,
         "time_control": "600+0.1",
         "concurrency": 1,
         "ponder": False,

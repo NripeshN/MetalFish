@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '12' }}
+  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '14' }}
   TIME_CONTROL: ${{ github.event.inputs.time_control || '600+0.1' }}
 
 jobs:
