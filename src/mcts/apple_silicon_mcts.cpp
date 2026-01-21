@@ -294,6 +294,10 @@ int GPUResidentEvalBatch::add_position(const GPUPositionData& pos_data) {
   
   // Direct write to unified memory - no copy needed!
   GPUPositionData* positions = positions_data();
+  if (!positions) {
+    current_size_.fetch_sub(1, std::memory_order_relaxed);
+    return -1;
+  }
   positions[index] = pos_data;
   
   return index;
