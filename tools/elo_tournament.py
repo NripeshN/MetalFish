@@ -167,7 +167,10 @@ class Colors:
 
 
 class ChessBoardVisualizer:
-    """Terminal-based chess board visualizer with Unicode pieces and rich colors."""
+    """Terminal-based chess board visualizer with Unicode pieces and rich colors.
+    
+    Uses python-chess library for all move handling and board state management.
+    """
     
     # Unicode chess pieces
     # WHITE: Outlined pieces (♔♕♖♗♘♙) - appear hollow/white in most terminals
@@ -179,288 +182,76 @@ class ChessBoardVisualizer:
         'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟',
     }
     
-    # Box drawing characters for a nicer border
-    BOX = {
-        'tl': '\u250F', 'tr': '\u2513', 'bl': '\u2517', 'br': '\u251B',
-        'h': '\u2501', 'v': '\u2503',
-        'lt': '\u2523', 'rt': '\u252B', 'tt': '\u2533', 'bt': '\u253B',
-        'cross': '\u254B'
-    }
-    
-    # Starting position FEN
-    STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-    
     def __init__(self):
-        self.board = self._fen_to_board(self.STARTING_FEN)
-        self.move_history = []
-        self.current_move = 0
+        self.chess_board = chess.Board()  # python-chess board for all logic
         self.white_player = "White"
         self.black_player = "Black"
         self.result = "*"
         self.last_move_from = None
         self.last_move_to = None
-        self.board_height = 26  # Lines used by the board display (header box + board + coordinates)
-        self.en_passant_square = None  # Track en passant target square (rank, file)
+        self.board_height = 26  # Lines used by the board display
         
-    def _fen_to_board(self, fen: str) -> List[List[str]]:
-        """Convert FEN string to 8x8 board array."""
+        # 8x8 board array for display (synced from chess_board)
+        self.board = self._sync_board()
+    
+    def _sync_board(self) -> List[List[str]]:
+        """Sync internal board array from python-chess board."""
         board = [[' ' for _ in range(8)] for _ in range(8)]
-        parts = fen.split()
-        rows = parts[0].split('/')
-        
-        for rank, row in enumerate(rows):
-            file = 0
-            for char in row:
-                if char.isdigit():
-                    file += int(char)
-                else:
-                    board[rank][file] = char
-                    file += 1
+        for square, piece in self.chess_board.piece_map().items():
+            rank = 7 - chess.square_rank(square)
+            file = chess.square_file(square)
+            board[rank][file] = piece.symbol()
         return board
     
-    def _can_piece_reach(self, piece: str, from_r: int, from_f: int, to_r: int, to_f: int, board: List[List[str]], is_capture: bool = False) -> bool:
-        """Check if a piece can legally move from one square to another."""
-        dr = to_r - from_r
-        df = to_f - from_f
-        abs_dr, abs_df = abs(dr), abs(df)
-        
-        piece_type = piece.upper()
-        is_white = piece.isupper()
-        
-        if piece_type == 'P':
-            # Pawn movement
-            direction = -1 if is_white else 1  # White moves up (decreasing rank), black moves down
-            start_rank = 6 if is_white else 1
-            
-            if is_capture:
-                # Diagonal capture
-                return dr == direction and abs_df == 1
-            else:
-                # Forward move
-                if df != 0:
-                    return False
-                if dr == direction:
-                    return board[to_r][to_f] == ' '
-                if dr == 2 * direction and from_r == start_rank:
-                    # Two-square initial move - check both squares are empty
-                    mid_r = from_r + direction
-                    return board[mid_r][from_f] == ' ' and board[to_r][to_f] == ' '
-            return False
-        
-        elif piece_type == 'N':
-            # Knight: L-shape move
-            return (abs_dr == 2 and abs_df == 1) or (abs_dr == 1 and abs_df == 2)
-        
-        elif piece_type == 'B':
-            # Bishop: diagonal move with clear path
-            if abs_dr != abs_df or abs_dr == 0:
-                return False
-            return self._is_path_clear(from_r, from_f, to_r, to_f, board)
-        
-        elif piece_type == 'R':
-            # Rook: straight line with clear path
-            if not (dr == 0 or df == 0) or (dr == 0 and df == 0):
-                return False
-            return self._is_path_clear(from_r, from_f, to_r, to_f, board)
-        
-        elif piece_type == 'Q':
-            # Queen: diagonal or straight with clear path
-            if abs_dr == abs_df and abs_dr > 0:
-                return self._is_path_clear(from_r, from_f, to_r, to_f, board)
-            if (dr == 0 or df == 0) and (dr != 0 or df != 0):
-                return self._is_path_clear(from_r, from_f, to_r, to_f, board)
-            return False
-        
-        elif piece_type == 'K':
-            # King: one square in any direction
-            return abs_dr <= 1 and abs_df <= 1 and (abs_dr + abs_df) > 0
-        
-        return False
+    def reset(self):
+        """Reset to starting position."""
+        self.chess_board.reset()
+        self.board = self._sync_board()
+        self.last_move_from = None
+        self.last_move_to = None
+        self.result = "*"
     
-    def _is_path_clear(self, from_r: int, from_f: int, to_r: int, to_f: int, board: List[List[str]]) -> bool:
-        """Check if the path between two squares is clear (exclusive of endpoints)."""
-        dr = to_r - from_r
-        df = to_f - from_f
+    def apply_move(self, move_str: str, is_white: bool = True) -> bool:
+        """Apply a move to the board using python-chess.
         
-        step_r = 0 if dr == 0 else (1 if dr > 0 else -1)
-        step_f = 0 if df == 0 else (1 if df > 0 else -1)
-        
-        r, f = from_r + step_r, from_f + step_f
-        while r != to_r or f != to_f:
-            if board[r][f] != ' ':
-                return False
-            r += step_r
-            f += step_f
-        
-        return True
-    
-    def _parse_move(self, move: str, board: List[List[str]], is_white: bool) -> Optional[Tuple[int, int, int, int, str]]:
-        """Parse algebraic notation move. Returns (from_rank, from_file, to_rank, to_file, promotion)."""
-        if not move or move in ['1-0', '0-1', '1/2-1/2', '*']:
-            return None
-        
-        original_move = move
-            
-        # Handle castling
-        if move in ['O-O', 'O-O+', 'O-O#', '0-0', '0-0+', '0-0#']:
-            rank = 7 if is_white else 0
-            return (rank, 4, rank, 6, '')
-        if move in ['O-O-O', 'O-O-O+', 'O-O-O#', '0-0-0', '0-0-0+', '0-0-0#']:
-            rank = 7 if is_white else 0
-            return (rank, 4, rank, 2, '')
-        
-        # Remove check/mate indicators
-        move = move.rstrip('+#')
-        
-        # Handle promotion
-        promotion = ''
-        if '=' in move:
-            parts = move.split('=')
-            move = parts[0]
-            promotion = parts[1][0] if len(parts) > 1 and parts[1] else 'Q'
-        # Also handle promotion without = (e.g., "e8Q")
-        elif len(move) >= 3 and move[-1] in 'QRBN' and move[-2].isdigit():
-            if move[-2] in '18':  # Promotion rank
-                promotion = move[-1]
-                move = move[:-1]
-        
-        # Determine piece type
-        piece = 'P'
-        if move and move[0] in 'KQRBN':
-            piece = move[0]
-            move = move[1:]
-        
-        # Check for capture
-        is_capture = 'x' in move
-        move = move.replace('x', '')
-        
-        # Get destination square (last two characters)
-        if len(move) < 2:
-            return None
+        Accepts SAN (e.g., 'Nf3', 'O-O') or UCI (e.g., 'g1f3', 'e1g1').
+        """
+        if not move_str or move_str in ['1-0', '0-1', '1/2-1/2', '*']:
+            return False
         
         try:
-            dest_file = ord(move[-2]) - ord('a')
-            dest_rank = 8 - int(move[-1])
-        except (ValueError, IndexError):
-            return None
+            # Try parsing as SAN first
+            move = self.chess_board.parse_san(move_str)
+        except chess.InvalidMoveError:
+            try:
+                # Try parsing as UCI
+                move = chess.Move.from_uci(move_str)
+                if move not in self.chess_board.legal_moves:
+                    return False
+            except (chess.InvalidMoveError, ValueError):
+                return False
         
-        if not (0 <= dest_file < 8 and 0 <= dest_rank < 8):
-            return None
+        # Store move squares for highlighting
+        self.last_move_from = (7 - chess.square_rank(move.from_square), chess.square_file(move.from_square))
+        self.last_move_to = (7 - chess.square_rank(move.to_square), chess.square_file(move.to_square))
         
-        # Get disambiguation (everything before destination)
-        disambiguation = move[:-2]
-        
-        # Find the piece that can make this move
-        target_piece = piece if is_white else piece.lower()
-        candidates = []
-        
-        for r in range(8):
-            for f in range(8):
-                if board[r][f] == target_piece:
-                    # Check disambiguation
-                    if disambiguation:
-                        # File disambiguation (e.g., "Nbd2" - knight from b-file)
-                        if len(disambiguation) >= 1 and disambiguation[0].isalpha():
-                            if f != ord(disambiguation[0]) - ord('a'):
-                                continue
-                        # Rank disambiguation (e.g., "R1e1" - rook from rank 1)
-                        if len(disambiguation) >= 1 and disambiguation[-1].isdigit():
-                            if r != 8 - int(disambiguation[-1]):
-                                continue
-                        # Full square disambiguation (e.g., "Qa1b2")
-                        if len(disambiguation) == 2:
-                            if f != ord(disambiguation[0]) - ord('a') or r != 8 - int(disambiguation[1]):
-                                continue
-                    
-                    # Check if this piece can actually reach the destination
-                    if piece == 'P':
-                        # Special pawn handling
-                        if is_capture:
-                            # Pawn capture (including en passant)
-                            if self._can_piece_reach(target_piece, r, f, dest_rank, dest_file, board, is_capture=True):
-                                candidates.append((r, f))
-                        else:
-                            # Pawn push
-                            if self._can_piece_reach(target_piece, r, f, dest_rank, dest_file, board, is_capture=False):
-                                candidates.append((r, f))
-                    else:
-                        # Other pieces
-                        if self._can_piece_reach(target_piece, r, f, dest_rank, dest_file, board):
-                            candidates.append((r, f))
-        
-        if len(candidates) == 1:
-            from_r, from_f = candidates[0]
-            return (from_r, from_f, dest_rank, dest_file, promotion)
-        elif len(candidates) > 1:
-            # Multiple candidates - should have been disambiguated, take first one
-            # This shouldn't happen with proper PGN, but handle gracefully
-            from_r, from_f = candidates[0]
-            return (from_r, from_f, dest_rank, dest_file, promotion)
-        
-        return None
-    
-    def apply_move(self, move: str, is_white: bool) -> bool:
-        """Apply a move to the board."""
-        parsed = self._parse_move(move, self.board, is_white)
-        if not parsed:
-            return False
-        
-        from_rank, from_file, to_rank, to_file, promotion = parsed
-        piece = self.board[from_rank][from_file]
-        
-        # Store last move for highlighting
-        self.last_move_from = (from_rank, from_file)
-        self.last_move_to = (to_rank, to_file)
-        
-        # Handle castling (king moves 2 squares)
-        if piece.upper() == 'K' and abs(from_file - to_file) == 2:
-            # Move king
-            self.board[to_rank][to_file] = piece
-            self.board[from_rank][from_file] = ' '
-            # Move rook
-            if to_file > from_file:  # Kingside (O-O)
-                rook = 'R' if is_white else 'r'
-                self.board[to_rank][5] = rook
-                self.board[to_rank][7] = ' '
-            else:  # Queenside (O-O-O)
-                rook = 'R' if is_white else 'r'
-                self.board[to_rank][3] = rook
-                self.board[to_rank][0] = ' '
-            self.en_passant_square = None
-            self.move_history.append(move)
-            self.current_move += 1
-            return True
-        
-        # Handle en passant capture
-        if piece.upper() == 'P' and from_file != to_file and self.board[to_rank][to_file] == ' ':
-            # This is en passant - remove the captured pawn
-            captured_rank = from_rank  # The captured pawn is on the same rank as the capturing pawn
-            self.board[captured_rank][to_file] = ' '
-        
-        # Check for pawn double move (sets en passant square)
-        if piece.upper() == 'P' and abs(from_rank - to_rank) == 2:
-            # Set en passant target square (the square the pawn passed through)
-            ep_rank = (from_rank + to_rank) // 2
-            self.en_passant_square = (ep_rank, from_file)
-        else:
-            self.en_passant_square = None
-        
-        # Move piece
-        moving_piece = piece
-        
-        # Handle promotion
-        if promotion:
-            if is_white:
-                moving_piece = promotion.upper()
-            else:
-                moving_piece = promotion.lower()
-        
-        self.board[to_rank][to_file] = moving_piece
-        self.board[from_rank][from_file] = ' '
-        
-        self.move_history.append(move)
-        self.current_move += 1
+        # Apply move
+        self.chess_board.push(move)
+        self.board = self._sync_board()
         return True
+    
+    @property
+    def current_move(self) -> int:
+        """Get current move number (ply count)."""
+        return len(self.chess_board.move_stack)
+    
+    def get_san(self, uci_move: str) -> str:
+        """Convert UCI move to SAN notation."""
+        try:
+            move = chess.Move.from_uci(uci_move)
+            return self.chess_board.san(move)
+        except:
+            return uci_move
     
     def _get_piece_display(self, piece: str, is_light_square: bool) -> str:
         """Get the colored piece character for display."""
@@ -613,16 +404,6 @@ class ChessBoardVisualizer:
         for _ in range(self.board_height + 4):
             sys.stdout.write(f"{Colors.CURSOR_UP}{Colors.CLEAR_LINE}")
         sys.stdout.flush()
-    
-    def reset(self):
-        """Reset board to starting position."""
-        self.board = self._fen_to_board(self.STARTING_FEN)
-        self.move_history = []
-        self.current_move = 0
-        self.result = "*"
-        self.last_move_from = None
-        self.last_move_to = None
-        self.en_passant_square = None
 
 
 def parse_pgn_moves(pgn: str) -> List[str]:
@@ -1874,23 +1655,6 @@ def run_ci_match(
                 else:
                     return f"Elo: {int(elo_diff)}"
         
-        # Helper to sync chess.Board to visualizer board
-        def sync_board_to_visualizer(chess_board: chess.Board, visualizer: ChessBoardVisualizer):
-            """Sync python-chess board state to our visualizer."""
-            piece_map = chess_board.piece_map()
-            # Clear visualizer board
-            for r in range(8):
-                for f in range(8):
-                    visualizer.board[r][f] = ' '
-            # Place pieces
-            for square, piece in piece_map.items():
-                rank = 7 - chess.square_rank(square)  # Convert to our coordinate system
-                file = chess.square_file(square)
-                visualizer.board[rank][file] = piece.symbol()
-        
-        # Track game state using python-chess
-        game_board = chess.Board()  # Proper chess board with full rules
-        
         # Read stdout line by line
         if process.stdout is not None:
             for line in process.stdout:
@@ -1900,8 +1664,7 @@ def run_ci_match(
                 # Detect game start
                 if "Started game" in line_stripped:
                     current_game += 1
-                    visualizer.reset()
-                    game_board.reset()  # Reset python-chess board for new game
+                    visualizer.reset()  # Reset uses python-chess internally
                     
                     # Parse players from line like "Started game 1 of 20 (Engine1 vs Engine2)"
                     match = re.search(r'\((.+?) vs (.+?)\)', line_stripped)
@@ -1925,32 +1688,19 @@ def run_ci_match(
                     moves_str = pos_match.group(1).strip()
                     new_uci_moves = moves_str.split()
                     
-                    # Check if we have new moves compared to what's on our board
-                    current_move_count = len(game_board.move_stack)
+                    # Check if we have new moves compared to what's on visualizer's board
+                    current_move_count = len(visualizer.chess_board.move_stack)
                     if len(new_uci_moves) > current_move_count:
-                        # Apply new moves using python-chess
+                        # Apply new moves using visualizer's apply_move (uses python-chess)
                         last_san = ""
                         for i in range(current_move_count, len(new_uci_moves)):
                             uci_move = new_uci_moves[i]
-                            try:
-                                move = chess.Move.from_uci(uci_move)
-                                # Get SAN before pushing (proper notation with +, #, disambiguation)
-                                last_san = game_board.san(move)
-                                game_board.push(move)
-                                
-                                # Update highlight squares
-                                from_sq = move.from_square
-                                to_sq = move.to_square
-                                visualizer.last_move_from = (7 - chess.square_rank(from_sq), chess.square_file(from_sq))
-                                visualizer.last_move_to = (7 - chess.square_rank(to_sq), chess.square_file(to_sq))
-                            except Exception:
-                                pass  # Invalid move, skip
-                        
-                        # Sync board state to visualizer
-                        sync_board_to_visualizer(game_board, visualizer)
+                            # Get SAN before applying (proper notation with +, #, disambiguation)
+                            last_san = visualizer.get_san(uci_move)
+                            visualizer.apply_move(uci_move)
                         
                         # Create move display with proper SAN notation
-                        move_count = len(game_board.move_stack)
+                        move_count = visualizer.current_move
                         move_num = (move_count + 1) // 2
                         is_white_last = (move_count % 2 == 1)
                         
