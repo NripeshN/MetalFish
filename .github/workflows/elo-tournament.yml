@@ -200,10 +200,12 @@ jobs:
           echo "Available opening books:"
           ls -la reference/books/*.pgn.zip reference/books/*.epd.zip 2>/dev/null | head -20 || true
 
-          # The 8moves_v3.pgn.zip is the recommended book for CCRL-style testing
-          # (16 plies depth, 34700 positions)
-          if [ -f "reference/books/8moves_v3.pgn.zip" ]; then
-            echo "Opening book 8moves_v3.pgn.zip found (34700 positions, 16 plies)"
+          # Extract the opening book (cutechess-cli needs uncompressed file)
+          cd reference/books
+          if [ -f "8moves_v3.pgn.zip" ]; then
+            unzip -o 8moves_v3.pgn.zip
+            echo "Opening book extracted: 8moves_v3.pgn (34700 positions, 16 plies)"
+            ls -la 8moves_v3.pgn
           else
             echo "Warning: Opening book not found"
           fi
@@ -376,10 +378,10 @@ jobs:
             tools/metalfish_mcts_wrapper.sh \
             2>/dev/null || true
 
-          # Add opening book (8moves_v3.pgn.zip - 16 plies, CCRL-style)
-          if [ -f "reference/books/8moves_v3.pgn.zip" ]; then
-            tar -rvf build-artifacts.tar reference/books/8moves_v3.pgn.zip
-            echo "Added opening book: 8moves_v3.pgn.zip"
+          # Add opening book (8moves_v3.pgn - 16 plies, CCRL-style)
+          if [ -f "reference/books/8moves_v3.pgn" ]; then
+            tar -rvf build-artifacts.tar reference/books/8moves_v3.pgn
+            echo "Added opening book: 8moves_v3.pgn"
           fi
 
           # Add Patricia if it exists

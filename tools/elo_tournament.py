@@ -97,7 +97,7 @@ DEFAULT_ENGINES_CONFIG = {
         }
     },
     "opening_book": {
-        "file": "reference/books/8moves_v3.pgn.zip",
+        "file": "reference/books/8moves_v3.pgn",
         "format": "pgn",
         "description": "8-move openings (16 plies) - CCRL-style balanced openings",
         "total_positions": 34700,
