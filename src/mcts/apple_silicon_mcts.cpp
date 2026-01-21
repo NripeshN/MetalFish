@@ -456,6 +456,13 @@ void AppleSiliconMCTSEvaluator::evaluate_batch_async(
   int32_t* psqt_out = const_cast<int32_t*>(batch.psqt_scores());
   int32_t* pos_out = const_cast<int32_t*>(batch.positional_scores());
   
+  if (!psqt_out || !pos_out) {
+    if (completion_handler) {
+      completion_handler();
+    }
+    return;
+  }
+  
   for (int i = 0; i < batch.size(); ++i) {
     psqt_out[i] = gpu_batch.psqt_scores.size() > static_cast<size_t>(i) 
                       ? gpu_batch.psqt_scores[i] : 0;
