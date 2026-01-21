@@ -694,7 +694,9 @@ done | "$ENGINE"
         try:
             with open(pgn_file.name, "r") as f:
                 pgn_content = f.read()
-        except:
+        except (OSError, IOError):
+            # If PGN file cannot be read, continue with empty content
+            # The tournament will parse what it can from cutechess output
             pass
 
         # Parse individual games from PGN
