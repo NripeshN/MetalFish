@@ -1568,14 +1568,20 @@ def run_ci_match(
         print(f"  Opening Book: {opening_book.name}")
     print(f"  Command: {' '.join(cmd)}")
 
-    # Initialize visualizer
-    visualizer = ChessBoardVisualizer()
-    visualizer.white_player = engine1_name
-    visualizer.black_player = engine2_name
+    # Detect CI environment - disable fancy visualization in CI
+    is_ci = os.environ.get('CI', '').lower() == 'true' or os.environ.get('GITHUB_ACTIONS', '').lower() == 'true'
+    
+    # Initialize visualizer (only used if not in CI)
+    visualizer = ChessBoardVisualizer() if not is_ci else None
+    if visualizer:
+        visualizer.white_player = engine1_name
+        visualizer.black_player = engine2_name
     
     # Track score
     wins1, wins2, draws = 0, 0, 0
     current_game = 0
+    current_white_player = engine1_name  # Track current game's white player
+    current_black_player = engine2_name  # Track current game's black player
     
     try:
         # Use Popen for real-time output
@@ -1613,7 +1619,7 @@ def run_ci_match(
                     # Extract moves from this game's moves string
                     moves = parse_pgn_moves(game_moves)
                     
-                    if moves:
+                    if moves and visualizer:
                         # Reset and replay all moves
                         visualizer.reset()
                         is_white = True
@@ -1647,27 +1653,34 @@ def run_ci_match(
                 # Detect game start
                 if "Started game" in line_stripped:
                     current_game += 1
-                    visualizer.reset()  # Reset uses python-chess internally
+                    if visualizer:
+                        visualizer.reset()  # Reset uses python-chess internally
                     
                     # Parse players from line like "Started game 1 of 20 (Engine1 vs Engine2)"
                     match = re.search(r'\((.+?) vs (.+?)\)', line_stripped)
                     if match:
-                        visualizer.white_player = match.group(1)
-                        visualizer.black_player = match.group(2)
+                        current_white_player = match.group(1)
+                        current_black_player = match.group(2)
+                        if visualizer:
+                            visualizer.white_player = current_white_player
+                            visualizer.black_player = current_black_player
                     
                     # Clear previous board if displayed
-                    if board_displayed:
+                    if board_displayed and visualizer:
                         visualizer.clear_board_area()
                         board_displayed = False
                     
-                    # Show initial board
-                    print(visualizer.render(f"Game {current_game}/{games} - Starting..."))
-                    board_displayed = True
+                    # Show initial board or CI message
+                    if visualizer:
+                        print(visualizer.render(f"Game {current_game}/{games} - Starting..."))
+                        board_displayed = True
+                    else:
+                        print(f"  Started game {current_game} of {games}")
                 
                 # Parse position command to get all moves played
                 # Format: ">Engine(0): position startpos moves e2e4 e7e5 ..."
                 pos_match = re.search(r'>[^:]+: position startpos moves (.+)', line_stripped)
-                if pos_match and board_displayed:
+                if pos_match and visualizer and board_displayed:
                     moves_str = pos_match.group(1).strip()
                     new_uci_moves = moves_str.split()
                     
@@ -1704,20 +1717,20 @@ def run_ci_match(
                 # Detect game end
                 if "Finished game" in line_stripped:
                     # Clear the board for final position from PGN
-                    if board_displayed:
+                    if board_displayed and visualizer:
                         visualizer.clear_board_area()
                         board_displayed = False
                     
                     # Parse result
                     if "1-0" in line_stripped:
                         result = "1-0"
-                        if visualizer.white_player == engine1_name:
+                        if current_white_player == engine1_name:
                             wins1 += 1
                         else:
                             wins2 += 1
                     elif "0-1" in line_stripped:
                         result = "0-1"
-                        if visualizer.black_player == engine1_name:
+                        if current_black_player == engine1_name:
                             wins1 += 1
                         else:
                             wins2 += 1
@@ -1731,15 +1744,18 @@ def run_ci_match(
                     if reason_match:
                         reason = reason_match.group(1)
                     
-                    # Show final position from PGN (accurate)
-                    game_pgn, game_moves = show_game_final_position(current_game, result, reason)
-                    board_displayed = True
+                    # Show final position from PGN (accurate) - only if visualizer is available
+                    if visualizer:
+                        game_pgn, game_moves = show_game_final_position(current_game, result, reason)
+                        board_displayed = True
+                    else:
+                        game_pgn, game_moves = "", ""
                     
                     # Print game result
                     total = wins1 + wins2 + draws
                     score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
                     
-                    print(f"  {Colors.CYAN}Game {current_game}:{Colors.RESET} {visualizer.white_player} vs {visualizer.black_player}")
+                    print(f"  {Colors.CYAN}Game {current_game}:{Colors.RESET} {current_white_player} vs {current_black_player}")
                     print(f"  {Colors.BOLD}Result: {result}{Colors.RESET}", end="")
                     if reason:
                         print(f" {Colors.DIM}({reason}){Colors.RESET}")
@@ -1751,7 +1767,7 @@ def run_ci_match(
                     if game_pgn:
                         formatted_output = _format_ci_game_output(
                             current_game, games,
-                            visualizer.white_player, visualizer.black_player,
+                            current_white_player, current_black_player,
                             result, reason, game_pgn, game_moves
                         )
                         print(formatted_output)
