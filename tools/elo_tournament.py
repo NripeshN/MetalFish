@@ -172,11 +172,10 @@ class ChessBoardVisualizer:
     Uses python-chess library for all move handling and board state management.
     """
     
-    # Unicode chess pieces
-    # WHITE: Outlined pieces (♔♕♖♗♘♙) - appear hollow/white in most terminals
-    # BLACK: Filled pieces (♚♛♜♝♞♟) - appear solid/black
+    # Unicode chess pieces - using filled/solid pieces for both colors
+    # Differentiated by text color (white pieces = cream, black pieces = dark)
     WHITE_PIECES = {
-        'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
+        'K': '♚', 'Q': '♛', 'R': '♜', 'B': '♝', 'N': '♞', 'P': '♟',
     }
     BLACK_PIECES = {
         'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟',
