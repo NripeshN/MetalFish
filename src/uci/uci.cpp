@@ -155,6 +155,8 @@ void UCIEngine::loop() {
       mcts_mt_go(is); // Pure GPU MCTS
     else if (token == "mctsbench")
       mcts_batch_benchmark(is);
+    else if (token == "nnuebench")
+      nnue_benchmark(is);  // CPU vs GPU NNUE comparison
     else if (token == "compiler")
       sync_cout << compiler_info() << sync_endl;
     else if (token == "export_net") {
@@ -1262,6 +1264,25 @@ void UCIEngine::gpu_benchmark() {
 // Parallel Hybrid Search Command (MCTS + AB running simultaneously)
 // Optimized for Apple Silicon with unified memory
 // ============================================================================
+
+// Static persistent search object to avoid repeated construction/destruction
+// which can cause crashes due to GPU resource cleanup issues
+static std::unique_ptr<MCTS::ParallelHybridSearch> g_parallel_hybrid_search;
+static GPU::GPUNNUEManager *g_hybrid_gpu_manager = nullptr;
+
+// Cleanup function to be called before GPU shutdown
+void cleanup_parallel_hybrid_search() {
+  if (g_parallel_hybrid_search) {
+    g_parallel_hybrid_search->stop();
+    g_parallel_hybrid_search->wait();
+    if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
+      GPU::gpu().synchronize();
+    }
+    g_parallel_hybrid_search.reset();
+    g_hybrid_gpu_manager = nullptr;
+  }
+}
+
 void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   sync_cout << "info string Starting Parallel Hybrid Search (MCTS + AB)..."
             << sync_endl;
@@ -1309,17 +1330,37 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   config.use_gpu_resident_batches = true; // Zero-copy unified memory
   config.use_simd_kernels = true;         // SIMD-optimized Metal kernels
 
-  // Create parallel hybrid search
-  auto search =
-      MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
-
-  if (!search) {
-    sync_cout << "info string ERROR: Failed to create parallel hybrid search"
-              << sync_endl;
-    return;
+  // Reuse or create the persistent search object
+  // This avoids crashes from repeated construction/destruction of GPU resources
+  bool need_reinit = !g_parallel_hybrid_search || 
+                     g_hybrid_gpu_manager != gpu_manager;
+  
+  if (need_reinit) {
+    // Clean up old search if it exists
+    if (g_parallel_hybrid_search) {
+      g_parallel_hybrid_search->stop();
+      g_parallel_hybrid_search->wait();
+      if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
+        GPU::gpu().synchronize();
+      }
+      g_parallel_hybrid_search.reset();
+    }
+    
+    // Create new search
+    g_parallel_hybrid_search =
+        MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
+    g_hybrid_gpu_manager = gpu_manager;
+    
+    if (!g_parallel_hybrid_search) {
+      sync_cout << "info string ERROR: Failed to create parallel hybrid search"
+                << sync_endl;
+      return;
+    }
+    sync_cout << "info string Parallel hybrid search initialized" << sync_endl;
+  } else {
+    // Update config on existing search
+    g_parallel_hybrid_search->set_config(config);
   }
-
-  sync_cout << "info string Parallel hybrid search initialized" << sync_endl;
 
   // Get current position from engine
   Position pos;
@@ -1340,13 +1381,13 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   };
 
   // Start search
-  search->start_search(pos, limits, best_move_cb, info_cb);
+  g_parallel_hybrid_search->start_search(pos, limits, best_move_cb, info_cb);
 
   // Wait for completion
-  search->wait();
+  g_parallel_hybrid_search->wait();
 
   // Print final statistics
-  const auto &stats = search->stats();
+  const auto &stats = g_parallel_hybrid_search->stats();
   sync_cout << "info string Parallel stats: MCTS=" << stats.mcts_nodes
             << " AB=" << stats.ab_nodes
             << " agreements=" << stats.move_agreements
@@ -1359,19 +1400,8 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
             << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms
             << "ms Total=" << stats.total_time_ms << "ms" << sync_endl;
 
-  // Explicitly synchronize GPU before destroying the search object
-  // This ensures all async operations complete before destruction
-  if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
-    GPU::gpu().synchronize();
-  }
-
-  // Explicitly destroy the search object
-  search.reset();
-
-  // Final synchronization after destruction
-  if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
-    GPU::gpu().synchronize();
-  }
+  // Note: We don't destroy the search object anymore - it's persistent
+  // This avoids crashes from GPU resource cleanup issues
 }
 
 // ============================================================================
@@ -1678,6 +1708,250 @@ void UCIEngine::mcts_batch_benchmark(std::istringstream &is) {
 
   sync_cout << "" << sync_endl;
   sync_cout << "info string Benchmark complete!" << sync_endl;
+}
+
+// ============================================================================
+// NNUE Benchmark - Compare CPU vs GPU NNUE Performance
+// ============================================================================
+void UCIEngine::nnue_benchmark(std::istream &is) {
+  sync_cout << "info string =================================================="
+            << sync_endl;
+  sync_cout << "info string      CPU vs GPU NNUE Benchmark" << sync_endl;
+  sync_cout << "info string =================================================="
+            << sync_endl;
+
+  // Parse options
+  std::string token;
+  int num_positions = 1000;
+  int batch_size = 64;
+
+  while (is >> token) {
+    if (token == "positions")
+      is >> num_positions;
+    else if (token == "batch")
+      is >> batch_size;
+  }
+
+  // Test positions (diverse positions from different game phases)
+  std::vector<std::string> test_fens = {
+      // Starting position
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      // Italian Game
+      "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
+      // Sicilian Defense
+      "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2",
+      // Queen's Gambit
+      "rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR b KQkq c3 0 2",
+      // Ruy Lopez
+      "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+      // King's Indian
+      "rnbqkb1r/pppppp1p/5np1/8/2PP4/8/PP2PPPP/RNBQKBNR w KQkq - 0 3",
+      // Complex middlegame
+      "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 9",
+      // Endgame
+      "8/5pk1/6p1/8/8/6P1/5PK1/8 w - - 0 1",
+      // Complex position
+      "r2qr1k1/pp1nbppp/2p2n2/3p4/3P4/2NBPN2/PP3PPP/R1BQR1K1 w - - 0 11",
+      // Tactical position
+      "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 0 5"};
+
+  sync_cout << "info string Test configuration:" << sync_endl;
+  sync_cout << "info string   Positions to evaluate: " << num_positions
+            << sync_endl;
+  sync_cout << "info string   GPU batch size: " << batch_size << sync_endl;
+  sync_cout << "info string   Test FENs: " << test_fens.size() << sync_endl;
+
+  // Check GPU availability
+  bool gpu_available = GPU::gpu_nnue_manager_available();
+  if (gpu_available) {
+    sync_cout << "info string   GPU NNUE: Available ("
+              << GPU::gpu().device_name() << ")" << sync_endl;
+    sync_cout << "info string   Unified Memory: "
+              << (GPU::gpu().has_unified_memory() ? "Yes" : "No") << sync_endl;
+  } else {
+    sync_cout << "info string   GPU NNUE: Not available" << sync_endl;
+  }
+  sync_cout << "" << sync_endl;
+
+  // Create positions using pointers to avoid copy issues
+  std::vector<std::unique_ptr<Position>> positions;
+  std::vector<std::unique_ptr<StateInfo>> states;
+  positions.reserve(num_positions);
+  states.reserve(num_positions);
+
+  for (int i = 0; i < num_positions; i++) {
+    states.push_back(std::make_unique<StateInfo>());
+    positions.push_back(std::make_unique<Position>());
+    positions.back()->set(test_fens[i % test_fens.size()], false, states.back().get());
+  }
+
+  // =========================================================================
+  // CPU NNUE Benchmark (using Stockfish's evaluation via engine search)
+  // We'll use simple_eval as a baseline for CPU since we can't access networks directly
+  // =========================================================================
+  sync_cout << "info string [CPU Simple Eval Benchmark (baseline)]" << sync_endl;
+
+  // Warm up CPU
+  for (int i = 0; i < 100 && i < num_positions; i++) {
+    int v = Eval::simple_eval(*positions[i]);
+    (void)v;
+  }
+
+  // CPU simple eval benchmark
+  std::vector<int32_t> cpu_simple_results(num_positions);
+  auto cpu_simple_start = std::chrono::high_resolution_clock::now();
+
+  for (int i = 0; i < num_positions; i++) {
+    cpu_simple_results[i] = Eval::simple_eval(*positions[i]);
+  }
+
+  auto cpu_simple_end = std::chrono::high_resolution_clock::now();
+  double cpu_simple_time_ms =
+      std::chrono::duration<double, std::milli>(cpu_simple_end - cpu_simple_start).count();
+  double cpu_simple_pos_per_sec = (num_positions * 1000.0) / cpu_simple_time_ms;
+
+  sync_cout << "info string   Time: " << std::fixed << std::setprecision(2)
+            << cpu_simple_time_ms << " ms" << sync_endl;
+  sync_cout << "info string   Positions/sec: " << std::fixed
+            << std::setprecision(0) << cpu_simple_pos_per_sec << sync_endl;
+  sync_cout << "" << sync_endl;
+
+  // =========================================================================
+  // GPU NNUE Benchmark (if available)
+  // =========================================================================
+  if (gpu_available) {
+    sync_cout << "info string [GPU NNUE Benchmark]" << sync_endl;
+
+    auto &gpu_manager = GPU::gpu_nnue_manager();
+    gpu_manager.reset_stats();
+
+    // Warm up GPU
+    {
+      GPU::GPUEvalBatch warmup_batch;
+      warmup_batch.reserve(std::min(batch_size, 100));
+      for (int i = 0; i < std::min(batch_size, 100); i++) {
+        warmup_batch.add_position(*positions[i]);
+      }
+      gpu_manager.evaluate_batch(warmup_batch, true);
+    }
+
+    // GPU benchmark - single position evaluation
+    sync_cout << "info string   [Single Position Mode]" << sync_endl;
+    std::vector<int32_t> gpu_single_results(num_positions);
+    auto gpu_single_start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < num_positions; i++) {
+      auto [psqt, pos_score] = gpu_manager.evaluate_single(*positions[i], true);
+      gpu_single_results[i] = psqt + pos_score;
+    }
+
+    auto gpu_single_end = std::chrono::high_resolution_clock::now();
+    double gpu_single_time_ms =
+        std::chrono::duration<double, std::milli>(gpu_single_end - gpu_single_start).count();
+    double gpu_single_pos_per_sec = (num_positions * 1000.0) / gpu_single_time_ms;
+
+    sync_cout << "info string     Time: " << std::fixed << std::setprecision(2)
+              << gpu_single_time_ms << " ms" << sync_endl;
+    sync_cout << "info string     Positions/sec: " << std::fixed
+              << std::setprecision(0) << gpu_single_pos_per_sec << sync_endl;
+
+    // GPU benchmark - batched evaluation
+    gpu_manager.reset_stats();
+    sync_cout << "info string   [Batched Mode (batch=" << batch_size << ")]" << sync_endl;
+    std::vector<int32_t> gpu_batch_results(num_positions);
+    auto gpu_batch_start = std::chrono::high_resolution_clock::now();
+
+    for (int start = 0; start < num_positions; start += batch_size) {
+      int end = std::min(start + batch_size, num_positions);
+      int count = end - start;
+
+      GPU::GPUEvalBatch batch;
+      batch.reserve(count);
+
+      for (int i = start; i < end; i++) {
+        batch.add_position(*positions[i]);
+      }
+
+      gpu_manager.evaluate_batch(batch, true);
+
+      // Store results
+      for (int i = 0; i < count; i++) {
+        int32_t psqt =
+            batch.psqt_scores.size() > static_cast<size_t>(i) ? batch.psqt_scores[i] : 0;
+        int32_t pos = batch.positional_scores.size() > static_cast<size_t>(i)
+                          ? batch.positional_scores[i]
+                          : 0;
+        gpu_batch_results[start + i] = psqt + pos;
+      }
+    }
+
+    auto gpu_batch_end = std::chrono::high_resolution_clock::now();
+    double gpu_batch_time_ms =
+        std::chrono::duration<double, std::milli>(gpu_batch_end - gpu_batch_start).count();
+    double gpu_batch_pos_per_sec = (num_positions * 1000.0) / gpu_batch_time_ms;
+
+    sync_cout << "info string     Time: " << std::fixed << std::setprecision(2)
+              << gpu_batch_time_ms << " ms" << sync_endl;
+    sync_cout << "info string     Positions/sec: " << std::fixed
+              << std::setprecision(0) << gpu_batch_pos_per_sec << sync_endl;
+    sync_cout << "info string     GPU evaluations: " << gpu_manager.gpu_evaluations()
+              << sync_endl;
+    sync_cout << "info string     Batches: " << gpu_manager.total_batches()
+              << sync_endl;
+    sync_cout << "" << sync_endl;
+
+    // =========================================================================
+    // Performance Comparison
+    // =========================================================================
+    sync_cout << "info string [Performance Summary]" << sync_endl;
+    sync_cout << "info string   CPU Simple Eval: " << std::fixed << std::setprecision(0)
+              << cpu_simple_pos_per_sec << " pos/sec" << sync_endl;
+    sync_cout << "info string   GPU Single:      " << std::fixed << std::setprecision(0)
+              << gpu_single_pos_per_sec << " pos/sec" << sync_endl;
+    sync_cout << "info string   GPU Batched:     " << std::fixed << std::setprecision(0)
+              << gpu_batch_pos_per_sec << " pos/sec" << sync_endl;
+
+    double batch_vs_single = gpu_batch_pos_per_sec / gpu_single_pos_per_sec;
+    sync_cout << "info string   Batch speedup over single: " << std::fixed
+              << std::setprecision(2) << batch_vs_single << "x" << sync_endl;
+    sync_cout << "" << sync_endl;
+
+    // Verify consistency between single and batch modes
+    sync_cout << "info string [Consistency Check (Single vs Batch)]" << sync_endl;
+    int matches = 0;
+    for (int i = 0; i < num_positions; i++) {
+      if (gpu_single_results[i] == gpu_batch_results[i]) {
+        matches++;
+      }
+    }
+    double match_pct = (matches * 100.0) / num_positions;
+    sync_cout << "info string   Exact matches: " << matches << "/" << num_positions
+              << " (" << std::fixed << std::setprecision(1) << match_pct << "%)"
+              << sync_endl;
+
+    // Show sample results
+    sync_cout << "" << sync_endl;
+    sync_cout << "info string [Sample GPU NNUE Results (first 5 positions)]" << sync_endl;
+    for (int i = 0; i < std::min(5, num_positions); i++) {
+      int32_t psqt = 0, pos = 0;
+      auto [p, s] = gpu_manager.evaluate_single(*positions[i], true);
+      psqt = p;
+      pos = s;
+      sync_cout << "info string   Pos " << (i + 1) << ": PSQT=" << psqt
+                << " Positional=" << pos << " Total=" << (psqt + pos)
+                << " (Simple=" << cpu_simple_results[i] << ")" << sync_endl;
+    }
+  } else {
+    sync_cout << "info string GPU NNUE not available - skipping GPU benchmark"
+              << sync_endl;
+  }
+
+  sync_cout << "" << sync_endl;
+  sync_cout << "info string =================================================="
+            << sync_endl;
+  sync_cout << "info string NNUE Benchmark Complete!" << sync_endl;
+  sync_cout << "info string =================================================="
+            << sync_endl;
 }
 
 } // namespace MetalFish

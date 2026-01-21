@@ -532,9 +532,9 @@ void HybridSearch::start_search(const MCTSPositionHistory &history,
 void HybridSearch::stop() { stop_flag_.store(true, std::memory_order_release); }
 
 void HybridSearch::wait() {
-  for (auto &thread : search_threads_) {
-    if (thread.joinable()) {
-      thread.join();
+  for (size_t i = 0; i < search_threads_.size(); ++i) {
+    if (search_threads_[i].joinable()) {
+      search_threads_[i].join();
     }
   }
   search_threads_.clear();
@@ -546,7 +546,7 @@ void HybridSearch::wait() {
 
   running_.store(false, std::memory_order_release);
 
-  // Report best move
+  // Report best move (only if callback is still valid)
   if (best_move_callback_) {
     MCTSMove best = select_best_move();
     std::vector<MCTSMove> pv = get_pv();

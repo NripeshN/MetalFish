@@ -52,6 +52,7 @@ private:
   void go(std::istringstream &is);
   void bench(std::istream &args);
   void benchmark(std::istream &args);
+  void nnue_benchmark(std::istream &args);  // CPU vs GPU NNUE comparison
   void position(std::istringstream &is);
   void setoption(std::istringstream &is);
   std::uint64_t perft(const Search::LimitsType &);
@@ -70,6 +71,10 @@ private:
 
   void init_search_update_listeners();
 };
+
+// Cleanup function for static parallel hybrid search object
+// Must be called before GPU shutdown to prevent crashes
+void cleanup_parallel_hybrid_search();
 
 } // namespace MetalFish
 

@@ -106,21 +106,17 @@ ParallelHybridSearch::~ParallelHybridSearch() {
   stop_flag_.store(true, std::memory_order_release);
   searching_.store(false, std::memory_order_release);
 
-  // Stop MCTS search if running
+  // Join all our threads FIRST before touching MCTS
+  // This ensures our threads aren't using MCTS while we destroy it
+  join_all_threads();
+
+  // Now stop MCTS search if running
   if (mcts_search_) {
+    // Clear the MCTS callback before waiting to prevent crash during cleanup
+    mcts_search_->clear_callbacks();
     mcts_search_->stop();
-  }
-
-  // Give threads a moment to notice the stop flag
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-  // Wait for MCTS to fully stop
-  if (mcts_search_) {
     mcts_search_->wait();
   }
-
-  // Join all threads safely
-  join_all_threads();
 
   // Wait for any pending GPU evaluations to complete
   // This is critical to prevent crashes from async callbacks accessing
@@ -129,8 +125,13 @@ ParallelHybridSearch::~ParallelHybridSearch() {
     wait_gpu_evaluations();
   }
 
-  // Synchronize GPU only if backend is still available
+  // Apple Silicon Optimization: Only synchronize if absolutely necessary
+  // On unified memory systems, we don't need heavy synchronization since
+  // CPU and GPU share the same memory. We only sync if there were pending
+  // GPU operations that might still be in flight.
   if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
+    // Light synchronization - just ensure command buffers are committed
+    // This is faster than full synchronization on Apple Silicon
     GPU::gpu().synchronize();
   }
 

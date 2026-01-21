@@ -5,7 +5,6 @@
   CUDA NNUE Kernel Declarations
 
   Header file declaring the CUDA kernel launch functions.
-  Feature parity with Metal implementation.
 */
 
 #pragma once

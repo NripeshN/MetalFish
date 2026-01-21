@@ -35,6 +35,9 @@ static void cleanup_gpu_resources() {
     return; // Already cleaned up
   }
 
+  // 0. Cleanup parallel hybrid search first (it holds GPU resources)
+  cleanup_parallel_hybrid_search();
+
   // 1. Shutdown MCTS components first (they use GPU)
   MCTS::shutdown_hybrid_bridge();
   MCTS::shutdown_mcts_batch_evaluator();

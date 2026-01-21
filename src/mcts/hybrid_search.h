@@ -481,6 +481,7 @@ public:
 
   void stop();
   void wait();
+  void clear_callbacks() { best_move_callback_ = nullptr; info_callback_ = nullptr; }
 
   MCTSMove get_best_move() const;
   std::vector<MCTSMove> get_pv() const;
