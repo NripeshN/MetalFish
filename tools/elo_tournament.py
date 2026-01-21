@@ -478,7 +478,7 @@ class ChessBoardVisualizer:
         
         return f"{piece_color}{char} "
     
-    def render(self, last_move: str = "", show_info: bool = True) -> str:
+    def render(self, last_move: str = "", show_info: bool = True, live_score: str = "") -> str:
         """Render the board as a string with rich formatting."""
         lines = []
         
@@ -494,15 +494,26 @@ class ChessBoardVisualizer:
         right_pad = padding - left_pad
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{' ' * left_pad}{Colors.BOLD}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}{' ' * right_pad}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
         
-        # Move info line
+        # Move info line with live score on the right
         if last_move:
             move_info = last_move  # Use the provided move info directly
         else:
             move_num = (self.current_move + 1) // 2
             side = "White" if self.current_move % 2 == 0 else "Black"
             move_info = f"{side} to move"
-        info_padding = inner_width - len(move_info) - 2
-        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET} {Colors.DIM}{move_info}{Colors.RESET}{' ' * info_padding} {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
+        
+        # Add live score to the right if provided
+        if live_score:
+            available_space = inner_width - len(move_info) - len(live_score) - 4
+            if available_space > 0:
+                info_line = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * available_space}{Colors.YELLOW}{live_score}{Colors.RESET} "
+            else:
+                info_line = f" {Colors.DIM}{move_info}{Colors.RESET} "
+        else:
+            info_padding = inner_width - len(move_info) - 2
+            info_line = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * info_padding} "
+        
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{info_line}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
         
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}╚{'═' * inner_width}╝{Colors.RESET}")
         lines.append("")
@@ -1880,9 +1891,90 @@ def run_ci_match(
             
             return (from_rank, from_file), (to_rank, to_file)
         
+        # Helper to convert UCI move to SAN (Standard Algebraic Notation)
+        def uci_to_san(uci_move: str, board_before: list, is_white: bool) -> str:
+            """Convert UCI move to SAN notation."""
+            if len(uci_move) < 4:
+                return uci_move
+            
+            from_file = ord(uci_move[0]) - ord('a')
+            from_rank = 8 - int(uci_move[1])
+            to_file = ord(uci_move[2]) - ord('a')
+            to_rank = 8 - int(uci_move[3])
+            promo = uci_move[4:] if len(uci_move) > 4 else ""
+            
+            piece = board_before[from_rank][from_file]
+            target = board_before[to_rank][to_file]
+            is_capture = target != ' '
+            
+            to_sq = uci_move[2:4]
+            
+            # Castling
+            if piece.upper() == 'K' and abs(from_file - to_file) == 2:
+                return "O-O" if to_file > from_file else "O-O-O"
+            
+            # Pawn moves
+            if piece.upper() == 'P':
+                # En passant capture
+                if from_file != to_file and target == ' ':
+                    is_capture = True
+                
+                if is_capture:
+                    san = f"{chr(ord('a') + from_file)}x{to_sq}"
+                else:
+                    san = to_sq
+                
+                if promo:
+                    san += f"={promo.upper()}"
+                return san
+            
+            # Piece moves
+            piece_letter = piece.upper()
+            
+            # Check for disambiguation (multiple pieces of same type can reach target)
+            # For simplicity, always include file disambiguation for knights, rooks
+            if piece_letter in ['N', 'R', 'Q', 'B']:
+                from_file_char = chr(ord('a') + from_file)
+                if is_capture:
+                    san = f"{piece_letter}{from_file_char}x{to_sq}"
+                else:
+                    san = f"{piece_letter}{from_file_char}{to_sq}"
+            else:
+                # King
+                if is_capture:
+                    san = f"{piece_letter}x{to_sq}"
+                else:
+                    san = f"{piece_letter}{to_sq}"
+            
+            return san
+        
+        # Helper to calculate live Elo difference from score
+        def calculate_elo_diff(wins: int, losses: int, draws: int) -> str:
+            """Calculate estimated Elo difference from score."""
+            total = wins + losses + draws
+            if total == 0:
+                return "Elo: ±0"
+            
+            score = wins + draws * 0.5
+            win_rate = score / total
+            
+            # Elo difference formula: Elo_diff = 400 * log10(win_rate / (1 - win_rate))
+            if win_rate <= 0:
+                return "Elo: -∞"
+            elif win_rate >= 1:
+                return "Elo: +∞"
+            else:
+                import math
+                elo_diff = 400 * math.log10(win_rate / (1 - win_rate))
+                if elo_diff >= 0:
+                    return f"Elo: +{int(elo_diff)}"
+                else:
+                    return f"Elo: {int(elo_diff)}"
+        
         # Track game state
         current_uci_moves = []  # All UCI moves played so far
         last_position_moves = []  # Last known position
+        board_snapshot = None  # Board state before last move (for SAN conversion)
         
         # Read stdout line by line
         if process.stdout is not None:
@@ -1922,9 +2014,13 @@ def run_ci_match(
                     # Check if we have new moves
                     if len(new_moves) > len(current_uci_moves):
                         # Apply only the new moves
+                        last_san = ""
                         for i in range(len(current_uci_moves), len(new_moves)):
                             uci_move = new_moves[i]
                             is_white = (i % 2 == 0)
+                            
+                            # Convert to SAN before applying move
+                            last_san = uci_to_san(uci_move, visualizer.board, is_white)
                             
                             from_pos, to_pos = apply_uci_move(uci_move, visualizer.board, is_white)
                             if from_pos and to_pos:
@@ -1933,31 +2029,24 @@ def run_ci_match(
                         
                         current_uci_moves = new_moves
                         
-                        # Create move display
+                        # Create move display with SAN notation
                         move_count = len(current_uci_moves)
-                        last_move = current_uci_moves[-1] if current_uci_moves else ""
                         move_num = (move_count + 1) // 2
                         is_white_last = (move_count % 2 == 1)
                         
-                        # Format move more nicely
-                        if len(last_move) >= 4:
-                            from_sq = last_move[:2]
-                            to_sq = last_move[2:4]
-                            promo = last_move[4:] if len(last_move) > 4 else ""
-                            move_str = f"{from_sq}-{to_sq}"
-                            if promo:
-                                move_str += f"={promo.upper()}"
-                        else:
-                            move_str = last_move
-                        
                         if is_white_last:
-                            move_display = f"Move {move_count}: {move_num}. {move_str}"
+                            move_display = f"Move {move_count}: {move_num}. {last_san}"
                         else:
-                            move_display = f"Move {move_count}: {move_num}... {move_str}"
+                            move_display = f"Move {move_count}: {move_num}... {last_san}"
+                        
+                        # Calculate live score for engine1
+                        live_score = f"{wins1}-{draws}-{wins2}"
+                        elo_str = calculate_elo_diff(wins1, wins2, draws)
+                        live_info = f"[{live_score}] {elo_str}"
                         
                         # Update board display
                         visualizer.clear_board_area()
-                        print(visualizer.render(move_display))
+                        print(visualizer.render(move_display, live_score=live_info))
                         board_displayed = True
                 
                 # Detect game end
