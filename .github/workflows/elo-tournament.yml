@@ -153,9 +153,24 @@ jobs:
           git clone --depth 1 https://github.com/jhonnold/berserk.git reference/berserk
 
           cd reference/berserk/src
-          # Build Berserk with clang for Apple Silicon
-          # Use native build for best performance
-          make build CC=clang ARCH=native || make build CC=clang
+
+          # Try to download network with retries
+          NETWORK_NAME="berserk-9b84c340af7e.nn"
+          NETWORK_URL="https://github.com/jhonnold/berserk/releases/download/net/$NETWORK_NAME"
+
+          for i in 1 2 3; do
+            echo "Attempt $i: Downloading $NETWORK_NAME..."
+            curl -L -o "$NETWORK_NAME" "$NETWORK_URL" && break
+            echo "Download attempt $i failed, retrying..."
+            sleep 5
+          done
+
+          # Build Berserk (skip network download since we did it manually)
+          # The EVALFILE env var tells Berserk where to find the network
+          export EVALFILE="$NETWORK_NAME"
+          make build CC=clang ARCH=native EVALFILE="$NETWORK_NAME" || \
+          make build CC=clang EVALFILE="$NETWORK_NAME" || \
+          echo "Berserk build failed, will skip in tournament"
 
       - name: Clone and Build Leela Chess Zero (lc0)
         continue-on-error: true
@@ -312,8 +327,14 @@ jobs:
           echo ""
           echo "=== Berserk ==="
           if [ -f "reference/berserk/src/berserk" ]; then
-            echo "  ✓ Found at reference/berserk/src/berserk"
-            echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/berserk/src/berserk 2>&1 | head -3 || true
+            echo "  ✓ Binary found at reference/berserk/src/berserk"
+            # Check if network file exists
+            if ls reference/berserk/src/*.nn 1> /dev/null 2>&1; then
+              echo "  ✓ Network file found"
+              echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/berserk/src/berserk 2>&1 | head -3 || true
+            else
+              echo "  ✗ Network file missing - Berserk will not work properly"
+            fi
           else
             echo "  ✗ Not found (optional - will be skipped)"
           fi
@@ -389,9 +410,13 @@ jobs:
             tar -rvf build-artifacts.tar reference/Patricia/engine/patricia
           fi
 
-          # Add Berserk if it exists
+          # Add Berserk if it exists with its network file
           if [ -f "reference/berserk/src/berserk" ]; then
             tar -rvf build-artifacts.tar reference/berserk/src/berserk
+            # Also include the network file
+            if ls reference/berserk/src/*.nn 1> /dev/null 2>&1; then
+              tar -rvf build-artifacts.tar reference/berserk/src/*.nn
+            fi
           fi
 
           # Add lc0 if it exists with network
