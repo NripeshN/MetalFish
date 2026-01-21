@@ -33,17 +33,17 @@ static void cleanup_gpu_resources() {
   // Only cleanup once - prevent double cleanup
   bool expected = false;
   if (!g_cleanup_done.compare_exchange_strong(expected, true)) {
-    return;  // Already cleaned up
+    return; // Already cleaned up
   }
-  
+
   // 1. Shutdown MCTS components first (they use GPU)
   MCTS::shutdown_hybrid_bridge();
   MCTS::shutdown_mcts_batch_evaluator();
   MCTS::shutdown_mcts_tt();
-  
+
   // 2. Shutdown GPU feature extractor
   GPU::shutdown_gpu_feature_extractor();
-  
+
   // 3. Shutdown GPU NNUE manager (this also shuts down the GPU backend)
   GPU::shutdown_gpu_nnue();
 }
@@ -60,12 +60,12 @@ int main(int argc, char *argv[]) {
 
   {
     // Scope the UCIEngine to ensure it's destroyed before GPU cleanup
-  auto uci = std::make_unique<UCIEngine>(argc, argv);
+    auto uci = std::make_unique<UCIEngine>(argc, argv);
 
-  Tune::init(uci->engine_options());
+    Tune::init(uci->engine_options());
 
-  uci->loop();
-    
+    uci->loop();
+
     // Explicitly destroy the UCI engine before GPU cleanup
     uci.reset();
   }

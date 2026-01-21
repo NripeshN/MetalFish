@@ -310,7 +310,8 @@ kernel void gpu_nnue_forward(
     return false;
   }
 
-  std::cout << "[GPU NNUE Eval] Metal kernels compiled successfully" << std::endl;
+  std::cout << "[GPU NNUE Eval] Metal kernels compiled successfully"
+            << std::endl;
 #endif // USE_METAL
 
 #ifdef USE_CUDA

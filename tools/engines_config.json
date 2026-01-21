@@ -1,127 +1,127 @@
 {
-    "engines": {
-        "MetalFish-AB": {
-            "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
-            "expected_elo": null,
-            "options": {
-                "Threads": "1",
-                "Hash": "128",
-                "Ponder": "false"
-            }
-        },
-        "MetalFish-MCTS": {
-            "description": "MetalFish with Pure GPU MCTS",
-            "expected_elo": null,
-            "options": {
-                "Ponder": "false"
-            }
-        },
-        "MetalFish-Hybrid": {
-            "description": "MetalFish with Parallel MCTS+AB hybrid search",
-            "expected_elo": null,
-            "options": {
-                "Ponder": "false"
-            }
-        },
-        "Patricia": {
-            "description": "Aggressive chess engine by Adam Kulju",
-            "expected_elo": 3415,
-            "options": {
-                "Threads": "1",
-                "Hash": "128",
-                "Ponder": "false"
-            },
-            "path": "reference/Patricia/engine/patricia",
-            "anchor": true,
-            "anchor_elo": 3415
-        },
-        "Berserk": {
-            "description": "Strong NNUE engine by Jay Honnold",
-            "expected_elo": 3662,
-            "options": {
-                "Threads": "1",
-                "Hash": "128",
-                "Ponder": "false"
-            },
-            "path": "reference/berserk/src/berserk",
-            "anchor": true,
-            "anchor_elo": 3662
-        },
-        "Lc0": {
-            "description": "Leela Chess Zero - neural network engine",
-            "expected_elo": 3716,
-            "options": {
-                "Threads": "1",
-                "Ponder": "false"
-            },
-            "path": "reference/lc0/build/release/lc0",
-            "network_path": "reference/lc0/build/release/network.pb.gz"
-        }
+  "engines": {
+    "MetalFish-AB": {
+      "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
+      "expected_elo": null,
+      "options": {
+        "Threads": "1",
+        "Hash": "128",
+        "Ponder": "false"
+      }
     },
-    "stockfish": {
-        "path": "reference/stockfish/src/stockfish",
-        "default_levels": [
-            0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            10,
-            12,
-            14,
-            16,
-            17,
-            18,
-            19,
-            20
-        ],
-        "options": {
-            "Threads": "1",
-            "Hash": "128",
-            "Ponder": "false"
-        },
-        "skill_elo_map": {
-            "0": 1725,
-            "1": 1982,
-            "2": 2233,
-            "3": 2474,
-            "4": 2643,
-            "5": 2800,
-            "6": 2947,
-            "7": 3059,
-            "8": 3156,
-            "9": 3237,
-            "10": 3304,
-            "11": 3362,
-            "12": 3412,
-            "13": 3459,
-            "14": 3505,
-            "15": 3551,
-            "16": 3584,
-            "17": 3609,
-            "18": 3644,
-            "19": 3697,
-            "20": 3764
-        }
+    "MetalFish-MCTS": {
+      "description": "MetalFish with Pure GPU MCTS",
+      "expected_elo": null,
+      "options": {
+        "Ponder": "false"
+      }
     },
-    "opening_book": {
-        "file": "reference/books/8moves_v3.pgn",
-        "format": "pgn",
-        "description": "8-move openings (16 plies) - CCRL-style balanced openings",
-        "total_positions": 34700,
-        "depth_plies": 16
+    "MetalFish-Hybrid": {
+      "description": "MetalFish with Parallel MCTS+AB hybrid search",
+      "expected_elo": null,
+      "options": {
+        "Ponder": "false"
+      }
     },
-    "tournament_defaults": {
-        "games_per_pair": 16,
-        "time_control": "600+0.1",
-        "concurrency": 1,
-        "ponder": false,
-        "repeat": true,
-        "recover": true,
-        "notes": "16 games = 8 openings x 2 (color swap). 10 min + 0.1s/move time control."
+    "Patricia": {
+      "description": "Aggressive chess engine by Adam Kulju",
+      "expected_elo": 3415,
+      "options": {
+        "Threads": "1",
+        "Hash": "128",
+        "Ponder": "false"
+      },
+      "path": "reference/Patricia/engine/patricia",
+      "anchor": true,
+      "anchor_elo": 3415
+    },
+    "Berserk": {
+      "description": "Strong NNUE engine by Jay Honnold",
+      "expected_elo": 3662,
+      "options": {
+        "Threads": "1",
+        "Hash": "128",
+        "Ponder": "false"
+      },
+      "path": "reference/berserk/src/berserk",
+      "anchor": true,
+      "anchor_elo": 3662
+    },
+    "Lc0": {
+      "description": "Leela Chess Zero - neural network engine",
+      "expected_elo": 3716,
+      "options": {
+        "Threads": "1",
+        "Ponder": "false"
+      },
+      "path": "reference/lc0/build/release/lc0",
+      "network_path": "reference/lc0/build/release/network.pb.gz"
     }
+  },
+  "stockfish": {
+    "path": "reference/stockfish/src/stockfish",
+    "default_levels": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      10,
+      12,
+      14,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "options": {
+      "Threads": "1",
+      "Hash": "128",
+      "Ponder": "false"
+    },
+    "skill_elo_map": {
+      "0": 1725,
+      "1": 1982,
+      "2": 2233,
+      "3": 2474,
+      "4": 2643,
+      "5": 2800,
+      "6": 2947,
+      "7": 3059,
+      "8": 3156,
+      "9": 3237,
+      "10": 3304,
+      "11": 3362,
+      "12": 3412,
+      "13": 3459,
+      "14": 3505,
+      "15": 3551,
+      "16": 3584,
+      "17": 3609,
+      "18": 3644,
+      "19": 3697,
+      "20": 3764
+    }
+  },
+  "opening_book": {
+    "file": "reference/books/8moves_v3.pgn",
+    "format": "pgn",
+    "description": "8-move openings (16 plies) - CCRL-style balanced openings",
+    "total_positions": 34700,
+    "depth_plies": 16
+  },
+  "tournament_defaults": {
+    "games_per_pair": 16,
+    "time_control": "600+0.1",
+    "concurrency": 1,
+    "ponder": false,
+    "repeat": true,
+    "recover": true,
+    "notes": "16 games = 8 openings x 2 (color swap). 10 min + 0.1s/move time control."
+  }
 }

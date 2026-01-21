@@ -7,7 +7,7 @@
   This implementation incorporates algorithms from Leela Chess Zero (Lc0),
   including PUCT with logarithmic growth, FPU reduction strategy, and
   moves left head (MLH) utility.
-  
+
   Apple Silicon Optimizations:
   - Unified memory zero-copy evaluation batches
   - SIMD-accelerated policy softmax
@@ -18,8 +18,8 @@
 */
 
 #include "thread_safe_mcts.h"
-#include "lc0_mcts_core.h"
 #include "apple_silicon_mcts.h"
+#include "lc0_mcts_core.h"
 
 #include <algorithm>
 #include <chrono>
@@ -44,7 +44,8 @@
 // Cross-platform prefetch macro
 #if defined(_MSC_VER)
 #include <intrin.h>
-#define PREFETCH(addr) _mm_prefetch(reinterpret_cast<const char*>(addr), _MM_HINT_T0)
+#define PREFETCH(addr)                                                         \
+  _mm_prefetch(reinterpret_cast<const char *>(addr), _MM_HINT_T0)
 #elif defined(__GNUC__) || defined(__clang__)
 #define PREFETCH(addr) __builtin_prefetch(addr, 0, 3)
 #else
@@ -499,28 +500,30 @@ void ThreadSafeNode::create_edges(const MoveList<LEGAL> &moves) {
 }
 
 // Lc0-style FinalizeScoreUpdate implementation
-// Updates statistics using running average: Q = (Q * N + V * multivisit) / (N + multivisit)
-// This is the core algorithm from Lc0 node.cc
-void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val, 
-                                          int multivisit) {
+// Updates statistics using running average: Q = (Q * N + V * multivisit) / (N +
+// multivisit) This is the core algorithm from Lc0 node.cc
+void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
+                                         int multivisit) {
   // Get current N before update
   uint32_t old_n = n_.load(std::memory_order_acquire);
   uint32_t new_n = old_n + multivisit;
-  
-  if (new_n == 0) return; // Safety check
-  
+
+  if (new_n == 0)
+    return; // Safety check
+
   // Lc0's running average formula:
   // Q_new = Q_old + multivisit * (V - Q_old) / N_new
-  // This is algebraically equivalent to: (Q_old * N_old + V * multivisit) / N_new
-  
+  // This is algebraically equivalent to: (Q_old * N_old + V * multivisit) /
+  // N_new
+
   float mult = static_cast<float>(multivisit);
   float inv_new_n = 1.0f / static_cast<float>(new_n);
-  
+
   // Update WL (Win-Loss)
   float old_wl = wl_.load(std::memory_order_relaxed);
   float new_wl = old_wl + mult * (v - old_wl) * inv_new_n;
   wl_.store(new_wl, std::memory_order_relaxed);
-  
+
   // Update D (Draw probability)
   float old_d = d_.load(std::memory_order_relaxed);
   float new_d = old_d + mult * (d_val - old_d) * inv_new_n;
@@ -530,14 +533,14 @@ void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
   float old_m = m_.load(std::memory_order_relaxed);
   float new_m = old_m + mult * (m_val - old_m) * inv_new_n;
   m_.store(new_m, std::memory_order_relaxed);
-  
+
   // Update W (total value sum) for debugging/verification
   float old_w = w_.load(std::memory_order_relaxed);
   w_.store(old_w + v * mult, std::memory_order_relaxed);
-  
+
   // Increment N (this is the synchronization point)
   n_.store(new_n, std::memory_order_release);
-  
+
   // Decrement virtual loss
   n_in_flight_.fetch_sub(multivisit, std::memory_order_acq_rel);
 }
@@ -546,30 +549,32 @@ void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
 float ThreadSafeNode::GetVisitedPolicy() const {
   float sum = 0.0f;
   int num = num_edges_.load(std::memory_order_acquire);
-  const TSEdge* e = edges_.get();
-  
+  const TSEdge *e = edges_.get();
+
   for (int i = 0; i < num; ++i) {
-    ThreadSafeNode* child = e[i].child.load(std::memory_order_acquire);
+    ThreadSafeNode *child = e[i].child.load(std::memory_order_acquire);
     if (child && child->GetN() > 0) {
       sum += e[i].GetPolicy();
-}
+    }
   }
   return sum;
 }
 
 // Get the edge from parent that points to this node
-TSEdge* ThreadSafeNode::GetOwnEdge() const {
-  if (!parent_ || edge_index_ < 0) return nullptr;
+TSEdge *ThreadSafeNode::GetOwnEdge() const {
+  if (!parent_ || edge_index_ < 0)
+    return nullptr;
   return &parent_->edges()[edge_index_];
 }
 
 // Make node terminal with specific values
-void ThreadSafeNode::MakeTerminal(Terminal type, float wl, float d_val, float m_val) {
+void ThreadSafeNode::MakeTerminal(Terminal type, float wl, float d_val,
+                                  float m_val) {
   terminal_type_.store(type, std::memory_order_release);
   wl_.store(wl, std::memory_order_relaxed);
   d_.store(d_val, std::memory_order_relaxed);
   m_.store(m_val, std::memory_order_relaxed);
-  
+
   // Lc0 behavior: terminal losses have no uncertainty
   // Clear policy to prevent U value from being comparable to non-loss choices
   if (wl < -0.99f && parent_ && edge_index_ >= 0) {
@@ -582,30 +587,30 @@ void ThreadSafeNode::MakeTerminal(Terminal type, float wl, float d_val, float m_
 // This improves performance for frequently visited subtrees
 bool ThreadSafeNode::MakeSolid() {
   // Check if already solid or no children
-  if (is_solid_.load(std::memory_order_acquire) || 
-      num_edges_.load(std::memory_order_acquire) == 0 ||
-      IsTerminal()) {
+  if (is_solid_.load(std::memory_order_acquire) ||
+      num_edges_.load(std::memory_order_acquire) == 0 || IsTerminal()) {
     return false;
   }
-  
+
   // Lock to prevent concurrent solidification
   std::lock_guard<std::mutex> lock(mutex_);
-  
+
   // Double-check after acquiring lock
   if (is_solid_.load(std::memory_order_acquire)) {
     return false;
   }
-  
+
   int num = num_edges_.load(std::memory_order_acquire);
-  if (num == 0) return false;
-  
+  if (num == 0)
+    return false;
+
   // Check if any children have in-flight visits
   // Can't solidify if children might be modified
-  TSEdge* e = edges_.get();
+  TSEdge *e = edges_.get();
   uint32_t total_in_flight = 0;
-  
+
   for (int i = 0; i < num; ++i) {
-    ThreadSafeNode* child = e[i].child.load(std::memory_order_acquire);
+    ThreadSafeNode *child = e[i].child.load(std::memory_order_acquire);
     if (child) {
       // Can't solidify if child has only 1 visit and is in-flight
       if (child->GetN() <= 1 && child->GetNInFlight() > 0) {
@@ -617,57 +622,57 @@ bool ThreadSafeNode::MakeSolid() {
       total_in_flight += child->GetNInFlight();
     }
   }
-  
+
   // If total in-flight doesn't match our in-flight, there are collisions
   if (total_in_flight != GetNInFlight()) {
     return false;
   }
-  
+
   // Mark as solid - this is a one-way transition
   // The edges array is already contiguous, we just need to mark it
-  // In a full Lc0 implementation, this would reallocate children to a contiguous block
-  // For our simpler implementation, we just mark it to enable optimized iteration
+  // In a full Lc0 implementation, this would reallocate children to a
+  // contiguous block For our simpler implementation, we just mark it to enable
+  // optimized iteration
   is_solid_.store(true, std::memory_order_release);
-  
+
   return true;
 }
-
 
 void ThreadSafeNode::set_terminal(Terminal type, float value) {
   // Map legacy Terminal types to Lc0-style
   float wl_val = 0.0f;
   float d_val = 0.0f;
-  
+
   // Determine WL and D based on terminal type
   // Note: Legacy types Win/Draw/Loss need to be mapped
   switch (type) {
-    case Terminal::EndOfGame:
-      // EndOfGame with value determines win/draw/loss
-      if (value > 0.5f) {
-        wl_val = 1.0f;  // Win
-        d_val = 0.0f;
-      } else if (value < -0.5f) {
-        wl_val = -1.0f; // Loss
-        d_val = 0.0f;
-      } else {
-        wl_val = 0.0f;  // Draw
-        d_val = 1.0f;
-      }
-      break;
-    case Terminal::Tablebase:
-      wl_val = value;
-      d_val = (std::abs(value) < 0.01f) ? 1.0f : 0.0f;
-      break;
-    case Terminal::TwoFold:
-      wl_val = 0.0f;
-      d_val = 1.0f;
-      break;
-    default:
-      wl_val = value;
+  case Terminal::EndOfGame:
+    // EndOfGame with value determines win/draw/loss
+    if (value > 0.5f) {
+      wl_val = 1.0f; // Win
       d_val = 0.0f;
-      break;
+    } else if (value < -0.5f) {
+      wl_val = -1.0f; // Loss
+      d_val = 0.0f;
+    } else {
+      wl_val = 0.0f; // Draw
+      d_val = 1.0f;
+    }
+    break;
+  case Terminal::Tablebase:
+    wl_val = value;
+    d_val = (std::abs(value) < 0.01f) ? 1.0f : 0.0f;
+    break;
+  case Terminal::TwoFold:
+    wl_val = 0.0f;
+    d_val = 1.0f;
+    break;
+  default:
+    wl_val = value;
+    d_val = 0.0f;
+    break;
   }
-  
+
   MakeTerminal(type, wl_val, d_val, 0.0f);
   n_.store(1, std::memory_order_release);
 }
@@ -889,15 +894,15 @@ int64_t ThreadSafeMCTS::calculate_time_budget() const {
   // IMPROVED: Use more aggressive time allocation for MCTS
   // MCTS needs more time than alpha-beta to build a good tree
   // Use ~8% of remaining time + most of increment for better tree building
-  int64_t base_time = time_left / 12;  // ~8% of remaining time
-  int64_t inc_time = inc * 4 / 5;       // Use 80% of increment
-  
+  int64_t base_time = time_left / 12; // ~8% of remaining time
+  int64_t inc_time = inc * 4 / 5;     // Use 80% of increment
+
   // Minimum 1000ms for MCTS to be effective (was 500ms)
   int64_t budget = std::max(int64_t(1000), base_time + inc_time);
-  
+
   // Cap at 25% of remaining time to avoid time trouble (was 20%)
   int64_t max_time = time_left / 4;
-  
+
   return std::min(budget, max_time);
 }
 
@@ -1099,26 +1104,29 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   // Get parent statistics using Lc0-style accessors
   uint32_t parent_n = node->GetN() + node->GetNInFlight();
   float parent_q = node->GetN() > 0 ? node->GetQ(0.0f) : 0.0f;
-  float draw_score = 0.0f;  // Can be configured for contempt
-  
+  float draw_score = 0.0f; // Can be configured for contempt
+
   // Lc0-style PUCT with logarithmic growth
   // Formula: cpuct_init + cpuct_factor * log((N + cpuct_base) / cpuct_base)
   const float cpuct_base = config_.cpuct_base;
   const float cpuct_factor = config_.cpuct_factor;
-  float effective_cpuct = cpuct + cpuct_factor * 
-      std::log((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
-  
+  float effective_cpuct =
+      cpuct +
+      cpuct_factor *
+          std::log((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
+
   // Compute U coefficient: cpuct * sqrt(children_visits)
   // Use GetChildrenVisits() which returns N-1 for non-root (Lc0 style)
   uint32_t children_visits = node->GetChildrenVisits();
-  float cpuct_sqrt_n = effective_cpuct * std::sqrt(static_cast<float>(
-      std::max(children_visits, 1u)));
+  float cpuct_sqrt_n =
+      effective_cpuct *
+      std::sqrt(static_cast<float>(std::max(children_visits, 1u)));
 
   // Lc0-style FPU with reduction strategy
   // FPU = parent_Q - fpu_value * sqrt(visited_policy)
   // This encourages exploration of unvisited nodes while being pessimistic
   float visited_policy = node->GetVisitedPolicy();
-  
+
   // FPU reduction: unvisited nodes get parent Q minus a reduction
   // The reduction is proportional to sqrt of visited policy
   float fpu = parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
@@ -1130,14 +1138,14 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   lc0_params.moves_left_slope = 0.0027f;
   lc0_params.moves_left_scaled_factor = 1.6521f;
   lc0_params.moves_left_quadratic_factor = -0.6521f;
-  
+
   MovesLeftEvaluator m_eval(lc0_params, node->GetM(), parent_q);
 
   // Single-pass selection with SIMD-friendly layout
   const TSEdge *edges = node->edges();
   int best_idx = 0;
   float best_score = -1e9f;
-  
+
 #ifdef __APPLE__
   // Apple Silicon optimization: prefetch edge data
   for (int i = 0; i < std::min(4, num_edges); ++i) {
@@ -1150,7 +1158,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
     ThreadSafeNode *child = edge.child.load(std::memory_order_acquire);
 
     float q, m_utility = 0.0f;
-    float policy = edge.GetPolicy();  // Use Lc0-style compressed policy
+    float policy = edge.GetPolicy(); // Use Lc0-style compressed policy
     int n_started = 0;
 
     if (child) {
@@ -1161,7 +1169,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
       // CRITICAL: Negate child Q value because it's from opponent's perspective
       // This is the core of minimax in MCTS
       q = (n > 0) ? -child->GetQ(draw_score) : fpu;
-      
+
       // Add moves left utility if enabled and child has visits
       // MLH prefers shorter wins and longer losses
       if (n > 0 && m_eval.IsEnabled()) {
@@ -1177,7 +1185,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
     // This balances exploitation (Q) with exploration (U)
     float u = cpuct_sqrt_n * policy / (1.0f + static_cast<float>(n_started));
     float score = q + u + m_utility;
-    
+
     if (score > best_score) {
       best_score = score;
       best_idx = i;
@@ -1196,7 +1204,8 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
   std::vector<float> scores(num_edges);
   float max_score = -1e9f;
 
-  // Score each move using improved heuristics (closer to Stockfish move ordering)
+  // Score each move using improved heuristics (closer to Stockfish move
+  // ordering)
   for (int i = 0; i < num_edges; ++i) {
     Move m = edges[i].move;
     float score = 0.0f;
@@ -1207,16 +1216,17 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
                                ? PAWN
                                : type_of(ctx.pos.piece_on(m.to_sq()));
       PieceType attacker = type_of(ctx.pos.piece_on(m.from_sq()));
-      
+
       // Improved piece values matching Stockfish
       static const float piece_values[] = {0, 100, 320, 330, 500, 1000, 0};
-      
-      // MVV-LVA: Prioritize capturing valuable pieces with less valuable attackers
+
+      // MVV-LVA: Prioritize capturing valuable pieces with less valuable
+      // attackers
       score += piece_values[captured] * 8.0f - piece_values[attacker] * 0.5f;
 
       // SEE bonus: Good captures get significant boost
       if (ctx.pos.see_ge(m, Value(0))) {
-        score += 500.0f;  // Increased from 300
+        score += 500.0f; // Increased from 300
       } else {
         // Bad captures (losing material) get penalty
         score -= 200.0f;
@@ -1227,17 +1237,17 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
     if (m.type_of() == PROMOTION) {
       PieceType promo = m.promotion_type();
       if (promo == QUEEN)
-        score += 5000.0f;  // Very high priority
+        score += 5000.0f; // Very high priority
       else if (promo == KNIGHT)
-        score += 1000.0f;  // Knight promotions for discovered attacks
+        score += 1000.0f; // Knight promotions for discovered attacks
       else
-        score -= 500.0f;   // Underpromotions rarely good
+        score -= 500.0f; // Underpromotions rarely good
     }
 
     // Checks - very important tactically
     if (ctx.pos.gives_check(m)) {
-      score += 600.0f;  // Increased from 400
-      
+      score += 600.0f; // Increased from 400
+
       // Discovered checks are even more valuable
       Bitboard blockers = ctx.pos.blockers_for_king(~ctx.pos.side_to_move());
       if (blockers & m.from_sq()) {
@@ -1246,20 +1256,22 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
     }
 
     // Piece development in opening/middlegame
-    int game_phase = ctx.pos.count<ALL_PIECES>() > 24 ? 0 : 
-                     ctx.pos.count<ALL_PIECES>() > 10 ? 1 : 2;
-    
-    if (game_phase < 2) {  // Not endgame
+    int game_phase = ctx.pos.count<ALL_PIECES>() > 24   ? 0
+                     : ctx.pos.count<ALL_PIECES>() > 10 ? 1
+                                                        : 2;
+
+    if (game_phase < 2) { // Not endgame
       PieceType pt = type_of(ctx.pos.piece_on(m.from_sq()));
-      
+
       // Knights and bishops should be developed
       if (pt == KNIGHT || pt == BISHOP) {
-        Rank from_rank = relative_rank(ctx.pos.side_to_move(), rank_of(m.from_sq()));
-        if (from_rank == RANK_1) {  // Moving from back rank
+        Rank from_rank =
+            relative_rank(ctx.pos.side_to_move(), rank_of(m.from_sq()));
+        if (from_rank == RANK_1) { // Moving from back rank
           score += 150.0f;
         }
       }
-      
+
       // Don't move queen too early
       if (pt == QUEEN && game_phase == 0) {
         score -= 100.0f;
@@ -1270,18 +1282,19 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
     int to_file = file_of(m.to_sq());
     int to_rank = rank_of(m.to_sq());
     float center_dist = std::abs(to_file - 3.5f) + std::abs(to_rank - 3.5f);
-    score += (7.0f - center_dist) * 20.0f;  // Increased from 15
+    score += (7.0f - center_dist) * 20.0f; // Increased from 15
 
     // Castling bonus - king safety is important
     if (m.type_of() == CASTLING) {
-      score += 400.0f;  // Increased from 200
+      score += 400.0f; // Increased from 200
     }
 
     // Pawn advances (especially passed pawns)
     if (type_of(ctx.pos.piece_on(m.from_sq())) == PAWN) {
-      Rank to_rank_rel = relative_rank(ctx.pos.side_to_move(), rank_of(m.to_sq()));
+      Rank to_rank_rel =
+          relative_rank(ctx.pos.side_to_move(), rank_of(m.to_sq()));
       if (to_rank_rel >= RANK_6) {
-        score += 200.0f * (to_rank_rel - RANK_5);  // Bonus for advanced pawns
+        score += 200.0f * (to_rank_rel - RANK_5); // Bonus for advanced pawns
       }
     }
 
@@ -1301,7 +1314,7 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
   float sum = 0.0f;
   for (int i = 0; i < num_edges; ++i) {
     // Temperature controls exploration: lower = more exploitation
-    float temp = config_.policy_softmax_temp * 300.0f;  // Adjusted divisor
+    float temp = config_.policy_softmax_temp * 300.0f; // Adjusted divisor
     scores[i] = std::exp((scores[i] - max_score) / temp);
     sum += scores[i];
   }
@@ -1332,7 +1345,8 @@ void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
   }
 
   // Avoid division by zero
-  if (noise_sum < std::numeric_limits<float>::min()) return;
+  if (noise_sum < std::numeric_limits<float>::min())
+    return;
 
   // Mix noise with existing policy: P' = (1 - epsilon) * P + epsilon * noise
   // This is Lc0's Dirichlet noise implementation for exploration
@@ -1379,7 +1393,7 @@ float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
     // Thread-safe GPU evaluation
     std::lock_guard<std::mutex> lock(gpu_mutex_);
     auto [psqt, score] = gpu_manager_->evaluate_single(ctx.pos, true);
-    
+
     // Use Lc0-style score transformation
     // This converts NNUE centipawn scores to MCTS Q values in [-1, 1]
     value = NnueScoreToQ(score);
@@ -1409,9 +1423,9 @@ void ThreadSafeMCTS::backpropagate(ThreadSafeNode *node, float value,
   // Lc0-style backpropagation with proper value negation
   // The value is from the perspective of the player who just moved
   // As we go up the tree, we negate it for the opponent
-  
-  int multivisit = config_.virtual_loss;  // Match virtual loss count
-  
+
+  int multivisit = config_.virtual_loss; // Match virtual loss count
+
   while (node) {
     // Lc0-style FinalizeScoreUpdate handles:
     // 1. Removing virtual loss (n_in_flight -= multivisit)
@@ -1422,7 +1436,7 @@ void ThreadSafeMCTS::backpropagate(ThreadSafeNode *node, float value,
     // Flip value for parent (opponent's perspective)
     // This is the core of minimax in MCTS
     value = -value;
-    
+
     // Increment moves left as we go up the tree
     // This helps with MLH (Moves Left Head) utility
     moves_left += 1.0f;
@@ -1440,20 +1454,20 @@ Move ThreadSafeMCTS::get_best_move() const {
   const TSEdge *edges = root->edges();
 
   // Lc0-style best move selection
-  // Priority: Terminal wins > Tablebase wins > Most visits > Best Q > Highest policy
-  // Also prefers shorter wins and longer losses
-  
+  // Priority: Terminal wins > Tablebase wins > Most visits > Best Q > Highest
+  // policy Also prefers shorter wins and longer losses
+
   struct EdgeInfo {
     int idx;
     uint32_t visits;
     float q;
     float policy;
-    float m;  // Moves left estimate
+    float m; // Moves left estimate
     bool is_terminal;
     bool is_win;
     bool is_loss;
   };
-  
+
   std::vector<EdgeInfo> candidates;
   candidates.reserve(num_edges);
 
@@ -1463,8 +1477,10 @@ Move ThreadSafeMCTS::get_best_move() const {
       EdgeInfo info;
       info.idx = i;
       info.visits = child->n();
-      info.q = -child->q();  // Negate because child Q is from opponent's perspective
-      info.policy = edges[i].GetPolicy();  // Use Lc0-style compressed policy accessor
+      info.q =
+          -child->q(); // Negate because child Q is from opponent's perspective
+      info.policy =
+          edges[i].GetPolicy(); // Use Lc0-style compressed policy accessor
       info.m = child->m();
       info.is_terminal = child->is_terminal();
       info.is_win = info.is_terminal && info.q > 0.5f;
@@ -1479,26 +1495,35 @@ Move ThreadSafeMCTS::get_best_move() const {
   }
 
   // Sort by Lc0 criteria
-  std::sort(candidates.begin(), candidates.end(), [](const EdgeInfo& a, const EdgeInfo& b) {
-    // Terminal wins first (prefer shorter)
-    if (a.is_win && !b.is_win) return true;
-    if (!a.is_win && b.is_win) return false;
-    if (a.is_win && b.is_win) return a.m < b.m;  // Shorter win
-    
-    // Terminal losses last (prefer longer)
-    if (a.is_loss && !b.is_loss) return false;
-    if (!a.is_loss && b.is_loss) return true;
-    if (a.is_loss && b.is_loss) return a.m > b.m;  // Longer loss
-    
-    // Non-terminal: prefer more visits
-    if (a.visits != b.visits) return a.visits > b.visits;
-    
-    // Then prefer better Q
-    if (std::abs(a.q - b.q) > 0.001f) return a.q > b.q;
-    
-    // Then prefer higher policy
-    return a.policy > b.policy;
-  });
+  std::sort(candidates.begin(), candidates.end(),
+            [](const EdgeInfo &a, const EdgeInfo &b) {
+              // Terminal wins first (prefer shorter)
+              if (a.is_win && !b.is_win)
+                return true;
+              if (!a.is_win && b.is_win)
+                return false;
+              if (a.is_win && b.is_win)
+                return a.m < b.m; // Shorter win
+
+              // Terminal losses last (prefer longer)
+              if (a.is_loss && !b.is_loss)
+                return false;
+              if (!a.is_loss && b.is_loss)
+                return true;
+              if (a.is_loss && b.is_loss)
+                return a.m > b.m; // Longer loss
+
+              // Non-terminal: prefer more visits
+              if (a.visits != b.visits)
+                return a.visits > b.visits;
+
+              // Then prefer better Q
+              if (std::abs(a.q - b.q) > 0.001f)
+                return a.q > b.q;
+
+              // Then prefer higher policy
+              return a.policy > b.policy;
+            });
 
   return edges[candidates[0].idx].move;
 }

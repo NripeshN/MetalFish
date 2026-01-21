@@ -8,9 +8,9 @@
 */
 
 #include "gpu_mcts_backend.h"
-#include "gpu_nnue_integration.h"
 #include "../core/movegen.h"
 #include "../search/movepick.h"
+#include "gpu_nnue_integration.h"
 #include <algorithm>
 #include <cmath>
 

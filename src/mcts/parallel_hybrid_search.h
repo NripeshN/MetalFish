@@ -3,7 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Parallel Hybrid Search - MCTS and Alpha-Beta running simultaneously
-  
+
   Optimized for Apple Silicon with unified memory architecture:
   - Zero-copy data sharing between CPU and GPU
   - Lock-free atomic communication using cache-line aligned structures
@@ -56,7 +56,8 @@ namespace MCTS {
 // Apple Silicon Unified Memory Optimizations
 // ============================================================================
 
-// Cache line size for optimal alignment (Apple Silicon uses 128-byte cache lines)
+// Cache line size for optimal alignment (Apple Silicon uses 128-byte cache
+// lines)
 constexpr size_t APPLE_CACHE_LINE_SIZE = 128;
 
 // GPU-resident evaluation batch for zero-copy on unified memory
@@ -64,20 +65,23 @@ struct GPUResidentBatch {
   // Positions stored in GPU-accessible buffer (unified memory = zero copy)
   std::unique_ptr<GPU::Buffer> positions_buffer;
   std::unique_ptr<GPU::Buffer> results_buffer;
-  
+
   // Metadata (small, kept on CPU)
   std::vector<uint32_t> position_indices;
   int count = 0;
   int capacity = 0;
-  
+
   bool initialized = false;
-  
+
   // Initialize with capacity
   bool initialize(int batch_capacity);
-  
+
   // Clear for reuse (doesn't deallocate)
-  void clear() { count = 0; position_indices.clear(); }
-  
+  void clear() {
+    count = 0;
+    position_indices.clear();
+  }
+
   // Check if batch is full
   bool full() const { return count >= capacity; }
 };
@@ -90,26 +94,26 @@ struct GPUResidentBatch {
 // Aligned to 128 bytes (Apple Silicon cache line) to prevent false sharing
 struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
   // Current best move from AB (updated atomically)
-  std::atomic<uint32_t> best_move_raw{0};  // Move encoded as uint32_t
+  std::atomic<uint32_t> best_move_raw{0}; // Move encoded as uint32_t
   std::atomic<int32_t> best_score{0};
   std::atomic<int32_t> completed_depth{0};
   std::atomic<uint64_t> nodes_searched{0};
-  
+
   // Policy updates from AB (move scores for MCTS policy adjustment)
   static constexpr int MAX_MOVES = 256;
   struct MoveScore {
     std::atomic<uint32_t> move_raw{0};
-    std::atomic<int32_t> score{-32001};  // VALUE_NONE equivalent
+    std::atomic<int32_t> score{-32001}; // VALUE_NONE equivalent
     std::atomic<int32_t> depth{0};
   };
   MoveScore move_scores[MAX_MOVES];
   std::atomic<int> num_scored_moves{0};
-  
+
   // Synchronization
-  std::atomic<uint64_t> update_counter{0};  // Incremented on each AB update
+  std::atomic<uint64_t> update_counter{0}; // Incremented on each AB update
   std::atomic<bool> ab_running{false};
   std::atomic<bool> has_result{false};
-  
+
   void reset() {
     best_move_raw.store(0, std::memory_order_relaxed);
     best_score.store(0, std::memory_order_relaxed);
@@ -125,12 +129,12 @@ struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
       move_scores[i].depth.store(0, std::memory_order_relaxed);
     }
   }
-  
+
   Move get_best_move() const {
     uint32_t raw = best_move_raw.load(std::memory_order_acquire);
     return Move(raw);
   }
-  
+
   void set_best_move(Move m, int score, int depth, uint64_t nodes) {
     best_move_raw.store(m.raw(), std::memory_order_relaxed);
     best_score.store(score, std::memory_order_relaxed);
@@ -139,11 +143,12 @@ struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
     has_result.store(true, std::memory_order_release);
     update_counter.fetch_add(1, std::memory_order_release);
   }
-  
+
   void update_move_score(Move m, int score, int depth) {
     int idx = num_scored_moves.load(std::memory_order_relaxed);
-    if (idx >= MAX_MOVES) return;
-    
+    if (idx >= MAX_MOVES)
+      return;
+
     // Check if move already exists
     for (int i = 0; i < idx; ++i) {
       if (move_scores[i].move_raw.load(std::memory_order_relaxed) == m.raw()) {
@@ -155,7 +160,7 @@ struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
         return;
       }
     }
-    
+
     // Add new move
     int new_idx = num_scored_moves.fetch_add(1, std::memory_order_relaxed);
     if (new_idx < MAX_MOVES) {
@@ -175,7 +180,7 @@ struct alignas(APPLE_CACHE_LINE_SIZE) MCTSSharedState {
   std::atomic<float> best_q{0.0f};
   std::atomic<uint32_t> best_visits{0};
   std::atomic<uint64_t> total_nodes{0};
-  
+
   // Top moves for AB to prioritize
   static constexpr int MAX_TOP_MOVES = 10;
   struct TopMove {
@@ -186,12 +191,12 @@ struct alignas(APPLE_CACHE_LINE_SIZE) MCTSSharedState {
   };
   TopMove top_moves[MAX_TOP_MOVES];
   std::atomic<int> num_top_moves{0};
-  
+
   // Synchronization
   std::atomic<uint64_t> update_counter{0};
   std::atomic<bool> mcts_running{false};
   std::atomic<bool> has_result{false};
-  
+
   void reset() {
     best_move_raw.store(0, std::memory_order_relaxed);
     best_q.store(0.0f, std::memory_order_relaxed);
@@ -208,7 +213,7 @@ struct alignas(APPLE_CACHE_LINE_SIZE) MCTSSharedState {
       top_moves[i].q.store(0.0f, std::memory_order_relaxed);
     }
   }
-  
+
   Move get_best_move() const {
     uint32_t raw = best_move_raw.load(std::memory_order_acquire);
     return Move(raw);
@@ -225,23 +230,23 @@ struct ParallelSearchStats {
   std::atomic<uint64_t> mcts_iterations{0};
   std::atomic<uint64_t> gpu_evaluations{0};
   std::atomic<uint64_t> gpu_batches{0};
-  
+
   // AB stats
   std::atomic<uint64_t> ab_nodes{0};
   std::atomic<uint64_t> ab_depth{0};
   std::atomic<uint64_t> ab_iterations{0};
-  
+
   // Interaction stats
-  std::atomic<uint64_t> policy_updates{0};      // Times AB updated MCTS policy
-  std::atomic<uint64_t> move_agreements{0};     // Times MCTS and AB agreed
-  std::atomic<uint64_t> ab_overrides{0};        // Times AB overrode MCTS
-  std::atomic<uint64_t> mcts_overrides{0};      // Times MCTS overrode AB
-  
+  std::atomic<uint64_t> policy_updates{0};  // Times AB updated MCTS policy
+  std::atomic<uint64_t> move_agreements{0}; // Times MCTS and AB agreed
+  std::atomic<uint64_t> ab_overrides{0};    // Times AB overrode MCTS
+  std::atomic<uint64_t> mcts_overrides{0};  // Times MCTS overrode AB
+
   // Timing
   double mcts_time_ms = 0;
   double ab_time_ms = 0;
   double total_time_ms = 0;
-  
+
   void reset() {
     mcts_nodes = 0;
     mcts_iterations = 0;
@@ -268,49 +273,49 @@ struct ParallelHybridConfig {
   // MCTS configuration
   HybridSearchConfig mcts_config;
   int mcts_threads = 1;
-  
-  // AB configuration  
-  int ab_min_depth = 8;       // Minimum depth for AB to search
-  int ab_max_depth = 64;      // Maximum depth (iterative deepening)
-  bool ab_use_time = true;    // Use time management for AB
-  
+
+  // AB configuration
+  int ab_min_depth = 8;    // Minimum depth for AB to search
+  int ab_max_depth = 64;   // Maximum depth (iterative deepening)
+  bool ab_use_time = true; // Use time management for AB
+
   // Parallel coordination
-  float ab_policy_weight = 0.3f;        // Weight of AB scores in MCTS policy
-  float agreement_threshold = 0.3f;     // Pawns - if within this, moves agree
-  float override_threshold = 1.0f;      // Pawns - AB overrides MCTS if exceeds
-  int policy_update_interval_ms = 50;   // How often to update MCTS policy from AB
-  
+  float ab_policy_weight = 0.3f;      // Weight of AB scores in MCTS policy
+  float agreement_threshold = 0.3f;   // Pawns - if within this, moves agree
+  float override_threshold = 1.0f;    // Pawns - AB overrides MCTS if exceeds
+  int policy_update_interval_ms = 50; // How often to update MCTS policy from AB
+
   // Time allocation
-  float time_fraction = 0.05f;          // Base fraction of remaining time
-  float max_time_fraction = 0.20f;      // Maximum fraction
-  float increment_usage = 0.75f;        // How much of increment to use
-  
+  float time_fraction = 0.05f;     // Base fraction of remaining time
+  float max_time_fraction = 0.20f; // Maximum fraction
+  float increment_usage = 0.75f;   // How much of increment to use
+
   // Position-based strategy
   bool use_position_classifier = true;
-  
+
   // =========================================================================
   // Apple Silicon / GPU Optimizations
   // =========================================================================
-  
+
   // GPU batch evaluation settings
-  int gpu_batch_size = 128;             // Optimal batch size for M-series GPUs
-  int gpu_batch_timeout_us = 200;       // Max wait time to fill batch (microseconds)
-  bool use_async_gpu_eval = true;       // Use async GPU evaluation with callbacks
-  
+  int gpu_batch_size = 128;       // Optimal batch size for M-series GPUs
+  int gpu_batch_timeout_us = 200; // Max wait time to fill batch (microseconds)
+  bool use_async_gpu_eval = true; // Use async GPU evaluation with callbacks
+
   // Unified memory optimizations
   bool use_gpu_resident_batches = true; // Keep batches in unified memory
   bool prefetch_positions = true;       // Prefetch next batch while evaluating
-  
+
   // Metal-specific optimizations
-  bool use_simd_kernels = true;         // Use SIMD-optimized Metal kernels
-  int metal_threadgroup_size = 256;     // Threads per threadgroup
-  
+  bool use_simd_kernels = true;     // Use SIMD-optimized Metal kernels
+  int metal_threadgroup_size = 256; // Threads per threadgroup
+
   // Final decision
   enum class DecisionMode {
-    MCTS_PRIMARY,     // Trust MCTS unless AB strongly disagrees
-    AB_PRIMARY,       // Trust AB unless MCTS strongly disagrees
-    VOTE_WEIGHTED,    // Weighted combination based on confidence
-    DYNAMIC           // Choose based on position type
+    MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees
+    AB_PRIMARY,    // Trust AB unless MCTS strongly disagrees
+    VOTE_WEIGHTED, // Weighted combination based on confidence
+    DYNAMIC        // Choose based on position type
   };
   DecisionMode decision_mode = DecisionMode::DYNAMIC;
 };
@@ -326,12 +331,12 @@ public:
 
   ParallelHybridSearch();
   ~ParallelHybridSearch();
-  
+
   // Non-copyable, non-movable (due to threads and atomics)
-  ParallelHybridSearch(const ParallelHybridSearch&) = delete;
-  ParallelHybridSearch& operator=(const ParallelHybridSearch&) = delete;
-  ParallelHybridSearch(ParallelHybridSearch&&) = delete;
-  ParallelHybridSearch& operator=(ParallelHybridSearch&&) = delete;
+  ParallelHybridSearch(const ParallelHybridSearch &) = delete;
+  ParallelHybridSearch &operator=(const ParallelHybridSearch &) = delete;
+  ParallelHybridSearch(ParallelHybridSearch &&) = delete;
+  ParallelHybridSearch &operator=(ParallelHybridSearch &&) = delete;
 
   // Initialization
   bool initialize(GPU::GPUNNUEManager *gpu_manager, Engine *engine);
@@ -347,7 +352,9 @@ public:
                     InfoCallback info_cb = nullptr);
   void stop();
   void wait();
-  bool is_searching() const { return searching_.load(std::memory_order_acquire); }
+  bool is_searching() const {
+    return searching_.load(std::memory_order_acquire);
+  }
 
   // Results
   const ParallelSearchStats &stats() const { return stats_; }
@@ -381,44 +388,44 @@ private:
   // =========================================================================
   // Apple Silicon GPU Optimization State
   // =========================================================================
-  
+
   // GPU-resident evaluation batches (double-buffered for async)
   GPUResidentBatch gpu_batch_[2];
   std::atomic<int> current_batch_{0};
   std::atomic<bool> batch_pending_{false};
-  
+
   // Async evaluation state
   std::mutex async_mutex_;
   std::condition_variable async_cv_;
   std::atomic<int> pending_evaluations_{0};
-  
+
   // Unified memory info
   bool has_unified_memory_ = false;
 
   // =========================================================================
   // Thread Management - Robust lifecycle handling
   // =========================================================================
-  
+
   // Thread state machine: IDLE -> RUNNING -> STOPPING -> IDLE
   enum class ThreadState { IDLE, RUNNING, STOPPING };
-  
+
   // Centralized thread control
-  std::mutex thread_mutex_;                    // Protects thread lifecycle
-  std::condition_variable thread_cv_;          // For waiting on thread completion
-  std::atomic<bool> stop_flag_{false};         // Signal to stop all threads
-  std::atomic<bool> searching_{false};         // External "is searching" flag
+  std::mutex thread_mutex_;            // Protects thread lifecycle
+  std::condition_variable thread_cv_;  // For waiting on thread completion
+  std::atomic<bool> stop_flag_{false}; // Signal to stop all threads
+  std::atomic<bool> searching_{false}; // External "is searching" flag
   std::atomic<bool> shutdown_requested_{false}; // Destructor called
-  
+
   // Thread objects (protected by thread_mutex_)
   std::thread mcts_thread_;
   std::thread ab_thread_;
   std::thread coordinator_thread_;
-  
+
   // Thread state tracking (protected by thread_mutex_)
   std::atomic<ThreadState> mcts_thread_state_{ThreadState::IDLE};
   std::atomic<ThreadState> ab_thread_state_{ThreadState::IDLE};
   std::atomic<ThreadState> coordinator_thread_state_{ThreadState::IDLE};
-  
+
   // Thread completion flags (set by threads before exit, read by wait())
   std::atomic<bool> mcts_thread_done_{true};
   std::atomic<bool> ab_thread_done_{true};
@@ -440,7 +447,8 @@ private:
   std::mutex callback_mutex_;
   BestMoveCallback best_move_callback_;
   InfoCallback info_callback_;
-  std::atomic<bool> callback_invoked_{false};  // Ensure callback called only once
+  std::atomic<bool> callback_invoked_{
+      false}; // Ensure callback called only once
 
   // Thread functions - these set their done flags before returning
   void mcts_thread_main();
@@ -459,26 +467,26 @@ private:
   Move make_final_decision();
   int calculate_time_budget() const;
   bool should_stop() const;
-  
+
   // Thread lifecycle helpers
-  void join_all_threads();  // Safely joins all threads
-  void signal_thread_done(std::atomic<bool>& done_flag);
+  void join_all_threads(); // Safely joins all threads
+  void signal_thread_done(std::atomic<bool> &done_flag);
   bool all_threads_done() const;
-  
+
   // =========================================================================
   // GPU Optimization Helpers
   // =========================================================================
-  
+
   // Initialize GPU-resident batches for zero-copy evaluation
   bool initialize_gpu_batches();
-  
+
   // Submit batch for async GPU evaluation
-  void submit_gpu_batch_async(int batch_idx, 
+  void submit_gpu_batch_async(int batch_idx,
                               std::function<void(bool)> completion_handler);
-  
+
   // Swap to next batch (double-buffering)
   int swap_batch();
-  
+
   // Wait for pending GPU evaluations
   void wait_gpu_evaluations();
 
@@ -486,15 +494,15 @@ private:
   void send_info(int depth, int score, uint64_t nodes, int time_ms,
                  const std::vector<Move> &pv, const std::string &source);
   void send_info_string(const std::string &msg);
-  
+
   // Safe callback invocation (ensures called exactly once per search)
   void invoke_best_move_callback(Move best, Move ponder);
 };
 
 // Factory function
-std::unique_ptr<ParallelHybridSearch>
-create_parallel_hybrid_search(GPU::GPUNNUEManager *gpu_manager, Engine *engine,
-                              const ParallelHybridConfig &config = ParallelHybridConfig());
+std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
+    GPU::GPUNNUEManager *gpu_manager, Engine *engine,
+    const ParallelHybridConfig &config = ParallelHybridConfig());
 
 } // namespace MCTS
 } // namespace MetalFish

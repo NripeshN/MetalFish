@@ -152,9 +152,9 @@ void UCIEngine::loop() {
     else if (token == "gpubench")
       gpu_benchmark();
     else if (token == "mcts" || token == "parallel_hybrid" || token == "hybrid")
-      parallel_hybrid_go(is);  // All hybrid commands use parallel hybrid search
+      parallel_hybrid_go(is); // All hybrid commands use parallel hybrid search
     else if (token == "mctsmt")
-      mcts_mt_go(is);  // Pure GPU MCTS
+      mcts_mt_go(is); // Pure GPU MCTS
     else if (token == "mctsbench")
       mcts_batch_benchmark(is);
     else if (token == "compiler")
@@ -1265,7 +1265,8 @@ void UCIEngine::gpu_benchmark() {
 // Optimized for Apple Silicon with unified memory
 // ============================================================================
 void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
-  sync_cout << "info string Starting Parallel Hybrid Search (MCTS + AB)..." << sync_endl;
+  sync_cout << "info string Starting Parallel Hybrid Search (MCTS + AB)..."
+            << sync_endl;
 
   // Parse search limits
   Search::LimitsType limits = parse_limits(is);
@@ -1289,29 +1290,30 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   config.mcts_config.fpu_reduction = 0.2f;
   config.mcts_config.add_dirichlet_noise = true;
   config.mcts_config.num_search_threads = 1;
-  
+
   // AB configuration
   config.ab_min_depth = 10;
   config.ab_use_time = true;
-  
+
   // Parallel coordination
   config.ab_policy_weight = 0.3f;
   config.agreement_threshold = 0.3f;
   config.override_threshold = 1.0f;
   config.policy_update_interval_ms = 50;
-  
+
   // Position-based strategy
   config.use_position_classifier = true;
   config.decision_mode = MCTS::ParallelHybridConfig::DecisionMode::DYNAMIC;
-  
+
   // Apple Silicon GPU optimizations
-  config.gpu_batch_size = 128;           // Optimal for M-series
-  config.use_async_gpu_eval = true;      // Async GPU evaluation
+  config.gpu_batch_size = 128;            // Optimal for M-series
+  config.use_async_gpu_eval = true;       // Async GPU evaluation
   config.use_gpu_resident_batches = true; // Zero-copy unified memory
-  config.use_simd_kernels = true;        // SIMD-optimized Metal kernels
+  config.use_simd_kernels = true;         // SIMD-optimized Metal kernels
 
   // Create parallel hybrid search
-  auto search = MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
+  auto search =
+      MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
 
   if (!search) {
     sync_cout << "info string ERROR: Failed to create parallel hybrid search"
@@ -1358,13 +1360,13 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   sync_cout << "info string Time: MCTS=" << std::fixed << std::setprecision(1)
             << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms
             << "ms Total=" << stats.total_time_ms << "ms" << sync_endl;
-  
+
   // Explicitly synchronize GPU before destroying the search object
   // This ensures all async operations complete before destruction
   if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
     GPU::gpu().synchronize();
   }
-  
+
   // Explicitly destroy the search object
   search.reset();
 

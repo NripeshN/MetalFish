@@ -127,13 +127,12 @@ public:
   size_t max_buffer_size() const override;
   size_t max_threadgroup_memory() const override;
 
-  std::unique_ptr<Buffer> create_buffer(size_t size,
-                                        MemoryMode mode = MemoryMode::Shared,
-                                        BufferUsage usage = BufferUsage::Default)
-      override;
-  std::unique_ptr<Buffer> create_buffer(const void *data, size_t size,
-                                        MemoryMode mode = MemoryMode::Shared)
-      override;
+  std::unique_ptr<Buffer>
+  create_buffer(size_t size, MemoryMode mode = MemoryMode::Shared,
+                BufferUsage usage = BufferUsage::Default) override;
+  std::unique_ptr<Buffer>
+  create_buffer(const void *data, size_t size,
+                MemoryMode mode = MemoryMode::Shared) override;
 
   std::unique_ptr<ComputeKernel>
   create_kernel(const std::string &name,

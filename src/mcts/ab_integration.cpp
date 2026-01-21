@@ -584,7 +584,7 @@ int ABSearcher::late_move_reduction(int depth, int move_count,
 }
 
 Value ABSearcher::evaluate(const Position &pos) {
-  // Use simple_eval for the ABSearcher since we don't have access to 
+  // Use simple_eval for the ABSearcher since we don't have access to
   // the full NNUE infrastructure (networks, accumulators, caches).
   // The main MCTS evaluation uses GPU NNUE for strong evaluation.
   // This ABSearcher is primarily used for tactical verification where
@@ -924,8 +924,7 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
   // Use the REAL Engine if available!
   if (engine_) {
     // Run the full Stockfish search
-    auto search_result =
-        engine_->search_sync(pos.fen(), verification_depth, 0);
+    auto search_result = engine_->search_sync(pos.fen(), verification_depth, 0);
 
     result.ab_move = search_result.best_move;
     result.ab_score = search_result.score;
@@ -967,8 +966,8 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
 
     if (engine_) {
       // Use real engine for MCTS move evaluation too
-      auto mcts_result = engine_->search_sync(test_pos.fen(), 
-                                              std::max(1, verification_depth - 2), 0);
+      auto mcts_result = engine_->search_sync(
+          test_pos.fen(), std::max(1, verification_depth - 2), 0);
       result.mcts_score = -mcts_result.score;
     } else {
       // Fallback qsearch
@@ -1126,12 +1125,13 @@ HybridSearchBridge &hybrid_bridge() {
   std::call_once(g_hybrid_bridge_init_flag, []() {
     g_hybrid_bridge = std::make_unique<HybridSearchBridge>();
   });
-  
-  // After shutdown, g_hybrid_bridge may be null. Check and throw instead of dereferencing null.
+
+  // After shutdown, g_hybrid_bridge may be null. Check and throw instead of
+  // dereferencing null.
   if (!g_hybrid_bridge) {
     throw std::runtime_error("HybridSearchBridge accessed after shutdown");
   }
-  
+
   return *g_hybrid_bridge;
 }
 

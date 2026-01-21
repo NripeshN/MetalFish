@@ -31,7 +31,6 @@
 #include "gpu/backend.h"
 #include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
-#include "gpu/gpu_nnue_integration.h"
 #include "search/search.h"
 #include "syzygy/tbprobe.h"
 #include "uci/uci.h"

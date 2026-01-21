@@ -29,9 +29,9 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
-#include <thread>
 #include <mutex>
 #include <sstream>
+#include <thread>
 
 namespace MetalFish::GPU {
 
@@ -1798,8 +1798,8 @@ bool GPUNNUEManager::evaluate_batch_async(
   // Lock for thread-safe GPU access - protects kernel dispatch setup
   // NOTE: We use a short lock scope here. The gpu_mutex_ is released when this
   // function returns, but the GPU is still reading from the input buffers.
-  // To avoid race conditions with MAX_INFLIGHT_BATCHES=4 concurrent async calls,
-  // we allocate dedicated input buffers for each async call below.
+  // To avoid race conditions with MAX_INFLIGHT_BATCHES=4 concurrent async
+  // calls, we allocate dedicated input buffers for each async call below.
   std::lock_guard<std::mutex> lock(gpu_mutex_);
 
   auto &backend = gpu();
@@ -1815,12 +1815,14 @@ bool GPUNNUEManager::evaluate_batch_async(
   const int batch_size = batch.count;
   const int hidden_dim = net.hidden_dim;
 
-  // Allocate dedicated input buffers for this async call to avoid race conditions.
-  // The shared class member buffers cannot be used because the gpu_mutex_ is
-  // released when this function returns, but the GPU completion handler runs later.
-  // With MAX_INFLIGHT_BATCHES=4 concurrent async evaluations, another thread could
-  // acquire the mutex and overwrite the shared buffers before our GPU work completes.
-  const size_t max_features_per_batch = batch_size * GPU_MAX_FEATURES_PER_PERSPECTIVE;
+  // Allocate dedicated input buffers for this async call to avoid race
+  // conditions. The shared class member buffers cannot be used because the
+  // gpu_mutex_ is released when this function returns, but the GPU completion
+  // handler runs later. With MAX_INFLIGHT_BATCHES=4 concurrent async
+  // evaluations, another thread could acquire the mutex and overwrite the
+  // shared buffers before our GPU work completes.
+  const size_t max_features_per_batch =
+      batch_size * GPU_MAX_FEATURES_PER_PERSPECTIVE;
 
   auto async_white_features = std::make_shared<std::unique_ptr<Buffer>>(
       backend.create_buffer(max_features_per_batch * sizeof(int32_t),
@@ -1829,17 +1831,17 @@ bool GPUNNUEManager::evaluate_batch_async(
       backend.create_buffer(max_features_per_batch * sizeof(int32_t),
                             MemoryMode::Shared, BufferUsage::Transient));
   auto async_white_counts = std::make_shared<std::unique_ptr<Buffer>>(
-      backend.create_buffer(batch_size * sizeof(uint32_t),
-                            MemoryMode::Shared, BufferUsage::Transient));
+      backend.create_buffer(batch_size * sizeof(uint32_t), MemoryMode::Shared,
+                            BufferUsage::Transient));
   auto async_black_counts = std::make_shared<std::unique_ptr<Buffer>>(
-      backend.create_buffer(batch_size * sizeof(uint32_t),
-                            MemoryMode::Shared, BufferUsage::Transient));
+      backend.create_buffer(batch_size * sizeof(uint32_t), MemoryMode::Shared,
+                            BufferUsage::Transient));
   auto async_white_offsets = std::make_shared<std::unique_ptr<Buffer>>(
-      backend.create_buffer(batch_size * sizeof(uint32_t),
-                            MemoryMode::Shared, BufferUsage::Transient));
+      backend.create_buffer(batch_size * sizeof(uint32_t), MemoryMode::Shared,
+                            BufferUsage::Transient));
   auto async_black_offsets = std::make_shared<std::unique_ptr<Buffer>>(
-      backend.create_buffer(batch_size * sizeof(uint32_t),
-                            MemoryMode::Shared, BufferUsage::Transient));
+      backend.create_buffer(batch_size * sizeof(uint32_t), MemoryMode::Shared,
+                            BufferUsage::Transient));
   auto async_accumulators = std::make_shared<std::unique_ptr<Buffer>>(
       backend.create_buffer(batch_size * 2 * hidden_dim * sizeof(int32_t),
                             MemoryMode::Shared, BufferUsage::Transient));
@@ -1965,9 +1967,9 @@ bool GPUNNUEManager::evaluate_batch_async(
   // is released when this function returns, but the completion handler runs
   // later. Another thread could acquire the mutex and overwrite output_buffer_
   // before our completion handler executes.
-  auto async_output_buffer =
-      std::make_shared<std::unique_ptr<Buffer>>(backend.create_buffer(
-          batch_size * sizeof(int32_t), MemoryMode::Shared, BufferUsage::Transient));
+  auto async_output_buffer = std::make_shared<std::unique_ptr<Buffer>>(
+      backend.create_buffer(batch_size * sizeof(int32_t), MemoryMode::Shared,
+                            BufferUsage::Transient));
 
   if (!*async_output_buffer || !(*async_output_buffer)->valid()) {
     // Fallback to synchronous path if buffer allocation fails
@@ -2002,29 +2004,33 @@ bool GPUNNUEManager::evaluate_batch_async(
   // ensuring the buffers remain valid until after GPU work completes.
   // This fixes the race condition where multiple async calls could previously
   // corrupt each other's input data when using shared class member buffers.
-  backend.submit_async(encoder.get(), [=,
-      // Capture all async buffers to extend their lifetime
-      async_white_features = async_white_features,
-      async_black_features = async_black_features,
-      async_white_counts = async_white_counts,
-      async_black_counts = async_black_counts,
-      async_white_offsets = async_white_offsets,
-      async_black_offsets = async_black_offsets,
-      async_accumulators = async_accumulators,
-      async_output_buffer = async_output_buffer]() {
-    // Read results from our dedicated buffer (safe - no other thread can access it)
-    batch_ptr->positional_scores.resize(batch_size);
-    std::memcpy(batch_ptr->positional_scores.data(),
-                (*async_output_buffer)->data(), batch_size * sizeof(int32_t));
+  backend.submit_async(encoder.get(),
+                       [=,
+                        // Capture all async buffers to extend their lifetime
+                        async_white_features = async_white_features,
+                        async_black_features = async_black_features,
+                        async_white_counts = async_white_counts,
+                        async_black_counts = async_black_counts,
+                        async_white_offsets = async_white_offsets,
+                        async_black_offsets = async_black_offsets,
+                        async_accumulators = async_accumulators,
+                        async_output_buffer = async_output_buffer]() {
+                         // Read results from our dedicated buffer (safe - no
+                         // other thread can access it)
+                         batch_ptr->positional_scores.resize(batch_size);
+                         std::memcpy(batch_ptr->positional_scores.data(),
+                                     (*async_output_buffer)->data(),
+                                     batch_size * sizeof(int32_t));
 
-    (*gpu_evals_ptr) += batch_size;
-    (*batch_count_ptr)++;
+                         (*gpu_evals_ptr) += batch_size;
+                         (*batch_count_ptr)++;
 
-    if (completion_handler) {
-      completion_handler(true);
-    }
-    // All async buffers are automatically freed when this lambda is destroyed
-  });
+                         if (completion_handler) {
+                           completion_handler(true);
+                         }
+                         // All async buffers are automatically freed when this
+                         // lambda is destroyed
+                       });
 
   return true;
 }
@@ -2129,23 +2135,23 @@ bool gpu_evaluate_batch(GPUEvalBatch &batch, bool use_big) {
 void shutdown_gpu_nnue() {
   // Set shutdown flag first to prevent any new access
   g_gpu_nnue_shutdown.store(true, std::memory_order_release);
-  
+
   // Reset the manager - this will call its destructor
   if (g_gpu_nnue_manager) {
     // First, synchronize any pending GPU operations
     if (gpu_available() && !gpu_backend_shutdown()) {
       gpu().synchronize();
     }
-    
+
     // Reset the manager (calls destructor which cleans up GPU resources)
     g_gpu_nnue_manager.reset();
-    
+
     // Final synchronization to ensure all cleanup is complete
     if (gpu_available() && !gpu_backend_shutdown()) {
       gpu().synchronize();
     }
   }
-  
+
   // Now shut down the GPU backend itself
   shutdown_gpu_backend();
 }

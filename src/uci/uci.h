@@ -57,7 +57,8 @@ private:
   std::uint64_t perft(const Search::LimitsType &);
   void gpu_info();
   void gpu_benchmark();
-  void parallel_hybrid_go(std::istringstream &is); // Parallel MCTS+AB search (best hybrid)
+  void parallel_hybrid_go(
+      std::istringstream &is); // Parallel MCTS+AB search (best hybrid)
   void mcts_mt_go(std::istringstream &is); // Pure GPU MCTS search
   void mcts_batch_benchmark(
       std::istringstream &is); // Batched vs direct eval benchmark

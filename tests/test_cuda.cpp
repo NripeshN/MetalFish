@@ -17,8 +17,8 @@
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "gpu/backend.h"
-#include "gpu/gpu_nnue_integration.h"
 #include "gpu/cuda/cuda_backend.h"
+#include "gpu/gpu_nnue_integration.h"
 
 using namespace MetalFish;
 
@@ -44,9 +44,10 @@ bool test_cuda() {
               << "." << cuda.compute_capability_minor() << std::endl;
     std::cout << "Total Memory: " << (cuda.total_memory() / (1024 * 1024))
               << " MB" << std::endl;
-    std::cout << "Multiprocessors: " << cuda.multiprocessor_count() << std::endl;
-    std::cout << "Unified Memory: " << (cuda.has_unified_memory() ? "Yes" : "No")
+    std::cout << "Multiprocessors: " << cuda.multiprocessor_count()
               << std::endl;
+    std::cout << "Unified Memory: "
+              << (cuda.has_unified_memory() ? "Yes" : "No") << std::endl;
     std::cout << "Max Buffer Size: " << (cuda.max_buffer_size() / (1024 * 1024))
               << " MB" << std::endl;
     std::cout << "Max Threadgroup Memory: " << cuda.max_threadgroup_memory()
@@ -103,9 +104,9 @@ bool test_cuda() {
     std::cout << "\n=== Testing Buffer with Initial Data ===" << std::endl;
     {
       std::vector<float> test_data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
-      auto data_buffer = cuda.create_buffer(test_data.data(),
-                                            test_data.size() * sizeof(float),
-                                            GPU::MemoryMode::Shared);
+      auto data_buffer =
+          cuda.create_buffer(test_data.data(), test_data.size() * sizeof(float),
+                             GPU::MemoryMode::Shared);
       assert(data_buffer != nullptr);
       assert(data_buffer->valid());
 
@@ -233,7 +234,8 @@ bool test_cuda_performance() {
       auto end = std::chrono::high_resolution_clock::now();
       double write_time =
           std::chrono::duration<double, std::milli>(end - start).count();
-      double write_bw = (size / (1024.0 * 1024.0 * 1024.0)) / (write_time / 1000.0);
+      double write_bw =
+          (size / (1024.0 * 1024.0 * 1024.0)) / (write_time / 1000.0);
       std::cout << "  Memory write bandwidth: " << write_bw << " GB/s"
                 << std::endl;
 
@@ -246,7 +248,8 @@ bool test_cuda_performance() {
       end = std::chrono::high_resolution_clock::now();
       double read_time =
           std::chrono::duration<double, std::milli>(end - start).count();
-      double read_bw = (size / (1024.0 * 1024.0 * 1024.0)) / (read_time / 1000.0);
+      double read_bw =
+          (size / (1024.0 * 1024.0 * 1024.0)) / (read_time / 1000.0);
       std::cout << "  Memory read bandwidth: " << read_bw << " GB/s"
                 << std::endl;
     }

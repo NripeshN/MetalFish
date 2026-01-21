@@ -4,7 +4,7 @@ MetalFish Comprehensive Elo Tournament
 
 Runs a tournament between multiple chess engines to determine Elo ratings:
 - MetalFish-AB (Alpha-Beta search with 'go' command) - Full Stockfish search with NNUE
-- MetalFish-MCTS (GPU MCTS with 'mctsmt' command) - Pure GPU-accelerated MCTS  
+- MetalFish-MCTS (GPU MCTS with 'mctsmt' command) - Pure GPU-accelerated MCTS
 - MetalFish-Hybrid (Parallel MCTS+AB with 'parallel_hybrid' command) - Best of both worlds
 - Stockfish at various skill levels (0-20)
 - Patricia (aggressive engine, ~3500 Elo)
@@ -28,7 +28,6 @@ Usage:
 
 import argparse
 import glob
-import chess  # python-chess library for proper move handling
 import json
 import math
 import os
@@ -42,6 +41,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import chess  # python-chess library for proper move handling
 
 # Default engines configuration (used if engines_config.json is not found)
 DEFAULT_ENGINES_CONFIG = {
@@ -49,17 +49,17 @@ DEFAULT_ENGINES_CONFIG = {
         "MetalFish-AB": {
             "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
             "expected_elo": None,
-            "options": {"Threads": "1", "Hash": "128", "Ponder": "false"}
+            "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
         },
         "MetalFish-MCTS": {
             "description": "MetalFish with Pure GPU MCTS",
             "expected_elo": None,
-            "options": {"Ponder": "false"}
+            "options": {"Ponder": "false"},
         },
         "MetalFish-Hybrid": {
             "description": "MetalFish with Parallel MCTS+AB hybrid search",
             "expected_elo": None,
-            "options": {"Ponder": "false"}
+            "options": {"Ponder": "false"},
         },
         "Patricia": {
             "description": "Aggressive chess engine by Adam Kulju",
@@ -67,7 +67,7 @@ DEFAULT_ENGINES_CONFIG = {
             "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
             "path": "reference/Patricia/engine/patricia",
             "anchor": True,
-            "anchor_elo": 3415
+            "anchor_elo": 3415,
         },
         "Berserk": {
             "description": "Strong NNUE engine by Jay Honnold",
@@ -75,34 +75,50 @@ DEFAULT_ENGINES_CONFIG = {
             "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
             "path": "reference/berserk/src/berserk",
             "anchor": True,
-            "anchor_elo": 3662
+            "anchor_elo": 3662,
         },
         "Lc0": {
             "description": "Leela Chess Zero - neural network engine",
             "expected_elo": 3716,
             "options": {"Threads": "1", "Ponder": "false"},
             "path": "reference/lc0/build/release/lc0",
-            "network_path": "reference/lc0/build/release/network.pb.gz"
-        }
+            "network_path": "reference/lc0/build/release/network.pb.gz",
+        },
     },
     "stockfish": {
         "path": "reference/stockfish/src/stockfish",
         "default_levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 17, 18, 19, 20],
         "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
         "skill_elo_map": {
-            "0": 1725, "1": 1982, "2": 2233, "3": 2474, "4": 2643,
-            "5": 2800, "6": 2947, "7": 3059, "8": 3156, "9": 3237,
-            "10": 3304, "11": 3362, "12": 3412, "13": 3459, "14": 3505,
-            "15": 3551, "16": 3584, "17": 3609, "18": 3644, "19": 3697,
-            "20": 3764
-        }
+            "0": 1725,
+            "1": 1982,
+            "2": 2233,
+            "3": 2474,
+            "4": 2643,
+            "5": 2800,
+            "6": 2947,
+            "7": 3059,
+            "8": 3156,
+            "9": 3237,
+            "10": 3304,
+            "11": 3362,
+            "12": 3412,
+            "13": 3459,
+            "14": 3505,
+            "15": 3551,
+            "16": 3584,
+            "17": 3609,
+            "18": 3644,
+            "19": 3697,
+            "20": 3764,
+        },
     },
     "opening_book": {
         "file": "reference/books/8moves_v3.pgn",
         "format": "pgn",
         "description": "8-move openings (16 plies) - CCRL-style balanced openings",
         "total_positions": 34700,
-        "depth_plies": 16
+        "depth_plies": 16,
     },
     "tournament_defaults": {
         "games_per_pair": 16,
@@ -110,25 +126,34 @@ DEFAULT_ENGINES_CONFIG = {
         "concurrency": 1,
         "ponder": False,
         "repeat": True,
-        "recover": True
-    }
+        "recover": True,
+    },
 }
 
 
 def load_engines_config(base_dir: Path) -> Dict[str, Any]:
     """Load engines configuration from JSON file or use defaults."""
     config_path = base_dir / "tools" / "engines_config.json"
-    
+
     if config_path.exists():
         try:
             with open(config_path, "r") as f:
                 config = json.load(f)
-            print(f"{Colors.DIM}  Loaded engine config from: {config_path}{Colors.RESET}", file=sys.stderr)
+            print(
+                f"{Colors.DIM}  Loaded engine config from: {config_path}{Colors.RESET}",
+                file=sys.stderr,
+            )
             return config
         except (json.JSONDecodeError, IOError) as e:
-            print(f"{Colors.YELLOW}  Warning: Could not load {config_path}: {e}{Colors.RESET}", file=sys.stderr)
-            print(f"{Colors.DIM}  Using default configuration{Colors.RESET}", file=sys.stderr)
-    
+            print(
+                f"{Colors.YELLOW}  Warning: Could not load {config_path}: {e}{Colors.RESET}",
+                file=sys.stderr,
+            )
+            print(
+                f"{Colors.DIM}  Using default configuration{Colors.RESET}",
+                file=sys.stderr,
+            )
+
     return DEFAULT_ENGINES_CONFIG
 
 
@@ -149,12 +174,12 @@ class Colors:
     BLACK_FG = "\033[30m"
     # Rich colors for board
     LIGHT_SQUARE = "\033[48;2;240;217;181m"  # Warm beige
-    DARK_SQUARE = "\033[48;2;181;136;99m"    # Brown
-    WHITE_PIECE = "\033[38;2;255;248;220m"   # Cornsilk/cream - warm white
-    BLACK_PIECE = "\033[38;2;40;40;40m"      # Very dark gray
+    DARK_SQUARE = "\033[48;2;181;136;99m"  # Brown
+    WHITE_PIECE = "\033[38;2;255;248;220m"  # Cornsilk/cream - warm white
+    BLACK_PIECE = "\033[38;2;40;40;40m"  # Very dark gray
     HIGHLIGHT_SQUARE = "\033[48;2;186;202;68m"  # Lichess-style green highlight
-    BORDER_COLOR = "\033[38;2;139;90;43m"    # Wood brown
-    COORD_COLOR = "\033[38;2;101;67;33m"     # Dark brown
+    BORDER_COLOR = "\033[38;2;139;90;43m"  # Wood brown
+    COORD_COLOR = "\033[38;2;101;67;33m"  # Dark brown
     # Cursor control
     CLEAR_SCREEN = "\033[2J"
     CURSOR_HOME = "\033[H"
@@ -168,19 +193,29 @@ class Colors:
 
 class ChessBoardVisualizer:
     """Terminal-based chess board visualizer with Unicode pieces and rich colors.
-    
+
     Uses python-chess library for all move handling and board state management.
     """
-    
+
     # Unicode chess pieces - using filled/solid pieces for both colors
     # Differentiated by text color (white pieces = cream, black pieces = dark)
     WHITE_PIECES = {
-        'K': '♚', 'Q': '♛', 'R': '♜', 'B': '♝', 'N': '♞', 'P': '♟',
+        "K": "♚",
+        "Q": "♛",
+        "R": "♜",
+        "B": "♝",
+        "N": "♞",
+        "P": "♟",
     }
     BLACK_PIECES = {
-        'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟',
+        "k": "♚",
+        "q": "♛",
+        "r": "♜",
+        "b": "♝",
+        "n": "♞",
+        "p": "♟",
     }
-    
+
     def __init__(self):
         self.chess_board = chess.Board()  # python-chess board for all logic
         self.white_player = "White"
@@ -189,19 +224,19 @@ class ChessBoardVisualizer:
         self.last_move_from = None
         self.last_move_to = None
         self.board_height = 26  # Lines used by the board display
-        
+
         # 8x8 board array for display (synced from chess_board)
         self.board = self._sync_board()
-    
+
     def _sync_board(self) -> List[List[str]]:
         """Sync internal board array from python-chess board."""
-        board = [[' ' for _ in range(8)] for _ in range(8)]
+        board = [[" " for _ in range(8)] for _ in range(8)]
         for square, piece in self.chess_board.piece_map().items():
             rank = 7 - chess.square_rank(square)
             file = chess.square_file(square)
             board[rank][file] = piece.symbol()
         return board
-    
+
     def reset(self):
         """Reset to starting position."""
         self.chess_board.reset()
@@ -209,15 +244,15 @@ class ChessBoardVisualizer:
         self.last_move_from = None
         self.last_move_to = None
         self.result = "*"
-    
+
     def apply_move(self, move_str: str, is_white: bool = True) -> bool:
         """Apply a move to the board using python-chess.
-        
+
         Accepts SAN (e.g., 'Nf3', 'O-O') or UCI (e.g., 'g1f3', 'e1g1').
         """
-        if not move_str or move_str in ['1-0', '0-1', '1/2-1/2', '*']:
+        if not move_str or move_str in ["1-0", "0-1", "1/2-1/2", "*"]:
             return False
-        
+
         try:
             # Try parsing as SAN first
             move = self.chess_board.parse_san(move_str)
@@ -229,21 +264,27 @@ class ChessBoardVisualizer:
                     return False
             except (chess.InvalidMoveError, ValueError):
                 return False
-        
+
         # Store move squares for highlighting
-        self.last_move_from = (7 - chess.square_rank(move.from_square), chess.square_file(move.from_square))
-        self.last_move_to = (7 - chess.square_rank(move.to_square), chess.square_file(move.to_square))
-        
+        self.last_move_from = (
+            7 - chess.square_rank(move.from_square),
+            chess.square_file(move.from_square),
+        )
+        self.last_move_to = (
+            7 - chess.square_rank(move.to_square),
+            chess.square_file(move.to_square),
+        )
+
         # Apply move
         self.chess_board.push(move)
         self.board = self._sync_board()
         return True
-    
+
     @property
     def current_move(self) -> int:
         """Get current move number (ply count)."""
         return len(self.chess_board.move_stack)
-    
+
     def get_san(self, uci_move: str) -> str:
         """Convert UCI move to SAN notation."""
         try:
@@ -251,12 +292,12 @@ class ChessBoardVisualizer:
             return self.chess_board.san(move)
         except:
             return uci_move
-    
+
     def _get_piece_display(self, piece: str, is_light_square: bool) -> str:
         """Get the colored piece character for display."""
-        if piece == ' ':
-            return '  '
-        
+        if piece == " ":
+            return "  "
+
         # Determine piece color and get unicode character
         if piece.isupper():
             # White piece
@@ -266,13 +307,19 @@ class ChessBoardVisualizer:
             # Black piece
             char = self.BLACK_PIECES.get(piece, piece)
             piece_color = Colors.BLACK_PIECE
-        
+
         return f"{piece_color}{char} "
-    
-    def render(self, last_move: str = "", show_info: bool = True, live_score: str = "", 
-               white_score: float = 0, black_score: float = 0) -> str:
+
+    def render(
+        self,
+        last_move: str = "",
+        show_info: bool = True,
+        live_score: str = "",
+        white_score: float = 0,
+        black_score: float = 0,
+    ) -> str:
         """Render the board as a string with rich formatting.
-        
+
         Args:
             last_move: Move notation to display
             show_info: Whether to show info line
@@ -281,62 +328,74 @@ class ChessBoardVisualizer:
             black_score: Points for black player (1 per win, 0.5 per draw)
         """
         lines = []
-        
+
         # Title bar - fixed width box (48 chars inner width)
         inner_width = 48
         lines.append("")
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}╔{'═' * inner_width}╗{Colors.RESET}")
-        
+
         # Format scores - show as integer if whole number, else one decimal
         def fmt_score(s):
             return str(int(s)) if s == int(s) else f"{s:.1f}"
-        
+
         # Player names with scores: "Engine1 (2.5) vs Engine2 (1.5)"
         white_score_str = fmt_score(white_score)
         black_score_str = fmt_score(black_score)
-        
+
         # Build title with scores next to names
         title_parts = f"{self.white_player} ({white_score_str}) vs ({black_score_str}) {self.black_player}"
         padding = inner_width - len(title_parts)
         left_pad = max(0, padding // 2)
         right_pad = max(0, padding - left_pad)
-        
-        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{' ' * left_pad}{Colors.BOLD}{self.white_player}{Colors.RESET} ({Colors.GREEN}{white_score_str}{Colors.RESET}) vs ({Colors.GREEN}{black_score_str}{Colors.RESET}) {Colors.BOLD}{self.black_player}{Colors.RESET}{' ' * right_pad}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
-        
+
+        lines.append(
+            f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{' ' * left_pad}{Colors.BOLD}{self.white_player}{Colors.RESET} ({Colors.GREEN}{white_score_str}{Colors.RESET}) vs ({Colors.GREEN}{black_score_str}{Colors.RESET}) {Colors.BOLD}{self.black_player}{Colors.RESET}{' ' * right_pad}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}"
+        )
+
         # Move info line
         if last_move:
             move_info = last_move
         else:
             side = "White" if self.current_move % 2 == 0 else "Black"
             move_info = f"{side} to move"
-        
+
         # Build the info line with proper spacing
         padding_needed = inner_width - len(move_info) - 2
         if padding_needed < 1:
             padding_needed = 1
-        
-        colored_content = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * padding_needed} "
-        
-        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{colored_content}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
-        
+
+        colored_content = (
+            f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * padding_needed} "
+        )
+
+        lines.append(
+            f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{colored_content}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}"
+        )
+
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}╚{'═' * inner_width}╝{Colors.RESET}")
         lines.append("")
-        
+
         # Top coordinates
-        lines.append(f"      {Colors.COORD_COLOR}a    b    c    d    e    f    g    h{Colors.RESET}")
-        lines.append(f"    {Colors.BORDER_COLOR}+----+----+----+----+----+----+----+----+{Colors.RESET}")
-        
+        lines.append(
+            f"      {Colors.COORD_COLOR}a    b    c    d    e    f    g    h{Colors.RESET}"
+        )
+        lines.append(
+            f"    {Colors.BORDER_COLOR}+----+----+----+----+----+----+----+----+{Colors.RESET}"
+        )
+
         for rank in range(8):
             row = f"  {Colors.COORD_COLOR}{8 - rank}{Colors.RESET} {Colors.BORDER_COLOR}|{Colors.RESET}"
-            
+
             for file in range(8):
                 piece = self.board[rank][file]
                 is_light = (rank + file) % 2 == 0
-                
+
                 # Check if this square was part of the last move
-                is_highlighted = (self.last_move_from == (rank, file) or 
-                                  self.last_move_to == (rank, file))
-                
+                is_highlighted = self.last_move_from == (
+                    rank,
+                    file,
+                ) or self.last_move_to == (rank, file)
+
                 # Choose square color
                 if is_highlighted:
                     sq_color = Colors.HIGHLIGHT_SQUARE
@@ -344,9 +403,9 @@ class ChessBoardVisualizer:
                     sq_color = Colors.LIGHT_SQUARE
                 else:
                     sq_color = Colors.DARK_SQUARE
-                
+
                 # Get piece display - more prominent with bold
-                if piece == ' ':
+                if piece == " ":
                     piece_str = "    "
                 elif piece.isupper():
                     char = self.WHITE_PIECES.get(piece, piece)
@@ -354,42 +413,50 @@ class ChessBoardVisualizer:
                 else:
                     char = self.BLACK_PIECES.get(piece, piece)
                     piece_str = f"{Colors.BLACK_PIECE}{Colors.BOLD} {char}  {Colors.RESET}{sq_color}"
-                
+
                 row += f"{sq_color}{piece_str}{Colors.RESET}{Colors.BORDER_COLOR}|{Colors.RESET}"
-            
+
             row += f" {Colors.COORD_COLOR}{8 - rank}{Colors.RESET}"
             lines.append(row)
-            lines.append(f"    {Colors.BORDER_COLOR}+----+----+----+----+----+----+----+----+{Colors.RESET}")
-        
+            lines.append(
+                f"    {Colors.BORDER_COLOR}+----+----+----+----+----+----+----+----+{Colors.RESET}"
+            )
+
         # Bottom coordinates
-        lines.append(f"      {Colors.COORD_COLOR}a    b    c    d    e    f    g    h{Colors.RESET}")
+        lines.append(
+            f"      {Colors.COORD_COLOR}a    b    c    d    e    f    g    h{Colors.RESET}"
+        )
         lines.append("")
-        
-        return '\n'.join(lines)
-    
+
+        return "\n".join(lines)
+
     def render_compact(self, last_move: str = "") -> str:
         """Render a more compact board without grid lines."""
         lines = []
-        
+
         # Header
-        lines.append(f"\n  {Colors.BOLD}{Colors.WHITE_PIECE}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}")
+        lines.append(
+            f"\n  {Colors.BOLD}{Colors.WHITE_PIECE}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}"
+        )
         move_num = (self.current_move + 1) // 2
         lines.append(f"  {Colors.DIM}Move {move_num}: {last_move}{Colors.RESET}\n")
-        
+
         # Coordinates and board
         lines.append(f"    {Colors.COORD_COLOR} a  b  c  d  e  f  g  h{Colors.RESET}")
-        
+
         for rank in range(8):
             row = f"  {Colors.COORD_COLOR}{8 - rank}{Colors.RESET} "
-            
+
             for file in range(8):
                 piece = self.board[rank][file]
                 is_light = (rank + file) % 2 == 0
-                
+
                 # Check if this square was part of the last move
-                is_highlighted = (self.last_move_from == (rank, file) or 
-                                  self.last_move_to == (rank, file))
-                
+                is_highlighted = self.last_move_from == (
+                    rank,
+                    file,
+                ) or self.last_move_to == (rank, file)
+
                 # Choose square color
                 if is_highlighted:
                     sq_color = Colors.HIGHLIGHT_SQUARE
@@ -397,19 +464,19 @@ class ChessBoardVisualizer:
                     sq_color = Colors.LIGHT_SQUARE
                 else:
                     sq_color = Colors.DARK_SQUARE
-                
+
                 # Get piece display
                 piece_str = self._get_piece_display(piece, is_light)
-                
+
                 row += f"{sq_color}{piece_str}{Colors.RESET}"
-            
+
             row += f" {Colors.COORD_COLOR}{8 - rank}{Colors.RESET}"
             lines.append(row)
-        
+
         lines.append(f"    {Colors.COORD_COLOR} a  b  c  d  e  f  g  h{Colors.RESET}\n")
-        
-        return '\n'.join(lines)
-    
+
+        return "\n".join(lines)
+
     def clear_board_area(self):
         """Clear the board display area."""
         # Move cursor up and clear lines
@@ -421,34 +488,34 @@ class ChessBoardVisualizer:
 def parse_pgn_moves(pgn: str) -> List[str]:
     """Extract moves from PGN string."""
     # Remove headers
-    lines = pgn.split('\n')
+    lines = pgn.split("\n")
     move_text = ""
     in_moves = False
     for line in lines:
-        if line.startswith('['):
+        if line.startswith("["):
             continue
         if line.strip():
             in_moves = True
         if in_moves:
             move_text += " " + line
-    
+
     # Remove comments and variations
-    move_text = re.sub(r'\{[^}]*\}', '', move_text)
-    move_text = re.sub(r'\([^)]*\)', '', move_text)
-    
+    move_text = re.sub(r"\{[^}]*\}", "", move_text)
+    move_text = re.sub(r"\([^)]*\)", "", move_text)
+
     # Extract moves (remove move numbers and results)
     tokens = move_text.split()
     moves = []
     for token in tokens:
         # Skip move numbers like "1." or "1..."
-        if re.match(r'^\d+\.+$', token):
+        if re.match(r"^\d+\.+$", token):
             continue
         # Skip results
-        if token in ['1-0', '0-1', '1/2-1/2', '*']:
+        if token in ["1-0", "0-1", "1/2-1/2", "*"]:
             continue
         if token:
             moves.append(token)
-    
+
     return moves
 
 
@@ -650,7 +717,7 @@ class Tournament:
         self.elo_calc = EloCalculator()
         self.opening_book: Optional[Path] = None
         self.opening_format: str = "pgn"
-        
+
         # Load opening book from config
         config = load_engines_config(base_dir)
         if "opening_book" in config:
@@ -659,7 +726,10 @@ class Tournament:
             if book_path.exists():
                 self.opening_book = book_path
                 self.opening_format = book_config.get("format", "pgn")
-                print(f"{Colors.DIM}  Using opening book: {book_path.name} ({book_config.get('description', '')}){Colors.RESET}", file=sys.stderr)
+                print(
+                    f"{Colors.DIM}  Using opening book: {book_path.name} ({book_config.get('description', '')}){Colors.RESET}",
+                    file=sys.stderr,
+                )
 
     def add_engine(self, config: EngineConfig):
         """Add an engine to the tournament."""
@@ -667,7 +737,7 @@ class Tournament:
 
     def setup_default_engines(self, stockfish_levels: List[int] = None):
         """Setup default engine configurations from engines_config.json."""
-        
+
         # Load configuration
         config = load_engines_config(self.base_dir)
         engines_config = config.get("engines", {})
@@ -718,14 +788,14 @@ class Tournament:
             # Skip MetalFish variants (already added above)
             if engine_name.startswith("MetalFish"):
                 continue
-            
+
             # Get engine path from config or use default
             engine_path_str = engine_cfg.get("path", "")
             if not engine_path_str:
                 continue
-                
+
             engine_path = self.base_dir / engine_path_str
-            
+
             # Special handling for Lc0 (needs network file)
             if engine_name == "Lc0":
                 network_path_str = engine_cfg.get("network_path", "")
@@ -744,7 +814,7 @@ class Tournament:
                         )
                     )
                 continue
-            
+
             # Standard engine
             if engine_path.exists():
                 self.add_engine(
@@ -762,16 +832,24 @@ class Tournament:
                     anchor_set = True
 
         # Stockfish at various skill levels
-        stockfish_path_str = stockfish_config.get("path", "reference/stockfish/src/stockfish")
+        stockfish_path_str = stockfish_config.get(
+            "path", "reference/stockfish/src/stockfish"
+        )
         stockfish_path = self.base_dir / stockfish_path_str
-        
+
         if stockfish_path.exists():
             if stockfish_levels is None:
-                stockfish_levels = stockfish_config.get("default_levels", [1, 5, 10, 15, 20])
+                stockfish_levels = stockfish_config.get(
+                    "default_levels", [1, 5, 10, 15, 20]
+                )
 
             # Get Elo map from config
-            skill_elo_map = {int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()}
-            default_options = stockfish_config.get("options", {"Threads": "1", "Hash": "128"})
+            skill_elo_map = {
+                int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()
+            }
+            default_options = stockfish_config.get(
+                "options", {"Threads": "1", "Hash": "128"}
+            )
 
             for level in stockfish_levels:
                 name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
@@ -840,47 +918,57 @@ done | "$ENGINE"
         current_game = {"headers": {}, "moves": "", "raw": ""}
         in_moves = False
         current_raw = []
-        
-        for line in pgn_content.split('\n'):
+
+        for line in pgn_content.split("\n"):
             current_raw.append(line)
             line = line.strip()
-            
-            if line.startswith('['):
+
+            if line.startswith("["):
                 # Header line
                 in_moves = False
                 match = re.match(r'\[(\w+)\s+"([^"]*)"\]', line)
                 if match:
                     current_game["headers"][match.group(1)] = match.group(2)
-            elif line and not line.startswith('['):
+            elif line and not line.startswith("["):
                 # Move line
                 in_moves = True
                 current_game["moves"] += line + " "
             elif not line and in_moves and current_game["moves"]:
                 # Empty line after moves - game complete
-                current_game["raw"] = '\n'.join(current_raw)
+                current_game["raw"] = "\n".join(current_raw)
                 games.append(current_game)
                 current_game = {"headers": {}, "moves": "", "raw": ""}
                 current_raw = []
                 in_moves = False
-        
+
         # Don't forget the last game
         if current_game["moves"]:
-            current_game["raw"] = '\n'.join(current_raw)
+            current_game["raw"] = "\n".join(current_raw)
             games.append(current_game)
-        
+
         return games
 
-    def _format_game_output(self, game_num: int, total_games: int, 
-                           white: str, black: str, result: str, 
-                           reason: str, pgn: str, moves: str) -> str:
+    def _format_game_output(
+        self,
+        game_num: int,
+        total_games: int,
+        white: str,
+        black: str,
+        result: str,
+        reason: str,
+        pgn: str,
+        moves: str,
+    ) -> str:
         """Format a single game's output with pretty printing."""
         lines = []
-        
+
         # Game header
         lines.append(f"\n{Colors.BOLD}{'─' * 70}{Colors.RESET}")
-        lines.append(f"{Colors.BOLD}  📋 Game {game_num}/{total_games}: {white} vs {black}{Colors.RESET}")
+        lines.append(
+            f"{Colors.BOLD}  📋 Game {game_num}/{total_games}: {white} vs {black}{Colors.RESET}"
+        )
         lines.append(f"{Colors.BOLD}{'─' * 70}{Colors.RESET}")
-        
+
         # Result with color coding
         result_color = Colors.RESET
         result_icon = "🤝"
@@ -890,26 +978,34 @@ done | "$ENGINE"
         elif result == "0-1":
             result_color = Colors.RED
             result_icon = "👑"
-        
-        lines.append(f"  {result_icon} {Colors.BOLD}Result:{Colors.RESET} {result_color}{result}{Colors.RESET}")
+
+        lines.append(
+            f"  {result_icon} {Colors.BOLD}Result:{Colors.RESET} {result_color}{result}{Colors.RESET}"
+        )
         if reason:
             lines.append(f"  📝 {Colors.DIM}Reason: {reason}{Colors.RESET}")
-        
+
         # Move count
         move_list = moves.strip().split()
         # Count actual moves (filter out move numbers and results)
-        actual_moves = [m for m in move_list if not m.endswith('.') and m not in ['1-0', '0-1', '1/2-1/2', '*']]
+        actual_moves = [
+            m
+            for m in move_list
+            if not m.endswith(".") and m not in ["1-0", "0-1", "1/2-1/2", "*"]
+        ]
         num_moves = len(actual_moves) // 2 + len(actual_moves) % 2
         lines.append(f"  🎯 {Colors.DIM}Moves: {num_moves}{Colors.RESET}")
-        
+
         # PGN section
         lines.append(f"\n  {Colors.CYAN}┌{'─' * 66}┐{Colors.RESET}")
-        lines.append(f"  {Colors.CYAN}│{Colors.RESET} {Colors.BOLD}PGN:{Colors.RESET}{' ' * 60}{Colors.CYAN}│{Colors.RESET}")
+        lines.append(
+            f"  {Colors.CYAN}│{Colors.RESET} {Colors.BOLD}PGN:{Colors.RESET}{' ' * 60}{Colors.CYAN}│{Colors.RESET}"
+        )
         lines.append(f"  {Colors.CYAN}├{'─' * 66}┤{Colors.RESET}")
-        
+
         # Format PGN with word wrap
-        for pgn_line in pgn.strip().split('\n'):
-            if pgn_line.startswith('['):
+        for pgn_line in pgn.strip().split("\n"):
+            if pgn_line.startswith("["):
                 # Header line - dim
                 formatted = f"  {Colors.CYAN}│{Colors.RESET} {Colors.DIM}{pgn_line[:64]:<64}{Colors.RESET} {Colors.CYAN}│{Colors.RESET}"
             else:
@@ -921,17 +1017,19 @@ done | "$ENGINE"
                         current_line += (" " if current_line else "") + word
                     else:
                         if current_line:
-                            lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+                            lines.append(
+                                f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                            )
                         current_line = word
                 if current_line:
                     formatted = f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
                 else:
                     continue
             lines.append(formatted)
-        
+
         lines.append(f"  {Colors.CYAN}└{'─' * 66}┘{Colors.RESET}")
-        
-        return '\n'.join(lines)
+
+        return "\n".join(lines)
 
     def run_match(
         self,
@@ -967,20 +1065,24 @@ done | "$ENGINE"
                 "-repeat",
             ]
         )
-        
+
         # Add opening book if available
         book_to_use = opening_book or self.opening_book
         if book_to_use and book_to_use.exists():
             fmt = opening_format if opening_book else self.opening_format
-            cmd.extend([
-                "-openings",
-                f"file={book_to_use}",
-                f"format={fmt}",
-                "order=random",  # Random selection from book
-            ])
+            cmd.extend(
+                [
+                    "-openings",
+                    f"file={book_to_use}",
+                    f"format={fmt}",
+                    "order=random",  # Random selection from book
+                ]
+            )
 
         print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
-        print(f"{Colors.BOLD}  🎮 MATCH: {engine1.name} vs {engine2.name}{Colors.RESET}")
+        print(
+            f"{Colors.BOLD}  🎮 MATCH: {engine1.name} vs {engine2.name}{Colors.RESET}"
+        )
         print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
         print(f"  📊 Games: {games} | ⏱️  Time Control: {time_control}")
         if book_to_use:
@@ -1009,7 +1111,7 @@ done | "$ENGINE"
 
         # Parse individual games from PGN
         parsed_games = self._parse_pgn_games(pgn_content)
-        
+
         # Track running score
         wins1, wins2, draws = 0, 0, 0
 
@@ -1022,7 +1124,7 @@ done | "$ENGINE"
             reason = headers.get("Termination", "")
             moves = game["moves"]
             raw_pgn = game["raw"]
-            
+
             # Update score
             if result == "1-0":
                 if white == engine1.name:
@@ -1036,27 +1138,35 @@ done | "$ENGINE"
                     wins2 += 1
             else:
                 draws += 1
-            
+
             # Print formatted game output
-            print(self._format_game_output(
-                i, games, white, black, result, reason, raw_pgn, moves
-            ))
-            
+            print(
+                self._format_game_output(
+                    i, games, white, black, result, reason, raw_pgn, moves
+                )
+            )
+
             # Print running score
             total = wins1 + wins2 + draws
             score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
-            print(f"\n  {Colors.MAGENTA}📈 Running Score ({engine1.name} vs {engine2.name}):{Colors.RESET}")
-            print(f"     {Colors.BOLD}{wins1} - {draws} - {wins2}{Colors.RESET}  [{score_pct:.1f}%]")
-            
+            print(
+                f"\n  {Colors.MAGENTA}📈 Running Score ({engine1.name} vs {engine2.name}):{Colors.RESET}"
+            )
+            print(
+                f"     {Colors.BOLD}{wins1} - {draws} - {wins2}{Colors.RESET}  [{score_pct:.1f}%]"
+            )
+
             # Create GameResult
-            game_results.append(GameResult(
-                white=white,
-                black=black,
-                result=result,
-                reason=reason,
-                moves=len(moves.split()) // 3,  # Rough move count
-                pgn=raw_pgn
-            ))
+            game_results.append(
+                GameResult(
+                    white=white,
+                    black=black,
+                    result=result,
+                    reason=reason,
+                    moves=len(moves.split()) // 3,  # Rough move count
+                    pgn=raw_pgn,
+                )
+            )
 
         # If no games parsed from PGN, fall back to score parsing
         if not game_results:
@@ -1079,7 +1189,9 @@ done | "$ENGINE"
                 for _ in range(wins2):
                     game_results.append(GameResult(engine1.name, engine2.name, "0-1"))
                 for _ in range(draws):
-                    game_results.append(GameResult(engine1.name, engine2.name, "1/2-1/2"))
+                    game_results.append(
+                        GameResult(engine1.name, engine2.name, "1/2-1/2")
+                    )
             else:
                 # Try to parse from PGN counts
                 wins1 = pgn_content.count('[Result "1-0"]')
@@ -1091,16 +1203,22 @@ done | "$ENGINE"
                 for _ in range(wins2):
                     game_results.append(GameResult(engine1.name, engine2.name, "0-1"))
                 for _ in range(draws):
-                    game_results.append(GameResult(engine1.name, engine2.name, "1/2-1/2"))
+                    game_results.append(
+                        GameResult(engine1.name, engine2.name, "1/2-1/2")
+                    )
 
         # Print final match summary
         total = wins1 + wins2 + draws
         score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
-        
+
         print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
-        print(f"{Colors.BOLD}  ✅ MATCH COMPLETE: {engine1.name} vs {engine2.name}{Colors.RESET}")
+        print(
+            f"{Colors.BOLD}  ✅ MATCH COMPLETE: {engine1.name} vs {engine2.name}{Colors.RESET}"
+        )
         print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
-        print(f"  {Colors.GREEN}Final Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}")
+        print(
+            f"  {Colors.GREEN}Final Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}"
+        )
         print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}\n")
 
         # Clean up
@@ -1238,7 +1356,7 @@ def get_engine_configs(
 ) -> Dict[str, EngineConfig]:
     """Get all available engine configurations for CI mode from engines_config.json."""
     configs = {}
-    
+
     # Load configuration
     config = load_engines_config(base_dir)
     engines_config = config.get("engines", {})
@@ -1280,14 +1398,14 @@ def get_engine_configs(
         # Skip MetalFish variants (already added above)
         if engine_name.startswith("MetalFish"):
             continue
-        
+
         # Get engine path from config
         engine_path_str = engine_cfg.get("path", "")
         if not engine_path_str:
             continue
-            
+
         engine_path = base_dir / engine_path_str
-        
+
         # Special handling for Lc0 (needs network file)
         if engine_name == "Lc0":
             network_path_str = engine_cfg.get("network_path", "")
@@ -1303,7 +1421,7 @@ def get_engine_configs(
                         expected_elo=engine_cfg.get("expected_elo"),
                     )
             continue
-        
+
         # Standard engine
         if engine_path.exists():
             configs[engine_name] = EngineConfig(
@@ -1314,16 +1432,24 @@ def get_engine_configs(
             )
 
     # Stockfish at various levels
-    stockfish_path_str = stockfish_config.get("path", "reference/stockfish/src/stockfish")
+    stockfish_path_str = stockfish_config.get(
+        "path", "reference/stockfish/src/stockfish"
+    )
     stockfish_path = base_dir / stockfish_path_str
-    
+
     if stockfish_path.exists():
         if stockfish_levels is None:
-            stockfish_levels = stockfish_config.get("default_levels", [1, 5, 10, 15, 20])
+            stockfish_levels = stockfish_config.get(
+                "default_levels", [1, 5, 10, 15, 20]
+            )
 
         # Get Elo map from config
-        skill_elo_map = {int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()}
-        default_options = stockfish_config.get("options", {"Threads": "1", "Hash": "128"})
+        skill_elo_map = {
+            int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()
+        }
+        default_options = stockfish_config.get(
+            "options", {"Threads": "1", "Hash": "128"}
+        )
 
         for level in stockfish_levels:
             name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
@@ -1356,48 +1482,57 @@ def _parse_pgn_games_standalone(pgn_content: str) -> List[Dict[str, Any]]:
     current_game = {"headers": {}, "moves": "", "raw": ""}
     in_moves = False
     current_raw = []
-    
-    for line in pgn_content.split('\n'):
+
+    for line in pgn_content.split("\n"):
         current_raw.append(line)
         line_stripped = line.strip()
-        
-        if line_stripped.startswith('['):
+
+        if line_stripped.startswith("["):
             # Header line
             in_moves = False
             match = re.match(r'\[(\w+)\s+"([^"]*)"\]', line_stripped)
             if match:
                 current_game["headers"][match.group(1)] = match.group(2)
-        elif line_stripped and not line_stripped.startswith('['):
+        elif line_stripped and not line_stripped.startswith("["):
             # Move line
             in_moves = True
             current_game["moves"] += line_stripped + " "
         elif not line_stripped and in_moves and current_game["moves"]:
             # Empty line after moves - game complete
-            current_game["raw"] = '\n'.join(current_raw)
+            current_game["raw"] = "\n".join(current_raw)
             games.append(current_game)
             current_game = {"headers": {}, "moves": "", "raw": ""}
             current_raw = []
             in_moves = False
-    
+
     # Don't forget the last game
     if current_game["moves"]:
-        current_game["raw"] = '\n'.join(current_raw)
+        current_game["raw"] = "\n".join(current_raw)
         games.append(current_game)
-    
+
     return games
 
 
-def _format_ci_game_output(game_num: int, total_games: int, 
-                           white: str, black: str, result: str, 
-                           reason: str, pgn: str, moves: str) -> str:
+def _format_ci_game_output(
+    game_num: int,
+    total_games: int,
+    white: str,
+    black: str,
+    result: str,
+    reason: str,
+    pgn: str,
+    moves: str,
+) -> str:
     """Format a single game's output with pretty printing (CI mode)."""
     lines = []
-    
+
     # Game header
     lines.append(f"\n{Colors.BOLD}{'─' * 70}{Colors.RESET}")
-    lines.append(f"{Colors.BOLD}  📋 Game {game_num}/{total_games}: {white} vs {black}{Colors.RESET}")
+    lines.append(
+        f"{Colors.BOLD}  📋 Game {game_num}/{total_games}: {white} vs {black}{Colors.RESET}"
+    )
     lines.append(f"{Colors.BOLD}{'─' * 70}{Colors.RESET}")
-    
+
     # Result with color coding
     result_color = Colors.RESET
     result_icon = "🤝"
@@ -1407,25 +1542,33 @@ def _format_ci_game_output(game_num: int, total_games: int,
     elif result == "0-1":
         result_color = Colors.RED
         result_icon = "👑"
-    
-    lines.append(f"  {result_icon} {Colors.BOLD}Result:{Colors.RESET} {result_color}{result}{Colors.RESET}")
+
+    lines.append(
+        f"  {result_icon} {Colors.BOLD}Result:{Colors.RESET} {result_color}{result}{Colors.RESET}"
+    )
     if reason:
         lines.append(f"  📝 {Colors.DIM}Reason: {reason}{Colors.RESET}")
-    
+
     # Move count
     move_list = moves.strip().split()
-    actual_moves = [m for m in move_list if not m.endswith('.') and m not in ['1-0', '0-1', '1/2-1/2', '*']]
+    actual_moves = [
+        m
+        for m in move_list
+        if not m.endswith(".") and m not in ["1-0", "0-1", "1/2-1/2", "*"]
+    ]
     num_moves = len(actual_moves) // 2 + len(actual_moves) % 2
     lines.append(f"  🎯 {Colors.DIM}Moves: {num_moves}{Colors.RESET}")
-    
+
     # PGN section
     lines.append(f"\n  {Colors.CYAN}┌{'─' * 66}┐{Colors.RESET}")
-    lines.append(f"  {Colors.CYAN}│{Colors.RESET} {Colors.BOLD}PGN:{Colors.RESET}{' ' * 60}{Colors.CYAN}│{Colors.RESET}")
+    lines.append(
+        f"  {Colors.CYAN}│{Colors.RESET} {Colors.BOLD}PGN:{Colors.RESET}{' ' * 60}{Colors.CYAN}│{Colors.RESET}"
+    )
     lines.append(f"  {Colors.CYAN}├{'─' * 66}┤{Colors.RESET}")
-    
+
     # Format PGN - one move pair per line (1. e4 e5 then newline)
-    for pgn_line in pgn.strip().split('\n'):
-        if pgn_line.startswith('['):
+    for pgn_line in pgn.strip().split("\n"):
+        if pgn_line.startswith("["):
             # Header line - dim
             formatted = f"  {Colors.CYAN}│{Colors.RESET} {Colors.DIM}{pgn_line[:64]:<64}{Colors.RESET} {Colors.CYAN}│{Colors.RESET}"
             lines.append(formatted)
@@ -1434,41 +1577,51 @@ def _format_ci_game_output(game_num: int, total_games: int,
             # Parse moves and group by move number
             tokens = pgn_line.split()
             current_line = ""
-            
+
             for token in tokens:
                 # Check if this is a move number (e.g., "1.", "12.")
-                is_move_num = token.rstrip('.').isdigit() and token.endswith('.')
-                
+                is_move_num = token.rstrip(".").isdigit() and token.endswith(".")
+
                 # If we have content and hit a new move number, output current line
-                if is_move_num and current_line and not current_line.endswith('. '):
+                if is_move_num and current_line and not current_line.endswith(". "):
                     # Pad and output the line
                     if len(current_line) <= 64:
-                        lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+                        lines.append(
+                            f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                        )
                     else:
-                        lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line[:64]} {Colors.CYAN}│{Colors.RESET}")
+                        lines.append(
+                            f"  {Colors.CYAN}│{Colors.RESET} {current_line[:64]} {Colors.CYAN}│{Colors.RESET}"
+                        )
                     current_line = ""
-                
+
                 # Add token to current line
                 if current_line:
                     if len(current_line) + len(token) + 1 <= 64:
                         current_line += " " + token
                     else:
                         # Line too long, output and start new
-                        lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+                        lines.append(
+                            f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                        )
                         current_line = token
                 else:
                     current_line = token
-            
+
             # Output remaining content
             if current_line:
                 if len(current_line) <= 64:
-                    lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+                    lines.append(
+                        f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                    )
                 else:
-                    lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line[:64]} {Colors.CYAN}│{Colors.RESET}")
-    
+                    lines.append(
+                        f"  {Colors.CYAN}│{Colors.RESET} {current_line[:64]} {Colors.CYAN}│{Colors.RESET}"
+                    )
+
     lines.append(f"  {Colors.CYAN}└{'─' * 66}┘{Colors.RESET}")
-    
-    return '\n'.join(lines)
+
+    return "\n".join(lines)
 
 
 def run_ci_match(
@@ -1556,15 +1709,17 @@ def run_ci_match(
             "all",  # Enable verbose output for real-time move tracking
         ]
     )
-    
+
     # Add opening book if available
     if opening_book:
-        cmd.extend([
-            "-openings",
-            f"file={opening_book}",
-            f"format={opening_format}",
-            "order=random",
-        ])
+        cmd.extend(
+            [
+                "-openings",
+                f"file={opening_book}",
+                f"format={opening_format}",
+                "order=random",
+            ]
+        )
 
     print(f"\n{Colors.BOLD}{'=' * 70}{Colors.RESET}")
     print(f"{Colors.BOLD}  CI MATCH: {engine1_name} vs {engine2_name}{Colors.RESET}")
@@ -1575,14 +1730,17 @@ def run_ci_match(
     print(f"  Command: {' '.join(cmd)}")
 
     # Detect CI environment - disable fancy visualization in CI
-    is_ci = os.environ.get('CI', '').lower() == 'true' or os.environ.get('GITHUB_ACTIONS', '').lower() == 'true'
-    
+    is_ci = (
+        os.environ.get("CI", "").lower() == "true"
+        or os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+    )
+
     # Initialize visualizer (only used if not in CI)
     visualizer = ChessBoardVisualizer() if not is_ci else None
     if visualizer:
         visualizer.white_player = engine1_name
         visualizer.black_player = engine2_name
-    
+
     # Track score
     wins1, wins2, draws = 0, 0, 0
     # Track points for each engine (1 for win, 0.5 for draw)
@@ -1591,23 +1749,19 @@ def run_ci_match(
     current_game = 0
     current_white_player = engine1_name  # Track current game's white player
     current_black_player = engine2_name  # Track current game's black player
-    
+
     try:
         # Use Popen for real-time output
         process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
         )
-        
+
         output_lines = []
         board_displayed = False
         game_pgns = []  # Store PGN content for each game
-        
+
         print(f"\n{Colors.DIM}  Starting games...{Colors.RESET}\n")
-        
+
         # Helper function to read and replay game from PGN
         def show_game_final_position(game_num: int, result_str: str, reason: str):
             """Read PGN file and show the final position of the specified game."""
@@ -1617,17 +1771,17 @@ def run_ci_match(
             try:
                 with open(pgn_file.name, "r") as f:
                     pgn_content = f.read()
-                
+
                 # Parse individual games from PGN
                 games_list = _parse_pgn_games_standalone(pgn_content)
                 if game_num <= len(games_list):
                     game_data = games_list[game_num - 1]
                     game_pgn = game_data.get("raw", "")
                     game_moves = game_data.get("moves", "")
-                    
+
                     # Extract moves from this game's moves string
                     moves = parse_pgn_moves(game_moves)
-                    
+
                     if moves and visualizer:
                         # Reset and replay all moves
                         visualizer.reset()
@@ -1638,54 +1792,59 @@ def run_ci_match(
                                 is_white = not is_white
                             except Exception:
                                 pass  # Skip invalid moves
-                        
+
                         # Show final position
                         move_count = len(moves)
                         last_move = moves[-1] if moves else ""
-                        
+
                         # Calculate scores for display
                         if current_white_player == engine1_name:
                             white_pts, black_pts = engine1_points, engine2_points
                         else:
                             white_pts, black_pts = engine2_points, engine1_points
-                        
+
                         # Print final position with board (keep visible - don't clear)
-                        print(visualizer.render(f"Final: {last_move} ({move_count} moves) - {result_str}",
-                                               white_score=white_pts, black_score=black_pts))
+                        print(
+                            visualizer.render(
+                                f"Final: {last_move} ({move_count} moves) - {result_str}",
+                                white_score=white_pts,
+                                black_score=black_pts,
+                            )
+                        )
                         sys.stdout.flush()
                         board_displayed = True
-                        
+
             except Exception as e:
                 pass  # If we can't read PGN, just continue without board display
-            
+
             return game_pgn, game_moves
-        
+
         # Read stdout line by line
         if process.stdout is not None:
             for line in process.stdout:
                 output_lines.append(line)
                 line_stripped = line.strip()
-                
+
                 # Detect game start
                 if "Started game" in line_stripped:
                     current_game += 1
                     if visualizer:
                         visualizer.reset()  # Reset uses python-chess internally
-                    
+
                     # Parse players from line like "Started game 1 of 20 (Engine1 vs Engine2)"
-                    match = re.search(r'\((.+?) vs (.+?)\)', line_stripped)
+                    match = re.search(r"\((.+?) vs (.+?)\)", line_stripped)
                     if match:
                         current_white_player = match.group(1)
                         current_black_player = match.group(2)
                         if visualizer:
                             visualizer.white_player = current_white_player
                             visualizer.black_player = current_black_player
-                    
+
                     # Clear previous board if displayed
                     if board_displayed and visualizer:
                         visualizer.clear_board_area()
                         board_displayed = False
-                    
+
                     # Show initial board or CI message
                     if visualizer:
                         # Calculate scores for display (who's white this game?)
@@ -1693,19 +1852,26 @@ def run_ci_match(
                             white_pts, black_pts = engine1_points, engine2_points
                         else:
                             white_pts, black_pts = engine2_points, engine1_points
-                        print(visualizer.render(f"Game {current_game}/{games} - Starting...", 
-                                               white_score=white_pts, black_score=black_pts))
+                        print(
+                            visualizer.render(
+                                f"Game {current_game}/{games} - Starting...",
+                                white_score=white_pts,
+                                black_score=black_pts,
+                            )
+                        )
                         board_displayed = True
                     else:
                         print(f"  Started game {current_game} of {games}")
-                
+
                 # Parse position command to get all moves played
                 # Format: ">Engine(0): position startpos moves e2e4 e7e5 ..."
-                pos_match = re.search(r'>[^:]+: position startpos moves (.+)', line_stripped)
+                pos_match = re.search(
+                    r">[^:]+: position startpos moves (.+)", line_stripped
+                )
                 if pos_match and visualizer and board_displayed:
                     moves_str = pos_match.group(1).strip()
                     new_uci_moves = moves_str.split()
-                    
+
                     # Check if we have new moves compared to what's on visualizer's board
                     current_move_count = len(visualizer.chess_board.move_stack)
                     if len(new_uci_moves) > current_move_count:
@@ -1716,36 +1882,42 @@ def run_ci_match(
                             # Get SAN before applying (proper notation with +, #, disambiguation)
                             last_san = visualizer.get_san(uci_move)
                             visualizer.apply_move(uci_move)
-                        
+
                         # Create move display with proper SAN notation
                         move_count = visualizer.current_move
                         move_num = (move_count + 1) // 2
-                        is_white_last = (move_count % 2 == 1)
-                        
+                        is_white_last = move_count % 2 == 1
+
                         # Show just the move in proper notation (e.g., "8. Nf3" or "8... b5")
                         if is_white_last:
                             move_display = f"{move_num}. {last_san}"
                         else:
                             move_display = f"{move_num}... {last_san}"
-                        
+
                         # Calculate scores for display (who's white this game?)
                         if current_white_player == engine1_name:
                             white_pts, black_pts = engine1_points, engine2_points
                         else:
                             white_pts, black_pts = engine2_points, engine1_points
-                        
+
                         # Update board display
                         visualizer.clear_board_area()
-                        print(visualizer.render(move_display, white_score=white_pts, black_score=black_pts))
+                        print(
+                            visualizer.render(
+                                move_display,
+                                white_score=white_pts,
+                                black_score=black_pts,
+                            )
+                        )
                         board_displayed = True
-                
+
                 # Detect game end
                 if "Finished game" in line_stripped:
                     # Clear the board for final position from PGN
                     if board_displayed and visualizer:
                         visualizer.clear_board_area()
                         board_displayed = False
-                    
+
                     # Parse result and update points
                     if "1-0" in line_stripped:
                         result = "1-0"
@@ -1768,45 +1940,56 @@ def run_ci_match(
                         draws += 1
                         engine1_points += 0.5
                         engine2_points += 0.5
-                    
+
                     # Extract reason
                     reason = ""
-                    reason_match = re.search(r'\{(.+?)\}', line_stripped)
+                    reason_match = re.search(r"\{(.+?)\}", line_stripped)
                     if reason_match:
                         reason = reason_match.group(1)
-                    
+
                     # Show final position from PGN (accurate) - only if visualizer is available
                     if visualizer:
-                        game_pgn, game_moves = show_game_final_position(current_game, result, reason)
+                        game_pgn, game_moves = show_game_final_position(
+                            current_game, result, reason
+                        )
                         board_displayed = True
                     else:
                         game_pgn, game_moves = "", ""
-                    
+
                     # Print game result
                     total = wins1 + wins2 + draws
                     score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
-                    
-                    print(f"  {Colors.CYAN}Game {current_game}:{Colors.RESET} {current_white_player} vs {current_black_player}")
+
+                    print(
+                        f"  {Colors.CYAN}Game {current_game}:{Colors.RESET} {current_white_player} vs {current_black_player}"
+                    )
                     print(f"  {Colors.BOLD}Result: {result}{Colors.RESET}", end="")
                     if reason:
                         print(f" {Colors.DIM}({reason}){Colors.RESET}")
                     else:
                         print()
-                    print(f"  {Colors.MAGENTA}Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}")
-                    
+                    print(
+                        f"  {Colors.MAGENTA}Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}"
+                    )
+
                     # Print formatted PGN
                     if game_pgn:
                         formatted_output = _format_ci_game_output(
-                            current_game, games,
-                            current_white_player, current_black_player,
-                            result, reason, game_pgn, game_moves
+                            current_game,
+                            games,
+                            current_white_player,
+                            current_black_player,
+                            result,
+                            reason,
+                            game_pgn,
+                            game_moves,
                         )
                         print(formatted_output)
                     print()  # Extra spacing between games
-        
+
         process.wait(timeout=7200)
-        output = ''.join(output_lines)
-        
+        output = "".join(output_lines)
+
         if process.returncode != 0:
             print(
                 f"  {Colors.YELLOW}Warning: cutechess-cli returned non-zero exit code: {process.returncode}{Colors.RESET}"
@@ -1834,17 +2017,19 @@ def run_ci_match(
 
     # If no games were tracked from real-time output, parse from PGN/output
     if wins1 + wins2 + draws == 0:
-        print(f"\n  {Colors.YELLOW}Warning: No games parsed from real-time output, using PGN{Colors.RESET}")
-        
+        print(
+            f"\n  {Colors.YELLOW}Warning: No games parsed from real-time output, using PGN{Colors.RESET}"
+        )
+
         # Parse individual games from PGN
         parsed_games = _parse_pgn_games_standalone(pgn_content)
-        
+
         for i, game in enumerate(parsed_games, 1):
             headers = game["headers"]
             white = headers.get("White", engine1_name)
             black = headers.get("Black", engine2_name)
             game_result = headers.get("Result", "*")
-            
+
             if game_result == "1-0":
                 if white == engine1_name:
                     wins1 += 1
@@ -1857,7 +2042,7 @@ def run_ci_match(
                     wins2 += 1
             else:
                 draws += 1
-        
+
         # If still no games, try output parsing
         if wins1 + wins2 + draws == 0:
             score_matches = re.findall(
@@ -1883,11 +2068,15 @@ def run_ci_match(
     # Print final match summary
     total = wins1 + wins2 + draws
     score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
-    
+
     print(f"\n{Colors.BOLD}{'=' * 70}{Colors.RESET}")
-    print(f"{Colors.BOLD}  MATCH COMPLETE: {engine1_name} vs {engine2_name}{Colors.RESET}")
+    print(
+        f"{Colors.BOLD}  MATCH COMPLETE: {engine1_name} vs {engine2_name}{Colors.RESET}"
+    )
     print(f"{Colors.BOLD}{'=' * 70}{Colors.RESET}")
-    print(f"  {Colors.GREEN}Final Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}")
+    print(
+        f"  {Colors.GREEN}Final Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}"
+    )
     print(f"{Colors.BOLD}{'=' * 70}{Colors.RESET}\n")
 
     match_result = {
@@ -1980,13 +2169,16 @@ def aggregate_ci_results(results_dir: Path, output_file: Path = None) -> Dict[st
             # Skip files that don't look like match results
             if "engine1" not in match or "engine2" not in match:
                 continue
-                
+
             if "error" not in match:
                 all_matches.append(match)
                 engines.add(match["engine1"])
                 engines.add(match["engine2"])
         except (json.JSONDecodeError, KeyError) as e:
-            print(f"Warning: Skipping invalid result file {result_file}: {e}", file=sys.stderr)
+            print(
+                f"Warning: Skipping invalid result file {result_file}: {e}",
+                file=sys.stderr,
+            )
             continue
 
     # Calculate Elo ratings - use Patricia as anchor with updated Elo

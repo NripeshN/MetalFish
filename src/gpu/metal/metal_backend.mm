@@ -231,8 +231,9 @@ class MetalBackend : public Backend {
 public:
   static MetalBackend &instance() {
     // Use a pointer to avoid static destruction order issues
-    // The backend is intentionally leaked to prevent crashes during static destruction
-    static MetalBackend* instance = new MetalBackend();
+    // The backend is intentionally leaked to prevent crashes during static
+    // destruction
+    static MetalBackend *instance = new MetalBackend();
     return *instance;
   }
 
@@ -536,7 +537,8 @@ private:
   ~MetalBackend() {
     @autoreleasepool {
       // Synchronize all command queues before releasing resources
-      // This ensures all pending GPU operations complete before we destroy the backend
+      // This ensures all pending GPU operations complete before we destroy the
+      // backend
       if (queue_) {
         id<MTLCommandBuffer> buffer = [queue_ commandBuffer];
         if (buffer) {
@@ -544,7 +546,7 @@ private:
           [buffer waitUntilCompleted];
         }
       }
-      
+
       for (auto q : parallel_queues_) {
         if (q) {
           id<MTLCommandBuffer> buffer = [q commandBuffer];
@@ -554,7 +556,7 @@ private:
           }
         }
       }
-      
+
       // Now release all resources
       for (auto &[name, lib] : libraries_) {
         if (lib)
@@ -637,17 +639,17 @@ static std::atomic<bool> g_backend_shutdown{false};
 
 Backend &Backend::get() { return MetalBackend::instance(); }
 
-bool Backend::available() { 
+bool Backend::available() {
   if (g_backend_shutdown.load(std::memory_order_acquire)) {
     return false;
   }
-  return MetalBackend::instance().is_available(); 
+  return MetalBackend::instance().is_available();
 }
 
 void shutdown_gpu_backend() {
   // Set shutdown flag first to prevent any new access
   g_backend_shutdown.store(true, std::memory_order_release);
-  
+
   // Synchronize all pending GPU operations
   if (MetalBackend::instance().is_available()) {
     MetalBackend::instance().synchronize();

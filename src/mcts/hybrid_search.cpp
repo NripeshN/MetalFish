@@ -4,7 +4,7 @@
 
   Implementation of the Hybrid MCTS + Alpha-Beta search.
   Optimized for Apple Silicon unified memory and Metal GPU.
-  
+
   This implementation incorporates algorithms from Leela Chess Zero (Lc0),
   including PUCT with logarithmic growth, FPU reduction strategy, and
   moves left head (MLH) utility.
@@ -13,9 +13,9 @@
 */
 
 #include "hybrid_search.h"
-#include "lc0_mcts_core.h"
 #include "../eval/evaluate.h"
 #include "../gpu/backend.h"
+#include "lc0_mcts_core.h"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -464,7 +464,7 @@ HybridSearch::~HybridSearch() {
   if (batched_evaluator_) {
     batched_evaluator_->stop();
   }
-  
+
   // Synchronize GPU to ensure all pending operations complete
   // This prevents crashes from async callbacks accessing destroyed objects
   // Only synchronize if the backend is still available and not shut down
@@ -783,11 +783,11 @@ float HybridSearch::evaluate_position_direct(const MCTSPosition &pos,
     std::lock_guard<std::mutex> lock(gpu_mutex_);
     auto [psqt, score] =
         gpu_nnue_->evaluate_single(pos.stockfish_position(), true);
-    
+
     // Use Lc0-style score transformation
     // This converts NNUE centipawn scores to MCTS Q values in [-1, 1]
     value = NnueScoreToQ(score);
-    
+
     // CRITICAL: Ensure value is from side-to-move's perspective
     // NNUE returns score from white's perspective, so negate for black
     if (pos.is_black_to_move()) {
@@ -839,17 +839,20 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
   // Get parent statistics
   uint32_t parent_n = node->n() + node->n_in_flight();
   float parent_q = node->n() > 0 ? node->q() : 0.0f;
-  
+
   // Lc0-style PUCT with logarithmic growth
   // Formula: cpuct_init + cpuct_factor * log((N + cpuct_base) / cpuct_base)
-  float effective_cpuct = cpuct + config_.cpuct_factor * 
-      std::log((static_cast<float>(parent_n) + config_.cpuct_base) / config_.cpuct_base);
-  
+  float effective_cpuct =
+      cpuct + config_.cpuct_factor *
+                  std::log((static_cast<float>(parent_n) + config_.cpuct_base) /
+                           config_.cpuct_base);
+
   // Compute U coefficient: cpuct * sqrt(children_visits)
   uint32_t children_visits = node->n() > 0 ? node->n() - 1 : 0;
-  float cpuct_sqrt_n = effective_cpuct * std::sqrt(static_cast<float>(
-      std::max(children_visits, 1u)));
-  
+  float cpuct_sqrt_n =
+      effective_cpuct *
+      std::sqrt(static_cast<float>(std::max(children_visits, 1u)));
+
   // Lc0-style FPU with reduction strategy
   // FPU = -parent_Q - fpu_value * sqrt(visited_policy)
   float visited_policy = 0.0f;
@@ -860,10 +863,10 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
       visited_policy += edge.policy();
     }
   }
-  
+
   // FPU reduction: unvisited nodes get parent Q minus a reduction
   float fpu = parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
-  
+
   // Set up moves left evaluator for MLH utility
   Lc0SearchParams lc0_params;
   lc0_params.moves_left_max_effect = 0.0345f;
@@ -871,7 +874,7 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
   lc0_params.moves_left_slope = 0.0027f;
   lc0_params.moves_left_scaled_factor = 1.6521f;
   lc0_params.moves_left_quadratic_factor = -0.6521f;
-  
+
   MovesLeftEvaluator m_eval(lc0_params, node->m(), parent_q);
 
   int best_idx = -1;
@@ -884,15 +887,15 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
     float q, m_utility = 0.0f;
     float policy = edge.policy();
     int n_started = 0;
-    
+
     if (child) {
       uint32_t n = child->n();
       uint32_t n_in_flight = child->n_in_flight();
       n_started = static_cast<int>(n + n_in_flight);
-      
+
       // CRITICAL: Negate child Q value because it's from opponent's perspective
       q = (n > 0) ? -child->q() : fpu;
-      
+
       // Add moves left utility if enabled and child has visits
       if (n > 0 && m_eval.IsEnabled()) {
         m_utility = m_eval.GetMUtility(child->m(), q);
@@ -901,7 +904,7 @@ int HybridSearch::select_child_puct(HybridNode *node, float cpuct,
       q = fpu;
       m_utility = m_eval.GetDefaultMUtility();
     }
-    
+
     // Lc0-style PUCT score: Q + U + M
     // U = cpuct * sqrt(parent_N) * P / (1 + child_N)
     float u = cpuct_sqrt_n * policy / (1.0f + static_cast<float>(n_started));
@@ -933,34 +936,34 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos,
   }
 
   node->create_edges(moves);
-  
+
   // CRITICAL FIX: Set heuristic policy priors (like thread_safe_mcts.cpp)
   // Without this, all moves have equal probability which hurts search quality
   int num_edges = node->num_edges();
   if (num_edges > 0) {
     std::vector<float> scores(num_edges);
     float max_score = -1e9f;
-    
+
     const Position &sf_pos = pos.stockfish_position();
-    
+
     for (int i = 0; i < num_edges; ++i) {
       Move m = node->edges()[i].move().to_stockfish();
       float score = 0.0f;
-      
+
       // Captures scored by MVV-LVA and SEE
       if (sf_pos.capture(m)) {
         PieceType captured = m.type_of() == EN_PASSANT
-                               ? PAWN
-                               : type_of(sf_pos.piece_on(m.to_sq()));
+                                 ? PAWN
+                                 : type_of(sf_pos.piece_on(m.to_sq()));
         PieceType attacker = type_of(sf_pos.piece_on(m.from_sq()));
         static const float piece_values[] = {0, 100, 320, 330, 500, 900, 0};
         score += piece_values[captured] * 6.0f - piece_values[attacker];
-        
+
         if (sf_pos.see_ge(m, Value(0))) {
           score += 300.0f;
         }
       }
-      
+
       // Promotions
       if (m.type_of() == PROMOTION) {
         PieceType promo = m.promotion_type();
@@ -969,47 +972,49 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos,
         else if (promo == KNIGHT)
           score += 800.0f;
       }
-      
+
       // Checks
       if (sf_pos.gives_check(m)) {
         score += 400.0f;
       }
-      
+
       // Center control
       int to_file = file_of(m.to_sq());
       int to_rank = rank_of(m.to_sq());
       float center_dist = std::abs(to_file - 3.5f) + std::abs(to_rank - 3.5f);
       score += (7.0f - center_dist) * 15.0f;
-      
+
       // Castling bonus
       if (m.type_of() == CASTLING) {
         score += 200.0f;
       }
-      
+
       scores[i] = score;
       max_score = std::max(max_score, score);
     }
-    
+
     // Softmax normalization with temperature
     // Handle temperature == 0 as argmax (deterministic selection)
     if (config_.policy_softmax_temp == 0.0f) {
       // Count how many moves tie for max score
       int max_count = 0;
       for (int i = 0; i < num_edges; ++i) {
-        if (scores[i] == max_score) ++max_count;
+        if (scores[i] == max_score)
+          ++max_count;
       }
       float normalized_prob = 1.0f / max_count;
       for (int i = 0; i < num_edges; ++i) {
-        node->edges()[i].set_policy((scores[i] == max_score) ? normalized_prob : 0.0f);
+        node->edges()[i].set_policy((scores[i] == max_score) ? normalized_prob
+                                                             : 0.0f);
       }
     } else {
       float sum = 0.0f;
       for (int i = 0; i < num_edges; ++i) {
-        scores[i] = std::exp((scores[i] - max_score) / 
+        scores[i] = std::exp((scores[i] - max_score) /
                              (config_.policy_softmax_temp * 400.0f));
         sum += scores[i];
       }
-      
+
       // Set policy priors
       for (int i = 0; i < num_edges; ++i) {
         node->edges()[i].set_policy(scores[i] / sum);
@@ -1043,7 +1048,8 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos,
 void HybridSearch::backpropagate(HybridNode *node, float value, float draw_prob,
                                  float moves_left) {
   // CRITICAL: Start with the value from the leaf node's perspective
-  // As we go up the tree, we flip the value because each level is opponent's turn
+  // As we go up the tree, we flip the value because each level is opponent's
+  // turn
   while (node) {
     // Remove virtual loss first
     node->remove_virtual_loss(config_.virtual_loss);
@@ -1163,15 +1169,15 @@ int64_t HybridSearch::get_time_budget_ms() const {
   // CRITICAL FIX: Use more aggressive time allocation for MCTS
   // MCTS needs more time than alpha-beta to build a good tree
   // Use ~5% of remaining time + most of increment (was 2.5% + increment)
-  int64_t base_time = time_left / 20;  // 5% of remaining time
-  int64_t inc_time = inc * 3 / 4;       // Use 75% of increment
-  
+  int64_t base_time = time_left / 20; // 5% of remaining time
+  int64_t inc_time = inc * 3 / 4;     // Use 75% of increment
+
   // Minimum 500ms for MCTS to be effective
   int64_t budget = std::max(int64_t(500), base_time + inc_time);
-  
+
   // Cap at 20% of remaining time to avoid time trouble
   int64_t max_time = time_left / 5;
-  
+
   return std::min(budget, max_time);
 }
 
@@ -1181,34 +1187,35 @@ MCTSMove HybridSearch::select_best_move() const {
     return MCTSMove();
 
   int num_edges = root->num_edges();
-  
+
   // Lc0-style best move selection
   // Priority: Terminal wins > Most visits > Best Q > Highest policy
   // Also prefers shorter wins and longer losses
-  
+
   struct EdgeInfo {
     int idx;
     uint32_t visits;
     float q;
     float policy;
-    float m;  // Moves left estimate
+    float m; // Moves left estimate
     bool is_terminal;
     bool is_win;
     bool is_loss;
   };
-  
+
   std::vector<EdgeInfo> candidates;
   candidates.reserve(num_edges);
-  
+
   for (int i = 0; i < num_edges; ++i) {
     const HybridEdge &edge = root->edges()[i];
     HybridNode *child = edge.child();
-    
+
     if (child && child->n() > 0) {
       EdgeInfo info;
       info.idx = i;
       info.visits = child->n();
-      info.q = -child->q();  // Negate because child Q is from opponent's perspective
+      info.q =
+          -child->q(); // Negate because child Q is from opponent's perspective
       info.policy = edge.policy();
       info.m = child->m();
       info.is_terminal = child->is_terminal();
@@ -1217,33 +1224,42 @@ MCTSMove HybridSearch::select_best_move() const {
       candidates.push_back(info);
     }
   }
-  
+
   if (candidates.empty()) {
     // No visits, return first move
     return root->edges()[0].move();
   }
-  
+
   // Sort by Lc0 criteria
-  std::sort(candidates.begin(), candidates.end(), [](const EdgeInfo& a, const EdgeInfo& b) {
-    // Terminal wins first (prefer shorter)
-    if (a.is_win && !b.is_win) return true;
-    if (!a.is_win && b.is_win) return false;
-    if (a.is_win && b.is_win) return a.m < b.m;  // Shorter win
-    
-    // Terminal losses last (prefer longer)
-    if (a.is_loss && !b.is_loss) return false;
-    if (!a.is_loss && b.is_loss) return true;
-    if (a.is_loss && b.is_loss) return a.m > b.m;  // Longer loss
-    
-    // Non-terminal: prefer more visits
-    if (a.visits != b.visits) return a.visits > b.visits;
-    
-    // Then prefer better Q
-    if (std::abs(a.q - b.q) > 0.001f) return a.q > b.q;
-    
-    // Then prefer higher policy
-    return a.policy > b.policy;
-  });
+  std::sort(candidates.begin(), candidates.end(),
+            [](const EdgeInfo &a, const EdgeInfo &b) {
+              // Terminal wins first (prefer shorter)
+              if (a.is_win && !b.is_win)
+                return true;
+              if (!a.is_win && b.is_win)
+                return false;
+              if (a.is_win && b.is_win)
+                return a.m < b.m; // Shorter win
+
+              // Terminal losses last (prefer longer)
+              if (a.is_loss && !b.is_loss)
+                return false;
+              if (!a.is_loss && b.is_loss)
+                return true;
+              if (a.is_loss && b.is_loss)
+                return a.m > b.m; // Longer loss
+
+              // Non-terminal: prefer more visits
+              if (a.visits != b.visits)
+                return a.visits > b.visits;
+
+              // Then prefer better Q
+              if (std::abs(a.q - b.q) > 0.001f)
+                return a.q > b.q;
+
+              // Then prefer higher policy
+              return a.policy > b.policy;
+            });
 
   return root->edges()[candidates[0].idx].move();
 }

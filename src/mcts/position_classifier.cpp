@@ -539,22 +539,22 @@ SearchStrategy StrategySelector::get_strategy(const PositionFeatures &f) const {
   switch (s.position_type) {
   case PositionType::HIGHLY_TACTICAL:
     // Tactical positions still favor alpha-beta but not as extreme
-    s.mcts_weight = 0.35f;  // was 0.2f
-    s.ab_weight = 0.65f;    // was 0.8f
-    s.cpuct = 1.2f;         // Lower exploration for tactics
-    s.ab_depth = 8;         // was 10
-    s.ab_verify_depth = 5;  // was 6
+    s.mcts_weight = 0.35f;          // was 0.2f
+    s.ab_weight = 0.65f;            // was 0.8f
+    s.cpuct = 1.2f;                 // Lower exploration for tactics
+    s.ab_depth = 8;                 // was 10
+    s.ab_verify_depth = 5;          // was 6
     s.ab_override_threshold = 0.3f; // was 0.1f - harder to override MCTS
     s.use_ab_for_tactics = true;
     s.time_multiplier = 1.1f; // was 1.2f
     break;
 
   case PositionType::TACTICAL:
-    s.mcts_weight = 0.45f;  // was 0.35f
-    s.ab_weight = 0.55f;    // was 0.65f
-    s.cpuct = 1.5f;         // was 2.0f
-    s.ab_depth = 7;         // was 8
-    s.ab_verify_depth = 4;  // was 5
+    s.mcts_weight = 0.45f;           // was 0.35f
+    s.ab_weight = 0.55f;             // was 0.65f
+    s.cpuct = 1.5f;                  // was 2.0f
+    s.ab_depth = 7;                  // was 8
+    s.ab_verify_depth = 4;           // was 5
     s.ab_override_threshold = 0.35f; // was 0.2f
     s.use_ab_for_tactics = true;
     s.time_multiplier = 1.05f; // was 1.1f
@@ -562,9 +562,9 @@ SearchStrategy StrategySelector::get_strategy(const PositionFeatures &f) const {
 
   case PositionType::BALANCED:
     // Balanced positions should favor MCTS slightly (it's our strength)
-    s.mcts_weight = 0.55f;  // was 0.5f
-    s.ab_weight = 0.45f;    // was 0.5f
-    s.cpuct = 1.5f;         // was 2.5f
+    s.mcts_weight = 0.55f; // was 0.5f
+    s.ab_weight = 0.45f;   // was 0.5f
+    s.cpuct = 1.5f;        // was 2.5f
     s.ab_depth = 6;
     s.ab_verify_depth = 4;
     s.ab_override_threshold = 0.4f; // was 0.3f
@@ -574,9 +574,9 @@ SearchStrategy StrategySelector::get_strategy(const PositionFeatures &f) const {
 
   case PositionType::STRATEGIC:
     // Strategic positions favor MCTS more
-    s.mcts_weight = 0.70f;  // was 0.65f
-    s.ab_weight = 0.30f;    // was 0.35f
-    s.cpuct = 1.8f;         // was 3.0f - still moderate exploration
+    s.mcts_weight = 0.70f; // was 0.65f
+    s.ab_weight = 0.30f;   // was 0.35f
+    s.cpuct = 1.8f;        // was 3.0f - still moderate exploration
     s.ab_depth = 5;
     s.ab_verify_depth = 3;
     s.ab_override_threshold = 0.5f; // was 0.4f
@@ -586,9 +586,9 @@ SearchStrategy StrategySelector::get_strategy(const PositionFeatures &f) const {
 
   case PositionType::HIGHLY_STRATEGIC:
     // Highly strategic positions strongly favor MCTS
-    s.mcts_weight = 0.85f;  // was 0.8f
-    s.ab_weight = 0.15f;    // was 0.2f
-    s.cpuct = 2.0f;         // was 3.5f
+    s.mcts_weight = 0.85f; // was 0.8f
+    s.ab_weight = 0.15f;   // was 0.2f
+    s.cpuct = 2.0f;        // was 3.5f
     s.ab_depth = 4;
     s.ab_verify_depth = 2;
     s.ab_override_threshold = 0.6f; // was 0.5f
@@ -599,10 +599,10 @@ SearchStrategy StrategySelector::get_strategy(const PositionFeatures &f) const {
 
   // Adjust for endgame - MCTS can be good in endgames too
   if (f.is_endgame) {
-    s.ab_depth += 1;  // was +2
+    s.ab_depth += 1; // was +2
     s.ab_verify_depth += 1;
     // Don't reduce MCTS weight as much in endgames
-    s.mcts_weight *= 0.9f;  // was 0.8f
+    s.mcts_weight *= 0.9f; // was 0.8f
     s.ab_weight = 1.0f - s.mcts_weight;
   }
 

@@ -6,7 +6,7 @@
 
   Implements the GPU backend interface for NVIDIA CUDA.
   Optimized for modern NVIDIA GPUs with tensor cores when available.
-  
+
   Note: This implementation uses only the CUDA Runtime API to avoid
   dependency on libcuda.so (driver library) which requires an actual GPU.
   Runtime kernel compilation (NVRTC) is optional and guarded.
@@ -15,9 +15,9 @@
 #ifdef USE_CUDA
 
 #include "cuda_backend.h"
-#include <cuda_runtime.h>
 #include <atomic>
 #include <cstring>
+#include <cuda_runtime.h>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -248,17 +248,15 @@ void CUDACommandEncoder::dispatch_threadgroups(size_t groups_x, size_t groups_y,
                    args.data(), 0, stream_);
 }
 
-void CUDACommandEncoder::barrier() {
-  cudaStreamSynchronize(stream_);
-}
+void CUDACommandEncoder::barrier() { cudaStreamSynchronize(stream_); }
 
 // ============================================================================
 // CUDABackend Implementation
 // ============================================================================
 
 CUDABackend::CUDABackend()
-    : device_id_(-1), compute_capability_major_(0), compute_capability_minor_(0),
-      total_memory_(0), multiprocessor_count_(0),
+    : device_id_(-1), compute_capability_major_(0),
+      compute_capability_minor_(0), total_memory_(0), multiprocessor_count_(0),
       unified_memory_supported_(false), default_stream_(nullptr),
       stream_index_(0), allocated_memory_(0), peak_memory_(0),
       initialized_(false) {}
@@ -332,8 +330,9 @@ bool CUDABackend::initialize() {
   initialized_ = true;
 
   std::cout << "[CUDA Backend] Initialized: " << device_name_ << std::endl;
-  std::cout << "[CUDA Backend] Compute Capability: " << compute_capability_major_
-            << "." << compute_capability_minor_ << std::endl;
+  std::cout << "[CUDA Backend] Compute Capability: "
+            << compute_capability_major_ << "." << compute_capability_minor_
+            << std::endl;
   std::cout << "[CUDA Backend] Total Memory: " << total_memory_ / (1024 * 1024)
             << " MB" << std::endl;
   std::cout << "[CUDA Backend] Multiprocessors: " << multiprocessor_count_
@@ -428,9 +427,8 @@ std::unique_ptr<Buffer> CUDABackend::create_buffer(size_t size, MemoryMode mode,
   return std::make_unique<CUDABuffer>(device_ptr, host_ptr, size, unified);
 }
 
-std::unique_ptr<Buffer> CUDABackend::create_buffer(const void *data,
-                                                   size_t size,
-                                                   MemoryMode mode) {
+std::unique_ptr<Buffer>
+CUDABackend::create_buffer(const void *data, size_t size, MemoryMode mode) {
   auto buffer = create_buffer(size, mode);
   if (buffer && data) {
     auto *cuda_buffer = static_cast<CUDABuffer *>(buffer.get());
@@ -461,9 +459,8 @@ CUDABackend::create_kernel(const std::string &name,
   auto mod_it = modules_.find(library_name);
   if (mod_it != modules_.end()) {
     CUfunction func;
-    CUresult result =
-        cuModuleGetFunction(&func, static_cast<CUmodule>(mod_it->second),
-                            name.c_str());
+    CUresult result = cuModuleGetFunction(
+        &func, static_cast<CUmodule>(mod_it->second), name.c_str());
     if (result == CUDA_SUCCESS) {
       kernels_[key] = func;
       return std::make_unique<CUDAKernel>(name, func);
@@ -480,7 +477,9 @@ bool CUDABackend::compile_library(const std::string &name,
                                   const std::string &source) {
 #if defined(NO_NVRTC) || defined(NO_CUDA_DRIVER_API)
   // Runtime compilation not available without NVRTC and driver API
-  std::cerr << "[CUDA] Runtime compilation not available (NO_NVRTC or NO_CUDA_DRIVER_API defined)" << std::endl;
+  std::cerr << "[CUDA] Runtime compilation not available (NO_NVRTC or "
+               "NO_CUDA_DRIVER_API defined)"
+            << std::endl;
   return false;
 #else
   if (!initialized_) {
@@ -493,9 +492,9 @@ bool CUDABackend::compile_library(const std::string &name,
                                  nullptr, nullptr));
 
   // Set compilation options
-  std::string arch_opt =
-      "--gpu-architecture=compute_" + std::to_string(compute_capability_major_) +
-      std::to_string(compute_capability_minor_);
+  std::string arch_opt = "--gpu-architecture=compute_" +
+                         std::to_string(compute_capability_major_) +
+                         std::to_string(compute_capability_minor_);
   const char *opts[] = {arch_opt.c_str(), "--std=c++17", "-default-device"};
 
   // Compile
@@ -528,7 +527,8 @@ bool CUDABackend::compile_library(const std::string &name,
 
   // Load module
   CUmodule module;
-  CUresult result = cuModuleLoadDataEx(&module, ptx.data(), 0, nullptr, nullptr);
+  CUresult result =
+      cuModuleLoadDataEx(&module, ptx.data(), 0, nullptr, nullptr);
   if (result != CUDA_SUCCESS) {
     std::cerr << "[CUDA] Failed to load module: " << name << std::endl;
     return false;
@@ -548,7 +548,9 @@ bool CUDABackend::load_library(const std::string &name,
                                const std::string &path) {
 #ifdef NO_CUDA_DRIVER_API
   // Library loading not available without driver API
-  std::cerr << "[CUDA] Library loading not available (NO_CUDA_DRIVER_API defined)" << std::endl;
+  std::cerr
+      << "[CUDA] Library loading not available (NO_CUDA_DRIVER_API defined)"
+      << std::endl;
   return false;
 #else
   if (!initialized_) {

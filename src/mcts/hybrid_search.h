@@ -59,19 +59,19 @@ class HybridBatchedEvaluator;
 // Configuration for hybrid search
 struct HybridSearchConfig {
   // Lc0-style MCTS parameters
-  float cpuct = 1.745f;              // Lc0 default: 1.745
-  float cpuct_base = 38739.0f;       // Lc0 default for log growth
-  float cpuct_factor = 3.894f;       // Lc0 default multiplier
-  
+  float cpuct = 1.745f;        // Lc0 default: 1.745
+  float cpuct_base = 38739.0f; // Lc0 default for log growth
+  float cpuct_factor = 3.894f; // Lc0 default multiplier
+
   // FPU (First Play Urgency) - Lc0 reduction strategy
-  float fpu_value = 0.0f;            // Base FPU value (neutral)
-  float fpu_reduction = 0.330f;      // Lc0 default: 0.330
-  
+  float fpu_value = 0.0f;       // Base FPU value (neutral)
+  float fpu_reduction = 0.330f; // Lc0 default: 0.330
+
   // Policy and exploration
   float policy_softmax_temp = 1.0f;
   bool add_dirichlet_noise = true;
-  float dirichlet_alpha = 0.3f;      // Lc0 default
-  float dirichlet_epsilon = 0.25f;   // Lc0 uses 0.25 for training
+  float dirichlet_alpha = 0.3f;    // Lc0 default
+  float dirichlet_epsilon = 0.25f; // Lc0 uses 0.25 for training
   int virtual_loss = 3;
 
   // Alpha-beta integration parameters
