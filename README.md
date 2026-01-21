@@ -1,18 +1,20 @@
 # MetalFish
 
-A high-performance UCI chess engine optimized for Apple Silicon, featuring Metal GPU-accelerated NNUE evaluation and multiple search algorithms.
+A high-performance UCI chess engine optimized for Apple Silicon, featuring Metal GPU-accelerated NNUE evaluation and multiple search algorithms including Lc0-derived MCTS.
 
 ## Overview
 
-MetalFish is a chess engine that leverages Apple Silicon's unified memory architecture and Metal compute capabilities. It implements three distinct search approaches, all utilizing GPU-accelerated NNUE evaluation:
+MetalFish is a chess engine that leverages Apple Silicon's unified memory architecture and Metal compute capabilities. It implements three distinct search approaches:
 
-1. **Alpha-Beta Search** - Traditional minimax with pruning (Stockfish-derived)
-2. **MCTS (Monte Carlo Tree Search)** - Tree search with neural network guidance
-3. **Hybrid MCTS-Alpha-Beta** - Combines MCTS exploration with Alpha-Beta tactical verification
+| Search Mode | Description | UCI Command |
+|-------------|-------------|-------------|
+| **Alpha-Beta** | Traditional minimax with pruning (Stockfish-derived) | `go` |
+| **MCTS** | Lc0-derived Monte Carlo Tree Search with GPU batching | `mctsmt` |
+| **Hybrid** | Parallel MCTS + Alpha-Beta with dynamic integration | `parallel_hybrid` |
 
 ## Search Algorithms
 
-### Alpha-Beta Search
+### Alpha-Beta Search (MetalFish-AB)
 
 The primary search algorithm, derived from Stockfish, featuring:
 
@@ -24,40 +26,73 @@ The primary search algorithm, derived from Stockfish, featuring:
 - History heuristics (butterfly, capture, continuation, pawn)
 - Killer moves and counter moves
 - MVV-LVA move ordering
+- GPU-accelerated NNUE evaluation
 
-**UCI Command:** `go depth N` or `go movetime M`
+### Monte Carlo Tree Search (MetalFish-MCTS)
 
-### Monte Carlo Tree Search (MCTS)
+A multi-threaded MCTS implementation derived from Leela Chess Zero (Lc0), optimized for Apple Silicon GPU evaluation:
 
-A multi-threaded MCTS implementation optimized for GPU evaluation:
+#### Lc0-Derived Algorithms
 
-- PUCT selection with policy priors
-- Virtual loss for multi-threaded tree traversal
-- Lock-free atomic statistics updates
+- **PUCT Selection**: Logarithmic exploration bonus with configurable cpuct
+  ```
+  cpuct = init + factor * log((parent_N + base) / base)
+  ```
+- **First Play Urgency (FPU)**: Reduction strategy for unvisited nodes
+  ```
+  fpu = -parent_Q - reduction * sqrt(visited_policy)
+  ```
+- **Moves Left Head (MLH)**: Utility adjustment for preferring shorter wins
+- **WDL Rescaling**: Win/Draw/Loss probability rescaling for contempt
+- **Dirichlet Noise**: Root exploration with configurable alpha and epsilon
+- **Policy Temperature**: Softmax temperature for move selection
+- **Solid Tree Optimization**: Cache-locality improvements for large trees
+
+#### Multi-Threading
+
+- Virtual loss for concurrent tree traversal
+- Lock-free atomic statistics updates using `std::memory_order_relaxed`
 - Thread-local position management
-- Dirichlet noise at root for exploration
-- Heuristic policy priors (captures, checks, promotions)
+- Collision detection and handling
 
-**UCI Command:** `mctsmt threads=N movetime M`
+#### Apple Silicon Optimizations
 
-**Performance:** ~700K nodes/second with 4 threads on M2 Max
+- SIMD-accelerated policy softmax using Accelerate framework (`vDSP_*`)
+- 128-byte cache-line aligned node statistics
+- GPU-resident evaluation batches in unified memory
+- Asynchronous GPU dispatch with completion handlers
+- Zero-copy CPU/GPU data sharing
 
-### Hybrid MCTS-Alpha-Beta
+### Hybrid MCTS-Alpha-Beta (MetalFish-Hybrid)
 
-Combines both approaches with dynamic strategy selection:
+A parallel hybrid search that runs MCTS and Alpha-Beta simultaneously:
 
-- Position classifier (tactical vs. strategic)
-- MCTS for strategic exploration
-- Alpha-Beta verifier for tactical positions
-- Configurable verification depth and override threshold
+#### Architecture
 
-**UCI Command:** `mcts movetime M`
+- **Parallel Execution**: MCTS and AB run in separate threads concurrently
+- **Shared State**: Lock-free communication via atomic variables
+- **Coordinator Thread**: Manages time allocation and final decision
+
+#### Integration Strategy
+
+- MCTS provides broad exploration and move ordering
+- Alpha-Beta provides tactical verification and precise evaluation
+- Dynamic weighting based on:
+  - Search depth achieved
+  - Score agreement between searches
+  - Position characteristics (tactical vs. strategic)
+
+#### Decision Logic
+
+1. If both searches agree on best move, use it immediately
+2. If AB finds a significantly better move (threshold-based), prefer AB
+3. Otherwise, weight by search confidence and depth
 
 ## GPU Acceleration
 
-MetalFish implements comprehensive GPU acceleration for NNUE evaluation:
+### Metal Backend
 
-### Architecture
+MetalFish implements comprehensive GPU acceleration using Apple's Metal framework:
 
 - Metal compute shaders for neural network inference
 - Zero-copy CPU/GPU data sharing via unified memory
@@ -71,7 +106,8 @@ MetalFish implements comprehensive GPU acceleration for NNUE evaluation:
 - Feature transformer with sparse input handling
 - Dual-perspective accumulator updates
 - Fused forward pass for output layers
-- Batch evaluation for MCTS
+- Batch evaluation for MCTS (up to 256 positions per batch)
+- SIMD policy softmax computation
 
 ### Performance (Apple M2 Max)
 
@@ -87,25 +123,41 @@ MetalFish implements comprehensive GPU acceleration for NNUE evaluation:
 ```
 metalfish/
 ├── src/
-│   ├── core/           # Bitboard, position, move generation
-│   ├── search/         # Alpha-Beta search implementation
-│   ├── eval/           # NNUE evaluation
-│   │   └── nnue/       # Neural network architecture
-│   ├── mcts/           # MCTS and hybrid search
+│   ├── core/              # Bitboard, position, move generation
+│   │   ├── bitboard.*     # Bitboard operations and magic bitboards
+│   │   ├── position.*     # Board representation and state
+│   │   ├── movegen.*      # Legal move generation
+│   │   └── types.h        # Core type definitions
+│   ├── search/            # Alpha-Beta search implementation
+│   │   ├── search.*       # Main search loop
+│   │   ├── movepick.*     # Move ordering
+│   │   └── thread.*       # Thread pool management
+│   ├── eval/              # NNUE evaluation
+│   │   └── nnue/          # Neural network architecture
+│   ├── mcts/              # MCTS and hybrid search
+│   │   ├── lc0_mcts_core.h        # Lc0-derived algorithms
 │   │   ├── thread_safe_mcts.*     # Multi-threaded MCTS
-│   │   ├── hybrid_search.*        # Hybrid MCTS-AB
-│   │   ├── position_classifier.*  # Tactical/strategic detection
-│   │   └── ab_integration.*       # Alpha-Beta integration
-│   ├── gpu/            # GPU acceleration framework
+│   │   ├── parallel_hybrid_search.* # Parallel hybrid search
+│   │   ├── hybrid_search.*        # Hybrid MCTS-AB integration
+│   │   ├── apple_silicon_mcts.*   # Apple Silicon optimizations
+│   │   ├── mcts_tt.*              # MCTS transposition table
+│   │   └── ab_integration.*       # Alpha-Beta bridge
+│   ├── gpu/               # GPU acceleration framework
 │   │   ├── gpu_nnue_integration.* # GPU NNUE manager
-│   │   ├── persistent_pipeline.*  # Command buffer optimization
-│   │   └── metal/      # Metal backend
-│   ├── uci/            # UCI protocol implementation
-│   └── syzygy/         # Tablebase probing
-├── tests/              # Test suite
-├── tools/              # Tournament and analysis scripts
-├── paper/              # Academic paper (LaTeX)
-└── external/           # Dependencies (metal-cpp)
+│   │   ├── gpu_accumulator.*      # Feature extraction
+│   │   ├── gpu_mcts_backend.*     # MCTS GPU backend
+│   │   ├── backend.h              # GPU backend interface
+│   │   └── metal/                 # Metal implementation
+│   │       ├── metal_backend.mm   # Metal backend
+│   │       └── nnue.metal         # Metal shaders
+│   ├── uci/               # UCI protocol implementation
+│   └── syzygy/            # Tablebase probing
+├── tests/                 # Comprehensive test suite
+├── tools/                 # Tournament and analysis scripts
+│   ├── elo_tournament.py  # Automated Elo tournament
+│   └── engines_config.json # Engine configuration
+├── reference/             # Reference engines (gitignored)
+└── external/              # Dependencies (metal-cpp)
 ```
 
 ## Building
@@ -115,6 +167,7 @@ metalfish/
 - macOS 12.0 or later
 - Xcode Command Line Tools
 - CMake 3.20 or later
+- Ninja (recommended)
 - Apple Silicon (M1/M2/M3/M4) recommended
 
 ### Build Instructions
@@ -122,8 +175,8 @@ metalfish/
 ```bash
 cd metalfish
 mkdir build && cd build
-cmake .. -DUSE_METAL=ON
-make -j8
+cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+ninja metalfish
 ```
 
 ### Build Options
@@ -169,59 +222,85 @@ go depth 20
 |---------|-------------|
 | `go depth N` | Alpha-Beta search to depth N |
 | `go movetime M` | Alpha-Beta search for M milliseconds |
-| `mctsmt threads=N movetime M` | Multi-threaded MCTS search |
-| `mcts movetime M` | Hybrid MCTS-Alpha-Beta search |
+| `go wtime W btime B` | Alpha-Beta with time management |
+| `mctsmt movetime M` | Multi-threaded MCTS search |
+| `parallel_hybrid movetime M` | Parallel hybrid MCTS+AB search |
 
 ### UCI Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| Threads | spin | 1 | Number of Alpha-Beta search threads |
+| Threads | spin | 1 | Number of search threads |
 | Hash | spin | 16 | Transposition table size (MB) |
 | MultiPV | spin | 1 | Number of principal variations |
 | Skill Level | spin | 20 | Playing strength (0-20) |
 | UseGPU | check | true | Enable GPU NNUE evaluation |
 | SyzygyPath | string | | Path to Syzygy tablebase files |
-
-### Benchmarks
-
-```bash
-# Standard benchmark
-./build/metalfish bench
-
-# GPU benchmark
-./build/metalfish_gpu_bench
-
-# Hybrid search validation
-./build/metalfish hybridbench
-```
+| Ponder | check | false | Enable pondering |
 
 ## Testing
 
-```bash
-# Run all tests
-./build/metalfish_tests
+### Running Tests
 
-# Run specific test categories
-./build/metalfish_tests  # Includes bitboard, position, movegen, search, MCTS, GPU tests
+```bash
+# Build and run all tests
+cd build
+ninja metalfish_tests
+./metalfish_tests
 ```
 
+### Test Coverage
+
 The test suite validates:
-- Bitboard operations
+
+- Bitboard operations and magic bitboards
 - Position management and FEN parsing
 - Move generation (perft verified)
-- Search correctness
-- MCTS components (nodes, tree, statistics)
+- Alpha-Beta search correctness
+- MCTS components (nodes, tree, statistics, PUCT)
+- Hybrid search integration
 - GPU shader compilation and execution
-- GPU NNUE correctness vs CPU
+- GPU NNUE correctness vs CPU reference
+- Alpha-Beta integration bridge
+
+## Elo Tournament
+
+MetalFish includes an automated tournament system for Elo estimation.
+
+### Tournament Configuration
+
+| Setting | Value |
+|---------|-------|
+| Opening Book | 8moves_v3.pgn (16 plies, CCRL-style) |
+| Games per Opening | 2 (color swap) |
+| Time Control | 10+0.1 |
+| Ponder | OFF |
+
+### Running Locally
+
+```bash
+python3 tools/elo_tournament.py --games 20 --time "10+0.1"
+```
+
+### CI Tournament
+
+The GitHub Actions workflow runs a comprehensive tournament against:
+
+- Stockfish at multiple skill levels (0-20)
+- Patricia (~3415 Elo)
+- Berserk (~3662 Elo)
+- Leela Chess Zero (~3716 Elo)
 
 ## Performance Summary
 
 ### Alpha-Beta Search
-- ~1.5M nodes/second (single thread, CPU NNUE)
-- Standard Stockfish-level search quality
+
+- ~1.5M nodes/second (single thread)
+- Full Stockfish-level search quality
+- GPU-accelerated NNUE evaluation
 
 ### MCTS Search
+
 | Threads | NPS | Scaling |
 |---------|-----|---------|
 | 1 | 333K | 1.0x |
@@ -229,17 +308,42 @@ The test suite validates:
 | 4 | 706K | 2.1x |
 
 ### GPU NNUE
+
 - Batch evaluation: 3.3M positions/second
 - Speedup over sequential: 11.6x at batch size 4096
 
 ## Compatibility
 
 MetalFish is compatible with standard chess GUIs:
+
 - Cute Chess
 - Arena
 - Banksia GUI
 - SCID
 - lichess-bot
+
+## References
+
+### Stockfish
+
+The Alpha-Beta search implementation is derived from Stockfish, the strongest open-source chess engine.
+
+- Repository: https://github.com/official-stockfish/Stockfish
+- License: GPL-3.0
+
+### Leela Chess Zero (Lc0)
+
+The MCTS implementation incorporates algorithms from Lc0, including PUCT selection, FPU calculation, and policy handling.
+
+- Repository: https://github.com/LeelaChessZero/lc0
+- License: GPL-3.0
+
+### Opening Books
+
+Tournament testing uses opening books from the official Stockfish books repository.
+
+- Repository: https://github.com/official-stockfish/books
+- License: CC0-1.0
 
 ## License
 
@@ -252,5 +356,6 @@ Nripesh Niketan
 ## Acknowledgments
 
 - Stockfish team for the search and evaluation framework
+- Leela Chess Zero team for MCTS algorithms and research
 - Apple for Metal compute and unified memory architecture
 - The computer chess community for research and testing methodologies
