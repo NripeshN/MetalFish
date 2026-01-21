@@ -798,7 +798,9 @@ done | "$ENGINE"
         # Clean up
         try:
             os.unlink(pgn_file.name)
-        except:
+        except OSError:
+            # Ignore errors when cleaning up temporary PGN file
+            # File may already be deleted or unavailable
             pass
 
         return game_results
