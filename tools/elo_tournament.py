@@ -279,7 +279,7 @@ class ChessBoardVisualizer:
         lines.append("")
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}╔{'═' * inner_width}╗{Colors.RESET}")
         
-        # Player names line - center it
+        # Player names line - center it (calculate visible length only)
         title = f"{self.white_player} vs {self.black_player}"
         padding = inner_width - len(title)
         left_pad = padding // 2
@@ -288,24 +288,31 @@ class ChessBoardVisualizer:
         
         # Move info line with live score on the right
         if last_move:
-            move_info = last_move  # Use the provided move info directly
+            move_info = last_move
         else:
-            move_num = (self.current_move + 1) // 2
             side = "White" if self.current_move % 2 == 0 else "Black"
             move_info = f"{side} to move"
         
-        # Add live score to the right if provided
+        # Build the info line with proper spacing (inner_width chars total)
         if live_score:
-            available_space = inner_width - len(move_info) - len(live_score) - 4
-            if available_space > 0:
-                info_line = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * available_space}{Colors.YELLOW}{live_score}{Colors.RESET} "
-            else:
-                info_line = f" {Colors.DIM}{move_info}{Colors.RESET} "
+            # Calculate space between move_info and live_score
+            # Total: 1 space + move_info + padding + live_score + 1 space = inner_width
+            padding_needed = inner_width - len(move_info) - len(live_score) - 2
+            if padding_needed < 1:
+                padding_needed = 1
+            content = f" {move_info}{' ' * padding_needed}{live_score} "
         else:
-            info_padding = inner_width - len(move_info) - 2
-            info_line = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * info_padding} "
+            # Just move_info left-aligned with padding
+            padding_needed = inner_width - len(move_info) - 2
+            content = f" {move_info}{' ' * padding_needed} "
         
-        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{info_line}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
+        # Apply colors after calculating spacing
+        if live_score:
+            colored_content = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * padding_needed}{Colors.YELLOW}{live_score}{Colors.RESET} "
+        else:
+            colored_content = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * padding_needed} "
+        
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{colored_content}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
         
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}╚{'═' * inner_width}╝{Colors.RESET}")
         lines.append("")
@@ -1704,10 +1711,11 @@ def run_ci_match(
                         move_num = (move_count + 1) // 2
                         is_white_last = (move_count % 2 == 1)
                         
+                        # Show just the move in proper notation (e.g., "8. Nf3" or "8... b5")
                         if is_white_last:
-                            move_display = f"Move {move_count}: {move_num}. {last_san}"
+                            move_display = f"{move_num}. {last_san}"
                         else:
-                            move_display = f"Move {move_count}: {move_num}... {last_san}"
+                            move_display = f"{move_num}... {last_san}"
                         
                         # Calculate live score for engine1
                         live_score = f"{wins1}-{draws}-{wins2}"
