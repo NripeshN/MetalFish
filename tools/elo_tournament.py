@@ -149,9 +149,9 @@ class Colors:
     # Rich colors for board
     LIGHT_SQUARE = "\033[48;2;240;217;181m"  # Warm beige
     DARK_SQUARE = "\033[48;2;181;136;99m"    # Brown
-    WHITE_PIECE = "\033[38;2;255;255;255m"   # Pure white
-    BLACK_PIECE = "\033[38;2;0;0;0m"         # Pure black
-    HIGHLIGHT_SQUARE = "\033[48;2;255;255;102m"  # Yellow highlight
+    WHITE_PIECE = "\033[38;2;255;248;220m"   # Cornsilk/cream - warm white
+    BLACK_PIECE = "\033[38;2;40;40;40m"      # Very dark gray
+    HIGHLIGHT_SQUARE = "\033[48;2;186;202;68m"  # Lichess-style green highlight
     BORDER_COLOR = "\033[38;2;139;90;43m"    # Wood brown
     COORD_COLOR = "\033[38;2;101;67;33m"     # Dark brown
     # Cursor control
@@ -168,12 +168,14 @@ class Colors:
 class ChessBoardVisualizer:
     """Terminal-based chess board visualizer with Unicode pieces and rich colors."""
     
-    # Unicode chess pieces - using filled pieces for better visibility
+    # Unicode chess pieces
+    # WHITE: Outlined pieces (♔♕♖♗♘♙) - appear hollow/white in most terminals
+    # BLACK: Filled pieces (♚♛♜♝♞♟) - appear solid/black
     WHITE_PIECES = {
-        'K': '\u2654', 'Q': '\u2655', 'R': '\u2656', 'B': '\u2657', 'N': '\u2658', 'P': '\u2659',
+        'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
     }
     BLACK_PIECES = {
-        'k': '\u265A', 'q': '\u265B', 'r': '\u265C', 'b': '\u265D', 'n': '\u265E', 'p': '\u265F',
+        'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟',
     }
     
     # Box drawing characters for a nicer border
@@ -480,19 +482,29 @@ class ChessBoardVisualizer:
         """Render the board as a string with rich formatting."""
         lines = []
         
-        # Title bar
+        # Title bar - fixed width box (48 chars inner width)
+        inner_width = 48
         lines.append("")
-        lines.append(f"  {Colors.CYAN}{Colors.BOLD}{'=' * 42}{Colors.RESET}")
-        lines.append(f"  {Colors.CYAN}{Colors.BOLD}|{Colors.RESET}  {Colors.BOLD}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}".ljust(54) + f"{Colors.CYAN}{Colors.BOLD}|{Colors.RESET}")
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}╔{'═' * inner_width}╗{Colors.RESET}")
         
+        # Player names line - center it
+        title = f"{self.white_player} vs {self.black_player}"
+        padding = inner_width - len(title)
+        left_pad = padding // 2
+        right_pad = padding - left_pad
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{' ' * left_pad}{Colors.BOLD}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}{' ' * right_pad}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
+        
+        # Move info line
         move_num = (self.current_move + 1) // 2
         side = "White" if self.current_move % 2 == 0 else "Black"
         if last_move:
-            move_info = f"  Move {move_num}: {last_move}"
+            move_info = f"Move {move_num}: {last_move}"
         else:
-            move_info = f"  {side} to move"
-        lines.append(f"  {Colors.CYAN}{Colors.BOLD}|{Colors.RESET}{Colors.DIM}{move_info}{Colors.RESET}".ljust(62) + f"{Colors.CYAN}{Colors.BOLD}|{Colors.RESET}")
-        lines.append(f"  {Colors.CYAN}{Colors.BOLD}{'=' * 42}{Colors.RESET}")
+            move_info = f"{side} to move"
+        info_padding = inner_width - len(move_info) - 2
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET} {Colors.DIM}{move_info}{Colors.RESET}{' ' * info_padding} {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
+        
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}╚{'═' * inner_width}╝{Colors.RESET}")
         lines.append("")
         
         # Top coordinates
@@ -518,15 +530,15 @@ class ChessBoardVisualizer:
                 else:
                     sq_color = Colors.DARK_SQUARE
                 
-                # Get piece display
+                # Get piece display - more prominent with bold
                 if piece == ' ':
                     piece_str = "    "
                 elif piece.isupper():
                     char = self.WHITE_PIECES.get(piece, piece)
-                    piece_str = f"{Colors.WHITE_PIECE} {char}  "
+                    piece_str = f"{Colors.WHITE_PIECE}{Colors.BOLD} {char}  {Colors.RESET}{sq_color}"
                 else:
                     char = self.BLACK_PIECES.get(piece, piece)
-                    piece_str = f"{Colors.BLACK_PIECE} {char}  "
+                    piece_str = f"{Colors.BLACK_PIECE}{Colors.BOLD} {char}  {Colors.RESET}{sq_color}"
                 
                 row += f"{sq_color}{piece_str}{Colors.RESET}{Colors.BORDER_COLOR}|{Colors.RESET}"
             
