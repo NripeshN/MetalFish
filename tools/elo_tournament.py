@@ -84,6 +84,7 @@ class GameResult:
     result: str  # "1-0", "0-1", "1/2-1/2"
     reason: str = ""
     moves: int = 0
+    pgn: str = ""  # Full PGN of the game
 
 
 @dataclass
@@ -414,6 +415,105 @@ done | "$ENGINE"
         """Alias for _create_mcts_wrapper for backwards compatibility."""
         self._create_mcts_wrapper(metalfish_path, wrapper_path)
 
+    def _parse_pgn_games(self, pgn_content: str) -> List[Dict[str, Any]]:
+        """Parse individual games from PGN content."""
+        games = []
+        current_game = {"headers": {}, "moves": "", "raw": ""}
+        in_moves = False
+        current_raw = []
+        
+        for line in pgn_content.split('\n'):
+            current_raw.append(line)
+            line = line.strip()
+            
+            if line.startswith('['):
+                # Header line
+                in_moves = False
+                match = re.match(r'\[(\w+)\s+"([^"]*)"\]', line)
+                if match:
+                    current_game["headers"][match.group(1)] = match.group(2)
+            elif line and not line.startswith('['):
+                # Move line
+                in_moves = True
+                current_game["moves"] += line + " "
+            elif not line and in_moves and current_game["moves"]:
+                # Empty line after moves - game complete
+                current_game["raw"] = '\n'.join(current_raw)
+                games.append(current_game)
+                current_game = {"headers": {}, "moves": "", "raw": ""}
+                current_raw = []
+                in_moves = False
+        
+        # Don't forget the last game
+        if current_game["moves"]:
+            current_game["raw"] = '\n'.join(current_raw)
+            games.append(current_game)
+        
+        return games
+
+    def _format_game_output(self, game_num: int, total_games: int, 
+                           white: str, black: str, result: str, 
+                           reason: str, pgn: str, moves: str) -> str:
+        """Format a single game's output with pretty printing."""
+        lines = []
+        
+        # Game header
+        lines.append(f"\n{Colors.BOLD}{'─' * 70}{Colors.RESET}")
+        lines.append(f"{Colors.BOLD}  📋 Game {game_num}/{total_games}: {white} vs {black}{Colors.RESET}")
+        lines.append(f"{Colors.BOLD}{'─' * 70}{Colors.RESET}")
+        
+        # Result with color coding
+        result_color = Colors.RESET
+        result_icon = "🤝"
+        if result == "1-0":
+            result_color = Colors.GREEN
+            result_icon = "👑"
+        elif result == "0-1":
+            result_color = Colors.RED
+            result_icon = "👑"
+        
+        lines.append(f"  {result_icon} {Colors.BOLD}Result:{Colors.RESET} {result_color}{result}{Colors.RESET}")
+        if reason:
+            lines.append(f"  📝 {Colors.DIM}Reason: {reason}{Colors.RESET}")
+        
+        # Move count
+        move_list = moves.strip().split()
+        # Count actual moves (filter out move numbers and results)
+        actual_moves = [m for m in move_list if not m.endswith('.') and m not in ['1-0', '0-1', '1/2-1/2', '*']]
+        num_moves = len(actual_moves) // 2 + len(actual_moves) % 2
+        lines.append(f"  🎯 {Colors.DIM}Moves: {num_moves}{Colors.RESET}")
+        
+        # PGN section
+        lines.append(f"\n  {Colors.CYAN}┌{'─' * 66}┐{Colors.RESET}")
+        lines.append(f"  {Colors.CYAN}│{Colors.RESET} {Colors.BOLD}PGN:{Colors.RESET}{' ' * 60}{Colors.CYAN}│{Colors.RESET}")
+        lines.append(f"  {Colors.CYAN}├{'─' * 66}┤{Colors.RESET}")
+        
+        # Format PGN with word wrap
+        for pgn_line in pgn.strip().split('\n'):
+            if pgn_line.startswith('['):
+                # Header line - dim
+                formatted = f"  {Colors.CYAN}│{Colors.RESET} {Colors.DIM}{pgn_line[:64]:<64}{Colors.RESET} {Colors.CYAN}│{Colors.RESET}"
+            else:
+                # Move line - wrap at 64 chars
+                words = pgn_line.split()
+                current_line = ""
+                for word in words:
+                    if len(current_line) + len(word) + 1 <= 64:
+                        current_line += (" " if current_line else "") + word
+                    else:
+                        if current_line:
+                            lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+                        current_line = word
+                if current_line:
+                    formatted = f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                else:
+                    continue
+            lines.append(formatted)
+        
+        lines.append(f"  {Colors.CYAN}└{'─' * 66}┘{Colors.RESET}")
+        
+        return '\n'.join(lines)
+
     def run_match(
         self,
         engine1: EngineConfig,
@@ -447,56 +547,105 @@ done | "$ENGINE"
             ]
         )
 
-        print(
-            f"  Running: {engine1.name} vs {engine2.name} ({games} games)...",
-            end=" ",
-            flush=True,
-        )
+        print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+        print(f"{Colors.BOLD}  🎮 MATCH: {engine1.name} vs {engine2.name}{Colors.RESET}")
+        print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+        print(f"  📊 Games: {games} | ⏱️  Time Control: {time_control}")
+        print(f"{Colors.DIM}  Running...{Colors.RESET}")
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
             output = result.stdout + result.stderr
         except subprocess.TimeoutExpired:
-            print(f"{Colors.RED}TIMEOUT{Colors.RESET}")
+            print(f"  {Colors.RED}⚠️  TIMEOUT{Colors.RESET}")
             return []
 
         # Parse results from output
         game_results = []
 
-        # Find ALL score lines and use the LAST one (final result)
-        score_matches = re.findall(
-            rf"Score of {re.escape(engine1.name)} vs {re.escape(engine2.name)}: (\d+) - (\d+) - (\d+)",
-            output,
-        )
+        # Read and parse PGN file for individual games
+        pgn_content = ""
+        try:
+            with open(pgn_file.name, "r") as f:
+                pgn_content = f.read()
+        except:
+            pass
 
-        if score_matches:
-            # Use the last match (final score)
-            last_match = score_matches[-1]
-            wins1 = int(last_match[0])
-            wins2 = int(last_match[1])
-            draws = int(last_match[2])
+        # Parse individual games from PGN
+        parsed_games = self._parse_pgn_games(pgn_content)
+        
+        # Track running score
+        wins1, wins2, draws = 0, 0, 0
 
-            # Create game results
-            for _ in range(wins1):
-                game_results.append(GameResult(engine1.name, engine2.name, "1-0"))
-            for _ in range(wins2):
-                game_results.append(GameResult(engine1.name, engine2.name, "0-1"))
-            for _ in range(draws):
-                game_results.append(GameResult(engine1.name, engine2.name, "1/2-1/2"))
-
+        # Print each game with its PGN
+        for i, game in enumerate(parsed_games, 1):
+            headers = game["headers"]
+            white = headers.get("White", engine1.name)
+            black = headers.get("Black", engine2.name)
+            result = headers.get("Result", "*")
+            reason = headers.get("Termination", "")
+            moves = game["moves"]
+            raw_pgn = game["raw"]
+            
+            # Update score
+            if result == "1-0":
+                if white == engine1.name:
+                    wins1 += 1
+                else:
+                    wins2 += 1
+            elif result == "0-1":
+                if black == engine1.name:
+                    wins1 += 1
+                else:
+                    wins2 += 1
+            else:
+                draws += 1
+            
+            # Print formatted game output
+            print(self._format_game_output(
+                i, games, white, black, result, reason, raw_pgn, moves
+            ))
+            
+            # Print running score
             total = wins1 + wins2 + draws
             score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
-            print(
-                f"{Colors.GREEN}Done{Colors.RESET} ({wins1}-{wins2}-{draws}, {score_pct:.1f}%)"
-            )
-        else:
-            print(f"{Colors.YELLOW}No results parsed{Colors.RESET}")
-            # Try to parse individual game results from PGN
-            try:
-                with open(pgn_file.name, "r") as f:
-                    pgn_content = f.read()
+            print(f"\n  {Colors.MAGENTA}📈 Running Score ({engine1.name} vs {engine2.name}):{Colors.RESET}")
+            print(f"     {Colors.BOLD}{wins1} - {draws} - {wins2}{Colors.RESET}  [{score_pct:.1f}%]")
+            
+            # Create GameResult
+            game_results.append(GameResult(
+                white=white,
+                black=black,
+                result=result,
+                reason=reason,
+                moves=len(moves.split()) // 3,  # Rough move count
+                pgn=raw_pgn
+            ))
 
-                # Count results in PGN
+        # If no games parsed from PGN, fall back to score parsing
+        if not game_results:
+            # Find ALL score lines and use the LAST one (final result)
+            score_matches = re.findall(
+                rf"Score of {re.escape(engine1.name)} vs {re.escape(engine2.name)}: (\d+) - (\d+) - (\d+)",
+                output,
+            )
+
+            if score_matches:
+                # Use the last match (final score)
+                last_match = score_matches[-1]
+                wins1 = int(last_match[0])
+                wins2 = int(last_match[1])
+                draws = int(last_match[2])
+
+                # Create game results
+                for _ in range(wins1):
+                    game_results.append(GameResult(engine1.name, engine2.name, "1-0"))
+                for _ in range(wins2):
+                    game_results.append(GameResult(engine1.name, engine2.name, "0-1"))
+                for _ in range(draws):
+                    game_results.append(GameResult(engine1.name, engine2.name, "1/2-1/2"))
+            else:
+                # Try to parse from PGN counts
                 wins1 = pgn_content.count('[Result "1-0"]')
                 wins2 = pgn_content.count('[Result "0-1"]')
                 draws = pgn_content.count('[Result "1/2-1/2"]')
@@ -506,11 +655,17 @@ done | "$ENGINE"
                 for _ in range(wins2):
                     game_results.append(GameResult(engine1.name, engine2.name, "0-1"))
                 for _ in range(draws):
-                    game_results.append(
-                        GameResult(engine1.name, engine2.name, "1/2-1/2")
-                    )
-            except:
-                pass
+                    game_results.append(GameResult(engine1.name, engine2.name, "1/2-1/2"))
+
+        # Print final match summary
+        total = wins1 + wins2 + draws
+        score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
+        
+        print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+        print(f"{Colors.BOLD}  ✅ MATCH COMPLETE: {engine1.name} vs {engine2.name}{Colors.RESET}")
+        print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+        print(f"  {Colors.GREEN}Final Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}")
+        print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}\n")
 
         # Clean up
         try:
@@ -744,6 +899,104 @@ def list_engine_pairs(engines: List[str]) -> List[Tuple[str, str]]:
     return pairs
 
 
+def _parse_pgn_games_standalone(pgn_content: str) -> List[Dict[str, Any]]:
+    """Parse individual games from PGN content (standalone function for CI mode)."""
+    games = []
+    current_game = {"headers": {}, "moves": "", "raw": ""}
+    in_moves = False
+    current_raw = []
+    
+    for line in pgn_content.split('\n'):
+        current_raw.append(line)
+        line_stripped = line.strip()
+        
+        if line_stripped.startswith('['):
+            # Header line
+            in_moves = False
+            match = re.match(r'\[(\w+)\s+"([^"]*)"\]', line_stripped)
+            if match:
+                current_game["headers"][match.group(1)] = match.group(2)
+        elif line_stripped and not line_stripped.startswith('['):
+            # Move line
+            in_moves = True
+            current_game["moves"] += line_stripped + " "
+        elif not line_stripped and in_moves and current_game["moves"]:
+            # Empty line after moves - game complete
+            current_game["raw"] = '\n'.join(current_raw)
+            games.append(current_game)
+            current_game = {"headers": {}, "moves": "", "raw": ""}
+            current_raw = []
+            in_moves = False
+    
+    # Don't forget the last game
+    if current_game["moves"]:
+        current_game["raw"] = '\n'.join(current_raw)
+        games.append(current_game)
+    
+    return games
+
+
+def _format_ci_game_output(game_num: int, total_games: int, 
+                           white: str, black: str, result: str, 
+                           reason: str, pgn: str, moves: str) -> str:
+    """Format a single game's output with pretty printing (CI mode)."""
+    lines = []
+    
+    # Game header
+    lines.append(f"\n{Colors.BOLD}{'─' * 70}{Colors.RESET}")
+    lines.append(f"{Colors.BOLD}  📋 Game {game_num}/{total_games}: {white} vs {black}{Colors.RESET}")
+    lines.append(f"{Colors.BOLD}{'─' * 70}{Colors.RESET}")
+    
+    # Result with color coding
+    result_color = Colors.RESET
+    result_icon = "🤝"
+    if result == "1-0":
+        result_color = Colors.GREEN
+        result_icon = "👑"
+    elif result == "0-1":
+        result_color = Colors.RED
+        result_icon = "👑"
+    
+    lines.append(f"  {result_icon} {Colors.BOLD}Result:{Colors.RESET} {result_color}{result}{Colors.RESET}")
+    if reason:
+        lines.append(f"  📝 {Colors.DIM}Reason: {reason}{Colors.RESET}")
+    
+    # Move count
+    move_list = moves.strip().split()
+    actual_moves = [m for m in move_list if not m.endswith('.') and m not in ['1-0', '0-1', '1/2-1/2', '*']]
+    num_moves = len(actual_moves) // 2 + len(actual_moves) % 2
+    lines.append(f"  🎯 {Colors.DIM}Moves: {num_moves}{Colors.RESET}")
+    
+    # PGN section
+    lines.append(f"\n  {Colors.CYAN}┌{'─' * 66}┐{Colors.RESET}")
+    lines.append(f"  {Colors.CYAN}│{Colors.RESET} {Colors.BOLD}PGN:{Colors.RESET}{' ' * 60}{Colors.CYAN}│{Colors.RESET}")
+    lines.append(f"  {Colors.CYAN}├{'─' * 66}┤{Colors.RESET}")
+    
+    # Format PGN with word wrap
+    for pgn_line in pgn.strip().split('\n'):
+        if pgn_line.startswith('['):
+            # Header line - dim
+            formatted = f"  {Colors.CYAN}│{Colors.RESET} {Colors.DIM}{pgn_line[:64]:<64}{Colors.RESET} {Colors.CYAN}│{Colors.RESET}"
+            lines.append(formatted)
+        elif pgn_line.strip():
+            # Move line - wrap at 64 chars
+            words = pgn_line.split()
+            current_line = ""
+            for word in words:
+                if len(current_line) + len(word) + 1 <= 64:
+                    current_line += (" " if current_line else "") + word
+                else:
+                    if current_line:
+                        lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+                    current_line = word
+            if current_line:
+                lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+    
+    lines.append(f"  {Colors.CYAN}└{'─' * 66}┘{Colors.RESET}")
+    
+    return '\n'.join(lines)
+
+
 def run_ci_match(
     base_dir: Path,
     engine1_name: str,
@@ -816,25 +1069,23 @@ def run_ci_match(
         ]
     )
 
-    print(f"Running: {engine1_name} vs {engine2_name} ({games} games)...")
-    print(f"Command: {' '.join(cmd)}")
+    print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+    print(f"{Colors.BOLD}  🎮 CI MATCH: {engine1_name} vs {engine2_name}{Colors.RESET}")
+    print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+    print(f"  📊 Games: {games} | ⏱️  Time Control: {time_control}")
+    print(f"  Command: {' '.join(cmd)}")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
         output = result.stdout + result.stderr
 
-        # Always print cutechess output for debugging
-        print(f"\n=== cutechess-cli output ===")
-        print(output[:5000] if len(output) > 5000 else output)  # Limit output length
-        print(f"=== end cutechess-cli output ===\n")
-
         if result.returncode != 0:
             print(
-                f"Warning: cutechess-cli returned non-zero exit code: {result.returncode}"
+                f"  {Colors.YELLOW}⚠️  cutechess-cli returned non-zero exit code: {result.returncode}{Colors.RESET}"
             )
 
     except subprocess.TimeoutExpired:
-        print(f"ERROR: Match timed out after 7200 seconds")
+        print(f"  {Colors.RED}⚠️  ERROR: Match timed out after 7200 seconds{Colors.RESET}")
         return {
             "engine1": engine1_name,
             "engine2": engine2_name,
@@ -844,43 +1095,93 @@ def run_ci_match(
             "error": "timeout",
         }
 
-    # Parse results
+    # Read PGN file for individual games
+    pgn_content = ""
+    try:
+        with open(pgn_file.name, "r") as f:
+            pgn_content = f.read()
+    except Exception as e:
+        print(f"  {Colors.YELLOW}⚠️  Error reading PGN file: {e}{Colors.RESET}")
+
+    # Parse individual games from PGN
+    parsed_games = _parse_pgn_games_standalone(pgn_content)
+    
+    # Track running score
     wins1, wins2, draws = 0, 0, 0
 
-    # Find ALL score lines and use the LAST one (final result)
-    score_matches = re.findall(
-        rf"Score of {re.escape(engine1_name)} vs {re.escape(engine2_name)}: (\d+) - (\d+) - (\d+)",
-        output,
-    )
+    # Print each game with its PGN
+    for i, game in enumerate(parsed_games, 1):
+        headers = game["headers"]
+        white = headers.get("White", engine1_name)
+        black = headers.get("Black", engine2_name)
+        game_result = headers.get("Result", "*")
+        reason = headers.get("Termination", "")
+        moves = game["moves"]
+        raw_pgn = game["raw"]
+        
+        # Update score
+        if game_result == "1-0":
+            if white == engine1_name:
+                wins1 += 1
+            else:
+                wins2 += 1
+        elif game_result == "0-1":
+            if black == engine1_name:
+                wins1 += 1
+            else:
+                wins2 += 1
+        else:
+            draws += 1
+        
+        # Print formatted game output
+        print(_format_ci_game_output(
+            i, games, white, black, game_result, reason, raw_pgn, moves
+        ))
+        
+        # Print running score
+        total = wins1 + wins2 + draws
+        score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
+        print(f"\n  {Colors.MAGENTA}📈 Running Score ({engine1_name} vs {engine2_name}):{Colors.RESET}")
+        print(f"     {Colors.BOLD}{wins1} - {draws} - {wins2}{Colors.RESET}  [{score_pct:.1f}%]")
 
-    if score_matches:
-        # Use the last match (final score)
-        last_match = score_matches[-1]
-        wins1 = int(last_match[0])
-        wins2 = int(last_match[1])
-        draws = int(last_match[2])
-    else:
-        print(f"Warning: Could not parse score from cutechess output")
-        # Try PGN parsing
-        try:
-            with open(pgn_file.name, "r") as f:
-                pgn_content = f.read()
-            print(f"PGN file contents ({len(pgn_content)} bytes):")
-            print(pgn_content[:2000] if len(pgn_content) > 2000 else pgn_content)
+    # If no games parsed from PGN, fall back to score parsing from output
+    if not parsed_games:
+        print(f"\n  {Colors.YELLOW}⚠️  No games parsed from PGN, using cutechess output{Colors.RESET}")
+        
+        # Find ALL score lines and use the LAST one (final result)
+        score_matches = re.findall(
+            rf"Score of {re.escape(engine1_name)} vs {re.escape(engine2_name)}: (\d+) - (\d+) - (\d+)",
+            output,
+        )
 
+        if score_matches:
+            # Use the last match (final score)
+            last_match = score_matches[-1]
+            wins1 = int(last_match[0])
+            wins2 = int(last_match[1])
+            draws = int(last_match[2])
+        else:
+            print(f"  {Colors.YELLOW}⚠️  Could not parse score from cutechess output{Colors.RESET}")
+            # Try PGN counts
             wins1 = pgn_content.count('[Result "1-0"]')
             wins2 = pgn_content.count('[Result "0-1"]')
             draws = pgn_content.count('[Result "1/2-1/2"]')
-        except Exception as e:
-            print(f"Error reading PGN file: {e}")
-        except:
-            pass
 
     # Cleanup
     try:
         os.unlink(pgn_file.name)
     except:
         pass
+
+    # Print final match summary
+    total = wins1 + wins2 + draws
+    score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
+    
+    print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+    print(f"{Colors.BOLD}  ✅ MATCH COMPLETE: {engine1_name} vs {engine2_name}{Colors.RESET}")
+    print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+    print(f"  {Colors.GREEN}Final Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}")
+    print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}\n")
 
     match_result = {
         "engine1": engine1_name,
@@ -897,8 +1198,7 @@ def run_ci_match(
     with open(output_file, "w") as f:
         json.dump(match_result, f, indent=2)
 
-    print(f"Match complete: {wins1}-{wins2}-{draws}")
-    print(f"Results saved to: {output_file}")
+    print(f"  📁 Results saved to: {output_file}")
 
     return match_result
 

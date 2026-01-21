@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-01-21T04:01:02.566302",
+  "ratings": {},
+  "matches": [],
+  "engines": [
+    {
+      "name": "MetalFish-AB",
+      "expected_elo": null
+    },
+    {
+      "name": "MetalFish-Hybrid",
+      "expected_elo": null
+    },
+    {
+      "name": "MetalFish-MCTS",
+      "expected_elo": null
+    }
+  ]
+}
