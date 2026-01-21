@@ -85,7 +85,11 @@ Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
   if (smallNet && (std::abs(nnue) < 277)) {
 #ifdef __APPLE__
     if (use_apple_silicon_nnue() && GPU::gpu_nnue_manager_available()) {
-      // GPU already uses big network equivalent
+      // Re-evaluate with big network
+      auto [gpu_psqt, gpu_positional] = GPU::gpu_nnue_manager().evaluate_single(pos, true);
+      psqt = gpu_psqt;
+      positional = gpu_positional;
+      nnue = (125 * psqt + 131 * positional) / 128;
     } else
 #endif
     {
