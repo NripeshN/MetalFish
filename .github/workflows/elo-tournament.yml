@@ -145,6 +145,18 @@ jobs:
           # Build Patricia with clang++
           make build CXX=clang++
 
+      - name: Clone and Build Berserk
+        continue-on-error: true
+        run: |
+          # Clone Berserk (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/jhonnold/berserk.git reference/berserk
+
+          cd reference/berserk/src
+          # Build Berserk with clang for Apple Silicon
+          # Use native build for best performance
+          make build CC=clang ARCH=native || make build CC=clang
+
       - name: Clone and Build Leela Chess Zero (lc0)
         continue-on-error: true
         run: |
@@ -278,6 +290,15 @@ jobs:
           fi
 
           echo ""
+          echo "=== Berserk ==="
+          if [ -f "reference/berserk/src/berserk" ]; then
+            echo "  ✓ Found at reference/berserk/src/berserk"
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/berserk/src/berserk 2>&1 | head -3 || true
+          else
+            echo "  ✗ Not found (optional - will be skipped)"
+          fi
+
+          echo ""
           echo "=== cutechess-cli ==="
           if [ -f "reference/cutechess/build/cutechess-cli" ]; then
             echo "  ✓ Found at reference/cutechess/build/cutechess-cli"
@@ -341,6 +362,11 @@ jobs:
             tar -rvf build-artifacts.tar reference/Patricia/engine/patricia
           fi
 
+          # Add Berserk if it exists
+          if [ -f "reference/berserk/src/berserk" ]; then
+            tar -rvf build-artifacts.tar reference/berserk/src/berserk
+          fi
+
           # Add lc0 if it exists with network
           if [ -f "reference/lc0/build/release/lc0" ]; then
             tar -rvf build-artifacts.tar reference/lc0/build/release/lc0
@@ -388,13 +414,14 @@ jobs:
           chmod +x reference/cutechess/build/cutechess-cli || true
           chmod +x reference/stockfish/src/stockfish || true
           chmod +x reference/Patricia/engine/patricia || true
+          chmod +x reference/berserk/src/berserk || true
           chmod +x reference/lc0/build/release/lc0 || true
           chmod +x tools/metalfish_hybrid_wrapper.sh || true
           chmod +x tools/metalfish_mcts_wrapper.sh || true
 
           # Debug: List what we have
           echo "=== Directory structure after extraction ==="
-          find . -type f -name "metalfish" -o -name "stockfish" -o -name "patricia" -o -name "cutechess-cli" -o -name "lc0" 2>/dev/null || true
+          find . -type f -name "metalfish" -o -name "stockfish" -o -name "patricia" -o -name "berserk" -o -name "cutechess-cli" -o -name "lc0" 2>/dev/null || true
           echo ""
           echo "=== Build directory ==="
           ls -la build/ || echo "build/ not found"

@@ -307,6 +307,22 @@ class Tournament:
             self.elo_calc.anchor_engine = "Patricia"
             self.elo_calc.anchor_elo = 3500
 
+        # Berserk - strong NNUE engine (~3500-3700 Elo)
+        berserk_path = self.base_dir / "reference" / "berserk" / "src" / "berserk"
+        if berserk_path.exists():
+            self.add_engine(
+                EngineConfig(
+                    name="Berserk",
+                    cmd=str(berserk_path),
+                    options={"Threads": "1", "Hash": "128"},
+                    expected_elo=3550,
+                )
+            )
+            # If Patricia not available, use Berserk as anchor
+            if not patricia_path.exists():
+                self.elo_calc.anchor_engine = "Berserk"
+                self.elo_calc.anchor_elo = 3550
+
         # Lc0 (Leela Chess Zero) - neural network engine
         lc0_path = self.base_dir / "reference" / "lc0" / "build" / "release" / "lc0"
         lc0_network = (
@@ -831,6 +847,16 @@ def get_engine_configs(
             cmd=str(patricia_path),
             options={"Threads": "1", "Hash": "128"},
             expected_elo=3500,
+        )
+
+    # Berserk - strong NNUE engine (~3500-3700 Elo)
+    berserk_path = base_dir / "reference" / "berserk" / "src" / "berserk"
+    if berserk_path.exists():
+        configs["Berserk"] = EngineConfig(
+            name="Berserk",
+            cmd=str(berserk_path),
+            options={"Threads": "1", "Hash": "128"},
+            expected_elo=3550,
         )
 
     # Lc0 (Leela Chess Zero) - neural network engine
