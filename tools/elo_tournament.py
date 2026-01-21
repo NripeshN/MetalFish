@@ -48,58 +48,68 @@ DEFAULT_ENGINES_CONFIG = {
         "MetalFish-AB": {
             "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
             "expected_elo": None,
-            "options": {"Threads": "1", "Hash": "128"}
+            "options": {"Threads": "1", "Hash": "128", "Ponder": "false"}
         },
         "MetalFish-MCTS": {
             "description": "MetalFish with Pure GPU MCTS",
             "expected_elo": None,
-            "options": {}
+            "options": {"Ponder": "false"}
         },
         "MetalFish-Hybrid": {
             "description": "MetalFish with Parallel MCTS+AB hybrid search",
             "expected_elo": None,
-            "options": {}
+            "options": {"Ponder": "false"}
         },
         "Patricia": {
             "description": "Aggressive chess engine by Adam Kulju",
-            "expected_elo": 3460,
-            "options": {"Threads": "1", "Hash": "128"},
+            "expected_elo": 3415,
+            "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
             "path": "reference/Patricia/engine/patricia",
             "anchor": True,
-            "anchor_elo": 3460
+            "anchor_elo": 3415
         },
         "Berserk": {
             "description": "Strong NNUE engine by Jay Honnold",
-            "expected_elo": 3617,
-            "options": {"Threads": "1", "Hash": "128"},
+            "expected_elo": 3662,
+            "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
             "path": "reference/berserk/src/berserk",
             "anchor": True,
-            "anchor_elo": 3617
+            "anchor_elo": 3662
         },
         "Lc0": {
             "description": "Leela Chess Zero - neural network engine",
-            "expected_elo": 3600,
-            "options": {"Threads": "1"},
+            "expected_elo": 3716,
+            "options": {"Threads": "1", "Ponder": "false"},
             "path": "reference/lc0/build/release/lc0",
             "network_path": "reference/lc0/build/release/network.pb.gz"
         }
     },
     "stockfish": {
         "path": "reference/stockfish/src/stockfish",
-        "default_levels": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
-        "options": {"Threads": "1", "Hash": "128"},
+        "default_levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 17, 18, 19, 20],
+        "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
         "skill_elo_map": {
-            "0": 1347, "1": 1444, "2": 1566, "3": 1729, "4": 1953,
-            "5": 2197, "6": 2383, "7": 2518, "8": 2624, "9": 2711,
-            "10": 2786, "11": 2851, "12": 2910, "13": 2963, "14": 3012,
-            "15": 3057, "16": 3099, "17": 3139, "18": 3176, "19": 3211,
-            "20": 3244
+            "0": 1725, "1": 1982, "2": 2233, "3": 2474, "4": 2643,
+            "5": 2800, "6": 2947, "7": 3059, "8": 3156, "9": 3237,
+            "10": 3304, "11": 3362, "12": 3412, "13": 3459, "14": 3505,
+            "15": 3551, "16": 3584, "17": 3609, "18": 3644, "19": 3697,
+            "20": 3764
         }
     },
+    "opening_book": {
+        "file": "reference/books/8moves_v3.pgn.zip",
+        "format": "pgn",
+        "description": "8-move openings (16 plies) - CCRL-style balanced openings",
+        "total_positions": 34700,
+        "depth_plies": 16
+    },
     "tournament_defaults": {
-        "games_per_pair": 15,
+        "games_per_pair": 12,
         "time_control": "10+0.1",
-        "concurrency": 1
+        "concurrency": 1,
+        "ponder": False,
+        "repeat": True,
+        "recover": True
     }
 }
 
@@ -330,6 +340,18 @@ class Tournament:
         self.engines: List[EngineConfig] = []
         self.results: List[GameResult] = []
         self.elo_calc = EloCalculator()
+        self.opening_book: Optional[Path] = None
+        self.opening_format: str = "pgn"
+        
+        # Load opening book from config
+        config = load_engines_config(base_dir)
+        if "opening_book" in config:
+            book_config = config["opening_book"]
+            book_path = base_dir / book_config.get("file", "")
+            if book_path.exists():
+                self.opening_book = book_path
+                self.opening_format = book_config.get("format", "pgn")
+                print(f"{Colors.DIM}  Using opening book: {book_path.name} ({book_config.get('description', '')}){Colors.RESET}", file=sys.stderr)
 
     def add_engine(self, config: EngineConfig):
         """Add an engine to the tournament."""
@@ -610,6 +632,8 @@ done | "$ENGINE"
         games: int,
         time_control: str,
         concurrency: int = 1,
+        opening_book: Optional[Path] = None,
+        opening_format: str = "pgn",
     ) -> List[GameResult]:
         """Run a match between two engines."""
 
@@ -635,11 +659,24 @@ done | "$ENGINE"
                 "-repeat",
             ]
         )
+        
+        # Add opening book if available
+        book_to_use = opening_book or self.opening_book
+        if book_to_use and book_to_use.exists():
+            fmt = opening_format if opening_book else self.opening_format
+            cmd.extend([
+                "-openings",
+                f"file={book_to_use}",
+                f"format={fmt}",
+                "order=random",  # Random selection from book
+            ])
 
         print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
         print(f"{Colors.BOLD}  🎮 MATCH: {engine1.name} vs {engine2.name}{Colors.RESET}")
         print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
         print(f"  📊 Games: {games} | ⏱️  Time Control: {time_control}")
+        if book_to_use:
+            print(f"  📖 Opening Book: {book_to_use.name}")
         print(f"{Colors.DIM}  Running...{Colors.RESET}")
 
         try:
@@ -1109,6 +1146,8 @@ def run_ci_match(
 ) -> Dict[str, Any]:
     """Run a single match between two engines and output JSON results."""
 
+    # Load config for opening book
+    config = load_engines_config(base_dir)
     configs = get_engine_configs(base_dir)
 
     if engine1_name not in configs:
@@ -1134,6 +1173,16 @@ def run_ci_match(
 
     if not cutechess.exists():
         raise FileNotFoundError(f"cutechess-cli not found at {cutechess}")
+
+    # Check for opening book
+    opening_book = None
+    opening_format = "pgn"
+    if "opening_book" in config:
+        book_config = config["opening_book"]
+        book_path = base_dir / book_config.get("file", "")
+        if book_path.exists():
+            opening_book = book_path
+            opening_format = book_config.get("format", "pgn")
 
     # Verify engine binaries exist
     print(f"Verifying engine binaries...")
@@ -1170,11 +1219,22 @@ def run_ci_match(
             "-repeat",
         ]
     )
+    
+    # Add opening book if available
+    if opening_book:
+        cmd.extend([
+            "-openings",
+            f"file={opening_book}",
+            f"format={opening_format}",
+            "order=random",
+        ])
 
     print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
     print(f"{Colors.BOLD}  🎮 CI MATCH: {engine1_name} vs {engine2_name}{Colors.RESET}")
     print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
     print(f"  📊 Games: {games} | ⏱️  Time Control: {time_control}")
+    if opening_book:
+        print(f"  📖 Opening Book: {opening_book.name}")
     print(f"  Command: {' '.join(cmd)}")
 
     try:
@@ -1385,7 +1445,7 @@ def aggregate_ci_results(results_dir: Path, output_file: Path = None) -> Dict[st
             continue
 
     # Calculate Elo ratings - use Patricia as anchor with updated Elo
-    elo_calc = EloCalculator(anchor_engine="Patricia", anchor_elo=3460)
+    elo_calc = EloCalculator(anchor_engine="Patricia", anchor_elo=3415)
 
     for match in all_matches:
         # Add individual game results
@@ -1521,8 +1581,8 @@ def main():
         "--stockfish-levels",
         "-s",
         type=str,
-        default="1,5,10,15,20",
-        help="Comma-separated Stockfish skill levels to test (default: 1,5,10,15,20)",
+        default=None,
+        help="Comma-separated Stockfish skill levels to test (default: from config file)",
     )
     parser.add_argument(
         "--quick",
@@ -1583,8 +1643,10 @@ def main():
 
     print(f"Base directory: {base_dir.absolute()}", file=sys.stderr)
 
-    # Parse Stockfish levels
-    stockfish_levels = [int(x) for x in args.stockfish_levels.split(",")]
+    # Parse Stockfish levels (None means use config file defaults)
+    stockfish_levels = None
+    if args.stockfish_levels:
+        stockfish_levels = [int(x) for x in args.stockfish_levels.split(",")]
 
     # CI mode: list engines
     if args.ci_list_engines:

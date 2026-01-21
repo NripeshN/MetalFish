@@ -7,9 +7,9 @@ on:
   workflow_dispatch: # Allow manual trigger
     inputs:
       games_per_match:
-        description: "Number of games per match"
+        description: "Number of games per match (should be even for color swap)"
         required: false
-        default: "15"
+        default: "12"
       time_control:
         description: "Time control (e.g., 10+0.1)"
         required: false
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '15' }}
+  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '12' }}
   TIME_CONTROL: ${{ github.event.inputs.time_control || '10+0.1' }}
 
 jobs:
@@ -188,6 +188,24 @@ jobs:
                 rm -f network.pb.gz
               fi
             fi
+          fi
+
+      - name: Download Opening Book
+        run: |
+          # Clone official Stockfish books repository
+          mkdir -p reference
+          git clone --depth 1 https://github.com/official-stockfish/books.git reference/books
+
+          # List available books
+          echo "Available opening books:"
+          ls -la reference/books/*.pgn.zip reference/books/*.epd.zip 2>/dev/null | head -20 || true
+
+          # The 8moves_v3.pgn.zip is the recommended book for CCRL-style testing
+          # (16 plies depth, 34700 positions)
+          if [ -f "reference/books/8moves_v3.pgn.zip" ]; then
+            echo "Opening book 8moves_v3.pgn.zip found (34700 positions, 16 plies)"
+          else
+            echo "Warning: Opening book not found"
           fi
 
       - name: Create MetalFish wrapper scripts
@@ -357,6 +375,12 @@ jobs:
             tools/metalfish_hybrid_wrapper.sh \
             tools/metalfish_mcts_wrapper.sh \
             2>/dev/null || true
+
+          # Add opening book (8moves_v3.pgn.zip - 16 plies, CCRL-style)
+          if [ -f "reference/books/8moves_v3.pgn.zip" ]; then
+            tar -rvf build-artifacts.tar reference/books/8moves_v3.pgn.zip
+            echo "Added opening book: 8moves_v3.pgn.zip"
+          fi
 
           # Add Patricia if it exists
           if [ -f "reference/Patricia/engine/patricia" ]; then

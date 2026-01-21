@@ -5,46 +5,54 @@
             "expected_elo": null,
             "options": {
                 "Threads": "1",
-                "Hash": "128"
+                "Hash": "128",
+                "Ponder": "false"
             }
         },
         "MetalFish-MCTS": {
             "description": "MetalFish with Pure GPU MCTS",
             "expected_elo": null,
-            "options": {}
+            "options": {
+                "Ponder": "false"
+            }
         },
         "MetalFish-Hybrid": {
             "description": "MetalFish with Parallel MCTS+AB hybrid search",
             "expected_elo": null,
-            "options": {}
+            "options": {
+                "Ponder": "false"
+            }
         },
         "Patricia": {
             "description": "Aggressive chess engine by Adam Kulju",
-            "expected_elo": 3460,
+            "expected_elo": 3415,
             "options": {
                 "Threads": "1",
-                "Hash": "128"
+                "Hash": "128",
+                "Ponder": "false"
             },
             "path": "reference/Patricia/engine/patricia",
             "anchor": true,
-            "anchor_elo": 3460
+            "anchor_elo": 3415
         },
         "Berserk": {
             "description": "Strong NNUE engine by Jay Honnold",
-            "expected_elo": 3617,
+            "expected_elo": 3662,
             "options": {
                 "Threads": "1",
-                "Hash": "128"
+                "Hash": "128",
+                "Ponder": "false"
             },
             "path": "reference/berserk/src/berserk",
             "anchor": true,
-            "anchor_elo": 3617
+            "anchor_elo": 3662
         },
         "Lc0": {
             "description": "Leela Chess Zero - neural network engine",
-            "expected_elo": 3600,
+            "expected_elo": 3716,
             "options": {
-                "Threads": "1"
+                "Threads": "1",
+                "Ponder": "false"
             },
             "path": "reference/lc0/build/release/lc0",
             "network_path": "reference/lc0/build/release/network.pb.gz"
@@ -54,48 +62,66 @@
         "path": "reference/stockfish/src/stockfish",
         "default_levels": [
             0,
+            1,
             2,
+            3,
             4,
+            5,
             6,
+            7,
             8,
             10,
             12,
             14,
             16,
+            17,
             18,
+            19,
             20
         ],
         "options": {
             "Threads": "1",
-            "Hash": "128"
+            "Hash": "128",
+            "Ponder": "false"
         },
         "skill_elo_map": {
-            "0": 1347,
-            "1": 1444,
-            "2": 1566,
-            "3": 1729,
-            "4": 1953,
-            "5": 2197,
-            "6": 2383,
-            "7": 2518,
-            "8": 2624,
-            "9": 2711,
-            "10": 2786,
-            "11": 2851,
-            "12": 2910,
-            "13": 2963,
-            "14": 3012,
-            "15": 3057,
-            "16": 3099,
-            "17": 3139,
-            "18": 3176,
-            "19": 3190,
-            "20": 3200
+            "0": 1725,
+            "1": 1982,
+            "2": 2233,
+            "3": 2474,
+            "4": 2643,
+            "5": 2800,
+            "6": 2947,
+            "7": 3059,
+            "8": 3156,
+            "9": 3237,
+            "10": 3304,
+            "11": 3362,
+            "12": 3412,
+            "13": 3459,
+            "14": 3505,
+            "15": 3551,
+            "16": 3584,
+            "17": 3609,
+            "18": 3644,
+            "19": 3697,
+            "20": 3764
         }
     },
+    "opening_book": {
+        "file": "reference/books/8moves_v3.pgn.zip",
+        "format": "pgn",
+        "description": "8-move openings (16 plies) - CCRL-style balanced openings",
+        "total_positions": 34700,
+        "depth_plies": 16
+    },
     "tournament_defaults": {
-        "games_per_pair": 15,
+        "games_per_pair": 12,
         "time_control": "10+0.1",
-        "concurrency": 1
+        "concurrency": 1,
+        "ponder": false,
+        "repeat": true,
+        "recover": true,
+        "notes": "12 games = 6 openings x 2 (color swap). With opening book for balanced positions."
     }
 }
