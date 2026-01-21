@@ -154,22 +154,29 @@ jobs:
 
           cd reference/berserk/src
 
-          # Try to download network with retries
-          NETWORK_NAME="berserk-9b84c340af7e.nn"
-          NETWORK_URL="https://github.com/jhonnold/berserk/releases/download/net/$NETWORK_NAME"
+          # Download network from GitHub releases (S3 bucket no longer accessible)
+          # Using Berserk 13 release network
+          NETWORK_NAME="berserk-d43206fe90e4.nn"
+          NETWORK_URL="https://github.com/jhonnold/berserk/releases/download/13/$NETWORK_NAME"
 
           for i in 1 2 3; do
-            echo "Attempt $i: Downloading $NETWORK_NAME..."
+            echo "Attempt $i: Downloading $NETWORK_NAME from GitHub releases..."
             curl -L -o "$NETWORK_NAME" "$NETWORK_URL" && break
             echo "Download attempt $i failed, retrying..."
             sleep 5
           done
 
-          # Build Berserk (skip network download since we did it manually)
-          # The EVALFILE env var tells Berserk where to find the network
-          export EVALFILE="$NETWORK_NAME"
-          make build CC=clang ARCH=native EVALFILE="$NETWORK_NAME" || \
-          make build CC=clang EVALFILE="$NETWORK_NAME" || \
+          # Verify download (should be ~25MB)
+          if [ -f "$NETWORK_NAME" ] && [ $(stat -f%z "$NETWORK_NAME" 2>/dev/null || stat -c%s "$NETWORK_NAME" 2>/dev/null) -gt 1000000 ]; then
+            echo "Network downloaded successfully: $(ls -lh $NETWORK_NAME)"
+          else
+            echo "Network download failed or file too small"
+            exit 1
+          fi
+
+          # Build Berserk with the downloaded network
+          make all CC=clang ARCH=native EVALFILE="$NETWORK_NAME" || \
+          make all CC=clang EVALFILE="$NETWORK_NAME" || \
           echo "Berserk build failed, will skip in tournament"
 
       - name: Clone and Build Leela Chess Zero (lc0)
