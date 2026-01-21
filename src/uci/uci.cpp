@@ -1367,7 +1367,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   
   // Explicitly destroy the search object
   search.reset();
-  
+
   // Final synchronization after destruction
   if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
     GPU::gpu().synchronize();

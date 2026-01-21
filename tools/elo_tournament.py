@@ -269,8 +269,17 @@ class ChessBoardVisualizer:
         
         return f"{piece_color}{char} "
     
-    def render(self, last_move: str = "", show_info: bool = True, live_score: str = "") -> str:
-        """Render the board as a string with rich formatting."""
+    def render(self, last_move: str = "", show_info: bool = True, live_score: str = "", 
+               white_score: float = 0, black_score: float = 0) -> str:
+        """Render the board as a string with rich formatting.
+        
+        Args:
+            last_move: Move notation to display
+            show_info: Whether to show info line
+            live_score: Legacy score string (ignored if white_score/black_score provided)
+            white_score: Points for white player (1 per win, 0.5 per draw)
+            black_score: Points for black player (1 per win, 0.5 per draw)
+        """
         lines = []
         
         # Title bar - fixed width box (48 chars inner width)
@@ -278,38 +287,35 @@ class ChessBoardVisualizer:
         lines.append("")
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}╔{'═' * inner_width}╗{Colors.RESET}")
         
-        # Player names line - center it (calculate visible length only)
-        title = f"{self.white_player} vs {self.black_player}"
-        padding = inner_width - len(title)
-        left_pad = padding // 2
-        right_pad = padding - left_pad
-        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{' ' * left_pad}{Colors.BOLD}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}{' ' * right_pad}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
+        # Format scores - show as integer if whole number, else one decimal
+        def fmt_score(s):
+            return str(int(s)) if s == int(s) else f"{s:.1f}"
         
-        # Move info line with live score on the right
+        # Player names with scores: "Engine1 (2.5) vs Engine2 (1.5)"
+        white_score_str = fmt_score(white_score)
+        black_score_str = fmt_score(black_score)
+        
+        # Build title with scores next to names
+        title_parts = f"{self.white_player} ({white_score_str}) vs ({black_score_str}) {self.black_player}"
+        padding = inner_width - len(title_parts)
+        left_pad = max(0, padding // 2)
+        right_pad = max(0, padding - left_pad)
+        
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{' ' * left_pad}{Colors.BOLD}{self.white_player}{Colors.RESET} ({Colors.GREEN}{white_score_str}{Colors.RESET}) vs ({Colors.GREEN}{black_score_str}{Colors.RESET}) {Colors.BOLD}{self.black_player}{Colors.RESET}{' ' * right_pad}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
+        
+        # Move info line
         if last_move:
             move_info = last_move
         else:
             side = "White" if self.current_move % 2 == 0 else "Black"
             move_info = f"{side} to move"
         
-        # Build the info line with proper spacing (inner_width chars total)
-        if live_score:
-            # Calculate space between move_info and live_score
-            # Total: 1 space + move_info + padding + live_score + 1 space = inner_width
-            padding_needed = inner_width - len(move_info) - len(live_score) - 2
-            if padding_needed < 1:
-                padding_needed = 1
-            content = f" {move_info}{' ' * padding_needed}{live_score} "
-        else:
-            # Just move_info left-aligned with padding
-            padding_needed = inner_width - len(move_info) - 2
-            content = f" {move_info}{' ' * padding_needed} "
+        # Build the info line with proper spacing
+        padding_needed = inner_width - len(move_info) - 2
+        if padding_needed < 1:
+            padding_needed = 1
         
-        # Apply colors after calculating spacing
-        if live_score:
-            colored_content = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * padding_needed}{Colors.YELLOW}{live_score}{Colors.RESET} "
-        else:
-            colored_content = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * padding_needed} "
+        colored_content = f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * padding_needed} "
         
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{colored_content}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
         
@@ -1579,6 +1585,9 @@ def run_ci_match(
     
     # Track score
     wins1, wins2, draws = 0, 0, 0
+    # Track points for each engine (1 for win, 0.5 for draw)
+    engine1_points = 0.0
+    engine2_points = 0.0
     current_game = 0
     current_white_player = engine1_name  # Track current game's white player
     current_black_player = engine2_name  # Track current game's black player
@@ -1634,8 +1643,15 @@ def run_ci_match(
                         move_count = len(moves)
                         last_move = moves[-1] if moves else ""
                         
+                        # Calculate scores for display
+                        if current_white_player == engine1_name:
+                            white_pts, black_pts = engine1_points, engine2_points
+                        else:
+                            white_pts, black_pts = engine2_points, engine1_points
+                        
                         # Print final position with board (keep visible - don't clear)
-                        print(visualizer.render(f"Final: {last_move} ({move_count} moves) - {result_str}"))
+                        print(visualizer.render(f"Final: {last_move} ({move_count} moves) - {result_str}",
+                                               white_score=white_pts, black_score=black_pts))
                         sys.stdout.flush()
                         board_displayed = True
                         
@@ -1672,7 +1688,13 @@ def run_ci_match(
                     
                     # Show initial board or CI message
                     if visualizer:
-                        print(visualizer.render(f"Game {current_game}/{games} - Starting..."))
+                        # Calculate scores for display (who's white this game?)
+                        if current_white_player == engine1_name:
+                            white_pts, black_pts = engine1_points, engine2_points
+                        else:
+                            white_pts, black_pts = engine2_points, engine1_points
+                        print(visualizer.render(f"Game {current_game}/{games} - Starting...", 
+                                               white_score=white_pts, black_score=black_pts))
                         board_displayed = True
                     else:
                         print(f"  Started game {current_game} of {games}")
@@ -1706,12 +1728,15 @@ def run_ci_match(
                         else:
                             move_display = f"{move_num}... {last_san}"
                         
-                        # Show W-D-L score
-                        live_info = f"[{wins1}-{draws}-{wins2}]"
+                        # Calculate scores for display (who's white this game?)
+                        if current_white_player == engine1_name:
+                            white_pts, black_pts = engine1_points, engine2_points
+                        else:
+                            white_pts, black_pts = engine2_points, engine1_points
                         
                         # Update board display
                         visualizer.clear_board_area()
-                        print(visualizer.render(move_display, live_score=live_info))
+                        print(visualizer.render(move_display, white_score=white_pts, black_score=black_pts))
                         board_displayed = True
                 
                 # Detect game end
@@ -1721,22 +1746,28 @@ def run_ci_match(
                         visualizer.clear_board_area()
                         board_displayed = False
                     
-                    # Parse result
+                    # Parse result and update points
                     if "1-0" in line_stripped:
                         result = "1-0"
                         if current_white_player == engine1_name:
                             wins1 += 1
+                            engine1_points += 1.0
                         else:
                             wins2 += 1
+                            engine2_points += 1.0
                     elif "0-1" in line_stripped:
                         result = "0-1"
                         if current_black_player == engine1_name:
                             wins1 += 1
+                            engine1_points += 1.0
                         else:
                             wins2 += 1
+                            engine2_points += 1.0
                     else:
                         result = "1/2-1/2"
                         draws += 1
+                        engine1_points += 0.5
+                        engine2_points += 0.5
                     
                     # Extract reason
                     reason = ""

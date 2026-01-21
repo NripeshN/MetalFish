@@ -53,18 +53,18 @@ int main(int argc, char *argv[]) {
 
   Bitboards::init();
   Position::init();
-  
+
   // Register cleanup function with atexit
   // This ensures cleanup happens before static destruction
   std::atexit(cleanup_gpu_resources);
 
   {
     // Scope the UCIEngine to ensure it's destroyed before GPU cleanup
-    auto uci = std::make_unique<UCIEngine>(argc, argv);
+  auto uci = std::make_unique<UCIEngine>(argc, argv);
 
-    Tune::init(uci->engine_options());
+  Tune::init(uci->engine_options());
 
-    uci->loop();
+  uci->loop();
     
     // Explicitly destroy the UCI engine before GPU cleanup
     uci.reset();

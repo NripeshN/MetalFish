@@ -3,7 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Thread-Safe MCTS Implementation - Optimized for Apple Silicon
-  
+
   This implementation incorporates algorithms from Leela Chess Zero (Lc0),
   including PUCT with logarithmic growth, FPU reduction strategy, and
   moves left head (MLH) utility.
@@ -525,7 +525,7 @@ void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
   float old_d = d_.load(std::memory_order_relaxed);
   float new_d = old_d + mult * (d_val - old_d) * inv_new_n;
   d_.store(new_d, std::memory_order_relaxed);
-  
+
   // Update M (Moves left)
   float old_m = m_.load(std::memory_order_relaxed);
   float new_m = old_m + mult * (m_val - old_m) * inv_new_n;
@@ -552,7 +552,7 @@ float ThreadSafeNode::GetVisitedPolicy() const {
     ThreadSafeNode* child = e[i].child.load(std::memory_order_acquire);
     if (child && child->GetN() > 0) {
       sum += e[i].GetPolicy();
-    }
+}
   }
   return sum;
 }
