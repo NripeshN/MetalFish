@@ -29,7 +29,6 @@
 #include "eval/nnue/nnue_common.h"
 #include "eval/nnue/nnue_misc.h"
 #include "gpu/backend.h"
-#include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "search/search.h"
 #include "syzygy/tbprobe.h"
@@ -143,6 +142,35 @@ Engine::Engine(std::optional<std::string> path)
                       "GPU not available on this system");
                 }
                 return std::optional<std::string>(std::nullopt);
+              }));
+
+  // Apple Silicon optimized GPU NNUE
+  options.add("UseAppleSiliconNNUE", Option(false, [this](const Option &o) {
+#ifdef __APPLE__
+                if (o) {
+                  // Initialize GPU NNUE if not already done
+                  if (!GPU::gpu_nnue_manager_available()) {
+                    // Try to initialize with current networks
+                    networks.modify_and_replicate([](NN::Networks &networks_) {
+                      if (GPU::initialize_gpu_nnue(networks_)) {
+                        sync_cout << "info string GPU NNUE: initialized" << sync_endl;
+                      }
+                    });
+                  }
+                  if (GPU::gpu_nnue_manager_available()) {
+                    Eval::set_use_apple_silicon_nnue(true);
+                    return std::optional<std::string>("GPU NNUE enabled");
+                  } else {
+                    return std::optional<std::string>("GPU NNUE initialization failed");
+                  }
+                } else {
+                  Eval::set_use_apple_silicon_nnue(false);
+                  return std::optional<std::string>("GPU NNUE disabled");
+                }
+#else
+                (void)o;
+                return std::optional<std::string>("GPU NNUE not available on this platform");
+#endif
               }));
 
   load_networks();

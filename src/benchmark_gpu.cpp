@@ -8,7 +8,6 @@
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "gpu/backend.h"
-#include "gpu/gpu_accumulator.h"
 #include "gpu/gpu_nnue_integration.h"
 #include <chrono>
 #include <iostream>
@@ -243,7 +242,7 @@ void benchmark_gpu_nnue() {
   }
 }
 
-// Benchmark GPU accumulator operations
+// Benchmark GPU accumulator operations (via GPUNNUEManager)
 void benchmark_gpu_accumulator() {
   if (!GPU::gpu_available()) {
     std::cout << "GPU not available, skipping accumulator benchmark"
@@ -251,20 +250,20 @@ void benchmark_gpu_accumulator() {
     return;
   }
 
-  std::cout << "\n=== GPU Accumulator Benchmark ===" << std::endl;
+  std::cout << "\n=== GPU NNUE Manager Benchmark ===" << std::endl;
 
-  GPU::GPUAccumulatorStack stack;
-  if (!stack.initialize(GPU::GPU_FT_DIM_BIG, true)) {
-    std::cout << "Failed to initialize GPU accumulator stack" << std::endl;
+  auto &manager = GPU::gpu_nnue_manager();
+  if (!manager.initialize()) {
+    std::cout << "Failed to initialize GPU NNUE manager" << std::endl;
     return;
   }
 
-  std::cout << "GPU Accumulator Stack initialized" << std::endl;
-  std::cout << "  Hidden dim: " << GPU::GPU_FT_DIM_BIG << std::endl;
-  std::cout << "  Max ply: " << GPU::GPUAccumulatorStack::MAX_PLY << std::endl;
+  std::cout << "GPU NNUE Manager initialized" << std::endl;
+  std::cout << "  Big network hidden dim: " << GPU::GPU_FT_DIM_BIG << std::endl;
+  std::cout << "  Small network hidden dim: " << GPU::GPU_FT_DIM_SMALL << std::endl;
+  std::cout << "  GPU Memory: " << manager.gpu_memory_used() / 1024 << " KB" << std::endl;
 
-  // Note: Full accumulator benchmarks require network weights
-  // For now, just report initialization success
+  // Note: Full benchmarks require network weights
   std::cout << "  (Full benchmarks require loaded networks)" << std::endl;
 }
 

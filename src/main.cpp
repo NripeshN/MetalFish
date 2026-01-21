@@ -13,7 +13,6 @@
 #include "core/misc.h"
 #include "core/position.h"
 #include "gpu/backend.h"
-#include "gpu/gpu_accumulator.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "mcts/ab_integration.h"
 #include "mcts/mcts_batch_evaluator.h"
@@ -41,10 +40,7 @@ static void cleanup_gpu_resources() {
   MCTS::shutdown_mcts_batch_evaluator();
   MCTS::shutdown_mcts_tt();
 
-  // 2. Shutdown GPU feature extractor
-  GPU::shutdown_gpu_feature_extractor();
-
-  // 3. Shutdown GPU NNUE manager (this also shuts down the GPU backend)
+  // 2. Shutdown GPU NNUE manager (this also shuts down the GPU backend)
   GPU::shutdown_gpu_nnue();
 }
 

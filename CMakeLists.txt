@@ -212,9 +212,12 @@ set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
 # Syzygy source files
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
-# GPU source files (backend-agnostic interface)
-set(GPU_SOURCES src/gpu/gpu_nnue.cpp src/gpu/gpu_nnue_integration.cpp
-                src/gpu/gpu_accumulator.cpp src/gpu/gpu_mcts_backend.cpp)
+# GPU source files (unified implementation)
+# gpu_nnue_integration.cpp - Main GPU NNUE implementation with all optimizations
+# gpu_mcts_backend.cpp - MCTS GPU backend
+# gpu_accumulator_cache.cpp - Finny tables and incremental update support
+set(GPU_SOURCES src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_mcts_backend.cpp
+                src/gpu/gpu_accumulator_cache.cpp)
 
 # CUDA source files
 set(CUDA_SOURCES "")
@@ -244,26 +247,26 @@ if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
   message(STATUS "Metal GPU acceleration: ENABLED")
 
-  # Compile Metal shaders (optional - shaders can also be compiled at runtime)
+  # Compile Metal shaders
   set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels)
   set(SHADER_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/metalfish.metallib)
 
   # Check if Metal compiler is available
   find_program(METAL_COMPILER xcrun)
   if(METAL_COMPILER)
-    # Create a shell script to compile shaders with proper error handling
+    # Compile single consolidated nnue.metal shader
     add_custom_command(
       OUTPUT ${SHADER_OUTPUT}
       COMMAND ${CMAKE_COMMAND} -E echo "Compiling Metal shaders..."
       COMMAND
         sh -c
-        "xcrun -sdk macosx metal -c ${SHADER_DIR}/nnue_full.metal -o ${CMAKE_CURRENT_BINARY_DIR}/nnue.air 2>&1 || echo 'Metal shader compilation skipped'"
+        "xcrun -sdk macosx metal -c ${SHADER_DIR}/nnue.metal -o ${CMAKE_CURRENT_BINARY_DIR}/nnue.air 2>&1 || echo 'Metal shader compilation skipped'"
       COMMAND
         sh -c
         "if [ -f ${CMAKE_CURRENT_BINARY_DIR}/nnue.air ]; then xcrun -sdk macosx metallib ${CMAKE_CURRENT_BINARY_DIR}/nnue.air -o ${SHADER_OUTPUT} 2>&1 || echo 'Metallib creation skipped'; fi"
       COMMAND ${CMAKE_COMMAND} -E touch ${SHADER_OUTPUT}
-      DEPENDS ${SHADER_DIR}/nnue_full.metal
-      COMMENT "Compiling Metal shaders (optional)"
+      DEPENDS ${SHADER_DIR}/nnue.metal
+      COMMENT "Compiling Metal shaders"
       VERBATIM)
     add_custom_target(metal_shaders DEPENDS ${SHADER_OUTPUT})
   endif()

@@ -1631,8 +1631,15 @@ def run_ci_match(
     games: int,
     time_control: str,
     output_file: Path,
+    engine1_options: Optional[Dict[str, str]] = None,
+    engine2_options: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    """Run a single match between two engines and output JSON results."""
+    """Run a single match between two engines and output JSON results.
+    
+    Args:
+        engine1_options: Custom UCI options to override defaults for engine1
+        engine2_options: Custom UCI options to override defaults for engine2
+    """
 
     # Load config for opening book
     config = load_engines_config(base_dir)
@@ -1645,6 +1652,16 @@ def run_ci_match(
 
     engine1 = configs[engine1_name]
     engine2 = configs[engine2_name]
+
+    # Apply custom UCI options if provided (override defaults)
+    if engine1_options:
+        for key, value in engine1_options.items():
+            engine1.options[key] = value
+        print(f"  Engine 1 custom options: {engine1_options}")
+    if engine2_options:
+        for key, value in engine2_options.items():
+            engine2.options[key] = value
+        print(f"  Engine 2 custom options: {engine2_options}")
 
     metalfish_path = base_dir / "build" / "metalfish"
 
@@ -2343,6 +2360,18 @@ def main():
     parser.add_argument("--engine1", type=str, help="First engine name for CI match")
     parser.add_argument("--engine2", type=str, help="Second engine name for CI match")
     parser.add_argument(
+        "--engine1-options",
+        type=str,
+        default=None,
+        help="UCI options for engine1 as key=value pairs separated by commas (e.g., 'Threads=12,Hash=1024')",
+    )
+    parser.add_argument(
+        "--engine2-options",
+        type=str,
+        default=None,
+        help="UCI options for engine2 as key=value pairs separated by commas (e.g., 'Threads=1,Hash=128')",
+    )
+    parser.add_argument(
         "--output", "-o", type=str, help="Output file for CI match results (JSON)"
     )
     parser.add_argument(
@@ -2409,9 +2438,25 @@ def main():
             args.games = 10
             args.time = "5+0.05"
 
+        # Parse custom UCI options
+        engine1_options = {}
+        engine2_options = {}
+        if args.engine1_options:
+            for opt in args.engine1_options.split(","):
+                if "=" in opt:
+                    key, value = opt.split("=", 1)
+                    engine1_options[key.strip()] = value.strip()
+        if args.engine2_options:
+            for opt in args.engine2_options.split(","):
+                if "=" in opt:
+                    key, value = opt.split("=", 1)
+                    engine2_options[key.strip()] = value.strip()
+
         try:
             run_ci_match(
-                base_dir, args.engine1, args.engine2, args.games, args.time, output_file
+                base_dir, args.engine1, args.engine2, args.games, args.time, output_file,
+                engine1_options=engine1_options if engine1_options else None,
+                engine2_options=engine2_options if engine2_options else None,
             )
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)

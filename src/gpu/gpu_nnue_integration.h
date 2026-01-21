@@ -2,10 +2,30 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  GPU NNUE Integration Header
+  GPU NNUE Integration Header - Unified Implementation
 
   Provides GPU-accelerated NNUE evaluation with adaptive kernel selection
   based on batch size and runtime performance characteristics.
+  
+  This is the primary GPU NNUE interface. Use this header for all GPU NNUE
+  functionality. The implementation is in gpu_nnue_integration.cpp.
+  
+  STOCKFISH NNUE PARITY:
+  =====================
+  1. HalfKAv2_hm Feature Set - Exact match to Stockfish's feature extraction
+  2. Dual Network Architecture - Big (1024) and Small (128) networks
+  3. 8 Layer Stacks - Bucket-based evaluation by piece count
+  4. Clipped ReLU Activation - [0, 127] range with squared clipping
+  5. Skip Connection - FC0 output 15 feeds into final output
+  6. PSQT Accumulation - Piece-square table evaluation
+  
+  APPLE SILICON OPTIMIZATIONS:
+  ===========================
+  1. ZERO-COPY UNIFIED MEMORY - MTLResourceStorageModeShared
+  2. SIMD-OPTIMIZED METAL SHADERS - simdgroup_sum, 8-way unrolling
+  3. FUSED KERNELS - Single kernel for small batches
+  4. ADAPTIVE STRATEGY SELECTION - CPU/GPU/SIMD based on batch size
+  5. PARALLEL COMMAND QUEUES - Concurrent async submissions
 */
 
 #pragma once
@@ -209,6 +229,29 @@ public:
   // Status
   std::string status_string() const;
 
+  // ============================================================================
+  // Incremental Update API
+  // ============================================================================
+
+  // Apply incremental update to accumulator
+  // Returns true if update was applied on GPU, false if full refresh needed
+  bool apply_incremental_update(int perspective, int king_square,
+                                const int32_t *added_features, int num_added,
+                                const int32_t *removed_features, int num_removed,
+                                const int32_t *src_accumulator,
+                                int32_t *dst_accumulator, int hidden_dim);
+
+  // Apply double incremental update (for null-move search)
+  bool apply_double_incremental_update(
+      int perspective, const int32_t *added1, int num_added1,
+      const int32_t *removed1, int num_removed1, const int32_t *added2,
+      int num_added2, const int32_t *removed2, int num_removed2,
+      const int32_t *src_accumulator, int32_t *dst_accumulator, int hidden_dim);
+
+  // Check if incremental update is beneficial vs full refresh
+  bool should_use_incremental(int num_added, int num_removed,
+                              int hidden_dim) const;
+
 private:
   bool initialized_ = false;
   GPUTuningParams tuning_;
@@ -232,6 +275,20 @@ private:
   std::unique_ptr<ComputeKernel> forward_optimized_kernel_;
   std::unique_ptr<ComputeKernel> fused_single_kernel_;
 
+  // Compute kernels - incremental updates
+  std::unique_ptr<ComputeKernel> incremental_update_kernel_;
+  std::unique_ptr<ComputeKernel> incremental_update_simd_kernel_;
+  std::unique_ptr<ComputeKernel> double_incremental_kernel_;
+
+  // Compute kernels - Finny table operations
+  std::unique_ptr<ComputeKernel> update_finny_kernel_;
+  std::unique_ptr<ComputeKernel> load_finny_kernel_;
+
+  // Compute kernels - sparse optimizations
+  std::unique_ptr<ComputeKernel> fc0_sparse_bitmask_kernel_;
+  std::unique_ptr<ComputeKernel> feature_transform_permuted_kernel_;
+  std::unique_ptr<ComputeKernel> forward_simd_optimized_kernel_;
+
   // Working buffers
   std::unique_ptr<Buffer> positions_buffer_;
   std::unique_ptr<Buffer> white_features_buffer_;
@@ -247,6 +304,19 @@ private:
   std::unique_ptr<Buffer> black_counts_buffer_;
   std::unique_ptr<Buffer> white_offsets_buffer_;
   std::unique_ptr<Buffer> black_offsets_buffer_;
+
+  // Incremental update buffers
+  std::unique_ptr<Buffer> feature_update_buffer_;
+  std::unique_ptr<Buffer> added_features_buffer_;
+  std::unique_ptr<Buffer> removed_features_buffer_;
+  std::unique_ptr<Buffer> update_counts_buffer_;
+
+  // Finny table GPU buffers (for caching)
+  std::unique_ptr<Buffer> finny_accumulators_buffer_[2]; // [perspective]
+  std::unique_ptr<Buffer> finny_psqt_buffer_[2];
+
+  // Sparse input bitmask buffer
+  std::unique_ptr<Buffer> nnz_masks_buffer_;
 
   // Statistics
   std::atomic<size_t> gpu_evals_{0};

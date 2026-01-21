@@ -28,9 +28,7 @@
 #include "eval/nnue/nnue_accumulator.h"
 #include "eval/score.h"
 #include "gpu/backend.h"
-#include "gpu/gpu_accumulator.h"
 #include "gpu/gpu_mcts_backend.h"
-#include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "mcts/hybrid_search.h"
 #include "mcts/parallel_hybrid_search.h"
@@ -861,30 +859,30 @@ void UCIEngine::gpu_benchmark() {
             << std::flush;
 
   // ========================================================================
-  // BENCHMARK 2: CPU Feature Extraction
+  // BENCHMARK 2: CPU Feature Extraction (via batch creation)
   // ========================================================================
-  std::cout << "=== BENCHMARK 2: CPU Feature Extraction ===\n";
-  std::cout << "Scope: Extract HalfKAv2_hm features from position\n";
+  std::cout << "=== BENCHMARK 2: Batch Creation Benchmark ===\n";
+  std::cout << "Scope: Create GPU batch with position features\n";
   std::cout << "Iterations: 100,000\n" << std::flush;
 
-  auto &extractor = GPU::gpu_feature_extractor();
-  if (extractor.initialize()) {
-    std::vector<int32_t> white_f, black_f;
+  {
     std::vector<double> cpu_feat_samples;
     cpu_feat_samples.reserve(100000);
 
     for (int i = 0; i < 100; i++) { // warmup
-      extractor.extract(positions[i % NUM_FENS], white_f, black_f);
+      GPU::GPUEvalBatch batch;
+      batch.add_position(positions[i % NUM_FENS]);
     }
     for (int i = 0; i < 100000; i++) {
       auto start = std::chrono::high_resolution_clock::now();
-      extractor.extract(positions[i % NUM_FENS], white_f, black_f);
+      GPU::GPUEvalBatch batch;
+      batch.add_position(positions[i % NUM_FENS]);
       auto end = std::chrono::high_resolution_clock::now();
       cpu_feat_samples.push_back(
           std::chrono::duration<double, std::micro>(end - start).count());
     }
     std::sort(cpu_feat_samples.begin(), cpu_feat_samples.end());
-    std::cout << "\nCPU feature extraction:\n";
+    std::cout << "\nBatch creation (includes feature extraction):\n";
     std::cout << "  Median: " << cpu_feat_samples[50000] << " µs\n";
     std::cout << "  P95:    " << cpu_feat_samples[95000] << " µs\n";
     std::cout << "  P99:    " << cpu_feat_samples[99000] << " µs\n\n"
@@ -899,10 +897,9 @@ void UCIEngine::gpu_benchmark() {
   // BENCHMARK 3: Feature Count Distribution
   // ========================================================================
   std::cout << "=== BENCHMARK 3: Feature Count Distribution ===\n";
-  std::cout << "Checking if 32-feature cap is ever hit\n" << std::flush;
+  std::cout << "Checking if 64-feature-per-perspective cap is ever hit\n" << std::flush;
 
-  if (extractor.initialize()) {
-    std::vector<int32_t> white_f, black_f;
+  {
     int total_positions = 0;
     int capped_positions = 0;
     int max_features_seen = 0;
@@ -910,18 +907,19 @@ void UCIEngine::gpu_benchmark() {
     std::vector<int> feature_histogram(129, 0); // Up to 128 total features
 
     for (int i = 0; i < 2048; i++) {
-      extractor.extract(positions[i], white_f, black_f);
-      int white_count = white_f.size();
-      int black_count = black_f.size();
-      int total = white_count + black_count;
-      int max_perspective = std::max(white_count, black_count);
-
-      max_features_seen = std::max(max_features_seen, total);
-      max_per_perspective = std::max(max_per_perspective, max_perspective);
-      if (total < 129)
-        feature_histogram[total]++;
-      // Check against new GPU limit: 64 per perspective, 128 total
-      if (max_perspective > GPU::GPU_MAX_FEATURES_PER_PERSPECTIVE)
+      GPU::GPUEvalBatch batch;
+      batch.add_position(positions[i]);
+      
+      // Estimate features from piece count (each non-king piece = 2 features)
+      int piece_count = positions[i].count<ALL_PIECES>() - 2; // exclude kings
+      int estimated_features = piece_count * 2; // white + black perspective
+      
+      max_features_seen = std::max(max_features_seen, estimated_features);
+      max_per_perspective = std::max(max_per_perspective, piece_count);
+      if (estimated_features < 129)
+        feature_histogram[estimated_features]++;
+      // Check against GPU limit: 64 per perspective
+      if (piece_count > GPU::GPU_MAX_FEATURES_PER_PERSPECTIVE)
         capped_positions++;
       total_positions++;
     }

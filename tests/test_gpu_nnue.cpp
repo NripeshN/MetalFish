@@ -24,7 +24,6 @@
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "gpu/backend.h"
-#include "gpu/gpu_accumulator.h"
 #include "gpu/gpu_nnue_integration.h"
 
 using namespace MetalFish;
@@ -205,55 +204,43 @@ bool test_gpu_feature_extraction() {
 
   bool all_passed = true;
 
-  // Test feature extractor initialization
+  // Test feature extraction via batch evaluation
   {
-    auto &extractor = GPU::gpu_feature_extractor();
-    bool passed = extractor.initialize();
-    print_result("Feature extractor initialization", passed);
-    all_passed &= passed;
-  }
-
-  // Test feature extraction from positions
-  {
-    bool passed = true;
-    for (int i = 0; i < NUM_TEST_FENS && passed; i++) {
-      std::deque<StateInfo> states(1);
-      Position pos;
-      pos.set(TEST_FENS[i], false, &states.back());
-
-      std::vector<int32_t> white_features, black_features;
-      auto &extractor = GPU::gpu_feature_extractor();
-      passed = extractor.extract(pos, white_features, black_features);
-
-      // Check that we got some features
-      passed &= !white_features.empty() && !black_features.empty();
-    }
-    print_result("Feature extraction from positions", passed);
-    all_passed &= passed;
-  }
-
-  // Test batch feature extraction
-  {
-    std::vector<const Position *> positions;
+    GPU::GPUEvalBatch batch;
+    batch.reserve(NUM_TEST_FENS);
+    
     std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
     std::vector<Position> pos_vec(NUM_TEST_FENS);
 
     for (int i = 0; i < NUM_TEST_FENS; i++) {
       states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
       pos_vec[i].set(TEST_FENS[i], false, &states_vec.back()->back());
-      positions.push_back(&pos_vec[i]);
+      batch.add_position(pos_vec[i]);
     }
 
-    std::vector<int32_t> features;
-    std::vector<uint32_t> counts, offsets;
+    bool passed = batch.count == NUM_TEST_FENS;
+    print_result("Feature extraction via batch", passed);
+    all_passed &= passed;
+  }
 
-    auto &extractor = GPU::gpu_feature_extractor();
-    bool passed = extractor.extract_batch(positions, features, counts, offsets);
+  // Test batch feature extraction with GPUPositionData
+  {
+    std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
+    std::vector<Position> pos_vec(NUM_TEST_FENS);
+    GPU::GPUEvalBatch batch;
+    batch.reserve(NUM_TEST_FENS);
 
-    passed &= counts.size() == NUM_TEST_FENS;
-    passed &= !features.empty();
+    for (int i = 0; i < NUM_TEST_FENS; i++) {
+      states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
+      pos_vec[i].set(TEST_FENS[i], false, &states_vec.back()->back());
+      
+      GPU::GPUPositionData data;
+      data.from_position(pos_vec[i]);
+      batch.add_position_data(data);
+    }
 
-    print_result("Batch feature extraction", passed);
+    bool passed = batch.count == NUM_TEST_FENS;
+    print_result("Batch feature extraction via position data", passed);
     all_passed &= passed;
   }
 
@@ -261,7 +248,7 @@ bool test_gpu_feature_extraction() {
 }
 
 // ============================================================================
-// GPU Accumulator Tests
+// GPU Accumulator Tests (via GPUNNUEManager)
 // ============================================================================
 
 bool test_gpu_accumulator() {
@@ -274,42 +261,29 @@ bool test_gpu_accumulator() {
 
   bool all_passed = true;
 
-  // Test accumulator stack initialization
+  // Test that GPUNNUEManager handles accumulator operations internally
   {
-    GPU::GPUAccumulatorStack stack;
-    bool passed = stack.initialize(GPU::GPU_FT_DIM_BIG, true);
-    print_result("Accumulator stack initialization (big)", passed);
+    auto &manager = GPU::gpu_nnue_manager();
+    bool passed = manager.initialize();
+    print_result("Manager initialization (handles accumulators)", passed);
     all_passed &= passed;
   }
 
+  // Test batch evaluation (which uses accumulators internally)
   {
-    GPU::GPUAccumulatorStack stack;
-    bool passed = stack.initialize(GPU::GPU_FT_DIM_SMALL, false);
-    print_result("Accumulator stack initialization (small)", passed);
-    all_passed &= passed;
-  }
-
-  // Test stack operations
-  {
-    GPU::GPUAccumulatorStack stack;
-    stack.initialize(GPU::GPU_FT_DIM_BIG, true);
-
-    bool passed = true;
-    passed &= stack.size() == 1;
-
-    stack.push();
-    passed &= stack.size() == 2;
-
-    stack.push();
-    passed &= stack.size() == 3;
-
-    stack.pop();
-    passed &= stack.size() == 2;
-
-    stack.reset();
-    passed &= stack.size() == 1;
-
-    print_result("Accumulator stack operations", passed);
+    GPU::GPUEvalBatch batch;
+    batch.reserve(4);
+    
+    std::deque<StateInfo> states(1);
+    Position pos;
+    pos.set(TEST_FENS[0], false, &states.back());
+    
+    for (int i = 0; i < 4; i++) {
+      batch.add_position(pos);
+    }
+    
+    bool passed = batch.count == 4;
+    print_result("Batch with accumulator support", passed);
     all_passed &= passed;
   }
 
@@ -492,9 +466,9 @@ void run_gpu_benchmarks() {
     }
   }
 
-  // Feature extraction benchmark
+  // Feature extraction benchmark (via batch evaluation)
   {
-    std::cout << "\n  Feature Extraction:" << std::endl;
+    std::cout << "\n  Feature Extraction (via batch):" << std::endl;
 
     std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
     std::vector<Position> positions(NUM_TEST_FENS);
@@ -503,20 +477,18 @@ void run_gpu_benchmarks() {
       positions[i].set(TEST_FENS[i], false, &states_vec.back()->back());
     }
 
-    auto &extractor = GPU::gpu_feature_extractor();
-    extractor.initialize();
-
     const int iters = 1000;
-    std::vector<int32_t> white_features, black_features;
 
     timer.start();
     for (int i = 0; i < iters; i++) {
+      GPU::GPUEvalBatch batch;
+      batch.reserve(NUM_TEST_FENS);
       for (int j = 0; j < NUM_TEST_FENS; j++) {
-        extractor.extract(positions[j], white_features, black_features);
+        batch.add_position(positions[j]);
       }
     }
     double time = timer.elapsed_ms();
-    print_benchmark("Single position", time, iters * NUM_TEST_FENS);
+    print_benchmark("Batch creation", time, iters * NUM_TEST_FENS);
   }
 }
 
