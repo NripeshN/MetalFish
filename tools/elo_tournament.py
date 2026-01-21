@@ -197,6 +197,7 @@ class ChessBoardVisualizer:
         self.last_move_from = None
         self.last_move_to = None
         self.board_height = 16  # Lines used by the board display
+        self.en_passant_square = None  # Track en passant target square (rank, file)
         
     def _fen_to_board(self, fen: str) -> List[List[str]]:
         """Convert FEN string to 8x8 board array."""
@@ -214,16 +215,94 @@ class ChessBoardVisualizer:
                     file += 1
         return board
     
+    def _can_piece_reach(self, piece: str, from_r: int, from_f: int, to_r: int, to_f: int, board: List[List[str]], is_capture: bool = False) -> bool:
+        """Check if a piece can legally move from one square to another."""
+        dr = to_r - from_r
+        df = to_f - from_f
+        abs_dr, abs_df = abs(dr), abs(df)
+        
+        piece_type = piece.upper()
+        is_white = piece.isupper()
+        
+        if piece_type == 'P':
+            # Pawn movement
+            direction = -1 if is_white else 1  # White moves up (decreasing rank), black moves down
+            start_rank = 6 if is_white else 1
+            
+            if is_capture:
+                # Diagonal capture
+                return dr == direction and abs_df == 1
+            else:
+                # Forward move
+                if df != 0:
+                    return False
+                if dr == direction:
+                    return board[to_r][to_f] == ' '
+                if dr == 2 * direction and from_r == start_rank:
+                    # Two-square initial move - check both squares are empty
+                    mid_r = from_r + direction
+                    return board[mid_r][from_f] == ' ' and board[to_r][to_f] == ' '
+            return False
+        
+        elif piece_type == 'N':
+            # Knight: L-shape move
+            return (abs_dr == 2 and abs_df == 1) or (abs_dr == 1 and abs_df == 2)
+        
+        elif piece_type == 'B':
+            # Bishop: diagonal move with clear path
+            if abs_dr != abs_df or abs_dr == 0:
+                return False
+            return self._is_path_clear(from_r, from_f, to_r, to_f, board)
+        
+        elif piece_type == 'R':
+            # Rook: straight line with clear path
+            if not (dr == 0 or df == 0) or (dr == 0 and df == 0):
+                return False
+            return self._is_path_clear(from_r, from_f, to_r, to_f, board)
+        
+        elif piece_type == 'Q':
+            # Queen: diagonal or straight with clear path
+            if abs_dr == abs_df and abs_dr > 0:
+                return self._is_path_clear(from_r, from_f, to_r, to_f, board)
+            if (dr == 0 or df == 0) and (dr != 0 or df != 0):
+                return self._is_path_clear(from_r, from_f, to_r, to_f, board)
+            return False
+        
+        elif piece_type == 'K':
+            # King: one square in any direction
+            return abs_dr <= 1 and abs_df <= 1 and (abs_dr + abs_df) > 0
+        
+        return False
+    
+    def _is_path_clear(self, from_r: int, from_f: int, to_r: int, to_f: int, board: List[List[str]]) -> bool:
+        """Check if the path between two squares is clear (exclusive of endpoints)."""
+        dr = to_r - from_r
+        df = to_f - from_f
+        
+        step_r = 0 if dr == 0 else (1 if dr > 0 else -1)
+        step_f = 0 if df == 0 else (1 if df > 0 else -1)
+        
+        r, f = from_r + step_r, from_f + step_f
+        while r != to_r or f != to_f:
+            if board[r][f] != ' ':
+                return False
+            r += step_r
+            f += step_f
+        
+        return True
+    
     def _parse_move(self, move: str, board: List[List[str]], is_white: bool) -> Optional[Tuple[int, int, int, int, str]]:
         """Parse algebraic notation move. Returns (from_rank, from_file, to_rank, to_file, promotion)."""
         if not move or move in ['1-0', '0-1', '1/2-1/2', '*']:
             return None
+        
+        original_move = move
             
         # Handle castling
-        if move in ['O-O', 'O-O+', 'O-O#']:
+        if move in ['O-O', 'O-O+', 'O-O#', '0-0', '0-0+', '0-0#']:
             rank = 7 if is_white else 0
             return (rank, 4, rank, 6, '')
-        if move in ['O-O-O', 'O-O-O+', 'O-O-O#']:
+        if move in ['O-O-O', 'O-O-O+', 'O-O-O#', '0-0-0', '0-0-0+', '0-0-0#']:
             rank = 7 if is_white else 0
             return (rank, 4, rank, 2, '')
         
@@ -233,59 +312,87 @@ class ChessBoardVisualizer:
         # Handle promotion
         promotion = ''
         if '=' in move:
-            move, promotion = move.split('=')
-            promotion = promotion[0]
+            parts = move.split('=')
+            move = parts[0]
+            promotion = parts[1][0] if len(parts) > 1 and parts[1] else 'Q'
+        # Also handle promotion without = (e.g., "e8Q")
+        elif len(move) >= 3 and move[-1] in 'QRBN' and move[-2].isdigit():
+            if move[-2] in '18':  # Promotion rank
+                promotion = move[-1]
+                move = move[:-1]
         
         # Determine piece type
         piece = 'P'
-        if move[0] in 'KQRBN':
+        if move and move[0] in 'KQRBN':
             piece = move[0]
             move = move[1:]
         
-        # Handle captures
+        # Check for capture
+        is_capture = 'x' in move
         move = move.replace('x', '')
         
-        # Get destination square
+        # Get destination square (last two characters)
         if len(move) < 2:
             return None
-        dest_file = ord(move[-2]) - ord('a')
-        dest_rank = 8 - int(move[-1])
+        
+        try:
+            dest_file = ord(move[-2]) - ord('a')
+            dest_rank = 8 - int(move[-1])
+        except (ValueError, IndexError):
+            return None
         
         if not (0 <= dest_file < 8 and 0 <= dest_rank < 8):
             return None
         
-        # Find source square
+        # Get disambiguation (everything before destination)
         disambiguation = move[:-2]
+        
+        # Find the piece that can make this move
         target_piece = piece if is_white else piece.lower()
+        candidates = []
         
         for r in range(8):
             for f in range(8):
                 if board[r][f] == target_piece:
                     # Check disambiguation
                     if disambiguation:
-                        if disambiguation.isalpha() and f != ord(disambiguation) - ord('a'):
-                            continue
-                        if disambiguation.isdigit() and r != 8 - int(disambiguation):
-                            continue
+                        # File disambiguation (e.g., "Nbd2" - knight from b-file)
+                        if len(disambiguation) >= 1 and disambiguation[0].isalpha():
+                            if f != ord(disambiguation[0]) - ord('a'):
+                                continue
+                        # Rank disambiguation (e.g., "R1e1" - rook from rank 1)
+                        if len(disambiguation) >= 1 and disambiguation[-1].isdigit():
+                            if r != 8 - int(disambiguation[-1]):
+                                continue
+                        # Full square disambiguation (e.g., "Qa1b2")
                         if len(disambiguation) == 2:
                             if f != ord(disambiguation[0]) - ord('a') or r != 8 - int(disambiguation[1]):
                                 continue
                     
-                    # For pawns, simple validation
+                    # Check if this piece can actually reach the destination
                     if piece == 'P':
-                        if is_white:
-                            if f == dest_file and (r - dest_rank == 1 or (r == 6 and dest_rank == 4)):
-                                return (r, f, dest_rank, dest_file, promotion)
-                            if abs(f - dest_file) == 1 and r - dest_rank == 1:
-                                return (r, f, dest_rank, dest_file, promotion)
+                        # Special pawn handling
+                        if is_capture:
+                            # Pawn capture (including en passant)
+                            if self._can_piece_reach(target_piece, r, f, dest_rank, dest_file, board, is_capture=True):
+                                candidates.append((r, f))
                         else:
-                            if f == dest_file and (dest_rank - r == 1 or (r == 1 and dest_rank == 3)):
-                                return (r, f, dest_rank, dest_file, promotion)
-                            if abs(f - dest_file) == 1 and dest_rank - r == 1:
-                                return (r, f, dest_rank, dest_file, promotion)
+                            # Pawn push
+                            if self._can_piece_reach(target_piece, r, f, dest_rank, dest_file, board, is_capture=False):
+                                candidates.append((r, f))
                     else:
-                        # Simplified: just return first matching piece
-                        return (r, f, dest_rank, dest_file, promotion)
+                        # Other pieces
+                        if self._can_piece_reach(target_piece, r, f, dest_rank, dest_file, board):
+                            candidates.append((r, f))
+        
+        if len(candidates) == 1:
+            from_r, from_f = candidates[0]
+            return (from_r, from_f, dest_rank, dest_file, promotion)
+        elif len(candidates) > 1:
+            # Multiple candidates - should have been disambiguated, take first one
+            # This shouldn't happen with proper PGN, but handle gracefully
+            from_r, from_f = candidates[0]
+            return (from_r, from_f, dest_rank, dest_file, promotion)
         
         return None
     
@@ -296,34 +403,56 @@ class ChessBoardVisualizer:
             return False
         
         from_rank, from_file, to_rank, to_file, promotion = parsed
+        piece = self.board[from_rank][from_file]
         
         # Store last move for highlighting
         self.last_move_from = (from_rank, from_file)
         self.last_move_to = (to_rank, to_file)
         
-        # Handle castling
-        if self.board[from_rank][from_file].upper() == 'K' and abs(from_file - to_file) == 2:
+        # Handle castling (king moves 2 squares)
+        if piece.upper() == 'K' and abs(from_file - to_file) == 2:
             # Move king
-            self.board[to_rank][to_file] = self.board[from_rank][from_file]
+            self.board[to_rank][to_file] = piece
             self.board[from_rank][from_file] = ' '
             # Move rook
-            if to_file > from_file:  # Kingside
-                self.board[to_rank][5] = self.board[to_rank][7]
+            if to_file > from_file:  # Kingside (O-O)
+                rook = 'R' if is_white else 'r'
+                self.board[to_rank][5] = rook
                 self.board[to_rank][7] = ' '
-            else:  # Queenside
-                self.board[to_rank][3] = self.board[to_rank][0]
+            else:  # Queenside (O-O-O)
+                rook = 'R' if is_white else 'r'
+                self.board[to_rank][3] = rook
                 self.board[to_rank][0] = ' '
+            self.en_passant_square = None
+            self.move_history.append(move)
+            self.current_move += 1
             return True
         
-        # Handle en passant
-        if self.board[from_rank][from_file].upper() == 'P' and from_file != to_file and self.board[to_rank][to_file] == ' ':
-            self.board[from_rank][to_file] = ' '
+        # Handle en passant capture
+        if piece.upper() == 'P' and from_file != to_file and self.board[to_rank][to_file] == ' ':
+            # This is en passant - remove the captured pawn
+            captured_rank = from_rank  # The captured pawn is on the same rank as the capturing pawn
+            self.board[captured_rank][to_file] = ' '
+        
+        # Check for pawn double move (sets en passant square)
+        if piece.upper() == 'P' and abs(from_rank - to_rank) == 2:
+            # Set en passant target square (the square the pawn passed through)
+            ep_rank = (from_rank + to_rank) // 2
+            self.en_passant_square = (ep_rank, from_file)
+        else:
+            self.en_passant_square = None
         
         # Move piece
-        piece = self.board[from_rank][from_file]
+        moving_piece = piece
+        
+        # Handle promotion
         if promotion:
-            piece = promotion if is_white else promotion.lower()
-        self.board[to_rank][to_file] = piece
+            if is_white:
+                moving_piece = promotion.upper()
+            else:
+                moving_piece = promotion.lower()
+        
+        self.board[to_rank][to_file] = moving_piece
         self.board[from_rank][from_file] = ' '
         
         self.move_history.append(move)
@@ -350,29 +479,28 @@ class ChessBoardVisualizer:
     def render(self, last_move: str = "", show_info: bool = True) -> str:
         """Render the board as a string with rich formatting."""
         lines = []
-        B = self.BOX
         
         # Title bar
         lines.append("")
-        lines.append(f"  {Colors.BOLD}{Colors.CYAN}+{'-' * 40}+{Colors.RESET}")
-        lines.append(f"  {Colors.BOLD}{Colors.CYAN}|{Colors.RESET}  {Colors.WHITE_PIECE}{Colors.BOLD}{self.white_player}{Colors.RESET} vs {Colors.BLACK_PIECE}{Colors.BOLD}{self.black_player}{Colors.RESET}".ljust(52) + f"{Colors.CYAN}|{Colors.RESET}")
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}{'=' * 42}{Colors.RESET}")
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}|{Colors.RESET}  {Colors.BOLD}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}".ljust(54) + f"{Colors.CYAN}{Colors.BOLD}|{Colors.RESET}")
         
         move_num = (self.current_move + 1) // 2
         side = "White" if self.current_move % 2 == 0 else "Black"
         if last_move:
-            move_info = f"  Move {move_num}: {last_move} ({side} to move)"
+            move_info = f"  Move {move_num}: {last_move}"
         else:
             move_info = f"  {side} to move"
-        lines.append(f"  {Colors.CYAN}|{Colors.RESET}{Colors.DIM}{move_info}{Colors.RESET}".ljust(60) + f"{Colors.CYAN}|{Colors.RESET}")
-        lines.append(f"  {Colors.CYAN}+{'-' * 40}+{Colors.RESET}")
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}|{Colors.RESET}{Colors.DIM}{move_info}{Colors.RESET}".ljust(62) + f"{Colors.CYAN}{Colors.BOLD}|{Colors.RESET}")
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}{'=' * 42}{Colors.RESET}")
         lines.append("")
         
-        # Top border with coordinates
-        lines.append(f"     {Colors.COORD_COLOR}a   b   c   d   e   f   g   h{Colors.RESET}")
-        lines.append(f"   {Colors.BORDER_COLOR}{B['tl']}{B['h'] * 3}{(B['tt'] + B['h'] * 3) * 7}{B['tr']}{Colors.RESET}")
+        # Top coordinates
+        lines.append(f"      {Colors.COORD_COLOR}a    b    c    d    e    f    g    h{Colors.RESET}")
+        lines.append(f"    {Colors.BORDER_COLOR}+----+----+----+----+----+----+----+----+{Colors.RESET}")
         
         for rank in range(8):
-            row = f" {Colors.COORD_COLOR}{8 - rank}{Colors.RESET} {Colors.BORDER_COLOR}{B['v']}{Colors.RESET}"
+            row = f"  {Colors.COORD_COLOR}{8 - rank}{Colors.RESET} {Colors.BORDER_COLOR}|{Colors.RESET}"
             
             for file in range(8):
                 piece = self.board[rank][file]
@@ -391,20 +519,23 @@ class ChessBoardVisualizer:
                     sq_color = Colors.DARK_SQUARE
                 
                 # Get piece display
-                piece_str = self._get_piece_display(piece, is_light)
+                if piece == ' ':
+                    piece_str = "    "
+                elif piece.isupper():
+                    char = self.WHITE_PIECES.get(piece, piece)
+                    piece_str = f"{Colors.WHITE_PIECE} {char}  "
+                else:
+                    char = self.BLACK_PIECES.get(piece, piece)
+                    piece_str = f"{Colors.BLACK_PIECE} {char}  "
                 
-                row += f"{sq_color}{piece_str} {Colors.RESET}"
+                row += f"{sq_color}{piece_str}{Colors.RESET}{Colors.BORDER_COLOR}|{Colors.RESET}"
             
-            row += f"{Colors.BORDER_COLOR}{B['v']}{Colors.RESET} {Colors.COORD_COLOR}{8 - rank}{Colors.RESET}"
+            row += f" {Colors.COORD_COLOR}{8 - rank}{Colors.RESET}"
             lines.append(row)
-            
-            # Add horizontal separator between ranks (except after last rank)
-            if rank < 7:
-                lines.append(f"   {Colors.BORDER_COLOR}{B['lt']}{B['h'] * 3}{(B['cross'] + B['h'] * 3) * 7}{B['rt']}{Colors.RESET}")
+            lines.append(f"    {Colors.BORDER_COLOR}+----+----+----+----+----+----+----+----+{Colors.RESET}")
         
-        # Bottom border
-        lines.append(f"   {Colors.BORDER_COLOR}{B['bl']}{B['h'] * 3}{(B['bt'] + B['h'] * 3) * 7}{B['br']}{Colors.RESET}")
-        lines.append(f"     {Colors.COORD_COLOR}a   b   c   d   e   f   g   h{Colors.RESET}")
+        # Bottom coordinates
+        lines.append(f"      {Colors.COORD_COLOR}a    b    c    d    e    f    g    h{Colors.RESET}")
         lines.append("")
         
         return '\n'.join(lines)
@@ -467,6 +598,7 @@ class ChessBoardVisualizer:
         self.result = "*"
         self.last_move_from = None
         self.last_move_to = None
+        self.en_passant_square = None
 
 
 def parse_pgn_moves(pgn: str) -> List[str]:
