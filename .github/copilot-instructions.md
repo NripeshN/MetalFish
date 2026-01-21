@@ -47,8 +47,8 @@ cd ..
 mkdir -p build && cd build
 cmake .. -DUSE_METAL=ON -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
 
-# 3. Build with parallel jobs (adjust -j based on cores)
-cmake --build . -j$(sysctl -n hw.ncpu)
+# 3. Build with parallel jobs
+cmake --build . --parallel
 
 # 4. NNUE files are automatically copied to build directory
 ls -la *.nnue  # Verify they're present
@@ -74,7 +74,7 @@ cmake .. -DUSE_METAL=OFF -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
 cmake .. -DUSE_METAL=OFF -DUSE_CUDA=ON -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
 
 # 3. Build
-cmake --build . -j$(nproc)
+cmake --build . --parallel
 
 # 4. Run tests
 ./metalfish_tests
@@ -89,7 +89,7 @@ mkdir build && cd build
 cmake .. -DUSE_METAL=OFF -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
 
 # 3. Build
-cmake --build . --config Release -j %NUMBER_OF_PROCESSORS%
+cmake --build . --config Release --parallel
 
 # 4. NNUE files must be in build/Release/ for Windows
 copy ..\src\*.nnue Release\
@@ -131,7 +131,7 @@ python3 tests/testing.py --bench
 
 ```bash
 cd build
-echo -e "uci\nisready\nposition startpos\ngo depth 5\nquit" | ./metalfish
+printf "uci\nisready\nposition startpos\ngo depth 5\nquit\n" | ./metalfish
 ```
 
 Expected output includes "uciok", "readyok", and "bestmove".
@@ -229,9 +229,9 @@ Hooks run: `clang-format` (C++), `black` + `isort` (Python), `cmake-format`
 
 ### Typical Development Workflow
 1. Make changes to source files
-2. Rebuild: `cd build && cmake --build . -j$(nproc)`
+2. Rebuild: `cd build && cmake --build . --parallel`
 3. Run relevant tests: `./metalfish_tests` or `python3 tests/testing.py --quick`
-4. Test UCI manually: `echo -e "uci\nisready\nposition startpos\ngo depth 10\nquit" | ./metalfish`
+4. Test UCI manually: `printf "uci\nisready\nposition startpos\ngo depth 10\nquit\n" | ./metalfish`
 5. Verify no Metal/CUDA shader issues if modified GPU code
 
 ### GPU Code Changes
