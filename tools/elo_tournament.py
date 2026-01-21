@@ -146,6 +146,14 @@ class Colors:
     BLACK_BG = "\033[100m"
     WHITE_FG = "\033[97m"
     BLACK_FG = "\033[30m"
+    # Rich colors for board
+    LIGHT_SQUARE = "\033[48;2;240;217;181m"  # Warm beige
+    DARK_SQUARE = "\033[48;2;181;136;99m"    # Brown
+    WHITE_PIECE = "\033[38;2;255;255;255m"   # Pure white
+    BLACK_PIECE = "\033[38;2;0;0;0m"         # Pure black
+    HIGHLIGHT_SQUARE = "\033[48;2;255;255;102m"  # Yellow highlight
+    BORDER_COLOR = "\033[38;2;139;90;43m"    # Wood brown
+    COORD_COLOR = "\033[38;2;101;67;33m"     # Dark brown
     # Cursor control
     CLEAR_SCREEN = "\033[2J"
     CURSOR_HOME = "\033[H"
@@ -158,12 +166,22 @@ class Colors:
 
 
 class ChessBoardVisualizer:
-    """Terminal-based chess board visualizer with Unicode pieces."""
+    """Terminal-based chess board visualizer with Unicode pieces and rich colors."""
     
-    # Unicode chess pieces
-    PIECES = {
+    # Unicode chess pieces - using filled pieces for better visibility
+    WHITE_PIECES = {
         'K': '\u2654', 'Q': '\u2655', 'R': '\u2656', 'B': '\u2657', 'N': '\u2658', 'P': '\u2659',
+    }
+    BLACK_PIECES = {
         'k': '\u265A', 'q': '\u265B', 'r': '\u265C', 'b': '\u265D', 'n': '\u265E', 'p': '\u265F',
+    }
+    
+    # Box drawing characters for a nicer border
+    BOX = {
+        'tl': '\u250F', 'tr': '\u2513', 'bl': '\u2517', 'br': '\u251B',
+        'h': '\u2501', 'v': '\u2503',
+        'lt': '\u2523', 'rt': '\u252B', 'tt': '\u2533', 'bt': '\u253B',
+        'cross': '\u254B'
     }
     
     # Starting position FEN
@@ -176,7 +194,9 @@ class ChessBoardVisualizer:
         self.white_player = "White"
         self.black_player = "Black"
         self.result = "*"
-        self.board_height = 12  # Lines used by the board display
+        self.last_move_from = None
+        self.last_move_to = None
+        self.board_height = 16  # Lines used by the board display
         
     def _fen_to_board(self, fen: str) -> List[List[str]]:
         """Convert FEN string to 8x8 board array."""
@@ -277,6 +297,10 @@ class ChessBoardVisualizer:
         
         from_rank, from_file, to_rank, to_file, promotion = parsed
         
+        # Store last move for highlighting
+        self.last_move_from = (from_rank, from_file)
+        self.last_move_to = (to_rank, to_file)
+        
         # Handle castling
         if self.board[from_rank][from_file].upper() == 'K' and abs(from_file - to_file) == 2:
             # Move king
@@ -306,48 +330,132 @@ class ChessBoardVisualizer:
         self.current_move += 1
         return True
     
+    def _get_piece_display(self, piece: str, is_light_square: bool) -> str:
+        """Get the colored piece character for display."""
+        if piece == ' ':
+            return '  '
+        
+        # Determine piece color and get unicode character
+        if piece.isupper():
+            # White piece
+            char = self.WHITE_PIECES.get(piece, piece)
+            piece_color = Colors.WHITE_PIECE
+        else:
+            # Black piece
+            char = self.BLACK_PIECES.get(piece, piece)
+            piece_color = Colors.BLACK_PIECE
+        
+        return f"{piece_color}{char} "
+    
     def render(self, last_move: str = "", show_info: bool = True) -> str:
-        """Render the board as a string."""
+        """Render the board as a string with rich formatting."""
+        lines = []
+        B = self.BOX
+        
+        # Title bar
+        lines.append("")
+        lines.append(f"  {Colors.BOLD}{Colors.CYAN}+{'-' * 40}+{Colors.RESET}")
+        lines.append(f"  {Colors.BOLD}{Colors.CYAN}|{Colors.RESET}  {Colors.WHITE_PIECE}{Colors.BOLD}{self.white_player}{Colors.RESET} vs {Colors.BLACK_PIECE}{Colors.BOLD}{self.black_player}{Colors.RESET}".ljust(52) + f"{Colors.CYAN}|{Colors.RESET}")
+        
+        move_num = (self.current_move + 1) // 2
+        side = "White" if self.current_move % 2 == 0 else "Black"
+        if last_move:
+            move_info = f"  Move {move_num}: {last_move} ({side} to move)"
+        else:
+            move_info = f"  {side} to move"
+        lines.append(f"  {Colors.CYAN}|{Colors.RESET}{Colors.DIM}{move_info}{Colors.RESET}".ljust(60) + f"{Colors.CYAN}|{Colors.RESET}")
+        lines.append(f"  {Colors.CYAN}+{'-' * 40}+{Colors.RESET}")
+        lines.append("")
+        
+        # Top border with coordinates
+        lines.append(f"     {Colors.COORD_COLOR}a   b   c   d   e   f   g   h{Colors.RESET}")
+        lines.append(f"   {Colors.BORDER_COLOR}{B['tl']}{B['h'] * 3}{(B['tt'] + B['h'] * 3) * 7}{B['tr']}{Colors.RESET}")
+        
+        for rank in range(8):
+            row = f" {Colors.COORD_COLOR}{8 - rank}{Colors.RESET} {Colors.BORDER_COLOR}{B['v']}{Colors.RESET}"
+            
+            for file in range(8):
+                piece = self.board[rank][file]
+                is_light = (rank + file) % 2 == 0
+                
+                # Check if this square was part of the last move
+                is_highlighted = (self.last_move_from == (rank, file) or 
+                                  self.last_move_to == (rank, file))
+                
+                # Choose square color
+                if is_highlighted:
+                    sq_color = Colors.HIGHLIGHT_SQUARE
+                elif is_light:
+                    sq_color = Colors.LIGHT_SQUARE
+                else:
+                    sq_color = Colors.DARK_SQUARE
+                
+                # Get piece display
+                piece_str = self._get_piece_display(piece, is_light)
+                
+                row += f"{sq_color}{piece_str} {Colors.RESET}"
+            
+            row += f"{Colors.BORDER_COLOR}{B['v']}{Colors.RESET} {Colors.COORD_COLOR}{8 - rank}{Colors.RESET}"
+            lines.append(row)
+            
+            # Add horizontal separator between ranks (except after last rank)
+            if rank < 7:
+                lines.append(f"   {Colors.BORDER_COLOR}{B['lt']}{B['h'] * 3}{(B['cross'] + B['h'] * 3) * 7}{B['rt']}{Colors.RESET}")
+        
+        # Bottom border
+        lines.append(f"   {Colors.BORDER_COLOR}{B['bl']}{B['h'] * 3}{(B['bt'] + B['h'] * 3) * 7}{B['br']}{Colors.RESET}")
+        lines.append(f"     {Colors.COORD_COLOR}a   b   c   d   e   f   g   h{Colors.RESET}")
+        lines.append("")
+        
+        return '\n'.join(lines)
+    
+    def render_compact(self, last_move: str = "") -> str:
+        """Render a more compact board without grid lines."""
         lines = []
         
         # Header
-        lines.append(f"  {Colors.BOLD}{self.white_player} vs {self.black_player}{Colors.RESET}")
-        lines.append(f"  {Colors.DIM}Move {(self.current_move + 1) // 2}: {last_move}{Colors.RESET}")
-        lines.append("")
+        lines.append(f"\n  {Colors.BOLD}{Colors.WHITE_PIECE}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}")
+        move_num = (self.current_move + 1) // 2
+        lines.append(f"  {Colors.DIM}Move {move_num}: {last_move}{Colors.RESET}\n")
         
-        # Board with coordinates
-        lines.append(f"    a b c d e f g h")
-        lines.append(f"  {Colors.DIM}+{'-' * 17}+{Colors.RESET}")
+        # Coordinates and board
+        lines.append(f"    {Colors.COORD_COLOR} a  b  c  d  e  f  g  h{Colors.RESET}")
         
         for rank in range(8):
-            row = f"{Colors.DIM}{8 - rank} |{Colors.RESET}"
+            row = f"  {Colors.COORD_COLOR}{8 - rank}{Colors.RESET} "
+            
             for file in range(8):
                 piece = self.board[rank][file]
-                # Alternate square colors
                 is_light = (rank + file) % 2 == 0
                 
-                if piece == ' ':
-                    char = ' '
-                else:
-                    char = self.PIECES.get(piece, piece)
+                # Check if this square was part of the last move
+                is_highlighted = (self.last_move_from == (rank, file) or 
+                                  self.last_move_to == (rank, file))
                 
-                if is_light:
-                    row += f"{Colors.WHITE_BG}{Colors.BLACK_FG}{char} {Colors.RESET}"
+                # Choose square color
+                if is_highlighted:
+                    sq_color = Colors.HIGHLIGHT_SQUARE
+                elif is_light:
+                    sq_color = Colors.LIGHT_SQUARE
                 else:
-                    row += f"{Colors.BLACK_BG}{Colors.WHITE_FG}{char} {Colors.RESET}"
+                    sq_color = Colors.DARK_SQUARE
+                
+                # Get piece display
+                piece_str = self._get_piece_display(piece, is_light)
+                
+                row += f"{sq_color}{piece_str}{Colors.RESET}"
             
-            row += f"{Colors.DIM}| {8 - rank}{Colors.RESET}"
+            row += f" {Colors.COORD_COLOR}{8 - rank}{Colors.RESET}"
             lines.append(row)
         
-        lines.append(f"  {Colors.DIM}+{'-' * 17}+{Colors.RESET}")
-        lines.append(f"    a b c d e f g h")
+        lines.append(f"    {Colors.COORD_COLOR} a  b  c  d  e  f  g  h{Colors.RESET}\n")
         
         return '\n'.join(lines)
     
     def clear_board_area(self):
         """Clear the board display area."""
         # Move cursor up and clear lines
-        for _ in range(self.board_height + 2):
+        for _ in range(self.board_height + 4):
             sys.stdout.write(f"{Colors.CURSOR_UP}{Colors.CLEAR_LINE}")
         sys.stdout.flush()
     
@@ -357,6 +465,8 @@ class ChessBoardVisualizer:
         self.move_history = []
         self.current_move = 0
         self.result = "*"
+        self.last_move_from = None
+        self.last_move_to = None
 
 
 def parse_pgn_moves(pgn: str) -> List[str]:
