@@ -198,7 +198,7 @@ class ChessBoardVisualizer:
         self.result = "*"
         self.last_move_from = None
         self.last_move_to = None
-        self.board_height = 16  # Lines used by the board display
+        self.board_height = 26  # Lines used by the board display (header box + board + coordinates)
         self.en_passant_square = None  # Track en passant target square (rank, file)
         
     def _fen_to_board(self, fen: str) -> List[List[str]]:
@@ -495,11 +495,11 @@ class ChessBoardVisualizer:
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{' ' * left_pad}{Colors.BOLD}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}{' ' * right_pad}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
         
         # Move info line
-        move_num = (self.current_move + 1) // 2
-        side = "White" if self.current_move % 2 == 0 else "Black"
         if last_move:
-            move_info = f"Move {move_num}: {last_move}"
+            move_info = last_move  # Use the provided move info directly
         else:
+            move_num = (self.current_move + 1) // 2
+            side = "White" if self.current_move % 2 == 0 else "Black"
             move_info = f"{side} to move"
         info_padding = inner_width - len(move_info) - 2
         lines.append(f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET} {Colors.DIM}{move_info}{Colors.RESET}{' ' * info_padding} {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}")
@@ -1618,25 +1618,48 @@ def _format_ci_game_output(game_num: int, total_games: int,
     lines.append(f"  {Colors.CYAN}│{Colors.RESET} {Colors.BOLD}PGN:{Colors.RESET}{' ' * 60}{Colors.CYAN}│{Colors.RESET}")
     lines.append(f"  {Colors.CYAN}├{'─' * 66}┤{Colors.RESET}")
     
-    # Format PGN with word wrap
+    # Format PGN - one move pair per line (1. e4 e5 then newline)
     for pgn_line in pgn.strip().split('\n'):
         if pgn_line.startswith('['):
             # Header line - dim
             formatted = f"  {Colors.CYAN}│{Colors.RESET} {Colors.DIM}{pgn_line[:64]:<64}{Colors.RESET} {Colors.CYAN}│{Colors.RESET}"
             lines.append(formatted)
         elif pgn_line.strip():
-            # Move line - wrap at 64 chars
-            words = pgn_line.split()
+            # Move line - format with one move pair per line
+            # Parse moves and group by move number
+            tokens = pgn_line.split()
             current_line = ""
-            for word in words:
-                if len(current_line) + len(word) + 1 <= 64:
-                    current_line += (" " if current_line else "") + word
-                else:
-                    if current_line:
+            
+            for token in tokens:
+                # Check if this is a move number (e.g., "1.", "12.")
+                is_move_num = token.rstrip('.').isdigit() and token.endswith('.')
+                
+                # If we have content and hit a new move number, output current line
+                if is_move_num and current_line and not current_line.endswith('. '):
+                    # Pad and output the line
+                    if len(current_line) <= 64:
                         lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
-                    current_line = word
+                    else:
+                        lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line[:64]} {Colors.CYAN}│{Colors.RESET}")
+                    current_line = ""
+                
+                # Add token to current line
+                if current_line:
+                    if len(current_line) + len(token) + 1 <= 64:
+                        current_line += " " + token
+                    else:
+                        # Line too long, output and start new
+                        lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+                        current_line = token
+                else:
+                    current_line = token
+            
+            # Output remaining content
             if current_line:
-                lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+                if len(current_line) <= 64:
+                    lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}")
+                else:
+                    lines.append(f"  {Colors.CYAN}│{Colors.RESET} {current_line[:64]} {Colors.CYAN}│{Colors.RESET}")
     
     lines.append(f"  {Colors.CYAN}└{'─' * 66}┘{Colors.RESET}")
     
@@ -1724,6 +1747,8 @@ def run_ci_match(
             "1",
             "-recover",
             "-repeat",
+            "-debug",
+            "all",  # Enable verbose output for real-time move tracking
         ]
     )
     
@@ -1765,93 +1790,231 @@ def run_ci_match(
         
         output_lines = []
         board_displayed = False
+        game_pgns = []  # Store PGN content for each game
         
         print(f"\n{Colors.DIM}  Starting games...{Colors.RESET}\n")
+        
+        # Helper function to read and replay game from PGN
+        def show_game_final_position(game_num: int, result_str: str, reason: str):
+            """Read PGN file and show the final position of the specified game."""
+            nonlocal board_displayed
+            game_pgn = ""
+            game_moves = ""
+            try:
+                with open(pgn_file.name, "r") as f:
+                    pgn_content = f.read()
+                
+                # Parse individual games from PGN
+                games_list = _parse_pgn_games_standalone(pgn_content)
+                if game_num <= len(games_list):
+                    game_data = games_list[game_num - 1]
+                    game_pgn = game_data.get("raw", "")
+                    game_moves = game_data.get("moves", "")
+                    
+                    # Extract moves from this game's moves string
+                    moves = parse_pgn_moves(game_moves)
+                    
+                    if moves:
+                        # Reset and replay all moves
+                        visualizer.reset()
+                        is_white = True
+                        for move in moves:
+                            try:
+                                visualizer.apply_move(move, is_white)
+                                is_white = not is_white
+                            except Exception:
+                                pass  # Skip invalid moves
+                        
+                        # Show final position
+                        move_count = len(moves)
+                        last_move = moves[-1] if moves else ""
+                        
+                        # Print final position with board (keep visible - don't clear)
+                        print(visualizer.render(f"Final: {last_move} ({move_count} moves) - {result_str}"))
+                        sys.stdout.flush()
+                        board_displayed = True
+                        
+            except Exception as e:
+                pass  # If we can't read PGN, just continue without board display
+            
+            return game_pgn, game_moves
+        
+        # Helper to apply UCI move to board
+        def apply_uci_move(uci_move: str, board: list, is_white_move: bool) -> tuple:
+            """Apply a UCI move to the board and return (from_pos, to_pos)."""
+            if len(uci_move) < 4:
+                return None, None
+            
+            from_file = ord(uci_move[0]) - ord('a')
+            from_rank = 8 - int(uci_move[1])
+            to_file = ord(uci_move[2]) - ord('a')
+            to_rank = 8 - int(uci_move[3])
+            
+            piece = board[from_rank][from_file]
+            
+            # Handle castling
+            if piece.upper() == 'K' and abs(from_file - to_file) == 2:
+                board[from_rank][from_file] = ' '
+                board[to_rank][to_file] = piece
+                if to_file > from_file:  # Kingside
+                    rook = board[from_rank][7]
+                    board[from_rank][7] = ' '
+                    board[to_rank][5] = rook
+                else:  # Queenside
+                    rook = board[from_rank][0]
+                    board[from_rank][0] = ' '
+                    board[to_rank][3] = rook
+            else:
+                # Handle en passant
+                if piece.upper() == 'P' and from_file != to_file and board[to_rank][to_file] == ' ':
+                    board[from_rank][to_file] = ' '  # Capture en passant pawn
+                
+                board[from_rank][from_file] = ' '
+                
+                # Handle promotion
+                if len(uci_move) > 4:
+                    promo = uci_move[4]
+                    board[to_rank][to_file] = promo.upper() if is_white_move else promo.lower()
+                else:
+                    board[to_rank][to_file] = piece
+            
+            return (from_rank, from_file), (to_rank, to_file)
+        
+        # Track game state
+        current_uci_moves = []  # All UCI moves played so far
+        last_position_moves = []  # Last known position
         
         # Read stdout line by line
         if process.stdout is not None:
             for line in process.stdout:
                 output_lines.append(line)
-                line = line.strip()
-            
-            # Detect game start
-            if "Started game" in line:
-                current_game += 1
-                visualizer.reset()
+                line_stripped = line.strip()
                 
-                # Parse players from line like "Started game 1 of 20 (Engine1 vs Engine2)"
-                match = re.search(r'\((.+?) vs (.+?)\)', line)
-                if match:
-                    visualizer.white_player = match.group(1)
-                    visualizer.black_player = match.group(2)
+                # Detect game start
+                if "Started game" in line_stripped:
+                    current_game += 1
+                    visualizer.reset()
+                    current_uci_moves = []
+                    last_position_moves = []
+                    
+                    # Parse players from line like "Started game 1 of 20 (Engine1 vs Engine2)"
+                    match = re.search(r'\((.+?) vs (.+?)\)', line_stripped)
+                    if match:
+                        visualizer.white_player = match.group(1)
+                        visualizer.black_player = match.group(2)
+                    
+                    # Clear previous board if displayed
+                    if board_displayed:
+                        visualizer.clear_board_area()
+                        board_displayed = False
+                    
+                    # Show initial board
+                    print(visualizer.render(f"Game {current_game}/{games} - Starting..."))
+                    board_displayed = True
                 
-                # Clear previous board if displayed
-                if board_displayed:
-                    visualizer.clear_board_area()
+                # Parse position command to get all moves played
+                # Format: ">Engine(0): position startpos moves e2e4 e7e5 ..."
+                pos_match = re.search(r'>[^:]+: position startpos moves (.+)', line_stripped)
+                if pos_match and board_displayed:
+                    moves_str = pos_match.group(1).strip()
+                    new_moves = moves_str.split()
+                    
+                    # Check if we have new moves
+                    if len(new_moves) > len(current_uci_moves):
+                        # Apply only the new moves
+                        for i in range(len(current_uci_moves), len(new_moves)):
+                            uci_move = new_moves[i]
+                            is_white = (i % 2 == 0)
+                            
+                            from_pos, to_pos = apply_uci_move(uci_move, visualizer.board, is_white)
+                            if from_pos and to_pos:
+                                visualizer.last_move_from = from_pos
+                                visualizer.last_move_to = to_pos
+                        
+                        current_uci_moves = new_moves
+                        
+                        # Create move display
+                        move_count = len(current_uci_moves)
+                        last_move = current_uci_moves[-1] if current_uci_moves else ""
+                        move_num = (move_count + 1) // 2
+                        is_white_last = (move_count % 2 == 1)
+                        
+                        # Format move more nicely
+                        if len(last_move) >= 4:
+                            from_sq = last_move[:2]
+                            to_sq = last_move[2:4]
+                            promo = last_move[4:] if len(last_move) > 4 else ""
+                            move_str = f"{from_sq}-{to_sq}"
+                            if promo:
+                                move_str += f"={promo.upper()}"
+                        else:
+                            move_str = last_move
+                        
+                        if is_white_last:
+                            move_display = f"Move {move_count}: {move_num}. {move_str}"
+                        else:
+                            move_display = f"Move {move_count}: {move_num}... {move_str}"
+                        
+                        # Update board display
+                        visualizer.clear_board_area()
+                        print(visualizer.render(move_display))
+                        board_displayed = True
                 
-                # Show initial board
-                print(visualizer.render(f"Game {current_game}/{games}"))
-                board_displayed = True
-            
-            # Detect moves (cutechess outputs moves in real-time)
-            # Format: "1. e4 e5 2. Nf3 Nc6" or individual moves
-            move_match = re.search(r'(\d+)\.\s*(\S+)(?:\s+(\S+))?', line)
-            if move_match and board_displayed:
-                move_num = int(move_match.group(1))
-                white_move = move_match.group(2)
-                black_move = move_match.group(3)
-                
-                if white_move and white_move not in ['1-0', '0-1', '1/2-1/2']:
-                    visualizer.apply_move(white_move, is_white=True)
-                    visualizer.clear_board_area()
-                    print(visualizer.render(f"{move_num}. {white_move}"))
-                
-                if black_move and black_move not in ['1-0', '0-1', '1/2-1/2']:
-                    visualizer.apply_move(black_move, is_white=False)
-                    visualizer.clear_board_area()
-                    print(visualizer.render(f"{move_num}... {black_move}"))
-            
-            # Detect game end
-            if "Finished game" in line:
-                # Parse result
-                if "1-0" in line:
-                    result = "1-0"
-                    if visualizer.white_player == engine1_name:
-                        wins1 += 1
+                # Detect game end
+                if "Finished game" in line_stripped:
+                    # Clear the board for final position from PGN
+                    if board_displayed:
+                        visualizer.clear_board_area()
+                        board_displayed = False
+                    
+                    # Parse result
+                    if "1-0" in line_stripped:
+                        result = "1-0"
+                        if visualizer.white_player == engine1_name:
+                            wins1 += 1
+                        else:
+                            wins2 += 1
+                    elif "0-1" in line_stripped:
+                        result = "0-1"
+                        if visualizer.black_player == engine1_name:
+                            wins1 += 1
+                        else:
+                            wins2 += 1
                     else:
-                        wins2 += 1
-                elif "0-1" in line:
-                    result = "0-1"
-                    if visualizer.black_player == engine1_name:
-                        wins1 += 1
+                        result = "1/2-1/2"
+                        draws += 1
+                    
+                    # Extract reason
+                    reason = ""
+                    reason_match = re.search(r'\{(.+?)\}', line_stripped)
+                    if reason_match:
+                        reason = reason_match.group(1)
+                    
+                    # Show final position from PGN (accurate)
+                    game_pgn, game_moves = show_game_final_position(current_game, result, reason)
+                    board_displayed = True
+                    
+                    # Print game result
+                    total = wins1 + wins2 + draws
+                    score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
+                    
+                    print(f"  {Colors.CYAN}Game {current_game}:{Colors.RESET} {visualizer.white_player} vs {visualizer.black_player}")
+                    print(f"  {Colors.BOLD}Result: {result}{Colors.RESET}", end="")
+                    if reason:
+                        print(f" {Colors.DIM}({reason}){Colors.RESET}")
                     else:
-                        wins2 += 1
-                else:
-                    result = "1/2-1/2"
-                    draws += 1
-                
-                # Clear board and show result
-                if board_displayed:
-                    visualizer.clear_board_area()
-                    board_displayed = False
-                
-                # Extract reason
-                reason = ""
-                reason_match = re.search(r'\{(.+?)\}', line)
-                if reason_match:
-                    reason = reason_match.group(1)
-                
-                # Print game result
-                total = wins1 + wins2 + draws
-                score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
-                
-                print(f"  {Colors.CYAN}Game {current_game}:{Colors.RESET} {visualizer.white_player} vs {visualizer.black_player}")
-                print(f"  {Colors.BOLD}Result: {result}{Colors.RESET}", end="")
-                if reason:
-                    print(f" {Colors.DIM}({reason}){Colors.RESET}")
-                else:
-                    print()
-                print(f"  {Colors.MAGENTA}Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}\n")
+                        print()
+                    print(f"  {Colors.MAGENTA}Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}")
+                    
+                    # Print formatted PGN
+                    if game_pgn:
+                        formatted_output = _format_ci_game_output(
+                            current_game, games,
+                            visualizer.white_player, visualizer.black_player,
+                            result, reason, game_pgn, game_moves
+                        )
+                        print(formatted_output)
+                    print()  # Extra spacing between games
         
         process.wait(timeout=7200)
         output = ''.join(output_lines)
