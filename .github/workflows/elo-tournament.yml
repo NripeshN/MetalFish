@@ -353,6 +353,7 @@ jobs:
             reference/stockfish/src/stockfish \
             reference/stockfish/src/nn-*.nnue \
             tools/elo_tournament.py \
+            tools/engines_config.json \
             tools/metalfish_hybrid_wrapper.sh \
             tools/metalfish_mcts_wrapper.sh \
             2>/dev/null || true

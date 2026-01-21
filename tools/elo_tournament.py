@@ -8,7 +8,10 @@ Runs a tournament between multiple chess engines to determine Elo ratings:
 - MetalFish-Hybrid (Parallel MCTS+AB with 'parallel_hybrid' command) - Best of both worlds
 - Stockfish at various skill levels (0-20)
 - Patricia (aggressive engine, ~3500 Elo)
+- Berserk (strong NNUE engine, ~3550 Elo)
 - Lc0 (Leela Chess Zero - neural network engine)
+
+Engine configurations are loaded from engines_config.json.
 
 Uses cutechess-cli for tournament management and calculates Elo ratings.
 
@@ -37,6 +40,85 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+
+# Default engines configuration (used if engines_config.json is not found)
+DEFAULT_ENGINES_CONFIG = {
+    "engines": {
+        "MetalFish-AB": {
+            "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
+            "expected_elo": None,
+            "options": {"Threads": "1", "Hash": "128"}
+        },
+        "MetalFish-MCTS": {
+            "description": "MetalFish with Pure GPU MCTS",
+            "expected_elo": None,
+            "options": {}
+        },
+        "MetalFish-Hybrid": {
+            "description": "MetalFish with Parallel MCTS+AB hybrid search",
+            "expected_elo": None,
+            "options": {}
+        },
+        "Patricia": {
+            "description": "Aggressive chess engine by Adam Kulju",
+            "expected_elo": 3460,
+            "options": {"Threads": "1", "Hash": "128"},
+            "path": "reference/Patricia/engine/patricia",
+            "anchor": True,
+            "anchor_elo": 3460
+        },
+        "Berserk": {
+            "description": "Strong NNUE engine by Jay Honnold",
+            "expected_elo": 3617,
+            "options": {"Threads": "1", "Hash": "128"},
+            "path": "reference/berserk/src/berserk",
+            "anchor": True,
+            "anchor_elo": 3617
+        },
+        "Lc0": {
+            "description": "Leela Chess Zero - neural network engine",
+            "expected_elo": 3600,
+            "options": {"Threads": "1"},
+            "path": "reference/lc0/build/release/lc0",
+            "network_path": "reference/lc0/build/release/network.pb.gz"
+        }
+    },
+    "stockfish": {
+        "path": "reference/stockfish/src/stockfish",
+        "default_levels": [1, 5, 10, 15, 20],
+        "options": {"Threads": "1", "Hash": "128"},
+        "skill_elo_map": {
+            "0": 1350, "1": 1500, "2": 1600, "3": 1700, "4": 1800,
+            "5": 1900, "6": 2000, "7": 2100, "8": 2200, "9": 2300,
+            "10": 2400, "11": 2500, "12": 2600, "13": 2700, "14": 2800,
+            "15": 2900, "16": 3000, "17": 3100, "18": 3200, "19": 3300,
+            "20": 3600
+        }
+    },
+    "tournament_defaults": {
+        "games_per_pair": 20,
+        "time_control": "10+0.1",
+        "concurrency": 1
+    }
+}
+
+
+def load_engines_config(base_dir: Path) -> Dict[str, Any]:
+    """Load engines configuration from JSON file or use defaults."""
+    config_path = base_dir / "tools" / "engines_config.json"
+    
+    if config_path.exists():
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            print(f"{Colors.DIM}  Loaded engine config from: {config_path}{Colors.RESET}", file=sys.stderr)
+            return config
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"{Colors.YELLOW}  Warning: Could not load {config_path}: {e}{Colors.RESET}", file=sys.stderr)
+            print(f"{Colors.DIM}  Using default configuration{Colors.RESET}", file=sys.stderr)
+    
+    return DEFAULT_ENGINES_CONFIG
 
 
 # ANSI colors
@@ -254,125 +336,116 @@ class Tournament:
         self.engines.append(config)
 
     def setup_default_engines(self, stockfish_levels: List[int] = None):
-        """Setup default engine configurations."""
+        """Setup default engine configurations from engines_config.json."""
+        
+        # Load configuration
+        config = load_engines_config(self.base_dir)
+        engines_config = config.get("engines", {})
+        stockfish_config = config.get("stockfish", {})
 
         metalfish_path = self.base_dir / "build" / "metalfish"
 
         # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
+        ab_config = engines_config.get("MetalFish-AB", {})
         self.add_engine(
             EngineConfig(
                 name="MetalFish-AB",
                 cmd=str(metalfish_path),
-                options={"Threads": "1", "Hash": "128"},
-                expected_elo=None,  # To be determined
+                options=ab_config.get("options", {"Threads": "1", "Hash": "128"}),
+                expected_elo=ab_config.get("expected_elo"),
             )
         )
 
         # MetalFish with Pure GPU MCTS (uses 'mctsmt' command)
         mcts_wrapper = self.base_dir / "tools" / "metalfish_mcts_wrapper.sh"
         self._create_mcts_wrapper(metalfish_path, mcts_wrapper)
+        mcts_config = engines_config.get("MetalFish-MCTS", {})
         self.add_engine(
             EngineConfig(
                 name="MetalFish-MCTS",
                 cmd=str(mcts_wrapper),
-                options={},
-                expected_elo=None,
+                options=mcts_config.get("options", {}),
+                expected_elo=mcts_config.get("expected_elo"),
             )
         )
 
         # MetalFish with Parallel Hybrid search (MCTS + AB in parallel)
         hybrid_wrapper = self.base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
         self._create_hybrid_wrapper(metalfish_path, hybrid_wrapper)
+        hybrid_config = engines_config.get("MetalFish-Hybrid", {})
         self.add_engine(
             EngineConfig(
                 name="MetalFish-Hybrid",
                 cmd=str(hybrid_wrapper),
-                options={},
-                expected_elo=None,
+                options=hybrid_config.get("options", {}),
+                expected_elo=hybrid_config.get("expected_elo"),
             )
         )
 
-        # Patricia - known aggressive engine (~3500 Elo)
-        patricia_path = self.base_dir / "reference" / "Patricia" / "engine" / "patricia"
-        if patricia_path.exists():
-            self.add_engine(
-                EngineConfig(
-                    name="Patricia",
-                    cmd=str(patricia_path),
-                    options={"Threads": "1", "Hash": "128"},
-                    expected_elo=3500,
+        # Add external engines from config
+        anchor_set = False
+        for engine_name, engine_cfg in engines_config.items():
+            # Skip MetalFish variants (already added above)
+            if engine_name.startswith("MetalFish"):
+                continue
+            
+            # Get engine path from config or use default
+            engine_path_str = engine_cfg.get("path", "")
+            if not engine_path_str:
+                continue
+                
+            engine_path = self.base_dir / engine_path_str
+            
+            # Special handling for Lc0 (needs network file)
+            if engine_name == "Lc0":
+                network_path_str = engine_cfg.get("network_path", "")
+                if network_path_str:
+                    network_path = self.base_dir / network_path_str
+                    if not (engine_path.exists() and network_path.exists()):
+                        continue
+                    options = engine_cfg.get("options", {}).copy()
+                    options["WeightsFile"] = str(network_path)
+                    self.add_engine(
+                        EngineConfig(
+                            name=engine_name,
+                            cmd=str(engine_path),
+                            options=options,
+                            expected_elo=engine_cfg.get("expected_elo"),
+                        )
+                    )
+                continue
+            
+            # Standard engine
+            if engine_path.exists():
+                self.add_engine(
+                    EngineConfig(
+                        name=engine_name,
+                        cmd=str(engine_path),
+                        options=engine_cfg.get("options", {}),
+                        expected_elo=engine_cfg.get("expected_elo"),
+                    )
                 )
-            )
-            # Set Patricia as anchor for Elo calculation
-            self.elo_calc.anchor_engine = "Patricia"
-            self.elo_calc.anchor_elo = 3500
-
-        # Berserk - strong NNUE engine (~3500-3700 Elo)
-        berserk_path = self.base_dir / "reference" / "berserk" / "src" / "berserk"
-        if berserk_path.exists():
-            self.add_engine(
-                EngineConfig(
-                    name="Berserk",
-                    cmd=str(berserk_path),
-                    options={"Threads": "1", "Hash": "128"},
-                    expected_elo=3550,
-                )
-            )
-            # If Patricia not available, use Berserk as anchor
-            if not patricia_path.exists():
-                self.elo_calc.anchor_engine = "Berserk"
-                self.elo_calc.anchor_elo = 3550
-
-        # Lc0 (Leela Chess Zero) - neural network engine
-        lc0_path = self.base_dir / "reference" / "lc0" / "build" / "release" / "lc0"
-        lc0_network = (
-            self.base_dir / "reference" / "lc0" / "build" / "release" / "network.pb.gz"
-        )
-        if lc0_path.exists() and lc0_network.exists():
-            self.add_engine(
-                EngineConfig(
-                    name="Lc0",
-                    cmd=str(lc0_path),
-                    options={"WeightsFile": str(lc0_network), "Threads": "1"},
-                    expected_elo=3600,  # Depends on network
-                )
-            )
+                # Set anchor if configured and not already set
+                if engine_cfg.get("anchor") and not anchor_set:
+                    self.elo_calc.anchor_engine = engine_name
+                    self.elo_calc.anchor_elo = engine_cfg.get("anchor_elo", 3000)
+                    anchor_set = True
 
         # Stockfish at various skill levels
-        stockfish_path = self.base_dir / "reference" / "stockfish" / "src" / "stockfish"
+        stockfish_path_str = stockfish_config.get("path", "reference/stockfish/src/stockfish")
+        stockfish_path = self.base_dir / stockfish_path_str
+        
         if stockfish_path.exists():
             if stockfish_levels is None:
-                # Default: test against multiple levels
-                stockfish_levels = [1, 5, 10, 15, 20]
+                stockfish_levels = stockfish_config.get("default_levels", [1, 5, 10, 15, 20])
 
-            # Approximate Elo for each skill level (based on Stockfish docs)
-            skill_elo_map = {
-                0: 1350,
-                1: 1500,
-                2: 1600,
-                3: 1700,
-                4: 1800,
-                5: 1900,
-                6: 2000,
-                7: 2100,
-                8: 2200,
-                9: 2300,
-                10: 2400,
-                11: 2500,
-                12: 2600,
-                13: 2700,
-                14: 2800,
-                15: 2900,
-                16: 3000,
-                17: 3100,
-                18: 3200,
-                19: 3300,
-                20: 3600,  # Full strength
-            }
+            # Get Elo map from config
+            skill_elo_map = {int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()}
+            default_options = stockfish_config.get("options", {"Threads": "1", "Hash": "128"})
 
             for level in stockfish_levels:
                 name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
-                options = {"Threads": "1", "Hash": "128"}
+                options = default_options.copy()
                 if level < 20:
                     options["Skill Level"] = str(level)
 
@@ -814,95 +887,98 @@ done | "$ENGINE"
 def get_engine_configs(
     base_dir: Path, stockfish_levels: List[int] = None
 ) -> Dict[str, EngineConfig]:
-    """Get all available engine configurations for CI mode."""
+    """Get all available engine configurations for CI mode from engines_config.json."""
     configs = {}
+    
+    # Load configuration
+    config = load_engines_config(base_dir)
+    engines_config = config.get("engines", {})
+    stockfish_config = config.get("stockfish", {})
 
     metalfish_path = base_dir / "build" / "metalfish"
 
     # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
+    ab_config = engines_config.get("MetalFish-AB", {})
     configs["MetalFish-AB"] = EngineConfig(
         name="MetalFish-AB",
         cmd=str(metalfish_path),
-        options={"Threads": "1", "Hash": "128"},
-        expected_elo=None,
+        options=ab_config.get("options", {"Threads": "1", "Hash": "128"}),
+        expected_elo=ab_config.get("expected_elo"),
     )
 
     # MetalFish with Pure GPU MCTS (uses 'mctsmt' command)
     mcts_wrapper = base_dir / "tools" / "metalfish_mcts_wrapper.sh"
+    mcts_config = engines_config.get("MetalFish-MCTS", {})
     configs["MetalFish-MCTS"] = EngineConfig(
-        name="MetalFish-MCTS", cmd=str(mcts_wrapper), options={}, expected_elo=None
+        name="MetalFish-MCTS",
+        cmd=str(mcts_wrapper),
+        options=mcts_config.get("options", {}),
+        expected_elo=mcts_config.get("expected_elo"),
     )
 
     # MetalFish with Parallel Hybrid search (MCTS + AB in parallel)
     hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
+    hybrid_config = engines_config.get("MetalFish-Hybrid", {})
     configs["MetalFish-Hybrid"] = EngineConfig(
-        name="MetalFish-Hybrid", cmd=str(hybrid_wrapper), options={}, expected_elo=None
+        name="MetalFish-Hybrid",
+        cmd=str(hybrid_wrapper),
+        options=hybrid_config.get("options", {}),
+        expected_elo=hybrid_config.get("expected_elo"),
     )
 
-    # Patricia - aggressive engine (~3500 Elo)
-    patricia_path = base_dir / "reference" / "Patricia" / "engine" / "patricia"
-    if patricia_path.exists():
-        configs["Patricia"] = EngineConfig(
-            name="Patricia",
-            cmd=str(patricia_path),
-            options={"Threads": "1", "Hash": "128"},
-            expected_elo=3500,
-        )
-
-    # Berserk - strong NNUE engine (~3500-3700 Elo)
-    berserk_path = base_dir / "reference" / "berserk" / "src" / "berserk"
-    if berserk_path.exists():
-        configs["Berserk"] = EngineConfig(
-            name="Berserk",
-            cmd=str(berserk_path),
-            options={"Threads": "1", "Hash": "128"},
-            expected_elo=3550,
-        )
-
-    # Lc0 (Leela Chess Zero) - neural network engine
-    lc0_path = base_dir / "reference" / "lc0" / "build" / "release" / "lc0"
-    lc0_network = base_dir / "reference" / "lc0" / "build" / "release" / "network.pb.gz"
-    if lc0_path.exists() and lc0_network.exists():
-        configs["Lc0"] = EngineConfig(
-            name="Lc0",
-            cmd=str(lc0_path),
-            options={"WeightsFile": str(lc0_network), "Threads": "1"},
-            expected_elo=3600,
-        )
+    # Add external engines from config
+    for engine_name, engine_cfg in engines_config.items():
+        # Skip MetalFish variants (already added above)
+        if engine_name.startswith("MetalFish"):
+            continue
+        
+        # Get engine path from config
+        engine_path_str = engine_cfg.get("path", "")
+        if not engine_path_str:
+            continue
+            
+        engine_path = base_dir / engine_path_str
+        
+        # Special handling for Lc0 (needs network file)
+        if engine_name == "Lc0":
+            network_path_str = engine_cfg.get("network_path", "")
+            if network_path_str:
+                network_path = base_dir / network_path_str
+                if engine_path.exists() and network_path.exists():
+                    options = engine_cfg.get("options", {}).copy()
+                    options["WeightsFile"] = str(network_path)
+                    configs[engine_name] = EngineConfig(
+                        name=engine_name,
+                        cmd=str(engine_path),
+                        options=options,
+                        expected_elo=engine_cfg.get("expected_elo"),
+                    )
+            continue
+        
+        # Standard engine
+        if engine_path.exists():
+            configs[engine_name] = EngineConfig(
+                name=engine_name,
+                cmd=str(engine_path),
+                options=engine_cfg.get("options", {}),
+                expected_elo=engine_cfg.get("expected_elo"),
+            )
 
     # Stockfish at various levels
-    stockfish_path = base_dir / "reference" / "stockfish" / "src" / "stockfish"
+    stockfish_path_str = stockfish_config.get("path", "reference/stockfish/src/stockfish")
+    stockfish_path = base_dir / stockfish_path_str
+    
     if stockfish_path.exists():
         if stockfish_levels is None:
-            stockfish_levels = [1, 5, 10, 15, 20]
+            stockfish_levels = stockfish_config.get("default_levels", [1, 5, 10, 15, 20])
 
-        skill_elo_map = {
-            0: 1350,
-            1: 1500,
-            2: 1600,
-            3: 1700,
-            4: 1800,
-            5: 1900,
-            6: 2000,
-            7: 2100,
-            8: 2200,
-            9: 2300,
-            10: 2400,
-            11: 2500,
-            12: 2600,
-            13: 2700,
-            14: 2800,
-            15: 2900,
-            16: 3000,
-            17: 3100,
-            18: 3200,
-            19: 3300,
-            20: 3600,
-        }
+        # Get Elo map from config
+        skill_elo_map = {int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()}
+        default_options = stockfish_config.get("options", {"Threads": "1", "Hash": "128"})
 
         for level in stockfish_levels:
             name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
-            options = {"Threads": "1", "Hash": "128"}
+            options = default_options.copy()
             if level < 20:
                 options["Skill Level"] = str(level)
 
@@ -1281,8 +1357,8 @@ def _create_mctsmt_wrapper_file(metalfish_path: Path, wrapper_path: Path):
 def aggregate_ci_results(results_dir: Path, output_file: Path = None) -> Dict[str, Any]:
     """Aggregate results from multiple CI match jobs."""
 
-    # Find all result JSON files
-    result_files = list(results_dir.glob("*.json"))
+    # Find all result JSON files (exclude summary.json)
+    result_files = [f for f in results_dir.glob("*.json") if f.name != "summary.json"]
 
     if not result_files:
         raise FileNotFoundError(f"No result files found in {results_dir}")
@@ -1292,16 +1368,24 @@ def aggregate_ci_results(results_dir: Path, output_file: Path = None) -> Dict[st
     engines = set()
 
     for result_file in result_files:
-        with open(result_file, "r") as f:
-            match = json.load(f)
+        try:
+            with open(result_file, "r") as f:
+                match = json.load(f)
 
-        if "error" not in match:
-            all_matches.append(match)
-            engines.add(match["engine1"])
-            engines.add(match["engine2"])
+            # Skip files that don't look like match results
+            if "engine1" not in match or "engine2" not in match:
+                continue
+                
+            if "error" not in match:
+                all_matches.append(match)
+                engines.add(match["engine1"])
+                engines.add(match["engine2"])
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"Warning: Skipping invalid result file {result_file}: {e}", file=sys.stderr)
+            continue
 
-    # Calculate Elo ratings
-    elo_calc = EloCalculator(anchor_engine="Patricia", anchor_elo=3500)
+    # Calculate Elo ratings - use Patricia as anchor with updated Elo
+    elo_calc = EloCalculator(anchor_engine="Patricia", anchor_elo=3460)
 
     for match in all_matches:
         # Add individual game results

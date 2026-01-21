@@ -1,0 +1,95 @@
+{
+    "engines": {
+        "MetalFish-AB": {
+            "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
+            "expected_elo": null,
+            "options": {
+                "Threads": "1",
+                "Hash": "128"
+            }
+        },
+        "MetalFish-MCTS": {
+            "description": "MetalFish with Pure GPU MCTS",
+            "expected_elo": null,
+            "options": {}
+        },
+        "MetalFish-Hybrid": {
+            "description": "MetalFish with Parallel MCTS+AB hybrid search",
+            "expected_elo": null,
+            "options": {}
+        },
+        "Patricia": {
+            "description": "Aggressive chess engine by Adam Kulju",
+            "expected_elo": 3460,
+            "options": {
+                "Threads": "1",
+                "Hash": "128"
+            },
+            "path": "reference/Patricia/engine/patricia",
+            "anchor": true,
+            "anchor_elo": 3460
+        },
+        "Berserk": {
+            "description": "Strong NNUE engine by Jay Honnold",
+            "expected_elo": 3617,
+            "options": {
+                "Threads": "1",
+                "Hash": "128"
+            },
+            "path": "reference/berserk/src/berserk",
+            "anchor": true,
+            "anchor_elo": 3617
+        },
+        "Lc0": {
+            "description": "Leela Chess Zero - neural network engine",
+            "expected_elo": 3600,
+            "options": {
+                "Threads": "1"
+            },
+            "path": "reference/lc0/build/release/lc0",
+            "network_path": "reference/lc0/build/release/network.pb.gz"
+        }
+    },
+    "stockfish": {
+        "path": "reference/stockfish/src/stockfish",
+        "default_levels": [
+            1,
+            5,
+            10,
+            15,
+            20
+        ],
+        "options": {
+            "Threads": "1",
+            "Hash": "128"
+        },
+        "skill_elo_map": {
+            "0": 1350,
+            "1": 1500,
+            "2": 1600,
+            "3": 1700,
+            "4": 1800,
+            "5": 1900,
+            "6": 2000,
+            "7": 2100,
+            "8": 2200,
+            "9": 2300,
+            "10": 2400,
+            "11": 2500,
+            "12": 2600,
+            "13": 2700,
+            "14": 2800,
+            "15": 2900,
+            "16": 3000,
+            "17": 3100,
+            "18": 3200,
+            "19": 3300,
+            "20": 3600
+        }
+    },
+    "tournament_defaults": {
+        "games_per_pair": 20,
+        "time_control": "10+0.1",
+        "concurrency": 1
+    }
+}
