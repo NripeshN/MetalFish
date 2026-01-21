@@ -9,11 +9,11 @@ on:
       games_per_match:
         description: "Number of games per match (should be even for color swap)"
         required: false
-        default: "20"
+        default: "16"
       time_control:
         description: "Time control (e.g., 10+0.1)"
         required: false
-        default: "10+0.1"
+        default: "600+0.1"
 
 # Cancel in-progress runs for the same PR when a new push occurs
 concurrency:
