@@ -457,8 +457,10 @@ void AppleSiliconMCTSEvaluator::evaluate_batch_async(
   int32_t* pos_out = const_cast<int32_t*>(batch.positional_scores());
   
   for (int i = 0; i < batch.size(); ++i) {
-    psqt_out[i] = gpu_batch.psqt_scores[i];
-    pos_out[i] = gpu_batch.positional_scores[i];
+    psqt_out[i] = gpu_batch.psqt_scores.size() > static_cast<size_t>(i) 
+                      ? gpu_batch.psqt_scores[i] : 0;
+    pos_out[i] = gpu_batch.positional_scores.size() > static_cast<size_t>(i)
+                     ? gpu_batch.positional_scores[i] : 0;
   }
   
   total_evals_.fetch_add(batch.size(), std::memory_order_relaxed);
@@ -624,6 +626,11 @@ AppleSiliconNodePool::AppleSiliconNodePool(size_t capacity)
 AppleSiliconNodePool::~AppleSiliconNodePool() = default;
 
 void* AppleSiliconNodePool::allocate() {
+  // Check if memory allocation succeeded in constructor
+  if (!memory_) {
+    return nullptr;
+  }
+  
   size_t index = next_free_.fetch_add(1, std::memory_order_acq_rel);
   
   if (index >= capacity_) {
