@@ -145,7 +145,9 @@ public:
   }
 
   // Invalidate entry for a specific king square
-  void invalidate(int king_square) { entries_[king_square].state.valid = false; }
+  void invalidate(int king_square) {
+    entries_[king_square].state.valid = false;
+  }
 
   // Get current epoch
   uint32_t epoch() const { return epoch_; }
@@ -190,13 +192,17 @@ public:
   bool needs_refresh(int perspective) const;
 
   // Get the feature delta from parent to current position
-  FeatureDelta &get_delta(int perspective) { return deltas_[ply_][perspective]; }
+  FeatureDelta &get_delta(int perspective) {
+    return deltas_[ply_][perspective];
+  }
 
   // Clear deltas for current ply
   void clear_deltas();
 
   // Access Finny tables
-  FinnyTable &finny_table(int perspective) { return finny_tables_[perspective]; }
+  FinnyTable &finny_table(int perspective) {
+    return finny_tables_[perspective];
+  }
 
   // Get accumulator data for current ply
   int32_t *accumulator_data(int perspective);
@@ -254,7 +260,8 @@ class WeightPermuter {
 public:
   // Permute feature transformer weights for optimal access
   // Input:  weights[feature_idx * hidden_dim + hidden_idx]
-  // Output: weights[hidden_tile * features * tile_size + feature_idx * tile_size
+  // Output: weights[hidden_tile * features * tile_size + feature_idx *
+  // tile_size
   // + lane]
   static void permute_ft_weights(const int16_t *src, int16_t *dst,
                                  int num_features, int hidden_dim,

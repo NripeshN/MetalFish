@@ -255,6 +255,112 @@ public:
     return device_ ? [device_ maxThreadgroupMemoryLength] : 0;
   }
 
+  size_t recommended_working_set_size() const override {
+    if (!device_)
+      return 0;
+    // recommendedMaxWorkingSetSize gives the optimal GPU memory allocation
+    return [device_ recommendedMaxWorkingSetSize];
+  }
+
+  size_t total_system_memory() const override {
+    // On Apple Silicon with unified memory, we can query total RAM
+    // This is useful for determining how much memory to allocate for caches
+    return [[NSProcessInfo processInfo] physicalMemory];
+  }
+
+  int gpu_core_count() const override {
+    // Apple doesn't expose GPU core count directly via Metal API
+    // We infer it from the device name and known configurations
+    if (!device_)
+      return 0;
+
+    std::string name = device_name();
+
+    // Apple Silicon GPU core counts (as of 2025):
+    // M1: 7-8 cores, M1 Pro: 14-16, M1 Max: 24-32, M1 Ultra: 48-64
+    // M2: 8-10 cores, M2 Pro: 16-19, M2 Max: 30-38, M2 Ultra: 60-76
+    // M3: 8-10 cores, M3 Pro: 14-18, M3 Max: 30-40
+    // M4: 10 cores, M4 Pro: 16-20, M4 Max: 32-40
+
+    if (name.find("Ultra") != std::string::npos) {
+      if (name.find("M2") != std::string::npos)
+        return 76;
+      if (name.find("M1") != std::string::npos)
+        return 64;
+      return 64; // Conservative default for Ultra chips
+    }
+    if (name.find("Max") != std::string::npos) {
+      if (name.find("M4") != std::string::npos)
+        return 40;
+      if (name.find("M3") != std::string::npos)
+        return 40;
+      if (name.find("M2") != std::string::npos)
+        return 38;
+      if (name.find("M1") != std::string::npos)
+        return 32;
+      return 32; // Conservative default for Max chips
+    }
+    if (name.find("Pro") != std::string::npos) {
+      if (name.find("M4") != std::string::npos)
+        return 20;
+      if (name.find("M3") != std::string::npos)
+        return 18;
+      if (name.find("M2") != std::string::npos)
+        return 19;
+      if (name.find("M1") != std::string::npos)
+        return 16;
+      return 16; // Conservative default for Pro chips
+    }
+    // Base models
+    if (name.find("M4") != std::string::npos)
+      return 10;
+    if (name.find("M3") != std::string::npos)
+      return 10;
+    if (name.find("M2") != std::string::npos)
+      return 10;
+    if (name.find("M1") != std::string::npos)
+      return 8;
+
+    // Fallback: estimate from recommended working set size
+    // Rough heuristic: ~256MB per GPU core for Apple Silicon
+    size_t working_set = recommended_working_set_size();
+    if (working_set > 0) {
+      return static_cast<int>(working_set / (256 * 1024 * 1024));
+    }
+
+    return 8; // Safe default
+  }
+
+  int max_threads_per_simd_group() const override {
+    // Apple GPUs use 32-wide SIMD groups
+    return 32;
+  }
+
+  int recommended_batch_size() const override {
+    int cores = gpu_core_count();
+    if (cores <= 0)
+      return 128;
+
+    // Scale batch size with GPU cores
+    // Base: 16 positions per core, but adjust based on memory
+    int base_batch = cores * 16;
+
+    // Consider available memory - each position needs ~128 bytes for data
+    // plus ~4KB for NNUE evaluation workspace
+    size_t working_set = recommended_working_set_size();
+    size_t memory_per_position = 4 * 1024; // Conservative estimate
+    int memory_limited_batch =
+        static_cast<int>(working_set / (4 * memory_per_position));
+
+    int batch = std::min(base_batch, memory_limited_batch);
+
+    // Round to nearest multiple of SIMD width (32) for optimal GPU utilization
+    batch = ((batch + 31) / 32) * 32;
+
+    // Clamp to reasonable range
+    return std::max(32, std::min(512, batch));
+  }
+
   // Command buffer pool management
   id<MTLCommandBuffer> acquire_command_buffer() {
     std::lock_guard<std::mutex> lock(pool_mutex_);
@@ -524,11 +630,13 @@ private:
           }
         }
 
-        std::cout << "[MetalBackend] Initialized: " << device_name()
+        // Use stderr for initialization messages to avoid interfering with UCI
+        // protocol
+        std::cerr << "[MetalBackend] Initialized: " << device_name()
                   << std::endl;
-        std::cout << "[MetalBackend] Unified memory: "
+        std::cerr << "[MetalBackend] Unified memory: "
                   << (has_unified_memory() ? "Yes" : "No") << std::endl;
-        std::cout << "[MetalBackend] Command queues: "
+        std::cerr << "[MetalBackend] Command queues: "
                   << (1 + parallel_queues_.size()) << std::endl;
       }
     }

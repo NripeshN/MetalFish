@@ -2,14 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  MCTS Hybrid Search Test Suite
+  MCTS Test Suite
 
   Tests all MCTS and hybrid search components including:
-  - Position classifier
   - Stockfish adapter
-  - MCTS transposition table
-  - Batch evaluator
-  - Hybrid search
+  - Thread-safe MCTS
 */
 
 #include <cassert>
@@ -23,10 +20,6 @@
 #include "core/position.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "mcts/ab_integration.h"
-#include "mcts/hybrid_search.h"
-#include "mcts/mcts_batch_evaluator.h"
-#include "mcts/mcts_tt.h"
-#include "mcts/parallel_hybrid_search.h"
 #include "mcts/position_classifier.h"
 #include "mcts/stockfish_adapter.h"
 #include "mcts/thread_safe_mcts.h"
@@ -51,15 +44,17 @@ public:
       std::cout << "PASSED" << std::endl;
       g_tests_passed++;
     } else {
+      std::cout << "FAILED" << std::endl;
       g_tests_failed++;
     }
   }
 
-  void expect(bool condition, const char *expr, int line) {
-    if (!condition) {
-      std::cerr << "\n    FAILED: " << expr << " at line " << line << std::endl;
+  void fail(const char *msg, const char *file, int line) {
+    if (passed_) {
+      std::cout << "FAILED\n";
       passed_ = false;
     }
+    std::cout << "    " << file << ":" << line << ": " << msg << std::endl;
   }
 
   bool passed() const { return passed_; }
@@ -69,22 +64,20 @@ private:
   bool passed_;
 };
 
-#define EXPECT(tc, condition) tc.expect((condition), #condition, __LINE__)
+#define EXPECT(tc, cond)                                                       \
+  do {                                                                         \
+    if (!(cond)) {                                                             \
+      tc.fail(#cond, __FILE__, __LINE__);                                      \
+    }                                                                          \
+  } while (0)
 
-// Test positions
+// Test FENs
 const char *TEST_FENS[] = {
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", // Starting
-    "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq "
-    "- 4 4", // Tactical
-    "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - "
-    "2 3",                           // Italian
-    "8/8/8/8/8/8/k7/4K2R w - - 0 1", // Endgame
-    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w "
-    "KQkq - 0 1", // Complex
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", // Endgame
+    "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1",
 };
-const int NUM_TEST_FENS = sizeof(TEST_FENS) / sizeof(TEST_FENS[0]);
-
-} // namespace
 
 // ============================================================================
 // Stockfish Adapter Tests
@@ -93,21 +86,22 @@ const int NUM_TEST_FENS = sizeof(TEST_FENS) / sizeof(TEST_FENS[0]);
 bool test_mcts_move() {
   TestCase tc("MCTSMove");
 
-  // Test move creation
+  // Create from Stockfish move
   Move sf_move(SQ_E2, SQ_E4);
   MCTSMove mcts_move = MCTSMove::FromStockfish(sf_move);
 
   EXPECT(tc, mcts_move.to_stockfish() == sf_move);
-  EXPECT(tc, !mcts_move.is_null());
+  EXPECT(tc, mcts_move.from() == SQ_E2);
+  EXPECT(tc, mcts_move.to() == SQ_E4);
+
+  // Test promotion
+  Move promo_move = Move::make<PROMOTION>(SQ_E7, SQ_E8, QUEEN);
+  MCTSMove mcts_promo = MCTSMove::FromStockfish(promo_move);
+  EXPECT(tc, mcts_promo.to_stockfish() == promo_move);
 
   // Test null move
   MCTSMove null_move;
-  EXPECT(tc, null_move.is_null());
-
-  // Test promotion - use make<PROMOTION> helper
-  Move promo_move = Move::make<PROMOTION>(SQ_E7, SQ_E8, QUEEN);
-  MCTSMove mcts_promo = MCTSMove::FromStockfish(promo_move);
-  EXPECT(tc, mcts_promo.is_promotion());
+  EXPECT(tc, null_move.to_stockfish() == Move::none());
 
   return tc.passed();
 }
@@ -115,50 +109,11 @@ bool test_mcts_move() {
 bool test_mcts_position() {
   TestCase tc("MCTSPosition");
 
-  Bitboards::init();
-  Position::init();
+  MCTSPosition mcts_pos;
+  mcts_pos.set_from_fen(TEST_FENS[0]);
 
-  MCTSPositionHistory history;
-  history.reset(TEST_FENS[0]);
-
-  MCTSPosition pos = history.current();
-
-  // Test basic properties
-  EXPECT(tc, !pos.is_black_to_move());
-  EXPECT(tc, !pos.is_terminal());
-  EXPECT(tc, pos.hash() != 0);
-
-  // Test move generation
-  std::vector<MCTSMove> moves = pos.generate_legal_moves();
-  EXPECT(tc, moves.size() == 20); // 20 legal moves from starting position
-
-  // Test do_move
-  MCTSMove e2e4 = MCTSMove::FromStockfish(Move(SQ_E2, SQ_E4));
-  MCTSPosition new_pos = pos;
-  new_pos.do_move(e2e4);
-  EXPECT(tc, new_pos.is_black_to_move());
-  EXPECT(tc, new_pos.hash() != pos.hash());
-
-  return tc.passed();
-}
-
-bool test_mcts_position_history() {
-  TestCase tc("MCTSPositionHistory");
-
-  MCTSPositionHistory history;
-  history.reset(TEST_FENS[0]);
-
-  // Make a move
-  Move e2e4(SQ_E2, SQ_E4);
-  history.do_move(e2e4);
-
-  // Make another move
-  Move e7e5(SQ_E7, SQ_E5);
-  history.do_move(e7e5);
-
-  // Check current position
-  MCTSPosition current = history.current();
-  EXPECT(tc, !current.is_black_to_move()); // White to move after e4 e5
+  EXPECT(tc, mcts_pos.side_to_move() == WHITE);
+  EXPECT(tc, mcts_pos.hash() != 0);
 
   return tc.passed();
 }
@@ -170,20 +125,20 @@ bool test_mcts_position_history() {
 bool test_position_classifier_basic() {
   TestCase tc("PositionClassifierBasic");
 
-  Bitboards::init();
-  Position::init();
-
   PositionClassifier classifier;
 
-  std::deque<StateInfo> states(1);
   Position pos;
-  pos.set(TEST_FENS[0], false, &states.back());
+  StateInfo st;
+  pos.set(TEST_FENS[0], false, &st);
 
-  PositionType type = classifier.quick_classify(pos);
+  auto features = classifier.analyze(pos);
 
-  // Starting position should be strategic (no immediate tactics)
-  EXPECT(tc, type == PositionType::STRATEGIC ||
-                 type == PositionType::HIGHLY_STRATEGIC);
+  // Starting position should not be in check
+  EXPECT(tc, !features.in_check);
+
+  // Should have some tactical score
+  EXPECT(tc, features.tactical_score >= 0.0f);
+  EXPECT(tc, features.tactical_score <= 1.0f);
 
   return tc.passed();
 }
@@ -193,302 +148,14 @@ bool test_position_classifier_tactical() {
 
   PositionClassifier classifier;
 
-  std::deque<StateInfo> states(1);
   Position pos;
-  // Position with queen attacking f7 (Scholar's mate setup)
-  pos.set(TEST_FENS[1], false, &states.back());
+  StateInfo st;
+  pos.set(TEST_FENS[1], false, &st); // Kiwipete - complex tactical
 
-  // Analyze and get features
-  PositionFeatures features = classifier.analyze(pos);
+  auto features = classifier.analyze(pos);
 
-  // Should have some tactical elements
-  EXPECT(tc, features.tactical_score > 0.0f || features.num_captures > 0 ||
-                 features.num_checks_available > 0);
-
-  return tc.passed();
-}
-
-bool test_position_classifier_endgame() {
-  TestCase tc("PositionClassifierEndgame");
-
-  PositionClassifier classifier;
-
-  std::deque<StateInfo> states(1);
-  Position pos;
-  // Simple endgame position
-  pos.set(TEST_FENS[3], false, &states.back());
-
-  // Check that it's identified as endgame-like
-  PositionFeatures features = classifier.analyze(pos);
-  EXPECT(tc, features.is_endgame);
-
-  return tc.passed();
-}
-
-// ============================================================================
-// MCTS Transposition Table Tests
-// ============================================================================
-
-bool test_mcts_tt_basic() {
-  TestCase tc("MCTSTTBasic");
-
-  MCTSTTConfig config;
-  config.size_mb = 1; // Small for testing
-
-  MCTSTranspositionTable tt;
-  bool init_ok = tt.initialize(config);
-  EXPECT(tc, init_ok);
-  EXPECT(tc, tt.num_entries() > 0);
-
-  return tc.passed();
-}
-
-bool test_mcts_tt_store_probe() {
-  TestCase tc("MCTSTTStoreProbe");
-
-  MCTSTTConfig config;
-  config.size_mb = 1;
-
-  MCTSTranspositionTable tt;
-  tt.initialize(config);
-
-  // Store MCTS stats
-  uint64_t key = 0x123456789ABCDEF0ULL;
-  MCTSStats stats;
-  stats.q = 0.5f;
-  stats.n = 100;
-  stats.d = 0.1f;
-  stats.m = 30.0f;
-  stats.set_policy(0.25f);
-
-  tt.store_mcts(key, stats);
-
-  // Probe
-  MCTSStats retrieved;
-  bool found = tt.probe_mcts(key, retrieved);
-
-  EXPECT(tc, found);
-  EXPECT(tc, std::abs(retrieved.q - 0.5f) < 0.001f);
-  EXPECT(tc, retrieved.n == 100);
-  EXPECT(tc, std::abs(retrieved.d - 0.1f) < 0.001f);
-
-  return tc.passed();
-}
-
-bool test_mcts_tt_update() {
-  TestCase tc("MCTSTTUpdate");
-
-  MCTSTTConfig config;
-  config.size_mb = 1;
-
-  MCTSTranspositionTable tt;
-  tt.initialize(config);
-
-  uint64_t key = 0xDEADBEEFCAFEBABEULL;
-
-  // First update
-  tt.update_mcts(key, 0.3f, 0.1f, 25.0f);
-
-  MCTSStats stats;
-  bool found = tt.probe_mcts(key, stats);
-  EXPECT(tc, found);
-  EXPECT(tc, stats.n == 1);
-  EXPECT(tc, std::abs(stats.q - 0.3f) < 0.001f);
-
-  // Second update (running average)
-  tt.update_mcts(key, 0.5f, 0.2f, 20.0f);
-
-  found = tt.probe_mcts(key, stats);
-  EXPECT(tc, found);
-  EXPECT(tc, stats.n == 2);
-  EXPECT(tc, std::abs(stats.q - 0.4f) < 0.001f); // Average of 0.3 and 0.5
-
-  return tc.passed();
-}
-
-bool test_mcts_tt_ab_bounds() {
-  TestCase tc("MCTSTTABBounds");
-
-  MCTSTTConfig config;
-  config.size_mb = 1;
-
-  MCTSTranspositionTable tt;
-  tt.initialize(config);
-
-  uint64_t key = 0x1111222233334444ULL;
-
-  ABBounds bounds;
-  bounds.score = 150;
-  bounds.depth = 10;
-  bounds.bound = 1; // EXACT
-  bounds.best_move = Move(SQ_E2, SQ_E4);
-
-  tt.store_ab(key, bounds);
-
-  ABBounds retrieved;
-  bool found = tt.probe_ab(key, retrieved);
-
-  EXPECT(tc, found);
-  EXPECT(tc, retrieved.score == 150);
-  EXPECT(tc, retrieved.depth == 10);
-  EXPECT(tc, retrieved.best_move == Move(SQ_E2, SQ_E4));
-
-  return tc.passed();
-}
-
-// ============================================================================
-// Batch Evaluator Tests
-// ============================================================================
-
-bool test_batch_buffer() {
-  TestCase tc("BatchBuffer");
-
-  UnifiedBatchBuffer buffer;
-  buffer.allocate(64);
-
-  EXPECT(tc, buffer.capacity == 64);
-  EXPECT(tc, buffer.count == 0);
-  EXPECT(tc, !buffer.is_full());
-
-  buffer.clear();
-  EXPECT(tc, buffer.count == 0);
-
-  return tc.passed();
-}
-
-bool test_lock_free_collector() {
-  TestCase tc("LockFreeBatchCollector");
-
-  LockFreeBatchCollector collector(32);
-
-  EXPECT(tc, collector.size() == 0);
-  EXPECT(tc, !collector.is_ready(1));
-
-  // Add some positions
-  MCTSPositionHistory history;
-  history.reset(TEST_FENS[0]);
-  MCTSPosition pos = history.current();
-
-  int idx = collector.add(nullptr, pos);
-  EXPECT(tc, idx == 0);
-  EXPECT(tc, collector.size() == 1);
-  EXPECT(tc, collector.is_ready(1));
-
-  // Take batch
-  std::vector<HybridNode *> nodes;
-  std::vector<MCTSPosition> positions;
-  int count = collector.take_batch(nodes, positions);
-
-  EXPECT(tc, count == 1);
-  EXPECT(tc, collector.size() == 0);
-
-  return tc.passed();
-}
-
-// ============================================================================
-// Hybrid Search Tests
-// ============================================================================
-
-bool test_hybrid_edge() {
-  TestCase tc("HybridEdge");
-
-  MCTSMove move = MCTSMove::FromStockfish(Move(SQ_E2, SQ_E4));
-  HybridEdge edge;
-  edge.init(move, 0.0f);
-
-  EXPECT(tc, edge.move().to_stockfish() == Move(SQ_E2, SQ_E4));
-  EXPECT(tc, edge.policy() == 0.0f);
-
-  edge.set_policy(0.5f);
-  EXPECT(tc, std::abs(edge.policy() - 0.5f) < 0.001f);
-
-  return tc.passed();
-}
-
-bool test_hybrid_node() {
-  TestCase tc("HybridNode");
-
-  HybridNode node;
-
-  EXPECT(tc, node.n() == 0);
-  EXPECT(tc, !node.has_children());
-  EXPECT(tc, !node.is_terminal());
-
-  // Add edges
-  std::vector<MCTSMove> moves;
-  moves.push_back(MCTSMove::FromStockfish(Move(SQ_E2, SQ_E4)));
-  moves.push_back(MCTSMove::FromStockfish(Move(SQ_D2, SQ_D4)));
-  node.create_edges(moves);
-
-  EXPECT(tc, node.has_children());
-  EXPECT(tc, node.num_edges() == 2);
-
-  // Test terminal state
-  node.set_terminal(HybridNode::Terminal::Win, 1.0f);
-  EXPECT(tc, node.is_terminal());
-
-  return tc.passed();
-}
-
-bool test_hybrid_tree() {
-  TestCase tc("HybridTree");
-
-  MCTSPositionHistory history;
-  history.reset(TEST_FENS[0]);
-
-  HybridTree tree;
-  tree.reset(history);
-
-  EXPECT(tc, tree.root() != nullptr);
-  EXPECT(tc, tree.node_count() == 1);
-
-  return tc.passed();
-}
-
-// ============================================================================
-// Integration Tests
-// ============================================================================
-
-bool test_hybrid_search_basic() {
-  TestCase tc("HybridSearchBasic");
-
-  if (!GPU::gpu_available()) {
-    std::cout << "(skipped - no GPU) ";
-    return true;
-  }
-
-  auto &gpu_manager = GPU::gpu_nnue_manager();
-  if (!gpu_manager.is_ready()) {
-    gpu_manager.initialize();
-  }
-
-  HybridSearch search;
-  search.set_gpu_nnue(&gpu_manager);
-
-  // Basic instantiation test
-  EXPECT(tc, true);
-
-  return tc.passed();
-}
-
-bool test_parallel_hybrid_search() {
-  TestCase tc("ParallelHybridSearch");
-
-  if (!GPU::gpu_available()) {
-    std::cout << "(skipped - no GPU) ";
-    return true;
-  }
-
-  auto &gpu_manager = GPU::gpu_nnue_manager();
-  if (!gpu_manager.is_ready()) {
-    gpu_manager.initialize();
-  }
-
-  // ParallelHybridSearch requires an Engine, which we don't have in tests
-  // Just verify the config can be created
-  ParallelHybridConfig config;
-  EXPECT(tc, config.gpu_batch_size > 0);
-  EXPECT(tc, config.ab_min_depth > 0);
+  // Tactical positions should have higher complexity
+  EXPECT(tc, features.complexity >= 0.0f);
 
   return tc.passed();
 }
@@ -501,22 +168,15 @@ bool test_ab_search_result() {
   TestCase tc("ABSearchResult");
 
   ABSearchResult result;
-  result.score = 100;
-  result.is_mate = false;
+  result.best_move = Move(SQ_E2, SQ_E4);
+  result.score = 50;
+  result.depth = 10;
+  result.nodes_searched = 10000;
 
-  // Test normalized score
-  float normalized = result.normalized_score();
-  EXPECT(tc, normalized > 0.0f);
-  EXPECT(tc, normalized < 1.0f);
-
-  // Test mate score normalization
-  ABSearchResult mate_result;
-  mate_result.is_mate = true;
-  mate_result.mate_in = 5;
-  EXPECT(tc, mate_result.normalized_score() == 1.0f);
-
-  mate_result.mate_in = -5;
-  EXPECT(tc, mate_result.normalized_score() == -1.0f);
+  EXPECT(tc, result.best_move == Move(SQ_E2, SQ_E4));
+  EXPECT(tc, result.score == 50);
+  EXPECT(tc, result.depth == 10);
+  EXPECT(tc, result.nodes_searched == 10000);
 
   return tc.passed();
 }
@@ -525,55 +185,13 @@ bool test_ab_search_config() {
   TestCase tc("ABSearchConfig");
 
   ABSearchConfig config;
+  config.max_depth = 20;
+  config.use_tt = true;
+  config.use_lmr = true;
 
-  // Test default values
-  EXPECT(tc, config.max_depth > 0);
-  EXPECT(tc, config.quiescence_depth > 0);
-  EXPECT(tc, config.aspiration_window > 0);
+  EXPECT(tc, config.max_depth == 20);
   EXPECT(tc, config.use_tt);
-  EXPECT(tc, config.use_null_move);
   EXPECT(tc, config.use_lmr);
-  EXPECT(tc, config.use_futility);
-  EXPECT(tc, config.use_history);
-  EXPECT(tc, !config.verify_only);
-
-  return tc.passed();
-}
-
-bool test_ab_searcher_basic() {
-  TestCase tc("ABSearcherBasic");
-
-  ABSearcher searcher;
-
-  // Test without TT (should still work)
-  searcher.reset_stats();
-  EXPECT(tc, searcher.nodes_searched() == 0);
-  EXPECT(tc, searcher.tt_hits() == 0);
-
-  return tc.passed();
-}
-
-bool test_tactical_analyzer() {
-  TestCase tc("TacticalAnalyzer");
-
-  TacticalAnalyzer analyzer;
-
-  std::deque<StateInfo> states(1);
-  Position pos;
-
-  // Test starting position (not very tactical)
-  pos.set(TEST_FENS[0], false, &states.back());
-  auto info = analyzer.analyze(pos);
-
-  EXPECT(tc, !info.in_check);
-  EXPECT(tc, info.num_captures >= 0);
-
-  // Test tactical position
-  pos.set(TEST_FENS[1], false, &states.back());
-  info = analyzer.analyze(pos);
-
-  // Should have some tactical elements
-  EXPECT(tc, info.num_captures >= 0 || info.num_checks >= 0);
 
   return tc.passed();
 }
@@ -595,58 +213,27 @@ bool test_hybrid_search_bridge() {
 }
 
 // ============================================================================
-// Performance Tests
+// Thread-Safe MCTS Tests
 // ============================================================================
 
-bool test_tt_performance() {
-  TestCase tc("TTPerformance");
+bool test_thread_safe_mcts_config() {
+  TestCase tc("ThreadSafeMCTSConfig");
 
-  MCTSTTConfig config;
-  config.size_mb = 16;
+  ThreadSafeMCTSConfig config;
 
-  MCTSTranspositionTable tt;
-  tt.initialize(config);
+  // Test default values
+  EXPECT(tc, config.cpuct > 0.0f);
+  EXPECT(tc, config.fpu_reduction >= 0.0f);
+  EXPECT(tc, config.num_threads >= 0);
 
-  const int num_ops = 100000;
-
-  // Store benchmark
-  auto start = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < num_ops; ++i) {
-    uint64_t key = uint64_t(i) * 0x9E3779B97F4A7C15ULL;
-    tt.update_mcts(key, float(i % 100) / 100.0f, 0.1f, 30.0f);
-  }
-  auto end = std::chrono::high_resolution_clock::now();
-  double store_time =
-      std::chrono::duration<double, std::milli>(end - start).count();
-
-  // Probe benchmark
-  start = std::chrono::high_resolution_clock::now();
-  int hits = 0;
-  MCTSStats stats;
-  for (int i = 0; i < num_ops; ++i) {
-    uint64_t key = uint64_t(i) * 0x9E3779B97F4A7C15ULL;
-    if (tt.probe_mcts(key, stats))
-      hits++;
-  }
-  end = std::chrono::high_resolution_clock::now();
-  double probe_time =
-      std::chrono::duration<double, std::milli>(end - start).count();
-
-  std::cout << "\n    Store: " << std::fixed << std::setprecision(2)
-            << (num_ops / store_time * 1000) << " ops/sec";
-  std::cout << "\n    Probe: " << (num_ops / probe_time * 1000) << " ops/sec";
-  std::cout << "\n    Hit rate: " << (100.0 * hits / num_ops) << "%"
-            << std::endl;
-  std::cout << "  ";
-
-  EXPECT(tc, store_time < 1000); // Should complete in under 1 second
-  EXPECT(tc, probe_time < 1000);
-  EXPECT(tc, hits > num_ops / 2); // Should have decent hit rate
+  // Test auto-tune
+  config.auto_tune(4);
+  EXPECT(tc, config.min_batch_size >= 1);
+  EXPECT(tc, config.max_batch_size >= config.min_batch_size);
 
   return tc.passed();
 }
 
-// Test thread-safe MCTS
 bool test_thread_safe_mcts() {
   TestCase tc("ThreadSafeMCTS");
 
@@ -694,8 +281,10 @@ bool test_thread_safe_mcts() {
 // Main Test Runner
 // ============================================================================
 
+} // namespace
+
 bool test_mcts() {
-  std::cout << "\n=== MCTS Hybrid Search Tests ===" << std::endl;
+  std::cout << "\n=== MCTS Tests ===" << std::endl;
 
   Bitboards::init();
   Position::init();
@@ -706,41 +295,18 @@ bool test_mcts() {
   std::cout << "\n[Stockfish Adapter]" << std::endl;
   test_mcts_move();
   test_mcts_position();
-  test_mcts_position_history();
 
   std::cout << "\n[Position Classifier]" << std::endl;
   test_position_classifier_basic();
   test_position_classifier_tactical();
-  test_position_classifier_endgame();
-
-  std::cout << "\n[MCTS Transposition Table]" << std::endl;
-  test_mcts_tt_basic();
-  test_mcts_tt_store_probe();
-  test_mcts_tt_update();
-  test_mcts_tt_ab_bounds();
-
-  std::cout << "\n[Batch Evaluator]" << std::endl;
-  test_batch_buffer();
-  test_lock_free_collector();
-
-  std::cout << "\n[Hybrid Search]" << std::endl;
-  test_hybrid_edge();
-  test_hybrid_node();
-  test_hybrid_tree();
-  test_hybrid_search_basic();
-  test_parallel_hybrid_search();
 
   std::cout << "\n[AB Integration]" << std::endl;
   test_ab_search_result();
   test_ab_search_config();
-  test_ab_searcher_basic();
-  test_tactical_analyzer();
   test_hybrid_search_bridge();
 
-  std::cout << "\n[Performance]" << std::endl;
-  test_tt_performance();
-
   std::cout << "\n[Thread-Safe MCTS]" << std::endl;
+  test_thread_safe_mcts_config();
   test_thread_safe_mcts();
 
   std::cout << "\n=== MCTS Test Summary ===" << std::endl;

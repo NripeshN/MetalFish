@@ -11,6 +11,7 @@
 #include "../core/position.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <thread>
 
 #ifdef __APPLE__
@@ -192,16 +193,11 @@ int get_optimal_gpu_batch_size() {
     return 1;
   }
 
-  // Apple Silicon GPUs work best with batch sizes that are multiples of 32
-  // (SIMD group size) and fit well in shared memory
-
-  // M1/M2/M3 have different optimal sizes based on their GPU configurations
-  // M1: 7-8 GPU cores, optimal batch ~64-128
-  // M2: 8-10 GPU cores, optimal batch ~128-256
-  // M3: 10+ GPU cores, optimal batch ~128-256
-
-  // Use 128 as a good default that works well across all M-series chips
-  return 128;
+  // Use the backend's recommended batch size which accounts for:
+  // - GPU core count
+  // - Available GPU memory (recommendedMaxWorkingSetSize)
+  // - SIMD group width (32 for Apple Silicon)
+  return GPU::gpu().recommended_batch_size();
 }
 
 bool has_unified_memory() {
@@ -354,13 +350,40 @@ void AppleSiliconMCTSConfig::auto_tune_for_apple_silicon() {
   // More threads = higher virtual loss to reduce contention
   virtual_loss = std::min(5, 2 + num_search_threads / 2);
 
-  // Memory pool sizing based on available memory
-  // Apple Silicon Macs typically have 8-128GB unified memory
-  // Use 1M nodes as default, which is ~64MB for typical node size
-  node_pool_size = 1 << 20;
+  // Memory pool sizing based on available system memory
+  // Apple Silicon Macs have unified memory, so we can use a portion for MCTS
+  if (GPU::gpu_available()) {
+    size_t total_mem = GPU::gpu().total_system_memory();
+    size_t recommended_gpu_mem = GPU::gpu().recommended_working_set_size();
 
-  // TT size - 4M entries (~32MB)
-  tt_size = 1 << 22;
+    // Use ~5% of total memory for node pool, capped at 256MB
+    // Each node is ~64 bytes, so 256MB = ~4M nodes
+    size_t node_pool_bytes =
+        std::min(total_mem / 20, size_t(256) * 1024 * 1024);
+    node_pool_size = node_pool_bytes / 64; // 64 bytes per node
+
+    // TT size: ~2% of total memory, capped at 128MB
+    // Each TT entry is ~8 bytes
+    size_t tt_bytes = std::min(total_mem / 50, size_t(128) * 1024 * 1024);
+    tt_size = tt_bytes / 8;
+
+    // Log the auto-tuned configuration
+    std::cerr << "[AppleSiliconMCTS] Auto-tuned configuration:" << std::endl;
+    std::cerr << "  GPU batch size: " << gpu_batch_size << std::endl;
+    std::cerr << "  Search threads: " << num_search_threads << std::endl;
+    std::cerr << "  Node pool: " << (node_pool_size * 64 / (1024 * 1024))
+              << " MB (" << node_pool_size << " nodes)" << std::endl;
+    std::cerr << "  TT size: " << (tt_size * 8 / (1024 * 1024)) << " MB ("
+              << tt_size << " entries)" << std::endl;
+    std::cerr << "  Total system memory: " << (total_mem / (1024 * 1024 * 1024))
+              << " GB" << std::endl;
+    std::cerr << "  Recommended GPU working set: "
+              << (recommended_gpu_mem / (1024 * 1024)) << " MB" << std::endl;
+  } else {
+    // Fallback defaults when GPU is not available
+    node_pool_size = 1 << 20; // 1M nodes
+    tt_size = 1 << 22;        // 4M TT entries
+  }
 }
 
 // ============================================================================

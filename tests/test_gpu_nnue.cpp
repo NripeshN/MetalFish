@@ -208,7 +208,7 @@ bool test_gpu_feature_extraction() {
   {
     GPU::GPUEvalBatch batch;
     batch.reserve(NUM_TEST_FENS);
-    
+
     std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
     std::vector<Position> pos_vec(NUM_TEST_FENS);
 
@@ -233,7 +233,7 @@ bool test_gpu_feature_extraction() {
     for (int i = 0; i < NUM_TEST_FENS; i++) {
       states_vec.push_back(std::make_unique<std::deque<StateInfo>>(1));
       pos_vec[i].set(TEST_FENS[i], false, &states_vec.back()->back());
-      
+
       GPU::GPUPositionData data;
       data.from_position(pos_vec[i]);
       batch.add_position_data(data);
@@ -273,15 +273,15 @@ bool test_gpu_accumulator() {
   {
     GPU::GPUEvalBatch batch;
     batch.reserve(4);
-    
+
     std::deque<StateInfo> states(1);
     Position pos;
     pos.set(TEST_FENS[0], false, &states.back());
-    
+
     for (int i = 0; i < 4; i++) {
       batch.add_position(pos);
     }
-    
+
     bool passed = batch.count == 4;
     print_result("Batch with accumulator support", passed);
     all_passed &= passed;

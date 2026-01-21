@@ -22,6 +22,12 @@
 #include <mutex>
 #include <sstream>
 
+#ifdef __linux__
+#include <unistd.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
+
 // Only include driver API and NVRTC if not building without them
 #ifndef NO_CUDA_DRIVER_API
 #include <cuda.h>
@@ -386,6 +392,63 @@ size_t CUDABackend::max_threadgroup_memory() const {
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, device_id_);
   return prop.sharedMemPerBlock;
+}
+
+size_t CUDABackend::recommended_working_set_size() const {
+  // For CUDA, use ~75% of total GPU memory as recommended working set
+  return total_memory_ * 3 / 4;
+}
+
+size_t CUDABackend::total_system_memory() const {
+  // Query system RAM
+#ifdef __linux__
+  long pages = sysconf(_SC_PHYS_PAGES);
+  long page_size = sysconf(_SC_PAGE_SIZE);
+  return static_cast<size_t>(pages) * static_cast<size_t>(page_size);
+#elif defined(_WIN32)
+  MEMORYSTATUSEX status;
+  status.dwLength = sizeof(status);
+  GlobalMemoryStatusEx(&status);
+  return status.ullTotalPhys;
+#else
+  return 16ULL * 1024 * 1024 * 1024; // Default 16GB
+#endif
+}
+
+int CUDABackend::gpu_core_count() const {
+  // Return CUDA cores (SMs * cores per SM)
+  // Cores per SM varies by architecture:
+  // Pascal (6.x): 128, Volta/Turing (7.x): 64, Ampere (8.x): 128, Ada (8.9):
+  // 128
+  int cores_per_sm = 128;
+  if (compute_capability_major_ == 7) {
+    cores_per_sm = 64; // Volta/Turing
+  }
+  return multiprocessor_count_ * cores_per_sm;
+}
+
+int CUDABackend::max_threads_per_simd_group() const {
+  // CUDA warp size is always 32
+  return 32;
+}
+
+int CUDABackend::recommended_batch_size() const {
+  // NVIDIA GPUs benefit from larger batches than Apple Silicon
+  // Scale with number of SMs
+  int base_batch = multiprocessor_count_ * 8;
+
+  // Consider memory constraints
+  size_t memory_per_position = 4 * 1024; // ~4KB per position
+  int memory_limited_batch =
+      static_cast<int>(total_memory_ / (8 * memory_per_position));
+
+  int batch = std::min(base_batch, memory_limited_batch);
+
+  // Round to multiple of warp size (32)
+  batch = ((batch + 31) / 32) * 32;
+
+  // Clamp to reasonable range (NVIDIA can handle larger batches)
+  return std::max(64, std::min(1024, batch));
 }
 
 std::unique_ptr<Buffer> CUDABackend::create_buffer(size_t size, MemoryMode mode,

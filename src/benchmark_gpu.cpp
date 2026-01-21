@@ -260,8 +260,10 @@ void benchmark_gpu_accumulator() {
 
   std::cout << "GPU NNUE Manager initialized" << std::endl;
   std::cout << "  Big network hidden dim: " << GPU::GPU_FT_DIM_BIG << std::endl;
-  std::cout << "  Small network hidden dim: " << GPU::GPU_FT_DIM_SMALL << std::endl;
-  std::cout << "  GPU Memory: " << manager.gpu_memory_used() / 1024 << " KB" << std::endl;
+  std::cout << "  Small network hidden dim: " << GPU::GPU_FT_DIM_SMALL
+            << std::endl;
+  std::cout << "  GPU Memory: " << manager.gpu_memory_used() / 1024 << " KB"
+            << std::endl;
 
   // Note: Full benchmarks require network weights
   std::cout << "  (Full benchmarks require loaded networks)" << std::endl;

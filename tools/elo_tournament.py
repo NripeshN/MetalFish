@@ -770,14 +770,15 @@ class Tournament:
         )
 
         # MetalFish with Parallel Hybrid search (MCTS + AB in parallel)
-        hybrid_wrapper = self.base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
-        self._create_hybrid_wrapper(metalfish_path, hybrid_wrapper)
+        # Now uses UseHybridSearch UCI option instead of wrapper for better stability
         hybrid_config = engines_config.get("MetalFish-Hybrid", {})
+        hybrid_options = hybrid_config.get("options", {})
+        hybrid_options["UseHybridSearch"] = "true"  # Enable hybrid mode via UCI option
         self.add_engine(
             EngineConfig(
                 name="MetalFish-Hybrid",
-                cmd=str(hybrid_wrapper),
-                options=hybrid_config.get("options", {}),
+                cmd=str(metalfish_path),
+                options=hybrid_options,
                 expected_elo=hybrid_config.get("expected_elo"),
             )
         )
@@ -1384,12 +1385,14 @@ def get_engine_configs(
     )
 
     # MetalFish with Parallel Hybrid search (MCTS + AB in parallel)
-    hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
+    # Now uses UseHybridSearch UCI option instead of wrapper for better stability
     hybrid_config = engines_config.get("MetalFish-Hybrid", {})
+    hybrid_options = hybrid_config.get("options", {}).copy()
+    hybrid_options["UseHybridSearch"] = "true"  # Enable hybrid mode via UCI option
     configs["MetalFish-Hybrid"] = EngineConfig(
         name="MetalFish-Hybrid",
-        cmd=str(hybrid_wrapper),
-        options=hybrid_config.get("options", {}),
+        cmd=str(metalfish_path),
+        options=hybrid_options,
         expected_elo=hybrid_config.get("expected_elo"),
     )
 
@@ -1635,7 +1638,7 @@ def run_ci_match(
     engine2_options: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Run a single match between two engines and output JSON results.
-    
+
     Args:
         engine1_options: Custom UCI options to override defaults for engine1
         engine2_options: Custom UCI options to override defaults for engine2
@@ -1665,11 +1668,7 @@ def run_ci_match(
 
     metalfish_path = base_dir / "build" / "metalfish"
 
-    # Create wrapper scripts if needed
-    if "MetalFish-Hybrid" in [engine1_name, engine2_name]:
-        hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
-        _create_hybrid_wrapper_file(metalfish_path, hybrid_wrapper)
-
+    # Create wrapper scripts if needed (only for MCTS now, Hybrid uses UCI option)
     if "MetalFish-MCTS" in [engine1_name, engine2_name]:
         mcts_wrapper = base_dir / "tools" / "metalfish_mcts_wrapper.sh"
         _create_mcts_wrapper_file(metalfish_path, mcts_wrapper)
@@ -2454,7 +2453,12 @@ def main():
 
         try:
             run_ci_match(
-                base_dir, args.engine1, args.engine2, args.games, args.time, output_file,
+                base_dir,
+                args.engine1,
+                args.engine2,
+                args.games,
+                args.time,
+                output_file,
                 engine1_options=engine1_options if engine1_options else None,
                 engine2_options=engine2_options if engine2_options else None,
             )
@@ -2514,11 +2518,13 @@ def main():
             )
         )
 
-        # Hybrid MCTS ('mcts' command)
-        hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
-        tournament._create_hybrid_wrapper(metalfish_path, hybrid_wrapper)
+        # Hybrid MCTS - now uses UseHybridSearch UCI option instead of wrapper
         tournament.add_engine(
-            EngineConfig(name="MetalFish-Hybrid", cmd=str(hybrid_wrapper), options={})
+            EngineConfig(
+                name="MetalFish-Hybrid",
+                cmd=str(metalfish_path),
+                options={"Threads": "1", "Hash": "128", "UseHybridSearch": "true"},
+            )
         )
 
         # Multi-threaded MCTS ('mctsmt' command)

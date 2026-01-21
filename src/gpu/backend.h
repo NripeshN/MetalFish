@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -150,6 +151,27 @@ public:
   virtual bool has_unified_memory() const = 0;
   virtual size_t max_buffer_size() const = 0;
   virtual size_t max_threadgroup_memory() const = 0;
+
+  // Hardware capabilities (for dynamic tuning)
+  virtual size_t
+  recommended_working_set_size() const = 0;       // Recommended GPU memory
+  virtual size_t total_system_memory() const = 0; // Total RAM (unified memory)
+  virtual int gpu_core_count() const = 0;         // GPU compute units/cores
+  virtual int
+  max_threads_per_simd_group() const = 0; // SIMD width (32 for Apple)
+
+  // Recommended batch sizes based on hardware
+  virtual int recommended_batch_size() const {
+    // Default: scale with GPU cores, minimum 32, max 512
+    int cores = gpu_core_count();
+    if (cores <= 0)
+      return 128;
+    // ~16 positions per GPU core is a good heuristic
+    int batch = (cores * 16);
+    // Round to nearest power of 2 for optimal memory alignment
+    batch = 1 << (32 - __builtin_clz(batch - 1)); // Next power of 2
+    return std::max(32, std::min(512, batch));
+  }
 
   // Buffer management
   virtual std::unique_ptr<Buffer>

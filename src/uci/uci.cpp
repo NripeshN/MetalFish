@@ -30,7 +30,6 @@
 #include "gpu/backend.h"
 #include "gpu/gpu_mcts_backend.h"
 #include "gpu/gpu_nnue_integration.h"
-#include "mcts/hybrid_search.h"
 #include "mcts/parallel_hybrid_search.h"
 #include "mcts/position_classifier.h"
 #include "mcts/stockfish_adapter.h"
@@ -125,7 +124,18 @@ void UCIEngine::loop() {
       // python-chess
       print_info_string(engine.numa_config_information_as_string());
       print_info_string(engine.thread_allocation_information_as_string());
-      go(is);
+
+      // Check search mode from UCI options
+      if (engine.get_options()["UseMCTS"]) {
+        // Use pure MCTS search
+        mcts_mt_go(is);
+      } else if (engine.get_options()["UseHybridSearch"]) {
+        // Use parallel hybrid search (MCTS + AB)
+        parallel_hybrid_go(is);
+      } else {
+        // Use standard AB search
+        go(is);
+      }
     } else if (token == "position")
       position(is);
     else if (token == "ucinewgame")
@@ -156,7 +166,7 @@ void UCIEngine::loop() {
     else if (token == "mctsbench")
       mcts_batch_benchmark(is);
     else if (token == "nnuebench")
-      nnue_benchmark(is);  // CPU vs GPU NNUE comparison
+      nnue_benchmark(is); // CPU vs GPU NNUE comparison
     else if (token == "compiler")
       sync_cout << compiler_info() << sync_endl;
     else if (token == "export_net") {
@@ -899,7 +909,8 @@ void UCIEngine::gpu_benchmark() {
   // BENCHMARK 3: Feature Count Distribution
   // ========================================================================
   std::cout << "=== BENCHMARK 3: Feature Count Distribution ===\n";
-  std::cout << "Checking if 64-feature-per-perspective cap is ever hit\n" << std::flush;
+  std::cout << "Checking if 64-feature-per-perspective cap is ever hit\n"
+            << std::flush;
 
   {
     int total_positions = 0;
@@ -911,11 +922,11 @@ void UCIEngine::gpu_benchmark() {
     for (int i = 0; i < 2048; i++) {
       GPU::GPUEvalBatch batch;
       batch.add_position(positions[i]);
-      
+
       // Estimate features from piece count (each non-king piece = 2 features)
       int piece_count = positions[i].count<ALL_PIECES>() - 2; // exclude kings
       int estimated_features = piece_count * 2; // white + black perspective
-      
+
       max_features_seen = std::max(max_features_seen, estimated_features);
       max_per_perspective = std::max(max_per_perspective, piece_count);
       if (estimated_features < 129)
@@ -1270,8 +1281,10 @@ void UCIEngine::gpu_benchmark() {
 static std::unique_ptr<MCTS::ParallelHybridSearch> g_parallel_hybrid_search;
 static GPU::GPUNNUEManager *g_hybrid_gpu_manager = nullptr;
 
-// Cleanup function to be called before GPU shutdown
-void cleanup_parallel_hybrid_search() {
+} // namespace MetalFish
+
+// Cleanup function to be called before GPU shutdown (in MetalFish namespace)
+void MetalFish::cleanup_parallel_hybrid_search() {
   if (g_parallel_hybrid_search) {
     g_parallel_hybrid_search->stop();
     g_parallel_hybrid_search->wait();
@@ -1282,6 +1295,8 @@ void cleanup_parallel_hybrid_search() {
     g_hybrid_gpu_manager = nullptr;
   }
 }
+
+namespace MetalFish {
 
 void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   sync_cout << "info string Starting Parallel Hybrid Search (MCTS + AB)..."
@@ -1308,7 +1323,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   config.mcts_config.cpuct = 1.5f;
   config.mcts_config.fpu_reduction = 0.2f;
   config.mcts_config.add_dirichlet_noise = true;
-  config.mcts_config.num_search_threads = 1;
+  config.mcts_config.num_threads = 1; // ThreadSafeMCTSConfig uses num_threads
 
   // AB configuration
   config.ab_min_depth = 10;
@@ -1332,9 +1347,9 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
 
   // Reuse or create the persistent search object
   // This avoids crashes from repeated construction/destruction of GPU resources
-  bool need_reinit = !g_parallel_hybrid_search || 
-                     g_hybrid_gpu_manager != gpu_manager;
-  
+  bool need_reinit =
+      !g_parallel_hybrid_search || g_hybrid_gpu_manager != gpu_manager;
+
   if (need_reinit) {
     // Clean up old search if it exists
     if (g_parallel_hybrid_search) {
@@ -1345,12 +1360,12 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
       }
       g_parallel_hybrid_search.reset();
     }
-    
+
     // Create new search
     g_parallel_hybrid_search =
         MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
     g_hybrid_gpu_manager = gpu_manager;
-    
+
     if (!g_parallel_hybrid_search) {
       sync_cout << "info string ERROR: Failed to create parallel hybrid search"
                 << sync_endl;
@@ -1380,25 +1395,13 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     sync_cout << info << sync_endl;
   };
 
-  // Start search
+  // Start search - AB uses search_silent internally so no duplicate bestmove
   g_parallel_hybrid_search->start_search(pos, limits, best_move_cb, info_cb);
 
   // Wait for completion
+  // Note: The coordinator thread handles stats output and bestmove callback
+  // so we don't print anything here to avoid output after bestmove
   g_parallel_hybrid_search->wait();
-
-  // Print final statistics
-  const auto &stats = g_parallel_hybrid_search->stats();
-  sync_cout << "info string Parallel stats: MCTS=" << stats.mcts_nodes
-            << " AB=" << stats.ab_nodes
-            << " agreements=" << stats.move_agreements
-            << " AB_overrides=" << stats.ab_overrides
-            << " MCTS_overrides=" << stats.mcts_overrides
-            << " policy_updates=" << stats.policy_updates << sync_endl;
-  sync_cout << "info string GPU: evaluations=" << stats.gpu_evaluations
-            << " batches=" << stats.gpu_batches << sync_endl;
-  sync_cout << "info string Time: MCTS=" << std::fixed << std::setprecision(1)
-            << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms
-            << "ms Total=" << stats.total_time_ms << "ms" << sync_endl;
 
   // Note: We don't destroy the search object anymore - it's persistent
   // This avoids crashes from GPU resource cleanup issues
@@ -1782,14 +1785,17 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
   for (int i = 0; i < num_positions; i++) {
     states.push_back(std::make_unique<StateInfo>());
     positions.push_back(std::make_unique<Position>());
-    positions.back()->set(test_fens[i % test_fens.size()], false, states.back().get());
+    positions.back()->set(test_fens[i % test_fens.size()], false,
+                          states.back().get());
   }
 
   // =========================================================================
   // CPU NNUE Benchmark (using Stockfish's evaluation via engine search)
-  // We'll use simple_eval as a baseline for CPU since we can't access networks directly
+  // We'll use simple_eval as a baseline for CPU since we can't access networks
+  // directly
   // =========================================================================
-  sync_cout << "info string [CPU Simple Eval Benchmark (baseline)]" << sync_endl;
+  sync_cout << "info string [CPU Simple Eval Benchmark (baseline)]"
+            << sync_endl;
 
   // Warm up CPU
   for (int i = 0; i < 100 && i < num_positions; i++) {
@@ -1806,8 +1812,9 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
   }
 
   auto cpu_simple_end = std::chrono::high_resolution_clock::now();
-  double cpu_simple_time_ms =
-      std::chrono::duration<double, std::milli>(cpu_simple_end - cpu_simple_start).count();
+  double cpu_simple_time_ms = std::chrono::duration<double, std::milli>(
+                                  cpu_simple_end - cpu_simple_start)
+                                  .count();
   double cpu_simple_pos_per_sec = (num_positions * 1000.0) / cpu_simple_time_ms;
 
   sync_cout << "info string   Time: " << std::fixed << std::setprecision(2)
@@ -1846,9 +1853,11 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
     }
 
     auto gpu_single_end = std::chrono::high_resolution_clock::now();
-    double gpu_single_time_ms =
-        std::chrono::duration<double, std::milli>(gpu_single_end - gpu_single_start).count();
-    double gpu_single_pos_per_sec = (num_positions * 1000.0) / gpu_single_time_ms;
+    double gpu_single_time_ms = std::chrono::duration<double, std::milli>(
+                                    gpu_single_end - gpu_single_start)
+                                    .count();
+    double gpu_single_pos_per_sec =
+        (num_positions * 1000.0) / gpu_single_time_ms;
 
     sync_cout << "info string     Time: " << std::fixed << std::setprecision(2)
               << gpu_single_time_ms << " ms" << sync_endl;
@@ -1857,7 +1866,8 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
 
     // GPU benchmark - batched evaluation
     gpu_manager.reset_stats();
-    sync_cout << "info string   [Batched Mode (batch=" << batch_size << ")]" << sync_endl;
+    sync_cout << "info string   [Batched Mode (batch=" << batch_size << ")]"
+              << sync_endl;
     std::vector<int32_t> gpu_batch_results(num_positions);
     auto gpu_batch_start = std::chrono::high_resolution_clock::now();
 
@@ -1876,8 +1886,9 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
 
       // Store results
       for (int i = 0; i < count; i++) {
-        int32_t psqt =
-            batch.psqt_scores.size() > static_cast<size_t>(i) ? batch.psqt_scores[i] : 0;
+        int32_t psqt = batch.psqt_scores.size() > static_cast<size_t>(i)
+                           ? batch.psqt_scores[i]
+                           : 0;
         int32_t pos = batch.positional_scores.size() > static_cast<size_t>(i)
                           ? batch.positional_scores[i]
                           : 0;
@@ -1886,16 +1897,17 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
     }
 
     auto gpu_batch_end = std::chrono::high_resolution_clock::now();
-    double gpu_batch_time_ms =
-        std::chrono::duration<double, std::milli>(gpu_batch_end - gpu_batch_start).count();
+    double gpu_batch_time_ms = std::chrono::duration<double, std::milli>(
+                                   gpu_batch_end - gpu_batch_start)
+                                   .count();
     double gpu_batch_pos_per_sec = (num_positions * 1000.0) / gpu_batch_time_ms;
 
     sync_cout << "info string     Time: " << std::fixed << std::setprecision(2)
               << gpu_batch_time_ms << " ms" << sync_endl;
     sync_cout << "info string     Positions/sec: " << std::fixed
               << std::setprecision(0) << gpu_batch_pos_per_sec << sync_endl;
-    sync_cout << "info string     GPU evaluations: " << gpu_manager.gpu_evaluations()
-              << sync_endl;
+    sync_cout << "info string     GPU evaluations: "
+              << gpu_manager.gpu_evaluations() << sync_endl;
     sync_cout << "info string     Batches: " << gpu_manager.total_batches()
               << sync_endl;
     sync_cout << "" << sync_endl;
@@ -1904,12 +1916,15 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
     // Performance Comparison
     // =========================================================================
     sync_cout << "info string [Performance Summary]" << sync_endl;
-    sync_cout << "info string   CPU Simple Eval: " << std::fixed << std::setprecision(0)
-              << cpu_simple_pos_per_sec << " pos/sec" << sync_endl;
-    sync_cout << "info string   GPU Single:      " << std::fixed << std::setprecision(0)
-              << gpu_single_pos_per_sec << " pos/sec" << sync_endl;
-    sync_cout << "info string   GPU Batched:     " << std::fixed << std::setprecision(0)
-              << gpu_batch_pos_per_sec << " pos/sec" << sync_endl;
+    sync_cout << "info string   CPU Simple Eval: " << std::fixed
+              << std::setprecision(0) << cpu_simple_pos_per_sec << " pos/sec"
+              << sync_endl;
+    sync_cout << "info string   GPU Single:      " << std::fixed
+              << std::setprecision(0) << gpu_single_pos_per_sec << " pos/sec"
+              << sync_endl;
+    sync_cout << "info string   GPU Batched:     " << std::fixed
+              << std::setprecision(0) << gpu_batch_pos_per_sec << " pos/sec"
+              << sync_endl;
 
     double batch_vs_single = gpu_batch_pos_per_sec / gpu_single_pos_per_sec;
     sync_cout << "info string   Batch speedup over single: " << std::fixed
@@ -1917,7 +1932,8 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
     sync_cout << "" << sync_endl;
 
     // Verify consistency between single and batch modes
-    sync_cout << "info string [Consistency Check (Single vs Batch)]" << sync_endl;
+    sync_cout << "info string [Consistency Check (Single vs Batch)]"
+              << sync_endl;
     int matches = 0;
     for (int i = 0; i < num_positions; i++) {
       if (gpu_single_results[i] == gpu_batch_results[i]) {
@@ -1925,13 +1941,14 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
       }
     }
     double match_pct = (matches * 100.0) / num_positions;
-    sync_cout << "info string   Exact matches: " << matches << "/" << num_positions
-              << " (" << std::fixed << std::setprecision(1) << match_pct << "%)"
-              << sync_endl;
+    sync_cout << "info string   Exact matches: " << matches << "/"
+              << num_positions << " (" << std::fixed << std::setprecision(1)
+              << match_pct << "%)" << sync_endl;
 
     // Show sample results
     sync_cout << "" << sync_endl;
-    sync_cout << "info string [Sample GPU NNUE Results (first 5 positions)]" << sync_endl;
+    sync_cout << "info string [Sample GPU NNUE Results (first 5 positions)]"
+              << sync_endl;
     for (int i = 0; i < std::min(5, num_positions); i++) {
       int32_t psqt = 0, pos = 0;
       auto [p, s] = gpu_manager.evaluate_single(*positions[i], true);

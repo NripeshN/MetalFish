@@ -655,6 +655,12 @@ public:
   void stop();
   void wait();
 
+  // Clear callbacks to prevent crashes during cleanup
+  void clear_callbacks() {
+    best_move_callback_ = nullptr;
+    info_callback_ = nullptr;
+  }
+
   Move get_best_move() const;
   std::vector<Move> get_pv() const;
   const ThreadSafeMCTSStats &stats() const { return stats_; }

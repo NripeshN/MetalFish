@@ -847,12 +847,16 @@ void ThreadSafeMCTS::wait() {
 
   running_.store(false, std::memory_order_release);
 
-  // Report best move
-  if (best_move_callback_) {
+  // Report best move only if callback is valid
+  // Make a copy to prevent race conditions
+  auto callback_copy = best_move_callback_;
+  best_move_callback_ = nullptr; // Clear to prevent double-call
+
+  if (callback_copy) {
     Move best = get_best_move();
     std::vector<Move> pv = get_pv();
     Move ponder = pv.size() > 1 ? pv[1] : Move::none();
-    best_move_callback_(best, ponder);
+    callback_copy(best, ponder);
   }
 }
 

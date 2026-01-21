@@ -6,21 +6,31 @@
       "options": {
         "Threads": "1",
         "Hash": "128",
-        "Ponder": "false"
+        "Ponder": "false",
+        "UseHybridSearch": "false",
+        "UseMCTS": "false"
       }
     },
     "MetalFish-MCTS": {
       "description": "MetalFish with Pure GPU MCTS",
       "expected_elo": null,
       "options": {
-        "Ponder": "false"
+        "Threads": "1",
+        "Hash": "128",
+        "Ponder": "false",
+        "UseHybridSearch": "false",
+        "UseMCTS": "true"
       }
     },
     "MetalFish-Hybrid": {
       "description": "MetalFish with Parallel MCTS+AB hybrid search",
       "expected_elo": null,
       "options": {
-        "Ponder": "false"
+        "Threads": "1",
+        "Hash": "128",
+        "Ponder": "false",
+        "UseHybridSearch": "true",
+        "UseMCTS": "false"
       }
     },
     "Patricia": {

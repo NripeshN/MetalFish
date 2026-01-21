@@ -6,10 +6,10 @@
 
   Provides GPU-accelerated NNUE evaluation with adaptive kernel selection
   based on batch size and runtime performance characteristics.
-  
+
   This is the primary GPU NNUE interface. Use this header for all GPU NNUE
   functionality. The implementation is in gpu_nnue_integration.cpp.
-  
+
   STOCKFISH NNUE PARITY:
   =====================
   1. HalfKAv2_hm Feature Set - Exact match to Stockfish's feature extraction
@@ -18,7 +18,7 @@
   4. Clipped ReLU Activation - [0, 127] range with squared clipping
   5. Skip Connection - FC0 output 15 feeds into final output
   6. PSQT Accumulation - Piece-square table evaluation
-  
+
   APPLE SILICON OPTIMIZATIONS:
   ===========================
   1. ZERO-COPY UNIFIED MEMORY - MTLResourceStorageModeShared
@@ -237,8 +237,8 @@ public:
   // Returns true if update was applied on GPU, false if full refresh needed
   bool apply_incremental_update(int perspective, int king_square,
                                 const int32_t *added_features, int num_added,
-                                const int32_t *removed_features, int num_removed,
-                                const int32_t *src_accumulator,
+                                const int32_t *removed_features,
+                                int num_removed, const int32_t *src_accumulator,
                                 int32_t *dst_accumulator, int hidden_dim);
 
   // Apply double incremental update (for null-move search)

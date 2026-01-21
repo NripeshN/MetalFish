@@ -65,7 +65,8 @@ Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
 #ifdef __APPLE__
   // Try GPU NNUE first if enabled and available
   if (use_apple_silicon_nnue() && GPU::gpu_nnue_manager_available()) {
-    auto [gpu_psqt, gpu_positional] = GPU::gpu_nnue_manager().evaluate_single(pos, !smallNet);
+    auto [gpu_psqt, gpu_positional] =
+        GPU::gpu_nnue_manager().evaluate_single(pos, !smallNet);
     psqt = gpu_psqt;
     positional = gpu_positional;
   } else
@@ -86,7 +87,8 @@ Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
 #ifdef __APPLE__
     if (use_apple_silicon_nnue() && GPU::gpu_nnue_manager_available()) {
       // Re-evaluate with big network
-      auto [gpu_psqt, gpu_positional] = GPU::gpu_nnue_manager().evaluate_single(pos, true);
+      auto [gpu_psqt, gpu_positional] =
+          GPU::gpu_nnue_manager().evaluate_single(pos, true);
       psqt = gpu_psqt;
       positional = gpu_positional;
       nnue = (125 * psqt + 131 * positional) / 128;

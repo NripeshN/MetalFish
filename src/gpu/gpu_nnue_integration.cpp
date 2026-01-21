@@ -1207,7 +1207,7 @@ bool GPUNNUEManager::initialize() {
   }
 
   initialized_ = true;
-  std::cout << "[GPU NNUE] Manager initialized" << std::endl;
+  std::cerr << "[GPU NNUE] Manager initialized" << std::endl;
   return true;
 }
 
@@ -1267,45 +1267,45 @@ bool GPUNNUEManager::compile_shaders() {
 
   // Log available optional kernels
   if (forward_simd_kernel_ && forward_simd_kernel_->valid()) {
-    std::cout << "[GPU NNUE] SIMD forward kernel available" << std::endl;
+    std::cerr << "[GPU NNUE] SIMD forward kernel available" << std::endl;
   }
   if (feature_transform_dual_kernel_ &&
       feature_transform_dual_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Dual-perspective transform kernel available"
+    std::cerr << "[GPU NNUE] Dual-perspective transform kernel available"
               << std::endl;
   }
   if (extract_features_kernel_ && extract_features_kernel_->valid()) {
-    std::cout << "[GPU NNUE] GPU feature extraction kernel available"
+    std::cerr << "[GPU NNUE] GPU feature extraction kernel available"
               << std::endl;
   }
   if (forward_batch_kernel_ && forward_batch_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Batch forward kernel available" << std::endl;
+    std::cerr << "[GPU NNUE] Batch forward kernel available" << std::endl;
   }
   if (feature_transform_vec4_kernel_ &&
       feature_transform_vec4_kernel_->valid()) {
-    std::cout
+    std::cerr
         << "[GPU NNUE] Vectorized (vec4) feature transform kernel available"
         << std::endl;
   }
   if (feature_transform_dual_vec4_kernel_ &&
       feature_transform_dual_vec4_kernel_->valid()) {
-    std::cout
+    std::cerr
         << "[GPU NNUE] Dual-perspective vectorized transform kernel available"
         << std::endl;
   }
   if (forward_optimized_kernel_ && forward_optimized_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Optimized forward kernel available" << std::endl;
+    std::cerr << "[GPU NNUE] Optimized forward kernel available" << std::endl;
   }
   if (fused_single_kernel_ && fused_single_kernel_->valid()) {
-    std::cout << "[GPU NNUE] Fused single-position kernel available"
+    std::cerr << "[GPU NNUE] Fused single-position kernel available"
               << std::endl;
   }
 
   // Load incremental update kernels from Metal shader file
   // These are compiled from nnue.metal, not from the inline shader source
   // For now, we'll use the inline shader versions
-  
-  std::cout << "[GPU NNUE] Shaders compiled successfully" << std::endl;
+
+  std::cerr << "[GPU NNUE] Shaders compiled successfully" << std::endl;
   return true;
 }
 
@@ -1380,7 +1380,7 @@ bool GPUNNUEManager::allocate_working_buffers() {
     return false;
   }
 
-  std::cout << "[GPU NNUE] Working buffers allocated: "
+  std::cerr << "[GPU NNUE] Working buffers allocated: "
             << backend.allocated_memory() / 1024 << " KB" << std::endl;
   return true;
 }
@@ -1442,7 +1442,7 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
     return false;
   }
 
-  std::cout << "[GPU NNUE] Loading networks..." << std::endl;
+  std::cerr << "[GPU NNUE] Loading networks..." << std::endl;
 
   // Extract and print network info
   auto big_info = get_network_info<Eval::NNUE::NetworkBig>();
@@ -1451,7 +1451,7 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
   print_network_info(big_info, "Big");
   print_network_info(small_info, "Small");
 
-  std::cout << "[GPU NNUE] Total memory required: "
+  std::cerr << "[GPU NNUE] Total memory required: "
             << (get_network_memory_requirement<Eval::NNUE::NetworkBig>() +
                 get_network_memory_requirement<Eval::NNUE::NetworkSmall>()) /
                    1024
@@ -1475,7 +1475,7 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
   auto big_weights =
       GPUNNUEWeightExtractor<Eval::NNUE::NetworkBig>::extract(networks.big);
   if (big_weights.valid) {
-    std::cout << "[GPU NNUE] Uploading big network weights..." << std::endl;
+    std::cerr << "[GPU NNUE] Uploading big network weights..." << std::endl;
 
     // Upload feature transformer
     if (big_weights.ft.biases && big_network_.ft_biases) {
@@ -1524,14 +1524,14 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
                     std::min(src.fc2_biases_size, dst.fc2_biases->size()));
       }
     }
-    std::cout << "[GPU NNUE] Big network weights uploaded" << std::endl;
+    std::cerr << "[GPU NNUE] Big network weights uploaded" << std::endl;
   }
 
   // Extract and upload small network weights
   auto small_weights =
       GPUNNUEWeightExtractor<Eval::NNUE::NetworkSmall>::extract(networks.small);
   if (small_weights.valid) {
-    std::cout << "[GPU NNUE] Uploading small network weights..." << std::endl;
+    std::cerr << "[GPU NNUE] Uploading small network weights..." << std::endl;
 
     // Upload feature transformer
     if (small_weights.ft.biases && small_network_.ft_biases) {
@@ -1580,10 +1580,10 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
                     std::min(src.fc2_biases_size, dst.fc2_biases->size()));
       }
     }
-    std::cout << "[GPU NNUE] Small network weights uploaded" << std::endl;
+    std::cerr << "[GPU NNUE] Small network weights uploaded" << std::endl;
   }
 
-  std::cout << "[GPU NNUE] Networks loaded. Total GPU memory: "
+  std::cerr << "[GPU NNUE] Networks loaded. Total GPU memory: "
             << gpu_memory_used() / 1024 << " KB" << std::endl;
 
   return true;
@@ -2136,7 +2136,7 @@ bool GPUNNUEManager::should_use_incremental(int num_added, int num_removed,
   // Break-even point is roughly when changes < 10% of typical feature count
   const int total_changes = num_added + num_removed;
   const int typical_features = 30; // Average number of features per position
-  
+
   // Use incremental if we're changing less than 1/3 of typical features
   // AND we have valid source accumulator
   return total_changes <= typical_features / 3;
@@ -2147,20 +2147,21 @@ bool GPUNNUEManager::apply_incremental_update(
     int num_added, const int32_t *removed_features, int num_removed,
     const int32_t *src_accumulator, int32_t *dst_accumulator, int hidden_dim) {
 
-  if (!is_ready() || !should_use_incremental(num_added, num_removed, hidden_dim)) {
+  if (!is_ready() ||
+      !should_use_incremental(num_added, num_removed, hidden_dim)) {
     return false;
   }
 
   // For now, perform incremental update on CPU
   // This is actually faster for small updates due to GPU dispatch overhead
   // GPU incremental is beneficial for batched updates during MCTS
-  
+
   // Copy source to destination first
   std::memcpy(dst_accumulator, src_accumulator, hidden_dim * sizeof(int32_t));
-  
+
   // Note: We need access to the feature transformer weights
-  // For a full GPU implementation, we would dispatch the incremental_update kernel
-  // For now, we signal that CPU should handle this
+  // For a full GPU implementation, we would dispatch the incremental_update
+  // kernel For now, we signal that CPU should handle this
   return false;
 }
 
@@ -2176,9 +2177,10 @@ bool GPUNNUEManager::apply_double_incremental_update(
 
   // Double incremental is useful for null-move search
   // where we need to apply move + null move efficiently
-  
+
   // For small updates, CPU is faster
-  const int total_changes = num_added1 + num_removed1 + num_added2 + num_removed2;
+  const int total_changes =
+      num_added1 + num_removed1 + num_added2 + num_removed2;
   if (total_changes <= 8) {
     return false; // Let CPU handle it
   }

@@ -15,8 +15,6 @@
 #include "gpu/backend.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "mcts/ab_integration.h"
-#include "mcts/mcts_batch_evaluator.h"
-#include "mcts/mcts_tt.h"
 #include "search/tune.h"
 #include "uci/uci.h"
 
@@ -40,8 +38,6 @@ static void cleanup_gpu_resources() {
 
   // 1. Shutdown MCTS components first (they use GPU)
   MCTS::shutdown_hybrid_bridge();
-  MCTS::shutdown_mcts_batch_evaluator();
-  MCTS::shutdown_mcts_tt();
 
   // 2. Shutdown GPU NNUE manager (this also shuts down the GPU backend)
   GPU::shutdown_gpu_nnue();

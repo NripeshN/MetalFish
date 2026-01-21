@@ -35,9 +35,9 @@
 #include "../search/search.h"
 #include "../search/tt.h"
 #include "ab_integration.h"
-#include "hybrid_search.h"
 #include "position_classifier.h"
 #include "stockfish_adapter.h"
+#include "thread_safe_mcts.h"
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -270,8 +270,8 @@ struct ParallelSearchStats {
 // ============================================================================
 
 struct ParallelHybridConfig {
-  // MCTS configuration
-  HybridSearchConfig mcts_config;
+  // MCTS configuration - uses ThreadSafeMCTS (stable implementation)
+  ThreadSafeMCTSConfig mcts_config;
   int mcts_threads = 1;
 
   // AB configuration
@@ -370,8 +370,8 @@ private:
   ParallelHybridConfig config_;
   ParallelSearchStats stats_;
 
-  // Components
-  std::unique_ptr<HybridSearch> mcts_search_;
+  // Components - using ThreadSafeMCTS (stable, doesn't crash)
+  std::unique_ptr<ThreadSafeMCTS> mcts_search_;
   std::unique_ptr<GPU::GPUMCTSBackend> gpu_backend_;
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
   Engine *engine_ = nullptr;

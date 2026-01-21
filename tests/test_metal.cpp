@@ -39,6 +39,28 @@ bool test_metal() {
     std::cout << "Max Threadgroup Memory: " << gpu.max_threadgroup_memory()
               << " bytes" << std::endl;
 
+    // Test new hardware detection APIs
+    std::cout << "\n=== Hardware Detection ===" << std::endl;
+    std::cout << "GPU Core Count: " << gpu.gpu_core_count() << std::endl;
+    std::cout << "Total System Memory: "
+              << (gpu.total_system_memory() / (1024 * 1024 * 1024)) << " GB"
+              << std::endl;
+    std::cout << "Recommended Working Set: "
+              << (gpu.recommended_working_set_size() / (1024 * 1024)) << " MB"
+              << std::endl;
+    std::cout << "Recommended Batch Size: " << gpu.recommended_batch_size()
+              << std::endl;
+    std::cout << "SIMD Group Width: " << gpu.max_threads_per_simd_group()
+              << std::endl;
+
+    // Verify sensible values
+    assert(gpu.gpu_core_count() > 0);
+    assert(gpu.total_system_memory() > 1024ULL * 1024 * 1024); // At least 1GB
+    assert(gpu.recommended_working_set_size() > 0);
+    assert(gpu.recommended_batch_size() >= 32);
+    assert(gpu.max_threads_per_simd_group() ==
+           32); // Apple Silicon uses 32-wide SIMD
+
     // Test buffer creation
     auto gpu_buffer = gpu.create_buffer(4096);
     assert(gpu_buffer != nullptr);

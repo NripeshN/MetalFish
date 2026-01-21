@@ -122,6 +122,11 @@ public:
   QuickSearchResult search_sync(const std::string &fen, int depth,
                                 int time_ms = 0);
 
+  // Silent search - runs AB search WITHOUT triggering bestmove callback
+  // Used by hybrid search where the coordinator handles bestmove output
+  QuickSearchResult search_silent(const std::string &fen, int depth,
+                                  int time_ms = 0);
+
   // Get access to the transposition table for sharing with hybrid search
   TranspositionTable &get_tt() { return tt; }
   const TranspositionTable &get_tt() const { return tt; }

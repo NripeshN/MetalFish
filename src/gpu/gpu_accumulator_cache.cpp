@@ -172,8 +172,7 @@ void WeightPermuter::permute_fc_weights(const int8_t *src, int8_t *dst,
         int output = tile * tile_size + lane;
         if (output < output_dim) {
           int src_idx = input * output_dim + output;
-          int dst_idx =
-              tile * input_dim * tile_size + input * tile_size + lane;
+          int dst_idx = tile * input_dim * tile_size + input * tile_size + lane;
           dst[dst_idx] = src[src_idx];
         }
       }

@@ -212,10 +212,10 @@ set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
 # Syzygy source files
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
-# GPU source files (unified implementation)
-# gpu_nnue_integration.cpp - Main GPU NNUE implementation with all optimizations
-# gpu_mcts_backend.cpp - MCTS GPU backend
-# gpu_accumulator_cache.cpp - Finny tables and incremental update support
+# GPU source files (unified implementation) gpu_nnue_integration.cpp - Main GPU
+# NNUE implementation with all optimizations gpu_mcts_backend.cpp - MCTS GPU
+# backend gpu_accumulator_cache.cpp - Finny tables and incremental update
+# support
 set(GPU_SOURCES src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_mcts_backend.cpp
                 src/gpu/gpu_accumulator_cache.cpp)
 
@@ -223,23 +223,16 @@ set(GPU_SOURCES src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_mcts_backend.cpp
 set(CUDA_SOURCES "")
 
 # MCTS source files (hybrid search) Core files needed for all MCTS modes: -
-# stockfish_adapter: Interface between Stockfish and MCTS - hybrid_search: Core
-# MCTS tree implementation (HybridNode, HybridTree) - position_classifier:
-# Classifies positions for strategy selection - mcts_batch_evaluator: GPU batch
-# evaluation - mcts_tt: MCTS transposition table - ab_integration: Alpha-beta
-# integration helpers - thread_safe_mcts: Pure MCTS implementation for mctsmt
-# command - parallel_hybrid_search: Parallel MCTS+AB for mcts/hybrid commands -
-# apple_silicon_mcts: Apple Silicon specific optimizations
+# stockfish_adapter: Interface between Stockfish and MCTS - position_classifier:
+# Classifies positions for strategy selection - ab_integration: Alpha-beta
+# integration helpers - thread_safe_mcts: Pure MCTS implementation (stable, used
+# by mctsmt and hybrid) - parallel_hybrid_search: Parallel MCTS+AB for
+# mcts/hybrid commands - apple_silicon_mcts: Apple Silicon specific
+# optimizations
 set(MCTS_SOURCES
-    src/mcts/stockfish_adapter.cpp
-    src/mcts/hybrid_search.cpp
-    src/mcts/position_classifier.cpp
-    src/mcts/mcts_batch_evaluator.cpp
-    src/mcts/mcts_tt.cpp
-    src/mcts/ab_integration.cpp
-    src/mcts/thread_safe_mcts.cpp
-    src/mcts/parallel_hybrid_search.cpp
-    src/mcts/apple_silicon_mcts.cpp)
+    src/mcts/stockfish_adapter.cpp src/mcts/position_classifier.cpp
+    src/mcts/ab_integration.cpp src/mcts/thread_safe_mcts.cpp
+    src/mcts/parallel_hybrid_search.cpp src/mcts/apple_silicon_mcts.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)

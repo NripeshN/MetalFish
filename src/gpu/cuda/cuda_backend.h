@@ -127,6 +127,13 @@ public:
   size_t max_buffer_size() const override;
   size_t max_threadgroup_memory() const override;
 
+  // Hardware capabilities
+  size_t recommended_working_set_size() const override;
+  size_t total_system_memory() const override;
+  int gpu_core_count() const override;
+  int max_threads_per_simd_group() const override;
+  int recommended_batch_size() const override;
+
   std::unique_ptr<Buffer>
   create_buffer(size_t size, MemoryMode mode = MemoryMode::Shared,
                 BufferUsage usage = BufferUsage::Default) override;
