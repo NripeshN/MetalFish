@@ -28,6 +28,7 @@ Usage:
 
 import argparse
 import glob
+import chess  # python-chess library for proper move handling
 import json
 import math
 import os
@@ -1850,104 +1851,6 @@ def run_ci_match(
             
             return game_pgn, game_moves
         
-        # Helper to apply UCI move to board
-        def apply_uci_move(uci_move: str, board: list, is_white_move: bool) -> tuple:
-            """Apply a UCI move to the board and return (from_pos, to_pos)."""
-            if len(uci_move) < 4:
-                return None, None
-            
-            from_file = ord(uci_move[0]) - ord('a')
-            from_rank = 8 - int(uci_move[1])
-            to_file = ord(uci_move[2]) - ord('a')
-            to_rank = 8 - int(uci_move[3])
-            
-            piece = board[from_rank][from_file]
-            
-            # Handle castling
-            if piece.upper() == 'K' and abs(from_file - to_file) == 2:
-                board[from_rank][from_file] = ' '
-                board[to_rank][to_file] = piece
-                if to_file > from_file:  # Kingside
-                    rook = board[from_rank][7]
-                    board[from_rank][7] = ' '
-                    board[to_rank][5] = rook
-                else:  # Queenside
-                    rook = board[from_rank][0]
-                    board[from_rank][0] = ' '
-                    board[to_rank][3] = rook
-            else:
-                # Handle en passant
-                if piece.upper() == 'P' and from_file != to_file and board[to_rank][to_file] == ' ':
-                    board[from_rank][to_file] = ' '  # Capture en passant pawn
-                
-                board[from_rank][from_file] = ' '
-                
-                # Handle promotion
-                if len(uci_move) > 4:
-                    promo = uci_move[4]
-                    board[to_rank][to_file] = promo.upper() if is_white_move else promo.lower()
-                else:
-                    board[to_rank][to_file] = piece
-            
-            return (from_rank, from_file), (to_rank, to_file)
-        
-        # Helper to convert UCI move to SAN (Standard Algebraic Notation)
-        def uci_to_san(uci_move: str, board_before: list, is_white: bool) -> str:
-            """Convert UCI move to SAN notation."""
-            if len(uci_move) < 4:
-                return uci_move
-            
-            from_file = ord(uci_move[0]) - ord('a')
-            from_rank = 8 - int(uci_move[1])
-            to_file = ord(uci_move[2]) - ord('a')
-            to_rank = 8 - int(uci_move[3])
-            promo = uci_move[4:] if len(uci_move) > 4 else ""
-            
-            piece = board_before[from_rank][from_file]
-            target = board_before[to_rank][to_file]
-            is_capture = target != ' '
-            
-            to_sq = uci_move[2:4]
-            
-            # Castling
-            if piece.upper() == 'K' and abs(from_file - to_file) == 2:
-                return "O-O" if to_file > from_file else "O-O-O"
-            
-            # Pawn moves
-            if piece.upper() == 'P':
-                # En passant capture
-                if from_file != to_file and target == ' ':
-                    is_capture = True
-                
-                if is_capture:
-                    san = f"{chr(ord('a') + from_file)}x{to_sq}"
-                else:
-                    san = to_sq
-                
-                if promo:
-                    san += f"={promo.upper()}"
-                return san
-            
-            # Piece moves
-            piece_letter = piece.upper()
-            
-            # Check for disambiguation (multiple pieces of same type can reach target)
-            # For simplicity, always include file disambiguation for knights, rooks
-            if piece_letter in ['N', 'R', 'Q', 'B']:
-                from_file_char = chr(ord('a') + from_file)
-                if is_capture:
-                    san = f"{piece_letter}{from_file_char}x{to_sq}"
-                else:
-                    san = f"{piece_letter}{from_file_char}{to_sq}"
-            else:
-                # King
-                if is_capture:
-                    san = f"{piece_letter}x{to_sq}"
-                else:
-                    san = f"{piece_letter}{to_sq}"
-            
-            return san
-        
         # Helper to calculate live Elo difference from score
         def calculate_elo_diff(wins: int, losses: int, draws: int) -> str:
             """Calculate estimated Elo difference from score."""
@@ -1971,10 +1874,22 @@ def run_ci_match(
                 else:
                     return f"Elo: {int(elo_diff)}"
         
-        # Track game state
-        current_uci_moves = []  # All UCI moves played so far
-        last_position_moves = []  # Last known position
-        board_snapshot = None  # Board state before last move (for SAN conversion)
+        # Helper to sync chess.Board to visualizer board
+        def sync_board_to_visualizer(chess_board: chess.Board, visualizer: ChessBoardVisualizer):
+            """Sync python-chess board state to our visualizer."""
+            piece_map = chess_board.piece_map()
+            # Clear visualizer board
+            for r in range(8):
+                for f in range(8):
+                    visualizer.board[r][f] = ' '
+            # Place pieces
+            for square, piece in piece_map.items():
+                rank = 7 - chess.square_rank(square)  # Convert to our coordinate system
+                file = chess.square_file(square)
+                visualizer.board[rank][file] = piece.symbol()
+        
+        # Track game state using python-chess
+        game_board = chess.Board()  # Proper chess board with full rules
         
         # Read stdout line by line
         if process.stdout is not None:
@@ -1986,8 +1901,7 @@ def run_ci_match(
                 if "Started game" in line_stripped:
                     current_game += 1
                     visualizer.reset()
-                    current_uci_moves = []
-                    last_position_moves = []
+                    game_board.reset()  # Reset python-chess board for new game
                     
                     # Parse players from line like "Started game 1 of 20 (Engine1 vs Engine2)"
                     match = re.search(r'\((.+?) vs (.+?)\)', line_stripped)
@@ -2009,28 +1923,34 @@ def run_ci_match(
                 pos_match = re.search(r'>[^:]+: position startpos moves (.+)', line_stripped)
                 if pos_match and board_displayed:
                     moves_str = pos_match.group(1).strip()
-                    new_moves = moves_str.split()
+                    new_uci_moves = moves_str.split()
                     
-                    # Check if we have new moves
-                    if len(new_moves) > len(current_uci_moves):
-                        # Apply only the new moves
+                    # Check if we have new moves compared to what's on our board
+                    current_move_count = len(game_board.move_stack)
+                    if len(new_uci_moves) > current_move_count:
+                        # Apply new moves using python-chess
                         last_san = ""
-                        for i in range(len(current_uci_moves), len(new_moves)):
-                            uci_move = new_moves[i]
-                            is_white = (i % 2 == 0)
-                            
-                            # Convert to SAN before applying move
-                            last_san = uci_to_san(uci_move, visualizer.board, is_white)
-                            
-                            from_pos, to_pos = apply_uci_move(uci_move, visualizer.board, is_white)
-                            if from_pos and to_pos:
-                                visualizer.last_move_from = from_pos
-                                visualizer.last_move_to = to_pos
+                        for i in range(current_move_count, len(new_uci_moves)):
+                            uci_move = new_uci_moves[i]
+                            try:
+                                move = chess.Move.from_uci(uci_move)
+                                # Get SAN before pushing (proper notation with +, #, disambiguation)
+                                last_san = game_board.san(move)
+                                game_board.push(move)
+                                
+                                # Update highlight squares
+                                from_sq = move.from_square
+                                to_sq = move.to_square
+                                visualizer.last_move_from = (7 - chess.square_rank(from_sq), chess.square_file(from_sq))
+                                visualizer.last_move_to = (7 - chess.square_rank(to_sq), chess.square_file(to_sq))
+                            except Exception:
+                                pass  # Invalid move, skip
                         
-                        current_uci_moves = new_moves
+                        # Sync board state to visualizer
+                        sync_board_to_visualizer(game_board, visualizer)
                         
-                        # Create move display with SAN notation
-                        move_count = len(current_uci_moves)
+                        # Create move display with proper SAN notation
+                        move_count = len(game_board.move_stack)
                         move_num = (move_count + 1) // 2
                         is_white_last = (move_count % 2 == 1)
                         
