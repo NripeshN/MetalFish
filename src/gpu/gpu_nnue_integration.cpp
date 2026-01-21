@@ -25,9 +25,11 @@
 #include "eval/nnue/nnue_feature_transformer.h"
 #include "nnue_weight_accessor.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <thread>
 #include <mutex>
 #include <sstream>
 
@@ -2095,6 +2097,7 @@ std::string GPUNNUEManager::status_string() const {
 // ============================================================================
 
 static std::unique_ptr<GPUNNUEManager> g_gpu_nnue_manager;
+static std::atomic<bool> g_gpu_nnue_shutdown{false};
 
 GPUNNUEManager &gpu_nnue_manager() {
   if (!g_gpu_nnue_manager) {
@@ -2108,11 +2111,43 @@ bool initialize_gpu_nnue(const Eval::NNUE::Networks &networks) {
 }
 
 bool gpu_nnue_manager_available() {
-  return gpu_available() && gpu_nnue_manager().is_ready();
+  // Check shutdown flag first to prevent access after shutdown
+  if (g_gpu_nnue_shutdown.load(std::memory_order_acquire)) {
+    return false;
+  }
+  // Also check if the GPU backend itself has been shut down
+  if (gpu_backend_shutdown()) {
+    return false;
+  }
+  return gpu_available() && g_gpu_nnue_manager && gpu_nnue_manager().is_ready();
 }
 
 bool gpu_evaluate_batch(GPUEvalBatch &batch, bool use_big) {
   return gpu_nnue_manager().evaluate_batch(batch, use_big);
+}
+
+void shutdown_gpu_nnue() {
+  // Set shutdown flag first to prevent any new access
+  g_gpu_nnue_shutdown.store(true, std::memory_order_release);
+  
+  // Reset the manager - this will call its destructor
+  if (g_gpu_nnue_manager) {
+    // First, synchronize any pending GPU operations
+    if (gpu_available() && !gpu_backend_shutdown()) {
+      gpu().synchronize();
+    }
+    
+    // Reset the manager (calls destructor which cleans up GPU resources)
+    g_gpu_nnue_manager.reset();
+    
+    // Final synchronization to ensure all cleanup is complete
+    if (gpu_available() && !gpu_backend_shutdown()) {
+      gpu().synchronize();
+    }
+  }
+  
+  // Now shut down the GPU backend itself
+  shutdown_gpu_backend();
 }
 
 } // namespace MetalFish::GPU
@@ -2173,6 +2208,7 @@ GPUNNUEManager &gpu_nnue_manager() {
 bool initialize_gpu_nnue(const Eval::NNUE::Networks &) { return false; }
 bool gpu_nnue_manager_available() { return false; }
 bool gpu_evaluate_batch(GPUEvalBatch &, bool) { return false; }
+void shutdown_gpu_nnue() { g_gpu_nnue_manager.reset(); }
 
 } // namespace MetalFish::GPU
 

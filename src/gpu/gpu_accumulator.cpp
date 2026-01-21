@@ -554,6 +554,12 @@ bool gpu_features_available() {
   return gpu_available() && gpu_feature_extractor().is_initialized();
 }
 
+void shutdown_gpu_feature_extractor() {
+  if (g_feature_extractor) {
+    g_feature_extractor.reset();
+  }
+}
+
 } // namespace MetalFish::GPU
 
 #else // !USE_METAL
@@ -627,6 +633,12 @@ GPUFeatureExtractor &gpu_feature_extractor() {
   return *g_feature_extractor;
 }
 bool gpu_features_available() { return false; }
+
+void shutdown_gpu_feature_extractor() {
+  if (g_feature_extractor) {
+    g_feature_extractor.reset();
+  }
+}
 
 } // namespace MetalFish::GPU
 

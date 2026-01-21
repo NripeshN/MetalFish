@@ -311,5 +311,8 @@ bool initialize_hybrid_bridge(TranspositionTable *tt,
                               GPU::GPUNNUEManager *gpu_manager,
                               Engine *engine = nullptr);
 
+// Shutdown the hybrid bridge - call before program exit
+void shutdown_hybrid_bridge();
+
 } // namespace MCTS
 } // namespace MetalFish

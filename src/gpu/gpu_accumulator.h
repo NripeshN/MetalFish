@@ -215,4 +215,7 @@ GPUFeatureExtractor &gpu_feature_extractor();
 // Check if GPU feature extraction is available
 bool gpu_features_available();
 
+// Shutdown the GPU feature extractor
+void shutdown_gpu_feature_extractor();
+
 } // namespace MetalFish::GPU

@@ -89,46 +89,100 @@ ParallelHybridSearch::ParallelHybridSearch() {
   config_.gpu_batch_size = 128;
   config_.use_async_gpu_eval = true;
   config_.use_gpu_resident_batches = true;
+  
+  // Initialize thread state
+  mcts_thread_state_.store(ThreadState::IDLE, std::memory_order_relaxed);
+  ab_thread_state_.store(ThreadState::IDLE, std::memory_order_relaxed);
+  coordinator_thread_state_.store(ThreadState::IDLE, std::memory_order_relaxed);
+  mcts_thread_done_.store(true, std::memory_order_relaxed);
+  ab_thread_done_.store(true, std::memory_order_relaxed);
+  coordinator_thread_done_.store(true, std::memory_order_relaxed);
 }
 
 ParallelHybridSearch::~ParallelHybridSearch() {
-  // Set stop flag first
+  // Mark that we're shutting down - this prevents any new searches
+  shutdown_requested_.store(true, std::memory_order_release);
+  
+  // Signal stop to all threads
   stop_flag_.store(true, std::memory_order_release);
   searching_.store(false, std::memory_order_release);
   
-  // Stop MCTS search first
+  // Stop MCTS search if running
   if (mcts_search_) {
     mcts_search_->stop();
   }
   
-  // Give threads time to notice stop flag
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  // Give threads a moment to notice the stop flag
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
   
-  // Wait for MCTS to complete
+  // Wait for MCTS to fully stop
   if (mcts_search_) {
     mcts_search_->wait();
   }
   
-  // Join threads in reverse order of creation: workers first, then coordinator
-  // This ensures proper shutdown sequence
-  // Use try-catch to handle any thread errors gracefully
-  try {
-    if (ab_thread_.joinable()) {
-      ab_thread_.join();
-    }
-  } catch (...) {}
+  // Join all threads safely
+  join_all_threads();
   
-  try {
-    if (mcts_thread_.joinable()) {
-      mcts_thread_.join();
-    }
-  } catch (...) {}
+  // Wait for any pending GPU evaluations to complete
+  // This is critical to prevent crashes from async callbacks accessing destroyed objects
+  if (pending_evaluations_.load(std::memory_order_relaxed) > 0) {
+    wait_gpu_evaluations();
+  }
   
-  try {
-    if (coordinator_thread_.joinable()) {
-      coordinator_thread_.join();
-    }
-  } catch (...) {}
+  // Synchronize GPU only if backend is still available
+  if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
+    GPU::gpu().synchronize();
+  }
+  
+  // Clear callbacks to prevent any dangling references
+  {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    best_move_callback_ = nullptr;
+    info_callback_ = nullptr;
+  }
+}
+
+void ParallelHybridSearch::join_all_threads() {
+  // This function safely joins all threads, handling the case where
+  // threads may have already been joined or may not have been started.
+  
+  std::unique_lock<std::mutex> lock(thread_mutex_);
+  
+  // Wait for all threads to signal completion (with timeout)
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  thread_cv_.wait_until(lock, deadline, [this]() {
+    return all_threads_done();
+  });
+  
+  // Now join the threads - they should all be finished
+  // We need to release the lock to avoid deadlock if threads are trying
+  // to signal completion
+  lock.unlock();
+  
+  // Join coordinator first (it's the last to finish in normal operation)
+  if (coordinator_thread_.joinable()) {
+    coordinator_thread_.join();
+  }
+  
+  // Then join worker threads
+  if (mcts_thread_.joinable()) {
+    mcts_thread_.join();
+  }
+  
+  if (ab_thread_.joinable()) {
+    ab_thread_.join();
+  }
+}
+
+void ParallelHybridSearch::signal_thread_done(std::atomic<bool>& done_flag) {
+  done_flag.store(true, std::memory_order_release);
+  thread_cv_.notify_all();
+}
+
+bool ParallelHybridSearch::all_threads_done() const {
+  return mcts_thread_done_.load(std::memory_order_acquire) &&
+         ab_thread_done_.load(std::memory_order_acquire) &&
+         coordinator_thread_done_.load(std::memory_order_acquire);
 }
 
 bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
@@ -184,6 +238,14 @@ void ParallelHybridSearch::start_search(const Position &pos,
                                         const Search::LimitsType &limits,
                                         BestMoveCallback best_move_cb,
                                         InfoCallback info_cb) {
+  // Check if shutdown was requested
+  if (shutdown_requested_.load(std::memory_order_acquire)) {
+    if (best_move_cb) {
+      best_move_cb(Move::none(), Move::none());
+    }
+    return;
+  }
+  
   if (!initialized_) {
     // Cannot start search without initialization - mcts_search_ would be nullptr
     if (best_move_cb) {
@@ -192,6 +254,7 @@ void ParallelHybridSearch::start_search(const Position &pos,
     return;
   }
 
+  // Stop any existing search and wait for threads to finish
   stop();
   wait();
 
@@ -203,12 +266,18 @@ void ParallelHybridSearch::start_search(const Position &pos,
   searching_.store(true, std::memory_order_release);
   final_best_move_.store(0, std::memory_order_relaxed);
   final_ponder_move_.store(0, std::memory_order_relaxed);
+  callback_invoked_.store(false, std::memory_order_relaxed);
+
+  // Store callbacks safely
+  {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    best_move_callback_ = best_move_cb;
+    info_callback_ = info_cb;
+  }
 
   // Store parameters
   root_fen_ = pos.fen();
   limits_ = limits;
-  best_move_callback_ = best_move_cb;
-  info_callback_ = info_cb;
   search_start_ = std::chrono::steady_clock::now();
 
   // Calculate time budget
@@ -236,16 +305,30 @@ void ParallelHybridSearch::start_search(const Position &pos,
 
   send_info_string("Time budget: " + std::to_string(time_budget_ms_) + "ms");
 
-  // Start all threads
+  // Mark threads as not done before starting
+  mcts_thread_done_.store(false, std::memory_order_release);
+  ab_thread_done_.store(false, std::memory_order_release);
+  coordinator_thread_done_.store(false, std::memory_order_release);
+
+  // Start all threads with proper state tracking
   mcts_state_.mcts_running.store(true, std::memory_order_release);
   ab_state_.ab_running.store(true, std::memory_order_release);
 
-  mcts_thread_ = std::thread(&ParallelHybridSearch::mcts_thread_main, this);
-  ab_thread_ = std::thread(&ParallelHybridSearch::ab_thread_main, this);
-  coordinator_thread_ = std::thread(&ParallelHybridSearch::coordinator_thread_main, this);
+  {
+    std::lock_guard<std::mutex> lock(thread_mutex_);
+    
+    mcts_thread_state_.store(ThreadState::RUNNING, std::memory_order_release);
+    ab_thread_state_.store(ThreadState::RUNNING, std::memory_order_release);
+    coordinator_thread_state_.store(ThreadState::RUNNING, std::memory_order_release);
+    
+    mcts_thread_ = std::thread(&ParallelHybridSearch::mcts_thread_main, this);
+    ab_thread_ = std::thread(&ParallelHybridSearch::ab_thread_main, this);
+    coordinator_thread_ = std::thread(&ParallelHybridSearch::coordinator_thread_main, this);
+  }
 }
 
 void ParallelHybridSearch::stop() {
+  // Signal stop
   stop_flag_.store(true, std::memory_order_release);
   
   // Stop MCTS search
@@ -260,17 +343,43 @@ void ParallelHybridSearch::stop() {
 }
 
 void ParallelHybridSearch::wait() {
-  // Wait for all threads to finish - but only if they're joinable
-  // This prevents double-join issues
-  if (coordinator_thread_.joinable()) {
-    coordinator_thread_.join();
+  // Wait for all threads to complete
+  // Use a loop with timeout to avoid infinite hangs
+  
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  
+  while (!all_threads_done()) {
+    if (std::chrono::steady_clock::now() > deadline) {
+      // Timeout - threads are stuck, force stop
+      stop_flag_.store(true, std::memory_order_release);
+      if (mcts_search_) {
+        mcts_search_->stop();
+      }
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  if (mcts_thread_.joinable()) {
-    mcts_thread_.join();
+  
+  // Now join the threads
+  {
+    std::lock_guard<std::mutex> lock(thread_mutex_);
+    
+    if (coordinator_thread_.joinable()) {
+      coordinator_thread_.join();
+    }
+    if (mcts_thread_.joinable()) {
+      mcts_thread_.join();
+    }
+    if (ab_thread_.joinable()) {
+      ab_thread_.join();
+    }
+    
+    // Reset thread states
+    mcts_thread_state_.store(ThreadState::IDLE, std::memory_order_release);
+    ab_thread_state_.store(ThreadState::IDLE, std::memory_order_release);
+    coordinator_thread_state_.store(ThreadState::IDLE, std::memory_order_release);
   }
-  if (ab_thread_.joinable()) {
-    ab_thread_.join();
-  }
+  
   searching_.store(false, std::memory_order_release);
 }
 
@@ -285,9 +394,20 @@ Move ParallelHybridSearch::get_ponder_move() const {
 void ParallelHybridSearch::new_game() {
   stop();
   wait();
+  
+  // Reset state
   stats_.reset();
   ab_state_.reset();
   mcts_state_.reset();
+  callback_invoked_.store(false, std::memory_order_relaxed);
+  
+  // Clear callbacks
+  {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    best_move_callback_ = nullptr;
+    info_callback_ = nullptr;
+  }
+  
   if (mcts_search_) {
     mcts_search_ = std::make_unique<HybridSearch>(config_.mcts_config);
     mcts_search_->set_gpu_nnue(gpu_manager_);
@@ -351,6 +471,16 @@ bool ParallelHybridSearch::should_stop() const {
 
 // MCTS thread - runs GPU-accelerated MCTS
 void ParallelHybridSearch::mcts_thread_main() {
+  // RAII guard to ensure we always signal completion
+  struct ThreadGuard {
+    ParallelHybridSearch* self;
+    ~ThreadGuard() {
+      self->mcts_state_.mcts_running.store(false, std::memory_order_release);
+      self->mcts_thread_state_.store(ThreadState::IDLE, std::memory_order_release);
+      self->signal_thread_done(self->mcts_thread_done_);
+    }
+  } guard{this};
+  
   auto start = std::chrono::steady_clock::now();
 
   MCTSPositionHistory history;
@@ -410,8 +540,8 @@ void ParallelHybridSearch::mcts_thread_main() {
   stats_.mcts_nodes = mcts_search_->stats().mcts_nodes.load();
   stats_.gpu_evaluations = mcts_search_->stats().nn_evaluations.load();
   stats_.gpu_batches = mcts_search_->stats().nn_batches.load();
-
-  mcts_state_.mcts_running.store(false, std::memory_order_release);
+  
+  // ThreadGuard destructor will signal completion
 }
 
 void ParallelHybridSearch::publish_mcts_state() {
@@ -535,14 +665,24 @@ void ParallelHybridSearch::update_mcts_policy_from_ab() {
 
 // AB thread - runs full Stockfish iterative deepening
 void ParallelHybridSearch::ab_thread_main() {
+  // RAII guard to ensure we always signal completion
+  struct ThreadGuard {
+    ParallelHybridSearch* self;
+    ~ThreadGuard() {
+      self->ab_state_.ab_running.store(false, std::memory_order_release);
+      self->ab_thread_state_.store(ThreadState::IDLE, std::memory_order_release);
+      self->signal_thread_done(self->ab_thread_done_);
+    }
+  } guard{this};
+  
   auto start = std::chrono::steady_clock::now();
 
   run_ab_search();
 
   auto end = std::chrono::steady_clock::now();
   stats_.ab_time_ms = std::chrono::duration<double, std::milli>(end - start).count();
-
-  ab_state_.ab_running.store(false, std::memory_order_release);
+  
+  // ThreadGuard destructor will signal completion
 }
 
 void ParallelHybridSearch::run_ab_search() {
@@ -575,6 +715,16 @@ void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
 
 // Coordinator thread - monitors both searches and makes final decision
 void ParallelHybridSearch::coordinator_thread_main() {
+  // RAII guard to ensure we always signal completion
+  struct ThreadGuard {
+    ParallelHybridSearch* self;
+    ~ThreadGuard() {
+      self->coordinator_thread_state_.store(ThreadState::IDLE, std::memory_order_release);
+      self->searching_.store(false, std::memory_order_release);
+      self->signal_thread_done(self->coordinator_thread_done_);
+    }
+  } guard{this};
+  
   auto start = std::chrono::steady_clock::now();
 
   // Wait for search to complete or time to expire
@@ -623,8 +773,8 @@ void ParallelHybridSearch::coordinator_thread_main() {
   // Wait for MCTS and AB threads to finish before making decision
   // This ensures we have their final results
   int wait_count = 0;
-  while ((mcts_state_.mcts_running.load(std::memory_order_acquire) ||
-          ab_state_.ab_running.load(std::memory_order_acquire)) && wait_count < 500) {
+  while ((!mcts_thread_done_.load(std::memory_order_acquire) ||
+          !ab_thread_done_.load(std::memory_order_acquire)) && wait_count < 500) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     wait_count++;
   }
@@ -634,10 +784,12 @@ void ParallelHybridSearch::coordinator_thread_main() {
   final_best_move_.store(final_move.raw(), std::memory_order_release);
 
   // Get ponder move
+  Move ponder_move = Move::none();
   {
     std::lock_guard<std::mutex> lock(pv_mutex_);
     if (final_pv_.size() > 1) {
-      final_ponder_move_.store(final_pv_[1].raw(), std::memory_order_release);
+      ponder_move = final_pv_[1];
+      final_ponder_move_.store(ponder_move.raw(), std::memory_order_release);
     }
   }
 
@@ -650,13 +802,32 @@ void ParallelHybridSearch::coordinator_thread_main() {
                    " agreements=" + std::to_string(stats_.move_agreements.load()) +
                    " overrides=" + std::to_string(stats_.ab_overrides.load()));
 
-  // Call best move callback
-  if (best_move_callback_) {
-    Move ponder = get_ponder_move();
-    best_move_callback_(final_move, ponder);
-  }
+  // Invoke callback safely (exactly once)
+  invoke_best_move_callback(final_move, ponder_move);
+  
+  // ThreadGuard destructor will signal completion
+}
 
-  searching_.store(false, std::memory_order_release);
+void ParallelHybridSearch::invoke_best_move_callback(Move best, Move ponder) {
+  // Ensure callback is invoked exactly once
+  bool expected = false;
+  if (!callback_invoked_.compare_exchange_strong(expected, true,
+                                                  std::memory_order_acq_rel)) {
+    return;  // Already invoked
+  }
+  
+  // Get callback under lock, then invoke outside lock to avoid deadlock
+  BestMoveCallback callback;
+  {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    callback = best_move_callback_;
+    // Clear callback after capturing to prevent double invocation
+    best_move_callback_ = nullptr;
+  }
+  
+  if (callback) {
+    callback(best, ponder);
+  }
 }
 
 Move ParallelHybridSearch::make_final_decision() {
@@ -857,7 +1028,14 @@ Move ParallelHybridSearch::make_final_decision() {
 void ParallelHybridSearch::send_info(int depth, int score, uint64_t nodes,
                                      int time_ms, const std::vector<Move> &pv,
                                      const std::string &source) {
-  if (!info_callback_) return;
+  // Get callback under lock
+  InfoCallback callback;
+  {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    callback = info_callback_;
+  }
+  
+  if (!callback) return;
 
   std::ostringstream ss;
   ss << "info depth " << depth;
@@ -879,12 +1057,19 @@ void ParallelHybridSearch::send_info(int depth, int score, uint64_t nodes,
 
   ss << " string " << source;
 
-  info_callback_(ss.str());
+  callback(ss.str());
 }
 
 void ParallelHybridSearch::send_info_string(const std::string &msg) {
-  if (info_callback_) {
-    info_callback_("info string " + msg);
+  // Get callback under lock
+  InfoCallback callback;
+  {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    callback = info_callback_;
+  }
+  
+  if (callback) {
+    callback("info string " + msg);
   }
 }
 

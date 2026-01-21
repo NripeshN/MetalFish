@@ -407,5 +407,11 @@ bool initialize_mcts_tt(const MCTSTTConfig &config) {
   return g_mcts_tt->initialize(config);
 }
 
+void shutdown_mcts_tt() {
+  if (g_mcts_tt) {
+    g_mcts_tt.reset();
+  }
+}
+
 } // namespace MCTS
 } // namespace MetalFish

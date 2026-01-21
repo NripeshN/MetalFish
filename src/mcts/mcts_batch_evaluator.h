@@ -271,5 +271,8 @@ bool initialize_mcts_batch_evaluator(
     GPU::GPUNNUEManager *gpu_manager,
     const BatchEvaluatorConfig &config = BatchEvaluatorConfig());
 
+// Shutdown the global batch evaluator
+void shutdown_mcts_batch_evaluator();
+
 } // namespace MCTS
 } // namespace MetalFish

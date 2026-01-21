@@ -237,5 +237,8 @@ MCTSTranspositionTable &mcts_tt();
 // Initialize the global MCTS TT
 bool initialize_mcts_tt(const MCTSTTConfig &config = MCTSTTConfig());
 
+// Shutdown the global MCTS TT
+void shutdown_mcts_tt();
+
 } // namespace MCTS
 } // namespace MetalFish

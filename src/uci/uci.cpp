@@ -1358,6 +1358,20 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   sync_cout << "info string Time: MCTS=" << std::fixed << std::setprecision(1)
             << stats.mcts_time_ms << "ms AB=" << stats.ab_time_ms
             << "ms Total=" << stats.total_time_ms << "ms" << sync_endl;
+  
+  // Explicitly synchronize GPU before destroying the search object
+  // This ensures all async operations complete before destruction
+  if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
+    GPU::gpu().synchronize();
+  }
+  
+  // Explicitly destroy the search object
+  search.reset();
+  
+  // Final synchronization after destruction
+  if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
+    GPU::gpu().synchronize();
+  }
 }
 
 // ============================================================================

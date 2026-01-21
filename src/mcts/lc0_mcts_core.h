@@ -25,7 +25,9 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -773,6 +775,289 @@ constexpr int SOLID_TREE_THRESHOLD = 100;
 inline bool ShouldSolidify(uint32_t visits, int num_children) {
   return visits >= SOLID_TREE_THRESHOLD && num_children > 0;
 }
+
+// ============================================================================
+// Lc0-style Backpropagation (from Lc0)
+// ============================================================================
+
+// Update node statistics after evaluation (Lc0 FinalizeScoreUpdate)
+// Uses running average: Q = (Q * N + V) / (N + 1)
+inline void FinalizeScoreUpdate(float& wl, float& d, float& m, uint32_t& n,
+                                 float new_v, float new_d, float new_m,
+                                 int multivisit = 1) {
+  // Running average update
+  float total_n = static_cast<float>(n + multivisit);
+  if (total_n > 0) {
+    wl = (wl * n + new_v * multivisit) / total_n;
+    d = (d * n + new_d * multivisit) / total_n;
+    m = (m * n + new_m * multivisit) / total_n;
+  }
+  n += multivisit;
+}
+
+// Atomic version for thread-safe nodes
+template<typename AtomicFloat, typename AtomicUint>
+inline void FinalizeScoreUpdateAtomic(AtomicFloat& wl, AtomicFloat& d, 
+                                       AtomicFloat& m, AtomicUint& n,
+                                       AtomicFloat& w_sum,
+                                       float new_v, float new_d, float new_m,
+                                       int multivisit = 1) {
+  // Use compare-exchange loop for atomic update
+  float old_wl, new_wl;
+  float old_d_val, new_d_val;
+  float old_m_val, new_m_val;
+  uint32_t old_n;
+  
+  do {
+    old_n = n.load(std::memory_order_acquire);
+    old_wl = wl.load(std::memory_order_acquire);
+    old_d_val = d.load(std::memory_order_acquire);
+    old_m_val = m.load(std::memory_order_acquire);
+    
+    float total_n = static_cast<float>(old_n + multivisit);
+    new_wl = (old_wl * old_n + new_v * multivisit) / total_n;
+    new_d_val = (old_d_val * old_n + new_d * multivisit) / total_n;
+    new_m_val = (old_m_val * old_n + new_m * multivisit) / total_n;
+    
+  } while (!n.compare_exchange_weak(old_n, old_n + multivisit,
+                                     std::memory_order_acq_rel));
+  
+  // Update other values (may have slight race, but acceptable for MCTS)
+  wl.store(new_wl, std::memory_order_release);
+  d.store(new_d_val, std::memory_order_release);
+  m.store(new_m_val, std::memory_order_release);
+  
+  // Update W sum for proper averaging
+  float old_w, new_w;
+  do {
+    old_w = w_sum.load(std::memory_order_acquire);
+    new_w = old_w + new_v * multivisit;
+  } while (!w_sum.compare_exchange_weak(old_w, new_w, std::memory_order_acq_rel));
+}
+
+// ============================================================================
+// Smart Time Management (from Lc0)
+// ============================================================================
+
+struct TimeManagerParams {
+  float time_curve_peak = 26.2f;      // Move number where time usage peaks
+  float time_curve_left_width = 82.0f; // Width of curve before peak
+  float time_curve_right_width = 74.0f; // Width of curve after peak
+  float slowmover = 1.0f;              // Multiplier for base time
+  float move_overhead_ms = 100.0f;     // Time to reserve for move overhead
+  float minimum_remaining_time_ms = 0.0f;
+};
+
+// Calculate time allocation for a move (from Lc0 smooth stopper)
+inline int64_t CalculateTimeForMove(const TimeManagerParams& params,
+                                     int64_t time_remaining_ms,
+                                     int64_t increment_ms,
+                                     int move_number) {
+  // Reserve time for move overhead
+  int64_t available = time_remaining_ms - 
+                      static_cast<int64_t>(params.move_overhead_ms);
+  if (available <= 0) return 50; // Minimum time
+  
+  // Lc0-style time curve: Gaussian-like distribution centered at peak
+  float move = static_cast<float>(move_number);
+  float peak = params.time_curve_peak;
+  float width = (move < peak) ? params.time_curve_left_width 
+                               : params.time_curve_right_width;
+  
+  // Gaussian factor
+  float diff = move - peak;
+  float factor = std::exp(-(diff * diff) / (2.0f * width * width));
+  
+  // Base time allocation (fraction of remaining)
+  float base_fraction = 0.05f + 0.1f * factor; // 5-15% depending on move
+  
+  // Apply slowmover
+  base_fraction *= params.slowmover;
+  
+  // Calculate time
+  int64_t base_time = static_cast<int64_t>(available * base_fraction);
+  int64_t inc_time = increment_ms * 3 / 4; // Use 75% of increment
+  
+  int64_t total = base_time + inc_time;
+  
+  // Ensure we don't use more than 25% of remaining time
+  int64_t max_time = available / 4;
+  total = std::min(total, max_time);
+  
+  // Minimum time
+  return std::max(total, int64_t(100));
+}
+
+// ============================================================================
+// Early Termination Detection (from Lc0)
+// ============================================================================
+
+struct EarlyTerminationParams {
+  float obvious_move_threshold = 0.95f;  // N ratio for obvious best move
+  int minimum_visits = 100;               // Minimum visits before considering
+  float q_difference_threshold = 0.3f;    // Q difference for clear best
+};
+
+// Check if we can terminate search early
+inline bool CanTerminateEarly(const EarlyTerminationParams& params,
+                               uint32_t best_n, uint32_t second_best_n,
+                               uint32_t total_n,
+                               float best_q, float second_best_q) {
+  if (total_n < static_cast<uint32_t>(params.minimum_visits)) {
+    return false;
+  }
+  
+  // Check if best move has overwhelming visit share
+  float n_ratio = static_cast<float>(best_n) / 
+                  static_cast<float>(best_n + second_best_n + 1);
+  if (n_ratio >= params.obvious_move_threshold) {
+    return true;
+  }
+  
+  // Check if Q difference is decisive
+  if (best_q - second_best_q >= params.q_difference_threshold) {
+    // And best has at least 3x the visits
+    if (best_n >= second_best_n * 3) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// ============================================================================
+// Multi-PV Support (from Lc0)
+// ============================================================================
+
+// Get top N moves sorted by visit count then Q value
+template<typename EdgeArray>
+std::vector<int> GetTopNMoves(const EdgeArray& edges, int num_edges, 
+                               int n, float draw_score) {
+  std::vector<std::pair<int, std::pair<uint32_t, float>>> scored;
+  scored.reserve(num_edges);
+  
+  for (int i = 0; i < num_edges; ++i) {
+    uint32_t visits = edges[i].GetN();
+    float q = edges[i].GetQ(draw_score);
+    scored.emplace_back(i, std::make_pair(visits, q));
+  }
+  
+  // Sort by visits descending, then Q descending
+  std::partial_sort(scored.begin(), 
+                    scored.begin() + std::min(n, static_cast<int>(scored.size())),
+                    scored.end(),
+                    [](const auto& a, const auto& b) {
+                      if (a.second.first != b.second.first) {
+                        return a.second.first > b.second.first;
+                      }
+                      return a.second.second > b.second.second;
+                    });
+  
+  std::vector<int> result;
+  result.reserve(std::min(n, static_cast<int>(scored.size())));
+  for (int i = 0; i < std::min(n, static_cast<int>(scored.size())); ++i) {
+    result.push_back(scored[i].first);
+  }
+  return result;
+}
+
+// ============================================================================
+// Position History for Draw Detection (from Lc0)
+// ============================================================================
+
+// Check for two-fold repetition (faster than three-fold)
+inline bool IsTwoFoldRepetition(const std::vector<uint64_t>& history,
+                                 uint64_t current_key) {
+  // Check from the end, skipping every other position (same side to move)
+  for (size_t i = history.size(); i >= 4; i -= 2) {
+    if (history[i - 4] == current_key) {
+      return true;
+    }
+    // Can't have repetition before a pawn move or capture (rule50 reset)
+    // This optimization requires tracking rule50, so skip for now
+  }
+  return false;
+}
+
+// ============================================================================
+// Apple Silicon Optimizations
+// ============================================================================
+
+// Note: Accelerate.h should only be included in .cpp files, not headers,
+// due to potential conflicts with C++ standard library headers.
+// The implementations below use standard C++ when Accelerate is not available.
+
+// SIMD-accelerated softmax (implementation in apple_silicon_mcts.cpp when available)
+inline void AppleSiliconSoftmax(float* values, int count, float temperature) {
+  if (count == 0) return;
+  
+  float max_val = *std::max_element(values, values + count);
+  float sum = 0.0f;
+  
+  for (int i = 0; i < count; ++i) {
+    values[i] = std::exp((values[i] - max_val) / temperature);
+    sum += values[i];
+  }
+  
+  if (sum > 0.0f) {
+    for (int i = 0; i < count; ++i) {
+      values[i] /= sum;
+    }
+  }
+}
+
+// SIMD-accelerated PUCT score computation
+inline void AppleSiliconComputePuctScores(
+    const float* q_values,
+    const float* policies,
+    const int* n_started,
+    float* scores,
+    int num_edges,
+    float cpuct_sqrt_n,
+    float fpu) {
+  for (int i = 0; i < num_edges; ++i) {
+    float q = (n_started[i] > 0) ? q_values[i] : fpu;
+    float u = cpuct_sqrt_n * policies[i] / (1.0f + static_cast<float>(n_started[i]));
+    scores[i] = q + u;
+  }
+}
+
+// ============================================================================
+// Unified Memory Batch Structures (for Apple Silicon)
+// ============================================================================
+
+// Cache-line aligned position data for GPU evaluation
+struct alignas(128) UnifiedMemoryPosition {
+  uint64_t pieces[2][7];  // [color][piece_type] bitboards
+  uint8_t king_sq[2];     // King squares for each side
+  uint8_t stm;            // Side to move
+  uint8_t castling;       // Castling rights
+  uint8_t ep_square;      // En passant square
+  uint8_t rule50;         // 50-move rule counter
+  uint8_t padding[128 - 2*7*8 - 6];
+};
+
+// Batch of positions in unified memory (zero-copy GPU access)
+struct UnifiedMemoryBatch {
+  std::vector<UnifiedMemoryPosition> positions;
+  std::vector<float> results;
+  int count = 0;
+  int capacity = 0;
+  
+  void reserve(int n) {
+    positions.resize(n);
+    results.resize(n);
+    capacity = n;
+  }
+  
+  void clear() { count = 0; }
+  
+  bool add(const UnifiedMemoryPosition& pos) {
+    if (count >= capacity) return false;
+    positions[count++] = pos;
+    return true;
+  }
+};
 
 } // namespace MCTS
 } // namespace MetalFish

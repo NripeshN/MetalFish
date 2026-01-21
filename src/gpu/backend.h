@@ -235,5 +235,12 @@ inline bool gpu_available() { return Backend::available(); }
 // Get backend reference (throws if not available)
 inline Backend &gpu() { return Backend::get(); }
 
+// Shutdown the GPU backend - must be called before program exit
+// This ensures all GPU resources are released before static destruction
+void shutdown_gpu_backend();
+
+// Check if GPU backend has been shut down
+bool gpu_backend_shutdown();
+
 } // namespace GPU
 } // namespace MetalFish

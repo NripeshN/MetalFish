@@ -230,8 +230,10 @@ private:
 class MetalBackend : public Backend {
 public:
   static MetalBackend &instance() {
-    static MetalBackend instance;
-    return instance;
+    // Use a pointer to avoid static destruction order issues
+    // The backend is intentionally leaked to prevent crashes during static destruction
+    static MetalBackend* instance = new MetalBackend();
+    return *instance;
   }
 
   BackendType type() const override { return BackendType::Metal; }
@@ -533,6 +535,27 @@ private:
 
   ~MetalBackend() {
     @autoreleasepool {
+      // Synchronize all command queues before releasing resources
+      // This ensures all pending GPU operations complete before we destroy the backend
+      if (queue_) {
+        id<MTLCommandBuffer> buffer = [queue_ commandBuffer];
+        if (buffer) {
+          [buffer commit];
+          [buffer waitUntilCompleted];
+        }
+      }
+      
+      for (auto q : parallel_queues_) {
+        if (q) {
+          id<MTLCommandBuffer> buffer = [q commandBuffer];
+          if (buffer) {
+            [buffer commit];
+            [buffer waitUntilCompleted];
+          }
+        }
+      }
+      
+      // Now release all resources
       for (auto &[name, lib] : libraries_) {
         if (lib)
           [lib release];
@@ -609,9 +632,31 @@ private:
 // Backend Interface Implementation
 // ============================================================================
 
+// Global shutdown flag - prevents access to backend after shutdown
+static std::atomic<bool> g_backend_shutdown{false};
+
 Backend &Backend::get() { return MetalBackend::instance(); }
 
-bool Backend::available() { return MetalBackend::instance().is_available(); }
+bool Backend::available() { 
+  if (g_backend_shutdown.load(std::memory_order_acquire)) {
+    return false;
+  }
+  return MetalBackend::instance().is_available(); 
+}
+
+void shutdown_gpu_backend() {
+  // Set shutdown flag first to prevent any new access
+  g_backend_shutdown.store(true, std::memory_order_release);
+  
+  // Synchronize all pending GPU operations
+  if (MetalBackend::instance().is_available()) {
+    MetalBackend::instance().synchronize();
+  }
+}
+
+bool gpu_backend_shutdown() {
+  return g_backend_shutdown.load(std::memory_order_acquire);
+}
 
 // ============================================================================
 // Scoped Timer Implementation

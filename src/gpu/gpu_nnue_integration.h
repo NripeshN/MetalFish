@@ -292,4 +292,8 @@ bool gpu_nnue_manager_available();
 // Evaluate a batch of positions
 bool gpu_evaluate_batch(GPUEvalBatch &batch, bool use_big = true);
 
+// Shutdown GPU NNUE manager - call before program exit to ensure clean cleanup
+// This prevents crashes during static destruction
+void shutdown_gpu_nnue();
+
 } // namespace MetalFish::GPU

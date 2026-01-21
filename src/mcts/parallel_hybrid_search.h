@@ -326,6 +326,12 @@ public:
 
   ParallelHybridSearch();
   ~ParallelHybridSearch();
+  
+  // Non-copyable, non-movable (due to threads and atomics)
+  ParallelHybridSearch(const ParallelHybridSearch&) = delete;
+  ParallelHybridSearch& operator=(const ParallelHybridSearch&) = delete;
+  ParallelHybridSearch(ParallelHybridSearch&&) = delete;
+  ParallelHybridSearch& operator=(ParallelHybridSearch&&) = delete;
 
   // Initialization
   bool initialize(GPU::GPUNNUEManager *gpu_manager, Engine *engine);
@@ -389,12 +395,34 @@ private:
   // Unified memory info
   bool has_unified_memory_ = false;
 
-  // Threading
-  std::atomic<bool> stop_flag_{false};
-  std::atomic<bool> searching_{false};
+  // =========================================================================
+  // Thread Management - Robust lifecycle handling
+  // =========================================================================
+  
+  // Thread state machine: IDLE -> RUNNING -> STOPPING -> IDLE
+  enum class ThreadState { IDLE, RUNNING, STOPPING };
+  
+  // Centralized thread control
+  std::mutex thread_mutex_;                    // Protects thread lifecycle
+  std::condition_variable thread_cv_;          // For waiting on thread completion
+  std::atomic<bool> stop_flag_{false};         // Signal to stop all threads
+  std::atomic<bool> searching_{false};         // External "is searching" flag
+  std::atomic<bool> shutdown_requested_{false}; // Destructor called
+  
+  // Thread objects (protected by thread_mutex_)
   std::thread mcts_thread_;
   std::thread ab_thread_;
   std::thread coordinator_thread_;
+  
+  // Thread state tracking (protected by thread_mutex_)
+  std::atomic<ThreadState> mcts_thread_state_{ThreadState::IDLE};
+  std::atomic<ThreadState> ab_thread_state_{ThreadState::IDLE};
+  std::atomic<ThreadState> coordinator_thread_state_{ThreadState::IDLE};
+  
+  // Thread completion flags (set by threads before exit, read by wait())
+  std::atomic<bool> mcts_thread_done_{true};
+  std::atomic<bool> ab_thread_done_{true};
+  std::atomic<bool> coordinator_thread_done_{true};
 
   // Search state
   std::string root_fen_;
@@ -408,11 +436,13 @@ private:
   std::vector<Move> final_pv_;
   mutable std::mutex pv_mutex_;
 
-  // Callbacks
+  // Callbacks (protected by callback_mutex_ for thread-safe invocation)
+  std::mutex callback_mutex_;
   BestMoveCallback best_move_callback_;
   InfoCallback info_callback_;
+  std::atomic<bool> callback_invoked_{false};  // Ensure callback called only once
 
-  // Thread functions
+  // Thread functions - these set their done flags before returning
   void mcts_thread_main();
   void ab_thread_main();
   void coordinator_thread_main();
@@ -429,6 +459,11 @@ private:
   Move make_final_decision();
   int calculate_time_budget() const;
   bool should_stop() const;
+  
+  // Thread lifecycle helpers
+  void join_all_threads();  // Safely joins all threads
+  void signal_thread_done(std::atomic<bool>& done_flag);
+  bool all_threads_done() const;
   
   // =========================================================================
   // GPU Optimization Helpers
@@ -447,10 +482,13 @@ private:
   // Wait for pending GPU evaluations
   void wait_gpu_evaluations();
 
-  // Info output
+  // Info output (thread-safe)
   void send_info(int depth, int score, uint64_t nodes, int time_ms,
                  const std::vector<Move> &pv, const std::string &source);
   void send_info_string(const std::string &msg);
+  
+  // Safe callback invocation (ensures called exactly once per search)
+  void invoke_best_move_callback(Move best, Move ponder);
 };
 
 // Factory function

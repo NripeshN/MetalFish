@@ -1120,6 +1120,7 @@ Value HybridSearchBridge::get_tactical_score(const Position &pos) {
 
 static std::unique_ptr<HybridSearchBridge> g_hybrid_bridge;
 static std::once_flag g_hybrid_bridge_init_flag;
+static std::atomic<bool> g_hybrid_bridge_shutdown{false};
 
 HybridSearchBridge &hybrid_bridge() {
   std::call_once(g_hybrid_bridge_init_flag, []() {
@@ -1133,6 +1134,13 @@ bool initialize_hybrid_bridge(TranspositionTable *tt,
                               Engine *engine) {
   hybrid_bridge().initialize(tt, gpu_manager, engine);
   return true;
+}
+
+void shutdown_hybrid_bridge() {
+  g_hybrid_bridge_shutdown.store(true, std::memory_order_release);
+  if (g_hybrid_bridge) {
+    g_hybrid_bridge.reset();
+  }
 }
 
 } // namespace MCTS

@@ -15,6 +15,7 @@
 #include "hybrid_search.h"
 #include "lc0_mcts_core.h"
 #include "../eval/evaluate.h"
+#include "../gpu/backend.h"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -151,7 +152,8 @@ void HybridBatchedEvaluator::eval_thread_main() {
 
 void HybridBatchedEvaluator::process_batch(
     std::vector<HybridEvalRequest *> &batch) {
-  if (!gpu_manager_ || batch.empty())
+  // Check if GPU manager is available and not in shutdown
+  if (!gpu_manager_ || batch.empty() || !GPU::gpu_nnue_manager_available())
     return;
 
   const size_t batch_size = batch.size();
@@ -461,6 +463,13 @@ HybridSearch::~HybridSearch() {
 
   if (batched_evaluator_) {
     batched_evaluator_->stop();
+  }
+  
+  // Synchronize GPU to ensure all pending operations complete
+  // This prevents crashes from async callbacks accessing destroyed objects
+  // Only synchronize if the backend is still available and not shut down
+  if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
+    GPU::gpu().synchronize();
   }
 }
 

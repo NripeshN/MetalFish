@@ -410,5 +410,12 @@ bool initialize_mcts_batch_evaluator(GPU::GPUNNUEManager *gpu_manager,
   return mcts_batch_evaluator().initialize(gpu_manager, config);
 }
 
+void shutdown_mcts_batch_evaluator() {
+  if (g_mcts_batch_evaluator) {
+    g_mcts_batch_evaluator->stop();
+    g_mcts_batch_evaluator.reset();
+  }
+}
+
 } // namespace MCTS
 } // namespace MetalFish
