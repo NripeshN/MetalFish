@@ -21,8 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '20' }}
-  TIME_CONTROL: ${{ github.event.inputs.time_control || '10+0.1' }}
+  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '12' }}
+  TIME_CONTROL: ${{ github.event.inputs.time_control || '600+0.1' }}
 
 jobs:
   # First job: Build everything and generate the match matrix

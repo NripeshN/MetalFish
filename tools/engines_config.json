@@ -116,12 +116,12 @@
         "depth_plies": 16
     },
     "tournament_defaults": {
-        "games_per_pair": 20,
-        "time_control": "10+0.1",
+        "games_per_pair": 12,
+        "time_control": "600+0.1",
         "concurrency": 1,
         "ponder": false,
         "repeat": true,
         "recover": true,
-        "notes": "20 games = 10 openings x 2 (color swap). With opening book for balanced positions."
+        "notes": "12 games = 6 openings x 2 (color swap). 10 min + 0.1s/move time control."
     }
 }
