@@ -993,8 +993,14 @@ void HybridSearch::expand_node(HybridNode *node, const MCTSPosition &pos,
     // Softmax normalization with temperature
     // Handle temperature == 0 as argmax (deterministic selection)
     if (config_.policy_softmax_temp == 0.0f) {
+      // Count how many moves tie for max score
+      int max_count = 0;
       for (int i = 0; i < num_edges; ++i) {
-        node->edges()[i].set_policy((scores[i] == max_score) ? 1.0f : 0.0f);
+        if (scores[i] == max_score) ++max_count;
+      }
+      float normalized_prob = 1.0f / max_count;
+      for (int i = 0; i < num_edges; ++i) {
+        node->edges()[i].set_policy((scores[i] == max_score) ? normalized_prob : 0.0f);
       }
     } else {
       float sum = 0.0f;

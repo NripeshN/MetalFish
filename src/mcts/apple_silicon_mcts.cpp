@@ -523,8 +523,14 @@ void AppleSiliconPolicySoftmax::compute_softmax_simd(
   // Handle temperature == 0 as argmax (deterministic selection)
   if (temperature == 0.0f) {
     float max_score = *std::max_element(scores, scores + count);
+    // Count how many moves tie for max score
+    int max_count = 0;
     for (int i = 0; i < count; ++i) {
-      probs_out[i] = (scores[i] == max_score) ? 1.0f : 0.0f;
+      if (scores[i] == max_score) ++max_count;
+    }
+    float normalized_prob = 1.0f / max_count;
+    for (int i = 0; i < count; ++i) {
+      probs_out[i] = (scores[i] == max_score) ? normalized_prob : 0.0f;
     }
     return;
   }
