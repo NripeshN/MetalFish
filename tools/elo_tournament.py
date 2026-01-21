@@ -97,7 +97,7 @@ DEFAULT_ENGINES_CONFIG = {
         }
     },
     "tournament_defaults": {
-        "games_per_pair": 20,
+        "games_per_pair": 15,
         "time_control": "10+0.1",
         "concurrency": 1
     }

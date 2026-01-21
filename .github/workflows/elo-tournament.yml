@@ -9,7 +9,7 @@ on:
       games_per_match:
         description: "Number of games per match"
         required: false
-        default: "20"
+        default: "15"
       time_control:
         description: "Time control (e.g., 10+0.1)"
         required: false
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '20' }}
+  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '15' }}
   TIME_CONTROL: ${{ github.event.inputs.time_control || '10+0.1' }}
 
 jobs:
