@@ -43,7 +43,7 @@ jobs:
       - name: Install build dependencies
         run: |
           brew install cmake ninja meson qt@6 coreutils
-          pip3 install meson ninja
+          pip3 install meson ninja chess
           # coreutils provides gtimeout which we alias to timeout
           echo "alias timeout=gtimeout" >> ~/.bashrc
 
@@ -451,6 +451,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install Python dependencies
+        run: pip3 install chess
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -584,6 +587,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip3 install chess
 
       - name: Download all match results
         uses: actions/download-artifact@v4
