@@ -16,8 +16,8 @@ MetalFish is a high-performance UCI chess engine optimized for Apple Silicon wit
 
 ```bash
 cd src
-curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
 ```
 
 **Build Error if Missing:** Linker will fail with "Error: file not found: nn-c288c895ea92.nnue" during the final linking stage. Always download these files FIRST before building.
@@ -231,7 +231,7 @@ Hooks run: `clang-format` (C++), `black` + `isort` (Python), `cmake-format`
 1. Make changes to source files
 2. Rebuild: `cd build && cmake --build . --parallel`
 3. Run relevant tests: `./metalfish_tests` or `python3 tests/testing.py --quick`
-4. Test UCI manually: `printf "uci\nisready\nposition startpos\ngo depth 10\nquit\n" | ./metalfish`
+4. Test UCI manually (depth 5 for quick validation): `printf "uci\nisready\nposition startpos\ngo depth 5\nquit\n" | ./metalfish`
 5. Verify no Metal/CUDA shader issues if modified GPU code
 
 ### GPU Code Changes
