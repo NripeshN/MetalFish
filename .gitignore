@@ -46,6 +46,9 @@ reference/
 # build files
 build/
 
+# tournament results files (generated output)
+results/
+
 # external files
 external/
 

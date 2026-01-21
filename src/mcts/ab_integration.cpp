@@ -1126,6 +1126,12 @@ HybridSearchBridge &hybrid_bridge() {
   std::call_once(g_hybrid_bridge_init_flag, []() {
     g_hybrid_bridge = std::make_unique<HybridSearchBridge>();
   });
+  
+  // After shutdown, g_hybrid_bridge may be null. Check and throw instead of dereferencing null.
+  if (!g_hybrid_bridge) {
+    throw std::runtime_error("HybridSearchBridge accessed after shutdown");
+  }
+  
   return *g_hybrid_bridge;
 }
 
