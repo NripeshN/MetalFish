@@ -357,20 +357,14 @@ if(BUILD_TESTS)
 
   set(TEST_SOURCES
       tests/test_main.cpp
-      tests/test_bitboard.cpp
-      tests/test_position.cpp
-      tests/test_movegen.cpp
-      tests/test_search.cpp
-      tests/test_mcts.cpp
+      tests/test_core.cpp
+      tests/test_search_module.cpp
+      tests/test_mcts_module.cpp
+      tests/test_hybrid.cpp
+      tests/test_gpu_module.cpp
       tests/test_metal.cpp
       tests/test_gpu_nnue.cpp
-      tests/test_cuda.cpp
-      # Comprehensive test suites
-      tests/test_core_comprehensive.cpp
-      tests/test_search_comprehensive.cpp
-      tests/test_mcts_comprehensive.cpp
-      tests/test_hybrid_comprehensive.cpp
-      tests/test_gpu_comprehensive.cpp)
+      tests/test_cuda.cpp)
 
   if(USE_CUDA AND CUDA_AVAILABLE)
     # CUDA test executable
