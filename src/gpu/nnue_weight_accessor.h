@@ -245,7 +245,8 @@ template <typename Network> size_t get_network_memory_requirement() {
   return total;
 }
 
-// Print network information (to stderr to avoid interfering with UCI protocol)
+// Print NNUE network diagnostic information to stderr so we do not interfere
+// with UCI protocol communication, which must be sent on stdout.
 inline void print_network_info(const ExtractedNetworkWeights &info,
                                const char *name) {
   std::cerr << name << " Network:\n";

@@ -230,9 +230,12 @@ private:
 class MetalBackend : public Backend {
 public:
   static MetalBackend &instance() {
-    // Use a pointer to avoid static destruction order issues
+    // Use a pointer to avoid static destruction order issues.
     // The backend is intentionally leaked to prevent crashes during static
-    // destruction
+    // destruction when Metal objects are torn down after other global/static
+    // state that may still reference the GPU backend.
+    // The GPU backend is cleaned up via explicit shutdown_gpu_backend() call
+    // before program exit (see main.cpp).
     static MetalBackend *instance = new MetalBackend();
     return *instance;
   }
