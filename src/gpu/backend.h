@@ -21,8 +21,26 @@
 #include <string>
 #include <vector>
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
+
 namespace MetalFish {
 namespace GPU {
+
+// Cross-platform helper to compute next power of 2
+namespace detail {
+inline int next_power_of_2(int v) {
+  if (v <= 0) return 1;
+  v--;
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  return v + 1;
+}
+} // namespace detail
 
 // Forward declarations
 class Buffer;
@@ -169,7 +187,7 @@ public:
     // ~16 positions per GPU core is a good heuristic
     int batch = (cores * 16);
     // Round to nearest power of 2 for optimal memory alignment
-    batch = 1 << (32 - __builtin_clz(batch - 1)); // Next power of 2
+    batch = detail::next_power_of_2(batch);
     return std::max(32, std::min(512, batch));
   }
 

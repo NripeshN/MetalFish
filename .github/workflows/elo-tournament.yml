@@ -486,7 +486,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qtbase5-dev qt5-qmake libqt5svg5-dev libqt5concurrent5 make g++ git curl unzip
+          sudo apt-get install -y cmake ninja-build qtbase5-dev qt5-qmake libqt5svg5-dev libqt5core5a libqt5gui5 libqt5widgets5 libqt5svg5 libqt5concurrent5 make g++ git curl unzip
           pip3 install chess
 
       - name: Clone and Build cutechess-cli
