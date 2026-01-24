@@ -38,6 +38,10 @@ bool use_smallnet(const Position &pos);
 Value evaluate(const NNUE::Networks &networks, const Position &pos,
                Eval::NNUE::AccumulatorStack &accumulators,
                Eval::NNUE::AccumulatorCaches &caches, int optimism);
+
+// Apple Silicon GPU NNUE control
+void set_use_apple_silicon_nnue(bool use);
+bool use_apple_silicon_nnue();
 } // namespace Eval
 
 } // namespace MetalFish

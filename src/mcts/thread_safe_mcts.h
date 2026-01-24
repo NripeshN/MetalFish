@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstring>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -49,33 +50,74 @@ class BatchedGPUEvaluator;
 
 // ============================================================================
 // Thread-Safe Node - Cache-line aligned for optimal memory access
+// Apple Silicon has 128-byte cache lines, x86 has 64-byte
 // ============================================================================
 
-struct alignas(64) TSEdge {
+#ifdef __APPLE__
+constexpr size_t CACHE_LINE_SIZE = 128; // Apple Silicon M1/M2/M3
+#else
+constexpr size_t CACHE_LINE_SIZE = 64; // x86-64
+#endif
+
+// MCTS Edge with compressed policy (16-bit) for memory efficiency
+// Policy compression using 5-bit exponent + 11-bit significand
+struct alignas(CACHE_LINE_SIZE) TSEdge {
   Move move = Move::none();
-  std::atomic<float> policy{0.0f};
+
+  // Compressed policy storage - saves 2 bytes per edge
+  uint16_t p_compressed_ = 0;
+
+  // Child node pointer
   std::atomic<ThreadSafeNode *> child{nullptr};
-  char padding[64 - sizeof(Move) - sizeof(std::atomic<float>) -
+
+  // Padding to cache line boundary
+  char padding[CACHE_LINE_SIZE - sizeof(Move) - sizeof(uint16_t) -
                sizeof(std::atomic<ThreadSafeNode *>)];
 
   TSEdge() = default;
-  TSEdge(Move m, float p) : move(m), policy(p), child(nullptr) {}
+  TSEdge(Move m, float p) : move(m), child(nullptr) { SetPolicy(p); }
 
   TSEdge(const TSEdge &) = delete;
   TSEdge &operator=(const TSEdge &) = delete;
 
   TSEdge(TSEdge &&other) noexcept
-      : move(other.move), policy(other.policy.load(std::memory_order_relaxed)),
+      : move(other.move), p_compressed_(other.p_compressed_),
         child(other.child.load(std::memory_order_relaxed)) {}
+
+  // MCTS policy compression/decompression
+  // Internal implementation of 16-bit compressed policy encode/decode
+  void SetPolicy(float p) {
+    // Policy priors (P) are stored in a compressed 16-bit format.
+    // We store bits 27..12 of the IEEE 754 float representation.
+    // This gives us 5 bits of exponent and 11 bits of significand.
+    constexpr int32_t roundings = (1 << 11) - (3 << 28);
+    int32_t tmp;
+    std::memcpy(&tmp, &p, sizeof(float));
+    tmp += roundings;
+    p_compressed_ = (tmp < 0) ? 0 : static_cast<uint16_t>(tmp >> 12);
+  }
+
+  float GetPolicy() const {
+    // Reshift into place and set the assumed-set exponent bits.
+    uint32_t tmp = (static_cast<uint32_t>(p_compressed_) << 12) | (3 << 28);
+    float ret;
+    std::memcpy(&ret, &tmp, sizeof(uint32_t));
+    return ret;
+  }
+
+  // Atomic policy access for thread safety
+  float policy() const { return GetPolicy(); }
+  void set_policy(float p) { SetPolicy(p); }
 };
 
-class alignas(64) ThreadSafeNode {
+class alignas(CACHE_LINE_SIZE) ThreadSafeNode {
 public:
+  // MCTS terminal types
   enum class Terminal : uint8_t {
     NonTerminal = 0,
-    Win = 1,
-    Draw = 2,
-    Loss = 3
+    EndOfGame = 1, // Checkmate or stalemate
+    Tablebase = 2, // Tablebase hit
+    TwoFold = 3    // Two-fold repetition draw
   };
 
   ThreadSafeNode(ThreadSafeNode *parent = nullptr, int edge_idx = -1);
@@ -96,13 +138,32 @@ public:
 
   void create_edges(const MoveList<LEGAL> &moves);
 
-  uint32_t n() const { return n_.load(std::memory_order_acquire); }
-  uint32_t n_in_flight() const {
+  // MCTS statistics accessors
+  uint32_t GetN() const { return n_.load(std::memory_order_acquire); }
+  uint32_t GetNInFlight() const {
     return n_in_flight_.load(std::memory_order_acquire);
   }
-  float q() const { return q_.load(std::memory_order_acquire); }
-  float d() const { return d_.load(std::memory_order_acquire); }
-  float m() const { return m_.load(std::memory_order_acquire); }
+  uint32_t GetChildrenVisits() const {
+    uint32_t n = GetN();
+    return n > 0 ? n - 1 : 0;
+  }
+  int GetNStarted() const { return GetN() + GetNInFlight(); }
+
+  // MCTS Q/WL/D/M accessors
+  float GetQ(float draw_score = 0.0f) const {
+    return wl_.load(std::memory_order_acquire) +
+           draw_score * d_.load(std::memory_order_acquire);
+  }
+  float GetWL() const { return wl_.load(std::memory_order_acquire); }
+  float GetD() const { return d_.load(std::memory_order_acquire); }
+  float GetM() const { return m_.load(std::memory_order_acquire); }
+
+  // Legacy accessors (for compatibility)
+  uint32_t n() const { return GetN(); }
+  uint32_t n_in_flight() const { return GetNInFlight(); }
+  float q() const { return GetWL(); }
+  float d() const { return GetD(); }
+  float m() const { return GetM(); }
 
   void add_virtual_loss(int count = 1) {
     n_in_flight_.fetch_add(count, std::memory_order_acq_rel);
@@ -112,13 +173,29 @@ public:
     n_in_flight_.fetch_sub(count, std::memory_order_acq_rel);
   }
 
-  void update_stats(float value, float draw_prob, float moves_left);
+  // MCTS FinalizeScoreUpdate
+  // Updates Q using running average: Q = (Q * N + V) / (N + 1)
+  void FinalizeScoreUpdate(float v, float d, float m, int multivisit = 1);
+
+  // Legacy update method
+  void update_stats(float value, float draw_prob, float moves_left) {
+    FinalizeScoreUpdate(value, draw_prob, moves_left, 1);
+  }
 
   Terminal terminal_type() const {
     return terminal_type_.load(std::memory_order_acquire);
   }
-  bool is_terminal() const { return terminal_type() != Terminal::NonTerminal; }
+  bool IsTerminal() const { return terminal_type() != Terminal::NonTerminal; }
+  bool IsTbTerminal() const { return terminal_type() == Terminal::Tablebase; }
+  bool IsTwoFoldTerminal() const {
+    return terminal_type() == Terminal::TwoFold;
+  }
+
+  // Legacy terminal check
+  bool is_terminal() const { return IsTerminal(); }
+
   void set_terminal(Terminal type, float value);
+  void MakeTerminal(Terminal type, float wl, float d = 0.0f, float m = 0.0f);
 
   std::mutex &mutex() { return mutex_; }
 
@@ -126,6 +203,30 @@ public:
     parent_ = nullptr;
     edge_index_ = -1;
   }
+
+  // MCTS visited policy calculation
+  float GetVisitedPolicy() const;
+
+  // Get edge to this node from parent
+  TSEdge *GetOwnEdge() const;
+
+  // MCTS solid tree optimization
+  // Converts linked-list children to contiguous array for better cache locality
+  // Returns true if solidification was performed
+  bool MakeSolid();
+
+  // Check if node should be solidified (threshold: 100 visits)
+  bool ShouldSolidify() const {
+    return !is_solid_.load(std::memory_order_acquire) &&
+           GetN() >= SOLID_TREE_THRESHOLD &&
+           num_edges_.load(std::memory_order_acquire) > 0;
+  }
+
+  // Check if node is already solid
+  bool IsSolid() const { return is_solid_.load(std::memory_order_acquire); }
+
+  // solid tree threshold
+  static constexpr uint32_t SOLID_TREE_THRESHOLD = 100;
 
 private:
   ThreadSafeNode *parent_;
@@ -135,14 +236,16 @@ private:
   std::atomic<int> num_edges_{0};
 
   // Hot path statistics - cache-line aligned
-  alignas(64) std::atomic<uint32_t> n_{0};
+  // Using double for WL  for better precision during averaging
+  alignas(CACHE_LINE_SIZE) std::atomic<uint32_t> n_{0};
   std::atomic<uint32_t> n_in_flight_{0};
-  std::atomic<float> q_{0.0f};
-  std::atomic<float> d_{0.0f};
-  std::atomic<float> m_{0.0f};
-  std::atomic<float> w_{0.0f};
+  std::atomic<float> wl_{0.0f}; // Win-Loss (Q value without draw score)
+  std::atomic<float> d_{0.0f};  // Draw probability
+  std::atomic<float> m_{0.0f};  // Moves left estimate
+  std::atomic<float> w_{0.0f};  // Total value sum (for averaging)
 
   std::atomic<Terminal> terminal_type_{Terminal::NonTerminal};
+  std::atomic<bool> is_solid_{false}; // solid tree flag
   mutable std::mutex mutex_;
 };
 
@@ -263,12 +366,20 @@ struct WorkerContext {
 // ============================================================================
 
 struct ThreadSafeMCTSConfig {
-  float cpuct = 2.5f;
-  float fpu_value = -1.0f;
+  // MCTS PUCT parameters
+  float cpuct = 1.745f;        // default value: 1.745
+  float cpuct_base = 38739.0f; // default value for log growth
+  float cpuct_factor = 3.894f; // default value multiplier
+
+  // FPU (First Play Urgency) - reduction strategy
+  float fpu_value = 0.0f;       // Base FPU value (neutral)
+  float fpu_reduction = 0.330f; // default value: 0.330
+
+  // Policy and exploration
   float policy_softmax_temp = 1.0f;
   bool add_dirichlet_noise = true;
-  float dirichlet_alpha = 0.3f;
-  float dirichlet_epsilon = 0.25f;
+  float dirichlet_alpha = 0.3f;    // default value
+  float dirichlet_epsilon = 0.25f; // uses 0.25 for training
 
   int num_threads = 4;
   int virtual_loss = 3;
@@ -543,6 +654,12 @@ public:
 
   void stop();
   void wait();
+
+  // Clear callbacks to prevent crashes during cleanup
+  void clear_callbacks() {
+    best_move_callback_ = nullptr;
+    info_callback_ = nullptr;
+  }
 
   Move get_best_move() const;
   std::vector<Move> get_pv() const;

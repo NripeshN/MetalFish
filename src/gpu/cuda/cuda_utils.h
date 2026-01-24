@@ -50,13 +50,12 @@ inline int get_device_count() {
   return count;
 }
 
-inline bool has_cuda_device() {
-  return get_device_count() > 0;
-}
+inline bool has_cuda_device() { return get_device_count() > 0; }
 
 inline int get_best_device() {
   int device_count = get_device_count();
-  if (device_count == 0) return -1;
+  if (device_count == 0)
+    return -1;
 
   int best_device = 0;
   int best_sm = 0;
@@ -78,9 +77,8 @@ inline int get_best_device() {
 // Memory Utilities
 // ============================================================================
 
-template <typename T>
-T* cuda_malloc(size_t count) {
-  T* ptr = nullptr;
+template <typename T> T *cuda_malloc(size_t count) {
+  T *ptr = nullptr;
   cudaError_t err = cudaMalloc(&ptr, count * sizeof(T));
   if (err != cudaSuccess) {
     return nullptr;
@@ -88,9 +86,8 @@ T* cuda_malloc(size_t count) {
   return ptr;
 }
 
-template <typename T>
-T* cuda_malloc_managed(size_t count) {
-  T* ptr = nullptr;
+template <typename T> T *cuda_malloc_managed(size_t count) {
+  T *ptr = nullptr;
   cudaError_t err = cudaMallocManaged(&ptr, count * sizeof(T));
   if (err != cudaSuccess) {
     return nullptr;
@@ -98,31 +95,30 @@ T* cuda_malloc_managed(size_t count) {
   return ptr;
 }
 
-template <typename T>
-void cuda_free(T* ptr) {
+template <typename T> void cuda_free(T *ptr) {
   if (ptr) {
     cudaFree(ptr);
   }
 }
 
 template <typename T>
-void cuda_memcpy_to_device(T* dst, const T* src, size_t count) {
+void cuda_memcpy_to_device(T *dst, const T *src, size_t count) {
   cudaMemcpy(dst, src, count * sizeof(T), cudaMemcpyHostToDevice);
 }
 
 template <typename T>
-void cuda_memcpy_to_host(T* dst, const T* src, size_t count) {
+void cuda_memcpy_to_host(T *dst, const T *src, size_t count) {
   cudaMemcpy(dst, src, count * sizeof(T), cudaMemcpyDeviceToHost);
 }
 
 template <typename T>
-void cuda_memcpy_async_to_device(T* dst, const T* src, size_t count,
+void cuda_memcpy_async_to_device(T *dst, const T *src, size_t count,
                                  cudaStream_t stream) {
   cudaMemcpyAsync(dst, src, count * sizeof(T), cudaMemcpyHostToDevice, stream);
 }
 
 template <typename T>
-void cuda_memcpy_async_to_host(T* dst, const T* src, size_t count,
+void cuda_memcpy_async_to_host(T *dst, const T *src, size_t count,
                                cudaStream_t stream) {
   cudaMemcpyAsync(dst, src, count * sizeof(T), cudaMemcpyDeviceToHost, stream);
 }
@@ -170,7 +166,7 @@ public:
   void record(cudaStream_t stream = 0) { cudaEventRecord(event_, stream); }
   void synchronize() { cudaEventSynchronize(event_); }
 
-  float elapsed_ms(const CUDAEvent& start) const {
+  float elapsed_ms(const CUDAEvent &start) const {
     float ms = 0;
     cudaEventElapsedTime(&ms, start.event_, event_);
     return ms;
@@ -180,11 +176,10 @@ private:
   cudaEvent_t event_;
 };
 
-template <typename T>
-class CUDADeviceBuffer {
+template <typename T> class CUDADeviceBuffer {
 public:
   CUDADeviceBuffer() : ptr_(nullptr), size_(0) {}
-  
+
   explicit CUDADeviceBuffer(size_t count) : ptr_(nullptr), size_(count) {
     if (count > 0) {
       cudaMalloc(&ptr_, count * sizeof(T));
@@ -198,15 +193,16 @@ public:
   }
 
   // Move semantics
-  CUDADeviceBuffer(CUDADeviceBuffer&& other) noexcept
+  CUDADeviceBuffer(CUDADeviceBuffer &&other) noexcept
       : ptr_(other.ptr_), size_(other.size_) {
     other.ptr_ = nullptr;
     other.size_ = 0;
   }
 
-  CUDADeviceBuffer& operator=(CUDADeviceBuffer&& other) noexcept {
+  CUDADeviceBuffer &operator=(CUDADeviceBuffer &&other) noexcept {
     if (this != &other) {
-      if (ptr_) cudaFree(ptr_);
+      if (ptr_)
+        cudaFree(ptr_);
       ptr_ = other.ptr_;
       size_ = other.size_;
       other.ptr_ = nullptr;
@@ -216,24 +212,24 @@ public:
   }
 
   // No copy
-  CUDADeviceBuffer(const CUDADeviceBuffer&) = delete;
-  CUDADeviceBuffer& operator=(const CUDADeviceBuffer&) = delete;
+  CUDADeviceBuffer(const CUDADeviceBuffer &) = delete;
+  CUDADeviceBuffer &operator=(const CUDADeviceBuffer &) = delete;
 
-  T* get() { return ptr_; }
-  const T* get() const { return ptr_; }
+  T *get() { return ptr_; }
+  const T *get() const { return ptr_; }
   size_t size() const { return size_; }
   bool valid() const { return ptr_ != nullptr; }
 
-  void copy_from_host(const T* src, size_t count) {
+  void copy_from_host(const T *src, size_t count) {
     cudaMemcpy(ptr_, src, count * sizeof(T), cudaMemcpyHostToDevice);
   }
 
-  void copy_to_host(T* dst, size_t count) const {
+  void copy_to_host(T *dst, size_t count) const {
     cudaMemcpy(dst, ptr_, count * sizeof(T), cudaMemcpyDeviceToHost);
   }
 
 private:
-  T* ptr_;
+  T *ptr_;
   size_t size_;
 };
 

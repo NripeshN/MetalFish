@@ -11,6 +11,7 @@
 #include "../core/bitboard.h"
 #include "../core/movegen.h"
 #include "../eval/evaluate.h"
+#include "../uci/engine.h"
 #include <algorithm>
 #include <cmath>
 #include <mutex>
@@ -583,7 +584,12 @@ int ABSearcher::late_move_reduction(int depth, int move_count,
 }
 
 Value ABSearcher::evaluate(const Position &pos) {
-  return Eval::simple_eval(pos);
+  // Use simple_eval for the ABSearcher since we don't have access to
+  // the full NNUE infrastructure (networks, accumulators, caches).
+  // The main MCTS evaluation uses GPU NNUE for strong evaluation.
+  // This ABSearcher is primarily used for tactical verification where
+  // simple material evaluation is sufficient for move ordering.
+  return Value(Eval::simple_eval(pos));
 }
 
 bool ABSearcher::should_stop() const {
@@ -828,8 +834,8 @@ TacticalAnalyzer::TacticalInfo TacticalAnalyzer::analyze(const Position &pos) {
   ABSearchResult qresult = qsearcher_.search(pos, 0);
   info.quiescence_score = qresult.score;
 
-  // Static eval
-  info.tactical_score = Eval::simple_eval(pos);
+  // Static eval - use simple_eval since we don't have NNUE infrastructure
+  info.tactical_score = Value(Eval::simple_eval(pos));
 
   return info;
 }
@@ -885,9 +891,11 @@ HybridSearchBridge::HybridSearchBridge()
 HybridSearchBridge::~HybridSearchBridge() = default;
 
 void HybridSearchBridge::initialize(TranspositionTable *tt,
-                                    GPU::GPUNNUEManager *gpu_manager) {
+                                    GPU::GPUNNUEManager *gpu_manager,
+                                    Engine *engine) {
   tt_ = tt;
   gpu_manager_ = gpu_manager;
+  engine_ = engine;
 
   ab_searcher_->initialize(tt);
   policy_generator_->initialize(nullptr, nullptr, tt);
@@ -910,23 +918,45 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
 
   auto start = std::chrono::steady_clock::now();
 
-  // Lock to serialize search operations - ABSearcher has non-thread-safe state
+  // Lock to serialize search operations
   std::lock_guard<std::mutex> search_lock(search_mutex_);
 
-  // Run AB search
-  ABSearchConfig config;
-  config.max_depth = verification_depth;
-  config.use_tt = true;
-  ab_searcher_->set_config(config);
+  // Use the REAL Engine if available!
+  if (engine_) {
+    // Run the full alpha-beta search
+    auto search_result = engine_->search_sync(pos.fen(), verification_depth, 0);
 
-  ABSearchResult ab_result = ab_searcher_->search(pos, verification_depth);
+    result.ab_move = search_result.best_move;
+    result.ab_score = search_result.score;
+    result.ab_depth = search_result.depth;
+    result.ab_pv = search_result.pv;
 
-  result.ab_move = ab_result.best_move;
-  result.ab_score = ab_result.score;
-  result.ab_depth = ab_result.depth;
-  result.ab_pv = ab_result.pv;
+    // Update stats with real node count
+    {
+      std::lock_guard<std::mutex> lock(stats_mutex_);
+      stats_.ab_nodes += search_result.nodes;
+    }
+  } else {
+    // Fallback to simplified ABSearcher
+    ABSearchConfig config;
+    config.max_depth = verification_depth;
+    config.use_tt = true;
+    ab_searcher_->set_config(config);
 
-  // Get MCTS move score
+    ABSearchResult ab_result = ab_searcher_->search(pos, verification_depth);
+
+    result.ab_move = ab_result.best_move;
+    result.ab_score = ab_result.score;
+    result.ab_depth = ab_result.depth;
+    result.ab_pv = ab_result.pv;
+
+    {
+      std::lock_guard<std::mutex> lock(stats_mutex_);
+      stats_.ab_nodes += ab_searcher_->nodes_searched();
+    }
+  }
+
+  // Get MCTS move score by searching after making the move
   Position test_pos;
   StateInfo st1, st2;
   test_pos.set(pos.fen(), false, &st1);
@@ -934,12 +964,19 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
   if (test_pos.pseudo_legal(mcts_move) && test_pos.legal(mcts_move)) {
     test_pos.do_move(mcts_move, st2);
 
-    // Quick qsearch for MCTS move
-    ABSearchConfig qconfig;
-    qconfig.max_depth = 0;
-    ab_searcher_->set_config(qconfig);
-    ABSearchResult mcts_result = ab_searcher_->search(test_pos, 0);
-    result.mcts_score = -mcts_result.score;
+    if (engine_) {
+      // Use real engine for MCTS move evaluation too
+      auto mcts_result = engine_->search_sync(
+          test_pos.fen(), std::max(1, verification_depth - 2), 0);
+      result.mcts_score = -mcts_result.score;
+    } else {
+      // Fallback qsearch
+      ABSearchConfig qconfig;
+      qconfig.max_depth = 0;
+      ab_searcher_->set_config(qconfig);
+      ABSearchResult mcts_result = ab_searcher_->search(test_pos, 0);
+      result.mcts_score = -mcts_result.score;
+    }
   } else {
     result.mcts_score = VALUE_NONE;
   }
@@ -951,7 +988,7 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
   }
 
   // Determine if MCTS move is verified
-  if (mcts_move == ab_result.best_move) {
+  if (mcts_move == result.ab_move) {
     result.verified = true;
   } else if (result.score_difference < override_threshold) {
     result.verified = true;
@@ -970,7 +1007,7 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
     if (result.override_mcts) {
       stats_.overrides++;
     }
-    stats_.ab_nodes += ab_searcher_->nodes_searched();
+    // Note: ab_nodes is already updated in the engine/fallback branches above
     stats_.avg_verification_time_ms =
         (stats_.avg_verification_time_ms * (stats_.verifications - 1) +
          time_ms) /
@@ -989,7 +1026,7 @@ HybridSearchBridge::get_enhanced_policy(const Position &pos) {
     MoveList<LEGAL> moves(pos);
     float uniform = moves.size() > 0 ? 1.0f / moves.size() : 0.0f;
     for (const auto &m : moves) {
-      mcts_policy.emplace_back(MCTSMove::FromStockfish(m), uniform);
+      mcts_policy.emplace_back(MCTSMove::FromInternal(m), uniform);
     }
     return mcts_policy;
   }
@@ -1001,7 +1038,7 @@ HybridSearchBridge::get_enhanced_policy(const Position &pos) {
   auto ab_policy = policy_generator_->generate_policy(pos);
 
   for (const auto &[move, prob] : ab_policy) {
-    mcts_policy.emplace_back(MCTSMove::FromStockfish(move), prob);
+    mcts_policy.emplace_back(MCTSMove::FromInternal(move), prob);
   }
 
   {
@@ -1018,9 +1055,33 @@ ABSearchResult HybridSearchBridge::run_ab_search(const Position &pos, int depth,
     return ABSearchResult();
   }
 
-  // Lock to serialize search operations - ABSearcher has non-thread-safe state
+  // Lock to serialize search operations
   std::lock_guard<std::mutex> search_lock(search_mutex_);
 
+  // Use the REAL Engine if available!
+  if (engine_) {
+    auto search_result = engine_->search_sync(pos.fen(), depth, time_ms);
+
+    ABSearchResult result;
+    result.best_move = search_result.best_move;
+    result.score = search_result.score;
+    result.depth = search_result.depth;
+    result.nodes_searched = static_cast<int>(search_result.nodes);
+    result.pv = search_result.pv;
+
+    // Check for mate
+    if (result.score > VALUE_MATE_IN_MAX_PLY) {
+      result.is_mate = true;
+      result.mate_in = (VALUE_MATE - result.score + 1) / 2;
+    } else if (result.score < VALUE_MATED_IN_MAX_PLY) {
+      result.is_mate = true;
+      result.mate_in = -(VALUE_MATE + result.score) / 2;
+    }
+
+    return result;
+  }
+
+  // Fallback to simplified ABSearcher
   ABSearchConfig config;
   config.max_depth = depth;
   config.max_time_ms = time_ms;
@@ -1058,18 +1119,36 @@ Value HybridSearchBridge::get_tactical_score(const Position &pos) {
 
 static std::unique_ptr<HybridSearchBridge> g_hybrid_bridge;
 static std::once_flag g_hybrid_bridge_init_flag;
+static std::atomic<bool> g_hybrid_bridge_shutdown{false};
 
 HybridSearchBridge &hybrid_bridge() {
   std::call_once(g_hybrid_bridge_init_flag, []() {
     g_hybrid_bridge = std::make_unique<HybridSearchBridge>();
   });
+
+  // After shutdown, g_hybrid_bridge may be null. Return a safe fallback
+  // instance instead of throwing, to avoid exceptions during static
+  // destruction or late calls.
+  if (!g_hybrid_bridge) {
+    static HybridSearchBridge fallback;
+    return fallback;
+  }
+
   return *g_hybrid_bridge;
 }
 
 bool initialize_hybrid_bridge(TranspositionTable *tt,
-                              GPU::GPUNNUEManager *gpu_manager) {
-  hybrid_bridge().initialize(tt, gpu_manager);
+                              GPU::GPUNNUEManager *gpu_manager,
+                              Engine *engine) {
+  hybrid_bridge().initialize(tt, gpu_manager, engine);
   return true;
+}
+
+void shutdown_hybrid_bridge() {
+  g_hybrid_bridge_shutdown.store(true, std::memory_order_release);
+  if (g_hybrid_bridge) {
+    g_hybrid_bridge.reset();
+  }
 }
 
 } // namespace MCTS

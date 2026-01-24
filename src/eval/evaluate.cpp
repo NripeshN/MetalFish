@@ -22,9 +22,21 @@
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_accumulator.h"
 #include "eval/nnue/nnue_misc.h"
+#include "gpu/gpu_nnue_integration.h"
 #include "uci/uci.h"
 
 namespace MetalFish {
+
+// Global flag for GPU NNUE - controlled by UCI option
+static std::atomic<bool> g_use_gpu_nnue{false};
+
+void Eval::set_use_apple_silicon_nnue(bool use) {
+  g_use_gpu_nnue.store(use, std::memory_order_relaxed);
+}
+
+bool Eval::use_apple_silicon_nnue() {
+  return g_use_gpu_nnue.load(std::memory_order_relaxed);
+}
 
 // Returns a static, purely materialistic evaluation of the position from
 // the point of view of the side to move. It can be divided by PawnValue to get
@@ -47,18 +59,46 @@ Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
 
   assert(!pos.checkers());
 
+  int32_t psqt, positional;
   bool smallNet = use_smallnet(pos);
-  auto [psqt, positional] =
-      smallNet ? networks.small.evaluate(pos, accumulators, caches.small)
-               : networks.big.evaluate(pos, accumulators, caches.big);
+
+#ifdef __APPLE__
+  // Try GPU NNUE first if enabled and available
+  if (use_apple_silicon_nnue() && GPU::gpu_nnue_manager_available()) {
+    auto [gpu_psqt, gpu_positional] =
+        GPU::gpu_nnue_manager().evaluate_single(pos, !smallNet);
+    psqt = gpu_psqt;
+    positional = gpu_positional;
+  } else
+#endif
+  {
+    // Standard CPU NNUE evaluation
+    auto [cpu_psqt, cpu_positional] =
+        smallNet ? networks.small.evaluate(pos, accumulators, caches.small)
+                 : networks.big.evaluate(pos, accumulators, caches.big);
+    psqt = cpu_psqt;
+    positional = cpu_positional;
+  }
 
   Value nnue = (125 * psqt + 131 * positional) / 128;
 
   // Re-evaluate the position when higher eval accuracy is worth the time spent
   if (smallNet && (std::abs(nnue) < 277)) {
-    std::tie(psqt, positional) =
-        networks.big.evaluate(pos, accumulators, caches.big);
-    nnue = (125 * psqt + 131 * positional) / 128;
+#ifdef __APPLE__
+    if (use_apple_silicon_nnue() && GPU::gpu_nnue_manager_available()) {
+      // Re-evaluate with big network
+      auto [gpu_psqt, gpu_positional] =
+          GPU::gpu_nnue_manager().evaluate_single(pos, true);
+      psqt = gpu_psqt;
+      positional = gpu_positional;
+      nnue = (125 * psqt + 131 * positional) / 128;
+    } else
+#endif
+    {
+      std::tie(psqt, positional) =
+          networks.big.evaluate(pos, accumulators, caches.big);
+      nnue = (125 * psqt + 131 * positional) / 128;
+    }
     smallNet = false;
   }
 

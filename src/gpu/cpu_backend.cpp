@@ -15,6 +15,14 @@
 #include <cstring>
 #include <iostream>
 
+#ifdef __APPLE__
+#import <Foundation/Foundation.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace MetalFish {
 namespace GPU {
 
@@ -77,6 +85,49 @@ public:
   size_t max_buffer_size() const override { return SIZE_MAX; }
   size_t max_threadgroup_memory() const override { return 0; }
 
+  size_t recommended_working_set_size() const override {
+    // For CPU, return a reasonable portion of system memory
+    return total_system_memory() / 4;
+  }
+
+  size_t total_system_memory() const override {
+#ifdef __APPLE__
+    return [[NSProcessInfo processInfo] physicalMemory];
+#elif defined(__linux__)
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_size = sysconf(_SC_PAGE_SIZE);
+    return static_cast<size_t>(pages) * static_cast<size_t>(page_size);
+#elif defined(_WIN32)
+    MEMORYSTATUSEX status;
+    status.dwLength = sizeof(status);
+    GlobalMemoryStatusEx(&status);
+    return status.ullTotalPhys;
+#else
+    return 8ULL * 1024 * 1024 * 1024; // Default 8GB
+#endif
+  }
+
+  int gpu_core_count() const override {
+    // No GPU, return 0
+    return 0;
+  }
+
+  int max_threads_per_simd_group() const override {
+    // For CPU, return typical SIMD width (AVX-512 = 16 floats, AVX2 = 8)
+#ifdef __AVX512F__
+    return 16;
+#elif defined(__AVX2__) || defined(__AVX__)
+    return 8;
+#else
+    return 4; // SSE
+#endif
+  }
+
+  int recommended_batch_size() const override {
+    // For CPU fallback, use smaller batches
+    return 1;
+  }
+
   std::unique_ptr<Buffer> create_buffer(size_t size, MemoryMode,
                                         BufferUsage) override {
     allocated_ += size;
@@ -138,6 +189,16 @@ private:
 Backend &Backend::get() { return CPUBackend::instance(); }
 
 bool Backend::available() { return false; }
+
+// Shutdown functions - no-op for CPU backend since there's nothing to clean up
+void shutdown_gpu_backend() {
+  // No GPU resources to release in CPU fallback mode
+}
+
+bool gpu_backend_shutdown() {
+  // CPU backend is always "shutdown" safe since there's no actual GPU
+  return false;
+}
 
 // ScopedTimer implementation
 struct ScopedTimer::Impl {

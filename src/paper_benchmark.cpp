@@ -16,7 +16,6 @@
 #include "core/position.h"
 #include "eval/evaluate.h"
 #include "gpu/backend.h"
-#include "gpu/gpu_accumulator.h"
 #include "gpu/gpu_nnue_integration.h"
 
 #include <algorithm>
@@ -101,10 +100,10 @@ constexpr int MAX_FEATURES_PER_POS =
 void benchmark_cpu_feature_extraction() {
   std::cout << "\n";
   std::cout << "============================================================\n";
-  std::cout << "  BENCHMARK 1: CPU Feature Extraction\n";
+  std::cout << "  BENCHMARK 1: Batch Creation (Feature Extraction)\n";
   std::cout << "============================================================\n";
-  std::cout << "\nScope: Extract HalfKAv2_hm features from position\n";
-  std::cout << "       (matched with GPU feature extraction stage)\n";
+  std::cout << "\nScope: Create GPU batch with position features\n";
+  std::cout << "       (includes HalfKAv2_hm feature extraction)\n";
   std::cout << "Iterations: 100,000\n\n";
 
   std::vector<std::unique_ptr<std::deque<StateInfo>>> states_vec;
@@ -114,16 +113,10 @@ void benchmark_cpu_feature_extraction() {
     positions[i].set(TEST_FENS[i], false, &states_vec.back()->back());
   }
 
-  auto &extractor = GPU::gpu_feature_extractor();
-  if (!extractor.initialize()) {
-    std::cout << "  Feature extractor not available\n";
-    return;
-  }
-
   // Warmup
-  std::vector<int32_t> white_f, black_f;
   for (int i = 0; i < 1000; i++) {
-    extractor.extract(positions[i % NUM_FENS], white_f, black_f);
+    GPU::GPUEvalBatch batch;
+    batch.add_position(positions[i % NUM_FENS]);
   }
 
   // Benchmark
@@ -133,14 +126,15 @@ void benchmark_cpu_feature_extraction() {
 
   for (int i = 0; i < iterations; i++) {
     auto start = std::chrono::high_resolution_clock::now();
-    extractor.extract(positions[i % NUM_FENS], white_f, black_f);
+    GPU::GPUEvalBatch batch;
+    batch.add_position(positions[i % NUM_FENS]);
     auto end = std::chrono::high_resolution_clock::now();
     samples.push_back(
         std::chrono::duration<double, std::micro>(end - start).count());
   }
 
   auto stats = LatencyStats::compute(samples);
-  stats.print("CPU Feature Extraction");
+  stats.print("Batch Creation (Feature Extraction)");
 }
 
 // ============================================================================

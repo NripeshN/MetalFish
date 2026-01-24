@@ -45,6 +45,10 @@ reference/
 
 # build files
 build/
+_codeql_build_dir/
+
+# tournament results files (generated output)
+results/
 
 # external files
 external/
@@ -387,3 +391,4 @@ TSWLatexianTemp*
 #*Notes.bib
 *.pyc
 .DS_Store
+networks/BT4-1024x15x32h-swa-6147500.pb

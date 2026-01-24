@@ -245,21 +245,21 @@ template <typename Network> size_t get_network_memory_requirement() {
   return total;
 }
 
-// Print network information
+// Print network information (to stderr to avoid interfering with UCI protocol)
 inline void print_network_info(const ExtractedNetworkWeights &info,
                                const char *name) {
-  std::cout << name << " Network:\n";
-  std::cout << "  Hidden dim: " << info.hidden_dim << "\n";
-  std::cout << "  FC0 out: " << info.fc0_out << "\n";
-  std::cout << "  FC1 out: " << info.fc1_out << "\n";
-  std::cout << "  Has threats: " << (info.has_threats ? "Yes" : "No") << "\n";
-  std::cout << "  FT weights: " << info.ft.weights_size / 1024 << " KB\n";
-  std::cout << "  FT biases: " << info.ft.biases_size << " bytes\n";
-  std::cout << "  FT PSQT: " << info.ft.psqt_size / 1024 << " KB\n";
+  std::cerr << name << " Network:\n";
+  std::cerr << "  Hidden dim: " << info.hidden_dim << "\n";
+  std::cerr << "  FC0 out: " << info.fc0_out << "\n";
+  std::cerr << "  FC1 out: " << info.fc1_out << "\n";
+  std::cerr << "  Has threats: " << (info.has_threats ? "Yes" : "No") << "\n";
+  std::cerr << "  FT weights: " << info.ft.weights_size / 1024 << " KB\n";
+  std::cerr << "  FT biases: " << info.ft.biases_size << " bytes\n";
+  std::cerr << "  FT PSQT: " << info.ft.psqt_size / 1024 << " KB\n";
   if (info.has_threats) {
-    std::cout << "  Threat weights: " << info.ft.threat_weights_size / 1024
+    std::cerr << "  Threat weights: " << info.ft.threat_weights_size / 1024
               << " KB\n";
-    std::cout << "  Threat PSQT: " << info.ft.threat_psqt_size / 1024
+    std::cerr << "  Threat PSQT: " << info.ft.threat_psqt_size / 1024
               << " KB\n";
   }
 
@@ -269,7 +269,7 @@ inline void print_network_info(const ExtractedNetworkWeights &info,
     layer_total += layer.fc1_weights_size + layer.fc1_biases_size;
     layer_total += layer.fc2_weights_size + layer.fc2_biases_size;
   }
-  std::cout << "  Layer weights (8 buckets): " << layer_total / 1024 << " KB\n";
+  std::cerr << "  Layer weights (8 buckets): " << layer_total / 1024 << " KB\n";
 }
 
 } // namespace MetalFish::GPU

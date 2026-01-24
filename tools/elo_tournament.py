@@ -3,12 +3,15 @@
 MetalFish Comprehensive Elo Tournament
 
 Runs a tournament between multiple chess engines to determine Elo ratings:
-- MetalFish-AB (Alpha-Beta search with 'go' command) - Best for tactical positions, ~1.5M NPS
-- MetalFish-Hybrid (Hybrid MCTS search with 'mcts' command) - General play
-- MetalFish-MCTS (Multi-threaded MCTS with 'mctsmt' command) - Strategic positions, ~700K NPS (4 threads)
+- MetalFish-AB (Alpha-Beta search with 'go' command) - Full Stockfish search with NNUE
+- MetalFish-MCTS (GPU MCTS with 'mctsmt' command) - Pure GPU-accelerated MCTS
+- MetalFish-Hybrid (Parallel MCTS+AB with 'parallel_hybrid' command) - Best of both worlds
 - Stockfish at various skill levels (0-20)
 - Patricia (aggressive engine, ~3500 Elo)
+- Berserk (strong NNUE engine, ~3550 Elo)
 - Lc0 (Leela Chess Zero - neural network engine)
+
+Engine configurations are loaded from engines_config.json.
 
 Uses cutechess-cli for tournament management and calculates Elo ratings.
 
@@ -38,6 +41,121 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import chess  # python-chess library for proper move handling
+
+# Default engines configuration (used if engines_config.json is not found)
+DEFAULT_ENGINES_CONFIG = {
+    "engines": {
+        "MetalFish-AB": {
+            "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
+            "expected_elo": None,
+            "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
+        },
+        "MetalFish-MCTS": {
+            "description": "MetalFish with Pure GPU MCTS",
+            "expected_elo": None,
+            "options": {"Ponder": "false"},
+        },
+        "MetalFish-Hybrid": {
+            "description": "MetalFish with Parallel MCTS+AB hybrid search",
+            "expected_elo": None,
+            "options": {"Ponder": "false"},
+        },
+        "Patricia": {
+            "description": "Aggressive chess engine by Adam Kulju",
+            "expected_elo": 3415,
+            "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
+            "path": "reference/Patricia/engine/patricia",
+            "anchor": True,
+            "anchor_elo": 3415,
+        },
+        "Berserk": {
+            "description": "Strong NNUE engine by Jay Honnold",
+            "expected_elo": 3662,
+            "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
+            "path": "reference/berserk/src/berserk",
+            "anchor": True,
+            "anchor_elo": 3662,
+        },
+        "Lc0": {
+            "description": "Leela Chess Zero - neural network engine",
+            "expected_elo": 3716,
+            "options": {"Threads": "1", "Ponder": "false"},
+            "path": "reference/lc0/build/release/lc0",
+            "network_path": "reference/lc0/build/release/network.pb.gz",
+        },
+    },
+    "stockfish": {
+        "path": "reference/stockfish/src/stockfish",
+        "default_levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 17, 18, 19, 20],
+        "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
+        "skill_elo_map": {
+            "0": 1725,
+            "1": 1982,
+            "2": 2233,
+            "3": 2474,
+            "4": 2643,
+            "5": 2800,
+            "6": 2947,
+            "7": 3059,
+            "8": 3156,
+            "9": 3237,
+            "10": 3304,
+            "11": 3362,
+            "12": 3412,
+            "13": 3459,
+            "14": 3505,
+            "15": 3551,
+            "16": 3584,
+            "17": 3609,
+            "18": 3644,
+            "19": 3697,
+            "20": 3764,
+        },
+    },
+    "opening_book": {
+        "file": "reference/books/8moves_v3.pgn",
+        "format": "pgn",
+        "description": "8-move openings (16 plies) - CCRL-style balanced openings",
+        "total_positions": 34700,
+        "depth_plies": 16,
+    },
+    "tournament_defaults": {
+        "games_per_pair": 16,
+        "time_control": "600+0.1",
+        "concurrency": 1,
+        "ponder": False,
+        "repeat": True,
+        "recover": True,
+    },
+}
+
+
+def load_engines_config(base_dir: Path) -> Dict[str, Any]:
+    """Load engines configuration from JSON file or use defaults."""
+    config_path = base_dir / "tools" / "engines_config.json"
+
+    if config_path.exists():
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            print(
+                f"{Colors.DIM}  Loaded engine config from: {config_path}{Colors.RESET}",
+                file=sys.stderr,
+            )
+            return config
+        except (json.JSONDecodeError, IOError) as e:
+            print(
+                f"{Colors.YELLOW}  Warning: Could not load {config_path}: {e}{Colors.RESET}",
+                file=sys.stderr,
+            )
+            print(
+                f"{Colors.DIM}  Using default configuration{Colors.RESET}",
+                file=sys.stderr,
+            )
+
+    return DEFAULT_ENGINES_CONFIG
+
 
 # ANSI colors
 class Colors:
@@ -50,6 +168,355 @@ class Colors:
     MAGENTA = "\033[95m"
     BLUE = "\033[94m"
     DIM = "\033[2m"
+    WHITE_BG = "\033[47m"
+    BLACK_BG = "\033[100m"
+    WHITE_FG = "\033[97m"
+    BLACK_FG = "\033[30m"
+    # Rich colors for board
+    LIGHT_SQUARE = "\033[48;2;240;217;181m"  # Warm beige
+    DARK_SQUARE = "\033[48;2;181;136;99m"  # Brown
+    WHITE_PIECE = "\033[38;2;255;248;220m"  # Cornsilk/cream - warm white
+    BLACK_PIECE = "\033[38;2;40;40;40m"  # Very dark gray
+    HIGHLIGHT_SQUARE = "\033[48;2;186;202;68m"  # Lichess-style green highlight
+    BORDER_COLOR = "\033[38;2;139;90;43m"  # Wood brown
+    COORD_COLOR = "\033[38;2;101;67;33m"  # Dark brown
+    # Cursor control
+    CLEAR_SCREEN = "\033[2J"
+    CURSOR_HOME = "\033[H"
+    CLEAR_LINE = "\033[2K"
+    CURSOR_UP = "\033[A"
+    HIDE_CURSOR = "\033[?25l"
+    SHOW_CURSOR = "\033[?25h"
+    SAVE_CURSOR = "\033[s"
+    RESTORE_CURSOR = "\033[u"
+
+
+class ChessBoardVisualizer:
+    """Terminal-based chess board visualizer with Unicode pieces and rich colors.
+
+    Uses python-chess library for all move handling and board state management.
+    """
+
+    # Unicode chess pieces - using filled/solid pieces for both colors
+    # Differentiated by text color (white pieces = cream, black pieces = dark)
+    WHITE_PIECES = {
+        "K": "♚",
+        "Q": "♛",
+        "R": "♜",
+        "B": "♝",
+        "N": "♞",
+        "P": "♟",
+    }
+    BLACK_PIECES = {
+        "k": "♚",
+        "q": "♛",
+        "r": "♜",
+        "b": "♝",
+        "n": "♞",
+        "p": "♟",
+    }
+
+    def __init__(self):
+        self.chess_board = chess.Board()  # python-chess board for all logic
+        self.white_player = "White"
+        self.black_player = "Black"
+        self.result = "*"
+        self.last_move_from = None
+        self.last_move_to = None
+        self.board_height = 26  # Lines used by the board display
+
+        # 8x8 board array for display (synced from chess_board)
+        self.board = self._sync_board()
+
+    def _sync_board(self) -> List[List[str]]:
+        """Sync internal board array from python-chess board."""
+        board = [[" " for _ in range(8)] for _ in range(8)]
+        for square, piece in self.chess_board.piece_map().items():
+            rank = 7 - chess.square_rank(square)
+            file = chess.square_file(square)
+            board[rank][file] = piece.symbol()
+        return board
+
+    def reset(self):
+        """Reset to starting position."""
+        self.chess_board.reset()
+        self.board = self._sync_board()
+        self.last_move_from = None
+        self.last_move_to = None
+        self.result = "*"
+
+    def apply_move(self, move_str: str, is_white: bool = True) -> bool:
+        """Apply a move to the board using python-chess.
+
+        Accepts SAN (e.g., 'Nf3', 'O-O') or UCI (e.g., 'g1f3', 'e1g1').
+        """
+        if not move_str or move_str in ["1-0", "0-1", "1/2-1/2", "*"]:
+            return False
+
+        try:
+            # Try parsing as SAN first
+            move = self.chess_board.parse_san(move_str)
+        except chess.InvalidMoveError:
+            try:
+                # Try parsing as UCI
+                move = chess.Move.from_uci(move_str)
+                if move not in self.chess_board.legal_moves:
+                    return False
+            except (chess.InvalidMoveError, ValueError):
+                return False
+
+        # Store move squares for highlighting
+        self.last_move_from = (
+            7 - chess.square_rank(move.from_square),
+            chess.square_file(move.from_square),
+        )
+        self.last_move_to = (
+            7 - chess.square_rank(move.to_square),
+            chess.square_file(move.to_square),
+        )
+
+        # Apply move
+        self.chess_board.push(move)
+        self.board = self._sync_board()
+        return True
+
+    @property
+    def current_move(self) -> int:
+        """Get current move number (ply count)."""
+        return len(self.chess_board.move_stack)
+
+    def get_san(self, uci_move: str) -> str:
+        """Convert UCI move to SAN notation."""
+        try:
+            move = chess.Move.from_uci(uci_move)
+            return self.chess_board.san(move)
+        except:
+            return uci_move
+
+    def _get_piece_display(self, piece: str, is_light_square: bool) -> str:
+        """Get the colored piece character for display."""
+        if piece == " ":
+            return "  "
+
+        # Determine piece color and get unicode character
+        if piece.isupper():
+            # White piece
+            char = self.WHITE_PIECES.get(piece, piece)
+            piece_color = Colors.WHITE_PIECE
+        else:
+            # Black piece
+            char = self.BLACK_PIECES.get(piece, piece)
+            piece_color = Colors.BLACK_PIECE
+
+        return f"{piece_color}{char} "
+
+    def render(
+        self,
+        last_move: str = "",
+        show_info: bool = True,
+        live_score: str = "",
+        white_score: float = 0,
+        black_score: float = 0,
+    ) -> str:
+        """Render the board as a string with rich formatting.
+
+        Args:
+            last_move: Move notation to display
+            show_info: Whether to show info line
+            live_score: Legacy score string (ignored if white_score/black_score provided)
+            white_score: Points for white player (1 per win, 0.5 per draw)
+            black_score: Points for black player (1 per win, 0.5 per draw)
+        """
+        lines = []
+
+        # Title bar - fixed width box (48 chars inner width)
+        inner_width = 48
+        lines.append("")
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}╔{'═' * inner_width}╗{Colors.RESET}")
+
+        # Format scores - show as integer if whole number, else one decimal
+        def fmt_score(s):
+            return str(int(s)) if s == int(s) else f"{s:.1f}"
+
+        # Player names with scores: "Engine1 (2.5) vs Engine2 (1.5)"
+        white_score_str = fmt_score(white_score)
+        black_score_str = fmt_score(black_score)
+
+        # Build title with scores next to names
+        title_parts = f"{self.white_player} ({white_score_str}) vs ({black_score_str}) {self.black_player}"
+        padding = inner_width - len(title_parts)
+        left_pad = max(0, padding // 2)
+        right_pad = max(0, padding - left_pad)
+
+        lines.append(
+            f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{' ' * left_pad}{Colors.BOLD}{self.white_player}{Colors.RESET} ({Colors.GREEN}{white_score_str}{Colors.RESET}) vs ({Colors.GREEN}{black_score_str}{Colors.RESET}) {Colors.BOLD}{self.black_player}{Colors.RESET}{' ' * right_pad}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}"
+        )
+
+        # Move info line
+        if last_move:
+            move_info = last_move
+        else:
+            side = "White" if self.current_move % 2 == 0 else "Black"
+            move_info = f"{side} to move"
+
+        # Build the info line with proper spacing
+        padding_needed = inner_width - len(move_info) - 2
+        if padding_needed < 1:
+            padding_needed = 1
+
+        colored_content = (
+            f" {Colors.DIM}{move_info}{Colors.RESET}{' ' * padding_needed} "
+        )
+
+        lines.append(
+            f"  {Colors.CYAN}{Colors.BOLD}║{Colors.RESET}{colored_content}{Colors.CYAN}{Colors.BOLD}║{Colors.RESET}"
+        )
+
+        lines.append(f"  {Colors.CYAN}{Colors.BOLD}╚{'═' * inner_width}╝{Colors.RESET}")
+        lines.append("")
+
+        # Top coordinates
+        lines.append(
+            f"      {Colors.COORD_COLOR}a    b    c    d    e    f    g    h{Colors.RESET}"
+        )
+        lines.append(
+            f"    {Colors.BORDER_COLOR}+----+----+----+----+----+----+----+----+{Colors.RESET}"
+        )
+
+        for rank in range(8):
+            row = f"  {Colors.COORD_COLOR}{8 - rank}{Colors.RESET} {Colors.BORDER_COLOR}|{Colors.RESET}"
+
+            for file in range(8):
+                piece = self.board[rank][file]
+                is_light = (rank + file) % 2 == 0
+
+                # Check if this square was part of the last move
+                is_highlighted = self.last_move_from == (
+                    rank,
+                    file,
+                ) or self.last_move_to == (rank, file)
+
+                # Choose square color
+                if is_highlighted:
+                    sq_color = Colors.HIGHLIGHT_SQUARE
+                elif is_light:
+                    sq_color = Colors.LIGHT_SQUARE
+                else:
+                    sq_color = Colors.DARK_SQUARE
+
+                # Get piece display - more prominent with bold
+                if piece == " ":
+                    piece_str = "    "
+                elif piece.isupper():
+                    char = self.WHITE_PIECES.get(piece, piece)
+                    piece_str = f"{Colors.WHITE_PIECE}{Colors.BOLD} {char}  {Colors.RESET}{sq_color}"
+                else:
+                    char = self.BLACK_PIECES.get(piece, piece)
+                    piece_str = f"{Colors.BLACK_PIECE}{Colors.BOLD} {char}  {Colors.RESET}{sq_color}"
+
+                row += f"{sq_color}{piece_str}{Colors.RESET}{Colors.BORDER_COLOR}|{Colors.RESET}"
+
+            row += f" {Colors.COORD_COLOR}{8 - rank}{Colors.RESET}"
+            lines.append(row)
+            lines.append(
+                f"    {Colors.BORDER_COLOR}+----+----+----+----+----+----+----+----+{Colors.RESET}"
+            )
+
+        # Bottom coordinates
+        lines.append(
+            f"      {Colors.COORD_COLOR}a    b    c    d    e    f    g    h{Colors.RESET}"
+        )
+        lines.append("")
+
+        return "\n".join(lines)
+
+    def render_compact(self, last_move: str = "") -> str:
+        """Render a more compact board without grid lines."""
+        lines = []
+
+        # Header
+        lines.append(
+            f"\n  {Colors.BOLD}{Colors.WHITE_PIECE}{self.white_player}{Colors.RESET} vs {Colors.BOLD}{self.black_player}{Colors.RESET}"
+        )
+        move_num = (self.current_move + 1) // 2
+        lines.append(f"  {Colors.DIM}Move {move_num}: {last_move}{Colors.RESET}\n")
+
+        # Coordinates and board
+        lines.append(f"    {Colors.COORD_COLOR} a  b  c  d  e  f  g  h{Colors.RESET}")
+
+        for rank in range(8):
+            row = f"  {Colors.COORD_COLOR}{8 - rank}{Colors.RESET} "
+
+            for file in range(8):
+                piece = self.board[rank][file]
+                is_light = (rank + file) % 2 == 0
+
+                # Check if this square was part of the last move
+                is_highlighted = self.last_move_from == (
+                    rank,
+                    file,
+                ) or self.last_move_to == (rank, file)
+
+                # Choose square color
+                if is_highlighted:
+                    sq_color = Colors.HIGHLIGHT_SQUARE
+                elif is_light:
+                    sq_color = Colors.LIGHT_SQUARE
+                else:
+                    sq_color = Colors.DARK_SQUARE
+
+                # Get piece display
+                piece_str = self._get_piece_display(piece, is_light)
+
+                row += f"{sq_color}{piece_str}{Colors.RESET}"
+
+            row += f" {Colors.COORD_COLOR}{8 - rank}{Colors.RESET}"
+            lines.append(row)
+
+        lines.append(f"    {Colors.COORD_COLOR} a  b  c  d  e  f  g  h{Colors.RESET}\n")
+
+        return "\n".join(lines)
+
+    def clear_board_area(self):
+        """Clear the board display area."""
+        # Move cursor up and clear lines
+        for _ in range(self.board_height + 4):
+            sys.stdout.write(f"{Colors.CURSOR_UP}{Colors.CLEAR_LINE}")
+        sys.stdout.flush()
+
+
+def parse_pgn_moves(pgn: str) -> List[str]:
+    """Extract moves from PGN string."""
+    # Remove headers
+    lines = pgn.split("\n")
+    move_text = ""
+    in_moves = False
+    for line in lines:
+        if line.startswith("["):
+            continue
+        if line.strip():
+            in_moves = True
+        if in_moves:
+            move_text += " " + line
+
+    # Remove comments and variations
+    move_text = re.sub(r"\{[^}]*\}", "", move_text)
+    move_text = re.sub(r"\([^)]*\)", "", move_text)
+
+    # Extract moves (remove move numbers and results)
+    tokens = move_text.split()
+    moves = []
+    for token in tokens:
+        # Skip move numbers like "1." or "1..."
+        if re.match(r"^\d+\.+$", token):
+            continue
+        # Skip results
+        if token in ["1-0", "0-1", "1/2-1/2", "*"]:
+            continue
+        if token:
+            moves.append(token)
+
+    return moves
 
 
 @dataclass
@@ -84,6 +551,7 @@ class GameResult:
     result: str  # "1-0", "0-1", "1/2-1/2"
     reason: str = ""
     moves: int = 0
+    pgn: str = ""  # Full PGN of the game
 
 
 @dataclass
@@ -247,115 +715,146 @@ class Tournament:
         self.engines: List[EngineConfig] = []
         self.results: List[GameResult] = []
         self.elo_calc = EloCalculator()
+        self.opening_book: Optional[Path] = None
+        self.opening_format: str = "pgn"
+
+        # Load opening book from config
+        config = load_engines_config(base_dir)
+        if "opening_book" in config:
+            book_config = config["opening_book"]
+            book_path = base_dir / book_config.get("file", "")
+            if book_path.exists():
+                self.opening_book = book_path
+                self.opening_format = book_config.get("format", "pgn")
+                print(
+                    f"{Colors.DIM}  Using opening book: {book_path.name} ({book_config.get('description', '')}){Colors.RESET}",
+                    file=sys.stderr,
+                )
 
     def add_engine(self, config: EngineConfig):
         """Add an engine to the tournament."""
         self.engines.append(config)
 
     def setup_default_engines(self, stockfish_levels: List[int] = None):
-        """Setup default engine configurations."""
+        """Setup default engine configurations from engines_config.json."""
+
+        # Load configuration
+        config = load_engines_config(self.base_dir)
+        engines_config = config.get("engines", {})
+        stockfish_config = config.get("stockfish", {})
 
         metalfish_path = self.base_dir / "build" / "metalfish"
 
-        # MetalFish with standard Alpha-Beta search (best for tactical positions, ~1.5M NPS)
+        # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
+        ab_config = engines_config.get("MetalFish-AB", {})
         self.add_engine(
             EngineConfig(
                 name="MetalFish-AB",
                 cmd=str(metalfish_path),
-                options={"Threads": "1", "Hash": "128"},
-                expected_elo=None,  # To be determined
+                options=ab_config.get("options", {"Threads": "1", "Hash": "128"}),
+                expected_elo=ab_config.get("expected_elo"),
             )
         )
 
-        # MetalFish with Hybrid MCTS search (general play, combining strengths)
-        hybrid_wrapper = self.base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
-        self._create_hybrid_wrapper(metalfish_path, hybrid_wrapper)
-        self.add_engine(
-            EngineConfig(
-                name="MetalFish-Hybrid",
-                cmd=str(hybrid_wrapper),
-                options={},
-                expected_elo=None,
-            )
-        )
-
-        # MetalFish with Multi-threaded MCTS (strategic positions, ~700K NPS with 4 threads)
-        mctsmt_wrapper = self.base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
-        self._create_mctsmt_wrapper(metalfish_path, mctsmt_wrapper)
+        # MetalFish with Pure GPU MCTS (uses 'mctsmt' command)
+        mcts_wrapper = self.base_dir / "tools" / "metalfish_mcts_wrapper.sh"
+        self._create_mcts_wrapper(metalfish_path, mcts_wrapper)
+        mcts_config = engines_config.get("MetalFish-MCTS", {})
         self.add_engine(
             EngineConfig(
                 name="MetalFish-MCTS",
-                cmd=str(mctsmt_wrapper),
-                options={},
-                expected_elo=None,
+                cmd=str(mcts_wrapper),
+                options=mcts_config.get("options", {}),
+                expected_elo=mcts_config.get("expected_elo"),
             )
         )
 
-        # Patricia - known aggressive engine (~3500 Elo)
-        patricia_path = self.base_dir / "reference" / "Patricia" / "engine" / "patricia"
-        if patricia_path.exists():
-            self.add_engine(
-                EngineConfig(
-                    name="Patricia",
-                    cmd=str(patricia_path),
-                    options={"Threads": "1", "Hash": "128"},
-                    expected_elo=3500,
-                )
+        # MetalFish with Parallel Hybrid search (MCTS + AB in parallel)
+        # Now uses UseHybridSearch UCI option instead of wrapper for better stability
+        hybrid_config = engines_config.get("MetalFish-Hybrid", {})
+        hybrid_options = hybrid_config.get("options", {})
+        hybrid_options["UseHybridSearch"] = "true"  # Enable hybrid mode via UCI option
+        self.add_engine(
+            EngineConfig(
+                name="MetalFish-Hybrid",
+                cmd=str(metalfish_path),
+                options=hybrid_options,
+                expected_elo=hybrid_config.get("expected_elo"),
             )
-            # Set Patricia as anchor for Elo calculation
-            self.elo_calc.anchor_engine = "Patricia"
-            self.elo_calc.anchor_elo = 3500
-
-        # Lc0 (Leela Chess Zero) - neural network engine
-        lc0_path = self.base_dir / "reference" / "lc0" / "build" / "release" / "lc0"
-        lc0_network = (
-            self.base_dir / "reference" / "lc0" / "build" / "release" / "network.pb.gz"
         )
-        if lc0_path.exists() and lc0_network.exists():
-            self.add_engine(
-                EngineConfig(
-                    name="Lc0",
-                    cmd=str(lc0_path),
-                    options={"WeightsFile": str(lc0_network), "Threads": "1"},
-                    expected_elo=3600,  # Depends on network
+
+        # Add external engines from config
+        anchor_set = False
+        for engine_name, engine_cfg in engines_config.items():
+            # Skip MetalFish variants (already added above)
+            if engine_name.startswith("MetalFish"):
+                continue
+
+            # Get engine path from config or use default
+            engine_path_str = engine_cfg.get("path", "")
+            if not engine_path_str:
+                continue
+
+            engine_path = self.base_dir / engine_path_str
+
+            # Special handling for Lc0 (needs network file)
+            if engine_name == "Lc0":
+                network_path_str = engine_cfg.get("network_path", "")
+                if network_path_str:
+                    network_path = self.base_dir / network_path_str
+                    if not (engine_path.exists() and network_path.exists()):
+                        continue
+                    options = engine_cfg.get("options", {}).copy()
+                    options["WeightsFile"] = str(network_path)
+                    self.add_engine(
+                        EngineConfig(
+                            name=engine_name,
+                            cmd=str(engine_path),
+                            options=options,
+                            expected_elo=engine_cfg.get("expected_elo"),
+                        )
+                    )
+                continue
+
+            # Standard engine
+            if engine_path.exists():
+                self.add_engine(
+                    EngineConfig(
+                        name=engine_name,
+                        cmd=str(engine_path),
+                        options=engine_cfg.get("options", {}),
+                        expected_elo=engine_cfg.get("expected_elo"),
+                    )
                 )
-            )
+                # Set anchor if configured and not already set
+                if engine_cfg.get("anchor") and not anchor_set:
+                    self.elo_calc.anchor_engine = engine_name
+                    self.elo_calc.anchor_elo = engine_cfg.get("anchor_elo", 3000)
+                    anchor_set = True
 
         # Stockfish at various skill levels
-        stockfish_path = self.base_dir / "reference" / "stockfish" / "src" / "stockfish"
+        stockfish_path_str = stockfish_config.get(
+            "path", "reference/stockfish/src/stockfish"
+        )
+        stockfish_path = self.base_dir / stockfish_path_str
+
         if stockfish_path.exists():
             if stockfish_levels is None:
-                # Default: test against multiple levels
-                stockfish_levels = [1, 5, 10, 15, 20]
+                stockfish_levels = stockfish_config.get(
+                    "default_levels", [1, 5, 10, 15, 20]
+                )
 
-            # Approximate Elo for each skill level (based on Stockfish docs)
+            # Get Elo map from config
             skill_elo_map = {
-                0: 1350,
-                1: 1500,
-                2: 1600,
-                3: 1700,
-                4: 1800,
-                5: 1900,
-                6: 2000,
-                7: 2100,
-                8: 2200,
-                9: 2300,
-                10: 2400,
-                11: 2500,
-                12: 2600,
-                13: 2700,
-                14: 2800,
-                15: 2900,
-                16: 3000,
-                17: 3100,
-                18: 3200,
-                19: 3300,
-                20: 3600,  # Full strength
+                int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()
             }
+            default_options = stockfish_config.get(
+                "options", {"Threads": "1", "Hash": "128"}
+            )
 
             for level in stockfish_levels:
                 name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
-                options = {"Threads": "1", "Hash": "128"}
+                options = default_options.copy()
                 if level < 20:
                     options["Skill Level"] = str(level)
 
@@ -369,38 +868,17 @@ class Tournament:
                 )
 
     def _create_hybrid_wrapper(self, metalfish_path: Path, wrapper_path: Path):
-        """Create a wrapper script that uses 'mcts' command (hybrid search) instead of 'go'."""
+        """Create a wrapper script that uses 'parallel_hybrid' command for parallel MCTS+AB."""
         wrapper_content = f"""#!/bin/bash
-# MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
+# MetalFish Hybrid wrapper - intercepts 'go' and runs 'parallel_hybrid' (parallel MCTS+AB) instead
 
 ENGINE="{metalfish_path}"
 
-# Read UCI commands and transform 'go' to 'mcts'
+# Read UCI commands and transform 'go' to 'parallel_hybrid'
 while IFS= read -r line; do
     if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mcts' for hybrid search
-        echo "mcts ${{line#go}}"
-    else
-        echo "$line"
-    fi
-done | "$ENGINE"
-"""
-        with open(wrapper_path, "w") as f:
-            f.write(wrapper_content)
-        os.chmod(wrapper_path, 0o755)
-
-    def _create_mctsmt_wrapper(self, metalfish_path: Path, wrapper_path: Path):
-        """Create a wrapper script that uses 'mctsmt' command (multi-threaded MCTS) instead of 'go'."""
-        wrapper_content = f"""#!/bin/bash
-# MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
-
-ENGINE="{metalfish_path}"
-
-# Read UCI commands and transform 'go' to 'mctsmt threads=4'
-while IFS= read -r line; do
-    if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mctsmt threads=4' for multi-threaded MCTS
-        echo "mctsmt threads=4 ${{line#go}}"
+        # Replace 'go' with 'parallel_hybrid' for parallel hybrid search
+        echo "parallel_hybrid ${{line#go}}"
     else
         echo "$line"
     fi
@@ -411,17 +889,17 @@ done | "$ENGINE"
         os.chmod(wrapper_path, 0o755)
 
     def _create_mcts_wrapper(self, metalfish_path: Path, wrapper_path: Path):
-        """Create a wrapper script that uses 'mcts' command instead of 'go'."""
+        """Create a wrapper script that uses 'mctsmt' command for pure GPU MCTS."""
         wrapper_content = f"""#!/bin/bash
-# MetalFish MCTS wrapper - intercepts 'go' and runs 'mcts' instead
+# MetalFish MCTS wrapper - intercepts 'go' and runs 'mctsmt' (GPU MCTS) instead
 
 ENGINE="{metalfish_path}"
 
-# Read UCI commands and transform 'go' to 'mcts'
+# Read UCI commands and transform 'go' to 'mctsmt threads=4'
 while IFS= read -r line; do
     if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mcts'
-        echo "mcts ${{line#go}}"
+        # Replace 'go' with 'mctsmt threads=4' for multi-threaded GPU MCTS
+        echo "mctsmt threads=4 ${{line#go}}"
     else
         echo "$line"
     fi
@@ -431,6 +909,129 @@ done | "$ENGINE"
             f.write(wrapper_content)
         os.chmod(wrapper_path, 0o755)
 
+    def _create_mctsmt_wrapper(self, metalfish_path: Path, wrapper_path: Path):
+        """Alias for _create_mcts_wrapper for backwards compatibility."""
+        self._create_mcts_wrapper(metalfish_path, wrapper_path)
+
+    def _parse_pgn_games(self, pgn_content: str) -> List[Dict[str, Any]]:
+        """Parse individual games from PGN content."""
+        games = []
+        current_game = {"headers": {}, "moves": "", "raw": ""}
+        in_moves = False
+        current_raw = []
+
+        for line in pgn_content.split("\n"):
+            current_raw.append(line)
+            line = line.strip()
+
+            if line.startswith("["):
+                # Header line
+                in_moves = False
+                match = re.match(r'\[(\w+)\s+"([^"]*)"\]', line)
+                if match:
+                    current_game["headers"][match.group(1)] = match.group(2)
+            elif line and not line.startswith("["):
+                # Move line
+                in_moves = True
+                current_game["moves"] += line + " "
+            elif not line and in_moves and current_game["moves"]:
+                # Empty line after moves - game complete
+                current_game["raw"] = "\n".join(current_raw)
+                games.append(current_game)
+                current_game = {"headers": {}, "moves": "", "raw": ""}
+                current_raw = []
+                in_moves = False
+
+        # Don't forget the last game
+        if current_game["moves"]:
+            current_game["raw"] = "\n".join(current_raw)
+            games.append(current_game)
+
+        return games
+
+    def _format_game_output(
+        self,
+        game_num: int,
+        total_games: int,
+        white: str,
+        black: str,
+        result: str,
+        reason: str,
+        pgn: str,
+        moves: str,
+    ) -> str:
+        """Format a single game's output with pretty printing."""
+        lines = []
+
+        # Game header
+        lines.append(f"\n{Colors.BOLD}{'─' * 70}{Colors.RESET}")
+        lines.append(
+            f"{Colors.BOLD}  📋 Game {game_num}/{total_games}: {white} vs {black}{Colors.RESET}"
+        )
+        lines.append(f"{Colors.BOLD}{'─' * 70}{Colors.RESET}")
+
+        # Result with color coding
+        result_color = Colors.RESET
+        result_icon = "🤝"
+        if result == "1-0":
+            result_color = Colors.GREEN
+            result_icon = "👑"
+        elif result == "0-1":
+            result_color = Colors.RED
+            result_icon = "👑"
+
+        lines.append(
+            f"  {result_icon} {Colors.BOLD}Result:{Colors.RESET} {result_color}{result}{Colors.RESET}"
+        )
+        if reason:
+            lines.append(f"  📝 {Colors.DIM}Reason: {reason}{Colors.RESET}")
+
+        # Move count
+        move_list = moves.strip().split()
+        # Count actual moves (filter out move numbers and results)
+        actual_moves = [
+            m
+            for m in move_list
+            if not m.endswith(".") and m not in ["1-0", "0-1", "1/2-1/2", "*"]
+        ]
+        num_moves = len(actual_moves) // 2 + len(actual_moves) % 2
+        lines.append(f"  🎯 {Colors.DIM}Moves: {num_moves}{Colors.RESET}")
+
+        # PGN section
+        lines.append(f"\n  {Colors.CYAN}┌{'─' * 66}┐{Colors.RESET}")
+        lines.append(
+            f"  {Colors.CYAN}│{Colors.RESET} {Colors.BOLD}PGN:{Colors.RESET}{' ' * 60}{Colors.CYAN}│{Colors.RESET}"
+        )
+        lines.append(f"  {Colors.CYAN}├{'─' * 66}┤{Colors.RESET}")
+
+        # Format PGN with word wrap
+        for pgn_line in pgn.strip().split("\n"):
+            if pgn_line.startswith("["):
+                # Header line - dim
+                formatted = f"  {Colors.CYAN}│{Colors.RESET} {Colors.DIM}{pgn_line[:64]:<64}{Colors.RESET} {Colors.CYAN}│{Colors.RESET}"
+            else:
+                # Move line - wrap at 64 chars
+                words = pgn_line.split()
+                current_line = ""
+                for word in words:
+                    if len(current_line) + len(word) + 1 <= 64:
+                        current_line += (" " if current_line else "") + word
+                    else:
+                        if current_line:
+                            lines.append(
+                                f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                            )
+                        current_line = word
+                if current_line:
+                    formatted = f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                else:
+                    continue
+            lines.append(formatted)
+
+        lines.append(f"  {Colors.CYAN}└{'─' * 66}┘{Colors.RESET}")
+
+        return "\n".join(lines)
+
     def run_match(
         self,
         engine1: EngineConfig,
@@ -438,6 +1039,8 @@ done | "$ENGINE"
         games: int,
         time_control: str,
         concurrency: int = 1,
+        opening_book: Optional[Path] = None,
+        opening_format: str = "pgn",
     ) -> List[GameResult]:
         """Run a match between two engines."""
 
@@ -464,56 +1067,134 @@ done | "$ENGINE"
             ]
         )
 
+        # Add opening book if available
+        book_to_use = opening_book or self.opening_book
+        if book_to_use and book_to_use.exists():
+            fmt = opening_format if opening_book else self.opening_format
+            cmd.extend(
+                [
+                    "-openings",
+                    f"file={book_to_use}",
+                    f"format={fmt}",
+                    "order=random",  # Random selection from book
+                ]
+            )
+
+        print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
         print(
-            f"  Running: {engine1.name} vs {engine2.name} ({games} games)...",
-            end=" ",
-            flush=True,
+            f"{Colors.BOLD}  🎮 MATCH: {engine1.name} vs {engine2.name}{Colors.RESET}"
         )
+        print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+        print(f"  📊 Games: {games} | ⏱️  Time Control: {time_control}")
+        if book_to_use:
+            print(f"  📖 Opening Book: {book_to_use.name}")
+        print(f"{Colors.DIM}  Running...{Colors.RESET}")
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
             output = result.stdout + result.stderr
         except subprocess.TimeoutExpired:
-            print(f"{Colors.RED}TIMEOUT{Colors.RESET}")
+            print(f"  {Colors.RED}⚠️  TIMEOUT{Colors.RESET}")
             return []
 
         # Parse results from output
         game_results = []
 
-        # Find ALL score lines and use the LAST one (final result)
-        score_matches = re.findall(
-            rf"Score of {re.escape(engine1.name)} vs {re.escape(engine2.name)}: (\d+) - (\d+) - (\d+)",
-            output,
-        )
+        # Read and parse PGN file for individual games
+        pgn_content = ""
+        try:
+            with open(pgn_file.name, "r") as f:
+                pgn_content = f.read()
+        except OSError:
+            # If PGN file cannot be read, continue with empty content
+            # The tournament will parse what it can from cutechess output
+            pass
 
-        if score_matches:
-            # Use the last match (final score)
-            last_match = score_matches[-1]
-            wins1 = int(last_match[0])
-            wins2 = int(last_match[1])
-            draws = int(last_match[2])
+        # Parse individual games from PGN
+        parsed_games = self._parse_pgn_games(pgn_content)
 
-            # Create game results
-            for _ in range(wins1):
-                game_results.append(GameResult(engine1.name, engine2.name, "1-0"))
-            for _ in range(wins2):
-                game_results.append(GameResult(engine1.name, engine2.name, "0-1"))
-            for _ in range(draws):
-                game_results.append(GameResult(engine1.name, engine2.name, "1/2-1/2"))
+        # Track running score
+        wins1, wins2, draws = 0, 0, 0
 
+        # Print each game with its PGN
+        for i, game in enumerate(parsed_games, 1):
+            headers = game["headers"]
+            white = headers.get("White", engine1.name)
+            black = headers.get("Black", engine2.name)
+            result = headers.get("Result", "*")
+            reason = headers.get("Termination", "")
+            moves = game["moves"]
+            raw_pgn = game["raw"]
+
+            # Update score
+            if result == "1-0":
+                if white == engine1.name:
+                    wins1 += 1
+                else:
+                    wins2 += 1
+            elif result == "0-1":
+                if black == engine1.name:
+                    wins1 += 1
+                else:
+                    wins2 += 1
+            else:
+                draws += 1
+
+            # Print formatted game output
+            print(
+                self._format_game_output(
+                    i, games, white, black, result, reason, raw_pgn, moves
+                )
+            )
+
+            # Print running score
             total = wins1 + wins2 + draws
             score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
             print(
-                f"{Colors.GREEN}Done{Colors.RESET} ({wins1}-{wins2}-{draws}, {score_pct:.1f}%)"
+                f"\n  {Colors.MAGENTA}📈 Running Score ({engine1.name} vs {engine2.name}):{Colors.RESET}"
             )
-        else:
-            print(f"{Colors.YELLOW}No results parsed{Colors.RESET}")
-            # Try to parse individual game results from PGN
-            try:
-                with open(pgn_file.name, "r") as f:
-                    pgn_content = f.read()
+            print(
+                f"     {Colors.BOLD}{wins1} - {draws} - {wins2}{Colors.RESET}  [{score_pct:.1f}%]"
+            )
 
-                # Count results in PGN
+            # Create GameResult
+            game_results.append(
+                GameResult(
+                    white=white,
+                    black=black,
+                    result=result,
+                    reason=reason,
+                    moves=len(moves.split()) // 3,  # Rough move count
+                    pgn=raw_pgn,
+                )
+            )
+
+        # If no games parsed from PGN, fall back to score parsing
+        if not game_results:
+            # Find ALL score lines and use the LAST one (final result)
+            score_matches = re.findall(
+                rf"Score of {re.escape(engine1.name)} vs {re.escape(engine2.name)}: (\d+) - (\d+) - (\d+)",
+                output,
+            )
+
+            if score_matches:
+                # Use the last match (final score)
+                last_match = score_matches[-1]
+                wins1 = int(last_match[0])
+                wins2 = int(last_match[1])
+                draws = int(last_match[2])
+
+                # Create game results
+                for _ in range(wins1):
+                    game_results.append(GameResult(engine1.name, engine2.name, "1-0"))
+                for _ in range(wins2):
+                    game_results.append(GameResult(engine1.name, engine2.name, "0-1"))
+                for _ in range(draws):
+                    game_results.append(
+                        GameResult(engine1.name, engine2.name, "1/2-1/2")
+                    )
+            else:
+                # Try to parse from PGN counts
                 wins1 = pgn_content.count('[Result "1-0"]')
                 wins2 = pgn_content.count('[Result "0-1"]')
                 draws = pgn_content.count('[Result "1/2-1/2"]')
@@ -526,13 +1207,27 @@ done | "$ENGINE"
                     game_results.append(
                         GameResult(engine1.name, engine2.name, "1/2-1/2")
                     )
-            except:
-                pass
+
+        # Print final match summary
+        total = wins1 + wins2 + draws
+        score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
+
+        print(f"\n{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+        print(
+            f"{Colors.BOLD}  ✅ MATCH COMPLETE: {engine1.name} vs {engine2.name}{Colors.RESET}"
+        )
+        print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}")
+        print(
+            f"  {Colors.GREEN}Final Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}"
+        )
+        print(f"{Colors.BOLD}{'═' * 70}{Colors.RESET}\n")
 
         # Clean up
         try:
             os.unlink(pgn_file.name)
-        except:
+        except OSError:
+            # Ignore errors when cleaning up temporary PGN file
+            # File may already be deleted or unavailable
             pass
 
         return game_results
@@ -660,85 +1355,108 @@ done | "$ENGINE"
 def get_engine_configs(
     base_dir: Path, stockfish_levels: List[int] = None
 ) -> Dict[str, EngineConfig]:
-    """Get all available engine configurations for CI mode."""
+    """Get all available engine configurations for CI mode from engines_config.json."""
     configs = {}
+
+    # Load configuration
+    config = load_engines_config(base_dir)
+    engines_config = config.get("engines", {})
+    stockfish_config = config.get("stockfish", {})
 
     metalfish_path = base_dir / "build" / "metalfish"
 
-    # MetalFish with standard Alpha-Beta search (best for tactical positions, ~1.5M NPS)
+    # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
+    ab_config = engines_config.get("MetalFish-AB", {})
     configs["MetalFish-AB"] = EngineConfig(
         name="MetalFish-AB",
         cmd=str(metalfish_path),
-        options={"Threads": "1", "Hash": "128"},
-        expected_elo=None,
+        options=ab_config.get("options", {"Threads": "1", "Hash": "128"}),
+        expected_elo=ab_config.get("expected_elo"),
     )
 
-    # MetalFish with Hybrid MCTS search (general play)
-    hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
-    configs["MetalFish-Hybrid"] = EngineConfig(
-        name="MetalFish-Hybrid", cmd=str(hybrid_wrapper), options={}, expected_elo=None
-    )
-
-    # MetalFish with Multi-threaded MCTS (strategic positions, ~700K NPS with 4 threads)
-    mctsmt_wrapper = base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
+    # MetalFish with Pure GPU MCTS (uses 'mctsmt' command)
+    mcts_wrapper = base_dir / "tools" / "metalfish_mcts_wrapper.sh"
+    mcts_config = engines_config.get("MetalFish-MCTS", {})
     configs["MetalFish-MCTS"] = EngineConfig(
-        name="MetalFish-MCTS", cmd=str(mctsmt_wrapper), options={}, expected_elo=None
+        name="MetalFish-MCTS",
+        cmd=str(mcts_wrapper),
+        options=mcts_config.get("options", {}),
+        expected_elo=mcts_config.get("expected_elo"),
     )
 
-    # Patricia - aggressive engine (~3500 Elo)
-    patricia_path = base_dir / "reference" / "Patricia" / "engine" / "patricia"
-    if patricia_path.exists():
-        configs["Patricia"] = EngineConfig(
-            name="Patricia",
-            cmd=str(patricia_path),
-            options={"Threads": "1", "Hash": "128"},
-            expected_elo=3500,
-        )
+    # MetalFish with Parallel Hybrid search (MCTS + AB in parallel)
+    # Now uses UseHybridSearch UCI option instead of wrapper for better stability
+    hybrid_config = engines_config.get("MetalFish-Hybrid", {})
+    hybrid_options = hybrid_config.get("options", {}).copy()
+    hybrid_options["UseHybridSearch"] = "true"  # Enable hybrid mode via UCI option
+    configs["MetalFish-Hybrid"] = EngineConfig(
+        name="MetalFish-Hybrid",
+        cmd=str(metalfish_path),
+        options=hybrid_options,
+        expected_elo=hybrid_config.get("expected_elo"),
+    )
 
-    # Lc0 (Leela Chess Zero) - neural network engine
-    lc0_path = base_dir / "reference" / "lc0" / "build" / "release" / "lc0"
-    lc0_network = base_dir / "reference" / "lc0" / "build" / "release" / "network.pb.gz"
-    if lc0_path.exists() and lc0_network.exists():
-        configs["Lc0"] = EngineConfig(
-            name="Lc0",
-            cmd=str(lc0_path),
-            options={"WeightsFile": str(lc0_network), "Threads": "1"},
-            expected_elo=3600,
-        )
+    # Add external engines from config
+    for engine_name, engine_cfg in engines_config.items():
+        # Skip MetalFish variants (already added above)
+        if engine_name.startswith("MetalFish"):
+            continue
+
+        # Get engine path from config
+        engine_path_str = engine_cfg.get("path", "")
+        if not engine_path_str:
+            continue
+
+        engine_path = base_dir / engine_path_str
+
+        # Special handling for Lc0 (needs network file)
+        if engine_name == "Lc0":
+            network_path_str = engine_cfg.get("network_path", "")
+            if network_path_str:
+                network_path = base_dir / network_path_str
+                if engine_path.exists() and network_path.exists():
+                    options = engine_cfg.get("options", {}).copy()
+                    options["WeightsFile"] = str(network_path)
+                    configs[engine_name] = EngineConfig(
+                        name=engine_name,
+                        cmd=str(engine_path),
+                        options=options,
+                        expected_elo=engine_cfg.get("expected_elo"),
+                    )
+            continue
+
+        # Standard engine
+        if engine_path.exists():
+            configs[engine_name] = EngineConfig(
+                name=engine_name,
+                cmd=str(engine_path),
+                options=engine_cfg.get("options", {}),
+                expected_elo=engine_cfg.get("expected_elo"),
+            )
 
     # Stockfish at various levels
-    stockfish_path = base_dir / "reference" / "stockfish" / "src" / "stockfish"
+    stockfish_path_str = stockfish_config.get(
+        "path", "reference/stockfish/src/stockfish"
+    )
+    stockfish_path = base_dir / stockfish_path_str
+
     if stockfish_path.exists():
         if stockfish_levels is None:
-            stockfish_levels = [1, 5, 10, 15, 20]
+            stockfish_levels = stockfish_config.get(
+                "default_levels", [1, 5, 10, 15, 20]
+            )
 
+        # Get Elo map from config
         skill_elo_map = {
-            0: 1350,
-            1: 1500,
-            2: 1600,
-            3: 1700,
-            4: 1800,
-            5: 1900,
-            6: 2000,
-            7: 2100,
-            8: 2200,
-            9: 2300,
-            10: 2400,
-            11: 2500,
-            12: 2600,
-            13: 2700,
-            14: 2800,
-            15: 2900,
-            16: 3000,
-            17: 3100,
-            18: 3200,
-            19: 3300,
-            20: 3600,
+            int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()
         }
+        default_options = stockfish_config.get(
+            "options", {"Threads": "1", "Hash": "128"}
+        )
 
         for level in stockfish_levels:
             name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
-            options = {"Threads": "1", "Hash": "128"}
+            options = default_options.copy()
             if level < 20:
                 options["Skill Level"] = str(level)
 
@@ -761,6 +1479,154 @@ def list_engine_pairs(engines: List[str]) -> List[Tuple[str, str]]:
     return pairs
 
 
+def _parse_pgn_games_standalone(pgn_content: str) -> List[Dict[str, Any]]:
+    """Parse individual games from PGN content (standalone function for CI mode)."""
+    games = []
+    current_game = {"headers": {}, "moves": "", "raw": ""}
+    in_moves = False
+    current_raw = []
+
+    for line in pgn_content.split("\n"):
+        current_raw.append(line)
+        line_stripped = line.strip()
+
+        if line_stripped.startswith("["):
+            # Header line
+            in_moves = False
+            match = re.match(r'\[(\w+)\s+"([^"]*)"\]', line_stripped)
+            if match:
+                current_game["headers"][match.group(1)] = match.group(2)
+        elif line_stripped and not line_stripped.startswith("["):
+            # Move line
+            in_moves = True
+            current_game["moves"] += line_stripped + " "
+        elif not line_stripped and in_moves and current_game["moves"]:
+            # Empty line after moves - game complete
+            current_game["raw"] = "\n".join(current_raw)
+            games.append(current_game)
+            current_game = {"headers": {}, "moves": "", "raw": ""}
+            current_raw = []
+            in_moves = False
+
+    # Don't forget the last game
+    if current_game["moves"]:
+        current_game["raw"] = "\n".join(current_raw)
+        games.append(current_game)
+
+    return games
+
+
+def _format_ci_game_output(
+    game_num: int,
+    total_games: int,
+    white: str,
+    black: str,
+    result: str,
+    reason: str,
+    pgn: str,
+    moves: str,
+) -> str:
+    """Format a single game's output with pretty printing (CI mode)."""
+    lines = []
+
+    # Game header
+    lines.append(f"\n{Colors.BOLD}{'─' * 70}{Colors.RESET}")
+    lines.append(
+        f"{Colors.BOLD}  📋 Game {game_num}/{total_games}: {white} vs {black}{Colors.RESET}"
+    )
+    lines.append(f"{Colors.BOLD}{'─' * 70}{Colors.RESET}")
+
+    # Result with color coding
+    result_color = Colors.RESET
+    result_icon = "🤝"
+    if result == "1-0":
+        result_color = Colors.GREEN
+        result_icon = "👑"
+    elif result == "0-1":
+        result_color = Colors.RED
+        result_icon = "👑"
+
+    lines.append(
+        f"  {result_icon} {Colors.BOLD}Result:{Colors.RESET} {result_color}{result}{Colors.RESET}"
+    )
+    if reason:
+        lines.append(f"  📝 {Colors.DIM}Reason: {reason}{Colors.RESET}")
+
+    # Move count
+    move_list = moves.strip().split()
+    actual_moves = [
+        m
+        for m in move_list
+        if not m.endswith(".") and m not in ["1-0", "0-1", "1/2-1/2", "*"]
+    ]
+    num_moves = len(actual_moves) // 2 + len(actual_moves) % 2
+    lines.append(f"  🎯 {Colors.DIM}Moves: {num_moves}{Colors.RESET}")
+
+    # PGN section
+    lines.append(f"\n  {Colors.CYAN}┌{'─' * 66}┐{Colors.RESET}")
+    lines.append(
+        f"  {Colors.CYAN}│{Colors.RESET} {Colors.BOLD}PGN:{Colors.RESET}{' ' * 60}{Colors.CYAN}│{Colors.RESET}"
+    )
+    lines.append(f"  {Colors.CYAN}├{'─' * 66}┤{Colors.RESET}")
+
+    # Format PGN - one move pair per line (1. e4 e5 then newline)
+    for pgn_line in pgn.strip().split("\n"):
+        if pgn_line.startswith("["):
+            # Header line - dim
+            formatted = f"  {Colors.CYAN}│{Colors.RESET} {Colors.DIM}{pgn_line[:64]:<64}{Colors.RESET} {Colors.CYAN}│{Colors.RESET}"
+            lines.append(formatted)
+        elif pgn_line.strip():
+            # Move line - format with one move pair per line
+            # Parse moves and group by move number
+            tokens = pgn_line.split()
+            current_line = ""
+
+            for token in tokens:
+                # Check if this is a move number (e.g., "1.", "12.")
+                is_move_num = token.rstrip(".").isdigit() and token.endswith(".")
+
+                # If we have content and hit a new move number, output current line
+                if is_move_num and current_line and not current_line.endswith(". "):
+                    # Pad and output the line
+                    if len(current_line) <= 64:
+                        lines.append(
+                            f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                        )
+                    else:
+                        lines.append(
+                            f"  {Colors.CYAN}│{Colors.RESET} {current_line[:64]} {Colors.CYAN}│{Colors.RESET}"
+                        )
+                    current_line = ""
+
+                # Add token to current line
+                if current_line:
+                    if len(current_line) + len(token) + 1 <= 64:
+                        current_line += " " + token
+                    else:
+                        # Line too long, output and start new
+                        lines.append(
+                            f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                        )
+                        current_line = token
+                else:
+                    current_line = token
+
+            # Output remaining content
+            if current_line:
+                if len(current_line) <= 64:
+                    lines.append(
+                        f"  {Colors.CYAN}│{Colors.RESET} {current_line:<64} {Colors.CYAN}│{Colors.RESET}"
+                    )
+                else:
+                    lines.append(
+                        f"  {Colors.CYAN}│{Colors.RESET} {current_line[:64]} {Colors.CYAN}│{Colors.RESET}"
+                    )
+
+    lines.append(f"  {Colors.CYAN}└{'─' * 66}┘{Colors.RESET}")
+
+    return "\n".join(lines)
+
+
 def run_ci_match(
     base_dir: Path,
     engine1_name: str,
@@ -768,9 +1634,18 @@ def run_ci_match(
     games: int,
     time_control: str,
     output_file: Path,
+    engine1_options: Optional[Dict[str, str]] = None,
+    engine2_options: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    """Run a single match between two engines and output JSON results."""
+    """Run a single match between two engines and output JSON results.
 
+    Args:
+        engine1_options: Custom UCI options to override defaults for engine1
+        engine2_options: Custom UCI options to override defaults for engine2
+    """
+
+    # Load config for opening book
+    config = load_engines_config(base_dir)
     configs = get_engine_configs(base_dir)
 
     if engine1_name not in configs:
@@ -781,21 +1656,37 @@ def run_ci_match(
     engine1 = configs[engine1_name]
     engine2 = configs[engine2_name]
 
+    # Apply custom UCI options if provided (override defaults)
+    if engine1_options:
+        for key, value in engine1_options.items():
+            engine1.options[key] = value
+        print(f"  Engine 1 custom options: {engine1_options}")
+    if engine2_options:
+        for key, value in engine2_options.items():
+            engine2.options[key] = value
+        print(f"  Engine 2 custom options: {engine2_options}")
+
     metalfish_path = base_dir / "build" / "metalfish"
 
-    # Create wrapper scripts if needed
-    if "MetalFish-Hybrid" in [engine1_name, engine2_name]:
-        hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
-        _create_hybrid_wrapper_file(metalfish_path, hybrid_wrapper)
-
+    # Create wrapper scripts if needed (only for MCTS now, Hybrid uses UCI option)
     if "MetalFish-MCTS" in [engine1_name, engine2_name]:
-        mctsmt_wrapper = base_dir / "tools" / "metalfish_mctsmt_wrapper.sh"
-        _create_mctsmt_wrapper_file(metalfish_path, mctsmt_wrapper)
+        mcts_wrapper = base_dir / "tools" / "metalfish_mcts_wrapper.sh"
+        _create_mcts_wrapper_file(metalfish_path, mcts_wrapper)
 
     cutechess = base_dir / "reference" / "cutechess" / "build" / "cutechess-cli"
 
     if not cutechess.exists():
         raise FileNotFoundError(f"cutechess-cli not found at {cutechess}")
+
+    # Check for opening book
+    opening_book = None
+    opening_format = "pgn"
+    if "opening_book" in config:
+        book_config = config["opening_book"]
+        book_path = base_dir / book_config.get("file", "")
+        if book_path.exists():
+            opening_book = book_path
+            opening_format = book_config.get("format", "pgn")
 
     # Verify engine binaries exist
     print(f"Verifying engine binaries...")
@@ -830,28 +1721,299 @@ def run_ci_match(
             "1",
             "-recover",
             "-repeat",
+            "-debug",
+            "all",  # Enable verbose output for real-time move tracking
         ]
     )
 
-    print(f"Running: {engine1_name} vs {engine2_name} ({games} games)...")
-    print(f"Command: {' '.join(cmd)}")
+    # Add opening book if available
+    if opening_book:
+        cmd.extend(
+            [
+                "-openings",
+                f"file={opening_book}",
+                f"format={opening_format}",
+                "order=random",
+            ]
+        )
+
+    print(f"\n{Colors.BOLD}{'=' * 70}{Colors.RESET}")
+    print(f"{Colors.BOLD}  CI MATCH: {engine1_name} vs {engine2_name}{Colors.RESET}")
+    print(f"{Colors.BOLD}{'=' * 70}{Colors.RESET}")
+    print(f"  Games: {games} | Time Control: {time_control}")
+    if opening_book:
+        print(f"  Opening Book: {opening_book.name}")
+    print(f"  Command: {' '.join(cmd)}")
+
+    # Detect CI environment - disable fancy visualization in CI
+    is_ci = (
+        os.environ.get("CI", "").lower() == "true"
+        or os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+    )
+
+    # Initialize visualizer (only used if not in CI)
+    visualizer = ChessBoardVisualizer() if not is_ci else None
+    if visualizer:
+        visualizer.white_player = engine1_name
+        visualizer.black_player = engine2_name
+
+    # Track score
+    wins1, wins2, draws = 0, 0, 0
+    # Track points for each engine (1 for win, 0.5 for draw)
+    engine1_points = 0.0
+    engine2_points = 0.0
+    current_game = 0
+    current_white_player = engine1_name  # Track current game's white player
+    current_black_player = engine2_name  # Track current game's black player
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
-        output = result.stdout + result.stderr
+        # Use Popen for real-time output
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+        )
 
-        # Always print cutechess output for debugging
-        print(f"\n=== cutechess-cli output ===")
-        print(output[:5000] if len(output) > 5000 else output)  # Limit output length
-        print(f"=== end cutechess-cli output ===\n")
+        output_lines = []
+        board_displayed = False
+        game_pgns = []  # Store PGN content for each game
 
-        if result.returncode != 0:
+        print(f"\n{Colors.DIM}  Starting games...{Colors.RESET}\n")
+
+        # Helper function to read and replay game from PGN
+        def show_game_final_position(game_num: int, result_str: str, reason: str):
+            """Read PGN file and show the final position of the specified game."""
+            nonlocal board_displayed
+            game_pgn = ""
+            game_moves = ""
+            try:
+                with open(pgn_file.name, "r") as f:
+                    pgn_content = f.read()
+
+                # Parse individual games from PGN
+                games_list = _parse_pgn_games_standalone(pgn_content)
+                if game_num <= len(games_list):
+                    game_data = games_list[game_num - 1]
+                    game_pgn = game_data.get("raw", "")
+                    game_moves = game_data.get("moves", "")
+
+                    # Extract moves from this game's moves string
+                    moves = parse_pgn_moves(game_moves)
+
+                    if moves and visualizer:
+                        # Reset and replay all moves
+                        visualizer.reset()
+                        is_white = True
+                        for move in moves:
+                            try:
+                                visualizer.apply_move(move, is_white)
+                                is_white = not is_white
+                            except Exception:
+                                pass  # Skip invalid moves
+
+                        # Show final position
+                        move_count = len(moves)
+                        last_move = moves[-1] if moves else ""
+
+                        # Calculate scores for display
+                        if current_white_player == engine1_name:
+                            white_pts, black_pts = engine1_points, engine2_points
+                        else:
+                            white_pts, black_pts = engine2_points, engine1_points
+
+                        # Print final position with board (keep visible - don't clear)
+                        print(
+                            visualizer.render(
+                                f"Final: {last_move} ({move_count} moves) - {result_str}",
+                                white_score=white_pts,
+                                black_score=black_pts,
+                            )
+                        )
+                        sys.stdout.flush()
+                        board_displayed = True
+
+            except Exception as e:
+                pass  # If we can't read PGN, just continue without board display
+
+            return game_pgn, game_moves
+
+        # Read stdout line by line
+        if process.stdout is not None:
+            for line in process.stdout:
+                output_lines.append(line)
+                line_stripped = line.strip()
+
+                # Detect game start
+                if "Started game" in line_stripped:
+                    current_game += 1
+                    if visualizer:
+                        visualizer.reset()  # Reset uses python-chess internally
+
+                    # Parse players from line like "Started game 1 of 20 (Engine1 vs Engine2)"
+                    match = re.search(r"\((.+?) vs (.+?)\)", line_stripped)
+                    if match:
+                        current_white_player = match.group(1)
+                        current_black_player = match.group(2)
+                        if visualizer:
+                            visualizer.white_player = current_white_player
+                            visualizer.black_player = current_black_player
+
+                    # Clear previous board if displayed
+                    if board_displayed and visualizer:
+                        visualizer.clear_board_area()
+                        board_displayed = False
+
+                    # Show initial board or CI message
+                    if visualizer:
+                        # Calculate scores for display (who's white this game?)
+                        if current_white_player == engine1_name:
+                            white_pts, black_pts = engine1_points, engine2_points
+                        else:
+                            white_pts, black_pts = engine2_points, engine1_points
+                        print(
+                            visualizer.render(
+                                f"Game {current_game}/{games} - Starting...",
+                                white_score=white_pts,
+                                black_score=black_pts,
+                            )
+                        )
+                        board_displayed = True
+                    else:
+                        print(f"  Started game {current_game} of {games}")
+
+                # Parse position command to get all moves played
+                # Format: ">Engine(0): position startpos moves e2e4 e7e5 ..."
+                pos_match = re.search(
+                    r">[^:]+: position startpos moves (.+)", line_stripped
+                )
+                if pos_match and visualizer and board_displayed:
+                    moves_str = pos_match.group(1).strip()
+                    new_uci_moves = moves_str.split()
+
+                    # Check if we have new moves compared to what's on visualizer's board
+                    current_move_count = len(visualizer.chess_board.move_stack)
+                    if len(new_uci_moves) > current_move_count:
+                        # Apply new moves using visualizer's apply_move (uses python-chess)
+                        last_san = ""
+                        for i in range(current_move_count, len(new_uci_moves)):
+                            uci_move = new_uci_moves[i]
+                            # Get SAN before applying (proper notation with +, #, disambiguation)
+                            last_san = visualizer.get_san(uci_move)
+                            visualizer.apply_move(uci_move)
+
+                        # Create move display with proper SAN notation
+                        move_count = visualizer.current_move
+                        move_num = (move_count + 1) // 2
+                        is_white_last = move_count % 2 == 1
+
+                        # Show just the move in proper notation (e.g., "8. Nf3" or "8... b5")
+                        if is_white_last:
+                            move_display = f"{move_num}. {last_san}"
+                        else:
+                            move_display = f"{move_num}... {last_san}"
+
+                        # Calculate scores for display (who's white this game?)
+                        if current_white_player == engine1_name:
+                            white_pts, black_pts = engine1_points, engine2_points
+                        else:
+                            white_pts, black_pts = engine2_points, engine1_points
+
+                        # Update board display
+                        visualizer.clear_board_area()
+                        print(
+                            visualizer.render(
+                                move_display,
+                                white_score=white_pts,
+                                black_score=black_pts,
+                            )
+                        )
+                        board_displayed = True
+
+                # Detect game end
+                if "Finished game" in line_stripped:
+                    # Clear the board for final position from PGN
+                    if board_displayed and visualizer:
+                        visualizer.clear_board_area()
+                        board_displayed = False
+
+                    # Parse result and update points
+                    if "1-0" in line_stripped:
+                        result = "1-0"
+                        if current_white_player == engine1_name:
+                            wins1 += 1
+                            engine1_points += 1.0
+                        else:
+                            wins2 += 1
+                            engine2_points += 1.0
+                    elif "0-1" in line_stripped:
+                        result = "0-1"
+                        if current_black_player == engine1_name:
+                            wins1 += 1
+                            engine1_points += 1.0
+                        else:
+                            wins2 += 1
+                            engine2_points += 1.0
+                    else:
+                        result = "1/2-1/2"
+                        draws += 1
+                        engine1_points += 0.5
+                        engine2_points += 0.5
+
+                    # Extract reason
+                    reason = ""
+                    reason_match = re.search(r"\{(.+?)\}", line_stripped)
+                    if reason_match:
+                        reason = reason_match.group(1)
+
+                    # Show final position from PGN (accurate) - only if visualizer is available
+                    if visualizer:
+                        game_pgn, game_moves = show_game_final_position(
+                            current_game, result, reason
+                        )
+                        board_displayed = True
+                    else:
+                        game_pgn, game_moves = "", ""
+
+                    # Print game result
+                    total = wins1 + wins2 + draws
+                    score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
+
+                    print(
+                        f"  {Colors.CYAN}Game {current_game}:{Colors.RESET} {current_white_player} vs {current_black_player}"
+                    )
+                    print(f"  {Colors.BOLD}Result: {result}{Colors.RESET}", end="")
+                    if reason:
+                        print(f" {Colors.DIM}({reason}){Colors.RESET}")
+                    else:
+                        print()
+                    print(
+                        f"  {Colors.MAGENTA}Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}"
+                    )
+
+                    # Print formatted PGN
+                    if game_pgn:
+                        formatted_output = _format_ci_game_output(
+                            current_game,
+                            games,
+                            current_white_player,
+                            current_black_player,
+                            result,
+                            reason,
+                            game_pgn,
+                            game_moves,
+                        )
+                        print(formatted_output)
+                    print()  # Extra spacing between games
+
+        process.wait(timeout=7200)
+        output = "".join(output_lines)
+
+        if process.returncode != 0:
             print(
-                f"Warning: cutechess-cli returned non-zero exit code: {result.returncode}"
+                f"  {Colors.YELLOW}Warning: cutechess-cli returned non-zero exit code: {process.returncode}{Colors.RESET}"
             )
 
     except subprocess.TimeoutExpired:
-        print(f"ERROR: Match timed out after 7200 seconds")
+        process.kill()
+        print(f"  {Colors.RED}ERROR: Match timed out after 7200 seconds{Colors.RESET}")
         return {
             "engine1": engine1_name,
             "engine2": engine2_name,
@@ -861,43 +2023,77 @@ def run_ci_match(
             "error": "timeout",
         }
 
-    # Parse results
-    wins1, wins2, draws = 0, 0, 0
+    # Read PGN file for detailed game records
+    pgn_content = ""
+    try:
+        with open(pgn_file.name, "r") as f:
+            pgn_content = f.read()
+    except Exception as e:
+        print(f"  {Colors.YELLOW}Warning: Error reading PGN file: {e}{Colors.RESET}")
 
-    # Find ALL score lines and use the LAST one (final result)
-    score_matches = re.findall(
-        rf"Score of {re.escape(engine1_name)} vs {re.escape(engine2_name)}: (\d+) - (\d+) - (\d+)",
-        output,
-    )
+    # If no games were tracked from real-time output, parse from PGN/output
+    if wins1 + wins2 + draws == 0:
+        print(
+            f"\n  {Colors.YELLOW}Warning: No games parsed from real-time output, using PGN{Colors.RESET}"
+        )
 
-    if score_matches:
-        # Use the last match (final score)
-        last_match = score_matches[-1]
-        wins1 = int(last_match[0])
-        wins2 = int(last_match[1])
-        draws = int(last_match[2])
-    else:
-        print(f"Warning: Could not parse score from cutechess output")
-        # Try PGN parsing
-        try:
-            with open(pgn_file.name, "r") as f:
-                pgn_content = f.read()
-            print(f"PGN file contents ({len(pgn_content)} bytes):")
-            print(pgn_content[:2000] if len(pgn_content) > 2000 else pgn_content)
+        # Parse individual games from PGN
+        parsed_games = _parse_pgn_games_standalone(pgn_content)
 
-            wins1 = pgn_content.count('[Result "1-0"]')
-            wins2 = pgn_content.count('[Result "0-1"]')
-            draws = pgn_content.count('[Result "1/2-1/2"]')
-        except Exception as e:
-            print(f"Error reading PGN file: {e}")
-        except:
-            pass
+        for i, game in enumerate(parsed_games, 1):
+            headers = game["headers"]
+            white = headers.get("White", engine1_name)
+            black = headers.get("Black", engine2_name)
+            game_result = headers.get("Result", "*")
+
+            if game_result == "1-0":
+                if white == engine1_name:
+                    wins1 += 1
+                else:
+                    wins2 += 1
+            elif game_result == "0-1":
+                if black == engine1_name:
+                    wins1 += 1
+                else:
+                    wins2 += 1
+            else:
+                draws += 1
+
+        # If still no games, try output parsing
+        if wins1 + wins2 + draws == 0:
+            score_matches = re.findall(
+                rf"Score of {re.escape(engine1_name)} vs {re.escape(engine2_name)}: (\d+) - (\d+) - (\d+)",
+                output,
+            )
+            if score_matches:
+                last_match = score_matches[-1]
+                wins1 = int(last_match[0])
+                wins2 = int(last_match[1])
+                draws = int(last_match[2])
+            else:
+                wins1 = pgn_content.count('[Result "1-0"]')
+                wins2 = pgn_content.count('[Result "0-1"]')
+                draws = pgn_content.count('[Result "1/2-1/2"]')
 
     # Cleanup
     try:
         os.unlink(pgn_file.name)
-    except:
+    except OSError:
         pass
+
+    # Print final match summary
+    total = wins1 + wins2 + draws
+    score_pct = (wins1 + draws * 0.5) / total * 100 if total > 0 else 50
+
+    print(f"\n{Colors.BOLD}{'=' * 70}{Colors.RESET}")
+    print(
+        f"{Colors.BOLD}  MATCH COMPLETE: {engine1_name} vs {engine2_name}{Colors.RESET}"
+    )
+    print(f"{Colors.BOLD}{'=' * 70}{Colors.RESET}")
+    print(
+        f"  {Colors.GREEN}Final Score: {wins1} - {draws} - {wins2}  [{score_pct:.1f}%]{Colors.RESET}"
+    )
+    print(f"{Colors.BOLD}{'=' * 70}{Colors.RESET}\n")
 
     match_result = {
         "engine1": engine1_name,
@@ -914,46 +2110,23 @@ def run_ci_match(
     with open(output_file, "w") as f:
         json.dump(match_result, f, indent=2)
 
-    print(f"Match complete: {wins1}-{wins2}-{draws}")
-    print(f"Results saved to: {output_file}")
+    print(f"  📁 Results saved to: {output_file}")
 
     return match_result
 
 
 def _create_hybrid_wrapper_file(metalfish_path: Path, wrapper_path: Path):
-    """Create a wrapper script that uses 'mcts' command (hybrid search) instead of 'go'."""
+    """Create a wrapper script that uses 'parallel_hybrid' command for parallel MCTS+AB."""
     wrapper_content = f"""#!/bin/bash
-# MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
+# MetalFish Hybrid wrapper - intercepts 'go' and runs 'parallel_hybrid' (parallel MCTS+AB) instead
 
 ENGINE="{metalfish_path}"
 
-# Read UCI commands and transform 'go' to 'mcts'
+# Read UCI commands and transform 'go' to 'parallel_hybrid'
 while IFS= read -r line; do
     if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mcts' for hybrid search
-        echo "mcts ${{line#go}}"
-    else
-        echo "$line"
-    fi
-done | "$ENGINE"
-"""
-    with open(wrapper_path, "w") as f:
-        f.write(wrapper_content)
-    os.chmod(wrapper_path, 0o755)
-
-
-def _create_mctsmt_wrapper_file(metalfish_path: Path, wrapper_path: Path):
-    """Create a wrapper script that uses 'mctsmt' command (multi-threaded MCTS) instead of 'go'."""
-    wrapper_content = f"""#!/bin/bash
-# MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
-
-ENGINE="{metalfish_path}"
-
-# Read UCI commands and transform 'go' to 'mctsmt threads=4'
-while IFS= read -r line; do
-    if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mctsmt threads=4' for multi-threaded MCTS
-        echo "mctsmt threads=4 ${{line#go}}"
+        # Replace 'go' with 'parallel_hybrid' for parallel hybrid search
+        echo "parallel_hybrid ${{line#go}}"
     else
         echo "$line"
     fi
@@ -965,17 +2138,17 @@ done | "$ENGINE"
 
 
 def _create_mcts_wrapper_file(metalfish_path: Path, wrapper_path: Path):
-    """Create a wrapper script that uses 'mcts' command instead of 'go'."""
+    """Create a wrapper script that uses 'mctsmt' command for pure GPU MCTS."""
     wrapper_content = f"""#!/bin/bash
-# MetalFish MCTS wrapper - intercepts 'go' and runs 'mcts' instead
+# MetalFish MCTS wrapper - intercepts 'go' and runs 'mctsmt' (GPU MCTS) instead
 
 ENGINE="{metalfish_path}"
 
-# Read UCI commands and transform 'go' to 'mcts'
+# Read UCI commands and transform 'go' to 'mctsmt threads=4'
 while IFS= read -r line; do
     if [[ "$line" == go* ]]; then
-        # Replace 'go' with 'mcts'
-        echo "mcts ${{line#go}}"
+        # Replace 'go' with 'mctsmt threads=4' for multi-threaded GPU MCTS
+        echo "mctsmt threads=4 ${{line#go}}"
     else
         echo "$line"
     fi
@@ -986,11 +2159,16 @@ done | "$ENGINE"
     os.chmod(wrapper_path, 0o755)
 
 
+def _create_mctsmt_wrapper_file(metalfish_path: Path, wrapper_path: Path):
+    """Alias for _create_mcts_wrapper_file for backwards compatibility."""
+    _create_mcts_wrapper_file(metalfish_path, wrapper_path)
+
+
 def aggregate_ci_results(results_dir: Path, output_file: Path = None) -> Dict[str, Any]:
     """Aggregate results from multiple CI match jobs."""
 
-    # Find all result JSON files
-    result_files = list(results_dir.glob("*.json"))
+    # Find all result JSON files (exclude summary.json)
+    result_files = [f for f in results_dir.glob("*.json") if f.name != "summary.json"]
 
     if not result_files:
         raise FileNotFoundError(f"No result files found in {results_dir}")
@@ -1000,16 +2178,27 @@ def aggregate_ci_results(results_dir: Path, output_file: Path = None) -> Dict[st
     engines = set()
 
     for result_file in result_files:
-        with open(result_file, "r") as f:
-            match = json.load(f)
+        try:
+            with open(result_file, "r") as f:
+                match = json.load(f)
 
-        if "error" not in match:
-            all_matches.append(match)
-            engines.add(match["engine1"])
-            engines.add(match["engine2"])
+            # Skip files that don't look like match results
+            if "engine1" not in match or "engine2" not in match:
+                continue
 
-    # Calculate Elo ratings
-    elo_calc = EloCalculator(anchor_engine="Patricia", anchor_elo=3500)
+            if "error" not in match:
+                all_matches.append(match)
+                engines.add(match["engine1"])
+                engines.add(match["engine2"])
+        except (json.JSONDecodeError, KeyError) as e:
+            print(
+                f"Warning: Skipping invalid result file {result_file}: {e}",
+                file=sys.stderr,
+            )
+            continue
+
+    # Calculate Elo ratings - use Patricia as anchor with updated Elo
+    elo_calc = EloCalculator(anchor_engine="Patricia", anchor_elo=3415)
 
     for match in all_matches:
         # Add individual game results
@@ -1101,15 +2290,32 @@ def generate_pr_comment(summary: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def requires_metal(engine_name: str) -> bool:
+    """Check if an engine requires Metal (macOS) to run."""
+    metalfish_engines = {"MetalFish-AB", "MetalFish-MCTS", "MetalFish-Hybrid"}
+    return engine_name in metalfish_engines
+
+
 def print_ci_engines(base_dir: Path, stockfish_levels: List[int] = None):
-    """Print available engines as JSON for CI matrix generation."""
+    """Print available engines as JSON for CI matrix generation.
+    
+    Includes 'requires_metal' flag for each match to determine runner OS.
+    Matches involving MetalFish engines require macOS, others can run on Ubuntu.
+    """
     configs = get_engine_configs(base_dir, stockfish_levels)
     engines = list(configs.keys())
     pairs = list_engine_pairs(engines)
 
     output = {
         "engines": engines,
-        "pairs": [{"engine1": p[0], "engine2": p[1]} for p in pairs],
+        "pairs": [
+            {
+                "engine1": p[0], 
+                "engine2": p[1],
+                "requires_metal": requires_metal(p[0]) or requires_metal(p[1])
+            } 
+            for p in pairs
+        ],
         "matrix": [f"{p[0]}__vs__{p[1]}" for p in pairs],
     }
 
@@ -1145,8 +2351,8 @@ def main():
         "--stockfish-levels",
         "-s",
         type=str,
-        default="1,5,10,15,20",
-        help="Comma-separated Stockfish skill levels to test (default: 1,5,10,15,20)",
+        default=None,
+        help="Comma-separated Stockfish skill levels to test (default: from config file)",
     )
     parser.add_argument(
         "--quick",
@@ -1169,6 +2375,18 @@ def main():
     )
     parser.add_argument("--engine1", type=str, help="First engine name for CI match")
     parser.add_argument("--engine2", type=str, help="Second engine name for CI match")
+    parser.add_argument(
+        "--engine1-options",
+        type=str,
+        default=None,
+        help="UCI options for engine1 as key=value pairs separated by commas (e.g., 'Threads=12,Hash=1024')",
+    )
+    parser.add_argument(
+        "--engine2-options",
+        type=str,
+        default=None,
+        help="UCI options for engine2 as key=value pairs separated by commas (e.g., 'Threads=1,Hash=128')",
+    )
     parser.add_argument(
         "--output", "-o", type=str, help="Output file for CI match results (JSON)"
     )
@@ -1207,8 +2425,10 @@ def main():
 
     print(f"Base directory: {base_dir.absolute()}", file=sys.stderr)
 
-    # Parse Stockfish levels
-    stockfish_levels = [int(x) for x in args.stockfish_levels.split(",")]
+    # Parse Stockfish levels (None means use config file defaults)
+    stockfish_levels = None
+    if args.stockfish_levels:
+        stockfish_levels = [int(x) for x in args.stockfish_levels.split(",")]
 
     # CI mode: list engines
     if args.ci_list_engines:
@@ -1234,9 +2454,30 @@ def main():
             args.games = 10
             args.time = "5+0.05"
 
+        # Parse custom UCI options
+        engine1_options = {}
+        engine2_options = {}
+        if args.engine1_options:
+            for opt in args.engine1_options.split(","):
+                if "=" in opt:
+                    key, value = opt.split("=", 1)
+                    engine1_options[key.strip()] = value.strip()
+        if args.engine2_options:
+            for opt in args.engine2_options.split(","):
+                if "=" in opt:
+                    key, value = opt.split("=", 1)
+                    engine2_options[key.strip()] = value.strip()
+
         try:
             run_ci_match(
-                base_dir, args.engine1, args.engine2, args.games, args.time, output_file
+                base_dir,
+                args.engine1,
+                args.engine2,
+                args.games,
+                args.time,
+                output_file,
+                engine1_options=engine1_options if engine1_options else None,
+                engine2_options=engine2_options if engine2_options else None,
             )
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
@@ -1294,11 +2535,13 @@ def main():
             )
         )
 
-        # Hybrid MCTS ('mcts' command)
-        hybrid_wrapper = base_dir / "tools" / "metalfish_hybrid_wrapper.sh"
-        tournament._create_hybrid_wrapper(metalfish_path, hybrid_wrapper)
+        # Hybrid MCTS - now uses UseHybridSearch UCI option instead of wrapper
         tournament.add_engine(
-            EngineConfig(name="MetalFish-Hybrid", cmd=str(hybrid_wrapper), options={})
+            EngineConfig(
+                name="MetalFish-Hybrid",
+                cmd=str(metalfish_path),
+                options={"Threads": "1", "Hash": "128", "UseHybridSearch": "true"},
+            )
         )
 
         # Multi-threaded MCTS ('mctsmt' command)

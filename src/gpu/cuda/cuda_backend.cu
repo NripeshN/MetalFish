@@ -6,7 +6,7 @@
 
   Implements the GPU backend interface for NVIDIA CUDA.
   Optimized for modern NVIDIA GPUs with tensor cores when available.
-  
+
   Note: This implementation uses only the CUDA Runtime API to avoid
   dependency on libcuda.so (driver library) which requires an actual GPU.
   Runtime kernel compilation (NVRTC) is optional and guarded.
@@ -15,12 +15,18 @@
 #ifdef USE_CUDA
 
 #include "cuda_backend.h"
-#include <cuda_runtime.h>
 #include <atomic>
 #include <cstring>
+#include <cuda_runtime.h>
 #include <iostream>
 #include <mutex>
 #include <sstream>
+
+#ifdef __linux__
+#include <unistd.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
 
 // Only include driver API and NVRTC if not building without them
 #ifndef NO_CUDA_DRIVER_API
@@ -248,17 +254,15 @@ void CUDACommandEncoder::dispatch_threadgroups(size_t groups_x, size_t groups_y,
                    args.data(), 0, stream_);
 }
 
-void CUDACommandEncoder::barrier() {
-  cudaStreamSynchronize(stream_);
-}
+void CUDACommandEncoder::barrier() { cudaStreamSynchronize(stream_); }
 
 // ============================================================================
 // CUDABackend Implementation
 // ============================================================================
 
 CUDABackend::CUDABackend()
-    : device_id_(-1), compute_capability_major_(0), compute_capability_minor_(0),
-      total_memory_(0), multiprocessor_count_(0),
+    : device_id_(-1), compute_capability_major_(0),
+      compute_capability_minor_(0), total_memory_(0), multiprocessor_count_(0),
       unified_memory_supported_(false), default_stream_(nullptr),
       stream_index_(0), allocated_memory_(0), peak_memory_(0),
       initialized_(false) {}
@@ -332,8 +336,9 @@ bool CUDABackend::initialize() {
   initialized_ = true;
 
   std::cout << "[CUDA Backend] Initialized: " << device_name_ << std::endl;
-  std::cout << "[CUDA Backend] Compute Capability: " << compute_capability_major_
-            << "." << compute_capability_minor_ << std::endl;
+  std::cout << "[CUDA Backend] Compute Capability: "
+            << compute_capability_major_ << "." << compute_capability_minor_
+            << std::endl;
   std::cout << "[CUDA Backend] Total Memory: " << total_memory_ / (1024 * 1024)
             << " MB" << std::endl;
   std::cout << "[CUDA Backend] Multiprocessors: " << multiprocessor_count_
@@ -389,6 +394,63 @@ size_t CUDABackend::max_threadgroup_memory() const {
   return prop.sharedMemPerBlock;
 }
 
+size_t CUDABackend::recommended_working_set_size() const {
+  // For CUDA, use ~75% of total GPU memory as recommended working set
+  return total_memory_ * 3 / 4;
+}
+
+size_t CUDABackend::total_system_memory() const {
+  // Query system RAM
+#ifdef __linux__
+  long pages = sysconf(_SC_PHYS_PAGES);
+  long page_size = sysconf(_SC_PAGE_SIZE);
+  return static_cast<size_t>(pages) * static_cast<size_t>(page_size);
+#elif defined(_WIN32)
+  MEMORYSTATUSEX status;
+  status.dwLength = sizeof(status);
+  GlobalMemoryStatusEx(&status);
+  return status.ullTotalPhys;
+#else
+  return 16ULL * 1024 * 1024 * 1024; // Default 16GB
+#endif
+}
+
+int CUDABackend::gpu_core_count() const {
+  // Return CUDA cores (SMs * cores per SM)
+  // Cores per SM varies by architecture:
+  // Pascal (6.x): 128, Volta/Turing (7.x): 64, Ampere (8.x): 128, Ada (8.9):
+  // 128
+  int cores_per_sm = 128;
+  if (compute_capability_major_ == 7) {
+    cores_per_sm = 64; // Volta/Turing
+  }
+  return multiprocessor_count_ * cores_per_sm;
+}
+
+int CUDABackend::max_threads_per_simd_group() const {
+  // CUDA warp size is always 32
+  return 32;
+}
+
+int CUDABackend::recommended_batch_size() const {
+  // NVIDIA GPUs benefit from larger batches than Apple Silicon
+  // Scale with number of SMs
+  int base_batch = multiprocessor_count_ * 8;
+
+  // Consider memory constraints
+  size_t memory_per_position = 4 * 1024; // ~4KB per position
+  int memory_limited_batch =
+      static_cast<int>(total_memory_ / (8 * memory_per_position));
+
+  int batch = std::min(base_batch, memory_limited_batch);
+
+  // Round to multiple of warp size (32)
+  batch = ((batch + 31) / 32) * 32;
+
+  // Clamp to reasonable range (NVIDIA can handle larger batches)
+  return std::max(64, std::min(1024, batch));
+}
+
 std::unique_ptr<Buffer> CUDABackend::create_buffer(size_t size, MemoryMode mode,
                                                    BufferUsage usage) {
   if (!initialized_ || size == 0) {
@@ -428,9 +490,8 @@ std::unique_ptr<Buffer> CUDABackend::create_buffer(size_t size, MemoryMode mode,
   return std::make_unique<CUDABuffer>(device_ptr, host_ptr, size, unified);
 }
 
-std::unique_ptr<Buffer> CUDABackend::create_buffer(const void *data,
-                                                   size_t size,
-                                                   MemoryMode mode) {
+std::unique_ptr<Buffer>
+CUDABackend::create_buffer(const void *data, size_t size, MemoryMode mode) {
   auto buffer = create_buffer(size, mode);
   if (buffer && data) {
     auto *cuda_buffer = static_cast<CUDABuffer *>(buffer.get());
@@ -461,9 +522,8 @@ CUDABackend::create_kernel(const std::string &name,
   auto mod_it = modules_.find(library_name);
   if (mod_it != modules_.end()) {
     CUfunction func;
-    CUresult result =
-        cuModuleGetFunction(&func, static_cast<CUmodule>(mod_it->second),
-                            name.c_str());
+    CUresult result = cuModuleGetFunction(
+        &func, static_cast<CUmodule>(mod_it->second), name.c_str());
     if (result == CUDA_SUCCESS) {
       kernels_[key] = func;
       return std::make_unique<CUDAKernel>(name, func);
@@ -480,7 +540,9 @@ bool CUDABackend::compile_library(const std::string &name,
                                   const std::string &source) {
 #if defined(NO_NVRTC) || defined(NO_CUDA_DRIVER_API)
   // Runtime compilation not available without NVRTC and driver API
-  std::cerr << "[CUDA] Runtime compilation not available (NO_NVRTC or NO_CUDA_DRIVER_API defined)" << std::endl;
+  std::cerr << "[CUDA] Runtime compilation not available (NO_NVRTC or "
+               "NO_CUDA_DRIVER_API defined)"
+            << std::endl;
   return false;
 #else
   if (!initialized_) {
@@ -493,9 +555,9 @@ bool CUDABackend::compile_library(const std::string &name,
                                  nullptr, nullptr));
 
   // Set compilation options
-  std::string arch_opt =
-      "--gpu-architecture=compute_" + std::to_string(compute_capability_major_) +
-      std::to_string(compute_capability_minor_);
+  std::string arch_opt = "--gpu-architecture=compute_" +
+                         std::to_string(compute_capability_major_) +
+                         std::to_string(compute_capability_minor_);
   const char *opts[] = {arch_opt.c_str(), "--std=c++17", "-default-device"};
 
   // Compile
@@ -528,7 +590,8 @@ bool CUDABackend::compile_library(const std::string &name,
 
   // Load module
   CUmodule module;
-  CUresult result = cuModuleLoadDataEx(&module, ptx.data(), 0, nullptr, nullptr);
+  CUresult result =
+      cuModuleLoadDataEx(&module, ptx.data(), 0, nullptr, nullptr);
   if (result != CUDA_SUCCESS) {
     std::cerr << "[CUDA] Failed to load module: " << name << std::endl;
     return false;
@@ -548,7 +611,9 @@ bool CUDABackend::load_library(const std::string &name,
                                const std::string &path) {
 #ifdef NO_CUDA_DRIVER_API
   // Library loading not available without driver API
-  std::cerr << "[CUDA] Library loading not available (NO_CUDA_DRIVER_API defined)" << std::endl;
+  std::cerr
+      << "[CUDA] Library loading not available (NO_CUDA_DRIVER_API defined)"
+      << std::endl;
   return false;
 #else
   if (!initialized_) {
