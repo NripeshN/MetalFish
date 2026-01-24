@@ -15,6 +15,8 @@
 #ifdef USE_CUDA
 
 #include "cuda_backend.h"
+#include "cuda_memory.h"
+#include "cuda_profiling.h"
 #include <atomic>
 #include <cstring>
 #include <cuda_runtime.h>
@@ -88,11 +90,11 @@ CUDABuffer::CUDABuffer(void *device_ptr, void *host_ptr, size_t size,
 CUDABuffer::~CUDABuffer() {
   if (device_ptr_) {
     if (unified_) {
-      cudaFree(device_ptr_);
+      CUDA::UnifiedMemoryManager::free_unified(device_ptr_);
     } else {
       cudaFree(device_ptr_);
       if (host_ptr_) {
-        cudaFreeHost(host_ptr_);
+        CUDA::PinnedMemoryManager::free_pinned(host_ptr_);
       }
     }
   }
@@ -263,7 +265,8 @@ void CUDACommandEncoder::barrier() { cudaStreamSynchronize(stream_); }
 CUDABackend::CUDABackend()
     : device_id_(-1), compute_capability_major_(0),
       compute_capability_minor_(0), total_memory_(0), multiprocessor_count_(0),
-      unified_memory_supported_(false), default_stream_(nullptr),
+      unified_memory_supported_(false), tensor_cores_available_(false),
+      int8_tensor_cores_available_(false), default_stream_(nullptr),
       stream_index_(0), allocated_memory_(0), peak_memory_(0),
       initialized_(false) {}
 
@@ -333,6 +336,9 @@ bool CUDABackend::initialize() {
     cudaStreamCreate(&parallel_streams_[i]);
   }
 
+  // Detect architecture-specific features
+  detect_architecture_features();
+  
   initialized_ = true;
 
   std::cout << "[CUDA Backend] Initialized: " << device_name_ << std::endl;
@@ -345,8 +351,49 @@ bool CUDABackend::initialize() {
             << std::endl;
   std::cout << "[CUDA Backend] Unified Memory: "
             << (unified_memory_supported_ ? "Yes" : "No") << std::endl;
+  std::cout << "[CUDA Backend] Tensor Cores: "
+            << (tensor_cores_available_ ? "Yes" : "No") << std::endl;
+  if (tensor_cores_available_) {
+    std::cout << "[CUDA Backend] INT8 Tensor Cores: "
+              << (int8_tensor_cores_available_ ? "Yes" : "No") << std::endl;
+  }
 
   return true;
+}
+
+void CUDABackend::detect_architecture_features() {
+  // Detect tensor core support
+  // Volta (SM 7.0) and later have FP16 tensor cores
+  tensor_cores_available_ = compute_capability_major_ >= 7;
+  
+  // Turing (SM 7.5) and later have INT8 tensor cores
+  int8_tensor_cores_available_ = (compute_capability_major_ > 7) || 
+                                  (compute_capability_major_ == 7 && 
+                                   compute_capability_minor_ >= 5);
+  
+  // Print architecture-specific information
+  std::string arch_name;
+  if (compute_capability_major_ == 6 && compute_capability_minor_ == 0) {
+    arch_name = "Pascal (GP100)";
+  } else if (compute_capability_major_ == 6 && compute_capability_minor_ == 1) {
+    arch_name = "Pascal (GP10x)";
+  } else if (compute_capability_major_ == 7 && compute_capability_minor_ == 0) {
+    arch_name = "Volta";
+  } else if (compute_capability_major_ == 7 && compute_capability_minor_ == 5) {
+    arch_name = "Turing";
+  } else if (compute_capability_major_ == 8 && compute_capability_minor_ == 0) {
+    arch_name = "Ampere (A100)";
+  } else if (compute_capability_major_ == 8 && compute_capability_minor_ == 6) {
+    arch_name = "Ampere (GA10x)";
+  } else if (compute_capability_major_ == 8 && compute_capability_minor_ == 9) {
+    arch_name = "Ada Lovelace";
+  } else if (compute_capability_major_ == 9 && compute_capability_minor_ == 0) {
+    arch_name = "Hopper";
+  } else {
+    arch_name = "Unknown";
+  }
+  
+  std::cout << "[CUDA Backend] Architecture: " << arch_name << std::endl;
 }
 
 void CUDABackend::cleanup() {
@@ -462,11 +509,17 @@ std::unique_ptr<Buffer> CUDABackend::create_buffer(size_t size, MemoryMode mode,
   bool unified = false;
 
   if (mode == MemoryMode::Shared && unified_memory_supported_) {
-    // Use unified memory
-    cudaError_t err = cudaMallocManaged(&device_ptr, size);
-    if (err != cudaSuccess) {
+    // Use optimized unified memory with hints
+    device_ptr = CUDA::UnifiedMemoryManager::allocate_unified(size, device_id_);
+    if (!device_ptr) {
       return nullptr;
     }
+    
+    // For read-only buffers (like weights), use read-mostly hint
+    if (usage == BufferUsage::Static) {
+      cudaMemAdvise(device_ptr, size, cudaMemAdviseSetReadMostly, device_id_);
+    }
+    
     unified = true;
   } else {
     // Allocate device and host memory separately
@@ -476,8 +529,9 @@ std::unique_ptr<Buffer> CUDABackend::create_buffer(size_t size, MemoryMode mode,
     }
 
     if (mode != MemoryMode::Private) {
-      err = cudaMallocHost(&host_ptr, size);
-      if (err != cudaSuccess) {
+      // Use pinned memory for faster transfers
+      host_ptr = CUDA::PinnedMemoryManager::allocate_pinned(size);
+      if (!host_ptr) {
         cudaFree(device_ptr);
         return nullptr;
       }

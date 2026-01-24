@@ -169,6 +169,10 @@ public:
   int compute_capability_minor() const { return compute_capability_minor_; }
   size_t total_memory() const { return total_memory_; }
   int multiprocessor_count() const { return multiprocessor_count_; }
+  bool has_tensor_cores() const { return tensor_cores_available_; }
+  bool has_int8_tensor_cores() const { return int8_tensor_cores_available_; }
+  bool has_warp_shuffle() const { return compute_capability_major_ >= 3; }
+  bool has_cooperative_groups() const { return compute_capability_major_ >= 6; }
 
 private:
   CUDABackend();
@@ -176,6 +180,7 @@ private:
 
   bool initialize();
   void cleanup();
+  void detect_architecture_features();
 
   int device_id_;
   std::string device_name_;
@@ -184,6 +189,8 @@ private:
   size_t total_memory_;
   int multiprocessor_count_;
   bool unified_memory_supported_;
+  bool tensor_cores_available_;
+  bool int8_tensor_cores_available_;
 
   cudaStream_t default_stream_;
   std::vector<cudaStream_t> parallel_streams_;
