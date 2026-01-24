@@ -486,7 +486,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev libqt6core6 make g++ git curl unzip
+          sudo apt-get install -y cmake ninja-build qtbase5-dev qt5-qmake make g++ git curl unzip
           pip3 install chess
 
       - name: Clone and Build cutechess-cli
@@ -499,7 +499,8 @@ jobs:
 
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DWITH_TESTS=OFF
+            -DWITH_TESTS=OFF \
+            -DWITH_GUI=OFF
           ninja cutechess-cli
 
           # Test it works
