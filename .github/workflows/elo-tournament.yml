@@ -383,28 +383,28 @@ jobs:
           # Extract the matrix arrays - split by requires_metal
           # macOS matrix: matches that require Metal (involve MetalFish)
           MATRIX_MACOS=$(cat /tmp/engines.json | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-macos_matches = [
-    {'match': m, 'engine1': p['engine1'], 'engine2': p['engine2']}
-    for m, p in zip(d['matrix'], d['pairs'])
-    if p.get('requires_metal', False)
-]
-print(json.dumps({'include': macos_matches}))
-")
+          import sys, json
+          d = json.load(sys.stdin)
+          macos_matches = [
+              {\"match\": m, \"engine1\": p[\"engine1\"], \"engine2\": p[\"engine2\"]}
+              for m, p in zip(d[\"matrix\"], d[\"pairs\"])
+              if p.get(\"requires_metal\", False)
+          ]
+          print(json.dumps({\"include\": macos_matches}))
+          ")
           echo "matrix_macos=$MATRIX_MACOS" >> $GITHUB_OUTPUT
 
           # Linux matrix: matches that don't require Metal (no MetalFish)
           MATRIX_LINUX=$(cat /tmp/engines.json | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-linux_matches = [
-    {'match': m, 'engine1': p['engine1'], 'engine2': p['engine2']}
-    for m, p in zip(d['matrix'], d['pairs'])
-    if not p.get('requires_metal', False)
-]
-print(json.dumps({'include': linux_matches}))
-")
+          import sys, json
+          d = json.load(sys.stdin)
+          linux_matches = [
+              {\"match\": m, \"engine1\": p[\"engine1\"], \"engine2\": p[\"engine2\"]}
+              for m, p in zip(d[\"matrix\"], d[\"pairs\"])
+              if not p.get(\"requires_metal\", False)
+          ]
+          print(json.dumps({\"include\": linux_matches}))
+          ")
           echo "matrix_linux=$MATRIX_LINUX" >> $GITHUB_OUTPUT
 
           # Print for debugging
