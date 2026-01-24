@@ -16,6 +16,8 @@
 #include <cuda_fp16.h>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <unordered_map>
 
 namespace MetalFish {
 namespace GPU {

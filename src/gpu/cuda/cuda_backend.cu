@@ -368,9 +368,9 @@ void CUDABackend::detect_architecture_features() {
   tensor_cores_available_ = compute_capability_major_ >= 7;
   
   // Turing (SM 7.5) and later have INT8 tensor cores
-  int8_tensor_cores_available_ = (compute_capability_major_ > 7) || 
-                                  (compute_capability_major_ == 7 && 
-                                   compute_capability_minor_ >= 5);
+  this->int8_tensor_cores_available_ = (compute_capability_major_ > 7) || 
+                                        (compute_capability_major_ == 7 && 
+                                         compute_capability_minor_ >= 5);
   
   // Print architecture-specific information
   std::string arch_name;

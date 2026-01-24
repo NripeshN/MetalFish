@@ -75,7 +75,15 @@ __global__ void persistent_nnue_evaluator(
     // Try to get work
     if (*queue_tail <= *queue_head) {
       // No work available, wait briefly
+      // Use __nanosleep on SM 7.0+, busy-wait on older GPUs
+#if __CUDA_ARCH__ >= 700
       __nanosleep(1000);  // Sleep 1 microsecond
+#else
+      // Busy-wait for compatibility with older GPUs
+      for (int i = 0; i < 100; i++) {
+        __threadfence();
+      }
+#endif
       continue;
     }
     

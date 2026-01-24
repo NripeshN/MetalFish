@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <iostream>
 
 // Include WMMA (Warp Matrix Multiply-Accumulate) API
 #if __CUDA_ARCH__ >= 700
@@ -188,36 +189,21 @@ __global__ void fc0_layer_tensor_core(
   }
   __syncthreads();
   
-  // Use tensor cores for the matrix multiply
-  // Each warp handles one output neuron
+  // Compute dot product between input_fp16 (length 2 * hidden_dim) and
+  // weights_fp16 row for this output, using warp-level primitives
+  // Note: This version avoids WMMA misuse and uses simple FP16 operations
   int warp_id = threadIdx.x / 32;
   int lane = threadIdx.x % 32;
   
   if (warp_id < (FC0_OUT + 1)) {
     int out_idx = warp_id;
     
-    fragment<matrix_a, WMMA_M, WMMA_N, WMMA_K, half, row_major> a_frag;
-    fragment<matrix_b, WMMA_M, WMMA_N, WMMA_K, half, row_major> b_frag;
-    fragment<accumulator, WMMA_M, WMMA_N, WMMA_K, half> c_frag;
-    
-    fill_fragment(c_frag, __float2half(0.0f));
-    
-    // Process in tiles
-    // WMMA operations require all threads in the warp to participate
-    for (int k = 0; k < 2 * hidden_dim; k += WMMA_K) {
-      if (k < 2 * hidden_dim) {
-        load_matrix_sync(a_frag, input_fp16 + k, 2 * hidden_dim);
-        load_matrix_sync(b_frag, weights_fp16 + out_idx * 2 * hidden_dim + k, 
-                        2 * hidden_dim);
-        mma_sync(c_frag, a_frag, b_frag, c_frag);
-      }
-    }
-    
-    // Reduce across fragment elements using all threads in the warp
-    // Each thread in the warp has some fragment elements
+    // Each thread in the warp accumulates over a strided subset of features
     half local_sum = __float2half(0.0f);
-    for (int i = 0; i < c_frag.num_elements; i++) {
-      local_sum = __hadd(local_sum, c_frag.x[i]);
+    for (int k = lane; k < 2 * hidden_dim; k += warpSize) {
+      half in_val = input_fp16[k];
+      half w_val = weights_fp16[out_idx * 2 * hidden_dim + k];
+      local_sum = __hadd(local_sum, __hmul(in_val, w_val));
     }
     
     // Warp-level reduction to get total sum
