@@ -11,6 +11,7 @@
 #ifndef USE_METAL
 
 #include "backend.h"
+#include "gpu_nnue_integration.h"
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -229,5 +230,19 @@ double ScopedTimer::elapsed_ms() const {
 
 } // namespace GPU
 } // namespace MetalFish
+
+// ============================================================================
+// GPUTuningParams Implementation (CPU fallback)
+// ============================================================================
+
+namespace MetalFish::GPU {
+
+EvalStrategy GPUTuningParams::select_strategy(int batch_size) const {
+  // CPU fallback always uses CPU
+  (void)batch_size;
+  return EvalStrategy::CPU_FALLBACK;
+}
+
+} // namespace MetalFish::GPU
 
 #endif // !USE_METAL

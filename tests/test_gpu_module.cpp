@@ -100,14 +100,21 @@ void test_tuning() {
     params.simd_threshold = 512;
     params.gpu_extract_threshold = 2048;
 
-    EvalStrategy small = params.select_strategy(2);
-    EXPECT(tc, small == EvalStrategy::CPU_FALLBACK);
+    // Strategy selection depends on whether GPU is available
+    if (Backend::available()) {
+      EvalStrategy small = params.select_strategy(2);
+      EXPECT(tc, small == EvalStrategy::CPU_FALLBACK);
 
-    EvalStrategy medium = params.select_strategy(100);
-    EXPECT(tc, medium == EvalStrategy::GPU_STANDARD);
+      EvalStrategy medium = params.select_strategy(100);
+      EXPECT(tc, medium == EvalStrategy::GPU_STANDARD);
 
-    EvalStrategy large = params.select_strategy(1000);
-    EXPECT(tc, large == EvalStrategy::GPU_SIMD);
+      EvalStrategy large = params.select_strategy(1000);
+      EXPECT(tc, large == EvalStrategy::GPU_SIMD);
+    } else {
+      // Without GPU, all strategies should fall back to CPU
+      EvalStrategy any = params.select_strategy(100);
+      EXPECT(tc, any == EvalStrategy::CPU_FALLBACK);
+    }
   }
 }
 
