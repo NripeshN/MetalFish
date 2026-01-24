@@ -403,7 +403,8 @@ if(BUILD_TESTS)
      AND METAL_CPP_AVAILABLE)
     target_link_libraries(
       metalfish_tests ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
-      ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+      ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK}
+      ${ACCELERATE_FRAMEWORK})
   endif()
 
   add_test(NAME metalfish_tests COMMAND metalfish_tests)

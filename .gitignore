@@ -45,6 +45,7 @@ reference/
 
 # build files
 build/
+_codeql_build_dir/
 
 # tournament results files (generated output)
 results/
