@@ -2,12 +2,12 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Implementation of the Stockfish-to-MCTS adapter layer.
+  Implementation of the position adapter layer for MCTS.
 
   Licensed under GPL-3.0
 */
 
-#include "stockfish_adapter.h"
+#include "position_adapter.h"
 #include "../uci/uci.h"
 #include <algorithm>
 #include <cmath>
@@ -68,7 +68,7 @@ void MCTSPosition::set_from_fen(const std::string &fen) {
 
 std::string MCTSPosition::fen() const { return pos_.fen(); }
 
-void MCTSPosition::do_move(MCTSMove move) { do_move(move.to_stockfish()); }
+void MCTSPosition::do_move(MCTSMove move) { do_move(move.to_internal()); }
 
 void MCTSPosition::do_move(Move move) {
   state_stack_.push_back(StateInfo());
@@ -89,7 +89,7 @@ MCTSMoveList MCTSPosition::generate_legal_moves() const {
   MoveList<LEGAL> moves(pos_);
 
   for (const auto &m : moves) {
-    result.push_back(MCTSMove::FromStockfish(m));
+    result.push_back(MCTSMove::FromInternal(m));
   }
 
   return result;
@@ -144,7 +144,7 @@ GameResult MCTSPosition::get_game_result() const {
 }
 
 int MCTSPosition::repetition_count() const {
-  // Simplified - use Stockfish's built-in repetition detection
+  // Simplified - use built-in repetition detection
   return pos_.is_draw(0) ? 2 : 0;
 }
 
@@ -182,7 +182,7 @@ void MCTSPositionHistory::reset(const std::string &fen,
   for (const auto &move_str : moves) {
     // Parse move from UCI string
     Move m =
-        UCIEngine::to_move(positions_.back().stockfish_position(), move_str);
+        UCIEngine::to_move(positions_.back().internal_position(), move_str);
     if (m != Move::none()) {
       do_move(m);
     }
@@ -190,13 +190,13 @@ void MCTSPositionHistory::reset(const std::string &fen,
 }
 
 void MCTSPositionHistory::do_move(MCTSMove move) {
-  do_move(move.to_stockfish());
+  do_move(move.to_internal());
 }
 
 void MCTSPositionHistory::do_move(Move move) {
   positions_.push_back(positions_.back());
   positions_.back().do_move(move);
-  moves_.push_back(MCTSMove::FromStockfish(move));
+  moves_.push_back(MCTSMove::FromInternal(move));
 }
 
 int MCTSPositionHistory::compute_repetitions() const {
@@ -226,11 +226,11 @@ MCTSMove MCTSPositionHistory::last_move() const {
 // ============================================================================
 
 std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
-  // Lc0 uses 112 input planes of 8x8 = 7168 values
+  // Uses 112 input planes of 8x8 = 7168 values
   // We'll use a simplified encoding compatible with our GPU NNUE
   std::vector<float> planes(kTotalPlanes * 64, 0.0f);
 
-  const Position &p = pos.stockfish_position();
+  const Position &p = pos.internal_position();
   Color us = p.side_to_move();
   Color them = ~us;
 
@@ -242,7 +242,7 @@ std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
 
       while (bb) {
         Square sq = pop_lsb(bb);
-        // Flip square if black to move (Lc0 convention)
+        // Flip square if black to move (standard convention)
         if (us == BLACK)
           sq = flip_rank(sq);
         planes[plane_idx * 64 + sq] = 1.0f;
@@ -258,7 +258,7 @@ std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
     std::fill_n(planes.data() + 12 * 64, 64, 1.0f);
   }
 
-  // Castling rights (planes 104-107 in Lc0, we'll use 13-16)
+  // Castling rights (planes 104-107, we'll use 13-16)
   if (pos.can_castle_kingside(us))
     std::fill_n(planes.data() + 13 * 64, 64, 1.0f);
   if (pos.can_castle_queenside(us))
@@ -331,11 +331,11 @@ MCTSEncoder::decode_policy(const MCTSPosition &pos, const float *policy_output,
 }
 
 int MCTSEncoder::move_to_policy_index(const MCTSPosition &pos, MCTSMove move) {
-  // Lc0 uses a 1858-element policy vector
+  // Uses a 1858-element policy vector
   // Encoding: from_square * 73 + move_type
   // Move types: 56 queen moves + 8 knight moves + 9 underpromotions
 
-  Move m = move.to_stockfish();
+  Move m = move.to_internal();
   Square from = m.from_sq();
   Square to = m.to_sq();
 

@@ -59,12 +59,12 @@ constexpr size_t CACHE_LINE_SIZE = 128; // Apple Silicon M1/M2/M3
 constexpr size_t CACHE_LINE_SIZE = 64; // x86-64
 #endif
 
-// Lc0-style Edge with compressed policy (16-bit) for memory efficiency
-// Policy compression from Lc0: 5-bit exponent + 11-bit significand
+// MCTS Edge with compressed policy (16-bit) for memory efficiency
+// Policy compression using 5-bit exponent + 11-bit significand
 struct alignas(CACHE_LINE_SIZE) TSEdge {
   Move move = Move::none();
 
-  // Compressed policy storage (Lc0 style) - saves 2 bytes per edge
+  // Compressed policy storage - saves 2 bytes per edge
   uint16_t p_compressed_ = 0;
 
   // Child node pointer
@@ -84,8 +84,8 @@ struct alignas(CACHE_LINE_SIZE) TSEdge {
       : move(other.move), p_compressed_(other.p_compressed_),
         child(other.child.load(std::memory_order_relaxed)) {}
 
-  // Lc0-style policy compression/decompression
-  // Source: Lc0 node.cc Edge::SetP/GetP
+  // MCTS policy compression/decompression
+  // Internal implementation of 16-bit compressed policy encode/decode
   void SetPolicy(float p) {
     // Policy priors (P) are stored in a compressed 16-bit format.
     // We store bits 27..12 of the IEEE 754 float representation.
@@ -112,7 +112,7 @@ struct alignas(CACHE_LINE_SIZE) TSEdge {
 
 class alignas(CACHE_LINE_SIZE) ThreadSafeNode {
 public:
-  // Lc0-style terminal types
+  // MCTS terminal types
   enum class Terminal : uint8_t {
     NonTerminal = 0,
     EndOfGame = 1, // Checkmate or stalemate
@@ -138,7 +138,7 @@ public:
 
   void create_edges(const MoveList<LEGAL> &moves);
 
-  // Lc0-style statistics accessors
+  // MCTS statistics accessors
   uint32_t GetN() const { return n_.load(std::memory_order_acquire); }
   uint32_t GetNInFlight() const {
     return n_in_flight_.load(std::memory_order_acquire);
@@ -149,7 +149,7 @@ public:
   }
   int GetNStarted() const { return GetN() + GetNInFlight(); }
 
-  // Lc0-style Q/WL/D/M accessors
+  // MCTS Q/WL/D/M accessors
   float GetQ(float draw_score = 0.0f) const {
     return wl_.load(std::memory_order_acquire) +
            draw_score * d_.load(std::memory_order_acquire);
@@ -173,7 +173,7 @@ public:
     n_in_flight_.fetch_sub(count, std::memory_order_acq_rel);
   }
 
-  // Lc0-style FinalizeScoreUpdate
+  // MCTS FinalizeScoreUpdate
   // Updates Q using running average: Q = (Q * N + V) / (N + 1)
   void FinalizeScoreUpdate(float v, float d, float m, int multivisit = 1);
 
@@ -204,18 +204,18 @@ public:
     edge_index_ = -1;
   }
 
-  // Lc0-style visited policy calculation
+  // MCTS visited policy calculation
   float GetVisitedPolicy() const;
 
   // Get edge to this node from parent
   TSEdge *GetOwnEdge() const;
 
-  // Lc0-style solid tree optimization
+  // MCTS solid tree optimization
   // Converts linked-list children to contiguous array for better cache locality
   // Returns true if solidification was performed
   bool MakeSolid();
 
-  // Check if node should be solidified (Lc0 threshold: 100 visits)
+  // Check if node should be solidified (threshold: 100 visits)
   bool ShouldSolidify() const {
     return !is_solid_.load(std::memory_order_acquire) &&
            GetN() >= SOLID_TREE_THRESHOLD &&
@@ -225,7 +225,7 @@ public:
   // Check if node is already solid
   bool IsSolid() const { return is_solid_.load(std::memory_order_acquire); }
 
-  // Lc0's solid tree threshold
+  // solid tree threshold
   static constexpr uint32_t SOLID_TREE_THRESHOLD = 100;
 
 private:
@@ -236,7 +236,7 @@ private:
   std::atomic<int> num_edges_{0};
 
   // Hot path statistics - cache-line aligned
-  // Using double for WL (like Lc0) for better precision during averaging
+  // Using double for WL  for better precision during averaging
   alignas(CACHE_LINE_SIZE) std::atomic<uint32_t> n_{0};
   std::atomic<uint32_t> n_in_flight_{0};
   std::atomic<float> wl_{0.0f}; // Win-Loss (Q value without draw score)
@@ -245,7 +245,7 @@ private:
   std::atomic<float> w_{0.0f};  // Total value sum (for averaging)
 
   std::atomic<Terminal> terminal_type_{Terminal::NonTerminal};
-  std::atomic<bool> is_solid_{false}; // Lc0 solid tree flag
+  std::atomic<bool> is_solid_{false}; // solid tree flag
   mutable std::mutex mutex_;
 };
 
@@ -366,20 +366,20 @@ struct WorkerContext {
 // ============================================================================
 
 struct ThreadSafeMCTSConfig {
-  // Lc0-style PUCT parameters
-  float cpuct = 1.745f;        // Lc0 default: 1.745
-  float cpuct_base = 38739.0f; // Lc0 default for log growth
-  float cpuct_factor = 3.894f; // Lc0 default multiplier
+  // MCTS PUCT parameters
+  float cpuct = 1.745f;        // default value: 1.745
+  float cpuct_base = 38739.0f; // default value for log growth
+  float cpuct_factor = 3.894f; // default value multiplier
 
-  // FPU (First Play Urgency) - Lc0 reduction strategy
+  // FPU (First Play Urgency) - reduction strategy
   float fpu_value = 0.0f;       // Base FPU value (neutral)
-  float fpu_reduction = 0.330f; // Lc0 default: 0.330
+  float fpu_reduction = 0.330f; // default value: 0.330
 
   // Policy and exploration
   float policy_softmax_temp = 1.0f;
   bool add_dirichlet_noise = true;
-  float dirichlet_alpha = 0.3f;    // Lc0 default
-  float dirichlet_epsilon = 0.25f; // Lc0 uses 0.25 for training
+  float dirichlet_alpha = 0.3f;    // default value
+  float dirichlet_epsilon = 0.25f; // uses 0.25 for training
 
   int num_threads = 4;
   int virtual_loss = 3;

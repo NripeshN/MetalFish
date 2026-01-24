@@ -2,10 +2,9 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  This file provides an adapter layer between Stockfish's chess representation
-  and Lc0's MCTS search infrastructure. This allows us to use Lc0's
-  battle-tested MCTS implementation with Stockfish's efficient position
-  representation.
+  This file provides an adapter layer for position representation
+  in the MCTS search infrastructure, providing a clean interface
+  for chess position management and neural network encoding.
 
   Licensed under GPL-3.0
 */
@@ -17,7 +16,7 @@
 #include <string>
 #include <vector>
 
-// Include Stockfish headers
+// Include core chess headers
 #include "../core/bitboard.h"
 #include "../core/movegen.h"
 #include "../core/position.h"
@@ -33,7 +32,7 @@ namespace MCTS {
 class MCTSNode;
 class MCTSTree;
 
-// Game result enum compatible with Lc0
+// Game result enum for MCTS
 enum class GameResult : uint8_t {
   UNDECIDED = 0,
   WHITE_WON = 1,
@@ -41,17 +40,17 @@ enum class GameResult : uint8_t {
   BLACK_WON = 3
 };
 
-// Move representation that wraps Stockfish's Move
+// Move representation that wraps internal Move type
 class MCTSMove {
 public:
   MCTSMove() : move_(Move::none()) {}
   MCTSMove(Move m) : move_(m) {}
 
-  // Create from Stockfish move
-  static MCTSMove FromStockfish(Move m) { return MCTSMove(m); }
+  // Create from internal move
+  static MCTSMove FromInternal(Move m) { return MCTSMove(m); }
 
-  // Convert to Stockfish move
-  Move to_stockfish() const { return move_; }
+  // Convert to internal move
+  Move to_internal() const { return move_; }
 
   // Get from/to squares
   Square from() const { return move_.from_sq(); }
@@ -80,11 +79,10 @@ private:
   Move move_;
 };
 
-// Move list compatible with Lc0's interface
+// Move list for MCTS
 using MCTSMoveList = std::vector<MCTSMove>;
 
-// Position wrapper that provides Lc0-compatible interface using Stockfish
-// internals
+// Position wrapper that provides MCTS-compatible interface
 class MCTSPosition {
 public:
   MCTSPosition();
@@ -131,9 +129,9 @@ public:
   // Hash
   uint64_t hash() const { return pos_.key(); }
 
-  // Access to underlying Stockfish position
-  const Position &stockfish_position() const { return pos_; }
-  Position &stockfish_position() { return pos_; }
+  // Access to underlying position
+  const Position &internal_position() const { return pos_; }
+  Position &internal_position() { return pos_; }
 
   // Piece access (for neural network encoding)
   Bitboard pieces(Color c) const { return pos_.pieces(c); }
@@ -199,12 +197,11 @@ private:
   std::vector<MCTSMove> moves_;
 };
 
-// Neural network input encoding (converts Stockfish position to NN input
-// planes)
+// Neural network input encoding (converts position to NN input planes)
 class MCTSEncoder {
 public:
   // Encode position for neural network
-  // Returns input planes in Lc0's format (112 planes of 8x8)
+  // Returns input planes (112 planes of 8x8)
   static std::vector<float> encode_position(const MCTSPosition &pos);
 
   // Encode position history (for transformer-style networks)

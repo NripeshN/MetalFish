@@ -12,7 +12,7 @@
 
   STOCKFISH NNUE PARITY:
   =====================
-  1. HalfKAv2_hm Feature Set - Exact match to Stockfish's feature extraction
+  1. HalfKAv2_hm Feature Set - Standard HalfKAv2_hm feature extraction
   2. Dual Network Architecture - Big (1024) and Small (128) networks
   3. 8 Layer Stacks - Bucket-based evaluation by piece count
   4. Clipped ReLU Activation - [0, 127] range with squared clipping

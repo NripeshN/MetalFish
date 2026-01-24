@@ -4,7 +4,7 @@
 
   Optimized for Apple Silicon with unified memory architecture.
 
-  This implementation incorporates algorithms from Leela Chess Zero (Lc0),
+  This implementation incorporates state-of-the-art MCTS algorithms,
   including PUCT with logarithmic growth, FPU reduction strategy, and
   moves left head (MLH) utility.
 
@@ -16,7 +16,7 @@
 #include "../eval/evaluate.h"
 #include "../uci/engine.h"
 #include "../uci/uci.h"
-#include "lc0_mcts_core.h"
+#include "mcts_core.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -74,9 +74,9 @@ bool GPUResidentBatch::initialize(int batch_capacity) {
 // ============================================================================
 
 ParallelHybridSearch::ParallelHybridSearch() {
-  // Lc0-style MCTS parameters
-  config_.mcts_config.cpuct = 1.745f;         // Lc0 default
-  config_.mcts_config.fpu_reduction = 0.330f; // Lc0 default
+  // MCTS parameters
+  config_.mcts_config.cpuct = 1.745f;         // default value
+  config_.mcts_config.fpu_reduction = 0.330f; // default value
   config_.mcts_config.cpuct_base = 38739.0f;
   config_.mcts_config.cpuct_factor = 3.894f;
 
@@ -583,7 +583,7 @@ void ParallelHybridSearch::update_mcts_policy_from_ab() {
   }
 }
 
-// AB thread - runs full Stockfish iterative deepening
+// AB thread - runs full alpha-beta iterative deepening
 void ParallelHybridSearch::ab_thread_main() {
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
@@ -814,7 +814,7 @@ Move ParallelHybridSearch::make_final_decision() {
   }
 
   // Moves disagree - need to decide
-  // Use Lc0-style Q to centipawn conversion
+  // Use Q to centipawn conversion
   int mcts_cp = QToNnueScore(mcts_q);
 
   float diff_pawns = std::abs(ab_score - mcts_cp) / 100.0f;

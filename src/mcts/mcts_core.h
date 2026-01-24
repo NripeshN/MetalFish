@@ -2,13 +2,12 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Lc0-style MCTS Core Algorithms
+  MCTS Core Algorithms
 
-  This module implements the core MCTS algorithms from Leela Chess Zero (Lc0),
-  adapted for MetalFish's architecture. These algorithms represent the
-  state-of-the-art in MCTS for chess.
+  This module implements the core MCTS algorithms for chess,
+  representing state-of-the-art Monte Carlo Tree Search techniques.
 
-  Key algorithms from Lc0:
+  Key algorithms:
   1. PUCT with logarithmic growth factor
   2. FPU (First Play Urgency) with reduction strategy
   3. Moves Left Head (MLH) utility for preferring shorter wins
@@ -17,9 +16,6 @@
   6. Policy softmax temperature
 
   Licensed under GPL-3.0
-
-  Based on Leela Chess Zero (https://github.com/LeelaChessZero/lc0)
-  Original Lc0 code is also GPL-3.0 licensed.
 */
 
 #pragma once
@@ -35,11 +31,11 @@ namespace MetalFish {
 namespace MCTS {
 
 // ============================================================================
-// Lc0-style Search Parameters
+// MCTS Search Parameters
 // ============================================================================
 
-struct Lc0SearchParams {
-  // PUCT parameters (from Lc0 defaults)
+struct MCTSSearchParams {
+  // PUCT parameters (default values)
   float cpuct = 1.745f;        // Base PUCT constant
   float cpuct_base = 38739.0f; // Base for logarithmic growth
   float cpuct_factor = 3.894f; // Multiplier for log term
@@ -84,7 +80,7 @@ struct Lc0SearchParams {
 };
 
 // ============================================================================
-// Fast Math Utilities (from Lc0)
+// Fast Math Utilities
 // ============================================================================
 
 namespace FastMath {
@@ -109,12 +105,12 @@ inline float FastTanh(float x) { return std::tanh(x); }
 } // namespace FastMath
 
 // ============================================================================
-// PUCT Computation (from Lc0)
+// PUCT Computation 
 // ============================================================================
 
 // Computes the PUCT exploration constant with logarithmic growth
 // Formula: cpuct_init + cpuct_factor * log((N + cpuct_base) / cpuct_base)
-inline float ComputeCpuct(const Lc0SearchParams &params, uint32_t N,
+inline float ComputeCpuct(const MCTSSearchParams &params, uint32_t N,
                           bool is_root) {
   const float init = is_root ? params.cpuct_at_root : params.cpuct;
   const float k = is_root ? params.cpuct_factor_at_root : params.cpuct_factor;
@@ -127,13 +123,13 @@ inline float ComputeCpuct(const Lc0SearchParams &params, uint32_t N,
 }
 
 // ============================================================================
-// FPU (First Play Urgency) Computation (from Lc0)
+// FPU (First Play Urgency) Computation 
 // ============================================================================
 
 // Computes the FPU value for unvisited nodes
 // Reduction strategy: parent_Q - fpu_value * sqrt(visited_policy)
 // Absolute strategy: just return fpu_value
-inline float ComputeFpu(const Lc0SearchParams &params, float parent_q,
+inline float ComputeFpu(const MCTSSearchParams &params, float parent_q,
                         float visited_policy, bool is_root, float draw_score) {
   const bool use_absolute =
       is_root ? params.fpu_absolute_at_root : params.fpu_absolute;
@@ -148,7 +144,7 @@ inline float ComputeFpu(const Lc0SearchParams &params, float parent_q,
 }
 
 // Simplified FPU when visited_policy is not available
-inline float ComputeFpuSimple(const Lc0SearchParams &params, float parent_q,
+inline float ComputeFpuSimple(const MCTSSearchParams &params, float parent_q,
                               bool is_root) {
   const bool use_absolute =
       is_root ? params.fpu_absolute_at_root : params.fpu_absolute;
@@ -162,14 +158,14 @@ inline float ComputeFpuSimple(const Lc0SearchParams &params, float parent_q,
 }
 
 // ============================================================================
-// Moves Left Head (MLH) Utility (from Lc0)
+// Moves Left Head (MLH) Utility 
 // ============================================================================
 
 class MovesLeftEvaluator {
 public:
   MovesLeftEvaluator() : enabled_(false) {}
 
-  MovesLeftEvaluator(const Lc0SearchParams &params, float parent_m = 0.0f,
+  MovesLeftEvaluator(const MCTSSearchParams &params, float parent_m = 0.0f,
                      float parent_q = 0.0f)
       : enabled_(params.moves_left_max_effect > 0.0f),
         m_slope_(params.moves_left_slope), m_cap_(params.moves_left_max_effect),
@@ -228,7 +224,7 @@ private:
 };
 
 // ============================================================================
-// Dirichlet Noise (from Lc0)
+// Dirichlet Noise 
 // ============================================================================
 
 // Applies Dirichlet noise to policy priors at the root
@@ -261,10 +257,10 @@ void ApplyDirichletNoise(EdgeArray &edges, int num_edges, float epsilon,
 }
 
 // ============================================================================
-// PUCT Selection (from Lc0)
+// PUCT Selection 
 // ============================================================================
 
-// Full PUCT selection with all Lc0 features
+// Full PUCT selection with standard MCTS features
 struct PuctSelectionResult {
   int best_idx = -1;
   float best_score = -1e9f;
@@ -290,7 +286,7 @@ inline float ComputePuctScore(float q, float policy, float cpuct_sqrt_n,
 template <typename Node, typename GetChildFunc, typename GetPolicyFunc,
           typename GetNStartedFunc>
 PuctSelectionResult SelectBestChildPuct(
-    Node *parent, int num_edges, const Lc0SearchParams &params, bool is_root,
+    Node *parent, int num_edges, const MCTSSearchParams &params, bool is_root,
     float draw_score,
     GetChildFunc get_child,       // (int idx) -> child node or nullptr
     GetPolicyFunc get_policy,     // (int idx) -> float policy
@@ -386,7 +382,7 @@ PuctSelectionResult SelectBestChildPuct(
 }
 
 // ============================================================================
-// Best Move Selection (from Lc0)
+// Best Move Selection 
 // ============================================================================
 
 enum class EdgeRank {
@@ -453,9 +449,9 @@ bool CompareEdgesForBestMove(const Edge &a, const Edge &b, float draw_score) {
 // WDL (Win/Draw/Loss) Utilities
 // ============================================================================
 
-// Convert Q value to centipawn score (Lc0 style)
+// Convert Q value to centipawn score (standard)
 inline int QToCentipawns(float q) {
-  // Lc0 uses: 90 * tan(1.5637541897 * q)
+  // Formula: 90 * tan(1.5637541897 * q)
   // Clamp q to avoid infinity
   q = std::clamp(q, -0.99f, 0.99f);
   return static_cast<int>(90.0f * std::tan(1.5637541897f * q));
@@ -500,7 +496,7 @@ inline float NnueScoreToQ(int score) {
   // Clamp to reasonable range
   float cp = std::clamp(static_cast<float>(score), -3000.0f, 3000.0f);
 
-  // Use Lc0-style conversion: Q = tanh(cp / 300)
+  // Use standard conversion: Q = tanh(cp / 300)
   // This gives:
   //   100cp (1 pawn) -> Q ≈ 0.32
   //   300cp (3 pawns) -> Q ≈ 0.76
@@ -517,7 +513,7 @@ inline int QToNnueScore(float q) {
 }
 
 // ============================================================================
-// WDL Rescaling (from Lc0) - For Contempt
+// WDL Rescaling  - For Contempt
 // ============================================================================
 
 // WDL rescaling parameters for contempt
@@ -527,7 +523,7 @@ struct WDLRescaleParams {
   float max_s = 0.2f; // Maximum reasonable s value
 };
 
-// Rescale WDL based on contempt settings (from Lc0)
+// Rescale WDL based on contempt settings 
 // This adjusts the evaluation to prefer wins/draws based on contempt
 inline void WDLRescale(float &v, float &d, const WDLRescaleParams &params,
                        float sign = 1.0f, bool invert = false) {
@@ -572,7 +568,7 @@ inline void WDLRescale(float &v, float &d, const WDLRescaleParams &params,
 }
 
 // ============================================================================
-// Collision Handling (from Lc0)
+// Collision Handling 
 // ============================================================================
 
 // Collision tracking for multi-threaded MCTS
@@ -602,7 +598,7 @@ struct CollisionStats {
 };
 
 // ============================================================================
-// Out-of-Order Evaluation Support (from Lc0)
+// Out-of-Order Evaluation Support 
 // ============================================================================
 
 // Node states for out-of-order evaluation
@@ -632,7 +628,7 @@ struct EvalBatchItem {
 };
 
 // ============================================================================
-// Policy Temperature (from Lc0)
+// Policy Temperature 
 // ============================================================================
 
 // Apply temperature to policy for move selection
@@ -674,7 +670,7 @@ inline void ApplyPolicyTemperature(std::vector<float> &policy,
 }
 
 // ============================================================================
-// Visit Count Temperature (from Lc0) - For Move Selection
+// Visit Count Temperature  - For Move Selection
 // ============================================================================
 
 // Apply temperature to visit counts for move selection
@@ -730,11 +726,11 @@ inline int SelectMoveWithTemperature(const std::vector<uint32_t> &visits,
 }
 
 // ============================================================================
-// Node Statistics Update (from Lc0)
+// Node Statistics Update 
 // ============================================================================
 
 // Atomically update node statistics after evaluation
-// This implements Lc0's finalize score update logic
+// This implements finalize score update logic
 struct NodeUpdateParams {
   float value;      // V from neural network (or terminal value)
   float draw;       // D from neural network
@@ -752,7 +748,7 @@ inline float CalculateNewQ(float old_wl, uint32_t old_n, float new_v,
 }
 
 // ============================================================================
-// Tree Reuse (from Lc0)
+// Tree Reuse 
 // ============================================================================
 
 // Check if a subtree can be reused for the next position
@@ -777,7 +773,7 @@ inline bool CanReuseSubtree(uint64_t old_hash, uint64_t new_hash,
 }
 
 // ============================================================================
-// Solid Tree Optimization (from Lc0)
+// Solid Tree Optimization 
 // ============================================================================
 
 // Threshold for converting linked list children to solid array
@@ -790,10 +786,10 @@ inline bool ShouldSolidify(uint32_t visits, int num_children) {
 }
 
 // ============================================================================
-// Lc0-style Backpropagation (from Lc0)
+// standard Backpropagation 
 // ============================================================================
 
-// Update node statistics after evaluation (Lc0 FinalizeScoreUpdate)
+// Update node statistics after evaluation (FinalizeScoreUpdate)
 // Uses running average: Q = (Q * N + V) / (N + 1)
 inline void FinalizeScoreUpdate(float &wl, float &d, float &m, uint32_t &n,
                                 float new_v, float new_d, float new_m,
@@ -849,7 +845,7 @@ FinalizeScoreUpdateAtomic(AtomicFloat &wl, AtomicFloat &d, AtomicFloat &m,
 }
 
 // ============================================================================
-// Smart Time Management (from Lc0)
+// Smart Time Management 
 // ============================================================================
 
 struct TimeManagerParams {
@@ -861,7 +857,7 @@ struct TimeManagerParams {
   float minimum_remaining_time_ms = 0.0f;
 };
 
-// Calculate time allocation for a move (from Lc0 smooth stopper)
+// Calculate time allocation for a move ()
 inline int64_t CalculateTimeForMove(const TimeManagerParams &params,
                                     int64_t time_remaining_ms,
                                     int64_t increment_ms, int move_number) {
@@ -871,7 +867,7 @@ inline int64_t CalculateTimeForMove(const TimeManagerParams &params,
   if (available <= 0)
     return 50; // Minimum time
 
-  // Lc0-style time curve: Gaussian-like distribution centered at peak
+  // standard time curve: Gaussian-like distribution centered at peak
   float move = static_cast<float>(move_number);
   float peak = params.time_curve_peak;
   float width = (move < peak) ? params.time_curve_left_width
@@ -902,7 +898,7 @@ inline int64_t CalculateTimeForMove(const TimeManagerParams &params,
 }
 
 // ============================================================================
-// Early Termination Detection (from Lc0)
+// Early Termination Detection 
 // ============================================================================
 
 struct EarlyTerminationParams {
@@ -939,7 +935,7 @@ inline bool CanTerminateEarly(const EarlyTerminationParams &params,
 }
 
 // ============================================================================
-// Multi-PV Support (from Lc0)
+// Multi-PV Support 
 // ============================================================================
 
 // Get top N moves sorted by visit count then Q value
@@ -975,7 +971,7 @@ std::vector<int> GetTopNMoves(const EdgeArray &edges, int num_edges, int n,
 }
 
 // ============================================================================
-// Position History for Draw Detection (from Lc0)
+// Position History for Draw Detection 
 // ============================================================================
 
 // Check for two-fold repetition (faster than three-fold)

@@ -10,7 +10,7 @@
   - Dual-perspective feature transform for efficiency
   - SIMD-optimized forward pass for large batches
   - Runtime tuning based on observed performance
-  - Full Stockfish NNUE parity
+  - Full NNUE parity
   - Apple Silicon unified memory optimization
 */
 

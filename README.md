@@ -1,6 +1,6 @@
 # MetalFish
 
-A high-performance UCI chess engine optimized for Apple Silicon, featuring Metal GPU-accelerated NNUE evaluation and multiple search algorithms including Lc0-derived MCTS.
+A high-performance UCI chess engine optimized for Apple Silicon, featuring Metal GPU-accelerated NNUE evaluation and multiple search algorithms including advanced MCTS.
 
 ## Overview
 
@@ -8,15 +8,15 @@ MetalFish is a chess engine that leverages Apple Silicon's unified memory archit
 
 | Search Mode | Description | UCI Command |
 |-------------|-------------|-------------|
-| **Alpha-Beta** | Traditional minimax with pruning (Stockfish-derived) | `go` |
-| **MCTS** | Lc0-derived Monte Carlo Tree Search with GPU batching | `mctsmt` |
+| **Alpha-Beta** | Traditional minimax with pruning | `go` |
+| **MCTS** | Monte Carlo Tree Search with GPU batching | `mctsmt` |
 | **Hybrid** | Parallel MCTS + Alpha-Beta with dynamic integration | `parallel_hybrid` |
 
 ## Search Algorithms
 
 ### Alpha-Beta Search (MetalFish-AB)
 
-The primary search algorithm, derived from Stockfish, featuring:
+The primary search algorithm featuring:
 
 - Principal Variation Search (PVS) with aspiration windows
 - Iterative deepening with transposition table
@@ -30,9 +30,9 @@ The primary search algorithm, derived from Stockfish, featuring:
 
 ### Monte Carlo Tree Search (MetalFish-MCTS)
 
-A multi-threaded MCTS implementation derived from Leela Chess Zero (Lc0), optimized for Apple Silicon GPU evaluation:
+A multi-threaded MCTS implementation optimized for Apple Silicon GPU evaluation:
 
-#### Lc0-Derived Algorithms
+#### Core Algorithms
 
 - **PUCT Selection**: Logarithmic exploration bonus with configurable cpuct
   ```
@@ -135,7 +135,7 @@ metalfish/
 │   ├── eval/              # NNUE evaluation
 │   │   └── nnue/          # Neural network architecture
 │   ├── mcts/              # MCTS and hybrid search
-│   │   ├── lc0_mcts_core.h        # Lc0-derived algorithms
+│   │   ├── mcts_core.h            # Core MCTS algorithms
 │   │   ├── thread_safe_mcts.*     # Multi-threaded MCTS
 │   │   ├── parallel_hybrid_search.* # Parallel hybrid search
 │   │   ├── hybrid_search.*        # Hybrid MCTS-AB integration
@@ -284,20 +284,14 @@ python3 tools/elo_tournament.py --games 20 --time "10+0.1"
 
 ### CI Tournament
 
-The GitHub Actions workflow runs a comprehensive tournament against:
-
-- Stockfish at multiple skill levels (0-20)
-- Patricia (~3415 Elo)
-- Berserk (~3662 Elo)
-- Leela Chess Zero (~3716 Elo)
+The GitHub Actions workflow runs a comprehensive tournament against various open-source engines at different strength levels.
 
 ## Performance Summary
 
 ### Alpha-Beta Search
 
 - ~1.5M nodes/second (single thread)
-- Full Stockfish-level search quality
-- GPU-accelerated NNUE evaluation
+- High-quality search with GPU-accelerated NNUE evaluation
 
 ### MCTS Search
 
@@ -322,29 +316,6 @@ MetalFish is compatible with standard chess GUIs:
 - SCID
 - lichess-bot
 
-## References
-
-### Stockfish
-
-The Alpha-Beta search implementation is derived from Stockfish, the strongest open-source chess engine.
-
-- Repository: https://github.com/official-stockfish/Stockfish
-- License: GPL-3.0
-
-### Leela Chess Zero (Lc0)
-
-The MCTS implementation incorporates algorithms from Lc0, including PUCT selection, FPU calculation, and policy handling.
-
-- Repository: https://github.com/LeelaChessZero/lc0
-- License: GPL-3.0
-
-### Opening Books
-
-Tournament testing uses opening books from the official Stockfish books repository.
-
-- Repository: https://github.com/official-stockfish/books
-- License: CC0-1.0
-
 ## License
 
 GNU General Public License v3.0. See LICENSE file for details.
@@ -355,7 +326,8 @@ Nripesh Niketan
 
 ## Acknowledgments
 
-- Stockfish team for the search and evaluation framework
-- Leela Chess Zero team for MCTS algorithms and research
-- Apple for Metal compute and unified memory architecture
+MetalFish builds upon research and techniques from the open-source chess engine community:
+- Advanced search algorithms and evaluation techniques
+- Monte Carlo Tree Search research and implementations
+- Apple's Metal framework and unified memory architecture
 - The computer chess community for research and testing methodologies

@@ -4,7 +4,7 @@
 
   Thread-Safe MCTS Implementation - Optimized for Apple Silicon
 
-  This implementation incorporates algorithms from Leela Chess Zero (Lc0),
+  This implementation incorporates state-of-the-art MCTS algorithms,
   including PUCT with logarithmic growth, FPU reduction strategy, and
   moves left head (MLH) utility.
 
@@ -19,7 +19,7 @@
 
 #include "thread_safe_mcts.h"
 #include "apple_silicon_mcts.h"
-#include "lc0_mcts_core.h"
+#include "mcts_core.h"
 
 #include <algorithm>
 #include <chrono>
@@ -499,9 +499,9 @@ void ThreadSafeNode::create_edges(const MoveList<LEGAL> &moves) {
   num_edges_.store(count, std::memory_order_release);
 }
 
-// Lc0-style FinalizeScoreUpdate implementation
+// MCTS FinalizeScoreUpdate implementation
 // Updates statistics using running average: Q = (Q * N + V * multivisit) / (N +
-// multivisit) This is the core algorithm from Lc0 node.cc
+// multivisit). This is the core algorithm for standard MCTS.
 void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
                                          int multivisit) {
   // Get current N before update
@@ -511,7 +511,7 @@ void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
   if (new_n == 0)
     return; // Safety check
 
-  // Lc0's running average formula:
+  // Running average formula:
   // Q_new = Q_old + multivisit * (V - Q_old) / N_new
   // This is algebraically equivalent to: (Q_old * N_old + V * multivisit) /
   // N_new
@@ -575,14 +575,14 @@ void ThreadSafeNode::MakeTerminal(Terminal type, float wl, float d_val,
   d_.store(d_val, std::memory_order_relaxed);
   m_.store(m_val, std::memory_order_relaxed);
 
-  // Lc0 behavior: terminal losses have no uncertainty
+  // Standard behavior: terminal losses have no uncertainty
   // Clear policy to prevent U value from being comparable to non-loss choices
   if (wl < -0.99f && parent_ && edge_index_ >= 0) {
     parent_->edges()[edge_index_].SetPolicy(0.0f);
   }
 }
 
-// Lc0-style solid tree optimization
+// MCTS solid tree optimization
 // Converts sparse child nodes to a contiguous array for better cache locality
 // This improves performance for frequently visited subtrees
 bool ThreadSafeNode::MakeSolid() {
@@ -630,7 +630,7 @@ bool ThreadSafeNode::MakeSolid() {
 
   // Mark as solid - this is a one-way transition
   // The edges array is already contiguous, we just need to mark it
-  // In a full Lc0 implementation, this would reallocate children to a
+  // In a full implementation, this would reallocate children to a
   // contiguous block For our simpler implementation, we just mark it to enable
   // optimized iteration
   is_solid_.store(true, std::memory_order_release);
@@ -639,7 +639,7 @@ bool ThreadSafeNode::MakeSolid() {
 }
 
 void ThreadSafeNode::set_terminal(Terminal type, float value) {
-  // Map legacy Terminal types to Lc0-style
+  // Map legacy Terminal types to standard
   float wl_val = 0.0f;
   float d_val = 0.0f;
 
@@ -1105,12 +1105,12 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   if (num_edges == 0)
     return -1;
 
-  // Get parent statistics using Lc0-style accessors
+  // Get parent statistics using MCTS accessors
   uint32_t parent_n = node->GetN() + node->GetNInFlight();
   float parent_q = node->GetN() > 0 ? node->GetQ(0.0f) : 0.0f;
   float draw_score = 0.0f; // Can be configured for contempt
 
-  // Lc0-style PUCT with logarithmic growth
+  // MCTS PUCT with logarithmic growth
   // Formula: cpuct_init + cpuct_factor * log((N + cpuct_base) / cpuct_base)
   const float cpuct_base = config_.cpuct_base;
   const float cpuct_factor = config_.cpuct_factor;
@@ -1120,13 +1120,13 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
           std::log((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
 
   // Compute U coefficient: cpuct * sqrt(children_visits)
-  // Use GetChildrenVisits() which returns N-1 for non-root (Lc0 style)
+  // Use GetChildrenVisits() which returns N-1 for non-root nodes.
   uint32_t children_visits = node->GetChildrenVisits();
   float cpuct_sqrt_n =
       effective_cpuct *
       std::sqrt(static_cast<float>(std::max(children_visits, 1u)));
 
-  // Lc0-style FPU with reduction strategy
+  // MCTS FPU with reduction strategy
   // FPU = parent_Q - fpu_value * sqrt(visited_policy)
   // This encourages exploration of unvisited nodes while being pessimistic
   float visited_policy = node->GetVisitedPolicy();
@@ -1135,8 +1135,8 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   // The reduction is proportional to sqrt of visited policy
   float fpu = parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
 
-  // Set up moves left evaluator for MLH utility (Lc0 feature)
-  Lc0SearchParams lc0_params;
+  // Set up moves-left evaluator for MLH (moves-left head) utility.
+  MCTSSearchParams lc0_params;
   lc0_params.moves_left_max_effect = 0.0345f;
   lc0_params.moves_left_threshold = 0.8f;
   lc0_params.moves_left_slope = 0.0027f;
@@ -1162,7 +1162,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
     ThreadSafeNode *child = edge.child.load(std::memory_order_acquire);
 
     float q, m_utility = 0.0f;
-    float policy = edge.GetPolicy(); // Use Lc0-style compressed policy
+    float policy = edge.GetPolicy(); // Use MCTS compressed policy
     int n_started = 0;
 
     if (child) {
@@ -1184,7 +1184,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
       m_utility = m_eval.GetDefaultMUtility();
     }
 
-    // Lc0-style PUCT score: Q + U + M
+    // MCTS PUCT score: Q + U + M
     // U = cpuct * sqrt(parent_N) * P / (1 + child_N_started)
     // This balances exploitation (Q) with exploration (U)
     float u = cpuct_sqrt_n * policy / (1.0f + static_cast<float>(n_started));
@@ -1208,8 +1208,7 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
   std::vector<float> scores(num_edges);
   float max_score = -1e9f;
 
-  // Score each move using improved heuristics (closer to Stockfish move
-  // ordering)
+  // Score each move using improved heuristics for move ordering
   for (int i = 0; i < num_edges; ++i) {
     Move m = edges[i].move;
     float score = 0.0f;
@@ -1221,7 +1220,7 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
                                : type_of(ctx.pos.piece_on(m.to_sq()));
       PieceType attacker = type_of(ctx.pos.piece_on(m.from_sq()));
 
-      // Improved piece values matching Stockfish
+      // Improved piece values for move ordering
       static const float piece_values[] = {0, 100, 320, 330, 500, 1000, 0};
 
       // MVV-LVA: Prioritize capturing valuable pieces with less valuable
@@ -1323,7 +1322,7 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
     sum += scores[i];
   }
 
-  // Set policy priors using Lc0-style compressed storage
+  // Set policy priors using MCTS compressed storage
   for (int i = 0; i < num_edges; ++i) {
     edges[i].SetPolicy(scores[i] / sum);
   }
@@ -1336,7 +1335,7 @@ void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
 
   TSEdge *edges = root->edges();
 
-  // Lc0-style Dirichlet noise
+  // MCTS Dirichlet noise
   std::random_device rd;
   std::mt19937 gen(rd());
   std::gamma_distribution<float> gamma(config_.dirichlet_alpha, 1.0f);
@@ -1353,7 +1352,7 @@ void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
     return;
 
   // Mix noise with existing policy: P' = (1 - epsilon) * P + epsilon * noise
-  // This is Lc0's Dirichlet noise implementation for exploration
+  // Dirichlet noise implementation for exploration
   for (int i = 0; i < num_edges; ++i) {
     float current = edges[i].GetPolicy();
     float noisy = (1.0f - config_.dirichlet_epsilon) * current +
@@ -1398,7 +1397,7 @@ float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
     std::lock_guard<std::mutex> lock(gpu_mutex_);
     auto [psqt, score] = gpu_manager_->evaluate_single(ctx.pos, true);
 
-    // Use Lc0-style score transformation
+    // Use MCTS score transformation
     // This converts NNUE centipawn scores to MCTS Q values in [-1, 1]
     value = NnueScoreToQ(score);
   } else {
@@ -1424,14 +1423,14 @@ float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
 
 void ThreadSafeMCTS::backpropagate(ThreadSafeNode *node, float value,
                                    float draw, float moves_left) {
-  // Lc0-style backpropagation with proper value negation
+  // MCTS backpropagation with proper value negation
   // The value is from the perspective of the player who just moved
   // As we go up the tree, we negate it for the opponent
 
   int multivisit = config_.virtual_loss; // Match virtual loss count
 
   while (node) {
-    // Lc0-style FinalizeScoreUpdate handles:
+    // MCTS FinalizeScoreUpdate handles:
     // 1. Removing virtual loss (n_in_flight -= multivisit)
     // 2. Incrementing N
     // 3. Updating WL, D, M using running average
@@ -1457,7 +1456,7 @@ Move ThreadSafeMCTS::get_best_move() const {
   int num_edges = root->num_edges();
   const TSEdge *edges = root->edges();
 
-  // Lc0-style best move selection
+  // MCTS best move selection
   // Priority: Terminal wins > Tablebase wins > Most visits > Best Q > Highest
   // policy Also prefers shorter wins and longer losses
 
@@ -1484,7 +1483,7 @@ Move ThreadSafeMCTS::get_best_move() const {
       info.q =
           -child->q(); // Negate because child Q is from opponent's perspective
       info.policy =
-          edges[i].GetPolicy(); // Use Lc0-style compressed policy accessor
+          edges[i].GetPolicy(); // Use MCTS compressed policy accessor
       info.m = child->m();
       info.is_terminal = child->is_terminal();
       info.is_win = info.is_terminal && info.q > 0.5f;
@@ -1498,7 +1497,7 @@ Move ThreadSafeMCTS::get_best_move() const {
     return edges[0].move;
   }
 
-  // Sort by Lc0 criteria
+  // Sort by visit count and value
   std::sort(candidates.begin(), candidates.end(),
             [](const EdgeInfo &a, const EdgeInfo &b) {
               // Terminal wins first (prefer shorter)
