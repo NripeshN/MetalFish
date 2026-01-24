@@ -328,6 +328,6 @@ Nripesh Niketan
 
 MetalFish builds upon research and techniques from the open-source chess engine community:
 - Advanced search algorithms and evaluation techniques
-- Monte Carlo Tree Search research and implementations  
+- Monte Carlo Tree Search research and implementations
 - Apple's Metal framework and unified memory architecture
 - The computer chess community for research and testing methodologies
