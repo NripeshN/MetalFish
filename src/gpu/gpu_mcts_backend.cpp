@@ -18,7 +18,7 @@ namespace MetalFish {
 namespace GPU {
 
 GPUMCTSBackend::GPUMCTSBackend() {
-  // Default WDL parameters based on Stockfish's win rate model
+  // Default WDL parameters based on win rate model
   // These convert centipawn scores to win probabilities
   // win_rate = 1 / (1 + exp(-score / scale))
   wdl_a_ = 0.5f;   // Base win rate at score=0

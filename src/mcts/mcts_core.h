@@ -105,7 +105,7 @@ inline float FastTanh(float x) { return std::tanh(x); }
 } // namespace FastMath
 
 // ============================================================================
-// PUCT Computation (from Lc0)
+// PUCT Computation 
 // ============================================================================
 
 // Computes the PUCT exploration constant with logarithmic growth
@@ -123,7 +123,7 @@ inline float ComputeCpuct(const MCTSSearchParams &params, uint32_t N,
 }
 
 // ============================================================================
-// FPU (First Play Urgency) Computation (from Lc0)
+// FPU (First Play Urgency) Computation 
 // ============================================================================
 
 // Computes the FPU value for unvisited nodes
@@ -158,7 +158,7 @@ inline float ComputeFpuSimple(const MCTSSearchParams &params, float parent_q,
 }
 
 // ============================================================================
-// Moves Left Head (MLH) Utility (from Lc0)
+// Moves Left Head (MLH) Utility 
 // ============================================================================
 
 class MovesLeftEvaluator {
@@ -224,7 +224,7 @@ private:
 };
 
 // ============================================================================
-// Dirichlet Noise (from Lc0)
+// Dirichlet Noise 
 // ============================================================================
 
 // Applies Dirichlet noise to policy priors at the root
@@ -257,10 +257,10 @@ void ApplyDirichletNoise(EdgeArray &edges, int num_edges, float epsilon,
 }
 
 // ============================================================================
-// PUCT Selection (from Lc0)
+// PUCT Selection 
 // ============================================================================
 
-// Full PUCT selection with all Lc0 features
+// Full PUCT selection with standard MCTS features
 struct PuctSelectionResult {
   int best_idx = -1;
   float best_score = -1e9f;
@@ -382,7 +382,7 @@ PuctSelectionResult SelectBestChildPuct(
 }
 
 // ============================================================================
-// Best Move Selection (from Lc0)
+// Best Move Selection 
 // ============================================================================
 
 enum class EdgeRank {
@@ -449,9 +449,9 @@ bool CompareEdgesForBestMove(const Edge &a, const Edge &b, float draw_score) {
 // WDL (Win/Draw/Loss) Utilities
 // ============================================================================
 
-// Convert Q value to centipawn score (Lc0 style)
+// Convert Q value to centipawn score (standard)
 inline int QToCentipawns(float q) {
-  // Lc0 uses: 90 * tan(1.5637541897 * q)
+  // Formula: 90 * tan(1.5637541897 * q)
   // Clamp q to avoid infinity
   q = std::clamp(q, -0.99f, 0.99f);
   return static_cast<int>(90.0f * std::tan(1.5637541897f * q));
@@ -513,7 +513,7 @@ inline int QToNnueScore(float q) {
 }
 
 // ============================================================================
-// WDL Rescaling (from Lc0) - For Contempt
+// WDL Rescaling  - For Contempt
 // ============================================================================
 
 // WDL rescaling parameters for contempt
@@ -523,7 +523,7 @@ struct WDLRescaleParams {
   float max_s = 0.2f; // Maximum reasonable s value
 };
 
-// Rescale WDL based on contempt settings (from Lc0)
+// Rescale WDL based on contempt settings 
 // This adjusts the evaluation to prefer wins/draws based on contempt
 inline void WDLRescale(float &v, float &d, const WDLRescaleParams &params,
                        float sign = 1.0f, bool invert = false) {
@@ -568,7 +568,7 @@ inline void WDLRescale(float &v, float &d, const WDLRescaleParams &params,
 }
 
 // ============================================================================
-// Collision Handling (from Lc0)
+// Collision Handling 
 // ============================================================================
 
 // Collision tracking for multi-threaded MCTS
@@ -598,7 +598,7 @@ struct CollisionStats {
 };
 
 // ============================================================================
-// Out-of-Order Evaluation Support (from Lc0)
+// Out-of-Order Evaluation Support 
 // ============================================================================
 
 // Node states for out-of-order evaluation
@@ -628,7 +628,7 @@ struct EvalBatchItem {
 };
 
 // ============================================================================
-// Policy Temperature (from Lc0)
+// Policy Temperature 
 // ============================================================================
 
 // Apply temperature to policy for move selection
@@ -670,7 +670,7 @@ inline void ApplyPolicyTemperature(std::vector<float> &policy,
 }
 
 // ============================================================================
-// Visit Count Temperature (from Lc0) - For Move Selection
+// Visit Count Temperature  - For Move Selection
 // ============================================================================
 
 // Apply temperature to visit counts for move selection
@@ -726,11 +726,11 @@ inline int SelectMoveWithTemperature(const std::vector<uint32_t> &visits,
 }
 
 // ============================================================================
-// Node Statistics Update (from Lc0)
+// Node Statistics Update 
 // ============================================================================
 
 // Atomically update node statistics after evaluation
-// This implements Lc0's finalize score update logic
+// This implements finalize score update logic
 struct NodeUpdateParams {
   float value;      // V from neural network (or terminal value)
   float draw;       // D from neural network
@@ -748,7 +748,7 @@ inline float CalculateNewQ(float old_wl, uint32_t old_n, float new_v,
 }
 
 // ============================================================================
-// Tree Reuse (from Lc0)
+// Tree Reuse 
 // ============================================================================
 
 // Check if a subtree can be reused for the next position
@@ -773,7 +773,7 @@ inline bool CanReuseSubtree(uint64_t old_hash, uint64_t new_hash,
 }
 
 // ============================================================================
-// Solid Tree Optimization (from Lc0)
+// Solid Tree Optimization 
 // ============================================================================
 
 // Threshold for converting linked list children to solid array
@@ -786,10 +786,10 @@ inline bool ShouldSolidify(uint32_t visits, int num_children) {
 }
 
 // ============================================================================
-// standard Backpropagation (from Lc0)
+// standard Backpropagation 
 // ============================================================================
 
-// Update node statistics after evaluation (Lc0 FinalizeScoreUpdate)
+// Update node statistics after evaluation (FinalizeScoreUpdate)
 // Uses running average: Q = (Q * N + V) / (N + 1)
 inline void FinalizeScoreUpdate(float &wl, float &d, float &m, uint32_t &n,
                                 float new_v, float new_d, float new_m,
@@ -845,7 +845,7 @@ FinalizeScoreUpdateAtomic(AtomicFloat &wl, AtomicFloat &d, AtomicFloat &m,
 }
 
 // ============================================================================
-// Smart Time Management (from Lc0)
+// Smart Time Management 
 // ============================================================================
 
 struct TimeManagerParams {
@@ -857,7 +857,7 @@ struct TimeManagerParams {
   float minimum_remaining_time_ms = 0.0f;
 };
 
-// Calculate time allocation for a move (from Lc0 smooth stopper)
+// Calculate time allocation for a move ()
 inline int64_t CalculateTimeForMove(const TimeManagerParams &params,
                                     int64_t time_remaining_ms,
                                     int64_t increment_ms, int move_number) {
@@ -898,7 +898,7 @@ inline int64_t CalculateTimeForMove(const TimeManagerParams &params,
 }
 
 // ============================================================================
-// Early Termination Detection (from Lc0)
+// Early Termination Detection 
 // ============================================================================
 
 struct EarlyTerminationParams {
@@ -935,7 +935,7 @@ inline bool CanTerminateEarly(const EarlyTerminationParams &params,
 }
 
 // ============================================================================
-// Multi-PV Support (from Lc0)
+// Multi-PV Support 
 // ============================================================================
 
 // Get top N moves sorted by visit count then Q value
@@ -971,7 +971,7 @@ std::vector<int> GetTopNMoves(const EdgeArray &edges, int num_edges, int n,
 }
 
 // ============================================================================
-// Position History for Draw Detection (from Lc0)
+// Position History for Draw Detection 
 // ============================================================================
 
 // Check for two-fold repetition (faster than three-fold)

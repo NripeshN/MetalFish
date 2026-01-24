@@ -501,7 +501,7 @@ void ThreadSafeNode::create_edges(const MoveList<LEGAL> &moves) {
 
 // MCTS FinalizeScoreUpdate implementation
 // Updates statistics using running average: Q = (Q * N + V * multivisit) / (N +
-// multivisit) This is the core algorithm from Lc0 node.cc
+// multivisit) This is the core algorithm standard MCTS
 void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
                                          int multivisit) {
   // Get current N before update
@@ -511,7 +511,7 @@ void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
   if (new_n == 0)
     return; // Safety check
 
-  // Lc0's running average formula:
+  // Running average formula:
   // Q_new = Q_old + multivisit * (V - Q_old) / N_new
   // This is algebraically equivalent to: (Q_old * N_old + V * multivisit) /
   // N_new
@@ -575,7 +575,7 @@ void ThreadSafeNode::MakeTerminal(Terminal type, float wl, float d_val,
   d_.store(d_val, std::memory_order_relaxed);
   m_.store(m_val, std::memory_order_relaxed);
 
-  // Lc0 behavior: terminal losses have no uncertainty
+  // Standard behavior: terminal losses have no uncertainty
   // Clear policy to prevent U value from being comparable to non-loss choices
   if (wl < -0.99f && parent_ && edge_index_ >= 0) {
     parent_->edges()[edge_index_].SetPolicy(0.0f);
@@ -630,7 +630,7 @@ bool ThreadSafeNode::MakeSolid() {
 
   // Mark as solid - this is a one-way transition
   // The edges array is already contiguous, we just need to mark it
-  // In a full Lc0 implementation, this would reallocate children to a
+  // In a full implementation, this would reallocate children to a
   // contiguous block For our simpler implementation, we just mark it to enable
   // optimized iteration
   is_solid_.store(true, std::memory_order_release);
@@ -639,7 +639,7 @@ bool ThreadSafeNode::MakeSolid() {
 }
 
 void ThreadSafeNode::set_terminal(Terminal type, float value) {
-  // Map legacy Terminal types to Lc0-style
+  // Map legacy Terminal types to standard
   float wl_val = 0.0f;
   float d_val = 0.0f;
 
@@ -1120,7 +1120,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
           std::log((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
 
   // Compute U coefficient: cpuct * sqrt(children_visits)
-  // Use GetChildrenVisits() which returns N-1 for non-root (Lc0 style)
+  // Use GetChildrenVisits() which returns N-1 for non-root 
   uint32_t children_visits = node->GetChildrenVisits();
   float cpuct_sqrt_n =
       effective_cpuct *
@@ -1135,7 +1135,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   // The reduction is proportional to sqrt of visited policy
   float fpu = parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
 
-  // Set up moves left evaluator for MLH utility (Lc0 feature)
+  // Set up moves left evaluator for MLH utility 
   MCTSSearchParams lc0_params;
   lc0_params.moves_left_max_effect = 0.0345f;
   lc0_params.moves_left_threshold = 0.8f;
@@ -1208,7 +1208,7 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
   std::vector<float> scores(num_edges);
   float max_score = -1e9f;
 
-  // Score each move using improved heuristics (closer to Stockfish move
+  // Score each move using improved heuristics (improved move
   // ordering)
   for (int i = 0; i < num_edges; ++i) {
     Move m = edges[i].move;
@@ -1221,7 +1221,7 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
                                : type_of(ctx.pos.piece_on(m.to_sq()));
       PieceType attacker = type_of(ctx.pos.piece_on(m.from_sq()));
 
-      // Improved piece values matching Stockfish
+      // Improved piece values standard
       static const float piece_values[] = {0, 100, 320, 330, 500, 1000, 0};
 
       // MVV-LVA: Prioritize capturing valuable pieces with less valuable
@@ -1353,7 +1353,7 @@ void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
     return;
 
   // Mix noise with existing policy: P' = (1 - epsilon) * P + epsilon * noise
-  // This is Lc0's Dirichlet noise implementation for exploration
+  // Dirichlet noise implementation for exploration
   for (int i = 0; i < num_edges; ++i) {
     float current = edges[i].GetPolicy();
     float noisy = (1.0f - config_.dirichlet_epsilon) * current +
@@ -1498,7 +1498,7 @@ Move ThreadSafeMCTS::get_best_move() const {
     return edges[0].move;
   }
 
-  // Sort by Lc0 criteria
+  // Sort by visit count and value
   std::sort(candidates.begin(), candidates.end(),
             [](const EdgeInfo &a, const EdgeInfo &b) {
               // Terminal wins first (prefer shorter)

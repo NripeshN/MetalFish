@@ -74,7 +74,7 @@ bool GPUResidentBatch::initialize(int batch_capacity) {
 // ============================================================================
 
 ParallelHybridSearch::ParallelHybridSearch() {
-  // Lc0-style MCTS parameters
+  // MCTS parameters
   config_.mcts_config.cpuct = 1.745f;         // default value
   config_.mcts_config.fpu_reduction = 0.330f; // default value
   config_.mcts_config.cpuct_base = 38739.0f;
@@ -814,7 +814,7 @@ Move ParallelHybridSearch::make_final_decision() {
   }
 
   // Moves disagree - need to decide
-  // Use Lc0-style Q to centipawn conversion
+  // Use Q to centipawn conversion
   int mcts_cp = QToNnueScore(mcts_q);
 
   float diff_pawns = std::abs(ab_score - mcts_cp) / 100.0f;

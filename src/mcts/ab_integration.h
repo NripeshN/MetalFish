@@ -4,13 +4,11 @@
 
   Alpha-Beta Integration for Hybrid Search
 
-  This module provides full integration between MCTS and Stockfish's
-  alpha-beta search. It enables:
-
-  1. Using the REAL AB search for tactical verification of MCTS moves
-  2. Full-depth AB search with all Stockfish optimizations
+  This module provides full integration between MCTS and alpha-beta search:
+  1. Using AB search for tactical verification of MCTS moves
+  2. Full-depth AB search with all optimizations
   3. Proper NNUE evaluation via the Engine
-  4. Integration with Stockfish's transposition table
+  4. Integration with transposition table
   5. History heuristics from AB to improve MCTS policy
 
   Licensed under GPL-3.0
@@ -231,7 +229,7 @@ private:
 };
 
 // Bridge between MCTS and AB search
-// This now uses the REAL Stockfish Engine for AB search!
+// This uses the Engine for AB search!
 class HybridSearchBridge {
 public:
   HybridSearchBridge();
@@ -268,7 +266,7 @@ public:
   get_enhanced_policy(const Position &pos);
 
   // Run full AB search for comparison
-  // If engine is available, uses the real Stockfish search
+  // If engine is available, uses the alpha-beta search
   ABSearchResult run_ab_search(const Position &pos, int depth, int time_ms = 0);
 
   // Tactical verification
@@ -291,7 +289,7 @@ private:
   bool initialized_ = false;
   TranspositionTable *tt_ = nullptr;
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
-  Engine *engine_ = nullptr; // The real Stockfish engine!
+  Engine *engine_ = nullptr; // The engine instance!
 
   // Fallback searcher (used only if engine is not available)
   std::unique_ptr<ABSearcher> ab_searcher_;

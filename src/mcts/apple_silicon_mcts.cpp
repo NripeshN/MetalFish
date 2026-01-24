@@ -335,7 +335,7 @@ void AppleSiliconMCTSConfig::auto_tune_for_apple_silicon() {
     return;
   }
 
-  // Set Lc0 defaults
+  // Set default MCTS parameters
   mcts_params = MCTSSearchParams();
 
   // Apple Silicon specific tuning
