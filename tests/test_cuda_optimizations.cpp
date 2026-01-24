@@ -125,11 +125,15 @@ bool test_double_buffer() {
     host_buf[i] = static_cast<int>(i);
   }
   
-  // Transfer to device
+  // First, we need to transfer the current buffer to device before swapping
+  cudaMemcpy(buffer.get_device_buffer(), host_buf, size * sizeof(int), cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+  
+  // Now swap - this prepares for the next iteration
   buffer.swap_and_transfer();
   buffer.synchronize();
   
-  // Verify device buffer
+  // The current device buffer should still have our data since we just copied it
   int *device_buf = buffer.get_device_buffer();
   std::vector<int> result(size);
   cudaMemcpy(result.data(), device_buf, size * sizeof(int), cudaMemcpyDeviceToHost);

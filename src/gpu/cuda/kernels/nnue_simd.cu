@@ -223,7 +223,10 @@ __global__ void feature_transform_simd(
   // Start with bias
   accumulator_t acc = static_cast<accumulator_t>(biases[hidden_idx]);
   
-  int count = feature_counts[pos_idx];
+  // Feature counts are stored as [white, black] for each position
+  // For now, we process white features (index 0). This should be extended
+  // to handle both perspectives or the caller should specify which perspective.
+  int count = feature_counts[pos_idx * 2];  // Use white features
   const int32_t *pos_features = features + pos_idx * max_features_per_pos;
   
   // Process features with warp-level cooperation

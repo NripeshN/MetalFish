@@ -158,7 +158,9 @@ template <typename T>
 class DoubleBuffer {
 public:
   DoubleBuffer(size_t size, int device_id) 
-      : size_(size), device_id_(device_id), current_buffer_(0) {
+      : size_(size), device_id_(device_id), current_buffer_(0),
+        host_buffers_{nullptr, nullptr}, device_buffers_{nullptr, nullptr},
+        compute_stream_(nullptr), copy_stream_(nullptr) {
     
     // Allocate two pinned host buffers
     host_buffers_[0] = static_cast<T*>(PinnedMemoryManager::allocate_pinned(size * sizeof(T)));
@@ -174,17 +176,17 @@ public:
   }
   
   ~DoubleBuffer() {
-    // Free host buffers
-    PinnedMemoryManager::free_pinned(host_buffers_[0]);
-    PinnedMemoryManager::free_pinned(host_buffers_[1]);
+    // Free host buffers (check for nullptr in case construction failed partway)
+    if (host_buffers_[0]) PinnedMemoryManager::free_pinned(host_buffers_[0]);
+    if (host_buffers_[1]) PinnedMemoryManager::free_pinned(host_buffers_[1]);
     
     // Free device buffers
-    cudaFree(device_buffers_[0]);
-    cudaFree(device_buffers_[1]);
+    if (device_buffers_[0]) cudaFree(device_buffers_[0]);
+    if (device_buffers_[1]) cudaFree(device_buffers_[1]);
     
     // Destroy streams
-    cudaStreamDestroy(compute_stream_);
-    cudaStreamDestroy(copy_stream_);
+    if (compute_stream_) cudaStreamDestroy(compute_stream_);
+    if (copy_stream_) cudaStreamDestroy(copy_stream_);
   }
   
   /**

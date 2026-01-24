@@ -203,8 +203,9 @@ __global__ void fc0_layer_tensor_core(
     fill_fragment(c_frag, __float2half(0.0f));
     
     // Process in tiles
+    // WMMA operations require all threads in the warp to participate
     for (int k = 0; k < 2 * hidden_dim; k += WMMA_K) {
-      if (lane == 0 && k < 2 * hidden_dim) {
+      if (k < 2 * hidden_dim) {
         load_matrix_sync(a_frag, input_fp16 + k, 2 * hidden_dim);
         load_matrix_sync(b_frag, weights_fp16 + out_idx * 2 * hidden_dim + k, 
                         2 * hidden_dim);
@@ -376,14 +377,10 @@ void cuda_fc_layer_tensor_core_fp16(
   dim3 grid((batch_size + 15) / 16,  // WMMA_M = 16
             (output_size + 15) / 16); // WMMA_N = 16
   
-  // Note: This requires the kernel to be compiled with appropriate arch flags
-  // For runtime compatibility, check CMAKE_CUDA_ARCHITECTURES includes 70+
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+  // Launch the kernel - it will be compiled for all architectures in CMAKE_CUDA_ARCHITECTURES
+  // The kernel code is conditionally compiled based on __CUDA_ARCH__ during device compilation
   fc_layer_tensor_core_fp16<<<grid, block, 0, stream>>>(
       input, weights, biases, output, batch_size, input_size, output_size);
-  #else
-  std::cerr << "[CUDA] Tensor core kernels require compilation for SM 7.0+" << std::endl;
-  #endif
 }
 
 /**
@@ -407,13 +404,10 @@ void cuda_fc0_layer_tensor_core(
   dim3 grid(batch_size);
   size_t shared_mem = (2 * hidden_dim + 2 * (FC0_OUT + 1)) * sizeof(half);
   
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+  // Launch the kernel - it will be compiled for all architectures in CMAKE_CUDA_ARCHITECTURES
   fc0_layer_tensor_core<<<grid, block, shared_mem, stream>>>(
       accumulators, weights_fp16, biases_fp16,
       output_sqr, output_linear, hidden_dim, batch_size);
-  #else
-  std::cerr << "[CUDA] Tensor core kernels require compilation for SM 7.0+" << std::endl;
-  #endif
 }
 
 /**
