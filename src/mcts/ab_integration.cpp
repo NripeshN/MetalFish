@@ -1126,10 +1126,12 @@ HybridSearchBridge &hybrid_bridge() {
     g_hybrid_bridge = std::make_unique<HybridSearchBridge>();
   });
 
-  // After shutdown, g_hybrid_bridge may be null. Check and throw instead of
-  // dereferencing null.
+  // After shutdown, g_hybrid_bridge may be null. Return a safe fallback
+  // instance instead of throwing, to avoid exceptions during static
+  // destruction or late calls.
   if (!g_hybrid_bridge) {
-    throw std::runtime_error("HybridSearchBridge accessed after shutdown");
+    static HybridSearchBridge fallback;
+    return fallback;
   }
 
   return *g_hybrid_bridge;
