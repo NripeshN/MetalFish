@@ -336,7 +336,7 @@ void AppleSiliconMCTSConfig::auto_tune_for_apple_silicon() {
   }
 
   // Set Lc0 defaults
-  lc0_params = MCTSSearchParams();
+  mcts_params = MCTSSearchParams();
 
   // Apple Silicon specific tuning
   gpu_batch_size = get_optimal_gpu_batch_size();

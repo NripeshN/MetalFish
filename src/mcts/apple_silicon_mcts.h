@@ -176,8 +176,8 @@ private:
 // ============================================================================
 
 struct AppleSiliconMCTSConfig {
-  // Lc0-style MCTS parameters
-  Lc0SearchParams lc0_params;
+  // MCTS parameters
+  MCTSSearchParams mcts_params;
 
   // Apple Silicon specific settings
   int gpu_batch_size = 128;         // Optimal for M-series GPUs
@@ -263,7 +263,7 @@ public:
   // Returns index of best child, or -1 if no children
   template <typename Node, typename EdgeArray>
   static int select_best_child(Node *parent, const EdgeArray &edges,
-                               int num_edges, const Lc0SearchParams &params,
+                               int num_edges, const MCTSSearchParams &params,
                                bool is_root, float draw_score);
 
   // Batch PUCT computation for multiple nodes (GPU accelerated)
@@ -272,7 +272,7 @@ public:
                                  const std::vector<float> &child_q,
                                  const std::vector<float> &child_n,
                                  const std::vector<float> &policy,
-                                 const Lc0SearchParams &params,
+                                 const MCTSSearchParams &params,
                                  std::vector<float> &scores_out);
 };
 

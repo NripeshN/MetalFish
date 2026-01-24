@@ -1136,7 +1136,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   float fpu = parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
 
   // Set up moves left evaluator for MLH utility (Lc0 feature)
-  Lc0SearchParams lc0_params;
+  MCTSSearchParams lc0_params;
   lc0_params.moves_left_max_effect = 0.0345f;
   lc0_params.moves_left_threshold = 0.8f;
   lc0_params.moves_left_slope = 0.0027f;

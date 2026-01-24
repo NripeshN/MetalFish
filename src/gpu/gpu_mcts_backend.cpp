@@ -92,20 +92,20 @@ GPUMCTSBackend::generate_policy(const MCTS::MCTSPosition &pos) {
   // 3. Center control
   // 4. Development moves
 
-  const Position &stockfish_pos = pos.internal_position();
+  const Position &internal_pos = pos.internal_position();
   std::vector<float> scores(moves.size());
   float total_score = 0.0f;
 
   for (size_t i = 0; i < moves.size(); ++i) {
-    Move m = moves[i].to_stockfish();
+    Move m = moves[i].to_internal();
     float score = 1.0f; // Base score
 
     // Captures get bonus based on captured piece value
-    if (stockfish_pos.capture(m)) {
+    if (internal_pos.capture(m)) {
       // For en passant, the captured pawn is not on the destination square
       PieceType captured = m.type_of() == EN_PASSANT
                                ? PAWN
-                               : type_of(stockfish_pos.piece_on(m.to_sq()));
+                               : type_of(internal_pos.piece_on(m.to_sq()));
       static const float piece_values[] = {0, 1, 3, 3, 5, 9, 0}; // PNBRQK
       score += piece_values[captured] * 0.5f;
     }
