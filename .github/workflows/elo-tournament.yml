@@ -801,8 +801,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python dependencies
-        run: pip3 install chess
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libqt5core5a libqt5gui5 libqt5widgets5 libqt5svg5 libqt5concurrent5
+          pip3 install chess
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
