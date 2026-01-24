@@ -38,31 +38,6 @@
 namespace MetalFish::GPU {
 
 // ============================================================================
-// GPUTuningParams Implementation
-// ============================================================================
-
-EvalStrategy GPUTuningParams::select_strategy(int batch_size) const {
-  if (batch_size < min_batch_for_gpu) {
-    return EvalStrategy::CPU_FALLBACK;
-  }
-
-  // Calculate expected costs
-  // CPU cost: batch_size * cpu_eval_ns (nanoseconds)
-  // GPU cost: gpu_dispatch_us * 1000 (nanoseconds) + batch_size *
-  // marginal_gpu_cost
-
-  // For small batches, dispatch overhead dominates - use standard kernels
-  // For large batches, compute dominates - use SIMD kernels
-
-  if (batch_size >= gpu_extract_threshold) {
-    return EvalStrategy::GPU_FEATURE_EXTRACT;
-  } else if (batch_size >= simd_threshold) {
-    return EvalStrategy::GPU_SIMD;
-  } else {
-    return EvalStrategy::GPU_STANDARD;
-  }
-}
-
 // ============================================================================
 // GPUPositionData Implementation
 // ============================================================================
