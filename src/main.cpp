@@ -15,7 +15,6 @@
 #include "gpu/backend.h"
 #include "gpu/gpu_nnue_integration.h"
 #include "mcts/ab_integration.h"
-#include "search/tune.h"
 #include "uci/uci.h"
 
 using namespace MetalFish;
@@ -56,8 +55,6 @@ int main(int argc, char *argv[]) {
   {
     // Scope the UCIEngine to ensure it's destroyed before GPU cleanup
     auto uci = std::make_unique<UCIEngine>(argc, argv);
-
-    Tune::init(uci->engine_options());
 
     uci->loop();
 
