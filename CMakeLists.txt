@@ -258,6 +258,13 @@ if(USE_CUDA AND CUDA_AVAILABLE)
   if(CUDA_TENSOR_CORES)
     list(APPEND CUDA_SOURCES src/gpu/cuda/kernels/nnue_tensor_core.cu)
   endif()
+  
+  # Add advanced features
+  list(APPEND CUDA_SOURCES 
+       src/gpu/cuda/cuda_graphs.cu
+       src/gpu/cuda/cuda_multi_gpu.cu
+       src/gpu/cuda/cuda_fp16_weights.cu
+       src/gpu/cuda/kernels/nnue_persistent.cu)
 endif()
 
 # MCTS source files (hybrid search) Core files needed for all MCTS modes: -

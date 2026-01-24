@@ -268,7 +268,8 @@ CUDABackend::CUDABackend()
       unified_memory_supported_(false), tensor_cores_available_(false),
       int8_tensor_cores_available_(false), default_stream_(nullptr),
       stream_index_(0), allocated_memory_(0), peak_memory_(0),
-      initialized_(false) {}
+      initialized_(false), use_cuda_graphs_(false), use_multi_gpu_(false),
+      use_persistent_kernels_(false), use_fp16_weights_(false) {}
 
 CUDABackend::~CUDABackend() { cleanup(); }
 

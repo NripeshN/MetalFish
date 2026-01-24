@@ -174,6 +174,19 @@ public:
   bool has_warp_shuffle() const { return compute_capability_major_ >= 3; }
   bool has_cooperative_groups() const { return compute_capability_major_ >= 6; }
 
+  // Advanced feature support
+  void enable_cuda_graphs(bool enable) { use_cuda_graphs_ = enable; }
+  bool is_cuda_graphs_enabled() const { return use_cuda_graphs_; }
+  
+  void enable_multi_gpu(bool enable) { use_multi_gpu_ = enable; }
+  bool is_multi_gpu_enabled() const { return use_multi_gpu_; }
+  
+  void enable_persistent_kernels(bool enable) { use_persistent_kernels_ = enable; }
+  bool is_persistent_kernels_enabled() const { return use_persistent_kernels_; }
+  
+  void enable_fp16_weights(bool enable) { use_fp16_weights_ = enable; }
+  bool is_fp16_weights_enabled() const { return use_fp16_weights_; }
+
 private:
   CUDABackend();
   ~CUDABackend();
@@ -191,6 +204,12 @@ private:
   bool unified_memory_supported_;
   bool tensor_cores_available_;
   bool int8_tensor_cores_available_;
+
+  // Feature flags
+  bool use_cuda_graphs_;
+  bool use_multi_gpu_;
+  bool use_persistent_kernels_;
+  bool use_fp16_weights_;
 
   cudaStream_t default_stream_;
   std::vector<cudaStream_t> parallel_streams_;
