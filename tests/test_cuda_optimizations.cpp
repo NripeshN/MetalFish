@@ -190,20 +190,27 @@ bool test_kernel_timer() {
   cudaStream_t stream;
   cudaStreamCreate(&stream);
   
+  // Allocate a small buffer for the test
+  void *test_buffer;
+  cudaMalloc(&test_buffer, 1024);
+  
   {
     CUDA::KernelTimer timer("test_kernel", stream);
     
-    // Simulate some work
-    cudaMemsetAsync(nullptr, 0, 0, stream);
+    // Simulate some work with actual operation
+    cudaMemsetAsync(test_buffer, 0, 1024, stream);
     cudaStreamSynchronize(stream);
   }
   
   float avg_time = CUDA::KernelTimer::get_average_time("test_kernel");
   if (avg_time < 0.0f) {
     std::cerr << "  Invalid timing result" << std::endl;
+    cudaFree(test_buffer);
+    cudaStreamDestroy(stream);
     return false;
   }
   
+  cudaFree(test_buffer);
   cudaStreamDestroy(stream);
   
   std::cout << "  PASSED (avg time: " << avg_time << " ms)" << std::endl;

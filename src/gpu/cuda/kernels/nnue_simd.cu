@@ -227,6 +227,10 @@ __global__ void feature_transform_simd(
   const int32_t *pos_features = features + pos_idx * max_features_per_pos;
   
   // Process features with warp-level cooperation
+  // Note: Broadcasting one feature at a time provides good coalesced access
+  // to weights. Alternative approaches (shared memory or processing multiple
+  // features) trade off register pressure and may not improve performance.
+  // This simple approach keeps registers low and allows high occupancy.
   for (int i = 0; i < count; i++) {
     // Lane 0 reads the feature index
     int32_t feat_idx = (lane == 0) ? pos_features[i] : 0;
@@ -236,6 +240,9 @@ __global__ void feature_transform_simd(
     
     if (feat_idx >= 0 && feat_idx < HALFKA_DIMS) {
       // All lanes read coalesced weight access
+      // Each thread reads weights[feat_idx * hidden_dim + hidden_idx]
+      // where hidden_idx is unique per thread (hidden_base + lane)
+      // This ensures perfect coalescing across the warp
       acc += weights[feat_idx * hidden_dim + hidden_idx];
     }
   }

@@ -352,26 +352,43 @@ bool cuda_int8_tensor_cores_available(int device_id) {
   return (prop.major > 7) || (prop.major == 7 && prop.minor >= 5);
 }
 
-#if __CUDA_ARCH__ >= 700
+// Tensor core function implementations are architecture-specific
+// and must be compiled with appropriate -arch flags
 
 /**
  * FC layer with FP16 tensor cores
+ * Only available when compiled for SM 7.0+
  */
 void cuda_fc_layer_tensor_core_fp16(
     const half *input, const half *weights, const half *biases,
     half *output, int batch_size, int input_size, int output_size,
     cudaStream_t stream) {
   
-  dim3 block(128);  // 4 warps per block
-  dim3 grid((batch_size + WMMA_M - 1) / WMMA_M, 
-            (output_size + WMMA_N - 1) / WMMA_N);
+  // Runtime check for architecture support
+  int device;
+  cudaGetDevice(&device);
+  if (!cuda_tensor_cores_available(device)) {
+    std::cerr << "[CUDA] Tensor cores not available on this device" << std::endl;
+    return;
+  }
   
+  dim3 block(128);  // 4 warps per block
+  dim3 grid((batch_size + 15) / 16,  // WMMA_M = 16
+            (output_size + 15) / 16); // WMMA_N = 16
+  
+  // Note: This requires the kernel to be compiled with appropriate arch flags
+  // For runtime compatibility, check CMAKE_CUDA_ARCHITECTURES includes 70+
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
   fc_layer_tensor_core_fp16<<<grid, block, 0, stream>>>(
       input, weights, biases, output, batch_size, input_size, output_size);
+  #else
+  std::cerr << "[CUDA] Tensor core kernels require compilation for SM 7.0+" << std::endl;
+  #endif
 }
 
 /**
  * FC0 layer with tensor cores
+ * Only available when compiled for SM 7.0+
  */
 void cuda_fc0_layer_tensor_core(
     const accumulator_t *accumulators,
@@ -379,17 +396,31 @@ void cuda_fc0_layer_tensor_core(
     int8_t *output_sqr, int8_t *output_linear,
     int hidden_dim, int batch_size, cudaStream_t stream) {
   
+  int device;
+  cudaGetDevice(&device);
+  if (!cuda_tensor_cores_available(device)) {
+    std::cerr << "[CUDA] Tensor cores not available on this device" << std::endl;
+    return;
+  }
+  
   dim3 block(128);
   dim3 grid(batch_size);
   size_t shared_mem = (2 * hidden_dim + 2 * (FC0_OUT + 1)) * sizeof(half);
   
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
   fc0_layer_tensor_core<<<grid, block, shared_mem, stream>>>(
       accumulators, weights_fp16, biases_fp16,
       output_sqr, output_linear, hidden_dim, batch_size);
+  #else
+  std::cerr << "[CUDA] Tensor core kernels require compilation for SM 7.0+" << std::endl;
+  #endif
 }
 
 /**
  * Full NNUE forward pass with tensor cores
+ * Note: This is a simplified implementation. Full implementation would require
+ * complete tensor core matrix operations for all layers.
+ * Only available when compiled for SM 7.0+
  */
 void cuda_nnue_forward_tensor_core(
     const accumulator_t *accumulators,
@@ -398,17 +429,25 @@ void cuda_nnue_forward_tensor_core(
     const half *fc2_weights, const half *fc2_biases,
     int32_t *output, int hidden_dim, int batch_size, cudaStream_t stream) {
   
-  dim3 block(128);
-  dim3 grid(batch_size);
-  size_t shared_mem = (2 * hidden_dim + 2 * (FC0_OUT + 1) + FC1_OUT) * sizeof(half);
+  int device;
+  cudaGetDevice(&device);
+  if (!cuda_tensor_cores_available(device)) {
+    std::cerr << "[CUDA] Tensor cores not available on this device" << std::endl;
+    return;
+  }
   
-  nnue_forward_tensor_core<<<grid, block, shared_mem, stream>>>(
-      accumulators, fc0_weights, fc0_biases,
-      fc1_weights, fc1_biases, fc2_weights, fc2_biases,
-      output, hidden_dim, batch_size);
+  // TODO: Implement full tensor core forward pass
+  // Currently this is a placeholder that demonstrates the API
+  // A complete implementation would:
+  // 1. Convert accumulators to FP16
+  // 2. Use tensor cores for FC0 layer (hidden_dim -> FC0_OUT)
+  // 3. Use tensor cores for FC1 layer (FC0_OUT -> FC1_OUT)
+  // 4. Use standard ops for FC2 (small output, not worth tensor cores)
+  // 5. Apply activations and skip connections
+  
+  std::cerr << "[CUDA] Full tensor core forward pass not yet implemented" << std::endl;
+  std::cerr << "[CUDA] Use individual layer functions instead" << std::endl;
 }
-
-#endif // __CUDA_ARCH__ >= 700
 
 } // extern "C"
 

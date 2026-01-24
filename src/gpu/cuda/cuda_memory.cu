@@ -314,17 +314,27 @@ private:
 /**
  * Allocate memory with specific cache line alignment
  * Important for avoiding false sharing and optimizing cache usage
+ * Note: alignment must be a power of 2
  */
 class CacheAlignedAllocator {
 public:
   /**
-   * Allocate device memory aligned to cache line (128 bytes)
+   * Allocate device memory aligned to cache line (128 bytes default)
+   * @param size Size to allocate in bytes
+   * @param alignment Alignment in bytes (must be power of 2, default 128)
+   * @return Aligned device pointer or nullptr on failure
    */
   static void *allocate_aligned(size_t size, size_t alignment = 128) {
+    // Validate alignment is power of 2
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
+      std::cerr << "[CUDA Memory] Alignment must be a power of 2" << std::endl;
+      return nullptr;
+    }
+    
     // CUDA allocations are already 256-byte aligned, but we can ensure it
     void *ptr = nullptr;
     
-    // Calculate aligned size
+    // Calculate aligned size (alignment must be power of 2)
     size_t aligned_size = (size + alignment - 1) & ~(alignment - 1);
     
     cudaError_t err = cudaMalloc(&ptr, aligned_size);
