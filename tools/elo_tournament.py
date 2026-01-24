@@ -2290,15 +2290,32 @@ def generate_pr_comment(summary: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def requires_metal(engine_name: str) -> bool:
+    """Check if an engine requires Metal (macOS) to run."""
+    metalfish_engines = {"MetalFish-AB", "MetalFish-MCTS", "MetalFish-Hybrid"}
+    return engine_name in metalfish_engines
+
+
 def print_ci_engines(base_dir: Path, stockfish_levels: List[int] = None):
-    """Print available engines as JSON for CI matrix generation."""
+    """Print available engines as JSON for CI matrix generation.
+    
+    Includes 'requires_metal' flag for each match to determine runner OS.
+    Matches involving MetalFish engines require macOS, others can run on Ubuntu.
+    """
     configs = get_engine_configs(base_dir, stockfish_levels)
     engines = list(configs.keys())
     pairs = list_engine_pairs(engines)
 
     output = {
         "engines": engines,
-        "pairs": [{"engine1": p[0], "engine2": p[1]} for p in pairs],
+        "pairs": [
+            {
+                "engine1": p[0], 
+                "engine2": p[1],
+                "requires_metal": requires_metal(p[0]) or requires_metal(p[1])
+            } 
+            for p in pairs
+        ],
         "matrix": [f"{p[0]}__vs__{p[1]}" for p in pairs],
     }
 
