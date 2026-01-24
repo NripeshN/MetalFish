@@ -26,7 +26,7 @@
 #include "../search/movepick.h"
 #include "../search/search.h"
 #include "../search/tt.h"
-#include "stockfish_adapter.h"
+#include "position_adapter.h"
 #include <atomic>
 #include <memory>
 #include <mutex>

@@ -2,13 +2,12 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Lc0-style MCTS Core Algorithms
+  MCTS Core Algorithms
 
-  This module implements the core MCTS algorithms from Leela Chess Zero (Lc0),
-  adapted for MetalFish's architecture. These algorithms represent the
-  state-of-the-art in MCTS for chess.
+  This module implements the core MCTS algorithms for chess,
+  representing state-of-the-art Monte Carlo Tree Search techniques.
 
-  Key algorithms from Lc0:
+  Key algorithms:
   1. PUCT with logarithmic growth factor
   2. FPU (First Play Urgency) with reduction strategy
   3. Moves Left Head (MLH) utility for preferring shorter wins
@@ -17,9 +16,6 @@
   6. Policy softmax temperature
 
   Licensed under GPL-3.0
-
-  Based on Leela Chess Zero (https://github.com/LeelaChessZero/lc0)
-  Original Lc0 code is also GPL-3.0 licensed.
 */
 
 #pragma once
@@ -35,11 +31,11 @@ namespace MetalFish {
 namespace MCTS {
 
 // ============================================================================
-// Lc0-style Search Parameters
+// MCTS Search Parameters
 // ============================================================================
 
-struct Lc0SearchParams {
-  // PUCT parameters (from Lc0 defaults)
+struct MCTSSearchParams {
+  // PUCT parameters (default values)
   float cpuct = 1.745f;        // Base PUCT constant
   float cpuct_base = 38739.0f; // Base for logarithmic growth
   float cpuct_factor = 3.894f; // Multiplier for log term
@@ -84,7 +80,7 @@ struct Lc0SearchParams {
 };
 
 // ============================================================================
-// Fast Math Utilities (from Lc0)
+// Fast Math Utilities
 // ============================================================================
 
 namespace FastMath {
@@ -114,7 +110,7 @@ inline float FastTanh(float x) { return std::tanh(x); }
 
 // Computes the PUCT exploration constant with logarithmic growth
 // Formula: cpuct_init + cpuct_factor * log((N + cpuct_base) / cpuct_base)
-inline float ComputeCpuct(const Lc0SearchParams &params, uint32_t N,
+inline float ComputeCpuct(const MCTSSearchParams &params, uint32_t N,
                           bool is_root) {
   const float init = is_root ? params.cpuct_at_root : params.cpuct;
   const float k = is_root ? params.cpuct_factor_at_root : params.cpuct_factor;
@@ -133,7 +129,7 @@ inline float ComputeCpuct(const Lc0SearchParams &params, uint32_t N,
 // Computes the FPU value for unvisited nodes
 // Reduction strategy: parent_Q - fpu_value * sqrt(visited_policy)
 // Absolute strategy: just return fpu_value
-inline float ComputeFpu(const Lc0SearchParams &params, float parent_q,
+inline float ComputeFpu(const MCTSSearchParams &params, float parent_q,
                         float visited_policy, bool is_root, float draw_score) {
   const bool use_absolute =
       is_root ? params.fpu_absolute_at_root : params.fpu_absolute;
@@ -148,7 +144,7 @@ inline float ComputeFpu(const Lc0SearchParams &params, float parent_q,
 }
 
 // Simplified FPU when visited_policy is not available
-inline float ComputeFpuSimple(const Lc0SearchParams &params, float parent_q,
+inline float ComputeFpuSimple(const MCTSSearchParams &params, float parent_q,
                               bool is_root) {
   const bool use_absolute =
       is_root ? params.fpu_absolute_at_root : params.fpu_absolute;
@@ -169,7 +165,7 @@ class MovesLeftEvaluator {
 public:
   MovesLeftEvaluator() : enabled_(false) {}
 
-  MovesLeftEvaluator(const Lc0SearchParams &params, float parent_m = 0.0f,
+  MovesLeftEvaluator(const MCTSSearchParams &params, float parent_m = 0.0f,
                      float parent_q = 0.0f)
       : enabled_(params.moves_left_max_effect > 0.0f),
         m_slope_(params.moves_left_slope), m_cap_(params.moves_left_max_effect),
@@ -290,7 +286,7 @@ inline float ComputePuctScore(float q, float policy, float cpuct_sqrt_n,
 template <typename Node, typename GetChildFunc, typename GetPolicyFunc,
           typename GetNStartedFunc>
 PuctSelectionResult SelectBestChildPuct(
-    Node *parent, int num_edges, const Lc0SearchParams &params, bool is_root,
+    Node *parent, int num_edges, const MCTSSearchParams &params, bool is_root,
     float draw_score,
     GetChildFunc get_child,       // (int idx) -> child node or nullptr
     GetPolicyFunc get_policy,     // (int idx) -> float policy
@@ -500,7 +496,7 @@ inline float NnueScoreToQ(int score) {
   // Clamp to reasonable range
   float cp = std::clamp(static_cast<float>(score), -3000.0f, 3000.0f);
 
-  // Use Lc0-style conversion: Q = tanh(cp / 300)
+  // Use standard conversion: Q = tanh(cp / 300)
   // This gives:
   //   100cp (1 pawn) -> Q ≈ 0.32
   //   300cp (3 pawns) -> Q ≈ 0.76
@@ -790,7 +786,7 @@ inline bool ShouldSolidify(uint32_t visits, int num_children) {
 }
 
 // ============================================================================
-// Lc0-style Backpropagation (from Lc0)
+// standard Backpropagation (from Lc0)
 // ============================================================================
 
 // Update node statistics after evaluation (Lc0 FinalizeScoreUpdate)
@@ -871,7 +867,7 @@ inline int64_t CalculateTimeForMove(const TimeManagerParams &params,
   if (available <= 0)
     return 50; // Minimum time
 
-  // Lc0-style time curve: Gaussian-like distribution centered at peak
+  // standard time curve: Gaussian-like distribution centered at peak
   float move = static_cast<float>(move_number);
   float peak = params.time_curve_peak;
   float width = (move < peak) ? params.time_curve_left_width

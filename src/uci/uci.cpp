@@ -32,7 +32,7 @@
 #include "gpu/gpu_nnue_integration.h"
 #include "mcts/parallel_hybrid_search.h"
 #include "mcts/position_classifier.h"
-#include "mcts/stockfish_adapter.h"
+#include "mcts/position_adapter.h"
 #include "mcts/thread_safe_mcts.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
@@ -1790,7 +1790,7 @@ void UCIEngine::nnue_benchmark(std::istream &is) {
   }
 
   // =========================================================================
-  // CPU NNUE Benchmark (using Stockfish's evaluation via engine search)
+  // CPU NNUE Benchmark (using NNUE evaluation via engine search)
   // We'll use simple_eval as a baseline for CPU since we can't access networks
   // directly
   // =========================================================================

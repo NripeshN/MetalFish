@@ -4,7 +4,7 @@
 
   Thread-Safe MCTS Implementation - Optimized for Apple Silicon
 
-  This implementation incorporates algorithms from Leela Chess Zero (Lc0),
+  This implementation incorporates state-of-the-art MCTS algorithms,
   including PUCT with logarithmic growth, FPU reduction strategy, and
   moves left head (MLH) utility.
 
@@ -19,7 +19,7 @@
 
 #include "thread_safe_mcts.h"
 #include "apple_silicon_mcts.h"
-#include "lc0_mcts_core.h"
+#include "mcts_core.h"
 
 #include <algorithm>
 #include <chrono>
@@ -499,7 +499,7 @@ void ThreadSafeNode::create_edges(const MoveList<LEGAL> &moves) {
   num_edges_.store(count, std::memory_order_release);
 }
 
-// Lc0-style FinalizeScoreUpdate implementation
+// MCTS FinalizeScoreUpdate implementation
 // Updates statistics using running average: Q = (Q * N + V * multivisit) / (N +
 // multivisit) This is the core algorithm from Lc0 node.cc
 void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
@@ -582,7 +582,7 @@ void ThreadSafeNode::MakeTerminal(Terminal type, float wl, float d_val,
   }
 }
 
-// Lc0-style solid tree optimization
+// MCTS solid tree optimization
 // Converts sparse child nodes to a contiguous array for better cache locality
 // This improves performance for frequently visited subtrees
 bool ThreadSafeNode::MakeSolid() {
@@ -1105,12 +1105,12 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   if (num_edges == 0)
     return -1;
 
-  // Get parent statistics using Lc0-style accessors
+  // Get parent statistics using MCTS accessors
   uint32_t parent_n = node->GetN() + node->GetNInFlight();
   float parent_q = node->GetN() > 0 ? node->GetQ(0.0f) : 0.0f;
   float draw_score = 0.0f; // Can be configured for contempt
 
-  // Lc0-style PUCT with logarithmic growth
+  // MCTS PUCT with logarithmic growth
   // Formula: cpuct_init + cpuct_factor * log((N + cpuct_base) / cpuct_base)
   const float cpuct_base = config_.cpuct_base;
   const float cpuct_factor = config_.cpuct_factor;
@@ -1126,7 +1126,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
       effective_cpuct *
       std::sqrt(static_cast<float>(std::max(children_visits, 1u)));
 
-  // Lc0-style FPU with reduction strategy
+  // MCTS FPU with reduction strategy
   // FPU = parent_Q - fpu_value * sqrt(visited_policy)
   // This encourages exploration of unvisited nodes while being pessimistic
   float visited_policy = node->GetVisitedPolicy();
@@ -1162,7 +1162,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
     ThreadSafeNode *child = edge.child.load(std::memory_order_acquire);
 
     float q, m_utility = 0.0f;
-    float policy = edge.GetPolicy(); // Use Lc0-style compressed policy
+    float policy = edge.GetPolicy(); // Use MCTS compressed policy
     int n_started = 0;
 
     if (child) {
@@ -1184,7 +1184,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
       m_utility = m_eval.GetDefaultMUtility();
     }
 
-    // Lc0-style PUCT score: Q + U + M
+    // MCTS PUCT score: Q + U + M
     // U = cpuct * sqrt(parent_N) * P / (1 + child_N_started)
     // This balances exploitation (Q) with exploration (U)
     float u = cpuct_sqrt_n * policy / (1.0f + static_cast<float>(n_started));
@@ -1323,7 +1323,7 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
     sum += scores[i];
   }
 
-  // Set policy priors using Lc0-style compressed storage
+  // Set policy priors using MCTS compressed storage
   for (int i = 0; i < num_edges; ++i) {
     edges[i].SetPolicy(scores[i] / sum);
   }
@@ -1336,7 +1336,7 @@ void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
 
   TSEdge *edges = root->edges();
 
-  // Lc0-style Dirichlet noise
+  // MCTS Dirichlet noise
   std::random_device rd;
   std::mt19937 gen(rd());
   std::gamma_distribution<float> gamma(config_.dirichlet_alpha, 1.0f);
@@ -1398,7 +1398,7 @@ float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
     std::lock_guard<std::mutex> lock(gpu_mutex_);
     auto [psqt, score] = gpu_manager_->evaluate_single(ctx.pos, true);
 
-    // Use Lc0-style score transformation
+    // Use MCTS score transformation
     // This converts NNUE centipawn scores to MCTS Q values in [-1, 1]
     value = NnueScoreToQ(score);
   } else {
@@ -1424,14 +1424,14 @@ float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
 
 void ThreadSafeMCTS::backpropagate(ThreadSafeNode *node, float value,
                                    float draw, float moves_left) {
-  // Lc0-style backpropagation with proper value negation
+  // MCTS backpropagation with proper value negation
   // The value is from the perspective of the player who just moved
   // As we go up the tree, we negate it for the opponent
 
   int multivisit = config_.virtual_loss; // Match virtual loss count
 
   while (node) {
-    // Lc0-style FinalizeScoreUpdate handles:
+    // MCTS FinalizeScoreUpdate handles:
     // 1. Removing virtual loss (n_in_flight -= multivisit)
     // 2. Incrementing N
     // 3. Updating WL, D, M using running average
@@ -1457,7 +1457,7 @@ Move ThreadSafeMCTS::get_best_move() const {
   int num_edges = root->num_edges();
   const TSEdge *edges = root->edges();
 
-  // Lc0-style best move selection
+  // MCTS best move selection
   // Priority: Terminal wins > Tablebase wins > Most visits > Best Q > Highest
   // policy Also prefers shorter wins and longer losses
 
@@ -1484,7 +1484,7 @@ Move ThreadSafeMCTS::get_best_move() const {
       info.q =
           -child->q(); // Negate because child Q is from opponent's perspective
       info.policy =
-          edges[i].GetPolicy(); // Use Lc0-style compressed policy accessor
+          edges[i].GetPolicy(); // Use MCTS compressed policy accessor
       info.m = child->m();
       info.is_terminal = child->is_terminal();
       info.is_win = info.is_terminal && info.q > 0.5f;

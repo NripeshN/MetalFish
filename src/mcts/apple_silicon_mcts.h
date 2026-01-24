@@ -28,7 +28,7 @@
 
 #include "../gpu/backend.h"
 #include "../gpu/gpu_nnue_integration.h"
-#include "lc0_mcts_core.h"
+#include "mcts_core.h"
 #include <atomic>
 #include <memory>
 #include <vector>

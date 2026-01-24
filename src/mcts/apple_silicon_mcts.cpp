@@ -336,7 +336,7 @@ void AppleSiliconMCTSConfig::auto_tune_for_apple_silicon() {
   }
 
   // Set Lc0 defaults
-  lc0_params = Lc0SearchParams();
+  lc0_params = MCTSSearchParams();
 
   // Apple Silicon specific tuning
   gpu_batch_size = get_optimal_gpu_batch_size();
@@ -443,7 +443,7 @@ float AppleSiliconMCTSEvaluator::evaluate_position(const Position &pos) {
   // Use GPU NNUE evaluation
   auto [psqt, score] = gpu_manager_->evaluate_single(pos, true);
 
-  // Convert to Q value using Lc0-style transformation
+  // Convert to Q value using MCTS transformation
   float q = NnueScoreToQ(score);
 
   // Adjust for side to move

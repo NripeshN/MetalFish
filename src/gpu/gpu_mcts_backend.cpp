@@ -36,7 +36,7 @@ bool GPUMCTSBackend::initialize(GPUNNUEManager *manager) {
 void GPUMCTSBackend::score_to_wdl(int score, float &win, float &draw,
                                   float &loss) {
   // Convert centipawn score to win probability using logistic function
-  // This is based on Stockfish's win rate model
+  // This is based on the win rate model
 
   // Clamp extreme scores
   score = std::clamp(score, -10000, 10000);
@@ -92,7 +92,7 @@ GPUMCTSBackend::generate_policy(const MCTS::MCTSPosition &pos) {
   // 3. Center control
   // 4. Development moves
 
-  const Position &stockfish_pos = pos.stockfish_position();
+  const Position &stockfish_pos = pos.internal_position();
   std::vector<float> scores(moves.size());
   float total_score = 0.0f;
 
@@ -166,7 +166,7 @@ MCTS::MCTSEvaluation GPUMCTSBackend::evaluate(const MCTS::MCTSPosition &pos) {
 
   // Use GPU NNUE for evaluation
   auto [psqt, positional] =
-      gpu_manager_->evaluate_single(pos.stockfish_position(), use_big_network_);
+      gpu_manager_->evaluate_single(pos.internal_position(), use_big_network_);
 
   int score = positional; // Use positional score
 
@@ -215,7 +215,7 @@ std::vector<MCTS::MCTSEvaluation> GPUMCTSBackend::evaluate_batch(
   batch.reserve(static_cast<int>(positions.size()));
 
   for (const auto *pos : positions) {
-    batch.add_position(pos->stockfish_position());
+    batch.add_position(pos->internal_position());
   }
 
   // Evaluate on GPU
