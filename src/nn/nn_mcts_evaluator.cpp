@@ -16,10 +16,12 @@ namespace NN {
 
 // Placeholder inference backend
 struct Lc0NNEvaluator::InferenceBackend {
+  // TODO: Full Metal backend implementation required
   // In full implementation, this would contain:
   // - Metal buffers for weights
   // - MPSGraph for transformer inference
   // - Batch processing queue
+  // See src/nn/IMPLEMENTATION.md for Metal implementation guide
   
   bool initialize(const Lc0NetworkWeights& weights) {
     // TODO: Initialize Metal backend

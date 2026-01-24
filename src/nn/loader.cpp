@@ -62,19 +62,22 @@ std::unique_ptr<Lc0NetworkWeights> Lc0NetworkLoader::load(const std::string& pat
 }
 
 bool Lc0NetworkLoader::load_protobuf(const std::string& path, Lc0Weights& weights) {
-  // Placeholder - requires protobuf integration
+  // TODO: Implement protobuf parsing
+  // Requires: libprotobuf integration and lc0.proto schema
+  // See src/nn/README.md for implementation details
   error_message_ = "Protobuf parsing not yet implemented. Requires libprotobuf integration.";
   return false;
 }
 
 bool Lc0NetworkLoader::extract_weights(const Lc0Weights& pb_weights, 
                                         Lc0NetworkWeights& net_weights) {
-  // Placeholder - requires protobuf parsing
-  // In full implementation, this would:
+  // TODO: Implement weight extraction from parsed protobuf
+  // This function should:
   // 1. Parse protobuf structure
-  // 2. Extract transformer layer weights
+  // 2. Extract transformer layer weights (15 layers)
   // 3. Extract policy/value/mlh heads
   // 4. Validate dimensions match config
+  // See src/nn/IMPLEMENTATION.md for network architecture details
   
   error_message_ = "Weight extraction not yet implemented. Requires protobuf schema.";
   return false;
@@ -82,7 +85,8 @@ bool Lc0NetworkLoader::extract_weights(const Lc0Weights& pb_weights,
 
 bool Lc0NetworkLoader::decompress_gzip(const std::string& gz_path, 
                                         std::vector<uint8_t>& output) {
-  // Placeholder - requires zlib integration
+  // TODO: Implement gzip decompression for .pb.gz files
+  // Requires: zlib library
   error_message_ = "Gzip decompression not yet implemented. Requires zlib.";
   return false;
 }

@@ -63,6 +63,10 @@ int get_queen_direction(int from_sq, int to_sq) {
 }
 
 int get_knight_direction(int from_sq, int to_sq) {
+  // TODO: Verify this matches Lc0's exact knight move policy encoding
+  // The current implementation may not produce identical indices to Lc0
+  // See issue noted in src/nn/README.md - needs comparison with Lc0 reference
+  
   int from_file = from_sq % 8;
   int from_rank = from_sq / 8;
   int to_file = to_sq % 8;
