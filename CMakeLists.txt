@@ -234,6 +234,13 @@ set(MCTS_SOURCES
     src/mcts/ab_integration.cpp src/mcts/thread_safe_mcts.cpp
     src/mcts/parallel_hybrid_search.cpp src/mcts/apple_silicon_mcts.cpp)
 
+# Neural Network source files (Lc0-compatible transformer inference)
+set(NN_SOURCES
+    src/nn/loader.cpp
+    src/nn/encoder.cpp
+    src/nn/policy_tables.cpp
+    src/nn/nn_mcts_evaluator.cpp)
+
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(GPU_SOURCES ${GPU_SOURCES} src/gpu/metal/metal_backend.mm)
@@ -284,7 +291,8 @@ set(SOURCES
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
     ${GPU_SOURCES}
-    ${MCTS_SOURCES})
+    ${MCTS_SOURCES}
+    ${NN_SOURCES})
 
 # Create executable
 if(USE_CUDA AND CUDA_AVAILABLE)
@@ -364,7 +372,8 @@ if(BUILD_TESTS)
       tests/test_mcts.cpp
       tests/test_metal.cpp
       tests/test_gpu_nnue.cpp
-      tests/test_cuda.cpp)
+      tests/test_cuda.cpp
+      tests/test_lc0_comparison.cpp)
 
   if(USE_CUDA AND CUDA_AVAILABLE)
     # CUDA test executable
@@ -378,6 +387,7 @@ if(BUILD_TESTS)
       ${SYZYGY_SOURCES}
       ${GPU_SOURCES}
       ${MCTS_SOURCES}
+      ${NN_SOURCES}
       ${CUDA_SOURCES})
     set_target_properties(
       metalfish_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON
@@ -394,7 +404,8 @@ if(BUILD_TESTS)
       ${UCI_SOURCES}
       ${SYZYGY_SOURCES}
       ${GPU_SOURCES}
-      ${MCTS_SOURCES})
+      ${MCTS_SOURCES}
+      ${NN_SOURCES})
     target_link_libraries(metalfish_tests Threads::Threads)
   endif()
 
@@ -405,6 +416,10 @@ if(BUILD_TESTS)
       metalfish_tests ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
       ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
   endif()
+
+  # Define NO_MAIN for test_lc0_comparison.cpp to avoid multiple main() definitions
+  set_source_files_properties(tests/test_lc0_comparison.cpp
+                               PROPERTIES COMPILE_DEFINITIONS "NO_MAIN")
 
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
 endif()

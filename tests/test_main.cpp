@@ -18,6 +18,7 @@ bool test_metal();
 bool test_cuda();
 bool run_all_gpu_tests();
 bool test_mcts();
+bool run_all_lc0_tests();
 
 int main() {
   std::cout << "MetalFish Test Suite\n";
@@ -36,7 +37,8 @@ int main() {
       {"Bitboard", test_bitboard},       {"Position", test_position},
       {"Move Generation", test_movegen}, {"Search", test_search},
       {"Metal GPU", test_metal},         {"CUDA GPU", test_cuda},
-      {"GPU NNUE", run_all_gpu_tests},   {"MCTS Hybrid", test_mcts}};
+      {"GPU NNUE", run_all_gpu_tests},   {"MCTS Hybrid", test_mcts},
+      {"Lc0 NN", run_all_lc0_tests}};
 
   for (const auto &test : tests) {
     std::cout << "Running " << test.name << " tests... ";
