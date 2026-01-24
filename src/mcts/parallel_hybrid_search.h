@@ -36,7 +36,7 @@
 #include "../search/tt.h"
 #include "ab_integration.h"
 #include "position_classifier.h"
-#include "position_adapter.h"
+#include "stockfish_adapter.h"
 #include "thread_safe_mcts.h"
 #include <atomic>
 #include <condition_variable>

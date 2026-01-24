@@ -223,14 +223,14 @@ set(GPU_SOURCES src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_mcts_backend.cpp
 set(CUDA_SOURCES "")
 
 # MCTS source files (hybrid search) Core files needed for all MCTS modes: -
-# position_adapter: Interface for position representation - position_classifier:
+# stockfish_adapter: Interface between Stockfish and MCTS - position_classifier:
 # Classifies positions for strategy selection - ab_integration: Alpha-beta
 # integration helpers - thread_safe_mcts: Pure MCTS implementation (stable, used
 # by mctsmt and hybrid) - parallel_hybrid_search: Parallel MCTS+AB for
 # mcts/hybrid commands - apple_silicon_mcts: Apple Silicon specific
 # optimizations
 set(MCTS_SOURCES
-    src/mcts/position_adapter.cpp src/mcts/position_classifier.cpp
+    src/mcts/stockfish_adapter.cpp src/mcts/position_classifier.cpp
     src/mcts/ab_integration.cpp src/mcts/thread_safe_mcts.cpp
     src/mcts/parallel_hybrid_search.cpp src/mcts/apple_silicon_mcts.cpp)
 

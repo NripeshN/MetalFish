@@ -28,7 +28,7 @@
 
 #include "../gpu/backend.h"
 #include "../gpu/gpu_nnue_integration.h"
-#include "mcts_core.h"
+#include "lc0_mcts_core.h"
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -176,8 +176,8 @@ private:
 // ============================================================================
 
 struct AppleSiliconMCTSConfig {
-  // MCTS parameters
-  MCTSSearchParams mcts_params;
+  // Lc0-style MCTS parameters
+  Lc0SearchParams lc0_params;
 
   // Apple Silicon specific settings
   int gpu_batch_size = 128;         // Optimal for M-series GPUs
@@ -263,7 +263,7 @@ public:
   // Returns index of best child, or -1 if no children
   template <typename Node, typename EdgeArray>
   static int select_best_child(Node *parent, const EdgeArray &edges,
-                               int num_edges, const MCTSSearchParams &params,
+                               int num_edges, const Lc0SearchParams &params,
                                bool is_root, float draw_score);
 
   // Batch PUCT computation for multiple nodes (GPU accelerated)
@@ -272,7 +272,7 @@ public:
                                  const std::vector<float> &child_q,
                                  const std::vector<float> &child_n,
                                  const std::vector<float> &policy,
-                                 const MCTSSearchParams &params,
+                                 const Lc0SearchParams &params,
                                  std::vector<float> &scores_out);
 };
 

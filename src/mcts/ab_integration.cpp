@@ -923,7 +923,7 @@ HybridSearchBridge::verify_mcts_move(const Position &pos, Move mcts_move,
 
   // Use the REAL Engine if available!
   if (engine_) {
-    // Run the full alpha-beta search
+    // Run the full Stockfish search
     auto search_result = engine_->search_sync(pos.fen(), verification_depth, 0);
 
     result.ab_move = search_result.best_move;
@@ -1026,7 +1026,7 @@ HybridSearchBridge::get_enhanced_policy(const Position &pos) {
     MoveList<LEGAL> moves(pos);
     float uniform = moves.size() > 0 ? 1.0f / moves.size() : 0.0f;
     for (const auto &m : moves) {
-      mcts_policy.emplace_back(MCTSMove::FromInternal(m), uniform);
+      mcts_policy.emplace_back(MCTSMove::FromStockfish(m), uniform);
     }
     return mcts_policy;
   }
@@ -1038,7 +1038,7 @@ HybridSearchBridge::get_enhanced_policy(const Position &pos) {
   auto ab_policy = policy_generator_->generate_policy(pos);
 
   for (const auto &[move, prob] : ab_policy) {
-    mcts_policy.emplace_back(MCTSMove::FromInternal(move), prob);
+    mcts_policy.emplace_back(MCTSMove::FromStockfish(move), prob);
   }
 
   {

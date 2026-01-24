@@ -4,7 +4,7 @@
 
   GPU Accumulator Cache - Finny Tables Implementation
 
-  This implements the Finny Tables optimization for GPU:
+  This implements Stockfish's Finny Tables optimization for GPU:
   - Caches accumulator states indexed by king square
   - Enables efficient incremental updates during search
   - Tracks which accumulators need refresh vs incremental update
@@ -254,7 +254,7 @@ private:
 // ============================================================================
 
 // Permutes weights for optimal SIMD access pattern
-// Weight permutation ensures consecutive SIMD lanes access
+// Stockfish permutes weights so that consecutive SIMD lanes access
 // consecutive memory locations
 class WeightPermuter {
 public:
@@ -281,7 +281,7 @@ public:
 // Sparse Input Bitmask Helper
 // ============================================================================
 
-// Generates bitmasks for non-zero activations (find_nnz algorithm)
+// Generates bitmasks for non-zero activations (Stockfish's find_nnz)
 class SparseInputHelper {
 public:
   // Find non-zero indices in clipped accumulator

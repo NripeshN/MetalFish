@@ -11,7 +11,7 @@
 #include "mcts/ab_integration.h"
 #include "mcts/parallel_hybrid_search.h"
 #include "mcts/position_classifier.h"
-#include "mcts/position_adapter.h"
+#include "mcts/stockfish_adapter.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -214,26 +214,26 @@ void test_ab_integration() {
 }
 
 // ============================================================================
-// Position Adapter Tests
+// Stockfish Adapter Tests
 // ============================================================================
 
 void test_adapter() {
   {
     TestCase tc("Move conversion");
     Move sf_move(SQ_E2, SQ_E4);
-    MCTSMove mcts_move = MCTSMove::FromInternal(sf_move);
+    MCTSMove mcts_move = MCTSMove::FromStockfish(sf_move);
 
-    EXPECT(tc, mcts_move.to_internal() == sf_move);
+    EXPECT(tc, mcts_move.to_stockfish() == sf_move);
     EXPECT(tc, mcts_move.from() == SQ_E2);
     EXPECT(tc, mcts_move.to() == SQ_E4);
   }
   {
     TestCase tc("Promotion conversion");
     Move promo = Move::make<PROMOTION>(SQ_E7, SQ_E8, QUEEN);
-    MCTSMove mcts_promo = MCTSMove::FromInternal(promo);
+    MCTSMove mcts_promo = MCTSMove::FromStockfish(promo);
 
-    EXPECT(tc, mcts_promo.to_internal() == promo);
-    EXPECT(tc, mcts_promo.to_internal().promotion_type() == QUEEN);
+    EXPECT(tc, mcts_promo.to_stockfish() == promo);
+    EXPECT(tc, mcts_promo.to_stockfish().promotion_type() == QUEEN);
   }
   {
     TestCase tc("Position adapter");

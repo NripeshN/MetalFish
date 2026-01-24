@@ -109,7 +109,7 @@ public:
   // implementation for move verification.
 
   // Run a synchronous search on the given FEN and return the best move
-  // This uses the full alpha-beta search with all optimizations
+  // This uses the full Stockfish search with all optimizations
   struct QuickSearchResult {
     Move best_move = Move::none();
     Move ponder_move = Move::none();

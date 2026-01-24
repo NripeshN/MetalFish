@@ -13,7 +13,7 @@
 
 #pragma once
 
-#include "../mcts/position_adapter.h"
+#include "../mcts/stockfish_adapter.h"
 #include "gpu_nnue_integration.h"
 #include <memory>
 #include <vector>
@@ -55,7 +55,7 @@ private:
   int optimal_batch_size_ = 64;
   bool use_big_network_ = true;
 
-  // WDL conversion parameters (derived from win rate model)
+  // WDL conversion parameters (derived from Stockfish's win rate model)
   float wdl_a_ = 0.0f; // Win rate at eval=0
   float wdl_b_ = 1.0f; // Scaling factor
 
