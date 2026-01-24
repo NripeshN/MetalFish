@@ -501,7 +501,7 @@ void ThreadSafeNode::create_edges(const MoveList<LEGAL> &moves) {
 
 // MCTS FinalizeScoreUpdate implementation
 // Updates statistics using running average: Q = (Q * N + V * multivisit) / (N +
-// multivisit) This is the core algorithm standard MCTS
+// multivisit). This is the core algorithm for standard MCTS.
 void ThreadSafeNode::FinalizeScoreUpdate(float v, float d_val, float m_val,
                                          int multivisit) {
   // Get current N before update
@@ -1120,7 +1120,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
           std::log((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
 
   // Compute U coefficient: cpuct * sqrt(children_visits)
-  // Use GetChildrenVisits() which returns N-1 for non-root 
+  // Use GetChildrenVisits() which returns N-1 for non-root nodes.
   uint32_t children_visits = node->GetChildrenVisits();
   float cpuct_sqrt_n =
       effective_cpuct *
@@ -1135,7 +1135,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   // The reduction is proportional to sqrt of visited policy
   float fpu = parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
 
-  // Set up moves left evaluator for MLH utility 
+  // Set up moves-left evaluator for MLH (moves-left head) utility.
   MCTSSearchParams lc0_params;
   lc0_params.moves_left_max_effect = 0.0345f;
   lc0_params.moves_left_threshold = 0.8f;
@@ -1208,8 +1208,7 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
   std::vector<float> scores(num_edges);
   float max_score = -1e9f;
 
-  // Score each move using improved heuristics (improved move
-  // ordering)
+  // Score each move using improved heuristics for move ordering
   for (int i = 0; i < num_edges; ++i) {
     Move m = edges[i].move;
     float score = 0.0f;
@@ -1221,7 +1220,7 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
                                : type_of(ctx.pos.piece_on(m.to_sq()));
       PieceType attacker = type_of(ctx.pos.piece_on(m.from_sq()));
 
-      // Improved piece values standard
+      // Improved piece values for move ordering
       static const float piece_values[] = {0, 100, 320, 330, 500, 1000, 0};
 
       // MVV-LVA: Prioritize capturing valuable pieces with less valuable

@@ -64,7 +64,7 @@ constexpr size_t CACHE_LINE_SIZE = 64; // x86-64
 struct alignas(CACHE_LINE_SIZE) TSEdge {
   Move move = Move::none();
 
-  // Compressed policy storage (style) - saves 2 bytes per edge
+  // Compressed policy storage - saves 2 bytes per edge
   uint16_t p_compressed_ = 0;
 
   // Child node pointer
@@ -85,7 +85,7 @@ struct alignas(CACHE_LINE_SIZE) TSEdge {
         child(other.child.load(std::memory_order_relaxed)) {}
 
   // MCTS policy compression/decompression
-  // Source: node.cc Edge::SetP/GetP
+  // Internal implementation of 16-bit compressed policy encode/decode
   void SetPolicy(float p) {
     // Policy priors (P) are stored in a compressed 16-bit format.
     // We store bits 27..12 of the IEEE 754 float representation.
