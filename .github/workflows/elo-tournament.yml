@@ -648,7 +648,7 @@ jobs:
   run-matches-macos:
     name: Match (macOS) ${{ matrix.match }}
     needs: setup-macos
-    if: ${{ needs.setup-macos.outputs.matrix_macos != '{"include":[]}' && needs.setup-macos.outputs.matrix_macos != '' }}
+    if: needs.setup-macos.outputs.matrix_macos != '{"include":[]}' && needs.setup-macos.outputs.matrix_macos != ''
     runs-on: macos-latest # Apple Silicon for Metal support
     strategy:
       fail-fast: false
@@ -787,7 +787,7 @@ jobs:
   run-matches-linux:
     name: Match (Linux) ${{ matrix.match }}
     needs: [setup-macos, setup-linux]
-    if: ${{ needs.setup-macos.outputs.matrix_linux != '{"include":[]}' && needs.setup-macos.outputs.matrix_linux != '' }}
+    if: needs.setup-macos.outputs.matrix_linux != '{"include":[]}' && needs.setup-macos.outputs.matrix_linux != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
