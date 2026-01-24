@@ -495,5 +495,3 @@ constexpr auto is_all_same_v = is_all_same<Ts...>::value;
 } // namespace MetalFish
 
 #endif // #ifndef TYPES_H_INCLUDED
-
-#include "search/tune.h" // Global visibility to tuning setup

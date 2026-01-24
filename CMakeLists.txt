@@ -193,7 +193,7 @@ set(CORE_SOURCES src/core/bitboard.cpp src/core/misc.cpp src/core/movegen.cpp
 # Search source files
 set(SEARCH_SOURCES
     src/search/search.cpp src/search/movepick.cpp src/search/thread.cpp
-    src/search/tt.cpp src/search/timeman.cpp src/search/tune.cpp)
+    src/search/tt.cpp src/search/timeman.cpp)
 
 # Evaluation source files
 set(EVAL_SOURCES
