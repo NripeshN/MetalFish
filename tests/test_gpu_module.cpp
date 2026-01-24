@@ -158,6 +158,15 @@ void test_position_data() {
 // ============================================================================
 
 void test_eval_batch() {
+  // GPUEvalBatch methods are no-ops when GPU is not available
+  if (!Backend::available()) {
+    {
+      TestCase tc("Batch (no GPU - skipped)");
+      EXPECT(tc, true);
+    }
+    return;
+  }
+
   {
     TestCase tc("Batch creation");
     GPUEvalBatch batch;
