@@ -157,7 +157,16 @@ set(MCTS_SOURCES
     src/mcts/mcts_tt.cpp
     src/mcts/parallel_search.cpp
     src/mcts/ab_integration.cpp
-    src/mcts/thread_safe_mcts.cpp)
+    src/mcts/thread_safe_mcts.cpp
+    src/mcts/nn_mcts_evaluator.cpp)
+
+# Neural network source files
+set(NN_SOURCES
+    src/nn/proto/net.pb.cc
+    src/nn/loader.cpp
+    src/nn/encoder.cpp
+    src/nn/policy_map.cpp
+    src/nn/network.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
@@ -209,7 +218,8 @@ set(SOURCES
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
     ${GPU_SOURCES}
-    ${MCTS_SOURCES})
+    ${MCTS_SOURCES}
+    ${NN_SOURCES})
 
 # Create executable
 add_executable(metalfish ${SOURCES})
@@ -219,9 +229,17 @@ if(TARGET metal_shaders)
   add_dependencies(metalfish metal_shaders)
 endif()
 
+# Find protobuf
+find_package(Protobuf REQUIRED)
+include_directories(${Protobuf_INCLUDE_DIRS})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/nn)
+
+# Find zlib (for loading .pb.gz files)
+find_package(ZLIB REQUIRED)
+
 # Link pthread
 find_package(Threads REQUIRED)
-target_link_libraries(metalfish Threads::Threads)
+target_link_libraries(metalfish Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES})
 
 # macOS specific
 if(APPLE)
@@ -276,6 +294,11 @@ if(BUILD_TESTS)
       tests/test_mcts.cpp
       tests/test_metal.cpp
       tests/test_gpu_nnue.cpp)
+  
+  set(NN_TEST_SOURCES
+      tests/test_nn_comparison.cpp
+      ${CORE_SOURCES}
+      ${NN_SOURCES})
 
   add_executable(
     metalfish_tests
@@ -287,7 +310,7 @@ if(BUILD_TESTS)
     ${SYZYGY_SOURCES}
     ${GPU_SOURCES}
     ${MCTS_SOURCES})
-  target_link_libraries(metalfish_tests Threads::Threads)
+  target_link_libraries(metalfish_tests Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES})
 
   if(APPLE
      AND USE_METAL
@@ -298,6 +321,18 @@ if(BUILD_TESTS)
   endif()
 
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
+  
+  # Neural network comparison test
+  add_executable(test_nn_comparison ${NN_TEST_SOURCES} ${MCTS_SOURCES})
+  target_link_libraries(test_nn_comparison Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES})
+  
+  if(APPLE AND USE_METAL AND METAL_CPP_AVAILABLE)
+    target_link_libraries(
+      test_nn_comparison ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
+      ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+  endif()
+  
+  add_test(NAME test_nn_comparison COMMAND test_nn_comparison)
 endif()
 
 # GPU Benchmark (optional)

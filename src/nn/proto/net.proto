@@ -1,0 +1,358 @@
+/*
+  MetalFish - A GPU-accelerated UCI chess engine
+  Copyright (C) 2025 Nripesh Niketan
+
+  Licensed under GPL-3.0
+
+  Neural network weight format compatible with transformer-based networks.
+  Adapted from protobuf format for chess neural networks.
+*/
+syntax = "proto2";
+
+package MetalFishNN;
+
+message EngineVersion {
+  optional uint32 major = 1;
+  optional uint32 minor = 2;
+  optional uint32 patch = 3;
+}
+
+message Weights {
+  message Layer {
+    optional float min_val = 1;
+    optional float max_val = 2;
+    optional bytes params = 3;
+    enum Encoding {
+      UNKNOWN_ENCODING = 0;
+      LINEAR16 = 1;
+      FLOAT16 = 2;
+      BFLOAT16 = 3;
+      FLOAT32 = 4;
+    }
+    optional Encoding encoding = 4;
+    repeated uint32 dims = 5;
+  }
+
+  message ConvBlock {
+    optional Layer weights = 1;
+    optional Layer biases = 2;
+    optional Layer bn_means = 3;
+    optional Layer bn_stddivs = 4;
+    optional Layer bn_gammas = 5;
+    optional Layer bn_betas = 6;
+  }
+
+  message SEunit {
+    // Squeeze-excitation unit
+    optional Layer w1 = 1;
+    optional Layer b1 = 2;
+    optional Layer w2 = 3;
+    optional Layer b2 = 4;
+  }
+
+  message Residual {
+    optional ConvBlock conv1 = 1;
+    optional ConvBlock conv2 = 2;
+    optional SEunit se = 3;
+  }
+
+  message Smolgen {
+    optional Layer compress = 1;
+    optional Layer dense1_w = 2;
+    optional Layer dense1_b = 3;
+    optional Layer ln1_gammas = 4;
+    optional Layer ln1_betas = 5;
+    optional Layer dense2_w = 6;
+    optional Layer dense2_b = 7;
+    optional Layer ln2_gammas = 8;
+    optional Layer ln2_betas = 9;
+  }
+
+  message MHA {
+    optional Layer q_w = 1;
+    optional Layer q_b = 2;
+    optional Layer k_w = 3;
+    optional Layer k_b = 4;
+    optional Layer v_w = 5;
+    optional Layer v_b = 6;
+    optional Layer dense_w = 7;
+    optional Layer dense_b = 8;
+    optional Smolgen smolgen = 9;
+
+    optional Layer rpe_q = 10;
+    optional Layer rpe_k = 11;
+    optional Layer rpe_v = 12;
+  }
+
+  message FFN {
+    optional Layer dense1_w = 1;
+    optional Layer dense1_b = 2;
+    optional Layer dense2_w = 3;
+    optional Layer dense2_b = 4;
+  }
+
+  message EncoderLayer {
+    optional MHA mha = 1;
+    optional Layer ln1_gammas = 2;
+    optional Layer ln1_betas = 3;
+    optional FFN ffn = 4;
+    optional Layer ln2_gammas = 5;
+    optional Layer ln2_betas = 6;
+  }
+
+  message PolicyHead {
+    optional Layer ip_pol_w = 1;
+    optional Layer ip_pol_b = 2;
+    optional Layer ip2_pol_w = 3;
+    optional Layer ip2_pol_b = 4;
+    optional Layer ip3_pol_w = 5;
+    optional Layer ip3_pol_b = 6;
+    optional Layer ip4_pol_w = 7;
+
+    repeated EncoderLayer pol_encoder = 8;
+    optional uint32 pol_headcount = 9;
+
+    optional ConvBlock policy1 = 10;
+    optional ConvBlock policy = 11;
+  }
+
+  message ValueHead {
+    optional Layer ip_val_w = 1;
+    optional Layer ip_val_b = 2;
+    optional Layer ip1_val_w = 3;
+    optional Layer ip1_val_b = 4;
+    optional Layer ip2_val_w = 5;
+    optional Layer ip2_val_b = 6;
+    optional Layer ip_val_err_w = 7;
+    optional Layer ip_val_err_b = 8;
+    optional Layer ip_val_cat_w = 9;
+    optional Layer ip_val_cat_b = 10;
+
+    optional ConvBlock value = 11;
+  }
+
+  message PolicyHeadMap {
+    required string key = 1;
+    required PolicyHead value = 2;
+  }
+
+  message PolicyHeads {
+    optional Layer ip_pol_w = 1;
+    optional Layer ip_pol_b = 2;
+    optional PolicyHead vanilla = 3;
+    optional PolicyHead optimistic_st = 4;
+    optional PolicyHead soft = 5;
+    optional PolicyHead opponent = 6;
+    repeated PolicyHeadMap policy_head_map = 7;
+  }
+
+  message ValueHeadMap {
+    required string key = 1;
+    required ValueHead value = 2;
+  }
+
+  message ValueHeads {
+    optional ValueHead winner = 1;
+    optional ValueHead q = 2;
+    optional ValueHead st = 3;
+    repeated ValueHeadMap value_head_map = 4;
+  }
+
+  // Input convnet.
+  optional ConvBlock input = 1;
+
+  // Residual tower.
+  repeated Residual residual = 2;
+
+  // Embedding layer for attention body encoders
+  optional Layer ip_emb_preproc_w = 37;
+  optional Layer ip_emb_preproc_b = 38;
+
+  optional Layer ip_emb_w = 25;
+  optional Layer ip_emb_b = 26;
+
+  optional Layer ip_emb_ln_gammas = 39;
+  optional Layer ip_emb_ln_betas = 40;
+
+  // Input gating
+  optional Layer ip_mult_gate = 33;
+  optional Layer ip_add_gate = 34;
+
+  optional FFN ip_emb_ffn = 41;
+  optional Layer ip_emb_ffn_ln_gammas = 42;
+  optional Layer ip_emb_ffn_ln_betas = 43;
+
+  // Encoder stack
+  repeated EncoderLayer encoder = 27;
+  optional uint32 headcount = 28;
+
+  // Policy encoder stack
+  repeated EncoderLayer pol_encoder = 21;
+  optional uint32 pol_headcount = 24;
+
+  // Policy head
+  optional ConvBlock policy1 = 11;
+  optional ConvBlock policy = 3;
+  optional Layer ip_pol_w = 4;
+  optional Layer ip_pol_b = 5;
+  optional Layer ip2_pol_w = 17;
+  optional Layer ip2_pol_b = 18;
+  optional Layer ip3_pol_w = 19;
+  optional Layer ip3_pol_b = 20;
+  optional Layer ip4_pol_w = 22;
+
+  // Value head
+  optional ConvBlock value = 6;
+  optional Layer ip_val_w = 29;
+  optional Layer ip_val_b = 30;
+  optional Layer ip1_val_w = 7;
+  optional Layer ip1_val_b = 8;
+  optional Layer ip2_val_w = 9;
+  optional Layer ip2_val_b = 10;
+
+  optional ValueHeads value_heads = 44;
+  optional PolicyHeads policy_heads = 45;
+
+  // Moves left head
+  optional ConvBlock moves_left = 12;
+  optional Layer ip_mov_w = 31;
+  optional Layer ip_mov_b = 32;
+  optional Layer ip1_mov_w = 13;
+  optional Layer ip1_mov_b = 14;
+  optional Layer ip2_mov_w = 15;
+  optional Layer ip2_mov_b = 16;
+
+  // Global smolgen weights
+  optional Layer smolgen_w = 35;
+  optional Layer smolgen_b = 36;
+}
+
+message TrainingParams {
+  optional uint32 training_steps = 1;
+  optional float learning_rate = 2;
+  optional float mse_loss = 3;
+  optional float policy_loss = 4;
+  optional float accuracy = 5;
+  optional string training_params = 6;
+}
+
+message NetworkFormat {
+  enum InputFormat {
+    INPUT_UNKNOWN = 0;
+    INPUT_CLASSICAL_112_PLANE = 1;
+    INPUT_112_WITH_CASTLING_PLANE = 2;
+    INPUT_112_WITH_CANONICALIZATION = 3;
+    INPUT_112_WITH_CANONICALIZATION_HECTOPLIES = 4;
+    INPUT_112_WITH_CANONICALIZATION_HECTOPLIES_ARMAGEDDON = 132;
+    INPUT_112_WITH_CANONICALIZATION_V2 = 5;
+    INPUT_112_WITH_CANONICALIZATION_V2_ARMAGEDDON = 133;
+  }
+  optional InputFormat input = 1;
+
+  enum OutputFormat {
+    OUTPUT_UNKNOWN = 0;
+    OUTPUT_CLASSICAL = 1;
+    OUTPUT_WDL = 2;
+  }
+  optional OutputFormat output = 2;
+
+  enum NetworkStructure {
+    NETWORK_UNKNOWN = 0;
+    NETWORK_CLASSICAL = 1;
+    NETWORK_SE = 2;
+    NETWORK_CLASSICAL_WITH_HEADFORMAT = 3;
+    NETWORK_SE_WITH_HEADFORMAT = 4;
+    NETWORK_ONNX = 5;
+    NETWORK_ATTENTIONBODY_WITH_HEADFORMAT = 6;
+    NETWORK_ATTENTIONBODY_WITH_MULTIHEADFORMAT = 7;
+    NETWORK_AB_LEGACY_WITH_MULTIHEADFORMAT = 134;
+  }
+  optional NetworkStructure network = 3;
+
+  enum PolicyFormat {
+    POLICY_UNKNOWN = 0;
+    POLICY_CLASSICAL = 1;
+    POLICY_CONVOLUTION = 2;
+    POLICY_ATTENTION = 3;
+  }
+  optional PolicyFormat policy = 4;
+
+  enum ValueFormat {
+    VALUE_UNKNOWN = 0;
+    VALUE_CLASSICAL = 1;
+    VALUE_WDL = 2;
+    VALUE_PARAM = 3;
+  }
+  optional ValueFormat value = 5;
+
+  enum MovesLeftFormat {
+    MOVES_LEFT_NONE = 0;
+    MOVES_LEFT_V1 = 1;
+  }
+  optional MovesLeftFormat moves_left = 6;
+
+  enum ActivationFunction {
+    ACTIVATION_DEFAULT = 0;
+    ACTIVATION_MISH = 1;
+    ACTIVATION_RELU = 2;
+    ACTIVATION_NONE = 3;
+    ACTIVATION_TANH = 4;
+    ACTIVATION_SIGMOID = 5;
+    ACTIVATION_SELU = 6;
+    ACTIVATION_SWISH = 7;
+    ACTIVATION_RELU_2 = 8;
+    ACTIVATION_SOFTMAX = 9;
+  }
+
+  enum DefaultActivation {
+    DEFAULT_ACTIVATION_RELU = 0;
+    DEFAULT_ACTIVATION_MISH = 1;
+  }
+  optional DefaultActivation default_activation = 7;
+
+  optional ActivationFunction smolgen_activation = 8;
+  optional ActivationFunction ffn_activation = 9;
+
+  enum InputEmbeddingFormat {
+    INPUT_EMBEDDING_NONE = 0;
+    INPUT_EMBEDDING_PE_MAP = 1;
+    INPUT_EMBEDDING_PE_DENSE = 2;
+  }
+  optional InputEmbeddingFormat input_embedding = 10;
+}
+
+message Format {
+  enum Encoding {
+    UNKNOWN = 0;
+    LINEAR16 = 1;
+  }
+  optional Encoding weights_encoding = 1;
+  optional NetworkFormat network_format = 2;
+}
+
+message OnnxModel {
+  enum DataType {
+    UNKNOWN_DATATYPE = 0;
+    FLOAT = 1;
+    FLOAT16 = 10;
+    BFLOAT16 = 16;
+  }
+
+  optional bytes model = 1;
+  optional DataType data_type = 2;
+  optional string input_planes = 3;
+  optional string output_value = 4;
+  optional string output_wdl = 5;
+  optional string output_policy = 6;
+  optional string output_mlh = 7;
+}
+
+message Net {
+  optional fixed32 magic = 1;
+  optional string license = 2;
+  optional EngineVersion min_version = 3;
+  optional Format format = 4;
+  optional TrainingParams training_params = 5;
+  optional Weights weights = 10;
+  optional OnnxModel onnx_model = 11;
+}
