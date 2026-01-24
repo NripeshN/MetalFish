@@ -229,8 +229,8 @@ if(TARGET metal_shaders)
   add_dependencies(metalfish metal_shaders)
 endif()
 
-# Find protobuf
-find_package(Protobuf REQUIRED)
+# Find protobuf (minimum version 3.0)
+find_package(Protobuf 3.0 REQUIRED)
 include_directories(${Protobuf_INCLUDE_DIRS})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/nn)
 

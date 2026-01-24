@@ -114,10 +114,10 @@ InputPlanes EncodePositionForNN(
   int aux_base = kAuxPlaneBase;
   
   // Plane 0-3: Castling rights
-  SetPlane(result[aux_base + 0], current_pos.can_castle(us & KING_SIDE) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 1], current_pos.can_castle(us & QUEEN_SIDE) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 2], current_pos.can_castle(them & KING_SIDE) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 3], current_pos.can_castle(them & QUEEN_SIDE) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 0], current_pos.can_castle(WHITE_OO) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 1], current_pos.can_castle(WHITE_OOO) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 2], current_pos.can_castle(BLACK_OO) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 3], current_pos.can_castle(BLACK_OOO) ? 1.0f : 0.0f);
   
   // Plane 4: Color to move (or en passant in canonical format)
   if (IsCanonicalFormat(input_format)) {
@@ -193,10 +193,10 @@ InputPlanes EncodePositionForNN(
   // Fill auxiliary planes
   int aux_base = kAuxPlaneBase;
   
-  SetPlane(result[aux_base + 0], pos.can_castle(us & KING_SIDE) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 1], pos.can_castle(us & QUEEN_SIDE) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 2], pos.can_castle(them & KING_SIDE) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 3], pos.can_castle(them & QUEEN_SIDE) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 0], pos.can_castle(WHITE_OO) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 1], pos.can_castle(WHITE_OOO) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 2], pos.can_castle(BLACK_OO) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 3], pos.can_castle(BLACK_OOO) ? 1.0f : 0.0f);
   
   SetPlane(result[aux_base + 4], us == BLACK ? 1.0f : 0.0f);
   SetPlane(result[aux_base + 5], static_cast<float>(pos.rule50_count()));

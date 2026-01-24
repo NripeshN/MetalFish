@@ -41,10 +41,17 @@ std::string DecompressGzip(const std::string& filename) {
   }
 
   fflush(fp);
-  gzFile file = gzdopen(dup(fileno(fp)), "rb");
+  int fd = dup(fileno(fp));
+  if (fd == -1) {
+    fclose(fp);
+    throw std::runtime_error("Cannot duplicate file descriptor for " + filename);
+  }
+  
+  gzFile file = gzdopen(fd, "rb");
   fclose(fp);
   
   if (!file) {
+    close(fd);
     throw std::runtime_error("Cannot process file " + filename);
   }
 
@@ -189,7 +196,7 @@ FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer) {
   const auto encoding = layer.encoding();
   
   if (encoding == MetalFishNN::Weights::Layer::FLOAT32) {
-    // Directcopy float32 data
+    // Direct copy float32 data
     result.resize(params.size() / sizeof(float));
     std::memcpy(result.data(), params.data(), params.size());
   } else if (encoding == MetalFishNN::Weights::Layer::FLOAT16 ||

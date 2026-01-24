@@ -7,6 +7,7 @@
 
 #include "policy_map.h"
 
+#include <algorithm>
 #include <unordered_map>
 #include <string>
 
@@ -46,18 +47,19 @@ int MoveToNNIndex(Move move) {
   int from_idx = static_cast<int>(from);
   int to_idx = static_cast<int>(to);
   
-  // Basic formula: from * 64 + to (simplified)
-  // Real formula accounts for underpromotions and special moves
-  int base_index = from_idx * 64 + to_idx;
+  // Simplified mapping - real implementation needs full lookup tables
+  // This is a placeholder that returns a valid index in range [0, 1857]
+  int base_index = from_idx * 28 + (to_idx % 28);
   
-  // Add promotion offset if needed
+  // Add offset for promotions (simplified)
   if (mt == PROMOTION) {
     PieceType pt = move.promotion_type();
-    base_index += (static_cast<int>(pt) - KNIGHT) * 64 * 64;
+    int promo_offset = (static_cast<int>(pt) - KNIGHT) * 64;
+    base_index = 1792 + (promo_offset + from_idx) % 66;  // Keep in range
   }
   
-  // Ensure within bounds
-  return base_index % 1858;
+  // Ensure within bounds [0, 1857]
+  return std::min(base_index, 1857);
 }
 
 Move IndexToNNMove(int index) {
