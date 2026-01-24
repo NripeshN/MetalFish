@@ -160,19 +160,24 @@ public:
   DoubleBuffer(size_t size, int device_id) 
       : size_(size), device_id_(device_id), current_buffer_(0),
         host_buffers_{nullptr, nullptr}, device_buffers_{nullptr, nullptr},
-        compute_stream_(nullptr), copy_stream_(nullptr) {
+        compute_stream_(nullptr), copy_stream_(nullptr), valid_(false) {
     
     // Allocate two pinned host buffers
     host_buffers_[0] = static_cast<T*>(PinnedMemoryManager::allocate_pinned(size * sizeof(T)));
+    if (!host_buffers_[0]) return;
+    
     host_buffers_[1] = static_cast<T*>(PinnedMemoryManager::allocate_pinned(size * sizeof(T)));
+    if (!host_buffers_[1]) return;
     
     // Allocate device buffers
-    cudaMalloc(&device_buffers_[0], size * sizeof(T));
-    cudaMalloc(&device_buffers_[1], size * sizeof(T));
+    if (cudaMalloc(&device_buffers_[0], size * sizeof(T)) != cudaSuccess) return;
+    if (cudaMalloc(&device_buffers_[1], size * sizeof(T)) != cudaSuccess) return;
     
     // Create streams for concurrent operations
-    cudaStreamCreate(&compute_stream_);
-    cudaStreamCreate(&copy_stream_);
+    if (cudaStreamCreate(&compute_stream_) != cudaSuccess) return;
+    if (cudaStreamCreate(&copy_stream_) != cudaSuccess) return;
+    
+    valid_ = true;
   }
   
   ~DoubleBuffer() {
@@ -242,6 +247,7 @@ private:
   
   cudaStream_t compute_stream_;
   cudaStream_t copy_stream_;
+  bool valid_;
 };
 
 // ============================================================================
@@ -251,7 +257,7 @@ private:
 class MemoryPool {
 public:
   MemoryPool(size_t pool_size, int device_id) 
-      : pool_size_(pool_size), device_id_(device_id), allocated_(0) {
+      : pool_size_(pool_size), device_id_(device_id), allocated_(0), pool_base_(nullptr) {
     
     // Allocate large contiguous block
     cudaError_t err = cudaMalloc(&pool_base_, pool_size);

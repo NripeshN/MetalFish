@@ -133,24 +133,24 @@ __global__ void fc_layer_tensor_core_fp16(
     mma_sync(c_frag, a_frag, b_frag, c_frag);
   }
   
-  // Add biases
-  if (biases != nullptr) {
-    for (int i = 0; i < c_frag.num_elements; i++) {
-      int row = i / WMMA_N;
-      int col = i % WMMA_N;
-      int global_col = warpN * WMMA_N + col;
-      if (global_col < output_size) {
-        c_frag.x[i] = __hadd(c_frag.x[i], biases[global_col]);
-      }
-    }
-  }
-  
-  // Store the output
+  // Store the output first (WMMA handles the fragment layout automatically)
   int cRow = warpM * WMMA_M;
   int cCol = warpN * WMMA_N;
   if (cRow < batch_size && cCol < output_size) {
     store_matrix_sync(output + cRow * output_size + cCol, c_frag, 
                       output_size, mem_row_major);
+  }
+  
+  // Add biases in global memory to avoid fragment layout assumptions
+  // Only one thread per warp does this to avoid races
+  if (biases != nullptr && threadIdx.x % 32 == 0) {
+    for (int row = 0; row < WMMA_M && (cRow + row) < batch_size; ++row) {
+      for (int col = 0; col < WMMA_N && (cCol + col) < output_size; ++col) {
+        int global_col = cCol + col;
+        int out_index = (cRow + row) * output_size + global_col;
+        output[out_index] = __hadd(output[out_index], biases[global_col]);
+      }
+    }
   }
 }
 
@@ -213,15 +213,22 @@ __global__ void fc0_layer_tensor_core(
       }
     }
     
-    // Reduce across fragment and add bias
+    // Reduce across fragment elements using all threads in the warp
+    // Each thread in the warp has some fragment elements
+    half local_sum = __float2half(0.0f);
+    for (int i = 0; i < c_frag.num_elements; i++) {
+      local_sum = __hadd(local_sum, c_frag.x[i]);
+    }
+    
+    // Warp-level reduction to get total sum
+    for (int offset = 16; offset > 0; offset /= 2) {
+      local_sum = __hadd(local_sum, __shfl_down_sync(0xffffffff, local_sum, offset));
+    }
+    
+    // Only lane 0 has the final sum, add bias and store
     if (lane == 0) {
-      half sum = __float2half(0.0f);
-      for (int i = 0; i < c_frag.num_elements; i++) {
-        sum = __hadd(sum, c_frag.x[i]);
-      }
-      sum = __hadd(sum, biases_fp16[out_idx]);
-      
-      int16_t result = __half2int_rn(sum);
+      local_sum = __hadd(local_sum, biases_fp16[out_idx]);
+      int16_t result = __half2int_rn(local_sum);
       
       // Store squared and linear outputs
       if (out_idx < FC0_OUT) {

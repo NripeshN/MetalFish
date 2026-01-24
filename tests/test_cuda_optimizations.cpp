@@ -119,8 +119,19 @@ bool test_double_buffer() {
   
   CUDA::DoubleBuffer<int> buffer(size, device_id);
   
+  // Check if buffer was successfully initialized
+  if (!buffer.is_valid()) {
+    std::cerr << "  Failed to initialize double buffer" << std::endl;
+    return false;
+  }
+  
   // Fill buffer with test data
   int *host_buf = buffer.get_host_buffer();
+  if (!host_buf) {
+    std::cerr << "  Failed to get host buffer" << std::endl;
+    return false;
+  }
+  
   for (size_t i = 0; i < size; i++) {
     host_buf[i] = static_cast<int>(i);
   }

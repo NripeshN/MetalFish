@@ -82,8 +82,11 @@ public:
     float ms = 0.0f;
     cudaEventElapsedTime(&ms, start_event_, stop_event_);
     
-    // Record timing
-    timings_[name_].push_back(ms);
+    // Record timing with thread safety
+    {
+      std::lock_guard<std::mutex> lock(timings_mutex_);
+      timings_[name_].push_back(ms);
+    }
     
     cudaEventDestroy(start_event_);
     cudaEventDestroy(stop_event_);
@@ -91,6 +94,7 @@ public:
   
   // Get average time for a kernel
   static float get_average_time(const std::string &name) {
+    std::lock_guard<std::mutex> lock(timings_mutex_);
     auto it = timings_.find(name);
     if (it == timings_.end() || it->second.empty()) {
       return 0.0f;
@@ -427,6 +431,7 @@ namespace MetalFish {
 namespace GPU {
 namespace CUDA {
 std::map<std::string, std::vector<float>> KernelTimer::timings_;
+std::mutex KernelTimer::timings_mutex_;
 std::map<std::string, PerformanceMetrics::Metrics> PerformanceMetrics::metrics_;
 } // namespace CUDA
 } // namespace GPU

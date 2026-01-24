@@ -344,25 +344,32 @@ __global__ void batch_evaluate_simd(
   int lane = threadIdx.x % 32;
   int wid = threadIdx.x / 32;
   
-  // FC0 layer - process both perspectives in parallel
+  // FC0 layer - process both perspectives in parallel with warp-level cooperation
   for (int p = 0; p < 2; p++) {
     const accumulator_t *acc = (p == 0) ? white_acc : black_acc;
     
-    for (int out = lane; out <= FC0_OUT; out += 32) {
-      int32_t sum = fc0_biases[out];
+    // Each warp cooperatively computes all FC0 outputs
+    for (int out = 0; out <= FC0_OUT; ++out) {
+      // Lane 0 starts from bias; other lanes start from 0 to avoid double-counting
+      int32_t sum = (lane == 0) ? fc0_biases[out] : 0;
       
-      // Warp-level reduction over hidden dims
-      for (int i = 0; i < hidden_dim; i++) {
+      // Warp-level reduction over hidden dims: strided accumulation per lane
+      for (int i = lane; i < hidden_dim; i += 32) {
         int8_t clipped = clipped_relu(
             static_cast<int16_t>(acc[i] >> WEIGHT_SCALE_BITS));
         sum += clipped * fc0_weights[i * (FC0_OUT + 1) + out];
       }
       
-      int16_t result = static_cast<int16_t>(sum >> WEIGHT_SCALE_BITS);
-      if (out < FC0_OUT) {
-        fc0_sqr[p * FC0_OUT + out] = sqr_clipped_relu(result);
-      } else {
-        fc0_linear[p] = clipped_relu(result);
+      // Reduce partial sums across the warp
+      sum = warp_reduce_sum(sum);
+      
+      if (lane == 0) {
+        int16_t result = static_cast<int16_t>(sum >> WEIGHT_SCALE_BITS);
+        if (out < FC0_OUT) {
+          fc0_sqr[p * FC0_OUT + out] = sqr_clipped_relu(result);
+        } else {
+          fc0_linear[p] = clipped_relu(result);
+        }
       }
     }
   }
