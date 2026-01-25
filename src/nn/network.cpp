@@ -7,6 +7,10 @@
 
 #include "network.h"
 
+#ifdef USE_METAL
+#include "metal/metal_network.h"
+#endif
+
 #include <stdexcept>
 
 namespace MetalFish {
@@ -53,8 +57,21 @@ std::unique_ptr<Network> CreateNetwork(const std::string& weights_path,
     throw std::runtime_error("Could not load network weights from: " + weights_path);
   }
   
-  // For now, return stub implementation
-  // Real implementation would create Metal backend
+#ifdef USE_METAL
+  if (backend == "auto" || backend == "metal") {
+    try {
+      return std::make_unique<Metal::MetalNetwork>(weights_opt.value());
+    } catch (const std::exception& e) {
+      if (backend == "metal") {
+        // If Metal was explicitly requested, propagate error
+        throw;
+      }
+      // Otherwise fall through to stub
+    }
+  }
+#endif
+  
+  // Fallback to stub implementation
   return std::make_unique<StubNetwork>(weights_opt.value());
 }
 

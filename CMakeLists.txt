@@ -171,6 +171,7 @@ set(NN_SOURCES
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(GPU_SOURCES ${GPU_SOURCES} src/gpu/metal/metal_backend.mm)
+  set(NN_SOURCES ${NN_SOURCES} src/nn/metal/metal_network.mm)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
   message(STATUS "Metal GPU acceleration: ENABLED")
 
@@ -247,10 +248,13 @@ if(APPLE)
   find_library(FOUNDATION_FRAMEWORK Foundation)
   find_library(COREFOUNDATION_FRAMEWORK CoreFoundation)
   find_library(QUARTZCORE_FRAMEWORK QuartzCore)
+  find_library(MPS_FRAMEWORK MetalPerformanceShaders)
+  find_library(MPSGRAPH_FRAMEWORK MetalPerformanceShadersGraph)
 
   if(USE_METAL AND METAL_CPP_AVAILABLE)
     target_link_libraries(metalfish ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
-                          ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+                          ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK}
+                          ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK})
   endif()
 endif()
 
@@ -317,7 +321,8 @@ if(BUILD_TESTS)
      AND METAL_CPP_AVAILABLE)
     target_link_libraries(
       metalfish_tests ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
-      ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+      ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK}
+      ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK})
   endif()
 
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
@@ -329,7 +334,8 @@ if(BUILD_TESTS)
   if(APPLE AND USE_METAL AND METAL_CPP_AVAILABLE)
     target_link_libraries(
       test_nn_comparison ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
-      ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+      ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK}
+      ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK})
   endif()
   
   add_test(NAME test_nn_comparison COMMAND test_nn_comparison)
@@ -344,14 +350,16 @@ if(BUILD_GPU_BENCHMARK
                                      ${GPU_SOURCES})
   target_link_libraries(
     metalfish_gpu_bench Threads::Threads ${METAL_FRAMEWORK}
-    ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+    ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK}
+    ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK})
 
   # Paper benchmark with full NNUE support
   add_executable(metalfish_paper_bench src/paper_benchmark.cpp ${CORE_SOURCES}
                                        ${EVAL_SOURCES} ${GPU_SOURCES})
   target_link_libraries(
     metalfish_paper_bench Threads::Threads ${METAL_FRAMEWORK}
-    ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
+    ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK}
+    ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK})
 endif()
 
 # Print configuration summary
