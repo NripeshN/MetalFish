@@ -1046,13 +1046,17 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
       auto result = nn_evaluator_->Evaluate(ctx.pos);
       
       // Apply policy priors to edges (blend with heuristics)
+      // Configuration: 70% NN policy, 30% heuristic scores
+      constexpr float NN_POLICY_WEIGHT = 0.7f;
+      constexpr float HEURISTIC_WEIGHT = 0.3f;
+      constexpr float POLICY_SCALE = 10000.0f;  // Scale NN policy for blending
+      
       for (int i = 0; i < num_edges; ++i) {
         Move m = edges[i].move;
         float nn_policy = result.get_policy(m);
         if (nn_policy > 0.0f) {
-          // Blend NN policy with heuristic score
-          // NN policy gets higher weight (70%)
-          scores[i] = 0.7f * (nn_policy * 10000.0f) + 0.3f * scores[i];
+          scores[i] = NN_POLICY_WEIGHT * (nn_policy * POLICY_SCALE) + 
+                      HEURISTIC_WEIGHT * scores[i];
         }
       }
     } catch (const std::exception& e) {
