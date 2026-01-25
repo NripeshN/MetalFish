@@ -172,6 +172,11 @@ set(NN_SOURCES
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(GPU_SOURCES ${GPU_SOURCES} src/gpu/metal/metal_backend.mm)
   set(NN_SOURCES ${NN_SOURCES} src/nn/metal/metal_network.mm)
+  
+  # Disable ARC for Metal network implementation (uses manual memory management)
+  set_source_files_properties(src/nn/metal/metal_network.mm 
+                              PROPERTIES COMPILE_FLAGS "-fno-objc-arc")
+  
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
   message(STATUS "Metal GPU acceleration: ENABLED")
 

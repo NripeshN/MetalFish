@@ -2,6 +2,9 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
   Licensed under GPL-3.0
+  
+  Note: This file uses manual memory management (ARC disabled).
+  Metal objects are explicitly retained/released.
 */
 
 #include "metal_network.h"
@@ -213,9 +216,10 @@ MetalNetwork::Impl::Impl(const WeightsFile& weights) {
 
 MetalNetwork::Impl::~Impl() {
   @autoreleasepool {
-    [graph_ release];
-    [commandQueue_ release];
-    [device_ release];
+    // Release Metal objects (manual memory management, ARC disabled)
+    if (graph_) [graph_ release];
+    if (commandQueue_) [commandQueue_ release];
+    if (device_) [device_ release];
   }
 }
 
