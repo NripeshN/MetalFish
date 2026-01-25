@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <unordered_map>
 
@@ -605,6 +606,16 @@ ThreadSafeMCTS::ThreadSafeMCTS(const ThreadSafeMCTSConfig &config)
     : config_(config), tree_(std::make_unique<ThreadSafeTree>()) {
   // Initialize simple TT for direct evaluation mode
   simple_tt_.resize(SIMPLE_TT_SIZE);
+  
+  // Try to load NN weights
+  const char* weights_path = std::getenv("METALFISH_NN_WEIGHTS");
+  if (weights_path) {
+    try {
+      nn_evaluator_ = std::make_unique<NNMCTSEvaluator>(weights_path);
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to load NN weights: " << e.what() << std::endl;
+    }
+  }
 }
 
 ThreadSafeMCTS::~ThreadSafeMCTS() {
@@ -1029,6 +1040,26 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
     max_score = std::max(max_score, score);
   }
 
+  // Apply NN policy priors if available
+  if (nn_evaluator_) {
+    try {
+      auto result = nn_evaluator_->Evaluate(ctx.pos);
+      
+      // Apply policy priors to edges (blend with heuristics)
+      for (int i = 0; i < num_edges; ++i) {
+        Move m = edges[i].move;
+        float nn_policy = result.get_policy(m);
+        if (nn_policy > 0.0f) {
+          // Blend NN policy with heuristic score
+          // NN policy gets higher weight (70%)
+          scores[i] = 0.7f * (nn_policy * 10000.0f) + 0.3f * scores[i];
+        }
+      }
+    } catch (const std::exception& e) {
+      // Silently fall back to heuristics if NN evaluation fails
+    }
+  }
+
   // Softmax normalization
   float sum = 0.0f;
   for (int i = 0; i < num_edges; ++i) {
@@ -1084,6 +1115,20 @@ float ThreadSafeMCTS::evaluate_position_batched(WorkerContext &ctx) {
 }
 
 float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
+  // Use NN evaluator if available
+  if (nn_evaluator_) {
+    try {
+      auto result = nn_evaluator_->Evaluate(ctx.pos);
+      stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
+      
+      // Return value from side-to-move perspective
+      // (NN already returns from this perspective)
+      return result.value;
+    } catch (const std::exception& e) {
+      // Fall back to GPU NNUE on error
+    }
+  }
+  
   // Check TT first - lock-free read (may get stale data, but that's OK for
   // MCTS)
   uint64_t key = ctx.pos.key();

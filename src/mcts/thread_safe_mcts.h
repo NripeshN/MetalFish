@@ -37,6 +37,7 @@
 #include "../core/types.h"
 #include "../gpu/gpu_nnue_integration.h"
 #include "../search/search.h"
+#include "nn_mcts_evaluator.h"
 
 namespace MetalFish {
 namespace MCTS {
@@ -574,6 +575,7 @@ private:
   ThreadSafeMCTSConfig config_;
   std::unique_ptr<ThreadSafeTree> tree_;
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
+  std::unique_ptr<NNMCTSEvaluator> nn_evaluator_;
 
   std::atomic<bool> stop_flag_{false};
   std::atomic<bool> running_{false};

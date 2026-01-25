@@ -18,11 +18,21 @@ namespace MetalFish {
 namespace MCTS {
 
 // MCTS evaluation result from neural network
-struct NNEvaluation {
-  std::vector<float> policy;  // Move probabilities
-  float value;                 // Position value from NN
+struct EvaluationResult {
+  float value;  // Q value from side to move perspective
+  bool has_wdl;
+  float wdl[3];  // win/draw/loss probabilities
+  std::vector<std::pair<Move, float>> policy_priors;  // Move → policy probability pairs
   
-  NNEvaluation() : value(0.0f) {}
+  EvaluationResult() : value(0.0f), has_wdl(false), wdl{0.0f, 0.0f, 0.0f} {}
+  
+  // Helper to find policy for a move
+  float get_policy(Move move) const {
+    for (const auto& [m, p] : policy_priors) {
+      if (m == move) return p;
+    }
+    return 0.0f;
+  }
 };
 
 // Neural network evaluator for MCTS
@@ -32,16 +42,17 @@ public:
   ~NNMCTSEvaluator();
   
   // Evaluate single position
-  NNEvaluation Evaluate(const Position& pos);
+  EvaluationResult Evaluate(const Position& pos);
   
   // Batch evaluation for multiple positions
-  std::vector<NNEvaluation> EvaluateBatch(const std::vector<Position>& positions);
+  std::vector<EvaluationResult> EvaluateBatch(const std::vector<Position>& positions);
   
   // Get network information
   std::string GetNetworkInfo() const;
 
 private:
-  std::unique_ptr<NN::Network> network_;
+  class Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace MCTS
