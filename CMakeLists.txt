@@ -114,6 +114,11 @@ endif()
 # CUDA Configuration
 # ============================================================================
 if(USE_CUDA)
+  # CUDA optimization options
+  option(CUDA_TENSOR_CORES "Enable tensor core kernels (Volta SM 7.0+)" ON)
+  option(CUDA_PROFILING "Enable NVTX profiling markers" OFF)
+  option(CUDA_WARP_PRIMITIVES "Enable warp-level primitive optimizations" ON)
+  
   # Find CUDA toolkit
   find_package(CUDAToolkit QUIET)
 
@@ -164,6 +169,24 @@ if(USE_CUDA)
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 --use_fast_math")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -fPIC")
+    
+    # Enable tensor core support
+    if(CUDA_TENSOR_CORES)
+      add_definitions(-DUSE_CUDA_TENSOR_CORES)
+      message(STATUS "  Tensor Cores: ENABLED")
+    endif()
+    
+    # Enable NVTX profiling
+    if(CUDA_PROFILING)
+      add_definitions(-DUSE_NVTX)
+      message(STATUS "  NVTX Profiling: ENABLED")
+    endif()
+    
+    # Enable warp primitives
+    if(CUDA_WARP_PRIMITIVES)
+      add_definitions(-DUSE_CUDA_WARP_PRIMITIVES)
+      message(STATUS "  Warp Primitives: ENABLED")
+    endif()
 
     # Enable separable compilation for device code
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
@@ -221,6 +244,28 @@ set(GPU_SOURCES src/gpu/gpu_nnue_integration.cpp src/gpu/gpu_mcts_backend.cpp
 
 # CUDA source files
 set(CUDA_SOURCES "")
+if(USE_CUDA AND CUDA_AVAILABLE)
+  set(CUDA_SOURCES 
+      src/gpu/cuda/cuda_backend.cu
+      src/gpu/cuda/cuda_memory.cu
+      src/gpu/cuda/kernels/nnue_kernels.cu)
+  
+  # Add advanced optimization kernels if enabled
+  if(CUDA_WARP_PRIMITIVES)
+    list(APPEND CUDA_SOURCES src/gpu/cuda/kernels/nnue_simd.cu)
+  endif()
+  
+  if(CUDA_TENSOR_CORES)
+    list(APPEND CUDA_SOURCES src/gpu/cuda/kernels/nnue_tensor_core.cu)
+  endif()
+  
+  # Add advanced features
+  list(APPEND CUDA_SOURCES 
+       src/gpu/cuda/cuda_graphs.cu
+       src/gpu/cuda/cuda_multi_gpu.cu
+       src/gpu/cuda/cuda_fp16_weights.cu
+       src/gpu/cuda/kernels/nnue_persistent.cu)
+endif()
 
 # MCTS source files (hybrid search) Core files needed for all MCTS modes: -
 # position_adapter: Interface for position representation - position_classifier:
@@ -265,10 +310,9 @@ if(USE_METAL AND METAL_CPP_AVAILABLE)
   endif()
 elseif(USE_CUDA AND CUDA_AVAILABLE)
   # CUDA GPU acceleration
-  set(CUDA_SOURCES src/gpu/cuda/cuda_backend.cu
-                   src/gpu/cuda/kernels/nnue_kernels.cu)
   add_definitions(-DUSE_CUDA)
   message(STATUS "CUDA GPU acceleration: ENABLED")
+  message(STATUS "  CUDA source files: ${CUDA_SOURCES}")
 else()
   # CPU fallback backend
   set(GPU_SOURCES ${GPU_SOURCES} src/gpu/cpu_backend.cpp)
