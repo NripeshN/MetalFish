@@ -40,6 +40,7 @@ enum NodeType { NonPV, PV, Root };
 class TranspositionTable;
 class ThreadPool;
 class OptionsMap;
+class Engine; // Forward declaration for friend access
 
 namespace Search {
 
@@ -336,6 +337,7 @@ private:
   Eval::NNUE::AccumulatorCaches refreshTable;
 
   friend class MetalFish::ThreadPool;
+  friend class MetalFish::Engine;
   friend class SearchManager;
 };
 

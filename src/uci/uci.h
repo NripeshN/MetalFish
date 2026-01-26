@@ -52,14 +52,15 @@ private:
   void go(std::istringstream &is);
   void bench(std::istream &args);
   void benchmark(std::istream &args);
+  void nnue_benchmark(std::istream &args); // CPU vs GPU NNUE comparison
   void position(std::istringstream &is);
   void setoption(std::istringstream &is);
   std::uint64_t perft(const Search::LimitsType &);
   void gpu_info();
   void gpu_benchmark();
-  void hybrid_benchmark();                 // Hybrid search validation
-  void mcts_go(std::istringstream &is);    // Hybrid MCTS search
-  void mcts_mt_go(std::istringstream &is); // Multi-threaded MCTS search
+  void parallel_hybrid_go(
+      std::istringstream &is); // Parallel MCTS+AB search (best hybrid)
+  void mcts_mt_go(std::istringstream &is); // Pure GPU MCTS search
   void mcts_batch_benchmark(
       std::istringstream &is); // Batched vs direct eval benchmark
 
@@ -70,6 +71,10 @@ private:
 
   void init_search_update_listeners();
 };
+
+// Cleanup function for static parallel hybrid search object
+// Must be called before GPU shutdown to prevent crashes
+void cleanup_parallel_hybrid_search();
 
 } // namespace MetalFish
 

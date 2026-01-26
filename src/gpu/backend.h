@@ -5,11 +5,15 @@
   GPU Backend Abstraction Layer
 
   This provides a backend-agnostic interface for GPU operations.
-  Currently supports Metal (Apple Silicon), with CUDA support planned.
+  Supported backends:
+  - Metal (Apple Silicon) - USE_METAL
+  - CUDA (NVIDIA GPUs) - USE_CUDA
+  - CPU fallback (when no GPU is available)
 */
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -17,8 +21,26 @@
 #include <string>
 #include <vector>
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
+
 namespace MetalFish {
 namespace GPU {
+
+// Cross-platform helper to compute next power of 2
+namespace detail {
+inline int next_power_of_2(int v) {
+  if (v <= 0) return 1;
+  v--;
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  return v + 1;
+}
+} // namespace detail
 
 // Forward declarations
 class Buffer;
@@ -148,6 +170,27 @@ public:
   virtual size_t max_buffer_size() const = 0;
   virtual size_t max_threadgroup_memory() const = 0;
 
+  // Hardware capabilities (for dynamic tuning)
+  virtual size_t
+  recommended_working_set_size() const = 0;       // Recommended GPU memory
+  virtual size_t total_system_memory() const = 0; // Total RAM (unified memory)
+  virtual int gpu_core_count() const = 0;         // GPU compute units/cores
+  virtual int
+  max_threads_per_simd_group() const = 0; // SIMD width (32 for Apple)
+
+  // Recommended batch sizes based on hardware
+  virtual int recommended_batch_size() const {
+    // Default: scale with GPU cores, minimum 32, max 512
+    int cores = gpu_core_count();
+    if (cores <= 0)
+      return 128;
+    // ~16 positions per GPU core is a good heuristic
+    int batch = (cores * 16);
+    // Round to nearest power of 2 for optimal memory alignment
+    batch = detail::next_power_of_2(batch);
+    return std::max(32, std::min(512, batch));
+  }
+
   // Buffer management
   virtual std::unique_ptr<Buffer>
   create_buffer(size_t size, MemoryMode mode = MemoryMode::Shared,
@@ -231,6 +274,13 @@ inline bool gpu_available() { return Backend::available(); }
 
 // Get backend reference (throws if not available)
 inline Backend &gpu() { return Backend::get(); }
+
+// Shutdown the GPU backend - must be called before program exit
+// This ensures all GPU resources are released before static destruction
+void shutdown_gpu_backend();
+
+// Check if GPU backend has been shut down
+bool gpu_backend_shutdown();
 
 } // namespace GPU
 } // namespace MetalFish

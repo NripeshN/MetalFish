@@ -4,13 +4,11 @@
 
   Alpha-Beta Integration for Hybrid Search
 
-  This module provides full integration between MCTS and Stockfish's
-  alpha-beta search. It enables:
-
+  This module provides full integration between MCTS and alpha-beta search:
   1. Using AB search for tactical verification of MCTS moves
-  2. Full-depth AB search with proper move ordering
-  3. Quiescence search for tactical positions
-  4. Integration with Stockfish's transposition table
+  2. Full-depth AB search with all optimizations
+  3. Proper NNUE evaluation via the Engine
+  4. Integration with transposition table
   5. History heuristics from AB to improve MCTS policy
 
   Licensed under GPL-3.0
@@ -26,13 +24,17 @@
 #include "../search/movepick.h"
 #include "../search/search.h"
 #include "../search/tt.h"
-#include "stockfish_adapter.h"
+#include "position_adapter.h"
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 namespace MetalFish {
+
+// Forward declaration of Engine
+class Engine;
+
 namespace MCTS {
 
 // Result from alpha-beta search
@@ -227,13 +229,20 @@ private:
 };
 
 // Bridge between MCTS and AB search
+// This uses the Engine for AB search!
 class HybridSearchBridge {
 public:
   HybridSearchBridge();
   ~HybridSearchBridge();
 
   // Initialize with shared resources
-  void initialize(TranspositionTable *tt, GPU::GPUNNUEManager *gpu_manager);
+  // Pass the Engine pointer to use the full AB search
+  void initialize(TranspositionTable *tt, GPU::GPUNNUEManager *gpu_manager,
+                  Engine *engine = nullptr);
+
+  // Set the engine (can be called after initialize)
+  void set_engine(Engine *engine) { engine_ = engine; }
+  bool has_engine() const { return engine_ != nullptr; }
 
   // Verify MCTS best move with AB search
   struct VerificationResult {
@@ -257,6 +266,7 @@ public:
   get_enhanced_policy(const Position &pos);
 
   // Run full AB search for comparison
+  // If engine is available, uses the alpha-beta search
   ABSearchResult run_ab_search(const Position &pos, int depth, int time_ms = 0);
 
   // Tactical verification
@@ -279,7 +289,9 @@ private:
   bool initialized_ = false;
   TranspositionTable *tt_ = nullptr;
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
+  Engine *engine_ = nullptr; // The engine instance!
 
+  // Fallback searcher (used only if engine is not available)
   std::unique_ptr<ABSearcher> ab_searcher_;
   std::unique_ptr<ABPolicyGenerator> policy_generator_;
   std::unique_ptr<TacticalAnalyzer> tactical_analyzer_;
@@ -287,15 +299,18 @@ private:
   BridgeStats stats_;
   mutable std::mutex stats_mutex_;
 
-  // Mutex to serialize search operations - ABSearcher has non-thread-safe
-  // member state (state_stack_, killers_, main_history_, static_eval_stack_)
+  // Mutex to serialize search operations
   mutable std::mutex search_mutex_;
 };
 
 // Global hybrid search bridge
 HybridSearchBridge &hybrid_bridge();
 bool initialize_hybrid_bridge(TranspositionTable *tt,
-                              GPU::GPUNNUEManager *gpu_manager);
+                              GPU::GPUNNUEManager *gpu_manager,
+                              Engine *engine = nullptr);
+
+// Shutdown the hybrid bridge - call before program exit
+void shutdown_hybrid_bridge();
 
 } // namespace MCTS
 } // namespace MetalFish

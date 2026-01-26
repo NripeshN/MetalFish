@@ -7,30 +7,31 @@ on:
   workflow_dispatch: # Allow manual trigger
     inputs:
       games_per_match:
-        description: "Number of games per match"
+        description: "Number of games per match (should be even for color swap)"
         required: false
-        default: "20"
+        default: "16"
       time_control:
         description: "Time control (e.g., 10+0.1)"
         required: false
-        default: "10+0.1"
+        default: "600+0.1"
 
-# Cancel in-progress runs for the same PR
+# Cancel in-progress runs for the same PR when a new push occurs
 concurrency:
   group: elo-tournament-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
-  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '20' }}
-  TIME_CONTROL: ${{ github.event.inputs.time_control || '10+0.1' }}
+  GAMES_PER_MATCH: ${{ github.event.inputs.games_per_match || '16' }}
+  TIME_CONTROL: ${{ github.event.inputs.time_control || '600+0.1' }}
 
 jobs:
-  # First job: Build everything and generate the match matrix
-  setup:
-    name: Build & Setup Matrix
+  # First job: Build everything on macOS and generate the match matrix
+  setup-macos:
+    name: Build (macOS) & Setup Matrix
     runs-on: macos-latest # Apple Silicon M1 runner for Metal support
     outputs:
-      matrix: ${{ steps.generate-matrix.outputs.matrix }}
+      matrix_macos: ${{ steps.generate-matrix.outputs.matrix_macos }}
+      matrix_linux: ${{ steps.generate-matrix.outputs.matrix_linux }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -43,7 +44,7 @@ jobs:
       - name: Install build dependencies
         run: |
           brew install cmake ninja meson qt@6 coreutils
-          pip3 install meson ninja
+          pip3 install meson ninja chess
           # coreutils provides gtimeout which we alias to timeout
           echo "alias timeout=gtimeout" >> ~/.bashrc
 
@@ -145,6 +146,40 @@ jobs:
           # Build Patricia with clang++
           make build CXX=clang++
 
+      - name: Clone and Build Berserk
+        continue-on-error: true
+        run: |
+          # Clone Berserk (reference/ is gitignored)
+          mkdir -p reference
+          git clone --depth 1 https://github.com/jhonnold/berserk.git reference/berserk
+
+          cd reference/berserk/src
+
+          # Download network from GitHub releases (S3 bucket no longer accessible)
+          # Using Berserk 13 release network
+          NETWORK_NAME="berserk-d43206fe90e4.nn"
+          NETWORK_URL="https://github.com/jhonnold/berserk/releases/download/13/$NETWORK_NAME"
+
+          for i in 1 2 3; do
+            echo "Attempt $i: Downloading $NETWORK_NAME from GitHub releases..."
+            curl -L -o "$NETWORK_NAME" "$NETWORK_URL" && break
+            echo "Download attempt $i failed, retrying..."
+            sleep 5
+          done
+
+          # Verify download (should be ~25MB)
+          if [ -f "$NETWORK_NAME" ] && [ $(stat -f%z "$NETWORK_NAME" 2>/dev/null || stat -c%s "$NETWORK_NAME" 2>/dev/null) -gt 1000000 ]; then
+            echo "Network downloaded successfully: $(ls -lh $NETWORK_NAME)"
+          else
+            echo "Network download failed or file too small"
+            exit 1
+          fi
+
+          # Build Berserk with the downloaded network
+          make all CC=clang ARCH=native EVALFILE="$NETWORK_NAME" || \
+          make all CC=clang EVALFILE="$NETWORK_NAME" || \
+          echo "Berserk build failed, will skip in tournament"
+
       - name: Clone and Build Leela Chess Zero (lc0)
         continue-on-error: true
         run: |
@@ -178,20 +213,40 @@ jobs:
             fi
           fi
 
+      - name: Download Opening Book
+        run: |
+          # Clone official Stockfish books repository
+          mkdir -p reference
+          git clone --depth 1 https://github.com/official-stockfish/books.git reference/books
+
+          # List available books
+          echo "Available opening books:"
+          ls -la reference/books/*.pgn.zip reference/books/*.epd.zip 2>/dev/null | head -20 || true
+
+          # Extract the opening book (cutechess-cli needs uncompressed file)
+          cd reference/books
+          if [ -f "8moves_v3.pgn.zip" ]; then
+            unzip -o 8moves_v3.pgn.zip
+            echo "Opening book extracted: 8moves_v3.pgn (34700 positions, 16 plies)"
+            ls -la 8moves_v3.pgn
+          else
+            echo "Warning: Opening book not found"
+          fi
+
       - name: Create MetalFish wrapper scripts
         run: |
-          # Create Hybrid wrapper (uses 'mcts' command)
+          # Create Hybrid wrapper (uses 'parallel_hybrid' command - MCTS + AB in parallel)
           cat > tools/metalfish_hybrid_wrapper.sh << 'EOF'
           #!/bin/bash
-          # MetalFish Hybrid wrapper - intercepts 'go' and runs 'mcts' (hybrid search) instead
+          # MetalFish Hybrid wrapper - intercepts 'go' and runs 'parallel_hybrid' (parallel MCTS+AB) instead
 
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           ENGINE="$SCRIPT_DIR/../build/metalfish"
 
-          # Read UCI commands and transform 'go' to 'mcts'
+          # Read UCI commands and transform 'go' to 'parallel_hybrid'
           while IFS= read -r line; do
               if [[ "$line" == go* ]]; then
-                  echo "mcts ${line#go}"
+                  echo "parallel_hybrid ${line#go}"
               else
                   echo "$line"
               fi
@@ -199,10 +254,10 @@ jobs:
           EOF
           chmod +x tools/metalfish_hybrid_wrapper.sh
 
-          # Create MCTS-MT wrapper (uses 'mctsmt' command with 4 threads)
-          cat > tools/metalfish_mctsmt_wrapper.sh << 'EOF'
+          # Create MCTS wrapper (uses 'mctsmt' command - pure GPU MCTS)
+          cat > tools/metalfish_mcts_wrapper.sh << 'EOF'
           #!/bin/bash
-          # MetalFish MCTS-MT wrapper - intercepts 'go' and runs 'mctsmt' (multi-threaded MCTS) instead
+          # MetalFish MCTS wrapper - intercepts 'go' and runs 'mctsmt' (GPU MCTS) instead
 
           SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
           ENGINE="$SCRIPT_DIR/../build/metalfish"
@@ -216,7 +271,7 @@ jobs:
               fi
           done | "$ENGINE"
           EOF
-          chmod +x tools/metalfish_mctsmt_wrapper.sh
+          chmod +x tools/metalfish_mcts_wrapper.sh
 
       - name: Verify all engine binaries
         run: |
@@ -250,9 +305,9 @@ jobs:
           fi
 
           echo ""
-          echo "=== MetalFish MCTS-MT Wrapper ==="
-          if [ -f "tools/metalfish_mctsmt_wrapper.sh" ]; then
-            echo "  ✓ Found at tools/metalfish_mctsmt_wrapper.sh"
+          echo "=== MetalFish MCTS Wrapper ==="
+          if [ -f "tools/metalfish_mcts_wrapper.sh" ]; then
+            echo "  ✓ Found at tools/metalfish_mcts_wrapper.sh"
           else
             echo "  ✗ Not found - REQUIRED"
             exit 1
@@ -273,6 +328,21 @@ jobs:
           if [ -f "reference/Patricia/engine/patricia" ]; then
             echo "  ✓ Found at reference/Patricia/engine/patricia"
             echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/Patricia/engine/patricia 2>&1 | head -3 || true
+          else
+            echo "  ✗ Not found (optional - will be skipped)"
+          fi
+
+          echo ""
+          echo "=== Berserk ==="
+          if [ -f "reference/berserk/src/berserk" ]; then
+            echo "  ✓ Binary found at reference/berserk/src/berserk"
+            # Check if network file exists
+            if ls reference/berserk/src/*.nn 1> /dev/null 2>&1; then
+              echo "  ✓ Network file found"
+              echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/berserk/src/berserk 2>&1 | head -3 || true
+            else
+              echo "  ✗ Network file missing - Berserk will not work properly"
+            fi
           else
             echo "  ✗ Not found (optional - will be skipped)"
           fi
@@ -307,20 +377,48 @@ jobs:
       - name: Generate match matrix
         id: generate-matrix
         run: |
-          # Get the list of engine pairs
+          # Get the list of engine pairs with requires_metal flag
           python3 tools/elo_tournament.py --ci-list-engines > /tmp/engines.json
 
-          # Extract the matrix array
-          MATRIX=$(cat /tmp/engines.json | python3 -c "import sys, json; d=json.load(sys.stdin); print(json.dumps({'include': [{'match': m, 'engine1': p['engine1'], 'engine2': p['engine2']} for m, p in zip(d['matrix'], d['pairs'])]}))")
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          # Extract the matrix arrays - split by requires_metal
+          # macOS matrix: matches that require Metal (involve MetalFish)
+          MATRIX_MACOS=$(cat /tmp/engines.json | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          macos_matches = [
+              {\"match\": m, \"engine1\": p[\"engine1\"], \"engine2\": p[\"engine2\"]}
+              for m, p in zip(d[\"matrix\"], d[\"pairs\"])
+              if p.get(\"requires_metal\", False)
+          ]
+          print(json.dumps({\"include\": macos_matches}))
+          ")
+          echo "matrix_macos=$MATRIX_MACOS" >> $GITHUB_OUTPUT
+
+          # Linux matrix: matches that don't require Metal (no MetalFish)
+          MATRIX_LINUX=$(cat /tmp/engines.json | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          linux_matches = [
+              {\"match\": m, \"engine1\": p[\"engine1\"], \"engine2\": p[\"engine2\"]}
+              for m, p in zip(d[\"matrix\"], d[\"pairs\"])
+              if not p.get(\"requires_metal\", False)
+          ]
+          print(json.dumps({\"include\": linux_matches}))
+          ")
+          echo "matrix_linux=$MATRIX_LINUX" >> $GITHUB_OUTPUT
 
           # Print for debugging
-          echo "Generated matrix:"
-          echo "$MATRIX" | python3 -m json.tool
+          echo "Generated macOS matrix (MetalFish matches):"
+          echo "$MATRIX_MACOS" | python3 -m json.tool
+          echo ""
+          echo "Generated Linux matrix (non-MetalFish matches):"
+          echo "$MATRIX_LINUX" | python3 -m json.tool
 
           # Count matches
-          NUM_MATCHES=$(echo "$MATRIX" | python3 -c "import sys, json; d=json.load(sys.stdin); print(len(d['include']))")
-          echo "Total matches to run: $NUM_MATCHES"
+          NUM_MACOS=$(echo "$MATRIX_MACOS" | python3 -c "import sys, json; d=json.load(sys.stdin); print(len(d['include']))")
+          NUM_LINUX=$(echo "$MATRIX_LINUX" | python3 -c "import sys, json; d=json.load(sys.stdin); print(len(d['include']))")
+          echo "Total macOS matches (requires Metal): $NUM_MACOS"
+          echo "Total Linux matches (no Metal needed): $NUM_LINUX"
 
       - name: Package build artifacts
         run: |
@@ -332,13 +430,29 @@ jobs:
             reference/stockfish/src/stockfish \
             reference/stockfish/src/nn-*.nnue \
             tools/elo_tournament.py \
+            tools/engines_config.json \
             tools/metalfish_hybrid_wrapper.sh \
-            tools/metalfish_mctsmt_wrapper.sh \
+            tools/metalfish_mcts_wrapper.sh \
             2>/dev/null || true
+
+          # Add opening book (8moves_v3.pgn - 16 plies, CCRL-style)
+          if [ -f "reference/books/8moves_v3.pgn" ]; then
+            tar -rvf build-artifacts.tar reference/books/8moves_v3.pgn
+            echo "Added opening book: 8moves_v3.pgn"
+          fi
 
           # Add Patricia if it exists
           if [ -f "reference/Patricia/engine/patricia" ]; then
             tar -rvf build-artifacts.tar reference/Patricia/engine/patricia
+          fi
+
+          # Add Berserk if it exists with its network file
+          if [ -f "reference/berserk/src/berserk" ]; then
+            tar -rvf build-artifacts.tar reference/berserk/src/berserk
+            # Also include the network file
+            if ls reference/berserk/src/*.nn 1> /dev/null 2>&1; then
+              tar -rvf build-artifacts.tar reference/berserk/src/*.nn
+            fi
           fi
 
           # Add lc0 if it exists with network
@@ -352,18 +466,14 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts
+          name: build-artifacts-macos
           path: build-artifacts.tar
           retention-days: 1
 
-  # Matrix job: Run each match in parallel
-  run-matches:
-    name: Match ${{ matrix.match }}
-    needs: setup
-    runs-on: macos-latest # Apple Silicon for Metal support
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+  # Second job: Build Linux binaries for non-MetalFish engines
+  setup-linux:
+    name: Build (Linux)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -373,10 +483,192 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build qtbase5-dev qt5-qmake libqt5svg5-dev libqt5core5a libqt5gui5 libqt5widgets5 libqt5svg5 libqt5concurrent5 make g++ git curl unzip
+          pip3 install chess
+
+      - name: Clone and Build cutechess-cli
+        run: |
+          mkdir -p reference
+          git clone --depth 1 https://github.com/cutechess/cutechess.git reference/cutechess
+
+          cd reference/cutechess
+          mkdir -p build && cd build
+
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_TESTS=OFF \
+            -DWITH_GUI=OFF
+          ninja cutechess-cli
+
+          # Test it works
+          echo "=== Testing cutechess-cli ==="
+          ./cutechess-cli --version || echo "Version check failed"
+
+      - name: Clone and Build Stockfish
+        run: |
+          mkdir -p reference
+          git clone --depth 1 https://github.com/official-stockfish/Stockfish.git reference/stockfish
+
+          cd reference/stockfish/src
+          # Download NNUE files for Stockfish
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          # Build for Linux x86_64
+          make -j$(nproc) build ARCH=x86-64-avx2 || make -j$(nproc) build ARCH=x86-64
+
+      - name: Clone and Build Patricia
+        continue-on-error: true
+        run: |
+          mkdir -p reference
+          git clone --depth 1 https://github.com/Adam-Kulju/Patricia.git reference/Patricia
+
+          cd reference/Patricia/engine
+          make build CXX=g++
+
+      - name: Clone and Build Berserk
+        continue-on-error: true
+        run: |
+          mkdir -p reference
+          git clone --depth 1 https://github.com/jhonnold/berserk.git reference/berserk
+
+          cd reference/berserk/src
+
+          NETWORK_NAME="berserk-d43206fe90e4.nn"
+          NETWORK_URL="https://github.com/jhonnold/berserk/releases/download/13/$NETWORK_NAME"
+
+          for i in 1 2 3; do
+            echo "Attempt $i: Downloading $NETWORK_NAME from GitHub releases..."
+            curl -L -o "$NETWORK_NAME" "$NETWORK_URL" && break
+            echo "Download attempt $i failed, retrying..."
+            sleep 5
+          done
+
+          if [ -f "$NETWORK_NAME" ] && [ $(stat -c%s "$NETWORK_NAME" 2>/dev/null) -gt 1000000 ]; then
+            echo "Network downloaded successfully: $(ls -lh $NETWORK_NAME)"
+          else
+            echo "Network download failed or file too small"
+            exit 1
+          fi
+
+          make all CC=gcc ARCH=native EVALFILE="$NETWORK_NAME" || \
+          make all CC=gcc EVALFILE="$NETWORK_NAME" || \
+          echo "Berserk build failed, will skip in tournament"
+
+      - name: Download Opening Book
+        run: |
+          mkdir -p reference
+          git clone --depth 1 https://github.com/official-stockfish/books.git reference/books
+
+          cd reference/books
+          if [ -f "8moves_v3.pgn.zip" ]; then
+            unzip -o 8moves_v3.pgn.zip
+            echo "Opening book extracted: 8moves_v3.pgn"
+          fi
+
+      - name: Verify Linux engine binaries
+        run: |
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║     Verifying Linux Engine Binaries                      ║"
+          echo "╚══════════════════════════════════════════════════════════╝"
+
+          echo ""
+          echo "=== Stockfish ==="
+          if [ -f "reference/stockfish/src/stockfish" ]; then
+            echo "  ✓ Found at reference/stockfish/src/stockfish"
+            echo -e "uci\nquit" | timeout 5 reference/stockfish/src/stockfish 2>&1 | head -3 || true
+          else
+            echo "  ✗ Not found - REQUIRED"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Patricia ==="
+          if [ -f "reference/Patricia/engine/patricia" ]; then
+            echo "  ✓ Found at reference/Patricia/engine/patricia"
+            echo -e "uci\nquit" | timeout 5 reference/Patricia/engine/patricia 2>&1 | head -3 || true
+          else
+            echo "  ✗ Not found (optional)"
+          fi
+
+          echo ""
+          echo "=== Berserk ==="
+          if [ -f "reference/berserk/src/berserk" ]; then
+            echo "  ✓ Found at reference/berserk/src/berserk"
+            echo -e "uci\nquit" | timeout 5 reference/berserk/src/berserk 2>&1 | head -3 || true
+          else
+            echo "  ✗ Not found (optional)"
+          fi
+
+          echo ""
+          echo "=== cutechess-cli ==="
+          if [ -f "reference/cutechess/build/cutechess-cli" ]; then
+            echo "  ✓ Found at reference/cutechess/build/cutechess-cli"
+            reference/cutechess/build/cutechess-cli --version || echo "cutechess-cli version check failed"
+          else
+            echo "  ✗ Not found - REQUIRED"
+            exit 1
+          fi
+
+      - name: Package Linux build artifacts
+        run: |
+          tar -cvf build-artifacts-linux.tar \
+            reference/cutechess/build/cutechess-cli \
+            reference/stockfish/src/stockfish \
+            reference/stockfish/src/nn-*.nnue \
+            tools/elo_tournament.py \
+            tools/engines_config.json \
+            2>/dev/null || true
+
+          if [ -f "reference/books/8moves_v3.pgn" ]; then
+            tar -rvf build-artifacts-linux.tar reference/books/8moves_v3.pgn
+          fi
+
+          if [ -f "reference/Patricia/engine/patricia" ]; then
+            tar -rvf build-artifacts-linux.tar reference/Patricia/engine/patricia
+          fi
+
+          if [ -f "reference/berserk/src/berserk" ]; then
+            tar -rvf build-artifacts-linux.tar reference/berserk/src/berserk
+            if ls reference/berserk/src/*.nn 1> /dev/null 2>&1; then
+              tar -rvf build-artifacts-linux.tar reference/berserk/src/*.nn
+            fi
+          fi
+
+      - name: Upload Linux build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-linux
+          path: build-artifacts-linux.tar
+          retention-days: 1
+
+  # Matrix job: Run MetalFish matches on macOS
+  run-matches-macos:
+    name: Match (macOS) ${{ matrix.match }}
+    needs: setup-macos
+    if: needs.setup-macos.outputs.matrix_macos != '{"include":[]}' && needs.setup-macos.outputs.matrix_macos != ''
+    runs-on: macos-latest # Apple Silicon for Metal support
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-macos.outputs.matrix_macos) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip3 install chess
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: build-artifacts
+          name: build-artifacts-macos
           path: .
 
       - name: Extract build artifacts
@@ -388,13 +680,14 @@ jobs:
           chmod +x reference/cutechess/build/cutechess-cli || true
           chmod +x reference/stockfish/src/stockfish || true
           chmod +x reference/Patricia/engine/patricia || true
+          chmod +x reference/berserk/src/berserk || true
           chmod +x reference/lc0/build/release/lc0 || true
           chmod +x tools/metalfish_hybrid_wrapper.sh || true
-          chmod +x tools/metalfish_mctsmt_wrapper.sh || true
+          chmod +x tools/metalfish_mcts_wrapper.sh || true
 
           # Debug: List what we have
           echo "=== Directory structure after extraction ==="
-          find . -type f -name "metalfish" -o -name "stockfish" -o -name "patricia" -o -name "cutechess-cli" -o -name "lc0" 2>/dev/null || true
+          find . -type f -name "metalfish" -o -name "stockfish" -o -name "patricia" -o -name "berserk" -o -name "cutechess-cli" -o -name "lc0" 2>/dev/null || true
           echo ""
           echo "=== Build directory ==="
           ls -la build/ || echo "build/ not found"
@@ -490,10 +783,103 @@ jobs:
           path: results/*.json
           retention-days: 1
 
+  # Matrix job: Run non-MetalFish matches on Linux (cheaper runners)
+  run-matches-linux:
+    name: Match (Linux) ${{ matrix.match }}
+    needs: [setup-macos, setup-linux]
+    if: needs.setup-macos.outputs.matrix_linux != '{"include":[]}' && needs.setup-macos.outputs.matrix_linux != ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup-macos.outputs.matrix_linux) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libqt5core5a libqt5gui5 libqt5widgets5 libqt5svg5 libqt5concurrent5
+          pip3 install chess
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-linux
+          path: .
+
+      - name: Extract build artifacts
+        run: |
+          tar -xvf build-artifacts-linux.tar
+
+          # Set executable permissions
+          chmod +x reference/cutechess/build/cutechess-cli || true
+          chmod +x reference/stockfish/src/stockfish || true
+          chmod +x reference/Patricia/engine/patricia || true
+          chmod +x reference/berserk/src/berserk || true
+
+          # Debug: List what we have
+          echo "=== Directory structure after extraction ==="
+          find . -type f \( -name "stockfish" -o -name "patricia" -o -name "berserk" -o -name "cutechess-cli" \) 2>/dev/null || true
+          echo ""
+          echo "=== Reference directory ==="
+          ls -la reference/ || echo "reference/ not found"
+
+      - name: Verify engines before match
+        run: |
+          echo "=== Verifying engines can run ==="
+
+          echo "Stockfish:"
+          if [ -f "reference/stockfish/src/stockfish" ]; then
+            echo -e "uci\nquit" | timeout 5 ./reference/stockfish/src/stockfish 2>&1 | head -5 || echo "Stockfish failed to respond"
+          else
+            echo "ERROR: reference/stockfish/src/stockfish not found!"
+            exit 1
+          fi
+
+          echo ""
+          echo "cutechess-cli:"
+          if [ -f "reference/cutechess/build/cutechess-cli" ]; then
+            ./reference/cutechess/build/cutechess-cli --version || echo "cutechess-cli failed"
+          else
+            echo "ERROR: reference/cutechess/build/cutechess-cli not found!"
+            exit 1
+          fi
+
+      - name: Run match
+        run: |
+          mkdir -p results
+
+          echo "Running match: ${{ matrix.engine1 }} vs ${{ matrix.engine2 }}"
+          echo "Current directory: $(pwd)"
+          echo "Script location: $(ls -la tools/elo_tournament.py)"
+
+          python3 tools/elo_tournament.py \
+            --ci-match \
+            --base-dir "$(pwd)" \
+            --engine1 "${{ matrix.engine1 }}" \
+            --engine2 "${{ matrix.engine2 }}" \
+            --games ${{ env.GAMES_PER_MATCH }} \
+            --time "${{ env.TIME_CONTROL }}" \
+            --output "results/${{ matrix.match }}.json"
+
+      - name: Upload match results
+        uses: actions/upload-artifact@v4
+        with:
+          name: match-result-${{ matrix.match }}
+          path: results/*.json
+          retention-days: 1
+
   # Final job: Aggregate results and post PR comment
   aggregate-results:
     name: Aggregate & Report
-    needs: run-matches
+    needs: [run-matches-macos, run-matches-linux]
+    if: ${{ always() && (needs.run-matches-macos.result == 'success' || needs.run-matches-macos.result == 'skipped') && (needs.run-matches-linux.result == 'success' || needs.run-matches-linux.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -505,6 +891,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip3 install chess
 
       - name: Download all match results
         uses: actions/download-artifact@v4

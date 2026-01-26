@@ -10,6 +10,7 @@
 #include "gpu_mcts_backend.h"
 #include "../core/movegen.h"
 #include "../search/movepick.h"
+#include "gpu_nnue_integration.h"
 #include <algorithm>
 #include <cmath>
 
@@ -17,7 +18,7 @@ namespace MetalFish {
 namespace GPU {
 
 GPUMCTSBackend::GPUMCTSBackend() {
-  // Default WDL parameters based on Stockfish's win rate model
+  // Default WDL parameters based on win rate model
   // These convert centipawn scores to win probabilities
   // win_rate = 1 / (1 + exp(-score / scale))
   wdl_a_ = 0.5f;   // Base win rate at score=0
@@ -35,7 +36,7 @@ bool GPUMCTSBackend::initialize(GPUNNUEManager *manager) {
 void GPUMCTSBackend::score_to_wdl(int score, float &win, float &draw,
                                   float &loss) {
   // Convert centipawn score to win probability using logistic function
-  // This is based on Stockfish's win rate model
+  // This is based on the win rate model
 
   // Clamp extreme scores
   score = std::clamp(score, -10000, 10000);
@@ -91,20 +92,20 @@ GPUMCTSBackend::generate_policy(const MCTS::MCTSPosition &pos) {
   // 3. Center control
   // 4. Development moves
 
-  const Position &stockfish_pos = pos.stockfish_position();
+  const Position &internal_pos = pos.internal_position();
   std::vector<float> scores(moves.size());
   float total_score = 0.0f;
 
   for (size_t i = 0; i < moves.size(); ++i) {
-    Move m = moves[i].to_stockfish();
+    Move m = moves[i].to_internal();
     float score = 1.0f; // Base score
 
     // Captures get bonus based on captured piece value
-    if (stockfish_pos.capture(m)) {
+    if (internal_pos.capture(m)) {
       // For en passant, the captured pawn is not on the destination square
       PieceType captured = m.type_of() == EN_PASSANT
                                ? PAWN
-                               : type_of(stockfish_pos.piece_on(m.to_sq()));
+                               : type_of(internal_pos.piece_on(m.to_sq()));
       static const float piece_values[] = {0, 1, 3, 3, 5, 9, 0}; // PNBRQK
       score += piece_values[captured] * 0.5f;
     }
@@ -165,7 +166,7 @@ MCTS::MCTSEvaluation GPUMCTSBackend::evaluate(const MCTS::MCTSPosition &pos) {
 
   // Use GPU NNUE for evaluation
   auto [psqt, positional] =
-      gpu_manager_->evaluate_single(pos.stockfish_position(), use_big_network_);
+      gpu_manager_->evaluate_single(pos.internal_position(), use_big_network_);
 
   int score = positional; // Use positional score
 
@@ -214,7 +215,7 @@ std::vector<MCTS::MCTSEvaluation> GPUMCTSBackend::evaluate_batch(
   batch.reserve(static_cast<int>(positions.size()));
 
   for (const auto *pos : positions) {
-    batch.add_position(pos->stockfish_position());
+    batch.add_position(pos->internal_position());
   }
 
   // Evaluate on GPU

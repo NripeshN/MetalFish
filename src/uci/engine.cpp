@@ -29,9 +29,7 @@
 #include "eval/nnue/nnue_common.h"
 #include "eval/nnue/nnue_misc.h"
 #include "gpu/backend.h"
-#include "gpu/gpu_nnue.h"
 #include "gpu/gpu_nnue_integration.h"
-#include "gpu/nnue_eval.h"
 #include "search/search.h"
 #include "syzygy/tbprobe.h"
 #include "uci/uci.h"
@@ -145,6 +143,42 @@ Engine::Engine(std::optional<std::string> path)
                 }
                 return std::optional<std::string>(std::nullopt);
               }));
+
+  // Apple Silicon optimized GPU NNUE
+  options.add(
+      "UseAppleSiliconNNUE", Option(false, [this](const Option &o) {
+#ifdef __APPLE__
+        if (o) {
+          // Initialize GPU NNUE if not already done
+          if (!GPU::gpu_nnue_manager_available()) {
+            // Try to initialize with current networks
+            networks.modify_and_replicate([](NN::Networks &networks_) {
+              if (GPU::initialize_gpu_nnue(networks_)) {
+                sync_cout << "info string GPU NNUE: initialized" << sync_endl;
+              }
+            });
+          }
+          if (GPU::gpu_nnue_manager_available()) {
+            Eval::set_use_apple_silicon_nnue(true);
+            return std::optional<std::string>("GPU NNUE enabled");
+          } else {
+            return std::optional<std::string>("GPU NNUE initialization failed");
+          }
+        } else {
+          Eval::set_use_apple_silicon_nnue(false);
+          return std::optional<std::string>("GPU NNUE disabled");
+        }
+#else
+                (void)o;
+                return std::optional<std::string>("GPU NNUE not available on this platform");
+#endif
+      }));
+
+  // Hybrid search mode - use parallel MCTS+AB instead of pure AB
+  options.add("UseHybridSearch", Option(false));
+
+  // Pure MCTS mode - use GPU-accelerated MCTS instead of AB
+  options.add("UseMCTS", Option(false));
 
   load_networks();
   resize_threads();
@@ -425,4 +459,109 @@ std::string Engine::thread_allocation_information_as_string() const {
 
   return ss.str();
 }
+
+// ============================================================================
+// Hybrid Search Integration
+// ============================================================================
+
+Engine::QuickSearchResult Engine::search_sync(const std::string &fen, int depth,
+                                              int time_ms) {
+  QuickSearchResult result;
+
+  // Set up the position
+  set_position(fen, {});
+
+  // Set up search limits
+  Search::LimitsType limits;
+  limits.startTime = now();
+  if (depth > 0) {
+    limits.depth = depth;
+  }
+  if (time_ms > 0) {
+    limits.movetime = time_ms;
+  }
+
+  // Run the search
+  go(limits);
+  wait_for_search_finished();
+
+  // Get the best thread's result (Engine is now a friend of Worker)
+  Thread *best_thread = threads.get_best_thread();
+  if (best_thread && !best_thread->worker->rootMoves.empty()) {
+    const auto &root_move = best_thread->worker->rootMoves[0];
+    result.best_move = root_move.pv[0];
+    result.score = root_move.score;
+    result.depth = best_thread->worker->completedDepth;
+    result.nodes = threads.nodes_searched();
+    result.pv = root_move.pv;
+
+    if (root_move.pv.size() > 1) {
+      result.ponder_move = root_move.pv[1];
+    }
+  }
+
+  return result;
+}
+
+// Silent search - runs AB search WITHOUT triggering bestmove callback
+// This is used by hybrid search where the coordinator handles bestmove output
+Engine::QuickSearchResult Engine::search_silent(const std::string &fen,
+                                                int depth, int time_ms) {
+  QuickSearchResult result;
+
+  // Set up the position
+  set_position(fen, {});
+
+  // Set up search limits
+  Search::LimitsType limits;
+  limits.startTime = now();
+  if (depth > 0) {
+    limits.depth = depth;
+  }
+  if (time_ms > 0) {
+    limits.movetime = time_ms;
+  }
+
+  // IMPORTANT: We cannot safely modify the callback while search is running
+  // because it's called from the search thread. Instead, we use a flag-based
+  // approach where the callback checks if it should be silent.
+  //
+  // For now, we use a simpler approach: temporarily set a no-op callback
+  // BEFORE starting the search, and restore it AFTER the search completes.
+  // This is safe because wait_for_search_finished() ensures the search thread
+  // has completed before we restore.
+
+  // Save the current bestmove callback
+  auto saved_callback = updateContext.onBestmove;
+
+  // Set a no-op callback before starting search
+  updateContext.onBestmove = [](std::string_view, std::string_view) {
+    // Silent - do nothing
+  };
+
+  // Run the search - the no-op callback is in place
+  go(limits);
+  wait_for_search_finished(); // This ensures search thread has finished
+
+  // Now safe to restore the callback since search thread is done
+  updateContext.onBestmove = saved_callback;
+
+  // Get the best thread's result
+  Thread *best_thread = threads.get_best_thread();
+  if (best_thread && !best_thread->worker->rootMoves.empty()) {
+    const auto &root_move = best_thread->worker->rootMoves[0];
+    result.best_move = root_move.pv[0];
+    result.score = root_move.score;
+    result.depth = best_thread->worker->completedDepth;
+    result.nodes = threads.nodes_searched();
+    result.pv = root_move.pv;
+
+    if (root_move.pv.size() > 1) {
+      result.ponder_move = root_move.pv[1];
+    }
+  }
+
+  return result;
+}
+
 } // namespace MetalFish

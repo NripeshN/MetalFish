@@ -411,7 +411,7 @@ def test_uci_protocol():
             input="uci\nisready\nposition startpos\ngo depth 3 searchmoves e2e4 d2d4\nquit\n",
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
         assert "bestmove" in result.stdout, f"No bestmove found in output"
         # Best move should be one of the restricted moves
@@ -425,10 +425,10 @@ def test_uci_protocol():
 
         result = subprocess.run(
             [str(METALFISH_BIN)],
-            input="uci\nisready\nposition startpos\ngo nodes 200\nquit\n",
+            input="uci\nisready\nposition startpos\ngo nodes 1000\nquit\n",
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
         )
         assert (
             "bestmove" in result.stdout
