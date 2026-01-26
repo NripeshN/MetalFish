@@ -2,13 +2,13 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-/**
- * @file tune.h
- * @brief MetalFish source file.
- */
-
   Licensed under GPL-3.0
 */
+
+/**
+ * @file tune.h
+ * @brief Declarations for search parameter tuning helpers.
+ */
 
 #ifndef TUNE_H_INCLUDED
 #define TUNE_H_INCLUDED

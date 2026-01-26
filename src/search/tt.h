@@ -2,13 +2,16 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-/**
- * @file tt.h
- * @brief MetalFish source file.
- */
-
   Licensed under GPL-3.0
 */
+
+/**
+ * @file tt.h
+ * @brief Transposition table interfaces.
+ *
+ * Declares the transposition table class and related helpers for
+ * storing hashed search results.
+ */
 
 #ifndef TT_H_INCLUDED
 #define TT_H_INCLUDED

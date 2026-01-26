@@ -2,13 +2,16 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-/**
- * @file tt.cpp
- * @brief MetalFish source file.
- */
-
   Licensed under GPL-3.0
 */
+
+/**
+ * @file tt.cpp
+ * @brief Transposition table implementation.
+ *
+ * Implements hashed position storage, aging, and probing utilities
+ * used by the search to cache results.
+ */
 
 #include "search/tt.h"
 
@@ -24,21 +27,6 @@
 #include "syzygy/tbprobe.h"
 
 namespace MetalFish {
-
-// TTEntry struct is the 10 bytes transposition table entry, defined as below:
-//
-// key        16 bit
-// depth       8 bit
-// generation  5 bit
-// pv node     1 bit
-// bound type  2 bit
-// move       16 bit
-// value      16 bit
-// evaluation 16 bit
-//
-// These fields are in the same order as accessed by TT::probe(), since memory
-// is fastest sequentially. Equally, the store order in save() matches this
-// order.
 
 struct TTEntry {
 

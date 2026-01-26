@@ -2,13 +2,13 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-/**
- * @file tune.cpp
- * @brief MetalFish source file.
- */
-
   Licensed under GPL-3.0
 */
+
+/**
+ * @file tune.cpp
+ * @brief Parameter tuning utilities for search heuristics.
+ */
 
 #include "search/tune.h"
 
@@ -43,7 +43,7 @@ std::optional<std::string> on_tune(const Option &o) {
 void Tune::make_option(OptionsMap *opts, const string &n, int v,
                        const SetRange &r) {
 
-  // Do not generate option when there is nothing to tune (ie. min = max)
+// Do not generate option when there is nothing to tune (ie. min = max)
   if (r(v).first == r(v).second)
     return;
 

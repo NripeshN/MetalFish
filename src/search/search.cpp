@@ -2,13 +2,16 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-/**
- * @file search.cpp
- * @brief MetalFish source file.
- */
-
   Licensed under GPL-3.0
 */
+
+/**
+ * @file search.cpp
+ * @brief Alpha-beta search implementation with NNUE integration.
+ *
+ * Implements the main search driver, threading, time management,
+ * and integration with NNUE evaluation and tablebases.
+ */
 
 #include "search/search.h"
 
