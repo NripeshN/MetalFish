@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file stockfish_adapter.cpp
+ * @brief MetalFish source file.
+ */
+
   Implementation of the Stockfish-to-MCTS adapter layer.
 
   Licensed under GPL-3.0

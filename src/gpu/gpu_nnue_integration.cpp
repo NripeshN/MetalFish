@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file gpu_nnue_integration.cpp
+ * @brief MetalFish source file.
+ */
+
   GPU NNUE Unified Implementation
 
   This module provides GPU-accelerated NNUE evaluation using Metal compute

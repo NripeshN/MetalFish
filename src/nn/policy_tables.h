@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file policy_tables.h
+ * @brief MetalFish source file.
+ */
+
   Lc0 Policy Tables - UCI Move ↔ NN Policy Index Mapping
   
   Maps between UCI move notation and neural network policy output indices.

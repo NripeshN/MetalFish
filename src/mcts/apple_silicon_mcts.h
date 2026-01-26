@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file apple_silicon_mcts.h
+ * @brief MetalFish source file.
+ */
+
   Apple Silicon MCTS Optimizations
 
   This module provides Apple Silicon-specific optimizations for MCTS:

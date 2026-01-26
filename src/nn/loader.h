@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file loader.h
+ * @brief MetalFish source file.
+ */
+
   Lc0 Network Loader - Protobuf Weight Loading
   
   Loads Lc0-format neural network weights from .pb and .pb.gz files.

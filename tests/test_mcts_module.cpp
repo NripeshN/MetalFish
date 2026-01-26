@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file test_mcts_module.cpp
+ * @brief MetalFish source file.
+ */
+
   MCTS Tests - Thread-Safe MCTS, Nodes, Tree, Algorithms
 */
 

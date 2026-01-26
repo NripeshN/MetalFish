@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file test_lc0_comparison.cpp
+ * @brief MetalFish source file.
+ */
+
   Lc0 Comparison Tests
   
   Verifies that MetalFish's neural network inference produces identical

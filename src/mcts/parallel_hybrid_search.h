@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file parallel_hybrid_search.h
+ * @brief MetalFish source file.
+ */
+
   Parallel Hybrid Search - MCTS and Alpha-Beta running simultaneously
 
   Optimized for Apple Silicon with unified memory architecture:

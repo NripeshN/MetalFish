@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file nnue_weight_accessor.h
+ * @brief MetalFish source file.
+ */
+
   NNUE Weight Accessor for GPU
 
   This header provides read-only access to NNUE network weights

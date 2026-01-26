@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file nnue_kernels.h
+ * @brief MetalFish source file.
+ */
+
   CUDA NNUE Kernel Declarations
 
   Header file declaring the CUDA kernel launch functions.

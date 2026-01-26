@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file nnue_kernels.cu
+ * @brief MetalFish source file.
+ */
+
   CUDA NNUE Kernels
 
   GPU kernels for NNUE neural network evaluation on NVIDIA GPUs.

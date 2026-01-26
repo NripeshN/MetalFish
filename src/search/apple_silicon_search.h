@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file apple_silicon_search.h
+ * @brief MetalFish source file.
+ */
+
   Apple Silicon Search Optimizations
   
   This header provides optimizations specifically tuned for Apple Silicon chips.

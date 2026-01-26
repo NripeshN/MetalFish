@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file thread_safe_mcts.h
+ * @brief MetalFish source file.
+ */
+
   Thread-Safe MCTS Implementation - Optimized for Apple Silicon
 
   This module provides a fully thread-safe MCTS implementation optimized for

@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file ab_integration.h
+ * @brief MetalFish source file.
+ */
+
   Alpha-Beta Integration for Hybrid Search
 
   This module provides full integration between MCTS and Stockfish's

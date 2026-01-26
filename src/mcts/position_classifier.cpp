@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file position_classifier.cpp
+ * @brief MetalFish source file.
+ */
+
   Position Classifier - Implementation
 
   Licensed under GPL-3.0

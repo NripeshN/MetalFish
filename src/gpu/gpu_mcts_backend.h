@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file gpu_mcts_backend.h
+ * @brief MetalFish source file.
+ */
+
   GPU Neural Network Backend for MCTS
 
   This file provides a neural network backend for MCTS that leverages

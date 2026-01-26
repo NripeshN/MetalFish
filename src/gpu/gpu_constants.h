@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file gpu_constants.h
+ * @brief MetalFish source file.
+ */
+
   GPU Constants - Single source of truth for all GPU-related constants
 */
 

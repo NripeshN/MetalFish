@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file cuda_backend.h
+ * @brief MetalFish source file.
+ */
+
   CUDA Backend Header
 
   Provides CUDA implementation of the GPU backend interface.

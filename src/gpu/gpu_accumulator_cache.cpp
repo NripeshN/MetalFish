@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file gpu_accumulator_cache.cpp
+ * @brief MetalFish source file.
+ */
+
   GPU Accumulator Cache Implementation
 */
 

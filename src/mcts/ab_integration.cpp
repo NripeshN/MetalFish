@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file ab_integration.cpp
+ * @brief MetalFish source file.
+ */
+
   Alpha-Beta Integration for Hybrid Search - Implementation
 
   Licensed under GPL-3.0

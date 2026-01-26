@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file gpu_accumulator_cache.h
+ * @brief MetalFish source file.
+ */
+
   GPU Accumulator Cache - Finny Tables Implementation
 
   This implements Stockfish's Finny Tables optimization for GPU:

@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file position_classifier.h
+ * @brief MetalFish source file.
+ */
+
   Position Classifier
 
   Classifies positions as tactical or strategic to determine the optimal

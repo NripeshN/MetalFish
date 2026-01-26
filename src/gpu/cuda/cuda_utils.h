@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file cuda_utils.h
+ * @brief MetalFish source file.
+ */
+
   CUDA Utilities Header
 
   Common utilities and helpers for CUDA operations.

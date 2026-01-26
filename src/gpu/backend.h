@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file backend.h
+ * @brief MetalFish source file.
+ */
+
   GPU Backend Abstraction Layer
 
   This provides a backend-agnostic interface for GPU operations.

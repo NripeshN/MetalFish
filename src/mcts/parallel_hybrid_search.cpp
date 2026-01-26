@@ -2,6 +2,11 @@
   MetalFish - Parallel Hybrid Search Implementation
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file parallel_hybrid_search.cpp
+ * @brief MetalFish source file.
+ */
+
   Optimized for Apple Silicon with unified memory architecture.
 
   This implementation incorporates algorithms from Leela Chess Zero (Lc0),

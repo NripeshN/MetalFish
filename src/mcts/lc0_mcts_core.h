@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file lc0_mcts_core.h
+ * @brief MetalFish source file.
+ */
+
   Lc0-style MCTS Core Algorithms
 
   This module implements the core MCTS algorithms from Leela Chess Zero (Lc0),

@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file cpu_backend.cpp
+ * @brief MetalFish source file.
+ */
+
   CPU Fallback Backend Implementation
 
   This provides stub implementations when no GPU backend is available.

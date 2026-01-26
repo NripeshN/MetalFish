@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file encoder.h
+ * @brief MetalFish source file.
+ */
+
   Lc0 Position Encoder - 112-Plane Input Format
   
   Encodes chess positions into Lc0's 112-plane neural network input format:

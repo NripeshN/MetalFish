@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file test_gpu_nnue.cpp
+ * @brief MetalFish source file.
+ */
+
   Comprehensive GPU NNUE Test Suite
 
   Tests all GPU-accelerated NNUE functionality including:

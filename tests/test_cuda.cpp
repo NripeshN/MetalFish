@@ -2,6 +2,11 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
+/**
+ * @file test_cuda.cpp
+ * @brief MetalFish source file.
+ */
+
   CUDA Backend Tests
 
   Tests for NVIDIA CUDA GPU acceleration functionality.
