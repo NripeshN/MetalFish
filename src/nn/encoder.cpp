@@ -257,10 +257,11 @@ InputPlanes EncodePositionForNN(
       CastlingRights their_queenside = (them == WHITE ? WHITE_OOO : BLACK_OOO);
       CastlingRights their_kingside = (them == WHITE ? WHITE_OO : BLACK_OO);
       
-      SetPlane(result[aux_base + 0], current_pos.can_castle(our_queenside) ? 1.0f : 0.0f);
-      SetPlane(result[aux_base + 1], current_pos.can_castle(our_kingside) ? 1.0f : 0.0f);
-      SetPlane(result[aux_base + 2], current_pos.can_castle(their_queenside) ? 1.0f : 0.0f);
-      SetPlane(result[aux_base + 3], current_pos.can_castle(their_kingside) ? 1.0f : 0.0f);
+      // Order: our O-O (kingside), our O-O-O (queenside), their O-O, their O-O-O
+      SetPlane(result[aux_base + 0], current_pos.can_castle(our_kingside) ? 1.0f : 0.0f);
+      SetPlane(result[aux_base + 1], current_pos.can_castle(our_queenside) ? 1.0f : 0.0f);
+      SetPlane(result[aux_base + 2], current_pos.can_castle(their_kingside) ? 1.0f : 0.0f);
+      SetPlane(result[aux_base + 3], current_pos.can_castle(their_queenside) ? 1.0f : 0.0f);
     } else {
       // Modern format: rook positions for castling (for Chess960 support)
       // Note: MetalFish may not have FRC support yet, so this is simplified

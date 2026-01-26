@@ -330,7 +330,7 @@ int MoveToNNIndex(Move move) {
     
     // Validate square indices
     if (from_sq < 0 || from_sq > 63 || to_sq < 0 || to_sq > 63) {
-        return 0;  // Invalid move
+        return -1;  // Invalid move - return -1 to indicate error
     }
     
     // Handle promotions
@@ -351,10 +351,10 @@ int MoveToNNIndex(Move move) {
     uint16_t packed = PackMove(from_sq, to_sq, promo_char);
     uint16_t index = kPackedToIndex[packed];
     
-    // If move not in policy table, return 0 (should be rare for legal moves)
+    // If move not in policy table, return -1 to indicate error
     if (index == 0xFFFF) {
         // This can happen for illegal moves or castle moves in some edge cases
-        return 0;
+        return -1;
     }
     
     return static_cast<int>(index);
