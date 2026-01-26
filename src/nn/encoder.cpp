@@ -497,10 +497,16 @@ InputPlanes EncodePositionForNN(
   // Fill auxiliary planes
   int aux_base = kAuxPlaneBase;
   
-  SetPlane(result[aux_base + 0], pos.can_castle(WHITE_OO) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 1], pos.can_castle(WHITE_OOO) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 2], pos.can_castle(BLACK_OO) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 3], pos.can_castle(BLACK_OOO) ? 1.0f : 0.0f);
+  // Castling rights from side-to-move perspective
+  CastlingRights our_oo = us == WHITE ? WHITE_OO : BLACK_OO;
+  CastlingRights our_ooo = us == WHITE ? WHITE_OOO : BLACK_OOO;
+  CastlingRights their_oo = us == WHITE ? BLACK_OO : WHITE_OO;
+  CastlingRights their_ooo = us == WHITE ? BLACK_OOO : WHITE_OOO;
+  
+  SetPlane(result[aux_base + 0], pos.can_castle(our_oo) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 1], pos.can_castle(our_ooo) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 2], pos.can_castle(their_oo) ? 1.0f : 0.0f);
+  SetPlane(result[aux_base + 3], pos.can_castle(their_ooo) ? 1.0f : 0.0f);
   
   SetPlane(result[aux_base + 4], us == BLACK ? 1.0f : 0.0f);
   SetPlane(result[aux_base + 5], static_cast<float>(pos.rule50_count()));

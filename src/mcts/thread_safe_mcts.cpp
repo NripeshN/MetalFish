@@ -1343,6 +1343,12 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
                       HEURISTIC_WEIGHT * scores[i];
         }
       }
+      
+      // Recalculate max_score after NN policy blending
+      max_score = -std::numeric_limits<float>::infinity();
+      for (int i = 0; i < num_edges; ++i) {
+        max_score = std::max(max_score, scores[i]);
+      }
     } catch (const std::exception& e) {
       // Silently fall back to heuristics if NN evaluation fails
     }
