@@ -19,35 +19,32 @@ src/nn/
 │   ├── net.proto          # Protobuf definition for network weights
 │   ├── net.pb.h          # Generated protobuf header
 │   └── net.pb.cc         # Generated protobuf implementation
-├── encoder.h/cpp         # Position to 112-plane encoding
-├── loader.h/cpp          # Load network weights from .pb files
-├── policy_map.h/cpp      # Move to policy index mapping
-├── network.h/cpp         # Abstract network interface
-└── metal/                # Metal backend (TODO)
-    └── metal_network.mm  # Metal/MPSGraph implementation (TODO)
+├── encoder.h/cpp         # Position to 112-plane encoding (✓ Full implementation)
+├── loader.h/cpp          # Load network weights from .pb files (✓ Complete)
+├── policy_map.h/cpp      # Move to policy index mapping (✓ Full 1858 tables)
+├── network.h/cpp         # Abstract network interface (✓ Complete)
+└── metal/                # Metal backend (✓ Complete)
+    ├── metal_network.h   # Metal network class
+    ├── metal_network.mm  # Metal/MPSGraph implementation (~1010 LOC)
+    └── README.md         # Metal backend documentation
 ```
 
 ## Current Status
 
-### ✅ Implemented
-- Protobuf weight format parsing
-- 112-plane position encoding
-- Basic policy mapping infrastructure
-- MCTS evaluator integration points
-- Test framework
+### ✅ Fully Implemented
+- Protobuf weight format parsing (all formats: FLOAT32/16, BFLOAT16, LINEAR16)
+- Full 8-position history encoding with canonicalization transforms
+- Complete 1858-element policy mapping tables
+- Metal/MPSGraph transformer backend with full architecture
+- MCTS evaluator integration
+- Comprehensive test framework with 15 benchmark positions
 
-### ⚠️ Partial Implementation
-- Position encoder (simplified, no canonicalization transforms)
-- Policy tables (simplified mapping, not full 1858-move table)
-- Weight loader (basic decompression, needs validation)
-
-### ❌ Not Implemented
-- Metal backend for transformer inference
-- Full policy mapping tables
-- Canonicalization transforms
-- Batch optimization
-- Network weight validation
-- Performance benchmarking
+### 🎯 Production Ready
+- Position encoder with flip/mirror/transpose canonicalization
+- Policy tables with O(1) bidirectional lookup
+- Weight loader with gzip decompression
+- Metal backend optimized for Apple Silicon unified memory
+- Batch processing support for efficient inference
 
 ## Usage
 
@@ -58,19 +55,24 @@ src/nn/
 #include "nn/encoder.h"
 #include "mcts/nn_mcts_evaluator.h"
 
-// Load network
-auto network = NN::CreateNetwork("path/to/network.pb.gz");
+// Set environment variable or provide path directly
+// export METALFISH_NN_WEIGHTS=/path/to/network.pb
+
+// Load network (auto-detects Metal backend on macOS)
+auto network = NN::CreateNetwork("/path/to/network.pb", "auto");
 
 // Encode position
 Position pos;
 StateInfo si;
 pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false, &si);
-NN::InputPlanes input = NN::EncodePositionForNN(pos);
+NN::InputPlanes input = NN::EncodePositionForNN(
+    pos, MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE);
 
 // Evaluate
 NN::NetworkOutput output = network->Evaluate(input);
 // output.policy contains 1858 move probabilities
 // output.value contains position evaluation (-1 to 1)
+// output.wdl contains [win, draw, loss] probabilities (if network supports it)
 ```
 
 ### MCTS Integration
@@ -79,12 +81,16 @@ NN::NetworkOutput output = network->Evaluate(input);
 #include "mcts/nn_mcts_evaluator.h"
 
 // Create evaluator
-MCTS::NNMCTSEvaluator evaluator("path/to/network.pb.gz");
+MCTS::NNMCTSEvaluator evaluator("/path/to/network.pb");
 
 // Evaluate position
 Position pos;
 // ... initialize position ...
-MCTS::NNEvaluation result = evaluator.Evaluate(pos);
+auto result = evaluator.Evaluate(pos);
+
+// result.value: position evaluation
+// result.policy_priors: map of Move → probability for all legal moves
+// result.wdl: [win, draw, loss] probabilities
 ```
 
 ## Technical Details
@@ -97,7 +103,53 @@ The network expects 112 input planes (8×8×112):
   - 6 planes for opponent pieces
   - 1 plane for repetition count
 - **Planes 104-111**: Auxiliary planes
-  - Castling rights (4 planes)
+  - Castling rights (4 planes: us kingside, us queenside, them kingside, them queenside)
+  - En passant or side-to-move (1 plane, format-dependent)
+  - Rule50 counter (1 plane, normalized)
+  - Move count or zero plane (1 plane)
+  - All ones plane (1 plane, for edge detection)
+
+### Canonicalization
+
+The encoder supports canonicalization transforms to reduce the input space:
+- **Flip**: Horizontal flip (if king on left half of board)
+- **Mirror**: Vertical mirror (if no pawns and king on top half)
+- **Transpose**: Diagonal transpose (for certain symmetric positions)
+
+These transforms are applied when using canonical input formats:
+- `INPUT_112_WITH_CANONICALIZATION`
+- `INPUT_112_WITH_CANONICALIZATION_V2`
+- Armageddon variants
+
+### Policy Mapping
+
+The 1858 policy outputs represent:
+- **Queen-like moves**: All queen moves from each square (up to 56 per square)
+- **Knight moves**: All 8 knight moves from each square
+- **Underpromotions**: N/B/R promotions in 3 directions (forward, diagonal-left, diagonal-right)
+- **Queen promotions**: Similar structure to underpromotions
+
+Use `MoveToNNIndex()` and `IndexToNNMove()` for conversion.
+
+### Metal Backend Architecture
+
+The Metal implementation uses MPSGraph to build a transformer network:
+1. **Input embedding**: 112×8×8 → embedding_size (typically 1024)
+2. **Transformer encoder**: Configurable layers (typically 15) with:
+   - Multi-head self-attention (typically 32 heads)
+   - Feed-forward network (typically 4× expansion)
+   - Layer normalization
+   - Residual connections
+3. **Output heads**:
+   - Policy: embedding_size → 1858 (move probabilities)
+   - Value: embedding_size → 1 (position evaluation)
+   - WDL: embedding_size → 3 (win/draw/loss)
+   - Moves-left: embedding_size → 1 (game length prediction)
+
+The implementation is optimized for Apple Silicon:
+- Unified memory (zero-copy between CPU/GPU)
+- Pre-compiled MPSGraph executables
+- Efficient batch processing
   - Color to move or en passant
   - Rule50 counter
   - Move count
