@@ -25,10 +25,9 @@
 #include <type_traits>
 
 #if defined(_MSC_VER)
-// Disable some silly and noisy warnings from MSVC compiler
-#pragma warning(disable : 4127) // Conditional expression is constant
-#pragma warning(disable : 4146) // Unary minus operator applied to unsigned type
-#pragma warning(disable : 4800) // Forcing value to bool 'true' or 'false'
+#pragma warning(disable : 4127)
+#pragma warning(disable : 4146)
+#pragma warning(disable : 4800)
 #endif
 
 // Enforce minimum GCC version

@@ -2,13 +2,16 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-/**
- * @file bitboard.cpp
- * @brief MetalFish source file.
- */
-
   Licensed under GPL-3.0
 */
+
+/**
+ * @file bitboard.cpp
+ * @brief Bitboard manipulation and attack generation utilities.
+ *
+ * Implements bitboard operations and precomputed tables for attacks,
+ * distances, and magic bitboards used throughout move generation.
+ */
 
 #include "core/bitboard.h"
 

@@ -2,13 +2,16 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-/**
- * @file movegen.cpp
- * @brief MetalFish source file.
- */
-
   Licensed under GPL-3.0
 */
+
+/**
+ * @file movegen.cpp
+ * @brief Legal move generation routines.
+ *
+ * Implements pseudo-legal and legal move generation, including
+ * handling of checks, pins, castling, and special moves.
+ */
 
 #include "core/movegen.h"
 
