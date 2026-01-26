@@ -126,7 +126,7 @@ jobs:
         run: |
           # Clone ReferenceEngine (reference/ is gitignored)
           mkdir -p reference
-          git clone --depth 1 https://github.com/official-stockfish/ReferenceEngine.git reference/stockfish
+          git clone --depth 1 https://github.com/official-stockfish/Stockfish.git reference/stockfish
 
           cd reference/stockfish/src
           # Download NNUE files for ReferenceEngine
@@ -215,7 +215,7 @@ jobs:
 
       - name: Download Opening Book
         run: |
-          # Clone official ReferenceEngine books repository
+          # Clone official Stockfish books repository
           mkdir -p reference
           git clone --depth 1 https://github.com/official-stockfish/books.git reference/books
 
@@ -510,7 +510,7 @@ jobs:
       - name: Clone and Build ReferenceEngine
         run: |
           mkdir -p reference
-          git clone --depth 1 https://github.com/official-stockfish/ReferenceEngine.git reference/stockfish
+          git clone --depth 1 https://github.com/official-stockfish/Stockfish.git reference/stockfish
 
           cd reference/stockfish/src
           # Download NNUE files for ReferenceEngine
