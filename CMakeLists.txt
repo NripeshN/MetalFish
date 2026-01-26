@@ -277,7 +277,21 @@ endif()
 set(MCTS_SOURCES
     src/mcts/position_adapter.cpp src/mcts/position_classifier.cpp
     src/mcts/ab_integration.cpp src/mcts/thread_safe_mcts.cpp
-    src/mcts/parallel_hybrid_search.cpp src/mcts/apple_silicon_mcts.cpp)
+    src/mcts/parallel_hybrid_search.cpp src/mcts/apple_silicon_mcts.cpp
+    src/mcts/nn_mcts_evaluator.cpp)
+
+# Neural Network source files (Lc0-compatible inference)
+# Note: This is a stub implementation. Full implementation requires ~95k lines
+# See src/nn/README.md for details
+set(NN_SOURCES
+    proto/net.pb.cc)
+# TODO: Add when implemented:
+#   src/nn/encoder.cpp
+#   src/nn/loader.cpp
+#   src/nn/policy_tables.cpp
+# TODO: Metal backend when implemented:
+#   src/nn/metal/metal_backend.mm
+#   src/nn/metal/network_graph.mm
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
@@ -328,7 +342,8 @@ set(SOURCES
     ${UCI_SOURCES}
     ${SYZYGY_SOURCES}
     ${GPU_SOURCES}
-    ${MCTS_SOURCES})
+    ${MCTS_SOURCES}
+    ${NN_SOURCES})
 
 # Create executable
 if(USE_CUDA AND CUDA_AVAILABLE)
@@ -336,9 +351,10 @@ if(USE_CUDA AND CUDA_AVAILABLE)
   add_executable(metalfish ${SOURCES} ${CUDA_SOURCES})
   set_target_properties(metalfish PROPERTIES CUDA_SEPARABLE_COMPILATION ON
                                              CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-  target_link_libraries(metalfish ${CUDA_LINK_LIBRARIES})
+  target_link_libraries(metalfish ${CUDA_LINK_LIBRARIES} protobuf)
 else()
   add_executable(metalfish ${SOURCES})
+  target_link_libraries(metalfish protobuf)
 endif()
 
 # Add shader dependency if available
@@ -408,7 +424,8 @@ if(BUILD_TESTS)
       tests/test_gpu_module.cpp
       tests/test_metal.cpp
       tests/test_gpu_nnue.cpp
-      tests/test_cuda.cpp)
+      tests/test_cuda.cpp
+      tests/test_nn_comparison.cpp)
 
   if(USE_CUDA AND CUDA_AVAILABLE)
     # CUDA test executable
@@ -422,12 +439,13 @@ if(BUILD_TESTS)
       ${SYZYGY_SOURCES}
       ${GPU_SOURCES}
       ${MCTS_SOURCES}
+      ${NN_SOURCES}
       ${CUDA_SOURCES})
     set_target_properties(
       metalfish_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON
                                  CUDA_RESOLVE_DEVICE_SYMBOLS ON)
     target_link_libraries(metalfish_tests Threads::Threads
-                          ${CUDA_LINK_LIBRARIES})
+                          ${CUDA_LINK_LIBRARIES} protobuf)
   else()
     add_executable(
       metalfish_tests
@@ -438,8 +456,9 @@ if(BUILD_TESTS)
       ${UCI_SOURCES}
       ${SYZYGY_SOURCES}
       ${GPU_SOURCES}
-      ${MCTS_SOURCES})
-    target_link_libraries(metalfish_tests Threads::Threads)
+      ${MCTS_SOURCES}
+      ${NN_SOURCES})
+    target_link_libraries(metalfish_tests Threads::Threads protobuf)
   endif()
 
   if(APPLE
