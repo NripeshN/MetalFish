@@ -202,6 +202,7 @@ endif()
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})  # For proto/ includes
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   include_directories(${METAL_CPP_DIR})
 endif()
@@ -282,10 +283,15 @@ set(MCTS_SOURCES
 
 # Neural Network source files (Lc0-compatible inference)
 # Note: This is a stub implementation. Full implementation requires ~95k lines
-# See src/nn/README.md for details
+# See src/nn/README.md and IMPLEMENTATION_GUIDE.md for details
+#
+# Current status: Only protobuf schema is compiled
+# Stub files in src/nn/ are copied from lc0 but NOT adapted yet:
+#   - encoder.cpp, encoder.h, loader.cpp, loader.h, network.h
+#   These will NOT compile until adapted (see IMPLEMENTATION_GUIDE.md)
 set(NN_SOURCES
     proto/net.pb.cc)
-# TODO: Add when implemented:
+# TODO: Add when implemented and adapted:
 #   src/nn/encoder.cpp
 #   src/nn/loader.cpp
 #   src/nn/policy_tables.cpp

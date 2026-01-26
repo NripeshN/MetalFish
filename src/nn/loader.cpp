@@ -3,6 +3,16 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Licensed under GPL-3.0
+  
+  WARNING: This file is a STUB copied from lc0.
+  It has NOT been fully adapted for MetalFish and will NOT compile.
+  See IMPLEMENTATION_GUIDE.md for adaptation instructions.
+  
+  Issues to fix:
+  - Replace CERR/LOGFILE macros with std::cerr
+  - Remove/replace undefined includes (shared_params.h, etc.)
+  - Replace Exception with std::exception
+  - Adapt for MetalFish Position/Board classes
 */
 
 
