@@ -283,9 +283,37 @@ set(MCTS_SOURCES
     src/mcts/parallel_hybrid_search.cpp
     src/mcts/apple_silicon_mcts.cpp)
 
-# Neural network source files
+# Find protobuf (minimum version 3.0) - must be before NN_SOURCES
+find_package(Protobuf 3.0 REQUIRED)
+include_directories(${Protobuf_INCLUDE_DIRS})
+
+# Generate protobuf files from .proto definition
+# This ensures compatibility with the installed protobuf version
+set(PROTO_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/proto/net.proto)
+set(PROTO_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/proto)
+file(MAKE_DIRECTORY ${PROTO_OUTPUT_DIR})
+
+# Custom command to generate protobuf files in the correct location
+# The proto file outputs to PROTO_OUTPUT_DIR so includes like "proto/net.pb.h" work
+add_custom_command(
+    OUTPUT ${PROTO_OUTPUT_DIR}/net.pb.cc ${PROTO_OUTPUT_DIR}/net.pb.h
+    COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+    ARGS --cpp_out=${PROTO_OUTPUT_DIR}
+         --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/src/nn/proto
+         ${PROTO_FILE}
+    DEPENDS ${PROTO_FILE}
+    COMMENT "Generating protobuf files from net.proto"
+    VERBATIM
+)
+
+# Add generated directory to include path (so "proto/net.pb.h" works from build dir)
+# The include path should be the parent of proto/ so that "proto/net.pb.h" resolves
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/nn)
+
+# Neural network source files (includes generated protobuf)
 set(NN_SOURCES
-    src/nn/proto/net.pb.cc
+    ${PROTO_OUTPUT_DIR}/net.pb.cc
     src/nn/loader.cpp
     src/nn/encoder.cpp
     src/nn/policy_map.cpp
@@ -365,17 +393,27 @@ if(TARGET metal_shaders)
   add_dependencies(metalfish metal_shaders)
 endif()
 
-# Find protobuf (minimum version 3.0)
-find_package(Protobuf 3.0 REQUIRED)
-include_directories(${Protobuf_INCLUDE_DIRS})
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/nn)
-
 # Find zlib (for loading .pb.gz files)
 find_package(ZLIB REQUIRED)
 
+# Find absl (required by protobuf >= 22)
+find_package(absl CONFIG QUIET)
+if(absl_FOUND)
+  set(ABSL_LIBS absl::log absl::log_internal_check_op absl::log_internal_message)
+else()
+  # Try pkg-config as fallback
+  find_package(PkgConfig QUIET)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(ABSL QUIET absl_log absl_log_internal_check_op)
+    if(ABSL_FOUND)
+      set(ABSL_LIBS ${ABSL_LIBRARIES})
+    endif()
+  endif()
+endif()
+
 # Link pthread
 find_package(Threads REQUIRED)
-target_link_libraries(metalfish Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES})
+target_link_libraries(metalfish Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES} ${ABSL_LIBS})
 
 # macOS specific
 if(APPLE)
@@ -461,7 +499,7 @@ if(BUILD_TESTS)
       metalfish_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON
                                  CUDA_RESOLVE_DEVICE_SYMBOLS ON)
     target_link_libraries(metalfish_tests Threads::Threads
-                          ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES}
+                          ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES} ${ABSL_LIBS}
                           ${CUDA_LINK_LIBRARIES})
   else()
     add_executable(
@@ -473,8 +511,9 @@ if(BUILD_TESTS)
       ${UCI_SOURCES}
       ${SYZYGY_SOURCES}
       ${GPU_SOURCES}
-      ${MCTS_SOURCES})
-    target_link_libraries(metalfish_tests Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES})
+      ${MCTS_SOURCES}
+      ${NN_SOURCES})
+    target_link_libraries(metalfish_tests Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES} ${ABSL_LIBS})
   endif()
 
   if(APPLE
@@ -491,7 +530,7 @@ if(BUILD_TESTS)
   
   # Neural network comparison test
   add_executable(test_nn_comparison ${NN_TEST_SOURCES} ${MCTS_SOURCES})
-  target_link_libraries(test_nn_comparison Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES})
+  target_link_libraries(test_nn_comparison Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES} ${ABSL_LIBS})
   
   if(APPLE AND USE_METAL AND METAL_CPP_AVAILABLE)
     target_link_libraries(

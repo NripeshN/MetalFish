@@ -44,7 +44,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install cmake ninja meson qt@6 coreutils protobuf zlib
+          brew install cmake ninja meson qt@6 coreutils protobuf zlib abseil
           pip3 install meson ninja chess
           # coreutils provides gtimeout which we alias to timeout
           echo "alias timeout=gtimeout" >> ~/.bashrc

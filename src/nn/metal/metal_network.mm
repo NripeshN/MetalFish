@@ -63,11 +63,16 @@ MPSGraphTensor* ApplyActivation(MPSGraph* graph, MPSGraphTensor* input,
                                    secondaryTensor:sigmoid
                                               name:name];
   } else if ([activation isEqualToString:@"mish"]) {
-    // Mish: x * tanh(softplus(x))
-    auto softplus = [graph softPlusWithTensor:input name:[name stringByAppendingString:@"/softplus"]];
-    auto tanh = [graph tanhWithTensor:softplus name:[name stringByAppendingString:@"/tanh"]];
+    // Mish: x * tanh(softplus(x)) where softplus(x) = log(1 + exp(x))
+    auto exp_x = [graph exponentWithTensor:input name:[name stringByAppendingString:@"/exp"]];
+    auto one = [graph constantWithScalar:1.0 dataType:MPSDataTypeFloat32];
+    auto one_plus_exp = [graph additionWithPrimaryTensor:one
+                                         secondaryTensor:exp_x
+                                                    name:[name stringByAppendingString:@"/1_plus_exp"]];
+    auto softplus = [graph logarithmWithTensor:one_plus_exp name:[name stringByAppendingString:@"/softplus"]];
+    auto tanh_sp = [graph tanhWithTensor:softplus name:[name stringByAppendingString:@"/tanh"]];
     return [graph multiplicationWithPrimaryTensor:input
-                                   secondaryTensor:tanh
+                                   secondaryTensor:tanh_sp
                                               name:name];
   } else if ([activation isEqualToString:@"tanh"]) {
     return [graph tanhWithTensor:input name:name];
@@ -238,20 +243,11 @@ MPSGraphTensor* MetalNetwork::Impl::CreateConstant(
   NSData* nsdata = [NSData dataWithBytes:data.data() 
                                   length:data.size() * sizeof(float)];
   
-  // Create MPSGraphTensorData
-  MPSGraphTensorData* tensorData = [[MPSGraphTensorData alloc]
-      initWithDevice:device_
-                data:nsdata
-               shape:shape
-            dataType:MPSDataTypeFloat32];
-  
-  // Create constant tensor
-  MPSGraphTensor* tensor = [graph_ constantWithData:tensorData
+  // Create constant tensor directly from NSData
+  MPSGraphTensor* tensor = [graph_ constantWithData:nsdata
                                               shape:shape
-                                           dataType:MPSDataTypeFloat32
-                                               name:nil];
+                                           dataType:MPSDataTypeFloat32];
   
-  [tensorData release];
   return tensor;
 }
 
@@ -622,9 +618,6 @@ std::vector<NetworkOutput> MetalNetwork::Impl::EvaluateBatch(
                  shape:@[@(batchSize), @(kTotalPlanes), @64]
               dataType:MPSDataTypeFloat32];
     
-    // Create command buffer
-    id<MTLCommandBuffer> commandBuffer = [commandQueue_ commandBuffer];
-    
     // Run inference
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       inputPlaceholder_: inputTensorData
@@ -637,18 +630,24 @@ std::vector<NetworkOutput> MetalNetwork::Impl::EvaluateBatch(
                         targetTensors:targetTensors
                      targetOperations:nil];
     
-    [commandBuffer commit];
-    [commandBuffer waitUntilCompleted];
-    
-    // Extract policy output
+    // Extract results using MPSNDArray
     MPSGraphTensorData* policyData = results[policyOutput_];
-    NSData* policyNSData = [policyData mpsndarray].data;
-    const float* policyPtr = static_cast<const float*>([policyNSData bytes]);
-    
-    // Extract value output
     MPSGraphTensorData* valueData = results[valueOutput_];
-    NSData* valueNSData = [valueData mpsndarray].data;
-    const float* valuePtr = static_cast<const float*>([valueNSData bytes]);
+    
+    // Get the underlying MPSNDArray objects
+    MPSNDArray* policyArray = [policyData mpsndarray];
+    MPSNDArray* valueArray = [valueData mpsndarray];
+    
+    // Allocate buffers for reading data
+    size_t policySize = batchSize * kPolicyOutputs * sizeof(float);
+    size_t valueSize = batchSize * (hasWDL_ ? 3 : 1) * sizeof(float);
+    
+    std::vector<float> policyBuffer(batchSize * kPolicyOutputs);
+    std::vector<float> valueBuffer(batchSize * (hasWDL_ ? 3 : 1));
+    
+    // Read data from MPSNDArray into CPU buffers
+    [policyArray readBytes:policyBuffer.data() strideBytes:nil];
+    [valueArray readBytes:valueBuffer.data() strideBytes:nil];
     
     // Convert to NetworkOutput
     std::vector<NetworkOutput> outputs;
@@ -659,19 +658,19 @@ std::vector<NetworkOutput> MetalNetwork::Impl::EvaluateBatch(
       
       // Copy policy
       output.policy.resize(kPolicyOutputs);
-      std::memcpy(output.policy.data(), policyPtr + b * kPolicyOutputs,
+      std::memcpy(output.policy.data(), policyBuffer.data() + b * kPolicyOutputs,
                   kPolicyOutputs * sizeof(float));
       
       // Copy value
       if (hasWDL_) {
         output.has_wdl = true;
-        output.wdl[0] = valuePtr[b * 3 + 0];  // Win
-        output.wdl[1] = valuePtr[b * 3 + 1];  // Draw
-        output.wdl[2] = valuePtr[b * 3 + 2];  // Loss
+        output.wdl[0] = valueBuffer[b * 3 + 0];  // Win
+        output.wdl[1] = valueBuffer[b * 3 + 1];  // Draw
+        output.wdl[2] = valueBuffer[b * 3 + 2];  // Loss
         output.value = output.wdl[0] - output.wdl[2];  // Q = W - L
       } else {
         output.has_wdl = false;
-        output.value = valuePtr[b];
+        output.value = valueBuffer[b];
       }
       
       outputs.push_back(output);

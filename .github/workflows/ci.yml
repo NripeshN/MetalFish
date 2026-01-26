@@ -82,7 +82,7 @@ jobs:
           system_profiler SPDisplaysDataType | grep -A 5 "Metal" || echo "Metal info not available in CI"
           echo ""
           echo "Installing dependencies..."
-          brew install protobuf zlib
+          brew install protobuf zlib abseil
 
       - name: Setup environment (Ubuntu)
         if: runner.os == 'Linux'
@@ -105,7 +105,7 @@ jobs:
           echo ""
           echo "Installing dependencies..."
           sudo apt-get update
-          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev
+          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev libabsl-dev
         shell: bash
 
       - name: Setup environment (Windows)
@@ -278,7 +278,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev
+          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev libabsl-dev
         shell: bash
 
       - name: Download NNUE files
@@ -390,7 +390,7 @@ jobs:
           submodules: recursive
 
       - name: Install dependencies
-        run: brew install protobuf zlib
+        run: brew install protobuf zlib abseil
         shell: bash
 
       - name: Download NNUE files
@@ -454,7 +454,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev
+          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev libabsl-dev
         shell: bash
 
       - name: Download NNUE files
