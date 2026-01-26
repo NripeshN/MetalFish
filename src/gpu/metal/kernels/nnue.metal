@@ -16,7 +16,7 @@
 using namespace metal;
 
 // ============================================================================
-// Architecture Constants (matching Stockfish)
+// Architecture Constants (matching ReferenceEngine)
 // ============================================================================
 
 constant uint FT_DIM_BIG = 1024;
@@ -558,7 +558,7 @@ double_incremental_update(device const weight_t *weights [[buffer(0)]],
 }
 
 // ============================================================================
-// Sparse Input FC0 with Bitmask (Stockfish's find_nnz optimization)
+// Sparse Input FC0 with Bitmask (ReferenceEngine's find_nnz optimization)
 // Uses precomputed bitmask to skip zero activations
 // ============================================================================
 

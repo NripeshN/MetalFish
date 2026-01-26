@@ -122,14 +122,14 @@ jobs:
           echo "=== Testing cutechess-cli ==="
           ./cutechess-cli --version || echo "Version check failed"
 
-      - name: Clone and Build Stockfish
+      - name: Clone and Build ReferenceEngine
         run: |
-          # Clone Stockfish (reference/ is gitignored)
+          # Clone ReferenceEngine (reference/ is gitignored)
           mkdir -p reference
-          git clone --depth 1 https://github.com/official-stockfish/Stockfish.git reference/stockfish
+          git clone --depth 1 https://github.com/official-stockfish/ReferenceEngine.git reference/stockfish
 
           cd reference/stockfish/src
-          # Download NNUE files for Stockfish
+          # Download NNUE files for ReferenceEngine
           curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
           curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
           # Build for Apple Silicon
@@ -180,7 +180,7 @@ jobs:
           make all CC=clang EVALFILE="$NETWORK_NAME" || \
           echo "Berserk build failed, will skip in tournament"
 
-      - name: Clone and Build Leela Chess Zero (lc0)
+      - name: Clone and Build Neural Engine (lc0)
         continue-on-error: true
         run: |
           # Clone lc0 (reference/ is gitignored)
@@ -215,7 +215,7 @@ jobs:
 
       - name: Download Opening Book
         run: |
-          # Clone official Stockfish books repository
+          # Clone official ReferenceEngine books repository
           mkdir -p reference
           git clone --depth 1 https://github.com/official-stockfish/books.git reference/books
 
@@ -314,7 +314,7 @@ jobs:
           fi
 
           echo ""
-          echo "=== Stockfish ==="
+          echo "=== ReferenceEngine ==="
           if [ -f "reference/stockfish/src/stockfish" ]; then
             echo "  ✓ Found at reference/stockfish/src/stockfish"
             echo -e "uci\nquit" | $TIMEOUT_CMD 5 reference/stockfish/src/stockfish 2>&1 | head -3 || true
@@ -358,7 +358,7 @@ jobs:
           fi
 
           echo ""
-          echo "=== Lc0 (Leela Chess Zero) ==="
+          echo "=== NeuralEngine (Neural Engine) ==="
           if [ -f "reference/lc0/build/release/lc0" ]; then
             echo "  ✓ Found at reference/lc0/build/release/lc0"
             if [ -f "reference/lc0/build/release/network.pb.gz" ]; then
@@ -507,13 +507,13 @@ jobs:
           echo "=== Testing cutechess-cli ==="
           ./cutechess-cli --version || echo "Version check failed"
 
-      - name: Clone and Build Stockfish
+      - name: Clone and Build ReferenceEngine
         run: |
           mkdir -p reference
-          git clone --depth 1 https://github.com/official-stockfish/Stockfish.git reference/stockfish
+          git clone --depth 1 https://github.com/official-stockfish/ReferenceEngine.git reference/stockfish
 
           cd reference/stockfish/src
-          # Download NNUE files for Stockfish
+          # Download NNUE files for ReferenceEngine
           curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
           curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
           # Build for Linux x86_64
@@ -575,7 +575,7 @@ jobs:
           echo "╚══════════════════════════════════════════════════════════╝"
 
           echo ""
-          echo "=== Stockfish ==="
+          echo "=== ReferenceEngine ==="
           if [ -f "reference/stockfish/src/stockfish" ]; then
             echo "  ✓ Found at reference/stockfish/src/stockfish"
             echo -e "uci\nquit" | timeout 5 reference/stockfish/src/stockfish 2>&1 | head -3 || true
@@ -695,7 +695,7 @@ jobs:
           echo "=== Reference directory ==="
           ls -la reference/ || echo "reference/ not found"
           echo ""
-          echo "=== Stockfish ==="
+          echo "=== ReferenceEngine ==="
           ls -la reference/stockfish/src/ 2>/dev/null || echo "reference/stockfish/src/ not found"
           echo ""
           echo "=== Tools directory ==="
@@ -742,9 +742,9 @@ jobs:
           fi
 
           echo ""
-          echo "Stockfish:"
+          echo "ReferenceEngine:"
           if [ -f "reference/stockfish/src/stockfish" ]; then
-            echo -e "uci\nquit" | $TIMEOUT_CMD 5 ./reference/stockfish/src/stockfish 2>&1 | head -5 || echo "Stockfish failed to respond"
+            echo -e "uci\nquit" | $TIMEOUT_CMD 5 ./reference/stockfish/src/stockfish 2>&1 | head -5 || echo "ReferenceEngine failed to respond"
           else
             echo "ERROR: reference/stockfish/src/stockfish not found!"
             exit 1
@@ -834,9 +834,9 @@ jobs:
         run: |
           echo "=== Verifying engines can run ==="
 
-          echo "Stockfish:"
+          echo "ReferenceEngine:"
           if [ -f "reference/stockfish/src/stockfish" ]; then
-            echo -e "uci\nquit" | timeout 5 ./reference/stockfish/src/stockfish 2>&1 | head -5 || echo "Stockfish failed to respond"
+            echo -e "uci\nquit" | timeout 5 ./reference/stockfish/src/stockfish 2>&1 | head -5 || echo "ReferenceEngine failed to respond"
           else
             echo "ERROR: reference/stockfish/src/stockfish not found!"
             exit 1

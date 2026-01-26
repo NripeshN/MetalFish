@@ -3,13 +3,13 @@
 MetalFish Comprehensive Elo Tournament
 
 Runs a tournament between multiple chess engines to determine Elo ratings:
-- MetalFish-AB (Alpha-Beta search with 'go' command) - Full Stockfish search with NNUE
+- MetalFish-AB (Alpha-Beta search with 'go' command) - Full ReferenceEngine search with NNUE
 - MetalFish-MCTS (GPU MCTS with 'mctsmt' command) - Pure GPU-accelerated MCTS
 - MetalFish-Hybrid (Parallel MCTS+AB with 'parallel_hybrid' command) - Best of both worlds
-- Stockfish at various skill levels (0-20)
+- ReferenceEngine at various skill levels (0-20)
 - Patricia (aggressive engine, ~3500 Elo)
 - Berserk (strong NNUE engine, ~3550 Elo)
-- Lc0 (Leela Chess Zero - neural network engine)
+- NeuralEngine (Neural Engine - neural network engine)
 
 Engine configurations are loaded from engines_config.json.
 
@@ -20,7 +20,7 @@ Usage:
     python elo_tournament.py [--games N] [--time TC] [--concurrency N]
 
     # CI mode - run single match (for GitHub Actions matrix)
-    python elo_tournament.py --ci-match --engine1 "MetalFish-AB" --engine2 "Stockfish-L10"
+    python elo_tournament.py --ci-match --engine1 "MetalFish-AB" --engine2 "ReferenceEngine-L10"
 
     # CI mode - aggregate results from matrix jobs
     python elo_tournament.py --ci-aggregate --results-dir ./results
@@ -47,7 +47,7 @@ import chess  # python-chess library for proper move handling
 DEFAULT_ENGINES_CONFIG = {
     "engines": {
         "MetalFish-AB": {
-            "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
+            "description": "MetalFish with Alpha-Beta search (full ReferenceEngine with NNUE)",
             "expected_elo": None,
             "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
         },
@@ -77,8 +77,8 @@ DEFAULT_ENGINES_CONFIG = {
             "anchor": True,
             "anchor_elo": 3662,
         },
-        "Lc0": {
-            "description": "Leela Chess Zero - neural network engine",
+        "NeuralEngine": {
+            "description": "Neural Engine - neural network engine",
             "expected_elo": 3716,
             "options": {"Threads": "1", "Ponder": "false"},
             "path": "reference/lc0/build/release/lc0",
@@ -745,7 +745,7 @@ class Tournament:
 
         metalfish_path = self.base_dir / "build" / "metalfish"
 
-        # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
+        # MetalFish with standard Alpha-Beta search (full ReferenceEngine with NNUE)
         ab_config = engines_config.get("MetalFish-AB", {})
         self.add_engine(
             EngineConfig(
@@ -797,8 +797,8 @@ class Tournament:
 
             engine_path = self.base_dir / engine_path_str
 
-            # Special handling for Lc0 (needs network file)
-            if engine_name == "Lc0":
+            # Special handling for NeuralEngine (needs network file)
+            if engine_name == "NeuralEngine":
                 network_path_str = engine_cfg.get("network_path", "")
                 if network_path_str:
                     network_path = self.base_dir / network_path_str
@@ -832,7 +832,7 @@ class Tournament:
                     self.elo_calc.anchor_elo = engine_cfg.get("anchor_elo", 3000)
                     anchor_set = True
 
-        # Stockfish at various skill levels
+        # ReferenceEngine at various skill levels
         stockfish_path_str = stockfish_config.get(
             "path", "reference/stockfish/src/stockfish"
         )
@@ -853,7 +853,7 @@ class Tournament:
             )
 
             for level in stockfish_levels:
-                name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
+                name = f"ReferenceEngine-L{level}" if level < 20 else "ReferenceEngine-Full"
                 options = default_options.copy()
                 if level < 20:
                     options["Skill Level"] = str(level)
@@ -1365,7 +1365,7 @@ def get_engine_configs(
 
     metalfish_path = base_dir / "build" / "metalfish"
 
-    # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
+    # MetalFish with standard Alpha-Beta search (full ReferenceEngine with NNUE)
     ab_config = engines_config.get("MetalFish-AB", {})
     configs["MetalFish-AB"] = EngineConfig(
         name="MetalFish-AB",
@@ -1409,8 +1409,8 @@ def get_engine_configs(
 
         engine_path = base_dir / engine_path_str
 
-        # Special handling for Lc0 (needs network file)
-        if engine_name == "Lc0":
+        # Special handling for NeuralEngine (needs network file)
+        if engine_name == "NeuralEngine":
             network_path_str = engine_cfg.get("network_path", "")
             if network_path_str:
                 network_path = base_dir / network_path_str
@@ -1434,7 +1434,7 @@ def get_engine_configs(
                 expected_elo=engine_cfg.get("expected_elo"),
             )
 
-    # Stockfish at various levels
+    # ReferenceEngine at various levels
     stockfish_path_str = stockfish_config.get(
         "path", "reference/stockfish/src/stockfish"
     )
@@ -1455,7 +1455,7 @@ def get_engine_configs(
         )
 
         for level in stockfish_levels:
-            name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
+            name = f"ReferenceEngine-L{level}" if level < 20 else "ReferenceEngine-Full"
             options = default_options.copy()
             if level < 20:
                 options["Skill Level"] = str(level)
@@ -2352,7 +2352,7 @@ def main():
         "-s",
         type=str,
         default=None,
-        help="Comma-separated Stockfish skill levels to test (default: from config file)",
+        help="Comma-separated ReferenceEngine skill levels to test (default: from config file)",
     )
     parser.add_argument(
         "--quick",
@@ -2425,7 +2425,7 @@ def main():
 
     print(f"Base directory: {base_dir.absolute()}", file=sys.stderr)
 
-    # Parse Stockfish levels (None means use config file defaults)
+    # Parse ReferenceEngine levels (None means use config file defaults)
     stockfish_levels = None
     if args.stockfish_levels:
         stockfish_levels = [int(x) for x in args.stockfish_levels.split(",")]

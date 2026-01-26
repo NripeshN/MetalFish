@@ -1,7 +1,7 @@
 {
   "engines": {
     "MetalFish-AB": {
-      "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
+      "description": "MetalFish with Alpha-Beta search (full ReferenceEngine with NNUE)",
       "expected_elo": null,
       "options": {
         "Threads": "1",
@@ -57,8 +57,8 @@
       "anchor": true,
       "anchor_elo": 3662
     },
-    "Lc0": {
-      "description": "Leela Chess Zero - neural network engine",
+    "NeuralEngine": {
+      "description": "Neural Engine - neural network engine",
       "expected_elo": 3716,
       "options": {
         "Threads": "1",
