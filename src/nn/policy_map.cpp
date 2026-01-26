@@ -334,6 +334,8 @@ int MoveToNNIndex(Move move) {
     }
     
     // Handle promotions
+    // Note: The policy head only has q, r, b promotions (not knight)
+    // Knight promotions are mapped to queen promotions since they're rare
     char promo_char = 0;
     if (move.type_of() == PROMOTION) {
         PieceType pt = move.promotion_type();
@@ -341,7 +343,7 @@ int MoveToNNIndex(Move move) {
             case QUEEN:  promo_char = 'q'; break;
             case ROOK:   promo_char = 'r'; break;
             case BISHOP: promo_char = 'b'; break;
-            case KNIGHT: promo_char = 'n'; break;
+            case KNIGHT: promo_char = 'q'; break;  // Map knight to queen
             default: promo_char = 'q'; break;  // Default to queen
         }
     }
