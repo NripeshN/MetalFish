@@ -2,26 +2,17 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-/**
- * @file thread_safe_mcts.h
- * @brief MetalFish source file.
- */
-
-  Thread-Safe MCTS Implementation - Optimized for Apple Silicon
-
-  This module provides a fully thread-safe MCTS implementation optimized for
-  Apple Silicon's unified memory architecture and Metal GPU compute.
-
-  Key optimizations:
-  1. Lock-free tree traversal with virtual loss
-  2. Thread-local position management (no shared Position objects)
-  3. High-performance batched GPU evaluation with lock-free queue
-  4. Arena-based node allocation to reduce contention
-  5. Unified memory optimization - zero-copy GPU access
-  6. Adaptive strategy selection based on thread count
-
   Licensed under GPL-3.0
 */
+
+/**
+ * @file thread_safe_mcts.h
+ * @brief Thread-safe Monte Carlo Tree Search interfaces.
+ *
+ * Declares the MCTS data structures and APIs used for batched GPU
+ * evaluation, virtual-loss based parallelism, and Apple Silicon
+ * optimizations.
+ */
 
 #pragma once
 

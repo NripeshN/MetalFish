@@ -2,25 +2,18 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-/**
- * @file thread_safe_mcts.cpp
- * @brief MetalFish source file.
- */
-
-  Thread-Safe MCTS Implementation - Optimized for Apple Silicon
-
-  This implementation incorporates algorithms from Leela Chess Zero (Lc0),
-  including PUCT with logarithmic growth, FPU reduction strategy, and
-  moves left head (MLH) utility.
-
-  Apple Silicon Optimizations:
-  - Unified memory zero-copy evaluation batches
-  - SIMD-accelerated policy softmax
-  - Cache-line aligned node structures
-  - Lock-free atomic operations
-
   Licensed under GPL-3.0
 */
+
+/**
+ * @file thread_safe_mcts.cpp
+ * @brief Thread-safe Monte Carlo Tree Search implementation.
+ *
+ * Implements MCTS with virtual loss, batched GPU NNUE evaluation,
+ * and Apple Silicon optimizations (unified memory, SIMD softmax,
+ * cache-aligned nodes). Incorporates Lc0-derived PUCT, FPU, and
+ * moves-left adjustments.
+ */
 
 #include "thread_safe_mcts.h"
 #include "apple_silicon_mcts.h"
