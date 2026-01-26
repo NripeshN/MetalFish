@@ -14,6 +14,7 @@ bool test_search_module();
 bool test_mcts_module();
 bool test_hybrid_module();
 bool test_gpu_module();
+bool test_nn_comparison();
 
 // Hardware-specific tests
 bool test_metal();
@@ -56,6 +57,9 @@ int main(int argc, char *argv[]) {
   run_test("mcts", test_mcts_module);
   run_test("hybrid", test_hybrid_module);
   run_test("gpu", test_gpu_module);
+
+  // Neural network tests (stub implementation)
+  run_test("nn_comparison", test_nn_comparison);
 
   // Hardware-specific tests
   run_test("metal", test_metal);
