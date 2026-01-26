@@ -160,7 +160,6 @@ void GPUEvalBatch::add_position(const Position &pos) {
   data.from_position(pos);
   positions.push_back(data);
 
-  // Calculate bucket based on piece count (8 buckets, 4 pieces per bucket)
   int bucket = (pos.count<ALL_PIECES>() - 1) / 4;
   bucket = std::clamp(bucket, 0, GPU_LAYER_STACKS - 1);
   buckets.push_back(bucket);
@@ -172,7 +171,6 @@ void GPUEvalBatch::add_position(const Position &pos) {
 void GPUEvalBatch::add_position_data(const GPUPositionData &data) {
   positions.push_back(data);
 
-  // Calculate bucket based on piece count (8 buckets, 4 pieces per bucket)
   int bucket = (data.piece_count - 1) / 4;
   bucket = std::clamp(bucket, 0, GPU_LAYER_STACKS - 1);
   buckets.push_back(bucket);
@@ -180,15 +178,6 @@ void GPUEvalBatch::add_position_data(const GPUPositionData &data) {
   feature_offsets.push_back(white_features.size());
   count++;
 }
-
-// ============================================================================
-// Metal Shader Source
-//
-// Contains GPU compute kernels for NNUE evaluation:
-// - Feature transform: Converts sparse features to dense accumulators
-// - Forward pass: Evaluates the neural network layers
-// - PSQT accumulation: Computes piece-square table scores
-// ============================================================================
 
 static const char *GPU_NNUE_SHADER_SOURCE = R"(
 #include <metal_stdlib>

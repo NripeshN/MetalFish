@@ -422,19 +422,6 @@ private:
   NumaIndex n;
 };
 
-// Designed as immutable, because there is no good reason to alter an already
-// existing config in a way that doesn't require recreating it completely, and
-// it would be complex and expensive to maintain class invariants.
-// The CPU (processor) numbers always correspond to the actual numbering used
-// by the system. The NUMA node numbers MAY NOT correspond to the system's
-// numbering of the NUMA nodes. In particular, empty nodes may be removed, or
-// the user may create custom nodes. It is guaranteed that NUMA nodes are NOT
-// empty: every node exposed by NumaConfig has at least one processor assigned.
-//
-// We use startup affinities so as not to modify its own behaviour in time.
-//
-// Since MetalFish doesn't support exceptions all places where an exception
-// should be thrown are replaced by std::exit.
 class NumaConfig {
 public:
   NumaConfig() : highestCpuIndex(0), customAffinity(false) {

@@ -8,23 +8,15 @@
 #ifndef TYPES_H_INCLUDED
 #define TYPES_H_INCLUDED
 
-// When compiling with provided Makefile (e.g. for Linux and OSX), configuration
-// is done automatically. To get started type 'make help'.
-//
-// When Makefile is not used (e.g. with Microsoft Visual Studio) some switches
-// need to be set manually:
-//
-// -DNDEBUG      | Disable debugging mode. Always use this for release.
-//
-// -DNO_PREFETCH | Disable use of prefetch asm-instruction. You may need this to
-//               | run on some very old machines.
-//
-// -DUSE_POPCNT  | Add runtime support for use of popcnt asm-instruction. Works
-//               | only in 64-bit mode and requires hardware with popcnt
-//               support.
-//
-// -DUSE_PEXT    | Add runtime support for use of pext asm-instruction. Works
-//               | only in 64-bit mode and requires hardware with pext support.
+/**
+ * @file types.h
+ * @brief Core type definitions and compiler feature flags for MetalFish.
+ *
+ * Defines fundamental engine types (colors, pieces, values) and
+ * configuration macros used across the codebase. Compiler feature
+ * gates centralize platform-specific capabilities (popcnt, pext,
+ * 64-bit detection) to keep the rest of the engine portable.
+ */
 
 #include "core/misc.h"
 #include <cassert>
@@ -38,15 +30,6 @@
 #pragma warning(disable : 4146) // Unary minus operator applied to unsigned type
 #pragma warning(disable : 4800) // Forcing value to bool 'true' or 'false'
 #endif
-
-// Predefined macros hell:
-//
-// __GNUC__                Compiler is GCC, Clang or ICX
-// __clang__               Compiler is Clang or ICX
-// __INTEL_LLVM_COMPILER   Compiler is ICX
-// _MSC_VER                Compiler is MSVC
-// _WIN32                  Building on Windows (any)
-// _WIN64                  Building on Windows 64 bit
 
 // Enforce minimum GCC version
 #if defined(__GNUC__) && !defined(__clang__) &&                                \

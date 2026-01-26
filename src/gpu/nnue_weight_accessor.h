@@ -103,16 +103,6 @@ struct ExtractedNetworkWeights {
   bool valid = false;
 };
 
-// Note: Due to the private members in Network class, we cannot directly
-// access the weights without modifying the class. Instead, we'll need
-// to either:
-// 1. Add friend declarations to Network class
-// 2. Add public accessor methods
-// 3. Use the network's save/load mechanism to extract weights
-//
-// Friend declarations have been added to Network class to allow access.
-
-// GPU Weight Extractor - extracts weights from CPU network for GPU upload
 template <typename Network> class GPUNNUEWeightExtractor {
 public:
   using Accessor = NNUEWeightAccessor<Network>;

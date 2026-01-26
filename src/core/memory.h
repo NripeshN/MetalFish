@@ -8,6 +8,15 @@
 #ifndef MEMORY_H_INCLUDED
 #define MEMORY_H_INCLUDED
 
+/**
+ * @file memory.h
+ * @brief Aligned allocation helpers and smart pointer utilities.
+ *
+ * Provides abstractions for page-aligned allocations, large page
+ * support, and placement-new aware deleters to ensure portable and
+ * cache-friendly memory management across platforms.
+ */
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -127,12 +136,6 @@ memory_allocator(ALLOC_FUNC alloc_func, size_t num) {
   return reinterpret_cast<ElementType *>(raw_memory + array_offset);
 }
 
-//
-//
-// aligned large page unique ptr
-//
-//
-
 template <typename T> struct LargePageDeleter {
   void operator()(T *ptr) const {
     return memory_deleter<T>(ptr, aligned_large_pages_free);
@@ -178,12 +181,6 @@ make_unique_large_page(size_t num) {
 
   return LargePagePtr<T>(memory);
 }
-
-//
-//
-// aligned unique ptr
-//
-//
 
 template <typename T> struct AlignedDeleter {
   void operator()(T *ptr) const {
