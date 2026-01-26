@@ -1,5 +1,5 @@
 ---
-name: "\u2728 Copilot agent setup"
+name: "✨ Copilot agent setup"
 about: Configure or update Copilot Coding Agent instructions for this repository.
 title: "\u2728 Set up Copilot instructions"
 labels: ["copilot"]

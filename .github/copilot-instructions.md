@@ -11,7 +11,7 @@
   - `tools`: tournament and analysis scripts
 
 ## Build and test
-- Target platform: macOS 12+ with Apple Silicon and Metal toolchain.
+- Target platform: macOS 12+ with Apple Silicon and Metal toolchain (Xcode 14+ with Metal SDK).
 - Standard build:
   ```bash
   mkdir -p build && cd build
