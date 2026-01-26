@@ -275,13 +275,7 @@ endif()
 # mcts/hybrid commands - apple_silicon_mcts: Apple Silicon specific
 # optimizations
 set(MCTS_SOURCES
-    src/mcts/stockfish_adapter.cpp
-    src/mcts/hybrid_search.cpp
     src/mcts/position_classifier.cpp
-    src/mcts/enhanced_hybrid_search.cpp
-    src/mcts/mcts_batch_evaluator.cpp
-    src/mcts/mcts_tt.cpp
-    src/mcts/parallel_search.cpp
     src/mcts/ab_integration.cpp
     src/mcts/thread_safe_mcts.cpp
     src/mcts/nn_mcts_evaluator.cpp
