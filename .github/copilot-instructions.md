@@ -39,8 +39,9 @@ mkdir -p build && cd build
 cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_METAL=OFF -DUSE_CUDA=OFF -DBUILD_TESTS=ON
 
 # Step 3: Build (takes ~90-120 seconds on typical CI runner)
-ninja metalfish
+ninja metalfish metalfish_tests
 # Or use: cmake --build . --config Release -j$(nproc)
+# Note: Build both metalfish and metalfish_tests to run all validations
 ```
 
 **Platform-Specific Build Options:**
@@ -264,7 +265,7 @@ printf "uci\nisready\nposition startpos\ngo depth 5\nquit\n" | ./metalfish
 
 **Build from scratch:**
 ```bash
-cd src && curl -L -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue && curl -L -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue && cd .. && mkdir -p build && cd build && cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja metalfish
+cd src && curl -L -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue && curl -L -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue && cd .. && mkdir -p build && cd build && cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja metalfish metalfish_tests
 ```
 
 **Run all tests:**
