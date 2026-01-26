@@ -80,6 +80,9 @@ jobs:
           echo ""
           echo "Available Metal devices:"
           system_profiler SPDisplaysDataType | grep -A 5 "Metal" || echo "Metal info not available in CI"
+          echo ""
+          echo "Installing dependencies..."
+          brew install protobuf zlib
 
       - name: Setup environment (Ubuntu)
         if: runner.os == 'Linux'
@@ -99,6 +102,10 @@ jobs:
           else
             echo "No NVIDIA GPU detected (nvidia-smi not found)"
           fi
+          echo ""
+          echo "Installing dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev
         shell: bash
 
       - name: Setup environment (Windows)
@@ -118,6 +125,16 @@ jobs:
           }
         shell: pwsh
 
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # Install vcpkg and protobuf
+          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+          C:\vcpkg\bootstrap-vcpkg.bat
+          C:\vcpkg\vcpkg install protobuf:x64-windows zlib:x64-windows
+          echo "CMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake" >> $env:GITHUB_ENV
+        shell: pwsh
+
       - name: Download NNUE files
         run: |
           mkdir -p src
@@ -135,7 +152,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.os }}-cmake-
 
-      - name: Configure CMake
+      - name: Configure CMake (Unix)
+        if: runner.os != 'Windows'
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
@@ -143,6 +161,17 @@ jobs:
             -DUSE_CUDA=${{ matrix.use_cuda }} \
             -DBUILD_TESTS=ON
         shell: bash
+
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S . -B build `
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
+            -DUSE_METAL=${{ matrix.use_metal }} `
+            -DUSE_CUDA=${{ matrix.use_cuda }} `
+            -DBUILD_TESTS=ON `
+            -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+        shell: pwsh
 
       - name: Build (Unix)
         if: runner.os != 'Windows'
@@ -244,6 +273,12 @@ jobs:
           echo "CUDA version: ${{ steps.cuda-toolkit.outputs.cuda }}"
           echo "CUDA path: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
           nvcc --version
+        shell: bash
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev
         shell: bash
 
       - name: Download NNUE files
@@ -354,6 +389,10 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install dependencies
+        run: brew install protobuf zlib
+        shell: bash
+
       - name: Download NNUE files
         run: |
           mkdir -p src
@@ -411,6 +450,12 @@ jobs:
           cuda: ${{ env.CUDA_VERSION }}
           method: "network"
           sub-packages: '["nvcc", "cudart", "cudart-dev"]'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev
+        shell: bash
 
       - name: Download NNUE files
         run: |
