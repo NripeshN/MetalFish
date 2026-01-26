@@ -105,7 +105,7 @@ jobs:
           echo ""
           echo "Installing dependencies..."
           sudo apt-get update
-          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev libabsl-dev
+          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev
         shell: bash
 
       - name: Setup environment (Windows)
@@ -278,7 +278,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev libabsl-dev
+          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev
         shell: bash
 
       - name: Download NNUE files
@@ -454,7 +454,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev libabsl-dev
+          sudo apt-get install -y libprotobuf-dev protobuf-compiler zlib1g-dev
         shell: bash
 
       - name: Download NNUE files
