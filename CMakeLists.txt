@@ -285,16 +285,16 @@ set(MCTS_SOURCES
 # Note: This is a stub implementation. Full implementation requires ~95k lines
 # See src/nn/README.md and IMPLEMENTATION_GUIDE.md for details
 #
-# Current status: Only protobuf schema is compiled
+# Current status: Protobuf schema + policy tables compiled
 # Stub files in src/nn/ are copied from lc0 but NOT adapted yet:
 #   - encoder.cpp, encoder.h, loader.cpp, loader.h, network.h
 #   These will NOT compile until adapted (see IMPLEMENTATION_GUIDE.md)
 set(NN_SOURCES
-    proto/net.pb.cc)
+    proto/net.pb.cc
+    src/nn/tables/policy_utils.cpp)
 # TODO: Add when implemented and adapted:
 #   src/nn/encoder.cpp
 #   src/nn/loader.cpp
-#   src/nn/policy_tables.cpp
 # TODO: Metal backend when implemented:
 #   src/nn/metal/metal_backend.mm
 #   src/nn/metal/network_graph.mm
