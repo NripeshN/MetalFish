@@ -372,9 +372,9 @@ struct ThreadSafeMCTSConfig {
   float cpuct_base = 19652.0f; // match reference defaults
   float cpuct_factor = 2.5f;   // match reference defaults
 
-  // FPU (First Play Urgency) - reduction strategy
-  float fpu_value = 0.0f;       // Base FPU value (neutral)
-  float fpu_reduction = 0.0f;   // LC0 uses absolute FPU by default
+  // FPU (First Play Urgency) - reduction strategy (matches Lc0 defaults)
+  float fpu_value = 0.0f;        // Base FPU value (used if absolute strategy)
+  float fpu_reduction = 0.330f;  // Reduction factor applied to visited policy
 
   // Policy and exploration
   float policy_softmax_temp = 1.0f;

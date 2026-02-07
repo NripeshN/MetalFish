@@ -16,6 +16,7 @@
 
 #include "policy_map.h"
 #include "encoder.h"  // For kPolicyOutputs
+#include "metal/tables/attention_policy_map.h"
 
 #include <array>
 #include <string>
@@ -339,6 +340,15 @@ Square TransformSquare(Square sq, int transform) {
 }  // namespace
 
 int MoveToNNIndex(Move move, int transform) {
+    // Attention policy mapping: use direct table when available (non-promotion).
+    if (move.type_of() != PROMOTION) {
+        const int from_sq_raw = static_cast<int>(move.from_sq());
+        const int to_sq_raw = static_cast<int>(move.to_sq());
+        const int attn_idx = MetalFish::NN::Metal::kAttnPolicyMap[from_sq_raw * 64 + to_sq_raw];
+        if (attn_idx >= 0) {
+            return attn_idx;
+        }
+    }
     // Apply transform to move if needed
     if (transform != 0) {
         const Square from = TransformSquare(move.from_sq(), transform);

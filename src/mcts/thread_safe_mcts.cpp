@@ -67,31 +67,15 @@ void ApplyNNPolicy(ThreadSafeNode *node, const EvaluationResult &result) {
   if (num_edges == 0)
     return;
 
-  // Policy softmax temperature for controlling exploration
-  constexpr float kPolicySoftmaxTemp = 1.359f;
-  const float inv_temp = 1.0f / kPolicySoftmaxTemp;
-
-  // Neural network policy outputs are logits which can be negative.
-  // We apply softmax with temperature to convert them to probabilities.
-  std::vector<float> logits(num_edges);
-  float max_logit = -std::numeric_limits<float>::infinity();
-
-  for (int i = 0; i < num_edges; ++i) {
-    float p = result.get_policy(node->edges()[i].move);
-    // Note: Negative logits are valid and important for proper policy distribution.
-    // Do NOT clamp them - they indicate low-probability moves.
-    logits[i] = p;
-    if (p > max_logit) {
-      max_logit = p;
-    }
-  }
-
-  // Softmax over available logits for numerical stability and policy temperature.
+  // Normalize raw network policy logits to probabilities (no extra temperature)
+  // to mirror the reference implementation.
   std::vector<float> priors(num_edges, 0.0f);
   float sum = 0.0f;
   for (int i = 0; i < num_edges; ++i) {
-    priors[i] = std::exp((logits[i] - max_logit) * inv_temp);
-    sum += priors[i];
+    float p = result.get_policy(node->edges()[i].move);
+    if (p < 0.0f) p = 0.0f;
+    priors[i] = p;
+    sum += p;
   }
 
   if (sum <= 0.0f) {
