@@ -255,11 +255,11 @@ InputPlanes EncodePositionForNN(
       CastlingRights their_queenside = (them == WHITE ? WHITE_OOO : BLACK_OOO);
       CastlingRights their_kingside = (them == WHITE ? WHITE_OO : BLACK_OO);
       
-      // Order: our O-O (kingside), our O-O-O (queenside), their O-O, their O-O-O
-      SetPlane(result[aux_base + 0], current_pos.can_castle(our_kingside) ? 1.0f : 0.0f);
-      SetPlane(result[aux_base + 1], current_pos.can_castle(our_queenside) ? 1.0f : 0.0f);
-      SetPlane(result[aux_base + 2], current_pos.can_castle(their_kingside) ? 1.0f : 0.0f);
-      SetPlane(result[aux_base + 3], current_pos.can_castle(their_queenside) ? 1.0f : 0.0f);
+      // Order (matching Lc0 classical): our O-O-O, our O-O, their O-O-O, their O-O
+      SetPlane(result[aux_base + 0], current_pos.can_castle(our_queenside) ? 1.0f : 0.0f);
+      SetPlane(result[aux_base + 1], current_pos.can_castle(our_kingside) ? 1.0f : 0.0f);
+      SetPlane(result[aux_base + 2], current_pos.can_castle(their_queenside) ? 1.0f : 0.0f);
+      SetPlane(result[aux_base + 3], current_pos.can_castle(their_kingside) ? 1.0f : 0.0f);
     } else {
       // Modern format: rook positions for castling (for Chess960 support)
       // Note: MetalFish may not have FRC support yet, so this is simplified
@@ -331,6 +331,7 @@ InputPlanes EncodePositionForNN(
   int initial_castling = current_pos.can_castle(ANY_CASTLING) ? -1 : 0;
   int history_size = std::min(history_planes, kMoveHistory);
   int actual_history = static_cast<int>(position_history.size());
+  bool mirror_next = false;
   
   for (int i = 0; i < history_size; ++i) {
     // Calculate history index
@@ -369,7 +370,13 @@ InputPlanes EncodePositionForNN(
     }
     
     // Get position (use oldest if history_idx < 0 for fill_empty_history)
-    const Position& pos = *position_history[history_idx >= 0 ? history_idx : 0];
+    const Position& source = *position_history[history_idx >= 0 ? history_idx : 0];
+    Position pos;
+    StateInfo st;
+    pos.set(source.fen(), source.is_chess960(), &st);
+    if (mirror_next) {
+      pos.flip();
+    }
     
     // Check repetitions for v2 canonicalization
     if (skip_non_repeats && i > 0) {
@@ -425,11 +432,6 @@ InputPlanes EncodePositionForNN(
     // Handle en passant for filled history
     if (history_idx < 0 && pos.ep_square() != SQ_NONE) {
       Square ep_sq = pos.ep_square();
-      if (pos.side_to_move() == BLACK) {
-        int file = file_of(ep_sq);
-        int rank = 7 - rank_of(ep_sq);
-        ep_sq = make_square(File(file), Rank(rank));
-      }
       int ep_idx = static_cast<int>(ep_sq);
       
       // Undo the pawn move for en passant
@@ -440,6 +442,11 @@ InputPlanes EncodePositionForNN(
         uint64_t mask = ((0x0001000000000000ULL - 0x0000000100000000ULL) << (ep_idx - 56));
         FillPlaneFromBitboard(result[base + 6], their_pieces[0] + mask);
       }
+    }
+    
+    // Alternate perspective for next historical ply
+    if (history_idx > 0) {
+      mirror_next = !mirror_next;
     }
     
     // Stop early if rule50 was reset (capture or pawn move)

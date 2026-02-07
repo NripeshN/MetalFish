@@ -67,6 +67,9 @@ void ApplyNNPolicy(ThreadSafeNode *node, const EvaluationResult &result) {
   if (num_edges == 0)
     return;
 
+  constexpr float kPolicySoftmaxTemp = 1.359f;
+  const float inv_temp = 1.0f / kPolicySoftmaxTemp;
+
   std::vector<float> logits(num_edges, -std::numeric_limits<float>::infinity());
   float max_logit = -std::numeric_limits<float>::infinity();
 
@@ -79,13 +82,13 @@ void ApplyNNPolicy(ThreadSafeNode *node, const EvaluationResult &result) {
       max_logit = p;
   }
 
-  // Softmax over available logits for numerical stability.
+  // Softmax over available logits for numerical stability and policy temperature.
   std::vector<float> priors(num_edges, 0.0f);
   float sum = 0.0f;
   for (int i = 0; i < num_edges; ++i) {
     if (logits[i] == -std::numeric_limits<float>::infinity())
       continue;
-    priors[i] = std::exp(logits[i] - max_logit);
+    priors[i] = std::exp((logits[i] - max_logit) * inv_temp);
     sum += priors[i];
   }
 

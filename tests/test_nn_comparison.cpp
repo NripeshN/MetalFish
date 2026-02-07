@@ -110,6 +110,13 @@ void test_network() {
   }
   
   try {
+    auto weights_opt = NN::LoadWeights(weights_path);
+    if (weights_opt.has_value()) {
+      auto nf = weights_opt->format().network_format();
+      std::cout << "  Input format enum: " << nf.input() << std::endl;
+      std::cout << "  Network enum: " << nf.network() << std::endl;
+      std::cout << "  Policy enum: " << nf.policy() << std::endl;
+    }
     auto network = NN::CreateNetwork(weights_path, "auto");
     std::cout << "  Network: " << network->GetNetworkInfo() << std::endl;
     
@@ -128,6 +135,15 @@ void test_network() {
       std::cout << "  WDL: [" << output.wdl[0] << ", " << output.wdl[1] 
                 << ", " << output.wdl[2] << "]" << std::endl;
     }
+    // Debug: compare a few opening moves
+    int idx_g1f3 = NN::MoveToNNIndex(Move(SQ_G1, SQ_F3));
+    int idx_d2d4 = NN::MoveToNNIndex(Move(SQ_D2, SQ_D4));
+    std::cout << "  Index g1f3: " << idx_g1f3
+              << " maps to " << UCIEngine::move(NN::IndexToNNMove(idx_g1f3), false) << std::endl;
+    std::cout << "  Index d2d4: " << idx_d2d4
+              << " maps to " << UCIEngine::move(NN::IndexToNNMove(idx_d2d4), false) << std::endl;
+    std::cout << "  Policy g1f3: " << output.policy[idx_g1f3]
+              << "  d2d4: " << output.policy[idx_d2d4] << std::endl;
     std::cout << "  ✓ Network evaluation successful" << std::endl;
   } catch (const std::exception& e) {
     std::cout << "  ✗ Error: " << e.what() << std::endl;

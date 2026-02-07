@@ -369,12 +369,12 @@ struct WorkerContext {
 struct ThreadSafeMCTSConfig {
   // MCTS PUCT parameters
   float cpuct = 1.745f;        // default value: 1.745
-  float cpuct_base = 38739.0f; // default value for log growth
-  float cpuct_factor = 3.894f; // default value multiplier
+  float cpuct_base = 19652.0f; // match reference defaults
+  float cpuct_factor = 2.5f;   // match reference defaults
 
   // FPU (First Play Urgency) - reduction strategy
   float fpu_value = 0.0f;       // Base FPU value (neutral)
-  float fpu_reduction = 0.330f; // default value: 0.330
+  float fpu_reduction = 0.0f;   // LC0 uses absolute FPU by default
 
   // Policy and exploration
   float policy_softmax_temp = 1.0f;

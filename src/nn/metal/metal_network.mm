@@ -106,8 +106,9 @@ MetalNetwork::MetalNetwork(const WeightsFile& file, int gpu_id,
       nf.network() ==
           MetalFishNN::NetworkFormat_NetworkStructure_NETWORK_ATTENTIONBODY_WITH_MULTIHEADFORMAT;
 
-  auto embedding =
-      static_cast<InputEmbedding>(nf.input_embedding());
+  auto embedding = static_cast<InputEmbedding>(
+      nf.has_input_embedding() ? nf.input_embedding()
+                               : MetalFishNN::NetworkFormat::INPUT_EMBEDDING_PE_MAP);
 
   builder_->build(kInputPlanes, weights, embedding, attn_body, attn_policy_,
                   conv_policy_, wdl_, moves_left_, activations, policy_head,
