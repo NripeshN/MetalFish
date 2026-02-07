@@ -62,7 +62,7 @@ MetalNetwork::MetalNetwork(const WeightsFile& file, int gpu_id,
 
   // Initialize Metal builder.
   builder_ = std::make_unique<MetalNetworkBuilder>();
-  device_name_ = builder_->init(gpu_id);
+  device_name_ = builder_->init(gpu_id, max_batch_size_);
 
   // Activation selection.
   const auto& nf = file.format().network_format();
