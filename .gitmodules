@@ -1,0 +1,4 @@
+[submodule "lc0_ref"]
+	path = lc0_ref
+	url = https://github.com/LeelaChessZero/lc0
+	branch = master
