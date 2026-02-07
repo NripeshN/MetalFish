@@ -46,6 +46,8 @@ public:
 // Factory function to create network backend
 std::unique_ptr<Network> CreateNetwork(const std::string& weights_path,
                                       const std::string& backend = "auto");
+std::unique_ptr<Network> CreateNetwork(const WeightsFile& weights,
+                                      const std::string& backend = "auto");
 
 }  // namespace NN
 }  // namespace MetalFish

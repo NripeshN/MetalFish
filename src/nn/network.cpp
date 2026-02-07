@@ -51,19 +51,12 @@ private:
   WeightsFile weights_;
 };
 
-std::unique_ptr<Network> CreateNetwork(const std::string& weights_path,
+std::unique_ptr<Network> CreateNetwork(const WeightsFile& weights,
                                       const std::string& backend) {
-  // Try to load weights
-  auto weights_opt = LoadWeights(weights_path);
-  
-  if (!weights_opt.has_value()) {
-    throw std::runtime_error("Could not load network weights from: " + weights_path);
-  }
-  
 #ifdef USE_METAL
   if (backend == "auto" || backend == "metal") {
     try {
-      return std::make_unique<Metal::MetalNetwork>(weights_opt.value());
+      return std::make_unique<Metal::MetalNetwork>(weights);
     } catch (const std::exception& e) {
       // Surface the backend construction failure to aid debugging rather than
       // silently falling back to the stub implementation.
@@ -78,7 +71,19 @@ std::unique_ptr<Network> CreateNetwork(const std::string& weights_path,
 #endif
   
   // Fallback to stub implementation
-  return std::make_unique<StubNetwork>(weights_opt.value());
+  return std::make_unique<StubNetwork>(weights);
+}
+
+std::unique_ptr<Network> CreateNetwork(const std::string& weights_path,
+                                      const std::string& backend) {
+  // Try to load weights
+  auto weights_opt = LoadWeights(weights_path);
+  
+  if (!weights_opt.has_value()) {
+    throw std::runtime_error("Could not load network weights from: " + weights_path);
+  }
+  
+  return CreateNetwork(weights_opt.value(), backend);
 }
 
 }  // namespace NN

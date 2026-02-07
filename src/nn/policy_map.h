@@ -14,10 +14,10 @@ namespace MetalFish {
 namespace NN {
 
 // Map UCI move to policy index (0-1857)
-int MoveToNNIndex(Move move);
+int MoveToNNIndex(Move move, int transform = 0);
 
 // Map policy index to UCI move  
-Move IndexToNNMove(int index);
+Move IndexToNNMove(int index, int transform = 0);
 
 // Initialize policy tables
 void InitPolicyTables();

@@ -7,8 +7,10 @@
 
 #include "nn_mcts_evaluator.h"
 #include "../nn/policy_map.h"
+#include "../nn/loader.h"
 #include "../core/movegen.h"
 
+#include <vector>
 #include <stdexcept>
 
 namespace MetalFish {
@@ -17,13 +19,24 @@ namespace MCTS {
 class NNMCTSEvaluator::Impl {
 public:
   Impl(const std::string& weights_path) {
-    network_ = NN::CreateNetwork(weights_path, "auto");
+    auto weights_opt = NN::LoadWeights(weights_path);
+    if (!weights_opt.has_value()) {
+      throw std::runtime_error("Could not load network weights");
+    }
+    weights_ = std::move(weights_opt.value());
+    input_format_ = weights_.format().has_network_format()
+                        ? weights_.format().network_format().input()
+                        : MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE;
+    network_ = NN::CreateNetwork(weights_, "auto");
   }
   
   EvaluationResult Evaluate(const Position& pos) {
-    // 1. Encode position (use simple overload that doesn't require copying)
+    // 1. Encode position with transform (canonical if requested by network)
+    std::vector<const Position*> history = {&pos};
+    int transform = 0;
     auto planes = NN::EncodePositionForNN(
-        pos, MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE);
+        input_format_, history, NN::kMoveHistory,
+        NN::FillEmptyHistory::FEN_ONLY, &transform);
     
     // 2. Run neural network
     auto output = network_->Evaluate(planes);
@@ -44,7 +57,7 @@ public:
     MoveList<LEGAL> moves(pos);
     result.policy_priors.reserve(moves.size());
     for (const auto& move : moves) {
-      int policy_idx = NN::MoveToNNIndex(move);
+      int policy_idx = NN::MoveToNNIndex(move, transform);
       if (policy_idx >= 0 && policy_idx < static_cast<int>(output.policy.size())) {
         result.policy_priors.emplace_back(move, output.policy[policy_idx]);
       }
@@ -58,11 +71,17 @@ public:
     // Batch encoding
     std::vector<NN::InputPlanes> planes_batch;
     planes_batch.reserve(positions.size());
+    std::vector<int> transforms;
+    transforms.reserve(positions.size());
     
     for (const auto& pos : positions) {
+      std::vector<const Position*> history = {&pos};
+      int transform = 0;
       auto planes = NN::EncodePositionForNN(
-          pos, MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE);
+          input_format_, history, NN::kMoveHistory,
+          NN::FillEmptyHistory::FEN_ONLY, &transform);
       planes_batch.push_back(planes);
+      transforms.push_back(transform);
     }
     
     // Batch inference
@@ -88,7 +107,7 @@ public:
       MoveList<LEGAL> moves(positions[i]);
       result.policy_priors.reserve(moves.size());
       for (const auto& move : moves) {
-        int policy_idx = NN::MoveToNNIndex(move);
+        int policy_idx = NN::MoveToNNIndex(move, transforms[i]);
         if (policy_idx >= 0 && policy_idx < static_cast<int>(outputs[i].policy.size())) {
           result.policy_priors.emplace_back(move, outputs[i].policy[policy_idx]);
         }
@@ -105,6 +124,8 @@ public:
   }
   
 private:
+  MetalFishNN::NetworkFormat::InputFormat input_format_;
+  NN::WeightsFile weights_;
   std::unique_ptr<NN::Network> network_;
 };
 

@@ -323,18 +323,38 @@ void InitPolicyTables() {
     // This function maintained for API compatibility
 }
 
-int MoveToNNIndex(Move move) {
-    Square from = move.from_sq();
-    Square to = move.to_sq();
-    
-    int from_sq = static_cast<int>(from);
-    int to_sq = static_cast<int>(to);
-    
+namespace {
+Square TransformSquare(Square sq, int transform) {
+    int file = file_of(sq);
+    int rank = rank_of(sq);
+    if ((transform & (kMirrorTransform | kTransposeTransform)) != 0)
+        rank = 7 - rank;
+    if ((transform & (kFlipTransform | kTransposeTransform)) != 0)
+        file = 7 - file;
+    return make_square(File(file), Rank(rank));
+}
+}  // namespace
+
+int MoveToNNIndex(Move move, int transform) {
+    // Apply transform to move if needed
+    if (transform != 0) {
+        const Square from = TransformSquare(move.from_sq(), transform);
+        const Square to = TransformSquare(move.to_sq(), transform);
+        if (move.type_of() == PROMOTION) {
+            move = Move::make<PROMOTION>(from, to, move.promotion_type());
+        } else {
+            move = Move(from, to);
+        }
+    }
+
+    int from_sq = static_cast<int>(move.from_sq());
+    int to_sq = static_cast<int>(move.to_sq());
+
     // Validate square indices
     if (from_sq < 0 || from_sq > 63 || to_sq < 0 || to_sq > 63) {
         return -1;  // Invalid move - return -1 to indicate error
     }
-    
+
     // Handle promotions
     // The policy head has q, r, b, n promotions for all underpromotions
     char promo_char = 0;
@@ -348,20 +368,20 @@ int MoveToNNIndex(Move move) {
             default: promo_char = 'q'; break;  // Default to queen
         }
     }
-    
+
     uint16_t packed = PackMove(from_sq, to_sq, promo_char);
     uint16_t index = kPackedToIndex[packed];
-    
+
     // If move not in policy table, return -1 to indicate error
     if (index == 0xFFFF) {
         // This can happen for illegal moves or castle moves in some edge cases
         return -1;
     }
-    
+
     return static_cast<int>(index);
 }
 
-Move IndexToNNMove(int index) {
+Move IndexToNNMove(int index, int transform) {
     if (index < 0 || index >= kPolicyOutputs) {
         return Move::none();
     }
@@ -380,7 +400,20 @@ Move IndexToNNMove(int index) {
     
     Square from = make_square(File(from_file), Rank(from_rank));
     Square to = make_square(File(to_file), Rank(to_rank));
-    
+
+    if (transform != 0) {
+        int inv_transform;
+        if (transform & kTransposeTransform) {
+            inv_transform = kTransposeTransform;
+            if (transform & kFlipTransform) inv_transform |= kMirrorTransform;
+            if (transform & kMirrorTransform) inv_transform |= kFlipTransform;
+        } else {
+            inv_transform = transform;
+        }
+        to = TransformSquare(to, inv_transform);
+        from = TransformSquare(from, inv_transform);
+    }
+
     // Check for promotion (5th character)
     if (move_str[4]) {
         PieceType pt = QUEEN;
