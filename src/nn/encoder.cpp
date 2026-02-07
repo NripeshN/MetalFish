@@ -387,30 +387,31 @@ InputPlanes EncodePositionForNN(
     
     int base = i * kPlanesPerBoard;
     
-    // Get piece bitboards from perspective of current side to move
-    Color perspective_us = pos.side_to_move();
-    Color perspective_them = ~perspective_us;
-    
+    // Get piece bitboards from perspective of CURRENT position's side to move
+    // In standard Lc0 encoding, all history positions are encoded from the
+    // perspective of the current STM, not the historical position's STM.
+    // "Our pieces" always means the current STM's pieces across all history.
     uint64_t our_pieces[6] = {
-      GetPieceBitboard(pos, PAWN, perspective_us),
-      GetPieceBitboard(pos, KNIGHT, perspective_us),
-      GetPieceBitboard(pos, BISHOP, perspective_us),
-      GetPieceBitboard(pos, ROOK, perspective_us),
-      GetPieceBitboard(pos, QUEEN, perspective_us),
-      GetPieceBitboard(pos, KING, perspective_us)
+      GetPieceBitboard(pos, PAWN, us),
+      GetPieceBitboard(pos, KNIGHT, us),
+      GetPieceBitboard(pos, BISHOP, us),
+      GetPieceBitboard(pos, ROOK, us),
+      GetPieceBitboard(pos, QUEEN, us),
+      GetPieceBitboard(pos, KING, us)
     };
     
     uint64_t their_pieces[6] = {
-      GetPieceBitboard(pos, PAWN, perspective_them),
-      GetPieceBitboard(pos, KNIGHT, perspective_them),
-      GetPieceBitboard(pos, BISHOP, perspective_them),
-      GetPieceBitboard(pos, ROOK, perspective_them),
-      GetPieceBitboard(pos, QUEEN, perspective_them),
-      GetPieceBitboard(pos, KING, perspective_them)
+      GetPieceBitboard(pos, PAWN, them),
+      GetPieceBitboard(pos, KNIGHT, them),
+      GetPieceBitboard(pos, BISHOP, them),
+      GetPieceBitboard(pos, ROOK, them),
+      GetPieceBitboard(pos, QUEEN, them),
+      GetPieceBitboard(pos, KING, them)
     };
 
     // Mirror to side-to-move perspective (side to move always "white" at bottom).
-    if (perspective_us == BLACK) {
+    // The flip is based on the CURRENT position's STM, applied uniformly to all history.
+    if (us == BLACK) {
       for (int piece = 0; piece < 6; ++piece) {
         our_pieces[piece] = ReverseBytesInBytes(our_pieces[piece]);
         their_pieces[piece] = ReverseBytesInBytes(their_pieces[piece]);

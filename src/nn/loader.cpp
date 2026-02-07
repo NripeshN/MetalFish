@@ -252,14 +252,34 @@ FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer) {
         uint32_t f32;
         if (exponent == 0) {
           if (mantissa == 0) {
+            // Zero (positive or negative)
             f32 = sign;
           } else {
-            // Denormalized
-            f32 = sign | ((exponent + 112) << 23) | (mantissa << 13);
+            // Denormalized fp16: value = sign × 2^(-14) × (mantissa / 1024)
+            // Need to renormalize by finding the leading 1 bit in mantissa.
+            // For mantissa with leading 1 at bit position k (0-9):
+            //   value = 2^(-14) × 2^(k-10) × (1 + fraction) = 2^(k-24) × (1 + fraction)
+            //   fp32 exponent = k - 24 + 127 = k + 103
+            int leading_bit = 9;
+            while (leading_bit >= 0 && !(mantissa & (1u << leading_bit))) {
+              leading_bit--;
+            }
+            if (leading_bit >= 0) {
+              // Remove the leading 1 and shift remaining bits to fp32 mantissa position
+              uint32_t fraction_bits = mantissa ^ (1u << leading_bit);
+              uint32_t fp32_mantissa = fraction_bits << (23 - leading_bit);
+              uint32_t fp32_exponent = static_cast<uint32_t>(103 + leading_bit);
+              f32 = sign | (fp32_exponent << 23) | fp32_mantissa;
+            } else {
+              // mantissa is 0, which shouldn't happen in this branch
+              f32 = sign;
+            }
           }
         } else if (exponent == 31) {
+          // Infinity or NaN
           f32 = sign | 0x7F800000 | (mantissa << 13);
         } else {
+          // Normalized: fp16 exp in [1,30], fp32 exp = fp16_exp - 15 + 127 = fp16_exp + 112
           f32 = sign | ((exponent + 112) << 23) | (mantissa << 13);
         }
         

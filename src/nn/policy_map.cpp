@@ -5,13 +5,13 @@
   Licensed under GPL-3.0
   
   Policy mapping tables for neural network move encoding.
-  Adapted from the standard 1858-move encoding scheme.
+  Uses the standard Lc0 1858-move encoding scheme.
   
   The policy head outputs 1858 values corresponding to:
   - Queen-like moves (up to 56 per origin square in 8 directions × 7 distances)
   - Knight moves (8 per origin square)
-  - Underpromotions (N/B/R) in 3 directions × 7 files
-  - Queen promotions in 3 directions × 7 files
+  - Indices 0-1791: Regular moves including queen promotions (encoded as queen-direction moves)
+  - Indices 1792-1857: Underpromotions only (N/B/R) in 3 directions × 22 positions = 66 entries
 */
 
 #include "policy_map.h"
@@ -28,6 +28,8 @@ namespace NN {
 namespace {
 
 // All 1858 policy output moves in UCI format
+// Indices 0-1791: Regular moves (including queen promotions as queen-direction moves)
+// Indices 1792-1857: Underpromotions only (r/b/n suffix)
 const char* kMoveStrings[kPolicyOutputs] = {
     "a1b1", "a1c1", "a1d1", "a1e1", "a1f1", "a1g1", "a1h1", "a1a2",
     "a1b2", "a1c2", "a1a3", "a1b3", "a1c3", "a1a4", "a1d4", "a1a5",
@@ -253,17 +255,18 @@ const char* kMoveStrings[kPolicyOutputs] = {
     "g8h8", "h8a1", "h8h1", "h8b2", "h8h2", "h8c3", "h8h3", "h8d4",
     "h8h4", "h8e5", "h8h5", "h8f6", "h8g6", "h8h6", "h8f7", "h8g7",
     "h8h7", "h8a8", "h8b8", "h8c8", "h8d8", "h8e8", "h8f8", "h8g8",
-    "a7a8q", "a7a8r", "a7a8b", "a7a8n", "a7b8q", "a7b8r", "a7b8b", "a7b8n",
-    "b7a8q", "b7a8r", "b7a8b", "b7a8n", "b7b8q", "b7b8r", "b7b8b", "b7b8n",
-    "b7c8q", "b7c8r", "b7c8b", "b7c8n", "c7b8q", "c7b8r", "c7b8b", "c7b8n",
-    "c7c8q", "c7c8r", "c7c8b", "c7c8n", "c7d8q", "c7d8r", "c7d8b", "c7d8n",
-    "d7c8q", "d7c8r", "d7c8b", "d7c8n", "d7d8q", "d7d8r", "d7d8b", "d7d8n",
-    "d7e8q", "d7e8r", "d7e8b", "d7e8n", "e7d8q", "e7d8r", "e7d8b", "e7d8n",
-    "e7e8q", "e7e8r", "e7e8b", "e7e8n", "e7f8q", "e7f8r", "e7f8b", "e7f8n",
-    "f7e8q", "f7e8r", "f7e8b", "f7e8n", "f7f8q", "f7f8r", "f7f8b", "f7f8n",
-    "f7g8q", "f7g8r", "f7g8b", "f7g8n", "g7f8q", "g7f8r", "g7f8b", "g7f8n",
-    "g7g8q", "g7g8r", "g7g8b", "g7g8n", "g7h8q", "g7h8r", "g7h8b", "g7h8n",
-    "h7g8q", "h7g8r", "h7g8b", "h7g8n", "h7h8q", "h7h8r", "h7h8b", "h7h8n"
+    // Underpromotions only (r/b/n) - queen promotions are encoded as regular moves
+    "a7a8r", "a7a8b", "a7a8n", "a7b8r", "a7b8b", "a7b8n",
+    "b7a8r", "b7a8b", "b7a8n", "b7b8r", "b7b8b", "b7b8n",
+    "b7c8r", "b7c8b", "b7c8n", "c7b8r", "c7b8b", "c7b8n",
+    "c7c8r", "c7c8b", "c7c8n", "c7d8r", "c7d8b", "c7d8n",
+    "d7c8r", "d7c8b", "d7c8n", "d7d8r", "d7d8b", "d7d8n",
+    "d7e8r", "d7e8b", "d7e8n", "e7d8r", "e7d8b", "e7d8n",
+    "e7e8r", "e7e8b", "e7e8n", "e7f8r", "e7f8b", "e7f8n",
+    "f7e8r", "f7e8b", "f7e8n", "f7f8r", "f7f8b", "f7f8n",
+    "f7g8r", "f7g8b", "f7g8n", "g7f8r", "g7f8b", "g7f8n",
+    "g7g8r", "g7g8b", "g7g8n", "g7h8r", "g7h8b", "g7h8n",
+    "h7g8r", "h7g8b", "h7g8n", "h7h8r", "h7h8b", "h7h8n"
 };
 
 // Pack move for lookup: from (6 bits) | to (6 bits) | promotion (4 bits)
@@ -356,16 +359,18 @@ int MoveToNNIndex(Move move, int transform) {
     }
 
     // Handle promotions
-    // The policy head has q, r, b, n promotions for all underpromotions
+    // In standard Lc0 encoding, queen promotions are encoded as regular queen-direction
+    // moves (indices 0-1791). Only underpromotions (r/b/n) have explicit promotion entries
+    // at indices 1792-1857.
     char promo_char = 0;
     if (move.type_of() == PROMOTION) {
         PieceType pt = move.promotion_type();
         switch (pt) {
-            case QUEEN:  promo_char = 'q'; break;
+            case QUEEN:  promo_char = 0; break;  // Queen promotion = regular move
             case ROOK:   promo_char = 'r'; break;
             case BISHOP: promo_char = 'b'; break;
             case KNIGHT: promo_char = 'n'; break;
-            default: promo_char = 'q'; break;  // Default to queen
+            default: promo_char = 0; break;  // Default to queen (regular move)
         }
     }
 
