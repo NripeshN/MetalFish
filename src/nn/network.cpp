@@ -11,6 +11,7 @@
 #include "metal/metal_network.h"
 #endif
 
+#include <iostream>
 #include <stdexcept>
 
 namespace MetalFish {
@@ -64,6 +65,9 @@ std::unique_ptr<Network> CreateNetwork(const std::string& weights_path,
     try {
       return std::make_unique<Metal::MetalNetwork>(weights_opt.value());
     } catch (const std::exception& e) {
+      // Surface the backend construction failure to aid debugging rather than
+      // silently falling back to the stub implementation.
+      std::cerr << "Metal backend unavailable: " << e.what() << std::endl;
       if (backend == "metal") {
         // If Metal was explicitly requested, propagate error
         throw;

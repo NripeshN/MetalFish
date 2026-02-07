@@ -137,8 +137,8 @@ message Weights {
   }
 
   message PolicyHeadMap {
-    required string key = 1;  // name of the policy head
-    required PolicyHead value = 2;
+    optional string key = 1;  // name of the policy head
+    optional PolicyHead value = 2;
   }
 
   message PolicyHeads {
@@ -153,8 +153,8 @@ message Weights {
   }
 
   message ValueHeadMap {
-    required string key = 1;  // name of the value head
-    required ValueHead value = 2;
+    optional string key = 1;  // name of the value head
+    optional ValueHead value = 2;
   }
 
   message ValueHeads {

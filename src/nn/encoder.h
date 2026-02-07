@@ -17,6 +17,14 @@
 namespace MetalFish {
 namespace NN {
 
+// Board transform flags used for canonical input formats.
+enum BoardTransform {
+  kNoTransform = 0,
+  kFlipTransform = 1,      // Horizontal flip
+  kMirrorTransform = 2,    // Vertical mirror
+  kTransposeTransform = 4  // Diagonal transpose
+};
+
 // Neural network input constants
 constexpr int kMoveHistory = 8;
 constexpr int kPlanesPerBoard = 13;
@@ -35,7 +43,7 @@ enum class FillEmptyHistory { NO, FEN_ONLY, ALWAYS };
 // Returns 112-plane representation compatible with training data
 InputPlanes EncodePositionForNN(
     MetalFishNN::NetworkFormat::InputFormat input_format,
-    const std::vector<Position>& position_history,
+    const std::vector<const Position*>& position_history,
     int history_planes,
     FillEmptyHistory fill_empty_history,
     int* transform_out = nullptr);
@@ -51,7 +59,7 @@ bool IsCanonicalFormat(MetalFishNN::NetworkFormat::InputFormat input_format);
 
 // Get transform to apply for canonicalization
 int TransformForPosition(MetalFishNN::NetworkFormat::InputFormat input_format,
-                        const std::vector<Position>& history);
+                        const std::vector<const Position*>& history);
 
 }  // namespace NN
 }  // namespace MetalFish

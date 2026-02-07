@@ -214,7 +214,12 @@ FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer) {
   FloatVector result;
   
   const auto& params = layer.params();
-  const auto encoding = layer.encoding();
+  auto encoding = layer.encoding();
+  // Some network files omit per-layer encoding; default to LINEAR16 like the
+  // reference implementation.
+  if (encoding == MetalFishNN::Weights::Layer::UNKNOWN_ENCODING) {
+    encoding = MetalFishNN::Weights::Layer::LINEAR16;
+  }
   
   if (encoding == MetalFishNN::Weights::Layer::FLOAT32) {
     // Direct copy float32 data

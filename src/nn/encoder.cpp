@@ -14,14 +14,6 @@ namespace NN {
 
 namespace {
 
-// Board transform constants
-enum BoardTransform {
-  NoTransform = 0,
-  FlipTransform = 1,       // Horizontal flip
-  MirrorTransform = 2,     // Vertical mirror
-  TransposeTransform = 4,  // Diagonal transpose
-};
-
 // Get lowest bit position
 inline unsigned long GetLowestBit(uint64_t value) {
 #if defined(_MSC_VER) && defined(_WIN64)
@@ -74,13 +66,13 @@ inline uint64_t ApplyTransform(uint64_t bitboard, int transform) {
   if (bitboard == 0 || bitboard == ~0ULL) return bitboard;
   
   uint64_t v = bitboard;
-  if ((transform & FlipTransform) != 0) {
+  if ((transform & kFlipTransform) != 0) {
     v = ReverseBitsInBytes(v);
   }
-  if ((transform & MirrorTransform) != 0) {
+  if ((transform & kMirrorTransform) != 0) {
     v = ReverseBytesInBytes(v);
   }
-  if ((transform & TransposeTransform) != 0) {
+  if ((transform & kTransposeTransform) != 0) {
     v = TransposeBitsInBytes(v);
   }
   return v;
@@ -89,10 +81,10 @@ inline uint64_t ApplyTransform(uint64_t bitboard, int transform) {
 // Compare transposing for canonicalization
 int CompareTransposing(uint64_t board, int initial_transform) {
   uint64_t value = board;
-  if ((initial_transform & FlipTransform) != 0) {
+  if ((initial_transform & kFlipTransform) != 0) {
     value = ReverseBitsInBytes(value);
   }
-  if ((initial_transform & MirrorTransform) != 0) {
+  if ((initial_transform & kMirrorTransform) != 0) {
     value = ReverseBytesInBytes(value);
   }
   auto alternative = TransposeBitsInBytes(value);
@@ -105,15 +97,15 @@ int CompareTransposing(uint64_t board, int initial_transform) {
 int ChooseTransform(const Position& pos, Color us) {
   // If there are any castling options, no transform is valid
   if (pos.can_castle(ANY_CASTLING)) {
-    return NoTransform;
+    return kNoTransform;
   }
   
   uint64_t our_king = pos.pieces(us, KING);
-  int transform = NoTransform;
+  int transform = kNoTransform;
   
   // Flip horizontally if king on left half
   if ((our_king & 0x0F0F0F0F0F0F0F0FULL) != 0) {
-    transform |= FlipTransform;
+    transform |= kFlipTransform;
     our_king = ReverseBitsInBytes(our_king);
   }
   
@@ -124,37 +116,37 @@ int ChooseTransform(const Position& pos, Color us) {
   
   // Mirror vertically if king on top half
   if ((our_king & 0xFFFFFFFF00000000ULL) != 0) {
-    transform |= MirrorTransform;
+    transform |= kMirrorTransform;
     our_king = ReverseBytesInBytes(our_king);
   }
   
   // Our king is now in bottom right quadrant
   // Transpose for king in top right triangle, or if on diagonal use comparison
   if ((our_king & 0xE0C08000ULL) != 0) {
-    transform |= TransposeTransform;
+    transform |= kTransposeTransform;
   } else if ((our_king & 0x10204080ULL) != 0) {
     // Compare all pieces, then ours, then each piece type to choose best transform
     auto outcome = CompareTransposing(pos.pieces(), transform);
     if (outcome == -1) return transform;
-    if (outcome == 1) return transform | TransposeTransform;
+    if (outcome == 1) return transform | kTransposeTransform;
     outcome = CompareTransposing(pos.pieces(us), transform);
     if (outcome == -1) return transform;
-    if (outcome == 1) return transform | TransposeTransform;
+    if (outcome == 1) return transform | kTransposeTransform;
     outcome = CompareTransposing(pos.pieces(KING), transform);
     if (outcome == -1) return transform;
-    if (outcome == 1) return transform | TransposeTransform;
+    if (outcome == 1) return transform | kTransposeTransform;
     outcome = CompareTransposing(pos.pieces(QUEEN), transform);
     if (outcome == -1) return transform;
-    if (outcome == 1) return transform | TransposeTransform;
+    if (outcome == 1) return transform | kTransposeTransform;
     outcome = CompareTransposing(pos.pieces(ROOK), transform);
     if (outcome == -1) return transform;
-    if (outcome == 1) return transform | TransposeTransform;
+    if (outcome == 1) return transform | kTransposeTransform;
     outcome = CompareTransposing(pos.pieces(KNIGHT), transform);
     if (outcome == -1) return transform;
-    if (outcome == 1) return transform | TransposeTransform;
+    if (outcome == 1) return transform | kTransposeTransform;
     outcome = CompareTransposing(pos.pieces(BISHOP), transform);
     if (outcome == -1) return transform;
-    if (outcome == 1) return transform | TransposeTransform;
+    if (outcome == 1) return transform | kTransposeTransform;
   }
   
   return transform;
@@ -206,18 +198,18 @@ bool IsCanonicalArmageddonFormat(MetalFishNN::NetworkFormat::InputFormat input_f
 }
 
 int TransformForPosition(MetalFishNN::NetworkFormat::InputFormat input_format,
-                         const std::vector<Position>& history) {
+                         const std::vector<const Position*>& history) {
   if (!IsCanonicalFormat(input_format) || history.empty()) {
     return 0;
   }
-  const Position& pos = history.back();
+  const Position& pos = *history.back();
   Color us = pos.side_to_move();
   return ChooseTransform(pos, us);
 }
 
 InputPlanes EncodePositionForNN(
     MetalFishNN::NetworkFormat::InputFormat input_format,
-    const std::vector<Position>& position_history,
+    const std::vector<const Position*>& position_history,
     int history_planes,
     FillEmptyHistory fill_empty_history,
     int* transform_out) {
@@ -229,12 +221,12 @@ InputPlanes EncodePositionForNN(
   }
   
   // Get current position and side to move
-  const Position& current_pos = position_history.back();
+  const Position& current_pos = *position_history.back();
   Color us = current_pos.side_to_move();
   Color them = ~us;
   
   // Determine if we should use canonicalization
-  int transform = NoTransform;
+  int transform = kNoTransform;
   bool stop_early = IsCanonicalFormat(input_format);
   bool skip_non_repeats = (input_format == MetalFishNN::NetworkFormat::INPUT_112_WITH_CANONICALIZATION_V2 ||
                            input_format == MetalFishNN::NetworkFormat::INPUT_112_WITH_CANONICALIZATION_V2_ARMAGEDDON);
@@ -341,7 +333,7 @@ InputPlanes EncodePositionForNN(
     
     // Check if we should break early for canonical formats
     if (stop_early && history_idx < actual_history - 1) {
-      const Position& check_pos = position_history[history_idx >= 0 ? history_idx : 0];
+      const Position& check_pos = *position_history[history_idx >= 0 ? history_idx : 0];
       
       // Break if castling changed
       int cur_castling = check_pos.can_castle(ANY_CASTLING) ? 1 : 0;
@@ -356,12 +348,12 @@ InputPlanes EncodePositionForNN(
       break;
     }
     if (fill_empty_history == FillEmptyHistory::NO && history_idx == -1) {
-      const Position& check_pos = position_history[0];
+      const Position& check_pos = *position_history[0];
       if (check_pos.ep_square() == SQ_NONE) break;
     }
     
     // Get position (use oldest if history_idx < 0 for fill_empty_history)
-    const Position& pos = position_history[history_idx >= 0 ? history_idx : 0];
+    const Position& pos = *position_history[history_idx >= 0 ? history_idx : 0];
     
     // Check repetitions for v2 canonicalization
     if (skip_non_repeats && i > 0) {
@@ -443,7 +435,7 @@ InputPlanes EncodePositionForNN(
   }
   
   // Apply transform to all planes if canonicalization is enabled
-  if (transform != NoTransform) {
+  if (transform != kNoTransform) {
     // Transform piece planes and en passant plane
     for (int i = 0; i <= aux_base + 4; ++i) {
       // Convert plane to bitboard
@@ -475,6 +467,7 @@ InputPlanes EncodePositionForNN(
 InputPlanes EncodePositionForNN(
     const Position& pos,
     MetalFishNN::NetworkFormat::InputFormat input_format) {
+<<<<<<< HEAD
   
   // Position can't be copied, so we need to pass it by reference
   // For simplicity, just encode current position without history
@@ -537,6 +530,11 @@ InputPlanes EncodePositionForNN(
   SetPlane(result[aux_base + 7], 1.0f);
   
   return result;
+=======
+  std::vector<const Position*> history = {&pos};
+  return EncodePositionForNN(input_format, history, kMoveHistory,
+                             FillEmptyHistory::FEN_ONLY, nullptr);
+>>>>>>> dfd2376 (Implement MetalFish neural inference)
 }
 
 }  // namespace NN
