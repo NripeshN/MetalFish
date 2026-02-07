@@ -376,6 +376,10 @@ InputPlanes EncodePositionForNN(
     Color perspective_us = flip ? them : us;
     Color perspective_them = flip ? us : them;
     
+    // When the current side to move is black, we need to vertically flip the board
+    // so the position is always from the side-to-move's perspective
+    bool flip_vertical = (us == BLACK);
+    
     uint64_t our_pieces[6] = {
       GetPieceBitboard(pos, PAWN, perspective_us),
       GetPieceBitboard(pos, KNIGHT, perspective_us),
@@ -393,6 +397,14 @@ InputPlanes EncodePositionForNN(
       GetPieceBitboard(pos, QUEEN, perspective_them),
       GetPieceBitboard(pos, KING, perspective_them)
     };
+    
+    // Apply vertical flip if black to move
+    if (flip_vertical) {
+      for (int piece = 0; piece < 6; ++piece) {
+        our_pieces[piece] = ReverseBytesInBytes(our_pieces[piece]);
+        their_pieces[piece] = ReverseBytesInBytes(their_pieces[piece]);
+      }
+    }
     
     // Fill planes for our pieces
     for (int piece = 0; piece < 6; ++piece) {
@@ -422,8 +434,9 @@ InputPlanes EncodePositionForNN(
       }
     }
     
-    // Alternate perspective for next position
-    if (history_idx > 0) flip = !flip;
+    // Alternate perspective for next position unconditionally
+    // The NN expects alternating perspectives regardless of history availability
+    flip = !flip;
     
     // Stop early if rule50 was reset (capture or pawn move)
     if (stop_early && pos.rule50_count() == 0) break;
@@ -476,21 +489,30 @@ InputPlanes EncodePositionForNN(
   // Encode current position only (no history)
   int base = 0;
   
+  // When black is to move, we need to vertically flip the board
+  // so the position is always from the side-to-move's perspective
+  bool flip_vertical = (us == BLACK);
+  
+  // Get bitboards and apply vertical flip if black to move
+  auto get_flipped = [flip_vertical](uint64_t bb) {
+    return flip_vertical ? ReverseBytesInBytes(bb) : bb;
+  };
+  
   // Our pieces (6 planes)
-  FillPlaneFromBitboard(result[base + 0], GetPieceBitboard(pos, PAWN, us));
-  FillPlaneFromBitboard(result[base + 1], GetPieceBitboard(pos, KNIGHT, us));
-  FillPlaneFromBitboard(result[base + 2], GetPieceBitboard(pos, BISHOP, us));
-  FillPlaneFromBitboard(result[base + 3], GetPieceBitboard(pos, ROOK, us));
-  FillPlaneFromBitboard(result[base + 4], GetPieceBitboard(pos, QUEEN, us));
-  FillPlaneFromBitboard(result[base + 5], GetPieceBitboard(pos, KING, us));
+  FillPlaneFromBitboard(result[base + 0], get_flipped(GetPieceBitboard(pos, PAWN, us)));
+  FillPlaneFromBitboard(result[base + 1], get_flipped(GetPieceBitboard(pos, KNIGHT, us)));
+  FillPlaneFromBitboard(result[base + 2], get_flipped(GetPieceBitboard(pos, BISHOP, us)));
+  FillPlaneFromBitboard(result[base + 3], get_flipped(GetPieceBitboard(pos, ROOK, us)));
+  FillPlaneFromBitboard(result[base + 4], get_flipped(GetPieceBitboard(pos, QUEEN, us)));
+  FillPlaneFromBitboard(result[base + 5], get_flipped(GetPieceBitboard(pos, KING, us)));
   
   // Their pieces (6 planes)
-  FillPlaneFromBitboard(result[base + 6], GetPieceBitboard(pos, PAWN, them));
-  FillPlaneFromBitboard(result[base + 7], GetPieceBitboard(pos, KNIGHT, them));
-  FillPlaneFromBitboard(result[base + 8], GetPieceBitboard(pos, BISHOP, them));
-  FillPlaneFromBitboard(result[base + 9], GetPieceBitboard(pos, ROOK, them));
-  FillPlaneFromBitboard(result[base + 10], GetPieceBitboard(pos, QUEEN, them));
-  FillPlaneFromBitboard(result[base + 11], GetPieceBitboard(pos, KING, them));
+  FillPlaneFromBitboard(result[base + 6], get_flipped(GetPieceBitboard(pos, PAWN, them)));
+  FillPlaneFromBitboard(result[base + 7], get_flipped(GetPieceBitboard(pos, KNIGHT, them)));
+  FillPlaneFromBitboard(result[base + 8], get_flipped(GetPieceBitboard(pos, BISHOP, them)));
+  FillPlaneFromBitboard(result[base + 9], get_flipped(GetPieceBitboard(pos, ROOK, them)));
+  FillPlaneFromBitboard(result[base + 10], get_flipped(GetPieceBitboard(pos, QUEEN, them)));
+  FillPlaneFromBitboard(result[base + 11], get_flipped(GetPieceBitboard(pos, KING, them)));
   
   // Repetition plane
   SetPlane(result[base + 12], 0.0f);
