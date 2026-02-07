@@ -490,9 +490,7 @@ if(BUILD_TESTS)
       tests/test_cuda.cpp)
   
   set(NN_TEST_SOURCES
-      tests/test_nn_comparison.cpp
-      ${CORE_SOURCES}
-      ${NN_SOURCES})
+      tests/test_nn_comparison.cpp)
 
   if(USE_CUDA AND CUDA_AVAILABLE)
     # CUDA test executable
@@ -506,6 +504,7 @@ if(BUILD_TESTS)
       ${SYZYGY_SOURCES}
       ${GPU_SOURCES}
       ${MCTS_SOURCES}
+      ${NN_SOURCES}
       ${CUDA_SOURCES})
     set_target_properties(
       metalfish_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON
