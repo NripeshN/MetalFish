@@ -23,6 +23,8 @@ struct NetworkOutput {
   float value;                 // Position evaluation (-1 to 1)
   float wdl[3];               // Win/Draw/Loss probabilities
   bool has_wdl;
+  float moves_left = 0.0f;    // Moves-left head prediction
+  bool has_moves_left = false;
 };
 
 // Abstract neural network interface

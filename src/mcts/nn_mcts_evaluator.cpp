@@ -37,6 +37,8 @@ public:
       result.wdl[1] = output.wdl[1];  // draw
       result.wdl[2] = output.wdl[2];  // loss
     }
+    result.has_moves_left = output.has_moves_left;
+    result.moves_left = output.moves_left;
     
     // 4. Map policy outputs to legal moves
     MoveList<LEGAL> moves(pos);
@@ -79,6 +81,8 @@ public:
         result.wdl[1] = outputs[i].wdl[1];
         result.wdl[2] = outputs[i].wdl[2];
       }
+      result.has_moves_left = outputs[i].has_moves_left;
+      result.moves_left = outputs[i].moves_left;
       
       // Map policy
       MoveList<LEGAL> moves(positions[i]);

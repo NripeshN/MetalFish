@@ -316,16 +316,22 @@ set(NN_SOURCES
     ${PROTO_OUTPUT_DIR}/net.pb.cc
     src/nn/loader.cpp
     src/nn/encoder.cpp
+    src/nn/network_legacy.cpp
     src/nn/policy_map.cpp
     src/nn/network.cpp)
 
 # Metal GPU acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   set(GPU_SOURCES ${GPU_SOURCES} src/gpu/metal/metal_backend.mm)
-  set(NN_SOURCES ${NN_SOURCES} src/nn/metal/metal_network.mm)
+  set(NN_SOURCES ${NN_SOURCES}
+      src/nn/metal/metal_network.mm
+      src/nn/metal/mps/MetalNetworkBuilder.mm
+      src/nn/metal/mps/NetworkGraph.mm)
   
   # Disable ARC for Metal network implementation (uses manual memory management)
-  set_source_files_properties(src/nn/metal/metal_network.mm 
+  set_source_files_properties(src/nn/metal/metal_network.mm
+                              src/nn/metal/mps/MetalNetworkBuilder.mm
+                              src/nn/metal/mps/NetworkGraph.mm
                               PROPERTIES COMPILE_FLAGS "-fno-objc-arc")
   
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")

@@ -60,6 +60,40 @@
 namespace MetalFish {
 namespace MCTS {
 
+namespace {
+
+void ApplyNNPolicy(ThreadSafeNode *node, const EvaluationResult &result) {
+  const int num_edges = node->num_edges();
+  if (num_edges == 0)
+    return;
+
+  std::vector<float> priors(num_edges, 0.0f);
+  float sum = 0.0f;
+
+  for (int i = 0; i < num_edges; ++i) {
+    float p = result.get_policy(node->edges()[i].move);
+    if (p < 0.0f)
+      p = 0.0f;
+    priors[i] = p;
+    sum += p;
+  }
+
+  if (sum <= 0.0f) {
+    const float uniform = 1.0f / static_cast<float>(num_edges);
+    for (int i = 0; i < num_edges; ++i) {
+      node->edges()[i].SetPolicy(uniform);
+    }
+    return;
+  }
+
+  const float inv_sum = 1.0f / sum;
+  for (int i = 0; i < num_edges; ++i) {
+    node->edges()[i].SetPolicy(priors[i] * inv_sum);
+  }
+}
+
+}  // namespace
+
 // ============================================================================
 // BatchedGPUEvaluator - High-Performance Implementation
 // ============================================================================
@@ -927,24 +961,6 @@ void ThreadSafeMCTS::worker_thread(int thread_id) {
   // Cache root FEN once per search (avoid repeated string copies)
   ctx.set_root_fen(tree_->root_fen());
 
-  // Expand root node if needed (only one thread should do this)
-  ThreadSafeNode *root = tree_->root();
-  if (!root->has_children()) {
-    std::lock_guard<std::mutex> lock(root->mutex());
-    if (!root->has_children()) {
-      MoveList<LEGAL> moves(ctx.pos);
-      root->create_edges(moves);
-
-      // Add Dirichlet noise at root
-      if (config_.add_dirichlet_noise) {
-        add_dirichlet_noise(root);
-      }
-
-      // Set heuristic policy priors
-      expand_node(root, ctx);
-    }
-  }
-
   // Main search loop with batched stop checks
   constexpr int STOP_CHECK_INTERVAL = 64;
   int iterations_since_check = 0;
@@ -984,6 +1000,9 @@ void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
   auto iter_start = do_profile ? std::chrono::steady_clock::now()
                                : std::chrono::steady_clock::time_point{};
 
+  EvaluationResult nn_result;
+  bool nn_used = false;
+
   // 1. Selection - traverse to leaf
   auto select_start = iter_start;
   ThreadSafeNode *leaf = select_leaf(ctx);
@@ -1013,11 +1032,29 @@ void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
   // 3. Expansion - add children if not expanded (reuse moves list)
   auto expand_start = do_profile ? std::chrono::steady_clock::now()
                                  : std::chrono::steady_clock::time_point{};
+
+  if (!leaf->has_children() && nn_evaluator_) {
+    try {
+      nn_result = nn_evaluator_->Evaluate(ctx.pos);
+      nn_used = true;
+      stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
+    } catch (...) {
+      nn_used = false;
+    }
+  }
+
   if (!leaf->has_children()) {
     std::lock_guard<std::mutex> lock(leaf->mutex());
     if (!leaf->has_children()) {
       leaf->create_edges(moves);
-      expand_node(leaf, ctx);
+      if (nn_used) {
+        ApplyNNPolicy(leaf, nn_result);
+      } else {
+        expand_node(leaf, ctx);
+      }
+      if (config_.add_dirichlet_noise && leaf == tree_->root()) {
+        add_dirichlet_noise(leaf);
+      }
     }
   }
   auto expand_end = do_profile ? std::chrono::steady_clock::now()
@@ -1026,15 +1063,32 @@ void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
   // 4. Evaluation
   auto eval_start = do_profile ? std::chrono::steady_clock::now()
                                : std::chrono::steady_clock::time_point{};
-  float value = evaluate_position(ctx);
+  float value = 0.0f;
+  float draw = 0.0f;
+  float moves_left_val = 30.0f;
+
+  if (nn_used) {
+    value = nn_result.value;
+    if (nn_result.has_wdl) {
+      draw = nn_result.wdl[1];
+    } else {
+      draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
+    }
+    if (nn_result.has_moves_left) {
+      moves_left_val = nn_result.moves_left;
+    }
+  } else {
+    value = evaluate_position(ctx);
+    draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
+  }
+
   auto eval_end = do_profile ? std::chrono::steady_clock::now()
                              : std::chrono::steady_clock::time_point{};
 
   // 5. Backpropagation
   auto backprop_start = do_profile ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
-  float draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
-  backpropagate(leaf, value, draw, 30.0f);
+  backpropagate(leaf, value, draw, moves_left_val);
   auto backprop_end = do_profile ? std::chrono::steady_clock::now()
                                  : std::chrono::steady_clock::time_point{};
 
@@ -1147,14 +1201,14 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   float fpu = parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
 
   // Set up moves-left evaluator for MLH (moves-left head) utility.
-  MCTSSearchParams lc0_params;
-  lc0_params.moves_left_max_effect = 0.0345f;
-  lc0_params.moves_left_threshold = 0.8f;
-  lc0_params.moves_left_slope = 0.0027f;
-  lc0_params.moves_left_scaled_factor = 1.6521f;
-  lc0_params.moves_left_quadratic_factor = -0.6521f;
+  MCTSSearchParams mlh_params;
+  mlh_params.moves_left_max_effect = 0.0345f;
+  mlh_params.moves_left_threshold = 0.8f;
+  mlh_params.moves_left_slope = 0.0027f;
+  mlh_params.moves_left_scaled_factor = 1.6521f;
+  mlh_params.moves_left_quadratic_factor = -0.6521f;
 
-  MovesLeftEvaluator m_eval(lc0_params, node->GetM(), parent_q);
+  MovesLeftEvaluator m_eval(mlh_params, node->GetM(), parent_q);
 
   // Single-pass selection with SIMD-friendly layout
   const TSEdge *edges = node->edges();

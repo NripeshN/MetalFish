@@ -27,6 +27,8 @@ public:
     output.policy.resize(kPolicyOutputs, 1.0f / kPolicyOutputs);
     output.value = 0.0f;
     output.has_wdl = false;
+    output.wdl[0] = output.wdl[1] = output.wdl[2] = 0.0f;
+    output.has_moves_left = false;
     return output;
   }
   

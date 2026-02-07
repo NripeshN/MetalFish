@@ -22,6 +22,8 @@ struct EvaluationResult {
   float value;  // Q value from side to move perspective
   bool has_wdl;
   float wdl[3];  // win/draw/loss probabilities
+  bool has_moves_left = false;
+  float moves_left = 0.0f;
   std::vector<std::pair<Move, float>> policy_priors;  // Move → policy probability pairs
   
   EvaluationResult() : value(0.0f), has_wdl(false), wdl{0.0f, 0.0f, 0.0f} {}

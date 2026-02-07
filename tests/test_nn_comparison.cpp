@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <string>
+#include <cstdlib>
 
 #include "../src/core/bitboard.h"
 #include "../src/core/position.h"
@@ -16,9 +17,12 @@
 #include "../src/nn/network.h"
 #include "../src/nn/policy_map.h"
 #include "../src/mcts/nn_mcts_evaluator.h"
+#include "../src/mcts/thread_safe_mcts.h"
+#include "../src/search/search.h"
 #include "../src/uci/uci.h"
 
 using namespace MetalFish;
+using namespace MetalFish::MCTS;
 
 // Standard benchmark positions - from issue #14 acceptance criteria
 // These positions must return identical moves to reference implementation
@@ -56,6 +60,11 @@ const std::vector<std::string> kBenchmarkPositions = {
     // Queen vs pieces
     "3q2k1/pb3p1p/4pbp1/2r5/PpN2N2/1P2P2P/5PP1/Q2R2K1 b - - 4 26",
 };
+
+const std::vector<std::string> kExpectedBestMoves = {
+    "g1f3", "e2a6", "b4f4", "f5d3", "b4b2",
+    "f4g3", "a1e1", "f4f6", "e5g4", "a2a4",
+    "f5f6", "f4f5", "h4h3", "e1e4", "c5d5"};
 
 void test_policy_tables() {
   std::cout << "Testing policy tables..." << std::endl;
@@ -169,8 +178,8 @@ void test_mcts_evaluator() {
 }
 
 void test_all_benchmark_positions() {
-  std::cout << "\n=== Testing All Benchmark Positions ===" << std::endl;
-  
+  std::cout << "\n=== Neural Network Comparison (MCTS 800 nodes) ===" << std::endl;
+
   const char* weights_path = std::getenv("METALFISH_NN_WEIGHTS");
   if (!weights_path) {
     std::cout << "⊘ Skipped (METALFISH_NN_WEIGHTS not set)" << std::endl;
@@ -179,66 +188,48 @@ void test_all_benchmark_positions() {
     std::cout << "  ./test_nn_comparison" << std::endl;
     return;
   }
-  
-  try {
-    MCTS::NNMCTSEvaluator evaluator(weights_path);
-    std::cout << "Network loaded: " << evaluator.GetNetworkInfo() << "\n" << std::endl;
-    
-    int passed = 0;
-    int failed = 0;
-    
-    for (size_t i = 0; i < kBenchmarkPositions.size(); ++i) {
-      std::cout << "Position " << (i + 1) << "/" << kBenchmarkPositions.size() 
-                << ": " << kBenchmarkPositions[i] << std::endl;
-      
-      try {
-        StateInfo st;
-        Position pos;
-        pos.set(kBenchmarkPositions[i], false, &st);
-        
-        auto result = evaluator.Evaluate(pos);
-        
-        // Find best move by policy
-        if (!result.policy_priors.empty()) {
-          auto best = std::max_element(
-              result.policy_priors.begin(), 
-              result.policy_priors.end(),
-              [](const auto& a, const auto& b) { return a.second < b.second; });
-          
-          std::cout << "  Value: " << result.value;
-          if (result.has_wdl) {
-            std::cout << " | WDL: [" << result.wdl[0] << ", " 
-                      << result.wdl[1] << ", " << result.wdl[2] << "]";
-          }
-          std::cout << std::endl;
-          std::cout << "  Best move policy: " << best->second << std::endl;
-          std::cout << "  ✓ PASS" << std::endl;
-          passed++;
-        } else {
-          std::cout << "  ✗ FAIL: No policy priors" << std::endl;
-          failed++;
-        }
-      } catch (const std::exception& e) {
-        std::cout << "  ✗ FAIL: " << e.what() << std::endl;
-        failed++;
-      }
-      std::cout << std::endl;
+
+  // Ensure ThreadSafeMCTS can see the weights
+  setenv("METALFISH_NN_WEIGHTS", weights_path, 1);
+
+  ThreadSafeMCTSConfig config;
+  config.num_threads = 1;
+  config.add_dirichlet_noise = false;
+  config.use_batched_eval = false;
+  config.max_nodes = 800;
+  config.max_time_ms = 0;
+
+  Search::LimitsType limits;
+  limits.nodes = config.max_nodes;
+
+  int passed = 0;
+  int failed = 0;
+
+  for (size_t i = 0; i < kBenchmarkPositions.size(); ++i) {
+    std::cout << "Position " << (i + 1) << "/" << kBenchmarkPositions.size()
+              << ": " << kBenchmarkPositions[i] << std::endl;
+
+    MCTS::ThreadSafeMCTS mcts(config);
+    mcts.start_search(kBenchmarkPositions[i], limits);
+    mcts.wait();
+    Move best = mcts.get_best_move();
+    std::string best_move = UCIEngine::move(best, false);
+
+    std::cout << "  Reference best move: " << kExpectedBestMoves[i] << std::endl;
+    std::cout << "  MetalFish best move: " << best_move << std::endl;
+
+    if (best_move == kExpectedBestMoves[i]) {
+      std::cout << "  ✓ MATCH" << std::endl;
+      ++passed;
+    } else {
+      std::cout << "  ✗ MISMATCH" << std::endl;
+      ++failed;
     }
-    
-    std::cout << "=== Summary ===" << std::endl;
-    std::cout << "Passed: " << passed << "/" << kBenchmarkPositions.size() << std::endl;
-    std::cout << "Failed: " << failed << "/" << kBenchmarkPositions.size() << std::endl;
-    
-    if (passed == static_cast<int>(kBenchmarkPositions.size())) {
-      std::cout << "\n✓ All benchmark positions evaluated successfully!" << std::endl;
-      std::cout << "\nNote: For full Lc0 compatibility verification, compare" << std::endl;
-      std::cout << "      outputs with reference implementation using identical" << std::endl;
-      std::cout << "      network weights and search parameters." << std::endl;
-    }
-    
-  } catch (const std::exception& e) {
-    std::cout << "✗ Error initializing evaluator: " << e.what() << std::endl;
+    std::cout << std::endl;
   }
+
+  std::cout << "Results: " << passed << "/" << kBenchmarkPositions.size()
+            << " positions match" << std::endl;
 }
 
 int main() {

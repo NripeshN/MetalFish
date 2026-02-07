@@ -5,7 +5,7 @@
   Licensed under GPL-3.0
   
   Policy mapping tables for neural network move encoding.
-  Adapted from Leela Chess Zero's move encoding scheme.
+  Adapted from the standard 1858-move encoding scheme.
   
   The policy head outputs 1858 values corresponding to:
   - Queen-like moves (up to 56 per origin square in 8 directions × 7 distances)
