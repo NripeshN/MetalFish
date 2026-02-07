@@ -165,9 +165,10 @@ void test_mcts_evaluator() {
     std::sort(sorted_moves.begin(), sorted_moves.end(),
               [](const auto& a, const auto& b) { return a.second > b.second; });
     
-    std::cout << "  Top 3 moves:" << std::endl;
-    for (int i = 0; i < std::min(3, (int)sorted_moves.size()); ++i) {
-      std::cout << "    Move #" << i+1 << " → " << sorted_moves[i].second << std::endl;
+    std::cout << "  Top 5 moves:" << std::endl;
+    for (int i = 0; i < std::min(5, (int)sorted_moves.size()); ++i) {
+      std::cout << "    " << UCIEngine::move(sorted_moves[i].first, false)
+                << " → " << sorted_moves[i].second << std::endl;
     }
     
     std::cout << "  ✓ MCTS evaluator test passed" << std::endl;

@@ -323,7 +323,6 @@ InputPlanes EncodePositionForNN(
   
   // Encode position history (up to 8 positions, 13 planes each)
   int initial_castling = current_pos.can_castle(ANY_CASTLING) ? -1 : 0;
-  bool flip = false;
   int history_size = std::min(history_planes, kMoveHistory);
   int actual_history = static_cast<int>(position_history.size());
   
@@ -365,8 +364,8 @@ InputPlanes EncodePositionForNN(
     int base = i * kPlanesPerBoard;
     
     // Get piece bitboards from perspective of current side to move
-    Color perspective_us = flip ? them : us;
-    Color perspective_them = flip ? us : them;
+    Color perspective_us = pos.side_to_move();
+    Color perspective_them = ~perspective_us;
     
     uint64_t our_pieces[6] = {
       GetPieceBitboard(pos, PAWN, perspective_us),
@@ -385,7 +384,14 @@ InputPlanes EncodePositionForNN(
       GetPieceBitboard(pos, QUEEN, perspective_them),
       GetPieceBitboard(pos, KING, perspective_them)
     };
-    
+
+    // Mirror to side-to-move perspective (side to move always "white" at bottom).
+    if (perspective_us == BLACK) {
+      for (int piece = 0; piece < 6; ++piece) {
+        our_pieces[piece] = ReverseBytesInBytes(our_pieces[piece]);
+        their_pieces[piece] = ReverseBytesInBytes(their_pieces[piece]);
+      }
+    }
     // Fill planes for our pieces
     for (int piece = 0; piece < 6; ++piece) {
       FillPlaneFromBitboard(result[base + piece], our_pieces[piece]);
@@ -396,12 +402,17 @@ InputPlanes EncodePositionForNN(
       FillPlaneFromBitboard(result[base + 6 + piece], their_pieces[piece]);
     }
     
-    // Repetition plane (simplified - always 0 for now)
-    SetPlane(result[base + 12], 0.0f);
+    // Repetition plane
+    SetPlane(result[base + 12], pos.has_repeated() ? 1.0f : 0.0f);
     
     // Handle en passant for filled history
     if (history_idx < 0 && pos.ep_square() != SQ_NONE) {
       Square ep_sq = pos.ep_square();
+      if (pos.side_to_move() == BLACK) {
+        int file = file_of(ep_sq);
+        int rank = 7 - rank_of(ep_sq);
+        ep_sq = make_square(File(file), Rank(rank));
+      }
       int ep_idx = static_cast<int>(ep_sq);
       
       // Undo the pawn move for en passant
@@ -413,10 +424,6 @@ InputPlanes EncodePositionForNN(
         FillPlaneFromBitboard(result[base + 6], their_pieces[0] + mask);
       }
     }
-    
-    // Alternate perspective for next position unconditionally
-    // The NN expects alternating perspectives regardless of history availability
-    flip = !flip;
     
     // Stop early if rule50 was reset (capture or pawn move)
     if (stop_early && pos.rule50_count() == 0) break;

@@ -67,15 +67,26 @@ void ApplyNNPolicy(ThreadSafeNode *node, const EvaluationResult &result) {
   if (num_edges == 0)
     return;
 
-  std::vector<float> priors(num_edges, 0.0f);
-  float sum = 0.0f;
+  std::vector<float> logits(num_edges, -std::numeric_limits<float>::infinity());
+  float max_logit = -std::numeric_limits<float>::infinity();
 
   for (int i = 0; i < num_edges; ++i) {
     float p = result.get_policy(node->edges()[i].move);
     if (p < 0.0f)
       p = 0.0f;
-    priors[i] = p;
-    sum += p;
+    logits[i] = p;
+    if (p > max_logit)
+      max_logit = p;
+  }
+
+  // Softmax over available logits for numerical stability.
+  std::vector<float> priors(num_edges, 0.0f);
+  float sum = 0.0f;
+  for (int i = 0; i < num_edges; ++i) {
+    if (logits[i] == -std::numeric_limits<float>::infinity())
+      continue;
+    priors[i] = std::exp(logits[i] - max_logit);
+    sum += priors[i];
   }
 
   if (sum <= 0.0f) {
