@@ -467,74 +467,11 @@ InputPlanes EncodePositionForNN(
 InputPlanes EncodePositionForNN(
     const Position& pos,
     MetalFishNN::NetworkFormat::InputFormat input_format) {
-<<<<<<< HEAD
-  
-  // Position can't be copied, so we need to pass it by reference
-  // For simplicity, just encode current position without history
-  std::vector<Position> history;
-  // Can't copy position, so we'll just encode it directly
-  
-  InputPlanes result{};
-  
-  Color us = pos.side_to_move();
-  Color them = ~us;
-  
-  // Encode current position only (no history)
-  int base = 0;
-  
-  // When black is to move, we need to vertically flip the board
-  // so the position is always from the side-to-move's perspective
-  bool flip_vertical = (us == BLACK);
-  
-  // Get bitboards and apply vertical flip if black to move
-  auto get_flipped = [flip_vertical](uint64_t bb) {
-    return flip_vertical ? ReverseBytesInBytes(bb) : bb;
-  };
-  
-  // Our pieces (6 planes)
-  FillPlaneFromBitboard(result[base + 0], get_flipped(GetPieceBitboard(pos, PAWN, us)));
-  FillPlaneFromBitboard(result[base + 1], get_flipped(GetPieceBitboard(pos, KNIGHT, us)));
-  FillPlaneFromBitboard(result[base + 2], get_flipped(GetPieceBitboard(pos, BISHOP, us)));
-  FillPlaneFromBitboard(result[base + 3], get_flipped(GetPieceBitboard(pos, ROOK, us)));
-  FillPlaneFromBitboard(result[base + 4], get_flipped(GetPieceBitboard(pos, QUEEN, us)));
-  FillPlaneFromBitboard(result[base + 5], get_flipped(GetPieceBitboard(pos, KING, us)));
-  
-  // Their pieces (6 planes)
-  FillPlaneFromBitboard(result[base + 6], get_flipped(GetPieceBitboard(pos, PAWN, them)));
-  FillPlaneFromBitboard(result[base + 7], get_flipped(GetPieceBitboard(pos, KNIGHT, them)));
-  FillPlaneFromBitboard(result[base + 8], get_flipped(GetPieceBitboard(pos, BISHOP, them)));
-  FillPlaneFromBitboard(result[base + 9], get_flipped(GetPieceBitboard(pos, ROOK, them)));
-  FillPlaneFromBitboard(result[base + 10], get_flipped(GetPieceBitboard(pos, QUEEN, them)));
-  FillPlaneFromBitboard(result[base + 11], get_flipped(GetPieceBitboard(pos, KING, them)));
-  
-  // Repetition plane
-  SetPlane(result[base + 12], 0.0f);
-  
-  // Fill auxiliary planes
-  int aux_base = kAuxPlaneBase;
-  
-  // Castling rights from side-to-move perspective
-  CastlingRights our_oo = us == WHITE ? WHITE_OO : BLACK_OO;
-  CastlingRights our_ooo = us == WHITE ? WHITE_OOO : BLACK_OOO;
-  CastlingRights their_oo = us == WHITE ? BLACK_OO : WHITE_OO;
-  CastlingRights their_ooo = us == WHITE ? BLACK_OOO : WHITE_OOO;
-  
-  SetPlane(result[aux_base + 0], pos.can_castle(our_oo) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 1], pos.can_castle(our_ooo) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 2], pos.can_castle(their_oo) ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 3], pos.can_castle(their_ooo) ? 1.0f : 0.0f);
-  
-  SetPlane(result[aux_base + 4], us == BLACK ? 1.0f : 0.0f);
-  SetPlane(result[aux_base + 5], static_cast<float>(pos.rule50_count()));
-  SetPlane(result[aux_base + 6], 0.0f);
-  SetPlane(result[aux_base + 7], 1.0f);
-  
-  return result;
-=======
+  // Delegate to the main function with a single-position history
+  // This ensures consistent behavior including vertical flip for black
   std::vector<const Position*> history = {&pos};
   return EncodePositionForNN(input_format, history, kMoveHistory,
                              FillEmptyHistory::FEN_ONLY, nullptr);
->>>>>>> dfd2376 (Implement MetalFish neural inference)
 }
 
 }  // namespace NN
