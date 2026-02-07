@@ -197,6 +197,12 @@ bool IsCanonicalArmageddonFormat(MetalFishNN::NetworkFormat::InputFormat input_f
          input_format == IF::INPUT_112_WITH_CANONICALIZATION_V2_ARMAGEDDON;
 }
 
+bool IsStartPosition(const Position& pos) {
+  static const std::string kStartFen =
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  return pos.fen() == kStartFen;
+}
+
 int TransformForPosition(MetalFishNN::NetworkFormat::InputFormat input_format,
                          const std::vector<const Position*>& history) {
   if (!IsCanonicalFormat(input_format) || history.empty()) {
@@ -329,6 +335,17 @@ InputPlanes EncodePositionForNN(
   for (int i = 0; i < history_size; ++i) {
     // Calculate history index
     int history_idx = actual_history - 1 - i;
+    
+    // Handle missing history based on fill policy
+    if (history_idx < 0) {
+      if (fill_empty_history == FillEmptyHistory::NO) {
+        break;
+      }
+      if (fill_empty_history == FillEmptyHistory::FEN_ONLY &&
+          IsStartPosition(*position_history.back())) {
+        break;
+      }
+    }
     
     // Check if we should break early for canonical formats
     if (stop_early && history_idx < actual_history - 1) {
