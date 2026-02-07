@@ -3,9 +3,6 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Licensed under GPL-3.0
-
-  Neural network weight format compatible with transformer-based networks.
-  Adapted from protobuf format for chess neural networks.
 */
 syntax = "proto2";
 
@@ -43,7 +40,8 @@ message Weights {
   }
 
   message SEunit {
-    // Squeeze-excitation unit
+    // Squeeze-excitation unit (https://arxiv.org/abs/1709.01507)
+    // weights and biases of the two fully connected layers.
     optional Layer w1 = 1;
     optional Layer b1 = 2;
     optional Layer w2 = 3;
@@ -57,6 +55,7 @@ message Weights {
   }
 
   message Smolgen {
+    // For NETWORK_ATTENTIONBODY_WITH_HEADFORMAT.
     optional Layer compress = 1;
     optional Layer dense1_w = 2;
     optional Layer dense1_b = 3;
@@ -82,6 +81,8 @@ message Weights {
     optional Layer rpe_q = 10;
     optional Layer rpe_k = 11;
     optional Layer rpe_v = 12;
+
+    // reserved 13 - 22 for int8 quantization
   }
 
   message FFN {
@@ -89,6 +90,7 @@ message Weights {
     optional Layer dense1_b = 2;
     optional Layer dense2_w = 3;
     optional Layer dense2_b = 4;
+    // reserved 5 - 10 for int8 quantization
   }
 
   message EncoderLayer {
@@ -103,21 +105,23 @@ message Weights {
   message PolicyHead {
     optional Layer ip_pol_w = 1;
     optional Layer ip_pol_b = 2;
-    optional Layer ip2_pol_w = 3;
+    optional Layer ip2_pol_w = 3;  // "wq" in policy attention
     optional Layer ip2_pol_b = 4;
-    optional Layer ip3_pol_w = 5;
+    optional Layer ip3_pol_w = 5;  // "wk" in policy attention
     optional Layer ip3_pol_b = 6;
-    optional Layer ip4_pol_w = 7;
+    optional Layer ip4_pol_w = 7;  // "ppo" in policy attention
 
+    // Optional policy encoders for policy head.
     repeated EncoderLayer pol_encoder = 8;
     optional uint32 pol_headcount = 9;
 
+    // Convolutions for legacy policy head.
     optional ConvBlock policy1 = 10;
     optional ConvBlock policy = 11;
   }
 
   message ValueHead {
-    optional Layer ip_val_w = 1;
+    optional Layer ip_val_w = 1;  // "embedding" for attention body value
     optional Layer ip_val_b = 2;
     optional Layer ip1_val_w = 3;
     optional Layer ip1_val_b = 4;
@@ -128,26 +132,28 @@ message Weights {
     optional Layer ip_val_cat_w = 9;
     optional Layer ip_val_cat_b = 10;
 
+    // Legacy value head support.
     optional ConvBlock value = 11;
   }
 
   message PolicyHeadMap {
-    required string key = 1;
+    required string key = 1;  // name of the policy head
     required PolicyHead value = 2;
   }
 
   message PolicyHeads {
-    optional Layer ip_pol_w = 1;
+    optional Layer ip_pol_w = 1;    // "embedding" in policy attention
     optional Layer ip_pol_b = 2;
     optional PolicyHead vanilla = 3;
     optional PolicyHead optimistic_st = 4;
     optional PolicyHead soft = 5;
     optional PolicyHead opponent = 6;
+    // map<string, PolicyHead> policy_head_map = 7;
     repeated PolicyHeadMap policy_head_map = 7;
   }
 
   message ValueHeadMap {
-    required string key = 1;
+    required string key = 1;  // name of the value head
     required ValueHead value = 2;
   }
 
@@ -155,6 +161,7 @@ message Weights {
     optional ValueHead winner = 1;
     optional ValueHead q = 2;
     optional ValueHead st = 3;
+    // map<string, ValueHead> value_head_map = 4;
     repeated ValueHeadMap value_head_map = 4;
   }
 
@@ -165,6 +172,8 @@ message Weights {
   repeated Residual residual = 2;
 
   // Embedding layer for attention body encoders
+  // (NETWORK_ATTENTIONBODY_WITH_HEADFORMAT).
+
   optional Layer ip_emb_preproc_w = 37;
   optional Layer ip_emb_preproc_b = 38;
 
@@ -174,7 +183,9 @@ message Weights {
   optional Layer ip_emb_ln_gammas = 39;
   optional Layer ip_emb_ln_betas = 40;
 
-  // Input gating
+
+
+  // Input gating (NETWORK_ATTENTIONBODY_WITH_HEADFORMAT).
   optional Layer ip_mult_gate = 33;
   optional Layer ip_add_gate = 34;
 
@@ -182,28 +193,33 @@ message Weights {
   optional Layer ip_emb_ffn_ln_gammas = 42;
   optional Layer ip_emb_ffn_ln_betas = 43;
 
-  // Encoder stack
+  // Encoder stack (NETWORK_ATTENTIONBODY_WITH_HEADFORMAT).
   repeated EncoderLayer encoder = 27;
   optional uint32 headcount = 28;
 
   // Policy encoder stack
+  // The ffn activation up to and including NETWORK_SE_WITH_HEADFORMAT is SELU,
+  // otherwise it follows the ffn activation setting.
   repeated EncoderLayer pol_encoder = 21;
   optional uint32 pol_headcount = 24;
 
   // Policy head
+  // Extra convolution for AZ-style policy head
   optional ConvBlock policy1 = 11;
   optional ConvBlock policy = 3;
-  optional Layer ip_pol_w = 4;
+  optional Layer ip_pol_w = 4;    // "embedding" in policy attention
   optional Layer ip_pol_b = 5;
-  optional Layer ip2_pol_w = 17;
+  // For policy attention, up to and including NETWORK_SE_WITH_HEADFORMAT the
+  // "embedding" activation is SELU, otherwise it is the default activation.
+  optional Layer ip2_pol_w = 17;  // "wq" in policy attention
   optional Layer ip2_pol_b = 18;
-  optional Layer ip3_pol_w = 19;
+  optional Layer ip3_pol_w = 19;  // "wk" in policy attention
   optional Layer ip3_pol_b = 20;
-  optional Layer ip4_pol_w = 22;
+  optional Layer ip4_pol_w = 22;  // "ppo" in policy attention
 
   // Value head
   optional ConvBlock value = 6;
-  optional Layer ip_val_w = 29;
+  optional Layer ip_val_w = 29;  // "embedding" for attention body value
   optional Layer ip_val_b = 30;
   optional Layer ip1_val_w = 7;
   optional Layer ip1_val_b = 8;
@@ -215,14 +231,14 @@ message Weights {
 
   // Moves left head
   optional ConvBlock moves_left = 12;
-  optional Layer ip_mov_w = 31;
+  optional Layer ip_mov_w = 31;  // "embedding" for attention body moves left
   optional Layer ip_mov_b = 32;
   optional Layer ip1_mov_w = 13;
   optional Layer ip1_mov_b = 14;
   optional Layer ip2_mov_w = 15;
   optional Layer ip2_mov_b = 16;
 
-  // Global smolgen weights
+  // Global smolgen weights (NETWORK_ATTENTIONBODY_WITH_HEADFORMAT).
   optional Layer smolgen_w = 35;
   optional Layer smolgen_b = 36;
 }
@@ -233,10 +249,11 @@ message TrainingParams {
   optional float mse_loss = 3;
   optional float policy_loss = 4;
   optional float accuracy = 5;
-  optional string training_params = 6;
+  optional string lc0_params = 6;
 }
 
 message NetworkFormat {
+  // Format to encode the input planes with. Used by position encoder.
   enum InputFormat {
     INPUT_UNKNOWN = 0;
     INPUT_CLASSICAL_112_PLANE = 1;
@@ -249,6 +266,7 @@ message NetworkFormat {
   }
   optional InputFormat input = 1;
 
+  // Output format of the NN. Used by search code to interpret results.
   enum OutputFormat {
     OUTPUT_UNKNOWN = 0;
     OUTPUT_CLASSICAL = 1;
@@ -256,10 +274,13 @@ message NetworkFormat {
   }
   optional OutputFormat output = 2;
 
+  // Network architecture. Used by backends to build the network.
   enum NetworkStructure {
+    // Networks without PolicyFormat or ValueFormat specified
     NETWORK_UNKNOWN = 0;
     NETWORK_CLASSICAL = 1;
     NETWORK_SE = 2;
+    // Networks with PolicyFormat and ValueFormat specified
     NETWORK_CLASSICAL_WITH_HEADFORMAT = 3;
     NETWORK_SE_WITH_HEADFORMAT = 4;
     NETWORK_ONNX = 5;
@@ -269,6 +290,7 @@ message NetworkFormat {
   }
   optional NetworkStructure network = 3;
 
+  // Policy head architecture
   enum PolicyFormat {
     POLICY_UNKNOWN = 0;
     POLICY_CLASSICAL = 1;
@@ -277,6 +299,7 @@ message NetworkFormat {
   }
   optional PolicyFormat policy = 4;
 
+  // Value head architecture
   enum ValueFormat {
     VALUE_UNKNOWN = 0;
     VALUE_CLASSICAL = 1;
@@ -285,6 +308,7 @@ message NetworkFormat {
   }
   optional ValueFormat value = 5;
 
+  // Moves left head architecture
   enum MovesLeftFormat {
     MOVES_LEFT_NONE = 0;
     MOVES_LEFT_V1 = 1;
@@ -304,6 +328,7 @@ message NetworkFormat {
     ACTIVATION_SOFTMAX = 9;
   }
 
+  // Activation used everywhere except head outputs or otherwise specified.
   enum DefaultActivation {
     DEFAULT_ACTIVATION_RELU = 0;
     DEFAULT_ACTIVATION_MISH = 1;
@@ -326,7 +351,10 @@ message Format {
     UNKNOWN = 0;
     LINEAR16 = 1;
   }
+  // Any encoding specified in a Layer overides this.
   optional Encoding weights_encoding = 1;
+  // If network_format is missing, it's assumed to have
+  // INPUT_CLASSICAL_112_PLANE / OUTPUT_CLASSICAL / NETWORK_CLASSICAL format.
   optional NetworkFormat network_format = 2;
 }
 
@@ -338,9 +366,13 @@ message OnnxModel {
     BFLOAT16 = 16;
   }
 
+  // Serialized OnnxProto model.
   optional bytes model = 1;
   optional DataType data_type = 2;
+  // Name of the input tensor to populate.
   optional string input_planes = 3;
+  // Names of the output tensors to get results from.
+  // If some feature is not present, corresponding values are not set.
   optional string output_value = 4;
   optional string output_wdl = 5;
   optional string output_policy = 6;
@@ -353,6 +385,7 @@ message Net {
   optional EngineVersion min_version = 3;
   optional Format format = 4;
   optional TrainingParams training_params = 5;
+  // Either weights or onnx_model is set, but not both.
   optional Weights weights = 10;
   optional OnnxModel onnx_model = 11;
 }

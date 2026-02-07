@@ -541,7 +541,16 @@ if(BUILD_TESTS)
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
   
   # Neural network comparison test
-  add_executable(test_nn_comparison ${NN_TEST_SOURCES} ${MCTS_SOURCES})
+  add_executable(test_nn_comparison
+    ${NN_TEST_SOURCES}
+    ${CORE_SOURCES}
+    ${SEARCH_SOURCES}
+    ${EVAL_SOURCES}
+    ${UCI_SOURCES}
+    ${SYZYGY_SOURCES}
+    ${GPU_SOURCES}
+    ${MCTS_SOURCES}
+    ${NN_SOURCES})
   target_link_libraries(test_nn_comparison Threads::Threads ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES} ${ABSL_LIBS})
   
   if(APPLE AND USE_METAL AND METAL_CPP_AVAILABLE)

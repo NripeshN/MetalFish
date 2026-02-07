@@ -13,8 +13,12 @@
 #include <cassert>
 #include <cstdio>
 #include <fstream>
+#include <iterator>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -126,7 +130,12 @@ void FixOlderWeightsFile(WeightsFile* file) {
 
 WeightsFile ParseWeightsProto(const std::string& buffer) {
   WeightsFile net;
-  if (!net.ParseFromString(buffer)) {
+  google::protobuf::io::ArrayInputStream ais(buffer.data(), buffer.size());
+  google::protobuf::io::CodedInputStream cis(&ais);
+  // Permit large transformer networks (>300MB).
+  cis.SetTotalBytesLimit(std::numeric_limits<int>::max());
+
+  if (!net.ParseFromCodedStream(&cis)) {
     throw std::runtime_error("Failed to parse protobuf weights file");
   }
 
@@ -141,8 +150,20 @@ WeightsFile ParseWeightsProto(const std::string& buffer) {
 }  // namespace
 
 WeightsFile LoadWeightsFromFile(const std::string& filename) {
-  auto buffer = DecompressGzip(filename);
-  
+  std::string buffer;
+
+  if (filename.size() >= 3 &&
+      filename.substr(filename.size() - 3) == ".gz") {
+    buffer = DecompressGzip(filename);
+  } else {
+    std::ifstream in(filename, std::ios::binary);
+    if (!in) {
+      throw std::runtime_error("Cannot read weights from " + filename);
+    }
+    buffer.assign((std::istreambuf_iterator<char>(in)),
+                  std::istreambuf_iterator<char>());
+  }
+
   if (buffer.size() < 2) {
     throw std::runtime_error("Invalid weight file: too small");
   }
