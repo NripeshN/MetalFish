@@ -24,9 +24,12 @@ public:
       throw std::runtime_error("Could not load network weights");
     }
     weights_ = std::move(weights_opt.value());
-    input_format_ = weights_.format().has_network_format()
-                        ? weights_.format().network_format().input()
-                        : MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE;
+    if (weights_.format().has_network_format() &&
+        weights_.format().network_format().has_input()) {
+      input_format_ = weights_.format().network_format().input();
+    } else {
+      input_format_ = MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE;
+    }
     network_ = NN::CreateNetwork(weights_, "auto");
   }
   

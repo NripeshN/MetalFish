@@ -367,36 +367,27 @@ InputPlanes EncodePositionForNN(
     // Get piece bitboards from perspective of current side to move
     Color perspective_us = flip ? them : us;
     Color perspective_them = flip ? us : them;
-    
-    // When the current side to move is black, we need to vertically flip the board
-    // so the position is always from the side-to-move's perspective
-    bool flip_vertical = (us == BLACK);
+    auto maybe_mirror = [&](uint64_t bb) {
+      return flip ? ReverseBytesInBytes(bb) : bb;
+    };
     
     uint64_t our_pieces[6] = {
-      GetPieceBitboard(pos, PAWN, perspective_us),
-      GetPieceBitboard(pos, KNIGHT, perspective_us),
-      GetPieceBitboard(pos, BISHOP, perspective_us),
-      GetPieceBitboard(pos, ROOK, perspective_us),
-      GetPieceBitboard(pos, QUEEN, perspective_us),
-      GetPieceBitboard(pos, KING, perspective_us)
+      maybe_mirror(GetPieceBitboard(pos, PAWN, perspective_us)),
+      maybe_mirror(GetPieceBitboard(pos, KNIGHT, perspective_us)),
+      maybe_mirror(GetPieceBitboard(pos, BISHOP, perspective_us)),
+      maybe_mirror(GetPieceBitboard(pos, ROOK, perspective_us)),
+      maybe_mirror(GetPieceBitboard(pos, QUEEN, perspective_us)),
+      maybe_mirror(GetPieceBitboard(pos, KING, perspective_us))
     };
     
     uint64_t their_pieces[6] = {
-      GetPieceBitboard(pos, PAWN, perspective_them),
-      GetPieceBitboard(pos, KNIGHT, perspective_them),
-      GetPieceBitboard(pos, BISHOP, perspective_them),
-      GetPieceBitboard(pos, ROOK, perspective_them),
-      GetPieceBitboard(pos, QUEEN, perspective_them),
-      GetPieceBitboard(pos, KING, perspective_them)
+      maybe_mirror(GetPieceBitboard(pos, PAWN, perspective_them)),
+      maybe_mirror(GetPieceBitboard(pos, KNIGHT, perspective_them)),
+      maybe_mirror(GetPieceBitboard(pos, BISHOP, perspective_them)),
+      maybe_mirror(GetPieceBitboard(pos, ROOK, perspective_them)),
+      maybe_mirror(GetPieceBitboard(pos, QUEEN, perspective_them)),
+      maybe_mirror(GetPieceBitboard(pos, KING, perspective_them))
     };
-    
-    // Apply vertical flip if black to move
-    if (flip_vertical) {
-      for (int piece = 0; piece < 6; ++piece) {
-        our_pieces[piece] = ReverseBytesInBytes(our_pieces[piece]);
-        their_pieces[piece] = ReverseBytesInBytes(their_pieces[piece]);
-      }
-    }
     
     // Fill planes for our pieces
     for (int piece = 0; piece < 6; ++piece) {
@@ -414,6 +405,11 @@ InputPlanes EncodePositionForNN(
     // Handle en passant for filled history
     if (history_idx < 0 && pos.ep_square() != SQ_NONE) {
       Square ep_sq = pos.ep_square();
+      if (flip) {
+        int file = file_of(ep_sq);
+        int rank = 7 - rank_of(ep_sq);
+        ep_sq = make_square(File(file), Rank(rank));
+      }
       int ep_idx = static_cast<int>(ep_sq);
       
       // Undo the pawn move for en passant
