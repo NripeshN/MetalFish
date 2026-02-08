@@ -377,7 +377,7 @@ struct ThreadSafeMCTSConfig {
   float fpu_reduction = 0.330f;  // Reduction factor applied to visited policy
 
   // Policy and exploration
-  float policy_softmax_temp = 1.0f;
+  float policy_softmax_temp = 1.359f;
   bool add_dirichlet_noise = true;
   float dirichlet_alpha = 0.3f;    // default value
   float dirichlet_epsilon = 0.25f; // uses 0.25 for training

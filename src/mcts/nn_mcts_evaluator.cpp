@@ -9,6 +9,7 @@
 #include "../nn/policy_map.h"
 #include "../nn/loader.h"
 #include "../core/movegen.h"
+#include <algorithm>
 
 #include <vector>
 #include <stdexcept>
@@ -43,6 +44,7 @@ public:
     
     // 3. Convert to MCTS evaluation result
     EvaluationResult result;
+    // Use raw network value (already from side-to-move perspective).
     result.value = output.value;
     result.has_wdl = output.has_wdl;
     if (output.has_wdl) {

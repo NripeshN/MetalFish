@@ -331,49 +331,37 @@ namespace {
 Square TransformSquare(Square sq, int transform) {
     int file = file_of(sq);
     int rank = rank_of(sq);
-    
-    // Apply transforms in the same order as ApplyTransform in encoder.cpp:
-    // 1. Flip (horizontal) - file -> 7-file
-    if (transform & kFlipTransform) {
-        file = 7 - file;
-    }
-    // 2. Mirror (vertical) - rank -> 7-rank
-    if (transform & kMirrorTransform) {
+    if ((transform & (kMirrorTransform | kTransposeTransform)) != 0)
         rank = 7 - rank;
-    }
-    // 3. Transpose (diagonal) - swap file and rank
-    if (transform & kTransposeTransform) {
-        int temp = file;
-        file = rank;
-        rank = temp;
-    }
-    
+    if ((transform & (kFlipTransform | kTransposeTransform)) != 0)
+        file = 7 - file;
     return make_square(File(file), Rank(rank));
 }
 }  // namespace
 
 int MoveToNNIndex(Move move, int transform) {
-    // Apply transform to squares first if needed
-    Square from_sq_transformed = move.from_sq();
-    Square to_sq_transformed = move.to_sq();
-    
+    // Apply transform to move if needed
     if (transform != 0) {
-        from_sq_transformed = TransformSquare(move.from_sq(), transform);
-        to_sq_transformed = TransformSquare(move.to_sq(), transform);
+        const Square from = TransformSquare(move.from_sq(), transform);
+        const Square to = TransformSquare(move.to_sq(), transform);
+        if (move.type_of() == PROMOTION) {
+            move = Move::make<PROMOTION>(from, to, move.promotion_type());
+        } else {
+            move = Move(from, to);
+        }
     }
 
-    // Attention policy mapping: use direct table when available (non-promotion).
+    const int from_sq = static_cast<int>(move.from_sq());
+    const int to_sq = static_cast<int>(move.to_sq());
+
+    // Attention policy map indexing (matches transformer policy output order).
     if (move.type_of() != PROMOTION) {
-        const int from_sq_raw = static_cast<int>(from_sq_transformed);
-        const int to_sq_raw = static_cast<int>(to_sq_transformed);
-        const int attn_idx = MetalFish::NN::Metal::kAttnPolicyMap[from_sq_raw * 64 + to_sq_raw];
+        int attn_idx =
+            MetalFish::NN::Metal::kAttnPolicyMap[from_sq * 64 + to_sq];
         if (attn_idx >= 0) {
             return attn_idx;
         }
     }
-
-    int from_sq = static_cast<int>(from_sq_transformed);
-    int to_sq = static_cast<int>(to_sq_transformed);
 
     // Validate square indices
     if (from_sq < 0 || from_sq > 63 || to_sq < 0 || to_sq > 63) {
