@@ -556,7 +556,8 @@ if(BUILD_TESTS)
     target_link_libraries(
       test_nn_comparison ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK}
       ${COREFOUNDATION_FRAMEWORK} ${QUARTZCORE_FRAMEWORK}
-      ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK})
+      ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK}
+      ${ACCELERATE_FRAMEWORK})
   endif()
   
   add_test(NAME test_nn_comparison COMMAND test_nn_comparison)
