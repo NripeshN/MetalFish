@@ -672,7 +672,8 @@ private:
   void run_iteration(WorkerContext &ctx);
 
   ThreadSafeNode *select_leaf(WorkerContext &ctx);
-  void expand_node(ThreadSafeNode *node, WorkerContext &ctx);
+  void expand_node(ThreadSafeNode *node, WorkerContext &ctx,
+                   EvaluationResult *out_nn_result = nullptr);
 
   float evaluate_position(WorkerContext &ctx);
   float evaluate_position_batched(WorkerContext &ctx);

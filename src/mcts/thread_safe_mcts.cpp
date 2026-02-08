@@ -1055,6 +1055,10 @@ void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
     }
   }
 
+  // Track if expand_node provided an NN result (to avoid redundant evaluation)
+  EvaluationResult expand_nn_result;
+  bool expand_nn_used = false;
+
   if (!leaf->has_children()) {
     std::lock_guard<std::mutex> lock(leaf->mutex());
     if (!leaf->has_children()) {
@@ -1062,7 +1066,12 @@ void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
       if (nn_used) {
         ApplyNNPolicy(leaf, nn_result);
       } else {
-        expand_node(leaf, ctx);
+        // Pass pointer to capture NN result if expand_node evaluates
+        expand_node(leaf, ctx, &expand_nn_result);
+        // Check if expand_node successfully evaluated NN (non-empty policy_priors)
+        if (!expand_nn_result.policy_priors.empty()) {
+          expand_nn_used = true;
+        }
       }
       if (config_.add_dirichlet_noise && leaf == tree_->root()) {
         add_dirichlet_noise(leaf);
@@ -1088,6 +1097,17 @@ void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
     }
     if (nn_result.has_moves_left) {
       moves_left_val = nn_result.moves_left;
+    }
+  } else if (expand_nn_used) {
+    // Reuse the NN result from expand_node to avoid redundant evaluation
+    value = expand_nn_result.value;
+    if (expand_nn_result.has_wdl) {
+      draw = expand_nn_result.wdl[1];
+    } else {
+      draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
+    }
+    if (expand_nn_result.has_moves_left) {
+      moves_left_val = expand_nn_result.moves_left;
     }
   } else {
     value = evaluate_position(ctx);
@@ -1276,7 +1296,8 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   return best_idx;
 }
 
-void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
+void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx,
+                                 EvaluationResult *out_nn_result) {
   int num_edges = node->num_edges();
   if (num_edges == 0)
     return;
@@ -1394,6 +1415,12 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
   if (nn_evaluator_) {
     try {
       auto result = nn_evaluator_->Evaluate(ctx.pos);
+      stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
+      
+      // Cache the NN result for value evaluation if requested
+      if (out_nn_result) {
+        *out_nn_result = result;
+      }
       
       // Apply policy priors to edges (blend with heuristics)
       // Configuration: 70% NN policy, 30% heuristic scores
@@ -1404,10 +1431,10 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx) {
       for (int i = 0; i < num_edges; ++i) {
         Move m = edges[i].move;
         float nn_policy = result.get_policy(m);
-        if (nn_policy > 0.0f) {
-          scores[i] = NN_POLICY_WEIGHT * (nn_policy * POLICY_SCALE) + 
-                      HEURISTIC_WEIGHT * scores[i];
-        }
+        // NN policy outputs are raw logits, not probabilities - they can be negative.
+        // We blend all moves regardless of logit sign.
+        scores[i] = NN_POLICY_WEIGHT * (nn_policy * POLICY_SCALE) + 
+                    HEURISTIC_WEIGHT * scores[i];
       }
       
       // Recalculate max_score after NN policy blending
