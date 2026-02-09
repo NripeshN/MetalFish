@@ -74,6 +74,14 @@ public:
   set_on_bestmove(std::function<void(std::string_view, std::string_view)> &&);
   void set_on_verify_networks(std::function<void(std::string_view)> &&);
 
+  // Getters for callbacks (for save/restore in hybrid search)
+  std::function<void(std::string_view, std::string_view)> get_on_bestmove();
+  std::function<void(const InfoFull &)> get_on_update_full();
+
+  // Thread accessors for hybrid search
+  Thread *threads_get_best();
+  uint64_t threads_nodes_searched();
+
   // network related
 
   void verify_networks() const;
@@ -126,6 +134,18 @@ public:
   // Used by hybrid search where the coordinator handles bestmove output
   QuickSearchResult search_silent(const std::string &fen, int depth,
                                   int time_ms = 0);
+
+  // Hybrid iterative deepening search with per-iteration callback.
+  // Runs the full AB search but calls `on_iteration` after each completed
+  // depth with the current best move, score, and PV. The search preserves
+  // all state (TT, aspiration windows, killers, history) across iterations
+  // unlike calling search_silent() in a loop. Used by the hybrid engine
+  // for real-time PV injection into the MCTS tree.
+  using IterationCallback =
+      std::function<void(const QuickSearchResult &result)>;
+  void search_with_callbacks(const std::string &fen, int time_ms,
+                             IterationCallback on_iteration,
+                             std::atomic<bool> &stop_flag);
 
   // Get access to the transposition table for sharing with hybrid search
   TranspositionTable &get_tt() { return tt; }

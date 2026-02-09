@@ -3,13 +3,13 @@
 MetalFish Comprehensive Elo Tournament
 
 Runs a tournament between multiple chess engines to determine Elo ratings:
-- MetalFish-AB (Alpha-Beta search with 'go' command) - Full Stockfish search with NNUE
+- MetalFish-AB (Alpha-Beta search with 'go' command) - Full Alpha-Beta search with NNUE
 - MetalFish-MCTS (GPU MCTS with 'mctsmt' command) - Pure GPU-accelerated MCTS
 - MetalFish-Hybrid (Parallel MCTS+AB with 'parallel_hybrid' command) - Best of both worlds
-- Stockfish at various skill levels (0-20)
+- Reference engines at various skill levels
 - Patricia (aggressive engine, ~3500 Elo)
 - Berserk (strong NNUE engine, ~3550 Elo)
-- Lc0 (Leela Chess Zero - neural network engine)
+- Reference neural network engines
 
 Engine configurations are loaded from engines_config.json.
 
@@ -20,7 +20,7 @@ Usage:
     python elo_tournament.py [--games N] [--time TC] [--concurrency N]
 
     # CI mode - run single match (for GitHub Actions matrix)
-    python elo_tournament.py --ci-match --engine1 "MetalFish-AB" --engine2 "Stockfish-L10"
+    python elo_tournament.py --ci-match --engine1 "MetalFish-AB" --engine2 "Reference-L10"
 
     # CI mode - aggregate results from matrix jobs
     python elo_tournament.py --ci-aggregate --results-dir ./results
@@ -47,7 +47,7 @@ import chess  # python-chess library for proper move handling
 DEFAULT_ENGINES_CONFIG = {
     "engines": {
         "MetalFish-AB": {
-            "description": "MetalFish with Alpha-Beta search (full Stockfish with NNUE)",
+            "description": "MetalFish with Alpha-Beta search (full AB search with NNUE)",
             "expected_elo": None,
             "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
         },
@@ -77,16 +77,16 @@ DEFAULT_ENGINES_CONFIG = {
             "anchor": True,
             "anchor_elo": 3662,
         },
-        "Lc0": {
-            "description": "Leela Chess Zero - neural network engine",
+        "NNReference": {
+            "description": "Reference neural network engine",
             "expected_elo": 3716,
             "options": {"Threads": "1", "Ponder": "false"},
             "path": "reference/lc0/build/release/lc0",
             "network_path": "reference/lc0/build/release/network.pb.gz",
         },
     },
-    "stockfish": {
-        "path": "reference/stockfish/src/stockfish",
+    "reference_engine": {
+        "path": "reference/engines/reference_engine",
         "default_levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 17, 18, 19, 20],
         "options": {"Threads": "1", "Hash": "128", "Ponder": "false"},
         "skill_elo_map": {
@@ -735,17 +735,17 @@ class Tournament:
         """Add an engine to the tournament."""
         self.engines.append(config)
 
-    def setup_default_engines(self, stockfish_levels: List[int] = None):
+    def setup_default_engines(self, reference_levels: List[int] = None):
         """Setup default engine configurations from engines_config.json."""
 
         # Load configuration
         config = load_engines_config(self.base_dir)
         engines_config = config.get("engines", {})
-        stockfish_config = config.get("stockfish", {})
+        reference_config = config.get("reference_engine", {})
 
         metalfish_path = self.base_dir / "build" / "metalfish"
 
-        # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
+        # MetalFish with standard Alpha-Beta search (full AB search with NNUE)
         ab_config = engines_config.get("MetalFish-AB", {})
         self.add_engine(
             EngineConfig(
@@ -797,8 +797,8 @@ class Tournament:
 
             engine_path = self.base_dir / engine_path_str
 
-            # Special handling for Lc0 (needs network file)
-            if engine_name == "Lc0":
+            # Special handling for NN reference (needs network file)
+            if engine_name.startswith("NNRef"):
                 network_path_str = engine_cfg.get("network_path", "")
                 if network_path_str:
                     network_path = self.base_dir / network_path_str
@@ -832,28 +832,28 @@ class Tournament:
                     self.elo_calc.anchor_elo = engine_cfg.get("anchor_elo", 3000)
                     anchor_set = True
 
-        # Stockfish at various skill levels
-        stockfish_path_str = stockfish_config.get(
-            "path", "reference/stockfish/src/stockfish"
+        # Reference engines at various skill levels
+        reference_path_str = reference_config.get(
+            "path", "reference/engines/reference_engine"
         )
-        stockfish_path = self.base_dir / stockfish_path_str
+        reference_path = self.base_dir / reference_path_str
 
-        if stockfish_path.exists():
-            if stockfish_levels is None:
-                stockfish_levels = stockfish_config.get(
+        if reference_path.exists():
+            if reference_levels is None:
+                reference_levels = reference_config.get(
                     "default_levels", [1, 5, 10, 15, 20]
                 )
 
             # Get Elo map from config
             skill_elo_map = {
-                int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()
+                int(k): v for k, v in reference_config.get("skill_elo_map", {}).items()
             }
-            default_options = stockfish_config.get(
+            default_options = reference_config.get(
                 "options", {"Threads": "1", "Hash": "128"}
             )
 
-            for level in stockfish_levels:
-                name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
+            for level in reference_levels:
+                name = f"Reference-L{level}" if level < 20 else "Reference-Full"
                 options = default_options.copy()
                 if level < 20:
                     options["Skill Level"] = str(level)
@@ -861,7 +861,7 @@ class Tournament:
                 self.add_engine(
                     EngineConfig(
                         name=name,
-                        cmd=str(stockfish_path),
+                        cmd=str(reference_path),
                         options=options,
                         expected_elo=skill_elo_map.get(level, 3000),
                     )
@@ -1353,7 +1353,7 @@ done | "$ENGINE"
 
 
 def get_engine_configs(
-    base_dir: Path, stockfish_levels: List[int] = None
+    base_dir: Path, reference_levels: List[int] = None
 ) -> Dict[str, EngineConfig]:
     """Get all available engine configurations for CI mode from engines_config.json."""
     configs = {}
@@ -1361,11 +1361,11 @@ def get_engine_configs(
     # Load configuration
     config = load_engines_config(base_dir)
     engines_config = config.get("engines", {})
-    stockfish_config = config.get("stockfish", {})
+    reference_config = config.get("reference_engine", {})
 
     metalfish_path = base_dir / "build" / "metalfish"
 
-    # MetalFish with standard Alpha-Beta search (full Stockfish with NNUE)
+    # MetalFish with standard Alpha-Beta search (full AB search with NNUE)
     ab_config = engines_config.get("MetalFish-AB", {})
     configs["MetalFish-AB"] = EngineConfig(
         name="MetalFish-AB",
@@ -1409,8 +1409,8 @@ def get_engine_configs(
 
         engine_path = base_dir / engine_path_str
 
-        # Special handling for Lc0 (needs network file)
-        if engine_name == "Lc0":
+        # Special handling for NN reference (needs network file)
+        if engine_name.startswith("NNRef"):
             network_path_str = engine_cfg.get("network_path", "")
             if network_path_str:
                 network_path = base_dir / network_path_str
@@ -1434,35 +1434,35 @@ def get_engine_configs(
                 expected_elo=engine_cfg.get("expected_elo"),
             )
 
-    # Stockfish at various levels
-    stockfish_path_str = stockfish_config.get(
-        "path", "reference/stockfish/src/stockfish"
+    # Reference engines at various levels
+    reference_path_str = reference_config.get(
+        "path", "reference/engines/reference_engine"
     )
-    stockfish_path = base_dir / stockfish_path_str
+    reference_path = base_dir / reference_path_str
 
-    if stockfish_path.exists():
-        if stockfish_levels is None:
-            stockfish_levels = stockfish_config.get(
+    if reference_path.exists():
+        if reference_levels is None:
+            reference_levels = reference_config.get(
                 "default_levels", [1, 5, 10, 15, 20]
             )
 
         # Get Elo map from config
         skill_elo_map = {
-            int(k): v for k, v in stockfish_config.get("skill_elo_map", {}).items()
+            int(k): v for k, v in reference_config.get("skill_elo_map", {}).items()
         }
-        default_options = stockfish_config.get(
+        default_options = reference_config.get(
             "options", {"Threads": "1", "Hash": "128"}
         )
 
-        for level in stockfish_levels:
-            name = f"Stockfish-L{level}" if level < 20 else "Stockfish-Full"
+        for level in reference_levels:
+            name = f"Reference-L{level}" if level < 20 else "Reference-Full"
             options = default_options.copy()
             if level < 20:
                 options["Skill Level"] = str(level)
 
             configs[name] = EngineConfig(
                 name=name,
-                cmd=str(stockfish_path),
+                cmd=str(reference_path),
                 options=options,
                 expected_elo=skill_elo_map.get(level, 3000),
             )
@@ -2296,13 +2296,13 @@ def requires_metal(engine_name: str) -> bool:
     return engine_name in metalfish_engines
 
 
-def print_ci_engines(base_dir: Path, stockfish_levels: List[int] = None):
+def print_ci_engines(base_dir: Path, reference_levels: List[int] = None):
     """Print available engines as JSON for CI matrix generation.
-    
+
     Includes 'requires_metal' flag for each match to determine runner OS.
     Matches involving MetalFish engines require macOS, others can run on Ubuntu.
     """
-    configs = get_engine_configs(base_dir, stockfish_levels)
+    configs = get_engine_configs(base_dir, reference_levels)
     engines = list(configs.keys())
     pairs = list_engine_pairs(engines)
 
@@ -2310,10 +2310,10 @@ def print_ci_engines(base_dir: Path, stockfish_levels: List[int] = None):
         "engines": engines,
         "pairs": [
             {
-                "engine1": p[0], 
+                "engine1": p[0],
                 "engine2": p[1],
-                "requires_metal": requires_metal(p[0]) or requires_metal(p[1])
-            } 
+                "requires_metal": requires_metal(p[0]) or requires_metal(p[1]),
+            }
             for p in pairs
         ],
         "matrix": [f"{p[0]}__vs__{p[1]}" for p in pairs],
@@ -2348,11 +2348,11 @@ def main():
         help="Number of concurrent games (default: 1)",
     )
     parser.add_argument(
-        "--stockfish-levels",
+        "--reference-levels",
         "-s",
         type=str,
         default=None,
-        help="Comma-separated Stockfish skill levels to test (default: from config file)",
+        help="Comma-separated reference skill levels to test (default: from config file)",
     )
     parser.add_argument(
         "--quick",
@@ -2425,14 +2425,14 @@ def main():
 
     print(f"Base directory: {base_dir.absolute()}", file=sys.stderr)
 
-    # Parse Stockfish levels (None means use config file defaults)
-    stockfish_levels = None
-    if args.stockfish_levels:
-        stockfish_levels = [int(x) for x in args.stockfish_levels.split(",")]
+    # Parse reference levels (None means use config file defaults)
+    reference_levels = None
+    if args.reference_levels:
+        reference_levels = [int(x) for x in args.reference_levels.split(",")]
 
     # CI mode: list engines
     if args.ci_list_engines:
-        print_ci_engines(base_dir, stockfish_levels)
+        print_ci_engines(base_dir, reference_levels)
         return
 
     # CI mode: run single match
@@ -2551,7 +2551,7 @@ def main():
             EngineConfig(name="MetalFish-MCTS", cmd=str(mctsmt_wrapper), options={})
         )
     else:
-        tournament.setup_default_engines(stockfish_levels)
+        tournament.setup_default_engines(reference_levels)
 
     # Run tournament
     ratings = tournament.run_round_robin(

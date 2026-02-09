@@ -191,6 +191,9 @@ void Search::Worker::start_searching() {
   // GUI sends a "stop" or "ponderhit" command. We therefore simply wait here
   // until the GUI sends one of those commands.
   while (!threads.stop && (main_manager()->ponder || limits.infinite)) {
+#ifdef __aarch64__
+    __builtin_arm_yield(); // ARM YIELD: reduce power in spin-wait
+#endif
   } // Busy wait for a stop or a ponder reset
 
   // Stop the threads if not already stopped (also raise the stop if
@@ -659,7 +662,7 @@ Value Search::Worker::search(Position &pos, Stack *ss, Value alpha, Value beta,
   if (!rootNode) {
     // Step 2. Check for aborted search and immediate draw
     if (threads.stop.load(std::memory_order_relaxed) || pos.is_draw(ss->ply) ||
-        ss->ply >= MAX_PLY)
+        ss->ply >= MAX_PLY) [[unlikely]]
       return (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos)
                                                   : value_draw(nodes);
 
@@ -1291,7 +1294,7 @@ moves_loop: // When in check, search starts here
     // Finished searching the move. If a stop occurred, the return value of
     // the search cannot be trusted, and we return immediately without updating
     // best move, principal variation nor transposition table.
-    if (threads.stop.load(std::memory_order_relaxed))
+    if (threads.stop.load(std::memory_order_relaxed)) [[unlikely]]
       return VALUE_ZERO;
 
     if (rootNode) {

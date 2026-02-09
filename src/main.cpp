@@ -12,9 +12,9 @@
 #include "core/bitboard.h"
 #include "core/misc.h"
 #include "core/position.h"
-#include "gpu/backend.h"
-#include "gpu/gpu_nnue_integration.h"
-#include "mcts/ab_integration.h"
+#include "eval/gpu_backend.h"
+#include "eval/gpu_integration.h"
+#include "hybrid/ab_bridge.h"
 #include "uci/uci.h"
 
 using namespace MetalFish;
@@ -43,7 +43,8 @@ static void cleanup_gpu_resources() {
 }
 
 int main(int argc, char *argv[]) {
-  std::cout << engine_info() << std::endl;
+  // NOTE: Don't print anything before UCI loop starts.
+  // The UCI protocol requires engines to wait for 'uci' before responding.
 
   Bitboards::init();
   Position::init();

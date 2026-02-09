@@ -25,11 +25,11 @@
 #include "core/shm.h"
 #include "core/types.h"
 #include "eval/evaluate.h"
+#include "eval/gpu_backend.h"
+#include "eval/gpu_integration.h"
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_common.h"
 #include "eval/nnue/nnue_misc.h"
-#include "gpu/backend.h"
-#include "gpu/gpu_nnue_integration.h"
 #include "search/search.h"
 #include "syzygy/tbprobe.h"
 #include "uci/uci.h"
@@ -135,44 +135,16 @@ Engine::Engine(std::optional<std::string> path)
       }));
 
   // GPU acceleration options
-  options.add("UseGPU", Option(GPU::gpu_available(), [](const Option &o) {
-                // This option is informational - GPU is auto-detected
-                if (o && !GPU::gpu_available()) {
-                  return std::optional<std::string>(
-                      "GPU not available on this system");
-                }
-                return std::optional<std::string>(std::nullopt);
-              }));
+  // NOTE: GPU is used ONLY for transformer network inference (MCTS/Hybrid).
+  // AB search always uses CPU NNUE. There is no "GPU NNUE" mode.
+  // Default to false -- Metal is initialized on demand when MCTS/Hybrid starts.
+  options.add("UseGPU", Option(false));
 
-  // Apple Silicon optimized GPU NNUE
-  options.add(
-      "UseAppleSiliconNNUE", Option(false, [this](const Option &o) {
-#ifdef __APPLE__
-        if (o) {
-          // Initialize GPU NNUE if not already done
-          if (!GPU::gpu_nnue_manager_available()) {
-            // Try to initialize with current networks
-            networks.modify_and_replicate([](NN::Networks &networks_) {
-              if (GPU::initialize_gpu_nnue(networks_)) {
-                sync_cout << "info string GPU NNUE: initialized" << sync_endl;
-              }
-            });
-          }
-          if (GPU::gpu_nnue_manager_available()) {
-            Eval::set_use_apple_silicon_nnue(true);
-            return std::optional<std::string>("GPU NNUE enabled");
-          } else {
-            return std::optional<std::string>("GPU NNUE initialization failed");
-          }
-        } else {
-          Eval::set_use_apple_silicon_nnue(false);
-          return std::optional<std::string>("GPU NNUE disabled");
-        }
-#else
-                (void)o;
-                return std::optional<std::string>("GPU NNUE not available on this platform");
-#endif
-      }));
+  // Transformer network weights for MCTS/Hybrid (.pb or .pb.gz file)
+  options.add("NNWeights", Option("", [](const Option &) {
+                // Path is read when MCTS/Hybrid search starts
+                return std::nullopt;
+              }));
 
   // Hybrid search mode - use parallel MCTS+AB instead of pure AB
   options.add("UseHybridSearch", Option(false));
@@ -182,14 +154,6 @@ Engine::Engine(std::optional<std::string> path)
 
   load_networks();
   resize_threads();
-
-  // Initialize GPU if available
-  if (GPU::gpu_available()) {
-    sync_cout << "info string GPU: " << GPU::gpu().device_name() << sync_endl;
-    if (GPU::gpu().has_unified_memory()) {
-      sync_cout << "info string GPU unified memory: enabled" << sync_endl;
-    }
-  }
 }
 
 std::uint64_t Engine::perft(const std::string &fen, Depth depth,
@@ -239,6 +203,19 @@ void Engine::set_on_bestmove(
 void Engine::set_on_verify_networks(std::function<void(std::string_view)> &&f) {
   onVerifyNetworks = std::move(f);
 }
+
+std::function<void(std::string_view, std::string_view)>
+Engine::get_on_bestmove() {
+  return updateContext.onBestmove;
+}
+
+std::function<void(const Engine::InfoFull &)> Engine::get_on_update_full() {
+  return updateContext.onUpdateFull;
+}
+
+Thread *Engine::threads_get_best() { return threads.get_best_thread(); }
+
+uint64_t Engine::threads_nodes_searched() { return threads.nodes_searched(); }
 
 void Engine::wait_for_search_finished() {
   threads.main_thread()->wait_for_search_finished();
@@ -335,21 +312,10 @@ void Engine::load_networks() {
   threads.clear();
   threads.ensure_network_replicated();
 
-  // Initialize GPU NNUE if available
-  if (GPU::gpu_available() && options["UseGPU"]) {
-    // Get access to networks for GPU initialization
-    // Use a lambda to access the networks
-    bool gpu_init_success = false;
-    networks.modify_and_replicate([&gpu_init_success](NN::Networks &networks_) {
-      if (GPU::initialize_gpu_nnue(networks_)) {
-        gpu_init_success = true;
-      }
-    });
-
-    if (gpu_init_success) {
-      sync_cout << "info string GPU NNUE: initialized" << sync_endl;
-    }
-  }
+  // NOTE: No GPU NNUE initialization here.
+  // AB search uses CPU NNUE only.
+  // Transformer network (for MCTS/Hybrid) is loaded on demand when
+  // those search modes are activated, using the NNWeights UCI option.
 }
 
 void Engine::load_big_network(const std::string &file) {
@@ -564,4 +530,70 @@ Engine::QuickSearchResult Engine::search_silent(const std::string &fen,
   return result;
 }
 
+void Engine::search_with_callbacks(const std::string &fen, int time_ms,
+                                   IterationCallback on_iteration,
+                                   std::atomic<bool> &stop_flag) {
+  // Set up the position
+  set_position(fen, {});
+
+  // Set up search limits
+  Search::LimitsType limits;
+  limits.startTime = now();
+  if (time_ms > 0)
+    limits.movetime = time_ms;
+
+  // Save original callbacks
+  auto saved_bestmove = updateContext.onBestmove;
+  auto saved_update = updateContext.onUpdateFull;
+
+  // Suppress bestmove output (hybrid coordinator handles this)
+  updateContext.onBestmove = [](std::string_view, std::string_view) {};
+
+  // Hook into the per-iteration update to call our callback.
+  // This fires after each depth of iterative deepening completes,
+  // giving us the current best move + PV with full search state preserved.
+  updateContext.onUpdateFull = [this, &on_iteration,
+                                &saved_update](const Search::InfoFull &info) {
+    // Build QuickSearchResult from the search state
+    Thread *best = threads.get_best_thread();
+    if (best && !best->worker->rootMoves.empty()) {
+      QuickSearchResult result;
+      const auto &rm = best->worker->rootMoves[0];
+      result.best_move = rm.pv[0];
+      result.score = rm.score;
+      result.depth = best->worker->completedDepth;
+      result.nodes = threads.nodes_searched();
+      result.pv = rm.pv;
+      if (rm.pv.size() > 1)
+        result.ponder_move = rm.pv[1];
+
+      on_iteration(result);
+    }
+    // Chain to original for UCI info output
+    if (saved_update)
+      saved_update(info);
+  };
+
+  // Run the search -- this is a single iterative deepening run that
+  // preserves all state (TT, aspiration windows, killers, history)
+  // across depth iterations. Much more efficient than calling
+  // search_silent() in a loop.
+  go(limits);
+
+  // Poll for external stop signal from hybrid coordinator
+  // while the search is running. The search checks threads.stop
+  // internally, so setting it will cause the search to wind down.
+  while (!threads.stop.load(std::memory_order_acquire)) {
+    if (stop_flag.load(std::memory_order_acquire)) {
+      threads.stop = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::microseconds(200));
+  }
+  wait_for_search_finished();
+
+  // Restore original callbacks
+  updateContext.onBestmove = saved_bestmove;
+  updateContext.onUpdateFull = saved_update;
+}
 } // namespace MetalFish

@@ -554,7 +554,7 @@ public:
     // bad interaction with the scheduler - in particular it still prefers
     // scheduling on the thread's "primary" node, even if it means scheduling
     // SMT processors first. See
-    // https://github.com/official-stockfish/MetalFish/issues/5551 See
+    // https://github.com/NripeshN/MetalFish/issues/5551 See
     // https://learn.microsoft.com/en-us/windows/win32/procthread/processor-groups
     //
     //     Each process is assigned a primary group at creation, and by default

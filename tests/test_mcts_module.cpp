@@ -8,7 +8,7 @@
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
-#include "mcts/thread_safe_mcts.h"
+#include "mcts/tree.h"
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -510,3 +510,6 @@ bool test_mcts_module() {
 
   return g_tests_failed == 0;
 }
+
+// Alias for test runner (test_mcts is in anonymous namespace)
+bool test_mcts_all() { return test_mcts_module(); }

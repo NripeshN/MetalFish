@@ -6,12 +6,13 @@
 */
 
 #include "uci/benchmark.h"
-#include "core/numa.h"
 
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <vector>
+
+#include "core/numa.h"
 
 namespace {
 
@@ -87,7 +88,7 @@ const std::vector<std::string> Defaults = {
 
 // clang-format off
 // human-randomly picked 5 games with <60 moves from
-// https://tests.stockfishchess.org/tests/view/665c71f9fd45fb0f907c21e0
+// (benchmark positions for testing)
 // only moves for one side
 const std::vector<std::vector<std::string>> BenchmarkPositions = {
     {

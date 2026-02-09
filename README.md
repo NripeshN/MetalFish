@@ -1,205 +1,168 @@
 # MetalFish
 
-A high-performance UCI chess engine optimized for Apple Silicon, featuring Metal GPU-accelerated NNUE evaluation and multiple search algorithms including advanced MCTS.
+A high-performance UCI chess engine built for Apple Silicon, featuring Metal GPU-accelerated neural network evaluation and three distinct search engines.
 
 ## Overview
 
-MetalFish is a chess engine that leverages Apple Silicon's unified memory architecture and Metal compute capabilities. It implements three distinct search approaches:
+MetalFish exploits Apple Silicon's unified memory architecture and Metal GPU compute to deliver competitive chess analysis. It ships three search modes selectable at runtime via standard UCI options:
 
-| Search Mode | Description | UCI Command |
-|-------------|-------------|-------------|
-| **Alpha-Beta** | Traditional minimax with pruning | `go` |
-| **MCTS** | Monte Carlo Tree Search with GPU batching | `mctsmt` |
-| **Hybrid** | Parallel MCTS + Alpha-Beta with dynamic integration | `parallel_hybrid` |
+| Engine | Description | UCI Option |
+|--------|-------------|------------|
+| **Alpha-Beta** | Classical minimax with CPU NNUE (~4M NPS) | Default |
+| **MCTS** | GPU-batched Monte Carlo Tree Search with transformer | `setoption name UseMCTS value true` |
+| **Hybrid** | Parallel MCTS + AB with real-time PV injection | `setoption name UseHybridSearch value true` |
 
-## Search Algorithms
+## Search Engines
 
-### Alpha-Beta Search (MetalFish-AB)
+### Alpha-Beta (search/)
 
-The primary search algorithm featuring:
+A full-featured iterative-deepening PVS search with CPU NNUE evaluation:
 
-- Principal Variation Search (PVS) with aspiration windows
-- Iterative deepening with transposition table
+- Aspiration windows with gradual widening
+- Null move pruning, futility pruning, razoring
 - Late Move Reductions (LMR) and Late Move Pruning
-- Null Move Pruning, Futility Pruning, Razoring
-- Singular Extensions and Check Extensions
+- Singular extensions and check extensions
 - History heuristics (butterfly, capture, continuation, pawn)
 - Killer moves and counter moves
-- MVV-LVA move ordering
-- GPU-accelerated NNUE evaluation
+- Static Exchange Evaluation (SEE) for capture ordering
+- Transposition table with cluster-based replacement
+- Syzygy tablebase probing at root and in-search
+- CPU NNUE with NEON SIMD (~80ns per eval, ~4M NPS)
 
-### Monte Carlo Tree Search (MetalFish-MCTS)
+### MCTS (mcts/)
 
-A multi-threaded MCTS implementation optimized for Apple Silicon GPU evaluation:
+A multi-threaded Monte Carlo Tree Search engine with GPU transformer evaluation:
 
-#### Core Algorithms
+- **PUCT selection** with logarithmic exploration growth
+- **First Play Urgency** reduction strategy for unvisited nodes
+- **Moves Left Head** utility for shorter-win preference
+- **WDL rescaling** with configurable draw contempt
+- **Dirichlet noise** at the root for exploration
+- **Policy softmax temperature** with vDSP SIMD acceleration
+- **Virtual loss** for lock-free parallel tree traversal
+- **Arena-based allocation** with 128-byte cache-line aligned nodes
+- **Batched GPU evaluation** with adaptive timeout and double-buffering
+- **O(1) policy lookup** via pre-built move index table
 
-- **PUCT Selection**: Logarithmic exploration bonus with configurable cpuct
-  ```
-  cpuct = init + factor * log((parent_N + base) / base)
-  ```
-- **First Play Urgency (FPU)**: Reduction strategy for unvisited nodes
-  ```
-  fpu = -parent_Q - reduction * sqrt(visited_policy)
-  ```
-- **Moves Left Head (MLH)**: Utility adjustment for preferring shorter wins
-- **WDL Rescaling**: Win/Draw/Loss probability rescaling for contempt
-- **Dirichlet Noise**: Root exploration with configurable alpha and epsilon
-- **Policy Temperature**: Softmax temperature for move selection
-- **Solid Tree Optimization**: Cache-locality improvements for large trees
+### Hybrid (hybrid/)
 
-#### Multi-Threading
+Runs MCTS and Alpha-Beta in true parallel, combining their strengths via real-time PV injection:
 
-- Virtual loss for concurrent tree traversal
-- Lock-free atomic statistics updates using `std::memory_order_relaxed`
-- Thread-local position management
-- Collision detection and handling
+- **CPU (AB)** and **GPU (MCTS)** run simultaneously at full throughput
+- AB uses `search_with_callbacks()` for native iterative deepening with per-iteration PV publishing
+- MCTS reads AB PV from shared state (zero-copy unified memory) and boosts those edges in the tree
+- **Agreement-based early stopping** -- when both engines agree on the same move for 3+ checks, search stops early (saves ~40-50% time)
+- Position classifier tunes decision weights (tactical vs strategic)
+- Lock-free atomic communication between threads
 
-#### Apple Silicon Optimizations
+## Neural Networks
 
-- SIMD-accelerated policy softmax using Accelerate framework (`vDSP_*`)
-- 128-byte cache-line aligned node statistics
-- GPU-resident evaluation batches in unified memory
-- Asynchronous GPU dispatch with completion handlers
-- Zero-copy CPU/GPU data sharing
+MetalFish uses two complementary networks:
 
-### Hybrid MCTS-Alpha-Beta (MetalFish-Hybrid)
+### NNUE (eval/nnue/)
 
-A parallel hybrid search that runs MCTS and Alpha-Beta simultaneously:
+Efficiently Updatable Neural Network for the Alpha-Beta engine:
 
-#### Architecture
+- Dual-network architecture (big: 1024, small: 128 hidden dimensions)
+- HalfKAv2_hm feature set (45,056 king-relative piece-square features)
+- Incremental accumulator updates on make/unmake
+- 8 layer stacks with PSQT buckets
+- NEON SIMD with dot product instructions on Apple Silicon
 
-- **Parallel Execution**: MCTS and AB run in separate threads concurrently
-- **Shared State**: Lock-free communication via atomic variables
-- **Coordinator Thread**: Manages time allocation and final decision
+### Transformer (nn/)
 
-#### Integration Strategy
+Attention-based network for the MCTS engine:
 
-- MCTS provides broad exploration and move ordering
-- Alpha-Beta provides tactical verification and precise evaluation
-- Dynamic weighting based on:
-  - Search depth achieved
-  - Score agreement between searches
-  - Position characteristics (tactical vs. strategic)
+- 112-plane input encoding (8 history positions + auxiliary planes)
+- Multi-head attention encoder layers with FFN
+- Attention-based policy head (1858-move output)
+- WDL value head and optional moves-left head
+- Input canonicalization with board transforms
+- Supports `.pb` and `.pb.gz` weight files (float32, float16, bfloat16, linear16 encodings)
 
-#### Decision Logic
+## Apple Silicon Optimizations
 
-1. If both searches agree on best move, use it immediately
-2. If AB finds a significantly better move (threshold-based), prefer AB
-3. Otherwise, weight by search confidence and depth
-
-## GPU Acceleration
-
-### Metal Backend
-
-MetalFish implements comprehensive GPU acceleration using Apple's Metal framework:
-
-- Metal compute shaders for neural network inference
-- Zero-copy CPU/GPU data sharing via unified memory
-- Persistent command buffers to minimize dispatch overhead
-- Batch processing for efficient GPU utilization
-- Thread-safe GPU access with mutex protection
-
-### GPU-Accelerated Operations
-
-- Feature extraction (HalfKAv2_hm architecture)
-- Feature transformer with sparse input handling
-- Dual-perspective accumulator updates
-- Fused forward pass for output layers
-- Batch evaluation for MCTS (up to 256 positions per batch)
-- SIMD policy softmax computation
-
-### Performance (Apple M2 Max)
-
-| Metric | Value |
-|--------|-------|
-| GPU Batch Throughput | 3.3M positions/second |
-| Single Position Latency | ~285 microseconds |
-| Dispatch Overhead | ~148 microseconds |
-| Unified Memory Bandwidth | 52.7 GB/s |
+| Optimization | Detail |
+|-------------|--------|
+| **FP16 weights** | Transformer weights stored as float16 on GPU for 2x memory bandwidth |
+| **Unified memory** | Zero-copy CPU/GPU data sharing, no transfer overhead |
+| **Buffer pooling** | Pre-allocated I/O buffers with `os_unfair_lock` avoid per-inference allocation |
+| **Sub-batch parallelism** | Large batches split across parallel Metal command buffers |
+| **Actual batch eval** | GPU evaluates only the real batch size, not the padded maximum |
+| **vDSP softmax** | Accelerate framework SIMD for policy softmax in MCTS |
+| **Fast math** | Bit-hack `FastLog`, `FastTanh`, `FastExp`, `FastSqrt` for PUCT |
+| **128-byte alignment** | Node structures aligned to Apple Silicon cache lines |
+| **Metal compute** | Custom Metal shaders for NNUE sparse inference |
+| **MPSGraph** | Apple's graph API for transformer encoder/attention/FFN |
+| **ARM yield** | `__builtin_arm_yield()` in spin-wait loops |
+| **NEON dot product** | `-march=armv8.2-a+dotprod` for NNUE feature transforms |
 
 ## Project Structure
 
 ```
 metalfish/
-├── src/
-│   ├── core/              # Bitboard, position, move generation
-│   │   ├── bitboard.*     # Bitboard operations and magic bitboards
-│   │   ├── position.*     # Board representation and state
-│   │   ├── movegen.*      # Legal move generation
-│   │   └── types.h        # Core type definitions
-│   ├── search/            # Alpha-Beta search implementation
-│   │   ├── search.*       # Main search loop
-│   │   ├── movepick.*     # Move ordering
-│   │   └── thread.*       # Thread pool management
-│   ├── eval/              # NNUE evaluation
-│   │   └── nnue/          # Neural network architecture
-│   ├── mcts/              # MCTS and hybrid search
-│   │   ├── mcts_core.h            # Core MCTS algorithms
-│   │   ├── thread_safe_mcts.*     # Multi-threaded MCTS
-│   │   ├── parallel_hybrid_search.* # Parallel hybrid search
-│   │   ├── hybrid_search.*        # Hybrid MCTS-AB integration
-│   │   ├── apple_silicon_mcts.*   # Apple Silicon optimizations
-│   │   ├── mcts_tt.*              # MCTS transposition table
-│   │   └── ab_integration.*       # Alpha-Beta bridge
-│   ├── gpu/               # GPU acceleration framework
-│   │   ├── gpu_nnue_integration.* # GPU NNUE manager
-│   │   ├── gpu_accumulator.*      # Feature extraction
-│   │   ├── gpu_mcts_backend.*     # MCTS GPU backend
-│   │   ├── backend.h              # GPU backend interface
-│   │   └── metal/                 # Metal implementation
-│   │       ├── metal_backend.mm   # Metal backend
-│   │       └── nnue.metal         # Metal shaders
-│   ├── uci/               # UCI protocol implementation
-│   └── syzygy/            # Tablebase probing
-├── tests/                 # Comprehensive test suite
-├── tools/                 # Tournament and analysis scripts
-│   ├── elo_tournament.py  # Automated Elo tournament
-│   └── engines_config.json # Engine configuration
-├── reference/             # Reference engines (gitignored)
-└── external/              # Dependencies (metal-cpp)
+  src/
+    main.cpp                 Entry point
+    core/                    Bitboard, position, move generation, types
+    eval/                    NNUE evaluation + Metal GPU acceleration
+      nnue/                  Network layers, features, accumulator
+      metal/                 Metal compute shaders for NNUE
+    nn/                      Transformer network for MCTS
+      metal/                 MPSGraph backend
+        mps/                 Network graph builder
+        tables/              Policy mapping tables
+      proto/                 Protobuf weight format
+    search/                  Alpha-Beta search engine
+    mcts/                    MCTS search engine
+    hybrid/                  Hybrid MCTS+AB search engine
+    uci/                     UCI protocol, engine, options
+    syzygy/                  Syzygy tablebase probing
+  tests/                     Test suite (5 modules, 100+ assertions)
+  tools/                     Tournament scripts
+  networks/                  Network weight files
 ```
 
 ## Building
 
 ### Requirements
 
-- macOS 12.0 or later
-- Xcode Command Line Tools
-- CMake 3.20 or later
-- Ninja (recommended)
+- macOS 13.0 or later
+- Xcode Command Line Tools (with Metal support)
+- CMake 3.20+
+- Protobuf 3.0+
 - Apple Silicon (M1/M2/M3/M4) recommended
 
-### Build Instructions
+### Build
 
 ```bash
-cd metalfish
 mkdir build && cd build
-cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
-ninja metalfish
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(sysctl -n hw.ncpu)
 ```
 
 ### Build Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| USE_METAL | ON (macOS) | Enable Metal GPU acceleration |
-| BUILD_TESTS | ON | Build test suite |
-| BUILD_GPU_BENCHMARK | ON | Build GPU benchmark utility |
+| `USE_METAL` | ON (macOS) | Metal GPU acceleration |
+| `BUILD_TESTS` | ON | Build test suite |
 
-### NNUE Network Files
+### Network Files
 
-Download the required network files:
+Place network files in the `networks/` directory:
 
 ```bash
-cd src
-curl -LO https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-curl -LO https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+# NNUE networks (for Alpha-Beta) -- auto-loaded on startup
+networks/nn-c288c895ea92.nnue
+networks/nn-37f18f62d772.nnue
+
+# Transformer network (for MCTS/Hybrid) -- set via UCI option
+networks/BT4-1024x15x32h-swa-6147500.pb
 ```
 
 ## Usage
 
-MetalFish implements the Universal Chess Interface (UCI) protocol.
+MetalFish speaks the Universal Chess Interface (UCI) protocol and is compatible with all standard chess GUIs.
 
 ### Quick Start
 
@@ -207,108 +170,84 @@ MetalFish implements the Universal Chess Interface (UCI) protocol.
 ./build/metalfish
 ```
 
-### Example UCI Session
+### Example Session
 
 ```
 uci
+setoption name Threads value 4
+setoption name Hash value 256
 isready
 position startpos
 go depth 20
 ```
 
-### Search Commands
+### Engine Modes
 
-| Command | Description |
-|---------|-------------|
-| `go depth N` | Alpha-Beta search to depth N |
-| `go movetime M` | Alpha-Beta search for M milliseconds |
-| `go wtime W btime B` | Alpha-Beta with time management |
-| `mctsmt movetime M` | Multi-threaded MCTS search |
-| `parallel_hybrid movetime M` | Parallel hybrid MCTS+AB search |
+All three engines are accessed via the standard `go` command. Set the mode with UCI options before searching:
 
-### UCI Options
+```
+# Alpha-Beta (default)
+setoption name UseMCTS value false
+setoption name UseHybridSearch value false
+go movetime 5000
+
+# MCTS (requires transformer network)
+setoption name UseMCTS value true
+setoption name NNWeights value /path/to/BT4-network.pb
+go nodes 800
+
+# Hybrid (requires transformer network)
+setoption name UseHybridSearch value true
+setoption name NNWeights value /path/to/BT4-network.pb
+go movetime 5000
+```
+
+### Key UCI Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| Threads | spin | 1 | Number of search threads |
-| Hash | spin | 16 | Transposition table size (MB) |
-| MultiPV | spin | 1 | Number of principal variations |
-| Skill Level | spin | 20 | Playing strength (0-20) |
-| UseGPU | check | true | Enable GPU NNUE evaluation |
-| SyzygyPath | string | | Path to Syzygy tablebase files |
-| Ponder | check | false | Enable pondering |
+| `Threads` | spin | 1 | Search threads |
+| `Hash` | spin | 16 | Transposition table (MB) |
+| `MultiPV` | spin | 1 | Principal variations |
+| `Skill Level` | spin | 20 | Strength (0-20) |
+| `UseMCTS` | check | false | Use MCTS engine |
+| `UseHybridSearch` | check | false | Use Hybrid engine |
+| `UseGPU` | check | true | Enable GPU NNUE for MCTS batching |
+| `NNWeights` | string | | Transformer network path |
+| `SyzygyPath` | string | | Tablebase directory |
+| `Ponder` | check | false | Pondering |
 
 ## Testing
 
-### Running Tests
-
 ```bash
-# Build and run all tests
 cd build
-ninja metalfish_tests
+
+# Run all unit tests (core, search, eval/gpu, mcts, hybrid)
 ./metalfish_tests
+
+# Run a specific test module
+./metalfish_tests mcts
+
+# Run NN comparison test (requires METALFISH_NN_WEIGHTS env var)
+METALFISH_NN_WEIGHTS=/path/to/BT4-network.pb ./test_nn_comparison
+
+# Python integration tests (UCI protocol, perft)
+cd .. && python3 tests/testing.py
 ```
 
 ### Test Coverage
 
-The test suite validates:
-
-- Bitboard operations and magic bitboards
-- Position management and FEN parsing
-- Move generation (perft verified)
-- Alpha-Beta search correctness
-- MCTS components (nodes, tree, statistics, PUCT)
-- Hybrid search integration
-- GPU shader compilation and execution
-- GPU NNUE correctness vs CPU reference
-- Alpha-Beta integration bridge
-
-## Elo Tournament
-
-MetalFish includes an automated tournament system for Elo estimation.
-
-### Tournament Configuration
-
-| Setting | Value |
-|---------|-------|
-| Opening Book | 8moves_v3.pgn (16 plies, CCRL-style) |
-| Games per Opening | 2 (color swap) |
-| Time Control | 10+0.1 |
-| Ponder | OFF |
-
-### Running Locally
-
-```bash
-python3 tools/elo_tournament.py --games 20 --time "10+0.1"
-```
-
-### CI Tournament
-
-The GitHub Actions workflow runs a comprehensive tournament against various open-source engines at different strength levels.
-
-## Performance Summary
-
-### Alpha-Beta Search
-
-- ~1.5M nodes/second (single thread)
-- High-quality search with GPU-accelerated NNUE evaluation
-
-### MCTS Search
-
-| Threads | NPS | Scaling |
-|---------|-----|---------|
-| 1 | 333K | 1.0x |
-| 2 | 405K | 1.2x |
-| 4 | 706K | 2.1x |
-
-### GPU NNUE
-
-- Batch evaluation: 3.3M positions/second
-- Speedup over sequential: 11.6x at batch size 4096
+| Module | Tests | What it covers |
+|--------|-------|----------------|
+| core | 29 | Bitboard, position, move generation, FEN, castling, en passant |
+| search | 21 | History tables, limits, root moves, skill, stack, values |
+| eval_gpu | 1031 | Metal detection, buffer alloc/read/write, unified memory, NNUE manager |
+| mcts | 27 | Node creation, edges, policy, tree structure, PUCT, thread safety |
+| hybrid | 22 | Config, shared state, classifier, position adapter, strategy |
 
 ## Compatibility
 
-MetalFish is compatible with standard chess GUIs:
+MetalFish works with any UCI-compatible chess GUI:
 
 - Cute Chess
 - Arena
@@ -318,16 +257,8 @@ MetalFish is compatible with standard chess GUIs:
 
 ## License
 
-GNU General Public License v3.0. See LICENSE file for details.
+GNU General Public License v3.0. See [LICENSE](LICENSE) for details.
 
 ## Author
 
 Nripesh Niketan
-
-## Acknowledgments
-
-MetalFish builds upon research and techniques from the open-source chess engine community:
-- Advanced search algorithms and evaluation techniques
-- Monte Carlo Tree Search research and implementations
-- Apple's Metal framework and unified memory architecture
-- The computer chess community for research and testing methodologies

@@ -12,10 +12,13 @@
 #include <cmath>
 #include <cstdint>
 #include <iterator>
+#include <memory>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -24,22 +27,28 @@
 #include "core/position.h"
 #include "core/types.h"
 #include "eval/evaluate.h"
+#include "eval/gpu_backend.h"
+#include "eval/gpu_integration.h"
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_accumulator.h"
 #include "eval/score.h"
-#include "gpu/backend.h"
-#include "gpu/gpu_mcts_backend.h"
-#include "gpu/gpu_nnue_integration.h"
-#include "mcts/parallel_hybrid_search.h"
-#include "mcts/position_classifier.h"
-#include "mcts/position_adapter.h"
-#include "mcts/thread_safe_mcts.h"
+#include "hybrid/classifier.h"
+#include "hybrid/hybrid_search.h"
+#include "hybrid/position_adapter.h"
+#include "mcts/gpu_backend.h"
+#include "mcts/tree.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
 #include "uci/engine.h"
 #include "uci/ucioption.h"
 
 namespace MetalFish {
+
+// Forward declarations for search synchronization helpers (defined below)
+static void stop_active_searches();
+static void wait_active_searches();
+static void join_search_waiter();
+static void preload_search_objects(Engine &engine);
 
 constexpr auto BenchmarkCommand = "speedtest";
 
@@ -100,87 +109,109 @@ void UCIEngine::loop() {
     token.clear(); // Avoid a stale if getline() returns nothing or a blank line
     is >> std::skipws >> token;
 
-    if (token == "quit" || token == "stop")
-      engine.stop();
+    // Debug: log all commands to stderr with timestamps
+    if (!token.empty()) {
+      auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count();
+      std::cerr << "[UCI:" << ms << "] " << cmd << std::endl;
+    }
 
-    // The GUI sends 'ponderhit' to tell that the user has played the expected
-    // move. So, 'ponderhit' is sent if pondering was done on the same move that
-    // the user has played. The search should continue, but should also switch
-    // from pondering to the normal search.
-    else if (token == "ponderhit")
-      engine.set_ponderhit(false);
+    // ======================================================================
+    // Standard UCI Protocol Commands
+    // See: https://backscattering.de/chess/uci/
+    // ======================================================================
+
+    if (token == "quit" || token == "stop") {
+      stop_active_searches(); // Stop any MCTS/Hybrid search first
+      engine.stop();
+    }
 
     else if (token == "uci") {
       sync_cout << "id name " << engine_info(true) << "\n"
                 << engine.get_options() << sync_endl;
-
       sync_cout << "uciok" << sync_endl;
     }
 
+    else if (token == "isready") {
+      // Don't wait for active MCTS/Hybrid searches -- they're non-blocking
+      // and fire bestmove via callback. Just preload if needed and respond.
+      preload_search_objects(engine);
+      sync_cout << "readyok" << sync_endl;
+    }
+
+    else if (token == "ucinewgame") {
+      stop_active_searches();
+      wait_active_searches();
+      engine.search_clear();
+    }
+
+    else if (token == "position")
+      position(is);
+
     else if (token == "setoption")
       setoption(is);
+
+    else if (token == "ponderhit")
+      engine.set_ponderhit(false);
+
     else if (token == "go") {
-      // send info strings after the go command is sent for old GUIs and
-      // python-chess
-      print_info_string(engine.numa_config_information_as_string());
-      print_info_string(engine.thread_allocation_information_as_string());
-
-      // Check search mode from UCI options
-      if (engine.get_options()["UseMCTS"]) {
-        // Use pure MCTS search
+      // The standard `go` command routes to the active engine mode
+      // based on UCI options. GUIs set UseMCTS or UseHybridSearch
+      // via `setoption` before sending `go`.
+      if (engine.get_options()["UseMCTS"])
         mcts_mt_go(is);
-      } else if (engine.get_options()["UseHybridSearch"]) {
-        // Use parallel hybrid search (MCTS + AB)
+      else if (engine.get_options()["UseHybridSearch"])
         parallel_hybrid_go(is);
-      } else {
-        // Use standard AB search
+      else
         go(is);
-      }
-    } else if (token == "position")
-      position(is);
-    else if (token == "ucinewgame")
-      engine.search_clear();
-    else if (token == "isready")
-      sync_cout << "readyok" << sync_endl;
+    }
 
-    // Add custom non-UCI commands, mainly for debugging purposes.
-    // These commands must not be used during a search!
+    // ======================================================================
+    // MetalFish Extensions (debugging / CLI only -- GUIs never send these)
+    // ======================================================================
+
+    else if (token == "d")
+      sync_cout << engine.visualize() << sync_endl;
+    else if (token == "eval")
+      engine.trace_eval();
     else if (token == "flip")
       engine.flip();
     else if (token == "bench")
       bench(is);
     else if (token == BenchmarkCommand)
       benchmark(is);
-    else if (token == "d")
-      sync_cout << engine.visualize() << sync_endl;
-    else if (token == "eval")
-      engine.trace_eval();
+    else if (token == "compiler")
+      sync_cout << compiler_info() << sync_endl;
+
+    // Direct engine mode commands (CLI shortcuts)
+    else if (token == "mctsmt")
+      mcts_mt_go(is);
+    else if (token == "hybrid" || token == "parallel_hybrid")
+      parallel_hybrid_go(is);
+
+    // GPU diagnostics
     else if (token == "gpu")
       gpu_info();
     else if (token == "gpubench")
       gpu_benchmark();
-    else if (token == "mcts" || token == "parallel_hybrid" || token == "hybrid")
-      parallel_hybrid_go(is); // All hybrid commands use parallel hybrid search
-    else if (token == "mctsmt")
-      mcts_mt_go(is); // Pure GPU MCTS
+    else if (token == "nnuebench")
+      nnue_benchmark(is);
     else if (token == "mctsbench")
       mcts_batch_benchmark(is);
-    else if (token == "nnuebench")
-      nnue_benchmark(is); // CPU vs GPU NNUE comparison
-    else if (token == "compiler")
-      sync_cout << compiler_info() << sync_endl;
+
+    // Network export
     else if (token == "export_net") {
       std::pair<std::optional<std::string>, std::string> files[2];
-
       if (is >> std::skipws >> files[0].second)
         files[0].first = files[0].second;
-
       if (is >> std::skipws >> files[1].second)
         files[1].first = files[1].second;
-
       engine.save_network(files);
-    } else if (token == "--help" || token == "help" || token == "--license" ||
-               token == "license")
+    }
+
+    else if (token == "help" || token == "--help" || token == "license" ||
+             token == "--license")
       sync_cout
           << "\nMetalFish is a powerful chess engine for playing and analyzing."
              "\nIt is released as free software licensed under the GNU GPLv3 "
@@ -190,16 +221,21 @@ void UCIEngine::loop() {
              "\nthe Universal Chess Interface (UCI) protocol to communicate "
              "with a GUI, an API, etc."
              "\nFor any further information, visit "
-             "https://github.com/official-stockfish/MetalFish#readme"
+             "https://github.com/NripeshN/MetalFish#readme"
              "\nor read the corresponding README.md and Copying.txt files "
              "distributed along with this program.\n"
           << sync_endl;
+
     else if (!token.empty() && token[0] != '#')
       sync_cout << "Unknown command: '" << cmd
                 << "'. Type help for more information." << sync_endl;
 
   } while (token != "quit" &&
            cli.argc == 1); // The command-line arguments are one-shot
+
+  // Clean up background search threads before exiting
+  stop_active_searches();
+  join_search_waiter();
 }
 
 Search::LimitsType UCIEngine::parse_limits(std::istream &is) {
@@ -525,7 +561,7 @@ WinRateParams win_rate_params(const Position &pos) {
   double m = std::clamp(material, 17, 78) / 58.0;
 
   // Return a = p_a(material) and b = p_b(material), see
-  // github.com/official-stockfish/WDL_model
+  // WDL model calibration parameters
   constexpr double as[] = {-13.50030198, 40.92780883, -36.82753545,
                            386.83004070};
   constexpr double bs[] = {96.53354896, -165.79058388, 90.89679019,
@@ -1272,27 +1308,128 @@ void UCIEngine::gpu_benchmark() {
 }
 
 // ============================================================================
+// Preload transformer weights and initialize search objects during isready.
+// This ensures the first 'go' command responds instantly without weight
+// loading.
+// ============================================================================
+
+static MCTS::ParallelHybridConfig
+make_hybrid_config(const std::string &nn_weights) {
+  MCTS::ParallelHybridConfig config;
+  config.mcts_config.nn_weights_path = nn_weights;
+  config.mcts_config.min_batch_size = 8;
+  config.mcts_config.max_batch_size = 256;
+  config.mcts_config.cpuct = 1.5f;
+  config.mcts_config.fpu_reduction = 0.2f;
+  config.mcts_config.add_dirichlet_noise = true;
+  config.mcts_config.num_threads = 1;
+  config.ab_min_depth = 10;
+  config.ab_use_time = true;
+  config.ab_policy_weight = 0.3f;
+  config.agreement_threshold = 0.3f;
+  config.override_threshold = 1.0f;
+  config.policy_update_interval_ms = 50;
+  config.use_position_classifier = true;
+  config.decision_mode = MCTS::ParallelHybridConfig::DecisionMode::DYNAMIC;
+  config.gpu_batch_size = 128;
+  config.use_async_gpu_eval = true;
+  config.use_gpu_resident_batches = true;
+  config.use_simd_kernels = true;
+  return config;
+}
+
+static std::string get_nn_weights_path(Engine &engine) {
+  std::string nn_weights = std::string(engine.get_options()["NNWeights"]);
+  if (nn_weights.empty()) {
+    const char *env_path = std::getenv("METALFISH_NN_WEIGHTS");
+    if (env_path)
+      nn_weights = env_path;
+  }
+  return nn_weights;
+}
+
+// Called from isready to preload transformer weights and compile MPSGraph.
+// This makes the first 'go' instant -- no weight loading delay.
+// Forward declarations for static globals defined below.
+static std::unique_ptr<MCTS::ParallelHybridSearch> g_parallel_hybrid_search;
+static GPU::GPUNNUEManager *g_hybrid_gpu_manager = nullptr;
+static std::shared_ptr<MCTS::ThreadSafeMCTS> g_active_mcts;
+static std::mutex g_active_mcts_mutex;
+static std::thread g_search_waiter;
+static std::mutex g_search_waiter_mutex;
+
+static void preload_search_objects(Engine &engine) {
+  std::string nn_weights = get_nn_weights_path(engine);
+  if (nn_weights.empty())
+    return; // No weights configured -- nothing to preload
+
+  bool need_hybrid = engine.get_options()["UseHybridSearch"];
+  bool need_mcts = engine.get_options()["UseMCTS"];
+  if (!need_hybrid && !need_mcts)
+    return; // AB mode -- no transformer needed
+
+  // Preload hybrid search object (includes transformer weight loading)
+  if (need_hybrid && !g_parallel_hybrid_search) {
+    GPU::GPUNNUEManager *gpu_manager = nullptr;
+    if (GPU::gpu_nnue_manager_available())
+      gpu_manager = &GPU::gpu_nnue_manager();
+
+    auto config = make_hybrid_config(nn_weights);
+    g_parallel_hybrid_search =
+        MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
+    g_hybrid_gpu_manager = gpu_manager;
+
+    if (g_parallel_hybrid_search) {
+      sync_cout << "info string Hybrid search preloaded (transformer ready)"
+                << sync_endl;
+    }
+  }
+}
+
+// ============================================================================
 // Parallel Hybrid Search Command (MCTS + AB running simultaneously)
 // Optimized for Apple Silicon with unified memory
 // ============================================================================
 
-// Static persistent search object to avoid repeated construction/destruction
-// which can cause crashes due to GPU resource cleanup issues
-static std::unique_ptr<MCTS::ParallelHybridSearch> g_parallel_hybrid_search;
-static GPU::GPUNNUEManager *g_hybrid_gpu_manager = nullptr;
+// Wait for any background search waiter thread to complete
+static void join_search_waiter() {
+  std::lock_guard<std::mutex> lock(g_search_waiter_mutex);
+  if (g_search_waiter.joinable())
+    g_search_waiter.join();
+}
+
+// Stop any active MCTS/Hybrid search (called from UCI stop command)
+static void stop_active_searches() {
+  if (g_parallel_hybrid_search && g_parallel_hybrid_search->is_searching())
+    g_parallel_hybrid_search->stop();
+  {
+    std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
+    if (g_active_mcts)
+      g_active_mcts->stop();
+  }
+}
+
+// Wait for any active MCTS/Hybrid search to finish (called from UCI isready)
+static void wait_active_searches() {
+  if (g_parallel_hybrid_search && g_parallel_hybrid_search->is_searching())
+    g_parallel_hybrid_search->wait();
+  join_search_waiter();
+}
 
 } // namespace MetalFish
 
 // Cleanup function to be called before GPU shutdown (in MetalFish namespace)
 void MetalFish::cleanup_parallel_hybrid_search() {
+  join_search_waiter();
   if (g_parallel_hybrid_search) {
     g_parallel_hybrid_search->stop();
     g_parallel_hybrid_search->wait();
-    if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
-      GPU::gpu().synchronize();
-    }
     g_parallel_hybrid_search.reset();
     g_hybrid_gpu_manager = nullptr;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
+    g_active_mcts.reset();
   }
 }
 
@@ -1305,63 +1442,33 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   // Parse search limits
   Search::LimitsType limits = parse_limits(is);
 
-  // Get GPU NNUE manager
+  // Get transformer weights path
+  std::string nn_weights = get_nn_weights_path(engine);
+  if (nn_weights.empty()) {
+    sync_cout << "info string ERROR: No transformer weights. Set UCI option "
+                 "NNWeights."
+              << sync_endl;
+    return;
+  }
+
+  // GPU NNUE manager is optional
   GPU::GPUNNUEManager *gpu_manager = nullptr;
   if (GPU::gpu_nnue_manager_available()) {
     gpu_manager = &GPU::gpu_nnue_manager();
   }
 
-  if (!gpu_manager) {
-    sync_cout << "info string ERROR: GPU NNUE not available" << sync_endl;
-    return;
-  }
+  auto config = make_hybrid_config(nn_weights);
 
-  // Configure parallel hybrid search
-  MCTS::ParallelHybridConfig config;
-  config.mcts_config.min_batch_size = 8;
-  config.mcts_config.max_batch_size = 256;
-  config.mcts_config.cpuct = 1.5f;
-  config.mcts_config.fpu_reduction = 0.2f;
-  config.mcts_config.add_dirichlet_noise = true;
-  config.mcts_config.num_threads = 1; // ThreadSafeMCTSConfig uses num_threads
-
-  // AB configuration
-  config.ab_min_depth = 10;
-  config.ab_use_time = true;
-
-  // Parallel coordination
-  config.ab_policy_weight = 0.3f;
-  config.agreement_threshold = 0.3f;
-  config.override_threshold = 1.0f;
-  config.policy_update_interval_ms = 50;
-
-  // Position-based strategy
-  config.use_position_classifier = true;
-  config.decision_mode = MCTS::ParallelHybridConfig::DecisionMode::DYNAMIC;
-
-  // Apple Silicon GPU optimizations
-  config.gpu_batch_size = 128;            // Optimal for M-series
-  config.use_async_gpu_eval = true;       // Async GPU evaluation
-  config.use_gpu_resident_batches = true; // Zero-copy unified memory
-  config.use_simd_kernels = true;         // SIMD-optimized Metal kernels
-
-  // Reuse or create the persistent search object
-  // This avoids crashes from repeated construction/destruction of GPU resources
+  // Reuse preloaded search object, or create if not yet initialized
   bool need_reinit =
       !g_parallel_hybrid_search || g_hybrid_gpu_manager != gpu_manager;
 
   if (need_reinit) {
-    // Clean up old search if it exists
     if (g_parallel_hybrid_search) {
       g_parallel_hybrid_search->stop();
       g_parallel_hybrid_search->wait();
-      if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
-        GPU::gpu().synchronize();
-      }
       g_parallel_hybrid_search.reset();
     }
-
-    // Create new search
     g_parallel_hybrid_search =
         MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
     g_hybrid_gpu_manager = gpu_manager;
@@ -1373,7 +1480,6 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     }
     sync_cout << "info string Parallel hybrid search initialized" << sync_endl;
   } else {
-    // Update config on existing search
     g_parallel_hybrid_search->set_config(config);
   }
 
@@ -1396,15 +1502,14 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   };
 
   // Start search - AB uses search_silent internally so no duplicate bestmove
+  // The search runs asynchronously; the UCI loop must remain free to process
+  // stop/quit commands. The bestmove callback fires when the search finishes.
+  join_search_waiter(); // Clean up any previous waiter
   g_parallel_hybrid_search->start_search(pos, limits, best_move_cb, info_cb);
 
-  // Wait for completion
-  // Note: The coordinator thread handles stats output and bestmove callback
-  // so we don't print anything here to avoid output after bestmove
-  g_parallel_hybrid_search->wait();
-
-  // Note: We don't destroy the search object anymore - it's persistent
-  // This avoids crashes from GPU resource cleanup issues
+  // Note: We do NOT wait() here. The UCI loop must keep reading stdin so it
+  // can process 'stop' and 'quit' commands. The bestmove callback handles
+  // output when the search completes.
 }
 
 // ============================================================================
@@ -1438,19 +1543,29 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   sync_cout << "info string Starting Multi-Threaded MCTS Search with "
             << num_threads << " threads..." << sync_endl;
 
-  // Get GPU NNUE manager
+  // Get transformer weights path from UCI option
+  std::string nn_weights = std::string(engine.get_options()["NNWeights"]);
+  if (nn_weights.empty()) {
+    const char *env_path = std::getenv("METALFISH_NN_WEIGHTS");
+    if (env_path)
+      nn_weights = env_path;
+  }
+  if (nn_weights.empty()) {
+    sync_cout << "info string ERROR: No transformer weights. Set UCI option "
+                 "NNWeights."
+              << sync_endl;
+    return;
+  }
+
+  // GPU NNUE manager is optional -- transformer is the primary evaluator
   GPU::GPUNNUEManager *gpu_manager = nullptr;
   if (GPU::gpu_nnue_manager_available()) {
     gpu_manager = &GPU::gpu_nnue_manager();
   }
 
-  if (!gpu_manager) {
-    sync_cout << "info string ERROR: GPU NNUE not available" << sync_endl;
-    return;
-  }
-
   // Configure multi-threaded MCTS
   MCTS::ThreadSafeMCTSConfig config;
+  config.nn_weights_path = nn_weights; // Transformer weights
   config.num_threads = num_threads;
   config.cpuct = 2.5f;
   config.fpu_value = -1.0f;
@@ -1463,7 +1578,8 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   config.max_batch_size = 256;
 
   // Create thread-safe MCTS
-  auto mcts = MCTS::create_thread_safe_mcts(gpu_manager, config);
+  std::shared_ptr<MCTS::ThreadSafeMCTS> mcts(
+      MCTS::create_thread_safe_mcts(gpu_manager, config).release());
 
   if (!mcts) {
     sync_cout << "info string ERROR: Failed to create multi-threaded MCTS"
@@ -1494,58 +1610,80 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   auto start_time = std::chrono::steady_clock::now();
   mcts->start_search(fen, limits, best_move_cb, info_cb);
 
-  // Wait for completion
-  mcts->wait();
-
-  // Print final statistics
-  auto end_time = std::chrono::steady_clock::now();
-  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        end_time - start_time)
-                        .count();
-
-  const auto &stats = mcts->stats();
-  uint64_t nodes = stats.total_nodes.load();
-  uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
-
-  sync_cout << "info string Final stats:" << sync_endl;
-  sync_cout << "info string   Nodes: " << nodes << sync_endl;
-  sync_cout << "info string   NPS: " << nps << sync_endl;
-  sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
-  sync_cout << "info string   Threads: " << num_threads << sync_endl;
-  sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
-            << sync_endl;
-  sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
-            << " misses: " << stats.cache_misses.load() << sync_endl;
-
-  // Profiling breakdown
-  uint64_t sel_us = stats.selection_time_us.load();
-  uint64_t exp_us = stats.expansion_time_us.load();
-  uint64_t eval_us = stats.evaluation_time_us.load();
-  uint64_t bp_us = stats.backprop_time_us.load();
-  uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
-
-  if (total_us > 0) {
-    sync_cout << "info string   Selection: " << std::fixed
-              << std::setprecision(1) << (100.0 * sel_us / total_us) << "%"
-              << sync_endl;
-    sync_cout << "info string   Expansion: " << std::fixed
-              << std::setprecision(1) << (100.0 * exp_us / total_us) << "%"
-              << sync_endl;
-    sync_cout << "info string   Evaluation: " << std::fixed
-              << std::setprecision(1) << (100.0 * eval_us / total_us) << "%"
-              << sync_endl;
-    sync_cout << "info string   Backprop: " << std::fixed
-              << std::setprecision(1) << (100.0 * bp_us / total_us) << "%"
-              << sync_endl;
+  // Store a reference so the stop command can reach it
+  {
+    std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
+    g_active_mcts = mcts;
   }
 
-  // Batching statistics
-  uint64_t batch_count = stats.batch_count.load();
-  if (batch_count > 0) {
-    sync_cout << "info string   Avg batch size: " << std::fixed
-              << std::setprecision(1) << stats.avg_batch_size() << sync_endl;
-    sync_cout << "info string   Batch wait time: "
-              << (stats.batch_wait_time_us.load() / 1000) << "ms" << sync_endl;
+  // Spawn a background waiter thread for post-search stats.
+  // The UCI loop must remain free to process stop/quit commands.
+  join_search_waiter();
+  {
+    std::lock_guard<std::mutex> wlock(g_search_waiter_mutex);
+    g_search_waiter = std::thread([mcts, start_time, num_threads]() {
+      mcts->wait();
+
+      // Clear the global reference now that the search is done
+      {
+        std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
+        if (g_active_mcts == mcts)
+          g_active_mcts.reset();
+      }
+
+      // Print final statistics
+      auto end_time = std::chrono::steady_clock::now();
+      auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            end_time - start_time)
+                            .count();
+
+      const auto &stats = mcts->stats();
+      uint64_t nodes = stats.total_nodes.load();
+      uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+
+      sync_cout << "info string Final stats:" << sync_endl;
+      sync_cout << "info string   Nodes: " << nodes << sync_endl;
+      sync_cout << "info string   NPS: " << nps << sync_endl;
+      sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
+      sync_cout << "info string   Threads: " << num_threads << sync_endl;
+      sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
+                << sync_endl;
+      sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
+                << " misses: " << stats.cache_misses.load() << sync_endl;
+
+      // Profiling breakdown
+      uint64_t sel_us = stats.selection_time_us.load();
+      uint64_t exp_us = stats.expansion_time_us.load();
+      uint64_t eval_us = stats.evaluation_time_us.load();
+      uint64_t bp_us = stats.backprop_time_us.load();
+      uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
+
+      if (total_us > 0) {
+        sync_cout << "info string   Selection: " << std::fixed
+                  << std::setprecision(1) << (100.0 * sel_us / total_us) << "%"
+                  << sync_endl;
+        sync_cout << "info string   Expansion: " << std::fixed
+                  << std::setprecision(1) << (100.0 * exp_us / total_us) << "%"
+                  << sync_endl;
+        sync_cout << "info string   Evaluation: " << std::fixed
+                  << std::setprecision(1) << (100.0 * eval_us / total_us) << "%"
+                  << sync_endl;
+        sync_cout << "info string   Backprop: " << std::fixed
+                  << std::setprecision(1) << (100.0 * bp_us / total_us) << "%"
+                  << sync_endl;
+      }
+
+      // Batching statistics
+      uint64_t batch_count = stats.batch_count.load();
+      if (batch_count > 0) {
+        sync_cout << "info string   Avg batch size: " << std::fixed
+                  << std::setprecision(1) << stats.avg_batch_size()
+                  << sync_endl;
+        sync_cout << "info string   Batch wait time: "
+                  << (stats.batch_wait_time_us.load() / 1000) << "ms"
+                  << sync_endl;
+      }
+    });
   }
 }
 

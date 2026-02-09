@@ -22,12 +22,14 @@
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_accumulator.h"
 #include "eval/nnue/nnue_misc.h"
-#include "gpu/gpu_nnue_integration.h"
+#include "gpu_integration.h"
 #include "uci/uci.h"
 
 namespace MetalFish {
 
-// Global flag for GPU NNUE - controlled by UCI option
+// Global flag for GPU NNUE - controls whether MCTS batch evaluation uses GPU.
+// The AB search always uses CPU NNUE with incremental accumulator updates
+// regardless of this flag, since single-position GPU dispatch is too slow.
 static std::atomic<bool> g_use_gpu_nnue{false};
 
 void Eval::set_use_apple_silicon_nnue(bool use) {
@@ -53,6 +55,10 @@ bool Eval::use_smallnet(const Position &pos) {
 
 // Evaluate is the evaluator for the outer world. It returns a static evaluation
 // of the position from the point of view of the side to move.
+// Always uses CPU NNUE with incremental accumulator updates (~80ns per
+// position). GPU NNUE is reserved for batched evaluation in MCTS only --
+// single-position GPU dispatch overhead (~140us) makes it ~1750x slower than
+// CPU for AB search.
 Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
                      Eval::NNUE::AccumulatorStack &accumulators,
                      Eval::NNUE::AccumulatorCaches &caches, int optimism) {
@@ -62,43 +68,20 @@ Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
   int32_t psqt, positional;
   bool smallNet = use_smallnet(pos);
 
-#ifdef __APPLE__
-  // Try GPU NNUE first if enabled and available
-  if (use_apple_silicon_nnue() && GPU::gpu_nnue_manager_available()) {
-    auto [gpu_psqt, gpu_positional] =
-        GPU::gpu_nnue_manager().evaluate_single(pos, !smallNet);
-    psqt = gpu_psqt;
-    positional = gpu_positional;
-  } else
-#endif
-  {
-    // Standard CPU NNUE evaluation
-    auto [cpu_psqt, cpu_positional] =
-        smallNet ? networks.small.evaluate(pos, accumulators, caches.small)
-                 : networks.big.evaluate(pos, accumulators, caches.big);
-    psqt = cpu_psqt;
-    positional = cpu_positional;
-  }
+  // CPU NNUE evaluation with incremental accumulator updates
+  auto [cpu_psqt, cpu_positional] =
+      smallNet ? networks.small.evaluate(pos, accumulators, caches.small)
+               : networks.big.evaluate(pos, accumulators, caches.big);
+  psqt = cpu_psqt;
+  positional = cpu_positional;
 
   Value nnue = (125 * psqt + 131 * positional) / 128;
 
   // Re-evaluate the position when higher eval accuracy is worth the time spent
   if (smallNet && (std::abs(nnue) < 277)) {
-#ifdef __APPLE__
-    if (use_apple_silicon_nnue() && GPU::gpu_nnue_manager_available()) {
-      // Re-evaluate with big network
-      auto [gpu_psqt, gpu_positional] =
-          GPU::gpu_nnue_manager().evaluate_single(pos, true);
-      psqt = gpu_psqt;
-      positional = gpu_positional;
-      nnue = (125 * psqt + 131 * positional) / 128;
-    } else
-#endif
-    {
-      std::tie(psqt, positional) =
-          networks.big.evaluate(pos, accumulators, caches.big);
-      nnue = (125 * psqt + 131 * positional) / 128;
-    }
+    std::tie(psqt, positional) =
+        networks.big.evaluate(pos, accumulators, caches.big);
+    nnue = (125 * psqt + 131 * positional) / 128;
     smallNet = false;
   }
 

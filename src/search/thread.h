@@ -21,7 +21,7 @@
 #include "core/numa.h"
 #include "core/position.h"
 #include "search/search.h"
-#include "thread_win32_osx.h"
+#include "search/thread_win32_osx.h"
 
 namespace MetalFish {
 
