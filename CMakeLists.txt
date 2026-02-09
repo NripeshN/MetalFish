@@ -373,7 +373,7 @@ endif()
 
 # All source files
 set(SOURCES
-    src/main.cpp
+    src/app/main.cpp
     ${CORE_SOURCES}
     ${SEARCH_SOURCES}
     ${EVAL_SOURCES}
@@ -446,8 +446,8 @@ if(APPLE)
 endif()
 
 # Copy NNUE files to build directory (if they exist)
-set(NNUE_FILE1 ${CMAKE_CURRENT_SOURCE_DIR}/src/nn-c288c895ea92.nnue)
-set(NNUE_FILE2 ${CMAKE_CURRENT_SOURCE_DIR}/src/nn-37f18f62d772.nnue)
+set(NNUE_FILE1 ${CMAKE_CURRENT_SOURCE_DIR}/networks/nn-c288c895ea92.nnue)
+set(NNUE_FILE2 ${CMAKE_CURRENT_SOURCE_DIR}/networks/nn-37f18f62d772.nnue)
 
 if(EXISTS ${NNUE_FILE1})
   configure_file(${NNUE_FILE1} ${CMAKE_CURRENT_BINARY_DIR}/nn-c288c895ea92.nnue
@@ -569,7 +569,7 @@ endif()
 option(BUILD_GPU_BENCHMARK "Build GPU benchmark" ON)
 if(BUILD_GPU_BENCHMARK)
   if(USE_METAL AND METAL_CPP_AVAILABLE)
-    add_executable(metalfish_gpu_bench src/benchmark_gpu.cpp ${CORE_SOURCES}
+    add_executable(metalfish_gpu_bench src/bench/benchmark_gpu.cpp ${CORE_SOURCES}
                                        ${GPU_SOURCES})
     target_link_libraries(
       metalfish_gpu_bench Threads::Threads ${METAL_FRAMEWORK}
@@ -578,14 +578,14 @@ if(BUILD_GPU_BENCHMARK)
 
     # Paper benchmark with full NNUE support
     add_executable(
-      metalfish_paper_bench src/paper_benchmark.cpp ${CORE_SOURCES}
+      metalfish_paper_bench src/bench/paper_benchmark.cpp ${CORE_SOURCES}
                             ${EVAL_SOURCES} ${GPU_SOURCES})
     target_link_libraries(
       metalfish_paper_bench Threads::Threads ${METAL_FRAMEWORK}
       ${FOUNDATION_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK}
       ${QUARTZCORE_FRAMEWORK} ${MPS_FRAMEWORK} ${MPSGRAPH_FRAMEWORK})
   elseif(USE_CUDA AND CUDA_AVAILABLE)
-    add_executable(metalfish_gpu_bench src/benchmark_gpu.cpp ${CORE_SOURCES}
+    add_executable(metalfish_gpu_bench src/bench/benchmark_gpu.cpp ${CORE_SOURCES}
                                        ${GPU_SOURCES} ${CUDA_SOURCES})
     set_target_properties(
       metalfish_gpu_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON
@@ -595,7 +595,7 @@ if(BUILD_GPU_BENCHMARK)
 
     # Paper benchmark with full NNUE support
     add_executable(
-      metalfish_paper_bench src/paper_benchmark.cpp ${CORE_SOURCES}
+      metalfish_paper_bench src/bench/paper_benchmark.cpp ${CORE_SOURCES}
                             ${EVAL_SOURCES} ${GPU_SOURCES} ${CUDA_SOURCES})
     set_target_properties(
       metalfish_paper_bench PROPERTIES CUDA_SEPARABLE_COMPILATION ON
