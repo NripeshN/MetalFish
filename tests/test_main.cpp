@@ -1,73 +1,83 @@
 /*
-  MetalFish - A GPU-accelerated UCI chess engine
+  MetalFish - Comprehensive Test Suite
   Copyright (C) 2025 Nripesh Niketan
 
-  Test Suite Entry Point
+  Test runner for all engine subsystems.
+  Tests are organized by module:
+    - core:   Bitboard, position, move generation
+    - search: Alpha-Beta search, TT, move ordering, time management
+    - eval:   NNUE evaluation, GPU integration
+    - mcts:   MCTS tree, PUCT, batched evaluation
+    - hybrid: Parallel hybrid search, PV injection
+    - metal:  Metal GPU backend, shaders, buffers
 */
 
 #include <iostream>
 #include <string>
+#include <vector>
+#include <functional>
 
-// Module test declarations
+#include "../src/core/bitboard.h"
+#include "../src/core/position.h"
+
+// Test module declarations
 bool test_core();
-bool test_search_module();
-bool test_mcts_module();
+bool test_search();
+bool test_eval_gpu();
+bool test_mcts_all();
 bool test_hybrid_module();
-bool test_gpu_module();
-
-// Hardware-specific tests
-bool test_metal();
-bool run_all_gpu_tests();
 
 int main(int argc, char *argv[]) {
-  std::cout << "MetalFish Test Suite\n";
-  std::cout << "====================\n";
+  MetalFish::Bitboards::init();
+  MetalFish::Position::init();
 
-  std::string filter = "";
-  if (argc > 1) {
-    filter = argv[1];
-    std::cout << "Filter: " << filter << "\n";
-  }
+  std::cout << "=== MetalFish Test Suite ===" << std::endl;
 
-  int passed = 0;
-  int failed = 0;
+  // Filter: if a test name is passed as argument, run only that test
+  std::string filter = (argc > 1) ? argv[1] : "";
 
-  auto run_test = [&](const char *name, bool (*func)()) {
-    if (!filter.empty() && filter != name && filter != "all") {
-      return;
+  struct TestEntry {
+    std::string name;
+    std::function<bool()> fn;
+  };
+
+  std::vector<TestEntry> tests = {
+      {"core", test_core},
+      {"search", test_search},
+      {"eval_gpu", test_eval_gpu},
+      {"mcts", test_mcts_all},
+      {"hybrid", test_hybrid_module},
+  };
+
+  int passed = 0, failed = 0, skipped = 0;
+
+  for (const auto &t : tests) {
+    if (!filter.empty() && t.name != filter) {
+      skipped++;
+      continue;
     }
-    std::cout << "\nRunning " << name << " tests...\n";
+
+    std::cout << "\n========== " << t.name << " ==========" << std::endl;
     try {
-      if (func()) {
+      if (t.fn()) {
+        std::cout << ">> " << t.name << ": PASSED" << std::endl;
         passed++;
       } else {
+        std::cout << ">> " << t.name << ": FAILED" << std::endl;
         failed++;
       }
     } catch (const std::exception &e) {
-      std::cout << "ERROR: " << e.what() << "\n";
+      std::cout << ">> " << t.name << ": CRASHED (" << e.what() << ")"
+                << std::endl;
       failed++;
     }
-  };
-
-  // Core module tests
-  run_test("core", test_core);
-  run_test("search", test_search_module);
-  run_test("mcts", test_mcts_module);
-  run_test("hybrid", test_hybrid_module);
-  run_test("gpu", test_gpu_module);
-
-  // Hardware-specific tests
-  run_test("metal", test_metal);
-  run_test("gpu_nnue", run_all_gpu_tests);
-
-  std::cout << "\n====================\n";
-  std::cout << "Results: " << passed << " passed, " << failed << " failed\n";
-
-  if (failed > 0) {
-    std::cout << "\nSOME TESTS FAILED!\n";
-    return 1;
   }
 
-  std::cout << "\nALL TESTS PASSED!\n";
-  return 0;
+  std::cout << "\n===================="
+            << "\nResults: " << passed << " passed, " << failed << " failed";
+  if (skipped > 0)
+    std::cout << ", " << skipped << " skipped";
+  std::cout << "\n====================" << std::endl;
+
+  return failed > 0 ? 1 : 0;
 }

@@ -360,3 +360,6 @@ bool test_search_module() {
 
   return g_tests_failed == 0;
 }
+
+// Alias for test runner
+bool test_search() { return test_search_module(); }

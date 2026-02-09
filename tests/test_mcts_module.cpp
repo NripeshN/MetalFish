@@ -510,3 +510,6 @@ bool test_mcts_module() {
 
   return g_tests_failed == 0;
 }
+
+// Alias for test runner (test_mcts is in anonymous namespace)
+bool test_mcts_all() { return test_mcts_module(); }
