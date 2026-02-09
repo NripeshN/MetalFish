@@ -603,6 +603,131 @@ float BatchedGPUEvaluator::evaluate(const Position &pos, WorkerContext &ctx) {
 }
 
 // ============================================================================
+// GatherBatchEvaluator -- Queue-based cooperative batching
+// ============================================================================
+
+GatherBatchEvaluator::GatherBatchEvaluator(NNMCTSEvaluator *nn_evaluator,
+                                           int num_workers,
+                                           int gather_timeout_us)
+    : nn_evaluator_(nn_evaluator), num_workers_(num_workers),
+      gather_timeout_us_(gather_timeout_us) {
+  pending_.reserve(num_workers);
+}
+
+void GatherBatchEvaluator::cancel() {
+  cancelled_.store(true, std::memory_order_release);
+  done_cv_.notify_all();
+  queue_cv_.notify_all();
+}
+
+EvaluationResult GatherBatchEvaluator::evaluate(int worker_id,
+                                                const Position &pos) {
+  static std::atomic<int> entry_count{0};
+  int ec = entry_count.fetch_add(1);
+  if (ec < 10) {
+    std::cerr << "[GENTER] w" << worker_id << " cancelled=" << cancelled_.load()
+              << " this=" << (void *)this << " ec=" << ec << std::endl;
+  }
+  // Create request on the stack -- lives until this function returns
+  Request req;
+  req.fen = pos.fen();
+  req.is_chess960 = pos.is_chess960();
+  req.completed = false;
+
+  bool is_leader = false;
+  std::vector<Request *> batch;
+
+  {
+    std::unique_lock<std::mutex> lock(queue_mutex_);
+
+    // Submit my request
+    pending_.push_back(&req);
+
+    if (static_cast<int>(pending_.size()) >= num_workers_) {
+      // Enough requests -- I'm the leader
+      is_leader = true;
+      batch.swap(pending_);
+    } else {
+      // Wait until all workers have submitted (no timeout -- strict batching)
+      queue_cv_.wait(lock, [&] {
+        return static_cast<int>(pending_.size()) >= num_workers_ ||
+               cancelled_.load(std::memory_order_acquire);
+      });
+
+      if (cancelled_.load(std::memory_order_acquire)) {
+        // Remove our request from pending
+        auto it = std::find(pending_.begin(), pending_.end(), &req);
+        if (it != pending_.end())
+          pending_.erase(it);
+        return EvaluationResult();
+      }
+
+      // Check if we should become leader (timeout or enough gathered)
+      if (!req.completed && !pending_.empty()) {
+        is_leader = true;
+        batch.swap(pending_);
+      }
+    }
+  }
+
+  if (is_leader && !batch.empty()) {
+    // Build positions for batch evaluation
+    std::vector<std::unique_ptr<StateInfo>> state_infos;
+    std::vector<std::unique_ptr<Position>> positions;
+    std::vector<const Position *> pos_ptrs;
+
+    for (auto *r : batch) {
+      static std::atomic<int> fc{0};
+      if (fc.fetch_add(1) < 3)
+        std::cerr << "[GFEN] fen='" << r->fen << "'" << std::endl;
+      state_infos.push_back(std::make_unique<StateInfo>());
+      positions.push_back(std::make_unique<Position>());
+      positions.back()->set(r->fen, r->is_chess960, state_infos.back().get());
+      pos_ptrs.push_back(positions.back().get());
+    }
+
+    // Single GPU call for the entire batch
+    std::vector<EvaluationResult> results;
+    if (!pos_ptrs.empty()) {
+      static std::atomic<int> bcnt{0};
+      if (bcnt.fetch_add(1) < 3) {
+        std::cerr << "[GBATCH] batch=" << pos_ptrs.size() << " fen0="
+                  << (batch[0]->fen.empty() ? "EMPTY"
+                                            : batch[0]->fen.substr(0, 20))
+                  << std::endl;
+      }
+      try {
+        results =
+            nn_evaluator_->EvaluateBatch(pos_ptrs.data(), pos_ptrs.size());
+      } catch (...) {
+      }
+    }
+
+    // Scatter results AND mark completed under the mutex
+    // The mutex ensures happens-before: workers see results when they see
+    // completed=true
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      for (size_t i = 0; i < results.size() && i < batch.size(); ++i) {
+        batch[i]->result = std::move(results[i]);
+      }
+      for (auto *r : batch) {
+        r->completed = true;
+      }
+    }
+    done_cv_.notify_all();
+  } else if (!is_leader) {
+    // Wait for the leader to complete our request
+    std::unique_lock<std::mutex> lock(queue_mutex_);
+    done_cv_.wait(lock, [&] {
+      return req.completed || cancelled_.load(std::memory_order_acquire);
+    });
+  }
+
+  return std::move(req.result);
+}
+
+// ============================================================================
 // ThreadSafeNode Implementation
 // ============================================================================
 
@@ -975,17 +1100,20 @@ void ThreadSafeMCTS::start_search(const std::string &fen,
     batched_evaluator_->start();
   }
 
-  // Transformer evaluation: workers call nn_evaluator_->Evaluate() directly.
-  // GPU access is serialized by MetalNetwork's gpu_mutex_. Single-thread
-  // pattern -- the search thread itself does the GPU call.
-  // No separate BatchedNNEvaluator needed -- simpler and crash-free.
+  // Transformer evaluation: queue-based cooperative batching.
+  // Workers submit positions to a queue; when enough accumulate (or timeout),
+  // ONE worker calls EvaluateBatch() for the whole batch.
+  if (nn_evaluator_) {
+    gather_eval_ = std::make_unique<GatherBatchEvaluator>(
+        nn_evaluator_.get(), actual_threads, 20000 /*gather_timeout_us=20ms*/);
+  }
 
-  // Create worker contexts
-  std::cerr << "[TSMCTS] start_search: creating " << actual_threads
-            << " workers" << std::endl;
+  // Create worker contexts with unique IDs for gather slot assignment
   worker_contexts_.clear();
   for (int i = 0; i < actual_threads; ++i) {
-    worker_contexts_.push_back(std::make_unique<WorkerContext>());
+    auto ctx = std::make_unique<WorkerContext>();
+    ctx->worker_id = i;
+    worker_contexts_.push_back(std::move(ctx));
   }
 
   // Start worker threads
@@ -1001,25 +1129,28 @@ void ThreadSafeMCTS::stop() {
 }
 
 void ThreadSafeMCTS::wait() {
-  std::cerr << "[TSMCTS] wait() enter" << std::endl;
+  // Cancel gather evaluator FIRST -- releases any workers waiting in the
+  // barrier
+  if (gather_eval_) {
+    gather_eval_->cancel();
+  }
+
   // Stop GPU NNUE batched evaluator if active
   if (batched_evaluator_) {
     batched_evaluator_->stop();
     batched_evaluator_.reset();
   }
 
-  // Workers should exit quickly since evaluators are stopped.
-  std::cerr << "[TSMCTS] joining " << workers_.size() << " workers..."
-            << std::endl;
+  // Workers exit because: should_stop()=true AND gather barrier cancelled
   for (size_t i = 0; i < workers_.size(); ++i) {
     if (workers_[i].joinable()) {
-      std::cerr << "[TSMCTS] joining worker " << i << "..." << std::endl;
       workers_[i].join();
-      std::cerr << "[TSMCTS] worker " << i << " joined" << std::endl;
     }
   }
   workers_.clear();
-  std::cerr << "[TSMCTS] wait() exit" << std::endl;
+
+  // Destroy gather evaluator AFTER workers are joined (safe ordering)
+  gather_eval_.reset();
 
   running_.store(false, std::memory_order_release);
 
@@ -1158,10 +1289,15 @@ void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
 
   if (!leaf->has_children() && nn_evaluator_) {
     try {
-      // Direct GPU evaluation (single-thread pattern)
-      nn_result = nn_evaluator_->Evaluate(ctx.pos);
-      nn_used = true;
-      stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
+      if (gather_eval_) {
+        nn_result = gather_eval_->evaluate(ctx.worker_id, ctx.pos);
+      } else {
+        nn_result = nn_evaluator_->Evaluate(ctx.pos);
+      }
+      // Only count as NN-evaluated if we got actual policy results
+      nn_used = !nn_result.policy_priors.empty();
+      if (nn_used)
+        stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
     } catch (...) {
       nn_used = false;
     }
@@ -1532,7 +1668,9 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx,
   // Apply NN policy priors if available
   if (nn_evaluator_) {
     try {
-      auto result = nn_evaluator_->Evaluate(ctx.pos);
+      auto result = gather_eval_
+                        ? gather_eval_->evaluate(ctx.worker_id, ctx.pos)
+                        : nn_evaluator_->Evaluate(ctx.pos);
       stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
 
       // Cache the NN result for value evaluation if requested
@@ -1655,7 +1793,9 @@ float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
   // Use NN evaluator if available
   if (nn_evaluator_) {
     try {
-      auto result = nn_evaluator_->Evaluate(ctx.pos);
+      auto result = gather_eval_
+                        ? gather_eval_->evaluate(ctx.worker_id, ctx.pos)
+                        : nn_evaluator_->Evaluate(ctx.pos);
       stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
 
       // Return value from side-to-move perspective

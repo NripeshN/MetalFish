@@ -1490,13 +1490,11 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
 
   // Callbacks for UCI output
   auto best_move_cb = [](Move best, Move ponder) {
-    std::cerr << "[DBG] bestmove callback fired" << std::endl;
     std::string best_str = UCIEngine::move(best, false);
     std::string ponder_str = ponder != Move::none()
                                  ? " ponder " + UCIEngine::move(ponder, false)
                                  : "";
     sync_cout << "bestmove " << best_str << ponder_str << sync_endl;
-    std::cerr << "[DBG] bestmove written: " << best_str << std::endl;
   };
 
   auto info_cb = [](const std::string &info) {
@@ -1506,10 +1504,8 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   // Start search - AB uses search_silent internally so no duplicate bestmove
   // The search runs asynchronously; the UCI loop must remain free to process
   // stop/quit commands. The bestmove callback fires when the search finishes.
-  std::cerr << "[DBG] calling start_search..." << std::endl;
   join_search_waiter(); // Clean up any previous waiter
   g_parallel_hybrid_search->start_search(pos, limits, best_move_cb, info_cb);
-  std::cerr << "[DBG] start_search returned" << std::endl;
 
   // Note: We do NOT wait() here. The UCI loop must keep reading stdin so it
   // can process 'stop' and 'quit' commands. The bestmove callback handles

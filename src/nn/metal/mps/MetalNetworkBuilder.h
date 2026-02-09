@@ -7,15 +7,13 @@
 
 #pragma once
 
+#include "../../weights.h"
 #include <string>
 #include <vector>
 
 namespace MetalFish {
 namespace NN {
 namespace Metal {
-
-using MetalFish::NN::InputEmbedding;
-using MetalFish::NN::MultiHeadWeights;
 
 struct Activations {
   std::string default_activation = "relu";
