@@ -101,7 +101,7 @@ void ApplyNNPolicy(ThreadSafeNode *node, const EvaluationResult &result) {
   }
   float sum = 0.0f;
   for (int i = 0; i < n; ++i) {
-    priors_buf[i] = std::exp((logits_buf[i] - max_logit) * inv_temp);
+    priors_buf[i] = FastMath::FastExp((logits_buf[i] - max_logit) * inv_temp);
     sum += priors_buf[i];
   }
 #endif
@@ -318,52 +318,56 @@ void BatchedGPUEvaluator::process_batch(std::vector<EvalRequest *> &batch) {
 
   const size_t batch_size = batch.size();
 
-  // Deduplication: group requests by position key to avoid redundant GPU evals
-  // Use unordered_map for O(1) lookup (faster than sorting for typical batch
-  // sizes)
-  std::unordered_map<uint64_t, std::vector<size_t>> key_to_indices;
-  key_to_indices.reserve(batch_size);
-  std::vector<size_t> unique_indices;
-  unique_indices.reserve(batch_size);
+  // Flat deduplication: sort indices by key, then linear scan for groups.
+  // Avoids heap-allocating unordered_map buckets on every batch.
+  struct KeyIdx { uint64_t key; size_t idx; };
+  constexpr size_t kMaxBatchDedup = 512;
+  KeyIdx ki_buf[kMaxBatchDedup];
+  const size_t n = std::min(batch_size, kMaxBatchDedup);
 
-  for (size_t i = 0; i < batch_size; ++i) {
-    uint64_t key = batch[i]->position_key;
-    auto it = key_to_indices.find(key);
-    if (it == key_to_indices.end()) {
-      key_to_indices[key] = {i};
-      unique_indices.push_back(i);
-    } else {
-      it->second.push_back(i);
-    }
+  for (size_t i = 0; i < n; ++i) {
+    ki_buf[i] = {batch[i]->position_key, i};
   }
+  std::sort(ki_buf, ki_buf + n,
+            [](const KeyIdx &a, const KeyIdx &b) { return a.key < b.key; });
 
-  const size_t unique_count = unique_indices.size();
+  // Identify unique positions and record first occurrence
+  size_t unique_first[kMaxBatchDedup]; // index of first occurrence per group
+  size_t unique_count = 0;
+  for (size_t i = 0; i < n; ) {
+    unique_first[unique_count++] = ki_buf[i].idx;
+    size_t j = i + 1;
+    while (j < n && ki_buf[j].key == ki_buf[i].key) ++j;
+    i = j;
+  }
 
   // Only send unique positions to GPU
   GPU::GPUEvalBatch gpu_batch;
   gpu_batch.reserve(static_cast<int>(unique_count));
 
-  for (size_t idx : unique_indices) {
-    gpu_batch.add_position_data(batch[idx]->pos_data);
+  for (size_t i = 0; i < unique_count; ++i) {
+    gpu_batch.add_position_data(batch[unique_first[i]]->pos_data);
   }
 
   gpu_manager_->evaluate_batch(gpu_batch, true);
 
-  // Distribute results to all requests (including duplicates)
-  for (size_t i = 0; i < unique_count; ++i) {
-    size_t orig_idx = unique_indices[i];
+  // Distribute results to all requests (including duplicates).
+  // Walk the sorted array and fan out each unique result to all matching keys.
+  size_t ki_pos = 0;
+  for (size_t ui = 0; ui < unique_count; ++ui) {
+    size_t orig_idx = unique_first[ui];
     EvalRequest *req = batch[orig_idx];
 
     int32_t psqt =
-        gpu_batch.psqt_scores.size() > i ? gpu_batch.psqt_scores[i] : 0;
-    int32_t pos_score = gpu_batch.positional_scores.size() > i
-                            ? gpu_batch.positional_scores[i]
+        gpu_batch.psqt_scores.size() > ui ? gpu_batch.psqt_scores[ui] : 0;
+    int32_t pos_score = gpu_batch.positional_scores.size() > ui
+                            ? gpu_batch.positional_scores[ui]
                             : 0;
     int32_t raw_score = psqt + pos_score;
 
-    // Fast tanh using standard library (well-optimized on modern CPUs)
+    // Fast tanh approximation for NNUE-to-Q conversion
     float x = static_cast<float>(raw_score) / 400.0f;
-    float value = std::tanh(x);
+    float value = FastMath::FastTanh(x);
 
     if (req->side_to_move == BLACK) {
       value = -value;
@@ -376,10 +380,13 @@ void BatchedGPUEvaluator::process_batch(std::vector<EvalRequest *> &batch) {
     tt_[tt_idx].key = req->position_key;
     tt_[tt_idx].age = age;
 
-    // Complete all requests with same key
-    for (size_t dup_idx : key_to_indices[req->position_key]) {
+    // Complete all requests with same key (walk sorted array)
+    uint64_t this_key = req->position_key;
+    while (ki_pos < n && ki_buf[ki_pos].key == this_key) {
+      size_t dup_idx = ki_buf[ki_pos].idx;
       batch[dup_idx]->result = value;
       batch[dup_idx]->completed.store(true, std::memory_order_release);
+      ++ki_pos;
     }
   }
 
@@ -483,7 +490,7 @@ void BatchedGPUEvaluator::process_batch_async(
         int32_t raw_score = psqt + pos_score;
 
         float x = static_cast<float>(raw_score) / 400.0f;
-        float value = std::tanh(x);
+        float value = FastMath::FastTanh(x);
 
         if (req->side_to_move == BLACK) {
           value = -value;
@@ -1283,14 +1290,14 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   float effective_cpuct =
       cpuct +
       cpuct_factor *
-          std::log((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
+          FastMath::FastLog((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
 
   // Compute U coefficient: cpuct * sqrt(children_visits)
   // Use GetChildrenVisits() which returns N-1 for non-root nodes.
   uint32_t children_visits = node->GetChildrenVisits();
   float cpuct_sqrt_n =
       effective_cpuct *
-      std::sqrt(static_cast<float>(std::max(children_visits, 1u)));
+      FastMath::FastSqrt(static_cast<float>(std::max(children_visits, 1u)));
 
   // MCTS FPU with reduction strategy
   // FPU = parent_Q - fpu_value * sqrt(visited_policy)
@@ -1299,7 +1306,7 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
 
   // FPU reduction: unvisited nodes get parent Q minus a reduction
   // The reduction is proportional to sqrt of visited policy
-  float fpu = parent_q - config_.fpu_reduction * std::sqrt(visited_policy);
+  float fpu = parent_q - config_.fpu_reduction * FastMath::FastSqrt(visited_policy);
 
   // Set up moves-left evaluator for MLH (moves-left head) utility.
   MCTSSearchParams mlh_params;
@@ -1372,7 +1379,10 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx,
     return;
 
   TSEdge *edges = node->edges();
-  std::vector<float> scores(num_edges);
+  // Stack-allocated score buffer (max legal chess moves ~218, use 256 for safety)
+  constexpr int kMaxExpandEdges = 256;
+  float scores[kMaxExpandEdges];
+  const int safe_edges = std::min(num_edges, kMaxExpandEdges);
   float max_score = -1e9f;
 
   // Score each move using improved heuristics for move ordering
@@ -1518,16 +1528,40 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx,
 
   // Softmax normalization with temperature
   float sum = 0.0f;
-  for (int i = 0; i < num_edges; ++i) {
-    // Temperature controls exploration: lower = more exploitation
-    float temp = config_.policy_softmax_temp * 300.0f; // Adjusted divisor
-    scores[i] = std::exp((scores[i] - max_score) / temp);
+  const float temp = config_.policy_softmax_temp * 300.0f;
+  const int n = safe_edges;
+
+#ifdef __APPLE__
+  // vDSP-accelerated softmax: subtract max, divide by temp, exp, normalize
+  float neg_max = -max_score;
+  vDSP_vsadd(scores, 1, &neg_max, scores, 1, n);
+  float inv_temp = 1.0f / temp;
+  vDSP_vsmul(scores, 1, &inv_temp, scores, 1, n);
+  int vn = n;
+  float exp_buf[kMaxExpandEdges];
+  vvexpf(exp_buf, scores, &vn);
+  vDSP_sve(exp_buf, 1, &sum, n);
+  if (sum > 0.0f) {
+    float inv_sum = 1.0f / sum;
+    vDSP_vsmul(exp_buf, 1, &inv_sum, scores, 1, n);
+  } else {
+    float uniform = 1.0f / static_cast<float>(n);
+    for (int i = 0; i < n; ++i) scores[i] = uniform;
+  }
+#else
+  for (int i = 0; i < n; ++i) {
+    scores[i] = FastMath::FastExp((scores[i] - max_score) / temp);
     sum += scores[i];
   }
+  if (sum > 0.0f) {
+    float inv_sum = 1.0f / sum;
+    for (int i = 0; i < n; ++i) scores[i] *= inv_sum;
+  }
+#endif
 
   // Set policy priors using MCTS compressed storage
-  for (int i = 0; i < num_edges; ++i) {
-    edges[i].SetPolicy(scores[i] / sum);
+  for (int i = 0; i < n; ++i) {
+    edges[i].SetPolicy(scores[i]);
   }
 }
 

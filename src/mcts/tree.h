@@ -166,11 +166,13 @@ public:
   float m() const { return GetM(); }
 
   void add_virtual_loss(int count = 1) {
-    n_in_flight_.fetch_add(count, std::memory_order_acq_rel);
+    // Relaxed ordering: virtual loss is a statistical hint, not a correctness
+    // requirement. Avoids expensive memory barriers on ARM64.
+    n_in_flight_.fetch_add(count, std::memory_order_relaxed);
   }
 
   void remove_virtual_loss(int count = 1) {
-    n_in_flight_.fetch_sub(count, std::memory_order_acq_rel);
+    n_in_flight_.fetch_sub(count, std::memory_order_relaxed);
   }
 
   // MCTS FinalizeScoreUpdate

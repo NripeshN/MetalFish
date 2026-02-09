@@ -584,11 +584,10 @@ int ABSearcher::late_move_reduction(int depth, int move_count,
 }
 
 Value ABSearcher::evaluate(const Position &pos) {
-  // Use simple_eval for the ABSearcher since we don't have access to
-  // the full NNUE infrastructure (networks, accumulators, caches).
-  // The main MCTS evaluation uses GPU NNUE for strong evaluation.
-  // This ABSearcher is primarily used for tactical verification where
-  // simple material evaluation is sufficient for move ordering.
+  // Use simple material evaluation for the ABSearcher's tactical verification.
+  // The full NNUE infrastructure (accumulators, caches) is not available here.
+  // This is intentional: ABSearcher only needs rough material scores for
+  // move ordering and shallow tactical probes.
   return Value(Eval::simple_eval(pos));
 }
 

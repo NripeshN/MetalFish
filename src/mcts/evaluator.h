@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -25,15 +26,28 @@ struct EvaluationResult {
   bool has_moves_left = false;
   float moves_left = 0.0f;
   std::vector<std::pair<Move, float>> policy_priors;  // Move → policy probability pairs
-  
-  EvaluationResult() : value(0.0f), has_wdl(false), wdl{0.0f, 0.0f, 0.0f} {}
-  
-  // Helper to find policy for a move
-  float get_policy(Move move) const {
+
+  // O(1) policy lookup table indexed by move.raw() (max 4096 encoded moves).
+  // Populated during Evaluate() to avoid O(n) linear scans during PUCT.
+  static constexpr int kPolicyTableSize = 4096;
+  std::array<float, kPolicyTableSize> policy_table{};
+
+  EvaluationResult() : value(0.0f), has_wdl(false), wdl{0.0f, 0.0f, 0.0f} {
+    policy_table.fill(0.0f);
+  }
+
+  // Build the O(1) lookup table from policy_priors.
+  // Must be called after policy_priors is populated.
+  void build_policy_table() {
     for (const auto& [m, p] : policy_priors) {
-      if (m == move) return p;
+      uint16_t idx = m.raw() & (kPolicyTableSize - 1);
+      policy_table[idx] = p;
     }
-    return 0.0f;
+  }
+
+  // O(1) policy lookup for a move
+  float get_policy(Move move) const {
+    return policy_table[move.raw() & (kPolicyTableSize - 1)];
   }
 };
 

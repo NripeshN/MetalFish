@@ -8,6 +8,7 @@
 */
 
 #include "gpu_backend.h"
+#include "core.h"
 #include "../core/movegen.h"
 #include "../search/movepick.h"
 #include "../eval/gpu_integration.h"
@@ -48,9 +49,9 @@ void GPUMCTSBackend::score_to_wdl(int score, float &win, float &draw,
 
   // Compute bias from wdl_a_ (clamp to avoid log(0) or division by zero)
   float clamped_a = std::clamp(wdl_a_, 0.001f, 0.999f);
-  float bias = std::log(clamped_a / (1.0f - clamped_a));
+  float bias = MCTS::FastMath::FastLog(clamped_a / (1.0f - clamped_a));
 
-  float win_prob = 1.0f / (1.0f + std::exp(-(x + bias)));
+  float win_prob = 1.0f / (1.0f + MCTS::FastMath::FastExp(-(x + bias)));
 
   // Estimate draw probability based on score magnitude
   // Higher magnitude = lower draw probability

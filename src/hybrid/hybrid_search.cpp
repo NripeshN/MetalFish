@@ -362,7 +362,7 @@ void ParallelHybridSearch::wait() {
       }
       break;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
   }
 
   // Now join the threads
@@ -511,7 +511,7 @@ void ParallelHybridSearch::mcts_thread_main() {
   uint64_t last_ab_counter = 0;
 
   while (!mcts_done && !should_stop()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
 
     auto now_time = std::chrono::steady_clock::now();
     auto since_update = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -656,7 +656,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
 
   // Wait for search to complete or time to expire
   while (!should_stop()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
 
     // Check if both searches have results
     bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
@@ -705,7 +705,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
   while ((!mcts_thread_done_.load(std::memory_order_acquire) ||
           !ab_thread_done_.load(std::memory_order_acquire)) &&
          wait_count < 500) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
     wait_count++;
   }
 

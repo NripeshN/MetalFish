@@ -8,6 +8,7 @@
 */
 
 #include "apple_silicon.h"
+#include "core.h"
 #include "../core/position.h"
 #include <algorithm>
 #include <cmath>
@@ -613,7 +614,7 @@ void AppleSiliconPolicySoftmax::compute_softmax_simd(const float *scores,
 
   float sum = 0.0f;
   for (int i = 0; i < count; ++i) {
-    probs_out[i] = std::exp((scores[i] - max_score) / temperature);
+    probs_out[i] = FastMath::FastExp((scores[i] - max_score) / temperature);
     sum += probs_out[i];
   }
 

@@ -39,22 +39,16 @@ constexpr auto StartFEN =
 MCTSPosition::MCTSPosition() { pos_.set(StartFEN, false, &st_); }
 
 MCTSPosition::MCTSPosition(const MCTSPosition &other) {
-  // Use FEN to copy - simpler and safer
-  std::string current_fen = other.pos_.fen();
-  pos_.set(current_fen, false, &st_);
-
-  // Copy move stack for undo support
+  // Direct position copy via FEN (Position has non-trivial state pointers)
+  // This is safer than memcpy since Position has internal pointers to StateInfo.
+  pos_.set(other.pos_.fen(), false, &st_);
   move_stack_ = other.move_stack_;
 }
 
 MCTSPosition &MCTSPosition::operator=(const MCTSPosition &other) {
   if (this != &other) {
-    // Use FEN to copy - simpler and safer
-    std::string current_fen = other.pos_.fen();
     state_stack_.clear();
-    pos_.set(current_fen, false, &st_);
-
-    // Copy move stack for undo support
+    pos_.set(other.pos_.fen(), false, &st_);
     move_stack_ = other.move_stack_;
   }
   return *this;
