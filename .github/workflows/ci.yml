@@ -139,7 +139,9 @@ jobs:
         run: |
           mkdir -p networks
           cd networks
+          # NNUE weight files (hosted externally)
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          # NNUE weight files (hosted externally)
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
           ls -la
         shell: bash
@@ -285,7 +287,9 @@ jobs:
         run: |
           mkdir -p networks
           cd networks
+          # NNUE weight files (hosted externally)
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          # NNUE weight files (hosted externally)
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
           ls -la
         shell: bash
@@ -397,7 +401,9 @@ jobs:
         run: |
           mkdir -p networks
           cd networks
+          # NNUE weight files (hosted externally)
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          # NNUE weight files (hosted externally)
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
         shell: bash
 
@@ -461,7 +467,9 @@ jobs:
         run: |
           mkdir -p networks
           cd networks
+          # NNUE weight files (hosted externally)
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          # NNUE weight files (hosted externally)
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
         shell: bash
 

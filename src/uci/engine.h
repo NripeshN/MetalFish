@@ -74,6 +74,14 @@ public:
   set_on_bestmove(std::function<void(std::string_view, std::string_view)> &&);
   void set_on_verify_networks(std::function<void(std::string_view)> &&);
 
+  // Getters for callbacks (for save/restore in hybrid search)
+  std::function<void(std::string_view, std::string_view)> get_on_bestmove();
+  std::function<void(const InfoFull &)> get_on_update_full();
+
+  // Thread accessors for hybrid search
+  Thread *threads_get_best();
+  uint64_t threads_nodes_searched();
+
   // network related
 
   void verify_networks() const;

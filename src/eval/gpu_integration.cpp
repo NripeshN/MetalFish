@@ -2205,22 +2205,21 @@ void shutdown_gpu_nnue() {
 
   // Reset the manager - this will call its destructor
   if (g_gpu_nnue_manager) {
-    // First, synchronize any pending GPU operations
-    if (gpu_available() && !gpu_backend_shutdown()) {
-      gpu().synchronize();
+    // Only synchronize if GPU was actually used
+    if (!gpu_backend_shutdown()) {
+      try {
+        gpu().synchronize();
+      } catch (...) {
+        // GPU may not be initialized -- that's fine
+      }
     }
 
     // Reset the manager (calls destructor which cleans up GPU resources)
     g_gpu_nnue_manager.reset();
-
-    // Final synchronization to ensure all cleanup is complete
-    if (gpu_available() && !gpu_backend_shutdown()) {
-      gpu().synchronize();
-    }
   }
-
-  // Now shut down the GPU backend itself
-  shutdown_gpu_backend();
+  // Note: don't call shutdown_gpu_backend() -- it would initialize the Metal
+  // singleton if it was never used (e.g., AB-only mode). The backend's
+  // static destructor handles cleanup when the process exits.
 }
 
 } // namespace MetalFish::GPU

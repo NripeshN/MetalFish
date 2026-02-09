@@ -61,9 +61,10 @@ public:
   // Evaluate single position
   EvaluationResult Evaluate(const Position &pos);
 
-  // Batch evaluation for multiple positions
-  std::vector<EvaluationResult>
-  EvaluateBatch(const std::vector<Position> &positions);
+  // Batch evaluation for multiple positions (pointer array for non-copyable
+  // Position)
+  std::vector<EvaluationResult> EvaluateBatch(const Position *const *positions,
+                                              size_t count);
 
   // Get network information
   std::string GetNetworkInfo() const;

@@ -4,16 +4,16 @@
 
   Licensed under GPL-3.0
 */
+
 #pragma once
-#include <cstdint>
 #include <vector>
 
 namespace MetalFish {
 namespace NN {
 namespace Metal {
 
-static constexpr int kNumOutputPolicy = 1858;
-static constexpr int kInputPlanes = 112;
+static int kNumOutputPolicy = 1858;
+static int kInputPlanes = 112;
 
 struct InputsOutputs {
   InputsOutputs(int maxBatchSize, bool wdl, bool moves_left, bool conv_policy,

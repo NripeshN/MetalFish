@@ -70,15 +70,16 @@ public:
     return result;
   }
 
-  std::vector<EvaluationResult>
-  EvaluateBatch(const std::vector<Position> &positions) {
+  std::vector<EvaluationResult> EvaluateBatch(const Position *const *positions,
+                                              size_t count) {
     // Batch encoding
     std::vector<NN::InputPlanes> planes_batch;
-    planes_batch.reserve(positions.size());
+    planes_batch.reserve(count);
     std::vector<int> transforms;
-    transforms.reserve(positions.size());
+    transforms.reserve(count);
 
-    for (const auto &pos : positions) {
+    for (size_t idx = 0; idx < count; ++idx) {
+      const Position &pos = *positions[idx];
       std::vector<const Position *> history = {&pos};
       int transform = 0;
       auto planes =
@@ -108,7 +109,7 @@ public:
       result.moves_left = outputs[i].moves_left;
 
       // Map policy
-      MoveList<LEGAL> moves(positions[i]);
+      MoveList<LEGAL> moves(*positions[i]);
       result.policy_priors.reserve(moves.size());
       for (const auto &move : moves) {
         int policy_idx = NN::MoveToNNIndex(move, transforms[i]);
@@ -144,8 +145,8 @@ EvaluationResult NNMCTSEvaluator::Evaluate(const Position &pos) {
 }
 
 std::vector<EvaluationResult>
-NNMCTSEvaluator::EvaluateBatch(const std::vector<Position> &positions) {
-  return impl_->EvaluateBatch(positions);
+NNMCTSEvaluator::EvaluateBatch(const Position *const *positions, size_t count) {
+  return impl_->EvaluateBatch(positions, count);
 }
 
 std::string NNMCTSEvaluator::GetNetworkInfo() const {

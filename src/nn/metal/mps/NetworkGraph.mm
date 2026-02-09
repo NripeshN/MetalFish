@@ -9,18 +9,7 @@
 #import "../../weights.h"
 #import "../tables/attention_policy_map.h"
 #import "../tables/policy_map.h"
-#import <Accelerate/Accelerate.h>
 #import <vector>
-
-// Convert float32 array to float16 for reduced GPU memory bandwidth.
-static NSData *_Nonnull ConvertToFloat16(const float *_Nonnull src,
-                                         NSUInteger count) {
-  NSMutableData *dst = [NSMutableData dataWithLength:count * sizeof(uint16_t)];
-  vImage_Buffer srcBuf = {(void *)src, 1, count, count * sizeof(float)};
-  vImage_Buffer dstBuf = {dst.mutableBytes, 1, count, count * sizeof(uint16_t)};
-  vImageConvert_PlanarFtoPlanar16F(&srcBuf, &dstBuf, 0);
-  return dst;
-}
 
 static MPSGraphConvolution2DOpDescriptor *__nonnull convolution2DDescriptor =
     [MPSGraphConvolution2DOpDescriptor
@@ -103,22 +92,22 @@ static const NSInteger kMinSubBatchSize = 20;
   return graphs[index];
 }
 
-// Factory method to create or retrieve a graph for a device/index pair.
+// This is the MetalNetworkGraph factory method.
+// It is used to create a MetalNetworkGraph object.
+// The MetalNetworkGraph object is stored in the dictionary.
+// The MetalNetworkGraph object is initialized with the Metal device.
 + (void)graphWithDevice:(id<MTLDevice> __nonnull)device
-                  index:(NSNumber *_Nonnull)index
-               maxBatch:(NSUInteger)maxBatch {
+                  index:(NSNumber *_Nonnull)index {
   NSMutableDictionary *graphs = [MetalNetworkGraph getGraphs];
 
   @synchronized(self) {
     if (graphs[index] == nil) {
-      graphs[index] = [[MetalNetworkGraph alloc] initWithDevice:device
-                                                       maxBatch:maxBatch];
+      graphs[index] = [[MetalNetworkGraph alloc] initWithDevice:device];
     }
   }
 }
 
-- (nonnull instancetype)initWithDevice:(id<MTLDevice> __nonnull)device
-                              maxBatch:(NSUInteger)maxBatch {
+- (nonnull instancetype)initWithDevice:(id<MTLDevice> __nonnull)device {
   self = [super init];
   _device = [MPSGraphDevice deviceWithMTLDevice:device];
   _queue = [device newCommandQueue];
@@ -127,7 +116,6 @@ static const NSInteger kMinSubBatchSize = 20;
   _doubleBufferingSemaphore = dispatch_semaphore_create(kMaxInflightBuffers);
   _resultDataDicts =
       [NSMutableDictionary dictionaryWithCapacity:kMaxInflightBuffers];
-  _maxBatchSize = maxBatch > 0 ? maxBatch : 1;
 
   return self;
 }
@@ -137,43 +125,38 @@ static const NSInteger kMinSubBatchSize = 20;
                        inputs:(float *__nonnull)inputs
                         masks:(uint64_t *__nonnull)masks
                       outputs:(float *__nonnull *__nonnull)outputBuffers {
-  // Use sub-batch parallelism when batch is large enough to benefit from
-  // overlapping GPU command buffer encoding with execution.
-  if (batchSize > (NSUInteger)(2 * kMinSubBatchSize) &&
-      kMaxInflightBuffers >= 2) {
-    NSUInteger half = batchSize / 2;
-    // Ensure sub-batches cover the full batch (second gets remainder).
-    NSUInteger subBatch0Size = half;
-    NSUInteger subBatch1Size = batchSize - half;
+  // Calculate number of sub-batches to split across GPU command buffers for
+  // parallel execution. Shouldn't be more than kMaxInflightBuffers and each
+  // sub-batch shouldn't be smaller than kMinSubBatchSize.
+  NSUInteger splits = (batchSize + kMinSubBatchSize + 1) / kMinSubBatchSize;
+  if (splits > kMaxInflightBuffers)
+    splits = kMaxInflightBuffers;
+  NSUInteger subBatchSize = batchSize / splits;
+  NSUInteger inputDataLength =
+      subBatchSize * [_inputTensor sizeOfDimensionsFrom:@1];
 
-    // Dispatch two parallel command buffers.
-    MPSCommandBuffer *cb0 = [self runCommandSubBatchWithInputs:inputs
-                                                         masks:masks
-                                                      subBatch:0
-                                                  subBatchSize:subBatch0Size];
-    MPSCommandBuffer *cb1 =
-        [self runCommandSubBatchWithInputs:inputs +
-                                           subBatch0Size *
-                                               [_inputTensor.shape[1] intValue]
-                                     masks:masks +
-                                           subBatch0Size *
-                                               [_inputTensor.shape[1] intValue]
-                                  subBatch:1
-                              subBatchSize:subBatch1Size];
-
-    [cb0 waitUntilCompleted];
-    [cb1 waitUntilCompleted];
-    [self copyResultsToBuffers:outputBuffers subBatchSize:subBatch0Size];
-  } else {
-    // Single command buffer for small batches.
-    MPSCommandBuffer *commandBuffer =
-        [self runCommandSubBatchWithInputs:inputs
-                                     masks:masks
-                                  subBatch:0
-                              subBatchSize:batchSize];
-    [commandBuffer waitUntilCompleted];
-    [self copyResultsToBuffers:outputBuffers subBatchSize:batchSize];
+  // Split batchSize into smaller sub-batches and run using double-buffering.
+  NSUInteger subBatch = 0;
+  MPSCommandBuffer *commandBuffer;
+  for (subBatch = 0; subBatch < splits - 1; subBatch++) {
+    commandBuffer =
+        [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
+                                     masks:masks + subBatch * inputDataLength
+                                  subBatch:subBatch
+                              subBatchSize:subBatchSize];
   }
+  // Last sub-batch may be smaller or larger than others.
+  MPSCommandBuffer *latestCommandBuffer =
+      [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
+                                   masks:masks + subBatch * inputDataLength
+                                subBatch:subBatch
+                            subBatchSize:batchSize - subBatch * subBatchSize];
+
+  // Wait for the last batch to be processed.
+  [latestCommandBuffer waitUntilCompleted];
+  [commandBuffer waitUntilCompleted];
+
+  [self copyResultsToBuffers:outputBuffers subBatchSize:subBatchSize];
 
   return _resultTensors;
 }
@@ -274,20 +257,18 @@ static const NSInteger kMinSubBatchSize = 20;
 - (nonnull MPSGraphTensor *)
     inputPlaceholderWithInputChannels:(NSUInteger)channels
                                 label:(NSString *__nullable)label {
-  _inputTensor =
-      [self placeholderWithShape:@[ @(_maxBatchSize), @(channels), @1 ]
-                        dataType:MPSDataTypeFloat32
-                            name:label];
+  _inputTensor = [self placeholderWithShape:@[ @(-1), @(channels), @1 ]
+                                   dataType:MPSDataTypeFloat32
+                                       name:label];
   return _inputTensor;
 }
 
 - (nonnull MPSGraphTensor *)
     maskPlaceholderWithInputChannels:(NSUInteger)channels
                                label:(NSString *__nullable)label {
-  _maskTensor =
-      [self placeholderWithShape:@[ @(_maxBatchSize), @(channels), @1 ]
-                        dataType:MPSDataTypeUInt64
-                            name:label];
+  _maskTensor = [self placeholderWithShape:@[ @(-1), @(channels), @1 ]
+                                  dataType:MPSDataTypeUInt64
+                                      name:label];
   return _maskTensor;
 }
 
@@ -408,10 +389,11 @@ static const NSInteger kMinSubBatchSize = 20;
                             label:(NSString *__nonnull)label {
   NSUInteger inputChannels = [parent.shape[1] intValue];
 
-  // Store convolution weights as FP16 for 2x memory bandwidth on Apple Silicon
-  // GPU.
-  NSUInteger wCount = outputChannels * inputChannels * kernelSize * kernelSize;
-  NSData *weightsData = ConvertToFloat16(weights, wCount);
+  NSData *weightsData =
+      [NSData dataWithBytesNoCopy:weights
+                           length:outputChannels * inputChannels * kernelSize *
+                                  kernelSize * sizeof(float)
+                     freeWhenDone:NO];
 
   MPSGraphTensor *weightsTensor =
       [self variableWithData:weightsData
@@ -419,20 +401,13 @@ static const NSInteger kMinSubBatchSize = 20;
                          @(outputChannels), @(inputChannels), @(kernelSize),
                          @(kernelSize)
                        ]
-                    dataType:MPSDataTypeFloat16
+                    dataType:MPSDataTypeFloat32
                         name:[NSString stringWithFormat:@"%@/weights", label]];
-
-  // Cast weights to FP32 for the convolution (mixed-precision).
-  weightsTensor =
-      [self castTensor:weightsTensor
-                toType:MPSDataTypeFloat32
-                  name:[NSString stringWithFormat:@"%@/weights_f32", label]];
 
   NSData *biasData = [NSData dataWithBytesNoCopy:biases
                                           length:outputChannels * sizeof(float)
                                     freeWhenDone:NO];
 
-  // Biases remain FP32 for numerical stability.
   MPSGraphTensor *biasTensor =
       [self variableWithData:biasData
                        shape:@[ @(outputChannels), @1, @1 ]
@@ -527,23 +502,18 @@ static const NSInteger kMinSubBatchSize = 20;
                                label:(NSString *__nonnull)label {
   NSUInteger inputChannels = [[parent.shape lastObject] intValue];
 
-  // Store FC weights as FP16 for 2x memory bandwidth on Apple Silicon GPU.
-  NSUInteger fcCount = outputChannels * inputChannels;
-  NSData *weightData = ConvertToFloat16(weights, fcCount);
+  NSData *weightData =
+      [NSData dataWithBytesNoCopy:weights
+                           length:outputChannels * inputChannels * sizeof(float)
+                     freeWhenDone:NO];
 
   MPSGraphTensor *weightTensor =
       [self variableWithData:weightData
                        shape:@[ @(outputChannels), @(inputChannels) ]
-                    dataType:MPSDataTypeFloat16
+                    dataType:MPSDataTypeFloat32
                         name:[NSString stringWithFormat:@"%@/weights", label]];
 
-  // Cast weights to FP32 for mixed-precision matmul.
-  weightTensor =
-      [self castTensor:weightTensor
-                toType:MPSDataTypeFloat32
-                  name:[NSString stringWithFormat:@"%@/weights_f32", label]];
-
-  // Network weights are stored OIHW, transpose to IO** for matmul.
+  // Weights are OIHW, need to be transposed to IO** to allow matmul.
   weightTensor =
       [self transposeTensor:weightTensor
                   dimension:0
@@ -564,7 +534,6 @@ static const NSInteger kMinSubBatchSize = 20;
                              length:outputChannels * sizeof(float)
                        freeWhenDone:NO];
 
-    // Biases remain FP32 for numerical stability.
     MPSGraphTensor *biasTensor =
         [self variableWithData:biasData
                          shape:@[ @(outputChannels) ]
@@ -1390,21 +1359,17 @@ static const NSInteger kMinSubBatchSize = 20;
                          label:(NSString *__nonnull)label {
   assert([shape count] == 2 && shape[0] == tensor.shape[1]);
 
-  // Store position encodings as FP16 for reduced memory bandwidth.
-  NSUInteger encCount = [shape[0] intValue] * [shape[1] intValue];
-  NSData *encodingData = ConvertToFloat16(encodings, encCount);
+  NSData *encodingData =
+      [NSData dataWithBytesNoCopy:(void *)encodings
+                           length:[shape[0] intValue] * [shape[1] intValue] *
+                                  sizeof(float)
+                     freeWhenDone:NO];
 
   MPSGraphTensor *encodingTensor =
       [self variableWithData:encodingData
                        shape:shape
-                    dataType:MPSDataTypeFloat16
+                    dataType:MPSDataTypeFloat32
                         name:[NSString stringWithFormat:@"%@/weights", label]];
-
-  // Cast to FP32 for mixed-precision addition.
-  encodingTensor =
-      [self castTensor:encodingTensor
-                toType:MPSDataTypeFloat32
-                  name:[NSString stringWithFormat:@"%@/weights_f32", label]];
 
   MPSGraphTensor *shapeTensor =
       [self shapeOfTensor:tensor
@@ -1495,23 +1460,18 @@ static const NSInteger kMinSubBatchSize = 20;
                      weights:(const float *__nonnull)weights
                withOperation:(NSString *__nonnull)op
                        label:(NSString *__nonnull)label {
-  // Store gating weights as FP16 for reduced memory bandwidth.
-  NSUInteger gateCount = [parent sizeOfDimensionsFrom:@1];
-  NSData *weightsData = ConvertToFloat16(weights, gateCount);
+  NSData *weightsData = [NSData
+      dataWithBytesNoCopy:(void *)weights
+                   length:[parent sizeOfDimensionsFrom:@1] * sizeof(float)
+             freeWhenDone:NO];
 
   MPSGraphTensor *weightsTensor =
       [self variableWithData:weightsData
                        shape:@[ parent.shape[2], parent.shape[1] ]
-                    dataType:MPSDataTypeFloat16
+                    dataType:MPSDataTypeFloat32
                         name:[NSString stringWithFormat:@"%@/weights", label]];
 
-  // Cast to FP32 for mixed-precision operations.
-  weightsTensor =
-      [self castTensor:weightsTensor
-                toType:MPSDataTypeFloat32
-                  name:[NSString stringWithFormat:@"%@/weights_f32", label]];
-
-  // Weight layout is transposed relative to the matmul expectation.
+  // Weights are transposed.
   weightsTensor =
       [self transposeTensor:weightsTensor
                   dimension:0

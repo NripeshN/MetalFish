@@ -43,7 +43,8 @@ static void cleanup_gpu_resources() {
 }
 
 int main(int argc, char *argv[]) {
-  std::cout << engine_info() << std::endl;
+  // NOTE: Don't print anything before UCI loop starts.
+  // The UCI protocol requires engines to wait for 'uci' before responding.
 
   Bitboards::init();
   Position::init();

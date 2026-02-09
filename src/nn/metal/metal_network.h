@@ -30,7 +30,7 @@ namespace Metal {
 class MetalNetwork : public Network {
 public:
   explicit MetalNetwork(const WeightsFile &file, int gpu_id = 0,
-                        int max_batch = 256, int batch = 64);
+                        int max_batch = 256, int batch = 256);
   ~MetalNetwork() override;
 
   NetworkOutput Evaluate(const InputPlanes &input) override;

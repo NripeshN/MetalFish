@@ -12,10 +12,10 @@
     - metal:  Metal GPU backend, shaders, buffers
 */
 
+#include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
-#include <functional>
 
 #include "../src/core/bitboard.h"
 #include "../src/core/position.h"

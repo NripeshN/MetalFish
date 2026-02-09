@@ -3,7 +3,7 @@
   Copyright (C) 2025 Nripesh Niketan
 
   Licensed under GPL-3.0
- */
+*/
 
 #import "MetalNetworkBuilder.h"
 #import "../../weights.h"
@@ -17,8 +17,7 @@ namespace Metal {
 MetalNetworkBuilder::MetalNetworkBuilder(void) {}
 MetalNetworkBuilder::~MetalNetworkBuilder(void) {}
 
-std::string MetalNetworkBuilder::init(int gpu_id, int max_batch) {
-  max_batch_size_ = max_batch;
+std::string MetalNetworkBuilder::init(int gpu_id) {
   // All metal devices.
   NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
 
@@ -32,8 +31,7 @@ std::string MetalNetworkBuilder::init(int gpu_id, int max_batch) {
 
   // Initialize the metal MPS Graph executor with the selected device.
   [MetalNetworkGraph graphWithDevice:devices[gpu_id]
-                               index:[NSNumber numberWithInt:gpu_id]
-                            maxBatch:max_batch_size_];
+                               index:[NSNumber numberWithInt:gpu_id]];
 
   this->gpu_id = gpu_id;
 

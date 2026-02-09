@@ -188,14 +188,12 @@ bool ParallelHybridSearch::all_threads_done() const {
 
 bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
                                       Engine *engine) {
-  if (!gpu_manager || !gpu_manager->is_ready()) {
-    return false;
-  }
   if (!engine) {
     return false;
   }
 
-  gpu_manager_ = gpu_manager;
+  gpu_manager_ =
+      gpu_manager; // May be nullptr -- that's OK if transformer is loaded
   engine_ = engine;
 
   // Check for unified memory (Apple Silicon)
@@ -203,28 +201,27 @@ bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
     has_unified_memory_ = GPU::gpu().has_unified_memory();
   }
 
-  // Create GPU MCTS backend
-  gpu_backend_ = GPU::create_gpu_mcts_backend(gpu_manager);
-  if (!gpu_backend_) {
-    return false;
-  }
-
-  // Set optimal batch size for Apple Silicon
-  if (has_unified_memory_) {
-    gpu_backend_->set_optimal_batch_size(config_.gpu_batch_size);
-  }
-
-  // Initialize GPU-resident batches for zero-copy evaluation
-  if (config_.use_gpu_resident_batches && has_unified_memory_) {
-    if (!initialize_gpu_batches()) {
-      // Fall back to regular batches if GPU batches fail
-      config_.use_gpu_resident_batches = false;
+  // Create GPU MCTS backend (optional -- only if GPU NNUE is available)
+  if (gpu_manager && gpu_manager->is_ready()) {
+    gpu_backend_ = GPU::create_gpu_mcts_backend(gpu_manager);
+    if (gpu_backend_ && has_unified_memory_) {
+      gpu_backend_->set_optimal_batch_size(config_.gpu_batch_size);
+    }
+    // Initialize GPU-resident batches for zero-copy evaluation
+    if (gpu_backend_ && config_.use_gpu_resident_batches &&
+        has_unified_memory_) {
+      if (!initialize_gpu_batches()) {
+        config_.use_gpu_resident_batches = false;
+      }
     }
   }
 
-  // Create MCTS search using ThreadSafeMCTS (stable, doesn't crash)
+  // Create MCTS search using ThreadSafeMCTS
+  // This loads the transformer network from config_.mcts_config.nn_weights_path
   mcts_search_ = std::make_unique<ThreadSafeMCTS>(config_.mcts_config);
-  mcts_search_->set_gpu_manager(gpu_manager);
+  if (gpu_manager) {
+    mcts_search_->set_gpu_manager(gpu_manager);
+  }
 
   // Initialize shared state
   ab_state_.reset();
@@ -256,8 +253,11 @@ void ParallelHybridSearch::start_search(const Position &pos,
   }
 
   // Stop any existing search and wait for threads to finish
+  std::cerr << "[HYB] start_search: calling stop()..." << std::endl;
   stop();
+  std::cerr << "[HYB] start_search: calling wait()..." << std::endl;
   wait();
+  std::cerr << "[HYB] start_search: stop+wait done" << std::endl;
 
   // Reset state
   stats_.reset();
@@ -341,43 +341,48 @@ void ParallelHybridSearch::stop() {
     mcts_search_->stop();
   }
 
-  // NOTE: We don't call engine_->stop() because:
-  // 1. The engine is not owned by us
-  // 2. Calling stop() while search_sync is running can cause issues
-  // 3. search_sync will return naturally when the AB thread sees should_stop()
+  // Stop AB search immediately -- engine_->stop() sets threads.stop = true
+  // which the AB search checks at every node. This ensures the AB thread
+  // winds down in <1ms rather than waiting for the polling loop.
+  if (engine_) {
+    engine_->stop();
+  }
 }
 
 void ParallelHybridSearch::wait() {
-  // Wait for all threads to complete
-  // Use a loop with timeout to avoid infinite hangs
-
-  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  std::cerr << "[HYB] wait() enter" << std::endl;
+  // Wait for threads to complete with a short timeout.
+  auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
 
   while (!all_threads_done()) {
     if (std::chrono::steady_clock::now() > deadline) {
-      // Timeout - threads are stuck, force stop
+      std::cerr << "[HYB] wait() TIMEOUT - coord_done="
+                << coordinator_thread_done_.load()
+                << " mcts_done=" << mcts_thread_done_.load()
+                << " ab_done=" << ab_thread_done_.load() << std::endl;
       stop_flag_.store(true, std::memory_order_release);
-      if (mcts_search_) {
+      if (mcts_search_)
         mcts_search_->stop();
-      }
+      if (engine_)
+        engine_->stop();
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
       break;
     }
-    std::this_thread::sleep_for(std::chrono::microseconds(500));
+    std::this_thread::sleep_for(std::chrono::microseconds(200));
   }
 
-  // Now join the threads
+  // Join all threads. If they're not done, wait for them.
+  // Never detach -- detached threads can access destroyed objects.
   {
     std::lock_guard<std::mutex> lock(thread_mutex_);
 
-    if (coordinator_thread_.joinable()) {
+    if (coordinator_thread_.joinable())
       coordinator_thread_.join();
-    }
-    if (mcts_thread_.joinable()) {
+    if (mcts_thread_.joinable())
       mcts_thread_.join();
-    }
-    if (ab_thread_.joinable()) {
+    if (ab_thread_.joinable())
       ab_thread_.join();
-    }
 
     // Reset thread states
     mcts_thread_state_.store(ThreadState::IDLE, std::memory_order_release);
@@ -387,6 +392,7 @@ void ParallelHybridSearch::wait() {
   }
 
   searching_.store(false, std::memory_order_release);
+  std::cerr << "[HYB] wait() exit" << std::endl;
 }
 
 Move ParallelHybridSearch::get_best_move() const {
@@ -475,10 +481,12 @@ bool ParallelHybridSearch::should_stop() const {
 
 // MCTS thread - runs GPU-accelerated MCTS
 void ParallelHybridSearch::mcts_thread_main() {
+  std::cerr << "[MCTS_THR] enter" << std::endl;
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
     ~ThreadGuard() {
+      std::cerr << "[MCTS_THR] ThreadGuard destructor" << std::endl;
       self->mcts_state_.mcts_running.store(false, std::memory_order_release);
       self->mcts_thread_state_.store(ThreadState::IDLE,
                                      std::memory_order_release);
@@ -502,7 +510,11 @@ void ParallelHybridSearch::mcts_thread_main() {
     mcts_done = true;
   };
 
-  // Start MCTS search with FEN string
+  // Start MCTS search with FEN string.
+  // Note: don't call start_search() which internally does stop()+wait() --
+  // that would block if the previous eval thread is in a GPU call.
+  // Instead, the hybrid's own start_search() already stopped everything.
+  mcts_search_->stop();
   mcts_search_->start_search(root_fen_, mcts_limits, mcts_callback, nullptr);
 
   // Periodically update shared state and check for AB policy updates
@@ -535,7 +547,9 @@ void ParallelHybridSearch::mcts_thread_main() {
   }
 
   // Wait for MCTS to finish
+  std::cerr << "[MCTS_THR] calling mcts_search_->wait()..." << std::endl;
   mcts_search_->wait();
+  std::cerr << "[MCTS_THR] mcts wait done" << std::endl;
 
   // Final state update
   publish_mcts_state();
@@ -591,6 +605,7 @@ void ParallelHybridSearch::update_mcts_policy_from_ab() {
 
 // AB thread - runs full alpha-beta iterative deepening
 void ParallelHybridSearch::ab_thread_main() {
+  std::cerr << "[AB_THR] enter" << std::endl;
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
@@ -617,34 +632,39 @@ void ParallelHybridSearch::run_ab_search() {
   if (!engine_)
     return;
 
-  // Use the engine's native iterative deepening with per-iteration callbacks.
-  // This preserves all search state (TT entries, aspiration windows, killer
-  // moves, history tables) across depth iterations -- much more efficient than
-  // calling search_silent() at depth 1, 2, 3, ... which loses that state.
-  // The callback fires after each depth, publishing the PV to shared state
-  // for real-time injection into the MCTS tree via unified memory.
+  // Set up position using the standard Engine interface
+  engine_->set_position(root_fen_, {});
 
-  engine_->search_with_callbacks(
-      root_fen_, time_budget_ms_,
-      [this](const Engine::QuickSearchResult &result) {
-        // Publish AB state after each depth iteration
-        if (result.best_move != Move::none()) {
-          publish_ab_state(result.best_move, result.score, result.depth,
-                           result.nodes);
-          ab_state_.publish_pv(result.pv, result.depth);
+  // Build limits with movetime
+  Search::LimitsType ab_limits;
+  ab_limits.startTime = now();
+  if (time_budget_ms_ > 0)
+    ab_limits.movetime = time_budget_ms_;
 
-          // Update individual move scores from PV
-          for (size_t i = 0;
-               i < result.pv.size() && i < ABSharedState::MAX_MOVES; ++i) {
-            ab_state_.update_move_score(result.pv[i], result.score,
-                                        result.depth);
-          }
+  // Suppress bestmove output -- the coordinator handles it
+  auto saved_bestmove = engine_->get_on_bestmove();
+  Move ab_best_move = Move::none();
+  int ab_score = 0;
+  engine_->set_on_bestmove([this, &ab_best_move, &ab_score](
+                               std::string_view bestmove, std::string_view) {
+    // Parse the bestmove string to get the Move
+    Position pos;
+    StateInfo st;
+    pos.set(root_fen_, false, &st);
+    ab_best_move = UCIEngine::to_move(pos, std::string(bestmove));
+    // Publish final AB state
+    if (ab_best_move != Move::none()) {
+      publish_ab_state(ab_best_move, ab_score, 0,
+                       engine_->threads_nodes_searched());
+    }
+  });
 
-          stats_.ab_nodes = result.nodes;
-          stats_.ab_depth = result.depth;
-        }
-      },
-      stop_flag_);
+  // Standard search path -- no state corruption
+  engine_->go(ab_limits);
+  engine_->wait_for_search_finished();
+
+  // Restore callback
+  engine_->set_on_bestmove(std::move(saved_bestmove));
 }
 
 void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
@@ -654,10 +674,12 @@ void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
 
 // Coordinator thread - monitors both searches and makes final decision
 void ParallelHybridSearch::coordinator_thread_main() {
+  std::cerr << "[COORD] enter" << std::endl;
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
     ~ThreadGuard() {
+      std::cerr << "[COORD] ThreadGuard destructor" << std::endl;
       self->coordinator_thread_state_.store(ThreadState::IDLE,
                                             std::memory_order_release);
       self->searching_.store(false, std::memory_order_release);
@@ -732,22 +754,39 @@ void ParallelHybridSearch::coordinator_thread_main() {
     mcts_search_->stop();
   }
 
-  // NOTE: Do NOT call engine_->stop() here - it causes race conditions
-  // The AB thread will naturally finish when search_sync completes
-  // Just wait for it to finish
+  // Stop AB search immediately so it winds down before we read its result
+  if (engine_) {
+    engine_->stop();
+  }
 
-  // Wait for MCTS and AB threads to finish before making decision
-  // This ensures we have their final results
+  // Wait for MCTS and AB threads to finish before making decision.
+  // After external stop: emit bestmove immediately using AB result.
+  // Don't wait for MCTS -- GPU inference can't be interrupted.
+  int max_wait = stop_flag_.load(std::memory_order_acquire) ? 100 : 4000;
   int wait_count = 0;
-  while ((!mcts_thread_done_.load(std::memory_order_acquire) ||
-          !ab_thread_done_.load(std::memory_order_acquire)) &&
-         wait_count < 500) {
+  // Only wait for AB thread (MCTS might be stuck in GPU).
+  while (!ab_thread_done_.load(std::memory_order_acquire) &&
+         wait_count < max_wait) {
     std::this_thread::sleep_for(std::chrono::microseconds(500));
     wait_count++;
   }
 
   // Make final decision
+  std::cerr << "[COORD] making final decision..." << std::endl;
   Move final_move = make_final_decision();
+  std::cerr << "[COORD] final_move=" << final_move.raw() << std::endl;
+
+  // Guard: if no valid move, try to find any legal move
+  if (final_move == Move::none()) {
+    Position pos;
+    StateInfo st;
+    pos.set(root_fen_, false, &st);
+    MoveList<LEGAL> moves(pos);
+    if (moves.size() > 0) {
+      final_move = *moves.begin();
+    }
+  }
+
   final_best_move_.store(final_move.raw(), std::memory_order_release);
 
   // Get ponder move

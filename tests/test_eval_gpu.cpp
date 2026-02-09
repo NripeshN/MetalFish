@@ -30,8 +30,8 @@ static bool test_metal_availability() {
     auto &backend = GPU::gpu();
     EXPECT(tc, backend.max_threads_per_simd_group() > 0);
     std::cout << "    Metal device: available" << std::endl;
-    std::cout << "    Max threads/simd_group: " << backend.max_threads_per_simd_group()
-              << std::endl;
+    std::cout << "    Max threads/simd_group: "
+              << backend.max_threads_per_simd_group() << std::endl;
     std::cout << "    Unified memory: "
               << (backend.has_unified_memory() ? "yes" : "no") << std::endl;
   } else {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MetalFish Testing Framework
-Based on Stockfish's testing.py
+MetalFish testing utilities
 """
 
 import concurrent.futures
@@ -200,7 +200,7 @@ class TestRunner:
 # PERFT TESTS
 # ============================================================================
 
-# Standard perft test positions (matching Stockfish's perft.sh)
+# Standard perft test positions
 PERFT_POSITIONS = [
     # (FEN, depth, expected_nodes)
     # Starting position
@@ -464,7 +464,7 @@ def test_uci_protocol():
 # BENCHMARK
 # ============================================================================
 
-STOCKFISH_BIN = PATH.parent / "reference" / "stockfish" / "src" / "stockfish"
+REFERENCE_BIN = PATH.parent / "reference" / "engines" / "reference_engine"
 
 
 def run_bench(engine_path: str, engine_name: str, depth: int = 13) -> dict:
@@ -553,27 +553,27 @@ def run_perft_bench(engine: MetalFish, depth: int = 6) -> dict:
 
 
 def benchmark_comparison():
-    """Compare MetalFish and Stockfish performance"""
+    """Compare MetalFish performance with reference engine"""
     print(f"\n{WHITE_BOLD}=" * 60)
-    print("BENCHMARK COMPARISON: MetalFish (Metal) vs Stockfish (CPU)")
+    print("BENCHMARK COMPARISON: MetalFish performance test")
     print("=" * 60 + f"{RESET_COLOR}\n")
 
-    # Check if Stockfish exists
-    stockfish_exists = STOCKFISH_BIN.exists()
-    if not stockfish_exists:
-        print(f"{CYAN_COLOR}Note: Stockfish binary not found at {STOCKFISH_BIN}")
-        print("Building Stockfish for comparison...{RESET_COLOR}")
+    # Check if reference engine exists
+    ref_engine_exists = REFERENCE_BIN.exists()
+    if not ref_engine_exists:
+        print(f"{CYAN_COLOR}Note: Reference engine not found at {REFERENCE_BIN}")
+        print("Building reference engine for comparison...{RESET_COLOR}")
         try:
             subprocess.run(
                 ["make", "-j", "build", "ARCH=apple-silicon"],
-                cwd=str(STOCKFISH_BIN.parent),
+                cwd=str(REFERENCE_BIN.parent),
                 capture_output=True,
                 timeout=300,
             )
-            stockfish_exists = STOCKFISH_BIN.exists()
+            ref_engine_exists = REFERENCE_BIN.exists()
         except:
             print(
-                f"{RED_COLOR}Could not build Stockfish. Skipping comparison.{RESET_COLOR}"
+                f"{RED_COLOR}Could not build reference engine. Skipping comparison.{RESET_COLOR}"
             )
 
     # Run MetalFish perft benchmark
@@ -593,13 +593,13 @@ def benchmark_comparison():
     mf_engine.quit()
     mf_engine.close()
 
-    if stockfish_exists:
-        # Run Stockfish perft benchmark
-        print(f"\n  Running Stockfish perft 6...")
+    if ref_engine_exists:
+        # Run reference perft benchmark
+        print(f"\n  Running reference engine perft 6...")
         try:
             sf_start = time.time()
             sf_result = subprocess.run(
-                [str(STOCKFISH_BIN)],
+                [str(REFERENCE_BIN)],
                 input="position startpos\ngo perft 6\nquit\n",
                 capture_output=True,
                 text=True,
@@ -614,7 +614,7 @@ def benchmark_comparison():
 
             sf_nps = int(sf_nodes / sf_time) if sf_time > 0 else 0
 
-            print(f"  Stockfish: {sf_nodes:,} nodes in {int(sf_time*1000)}ms")
+            print(f"  Reference: {sf_nodes:,} nodes in {int(sf_time*1000)}ms")
             print(f"             NPS: {sf_nps:,}")
 
             # Comparison
@@ -623,14 +623,14 @@ def benchmark_comparison():
                 ratio = mf_perft["nps"] / sf_nps
                 if ratio > 1:
                     print(
-                        f"  MetalFish is {GREEN_COLOR}{ratio:.2f}x faster{RESET_COLOR} than Stockfish for perft"
+                        f"  MetalFish is {GREEN_COLOR}{ratio:.2f}x faster{RESET_COLOR} than reference engine for perft"
                     )
                 else:
                     print(
-                        f"  Stockfish is {CYAN_COLOR}{1/ratio:.2f}x faster{RESET_COLOR} than MetalFish for perft"
+                        f"  Reference is {CYAN_COLOR}{1/ratio:.2f}x faster{RESET_COLOR} than MetalFish for perft"
                     )
         except Exception as e:
-            print(f"  {RED_COLOR}Stockfish benchmark failed: {e}{RESET_COLOR}")
+            print(f"  {RED_COLOR}Reference benchmark failed: {e}{RESET_COLOR}")
 
     # Search benchmark
     print(f"\n{WHITE_BOLD}Search Benchmark (depth 12){RESET_COLOR}")
@@ -662,11 +662,11 @@ def benchmark_comparison():
     mf_engine.quit()
     mf_engine.close()
 
-    if stockfish_exists:
-        print(f"  Running Stockfish depth 12...")
+    if ref_engine_exists:
+        print(f"  Running reference depth 12...")
         try:
             sf_result = subprocess.run(
-                [str(STOCKFISH_BIN)],
+                [str(REFERENCE_BIN)],
                 input="position startpos\ngo depth 12\nquit\n",
                 capture_output=True,
                 text=True,
@@ -684,21 +684,21 @@ def benchmark_comparison():
                         if p == "nps" and i + 1 < len(parts):
                             sf_nps = int(parts[i + 1])
 
-            print(f"  Stockfish: {sf_nodes:,} nodes, NPS: {sf_nps:,}")
+            print(f"  Reference: {sf_nodes:,} nodes, NPS: {sf_nps:,}")
 
             if mf_nps > 0 and sf_nps > 0:
                 ratio = mf_nps / sf_nps
                 print(f"\n{WHITE_BOLD}Search NPS Comparison:{RESET_COLOR}")
                 if ratio > 1:
                     print(
-                        f"  MetalFish is {GREEN_COLOR}{ratio:.2f}x faster{RESET_COLOR} than Stockfish"
+                        f"  MetalFish is {GREEN_COLOR}{ratio:.2f}x faster{RESET_COLOR} than reference engine"
                     )
                 else:
                     print(
-                        f"  Stockfish is {CYAN_COLOR}{1/ratio:.2f}x faster{RESET_COLOR} than MetalFish"
+                        f"  Reference is {CYAN_COLOR}{1/ratio:.2f}x faster{RESET_COLOR} than MetalFish"
                     )
         except Exception as e:
-            print(f"  {RED_COLOR}Stockfish search failed: {e}{RESET_COLOR}")
+            print(f"  {RED_COLOR}Reference search failed: {e}{RESET_COLOR}")
 
     print()
 

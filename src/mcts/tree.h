@@ -30,6 +30,7 @@
 #include <queue>
 #include <random>
 #include <shared_mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -368,6 +369,10 @@ struct WorkerContext {
 // ============================================================================
 
 struct ThreadSafeMCTSConfig {
+  // Transformer network weights path (.pb or .pb.gz)
+  // Required for MCTS/Hybrid modes. Set via UCI option NNWeights.
+  std::string nn_weights_path;
+
   // MCTS PUCT parameters
   float cpuct = 1.745f;        // default value: 1.745
   float cpuct_base = 19652.0f; // match reference defaults

@@ -5,11 +5,11 @@
 
 #pragma once
 
+#include <cmath>
+#include <functional>
 #include <iostream>
 #include <string>
-#include <functional>
 #include <vector>
-#include <cmath>
 
 namespace MetalFish {
 namespace Test {
@@ -36,11 +36,11 @@ struct TestCase {
 
   void print_result() const {
     if (passed) {
-      std::cout << "  PASS: " << name << " (" << assertions
-                << " assertions)" << std::endl;
+      std::cout << "  PASS: " << name << " (" << assertions << " assertions)"
+                << std::endl;
     } else {
-      std::cout << "  FAIL: " << name << " (" << failures << "/"
-                << assertions << " failed)" << std::endl;
+      std::cout << "  FAIL: " << name << " (" << failures << "/" << assertions
+                << " failed)" << std::endl;
       for (const auto &msg : failure_messages) {
         std::cout << "    - " << msg << std::endl;
       }
@@ -51,41 +51,41 @@ struct TestCase {
 #define EXPECT(tc, cond)                                                       \
   do {                                                                         \
     (tc).check((cond), std::string(__FILE__) + ":" +                           \
-                            std::to_string(__LINE__) + ": " + #cond);          \
+                           std::to_string(__LINE__) + ": " + #cond);           \
   } while (0)
 
 #define EXPECT_EQ(tc, a, b)                                                    \
   do {                                                                         \
     (tc).check((a) == (b), std::string(__FILE__) + ":" +                       \
-                                std::to_string(__LINE__) + ": " + #a +         \
-                                " == " + #b);                                  \
+                               std::to_string(__LINE__) + ": " + #a +          \
+                               " == " + #b);                                   \
   } while (0)
 
 #define EXPECT_NE(tc, a, b)                                                    \
   do {                                                                         \
     (tc).check((a) != (b), std::string(__FILE__) + ":" +                       \
-                                std::to_string(__LINE__) + ": " + #a +         \
-                                " != " + #b);                                  \
+                               std::to_string(__LINE__) + ": " + #a +          \
+                               " != " + #b);                                   \
   } while (0)
 
 #define EXPECT_GT(tc, a, b)                                                    \
   do {                                                                         \
     (tc).check((a) > (b), std::string(__FILE__) + ":" +                        \
-                               std::to_string(__LINE__) + ": " + #a +          \
-                               " > " + #b);                                    \
+                              std::to_string(__LINE__) + ": " + #a + " > " +   \
+                              #b);                                             \
   } while (0)
 
 #define EXPECT_GE(tc, a, b)                                                    \
   do {                                                                         \
     (tc).check((a) >= (b), std::string(__FILE__) + ":" +                       \
-                                std::to_string(__LINE__) + ": " + #a +         \
-                                " >= " + #b);                                  \
+                               std::to_string(__LINE__) + ": " + #a +          \
+                               " >= " + #b);                                   \
   } while (0)
 
 #define EXPECT_NEAR(tc, a, b, eps)                                             \
   do {                                                                         \
     (tc).check(std::abs((a) - (b)) <= (eps),                                   \
-               std::string(__FILE__) + ":" + std::to_string(__LINE__) +         \
+               std::string(__FILE__) + ":" + std::to_string(__LINE__) +        \
                    ": |" + #a + " - " + #b + "| <= " + #eps);                  \
   } while (0)
 

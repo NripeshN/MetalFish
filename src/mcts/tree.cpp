@@ -821,21 +821,26 @@ ThreadSafeTree::ThreadSafeTree() {
 ThreadSafeTree::~ThreadSafeTree() = default;
 
 void ThreadSafeTree::reset(const std::string &fen) {
+  std::cerr << "[TREE] reset() enter, fen=" << fen.substr(0, 20) << std::endl;
   {
     std::unique_lock<std::shared_mutex> lock(fen_mutex_);
     root_fen_ = fen;
   }
+  std::cerr << "[TREE] clearing arenas..." << std::endl;
 
   // Reset arenas
   {
     std::lock_guard<std::mutex> lock(arena_mutex_);
     arenas_.clear();
+    std::cerr << "[TREE] arenas cleared, creating new..." << std::endl;
     arenas_.push_back(std::make_unique<NodeArena>());
     current_arena_.store(0, std::memory_order_relaxed);
   }
+  std::cerr << "[TREE] creating new root..." << std::endl;
 
   root_ = std::make_unique<ThreadSafeNode>();
   node_count_.store(1, std::memory_order_relaxed);
+  std::cerr << "[TREE] reset() done" << std::endl;
 }
 
 ThreadSafeNode *ThreadSafeTree::allocate_node(ThreadSafeNode *parent,
@@ -894,14 +899,28 @@ ThreadSafeMCTS::ThreadSafeMCTS(const ThreadSafeMCTSConfig &config)
   // Initialize simple TT for direct evaluation mode
   simple_tt_.resize(SIMPLE_TT_SIZE);
 
-  // Try to load NN weights
-  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
-  if (weights_path) {
+  // Load transformer NN weights from config path (set by UCI option NNWeights)
+  // Falls back to METALFISH_NN_WEIGHTS env var for backward compatibility
+  std::string weights_path = config.nn_weights_path;
+  if (weights_path.empty()) {
+    const char *env_path = std::getenv("METALFISH_NN_WEIGHTS");
+    if (env_path)
+      weights_path = env_path;
+  }
+
+  if (!weights_path.empty()) {
     try {
       nn_evaluator_ = std::make_unique<NNMCTSEvaluator>(weights_path);
+      std::cerr << "[MCTS] Loaded transformer weights: " << weights_path
+                << std::endl;
     } catch (const std::exception &e) {
-      std::cerr << "Failed to load NN weights: " << e.what() << std::endl;
+      std::cerr << "[MCTS] Failed to load transformer weights (" << weights_path
+                << "): " << e.what() << std::endl;
     }
+  } else {
+    std::cerr << "[MCTS] WARNING: No transformer weights path set. "
+              << "Set via UCI option NNWeights or env METALFISH_NN_WEIGHTS."
+              << std::endl;
   }
 }
 
@@ -924,6 +943,7 @@ void ThreadSafeMCTS::start_search(const std::string &fen,
   wait();
 
   // Reset state
+  std::cerr << "[TSMCTS] start_search: resetting state..." << std::endl;
   stats_.reset();
   stop_flag_.store(false, std::memory_order_release);
   running_.store(true, std::memory_order_release);
@@ -934,9 +954,13 @@ void ThreadSafeMCTS::start_search(const std::string &fen,
 
   // Calculate time budget
   time_budget_ms_ = calculate_time_budget();
+  std::cerr << "[TSMCTS] start_search: time_budget=" << time_budget_ms_
+            << std::endl;
 
   // Initialize tree
+  std::cerr << "[TSMCTS] start_search: resetting tree..." << std::endl;
   tree_->reset(fen);
+  std::cerr << "[TSMCTS] start_search: tree reset done" << std::endl;
 
   // Get actual thread count and auto-tune
   int actual_threads = config_.get_num_threads();
@@ -947,15 +971,18 @@ void ThreadSafeMCTS::start_search(const std::string &fen,
     batched_evaluator_ = std::make_unique<BatchedGPUEvaluator>(
         gpu_manager_, &stats_, config_.min_batch_size, config_.max_batch_size,
         config_.batch_timeout_us);
-    // Note: Async mode disabled by default - synchronous batching is more
-    // efficient for MCTS because workers need to wait for evaluation results
-    // anyway. Multiple command queues are still available for future async
-    // workloads.
     batched_evaluator_->set_async_mode(false);
     batched_evaluator_->start();
   }
 
+  // Transformer evaluation: workers call nn_evaluator_->Evaluate() directly.
+  // GPU access is serialized by MetalNetwork's gpu_mutex_. Single-thread
+  // pattern -- the search thread itself does the GPU call.
+  // No separate BatchedNNEvaluator needed -- simpler and crash-free.
+
   // Create worker contexts
+  std::cerr << "[TSMCTS] start_search: creating " << actual_threads
+            << " workers" << std::endl;
   worker_contexts_.clear();
   for (int i = 0; i < actual_threads; ++i) {
     worker_contexts_.push_back(std::make_unique<WorkerContext>());
@@ -966,6 +993,7 @@ void ThreadSafeMCTS::start_search(const std::string &fen,
   for (int i = 0; i < actual_threads; ++i) {
     workers_.emplace_back(&ThreadSafeMCTS::worker_thread, this, i);
   }
+  std::cerr << "[TSMCTS] start_search: all workers started" << std::endl;
 }
 
 void ThreadSafeMCTS::stop() {
@@ -973,18 +1001,25 @@ void ThreadSafeMCTS::stop() {
 }
 
 void ThreadSafeMCTS::wait() {
-  for (auto &worker : workers_) {
-    if (worker.joinable()) {
-      worker.join();
-    }
-  }
-  workers_.clear();
-
-  // Stop batched evaluator
+  std::cerr << "[TSMCTS] wait() enter" << std::endl;
+  // Stop GPU NNUE batched evaluator if active
   if (batched_evaluator_) {
     batched_evaluator_->stop();
     batched_evaluator_.reset();
   }
+
+  // Workers should exit quickly since evaluators are stopped.
+  std::cerr << "[TSMCTS] joining " << workers_.size() << " workers..."
+            << std::endl;
+  for (size_t i = 0; i < workers_.size(); ++i) {
+    if (workers_[i].joinable()) {
+      std::cerr << "[TSMCTS] joining worker " << i << "..." << std::endl;
+      workers_[i].join();
+      std::cerr << "[TSMCTS] worker " << i << " joined" << std::endl;
+    }
+  }
+  workers_.clear();
+  std::cerr << "[TSMCTS] wait() exit" << std::endl;
 
   running_.store(false, std::memory_order_release);
 
@@ -1058,17 +1093,9 @@ void ThreadSafeMCTS::worker_thread(int thread_id) {
   ctx.set_root_fen(tree_->root_fen());
 
   // Main search loop with batched stop checks
-  constexpr int STOP_CHECK_INTERVAL = 64;
-  int iterations_since_check = 0;
-
-  while (true) {
-    // Batch stop checks to reduce overhead
-    if (++iterations_since_check >= STOP_CHECK_INTERVAL) {
-      iterations_since_check = 0;
-      if (should_stop())
-        break;
-    }
-
+  // Check stop on every iteration -- critical for responsiveness when
+  // the evaluator is stopped externally (e.g., time's up, UCI stop).
+  while (!should_stop()) {
     run_iteration(ctx);
   }
 
@@ -1131,6 +1158,7 @@ void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
 
   if (!leaf->has_children() && nn_evaluator_) {
     try {
+      // Direct GPU evaluation (single-thread pattern)
       nn_result = nn_evaluator_->Evaluate(ctx.pos);
       nn_used = true;
       stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);

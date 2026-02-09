@@ -61,7 +61,7 @@ MetalNetwork::MetalNetwork(const WeightsFile &file, int gpu_id, int max_batch,
 
   // Initialize Metal builder.
   builder_ = std::make_unique<MetalNetworkBuilder>();
-  device_name_ = builder_->init(gpu_id, max_batch_size_);
+  device_name_ = builder_->init(gpu_id);
 
   // Activation selection.
   const auto &nf = file.format().network_format();
@@ -206,28 +206,18 @@ void MetalNetwork::RunBatch(const std::vector<InputPlanes> &inputs,
     }
   }
 
-  // Zero-pad remaining entries for batch < max.
-  const int pad_start = batch * kInputPlanes;
-  const int pad_count = (max_batch_size_ - batch) * kInputPlanes;
-  if (pad_count > 0) {
-    std::memset(&io->input_masks_mem_[pad_start], 0,
-                pad_count * sizeof(uint64_t));
-    std::memset(&io->input_val_mem_[pad_start], 0, pad_count * sizeof(float));
-  }
-
+  // With dynamic @(-1) placeholders, pass actual batch size directly.
+  // No zero-padding needed -- MPSGraph accepts any batch size.
   {
     std::lock_guard<std::mutex> lock(gpu_mutex_);
-    // Evaluate actual batch size instead of always evaluating max_batch_size_.
-    // This avoids wasting GPU compute on zero-padded data.
-    const int eval_batch = batch;
     if (moves_left_) {
       builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
-                            eval_batch,
+                            batch,
                             {&io->op_policy_mem_[0], &io->op_value_mem_[0],
                              &io->op_moves_left_mem_[0]});
     } else {
       builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
-                            eval_batch,
+                            batch,
                             {&io->op_policy_mem_[0], &io->op_value_mem_[0]});
     }
   }

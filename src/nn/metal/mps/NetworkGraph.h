@@ -4,6 +4,7 @@
 
   Licensed under GPL-3.0
 */
+
 #pragma once
 
 #import <Foundation/Foundation.h>
@@ -28,7 +29,6 @@ static MPSImageFeatureChannelFormat fcFormat =
   // Keep the device and command queue objects around for ease of use.
   MPSGraphDevice *_device;
   id<MTLCommandQueue> _queue;
-  NSUInteger _maxBatchSize;
 
   // Input tensor and tensor data placeholders.
   MPSGraphTensor *_inputTensor;
@@ -51,11 +51,9 @@ static MPSImageFeatureChannelFormat fcFormat =
 + (MetalNetworkGraph *_Nonnull)getGraphAt:(NSNumber *_Nonnull)index;
 
 + (void)graphWithDevice:(id<MTLDevice> __nonnull)device
-                  index:(NSNumber *_Nonnull)index
-               maxBatch:(NSUInteger)maxBatch;
+                  index:(NSNumber *_Nonnull)index;
 
-- (nonnull instancetype)initWithDevice:(id<MTLDevice> __nonnull)device
-                              maxBatch:(NSUInteger)maxBatch;
+- (nonnull instancetype)initWithDevice:(id<MTLDevice> __nonnull)device;
 
 - (nonnull MPSGraphTensor *)
     inputPlaceholderWithInputChannels:(NSUInteger)channels

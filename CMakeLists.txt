@@ -168,10 +168,10 @@ if(USE_METAL AND METAL_CPP_AVAILABLE)
       ${NN_SOURCES} src/nn/metal/metal_network.mm
       src/nn/metal/mps/MetalNetworkBuilder.mm src/nn/metal/mps/NetworkGraph.mm)
 
-  # Disable ARC for Metal (uses manual memory management)
+  # Enable ARC for Metal ObjC++ files (required for MPSGraph)
   set_source_files_properties(
     src/nn/metal/metal_network.mm src/nn/metal/mps/MetalNetworkBuilder.mm
-    src/nn/metal/mps/NetworkGraph.mm PROPERTIES COMPILE_FLAGS "-fno-objc-arc")
+    src/nn/metal/mps/NetworkGraph.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
   message(STATUS "Metal GPU acceleration: ENABLED")
@@ -297,12 +297,8 @@ if(BUILD_TESTS)
   enable_testing()
 
   set(TEST_SOURCES
-      tests/test_main.cpp
-      tests/test_core.cpp
-      tests/test_search_module.cpp
-      tests/test_mcts_module.cpp
-      tests/test_hybrid.cpp
-      tests/test_eval_gpu.cpp)
+      tests/test_main.cpp tests/test_core.cpp tests/test_search_module.cpp
+      tests/test_mcts_module.cpp tests/test_hybrid.cpp tests/test_eval_gpu.cpp)
 
   add_executable(
     metalfish_tests

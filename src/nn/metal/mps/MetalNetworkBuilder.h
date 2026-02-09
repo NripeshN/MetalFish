@@ -4,17 +4,18 @@
 
   Licensed under GPL-3.0
 */
+
 #pragma once
 
-#include <cstdint>
 #include <string>
 #include <vector>
-
-#include "../../weights.h"
 
 namespace MetalFish {
 namespace NN {
 namespace Metal {
+
+using MetalFish::NN::InputEmbedding;
+using MetalFish::NN::MultiHeadWeights;
 
 struct Activations {
   std::string default_activation = "relu";
@@ -27,7 +28,7 @@ public:
   MetalNetworkBuilder(void);
   ~MetalNetworkBuilder(void);
 
-  std::string init(int gpu_id, int max_batch);
+  std::string init(int gpu_id);
 
   void build(int kInputPlanes, MultiHeadWeights &weights,
              InputEmbedding embedding, bool attn_body, bool attn_policy,
@@ -40,7 +41,6 @@ public:
 
 private:
   int gpu_id;
-  int max_batch_size_;
 };
 
 } // namespace Metal
