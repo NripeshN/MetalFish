@@ -137,8 +137,8 @@ jobs:
 
       - name: Download NNUE files
         run: |
-          mkdir -p src
-          cd src
+          mkdir -p networks
+          cd networks
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
           ls -la
@@ -188,14 +188,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          cp src/*.nnue build/${{ env.BUILD_TYPE }}/ 2>/dev/null || true
+          cp networks/*.nnue build/${{ env.BUILD_TYPE }}/ 2>/dev/null || true
           ls -la build/${{ env.BUILD_TYPE }}/
 
       - name: Copy NNUE files into build output (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          cp src/*.nnue build/ 2>/dev/null || true
+          cp networks/*.nnue build/ 2>/dev/null || true
           ls -la build/
 
       - name: Run C++ Tests (Unix)
@@ -283,8 +283,8 @@ jobs:
 
       - name: Download NNUE files
         run: |
-          mkdir -p src
-          cd src
+          mkdir -p networks
+          cd networks
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
           ls -la
@@ -306,7 +306,7 @@ jobs:
 
       - name: Copy NNUE files into build output
         run: |
-          cp src/*.nnue build/ 2>/dev/null || true
+          cp networks/*.nnue build/ 2>/dev/null || true
           ls -la build/
         shell: bash
 
@@ -395,8 +395,8 @@ jobs:
 
       - name: Download NNUE files
         run: |
-          mkdir -p src
-          cd src
+          mkdir -p networks
+          cd networks
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
         shell: bash
@@ -459,8 +459,8 @@ jobs:
 
       - name: Download NNUE files
         run: |
-          mkdir -p src
-          cd src
+          mkdir -p networks
+          cd networks
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
           curl -L --retry 3 --retry-delay 2 -O https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
         shell: bash

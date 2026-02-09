@@ -331,7 +331,6 @@ InputPlanes EncodePositionForNN(
   int initial_castling = current_pos.can_castle(ANY_CASTLING) ? -1 : 0;
   int history_size = std::min(history_planes, kMoveHistory);
   int actual_history = static_cast<int>(position_history.size());
-  bool mirror_next = false;
   
   for (int i = 0; i < history_size; ++i) {
     // Calculate history index
@@ -374,9 +373,6 @@ InputPlanes EncodePositionForNN(
     Position pos;
     StateInfo st;
     pos.set(source.fen(), source.is_chess960(), &st);
-    if (mirror_next) {
-      pos.flip();
-    }
     
     // Check repetitions for v2 canonicalization
     if (skip_non_repeats && i > 0) {
@@ -443,11 +439,6 @@ InputPlanes EncodePositionForNN(
         uint64_t mask = ((0x0001000000000000ULL - 0x0000000100000000ULL) << (ep_idx - 56));
         FillPlaneFromBitboard(result[base + 6], their_pieces[0] + mask);
       }
-    }
-    
-    // Alternate perspective for next historical ply
-    if (history_idx > 0) {
-      mirror_next = !mirror_next;
     }
     
     // Stop early if rule50 was reset (capture or pawn move)

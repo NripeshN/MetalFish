@@ -166,7 +166,7 @@ void MetalNetwork::RunBatch(const std::vector<InputPlanes>& inputs,
 
   {
     std::lock_guard<std::mutex> lock(gpu_mutex_);
-    const int eval_batch = max_batch_size_;
+    const int eval_batch = batch;
     if (moves_left_) {
       builder_->forwardEval(&io.input_val_mem_[0], &io.input_masks_mem_[0],
                             eval_batch,
