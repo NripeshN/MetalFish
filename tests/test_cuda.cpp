@@ -16,9 +16,8 @@
 #ifdef USE_CUDA
 #include "core/bitboard.h"
 #include "core/position.h"
-#include "gpu/backend.h"
-#include "gpu/cuda/cuda_backend.h"
-#include "gpu/gpu_nnue_integration.h"
+#include "eval/gpu_backend.h"
+#include "eval/gpu_integration.h"
 
 using namespace MetalFish;
 

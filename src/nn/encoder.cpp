@@ -255,7 +255,7 @@ InputPlanes EncodePositionForNN(
       CastlingRights their_queenside = (them == WHITE ? WHITE_OOO : BLACK_OOO);
       CastlingRights their_kingside = (them == WHITE ? WHITE_OO : BLACK_OO);
       
-      // Order (matching Lc0 classical): our O-O-O, our O-O, their O-O-O, their O-O
+      // Order: our O-O-O, our O-O, their O-O-O, their O-O
       SetPlane(result[aux_base + 0], current_pos.can_castle(our_queenside) ? 1.0f : 0.0f);
       SetPlane(result[aux_base + 1], current_pos.can_castle(our_kingside) ? 1.0f : 0.0f);
       SetPlane(result[aux_base + 2], current_pos.can_castle(their_queenside) ? 1.0f : 0.0f);
@@ -384,7 +384,7 @@ InputPlanes EncodePositionForNN(
     int base = i * kPlanesPerBoard;
     
     // Get piece bitboards from perspective of CURRENT position's side to move
-    // In standard Lc0 encoding, all history positions are encoded from the
+    // In standard encoding, all history positions are encoded from the
     // perspective of the current STM, not the historical position's STM.
     // "Our pieces" always means the current STM's pieces across all history.
     uint64_t our_pieces[6] = {

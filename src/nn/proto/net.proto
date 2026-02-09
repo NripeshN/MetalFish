@@ -249,7 +249,7 @@ message TrainingParams {
   optional float mse_loss = 3;
   optional float policy_loss = 4;
   optional float accuracy = 5;
-  optional string lc0_params = 6;
+  optional string network_params = 6;
 }
 
 message NetworkFormat {

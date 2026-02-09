@@ -8,7 +8,7 @@
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
-#include "mcts/thread_safe_mcts.h"
+#include "mcts/tree.h"
 #include <atomic>
 #include <cassert>
 #include <chrono>

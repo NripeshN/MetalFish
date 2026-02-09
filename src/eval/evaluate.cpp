@@ -22,7 +22,7 @@
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_accumulator.h"
 #include "eval/nnue/nnue_misc.h"
-#include "gpu/gpu_nnue_integration.h"
+#include "gpu_integration.h"
 #include "uci/uci.h"
 
 namespace MetalFish {

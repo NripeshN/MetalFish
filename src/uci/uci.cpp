@@ -27,13 +27,13 @@
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_accumulator.h"
 #include "eval/score.h"
-#include "gpu/backend.h"
-#include "gpu/gpu_mcts_backend.h"
-#include "gpu/gpu_nnue_integration.h"
-#include "mcts/parallel_hybrid_search.h"
-#include "mcts/position_classifier.h"
-#include "mcts/position_adapter.h"
-#include "mcts/thread_safe_mcts.h"
+#include "eval/gpu_backend.h"
+#include "mcts/gpu_backend.h"
+#include "eval/gpu_integration.h"
+#include "hybrid/hybrid_search.h"
+#include "hybrid/classifier.h"
+#include "hybrid/position_adapter.h"
+#include "mcts/tree.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
 #include "uci/engine.h"
@@ -190,7 +190,7 @@ void UCIEngine::loop() {
              "\nthe Universal Chess Interface (UCI) protocol to communicate "
              "with a GUI, an API, etc."
              "\nFor any further information, visit "
-             "https://github.com/official-stockfish/MetalFish#readme"
+             "https://github.com/NripeshN/MetalFish#readme"
              "\nor read the corresponding README.md and Copying.txt files "
              "distributed along with this program.\n"
           << sync_endl;
@@ -525,7 +525,7 @@ WinRateParams win_rate_params(const Position &pos) {
   double m = std::clamp(material, 17, 78) / 58.0;
 
   // Return a = p_a(material) and b = p_b(material), see
-  // github.com/official-stockfish/WDL_model
+  // WDL model calibration parameters
   constexpr double as[] = {-13.50030198, 40.92780883, -36.82753545,
                            386.83004070};
   constexpr double bs[] = {96.53354896, -165.79058388, 90.89679019,

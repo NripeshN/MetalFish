@@ -16,8 +16,8 @@
 #include "../src/nn/loader.h"
 #include "../src/nn/network.h"
 #include "../src/nn/policy_map.h"
-#include "../src/mcts/nn_mcts_evaluator.h"
-#include "../src/mcts/thread_safe_mcts.h"
+#include "../src/mcts/evaluator.h"
+#include "../src/mcts/tree.h"
 #include "../src/search/search.h"
 #include "../src/uci/uci.h"
 

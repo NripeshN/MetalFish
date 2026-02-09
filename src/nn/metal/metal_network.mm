@@ -117,6 +117,42 @@ MetalNetwork::MetalNetwork(const WeightsFile& file, int gpu_id,
 
 MetalNetwork::~MetalNetwork() = default;
 
+// ---- Buffer pool: avoids heap allocation on every inference call ----
+
+InputsOutputs* MetalNetwork::AcquireIO() {
+#ifdef __APPLE__
+  os_unfair_lock_lock(&io_pool_lock_);
+#else
+  std::lock_guard<std::mutex> lock(io_pool_mutex_);
+#endif
+  InputsOutputs* io = nullptr;
+  if (!io_pool_.empty()) {
+    io = io_pool_.back().release();
+    io_pool_.pop_back();
+  }
+#ifdef __APPLE__
+  os_unfair_lock_unlock(&io_pool_lock_);
+#endif
+  if (!io) {
+    io = new InputsOutputs(max_batch_size_, wdl_, moves_left_,
+                           conv_policy_, attn_policy_);
+  }
+  return io;
+}
+
+void MetalNetwork::ReleaseIO(InputsOutputs* io) {
+#ifdef __APPLE__
+  os_unfair_lock_lock(&io_pool_lock_);
+  io_pool_.emplace_back(io);
+  os_unfair_lock_unlock(&io_pool_lock_);
+#else
+  std::lock_guard<std::mutex> lock(io_pool_mutex_);
+  io_pool_.emplace_back(io);
+#endif
+}
+
+// ---- Inference entry points ----
+
 NetworkOutput MetalNetwork::Evaluate(const InputPlanes& input) {
   auto outputs = EvaluateBatch({input});
   return outputs.front();
@@ -136,74 +172,92 @@ void MetalNetwork::RunBatch(const std::vector<InputPlanes>& inputs,
     throw std::runtime_error("Batch size exceeds configured max batch size");
   }
 
-  // Allocate buffers at max batch size and pad with zeros for stability.
-  InputsOutputs io(max_batch_size_, wdl_, moves_left_, conv_policy_, attn_policy_);
+  // Acquire a pre-allocated IO buffer from the pool (no heap alloc).
+  InputsOutputs* io = AcquireIO();
 
   // Pack inputs into mask/value representation.
+  // Optimized: scan float array with early-exit bitboard reconstruction.
   for (int b = 0; b < batch; ++b) {
+    const int base = b * kInputPlanes;
     for (int p = 0; p < kInputPlanes; ++p) {
       const auto& plane = inputs[b][p];
       uint64_t mask = 0;
       float value = 0.0f;
-      for (int sq = 0; sq < 64; ++sq) {
-        float v = plane[sq];
-        if (v != 0.0f) {
-          mask |= (1ULL << sq);
-          value = v;
+      // Most planes are sparse (0/1 from bitboard) or uniform.
+      // Use two-pass: first check if plane is uniform, then scan.
+      const float first_nonzero = [&]() -> float {
+        for (int sq = 0; sq < 64; ++sq) {
+          if (plane[sq] != 0.0f) return plane[sq];
+        }
+        return 0.0f;
+      }();
+      if (first_nonzero != 0.0f) {
+        value = first_nonzero;
+        for (int sq = 0; sq < 64; ++sq) {
+          if (plane[sq] != 0.0f) {
+            mask |= (1ULL << sq);
+          }
         }
       }
-      io.input_masks_mem_[b * kInputPlanes + p] = mask;
-      io.input_val_mem_[b * kInputPlanes + p] = value;
+      io->input_masks_mem_[base + p] = mask;
+      io->input_val_mem_[base + p] = value;
     }
   }
-  // Pad remaining entries to avoid uninitialized data when batch < max.
-  for (int b = batch; b < max_batch_size_; ++b) {
-    for (int p = 0; p < kInputPlanes; ++p) {
-      io.input_masks_mem_[b * kInputPlanes + p] = 0;
-      io.input_val_mem_[b * kInputPlanes + p] = 0.0f;
-    }
+
+  // Zero-pad remaining entries for batch < max.
+  const int pad_start = batch * kInputPlanes;
+  const int pad_count = (max_batch_size_ - batch) * kInputPlanes;
+  if (pad_count > 0) {
+    std::memset(&io->input_masks_mem_[pad_start], 0,
+                pad_count * sizeof(uint64_t));
+    std::memset(&io->input_val_mem_[pad_start], 0,
+                pad_count * sizeof(float));
   }
 
   {
     std::lock_guard<std::mutex> lock(gpu_mutex_);
+    // Evaluate actual batch size instead of always evaluating max_batch_size_.
+    // This avoids wasting GPU compute on zero-padded data.
     const int eval_batch = batch;
     if (moves_left_) {
-      builder_->forwardEval(&io.input_val_mem_[0], &io.input_masks_mem_[0],
+      builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
                             eval_batch,
-                            {&io.op_policy_mem_[0], &io.op_value_mem_[0],
-                             &io.op_moves_left_mem_[0]});
+                            {&io->op_policy_mem_[0], &io->op_value_mem_[0],
+                             &io->op_moves_left_mem_[0]});
     } else {
-      builder_->forwardEval(&io.input_val_mem_[0], &io.input_masks_mem_[0],
+      builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
                             eval_batch,
-                            {&io.op_policy_mem_[0], &io.op_value_mem_[0]});
+                            {&io->op_policy_mem_[0], &io->op_value_mem_[0]});
     }
   }
 
   // Convert outputs.
   for (int b = 0; b < batch; ++b) {
-    NetworkOutput out;
+    NetworkOutput& out = outputs[b];
     out.policy.resize(kNumOutputPolicy);
     std::memcpy(out.policy.data(),
-                &io.op_policy_mem_[b * kNumOutputPolicy],
+                &io->op_policy_mem_[b * kNumOutputPolicy],
                 sizeof(float) * kNumOutputPolicy);
 
     if (wdl_) {
       out.has_wdl = true;
-      out.wdl[0] = io.op_value_mem_[b * 3 + 0];
-      out.wdl[1] = io.op_value_mem_[b * 3 + 1];
-      out.wdl[2] = io.op_value_mem_[b * 3 + 2];
+      out.wdl[0] = io->op_value_mem_[b * 3 + 0];
+      out.wdl[1] = io->op_value_mem_[b * 3 + 1];
+      out.wdl[2] = io->op_value_mem_[b * 3 + 2];
       out.value = out.wdl[0] - out.wdl[2];
     } else {
       out.has_wdl = false;
-      out.value = io.op_value_mem_[b];
+      out.value = io->op_value_mem_[b];
       out.wdl[0] = out.wdl[1] = out.wdl[2] = 0.0f;
     }
     if (moves_left_) {
       out.has_moves_left = true;
-      out.moves_left = io.op_moves_left_mem_[b];
+      out.moves_left = io->op_moves_left_mem_[b];
     }
-    outputs[b] = out;
   }
+
+  // Return IO buffer to the pool for reuse.
+  ReleaseIO(io);
 }
 
 std::string MetalNetwork::GetNetworkInfo() const {

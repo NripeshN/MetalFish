@@ -10,7 +10,7 @@
 #import <Metal/Metal.h>
 #import <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
-#import "../../network_legacy.h"
+#import "../../weights.h"
 
 @interface MPSGraphTensor(MetalExtensions)
 

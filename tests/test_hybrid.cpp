@@ -8,10 +8,10 @@
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
-#include "mcts/ab_integration.h"
-#include "mcts/parallel_hybrid_search.h"
-#include "mcts/position_classifier.h"
-#include "mcts/position_adapter.h"
+#include "hybrid/ab_bridge.h"
+#include "hybrid/hybrid_search.h"
+#include "hybrid/classifier.h"
+#include "hybrid/position_adapter.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>

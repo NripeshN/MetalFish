@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "../../network_legacy.h"
+#include "../../weights.h"
 
 namespace MetalFish {
 namespace NN {

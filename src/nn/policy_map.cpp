@@ -5,7 +5,7 @@
   Licensed under GPL-3.0
   
   Policy mapping tables for neural network move encoding.
-  Uses the standard Lc0 1858-move encoding scheme.
+  Uses the standard 1858-move encoding scheme.
   
   The policy head outputs 1858 values corresponding to:
   - Queen-like moves (up to 56 per origin square in 8 directions × 7 distances)
@@ -369,7 +369,7 @@ int MoveToNNIndex(Move move, int transform) {
     }
 
     // Handle promotions
-    // In standard Lc0 encoding, queen promotions are encoded as regular queen-direction
+    // In standard encoding, queen promotions are encoded as regular queen-direction
     // moves (indices 0-1791). Only underpromotions (r/b/n) have explicit promotion entries
     // at indices 1792-1857.
     char promo_char = 0;

@@ -188,7 +188,7 @@ void Network<Arch, Transformer>::verify(
           "The UCI option EvalFile might need to specify the full path, "
           "including the directory name, to the network file.";
       std::string msg4 = "The default net can be downloaded from: "
-                         "https://tests.stockfishchess.org/api/nn/" +
+                         "https://github.com/NripeshN/MetalFish/releases/download/nnue/" +
                          std::string(evalFile.defaultName);
       std::string msg5 = "The engine will be terminated now.";
 

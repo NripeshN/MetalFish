@@ -5,7 +5,7 @@
   Licensed under GPL-3.0
  */
 
-#import "../../network_legacy.h"
+#import "../../weights.h"
 #import "../tables/attention_policy_map.h"
 #import "MetalNetworkBuilder.h"
 #import "NetworkGraph.h"

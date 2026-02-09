@@ -32,7 +32,7 @@ constexpr int kAuxPlaneBase = kPlanesPerBoard * kMoveHistory;
 constexpr int kTotalPlanes = 112;  // 8 history * 13 planes + 8 auxiliary
 
 // Policy output size (all possible moves in UCI encoding)
-// Standard Lc0 encoding: 1792 regular moves + 66 underpromotions (22 directions * 3 types: r/b/n)
+// Standard encoding: 1792 regular moves + 66 underpromotions (22 directions * 3 types: r/b/n)
 // Queen promotions are encoded as regular queen-direction moves (indices 0-1791)
 constexpr int kPolicyOutputs = 1858;
 
