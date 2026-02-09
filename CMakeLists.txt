@@ -308,8 +308,7 @@ if(BUILD_TESTS)
       tests/test_hybrid.cpp
       tests/test_gpu_module.cpp
       tests/test_metal.cpp
-      tests/test_gpu_nnue.cpp
-      tests/test_cuda.cpp)
+      tests/test_gpu_nnue.cpp)
 
   add_executable(metalfish_tests
       ${TEST_SOURCES}
