@@ -17,11 +17,11 @@ namespace MetalFish {
 namespace NN {
 
 struct BaseWeights {
-  explicit BaseWeights(const MetalFishNN::Weights& weights);
+  explicit BaseWeights(const MetalFishNN::Weights &weights);
 
   using Vec = std::vector<float>;
   struct ConvBlock {
-    explicit ConvBlock(const MetalFishNN::Weights::ConvBlock& block);
+    explicit ConvBlock(const MetalFishNN::Weights::ConvBlock &block);
 
     Vec weights;
     Vec biases;
@@ -32,7 +32,7 @@ struct BaseWeights {
   };
 
   struct SEunit {
-    explicit SEunit(const MetalFishNN::Weights::SEunit& se);
+    explicit SEunit(const MetalFishNN::Weights::SEunit &se);
     Vec w1;
     Vec b1;
     Vec w2;
@@ -40,7 +40,7 @@ struct BaseWeights {
   };
 
   struct Residual {
-    explicit Residual(const MetalFishNN::Weights::Residual& residual);
+    explicit Residual(const MetalFishNN::Weights::Residual &residual);
     ConvBlock conv1;
     ConvBlock conv2;
     SEunit se;
@@ -48,7 +48,7 @@ struct BaseWeights {
   };
 
   struct Smolgen {
-    explicit Smolgen(const MetalFishNN::Weights::Smolgen& smolgen);
+    explicit Smolgen(const MetalFishNN::Weights::Smolgen &smolgen);
     Vec compress;
     Vec dense1_w;
     Vec dense1_b;
@@ -61,7 +61,7 @@ struct BaseWeights {
   };
 
   struct MHA {
-    explicit MHA(const MetalFishNN::Weights::MHA& mha);
+    explicit MHA(const MetalFishNN::Weights::MHA &mha);
     Vec q_w;
     Vec q_b;
     Vec k_w;
@@ -75,7 +75,7 @@ struct BaseWeights {
   };
 
   struct FFN {
-    explicit FFN(const MetalFishNN::Weights::FFN& mha);
+    explicit FFN(const MetalFishNN::Weights::FFN &mha);
     Vec dense1_w;
     Vec dense1_b;
     Vec dense2_w;
@@ -83,7 +83,7 @@ struct BaseWeights {
   };
 
   struct EncoderLayer {
-    explicit EncoderLayer(const MetalFishNN::Weights::EncoderLayer& encoder);
+    explicit EncoderLayer(const MetalFishNN::Weights::EncoderLayer &encoder);
     MHA mha;
     Vec ln1_gammas;
     Vec ln1_betas;
@@ -139,7 +139,7 @@ struct BaseWeights {
 };
 
 struct LegacyWeights : public BaseWeights {
-  explicit LegacyWeights(const MetalFishNN::Weights& weights);
+  explicit LegacyWeights(const MetalFishNN::Weights &weights);
 
   // Policy head
   // Extra convolution for AZ-style policy head
@@ -167,21 +167,21 @@ struct LegacyWeights : public BaseWeights {
 };
 
 struct MultiHeadWeights : public BaseWeights {
-  explicit MultiHeadWeights(const MetalFishNN::Weights& weights);
+  explicit MultiHeadWeights(const MetalFishNN::Weights &weights);
 
   struct PolicyHead {
-    explicit PolicyHead(const MetalFishNN::Weights::PolicyHead& policyhead, Vec& w,
-                        Vec& b);
+    explicit PolicyHead(const MetalFishNN::Weights::PolicyHead &policyhead,
+                        Vec &w, Vec &b);
     // Policy head
-   private:
+  private:
     // Storage in case _ip_pol_w/b are not shared among heads.
     Vec _ip_pol_w;
     Vec _ip_pol_b;
 
-   public:
+  public:
     // Reference to possibly shared value (to avoid unnecessary copies).
-    Vec& ip_pol_w;
-    Vec& ip_pol_b;
+    Vec &ip_pol_w;
+    Vec &ip_pol_b;
     // Extra convolution for AZ-style policy head
     ConvBlock policy1;
     ConvBlock policy;
@@ -196,7 +196,7 @@ struct MultiHeadWeights : public BaseWeights {
   };
 
   struct ValueHead {
-    explicit ValueHead(const MetalFishNN::Weights::ValueHead& valuehead);
+    explicit ValueHead(const MetalFishNN::Weights::ValueHead &valuehead);
     // Value head
     ConvBlock value;
     Vec ip_val_w;
@@ -209,11 +209,11 @@ struct MultiHeadWeights : public BaseWeights {
     Vec ip_val_err_b;
   };
 
- private:
+private:
   Vec ip_pol_w;
   Vec ip_pol_b;
 
- public:
+public:
   // Policy and value multiheads
   std::unordered_map<std::string, ValueHead> value_heads;
   std::unordered_map<std::string, PolicyHead> policy_heads;
@@ -225,5 +225,5 @@ enum InputEmbedding {
   INPUT_EMBEDDING_PE_DENSE = 2,
 };
 
-}  // namespace NN
-}  // namespace MetalFish
+} // namespace NN
+} // namespace MetalFish

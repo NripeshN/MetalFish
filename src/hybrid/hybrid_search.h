@@ -30,14 +30,14 @@
 #pragma once
 
 #include "../eval/gpu_backend.h"
-#include "../mcts/gpu_backend.h"
 #include "../eval/gpu_integration.h"
+#include "../mcts/gpu_backend.h"
+#include "../mcts/tree.h"
 #include "../search/search.h"
 #include "../search/tt.h"
 #include "ab_bridge.h"
 #include "classifier.h"
 #include "position_adapter.h"
-#include "../mcts/tree.h"
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -123,6 +123,11 @@ struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
     update_counter.store(0, std::memory_order_relaxed);
     ab_running.store(false, std::memory_order_relaxed);
     has_result.store(false, std::memory_order_relaxed);
+    pv_length.store(0, std::memory_order_relaxed);
+    pv_depth.store(0, std::memory_order_relaxed);
+    for (int i = 0; i < MAX_PV; ++i) {
+      pv_moves[i].store(0, std::memory_order_relaxed);
+    }
     for (int i = 0; i < MAX_MOVES; ++i) {
       move_scores[i].move_raw.store(0, std::memory_order_relaxed);
       move_scores[i].score.store(-32001, std::memory_order_relaxed);
@@ -168,6 +173,23 @@ struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
       move_scores[new_idx].score.store(score, std::memory_order_relaxed);
       move_scores[new_idx].depth.store(depth, std::memory_order_release);
     }
+  }
+
+  // PV from AB iterative deepening -- updated after each depth iteration
+  // for real-time injection into the MCTS tree. Uses unified memory on
+  // Apple Silicon for zero-copy sharing between CPU AB and GPU MCTS.
+  static constexpr int MAX_PV = 16;
+  std::atomic<uint16_t> pv_moves[MAX_PV]{};
+  std::atomic<int> pv_length{0};
+  std::atomic<int> pv_depth{0};
+
+  void publish_pv(const std::vector<Move> &pv, int depth) {
+    int len = std::min(static_cast<int>(pv.size()), MAX_PV);
+    for (int i = 0; i < len; ++i) {
+      pv_moves[i].store(pv[i].raw(), std::memory_order_relaxed);
+    }
+    pv_depth.store(depth, std::memory_order_relaxed);
+    pv_length.store(len, std::memory_order_release); // Release after all writes
   }
 };
 

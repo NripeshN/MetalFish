@@ -7,7 +7,9 @@
 
 #pragma once
 
-namespace MetalFish { namespace NN { namespace Metal {
+namespace MetalFish {
+namespace NN {
+namespace Metal {
 
 // 64*64 + 8x24
 const short kAttnPolicyMap[] = {
@@ -694,6 +696,6 @@ const float kPosEncoding[64][kNumPosEncodingChannels] = {
      1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0,
      0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0}};
 
-}  // namespace Metal
-}  // namespace NN
-}  // namespace MetalFish
+} // namespace Metal
+} // namespace NN
+} // namespace MetalFish

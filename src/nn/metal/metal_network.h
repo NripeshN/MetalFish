@@ -28,23 +28,23 @@ namespace Metal {
 // Metal backend implementation using MPSGraph and transformer weights.
 // Optimized for Apple Silicon: FP16 weights, buffer pooling, actual batch eval.
 class MetalNetwork : public Network {
- public:
-  explicit MetalNetwork(const WeightsFile& file, int gpu_id = 0,
+public:
+  explicit MetalNetwork(const WeightsFile &file, int gpu_id = 0,
                         int max_batch = 256, int batch = 64);
   ~MetalNetwork() override;
 
-  NetworkOutput Evaluate(const InputPlanes& input) override;
-  std::vector<NetworkOutput> EvaluateBatch(
-      const std::vector<InputPlanes>& inputs) override;
+  NetworkOutput Evaluate(const InputPlanes &input) override;
+  std::vector<NetworkOutput>
+  EvaluateBatch(const std::vector<InputPlanes> &inputs) override;
   std::string GetNetworkInfo() const override;
 
- private:
-  void RunBatch(const std::vector<InputPlanes>& inputs,
-                std::vector<NetworkOutput>& outputs);
+private:
+  void RunBatch(const std::vector<InputPlanes> &inputs,
+                std::vector<NetworkOutput> &outputs);
 
   // Buffer pool to avoid per-inference heap allocations.
-  InputsOutputs* AcquireIO();
-  void ReleaseIO(InputsOutputs* io);
+  InputsOutputs *AcquireIO();
+  void ReleaseIO(InputsOutputs *io);
 
   std::unique_ptr<MetalNetworkBuilder> builder_;
   bool wdl_;
@@ -65,7 +65,6 @@ class MetalNetwork : public Network {
   std::vector<std::unique_ptr<InputsOutputs>> io_pool_;
 };
 
-}  // namespace Metal
-}  // namespace NN
-}  // namespace MetalFish
-
+} // namespace Metal
+} // namespace NN
+} // namespace MetalFish

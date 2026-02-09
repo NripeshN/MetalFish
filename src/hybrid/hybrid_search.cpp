@@ -14,9 +14,9 @@
 #include "hybrid_search.h"
 #include "../core/misc.h"
 #include "../eval/evaluate.h"
+#include "../mcts/core.h"
 #include "../uci/engine.h"
 #include "../uci/uci.h"
-#include "../mcts/core.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -572,15 +572,21 @@ void ParallelHybridSearch::publish_mcts_state() {
 }
 
 void ParallelHybridSearch::update_mcts_policy_from_ab() {
-  // This updates MCTS policy priors based on AB scores
-  // Note: ThreadSafeMCTS doesn't expose tree directly for policy updates
-  // The policy guidance is handled through the final decision logic instead
+  // Read AB's current PV and inject it into the MCTS tree.
+  // This is the core cross-pollination: AB's deep tactical analysis
+  // biases MCTS exploration toward proven lines.
+  int pv_len = ab_state_.pv_length.load(std::memory_order_acquire);
+  if (pv_len <= 0 || !mcts_search_)
+    return;
 
-  // Just track that AB has results for the final decision
-  int num_scored = ab_state_.num_scored_moves.load(std::memory_order_acquire);
-  if (num_scored > 0) {
-    stats_.policy_updates.fetch_add(1, std::memory_order_relaxed);
+  Move pv[ABSharedState::MAX_PV];
+  for (int i = 0; i < pv_len; ++i) {
+    pv[i] = Move(ab_state_.pv_moves[i].load(std::memory_order_relaxed));
   }
+  int depth = ab_state_.pv_depth.load(std::memory_order_relaxed);
+
+  mcts_search_->inject_pv_boost(pv, pv_len, depth);
+  stats_.policy_updates.fetch_add(1, std::memory_order_relaxed);
 }
 
 // AB thread - runs full alpha-beta iterative deepening
@@ -611,27 +617,34 @@ void ParallelHybridSearch::run_ab_search() {
   if (!engine_)
     return;
 
-  // Run iterative deepening search
-  int depth = config_.ab_use_time ? 0 : config_.ab_min_depth;
-  int time_ms = config_.ab_use_time ? time_budget_ms_ : 0;
+  // Use the engine's native iterative deepening with per-iteration callbacks.
+  // This preserves all search state (TT entries, aspiration windows, killer
+  // moves, history tables) across depth iterations -- much more efficient than
+  // calling search_silent() at depth 1, 2, 3, ... which loses that state.
+  // The callback fires after each depth, publishing the PV to shared state
+  // for real-time injection into the MCTS tree via unified memory.
 
-  // Use search_silent to avoid triggering bestmove callback
-  // The hybrid coordinator is responsible for the single bestmove output
-  auto result = engine_->search_silent(root_fen_, depth, time_ms);
+  engine_->search_with_callbacks(
+      root_fen_, time_budget_ms_,
+      [this](const Engine::QuickSearchResult &result) {
+        // Publish AB state after each depth iteration
+        if (result.best_move != Move::none()) {
+          publish_ab_state(result.best_move, result.score, result.depth,
+                           result.nodes);
+          ab_state_.publish_pv(result.pv, result.depth);
 
-  if (result.best_move != Move::none()) {
-    publish_ab_state(result.best_move, result.score, result.depth,
-                     result.nodes);
+          // Update individual move scores from PV
+          for (size_t i = 0;
+               i < result.pv.size() && i < ABSharedState::MAX_MOVES; ++i) {
+            ab_state_.update_move_score(result.pv[i], result.score,
+                                        result.depth);
+          }
 
-    // Update move scores for policy guidance
-    // The PV gives us the best line
-    for (size_t i = 0; i < result.pv.size() && i < 1; ++i) {
-      ab_state_.update_move_score(result.pv[i], result.score, result.depth);
-    }
-  }
-
-  stats_.ab_nodes = result.nodes;
-  stats_.ab_depth = result.depth;
+          stats_.ab_nodes = result.nodes;
+          stats_.ab_depth = result.depth;
+        }
+      },
+      stop_flag_);
 }
 
 void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
@@ -653,6 +666,10 @@ void ParallelHybridSearch::coordinator_thread_main() {
   } guard{this};
 
   auto start = std::chrono::steady_clock::now();
+  int agreement_count = 0;
+  uint32_t last_ab_move_raw = 0;
+  uint32_t last_mcts_move_raw = 0;
+  int64_t last_info_ms = 0;
 
   // Wait for search to complete or time to expire
   while (!should_stop()) {
@@ -662,13 +679,33 @@ void ParallelHybridSearch::coordinator_thread_main() {
     bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
     bool ab_done = !ab_state_.ab_running.load(std::memory_order_acquire);
 
-    // Send periodic info updates
     auto elapsed = std::chrono::steady_clock::now() - start;
     auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
-    if (ms > 0 && (ms % 500) < 15) {
-      // Send combined info
+    // Agreement-based early stopping: if both engines agree on the same
+    // move for several consecutive checks, we can stop early and save time.
+    uint32_t ab_move = ab_state_.best_move_raw.load(std::memory_order_relaxed);
+    uint32_t mcts_move =
+        mcts_state_.best_move_raw.load(std::memory_order_relaxed);
+
+    if (ab_move != 0 && mcts_move != 0) {
+      if (ab_move == mcts_move) {
+        agreement_count++;
+        // Both agree for 3+ checks AND we've used at least 25% of time
+        if (agreement_count >= 3 && ms > time_budget_ms_ / 4) {
+          send_info_string("Hybrid: engines agree, stopping early at " +
+                           std::to_string(ms) + "ms");
+          break;
+        }
+      } else {
+        agreement_count = 0;
+      }
+    }
+
+    // Send combined info every ~500ms (fixed timing)
+    if (ms - last_info_ms >= 500) {
+      last_info_ms = ms;
       uint64_t total_nodes = stats_.mcts_nodes + stats_.ab_nodes;
       int ab_depth = ab_state_.completed_depth.load(std::memory_order_relaxed);
       int ab_score = ab_state_.best_score.load(std::memory_order_relaxed);
@@ -817,8 +854,7 @@ Move ParallelHybridSearch::make_final_decision() {
   // Use Q to centipawn conversion
   int mcts_cp = QToNnueScore(mcts_q);
 
-  float diff_pawns = std::abs(ab_score - mcts_cp) / 100.0f;
-
+  // Score comparison for decision logic
   // Calculate confidence metrics
   float ab_confidence = std::min(1.0f, static_cast<float>(ab_depth) / 20.0f);
   float mcts_confidence =

@@ -40,7 +40,8 @@ MCTSPosition::MCTSPosition() { pos_.set(StartFEN, false, &st_); }
 
 MCTSPosition::MCTSPosition(const MCTSPosition &other) {
   // Direct position copy via FEN (Position has non-trivial state pointers)
-  // This is safer than memcpy since Position has internal pointers to StateInfo.
+  // This is safer than memcpy since Position has internal pointers to
+  // StateInfo.
   pos_.set(other.pos_.fen(), false, &st_);
   move_stack_ = other.move_stack_;
 }

@@ -18,13 +18,13 @@
 
 #ifdef USE_METAL
 
-#include "gpu_backend.h"
 #include "core/bitboard.h"
 #include "core/position.h"
 #include "eval/evaluate.h"
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_architecture.h"
 #include "eval/nnue/nnue_feature_transformer.h"
+#include "gpu_backend.h"
 #include "nnue_weight_accessor.h"
 
 #include <atomic>

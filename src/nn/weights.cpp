@@ -9,8 +9,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <utility>
 #include <stdexcept>
+#include <utility>
 
 #include "loader.h"
 
@@ -22,18 +22,18 @@ static constexpr float kEpsilon = 1e-5f;
 // Lightweight weight extraction utility that relies on
 // MetalFish's DecodeLayer helper.
 class LayerAdapter {
- public:
-  explicit LayerAdapter(const MetalFishNN::Weights::Layer& layer)
+public:
+  explicit LayerAdapter(const MetalFishNN::Weights::Layer &layer)
       : data_(DecodeLayer(layer)) {}
 
   std::vector<float> as_vector() const { return data_; }
 
- private:
+private:
   std::vector<float> data_;
 };
-}  // namespace
+} // namespace
 
-BaseWeights::BaseWeights(const MetalFishNN::Weights& weights)
+BaseWeights::BaseWeights(const MetalFishNN::Weights &weights)
     : input(weights.input()),
       ip_emb_preproc_w(LayerAdapter(weights.ip_emb_preproc_w()).as_vector()),
       ip_emb_preproc_b(LayerAdapter(weights.ip_emb_preproc_b()).as_vector()),
@@ -57,28 +57,26 @@ BaseWeights::BaseWeights(const MetalFishNN::Weights& weights)
       ip2_mov_b(LayerAdapter(weights.ip2_mov_b()).as_vector()),
       smolgen_w(LayerAdapter(weights.smolgen_w()).as_vector()),
       has_smolgen(weights.has_smolgen_w()) {
-  for (const auto& res : weights.residual()) {
+  for (const auto &res : weights.residual()) {
     residual.emplace_back(res);
   }
   encoder_head_count = weights.headcount();
-  for (const auto& enc : weights.encoder()) {
+  for (const auto &enc : weights.encoder()) {
     encoder.emplace_back(enc);
   }
 }
 
-BaseWeights::SEunit::SEunit(const MetalFishNN::Weights::SEunit& se)
+BaseWeights::SEunit::SEunit(const MetalFishNN::Weights::SEunit &se)
     : w1(LayerAdapter(se.w1()).as_vector()),
       b1(LayerAdapter(se.b1()).as_vector()),
       w2(LayerAdapter(se.w2()).as_vector()),
       b2(LayerAdapter(se.b2()).as_vector()) {}
 
-BaseWeights::Residual::Residual(const MetalFishNN::Weights::Residual& residual)
-    : conv1(residual.conv1()),
-      conv2(residual.conv2()),
-      se(residual.se()),
+BaseWeights::Residual::Residual(const MetalFishNN::Weights::Residual &residual)
+    : conv1(residual.conv1()), conv2(residual.conv2()), se(residual.se()),
       has_se(residual.has_se()) {}
 
-BaseWeights::ConvBlock::ConvBlock(const MetalFishNN::Weights::ConvBlock& block)
+BaseWeights::ConvBlock::ConvBlock(const MetalFishNN::Weights::ConvBlock &block)
     : weights(LayerAdapter(block.weights()).as_vector()),
       biases(LayerAdapter(block.biases()).as_vector()),
       bn_gammas(LayerAdapter(block.bn_gammas()).as_vector()),
@@ -135,7 +133,7 @@ BaseWeights::ConvBlock::ConvBlock(const MetalFishNN::Weights::ConvBlock& block)
   bn_gammas.clear();
 }
 
-BaseWeights::MHA::MHA(const MetalFishNN::Weights::MHA& mha)
+BaseWeights::MHA::MHA(const MetalFishNN::Weights::MHA &mha)
     : q_w(LayerAdapter(mha.q_w()).as_vector()),
       q_b(LayerAdapter(mha.q_b()).as_vector()),
       k_w(LayerAdapter(mha.k_w()).as_vector()),
@@ -144,21 +142,20 @@ BaseWeights::MHA::MHA(const MetalFishNN::Weights::MHA& mha)
       v_b(LayerAdapter(mha.v_b()).as_vector()),
       dense_w(LayerAdapter(mha.dense_w()).as_vector()),
       dense_b(LayerAdapter(mha.dense_b()).as_vector()),
-      smolgen(Smolgen(mha.smolgen())),
-      has_smolgen(mha.has_smolgen()) {
+      smolgen(Smolgen(mha.smolgen())), has_smolgen(mha.has_smolgen()) {
   if (mha.has_rpe_q() || mha.has_rpe_k() || mha.has_rpe_v()) {
     throw std::runtime_error("RPE weights file not supported.");
   }
 }
 
-BaseWeights::FFN::FFN(const MetalFishNN::Weights::FFN& ffn)
+BaseWeights::FFN::FFN(const MetalFishNN::Weights::FFN &ffn)
     : dense1_w(LayerAdapter(ffn.dense1_w()).as_vector()),
       dense1_b(LayerAdapter(ffn.dense1_b()).as_vector()),
       dense2_w(LayerAdapter(ffn.dense2_w()).as_vector()),
       dense2_b(LayerAdapter(ffn.dense2_b()).as_vector()) {}
 
 BaseWeights::EncoderLayer::EncoderLayer(
-    const MetalFishNN::Weights::EncoderLayer& encoder)
+    const MetalFishNN::Weights::EncoderLayer &encoder)
     : mha(MHA(encoder.mha())),
       ln1_gammas(LayerAdapter(encoder.ln1_gammas()).as_vector()),
       ln1_betas(LayerAdapter(encoder.ln1_betas()).as_vector()),
@@ -166,7 +163,7 @@ BaseWeights::EncoderLayer::EncoderLayer(
       ln2_gammas(LayerAdapter(encoder.ln2_gammas()).as_vector()),
       ln2_betas(LayerAdapter(encoder.ln2_betas()).as_vector()) {}
 
-BaseWeights::Smolgen::Smolgen(const MetalFishNN::Weights::Smolgen& smolgen)
+BaseWeights::Smolgen::Smolgen(const MetalFishNN::Weights::Smolgen &smolgen)
     : compress(LayerAdapter(smolgen.compress()).as_vector()),
       dense1_w(LayerAdapter(smolgen.dense1_w()).as_vector()),
       dense1_b(LayerAdapter(smolgen.dense1_b()).as_vector()),
@@ -178,26 +175,25 @@ BaseWeights::Smolgen::Smolgen(const MetalFishNN::Weights::Smolgen& smolgen)
       ln2_betas(LayerAdapter(smolgen.ln2_betas()).as_vector()) {}
 
 MultiHeadWeights::PolicyHead::PolicyHead(
-    const MetalFishNN::Weights::PolicyHead& policyhead, Vec& w, Vec& b)
+    const MetalFishNN::Weights::PolicyHead &policyhead, Vec &w, Vec &b)
     : _ip_pol_w(LayerAdapter(policyhead.ip_pol_w()).as_vector()),
       _ip_pol_b(LayerAdapter(policyhead.ip_pol_b()).as_vector()),
       ip_pol_w(_ip_pol_w.empty() ? w : _ip_pol_w),
       ip_pol_b(_ip_pol_b.empty() ? b : _ip_pol_b),
-      policy1(policyhead.policy1()),
-      policy(policyhead.policy()),
+      policy1(policyhead.policy1()), policy(policyhead.policy()),
       ip2_pol_w(LayerAdapter(policyhead.ip2_pol_w()).as_vector()),
       ip2_pol_b(LayerAdapter(policyhead.ip2_pol_b()).as_vector()),
       ip3_pol_w(LayerAdapter(policyhead.ip3_pol_w()).as_vector()),
       ip3_pol_b(LayerAdapter(policyhead.ip3_pol_b()).as_vector()),
       ip4_pol_w(LayerAdapter(policyhead.ip4_pol_w()).as_vector()) {
   pol_encoder_head_count = policyhead.pol_headcount();
-  for (const auto& enc : policyhead.pol_encoder()) {
+  for (const auto &enc : policyhead.pol_encoder()) {
     pol_encoder.emplace_back(enc);
   }
 }
 
 MultiHeadWeights::ValueHead::ValueHead(
-    const MetalFishNN::Weights::ValueHead& valuehead)
+    const MetalFishNN::Weights::ValueHead &valuehead)
     : value(valuehead.value()),
       ip_val_w(LayerAdapter(valuehead.ip_val_w()).as_vector()),
       ip_val_b(LayerAdapter(valuehead.ip_val_b()).as_vector()),
@@ -208,9 +204,8 @@ MultiHeadWeights::ValueHead::ValueHead(
       ip_val_err_w(LayerAdapter(valuehead.ip_val_err_w()).as_vector()),
       ip_val_err_b(LayerAdapter(valuehead.ip_val_err_b()).as_vector()) {}
 
-LegacyWeights::LegacyWeights(const MetalFishNN::Weights& weights)
-    : BaseWeights(weights),
-      policy1(weights.policy1()),
+LegacyWeights::LegacyWeights(const MetalFishNN::Weights &weights)
+    : BaseWeights(weights), policy1(weights.policy1()),
       policy(weights.policy()),
       ip_pol_w(LayerAdapter(weights.ip_pol_w()).as_vector()),
       ip_pol_b(LayerAdapter(weights.ip_pol_b()).as_vector()),
@@ -227,12 +222,12 @@ LegacyWeights::LegacyWeights(const MetalFishNN::Weights& weights)
       ip2_val_w(LayerAdapter(weights.ip2_val_w()).as_vector()),
       ip2_val_b(LayerAdapter(weights.ip2_val_b()).as_vector()) {
   pol_encoder_head_count = weights.pol_headcount();
-  for (const auto& enc : weights.pol_encoder()) {
+  for (const auto &enc : weights.pol_encoder()) {
     pol_encoder.emplace_back(enc);
   }
 }
 
-MultiHeadWeights::MultiHeadWeights(const MetalFishNN::Weights& weights)
+MultiHeadWeights::MultiHeadWeights(const MetalFishNN::Weights &weights)
     : BaseWeights(weights),
       ip_pol_w(LayerAdapter(weights.policy_heads().has_ip_pol_w()
                                 ? weights.policy_heads().ip_pol_w()
@@ -268,7 +263,7 @@ MultiHeadWeights::MultiHeadWeights(const MetalFishNN::Weights& weights)
   } else {
     if (weights.has_policy() || weights.has_policy1() ||
         weights.has_ip_pol_w()) {
-      auto& vanilla = policy_heads.at("vanilla");
+      auto &vanilla = policy_heads.at("vanilla");
       vanilla.policy1 = ConvBlock(weights.policy1());
       vanilla.policy = ConvBlock(weights.policy());
       vanilla.ip2_pol_w = LayerAdapter(weights.ip2_pol_w()).as_vector();
@@ -277,7 +272,7 @@ MultiHeadWeights::MultiHeadWeights(const MetalFishNN::Weights& weights)
       vanilla.ip3_pol_b = LayerAdapter(weights.ip3_pol_b()).as_vector();
       vanilla.ip4_pol_w = LayerAdapter(weights.ip4_pol_w()).as_vector();
       vanilla.pol_encoder_head_count = weights.pol_headcount();
-      for (const auto& enc : weights.pol_encoder()) {
+      for (const auto &enc : weights.pol_encoder()) {
         vanilla.pol_encoder.emplace_back(enc);
       }
     } else {
@@ -295,7 +290,7 @@ MultiHeadWeights::MultiHeadWeights(const MetalFishNN::Weights& weights)
     }
   } else {
     if (weights.has_value() || weights.has_ip_val_w()) {
-      auto& winner = value_heads.at("winner");
+      auto &winner = value_heads.at("winner");
       winner.value = ConvBlock(weights.value());
       winner.ip_val_w = LayerAdapter(weights.ip_val_w()).as_vector();
       winner.ip_val_b = LayerAdapter(weights.ip_val_b()).as_vector();
@@ -309,5 +304,5 @@ MultiHeadWeights::MultiHeadWeights(const MetalFishNN::Weights& weights)
   }
 }
 
-}  // namespace NN
-}  // namespace MetalFish
+} // namespace NN
+} // namespace MetalFish

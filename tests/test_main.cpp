@@ -17,7 +17,6 @@ bool test_gpu_module();
 
 // Hardware-specific tests
 bool test_metal();
-bool test_cuda();
 bool run_all_gpu_tests();
 
 int main(int argc, char *argv[]) {
@@ -59,7 +58,6 @@ int main(int argc, char *argv[]) {
 
   // Hardware-specific tests
   run_test("metal", test_metal);
-  run_test("cuda", test_cuda);
   run_test("gpu_nnue", run_all_gpu_tests);
 
   std::cout << "\n====================\n";

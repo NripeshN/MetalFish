@@ -374,8 +374,8 @@ struct ThreadSafeMCTSConfig {
   float cpuct_factor = 2.5f;   // match reference defaults
 
   // FPU (First Play Urgency) - reduction strategy (MetalFish defaults)
-  float fpu_value = 0.0f;        // Base FPU value (used if absolute strategy)
-  float fpu_reduction = 0.330f;  // Reduction factor applied to visited policy
+  float fpu_value = 0.0f;       // Base FPU value (used if absolute strategy)
+  float fpu_reduction = 0.330f; // Reduction factor applied to visited policy
 
   // Policy and exploration
   float policy_softmax_temp = 1.359f;
@@ -667,6 +667,11 @@ public:
   std::vector<Move> get_pv() const;
   const ThreadSafeMCTSStats &stats() const { return stats_; }
   float get_best_q() const;
+
+  // Inject AB PV into the MCTS tree: boost policy priors for PV moves.
+  // Called from the hybrid MCTS thread when AB publishes a new PV iteration.
+  // Thread-safe: only modifies policy priors (SetPolicy is atomic on uint16).
+  void inject_pv_boost(const Move *pv, int pv_len, int ab_depth);
 
 private:
   void worker_thread(int thread_id);

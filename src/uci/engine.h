@@ -127,6 +127,18 @@ public:
   QuickSearchResult search_silent(const std::string &fen, int depth,
                                   int time_ms = 0);
 
+  // Hybrid iterative deepening search with per-iteration callback.
+  // Runs the full AB search but calls `on_iteration` after each completed
+  // depth with the current best move, score, and PV. The search preserves
+  // all state (TT, aspiration windows, killers, history) across iterations
+  // unlike calling search_silent() in a loop. Used by the hybrid engine
+  // for real-time PV injection into the MCTS tree.
+  using IterationCallback =
+      std::function<void(const QuickSearchResult &result)>;
+  void search_with_callbacks(const std::string &fen, int time_ms,
+                             IterationCallback on_iteration,
+                             std::atomic<bool> &stop_flag);
+
   // Get access to the transposition table for sharing with hybrid search
   TranspositionTable &get_tt() { return tt; }
   const TranspositionTable &get_tt() const { return tt; }

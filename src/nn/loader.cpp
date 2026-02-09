@@ -13,12 +13,12 @@
 #include <cassert>
 #include <cstdio>
 #include <fstream>
+#include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <iterator>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
-#include <google/protobuf/io/coded_stream.h>
-#include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -32,14 +32,14 @@ namespace NN {
 namespace {
 
 const std::uint32_t kWeightMagic = 0x1c0;
-const int kStartingSize = 8 * 1024 * 1024;  // 8M
+const int kStartingSize = 8 * 1024 * 1024; // 8M
 
-std::string DecompressGzip(const std::string& filename) {
+std::string DecompressGzip(const std::string &filename) {
   std::string buffer;
   buffer.resize(kStartingSize);
   int bytes_read = 0;
 
-  FILE* fp = fopen(filename.c_str(), "rb");
+  FILE *fp = fopen(filename.c_str(), "rb");
   if (!fp) {
     throw std::runtime_error("Cannot read weights from " + filename);
   }
@@ -48,19 +48,21 @@ std::string DecompressGzip(const std::string& filename) {
   int fd = dup(fileno(fp));
   if (fd == -1) {
     fclose(fp);
-    throw std::runtime_error("Cannot duplicate file descriptor for " + filename);
+    throw std::runtime_error("Cannot duplicate file descriptor for " +
+                             filename);
   }
-  
+
   gzFile file = gzdopen(fd, "rb");
   fclose(fp);
-  
+
   if (!file) {
     close(fd);
     throw std::runtime_error("Cannot process file " + filename);
   }
 
   while (true) {
-    const int sz = gzread(file, &buffer[bytes_read], buffer.size() - bytes_read);
+    const int sz =
+        gzread(file, &buffer[bytes_read], buffer.size() - bytes_read);
     if (sz < 0) {
       int errnum;
       gzclose(file);
@@ -80,12 +82,12 @@ std::string DecompressGzip(const std::string& filename) {
   return buffer;
 }
 
-void FixOlderWeightsFile(WeightsFile* file) {
+void FixOlderWeightsFile(WeightsFile *file) {
   using nf = MetalFishNN::NetworkFormat;
-  
-  auto* net = file->mutable_format()->mutable_network_format();
+
+  auto *net = file->mutable_format()->mutable_network_format();
   const auto has_network_format = file->format().has_network_format();
-  
+
   if (!has_network_format) {
     net->set_input(nf::INPUT_CLASSICAL_112_PLANE);
     net->set_output(nf::OUTPUT_CLASSICAL);
@@ -93,9 +95,9 @@ void FixOlderWeightsFile(WeightsFile* file) {
     net->set_value(nf::VALUE_CLASSICAL);
     net->set_policy(nf::POLICY_CLASSICAL);
   }
-  
+
   auto network_format = file->format().network_format().network();
-  
+
   if (network_format == nf::NETWORK_CLASSICAL) {
     net->set_network(nf::NETWORK_CLASSICAL_WITH_HEADFORMAT);
     net->set_value(nf::VALUE_CLASSICAL);
@@ -114,8 +116,8 @@ void FixOlderWeightsFile(WeightsFile* file) {
   } else if (network_format == nf::NETWORK_AB_LEGACY_WITH_MULTIHEADFORMAT) {
     net->set_network(nf::NETWORK_ATTENTIONBODY_WITH_MULTIHEADFORMAT);
   }
-  
-  if (file->format().network_format().network() == 
+
+  if (file->format().network_format().network() ==
       nf::NETWORK_ATTENTIONBODY_WITH_HEADFORMAT) {
     auto weights = file->weights();
     if (weights.has_policy_heads() && weights.has_value_heads()) {
@@ -128,7 +130,7 @@ void FixOlderWeightsFile(WeightsFile* file) {
   }
 }
 
-WeightsFile ParseWeightsProto(const std::string& buffer) {
+WeightsFile ParseWeightsProto(const std::string &buffer) {
   WeightsFile net;
   google::protobuf::io::ArrayInputStream ais(buffer.data(), buffer.size());
   google::protobuf::io::CodedInputStream cis(&ais);
@@ -147,13 +149,12 @@ WeightsFile ParseWeightsProto(const std::string& buffer) {
   return net;
 }
 
-}  // namespace
+} // namespace
 
-WeightsFile LoadWeightsFromFile(const std::string& filename) {
+WeightsFile LoadWeightsFromFile(const std::string &filename) {
   std::string buffer;
 
-  if (filename.size() >= 3 &&
-      filename.substr(filename.size() - 3) == ".gz") {
+  if (filename.size() >= 3 && filename.substr(filename.size() - 3) == ".gz") {
     buffer = DecompressGzip(filename);
   } else {
     std::ifstream in(filename, std::ios::binary);
@@ -173,7 +174,7 @@ WeightsFile LoadWeightsFromFile(const std::string& filename) {
 
 std::optional<WeightsFile> LoadWeights(std::string_view location) {
   std::string loc(location);
-  
+
   if (loc == "<autodiscover>") {
     auto discovered = DiscoverWeightsFile();
     if (discovered.empty()) {
@@ -181,46 +182,46 @@ std::optional<WeightsFile> LoadWeights(std::string_view location) {
     }
     loc = discovered;
   }
-  
+
   return LoadWeightsFromFile(loc);
 }
 
 std::string DiscoverWeightsFile() {
   // Check common locations for weights files
   const std::vector<std::string> locations = {
-    "networks/",
-    "./",
-    "../networks/",
+      "networks/",
+      "./",
+      "../networks/",
   };
-  
+
   const std::vector<std::string> extensions = {
-    ".pb.gz",
-    ".pb",
+      ".pb.gz",
+      ".pb",
   };
-  
-  for (const auto& dir : locations) {
-    for (const auto& ext : extensions) {
+
+  for (const auto &dir : locations) {
+    for (const auto &ext : extensions) {
       // Look for common network file patterns
       std::string pattern = dir + "*" + ext;
       // Simple check - in real implementation would scan directory
       // For now, just return empty to indicate no autodiscovery
     }
   }
-  
+
   return "";
 }
 
-FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer) {
+FloatVector DecodeLayer(const MetalFishNN::Weights::Layer &layer) {
   FloatVector result;
-  
-  const auto& params = layer.params();
+
+  const auto &params = layer.params();
   auto encoding = layer.encoding();
   // Some network files omit per-layer encoding; default to LINEAR16 like the
   // reference implementation.
   if (encoding == MetalFishNN::Weights::Layer::UNKNOWN_ENCODING) {
     encoding = MetalFishNN::Weights::Layer::LINEAR16;
   }
-  
+
   if (encoding == MetalFishNN::Weights::Layer::FLOAT32) {
     // Direct copy float32 data
     result.resize(params.size() / sizeof(float));
@@ -231,15 +232,15 @@ FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer) {
     // Decode 16-bit formats
     const size_t count = params.size() / 2;
     result.resize(count);
-    
+
     const float min_val = layer.min_val();
     const float max_val = layer.max_val();
     const float range = max_val - min_val;
-    
+
     for (size_t i = 0; i < count; ++i) {
       uint16_t raw;
       std::memcpy(&raw, params.data() + i * 2, 2);
-      
+
       if (encoding == MetalFishNN::Weights::Layer::LINEAR16) {
         // Linear dequantization
         result[i] = min_val + (raw / 65535.0f) * range;
@@ -248,7 +249,7 @@ FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer) {
         uint32_t sign = (raw & 0x8000) << 16;
         uint32_t exponent = (raw & 0x7C00) >> 10;
         uint32_t mantissa = (raw & 0x03FF);
-        
+
         uint32_t f32;
         if (exponent == 0) {
           if (mantissa == 0) {
@@ -258,14 +259,15 @@ FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer) {
             // Denormalized fp16: value = sign × 2^(-14) × (mantissa / 1024)
             // Need to renormalize by finding the leading 1 bit in mantissa.
             // For mantissa with leading 1 at bit position k (0-9):
-            //   value = 2^(-14) × 2^(k-10) × (1 + fraction) = 2^(k-24) × (1 + fraction)
-            //   fp32 exponent = k - 24 + 127 = k + 103
+            //   value = 2^(-14) × 2^(k-10) × (1 + fraction) = 2^(k-24) × (1 +
+            //   fraction) fp32 exponent = k - 24 + 127 = k + 103
             int leading_bit = 9;
             while (leading_bit >= 0 && !(mantissa & (1u << leading_bit))) {
               leading_bit--;
             }
             if (leading_bit >= 0) {
-              // Remove the leading 1 and shift remaining bits to fp32 mantissa position
+              // Remove the leading 1 and shift remaining bits to fp32 mantissa
+              // position
               uint32_t fraction_bits = mantissa ^ (1u << leading_bit);
               uint32_t fp32_mantissa = fraction_bits << (23 - leading_bit);
               uint32_t fp32_exponent = static_cast<uint32_t>(103 + leading_bit);
@@ -279,10 +281,11 @@ FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer) {
           // Infinity or NaN
           f32 = sign | 0x7F800000 | (mantissa << 13);
         } else {
-          // Normalized: fp16 exp in [1,30], fp32 exp = fp16_exp - 15 + 127 = fp16_exp + 112
+          // Normalized: fp16 exp in [1,30], fp32 exp = fp16_exp - 15 + 127 =
+          // fp16_exp + 112
           f32 = sign | ((exponent + 112) << 23) | (mantissa << 13);
         }
-        
+
         std::memcpy(&result[i], &f32, 4);
       } else {
         // BFLOAT16
@@ -293,9 +296,9 @@ FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer) {
   } else {
     throw std::runtime_error("Unsupported weight encoding");
   }
-  
+
   return result;
 }
 
-}  // namespace NN
-}  // namespace MetalFish
+} // namespace NN
+} // namespace MetalFish

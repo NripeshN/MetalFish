@@ -9,8 +9,8 @@
 #include "core/movegen.h"
 #include "core/position.h"
 #include "hybrid/ab_bridge.h"
-#include "hybrid/hybrid_search.h"
 #include "hybrid/classifier.h"
+#include "hybrid/hybrid_search.h"
 #include "hybrid/position_adapter.h"
 #include <cassert>
 #include <cmath>

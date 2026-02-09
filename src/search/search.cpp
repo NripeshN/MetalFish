@@ -192,7 +192,7 @@ void Search::Worker::start_searching() {
   // until the GUI sends one of those commands.
   while (!threads.stop && (main_manager()->ponder || limits.infinite)) {
 #ifdef __aarch64__
-    __builtin_arm_yield();  // ARM YIELD: reduce power in spin-wait
+    __builtin_arm_yield(); // ARM YIELD: reduce power in spin-wait
 #endif
   } // Busy wait for a stop or a ponder reset
 

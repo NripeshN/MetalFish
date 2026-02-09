@@ -121,8 +121,10 @@ inline float FastLogistic(float x) { return 1.0f / (1.0f + FastExp(-x)); }
 // Fast tanh using Pade approximant: x*(27+x^2)/(27+9*x^2) for |x|<4.97.
 // ~4x faster than std::tanh with <0.004 absolute error in the useful range.
 inline float FastTanh(float x) {
-  if (x < -4.97f) return -1.0f;
-  if (x > 4.97f) return 1.0f;
+  if (x < -4.97f)
+    return -1.0f;
+  if (x > 4.97f)
+    return 1.0f;
   float x2 = x * x;
   return x * (27.0f + x2) / (27.0f + 9.0f * x2);
 }
@@ -130,11 +132,12 @@ inline float FastTanh(float x) {
 // Fast square root using the Quake III inverse sqrt trick + one Newton step.
 // ~3x faster than std::sqrt with <0.2% relative error.
 inline float FastSqrt(float x) {
-  if (x <= 0.0f) return 0.0f;
+  if (x <= 0.0f)
+    return 0.0f;
   // Initial approximation via integer bit-hack
   int32_t i;
   std::memcpy(&i, &x, sizeof(float));
-  i = 0x1FBD1DF5 + (i >> 1);  // Magic constant for sqrt
+  i = 0x1FBD1DF5 + (i >> 1); // Magic constant for sqrt
   float y;
   std::memcpy(&y, &i, sizeof(float));
   // One Newton-Raphson refinement: y = 0.5 * (y + x/y)
@@ -145,7 +148,7 @@ inline float FastSqrt(float x) {
 } // namespace FastMath
 
 // ============================================================================
-// PUCT Computation 
+// PUCT Computation
 // ============================================================================
 
 // Computes the PUCT exploration constant with logarithmic growth
@@ -163,7 +166,7 @@ inline float ComputeCpuct(const MCTSSearchParams &params, uint32_t N,
 }
 
 // ============================================================================
-// FPU (First Play Urgency) Computation 
+// FPU (First Play Urgency) Computation
 // ============================================================================
 
 // Computes the FPU value for unvisited nodes
@@ -198,7 +201,7 @@ inline float ComputeFpuSimple(const MCTSSearchParams &params, float parent_q,
 }
 
 // ============================================================================
-// Moves Left Head (MLH) Utility 
+// Moves Left Head (MLH) Utility
 // ============================================================================
 
 class MovesLeftEvaluator {
@@ -264,7 +267,7 @@ private:
 };
 
 // ============================================================================
-// Dirichlet Noise 
+// Dirichlet Noise
 // ============================================================================
 
 // Applies Dirichlet noise to policy priors at the root
@@ -297,7 +300,7 @@ void ApplyDirichletNoise(EdgeArray &edges, int num_edges, float epsilon,
 }
 
 // ============================================================================
-// PUCT Selection 
+// PUCT Selection
 // ============================================================================
 
 // Full PUCT selection with standard MCTS features
@@ -343,9 +346,8 @@ PuctSelectionResult SelectBestChildPuct(
 
   // Compute CPUCT with logarithmic growth
   float cpuct = ComputeCpuct(params, parent_n, is_root);
-  float cpuct_sqrt_n =
-      cpuct *
-      FastMath::FastSqrt(static_cast<float>(std::max(parent->GetChildrenVisits(), 1u)));
+  float cpuct_sqrt_n = cpuct * FastMath::FastSqrt(static_cast<float>(
+                                   std::max(parent->GetChildrenVisits(), 1u)));
 
   // Compute visited policy for FPU
   float visited_policy = 0.0f;
@@ -422,7 +424,7 @@ PuctSelectionResult SelectBestChildPuct(
 }
 
 // ============================================================================
-// Best Move Selection 
+// Best Move Selection
 // ============================================================================
 
 enum class EdgeRank {
@@ -563,7 +565,7 @@ struct WDLRescaleParams {
   float max_s = 0.2f; // Maximum reasonable s value
 };
 
-// Rescale WDL based on contempt settings 
+// Rescale WDL based on contempt settings
 // This adjusts the evaluation to prefer wins/draws based on contempt
 inline void WDLRescale(float &v, float &d, const WDLRescaleParams &params,
                        float sign = 1.0f, bool invert = false) {
@@ -608,7 +610,7 @@ inline void WDLRescale(float &v, float &d, const WDLRescaleParams &params,
 }
 
 // ============================================================================
-// Collision Handling 
+// Collision Handling
 // ============================================================================
 
 // Collision tracking for multi-threaded MCTS
@@ -638,7 +640,7 @@ struct CollisionStats {
 };
 
 // ============================================================================
-// Out-of-Order Evaluation Support 
+// Out-of-Order Evaluation Support
 // ============================================================================
 
 // Node states for out-of-order evaluation
@@ -668,7 +670,7 @@ struct EvalBatchItem {
 };
 
 // ============================================================================
-// Policy Temperature 
+// Policy Temperature
 // ============================================================================
 
 // Apply temperature to policy for move selection
@@ -731,8 +733,9 @@ inline int SelectMoveWithTemperature(const std::vector<uint32_t> &visits,
 
   for (size_t i = 0; i < visits.size(); ++i) {
     if (visits[i] > 0) {
-      max_log = std::max(max_log,
-                         FastMath::FastLog(static_cast<float>(visits[i])) / temperature);
+      max_log =
+          std::max(max_log, FastMath::FastLog(static_cast<float>(visits[i])) /
+                                temperature);
     }
   }
 
@@ -740,7 +743,8 @@ inline int SelectMoveWithTemperature(const std::vector<uint32_t> &visits,
   for (size_t i = 0; i < visits.size(); ++i) {
     if (visits[i] > 0) {
       probs[i] = FastMath::FastExp(
-          FastMath::FastLog(static_cast<float>(visits[i])) / temperature - max_log);
+          FastMath::FastLog(static_cast<float>(visits[i])) / temperature -
+          max_log);
       sum += probs[i];
     }
   }
@@ -766,7 +770,7 @@ inline int SelectMoveWithTemperature(const std::vector<uint32_t> &visits,
 }
 
 // ============================================================================
-// Node Statistics Update 
+// Node Statistics Update
 // ============================================================================
 
 // Atomically update node statistics after evaluation
@@ -788,7 +792,7 @@ inline float CalculateNewQ(float old_wl, uint32_t old_n, float new_v,
 }
 
 // ============================================================================
-// Tree Reuse 
+// Tree Reuse
 // ============================================================================
 
 // Check if a subtree can be reused for the next position
@@ -813,7 +817,7 @@ inline bool CanReuseSubtree(uint64_t old_hash, uint64_t new_hash,
 }
 
 // ============================================================================
-// Solid Tree Optimization 
+// Solid Tree Optimization
 // ============================================================================
 
 // Threshold for converting linked list children to solid array
@@ -826,7 +830,7 @@ inline bool ShouldSolidify(uint32_t visits, int num_children) {
 }
 
 // ============================================================================
-// standard Backpropagation 
+// standard Backpropagation
 // ============================================================================
 
 // Update node statistics after evaluation (FinalizeScoreUpdate)
@@ -885,7 +889,7 @@ FinalizeScoreUpdateAtomic(AtomicFloat &wl, AtomicFloat &d, AtomicFloat &m,
 }
 
 // ============================================================================
-// Smart Time Management 
+// Smart Time Management
 // ============================================================================
 
 struct TimeManagerParams {
@@ -938,7 +942,7 @@ inline int64_t CalculateTimeForMove(const TimeManagerParams &params,
 }
 
 // ============================================================================
-// Early Termination Detection 
+// Early Termination Detection
 // ============================================================================
 
 struct EarlyTerminationParams {
@@ -975,7 +979,7 @@ inline bool CanTerminateEarly(const EarlyTerminationParams &params,
 }
 
 // ============================================================================
-// Multi-PV Support 
+// Multi-PV Support
 // ============================================================================
 
 // Get top N moves sorted by visit count then Q value
@@ -1011,7 +1015,7 @@ std::vector<int> GetTopNMoves(const EdgeArray &edges, int num_edges, int n,
 }
 
 // ============================================================================
-// Position History for Draw Detection 
+// Position History for Draw Detection
 // ============================================================================
 
 // Check for two-fold repetition (faster than three-fold)

@@ -12,20 +12,21 @@
 #include <vector>
 
 #include "../core/position.h"
-#include "../nn/network.h"
 #include "../nn/encoder.h"
+#include "../nn/network.h"
 
 namespace MetalFish {
 namespace MCTS {
 
 // MCTS evaluation result from neural network
 struct EvaluationResult {
-  float value;  // Q value from side to move perspective
+  float value; // Q value from side to move perspective
   bool has_wdl;
-  float wdl[3];  // win/draw/loss probabilities
+  float wdl[3]; // win/draw/loss probabilities
   bool has_moves_left = false;
   float moves_left = 0.0f;
-  std::vector<std::pair<Move, float>> policy_priors;  // Move → policy probability pairs
+  std::vector<std::pair<Move, float>>
+      policy_priors; // Move → policy probability pairs
 
   // O(1) policy lookup table indexed by move.raw() (max 4096 encoded moves).
   // Populated during Evaluate() to avoid O(n) linear scans during PUCT.
@@ -39,7 +40,7 @@ struct EvaluationResult {
   // Build the O(1) lookup table from policy_priors.
   // Must be called after policy_priors is populated.
   void build_policy_table() {
-    for (const auto& [m, p] : policy_priors) {
+    for (const auto &[m, p] : policy_priors) {
       uint16_t idx = m.raw() & (kPolicyTableSize - 1);
       policy_table[idx] = p;
     }
@@ -54,15 +55,16 @@ struct EvaluationResult {
 // Neural network evaluator for MCTS
 class NNMCTSEvaluator {
 public:
-  explicit NNMCTSEvaluator(const std::string& weights_path);
+  explicit NNMCTSEvaluator(const std::string &weights_path);
   ~NNMCTSEvaluator();
-  
+
   // Evaluate single position
-  EvaluationResult Evaluate(const Position& pos);
-  
+  EvaluationResult Evaluate(const Position &pos);
+
   // Batch evaluation for multiple positions
-  std::vector<EvaluationResult> EvaluateBatch(const std::vector<Position>& positions);
-  
+  std::vector<EvaluationResult>
+  EvaluateBatch(const std::vector<Position> &positions);
+
   // Get network information
   std::string GetNetworkInfo() const;
 
@@ -71,5 +73,5 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace MCTS
-}  // namespace MetalFish
+} // namespace MCTS
+} // namespace MetalFish

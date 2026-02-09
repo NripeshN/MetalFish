@@ -38,8 +38,8 @@
 #include <string>
 #include <vector>
 
-#include "gpu_backend.h"
 #include "core/types.h"
+#include "gpu_backend.h"
 #include "gpu_constants.h"
 
 namespace MetalFish {

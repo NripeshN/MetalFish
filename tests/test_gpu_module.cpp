@@ -106,7 +106,8 @@ void test_tuning() {
 
     // Larger batches - behavior depends on GPU availability
     // The inline implementation in the header always returns GPU strategies
-    // for batches above min_batch_for_gpu, regardless of actual GPU availability
+    // for batches above min_batch_for_gpu, regardless of actual GPU
+    // availability
     EvalStrategy medium = params.select_strategy(100);
     EXPECT(tc, medium == EvalStrategy::GPU_STANDARD);
 

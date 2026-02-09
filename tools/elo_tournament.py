@@ -2298,7 +2298,7 @@ def requires_metal(engine_name: str) -> bool:
 
 def print_ci_engines(base_dir: Path, stockfish_levels: List[int] = None):
     """Print available engines as JSON for CI matrix generation.
-    
+
     Includes 'requires_metal' flag for each match to determine runner OS.
     Matches involving MetalFish engines require macOS, others can run on Ubuntu.
     """
@@ -2310,10 +2310,10 @@ def print_ci_engines(base_dir: Path, stockfish_levels: List[int] = None):
         "engines": engines,
         "pairs": [
             {
-                "engine1": p[0], 
+                "engine1": p[0],
                 "engine2": p[1],
-                "requires_metal": requires_metal(p[0]) or requires_metal(p[1])
-            } 
+                "requires_metal": requires_metal(p[0]) or requires_metal(p[1]),
+            }
             for p in pairs
         ],
         "matrix": [f"{p[0]}__vs__{p[1]}" for p in pairs],

@@ -31,7 +31,8 @@ namespace GPU {
 // Cross-platform helper to compute next power of 2
 namespace detail {
 inline int next_power_of_2(int v) {
-  if (v <= 0) return 1;
+  if (v <= 0)
+    return 1;
   v--;
   v |= v >> 1;
   v |= v >> 2;

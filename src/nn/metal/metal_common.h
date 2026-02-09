@@ -49,6 +49,6 @@ struct InputsOutputs {
   std::vector<float> op_policy_raw_mem_;
 };
 
-}  // namespace Metal
-}  // namespace NN
-}  // namespace MetalFish
+} // namespace Metal
+} // namespace NN
+} // namespace MetalFish

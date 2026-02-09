@@ -8,8 +8,8 @@
 */
 
 #include "apple_silicon.h"
-#include "core.h"
 #include "../core/position.h"
+#include "core.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>

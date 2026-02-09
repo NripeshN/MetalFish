@@ -22,7 +22,7 @@ using FloatVectors = std::vector<FloatVector>;
 using WeightsFile = MetalFishNN::Net;
 
 // Load weights from file (supports .pb and .pb.gz formats)
-WeightsFile LoadWeightsFromFile(const std::string& filename);
+WeightsFile LoadWeightsFromFile(const std::string &filename);
 
 // Load weights with autodiscovery support
 std::optional<WeightsFile> LoadWeights(std::string_view location);
@@ -31,7 +31,7 @@ std::optional<WeightsFile> LoadWeights(std::string_view location);
 std::string DiscoverWeightsFile();
 
 // Decode layer weights to float vector
-FloatVector DecodeLayer(const MetalFishNN::Weights::Layer& layer);
+FloatVector DecodeLayer(const MetalFishNN::Weights::Layer &layer);
 
-}  // namespace NN
-}  // namespace MetalFish
+} // namespace NN
+} // namespace MetalFish

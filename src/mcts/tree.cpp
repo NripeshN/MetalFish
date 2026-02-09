@@ -97,7 +97,8 @@ void ApplyNNPolicy(ThreadSafeNode *node, const EvaluationResult &result) {
   float max_logit = -std::numeric_limits<float>::infinity();
   for (int i = 0; i < n; ++i) {
     logits_buf[i] = result.get_policy(node->edges()[i].move);
-    if (logits_buf[i] > max_logit) max_logit = logits_buf[i];
+    if (logits_buf[i] > max_logit)
+      max_logit = logits_buf[i];
   }
   float sum = 0.0f;
   for (int i = 0; i < n; ++i) {
@@ -118,7 +119,8 @@ void ApplyNNPolicy(ThreadSafeNode *node, const EvaluationResult &result) {
 #ifdef __APPLE__
   vDSP_vsmul(priors_buf, 1, &inv_sum, priors_buf, 1, n);
 #else
-  for (int i = 0; i < n; ++i) priors_buf[i] *= inv_sum;
+  for (int i = 0; i < n; ++i)
+    priors_buf[i] *= inv_sum;
 #endif
 
   for (int i = 0; i < n; ++i) {
@@ -126,7 +128,7 @@ void ApplyNNPolicy(ThreadSafeNode *node, const EvaluationResult &result) {
   }
 }
 
-}  // namespace
+} // namespace
 
 // ============================================================================
 // BatchedGPUEvaluator - High-Performance Implementation
@@ -227,8 +229,10 @@ void BatchedGPUEvaluator::eval_thread_main() {
     while (true) {
       {
         std::unique_lock<std::mutex> lk(prefetch_mutex);
-        prefetch_cv.wait(lk, [&] { return prefetch_requested || prefetch_shutdown; });
-        if (prefetch_shutdown) return;
+        prefetch_cv.wait(
+            lk, [&] { return prefetch_requested || prefetch_shutdown; });
+        if (prefetch_shutdown)
+          return;
       }
       if (running_.load(std::memory_order_acquire)) {
         collect_batch(next_batch, adaptive_timeout_us / 2);
@@ -320,7 +324,10 @@ void BatchedGPUEvaluator::process_batch(std::vector<EvalRequest *> &batch) {
 
   // Flat deduplication: sort indices by key, then linear scan for groups.
   // Avoids heap-allocating unordered_map buckets on every batch.
-  struct KeyIdx { uint64_t key; size_t idx; };
+  struct KeyIdx {
+    uint64_t key;
+    size_t idx;
+  };
   constexpr size_t kMaxBatchDedup = 512;
   KeyIdx ki_buf[kMaxBatchDedup];
   const size_t n = std::min(batch_size, kMaxBatchDedup);
@@ -334,10 +341,11 @@ void BatchedGPUEvaluator::process_batch(std::vector<EvalRequest *> &batch) {
   // Identify unique positions and record first occurrence
   size_t unique_first[kMaxBatchDedup]; // index of first occurrence per group
   size_t unique_count = 0;
-  for (size_t i = 0; i < n; ) {
+  for (size_t i = 0; i < n;) {
     unique_first[unique_count++] = ki_buf[i].idx;
     size_t j = i + 1;
-    while (j < n && ki_buf[j].key == ki_buf[i].key) ++j;
+    while (j < n && ki_buf[j].key == ki_buf[i].key)
+      ++j;
     i = j;
   }
 
@@ -885,13 +893,13 @@ ThreadSafeMCTS::ThreadSafeMCTS(const ThreadSafeMCTSConfig &config)
     : config_(config), tree_(std::make_unique<ThreadSafeTree>()) {
   // Initialize simple TT for direct evaluation mode
   simple_tt_.resize(SIMPLE_TT_SIZE);
-  
+
   // Try to load NN weights
-  const char* weights_path = std::getenv("METALFISH_NN_WEIGHTS");
+  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
   if (weights_path) {
     try {
       nn_evaluator_ = std::make_unique<NNMCTSEvaluator>(weights_path);
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
       std::cerr << "Failed to load NN weights: " << e.what() << std::endl;
     }
   }
@@ -1144,7 +1152,8 @@ void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
       } else {
         // Pass pointer to capture NN result if expand_node evaluates
         expand_node(leaf, ctx, &expand_nn_result);
-        // Check if expand_node successfully evaluated NN (non-empty policy_priors)
+        // Check if expand_node successfully evaluated NN (non-empty
+        // policy_priors)
         if (!expand_nn_result.policy_priors.empty()) {
           expand_nn_used = true;
         }
@@ -1288,9 +1297,9 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   const float cpuct_base = config_.cpuct_base;
   const float cpuct_factor = config_.cpuct_factor;
   float effective_cpuct =
-      cpuct +
-      cpuct_factor *
-          FastMath::FastLog((static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
+      cpuct + cpuct_factor *
+                  FastMath::FastLog(
+                      (static_cast<float>(parent_n) + cpuct_base) / cpuct_base);
 
   // Compute U coefficient: cpuct * sqrt(children_visits)
   // Use GetChildrenVisits() which returns N-1 for non-root nodes.
@@ -1306,7 +1315,8 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
 
   // FPU reduction: unvisited nodes get parent Q minus a reduction
   // The reduction is proportional to sqrt of visited policy
-  float fpu = parent_q - config_.fpu_reduction * FastMath::FastSqrt(visited_policy);
+  float fpu =
+      parent_q - config_.fpu_reduction * FastMath::FastSqrt(visited_policy);
 
   // Set up moves-left evaluator for MLH (moves-left head) utility.
   MCTSSearchParams mlh_params;
@@ -1379,7 +1389,8 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx,
     return;
 
   TSEdge *edges = node->edges();
-  // Stack-allocated score buffer (max legal chess moves ~218, use 256 for safety)
+  // Stack-allocated score buffer (max legal chess moves ~218, use 256 for
+  // safety)
   constexpr int kMaxExpandEdges = 256;
   float scores[kMaxExpandEdges];
   const int safe_edges = std::min(num_edges, kMaxExpandEdges);
@@ -1495,33 +1506,33 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx,
     try {
       auto result = nn_evaluator_->Evaluate(ctx.pos);
       stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
-      
+
       // Cache the NN result for value evaluation if requested
       if (out_nn_result) {
         *out_nn_result = result;
       }
-      
+
       // Apply policy priors to edges (blend with heuristics)
       // Configuration: 70% NN policy, 30% heuristic scores
       constexpr float NN_POLICY_WEIGHT = 0.7f;
       constexpr float HEURISTIC_WEIGHT = 0.3f;
-      constexpr float POLICY_SCALE = 10000.0f;  // Scale NN policy for blending
-      
+      constexpr float POLICY_SCALE = 10000.0f; // Scale NN policy for blending
+
       for (int i = 0; i < num_edges; ++i) {
         Move m = edges[i].move;
         float nn_policy = result.get_policy(m);
-        // NN policy outputs are raw logits, not probabilities - they can be negative.
-        // We blend all moves regardless of logit sign.
-        scores[i] = NN_POLICY_WEIGHT * (nn_policy * POLICY_SCALE) + 
+        // NN policy outputs are raw logits, not probabilities - they can be
+        // negative. We blend all moves regardless of logit sign.
+        scores[i] = NN_POLICY_WEIGHT * (nn_policy * POLICY_SCALE) +
                     HEURISTIC_WEIGHT * scores[i];
       }
-      
+
       // Recalculate max_score after NN policy blending
       max_score = -std::numeric_limits<float>::infinity();
       for (int i = 0; i < num_edges; ++i) {
         max_score = std::max(max_score, scores[i]);
       }
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
       // Silently fall back to heuristics if NN evaluation fails
     }
   }
@@ -1546,7 +1557,8 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx,
     vDSP_vsmul(exp_buf, 1, &inv_sum, scores, 1, n);
   } else {
     float uniform = 1.0f / static_cast<float>(n);
-    for (int i = 0; i < n; ++i) scores[i] = uniform;
+    for (int i = 0; i < n; ++i)
+      scores[i] = uniform;
   }
 #else
   for (int i = 0; i < n; ++i) {
@@ -1555,7 +1567,8 @@ void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx,
   }
   if (sum > 0.0f) {
     float inv_sum = 1.0f / sum;
-    for (int i = 0; i < n; ++i) scores[i] *= inv_sum;
+    for (int i = 0; i < n; ++i)
+      scores[i] *= inv_sum;
   }
 #endif
 
@@ -1616,15 +1629,15 @@ float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
     try {
       auto result = nn_evaluator_->Evaluate(ctx.pos);
       stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
-      
+
       // Return value from side-to-move perspective
       // (NN already returns from this perspective)
       return result.value;
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
       // Fall back to GPU NNUE on error
     }
   }
-  
+
   // Check TT first - lock-free read (may get stale data, but that's OK for
   // MCTS)
   uint64_t key = ctx.pos.key();
@@ -1733,8 +1746,7 @@ Move ThreadSafeMCTS::get_best_move() const {
       info.visits = child->n();
       info.q =
           -child->q(); // Negate because child Q is from opponent's perspective
-      info.policy =
-          edges[i].GetPolicy(); // Use MCTS compressed policy accessor
+      info.policy = edges[i].GetPolicy(); // Use MCTS compressed policy accessor
       info.m = child->m();
       info.is_terminal = child->is_terminal();
       info.is_win = info.is_terminal && info.q > 0.5f;
@@ -1836,6 +1848,61 @@ float ThreadSafeMCTS::get_best_q() const {
   ThreadSafeNode *best_child =
       edges[best_idx].child.load(std::memory_order_acquire);
   return best_child ? -best_child->q() : 0.0f;
+}
+
+void ThreadSafeMCTS::inject_pv_boost(const Move *pv, int pv_len, int ab_depth) {
+  if (!tree_ || pv_len <= 0)
+    return;
+
+  // Confidence scales with AB depth: depth 20 = full confidence
+  float boost = std::min(1.0f, static_cast<float>(ab_depth) / 20.0f);
+
+  ThreadSafeNode *node = tree_->root();
+
+  for (int i = 0; i < pv_len && node && node->has_children(); ++i) {
+    TSEdge *edges = node->edges();
+    int num = node->num_edges();
+    bool found = false;
+
+    // Re-normalize: first compute sum of current policies
+    float total = 0.0f;
+    for (int e = 0; e < num; ++e) {
+      total += edges[e].GetPolicy();
+    }
+    if (total <= 0.0f)
+      break;
+
+    for (int e = 0; e < num; ++e) {
+      if (edges[e].move == pv[i]) {
+        // Boost the PV move's policy prior proportionally to AB confidence.
+        // First PV move gets the full boost, subsequent moves get diminishing.
+        float depth_boost = boost * (1.0f / (1.0f + 0.5f * i));
+        float current = edges[e].GetPolicy();
+        float boosted = current * (1.0f + depth_boost);
+        edges[e].SetPolicy(boosted);
+
+        // Re-normalize all edges so they sum to ~1
+        float new_total = total - current + boosted;
+        if (new_total > 0.0f) {
+          float scale = total / new_total;
+          for (int j = 0; j < num; ++j) {
+            if (j != e) {
+              edges[j].SetPolicy(edges[j].GetPolicy() * scale);
+            } else {
+              edges[j].SetPolicy(boosted * scale);
+            }
+          }
+        }
+
+        // Follow this edge deeper into the tree
+        node = edges[e].child.load(std::memory_order_relaxed);
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      break; // PV move not in tree -- stop descending
+  }
 }
 
 void ThreadSafeMCTS::send_info() {

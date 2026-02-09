@@ -23,26 +23,26 @@ struct Activations {
 };
 
 class MetalNetworkBuilder {
- public:
+public:
   MetalNetworkBuilder(void);
   ~MetalNetworkBuilder(void);
 
   std::string init(int gpu_id, int max_batch);
 
-  void build(int kInputPlanes, MultiHeadWeights& weights,
+  void build(int kInputPlanes, MultiHeadWeights &weights,
              InputEmbedding embedding, bool attn_body, bool attn_policy,
              bool conv_policy, bool wdl, bool moves_left,
-             Activations& activations, std::string& policy_head,
-             std::string& value_head);
+             Activations &activations, std::string &policy_head,
+             std::string &value_head);
 
-  void forwardEval(float* values, uint64_t* masks, int batchSize,
-                   std::vector<float*> output_mems);
+  void forwardEval(float *values, uint64_t *masks, int batchSize,
+                   std::vector<float *> output_mems);
 
- private:
+private:
   int gpu_id;
   int max_batch_size_;
 };
 
-}  // namespace Metal
-}  // namespace NN
-}  // namespace MetalFish
+} // namespace Metal
+} // namespace NN
+} // namespace MetalFish

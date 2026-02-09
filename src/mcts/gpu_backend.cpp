@@ -8,10 +8,10 @@
 */
 
 #include "gpu_backend.h"
-#include "core.h"
 #include "../core/movegen.h"
-#include "../search/movepick.h"
 #include "../eval/gpu_integration.h"
+#include "../search/movepick.h"
+#include "core.h"
 #include <algorithm>
 #include <cmath>
 

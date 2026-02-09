@@ -13,8 +13,8 @@
 
 #pragma once
 
-#include "../hybrid/position_adapter.h"
 #include "../eval/gpu_integration.h"
+#include "../hybrid/position_adapter.h"
 #include <memory>
 #include <vector>
 

@@ -55,9 +55,10 @@ bool Eval::use_smallnet(const Position &pos) {
 
 // Evaluate is the evaluator for the outer world. It returns a static evaluation
 // of the position from the point of view of the side to move.
-// Always uses CPU NNUE with incremental accumulator updates (~80ns per position).
-// GPU NNUE is reserved for batched evaluation in MCTS only -- single-position
-// GPU dispatch overhead (~140us) makes it ~1750x slower than CPU for AB search.
+// Always uses CPU NNUE with incremental accumulator updates (~80ns per
+// position). GPU NNUE is reserved for batched evaluation in MCTS only --
+// single-position GPU dispatch overhead (~140us) makes it ~1750x slower than
+// CPU for AB search.
 Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
                      Eval::NNUE::AccumulatorStack &accumulators,
                      Eval::NNUE::AccumulatorCaches &caches, int optimism) {
