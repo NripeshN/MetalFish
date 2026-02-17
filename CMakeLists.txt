@@ -19,7 +19,7 @@ endif()
 # Enable NEON for Apple Silicon
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} -DUSE_NEON=8 -DUSE_NEON_DOTPROD -march=armv8.2-a+dotprod"
+      "${CMAKE_CXX_FLAGS} -DUSE_NEON=8 -DUSE_NEON_DOTPROD -mcpu=apple-m1 -mtune=apple-m1"
   )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_PEXT")
 endif()

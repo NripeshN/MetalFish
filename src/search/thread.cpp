@@ -8,6 +8,9 @@
 #include "search/thread.h"
 
 #include <algorithm>
+#if defined(__APPLE__)
+#include <pthread.h>
+#endif
 #include <cassert>
 #include <deque>
 #include <map>
@@ -103,6 +106,13 @@ void Thread::ensure_network_replicated() {
 // when the thread has no work to do.
 
 void Thread::idle_loop() {
+#if defined(__APPLE__)
+  // Request P-core scheduling via QoS class.
+  // USER_INTERACTIVE signals to macOS that this is a latency-sensitive thread
+  // and should prefer performance cores over efficiency cores.
+  pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
+
   while (true) {
     std::unique_lock<std::mutex> lk(mutex);
     searching = false;

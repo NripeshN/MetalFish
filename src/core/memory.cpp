@@ -121,6 +121,8 @@ void *aligned_large_pages_alloc(size_t allocSize) {
 
 #if defined(__linux__)
   constexpr size_t alignment = 2 * 1024 * 1024; // 2MB page size assumed
+#elif defined(__APPLE__)
+  constexpr size_t alignment = 16384; // 16KB page size on Apple Silicon
 #else
   constexpr size_t alignment = 4096; // small page size assumed
 #endif

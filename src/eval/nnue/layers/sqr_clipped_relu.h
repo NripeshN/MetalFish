@@ -77,6 +77,43 @@ public:
     }
     constexpr IndexType Start = NumChunks * 16;
 
+#elif defined(USE_NEON)
+    constexpr IndexType NumChunks = InputDimensions / 16;
+
+    static_assert(WeightScaleBits == 6);
+    const auto in = reinterpret_cast<const int32x4_t *>(input);
+    const auto out = reinterpret_cast<int8x16_t *>(output);
+    for (IndexType i = 0; i < NumChunks; ++i) {
+      // Pack 4x int32 -> int16 (saturate)
+      int16x4_t lo0 = vqmovn_s32(in[i * 4 + 0]);
+      int16x4_t hi0 = vqmovn_s32(in[i * 4 + 1]);
+      int16x4_t lo1 = vqmovn_s32(in[i * 4 + 2]);
+      int16x4_t hi1 = vqmovn_s32(in[i * 4 + 3]);
+
+      // Square and shift: (a*a) >> 19 using vmull (widening multiply)
+      // vmull_s16 gives int32x4, then shift right by 19 and narrow
+      int32x4_t sq0 = vmull_s16(lo0, lo0);
+      int32x4_t sq1 = vmull_s16(hi0, hi0);
+      int32x4_t sq2 = vmull_s16(lo1, lo1);
+      int32x4_t sq3 = vmull_s16(hi1, hi1);
+
+      // Shift right by 19 then narrow to int16
+      int16x4_t r0 = vmovn_s32(vshrq_n_s32(sq0, 19));
+      int16x4_t r1 = vmovn_s32(vshrq_n_s32(sq1, 19));
+      int16x4_t r2 = vmovn_s32(vshrq_n_s32(sq2, 19));
+      int16x4_t r3 = vmovn_s32(vshrq_n_s32(sq3, 19));
+
+      int16x8_t words0 = vcombine_s16(r0, r1);
+      int16x8_t words1 = vcombine_s16(r2, r3);
+
+      // Pack int16 -> uint8 (saturate)
+      uint8x8_t bytes0 = vqmovun_s16(words0);
+      uint8x8_t bytes1 = vqmovun_s16(words1);
+      vst1q_u8(reinterpret_cast<uint8_t *>(&out[i]),
+               vcombine_u8(bytes0, bytes1));
+    }
+    constexpr IndexType Start = NumChunks * 16;
+
 #else
     constexpr IndexType Start = 0;
 #endif
