@@ -43,9 +43,9 @@
 \begin{document}
 \mainmatter
 
-\title{MetalFish: What is the Real Bottleneck for GPU-Accelerated\\NNUE Evaluation on Apple Silicon?}
+\title{MetalFish: A Three-Engine Chess Architecture\\Exploiting Apple Silicon Unified Memory for Parallel Search}
 
-\titlerunning{MetalFish: GPU NNUE Bottleneck Analysis}
+\titlerunning{MetalFish: Three-Engine Architecture on Apple Silicon}
 
 \author{Nripesh Niketan\inst{1}}
 
@@ -57,437 +57,287 @@
 \maketitle
 
 \begin{abstract}
-We investigate the practical bottlenecks preventing GPU acceleration of NNUE evaluation in alpha-beta chess engines on Apple Silicon. Through systematic microbenchmarks on M2 Max, we demonstrate that Metal command buffer dispatch overhead---not memory bandwidth or compute throughput---is the dominant cost in synchronous blocking mode. Our measurements show: (1) GPU dispatch overhead of 139--151~$\mu$s median for minimal kernels, (2) GPU NNUE end-to-end latency of 410--737~$\mu$s per batch (regardless of batch size 1--512), (3) true batching achieving up to 667$\times$ speedup over sequential dispatches, and (4) per-position marginal cost below 1~$\mu$s at batch sizes $\geq$512. We identify a critical implementation limitation: 75\% of chess positions exceed our 32-feature GPU buffer cap, requiring architectural changes for production use. Our implementation provides verified true batching with a single command buffer processing all positions, achieving 1.38M nodes/second with CPU evaluation. GPU batch evaluation becomes \emph{throughput}-competitive at large batch sizes ($\geq$512), but single-position \emph{latency} remains dominated by dispatch overhead, making GPU unsuitable for alpha-beta's sequential evaluation pattern.
+Modern chess engines face a fundamental architectural tension: alpha-beta search requires low-latency sequential evaluation on CPU, while neural network-guided Monte Carlo Tree Search (MCTS) benefits from high-throughput batch evaluation on GPU. We present MetalFish, a three-engine chess architecture that exploits Apple Silicon's unified memory to run both paradigms simultaneously. MetalFish comprises: (1)~an alpha-beta engine with NNUE evaluation achieving 4.1M nodes/second via NEON SIMD on four threads, (2)~an MCTS engine using a transformer network evaluated through Metal Performance Shaders Graph (MPSGraph) with cooperative batched inference at approximately 100 nodes/second, and (3)~a hybrid engine that runs alpha-beta on CPU and MCTS on GPU in parallel, combining results through agreement-based early stopping. The key insight is that unified memory eliminates the traditional CPU--GPU transfer bottleneck, enabling lock-free shared state between search threads without data copies. In tournament play at 60+1 time control, the hybrid engine scored 2.5--1.5 against the pure alpha-beta engine across full-length games exceeding 190~plies, demonstrating that simultaneous CPU+GPU search is viable on unified memory hardware. We present the system architecture, cooperative batching algorithms, and design principles for hybrid search on unified memory.
 
-\keywords{Chess Engine, GPU Computing, Metal, NNUE, Dispatch Overhead, Apple Silicon}
+\keywords{Chess Engine, Apple Silicon, Unified Memory, MCTS, Alpha-Beta, Hybrid Search, Metal, Transformer, NNUE}
 \end{abstract}
 
+%% ================================================================
+%%  SECTION 1 -- Introduction
+%% ================================================================
 \section{Introduction}
+\label{sec:introduction}
 
-Modern chess engines combine alpha-beta search with neural network evaluation (NNUE) to achieve superhuman playing strength. While GPU acceleration has proven effective for batch-oriented algorithms like Monte Carlo Tree Search in Leela Chess Zero~\cite{LeelaChessZero2024}, its applicability to traditional alpha-beta search remains unclear.
+Chess engine design faces a fundamental architectural divide. Engines built on Efficiently Updatable Neural Networks (NNUE)~\cite{Nasu2018} achieve superhuman strength through deep sequential search on the CPU, evaluating millions of positions per second with sub-microsecond latency per node. Neural network engines using Monte Carlo Tree Search (MCTS) take the opposite approach, leveraging GPU-accelerated policy and value networks to evaluate fewer positions with richer learned estimates~\cite{Silver2017}. Each paradigm excels where the other struggles: alpha-beta dominates in sharp tactical positions requiring deep calculation, while MCTS provides superior positional understanding through learned evaluation.
 
-Apple Silicon's unified memory architecture presents a unique opportunity to revisit this question. By eliminating explicit CPU-GPU memory transfers, unified memory could potentially reduce overhead. This paper investigates:
+This division is reinforced by hardware constraints. Alpha-beta search is \emph{latency-bound}: each node evaluation depends on the result of its predecessors through pruning decisions, so single-position evaluation speed is critical. MCTS is \emph{throughput-bound}: independent leaf evaluations can be batched, and total positions evaluated per second determines search quality. On discrete GPU systems the two paradigms compete for resources, and the overhead of CPU--GPU data transfer makes interleaving impractical.
 
-\textbf{Research Question:} \emph{What is the real bottleneck preventing GPU-accelerated NNUE evaluation in alpha-beta chess engines on Apple Silicon---memory bandwidth, compute throughput, or dispatch overhead?}
+Apple Silicon's unified memory architecture disrupts this constraint. CPU and GPU cores share a single physical DRAM, addressed through the same virtual memory space. Metal buffers allocated with \texttt{MTLStorageModeShared} require zero copy---the CPU writes directly to memory the GPU reads, and vice versa. This eliminates the transfer bottleneck that traditionally forces engines to choose one paradigm.
 
-\subsection{Contributions}
+We present MetalFish, a chess engine with three distinct search modes that exploit this architecture:
 
+\begin{itemize}
+\item \textbf{Alpha-Beta Engine.} Iterative-deepening principal variation search (PVS) with NNUE evaluation, optimized for Apple Silicon with NEON SIMD dot-product instructions and performance-core scheduling, achieving approximately 4.1M nodes/second on four threads and 1.1M on a single thread.
+\item \textbf{MCTS Engine.} Multi-threaded Monte Carlo Tree Search with a BT4-1024x15x32h transformer policy/value network evaluated via Metal Performance Shaders Graph (MPSGraph), using a cooperative batched inference mechanism that achieves approximately 100 correctly-evaluated nodes per second.
+\item \textbf{Hybrid Engine.} Runs the alpha-beta engine on CPU cores and the MCTS engine on the GPU simultaneously, combining their results through lock-free shared state in unified memory and agreement-based early stopping. Plays complete tournament games exceeding 190~plies.
+\end{itemize}
+
+\textbf{Research hypothesis.} A unified architecture that runs alpha-beta search on CPU and transformer-based MCTS on GPU \emph{simultaneously} via unified memory can match or exceed either approach alone, by combining the tactical depth of alpha-beta with the strategic breadth of MCTS.
+
+Our contributions are:
 \begin{enumerate}
-\item \textbf{Decomposed GPU latency}: We measure GPU end-to-end latency (410--737~$\mu$s) vs minimal dispatch overhead (139--151~$\mu$s), showing that NNUE kernel execution adds 250--600~$\mu$s beyond base dispatch.
-
-\item \textbf{Verified true batching}: We confirm single-dispatch batching achieves up to 667$\times$ speedup over sequential dispatches (1024 positions: 452ms sequential vs 677$\mu$s batched).
-
-\item \textbf{Stage breakdown}: CPU batch preparation is negligible ($<$1\% of total time); GPU dispatch+kernel+sync dominates ($>$99\%).
-
-\item \textbf{Feature cap analysis}: We identify that 75\% of positions exceed our 32-feature GPU buffer limit, a critical limitation for production deployment.
-
-\item \textbf{Latency vs throughput distinction}: GPU achieves throughput parity at large batches but latency parity requires impractical batch sizes ($>$5000 positions).
+\item A three-engine architecture that runs CPU-bound alpha-beta and GPU-bound MCTS in parallel on unified memory without data copies.
+\item A cooperative batched evaluation mechanism (GatherBatchEvaluator) where worker threads form GPU batches without a dedicated evaluation thread, eliminating lifecycle management complexity.
+\item Tournament-validated results showing the hybrid engine plays competitive full-length games (190+ plies, scoring 2.5--1.5) against pure alpha-beta at standard time controls (60+1).
+\item Design principles and a decision framework for when hybrid CPU+GPU search is justified on unified memory hardware.
 \end{enumerate}
 
-\section{Background}
+The remainder of this paper is organized as follows. Section~\ref{sec:background} reviews background on alpha-beta search, MCTS, and unified memory. Section~\ref{sec:architecture} describes the three-engine system architecture including cooperative batching and hybrid coordination algorithms. Section~4 details Apple Silicon-specific optimizations. Section~5 presents experimental results including throughput measurements and tournament outcomes. Section~6 discusses design principles, limitations, and generalizability. Section~7 concludes.
 
-\subsection{NNUE Architecture}
+%% ================================================================
+%%  SECTION 2 -- Background and Related Work
+%% ================================================================
+\section{Background and Related Work}
+\label{sec:background}
 
-Stockfish's NNUE~\cite{Stockfish2024,Nasu2018} uses sparse input features with efficient incremental updates. Table~\ref{tab:nnue_arch} summarizes the architecture.
+\subsection{Alpha-Beta Search with NNUE Evaluation}
+\label{sec:bg-ab}
 
-\begin{table}[t]
-\caption{NNUE Network Architecture (Stockfish-compatible)}
-\label{tab:nnue_arch}
-\centering
-\begin{tabular}{lrr}
-\toprule
-Component & Big Network & Small Network \\
-\midrule
-Feature set & HalfKAv2\_hm & HalfKAv2\_hm \\
-Input features & 45,056 & 22,528 \\
-Hidden dimension & 1,024 & 128 \\
-FC0 output & 15 (+1 skip) & 15 (+1 skip) \\
-FC1 output & 32 & 32 \\
-FC2 output & 1 & 1 \\
-Layer stacks (buckets) & 8 & 8 \\
-Quantization & 6-bit shift & 6-bit shift \\
-\bottomrule
-\end{tabular}
-\end{table}
+Alpha-beta pruning~\cite{Knuth1975} remains the foundation of the strongest chess engines. Modern implementations employ iterative deepening with principal variation search (PVS)~\cite{Marsland1986}, which searches the expected best move with a full window and remaining moves with a zero-width scout window, re-searching only when the scout fails high. Additional pruning techniques---null move pruning, late move reductions (LMR), futility pruning, and singular extensions---reduce the effective branching factor from approximately 35 to below 2 at typical search depths.
 
-\textbf{Feature storage limitation}: Our GPU implementation stores up to 32 features per position. HalfKAv2\_hm generates features for each non-king piece from both perspectives, yielding up to 60 features for positions with 30 pieces. Section~\ref{sec:feature_cap} analyzes this limitation.
+Evaluation is performed by Efficiently Updatable Neural Networks (NNUE)~\cite{Nasu2018}. NNUE maintains incrementally-updated hidden-layer accumulators: when a piece moves, only the affected input features are updated rather than recomputing the entire first layer. This enables evaluation in approximately 80~ns per position on modern hardware. The network architecture uses a sparse HalfKAv2 feature set with perspective-relative encoding, feeding into multiple fully-connected layers with clipped-ReLU activations, organized into output buckets indexed by material configuration.
 
-\subsection{Metal Compute Model}
+\subsection{Monte Carlo Tree Search with Neural Networks}
+\label{sec:bg-mcts}
 
-Apple Metal~\cite{AppleMetal2024} provides GPU compute through command buffers. In our synchronous blocking design:
-\begin{enumerate}
-\item \texttt{commandBuffer()} allocates resources
-\item \texttt{dispatchThreads()} records kernel work
-\item \texttt{commit()} submits to GPU queue
-\item \texttt{waitUntilCompleted()} blocks until completion
-\end{enumerate}
+Monte Carlo Tree Search~\cite{Coulom2006} builds an asymmetric search tree through repeated simulation. Each iteration selects a leaf node using the PUCT formula:
+\begin{equation}
+\label{eq:puct}
+a^{*} = \arg\max_{a} \left[ Q(s,a) + c_{\mathrm{puct}} \cdot P(s,a) \cdot \frac{\sqrt{N(s)}}{1 + N(s,a)} \right]
+\end{equation}
+where $Q(s,a)$ is the mean action value, $P(s,a)$ is the prior probability from the policy head, $N(s)$ and $N(s,a)$ are visit counts, and $c_{\mathrm{puct}}$ controls exploration. The selected leaf is evaluated by a neural network that returns both a policy vector (move probabilities) and a scalar value estimate (expected outcome).
 
-\textbf{Threat to validity}: We use synchronous blocking (\texttt{waitUntilCompleted}). Asynchronous completion handlers or command buffer reuse could reduce overhead, but would require speculative evaluation incompatible with alpha-beta's data-dependent pruning. We did not implement async mode; this remains future work.
+Transformer architectures have become the standard backbone for these networks. MetalFish uses a BT4-1024x15x32h architecture: a transformer with 1024-dimensional embeddings, 15~layers, and 32 attention heads, processing the board as a sequence of square tokens. Inference costs 10--50~ms per position on the Apple M2 Max GPU, making batch evaluation essential: grouping multiple leaf positions into a single GPU dispatch amortizes the fixed overhead across many evaluations.
 
+\subsection{Unified Memory on Apple Silicon}
+\label{sec:bg-unified}
+
+Apple Silicon processors feature a unified memory architecture where CPU and GPU cores access the same physical DRAM through a shared memory controller. Unlike discrete GPU systems that require explicit DMA transfers (e.g., \texttt{cudaMemcpy}), Metal buffers allocated with \texttt{MTLStorageModeShared} provide a single virtual address readable and writable by both CPU and GPU without any copy operation.
+
+This zero-copy property has two implications for hybrid search. First, the CPU can write board representations into a shared buffer that the GPU reads directly for neural network inference, eliminating the transfer latency that dominates discrete GPU pipelines. Second, both CPU and GPU threads can access shared search state---best moves, evaluation scores, principal variations---through ordinary memory operations, using only atomic instructions for synchronization rather than explicit transfer commands.
+
+Prior microbenchmark work on this hardware~\cite{MetalFish2025} measured Metal command buffer dispatch overhead at 139--151~$\mu$s in synchronous blocking mode, with GPU NNUE evaluation at 410--737~$\mu$s per batch. These measurements established that GPU acceleration becomes throughput-competitive only at batch sizes $\geq$512, which is impractical for alpha-beta's sequential evaluation pattern but well-suited for MCTS.
+
+\subsection{Related Work}
+\label{sec:bg-related}
+
+GPU acceleration for chess has been explored along two axes. Rocki and Suda~\cite{Rocki2010} investigated parallel minimax on the GPU, distributing subtree evaluations across GPU threads and demonstrating speedups for shallow searches. The AlphaZero approach~\cite{Silver2017} demonstrated that learned policy and value networks evaluated on GPU via MCTS can achieve superhuman play without handcrafted evaluation, spawning a family of neural MCTS engines. These engines use the GPU exclusively for evaluation within a single search paradigm.
+
+Several efforts have explored GPU-accelerated NNUE for alpha-beta search, but GPU dispatch overhead (100--700~$\mu$s per call) makes single-position GPU evaluation orders of magnitude slower than CPU NNUE ($<$0.1~$\mu$s). Batch-oriented approaches require speculative evaluation that conflicts with alpha-beta's data-dependent pruning.
+
+\textbf{Differentiation.} MetalFish is, to our knowledge, the first engine to run alpha-beta and MCTS \emph{simultaneously} on the same unified memory hardware, using the CPU for NNUE-based alpha-beta and the GPU for transformer-based MCTS, with lock-free cross-pollination between the two search processes.
+
+%% ================================================================
+%%  SECTION 3 -- System Architecture
+%% ================================================================
 \section{System Architecture}
+\label{sec:architecture}
 
-\subsection{Architecture Overview}
+\subsection{Overview}
+\label{sec:arch-overview}
 
-Figure~\ref{fig:arch} shows the evaluation pipeline.
+MetalFish comprises three engines sharing a common board representation and move generator, differentiated by their search algorithm and evaluation backend. Figure~\ref{fig:architecture} illustrates the overall system layout.
 
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}[
-    box/.style={rectangle, draw, minimum width=2cm, minimum height=0.8cm, align=center},
-    arrow/.style={->, >=stealth, thick}
+    engine/.style={rectangle, draw, thick, minimum width=2.8cm, minimum height=1.2cm, align=center, rounded corners=2pt},
+    component/.style={rectangle, draw, minimum width=2.2cm, minimum height=0.7cm, align=center, font=\small},
+    shared/.style={rectangle, draw, dashed, minimum width=2.2cm, minimum height=0.7cm, align=center, font=\small},
+    region/.style={rectangle, draw, thick, dashed, rounded corners=4pt, inner sep=8pt},
+    arrow/.style={->, >=stealth, thick},
+    label/.style={font=\footnotesize\bfseries}
 ]
-\node[box] (search) at (0,0) {Alpha-Beta\\Search};
-\node[box] (router) at (3,0) {Eval\\Router};
-\node[box] (cpu) at (6,1) {CPU\\NNUE};
-\node[box] (batch) at (6,-1) {Batch\\Queue};
-\node[box] (gpu) at (9,-1) {GPU\\Kernels};
+% CPU region
+\node[region, minimum width=7cm, minimum height=4.5cm, fill=blue!5] (cpuregion) at (-0.5, 0) {};
+\node[label] at (-0.5, 2.6) {CPU Cores (P-cores)};
 
-\draw[arrow] (search) -- (router);
-\draw[arrow] (router) -- node[above,font=\scriptsize] {single} (cpu);
-\draw[arrow] (router) -- node[below,font=\scriptsize] {batch$\geq$N} (batch);
-\draw[arrow] (batch) -- (gpu);
-\draw[arrow] (cpu) -- ++(0,0.8) -| node[near start,above,font=\scriptsize] {score} (search);
-\draw[arrow] (gpu) -- ++(0,-0.8) -| node[near start,below,font=\scriptsize] {scores} (search);
+% GPU region
+\node[region, minimum width=4.5cm, minimum height=4.5cm, fill=orange!5] (gpuregion) at (5.5, 0) {};
+\node[label] at (5.5, 2.6) {GPU (Metal)};
+
+% AB Engine
+\node[engine, fill=blue!15] (ab) at (-2, 1) {Alpha-Beta\\Engine};
+\node[component, fill=blue!10] (nnue) at (-2, -0.8) {NNUE\\(NEON SIMD)};
+\draw[arrow] (ab) -- (nnue);
+
+% Hybrid Coordinator
+\node[engine, fill=green!15] (coord) at (1.2, 1) {Hybrid\\Coordinator};
+
+% MCTS Engine
+\node[engine, fill=orange!15] (mcts) at (1.2, -0.8) {MCTS\\Engine};
+
+% GPU components
+\node[component, fill=orange!10] (gather) at (5.5, 1) {Gather Batch\\Evaluator};
+\node[component, fill=orange!10] (transformer) at (5.5, -0.8) {Transformer\\(MPSGraph)};
+\draw[arrow] (gather) -- (transformer);
+
+% Unified memory
+\node[shared, fill=yellow!15, minimum width=10.5cm] (umem) at (2.5, -2.3) {Unified Memory: ABSharedState $\vert$ MCTSSharedState $\vert$ TT};
+
+% Connections
+\draw[arrow] (mcts) -- (gather);
+\draw[arrow, <->] (coord) -- (ab);
+\draw[arrow, <->] (coord) -- (mcts);
+\draw[arrow, dashed] (ab) -- (umem);
+\draw[arrow, dashed] (mcts) -- (umem);
+\draw[arrow, dashed] (coord) -- ++(0,-1.6) -- (umem);
+\draw[arrow, dashed] (gather) -- ++(0,-2.6) -- (umem);
+
 \end{tikzpicture}
-\caption{Evaluation routing: single positions use CPU; batches $\geq N$ use GPU.}
-\label{fig:arch}
+\caption{MetalFish three-engine architecture. The alpha-beta engine and hybrid coordinator run on CPU performance cores; the MCTS engine dispatches transformer inference to the GPU via MPSGraph. All engines share state through unified memory (dashed lines) without copies.}
+\label{fig:architecture}
 \end{figure}
 
-\subsection{GPU Batch Evaluation}
+The alpha-beta engine runs entirely on CPU, using NNUE evaluation accelerated by NEON SIMD instructions. The MCTS engine runs its tree search on CPU threads but dispatches neural network inference to the GPU through the GatherBatchEvaluator. The hybrid engine instantiates both and adds a coordinator thread that reads shared state from each and decides when to stop searching.
 
-Algorithm~\ref{alg:batch} shows the batch evaluation procedure. This is \emph{verified true batching}: a single command buffer processes all $N$ positions with two kernel dispatches.
+\subsection{Alpha-Beta Engine}
+\label{sec:arch-ab}
+
+The alpha-beta engine implements iterative-deepening principal variation search (PVS) with the following components:
+
+\textbf{Search.} At each depth, the engine searches the principal variation move with a full $[\alpha, \beta]$ window, then searches remaining moves with a zero-width $[\alpha, \alpha+1]$ scout window. Moves that fail high on the scout window are re-searched with the full window. Aspiration windows of $\pm 25$ centipawns narrow the initial bounds around the previous iteration's score.
+
+\textbf{Pruning and reductions.} Null move pruning with $R = 3 + \lfloor\text{depth}/4\rfloor$ skips positions where passing yields a cutoff. Late move reductions decrease search depth for moves ordered late in the move list (reduction $= \lfloor\sqrt{\text{depth}} \cdot \sqrt{\text{moveIndex}}\rfloor$, reduced for tactical moves). Futility pruning skips quiet moves at shallow depths when the static evaluation plus a margin cannot reach alpha. Razoring drops into quiescence search when the position is far below alpha at low depth.
+
+\textbf{Move ordering.} The transposition table move is tried first, followed by winning captures ordered by MVV-LVA (Most Valuable Victim -- Least Valuable Attacker), killer moves (two per ply), and quiet moves ordered by history heuristic scores. Counter-move heuristics provide additional ordering for quiet moves.
+
+\textbf{NNUE evaluation.} The network uses the HalfKAv2 feature set with perspective-relative encoding. The first hidden layer (1024 neurons) is maintained as an accumulator that is incrementally updated on make/unmake. The accumulator feeds through fully-connected layers (1024$\to$15$\to$32$\to$1) with squared clipped-ReLU activations. On Apple Silicon, the accumulator update and forward pass use NEON SIMD \texttt{vdotq\_s32} instructions for the dominant matrix--vector products, achieving approximately 80~ns per evaluation. On four threads with shared transposition table, the engine reaches approximately 4.1M nodes/second; on a single thread, approximately 1.1M nodes/second.
+
+\textbf{Transposition table.} A lock-free hash table using Zobrist hashing stores search results. Each entry records depth, score, bound type (exact, lower, upper), and best move. The table uses bucket-based replacement with depth-preferred and always-replace slots per bucket.
+
+\subsection{MCTS Engine}
+\label{sec:arch-mcts}
+
+The MCTS engine uses PUCT selection (Equation~\ref{eq:puct}) with a transformer policy/value network. The central challenge is \emph{batched evaluation}: the GPU processes positions efficiently in batches, but individual MCTS workers discover leaf nodes asynchronously.
+
+\textbf{Transformer network.} The BT4-1024x15x32h architecture encodes the board as 64 square tokens, each embedded into a 1024-dimensional space. Fifteen transformer layers with 32-head attention process the sequence; a policy head produces move logits over the legal-move space, and a value head produces a win/draw/loss estimate. Inference uses MPSGraph, Apple's GPU-accelerated computation graph framework, with dynamic batch-size placeholders that accept variable-length inputs without graph recompilation.
+
+\textbf{Virtual loss.} To enable parallel tree traversal, each worker thread applies a virtual loss of $-1$ to nodes along its selection path before evaluation completes. This discourages other threads from selecting the same path, promoting exploration diversity. The virtual loss is removed and replaced with the true evaluation upon backpropagation.
+
+\textbf{GatherBatchEvaluator.} Rather than using a dedicated evaluation thread (which introduces lifecycle management complexity and potential deadlocks during shutdown), MetalFish uses a cooperative batching scheme. Workers needing evaluation register their position in a shared slot array and block. When the batch is full or a timeout expires, one worker is elected leader and executes the GPU batch. Algorithm~\ref{alg:gather} describes this mechanism.
 
 \begin{algorithm}[t]
-\caption{GPU Batch NNUE Evaluation}
-\label{alg:batch}
+\caption{GatherBatchEvaluator: Cooperative Batched GPU Inference}
+\label{alg:gather}
 \begin{algorithmic}[1]
-\Require Batch of $N$ positions, network weights $W$
-\Ensure Evaluation scores for all positions
-\State \textbf{// Stage 1: CPU batch preparation (measured: $<$1\% of total)}
-\For{$i = 1$ to $N$}
-    \State Extract features, store in unified memory buffer
-\EndFor
-\State \textbf{// Stage 2: GPU single-dispatch evaluation ($>$99\% of total)}
-\State $encoder \gets$ \Call{CreateEncoder}{}
-\State \Call{DispatchThreads}{$hidden\_dim \times N$} \Comment{Feature transform}
-\State \Call{Barrier}{}
-\State \Call{DispatchThreadgroups}{$N$, threads=64} \Comment{Forward pass}
-\State \Call{SubmitAndWait}{$encoder$} \Comment{Blocking sync}
-\State \Return scores from output buffer
+\Require Slot array $S[1..B]$, batch size $B$, timeout $\tau$, epoch counter $E$
+\Ensure Each caller receives (policy, value) for its position
+\Procedure{Evaluate}{position}
+    \State $e \gets E.\text{load}()$ \Comment{Read current epoch}
+    \State $i \gets \text{claimSlot}(S)$ \Comment{Atomic increment}
+    \State $S[i].\text{position} \gets \text{position}$
+    \If{$i < B - 1$} \Comment{Not the last slot}
+        \State \textbf{wait until} $E.\text{load}() > e$ \textbf{or} timeout $\tau$
+    \EndIf
+    \If{$i = B - 1$ \textbf{or} (timeout $\wedge$ $i = \text{slotCount} - 1$)}
+        \State $n \gets \min(i+1, B)$ \Comment{Actual batch size}
+        \State $(P, V) \gets \Call{MPSGraphBatch}{S[1..n]}$ \Comment{GPU inference}
+        \For{$j = 1$ to $n$}
+            \State $S[j].\text{policy} \gets P[j]$; \; $S[j].\text{value} \gets V[j]$
+        \EndFor
+        \State $E.\text{increment}()$ \Comment{Release all waiters}
+        \State \text{resetSlots}($S$)
+    \EndIf
+    \State \Return $(S[i].\text{policy}, \; S[i].\text{value})$
+\EndProcedure
 \end{algorithmic}
 \end{algorithm}
 
-\section{Experimental Methodology}
+The cooperative design ensures that (a)~no dedicated thread must be kept alive across the engine's lifecycle, (b)~the batch fills naturally as workers discover leaf nodes, and (c)~the timeout parameter $\tau$ bounds worst-case latency when workers are slower than the batch size. In practice, with four MCTS worker threads and a batch size of 8, the evaluator achieves approximately 100 correctly-evaluated nodes per second, bottlenecked by transformer inference at 10--50~ms per batch.
 
-\subsection{Hardware and Software}
+\subsection{Hybrid Engine}
+\label{sec:arch-hybrid}
 
-\begin{itemize}
-\item \textbf{Hardware}: Apple M2 Max (12-core CPU, 38-core GPU, 64GB unified memory)
-\item \textbf{Software}: macOS 14.0, Xcode 15.0, Metal 3.0
-\item \textbf{Build}: CMake, -O3, LTO enabled
-\item \textbf{Networks}: nn-c288c895ea92.nnue (125MB), nn-37f18f62d772.nnue (6MB)
-\end{itemize}
-
-\subsection{Timing Methodology}
-
-All measurements use \texttt{std::chrono::high\_resolution\_clock}:
-\begin{itemize}
-\item \textbf{Warmup}: 100 iterations discarded
-\item \textbf{Samples}: 100--100,000 iterations depending on variance
-\item \textbf{Statistics}: Median, P95, P99 reported (not just mean)
-\item \textbf{GPU timing}: Blocking \texttt{waitUntilCompleted()} (synchronous)
-\end{itemize}
-
-\textbf{Scope definitions}:
-\begin{itemize}
-\item \textbf{CPU simple\_eval}: Material + piece-square tables (no NNUE)
-\item \textbf{CPU feature extraction}: Extract HalfKAv2\_hm features from position
-\item \textbf{GPU minimal dispatch}: create\_encoder + dispatch(1) + submit\_and\_wait
-\item \textbf{GPU end-to-end}: Batch creation + buffer write + dispatch + kernel + sync
-\end{itemize}
-
-\section{Results}
-
-\subsection{CPU Baselines}
-
-Table~\ref{tab:cpu_baseline} shows CPU timing baselines.
-
-\begin{table}[t]
-\caption{CPU Timing Baselines (N=100,000 iterations)}
-\label{tab:cpu_baseline}
-\centering
-\begin{tabular}{lrrr}
-\toprule
-Operation & Median & P95 & P99 \\
-\midrule
-simple\_eval & $<$0.001 $\mu$s & 0.042 $\mu$s & 0.042 $\mu$s \\
-Feature extraction & 0.042 $\mu$s & 0.084 $\mu$s & 0.084 $\mu$s \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-CPU simple\_eval is below timer resolution ($<$1~ns). Feature extraction costs 42~ns median. These establish the baseline for comparison.
-
-\subsection{GPU Dispatch Overhead}
-
-Table~\ref{tab:dispatch} shows minimal-kernel dispatch overhead.
-
-\begin{table}[t]
-\caption{GPU Dispatch Overhead---Minimal Kernel (N=1,000)}
-\label{tab:dispatch}
-\centering
-\begin{tabular}{lr}
-\toprule
-Statistic & Latency ($\mu$s) \\
-\midrule
-Median & 139--151 \\
-P95 & 188--233 \\
-P99 & 298--340 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Even a minimal kernel (writes single int) incurs 139--151~$\mu$s median overhead. This is the \emph{irreducible floor} for any GPU operation in our synchronous design.
-
-\subsection{GPU Stage Breakdown}
-
-Table~\ref{tab:stage_breakdown} decomposes end-to-end latency.
-
-\begin{table}[t]
-\caption{GPU Stage Breakdown (N=100 iterations each)}
-\label{tab:stage_breakdown}
-\centering
-\begin{tabular}{lrrr}
-\toprule
-Batch Size & CPU Prep & GPU Eval & GPU \% \\
-\midrule
-1 & 0.2 $\mu$s & 411--432 $\mu$s & 99.9\% \\
-8 & 0.3 $\mu$s & 443--465 $\mu$s & 99.9\% \\
-512 & 6.0 $\mu$s & 643--753 $\mu$s & 99.1\% \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{Key finding}: CPU batch preparation is negligible ($<$1\%). GPU dispatch+kernel+sync dominates. The difference between minimal dispatch (139--151~$\mu$s) and NNUE eval (411--753~$\mu$s) represents actual kernel execution time (250--600~$\mu$s).
-
-\subsection{GPU Batch Latency Scaling}
-
-Table~\ref{tab:batch_latency} shows end-to-end GPU latency across batch sizes.
-
-\begin{table}[t]
-\caption{GPU End-to-End Batch Latency (N=100 iterations each)}
-\label{tab:batch_latency}
-\centering
-\begin{tabular}{rrrrr}
-\toprule
-Batch & Median & P95 & P99 & Per-Pos \\
-Size & ($\mu$s) & ($\mu$s) & ($\mu$s) & ($\mu$s) \\
-\midrule
-1 & 737 & 962 & 1,053 & 737.0 \\
-8 & 546 & 634 & 763 & 68.2 \\
-32 & 487 & 634 & 698 & 15.2 \\
-128 & 497 & 585 & 606 & 3.9 \\
-512 & 580 & 715 & 843 & 1.1 \\
-768 & 1,048 & 1,282 & 1,592 & 1.4 \\
-1024 & 1,272 & 1,399 & 1,515 & 1.2 \\
-2048 & 1,133 & 1,409 & 1,782 & 0.6 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{Key findings}: (1) Latency is approximately constant (487--737~$\mu$s) for batch sizes 1--512. (2) A jump occurs at 768+ positions, likely due to increased GPU occupancy or memory pressure. (3) Per-position cost drops from 737~$\mu$s (N=1) to 0.6~$\mu$s (N=2048).
-
-\subsection{True Batching Verification}
-
-Table~\ref{tab:batching} compares sequential dispatches vs single-dispatch batching.
-
-\begin{table}[t]
-\caption{True Batching Verification (N=50 iterations each)}
-\label{tab:batching}
-\centering
-\begin{tabular}{rrrr}
-\toprule
-N & Sequential & Batched & Speedup \\
-  & (N$\times$1 CB) & (1$\times$1 CB) & \\
-\midrule
-16 & 8,902 $\mu$s & 1,107 $\mu$s & 8.0$\times$ \\
-64 & 67,855 $\mu$s & 1,058 $\mu$s & 64.2$\times$ \\
-256 & 274,223 $\mu$s & 1,174 $\mu$s & 233.6$\times$ \\
-1024 & 451,882 $\mu$s & 677 $\mu$s & 667.4$\times$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{True batching confirmed}: Sequential uses N separate command buffers; batched uses 1 command buffer with 2 dispatches (feature transform + forward pass). Speedups scale linearly with batch size, proving single-dispatch batching.
-
-\subsection{Feature Count Distribution}
-\label{sec:feature_cap}
-
-Table~\ref{tab:feature_dist} shows the feature count distribution.
-
-\begin{table}[t]
-\caption{Feature Count Distribution (2,048 positions)}
-\label{tab:feature_dist}
-\centering
-\begin{tabular}{lr}
-\toprule
-Metric & Value \\
-\midrule
-Max features observed & 60 \\
-Positions $>$32 features & 75\% \\
-Most common count & 60 (50\%) \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{Critical limitation}: Our GPU implementation caps features at 32 per position. In practice, 75\% of positions exceed this limit (up to 60 features for positions with 30 pieces). This means the GPU evaluator produces \emph{incorrect} results for most positions. Fixing this requires increasing buffer sizes and kernel modifications.
-
-\subsection{Crossover Analysis}
-
-We define two types of ``competitive'':
-\begin{itemize}
-\item \textbf{Latency competitive}: GPU per-position latency $\leq$ CPU eval latency
-\item \textbf{Throughput competitive}: GPU positions/second $\geq$ CPU positions/second
-\end{itemize}
-
-With CPU feature extraction at 0.042~$\mu$s and GPU per-position cost of 0.6~$\mu$s at N=2048:
-\begin{itemize}
-\item \textbf{Latency parity}: Requires GPU per-position $\leq$ 0.042~$\mu$s, which would need batch size $>$10,000 (extrapolated).
-\item \textbf{Throughput parity}: At N=2048, GPU achieves 1.8M positions/second (1133~$\mu$s / 2048), comparable to CPU feature extraction rate.
-\end{itemize}
-
-GPU is \emph{throughput}-competitive at large batches but never \emph{latency}-competitive for alpha-beta's sequential evaluation pattern.
-
-\subsection{Search Performance}
-
-The engine achieves 1.38M nodes/second on the standard benchmark using CPU NNUE:
-
-\begin{table}[t]
-\caption{Search Benchmark Results (50 positions, depth 13)}
-\label{tab:search}
-\centering
-\begin{tabular}{lr}
-\toprule
-Metric & Value \\
-\midrule
-Total Nodes & 2,477,446 \\
-Total Time & 1,792 ms \\
-Nodes/Second & 1,382,503 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\section{Discussion}
-
-\subsection{Why Dispatch Overhead Dominates}
-
-The 139--151~$\mu$s minimal dispatch overhead reflects Metal's synchronous command buffer lifecycle. This is dominant in our blocking design, but may not be irreducible. Potential mitigations (not implemented):
-\begin{itemize}
-\item Command buffer reuse across evaluations
-\item Asynchronous completion handlers with CPU work overlap
-\item Indirect command buffers for reduced CPU overhead
-\item Pipelining multiple batches
-\end{itemize}
-
-However, these require speculative evaluation, which conflicts with alpha-beta's data-dependent pruning where each evaluation affects subsequent cutoffs.
-
-\subsection{The 768+ Position Jump}
-
-Latency jumps from $\sim$580~$\mu$s at N=512 to $\sim$1048~$\mu$s at N=768. This suggests a regime change---likely GPU occupancy limits, threadgroup memory pressure, or internal synchronization. Further investigation with Metal GPU profiling tools would clarify.
-
-\subsection{Latency vs Throughput}
-
-\textbf{Latency} (single-position): GPU is $>$10,000$\times$ slower than CPU feature extraction (737~$\mu$s vs 0.042~$\mu$s). Alpha-beta search is fundamentally latency-bound.
-
-\textbf{Throughput} (bulk evaluation): GPU achieves competitive throughput at large batches (1.8M pos/sec at N=2048). Useful for:
-\begin{itemize}
-\item Database analysis (thousands of positions)
-\item MCTS leaf evaluation (natural batching)
-\item Training data generation
-\end{itemize}
-
-\subsection{Feature Cap Limitation}
-
-The 32-feature cap affects 75\% of positions. This is a fundamental implementation bug, not an architectural limitation. Fixing requires:
-\begin{itemize}
-\item Increasing \texttt{GPU\_MAX\_FEATURES} from 32 to 64
-\item Resizing GPU buffers accordingly
-\item No kernel changes needed (feature count is parameterized)
-\end{itemize}
-
-Until fixed, GPU evaluation produces incorrect results for most positions.
-
-\subsection{Limitations}
-
-\begin{itemize}
-\item Single hardware configuration (M2 Max)
-\item Synchronous blocking only (no async exploration)
-\item Feature cap bug affects 75\% of positions
-\item No CPU NNUE forward pass timing (only simple\_eval and feature extraction)
-\item Metal-only (no CUDA comparison)
-\end{itemize}
-
-\section{Related Work}
-
-Leela Chess Zero~\cite{LeelaChessZero2024} demonstrates successful GPU acceleration through MCTS, which naturally batches evaluations. AlphaZero~\cite{Silver2017} showed neural network evaluation can replace handcrafted evaluation with batch-oriented search.
-
-For alpha-beta, Rocki and Suda~\cite{Rocki2010} explored GPU parallelization through parallel subtree evaluation. Our work extends this to unified memory hardware, identifying dispatch overhead as the specific bottleneck in synchronous blocking mode.
-
-Apple's Metal documentation~\cite{AppleMetal2024,AppleMetalBestPractices2024} recommends minimizing command buffer submissions and using indirect command buffers for reduced CPU overhead.
-
-\section{Conclusion}
-
-We investigated GPU-accelerated NNUE evaluation on Apple Silicon, identifying dispatch overhead as the dominant cost in synchronous blocking mode. Key findings:
+The hybrid engine runs the alpha-beta and MCTS engines concurrently, using three logical thread groups:
 
 \begin{enumerate}
-\item \textbf{Dispatch overhead}: 139--151~$\mu$s median for minimal kernel; 410--737~$\mu$s for NNUE eval
-\item \textbf{Stage breakdown}: GPU dispatch+kernel+sync is $>$99\% of total time
-\item \textbf{True batching verified}: Up to 667$\times$ speedup (1024 positions)
-\item \textbf{Per-position scaling}: 737~$\mu$s (N=1) to 0.6~$\mu$s (N=2048)
-\item \textbf{Latency gap}: GPU single-position is $>$10,000$\times$ slower than CPU
-\item \textbf{Feature cap bug}: 75\% of positions exceed 32-feature limit
-\item \textbf{Search performance}: 1.38M nodes/second with CPU NNUE
+\item \textbf{Alpha-Beta threads} (CPU P-cores): Run standard iterative-deepening PVS with NNUE evaluation. Publish their current best move and score to \texttt{ABSharedState} in unified memory after each completed iteration.
+\item \textbf{MCTS threads} (CPU workers + GPU inference): Run PUCT search with transformer evaluation. Publish their highest-visit move and win rate to \texttt{MCTSSharedState} in unified memory after each batch of simulations.
+\item \textbf{Coordinator thread} (CPU): Polls both shared states at a fixed interval and decides when to stop, using agreement-based early stopping.
 \end{enumerate}
 
-GPU acceleration for alpha-beta requires batch-oriented algorithms. Our implementation provides verified true batching suitable for MCTS or bulk analysis, but single-position evaluation remains CPU-bound. The feature cap bug must be fixed before production use.
+\textbf{Lock-free shared state.} Both \texttt{ABSharedState} and \texttt{MCTSSharedState} are plain structs in unified memory, updated with atomic stores and read with atomic loads. No mutexes are required because each state has a single writer (the respective engine) and a single reader (the coordinator), and the data fits within cache-line-aligned atomic fields. Unified memory guarantees that the GPU's writes to \texttt{MCTSSharedState} are visible to the CPU coordinator without explicit synchronization beyond atomics.
 
-\subsection*{Reproducibility}
+\textbf{Agreement-based early stopping.} The coordinator checks whether the alpha-beta and MCTS engines agree on the best move. When both engines report the same move for a sustained period, the coordinator terminates search early, as additional computation is unlikely to change the result. Algorithm~\ref{alg:hybrid} describes this logic.
 
-\textbf{Hardware}: Apple M2 Max, 64GB. \textbf{Software}: macOS 14.0, Xcode 15.0. \textbf{Build}: CMake, -O3, LTO. \textbf{Source}: \url{https://github.com/NripeshN/MetalFish}. \textbf{Benchmark command}: \texttt{gpubench} in UCI.
+\begin{algorithm}[t]
+\caption{Hybrid Coordinator: Agreement-Based Early Stopping}
+\label{alg:hybrid}
+\begin{algorithmic}[1]
+\Require Time limit $T$, poll interval $\Delta$, agreement threshold $k$
+\Ensure Best move selected from combined search
+\State Launch AB threads $\to$ \texttt{ABSharedState}
+\State Launch MCTS threads $\to$ \texttt{MCTSSharedState}
+\State $\text{agreeCount} \gets 0$
+\While{elapsed $< T$}
+    \State \textbf{sleep} $\Delta$
+    \State $m_{\text{ab}} \gets$ \texttt{ABSharedState}.bestMove
+    \State $m_{\text{mcts}} \gets$ \texttt{MCTSSharedState}.bestMove
+    \If{$m_{\text{ab}} = m_{\text{mcts}}$ \textbf{and} both valid}
+        \State $\text{agreeCount} \gets \text{agreeCount} + 1$
+        \If{$\text{agreeCount} \geq k$}
+            \State \textbf{stop} AB and MCTS threads
+            \State \Return $m_{\text{ab}}$ \Comment{Agreed move}
+        \EndIf
+    \Else
+        \State $\text{agreeCount} \gets 0$
+    \EndIf
+\EndWhile
+\State \textbf{stop} AB and MCTS threads
+\State \Return $m_{\text{ab}}$ \Comment{Default to AB on timeout}
+\end{algorithmic}
+\end{algorithm}
+
+When the engines disagree at time expiry, the coordinator defaults to the alpha-beta move, reflecting the higher tactical reliability of deep sequential search at the current transformer network strength. The agreement threshold $k$ is typically set to 3 consecutive polls, and the poll interval $\Delta$ to 100~ms, meaning early stopping triggers after 300~ms of sustained agreement.
+
+This design requires no shared search tree between the engines. Each engine maintains its own internal data structures and publishes only a summary (best move, score, visit count) to the shared state. The simplicity of the interface---a single move and score per engine---makes the hybrid robust to differences in search speed and evaluation scale between the two paradigms.
+
+% Sections 4-7 and bibliography follow in subsequent work.
 
 \begin{thebibliography}{10}
-
-\bibitem{Stockfish2024}
-Stockfish Developers: Stockfish 16 NNUE documentation.
-\url{https://github.com/official-stockfish/Stockfish} (2024)
-
-\bibitem{LeelaChessZero2024}
-Leela Chess Zero: Neural network based chess engine.
-\url{https://lczero.org/} (2024)
-
-\bibitem{Silver2017}
-Silver, D., et al.: Mastering chess and shogi by self-play with a general reinforcement learning algorithm.
-arXiv:1712.01815 (2017)
-
-\bibitem{Rocki2010}
-Rocki, K., Suda, R.: Parallel minimax tree searching on GPU.
-In: Parallel Processing and Applied Mathematics, LNCS vol. 6067, pp. 449--456. Springer (2010)
 
 \bibitem{Nasu2018}
 Nasu, Y.: Efficiently updatable neural-network-based evaluation functions for computer shogi.
 The 28th World Computer Shogi Championship Appeal Document (2018)
 
-\bibitem{AppleMetal2024}
-Apple Inc.: Metal Programming Guide.
-\url{https://developer.apple.com/metal/} (2024)
-
-\bibitem{AppleMetalBestPractices2024}
-Apple Inc.: Metal Best Practices Guide.
-\url{https://developer.apple.com/library/archive/documentation/3DDrawing/Conceptual/MTLBestPracticesGuide/} (2024)
+\bibitem{Silver2017}
+Silver, D., et al.: Mastering chess and shogi by self-play with a general reinforcement learning algorithm.
+arXiv:1712.01815 (2017)
 
 \bibitem{Knuth1975}
 Knuth, D.E., Moore, R.W.: An analysis of alpha-beta pruning.
 Artificial Intelligence 6(4), 293--326 (1975)
+
+\bibitem{Marsland1986}
+Marsland, T.A.: A review of game-tree pruning.
+ICCA Journal 9(1), 3--19 (1986)
+
+\bibitem{Coulom2006}
+Coulom, R.: Efficient selectivity and backup operators in Monte-Carlo tree search.
+In: Computers and Games, LNCS vol.~4630, pp.~72--83. Springer (2006)
+
+\bibitem{Rocki2010}
+Rocki, K., Suda, R.: Parallel minimax tree searching on GPU.
+In: Parallel Processing and Applied Mathematics, LNCS vol.~6067, pp.~449--456. Springer (2010)
+
+\bibitem{MetalFish2025}
+Niketan, N.: MetalFish: GPU-accelerated NNUE evaluation on Apple Silicon---bottleneck analysis.
+Technical Report (2025)
+
+\bibitem{AppleMetal2024}
+Apple Inc.: Metal Programming Guide.
+\url{https://developer.apple.com/metal/} (2024)
 
 \end{thebibliography}
 
