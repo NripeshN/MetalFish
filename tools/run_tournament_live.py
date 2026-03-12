@@ -31,9 +31,9 @@ BERSERK = str(DIR / "reference/berserk/src/berserk")
 PATRICIA = str(DIR / "reference/Patricia/engine/patricia")
 BOOK = DIR / "reference/books/8moves_v3.pgn"
 
-TC_BASE = 300  # seconds
-TC_INC = 3   # seconds per move
-GAMES = 20
+TC_BASE = 300   # seconds
+TC_INC = 0.1    # seconds per move
+GAMES = 10
 THREADS = 4
 HASH = 256
 
@@ -184,10 +184,10 @@ def play_game(eng_w, eng_b, opening_moves, viz, game_num, total_games,
     eng_b.newgame()
 
     moves_uci = []
-    wtime = TC_BASE * 1000
-    btime = TC_BASE * 1000
-    winc = TC_INC * 1000
-    binc = TC_INC * 1000
+    wtime = int(TC_BASE * 1000)
+    btime = int(TC_BASE * 1000)
+    winc = int(TC_INC * 1000)
+    binc = int(TC_INC * 1000)
     last_score = ""
     last_depth = ""
     last_nps = ""
@@ -501,34 +501,39 @@ def main():
     openings = load_openings(BOOK, count=50)
     print(f"  Loaded {len(openings)} openings from book")
 
-    matches = [
-        ("MetalFish-AB", METALFISH, {"Threads": THREADS, "Hash": HASH},
-         "Patricia", PATRICIA, {"Threads": THREADS, "Hash": HASH}),
-        ("MetalFish-AB", METALFISH, {"Threads": THREADS, "Hash": HASH},
-         "Stockfish-L10", STOCKFISH, {"Threads": THREADS, "Hash": HASH, "Skill Level": 10}),
-        ("MetalFish-AB", METALFISH, {"Threads": THREADS, "Hash": HASH},
-         "Stockfish-L15", STOCKFISH, {"Threads": THREADS, "Hash": HASH, "Skill Level": 15}),
-        ("MetalFish-AB", METALFISH, {"Threads": THREADS, "Hash": HASH},
-         "Berserk", BERSERK, {"Threads": THREADS, "Hash": HASH}),
-        ("MetalFish-AB", METALFISH, {"Threads": THREADS, "Hash": HASH},
-         "Stockfish-Full", STOCKFISH, {"Threads": THREADS, "Hash": HASH}),
-        ("MetalFish-Hybrid", METALFISH,
-         {"Threads": THREADS, "Hash": HASH, "UseHybridSearch": "true",
-          "NNWeights": str(NNWEIGHTS)},
-         "Patricia", PATRICIA, {"Threads": THREADS, "Hash": HASH}),
-        ("MetalFish-Hybrid", METALFISH,
-         {"Threads": THREADS, "Hash": HASH, "UseHybridSearch": "true",
-          "NNWeights": str(NNWEIGHTS)},
-         "Stockfish-L10", STOCKFISH, {"Threads": THREADS, "Hash": HASH, "Skill Level": 10}),
-        ("MetalFish-Hybrid", METALFISH,
-         {"Threads": THREADS, "Hash": HASH, "UseHybridSearch": "true",
-          "NNWeights": str(NNWEIGHTS)},
-         "Stockfish-L15", STOCKFISH, {"Threads": THREADS, "Hash": HASH, "Skill Level": 15}),
-        ("MetalFish-AB", METALFISH, {"Threads": THREADS, "Hash": HASH},
-         "MetalFish-Hybrid", METALFISH,
-         {"Threads": THREADS, "Hash": HASH, "UseHybridSearch": "true",
-          "NNWeights": str(NNWEIGHTS)}),
-    ]
+    # All MetalFish engines
+    MF_AB = ("MetalFish-AB", METALFISH, {"Threads": THREADS, "Hash": HASH})
+    MF_MCTS = ("MetalFish-MCTS", METALFISH,
+               {"Threads": THREADS, "Hash": HASH, "UseMCTS": "true",
+                "NNWeights": str(NNWEIGHTS)})
+    MF_HYB = ("MetalFish-Hybrid", METALFISH,
+              {"Threads": THREADS, "Hash": HASH, "UseHybridSearch": "true",
+               "NNWeights": str(NNWEIGHTS)})
+
+    # Reference engines
+    PAT = ("Patricia", PATRICIA, {"Threads": THREADS, "Hash": HASH})
+    SF5 = ("Stockfish-L5", STOCKFISH, {"Threads": THREADS, "Hash": HASH, "Skill Level": 5})
+    SF10 = ("Stockfish-L10", STOCKFISH, {"Threads": THREADS, "Hash": HASH, "Skill Level": 10})
+    SF15 = ("Stockfish-L15", STOCKFISH, {"Threads": THREADS, "Hash": HASH, "Skill Level": 15})
+    SF20 = ("Stockfish-Full", STOCKFISH, {"Threads": THREADS, "Hash": HASH})
+    BER = ("Berserk", BERSERK, {"Threads": THREADS, "Hash": HASH})
+
+    refs = [PAT, SF5, SF10, SF15, SF20, BER]
+    mf_engines = [MF_AB, MF_MCTS, MF_HYB]
+
+    # Build full match list: every MetalFish engine vs every reference
+    matches = []
+    for mf in mf_engines:
+        for ref in refs:
+            matches.append((*mf, *ref))
+
+    # Internal head-to-head: AB vs MCTS, AB vs Hybrid, MCTS vs Hybrid
+    matches.append((*MF_AB, *MF_MCTS))
+    matches.append((*MF_AB, *MF_HYB))
+    matches.append((*MF_MCTS, *MF_HYB))
+
+    print(f"  {B}{len(matches)} matches, {len(matches)*GAMES} total games{N}")
+    print(f"  {D}TC: {TC_BASE}+{TC_INC} | {GAMES} games/match | Threads: {THREADS}{N}")
 
     # Resume or fresh start
     start_match = 0
