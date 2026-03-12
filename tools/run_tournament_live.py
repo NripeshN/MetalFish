@@ -67,7 +67,10 @@ class UCIEngine:
         self.proc.stdin.flush()
 
     def _readline(self):
-        return self.proc.stdout.readline().strip()
+        line = self.proc.stdout.readline().strip()
+        if line == "" and self.proc.poll() is not None:
+            return "bestmove (none)"  # Engine died
+        return line
 
     def _wait_for(self, token):
         while True:
@@ -189,6 +192,7 @@ def play_game(eng_w, eng_b, opening_moves, viz, game_num, total_games,
     last_depth = ""
     last_nps = ""
     result = "*"
+    resign_count = 0  # Consecutive moves with |score| > 10.0
 
     # Apply opening moves
     for uci_move in opening_moves:
@@ -288,6 +292,23 @@ def play_game(eng_w, eng_b, opening_moves, viz, game_num, total_games,
         ))
         print(f"  {D}{match_name}  |  {clock_str}  |  Ply {len(board.move_stack)}{N}")
 
+        # Resign detection: if score > 10.0 pawns for 3 consecutive moves, resign
+        try:
+            score_val = abs(float(score_display)) if score_display and score_display[0] in "+-" else 0
+            if score_val > 10.0:
+                resign_count += 1
+            else:
+                resign_count = 0
+            if resign_count >= 3:
+                # Side with negative score loses
+                if float(score_display) > 0:
+                    result = "1-0"
+                else:
+                    result = "0-1"
+                break
+        except (ValueError, IndexError):
+            pass
+
         # Check time forfeit
         if wtime <= 0:
             result = "0-1"
@@ -296,8 +317,10 @@ def play_game(eng_w, eng_b, opening_moves, viz, game_num, total_games,
             result = "1-0"
             break
 
-        # Simple resign detection (score > 10.0 for 5 moves)
-        # (simplified - just let games play out)
+        # Ply limit to prevent infinite games
+        if len(board.move_stack) > 500:
+            result = "1/2-1/2"
+            break
 
     # Determine result
     if result == "*":
