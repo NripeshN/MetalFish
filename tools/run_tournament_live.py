@@ -8,7 +8,7 @@ as it happens. Uses ChessBoardVisualizer for the board display.
 Usage: python3 tools/run_tournament_live.py
 """
 
-import subprocess, sys, os, time, threading, signal
+import subprocess, sys, os, time, json, argparse
 from pathlib import Path
 from datetime import datetime
 
@@ -32,7 +32,7 @@ PATRICIA = str(DIR / "reference/Patricia/engine/patricia")
 BOOK = DIR / "reference/books/8moves_v3.pgn"
 
 TC_BASE = 300  # seconds
-TC_INC = 3     # seconds per move
+TC_INC = 3   # seconds per move
 GAMES = 20
 THREADS = 4
 HASH = 256
@@ -225,15 +225,22 @@ def play_game(eng_w, eng_b, opening_moves, viz, game_num, total_games,
         if board.turn == chess.WHITE:
             engine = eng_w
             t_start = time.time()
-            bestmove, info = engine.go(pos_cmd, wtime, btime, winc, binc)
+            bestmove, info = engine.go(pos_cmd, max(100, wtime), btime, winc, binc)
             elapsed_ms = int((time.time() - t_start) * 1000)
-            wtime = max(100, wtime - elapsed_ms + winc)
+            wtime = wtime - elapsed_ms + winc
+            
+            if wtime <= 0:
+                result = "0-1"  # White flags
+                break
         else:
             engine = eng_b
             t_start = time.time()
-            bestmove, info = engine.go(pos_cmd, wtime, btime, winc, binc)
+            bestmove, info = engine.go(pos_cmd, wtime, max(100, btime), winc, binc)
             elapsed_ms = int((time.time() - t_start) * 1000)
-            btime = max(100, btime - elapsed_ms + binc)
+            btime = btime - elapsed_ms + binc
+            if btime <= 0:
+                result = "1-0"  # Black flags
+                break
 
         if not bestmove or bestmove == "(none)":
             break
@@ -309,14 +316,6 @@ def play_game(eng_w, eng_b, opening_moves, viz, game_num, total_games,
         except (ValueError, IndexError):
             pass
 
-        # Check time forfeit
-        if wtime <= 0:
-            result = "0-1"
-            break
-        if btime <= 0:
-            result = "1-0"
-            break
-
         # Ply limit to prevent infinite games
         if len(board.move_stack) > 500:
             result = "1/2-1/2"
@@ -375,19 +374,35 @@ def save_pgn(pgn_path, white, black, result, moves_uci, game_num, opening_len):
         f.write(str(game) + "\n\n")
 
 
-def run_match(name1, cmd1, opts1, name2, cmd2, opts2, match_num, total_matches, openings):
-    """Run a full match between two engines."""
+def run_match(name1, cmd1, opts1, name2, cmd2, opts2, match_num, total_matches,
+              openings, start_game=0, init_score1=0.0, init_score2=0.0):
+    """Run a full match between two engines.
+    
+    Args:
+        start_game: Resume from this game number (0-indexed)
+        init_score1/2: Initial scores when resuming
+    Returns: (score_1, score_2, games_completed)
+    """
     viz = ChessBoardVisualizer()
     pgn_path = RESULTS_DIR / f"{name1}_vs_{name2}.pgn"
     match_name = f"Match {match_num}/{total_matches}: {name1} vs {name2}"
 
-    score_1 = 0.0  # First engine's score
-    score_2 = 0.0
+    score_1 = init_score1
+    score_2 = init_score2
     results = []
+    LEAD_THRESHOLD = 3.0  # End match early if one engine leads by this much
 
-    for g in range(GAMES):
+    for g in range(start_game, GAMES):
         game_num = g + 1
         opening = openings[g % len(openings)] if openings else []
+
+        # Check for early match termination
+        if g > 0 and abs(score_1 - score_2) >= LEAD_THRESHOLD:
+            leader = name1 if score_1 > score_2 else name2
+            print(f"\n  {Y}{B}Match ended early: {leader} leads "
+                  f"{max(score_1,score_2)}-{min(score_1,score_2)} "
+                  f"(>{LEAD_THRESHOLD} point lead){N}")
+            break
 
         # Alternate colors every 2 games (same opening, swapped colors)
         if g % 2 == 0:
@@ -425,21 +440,57 @@ def run_match(name1, cmd1, opts1, name2, cmd2, opts2, match_num, total_matches, 
         eng_b.quit()
         results.append(result)
 
+        # Save state after each game for mid-match resume
+        save_state(RESULTS_DIR, match_num - 1, g + 1, score_1, score_2, [])
+
         # Brief pause between games
         time.sleep(1)
 
     # Match summary
+    games_done = len(results) + start_game
     w = sum(1 for r in results if r == "1-0")
     d = sum(1 for r in results if r == "1/2-1/2")
     l = sum(1 for r in results if r == "0-1")
     print(f"\n  {B}Match result ({name1} perspective): {G}+{w}{N} {Y}={d}{N} {R}-{l}{N}")
-    print(f"  Score: {score_1}/{GAMES}")
+    print(f"  Score: {score_1} - {score_2} / {games_done} games")
     print()
 
-    return score_1, score_2
+    return score_1, score_2, games_done
+
+
+STATE_FILE = "state.json"
+
+
+def save_state(results_dir, match_idx, game_idx, score1, score2, all_results):
+    """Save tournament progress for resume."""
+    state = {
+        "results_dir": str(results_dir),
+        "match_idx": match_idx,
+        "game_idx": game_idx,
+        "score1": score1,
+        "score2": score2,
+        "all_results": all_results,
+    }
+    with open(results_dir / STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def load_state(results_dir):
+    """Load tournament progress for resume."""
+    state_path = Path(results_dir) / STATE_FILE
+    if state_path.exists():
+        with open(state_path) as f:
+            return json.load(f)
+    return None
 
 
 def main():
+    parser = argparse.ArgumentParser(description="MetalFish Live Tournament")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Resume from a previous tournament directory "
+                             "(e.g. results/tournament_20260312_161340)")
+    args = parser.parse_args()
+
     # Check engines
     for path, name in [(METALFISH, "MetalFish"), (STOCKFISH, "Stockfish"),
                         (BERSERK, "Berserk"), (PATRICIA, "Patricia")]:
@@ -479,12 +530,50 @@ def main():
           "NNWeights": str(NNWEIGHTS)}),
     ]
 
-    start = time.time()
+    # Resume or fresh start
+    start_match = 0
+    start_game = 0
+    resume_s1 = 0.0
+    resume_s2 = 0.0
     all_results = []
 
+    if args.resume:
+        global RESULTS_DIR
+        RESULTS_DIR = Path(args.resume)
+        state = load_state(RESULTS_DIR)
+        if state:
+            start_match = state["match_idx"]
+            start_game = state["game_idx"]
+            resume_s1 = state["score1"]
+            resume_s2 = state["score2"]
+            all_results = state["all_results"]
+            print(f"  {G}Resuming from match {start_match+1}, game {start_game+1}{N}")
+            print(f"  {D}Previous results: {len(all_results)} matches completed{N}")
+        else:
+            print(f"  {Y}No state file found in {args.resume}, starting fresh{N}")
+    else:
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    start = time.time()
+
     for i, (n1, c1, o1, n2, c2, o2) in enumerate(matches):
-        s1, s2 = run_match(n1, c1, o1, n2, c2, o2, i+1, len(matches), openings)
-        all_results.append((n1, n2, s1, s2))
+        if i < start_match:
+            continue  # Skip completed matches
+
+        # Determine resume point for current match
+        g_start = start_game if i == start_match else 0
+        s1_init = resume_s1 if i == start_match else 0.0
+        s2_init = resume_s2 if i == start_match else 0.0
+
+        s1, s2, games_done = run_match(
+            n1, c1, o1, n2, c2, o2, i+1, len(matches), openings,
+            start_game=g_start, init_score1=s1_init, init_score2=s2_init
+        )
+        all_results.append((n1, n2, s1, s2, games_done))
+
+        # Save state after each match for resume
+        next_match = i + 1
+        save_state(RESULTS_DIR, next_match, 0, 0.0, 0.0, all_results)
 
     # Final summary
     elapsed = int(time.time() - start)
@@ -493,11 +582,16 @@ def main():
     print(f"  {C}{B}  TOURNAMENT COMPLETE  ({elapsed//3600}h{(elapsed%3600)//60:02d}m){N}")
     print(f"  {C}{B}{'='*45}{N}\n")
 
-    for n1, n2, s1, s2 in all_results:
-        total = int(s1 + s2)
-        print(f"  {n1} vs {n2}: {G}{s1}{N} - {R}{s2}{N} / {total}")
+    for entry in all_results:
+        if len(entry) == 5:
+            n1, n2, s1, s2, gd = entry
+        else:
+            n1, n2, s1, s2 = entry
+            gd = int(s1 + s2)
+        print(f"  {n1} vs {n2}: {G}{s1}{N} - {R}{s2}{N} / {gd} games")
 
     print(f"\n  {D}PGN files: {RESULTS_DIR}{N}")
+    print(f"  {D}Resume: python3 tools/run_tournament_live.py --resume {RESULTS_DIR}{N}")
     print(f"  {G}{B}Done!{N}\n")
 
 
