@@ -258,11 +258,21 @@ def play_game(eng_w, eng_b, opening_moves, viz, game_num, total_games,
         # Format move display
         if is_white:
             move_str = f"{move_num}. {san}"
+            # Score is from white's perspective already
+            score_display = last_score
         else:
             move_str = f"{move_num}... {san}"
+            # Flip score to white's perspective
+            if last_score and last_score[0] in "+-":
+                score_display = f"{-float(last_score):+.2f}"
+            elif last_score.startswith("M"):
+                score_display = f"M{-int(last_score[1:])}" if last_score[1:].lstrip('-').isdigit() else last_score
+            else:
+                score_display = last_score
 
         time_str = f"{elapsed_ms/1000:.1f}s"
-        info_str = f"{move_str}  {last_score}  d{last_depth}  {last_nps}  {time_str}"
+        mover = eng_w.name if is_white else eng_b.name
+        info_str = f"{move_str}  [{score_display}] d{last_depth} {last_nps} {time_str}"
 
         # Format clocks
         wm, ws = divmod(wtime // 1000, 60)
