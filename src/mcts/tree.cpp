@@ -1078,14 +1078,24 @@ int64_t ThreadSafeMCTS::calculate_time_budget() const {
 void ThreadSafeMCTS::worker_thread(int thread_id) {
   WorkerContext &ctx = *worker_contexts_[thread_id];
 
-  // Cache root FEN once per search (avoid repeated string copies)
   ctx.set_root_fen(tree_->root_fen());
 
-  // Main search loop with batched stop checks
-  // Check stop on every iteration -- critical for responsiveness when
-  // the evaluator is stopped externally (e.g., time's up, UCI stop).
+  auto last_info = std::chrono::steady_clock::now();
+
   while (!should_stop()) {
     run_iteration(ctx);
+
+    // Thread 0 sends UCI info every ~1 second
+    if (thread_id == 0) {
+      auto now = std::chrono::steady_clock::now();
+      auto since_info = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now - last_info)
+                            .count();
+      if (since_info >= 1000) {
+        send_info();
+        last_info = now;
+      }
+    }
   }
 
   // Flush accumulated profiling stats
@@ -1569,20 +1579,32 @@ void ThreadSafeMCTS::send_info() {
           .count();
 
   uint64_t nodes = stats_.total_nodes.load(std::memory_order_relaxed);
-  uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+  uint64_t nn_evals = stats_.nn_evaluations.load(std::memory_order_relaxed);
+  uint64_t nps = elapsed_ms > 0 ? (nn_evals * 1000) / elapsed_ms : 0;
+
+  // Q value to centipawns: Q is in [-1, 1], use inverse tanh scaling
+  // cp = 111.714640912 * tan(1.5620688421 * Q) matches Lc0's WDL-to-cp
+  float q = get_best_q();
+  int cp;
+  if (std::abs(q) > 0.99f) {
+    cp = q > 0 ? 10000 : -10000;
+  } else {
+    cp = static_cast<int>(111.714 * std::tan(1.5621 * q));
+  }
+
+  // Depth = best move visits, seldepth = max PV length
+  std::vector<Move> pv = get_pv();
+  int depth = static_cast<int>(pv.size());
+  if (depth < 1) depth = 1;
 
   std::ostringstream ss;
-  ss << "info depth " << 1;
-  ss << " nodes " << nodes;
+  ss << "info depth " << depth;
+  ss << " seldepth " << depth;
+  ss << " nodes " << nn_evals;
   ss << " nps " << nps;
   ss << " time " << elapsed_ms;
-
-  float q = get_best_q();
-  int cp = static_cast<int>(q * 100);
   ss << " score cp " << cp;
 
-  // PV
-  std::vector<Move> pv = get_pv();
   if (!pv.empty()) {
     ss << " pv";
     for (const Move &m : pv) {
