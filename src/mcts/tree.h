@@ -375,19 +375,17 @@ struct ThreadSafeMCTSConfig {
   std::string nn_weights_path;
 
   // MCTS PUCT parameters
-  float cpuct = 1.745f;        // default value: 1.745
-  float cpuct_base = 19652.0f; // match reference defaults
-  float cpuct_factor = 2.5f;   // match reference defaults
+  float cpuct = 1.745f;
+  float cpuct_base = 38739.0f;
+  float cpuct_factor = 3.894f;
 
-  // FPU (First Play Urgency) - reduction strategy (MetalFish defaults)
-  float fpu_value = 0.0f;       // Base FPU value (used if absolute strategy)
-  float fpu_reduction = 0.330f; // Reduction factor applied to visited policy
+  float fpu_value = 0.0f;
+  float fpu_reduction = 0.330f;
 
-  // Policy and exploration
   float policy_softmax_temp = 1.359f;
-  bool add_dirichlet_noise = true;
-  float dirichlet_alpha = 0.3f;    // default value
-  float dirichlet_epsilon = 0.25f; // uses 0.25 for training
+  bool add_dirichlet_noise = false;  // Off for competitive play (matches Lc0)
+  float dirichlet_alpha = 0.3f;
+  float dirichlet_epsilon = 0.25f;
 
   int num_threads = 4;
   int virtual_loss = 3;
