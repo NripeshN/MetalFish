@@ -303,7 +303,7 @@ private:
 // ============================================================================
 
 struct WorkerContext {
-  int worker_id = 0; // Unique ID for GatherBatchEvaluator slot assignment
+  int worker_id = 0;
   Position pos;
   StateInfo root_st;
   std::vector<StateInfo> state_stack;
@@ -479,45 +479,6 @@ struct ThreadSafeMCTSStats {
                            count
                      : 0;
   }
-};
-
-// ============================================================================
-// GatherBatchEvaluator -- Crash-free batched transformer evaluation
-//
-// Workers submit positions to a shared queue under a mutex, then wait on
-// a per-request condition variable. When enough positions accumulate (or
-// a timeout fires), the submitting worker becomes the leader and calls
-// EvaluateBatch() for the whole queue. No separate eval thread.
-// ============================================================================
-
-class GatherBatchEvaluator {
-public:
-  GatherBatchEvaluator(NNMCTSEvaluator *nn_evaluator, int num_workers,
-                       int gather_timeout_us = 500);
-
-  // Called by worker threads. Blocks until batch is evaluated.
-  EvaluationResult evaluate(int worker_id, const Position &pos);
-
-  // Cancel all waiting workers (called from stop())
-  void cancel();
-
-private:
-  struct Request {
-    std::string fen;
-    bool is_chess960 = false;
-    EvaluationResult result;
-    bool completed = false;
-  };
-
-  NNMCTSEvaluator *nn_evaluator_;
-  int num_workers_;
-  int gather_timeout_us_;
-
-  std::mutex queue_mutex_;
-  std::condition_variable queue_cv_; // Notified when new request arrives
-  std::condition_variable done_cv_;  // Notified when batch is complete
-  std::vector<Request *> pending_;   // Requests waiting to be batched
-  std::atomic<bool> cancelled_{false};
 };
 
 // ============================================================================
@@ -721,12 +682,6 @@ private:
   void run_iteration(WorkerContext &ctx);
 
   ThreadSafeNode *select_leaf(WorkerContext &ctx);
-  void expand_node(ThreadSafeNode *node, WorkerContext &ctx,
-                   EvaluationResult *out_nn_result = nullptr);
-
-  float evaluate_position(WorkerContext &ctx);
-  float evaluate_position_batched(WorkerContext &ctx);
-  float evaluate_position_direct(WorkerContext &ctx);
 
   void backpropagate(ThreadSafeNode *node, float value, float draw,
                      float moves_left);
@@ -743,7 +698,6 @@ private:
   std::unique_ptr<ThreadSafeTree> tree_;
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
   std::unique_ptr<NNMCTSEvaluator> nn_evaluator_;
-  std::unique_ptr<GatherBatchEvaluator> gather_eval_;
 
   std::atomic<bool> stop_flag_{false};
   std::atomic<bool> running_{false};

@@ -603,131 +603,6 @@ float BatchedGPUEvaluator::evaluate(const Position &pos, WorkerContext &ctx) {
 }
 
 // ============================================================================
-// GatherBatchEvaluator -- Queue-based cooperative batching
-// ============================================================================
-
-GatherBatchEvaluator::GatherBatchEvaluator(NNMCTSEvaluator *nn_evaluator,
-                                           int num_workers,
-                                           int gather_timeout_us)
-    : nn_evaluator_(nn_evaluator), num_workers_(num_workers),
-      gather_timeout_us_(gather_timeout_us) {
-  pending_.reserve(num_workers);
-}
-
-void GatherBatchEvaluator::cancel() {
-  cancelled_.store(true, std::memory_order_release);
-  done_cv_.notify_all();
-  queue_cv_.notify_all();
-}
-
-EvaluationResult GatherBatchEvaluator::evaluate(int worker_id,
-                                                const Position &pos) {
-  static std::atomic<int> entry_count{0};
-  int ec = entry_count.fetch_add(1);
-  if (ec < 10) {
-    std::cerr << "[GENTER] w" << worker_id << " cancelled=" << cancelled_.load()
-              << " this=" << (void *)this << " ec=" << ec << std::endl;
-  }
-  // Create request on the stack -- lives until this function returns
-  Request req;
-  req.fen = pos.fen();
-  req.is_chess960 = pos.is_chess960();
-  req.completed = false;
-
-  bool is_leader = false;
-  std::vector<Request *> batch;
-
-  {
-    std::unique_lock<std::mutex> lock(queue_mutex_);
-
-    // Submit my request
-    pending_.push_back(&req);
-
-    if (static_cast<int>(pending_.size()) >= num_workers_) {
-      // Enough requests -- I'm the leader
-      is_leader = true;
-      batch.swap(pending_);
-    } else {
-      // Wait until all workers have submitted (no timeout -- strict batching)
-      queue_cv_.wait(lock, [&] {
-        return static_cast<int>(pending_.size()) >= num_workers_ ||
-               cancelled_.load(std::memory_order_acquire);
-      });
-
-      if (cancelled_.load(std::memory_order_acquire)) {
-        // Remove our request from pending
-        auto it = std::find(pending_.begin(), pending_.end(), &req);
-        if (it != pending_.end())
-          pending_.erase(it);
-        return EvaluationResult();
-      }
-
-      // Check if we should become leader (timeout or enough gathered)
-      if (!req.completed && !pending_.empty()) {
-        is_leader = true;
-        batch.swap(pending_);
-      }
-    }
-  }
-
-  if (is_leader && !batch.empty()) {
-    // Build positions for batch evaluation
-    std::vector<std::unique_ptr<StateInfo>> state_infos;
-    std::vector<std::unique_ptr<Position>> positions;
-    std::vector<const Position *> pos_ptrs;
-
-    for (auto *r : batch) {
-      static std::atomic<int> fc{0};
-      if (fc.fetch_add(1) < 3)
-        std::cerr << "[GFEN] fen='" << r->fen << "'" << std::endl;
-      state_infos.push_back(std::make_unique<StateInfo>());
-      positions.push_back(std::make_unique<Position>());
-      positions.back()->set(r->fen, r->is_chess960, state_infos.back().get());
-      pos_ptrs.push_back(positions.back().get());
-    }
-
-    // Single GPU call for the entire batch
-    std::vector<EvaluationResult> results;
-    if (!pos_ptrs.empty()) {
-      static std::atomic<int> bcnt{0};
-      if (bcnt.fetch_add(1) < 3) {
-        std::cerr << "[GBATCH] batch=" << pos_ptrs.size() << " fen0="
-                  << (batch[0]->fen.empty() ? "EMPTY"
-                                            : batch[0]->fen.substr(0, 20))
-                  << std::endl;
-      }
-      try {
-        results =
-            nn_evaluator_->EvaluateBatch(pos_ptrs.data(), pos_ptrs.size());
-      } catch (...) {
-      }
-    }
-
-    // Scatter results AND mark completed under the mutex
-    // The mutex ensures happens-before: workers see results when they see
-    // completed=true
-    {
-      std::lock_guard<std::mutex> lock(queue_mutex_);
-      for (size_t i = 0; i < results.size() && i < batch.size(); ++i) {
-        batch[i]->result = std::move(results[i]);
-      }
-      for (auto *r : batch) {
-        r->completed = true;
-      }
-    }
-    done_cv_.notify_all();
-  } else if (!is_leader) {
-    // Wait for the leader to complete our request
-    std::unique_lock<std::mutex> lock(queue_mutex_);
-    done_cv_.wait(lock, [&] {
-      return req.completed || cancelled_.load(std::memory_order_acquire);
-    });
-  }
-
-  return std::move(req.result);
-}
-
-// ============================================================================
 // ThreadSafeNode Implementation
 // ============================================================================
 
@@ -1100,14 +975,6 @@ void ThreadSafeMCTS::start_search(const std::string &fen,
     batched_evaluator_->start();
   }
 
-  // Transformer evaluation: queue-based cooperative batching.
-  // Workers submit positions to a queue; when enough accumulate (or timeout),
-  // ONE worker calls EvaluateBatch() for the whole batch.
-  if (nn_evaluator_) {
-    gather_eval_ = std::make_unique<GatherBatchEvaluator>(
-        nn_evaluator_.get(), actual_threads, 20000 /*gather_timeout_us=20ms*/);
-  }
-
   // Create worker contexts with unique IDs for gather slot assignment
   worker_contexts_.clear();
   for (int i = 0; i < actual_threads; ++i) {
@@ -1129,28 +996,19 @@ void ThreadSafeMCTS::stop() {
 }
 
 void ThreadSafeMCTS::wait() {
-  // Cancel gather evaluator FIRST -- releases any workers waiting in the
-  // barrier
-  if (gather_eval_) {
-    gather_eval_->cancel();
-  }
-
   // Stop GPU NNUE batched evaluator if active
   if (batched_evaluator_) {
     batched_evaluator_->stop();
     batched_evaluator_.reset();
   }
 
-  // Workers exit because: should_stop()=true AND gather barrier cancelled
+  // Workers exit because: should_stop()=true
   for (size_t i = 0; i < workers_.size(); ++i) {
     if (workers_[i].joinable()) {
       workers_[i].join();
     }
   }
   workers_.clear();
-
-  // Destroy gather evaluator AFTER workers are joined (safe ordering)
-  gather_eval_.reset();
 
   running_.store(false, std::memory_order_release);
 
@@ -1246,160 +1104,62 @@ void ThreadSafeMCTS::worker_thread(int thread_id) {
 }
 
 void ThreadSafeMCTS::run_iteration(WorkerContext &ctx) {
-  // Use cached root FEN instead of fetching every time
   ctx.reset_to_cached_root();
+  ctx.iterations++;
 
-  // Profile only every N iterations to reduce chrono overhead
-  bool do_profile = (ctx.iterations % WorkerContext::PROFILE_SAMPLE_RATE) == 0;
-  auto iter_start = do_profile ? std::chrono::steady_clock::now()
-                               : std::chrono::steady_clock::time_point{};
-
-  EvaluationResult nn_result;
-  bool nn_used = false;
-
-  // 1. Selection - traverse to leaf
-  auto select_start = iter_start;
+  // 1. SELECT leaf via PUCT with virtual loss
   ThreadSafeNode *leaf = select_leaf(ctx);
-  auto select_end = do_profile ? std::chrono::steady_clock::now()
-                               : std::chrono::steady_clock::time_point{};
-
   if (!leaf)
     return;
 
-  // 2. Check for terminal - generate moves once and reuse
+  // 2. CHECK TERMINAL
   MoveList<LEGAL> moves(ctx.pos);
-  bool is_in_check = ctx.pos.checkers() != 0;
-
   if (moves.size() == 0) {
-    if (is_in_check) {
-      // Checkmate - terminal loss (from perspective of side to move)
-      leaf->set_terminal(ThreadSafeNode::Terminal::EndOfGame, -1.0f);
-      backpropagate(leaf, -1.0f, 0.0f, 0.0f);
-    } else {
-      // Stalemate - terminal draw
-      leaf->set_terminal(ThreadSafeNode::Terminal::EndOfGame, 0.0f);
-      backpropagate(leaf, 0.0f, 1.0f, 0.0f);
-    }
+    bool in_check = ctx.pos.checkers() != 0;
+    float value = in_check ? -1.0f : 0.0f;
+    float draw = in_check ? 0.0f : 1.0f;
+    leaf->set_terminal(ThreadSafeNode::Terminal::EndOfGame, value);
+    backpropagate(leaf, value, draw, 0.0f);
     return;
   }
 
-  // 3. Expansion - add children if not expanded (reuse moves list)
-  auto expand_start = do_profile ? std::chrono::steady_clock::now()
-                                 : std::chrono::steady_clock::time_point{};
-
-  if (!leaf->has_children() && nn_evaluator_) {
-    try {
-      if (gather_eval_) {
-        nn_result = gather_eval_->evaluate(ctx.worker_id, ctx.pos);
-      } else {
-        nn_result = nn_evaluator_->Evaluate(ctx.pos);
-      }
-      // Only count as NN-evaluated if we got actual policy results
-      nn_used = !nn_result.policy_priors.empty();
-      if (nn_used)
-        stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
-    } catch (...) {
-      nn_used = false;
-    }
-  }
-
-  // Track if expand_node provided an NN result (to avoid redundant evaluation)
-  EvaluationResult expand_nn_result;
-  bool expand_nn_used = false;
-
-  if (!leaf->has_children()) {
-    std::lock_guard<std::mutex> lock(leaf->mutex());
-    if (!leaf->has_children()) {
-      leaf->create_edges(moves);
-      if (nn_used) {
-        ApplyNNPolicy(leaf, nn_result);
-      } else {
-        // Pass pointer to capture NN result if expand_node evaluates
-        expand_node(leaf, ctx, &expand_nn_result);
-        // Check if expand_node successfully evaluated NN (non-empty
-        // policy_priors)
-        if (!expand_nn_result.policy_priors.empty()) {
-          expand_nn_used = true;
-        }
-      }
-      if (config_.add_dirichlet_noise && leaf == tree_->root()) {
-        add_dirichlet_noise(leaf);
-      }
-    }
-  }
-  auto expand_end = do_profile ? std::chrono::steady_clock::now()
-                               : std::chrono::steady_clock::time_point{};
-
-  // 4. Evaluation
-  auto eval_start = do_profile ? std::chrono::steady_clock::now()
-                               : std::chrono::steady_clock::time_point{};
+  // 3. EVALUATE with transformer NN (ONE call per leaf, no fallbacks)
   float value = 0.0f;
   float draw = 0.0f;
   float moves_left_val = 30.0f;
 
-  if (nn_used) {
-    value = nn_result.value;
-    if (nn_result.has_wdl) {
-      draw = nn_result.wdl[1];
-    } else {
-      draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
+  if (!leaf->has_children() && nn_evaluator_) {
+    try {
+      auto nn_result = nn_evaluator_->Evaluate(ctx.pos);
+
+      // Expand node with NN policy directly (no heuristic blending)
+      {
+        std::lock_guard<std::mutex> lock(leaf->mutex());
+        if (!leaf->has_children()) {
+          leaf->create_edges(moves);
+          ApplyNNPolicy(leaf, nn_result);
+          if (config_.add_dirichlet_noise && leaf == tree_->root()) {
+            add_dirichlet_noise(leaf);
+          }
+        }
+      }
+
+      // Use NN value directly (no NNUE/heuristic fallback)
+      value = nn_result.value;
+      draw = nn_result.has_wdl ? nn_result.wdl[1] : 0.0f;
+      moves_left_val =
+          nn_result.has_moves_left ? nn_result.moves_left : 30.0f;
+
+      stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
+    } catch (...) {
+      // NN failed -- treat as uncertain (draw)
+      value = 0.0f;
+      draw = 1.0f;
     }
-    if (nn_result.has_moves_left) {
-      moves_left_val = nn_result.moves_left;
-    }
-  } else if (expand_nn_used) {
-    // Reuse the NN result from expand_node to avoid redundant evaluation
-    value = expand_nn_result.value;
-    if (expand_nn_result.has_wdl) {
-      draw = expand_nn_result.wdl[1];
-    } else {
-      draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
-    }
-    if (expand_nn_result.has_moves_left) {
-      moves_left_val = expand_nn_result.moves_left;
-    }
-  } else {
-    value = evaluate_position(ctx);
-    draw = std::max(0.0f, 0.4f - std::abs(value) * 0.3f);
   }
 
-  auto eval_end = do_profile ? std::chrono::steady_clock::now()
-                             : std::chrono::steady_clock::time_point{};
-
-  // 5. Backpropagation
-  auto backprop_start = do_profile ? std::chrono::steady_clock::now()
-                                   : std::chrono::steady_clock::time_point{};
+  // 4. BACKPROPAGATE
   backpropagate(leaf, value, draw, moves_left_val);
-  auto backprop_end = do_profile ? std::chrono::steady_clock::now()
-                                 : std::chrono::steady_clock::time_point{};
-
-  // Update profiling stats (sampled)
-  if (do_profile) {
-    ctx.selection_time_acc +=
-        std::chrono::duration_cast<std::chrono::microseconds>(select_end -
-                                                              select_start)
-            .count() *
-        WorkerContext::PROFILE_SAMPLE_RATE;
-    ctx.expansion_time_acc +=
-        std::chrono::duration_cast<std::chrono::microseconds>(expand_end -
-                                                              expand_start)
-            .count() *
-        WorkerContext::PROFILE_SAMPLE_RATE;
-    ctx.evaluation_time_acc +=
-        std::chrono::duration_cast<std::chrono::microseconds>(eval_end -
-                                                              eval_start)
-            .count() *
-        WorkerContext::PROFILE_SAMPLE_RATE;
-    ctx.backprop_time_acc +=
-        std::chrono::duration_cast<std::chrono::microseconds>(backprop_end -
-                                                              backprop_start)
-            .count() *
-        WorkerContext::PROFILE_SAMPLE_RATE;
-  }
-
-  stats_.total_nodes.fetch_add(1, std::memory_order_relaxed);
-  stats_.total_iterations.fetch_add(1, std::memory_order_relaxed);
-  ctx.iterations++;
 }
 
 ThreadSafeNode *ThreadSafeMCTS::select_leaf(WorkerContext &ctx) {
@@ -1546,204 +1306,6 @@ int ThreadSafeMCTS::select_child_puct(ThreadSafeNode *node, float cpuct,
   return best_idx;
 }
 
-void ThreadSafeMCTS::expand_node(ThreadSafeNode *node, WorkerContext &ctx,
-                                 EvaluationResult *out_nn_result) {
-  int num_edges = node->num_edges();
-  if (num_edges == 0)
-    return;
-
-  TSEdge *edges = node->edges();
-  // Stack-allocated score buffer (max legal chess moves ~218, use 256 for
-  // safety)
-  constexpr int kMaxExpandEdges = 256;
-  float scores[kMaxExpandEdges];
-  const int safe_edges = std::min(num_edges, kMaxExpandEdges);
-  float max_score = -1e9f;
-
-  // Score each move using improved heuristics for move ordering
-  for (int i = 0; i < num_edges; ++i) {
-    Move m = edges[i].move;
-    float score = 0.0f;
-
-    // Captures scored by MVV-LVA and SEE (most important for tactics)
-    if (ctx.pos.capture(m)) {
-      PieceType captured = m.type_of() == EN_PASSANT
-                               ? PAWN
-                               : type_of(ctx.pos.piece_on(m.to_sq()));
-      PieceType attacker = type_of(ctx.pos.piece_on(m.from_sq()));
-
-      // Improved piece values for move ordering
-      static const float piece_values[] = {0, 100, 320, 330, 500, 1000, 0};
-
-      // MVV-LVA: Prioritize capturing valuable pieces with less valuable
-      // attackers
-      score += piece_values[captured] * 8.0f - piece_values[attacker] * 0.5f;
-
-      // SEE bonus: Good captures get significant boost
-      if (ctx.pos.see_ge(m, Value(0))) {
-        score += 500.0f; // Increased from 300
-      } else {
-        // Bad captures (losing material) get penalty
-        score -= 200.0f;
-      }
-    }
-
-    // Promotions - queens are almost always best
-    if (m.type_of() == PROMOTION) {
-      PieceType promo = m.promotion_type();
-      if (promo == QUEEN)
-        score += 5000.0f; // Very high priority
-      else if (promo == KNIGHT)
-        score += 1000.0f; // Knight promotions for discovered attacks
-      else
-        score -= 500.0f; // Underpromotions rarely good
-    }
-
-    // Checks - very important tactically
-    if (ctx.pos.gives_check(m)) {
-      score += 600.0f; // Increased from 400
-
-      // Discovered checks are even more valuable
-      Bitboard blockers = ctx.pos.blockers_for_king(~ctx.pos.side_to_move());
-      if (blockers & m.from_sq()) {
-        score += 300.0f;
-      }
-    }
-
-    // Piece development in opening/middlegame
-    int game_phase = ctx.pos.count<ALL_PIECES>() > 24   ? 0
-                     : ctx.pos.count<ALL_PIECES>() > 10 ? 1
-                                                        : 2;
-
-    if (game_phase < 2) { // Not endgame
-      PieceType pt = type_of(ctx.pos.piece_on(m.from_sq()));
-
-      // Knights and bishops should be developed
-      if (pt == KNIGHT || pt == BISHOP) {
-        Rank from_rank =
-            relative_rank(ctx.pos.side_to_move(), rank_of(m.from_sq()));
-        if (from_rank == RANK_1) { // Moving from back rank
-          score += 150.0f;
-        }
-      }
-
-      // Don't move queen too early
-      if (pt == QUEEN && game_phase == 0) {
-        score -= 100.0f;
-      }
-    }
-
-    // Center control (important in all phases)
-    int to_file = file_of(m.to_sq());
-    int to_rank = rank_of(m.to_sq());
-    float center_dist = std::abs(to_file - 3.5f) + std::abs(to_rank - 3.5f);
-    score += (7.0f - center_dist) * 20.0f; // Increased from 15
-
-    // Castling bonus - king safety is important
-    if (m.type_of() == CASTLING) {
-      score += 400.0f; // Increased from 200
-    }
-
-    // Pawn advances (especially passed pawns)
-    if (type_of(ctx.pos.piece_on(m.from_sq())) == PAWN) {
-      Rank to_rank_rel =
-          relative_rank(ctx.pos.side_to_move(), rank_of(m.to_sq()));
-      if (to_rank_rel >= RANK_6) {
-        score += 200.0f * (to_rank_rel - RANK_5); // Bonus for advanced pawns
-      }
-    }
-
-    // Avoid moving pieces that are well-placed (unless capturing)
-    if (!ctx.pos.capture(m)) {
-      // Small penalty for moving pieces multiple times in opening
-      if (game_phase == 0) {
-        score -= 30.0f;
-      }
-    }
-
-    scores[i] = score;
-    max_score = std::max(max_score, score);
-  }
-
-  // Apply NN policy priors if available
-  if (nn_evaluator_) {
-    try {
-      auto result = gather_eval_
-                        ? gather_eval_->evaluate(ctx.worker_id, ctx.pos)
-                        : nn_evaluator_->Evaluate(ctx.pos);
-      stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
-
-      // Cache the NN result for value evaluation if requested
-      if (out_nn_result) {
-        *out_nn_result = result;
-      }
-
-      // Apply policy priors to edges (blend with heuristics)
-      // Configuration: 70% NN policy, 30% heuristic scores
-      constexpr float NN_POLICY_WEIGHT = 0.7f;
-      constexpr float HEURISTIC_WEIGHT = 0.3f;
-      constexpr float POLICY_SCALE = 10000.0f; // Scale NN policy for blending
-
-      for (int i = 0; i < num_edges; ++i) {
-        Move m = edges[i].move;
-        float nn_policy = result.get_policy(m);
-        // NN policy outputs are raw logits, not probabilities - they can be
-        // negative. We blend all moves regardless of logit sign.
-        scores[i] = NN_POLICY_WEIGHT * (nn_policy * POLICY_SCALE) +
-                    HEURISTIC_WEIGHT * scores[i];
-      }
-
-      // Recalculate max_score after NN policy blending
-      max_score = -std::numeric_limits<float>::infinity();
-      for (int i = 0; i < num_edges; ++i) {
-        max_score = std::max(max_score, scores[i]);
-      }
-    } catch (const std::exception &e) {
-      // Silently fall back to heuristics if NN evaluation fails
-    }
-  }
-
-  // Softmax normalization with temperature
-  float sum = 0.0f;
-  const float temp = config_.policy_softmax_temp * 300.0f;
-  const int n = safe_edges;
-
-#ifdef __APPLE__
-  // vDSP-accelerated softmax: subtract max, divide by temp, exp, normalize
-  float neg_max = -max_score;
-  vDSP_vsadd(scores, 1, &neg_max, scores, 1, n);
-  float inv_temp = 1.0f / temp;
-  vDSP_vsmul(scores, 1, &inv_temp, scores, 1, n);
-  int vn = n;
-  float exp_buf[kMaxExpandEdges];
-  vvexpf(exp_buf, scores, &vn);
-  vDSP_sve(exp_buf, 1, &sum, n);
-  if (sum > 0.0f) {
-    float inv_sum = 1.0f / sum;
-    vDSP_vsmul(exp_buf, 1, &inv_sum, scores, 1, n);
-  } else {
-    float uniform = 1.0f / static_cast<float>(n);
-    for (int i = 0; i < n; ++i)
-      scores[i] = uniform;
-  }
-#else
-  for (int i = 0; i < n; ++i) {
-    scores[i] = FastMath::FastExp((scores[i] - max_score) / temp);
-    sum += scores[i];
-  }
-  if (sum > 0.0f) {
-    float inv_sum = 1.0f / sum;
-    for (int i = 0; i < n; ++i)
-      scores[i] *= inv_sum;
-  }
-#endif
-
-  // Set policy priors using MCTS compressed storage
-  for (int i = 0; i < n; ++i) {
-    edges[i].SetPolicy(scores[i]);
-  }
-}
-
 void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
   int num_edges = root->num_edges();
   if (num_edges == 0)
@@ -1775,82 +1337,6 @@ void ThreadSafeMCTS::add_dirichlet_noise(ThreadSafeNode *root) {
                   config_.dirichlet_epsilon * (noise[i] / noise_sum);
     edges[i].SetPolicy(noisy);
   }
-}
-
-float ThreadSafeMCTS::evaluate_position(WorkerContext &ctx) {
-  if (config_.use_batched_eval && batched_evaluator_) {
-    return evaluate_position_batched(ctx);
-  } else {
-    return evaluate_position_direct(ctx);
-  }
-}
-
-float ThreadSafeMCTS::evaluate_position_batched(WorkerContext &ctx) {
-  return batched_evaluator_->evaluate(ctx.pos, ctx);
-}
-
-float ThreadSafeMCTS::evaluate_position_direct(WorkerContext &ctx) {
-  // Use NN evaluator if available
-  if (nn_evaluator_) {
-    try {
-      auto result = gather_eval_
-                        ? gather_eval_->evaluate(ctx.worker_id, ctx.pos)
-                        : nn_evaluator_->Evaluate(ctx.pos);
-      stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
-
-      // Return value from side-to-move perspective
-      // (NN already returns from this perspective)
-      return result.value;
-    } catch (const std::exception &e) {
-      // Fall back to GPU NNUE on error
-    }
-  }
-
-  // Check TT first - lock-free read (may get stale data, but that's OK for
-  // MCTS)
-  uint64_t key = ctx.pos.key();
-  size_t tt_idx = key % SIMPLE_TT_SIZE;
-
-  SimpleTTEntry &entry = simple_tt_[tt_idx];
-
-  // Relaxed read - may see torn write but value will still be valid float
-  if (entry.key == key) {
-    ctx.cache_hits++;
-    return entry.value;
-  }
-
-  ctx.cache_misses++;
-
-  // Evaluate using GPU NNUE
-  float value = 0.0f;
-
-  if (gpu_manager_) {
-    // Thread-safe GPU evaluation
-    std::lock_guard<std::mutex> lock(gpu_mutex_);
-    auto [psqt, score] = gpu_manager_->evaluate_single(ctx.pos, true);
-
-    // Use MCTS score transformation
-    // This converts NNUE centipawn scores to MCTS Q values in [-1, 1]
-    value = NnueScoreToQ(score);
-  } else {
-    // Fallback to simple eval
-    int simple = Eval::simple_eval(ctx.pos);
-    value = NnueScoreToQ(simple);
-  }
-
-  // CRITICAL: Adjust for side to move
-  // NNUE returns score from white's perspective, so negate for black
-  if (ctx.pos.side_to_move() == BLACK) {
-    value = -value;
-  }
-
-  // Store in TT - lock-free write (benign race - last writer wins)
-  entry.value = value;
-  entry.key = key; // Write key last to serve as a release
-
-  stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
-
-  return value;
 }
 
 void ThreadSafeMCTS::backpropagate(ThreadSafeNode *node, float value,
