@@ -519,15 +519,14 @@ def main():
     BER = ("Berserk", BERSERK, {"Threads": THREADS, "Hash": HASH})
 
     refs = [PAT, SF5, SF10, SF15, SF20, BER]
-    mf_engines = [MF_AB, MF_MCTS, MF_HYB]
 
-    # Build full match list: every MetalFish engine vs every reference
+    # MCTS and Hybrid vs all references (skip AB -- already tested)
     matches = []
-    for mf in mf_engines:
+    for mf in [MF_MCTS, MF_HYB]:
         for ref in refs:
             matches.append((*mf, *ref))
 
-    # Internal head-to-head: AB vs MCTS, AB vs Hybrid, MCTS vs Hybrid
+    # Internal head-to-head
     matches.append((*MF_AB, *MF_MCTS))
     matches.append((*MF_AB, *MF_HYB))
     matches.append((*MF_MCTS, *MF_HYB))
