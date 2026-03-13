@@ -31,7 +31,7 @@ METALFISH = str(DIR / "build/metalfish")
 STOCKFISH = str(DIR / "reference/stockfish/src/stockfish")
 LC0 = str(DIR / "reference/lc0/build/release/lc0")
 NNWEIGHTS = str(DIR / "networks/BT4-1024x15x32h-swa-6147500.pb")
-DEFAULT_EPD = str(DIR / "tests/suites/metalfish_eval.epd")
+DEFAULT_EPD = str(DIR / "tests/suites/bk.epd")
 RESULTS_DIR = DIR / "results"
 
 C = "\033[36m"; W = "\033[1;37m"; G = "\033[32m"; R = "\033[31m"
@@ -120,20 +120,25 @@ class UCIEngine:
 # ── EPD Parsing ──
 
 def parse_epd(filepath):
-    """Parse an EPD file. Returns list of dicts with keys: fen, bm, id."""
+    """Parse an EPD file. Supports BK format: FEN ; bm MOVE ; id NAME"""
     positions = []
     with open(filepath) as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            bm_match = re.search(r'\bbm\s+([^;]+);', line)
-            id_match = re.search(r'\bid\s+"([^"]+)"', line)
+            # Find bm (best move) -- could be after ; or in the line
+            bm_match = re.search(r'\bbm\s+([^;]+)', line)
+            id_match = re.search(r'\bid\s+"?([^";]+)"?', line)
             if not bm_match:
                 continue
-            bm_str = bm_match.group(1).strip()
-            pos_id = id_match.group(1) if id_match else "unknown"
-            fen_part = line[:bm_match.start()].strip()
+            bm_str = bm_match.group(1).strip().rstrip('+').strip()
+            pos_id = id_match.group(1).strip() if id_match else "unknown"
+
+            # FEN is everything before first ; or before bm
+            fen_part = line.split(';')[0].strip()
+            if ' bm ' in fen_part:
+                fen_part = fen_part.split(' bm ')[0].strip()
             fen_fields = fen_part.split()
             if len(fen_fields) >= 4:
                 fen = " ".join(fen_fields[:6]) if len(fen_fields) >= 6 else " ".join(fen_fields[:4]) + " 0 1"
