@@ -568,20 +568,11 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
     coll_stats.scaling_power = params_.max_collision_visits_scaling_power;
     int max_coll_visits = coll_stats.GetMaxCollisionVisits(tree_size);
 
-    constexpr int kMinBatchSize = 4;
-
     while (static_cast<int>(local_batch.size()) < params_.minibatch_size &&
            !ShouldStop()) {
         if (collision_events >= params_.max_collision_events ||
-            collision_visits >= max_coll_visits) {
-            if (!local_batch.empty() &&
-                static_cast<int>(local_batch.size()) < kMinBatchSize) {
-                collision_events = 0;
-                collision_visits = 0;
-                continue;
-            }
+            collision_visits >= max_coll_visits)
             break;
-        }
 
         ctx.ResetToRoot();
 
