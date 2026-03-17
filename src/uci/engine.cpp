@@ -152,6 +152,28 @@ Engine::Engine(std::optional<std::string> path)
   // Pure MCTS mode - use GPU-accelerated MCTS instead of AB
   options.add("UseMCTS", Option(false));
 
+  // Optional parity preset and exposed MCTS tuning controls
+  options.add("MCTSParityPreset", Option(false));
+  options.add("MCTSCPuct", Option("1.745"));
+  options.add("MCTSCPuctAtRoot", Option("1.745"));
+  options.add("MCTSCPuctBase", Option("38739"));
+  options.add("MCTSCPuctFactor", Option("3.894"));
+  options.add("MCTSCPuctBaseAtRoot", Option("38739"));
+  options.add("MCTSCPuctFactorAtRoot", Option("3.894"));
+  options.add("MCTSFpuAbsolute", Option(false));
+  options.add("MCTSFpuAbsoluteAtRoot", Option(false));
+  options.add("MCTSFpuValue", Option("0.33"));
+  options.add("MCTSFpuValueAtRoot", Option("0.33"));
+  options.add("MCTSFpuReduction", Option("0.33"));
+  options.add("MCTSFpuReductionAtRoot", Option("0.33"));
+  options.add("MCTSPolicySoftmaxTemp", Option("1.359"));
+  options.add("MCTSVirtualLoss", Option(1, 1, 128));
+  options.add("MCTSMinibatchSize", Option(256, 1, 4096));
+  options.add("MCTSMaxOutOfOrderFactor", Option("2.4"));
+  options.add("MCTSAddDirichletNoise", Option(false));
+  options.add("MCTSNoiseEpsilon", Option("0.0"));
+  options.add("MCTSNoiseAlpha", Option("0.3"));
+
   load_networks();
   resize_threads();
 }

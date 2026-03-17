@@ -245,28 +245,6 @@ void test_skill() {
 }
 
 // ============================================================================
-// Stack Tests
-// ============================================================================
-
-void test_stack() {
-  {
-    TestCase tc("SearchStack structure");
-    Search::Stack ss;
-    ss.ply = 5;
-    ss.currentMove = Move(SQ_E2, SQ_E4);
-    ss.staticEval = 100;
-    ss.inCheck = false;
-    ss.ttPv = true;
-
-    EXPECT(tc, ss.ply == 5);
-    EXPECT(tc, ss.currentMove == Move(SQ_E2, SQ_E4));
-    EXPECT(tc, ss.staticEval == 100);
-    EXPECT(tc, !ss.inCheck);
-    EXPECT(tc, ss.ttPv);
-  }
-}
-
-// ============================================================================
 // Value Tests
 // ============================================================================
 
@@ -294,35 +272,6 @@ void test_values() {
   }
 }
 
-// ============================================================================
-// Info Tests
-// ============================================================================
-
-void test_info() {
-  {
-    TestCase tc("InfoShort");
-    Search::InfoShort info;
-    info.depth = 15;
-    EXPECT(tc, info.depth == 15);
-  }
-  {
-    TestCase tc("InfoFull");
-    Search::InfoFull info;
-    info.depth = 20;
-    info.selDepth = 35;
-    info.multiPV = 1;
-    info.timeMs = 5000;
-    info.nodes = 1000000;
-    info.nps = 200000;
-    info.hashfull = 500;
-
-    EXPECT(tc, info.depth == 20);
-    EXPECT(tc, info.selDepth == 35);
-    EXPECT(tc, info.nodes == 1000000);
-    EXPECT(tc, info.nps == 200000);
-  }
-}
-
 } // namespace
 
 bool test_search_module() {
@@ -346,14 +295,8 @@ bool test_search_module() {
   std::cout << "\n[Skill]" << std::endl;
   test_skill();
 
-  std::cout << "\n[Stack]" << std::endl;
-  test_stack();
-
   std::cout << "\n[Values]" << std::endl;
   test_values();
-
-  std::cout << "\n[Info]" << std::endl;
-  test_info();
 
   std::cout << "\n--- Search Results: " << g_tests_passed << " passed, "
             << g_tests_failed << " failed ---" << std::endl;

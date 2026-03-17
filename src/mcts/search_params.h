@@ -18,19 +18,23 @@ namespace MCTS {
 
 struct SearchParams {
     // PUCT exploration (Lc0 defaults)
-    float cpuct = 1.75f;
-    float cpuct_at_root = 1.75f;
+    float cpuct = 1.745f;
+    float cpuct_at_root = 1.745f;
     float cpuct_base = 38739.0f;
-    float cpuct_factor = 3.89f;
+    float cpuct_factor = 3.894f;
+    float cpuct_base_at_root = 38739.0f;
+    float cpuct_factor_at_root = 3.894f;
 
     // First Play Urgency (Lc0 defaults: reduction strategy, same at root)
     bool  fpu_absolute = false;
     float fpu_value = 0.33f;
+    bool  fpu_absolute_at_root = false;
+    float fpu_value_at_root = 0.33f;
     float fpu_reduction = 0.33f;
-    float fpu_reduction_at_root = 1.0f;
+    float fpu_reduction_at_root = 0.33f;
 
     // Policy softmax temperature
-    float policy_softmax_temp = 1.36f;
+    float policy_softmax_temp = 1.359f;
 
     // Dirichlet exploration noise (disabled for competitive play)
     bool  add_dirichlet_noise = false;
@@ -89,6 +93,22 @@ struct SearchParams {
 
     float GetCpuct(bool is_root) const {
         return is_root ? cpuct_at_root : cpuct;
+    }
+
+    float GetCpuctBase(bool is_root) const {
+        return is_root ? cpuct_base_at_root : cpuct_base;
+    }
+
+    float GetCpuctFactor(bool is_root) const {
+        return is_root ? cpuct_factor_at_root : cpuct_factor;
+    }
+
+    bool GetFpuAbsolute(bool is_root) const {
+        return is_root ? fpu_absolute_at_root : fpu_absolute;
+    }
+
+    float GetFpuValue(bool is_root) const {
+        return is_root ? fpu_value_at_root : fpu_value;
     }
 };
 

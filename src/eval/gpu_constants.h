@@ -43,12 +43,4 @@ constexpr int GPU_FORWARD_THREADS = 64;
 // Memory alignment for optimal GPU access
 constexpr int GPU_BUFFER_ALIGNMENT = 256;
 
-// Legacy aliases for backward compatibility
-constexpr int NNUE_FEATURE_DIM_BIG = GPU_FT_DIM_BIG;
-constexpr int NNUE_FEATURE_DIM_SMALL = GPU_FT_DIM_SMALL;
-constexpr int MAX_BATCH_SIZE = GPU_MAX_BATCH_SIZE;
-constexpr int MAX_FEATURES_PER_POSITION = GPU_MAX_FEATURES;
-constexpr int HALFKA_DIMS = GPU_HALFKA_DIMS;
-constexpr int PSQT_DIMS = GPU_PSQT_BUCKETS;
-
 } // namespace MetalFish::GPU

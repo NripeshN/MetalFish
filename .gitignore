@@ -390,6 +390,7 @@ TSWLatexianTemp*
 # Uncomment the next line to have this generated file ignored.
 #*Notes.bib
 *.pyc
+__pycache__/
 .DS_Store
 _codeql_build_dir/
 _codeql_detected_source_root

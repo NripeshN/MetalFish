@@ -8,6 +8,7 @@
 #include "encoder.h"
 
 #include <cstring>
+#include <limits>
 
 namespace MetalFish {
 namespace NN {
@@ -360,71 +361,72 @@ EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
   }
 
   // Encode position history (up to 8 positions, 13 planes each)
-  int initial_castling = current_pos.can_castle(ANY_CASTLING) ? -1 : 0;
+  auto castling_mask_for_us = [us](const Position &p) -> uint8_t {
+    uint8_t mask = 0;
+    if (us == WHITE) {
+      if (p.can_castle(WHITE_OO))
+        mask |= 1 << 0;
+      if (p.can_castle(WHITE_OOO))
+        mask |= 1 << 1;
+      if (p.can_castle(BLACK_OO))
+        mask |= 1 << 2;
+      if (p.can_castle(BLACK_OOO))
+        mask |= 1 << 3;
+    } else {
+      if (p.can_castle(BLACK_OO))
+        mask |= 1 << 0;
+      if (p.can_castle(BLACK_OOO))
+        mask |= 1 << 1;
+      if (p.can_castle(WHITE_OO))
+        mask |= 1 << 2;
+      if (p.can_castle(WHITE_OOO))
+        mask |= 1 << 3;
+    }
+    return mask;
+  };
+
+  const uint8_t root_castling_mask = castling_mask_for_us(current_pos);
   int history_size = std::min(history_planes, kMoveHistory);
   int actual_history = static_cast<int>(position_history.size());
 
-  for (int i = 0; i < history_size; ++i) {
-    // Calculate history index
-    int history_idx = actual_history - 1 - i;
+  for (int i = 0, history_idx = actual_history - 1; i < history_size;
+       ++i, --history_idx) {
+    const Position &pos = *position_history[history_idx >= 0 ? history_idx : 0];
 
-    // Handle missing history based on fill policy
-    if (history_idx < 0) {
-      if (fill_empty_history == FillEmptyHistory::NO) {
-        break;
-      }
-      if (fill_empty_history == FillEmptyHistory::FEN_ONLY &&
-          IsStartPosition(*position_history.back())) {
-        break;
-      }
-    }
-
-    // Check if we should break early for canonical formats
-    if (stop_early && history_idx < actual_history - 1) {
-      const Position &check_pos =
-          *position_history[history_idx >= 0 ? history_idx : 0];
-
-      // Break if castling changed
-      int cur_castling = check_pos.can_castle(ANY_CASTLING) ? 1 : 0;
-      if (initial_castling >= 0 && cur_castling != initial_castling)
-        break;
-
-      // Break if en passant and not current position
-      if (check_pos.ep_square() != SQ_NONE)
-        break;
-    }
-
-    // Check if we should skip this position for fill_empty_history
-    if (fill_empty_history == FillEmptyHistory::NO && history_idx < -1) {
+    // If en passant is possible we can infer one previous move; otherwise stop.
+    if (fill_empty_history == FillEmptyHistory::NO &&
+        (history_idx < -1 ||
+         (history_idx == -1 && pos.ep_square() == SQ_NONE))) {
       break;
     }
-    if (fill_empty_history == FillEmptyHistory::NO && history_idx == -1) {
-      const Position &check_pos = *position_history[0];
-      if (check_pos.ep_square() == SQ_NONE)
+
+    // For FEN-only history, don't synthesize through the start position.
+    if (history_idx < 0 && fill_empty_history == FillEmptyHistory::FEN_ONLY &&
+        IsStartPosition(pos)) {
+      break;
+    }
+
+    // Castling or non-current en passant changes cannot be repeated.
+    if (stop_early && history_idx < actual_history - 1) {
+      if (castling_mask_for_us(pos) != root_castling_mask)
+        break;
+      if (pos.ep_square() != SQ_NONE)
         break;
     }
 
-    // Get position (use oldest if history_idx < 0 for fill_empty_history)
-    const Position &source =
-        *position_history[history_idx >= 0 ? history_idx : 0];
-    Position pos;
-    StateInfo st;
-    pos.set(source.fen(), source.is_chess960(), &st);
+    const bool has_repetition =
+        pos.is_repetition(std::numeric_limits<int>::max());
 
-    // Check repetitions for v2 canonicalization
-    if (skip_non_repeats && i > 0) {
-      // Simplified: we don't have repetition tracking yet
-      // In full implementation, check if position repeats
+    // Canonical v2: keep plane index fixed when skipping non-repeats.
+    if (skip_non_repeats && i > 0 && !has_repetition) {
       if (pos.rule50_count() == 0)
         break;
+      --i;
+      continue;
     }
 
     int base = i * kPlanesPerBoard;
 
-    // Get piece bitboards from perspective of CURRENT position's side to move
-    // In standard encoding, all history positions are encoded from the
-    // perspective of the current STM, not the historical position's STM.
-    // "Our pieces" always means the current STM's pieces across all history.
     uint64_t our_pieces[6] = {
         GetPieceBitboard(pos, PAWN, us),   GetPieceBitboard(pos, KNIGHT, us),
         GetPieceBitboard(pos, BISHOP, us), GetPieceBitboard(pos, ROOK, us),
@@ -437,34 +439,28 @@ EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
                                 GetPieceBitboard(pos, QUEEN, them),
                                 GetPieceBitboard(pos, KING, them)};
 
-    // Mirror to side-to-move perspective (side to move always "white" at
-    // bottom). The flip is based on the CURRENT position's STM, applied
-    // uniformly to all history.
+    // Side-to-move perspective: current side always at the bottom.
     if (us == BLACK) {
       for (int piece = 0; piece < 6; ++piece) {
         our_pieces[piece] = ReverseBytesInBytes(our_pieces[piece]);
         their_pieces[piece] = ReverseBytesInBytes(their_pieces[piece]);
       }
     }
-    // Fill planes for our pieces
+
     for (int piece = 0; piece < 6; ++piece) {
       FillPlaneFromBitboard(result[base + piece], our_pieces[piece]);
     }
-
-    // Fill planes for their pieces
     for (int piece = 0; piece < 6; ++piece) {
       FillPlaneFromBitboard(result[base + 6 + piece], their_pieces[piece]);
     }
 
-    // Repetition plane
-    SetPlane(result[base + 12], pos.has_repeated() ? 1.0f : 0.0f);
+    // Repetition flag for this specific history position.
+    SetPlane(result[base + 12], has_repetition ? 1.0f : 0.0f);
 
-    // Handle en passant for filled history
+    // For synthesized history with EP, undo the last pawn move in the plane.
     if (history_idx < 0 && pos.ep_square() != SQ_NONE) {
       Square ep_sq = pos.ep_square();
       int ep_idx = static_cast<int>(ep_sq);
-
-      // Undo the pawn move for en passant
       if (ep_idx < 8) { // "Us" pawn
         uint64_t mask =
             ((0x0000000000000100ULL - 0x0000000001000000ULL) << ep_idx);
@@ -476,7 +472,6 @@ EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
       }
     }
 
-    // Stop early if rule50 was reset (capture or pawn move)
     if (stop_early && pos.rule50_count() == 0)
       break;
   }

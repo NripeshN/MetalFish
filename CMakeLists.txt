@@ -112,7 +112,6 @@ set(EVAL_SOURCES
     src/eval/evaluate.cpp
     src/eval/score.cpp
     src/eval/gpu_integration.cpp
-    src/eval/accumulator_cache.cpp
     src/eval/nnue/network.cpp
     src/eval/nnue/nnue_accumulator.cpp
     src/eval/nnue/nnue_misc.cpp
@@ -127,12 +126,12 @@ set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
 # MCTS search engine
-set(MCTS_SOURCES src/mcts/node.cpp src/mcts/search.cpp src/mcts/backend_adapter.cpp
+set(MCTS_SOURCES src/mcts/search.cpp src/mcts/backend_adapter.cpp
                  src/mcts/stoppers.cpp src/mcts/evaluator.cpp
-                 src/mcts/apple_silicon.cpp src/mcts/gpu_backend.cpp)
+                 src/mcts/gpu_backend.cpp)
 
 # Hybrid search engine
-set(HYBRID_SOURCES src/hybrid/hybrid_search.cpp src/hybrid/ab_bridge.cpp
+set(HYBRID_SOURCES src/hybrid/hybrid_search.cpp
                    src/hybrid/position_adapter.cpp src/hybrid/classifier.cpp)
 
 # Protobuf generation for transformer network weights

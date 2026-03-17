@@ -17,6 +17,23 @@
 namespace MetalFish {
 namespace MCTS {
 
+namespace {
+
+inline Square MirrorSquareVertical(Square sq) {
+  return make_square(file_of(sq), Rank(7 - rank_of(sq)));
+}
+
+inline Move MirrorMoveVertical(Move move) {
+  const Square from = MirrorSquareVertical(move.from_sq());
+  const Square to = MirrorSquareVertical(move.to_sq());
+  if (move.type_of() == PROMOTION) {
+    return Move::make<PROMOTION>(from, to, move.promotion_type());
+  }
+  return Move(from, to);
+}
+
+} // namespace
+
 class NNMCTSEvaluator::Impl {
 public:
   Impl(const std::string &weights_path) {
@@ -67,7 +84,11 @@ public:
     MoveList<LEGAL> moves(pos);
     result.policy_priors.reserve(moves.size());
     for (const auto &move : moves) {
-      int policy_idx = NN::MoveToNNIndex(move, transform);
+      Move policy_move = move;
+      if (pos.side_to_move() == BLACK) {
+        policy_move = MirrorMoveVertical(policy_move);
+      }
+      int policy_idx = NN::MoveToNNIndex(policy_move, transform);
       if (policy_idx >= 0 &&
           policy_idx < static_cast<int>(output.policy.size())) {
         result.policy_priors.emplace_back(move, output.policy[policy_idx]);
@@ -120,7 +141,11 @@ public:
       MoveList<LEGAL> moves(*positions[i]);
       result.policy_priors.reserve(moves.size());
       for (const auto &move : moves) {
-        int policy_idx = NN::MoveToNNIndex(move, transforms[i]);
+        Move policy_move = move;
+        if (positions[i]->side_to_move() == BLACK) {
+          policy_move = MirrorMoveVertical(policy_move);
+        }
+        int policy_idx = NN::MoveToNNIndex(policy_move, transforms[i]);
         if (policy_idx >= 0 &&
             policy_idx < static_cast<int>(outputs[i].policy.size())) {
           result.policy_priors.emplace_back(move,
@@ -172,7 +197,11 @@ public:
       MoveList<LEGAL> moves(pos);
       result.policy_priors.reserve(moves.size());
       for (const auto &move : moves) {
-        int policy_idx = NN::MoveToNNIndex(move, transforms[i]);
+        Move policy_move = move;
+        if (pos.side_to_move() == BLACK) {
+          policy_move = MirrorMoveVertical(policy_move);
+        }
+        int policy_idx = NN::MoveToNNIndex(policy_move, transforms[i]);
         if (policy_idx >= 0 &&
             policy_idx < static_cast<int>(outputs[i].policy.size())) {
           result.policy_priors.emplace_back(move, outputs[i].policy[policy_idx]);

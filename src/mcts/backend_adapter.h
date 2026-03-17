@@ -20,7 +20,7 @@ namespace MCTS {
 class NNCache {
 public:
   explicit NNCache(size_t size = 1 << 21);
-  bool Lookup(uint64_t key, EvaluationResult &out) const;
+  bool Lookup(uint64_t key, int expected_moves, EvaluationResult &out) const;
   void Insert(uint64_t key, const EvaluationResult &result);
   void Clear();
 
@@ -39,6 +39,7 @@ private:
     };
     CachedMove moves[MAX_MOVES];
     int num_moves = 0;
+    uint16_t legal_moves = 0;
     bool occupied = false;
   };
 

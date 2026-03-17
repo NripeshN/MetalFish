@@ -88,21 +88,6 @@ public:
   // Analyze position and return features
   PositionFeatures analyze(const Position &pos) const;
 
-  // Quick classification without full analysis
-  PositionType quick_classify(const Position &pos) const;
-
-  // Get tactical score (0-1)
-  float tactical_score(const Position &pos) const;
-
-  // Get strategic score (0-1)
-  float strategic_score(const Position &pos) const;
-
-  // Check specific conditions
-  bool is_tactical(const Position &pos) const;
-  bool is_strategic(const Position &pos) const;
-  bool has_forcing_moves(const Position &pos) const;
-  bool is_quiet(const Position &pos) const;
-
 private:
   // Helper methods
   int count_hanging_pieces(const Position &pos, Color c) const;

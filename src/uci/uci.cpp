@@ -1313,6 +1313,71 @@ void UCIEngine::gpu_benchmark() {
 // loading.
 // ============================================================================
 
+static float get_float_option(Engine &engine, const char *name, float fallback) {
+  if (!engine.get_options().count(name))
+    return fallback;
+  try {
+    return std::stof(std::string(engine.get_options()[name]));
+  } catch (...) {
+    return fallback;
+  }
+}
+
+static MCTS::SearchParams make_mcts_config(Engine &engine,
+                                           const std::string &nn_weights,
+                                           int num_threads) {
+  MCTS::SearchParams config;
+  config.nn_weights_path = nn_weights;
+  config.num_threads = num_threads;
+
+  config.cpuct = get_float_option(engine, "MCTSCPuct", config.cpuct);
+  config.cpuct_at_root =
+      get_float_option(engine, "MCTSCPuctAtRoot", config.cpuct_at_root);
+  config.cpuct_base =
+      get_float_option(engine, "MCTSCPuctBase", config.cpuct_base);
+  config.cpuct_factor =
+      get_float_option(engine, "MCTSCPuctFactor", config.cpuct_factor);
+  config.cpuct_base_at_root =
+      get_float_option(engine, "MCTSCPuctBaseAtRoot", config.cpuct_base_at_root);
+  config.cpuct_factor_at_root = get_float_option(
+      engine, "MCTSCPuctFactorAtRoot", config.cpuct_factor_at_root);
+
+  config.fpu_absolute = engine.get_options()["MCTSFpuAbsolute"];
+  config.fpu_absolute_at_root = engine.get_options()["MCTSFpuAbsoluteAtRoot"];
+  config.fpu_value = get_float_option(engine, "MCTSFpuValue", config.fpu_value);
+  config.fpu_value_at_root =
+      get_float_option(engine, "MCTSFpuValueAtRoot", config.fpu_value_at_root);
+  config.fpu_reduction =
+      get_float_option(engine, "MCTSFpuReduction", config.fpu_reduction);
+  config.fpu_reduction_at_root = get_float_option(
+      engine, "MCTSFpuReductionAtRoot", config.fpu_reduction_at_root);
+
+  config.policy_softmax_temp = get_float_option(
+      engine, "MCTSPolicySoftmaxTemp", config.policy_softmax_temp);
+  config.virtual_loss = std::max(1, static_cast<int>(
+                                        engine.get_options()["MCTSVirtualLoss"]));
+  config.minibatch_size = std::max(
+      1, static_cast<int>(engine.get_options()["MCTSMinibatchSize"]));
+  config.max_out_of_order_evals_factor = get_float_option(
+      engine, "MCTSMaxOutOfOrderFactor", config.max_out_of_order_evals_factor);
+
+  config.add_dirichlet_noise = engine.get_options()["MCTSAddDirichletNoise"];
+  config.noise_epsilon =
+      get_float_option(engine, "MCTSNoiseEpsilon", config.noise_epsilon);
+  config.noise_alpha =
+      get_float_option(engine, "MCTSNoiseAlpha", config.noise_alpha);
+
+  if (engine.get_options()["MCTSParityPreset"]) {
+    config.add_dirichlet_noise = false;
+    config.out_of_order_eval = false;
+    config.fpu_reduction_at_root = config.fpu_reduction;
+    config.fpu_absolute_at_root = config.fpu_absolute;
+    config.fpu_value_at_root = config.fpu_value;
+  }
+
+  return config;
+}
+
 static MCTS::ParallelHybridConfig
 make_hybrid_config(const std::string &nn_weights) {
   MCTS::ParallelHybridConfig config;
@@ -1517,7 +1582,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
 void UCIEngine::mcts_mt_go(std::istringstream &is) {
   // Parse threads option
   std::string token;
-  int num_threads = 2;
+  int num_threads = static_cast<int>(engine.get_options()["Threads"]);
 
   // Parse additional options (threads=N)
   while (is >> token) {
@@ -1551,17 +1616,28 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
     return;
   }
 
-  // Configure multi-threaded MCTS (Lc0-compatible defaults from config struct)
-  MCTS::SearchParams config;
-  config.nn_weights_path = nn_weights;
-  config.num_threads = num_threads;
-  config.add_dirichlet_noise = false;
+  MCTS::SearchParams config = make_mcts_config(engine, nn_weights, num_threads);
 
   static std::shared_ptr<MCTS::Search> s_cached_mcts;
-  static std::string s_cached_weights;
+  static std::string s_cached_key;
 
   std::shared_ptr<MCTS::Search> mcts;
-  if (s_cached_mcts && s_cached_weights == nn_weights) {
+  std::ostringstream config_key;
+  config_key << nn_weights
+             << "|" << config.num_threads
+             << "|" << config.cpuct
+             << "|" << config.cpuct_at_root
+             << "|" << config.cpuct_base
+             << "|" << config.cpuct_factor
+             << "|" << config.fpu_reduction
+             << "|" << config.fpu_reduction_at_root
+             << "|" << config.policy_softmax_temp
+             << "|" << config.virtual_loss
+             << "|" << config.minibatch_size
+             << "|" << config.max_out_of_order_evals_factor
+             << "|" << config.add_dirichlet_noise;
+
+  if (s_cached_mcts && s_cached_key == config_key.str()) {
     mcts = s_cached_mcts;
   } else {
     if (s_cached_mcts) {
@@ -1577,7 +1653,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
     }
     mcts.reset(MCTS::CreateSearch(config).release());
     s_cached_mcts = mcts;
-    s_cached_weights = nn_weights;
+    s_cached_key = config_key.str();
   }
 
   if (!mcts) {
@@ -1642,7 +1718,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
       const auto &stats = mcts->Stats();
       uint64_t nodes = stats.total_nodes.load();
       uint64_t nn_evals = stats.nn_evaluations.load();
-      uint64_t nps = elapsed_ms > 0 ? (nn_evals * 1000) / elapsed_ms : 0;
+      uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
 
       sync_cout << "info string Final stats:" << sync_endl;
       sync_cout << "info string   Nodes: " << nodes << sync_endl;

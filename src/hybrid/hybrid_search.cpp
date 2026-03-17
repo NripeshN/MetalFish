@@ -28,49 +28,6 @@ namespace MetalFish {
 namespace MCTS {
 
 // ============================================================================
-// GPU-Resident Batch Implementation
-// ============================================================================
-
-bool GPUResidentBatch::initialize(int batch_capacity) {
-  if (!GPU::gpu_available()) {
-    return false;
-  }
-
-  auto &backend = GPU::gpu();
-
-  // Calculate buffer sizes
-  // Each position needs: GPUPositionData (aligned struct)
-  size_t position_size = sizeof(GPU::GPUPositionData);
-  size_t positions_buffer_size = batch_capacity * position_size;
-
-  // Results: psqt score + positional score per position
-  size_t results_buffer_size = batch_capacity * 2 * sizeof(int32_t);
-
-  // Create GPU-accessible buffers using unified memory (Shared mode)
-  // On Apple Silicon, this means zero-copy access from both CPU and GPU
-  positions_buffer = backend.create_buffer(
-      positions_buffer_size,
-      GPU::MemoryMode::Shared,    // Unified memory - zero copy!
-      GPU::BufferUsage::Streaming // Frequently updated from CPU
-  );
-
-  results_buffer = backend.create_buffer(
-      results_buffer_size,
-      GPU::MemoryMode::Shared, // Results read by CPU after GPU writes
-      GPU::BufferUsage::Streaming);
-
-  if (!positions_buffer || !results_buffer) {
-    return false;
-  }
-
-  capacity = batch_capacity;
-  position_indices.reserve(batch_capacity);
-  initialized = true;
-
-  return true;
-}
-
-// ============================================================================
 // ParallelHybridSearch Implementation
 // ============================================================================
 
@@ -119,13 +76,6 @@ ParallelHybridSearch::~ParallelHybridSearch() {
       mcts_search_->ClearCallbacks();
     mcts_search_->Stop();
     mcts_search_->Wait();
-  }
-
-  // Wait for any pending GPU evaluations to complete
-  // This is critical to prevent crashes from async callbacks accessing
-  // destroyed objects
-  if (pending_evaluations_.load(std::memory_order_relaxed) > 0) {
-    wait_gpu_evaluations();
   }
 
   // Apple Silicon Optimization: Only synchronize if absolutely necessary
@@ -198,23 +148,11 @@ bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
       gpu_manager; // May be nullptr -- that's OK if transformer is loaded
   engine_ = engine;
 
-  // Check for unified memory (Apple Silicon)
-  if (GPU::gpu_available()) {
-    has_unified_memory_ = GPU::gpu().has_unified_memory();
-  }
-
   // Create GPU MCTS backend (optional -- only if GPU NNUE is available)
   if (gpu_manager && gpu_manager->is_ready()) {
     gpu_backend_ = GPU::create_gpu_mcts_backend(gpu_manager);
-    if (gpu_backend_ && has_unified_memory_) {
+    if (gpu_backend_) {
       gpu_backend_->set_optimal_batch_size(config_.gpu_batch_size);
-    }
-    // Initialize GPU-resident batches for zero-copy evaluation
-    if (gpu_backend_ && config_.use_gpu_resident_batches &&
-        has_unified_memory_) {
-      if (!initialize_gpu_batches()) {
-        config_.use_gpu_resident_batches = false;
-      }
     }
   }
 
@@ -420,12 +358,6 @@ void ParallelHybridSearch::new_game() {
       std::make_unique<Backend>(config_.mcts_config.nn_weights_path));
   }
   // Search manages its own TT internally
-}
-
-void ParallelHybridSearch::apply_move(Move move) {
-  // Search supports tree reuse via TryReuse
-  // search This is a no-op, but we keep the function for API compatibility
-  (void)move;
 }
 
 int ParallelHybridSearch::calculate_time_budget() const {
@@ -1090,40 +1022,6 @@ void ParallelHybridSearch::send_info_string(const std::string &msg) {
   if (callback) {
     callback("info string " + msg);
   }
-}
-
-// ============================================================================
-// GPU Optimization Helpers (Apple Silicon)
-// ============================================================================
-
-bool ParallelHybridSearch::initialize_gpu_batches() {
-  if (!GPU::gpu_available()) {
-    return false;
-  }
-
-  // Initialize double-buffered GPU-resident batches
-  // Double buffering allows us to fill one batch while the other is being
-  // evaluated
-  bool success = true;
-  for (int i = 0; i < 2; ++i) {
-    if (!gpu_batch_[i].initialize(config_.gpu_batch_size)) {
-      success = false;
-      break;
-    }
-  }
-
-  if (success && has_unified_memory_) {
-    send_info_string("GPU unified memory: enabled (zero-copy batches)");
-  }
-
-  return success;
-}
-
-void ParallelHybridSearch::wait_gpu_evaluations() {
-  std::unique_lock<std::mutex> lock(async_mutex_);
-  async_cv_.wait(lock, [this]() {
-    return pending_evaluations_.load(std::memory_order_relaxed) == 0;
-  });
 }
 
 // Factory function

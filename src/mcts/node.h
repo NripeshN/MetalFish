@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <memory>
@@ -124,12 +125,15 @@ public:
     // --- Value accessors ---
 
     float GetQ(float draw_score = 0.0f) const {
-        return static_cast<float>(wl_) + draw_score * d_;
+        return static_cast<float>(wl_.load(std::memory_order_acquire)) +
+               draw_score * d_.load(std::memory_order_acquire);
     }
 
-    float GetWL() const { return static_cast<float>(wl_); }
-    float GetD() const { return d_; }
-    float GetM() const { return m_; }
+    float GetWL() const {
+        return static_cast<float>(wl_.load(std::memory_order_acquire));
+    }
+    float GetD() const { return d_.load(std::memory_order_acquire); }
+    float GetM() const { return m_.load(std::memory_order_acquire); }
 
     // Sum of policy priors for children that have been visited (N > 0)
     float GetVisitedPolicy() const {
@@ -148,35 +152,60 @@ public:
     // Collision-aware virtual loss. Returns false when another thread is
     // already expanding this node (N==0 && N_in_flight>0), signalling
     // a collision the caller should back off from.
-    bool TryStartScoreUpdate() {
+    bool TryStartScoreUpdate(int multivisit = 1) {
+        const uint32_t visits = static_cast<uint32_t>(std::max(1, multivisit));
         uint32_t n = n_.load(std::memory_order_acquire);
         if (n == 0 && n_in_flight_.load(std::memory_order_acquire) > 0) {
             return false;
         }
-        n_in_flight_.fetch_add(1, std::memory_order_acq_rel);
+        n_in_flight_.fetch_add(visits, std::memory_order_acq_rel);
         return true;
     }
 
     void CancelScoreUpdate(int count = 1) {
-        n_in_flight_.fetch_sub(static_cast<uint32_t>(count),
-                               std::memory_order_acq_rel);
+        uint32_t to_sub = static_cast<uint32_t>(std::max(1, count));
+        uint32_t cur = n_in_flight_.load(std::memory_order_acquire);
+        while (true) {
+            const uint32_t next = (cur > to_sub) ? (cur - to_sub) : 0;
+            if (n_in_flight_.compare_exchange_weak(
+                    cur, next, std::memory_order_acq_rel,
+                    std::memory_order_acquire)) {
+                break;
+            }
+        }
     }
 
     // Running-average backpropagation with double-precision WL accumulation.
     void FinalizeScoreUpdate(float v, float d, float m, int multivisit = 1) {
-        uint32_t old_n = n_.load(std::memory_order_acquire);
-        double total = static_cast<double>(old_n + multivisit);
+        std::lock_guard<std::mutex> lock(score_mu_);
+        const uint32_t visits = static_cast<uint32_t>(std::max(1, multivisit));
+        const uint32_t old_n = n_.load(std::memory_order_relaxed);
+        const double total = static_cast<double>(old_n + visits);
 
-        wl_ = (wl_ * old_n + static_cast<double>(v) * multivisit) / total;
-        d_  = static_cast<float>((static_cast<double>(d_) * old_n +
-                                  static_cast<double>(d) * multivisit) / total);
-        m_  = static_cast<float>((static_cast<double>(m_) * old_n +
-                                  static_cast<double>(m) * multivisit) / total);
+        const double old_wl = wl_.load(std::memory_order_relaxed);
+        const float old_d = d_.load(std::memory_order_relaxed);
+        const float old_m = m_.load(std::memory_order_relaxed);
 
-        n_.fetch_add(static_cast<uint32_t>(multivisit),
-                     std::memory_order_acq_rel);
-        n_in_flight_.fetch_sub(static_cast<uint32_t>(multivisit),
-                               std::memory_order_acq_rel);
+        wl_.store((old_wl * old_n + static_cast<double>(v) * visits) / total,
+                  std::memory_order_release);
+        d_.store(static_cast<float>((static_cast<double>(old_d) * old_n +
+                                     static_cast<double>(d) * visits) / total),
+                 std::memory_order_release);
+        m_.store(static_cast<float>((static_cast<double>(old_m) * old_n +
+                                     static_cast<double>(m) * visits) / total),
+                 std::memory_order_release);
+
+        n_.store(old_n + visits, std::memory_order_release);
+
+        uint32_t cur = n_in_flight_.load(std::memory_order_acquire);
+        while (true) {
+            const uint32_t next = (cur > visits) ? (cur - visits) : 0;
+            if (n_in_flight_.compare_exchange_weak(
+                    cur, next, std::memory_order_acq_rel,
+                    std::memory_order_acquire)) {
+                break;
+            }
+        }
     }
 
     // Propagate proven terminal bounds up the tree ("sticky endgames").
@@ -197,7 +226,7 @@ public:
                 all_terminal = false;
                 break;
             }
-            float child_wl = -ch->GetWL();
+            float child_wl = ch->GetWL();
             float child_d  = ch->GetD();
             float child_m  = ch->GetM() + 1.0f;
 
@@ -213,11 +242,11 @@ public:
         if (!all_terminal) return;
 
         if (best_wl > 0.0f) {
-            MakeTerminal(Terminal::EndOfGame, best_wl, best_d, best_m);
+            MakeTerminal(Terminal::EndOfGame, -best_wl, best_d, best_m);
         } else if (any_draw) {
             MakeTerminal(Terminal::EndOfGame, 0.0f, 1.0f, best_m);
         } else if (any_loss) {
-            MakeTerminal(Terminal::EndOfGame, best_wl, best_d, best_m);
+            MakeTerminal(Terminal::EndOfGame, -best_wl, best_d, best_m);
         }
     }
 
@@ -246,20 +275,28 @@ public:
 
     Node* Parent() const { return parent_; }
     int EdgeIndex() const { return static_cast<int>(index_); }
+    void DetachFromParentForReuse() {
+        parent_ = nullptr;
+        index_ = 0;
+    }
 
     // --- Terminal state ---
 
-    bool IsTerminal() const { return terminal_type_ != 0; }
+    bool IsTerminal() const {
+        return terminal_type_.load(std::memory_order_acquire) != 0;
+    }
 
     Terminal GetTerminalType() const {
-        return static_cast<Terminal>(terminal_type_);
+        return static_cast<Terminal>(
+            terminal_type_.load(std::memory_order_acquire));
     }
 
     void MakeTerminal(Terminal type, float wl, float d, float m) {
-        wl_ = static_cast<double>(wl);
-        d_  = d;
-        m_  = m;
-        terminal_type_ = static_cast<uint8_t>(type);
+        std::lock_guard<std::mutex> lock(score_mu_);
+        wl_.store(static_cast<double>(wl), std::memory_order_release);
+        d_.store(d, std::memory_order_release);
+        m_.store(m, std::memory_order_release);
+        terminal_type_.store(static_cast<uint8_t>(type), std::memory_order_release);
     }
 
     // Legacy helper: sets WL from a single value, D=0, M=0
@@ -276,16 +313,17 @@ public:
     bool is_terminal() const { return IsTerminal(); }
 
 private:
-    double                    wl_ = 0.0;          // 8  bytes - Win-Loss (double precision)
+    std::atomic<double>       wl_{0.0};           // 8  bytes - Win-Loss (double precision)
     std::unique_ptr<Edge[]>   edges_;              // 8  bytes
     Node*                     parent_ = nullptr;   // 8  bytes
-    float                     d_ = 0.0f;           // 4  bytes - Draw probability
-    float                     m_ = 0.0f;           // 4  bytes - Moves left estimate
+    std::atomic<float>        d_{0.0f};            // 4  bytes - Draw probability
+    std::atomic<float>        m_{0.0f};            // 4  bytes - Moves left estimate
     std::atomic<uint32_t>     n_{0};               // 4  bytes - Visit count
     std::atomic<uint32_t>     n_in_flight_{0};     // 4  bytes - In-flight virtual visits
     uint16_t                  index_ = 0;          // 2  bytes - Edge index in parent
     uint8_t                   num_edges_ = 0;      // 1  byte  - Number of edges
-    uint8_t                   terminal_type_ = 0;  // 1  byte  - Terminal enum
+    std::atomic<uint8_t>      terminal_type_{0};   // 1  byte  - Terminal enum
+    mutable std::mutex        score_mu_;
     // Total core: 44 bytes; padded to CACHE_LINE_SIZE by alignas
 };
 
@@ -346,6 +384,7 @@ public:
 
             if (test.key() == target_key) {
                 edges[i].child.store(nullptr, std::memory_order_relaxed);
+                child->DetachFromParentForReuse();
                 root_heap_.reset();
                 root_arena_.reset(child);
                 root_is_arena_ = true;
@@ -365,6 +404,7 @@ public:
                     test.do_move(ce[j].move, ts3);
                     if (test.key() == target_key) {
                         ce[j].child.store(nullptr, std::memory_order_relaxed);
+                        gc->DetachFromParentForReuse();
                         root_heap_.reset();
                         root_arena_.reset(gc);
                         root_is_arena_ = true;

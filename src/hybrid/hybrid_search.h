@@ -35,9 +35,7 @@
 #include "../mcts/search.h"
 #include "../search/search.h"
 #include "../search/tt.h"
-#include "ab_bridge.h"
 #include "classifier.h"
-#include "position_adapter.h"
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -58,32 +56,6 @@ namespace MCTS {
 // Cache line size for optimal alignment (Apple Silicon uses 128-byte cache
 // lines)
 constexpr size_t APPLE_CACHE_LINE_SIZE = 128;
-
-// GPU-resident evaluation batch for zero-copy on unified memory
-struct GPUResidentBatch {
-  // Positions stored in GPU-accessible buffer (unified memory = zero copy)
-  std::unique_ptr<GPU::Buffer> positions_buffer;
-  std::unique_ptr<GPU::Buffer> results_buffer;
-
-  // Metadata (small, kept on CPU)
-  std::vector<uint32_t> position_indices;
-  int count = 0;
-  int capacity = 0;
-
-  bool initialized = false;
-
-  // Initialize with capacity
-  bool initialize(int batch_capacity);
-
-  // Clear for reuse (doesn't deallocate)
-  void clear() {
-    count = 0;
-    position_indices.clear();
-  }
-
-  // Check if batch is full
-  bool full() const { return count >= capacity; }
-};
 
 // ============================================================================
 // Shared State for Parallel Communication (Cache-line aligned)
@@ -342,7 +314,6 @@ public:
 
   // Tree management
   void new_game();
-  void apply_move(Move move);
 
 private:
   bool initialized_ = false;
@@ -363,22 +334,6 @@ private:
   // Shared state for parallel communication (cache-line aligned)
   ABSharedState ab_state_;
   MCTSSharedState mcts_state_;
-
-  // =========================================================================
-  // Apple Silicon GPU Optimization State
-  // =========================================================================
-
-  // GPU-resident evaluation batches (double-buffered for async)
-  GPUResidentBatch gpu_batch_[2];
-  std::atomic<int> current_batch_{0};
-
-  // Async evaluation state
-  std::mutex async_mutex_;
-  std::condition_variable async_cv_;
-  std::atomic<int> pending_evaluations_{0};
-
-  // Unified memory info
-  bool has_unified_memory_ = false;
 
   // =========================================================================
   // Thread Management - Robust lifecycle handling
@@ -450,16 +405,6 @@ private:
   void join_all_threads(); // Safely joins all threads
   void signal_thread_done(std::atomic<bool> &done_flag);
   bool all_threads_done() const;
-
-  // =========================================================================
-  // GPU Optimization Helpers
-  // =========================================================================
-
-  // Initialize GPU-resident batches for zero-copy evaluation
-  bool initialize_gpu_batches();
-
-  // Wait for pending GPU evaluations
-  void wait_gpu_evaluations();
 
   // Info output (thread-safe)
   void send_info(int depth, int score, uint64_t nodes, int time_ms,

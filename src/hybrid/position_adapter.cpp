@@ -10,8 +10,6 @@
 #include "position_adapter.h"
 #include "../uci/uci.h"
 #include <algorithm>
-#include <cmath>
-#include <sstream>
 
 using namespace MetalFish;
 
@@ -71,14 +69,6 @@ void MCTSPosition::do_move(Move move) {
   move_stack_.push_back(move);
 }
 
-void MCTSPosition::undo_move() {
-  if (!move_stack_.empty()) {
-    pos_.undo_move(move_stack_.back());
-    move_stack_.pop_back();
-    state_stack_.pop_back();
-  }
-}
-
 MCTSMoveList MCTSPosition::generate_legal_moves() const {
   MCTSMoveList result;
   MoveList<LEGAL> moves(pos_);
@@ -127,17 +117,6 @@ bool MCTSPosition::is_terminal() const {
   return false;
 }
 
-GameResult MCTSPosition::get_game_result() const {
-  if (!is_terminal())
-    return GameResult::UNDECIDED;
-
-  if (is_checkmate()) {
-    return is_black_to_move() ? GameResult::WHITE_WON : GameResult::BLACK_WON;
-  }
-
-  return GameResult::DRAW;
-}
-
 int MCTSPosition::repetition_count() const {
   // Simplified - use built-in repetition detection
   return pos_.is_draw(0) ? 2 : 0;
@@ -149,71 +128,6 @@ bool MCTSPosition::can_castle_kingside(Color c) const {
 
 bool MCTSPosition::can_castle_queenside(Color c) const {
   return pos_.can_castle(c == WHITE ? WHITE_OOO : BLACK_OOO);
-}
-
-// ============================================================================
-// MCTSPositionHistory Implementation
-// ============================================================================
-
-MCTSPositionHistory::MCTSPositionHistory() { reset(); }
-
-void MCTSPositionHistory::reset() {
-  positions_.clear();
-  moves_.clear();
-  positions_.emplace_back();
-}
-
-void MCTSPositionHistory::reset(const std::string &fen) {
-  positions_.clear();
-  moves_.clear();
-  positions_.emplace_back();
-  positions_.back().set_from_fen(fen);
-}
-
-void MCTSPositionHistory::reset(const std::string &fen,
-                                const std::vector<std::string> &moves) {
-  reset(fen);
-
-  for (const auto &move_str : moves) {
-    // Parse move from UCI string
-    Move m =
-        UCIEngine::to_move(positions_.back().internal_position(), move_str);
-    if (m != Move::none()) {
-      do_move(m);
-    }
-  }
-}
-
-void MCTSPositionHistory::do_move(MCTSMove move) {
-  do_move(move.to_internal());
-}
-
-void MCTSPositionHistory::do_move(Move move) {
-  positions_.push_back(positions_.back());
-  positions_.back().do_move(move);
-  moves_.push_back(MCTSMove::FromInternal(move));
-}
-
-int MCTSPositionHistory::compute_repetitions() const {
-  if (positions_.empty())
-    return 0;
-
-  uint64_t current_hash = current().hash();
-  int count = 0;
-
-  for (size_t i = 0; i + 1 < positions_.size(); ++i) {
-    if (positions_[i].hash() == current_hash) {
-      ++count;
-    }
-  }
-
-  return count;
-}
-
-MCTSMove MCTSPositionHistory::last_move() const {
-  if (moves_.empty())
-    return MCTSMove();
-  return moves_.back();
 }
 
 // ============================================================================
@@ -275,126 +189,6 @@ std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
   std::fill_n(planes.data() + 18 * 64, 64, rule50);
 
   return planes;
-}
-
-std::vector<std::pair<MCTSMove, float>>
-MCTSEncoder::decode_policy(const MCTSPosition &pos, const float *policy_output,
-                           int policy_size) {
-
-  std::vector<std::pair<MCTSMove, float>> result;
-  MCTSMoveList legal_moves = pos.generate_legal_moves();
-
-  // Normalize policy over legal moves
-  float total = 0.0f;
-  std::vector<float> probs;
-  probs.reserve(legal_moves.size());
-
-  for (const auto &move : legal_moves) {
-    int idx = move_to_policy_index(pos, move);
-    float prob = (idx >= 0 && idx < policy_size) ? policy_output[idx] : 0.0f;
-    prob = std::max(prob, 0.0f); // Ensure non-negative
-    probs.push_back(prob);
-    total += prob;
-  }
-
-  // Normalize
-  if (total > 0.0f) {
-    for (size_t i = 0; i < legal_moves.size(); ++i) {
-      result.emplace_back(legal_moves[i], probs[i] / total);
-    }
-  } else {
-    // Uniform distribution if no valid policy
-    float uniform = 1.0f / legal_moves.size();
-    for (const auto &move : legal_moves) {
-      result.emplace_back(move, uniform);
-    }
-  }
-
-  // Sort by probability descending
-  std::sort(result.begin(), result.end(),
-            [](const auto &a, const auto &b) { return a.second > b.second; });
-
-  return result;
-}
-
-int MCTSEncoder::move_to_policy_index(const MCTSPosition &pos, MCTSMove move) {
-  // Uses a 1858-element policy vector
-  // Encoding: from_square * 73 + move_type
-  // Move types: 56 queen moves + 8 knight moves + 9 underpromotions
-
-  Move m = move.to_internal();
-  Square from = m.from_sq();
-  Square to = m.to_sq();
-
-  // Flip if black to move
-  if (pos.is_black_to_move()) {
-    from = flip_rank(from);
-    to = flip_rank(to);
-  }
-
-  int from_idx = static_cast<int>(from);
-
-  // Calculate direction and distance
-  int df = file_of(to) - file_of(from);
-  int dr = rank_of(to) - rank_of(from);
-
-  int move_type = -1;
-
-  // Knight moves (8 directions)
-  if ((std::abs(df) == 2 && std::abs(dr) == 1) ||
-      (std::abs(df) == 1 && std::abs(dr) == 2)) {
-    static const int knight_dirs[8][2] = {{-2, -1}, {-2, 1}, {-1, -2}, {-1, 2},
-                                          {1, -2},  {1, 2},  {2, -1},  {2, 1}};
-    for (int i = 0; i < 8; ++i) {
-      if (df == knight_dirs[i][0] && dr == knight_dirs[i][1]) {
-        move_type = 56 + i;
-        break;
-      }
-    }
-  }
-  // Queen-like moves (56 directions: 7 distances * 8 directions)
-  else if (df == 0 || dr == 0 || std::abs(df) == std::abs(dr)) {
-    int distance = std::max(std::abs(df), std::abs(dr));
-    int dir = -1;
-
-    // 8 directions: N, NE, E, SE, S, SW, W, NW
-    if (df == 0 && dr > 0)
-      dir = 0; // N
-    else if (df > 0 && dr > 0 && df == dr)
-      dir = 1; // NE
-    else if (df > 0 && dr == 0)
-      dir = 2; // E
-    else if (df > 0 && dr < 0 && df == -dr)
-      dir = 3; // SE
-    else if (df == 0 && dr < 0)
-      dir = 4; // S
-    else if (df < 0 && dr < 0 && df == dr)
-      dir = 5; // SW
-    else if (df < 0 && dr == 0)
-      dir = 6; // W
-    else if (df < 0 && dr > 0 && -df == dr)
-      dir = 7; // NW
-
-    if (dir >= 0 && distance >= 1 && distance <= 7) {
-      move_type = dir * 7 + (distance - 1);
-    }
-  }
-
-  // Handle underpromotions (knight, bishop, rook)
-  if (move.is_promotion()) {
-    PieceType promo = m.promotion_type();
-    if (promo != QUEEN) {
-      // Underpromotion: 64-72 (3 types * 3 directions)
-      int promo_idx = (promo == KNIGHT) ? 0 : (promo == BISHOP) ? 1 : 2;
-      int dir_idx = (df == 0) ? 1 : (df > 0) ? 2 : 0; // Left, straight, right
-      move_type = 64 + promo_idx * 3 + dir_idx;
-    }
-  }
-
-  if (move_type < 0)
-    return -1;
-
-  return from_idx * 73 + move_type;
 }
 
 } // namespace MCTS

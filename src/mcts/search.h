@@ -18,6 +18,7 @@
 
 #include <thread>
 #include <atomic>
+#include <random>
 #include <chrono>
 #include <functional>
 #include <sstream>
@@ -99,14 +100,14 @@ struct SearchWorkerCtx {
         move_stack.clear();
         hash_stack.clear();
         pos.set(cached_root_fen, false, &root_st);
-        hash_stack.push_back(pos.key());
+        hash_stack.push_back(pos.raw_key());
     }
 
     void DoMove(Move m) {
         state_stack.emplace_back();
         pos.do_move(m, state_stack.back());
         move_stack.push_back(m);
-        hash_stack.push_back(pos.key());
+        hash_stack.push_back(pos.raw_key());
     }
 
     // Build position history (last 8 positions) for NN encoding.
@@ -189,10 +190,15 @@ private:
     // Core MCTS algorithms
     void RunIteration(SearchWorkerCtx& ctx);
     void RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers);
-    Node* SelectLeaf(SearchWorkerCtx& ctx);
+    struct SelectedLeaf {
+        Node* node = nullptr;
+        int multivisit = 1;
+    };
+    SelectedLeaf SelectLeaf(SearchWorkerCtx& ctx);
     struct PuctResult { int best_idx; int visits_to_assign; };
     PuctResult SelectChildPuct(Node* node, bool is_root, SearchWorkerCtx& ctx);
-    void Backpropagate(Node* node, float value, float draw, float moves_left);
+    void Backpropagate(Node* node, float value, float draw, float moves_left,
+                       int multivisit = 1);
     void AddDirichletNoise(Node* root);
 
     // NN policy application

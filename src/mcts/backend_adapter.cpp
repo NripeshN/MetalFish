@@ -7,6 +7,8 @@
 
 #include "backend_adapter.h"
 
+#include "../core/movegen.h"
+
 #include <algorithm>
 #include <iostream>
 
@@ -19,9 +21,11 @@ namespace MCTS {
 
 NNCache::NNCache(size_t size) : entries_(size), size_(size) {}
 
-bool NNCache::Lookup(uint64_t key, EvaluationResult &out) const {
+bool NNCache::Lookup(uint64_t key, int expected_moves,
+                     EvaluationResult &out) const {
   const Entry &e = entries_[key % size_];
   if (!e.occupied || e.key != key) return false;
+  if (expected_moves >= 0 && e.legal_moves != expected_moves) return false;
 
   out.value = e.value;
   out.has_wdl = e.has_wdl;
@@ -60,6 +64,7 @@ void NNCache::Insert(uint64_t key, const EvaluationResult &result) {
   int n = std::min(static_cast<int>(result.policy_priors.size()),
                    Entry::MAX_MOVES);
   e.num_moves = n;
+  e.legal_moves = static_cast<uint16_t>(result.policy_priors.size());
   for (int i = 0; i < n; ++i) {
     e.moves[i].move_raw = result.policy_priors[i].first.raw();
     e.moves[i].policy = result.policy_priors[i].second;
@@ -72,6 +77,7 @@ void NNCache::Clear() {
     e.occupied = false;
     e.key = 0;
     e.num_moves = 0;
+    e.legal_moves = 0;
   }
 }
 
@@ -95,7 +101,12 @@ BackendComputation::AddInputWithHistory(
   from_cache_.push_back(false);
 
   EvaluationResult cached;
-  if (cache_ && cache_->Lookup(key, cached)) {
+  int expected_moves = -1;
+  if (!history.empty()) {
+    MoveList<LEGAL> moves(*history.back());
+    expected_moves = static_cast<int>(moves.size());
+  }
+  if (cache_ && cache_->Lookup(key, expected_moves, cached)) {
     results_[idx] = std::move(cached);
     from_cache_[idx] = true;
     return CACHE_HIT;
