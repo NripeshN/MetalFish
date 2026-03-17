@@ -58,13 +58,18 @@ public:
   explicit NNMCTSEvaluator(const std::string &weights_path);
   ~NNMCTSEvaluator();
 
-  // Evaluate single position
+  // Evaluate single position with game history for accurate NN encoding.
+  // The history vector should contain the last 8 board states (or fewer).
+  // history.back() is the current position to evaluate.
   EvaluationResult Evaluate(const Position &pos);
+  EvaluationResult EvaluateWithHistory(
+      const std::vector<const Position *> &history);
 
-  // Batch evaluation for multiple positions (pointer array for non-copyable
-  // Position)
+  // Batch evaluation with per-position history
   std::vector<EvaluationResult> EvaluateBatch(const Position *const *positions,
                                               size_t count);
+  std::vector<EvaluationResult> EvaluateBatchWithHistory(
+      const std::vector<std::vector<const Position *>> &histories);
 
   // Get network information
   std::string GetNetworkInfo() const;

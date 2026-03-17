@@ -36,7 +36,7 @@
 #include "hybrid/hybrid_search.h"
 #include "hybrid/position_adapter.h"
 #include "mcts/gpu_backend.h"
-#include "mcts/tree.h"
+#include "mcts/search.h"
 #include "search/search.h"
 #include "uci/benchmark.h"
 #include "uci/engine.h"
@@ -1313,15 +1313,79 @@ void UCIEngine::gpu_benchmark() {
 // loading.
 // ============================================================================
 
+static float get_float_option(Engine &engine, const char *name, float fallback) {
+  if (!engine.get_options().count(name))
+    return fallback;
+  try {
+    return std::stof(std::string(engine.get_options()[name]));
+  } catch (...) {
+    return fallback;
+  }
+}
+
+static MCTS::SearchParams make_mcts_config(Engine &engine,
+                                           const std::string &nn_weights,
+                                           int num_threads) {
+  MCTS::SearchParams config;
+  config.nn_weights_path = nn_weights;
+  config.num_threads = num_threads;
+
+  config.cpuct = get_float_option(engine, "MCTSCPuct", config.cpuct);
+  config.cpuct_at_root =
+      get_float_option(engine, "MCTSCPuctAtRoot", config.cpuct_at_root);
+  config.cpuct_base =
+      get_float_option(engine, "MCTSCPuctBase", config.cpuct_base);
+  config.cpuct_factor =
+      get_float_option(engine, "MCTSCPuctFactor", config.cpuct_factor);
+  config.cpuct_base_at_root =
+      get_float_option(engine, "MCTSCPuctBaseAtRoot", config.cpuct_base_at_root);
+  config.cpuct_factor_at_root = get_float_option(
+      engine, "MCTSCPuctFactorAtRoot", config.cpuct_factor_at_root);
+
+  config.fpu_absolute = engine.get_options()["MCTSFpuAbsolute"];
+  config.fpu_absolute_at_root = engine.get_options()["MCTSFpuAbsoluteAtRoot"];
+  config.fpu_value = get_float_option(engine, "MCTSFpuValue", config.fpu_value);
+  config.fpu_value_at_root =
+      get_float_option(engine, "MCTSFpuValueAtRoot", config.fpu_value_at_root);
+  config.fpu_reduction =
+      get_float_option(engine, "MCTSFpuReduction", config.fpu_reduction);
+  config.fpu_reduction_at_root = get_float_option(
+      engine, "MCTSFpuReductionAtRoot", config.fpu_reduction_at_root);
+
+  config.policy_softmax_temp = get_float_option(
+      engine, "MCTSPolicySoftmaxTemp", config.policy_softmax_temp);
+  config.virtual_loss = std::max(1, static_cast<int>(
+                                        engine.get_options()["MCTSVirtualLoss"]));
+  config.minibatch_size = std::max(
+      1, static_cast<int>(engine.get_options()["MCTSMinibatchSize"]));
+  config.max_out_of_order_evals_factor = get_float_option(
+      engine, "MCTSMaxOutOfOrderFactor", config.max_out_of_order_evals_factor);
+
+  config.add_dirichlet_noise = engine.get_options()["MCTSAddDirichletNoise"];
+  config.noise_epsilon =
+      get_float_option(engine, "MCTSNoiseEpsilon", config.noise_epsilon);
+  config.noise_alpha =
+      get_float_option(engine, "MCTSNoiseAlpha", config.noise_alpha);
+
+  if (engine.get_options()["MCTSParityPreset"]) {
+    config.add_dirichlet_noise = false;
+    config.out_of_order_eval = false;
+    config.fpu_reduction_at_root = config.fpu_reduction;
+    config.fpu_absolute_at_root = config.fpu_absolute;
+    config.fpu_value_at_root = config.fpu_value;
+  }
+
+  return config;
+}
+
 static MCTS::ParallelHybridConfig
 make_hybrid_config(const std::string &nn_weights) {
   MCTS::ParallelHybridConfig config;
   config.mcts_config.nn_weights_path = nn_weights;
-  config.mcts_config.min_batch_size = 8;
-  config.mcts_config.max_batch_size = 256;
-  config.mcts_config.cpuct = 1.5f;
-  config.mcts_config.fpu_reduction = 0.2f;
-  config.mcts_config.add_dirichlet_noise = true;
+  config.mcts_config.cpuct = 1.745f;
+  config.mcts_config.cpuct_at_root = 2.15f;
+  config.mcts_config.fpu_reduction = 0.330f;
+  config.mcts_config.add_dirichlet_noise = false;
   config.mcts_config.num_threads = 1;
   config.ab_min_depth = 10;
   config.ab_use_time = true;
@@ -1353,7 +1417,7 @@ static std::string get_nn_weights_path(Engine &engine) {
 // Forward declarations for static globals defined below.
 static std::unique_ptr<MCTS::ParallelHybridSearch> g_parallel_hybrid_search;
 static GPU::GPUNNUEManager *g_hybrid_gpu_manager = nullptr;
-static std::shared_ptr<MCTS::ThreadSafeMCTS> g_active_mcts;
+static std::shared_ptr<MCTS::Search> g_active_mcts;
 static std::mutex g_active_mcts_mutex;
 static std::thread g_search_waiter;
 static std::mutex g_search_waiter_mutex;
@@ -1405,7 +1469,7 @@ static void stop_active_searches() {
   {
     std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
     if (g_active_mcts)
-      g_active_mcts->stop();
+      g_active_mcts->Stop();
   }
 }
 
@@ -1518,7 +1582,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
 void UCIEngine::mcts_mt_go(std::istringstream &is) {
   // Parse threads option
   std::string token;
-  int num_threads = 4; // Default to 4 threads
+  int num_threads = static_cast<int>(engine.get_options()["Threads"]);
 
   // Parse additional options (threads=N)
   while (is >> token) {
@@ -1544,12 +1608,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
             << num_threads << " threads..." << sync_endl;
 
   // Get transformer weights path from UCI option
-  std::string nn_weights = std::string(engine.get_options()["NNWeights"]);
-  if (nn_weights.empty()) {
-    const char *env_path = std::getenv("METALFISH_NN_WEIGHTS");
-    if (env_path)
-      nn_weights = env_path;
-  }
+  std::string nn_weights = get_nn_weights_path(engine);
   if (nn_weights.empty()) {
     sync_cout << "info string ERROR: No transformer weights. Set UCI option "
                  "NNWeights."
@@ -1557,35 +1616,56 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
     return;
   }
 
-  // GPU NNUE manager is optional -- transformer is the primary evaluator
-  GPU::GPUNNUEManager *gpu_manager = nullptr;
-  if (GPU::gpu_nnue_manager_available()) {
-    gpu_manager = &GPU::gpu_nnue_manager();
+  MCTS::SearchParams config = make_mcts_config(engine, nn_weights, num_threads);
+
+  static std::shared_ptr<MCTS::Search> s_cached_mcts;
+  static std::string s_cached_key;
+
+  std::shared_ptr<MCTS::Search> mcts;
+  std::ostringstream config_key;
+  config_key << nn_weights
+             << "|" << config.num_threads
+             << "|" << config.cpuct
+             << "|" << config.cpuct_at_root
+             << "|" << config.cpuct_base
+             << "|" << config.cpuct_factor
+             << "|" << config.fpu_reduction
+             << "|" << config.fpu_reduction_at_root
+             << "|" << config.policy_softmax_temp
+             << "|" << config.virtual_loss
+             << "|" << config.minibatch_size
+             << "|" << config.max_out_of_order_evals_factor
+             << "|" << config.add_dirichlet_noise;
+
+  if (s_cached_mcts && s_cached_key == config_key.str()) {
+    mcts = s_cached_mcts;
+  } else {
+    if (s_cached_mcts) {
+      s_cached_mcts->Stop();
+      s_cached_mcts->ClearCallbacks();
+      {
+        std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
+        if (g_active_mcts == s_cached_mcts)
+          g_active_mcts.reset();
+      }
+      join_search_waiter();
+      s_cached_mcts.reset();
+    }
+    mcts.reset(MCTS::CreateSearch(config).release());
+    s_cached_mcts = mcts;
+    s_cached_key = config_key.str();
   }
-
-  // Configure multi-threaded MCTS
-  MCTS::ThreadSafeMCTSConfig config;
-  config.nn_weights_path = nn_weights; // Transformer weights
-  config.num_threads = num_threads;
-  config.cpuct = 2.5f;
-  config.fpu_value = -1.0f;
-  config.policy_softmax_temp = 1.0f;
-  config.add_dirichlet_noise = true;
-  config.dirichlet_alpha = 0.3f;
-  config.dirichlet_epsilon = 0.25f;
-  config.virtual_loss = 3;
-  config.min_batch_size = 8;
-  config.max_batch_size = 256;
-
-  // Create thread-safe MCTS
-  std::shared_ptr<MCTS::ThreadSafeMCTS> mcts(
-      MCTS::create_thread_safe_mcts(gpu_manager, config).release());
 
   if (!mcts) {
     sync_cout << "info string ERROR: Failed to create multi-threaded MCTS"
               << sync_endl;
     return;
   }
+
+  // Ensure any previous search waiter thread is joined before starting a new
+  // search on the same cached object. start_search() handles stop/wait
+  // internally so we only need to join the background waiter.
+  join_search_waiter();
 
   sync_cout << "info string Multi-threaded MCTS initialized with "
             << num_threads << " threads" << sync_endl;
@@ -1608,7 +1688,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
 
   // Start search
   auto start_time = std::chrono::steady_clock::now();
-  mcts->start_search(fen, limits, best_move_cb, info_cb);
+  mcts->StartSearch(fen, limits, best_move_cb, info_cb);
 
   // Store a reference so the stop command can reach it
   {
@@ -1622,23 +1702,22 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   {
     std::lock_guard<std::mutex> wlock(g_search_waiter_mutex);
     g_search_waiter = std::thread([mcts, start_time, num_threads]() {
-      mcts->wait();
+      mcts->Wait();
 
-      // Clear the global reference now that the search is done
       {
         std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
         if (g_active_mcts == mcts)
           g_active_mcts.reset();
       }
 
-      // Print final statistics
       auto end_time = std::chrono::steady_clock::now();
       auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             end_time - start_time)
                             .count();
 
-      const auto &stats = mcts->stats();
+      const auto &stats = mcts->Stats();
       uint64_t nodes = stats.total_nodes.load();
+      uint64_t nn_evals = stats.nn_evaluations.load();
       uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
 
       sync_cout << "info string Final stats:" << sync_endl;
@@ -1646,43 +1725,10 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
       sync_cout << "info string   NPS: " << nps << sync_endl;
       sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
       sync_cout << "info string   Threads: " << num_threads << sync_endl;
-      sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
-                << sync_endl;
+      sync_cout << "info string   NN evals: " << nn_evals << sync_endl;
       sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
                 << " misses: " << stats.cache_misses.load() << sync_endl;
 
-      // Profiling breakdown
-      uint64_t sel_us = stats.selection_time_us.load();
-      uint64_t exp_us = stats.expansion_time_us.load();
-      uint64_t eval_us = stats.evaluation_time_us.load();
-      uint64_t bp_us = stats.backprop_time_us.load();
-      uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
-
-      if (total_us > 0) {
-        sync_cout << "info string   Selection: " << std::fixed
-                  << std::setprecision(1) << (100.0 * sel_us / total_us) << "%"
-                  << sync_endl;
-        sync_cout << "info string   Expansion: " << std::fixed
-                  << std::setprecision(1) << (100.0 * exp_us / total_us) << "%"
-                  << sync_endl;
-        sync_cout << "info string   Evaluation: " << std::fixed
-                  << std::setprecision(1) << (100.0 * eval_us / total_us) << "%"
-                  << sync_endl;
-        sync_cout << "info string   Backprop: " << std::fixed
-                  << std::setprecision(1) << (100.0 * bp_us / total_us) << "%"
-                  << sync_endl;
-      }
-
-      // Batching statistics
-      uint64_t batch_count = stats.batch_count.load();
-      if (batch_count > 0) {
-        sync_cout << "info string   Avg batch size: " << std::fixed
-                  << std::setprecision(1) << stats.avg_batch_size()
-                  << sync_endl;
-        sync_cout << "info string   Batch wait time: "
-                  << (stats.batch_wait_time_us.load() / 1000) << "ms"
-                  << sync_endl;
-      }
     });
   }
 }
@@ -1745,45 +1791,31 @@ void UCIEngine::mcts_batch_benchmark(std::istringstream &is) {
             << sync_endl;
 
   {
-    MCTS::ThreadSafeMCTSConfig config;
+    MCTS::SearchParams config;
     config.num_threads = num_threads;
-    config.use_batched_eval = false; // Disable batching
-    config.cpuct = 2.5f;
+    config.cpuct_at_root = 2.5f;
     config.add_dirichlet_noise = true;
-    config.virtual_loss = 3;
 
-    auto mcts = MCTS::create_thread_safe_mcts(gpu_manager, config);
+    auto mcts = MCTS::CreateSearch(config);
 
     auto start = std::chrono::steady_clock::now();
-    mcts->start_search(fen, limits, nullptr, nullptr);
-    mcts->wait();
+    mcts->StartSearch(fen, limits, nullptr, nullptr);
+    mcts->Wait();
     auto end = std::chrono::steady_clock::now();
 
     auto elapsed_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
             .count();
-    const auto &stats = mcts->stats();
+    const auto &stats = mcts->Stats();
     uint64_t nodes = stats.total_nodes.load();
-    uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+    uint64_t nn_evals = stats.nn_evaluations.load();
+    uint64_t nps = elapsed_ms > 0 ? (nn_evals * 1000) / elapsed_ms : 0;
 
     sync_cout << "info string   Nodes: " << nodes << sync_endl;
     sync_cout << "info string   NPS: " << nps << sync_endl;
-    sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
-              << sync_endl;
+    sync_cout << "info string   NN evals: " << nn_evals << sync_endl;
     sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
               << " misses: " << stats.cache_misses.load() << sync_endl;
-
-    uint64_t sel_us = stats.selection_time_us.load();
-    uint64_t exp_us = stats.expansion_time_us.load();
-    uint64_t eval_us = stats.evaluation_time_us.load();
-    uint64_t bp_us = stats.backprop_time_us.load();
-    uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
-
-    if (total_us > 0) {
-      sync_cout << "info string   Evaluation time: " << std::fixed
-                << std::setprecision(1) << (100.0 * eval_us / total_us)
-                << "% of iteration" << sync_endl;
-    }
   }
 
   sync_cout << "" << sync_endl;
@@ -1796,55 +1828,31 @@ void UCIEngine::mcts_batch_benchmark(std::istringstream &is) {
       << sync_endl;
 
   {
-    MCTS::ThreadSafeMCTSConfig config;
+    MCTS::SearchParams config;
     config.num_threads = num_threads;
-    config.use_batched_eval = true; // Enable batching
-    config.min_batch_size = 8;
-    config.max_batch_size = 256;
-    config.batch_timeout_us = 500;
-    config.cpuct = 2.5f;
+    config.cpuct_at_root = 2.5f;
     config.add_dirichlet_noise = true;
-    config.virtual_loss = 3;
 
-    auto mcts = MCTS::create_thread_safe_mcts(gpu_manager, config);
+    auto mcts = MCTS::CreateSearch(config);
 
     auto start = std::chrono::steady_clock::now();
-    mcts->start_search(fen, limits, nullptr, nullptr);
-    mcts->wait();
+    mcts->StartSearch(fen, limits, nullptr, nullptr);
+    mcts->Wait();
     auto end = std::chrono::steady_clock::now();
 
     auto elapsed_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
             .count();
-    const auto &stats = mcts->stats();
+    const auto &stats = mcts->Stats();
     uint64_t nodes = stats.total_nodes.load();
-    uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+    uint64_t nn_evals = stats.nn_evaluations.load();
+    uint64_t nps = elapsed_ms > 0 ? (nn_evals * 1000) / elapsed_ms : 0;
 
     sync_cout << "info string   Nodes: " << nodes << sync_endl;
     sync_cout << "info string   NPS: " << nps << sync_endl;
-    sync_cout << "info string   NN evals: " << stats.nn_evaluations.load()
-              << sync_endl;
-    sync_cout << "info string   NN batches: " << stats.nn_batches.load()
-              << sync_endl;
-    sync_cout << "info string   Avg batch size: " << std::fixed
-              << std::setprecision(1) << stats.avg_batch_size() << sync_endl;
+    sync_cout << "info string   NN evals: " << nn_evals << sync_endl;
     sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
               << " misses: " << stats.cache_misses.load() << sync_endl;
-    sync_cout << "info string   Batch wait time: "
-              << (stats.batch_wait_time_us.load() / 1000) << "ms total"
-              << sync_endl;
-
-    uint64_t sel_us = stats.selection_time_us.load();
-    uint64_t exp_us = stats.expansion_time_us.load();
-    uint64_t eval_us = stats.evaluation_time_us.load();
-    uint64_t bp_us = stats.backprop_time_us.load();
-    uint64_t total_us = sel_us + exp_us + eval_us + bp_us;
-
-    if (total_us > 0) {
-      sync_cout << "info string   Evaluation time: " << std::fixed
-                << std::setprecision(1) << (100.0 * eval_us / total_us)
-                << "% of iteration" << sync_endl;
-    }
   }
 
   sync_cout << "" << sync_endl;

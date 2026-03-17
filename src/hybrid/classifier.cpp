@@ -157,108 +157,6 @@ PositionFeatures PositionClassifier::analyze(const Position &pos) const {
   return f;
 }
 
-PositionType PositionClassifier::quick_classify(const Position &pos) const {
-  // Fast classification without full analysis
-
-  // Check for immediate tactical elements
-  if (pos.checkers()) {
-    return PositionType::HIGHLY_TACTICAL;
-  }
-
-  // Count captures quickly
-  int captures = 0;
-  MoveList<CAPTURES> cap_moves(pos);
-  captures = cap_moves.size();
-
-  if (captures > 5) {
-    return PositionType::TACTICAL;
-  }
-
-  // Check for closed position
-  if (is_position_closed(pos)) {
-    return PositionType::STRATEGIC;
-  }
-
-  // Check piece count for endgame
-  if (is_endgame_position(pos)) {
-    return PositionType::STRATEGIC;
-  }
-
-  // Default to balanced
-  if (captures > 2) {
-    return PositionType::TACTICAL;
-  }
-
-  return PositionType::BALANCED;
-}
-
-float PositionClassifier::tactical_score(const Position &pos) const {
-  float score = 0.0f;
-
-  if (pos.checkers())
-    score += 0.4f;
-
-  MoveList<CAPTURES> caps(pos);
-  score += 0.05f * std::min(static_cast<int>(caps.size()), 8);
-
-  // King safety
-  for (Color c : {WHITE, BLACK}) {
-    int attackers = count_king_attackers(pos, c);
-    if (attackers > 2)
-      score += 0.2f;
-  }
-
-  return std::min(1.0f, score);
-}
-
-float PositionClassifier::strategic_score(const Position &pos) const {
-  float score = 0.0f;
-
-  if (is_position_closed(pos))
-    score += 0.3f;
-  if (is_endgame_position(pos))
-    score += 0.2f;
-  if (!pos.checkers())
-    score += 0.1f;
-
-  // Pawn structure complexity
-  int islands = count_pawn_islands(pos, WHITE) + count_pawn_islands(pos, BLACK);
-  if (islands > 4)
-    score += 0.2f;
-
-  return std::min(1.0f, score);
-}
-
-bool PositionClassifier::is_tactical(const Position &pos) const {
-  return tactical_score(pos) > 0.5f;
-}
-
-bool PositionClassifier::is_strategic(const Position &pos) const {
-  return strategic_score(pos) > 0.5f;
-}
-
-bool PositionClassifier::has_forcing_moves(const Position &pos) const {
-  if (pos.checkers())
-    return true;
-
-  // Check for checks available
-  MoveList<LEGAL> moves(pos);
-  for (const auto &m : moves) {
-    if (pos.gives_check(m))
-      return true;
-  }
-
-  return false;
-}
-
-bool PositionClassifier::is_quiet(const Position &pos) const {
-  if (pos.checkers())
-    return false;
-
-  MoveList<CAPTURES> caps(pos);
-  return caps.size() < 3;
-}
-
 int PositionClassifier::count_hanging_pieces(const Position &pos,
                                              Color c) const {
   int count = 0;
@@ -491,35 +389,6 @@ Bitboard PositionClassifier::get_king_zone(Square ksq) const {
   return zone;
 }
 
-Bitboard PositionClassifier::get_outpost_squares(const Position &pos,
-                                                 Color c) const {
-  // Squares that cannot be attacked by enemy pawns
-  Color them = ~c;
-  Bitboard their_pawns = pos.pieces(them, PAWN);
-
-  Bitboard safe = ~0ULL;
-
-  while (their_pawns) {
-    Square s = pop_lsb(their_pawns);
-    // Remove squares attacked by pawn advances
-    Bitboard pawn_attacks = (them == WHITE)
-                                ? pawn_attacks_bb<WHITE>(square_bb(s))
-                                : pawn_attacks_bb<BLACK>(square_bb(s));
-    safe &= ~pawn_attacks;
-  }
-
-  // Only consider central and advanced squares
-  Bitboard central =
-      (file_bb(FILE_C) | file_bb(FILE_D) | file_bb(FILE_E) | file_bb(FILE_F));
-  if (c == WHITE) {
-    central &= (rank_bb(RANK_4) | rank_bb(RANK_5) | rank_bb(RANK_6));
-  } else {
-    central &= (rank_bb(RANK_3) | rank_bb(RANK_4) | rank_bb(RANK_5));
-  }
-
-  return safe & central;
-}
-
 // ============================================================================
 // StrategySelector
 // ============================================================================
@@ -639,28 +508,6 @@ void StrategySelector::adjust_for_time(SearchStrategy &s, int time_left_ms,
   if (increment_ms > 5000) {
     s.time_multiplier *= 1.1f;
   }
-}
-
-void StrategySelector::adjust_for_score(SearchStrategy &s,
-                                        int current_score) const {
-  // Adjust based on current evaluation
-  if (std::abs(current_score) > 500) {
-    // Winning or losing badly - be more tactical
-    s.mcts_weight *= 0.7f;
-    s.ab_weight = 1.0f - s.mcts_weight;
-    s.use_ab_for_tactics = true;
-  } else if (std::abs(current_score) < 50) {
-    // Equal position - can explore more
-    s.mcts_weight *= 1.1f;
-    s.mcts_weight = std::min(0.9f, s.mcts_weight);
-    s.ab_weight = 1.0f - s.mcts_weight;
-  }
-}
-
-// Global instance
-PositionClassifier &position_classifier() {
-  static PositionClassifier instance;
-  return instance;
 }
 
 } // namespace MetalFish

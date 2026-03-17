@@ -234,17 +234,17 @@ const char *kMoveStrings[kPolicyOutputs] = {
     "h8c3", "h8h3", "h8d4", "h8h4", "h8e5", "h8h5", "h8f6", "h8g6", "h8h6",
     "h8f7", "h8g7", "h8h7", "h8a8", "h8b8", "h8c8", "h8d8", "h8e8", "h8f8",
     "h8g8",
-    // Underpromotions only (r/b/n) - queen promotions are encoded as regular
-    // moves
-    "a7a8r", "a7a8b", "a7a8n", "a7b8r", "a7b8b", "a7b8n", "b7a8r", "b7a8b",
-    "b7a8n", "b7b8r", "b7b8b", "b7b8n", "b7c8r", "b7c8b", "b7c8n", "c7b8r",
-    "c7b8b", "c7b8n", "c7c8r", "c7c8b", "c7c8n", "c7d8r", "c7d8b", "c7d8n",
-    "d7c8r", "d7c8b", "d7c8n", "d7d8r", "d7d8b", "d7d8n", "d7e8r", "d7e8b",
-    "d7e8n", "e7d8r", "e7d8b", "e7d8n", "e7e8r", "e7e8b", "e7e8n", "e7f8r",
-    "e7f8b", "e7f8n", "f7e8r", "f7e8b", "f7e8n", "f7f8r", "f7f8b", "f7f8n",
-    "f7g8r", "f7g8b", "f7g8n", "g7f8r", "g7f8b", "g7f8n", "g7g8r", "g7g8b",
-    "g7g8n", "g7h8r", "g7h8b", "g7h8n", "h7g8r", "h7g8b", "h7g8n", "h7h8r",
-    "h7h8b", "h7h8n"};
+    // Promotions (q/r/b) - matches Lc0 encoding.
+    // Knight promotions use the regular knight-move entries in 0-1791.
+    "a7a8q", "a7a8r", "a7a8b", "a7b8q", "a7b8r", "a7b8b", "b7a8q", "b7a8r",
+    "b7a8b", "b7b8q", "b7b8r", "b7b8b", "b7c8q", "b7c8r", "b7c8b", "c7b8q",
+    "c7b8r", "c7b8b", "c7c8q", "c7c8r", "c7c8b", "c7d8q", "c7d8r", "c7d8b",
+    "d7c8q", "d7c8r", "d7c8b", "d7d8q", "d7d8r", "d7d8b", "d7e8q", "d7e8r",
+    "d7e8b", "e7d8q", "e7d8r", "e7d8b", "e7e8q", "e7e8r", "e7e8b", "e7f8q",
+    "e7f8r", "e7f8b", "f7e8q", "f7e8r", "f7e8b", "f7f8q", "f7f8r", "f7f8b",
+    "f7g8q", "f7g8r", "f7g8b", "g7f8q", "g7f8r", "g7f8b", "g7g8q", "g7g8r",
+    "g7g8b", "g7h8q", "g7h8r", "g7h8b", "h7g8q", "h7g8r", "h7g8b", "h7h8q",
+    "h7h8r", "h7h8b"};
 
 // Pack move for lookup: from (6 bits) | to (6 bits) | promotion (4 bits)
 constexpr uint16_t PackMove(int from_sq, int to_sq, char promo_char) {
@@ -335,30 +335,21 @@ int MoveToNNIndex(Move move, int transform) {
   const int from_sq = static_cast<int>(move.from_sq());
   const int to_sq = static_cast<int>(move.to_sq());
 
-  // Attention policy map indexing (matches transformer policy output order).
-  if (move.type_of() != PROMOTION) {
-    int attn_idx = MetalFish::NN::Metal::kAttnPolicyMap[from_sq * 64 + to_sq];
-    if (attn_idx >= 0) {
-      return attn_idx;
-    }
-  }
-
   // Validate square indices
   if (from_sq < 0 || from_sq > 63 || to_sq < 0 || to_sq > 63) {
-    return -1; // Invalid move - return -1 to indicate error
+    return -1;
   }
 
-  // Handle promotions
-  // In standard encoding, queen promotions are encoded as regular
-  // queen-direction moves (indices 0-1791). Only underpromotions (r/b/n) have
-  // explicit promotion entries at indices 1792-1857.
+  // Handle promotions -- matches Lc0 encoding:
+  // Queen/rook/bishop promotions use explicit entries at indices 1792-1857.
+  // Knight promotions use the regular knight-move entries in 0-1791.
   char promo_char = 0;
   if (move.type_of() == PROMOTION) {
     PieceType pt = move.promotion_type();
     switch (pt) {
     case QUEEN:
-      promo_char = 0;
-      break; // Queen promotion = regular move
+      promo_char = 'q';
+      break;
     case ROOK:
       promo_char = 'r';
       break;
@@ -366,11 +357,11 @@ int MoveToNNIndex(Move move, int transform) {
       promo_char = 'b';
       break;
     case KNIGHT:
-      promo_char = 'n';
-      break;
-    default:
       promo_char = 0;
-      break; // Default to queen (regular move)
+      break; // Knight promotion = regular knight-move entry
+    default:
+      promo_char = 'q';
+      break;
     }
   }
 

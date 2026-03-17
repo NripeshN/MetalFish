@@ -14,7 +14,6 @@
 #include "core/position.h"
 #include "eval/gpu_backend.h"
 #include "eval/gpu_integration.h"
-#include "hybrid/ab_bridge.h"
 #include "uci/uci.h"
 
 using namespace MetalFish;
@@ -34,9 +33,6 @@ static void cleanup_gpu_resources() {
 
   // 0. Cleanup parallel hybrid search first (it holds GPU resources)
   cleanup_parallel_hybrid_search();
-
-  // 1. Shutdown MCTS components first (they use GPU)
-  MCTS::shutdown_hybrid_bridge();
 
   // 2. Shutdown GPU NNUE manager (this also shuts down the GPU backend)
   GPU::shutdown_gpu_nnue();

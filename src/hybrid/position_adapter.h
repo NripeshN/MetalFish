@@ -28,18 +28,6 @@ using namespace MetalFish;
 namespace MetalFish {
 namespace MCTS {
 
-// Forward declarations
-class MCTSNode;
-class MCTSTree;
-
-// Game result enum for MCTS
-enum class GameResult : uint8_t {
-  UNDECIDED = 0,
-  WHITE_WON = 1,
-  DRAW = 2,
-  BLACK_WON = 3
-};
-
 // Move representation that wraps internal Move type
 class MCTSMove {
 public:
@@ -103,9 +91,6 @@ public:
   void do_move(MCTSMove move);
   void do_move(Move move);
 
-  // Undo last move
-  void undo_move();
-
   // Generate legal moves
   MCTSMoveList generate_legal_moves() const;
 
@@ -115,7 +100,6 @@ public:
   bool is_stalemate() const;
   bool is_draw() const;
   bool is_terminal() const;
-  GameResult get_game_result() const;
 
   // Get repetition count
   int repetition_count() const;
@@ -152,72 +136,11 @@ private:
   std::vector<Move> move_stack_;
 };
 
-// Position history for repetition detection and game tracking
-class MCTSPositionHistory {
-public:
-  MCTSPositionHistory();
-
-  // Reset to starting position
-  void reset();
-
-  // Reset to position from FEN
-  void reset(const std::string &fen);
-
-  // Reset with moves
-  void reset(const std::string &fen, const std::vector<std::string> &moves);
-
-  // Apply move
-  void do_move(MCTSMove move);
-  void do_move(Move move);
-
-  // Get current position
-  const MCTSPosition &current() const { return positions_.back(); }
-  MCTSPosition &current() { return positions_.back(); }
-
-  // Get position at index
-  const MCTSPosition &at(size_t idx) const { return positions_[idx]; }
-
-  // Get number of positions
-  size_t size() const { return positions_.size(); }
-
-  // Check for repetition
-  int compute_repetitions() const;
-
-  // Get last move
-  MCTSMove last_move() const;
-
-  // Check if position is terminal
-  bool is_terminal() const { return current().is_terminal(); }
-
-  // Get game result
-  GameResult get_game_result() const { return current().get_game_result(); }
-
-private:
-  std::vector<MCTSPosition> positions_;
-  std::vector<MCTSMove> moves_;
-};
-
 // Neural network input encoding (converts position to NN input planes)
 class MCTSEncoder {
 public:
   // Encode position for neural network
-  // Returns input planes (112 planes of 8x8)
   static std::vector<float> encode_position(const MCTSPosition &pos);
-
-  // Encode position history (for transformer-style networks)
-  static std::vector<float> encode_history(const MCTSPositionHistory &history,
-                                           int history_length = 8);
-
-  // Decode policy output to moves
-  static std::vector<std::pair<MCTSMove, float>>
-  decode_policy(const MCTSPosition &pos, const float *policy_output,
-                int policy_size);
-
-  // Policy index for a move
-  static int move_to_policy_index(const MCTSPosition &pos, MCTSMove move);
-
-  // Move from policy index
-  static MCTSMove policy_index_to_move(const MCTSPosition &pos, int index);
 
 private:
   // Piece plane indices

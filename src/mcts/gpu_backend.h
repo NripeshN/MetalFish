@@ -15,6 +15,7 @@
 
 #include "../eval/gpu_integration.h"
 #include "../hybrid/position_adapter.h"
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -45,8 +46,8 @@ public:
   void set_wdl_rescale(float win_rate, float draw_rate);
 
   // Statistics
-  size_t total_evaluations() const { return total_evals_; }
-  size_t batch_evaluations() const { return batch_evals_; }
+  size_t total_evaluations() const { return total_evals_.load(std::memory_order_relaxed); }
+  size_t batch_evaluations() const { return batch_evals_.load(std::memory_order_relaxed); }
   double avg_batch_size() const;
 
 private:
@@ -60,9 +61,9 @@ private:
   float wdl_b_ = 1.0f; // Scaling factor
 
   // Statistics
-  size_t total_evals_ = 0;
-  size_t batch_evals_ = 0;
-  size_t total_positions_ = 0;
+  std::atomic<size_t> total_evals_{0};
+  std::atomic<size_t> batch_evals_{0};
+  std::atomic<size_t> total_positions_{0};
 
   // Convert NNUE centipawn score to WDL probabilities
   void score_to_wdl(int score, float &win, float &draw, float &loss);

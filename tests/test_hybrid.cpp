@@ -8,7 +8,6 @@
 #include "core/bitboard.h"
 #include "core/movegen.h"
 #include "core/position.h"
-#include "hybrid/ab_bridge.h"
 #include "hybrid/classifier.h"
 #include "hybrid/hybrid_search.h"
 #include "hybrid/position_adapter.h"
@@ -110,30 +109,6 @@ void test_classifier() {
     auto features = classifier.analyze(pos);
     EXPECT(tc, features.is_endgame);
   }
-  {
-    TestCase tc("Quick classification");
-    PositionClassifier classifier;
-    StateInfo st;
-    Position pos;
-    pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
-            &st);
-
-    PositionType type = classifier.quick_classify(pos);
-
-    EXPECT(tc, type == PositionType::BALANCED ||
-                   type == PositionType::STRATEGIC ||
-                   type == PositionType::HIGHLY_STRATEGIC);
-  }
-  {
-    TestCase tc("Quiet position check");
-    PositionClassifier classifier;
-    StateInfo st;
-    Position pos;
-    pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
-            &st);
-
-    EXPECT(tc, classifier.is_quiet(pos));
-  }
 }
 
 // ============================================================================
@@ -168,48 +143,6 @@ void test_strategy() {
     selector.adjust_for_time(strategy, 1000, 0);
 
     EXPECT(tc, strategy.time_multiplier > 0.0f);
-  }
-}
-
-// ============================================================================
-// AB Integration Tests
-// ============================================================================
-
-void test_ab_integration() {
-  {
-    TestCase tc("ABSearchResult");
-    ABSearchResult result;
-    result.best_move = Move(SQ_E2, SQ_E4);
-    result.score = 50;
-    result.depth = 10;
-    result.nodes_searched = 10000;
-
-    EXPECT(tc, result.best_move == Move(SQ_E2, SQ_E4));
-    EXPECT(tc, result.score == 50);
-    EXPECT(tc, result.depth == 10);
-    EXPECT(tc, result.nodes_searched == 10000);
-  }
-  {
-    TestCase tc("ABSearchConfig");
-    ABSearchConfig config;
-    config.max_depth = 20;
-    config.use_tt = true;
-    config.use_lmr = true;
-    config.use_null_move = true;
-
-    EXPECT(tc, config.max_depth == 20);
-    EXPECT(tc, config.use_tt);
-    EXPECT(tc, config.use_lmr);
-    EXPECT(tc, config.use_null_move);
-  }
-  {
-    TestCase tc("HybridBridgeStats");
-    HybridSearchBridge bridge;
-    auto stats = bridge.get_stats();
-
-    EXPECT(tc, stats.verifications == 0);
-    EXPECT(tc, stats.overrides == 0);
-    EXPECT(tc, stats.ab_nodes == 0);
   }
 }
 
@@ -276,17 +209,15 @@ void test_shared_state() {
     EXPECT(tc, state.has_result.load());
   }
   {
-    TestCase tc("ABSharedState move scores");
+    TestCase tc("ABSharedState PV publish");
     ABSharedState state;
     state.reset();
 
-    Move m1(SQ_E2, SQ_E4);
-    Move m2(SQ_D2, SQ_D4);
+    std::vector<Move> pv = {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5)};
+    state.publish_pv(pv, 8);
 
-    state.update_move_score(m1, 50, 5);
-    state.update_move_score(m2, 30, 5);
-
-    EXPECT(tc, state.num_scored_moves.load() == 2);
+    EXPECT(tc, state.pv_length.load() == 2);
+    EXPECT(tc, state.pv_depth.load() == 8);
   }
   {
     TestCase tc("MCTSSharedState reset");
@@ -314,26 +245,6 @@ void test_hybrid_config() {
     EXPECT(tc, config.ab_max_depth > config.ab_min_depth);
     EXPECT(tc, config.ab_policy_weight >= 0.0f);
     EXPECT(tc, config.ab_policy_weight <= 1.0f);
-  }
-  {
-    TestCase tc("Decision modes");
-    ParallelHybridConfig config;
-
-    config.decision_mode = ParallelHybridConfig::DecisionMode::MCTS_PRIMARY;
-    EXPECT(tc, config.decision_mode ==
-                   ParallelHybridConfig::DecisionMode::MCTS_PRIMARY);
-
-    config.decision_mode = ParallelHybridConfig::DecisionMode::AB_PRIMARY;
-    EXPECT(tc, config.decision_mode ==
-                   ParallelHybridConfig::DecisionMode::AB_PRIMARY);
-
-    config.decision_mode = ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED;
-    EXPECT(tc, config.decision_mode ==
-                   ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED);
-
-    config.decision_mode = ParallelHybridConfig::DecisionMode::DYNAMIC;
-    EXPECT(tc,
-           config.decision_mode == ParallelHybridConfig::DecisionMode::DYNAMIC);
   }
   {
     TestCase tc("GPU settings");
@@ -380,9 +291,6 @@ bool test_hybrid_module() {
 
   std::cout << "\n[Strategy]" << std::endl;
   test_strategy();
-
-  std::cout << "\n[AB Integration]" << std::endl;
-  test_ab_integration();
 
   std::cout << "\n[Adapter]" << std::endl;
   test_adapter();

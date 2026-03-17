@@ -130,6 +130,7 @@ public:
 
   // Accessing hash keys
   Key key() const;
+  Key raw_key() const;
   Key material_key() const;
   Key pawn_key() const;
   Key minor_piece_key() const;
@@ -143,6 +144,7 @@ public:
   bool is_repetition(int ply) const;
   bool upcoming_repetition(int ply) const;
   bool has_repeated() const;
+  int repetition_distance() const;
   int rule50_count() const;
   Value non_pawn_material(Color c) const;
   Value non_pawn_material() const;
@@ -289,6 +291,8 @@ inline Bitboard Position::check_squares(PieceType pt) const {
 
 inline Key Position::key() const { return adjust_key50(st->key); }
 
+inline Key Position::raw_key() const { return st->key; }
+
 inline Key Position::adjust_key50(Key k) const {
   return st->rule50 < 14 ? k : k ^ make_key((st->rule50 - 14) / 8);
 }
@@ -312,6 +316,8 @@ inline Value Position::non_pawn_material() const {
 inline int Position::game_ply() const { return gamePly; }
 
 inline int Position::rule50_count() const { return st->rule50; }
+
+inline int Position::repetition_distance() const { return st->repetition; }
 
 inline bool Position::is_chess960() const { return chess960; }
 

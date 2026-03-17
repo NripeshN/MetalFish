@@ -22,52 +22,10 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <type_traits>
 
 namespace MetalFish {
 namespace MCTS {
-
-// ============================================================================
-// GPU-Resident Batch Implementation
-// ============================================================================
-
-bool GPUResidentBatch::initialize(int batch_capacity) {
-  if (!GPU::gpu_available()) {
-    return false;
-  }
-
-  auto &backend = GPU::gpu();
-
-  // Calculate buffer sizes
-  // Each position needs: GPUPositionData (aligned struct)
-  size_t position_size = sizeof(GPU::GPUPositionData);
-  size_t positions_buffer_size = batch_capacity * position_size;
-
-  // Results: psqt score + positional score per position
-  size_t results_buffer_size = batch_capacity * 2 * sizeof(int32_t);
-
-  // Create GPU-accessible buffers using unified memory (Shared mode)
-  // On Apple Silicon, this means zero-copy access from both CPU and GPU
-  positions_buffer = backend.create_buffer(
-      positions_buffer_size,
-      GPU::MemoryMode::Shared,    // Unified memory - zero copy!
-      GPU::BufferUsage::Streaming // Frequently updated from CPU
-  );
-
-  results_buffer = backend.create_buffer(
-      results_buffer_size,
-      GPU::MemoryMode::Shared, // Results read by CPU after GPU writes
-      GPU::BufferUsage::Streaming);
-
-  if (!positions_buffer || !results_buffer) {
-    return false;
-  }
-
-  capacity = batch_capacity;
-  position_indices.reserve(batch_capacity);
-  initialized = true;
-
-  return true;
-}
 
 // ============================================================================
 // ParallelHybridSearch Implementation
@@ -75,8 +33,9 @@ bool GPUResidentBatch::initialize(int batch_capacity) {
 
 ParallelHybridSearch::ParallelHybridSearch() {
   // MCTS parameters
-  config_.mcts_config.cpuct = 1.745f;         // default value
-  config_.mcts_config.fpu_reduction = 0.330f; // default value
+  config_.mcts_config.cpuct = 1.745f;
+  config_.mcts_config.cpuct_at_root = 2.15f;
+  config_.mcts_config.fpu_reduction = 0.330f;
   config_.mcts_config.cpuct_base = 38739.0f;
   config_.mcts_config.cpuct_factor = 3.894f;
 
@@ -114,16 +73,9 @@ ParallelHybridSearch::~ParallelHybridSearch() {
   if (mcts_search_) {
     // Clear callbacks BEFORE calling wait to prevent crash from invalid
     // callback
-    mcts_search_->clear_callbacks();
-    mcts_search_->stop();
-    mcts_search_->wait();
-  }
-
-  // Wait for any pending GPU evaluations to complete
-  // This is critical to prevent crashes from async callbacks accessing
-  // destroyed objects
-  if (pending_evaluations_.load(std::memory_order_relaxed) > 0) {
-    wait_gpu_evaluations();
+      mcts_search_->ClearCallbacks();
+    mcts_search_->Stop();
+    mcts_search_->Wait();
   }
 
   // Apple Silicon Optimization: Only synchronize if absolutely necessary
@@ -196,32 +148,18 @@ bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
       gpu_manager; // May be nullptr -- that's OK if transformer is loaded
   engine_ = engine;
 
-  // Check for unified memory (Apple Silicon)
-  if (GPU::gpu_available()) {
-    has_unified_memory_ = GPU::gpu().has_unified_memory();
-  }
-
   // Create GPU MCTS backend (optional -- only if GPU NNUE is available)
   if (gpu_manager && gpu_manager->is_ready()) {
     gpu_backend_ = GPU::create_gpu_mcts_backend(gpu_manager);
-    if (gpu_backend_ && has_unified_memory_) {
+    if (gpu_backend_) {
       gpu_backend_->set_optimal_batch_size(config_.gpu_batch_size);
-    }
-    // Initialize GPU-resident batches for zero-copy evaluation
-    if (gpu_backend_ && config_.use_gpu_resident_batches &&
-        has_unified_memory_) {
-      if (!initialize_gpu_batches()) {
-        config_.use_gpu_resident_batches = false;
-      }
     }
   }
 
-  // Create MCTS search using ThreadSafeMCTS
+  // Create MCTS search engine
   // This loads the transformer network from config_.mcts_config.nn_weights_path
-  mcts_search_ = std::make_unique<ThreadSafeMCTS>(config_.mcts_config);
-  if (gpu_manager) {
-    mcts_search_->set_gpu_manager(gpu_manager);
-  }
+  mcts_search_ = std::make_unique<Search>(config_.mcts_config,
+      std::make_unique<Backend>(config_.mcts_config.nn_weights_path));
 
   // Initialize shared state
   ab_state_.reset();
@@ -232,7 +170,7 @@ bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
 }
 
 void ParallelHybridSearch::start_search(const Position &pos,
-                                        const Search::LimitsType &limits,
+                                        const ::MetalFish::Search::LimitsType &limits,
                                         BestMoveCallback best_move_cb,
                                         InfoCallback info_cb) {
   // Check if shutdown was requested
@@ -253,11 +191,8 @@ void ParallelHybridSearch::start_search(const Position &pos,
   }
 
   // Stop any existing search and wait for threads to finish
-  std::cerr << "[HYB] start_search: calling stop()..." << std::endl;
   stop();
-  std::cerr << "[HYB] start_search: calling wait()..." << std::endl;
   wait();
-  std::cerr << "[HYB] start_search: stop+wait done" << std::endl;
 
   // Reset state
   stats_.reset();
@@ -338,7 +273,7 @@ void ParallelHybridSearch::stop() {
 
   // Stop MCTS search
   if (mcts_search_) {
-    mcts_search_->stop();
+    mcts_search_->Stop();
   }
 
   // Stop AB search immediately -- engine_->stop() sets threads.stop = true
@@ -350,7 +285,6 @@ void ParallelHybridSearch::stop() {
 }
 
 void ParallelHybridSearch::wait() {
-  std::cerr << "[HYB] wait() enter" << std::endl;
   // Wait for threads to complete with a short timeout.
   auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
@@ -363,7 +297,7 @@ void ParallelHybridSearch::wait() {
                 << " ab_done=" << ab_thread_done_.load() << std::endl;
       stop_flag_.store(true, std::memory_order_release);
       if (mcts_search_)
-        mcts_search_->stop();
+        mcts_search_->Stop();
       if (engine_)
         engine_->stop();
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -392,7 +326,6 @@ void ParallelHybridSearch::wait() {
   }
 
   searching_.store(false, std::memory_order_release);
-  std::cerr << "[HYB] wait() exit" << std::endl;
 }
 
 Move ParallelHybridSearch::get_best_move() const {
@@ -421,16 +354,10 @@ void ParallelHybridSearch::new_game() {
   }
 
   if (mcts_search_) {
-    mcts_search_ = std::make_unique<ThreadSafeMCTS>(config_.mcts_config);
-    mcts_search_->set_gpu_manager(gpu_manager_);
+    mcts_search_ = std::make_unique<Search>(config_.mcts_config,
+      std::make_unique<Backend>(config_.mcts_config.nn_weights_path));
   }
-  // ThreadSafeMCTS manages its own TT internally
-}
-
-void ParallelHybridSearch::apply_move(Move move) {
-  // ThreadSafeMCTS doesn't support tree reuse - it creates a fresh tree each
-  // search This is a no-op, but we keep the function for API compatibility
-  (void)move;
+  // Search manages its own TT internally
 }
 
 int ParallelHybridSearch::calculate_time_budget() const {
@@ -481,12 +408,10 @@ bool ParallelHybridSearch::should_stop() const {
 
 // MCTS thread - runs GPU-accelerated MCTS
 void ParallelHybridSearch::mcts_thread_main() {
-  std::cerr << "[MCTS_THR] enter" << std::endl;
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
     ~ThreadGuard() {
-      std::cerr << "[MCTS_THR] ThreadGuard destructor" << std::endl;
       self->mcts_state_.mcts_running.store(false, std::memory_order_release);
       self->mcts_thread_state_.store(ThreadState::IDLE,
                                      std::memory_order_release);
@@ -497,14 +422,14 @@ void ParallelHybridSearch::mcts_thread_main() {
   auto start = std::chrono::steady_clock::now();
 
   // Set up MCTS limits - run for full time budget
-  Search::LimitsType mcts_limits;
+  ::MetalFish::Search::LimitsType mcts_limits;
   mcts_limits.movetime = time_budget_ms_;
   mcts_limits.startTime = now();
 
   Move best_move = Move::none();
   std::atomic<bool> mcts_done{false};
 
-  // ThreadSafeMCTS uses Move, not MCTSMove
+  // Search uses Move natively
   auto mcts_callback = [&](Move move, Move ponder) {
     best_move = move;
     mcts_done = true;
@@ -514,8 +439,8 @@ void ParallelHybridSearch::mcts_thread_main() {
   // Note: don't call start_search() which internally does stop()+wait() --
   // that would block if the previous eval thread is in a GPU call.
   // Instead, the hybrid's own start_search() already stopped everything.
-  mcts_search_->stop();
-  mcts_search_->start_search(root_fen_, mcts_limits, mcts_callback, nullptr);
+  mcts_search_->Stop();
+  mcts_search_->StartSearch(root_fen_, mcts_limits, mcts_callback, nullptr);
 
   // Periodically update shared state and check for AB policy updates
   int update_interval_ms = config_.policy_update_interval_ms;
@@ -547,9 +472,7 @@ void ParallelHybridSearch::mcts_thread_main() {
   }
 
   // Wait for MCTS to finish
-  std::cerr << "[MCTS_THR] calling mcts_search_->wait()..." << std::endl;
-  mcts_search_->wait();
-  std::cerr << "[MCTS_THR] mcts wait done" << std::endl;
+  mcts_search_->Wait();
 
   // Final state update
   publish_mcts_state();
@@ -557,29 +480,29 @@ void ParallelHybridSearch::mcts_thread_main() {
   auto end = std::chrono::steady_clock::now();
   stats_.mcts_time_ms =
       std::chrono::duration<double, std::milli>(end - start).count();
-  stats_.mcts_nodes = mcts_search_->stats().total_nodes.load();
-  stats_.gpu_evaluations = mcts_search_->stats().nn_evaluations.load();
-  stats_.gpu_batches = mcts_search_->stats().nn_batches.load();
+  stats_.mcts_nodes = mcts_search_->Stats().total_nodes.load();
+  stats_.gpu_evaluations = mcts_search_->Stats().nn_evaluations.load();
+  stats_.gpu_batches = mcts_search_->Stats().nn_evaluations.load();
 
   // ThreadGuard destructor will signal completion
 }
 
 void ParallelHybridSearch::publish_mcts_state() {
-  // ThreadSafeMCTS doesn't expose tree() directly, use get_best_move() instead
+  // Use GetBestMove() for the MCTS result
   if (!mcts_search_)
     return;
 
-  Move best = mcts_search_->get_best_move();
+  Move best = mcts_search_->GetBestMove();
   if (best == Move::none())
     return;
 
-  float best_q = mcts_search_->get_best_q();
+  float best_q = mcts_search_->GetBestQ();
 
   mcts_state_.best_move_raw.store(best.raw(), std::memory_order_relaxed);
   mcts_state_.best_q.store(best_q, std::memory_order_relaxed);
-  mcts_state_.best_visits.store(mcts_search_->stats().total_nodes.load(),
+  mcts_state_.best_visits.store(mcts_search_->Stats().total_nodes.load(),
                                 std::memory_order_relaxed);
-  mcts_state_.total_nodes.store(mcts_search_->stats().total_nodes.load(),
+  mcts_state_.total_nodes.store(mcts_search_->Stats().total_nodes.load(),
                                 std::memory_order_relaxed);
   mcts_state_.has_result.store(true, std::memory_order_release);
   mcts_state_.update_counter.fetch_add(1, std::memory_order_release);
@@ -599,13 +522,12 @@ void ParallelHybridSearch::update_mcts_policy_from_ab() {
   }
   int depth = ab_state_.pv_depth.load(std::memory_order_relaxed);
 
-  mcts_search_->inject_pv_boost(pv, pv_len, depth);
+  mcts_search_->InjectPVBoost(pv, pv_len, depth);
   stats_.policy_updates.fetch_add(1, std::memory_order_relaxed);
 }
 
 // AB thread - runs full alpha-beta iterative deepening
 void ParallelHybridSearch::ab_thread_main() {
-  std::cerr << "[AB_THR] enter" << std::endl;
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
@@ -636,25 +558,46 @@ void ParallelHybridSearch::run_ab_search() {
   engine_->set_position(root_fen_, {});
 
   // Build limits with movetime
-  Search::LimitsType ab_limits;
+  ::MetalFish::Search::LimitsType ab_limits;
   ab_limits.startTime = now();
   if (time_budget_ms_ > 0)
     ab_limits.movetime = time_budget_ms_;
 
   // Suppress bestmove output -- the coordinator handles it
   auto saved_bestmove = engine_->get_on_bestmove();
+  auto saved_update_full = engine_->get_on_update_full();
   Move ab_best_move = Move::none();
   int ab_score = 0;
-  engine_->set_on_bestmove([this, &ab_best_move, &ab_score](
+  int ab_depth = 0;
+
+  // Hook into the per-depth update to capture the actual score.
+  // InfoFull inherits InfoShort which carries `depth` and `score`.
+  engine_->set_on_update_full(
+      [this, &ab_score, &ab_depth](const Engine::InfoFull &info) {
+        ab_score = info.score.visit([](auto &&val) -> int {
+          using T = std::decay_t<decltype(val)>;
+          if constexpr (std::is_same_v<T, Score::InternalUnits>)
+            return val.value;
+          else if constexpr (std::is_same_v<T, Score::Mate>)
+            return val.plies > 0 ? 30000 - val.plies : -30000 - val.plies;
+          else if constexpr (std::is_same_v<T, Score::Tablebase>)
+            return val.win ? 20000 - val.plies : -20000 + val.plies;
+          else
+            return 0;
+        });
+        ab_depth = info.depth;
+        publish_ab_state(ab_state_.get_best_move(), ab_score, ab_depth,
+                         engine_->threads_nodes_searched());
+      });
+
+  engine_->set_on_bestmove([this, &ab_best_move, &ab_score, &ab_depth](
                                std::string_view bestmove, std::string_view) {
-    // Parse the bestmove string to get the Move
     Position pos;
     StateInfo st;
     pos.set(root_fen_, false, &st);
     ab_best_move = UCIEngine::to_move(pos, std::string(bestmove));
-    // Publish final AB state
     if (ab_best_move != Move::none()) {
-      publish_ab_state(ab_best_move, ab_score, 0,
+      publish_ab_state(ab_best_move, ab_score, ab_depth,
                        engine_->threads_nodes_searched());
     }
   });
@@ -663,7 +606,8 @@ void ParallelHybridSearch::run_ab_search() {
   engine_->go(ab_limits);
   engine_->wait_for_search_finished();
 
-  // Restore callback
+  // Restore callbacks
+  engine_->set_on_update_full(std::move(saved_update_full));
   engine_->set_on_bestmove(std::move(saved_bestmove));
 }
 
@@ -674,12 +618,10 @@ void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
 
 // Coordinator thread - monitors both searches and makes final decision
 void ParallelHybridSearch::coordinator_thread_main() {
-  std::cerr << "[COORD] enter" << std::endl;
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
     ~ThreadGuard() {
-      std::cerr << "[COORD] ThreadGuard destructor" << std::endl;
       self->coordinator_thread_state_.store(ThreadState::IDLE,
                                             std::memory_order_release);
       self->searching_.store(false, std::memory_order_release);
@@ -751,7 +693,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
 
   // Stop MCTS search safely
   if (mcts_search_) {
-    mcts_search_->stop();
+    mcts_search_->Stop();
   }
 
   // Stop AB search immediately so it winds down before we read its result
@@ -772,9 +714,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
   }
 
   // Make final decision
-  std::cerr << "[COORD] making final decision..." << std::endl;
   Move final_move = make_final_decision();
-  std::cerr << "[COORD] final_move=" << final_move.raw() << std::endl;
 
   // Guard: if no valid move, try to find any legal move
   if (final_move == Move::none()) {
@@ -1082,122 +1022,6 @@ void ParallelHybridSearch::send_info_string(const std::string &msg) {
   if (callback) {
     callback("info string " + msg);
   }
-}
-
-// ============================================================================
-// GPU Optimization Helpers (Apple Silicon)
-// ============================================================================
-
-bool ParallelHybridSearch::initialize_gpu_batches() {
-  if (!GPU::gpu_available()) {
-    return false;
-  }
-
-  // Initialize double-buffered GPU-resident batches
-  // Double buffering allows us to fill one batch while the other is being
-  // evaluated
-  bool success = true;
-  for (int i = 0; i < 2; ++i) {
-    if (!gpu_batch_[i].initialize(config_.gpu_batch_size)) {
-      success = false;
-      break;
-    }
-  }
-
-  if (success && has_unified_memory_) {
-    send_info_string("GPU unified memory: enabled (zero-copy batches)");
-  }
-
-  return success;
-}
-
-void ParallelHybridSearch::submit_gpu_batch_async(
-    int batch_idx, std::function<void(bool)> completion_handler) {
-  if (!gpu_manager_ || batch_idx < 0 || batch_idx > 1) {
-    if (completion_handler)
-      completion_handler(false);
-    return;
-  }
-
-  GPUResidentBatch &batch = gpu_batch_[batch_idx];
-  if (batch.count == 0) {
-    if (completion_handler)
-      completion_handler(true);
-    return;
-  }
-
-  // Create evaluation batch from GPU-resident data
-  GPU::GPUEvalBatch eval_batch;
-  eval_batch.reserve(batch.count);
-
-  // Since we're using unified memory, the positions are already in
-  // GPU-accessible memory We just need to set up the batch metadata
-  if (batch.positions_buffer && batch.positions_buffer->valid()) {
-    auto *positions = batch.positions_buffer->as<GPU::GPUPositionData>();
-    for (int i = 0; i < batch.count; ++i) {
-      eval_batch.add_position_data(positions[i]);
-    }
-  }
-
-  // Track pending evaluations
-  pending_evaluations_.fetch_add(1, std::memory_order_relaxed);
-
-  // Capture batch count before moving eval_batch (batch is a member reference,
-  // safe to capture)
-  const int batch_count = batch.count;
-
-  // Submit async evaluation - move eval_batch into the lambda to avoid
-  // use-after-free (eval_batch is a local variable that would go out of scope
-  // before the async callback)
-  bool started = gpu_manager_->evaluate_batch_async(
-      eval_batch, [this, batch_idx, completion_handler, &batch, batch_count,
-                   eval_batch = std::move(eval_batch)](bool success) mutable {
-        // Copy results back (unified memory = no actual copy needed)
-        if (success && batch.results_buffer && batch.results_buffer->valid()) {
-          auto *results = batch.results_buffer->as<int32_t>();
-          for (int i = 0; i < batch_count; ++i) {
-            results[i * 2] = eval_batch.psqt_scores[i];
-            results[i * 2 + 1] = eval_batch.positional_scores[i];
-          }
-        }
-
-        // Decrement pending count
-        pending_evaluations_.fetch_sub(1, std::memory_order_relaxed);
-
-        // Notify completion
-        {
-          std::lock_guard<std::mutex> lock(async_mutex_);
-          async_cv_.notify_all();
-        }
-
-        if (completion_handler) {
-          completion_handler(success);
-        }
-      });
-
-  if (!started) {
-    pending_evaluations_.fetch_sub(1, std::memory_order_relaxed);
-    if (completion_handler)
-      completion_handler(false);
-  }
-}
-
-int ParallelHybridSearch::swap_batch() {
-  int old_batch = current_batch_.load(std::memory_order_relaxed);
-  int new_batch = 1 - old_batch;
-  current_batch_.store(new_batch, std::memory_order_release);
-
-  // Clear the new batch for filling
-  gpu_batch_[new_batch].clear();
-
-  return old_batch;
-}
-
-void ParallelHybridSearch::wait_gpu_evaluations() {
-  std::unique_lock<std::mutex> lock(async_mutex_);
-  async_cv_.wait(lock, [this]() {
-    return pending_evaluations_.load(std::memory_order_relaxed) == 0;
-  });
 }
 
 // Factory function
