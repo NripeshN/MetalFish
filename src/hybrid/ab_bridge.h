@@ -123,14 +123,6 @@ private:
   // Quiescence search
   Value qsearch(Position &pos, Value alpha, Value beta, int ply);
 
-  // Move ordering
-  void score_moves(const Position &pos, MoveList<LEGAL> &moves, Move tt_move);
-
-  // Pruning helpers
-  bool can_futility_prune(const Position &pos, int depth, Value alpha,
-                          Value static_eval) const;
-  bool can_null_move_prune(const Position &pos, int depth, Value beta,
-                           Value static_eval) const;
   int late_move_reduction(int depth, int move_count, bool improving) const;
 
   // Evaluation

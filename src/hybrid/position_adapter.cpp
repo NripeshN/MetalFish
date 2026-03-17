@@ -277,14 +277,6 @@ std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
   return planes;
 }
 
-std::vector<float>
-MCTSEncoder::encode_history(const MCTSPositionHistory &history,
-                            int history_length) {
-  // For now, just encode the current position
-  // A full implementation would encode the last N positions
-  return encode_position(history.current());
-}
-
 std::vector<std::pair<MCTSMove, float>>
 MCTSEncoder::decode_policy(const MCTSPosition &pos, const float *policy_output,
                            int policy_size) {
@@ -403,12 +395,6 @@ int MCTSEncoder::move_to_policy_index(const MCTSPosition &pos, MCTSMove move) {
     return -1;
 
   return from_idx * 73 + move_type;
-}
-
-MCTSMove MCTSEncoder::policy_index_to_move(const MCTSPosition &pos, int index) {
-  // This is the inverse of move_to_policy_index
-  // For now, return null move - proper implementation would decode the index
-  return MCTSMove();
 }
 
 } // namespace MCTS

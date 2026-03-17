@@ -32,7 +32,7 @@
 #include "../eval/gpu_backend.h"
 #include "../eval/gpu_integration.h"
 #include "../mcts/gpu_backend.h"
-#include "../mcts/tree.h"
+#include "../mcts/search.h"
 #include "../search/search.h"
 #include "../search/tt.h"
 #include "ab_bridge.h"
@@ -42,7 +42,6 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -99,16 +98,6 @@ struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
   std::atomic<int32_t> completed_depth{0};
   std::atomic<uint64_t> nodes_searched{0};
 
-  // Policy updates from AB (move scores for MCTS policy adjustment)
-  static constexpr int MAX_MOVES = 256;
-  struct MoveScore {
-    std::atomic<uint32_t> move_raw{0};
-    std::atomic<int32_t> score{-32001}; // VALUE_NONE equivalent
-    std::atomic<int32_t> depth{0};
-  };
-  MoveScore move_scores[MAX_MOVES];
-  std::atomic<int> num_scored_moves{0};
-
   // Synchronization
   std::atomic<uint64_t> update_counter{0}; // Incremented on each AB update
   std::atomic<bool> ab_running{false};
@@ -119,7 +108,6 @@ struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
     best_score.store(0, std::memory_order_relaxed);
     completed_depth.store(0, std::memory_order_relaxed);
     nodes_searched.store(0, std::memory_order_relaxed);
-    num_scored_moves.store(0, std::memory_order_relaxed);
     update_counter.store(0, std::memory_order_relaxed);
     ab_running.store(false, std::memory_order_relaxed);
     has_result.store(false, std::memory_order_relaxed);
@@ -127,11 +115,6 @@ struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
     pv_depth.store(0, std::memory_order_relaxed);
     for (int i = 0; i < MAX_PV; ++i) {
       pv_moves[i].store(0, std::memory_order_relaxed);
-    }
-    for (int i = 0; i < MAX_MOVES; ++i) {
-      move_scores[i].move_raw.store(0, std::memory_order_relaxed);
-      move_scores[i].score.store(-32001, std::memory_order_relaxed);
-      move_scores[i].depth.store(0, std::memory_order_relaxed);
     }
   }
 
@@ -147,32 +130,6 @@ struct alignas(APPLE_CACHE_LINE_SIZE) ABSharedState {
     nodes_searched.store(nodes, std::memory_order_relaxed);
     has_result.store(true, std::memory_order_release);
     update_counter.fetch_add(1, std::memory_order_release);
-  }
-
-  void update_move_score(Move m, int score, int depth) {
-    int idx = num_scored_moves.load(std::memory_order_relaxed);
-    if (idx >= MAX_MOVES)
-      return;
-
-    // Check if move already exists
-    for (int i = 0; i < idx; ++i) {
-      if (move_scores[i].move_raw.load(std::memory_order_relaxed) == m.raw()) {
-        // Update if deeper
-        if (depth > move_scores[i].depth.load(std::memory_order_relaxed)) {
-          move_scores[i].score.store(score, std::memory_order_relaxed);
-          move_scores[i].depth.store(depth, std::memory_order_release);
-        }
-        return;
-      }
-    }
-
-    // Add new move
-    int new_idx = num_scored_moves.fetch_add(1, std::memory_order_relaxed);
-    if (new_idx < MAX_MOVES) {
-      move_scores[new_idx].move_raw.store(m.raw(), std::memory_order_relaxed);
-      move_scores[new_idx].score.store(score, std::memory_order_relaxed);
-      move_scores[new_idx].depth.store(depth, std::memory_order_release);
-    }
   }
 
   // PV from AB iterative deepening -- updated after each depth iteration
@@ -292,8 +249,8 @@ struct ParallelSearchStats {
 // ============================================================================
 
 struct ParallelHybridConfig {
-  // MCTS configuration - uses ThreadSafeMCTS (stable implementation)
-  ThreadSafeMCTSConfig mcts_config;
+  // MCTS configuration
+  SearchParams mcts_config;
   int mcts_threads = 1;
 
   // AB configuration
@@ -369,7 +326,7 @@ public:
   const ParallelHybridConfig &config() const { return config_; }
 
   // Main search interface
-  void start_search(const Position &pos, const Search::LimitsType &limits,
+  void start_search(const Position &pos, const ::MetalFish::Search::LimitsType &limits,
                     BestMoveCallback best_move_cb,
                     InfoCallback info_cb = nullptr);
   void stop();
@@ -392,8 +349,8 @@ private:
   ParallelHybridConfig config_;
   ParallelSearchStats stats_;
 
-  // Components - using ThreadSafeMCTS (stable, doesn't crash)
-  std::unique_ptr<ThreadSafeMCTS> mcts_search_;
+  // MCTS search engine
+  std::unique_ptr<Search> mcts_search_;
   std::unique_ptr<GPU::GPUMCTSBackend> gpu_backend_;
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
   Engine *engine_ = nullptr;
@@ -414,7 +371,6 @@ private:
   // GPU-resident evaluation batches (double-buffered for async)
   GPUResidentBatch gpu_batch_[2];
   std::atomic<int> current_batch_{0};
-  std::atomic<bool> batch_pending_{false};
 
   // Async evaluation state
   std::mutex async_mutex_;
@@ -455,7 +411,7 @@ private:
 
   // Search state
   std::string root_fen_;
-  Search::LimitsType limits_;
+  ::MetalFish::Search::LimitsType limits_;
   std::chrono::steady_clock::time_point search_start_;
   int time_budget_ms_ = 0;
 
@@ -501,13 +457,6 @@ private:
 
   // Initialize GPU-resident batches for zero-copy evaluation
   bool initialize_gpu_batches();
-
-  // Submit batch for async GPU evaluation
-  void submit_gpu_batch_async(int batch_idx,
-                              std::function<void(bool)> completion_handler);
-
-  // Swap to next batch (double-buffering)
-  int swap_batch();
 
   // Wait for pending GPU evaluations
   void wait_gpu_evaluations();

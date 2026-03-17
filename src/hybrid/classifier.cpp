@@ -491,35 +491,6 @@ Bitboard PositionClassifier::get_king_zone(Square ksq) const {
   return zone;
 }
 
-Bitboard PositionClassifier::get_outpost_squares(const Position &pos,
-                                                 Color c) const {
-  // Squares that cannot be attacked by enemy pawns
-  Color them = ~c;
-  Bitboard their_pawns = pos.pieces(them, PAWN);
-
-  Bitboard safe = ~0ULL;
-
-  while (their_pawns) {
-    Square s = pop_lsb(their_pawns);
-    // Remove squares attacked by pawn advances
-    Bitboard pawn_attacks = (them == WHITE)
-                                ? pawn_attacks_bb<WHITE>(square_bb(s))
-                                : pawn_attacks_bb<BLACK>(square_bb(s));
-    safe &= ~pawn_attacks;
-  }
-
-  // Only consider central and advanced squares
-  Bitboard central =
-      (file_bb(FILE_C) | file_bb(FILE_D) | file_bb(FILE_E) | file_bb(FILE_F));
-  if (c == WHITE) {
-    central &= (rank_bb(RANK_4) | rank_bb(RANK_5) | rank_bb(RANK_6));
-  } else {
-    central &= (rank_bb(RANK_3) | rank_bb(RANK_4) | rank_bb(RANK_5));
-  }
-
-  return safe & central;
-}
-
 // ============================================================================
 // StrategySelector
 // ============================================================================
@@ -639,28 +610,6 @@ void StrategySelector::adjust_for_time(SearchStrategy &s, int time_left_ms,
   if (increment_ms > 5000) {
     s.time_multiplier *= 1.1f;
   }
-}
-
-void StrategySelector::adjust_for_score(SearchStrategy &s,
-                                        int current_score) const {
-  // Adjust based on current evaluation
-  if (std::abs(current_score) > 500) {
-    // Winning or losing badly - be more tactical
-    s.mcts_weight *= 0.7f;
-    s.ab_weight = 1.0f - s.mcts_weight;
-    s.use_ab_for_tactics = true;
-  } else if (std::abs(current_score) < 50) {
-    // Equal position - can explore more
-    s.mcts_weight *= 1.1f;
-    s.mcts_weight = std::min(0.9f, s.mcts_weight);
-    s.ab_weight = 1.0f - s.mcts_weight;
-  }
-}
-
-// Global instance
-PositionClassifier &position_classifier() {
-  static PositionClassifier instance;
-  return instance;
 }
 
 } // namespace MetalFish

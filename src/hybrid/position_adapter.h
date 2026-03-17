@@ -204,10 +204,6 @@ public:
   // Returns input planes (112 planes of 8x8)
   static std::vector<float> encode_position(const MCTSPosition &pos);
 
-  // Encode position history (for transformer-style networks)
-  static std::vector<float> encode_history(const MCTSPositionHistory &history,
-                                           int history_length = 8);
-
   // Decode policy output to moves
   static std::vector<std::pair<MCTSMove, float>>
   decode_policy(const MCTSPosition &pos, const float *policy_output,
@@ -215,9 +211,6 @@ public:
 
   // Policy index for a move
   static int move_to_policy_index(const MCTSPosition &pos, MCTSMove move);
-
-  // Move from policy index
-  static MCTSMove policy_index_to_move(const MCTSPosition &pos, int index);
 
 private:
   // Piece plane indices

@@ -116,7 +116,6 @@ private:
 
   // Bitboard helpers
   Bitboard get_king_zone(Square ksq) const;
-  Bitboard get_outpost_squares(const Position &pos, Color c) const;
 };
 
 // Search strategy recommendation based on position
@@ -160,13 +159,9 @@ public:
   // Adjust strategy based on game phase
   void adjust_for_time(SearchStrategy &strategy, int time_left_ms,
                        int increment_ms) const;
-  void adjust_for_score(SearchStrategy &strategy, int current_score) const;
 
 private:
   PositionClassifier classifier_;
 };
-
-// Global classifier instance
-PositionClassifier &position_classifier();
 
 } // namespace MetalFish

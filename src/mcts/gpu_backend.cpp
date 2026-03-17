@@ -274,9 +274,10 @@ void GPUMCTSBackend::set_wdl_rescale(float win_rate, float draw_rate) {
 }
 
 double GPUMCTSBackend::avg_batch_size() const {
-  if (batch_evals_ == 0)
+  size_t batches = batch_evals_.load(std::memory_order_relaxed);
+  if (batches == 0)
     return 0.0;
-  return static_cast<double>(total_positions_) / batch_evals_;
+  return static_cast<double>(total_positions_.load(std::memory_order_relaxed)) / batches;
 }
 
 std::unique_ptr<GPUMCTSBackend>

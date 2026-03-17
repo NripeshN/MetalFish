@@ -569,11 +569,6 @@ Value ABSearcher::qsearch(Position &pos, Value alpha, Value beta, int ply) {
   return best_value;
 }
 
-void ABSearcher::score_moves(const Position &pos, MoveList<LEGAL> &moves,
-                             Move tt_move) {
-  // Scoring is now done inline in search_internal
-}
-
 int ABSearcher::late_move_reduction(int depth, int move_count,
                                     bool improving) const {
   int r = LMRTable[std::min(depth, 63)][std::min(move_count, 63)];
@@ -1118,7 +1113,6 @@ Value HybridSearchBridge::get_tactical_score(const Position &pos) {
 
 static std::unique_ptr<HybridSearchBridge> g_hybrid_bridge;
 static std::once_flag g_hybrid_bridge_init_flag;
-static std::atomic<bool> g_hybrid_bridge_shutdown{false};
 
 HybridSearchBridge &hybrid_bridge() {
   std::call_once(g_hybrid_bridge_init_flag, []() {
@@ -1144,7 +1138,6 @@ bool initialize_hybrid_bridge(TranspositionTable *tt,
 }
 
 void shutdown_hybrid_bridge() {
-  g_hybrid_bridge_shutdown.store(true, std::memory_order_release);
   if (g_hybrid_bridge) {
     g_hybrid_bridge.reset();
   }

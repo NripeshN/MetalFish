@@ -32,8 +32,16 @@ public:
   }
 
   EvaluationResult Evaluate(const Position &pos) {
-    // 1. Encode position with transform (canonical if requested by network)
     std::vector<const Position *> history = {&pos};
+    return EvaluateWithHistory(history);
+  }
+
+  EvaluationResult EvaluateWithHistory(
+      const std::vector<const Position *> &history) {
+    if (history.empty())
+      return EvaluationResult{};
+    const Position &pos = *history.back();
+
     int transform = 0;
     auto planes =
         NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
@@ -127,6 +135,55 @@ public:
     return results;
   }
 
+  std::vector<EvaluationResult> EvaluateBatchWithHistory(
+      const std::vector<std::vector<const Position *>> &histories) {
+    size_t count = histories.size();
+    std::vector<NN::InputPlanes> planes_batch;
+    planes_batch.reserve(count);
+    std::vector<int> transforms;
+    transforms.reserve(count);
+
+    for (size_t idx = 0; idx < count; ++idx) {
+      int transform = 0;
+      auto planes = NN::EncodePositionForNN(
+          input_format_, histories[idx], NN::kMoveHistory,
+          NN::FillEmptyHistory::FEN_ONLY, &transform);
+      planes_batch.push_back(planes);
+      transforms.push_back(transform);
+    }
+
+    auto outputs = network_->EvaluateBatch(planes_batch);
+
+    std::vector<EvaluationResult> results;
+    results.reserve(outputs.size());
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      EvaluationResult result;
+      result.value = outputs[i].value;
+      result.has_wdl = outputs[i].has_wdl;
+      if (outputs[i].has_wdl) {
+        result.wdl[0] = outputs[i].wdl[0];
+        result.wdl[1] = outputs[i].wdl[1];
+        result.wdl[2] = outputs[i].wdl[2];
+      }
+      result.has_moves_left = outputs[i].has_moves_left;
+      result.moves_left = outputs[i].moves_left;
+
+      const Position &pos = *histories[i].back();
+      MoveList<LEGAL> moves(pos);
+      result.policy_priors.reserve(moves.size());
+      for (const auto &move : moves) {
+        int policy_idx = NN::MoveToNNIndex(move, transforms[i]);
+        if (policy_idx >= 0 &&
+            policy_idx < static_cast<int>(outputs[i].policy.size())) {
+          result.policy_priors.emplace_back(move, outputs[i].policy[policy_idx]);
+        }
+      }
+      result.build_policy_table();
+      results.push_back(result);
+    }
+    return results;
+  }
+
   std::string GetNetworkInfo() const { return network_->GetNetworkInfo(); }
 
 private:
@@ -144,9 +201,20 @@ EvaluationResult NNMCTSEvaluator::Evaluate(const Position &pos) {
   return impl_->Evaluate(pos);
 }
 
+EvaluationResult NNMCTSEvaluator::EvaluateWithHistory(
+    const std::vector<const Position *> &history) {
+  return impl_->EvaluateWithHistory(history);
+}
+
 std::vector<EvaluationResult>
 NNMCTSEvaluator::EvaluateBatch(const Position *const *positions, size_t count) {
   return impl_->EvaluateBatch(positions, count);
+}
+
+std::vector<EvaluationResult>
+NNMCTSEvaluator::EvaluateBatchWithHistory(
+    const std::vector<std::vector<const Position *>> &histories) {
+  return impl_->EvaluateBatchWithHistory(histories);
 }
 
 std::string NNMCTSEvaluator::GetNetworkInfo() const {

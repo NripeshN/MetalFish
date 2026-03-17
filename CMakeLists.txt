@@ -127,7 +127,8 @@ set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
 # MCTS search engine
-set(MCTS_SOURCES src/mcts/tree.cpp src/mcts/evaluator.cpp
+set(MCTS_SOURCES src/mcts/node.cpp src/mcts/search.cpp src/mcts/backend_adapter.cpp
+                 src/mcts/stoppers.cpp src/mcts/evaluator.cpp
                  src/mcts/apple_silicon.cpp src/mcts/gpu_backend.cpp)
 
 # Hybrid search engine

@@ -36,42 +36,41 @@ namespace MCTS {
 // ============================================================================
 
 struct MCTSSearchParams {
-  // PUCT parameters (default values)
-  float cpuct = 1.745f;        // Base PUCT constant
-  float cpuct_base = 38739.0f; // Base for logarithmic growth
-  float cpuct_factor = 3.894f; // Multiplier for log term
+  // PUCT parameters (Lc0 defaults)
+  float cpuct = 1.75f;
+  float cpuct_base = 38739.0f;
+  float cpuct_factor = 3.89f;
 
-  // Root-specific PUCT (can be different from non-root)
-  float cpuct_at_root = 1.745f;
+  float cpuct_at_root = 1.75f;
   float cpuct_base_at_root = 38739.0f;
-  float cpuct_factor_at_root = 3.894f;
+  float cpuct_factor_at_root = 3.89f;
 
-  // FPU (First Play Urgency) parameters
-  bool fpu_absolute = false; // If true, use absolute FPU value
-  float fpu_value = 0.330f;  // FPU reduction value
+  // FPU (First Play Urgency) parameters (Lc0 defaults)
+  bool fpu_absolute = false;
+  float fpu_value = 0.33f;
   bool fpu_absolute_at_root = false;
-  float fpu_value_at_root = 1.0f;
+  float fpu_value_at_root = 0.33f;
 
-  // Moves Left Head (MLH) parameters
-  float moves_left_max_effect = 0.0345f;
-  float moves_left_threshold = 0.8f;
-  float moves_left_slope = 0.0027f;
+  // Moves Left Head (MLH) parameters (Lc0 defaults)
+  float moves_left_max_effect = 0.03f;
+  float moves_left_threshold = 0.80f;
+  float moves_left_slope = 0.00f;
   float moves_left_constant_factor = 0.0f;
-  float moves_left_scaled_factor = 1.6521f;
-  float moves_left_quadratic_factor = -0.6521f;
+  float moves_left_scaled_factor = 1.65f;
+  float moves_left_quadratic_factor = -0.65f;
 
   // Dirichlet noise parameters
-  float noise_epsilon = 0.0f; // 0 = disabled, 0.25 = typical for training
-  float noise_alpha = 0.3f;   // Dirichlet alpha
+  float noise_epsilon = 0.0f;
+  float noise_alpha = 0.3f;
 
   // Policy softmax temperature
-  float policy_softmax_temp = 1.0f;
+  float policy_softmax_temp = 1.36f;
 
   // Draw score (for contempt)
   float draw_score = 0.0f;
 
   // Virtual loss
-  int virtual_loss = 3;
+  int virtual_loss = 1;
 
   // Two-fold draw detection
   bool two_fold_draws = true;
@@ -184,20 +183,6 @@ inline float ComputeFpu(const MCTSSearchParams &params, float parent_q,
   // Reduction strategy: start from parent's Q and reduce based on visited
   // policy
   return parent_q - value * FastMath::FastSqrt(visited_policy);
-}
-
-// Simplified FPU when visited_policy is not available
-inline float ComputeFpuSimple(const MCTSSearchParams &params, float parent_q,
-                              bool is_root) {
-  const bool use_absolute =
-      is_root ? params.fpu_absolute_at_root : params.fpu_absolute;
-  const float value = is_root ? params.fpu_value_at_root : params.fpu_value;
-
-  if (use_absolute) {
-    return value;
-  }
-  // Use a default visited_policy estimate
-  return parent_q - value * 0.5f;
 }
 
 // ============================================================================
@@ -499,12 +484,6 @@ inline int QToCentipawns(float q) {
   return static_cast<int>(90.0f * std::tan(1.5637541897f * q));
 }
 
-// Convert centipawn score to Q value
-inline float CentipawnsToQ(int cp) {
-  // Inverse of QToCentipawns
-  return std::atan(cp / 90.0f) / 1.5637541897f;
-}
-
 // Compute WDL probabilities from Q and D
 struct WDL {
   float win;
@@ -615,13 +594,12 @@ inline void WDLRescale(float &v, float &d, const WDLRescaleParams &params,
 
 // Collision tracking for multi-threaded MCTS
 struct CollisionStats {
-  int max_collision_events = 32;
-  int max_collision_visits = 9999;
+  int max_collision_events = 917;
+  int max_collision_visits = 80000;
 
-  // Scaling for collision visits based on tree size
   int scaling_start = 28;
-  int scaling_end = 145;
-  float scaling_power = 1.56f;
+  int scaling_end = 145000;
+  float scaling_power = 1.25f;
 
   // Get max collision visits scaled by tree size
   int GetMaxCollisionVisits(uint32_t tree_size) const {
@@ -640,136 +618,6 @@ struct CollisionStats {
 };
 
 // ============================================================================
-// Out-of-Order Evaluation Support
-// ============================================================================
-
-// Node states for out-of-order evaluation
-enum class NodeEvalState {
-  kNotStarted,    // Not yet selected for evaluation
-  kInFlight,      // Selected but not yet evaluated
-  kEvaluated,     // Evaluation complete, ready for backprop
-  kBackpropagated // Backpropagation complete
-};
-
-// Batch item for out-of-order evaluation
-struct EvalBatchItem {
-  void *node = nullptr; // Pointer to node being evaluated
-  uint16_t depth = 0;   // Depth in tree
-  int multivisit = 1;   // Number of visits to apply
-  NodeEvalState state = NodeEvalState::kNotStarted;
-
-  // Evaluation results
-  float wl = 0.0f; // Win-Loss value
-  float d = 0.0f;  // Draw probability
-  float m = 0.0f;  // Moves left estimate
-
-  bool CanEvalOutOfOrder() const {
-    // Can evaluate out of order if it's a cache hit or terminal
-    return state == NodeEvalState::kEvaluated;
-  }
-};
-
-// ============================================================================
-// Policy Temperature
-// ============================================================================
-
-// Apply temperature to policy for move selection
-inline void ApplyPolicyTemperature(std::vector<float> &policy,
-                                   float temperature) {
-  if (temperature == 1.0f || policy.empty())
-    return;
-
-  if (temperature == 0.0f) {
-    // Temperature 0 = argmax
-    float max_val = *std::max_element(policy.begin(), policy.end());
-    for (float &p : policy) {
-      p = (p == max_val) ? 1.0f : 0.0f;
-    }
-    return;
-  }
-
-  // Apply temperature: p_i = exp(log(p_i) / T) / sum(exp(log(p_j) / T))
-  float max_log = -std::numeric_limits<float>::infinity();
-  for (float p : policy) {
-    if (p > 0.0f) {
-      max_log = std::max(max_log, FastMath::FastLog(p) / temperature);
-    }
-  }
-
-  float sum = 0.0f;
-  for (float &p : policy) {
-    if (p > 0.0f) {
-      p = FastMath::FastExp(FastMath::FastLog(p) / temperature - max_log);
-      sum += p;
-    }
-  }
-
-  if (sum > 0.0f) {
-    for (float &p : policy) {
-      p /= sum;
-    }
-  }
-}
-
-// ============================================================================
-// Visit Count Temperature  - For Move Selection
-// ============================================================================
-
-// Apply temperature to visit counts for move selection
-inline int SelectMoveWithTemperature(const std::vector<uint32_t> &visits,
-                                     float temperature, std::mt19937 &rng) {
-  if (visits.empty())
-    return -1;
-
-  if (temperature == 0.0f) {
-    // Temperature 0 = argmax
-    return static_cast<int>(std::distance(
-        visits.begin(), std::max_element(visits.begin(), visits.end())));
-  }
-
-  // Convert visits to probabilities with temperature
-  std::vector<float> probs(visits.size());
-  float max_log = -std::numeric_limits<float>::infinity();
-
-  for (size_t i = 0; i < visits.size(); ++i) {
-    if (visits[i] > 0) {
-      max_log =
-          std::max(max_log, FastMath::FastLog(static_cast<float>(visits[i])) /
-                                temperature);
-    }
-  }
-
-  float sum = 0.0f;
-  for (size_t i = 0; i < visits.size(); ++i) {
-    if (visits[i] > 0) {
-      probs[i] = FastMath::FastExp(
-          FastMath::FastLog(static_cast<float>(visits[i])) / temperature -
-          max_log);
-      sum += probs[i];
-    }
-  }
-
-  if (sum <= 0.0f) {
-    // Fallback to uniform
-    std::uniform_int_distribution<int> dist(0, static_cast<int>(visits.size()) -
-                                                   1);
-    return dist(rng);
-  }
-
-  // Sample from distribution
-  std::uniform_real_distribution<float> dist(0.0f, sum);
-  float r = dist(rng);
-
-  for (size_t i = 0; i < probs.size(); ++i) {
-    r -= probs[i];
-    if (r <= 0.0f)
-      return static_cast<int>(i);
-  }
-
-  return static_cast<int>(probs.size()) - 1;
-}
-
-// ============================================================================
 // Node Statistics Update
 // ============================================================================
 
@@ -781,40 +629,6 @@ struct NodeUpdateParams {
   float moves_left; // M from neural network (or 0)
   int multivisit;   // Number of visits to apply
 };
-
-// Calculate new Q value after adding visits
-inline float CalculateNewQ(float old_wl, uint32_t old_n, float new_v,
-                           int new_visits) {
-  uint32_t total_n = old_n + new_visits;
-  if (total_n == 0)
-    return 0.0f;
-  return (old_wl * old_n + new_v * new_visits) / total_n;
-}
-
-// ============================================================================
-// Tree Reuse
-// ============================================================================
-
-// Check if a subtree can be reused for the next position
-inline bool CanReuseSubtree(uint64_t old_hash, uint64_t new_hash,
-                            const std::vector<uint64_t> &move_hashes,
-                            uint64_t &best_match_hash) {
-  // Direct match
-  if (old_hash == new_hash) {
-    best_match_hash = old_hash;
-    return true;
-  }
-
-  // Check if new position is reachable from old position
-  for (uint64_t hash : move_hashes) {
-    if (hash == new_hash) {
-      best_match_hash = hash;
-      return true;
-    }
-  }
-
-  return false;
-}
 
 // ============================================================================
 // Solid Tree Optimization
@@ -893,11 +707,11 @@ FinalizeScoreUpdateAtomic(AtomicFloat &wl, AtomicFloat &d, AtomicFloat &m,
 // ============================================================================
 
 struct TimeManagerParams {
-  float time_curve_peak = 26.2f;        // Move number where time usage peaks
-  float time_curve_left_width = 82.0f;  // Width of curve before peak
-  float time_curve_right_width = 74.0f; // Width of curve after peak
-  float slowmover = 1.0f;               // Multiplier for base time
-  float move_overhead_ms = 100.0f;      // Time to reserve for move overhead
+  float time_curve_peak = 26.2f;
+  float time_curve_left_width = 82.0f;
+  float time_curve_right_width = 74.0f;
+  float slowmover = 2.2f;
+  float move_overhead_ms = 200.0f;
   float minimum_remaining_time_ms = 0.0f;
 };
 
@@ -977,141 +791,6 @@ inline bool CanTerminateEarly(const EarlyTerminationParams &params,
 
   return false;
 }
-
-// ============================================================================
-// Multi-PV Support
-// ============================================================================
-
-// Get top N moves sorted by visit count then Q value
-template <typename EdgeArray>
-std::vector<int> GetTopNMoves(const EdgeArray &edges, int num_edges, int n,
-                              float draw_score) {
-  std::vector<std::pair<int, std::pair<uint32_t, float>>> scored;
-  scored.reserve(num_edges);
-
-  for (int i = 0; i < num_edges; ++i) {
-    uint32_t visits = edges[i].GetN();
-    float q = edges[i].GetQ(draw_score);
-    scored.emplace_back(i, std::make_pair(visits, q));
-  }
-
-  // Sort by visits descending, then Q descending
-  std::partial_sort(scored.begin(),
-                    scored.begin() +
-                        std::min(n, static_cast<int>(scored.size())),
-                    scored.end(), [](const auto &a, const auto &b) {
-                      if (a.second.first != b.second.first) {
-                        return a.second.first > b.second.first;
-                      }
-                      return a.second.second > b.second.second;
-                    });
-
-  std::vector<int> result;
-  result.reserve(std::min(n, static_cast<int>(scored.size())));
-  for (int i = 0; i < std::min(n, static_cast<int>(scored.size())); ++i) {
-    result.push_back(scored[i].first);
-  }
-  return result;
-}
-
-// ============================================================================
-// Position History for Draw Detection
-// ============================================================================
-
-// Check for two-fold repetition (faster than three-fold)
-inline bool IsTwoFoldRepetition(const std::vector<uint64_t> &history,
-                                uint64_t current_key) {
-  // Check from the end, skipping every other position (same side to move)
-  for (size_t i = history.size(); i >= 4; i -= 2) {
-    if (history[i - 4] == current_key) {
-      return true;
-    }
-    // Can't have repetition before a pawn move or capture (rule50 reset)
-    // This optimization requires tracking rule50, so skip for now
-  }
-  return false;
-}
-
-// ============================================================================
-// Apple Silicon Optimizations
-// ============================================================================
-
-// Note: Accelerate.h should only be included in .cpp files, not headers,
-// due to potential conflicts with C++ standard library headers.
-// The implementations below use standard C++ when Accelerate is not available.
-
-// SIMD-accelerated softmax (implementation in apple_silicon_mcts.cpp when
-// available)
-inline void AppleSiliconSoftmax(float *values, int count, float temperature) {
-  if (count == 0)
-    return;
-
-  float max_val = *std::max_element(values, values + count);
-  float sum = 0.0f;
-
-  for (int i = 0; i < count; ++i) {
-    values[i] = FastMath::FastExp((values[i] - max_val) / temperature);
-    sum += values[i];
-  }
-
-  if (sum > 0.0f) {
-    for (int i = 0; i < count; ++i) {
-      values[i] /= sum;
-    }
-  }
-}
-
-// SIMD-accelerated PUCT score computation
-inline void AppleSiliconComputePuctScores(const float *q_values,
-                                          const float *policies,
-                                          const int *n_started, float *scores,
-                                          int num_edges, float cpuct_sqrt_n,
-                                          float fpu) {
-  for (int i = 0; i < num_edges; ++i) {
-    float q = (n_started[i] > 0) ? q_values[i] : fpu;
-    float u =
-        cpuct_sqrt_n * policies[i] / (1.0f + static_cast<float>(n_started[i]));
-    scores[i] = q + u;
-  }
-}
-
-// ============================================================================
-// Unified Memory Batch Structures (for Apple Silicon)
-// ============================================================================
-
-// Cache-line aligned position data for GPU evaluation
-struct alignas(128) UnifiedMemoryPosition {
-  uint64_t pieces[2][7]; // [color][piece_type] bitboards
-  uint8_t king_sq[2];    // King squares for each side
-  uint8_t stm;           // Side to move
-  uint8_t castling;      // Castling rights
-  uint8_t ep_square;     // En passant square
-  uint8_t rule50;        // 50-move rule counter
-  uint8_t padding[128 - 2 * 7 * 8 - 6];
-};
-
-// Batch of positions in unified memory (zero-copy GPU access)
-struct UnifiedMemoryBatch {
-  std::vector<UnifiedMemoryPosition> positions;
-  std::vector<float> results;
-  int count = 0;
-  int capacity = 0;
-
-  void reserve(int n) {
-    positions.resize(n);
-    results.resize(n);
-    capacity = n;
-  }
-
-  void clear() { count = 0; }
-
-  bool add(const UnifiedMemoryPosition &pos) {
-    if (count >= capacity)
-      return false;
-    positions[count++] = pos;
-    return true;
-  }
-};
 
 } // namespace MCTS
 } // namespace MetalFish
