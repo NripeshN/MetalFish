@@ -23,7 +23,7 @@ namespace MetalFish {
 namespace MCTS {
 
 static_assert(sizeof(Node) >= sizeof(double), "Node must contain WL");
-static_assert(alignof(Node) == CACHE_LINE_SIZE, "Node alignment mismatch");
+static_assert(alignof(Node) == 64, "Node alignment mismatch");
 
 namespace {
 
@@ -40,12 +40,13 @@ inline uint64_t Mix64(uint64_t x) {
     return x;
 }
 
-uint64_t ComputeHistoryCacheKey(const std::vector<const Position*>& history) {
+uint64_t ComputePositionCacheKey(const Position* const* history, int count) {
     uint64_t key = kFNVOffset;
-    key ^= Mix64(static_cast<uint64_t>(history.size()));
+    key ^= Mix64(static_cast<uint64_t>(count));
     key *= kFNVPrime;
 
-    for (const Position* p : history) {
+    for (int i = 0; i < count; ++i) {
+        const Position* p = history[i];
         if (!p) continue;
         key ^= Mix64(p->raw_key());
         key *= kFNVPrime;
@@ -475,9 +476,10 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
 
     if (leaf->NumEdges() == 0 && backend_) {
         auto history = ctx.BuildHistory();
-        uint64_t cache_key = ComputeHistoryCacheKey(history.ptrs);
-        auto computation = backend_->CreateComputation();
-        auto add_result = computation->AddInputWithHistory(history.ptrs, cache_key);
+        uint64_t cache_key = ComputePositionCacheKey(history.ptrs, history.depth);
+        auto computation = AcquireComputation();
+        auto add_result = computation->AddInputWithHistory(
+            std::vector<const Position*>(history.ptrs, history.ptrs + history.depth), cache_key);
 
         if (add_result == BackendComputation::CACHE_HIT) {
             ctx.local_cache_hits++;
@@ -547,7 +549,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
     local_batch.reserve(params_.minibatch_size);
 
     std::unique_ptr<BackendComputation> computation;
-    if (backend_) computation = backend_->CreateComputation();
+    if (backend_) computation = AcquireComputation();
 
     int collision_events = 0;
     int collision_visits = 0;
@@ -566,11 +568,20 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
     coll_stats.scaling_power = params_.max_collision_visits_scaling_power;
     int max_coll_visits = coll_stats.GetMaxCollisionVisits(tree_size);
 
+    constexpr int kMinBatchSize = 4;
+
     while (static_cast<int>(local_batch.size()) < params_.minibatch_size &&
            !ShouldStop()) {
         if (collision_events >= params_.max_collision_events ||
-            collision_visits >= max_coll_visits)
+            collision_visits >= max_coll_visits) {
+            if (!local_batch.empty() &&
+                static_cast<int>(local_batch.size()) < kMinBatchSize) {
+                collision_events = 0;
+                collision_visits = 0;
+                continue;
+            }
             break;
+        }
 
         ctx.ResetToRoot();
 
@@ -637,8 +648,9 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
         }
 
         auto hist_buf_sem = ctx.BuildHistory();
-        uint64_t cache_key = ComputeHistoryCacheKey(hist_buf_sem.ptrs);
-        auto add_result = computation->AddInputWithHistory(hist_buf_sem.ptrs, cache_key);
+        uint64_t cache_key = ComputePositionCacheKey(hist_buf_sem.ptrs, hist_buf_sem.depth);
+        auto add_result = computation->AddInputWithHistory(
+            std::vector<const Position*>(hist_buf_sem.ptrs, hist_buf_sem.ptrs + hist_buf_sem.depth), cache_key);
 
         if (add_result == BackendComputation::CACHE_HIT) {
             ctx.local_cache_hits++;
@@ -694,14 +706,16 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
     uint64_t total_visits = 0;
     for (auto& entry : local_batch) {
         const auto& result = computation->GetResult(entry.computation_idx);
-        const Position& leaf_pos = *entry.history.ptrs.back();
 
-        MoveList<LEGAL> leaf_moves(leaf_pos);
-        if (entry.leaf->NumEdges() == 0 && leaf_moves.size() > 0) {
-            entry.leaf->CreateEdges(leaf_moves);
-            ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
-            if (params_.add_dirichlet_noise && entry.leaf == tree_.Root())
-                AddDirichletNoise(entry.leaf);
+        if (entry.leaf->NumEdges() == 0) {
+            const Position& leaf_pos = *entry.history.ptrs[entry.history.depth - 1];
+            MoveList<LEGAL> leaf_moves(leaf_pos);
+            if (leaf_moves.size() > 0) {
+                entry.leaf->CreateEdges(leaf_moves);
+                ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
+                if (params_.add_dirichlet_noise && entry.leaf == tree_.Root())
+                    AddDirichletNoise(entry.leaf);
+            }
         }
 
         float v = -result.value;
@@ -714,6 +728,8 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
 
     stats_.total_nodes.fetch_add(total_visits, std::memory_order_relaxed);
     stats_.nn_evaluations.fetch_add(local_batch.size(), std::memory_order_relaxed);
+
+    if (computation) ReleaseComputation(std::move(computation));
 }
 
 // ============================================================================

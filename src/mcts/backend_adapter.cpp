@@ -43,7 +43,6 @@ bool NNCache::Lookup(uint64_t key, int expected_moves,
     Move m = Move(e.moves[i].move_raw);
     out.policy_priors.emplace_back(m, e.moves[i].policy);
   }
-  out.build_policy_table();
   return true;
 }
 

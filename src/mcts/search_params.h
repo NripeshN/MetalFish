@@ -78,7 +78,7 @@ struct SearchParams {
     bool out_of_order_eval = true;
 
     // NNCache
-    int nn_cache_size = 2000000;
+    int nn_cache_size = 500000;
 
     // Backend
     std::string nn_weights_path;

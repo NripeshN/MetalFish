@@ -115,36 +115,41 @@ struct SearchWorkerCtx {
     // Caller owns the returned buffer and must keep it alive
     // while the history pointers are in use.
     struct HistoryBuffer {
-        std::vector<std::unique_ptr<Position>> positions;
-        std::vector<std::unique_ptr<StateInfo>> root_states;
-        std::vector<std::vector<StateInfo>> state_stacks;
-        std::vector<const Position*> ptrs;
+        static constexpr int kMaxHistory = 8;
+        std::unique_ptr<Position> positions[kMaxHistory];
+        StateInfo root_states[kMaxHistory];
+        std::vector<StateInfo> state_stacks[kMaxHistory];
+        const Position* ptrs[kMaxHistory];
+        int depth = 0;
+
+        HistoryBuffer() {
+            for (int i = 0; i < kMaxHistory; ++i)
+                positions[i] = std::make_unique<Position>();
+        }
+
+        HistoryBuffer(const HistoryBuffer&) = delete;
+        HistoryBuffer& operator=(const HistoryBuffer&) = delete;
+        HistoryBuffer(HistoryBuffer&&) = default;
+        HistoryBuffer& operator=(HistoryBuffer&&) = default;
     };
 
-    HistoryBuffer BuildHistory() const {
+    HistoryBuffer BuildHistory() {
         HistoryBuffer buf;
         int total_plies = static_cast<int>(move_stack.size());
-        int history_depth = std::min(total_plies + 1, 8);
-        int start_ply = total_plies - (history_depth - 1);
+        buf.depth = std::min(total_plies + 1, HistoryBuffer::kMaxHistory);
+        int start_ply = total_plies - (buf.depth - 1);
 
-        buf.positions.reserve(history_depth);
-        buf.root_states.reserve(history_depth);
-        buf.state_stacks.resize(history_depth);
-        buf.ptrs.reserve(history_depth);
-
-        for (int h = 0; h < history_depth; ++h) {
+        for (int h = 0; h < buf.depth; ++h) {
             int target_ply = start_ply + h;
-            buf.positions.push_back(std::make_unique<Position>());
-            buf.root_states.push_back(std::make_unique<StateInfo>());
-            buf.positions.back()->set(cached_root_fen, false,
-                                       buf.root_states.back().get());
+            buf.positions[h]->set(cached_root_fen, false, &buf.root_states[h]);
+            buf.state_stacks[h].clear();
             buf.state_stacks[h].reserve(target_ply);
             for (int p = 0; p < target_ply; ++p) {
                 buf.state_stacks[h].emplace_back();
-                buf.positions.back()->do_move(move_stack[p],
-                                               buf.state_stacks[h].back());
+                buf.positions[h]->do_move(move_stack[p],
+                                           buf.state_stacks[h].back());
             }
-            buf.ptrs.push_back(buf.positions.back().get());
+            buf.ptrs[h] = buf.positions[h].get();
         }
         return buf;
     }
@@ -208,6 +213,28 @@ private:
     SearchParams params_;
     std::unique_ptr<Backend> backend_;
     NodeTree tree_;
+
+    // BackendComputation pool to avoid per-iteration heap allocation
+    std::vector<std::unique_ptr<BackendComputation>> computation_pool_;
+    std::mutex pool_mutex_;
+
+    std::unique_ptr<BackendComputation> AcquireComputation() {
+        {
+            std::lock_guard<std::mutex> lock(pool_mutex_);
+            if (!computation_pool_.empty()) {
+                auto c = std::move(computation_pool_.back());
+                computation_pool_.pop_back();
+                c->Reset();
+                return c;
+            }
+        }
+        return backend_->CreateComputation();
+    }
+
+    void ReleaseComputation(std::unique_ptr<BackendComputation> c) {
+        std::lock_guard<std::mutex> lock(pool_mutex_);
+        computation_pool_.push_back(std::move(c));
+    }
 
     std::atomic<bool> stop_flag_{false};
     std::atomic<bool> running_{false};
