@@ -32,7 +32,7 @@ private:
     float wdl[3] = {};
     bool has_moves_left = false;
 
-        static constexpr int MAX_MOVES = 218;
+        static constexpr int MAX_MOVES = 96;
     struct CachedMove {
       uint16_t move_raw = 0;
       float policy = 0;
@@ -60,6 +60,12 @@ public:
   const EvaluationResult &GetResult(int idx) const;
     int UsedBatchSize() const;
     int TotalInputs() const;
+    void Reset() {
+        pending_.clear();
+        results_.clear();
+        from_cache_.clear();
+        total_inputs_ = 0;
+    }
 
 private:
   NNMCTSEvaluator *evaluator_;

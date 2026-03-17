@@ -94,7 +94,6 @@ public:
         result.policy_priors.emplace_back(move, output.policy[policy_idx]);
       }
     }
-    result.build_policy_table();
 
     return result;
   }
@@ -152,7 +151,6 @@ public:
                                             outputs[i].policy[policy_idx]);
         }
       }
-      result.build_policy_table();
 
       results.push_back(result);
     }
@@ -207,7 +205,6 @@ public:
           result.policy_priors.emplace_back(move, outputs[i].policy[policy_idx]);
         }
       }
-      result.build_policy_table();
       results.push_back(result);
     }
     return results;

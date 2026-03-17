@@ -25,21 +25,21 @@ std::string
 ActivationToString(MetalFishNN::NetworkFormat_ActivationFunction act) {
   switch (act) {
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_RELU:
-      return "relu";
+    return "relu";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_MISH:
-      return "mish";
+    return "mish";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_SWISH:
-      return "swish";
+    return "swish";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_RELU_2:
-      return "relu_2";
+    return "relu_2";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_SELU:
-      return "selu";
+    return "selu";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_TANH:
-      return "tanh";
+    return "tanh";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_SIGMOID:
-      return "sigmoid";
-    default:
-      return "relu";
+    return "sigmoid";
+  default:
+    return "relu";
   }
 }
 
@@ -206,20 +206,16 @@ void MetalNetwork::RunBatch(const std::vector<InputPlanes> &inputs,
     }
   }
 
-  // With dynamic @(-1) placeholders, pass actual batch size directly.
-  // No zero-padding needed -- MPSGraph accepts any batch size.
-  {
-    std::lock_guard<std::mutex> lock(gpu_mutex_);
-    if (moves_left_) {
-      builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
-                            batch,
-                            {&io->op_policy_mem_[0], &io->op_value_mem_[0],
-                             &io->op_moves_left_mem_[0]});
-    } else {
-      builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
-                            batch,
-                            {&io->op_policy_mem_[0], &io->op_value_mem_[0]});
-    }
+  // MPSGraph handles concurrency via its own double-buffering semaphore.
+  if (moves_left_) {
+    builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
+                          batch,
+                          {&io->op_policy_mem_[0], &io->op_value_mem_[0],
+                           &io->op_moves_left_mem_[0]});
+  } else {
+    builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
+                          batch,
+                          {&io->op_policy_mem_[0], &io->op_value_mem_[0]});
   }
 
   // Convert outputs.

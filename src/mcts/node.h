@@ -87,7 +87,7 @@ struct Edge {
 // MCTS Node - cache-line aligned, ~64 bytes core data on ARM64.
 // Children are stored as atomic<Node*> inside each Edge, matching the old
 // TSEdge pattern for lock-free child installation via CAS.
-class alignas(CACHE_LINE_SIZE) Node {
+class alignas(64) Node {
 public:
     enum class Terminal : uint8_t {
         NonTerminal = 0,
@@ -177,7 +177,11 @@ public:
 
     // Running-average backpropagation with double-precision WL accumulation.
     void FinalizeScoreUpdate(float v, float d, float m, int multivisit = 1) {
-        std::lock_guard<std::mutex> lock(score_mu_);
+#ifdef __APPLE__
+        os_unfair_lock_lock(&score_lock_);
+#else
+        std::lock_guard<std::mutex> _guard(score_lock_);
+#endif
         const uint32_t visits = static_cast<uint32_t>(std::max(1, multivisit));
         const uint32_t old_n = n_.load(std::memory_order_relaxed);
         const double total = static_cast<double>(old_n + visits);
@@ -206,6 +210,9 @@ public:
                 break;
             }
         }
+#ifdef __APPLE__
+        os_unfair_lock_unlock(&score_lock_);
+#endif
     }
 
     // Propagate proven terminal bounds up the tree ("sticky endgames").
@@ -292,11 +299,18 @@ public:
     }
 
     void MakeTerminal(Terminal type, float wl, float d, float m) {
-        std::lock_guard<std::mutex> lock(score_mu_);
+#ifdef __APPLE__
+        os_unfair_lock_lock(&score_lock_);
+#else
+        std::lock_guard<std::mutex> _guard(score_lock_);
+#endif
         wl_.store(static_cast<double>(wl), std::memory_order_release);
         d_.store(d, std::memory_order_release);
         m_.store(m, std::memory_order_release);
         terminal_type_.store(static_cast<uint8_t>(type), std::memory_order_release);
+#ifdef __APPLE__
+        os_unfair_lock_unlock(&score_lock_);
+#endif
     }
 
     // Legacy helper: sets WL from a single value, D=0, M=0
@@ -323,8 +337,12 @@ private:
     uint16_t                  index_ = 0;          // 2  bytes - Edge index in parent
     uint8_t                   num_edges_ = 0;      // 1  byte  - Number of edges
     std::atomic<uint8_t>      terminal_type_{0};   // 1  byte  - Terminal enum
-    mutable std::mutex        score_mu_;
-    // Total core: 44 bytes; padded to CACHE_LINE_SIZE by alignas
+#ifdef __APPLE__
+    mutable os_unfair_lock    score_lock_ = OS_UNFAIR_LOCK_INIT;  // 4 bytes
+#else
+    mutable std::mutex        score_lock_;
+#endif
+    // Total core: 48 bytes on Apple (44 + 4 lock), fits in half a cache line
 };
 
 // ============================================================================
