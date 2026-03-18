@@ -5,7 +5,7 @@
       "path": "build/metalfish",
       "expected_elo": null,
       "options": {
-        "Threads": "4",
+        "Threads": "8",
         "Hash": "256"
       }
     },
@@ -14,7 +14,7 @@
       "path": "build/metalfish",
       "expected_elo": null,
       "options": {
-        "Threads": "4",
+        "Threads": "8",
         "Hash": "256",
         "UseMCTS": "true",
         "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb"
@@ -25,7 +25,7 @@
       "path": "build/metalfish",
       "expected_elo": null,
       "options": {
-        "Threads": "4",
+        "Threads": "8",
         "Hash": "256",
         "UseHybridSearch": "true",
         "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb"
@@ -37,7 +37,7 @@
       "expected_elo": 3800,
       "anchor": true,
       "options": {
-        "Threads": "4",
+        "Threads": "8",
         "Hash": "256"
       }
     },
@@ -46,7 +46,7 @@
       "path": "reference/stockfish/src/stockfish",
       "expected_elo": 3551,
       "options": {
-        "Threads": "4",
+        "Threads": "8",
         "Hash": "256",
         "Skill Level": "15"
       }
@@ -56,7 +56,7 @@
       "path": "reference/stockfish/src/stockfish",
       "expected_elo": 3304,
       "options": {
-        "Threads": "4",
+        "Threads": "8",
         "Hash": "256",
         "Skill Level": "10"
       }
@@ -67,7 +67,7 @@
       "expected_elo": 3722,
       "anchor": true,
       "options": {
-        "Threads": "4",
+        "Threads": "8",
         "Hash": "256"
       }
     },
@@ -77,7 +77,7 @@
       "expected_elo": 3415,
       "anchor": true,
       "options": {
-        "Threads": "4",
+        "Threads": "8",
         "Hash": "256"
       }
     },
@@ -87,7 +87,7 @@
       "expected_elo": 3700,
       "cmd_args": ["--weights=networks/BT4-1024x15x32h-swa-6147500.pb", "--backend=metal"],
       "options": {
-        "Threads": "4",
+        "Threads": "8",
         "Temperature": "0"
       }
     }
