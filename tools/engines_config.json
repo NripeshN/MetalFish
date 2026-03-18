@@ -1,137 +1,101 @@
 {
   "engines": {
     "MetalFish-AB": {
-      "description": "MetalFish with Alpha-Beta search (NNUE evaluation)",
+      "description": "MetalFish Alpha-Beta + NNUE evaluation",
+      "path": "build/metalfish",
       "expected_elo": null,
       "options": {
-        "Threads": "1",
-        "Hash": "128",
-        "Ponder": "false",
-        "UseHybridSearch": "false",
-        "UseMCTS": "false"
+        "Threads": "4",
+        "Hash": "256"
       }
     },
     "MetalFish-MCTS": {
-      "description": "MetalFish with Pure GPU MCTS",
+      "description": "MetalFish pure GPU MCTS (transformer network)",
+      "path": "build/metalfish",
       "expected_elo": null,
       "options": {
-        "Threads": "1",
-        "Hash": "128",
-        "Ponder": "false",
-        "UseHybridSearch": "false",
-        "UseMCTS": "true"
+        "Threads": "4",
+        "Hash": "256",
+        "UseMCTS": "true",
+        "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb"
       }
     },
     "MetalFish-Hybrid": {
-      "description": "MetalFish with Parallel MCTS+AB hybrid search",
+      "description": "MetalFish parallel MCTS + Alpha-Beta hybrid",
+      "path": "build/metalfish",
       "expected_elo": null,
       "options": {
-        "Threads": "1",
-        "Hash": "128",
-        "Ponder": "false",
+        "Threads": "4",
+        "Hash": "256",
         "UseHybridSearch": "true",
-        "UseMCTS": "false"
+        "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb"
+      }
+    },
+    "Stockfish": {
+      "description": "Stockfish dev-20260106 (full strength)",
+      "path": "reference/stockfish/src/stockfish",
+      "expected_elo": 3800,
+      "anchor": true,
+      "options": {
+        "Threads": "4",
+        "Hash": "256"
+      }
+    },
+    "Stockfish-L15": {
+      "description": "Stockfish dev-20260106 (Skill Level 15)",
+      "path": "reference/stockfish/src/stockfish",
+      "expected_elo": 3551,
+      "options": {
+        "Threads": "4",
+        "Hash": "256",
+        "Skill Level": "15"
+      }
+    },
+    "Stockfish-L10": {
+      "description": "Stockfish dev-20260106 (Skill Level 10)",
+      "path": "reference/stockfish/src/stockfish",
+      "expected_elo": 3304,
+      "options": {
+        "Threads": "4",
+        "Hash": "256",
+        "Skill Level": "10"
+      }
+    },
+    "Berserk": {
+      "description": "Berserk 20250622 by Jay Honnold",
+      "path": "reference/berserk/src/berserk",
+      "expected_elo": 3722,
+      "anchor": true,
+      "options": {
+        "Threads": "4",
+        "Hash": "256"
       }
     },
     "Patricia": {
-      "description": "Aggressive chess engine by Adam Kulju",
-      "expected_elo": 3415,
-      "options": {
-        "Threads": "1",
-        "Hash": "128",
-        "Ponder": "false"
-      },
+      "description": "Patricia by Adam Kulju",
       "path": "reference/Patricia/engine/patricia",
+      "expected_elo": 3415,
       "anchor": true,
-      "anchor_elo": 3415
-    },
-    "Berserk": {
-      "description": "Strong NNUE engine by Jay Honnold",
-      "expected_elo": 3662,
       "options": {
-        "Threads": "1",
-        "Hash": "128",
-        "Ponder": "false"
-      },
-      "path": "reference/berserk/src/berserk",
-      "anchor": true,
-      "anchor_elo": 3662
+        "Threads": "4",
+        "Hash": "256"
+      }
     },
-    "NNReference": {
-      "description": "Reference neural network engine",
-      "expected_elo": 3716,
-      "options": {
-        "Threads": "1",
-        "Ponder": "false"
-      },
+    "Lc0": {
+      "description": "Lc0 with BT4-1024x15x32h network (Metal backend)",
       "path": "reference/lc0/build/release/lc0",
-      "network_path": "reference/lc0/build/release/network.pb.gz"
-    }
-  },
-  "reference_engine": {
-    "path": "reference/engines/reference_engine",
-    "default_levels": [
-      0,
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-      7,
-      8,
-      10,
-      12,
-      14,
-      16,
-      17,
-      18,
-      19,
-      20
-    ],
-    "options": {
-      "Threads": "1",
-      "Hash": "128",
-      "Ponder": "false"
-    },
-    "skill_elo_map": {
-      "0": 1725,
-      "1": 1982,
-      "2": 2233,
-      "3": 2474,
-      "4": 2643,
-      "5": 2800,
-      "6": 2947,
-      "7": 3059,
-      "8": 3156,
-      "9": 3237,
-      "10": 3304,
-      "11": 3362,
-      "12": 3412,
-      "13": 3459,
-      "14": 3505,
-      "15": 3551,
-      "16": 3584,
-      "17": 3609,
-      "18": 3644,
-      "19": 3697,
-      "20": 3764
+      "expected_elo": 3700,
+      "cmd_args": ["--weights=networks/BT4-1024x15x32h-swa-6147500.pb", "--backend=metal"],
+      "options": {
+        "Threads": "4",
+        "Temperature": "0"
+      }
     }
   },
   "opening_book": {
     "file": "reference/books/8moves_v3.pgn",
     "format": "pgn",
-    "description": "8-move openings (16 plies) - CCRL-style balanced openings",
     "total_positions": 34700,
     "depth_plies": 16
-  },
-  "tournament_defaults": {
-    "games_per_pair": 16,
-    "time_control": "600+0.1",
-    "concurrency": 1,
-    "ponder": false,
-    "repeat": true,
-    "recover": true,
-    "notes": "16 games = 8 openings x 2 (color swap). 10 min + 0.1s/move time control."
   }
 }
