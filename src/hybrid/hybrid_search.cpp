@@ -390,7 +390,9 @@ bool ParallelHybridSearch::should_stop() const {
     return true;
 
   if (limits_.nodes > 0) {
-    uint64_t total = stats_.mcts_nodes + stats_.ab_nodes;
+    uint64_t mcts_n = mcts_search_ ?
+        mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed) : 0;
+    uint64_t total = mcts_n + ab_state_.nodes_searched.load(std::memory_order_relaxed);
     if (total >= limits_.nodes)
       return true;
   }
@@ -670,7 +672,10 @@ void ParallelHybridSearch::coordinator_thread_main() {
     // Send combined info every ~500ms (fixed timing)
     if (ms - last_info_ms >= 500) {
       last_info_ms = ms;
-      uint64_t total_nodes = stats_.mcts_nodes + stats_.ab_nodes;
+      uint64_t mcts_nodes = mcts_search_ ?
+          mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed) : 0;
+      uint64_t ab_nodes = ab_state_.nodes_searched.load(std::memory_order_relaxed);
+      uint64_t total_nodes = mcts_nodes + ab_nodes;
       int ab_depth = ab_state_.completed_depth.load(std::memory_order_relaxed);
       int ab_score = ab_state_.best_score.load(std::memory_order_relaxed);
 
