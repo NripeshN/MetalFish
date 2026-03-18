@@ -482,10 +482,10 @@ def main():
     parser = argparse.ArgumentParser(description="MetalFish Tournament Runner")
     parser.add_argument("--games", type=int, default=20,
                         help="Games per match (default: 20)")
-    parser.add_argument("--tc-base", type=float, default=60,
-                        help="Base time in seconds (default: 60)")
-    parser.add_argument("--tc-inc", type=float, default=0.6,
-                        help="Increment in seconds (default: 0.6)")
+    parser.add_argument("--tc-base", type=float, default=300,
+                        help="Base time in seconds (default: 300)")
+    parser.add_argument("--tc-inc", type=float, default=0.1,
+                        help="Increment in seconds (default: 0.1)")
     parser.add_argument("--movetime", type=int, default=0,
                         help="Fixed movetime in ms (overrides tc, 0=disabled)")
     parser.add_argument("--quick", action="store_true",
