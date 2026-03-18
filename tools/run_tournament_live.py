@@ -480,7 +480,7 @@ def run_tournament(args):
 
 def main():
     parser = argparse.ArgumentParser(description="MetalFish Tournament Runner")
-    parser.add_argument("--games", type=int, default=20,
+    parser.add_argument("--games", type=int, default=6,
                         help="Games per match (default: 20)")
     parser.add_argument("--tc-base", type=float, default=300,
                         help="Base time in seconds (default: 300)")

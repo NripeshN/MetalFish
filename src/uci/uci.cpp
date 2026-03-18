@@ -21,6 +21,11 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <filesystem>
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 #include "core/memory.h"
 #include "core/movegen.h"
@@ -1408,6 +1413,44 @@ static std::string get_nn_weights_path(Engine &engine) {
     const char *env_path = std::getenv("METALFISH_NN_WEIGHTS");
     if (env_path)
       nn_weights = env_path;
+  }
+  if (nn_weights.empty()) {
+    namespace fs = std::filesystem;
+    auto try_dir = [&](const fs::path &dir) -> std::string {
+      if (!fs::is_directory(dir)) return {};
+      std::string best;
+      for (const auto &entry : fs::directory_iterator(dir)) {
+        if (!entry.is_regular_file()) continue;
+        auto ext = entry.path().extension().string();
+        if (ext == ".pb" || ext == ".gz" || ext == ".onnx") {
+          auto name = entry.path().filename().string();
+          if (best.empty() || name > best)
+            best = entry.path().string();
+        }
+      }
+      return best;
+    };
+
+    auto exe_dir = fs::path("/proc/self/exe").parent_path();
+    #ifdef __APPLE__
+    {
+      char buf[4096];
+      uint32_t sz = sizeof(buf);
+      if (_NSGetExecutablePath(buf, &sz) == 0)
+        exe_dir = fs::path(buf).parent_path();
+    }
+    #endif
+
+    nn_weights = try_dir(exe_dir / "networks");
+    if (nn_weights.empty())
+      nn_weights = try_dir(exe_dir.parent_path() / "networks");
+    if (nn_weights.empty())
+      nn_weights = try_dir(fs::current_path() / "networks");
+    if (nn_weights.empty())
+      nn_weights = try_dir("networks");
+
+    if (!nn_weights.empty())
+      sync_cout << "info string Auto-detected NN weights: " << nn_weights << sync_endl;
   }
   return nn_weights;
 }
