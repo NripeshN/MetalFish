@@ -206,16 +206,18 @@ void MetalNetwork::RunBatch(const std::vector<InputPlanes> &inputs,
     }
   }
 
-  // MPSGraph handles concurrency via its own double-buffering semaphore.
-  if (moves_left_) {
-    builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
-                          batch,
-                          {&io->op_policy_mem_[0], &io->op_value_mem_[0],
-                           &io->op_moves_left_mem_[0]});
-  } else {
-    builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
-                          batch,
-                          {&io->op_policy_mem_[0], &io->op_value_mem_[0]});
+  {
+    std::lock_guard<std::mutex> lock(gpu_mutex_);
+    if (moves_left_) {
+      builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
+                            batch,
+                            {&io->op_policy_mem_[0], &io->op_value_mem_[0],
+                             &io->op_moves_left_mem_[0]});
+    } else {
+      builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
+                            batch,
+                            {&io->op_policy_mem_[0], &io->op_value_mem_[0]});
+    }
   }
 
   // Convert outputs.

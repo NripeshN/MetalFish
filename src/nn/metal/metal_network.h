@@ -54,6 +54,7 @@ private:
   int max_batch_size_;
   int batch_size_;
   std::string device_name_;
+  std::mutex gpu_mutex_;
 
   // Lock-free IO buffer pool (os_unfair_lock is faster than std::mutex).
 #ifdef __APPLE__
