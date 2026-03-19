@@ -13,14 +13,12 @@ RDIR="/Users/ec2-user/metalfish-src"
 RESULTS_DIR="$PROJ/results/distributed_$(date +%Y%m%d_%H%M%S)"
 GAMES=20
 TC="300+0.1"
-SESSION="metalfish-tournament"
 
 for arg in "$@"; do
     case $arg in
         --quick) GAMES=4; TC="10+0.1" ;;
         --games=*) GAMES="${arg#*=}" ;;
         --tc=*) TC="${arg#*=}" ;;
-        --no-tmux) NO_TMUX=1 ;;
     esac
 done
 
@@ -82,11 +80,6 @@ I4="$I4 && echo '=== [4] Hybrid vs MCTS ===' && $CC $HYB $MCTS $CCARGS -pgnout $
 I4="$I4 && echo '=== [4] SF vs Lc0 ===' && $CC $SF $LC0 $CCARGS -pgnout $RDIR/16_SF_vs_Lc0.pgn"
 I4="$I4 && echo '=== Instance 4 COMPLETE ==='"
 
-SSH1="ssh_cmd ${HOSTS[0]} \"$I1\""
-SSH2="ssh_cmd ${HOSTS[1]} \"$I2\""
-SSH3="ssh_cmd ${HOSTS[2]} \"$I3\""
-SSH4="ssh_cmd ${HOSTS[3]} \"$I4\""
-
 echo "============================================"
 echo "  MetalFish Distributed Tournament"
 echo "============================================"
@@ -99,29 +92,15 @@ echo "  Instance 3: Hybrid vs SF-L15, SF-L12, Patricia, Lc0"
 echo "  Instance 4: AB-vs-Hybrid, AB-vs-MCTS, Hybrid-vs-MCTS, SF-vs-Lc0"
 echo ""
 
-if [ "${NO_TMUX:-0}" = "1" ] || ! command -v tmux &>/dev/null; then
-    echo "Running parallel (no tmux)..."
-    eval $SSH1 2>&1 | sed 's/^/[1] /' | tee "$RESULTS_DIR/log1.txt" &
-    eval $SSH2 2>&1 | sed 's/^/[2] /' | tee "$RESULTS_DIR/log2.txt" &
-    eval $SSH3 2>&1 | sed 's/^/[3] /' | tee "$RESULTS_DIR/log3.txt" &
-    eval $SSH4 2>&1 | sed 's/^/[4] /' | tee "$RESULTS_DIR/log4.txt" &
-    wait
-else
-    tmux kill-session -t $SESSION 2>/dev/null || true
-    tmux new-session -d -s $SESSION -x 200 -y 50 \
-        "echo '╔═══ Instance 1: AB Ladder ═══╗'; eval $SSH1; echo '=== DONE ==='; read"
-    tmux split-window -h -t $SESSION \
-        "echo '╔═══ Instance 2: MCTS Ladder ═══╗'; eval $SSH2; echo '=== DONE ==='; read"
-    tmux split-window -v -t $SESSION:0.0 \
-        "echo '╔═══ Instance 3: Hybrid Ladder ═══╗'; eval $SSH3; echo '=== DONE ==='; read"
-    tmux split-window -v -t $SESSION:0.1 \
-        "echo '╔═══ Instance 4: Internal H2H ═══╗'; eval $SSH4; echo '=== DONE ==='; read"
-    tmux set -t $SESSION pane-border-style "fg=cyan"
-    tmux set -t $SESSION pane-active-border-style "fg=green"
-    echo "Attached to tmux. Ctrl-B D to detach."
-    echo "Reattach: tmux attach -t $SESSION"
-    tmux attach -t $SESSION
-fi
+echo "Running 4 instances in parallel..."
+echo "Logs: $RESULTS_DIR/log{1..4}.txt"
+echo ""
+
+ssh_cmd "${HOSTS[0]}" "$I1" 2>&1 | sed 's/^/[1] /' | tee "$RESULTS_DIR/log1.txt" &
+ssh_cmd "${HOSTS[1]}" "$I2" 2>&1 | sed 's/^/[2] /' | tee "$RESULTS_DIR/log2.txt" &
+ssh_cmd "${HOSTS[2]}" "$I3" 2>&1 | sed 's/^/[3] /' | tee "$RESULTS_DIR/log3.txt" &
+ssh_cmd "${HOSTS[3]}" "$I4" 2>&1 | sed 's/^/[4] /' | tee "$RESULTS_DIR/log4.txt" &
+wait
 
 # Collect results
 echo ""
