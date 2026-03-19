@@ -62,8 +62,7 @@ echo ""
 # Verify
 # ============================================================================
 echo "--- Verifying ---"
-V=$(ssh_cmd "${HOSTS[0]}" "cd $RDIR && echo 'uci
-quit' | build/metalfish 2>&1 | head -1")
+V=$(ssh_cmd "${HOSTS[0]}" "cd $RDIR && printf 'uci\nquit\n' | build/metalfish 2>&1 | head -1")
 echo "  metalfish: $V"
 V=$(ssh_cmd "${HOSTS[0]}" "$RDIR/reference/cutechess/build/cutechess-cli --version 2>&1 | head -1")
 echo "  cutechess: $V"
@@ -80,9 +79,9 @@ AB="-engine cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=8 option.
 MCTS="-engine cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=8 option.UseMCTS=true"
 HYB="-engine cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=8 option.Hash=256 option.UseHybridSearch=true"
 SF="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish option.Threads=8 option.Hash=256"
-SFL15="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L15 option.Threads=8 option.Hash=256 option.Skill_Level=15"
-SFL10="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L10 option.Threads=8 option.Hash=256 option.Skill_Level=10"
-SFL5="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L5 option.Threads=8 option.Hash=256 option.Skill_Level=5"
+SFL15="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L15 option.Threads=8 option.Hash=256 option.\"Skill Level\"=15"
+SFL10="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L10 option.Threads=8 option.Hash=256 option.\"Skill Level\"=10"
+SFL5="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L5 option.Threads=8 option.Hash=256 option.\"Skill Level\"=5"
 BER="-engine cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=8 option.Hash=256"
 PAT="-engine cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=8 option.Hash=256"
 LC0="-engine cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb arg=--backend=metal option.Threads=8 option.Temperature=0"
