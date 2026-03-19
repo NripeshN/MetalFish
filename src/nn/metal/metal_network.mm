@@ -25,21 +25,21 @@ std::string
 ActivationToString(MetalFishNN::NetworkFormat_ActivationFunction act) {
   switch (act) {
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_RELU:
-    return "relu";
+      return "relu";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_MISH:
-    return "mish";
+      return "mish";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_SWISH:
-    return "swish";
+      return "swish";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_RELU_2:
-    return "relu_2";
+      return "relu_2";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_SELU:
-    return "selu";
+      return "selu";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_TANH:
-    return "tanh";
+      return "tanh";
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_SIGMOID:
-    return "sigmoid";
-  default:
-    return "relu";
+      return "sigmoid";
+    default:
+      return "relu";
   }
 }
 
