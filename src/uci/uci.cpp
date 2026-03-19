@@ -170,7 +170,7 @@ void UCIEngine::loop() {
         parallel_hybrid_go(is);
       else
         go(is);
-    }
+      }
 
     // ======================================================================
     // MetalFish Extensions (debugging / CLI only -- GUIs never send these)
@@ -1753,24 +1753,24 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
           g_active_mcts.reset();
       }
 
-      auto end_time = std::chrono::steady_clock::now();
-      auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            end_time - start_time)
-                            .count();
+  auto end_time = std::chrono::steady_clock::now();
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        end_time - start_time)
+                        .count();
 
       const auto &stats = mcts->Stats();
-      uint64_t nodes = stats.total_nodes.load();
+  uint64_t nodes = stats.total_nodes.load();
       uint64_t nn_evals = stats.nn_evaluations.load();
-      uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+  uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
 
-      sync_cout << "info string Final stats:" << sync_endl;
-      sync_cout << "info string   Nodes: " << nodes << sync_endl;
-      sync_cout << "info string   NPS: " << nps << sync_endl;
-      sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
-      sync_cout << "info string   Threads: " << num_threads << sync_endl;
+  sync_cout << "info string Final stats:" << sync_endl;
+  sync_cout << "info string   Nodes: " << nodes << sync_endl;
+  sync_cout << "info string   NPS: " << nps << sync_endl;
+  sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
+  sync_cout << "info string   Threads: " << num_threads << sync_endl;
       sync_cout << "info string   NN evals: " << nn_evals << sync_endl;
-      sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
-                << " misses: " << stats.cache_misses.load() << sync_endl;
+  sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
+            << " misses: " << stats.cache_misses.load() << sync_endl;
 
     });
   }

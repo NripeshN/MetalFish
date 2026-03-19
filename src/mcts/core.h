@@ -73,7 +73,7 @@ inline float FastSqrt(float x) {
 } // namespace FastMath
 
 // ============================================================================
-// Moves Left Head (MLH) Utility
+// Moves Left Head (MLH) Utility 
 // ============================================================================
 
 class MovesLeftEvaluator {
@@ -140,7 +140,7 @@ inline int QToNnueScore(float q) {
 }
 
 // ============================================================================
-// Collision Handling
+// Collision Handling 
 // ============================================================================
 
 struct CollisionStats {
