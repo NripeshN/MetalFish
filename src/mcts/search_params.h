@@ -65,7 +65,7 @@ struct SearchParams {
 
     // Time management (Lc0 defaults)
     float slowmover = 2.2f;
-    float move_overhead_ms = 200.0f;
+    float move_overhead_ms = 10.0f;
 
     // Minibatch gathering (Lc0 defaults)
     int max_prefetch = 32;
