@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
-# MetalFish Distributed Tournament via cutechess-cli
-# All engines built natively on 4 M1 Ultra EC2 instances
+# MetalFish Distributed Tournament (4-pane tmux display)
+# 16 matches across 4 M1 Ultra instances, 300+0.1 TC
 # ============================================================================
 set -euo pipefail
 
@@ -13,123 +13,132 @@ RDIR="/Users/ec2-user/metalfish-src"
 RESULTS_DIR="$PROJ/results/distributed_$(date +%Y%m%d_%H%M%S)"
 GAMES=20
 TC="300+0.1"
+SESSION="metalfish-tournament"
 
 for arg in "$@"; do
     case $arg in
         --quick) GAMES=4; TC="10+0.1" ;;
         --games=*) GAMES="${arg#*=}" ;;
         --tc=*) TC="${arg#*=}" ;;
+        --no-tmux) NO_TMUX=1 ;;
     esac
 done
 
 mkdir -p "$RESULTS_DIR"
-ssh_cmd() { ssh -i "$PEM" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$USER@$1" "${@:2}"; }
+ssh_cmd() { ssh -i "$PEM" -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=60 "$USER@$1" "${@:2}"; }
 scp_cmd() { scp -i "$PEM" -o StrictHostKeyChecking=no -q "$@"; }
+
+# Engine definitions
+CC="$RDIR/reference/cutechess/build/cutechess-cli"
+BOOK="$RDIR/reference/books/8moves_v3.pgn"
+W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
+CCARGS="-each tc=$TC -games $GAMES -repeat -recover -openings file=$BOOK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
+
+AB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=10 option.Hash=512"
+MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=10 option.UseMCTS=true option.NNWeights=$W"
+HYB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=10 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W"
+
+SF="-engine proto=uci cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish option.Threads=10 option.Hash=512"
+SF15='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=SF-L15 option.Threads=10 option.Hash=512 "option.Skill Level=15"'
+SF12='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=SF-L12 option.Threads=10 option.Hash=512 "option.Skill Level=12"'
+SF10='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=SF-L10 option.Threads=10 option.Hash=512 "option.Skill Level=10"'
+SF8='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=SF-L8 option.Threads=10 option.Hash=512 "option.Skill Level=8"'
+SF5='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=SF-L5 option.Threads=10 option.Hash=512 "option.Skill Level=5"'
+
+BER="-engine proto=uci cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=10 option.Hash=512"
+PAT="-engine proto=uci cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=10 option.Hash=512"
+LC0="-engine proto=uci cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$W arg=--backend=metal option.Threads=10"
+
+# Build instance scripts (sequential matches per instance)
+# Instance 1: AB Elo ladder (AB vs strong engines)
+I1="cd $RDIR"
+I1="$I1 && echo '=== [1] AB vs Stockfish ===' && $CC $AB $SF $CCARGS -pgnout $RDIR/01_AB_vs_SF.pgn"
+I1="$I1 && echo '=== [1] AB vs Berserk ===' && $CC $AB $BER $CCARGS -pgnout $RDIR/02_AB_vs_Berserk.pgn"
+I1="$I1 && echo '=== [1] AB vs SF-L15 ===' && $CC $AB $SF15 $CCARGS -pgnout $RDIR/03_AB_vs_SF15.pgn"
+I1="$I1 && echo '=== [1] AB vs Lc0 ===' && $CC $AB $LC0 $CCARGS -pgnout $RDIR/04_AB_vs_Lc0.pgn"
+I1="$I1 && echo '=== Instance 1 COMPLETE ==='"
+
+# Instance 2: MCTS Elo ladder (MCTS vs calibrated opponents)
+I2="cd $RDIR"
+I2="$I2 && echo '=== [2] MCTS vs Lc0 ===' && $CC $MCTS $LC0 $CCARGS -pgnout $RDIR/05_MCTS_vs_Lc0.pgn"
+I2="$I2 && echo '=== [2] MCTS vs SF-L10 ===' && $CC $MCTS $SF10 $CCARGS -pgnout $RDIR/06_MCTS_vs_SF10.pgn"
+I2="$I2 && echo '=== [2] MCTS vs SF-L8 ===' && $CC $MCTS $SF8 $CCARGS -pgnout $RDIR/07_MCTS_vs_SF8.pgn"
+I2="$I2 && echo '=== [2] MCTS vs Patricia ===' && $CC $MCTS $PAT $CCARGS -pgnout $RDIR/08_MCTS_vs_Patricia.pgn"
+I2="$I2 && echo '=== Instance 2 COMPLETE ==='"
+
+# Instance 3: Hybrid Elo ladder
+I3="cd $RDIR"
+I3="$I3 && echo '=== [3] Hybrid vs SF-L15 ===' && $CC $HYB $SF15 $CCARGS -pgnout $RDIR/09_Hybrid_vs_SF15.pgn"
+I3="$I3 && echo '=== [3] Hybrid vs SF-L12 ===' && $CC $HYB $SF12 $CCARGS -pgnout $RDIR/10_Hybrid_vs_SF12.pgn"
+I3="$I3 && echo '=== [3] Hybrid vs Patricia ===' && $CC $HYB $PAT $CCARGS -pgnout $RDIR/11_Hybrid_vs_Patricia.pgn"
+I3="$I3 && echo '=== [3] Hybrid vs Lc0 ===' && $CC $HYB $LC0 $CCARGS -pgnout $RDIR/12_Hybrid_vs_Lc0.pgn"
+I3="$I3 && echo '=== Instance 3 COMPLETE ==='"
+
+# Instance 4: Internal head-to-head + calibration
+I4="cd $RDIR"
+I4="$I4 && echo '=== [4] AB vs Hybrid ===' && $CC $AB $HYB $CCARGS -pgnout $RDIR/13_AB_vs_Hybrid.pgn"
+I4="$I4 && echo '=== [4] AB vs MCTS ===' && $CC $AB $MCTS $CCARGS -pgnout $RDIR/14_AB_vs_MCTS.pgn"
+I4="$I4 && echo '=== [4] Hybrid vs MCTS ===' && $CC $HYB $MCTS $CCARGS -pgnout $RDIR/15_Hybrid_vs_MCTS.pgn"
+I4="$I4 && echo '=== [4] SF vs Lc0 ===' && $CC $SF $LC0 $CCARGS -pgnout $RDIR/16_SF_vs_Lc0.pgn"
+I4="$I4 && echo '=== Instance 4 COMPLETE ==='"
+
+SSH1="ssh_cmd ${HOSTS[0]} \"$I1\""
+SSH2="ssh_cmd ${HOSTS[1]} \"$I2\""
+SSH3="ssh_cmd ${HOSTS[2]} \"$I3\""
+SSH4="ssh_cmd ${HOSTS[3]} \"$I4\""
 
 echo "============================================"
 echo "  MetalFish Distributed Tournament"
 echo "============================================"
-echo "Instances: ${#HOSTS[@]} | Games: $GAMES | TC: $TC"
+echo "Games: $GAMES/match | TC: $TC | Matches: 16"
 echo "Results: $RESULTS_DIR"
 echo ""
+echo "  Instance 1: AB vs SF, Berserk, SF-L15, Lc0"
+echo "  Instance 2: MCTS vs Lc0, SF-L10, SF-L8, Patricia"
+echo "  Instance 3: Hybrid vs SF-L15, SF-L12, Patricia, Lc0"
+echo "  Instance 4: AB-vs-Hybrid, AB-vs-MCTS, Hybrid-vs-MCTS, SF-vs-Lc0"
+echo ""
 
-# ============================================================================
-# Verify builds exist
-# ============================================================================
-echo "--- Verifying ---"
+if [ "${NO_TMUX:-0}" = "1" ] || ! command -v tmux &>/dev/null; then
+    echo "Running parallel (no tmux)..."
+    eval $SSH1 2>&1 | sed 's/^/[1] /' | tee "$RESULTS_DIR/log1.txt" &
+    eval $SSH2 2>&1 | sed 's/^/[2] /' | tee "$RESULTS_DIR/log2.txt" &
+    eval $SSH3 2>&1 | sed 's/^/[3] /' | tee "$RESULTS_DIR/log3.txt" &
+    eval $SSH4 2>&1 | sed 's/^/[4] /' | tee "$RESULTS_DIR/log4.txt" &
+    wait
+else
+    tmux kill-session -t $SESSION 2>/dev/null || true
+    tmux new-session -d -s $SESSION -x 200 -y 50 \
+        "echo '╔═══ Instance 1: AB Ladder ═══╗'; eval $SSH1; echo '=== DONE ==='; read"
+    tmux split-window -h -t $SESSION \
+        "echo '╔═══ Instance 2: MCTS Ladder ═══╗'; eval $SSH2; echo '=== DONE ==='; read"
+    tmux split-window -v -t $SESSION:0.0 \
+        "echo '╔═══ Instance 3: Hybrid Ladder ═══╗'; eval $SSH3; echo '=== DONE ==='; read"
+    tmux split-window -v -t $SESSION:0.1 \
+        "echo '╔═══ Instance 4: Internal H2H ═══╗'; eval $SSH4; echo '=== DONE ==='; read"
+    tmux set -t $SESSION pane-border-style "fg=cyan"
+    tmux set -t $SESSION pane-active-border-style "fg=green"
+    echo "Attached to tmux. Ctrl-B D to detach."
+    echo "Reattach: tmux attach -t $SESSION"
+    tmux attach -t $SESSION
+fi
+
+# Collect results
+echo ""
+echo "--- Collecting PGNs ---"
 for host in "${HOSTS[@]}"; do
-    V=$(ssh_cmd "$host" "ls $RDIR/build/metalfish 2>/dev/null && echo OK || echo MISSING")
-    echo "  $host: $V"
+    scp_cmd $USER@$host:$RDIR/*.pgn "$RESULTS_DIR/" 2>/dev/null || true
 done
-echo ""
 
-# ============================================================================
-# Engine definitions (10 threads each = 20 cores / 2 engines per match)
-# ============================================================================
-CC="$RDIR/reference/cutechess/build/cutechess-cli"
-BOOK="$RDIR/reference/books/8moves_v3.pgn"
-WEIGHTS="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
-COMMON="-each tc=$TC -games $GAMES -repeat -recover -openings file=$BOOK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
-
-AB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=10 option.Hash=512"
-MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=10 option.UseMCTS=true option.NNWeights=$WEIGHTS"
-HYB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=10 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$WEIGHTS"
-SF="-engine proto=uci cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish option.Threads=10 option.Hash=512"
-SFL15='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=Stockfish-L15 option.Threads=10 option.Hash=512 "option.Skill Level=15"'
-SFL10='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=Stockfish-L10 option.Threads=10 option.Hash=512 "option.Skill Level=10"'
-SFL5='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=Stockfish-L5 option.Threads=10 option.Hash=512 "option.Skill Level=5"'
-BER="-engine proto=uci cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=10 option.Hash=512"
-PAT="-engine proto=uci cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=10 option.Hash=512"
-LC0="-engine proto=uci cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$WEIGHTS arg=--backend=metal option.Threads=10"
-
-# ============================================================================
-# Match runner
-# ============================================================================
-run_match() {
-    local host=$1 idx=$2 e1="$3" e2="$4" label="$5"
-    echo "[$idx] $label"
-    ssh_cmd "$host" "cd $RDIR && $CC $e1 $e2 $COMMON -pgnout $RDIR/$label.pgn 2>&1" | tail -3
-    scp_cmd "$USER@$host:$RDIR/$label.pgn" "$RESULTS_DIR/" 2>/dev/null || true
-    echo "[$idx] Done: $label"
-}
-
-run_group() {
-    local host=$1 idx=$2; shift 2
-    while [ $# -ge 3 ]; do run_match "$host" "$idx" "$1" "$2" "$3"; shift 3; done
-}
-
-echo "--- Running 24 matches across 4 M1 Ultra instances ---"
-echo ""
-
-# Instance 1: MetalFish-AB matches
-run_group "${HOSTS[0]}" 1 \
-    "$AB" "$SF" "01_AB_vs_Stockfish" \
-    "$AB" "$BER" "02_AB_vs_Berserk" \
-    "$AB" "$PAT" "03_AB_vs_Patricia" \
-    "$AB" "$SFL15" "04_AB_vs_SF-L15" \
-    "$AB" "$SFL10" "05_AB_vs_SF-L10" \
-    "$AB" "$LC0" "06_AB_vs_Lc0" &
-
-# Instance 2: MetalFish-MCTS matches
-run_group "${HOSTS[1]}" 2 \
-    "$MCTS" "$LC0" "07_MCTS_vs_Lc0" \
-    "$MCTS" "$PAT" "08_MCTS_vs_Patricia" \
-    "$MCTS" "$SFL10" "09_MCTS_vs_SF-L10" \
-    "$MCTS" "$SFL5" "10_MCTS_vs_SF-L5" \
-    "$MCTS" "$AB" "11_MCTS_vs_AB" \
-    "$MCTS" "$BER" "12_MCTS_vs_Berserk" &
-
-# Instance 3: MetalFish-Hybrid matches
-run_group "${HOSTS[2]}" 3 \
-    "$HYB" "$SFL15" "13_Hybrid_vs_SF-L15" \
-    "$HYB" "$BER" "14_Hybrid_vs_Berserk" \
-    "$HYB" "$PAT" "15_Hybrid_vs_Patricia" \
-    "$HYB" "$LC0" "16_Hybrid_vs_Lc0" \
-    "$HYB" "$SF" "17_Hybrid_vs_Stockfish" \
-    "$HYB" "$MCTS" "18_Hybrid_vs_MCTS" &
-
-# Instance 4: Cross matches
-run_group "${HOSTS[3]}" 4 \
-    "$HYB" "$AB" "19_Hybrid_vs_AB" \
-    "$HYB" "$SFL10" "20_Hybrid_vs_SF-L10" \
-    "$SF" "$LC0" "21_SF_vs_Lc0" \
-    "$PAT" "$LC0" "22_Patricia_vs_Lc0" \
-    "$AB" "$SFL5" "23_AB_vs_SF-L5" \
-    "$SF" "$PAT" "24_SF_vs_Patricia" &
-
-wait
-
-# ============================================================================
-# Aggregate
-# ============================================================================
-echo ""
-echo "============================================"
-echo "  RESULTS"
-echo "============================================"
 cat "$RESULTS_DIR"/*.pgn > "$RESULTS_DIR/all_games.pgn" 2>/dev/null || true
 TOTAL=$(grep -c "\[Result " "$RESULTS_DIR/all_games.pgn" 2>/dev/null || echo 0)
-echo "Total games: $TOTAL"
+
 echo ""
+echo "============================================"
+echo "  RESULTS ($TOTAL games)"
+echo "============================================"
+printf "\n  %-30s %4s %4s %4s %7s\n" "Match" "W" "D" "L" "Score"
+echo "  $(printf '%.0s-' {1..55})"
 for pgn in "$RESULTS_DIR"/*.pgn; do
     [ "$(basename "$pgn")" = "all_games.pgn" ] && continue
     label=$(basename "$pgn" .pgn)
@@ -137,8 +146,8 @@ for pgn in "$RESULTS_DIR"/*.pgn; do
     d=$(grep -c '\[Result "1/2-1/2"\]' "$pgn" 2>/dev/null || echo 0)
     l=$(grep -c '\[Result "0-1"\]' "$pgn" 2>/dev/null || echo 0)
     t=$((w+d+l)); [ $t -eq 0 ] && continue
-    printf "  %-35s %dW-%dD-%dL (%d games)\n" "$label" "$w" "$d" "$l" "$t"
+    s=$(echo "scale=1; $w + $d * 0.5" | bc)
+    printf "  %-30s %4d %4d %4d %5s/%d\n" "$label" "$w" "$d" "$l" "$s" "$t"
 done
 echo ""
-echo "PGNs: $RESULTS_DIR/"
-echo "Combined: $RESULTS_DIR/all_games.pgn"
+echo "Combined PGN: $RESULTS_DIR/all_games.pgn"
