@@ -75,16 +75,18 @@ CC="$RDIR/reference/cutechess/build/cutechess-cli"
 BOOK="$RDIR/reference/books/8moves_v3.pgn"
 COMMON="-each tc=$TC -games $GAMES -repeat -recover -openings file=$BOOK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
 
-AB="-engine cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=8 option.Hash=256"
-MCTS="-engine cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=8 option.UseMCTS=true"
-HYB="-engine cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=8 option.Hash=256 option.UseHybridSearch=true"
-SF="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish option.Threads=8 option.Hash=256"
-SFL15="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L15 option.Threads=8 option.Hash=256 option.\"Skill Level\"=15"
-SFL10="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L10 option.Threads=8 option.Hash=256 option.\"Skill Level\"=10"
-SFL5="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L5 option.Threads=8 option.Hash=256 option.\"Skill Level\"=5"
-BER="-engine cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=8 option.Hash=256"
-PAT="-engine cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=8 option.Hash=256"
-LC0="-engine cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb arg=--backend=metal option.Threads=8 option.Temperature=0"
+WEIGHTS="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
+
+AB="-engine cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=10 option.Hash=512"
+MCTS="-engine cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=10 option.UseMCTS=true option.NNWeights=$WEIGHTS"
+HYB="-engine cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=10 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$WEIGHTS"
+SF="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish option.Threads=10 option.Hash=512"
+SFL15="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L15 option.Threads=10 option.Hash=512 option.\"Skill Level\"=15"
+SFL10="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L10 option.Threads=10 option.Hash=512 option.\"Skill Level\"=10"
+SFL5="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L5 option.Threads=10 option.Hash=512 option.\"Skill Level\"=5"
+BER="-engine cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=10 option.Hash=512"
+PAT="-engine cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=10 option.Hash=512"
+LC0="-engine cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$WEIGHTS arg=--backend=metal option.Threads=10 option.Temperature=0"
 
 # ============================================================================
 # Run matches
