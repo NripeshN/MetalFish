@@ -190,7 +190,7 @@ private:
     bool IsSearchActive() const;
     bool ShouldStop() const;
     void SendInfo();
-    int64_t CalculateTimeBudget() const;
+    int64_t CalculateTimeBudget();
 
     // Core MCTS algorithms
     void RunIteration(SearchWorkerCtx& ctx);
@@ -252,6 +252,20 @@ private:
 
     std::atomic<int> gathering_permit_{1};
     std::atomic<int> backend_waiting_{0};
+
+    // Lc0-style smooth time management (persistent across searches)
+    struct TimeManagerState {
+        float nps = 200.0f;
+        bool nps_reliable = false;
+        float tree_reuse = 0.52f;
+        float timeuse = 0.70f;
+        float avg_ms_per_move = 0.0f;
+        float move_allocated_time_ms = 0.0f;
+        int64_t last_move_final_nodes = 0;
+        int64_t piggybank_ms = 0;
+        bool first_move = true;
+    };
+    TimeManagerState tmgr_;
 };
 
 // Factory function matching the old create_thread_safe_mcts pattern
