@@ -268,12 +268,44 @@ void Search::Stop() {
     stop_flag_.store(true, std::memory_order_release);
 }
 
+namespace {
+float ExponentialDecay(float from, float to, float halflife_steps, float steps) {
+    return to - (to - from) * std::pow(0.5f, steps / halflife_steps);
+}
+} // namespace
+
 void Search::Wait() {
     for (auto& t : workers_) {
         if (t.joinable()) t.join();
     }
     workers_.clear();
     running_.store(false, std::memory_order_release);
+
+    // Update time management state for next search
+    auto elapsed = std::chrono::steady_clock::now() - search_start_;
+    int64_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    uint64_t total_nodes = stats_.total_nodes.load(std::memory_order_relaxed);
+
+    if (elapsed_ms > 0 && total_nodes > 0) {
+        float actual_nps = 1000.0f * total_nodes / elapsed_ms;
+        if (tmgr_.nps_reliable) {
+            tmgr_.nps = tmgr_.nps * 0.5f + actual_nps * 0.5f;
+        } else {
+            tmgr_.nps = actual_nps;
+            tmgr_.nps_reliable = true;
+        }
+    }
+
+    if (tmgr_.move_allocated_time_ms > 0 && elapsed_ms > 0) {
+        float actual_timeuse = static_cast<float>(elapsed_ms) / tmgr_.move_allocated_time_ms;
+        float update_rate = tmgr_.avg_ms_per_move > 0 ?
+            static_cast<float>(elapsed_ms) / tmgr_.avg_ms_per_move : 1.0f;
+        tmgr_.timeuse = ExponentialDecay(tmgr_.timeuse, actual_timeuse,
+                                         5.51f, update_rate);
+        tmgr_.timeuse = std::max(tmgr_.timeuse, 0.34f);
+    }
+
+    tmgr_.last_move_final_nodes = static_cast<int64_t>(total_nodes);
 
     auto cb_copy = best_move_cb_;
     best_move_cb_ = nullptr;
@@ -299,7 +331,20 @@ bool Search::IsSearchActive() const {
 // Time Management
 // ============================================================================
 
-int64_t Search::CalculateTimeBudget() const {
+namespace {
+
+// Log-logistic distribution for estimating remaining moves in a game.
+// From Lc0: midpoint=45.2, steepness=5.93 (fitted to game length data).
+float EstimateMovesToGo(int ply, float midpoint = 45.2f,
+                        float steepness = 5.93f) {
+    float move = ply / 2.0f;
+    return midpoint * std::pow(1.0f + 2.0f * std::pow(move / midpoint, steepness),
+                               1.0f / steepness) - move;
+}
+
+} // namespace
+
+int64_t Search::CalculateTimeBudget() {
     if (limits_.nodes > 0 && limits_.movetime <= 0 && !limits_.infinite &&
         limits_.time[WHITE] <= 0 && limits_.time[BLACK] <= 0) {
         return 0;
@@ -312,30 +357,99 @@ int64_t Search::CalculateTimeBudget() const {
     int64_t inc = limits_.inc[us];
     if (time_left <= 0) return 1000;
 
-    int64_t available = time_left - static_cast<int64_t>(params_.move_overhead_ms);
-    if (available <= 0) return 50;
+    const int64_t overhead = static_cast<int64_t>(params_.move_overhead_ms);
 
-    // Lc0's sigmoid-based estimate of moves remaining
-    // Uses the game ply (approximated from movestogo or sigmoid curve)
-    double est_moves;
-    if (limits_.movestogo > 0) {
-        est_moves = static_cast<double>(limits_.movestogo);
-    } else {
-        int ply = 45; // approximate mid-game ply
-        est_moves = 10.0 + 50.0 / (1.0 + std::exp((ply - 45.0) / 6.0));
+    // Initialize piggybank on first move (9% of initial time, from Lc0)
+    if (tmgr_.first_move) {
+        tmgr_.piggybank_ms = static_cast<int64_t>(time_left * 0.09f);
+        tmgr_.first_move = false;
     }
 
-    double total_time = static_cast<double>(available) +
-                        static_cast<double>(inc) * std::max(0.0, est_moves - 1.0);
+    // Update tree reuse estimate from previous search
+    uint32_t current_nodes = tree_.Root() ? tree_.Root()->GetN() : 0;
+    if (tmgr_.last_move_final_nodes > 0 && current_nodes > 0) {
+        float this_reuse = static_cast<float>(current_nodes) /
+                           static_cast<float>(tmgr_.last_move_final_nodes);
+        float update_rate = tmgr_.avg_ms_per_move > 0.0f ?
+            tmgr_.move_allocated_time_ms / tmgr_.avg_ms_per_move : 1.0f;
+        tmgr_.tree_reuse = ExponentialDecay(tmgr_.tree_reuse, this_reuse,
+                                            3.39f, update_rate);
+        tmgr_.tree_reuse = std::min(tmgr_.tree_reuse, 0.73f);
+    }
 
-    int64_t time_for_move = static_cast<int64_t>(
-        total_time / est_moves * static_cast<double>(params_.slowmover));
+    // Estimate remaining moves using log-logistic distribution
+    // Approximate game ply from the position (use tree root's move count)
+    int ply = 2 * (limits_.movestogo > 0 ? 40 : 30);
+    {
+        Position pos;
+        StateInfo st;
+        std::string fen = tree_.RootFen();
+        if (!fen.empty()) {
+            pos.set(fen, false, &st);
+            ply = pos.game_ply();
+        }
+    }
 
-    int64_t max_time = static_cast<int64_t>(available * 0.3);
-    time_for_move = std::min(time_for_move, max_time);
-    time_for_move = std::max(time_for_move, int64_t(500));
+    float remaining_moves = EstimateMovesToGo(ply);
+    if (limits_.movestogo > 0 && limits_.movestogo < remaining_moves) {
+        remaining_moves = static_cast<float>(limits_.movestogo);
+    }
+    remaining_moves = std::max(remaining_moves, 1.0f);
 
-    return time_for_move;
+    // Max piggybank: proportional to average time per move
+    float max_piggybank = 36.5f *
+        std::max(0.0f, static_cast<float>(time_left) +
+                 static_cast<float>(inc) * (remaining_moves - 1.0f) - overhead) /
+        remaining_moves;
+    tmgr_.piggybank_ms = std::min(tmgr_.piggybank_ms,
+                                  static_cast<int64_t>(max_piggybank));
+
+    // Total remaining time (excluding piggybank reserve)
+    float total_remaining = std::max(0.0f,
+        static_cast<float>(time_left) - static_cast<float>(tmgr_.piggybank_ms) +
+        static_cast<float>(inc) * (remaining_moves - 1.0f) -
+        static_cast<float>(overhead));
+
+    // Average nodes per move (using NPS estimate)
+    float remaining_game_nodes = total_remaining * tmgr_.nps / 1000.0f;
+    float avg_nodes_per_move = remaining_game_nodes / remaining_moves;
+    tmgr_.avg_ms_per_move = total_remaining / remaining_moves;
+
+    // Account for tree reuse: we get some nodes for free
+    float nodes_with_reuse = avg_nodes_per_move / (1.0f - tmgr_.tree_reuse);
+    float new_nodes_needed = std::max(0.0f, nodes_with_reuse - current_nodes);
+
+    // Expected thinking time for this move
+    float expected_ms = new_nodes_needed / tmgr_.nps * 1000.0f;
+
+    // Save 12% of move time to piggybank (from Lc0)
+    float to_piggybank = std::min(max_piggybank - tmgr_.piggybank_ms,
+                                  expected_ms * 0.12f);
+    expected_ms -= to_piggybank;
+
+    // Adjust for smart pruning time use (we typically don't use all allocated time)
+    tmgr_.move_allocated_time_ms = expected_ms / tmgr_.timeuse;
+
+    // Cap at 42% of remaining time (from Lc0: max-move-budget=0.42)
+    float max_move_time = static_cast<float>(time_left) * 0.42f;
+    if (tmgr_.move_allocated_time_ms > max_move_time) {
+        tmgr_.move_allocated_time_ms = max_move_time;
+    }
+
+    // Hard cap: never exceed remaining time minus overhead
+    float hard_cap = static_cast<float>(time_left - overhead);
+    if (tmgr_.move_allocated_time_ms > hard_cap) {
+        tmgr_.move_allocated_time_ms = std::max(0.0f, hard_cap);
+    }
+
+    // Add piggybank to budget
+    tmgr_.piggybank_ms += static_cast<int64_t>(to_piggybank);
+
+    // Minimum: at least 50ms or 1/3 of remaining
+    float min_time = std::min(50.0f, hard_cap / 3.0f);
+    tmgr_.move_allocated_time_ms = std::max(tmgr_.move_allocated_time_ms, min_time);
+
+    return static_cast<int64_t>(tmgr_.move_allocated_time_ms);
 }
 
 // ============================================================================
