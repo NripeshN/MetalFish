@@ -1005,9 +1005,16 @@ void ParallelHybridSearch::send_info(int depth, int score, uint64_t nodes,
   }
 
   if (!pv.empty()) {
-    ss << " pv";
+    bool has_valid = false;
     for (const auto &m : pv) {
-      ss << " " << UCIEngine::move(m, false);
+      if (m != Move::none()) { has_valid = true; break; }
+    }
+    if (has_valid) {
+      ss << " pv";
+      for (const auto &m : pv) {
+        if (m != Move::none())
+          ss << " " << UCIEngine::move(m, false);
+      }
     }
   }
 
