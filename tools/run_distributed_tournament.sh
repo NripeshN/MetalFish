@@ -77,16 +77,16 @@ COMMON="-each tc=$TC -games $GAMES -repeat -recover -openings file=$BOOK format=
 
 WEIGHTS="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
 
-AB="-engine cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=10 option.Hash=512"
-MCTS="-engine cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=10 option.UseMCTS=true option.NNWeights=$WEIGHTS"
-HYB="-engine cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=10 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$WEIGHTS"
-SF="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish option.Threads=10 option.Hash=512"
-SFL15="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L15 option.Threads=10 option.Hash=512 option.\"Skill Level\"=15"
-SFL10="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L10 option.Threads=10 option.Hash=512 option.\"Skill Level\"=10"
-SFL5="-engine cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L5 option.Threads=10 option.Hash=512 option.\"Skill Level\"=5"
-BER="-engine cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=10 option.Hash=512"
-PAT="-engine cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=10 option.Hash=512"
-LC0="-engine cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$WEIGHTS arg=--backend=metal option.Threads=10 option.Temperature=0"
+AB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=10 option.Hash=512"
+MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=10 option.UseMCTS=true option.NNWeights=$WEIGHTS"
+HYB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=10 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$WEIGHTS"
+SF="-engine proto=uci cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish option.Threads=10 option.Hash=512"
+SFL15="-engine proto=uci cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L15 option.Threads=10 option.Hash=512 option.\"Skill Level\"=15"
+SFL10="-engine proto=uci cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L10 option.Threads=10 option.Hash=512 option.\"Skill Level\"=10"
+SFL5="-engine proto=uci cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish-L5 option.Threads=10 option.Hash=512 option.\"Skill Level\"=5"
+BER="-engine proto=uci cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=10 option.Hash=512"
+PAT="-engine proto=uci cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=10 option.Hash=512"
+LC0="-engine proto=uci cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$WEIGHTS arg=--backend=metal option.Threads=10 option.Temperature=0"
 
 # ============================================================================
 # Run matches
