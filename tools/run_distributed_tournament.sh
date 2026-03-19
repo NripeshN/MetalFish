@@ -1,8 +1,7 @@
 #!/bin/bash
 # ============================================================================
-# MetalFish Full Round-Robin Tournament
-# 9 engines, 36 matches, 10 games each, 300+0.1 TC
-# Distributed across 4 M1 Ultra EC2 instances
+# MetalFish Tournament: All 3 engines vs 10 opponents + internal H2H
+# 33 matches × 10 games = 330 games across 4 M1 Ultra instances
 # ============================================================================
 set -euo pipefail
 
@@ -27,104 +26,103 @@ mkdir -p "$RESULTS_DIR"
 ssh_cmd() { ssh -i "$PEM" -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=60 "$USER@$1" "${@:2}"; }
 scp_cmd() { scp -i "$PEM" -o StrictHostKeyChecking=no -q "$@"; }
 
-# Engine definitions
 CC="$RDIR/reference/cutechess/build/cutechess-cli"
 BK="$RDIR/reference/books/8moves_v3.pgn"
 W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
 CA="-each tc=$TC -games $GAMES -repeat -recover -openings file=$BK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
 
+# Our engines
 AB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=10 option.Hash=512"
 MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=10 option.UseMCTS=true option.NNWeights=$W"
 HYB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=10 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W"
-SF="-engine proto=uci cmd=$RDIR/reference/stockfish/src/stockfish name=Stockfish option.Threads=10 option.Hash=512"
-SF15='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=SF-L15 option.Threads=10 option.Hash=512 "option.Skill Level=15"'
-SF10='-engine proto=uci cmd='$RDIR'/reference/stockfish/src/stockfish name=SF-L10 option.Threads=10 option.Hash=512 "option.Skill Level=10"'
+
+# Opponents (10 engines spanning ~3100-3800 Elo)
+S="$RDIR/reference/stockfish/src/stockfish"
+SF="-engine proto=uci cmd=$S name=Stockfish option.Threads=10 option.Hash=512"
+S16='-engine proto=uci cmd='$S' name=SF-L16 option.Threads=10 option.Hash=512 "option.Skill Level=16"'
+S14='-engine proto=uci cmd='$S' name=SF-L14 option.Threads=10 option.Hash=512 "option.Skill Level=14"'
+S12='-engine proto=uci cmd='$S' name=SF-L12 option.Threads=10 option.Hash=512 "option.Skill Level=12"'
+S10='-engine proto=uci cmd='$S' name=SF-L10 option.Threads=10 option.Hash=512 "option.Skill Level=10"'
+S8='-engine proto=uci cmd='$S' name=SF-L8 option.Threads=10 option.Hash=512 "option.Skill Level=8"'
+S5='-engine proto=uci cmd='$S' name=SF-L5 option.Threads=10 option.Hash=512 "option.Skill Level=5"'
 BER="-engine proto=uci cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=10 option.Hash=512"
 PAT="-engine proto=uci cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=10 option.Hash=512"
 LC0="-engine proto=uci cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$W arg=--backend=metal option.Threads=10"
 
-# Helper: run one match
-m() { echo "=== $3 ===" && $CC $1 $2 $CA -pgnout $RDIR/$3.pgn; }
-
-# 36 matches split across 4 instances (9 per instance)
-# Instance 1: AB plays everyone + some cross
+# Instance 1 (9 matches): AB vs everyone except Lc0
 I1="cd $RDIR"
-I1="$I1 && $(echo "m '$AB' '$SF' '01_AB_vs_SF'")"
-I1="$I1 && $(echo "m '$AB' '$BER' '02_AB_vs_Berserk'")"
-I1="$I1 && $(echo "m '$AB' '$PAT' '03_AB_vs_Patricia'")"
-I1="$I1 && $(echo "m '$AB' '$SF15' '04_AB_vs_SF15'")"
-I1="$I1 && $(echo "m '$AB' '$SF10' '05_AB_vs_SF10'")"
-I1="$I1 && $(echo "m '$AB' '$LC0' '06_AB_vs_Lc0'")"
-I1="$I1 && $(echo "m '$AB' '$MCTS' '07_AB_vs_MCTS'")"
-I1="$I1 && $(echo "m '$AB' '$HYB' '08_AB_vs_Hybrid'")"
-I1="$I1 && $(echo "m '$SF' '$BER' '09_SF_vs_Berserk'")"
-I1="$I1 && echo '=== Instance 1 COMPLETE ==='"
+I1="$I1 && echo '>>> AB vs Stockfish' && $CC $AB $SF $CA -pgnout $RDIR/01_AB_vs_SF.pgn"
+I1="$I1 && echo '>>> AB vs SF-L16' && $CC $AB $S16 $CA -pgnout $RDIR/02_AB_vs_SF16.pgn"
+I1="$I1 && echo '>>> AB vs SF-L14' && $CC $AB $S14 $CA -pgnout $RDIR/03_AB_vs_SF14.pgn"
+I1="$I1 && echo '>>> AB vs SF-L12' && $CC $AB $S12 $CA -pgnout $RDIR/04_AB_vs_SF12.pgn"
+I1="$I1 && echo '>>> AB vs SF-L10' && $CC $AB $S10 $CA -pgnout $RDIR/05_AB_vs_SF10.pgn"
+I1="$I1 && echo '>>> AB vs SF-L8' && $CC $AB $S8 $CA -pgnout $RDIR/06_AB_vs_SF8.pgn"
+I1="$I1 && echo '>>> AB vs SF-L5' && $CC $AB $S5 $CA -pgnout $RDIR/07_AB_vs_SF5.pgn"
+I1="$I1 && echo '>>> AB vs Berserk' && $CC $AB $BER $CA -pgnout $RDIR/08_AB_vs_Berserk.pgn"
+I1="$I1 && echo '>>> AB vs Patricia' && $CC $AB $PAT $CA -pgnout $RDIR/09_AB_vs_Patricia.pgn"
+I1="$I1 && echo '=== Instance 1 DONE ==='"
 
-# Instance 2: MCTS plays everyone + some cross
+# Instance 2 (9 matches): MCTS vs everyone except SF/SF16
 I2="cd $RDIR"
-I2="$I2 && $(echo "m '$MCTS' '$LC0' '10_MCTS_vs_Lc0'")"
-I2="$I2 && $(echo "m '$MCTS' '$PAT' '11_MCTS_vs_Patricia'")"
-I2="$I2 && $(echo "m '$MCTS' '$SF10' '12_MCTS_vs_SF10'")"
-I2="$I2 && $(echo "m '$MCTS' '$SF15' '13_MCTS_vs_SF15'")"
-I2="$I2 && $(echo "m '$MCTS' '$BER' '14_MCTS_vs_Berserk'")"
-I2="$I2 && $(echo "m '$MCTS' '$SF' '15_MCTS_vs_SF'")"
-I2="$I2 && $(echo "m '$MCTS' '$HYB' '16_MCTS_vs_Hybrid'")"
-I2="$I2 && $(echo "m '$SF' '$PAT' '17_SF_vs_Patricia'")"
-I2="$I2 && $(echo "m '$SF' '$SF15' '18_SF_vs_SF15'")"
-I2="$I2 && echo '=== Instance 2 COMPLETE ==='"
+I2="$I2 && echo '>>> MCTS vs Lc0' && $CC $MCTS $LC0 $CA -pgnout $RDIR/10_MCTS_vs_Lc0.pgn"
+I2="$I2 && echo '>>> MCTS vs SF-L14' && $CC $MCTS $S14 $CA -pgnout $RDIR/11_MCTS_vs_SF14.pgn"
+I2="$I2 && echo '>>> MCTS vs SF-L12' && $CC $MCTS $S12 $CA -pgnout $RDIR/12_MCTS_vs_SF12.pgn"
+I2="$I2 && echo '>>> MCTS vs SF-L10' && $CC $MCTS $S10 $CA -pgnout $RDIR/13_MCTS_vs_SF10.pgn"
+I2="$I2 && echo '>>> MCTS vs SF-L8' && $CC $MCTS $S8 $CA -pgnout $RDIR/14_MCTS_vs_SF8.pgn"
+I2="$I2 && echo '>>> MCTS vs SF-L5' && $CC $MCTS $S5 $CA -pgnout $RDIR/15_MCTS_vs_SF5.pgn"
+I2="$I2 && echo '>>> MCTS vs Berserk' && $CC $MCTS $BER $CA -pgnout $RDIR/16_MCTS_vs_Berserk.pgn"
+I2="$I2 && echo '>>> MCTS vs Patricia' && $CC $MCTS $PAT $CA -pgnout $RDIR/17_MCTS_vs_Patricia.pgn"
+I2="$I2 && echo '>>> MCTS vs Stockfish' && $CC $MCTS $SF $CA -pgnout $RDIR/18_MCTS_vs_SF.pgn"
+I2="$I2 && echo '=== Instance 2 DONE ==='"
 
-# Instance 3: Hybrid plays everyone + some cross
+# Instance 3 (9 matches): Hybrid vs everyone except SF8/SF5
 I3="cd $RDIR"
-I3="$I3 && $(echo "m '$HYB' '$SF' '19_Hybrid_vs_SF'")"
-I3="$I3 && $(echo "m '$HYB' '$BER' '20_Hybrid_vs_Berserk'")"
-I3="$I3 && $(echo "m '$HYB' '$PAT' '21_Hybrid_vs_Patricia'")"
-I3="$I3 && $(echo "m '$HYB' '$LC0' '22_Hybrid_vs_Lc0'")"
-I3="$I3 && $(echo "m '$HYB' '$SF15' '23_Hybrid_vs_SF15'")"
-I3="$I3 && $(echo "m '$HYB' '$SF10' '24_Hybrid_vs_SF10'")"
-I3="$I3 && $(echo "m '$SF' '$LC0' '25_SF_vs_Lc0'")"
-I3="$I3 && $(echo "m '$SF' '$SF10' '26_SF_vs_SF10'")"
-I3="$I3 && $(echo "m '$BER' '$PAT' '27_Berserk_vs_Patricia'")"
-I3="$I3 && echo '=== Instance 3 COMPLETE ==='"
+I3="$I3 && echo '>>> Hybrid vs Stockfish' && $CC $HYB $SF $CA -pgnout $RDIR/19_Hybrid_vs_SF.pgn"
+I3="$I3 && echo '>>> Hybrid vs SF-L16' && $CC $HYB $S16 $CA -pgnout $RDIR/20_Hybrid_vs_SF16.pgn"
+I3="$I3 && echo '>>> Hybrid vs SF-L14' && $CC $HYB $S14 $CA -pgnout $RDIR/21_Hybrid_vs_SF14.pgn"
+I3="$I3 && echo '>>> Hybrid vs SF-L12' && $CC $HYB $S12 $CA -pgnout $RDIR/22_Hybrid_vs_SF12.pgn"
+I3="$I3 && echo '>>> Hybrid vs SF-L10' && $CC $HYB $S10 $CA -pgnout $RDIR/23_Hybrid_vs_SF10.pgn"
+I3="$I3 && echo '>>> Hybrid vs Berserk' && $CC $HYB $BER $CA -pgnout $RDIR/24_Hybrid_vs_Berserk.pgn"
+I3="$I3 && echo '>>> Hybrid vs Patricia' && $CC $HYB $PAT $CA -pgnout $RDIR/25_Hybrid_vs_Patricia.pgn"
+I3="$I3 && echo '>>> Hybrid vs Lc0' && $CC $HYB $LC0 $CA -pgnout $RDIR/26_Hybrid_vs_Lc0.pgn"
+I3="$I3 && echo '>>> Hybrid vs SF-L8' && $CC $HYB $S8 $CA -pgnout $RDIR/27_Hybrid_vs_SF8.pgn"
+I3="$I3 && echo '=== Instance 3 DONE ==='"
 
-# Instance 4: remaining cross matches
+# Instance 4 (6 matches): Internal H2H + remaining
 I4="cd $RDIR"
-I4="$I4 && $(echo "m '$LC0' '$PAT' '28_Lc0_vs_Patricia'")"
-I4="$I4 && $(echo "m '$LC0' '$BER' '29_Lc0_vs_Berserk'")"
-I4="$I4 && $(echo "m '$LC0' '$SF15' '30_Lc0_vs_SF15'")"
-I4="$I4 && $(echo "m '$LC0' '$SF10' '31_Lc0_vs_SF10'")"
-I4="$I4 && $(echo "m '$SF15' '$PAT' '32_SF15_vs_Patricia'")"
-I4="$I4 && $(echo "m '$SF15' '$BER' '33_SF15_vs_Berserk'")"
-I4="$I4 && $(echo "m '$SF15' '$SF10' '34_SF15_vs_SF10'")"
-I4="$I4 && $(echo "m '$SF10' '$PAT' '35_SF10_vs_Patricia'")"
-I4="$I4 && $(echo "m '$SF10' '$BER' '36_SF10_vs_Berserk'")"
-I4="$I4 && echo '=== Instance 4 COMPLETE ==='"
+I4="$I4 && echo '>>> AB vs MCTS' && $CC $AB $MCTS $CA -pgnout $RDIR/28_AB_vs_MCTS.pgn"
+I4="$I4 && echo '>>> AB vs Hybrid' && $CC $AB $HYB $CA -pgnout $RDIR/29_AB_vs_Hybrid.pgn"
+I4="$I4 && echo '>>> Hybrid vs MCTS' && $CC $HYB $MCTS $CA -pgnout $RDIR/30_Hybrid_vs_MCTS.pgn"
+I4="$I4 && echo '>>> AB vs Lc0' && $CC $AB $LC0 $CA -pgnout $RDIR/31_AB_vs_Lc0.pgn"
+I4="$I4 && echo '>>> MCTS vs SF-L16' && $CC $MCTS $S16 $CA -pgnout $RDIR/32_MCTS_vs_SF16.pgn"
+I4="$I4 && echo '>>> Hybrid vs SF-L5' && $CC $HYB $S5 $CA -pgnout $RDIR/33_Hybrid_vs_SF5.pgn"
+I4="$I4 && echo '=== Instance 4 DONE ==='"
 
 echo "============================================"
-echo "  MetalFish Full Round-Robin Tournament"
+echo "  MetalFish Engine Evaluation Tournament"
 echo "============================================"
-echo "Engines: AB, MCTS, Hybrid, Stockfish, SF-L15, SF-L10, Berserk, Patricia, Lc0"
-echo "Matches: 36 (full round-robin) | Games: $GAMES/match | TC: $TC"
-echo "Total games: $((36 * GAMES))"
-echo "Results: $RESULTS_DIR"
 echo ""
-echo "  Instance 1: 9 matches (AB ladder + SF-vs-Berserk)"
-echo "  Instance 2: 9 matches (MCTS ladder + SF cross)"
-echo "  Instance 3: 9 matches (Hybrid ladder + cross)"
-echo "  Instance 4: 9 matches (Lc0/SF15/SF10 cross)"
+echo "  Our engines: MetalFish-AB, MetalFish-MCTS, MetalFish-Hybrid"
+echo "  Opponents:   Stockfish, SF-L16, SF-L14, SF-L12, SF-L10,"
+echo "               SF-L8, SF-L5, Berserk, Patricia, Lc0"
 echo ""
-echo "Running..."
+echo "  33 matches × $GAMES games = $((33 * GAMES)) games | TC: $TC"
+echo "  Results: $RESULTS_DIR"
+echo ""
+echo "  [1] AB vs 9 opponents       (~3100-3800 Elo ladder)"
+echo "  [2] MCTS vs 9 opponents     (full strength range)"
+echo "  [3] Hybrid vs 9 opponents   (full strength range)"
+echo "  [4] Internal H2H + 3 extras (AB/MCTS/Hybrid vs each other)"
+echo ""
+echo "  Estimated time: ~13 hours"
 echo ""
 
-# Define m() function on remote via heredoc
-MFUNC='m() { echo "=== $3 ===" && '$CC' $1 $2 '$CA' -pgnout '$RDIR'/$3.pgn; }'
-
-ssh_cmd "${HOSTS[0]}" "$MFUNC && $I1" 2>&1 | sed 's/^/[1] /' | tee "$RESULTS_DIR/log1.txt" &
-ssh_cmd "${HOSTS[1]}" "$MFUNC && $I2" 2>&1 | sed 's/^/[2] /' | tee "$RESULTS_DIR/log2.txt" &
-ssh_cmd "${HOSTS[2]}" "$MFUNC && $I3" 2>&1 | sed 's/^/[3] /' | tee "$RESULTS_DIR/log3.txt" &
-ssh_cmd "${HOSTS[3]}" "$MFUNC && $I4" 2>&1 | sed 's/^/[4] /' | tee "$RESULTS_DIR/log4.txt" &
+ssh_cmd "${HOSTS[0]}" "$I1" 2>&1 | sed 's/^/[1] /' | tee "$RESULTS_DIR/log1.txt" &
+ssh_cmd "${HOSTS[1]}" "$I2" 2>&1 | sed 's/^/[2] /' | tee "$RESULTS_DIR/log2.txt" &
+ssh_cmd "${HOSTS[2]}" "$I3" 2>&1 | sed 's/^/[3] /' | tee "$RESULTS_DIR/log3.txt" &
+ssh_cmd "${HOSTS[3]}" "$I4" 2>&1 | sed 's/^/[4] /' | tee "$RESULTS_DIR/log4.txt" &
 wait
 
-# Collect PGNs
 echo ""
 echo "--- Collecting PGNs ---"
 for host in "${HOSTS[@]}"; do
@@ -151,4 +149,4 @@ for pgn in "$RESULTS_DIR"/*.pgn; do
     printf "  %-35s %4d %4d %4d %5s/%d\n" "$label" "$w" "$d" "$l" "$s" "$t"
 done
 echo ""
-echo "Combined PGN: $RESULTS_DIR/all_games.pgn"
+echo "Combined: $RESULTS_DIR/all_games.pgn"
