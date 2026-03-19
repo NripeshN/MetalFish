@@ -355,9 +355,14 @@ int64_t Search::CalculateTimeBudget() {
     Color us = root_color_;
     int64_t time_left = limits_.time[us];
     int64_t inc = limits_.inc[us];
-    if (time_left <= 0) return 1000;
+    if (time_left <= 0) return std::max(int64_t(50), inc);
 
     const int64_t overhead = static_cast<int64_t>(params_.move_overhead_ms);
+
+    // Emergency: very low time, just use increment or tiny fraction
+    if (time_left < 500) {
+        return std::max(int64_t(50), std::min(time_left / 4, inc));
+    }
 
     // Initialize piggybank on first move (9% of initial time, from Lc0)
     if (tmgr_.first_move) {
