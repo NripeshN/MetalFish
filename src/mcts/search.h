@@ -253,6 +253,8 @@ private:
     std::atomic<int> gathering_permit_{1};
     std::atomic<int> backend_waiting_{0};
 
+    std::unique_ptr<KLDGainStopper> kld_stopper_;
+
     // Lc0-style smooth time management (persistent across searches)
     struct TimeManagerState {
         float nps = 200.0f;

@@ -66,6 +66,18 @@ private:
   int64_t time_limit_ms_;
 };
 
+class KLDGainStopper : public SearchStopper {
+public:
+  KLDGainStopper(float min_gain, int average_interval);
+  bool ShouldStop(const SearchStats &stats) override;
+
+private:
+  float min_gain_;
+  int average_interval_;
+  std::vector<double> prev_visits_;
+  double prev_child_nodes_ = 0.0;
+};
+
 class SigmoidTimeManager {
 public:
   std::unique_ptr<SearchStopper> CreateStopper(Color us, int64_t time_left,

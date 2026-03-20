@@ -241,6 +241,13 @@ void Search::StartSearch(const std::string& fen,
     gathering_permit_.store(1, std::memory_order_relaxed);
     backend_waiting_.store(0, std::memory_order_relaxed);
 
+    if (params_.use_kld_gain_stopper) {
+        kld_stopper_ = std::make_unique<KLDGainStopper>(
+            params_.kld_gain_min, params_.kld_gain_average_interval);
+    } else {
+        kld_stopper_.reset();
+    }
+
     int num_threads = params_.GetNumThreads();
     worker_ctxs_.clear();
     workers_.clear();
@@ -486,6 +493,20 @@ bool Search::ShouldStop() const {
                         est_remaining * params_.smart_pruning_factor))
                     return true;
             }
+        }
+    }
+
+    if (kld_stopper_) {
+        SearchStats kld_stats;
+        kld_stats.total_nodes = stats_.total_nodes.load(std::memory_order_relaxed);
+        const Node* root = tree_.Root();
+        if (root && root->NumEdges() > 0) {
+            const Edge* edges = root->Edges();
+            for (int i = 0; i < root->NumEdges(); ++i) {
+                Node* child = edges[i].child.load(std::memory_order_relaxed);
+                kld_stats.edge_n.push_back(child ? child->GetN() : 0);
+            }
+            if (kld_stopper_->ShouldStop(kld_stats)) return true;
         }
     }
 
