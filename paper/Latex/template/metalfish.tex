@@ -111,11 +111,11 @@ Our approach differs in that both search paradigms run as fully independent para
 
 Our system comprises three search engines sharing a common UCI~\cite{uci} interface, position representation, and neural network backends. Fig.~\ref{fig:architecture} illustrates the overall design.
 
-\begin{figure}[t]
+\begin{figure}[H]
 \centering
 \begin{tikzpicture}[
-    node distance=1.2cm and 1.5cm,
-    block/.style={rectangle, draw, rounded corners, minimum width=2.8cm, minimum height=0.9cm, align=center, font=\small},
+    node distance=1.0cm and 1.8cm,
+    block/.style={rectangle, draw, rounded corners, minimum width=2.6cm, minimum height=0.8cm, align=center, font=\small},
     gpu/.style={block, fill=blue!15},
     cpu/.style={block, fill=orange!15},
     hybrid/.style={block, fill=green!15},
@@ -129,32 +129,32 @@ Our system comprises three search engines sharing a common UCI~\cite{uci} interf
     \node[block, below=0.8cm of uci] (classifier) {Position Classifier};
     
     % Three engines
-    \node[cpu, below left=1cm and 2cm of classifier] (ab) {Alpha-Beta\\Engine};
-    \node[gpu, below=1cm of classifier] (mcts) {MCTS\\Engine};
-    \node[hybrid, below right=1cm and 2cm of classifier] (hybrid) {Hybrid\\Coordinator};
+    \node[cpu, below left=1.0cm and 2.2cm of classifier] (ab) {Alpha-Beta\\Engine};
+    \node[gpu, below=1.0cm of classifier] (mcts) {MCTS\\Engine};
+    \node[hybrid, below right=1.0cm and 2.2cm of classifier] (hybride) {Hybrid\\Coordinator};
     
     % Shared state
-    \node[shared, below=1.2cm of mcts] (state) {Lock-Free\\Shared State};
+    \node[shared, below=1.0cm of mcts] (state) {Lock-Free\\Shared State};
     
-    % Backend components
-    \node[cpu, below left=1cm and 0.5cm of state] (nnue) {NNUE\\Evaluation};
-    \node[gpu, below right=1cm and 0.5cm of state] (transformer) {Transformer\\(MPSGraph)};
+    % Backend components side by side below shared state
+    \node[cpu, below left=1.2cm and 1.5cm of state] (nnue) {NNUE\\Evaluation (CPU)};
+    \node[gpu, below right=1.2cm and 1.5cm of state] (transformer) {Transformer\\(Metal GPU)};
     
-    % Unified memory
-    \node[block, fill=gray!15, below=0.8cm of state, minimum width=7cm] (memory) {Apple Silicon Unified Memory};
+    % Unified memory bar at very bottom
+    \node[block, fill=gray!15, below=2.8cm of state, minimum width=9cm] (memory) {Apple Silicon Unified Memory};
     
     % Arrows
     \draw[arrow] (uci) -- (classifier);
     \draw[arrow] (classifier) -- (ab);
     \draw[arrow] (classifier) -- (mcts);
-    \draw[arrow] (classifier) -- (hybrid);
+    \draw[arrow] (classifier) -- (hybride);
     \draw[arrow] (ab) -- (state);
     \draw[arrow] (mcts) -- (state);
-    \draw[arrow] (hybrid) -- (state);
+    \draw[arrow] (hybride) -- (state);
     \draw[arrow] (state) -- (nnue);
     \draw[arrow] (state) -- (transformer);
-    \draw[arrow, dashed] (nnue) -- (memory);
-    \draw[arrow, dashed] (transformer) -- (memory);
+    \draw[arrow] (nnue) -- (memory);
+    \draw[arrow] (transformer) -- (memory);
     
 \end{tikzpicture}
 \caption{System architecture. The UCI layer routes positions to one of three engines. The hybrid coordinator runs alpha-beta and MCTS in parallel, sharing results through cache-line-aligned atomic state in unified memory. NNUE runs on CPU; transformer inference runs on the Metal GPU via MPSGraph.}
@@ -186,7 +186,7 @@ The MCTS engine implements PUCT (Polynomial Upper Confidence Trees) selection~\c
 
 The hybrid engine coordinates alpha-beta and MCTS running simultaneously:
 
-\begin{algorithm}[t]
+\begin{algorithm}[H]
 \caption{Parallel Hybrid Search}
 \label{alg:hybrid}
 \begin{algorithmic}[1]
@@ -219,7 +219,7 @@ The position classifier analyzes tactical features (checks, captures, piece tens
 
 The MCTS engine required several Apple Silicon-specific optimizations to achieve competitive performance. Table~\ref{tab:optimizations} summarizes the impact of each optimization.
 
-\begin{table}[t]
+\begin{table}[H]
 \centering
 \caption{Impact of Apple Silicon optimizations on MCTS throughput. Baseline: original implementation with \texttt{std::mutex} nodes, per-iteration heap allocation, and 16KB policy tables. Measured on Apple M2~Max at 2~threads.}
 \label{tab:optimizations}
@@ -285,7 +285,7 @@ The engine auto-detects transformer weights by scanning the \texttt{networks/} d
 
 We evaluated all engines on the 24-position Bratko-Kopec~\cite{bratko1982advice} test suite at 10~seconds per position. Results are shown in Table~\ref{tab:tactical}.
 
-\begin{table}[t]
+\begin{table}[H]
 \centering
 \caption{Bratko-Kopec tactical test suite results (24 positions, 10s/position). Solve rate indicates percentage of positions where the engine found the known best move.}
 \label{tab:tactical}
@@ -306,7 +306,7 @@ MetalFish-AB matches Stockfish exactly at 20/24, with 100\% bestmove agreement (
 
 Table~\ref{tab:agreement} shows the bestmove agreement matrix. The 100\% agreement between MetalFish-AB and Stockfish validates our alpha-beta implementation. The 95.8\% agreement between the hybrid engine and Lc0 suggests the hybrid's decision-making is heavily influenced by its neural network component.
 
-\begin{table}[t]
+\begin{table}[H]
 \centering
 \caption{Bestmove agreement matrix on BK suite (24 positions). Each cell shows the percentage of positions where both engines chose the same move.}
 \label{tab:agreement}
@@ -328,7 +328,7 @@ Stockfish & & & & & --- \\
 
 Table~\ref{tab:nps} compares MetalFish-MCTS and Lc0 throughput using the same BT4 transformer network at 2~threads. MetalFish achieves 1.26$\times$ higher average throughput, with the largest advantage in middlegame positions (5.5$\times$) where the cooperative batching amortizes GPU dispatch overhead across more diverse leaf positions.
 
-\begin{table}[t]
+\begin{table}[H]
 \centering
 \caption{NPS throughput comparison: MetalFish-MCTS vs.\ Lc0 (same BT4 network, 2 threads, 10s/position). Speedup is MetalFish NPS / Lc0 NPS.}
 \label{tab:nps}
@@ -351,7 +351,7 @@ Rook endgame       & 164  & 111 & 1.48$\times$ \\
 
 We conducted a comprehensive tournament of 322 games across 33 matches at 300s + 0.1s time control on M1~Ultra instances. Each of our three engines played against all 10 reference opponents plus each other. Results are shown in Table~\ref{tab:tournament} and the estimated Elo ratings in Fig.~\ref{fig:elo}.
 
-\begin{table}[t]
+\begin{table}[H]
 \centering
 \caption{Tournament results: MetalFish engines vs.\ reference opponents (322 games, 300+0.1s TC, M1 Ultra, 10 threads). W/D/L from MetalFish's perspective.}
 \label{tab:tournament}
@@ -393,7 +393,7 @@ We conducted a comprehensive tournament of 322 games across 33 matches at 300s +
 \end{tabular}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure}[H]
 \centering
 \begin{tikzpicture}
 \begin{axis}[
@@ -439,7 +439,7 @@ We conducted a comprehensive tournament of 322 games across 33 matches at 300s +
 
 Table~\ref{tab:internal} shows direct comparisons between our three engine modes. The alpha-beta engine dominates, but the hybrid engine shows a clear advantage over pure MCTS, validating the hybrid approach.
 
-\begin{table}[t]
+\begin{table}[H]
 \centering
 \caption{Internal head-to-head results (5 games each, 300+0.1s TC).}
 \label{tab:internal}
