@@ -40,25 +40,16 @@ inline uint64_t Mix64(uint64_t x) {
     return x;
 }
 
+// Hash only current position (not full history) to enable transposition hits across move orders.
 uint64_t ComputePositionCacheKey(const Position* const* history, int count) {
+    if (count <= 0 || !history[count - 1]) return kFNVOffset;
+    const Position* current = history[count - 1];
     uint64_t key = kFNVOffset;
-    key ^= Mix64(static_cast<uint64_t>(count));
+    key ^= Mix64(current->raw_key());
     key *= kFNVPrime;
-
-    for (int i = 0; i < count; ++i) {
-        const Position* p = history[i];
-        if (!p) continue;
-        key ^= Mix64(p->raw_key());
-        key *= kFNVPrime;
-        key ^= Mix64(static_cast<uint64_t>(p->rule50_count()));
-        key *= kFNVPrime;
-        key ^= Mix64(static_cast<uint64_t>(p->side_to_move()));
-        key *= kFNVPrime;
-        key ^= Mix64(static_cast<uint64_t>(
-            static_cast<int64_t>(p->repetition_distance())));
-        key *= kFNVPrime;
-    }
-
+    key ^= Mix64(static_cast<uint64_t>(
+        static_cast<int64_t>(current->repetition_distance())));
+    key *= kFNVPrime;
     return key;
 }
 

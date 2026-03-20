@@ -107,6 +107,39 @@ void test_deterministic_repro(TestCounter &tc) {
   expect(b1 == b2, "bestmove should match across deterministic runs", tc);
 }
 
+void test_cache_hit_rate(TestCounter &tc) {
+  std::cout << "  Cache hit rate..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  SearchParams params;
+  params.num_threads = 1;
+  params.nn_weights_path = weights;
+  params.add_dirichlet_noise = false;
+  params.out_of_order_eval = false;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 256;
+  const std::string fen =
+      "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3";
+
+  auto search = CreateSearch(params);
+  search->StartSearch(fen, limits, nullptr, nullptr);
+  search->Wait();
+
+  const auto &stats = search->Stats();
+  uint64_t hits = stats.cache_hits.load();
+  uint64_t misses = stats.cache_misses.load();
+  uint64_t total_lookups = hits + misses;
+  double hit_rate = total_lookups > 0 ? 100.0 * hits / total_lookups : 0.0;
+  std::cout << "    Cache hits: " << hits << " / " << total_lookups
+            << " lookups (" << hit_rate << "%)" << std::endl;
+  expect(hit_rate > 5.0, "cache hit rate > 5%", tc);
+}
+
 } // namespace
 
 bool test_mcts_all() {
@@ -117,6 +150,7 @@ bool test_mcts_all() {
   test_search_params_defaults(tc);
   test_root_search_smoke(tc);
   test_deterministic_repro(tc);
+  test_cache_hit_rate(tc);
 
   std::cout << "  Passed: " << tc.passed << ", Failed: " << tc.failed
             << std::endl;
