@@ -674,7 +674,10 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
             }
             if (params_.add_dirichlet_noise && leaf == tree_.Root())
                 AddDirichletNoise(leaf);
-            value = -result.value;
+            {
+                WDLRescaler rescaler{params_.wdl_rescale_ratio, params_.wdl_rescale_diff};
+                value = -rescaler.Rescale(result.value);
+            }
             draw = result.has_wdl ? result.wdl[1] : 0.0f;
             moves_left_val = result.has_moves_left ? result.moves_left : 30.0f;
         } else {
@@ -688,7 +691,10 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
             }
             if (params_.add_dirichlet_noise && leaf == tree_.Root())
                 AddDirichletNoise(leaf);
-            value = -result.value;
+            {
+                WDLRescaler rescaler{params_.wdl_rescale_ratio, params_.wdl_rescale_diff};
+                value = -rescaler.Rescale(result.value);
+            }
             draw = result.has_wdl ? result.wdl[1] : 0.0f;
             moves_left_val = result.has_moves_left ? result.moves_left : 30.0f;
             stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
@@ -868,7 +874,11 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
             }
             if (params_.add_dirichlet_noise && leaf == tree_.Root())
                 AddDirichletNoise(leaf);
-            float v = -result.value;
+            float v;
+            {
+                WDLRescaler rescaler{params_.wdl_rescale_ratio, params_.wdl_rescale_diff};
+                v = -rescaler.Rescale(result.value);
+            }
             float d = result.has_wdl ? result.wdl[1] : 0.0f;
             float ml = result.has_moves_left ? result.moves_left : 30.0f;
             Backpropagate(leaf, v, d, ml, multivisit);
@@ -928,7 +938,11 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
             }
         }
 
-        float v = -result.value;
+        float v;
+        {
+            WDLRescaler rescaler{params_.wdl_rescale_ratio, params_.wdl_rescale_diff};
+            v = -rescaler.Rescale(result.value);
+        }
         float d = result.has_wdl ? result.wdl[1] : 0.0f;
         float ml = result.has_moves_left ? result.moves_left : 30.0f;
 

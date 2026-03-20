@@ -58,6 +58,10 @@ struct SearchParams {
     bool  sticky_endgames = true;
     float draw_score = 0.0f;
 
+    // WDL rescaling (ratio=1.0 means no rescaling)
+    float wdl_rescale_ratio = 1.0f;
+    float wdl_rescale_diff = 0.0f;
+
     // Temperature for final move selection (0 = always best, >0 = sample)
     float temperature = 0.0f;
     float temp_winpct_cutoff = 50.0f;

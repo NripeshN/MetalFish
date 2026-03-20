@@ -131,6 +131,23 @@ private:
 };
 
 // ============================================================================
+// WDL Rescaling
+// ============================================================================
+
+struct WDLRescaler {
+    float ratio;
+    float diff;
+
+    bool IsActive() const { return ratio != 1.0f || diff != 0.0f; }
+
+    float Rescale(float q) const {
+        if (!IsActive()) return q;
+        float clamped = std::clamp(q, -0.9999f, 0.9999f);
+        return std::tanh(std::atanh(clamped) * ratio + diff);
+    }
+};
+
+// ============================================================================
 // Score Transformation
 // ============================================================================
 
