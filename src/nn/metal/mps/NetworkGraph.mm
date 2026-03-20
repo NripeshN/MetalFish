@@ -125,9 +125,10 @@ static const NSInteger kMinSubBatchSize = 20;
                        inputs:(float *__nonnull)inputs
                         masks:(uint64_t *__nonnull)masks
                       outputs:(float *__nonnull *__nonnull)outputBuffers {
-  // Calculate number of sub-batches to split across GPU command buffers for
-  // parallel execution. Shouldn't be more than kMaxInflightBuffers and each
-  // sub-batch shouldn't be smaller than kMinSubBatchSize.
+  // Clear stale GPU-backed result dictionaries from previous inference calls
+  // to prevent Metal resource accumulation across sequential evaluations.
+  [_resultDataDicts removeAllObjects];
+
   NSUInteger splits = (batchSize + kMinSubBatchSize + 1) / kMinSubBatchSize;
   if (splits > kMaxInflightBuffers)
     splits = kMaxInflightBuffers;
@@ -135,26 +136,27 @@ static const NSInteger kMinSubBatchSize = 20;
   NSUInteger inputDataLength =
       subBatchSize * [_inputTensor sizeOfDimensionsFrom:@1];
 
-  // Split batchSize into smaller sub-batches and run using double-buffering.
   NSUInteger subBatch = 0;
   MPSCommandBuffer *commandBuffer;
   for (subBatch = 0; subBatch < splits - 1; subBatch++) {
-    commandBuffer =
+    @autoreleasepool {
+      commandBuffer =
+          [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
+                                       masks:masks + subBatch * inputDataLength
+                                    subBatch:subBatch
+                                subBatchSize:subBatchSize];
+    }
+  }
+  @autoreleasepool {
+    MPSCommandBuffer *latestCommandBuffer =
         [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
                                      masks:masks + subBatch * inputDataLength
                                   subBatch:subBatch
-                              subBatchSize:subBatchSize];
-  }
-  // Last sub-batch may be smaller or larger than others.
-  MPSCommandBuffer *latestCommandBuffer =
-      [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
-                                   masks:masks + subBatch * inputDataLength
-                                subBatch:subBatch
-                            subBatchSize:batchSize - subBatch * subBatchSize];
+                              subBatchSize:batchSize - subBatch * subBatchSize];
 
-  // Wait for the last batch to be processed.
-  [latestCommandBuffer waitUntilCompleted];
+    [latestCommandBuffer waitUntilCompleted];
     [commandBuffer waitUntilCompleted];
+  }
 
   [self copyResultsToBuffers:outputBuffers subBatchSize:subBatchSize];
 
