@@ -88,9 +88,10 @@ struct SearchParams {
     float max_collision_visits_scaling_power = 1.25f;
     bool out_of_order_eval = true;
 
-    // KLD gain stopper (stop when visit distribution converges)
-    bool use_kld_gain_stopper = true;
-    float kld_gain_min = 0.00001f;
+    // KLD gain stopper (disabled by default, matching lc0)
+    // Set kld_gain_min > 0 to enable (e.g. 0.00001)
+    bool use_kld_gain_stopper = false;
+    float kld_gain_min = 0.0f;
     int kld_gain_average_interval = 100;
 
     // NNCache
