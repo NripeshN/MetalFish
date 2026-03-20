@@ -9,6 +9,7 @@
 #include "core.h"
 
 #include "../core/movegen.h"
+#include "../syzygy/tbprobe.h"
 #include "../uci/uci.h"
 
 #include <algorithm>
@@ -588,6 +589,34 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
             return;
         }
 
+        if (Tablebases::MaxCardinality > 0 &&
+            !ctx.pos.can_castle(ANY_CASTLING) &&
+            ctx.pos.rule50_count() == 0 &&
+            popcount(ctx.pos.pieces()) <= Tablebases::MaxCardinality) {
+            Tablebases::ProbeState state;
+            Tablebases::WDLScore wdl = Tablebases::probe_wdl(ctx.pos, &state);
+            if (state != Tablebases::FAIL) {
+                float tb_value, tb_draw;
+                if (wdl > 0) {
+                    tb_value = 1.0f; tb_draw = 0.0f;
+                } else if (wdl < 0) {
+                    tb_value = -1.0f; tb_draw = 0.0f;
+                } else {
+                    tb_value = 0.0f; tb_draw = 1.0f;
+                }
+                float tb_m = 0.0f;
+                if (leaf->Parent()) {
+                    tb_m = std::max(0.0f, leaf->Parent()->GetM() - 1.0f);
+                }
+                leaf->MakeTerminal(Node::Terminal::Tablebase, tb_value, tb_draw, tb_m);
+                leaf->FinalizeScoreUpdate(tb_value, tb_draw, tb_m, multivisit);
+                if (leaf->Parent())
+                    Backpropagate(leaf->Parent(), -tb_value, tb_draw, tb_m + 1.0f, multivisit);
+                stats_.total_nodes.fetch_add(multivisit, std::memory_order_relaxed);
+                return;
+            }
+        }
+
         float rep_moves_left = 0.0f;
         Node::Terminal rep_terminal = Node::Terminal::EndOfGame;
         const int plies_from_root = static_cast<int>(ctx.move_stack.size());
@@ -745,6 +774,36 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
                 out_of_order_count++;
                 if (out_of_order_count >= max_out_of_order) break;
                 continue;
+            }
+
+            if (Tablebases::MaxCardinality > 0 &&
+                !ctx.pos.can_castle(ANY_CASTLING) &&
+                ctx.pos.rule50_count() == 0 &&
+                popcount(ctx.pos.pieces()) <= Tablebases::MaxCardinality) {
+                Tablebases::ProbeState state;
+                Tablebases::WDLScore wdl = Tablebases::probe_wdl(ctx.pos, &state);
+                if (state != Tablebases::FAIL) {
+                    float tb_value, tb_draw;
+                    if (wdl > 0) {
+                        tb_value = 1.0f; tb_draw = 0.0f;
+                    } else if (wdl < 0) {
+                        tb_value = -1.0f; tb_draw = 0.0f;
+                    } else {
+                        tb_value = 0.0f; tb_draw = 1.0f;
+                    }
+                    float tb_m = 0.0f;
+                    if (leaf->Parent()) {
+                        tb_m = std::max(0.0f, leaf->Parent()->GetM() - 1.0f);
+                    }
+                    leaf->MakeTerminal(Node::Terminal::Tablebase, tb_value, tb_draw, tb_m);
+                    leaf->FinalizeScoreUpdate(tb_value, tb_draw, tb_m, multivisit);
+                    if (leaf->Parent())
+                        Backpropagate(leaf->Parent(), -tb_value, tb_draw, tb_m + 1.0f, multivisit);
+                    stats_.total_nodes.fetch_add(multivisit, std::memory_order_relaxed);
+                    out_of_order_count++;
+                    if (out_of_order_count >= max_out_of_order) break;
+                    continue;
+                }
             }
 
             float rep_moves_left = 0.0f;
