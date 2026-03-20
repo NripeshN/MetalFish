@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  20 MAR 2026 13:38
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  20 MAR 2026 13:42
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -185,6 +185,9 @@ Package: float 2001/11/08 v1.3d Float enhancements (AL)
 \float@box=\box100
 \@float@everytoks=\toks23
 \@floatcapt=\box101
+)
+(/usr/local/texlive/2025/texmf-dist/tex/latex/placeins/placeins.sty
+Package: placeins 2005/04/18  v 2.2
 )
 (/usr/local/texlive/2025/texmf-dist/tex/latex/amsmath/amsmath.sty
 Package: amsmath 2024/11/05 v2.17t AMS math features
@@ -831,20 +834,20 @@ File: l3backend-pdftex.def 2024-05-08 L3 backend support: PDF output (pdfTeX)
 (./metalfish.aux)
 \openout1 = `metalfish.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 27.
-LaTeX Font Info:    ... okay on input line 27.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 27.
-LaTeX Font Info:    ... okay on input line 27.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 27.
-LaTeX Font Info:    ... okay on input line 27.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 27.
-LaTeX Font Info:    ... okay on input line 27.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 27.
-LaTeX Font Info:    ... okay on input line 27.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 27.
-LaTeX Font Info:    ... okay on input line 27.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 27.
-LaTeX Font Info:    ... okay on input line 27.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 28.
+LaTeX Font Info:    ... okay on input line 28.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 28.
+LaTeX Font Info:    ... okay on input line 28.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 28.
+LaTeX Font Info:    ... okay on input line 28.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 28.
+LaTeX Font Info:    ... okay on input line 28.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 28.
+LaTeX Font Info:    ... okay on input line 28.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 28.
+LaTeX Font Info:    ... okay on input line 28.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 28.
+LaTeX Font Info:    ... okay on input line 28.
 
 (/usr/local/texlive/2025/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
 [Loading MPS to PDF converter (version 2006.09.02).]
@@ -876,13 +879,13 @@ s been generated with the most recent feature set (\pgfplotsset{compat=1.18}).
 Package caption Info: Begin \AtBeginDocument code.
 Package caption Info: End \AtBeginDocument code.
 
-Overfull \hbox (28.3006pt too wide) in paragraph at lines 46--47
+Overfull \hbox (28.3006pt too wide) in paragraph at lines 47--48
 \OT1/cmr/m/n/9 128 to 64 bytes), pre-allocated his-tory buffers, and Lc0-style 
 time management---
  []
 
 
-Overfull \hbox (11.4681pt too wide) in paragraph at lines 46--47
+Overfull \hbox (11.4681pt too wide) in paragraph at lines 47--48
 \OT1/cmr/m/n/9 improved multi-threaded MCTS through-put from 2 to 148 NPS at 2 
 threads,
  []
@@ -895,94 +898,79 @@ threads,
 {/usr/local/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map}]
 
 [2]
-Overfull \hbox (5.89612pt too wide) in paragraph at lines 159--160
+Overfull \hbox (5.89612pt too wide) in paragraph at lines 161--162
  [][] 
  []
 
 
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
-
-
-[3]
-Overfull \hbox (11.0972pt too wide) in paragraph at lines 169--170
+Overfull \hbox (11.0972pt too wide) in paragraph at lines 171--172
 \OT1/cmr/m/n/10 and 9.8M NPS on M1 Ul-tra, demon-strat-ing near-linear scal-ing
  (7.24$\OMS/cmsy/m/n/10 ^^B$ \OT1/cmr/m/n/10 on 8 threads).
  []
 
 
 
+[3]
+
 [4]
-Overfull \hbox (1.18146pt too wide) in paragraph at lines 220--221
+Overfull \hbox (1.18146pt too wide) in paragraph at lines 223--224
 \OT1/cmr/m/n/10 The MCTS en-gine re-quired sev-eral Ap-ple Silicon-specific op-
 ti-miza-tions to achieve
  []
 
 
-
-[5]
-Overfull \hbox (18.59883pt too wide) in paragraph at lines 242--243
+Overfull \hbox (18.59883pt too wide) in paragraph at lines 245--246
 \OT1/cmr/m/n/10 The most im-pact-ful op-ti-miza-tion re-placed \OT1/cmtt/m/n/10
  std::mutex \OT1/cmr/m/n/10 (64 bytes on Dar-win/ARM64)
  []
 
 
 
+[5]
+
 [6]
-Overfull \hbox (26.62608pt too wide) in paragraph at lines 279--280
+Overfull \hbox (26.62608pt too wide) in paragraph at lines 283--284
 \OT1/cmr/m/n/10 (alpha-beta with NNUE), MetalFish-MCTS (pure trans-former MCTS)
 , and MetalFish-
  []
 
 
-
-[7]
-Overfull \hbox (1.7371pt too wide) in paragraph at lines 305--306
+Overfull \hbox (1.7371pt too wide) in paragraph at lines 309--310
 []\OT1/cmr/m/n/10 MetalFish-AB matches Stock-fish ex-actly at 20/24, with 100% 
 best-move agree-
  []
 
 
-Underfull \vbox (badness 6268) has occurred while \output is active []
 
-
-
-[8]
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
-
-
-[9]
-Overfull \hbox (15.35585pt too wide) in paragraph at lines 432--433
+[7]
+Overfull \hbox (15.35585pt too wide) in paragraph at lines 438--439
  [][] 
  []
 
 
-Underfull \hbox (badness 1052) in paragraph at lines 433--433
+Underfull \hbox (badness 1052) in paragraph at lines 439--439
 \OT1/cmr/m/n/10 strongest, fol-lowed by Stock-fish ($\OMS/cmsy/m/n/10 ^^X$\OT1/
 cmr/m/n/10 3800), MetalFish-Hybrid ($\OMS/cmsy/m/n/10 ^^X$\OT1/cmr/m/n/10 3724)
 , and
  []
 
 
-Underfull \vbox (badness 10000) has occurred while \output is active []
 
+[8]
 
+[9]
 
 [10]
-Overfull \hbox (3.0705pt too wide) in paragraph at lines 467--468
+Overfull \hbox (3.0705pt too wide) in paragraph at lines 475--476
 \OT1/cmr/m/n/10 The hy-brid en-gine ($\OMS/cmsy/m/n/10 ^^X$\OT1/cmr/m/n/10 3724
  Elo) is sub-stan-tially stronger than pure MCTS ($\OMS/cmsy/m/n/10 ^^X$\OT1/cm
 r/m/n/10 3289)
  []
 
 
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
-
 
 [11]
-Overfull \hbox (2.83118pt too wide) in paragraph at lines 485--486
+Overfull \hbox (2.83118pt too wide) in paragraph at lines 493--494
 \OT1/cmr/m/n/10 plicit syn-chro-niza-tion; and (3) \OT1/cmr/m/it/10 ef-fi-cient
  con-text switch-ing \OT1/cmr/m/n/10 where \OT1/cmtt/m/n/10 os[]unfair[]lock\OT
 1/cmr/m/n/10 's
@@ -991,35 +979,33 @@ Overfull \hbox (2.83118pt too wide) in paragraph at lines 485--486
 
 
 [12]
-
-[13]
-Underfull \hbox (badness 10000) in paragraph at lines 539--540
+Underfull \hbox (badness 10000) in paragraph at lines 547--548
 []\OT1/cmr/m/n/9 Apple Inc.: Ap-ple M1 chip. $https : / / www . apple . com / n
 ewsroom / 2020 / 11 /
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 551--552
+Underfull \hbox (badness 10000) in paragraph at lines 559--560
 []\OT1/cmr/m/n/9 Huber, S.: Uni-ver-sal Chess In-ter-face pro-to-col spec-i-fi-
 ca-tion. $http :
  []
 
 
 
-[14] (./metalfish.aux)
+[13] (./metalfish.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 28258 strings out of 473190
- 705306 string characters out of 5715801
- 1199442 words of memory out of 5000000
- 51096 multiletter control sequences out of 15000+600000
+ 28283 strings out of 473190
+ 705957 string characters out of 5715801
+ 1204670 words of memory out of 5000000
+ 51117 multiletter control sequences out of 15000+600000
  564374 words of font info for 56 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 84i,12n,87p,1351b,2322s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 84i,12n,87p,1351b,2326s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb
 ></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb>
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></
@@ -1037,10 +1023,10 @@ ve/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/
 5/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/2025
 /texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/2025/
 texmf-dist/fonts/type1/public/amsfonts/cm/cmtt9.pfb>
-Output written on metalfish.pdf (14 pages, 258483 bytes).
+Output written on metalfish.pdf (13 pages, 258052 bytes).
 PDF statistics:
- 138 PDF objects out of 1000 (max. 8388607)
- 87 compressed objects within 1 object stream
+ 135 PDF objects out of 1000 (max. 8388607)
+ 85 compressed objects within 1 object stream
  0 named destinations out of 1000 (max. 500000)
  13 words of extra memory for PDF output out of 10000 (max. 10000000)
 

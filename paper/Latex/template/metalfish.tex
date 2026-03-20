@@ -11,6 +11,7 @@
 \def\UrlFont{\rmfamily}
 \usepackage{graphicx}
 \usepackage{float}
+\usepackage{placeins}
 \usepackage{amsmath}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
@@ -106,12 +107,13 @@ Our approach differs in that both search paradigms run as fully independent para
 % 3. SYSTEM ARCHITECTURE
 % ===========================================================================
 
+\FloatBarrier
 \section{System Architecture}
 \label{sec:architecture}
 
 Our system comprises three search engines sharing a common UCI~\cite{uci} interface, position representation, and neural network backends. Fig.~\ref{fig:architecture} illustrates the overall design.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \begin{tikzpicture}[
     node distance=1.0cm and 1.8cm,
@@ -186,7 +188,7 @@ The MCTS engine implements PUCT (Polynomial Upper Confidence Trees) selection~\c
 
 The hybrid engine coordinates alpha-beta and MCTS running simultaneously:
 
-\begin{algorithm}[H]
+\begin{algorithm}[!htbp]
 \caption{Parallel Hybrid Search}
 \label{alg:hybrid}
 \begin{algorithmic}[1]
@@ -214,12 +216,13 @@ The position classifier analyzes tactical features (checks, captures, piece tens
 % 4. APPLE SILICON OPTIMIZATIONS
 % ===========================================================================
 
+\FloatBarrier
 \section{Apple Silicon Optimizations}
 \label{sec:optimizations}
 
 The MCTS engine required several Apple Silicon-specific optimizations to achieve competitive performance. Table~\ref{tab:optimizations} summarizes the impact of each optimization.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Impact of Apple Silicon optimizations on MCTS throughput. Baseline: original implementation with \texttt{std::mutex} nodes, per-iteration heap allocation, and 16KB policy tables. Measured on Apple M2~Max at 2~threads.}
 \label{tab:optimizations}
@@ -268,6 +271,7 @@ The engine auto-detects transformer weights by scanning the \texttt{networks/} d
 % 5. EXPERIMENTAL EVALUATION
 % ===========================================================================
 
+\FloatBarrier
 \section{Experimental Evaluation}
 \label{sec:evaluation}
 
@@ -285,7 +289,7 @@ The engine auto-detects transformer weights by scanning the \texttt{networks/} d
 
 We evaluated all engines on the 24-position Bratko-Kopec~\cite{bratko1982advice} test suite at 10~seconds per position. Results are shown in Table~\ref{tab:tactical}.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Bratko-Kopec tactical test suite results (24 positions, 10s/position). Solve rate indicates percentage of positions where the engine found the known best move.}
 \label{tab:tactical}
@@ -306,7 +310,7 @@ MetalFish-AB matches Stockfish exactly at 20/24, with 100\% bestmove agreement (
 
 Table~\ref{tab:agreement} shows the bestmove agreement matrix. The 100\% agreement between MetalFish-AB and Stockfish validates our alpha-beta implementation. The 95.8\% agreement between the hybrid engine and Lc0 suggests the hybrid's decision-making is heavily influenced by its neural network component.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Bestmove agreement matrix on BK suite (24 positions). Each cell shows the percentage of positions where both engines chose the same move.}
 \label{tab:agreement}
@@ -323,12 +327,13 @@ Stockfish & & & & & --- \\
 \end{tabular}
 \end{table}
 
+\FloatBarrier
 \subsection{MCTS Throughput}
 \label{sec:eval-throughput}
 
 Table~\ref{tab:nps} compares MetalFish-MCTS and Lc0 throughput using the same BT4 transformer network at 2~threads. MetalFish achieves 1.26$\times$ higher average throughput, with the largest advantage in middlegame positions (5.5$\times$) where the cooperative batching amortizes GPU dispatch overhead across more diverse leaf positions.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{NPS throughput comparison: MetalFish-MCTS vs.\ Lc0 (same BT4 network, 2 threads, 10s/position). Speedup is MetalFish NPS / Lc0 NPS.}
 \label{tab:nps}
@@ -346,12 +351,13 @@ Rook endgame       & 164  & 111 & 1.48$\times$ \\
 \end{tabular}
 \end{table}
 
+\FloatBarrier
 \subsection{Tournament Results}
 \label{sec:eval-tournament}
 
 We conducted a comprehensive tournament of 322 games across 33 matches at 300s + 0.1s time control on M1~Ultra instances. Each of our three engines played against all 10 reference opponents plus each other. Results are shown in Table~\ref{tab:tournament} and the estimated Elo ratings in Fig.~\ref{fig:elo}.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Tournament results: MetalFish engines vs.\ reference opponents (322 games, 300+0.1s TC, M1 Ultra, 10 threads). W/D/L from MetalFish's perspective.}
 \label{tab:tournament}
@@ -393,7 +399,7 @@ We conducted a comprehensive tournament of 322 games across 33 matches at 300s +
 \end{tabular}
 \end{table}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \begin{tikzpicture}
 \begin{axis}[
@@ -434,12 +440,13 @@ We conducted a comprehensive tournament of 322 games across 33 matches at 300s +
 \label{fig:elo}
 \end{figure}
 
+\FloatBarrier
 \subsection{Internal Head-to-Head}
 \label{sec:eval-internal}
 
 Table~\ref{tab:internal} shows direct comparisons between our three engine modes. The alpha-beta engine dominates, but the hybrid engine shows a clear advantage over pure MCTS, validating the hybrid approach.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering
 \caption{Internal head-to-head results (5 games each, 300+0.1s TC).}
 \label{tab:internal}
@@ -459,6 +466,7 @@ Hybrid vs.\ MCTS & 5-0-0 & 5.0/5 (100\%) & $>$+400 \\
 % 6. DISCUSSION
 % ===========================================================================
 
+\FloatBarrier
 \section{Discussion}
 \label{sec:discussion}
 
