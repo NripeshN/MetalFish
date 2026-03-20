@@ -493,6 +493,7 @@ bool Search::ShouldStop() const {
         if (elapsed >= time_budget_ms_) return true;
 
         if (params_.smart_pruning_factor > 0.0f &&
+            stats_.total_nodes.load(std::memory_order_relaxed) > 100 &&
             stats_.total_nodes.load(std::memory_order_relaxed) % 32 == 0) {
             const Node* root = tree_.Root();
             if (root && root->NumEdges() > 0) {
@@ -533,14 +534,17 @@ bool Search::ShouldStop() const {
         }
     }
 
-    // Mate detection: stop immediately if a proven win is found at root
+    // Mate detection: stop immediately if a proven checkmate is found at root
     {
         const Node* root = tree_.Root();
-        if (root && root->NumEdges() > 0) {
+        if (root && root->NumEdges() > 0 &&
+            root->GetN() > 100) { // Only check after meaningful search
             const Edge* edges = root->Edges();
             for (int i = 0; i < root->NumEdges(); ++i) {
                 Node* child = edges[i].child.load(std::memory_order_relaxed);
-                if (child && child->IsTerminal() && child->GetWL() > 0.5f) {
+                if (child && child->IsTerminal() &&
+                    child->GetTerminalType() == Node::Terminal::EndOfGame &&
+                    child->GetWL() > 0.99f) {
                     return true;
                 }
             }

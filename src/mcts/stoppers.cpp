@@ -95,6 +95,10 @@ KLDGainStopper::KLDGainStopper(float min_gain, int average_interval)
 
 bool KLDGainStopper::ShouldStop(const SearchStats &stats) {
   const double new_child_nodes = static_cast<double>(stats.total_nodes) - 1.0;
+
+  // Don't trigger before a minimum number of nodes (need meaningful distribution)
+  if (new_child_nodes < 500) return false;
+
   if (new_child_nodes < prev_child_nodes_ + average_interval_) return false;
 
   const auto& new_visits = stats.edge_n;
