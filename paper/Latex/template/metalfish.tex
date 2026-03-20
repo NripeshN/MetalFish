@@ -349,7 +349,7 @@ We conducted a comprehensive tournament of 322 games across 33 matches at 300s +
 \centering
 \caption{Tournament results (322 games, 300+0.1s TC, M1 Ultra). W/D/L from MetalFish's perspective. Elo estimates: AB $\sim$4048, Hybrid $\sim$3724, MCTS $\sim$3289.}
 \label{tab:tournament}
-\scriptsize
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{lcccc|lcccc|lcccc}
 \toprule
 \multicolumn{5}{c|}{\textbf{MetalFish-AB}} & \multicolumn{5}{c|}{\textbf{MetalFish-Hybrid}} & \multicolumn{5}{c}{\textbf{MetalFish-MCTS}} \\
@@ -367,7 +367,8 @@ Patri. & 5 & 0 & 0 & 5/5   &        &   &   &   &       & SF     & 0 & 0 & 5 & 0
 \midrule
 \multicolumn{5}{c|}{0 losses in 110 games} & \multicolumn{5}{c|}{63W-39D-19L} & \multicolumn{5}{c}{31W-14D-76L} \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 \begin{figure}[!htbp]
