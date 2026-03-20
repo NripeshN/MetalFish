@@ -110,6 +110,14 @@ struct SearchWorkerCtx {
         hash_stack.push_back(pos.raw_key());
     }
 
+    void UndoMove() {
+        if (move_stack.empty()) return;
+        pos.undo_move(move_stack.back());
+        move_stack.pop_back();
+        state_stack.pop_back();
+        hash_stack.pop_back();
+    }
+
     // Build position history (last 8 positions) for NN encoding.
     // Reconstructs intermediate positions from the move path.
     // Caller owns the returned buffer and must keep it alive
@@ -205,6 +213,11 @@ private:
     void Backpropagate(Node* node, float value, float draw, float moves_left,
                        int multivisit = 1);
     void AddDirichletNoise(Node* root);
+
+    // Prefetch likely-needed positions into unused GPU batch slots
+    void MaybePrefetchIntoCache(SearchWorkerCtx& ctx, BackendComputation* computation);
+    int PrefetchIntoCache(Node* node, int budget, SearchWorkerCtx& ctx,
+                          BackendComputation* computation);
 
     // NN policy application
     static void ApplyNNPolicy(Node* node, const EvaluationResult& result,

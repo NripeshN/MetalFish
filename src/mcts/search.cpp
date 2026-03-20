@@ -814,6 +814,8 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
     backend_waiting_.fetch_add(1, std::memory_order_release);
     gathering_permit_.store(1, std::memory_order_release);
 
+    MaybePrefetchIntoCache(ctx, computation.get());
+
     try {
         computation->ComputeBlocking();
     } catch (...) {
@@ -1033,6 +1035,81 @@ void Search::Backpropagate(Node* node, float value, float draw,
         moves_left += 1.0f;
         node = node->Parent();
     }
+}
+
+// ============================================================================
+// Prefetch into NN Cache
+// ============================================================================
+
+void Search::MaybePrefetchIntoCache(SearchWorkerCtx& ctx, BackendComputation* computation) {
+    if (stop_flag_.load(std::memory_order_acquire)) return;
+    if (!computation || computation->UsedBatchSize() <= 0) return;
+    if (computation->UsedBatchSize() >= params_.max_prefetch) return;
+
+    int budget = params_.max_prefetch - computation->UsedBatchSize();
+    ctx.ResetToRoot();
+    PrefetchIntoCache(tree_.Root(), budget, ctx, computation);
+}
+
+int Search::PrefetchIntoCache(Node* node, int budget, SearchWorkerCtx& ctx,
+                               BackendComputation* computation) {
+    if (budget <= 0 || !node || stop_flag_.load(std::memory_order_acquire)) return 0;
+
+    if (node->GetNStarted() == 0) {
+        if (node->NumEdges() == 0) return 0;
+        auto history = ctx.BuildHistory();
+        uint64_t key = ComputePositionCacheKey(history.ptrs, history.depth);
+        computation->AddInputWithHistory(
+            std::vector<const Position*>(history.ptrs, history.ptrs + history.depth), key);
+        return 1;
+    }
+
+    if (node->GetN() == 0 || node->IsTerminal() || node->NumEdges() == 0) return 0;
+
+    int num_edges = node->NumEdges();
+    const Edge* edges = node->Edges();
+    bool is_root = (node == tree_.Root());
+
+    float cpuct = params_.GetCpuct(is_root);
+    float cpuct_base = params_.GetCpuctBase(is_root);
+    float cpuct_factor = params_.GetCpuctFactor(is_root);
+    float effective_cpuct = cpuct + cpuct_factor *
+        std::log((static_cast<float>(node->GetN()) + cpuct_base) / cpuct_base);
+    float puct_mult = effective_cpuct *
+        std::sqrt(static_cast<float>(std::max(node->GetChildrenVisits(), 1u)));
+
+    float fpu;
+    if (params_.GetFpuAbsolute(is_root)) {
+        fpu = params_.GetFpuValue(is_root);
+    } else {
+        float reduction = is_root ? params_.fpu_reduction_at_root : params_.fpu_reduction;
+        fpu = -node->GetQ(-params_.draw_score) - reduction * std::sqrt(node->GetVisitedPolicy());
+    }
+
+    int best_idx = -1;
+    float best_score = -1e9f;
+    for (int i = 0; i < num_edges && i < 8; ++i) {
+        Node* child = edges[i].child.load(std::memory_order_acquire);
+        float policy = edges[i].GetP();
+        if (policy <= 0.0f) continue;
+        float q = (child && child->GetN() > 0) ? child->GetQ(params_.draw_score) : fpu;
+        int n_started = child ? child->GetNStarted() : 0;
+        float u = puct_mult * policy / (1.0f + static_cast<float>(n_started));
+        float score = q + u;
+        if (score > best_score) {
+            best_score = score;
+            best_idx = i;
+        }
+    }
+
+    if (best_idx < 0) return 0;
+
+    Node* child = edges[best_idx].child.load(std::memory_order_acquire);
+    ctx.DoMove(edges[best_idx].move);
+    int spent = PrefetchIntoCache(child, budget, ctx, computation);
+    ctx.UndoMove();
+
+    return spent;
 }
 
 // ============================================================================
