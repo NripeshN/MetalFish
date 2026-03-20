@@ -747,6 +747,7 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
             moves_left_val = result.has_moves_left ? result.moves_left : 30.0f;
             stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
         }
+        ReleaseComputation(std::move(computation));
     } else if (leaf->NumEdges() > 0 && leaf->GetN() > 0) {
         // Collision: another thread already expanded this node.
         // Use its existing Q instead of backpropagating a fake 0.0 value.
