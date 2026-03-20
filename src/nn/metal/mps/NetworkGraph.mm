@@ -125,8 +125,6 @@ static const NSInteger kMinSubBatchSize = 20;
                        inputs:(float *__nonnull)inputs
                         masks:(uint64_t *__nonnull)masks
                       outputs:(float *__nonnull *__nonnull)outputBuffers {
-  // Clear stale GPU-backed result dictionaries from previous inference calls
-  // to prevent Metal resource accumulation across sequential evaluations.
   [_resultDataDicts removeAllObjects];
 
   NSUInteger splits = (batchSize + kMinSubBatchSize + 1) / kMinSubBatchSize;
@@ -136,31 +134,30 @@ static const NSInteger kMinSubBatchSize = 20;
   NSUInteger inputDataLength =
       subBatchSize * [_inputTensor sizeOfDimensionsFrom:@1];
 
-  NSUInteger subBatch = 0;
-  MPSCommandBuffer *commandBuffer;
-  for (subBatch = 0; subBatch < splits - 1; subBatch++) {
-    @autoreleasepool {
-      commandBuffer =
-          [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
-                                       masks:masks + subBatch * inputDataLength
-                                    subBatch:subBatch
-                                subBatchSize:subBatchSize];
-    }
-  }
-  @autoreleasepool {
-    MPSCommandBuffer *latestCommandBuffer =
+  NSMutableArray<MPSCommandBuffer *> *commandBuffers =
+      [NSMutableArray arrayWithCapacity:splits];
+
+  for (NSUInteger subBatch = 0; subBatch < splits; subBatch++) {
+    NSUInteger currentSubBatchSize =
+        (subBatch == splits - 1) ? (batchSize - subBatch * subBatchSize)
+                                 : subBatchSize;
+    MPSCommandBuffer *cb =
         [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
                                      masks:masks + subBatch * inputDataLength
                                   subBatch:subBatch
-                              subBatchSize:batchSize - subBatch * subBatchSize];
+                              subBatchSize:currentSubBatchSize];
+    [commandBuffers addObject:cb];
+  }
 
-    [latestCommandBuffer waitUntilCompleted];
-    [commandBuffer waitUntilCompleted];
+  for (MPSCommandBuffer *cb in commandBuffers) {
+    [cb waitUntilCompleted];
   }
 
   [self copyResultsToBuffers:outputBuffers subBatchSize:subBatchSize];
 
-    return _resultTensors;
+  [_resultDataDicts removeAllObjects];
+
+  return _resultTensors;
 }
 
 - (nonnull MPSCommandBuffer *)
