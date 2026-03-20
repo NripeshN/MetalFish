@@ -786,199 +786,54 @@ void ParallelHybridSearch::invoke_best_move_callback(Move best, Move ponder) {
 }
 
 Move ParallelHybridSearch::make_final_decision() {
-  Move mcts_best = mcts_state_.get_best_move();
   Move ab_best = ab_state_.get_best_move();
+  Move mcts_best = mcts_state_.get_best_move();
   int ab_score = ab_state_.best_score.load(std::memory_order_relaxed);
-  float mcts_q = mcts_state_.best_q.load(std::memory_order_relaxed);
   int ab_depth = ab_state_.completed_depth.load(std::memory_order_relaxed);
-  uint32_t mcts_visits =
-      mcts_state_.best_visits.load(std::memory_order_relaxed);
+  float mcts_q = mcts_state_.best_q.load(std::memory_order_relaxed);
+  uint32_t mcts_visits = mcts_state_.best_visits.load(std::memory_order_relaxed);
 
-  // If only one has a result, use it
-  if (mcts_best == Move::none() && ab_best != Move::none()) {
-    stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-    {
-      std::lock_guard<std::mutex> lock(pv_mutex_);
-      final_pv_.clear();
-      final_pv_.push_back(ab_best);
-    }
-    return ab_best;
-  }
+  // Rule 1: If only one engine has a result, use it
   if (ab_best == Move::none() && mcts_best != Move::none()) {
     stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-    {
-      std::lock_guard<std::mutex> lock(pv_mutex_);
-      final_pv_.clear();
-      final_pv_.push_back(mcts_best);
-    }
     return mcts_best;
   }
-  if (mcts_best == Move::none() && ab_best == Move::none()) {
-    // Fallback: find any legal move
+  if (mcts_best == Move::none() && ab_best != Move::none()) {
+    stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+    return ab_best;
+  }
+  if (ab_best == Move::none() && mcts_best == Move::none()) {
     Position pos;
     StateInfo st;
     pos.set(root_fen_, false, &st);
     MoveList<LEGAL> moves(pos);
-    if (moves.size() > 0) {
-      return *moves.begin();
-    }
-    return Move::none();
+    return moves.size() > 0 ? *moves.begin() : Move::none();
   }
 
-  // Both have results - decide based on mode
-  if (mcts_best == ab_best) {
+  // Rule 2: If both agree, use that move (highest confidence)
+  if (ab_best == mcts_best) {
     stats_.move_agreements.fetch_add(1, std::memory_order_relaxed);
-    {
-      std::lock_guard<std::mutex> lock(pv_mutex_);
-      final_pv_.clear();
-      final_pv_.push_back(ab_best);
-    }
     return ab_best;
   }
 
-  // Moves disagree - need to decide
-  // Use Q to centipawn conversion
+  // Rule 3: AB is primary. MCTS can only override when ALL conditions met:
+  //   a) MCTS has very high visit count (>10000 = reliable evaluation)
+  //   b) MCTS strongly favors its move (>200cp better than AB's score)
+  //   c) Position is NOT tactical (AB excels at tactics)
   int mcts_cp = QToNnueScore(mcts_q);
+  bool mcts_reliable = mcts_visits > 10000;
+  bool mcts_much_better = mcts_cp > ab_score + 200;
+  bool is_tactical = (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
+                      current_strategy_.position_type == PositionType::TACTICAL);
 
-  // Score comparison for decision logic
-  // Calculate confidence metrics
-  float ab_confidence = std::min(1.0f, static_cast<float>(ab_depth) / 20.0f);
-  float mcts_confidence =
-      std::min(1.0f, static_cast<float>(mcts_visits) / 50000.0f);
-
-  Move chosen;
-
-  switch (config_.decision_mode) {
-  case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
-    // Always trust AB unless MCTS strongly disagrees
-    if (mcts_cp > ab_score + 150 && mcts_confidence > 0.5f) {
-      chosen = mcts_best;
-      stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-    } else {
-      chosen = ab_best;
-      stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-    }
-    break;
-
-  case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
-    // Trust MCTS unless AB strongly disagrees
-    if (ab_score > mcts_cp + 100 && ab_confidence > 0.5f) {
-      chosen = ab_best;
-      stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-    } else {
-      chosen = mcts_best;
-      stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-    }
-    break;
-
-  case ParallelHybridConfig::DecisionMode::DYNAMIC:
-    // Use position type to decide - IMPROVED thresholds
-    if (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
-        current_strategy_.position_type == PositionType::TACTICAL) {
-      // Tactical: always trust AB unless MCTS has very high confidence
-      // and found something much better
-      if (mcts_confidence > 0.3f && mcts_cp > ab_score + 100) {
-        chosen = mcts_best;
-        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      }
-    } else {
-      // Strategic positions: MCTS has better positional understanding
-      // BUT only trust it when it has meaningful visit count.
-      // At low node counts (<5000), MCTS evaluations are unreliable.
-      if (mcts_confidence < 0.1f) {
-        // MCTS has too few visits to be trusted — use AB
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else if (ab_score > mcts_cp + 150) {
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        chosen = mcts_best;
-        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-      }
-    }
-    break;
-
-  case ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED:
-  default:
-    // Weighted decision based on confidence
-    // For losing positions, we want to choose the LEAST BAD option
-    // with proper confidence weighting.
-    //
-    // The key insight: compare confidence-weighted PREFERENCES, not raw scores.
-    // Higher confidence should make us more likely to trust that assessment,
-    // regardless of whether the position is winning or losing.
-
-    // Compute weighted scores using absolute values to handle negative scores
-    // correctly We compare which engine is MORE CONFIDENT that their move is
-    // BETTER (or less bad)
-    float ab_conf = ab_confidence;
-    float mcts_conf = mcts_confidence;
-
-    // Normalize confidences
-    float conf_sum = ab_conf + mcts_conf;
-    if (conf_sum > 0) {
-      ab_conf /= conf_sum;
-      mcts_conf /= conf_sum;
-    } else {
-      ab_conf = 0.5f;
-      mcts_conf = 0.5f;
-    }
-
-    // Decision: trust the engine with higher confidence, but only if scores
-    // are reasonably close. If scores differ significantly, trust the one
-    // claiming a better position (accounting for confidence).
-    //
-    // For close scores (within ~50cp), prefer higher confidence.
-    // For divergent scores, weight both confidence AND score difference.
-    int score_diff = ab_score - mcts_cp;
-    float score_diff_pawns = std::abs(score_diff) / 100.0f;
-
-    if (score_diff_pawns < 0.5f) {
-      // Scores are close - trust higher confidence
-      if (ab_conf > mcts_conf + 0.1f) {
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else if (mcts_conf > ab_conf + 0.1f) {
-        chosen = mcts_best;
-        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        // Very close confidence - default to AB (more reliable for tactics)
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      }
-    } else {
-      // Scores diverge significantly - weight confidence against score
-      // difference Use confidence as a "discount factor" on the claimed
-      // advantage Higher confidence means we trust the score more
-      float ab_effective = ab_score * ab_conf;
-      float mcts_effective = mcts_cp * mcts_conf;
-
-      if (ab_effective > mcts_effective) {
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else if (mcts_effective > ab_effective) {
-        chosen = mcts_best;
-        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        // Equal - default to AB
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      }
-    }
-    break;
+  if (mcts_reliable && mcts_much_better && !is_tactical) {
+    stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+    return mcts_best;
   }
 
-  {
-    std::lock_guard<std::mutex> lock(pv_mutex_);
-    final_pv_.clear();
-    final_pv_.push_back(chosen);
-  }
-
-  return chosen;
+  // Default: trust AB
+  stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+  return ab_best;
 }
 
 void ParallelHybridSearch::send_info(int depth, int score, uint64_t nodes,
