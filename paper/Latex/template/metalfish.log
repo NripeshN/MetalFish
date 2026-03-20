@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  20 MAR 2026 13:42
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  20 MAR 2026 13:46
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -898,28 +898,23 @@ threads,
 {/usr/local/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map}]
 
 [2]
-Overfull \hbox (5.89612pt too wide) in paragraph at lines 161--162
- [][] 
- []
 
-
-Overfull \hbox (11.0972pt too wide) in paragraph at lines 171--172
+[3]
+Overfull \hbox (11.0972pt too wide) in paragraph at lines 159--160
 \OT1/cmr/m/n/10 and 9.8M NPS on M1 Ul-tra, demon-strat-ing near-linear scal-ing
  (7.24$\OMS/cmsy/m/n/10 ^^B$ \OT1/cmr/m/n/10 on 8 threads).
  []
 
 
 
-[3]
-
 [4]
-Overfull \hbox (1.18146pt too wide) in paragraph at lines 223--224
+Overfull \hbox (1.18146pt too wide) in paragraph at lines 211--212
 \OT1/cmr/m/n/10 The MCTS en-gine re-quired sev-eral Ap-ple Silicon-specific op-
 ti-miza-tions to achieve
  []
 
 
-Overfull \hbox (18.59883pt too wide) in paragraph at lines 245--246
+Overfull \hbox (18.59883pt too wide) in paragraph at lines 233--234
 \OT1/cmr/m/n/10 The most im-pact-ful op-ti-miza-tion re-placed \OT1/cmtt/m/n/10
  std::mutex \OT1/cmr/m/n/10 (64 bytes on Dar-win/ARM64)
  []
@@ -927,15 +922,15 @@ Overfull \hbox (18.59883pt too wide) in paragraph at lines 245--246
 
 
 [5]
-
-[6]
-Overfull \hbox (26.62608pt too wide) in paragraph at lines 283--284
+Overfull \hbox (26.62608pt too wide) in paragraph at lines 271--272
 \OT1/cmr/m/n/10 (alpha-beta with NNUE), MetalFish-MCTS (pure trans-former MCTS)
 , and MetalFish-
  []
 
 
-Overfull \hbox (1.7371pt too wide) in paragraph at lines 309--310
+
+[6]
+Overfull \hbox (1.7371pt too wide) in paragraph at lines 297--298
 []\OT1/cmr/m/n/10 MetalFish-AB matches Stock-fish ex-actly at 20/24, with 100% 
 best-move agree-
  []
@@ -943,12 +938,12 @@ best-move agree-
 
 
 [7]
-Overfull \hbox (15.35585pt too wide) in paragraph at lines 438--439
+Overfull \hbox (15.35585pt too wide) in paragraph at lines 426--427
  [][] 
  []
 
 
-Underfull \hbox (badness 1052) in paragraph at lines 439--439
+Underfull \hbox (badness 1052) in paragraph at lines 427--427
 \OT1/cmr/m/n/10 strongest, fol-lowed by Stock-fish ($\OMS/cmsy/m/n/10 ^^X$\OT1/
 cmr/m/n/10 3800), MetalFish-Hybrid ($\OMS/cmsy/m/n/10 ^^X$\OT1/cmr/m/n/10 3724)
 , and
@@ -961,7 +956,7 @@ cmr/m/n/10 3800), MetalFish-Hybrid ($\OMS/cmsy/m/n/10 ^^X$\OT1/cmr/m/n/10 3724)
 [9]
 
 [10]
-Overfull \hbox (3.0705pt too wide) in paragraph at lines 475--476
+Overfull \hbox (3.0705pt too wide) in paragraph at lines 463--464
 \OT1/cmr/m/n/10 The hy-brid en-gine ($\OMS/cmsy/m/n/10 ^^X$\OT1/cmr/m/n/10 3724
  Elo) is sub-stan-tially stronger than pure MCTS ($\OMS/cmsy/m/n/10 ^^X$\OT1/cm
 r/m/n/10 3289)
@@ -970,7 +965,7 @@ r/m/n/10 3289)
 
 
 [11]
-Overfull \hbox (2.83118pt too wide) in paragraph at lines 493--494
+Overfull \hbox (2.83118pt too wide) in paragraph at lines 481--482
 \OT1/cmr/m/n/10 plicit syn-chro-niza-tion; and (3) \OT1/cmr/m/it/10 ef-fi-cient
  con-text switch-ing \OT1/cmr/m/n/10 where \OT1/cmtt/m/n/10 os[]unfair[]lock\OT
 1/cmr/m/n/10 's
@@ -979,13 +974,13 @@ Overfull \hbox (2.83118pt too wide) in paragraph at lines 493--494
 
 
 [12]
-Underfull \hbox (badness 10000) in paragraph at lines 547--548
+Underfull \hbox (badness 10000) in paragraph at lines 535--536
 []\OT1/cmr/m/n/9 Apple Inc.: Ap-ple M1 chip. $https : / / www . apple . com / n
 ewsroom / 2020 / 11 /
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 559--560
+Underfull \hbox (badness 10000) in paragraph at lines 547--548
 []\OT1/cmr/m/n/9 Huber, S.: Uni-ver-sal Chess In-ter-face pro-to-col spec-i-fi-
 ca-tion. $http :
  []
@@ -999,10 +994,10 @@ L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 28283 strings out of 473190
- 705957 string characters out of 5715801
- 1204670 words of memory out of 5000000
- 51117 multiletter control sequences out of 15000+600000
+ 28279 strings out of 473190
+ 705881 string characters out of 5715801
+ 1200895 words of memory out of 5000000
+ 51113 multiletter control sequences out of 15000+600000
  564374 words of font info for 56 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  84i,12n,87p,1351b,2326s stack positions out of 10000i,1000n,20000p,200000b,200000s
@@ -1023,7 +1018,7 @@ ve/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/
 5/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/2025
 /texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/2025/
 texmf-dist/fonts/type1/public/amsfonts/cm/cmtt9.pfb>
-Output written on metalfish.pdf (13 pages, 258052 bytes).
+Output written on metalfish.pdf (13 pages, 257842 bytes).
 PDF statistics:
  135 PDF objects out of 1000 (max. 8388607)
  85 compressed objects within 1 object stream

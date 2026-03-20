@@ -115,37 +115,25 @@ Our system comprises three search engines sharing a common UCI~\cite{uci} interf
 
 \begin{figure}[!htbp]
 \centering
+\resizebox{0.85\textwidth}{!}{%
 \begin{tikzpicture}[
-    node distance=1.0cm and 1.8cm,
-    block/.style={rectangle, draw, rounded corners, minimum width=2.6cm, minimum height=0.8cm, align=center, font=\small},
+    node distance=0.6cm and 1.2cm,
+    block/.style={rectangle, draw, rounded corners, minimum width=2.2cm, minimum height=0.6cm, align=center, font=\footnotesize},
     gpu/.style={block, fill=blue!15},
     cpu/.style={block, fill=orange!15},
     hybrid/.style={block, fill=green!15},
     shared/.style={block, fill=yellow!15, dashed},
-    arrow/.style={-{Stealth[length=2mm]}, thick}
+    arrow/.style={-{Stealth[length=1.5mm]}, semithick}
 ]
-    % UCI layer
     \node[block] (uci) {UCI Protocol};
-    
-    % Position classifier
-    \node[block, below=0.8cm of uci] (classifier) {Position Classifier};
-    
-    % Three engines
-    \node[cpu, below left=1.0cm and 2.2cm of classifier] (ab) {Alpha-Beta\\Engine};
-    \node[gpu, below=1.0cm of classifier] (mcts) {MCTS\\Engine};
-    \node[hybrid, below right=1.0cm and 2.2cm of classifier] (hybride) {Hybrid\\Coordinator};
-    
-    % Shared state
-    \node[shared, below=1.0cm of mcts] (state) {Lock-Free\\Shared State};
-    
-    % Backend components side by side below shared state
-    \node[cpu, below left=1.2cm and 1.5cm of state] (nnue) {NNUE\\Evaluation (CPU)};
-    \node[gpu, below right=1.2cm and 1.5cm of state] (transformer) {Transformer\\(Metal GPU)};
-    
-    % Unified memory bar at very bottom
-    \node[block, fill=gray!15, below=2.8cm of state, minimum width=9cm] (memory) {Apple Silicon Unified Memory};
-    
-    % Arrows
+    \node[block, below=0.5cm of uci] (classifier) {Position Classifier};
+    \node[cpu, below left=0.7cm and 1.8cm of classifier] (ab) {Alpha-Beta};
+    \node[gpu, below=0.7cm of classifier] (mcts) {MCTS};
+    \node[hybrid, below right=0.7cm and 1.8cm of classifier] (hybride) {Hybrid};
+    \node[shared, below=0.7cm of mcts] (state) {Lock-Free Shared State};
+    \node[cpu, below left=0.7cm and 1.2cm of state] (nnue) {NNUE (CPU)};
+    \node[gpu, below right=0.7cm and 1.2cm of state] (transformer) {Transformer (GPU)};
+    \node[block, fill=gray!15, below=1.5cm of state, minimum width=7.5cm] (memory) {Apple Silicon Unified Memory};
     \draw[arrow] (uci) -- (classifier);
     \draw[arrow] (classifier) -- (ab);
     \draw[arrow] (classifier) -- (mcts);
@@ -157,8 +145,8 @@ Our system comprises three search engines sharing a common UCI~\cite{uci} interf
     \draw[arrow] (state) -- (transformer);
     \draw[arrow] (nnue) -- (memory);
     \draw[arrow] (transformer) -- (memory);
-    
-\end{tikzpicture}
+\end{tikzpicture}%
+}
 \caption{System architecture. The UCI layer routes positions to one of three engines. The hybrid coordinator runs alpha-beta and MCTS in parallel, sharing results through cache-line-aligned atomic state in unified memory. NNUE runs on CPU; transformer inference runs on the Metal GPU via MPSGraph.}
 \label{fig:architecture}
 \end{figure}
@@ -361,7 +349,7 @@ We conducted a comprehensive tournament of 322 games across 33 matches at 300s +
 \centering
 \caption{Tournament results: MetalFish engines vs.\ reference opponents (322 games, 300+0.1s TC, M1 Ultra, 10 threads). W/D/L from MetalFish's perspective.}
 \label{tab:tournament}
-\small
+\footnotesize
 \begin{tabular}{llcccr}
 \toprule
 \textbf{Engine} & \textbf{Opponent} & \textbf{W} & \textbf{D} & \textbf{L} & \textbf{Score} \\
@@ -414,7 +402,7 @@ We conducted a comprehensive tournament of 322 games across 33 matches at 300s +
     nodes near coords align={horizontal},
     every node near coord/.append style={font=\tiny},
     width=0.95\textwidth,
-    height=9cm,
+    height=6cm,
     enlarge y limits={abs=0.4cm},
     grid=major,
     grid style={gray!30},
