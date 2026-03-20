@@ -875,28 +875,27 @@ Move ParallelHybridSearch::make_final_decision() {
     // Use position type to decide - IMPROVED thresholds
     if (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
         current_strategy_.position_type == PositionType::TACTICAL) {
-      // Tactical positions: trust AB more (it's better at tactics)
-      // But only override if AB is significantly better
-      if (ab_score > mcts_cp + 50) { // 0.5 pawn advantage
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else if (mcts_cp > ab_score + 100 && mcts_confidence > 0.3f) {
-        // MCTS found something AB missed
+      // Tactical: always trust AB unless MCTS has very high confidence
+      // and found something much better
+      if (mcts_confidence > 0.3f && mcts_cp > ab_score + 100) {
         chosen = mcts_best;
         stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
       } else {
-        // Close - trust AB in tactical positions
         chosen = ab_best;
         stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
       }
     } else {
-      // Strategic positions: trust MCTS more (it's better at long-term
-      // planning) But respect AB's tactical corrections
-      if (ab_score > mcts_cp + 150) { // 1.5 pawn - AB found a tactic
+      // Strategic positions: MCTS has better positional understanding
+      // BUT only trust it when it has meaningful visit count.
+      // At low node counts (<5000), MCTS evaluations are unreliable.
+      if (mcts_confidence < 0.1f) {
+        // MCTS has too few visits to be trusted — use AB
+        chosen = ab_best;
+        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+      } else if (ab_score > mcts_cp + 150) {
         chosen = ab_best;
         stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
       } else {
-        // Trust MCTS for strategic decisions
         chosen = mcts_best;
         stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
       }
