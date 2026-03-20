@@ -7,6 +7,7 @@
 
 #include "search.h"
 #include "core.h"
+#include "../hybrid/shared_tt.h"
 
 #include "../core/movegen.h"
 #include "../syzygy/tbprobe.h"
@@ -692,6 +693,18 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
 
     float value = 0.0f, draw = 0.0f, moves_left_val = 30.0f;
 
+    if (shared_tt_ && leaf->NumEdges() == 0) {
+        auto tt_result = shared_tt_->Probe(ctx.pos, 8);
+        if (tt_result.found) {
+            leaf->CreateEdges(moves);
+            float v = -tt_result.value;
+            float d = tt_result.draw;
+            Backpropagate(leaf, v, d, 30.0f, multivisit);
+            stats_.total_nodes.fetch_add(multivisit, std::memory_order_relaxed);
+            return;
+        }
+    }
+
     if (leaf->NumEdges() == 0 && backend_) {
         auto history = ctx.BuildHistory();
         uint64_t cache_key = ComputePositionCacheKey(history.ptrs, history.depth);
@@ -880,6 +893,20 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
                 if (leaf->Parent())
                     Backpropagate(leaf->Parent(), 0.0f, 1.0f, rep_moves_left + 1.0f,
                                   multivisit);
+                stats_.total_nodes.fetch_add(multivisit, std::memory_order_relaxed);
+                out_of_order_count++;
+                if (out_of_order_count >= max_out_of_order) break;
+                continue;
+            }
+        }
+
+        if (shared_tt_ && leaf->NumEdges() == 0) {
+            auto tt_result = shared_tt_->Probe(ctx.pos, 8);
+            if (tt_result.found) {
+                leaf->CreateEdges(moves);
+                float v = -tt_result.value;
+                float d = tt_result.draw;
+                Backpropagate(leaf, v, d, 30.0f, multivisit);
                 stats_.total_nodes.fetch_add(multivisit, std::memory_order_relaxed);
                 out_of_order_count++;
                 if (out_of_order_count >= max_out_of_order) break;

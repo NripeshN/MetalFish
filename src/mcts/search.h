@@ -48,6 +48,8 @@
 namespace MetalFish {
 namespace MCTS {
 
+class SharedTTReader;
+
 // ============================================================================
 // Search statistics exposed to UCI layer
 // ============================================================================
@@ -194,6 +196,8 @@ public:
 
     void InjectPVBoost(const Move* pv, int pv_len, int ab_depth);
 
+    void SetSharedTT(SharedTTReader* tt) { shared_tt_ = tt; }
+
 private:
     void WorkerThreadMain(int thread_id);
     bool IsSearchActive() const;
@@ -285,6 +289,8 @@ private:
         bool first_move = true;
     };
     TimeManagerState tmgr_;
+
+    SharedTTReader* shared_tt_ = nullptr;
 };
 
 // Factory function matching the old create_thread_safe_mcts pattern

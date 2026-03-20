@@ -161,6 +161,11 @@ bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
   mcts_search_ = std::make_unique<Search>(config_.mcts_config,
       std::make_unique<Backend>(config_.mcts_config.nn_weights_path));
 
+  if (engine_) {
+    shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
+    mcts_search_->SetSharedTT(shared_tt_reader_.get());
+  }
+
   // Initialize shared state
   ab_state_.reset();
   mcts_state_.reset();
@@ -218,6 +223,8 @@ void ParallelHybridSearch::start_search(const Position &pos,
 
   // Calculate time budget
   time_budget_ms_ = calculate_time_budget();
+
+  nn_policy_hints_.clear();
 
   // Analyze position for strategy
   if (config_.use_position_classifier) {
@@ -356,6 +363,10 @@ void ParallelHybridSearch::new_game() {
   if (mcts_search_) {
     mcts_search_ = std::make_unique<Search>(config_.mcts_config,
       std::make_unique<Backend>(config_.mcts_config.nn_weights_path));
+    if (engine_) {
+      shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
+      mcts_search_->SetSharedTT(shared_tt_reader_.get());
+    }
   }
   // Search manages its own TT internally
 }
