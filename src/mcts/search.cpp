@@ -597,6 +597,7 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
             if (leaf->NumEdges() == 0) {
                 leaf->CreateEdges(moves);
                 ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+                leaf->SortEdges();
             }
             if (params_.add_dirichlet_noise && leaf == tree_.Root())
                 AddDirichletNoise(leaf);
@@ -610,6 +611,7 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
             if (leaf->NumEdges() == 0) {
                 leaf->CreateEdges(moves);
                 ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+                leaf->SortEdges();
             }
             if (params_.add_dirichlet_noise && leaf == tree_.Root())
                 AddDirichletNoise(leaf);
@@ -759,6 +761,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
             if (leaf->NumEdges() == 0) {
                 leaf->CreateEdges(moves);
                 ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+                leaf->SortEdges();
             }
             if (params_.add_dirichlet_noise && leaf == tree_.Root())
                 AddDirichletNoise(leaf);
@@ -814,6 +817,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
             if (leaf_moves.size() > 0) {
                 entry.leaf->CreateEdges(leaf_moves);
                 ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
+                entry.leaf->SortEdges();
                 if (params_.add_dirichlet_noise && entry.leaf == tree_.Root())
                     AddDirichletNoise(entry.leaf);
             }
@@ -923,6 +927,14 @@ Search::PuctResult Search::SelectChildPuct(Node* node, bool is_root, SearchWorke
 
         const Edge& edge = edges[i];
         Node* child = edge.child.load(std::memory_order_acquire);
+
+        // Early cutoff: edges sorted by descending policy, so once we see
+        // two consecutive unvisited edges (no child pointer), all remaining
+        // also unvisited and have lower policy — can't beat current best.
+        if (!child && i > 0) {
+            Node* prev = edges[i - 1].child.load(std::memory_order_relaxed);
+            if (!prev) break;
+        }
 
         float q, m_utility = 0.0f;
         float policy = edge.GetP();

@@ -67,6 +67,14 @@ struct Edge {
           p_(other.p_),
           child(other.child.load(std::memory_order_relaxed)) {}
 
+    Edge& operator=(Edge&& other) noexcept {
+        move = other.move;
+        p_ = other.p_;
+        child.store(other.child.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed);
+        return *this;
+    }
+
     // 16-bit compressed policy: store bits 27..12 of IEEE 754 float
     void SetP(float p) {
         constexpr int32_t roundings = (1 << 11) - (3 << 28);
@@ -272,6 +280,12 @@ public:
             ++idx;
         }
         num_edges_ = static_cast<uint8_t>(count);
+    }
+
+    void SortEdges() {
+        if (!edges_ || num_edges_ <= 1) return;
+        std::sort(edges_.get(), edges_.get() + num_edges_,
+                  [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
     }
 
     int NumEdges() const { return num_edges_; }
