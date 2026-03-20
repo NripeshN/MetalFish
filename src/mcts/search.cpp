@@ -533,6 +533,20 @@ bool Search::ShouldStop() const {
         }
     }
 
+    // Mate detection: stop immediately if a proven win is found at root
+    {
+        const Node* root = tree_.Root();
+        if (root && root->NumEdges() > 0) {
+            const Edge* edges = root->Edges();
+            for (int i = 0; i < root->NumEdges(); ++i) {
+                Node* child = edges[i].child.load(std::memory_order_relaxed);
+                if (child && child->IsTerminal() && child->GetWL() > 0.5f) {
+                    return true;
+                }
+            }
+        }
+    }
+
     if (limits_.nodes > 0 && stats_.total_nodes >= limits_.nodes) return true;
 
     return false;

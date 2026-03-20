@@ -78,6 +78,15 @@ private:
   double prev_child_nodes_ = 0.0;
 };
 
+class MemoryWatchingStopper : public SearchStopper {
+public:
+  explicit MemoryWatchingStopper(size_t max_bytes);
+  bool ShouldStop(const SearchStats &stats) override;
+
+private:
+  size_t max_bytes_;
+};
+
 class SigmoidTimeManager {
 public:
   std::unique_ptr<SearchStopper> CreateStopper(Color us, int64_t time_left,

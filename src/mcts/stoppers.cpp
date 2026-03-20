@@ -123,6 +123,20 @@ bool KLDGainStopper::ShouldStop(const SearchStats &stats) {
 }
 
 // ============================================================================
+// MemoryWatchingStopper
+// ============================================================================
+
+MemoryWatchingStopper::MemoryWatchingStopper(size_t max_bytes)
+    : max_bytes_(max_bytes) {}
+
+bool MemoryWatchingStopper::ShouldStop(const SearchStats &stats) {
+    // ~64 bytes per node + ~16 bytes per edge * ~35 avg edges
+    // Conservative estimate: ~624 bytes per expanded node
+    size_t estimated = stats.total_nodes * 624;
+    return estimated > max_bytes_;
+}
+
+// ============================================================================
 // SigmoidTimeManager
 // ============================================================================
 
