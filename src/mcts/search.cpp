@@ -23,6 +23,7 @@ namespace MetalFish {
 namespace MCTS {
 
 static_assert(sizeof(Node) >= sizeof(double), "Node must contain WL");
+static_assert(sizeof(Node) <= 128, "Node exceeds two cache lines");
 static_assert(alignof(Node) == 64, "Node alignment mismatch");
 
 namespace {
@@ -1003,6 +1004,10 @@ void Search::Backpropagate(Node* node, float value, float draw,
     while (node) {
         node->FinalizeScoreUpdate(value, draw, moves_left, visits);
         if (params_.sticky_endgames) node->MaybeSetBounds();
+        if (!node->IsSolid() &&
+            node->GetN() >= static_cast<uint32_t>(params_.solid_tree_threshold)) {
+            node->MakeSolid();
+        }
         value = -value;
         moves_left += 1.0f;
         node = node->Parent();

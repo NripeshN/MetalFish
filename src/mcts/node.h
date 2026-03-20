@@ -108,7 +108,16 @@ public:
         : parent_(parent),
           index_(edge_idx >= 0 ? static_cast<uint16_t>(edge_idx) : 0) {}
 
-    ~Node() = default;
+    ~Node() {
+        if (solid_children_ && solid_base_) {
+            for (int i = 0; i < num_edges_; ++i) {
+                solid_base_[i].~Node();
+            }
+            std::allocator<Node> alloc;
+            alloc.deallocate(solid_base_, num_edges_);
+            solid_base_ = nullptr;
+        }
+    }
 
     Node(const Node&) = delete;
     Node& operator=(const Node&) = delete;
@@ -332,6 +341,51 @@ public:
         MakeTerminal(type, value, 0.0f, 0.0f);
     }
 
+    // --- Node solidification ---
+
+    bool IsSolid() const { return solid_children_; }
+
+    void TakeEdgesFrom(Node& other) {
+        edges_ = std::move(other.edges_);
+        num_edges_ = other.num_edges_;
+        other.num_edges_ = 0;
+    }
+
+    bool MakeSolid() {
+        if (solid_children_ || num_edges_ == 0 || IsTerminal()) return false;
+
+        for (int i = 0; i < num_edges_; ++i) {
+            Node* ch = edges_[i].child.load(std::memory_order_acquire);
+            if (ch && ch->GetN() == 0 && ch->GetNInFlight() > 0) return false;
+        }
+
+        std::allocator<Node> alloc;
+        Node* arr = alloc.allocate(num_edges_);
+        for (int i = 0; i < num_edges_; ++i) {
+            new (&arr[i]) Node(this, i);
+            Node* old = edges_[i].child.load(std::memory_order_acquire);
+            if (old) {
+                if (old->GetN() > 0) {
+                    arr[i].FinalizeScoreUpdate(old->GetWL(), old->GetD(),
+                                               old->GetM(),
+                                               static_cast<int>(old->GetN()));
+                }
+                if (old->NumEdges() > 0) {
+                    arr[i].TakeEdgesFrom(*old);
+                }
+                if (old->IsTerminal()) {
+                    arr[i].MakeTerminal(old->GetTerminalType(), old->GetWL(),
+                                        old->GetD(), old->GetM());
+                }
+            }
+            edges_[i].child.store(&arr[i], std::memory_order_release);
+        }
+
+        solid_base_ = arr;
+        solid_children_ = true;
+        return true;
+    }
+
     // --- Legacy accessors (compatibility with old ThreadSafeNode API) ---
 
     uint32_t n() const { return GetN(); }
@@ -356,7 +410,9 @@ private:
 #else
     mutable std::mutex        score_lock_;
 #endif
-    // Total core: 48 bytes on Apple (44 + 4 lock), fits in half a cache line
+    Node*                     solid_base_ = nullptr;     // 8 bytes — contiguous child array
+    bool                      solid_children_ = false;   // 1 byte  — children are solidified
+    // Total: 48 + 8 + 1 + 7 padding = 64 bytes on Apple
 };
 
 // ============================================================================
