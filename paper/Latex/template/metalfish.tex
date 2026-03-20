@@ -84,7 +84,7 @@ Our alpha-beta engine derives from the Stockfish codebase, inheriting its search
 \subsection{Monte Carlo Tree Search with Neural Networks}
 \label{sec:bg-mcts}
 
-AlphaZero~\cite{silver2018general} demonstrated that MCTS guided by deep neural networks could achieve superhuman chess play without domain-specific knowledge beyond the rules. Lc0~\cite{lc0} is the open-source continuation of this approach, using transformer networks~\cite{vaswani2017attention} for policy and value prediction.
+AlphaZero~\cite{silver2018general} demonstrated that MCTS~\cite{browne2012survey} guided by deep neural networks could achieve superhuman chess play without domain-specific knowledge beyond the rules. Lc0~\cite{lc0} is the open-source continuation of this approach, using transformer networks~\cite{vaswani2017attention} for policy and value prediction.
 
 Our MCTS engine implements the core Lc0 search algorithm---PUCT selection~\cite{rosin2011multi} with first play urgency (FPU), cooperative batching for GPU inference, and tree reuse between moves---while being natively compiled for Apple Silicon's Metal GPU compute framework.
 
@@ -165,7 +165,7 @@ The MCTS engine implements PUCT (Polynomial Upper Confidence Trees) selection~\c
 
 \textbf{Tree structure.} Each node stores visit count $N$, win-loss value $W\!L$ (double precision), draw probability $D$, and moves-left estimate $M$. Edges store compressed 16-bit policy priors and atomic child pointers. The node arena allocator pre-allocates blocks of 8192 nodes to avoid per-node heap allocation.
 
-\textbf{Neural network backend.} Position encoding follows the Lc0 input format: 8 history planes of 13 channels each (6 piece types $\times$ 2 colors + repetition flag), plus auxiliary planes for castling rights, en passant, and side to move. The BT4-1024$\times$15$\times$32h transformer network~\cite{lc0} is evaluated via Apple's MPSGraph framework, achieving $\sim$382 NPS on M1~Ultra's 64 GPU cores.
+\textbf{Neural network backend.} Position encoding follows the Lc0 input format: 8 history planes of 13 channels each (6 piece types $\times$ 2 colors + repetition flag), plus auxiliary planes for castling rights, en passant, and side to move. The BT4-1024$\times$15$\times$32h transformer network~\cite{lc0} is evaluated via Apple's MPSGraph framework~\cite{apple2022metal}, achieving $\sim$382 NPS on M1~Ultra's 64 GPU cores.
 
 \textbf{Cooperative batching.} A semaphore-based gathering protocol allows one thread to collect leaf nodes while others wait, then submits a batch to the GPU. Virtual loss (1~visit per in-flight node) prevents thread collision during parallel tree traversal.
 
@@ -268,7 +268,7 @@ The engine auto-detects transformer weights by scanning the \texttt{networks/} d
 
 \textbf{Hardware.} Benchmarks were conducted on Apple M2~Max (12~cores, 38~GPU cores, 32GB unified memory). Tournament games were played on four Apple M1~Ultra EC2 instances (20~cores, 64~GPU cores each) with 10~threads per engine and 512MB hash.
 
-\textbf{Engines.} We evaluate three configurations of our engine: MetalFish-AB (alpha-beta with NNUE), MetalFish-MCTS (pure transformer MCTS), and MetalFish-Hybrid (parallel AB+MCTS). Reference engines: Stockfish dev-20260106 at skill levels 5, 8, 10, 12, 14, 16, and full strength ($\sim$3800 Elo); Berserk 20250622 ($\sim$3722); Patricia ($\sim$3415); and Lc0 with BT4-1024$\times$15$\times$32h network via Metal backend.
+\textbf{Engines.} We evaluate three configurations of our engine: MetalFish-AB (alpha-beta with NNUE), MetalFish-MCTS (pure transformer MCTS), and MetalFish-Hybrid (parallel AB+MCTS). Reference engines: Stockfish dev-20260106 at skill levels 5, 8, 10, 12, 14, 16, and full strength ($\sim$3800 Elo); Berserk 20250622 ($\sim$3722~\cite{ccrl}); Patricia ($\sim$3415~\cite{ccrl}); and Lc0 with BT4-1024$\times$15$\times$32h network via Metal backend.
 
 \textbf{Time control.} Tournament: 300s + 0.1s increment. Tactical tests: 10s per position. Opening book: 8moves\_v3.pgn (34,700 positions, 16~plies). Adjudication: resign at $\pm$1000cp for 3~moves (two-sided); draw at $\leq$10cp for 8~moves after move~40.
 
@@ -437,7 +437,7 @@ The hybrid engine ($\sim$3724 Elo) is substantially stronger than pure MCTS ($\s
 
 The hybrid shows its value in two specific scenarios: (1)~\emph{agreement-based early termination}, where both engines confirming the same best move allows confident early stopping, saving 10--40\% of allocated time; and (2)~\emph{quiet strategic positions}, where the MCTS evaluation complements alpha-beta's tactical focus. The 95.8\% bestmove agreement between the hybrid and Lc0 on the Bratko-Kopec suite suggests the neural network component has significant influence on move selection.
 
-However, the current hybrid is limited by coordination overhead: the AB component reports nodes through the hybrid coordinator rather than directly, introducing latency. Additionally, the MCTS component's 200 NPS throughput means it contributes relatively few evaluations during the alpha-beta engine's thinking time.
+However, the current hybrid is limited by the strength of its MCTS component. Since the hybrid engine combines alpha-beta and MCTS evaluations, any improvement to the MCTS engine's search quality---such as better neural network cache utilization, more sophisticated batching, or stronger transformer networks---would directly translate to a stronger hybrid engine. The $\sim$435 Elo gap between the hybrid and pure alpha-beta suggests significant room for improvement as the MCTS component matures.
 
 \subsection{MCTS vs.\ Lc0: Same Network, Different Strength}
 
@@ -468,7 +468,7 @@ We presented a three-engine chess system optimized for Apple Silicon unified mem
 
 In a 322-game tournament on M1~Ultra hardware, MetalFish-AB achieved $\sim$4048 Elo with zero losses, MetalFish-Hybrid reached $\sim$3724 Elo (competitive with Berserk and Lc0-class engines), and MetalFish-MCTS achieved $\sim$3289 Elo. The hybrid approach adds $\sim$435 Elo over pure MCTS by combining alpha-beta's tactical depth with neural network evaluation.
 
-Future work includes improving the MCTS engine through cache key optimization for transposition hits, implementing the remaining Lc0 search heuristics, and exploring learned arbitration for the hybrid decision function. The complete source code is available as open-source software.
+Future work includes improving the MCTS engine through cache key optimization for transposition hits, implementing the remaining Lc0 search heuristics, and exploring learned arbitration for the hybrid decision function. Critically, because the hybrid architecture is modular, any improvement to the MCTS component will directly strengthen the hybrid engine---closing the current gap between MCTS and Lc0 would yield a hybrid engine competitive with the strongest alpha-beta implementations. The complete source code is available as open-source software.
 
 % ===========================================================================
 % DECLARATION ON GENERATIVE AI
@@ -517,7 +517,19 @@ Lanctot, M., Winands, M.H.M., Pepels, T., Sturtevant, N.R.: Monte Carlo tree sea
 Bratko, I., Kopec, D.: Performance analysis of a chess endgame advice giving program. Advances in Computer Chess \textbf{3}, 1--12 (1982)
 
 \bibitem{uci}
-Huber, S.: Universal Chess Interface protocol specification. \url{http://wbec-ridderkerk.nl/html/UCIProtocol.html} (2000)
+Huber, R., Meyer-Kahlen, S.: Universal Chess Interface protocol specification. \url{http://wbec-ridderkerk.nl/html/UCIProtocol.html} (2000)
+
+\bibitem{ccrl}
+CCRL: Computer Chess Rating Lists. \url{https://www.computerchess.org.uk/ccrl/} (2026)
+
+\bibitem{coulom2008elo}
+Coulom, R.: Whole-history rating: A Bayesian rating system for players of time-varying strength. In: International Conference on Computers and Games, pp.~113--124. Springer (2008)
+
+\bibitem{apple2022metal}
+Apple Inc.: Metal Performance Shaders Graph. \url{https://developer.apple.com/documentation/metalperformanceshadersgraph} (2022)
+
+\bibitem{browne2012survey}
+Browne, C.B., et al.: A survey of Monte Carlo tree search methods. IEEE Transactions on Computational Intelligence and AI in Games \textbf{4}(1), 1--43 (2012)
 
 \end{thebibliography}
 

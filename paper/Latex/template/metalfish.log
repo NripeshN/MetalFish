@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  20 MAR 2026 13:51
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.3.8)  20 MAR 2026 14:01
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -973,24 +973,20 @@ ewsroom / 2020 / 11 /
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 520--521
-[]\OT1/cmr/m/n/9 Huber, S.: Uni-ver-sal Chess In-ter-face pro-to-col spec-i-fi-
-ca-tion. $http :
- []
 
+[12]
 
-
-[12] (./metalfish.aux)
+[13] (./metalfish.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 28281 strings out of 473190
- 705900 string characters out of 5715801
- 1209782 words of memory out of 5000000
- 51114 multiletter control sequences out of 15000+600000
+ 28285 strings out of 473190
+ 705955 string characters out of 5715801
+ 1209798 words of memory out of 5000000
+ 51118 multiletter control sequences out of 15000+600000
  564683 words of font info for 57 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  84i,11n,87p,1351b,2326s stack positions out of 10000i,1000n,20000p,200000b,200000s
@@ -1012,10 +1008,10 @@ ive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texlive
 texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/2025/t
 exmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/2025/te
 xmf-dist/fonts/type1/public/amsfonts/cm/cmtt9.pfb>
-Output written on metalfish.pdf (12 pages, 271048 bytes).
+Output written on metalfish.pdf (13 pages, 272404 bytes).
 PDF statistics:
- 136 PDF objects out of 1000 (max. 8388607)
- 85 compressed objects within 1 object stream
+ 140 PDF objects out of 1000 (max. 8388607)
+ 88 compressed objects within 1 object stream
  0 named destinations out of 1000 (max. 500000)
  13 words of extra memory for PDF output out of 10000 (max. 10000000)
 
