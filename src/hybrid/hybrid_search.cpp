@@ -23,6 +23,9 @@
 #include <iomanip>
 #include <sstream>
 #include <type_traits>
+#ifdef __APPLE__
+#include <pthread/qos.h>
+#endif
 
 namespace MetalFish {
 namespace MCTS {
@@ -434,6 +437,10 @@ void ParallelHybridSearch::mcts_thread_main() {
 
   auto start = std::chrono::steady_clock::now();
 
+#ifdef __APPLE__
+  pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#endif
+
   // Set up MCTS limits - run for full time budget
   ::MetalFish::Search::LimitsType mcts_limits;
   mcts_limits.movetime = time_budget_ms_;
@@ -646,6 +653,11 @@ void ParallelHybridSearch::coordinator_thread_main() {
 
   auto start = std::chrono::steady_clock::now();
   int agreement_count = 0;
+
+#ifdef __APPLE__
+  pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+#endif
+
   uint32_t last_ab_move_raw = 0;
   uint32_t last_mcts_move_raw = 0;
   int64_t last_info_ms = 0;
@@ -799,52 +811,31 @@ void ParallelHybridSearch::invoke_best_move_callback(Move best, Move ponder) {
 Move ParallelHybridSearch::make_final_decision() {
   Move ab_best = ab_state_.get_best_move();
   Move mcts_best = mcts_state_.get_best_move();
-  int ab_score = ab_state_.best_score.load(std::memory_order_relaxed);
-  int ab_depth = ab_state_.completed_depth.load(std::memory_order_relaxed);
-  float mcts_q = mcts_state_.best_q.load(std::memory_order_relaxed);
-  uint32_t mcts_visits = mcts_state_.best_visits.load(std::memory_order_relaxed);
 
-  // Rule 1: If only one engine has a result, use it
-  if (ab_best == Move::none() && mcts_best != Move::none()) {
-    stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-    return mcts_best;
+  if (ab_best != Move::none() && mcts_best != Move::none()) {
+    if (ab_best == mcts_best) {
+      stats_.move_agreements.fetch_add(1, std::memory_order_relaxed);
+    }
   }
-  if (mcts_best == Move::none() && ab_best != Move::none()) {
+
+  // AB is ALWAYS the primary decision maker.
+  // MCTS runs in parallel for agreement tracking and future TT sharing,
+  // but does not influence the move choice.
+  if (ab_best != Move::none()) {
     stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
     return ab_best;
   }
-  if (ab_best == Move::none() && mcts_best == Move::none()) {
-    Position pos;
-    StateInfo st;
-    pos.set(root_fen_, false, &st);
-    MoveList<LEGAL> moves(pos);
-    return moves.size() > 0 ? *moves.begin() : Move::none();
-  }
 
-  // Rule 2: If both agree, use that move (highest confidence)
-  if (ab_best == mcts_best) {
-    stats_.move_agreements.fetch_add(1, std::memory_order_relaxed);
-    return ab_best;
-  }
-
-  // Rule 3: AB is primary. MCTS can only override when ALL conditions met:
-  //   a) MCTS has very high visit count (>10000 = reliable evaluation)
-  //   b) MCTS strongly favors its move (>200cp better than AB's score)
-  //   c) Position is NOT tactical (AB excels at tactics)
-  int mcts_cp = QToNnueScore(mcts_q);
-  bool mcts_reliable = mcts_visits > 10000;
-  bool mcts_much_better = mcts_cp > ab_score + 200;
-  bool is_tactical = (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
-                      current_strategy_.position_type == PositionType::TACTICAL);
-
-  if (mcts_reliable && mcts_much_better && !is_tactical) {
+  if (mcts_best != Move::none()) {
     stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
     return mcts_best;
   }
 
-  // Default: trust AB
-  stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-  return ab_best;
+  Position pos;
+  StateInfo st;
+  pos.set(root_fen_, false, &st);
+  MoveList<LEGAL> moves(pos);
+  return moves.size() > 0 ? *moves.begin() : Move::none();
 }
 
 void ParallelHybridSearch::send_info(int depth, int score, uint64_t nodes,
