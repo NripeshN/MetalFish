@@ -1384,14 +1384,17 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
 }
 
 static MCTS::ParallelHybridConfig
-make_hybrid_config(const std::string &nn_weights) {
+make_hybrid_config(Engine &engine, const std::string &nn_weights) {
   MCTS::ParallelHybridConfig config;
-  config.mcts_config.nn_weights_path = nn_weights;
-  config.mcts_config.cpuct = 1.745f;
+
+  // Use the same UCI-configurable MCTS params as pure MCTS mode,
+  // so all improvements (cache key fix, KLD stopper, solidification,
+  // prefetching, TB probing, etc.) apply to hybrid too.
+  config.mcts_config = make_mcts_config(engine, nn_weights, 1);
+
+  // Hybrid-specific override: slightly higher exploration at root
   config.mcts_config.cpuct_at_root = 2.15f;
-  config.mcts_config.fpu_reduction = 0.330f;
-  config.mcts_config.add_dirichlet_noise = false;
-  config.mcts_config.num_threads = 1;
+
   config.ab_min_depth = 10;
   config.ab_use_time = true;
   config.ab_policy_weight = 0.3f;
@@ -1481,7 +1484,7 @@ static void preload_search_objects(Engine &engine) {
     if (GPU::gpu_nnue_manager_available())
       gpu_manager = &GPU::gpu_nnue_manager();
 
-    auto config = make_hybrid_config(nn_weights);
+    auto config = make_hybrid_config(engine, nn_weights);
     g_parallel_hybrid_search =
         MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
     g_hybrid_gpu_manager = gpu_manager;
@@ -1564,7 +1567,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     gpu_manager = &GPU::gpu_nnue_manager();
   }
 
-  auto config = make_hybrid_config(nn_weights);
+  auto config = make_hybrid_config(engine, nn_weights);
 
   // Reuse preloaded search object, or create if not yet initialized
   bool need_reinit =
