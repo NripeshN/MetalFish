@@ -534,17 +534,25 @@ bool Search::ShouldStop() const {
         }
     }
 
-    // Mate detection: stop immediately if a proven checkmate is found at root
+    // Mate detection: stop if the best-visited move is a proven checkmate
     {
         const Node* root = tree_.Root();
-        if (root && root->NumEdges() > 0 &&
-            root->GetN() > 100) { // Only check after meaningful search
+        if (root && root->NumEdges() > 0 && root->GetN() > 100) {
             const Edge* edges = root->Edges();
+            uint32_t max_n = 0;
+            int max_idx = -1;
             for (int i = 0; i < root->NumEdges(); ++i) {
                 Node* child = edges[i].child.load(std::memory_order_relaxed);
-                if (child && child->IsTerminal() &&
-                    child->GetTerminalType() == Node::Terminal::EndOfGame &&
-                    child->GetWL() > 0.99f) {
+                if (child && child->GetN() > max_n) {
+                    max_n = child->GetN();
+                    max_idx = i;
+                }
+            }
+            if (max_idx >= 0) {
+                Node* best = edges[max_idx].child.load(std::memory_order_relaxed);
+                if (best && best->IsTerminal() &&
+                    best->GetTerminalType() == Node::Terminal::EndOfGame &&
+                    best->GetWL() > 0.99f) {
                     return true;
                 }
             }
@@ -982,12 +990,16 @@ Search::SelectedLeaf Search::SelectLeaf(SearchWorkerCtx& ctx) {
     Node* node = tree_.Root();
     int path_multivisit = std::max(1, params_.virtual_loss);
 
+    std::vector<Node*> vl_path;
+
     while (node->NumEdges() > 0 && !node->IsTerminal()) {
         bool is_root = (node == tree_.Root());
         auto [best_idx, visits_to_assign] = SelectChildPuct(node, is_root, ctx);
-        if (best_idx < 0) break;
+        if (best_idx < 0) {
+            for (Node* n : vl_path) n->CancelScoreUpdate(path_multivisit);
+            return {nullptr, 0};
+        }
 
-        // Use multivisit from PUCT at root to reduce tree traversals
         if (is_root && visits_to_assign > 1) {
             path_multivisit = std::min(visits_to_assign, 128);
         }
@@ -1009,9 +1021,11 @@ Search::SelectedLeaf Search::SelectLeaf(SearchWorkerCtx& ctx) {
         }
 
         if (!child->TryStartScoreUpdate(path_multivisit)) {
-            break;
+            for (Node* n : vl_path) n->CancelScoreUpdate(path_multivisit);
+            return {nullptr, 0};
         }
 
+        vl_path.push_back(child);
         ctx.DoMove(edge.move);
         node = child;
     }
@@ -1023,8 +1037,8 @@ Search::PuctResult Search::SelectChildPuct(Node* node, bool is_root, SearchWorke
     int num_edges = node->NumEdges();
     if (num_edges == 0) return {-1, 1};
 
-    uint32_t parent_n = node->GetN() + node->GetNInFlight();
-    float parent_q = parent_n > 0 ? -node->GetQ(-params_.draw_score) : 0.0f;
+    uint32_t parent_n = node->GetN();
+    float parent_q = node->GetN() > 0 ? -node->GetQ(-params_.draw_score) : 0.0f;
 
     float cpuct = params_.GetCpuct(is_root);
     float cpuct_base = params_.GetCpuctBase(is_root);
@@ -1303,7 +1317,13 @@ Move Search::GetBestMove() const {
         } else if (!is_win && best_is_terminal_win) {
             prefer = false;
         } else if (is_loss) {
-            prefer = false;
+            if (best_idx >= 0) {
+                Node* best_child = edges[best_idx].child.load(std::memory_order_acquire);
+                bool best_is_loss = best_child && best_child->IsTerminal() && best_child->GetWL() < -0.5f;
+                if (best_is_loss) {
+                    prefer = child->GetM() > best_m;
+                }
+            }
         } else {
             if (cn != best_n) prefer = cn > best_n;
             else if (std::abs(cq - best_q) > 0.001f) prefer = cq > best_q;

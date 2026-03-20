@@ -44,7 +44,7 @@ struct SearchParams {
     // Moves left head utility (Lc0 defaults)
     float moves_left_max_effect = 0.03f;
     float moves_left_threshold = 0.80f;
-    float moves_left_slope = 0.00f;
+    float moves_left_slope = 0.0027f;
     float moves_left_constant_factor = 0.0f;
     float moves_left_scaled_factor = 1.65f;
     float moves_left_quadratic_factor = -0.65f;

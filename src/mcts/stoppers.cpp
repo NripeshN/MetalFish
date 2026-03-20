@@ -94,6 +94,7 @@ KLDGainStopper::KLDGainStopper(float min_gain, int average_interval)
     : min_gain_(min_gain), average_interval_(average_interval) {}
 
 bool KLDGainStopper::ShouldStop(const SearchStats &stats) {
+  std::lock_guard<std::mutex> lock(mutex_);
   const double new_child_nodes = static_cast<double>(stats.total_nodes) - 1.0;
 
   // Don't trigger before a minimum number of nodes (need meaningful distribution)

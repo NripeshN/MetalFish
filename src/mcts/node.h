@@ -240,11 +240,9 @@ public:
         if (num_edges_ == 0) return;
 
         bool all_terminal = true;
-        bool any_loss = false;
-        bool any_draw = false;
-        float best_wl = -2.0f;
-        float best_d  = 0.0f;
-        float best_m  = 999.0f;
+        float best_parent_wl = -2.0f;
+        float best_d = 0.0f;
+        float best_m = 999.0f;
 
         for (int i = 0; i < num_edges_; ++i) {
             Node* ch = edges_[i].child.load(std::memory_order_acquire);
@@ -252,28 +250,20 @@ public:
                 all_terminal = false;
                 break;
             }
-            float child_wl = ch->GetWL();
-            float child_d  = ch->GetD();
-            float child_m  = ch->GetM() + 1.0f;
+            float parent_val = -ch->GetWL();
+            float child_d = ch->GetD();
+            float child_m = ch->GetM() + 1.0f;
 
-            if (child_wl > best_wl) {
-                best_wl = child_wl;
-                best_d  = child_d;
-                best_m  = child_m;
+            if (parent_val > best_parent_wl) {
+                best_parent_wl = parent_val;
+                best_d = child_d;
+                best_m = child_m;
             }
-            if (child_wl < 0.0f) any_loss = true;
-            if (child_d > 0.5f) any_draw = true;
         }
 
         if (!all_terminal) return;
 
-        if (best_wl > 0.0f) {
-            MakeTerminal(Terminal::EndOfGame, -best_wl, best_d, best_m);
-        } else if (any_draw) {
-            MakeTerminal(Terminal::EndOfGame, 0.0f, 1.0f, best_m);
-        } else if (any_loss) {
-            MakeTerminal(Terminal::EndOfGame, -best_wl, best_d, best_m);
-        }
+        MakeTerminal(Terminal::EndOfGame, best_parent_wl, best_d, best_m);
     }
 
     // --- Edge / children management ---
@@ -295,6 +285,9 @@ public:
 
     void SortEdges() {
         if (!edges_ || num_edges_ <= 1) return;
+        for (int i = 0; i < num_edges_; ++i) {
+            if (edges_[i].child.load(std::memory_order_relaxed) != nullptr) return;
+        }
         std::sort(edges_.get(), edges_.get() + num_edges_,
                   [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
     }
@@ -370,7 +363,10 @@ public:
 
         for (int i = 0; i < num_edges_; ++i) {
             Node* ch = edges_[i].child.load(std::memory_order_acquire);
-            if (ch && ch->GetN() == 0 && ch->GetNInFlight() > 0) return false;
+            if (ch) {
+                if (ch->GetN() <= 1 && ch->GetNInFlight() > 0) return false;
+                if (ch->IsTerminal() && ch->GetNInFlight() > 0) return false;
+            }
         }
 
         std::allocator<Node> alloc;
@@ -473,10 +469,10 @@ private:
         }
     }
 
-    std::thread gc_thread_;
     std::atomic<bool> stop_{false};
     std::mutex gc_mutex_;
     std::vector<std::unique_ptr<Node>> gc_queue_;
+    std::thread gc_thread_;
 };
 
 inline NodeGarbageCollector& GetNodeGC() {

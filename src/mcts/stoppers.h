@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "../core/types.h"
@@ -76,6 +77,7 @@ private:
   int average_interval_;
   std::vector<double> prev_visits_;
   double prev_child_nodes_ = 0.0;
+  mutable std::mutex mutex_;
 };
 
 class MemoryWatchingStopper : public SearchStopper {
