@@ -341,6 +341,18 @@ public:
         MakeTerminal(type, value, 0.0f, 0.0f);
     }
 
+    void RevertTerminal() {
+        terminal_type_.store(static_cast<uint8_t>(Terminal::NonTerminal),
+                             std::memory_order_release);
+    }
+
+    void MaybeRevertTwoFold(int depth_from_root) {
+        if (GetTerminalType() != Terminal::TwoFold) return;
+        if (depth_from_root < 4) {
+            RevertTerminal();
+        }
+    }
+
     // --- Node solidification ---
 
     bool IsSolid() const { return solid_children_; }

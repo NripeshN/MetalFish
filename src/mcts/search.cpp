@@ -228,6 +228,19 @@ void Search::StartSearch(const std::string& fen,
 
     if (!tree_.TryReuse(fen)) {
         tree_.Reset(fen);
+    } else {
+        std::function<void(Node*, int)> fixTwoFold = [&](Node* node, int depth) {
+            if (!node || depth > 50) return;
+            node->MaybeRevertTwoFold(depth);
+            if (node->NumEdges() > 0) {
+                Edge* edges = node->Edges();
+                for (int i = 0; i < node->NumEdges(); ++i) {
+                    Node* child = edges[i].child.load(std::memory_order_acquire);
+                    if (child) fixTwoFold(child, depth + 1);
+                }
+            }
+        };
+        fixTwoFold(tree_.Root(), 0);
     }
 
     {
