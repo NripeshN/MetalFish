@@ -26,6 +26,7 @@ public:
 
 private:
   struct Entry {
+    std::atomic<uint64_t> generation{0};
     uint64_t key = 0;
     float value = 0, draw = 0, moves_left = 0;
     bool has_wdl = false;

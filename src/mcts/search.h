@@ -269,6 +269,9 @@ private:
 
     std::unique_ptr<KLDGainStopper> kld_stopper_;
 
+    // Smart pruning: track when the first NN eval arrives
+    mutable int64_t first_eval_time_ms_ = -1;
+
     // Lc0-style smooth time management (persistent across searches)
     struct TimeManagerState {
         float nps = 200.0f;

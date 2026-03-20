@@ -24,6 +24,10 @@ NNCache::NNCache(size_t size) : entries_(size), size_(size) {}
 bool NNCache::Lookup(uint64_t key, int expected_moves,
                      EvaluationResult &out) const {
   const Entry &e = entries_[key % size_];
+
+  uint64_t gen1 = e.generation.load(std::memory_order_acquire);
+  if (gen1 & 1) return false;
+
   if (!e.occupied || e.key != key) return false;
   if (expected_moves >= 0 && e.legal_moves != expected_moves) return false;
 
@@ -43,11 +47,18 @@ bool NNCache::Lookup(uint64_t key, int expected_moves,
     Move m = Move(e.moves[i].move_raw);
     out.policy_priors.emplace_back(m, e.moves[i].policy);
   }
+
+  uint64_t gen2 = e.generation.load(std::memory_order_acquire);
+  if (gen1 != gen2) return false;
+
   return true;
 }
 
 void NNCache::Insert(uint64_t key, const EvaluationResult &result) {
   Entry &e = entries_[key % size_];
+  uint64_t gen = e.generation.load(std::memory_order_relaxed);
+  e.generation.store(gen + 1, std::memory_order_release);
+
   e.key = key;
   e.value = result.value;
   e.draw = result.has_wdl ? result.wdl[1] : 0.0f;
@@ -69,10 +80,13 @@ void NNCache::Insert(uint64_t key, const EvaluationResult &result) {
     e.moves[i].policy = result.policy_priors[i].second;
   }
   e.occupied = true;
+
+  e.generation.store(gen + 2, std::memory_order_release);
 }
 
 void NNCache::Clear() {
   for (auto &e : entries_) {
+    e.generation.store(0, std::memory_order_relaxed);
     e.occupied = false;
     e.key = 0;
     e.num_moves = 0;

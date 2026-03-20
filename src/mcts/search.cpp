@@ -219,6 +219,7 @@ void Search::StartSearch(const std::string& fen,
     Wait();
 
     stats_.reset();
+    first_eval_time_ms_ = -1;
     stop_flag_.store(false, std::memory_order_release);
     running_.store(true, std::memory_order_release);
     limits_ = limits;
@@ -493,29 +494,37 @@ bool Search::ShouldStop() const {
         if (elapsed >= time_budget_ms_) return true;
 
         if (params_.smart_pruning_factor > 0.0f &&
-            stats_.total_nodes.load(std::memory_order_relaxed) > 100 &&
+            stats_.total_nodes.load(std::memory_order_relaxed) > 0 &&
             stats_.total_nodes.load(std::memory_order_relaxed) % 32 == 0) {
-            const Node* root = tree_.Root();
-            if (root && root->NumEdges() > 0) {
-                int num_edges = root->NumEdges();
-                const Edge* edges = root->Edges();
-                uint32_t best_n = 0, second_n = 0;
-                for (int i = 0; i < num_edges; ++i) {
-                    Node* child = edges[i].child.load(std::memory_order_relaxed);
-                    if (child) {
-                        uint32_t cn = child->GetN();
-                        if (cn > best_n) { second_n = best_n; best_n = cn; }
-                        else if (cn > second_n) { second_n = cn; }
+
+            if (first_eval_time_ms_ < 0) {
+                first_eval_time_ms_ = elapsed;
+            }
+
+            if (elapsed >= first_eval_time_ms_ + 200) {
+                const Node* root = tree_.Root();
+                if (root && root->NumEdges() > 0) {
+                    int num_edges = root->NumEdges();
+                    const Edge* edges = root->Edges();
+                    uint32_t best_n = 0, second_n = 0;
+                    for (int i = 0; i < num_edges; ++i) {
+                        Node* child = edges[i].child.load(std::memory_order_relaxed);
+                        if (child) {
+                            uint32_t cn = child->GetN();
+                            if (cn > best_n) { second_n = best_n; best_n = cn; }
+                            else if (cn > second_n) { second_n = cn; }
+                        }
                     }
+                    uint64_t total = stats_.total_nodes.load(std::memory_order_relaxed);
+                    int64_t time_since_first = elapsed - first_eval_time_ms_;
+                    double adj_nps = (time_since_first > 0) ?
+                        static_cast<double>(total + 300) * 1000.0 / time_since_first : 0;
+                    int64_t remaining_ms = time_budget_ms_ - elapsed;
+                    double est_remaining = adj_nps * remaining_ms / 1000.0;
+                    if (best_n > second_n + static_cast<uint32_t>(
+                            est_remaining / params_.smart_pruning_factor))
+                        return true;
                 }
-                float elapsed_frac = static_cast<float>(elapsed) /
-                                     static_cast<float>(time_budget_ms_);
-                uint64_t total = stats_.total_nodes.load(std::memory_order_relaxed);
-                float est_remaining = static_cast<float>(total) *
-                    (1.0f - elapsed_frac) / std::max(elapsed_frac, 0.01f);
-                if (best_n > second_n + static_cast<uint32_t>(
-                        est_remaining * params_.smart_pruning_factor))
-                    return true;
             }
         }
     }

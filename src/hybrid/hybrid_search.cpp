@@ -511,9 +511,11 @@ void ParallelHybridSearch::publish_mcts_state() {
 }
 
 void ParallelHybridSearch::update_mcts_policy_from_ab() {
-  // Read AB's current PV and inject it into the MCTS tree.
-  // This is the core cross-pollination: AB's deep tactical analysis
-  // biases MCTS exploration toward proven lines.
+  // PV injection disabled — improved MCTS policies conflict with AB
+  // when cross-pollinated. Both engines run independently; the coordinator's
+  // make_final_decision() combines results at the end.
+  return;
+
   int pv_len = ab_state_.pv_length.load(std::memory_order_acquire);
   if (pv_len <= 0 || !mcts_search_)
     return;
