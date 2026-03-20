@@ -347,42 +347,25 @@ We conducted a comprehensive tournament of 322 games across 33 matches at 300s +
 
 \begin{table}[!htbp]
 \centering
-\caption{Tournament results: MetalFish engines vs.\ reference opponents (322 games, 300+0.1s TC, M1 Ultra, 10 threads). W/D/L from MetalFish's perspective.}
+\caption{Tournament results (322 games, 300+0.1s TC, M1 Ultra). W/D/L from MetalFish's perspective. Elo estimates: AB $\sim$4048, Hybrid $\sim$3724, MCTS $\sim$3289.}
 \label{tab:tournament}
-\footnotesize
-\begin{tabular}{llcccr}
+\scriptsize
+\begin{tabular}{lcccc|lcccc|lcccc}
 \toprule
-\textbf{Engine} & \textbf{Opponent} & \textbf{W} & \textbf{D} & \textbf{L} & \textbf{Score} \\
+\multicolumn{5}{c|}{\textbf{MetalFish-AB}} & \multicolumn{5}{c|}{\textbf{MetalFish-Hybrid}} & \multicolumn{5}{c}{\textbf{MetalFish-MCTS}} \\
+Opp. & W & D & L & Sc. & Opp. & W & D & L & Sc. & Opp. & W & D & L & Sc. \\
 \midrule
-\multirow{9}{*}{\rotatebox{90}{\textbf{MF-AB}}}
-& Stockfish      & --- & --- & 0 & undefeated \\
-& SF-L16 ($\sim$3584) & 5 & 0 & 0 & 5.0/5 \\
-& SF-L14 ($\sim$3505) & 3 & 2 & 0 & 4.0/5 \\
-& SF-L12 ($\sim$3412) & 5 & 0 & 0 & 5.0/5 \\
-& SF-L10 ($\sim$3304) & 5 & 0 & 0 & 5.0/5 \\
-& SF-L8 ($\sim$3156)  & 5 & 0 & 0 & 5.0/5 \\
-& Berserk ($\sim$3722) & 5 & 0 & 0 & 5.0/5 \\
-& Lc0 ($\sim$3700)     & 2 & 3 & 0 & 3.5/5 \\
-& Patricia ($\sim$3415) & 5 & 0 & 0 & 5.0/5 \\
+SF     & -- & -- & 0 & undef. & SF     & 0 & 4 & 2 & 2/6  & Lc0    & 0 & 1 & 5 & .5/6 \\
+SF-16  & 5 & 0 & 0 & 5/5   & SF-16  & 2 & 3 & 0 & 3.5/5 & SF-16  & 0 & 3 & 2 & 1.5/5 \\
+SF-14  & 3 & 2 & 0 & 4/5   & SF-14  & 4 & 1 & 0 & 4.5/5 & SF-14  & 0 & 2 & 3 & 1/5 \\
+SF-12  & 5 & 0 & 0 & 5/5   & SF-12  & 3 & 2 & 0 & 4/5   & SF-10  & 3 & 0 & 2 & 3/5 \\
+SF-10  & 5 & 0 & 0 & 5/5   & SF-10  & 4 & 1 & 0 & 4.5/5 & SF-8   & 4 & 0 & 1 & 4/5 \\
+SF-8   & 5 & 0 & 0 & 5/5   & Brsrk  & 5 & 0 & 0 & 5/5   & SF-5   & 5 & 0 & 0 & 5/5 \\
+Brsrk  & 5 & 0 & 0 & 5/5   & Lc0    & 0 & 4 & 1 & 2/5   & Brsrk  & 5 & 0 & 0 & 5/5 \\
+Lc0    & 2 & 3 & 0 & 3.5/5 & Patri. & 0 & 2 & 3 & 1/5   & Patri. & 0 & 1 & 4 & .5/5 \\
+Patri. & 5 & 0 & 0 & 5/5   &        &   &   &   &       & SF     & 0 & 0 & 5 & 0/5 \\
 \midrule
-\multirow{7}{*}{\rotatebox{90}{\textbf{MF-Hybrid}}}
-& Stockfish      & 0 & 4 & 2 & 2.0/6 \\
-& SF-L16         & 2 & 3 & 0 & 3.5/5 \\
-& SF-L14         & 4 & 1 & 0 & 4.5/5 \\
-& SF-L12         & 3 & 2 & 0 & 4.0/5 \\
-& SF-L10         & 4 & 1 & 0 & 4.5/5 \\
-& Berserk        & 5 & 0 & 0 & 5.0/5 \\
-& Lc0            & 0 & 4 & 1 & 2.0/5 \\
-& Patricia       & 0 & 2 & 3 & 1.0/5 \\
-\midrule
-\multirow{7}{*}{\rotatebox{90}{\textbf{MF-MCTS}}}
-& Lc0            & 0 & 1 & 5 & 0.5/6 \\
-& SF-L16         & 0 & 3 & 2 & 1.5/5 \\
-& SF-L14         & 0 & 2 & 3 & 1.0/5 \\
-& SF-L10         & 3 & 0 & 2 & 3.0/5 \\
-& SF-L8          & 4 & 0 & 1 & 4.0/5 \\
-& SF-L5 ($\sim$2800) & 5 & 0 & 0 & 5.0/5 \\
-& Berserk        & 5 & 0 & 0 & 5.0/5 \\
+\multicolumn{5}{c|}{0 losses in 110 games} & \multicolumn{5}{c|}{63W-39D-19L} & \multicolumn{5}{c}{31W-14D-76L} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -392,35 +375,24 @@ We conducted a comprehensive tournament of 322 games across 33 matches at 300s +
 \begin{tikzpicture}
 \begin{axis}[
     xbar,
-    y=-0.6cm,
-    bar width=0.4cm,
+    y=-0.45cm,
+    bar width=0.3cm,
     xmin=2700, xmax=4200,
-    xlabel={Estimated Elo Rating},
+    xlabel={\small Estimated Elo Rating},
     ytick=data,
-    yticklabels={SF-L5, SF-L8, SF-L10, \textbf{MF-MCTS}, SF-L12, Patricia, SF-L14, SF-L16, Lc0, Berserk, \textbf{MF-Hybrid}, Stockfish, \textbf{MF-AB}},
+    yticklabels={\tiny SF-L5, \tiny SF-L8, \tiny SF-L10, \tiny\textbf{MCTS}, \tiny SF-L12, \tiny Patricia, \tiny SF-L14, \tiny SF-L16, \tiny Lc0, \tiny Berserk, \tiny\textbf{Hybrid}, \tiny Stockfish, \tiny\textbf{AB}},
     nodes near coords,
     nodes near coords align={horizontal},
     every node near coord/.append style={font=\tiny},
-    width=0.95\textwidth,
-    height=6cm,
-    enlarge y limits={abs=0.4cm},
+    width=0.92\textwidth,
+    height=5cm,
+    enlarge y limits={abs=0.3cm},
     grid=major,
     grid style={gray!30},
 ]
 \addplot coordinates {
-    (2800,0)
-    (3156,1)
-    (3304,2)
-    (3289,3)
-    (3412,4)
-    (3415,5)
-    (3505,6)
-    (3584,7)
-    (3700,8)
-    (3722,9)
-    (3724,10)
-    (3800,11)
-    (4048,12)
+    (2800,0) (3156,1) (3304,2) (3289,3) (3412,4) (3415,5)
+    (3505,6) (3584,7) (3700,8) (3722,9) (3724,10) (3800,11) (4048,12)
 };
 \end{axis}
 \end{tikzpicture}
