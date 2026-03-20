@@ -128,7 +128,9 @@ void UCIEngine::loop() {
     // ======================================================================
 
     if (token == "quit" || token == "stop") {
-      stop_active_searches(); // Stop any MCTS/Hybrid search first
+      stop_active_searches();
+      if (token == "quit")
+        wait_active_searches();
       engine.stop();
     }
 
@@ -240,6 +242,7 @@ void UCIEngine::loop() {
 
   // Clean up background search threads before exiting
   stop_active_searches();
+  wait_active_searches();
   join_search_waiter();
 }
 
