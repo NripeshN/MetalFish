@@ -11,10 +11,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <thread>
 #include <vector>
 
 #include "../core/movegen.h"
@@ -428,6 +430,61 @@ private:
 };
 
 // ============================================================================
+// NodeGarbageCollector - Background deallocation of pruned subtrees
+// ============================================================================
+
+class NodeGarbageCollector {
+public:
+    NodeGarbageCollector() : gc_thread_([this]() { Worker(); }) {}
+
+    ~NodeGarbageCollector() {
+        stop_.store(true, std::memory_order_release);
+        if (gc_thread_.joinable()) gc_thread_.join();
+    }
+
+    NodeGarbageCollector(const NodeGarbageCollector&) = delete;
+    NodeGarbageCollector& operator=(const NodeGarbageCollector&) = delete;
+
+    void AddToQueue(std::unique_ptr<Node> node) {
+        if (!node) return;
+        std::lock_guard<std::mutex> lock(gc_mutex_);
+        gc_queue_.push_back(std::move(node));
+    }
+
+private:
+    void Worker() {
+        while (!stop_.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            ProcessQueue();
+        }
+        ProcessQueue();
+    }
+
+    void ProcessQueue() {
+        while (true) {
+            std::unique_ptr<Node> item;
+            {
+                std::lock_guard<std::mutex> lock(gc_mutex_);
+                if (gc_queue_.empty()) return;
+                item = std::move(gc_queue_.back());
+                gc_queue_.pop_back();
+            }
+            item.reset();
+        }
+    }
+
+    std::thread gc_thread_;
+    std::atomic<bool> stop_{false};
+    std::mutex gc_mutex_;
+    std::vector<std::unique_ptr<Node>> gc_queue_;
+};
+
+inline NodeGarbageCollector& GetNodeGC() {
+    static NodeGarbageCollector gc;
+    return gc;
+}
+
+// ============================================================================
 // NodeTree - Arena-allocated tree with reuse support
 // ============================================================================
 
@@ -444,7 +501,7 @@ public:
         arenas_.clear();
         current_arena_.store(0, std::memory_order_relaxed);
         AllocateNewArena();
-        root_heap_.reset();
+        if (root_heap_) GetNodeGC().AddToQueue(std::move(root_heap_));
         root_arena_.reset();
         root_is_arena_ = false;
 
@@ -485,7 +542,7 @@ public:
             if (test.key() == target_key) {
                 edges[i].child.store(nullptr, std::memory_order_relaxed);
                 child->DetachFromParentForReuse();
-                root_heap_.reset();
+                if (root_heap_) GetNodeGC().AddToQueue(std::move(root_heap_));
                 root_arena_.reset(child);
                 root_is_arena_ = true;
                 {
@@ -505,7 +562,7 @@ public:
                     if (test.key() == target_key) {
                         ce[j].child.store(nullptr, std::memory_order_relaxed);
                         gc->DetachFromParentForReuse();
-                        root_heap_.reset();
+                        if (root_heap_) GetNodeGC().AddToQueue(std::move(root_heap_));
                         root_arena_.reset(gc);
                         root_is_arena_ = true;
                         {
