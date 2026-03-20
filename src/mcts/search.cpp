@@ -845,7 +845,11 @@ Search::SelectedLeaf Search::SelectLeaf(SearchWorkerCtx& ctx) {
         bool is_root = (node == tree_.Root());
         auto [best_idx, visits_to_assign] = SelectChildPuct(node, is_root, ctx);
         if (best_idx < 0) break;
-        (void)visits_to_assign;
+
+        // Use multivisit from PUCT at root to reduce tree traversals
+        if (is_root && visits_to_assign > 1) {
+            path_multivisit = std::min(visits_to_assign, 128);
+        }
 
         Edge& edge = node->Edges()[best_idx];
 
