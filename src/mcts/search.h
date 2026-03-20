@@ -187,6 +187,7 @@ public:
     void ClearCallbacks();
 
     Move GetBestMove() const;
+    Move GetBestMoveWithTemperature(float temperature) const;
     float GetBestQ() const;
     std::vector<Move> GetPV() const;
     const PipelineStats& Stats() const { return stats_; }

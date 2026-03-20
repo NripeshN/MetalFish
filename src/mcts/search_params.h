@@ -58,6 +58,13 @@ struct SearchParams {
     bool  sticky_endgames = true;
     float draw_score = 0.0f;
 
+    // Temperature for final move selection (0 = always best, >0 = sample)
+    float temperature = 0.0f;
+    float temp_winpct_cutoff = 50.0f;
+
+    // Contempt (positive = avoid draws, negative = prefer draws)
+    float contempt = 0.0f;
+
     // Threading
     int num_threads = 2;
     int virtual_loss = 1;

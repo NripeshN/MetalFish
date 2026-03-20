@@ -250,6 +250,10 @@ void Search::StartSearch(const std::string& fen,
         root_color_ = root_pos.side_to_move();
     }
 
+    if (params_.contempt != 0.0f) {
+        params_.draw_score = -params_.contempt / 10000.0f;
+    }
+
     time_budget_ms_ = CalculateTimeBudget();
 
     gathering_permit_.store(1, std::memory_order_relaxed);
@@ -324,7 +328,12 @@ void Search::Wait() {
     best_move_cb_ = nullptr;
 
     if (cb_copy) {
-        Move best = GetBestMove();
+        Move best;
+        if (params_.temperature > 0.0f) {
+            best = GetBestMoveWithTemperature(params_.temperature);
+        } else {
+            best = GetBestMove();
+        }
         std::vector<Move> pv = GetPV();
         Move ponder = pv.size() > 1 ? pv[1] : Move::none();
         cb_copy(best, ponder);
@@ -1291,6 +1300,56 @@ Move Search::GetBestMove() const {
         return edges[best_policy_idx].move;
     }
     return edges[best_idx].move;
+}
+
+Move Search::GetBestMoveWithTemperature(float temperature) const {
+    const Node* root = tree_.Root();
+    if (!root || root->NumEdges() == 0) return Move::none();
+
+    int num_edges = root->NumEdges();
+    const Edge* edges = root->Edges();
+
+    float max_n = 0.0f;
+    float max_eval = -2.0f;
+    for (int i = 0; i < num_edges; ++i) {
+        Node* child = edges[i].child.load(std::memory_order_acquire);
+        if (!child || child->GetN() == 0) continue;
+        float cn = static_cast<float>(child->GetN());
+        if (cn > max_n) {
+            max_n = cn;
+            max_eval = child->GetWL();
+        }
+    }
+    if (max_n <= 0.0f) return GetBestMove();
+
+    float min_eval = max_eval - params_.temp_winpct_cutoff / 50.0f;
+
+    std::vector<float> cumsum;
+    std::vector<int> indices;
+    float sum = 0.0f;
+    for (int i = 0; i < num_edges; ++i) {
+        Node* child = edges[i].child.load(std::memory_order_acquire);
+        if (!child || child->GetN() == 0) continue;
+        if (child->GetWL() < min_eval) continue;
+
+        float weight = std::pow(
+            static_cast<float>(child->GetN()) / max_n,
+            1.0f / temperature);
+        sum += weight;
+        cumsum.push_back(sum);
+        indices.push_back(i);
+    }
+    if (cumsum.empty()) return GetBestMove();
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> dist(0.0f, cumsum.back());
+    float toss = dist(gen);
+    auto it = std::lower_bound(cumsum.begin(), cumsum.end(), toss);
+    int idx = static_cast<int>(it - cumsum.begin());
+    idx = std::min(idx, static_cast<int>(indices.size()) - 1);
+
+    return edges[indices[idx]].move;
 }
 
 std::vector<Move> Search::GetPV() const {
