@@ -1,94 +1,100 @@
 \relax 
-\citation{Nasu2018}
-\citation{Silver2017}
-\@writefile{toc}{\contentsline {title}{MetalFish: A Three-Engine Chess Architecture\unskip \ \ignorespaces Exploiting Apple Silicon Unified Memory for Parallel Search}{1}{}\protected@file@percent }
+\citation{stockfish}
+\citation{silver2018general}
+\citation{lc0}
+\citation{baier2015mcts}
+\@writefile{toc}{\contentsline {title}{Hybrid Chess Search: Combining Alpha-Beta and Monte Carlo Tree Search on Unified Memory Architectures}{1}{}\protected@file@percent }
 \@writefile{toc}{\authcount {1}}
-\@writefile{toc}{\contentsline {author}{Nripesh Niketan\unskip {}}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {author}{Anonymous Author(s)}{1}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{}\protected@file@percent }
 \newlabel{sec:introduction}{{1}{1}{}{section.1}{}}
-\citation{Knuth1975}
-\citation{Marsland1986}
-\citation{Nasu2018}
-\citation{Coulom2006}
-\@writefile{toc}{\contentsline {section}{\numberline {2}Background and Related Work}{3}{}\protected@file@percent }
-\newlabel{sec:background}{{2}{3}{}{section.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Alpha-Beta Search with NNUE Evaluation}{3}{}\protected@file@percent }
-\newlabel{sec:bg-ab}{{2.1}{3}{}{subsection.2.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Monte Carlo Tree Search with Neural Networks}{3}{}\protected@file@percent }
-\newlabel{sec:bg-mcts}{{2.2}{3}{}{subsection.2.2}{}}
-\newlabel{eq:puct}{{1}{3}{}{equation.1}{}}
-\citation{MetalFish2025}
-\citation{Rocki2010}
-\citation{Silver2017}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Unified Memory on Apple Silicon}{4}{}\protected@file@percent }
-\newlabel{sec:bg-unified}{{2.3}{4}{}{subsection.2.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Related Work}{4}{}\protected@file@percent }
-\newlabel{sec:bg-related}{{2.4}{4}{}{subsection.2.4}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces MetalFish three-engine architecture. The alpha-beta engine and hybrid coordinator run on CPU performance cores; the MCTS engine dispatches transformer inference to the GPU via MPSGraph. All engines share state through unified memory (dashed lines) without copies.}}{5}{}\protected@file@percent }
-\newlabel{fig:architecture}{{1}{5}{}{figure.1}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {3}System Architecture}{5}{}\protected@file@percent }
-\newlabel{sec:architecture}{{3}{5}{}{section.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Overview}{5}{}\protected@file@percent }
-\newlabel{sec:arch-overview}{{3.1}{5}{}{subsection.3.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Alpha-Beta Engine}{5}{}\protected@file@percent }
-\newlabel{sec:arch-ab}{{3.2}{5}{}{subsection.3.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}MCTS Engine}{6}{}\protected@file@percent }
-\newlabel{sec:arch-mcts}{{3.3}{6}{}{subsection.3.3}{}}
-\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces GatherBatchEvaluator: Cooperative Batched GPU Inference}}{7}{}\protected@file@percent }
-\newlabel{alg:gather}{{1}{7}{}{algorithm.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Hybrid Engine}{7}{}\protected@file@percent }
-\newlabel{sec:arch-hybrid}{{3.4}{7}{}{subsection.3.4}{}}
-\@writefile{loa}{\contentsline {algorithm}{\numberline {2}{\ignorespaces Hybrid Coordinator: Agreement-Based Early Stopping}}{8}{}\protected@file@percent }
-\newlabel{alg:hybrid}{{2}{8}{}{algorithm.2}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Apple Silicon optimizations and their measured impact. NPS measurements taken on Apple M2 Max, single-thread alpha-beta unless otherwise noted.}}{9}{}\protected@file@percent }
-\newlabel{tab:optimizations}{{1}{9}{}{table.1}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {4}Apple Silicon Optimizations}{9}{}\protected@file@percent }
-\newlabel{sec:optimizations}{{4}{9}{}{section.4}{}}
-\citation{cutechess}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Per-engine performance on Apple M2 Max. NPS measured at the starting position; depth and best move measured after 5 seconds of search.}}{10}{}\protected@file@percent }
-\newlabel{tab:engine-performance}{{2}{10}{}{table.2}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {5}Experimental Evaluation}{10}{}\protected@file@percent }
-\newlabel{sec:evaluation}{{5}{10}{}{section.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Setup}{10}{}\protected@file@percent }
-\newlabel{sec:eval-setup}{{5.1}{10}{}{subsection.5.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Per-Engine Performance}{10}{}\protected@file@percent }
-\newlabel{sec:eval-engines}{{5.2}{10}{}{subsection.5.2}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Tournament results: Alpha-Beta vs.\ Hybrid at 60+1 time control (4 games). Each engine alternates colors.}}{11}{}\protected@file@percent }
-\newlabel{tab:tournament}{{3}{11}{}{table.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Tournament Results}{11}{}\protected@file@percent }
-\newlabel{sec:eval-tournament}{{5.3}{11}{}{subsection.5.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Parameter Sensitivity}{11}{}\protected@file@percent }
-\newlabel{sec:eval-sensitivity}{{5.4}{11}{}{subsection.5.4}{}}
-\citation{Rocki2010}
-\citation{Silver2017}
-\citation{MetalFish2025}
-\citation{Rocki2010}
-\citation{Silver2017}
-\citation{MetalFish2025}
-\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion}{12}{}\protected@file@percent }
-\newlabel{sec:discussion}{{6}{12}{}{section.6}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}When Is Hybrid Search Justified?}{12}{}\protected@file@percent }
-\newlabel{sec:disc-when}{{6.1}{12}{}{subsection.6.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Design Principles}{12}{}\protected@file@percent }
-\newlabel{sec:disc-principles}{{6.2}{12}{}{subsection.6.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Comparison with Prior Approaches}{12}{}\protected@file@percent }
-\newlabel{sec:disc-comparison}{{6.3}{12}{}{subsection.6.3}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Comparison of MetalFish with prior GPU-accelerated chess approaches. Entries describe published approaches generically.}}{13}{}\protected@file@percent }
-\newlabel{tab:comparison}{{4}{13}{}{table.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Limitations}{13}{}\protected@file@percent }
-\newlabel{sec:disc-limitations}{{6.4}{13}{}{subsection.6.4}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion}{13}{}\protected@file@percent }
-\newlabel{sec:conclusion}{{7}{13}{}{section.7}{}}
-\bibcite{Knuth1975}{1}
-\bibcite{Nasu2018}{2}
-\bibcite{Silver2017}{3}
-\bibcite{Coulom2006}{4}
-\bibcite{Rocki2010}{5}
-\bibcite{AppleMetal2024}{6}
-\bibcite{AppleMetalBestPractices2024}{7}
-\bibcite{MetalFish2025}{8}
-\bibcite{Browne2012}{9}
-\bibcite{Campbell2002}{10}
-\bibcite{Marsland1986}{11}
-\bibcite{cutechess}{12}
-\gdef \@abspage@last{15}
+\citation{knuth1975analysis}
+\citation{stockfish}
+\citation{nasu2018efficiently}
+\citation{silver2018general}
+\citation{lc0}
+\citation{vaswani2017attention}
+\citation{rosin2011multi}
+\citation{apple2020m1}
+\citation{baier2015mcts}
+\citation{lanctot2014monte}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background and Related Work}{2}{}\protected@file@percent }
+\newlabel{sec:background}{{2}{2}{}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Alpha-Beta Search with NNUE}{2}{}\protected@file@percent }
+\newlabel{sec:bg-ab}{{2.1}{2}{}{subsection.2.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Monte Carlo Tree Search with Neural Networks}{2}{}\protected@file@percent }
+\newlabel{sec:bg-mcts}{{2.2}{2}{}{subsection.2.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Unified Memory Architecture}{2}{}\protected@file@percent }
+\newlabel{sec:bg-unified}{{2.3}{2}{}{subsection.2.3}{}}
+\citation{uci}
+\citation{stockfish}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces System architecture. The UCI layer routes positions to one of three engines. The hybrid coordinator runs alpha-beta and MCTS in parallel, sharing results through cache-line-aligned atomic state in unified memory. NNUE runs on CPU; transformer inference runs on the Metal GPU via MPSGraph.}}{3}{}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:architecture}{{1}{3}{}{figure.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Related Work}{3}{}\protected@file@percent }
+\newlabel{sec:bg-related}{{2.4}{3}{}{subsection.2.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}System Architecture}{3}{}\protected@file@percent }
+\newlabel{sec:architecture}{{3}{3}{}{section.3}{}}
+\citation{rosin2011multi}
+\citation{lc0}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Alpha-Beta Engine}{4}{}\protected@file@percent }
+\newlabel{sec:arch-ab}{{3.1}{4}{}{subsection.3.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}MCTS Engine}{4}{}\protected@file@percent }
+\newlabel{sec:arch-mcts}{{3.2}{4}{}{subsection.3.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Hybrid Engine}{4}{}\protected@file@percent }
+\newlabel{sec:arch-hybrid}{{3.3}{4}{}{subsection.3.3}{}}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces Parallel Hybrid Search}}{5}{}\protected@file@percent }
+\newlabel{alg:hybrid}{{1}{5}{}{algorithm.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Impact of Apple Silicon optimizations on MCTS throughput. Baseline: original implementation with \texttt  {std::mutex} nodes, per-iteration heap allocation, and 16KB policy tables. Measured on Apple M2~Max at 2~threads.}}{5}{}\protected@file@percent }
+\newlabel{tab:optimizations}{{1}{5}{}{table.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Apple Silicon Optimizations}{5}{}\protected@file@percent }
+\newlabel{sec:optimizations}{{4}{5}{}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Lock-Free Node Scoring}{5}{}\protected@file@percent }
+\citation{bratko1982advice}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Memory Optimization}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Auto-Detection and Time Management}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Experimental Evaluation}{6}{}\protected@file@percent }
+\newlabel{sec:evaluation}{{5}{6}{}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Experimental Setup}{6}{}\protected@file@percent }
+\newlabel{sec:eval-setup}{{5.1}{6}{}{subsection.5.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Bratko-Kopec tactical test suite results (24 positions, 10s/position). Solve rate indicates percentage of positions where the engine found the known best move.}}{7}{}\protected@file@percent }
+\newlabel{tab:tactical}{{2}{7}{}{table.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Bestmove agreement matrix on BK suite (24 positions). Each cell shows the percentage of positions where both engines chose the same move.}}{7}{}\protected@file@percent }
+\newlabel{tab:agreement}{{3}{7}{}{table.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Tactical Accuracy}{7}{}\protected@file@percent }
+\newlabel{sec:eval-tactical}{{5.2}{7}{}{subsection.5.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}MCTS Throughput}{7}{}\protected@file@percent }
+\newlabel{sec:eval-throughput}{{5.3}{7}{}{subsection.5.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces NPS throughput comparison: MetalFish-MCTS vs.\ Lc0 (same BT4 network, 2 threads, 10s/position). Speedup is MetalFish NPS / Lc0 NPS.}}{8}{}\protected@file@percent }
+\newlabel{tab:nps}{{4}{8}{}{table.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Tournament Results}{8}{}\protected@file@percent }
+\newlabel{sec:eval-tournament}{{5.4}{8}{}{subsection.5.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Internal Head-to-Head}{8}{}\protected@file@percent }
+\newlabel{sec:eval-internal}{{5.5}{8}{}{subsection.5.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion}{8}{}\protected@file@percent }
+\newlabel{sec:discussion}{{6}{8}{}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}When Does Hybrid Search Help?}{8}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Tournament results: MetalFish engines vs.\ reference opponents (322 games, 300+0.1s TC, M1 Ultra, 10 threads). W/D/L from MetalFish's perspective.}}{9}{}\protected@file@percent }
+\newlabel{tab:tournament}{{5}{9}{}{table.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}MCTS vs.\ Lc0: Same Network, Different Strength}{9}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Estimated Elo ratings for all engines. MetalFish-AB ($\sim $4048) is the strongest, followed by Stockfish ($\sim $3800), MetalFish-Hybrid ($\sim $3724), and MetalFish-MCTS ($\sim $3289). Ratings derived from performance against Stockfish skill-level ladder as calibration anchors.}}{10}{}\protected@file@percent }
+\newlabel{fig:elo}{{2}{10}{}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Unified Memory Benefits}{10}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Limitations}{10}{}\protected@file@percent }
+\bibcite{stockfish}{1}
+\bibcite{silver2018general}{2}
+\bibcite{lc0}{3}
+\bibcite{knuth1975analysis}{4}
+\bibcite{nasu2018efficiently}{5}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Internal head-to-head results (5 games each, 300+0.1s TC).}}{11}{}\protected@file@percent }
+\newlabel{tab:internal}{{6}{11}{}{table.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion}{11}{}\protected@file@percent }
+\newlabel{sec:conclusion}{{7}{11}{}{section.7}{}}
+\bibcite{vaswani2017attention}{6}
+\bibcite{rosin2011multi}{7}
+\bibcite{apple2020m1}{8}
+\bibcite{baier2015mcts}{9}
+\bibcite{lanctot2014monte}{10}
+\bibcite{bratko1982advice}{11}
+\bibcite{uci}{12}
+\gdef \@abspage@last{12}
