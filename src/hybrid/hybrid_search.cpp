@@ -375,11 +375,17 @@ void ParallelHybridSearch::new_game() {
 }
 
 int ParallelHybridSearch::calculate_time_budget() const {
+  // AB's Stockfish time manager is the master clock. This function only
+  // computes a hard safety cap for the coordinator — AB decides when to
+  // stop, and the coordinator stops MCTS when AB finishes.
   if (limits_.movetime > 0) {
     return limits_.movetime;
   }
-  if (limits_.infinite || limits_.nodes > 0) {
-    return 0;
+  if (limits_.infinite) {
+    return 0; // No cap — run until explicit stop
+  }
+  if (limits_.nodes > 0) {
+    return 0; // Node-limited — no time cap
   }
 
   Position pos;
@@ -388,18 +394,14 @@ int ParallelHybridSearch::calculate_time_budget() const {
   Color us = pos.side_to_move();
 
   int time_left = (us == WHITE) ? limits_.time[WHITE] : limits_.time[BLACK];
-  int increment = (us == WHITE) ? limits_.inc[WHITE] : limits_.inc[BLACK];
-
   if (time_left <= 0) {
+    int increment = (us == WHITE) ? limits_.inc[WHITE] : limits_.inc[BLACK];
     return std::max(1000, increment);
   }
 
-  // Hard safety cap: 42% of remaining time (Lc0's max-move-budget).
-  // The individual engines (AB via Stockfish TM, MCTS via Lc0 smooth TM)
-  // handle their own time allocation — this is just a safety backstop
-  // so the hybrid coordinator can force-stop if both engines overrun.
-  int hard_cap = static_cast<int>(time_left * 0.42f);
-  return std::max(500, hard_cap);
+  // Safety hard cap at 76% of remaining time (Stockfish's internal max).
+  // This only fires if AB's own time manager somehow fails to stop in time.
+  return std::max(500, static_cast<int>(time_left * 0.76f));
 }
 
 bool ParallelHybridSearch::should_stop() const {
@@ -440,9 +442,10 @@ void ParallelHybridSearch::mcts_thread_main() {
 
   auto start = std::chrono::steady_clock::now();
 
-  // Pass the real time controls so MCTS's Lc0-style smooth time manager
-  // handles allocation (with piggybank, NPS estimation, tree reuse, etc.)
-  ::MetalFish::Search::LimitsType mcts_limits = limits_;
+  // MCTS runs until the coordinator stops it (when AB finishes or agreement).
+  // Don't pass time controls — MCTS is a passenger on AB's time budget.
+  ::MetalFish::Search::LimitsType mcts_limits;
+  mcts_limits.infinite = 1;
   mcts_limits.startTime = now();
 
   Move best_move = Move::none();
@@ -656,20 +659,27 @@ void ParallelHybridSearch::coordinator_thread_main() {
   uint32_t last_mcts_move_raw = 0;
   int64_t last_info_ms = 0;
 
-  // Wait for search to complete or time to expire
+  // AB's time manager is the master clock. The coordinator monitors both
+  // engines and stops when: (1) AB finishes (its time manager decided), or
+  // (2) both agree on a move (early stop), or (3) safety hard cap fires.
   while (!should_stop()) {
     std::this_thread::sleep_for(std::chrono::microseconds(500));
 
-    // Check if both searches have results
-    bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
     bool ab_done = !ab_state_.ab_running.load(std::memory_order_acquire);
+    bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
+
+    // AB finished — it used its own time manager to decide. Stop everything.
+    if (ab_done && ab_state_.has_result.load(std::memory_order_acquire)) {
+      break;
+    }
 
     auto elapsed = std::chrono::steady_clock::now() - start;
     auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
-    // Agreement-based early stopping: if both engines agree on the same
-    // move for several consecutive checks, we can stop early and save time.
+    // Agreement-based early stopping: if both engines agree for 3+
+    // consecutive checks and we've used at least 25% of the safety cap,
+    // stop both engines early to save time for future moves.
     uint32_t ab_move = ab_state_.best_move_raw.load(std::memory_order_relaxed);
     uint32_t mcts_move =
         mcts_state_.best_move_raw.load(std::memory_order_relaxed);
@@ -677,8 +687,8 @@ void ParallelHybridSearch::coordinator_thread_main() {
     if (ab_move != 0 && mcts_move != 0) {
       if (ab_move == mcts_move) {
         agreement_count++;
-        // Both agree for 3+ checks AND we've used at least 25% of time
-        if (agreement_count >= 3 && ms > time_budget_ms_ / 4) {
+        int min_time = (time_budget_ms_ > 0) ? time_budget_ms_ / 4 : 500;
+        if (agreement_count >= 3 && ms > min_time) {
           send_info_string("Hybrid: engines agree, stopping early at " +
                            std::to_string(ms) + "ms");
           break;
@@ -688,7 +698,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
       }
     }
 
-    // Send combined info every ~500ms (fixed timing)
+    // Send combined info every ~500ms
     if (ms - last_info_ms >= 500) {
       last_info_ms = ms;
       uint64_t mcts_nodes = mcts_search_ ?
@@ -707,6 +717,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
       }
     }
 
+    // Both done — exit
     if (mcts_done && ab_done) {
       break;
     }
