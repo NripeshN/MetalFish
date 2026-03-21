@@ -165,7 +165,7 @@ class EngineConfig:
     uci_options: Dict[str, str] = field(default_factory=dict)
     available: bool = False
 
-def detect_engines(threads: int = 4) -> Dict[str, EngineConfig]:
+def detect_engines(threads: int = 2) -> Dict[str, EngineConfig]:
     engines = {}
     mf = METALFISH
     w = str(WEIGHTS)
@@ -180,24 +180,24 @@ def detect_engines(threads: int = 4) -> Dict[str, EngineConfig]:
 
     engines["metalfish-hybrid"] = EngineConfig(
         name="MetalFish-Hybrid", path=mf,
-        uci_options={"UseHybridSearch": "true", "NNWeights": w, "Threads": str(threads)})
+        uci_options={"UseHybridSearch": "true", "NNWeights": w, "Threads": str(max(4, threads * 2))})
 
     engines["lc0"] = EngineConfig(
         name="Lc0", path=LC0,
         cmd_args=[f"--weights={w}", "--backend=metal"],
-        uci_options={"Threads": str(threads), "Temperature": "0"})
+        uci_options={"Threads": "1", "Temperature": "0"})
 
     engines["stockfish"] = EngineConfig(
         name="Stockfish", path=STOCKFISH,
-        uci_options={"Threads": str(threads), "Skill Level": "20"})
+        uci_options={"Threads": "1", "Skill Level": "20"})
 
     engines["patricia"] = EngineConfig(
         name="Patricia", path=PATRICIA,
-        uci_options={"Threads": str(threads)})
+        uci_options={"Threads": "1"})
 
     engines["berserk"] = EngineConfig(
         name="Berserk", path=BERSERK,
-        uci_options={"Threads": str(threads)})
+        uci_options={"Threads": "1"})
 
     for eid, cfg in engines.items():
         cfg.available = cfg.path.exists()

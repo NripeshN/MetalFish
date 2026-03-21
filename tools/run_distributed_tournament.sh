@@ -31,23 +31,23 @@ BK="$RDIR/reference/books/8moves_v3.pgn"
 W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
 CA="-each tc=$TC -games $GAMES -repeat -recover -openings file=$BK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
 
-# Our engines
+# Our engines — optimal thread configs per engine
 AB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=10 option.Hash=512"
 MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=10 option.UseMCTS=true option.NNWeights=$W"
 HYB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=20 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W"
 
-# Opponents (10 engines spanning ~3100-3800 Elo)
+# Opponents — 1 thread each for controlled comparison
 S="$RDIR/reference/stockfish/src/stockfish"
-SF="-engine proto=uci cmd=$S name=Stockfish option.Threads=10 option.Hash=512"
-S16='-engine proto=uci cmd='$S' name=SF-L16 option.Threads=10 option.Hash=512 "option.Skill Level=16"'
-S14='-engine proto=uci cmd='$S' name=SF-L14 option.Threads=10 option.Hash=512 "option.Skill Level=14"'
-S12='-engine proto=uci cmd='$S' name=SF-L12 option.Threads=10 option.Hash=512 "option.Skill Level=12"'
-S10='-engine proto=uci cmd='$S' name=SF-L10 option.Threads=10 option.Hash=512 "option.Skill Level=10"'
-S8='-engine proto=uci cmd='$S' name=SF-L8 option.Threads=10 option.Hash=512 "option.Skill Level=8"'
-S5='-engine proto=uci cmd='$S' name=SF-L5 option.Threads=10 option.Hash=512 "option.Skill Level=5"'
-BER="-engine proto=uci cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=10 option.Hash=512"
-PAT="-engine proto=uci cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=10 option.Hash=512"
-LC0="-engine proto=uci cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$W arg=--backend=metal option.Threads=10"
+SF="-engine proto=uci cmd=$S name=Stockfish option.Threads=1 option.Hash=512"
+S16='-engine proto=uci cmd='$S' name=SF-L16 option.Threads=1 option.Hash=512 "option.Skill Level=16"'
+S14='-engine proto=uci cmd='$S' name=SF-L14 option.Threads=1 option.Hash=512 "option.Skill Level=14"'
+S12='-engine proto=uci cmd='$S' name=SF-L12 option.Threads=1 option.Hash=512 "option.Skill Level=12"'
+S10='-engine proto=uci cmd='$S' name=SF-L10 option.Threads=1 option.Hash=512 "option.Skill Level=10"'
+S8='-engine proto=uci cmd='$S' name=SF-L8 option.Threads=1 option.Hash=512 "option.Skill Level=8"'
+S5='-engine proto=uci cmd='$S' name=SF-L5 option.Threads=1 option.Hash=512 "option.Skill Level=5"'
+BER="-engine proto=uci cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=1 option.Hash=512"
+PAT="-engine proto=uci cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=1 option.Hash=512"
+LC0="-engine proto=uci cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$W arg=--backend=metal option.Threads=1"
 
 # Instance 1 (9 matches): AB vs everyone except Lc0
 I1="cd $RDIR"

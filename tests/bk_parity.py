@@ -199,7 +199,7 @@ def setup_metalfish(sess: UCISession, weights: pathlib.Path, threads: int, deter
 
 
 def setup_lc0(sess: UCISession, threads: int) -> None:
-    sess.setoption("Threads", str(threads))
+    sess.setoption("Threads", "1")
     sess.setoption("Temperature", "0")
     sess.send("isready")
     sess.wait_for("readyok", 120)
@@ -296,7 +296,7 @@ def main() -> int:
     parser.add_argument("--engine", choices=["metalfish", "lc0", "both"], default="both")
     parser.add_argument("--movetime", type=int, default=10_000)
     parser.add_argument("--nodes", type=int, default=0, help="If >0, uses go nodes")
-    parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--backend", default="metal")
