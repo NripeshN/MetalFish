@@ -87,6 +87,8 @@ class UCISession:
         while time.time() < deadline:
             line = self.proc.stdout.readline()
             if not line:
+                if self.proc.poll() is not None:
+                    raise RuntimeError(f"{self.name}: process died (exit={self.proc.returncode})")
                 continue
             line = line.strip()
             if line.startswith(prefix):
@@ -118,10 +120,15 @@ class UCISession:
         info_nps = 0
         info_nn_evals = 0
         t0 = time.time()
+        timeout = max(movetime_ms / 1000.0, nodes / 10.0 if nodes > 0 else 0) + 60
         assert self.proc.stdout is not None
         while True:
+            if time.time() - t0 > timeout:
+                raise TimeoutError(f"{self.name}: search timeout after {timeout:.0f}s")
             line = self.proc.stdout.readline()
             if not line:
+                if self.proc.poll() is not None:
+                    raise RuntimeError(f"{self.name}: process died during search (exit={self.proc.returncode})")
                 continue
             line = line.strip()
             if line.startswith("bestmove"):
@@ -149,9 +156,14 @@ class UCISession:
                             pass
         # Drain post-search stats (MetalFish prints final counters asynchronously).
         self.send("isready")
+        drain_deadline = time.time() + 30
         while True:
+            if time.time() > drain_deadline:
+                break
             line = self.proc.stdout.readline()
             if not line:
+                if self.proc.poll() is not None:
+                    break
                 continue
             line = line.strip()
             if line.startswith("readyok"):

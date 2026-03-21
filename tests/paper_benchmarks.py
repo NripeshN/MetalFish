@@ -84,7 +84,10 @@ class UCIEngine:
         assert self.proc.stdout
         while time.time() < deadline:
             line = self.proc.stdout.readline()
-            if not line: continue
+            if not line:
+                if self.proc.poll() is not None:
+                    raise RuntimeError(f"{self.name}: process died (exit={self.proc.returncode})")
+                continue
             line = line.strip()
             if line.startswith(prefix): return line
         raise TimeoutError(f"{self.name}: timeout waiting for {prefix}")
@@ -97,10 +100,16 @@ class UCIEngine:
         self.send(f"go movetime {movetime_ms}")
         r = SearchResult()
         t0 = time.time()
+        timeout = movetime_ms / 1000.0 + 30  # movetime + 30s grace
         assert self.proc.stdout
         while True:
+            if time.time() - t0 > timeout:
+                raise TimeoutError(f"{self.name}: search timeout after {timeout:.0f}s")
             line = self.proc.stdout.readline()
-            if not line: continue
+            if not line:
+                if self.proc.poll() is not None:
+                    raise RuntimeError(f"{self.name}: process died during search (exit={self.proc.returncode})")
+                continue
             line = line.strip()
             if line.startswith("bestmove"):
                 parts = line.split()
@@ -122,9 +131,15 @@ class UCIEngine:
                         try: r.depth = int(parts[i+1])
                         except ValueError: pass
         self.send("isready")
+        drain_deadline = time.time() + 30
         while True:
+            if time.time() > drain_deadline:
+                break
             line = self.proc.stdout.readline()
-            if not line: continue
+            if not line:
+                if self.proc.poll() is not None:
+                    break
+                continue
             line = line.strip()
             if line.startswith("readyok"): break
             if "NPS:" in line:
