@@ -592,7 +592,7 @@ def main() -> int:
     parser.add_argument("--scaling", action="store_true", help="Run thread scaling")
     parser.add_argument("--tournament", action="store_true", help="Run Elo tournament")
     parser.add_argument("--all", action="store_true", help="Run all experiments")
-    parser.add_argument("--threads", type=str, default="2", help="Thread counts (comma-sep)")
+    parser.add_argument("--threads", type=str, default="12", help="Thread counts (comma-sep)")
     parser.add_argument("--movetime", type=int, default=10000, help="Movetime per position (ms)")
     parser.add_argument("--games", type=int, default=10, help="Games per tournament match")
     parser.add_argument("--tc-movetime", type=int, default=5000, help="Movetime for tournament games")
