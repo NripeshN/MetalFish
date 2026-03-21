@@ -180,7 +180,7 @@ def detect_engines(threads: int = 2) -> Dict[str, EngineConfig]:
 
     engines["metalfish-hybrid"] = EngineConfig(
         name="MetalFish-Hybrid", path=mf,
-        uci_options={"UseHybridSearch": "true", "NNWeights": w, "Threads": str(max(4, threads * 2))})
+        uci_options={"UseHybridSearch": "true", "NNWeights": w, "Threads": str(max(4, threads + 2))})
 
     engines["lc0"] = EngineConfig(
         name="Lc0", path=LC0,

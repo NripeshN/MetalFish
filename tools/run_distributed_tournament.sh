@@ -32,8 +32,11 @@ W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
 CA="-each tc=$TC -games $GAMES -repeat -recover -openings file=$BK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
 
 # Our engines — optimal thread configs per engine
-AB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=10 option.Hash=512"
-MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=10 option.UseMCTS=true option.NNWeights=$W"
+# AB: scales well with threads, give it all available cores
+# MCTS: best at 2 threads (more causes collisions), GPU does heavy lifting
+# Hybrid: all 20 cores — internally splits to 18 AB + 2 MCTS + GPU
+AB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=18 option.Hash=512"
+MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=2 option.UseMCTS=true option.NNWeights=$W"
 HYB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=20 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W"
 
 # Opponents — 1 thread each for controlled comparison
