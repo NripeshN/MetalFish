@@ -296,7 +296,7 @@ def main() -> int:
     parser.add_argument("--engine", choices=["metalfish", "lc0", "both"], default="both")
     parser.add_argument("--movetime", type=int, default=10_000)
     parser.add_argument("--nodes", type=int, default=0, help="If >0, uses go nodes")
-    parser.add_argument("--threads", type=int, default=2)
+    parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--backend", default="metal")

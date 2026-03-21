@@ -1393,7 +1393,13 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights) {
   // Use the same UCI-configurable MCTS params as pure MCTS mode,
   // so all improvements (cache key fix, KLD stopper, solidification,
   // prefetching, TB probing, etc.) apply to hybrid too.
-  config.mcts_config = make_mcts_config(engine, nn_weights, 1);
+  int total_threads = std::max(1, static_cast<int>(engine.get_options()["Threads"]));
+  int ab_threads = std::max(1, total_threads / 2);
+  int mcts_threads = std::max(1, total_threads - ab_threads);
+
+  config.mcts_config = make_mcts_config(engine, nn_weights, mcts_threads);
+  config.mcts_threads = mcts_threads;
+  config.ab_threads = ab_threads;
 
   // Hybrid-specific override: slightly higher exploration at root
   config.mcts_config.cpuct_at_root = 2.15f;

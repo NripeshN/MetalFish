@@ -225,7 +225,8 @@ struct ParallelSearchStats {
 struct ParallelHybridConfig {
   // MCTS configuration
   SearchParams mcts_config;
-  int mcts_threads = 1;
+  int mcts_threads = 4;  // MCTS search threads + GPU
+  int ab_threads = 4;    // AB search threads (P-cores)
 
   // AB configuration
   int ab_min_depth = 8;    // Minimum depth for AB to search

@@ -165,7 +165,7 @@ class EngineConfig:
     uci_options: Dict[str, str] = field(default_factory=dict)
     available: bool = False
 
-def detect_engines(threads: int = 2) -> Dict[str, EngineConfig]:
+def detect_engines(threads: int = 4) -> Dict[str, EngineConfig]:
     engines = {}
     mf = METALFISH
     w = str(WEIGHTS)
