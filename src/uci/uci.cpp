@@ -1395,7 +1395,7 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights) {
   // prefetching, TB probing, etc.) apply to hybrid too.
   int total_threads = std::max(1, static_cast<int>(engine.get_options()["Threads"]));
   int mcts_threads = 2; // MCTS performs best at 2 threads (more causes collisions)
-  int ab_threads = std::max(1, total_threads - mcts_threads);
+  int ab_threads = std::max(1, total_threads - mcts_threads - 1); // -1 for coordinator thread
 
   config.mcts_config = make_mcts_config(engine, nn_weights, mcts_threads);
   config.mcts_threads = mcts_threads;
