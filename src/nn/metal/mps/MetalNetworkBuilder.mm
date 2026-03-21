@@ -313,12 +313,10 @@ void MetalNetworkBuilder::forwardEval(float *inputs, uint64_t *masks,
   @autoreleasepool {
     MetalNetworkGraph *graph =
         [MetalNetworkGraph getGraphAt:[NSNumber numberWithInt:this->gpu_id]];
-    @autoreleasepool {
-      [graph runInferenceWithBatchSize:batchSize
-                                inputs:inputs
-                                 masks:masks
-                               outputs:&output_mems[0]];
-    }
+    [graph runInferenceWithBatchSize:batchSize
+                              inputs:inputs
+                               masks:masks
+                             outputs:&output_mems[0]];
   }
 }
 
