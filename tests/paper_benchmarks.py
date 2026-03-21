@@ -165,7 +165,7 @@ class EngineConfig:
     uci_options: Dict[str, str] = field(default_factory=dict)
     available: bool = False
 
-def detect_engines(threads: int = 2) -> Dict[str, EngineConfig]:
+def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
     engines = {}
     mf = METALFISH
     w = str(WEIGHTS)
@@ -176,11 +176,11 @@ def detect_engines(threads: int = 2) -> Dict[str, EngineConfig]:
 
     engines["metalfish-mcts"] = EngineConfig(
         name="MetalFish-MCTS", path=mf,
-        uci_options={"UseMCTS": "true", "NNWeights": w, "Threads": str(threads)})
+        uci_options={"UseMCTS": "true", "NNWeights": w, "Threads": "2"})
 
     engines["metalfish-hybrid"] = EngineConfig(
         name="MetalFish-Hybrid", path=mf,
-        uci_options={"UseHybridSearch": "true", "NNWeights": w, "Threads": str(max(4, threads + 2))})
+        uci_options={"UseHybridSearch": "true", "NNWeights": w, "Threads": str(threads)})
 
     engines["lc0"] = EngineConfig(
         name="Lc0", path=LC0,
