@@ -378,6 +378,9 @@ int ParallelHybridSearch::calculate_time_budget() const {
   if (limits_.movetime > 0) {
     return limits_.movetime;
   }
+  if (limits_.infinite || limits_.nodes > 0) {
+    return 0;
+  }
 
   Position pos;
   StateInfo st;
@@ -388,15 +391,15 @@ int ParallelHybridSearch::calculate_time_budget() const {
   int increment = (us == WHITE) ? limits_.inc[WHITE] : limits_.inc[BLACK];
 
   if (time_left <= 0) {
-    return 1000;
+    return std::max(1000, increment);
   }
 
-  int base_time = static_cast<int>(time_left * config_.time_fraction);
-  base_time += static_cast<int>(increment * config_.increment_usage);
-  base_time = std::max(500, base_time);
-  int max_time = static_cast<int>(time_left * config_.max_time_fraction);
-
-  return std::min(base_time, max_time);
+  // Hard safety cap: 42% of remaining time (Lc0's max-move-budget).
+  // The individual engines (AB via Stockfish TM, MCTS via Lc0 smooth TM)
+  // handle their own time allocation — this is just a safety backstop
+  // so the hybrid coordinator can force-stop if both engines overrun.
+  int hard_cap = static_cast<int>(time_left * 0.42f);
+  return std::max(500, hard_cap);
 }
 
 bool ParallelHybridSearch::should_stop() const {
@@ -437,9 +440,9 @@ void ParallelHybridSearch::mcts_thread_main() {
 
   auto start = std::chrono::steady_clock::now();
 
-  // Set up MCTS limits - run for full time budget
-  ::MetalFish::Search::LimitsType mcts_limits;
-  mcts_limits.movetime = time_budget_ms_;
+  // Pass the real time controls so MCTS's Lc0-style smooth time manager
+  // handles allocation (with piggybank, NPS estimation, tree reuse, etc.)
+  ::MetalFish::Search::LimitsType mcts_limits = limits_;
   mcts_limits.startTime = now();
 
   Move best_move = Move::none();
@@ -574,11 +577,11 @@ void ParallelHybridSearch::run_ab_search() {
   // Set up position using the standard Engine interface
   engine_->set_position(root_fen_, {});
 
-  // Build limits with movetime
-  ::MetalFish::Search::LimitsType ab_limits;
+  // Pass the real time controls so Stockfish's own time manager handles
+  // move allocation (with move overhead, ponder support, instamove, etc.)
+  // instead of forcing a flat movetime budget.
+  ::MetalFish::Search::LimitsType ab_limits = limits_;
   ab_limits.startTime = now();
-  if (time_budget_ms_ > 0)
-    ab_limits.movetime = time_budget_ms_;
 
   // Suppress bestmove output -- the coordinator handles it
   auto saved_bestmove = engine_->get_on_bestmove();
