@@ -134,34 +134,29 @@ static const NSInteger kMinSubBatchSize = 20;
   NSUInteger inputDataLength =
       subBatchSize * [_inputTensor sizeOfDimensionsFrom:@1];
 
-  NSMutableArray<MPSCommandBuffer *> *commandBuffers =
-      [NSMutableArray arrayWithCapacity:splits];
+  MPSCommandBuffer *latestCommandBuffer = nil;
+  MPSCommandBuffer *commandBuffer = nil;
 
   for (NSUInteger subBatch = 0; subBatch < splits; subBatch++) {
-    NSUInteger currentSubBatchSize = (subBatch == splits - 1)
-                                         ? (batchSize - subBatch * subBatchSize)
-                                         : subBatchSize;
-    MPSCommandBuffer *cb =
+    NSUInteger currentSubBatchSize =
+        (subBatch == splits - 1) ? (batchSize - subBatch * subBatchSize)
+                                 : subBatchSize;
+    commandBuffer =
         [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
                                      masks:masks + subBatch * inputDataLength
                                   subBatch:subBatch
                               subBatchSize:currentSubBatchSize];
-    [commandBuffers addObject:cb];
+    if (subBatch == splits - 1) {
+      latestCommandBuffer = commandBuffer;
+    }
   }
 
-  for (MPSCommandBuffer *cb in commandBuffers) {
-    [cb waitUntilCompleted];
+  [latestCommandBuffer waitUntilCompleted];
+  if (commandBuffer != latestCommandBuffer) {
+    [commandBuffer waitUntilCompleted];
   }
-
-  // Reset the double-buffering semaphore to its initial count.
-  // The completion handlers should have signaled it, but in rare cases
-  // waitUntilCompleted returns before the handler fires on another queue.
-  // Re-creating the semaphore ensures we never deadlock on the next call.
-  _doubleBufferingSemaphore = dispatch_semaphore_create(kMaxInflightBuffers);
 
   [self copyResultsToBuffers:outputBuffers subBatchSize:subBatchSize];
-
-  [_resultDataDicts removeAllObjects];
 
   return _resultTensors;
 }
@@ -173,57 +168,56 @@ static const NSInteger kMinSubBatchSize = 20;
                     subBatchSize:(NSUInteger)subBatchSize {
   dispatch_semaphore_wait(_doubleBufferingSemaphore, DISPATCH_TIME_FOREVER);
 
-  @autoreleasepool {
-    MPSCommandBuffer *commandBuffer =
-        [MPSCommandBuffer commandBufferFromCommandQueue:_queue];
+  MPSCommandBuffer *commandBuffer =
+      [MPSCommandBuffer commandBufferFromCommandQueue:_queue];
 
-    MPSShape *shape =
-        @[ @(subBatchSize), _inputTensor.shape[1], _inputTensor.shape[2] ];
+  MPSShape *shape =
+      @[ @(subBatchSize), _inputTensor.shape[1], _inputTensor.shape[2] ];
 
-    NSUInteger inputDimSize = [_inputTensor sizeOfDimensionsFrom:@1];
-    NSData *inputData = [NSData dataWithBytes:inputs
-                                       length:subBatchSize * inputDimSize * sizeof(float)];
+  NSData *inputData = [NSData dataWithBytesNoCopy:inputs
+                                           length:subBatchSize * sizeof(float)
+                                     freeWhenDone:NO];
 
-    MPSGraphTensorData *inputTensorData =
-        [[MPSGraphTensorData alloc] initWithDevice:_device
-                                              data:inputData
-                                             shape:shape
-                                          dataType:_inputTensor.dataType];
+  MPSGraphTensorData *inputTensorData =
+      [[MPSGraphTensorData alloc] initWithDevice:_device
+                                            data:inputData
+                                           shape:shape
+                                        dataType:_inputTensor.dataType];
 
-    NSData *maskData = [NSData dataWithBytes:masks
-                                      length:subBatchSize * inputDimSize * sizeof(uint64_t)];
+  NSData *maskData = [NSData dataWithBytesNoCopy:masks
+                                          length:subBatchSize * sizeof(uint64_t)
+                                    freeWhenDone:NO];
 
-    MPSGraphTensorData *inputMaskData =
-        [[MPSGraphTensorData alloc] initWithDevice:_device
-                                              data:maskData
-                                             shape:shape
-                                          dataType:MPSDataTypeUInt64];
+  MPSGraphTensorData *inputMaskData =
+      [[MPSGraphTensorData alloc] initWithDevice:_device
+                                            data:maskData
+                                           shape:shape
+                                        dataType:MPSDataTypeUInt64];
 
-    NSDictionary *feeds =
-        @{_inputTensor : inputTensorData, _maskTensor : inputMaskData};
+  NSDictionary *feeds =
+      @{_inputTensor : inputTensorData, _maskTensor : inputMaskData};
 
-    MPSGraphExecutionDescriptor *executionDescriptor =
-        [[MPSGraphExecutionDescriptor alloc] init];
-    executionDescriptor.completionHandler =
-        ^(MPSGraphTensorDataDictionary *resultDictionary,
-          NSError *_Nullable error) {
-          if (error) {
-            NSLog(@"Error occurred during execution: %@", error);
-          } else {
-            self->_resultDataDicts[@(subBatch)] = resultDictionary;
-          }
-          dispatch_semaphore_signal(self->_doubleBufferingSemaphore);
-        };
+  MPSGraphExecutionDescriptor *executionDescriptor =
+      [[MPSGraphExecutionDescriptor alloc] init];
+  executionDescriptor.completionHandler =
+      ^(MPSGraphTensorDataDictionary *resultDictionary,
+        NSError *_Nullable error) {
+        if (error) {
+          NSLog(@"Error occurred during execution: %@", error);
+        } else {
+          _resultDataDicts[@(subBatch)] = resultDictionary;
+        }
+        dispatch_semaphore_signal(_doubleBufferingSemaphore);
+      };
 
-    [self encodeToCommandBuffer:commandBuffer
-                          feeds:feeds
-                  targetTensors:_targetTensors
-               targetOperations:nil
-            executionDescriptor:executionDescriptor];
+  [self encodeToCommandBuffer:commandBuffer
+                        feeds:feeds
+                targetTensors:_targetTensors
+             targetOperations:nil
+          executionDescriptor:executionDescriptor];
 
-    [commandBuffer commit];
-    return commandBuffer;
-  }
+  [commandBuffer commit];
+  return commandBuffer;
 }
 
 - (void)copyResultsToBuffers:(float *__nonnull *__nonnull)outputBuffers

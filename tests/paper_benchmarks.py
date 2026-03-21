@@ -269,7 +269,13 @@ def run_tactical(engines: Dict[str, EngineConfig], movetime_ms: int = 10000,
                 try: expected_uci.add(san_to_uci(fen, san))
                 except Exception: expected_uci.add(san.lower().replace("+","").replace("#",""))
 
-            r = eng.search(fen, movetime_ms)
+            try:
+                r = eng.search(fen, movetime_ms)
+            except (RuntimeError, TimeoutError) as e:
+                print(f"  {bk_id}: ERROR {e}")
+                print(f"  Engine crashed/timed out — reporting partial results for {cfg.name}")
+                break
+
             ok = r.bestmove in expected_uci
             score += int(ok)
             bestmoves[bk_id] = r.bestmove
