@@ -153,6 +153,12 @@ static const NSInteger kMinSubBatchSize = 20;
     [cb waitUntilCompleted];
   }
 
+  // Reset the double-buffering semaphore to its initial count.
+  // The completion handlers should have signaled it, but in rare cases
+  // waitUntilCompleted returns before the handler fires on another queue.
+  // Re-creating the semaphore ensures we never deadlock on the next call.
+  _doubleBufferingSemaphore = dispatch_semaphore_create(kMaxInflightBuffers);
+
   [self copyResultsToBuffers:outputBuffers subBatchSize:subBatchSize];
 
   [_resultDataDicts removeAllObjects];
