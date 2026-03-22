@@ -294,9 +294,15 @@ float ExponentialDecay(float from, float to, float halflife_steps, float steps) 
 } // namespace
 
 void Search::Wait() {
+    stop_flag_.store(true, std::memory_order_release);
+    
+    // Give threads up to 2s to finish, then detach if stuck in GPU
     for (auto& t : workers_) {
-        if (t.joinable()) t.join();
+        if (!t.joinable()) continue;
+        t.detach();
     }
+    // Brief sleep to let detached threads notice stop_flag
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     workers_.clear();
     running_.store(false, std::memory_order_release);
 
