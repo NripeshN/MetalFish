@@ -294,15 +294,9 @@ float ExponentialDecay(float from, float to, float halflife_steps, float steps) 
 } // namespace
 
 void Search::Wait() {
-    stop_flag_.store(true, std::memory_order_release);
-    
-    // Give threads up to 2s to finish, then detach if stuck in GPU
     for (auto& t : workers_) {
-        if (!t.joinable()) continue;
-        t.detach();
+        if (t.joinable()) t.join();
     }
-    // Brief sleep to let detached threads notice stop_flag
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     workers_.clear();
     running_.store(false, std::memory_order_release);
 
@@ -747,11 +741,6 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
             moves_left_val = result.has_moves_left ? result.moves_left : 30.0f;
         } else {
             ctx.local_cache_misses++;
-            if (ShouldStop()) {
-                leaf->CancelScoreUpdate(multivisit);
-                ReleaseComputation(std::move(computation));
-                return;
-            }
             computation->ComputeBlocking();
             const auto& result = computation->GetResult(0);
             if (leaf->NumEdges() == 0) {
@@ -991,15 +980,6 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
     gathering_permit_.store(1, std::memory_order_release);
 
     MaybePrefetchIntoCache(ctx, computation.get());
-
-    if (ShouldStop()) {
-        for (auto& entry : local_batch) {
-            entry.leaf->CancelScoreUpdate(entry.multivisit);
-        }
-        backend_waiting_.fetch_sub(1, std::memory_order_relaxed);
-        if (computation) ReleaseComputation(std::move(computation));
-        return;
-    }
 
     try {
         computation->ComputeBlocking();
