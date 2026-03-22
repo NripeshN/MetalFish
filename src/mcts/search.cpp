@@ -598,9 +598,10 @@ void Search::WorkerThreadMain(int thread_id) {
     int num_threads = params_.GetNumThreads();
     bool use_semaphore = (num_threads > 1) && backend_;
 
-    bool first_iteration = true;
-    while (first_iteration || !ShouldStop()) {
-        first_iteration = false;
+    // Match lc0's pattern: use do-while to ensure at least one iteration runs
+    // before checking stop conditions. A very early stop may arrive before
+    // this point, so the test is at the end.
+    do {
         if (use_semaphore)
             RunIterationSemaphore(ctx, num_threads);
         else
@@ -615,7 +616,7 @@ void Search::WorkerThreadMain(int thread_id) {
                 last_info = now;
             }
         }
-    }
+    } while (!ShouldStop());
 
     stats_.cache_hits.fetch_add(ctx.local_cache_hits, std::memory_order_relaxed);
     stats_.cache_misses.fetch_add(ctx.local_cache_misses, std::memory_order_relaxed);
