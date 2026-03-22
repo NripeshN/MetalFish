@@ -336,6 +336,14 @@ void Search::Wait() {
         } else {
             best = GetBestMove();
         }
+        // Safety: if search produced no result, pick any legal move
+        if (best == Move::none()) {
+            Position pos;
+            StateInfo st;
+            pos.set(tree_.RootFen(), false, &st);
+            MoveList<LEGAL> moves(pos);
+            if (moves.size() > 0) best = *moves.begin();
+        }
         std::vector<Move> pv = GetPV();
         Move ponder = pv.size() > 1 ? pv[1] : Move::none();
         cb_copy(best, ponder);
@@ -590,7 +598,9 @@ void Search::WorkerThreadMain(int thread_id) {
     int num_threads = params_.GetNumThreads();
     bool use_semaphore = (num_threads > 1) && backend_;
 
-    while (!ShouldStop()) {
+    bool first_iteration = true;
+    while (first_iteration || !ShouldStop()) {
+        first_iteration = false;
         if (use_semaphore)
             RunIterationSemaphore(ctx, num_threads);
         else
