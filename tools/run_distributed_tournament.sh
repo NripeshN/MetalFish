@@ -29,15 +29,15 @@ scp_cmd() { scp -i "$PEM" -o StrictHostKeyChecking=no -q "$@"; }
 CC="$RDIR/reference/cutechess/build/cutechess-cli"
 BK="$RDIR/reference/books/8moves_v3.pgn"
 W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
-CA="-each tc=$TC timemargin=30000 -games $GAMES -repeat -recover -openings file=$BK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
+CA="-each tc=$TC -games $GAMES -repeat -recover -wait 30000 -openings file=$BK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
 
 # Our engines — optimal thread configs per engine
 # AB: scales well with threads, give it all available cores
 # MCTS: best at 2 threads (more causes collisions), GPU does heavy lifting
 # Hybrid: all 20 cores — internally splits to 18 AB + 2 MCTS + GPU
 AB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=20 option.Hash=512"
-MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=2 option.UseMCTS=true option.NNWeights=$W"
-HYB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=20 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W"
+MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=2 option.UseMCTS=true option.NNWeights=$W timemargin=30000"
+HYB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=20 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W timemargin=30000"
 
 # Opponents — 1 thread each for controlled comparison
 S="$RDIR/reference/stockfish/src/stockfish"
