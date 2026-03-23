@@ -74,11 +74,6 @@ for host in "${HOSTS[@]}"; do
 done
 wait
 
-if [ "$REMOTE_BUILD" -eq 0 ] && [ "$SYNC_BIN" -eq 0 ]; then
-    echo "ERROR: both remote build and local sync are disabled; no engine binary selected." >&2
-    exit 1
-fi
-
 CC="$RDIR/reference/cutechess/build/cutechess-cli"
 BK="$RDIR/reference/books/8moves_v3.pgn"
 W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
