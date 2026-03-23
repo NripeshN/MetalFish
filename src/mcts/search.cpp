@@ -1202,10 +1202,9 @@ void Search::Backpropagate(Node* node, float value, float draw,
     while (node) {
         node->FinalizeScoreUpdate(value, draw, moves_left, visits);
         if (params_.sticky_endgames) node->MaybeSetBounds();
-        if (!node->IsSolid() &&
-            node->GetN() >= static_cast<uint32_t>(params_.solid_tree_threshold)) {
-            node->MakeSolid();
-        }
+        // Disabled for stability: solidification moves edge storage between
+        // nodes and can race with concurrent selectors in multi-threaded
+        // search, leaving transient invalid edge state.
         value = -value;
         moves_left += 1.0f;
         node = node->Parent();

@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
@@ -115,8 +116,8 @@ public:
             for (int i = 0; i < num_edges_; ++i) {
                 solid_base_[i].~Node();
             }
-            std::allocator<Node> alloc;
-            alloc.deallocate(solid_base_, num_edges_);
+            ::operator delete[](solid_base_,
+                                std::align_val_t(alignof(Node)));
             solid_base_ = nullptr;
         }
     }
@@ -369,8 +370,10 @@ public:
             }
         }
 
-        std::allocator<Node> alloc;
-        Node* arr = alloc.allocate(num_edges_);
+        void* raw = ::operator new[](
+            static_cast<size_t>(num_edges_) * sizeof(Node),
+            std::align_val_t(alignof(Node)));
+        Node* arr = static_cast<Node*>(raw);
         for (int i = 0; i < num_edges_; ++i) {
             new (&arr[i]) Node(this, i);
             Node* old = edges_[i].child.load(std::memory_order_acquire);
@@ -633,10 +636,27 @@ private:
     static constexpr size_t ARENA_SIZE = 8192;
 
     struct NodeArena {
-        std::unique_ptr<Node[]> nodes;
-        std::atomic<size_t>     next{0};
+        Node*                nodes = nullptr;
+        std::atomic<size_t>  next{0};
 
-        NodeArena() : nodes(std::make_unique<Node[]>(ARENA_SIZE)) {}
+        NodeArena() {
+            void* raw = ::operator new[](
+                ARENA_SIZE * sizeof(Node),
+                std::align_val_t(alignof(Node)));
+            nodes = static_cast<Node*>(raw);
+        }
+
+        ~NodeArena() {
+            const size_t count =
+                std::min(next.load(std::memory_order_acquire), ARENA_SIZE);
+            for (size_t i = 0; i < count; ++i) {
+                nodes[i].~Node();
+            }
+            ::operator delete[](nodes, std::align_val_t(alignof(Node)));
+        }
+
+        NodeArena(const NodeArena&) = delete;
+        NodeArena& operator=(const NodeArena&) = delete;
     };
 
     std::vector<std::unique_ptr<NodeArena>> arenas_;

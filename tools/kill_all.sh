@@ -2,7 +2,7 @@
 # Kill all engine processes on all EC2 instances + local
 PROJ="$(cd "$(dirname "$0")/.." && pwd)"
 PEM="$PROJ/m1 ultra.pem"
-HOSTS=(44.220.150.2 98.81.229.157 98.84.106.208 32.192.83.249)
+HOSTS=(18.212.251.224 54.91.84.176 54.163.13.25 107.21.161.159)
 
 echo "Killing local..."
 tmux kill-session -t metalfish-tournament 2>/dev/null || true

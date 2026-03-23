@@ -13,12 +13,24 @@ RDIR="/Users/ec2-user/metalfish-src"
 RESULTS_DIR="$PROJ/results/distributed_$(date +%Y%m%d_%H%M%S)"
 GAMES=10
 TC="300+0.1"
+WAIT_MS=180000
+SYNC_BIN=0
+REMOTE_BUILD=1
+CLEAN_REMOTE=1
+REMOTE_BUILD_DIR="build-native-ec2"
+REMOTE_CMAKE="/opt/homebrew/bin/cmake"
+ENGINE_BIN="$RDIR/$REMOTE_BUILD_DIR/metalfish"
 
 for arg in "$@"; do
     case $arg in
-        --quick) GAMES=2; TC="10+0.1" ;;
+        --quick) GAMES=2; TC="10+0.1"; WAIT_MS=60000 ;;
         --games=*) GAMES="${arg#*=}" ;;
         --tc=*) TC="${arg#*=}" ;;
+        --wait-ms=*) WAIT_MS="${arg#*=}" ;;
+        --sync-local) SYNC_BIN=1 ;;
+        --no-sync) SYNC_BIN=0 ;;
+        --no-remote-build) REMOTE_BUILD=0 ;;
+        --no-clean) CLEAN_REMOTE=0 ;;
     esac
 done
 
@@ -26,18 +38,59 @@ mkdir -p "$RESULTS_DIR"
 ssh_cmd() { ssh -i "$PEM" -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=60 "$USER@$1" "${@:2}"; }
 scp_cmd() { scp -i "$PEM" -o StrictHostKeyChecking=no -q "$@"; }
 
+# Preflight: ensure all hosts run the same binary and no stale matches are alive.
+if [ "$SYNC_BIN" -eq 1 ]; then
+    echo "--- Building local metalfish for deployment ---"
+    cmake --build "$PROJ/build" -j8 --target metalfish
+fi
+
+if [ "$CLEAN_REMOTE" -eq 1 ]; then
+    echo "--- Cleaning remote processes and stale PGNs ---"
+    for host in "${HOSTS[@]}"; do
+        ssh_cmd "$host" "killall -9 metalfish stockfish berserk patricia lc0 cutechess-cli 2>/dev/null || true; rm -f $RDIR/*.pgn; echo $host:clean" &
+    done
+    wait
+fi
+
+if [ "$REMOTE_BUILD" -eq 1 ]; then
+    echo "--- Building metalfish natively on all hosts ---"
+    for host in "${HOSTS[@]}"; do
+        ssh_cmd "$host" "set -e; cd $RDIR; CMAKE=$REMOTE_CMAKE; [ -x \$CMAKE ] || CMAKE=cmake; if [ ! -f $RDIR/$REMOTE_BUILD_DIR/CMakeCache.txt ]; then \$CMAKE -S . -B $REMOTE_BUILD_DIR -DCMAKE_BUILD_TYPE=Release; fi; \$CMAKE --build $REMOTE_BUILD_DIR -j8 --target metalfish; chmod +x $RDIR/$REMOTE_BUILD_DIR/metalfish; echo $host:remote-build-ok" &
+    done
+    wait
+fi
+
+if [ "$SYNC_BIN" -eq 1 ]; then
+    echo "--- Syncing metalfish binary to all hosts ---"
+    for host in "${HOSTS[@]}"; do
+        scp_cmd "$PROJ/build/metalfish" "$USER@$host:$RDIR/build/metalfish" &
+    done
+    wait
+    ENGINE_BIN="$RDIR/build/metalfish"
+fi
+
+for host in "${HOSTS[@]}"; do
+    ssh_cmd "$host" "{ echo uci; echo quit; } | $ENGINE_BIN >/dev/null; echo $host:binary-ok" &
+done
+wait
+
+if [ "$REMOTE_BUILD" -eq 0 ] && [ "$SYNC_BIN" -eq 0 ]; then
+    echo "ERROR: both remote build and local sync are disabled; no engine binary selected." >&2
+    exit 1
+fi
+
 CC="$RDIR/reference/cutechess/build/cutechess-cli"
 BK="$RDIR/reference/books/8moves_v3.pgn"
 W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
-CA="-each tc=$TC -games $GAMES -repeat -recover -wait 30000 -openings file=$BK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
+CA="-each tc=$TC -games $GAMES -repeat -recover -wait $WAIT_MS -openings file=$BK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
 
 # Our engines — optimal thread configs per engine
 # AB: scales well with threads, give it all available cores
 # MCTS: best at 2 threads (more causes collisions), GPU does heavy lifting
 # Hybrid: all 20 cores — internally splits to 18 AB + 2 MCTS + GPU
-AB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-AB option.Threads=20 option.Hash=512"
-MCTS="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-MCTS option.Threads=2 option.UseMCTS=true option.NNWeights=$W timemargin=30000"
-HYB="-engine proto=uci cmd=$RDIR/build/metalfish name=MetalFish-Hybrid option.Threads=20 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W timemargin=30000"
+AB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-AB option.Threads=20 option.Hash=512"
+MCTS="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-MCTS option.Threads=2 option.UseMCTS=true option.NNWeights=$W timemargin=30000"
+HYB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-Hybrid option.Threads=20 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W timemargin=30000"
 
 # Opponents — 1 thread each for controlled comparison
 S="$RDIR/reference/stockfish/src/stockfish"
@@ -109,7 +162,7 @@ echo "  Our engines: MetalFish-AB, MetalFish-MCTS, MetalFish-Hybrid"
 echo "  Opponents:   Stockfish, SF-L16, SF-L14, SF-L12, SF-L10,"
 echo "               SF-L8, SF-L5, Berserk, Patricia, Lc0"
 echo ""
-echo "  33 matches × $GAMES games = $((33 * GAMES)) games | TC: $TC"
+echo "  33 matches × $GAMES games = $((33 * GAMES)) games | TC: $TC | wait: ${WAIT_MS}ms"
 echo "  Results: $RESULTS_DIR"
 echo ""
 echo "  [1] AB vs 9 opponents       (~3100-3800 Elo ladder)"
@@ -144,9 +197,12 @@ echo "  $(printf '%.0s-' {1..60})"
 for pgn in "$RESULTS_DIR"/*.pgn; do
     [ "$(basename "$pgn")" = "all_games.pgn" ] && continue
     label=$(basename "$pgn" .pgn)
-    w=$(grep -c '\[Result "1-0"\]' "$pgn" 2>/dev/null || echo 0)
-    d=$(grep -c '\[Result "1/2-1/2"\]' "$pgn" 2>/dev/null || echo 0)
-    l=$(grep -c '\[Result "0-1"\]' "$pgn" 2>/dev/null || echo 0)
+    w=$(grep -c '\[Result "1-0"\]' "$pgn" 2>/dev/null || true)
+    d=$(grep -c '\[Result "1/2-1/2"\]' "$pgn" 2>/dev/null || true)
+    l=$(grep -c '\[Result "0-1"\]' "$pgn" 2>/dev/null || true)
+    [ -n "$w" ] || w=0
+    [ -n "$d" ] || d=0
+    [ -n "$l" ] || l=0
     t=$((w+d+l)); [ $t -eq 0 ] && continue
     s=$(echo "scale=1; $w + $d * 0.5" | bc)
     printf "  %-35s %4d %4d %4d %5s/%d\n" "$label" "$w" "$d" "$l" "$s" "$t"
