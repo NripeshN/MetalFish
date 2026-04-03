@@ -44,6 +44,32 @@ PROJ = pathlib.Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJ / "tools" / "engines_config.json"
 RESULTS_BASE = PROJ / "results"
 
+
+def detect_default_threads() -> int:
+    """Best-effort thread budget for local tournaments."""
+    env = os.getenv("METALFISH_THREADS")
+    if env:
+        try:
+            n = int(env)
+            if n > 0:
+                return n
+        except ValueError:
+            pass
+
+    if sys.platform == "darwin":
+        # Prefer performance cores on Apple Silicon for better chess throughput.
+        for key in ("hw.perflevel0.physicalcpu_max", "hw.logicalcpu"):
+            try:
+                out = subprocess.check_output(["sysctl", "-n", key], text=True).strip()
+                n = int(out)
+                if n > 0:
+                    return n
+            except Exception:
+                continue
+
+    n = os.cpu_count() or 8
+    return max(1, n)
+
 # ============================================================================
 # UCI Engine
 # ============================================================================
@@ -315,15 +341,20 @@ def run_match(eng1_name: str, eng2_name: str, eng1: UCIEngine, eng2: UCIEngine,
 # Tournament
 # ============================================================================
 
-def create_engine(name: str, cfg: dict) -> Optional[UCIEngine]:
+def create_engine(name: str, cfg: dict, default_threads: int) -> Optional[UCIEngine]:
     """Create a UCI engine from config."""
     path = PROJ / cfg["path"]
     if not path.exists():
         print(f"  SKIP {name}: binary not found at {path}")
         return None
     cmd = [str(path)] + cfg.get("cmd_args", [])
+    options = dict(cfg.get("options", {}))
+    if "Threads" in options:
+        t = str(options["Threads"]).strip().lower()
+        if t in {"auto", "max", "native"}:
+            options["Threads"] = str(default_threads)
     try:
-        eng = UCIEngine(cmd, name, cfg.get("options", {}))
+        eng = UCIEngine(cmd, name, options)
         return eng
     except Exception as e:
         print(f"  SKIP {name}: failed to start: {e}")
@@ -336,6 +367,7 @@ def run_tournament(args):
 
     engines_cfg = config["engines"]
     book_cfg = config.get("opening_book", {})
+    default_threads = detect_default_threads()
 
     # Load openings
     book_path = PROJ / book_cfg.get("file", "")
@@ -388,6 +420,7 @@ def run_tournament(args):
         print(f"Time control: {args.tc_base}s + {args.tc_inc}s/move")
     print(f"Results: {results_dir}")
     print(f"Matches: {len(matches)}")
+    print(f"Default thread budget: {default_threads}")
     print()
 
     # Run matches
@@ -403,7 +436,7 @@ def run_tournament(args):
             # Start engines (reuse if already running)
             for ename in [e1_name, e2_name]:
                 if ename not in active_engines:
-                    eng = create_engine(ename, engines_cfg[ename])
+                    eng = create_engine(ename, engines_cfg[ename], default_threads)
                     if eng is None:
                         break
                     active_engines[ename] = eng

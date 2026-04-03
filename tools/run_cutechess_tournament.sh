@@ -28,15 +28,31 @@ BERSERK="$PROJ/reference/berserk/src/berserk"
 PATRICIA="$PROJ/reference/Patricia/engine/patricia"
 LC0="$PROJ/reference/lc0/build/release/lc0"
 
-AB="cmd=$MF name=MetalFish-AB option.Threads=8 option.Hash=256"
-MCTS="cmd=$MF name=MetalFish-MCTS option.Threads=8 option.Hash=256 option.UseMCTS=true option.NNWeights=$WEIGHTS"
-HYBRID="cmd=$MF name=MetalFish-Hybrid option.Threads=8 option.Hash=256 option.UseHybridSearch=true option.NNWeights=$WEIGHTS"
-SFULL="cmd=$SF name=Stockfish option.Threads=8 option.Hash=256"
-SL15="cmd=$SF name=Stockfish-L15 option.Threads=8 option.Hash=256 option.\"Skill Level\"=15"
-SL10="cmd=$SF name=Stockfish-L10 option.Threads=8 option.Hash=256 option.\"Skill Level\"=10"
-BERSERK_E="cmd=$BERSERK name=Berserk option.Threads=8 option.Hash=256"
-PATRICIA_E="cmd=$PATRICIA name=Patricia option.Threads=8 option.Hash=256"
-LC0_E="cmd=$LC0 name=Lc0 arg=\"--weights=$WEIGHTS\" arg=\"--backend=metal\" option.Threads=8 option.Temperature=0"
+if [ -z "${THREADS:-}" ]; then
+    if [ "$(uname -s)" = "Darwin" ]; then
+        THREADS=$(sysctl -n hw.perflevel0.physicalcpu_max 2>/dev/null || true)
+        [ -n "$THREADS" ] || THREADS=$(sysctl -n hw.logicalcpu 2>/dev/null || true)
+    else
+        THREADS=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)
+    fi
+fi
+[ -n "$THREADS" ] || THREADS=8
+
+MCTS_THREADS="${MCTS_THREADS:-2}"
+if [ "$MCTS_THREADS" -ge "$THREADS" ]; then
+    MCTS_THREADS=$(( THREADS > 1 ? THREADS - 1 : 1 ))
+fi
+HYBRID_MCTS_THREADS="${HYBRID_MCTS_THREADS:-$MCTS_THREADS}"
+
+AB="cmd=$MF name=MetalFish-AB option.Threads=$THREADS option.Hash=256"
+MCTS="cmd=$MF name=MetalFish-MCTS option.Threads=$MCTS_THREADS option.Hash=256 option.UseMCTS=true option.NNWeights=$WEIGHTS"
+HYBRID="cmd=$MF name=MetalFish-Hybrid option.Threads=$THREADS option.Hash=256 option.UseHybridSearch=true option.NNWeights=$WEIGHTS option.HybridMCTSThreads=$HYBRID_MCTS_THREADS"
+SFULL="cmd=$SF name=Stockfish option.Threads=$THREADS option.Hash=256"
+SL15="cmd=$SF name=Stockfish-L15 option.Threads=$THREADS option.Hash=256 option.\"Skill Level\"=15"
+SL10="cmd=$SF name=Stockfish-L10 option.Threads=$THREADS option.Hash=256 option.\"Skill Level\"=10"
+BERSERK_E="cmd=$BERSERK name=Berserk option.Threads=$THREADS option.Hash=256"
+PATRICIA_E="cmd=$PATRICIA name=Patricia option.Threads=$THREADS option.Hash=256"
+LC0_E="cmd=$LC0 name=Lc0 arg=\"--weights=$WEIGHTS\" arg=\"--backend=metal\" option.Threads=$THREADS option.Temperature=0"
 
 BOOK_ARGS=""
 if [ -f "$BOOK" ]; then
@@ -52,6 +68,7 @@ echo "============================================"
 echo "  MetalFish Tournament (cutechess-cli)"
 echo "============================================"
 echo "TC: $TC | Games/match: $GAMES"
+echo "Threads: $THREADS (MCTS=$MCTS_THREADS, HybridMCTS=$HYBRID_MCTS_THREADS)"
 echo "Results: $RESULTS"
 echo ""
 

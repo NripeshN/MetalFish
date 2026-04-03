@@ -577,6 +577,22 @@ void ParallelHybridSearch::run_ab_search() {
   if (!engine_)
     return;
 
+  // Enforce hybrid split by temporarily resizing AB worker threads for this
+  // search. This keeps AB and MCTS from oversubscribing cores.
+  const int original_threads =
+      static_cast<int>(engine_->get_options()["Threads"]);
+  const int requested_ab_threads = std::max(1, config_.ab_threads);
+  const bool needs_thread_resize = (requested_ab_threads != original_threads);
+
+  auto set_engine_threads = [this](int n) {
+    std::istringstream ss("name Threads value " + std::to_string(n));
+    engine_->get_options().setoption(ss);
+  };
+
+  if (needs_thread_resize) {
+    set_engine_threads(requested_ab_threads);
+  }
+
   // Set up position using the standard Engine interface
   engine_->set_position(root_fen_, {});
 
@@ -632,6 +648,10 @@ void ParallelHybridSearch::run_ab_search() {
   // Restore callbacks
   engine_->set_on_update_full(std::move(saved_update_full));
   engine_->set_on_bestmove(std::move(saved_bestmove));
+
+  if (needs_thread_resize) {
+    set_engine_threads(original_threads);
+  }
 }
 
 void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
