@@ -1631,6 +1631,17 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   // Parse search limits
   Search::LimitsType limits = parse_limits(is);
 
+  const int total_threads =
+      std::max(1, static_cast<int>(engine.get_options()["Threads"]));
+  if (total_threads < 3) {
+    sync_cout << "info string Hybrid search requires at least 3 threads for "
+                 "separate AB, MCTS, and coordinator workers; falling back "
+                 "to Alpha-Beta"
+              << sync_endl;
+    engine.go(limits);
+    return;
+  }
+
   // Get transformer weights path
   std::string nn_weights = get_nn_weights_path(engine);
   if (nn_weights.empty()) {

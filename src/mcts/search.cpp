@@ -588,7 +588,9 @@ bool Search::ShouldStop() const {
 
 void Search::WorkerThreadMain(int thread_id) {
 #ifdef __APPLE__
-    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+    // MCTS is latency-sensitive but should not compete with AB/UI-critical
+    // work for the highest-priority P-cores in Hybrid mode.
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
 #endif
 
     SearchWorkerCtx& ctx = *worker_ctxs_[thread_id];

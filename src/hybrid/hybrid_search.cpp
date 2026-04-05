@@ -30,6 +30,14 @@
 namespace MetalFish {
 namespace MCTS {
 
+#ifdef __APPLE__
+namespace {
+inline void set_thread_qos(qos_class_t qos) {
+  pthread_set_qos_class_self_np(qos, 0);
+}
+} // namespace
+#endif
+
 // ============================================================================
 // ParallelHybridSearch Implementation
 // ============================================================================
@@ -429,6 +437,10 @@ bool ParallelHybridSearch::should_stop() const {
 
 // MCTS thread - runs GPU-accelerated MCTS
 void ParallelHybridSearch::mcts_thread_main() {
+#ifdef __APPLE__
+  set_thread_qos(QOS_CLASS_USER_INITIATED);
+#endif
+
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
@@ -551,6 +563,10 @@ void ParallelHybridSearch::update_mcts_policy_from_ab() {
 
 // AB thread - runs full alpha-beta iterative deepening
 void ParallelHybridSearch::ab_thread_main() {
+#ifdef __APPLE__
+  set_thread_qos(QOS_CLASS_USER_INITIATED);
+#endif
+
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
@@ -625,8 +641,41 @@ void ParallelHybridSearch::run_ab_search() {
             return 0;
         });
         ab_depth = info.depth;
-        publish_ab_state(ab_state_.get_best_move(), ab_score, ab_depth,
-                         engine_->threads_nodes_searched());
+
+        Position pos;
+        StateInfo root_st;
+        pos.set(root_fen_, false, &root_st);
+
+        std::vector<Move> pv_moves;
+        pv_moves.reserve(ABSharedState::MAX_PV);
+        std::vector<StateInfo> pv_states;
+        pv_states.reserve(ABSharedState::MAX_PV);
+
+        std::istringstream pv_stream(std::string(info.pv));
+        std::string move_token;
+        while (pv_stream >> move_token &&
+               pv_moves.size() < ABSharedState::MAX_PV) {
+          Move move = UCIEngine::to_move(pos, move_token);
+          if (move == Move::none()) {
+            break;
+          }
+
+          pv_moves.push_back(move);
+          if (pv_moves.size() >= ABSharedState::MAX_PV) {
+            break;
+          }
+
+          pv_states.emplace_back();
+          pos.do_move(move, pv_states.back());
+        }
+
+        const Move current_best =
+            pv_moves.empty() ? Move::none() : pv_moves.front();
+        if (current_best != Move::none()) {
+          ab_state_.publish_pv(pv_moves, ab_depth);
+          publish_ab_state(current_best, ab_score, ab_depth,
+                           engine_->threads_nodes_searched());
+        }
       });
 
   engine_->set_on_bestmove([this, &ab_best_move, &ab_score, &ab_depth](
@@ -645,6 +694,10 @@ void ParallelHybridSearch::run_ab_search() {
   engine_->go(ab_limits);
   engine_->wait_for_search_finished();
 
+  stats_.ab_nodes.store(engine_->threads_nodes_searched(),
+                        std::memory_order_relaxed);
+  stats_.ab_depth.store(ab_depth, std::memory_order_relaxed);
+
   // Restore callbacks
   engine_->set_on_update_full(std::move(saved_update_full));
   engine_->set_on_bestmove(std::move(saved_bestmove));
@@ -661,6 +714,10 @@ void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
 
 // Coordinator thread - monitors both searches and makes final decision
 void ParallelHybridSearch::coordinator_thread_main() {
+#ifdef __APPLE__
+  set_thread_qos(QOS_CLASS_UTILITY);
+#endif
+
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
