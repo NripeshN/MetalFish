@@ -87,6 +87,61 @@ bool SmartPruningStopper::ShouldStop(const SearchStats &stats) {
 }
 
 // ============================================================================
+// KLDGainStopper
+// ============================================================================
+
+KLDGainStopper::KLDGainStopper(float min_gain, int average_interval)
+    : min_gain_(min_gain), average_interval_(average_interval) {}
+
+bool KLDGainStopper::ShouldStop(const SearchStats &stats) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const double new_child_nodes = static_cast<double>(stats.total_nodes) - 1.0;
+
+  // Don't trigger before a minimum number of nodes (need meaningful distribution)
+  if (new_child_nodes < 500) return false;
+
+  if (new_child_nodes < prev_child_nodes_ + average_interval_) return false;
+
+  const auto& new_visits = stats.edge_n;
+  if (!prev_visits_.empty() && prev_visits_.size() == new_visits.size()) {
+    double kldgain = 0.0;
+    for (size_t i = 0; i < new_visits.size(); ++i) {
+      double o_p = prev_visits_[i] / prev_child_nodes_;
+      double n_p = static_cast<double>(new_visits[i]) / new_child_nodes;
+      if (prev_visits_[i] > 0 && n_p > 0) {
+        kldgain += o_p * std::log(o_p / n_p);
+      }
+    }
+    double per_node = kldgain / (new_child_nodes - prev_child_nodes_);
+    if (per_node < static_cast<double>(min_gain_)) {
+      return true;
+    }
+  }
+
+  prev_visits_.clear();
+  prev_visits_.reserve(new_visits.size());
+  for (uint32_t v : new_visits) {
+    prev_visits_.push_back(static_cast<double>(v));
+  }
+  prev_child_nodes_ = new_child_nodes;
+  return false;
+}
+
+// ============================================================================
+// MemoryWatchingStopper
+// ============================================================================
+
+MemoryWatchingStopper::MemoryWatchingStopper(size_t max_bytes)
+    : max_bytes_(max_bytes) {}
+
+bool MemoryWatchingStopper::ShouldStop(const SearchStats &stats) {
+    // ~64 bytes per node + ~16 bytes per edge * ~35 avg edges
+    // Conservative estimate: ~624 bytes per expanded node
+    size_t estimated = stats.total_nodes * 624;
+    return estimated > max_bytes_;
+}
+
+// ============================================================================
 // SigmoidTimeManager
 // ============================================================================
 

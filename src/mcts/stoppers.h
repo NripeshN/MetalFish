@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "../core/types.h"
@@ -64,6 +65,28 @@ public:
 private:
   float factor_;
   int64_t time_limit_ms_;
+};
+
+class KLDGainStopper : public SearchStopper {
+public:
+  KLDGainStopper(float min_gain, int average_interval);
+  bool ShouldStop(const SearchStats &stats) override;
+
+private:
+  float min_gain_;
+  int average_interval_;
+  std::vector<double> prev_visits_;
+  double prev_child_nodes_ = 0.0;
+  mutable std::mutex mutex_;
+};
+
+class MemoryWatchingStopper : public SearchStopper {
+public:
+  explicit MemoryWatchingStopper(size_t max_bytes);
+  bool ShouldStop(const SearchStats &stats) override;
+
+private:
+  size_t max_bytes_;
 };
 
 class SigmoidTimeManager {

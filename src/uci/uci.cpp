@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <cstdint>
 #include <iterator>
 #include <memory>
@@ -25,6 +27,7 @@
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#include <sys/sysctl.h>
 #endif
 
 #include "core/memory.h"
@@ -64,6 +67,33 @@ template <typename... Ts> struct overload : Ts... {
 };
 
 template <typename... Ts> overload(Ts...) -> overload<Ts...>;
+
+bool uci_trace_enabled() {
+  static const bool enabled = [] {
+    const char *env = std::getenv("METALFISH_UCI_TRACE");
+    if (!env || !*env)
+      return false;
+    std::string value(env);
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return value != "0" && value != "false" && value != "off" &&
+           value != "no";
+  }();
+  return enabled;
+}
+
+int detect_apple_perf_cores() {
+#ifdef __APPLE__
+  int value = 0;
+  size_t size = sizeof(value);
+  if (sysctlbyname("hw.perflevel0.physicalcpu_max", &value, &size, nullptr,
+                   0) == 0 &&
+      value > 0) {
+    return value;
+  }
+#endif
+  return 0;
+}
 
 void UCIEngine::print_info_string(std::string_view str) {
   sync_cout_start();
@@ -114,8 +144,8 @@ void UCIEngine::loop() {
     token.clear(); // Avoid a stale if getline() returns nothing or a blank line
     is >> std::skipws >> token;
 
-    // Debug: log all commands to stderr with timestamps
-    if (!token.empty()) {
+    // Debug command trace is opt-in via METALFISH_UCI_TRACE=1.
+    if (uci_trace_enabled() && !token.empty()) {
       auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now().time_since_epoch())
                     .count();
@@ -128,7 +158,9 @@ void UCIEngine::loop() {
     // ======================================================================
 
     if (token == "quit" || token == "stop") {
-      stop_active_searches(); // Stop any MCTS/Hybrid search first
+      stop_active_searches();
+      if (token == "quit")
+        wait_active_searches();
       engine.stop();
     }
 
@@ -170,7 +202,7 @@ void UCIEngine::loop() {
         parallel_hybrid_go(is);
       else
         go(is);
-    }
+      }
 
     // ======================================================================
     // MetalFish Extensions (debugging / CLI only -- GUIs never send these)
@@ -240,6 +272,7 @@ void UCIEngine::loop() {
 
   // Clean up background search threads before exiting
   stop_active_searches();
+  wait_active_searches();
   join_search_waiter();
 }
 
@@ -1383,15 +1416,64 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   return config;
 }
 
+struct HybridThreadSplit {
+  int mcts_threads = 1;
+  int ab_threads = 1;
+};
+
+static HybridThreadSplit compute_hybrid_thread_split(Engine &engine) {
+  const int total_threads =
+      std::max(1, static_cast<int>(engine.get_options()["Threads"]));
+  const int mcts_override =
+      static_cast<int>(engine.get_options()["HybridMCTSThreads"]);
+  const int ab_override =
+      static_cast<int>(engine.get_options()["HybridABThreads"]);
+  constexpr int coordinator_threads = 1;
+  const int available = std::max(1, total_threads - coordinator_threads);
+
+  int mcts_threads = 0;
+  if (mcts_override > 0) {
+    mcts_threads = std::clamp(mcts_override, 1, available);
+  } else {
+    // Strength-first default: keep MCTS single-threaded unless explicitly
+    // overridden, and use additional cores for AB.
+    mcts_threads = 1;
+  }
+
+  int ab_threads = 0;
+  if (ab_override > 0) {
+    ab_threads = std::clamp(ab_override, 1, available);
+  } else {
+    ab_threads = std::max(1, available - mcts_threads);
+  }
+
+  while (mcts_threads + ab_threads > available) {
+    if (ab_threads > 1)
+      --ab_threads;
+    else if (mcts_threads > 1)
+      --mcts_threads;
+    else
+      break;
+  }
+
+  return {mcts_threads, ab_threads};
+}
+
 static MCTS::ParallelHybridConfig
-make_hybrid_config(const std::string &nn_weights) {
+make_hybrid_config(Engine &engine, const std::string &nn_weights) {
   MCTS::ParallelHybridConfig config;
-  config.mcts_config.nn_weights_path = nn_weights;
-  config.mcts_config.cpuct = 1.745f;
+  auto split = compute_hybrid_thread_split(engine);
+
+  // Use the same UCI-configurable MCTS params as pure MCTS mode,
+  // so all improvements (cache key fix, KLD stopper, solidification,
+  // prefetching, TB probing, etc.) apply to hybrid too.
+  config.mcts_config = make_mcts_config(engine, nn_weights, split.mcts_threads);
+  config.mcts_threads = split.mcts_threads;
+  config.ab_threads = split.ab_threads;
+
+  // Hybrid-specific override: slightly higher exploration at root
   config.mcts_config.cpuct_at_root = 2.15f;
-  config.mcts_config.fpu_reduction = 0.330f;
-  config.mcts_config.add_dirichlet_noise = false;
-  config.mcts_config.num_threads = 1;
+
   config.ab_min_depth = 10;
   config.ab_use_time = true;
   config.ab_policy_weight = 0.3f;
@@ -1481,7 +1563,7 @@ static void preload_search_objects(Engine &engine) {
     if (GPU::gpu_nnue_manager_available())
       gpu_manager = &GPU::gpu_nnue_manager();
 
-    auto config = make_hybrid_config(nn_weights);
+    auto config = make_hybrid_config(engine, nn_weights);
     g_parallel_hybrid_search =
         MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
     g_hybrid_gpu_manager = gpu_manager;
@@ -1549,6 +1631,17 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   // Parse search limits
   Search::LimitsType limits = parse_limits(is);
 
+  const int total_threads =
+      std::max(1, static_cast<int>(engine.get_options()["Threads"]));
+  if (total_threads < 3) {
+    sync_cout << "info string Hybrid search requires at least 3 threads for "
+                 "separate AB, MCTS, and coordinator workers; falling back "
+                 "to Alpha-Beta"
+              << sync_endl;
+    engine.go(limits);
+    return;
+  }
+
   // Get transformer weights path
   std::string nn_weights = get_nn_weights_path(engine);
   if (nn_weights.empty()) {
@@ -1564,7 +1657,12 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     gpu_manager = &GPU::gpu_nnue_manager();
   }
 
-  auto config = make_hybrid_config(nn_weights);
+  auto config = make_hybrid_config(engine, nn_weights);
+  sync_cout << "info string Hybrid thread split: MCTS="
+            << config.mcts_threads << " AB=" << config.ab_threads
+            << " (+1 coordinator, total="
+            << (config.mcts_threads + config.ab_threads + 1) << ")"
+            << sync_endl;
 
   // Reuse preloaded search object, or create if not yet initialized
   bool need_reinit =
@@ -1626,11 +1724,13 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   // Parse threads option
   std::string token;
   int num_threads = static_cast<int>(engine.get_options()["Threads"]);
+  bool explicit_threads_arg = false;
 
   // Parse additional options (threads=N)
   while (is >> token) {
     if (token.find("threads=") == 0) {
       num_threads = std::stoi(token.substr(8));
+      explicit_threads_arg = true;
     }
   }
 
@@ -1646,6 +1746,28 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   is.clear();
   is.seekg(0);
   Search::LimitsType limits = parse_limits(is);
+
+  int mcts_thread_cap = static_cast<int>(engine.get_options()["MCTSMaxThreads"]);
+  if (!explicit_threads_arg && mcts_thread_cap <= 0) {
+    // Strength-first auto mode:
+    // - For standard timed play, cap to 1 thread to avoid tactical
+    //   regressions observed with higher MCTS thread counts.
+    // - For fixed-node runs, use a throughput-oriented cap.
+    if (limits.nodes > 0) {
+      int perf_cores = detect_apple_perf_cores();
+      if (perf_cores > 0) {
+        mcts_thread_cap = perf_cores + 2;
+      }
+    } else {
+      mcts_thread_cap = 1;
+    }
+  }
+  if (!explicit_threads_arg && mcts_thread_cap > 0 && num_threads > mcts_thread_cap) {
+    sync_cout << "info string Capping MCTS threads from " << num_threads
+              << " to " << mcts_thread_cap << " for tactical stability"
+              << sync_endl;
+    num_threads = mcts_thread_cap;
+  }
 
   sync_cout << "info string Starting Multi-Threaded MCTS Search with "
             << num_threads << " threads..." << sync_endl;
@@ -1753,24 +1875,24 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
           g_active_mcts.reset();
       }
 
-      auto end_time = std::chrono::steady_clock::now();
-      auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            end_time - start_time)
-                            .count();
+  auto end_time = std::chrono::steady_clock::now();
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        end_time - start_time)
+                        .count();
 
       const auto &stats = mcts->Stats();
-      uint64_t nodes = stats.total_nodes.load();
+  uint64_t nodes = stats.total_nodes.load();
       uint64_t nn_evals = stats.nn_evaluations.load();
-      uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+  uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
 
-      sync_cout << "info string Final stats:" << sync_endl;
-      sync_cout << "info string   Nodes: " << nodes << sync_endl;
-      sync_cout << "info string   NPS: " << nps << sync_endl;
-      sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
-      sync_cout << "info string   Threads: " << num_threads << sync_endl;
+  sync_cout << "info string Final stats:" << sync_endl;
+  sync_cout << "info string   Nodes: " << nodes << sync_endl;
+  sync_cout << "info string   NPS: " << nps << sync_endl;
+  sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
+  sync_cout << "info string   Threads: " << num_threads << sync_endl;
       sync_cout << "info string   NN evals: " << nn_evals << sync_endl;
-      sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
-                << " misses: " << stats.cache_misses.load() << sync_endl;
+  sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
+            << " misses: " << stats.cache_misses.load() << sync_endl;
 
     });
   }

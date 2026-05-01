@@ -11,10 +11,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <shared_mutex>
+#include <thread>
 #include <vector>
 
 #include "../core/movegen.h"
@@ -67,6 +70,14 @@ struct Edge {
           p_(other.p_),
           child(other.child.load(std::memory_order_relaxed)) {}
 
+    Edge& operator=(Edge&& other) noexcept {
+        move = other.move;
+        p_ = other.p_;
+        child.store(other.child.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed);
+        return *this;
+    }
+
     // 16-bit compressed policy: store bits 27..12 of IEEE 754 float
     void SetP(float p) {
         constexpr int32_t roundings = (1 << 11) - (3 << 28);
@@ -100,7 +111,16 @@ public:
         : parent_(parent),
           index_(edge_idx >= 0 ? static_cast<uint16_t>(edge_idx) : 0) {}
 
-    ~Node() = default;
+    ~Node() {
+        if (solid_children_ && solid_base_) {
+            for (int i = 0; i < num_edges_; ++i) {
+                solid_base_[i].~Node();
+            }
+            ::operator delete[](solid_base_,
+                                std::align_val_t(alignof(Node)));
+            solid_base_ = nullptr;
+        }
+    }
 
     Node(const Node&) = delete;
     Node& operator=(const Node&) = delete;
@@ -221,11 +241,9 @@ public:
         if (num_edges_ == 0) return;
 
         bool all_terminal = true;
-        bool any_loss = false;
-        bool any_draw = false;
-        float best_wl = -2.0f;
-        float best_d  = 0.0f;
-        float best_m  = 999.0f;
+        float best_parent_wl = -2.0f;
+        float best_d = 0.0f;
+        float best_m = 999.0f;
 
         for (int i = 0; i < num_edges_; ++i) {
             Node* ch = edges_[i].child.load(std::memory_order_acquire);
@@ -233,28 +251,20 @@ public:
                 all_terminal = false;
                 break;
             }
-            float child_wl = ch->GetWL();
-            float child_d  = ch->GetD();
-            float child_m  = ch->GetM() + 1.0f;
+            float parent_val = -ch->GetWL();
+            float child_d = ch->GetD();
+            float child_m = ch->GetM() + 1.0f;
 
-            if (child_wl > best_wl) {
-                best_wl = child_wl;
-                best_d  = child_d;
-                best_m  = child_m;
+            if (parent_val > best_parent_wl) {
+                best_parent_wl = parent_val;
+                best_d = child_d;
+                best_m = child_m;
             }
-            if (child_wl < 0.0f) any_loss = true;
-            if (child_d > 0.5f) any_draw = true;
         }
 
         if (!all_terminal) return;
 
-        if (best_wl > 0.0f) {
-            MakeTerminal(Terminal::EndOfGame, -best_wl, best_d, best_m);
-        } else if (any_draw) {
-            MakeTerminal(Terminal::EndOfGame, 0.0f, 1.0f, best_m);
-        } else if (any_loss) {
-            MakeTerminal(Terminal::EndOfGame, -best_wl, best_d, best_m);
-        }
+        MakeTerminal(Terminal::EndOfGame, best_parent_wl, best_d, best_m);
     }
 
     // --- Edge / children management ---
@@ -272,6 +282,15 @@ public:
             ++idx;
         }
         num_edges_ = static_cast<uint8_t>(count);
+    }
+
+    void SortEdges() {
+        if (!edges_ || num_edges_ <= 1) return;
+        for (int i = 0; i < num_edges_; ++i) {
+            if (edges_[i].child.load(std::memory_order_relaxed) != nullptr) return;
+        }
+        std::sort(edges_.get(), edges_.get() + num_edges_,
+                  [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
     }
 
     int NumEdges() const { return num_edges_; }
@@ -318,6 +337,68 @@ public:
         MakeTerminal(type, value, 0.0f, 0.0f);
     }
 
+    void RevertTerminal() {
+        terminal_type_.store(static_cast<uint8_t>(Terminal::NonTerminal),
+                             std::memory_order_release);
+    }
+
+    void MaybeRevertTwoFold(int depth_from_root) {
+        if (GetTerminalType() != Terminal::TwoFold) return;
+        if (depth_from_root < 4) {
+            RevertTerminal();
+        }
+    }
+
+    // --- Node solidification ---
+
+    bool IsSolid() const { return solid_children_; }
+
+    void TakeEdgesFrom(Node& other) {
+        edges_ = std::move(other.edges_);
+        num_edges_ = other.num_edges_;
+        other.num_edges_ = 0;
+    }
+
+    bool MakeSolid() {
+        if (solid_children_ || num_edges_ == 0 || IsTerminal()) return false;
+
+        for (int i = 0; i < num_edges_; ++i) {
+            Node* ch = edges_[i].child.load(std::memory_order_acquire);
+            if (ch) {
+                if (ch->GetN() <= 1 && ch->GetNInFlight() > 0) return false;
+                if (ch->IsTerminal() && ch->GetNInFlight() > 0) return false;
+            }
+        }
+
+        void* raw = ::operator new[](
+            static_cast<size_t>(num_edges_) * sizeof(Node),
+            std::align_val_t(alignof(Node)));
+        Node* arr = static_cast<Node*>(raw);
+        for (int i = 0; i < num_edges_; ++i) {
+            new (&arr[i]) Node(this, i);
+            Node* old = edges_[i].child.load(std::memory_order_acquire);
+            if (old) {
+                if (old->GetN() > 0) {
+                    arr[i].FinalizeScoreUpdate(old->GetWL(), old->GetD(),
+                                               old->GetM(),
+                                               static_cast<int>(old->GetN()));
+                }
+                if (old->NumEdges() > 0) {
+                    arr[i].TakeEdgesFrom(*old);
+                }
+                if (old->IsTerminal()) {
+                    arr[i].MakeTerminal(old->GetTerminalType(), old->GetWL(),
+                                        old->GetD(), old->GetM());
+                }
+            }
+            edges_[i].child.store(&arr[i], std::memory_order_release);
+        }
+
+        solid_base_ = arr;
+        solid_children_ = true;
+        return true;
+    }
+
     // --- Legacy accessors (compatibility with old ThreadSafeNode API) ---
 
     uint32_t n() const { return GetN(); }
@@ -342,8 +423,65 @@ private:
 #else
     mutable std::mutex        score_lock_;
 #endif
-    // Total core: 48 bytes on Apple (44 + 4 lock), fits in half a cache line
+    Node*                     solid_base_ = nullptr;     // 8 bytes — contiguous child array
+    bool                      solid_children_ = false;   // 1 byte  — children are solidified
+    // Total: 48 + 8 + 1 + 7 padding = 64 bytes on Apple
 };
+
+// ============================================================================
+// NodeGarbageCollector - Background deallocation of pruned subtrees
+// ============================================================================
+
+class NodeGarbageCollector {
+public:
+    NodeGarbageCollector() : gc_thread_([this]() { Worker(); }) {}
+
+    ~NodeGarbageCollector() {
+        stop_.store(true, std::memory_order_release);
+        if (gc_thread_.joinable()) gc_thread_.join();
+    }
+
+    NodeGarbageCollector(const NodeGarbageCollector&) = delete;
+    NodeGarbageCollector& operator=(const NodeGarbageCollector&) = delete;
+
+    void AddToQueue(std::unique_ptr<Node> node) {
+        if (!node) return;
+        std::lock_guard<std::mutex> lock(gc_mutex_);
+        gc_queue_.push_back(std::move(node));
+    }
+
+private:
+    void Worker() {
+        while (!stop_.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            ProcessQueue();
+        }
+        ProcessQueue();
+    }
+
+    void ProcessQueue() {
+        while (true) {
+            std::unique_ptr<Node> item;
+            {
+                std::lock_guard<std::mutex> lock(gc_mutex_);
+                if (gc_queue_.empty()) return;
+                item = std::move(gc_queue_.back());
+                gc_queue_.pop_back();
+            }
+            item.reset();
+        }
+    }
+
+    std::atomic<bool> stop_{false};
+    std::mutex gc_mutex_;
+    std::vector<std::unique_ptr<Node>> gc_queue_;
+    std::thread gc_thread_;
+};
+
+inline NodeGarbageCollector& GetNodeGC() {
+    static NodeGarbageCollector gc;
+    return gc;
+}
 
 // ============================================================================
 // NodeTree - Arena-allocated tree with reuse support
@@ -362,7 +500,7 @@ public:
         arenas_.clear();
         current_arena_.store(0, std::memory_order_relaxed);
         AllocateNewArena();
-        root_heap_.reset();
+        if (root_heap_) GetNodeGC().AddToQueue(std::move(root_heap_));
         root_arena_.reset();
         root_is_arena_ = false;
 
@@ -403,7 +541,7 @@ public:
             if (test.key() == target_key) {
                 edges[i].child.store(nullptr, std::memory_order_relaxed);
                 child->DetachFromParentForReuse();
-                root_heap_.reset();
+                if (root_heap_) GetNodeGC().AddToQueue(std::move(root_heap_));
                 root_arena_.reset(child);
                 root_is_arena_ = true;
                 {
@@ -423,7 +561,7 @@ public:
                     if (test.key() == target_key) {
                         ce[j].child.store(nullptr, std::memory_order_relaxed);
                         gc->DetachFromParentForReuse();
-                        root_heap_.reset();
+                        if (root_heap_) GetNodeGC().AddToQueue(std::move(root_heap_));
                         root_arena_.reset(gc);
                         root_is_arena_ = true;
                         {
@@ -498,10 +636,27 @@ private:
     static constexpr size_t ARENA_SIZE = 8192;
 
     struct NodeArena {
-        std::unique_ptr<Node[]> nodes;
-        std::atomic<size_t>     next{0};
+        Node*                nodes = nullptr;
+        std::atomic<size_t>  next{0};
 
-        NodeArena() : nodes(std::make_unique<Node[]>(ARENA_SIZE)) {}
+        NodeArena() {
+            void* raw = ::operator new[](
+                ARENA_SIZE * sizeof(Node),
+                std::align_val_t(alignof(Node)));
+            nodes = static_cast<Node*>(raw);
+        }
+
+        ~NodeArena() {
+            const size_t count =
+                std::min(next.load(std::memory_order_acquire), ARENA_SIZE);
+            for (size_t i = 0; i < count; ++i) {
+                nodes[i].~Node();
+            }
+            ::operator delete[](nodes, std::align_val_t(alignof(Node)));
+        }
+
+        NodeArena(const NodeArena&) = delete;
+        NodeArena& operator=(const NodeArena&) = delete;
     };
 
     std::vector<std::unique_ptr<NodeArena>> arenas_;

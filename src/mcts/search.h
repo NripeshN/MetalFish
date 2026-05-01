@@ -48,6 +48,8 @@
 namespace MetalFish {
 namespace MCTS {
 
+class SharedTTReader;
+
 // ============================================================================
 // Search statistics exposed to UCI layer
 // ============================================================================
@@ -108,6 +110,14 @@ struct SearchWorkerCtx {
         pos.do_move(m, state_stack.back());
         move_stack.push_back(m);
         hash_stack.push_back(pos.raw_key());
+    }
+
+    void UndoMove() {
+        if (move_stack.empty()) return;
+        pos.undo_move(move_stack.back());
+        move_stack.pop_back();
+        state_stack.pop_back();
+        hash_stack.pop_back();
     }
 
     // Build position history (last 8 positions) for NN encoding.
@@ -179,11 +189,14 @@ public:
     void ClearCallbacks();
 
     Move GetBestMove() const;
+    Move GetBestMoveWithTemperature(float temperature) const;
     float GetBestQ() const;
     std::vector<Move> GetPV() const;
     const PipelineStats& Stats() const { return stats_; }
 
     void InjectPVBoost(const Move* pv, int pv_len, int ab_depth);
+
+    void SetSharedTT(SharedTTReader* tt) { shared_tt_ = tt; }
 
 private:
     void WorkerThreadMain(int thread_id);
@@ -205,6 +218,11 @@ private:
     void Backpropagate(Node* node, float value, float draw, float moves_left,
                        int multivisit = 1);
     void AddDirichletNoise(Node* root);
+
+    // Prefetch likely-needed positions into unused GPU batch slots
+    void MaybePrefetchIntoCache(SearchWorkerCtx& ctx, BackendComputation* computation);
+    int PrefetchIntoCache(Node* node, int budget, SearchWorkerCtx& ctx,
+                          BackendComputation* computation);
 
     // NN policy application
     static void ApplyNNPolicy(Node* node, const EvaluationResult& result,
@@ -253,6 +271,11 @@ private:
     std::atomic<int> gathering_permit_{1};
     std::atomic<int> backend_waiting_{0};
 
+    std::unique_ptr<KLDGainStopper> kld_stopper_;
+
+    // Smart pruning: track when the first NN eval arrives
+    mutable int64_t first_eval_time_ms_ = -1;
+
     // Lc0-style smooth time management (persistent across searches)
     struct TimeManagerState {
         float nps = 200.0f;
@@ -266,6 +289,8 @@ private:
         bool first_move = true;
     };
     TimeManagerState tmgr_;
+
+    SharedTTReader* shared_tt_ = nullptr;
 };
 
 // Factory function matching the old create_thread_safe_mcts pattern

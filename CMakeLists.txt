@@ -10,18 +10,40 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Compiler flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
-if(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto")
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# Enable NEON for Apple Silicon
+option(METALFISH_ENABLE_IPO
+       "Enable interprocedural optimization for Release builds" ON)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-  set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} -DUSE_NEON=8 -DUSE_NEON_DOTPROD -mcpu=apple-m1 -mtune=apple-m1"
-  )
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_PEXT")
+  option(METALFISH_ENABLE_NATIVE_ARCH
+         "Tune code generation for the local Apple Silicon CPU" ON)
+else()
+  option(METALFISH_ENABLE_NATIVE_ARCH
+         "Tune code generation for the local CPU" OFF)
+endif()
+
+set(METALFISH_IPO_SUPPORTED OFF)
+if(METALFISH_ENABLE_IPO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT METALFISH_IPO_SUPPORTED
+                      OUTPUT METALFISH_IPO_ERROR)
+  if(NOT METALFISH_IPO_SUPPORTED)
+    message(STATUS "IPO/LTO disabled: ${METALFISH_IPO_ERROR}")
+  endif()
+endif()
+
+# Enable ARM-specific optimizations for Apple Silicon.
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+  set(APPLE_ARM_FLAGS "-DUSE_NEON=8 -DUSE_NEON_DOTPROD -DNO_PEXT")
+  if(METALFISH_ENABLE_NATIVE_ARCH)
+    string(APPEND APPLE_ARM_FLAGS " -mcpu=native -mtune=native")
+  else()
+    string(APPEND APPLE_ARM_FLAGS " -mcpu=apple-m1 -mtune=apple-m1")
+  endif()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${APPLE_ARM_FLAGS}")
+  set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} ${APPLE_ARM_FLAGS}")
 endif()
 
 # Metal GPU acceleration (Apple Silicon)
@@ -225,6 +247,11 @@ if(TARGET metal_shaders)
   add_dependencies(metalfish metal_shaders)
 endif()
 
+if(METALFISH_IPO_SUPPORTED)
+  set_property(TARGET metalfish PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE
+                                         TRUE)
+endif()
+
 # Libraries
 find_package(ZLIB REQUIRED)
 
@@ -311,6 +338,10 @@ if(BUILD_TESTS)
     ${MCTS_SOURCES}
     ${HYBRID_SOURCES}
     ${NN_SOURCES})
+  if(METALFISH_IPO_SUPPORTED)
+    set_property(TARGET metalfish_tests
+                 PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+  endif()
   target_link_libraries(metalfish_tests Threads::Threads ${Protobuf_LIBRARIES}
                         ${ZLIB_LIBRARIES} ${ABSL_LIBS})
 
@@ -341,6 +372,10 @@ if(BUILD_TESTS)
     ${MCTS_SOURCES}
     ${HYBRID_SOURCES}
     ${NN_SOURCES})
+  if(METALFISH_IPO_SUPPORTED)
+    set_property(TARGET test_nn_comparison
+                 PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+  endif()
   target_link_libraries(test_nn_comparison Threads::Threads
                         ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES} ${ABSL_LIBS})
 
@@ -368,5 +403,7 @@ message(STATUS "MetalFish Configuration Summary:")
 message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Metal GPU: ${USE_METAL}")
+message(STATUS "  Native arch tuning: ${METALFISH_ENABLE_NATIVE_ARCH}")
+message(STATUS "  IPO/LTO: ${METALFISH_IPO_SUPPORTED}")
 message(STATUS "  Tests: ${BUILD_TESTS}")
 message(STATUS "")

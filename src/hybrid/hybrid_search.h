@@ -36,11 +36,13 @@
 #include "../search/search.h"
 #include "../search/tt.h"
 #include "classifier.h"
+#include "shared_tt.h"
 #include <atomic>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace MetalFish {
@@ -223,7 +225,8 @@ struct ParallelSearchStats {
 struct ParallelHybridConfig {
   // MCTS configuration
   SearchParams mcts_config;
-  int mcts_threads = 1;
+  int mcts_threads = 4;  // MCTS search threads + GPU
+  int ab_threads = 4;    // AB search threads (P-cores)
 
   // AB configuration
   int ab_min_depth = 8;    // Minimum depth for AB to search
@@ -323,6 +326,7 @@ private:
   // MCTS search engine
   std::unique_ptr<Search> mcts_search_;
   std::unique_ptr<GPU::GPUMCTSBackend> gpu_backend_;
+  std::unique_ptr<SharedTTReader> shared_tt_reader_;
   GPU::GPUNNUEManager *gpu_manager_ = nullptr;
   Engine *engine_ = nullptr;
 
@@ -330,6 +334,9 @@ private:
   PositionClassifier classifier_;
   StrategySelector strategy_selector_;
   SearchStrategy current_strategy_;
+
+  // NN policy hints for potential future AB move ordering integration
+  std::unordered_map<uint16_t, float> nn_policy_hints_;
 
   // Shared state for parallel communication (cache-line aligned)
   ABSharedState ab_state_;

@@ -73,7 +73,7 @@ inline float FastSqrt(float x) {
 } // namespace FastMath
 
 // ============================================================================
-// Moves Left Head (MLH) Utility
+// Moves Left Head (MLH) Utility 
 // ============================================================================
 
 class MovesLeftEvaluator {
@@ -131,6 +131,23 @@ private:
 };
 
 // ============================================================================
+// WDL Rescaling
+// ============================================================================
+
+struct WDLRescaler {
+    float ratio;
+    float diff;
+
+    bool IsActive() const { return ratio != 1.0f || diff != 0.0f; }
+
+    float Rescale(float q) const {
+        if (!IsActive()) return q;
+        float clamped = std::clamp(q, -0.9999f, 0.9999f);
+        return std::tanh(std::atanh(clamped) * ratio + diff);
+    }
+};
+
+// ============================================================================
 // Score Transformation
 // ============================================================================
 
@@ -140,7 +157,7 @@ inline int QToNnueScore(float q) {
 }
 
 // ============================================================================
-// Collision Handling
+// Collision Handling 
 // ============================================================================
 
 struct CollisionStats {

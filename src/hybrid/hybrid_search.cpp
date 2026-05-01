@@ -23,9 +23,20 @@
 #include <iomanip>
 #include <sstream>
 #include <type_traits>
+#ifdef __APPLE__
+#include <pthread/qos.h>
+#endif
 
 namespace MetalFish {
 namespace MCTS {
+
+#ifdef __APPLE__
+namespace {
+inline void set_thread_qos(qos_class_t qos) {
+  pthread_set_qos_class_self_np(qos, 0);
+}
+} // namespace
+#endif
 
 // ============================================================================
 // ParallelHybridSearch Implementation
@@ -161,6 +172,11 @@ bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
   mcts_search_ = std::make_unique<Search>(config_.mcts_config,
       std::make_unique<Backend>(config_.mcts_config.nn_weights_path));
 
+  if (engine_) {
+    shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
+    mcts_search_->SetSharedTT(shared_tt_reader_.get());
+  }
+
   // Initialize shared state
   ab_state_.reset();
   mcts_state_.reset();
@@ -218,6 +234,8 @@ void ParallelHybridSearch::start_search(const Position &pos,
 
   // Calculate time budget
   time_budget_ms_ = calculate_time_budget();
+
+  nn_policy_hints_.clear();
 
   // Analyze position for strategy
   if (config_.use_position_classifier) {
@@ -356,13 +374,26 @@ void ParallelHybridSearch::new_game() {
   if (mcts_search_) {
     mcts_search_ = std::make_unique<Search>(config_.mcts_config,
       std::make_unique<Backend>(config_.mcts_config.nn_weights_path));
+    if (engine_) {
+      shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
+      mcts_search_->SetSharedTT(shared_tt_reader_.get());
+    }
   }
   // Search manages its own TT internally
 }
 
 int ParallelHybridSearch::calculate_time_budget() const {
+  // AB's Stockfish time manager is the master clock. This function only
+  // computes a hard safety cap for the coordinator — AB decides when to
+  // stop, and the coordinator stops MCTS when AB finishes.
   if (limits_.movetime > 0) {
     return limits_.movetime;
+  }
+  if (limits_.infinite) {
+    return 0; // No cap — run until explicit stop
+  }
+  if (limits_.nodes > 0) {
+    return 0; // Node-limited — no time cap
   }
 
   Position pos;
@@ -371,18 +402,14 @@ int ParallelHybridSearch::calculate_time_budget() const {
   Color us = pos.side_to_move();
 
   int time_left = (us == WHITE) ? limits_.time[WHITE] : limits_.time[BLACK];
-  int increment = (us == WHITE) ? limits_.inc[WHITE] : limits_.inc[BLACK];
-
   if (time_left <= 0) {
-    return 1000;
+    int increment = (us == WHITE) ? limits_.inc[WHITE] : limits_.inc[BLACK];
+    return std::max(1000, increment);
   }
 
-  int base_time = static_cast<int>(time_left * config_.time_fraction);
-  base_time += static_cast<int>(increment * config_.increment_usage);
-  base_time = std::max(500, base_time);
-  int max_time = static_cast<int>(time_left * config_.max_time_fraction);
-
-  return std::min(base_time, max_time);
+  // Safety hard cap at 76% of remaining time (Stockfish's internal max).
+  // This only fires if AB's own time manager somehow fails to stop in time.
+  return std::max(500, static_cast<int>(time_left * 0.76f));
 }
 
 bool ParallelHybridSearch::should_stop() const {
@@ -410,6 +437,10 @@ bool ParallelHybridSearch::should_stop() const {
 
 // MCTS thread - runs GPU-accelerated MCTS
 void ParallelHybridSearch::mcts_thread_main() {
+#ifdef __APPLE__
+  set_thread_qos(QOS_CLASS_USER_INITIATED);
+#endif
+
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
@@ -423,9 +454,10 @@ void ParallelHybridSearch::mcts_thread_main() {
 
   auto start = std::chrono::steady_clock::now();
 
-  // Set up MCTS limits - run for full time budget
+  // MCTS runs until the coordinator stops it (when AB finishes or agreement).
+  // Don't pass time controls — MCTS is a passenger on AB's time budget.
   ::MetalFish::Search::LimitsType mcts_limits;
-  mcts_limits.movetime = time_budget_ms_;
+  mcts_limits.infinite = 1;
   mcts_limits.startTime = now();
 
   Move best_move = Move::none();
@@ -511,9 +543,12 @@ void ParallelHybridSearch::publish_mcts_state() {
 }
 
 void ParallelHybridSearch::update_mcts_policy_from_ab() {
-  // Read AB's current PV and inject it into the MCTS tree.
-  // This is the core cross-pollination: AB's deep tactical analysis
-  // biases MCTS exploration toward proven lines.
+  int depth = ab_state_.pv_depth.load(std::memory_order_acquire);
+  if (depth < 10) return;
+
+  uint64_t mcts_nodes = mcts_search_ ? mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed) : 0;
+  if (mcts_nodes < 100) return;
+
   int pv_len = ab_state_.pv_length.load(std::memory_order_acquire);
   if (pv_len <= 0 || !mcts_search_)
     return;
@@ -522,14 +557,16 @@ void ParallelHybridSearch::update_mcts_policy_from_ab() {
   for (int i = 0; i < pv_len; ++i) {
     pv[i] = Move(ab_state_.pv_moves[i].load(std::memory_order_relaxed));
   }
-  int depth = ab_state_.pv_depth.load(std::memory_order_relaxed);
-
   mcts_search_->InjectPVBoost(pv, pv_len, depth);
   stats_.policy_updates.fetch_add(1, std::memory_order_relaxed);
 }
 
 // AB thread - runs full alpha-beta iterative deepening
 void ParallelHybridSearch::ab_thread_main() {
+#ifdef __APPLE__
+  set_thread_qos(QOS_CLASS_USER_INITIATED);
+#endif
+
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
@@ -556,14 +593,30 @@ void ParallelHybridSearch::run_ab_search() {
   if (!engine_)
     return;
 
+  // Enforce hybrid split by temporarily resizing AB worker threads for this
+  // search. This keeps AB and MCTS from oversubscribing cores.
+  const int original_threads =
+      static_cast<int>(engine_->get_options()["Threads"]);
+  const int requested_ab_threads = std::max(1, config_.ab_threads);
+  const bool needs_thread_resize = (requested_ab_threads != original_threads);
+
+  auto set_engine_threads = [this](int n) {
+    std::istringstream ss("name Threads value " + std::to_string(n));
+    engine_->get_options().setoption(ss);
+  };
+
+  if (needs_thread_resize) {
+    set_engine_threads(requested_ab_threads);
+  }
+
   // Set up position using the standard Engine interface
   engine_->set_position(root_fen_, {});
 
-  // Build limits with movetime
-  ::MetalFish::Search::LimitsType ab_limits;
+  // Pass the real time controls so Stockfish's own time manager handles
+  // move allocation (with move overhead, ponder support, instamove, etc.)
+  // instead of forcing a flat movetime budget.
+  ::MetalFish::Search::LimitsType ab_limits = limits_;
   ab_limits.startTime = now();
-  if (time_budget_ms_ > 0)
-    ab_limits.movetime = time_budget_ms_;
 
   // Suppress bestmove output -- the coordinator handles it
   auto saved_bestmove = engine_->get_on_bestmove();
@@ -588,8 +641,41 @@ void ParallelHybridSearch::run_ab_search() {
             return 0;
         });
         ab_depth = info.depth;
-        publish_ab_state(ab_state_.get_best_move(), ab_score, ab_depth,
-                         engine_->threads_nodes_searched());
+
+        Position pos;
+        StateInfo root_st;
+        pos.set(root_fen_, false, &root_st);
+
+        std::vector<Move> pv_moves;
+        pv_moves.reserve(ABSharedState::MAX_PV);
+        std::vector<StateInfo> pv_states;
+        pv_states.reserve(ABSharedState::MAX_PV);
+
+        std::istringstream pv_stream(std::string(info.pv));
+        std::string move_token;
+        while (pv_stream >> move_token &&
+               pv_moves.size() < ABSharedState::MAX_PV) {
+          Move move = UCIEngine::to_move(pos, move_token);
+          if (move == Move::none()) {
+            break;
+          }
+
+          pv_moves.push_back(move);
+          if (pv_moves.size() >= ABSharedState::MAX_PV) {
+            break;
+          }
+
+          pv_states.emplace_back();
+          pos.do_move(move, pv_states.back());
+        }
+
+        const Move current_best =
+            pv_moves.empty() ? Move::none() : pv_moves.front();
+        if (current_best != Move::none()) {
+          ab_state_.publish_pv(pv_moves, ab_depth);
+          publish_ab_state(current_best, ab_score, ab_depth,
+                           engine_->threads_nodes_searched());
+        }
       });
 
   engine_->set_on_bestmove([this, &ab_best_move, &ab_score, &ab_depth](
@@ -608,9 +694,17 @@ void ParallelHybridSearch::run_ab_search() {
   engine_->go(ab_limits);
   engine_->wait_for_search_finished();
 
+  stats_.ab_nodes.store(engine_->threads_nodes_searched(),
+                        std::memory_order_relaxed);
+  stats_.ab_depth.store(ab_depth, std::memory_order_relaxed);
+
   // Restore callbacks
   engine_->set_on_update_full(std::move(saved_update_full));
   engine_->set_on_bestmove(std::move(saved_bestmove));
+
+  if (needs_thread_resize) {
+    set_engine_threads(original_threads);
+  }
 }
 
 void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
@@ -620,6 +714,10 @@ void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
 
 // Coordinator thread - monitors both searches and makes final decision
 void ParallelHybridSearch::coordinator_thread_main() {
+#ifdef __APPLE__
+  set_thread_qos(QOS_CLASS_UTILITY);
+#endif
+
   // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
@@ -633,24 +731,32 @@ void ParallelHybridSearch::coordinator_thread_main() {
 
   auto start = std::chrono::steady_clock::now();
   int agreement_count = 0;
+
   uint32_t last_ab_move_raw = 0;
   uint32_t last_mcts_move_raw = 0;
   int64_t last_info_ms = 0;
 
-  // Wait for search to complete or time to expire
+  // AB's time manager is the master clock. The coordinator monitors both
+  // engines and stops when: (1) AB finishes (its time manager decided), or
+  // (2) both agree on a move (early stop), or (3) safety hard cap fires.
   while (!should_stop()) {
     std::this_thread::sleep_for(std::chrono::microseconds(500));
 
-    // Check if both searches have results
-    bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
     bool ab_done = !ab_state_.ab_running.load(std::memory_order_acquire);
+    bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
+
+    // AB finished — it used its own time manager to decide. Stop everything.
+    if (ab_done && ab_state_.has_result.load(std::memory_order_acquire)) {
+      break;
+    }
 
     auto elapsed = std::chrono::steady_clock::now() - start;
     auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
-    // Agreement-based early stopping: if both engines agree on the same
-    // move for several consecutive checks, we can stop early and save time.
+    // Agreement-based early stopping: if both engines agree for 3+
+    // consecutive checks and we've used at least 25% of the safety cap,
+    // stop both engines early to save time for future moves.
     uint32_t ab_move = ab_state_.best_move_raw.load(std::memory_order_relaxed);
     uint32_t mcts_move =
         mcts_state_.best_move_raw.load(std::memory_order_relaxed);
@@ -658,8 +764,8 @@ void ParallelHybridSearch::coordinator_thread_main() {
     if (ab_move != 0 && mcts_move != 0) {
       if (ab_move == mcts_move) {
         agreement_count++;
-        // Both agree for 3+ checks AND we've used at least 25% of time
-        if (agreement_count >= 3 && ms > time_budget_ms_ / 4) {
+        int min_time = (time_budget_ms_ > 0) ? time_budget_ms_ / 4 : 500;
+        if (agreement_count >= 3 && ms > min_time) {
           send_info_string("Hybrid: engines agree, stopping early at " +
                            std::to_string(ms) + "ms");
           break;
@@ -669,7 +775,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
       }
     }
 
-    // Send combined info every ~500ms (fixed timing)
+    // Send combined info every ~500ms
     if (ms - last_info_ms >= 500) {
       last_info_ms = ms;
       uint64_t mcts_nodes = mcts_search_ ?
@@ -688,6 +794,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
       }
     }
 
+    // Both done — exit
     if (mcts_done && ab_done) {
       break;
     }
@@ -784,200 +891,46 @@ void ParallelHybridSearch::invoke_best_move_callback(Move best, Move ponder) {
 }
 
 Move ParallelHybridSearch::make_final_decision() {
-  Move mcts_best = mcts_state_.get_best_move();
   Move ab_best = ab_state_.get_best_move();
+  Move mcts_best = mcts_state_.get_best_move();
   int ab_score = ab_state_.best_score.load(std::memory_order_relaxed);
   float mcts_q = mcts_state_.best_q.load(std::memory_order_relaxed);
-  int ab_depth = ab_state_.completed_depth.load(std::memory_order_relaxed);
-  uint32_t mcts_visits =
-      mcts_state_.best_visits.load(std::memory_order_relaxed);
+  uint32_t mcts_visits = mcts_state_.best_visits.load(std::memory_order_relaxed);
 
-  // If only one has a result, use it
-  if (mcts_best == Move::none() && ab_best != Move::none()) {
-    stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-    {
-      std::lock_guard<std::mutex> lock(pv_mutex_);
-      final_pv_.clear();
-      final_pv_.push_back(ab_best);
-    }
-    return ab_best;
-  }
   if (ab_best == Move::none() && mcts_best != Move::none()) {
     stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-    {
-      std::lock_guard<std::mutex> lock(pv_mutex_);
-      final_pv_.clear();
-      final_pv_.push_back(mcts_best);
-    }
     return mcts_best;
   }
-  if (mcts_best == Move::none() && ab_best == Move::none()) {
-    // Fallback: find any legal move
+  if (mcts_best == Move::none() || ab_best == Move::none()) {
+    if (ab_best != Move::none()) {
+      stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+      return ab_best;
+    }
     Position pos;
     StateInfo st;
     pos.set(root_fen_, false, &st);
     MoveList<LEGAL> moves(pos);
-    if (moves.size() > 0) {
-      return *moves.begin();
-    }
-    return Move::none();
+    return moves.size() > 0 ? *moves.begin() : Move::none();
   }
 
-  // Both have results - decide based on mode
-  if (mcts_best == ab_best) {
+  if (ab_best == mcts_best) {
     stats_.move_agreements.fetch_add(1, std::memory_order_relaxed);
-    {
-      std::lock_guard<std::mutex> lock(pv_mutex_);
-      final_pv_.clear();
-      final_pv_.push_back(ab_best);
-    }
     return ab_best;
   }
 
-  // Moves disagree - need to decide
-  // Use Q to centipawn conversion
   int mcts_cp = QToNnueScore(mcts_q);
+  bool mcts_reliable = mcts_visits > 5000;
+  bool mcts_much_better = mcts_cp > ab_score + 200;
+  bool is_tactical = (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
+                      current_strategy_.position_type == PositionType::TACTICAL);
 
-  // Score comparison for decision logic
-  // Calculate confidence metrics
-  float ab_confidence = std::min(1.0f, static_cast<float>(ab_depth) / 20.0f);
-  float mcts_confidence =
-      std::min(1.0f, static_cast<float>(mcts_visits) / 50000.0f);
-
-  Move chosen;
-
-  switch (config_.decision_mode) {
-  case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
-    // Always trust AB unless MCTS strongly disagrees
-    if (mcts_cp > ab_score + 150 && mcts_confidence > 0.5f) {
-      chosen = mcts_best;
-      stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-    } else {
-      chosen = ab_best;
-      stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-    }
-    break;
-
-  case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
-    // Trust MCTS unless AB strongly disagrees
-    if (ab_score > mcts_cp + 100 && ab_confidence > 0.5f) {
-      chosen = ab_best;
-      stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-    } else {
-      chosen = mcts_best;
-      stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-    }
-    break;
-
-  case ParallelHybridConfig::DecisionMode::DYNAMIC:
-    // Use position type to decide - IMPROVED thresholds
-    if (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
-        current_strategy_.position_type == PositionType::TACTICAL) {
-      // Tactical positions: trust AB more (it's better at tactics)
-      // But only override if AB is significantly better
-      if (ab_score > mcts_cp + 50) { // 0.5 pawn advantage
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else if (mcts_cp > ab_score + 100 && mcts_confidence > 0.3f) {
-        // MCTS found something AB missed
-        chosen = mcts_best;
-        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        // Close - trust AB in tactical positions
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      }
-    } else {
-      // Strategic positions: trust MCTS more (it's better at long-term
-      // planning) But respect AB's tactical corrections
-      if (ab_score > mcts_cp + 150) { // 1.5 pawn - AB found a tactic
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        // Trust MCTS for strategic decisions
-        chosen = mcts_best;
-        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-      }
-    }
-    break;
-
-  case ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED:
-  default:
-    // Weighted decision based on confidence
-    // For losing positions, we want to choose the LEAST BAD option
-    // with proper confidence weighting.
-    //
-    // The key insight: compare confidence-weighted PREFERENCES, not raw scores.
-    // Higher confidence should make us more likely to trust that assessment,
-    // regardless of whether the position is winning or losing.
-
-    // Compute weighted scores using absolute values to handle negative scores
-    // correctly We compare which engine is MORE CONFIDENT that their move is
-    // BETTER (or less bad)
-    float ab_conf = ab_confidence;
-    float mcts_conf = mcts_confidence;
-
-    // Normalize confidences
-    float conf_sum = ab_conf + mcts_conf;
-    if (conf_sum > 0) {
-      ab_conf /= conf_sum;
-      mcts_conf /= conf_sum;
-    } else {
-      ab_conf = 0.5f;
-      mcts_conf = 0.5f;
-    }
-
-    // Decision: trust the engine with higher confidence, but only if scores
-    // are reasonably close. If scores differ significantly, trust the one
-    // claiming a better position (accounting for confidence).
-    //
-    // For close scores (within ~50cp), prefer higher confidence.
-    // For divergent scores, weight both confidence AND score difference.
-    int score_diff = ab_score - mcts_cp;
-    float score_diff_pawns = std::abs(score_diff) / 100.0f;
-
-    if (score_diff_pawns < 0.5f) {
-      // Scores are close - trust higher confidence
-      if (ab_conf > mcts_conf + 0.1f) {
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else if (mcts_conf > ab_conf + 0.1f) {
-        chosen = mcts_best;
-        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        // Very close confidence - default to AB (more reliable for tactics)
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      }
-    } else {
-      // Scores diverge significantly - weight confidence against score
-      // difference Use confidence as a "discount factor" on the claimed
-      // advantage Higher confidence means we trust the score more
-      float ab_effective = ab_score * ab_conf;
-      float mcts_effective = mcts_cp * mcts_conf;
-
-      if (ab_effective > mcts_effective) {
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else if (mcts_effective > ab_effective) {
-        chosen = mcts_best;
-        stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        // Equal - default to AB
-        chosen = ab_best;
-        stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
-      }
-    }
-    break;
+  if (mcts_reliable && mcts_much_better && !is_tactical) {
+    stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+    return mcts_best;
   }
 
-  {
-    std::lock_guard<std::mutex> lock(pv_mutex_);
-    final_pv_.clear();
-    final_pv_.push_back(chosen);
-  }
-
-  return chosen;
+  stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+  return ab_best;
 }
 
 void ParallelHybridSearch::send_info(int depth, int score, uint64_t nodes,

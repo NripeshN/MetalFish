@@ -161,6 +161,14 @@ class MetalFish:
         return 0
 
 
+def initialize_uci_session(engine: MetalFish):
+    """Bring a fresh engine process into a ready UCI state."""
+    engine.send_command("uci")
+    engine.equals("uciok")
+    engine.send_command("isready")
+    engine.equals("readyok")
+
+
 class TestRunner:
     """Simple test runner"""
 
@@ -280,9 +288,7 @@ def test_perft():
     print(f"\n{WHITE_BOLD}Running Perft Tests{RESET_COLOR}")
 
     engine = MetalFish()
-
-    # Wait for engine to initialize
-    engine.contains("MetalFish")
+    initialize_uci_session(engine)
 
     passed = 0
     failed = 0
@@ -581,7 +587,7 @@ def benchmark_comparison():
     print("-" * 50)
 
     mf_engine = MetalFish()
-    mf_engine.contains("MetalFish")
+    initialize_uci_session(mf_engine)
 
     start = time.time()
     mf_perft = run_perft_bench(mf_engine, 6)
@@ -637,7 +643,7 @@ def benchmark_comparison():
     print("-" * 50)
 
     mf_engine = MetalFish()
-    mf_engine.contains("MetalFish")
+    initialize_uci_session(mf_engine)
     mf_engine.send_command("position startpos")
     mf_engine.send_command("go depth 12")
 

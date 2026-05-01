@@ -44,7 +44,7 @@ struct SearchParams {
     // Moves left head utility (Lc0 defaults)
     float moves_left_max_effect = 0.03f;
     float moves_left_threshold = 0.80f;
-    float moves_left_slope = 0.00f;
+    float moves_left_slope = 0.0027f;
     float moves_left_constant_factor = 0.0f;
     float moves_left_scaled_factor = 1.65f;
     float moves_left_quadratic_factor = -0.65f;
@@ -57,6 +57,17 @@ struct SearchParams {
     bool  two_fold_draws = true;
     bool  sticky_endgames = true;
     float draw_score = 0.0f;
+
+    // WDL rescaling (ratio=1.0 means no rescaling)
+    float wdl_rescale_ratio = 1.0f;
+    float wdl_rescale_diff = 0.0f;
+
+    // Temperature for final move selection (0 = always best, >0 = sample)
+    float temperature = 0.0f;
+    float temp_winpct_cutoff = 50.0f;
+
+    // Contempt (positive = avoid draws, negative = prefer draws)
+    float contempt = 0.0f;
 
     // Threading
     int num_threads = 2;
@@ -76,6 +87,12 @@ struct SearchParams {
     int max_collision_visits_scaling_end = 145000;
     float max_collision_visits_scaling_power = 1.25f;
     bool out_of_order_eval = true;
+
+    // KLD gain stopper (disabled by default, matching lc0)
+    // Set kld_gain_min > 0 to enable (e.g. 0.00001)
+    bool use_kld_gain_stopper = false;
+    float kld_gain_min = 0.0f;
+    int kld_gain_average_interval = 100;
 
     // NNCache
     int nn_cache_size = 500000;
