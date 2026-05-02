@@ -59,6 +59,15 @@ void NNCache::Insert(uint64_t key, const EvaluationResult &result) {
   uint64_t gen = e.generation.load(std::memory_order_relaxed);
   e.generation.store(gen + 1, std::memory_order_release);
 
+  if (result.policy_priors.size() > Entry::MAX_MOVES) {
+    e.occupied = false;
+    e.key = 0;
+    e.num_moves = 0;
+    e.legal_moves = 0;
+    e.generation.store(gen + 2, std::memory_order_release);
+    return;
+  }
+
   e.key = key;
   e.value = result.value;
   e.draw = result.has_wdl ? result.wdl[1] : 0.0f;
@@ -71,8 +80,7 @@ void NNCache::Insert(uint64_t key, const EvaluationResult &result) {
   }
   e.has_moves_left = result.has_moves_left;
 
-  int n = std::min(static_cast<int>(result.policy_priors.size()),
-                   Entry::MAX_MOVES);
+  int n = static_cast<int>(result.policy_priors.size());
   e.num_moves = n;
   e.legal_moves = static_cast<uint16_t>(result.policy_priors.size());
   for (int i = 0; i < n; ++i) {
@@ -103,20 +111,38 @@ BackendComputation::BackendComputation(NNMCTSEvaluator *eval, NNCache *cache)
 
 BackendComputation::AddInputResult
 BackendComputation::AddInput(const Position &pos, uint64_t key) {
-  return AddInputWithHistory({&pos}, key);
+  const Position *history[1] = {&pos};
+  return AddInputWithHistory(history, 1, key);
 }
 
 BackendComputation::AddInputResult
 BackendComputation::AddInputWithHistory(
     const std::vector<const Position *> &history, uint64_t key) {
+  return AddInputWithHistory(history.data(), static_cast<int>(history.size()),
+                             key);
+}
+
+BackendComputation::AddInputResult
+BackendComputation::AddInputWithHistory(const Position *const *history,
+                                        int history_depth, uint64_t key,
+                                        int expected_moves) {
+  return AddInputWithHistory(history, history_depth, key, nullptr,
+                             expected_moves);
+}
+
+BackendComputation::AddInputResult
+BackendComputation::AddInputWithHistory(const Position *const *history,
+                                        int history_depth, uint64_t key,
+                                        const Move *legal_moves,
+                                        int legal_move_count) {
   int idx = total_inputs_++;
   results_.emplace_back();
   from_cache_.push_back(false);
 
+  int expected_moves = legal_move_count;
   EvaluationResult cached;
-  int expected_moves = -1;
-  if (!history.empty()) {
-    MoveList<LEGAL> moves(*history.back());
+  if (expected_moves < 0 && history_depth > 0) {
+    MoveList<LEGAL> moves(*history[history_depth - 1]);
     expected_moves = static_cast<int>(moves.size());
   }
   if (cache_ && cache_->Lookup(key, expected_moves, cached)) {
@@ -125,20 +151,49 @@ BackendComputation::AddInputWithHistory(
     return CACHE_HIT;
   }
 
-  pending_.push_back({history, key, idx});
+  PendingInput pending;
+  pending.key = key;
+  pending.result_idx = idx;
+  pending.history_depth =
+      std::min(history_depth, static_cast<int>(pending.history.size()));
+  pending.legal_move_count = -1;
+  if (legal_moves && legal_move_count >= 0) {
+    pending.legal_move_count =
+        std::min(legal_move_count, static_cast<int>(pending.legal_moves.size()));
+    for (int i = 0; i < pending.legal_move_count; ++i) {
+      pending.legal_moves[i] = legal_moves[i];
+    }
+  }
+  const int start = history_depth - pending.history_depth;
+  for (int i = 0; i < pending.history_depth; ++i) {
+    pending.history[i] = history[start + i];
+  }
+  pending_.push_back(pending);
   return QUEUED;
 }
 
 void BackendComputation::ComputeBlocking() {
   if (pending_.empty()) return;
 
-  std::vector<std::vector<const Position *>> histories;
+  std::vector<NNMCTSEvaluator::PositionHistoryView> histories;
   histories.reserve(pending_.size());
+  std::vector<NNMCTSEvaluator::LegalMovesView> legal_moves;
+  legal_moves.reserve(pending_.size());
+  bool all_have_legal_moves = true;
   for (const auto &p : pending_) {
-    histories.push_back(p.history);
+    histories.emplace_back(p.history.data(), p.history_depth);
+    if (p.legal_move_count >= 0) {
+      legal_moves.emplace_back(p.legal_moves.data(), p.legal_move_count);
+    } else {
+      all_have_legal_moves = false;
+    }
   }
 
-  auto batch_results = evaluator_->EvaluateBatchWithHistory(histories);
+  auto batch_results = all_have_legal_moves
+                           ? evaluator_->EvaluateBatchWithHistoryViews(
+                                 histories, legal_moves)
+                           : evaluator_->EvaluateBatchWithHistoryViews(
+                                 histories);
 
   for (size_t i = 0; i < pending_.size(); ++i) {
     int idx = pending_[i].result_idx;
@@ -167,7 +222,8 @@ int BackendComputation::TotalInputs() const {
 // Backend
 // ============================================================================
 
-Backend::Backend(const std::string &weights_path) {
+Backend::Backend(const std::string &weights_path, size_t cache_entries)
+    : cache_(cache_entries) {
   try {
     evaluator_ = std::make_unique<NNMCTSEvaluator>(weights_path);
     std::cerr << "info string Backend loaded weights: " << weights_path

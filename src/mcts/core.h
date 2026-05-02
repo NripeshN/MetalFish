@@ -73,7 +73,7 @@ inline float FastSqrt(float x) {
 } // namespace FastMath
 
 // ============================================================================
-// Moves Left Head (MLH) Utility 
+// Moves Left Head (MLH) Utility
 // ============================================================================
 
 class MovesLeftEvaluator {
@@ -156,8 +156,20 @@ inline int QToNnueScore(float q) {
   return static_cast<int>(std::atanh(q) * 300.0f);
 }
 
+inline float TablebaseWDLToParentWL(int wdl) {
+  if (wdl >= 2)
+    return -1.0f;
+  if (wdl <= -2)
+    return 1.0f;
+  return 0.0f;
+}
+
+inline float TablebaseWDLToDraw(int wdl) {
+  return std::abs(wdl) >= 2 ? 0.0f : 1.0f;
+}
+
 // ============================================================================
-// Collision Handling 
+// Collision Handling
 // ============================================================================
 
 struct CollisionStats {

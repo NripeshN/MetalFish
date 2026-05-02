@@ -16,12 +16,15 @@
 #include "../search/search.h"
 #include "../uci/uci.h"
 
-#include <thread>
+#include <array>
 #include <atomic>
-#include <random>
 #include <chrono>
+#include <deque>
 #include <functional>
+#include <memory>
+#include <random>
 #include <sstream>
+#include <thread>
 
 #ifdef __APPLE__
 #include <Accelerate/Accelerate.h>
@@ -122,45 +125,45 @@ struct SearchWorkerCtx {
 
     // Build position history (last 8 positions) for NN encoding.
     // Reconstructs intermediate positions from the move path.
-    // Caller owns the returned buffer and must keep it alive
-    // while the history pointers are in use.
+    // Position objects hold raw StateInfo pointers, so HistoryBuffer must not
+    // be moved after it is populated.
     struct HistoryBuffer {
         static constexpr int kMaxHistory = 8;
-        std::unique_ptr<Position> positions[kMaxHistory];
+        std::array<Position, kMaxHistory> positions;
         StateInfo root_states[kMaxHistory];
         std::vector<StateInfo> state_stacks[kMaxHistory];
         const Position* ptrs[kMaxHistory];
         int depth = 0;
 
-        HistoryBuffer() {
-            for (int i = 0; i < kMaxHistory; ++i)
-                positions[i] = std::make_unique<Position>();
-        }
-
+        HistoryBuffer() = default;
         HistoryBuffer(const HistoryBuffer&) = delete;
         HistoryBuffer& operator=(const HistoryBuffer&) = delete;
-        HistoryBuffer(HistoryBuffer&&) = default;
-        HistoryBuffer& operator=(HistoryBuffer&&) = default;
+        HistoryBuffer(HistoryBuffer&&) = delete;
+        HistoryBuffer& operator=(HistoryBuffer&&) = delete;
     };
 
-    HistoryBuffer BuildHistory() {
-        HistoryBuffer buf;
+    void BuildHistory(HistoryBuffer& buf) const {
         int total_plies = static_cast<int>(move_stack.size());
         buf.depth = std::min(total_plies + 1, HistoryBuffer::kMaxHistory);
         int start_ply = total_plies - (buf.depth - 1);
 
         for (int h = 0; h < buf.depth; ++h) {
             int target_ply = start_ply + h;
-            buf.positions[h]->set(cached_root_fen, false, &buf.root_states[h]);
+            buf.positions[h].set(cached_root_fen, false, &buf.root_states[h]);
             buf.state_stacks[h].clear();
             buf.state_stacks[h].reserve(target_ply);
             for (int p = 0; p < target_ply; ++p) {
                 buf.state_stacks[h].emplace_back();
-                buf.positions[h]->do_move(move_stack[p],
-                                           buf.state_stacks[h].back());
+                buf.positions[h].do_move(move_stack[p],
+                                          buf.state_stacks[h].back());
             }
-            buf.ptrs[h] = buf.positions[h].get();
+            buf.ptrs[h] = &buf.positions[h];
         }
+    }
+
+    std::unique_ptr<HistoryBuffer> BuildHistory() const {
+        auto buf = std::make_unique<HistoryBuffer>();
+        BuildHistory(*buf);
         return buf;
     }
 };
@@ -220,9 +223,13 @@ private:
     void AddDirichletNoise(Node* root);
 
     // Prefetch likely-needed positions into unused GPU batch slots
-    void MaybePrefetchIntoCache(SearchWorkerCtx& ctx, BackendComputation* computation);
+    void MaybePrefetchIntoCache(
+        SearchWorkerCtx& ctx, BackendComputation* computation,
+        std::deque<SearchWorkerCtx::HistoryBuffer>& prefetch_histories);
     int PrefetchIntoCache(Node* node, int budget, SearchWorkerCtx& ctx,
-                          BackendComputation* computation);
+                          BackendComputation* computation,
+                          std::deque<SearchWorkerCtx::HistoryBuffer>&
+                              prefetch_histories);
 
     // NN policy application
     static void ApplyNNPolicy(Node* node, const EvaluationResult& result,

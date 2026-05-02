@@ -8,6 +8,7 @@
 #pragma once
 
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "../core/position.h"
@@ -39,6 +40,9 @@ struct EvaluationResult {
 // Neural network evaluator for MCTS
 class NNMCTSEvaluator {
 public:
+  using PositionHistoryView = std::span<const Position *const>;
+  using LegalMovesView = std::span<const Move>;
+
   explicit NNMCTSEvaluator(const std::string &weights_path);
   ~NNMCTSEvaluator();
 
@@ -46,14 +50,25 @@ public:
   // The history vector should contain the last 8 board states (or fewer).
   // history.back() is the current position to evaluate.
   EvaluationResult Evaluate(const Position &pos);
+  EvaluationResult EvaluateWithHistory(PositionHistoryView history);
+  EvaluationResult EvaluateWithHistoryAndMoves(PositionHistoryView history,
+                                               LegalMovesView legal_moves);
   EvaluationResult EvaluateWithHistory(
-      const std::vector<const Position *> &history);
+      const std::vector<const Position *> &history) {
+    return EvaluateWithHistory(PositionHistoryView(history.data(),
+                                                  history.size()));
+  }
 
   // Batch evaluation with per-position history
   std::vector<EvaluationResult> EvaluateBatch(const Position *const *positions,
                                               size_t count);
   std::vector<EvaluationResult> EvaluateBatchWithHistory(
       const std::vector<std::vector<const Position *>> &histories);
+  std::vector<EvaluationResult> EvaluateBatchWithHistoryViews(
+      const std::vector<PositionHistoryView> &histories);
+  std::vector<EvaluationResult> EvaluateBatchWithHistoryViews(
+      const std::vector<PositionHistoryView> &histories,
+      const std::vector<LegalMovesView> &legal_moves);
 
   // Get network information
   std::string GetNetworkInfo() const;

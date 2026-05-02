@@ -170,7 +170,9 @@ bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
   // Create MCTS search engine
   // This loads the transformer network from config_.mcts_config.nn_weights_path
   mcts_search_ = std::make_unique<Search>(config_.mcts_config,
-      std::make_unique<Backend>(config_.mcts_config.nn_weights_path));
+      std::make_unique<Backend>(
+          config_.mcts_config.nn_weights_path,
+          static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size))));
 
   if (engine_) {
     shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
@@ -373,7 +375,9 @@ void ParallelHybridSearch::new_game() {
 
   if (mcts_search_) {
     mcts_search_ = std::make_unique<Search>(config_.mcts_config,
-      std::make_unique<Backend>(config_.mcts_config.nn_weights_path));
+      std::make_unique<Backend>(
+          config_.mcts_config.nn_weights_path,
+          static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size))));
     if (engine_) {
       shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
       mcts_search_->SetSharedTT(shared_tt_reader_.get());
@@ -801,6 +805,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
   }
 
   // Signal stop to all threads
+  const bool external_stop = stop_flag_.load(std::memory_order_acquire);
   stop_flag_.store(true, std::memory_order_release);
 
   // Stop MCTS search safely
@@ -816,7 +821,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
   // Wait for MCTS and AB threads to finish before making decision.
   // After external stop: emit bestmove immediately using AB result.
   // Don't wait for MCTS -- GPU inference can't be interrupted.
-  int max_wait = stop_flag_.load(std::memory_order_acquire) ? 100 : 4000;
+  int max_wait = external_stop ? 100 : 4000;
   int wait_count = 0;
   // Only wait for AB thread (MCTS might be stuck in GPU).
   while (!ab_thread_done_.load(std::memory_order_acquire) &&

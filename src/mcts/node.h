@@ -18,6 +18,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "../core/movegen.h"
@@ -95,10 +96,10 @@ struct Edge {
     }
 };
 
-// MCTS Node - cache-line aligned, ~64 bytes core data on ARM64.
+// MCTS Node - cache-line aligned for the target CPU.
 // Children are stored as atomic<Node*> inside each Edge, matching the old
 // TSEdge pattern for lock-free child installation via CAS.
-class alignas(64) Node {
+class alignas(CACHE_LINE_SIZE) Node {
 public:
     enum class Terminal : uint8_t {
         NonTerminal = 0,
@@ -270,16 +271,30 @@ public:
     // --- Edge / children management ---
 
     void CreateEdges(const MoveList<LEGAL>& moves) {
-        int count = static_cast<int>(moves.size());
+        CreateEdges(moves.begin(), static_cast<int>(moves.size()));
+    }
+
+    void CreateEdges(const Move* moves, int count) {
         if (count == 0) return;
         edges_ = std::make_unique<Edge[]>(count);
         float uniform = 1.0f / static_cast<float>(count);
-        int idx = 0;
-        for (const auto& m : moves) {
-            edges_[idx].move = m;
+        for (int idx = 0; idx < count; ++idx) {
+            edges_[idx].move = moves[idx];
             edges_[idx].SetP(uniform);
             edges_[idx].child.store(nullptr, std::memory_order_relaxed);
-            ++idx;
+        }
+        num_edges_ = static_cast<uint8_t>(count);
+    }
+
+    void CreateEdges(const std::vector<std::pair<Move, float>>& policy_priors) {
+        int count = static_cast<int>(policy_priors.size());
+        if (count == 0) return;
+        edges_ = std::make_unique<Edge[]>(count);
+        float uniform = 1.0f / static_cast<float>(count);
+        for (int idx = 0; idx < count; ++idx) {
+            edges_[idx].move = policy_priors[idx].first;
+            edges_[idx].SetP(uniform);
+            edges_[idx].child.store(nullptr, std::memory_order_relaxed);
         }
         num_edges_ = static_cast<uint8_t>(count);
     }

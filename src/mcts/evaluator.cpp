@@ -11,6 +11,7 @@
 #include "../nn/policy_map.h"
 #include <algorithm>
 
+#include <array>
 #include <stdexcept>
 #include <vector>
 
@@ -49,72 +50,57 @@ public:
   }
 
   EvaluationResult Evaluate(const Position &pos) {
-    std::vector<const Position *> history = {&pos};
+    std::array<const Position *, 1> history = {&pos};
     return EvaluateWithHistory(history);
   }
 
-  EvaluationResult EvaluateWithHistory(
-      const std::vector<const Position *> &history) {
+  EvaluationResult
+  EvaluateWithHistory(NNMCTSEvaluator::PositionHistoryView history) {
     if (history.empty())
       return EvaluationResult{};
     const Position &pos = *history.back();
 
     int transform = 0;
-    auto planes =
-        NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
-                                NN::FillEmptyHistory::FEN_ONLY, &transform);
+    NN::InputPlanes planes;
+    NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
+                            NN::FillEmptyHistory::FEN_ONLY, planes,
+                            &transform);
 
     // 2. Run neural network
     auto output = network_->Evaluate(planes);
 
-    // 3. Convert to MCTS evaluation result
-    EvaluationResult result;
-    // Use raw network value (already from side-to-move perspective).
-    result.value = output.value;
-    result.has_wdl = output.has_wdl;
-    if (output.has_wdl) {
-      result.wdl[0] = output.wdl[0]; // win
-      result.wdl[1] = output.wdl[1]; // draw
-      result.wdl[2] = output.wdl[2]; // loss
-    }
-    result.has_moves_left = output.has_moves_left;
-    result.moves_left = output.moves_left;
+    return BuildResult(output, pos, transform, nullptr);
+  }
 
-    // 4. Map policy outputs to legal moves
-    MoveList<LEGAL> moves(pos);
-    result.policy_priors.reserve(moves.size());
-    for (const auto &move : moves) {
-      Move policy_move = move;
-      if (pos.side_to_move() == BLACK) {
-        policy_move = MirrorMoveVertical(policy_move);
-      }
-      int policy_idx = NN::MoveToNNIndex(policy_move, transform);
-      if (policy_idx >= 0 &&
-          policy_idx < static_cast<int>(output.policy.size())) {
-        result.policy_priors.emplace_back(move, output.policy[policy_idx]);
-      }
-    }
+  EvaluationResult EvaluateWithHistoryAndMoves(
+      NNMCTSEvaluator::PositionHistoryView history,
+      NNMCTSEvaluator::LegalMovesView legal_moves) {
+    if (history.empty())
+      return EvaluationResult{};
+    const Position &pos = *history.back();
 
-    return result;
+    int transform = 0;
+    NN::InputPlanes planes;
+    NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
+                            NN::FillEmptyHistory::FEN_ONLY, planes,
+                            &transform);
+
+    auto output = network_->Evaluate(planes);
+    return BuildResult(output, pos, transform, &legal_moves);
   }
 
   std::vector<EvaluationResult> EvaluateBatch(const Position *const *positions,
                                               size_t count) {
     // Batch encoding
-    std::vector<NN::InputPlanes> planes_batch;
-    planes_batch.reserve(count);
-    std::vector<int> transforms;
-    transforms.reserve(count);
+    std::vector<NN::InputPlanes> planes_batch(count);
+    std::vector<int> transforms(count);
 
     for (size_t idx = 0; idx < count; ++idx) {
       const Position &pos = *positions[idx];
-      std::vector<const Position *> history = {&pos};
-      int transform = 0;
-      auto planes =
-          NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
-                                  NN::FillEmptyHistory::FEN_ONLY, &transform);
-      planes_batch.push_back(planes);
-      transforms.push_back(transform);
+      std::array<const Position *, 1> history = {&pos};
+      NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
+                              NN::FillEmptyHistory::FEN_ONLY,
+                              planes_batch[idx], &transforms[idx]);
     }
 
     // Batch inference
@@ -125,54 +111,35 @@ public:
     results.reserve(outputs.size());
 
     for (size_t i = 0; i < outputs.size(); ++i) {
-      EvaluationResult result;
-      result.value = outputs[i].value;
-      result.has_wdl = outputs[i].has_wdl;
-      if (outputs[i].has_wdl) {
-        result.wdl[0] = outputs[i].wdl[0];
-        result.wdl[1] = outputs[i].wdl[1];
-        result.wdl[2] = outputs[i].wdl[2];
-      }
-      result.has_moves_left = outputs[i].has_moves_left;
-      result.moves_left = outputs[i].moves_left;
-
-      // Map policy
-      MoveList<LEGAL> moves(*positions[i]);
-      result.policy_priors.reserve(moves.size());
-      for (const auto &move : moves) {
-        Move policy_move = move;
-        if (positions[i]->side_to_move() == BLACK) {
-          policy_move = MirrorMoveVertical(policy_move);
-        }
-        int policy_idx = NN::MoveToNNIndex(policy_move, transforms[i]);
-        if (policy_idx >= 0 &&
-            policy_idx < static_cast<int>(outputs[i].policy.size())) {
-          result.policy_priors.emplace_back(move,
-                                            outputs[i].policy[policy_idx]);
-        }
-      }
-
-      results.push_back(result);
+      results.push_back(BuildResult(outputs[i], *positions[i], transforms[i],
+                                    nullptr));
     }
 
     return results;
   }
 
-  std::vector<EvaluationResult> EvaluateBatchWithHistory(
-      const std::vector<std::vector<const Position *>> &histories) {
+  std::vector<EvaluationResult> EvaluateBatchWithHistoryViews(
+      const std::vector<NNMCTSEvaluator::PositionHistoryView> &histories) {
+    return EvaluateBatchWithHistoryViews(histories, {});
+  }
+
+  std::vector<EvaluationResult> EvaluateBatchWithHistoryViews(
+      const std::vector<NNMCTSEvaluator::PositionHistoryView> &histories,
+      const std::vector<NNMCTSEvaluator::LegalMovesView> &legal_moves) {
+    if (!legal_moves.empty() && legal_moves.size() != histories.size()) {
+      throw std::invalid_argument(
+          "legal move view count must match history count");
+    }
+
     size_t count = histories.size();
-    std::vector<NN::InputPlanes> planes_batch;
-    planes_batch.reserve(count);
-    std::vector<int> transforms;
-    transforms.reserve(count);
+    std::vector<NN::InputPlanes> planes_batch(count);
+    std::vector<int> transforms(count);
 
     for (size_t idx = 0; idx < count; ++idx) {
-      int transform = 0;
-      auto planes = NN::EncodePositionForNN(
+      NN::EncodePositionForNN(
           input_format_, histories[idx], NN::kMoveHistory,
-          NN::FillEmptyHistory::FEN_ONLY, &transform);
-      planes_batch.push_back(planes);
-      transforms.push_back(transform);
+          NN::FillEmptyHistory::FEN_ONLY, planes_batch[idx],
+          &transforms[idx]);
     }
 
     auto outputs = network_->EvaluateBatch(planes_batch);
@@ -180,32 +147,9 @@ public:
     std::vector<EvaluationResult> results;
     results.reserve(outputs.size());
     for (size_t i = 0; i < outputs.size(); ++i) {
-      EvaluationResult result;
-      result.value = outputs[i].value;
-      result.has_wdl = outputs[i].has_wdl;
-      if (outputs[i].has_wdl) {
-        result.wdl[0] = outputs[i].wdl[0];
-        result.wdl[1] = outputs[i].wdl[1];
-        result.wdl[2] = outputs[i].wdl[2];
-      }
-      result.has_moves_left = outputs[i].has_moves_left;
-      result.moves_left = outputs[i].moves_left;
-
       const Position &pos = *histories[i].back();
-      MoveList<LEGAL> moves(pos);
-      result.policy_priors.reserve(moves.size());
-      for (const auto &move : moves) {
-        Move policy_move = move;
-        if (pos.side_to_move() == BLACK) {
-          policy_move = MirrorMoveVertical(policy_move);
-        }
-        int policy_idx = NN::MoveToNNIndex(policy_move, transforms[i]);
-        if (policy_idx >= 0 &&
-            policy_idx < static_cast<int>(outputs[i].policy.size())) {
-          result.policy_priors.emplace_back(move, outputs[i].policy[policy_idx]);
-        }
-      }
-      results.push_back(result);
+      const auto *moves = legal_moves.empty() ? nullptr : &legal_moves[i];
+      results.push_back(BuildResult(outputs[i], pos, transforms[i], moves));
     }
     return results;
   }
@@ -213,6 +157,51 @@ public:
   std::string GetNetworkInfo() const { return network_->GetNetworkInfo(); }
 
 private:
+  EvaluationResult BuildResult(const NN::NetworkOutput &output,
+                               const Position &pos, int transform,
+                               const NNMCTSEvaluator::LegalMovesView
+                                   *legal_moves) const {
+    EvaluationResult result;
+    result.value = output.value;
+    result.has_wdl = output.has_wdl;
+    if (output.has_wdl) {
+      result.wdl[0] = output.wdl[0];
+      result.wdl[1] = output.wdl[1];
+      result.wdl[2] = output.wdl[2];
+    }
+    result.has_moves_left = output.has_moves_left;
+    result.moves_left = output.moves_left;
+
+    auto append_move = [&](Move move) {
+      Move policy_move = move;
+      if (pos.side_to_move() == BLACK) {
+        policy_move = MirrorMoveVertical(policy_move);
+      }
+      int policy_idx = NN::MoveToNNIndex(policy_move, transform);
+      float prior = 0.0f;
+      if (policy_idx >= 0 &&
+          policy_idx < static_cast<int>(output.policy.size())) {
+        prior = output.policy[policy_idx];
+      }
+      result.policy_priors.emplace_back(move, prior);
+    };
+
+    if (legal_moves) {
+      result.policy_priors.reserve(legal_moves->size());
+      for (Move move : *legal_moves) {
+        append_move(move);
+      }
+    } else {
+      MoveList<LEGAL> moves(pos);
+      result.policy_priors.reserve(moves.size());
+      for (Move move : moves) {
+        append_move(move);
+      }
+    }
+
+    return result;
+  }
+
   MetalFishNN::NetworkFormat::InputFormat input_format_;
   NN::WeightsFile weights_;
   std::unique_ptr<NN::Network> network_;
@@ -228,8 +217,13 @@ EvaluationResult NNMCTSEvaluator::Evaluate(const Position &pos) {
 }
 
 EvaluationResult NNMCTSEvaluator::EvaluateWithHistory(
-    const std::vector<const Position *> &history) {
+    PositionHistoryView history) {
   return impl_->EvaluateWithHistory(history);
+}
+
+EvaluationResult NNMCTSEvaluator::EvaluateWithHistoryAndMoves(
+    PositionHistoryView history, LegalMovesView legal_moves) {
+  return impl_->EvaluateWithHistoryAndMoves(history, legal_moves);
 }
 
 std::vector<EvaluationResult>
@@ -240,7 +234,25 @@ NNMCTSEvaluator::EvaluateBatch(const Position *const *positions, size_t count) {
 std::vector<EvaluationResult>
 NNMCTSEvaluator::EvaluateBatchWithHistory(
     const std::vector<std::vector<const Position *>> &histories) {
-  return impl_->EvaluateBatchWithHistory(histories);
+  std::vector<PositionHistoryView> views;
+  views.reserve(histories.size());
+  for (const auto &history : histories) {
+    views.emplace_back(history.data(), history.size());
+  }
+  return impl_->EvaluateBatchWithHistoryViews(views);
+}
+
+std::vector<EvaluationResult>
+NNMCTSEvaluator::EvaluateBatchWithHistoryViews(
+    const std::vector<PositionHistoryView> &histories) {
+  return impl_->EvaluateBatchWithHistoryViews(histories);
+}
+
+std::vector<EvaluationResult>
+NNMCTSEvaluator::EvaluateBatchWithHistoryViews(
+    const std::vector<PositionHistoryView> &histories,
+    const std::vector<LegalMovesView> &legal_moves) {
+  return impl_->EvaluateBatchWithHistoryViews(histories, legal_moves);
 }
 
 std::string NNMCTSEvaluator::GetNetworkInfo() const {

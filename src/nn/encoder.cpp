@@ -179,16 +179,17 @@ uint64_t GetPieceBitboard(const Position &pos, PieceType pt, Color c) {
 
 // Fill a plane from a bitboard
 void FillPlaneFromBitboard(std::array<float, 64> &plane, uint64_t bitboard) {
-  for (int sq = 0; sq < 64; ++sq) {
-    plane[sq] = (bitboard & (1ULL << sq)) ? 1.0f : 0.0f;
+  plane.fill(0.0f);
+  while (bitboard) {
+    const int sq = GetLowestBit(bitboard);
+    plane[sq] = 1.0f;
+    bitboard &= bitboard - 1;
   }
 }
 
 // Set all values in a plane
 void SetPlane(std::array<float, 64> &plane, float value) {
-  for (int i = 0; i < 64; ++i) {
-    plane[i] = value;
-  }
+  plane.fill(value);
 }
 
 } // namespace
@@ -227,7 +228,7 @@ bool IsStartPosition(const Position &pos) {
 }
 
 int TransformForPosition(MetalFishNN::NetworkFormat::InputFormat input_format,
-                         const std::vector<const Position *> &history) {
+                         std::span<const Position *const> history) {
   if (!IsCanonicalFormat(input_format) || history.empty()) {
     return 0;
   }
@@ -236,16 +237,16 @@ int TransformForPosition(MetalFishNN::NetworkFormat::InputFormat input_format,
   return ChooseTransform(pos, us);
 }
 
-InputPlanes
-EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
-                    const std::vector<const Position *> &position_history,
-                    int history_planes, FillEmptyHistory fill_empty_history,
-                    int *transform_out) {
+void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
+                         std::span<const Position *const> position_history,
+                         int history_planes,
+                         FillEmptyHistory fill_empty_history,
+                         InputPlanes &result, int *transform_out) {
 
-  InputPlanes result{};
+  result = {};
 
   if (position_history.empty()) {
-    return result;
+    return;
   }
 
   // Get current position and side to move
@@ -503,7 +504,16 @@ EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
   if (transform_out) {
     *transform_out = transform;
   }
+}
 
+InputPlanes
+EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
+                    std::span<const Position *const> position_history,
+                    int history_planes, FillEmptyHistory fill_empty_history,
+                    int *transform_out) {
+  InputPlanes result;
+  EncodePositionForNN(input_format, position_history, history_planes,
+                      fill_empty_history, result, transform_out);
   return result;
 }
 
@@ -512,7 +522,7 @@ EncodePositionForNN(const Position &pos,
                     MetalFishNN::NetworkFormat::InputFormat input_format) {
   // Delegate to the main function with a single-position history
   // This ensures consistent behavior including vertical flip for black
-  std::vector<const Position *> history = {&pos};
+  std::array<const Position *, 1> history = {&pos};
   return EncodePositionForNN(input_format, history, kMoveHistory,
                              FillEmptyHistory::FEN_ONLY, nullptr);
 }

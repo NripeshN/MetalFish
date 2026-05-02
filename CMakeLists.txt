@@ -10,6 +10,10 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  add_compile_definitions(IS_64BIT)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
@@ -36,7 +40,7 @@ endif()
 
 # Enable ARM-specific optimizations for Apple Silicon.
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-  set(APPLE_ARM_FLAGS "-DUSE_NEON=8 -DUSE_NEON_DOTPROD -DNO_PEXT")
+  set(APPLE_ARM_FLAGS "-DUSE_NEON=8 -DUSE_NEON_DOTPROD -DUSE_POPCNT -DNO_PEXT")
   if(METALFISH_ENABLE_NATIVE_ARCH)
     string(APPEND APPLE_ARM_FLAGS " -mcpu=native -mtune=native")
   else()
@@ -168,7 +172,7 @@ add_custom_command(
   OUTPUT ${PROTO_OUTPUT_DIR}/net.pb.cc ${PROTO_OUTPUT_DIR}/net.pb.h
   COMMAND ${Protobuf_PROTOC_EXECUTABLE} ARGS --cpp_out=${PROTO_OUTPUT_DIR}
           --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/src/nn/proto ${PROTO_FILE}
-  DEPENDS ${PROTO_FILE}
+  DEPENDS ${PROTO_FILE} ${Protobuf_PROTOC_EXECUTABLE}
   COMMENT "Generating protobuf files from net.proto"
   VERBATIM)
 

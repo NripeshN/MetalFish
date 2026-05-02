@@ -42,11 +42,19 @@ using InputPlanes = std::array<std::array<float, 64>, kTotalPlanes>;
 
 enum class FillEmptyHistory { NO, FEN_ONLY, ALWAYS };
 
-// Encode position for neural network input
-// Returns 112-plane representation compatible with training data
+// Encode position for neural network input into a caller-owned buffer.
+void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
+                         std::span<const Position *const> position_history,
+                         int history_planes,
+                         FillEmptyHistory fill_empty_history,
+                         InputPlanes &output,
+                         int *transform_out = nullptr);
+
+// Encode position for neural network input.
+// Returns 112-plane representation compatible with training data.
 InputPlanes
 EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
-                    const std::vector<const Position *> &position_history,
+                    std::span<const Position *const> position_history,
                     int history_planes, FillEmptyHistory fill_empty_history,
                     int *transform_out = nullptr);
 
@@ -61,7 +69,7 @@ bool IsCanonicalFormat(MetalFishNN::NetworkFormat::InputFormat input_format);
 
 // Get transform to apply for canonicalization
 int TransformForPosition(MetalFishNN::NetworkFormat::InputFormat input_format,
-                         const std::vector<const Position *> &history);
+                         std::span<const Position *const> history);
 
 } // namespace NN
 } // namespace MetalFish

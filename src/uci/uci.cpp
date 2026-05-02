@@ -1539,13 +1539,113 @@ static std::string get_nn_weights_path(Engine &engine) {
 
 // Called from isready to preload transformer weights and compile MPSGraph.
 // This makes the first 'go' instant -- no weight loading delay.
-// Forward declarations for static globals defined below.
 static std::unique_ptr<MCTS::ParallelHybridSearch> g_parallel_hybrid_search;
 static GPU::GPUNNUEManager *g_hybrid_gpu_manager = nullptr;
 static std::shared_ptr<MCTS::Search> g_active_mcts;
 static std::mutex g_active_mcts_mutex;
+static std::shared_ptr<MCTS::Search> g_cached_mcts;
+static std::string g_cached_mcts_key;
+static std::mutex g_cached_mcts_mutex;
 static std::thread g_search_waiter;
 static std::mutex g_search_waiter_mutex;
+
+static int resolve_mcts_thread_count(Engine &engine,
+                                     const Search::LimitsType *limits,
+                                     bool explicit_threads_arg,
+                                     int requested_threads,
+                                     bool announce_cap) {
+  int num_threads = requested_threads;
+  if (num_threads <= 0) {
+    num_threads = static_cast<int>(std::thread::hardware_concurrency());
+    if (num_threads <= 0)
+      num_threads = 4;
+  }
+
+  int mcts_thread_cap = static_cast<int>(engine.get_options()["MCTSMaxThreads"]);
+  if (!explicit_threads_arg && mcts_thread_cap <= 0) {
+    // Strength-first auto mode:
+    // - For standard timed play, cap to 1 thread to avoid tactical
+    //   regressions observed with higher MCTS thread counts.
+    // - For fixed-node runs, use a throughput-oriented cap.
+    if (limits && limits->nodes > 0) {
+      int perf_cores = detect_apple_perf_cores();
+      if (perf_cores > 0)
+        mcts_thread_cap = perf_cores + 2;
+    } else {
+      mcts_thread_cap = 1;
+    }
+  }
+
+  if (!explicit_threads_arg && mcts_thread_cap > 0 &&
+      num_threads > mcts_thread_cap) {
+    if (announce_cap) {
+      sync_cout << "info string Capping MCTS threads from " << num_threads
+                << " to " << mcts_thread_cap << " for tactical stability"
+                << sync_endl;
+    }
+    num_threads = mcts_thread_cap;
+  }
+
+  return std::max(1, num_threads);
+}
+
+static std::string make_mcts_cache_key(const std::string &nn_weights,
+                                       const MCTS::SearchParams &config) {
+  std::ostringstream key;
+  key << nn_weights
+      << "|" << config.num_threads
+      << "|" << config.cpuct
+      << "|" << config.cpuct_at_root
+      << "|" << config.cpuct_base
+      << "|" << config.cpuct_factor
+      << "|" << config.cpuct_base_at_root
+      << "|" << config.cpuct_factor_at_root
+      << "|" << config.fpu_absolute
+      << "|" << config.fpu_absolute_at_root
+      << "|" << config.fpu_value
+      << "|" << config.fpu_value_at_root
+      << "|" << config.fpu_reduction
+      << "|" << config.fpu_reduction_at_root
+      << "|" << config.policy_softmax_temp
+      << "|" << config.virtual_loss
+      << "|" << config.minibatch_size
+      << "|" << config.max_out_of_order_evals_factor
+      << "|" << config.add_dirichlet_noise
+      << "|" << config.noise_epsilon
+      << "|" << config.noise_alpha
+      << "|" << config.out_of_order_eval
+      << "|" << config.nn_cache_size;
+  return key.str();
+}
+
+static std::shared_ptr<MCTS::Search>
+get_or_create_cached_mcts(const MCTS::SearchParams &config,
+                          const std::string &cache_key, bool *created) {
+  std::lock_guard<std::mutex> lock(g_cached_mcts_mutex);
+  if (created)
+    *created = false;
+
+  if (g_cached_mcts && g_cached_mcts_key == cache_key)
+    return g_cached_mcts;
+
+  if (g_cached_mcts) {
+    g_cached_mcts->Stop();
+    g_cached_mcts->ClearCallbacks();
+    {
+      std::lock_guard<std::mutex> active_lock(g_active_mcts_mutex);
+      if (g_active_mcts == g_cached_mcts)
+        g_active_mcts.reset();
+    }
+    g_cached_mcts.reset();
+    g_cached_mcts_key.clear();
+  }
+
+  g_cached_mcts.reset(MCTS::CreateSearch(config).release());
+  g_cached_mcts_key = cache_key;
+  if (created)
+    *created = static_cast<bool>(g_cached_mcts);
+  return g_cached_mcts;
+}
 
 static void preload_search_objects(Engine &engine) {
   std::string nn_weights = get_nn_weights_path(engine);
@@ -1570,6 +1670,34 @@ static void preload_search_objects(Engine &engine) {
 
     if (g_parallel_hybrid_search) {
       sync_cout << "info string Hybrid search preloaded (transformer ready)"
+                << sync_endl;
+    }
+  }
+
+  if (need_mcts) {
+    {
+      std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
+      if (g_active_mcts)
+        return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(g_search_waiter_mutex);
+      if (g_search_waiter.joinable())
+        return;
+    }
+
+    const int requested_threads =
+        static_cast<int>(engine.get_options()["Threads"]);
+    const int num_threads = resolve_mcts_thread_count(
+        engine, nullptr, false, requested_threads, false);
+    MCTS::SearchParams config =
+        make_mcts_config(engine, nn_weights, num_threads);
+    const std::string cache_key = make_mcts_cache_key(nn_weights, config);
+
+    bool created = false;
+    auto mcts = get_or_create_cached_mcts(config, cache_key, &created);
+    if (mcts && created) {
+      sync_cout << "info string MCTS search preloaded (transformer ready)"
                 << sync_endl;
     }
   }
@@ -1619,6 +1747,15 @@ void MetalFish::cleanup_parallel_hybrid_search() {
   {
     std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
     g_active_mcts.reset();
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_cached_mcts_mutex);
+    if (g_cached_mcts) {
+      g_cached_mcts->Stop();
+      g_cached_mcts->ClearCallbacks();
+      g_cached_mcts.reset();
+      g_cached_mcts_key.clear();
+    }
   }
 }
 
@@ -1721,53 +1858,27 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
 // Multi-Threaded MCTS Search Command (Pure GPU MCTS)
 // ============================================================================
 void UCIEngine::mcts_mt_go(std::istringstream &is) {
+  std::string args;
+  std::getline(is, args, '\0');
+
   // Parse threads option
   std::string token;
   int num_threads = static_cast<int>(engine.get_options()["Threads"]);
   bool explicit_threads_arg = false;
 
   // Parse additional options (threads=N)
-  while (is >> token) {
+  std::istringstream option_args(args);
+  while (option_args >> token) {
     if (token.find("threads=") == 0) {
       num_threads = std::stoi(token.substr(8));
       explicit_threads_arg = true;
     }
   }
 
-  // Handle threads=-1 (use all available threads)
-  if (num_threads <= 0) {
-    num_threads = static_cast<int>(std::thread::hardware_concurrency());
-    if (num_threads <= 0) {
-      num_threads = 4; // Fallback if hardware_concurrency() returns 0
-    }
-  }
-
-  // Reset stream for limit parsing
-  is.clear();
-  is.seekg(0);
-  Search::LimitsType limits = parse_limits(is);
-
-  int mcts_thread_cap = static_cast<int>(engine.get_options()["MCTSMaxThreads"]);
-  if (!explicit_threads_arg && mcts_thread_cap <= 0) {
-    // Strength-first auto mode:
-    // - For standard timed play, cap to 1 thread to avoid tactical
-    //   regressions observed with higher MCTS thread counts.
-    // - For fixed-node runs, use a throughput-oriented cap.
-    if (limits.nodes > 0) {
-      int perf_cores = detect_apple_perf_cores();
-      if (perf_cores > 0) {
-        mcts_thread_cap = perf_cores + 2;
-      }
-    } else {
-      mcts_thread_cap = 1;
-    }
-  }
-  if (!explicit_threads_arg && mcts_thread_cap > 0 && num_threads > mcts_thread_cap) {
-    sync_cout << "info string Capping MCTS threads from " << num_threads
-              << " to " << mcts_thread_cap << " for tactical stability"
-              << sync_endl;
-    num_threads = mcts_thread_cap;
-  }
+  std::istringstream limit_args(args);
+  Search::LimitsType limits = parse_limits(limit_args);
+  num_threads = resolve_mcts_thread_count(
+      engine, &limits, explicit_threads_arg, num_threads, true);
 
   sync_cout << "info string Starting Multi-Threaded MCTS Search with "
             << num_threads << " threads..." << sync_endl;
@@ -1783,54 +1894,18 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
 
   MCTS::SearchParams config = make_mcts_config(engine, nn_weights, num_threads);
 
-  static std::shared_ptr<MCTS::Search> s_cached_mcts;
-  static std::string s_cached_key;
-
   std::shared_ptr<MCTS::Search> mcts;
-  std::ostringstream config_key;
-  config_key << nn_weights
-             << "|" << config.num_threads
-             << "|" << config.cpuct
-             << "|" << config.cpuct_at_root
-             << "|" << config.cpuct_base
-             << "|" << config.cpuct_factor
-             << "|" << config.fpu_reduction
-             << "|" << config.fpu_reduction_at_root
-             << "|" << config.policy_softmax_temp
-             << "|" << config.virtual_loss
-             << "|" << config.minibatch_size
-             << "|" << config.max_out_of_order_evals_factor
-             << "|" << config.add_dirichlet_noise;
+  const std::string cache_key = make_mcts_cache_key(nn_weights, config);
 
-  if (s_cached_mcts && s_cached_key == config_key.str()) {
-    mcts = s_cached_mcts;
-  } else {
-    if (s_cached_mcts) {
-      s_cached_mcts->Stop();
-      s_cached_mcts->ClearCallbacks();
-      {
-        std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
-        if (g_active_mcts == s_cached_mcts)
-          g_active_mcts.reset();
-      }
-      join_search_waiter();
-      s_cached_mcts.reset();
-    }
-    mcts.reset(MCTS::CreateSearch(config).release());
-    s_cached_mcts = mcts;
-    s_cached_key = config_key.str();
-  }
+  // Finish the previous waiter before reusing or replacing the cached object.
+  join_search_waiter();
+  mcts = get_or_create_cached_mcts(config, cache_key, nullptr);
 
   if (!mcts) {
     sync_cout << "info string ERROR: Failed to create multi-threaded MCTS"
               << sync_endl;
     return;
   }
-
-  // Ensure any previous search waiter thread is joined before starting a new
-  // search on the same cached object. start_search() handles stop/wait
-  // internally so we only need to join the background waiter.
-  join_search_waiter();
 
   sync_cout << "info string Multi-threaded MCTS initialized with "
             << num_threads << " threads" << sync_endl;

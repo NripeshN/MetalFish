@@ -7,7 +7,9 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,7 +21,9 @@ namespace MCTS {
 
 class NNCache {
 public:
-  explicit NNCache(size_t size = 1 << 21);
+  static constexpr size_t kDefaultEntries = 500000;
+
+  explicit NNCache(size_t size = kDefaultEntries);
   bool Lookup(uint64_t key, int expected_moves, EvaluationResult &out) const;
   void Insert(uint64_t key, const EvaluationResult &result);
   void Clear();
@@ -33,7 +37,7 @@ private:
     float wdl[3] = {};
     bool has_moves_left = false;
 
-        static constexpr int MAX_MOVES = 96;
+    static constexpr int MAX_MOVES = 96;
     struct CachedMove {
       uint16_t move_raw = 0;
       float policy = 0;
@@ -57,23 +61,33 @@ public:
   AddInputResult AddInput(const Position &pos, uint64_t key);
   AddInputResult AddInputWithHistory(
       const std::vector<const Position *> &history, uint64_t key);
+  AddInputResult AddInputWithHistory(const Position *const *history,
+                                     int history_depth, uint64_t key,
+                                     int expected_moves = -1);
+  AddInputResult AddInputWithHistory(const Position *const *history,
+                                     int history_depth, uint64_t key,
+                                     const Move *legal_moves,
+                                     int legal_move_count);
   void ComputeBlocking();
   const EvaluationResult &GetResult(int idx) const;
-    int UsedBatchSize() const;
-    int TotalInputs() const;
-    void Reset() {
-        pending_.clear();
-        results_.clear();
-        from_cache_.clear();
-        total_inputs_ = 0;
-    }
+  int UsedBatchSize() const;
+  int TotalInputs() const;
+  void Reset() {
+    pending_.clear();
+    results_.clear();
+    from_cache_.clear();
+    total_inputs_ = 0;
+  }
 
 private:
   NNMCTSEvaluator *evaluator_;
   NNCache *cache_;
 
   struct PendingInput {
-    std::vector<const Position *> history;
+    std::array<const Position *, 8> history{};
+    std::array<Move, MAX_MOVES> legal_moves{};
+    int history_depth = 0;
+    int legal_move_count = -1;
     uint64_t key;
     int result_idx;
   };
@@ -86,7 +100,8 @@ private:
 
 class Backend {
 public:
-  explicit Backend(const std::string &weights_path);
+  explicit Backend(const std::string &weights_path,
+                   size_t cache_entries = NNCache::kDefaultEntries);
 
   std::unique_ptr<BackendComputation> CreateComputation();
   NNCache &Cache() { return cache_; }

@@ -108,6 +108,13 @@ void test_types() {
     EXPECT(tc, mated_in(5) == -VALUE_MATE + 5);
   }
   {
+    TestCase tc("Build feature detection");
+    EXPECT(tc, Is64Bit == (sizeof(void *) == 8));
+#if defined(__APPLE__) && defined(__aarch64__)
+    EXPECT(tc, HasPopCnt);
+#endif
+  }
+  {
     TestCase tc("Direction operations");
     EXPECT(tc, SQ_E4 + NORTH == SQ_E5);
     EXPECT(tc, SQ_E4 + SOUTH == SQ_E3);

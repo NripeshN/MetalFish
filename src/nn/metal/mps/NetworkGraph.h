@@ -11,6 +11,8 @@
 #import <Metal/Metal.h>
 #import <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
+#include <vector>
+
 #import "../../weights.h"
 
 @interface MPSGraphTensor (MetalExtensions)
@@ -225,6 +227,6 @@ static MPSImageFeatureChannelFormat fcFormat =
                     subBatchSize:(NSUInteger)subBatchSize;
 
 - (void)copyResultsToBuffers:(float *__nonnull *__nonnull)outputBuffers
-                subBatchSize:(NSUInteger)subBatchSize;
+                subBatchSizes:(const std::vector<NSUInteger> &)subBatchSizes;
 
 @end

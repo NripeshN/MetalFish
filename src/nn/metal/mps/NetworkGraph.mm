@@ -9,6 +9,7 @@
 #import "../../weights.h"
 #import "../tables/attention_policy_map.h"
 #import "../tables/policy_map.h"
+#import <algorithm>
 #import <vector>
 
 static MPSGraphConvolution2DOpDescriptor *__nonnull convolution2DDescriptor =
@@ -128,35 +129,43 @@ static const NSInteger kMinSubBatchSize = 20;
   // Calculate number of sub-batches to split across GPU command buffers for
   // parallel execution. Shouldn't be more than kMaxInflightBuffers and each
   // sub-batch shouldn't be smaller than kMinSubBatchSize.
-  NSUInteger splits = (batchSize + kMinSubBatchSize + 1) / kMinSubBatchSize;
+  NSUInteger splits = batchSize / kMinSubBatchSize;
+  if (splits == 0)
+    splits = 1;
   if (splits > kMaxInflightBuffers)
     splits = kMaxInflightBuffers;
-  NSUInteger subBatchSize = batchSize / splits;
-  NSUInteger inputDataLength =
-      subBatchSize * [_inputTensor sizeOfDimensionsFrom:@1];
+  const NSUInteger subBatchSize = (batchSize + splits - 1) / splits;
+  const NSUInteger inputChannels = [_inputTensor sizeOfDimensionsFrom:@1];
+
+  [_resultDataDicts removeAllObjects];
 
   // Split batchSize into smaller sub-batches and run using double-buffering.
-  NSUInteger subBatch = 0;
-  MPSCommandBuffer *commandBuffer;
-  for (subBatch = 0; subBatch < splits - 1; subBatch++) {
-    commandBuffer =
-        [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
-                                     masks:masks + subBatch * inputDataLength
+  NSMutableArray<MPSCommandBuffer *> *commandBuffers =
+      [NSMutableArray arrayWithCapacity:splits];
+  std::vector<NSUInteger> subBatchSizes;
+  subBatchSizes.reserve(splits);
+
+  NSUInteger sampleOffset = 0;
+  for (NSUInteger subBatch = 0; subBatch < splits; ++subBatch) {
+    const NSUInteger remaining = batchSize - sampleOffset;
+    const NSUInteger thisSubBatchSize = std::min(subBatchSize, remaining);
+    const NSUInteger inputOffset = sampleOffset * inputChannels;
+
+    MPSCommandBuffer *commandBuffer =
+        [self runCommandSubBatchWithInputs:inputs + inputOffset
+                                     masks:masks + inputOffset
                                   subBatch:subBatch
-                              subBatchSize:subBatchSize];
+                              subBatchSize:thisSubBatchSize];
+    [commandBuffers addObject:commandBuffer];
+    subBatchSizes.push_back(thisSubBatchSize);
+    sampleOffset += thisSubBatchSize;
   }
-  // Last sub-batch may be smaller or larger than others.
-  MPSCommandBuffer *latestCommandBuffer =
-      [self runCommandSubBatchWithInputs:inputs + subBatch * inputDataLength
-                                   masks:masks + subBatch * inputDataLength
-                                subBatch:subBatch
-                            subBatchSize:batchSize - subBatch * subBatchSize];
 
-  // Wait for the last batch to be processed.
-  [latestCommandBuffer waitUntilCompleted];
+  for (MPSCommandBuffer *commandBuffer in commandBuffers) {
     [commandBuffer waitUntilCompleted];
+  }
 
-  [self copyResultsToBuffers:outputBuffers subBatchSize:subBatchSize];
+  [self copyResultsToBuffers:outputBuffers subBatchSizes:subBatchSizes];
 
     return _resultTensors;
 }
@@ -175,9 +184,11 @@ static const NSInteger kMinSubBatchSize = 20;
 
   MPSShape *shape =
       @[ @(subBatchSize), _inputTensor.shape[1], _inputTensor.shape[2] ];
+  const NSUInteger inputElements =
+      subBatchSize * [_inputTensor sizeOfDimensionsFrom:@1];
 
   NSData *inputData = [NSData dataWithBytesNoCopy:inputs
-                                              length:subBatchSize * sizeof(float)
+                                              length:inputElements * sizeof(float)
                                         freeWhenDone:NO];
 
   MPSGraphTensorData *inputTensorData =
@@ -187,7 +198,7 @@ static const NSInteger kMinSubBatchSize = 20;
                                                                              dataType:_inputTensor.dataType];
 
   NSData *maskData = [NSData dataWithBytesNoCopy:masks
-                                             length:subBatchSize * sizeof(uint64_t)
+                                             length:inputElements * sizeof(uint64_t)
                                        freeWhenDone:NO];
 
   MPSGraphTensorData *inputMaskData =
@@ -229,17 +240,24 @@ static const NSInteger kMinSubBatchSize = 20;
 }
 
 - (void)copyResultsToBuffers:(float *__nonnull *__nonnull)outputBuffers
-                subBatchSize:(NSUInteger)subBatchSize {
+               subBatchSizes:(const std::vector<NSUInteger> &)subBatchSizes {
     // Copy results for batch back into the output buffers.
     for (NSUInteger rsIdx = 0; rsIdx < [_resultTensors count]; rsIdx++) {
-    NSUInteger outputDataLength =
-        [_resultTensors[rsIdx] sizeOfDimensions:@[ @1, @2, @3 ]] * subBatchSize;
-    for (NSUInteger subBatch = 0; subBatch < [_resultDataDicts count];
-         subBatch++) {
-      [[_resultDataDicts
-        [@(subBatch)] [_resultTensors
-                       [rsIdx]] mpsndarray] readBytes : outputBuffers [rsIdx] +
-       subBatch * outputDataLength strideBytes : nil];
+    const NSUInteger elementsPerSample =
+        [_resultTensors[rsIdx] sizeOfDimensions:@[ @1, @2, @3 ]];
+    NSUInteger outputSampleOffset = 0;
+    for (NSUInteger subBatch = 0; subBatch < subBatchSizes.size(); subBatch++) {
+      MPSGraphTensorDataDictionary *resultDictionary =
+          _resultDataDicts[@(subBatch)];
+      if (!resultDictionary) {
+        outputSampleOffset += subBatchSizes[subBatch];
+        continue;
+      }
+      [[resultDictionary[_resultTensors[rsIdx]] mpsndarray]
+          readBytes:outputBuffers[rsIdx] +
+                    outputSampleOffset * elementsPerSample
+        strideBytes:nil];
+      outputSampleOffset += subBatchSizes[subBatch];
     }
   }
 }
