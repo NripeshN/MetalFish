@@ -758,18 +758,41 @@ void ParallelHybridSearch::coordinator_thread_main() {
     auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
-    // Agreement-based early stopping: if both engines agree for 3+
-    // consecutive checks and we've used at least 25% of the safety cap,
-    // stop both engines early to save time for future moves.
+    // Agreement-based early stopping is only safe in clock-managed play. For
+    // explicit movetime analysis there is no future-clock reserve to protect,
+    // so spend the requested time. Also require enough independent MCTS and AB
+    // evidence before trusting agreement; otherwise a few initial transformer
+    // visits can prematurely stop a strong AB search.
     uint32_t ab_move = ab_state_.best_move_raw.load(std::memory_order_relaxed);
     uint32_t mcts_move =
         mcts_state_.best_move_raw.load(std::memory_order_relaxed);
 
+    if (ab_move != last_ab_move_raw || mcts_move != last_mcts_move_raw) {
+      agreement_count = 0;
+      last_ab_move_raw = ab_move;
+      last_mcts_move_raw = mcts_move;
+    }
+
     if (ab_move != 0 && mcts_move != 0) {
       if (ab_move == mcts_move) {
         agreement_count++;
-        int min_time = (time_budget_ms_ > 0) ? time_budget_ms_ / 4 : 500;
-        if (agreement_count >= 3 && ms > min_time) {
+        const bool fixed_movetime =
+            limits_.movetime > 0 && limits_.time[WHITE] <= 0 &&
+            limits_.time[BLACK] <= 0 && limits_.nodes <= 0;
+        const int min_time = (time_budget_ms_ > 0) ? time_budget_ms_ / 4 : 500;
+        const uint64_t mcts_nodes =
+            mcts_search_ ? mcts_search_->Stats().total_nodes.load(
+                               std::memory_order_relaxed)
+                         : 0;
+        const uint64_t min_mcts_nodes = static_cast<uint64_t>(
+            std::max(100, current_strategy_.min_mcts_nodes));
+        const int ab_depth =
+            ab_state_.completed_depth.load(std::memory_order_relaxed);
+        const int min_ab_depth =
+            std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
+
+        if (!fixed_movetime && agreement_count >= 3 && ms > min_time &&
+            mcts_nodes >= min_mcts_nodes && ab_depth >= min_ab_depth) {
           send_info_string("Hybrid: engines agree, stopping early at " +
                            std::to_string(ms) + "ms");
           break;
@@ -830,6 +853,12 @@ void ParallelHybridSearch::coordinator_thread_main() {
     wait_count++;
   }
 
+  // Capture the freshest available MCTS result before deciding. Short hybrid
+  // searches can finish before the periodic publisher fires.
+  if (mcts_search_) {
+    publish_mcts_state();
+  }
+
   // Make final decision
   Move final_move = make_final_decision();
 
@@ -845,6 +874,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
   }
 
   final_best_move_.store(final_move.raw(), std::memory_order_release);
+  refresh_final_state(final_move);
 
   // Get ponder move
   Move ponder_move = Move::none();
@@ -860,6 +890,20 @@ void ParallelHybridSearch::coordinator_thread_main() {
   stats_.total_time_ms =
       std::chrono::duration<double, std::milli>(end - start).count();
 
+  const uint64_t total_nodes =
+      stats_.mcts_nodes.load(std::memory_order_relaxed) +
+      stats_.ab_nodes.load(std::memory_order_relaxed);
+  const int info_depth = std::max<int>(
+      1, static_cast<int>(stats_.ab_depth.load(std::memory_order_relaxed)));
+  const Move ab_best = ab_state_.get_best_move();
+  const Move mcts_best = mcts_state_.get_best_move();
+  const int info_score =
+      final_move == mcts_best && final_move != ab_best
+          ? QToNnueScore(mcts_state_.best_q.load(std::memory_order_relaxed))
+          : ab_state_.best_score.load(std::memory_order_relaxed);
+  send_info(info_depth, info_score, total_nodes,
+            static_cast<int>(stats_.total_time_ms), final_pv_, "hybrid-final");
+
   // Report final stats
   send_info_string(
       "Final: MCTS=" + std::to_string(stats_.mcts_nodes.load()) +
@@ -871,6 +915,55 @@ void ParallelHybridSearch::coordinator_thread_main() {
   invoke_best_move_callback(final_move, ponder_move);
 
   // ThreadGuard destructor will signal completion
+}
+
+void ParallelHybridSearch::refresh_final_state(Move final_move) {
+  const uint64_t mcts_nodes =
+      mcts_search_ ? mcts_search_->Stats().total_nodes.load(
+                         std::memory_order_relaxed)
+                   : 0;
+  const uint64_t mcts_evals =
+      mcts_search_ ? mcts_search_->Stats().nn_evaluations.load(
+                         std::memory_order_relaxed)
+                   : 0;
+  const uint64_t ab_nodes =
+      ab_state_.nodes_searched.load(std::memory_order_relaxed);
+  const uint64_t ab_depth =
+      ab_state_.completed_depth.load(std::memory_order_relaxed);
+
+  stats_.mcts_nodes.store(mcts_nodes, std::memory_order_relaxed);
+  stats_.gpu_evaluations.store(mcts_evals, std::memory_order_relaxed);
+  stats_.ab_nodes.store(ab_nodes, std::memory_order_relaxed);
+  stats_.ab_depth.store(ab_depth, std::memory_order_relaxed);
+
+  std::vector<Move> pv;
+  const Move ab_best = ab_state_.get_best_move();
+  const Move mcts_best = mcts_state_.get_best_move();
+
+  if (final_move == ab_best) {
+    const int pv_len = std::min<int>(
+        ab_state_.pv_length.load(std::memory_order_acquire),
+        ABSharedState::MAX_PV);
+    pv.reserve(static_cast<size_t>(pv_len));
+    for (int i = 0; i < pv_len; ++i) {
+      Move m(ab_state_.pv_moves[i].load(std::memory_order_relaxed));
+      if (m == Move::none())
+        break;
+      pv.push_back(m);
+    }
+  } else if (final_move == mcts_best && mcts_search_ &&
+             mcts_thread_done_.load(std::memory_order_acquire)) {
+    pv = mcts_search_->GetPV();
+  }
+
+  if (final_move != Move::none() && (pv.empty() || pv.front() != final_move)) {
+    pv.insert(pv.begin(), final_move);
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(pv_mutex_);
+    final_pv_ = std::move(pv);
+  }
 }
 
 void ParallelHybridSearch::invoke_best_move_callback(Move best, Move ponder) {

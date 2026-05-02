@@ -27,7 +27,6 @@
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
-#include <sys/sysctl.h>
 #endif
 
 #include "core/memory.h"
@@ -80,19 +79,6 @@ bool uci_trace_enabled() {
            value != "no";
   }();
   return enabled;
-}
-
-int detect_apple_perf_cores() {
-#ifdef __APPLE__
-  int value = 0;
-  size_t size = sizeof(value);
-  if (sysctlbyname("hw.perflevel0.physicalcpu_max", &value, &size, nullptr,
-                   0) == 0 &&
-      value > 0) {
-    return value;
-  }
-#endif
-  return 0;
 }
 
 void UCIEngine::print_info_string(std::string_view str) {
@@ -1361,6 +1347,10 @@ static float get_float_option(Engine &engine, const char *name, float fallback) 
   }
 }
 
+static int auto_mcts_minibatch_size(int num_threads) {
+  return num_threads >= 8 ? 64 : 32;
+}
+
 static MCTS::SearchParams make_mcts_config(Engine &engine,
                                            const std::string &nn_weights,
                                            int num_threads) {
@@ -1394,8 +1384,11 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       engine, "MCTSPolicySoftmaxTemp", config.policy_softmax_temp);
   config.virtual_loss = std::max(1, static_cast<int>(
                                         engine.get_options()["MCTSVirtualLoss"]));
-  config.minibatch_size = std::max(
-      1, static_cast<int>(engine.get_options()["MCTSMinibatchSize"]));
+  const int requested_minibatch =
+      static_cast<int>(engine.get_options()["MCTSMinibatchSize"]);
+  config.minibatch_size = requested_minibatch > 0
+                              ? requested_minibatch
+                              : auto_mcts_minibatch_size(num_threads);
   config.max_out_of_order_evals_factor = get_float_option(
       engine, "MCTSMaxOutOfOrderFactor", config.max_out_of_order_evals_factor);
 
@@ -1428,8 +1421,10 @@ static HybridThreadSplit compute_hybrid_thread_split(Engine &engine) {
       static_cast<int>(engine.get_options()["HybridMCTSThreads"]);
   const int ab_override =
       static_cast<int>(engine.get_options()["HybridABThreads"]);
-  constexpr int coordinator_threads = 1;
-  const int available = std::max(1, total_threads - coordinator_threads);
+  // UCI Threads should describe search workers. The hybrid coordinator is a
+  // lightweight sleeping monitor, so keep it outside the AB+MCTS worker budget
+  // instead of stealing a core from the engines on Apple Silicon.
+  const int available = total_threads;
 
   int mcts_threads = 0;
   if (mcts_override > 0) {
@@ -1489,6 +1484,36 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights) {
   return config;
 }
 
+static std::string make_mcts_cache_key(const std::string &nn_weights,
+                                       const MCTS::SearchParams &config);
+
+static std::string make_hybrid_cache_key(
+    const std::string &nn_weights,
+    const MCTS::ParallelHybridConfig &config) {
+  std::ostringstream key;
+  key << make_mcts_cache_key(nn_weights, config.mcts_config)
+      << "|hybrid"
+      << "|" << config.mcts_threads
+      << "|" << config.ab_threads
+      << "|" << config.ab_min_depth
+      << "|" << config.ab_max_depth
+      << "|" << config.ab_use_time
+      << "|" << config.ab_policy_weight
+      << "|" << config.agreement_threshold
+      << "|" << config.override_threshold
+      << "|" << config.policy_update_interval_ms
+      << "|" << config.use_position_classifier
+      << "|" << static_cast<int>(config.decision_mode)
+      << "|" << config.gpu_batch_size
+      << "|" << config.gpu_batch_timeout_us
+      << "|" << config.use_async_gpu_eval
+      << "|" << config.use_gpu_resident_batches
+      << "|" << config.prefetch_positions
+      << "|" << config.use_simd_kernels
+      << "|" << config.metal_threadgroup_size;
+  return key.str();
+}
+
 static std::string get_nn_weights_path(Engine &engine) {
   std::string nn_weights = std::string(engine.get_options()["NNWeights"]);
   if (nn_weights.empty()) {
@@ -1541,6 +1566,7 @@ static std::string get_nn_weights_path(Engine &engine) {
 // This makes the first 'go' instant -- no weight loading delay.
 static std::unique_ptr<MCTS::ParallelHybridSearch> g_parallel_hybrid_search;
 static GPU::GPUNNUEManager *g_hybrid_gpu_manager = nullptr;
+static std::string g_parallel_hybrid_key;
 static std::shared_ptr<MCTS::Search> g_active_mcts;
 static std::mutex g_active_mcts_mutex;
 static std::shared_ptr<MCTS::Search> g_cached_mcts;
@@ -1550,7 +1576,6 @@ static std::thread g_search_waiter;
 static std::mutex g_search_waiter_mutex;
 
 static int resolve_mcts_thread_count(Engine &engine,
-                                     const Search::LimitsType *limits,
                                      bool explicit_threads_arg,
                                      int requested_threads,
                                      bool announce_cap) {
@@ -1564,16 +1589,10 @@ static int resolve_mcts_thread_count(Engine &engine,
   int mcts_thread_cap = static_cast<int>(engine.get_options()["MCTSMaxThreads"]);
   if (!explicit_threads_arg && mcts_thread_cap <= 0) {
     // Strength-first auto mode:
-    // - For standard timed play, cap to 1 thread to avoid tactical
-    //   regressions observed with higher MCTS thread counts.
-    // - For fixed-node runs, use a throughput-oriented cap.
-    if (limits && limits->nodes > 0) {
-      int perf_cores = detect_apple_perf_cores();
-      if (perf_cores > 0)
-        mcts_thread_cap = perf_cores + 2;
-    } else {
-      mcts_thread_cap = 1;
-    }
+    // Apple Silicon MPSGraph latency is better with one MCTS worker for the
+    // current transformer. Higher worker counts can still be requested via
+    // `go ... threads=N` or MCTSMaxThreads for explicit throughput tests.
+    mcts_thread_cap = 1;
   }
 
   if (!explicit_threads_arg && mcts_thread_cap > 0 &&
@@ -1657,18 +1676,34 @@ static void preload_search_objects(Engine &engine) {
   if (!need_hybrid && !need_mcts)
     return; // AB mode -- no transformer needed
 
-  // Preload hybrid search object (includes transformer weight loading)
-  if (need_hybrid && !g_parallel_hybrid_search) {
+  // Preload hybrid search object (includes transformer weight loading). Rebuild
+  // it whenever UCI options that affect the embedded MCTS object change.
+  if (need_hybrid) {
     GPU::GPUNNUEManager *gpu_manager = nullptr;
     if (GPU::gpu_nnue_manager_available())
       gpu_manager = &GPU::gpu_nnue_manager();
 
     auto config = make_hybrid_config(engine, nn_weights);
-    g_parallel_hybrid_search =
-        MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
-    g_hybrid_gpu_manager = gpu_manager;
+    const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
+    const bool needs_reinit =
+        !g_parallel_hybrid_search || g_hybrid_gpu_manager != gpu_manager ||
+        g_parallel_hybrid_key != cache_key;
 
-    if (g_parallel_hybrid_search) {
+    if (needs_reinit && (!g_parallel_hybrid_search ||
+                         !g_parallel_hybrid_search->is_searching())) {
+      if (g_parallel_hybrid_search) {
+        g_parallel_hybrid_search->stop();
+        g_parallel_hybrid_search->wait();
+        g_parallel_hybrid_search.reset();
+        g_parallel_hybrid_key.clear();
+      }
+      g_parallel_hybrid_search =
+          MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
+      g_hybrid_gpu_manager = gpu_manager;
+      g_parallel_hybrid_key = g_parallel_hybrid_search ? cache_key : "";
+    }
+
+    if (g_parallel_hybrid_search && needs_reinit) {
       sync_cout << "info string Hybrid search preloaded (transformer ready)"
                 << sync_endl;
     }
@@ -1689,7 +1724,7 @@ static void preload_search_objects(Engine &engine) {
     const int requested_threads =
         static_cast<int>(engine.get_options()["Threads"]);
     const int num_threads = resolve_mcts_thread_count(
-        engine, nullptr, false, requested_threads, false);
+        engine, false, requested_threads, false);
     MCTS::SearchParams config =
         make_mcts_config(engine, nn_weights, num_threads);
     const std::string cache_key = make_mcts_cache_key(nn_weights, config);
@@ -1743,6 +1778,7 @@ void MetalFish::cleanup_parallel_hybrid_search() {
     g_parallel_hybrid_search->wait();
     g_parallel_hybrid_search.reset();
     g_hybrid_gpu_manager = nullptr;
+    g_parallel_hybrid_key.clear();
   }
   {
     std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
@@ -1797,23 +1833,29 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   auto config = make_hybrid_config(engine, nn_weights);
   sync_cout << "info string Hybrid thread split: MCTS="
             << config.mcts_threads << " AB=" << config.ab_threads
-            << " (+1 coordinator, total="
+            << " (search workers="
+            << (config.mcts_threads + config.ab_threads)
+            << ", +1 coordinator, total="
             << (config.mcts_threads + config.ab_threads + 1) << ")"
             << sync_endl;
 
   // Reuse preloaded search object, or create if not yet initialized
+  const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
   bool need_reinit =
-      !g_parallel_hybrid_search || g_hybrid_gpu_manager != gpu_manager;
+      !g_parallel_hybrid_search || g_hybrid_gpu_manager != gpu_manager ||
+      g_parallel_hybrid_key != cache_key;
 
   if (need_reinit) {
     if (g_parallel_hybrid_search) {
       g_parallel_hybrid_search->stop();
       g_parallel_hybrid_search->wait();
       g_parallel_hybrid_search.reset();
+      g_parallel_hybrid_key.clear();
     }
     g_parallel_hybrid_search =
         MCTS::create_parallel_hybrid_search(gpu_manager, &engine, config);
     g_hybrid_gpu_manager = gpu_manager;
+    g_parallel_hybrid_key = g_parallel_hybrid_search ? cache_key : "";
 
     if (!g_parallel_hybrid_search) {
       sync_cout << "info string ERROR: Failed to create parallel hybrid search"
@@ -1878,7 +1920,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   std::istringstream limit_args(args);
   Search::LimitsType limits = parse_limits(limit_args);
   num_threads = resolve_mcts_thread_count(
-      engine, &limits, explicit_threads_arg, num_threads, true);
+      engine, explicit_threads_arg, num_threads, true);
 
   sync_cout << "info string Starting Multi-Threaded MCTS Search with "
             << num_threads << " threads..." << sync_endl;

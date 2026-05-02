@@ -82,6 +82,8 @@ struct SearchWorkerCtx {
     std::vector<StateInfo> state_stack;
     std::vector<Move> move_stack;
     std::vector<uint64_t> hash_stack;
+    std::vector<int> rule50_stack;
+    std::vector<int> repetition_stack;
     std::mt19937 rng;
 
     uint64_t local_cache_hits = 0;
@@ -93,6 +95,8 @@ struct SearchWorkerCtx {
         state_stack.reserve(256);
         move_stack.reserve(256);
         hash_stack.reserve(256);
+        rule50_stack.reserve(256);
+        repetition_stack.reserve(256);
     }
 
     void SetRootFen(const std::string& fen) {
@@ -104,8 +108,12 @@ struct SearchWorkerCtx {
         state_stack.clear();
         move_stack.clear();
         hash_stack.clear();
+        rule50_stack.clear();
+        repetition_stack.clear();
         pos.set(cached_root_fen, false, &root_st);
         hash_stack.push_back(pos.raw_key());
+        rule50_stack.push_back(pos.rule50_count());
+        repetition_stack.push_back(pos.repetition_distance());
     }
 
     void DoMove(Move m) {
@@ -113,6 +121,8 @@ struct SearchWorkerCtx {
         pos.do_move(m, state_stack.back());
         move_stack.push_back(m);
         hash_stack.push_back(pos.raw_key());
+        rule50_stack.push_back(pos.rule50_count());
+        repetition_stack.push_back(pos.repetition_distance());
     }
 
     void UndoMove() {
@@ -121,6 +131,8 @@ struct SearchWorkerCtx {
         move_stack.pop_back();
         state_stack.pop_back();
         hash_stack.pop_back();
+        rule50_stack.pop_back();
+        repetition_stack.pop_back();
     }
 
     // Build position history (last 8 positions) for NN encoding.
@@ -129,9 +141,12 @@ struct SearchWorkerCtx {
     // be moved after it is populated.
     struct HistoryBuffer {
         static constexpr int kMaxHistory = 8;
+        static constexpr int kInlineStateCapacity = 128;
         std::array<Position, kMaxHistory> positions;
         StateInfo root_states[kMaxHistory];
-        std::vector<StateInfo> state_stacks[kMaxHistory];
+        std::array<std::array<StateInfo, kInlineStateCapacity>, kMaxHistory>
+            inline_state_stacks;
+        std::vector<StateInfo> overflow_state_stacks[kMaxHistory];
         const Position* ptrs[kMaxHistory];
         int depth = 0;
 
@@ -140,6 +155,20 @@ struct SearchWorkerCtx {
         HistoryBuffer& operator=(const HistoryBuffer&) = delete;
         HistoryBuffer(HistoryBuffer&&) = delete;
         HistoryBuffer& operator=(HistoryBuffer&&) = delete;
+
+        void PrepareStateStack(int history_index, int target_ply) {
+            if (target_ply > kInlineStateCapacity) {
+                overflow_state_stacks[history_index].resize(target_ply);
+            } else {
+                overflow_state_stacks[history_index].clear();
+            }
+        }
+
+        StateInfo& StateAt(int history_index, int ply, int target_ply) {
+            if (target_ply > kInlineStateCapacity)
+                return overflow_state_stacks[history_index][ply];
+            return inline_state_stacks[history_index][ply];
+        }
     };
 
     void BuildHistory(HistoryBuffer& buf) const {
@@ -150,12 +179,10 @@ struct SearchWorkerCtx {
         for (int h = 0; h < buf.depth; ++h) {
             int target_ply = start_ply + h;
             buf.positions[h].set(cached_root_fen, false, &buf.root_states[h]);
-            buf.state_stacks[h].clear();
-            buf.state_stacks[h].reserve(target_ply);
+            buf.PrepareStateStack(h, target_ply);
             for (int p = 0; p < target_ply; ++p) {
-                buf.state_stacks[h].emplace_back();
                 buf.positions[h].do_move(move_stack[p],
-                                          buf.state_stacks[h].back());
+                                          buf.StateAt(h, p, target_ply));
             }
             buf.ptrs[h] = &buf.positions[h];
         }
@@ -165,6 +192,19 @@ struct SearchWorkerCtx {
         auto buf = std::make_unique<HistoryBuffer>();
         BuildHistory(*buf);
         return buf;
+    }
+
+    uint64_t CurrentNNCacheKey() const {
+        const int total_positions = static_cast<int>(hash_stack.size());
+        if (total_positions <= 0)
+            return ComputeNNCacheKeyFromState(nullptr, nullptr, nullptr, 0);
+
+        const int depth = std::min(total_positions, HistoryBuffer::kMaxHistory);
+        const int start = total_positions - depth;
+        return ComputeNNCacheKeyFromState(hash_stack.data() + start,
+                                          rule50_stack.data() + start,
+                                          repetition_stack.data() + start,
+                                          depth);
     }
 };
 

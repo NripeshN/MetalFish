@@ -169,6 +169,9 @@ void test_history_buffer_ownership(TestCounter &tc) {
   const auto &history = *keepalive.back();
   expect(history.depth == static_cast<int>(line.size()) + 1,
          "history should include root plus played moves", tc);
+  expect(ctx.CurrentNNCacheKey() ==
+             ComputeNNCacheKey(history.ptrs, history.depth),
+         "incremental cache key should match rebuilt history", tc);
 
   Position replay;
   StateInfo root_state;
@@ -182,6 +185,41 @@ void test_history_buffer_ownership(TestCounter &tc) {
     expect(history.ptrs[i + 1]->raw_key() == replay.raw_key(),
            "played history state remains valid after owner move", tc);
   }
+}
+
+void test_nn_cache_key_tracks_encoded_state(TestCounter &tc) {
+  std::cout << "  NN cache key encoded state..." << std::endl;
+
+  Position rule50_zero;
+  Position rule50_twenty;
+  StateInfo st_zero;
+  StateInfo st_twenty;
+  rule50_zero.set("8/8/8/8/8/8/4K3/7k w - - 0 1", false, &st_zero);
+  rule50_twenty.set("8/8/8/8/8/8/4K3/7k w - - 20 11", false,
+                    &st_twenty);
+
+  const Position *zero_history[] = {&rule50_zero};
+  const Position *twenty_history[] = {&rule50_twenty};
+  expect(ComputeNNCacheKey(zero_history, 1) !=
+             ComputeNNCacheKey(twenty_history, 1),
+         "cache key should include rule-50 state", tc);
+
+  const std::string start_fen =
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  Position root;
+  Position current;
+  StateInfo root_st;
+  StateInfo current_root_st;
+  StateInfo e4_st;
+  root.set(start_fen, false, &root_st);
+  current.set(start_fen, false, &current_root_st);
+  current.do_move(Move(SQ_E2, SQ_E4), e4_st);
+
+  const Position *short_history[] = {&current};
+  const Position *full_history[] = {&root, &current};
+  expect(ComputeNNCacheKey(short_history, 1) !=
+             ComputeNNCacheKey(full_history, 2),
+         "cache key should include encoded history depth and boards", tc);
 }
 
 void test_deterministic_repro(TestCounter &tc) {
@@ -270,6 +308,7 @@ void test_nodes_limit_with_callback(TestCounter &tc) {
   limits.nodes = 16;
 
   bool callback_called = false;
+  int info_lines = 0;
   auto search = CreateSearch(params);
   search->StartSearch(
       "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", limits,
@@ -277,10 +316,11 @@ void test_nodes_limit_with_callback(TestCounter &tc) {
         callback_called = true;
         expect(best != Move::none(), "callback best move should be legal", tc);
       },
-      nullptr);
+      [&](const std::string &) { ++info_lines; });
   search->Wait();
 
   expect(callback_called, "bestmove callback should fire", tc);
+  expect(info_lines > 0, "final MCTS info callback should fire", tc);
   expect(search->Stats().total_nodes.load() >= limits.nodes,
          "MCTS should honor node limit before callback", tc);
 
@@ -300,6 +340,41 @@ void test_nodes_limit_with_callback(TestCounter &tc) {
   expect(callback_called, "async bestmove callback should fire", tc);
   expect(async_search->Stats().total_nodes.load() >= limits.nodes,
          "MCTS should honor node limit with asynchronous waiter", tc);
+}
+
+void test_node_limited_batches_do_not_prefetch(TestCounter &tc) {
+  std::cout << "  Node-limited batch eval budget..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  SearchParams params;
+  params.num_threads = 2;
+  params.minibatch_size = 8;
+  params.max_prefetch = 16;
+  params.nn_weights_path = weights;
+  params.add_dirichlet_noise = false;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 32;
+
+  auto search = CreateSearch(params);
+  search->StartSearch(
+      "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+      limits, nullptr, nullptr);
+  search->Wait();
+
+  const auto &stats = search->Stats();
+  const uint64_t nodes = stats.total_nodes.load();
+  const uint64_t evals = stats.nn_evaluations.load();
+  std::cout << "    Nodes: " << nodes << ", NN evals: " << evals
+            << std::endl;
+  expect(nodes >= limits.nodes, "batched MCTS should honor node limit", tc);
+  expect(evals <= nodes,
+         "node-limited MCTS should not spend NN evals on speculative prefetch",
+         tc);
 }
 
 void test_cache_hit_rate(TestCounter &tc) {
@@ -325,6 +400,9 @@ void test_cache_hit_rate(TestCounter &tc) {
   search->StartSearch(fen, limits, nullptr, nullptr);
   search->Wait();
 
+  search->StartSearch(fen, limits, nullptr, nullptr);
+  search->Wait();
+
   const auto &stats = search->Stats();
   uint64_t hits = stats.cache_hits.load();
   uint64_t misses = stats.cache_misses.load();
@@ -332,7 +410,8 @@ void test_cache_hit_rate(TestCounter &tc) {
   double hit_rate = total_lookups > 0 ? 100.0 * hits / total_lookups : 0.0;
   std::cout << "    Cache hits: " << hits << " / " << total_lookups
             << " lookups (" << hit_rate << "%)" << std::endl;
-  expect(hit_rate > 5.0, "cache hit rate > 5%", tc);
+  expect(hits > 0, "cache should reuse exact NN inputs across searches", tc);
+  expect(hit_rate > 5.0, "exact-input cache hit rate > 5%", tc);
 }
 
 } // namespace
@@ -346,10 +425,12 @@ bool test_mcts_all() {
   test_search_params_defaults(tc);
   test_nn_cache_policy_capacity(tc);
   test_history_buffer_ownership(tc);
+  test_nn_cache_key_tracks_encoded_state(tc);
   test_root_search_smoke(tc);
   test_evaluator_legal_move_view_parity(tc);
   test_deterministic_repro(tc);
   test_nodes_limit_with_callback(tc);
+  test_node_limited_batches_do_not_prefetch(tc);
   test_cache_hit_rate(tc);
 
   std::cout << "  Passed: " << tc.passed << ", Failed: " << tc.failed

@@ -31,30 +31,7 @@ static_assert(alignof(Node) == CACHE_LINE_SIZE, "Node alignment mismatch");
 namespace {
 
 constexpr int kMaxEdges = 256;
-constexpr uint64_t kFNVOffset = 1469598103934665603ULL;
 constexpr uint64_t kFNVPrime = 1099511628211ULL;
-
-inline uint64_t Mix64(uint64_t x) {
-    x ^= x >> 30;
-    x *= 0xbf58476d1ce4e5b9ULL;
-    x ^= x >> 27;
-    x *= 0x94d049bb133111ebULL;
-    x ^= x >> 31;
-    return x;
-}
-
-// Hash only current position (not full history) to enable transposition hits across move orders.
-uint64_t ComputePositionCacheKey(const Position* const* history, int count) {
-    if (count <= 0 || !history[count - 1]) return kFNVOffset;
-    const Position* current = history[count - 1];
-    uint64_t key = kFNVOffset;
-    key ^= Mix64(current->raw_key());
-    key *= kFNVPrime;
-    key ^= Mix64(static_cast<uint64_t>(
-        static_cast<int64_t>(current->repetition_distance())));
-    key *= kFNVPrime;
-    return key;
-}
 
 bool IsInsufficientMaterial(const Position& pos) {
     const int pawns = popcount(pos.pieces(PAWN));
@@ -317,6 +294,9 @@ float ExponentialDecay(float from, float to, float halflife_steps, float steps) 
 } // namespace
 
 void Search::Wait() {
+    const bool had_active_search =
+        running_.load(std::memory_order_acquire) || !workers_.empty();
+
     for (auto& t : workers_) {
         if (t.joinable()) t.join();
     }
@@ -348,6 +328,10 @@ void Search::Wait() {
     }
 
     tmgr_.last_move_final_nodes = static_cast<int64_t>(total_nodes);
+
+    if (had_active_search) {
+        SendInfo();
+    }
 
     auto cb_copy = best_move_cb_;
     best_move_cb_ = nullptr;
@@ -738,51 +722,47 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
     }
 
     if (leaf->NumEdges() == 0 && backend_) {
-        SearchWorkerCtx::HistoryBuffer history;
-        ctx.BuildHistory(history);
-        uint64_t cache_key =
-            ComputePositionCacheKey(history.ptrs, history.depth);
-        auto computation = AcquireComputation();
-        auto add_result = computation->AddInputWithHistory(
-            history.ptrs, history.depth, cache_key, moves.begin(),
-            static_cast<int>(moves.size()));
+        auto apply_nn_result = [&](const EvaluationResult& result) {
+            if (leaf->NumEdges() == 0) {
+                leaf->CreateEdges(moves);
+                ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+                leaf->SortEdges();
+            }
+            if (params_.add_dirichlet_noise && leaf == tree_.Root())
+                AddDirichletNoise(leaf);
+            {
+                WDLRescaler rescaler{params_.wdl_rescale_ratio, params_.wdl_rescale_diff};
+                value = -rescaler.Rescale(result.value);
+            }
+            draw = result.has_wdl ? result.wdl[1] : 0.0f;
+            moves_left_val = result.has_moves_left ? result.moves_left : 30.0f;
+        };
 
-        if (add_result == BackendComputation::CACHE_HIT) {
+        const uint64_t cache_key = ctx.CurrentNNCacheKey();
+        EvaluationResult cached;
+        if (backend_->Cache().Lookup(cache_key, static_cast<int>(moves.size()),
+                                     cached)) {
             ctx.local_cache_hits++;
-            const auto& result = computation->GetResult(0);
-            if (leaf->NumEdges() == 0) {
-                leaf->CreateEdges(moves);
-                ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
-                leaf->SortEdges();
-            }
-            if (params_.add_dirichlet_noise && leaf == tree_.Root())
-                AddDirichletNoise(leaf);
-            {
-                WDLRescaler rescaler{params_.wdl_rescale_ratio, params_.wdl_rescale_diff};
-                value = -rescaler.Rescale(result.value);
-            }
-            draw = result.has_wdl ? result.wdl[1] : 0.0f;
-            moves_left_val = result.has_moves_left ? result.moves_left : 30.0f;
+            apply_nn_result(cached);
         } else {
-            ctx.local_cache_misses++;
-            computation->ComputeBlocking();
-            const auto& result = computation->GetResult(0);
-            if (leaf->NumEdges() == 0) {
-                leaf->CreateEdges(moves);
-                ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
-                leaf->SortEdges();
+            SearchWorkerCtx::HistoryBuffer history;
+            ctx.BuildHistory(history);
+            auto computation = AcquireComputation();
+            auto add_result = computation->AddInputWithHistory(
+                history.ptrs, history.depth, cache_key, moves.begin(),
+                static_cast<int>(moves.size()));
+
+            if (add_result == BackendComputation::CACHE_HIT) {
+                ctx.local_cache_hits++;
+                apply_nn_result(computation->GetResult(0));
+            } else {
+                ctx.local_cache_misses++;
+                computation->ComputeBlocking();
+                apply_nn_result(computation->GetResult(0));
+                stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
             }
-            if (params_.add_dirichlet_noise && leaf == tree_.Root())
-                AddDirichletNoise(leaf);
-            {
-                WDLRescaler rescaler{params_.wdl_rescale_ratio, params_.wdl_rescale_diff};
-                value = -rescaler.Rescale(result.value);
-            }
-            draw = result.has_wdl ? result.wdl[1] : 0.0f;
-            moves_left_val = result.has_moves_left ? result.moves_left : 30.0f;
-            stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
+            ReleaseComputation(std::move(computation));
         }
-        ReleaseComputation(std::move(computation));
     } else if (leaf->NumEdges() > 0 && leaf->GetN() > 0) {
         // Collision: another thread already expanded this node.
         // Use its existing Q instead of backpropagating a fake 0.0 value.
@@ -976,19 +956,34 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
             continue;
         }
 
-        batch_histories.emplace_back();
-        SearchWorkerCtx::HistoryBuffer& hist_buf_sem = batch_histories.back();
-        ctx.BuildHistory(hist_buf_sem);
-        uint64_t cache_key =
-            ComputePositionCacheKey(hist_buf_sem.ptrs, hist_buf_sem.depth);
-        auto add_result = computation->AddInputWithHistory(
-            hist_buf_sem.ptrs, hist_buf_sem.depth, cache_key, moves.begin(),
-            static_cast<int>(moves.size()));
+        const uint64_t cache_key = ctx.CurrentNNCacheKey();
+        EvaluationResult cached;
+        const bool direct_cache_hit = backend_->Cache().Lookup(
+            cache_key, static_cast<int>(moves.size()), cached);
+        BackendComputation::AddInputResult add_result =
+            BackendComputation::CACHE_HIT;
+        int computation_idx = -1;
+        SearchWorkerCtx::HistoryBuffer* hist_buf_ptr = nullptr;
 
-        if (add_result == BackendComputation::CACHE_HIT) {
-            batch_histories.pop_back();
+        if (!direct_cache_hit) {
+            batch_histories.emplace_back();
+            SearchWorkerCtx::HistoryBuffer& hist_buf_sem =
+                batch_histories.back();
+            ctx.BuildHistory(hist_buf_sem);
+            add_result = computation->AddInputWithHistory(
+                hist_buf_sem.ptrs, hist_buf_sem.depth, cache_key, moves.begin(),
+                static_cast<int>(moves.size()));
+            computation_idx = computation->TotalInputs() - 1;
+            hist_buf_ptr = &hist_buf_sem;
+        }
+
+        if (direct_cache_hit || add_result == BackendComputation::CACHE_HIT) {
+            if (!direct_cache_hit)
+                batch_histories.pop_back();
             ctx.local_cache_hits++;
-            const auto& result = computation->GetResult(computation->TotalInputs() - 1);
+            const auto& result = direct_cache_hit
+                                     ? cached
+                                     : computation->GetResult(computation_idx);
             if (leaf->NumEdges() == 0) {
                 leaf->CreateEdges(moves);
                 ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
@@ -1013,9 +1008,9 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
         ctx.local_cache_misses++;
         BatchEntry entry;
         entry.leaf = leaf;
-        entry.history = &hist_buf_sem;
+        entry.history = hist_buf_ptr;
         entry.multivisit = multivisit;
-        entry.computation_idx = computation->TotalInputs() - 1;
+        entry.computation_idx = computation_idx;
         local_batch.push_back(std::move(entry));
         planned_visits += static_cast<uint64_t>(multivisit);
     }
@@ -1030,6 +1025,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
 
     std::deque<SearchWorkerCtx::HistoryBuffer> prefetch_histories;
     MaybePrefetchIntoCache(ctx, computation.get(), prefetch_histories);
+    const int backend_evaluations = computation->UsedBatchSize();
 
     try {
         computation->ComputeBlocking();
@@ -1086,7 +1082,9 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
     }
 
     stats_.total_nodes.fetch_add(total_visits, std::memory_order_relaxed);
-    stats_.nn_evaluations.fetch_add(local_batch.size(), std::memory_order_relaxed);
+    stats_.nn_evaluations.fetch_add(
+        static_cast<uint64_t>(backend_evaluations),
+        std::memory_order_relaxed);
 
     if (computation) ReleaseComputation(std::move(computation));
 }
@@ -1311,6 +1309,9 @@ void Search::MaybePrefetchIntoCache(
     std::deque<SearchWorkerCtx::HistoryBuffer>& prefetch_histories) {
     if (stop_flag_.load(std::memory_order_acquire)) return;
     if (!computation || computation->UsedBatchSize() <= 0) return;
+    // Fixed-node searches benchmark completed visits; speculative evals waste
+    // the node budget and distort NPS.
+    if (limits_.nodes > 0) return;
     if (computation->UsedBatchSize() >= params_.max_prefetch) return;
 
     int budget = params_.max_prefetch - computation->UsedBatchSize();
@@ -1326,12 +1327,17 @@ int Search::PrefetchIntoCache(Node* node, int budget, SearchWorkerCtx& ctx,
     if (budget <= 0 || stop_flag_.load(std::memory_order_acquire)) return 0;
 
     auto prefetch_current_position = [&]() {
+        const uint64_t key = ctx.CurrentNNCacheKey();
+        const Position& pos = ctx.pos;
+        MoveList<LEGAL> moves(pos);
+        EvaluationResult cached;
+        if (backend_->Cache().Lookup(key, static_cast<int>(moves.size()),
+                                     cached))
+            return 0;
+
         prefetch_histories.emplace_back();
         SearchWorkerCtx::HistoryBuffer& history = prefetch_histories.back();
         ctx.BuildHistory(history);
-        uint64_t key = ComputePositionCacheKey(history.ptrs, history.depth);
-        const Position& pos = *history.ptrs[history.depth - 1];
-        MoveList<LEGAL> moves(pos);
         auto add_result = computation->AddInputWithHistory(
             history.ptrs, history.depth, key, moves.begin(),
             static_cast<int>(moves.size()));
@@ -1621,6 +1627,8 @@ void Search::SendInfo() {
 
     uint64_t nn_evals = stats_.nn_evaluations.load(std::memory_order_relaxed);
     uint64_t nodes = stats_.total_nodes.load(std::memory_order_relaxed);
+    uint64_t cache_hits = stats_.cache_hits.load(std::memory_order_relaxed);
+    uint64_t cache_misses = stats_.cache_misses.load(std::memory_order_relaxed);
     uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
 
     float q = GetBestQ();
@@ -1642,7 +1650,9 @@ void Search::SendInfo() {
        << " nps " << nps
        << " time " << elapsed_ms
        << " score cp " << cp
-       << " string nn_evals " << nn_evals;
+       << " string nn_evals " << nn_evals
+       << " cache_hits " << cache_hits
+       << " cache_misses " << cache_misses;
 
     if (!pv.empty()) {
         ss << " pv";

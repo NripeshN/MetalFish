@@ -173,7 +173,9 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSFpuReductionAtRoot", Option("0.33"));
   options.add("MCTSPolicySoftmaxTemp", Option("1.359"));
   options.add("MCTSVirtualLoss", Option(1, 1, 128));
-  options.add("MCTSMinibatchSize", Option(256, 1, 4096));
+  // 0 = auto. On Apple Silicon, smaller batches win at the low MCTS thread
+  // counts used for strength play; explicit values still override this.
+  options.add("MCTSMinibatchSize", Option(0, 0, 4096));
   options.add("MCTSMaxThreads", Option(0, 0, MaxThreads));
   options.add("MCTSMaxOutOfOrderFactor", Option("2.4"));
   options.add("MCTSAddDirichletNoise", Option(false));
@@ -290,8 +292,11 @@ void Engine::resize_threads() {
   threads.set(numaContext.get_numa_config(),
               {options, threads, tt, sharedHists, networks}, updateContext);
 
-  // Reallocate the hash with the new threadpool size
-  set_tt_size(options["Hash"]);
+  // Thread-count changes do not require rebuilding the TT. Preserving it is
+  // important for hybrid search, which temporarily resizes the AB worker pool
+  // around every move. Hash option changes and Clear Hash still reset it.
+  if (!tt.is_allocated())
+    set_tt_size(options["Hash"]);
   threads.ensure_network_replicated();
 }
 

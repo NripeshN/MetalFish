@@ -77,6 +77,7 @@ public:
 
   void resize(size_t mbSize, ThreadPool &threads); // Set TT size
   void clear(ThreadPool &threads); // Re-initialize memory, multithreaded
+  bool is_allocated() const { return table != nullptr; }
   int hashfull(
       int maxAge = 0) const; // Approximate what fraction of entries (permille)
                              // have been written to during this root search

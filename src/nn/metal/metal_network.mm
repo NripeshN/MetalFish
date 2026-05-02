@@ -177,28 +177,21 @@ void MetalNetwork::RunBatch(const std::vector<InputPlanes> &inputs,
   InputsOutputs *io = AcquireIO();
 
   // Pack inputs into mask/value representation.
-  // Optimized: scan float array with early-exit bitboard reconstruction.
+  // Optimized: build the bitboard mask and representative value in one pass.
   for (int b = 0; b < batch; ++b) {
     const int base = b * kInputPlanes;
     for (int p = 0; p < kInputPlanes; ++p) {
       const auto &plane = inputs[b][p];
       uint64_t mask = 0;
       float value = 0.0f;
-      // Most planes are sparse (0/1 from bitboard) or uniform.
-      // Use two-pass: first check if plane is uniform, then scan.
-      const float first_nonzero = [&]() -> float {
-        for (int sq = 0; sq < 64; ++sq) {
-          if (plane[sq] != 0.0f)
-            return plane[sq];
-        }
-        return 0.0f;
-      }();
-      if (first_nonzero != 0.0f) {
-        value = first_nonzero;
-        for (int sq = 0; sq < 64; ++sq) {
-          if (plane[sq] != 0.0f) {
-            mask |= (1ULL << sq);
-          }
+      // Most planes are sparse bitboards or uniform constants; the packed
+      // Metal representation stores one value plus a non-zero square mask.
+      for (int sq = 0; sq < 64; ++sq) {
+        const float v = plane[sq];
+        if (v != 0.0f) {
+          if (mask == 0)
+            value = v;
+          mask |= (1ULL << sq);
         }
       }
       io->input_masks_mem_[base + p] = mask;

@@ -15,6 +15,75 @@
 namespace MetalFish {
 namespace MCTS {
 
+namespace {
+
+constexpr uint64_t kFNVOffset = 1469598103934665603ULL;
+constexpr uint64_t kFNVPrime = 1099511628211ULL;
+
+inline uint64_t Mix64(uint64_t x) {
+  x ^= x >> 30;
+  x *= 0xbf58476d1ce4e5b9ULL;
+  x ^= x >> 27;
+  x *= 0x94d049bb133111ebULL;
+  x ^= x >> 31;
+  return x;
+}
+
+inline void MixInto(uint64_t &key, uint64_t value) {
+  key ^= Mix64(value);
+  key *= kFNVPrime;
+}
+
+inline void MixPositionState(uint64_t &key, int history_index,
+                             uint64_t raw_key, int rule50_count,
+                             int repetition_distance) {
+  MixInto(key, raw_key);
+  MixInto(key,
+          static_cast<uint64_t>(static_cast<uint32_t>(rule50_count)) |
+              (static_cast<uint64_t>(history_index) << 32));
+  MixInto(key,
+          static_cast<uint64_t>(static_cast<int64_t>(repetition_distance)));
+}
+
+} // namespace
+
+uint64_t ComputeNNCacheKey(const Position *const *history, int count) {
+  if (count <= 0 || !history)
+    return kFNVOffset;
+
+  uint64_t key = kFNVOffset;
+  MixInto(key, static_cast<uint64_t>(count));
+  for (int i = 0; i < count; ++i) {
+    const Position *pos = history[i];
+    if (!pos) {
+      MixInto(key, 0x6a09e667f3bcc909ULL ^ static_cast<uint64_t>(i));
+      continue;
+    }
+
+    MixPositionState(key, i, pos->raw_key(), pos->rule50_count(),
+                     pos->repetition_distance());
+  }
+
+  return key;
+}
+
+uint64_t ComputeNNCacheKeyFromState(const uint64_t *raw_keys,
+                                    const int *rule50_counts,
+                                    const int *repetition_distances,
+                                    int count) {
+  if (count <= 0 || !raw_keys || !rule50_counts || !repetition_distances)
+    return kFNVOffset;
+
+  uint64_t key = kFNVOffset;
+  MixInto(key, static_cast<uint64_t>(count));
+  for (int i = 0; i < count; ++i) {
+    MixPositionState(key, i, raw_keys[i], rule50_counts[i],
+                     repetition_distances[i]);
+  }
+
+  return key;
+}
+
 // ============================================================================
 // NNCache
 // ============================================================================

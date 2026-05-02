@@ -72,7 +72,7 @@ struct SearchParams {
     // Threading
     int num_threads = 2;
     int virtual_loss = 1;
-    int minibatch_size = 256;
+    int minibatch_size = 32;
 
     // Time management (Lc0 defaults)
     float slowmover = 2.2f;

@@ -405,6 +405,7 @@ private:
 
   // Coordination
   Move make_final_decision();
+  void refresh_final_state(Move final_move);
   int calculate_time_budget() const;
   bool should_stop() const;
 
