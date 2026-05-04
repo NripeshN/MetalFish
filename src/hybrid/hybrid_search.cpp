@@ -416,6 +416,11 @@ int ParallelHybridSearch::calculate_time_budget() const {
   return std::max(500, static_cast<int>(time_left * 0.76f));
 }
 
+bool HybridShouldContinueMCTSAfterAB(
+    const ::MetalFish::Search::LimitsType &limits) {
+  return limits.movetime > 0 || limits.nodes > 0 || limits.infinite;
+}
+
 bool ParallelHybridSearch::should_stop() const {
   if (stop_flag_.load(std::memory_order_acquire))
     return true;
@@ -473,11 +478,8 @@ void ParallelHybridSearch::mcts_thread_main() {
     mcts_done = true;
   };
 
-  // Start MCTS search with FEN string.
-  // Note: don't call start_search() which internally does stop()+wait() --
-  // that would block if the previous eval thread is in a GPU call.
-  // Instead, the hybrid's own start_search() already stopped everything.
-  mcts_search_->Stop();
+  // Start MCTS search with FEN string. Search::StartSearch owns stopping and
+  // joining any previous workers; avoid setting its stop flag separately here.
   mcts_search_->StartSearch(root_fen_, mcts_limits, mcts_callback, nullptr);
 
   // Periodically update shared state and check for AB policy updates
@@ -509,7 +511,11 @@ void ParallelHybridSearch::mcts_thread_main() {
     }
   }
 
-  // Wait for MCTS to finish
+  // Stop and wait for MCTS to finish. The search was launched with an infinite
+  // limit because the hybrid coordinator owns the outer budget.
+  if (!mcts_done) {
+    mcts_search_->Stop();
+  }
   mcts_search_->Wait();
 
   // Final state update
@@ -749,9 +755,13 @@ void ParallelHybridSearch::coordinator_thread_main() {
     bool ab_done = !ab_state_.ab_running.load(std::memory_order_acquire);
     bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
 
-    // AB finished — it used its own time manager to decide. Stop everything.
+    // AB finished. For clock-managed games AB owns the move allocation, but
+    // explicit analysis budgets should still give MCTS the requested time or
+    // node budget instead of collapsing to AB-only search.
     if (ab_done && ab_state_.has_result.load(std::memory_order_acquire)) {
-      break;
+      if (!HybridShouldContinueMCTSAfterAB(limits_) || mcts_done) {
+        break;
+      }
     }
 
     auto elapsed = std::chrono::steady_clock::now() - start;

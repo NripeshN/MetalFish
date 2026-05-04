@@ -332,6 +332,33 @@ void test_position() {
     EXPECT(tc, pos.pawn_key() != 0);
     EXPECT(tc, pos.material_key() != 0);
   }
+  {
+    TestCase tc("Position snapshot copy");
+    std::deque<StateInfo> states(8);
+    Position pos;
+    pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+            &states[0]);
+    pos.do_move(Move(SQ_E2, SQ_E4), states[1]);
+    pos.do_move(Move(SQ_C7, SQ_C5), states[2]);
+    pos.do_move(Move(SQ_G1, SQ_F3), states[3]);
+
+    StateInfo copy_st;
+    Position copy;
+    copy.copy_from(pos, &copy_st);
+
+    EXPECT(tc, copy.fen() == pos.fen());
+    EXPECT(tc, copy.key() == pos.key());
+    EXPECT(tc, copy.raw_key() == pos.raw_key());
+    EXPECT(tc, copy.rule50_count() == pos.rule50_count());
+    EXPECT(tc, copy.repetition_distance() == pos.repetition_distance());
+    EXPECT(tc, MoveList<LEGAL>(copy).size() == MoveList<LEGAL>(pos).size());
+
+    StateInfo next_st;
+    Move d7d6(SQ_D7, SQ_D6);
+    copy.do_move(d7d6, next_st);
+    copy.undo_move(d7d6);
+    EXPECT(tc, copy.key() == pos.key());
+  }
 }
 
 // ============================================================================

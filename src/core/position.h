@@ -73,6 +73,7 @@ public:
   // FEN string input/output
   Position &set(const std::string &fenStr, bool isChess960, StateInfo *si);
   Position &set(const std::string &code, Color c, StateInfo *si);
+  void copy_from(const Position &src, StateInfo *si);
   std::string fen() const;
 
   // Position representation

@@ -428,5 +428,10 @@ std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
     GPU::GPUNNUEManager *gpu_manager, Engine *engine,
     const ParallelHybridConfig &config = ParallelHybridConfig());
 
+// Returns true when the coordinator, not AB's time manager, owns the outer
+// search budget and should keep MCTS running after AB has produced a result.
+bool HybridShouldContinueMCTSAfterAB(
+    const ::MetalFish::Search::LimitsType &limits);
+
 } // namespace MCTS
 } // namespace MetalFish

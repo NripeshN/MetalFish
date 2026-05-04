@@ -253,6 +253,32 @@ void test_hybrid_config() {
     EXPECT(tc, config.gpu_batch_size > 0);
     EXPECT(tc, config.gpu_batch_timeout_us > 0);
   }
+  {
+    TestCase tc("Coordinator explicit budgets keep MCTS alive");
+    ::MetalFish::Search::LimitsType limits;
+
+    limits.movetime = 1000;
+    EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
+
+    limits.movetime = 0;
+    limits.nodes = 1024;
+    EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
+
+    limits.nodes = 0;
+    limits.infinite = 1;
+    EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
+
+    limits.infinite = 0;
+    limits.depth = 8;
+    EXPECT(tc, !HybridShouldContinueMCTSAfterAB(limits));
+
+    limits.time[WHITE] = 30000;
+    limits.inc[WHITE] = 1000;
+    EXPECT(tc, !HybridShouldContinueMCTSAfterAB(limits));
+
+    limits.movetime = 1000;
+    EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
+  }
 }
 
 // ============================================================================

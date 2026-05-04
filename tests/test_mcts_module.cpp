@@ -187,6 +187,64 @@ void test_history_buffer_ownership(TestCounter &tc) {
   }
 }
 
+void test_history_buffer_tail_replay(TestCounter &tc) {
+  std::cout << "  History buffer tail replay..." << std::endl;
+
+  const std::string fen =
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  const std::vector<Move> line = {
+      Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5), Move(SQ_G1, SQ_F3),
+      Move(SQ_B8, SQ_C6), Move(SQ_F1, SQ_C4), Move(SQ_G8, SQ_F6),
+      Move(SQ_D2, SQ_D3), Move(SQ_F8, SQ_C5), Move(SQ_C2, SQ_C3),
+      Move(SQ_D7, SQ_D6), Move(SQ_B1, SQ_D2), Move(SQ_A7, SQ_A6),
+  };
+
+  SearchWorkerCtx ctx;
+  ctx.SetRootFen(fen);
+  for (Move move : line) {
+    ctx.DoMove(move);
+  }
+
+  const Key leaf_key = ctx.pos.raw_key();
+  const uint64_t leaf_cache_key = ctx.CurrentNNCacheKey();
+
+  SearchWorkerCtx::HistoryBuffer history;
+  ctx.BuildHistory(history);
+
+  expect(ctx.pos.raw_key() == leaf_key,
+         "history build should restore leaf position", tc);
+  expect(ctx.CurrentNNCacheKey() == leaf_cache_key,
+         "history build should restore incremental cache state", tc);
+  expect(history.depth == SearchWorkerCtx::HistoryBuffer::kMaxHistory,
+         "long paths should keep exactly the NN history tail", tc);
+  expect(ctx.CurrentNNCacheKey() ==
+             ComputeNNCacheKey(history.ptrs, history.depth),
+         "tail history should match incremental cache key", tc);
+
+  std::deque<StateInfo> replay_states(line.size() + 1);
+  Position replay;
+  replay.set(fen, false, &replay_states[0]);
+  const int start_ply =
+      static_cast<int>(line.size()) -
+      (SearchWorkerCtx::HistoryBuffer::kMaxHistory - 1);
+
+  int history_idx = 0;
+  for (int ply = 0; ply <= static_cast<int>(line.size()); ++ply) {
+    if (ply >= start_ply) {
+      expect(history.ptrs[history_idx]->raw_key() == replay.raw_key(),
+             "tail history position should match replayed line", tc);
+      expect(history.ptrs[history_idx]->rule50_count() ==
+                 replay.rule50_count(),
+             "tail history rule50 should match replayed line", tc);
+      ++history_idx;
+    }
+
+    if (ply < static_cast<int>(line.size())) {
+      replay.do_move(line[ply], replay_states[ply + 1]);
+    }
+  }
+}
+
 void test_nn_cache_key_tracks_encoded_state(TestCounter &tc) {
   std::cout << "  NN cache key encoded state..." << std::endl;
 
@@ -425,6 +483,7 @@ bool test_mcts_all() {
   test_search_params_defaults(tc);
   test_nn_cache_policy_capacity(tc);
   test_history_buffer_ownership(tc);
+  test_history_buffer_tail_replay(tc);
   test_nn_cache_key_tracks_encoded_state(tc);
   test_root_search_smoke(tc);
   test_evaluator_legal_move_view_parity(tc);

@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -39,7 +40,7 @@ public:
   std::string GetNetworkInfo() const override;
 
 private:
-  void RunBatch(const std::vector<InputPlanes> &inputs,
+  void RunBatch(std::span<const InputPlanes> inputs,
                 std::vector<NetworkOutput> &outputs);
 
   // Buffer pool to avoid per-inference heap allocations.

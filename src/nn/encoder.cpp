@@ -187,6 +187,16 @@ void FillPlaneFromBitboard(std::array<float, 64> &plane, uint64_t bitboard) {
   }
 }
 
+// EncodePositionForNN zeroes the full tensor up front, so hot-path piece
+// planes only need their occupied squares set.
+void SetBitsInZeroedPlane(std::array<float, 64> &plane, uint64_t bitboard) {
+  while (bitboard) {
+    const int sq = GetLowestBit(bitboard);
+    plane[sq] = 1.0f;
+    bitboard &= bitboard - 1;
+  }
+}
+
 // Set all values in a plane
 void SetPlane(std::array<float, 64> &plane, float value) {
   plane.fill(value);
@@ -222,9 +232,35 @@ bool IsCanonicalArmageddonFormat(
 }
 
 bool IsStartPosition(const Position &pos) {
-  static const std::string kStartFen =
-      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-  return pos.fen() == kStartFen;
+  constexpr Bitboard kWhitePawns = 0x000000000000FF00ULL;
+  constexpr Bitboard kBlackPawns = 0x00FF000000000000ULL;
+  constexpr Bitboard kWhiteKnights = 0x0000000000000042ULL;
+  constexpr Bitboard kBlackKnights = 0x4200000000000000ULL;
+  constexpr Bitboard kWhiteBishops = 0x0000000000000024ULL;
+  constexpr Bitboard kBlackBishops = 0x2400000000000000ULL;
+  constexpr Bitboard kWhiteRooks = 0x0000000000000081ULL;
+  constexpr Bitboard kBlackRooks = 0x8100000000000000ULL;
+  constexpr Bitboard kWhiteQueen = 0x0000000000000008ULL;
+  constexpr Bitboard kBlackQueen = 0x0800000000000000ULL;
+  constexpr Bitboard kWhiteKing = 0x0000000000000010ULL;
+  constexpr Bitboard kBlackKing = 0x1000000000000000ULL;
+
+  return pos.side_to_move() == WHITE && pos.game_ply() == 0 &&
+         pos.rule50_count() == 0 && pos.ep_square() == SQ_NONE &&
+         pos.can_castle(WHITE_OO) && pos.can_castle(WHITE_OOO) &&
+         pos.can_castle(BLACK_OO) && pos.can_castle(BLACK_OOO) &&
+         pos.pieces(WHITE, PAWN) == kWhitePawns &&
+         pos.pieces(BLACK, PAWN) == kBlackPawns &&
+         pos.pieces(WHITE, KNIGHT) == kWhiteKnights &&
+         pos.pieces(BLACK, KNIGHT) == kBlackKnights &&
+         pos.pieces(WHITE, BISHOP) == kWhiteBishops &&
+         pos.pieces(BLACK, BISHOP) == kBlackBishops &&
+         pos.pieces(WHITE, ROOK) == kWhiteRooks &&
+         pos.pieces(BLACK, ROOK) == kBlackRooks &&
+         pos.pieces(WHITE, QUEEN) == kWhiteQueen &&
+         pos.pieces(BLACK, QUEEN) == kBlackQueen &&
+         pos.pieces(WHITE, KING) == kWhiteKing &&
+         pos.pieces(BLACK, KING) == kBlackKing;
 }
 
 int TransformForPosition(MetalFishNN::NetworkFormat::InputFormat input_format,
@@ -449,10 +485,10 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
     }
 
     for (int piece = 0; piece < 6; ++piece) {
-      FillPlaneFromBitboard(result[base + piece], our_pieces[piece]);
+      SetBitsInZeroedPlane(result[base + piece], our_pieces[piece]);
     }
     for (int piece = 0; piece < 6; ++piece) {
-      FillPlaneFromBitboard(result[base + 6 + piece], their_pieces[piece]);
+      SetBitsInZeroedPlane(result[base + 6 + piece], their_pieces[piece]);
     }
 
     // Repetition flag for this specific history position.

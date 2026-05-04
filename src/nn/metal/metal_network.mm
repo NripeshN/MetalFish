@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 
@@ -40,6 +41,33 @@ ActivationToString(MetalFishNN::NetworkFormat_ActivationFunction act) {
     return "sigmoid";
   default:
     return "relu";
+  }
+}
+
+inline bool IsSchemaUniformPlane(int plane) {
+  return (plane < kAuxPlaneBase &&
+          plane % kPlanesPerBoard == kPlanesPerBoard - 1) ||
+         plane == kAuxPlaneBase + 2 || plane == kAuxPlaneBase + 3 ||
+         plane >= kAuxPlaneBase + 5;
+}
+
+inline void PackInputPlane(const InputPlanes::value_type &plane, int plane_idx,
+                           uint64_t &mask, float &value) {
+  if (IsSchemaUniformPlane(plane_idx)) {
+    value = plane[0];
+    mask = value != 0.0f ? ~0ULL : 0ULL;
+    return;
+  }
+
+  mask = 0;
+  value = 0.0f;
+  for (int sq = 0; sq < 64; ++sq) {
+    const float v = plane[sq];
+    if (v != 0.0f) {
+      if (mask == 0)
+        value = v;
+      mask |= (1ULL << sq);
+    }
   }
 }
 
@@ -155,7 +183,8 @@ void MetalNetwork::ReleaseIO(InputsOutputs *io) {
 // ---- Inference entry points ----
 
 NetworkOutput MetalNetwork::Evaluate(const InputPlanes &input) {
-  auto outputs = EvaluateBatch({input});
+  std::vector<NetworkOutput> outputs(1);
+  RunBatch(std::span<const InputPlanes>(&input, 1), outputs);
   return outputs.front();
 }
 
@@ -166,7 +195,7 @@ MetalNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
   return outputs;
 }
 
-void MetalNetwork::RunBatch(const std::vector<InputPlanes> &inputs,
+void MetalNetwork::RunBatch(std::span<const InputPlanes> inputs,
                             std::vector<NetworkOutput> &outputs) {
   const int batch = static_cast<int>(inputs.size());
   if (batch > max_batch_size_) {
@@ -177,23 +206,15 @@ void MetalNetwork::RunBatch(const std::vector<InputPlanes> &inputs,
   InputsOutputs *io = AcquireIO();
 
   // Pack inputs into mask/value representation.
-  // Optimized: build the bitboard mask and representative value in one pass.
+  // Optimized: known uniform planes can be represented without scanning 64
+  // floats. This is hot in MCTS/Hybrid because every transformer request is
+  // repacked into Metal's mask/value layout.
   for (int b = 0; b < batch; ++b) {
     const int base = b * kInputPlanes;
     for (int p = 0; p < kInputPlanes; ++p) {
-      const auto &plane = inputs[b][p];
-      uint64_t mask = 0;
-      float value = 0.0f;
-      // Most planes are sparse bitboards or uniform constants; the packed
-      // Metal representation stores one value plus a non-zero square mask.
-      for (int sq = 0; sq < 64; ++sq) {
-        const float v = plane[sq];
-        if (v != 0.0f) {
-          if (mask == 0)
-            value = v;
-          mask |= (1ULL << sq);
-        }
-      }
+      uint64_t mask;
+      float value;
+      PackInputPlane(inputs[b][p], p, mask, value);
       io->input_masks_mem_[base + p] = mask;
       io->input_val_mem_[base + p] = value;
     }

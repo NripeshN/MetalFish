@@ -50,6 +50,32 @@ static constexpr Piece Pieces[] = {W_PAWN,   W_KNIGHT, W_BISHOP, W_ROOK,
                                    B_BISHOP, B_ROOK,   B_QUEEN,  B_KING};
 } // namespace
 
+void Position::copy_from(const Position &src, StateInfo *si) {
+  assert(si);
+
+  board = src.board;
+  byTypeBB = src.byTypeBB;
+  byColorBB = src.byColorBB;
+
+  std::copy(src.pieceCount, src.pieceCount + PIECE_NB, pieceCount);
+  std::copy(src.castlingRightsMask, src.castlingRightsMask + SQUARE_NB,
+            castlingRightsMask);
+  std::copy(src.castlingRookSquare,
+            src.castlingRookSquare + CASTLING_RIGHT_NB, castlingRookSquare);
+  std::copy(src.castlingPath, src.castlingPath + CASTLING_RIGHT_NB,
+            castlingPath);
+
+  *si = *src.st;
+  si->previous = nullptr;
+  st = si;
+
+  gamePly = src.gamePly;
+  sideToMove = src.sideToMove;
+  chess960 = src.chess960;
+
+  assert(pos_is_ok());
+}
+
 // Returns an ASCII representation of the position
 std::ostream &operator<<(std::ostream &os, const Position &pos) {
 
