@@ -53,10 +53,6 @@ namespace MCTS {
 
 class SharedTTReader;
 
-// ============================================================================
-// Search statistics exposed to UCI layer
-// ============================================================================
-
 struct PipelineStats {
     std::atomic<uint64_t> total_nodes{0};
     std::atomic<uint64_t> nn_evaluations{0};
@@ -70,10 +66,6 @@ struct PipelineStats {
         cache_misses.store(0, std::memory_order_relaxed);
     }
 };
-
-// ============================================================================
-// Worker context - thread-local state for each search thread
-// ============================================================================
 
 struct SearchWorkerCtx {
     int worker_id = 0;
@@ -151,10 +143,8 @@ struct SearchWorkerCtx {
         repetition_stack.pop_back();
     }
 
-    // Build position history (last 8 positions) for NN encoding.
-    // Reconstructs intermediate positions from the move path.
-    // Position objects hold raw StateInfo pointers, so HistoryBuffer must not
-    // be moved after it is populated.
+    // Position history (last 8 positions) for NN encoding.
+    // HistoryBuffer must not be moved after population (raw StateInfo pointers).
     struct HistoryBuffer {
         static constexpr int kMaxHistory = 8;
         static constexpr int kInlineStateCapacity = 128;
@@ -253,10 +243,6 @@ struct SearchWorkerCtx {
                                           depth);
     }
 };
-
-// ============================================================================
-// MCTS Search Engine
-// ============================================================================
 
 class Search {
 public:
@@ -366,7 +352,7 @@ private:
 
     std::unique_ptr<KLDGainStopper> kld_stopper_;
 
-    // Smart pruning: track when the first NN eval arrives
+    // Track when the first NN eval arrives for smart pruning
     mutable int64_t first_eval_time_ms_ = -1;
 
     // Lc0-style smooth time management (persistent across searches)
@@ -386,7 +372,7 @@ private:
     SharedTTReader* shared_tt_ = nullptr;
 };
 
-// Factory function matching the old create_thread_safe_mcts pattern
+// Factory function
 std::unique_ptr<Search> CreateSearch(const SearchParams& config);
 
 } // namespace MCTS

@@ -66,7 +66,6 @@ public:
                             NN::FillEmptyHistory::FEN_ONLY, planes,
                             &transform);
 
-    // 2. Run neural network
     auto output = network_->Evaluate(planes);
 
     return BuildResult(output, pos, transform, nullptr);
@@ -91,7 +90,6 @@ public:
 
   std::vector<EvaluationResult> EvaluateBatch(const Position *const *positions,
                                               size_t count) {
-    // Batch encoding
     std::vector<NN::InputPlanes> planes_batch(count);
     std::vector<int> transforms(count);
 
@@ -103,10 +101,8 @@ public:
                               planes_batch[idx], &transforms[idx]);
     }
 
-    // Batch inference
     auto outputs = network_->EvaluateBatch(planes_batch);
 
-    // Convert to results
     std::vector<EvaluationResult> results;
     results.reserve(outputs.size());
 

@@ -37,14 +37,7 @@
 
 namespace MetalFish::GPU {
 
-// ============================================================================
-// ============================================================================
-// GPUPositionData Implementation
-// ============================================================================
-
 void GPUPositionData::from_position(const Position &pos) {
-  // Direct assignment instead of memset+copy (faster for small struct)
-  // Copy piece bitboards - unrolled for better performance
   pieces[0][0] = pos.pieces(WHITE, NO_PIECE_TYPE);
   pieces[0][1] = pos.pieces(WHITE, PAWN);
   pieces[0][2] = pos.pieces(WHITE, KNIGHT);
@@ -67,10 +60,6 @@ void GPUPositionData::from_position(const Position &pos) {
   piece_count = pos.count<ALL_PIECES>();
   padding[0] = padding[1] = padding[2] = padding[3] = 0;
 }
-
-// ============================================================================
-// GPUNetworkData Implementation
-// ============================================================================
 
 size_t GPUNetworkData::memory_usage() const {
   size_t total = 0;
@@ -103,10 +92,6 @@ size_t GPUNetworkData::memory_usage() const {
   return total;
 }
 
-// ============================================================================
-// GPUEvalBatch Implementation
-// ============================================================================
-
 void GPUEvalBatch::clear() {
   positions.clear();
   white_features.clear();
@@ -135,7 +120,6 @@ void GPUEvalBatch::add_position(const Position &pos) {
   data.from_position(pos);
   positions.push_back(data);
 
-  // Calculate bucket based on piece count (8 buckets, 4 pieces per bucket)
   int bucket = (pos.count<ALL_PIECES>() - 1) / 4;
   bucket = std::clamp(bucket, 0, GPU_LAYER_STACKS - 1);
   buckets.push_back(bucket);
@@ -147,7 +131,6 @@ void GPUEvalBatch::add_position(const Position &pos) {
 void GPUEvalBatch::add_position_data(const GPUPositionData &data) {
   positions.push_back(data);
 
-  // Calculate bucket based on piece count (8 buckets, 4 pieces per bucket)
   int bucket = (data.piece_count - 1) / 4;
   bucket = std::clamp(bucket, 0, GPU_LAYER_STACKS - 1);
   buckets.push_back(bucket);
@@ -155,15 +138,6 @@ void GPUEvalBatch::add_position_data(const GPUPositionData &data) {
   feature_offsets.push_back(white_features.size());
   count++;
 }
-
-// ============================================================================
-// Metal Shader Source
-//
-// Contains GPU compute kernels for NNUE evaluation:
-// - Feature transform: Converts sparse features to dense accumulators
-// - Forward pass: Evaluates the neural network layers
-// - PSQT accumulation: Computes piece-square table scores
-// ============================================================================
 
 static const char *GPU_NNUE_SHADER_SOURCE = R"(
 #include <metal_stdlib>
@@ -1155,10 +1129,6 @@ kernel void gpu_nnue_forward_batch(
 }
 )";
 
-// ============================================================================
-// GPUNNUEManager Implementation
-// ============================================================================
-
 GPUNNUEManager::GPUNNUEManager() = default;
 GPUNNUEManager::~GPUNNUEManager() = default;
 
@@ -1203,7 +1173,6 @@ bool GPUNNUEManager::compile_shaders() {
   psqt_kernel_ =
       backend.create_kernel("gpu_psqt_accumulate", "gpu_nnue_integration");
 
-  // Optional kernels for adaptive strategy selection
   forward_simd_kernel_ =
       backend.create_kernel("gpu_nnue_forward_simd", "gpu_nnue_integration");
   feature_transform_dual_kernel_ = backend.create_kernel(
@@ -1213,7 +1182,6 @@ bool GPUNNUEManager::compile_shaders() {
   forward_batch_kernel_ =
       backend.create_kernel("gpu_nnue_forward_batch", "gpu_nnue_integration");
 
-  // New optimized kernels
   feature_transform_vec4_kernel_ = backend.create_kernel(
       "gpu_feature_transform_vec4", "gpu_nnue_integration");
   feature_transform_dual_vec4_kernel_ = backend.create_kernel(
@@ -1223,7 +1191,6 @@ bool GPUNNUEManager::compile_shaders() {
   fused_single_kernel_ =
       backend.create_kernel("gpu_nnue_fused_single", "gpu_nnue_integration");
 
-  // Verify required kernels
   if (!feature_transform_kernel_ || !feature_transform_kernel_->valid()) {
     std::cerr << "[GPU NNUE] Failed to create feature_transform kernel"
               << std::endl;
@@ -1240,7 +1207,6 @@ bool GPUNNUEManager::compile_shaders() {
     return false;
   }
 
-  // Log available optional kernels
   if (forward_simd_kernel_ && forward_simd_kernel_->valid()) {
     std::cerr << "[GPU NNUE] SIMD forward kernel available" << std::endl;
   }
@@ -1276,9 +1242,7 @@ bool GPUNNUEManager::compile_shaders() {
               << std::endl;
   }
 
-  // Load incremental update kernels from Metal shader file
-  // These are compiled from nnue.metal, not from the inline shader source
-  // For now, we'll use the inline shader versions
+  // Incremental update kernels are compiled from nnue.metal, not inline source
 
   std::cerr << "[GPU NNUE] Shaders compiled successfully" << std::endl;
   return true;
@@ -1292,48 +1256,39 @@ bool GPUNNUEManager::allocate_working_buffers() {
       max_positions * GPU_MAX_FEATURES_PER_PERSPECTIVE;
   const size_t max_hidden = GPU_FT_DIM_BIG;
 
-  // Position data buffer
   positions_buffer_ =
       backend.create_buffer(max_positions * sizeof(GPUPositionData));
 
-  // Feature buffers (separate for white and black)
   white_features_buffer_ =
       backend.create_buffer(max_features_per_perspective * sizeof(int32_t));
   black_features_buffer_ =
       backend.create_buffer(max_features_per_perspective * sizeof(int32_t));
 
-  // Counts buffers (separate for dual-perspective kernel)
   white_counts_buffer_ =
       backend.create_buffer(max_positions * sizeof(uint32_t));
   black_counts_buffer_ =
       backend.create_buffer(max_positions * sizeof(uint32_t));
 
-  // Offsets buffers (separate for dual-perspective kernel)
   white_offsets_buffer_ =
       backend.create_buffer(max_positions * sizeof(uint32_t));
   black_offsets_buffer_ =
       backend.create_buffer(max_positions * sizeof(uint32_t));
 
-  // Legacy interleaved buffers (for backward compatibility)
   feature_counts_buffer_ =
       backend.create_buffer(max_positions * 2 * sizeof(uint32_t));
   feature_offsets_buffer_ =
       backend.create_buffer(max_positions * 2 * sizeof(uint32_t));
 
-  // Accumulators: [batch][2 perspectives][hidden_dim]
   accumulators_buffer_ =
       backend.create_buffer(max_positions * 2 * max_hidden * sizeof(int32_t));
   psqt_buffer_ =
       backend.create_buffer(max_positions * GPU_PSQT_BUCKETS * sizeof(int32_t));
   output_buffer_ = backend.create_buffer(max_positions * sizeof(int32_t));
 
-  // Incremental update buffers
-  // Max 4 features added/removed per move
   added_features_buffer_ = backend.create_buffer(4 * sizeof(int32_t));
   removed_features_buffer_ = backend.create_buffer(4 * sizeof(int32_t));
   update_counts_buffer_ = backend.create_buffer(4 * sizeof(uint32_t));
 
-  // Finny table buffers: [64 squares][hidden_dim] per perspective
   finny_accumulators_buffer_[0] =
       backend.create_buffer(64 * max_hidden * sizeof(int32_t));
   finny_accumulators_buffer_[1] =
@@ -1343,7 +1298,6 @@ bool GPUNNUEManager::allocate_working_buffers() {
   finny_psqt_buffer_[1] =
       backend.create_buffer(64 * GPU_PSQT_BUCKETS * sizeof(int32_t));
 
-  // Sparse input bitmask buffer
   nnz_masks_buffer_ =
       backend.create_buffer(max_positions * 2 * sizeof(uint64_t));
 
@@ -1368,7 +1322,6 @@ bool GPUNNUEManager::allocate_network_buffers(GPUNetworkData &net,
   net.hidden_dim = hidden_dim;
   net.has_threats = has_threats;
 
-  // Feature transformer
   net.ft_weights =
       backend.create_buffer(GPU_HALFKA_DIMS * hidden_dim * sizeof(int16_t));
   net.ft_biases = backend.create_buffer(hidden_dim * sizeof(int16_t));
@@ -1389,7 +1342,6 @@ bool GPUNNUEManager::allocate_network_buffers(GPUNetworkData &net,
     }
   }
 
-  // FC layers for each bucket
   for (int b = 0; b < GPU_LAYER_STACKS; b++) {
     auto &layer = net.layers[b];
 
@@ -1419,7 +1371,6 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
 
   std::cerr << "[GPU NNUE] Loading networks..." << std::endl;
 
-  // Extract and print network info
   auto big_info = get_network_info<Eval::NNUE::NetworkBig>();
   auto small_info = get_network_info<Eval::NNUE::NetworkSmall>();
 
@@ -1432,27 +1383,23 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
                    1024
             << " KB" << std::endl;
 
-  // Allocate big network buffers
   if (!allocate_network_buffers(big_network_, GPU_FT_DIM_BIG, true)) {
     std::cerr << "[GPU NNUE] Failed to allocate big network buffers"
               << std::endl;
     return false;
   }
 
-  // Allocate small network buffers
   if (!allocate_network_buffers(small_network_, GPU_FT_DIM_SMALL, false)) {
     std::cerr << "[GPU NNUE] Failed to allocate small network buffers"
               << std::endl;
     return false;
   }
 
-  // Extract and upload big network weights
   auto big_weights =
       GPUNNUEWeightExtractor<Eval::NNUE::NetworkBig>::extract(networks.big);
   if (big_weights.valid) {
     std::cerr << "[GPU NNUE] Uploading big network weights..." << std::endl;
 
-    // Upload feature transformer
     if (big_weights.ft.biases && big_network_.ft_biases) {
       std::memcpy(
           big_network_.ft_biases->data(), big_weights.ft.biases,
@@ -1469,7 +1416,6 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
           std::min(big_weights.ft.psqt_size, big_network_.ft_psqt->size()));
     }
 
-    // Upload layer weights
     for (int b = 0; b < GPU_LAYER_STACKS; b++) {
       const auto &src = big_weights.layers[b];
       auto &dst = big_network_.layers[b];
@@ -1502,13 +1448,11 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
     std::cerr << "[GPU NNUE] Big network weights uploaded" << std::endl;
   }
 
-  // Extract and upload small network weights
   auto small_weights =
       GPUNNUEWeightExtractor<Eval::NNUE::NetworkSmall>::extract(networks.small);
   if (small_weights.valid) {
     std::cerr << "[GPU NNUE] Uploading small network weights..." << std::endl;
 
-    // Upload feature transformer
     if (small_weights.ft.biases && small_network_.ft_biases) {
       std::memcpy(small_network_.ft_biases->data(), small_weights.ft.biases,
                   std::min(small_weights.ft.biases_size,
@@ -1525,7 +1469,6 @@ bool GPUNNUEManager::load_networks(const Eval::NNUE::Networks &networks) {
           std::min(small_weights.ft.psqt_size, small_network_.ft_psqt->size()));
     }
 
-    // Upload layer weights
     for (int b = 0; b < GPU_LAYER_STACKS; b++) {
       const auto &src = small_weights.layers[b];
       auto &dst = small_network_.layers[b];
@@ -1570,7 +1513,6 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
     return false;
   }
 
-  // Select evaluation strategy based on batch size
   // If force_gpu is true, skip the CPU fallback threshold check
   EvalStrategy strategy = tuning_.select_strategy(batch.count);
 
@@ -1579,11 +1521,9 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
     return false;
   }
 
-  // Lock for thread-safe GPU access
   std::lock_guard<std::mutex> lock(gpu_mutex_);
 
   auto start = std::chrono::high_resolution_clock::now();
-
   auto &backend = gpu();
   const GPUNetworkData &net = use_big_network ? big_network_ : small_network_;
 
@@ -1595,8 +1535,6 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
   const int batch_size = batch.count;
   const int hidden_dim = net.hidden_dim;
 
-  // Use pre-allocated buffer pointers for direct writes (avoid std::vector
-  // allocations)
   int32_t *white_features_ptr =
       static_cast<int32_t *>(white_features_buffer_->data());
   int32_t *black_features_ptr =
@@ -1611,8 +1549,6 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
       static_cast<uint32_t *>(black_offsets_buffer_->data());
 
   // Extract features directly into GPU buffers (zero-copy on unified memory)
-  // Optimized: removed redundant bounds checks since feature indices are
-  // mathematically guaranteed to be in range for valid chess positions
   size_t white_feature_idx = 0;
   size_t black_feature_idx = 0;
 
@@ -1629,7 +1565,6 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
     int black_count = 0;
 
     // Extract HalfKA features from piece bitboards
-    // Unrolled color loop for better branch prediction
     for (int pt = PAWN; pt <= QUEEN; pt++) {
       const int pt_offset = (pt - 1) * 64;
 
@@ -1661,26 +1596,15 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
     black_counts_ptr[i] = static_cast<uint32_t>(black_count);
   }
 
-  // Note: positions_buffer_ upload removed - feature extraction is done on CPU
-  // and features are written directly to GPU buffers via unified memory
-
-  // Create command encoder - use parallel encoder for better queue distribution
-  // This reduces contention when multiple batches are submitted in quick
-  // succession
   auto encoder = backend.create_parallel_encoder();
 
-  // Select optimal kernel based on batch size and available kernels
-  // Testing showed that the fused kernel uses too much threadgroup memory
-  // and reduces GPU occupancy, making it slower than separate dispatches
-  // Always use dual-perspective kernel since it processes both perspectives
-  const bool use_fused_kernel =
-      false; // Disabled - slower than separate kernels
+  // Testing showed fused kernel uses too much threadgroup memory, reducing occupancy
+  const bool use_fused_kernel = false;
   const bool use_dual_kernel =
       feature_transform_dual_kernel_ && feature_transform_dual_kernel_->valid();
 
   if (use_fused_kernel) {
     // Fused kernel: feature transform + forward pass in single dispatch
-    // Eliminates inter-kernel barrier overhead for small batches
     const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
     const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
 
@@ -1702,7 +1626,6 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
     encoder->set_buffer(output_buffer_.get(), 14);
     encoder->set_value(static_cast<uint32_t>(hidden_dim), 15);
     encoder->set_value(static_cast<uint32_t>(batch_size), 16);
-    // Use 256 threads per threadgroup for optimal parallelism
     encoder->dispatch_threadgroups(batch_size, 1, 1, 256, 1, 1);
   } else if (use_dual_kernel) {
     encoder->set_kernel(feature_transform_dual_kernel_.get());
@@ -1717,13 +1640,10 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
     encoder->set_buffer(accumulators_buffer_.get(), 8);
     encoder->set_value(static_cast<uint32_t>(hidden_dim), 9);
     encoder->set_value(static_cast<uint32_t>(batch_size), 10);
-    // 3D dispatch: (hidden_dim, 2 perspectives, batch_size)
     encoder->dispatch_threads(hidden_dim, 2, batch_size);
-    // Barrier required for untracked hazard mode - ensures feature transform
-    // completes before forward pass reads accumulators
+    // Barrier ensures feature transform completes before forward pass
     encoder->barrier();
   } else {
-    // Single-perspective kernel: faster for small batches
     encoder->set_kernel(feature_transform_kernel_.get());
     encoder->set_buffer(net.ft_weights.get(), 0);
     encoder->set_buffer(net.ft_biases.get(), 1);
@@ -1737,16 +1657,11 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
     encoder->barrier();
   }
 
-  // Select correct bucket layer based on position piece counts
-  // For simplicity, use bucket 0 for all (can be extended to per-position
-  // buckets)
-  // Skip forward pass if we used the fused kernel
+  // Use bucket 0 for all positions (can be extended to per-position buckets)
   if (!use_fused_kernel) {
     const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
     const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
 
-    // Forward pass - standard kernel performs well across all batch sizes
-    // Testing showed the optimized kernel adds overhead without benefit
     encoder->set_kernel(forward_fused_kernel_.get());
     encoder->set_buffer(accumulators_buffer_.get(), 0);
     encoder->set_buffer(layer.fc0_weights.get(), 1);
@@ -1763,7 +1678,6 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
 
   backend.submit_and_wait(encoder.get());
 
-  // Read results (zero-copy on unified memory)
   batch.positional_scores.resize(batch_size);
   std::memcpy(batch.positional_scores.data(), output_buffer_->data(),
               batch_size * sizeof(int32_t));
@@ -1786,7 +1700,6 @@ bool GPUNNUEManager::evaluate_batch_async(
     return false;
   }
 
-  // Select evaluation strategy based on batch size
   EvalStrategy strategy = tuning_.select_strategy(batch.count);
 
   if (strategy == EvalStrategy::CPU_FALLBACK) {
@@ -1796,11 +1709,9 @@ bool GPUNNUEManager::evaluate_batch_async(
     return false;
   }
 
-  // Lock for thread-safe GPU access - protects kernel dispatch setup
-  // NOTE: We use a short lock scope here. The gpu_mutex_ is released when this
-  // function returns, but the GPU is still reading from the input buffers.
-  // To avoid race conditions with MAX_INFLIGHT_BATCHES=4 concurrent async
-  // calls, we allocate dedicated input buffers for each async call below.
+  // Short lock scope: gpu_mutex_ is released on return but GPU still reads
+  // input buffers. Dedicated per-call buffers prevent race conditions with
+  // concurrent async calls.
   std::lock_guard<std::mutex> lock(gpu_mutex_);
 
   auto &backend = gpu();
@@ -1816,12 +1727,8 @@ bool GPUNNUEManager::evaluate_batch_async(
   const int batch_size = batch.count;
   const int hidden_dim = net.hidden_dim;
 
-  // Allocate dedicated input buffers for this async call to avoid race
-  // conditions. The shared class member buffers cannot be used because the
-  // gpu_mutex_ is released when this function returns, but the GPU completion
-  // handler runs later. With MAX_INFLIGHT_BATCHES=4 concurrent async
-  // evaluations, another thread could acquire the mutex and overwrite the
-  // shared buffers before our GPU work completes.
+  // Dedicated per-call buffers: shared class buffers can't be used because
+  // the mutex is released on return while GPU work is still in flight.
   const size_t max_features_per_batch =
       batch_size * GPU_MAX_FEATURES_PER_PERSPECTIVE;
 
@@ -1847,7 +1754,6 @@ bool GPUNNUEManager::evaluate_batch_async(
       backend.create_buffer(batch_size * 2 * hidden_dim * sizeof(int32_t),
                             MemoryMode::Shared, BufferUsage::Transient));
 
-  // Validate all buffer allocations
   if (!*async_white_features || !(*async_white_features)->valid() ||
       !*async_black_features || !(*async_black_features)->valid() ||
       !*async_white_counts || !(*async_white_counts)->valid() ||
@@ -1855,14 +1761,13 @@ bool GPUNNUEManager::evaluate_batch_async(
       !*async_white_offsets || !(*async_white_offsets)->valid() ||
       !*async_black_offsets || !(*async_black_offsets)->valid() ||
       !*async_accumulators || !(*async_accumulators)->valid()) {
-    // Fallback to synchronous path if buffer allocation fails
     cpu_evals_ += batch.count;
     if (completion_handler)
       completion_handler(false);
     return false;
   }
 
-  // Use the dedicated async buffer pointers for direct writes
+  // Use the dedicated async buffer pointers
   int32_t *white_features_ptr =
       static_cast<int32_t *>((*async_white_features)->data());
   int32_t *black_features_ptr =
@@ -1876,8 +1781,6 @@ bool GPUNNUEManager::evaluate_batch_async(
   uint32_t *black_offsets_ptr =
       static_cast<uint32_t *>((*async_black_offsets)->data());
 
-  // Extract features directly into GPU buffers
-  // Optimized: removed redundant bounds checks
   size_t white_feature_idx = 0;
   size_t black_feature_idx = 0;
 
@@ -1924,10 +1827,9 @@ bool GPUNNUEManager::evaluate_batch_async(
     black_counts_ptr[i] = static_cast<uint32_t>(black_count);
   }
 
-  // Use parallel encoder for async work to avoid blocking main queue
+  // Use parallel encoder for async work
   auto encoder = backend.create_parallel_encoder();
 
-  // Feature transform - always use dual kernel for both perspectives
   const bool use_dual_kernel =
       feature_transform_dual_kernel_ && feature_transform_dual_kernel_->valid();
 
@@ -1963,17 +1865,12 @@ bool GPUNNUEManager::evaluate_batch_async(
   const int bucket = batch.buckets.empty() ? 0 : batch.buckets[0];
   const auto &layer = net.layers[std::clamp(bucket, 0, GPU_LAYER_STACKS - 1)];
 
-  // Allocate a dedicated output buffer for this async call to avoid race
-  // conditions. The shared output_buffer_ cannot be used because the gpu_mutex_
-  // is released when this function returns, but the completion handler runs
-  // later. Another thread could acquire the mutex and overwrite output_buffer_
-  // before our completion handler executes.
+  // Dedicated output buffer for this async call
   auto async_output_buffer = std::make_shared<std::unique_ptr<Buffer>>(
       backend.create_buffer(batch_size * sizeof(int32_t), MemoryMode::Shared,
                             BufferUsage::Transient));
 
   if (!*async_output_buffer || !(*async_output_buffer)->valid()) {
-    // Fallback to synchronous path if buffer allocation fails
     cpu_evals_ += batch.count;
     if (completion_handler)
       completion_handler(false);
@@ -1993,21 +1890,13 @@ bool GPUNNUEManager::evaluate_batch_async(
   encoder->set_value(static_cast<uint32_t>(batch_size), 9);
   encoder->dispatch_threadgroups(batch_size, 1, 1, GPU_FORWARD_THREADS, 1, 1);
 
-  // Capture necessary data for completion handler
-  // Note: All async_* buffers are shared_ptrs that keep the buffers alive
-  // until the completion handler finishes executing
+  // Capture data for completion handler; shared_ptrs keep buffers alive
   GPUEvalBatch *batch_ptr = &batch;
   std::atomic<size_t> *gpu_evals_ptr = &gpu_evals_;
   std::atomic<size_t> *batch_count_ptr = &batch_count_;
 
-  // Submit with async completion handler
-  // The completion handler captures all async buffers by value (shared_ptr),
-  // ensuring the buffers remain valid until after GPU work completes.
-  // This fixes the race condition where multiple async calls could previously
-  // corrupt each other's input data when using shared class member buffers.
   backend.submit_async(encoder.get(),
                        [=,
-                        // Capture all async buffers to extend their lifetime
                         async_white_features = async_white_features,
                         async_black_features = async_black_features,
                         async_white_counts = async_white_counts,
@@ -2016,8 +1905,6 @@ bool GPUNNUEManager::evaluate_batch_async(
                         async_black_offsets = async_black_offsets,
                         async_accumulators = async_accumulators,
                         async_output_buffer = async_output_buffer]() {
-                         // Read results from our dedicated buffer (safe - no
-                         // other thread can access it)
                          batch_ptr->positional_scores.resize(batch_size);
                          std::memcpy(batch_ptr->positional_scores.data(),
                                      (*async_output_buffer)->data(),
@@ -2029,8 +1916,6 @@ bool GPUNNUEManager::evaluate_batch_async(
                          if (completion_handler) {
                            completion_handler(true);
                          }
-                         // All async buffers are automatically freed when this
-                         // lambda is destroyed
                        });
 
   return true;
@@ -2038,28 +1923,19 @@ bool GPUNNUEManager::evaluate_batch_async(
 
 std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &pos,
                                                             bool use_big) {
-  // Create a batch with single position
   GPUEvalBatch batch;
   batch.add_position(pos);
 
-  // Use force_gpu=true to bypass the min_batch_for_gpu threshold check.
-  // The GPU overhead for N=1 is acceptable for MCTS which needs NNUE-quality
-  // evaluation, not just material counting.
-  // NOTE: We avoid modifying tuning_.min_batch_for_gpu here because that
-  // would cause a race condition when multiple MCTS threads call
-  // evaluate_single concurrently - one thread could save/restore a corrupted
-  // value.
+  // force_gpu=true bypasses min_batch_for_gpu threshold.
+  // Don't modify tuning_.min_batch_for_gpu here - would race with other threads.
   bool success = evaluate_batch(batch, use_big, /*force_gpu=*/true);
 
   if (success && !batch.positional_scores.empty()) {
-    // Return actual NNUE evaluation from GPU
     int32_t psqt = batch.psqt_scores.empty() ? 0 : batch.psqt_scores[0];
     int32_t positional = batch.positional_scores[0];
     return {psqt, positional};
   }
 
-  // GPU evaluation failed - fall back to simple eval as last resort
-  // This should rarely happen if GPU is properly initialized
   cpu_evals_++;
   return {0, Eval::simple_eval(pos)};
 }
@@ -2099,22 +1975,11 @@ std::string GPUNNUEManager::status_string() const {
   return ss.str();
 }
 
-// ============================================================================
-// Incremental Update Methods
-// ============================================================================
-
 bool GPUNNUEManager::should_use_incremental(int num_added, int num_removed,
                                             int hidden_dim) const {
-  // Heuristic: incremental is beneficial when changes are small
-  // Full refresh processes all ~30 features
-  // Incremental processes only changed features
-  // Break-even point is roughly when changes < 10% of typical feature count
+  // Incremental is beneficial when changes < 1/3 of typical features (~30)
   const int total_changes = num_added + num_removed;
-  const int typical_features = 30; // Average number of features per position
-
-  // Use incremental if we're changing less than 1/3 of typical features
-  // AND we have valid source accumulator
-  return total_changes <= typical_features / 3;
+  return total_changes <= 10;
 }
 
 bool GPUNNUEManager::apply_incremental_update(
@@ -2127,16 +1992,9 @@ bool GPUNNUEManager::apply_incremental_update(
     return false;
   }
 
-  // For now, perform incremental update on CPU
-  // This is actually faster for small updates due to GPU dispatch overhead
-  // GPU incremental is beneficial for batched updates during MCTS
-
-  // Copy source to destination first
+  // CPU incremental is faster for small updates due to GPU dispatch overhead.
+  // GPU incremental would be beneficial for batched MCTS updates.
   std::memcpy(dst_accumulator, src_accumulator, hidden_dim * sizeof(int32_t));
-
-  // Note: We need access to the feature transformer weights
-  // For a full GPU implementation, we would dispatch the incremental_update
-  // kernel For now, we signal that CPU should handle this
   return false;
 }
 
@@ -2150,24 +2008,15 @@ bool GPUNNUEManager::apply_double_incremental_update(
     return false;
   }
 
-  // Double incremental is useful for null-move search
-  // where we need to apply move + null move efficiently
-
   // For small updates, CPU is faster
   const int total_changes =
       num_added1 + num_removed1 + num_added2 + num_removed2;
   if (total_changes <= 8) {
-    return false; // Let CPU handle it
+    return false;
   }
 
-  // For larger updates, GPU dispatch could be beneficial
-  // This would use the double_incremental_update kernel
   return false;
 }
-
-// ============================================================================
-// Global Interface
-// ============================================================================
 
 static std::unique_ptr<GPUNNUEManager> g_gpu_nnue_manager;
 static std::atomic<bool> g_gpu_nnue_shutdown{false};
@@ -2184,11 +2033,9 @@ bool initialize_gpu_nnue(const Eval::NNUE::Networks &networks) {
 }
 
 bool gpu_nnue_manager_available() {
-  // Check shutdown flag first to prevent access after shutdown
   if (g_gpu_nnue_shutdown.load(std::memory_order_acquire)) {
     return false;
   }
-  // Also check if the GPU backend itself has been shut down
   if (gpu_backend_shutdown()) {
     return false;
   }
@@ -2200,12 +2047,9 @@ bool gpu_evaluate_batch(GPUEvalBatch &batch, bool use_big) {
 }
 
 void shutdown_gpu_nnue() {
-  // Set shutdown flag first to prevent any new access
   g_gpu_nnue_shutdown.store(true, std::memory_order_release);
 
-  // Reset the manager - this will call its destructor
   if (g_gpu_nnue_manager) {
-    // Only synchronize if GPU was actually used
     if (!gpu_backend_shutdown()) {
       try {
         gpu().synchronize();
@@ -2214,12 +2058,10 @@ void shutdown_gpu_nnue() {
       }
     }
 
-    // Reset the manager (calls destructor which cleans up GPU resources)
     g_gpu_nnue_manager.reset();
   }
-  // Note: don't call shutdown_gpu_backend() -- it would initialize the Metal
-  // singleton if it was never used (e.g., AB-only mode). The backend's
-  // static destructor handles cleanup when the process exits.
+  // Don't call shutdown_gpu_backend() -- it would initialize the Metal
+  // singleton if never used. The backend's static destructor handles cleanup.
 }
 
 } // namespace MetalFish::GPU

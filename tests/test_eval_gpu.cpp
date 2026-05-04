@@ -16,10 +16,6 @@
 using namespace MetalFish;
 using namespace MetalFish::Test;
 
-// ============================================================================
-// Metal Backend Tests
-// ============================================================================
-
 static bool test_metal_availability() {
   TestCase tc{"Metal backend detection"};
 
@@ -124,10 +120,6 @@ static bool test_gpu_nnue_manager() {
   tc.print_result();
   return tc.passed;
 }
-
-// ============================================================================
-// Entry point
-// ============================================================================
 
 bool test_eval_gpu() {
   bool all_passed = true;

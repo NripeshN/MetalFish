@@ -253,7 +253,6 @@ void Engine::wait_for_search_finished() {
 
 void Engine::set_position(const std::string &fen,
                           const std::vector<std::string> &moves) {
-  // Drop the old state and create a new one
   states = StateListPtr(new std::deque<StateInfo>(1));
   pos.set(fen, options["UCI_Chess960"], &states->back());
 
@@ -467,10 +466,8 @@ Engine::QuickSearchResult Engine::search_sync(const std::string &fen, int depth,
                                               int time_ms) {
   QuickSearchResult result;
 
-  // Set up the position
   set_position(fen, {});
 
-  // Set up search limits
   Search::LimitsType limits;
   limits.startTime = now();
   if (depth > 0) {
@@ -480,11 +477,9 @@ Engine::QuickSearchResult Engine::search_sync(const std::string &fen, int depth,
     limits.movetime = time_ms;
   }
 
-  // Run the search
   go(limits);
   wait_for_search_finished();
 
-  // Get the best thread's result (Engine is now a friend of Worker)
   Thread *best_thread = threads.get_best_thread();
   if (best_thread && !best_thread->worker->rootMoves.empty()) {
     const auto &root_move = best_thread->worker->rootMoves[0];
@@ -503,15 +498,12 @@ Engine::QuickSearchResult Engine::search_sync(const std::string &fen, int depth,
 }
 
 // Silent search - runs AB search WITHOUT triggering bestmove callback
-// This is used by hybrid search where the coordinator handles bestmove output
 Engine::QuickSearchResult Engine::search_silent(const std::string &fen,
                                                 int depth, int time_ms) {
   QuickSearchResult result;
 
-  // Set up the position
   set_position(fen, {});
 
-  // Set up search limits
   Search::LimitsType limits;
   limits.startTime = now();
   if (depth > 0) {
@@ -521,31 +513,16 @@ Engine::QuickSearchResult Engine::search_silent(const std::string &fen,
     limits.movetime = time_ms;
   }
 
-  // IMPORTANT: We cannot safely modify the callback while search is running
-  // because it's called from the search thread. Instead, we use a flag-based
-  // approach where the callback checks if it should be silent.
-  //
-  // For now, we use a simpler approach: temporarily set a no-op callback
-  // BEFORE starting the search, and restore it AFTER the search completes.
-  // This is safe because wait_for_search_finished() ensures the search thread
-  // has completed before we restore.
-
-  // Save the current bestmove callback
+  // Temporarily set a no-op callback before starting, restore after.
   auto saved_callback = updateContext.onBestmove;
 
-  // Set a no-op callback before starting search
-  updateContext.onBestmove = [](std::string_view, std::string_view) {
-    // Silent - do nothing
-  };
+  updateContext.onBestmove = [](std::string_view, std::string_view) {};
 
-  // Run the search - the no-op callback is in place
   go(limits);
-  wait_for_search_finished(); // This ensures search thread has finished
+  wait_for_search_finished();
 
-  // Now safe to restore the callback since search thread is done
   updateContext.onBestmove = saved_callback;
 
-  // Get the best thread's result
   Thread *best_thread = threads.get_best_thread();
   if (best_thread && !best_thread->worker->rootMoves.empty()) {
     const auto &root_move = best_thread->worker->rootMoves[0];
@@ -566,25 +543,18 @@ Engine::QuickSearchResult Engine::search_silent(const std::string &fen,
 void Engine::search_with_callbacks(const std::string &fen, int time_ms,
                                    IterationCallback on_iteration,
                                    std::atomic<bool> &stop_flag) {
-  // Set up the position
   set_position(fen, {});
 
-  // Set up search limits
   Search::LimitsType limits;
   limits.startTime = now();
   if (time_ms > 0)
     limits.movetime = time_ms;
 
-  // Save original callbacks
   auto saved_bestmove = updateContext.onBestmove;
   auto saved_update = updateContext.onUpdateFull;
 
-  // Suppress bestmove output (hybrid coordinator handles this)
   updateContext.onBestmove = [](std::string_view, std::string_view) {};
 
-  // Hook into the per-iteration update to call our callback.
-  // This fires after each depth of iterative deepening completes,
-  // giving us the current best move + PV with full search state preserved.
   updateContext.onUpdateFull = [this, &on_iteration,
                                 &saved_update](const Search::InfoFull &info) {
     // Build QuickSearchResult from the search state
@@ -602,20 +572,13 @@ void Engine::search_with_callbacks(const std::string &fen, int time_ms,
 
       on_iteration(result);
     }
-    // Chain to original for UCI info output
     if (saved_update)
       saved_update(info);
   };
 
-  // Run the search -- this is a single iterative deepening run that
-  // preserves all state (TT, aspiration windows, killers, history)
-  // across depth iterations. Much more efficient than calling
-  // search_silent() in a loop.
   go(limits);
 
   // Poll for external stop signal from hybrid coordinator
-  // while the search is running. The search checks threads.stop
-  // internally, so setting it will cause the search to wind down.
   while (!threads.stop.load(std::memory_order_acquire)) {
     if (stop_flag.load(std::memory_order_acquire)) {
       threads.stop = true;
@@ -625,7 +588,6 @@ void Engine::search_with_callbacks(const std::string &fen, int time_ms,
   }
   wait_for_search_finished();
 
-  // Restore original callbacks
   updateContext.onBestmove = saved_bestmove;
   updateContext.onUpdateFull = saved_update;
 }

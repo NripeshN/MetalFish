@@ -21,10 +21,6 @@
 namespace MetalFish {
 namespace MCTS {
 
-// ============================================================================
-// Fast Math Utilities
-// ============================================================================
-
 namespace FastMath {
 
 inline float FastLog(float x) {
@@ -71,10 +67,6 @@ inline float FastSqrt(float x) {
 }
 
 } // namespace FastMath
-
-// ============================================================================
-// Moves Left Head (MLH) Utility
-// ============================================================================
 
 class MovesLeftEvaluator {
 public:
@@ -130,10 +122,6 @@ private:
   bool parent_within_threshold_ = false;
 };
 
-// ============================================================================
-// WDL Rescaling
-// ============================================================================
-
 struct WDLRescaler {
     float ratio;
     float diff;
@@ -146,10 +134,6 @@ struct WDLRescaler {
         return std::tanh(std::atanh(clamped) * ratio + diff);
     }
 };
-
-// ============================================================================
-// Score Transformation
-// ============================================================================
 
 inline int QToNnueScore(float q) {
   q = std::clamp(q, -0.999f, 0.999f);
@@ -167,10 +151,6 @@ inline float TablebaseWDLToParentWL(int wdl) {
 inline float TablebaseWDLToDraw(int wdl) {
   return std::abs(wdl) >= 2 ? 0.0f : 1.0f;
 }
-
-// ============================================================================
-// Collision Handling
-// ============================================================================
 
 struct CollisionStats {
   int max_collision_events = 917;

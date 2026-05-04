@@ -15,7 +15,6 @@ namespace NN {
 
 namespace {
 
-// Get lowest bit position
 inline unsigned long GetLowestBit(uint64_t value) {
 #if defined(_MSC_VER) && defined(_WIN64)
   unsigned long result;
@@ -35,7 +34,6 @@ inline unsigned long GetLowestBit(uint64_t value) {
 #endif
 }
 
-// Reverse bits within each byte (horizontal flip)
 inline uint64_t ReverseBitsInBytes(uint64_t v) {
   v = ((v >> 1) & 0x5555555555555555ull) | ((v & 0x5555555555555555ull) << 1);
   v = ((v >> 2) & 0x3333333333333333ull) | ((v & 0x3333333333333333ull) << 2);
@@ -43,7 +41,6 @@ inline uint64_t ReverseBitsInBytes(uint64_t v) {
   return v;
 }
 
-// Reverse bytes (vertical mirror)
 inline uint64_t ReverseBytesInBytes(uint64_t v) {
   v = (v & 0x00000000FFFFFFFF) << 32 | (v & 0xFFFFFFFF00000000) >> 32;
   v = (v & 0x0000FFFF0000FFFF) << 16 | (v & 0xFFFF0000FFFF0000) >> 16;
@@ -51,7 +48,6 @@ inline uint64_t ReverseBytesInBytes(uint64_t v) {
   return v;
 }
 
-// Transpose 8x8 bit matrix (diagonal transpose)
 inline uint64_t TransposeBitsInBytes(uint64_t v) {
   v = (v & 0xAA00AA00AA00AA00ULL) >> 9 | (v & 0x0055005500550055ULL) << 9 |
       (v & 0x55AA55AA55AA55AAULL);
@@ -62,7 +58,6 @@ inline uint64_t TransposeBitsInBytes(uint64_t v) {
   return v;
 }
 
-// Apply transform to a bitboard
 inline uint64_t ApplyTransform(uint64_t bitboard, int transform) {
   if (bitboard == 0 || bitboard == ~0ULL)
     return bitboard;
@@ -80,7 +75,6 @@ inline uint64_t ApplyTransform(uint64_t bitboard, int transform) {
   return v;
 }
 
-// Compare transposing for canonicalization
 int CompareTransposing(uint64_t board, int initial_transform) {
   uint64_t value = board;
   if ((initial_transform & kFlipTransform) != 0) {
@@ -97,9 +91,7 @@ int CompareTransposing(uint64_t board, int initial_transform) {
   return 0;
 }
 
-// Choose optimal transform for canonicalization
 int ChooseTransform(const Position &pos, Color us) {
-  // If there are any castling options, no transform is valid
   if (pos.can_castle(ANY_CASTLING)) {
     return kNoTransform;
   }
@@ -107,30 +99,23 @@ int ChooseTransform(const Position &pos, Color us) {
   uint64_t our_king = pos.pieces(us, KING);
   int transform = kNoTransform;
 
-  // Flip horizontally if king on left half
   if ((our_king & 0x0F0F0F0F0F0F0F0FULL) != 0) {
     transform |= kFlipTransform;
     our_king = ReverseBitsInBytes(our_king);
   }
 
-  // If there are any pawns, only horizontal flip is valid
   if (pos.pieces(PAWN) != 0) {
     return transform;
   }
 
-  // Mirror vertically if king on top half
   if ((our_king & 0xFFFFFFFF00000000ULL) != 0) {
     transform |= kMirrorTransform;
     our_king = ReverseBytesInBytes(our_king);
   }
 
-  // Our king is now in bottom right quadrant
-  // Transpose for king in top right triangle, or if on diagonal use comparison
   if ((our_king & 0xE0C08000ULL) != 0) {
     transform |= kTransposeTransform;
   } else if ((our_king & 0x10204080ULL) != 0) {
-    // Compare all pieces, then ours, then each piece type to choose best
-    // transform
     auto outcome = CompareTransposing(pos.pieces(), transform);
     if (outcome == -1)
       return transform;
@@ -171,13 +156,11 @@ int ChooseTransform(const Position &pos, Color us) {
   return transform;
 }
 
-// Extract bitboard for a specific piece type and color
 uint64_t GetPieceBitboard(const Position &pos, PieceType pt, Color c) {
   Bitboard bb = pos.pieces(c, pt);
   return bb;
 }
 
-// Fill a plane from a bitboard
 void FillPlaneFromBitboard(std::array<float, 64> &plane, uint64_t bitboard) {
   plane.fill(0.0f);
   while (bitboard) {
@@ -187,8 +170,6 @@ void FillPlaneFromBitboard(std::array<float, 64> &plane, uint64_t bitboard) {
   }
 }
 
-// EncodePositionForNN zeroes the full tensor up front, so hot-path piece
-// planes only need their occupied squares set.
 void SetBitsInZeroedPlane(std::array<float, 64> &plane, uint64_t bitboard) {
   while (bitboard) {
     const int sq = GetLowestBit(bitboard);
@@ -197,7 +178,6 @@ void SetBitsInZeroedPlane(std::array<float, 64> &plane, uint64_t bitboard) {
   }
 }
 
-// Set all values in a plane
 void SetPlane(std::array<float, 64> &plane, float value) {
   plane.fill(value);
 }
@@ -285,12 +265,10 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
     return;
   }
 
-  // Get current position and side to move
   const Position &current_pos = *position_history.back();
   Color us = current_pos.side_to_move();
   Color them = ~us;
 
-  // Determine if we should use canonicalization
   int transform = kNoTransform;
   bool stop_early = IsCanonicalFormat(input_format);
   bool skip_non_repeats =
@@ -303,21 +281,17 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
     transform = ChooseTransform(current_pos, us);
   }
 
-  // Auxiliary planes (8 planes starting at index 104)
   int aux_base = kAuxPlaneBase;
 
-  // Fill castling and en passant auxiliary planes first
   {
     using IF = MetalFishNN::NetworkFormat;
 
     if (input_format == IF::INPUT_CLASSICAL_112_PLANE) {
-      // Legacy format: full planes for castling rights (from our perspective)
       CastlingRights our_queenside = (us == WHITE ? WHITE_OOO : BLACK_OOO);
       CastlingRights our_kingside = (us == WHITE ? WHITE_OO : BLACK_OO);
       CastlingRights their_queenside = (them == WHITE ? WHITE_OOO : BLACK_OOO);
       CastlingRights their_kingside = (them == WHITE ? WHITE_OO : BLACK_OO);
 
-      // Order: our O-O-O, our O-O, their O-O-O, their O-O
       SetPlane(result[aux_base + 0],
                current_pos.can_castle(our_queenside) ? 1.0f : 0.0f);
       SetPlane(result[aux_base + 1],
@@ -327,49 +301,30 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
       SetPlane(result[aux_base + 3],
                current_pos.can_castle(their_kingside) ? 1.0f : 0.0f);
     } else {
-      // Modern format: rook positions for castling (for Chess960 support)
-      // Note: MetalFish may not have FRC support yet, so this is simplified
       SetPlane(result[aux_base + 0], 0.0f);
       SetPlane(result[aux_base + 1], 0.0f);
 
-      // Set bits for castling rook positions (from our perspective)
-      // In standard chess, queenside rook on file A, kingside rook on file H
-      // From our perspective: our rooks on rank 1, their rooks on rank 8
       if (us == WHITE) {
-        if (current_pos.can_castle(WHITE_OOO)) {
-          result[aux_base + 0][0] = 1.0f; // a1 rook (our queenside)
-        }
-        if (current_pos.can_castle(WHITE_OO)) {
-          result[aux_base + 1][7] = 1.0f; // h1 rook (our kingside)
-        }
-        if (current_pos.can_castle(BLACK_OOO)) {
-          result[aux_base + 0][56] = 1.0f; // a8 rook (their queenside)
-        }
-        if (current_pos.can_castle(BLACK_OO)) {
-          result[aux_base + 1][63] = 1.0f; // h8 rook (their kingside)
-        }
+        if (current_pos.can_castle(WHITE_OOO))
+          result[aux_base + 0][0] = 1.0f;
+        if (current_pos.can_castle(WHITE_OO))
+          result[aux_base + 1][7] = 1.0f;
+        if (current_pos.can_castle(BLACK_OOO))
+          result[aux_base + 0][56] = 1.0f;
+        if (current_pos.can_castle(BLACK_OO))
+          result[aux_base + 1][63] = 1.0f;
       } else {
-        // Black's perspective: flip the board
-        if (current_pos.can_castle(BLACK_OOO)) {
-          result[aux_base + 0][0] =
-              1.0f; // a8 rook becomes a1 from black's view
-        }
-        if (current_pos.can_castle(BLACK_OO)) {
-          result[aux_base + 1][7] =
-              1.0f; // h8 rook becomes h1 from black's view
-        }
-        if (current_pos.can_castle(WHITE_OOO)) {
-          result[aux_base + 0][56] =
-              1.0f; // a1 rook becomes a8 from black's view
-        }
-        if (current_pos.can_castle(WHITE_OO)) {
-          result[aux_base + 1][63] =
-              1.0f; // h1 rook becomes h8 from black's view
-        }
+        if (current_pos.can_castle(BLACK_OOO))
+          result[aux_base + 0][0] = 1.0f;
+        if (current_pos.can_castle(BLACK_OO))
+          result[aux_base + 1][7] = 1.0f;
+        if (current_pos.can_castle(WHITE_OOO))
+          result[aux_base + 0][56] = 1.0f;
+        if (current_pos.can_castle(WHITE_OO))
+          result[aux_base + 1][63] = 1.0f;
       }
     }
 
-    // Plane 4: En passant or side to move
     if (IsCanonicalFormat(input_format)) {
       Square ep_sq = current_pos.ep_square();
       SetPlane(result[aux_base + 4], 0.0f);
@@ -380,24 +335,20 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
       SetPlane(result[aux_base + 4], us == BLACK ? 1.0f : 0.0f);
     }
 
-    // Plane 5: Rule50 counter
     float rule50_value = IsHectopliesFormat(input_format)
                              ? (current_pos.rule50_count() / 100.0f)
                              : static_cast<float>(current_pos.rule50_count());
     SetPlane(result[aux_base + 5], rule50_value);
 
-    // Plane 6: Armageddon side to move (or zeros)
     if (IsCanonicalArmageddonFormat(input_format)) {
       SetPlane(result[aux_base + 6], us == BLACK ? 1.0f : 0.0f);
     } else {
       SetPlane(result[aux_base + 6], 0.0f);
     }
 
-    // Plane 7: All ones (helps NN detect board edges)
     SetPlane(result[aux_base + 7], 1.0f);
   }
 
-  // Encode position history (up to 8 positions, 13 planes each)
   auto castling_mask_for_us = [us](const Position &p) -> uint8_t {
     uint8_t mask = 0;
     if (us == WHITE) {
@@ -476,7 +427,6 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
                                 GetPieceBitboard(pos, QUEEN, them),
                                 GetPieceBitboard(pos, KING, them)};
 
-    // Side-to-move perspective: current side always at the bottom.
     if (us == BLACK) {
       for (int piece = 0; piece < 6; ++piece) {
         our_pieces[piece] = ReverseBytesInBytes(our_pieces[piece]);
@@ -491,18 +441,16 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
       SetBitsInZeroedPlane(result[base + 6 + piece], their_pieces[piece]);
     }
 
-    // Repetition flag for this specific history position.
     SetPlane(result[base + 12], has_repetition ? 1.0f : 0.0f);
 
-    // For synthesized history with EP, undo the last pawn move in the plane.
     if (history_idx < 0 && pos.ep_square() != SQ_NONE) {
       Square ep_sq = pos.ep_square();
       int ep_idx = static_cast<int>(ep_sq);
-      if (ep_idx < 8) { // "Us" pawn
+      if (ep_idx < 8) {
         uint64_t mask =
             ((0x0000000000000100ULL - 0x0000000001000000ULL) << ep_idx);
         FillPlaneFromBitboard(result[base + 0], our_pieces[0] + mask);
-      } else if (ep_idx >= 56) { // "Them" pawn
+      } else if (ep_idx >= 56) {
         uint64_t mask =
             ((0x0001000000000000ULL - 0x0000000100000000ULL) << (ep_idx - 56));
         FillPlaneFromBitboard(result[base + 6], their_pieces[0] + mask);
@@ -513,11 +461,8 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
       break;
   }
 
-  // Apply transform to all planes if canonicalization is enabled
   if (transform != kNoTransform) {
-    // Transform piece planes and en passant plane
     for (int i = 0; i <= aux_base + 4; ++i) {
-      // Convert plane to bitboard
       uint64_t bitboard = 0;
       for (int sq = 0; sq < 64; ++sq) {
         if (result[i][sq] > 0.5f) {
@@ -525,14 +470,10 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
         }
       }
 
-      // Skip empty and full planes
       if (bitboard == 0 || bitboard == ~0ULL)
         continue;
 
-      // Apply transform
       uint64_t transformed = ApplyTransform(bitboard, transform);
-
-      // Convert back to plane
       FillPlaneFromBitboard(result[i], transformed);
     }
   }
@@ -556,8 +497,6 @@ EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
 InputPlanes
 EncodePositionForNN(const Position &pos,
                     MetalFishNN::NetworkFormat::InputFormat input_format) {
-  // Delegate to the main function with a single-position history
-  // This ensures consistent behavior including vertical flip for black
   std::array<const Position *, 1> history = {&pos};
   return EncodePositionForNN(input_format, history, kMoveHistory,
                              FillEmptyHistory::FEN_ONLY, nullptr);

@@ -84,10 +84,6 @@ uint64_t ComputeNNCacheKeyFromState(const uint64_t *raw_keys,
   return key;
 }
 
-// ============================================================================
-// NNCache
-// ============================================================================
-
 NNCache::NNCache(size_t size) : entries_(size), size_(size) {}
 
 bool NNCache::Lookup(uint64_t key, int expected_moves,
@@ -170,10 +166,6 @@ void NNCache::Clear() {
     e.legal_moves = 0;
   }
 }
-
-// ============================================================================
-// BackendComputation
-// ============================================================================
 
 BackendComputation::BackendComputation(NNMCTSEvaluator *eval, NNCache *cache)
     : evaluator_(eval), cache_(cache) {}
@@ -286,10 +278,6 @@ int BackendComputation::UsedBatchSize() const {
 int BackendComputation::TotalInputs() const {
   return total_inputs_;
 }
-
-// ============================================================================
-// Backend
-// ============================================================================
 
 Backend::Backend(const std::string &weights_path, size_t cache_entries)
     : cache_(cache_entries) {

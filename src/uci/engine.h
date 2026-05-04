@@ -113,11 +113,7 @@ public:
   // ============================================================================
   // Hybrid Search Integration
   // ============================================================================
-  // These methods allow the hybrid MCTS search to use the full AB search
-  // implementation for move verification.
 
-  // Run a synchronous search on the given FEN and return the best move
-  // This uses the full alpha-beta search with all optimizations
   struct QuickSearchResult {
     Move best_move = Move::none();
     Move ponder_move = Move::none();
@@ -130,28 +126,20 @@ public:
   QuickSearchResult search_sync(const std::string &fen, int depth,
                                 int time_ms = 0);
 
-  // Silent search - runs AB search WITHOUT triggering bestmove callback
-  // Used by hybrid search where the coordinator handles bestmove output
   QuickSearchResult search_silent(const std::string &fen, int depth,
                                   int time_ms = 0);
 
-  // Hybrid iterative deepening search with per-iteration callback.
-  // Runs the full AB search but calls `on_iteration` after each completed
-  // depth with the current best move, score, and PV. The search preserves
-  // all state (TT, aspiration windows, killers, history) across iterations
-  // unlike calling search_silent() in a loop. Used by the hybrid engine
-  // for real-time PV injection into the MCTS tree.
+  // Iterative deepening with per-iteration callback. Preserves all state
+  // (TT, aspiration windows, killers, history) across iterations.
   using IterationCallback =
       std::function<void(const QuickSearchResult &result)>;
   void search_with_callbacks(const std::string &fen, int time_ms,
                              IterationCallback on_iteration,
                              std::atomic<bool> &stop_flag);
 
-  // Get access to the transposition table for sharing with hybrid search
   TranspositionTable &get_tt() { return tt; }
   const TranspositionTable &get_tt() const { return tt; }
 
-  // Get access to thread pool for advanced integration
   ThreadPool &get_threads() { return threads; }
 
 private:

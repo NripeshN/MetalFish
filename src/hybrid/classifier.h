@@ -23,7 +23,6 @@
 
 namespace MetalFish {
 
-// Position type classification
 enum class PositionType {
   HIGHLY_TACTICAL, // Forcing moves, immediate threats
   TACTICAL,        // Some tactical elements
@@ -32,7 +31,6 @@ enum class PositionType {
   HIGHLY_STRATEGIC // Closed position, long-term planning
 };
 
-// Detailed position features for analysis
 struct PositionFeatures {
   // Tactical indicators
   bool in_check = false;
@@ -80,16 +78,13 @@ struct PositionFeatures {
   PositionType classify() const;
 };
 
-// Position classifier
 class PositionClassifier {
 public:
   PositionClassifier() = default;
 
-  // Analyze position and return features
   PositionFeatures analyze(const Position &pos) const;
 
 private:
-  // Helper methods
   int count_hanging_pieces(const Position &pos, Color c) const;
   int count_attacked_pieces(const Position &pos, Color c) const;
   int count_king_attackers(const Position &pos, Color c) const;
@@ -99,7 +94,6 @@ private:
   bool is_position_closed(const Position &pos) const;
   bool is_endgame_position(const Position &pos) const;
 
-  // Bitboard helpers
   Bitboard get_king_zone(Square ksq) const;
 };
 
@@ -107,41 +101,33 @@ private:
 struct SearchStrategy {
   PositionType position_type;
 
-  // Recommended approach
-  float mcts_weight = 0.5f; // 0-1, how much to rely on MCTS
-  float ab_weight = 0.5f;   // 0-1, how much to rely on alpha-beta
+  float mcts_weight = 0.5f;
+  float ab_weight = 0.5f;
 
-  // MCTS parameters
   float cpuct = 2.5f;
   int min_mcts_nodes = 100;
   int max_mcts_depth = 50;
   bool use_policy_network = true;
 
-  // Alpha-beta parameters
   int ab_depth = 6;
   bool use_null_move = true;
   bool use_lmr = true;
   int aspiration_window = 25;
 
-  // Hybrid parameters
-  int ab_verify_depth = 4;            // Depth for AB verification of MCTS moves
-  float ab_override_threshold = 0.3f; // Score diff to override MCTS choice
+  int ab_verify_depth = 4;
+  float ab_override_threshold = 0.3f;
   bool use_ab_for_tactics = true;
 
-  // Time allocation
-  float time_multiplier = 1.0f; // Adjust time based on position
+  float time_multiplier = 1.0f;
 };
 
-// Strategy selector
 class StrategySelector {
 public:
   StrategySelector() = default;
 
-  // Get recommended strategy for position
   SearchStrategy get_strategy(const Position &pos) const;
   SearchStrategy get_strategy(const PositionFeatures &features) const;
 
-  // Adjust strategy based on game phase
   void adjust_for_time(SearchStrategy &strategy, int time_left_ms,
                        int increment_ms) const;
 

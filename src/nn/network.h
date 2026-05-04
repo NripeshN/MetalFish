@@ -17,33 +17,27 @@
 namespace MetalFish {
 namespace NN {
 
-// Neural network output structure
 struct NetworkOutput {
-  std::vector<float> policy; // 1858 move probabilities
-  float value;               // Position evaluation (-1 to 1)
-  float wdl[3];              // Win/Draw/Loss probabilities
+  std::vector<float> policy;
+  float value;
+  float wdl[3];
   bool has_wdl;
-  float moves_left = 0.0f; // Moves-left head prediction
+  float moves_left = 0.0f;
   bool has_moves_left = false;
 };
 
-// Abstract neural network interface
 class Network {
 public:
   virtual ~Network() = default;
 
-  // Evaluate single position
   virtual NetworkOutput Evaluate(const InputPlanes &input) = 0;
 
-  // Batch evaluation
   virtual std::vector<NetworkOutput>
   EvaluateBatch(const std::vector<InputPlanes> &inputs) = 0;
 
-  // Get network information
   virtual std::string GetNetworkInfo() const = 0;
 };
 
-// Factory function to create network backend
 std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
                                        const std::string &backend = "auto");
 std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,

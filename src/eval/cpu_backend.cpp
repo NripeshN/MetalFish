@@ -26,7 +26,6 @@
 namespace MetalFish {
 namespace GPU {
 
-// Null buffer implementation
 class NullBuffer : public Buffer {
 public:
   NullBuffer(size_t size) : size_(size) {
@@ -45,7 +44,6 @@ private:
   size_t size_;
 };
 
-// Null kernel implementation
 class NullKernel : public ComputeKernel {
 public:
   NullKernel(const std::string &name) : name_(name) {}
@@ -58,7 +56,6 @@ private:
   std::string name_;
 };
 
-// Null encoder implementation
 class NullEncoder : public CommandEncoder {
 public:
   void set_kernel(ComputeKernel *) override {}
@@ -70,7 +67,6 @@ public:
   void barrier() override {}
 };
 
-// CPU fallback backend
 class CPUBackend : public Backend {
 public:
   static CPUBackend &instance() {
@@ -86,7 +82,6 @@ public:
   size_t max_threadgroup_memory() const override { return 0; }
 
   size_t recommended_working_set_size() const override {
-    // For CPU, return a reasonable portion of system memory
     return total_system_memory() / 4;
   }
 
@@ -108,12 +103,10 @@ public:
   }
 
   int gpu_core_count() const override {
-    // No GPU, return 0
     return 0;
   }
 
   int max_threads_per_simd_group() const override {
-    // For CPU, return typical SIMD width (AVX-512 = 16 floats, AVX2 = 8)
 #ifdef __AVX512F__
     return 16;
 #elif defined(__AVX2__) || defined(__AVX__)
@@ -124,7 +117,6 @@ public:
   }
 
   int recommended_batch_size() const override {
-    // For CPU fallback, use smaller batches
     return 1;
   }
 
@@ -165,7 +157,6 @@ public:
   void submit(CommandEncoder *) override {}
   void submit_async(CommandEncoder *,
                     std::function<void()> completion_handler) override {
-    // CPU fallback: just call the completion handler immediately
     if (completion_handler) {
       completion_handler();
     }
@@ -185,22 +176,16 @@ private:
   size_t allocated_ = 0;
 };
 
-// Backend static methods
 Backend &Backend::get() { return CPUBackend::instance(); }
 
 bool Backend::available() { return false; }
 
-// Shutdown functions - no-op for CPU backend since there's nothing to clean up
-void shutdown_gpu_backend() {
-  // No GPU resources to release in CPU fallback mode
-}
+void shutdown_gpu_backend() {}
 
 bool gpu_backend_shutdown() {
-  // CPU backend is always "shutdown" safe since there's no actual GPU
   return false;
 }
 
-// ScopedTimer implementation
 struct ScopedTimer::Impl {
   std::string name;
   std::chrono::high_resolution_clock::time_point start;

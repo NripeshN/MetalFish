@@ -148,10 +148,6 @@ void ApplyNNPolicyToNode(Node* node, const EvaluationResult& result,
 
 } // anonymous namespace
 
-// ============================================================================
-// Search Lifecycle
-// ============================================================================
-
 Search::Search(const SearchParams& params, std::unique_ptr<Backend> backend)
     : params_(params), backend_(std::move(backend)) {
     if (!backend_) {
@@ -178,8 +174,7 @@ Search::Search(const SearchParams& params, std::unique_ptr<Backend> backend)
         }
     }
 
-    // Warm up MPSGraph before the search clock starts. Use unique cache keys
-    // so the batched warmup is not converted into NNCache hits.
+    // Warm up MPSGraph before the search clock starts.
     if (backend_) {
         Position warmup_pos;
         StateInfo warmup_st;
@@ -343,7 +338,6 @@ void Search::Wait() {
         } else {
             best = GetBestMove();
         }
-        // Safety: if search produced no result, pick any legal move
         if (best == Move::none()) {
             Position pos;
             StateInfo st;
@@ -366,14 +360,9 @@ bool Search::IsSearchActive() const {
     return running_.load(std::memory_order_acquire);
 }
 
-// ============================================================================
-// Time Management
-// ============================================================================
-
 namespace {
 
-// Log-logistic distribution for estimating remaining moves in a game.
-// From Lc0: midpoint=45.2, steepness=5.93 (fitted to game length data).
+// Log-logistic remaining-moves estimate (Lc0 fitted parameters).
 float EstimateMovesToGo(int ply, float midpoint = 45.2f,
                         float steepness = 5.93f) {
     float move = ply / 2.0f;
@@ -398,18 +387,16 @@ int64_t Search::CalculateTimeBudget() {
 
     const int64_t overhead = static_cast<int64_t>(params_.move_overhead_ms);
 
-    // Emergency: very low time, just use increment or tiny fraction
     if (time_left < 500) {
         return std::max(int64_t(50), std::min(time_left / 4, inc));
     }
 
-    // Initialize piggybank on first move (9% of initial time, from Lc0)
+    // 9% of initial time (from Lc0)
     if (tmgr_.first_move) {
         tmgr_.piggybank_ms = static_cast<int64_t>(time_left * 0.09f);
         tmgr_.first_move = false;
     }
 
-    // Update tree reuse estimate from previous search
     uint32_t current_nodes = tree_.Root() ? tree_.Root()->GetN() : 0;
     if (tmgr_.last_move_final_nodes > 0 && current_nodes > 0) {
         float this_reuse = static_cast<float>(current_nodes) /
@@ -421,8 +408,6 @@ int64_t Search::CalculateTimeBudget() {
         tmgr_.tree_reuse = std::min(tmgr_.tree_reuse, 0.73f);
     }
 
-    // Estimate remaining moves using log-logistic distribution
-    // Approximate game ply from the position (use tree root's move count)
     int ply = 2 * (limits_.movestogo > 0 ? 40 : 30);
     {
         Position pos;
@@ -440,7 +425,6 @@ int64_t Search::CalculateTimeBudget() {
     }
     remaining_moves = std::max(remaining_moves, 1.0f);
 
-    // Max piggybank: proportional to average time per move
     float max_piggybank = 36.5f *
         std::max(0.0f, static_cast<float>(time_left) +
                  static_cast<float>(inc) * (remaining_moves - 1.0f) - overhead) /
@@ -448,57 +432,44 @@ int64_t Search::CalculateTimeBudget() {
     tmgr_.piggybank_ms = std::min(tmgr_.piggybank_ms,
                                   static_cast<int64_t>(max_piggybank));
 
-    // Total remaining time (excluding piggybank reserve)
     float total_remaining = std::max(0.0f,
         static_cast<float>(time_left) - static_cast<float>(tmgr_.piggybank_ms) +
         static_cast<float>(inc) * (remaining_moves - 1.0f) -
         static_cast<float>(overhead));
 
-    // Average nodes per move (using NPS estimate)
     float remaining_game_nodes = total_remaining * tmgr_.nps / 1000.0f;
     float avg_nodes_per_move = remaining_game_nodes / remaining_moves;
     tmgr_.avg_ms_per_move = total_remaining / remaining_moves;
 
-    // Account for tree reuse: we get some nodes for free
     float nodes_with_reuse = avg_nodes_per_move / (1.0f - tmgr_.tree_reuse);
     float new_nodes_needed = std::max(0.0f, nodes_with_reuse - current_nodes);
 
-    // Expected thinking time for this move
     float expected_ms = new_nodes_needed / tmgr_.nps * 1000.0f;
 
-    // Save 12% of move time to piggybank (from Lc0)
+    // 12% to piggybank (from Lc0)
     float to_piggybank = std::min(max_piggybank - tmgr_.piggybank_ms,
                                   expected_ms * 0.12f);
     expected_ms -= to_piggybank;
 
-    // Adjust for smart pruning time use (we typically don't use all allocated time)
     tmgr_.move_allocated_time_ms = expected_ms / tmgr_.timeuse;
 
-    // Cap at 42% of remaining time (from Lc0: max-move-budget=0.42)
     float max_move_time = static_cast<float>(time_left) * 0.42f;
     if (tmgr_.move_allocated_time_ms > max_move_time) {
         tmgr_.move_allocated_time_ms = max_move_time;
     }
 
-    // Hard cap: never exceed remaining time minus overhead
     float hard_cap = static_cast<float>(time_left - overhead);
     if (tmgr_.move_allocated_time_ms > hard_cap) {
         tmgr_.move_allocated_time_ms = std::max(0.0f, hard_cap);
     }
 
-    // Add piggybank to budget
     tmgr_.piggybank_ms += static_cast<int64_t>(to_piggybank);
 
-    // Minimum: at least 50ms or 1/3 of remaining
     float min_time = std::min(50.0f, hard_cap / 3.0f);
     tmgr_.move_allocated_time_ms = std::max(tmgr_.move_allocated_time_ms, min_time);
 
     return static_cast<int64_t>(tmgr_.move_allocated_time_ms);
 }
-
-// ============================================================================
-// Stop Conditions
-// ============================================================================
 
 bool Search::ShouldStop() const {
     if (stop_flag_.load(std::memory_order_acquire)) return true;
@@ -559,7 +530,7 @@ bool Search::ShouldStop() const {
         }
     }
 
-    // Mate detection: stop if the best-visited move is a proven checkmate
+    // Stop if the best-visited move is a proven checkmate
     {
         const Node* root = tree_.Root();
         if (root && root->NumEdges() > 0 && root->GetN() > 100) {
@@ -589,14 +560,8 @@ bool Search::ShouldStop() const {
     return false;
 }
 
-// ============================================================================
-// Worker Thread Entry Point
-// ============================================================================
-
 void Search::WorkerThreadMain(int thread_id) {
 #ifdef __APPLE__
-    // MCTS is latency-sensitive but should not compete with AB/UI-critical
-    // work for the highest-priority P-cores in Hybrid mode.
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
 #endif
 
@@ -608,9 +573,6 @@ void Search::WorkerThreadMain(int thread_id) {
     bool use_semaphore = (num_threads > 1) && backend_ &&
                          params_.minibatch_size > 1;
 
-    // Match lc0's pattern: use do-while to ensure at least one iteration runs
-    // before checking stop conditions. A very early stop may arrive before
-    // this point, so the test is at the end.
     do {
         if (use_semaphore)
             RunIterationSemaphore(ctx, num_threads);
@@ -631,10 +593,6 @@ void Search::WorkerThreadMain(int thread_id) {
     stats_.cache_hits.fetch_add(ctx.local_cache_hits, std::memory_order_relaxed);
     stats_.cache_misses.fetch_add(ctx.local_cache_misses, std::memory_order_relaxed);
 }
-
-// ============================================================================
-// Single-threaded iteration (no semaphore)
-// ============================================================================
 
 void Search::RunIteration(SearchWorkerCtx& ctx) {
     ctx.ResetToRoot();
@@ -764,13 +722,10 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
             ReleaseComputation(std::move(computation));
         }
     } else if (leaf->NumEdges() > 0 && leaf->GetN() > 0) {
-        // Collision: another thread already expanded this node.
-        // Use its existing Q instead of backpropagating a fake 0.0 value.
         value = leaf->GetWL();
         draw = leaf->GetD();
         moves_left_val = leaf->GetM();
     } else if (leaf->NumEdges() > 0) {
-        // Node expanded but not yet backed up -- cancel virtual loss, skip
         leaf->CancelScoreUpdate(multivisit);
         return;
     }
@@ -778,10 +733,6 @@ void Search::RunIteration(SearchWorkerCtx& ctx) {
     Backpropagate(leaf, value, draw, moves_left_val, multivisit);
     stats_.total_nodes.fetch_add(multivisit, std::memory_order_relaxed);
 }
-
-// ============================================================================
-// Semaphore-based iteration (multi-threaded batched GPU eval)
-// ============================================================================
 
 void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
     while (true) {
@@ -1089,10 +1040,6 @@ void Search::RunIterationSemaphore(SearchWorkerCtx& ctx, int num_workers) {
     if (computation) ReleaseComputation(std::move(computation));
 }
 
-// ============================================================================
-// PUCT Leaf Selection
-// ============================================================================
-
 Search::SelectedLeaf Search::SelectLeaf(SearchWorkerCtx& ctx) {
     Node* node = tree_.Root();
     int path_multivisit = std::max(1, params_.virtual_loss);
@@ -1209,16 +1156,12 @@ Search::PuctResult Search::SelectChildPuct(Node* node, bool is_root, SearchWorke
         const Edge& edge = edges[i];
         Node* child = edge.child.load(std::memory_order_acquire);
 
-        // A newly-created child with only virtual visits is already queued for
-        // neural evaluation. Skip it so the gather phase fills the GPU batch
-        // with distinct leaves instead of repeatedly colliding on the same one.
+        // Skip children already queued for neural evaluation to avoid collisions.
         if (child && child->GetN() == 0 && child->GetNInFlight() > 0) {
             continue;
         }
 
-        // Early cutoff: edges sorted by descending policy, so once we see
-        // two consecutive unvisited edges (no child pointer), all remaining
-        // also unvisited and have lower policy — can't beat current best.
+        // Edges sorted by descending policy; two consecutive unvisited = done.
         if (!child && i > 0) {
             Node* prev = edges[i - 1].child.load(std::memory_order_relaxed);
             if (!prev) break;
@@ -1257,15 +1200,9 @@ Search::PuctResult Search::SelectChildPuct(Node* node, bool is_root, SearchWorke
         }
     }
 
-    // Compute multivisit: how many visits can best child get before
-    // second-best overtakes it? (Lc0's visits_to_perform logic)
+    // Multivisit: visits until second-best overtakes (Lc0 visits_to_perform).
     int visits_to_assign = 1;
     if (best_idx >= 0 && num_edges > 1 && second_best_score > -1e8f) {
-        // After adding V visits to best, its U becomes:
-        // cpuct_sqrt_n * best_policy / (1 + best_n_started + V)
-        // We want: best_q + U_new >= second_best_score
-        // U_new = cpuct_sqrt_n * best_policy / (1 + N + V)
-        // V = cpuct_sqrt_n * best_policy / (second_best_score - best_q) - N - 1
         float best_q_component = best_score -
             cpuct_sqrt_n * best_policy / (1.0f + static_cast<float>(best_n_started));
         float margin = second_best_score - best_q_component;
@@ -1281,10 +1218,6 @@ Search::PuctResult Search::SelectChildPuct(Node* node, bool is_root, SearchWorke
     return {best_idx, visits_to_assign};
 }
 
-// ============================================================================
-// Backpropagation
-// ============================================================================
-
 void Search::Backpropagate(Node* node, float value, float draw,
                            float moves_left, int multivisit) {
     const int visits = std::max(1, multivisit);
@@ -1299,10 +1232,6 @@ void Search::Backpropagate(Node* node, float value, float draw,
         node = node->Parent();
     }
 }
-
-// ============================================================================
-// Prefetch into NN Cache
-// ============================================================================
 
 void Search::MaybePrefetchIntoCache(
     SearchWorkerCtx& ctx, BackendComputation* computation,
@@ -1401,10 +1330,6 @@ int Search::PrefetchIntoCache(Node* node, int budget, SearchWorkerCtx& ctx,
     return spent;
 }
 
-// ============================================================================
-// Dirichlet Noise
-// ============================================================================
-
 void Search::AddDirichletNoise(Node* root) {
     int num_edges = root->NumEdges();
     if (num_edges == 0 || params_.noise_epsilon <= 0.0f) return;
@@ -1431,18 +1356,10 @@ void Search::AddDirichletNoise(Node* root) {
     }
 }
 
-// ============================================================================
-// Static NN Policy Application
-// ============================================================================
-
 void Search::ApplyNNPolicy(Node* node, const EvaluationResult& result,
                            float softmax_temp) {
     ApplyNNPolicyToNode(node, result, softmax_temp);
 }
-
-// ============================================================================
-// Best Move / PV / Q Extraction
-// ============================================================================
 
 Move Search::GetBestMove() const {
     const Node* root = tree_.Root();
@@ -1614,10 +1531,6 @@ float Search::GetBestQ() const {
     return best ? best->GetWL() : 0.0f;
 }
 
-// ============================================================================
-// UCI Info Output
-// ============================================================================
-
 void Search::SendInfo() {
     if (!info_cb_) return;
 
@@ -1664,10 +1577,6 @@ void Search::SendInfo() {
     info_cb_(ss.str());
 }
 
-// ============================================================================
-// PV Boost Injection (Hybrid AB/MCTS)
-// ============================================================================
-
 void Search::InjectPVBoost(const Move* pv, int pv_len, int ab_depth) {
     if (pv_len <= 0) return;
 
@@ -1709,10 +1618,6 @@ void Search::InjectPVBoost(const Move* pv, int pv_len, int ab_depth) {
         if (!found) break;
     }
 }
-
-// ============================================================================
-// Factory
-// ============================================================================
 
 std::unique_ptr<Search> CreateSearch(const SearchParams& config) {
     std::unique_ptr<Backend> backend;

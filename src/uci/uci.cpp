@@ -51,7 +51,6 @@
 
 namespace MetalFish {
 
-// Forward declarations for search synchronization helpers (defined below)
 static void stop_active_searches();
 static void wait_active_searches();
 static void join_search_waiter();
@@ -140,7 +139,6 @@ void UCIEngine::loop() {
 
     // ======================================================================
     // Standard UCI Protocol Commands
-    // See: https://backscattering.de/chess/uci/
     // ======================================================================
 
     if (token == "quit" || token == "stop") {
@@ -191,7 +189,7 @@ void UCIEngine::loop() {
       }
 
     // ======================================================================
-    // MetalFish Extensions (debugging / CLI only -- GUIs never send these)
+    // MetalFish Extensions (debugging / CLI only)
     // ======================================================================
 
     else if (token == "d")
@@ -1332,9 +1330,7 @@ void UCIEngine::gpu_benchmark() {
 }
 
 // ============================================================================
-// Preload transformer weights and initialize search objects during isready.
-// This ensures the first 'go' command responds instantly without weight
-// loading.
+// Preload search objects during isready
 // ============================================================================
 
 static float get_float_option(Engine &engine, const char *name, float fallback) {
@@ -1562,8 +1558,6 @@ static std::string get_nn_weights_path(Engine &engine) {
   return nn_weights;
 }
 
-// Called from isready to preload transformer weights and compile MPSGraph.
-// This makes the first 'go' instant -- no weight loading delay.
 static std::unique_ptr<MCTS::ParallelHybridSearch> g_parallel_hybrid_search;
 static GPU::GPUNNUEManager *g_hybrid_gpu_manager = nullptr;
 static std::string g_parallel_hybrid_key;
@@ -1739,18 +1733,15 @@ static void preload_search_objects(Engine &engine) {
 }
 
 // ============================================================================
-// Parallel Hybrid Search Command (MCTS + AB running simultaneously)
-// Optimized for Apple Silicon with unified memory
+// Parallel Hybrid Search Command
 // ============================================================================
 
-// Wait for any background search waiter thread to complete
 static void join_search_waiter() {
   std::lock_guard<std::mutex> lock(g_search_waiter_mutex);
   if (g_search_waiter.joinable())
     g_search_waiter.join();
 }
 
-// Stop any active MCTS/Hybrid search (called from UCI stop command)
 static void stop_active_searches() {
   if (g_parallel_hybrid_search && g_parallel_hybrid_search->is_searching())
     g_parallel_hybrid_search->stop();
@@ -1761,7 +1752,6 @@ static void stop_active_searches() {
   }
 }
 
-// Wait for any active MCTS/Hybrid search to finish (called from UCI isready)
 static void wait_active_searches() {
   if (g_parallel_hybrid_search && g_parallel_hybrid_search->is_searching())
     g_parallel_hybrid_search->wait();
@@ -1801,7 +1791,6 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   sync_cout << "info string Starting Parallel Hybrid Search (MCTS + AB)..."
             << sync_endl;
 
-  // Parse search limits
   Search::LimitsType limits = parse_limits(is);
 
   const int total_threads =
@@ -1815,7 +1804,6 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     return;
   }
 
-  // Get transformer weights path
   std::string nn_weights = get_nn_weights_path(engine);
   if (nn_weights.empty()) {
     sync_cout << "info string ERROR: No transformer weights. Set UCI option "
@@ -1824,7 +1812,6 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     return;
   }
 
-  // GPU NNUE manager is optional
   GPU::GPUNNUEManager *gpu_manager = nullptr;
   if (GPU::gpu_nnue_manager_available()) {
     gpu_manager = &GPU::gpu_nnue_manager();
@@ -1839,7 +1826,6 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
             << (config.mcts_threads + config.ab_threads + 1) << ")"
             << sync_endl;
 
-  // Reuse preloaded search object, or create if not yet initialized
   const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
   bool need_reinit =
       !g_parallel_hybrid_search || g_hybrid_gpu_manager != gpu_manager ||
@@ -1867,12 +1853,10 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     g_parallel_hybrid_search->set_config(config);
   }
 
-  // Get current position from engine
   Position pos;
   StateInfo st;
   pos.set(engine.fen(), false, &st);
 
-  // Callbacks for UCI output
   auto best_move_cb = [](Move best, Move ponder) {
     std::string best_str = UCIEngine::move(best, false);
     std::string ponder_str = ponder != Move::none()
@@ -1885,19 +1869,13 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     sync_cout << info << sync_endl;
   };
 
-  // Start search - AB uses search_silent internally so no duplicate bestmove
-  // The search runs asynchronously; the UCI loop must remain free to process
-  // stop/quit commands. The bestmove callback fires when the search finishes.
-  join_search_waiter(); // Clean up any previous waiter
+  join_search_waiter();
   g_parallel_hybrid_search->start_search(pos, limits, best_move_cb, info_cb);
 
-  // Note: We do NOT wait() here. The UCI loop must keep reading stdin so it
-  // can process 'stop' and 'quit' commands. The bestmove callback handles
-  // output when the search completes.
 }
 
 // ============================================================================
-// Multi-Threaded MCTS Search Command (Pure GPU MCTS)
+// Multi-Threaded MCTS Search Command
 // ============================================================================
 void UCIEngine::mcts_mt_go(std::istringstream &is) {
   std::string args;
@@ -1908,7 +1886,6 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   int num_threads = static_cast<int>(engine.get_options()["Threads"]);
   bool explicit_threads_arg = false;
 
-  // Parse additional options (threads=N)
   std::istringstream option_args(args);
   while (option_args >> token) {
     if (token.find("threads=") == 0) {
@@ -1939,7 +1916,6 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   std::shared_ptr<MCTS::Search> mcts;
   const std::string cache_key = make_mcts_cache_key(nn_weights, config);
 
-  // Finish the previous waiter before reusing or replacing the cached object.
   join_search_waiter();
   mcts = get_or_create_cached_mcts(config, cache_key, nullptr);
 
@@ -1952,10 +1928,8 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   sync_cout << "info string Multi-threaded MCTS initialized with "
             << num_threads << " threads" << sync_endl;
 
-  // Get current position from engine
   std::string fen = engine.fen();
 
-  // Callbacks for UCI output
   auto best_move_cb = [](Move best, Move ponder) {
     std::string best_str = UCIEngine::move(best, false);
     std::string ponder_str = ponder != Move::none()
@@ -1968,18 +1942,14 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
     sync_cout << info << sync_endl;
   };
 
-  // Start search
   auto start_time = std::chrono::steady_clock::now();
   mcts->StartSearch(fen, limits, best_move_cb, info_cb);
 
-  // Store a reference so the stop command can reach it
   {
     std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
     g_active_mcts = mcts;
   }
 
-  // Spawn a background waiter thread for post-search stats.
-  // The UCI loop must remain free to process stop/quit commands.
   join_search_waiter();
   {
     std::lock_guard<std::mutex> wlock(g_search_waiter_mutex);
@@ -2021,8 +1991,6 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
 void UCIEngine::mcts_batch_benchmark(std::istringstream &is) {
   sync_cout << "info string MCTS Batched vs Direct Evaluation Benchmark"
             << sync_endl;
-  sync_cout << "info string ==========================================="
-            << sync_endl;
 
   // Get GPU NNUE manager
   GPU::GPUNNUEManager *gpu_manager = nullptr;
@@ -2035,7 +2003,6 @@ void UCIEngine::mcts_batch_benchmark(std::istringstream &is) {
     return;
   }
 
-  // Parse options
   std::string token;
   int num_threads = 4;
   int duration_ms = 5000;

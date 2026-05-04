@@ -18,7 +18,6 @@
 namespace MetalFish {
 namespace MCTS {
 
-// MCTS evaluation result from neural network
 struct EvaluationResult {
   float value;
   bool has_wdl;
@@ -37,7 +36,6 @@ struct EvaluationResult {
   }
 };
 
-// Neural network evaluator for MCTS
 class NNMCTSEvaluator {
 public:
   using PositionHistoryView = std::span<const Position *const>;
@@ -46,9 +44,6 @@ public:
   explicit NNMCTSEvaluator(const std::string &weights_path);
   ~NNMCTSEvaluator();
 
-  // Evaluate single position with game history for accurate NN encoding.
-  // The history vector should contain the last 8 board states (or fewer).
-  // history.back() is the current position to evaluate.
   EvaluationResult Evaluate(const Position &pos);
   EvaluationResult EvaluateWithHistory(PositionHistoryView history);
   EvaluationResult EvaluateWithHistoryAndMoves(PositionHistoryView history,

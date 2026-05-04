@@ -14,19 +14,12 @@
 
 namespace MetalFish {
 
-// Piece values for material calculation
 constexpr int PieceValues[] = {0, 100, 320, 330, 500, 900, 20000};
 
-// ============================================================================
-// PositionFeatures
-// ============================================================================
-
 PositionType PositionFeatures::classify() const {
-  // Weight the tactical vs strategic indicators
   float tactical = tactical_score;
   float strategic = strategic_score;
 
-  // Adjust based on specific conditions
   if (in_check || has_mate_threat) {
     tactical += 0.3f;
   }
@@ -60,17 +53,11 @@ PositionType PositionFeatures::classify() const {
   return PositionType::BALANCED;
 }
 
-// ============================================================================
-// PositionClassifier
-// ============================================================================
-
 PositionFeatures PositionClassifier::analyze(const Position &pos) const {
   PositionFeatures f;
 
-  // Basic checks
   f.in_check = pos.checkers();
 
-  // Count move types
   MoveList<LEGAL> moves(pos);
   for (const auto &m : moves) {
     if (pos.capture(m))
@@ -114,7 +101,7 @@ PositionFeatures PositionClassifier::analyze(const Position &pos) const {
   }
   f.material_imbalance = std::abs(f.material[WHITE] - f.material[BLACK]);
 
-  // Compute tactical score
+  // Tactical score
   float tactical = 0.0f;
   if (f.in_check)
     tactical += 0.3f;
@@ -132,7 +119,7 @@ PositionFeatures PositionClassifier::analyze(const Position &pos) const {
     tactical += 0.1f;
   f.tactical_score = std::min(1.0f, tactical);
 
-  // Compute strategic score
+  // Strategic score
   float strategic = 0.0f;
   if (f.is_closed)
     strategic += 0.3f;
@@ -203,7 +190,6 @@ int PositionClassifier::count_king_attackers(const Position &pos,
 
   int attackers = 0;
 
-  // Count pieces attacking king zone
   Bitboard their_pieces =
       pos.pieces(them) & ~pos.pieces(them, PAWN) & ~pos.pieces(them, KING);
   Bitboard occupied = pos.pieces();
@@ -271,7 +257,6 @@ int PositionClassifier::count_passed_pawns(const Position &pos, Color c) const {
     File f = file_of(s);
     Rank r = rank_of(s);
 
-    // Check if pawn is passed
     Bitboard front_span;
     if (c == WHITE) {
       front_span = 0ULL;
@@ -346,52 +331,38 @@ bool PositionClassifier::is_position_closed(const Position &pos) const {
   if (pawn_count < 10)
     return false;
 
-  // Count open files (files with no pawns)
   int open_files = 0;
   for (File f = FILE_A; f <= FILE_H; ++f) {
-    if (!(all_pawns & file_bb(f))) {
+    if (!(all_pawns & file_bb(f)))
       open_files++;
-    }
   }
 
-  // Position is closed if few open files and many pawns
   return open_files <= 2 && pawn_count >= 12;
 }
 
 bool PositionClassifier::is_endgame_position(const Position &pos) const {
-  // Simple endgame detection based on material
   int total_material = 0;
   for (Color c : {WHITE, BLACK}) {
     for (PieceType pt = KNIGHT; pt <= QUEEN; ++pt) {
       total_material += popcount(pos.pieces(c, pt)) * PieceValues[pt];
     }
   }
-
-  // Endgame if total non-pawn material is low
-  return total_material < 2600; // Roughly 2 rooks + minor piece
+  return total_material < 2600;
 }
 
 Bitboard PositionClassifier::get_king_zone(Square ksq) const {
-  // 3x3 area around king
   Bitboard zone = attacks_bb<KING>(ksq) | square_bb(ksq);
 
-  // Extend one rank forward
   File f = file_of(ksq);
   Rank r = rank_of(ksq);
 
-  if (r < RANK_7) {
+  if (r < RANK_7)
     zone |= shift<NORTH>(zone & rank_bb(Rank(r + 1)));
-  }
-  if (r > RANK_2) {
+  if (r > RANK_2)
     zone |= shift<SOUTH>(zone & rank_bb(Rank(r - 1)));
-  }
 
   return zone;
 }
-
-// ============================================================================
-// StrategySelector
-// ============================================================================
 
 SearchStrategy StrategySelector::get_strategy(const Position &pos) const {
   PositionFeatures features = classifier_.analyze(pos);
@@ -402,83 +373,74 @@ SearchStrategy StrategySelector::get_strategy(const PositionFeatures &f) const {
   SearchStrategy s;
   s.position_type = f.classify();
 
-  // REBALANCED: Give MCTS more weight across all position types
-  // The original weights were too aggressive toward alpha-beta,
-  // causing hybrid to underperform pure MCTS
   switch (s.position_type) {
   case PositionType::HIGHLY_TACTICAL:
-    // Tactical positions still favor alpha-beta but not as extreme
-    s.mcts_weight = 0.35f;          // was 0.2f
-    s.ab_weight = 0.65f;            // was 0.8f
-    s.cpuct = 1.2f;                 // Lower exploration for tactics
-    s.ab_depth = 8;                 // was 10
-    s.ab_verify_depth = 5;          // was 6
-    s.ab_override_threshold = 0.3f; // was 0.1f - harder to override MCTS
+    s.mcts_weight = 0.35f;
+    s.ab_weight = 0.65f;
+    s.cpuct = 1.2f;
+    s.ab_depth = 8;
+    s.ab_verify_depth = 5;
+    s.ab_override_threshold = 0.3f;
     s.use_ab_for_tactics = true;
-    s.time_multiplier = 1.1f; // was 1.2f
+    s.time_multiplier = 1.1f;
     break;
 
   case PositionType::TACTICAL:
-    s.mcts_weight = 0.45f;           // was 0.35f
-    s.ab_weight = 0.55f;             // was 0.65f
-    s.cpuct = 1.5f;                  // was 2.0f
-    s.ab_depth = 7;                  // was 8
-    s.ab_verify_depth = 4;           // was 5
-    s.ab_override_threshold = 0.35f; // was 0.2f
+    s.mcts_weight = 0.45f;
+    s.ab_weight = 0.55f;
+    s.cpuct = 1.5f;
+    s.ab_depth = 7;
+    s.ab_verify_depth = 4;
+    s.ab_override_threshold = 0.35f;
     s.use_ab_for_tactics = true;
-    s.time_multiplier = 1.05f; // was 1.1f
+    s.time_multiplier = 1.05f;
     break;
 
   case PositionType::BALANCED:
-    // Balanced positions should favor MCTS slightly (it's our strength)
-    s.mcts_weight = 0.55f; // was 0.5f
-    s.ab_weight = 0.45f;   // was 0.5f
-    s.cpuct = 1.5f;        // was 2.5f
+    s.mcts_weight = 0.55f;
+    s.ab_weight = 0.45f;
+    s.cpuct = 1.5f;
     s.ab_depth = 6;
     s.ab_verify_depth = 4;
-    s.ab_override_threshold = 0.4f; // was 0.3f
+    s.ab_override_threshold = 0.4f;
     s.use_ab_for_tactics = true;
     s.time_multiplier = 1.0f;
     break;
 
   case PositionType::STRATEGIC:
-    // Strategic positions favor MCTS more
-    s.mcts_weight = 0.70f; // was 0.65f
-    s.ab_weight = 0.30f;   // was 0.35f
-    s.cpuct = 1.8f;        // was 3.0f - still moderate exploration
+    s.mcts_weight = 0.70f;
+    s.ab_weight = 0.30f;
+    s.cpuct = 1.8f;
     s.ab_depth = 5;
     s.ab_verify_depth = 3;
-    s.ab_override_threshold = 0.5f; // was 0.4f
+    s.ab_override_threshold = 0.5f;
     s.use_ab_for_tactics = false;
-    s.time_multiplier = 0.95f; // was 0.9f
+    s.time_multiplier = 0.95f;
     break;
 
   case PositionType::HIGHLY_STRATEGIC:
-    // Highly strategic positions strongly favor MCTS
-    s.mcts_weight = 0.85f; // was 0.8f
-    s.ab_weight = 0.15f;   // was 0.2f
-    s.cpuct = 2.0f;        // was 3.5f
+    s.mcts_weight = 0.85f;
+    s.ab_weight = 0.15f;
+    s.cpuct = 2.0f;
     s.ab_depth = 4;
     s.ab_verify_depth = 2;
-    s.ab_override_threshold = 0.6f; // was 0.5f
+    s.ab_override_threshold = 0.6f;
     s.use_ab_for_tactics = false;
-    s.time_multiplier = 0.9f; // was 0.8f
+    s.time_multiplier = 0.9f;
     break;
   }
 
-  // Adjust for endgame - MCTS can be good in endgames too
+  // Adjust for endgame
   if (f.is_endgame) {
-    s.ab_depth += 1; // was +2
+    s.ab_depth += 1;
     s.ab_verify_depth += 1;
-    // Don't reduce MCTS weight as much in endgames
-    s.mcts_weight *= 0.9f; // was 0.8f
+    s.mcts_weight *= 0.9f;
     s.ab_weight = 1.0f - s.mcts_weight;
   }
 
-  // Adjust for complexity
   if (f.complexity > 0.7f) {
-    s.time_multiplier *= 1.15f; // was 1.2f
-    s.min_mcts_nodes = 150;     // was 200
+    s.time_multiplier *= 1.15f;
+    s.min_mcts_nodes = 150;
   }
 
   return s;
@@ -486,28 +448,23 @@ SearchStrategy StrategySelector::get_strategy(const PositionFeatures &f) const {
 
 void StrategySelector::adjust_for_time(SearchStrategy &s, int time_left_ms,
                                        int increment_ms) const {
-  // Adjust strategy based on time pressure
   if (time_left_ms < 10000) {
-    // Low time - favor faster alpha-beta
     s.mcts_weight *= 0.5f;
     s.ab_weight = 1.0f - s.mcts_weight;
     s.ab_depth = std::max(4, s.ab_depth - 2);
     s.time_multiplier *= 0.5f;
   } else if (time_left_ms < 30000) {
-    // Medium time pressure
     s.mcts_weight *= 0.8f;
     s.ab_weight = 1.0f - s.mcts_weight;
     s.time_multiplier *= 0.8f;
   } else if (time_left_ms > 300000) {
-    // Plenty of time - can explore more
     s.time_multiplier *= 1.3f;
     s.min_mcts_nodes = 300;
   }
 
   // Increment affects strategy
-  if (increment_ms > 5000) {
+  if (increment_ms > 5000)
     s.time_multiplier *= 1.1f;
-  }
 }
 
 } // namespace MetalFish

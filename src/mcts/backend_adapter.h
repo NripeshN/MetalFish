@@ -52,9 +52,8 @@ private:
   size_t size_;
 };
 
-// Hashes the exact state that can affect NN input encoding. The transformer
-// sees more than the current Zobrist key: history planes, repetition flags and
-// rule-50 state can all change the evaluation for the same board.
+// Hashes exact state affecting NN input encoding: history planes, repetition
+// flags and rule-50 state can all change the evaluation for the same board.
 uint64_t ComputeNNCacheKey(const Position *const *history, int count);
 uint64_t ComputeNNCacheKeyFromState(const uint64_t *raw_keys,
                                     const int *rule50_counts,

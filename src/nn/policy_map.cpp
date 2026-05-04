@@ -246,7 +246,6 @@ const char *kMoveStrings[kPolicyOutputs] = {
     "g7g8b", "g7h8q", "g7h8r", "g7h8b", "h7g8q", "h7g8r", "h7g8b", "h7h8q",
     "h7h8r", "h7h8b"};
 
-// Pack move for lookup: from (6 bits) | to (6 bits) | promotion (4 bits)
 constexpr uint16_t PackMove(int from_sq, int to_sq, char promo_char) {
   uint16_t packed = (from_sq & 0x3F) | ((to_sq & 0x3F) << 6);
   if (promo_char) {
@@ -264,7 +263,6 @@ constexpr uint16_t PackMove(int from_sq, int to_sq, char promo_char) {
   return packed;
 }
 
-// Parse move string to packed format
 uint16_t ParseMoveStr(const char *str) {
   int from_file = str[0] - 'a';
   int from_rank = str[1] - '1';
@@ -283,7 +281,6 @@ uint16_t ParseMoveStr(const char *str) {
   return PackMove(from_sq, to_sq, promo);
 }
 
-// Compile-time lookup table: packed move → policy index
 constexpr std::array<uint16_t, 65536> BuildLookupTable() {
   std::array<uint16_t, 65536> table{};
   for (auto &val : table)
@@ -304,8 +301,6 @@ const std::array<uint16_t, 65536> kPackedToIndex = BuildLookupTable();
 } // namespace
 
 void InitPolicyTables() {
-  // Tables are constexpr and built at compile time
-  // This function maintained for API compatibility
 }
 
 namespace {
@@ -321,7 +316,6 @@ Square TransformSquare(Square sq, int transform) {
 } // namespace
 
 int MoveToNNIndex(Move move, int transform) {
-  // Apply transform to move if needed
   if (transform != 0) {
     const Square from = TransformSquare(move.from_sq(), transform);
     const Square to = TransformSquare(move.to_sq(), transform);
@@ -335,14 +329,10 @@ int MoveToNNIndex(Move move, int transform) {
   const int from_sq = static_cast<int>(move.from_sq());
   const int to_sq = static_cast<int>(move.to_sq());
 
-  // Validate square indices
   if (from_sq < 0 || from_sq > 63 || to_sq < 0 || to_sq > 63) {
     return -1;
   }
 
-  // Handle promotions -- matches Lc0 encoding:
-  // Queen/rook/bishop promotions use explicit entries at indices 1792-1857.
-  // Knight promotions use the regular knight-move entries in 0-1791.
   char promo_char = 0;
   if (move.type_of() == PROMOTION) {
     PieceType pt = move.promotion_type();
@@ -358,7 +348,7 @@ int MoveToNNIndex(Move move, int transform) {
       break;
     case KNIGHT:
       promo_char = 0;
-      break; // Knight promotion = regular knight-move entry
+      break;
     default:
       promo_char = 'q';
       break;
@@ -368,9 +358,7 @@ int MoveToNNIndex(Move move, int transform) {
   uint16_t packed = PackMove(from_sq, to_sq, promo_char);
   uint16_t index = kPackedToIndex[packed];
 
-  // If move not in policy table, return -1 to indicate error
   if (index == 0xFFFF) {
-    // This can happen for illegal moves or castle moves in some edge cases
     return -1;
   }
 
@@ -412,7 +400,6 @@ Move IndexToNNMove(int index, int transform) {
     from = TransformSquare(from, inv_transform);
   }
 
-  // Check for promotion (5th character)
   if (move_str[4]) {
     PieceType pt = QUEEN;
     switch (move_str[4]) {

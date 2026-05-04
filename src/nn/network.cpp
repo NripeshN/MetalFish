@@ -17,13 +17,11 @@
 namespace MetalFish {
 namespace NN {
 
-// Stub implementation of network
 class StubNetwork : public Network {
 public:
   StubNetwork(const WeightsFile &weights) : weights_(weights) {}
 
   NetworkOutput Evaluate(const InputPlanes &input) override {
-    // Stub implementation - returns random-ish policy and neutral value
     NetworkOutput output;
     output.policy.resize(kPolicyOutputs, 1.0f / kPolicyOutputs);
     output.value = 0.0f;
@@ -76,7 +74,6 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
 
 std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
                                        const std::string &backend) {
-  // Try to load weights
   auto weights_opt = LoadWeights(weights_path);
 
   if (!weights_opt.has_value()) {

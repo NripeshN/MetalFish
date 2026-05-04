@@ -4,10 +4,6 @@
 
   GPU Neural Network Backend for MCTS
 
-  This file provides a neural network backend for MCTS that leverages
-  our existing GPU NNUE infrastructure. It converts NNUE scores to
-  WDL (Win/Draw/Loss) probabilities and provides policy priors.
-
   Licensed under GPL-3.0
 */
 
@@ -23,7 +19,6 @@ namespace MetalFish {
 namespace GPU {
 
 // GPU-accelerated neural network backend for MCTS
-// Uses our existing GPU NNUE infrastructure for evaluation
 class GPUMCTSBackend : public MCTS::MCTSNeuralNetwork {
 public:
   GPUMCTSBackend();
@@ -68,9 +63,6 @@ private:
   // Convert NNUE centipawn score to WDL probabilities
   void score_to_wdl(int score, float &win, float &draw, float &loss);
 
-  // Generate policy priors from legal moves
-  // Since NNUE doesn't provide policy, we use a heuristic based on move
-  // ordering
   std::vector<std::pair<MCTS::MCTSMove, float>>
   generate_policy(const MCTS::MCTSPosition &pos);
 };

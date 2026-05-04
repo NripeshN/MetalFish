@@ -16,30 +16,18 @@ using namespace MetalFish;
 namespace MetalFish {
 namespace MCTS {
 
-// ============================================================================
-// MCTSMove Implementation
-// ============================================================================
-
 std::string MCTSMove::to_string() const {
   if (is_null())
     return "(none)";
   return UCIEngine::move(move_, false);
 }
 
-// Starting position FEN
 constexpr auto StartFEN =
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
-// ============================================================================
-// MCTSPosition Implementation
-// ============================================================================
 
 MCTSPosition::MCTSPosition() { pos_.set(StartFEN, false, &st_); }
 
 MCTSPosition::MCTSPosition(const MCTSPosition &other) {
-  // Direct position copy via FEN (Position has non-trivial state pointers)
-  // This is safer than memcpy since Position has internal pointers to
-  // StateInfo.
   pos_.set(other.pos_.fen(), false, &st_);
   move_stack_ = other.move_stack_;
 }
@@ -97,28 +85,23 @@ bool MCTSPosition::is_stalemate() const {
 }
 
 bool MCTSPosition::is_draw() const {
-  // Check for 50-move rule
   if (pos_.rule50_count() >= 100)
     return true;
-
-  // Check for insufficient material
   if (pos_.is_draw(0))
     return true;
-
   return false;
 }
 
 bool MCTSPosition::is_terminal() const {
   MoveList<LEGAL> moves(pos_);
   if (moves.size() == 0)
-    return true; // Checkmate or stalemate
+    return true;
   if (is_draw())
     return true;
   return false;
 }
 
 int MCTSPosition::repetition_count() const {
-  // Simplified - use built-in repetition detection
   return pos_.is_draw(0) ? 2 : 0;
 }
 
@@ -130,13 +113,8 @@ bool MCTSPosition::can_castle_queenside(Color c) const {
   return pos_.can_castle(c == WHITE ? WHITE_OOO : BLACK_OOO);
 }
 
-// ============================================================================
-// MCTSEncoder Implementation
-// ============================================================================
-
 std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
-  // Uses 112 input planes of 8x8 = 7168 values
-  // We'll use a simplified encoding compatible with our GPU NNUE
+  // 112 input planes of 8x8 = 7168 values
   std::vector<float> planes(kTotalPlanes * 64, 0.0f);
 
   const Position &p = pos.internal_position();
@@ -151,7 +129,6 @@ std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
 
       while (bb) {
         Square sq = pop_lsb(bb);
-        // Flip square if black to move (standard convention)
         if (us == BLACK)
           sq = flip_rank(sq);
         planes[plane_idx * 64 + sq] = 1.0f;
@@ -167,7 +144,7 @@ std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
     std::fill_n(planes.data() + 12 * 64, 64, 1.0f);
   }
 
-  // Castling rights (planes 104-107, we'll use 13-16)
+  // Castling rights (planes 13-16)
   if (pos.can_castle_kingside(us))
     std::fill_n(planes.data() + 13 * 64, 64, 1.0f);
   if (pos.can_castle_queenside(us))
@@ -184,7 +161,7 @@ std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
     planes[17 * 64 + encoded_ep] = 1.0f;
   }
 
-  // 50-move rule counter (plane 18) - normalized
+  // 50-move rule counter (plane 18), normalized
   float rule50 = static_cast<float>(pos.rule50_count()) / 100.0f;
   std::fill_n(planes.data() + 18 * 64, 64, rule50);
 

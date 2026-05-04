@@ -53,11 +53,6 @@ template <typename Arch, typename Transformer> class Network;
 
 namespace MetalFish::GPU {
 
-// ============================================================================
-// Evaluation Strategy Selection
-// ============================================================================
-
-// Strategy for kernel dispatch based on batch characteristics
 enum class EvalStrategy {
   CPU_FALLBACK,       // Use CPU evaluation (batch too small)
   GPU_STANDARD,       // Standard GPU kernels
@@ -65,7 +60,6 @@ enum class EvalStrategy {
   GPU_FEATURE_EXTRACT // GPU-side feature extraction (very large batches)
 };
 
-// Runtime tuning parameters learned from observed performance
 struct GPUTuningParams {
   int min_batch_for_gpu = 4; // Minimum batch size for GPU path
   int simd_threshold =
@@ -75,19 +69,10 @@ struct GPUTuningParams {
   double gpu_dispatch_us =
       140.0; // Observed GPU dispatch overhead (microseconds)
 
-  // Select optimal strategy based on batch size
   inline EvalStrategy select_strategy(int batch_size) const {
     if (batch_size < min_batch_for_gpu) {
       return EvalStrategy::CPU_FALLBACK;
     }
-
-    // Calculate expected costs
-    // CPU cost: batch_size * cpu_eval_ns (nanoseconds)
-    // GPU cost: gpu_dispatch_us * 1000 (nanoseconds) + batch_size *
-    // marginal_gpu_cost
-
-    // For small batches, dispatch overhead dominates - use standard kernels
-    // For large batches, compute dominates - use SIMD kernels
 
     if (batch_size >= gpu_extract_threshold) {
       return EvalStrategy::GPU_FEATURE_EXTRACT;
@@ -99,10 +84,6 @@ struct GPUTuningParams {
   }
 };
 
-// ============================================================================
-// GPU Position Representation
-// ============================================================================
-
 struct alignas(16) GPUPositionData {
   uint64_t pieces[2][7]; // [color][piece_type] bitboards
   uint8_t king_sq[2];    // King squares
@@ -113,10 +94,6 @@ struct alignas(16) GPUPositionData {
   void from_position(const Position &pos);
 };
 
-// ============================================================================
-// Feature Update for Incremental Computation
-// ============================================================================
-
 struct GPUFeatureUpdate {
   std::array<int32_t, 32> added_features;
   std::array<int32_t, 32> removed_features;
@@ -125,10 +102,6 @@ struct GPUFeatureUpdate {
   uint8_t perspective = 0;
   uint8_t padding = 0;
 };
-
-// ============================================================================
-// GPU Network Weights
-// ============================================================================
 
 struct GPULayerWeights {
   std::unique_ptr<Buffer> fc0_weights; // [hidden_dim * (FC0_OUT+1)]
@@ -164,10 +137,6 @@ struct GPUNetworkData {
   size_t memory_usage() const;
 };
 
-// ============================================================================
-// GPU Evaluation Batch
-// ============================================================================
-
 struct GPUEvalBatch {
   // Position data
   std::vector<GPUPositionData> positions;
@@ -193,10 +162,6 @@ struct GPUEvalBatch {
   void add_position_data(const GPUPositionData &data);
   int get_bucket(int idx) const { return buckets[idx]; }
 };
-
-// ============================================================================
-// GPU NNUE Manager
-// ============================================================================
 
 class GPUNNUEManager {
 public:
@@ -249,26 +214,18 @@ public:
   // Status
   std::string status_string() const;
 
-  // ============================================================================
-  // Incremental Update API
-  // ============================================================================
-
-  // Apply incremental update to accumulator
-  // Returns true if update was applied on GPU, false if full refresh needed
   bool apply_incremental_update(int perspective, int king_square,
                                 const int32_t *added_features, int num_added,
                                 const int32_t *removed_features,
                                 int num_removed, const int32_t *src_accumulator,
                                 int32_t *dst_accumulator, int hidden_dim);
 
-  // Apply double incremental update (for null-move search)
   bool apply_double_incremental_update(
       int perspective, const int32_t *added1, int num_added1,
       const int32_t *removed1, int num_removed1, const int32_t *added2,
       int num_added2, const int32_t *removed2, int num_removed2,
       const int32_t *src_accumulator, int32_t *dst_accumulator, int hidden_dim);
 
-  // Check if incremental update is beneficial vs full refresh
   bool should_use_incremental(int num_added, int num_removed,
                               int hidden_dim) const;
 
@@ -276,18 +233,15 @@ private:
   bool initialized_ = false;
   GPUTuningParams tuning_;
 
-  // Network weights
   GPUNetworkData big_network_;
   GPUNetworkData small_network_;
 
-  // Compute kernels - standard
   std::unique_ptr<ComputeKernel> extract_features_kernel_;
   std::unique_ptr<ComputeKernel> feature_transform_kernel_;
   std::unique_ptr<ComputeKernel> feature_transform_dual_kernel_;
   std::unique_ptr<ComputeKernel> psqt_kernel_;
   std::unique_ptr<ComputeKernel> forward_fused_kernel_;
 
-  // Compute kernels - optimized variants
   std::unique_ptr<ComputeKernel> forward_simd_kernel_;
   std::unique_ptr<ComputeKernel> forward_batch_kernel_;
   std::unique_ptr<ComputeKernel> feature_transform_vec4_kernel_;
@@ -295,21 +249,17 @@ private:
   std::unique_ptr<ComputeKernel> forward_optimized_kernel_;
   std::unique_ptr<ComputeKernel> fused_single_kernel_;
 
-  // Compute kernels - incremental updates
   std::unique_ptr<ComputeKernel> incremental_update_kernel_;
   std::unique_ptr<ComputeKernel> incremental_update_simd_kernel_;
   std::unique_ptr<ComputeKernel> double_incremental_kernel_;
 
-  // Compute kernels - Finny table operations
   std::unique_ptr<ComputeKernel> update_finny_kernel_;
   std::unique_ptr<ComputeKernel> load_finny_kernel_;
 
-  // Compute kernels - sparse optimizations
   std::unique_ptr<ComputeKernel> fc0_sparse_bitmask_kernel_;
   std::unique_ptr<ComputeKernel> feature_transform_permuted_kernel_;
   std::unique_ptr<ComputeKernel> forward_simd_optimized_kernel_;
 
-  // Working buffers
   std::unique_ptr<Buffer> positions_buffer_;
   std::unique_ptr<Buffer> white_features_buffer_;
   std::unique_ptr<Buffer> black_features_buffer_;
@@ -319,35 +269,27 @@ private:
   std::unique_ptr<Buffer> psqt_buffer_;
   std::unique_ptr<Buffer> output_buffer_;
 
-  // Pre-allocated staging buffers (avoid per-call allocations)
   std::unique_ptr<Buffer> white_counts_buffer_;
   std::unique_ptr<Buffer> black_counts_buffer_;
   std::unique_ptr<Buffer> white_offsets_buffer_;
   std::unique_ptr<Buffer> black_offsets_buffer_;
 
-  // Incremental update buffers
   std::unique_ptr<Buffer> feature_update_buffer_;
   std::unique_ptr<Buffer> added_features_buffer_;
   std::unique_ptr<Buffer> removed_features_buffer_;
   std::unique_ptr<Buffer> update_counts_buffer_;
 
-  // Finny table GPU buffers (for caching)
-  std::unique_ptr<Buffer> finny_accumulators_buffer_[2]; // [perspective]
+  std::unique_ptr<Buffer> finny_accumulators_buffer_[2];
   std::unique_ptr<Buffer> finny_psqt_buffer_[2];
 
-  // Sparse input bitmask buffer
   std::unique_ptr<Buffer> nnz_masks_buffer_;
 
-  // Statistics
   std::atomic<size_t> gpu_evals_{0};
   std::atomic<size_t> cpu_evals_{0};
   std::atomic<size_t> batch_count_{0};
   double total_time_ms_ = 0;
 
-  // Thread safety for GPU operations
   mutable std::mutex gpu_mutex_;
-
-  // Internal methods
   bool compile_shaders();
   bool allocate_working_buffers();
   bool allocate_network_buffers(GPUNetworkData &net, int hidden_dim,
@@ -361,29 +303,14 @@ private:
   bool dispatch_forward_pass(const GPUNetworkData &net, int batch_size,
                              int bucket);
 
-  // Strategy-specific evaluation paths
   bool evaluate_standard(GPUEvalBatch &batch, const GPUNetworkData &net);
   bool evaluate_simd(GPUEvalBatch &batch, const GPUNetworkData &net);
 };
 
-// ============================================================================
-// Global Interface
-// ============================================================================
-
-// Get the global GPU NNUE manager
 GPUNNUEManager &gpu_nnue_manager();
-
-// Initialize GPU NNUE with networks
 bool initialize_gpu_nnue(const Eval::NNUE::Networks &networks);
-
-// Check if GPU NNUE manager is available
 bool gpu_nnue_manager_available();
-
-// Evaluate a batch of positions
 bool gpu_evaluate_batch(GPUEvalBatch &batch, bool use_big = true);
-
-// Shutdown GPU NNUE manager - call before program exit to ensure clean cleanup
-// This prevents crashes during static destruction
 void shutdown_gpu_nnue();
 
 } // namespace MetalFish::GPU

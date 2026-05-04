@@ -13,10 +13,6 @@
 namespace MetalFish {
 namespace MCTS {
 
-// ============================================================================
-// ChainedStopper
-// ============================================================================
-
 void ChainedStopper::Add(std::unique_ptr<SearchStopper> s) {
   stoppers_.push_back(std::move(s));
 }
@@ -28,29 +24,17 @@ bool ChainedStopper::ShouldStop(const SearchStats &stats) {
   return false;
 }
 
-// ============================================================================
-// TimeLimitStopper
-// ============================================================================
-
 TimeLimitStopper::TimeLimitStopper(int64_t limit_ms) : limit_ms_(limit_ms) {}
 
 bool TimeLimitStopper::ShouldStop(const SearchStats &stats) {
   return stats.time_since_movestart_ms >= limit_ms_;
 }
 
-// ============================================================================
-// NodeLimitStopper
-// ============================================================================
-
 NodeLimitStopper::NodeLimitStopper(uint64_t limit) : limit_(limit) {}
 
 bool NodeLimitStopper::ShouldStop(const SearchStats &stats) {
   return stats.total_nodes >= limit_;
 }
-
-// ============================================================================
-// SmartPruningStopper
-// ============================================================================
 
 SmartPruningStopper::SmartPruningStopper(float factor, int64_t time_limit_ms)
     : factor_(factor), time_limit_ms_(time_limit_ms) {}
@@ -86,10 +70,6 @@ bool SmartPruningStopper::ShouldStop(const SearchStats &stats) {
   return false;
 }
 
-// ============================================================================
-// KLDGainStopper
-// ============================================================================
-
 KLDGainStopper::KLDGainStopper(float min_gain, int average_interval)
     : min_gain_(min_gain), average_interval_(average_interval) {}
 
@@ -97,7 +77,7 @@ bool KLDGainStopper::ShouldStop(const SearchStats &stats) {
   std::lock_guard<std::mutex> lock(mutex_);
   const double new_child_nodes = static_cast<double>(stats.total_nodes) - 1.0;
 
-  // Don't trigger before a minimum number of nodes (need meaningful distribution)
+  // Need a meaningful distribution before triggering
   if (new_child_nodes < 500) return false;
 
   if (new_child_nodes < prev_child_nodes_ + average_interval_) return false;
@@ -127,23 +107,13 @@ bool KLDGainStopper::ShouldStop(const SearchStats &stats) {
   return false;
 }
 
-// ============================================================================
-// MemoryWatchingStopper
-// ============================================================================
-
 MemoryWatchingStopper::MemoryWatchingStopper(size_t max_bytes)
     : max_bytes_(max_bytes) {}
 
 bool MemoryWatchingStopper::ShouldStop(const SearchStats &stats) {
-    // ~64 bytes per node + ~16 bytes per edge * ~35 avg edges
-    // Conservative estimate: ~624 bytes per expanded node
     size_t estimated = stats.total_nodes * 624;
     return estimated > max_bytes_;
 }
-
-// ============================================================================
-// SigmoidTimeManager
-// ============================================================================
 
 std::unique_ptr<SearchStopper>
 SigmoidTimeManager::CreateStopper(Color /*us*/, int64_t time_left, int64_t inc,

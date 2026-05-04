@@ -50,11 +50,8 @@ constexpr size_t CACHE_LINE_SIZE = 128;
 constexpr size_t CACHE_LINE_SIZE = 64;
 #endif
 
-// Forward declarations
 class Node;
 
-// MCTS Edge with compressed policy and embedded child pointer (TSEdge pattern).
-// Edges are packed contiguously for cache-friendly PUCT scans.
 struct Edge {
     Move move = Move::none();
     uint16_t p_ = 0;
@@ -96,9 +93,6 @@ struct Edge {
     }
 };
 
-// MCTS Node - cache-line aligned for the target CPU.
-// Children are stored as atomic<Node*> inside each Edge, matching the old
-// TSEdge pattern for lock-free child installation via CAS.
 class alignas(CACHE_LINE_SIZE) Node {
 public:
     enum class Terminal : uint8_t {
@@ -126,8 +120,6 @@ public:
     Node(const Node&) = delete;
     Node& operator=(const Node&) = delete;
 
-    // --- Visit counts ---
-
     uint32_t GetN() const { return n_.load(std::memory_order_acquire); }
 
     uint32_t GetNInFlight() const {
@@ -143,8 +135,6 @@ public:
         return n > 0 ? n - 1 : 0;
     }
 
-    // --- Value accessors ---
-
     float GetQ(float draw_score = 0.0f) const {
         return static_cast<float>(wl_.load(std::memory_order_acquire)) +
                draw_score * d_.load(std::memory_order_acquire);
@@ -156,7 +146,6 @@ public:
     float GetD() const { return d_.load(std::memory_order_acquire); }
     float GetM() const { return m_.load(std::memory_order_acquire); }
 
-    // Sum of policy priors for children that have been visited (N > 0)
     float GetVisitedPolicy() const {
         float dominated = 0.0f;
         for (int i = 0; i < num_edges_; ++i) {
@@ -168,11 +157,7 @@ public:
         return dominated;
     }
 
-    // --- Score update ---
-
-    // Collision-aware virtual loss. Returns false when another thread is
-    // already expanding this node (N==0 && N_in_flight>0), signalling
-    // a collision the caller should back off from.
+    // Returns false on collision (another thread is expanding this node).
     bool TryStartScoreUpdate(int multivisit = 1) {
         const uint32_t visits = static_cast<uint32_t>(std::max(1, multivisit));
         uint32_t n = n_.load(std::memory_order_acquire);
@@ -196,7 +181,6 @@ public:
         }
     }
 
-    // Running-average backpropagation with double-precision WL accumulation.
     void FinalizeScoreUpdate(float v, float d, float m, int multivisit = 1) {
 #ifdef __APPLE__
         os_unfair_lock_lock(&score_lock_);
@@ -236,8 +220,7 @@ public:
 #endif
     }
 
-    // Propagate proven terminal bounds up the tree ("sticky endgames").
-    // If every child is terminal, this node becomes terminal too.
+    // If every child is terminal, propagate bounds up the tree.
     void MaybeSetBounds() {
         if (num_edges_ == 0) return;
 
@@ -267,8 +250,6 @@ public:
 
         MakeTerminal(Terminal::EndOfGame, best_parent_wl, best_d, best_m);
     }
-
-    // --- Edge / children management ---
 
     void CreateEdges(const MoveList<LEGAL>& moves) {
         CreateEdges(moves.begin(), static_cast<int>(moves.size()));
@@ -312,16 +293,12 @@ public:
     Edge* Edges() { return edges_.get(); }
     const Edge* Edges() const { return edges_.get(); }
 
-    // --- Tree navigation ---
-
     Node* Parent() const { return parent_; }
     int EdgeIndex() const { return static_cast<int>(index_); }
     void DetachFromParentForReuse() {
         parent_ = nullptr;
         index_ = 0;
     }
-
-    // --- Terminal state ---
 
     bool IsTerminal() const {
         return terminal_type_.load(std::memory_order_acquire) != 0;
@@ -347,7 +324,6 @@ public:
 #endif
     }
 
-    // Legacy helper: sets WL from a single value, D=0, M=0
     void SetTerminal(Terminal type, float value) {
         MakeTerminal(type, value, 0.0f, 0.0f);
     }
@@ -363,8 +339,6 @@ public:
             RevertTerminal();
         }
     }
-
-    // --- Node solidification ---
 
     bool IsSolid() const { return solid_children_; }
 
@@ -414,8 +388,6 @@ public:
         return true;
     }
 
-    // --- Legacy accessors (compatibility with old ThreadSafeNode API) ---
-
     uint32_t n() const { return GetN(); }
     float q() const { return GetWL(); }
     float d() const { return GetD(); }
@@ -442,10 +414,6 @@ private:
     bool                      solid_children_ = false;   // 1 byte  — children are solidified
     // Total: 48 + 8 + 1 + 7 padding = 64 bytes on Apple
 };
-
-// ============================================================================
-// NodeGarbageCollector - Background deallocation of pruned subtrees
-// ============================================================================
 
 class NodeGarbageCollector {
 public:
@@ -498,10 +466,6 @@ inline NodeGarbageCollector& GetNodeGC() {
     return gc;
 }
 
-// ============================================================================
-// NodeTree - Arena-allocated tree with reuse support
-// ============================================================================
-
 class NodeTree {
 public:
     NodeTree() { AllocateNewArena(); }
@@ -510,7 +474,6 @@ public:
     NodeTree(const NodeTree&) = delete;
     NodeTree& operator=(const NodeTree&) = delete;
 
-    // Full reset: discard the entire tree and start from the given FEN.
     void Reset(const std::string& fen) {
         arenas_.clear();
         current_arena_.store(0, std::memory_order_relaxed);
@@ -526,9 +489,6 @@ public:
         }
     }
 
-    // Attempt 1–2 ply lookahead reuse: if the new FEN is reachable from the
-    // current root via one of its expanded children (or grandchildren),
-    // re-root the tree instead of discarding it. Returns true on success.
     bool TryReuse(const std::string& new_fen) {
         Node* r = Root();
         if (!r || r->NumEdges() == 0) return false;
@@ -605,7 +565,6 @@ public:
         return root_fen_;
     }
 
-    // Arena allocation: O(1) amortised, thread-safe.
     Node* AllocateNode(Node* parent, int edge_idx) {
         while (true) {
             size_t arena_idx = current_arena_.load(std::memory_order_acquire);
@@ -638,7 +597,6 @@ public:
     }
 
 private:
-    // Root can live on the heap (initial) or in an arena (after reuse).
     struct NoDelete { void operator()(Node*) const {} };
     std::unique_ptr<Node>            root_heap_;
     std::unique_ptr<Node, NoDelete>  root_arena_;
