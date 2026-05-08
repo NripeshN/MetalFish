@@ -101,9 +101,7 @@ bool MCTSPosition::is_terminal() const {
   return false;
 }
 
-int MCTSPosition::repetition_count() const {
-  return pos_.is_draw(0) ? 2 : 0;
-}
+int MCTSPosition::repetition_count() const { return pos_.is_draw(0) ? 2 : 0; }
 
 bool MCTSPosition::can_castle_kingside(Color c) const {
   return pos_.can_castle(c == WHITE ? WHITE_OO : BLACK_OO);

@@ -102,9 +102,7 @@ public:
 #endif
   }
 
-  int gpu_core_count() const override {
-    return 0;
-  }
+  int gpu_core_count() const override { return 0; }
 
   int max_threads_per_simd_group() const override {
 #ifdef __AVX512F__
@@ -116,9 +114,7 @@ public:
 #endif
   }
 
-  int recommended_batch_size() const override {
-    return 1;
-  }
+  int recommended_batch_size() const override { return 1; }
 
   std::unique_ptr<Buffer> create_buffer(size_t size, MemoryMode,
                                         BufferUsage) override {
@@ -182,9 +178,7 @@ bool Backend::available() { return false; }
 
 void shutdown_gpu_backend() {}
 
-bool gpu_backend_shutdown() {
-  return false;
-}
+bool gpu_backend_shutdown() { return false; }
 
 struct ScopedTimer::Impl {
   std::string name;

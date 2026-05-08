@@ -30,7 +30,7 @@ import random
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 try:
@@ -70,16 +70,23 @@ def detect_default_threads() -> int:
     n = os.cpu_count() or 8
     return max(1, n)
 
+
 # ============================================================================
 # UCI Engine
 # ============================================================================
+
 
 class UCIEngine:
     def __init__(self, cmd: Sequence[str], name: str, options: Dict[str, str] = None):
         self.name = name
         self.proc = subprocess.Popen(
-            list(cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, bufsize=1)
+            list(cmd),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
         self._send("uci")
         self._wait_for("uciok", 30)
         if options:
@@ -110,8 +117,16 @@ class UCIEngine:
         self._send("isready")
         self._wait_for("readyok", 30)
 
-    def go(self, fen: str, moves: List[str], wtime: int, btime: int,
-           winc: int = 0, binc: int = 0, movetime: int = 0) -> str:
+    def go(
+        self,
+        fen: str,
+        moves: List[str],
+        wtime: int,
+        btime: int,
+        winc: int = 0,
+        binc: int = 0,
+        movetime: int = 0,
+    ) -> str:
         pos_cmd = f"position fen {fen}"
         if moves:
             pos_cmd += " moves " + " ".join(moves)
@@ -122,7 +137,9 @@ class UCIEngine:
         else:
             self._send(f"go wtime {wtime} btime {btime} winc {winc} binc {binc}")
 
-        timeout = max(wtime, btime) // 1000 + 30 if not movetime else movetime // 1000 + 30
+        timeout = (
+            max(wtime, btime) // 1000 + 30 if not movetime else movetime // 1000 + 30
+        )
         line = self._wait_for("bestmove", timeout)
         parts = line.split()
         return parts[1] if len(parts) > 1 else "0000"
@@ -140,7 +157,10 @@ class UCIEngine:
 # Opening Book
 # ============================================================================
 
-def load_openings(book_path: pathlib.Path, max_openings: int = 500) -> List[chess.Board]:
+
+def load_openings(
+    book_path: pathlib.Path, max_openings: int = 500
+) -> List[chess.Board]:
     """Load opening positions from a PGN book."""
     openings = []
     if not book_path.exists():
@@ -162,6 +182,7 @@ def load_openings(book_path: pathlib.Path, max_openings: int = 500) -> List[ches
 # Game Playing
 # ============================================================================
 
+
 @dataclass
 class GameResult:
     white: str
@@ -171,9 +192,16 @@ class GameResult:
     moves: int
     pgn: str = ""
 
-def play_game(white: UCIEngine, black: UCIEngine, opening: Optional[chess.Board] = None,
-              tc_base_ms: int = 60000, tc_inc_ms: int = 100,
-              movetime_ms: int = 0, max_moves: int = 300) -> GameResult:
+
+def play_game(
+    white: UCIEngine,
+    black: UCIEngine,
+    opening: Optional[chess.Board] = None,
+    tc_base_ms: int = 60000,
+    tc_inc_ms: int = 100,
+    movetime_ms: int = 0,
+    max_moves: int = 300,
+) -> GameResult:
     """Play one game between two engines."""
     if opening:
         board = opening.copy()
@@ -212,19 +240,22 @@ def play_game(white: UCIEngine, black: UCIEngine, opening: Optional[chess.Board]
                 reason = "3-fold repetition"
             elif board.is_insufficient_material():
                 reason = "insufficient material"
-            return GameResult(white.name, black.name, result, reason,
-                              ply // 2, str(game_pgn))
+            return GameResult(
+                white.name, black.name, result, reason, ply // 2, str(game_pgn)
+            )
 
         eng = white if board.turn == chess.WHITE else black
         t0 = time.time()
 
         try:
-            move_str = eng.go(start_fen, move_list, wtime, btime,
-                              tc_inc_ms, tc_inc_ms, movetime_ms)
+            move_str = eng.go(
+                start_fen, move_list, wtime, btime, tc_inc_ms, tc_inc_ms, movetime_ms
+            )
         except (TimeoutError, RuntimeError):
             result = "0-1" if board.turn == chess.WHITE else "1-0"
-            return GameResult(white.name, black.name, result, "timeout/crash",
-                              ply // 2, str(game_pgn))
+            return GameResult(
+                white.name, black.name, result, "timeout/crash", ply // 2, str(game_pgn)
+            )
 
         elapsed_ms = int((time.time() - t0) * 1000)
         if not movetime_ms:
@@ -237,24 +268,38 @@ def play_game(white: UCIEngine, black: UCIEngine, opening: Optional[chess.Board]
             move = chess.Move.from_uci(move_str)
             if move not in board.legal_moves:
                 result = "0-1" if board.turn == chess.WHITE else "1-0"
-                return GameResult(white.name, black.name, result, "illegal move",
-                                  ply // 2, str(game_pgn))
+                return GameResult(
+                    white.name,
+                    black.name,
+                    result,
+                    "illegal move",
+                    ply // 2,
+                    str(game_pgn),
+                )
         except Exception:
             result = "0-1" if board.turn == chess.WHITE else "1-0"
-            return GameResult(white.name, black.name, result, "invalid move string",
-                              ply // 2, str(game_pgn))
+            return GameResult(
+                white.name,
+                black.name,
+                result,
+                "invalid move string",
+                ply // 2,
+                str(game_pgn),
+            )
 
         move_list.append(move_str)
         node = node.add_variation(move)
         board.push(move)
 
-    return GameResult(white.name, black.name, "1/2-1/2", "max moves",
-                      max_moves, str(game_pgn))
+    return GameResult(
+        white.name, black.name, "1/2-1/2", "max moves", max_moves, str(game_pgn)
+    )
 
 
 # ============================================================================
 # Match Management
 # ============================================================================
+
 
 @dataclass
 class MatchResult:
@@ -285,10 +330,17 @@ class MatchResult:
         return -400.0 * math.log10(1.0 / p - 1.0)
 
 
-def run_match(eng1_name: str, eng2_name: str, eng1: UCIEngine, eng2: UCIEngine,
-              num_games: int, openings: List[chess.Board],
-              tc_base_ms: int = 60000, tc_inc_ms: int = 100,
-              movetime_ms: int = 0) -> MatchResult:
+def run_match(
+    eng1_name: str,
+    eng2_name: str,
+    eng1: UCIEngine,
+    eng2: UCIEngine,
+    num_games: int,
+    openings: List[chess.Board],
+    tc_base_ms: int = 60000,
+    tc_inc_ms: int = 100,
+    movetime_ms: int = 0,
+) -> MatchResult:
     """Run a match between two engines."""
     result = MatchResult(eng1_name, eng2_name)
     print(f"\n{'='*60}")
@@ -311,35 +363,60 @@ def run_match(eng1_name: str, eng2_name: str, eng1: UCIEngine, eng2: UCIEngine,
         gr = play_game(w, b, opening, tc_base_ms, tc_inc_ms, movetime_ms)
 
         if g % 2 == 0:
-            if gr.result == "1-0": result.wins += 1
-            elif gr.result == "0-1": result.losses += 1
-            else: result.draws += 1
+            if gr.result == "1-0":
+                result.wins += 1
+            elif gr.result == "0-1":
+                result.losses += 1
+            else:
+                result.draws += 1
         else:
-            if gr.result == "1-0": result.losses += 1
-            elif gr.result == "0-1": result.wins += 1
-            else: result.draws += 1
+            if gr.result == "1-0":
+                result.losses += 1
+            elif gr.result == "0-1":
+                result.wins += 1
+            else:
+                result.draws += 1
 
-        result.games.append({
-            "game": g + 1, "white": gr.white, "black": gr.black,
-            "result": gr.result, "reason": gr.reason, "moves": gr.moves})
+        result.games.append(
+            {
+                "game": g + 1,
+                "white": gr.white,
+                "black": gr.black,
+                "result": gr.result,
+                "reason": gr.reason,
+                "moves": gr.moves,
+            }
+        )
 
-        marker = "+" if (g % 2 == 0 and gr.result == "1-0") or \
-                        (g % 2 == 1 and gr.result == "0-1") else \
-                 "-" if (g % 2 == 0 and gr.result == "0-1") or \
-                        (g % 2 == 1 and gr.result == "1-0") else "="
+        marker = (
+            "+"
+            if (g % 2 == 0 and gr.result == "1-0")
+            or (g % 2 == 1 and gr.result == "0-1")
+            else (
+                "-"
+                if (g % 2 == 0 and gr.result == "0-1")
+                or (g % 2 == 1 and gr.result == "1-0")
+                else "="
+            )
+        )
         score_str = f"W{result.wins}-D{result.draws}-L{result.losses}"
-        print(f"  Game {g+1:2d}/{num_games}: {marker} {gr.result:7s} "
-              f"({gr.reason}, {gr.moves} moves) [{score_str}]")
+        print(
+            f"  Game {g+1:2d}/{num_games}: {marker} {gr.result:7s} "
+            f"({gr.reason}, {gr.moves} moves) [{score_str}]"
+        )
 
     elo = result.elo_diff
-    print(f"\n  Result: {eng1_name} {result.wins}W-{result.draws}D-{result.losses}L "
-          f"({result.score}/{result.total}) Elo diff: {elo:+.0f}")
+    print(
+        f"\n  Result: {eng1_name} {result.wins}W-{result.draws}D-{result.losses}L "
+        f"({result.score}/{result.total}) Elo diff: {elo:+.0f}"
+    )
     return result
 
 
 # ============================================================================
 # Tournament
 # ============================================================================
+
 
 def create_engine(name: str, cfg: dict, default_threads: int) -> Optional[UCIEngine]:
     """Create a UCI engine from config."""
@@ -446,26 +523,47 @@ def run_tournament(args):
                 continue
 
             mr = run_match(
-                e1_name, e2_name,
-                active_engines[e1_name], active_engines[e2_name],
-                args.games, openings, tc_base_ms, tc_inc_ms, movetime_ms)
+                e1_name,
+                e2_name,
+                active_engines[e1_name],
+                active_engines[e2_name],
+                args.games,
+                openings,
+                tc_base_ms,
+                tc_inc_ms,
+                movetime_ms,
+            )
 
             match_data = {
-                "engine1": mr.engine1, "engine2": mr.engine2,
-                "wins": mr.wins, "draws": mr.draws, "losses": mr.losses,
-                "score": mr.score, "total": mr.total,
-                "pct": round(mr.pct, 3), "elo_diff": round(mr.elo_diff, 1),
-                "games": mr.games
+                "engine1": mr.engine1,
+                "engine2": mr.engine2,
+                "wins": mr.wins,
+                "draws": mr.draws,
+                "losses": mr.losses,
+                "score": mr.score,
+                "total": mr.total,
+                "pct": round(mr.pct, 3),
+                "elo_diff": round(mr.elo_diff, 1),
+                "games": mr.games,
             }
             all_results.append(match_data)
 
             # Save incremental results
             with open(results_dir / "results.json", "w") as f:
-                json.dump({"matches": all_results,
-                           "timestamp": timestamp,
-                           "tc": f"{args.tc_base}+{args.tc_inc}" if not movetime_ms
-                                 else f"{movetime_ms}ms/move",
-                           "games_per_match": args.games}, f, indent=2)
+                json.dump(
+                    {
+                        "matches": all_results,
+                        "timestamp": timestamp,
+                        "tc": (
+                            f"{args.tc_base}+{args.tc_inc}"
+                            if not movetime_ms
+                            else f"{movetime_ms}ms/move"
+                        ),
+                        "games_per_match": args.games,
+                    },
+                    f,
+                    indent=2,
+                )
 
     finally:
         for eng in active_engines.values():
@@ -475,20 +573,27 @@ def run_tournament(args):
     print(f"\n{'='*60}")
     print(f"  TOURNAMENT SUMMARY")
     print(f"{'='*60}")
-    print(f"\n{'Engine 1':<20s} {'Engine 2':<20s} {'W':>3s} {'D':>3s} {'L':>3s} "
-          f"{'Score':>7s} {'Pct':>6s} {'Elo':>6s}")
+    print(
+        f"\n{'Engine 1':<20s} {'Engine 2':<20s} {'W':>3s} {'D':>3s} {'L':>3s} "
+        f"{'Score':>7s} {'Pct':>6s} {'Elo':>6s}"
+    )
     print("-" * 75)
 
     for m in all_results:
-        print(f"{m['engine1']:<20s} {m['engine2']:<20s} "
-              f"{m['wins']:3d} {m['draws']:3d} {m['losses']:3d} "
-              f"{m['score']:5.1f}/{m['total']:<2d} "
-              f"{m['pct']*100:5.1f}% {m['elo_diff']:+6.0f}")
+        print(
+            f"{m['engine1']:<20s} {m['engine2']:<20s} "
+            f"{m['wins']:3d} {m['draws']:3d} {m['losses']:3d} "
+            f"{m['score']:5.1f}/{m['total']:<2d} "
+            f"{m['pct']*100:5.1f}% {m['elo_diff']:+6.0f}"
+        )
 
     # Estimate Elo ratings
     print(f"\n  Estimated Elo Ratings (relative to anchors):")
-    anchors = {n: c["expected_elo"] for n, c in engines_cfg.items()
-               if c.get("anchor") and c.get("expected_elo")}
+    anchors = {
+        n: c["expected_elo"]
+        for n, c in engines_cfg.items()
+        if c.get("anchor") and c.get("expected_elo")
+    }
     engine_elos: Dict[str, List[float]] = {}
 
     for m in all_results:
@@ -499,7 +604,7 @@ def run_tournament(args):
         if e1 in anchors:
             engine_elos.setdefault(e2, []).append(anchors[e1] - diff)
 
-    for name, elos in sorted(engine_elos.items(), key=lambda x: -sum(x[1])/len(x[1])):
+    for name, elos in sorted(engine_elos.items(), key=lambda x: -sum(x[1]) / len(x[1])):
         avg = sum(elos) / len(elos)
         print(f"    {name:<25s} ~{avg:.0f} Elo (from {len(elos)} matchups)")
 
@@ -511,22 +616,34 @@ def run_tournament(args):
 # Main
 # ============================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(description="MetalFish Tournament Runner")
-    parser.add_argument("--games", type=int, default=6,
-                        help="Games per match (default: 20)")
-    parser.add_argument("--tc-base", type=float, default=300,
-                        help="Base time in seconds (default: 300)")
-    parser.add_argument("--tc-inc", type=float, default=0.1,
-                        help="Increment in seconds (default: 0.1)")
-    parser.add_argument("--movetime", type=int, default=0,
-                        help="Fixed movetime in ms (overrides tc, 0=disabled)")
-    parser.add_argument("--quick", action="store_true",
-                        help="Quick mode: 4 games, 10s+0.1s")
-    parser.add_argument("--match", nargs=2, metavar=("E1", "E2"),
-                        help="Run single match between two engines")
-    parser.add_argument("--resume", type=str,
-                        help="Resume from results directory")
+    parser.add_argument(
+        "--games", type=int, default=6, help="Games per match (default: 20)"
+    )
+    parser.add_argument(
+        "--tc-base", type=float, default=300, help="Base time in seconds (default: 300)"
+    )
+    parser.add_argument(
+        "--tc-inc", type=float, default=0.1, help="Increment in seconds (default: 0.1)"
+    )
+    parser.add_argument(
+        "--movetime",
+        type=int,
+        default=0,
+        help="Fixed movetime in ms (overrides tc, 0=disabled)",
+    )
+    parser.add_argument(
+        "--quick", action="store_true", help="Quick mode: 4 games, 10s+0.1s"
+    )
+    parser.add_argument(
+        "--match",
+        nargs=2,
+        metavar=("E1", "E2"),
+        help="Run single match between two engines",
+    )
+    parser.add_argument("--resume", type=str, help="Resume from results directory")
     args = parser.parse_args()
 
     if args.quick:

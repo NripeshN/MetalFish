@@ -300,8 +300,7 @@ const std::array<uint16_t, 65536> kPackedToIndex = BuildLookupTable();
 
 } // namespace
 
-void InitPolicyTables() {
-}
+void InitPolicyTables() {}
 
 namespace {
 Square TransformSquare(Square sq, int transform) {

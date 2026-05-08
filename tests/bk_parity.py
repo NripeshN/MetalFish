@@ -23,24 +23,48 @@ BK_POSITIONS: List[Tuple[str, List[str], str]] = [
     ("3r1k2/4npp1/1ppr3p/p6P/P2PPPP1/1NR5/5K2/2R5 w - -", ["d5"], "BK.02"),
     ("2q1rr1k/3bbnnp/p2p1pp1/2pPp3/PpP1P1P1/1P2BNNP/2BQ1PRK/7R b - -", ["f5"], "BK.03"),
     ("rnbqkb1r/p3pppp/1p6/2ppP3/3N4/2P5/PPP1QPPP/R1B1KB1R w KQkq -", ["e6"], "BK.04"),
-    ("r1b2rk1/2q1b1pp/p2ppn2/1p6/3QP3/1BN1B3/PPP3PP/R4RK1 w - -", ["Nd5", "a4"], "BK.05"),
+    (
+        "r1b2rk1/2q1b1pp/p2ppn2/1p6/3QP3/1BN1B3/PPP3PP/R4RK1 w - -",
+        ["Nd5", "a4"],
+        "BK.05",
+    ),
     ("2r3k1/pppR1pp1/4p3/4P1P1/5P2/1P4K1/P1P5/8 w - -", ["g6"], "BK.06"),
-    ("1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -", ["Nf6"], "BK.07"),
+    (
+        "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -",
+        ["Nf6"],
+        "BK.07",
+    ),
     ("4b3/p3kp2/6p1/3pP2p/2pP1P2/4K1P1/P3N2P/8 w - -", ["f5"], "BK.08"),
     ("2kr1bnr/pbpq4/2n1pp2/3p3p/3P1P1B/2N2N1Q/PPP3PP/2KR1B1R w - -", ["f5"], "BK.09"),
     ("3rr1k1/pp3pp1/1qn2np1/8/3p4/PP1R1P2/2P1NQPP/R1B3K1 b - -", ["Ne5"], "BK.10"),
     ("2r1nrk1/p2q1ppp/bp1p4/n1pPp3/P1P1P3/2PBB1N1/4QPPP/R4RK1 w - -", ["f4"], "BK.11"),
     ("r3r1k1/ppqb1ppp/8/4p1NQ/8/2P5/PP3PPP/R3R1K1 b - -", ["Bf5"], "BK.12"),
     ("r2q1rk1/4bppp/p2p4/2pP4/3pP3/3Q4/PP1B1PPP/R3R1K1 w - -", ["b4"], "BK.13"),
-    ("rnb2r1k/pp2p2p/2pp2p1/q2P1p2/8/1Pb2NP1/PB2PPBP/R2Q1RK1 w - -", ["Qd2", "Qe1"], "BK.14"),
+    (
+        "rnb2r1k/pp2p2p/2pp2p1/q2P1p2/8/1Pb2NP1/PB2PPBP/R2Q1RK1 w - -",
+        ["Qd2", "Qe1"],
+        "BK.14",
+    ),
     ("2r3k1/1p2q1pp/2b1pr2/p1pp4/6Q1/1P1PP1R1/P1PN2PP/5RK1 w - -", ["Qxg7+"], "BK.15"),
     ("r1bqkb1r/4npp1/p1p4p/1p1pP1B1/8/1B6/PPPN1PPP/R2Q1RK1 w kq -", ["Ne4"], "BK.16"),
-    ("r2q1rk1/1ppnbppp/p2p1nb1/3Pp3/2P1P1P1/2N2N1P/PPB1QP2/R1B2RK1 b - -", ["h5"], "BK.17"),
-    ("r1bq1rk1/pp2ppbp/2np2p1/2n5/P3PP2/N1P2N2/1PB3PP/R1B1QRK1 b - -", ["Nb3"], "BK.18"),
+    (
+        "r2q1rk1/1ppnbppp/p2p1nb1/3Pp3/2P1P1P1/2N2N1P/PPB1QP2/R1B2RK1 b - -",
+        ["h5"],
+        "BK.17",
+    ),
+    (
+        "r1bq1rk1/pp2ppbp/2np2p1/2n5/P3PP2/N1P2N2/1PB3PP/R1B1QRK1 b - -",
+        ["Nb3"],
+        "BK.18",
+    ),
     ("3rr3/2pq2pk/p2p1pnp/8/2QBPP2/1P6/P5PP/4RRK1 b - -", ["Rxe4"], "BK.19"),
     ("r4k2/pb2bp1r/1p1qp2p/3pNp2/3P1P2/2N3P1/PPP1Q2P/2KRR3 w - -", ["g4"], "BK.20"),
     ("3rn2k/ppb2rpp/2ppqp2/5N2/2P1P3/1P5Q/PB3PPP/3RR1K1 w - -", ["Nh6"], "BK.21"),
-    ("2r2rk1/1bqnbpp1/1p1ppn1p/pP6/N1P1P3/P2B1N1P/1B2QPP1/R2R2K1 b - -", ["Bxe4"], "BK.22"),
+    (
+        "2r2rk1/1bqnbpp1/1p1ppn1p/pP6/N1P1P3/P2B1N1P/1B2QPP1/R2R2K1 b - -",
+        ["Bxe4"],
+        "BK.22",
+    ),
     ("r1bqk2r/pp2bppp/2p5/3pP3/P2Q1P2/2N1B3/1PP3PP/R4RK1 b kq -", ["f6"], "BK.23"),
     ("r2qnrnk/p2b2b1/1p1p2pp/2pPpp2/1PP1P3/PRNBB3/3QNPPP/5RK1 w - -", ["f4"], "BK.24"),
 ]
@@ -88,7 +112,9 @@ class UCISession:
             line = self.proc.stdout.readline()
             if not line:
                 if self.proc.poll() is not None:
-                    raise RuntimeError(f"{self.name}: process died (exit={self.proc.returncode})")
+                    raise RuntimeError(
+                        f"{self.name}: process died (exit={self.proc.returncode})"
+                    )
                 continue
             line = line.strip()
             if line.startswith(prefix):
@@ -128,7 +154,9 @@ class UCISession:
             line = self.proc.stdout.readline()
             if not line:
                 if self.proc.poll() is not None:
-                    raise RuntimeError(f"{self.name}: process died during search (exit={self.proc.returncode})")
+                    raise RuntimeError(
+                        f"{self.name}: process died during search (exit={self.proc.returncode})"
+                    )
                 continue
             line = line.strip()
             if line.startswith("bestmove"):
@@ -200,7 +228,9 @@ class UCISession:
             self.proc.kill()
 
 
-def setup_metalfish(sess: UCISession, weights: pathlib.Path, threads: int, deterministic: bool) -> None:
+def setup_metalfish(
+    sess: UCISession, weights: pathlib.Path, threads: int, deterministic: bool
+) -> None:
     sess.setoption("UseMCTS", "true")
     sess.setoption("NNWeights", str(weights))
     sess.setoption("Threads", str(threads))
@@ -276,7 +306,11 @@ def run_once(args: argparse.Namespace) -> int:
                 print(f"ERROR: lc0 not found: {args.lc0}")
                 return 2
             s = UCISession(
-                [str(args.lc0), f"--weights={args.weights}", f"--backend={args.backend}"],
+                [
+                    str(args.lc0),
+                    f"--weights={args.weights}",
+                    f"--backend={args.backend}",
+                ],
                 "lc0",
             )
             setup_lc0(s, threads)
@@ -305,7 +339,9 @@ def run_once(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="BK parity harness")
-    parser.add_argument("--engine", choices=["metalfish", "lc0", "both"], default="both")
+    parser.add_argument(
+        "--engine", choices=["metalfish", "lc0", "both"], default="both"
+    )
     parser.add_argument("--movetime", type=int, default=10_000)
     parser.add_argument("--nodes", type=int, default=0, help="If >0, uses go nodes")
     parser.add_argument("--threads", type=int, default=2)

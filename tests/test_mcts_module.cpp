@@ -13,10 +13,10 @@
 #include "mcts/search.h"
 #include "syzygy/tbprobe.h"
 
-#include <cstdint>
-#include <cstdlib>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -96,8 +96,9 @@ void test_root_search_smoke(TestCounter &tc) {
 
   MetalFish::Search::LimitsType limits;
   limits.nodes = 8;
-  search->StartSearch("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                      limits, nullptr, nullptr);
+  search->StartSearch(
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", limits,
+      nullptr, nullptr);
   search->Wait();
 
   const auto &stats = search->Stats();
@@ -107,8 +108,7 @@ void test_root_search_smoke(TestCounter &tc) {
 void test_search_params_defaults(TestCounter &tc) {
   std::cout << "  Search params..." << std::endl;
   SearchParams params;
-  expect(params.fpu_reduction_at_root == 0.33f,
-         "root FPU default aligned", tc);
+  expect(params.fpu_reduction_at_root == 0.33f, "root FPU default aligned", tc);
   expect(params.GetCpuctBase(true) == params.cpuct_base_at_root,
          "root cpuct base getter", tc);
   expect(params.GetFpuValue(true) == params.fpu_value_at_root,
@@ -143,7 +143,8 @@ void test_nn_cache_policy_capacity(TestCounter &tc) {
   cache.Insert(5678, large);
   EvaluationResult large_out;
   bool large_hit = cache.Lookup(5678, 128, large_out);
-  expect(!large_hit || large_out.policy_priors.size() == large.policy_priors.size(),
+  expect(!large_hit ||
+             large_out.policy_priors.size() == large.policy_priors.size(),
          "cache must not return truncated policy entries", tc);
 }
 
@@ -153,8 +154,10 @@ void test_history_buffer_ownership(TestCounter &tc) {
   const std::string fen =
       "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   const std::vector<Move> line = {
-      Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5),
-      Move(SQ_G1, SQ_F3), Move(SQ_B8, SQ_C6),
+      Move(SQ_E2, SQ_E4),
+      Move(SQ_E7, SQ_E5),
+      Move(SQ_G1, SQ_F3),
+      Move(SQ_B8, SQ_C6),
   };
 
   SearchWorkerCtx ctx;
@@ -224,17 +227,15 @@ void test_history_buffer_tail_replay(TestCounter &tc) {
   std::deque<StateInfo> replay_states(line.size() + 1);
   Position replay;
   replay.set(fen, false, &replay_states[0]);
-  const int start_ply =
-      static_cast<int>(line.size()) -
-      (SearchWorkerCtx::HistoryBuffer::kMaxHistory - 1);
+  const int start_ply = static_cast<int>(line.size()) -
+                        (SearchWorkerCtx::HistoryBuffer::kMaxHistory - 1);
 
   int history_idx = 0;
   for (int ply = 0; ply <= static_cast<int>(line.size()); ++ply) {
     if (ply >= start_ply) {
       expect(history.ptrs[history_idx]->raw_key() == replay.raw_key(),
              "tail history position should match replayed line", tc);
-      expect(history.ptrs[history_idx]->rule50_count() ==
-                 replay.rule50_count(),
+      expect(history.ptrs[history_idx]->rule50_count() == replay.rule50_count(),
              "tail history rule50 should match replayed line", tc);
       ++history_idx;
     }
@@ -253,8 +254,7 @@ void test_nn_cache_key_tracks_encoded_state(TestCounter &tc) {
   StateInfo st_zero;
   StateInfo st_twenty;
   rule50_zero.set("8/8/8/8/8/8/4K3/7k w - - 0 1", false, &st_zero);
-  rule50_twenty.set("8/8/8/8/8/8/4K3/7k w - - 20 11", false,
-                    &st_twenty);
+  rule50_twenty.set("8/8/8/8/8/8/4K3/7k w - - 20 11", false, &st_twenty);
 
   const Position *zero_history[] = {&rule50_zero};
   const Position *twenty_history[] = {&rule50_twenty};
@@ -377,10 +377,18 @@ void test_nodes_limit_with_callback(TestCounter &tc) {
       [&](const std::string &) { ++info_lines; });
   search->Wait();
 
+  const uint64_t sync_nodes = search->Stats().total_nodes.load();
+  const auto sync_best = search->GetBestMoveStats();
   expect(callback_called, "bestmove callback should fire", tc);
   expect(info_lines > 0, "final MCTS info callback should fire", tc);
-  expect(search->Stats().total_nodes.load() >= limits.nodes,
+  expect(sync_nodes >= limits.nodes,
          "MCTS should honor node limit before callback", tc);
+  expect(sync_best.move != Move::none(), "best move stats should name a move",
+         tc);
+  expect(sync_best.visits > 0, "best move stats should include child visits",
+         tc);
+  expect(sync_best.visits <= sync_nodes,
+         "best move child visits should not exceed total visits", tc);
 
   callback_called = false;
   auto async_search = CreateSearch(params);
@@ -395,9 +403,17 @@ void test_nodes_limit_with_callback(TestCounter &tc) {
   std::thread waiter([&]() { async_search->Wait(); });
   waiter.join();
 
+  const uint64_t async_nodes = async_search->Stats().total_nodes.load();
+  const auto async_best = async_search->GetBestMoveStats();
   expect(callback_called, "async bestmove callback should fire", tc);
-  expect(async_search->Stats().total_nodes.load() >= limits.nodes,
+  expect(async_nodes >= limits.nodes,
          "MCTS should honor node limit with asynchronous waiter", tc);
+  expect(async_best.move != Move::none(),
+         "async best move stats should name a move", tc);
+  expect(async_best.visits > 0,
+         "async best move stats should include child visits", tc);
+  expect(async_best.visits <= async_nodes,
+         "async best move child visits should not exceed total visits", tc);
 }
 
 void test_node_limited_batches_do_not_prefetch(TestCounter &tc) {
@@ -427,8 +443,7 @@ void test_node_limited_batches_do_not_prefetch(TestCounter &tc) {
   const auto &stats = search->Stats();
   const uint64_t nodes = stats.total_nodes.load();
   const uint64_t evals = stats.nn_evaluations.load();
-  std::cout << "    Nodes: " << nodes << ", NN evals: " << evals
-            << std::endl;
+  std::cout << "    Nodes: " << nodes << ", NN evals: " << evals << std::endl;
   expect(nodes >= limits.nodes, "batched MCTS should honor node limit", tc);
   expect(evals <= nodes,
          "node-limited MCTS should not spend NN evals on speculative prefetch",

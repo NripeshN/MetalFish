@@ -12,8 +12,8 @@
 #include "nn/encoder.h"
 #include "nn/policy_map.h"
 
-#include <cstdlib>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -155,8 +155,9 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
   constexpr float kPolicyTolerance = 2e-3f;
 
   if (!close_enough(single.value, batched.value, kValueTolerance)) {
-    std::cout << "    FAIL: " << label << " value mismatch single="
-              << single.value << " batch=" << batched.value << std::endl;
+    std::cout << "    FAIL: " << label
+              << " value mismatch single=" << single.value
+              << " batch=" << batched.value << std::endl;
     return false;
   }
 
@@ -170,8 +171,8 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
   if (single.has_wdl) {
     for (int i = 0; i < 3; ++i) {
       if (!close_enough(single.wdl[i], batched.wdl[i], kValueTolerance)) {
-        std::cout << "    FAIL: " << label << " WDL[" << i
-                  << "] mismatch" << std::endl;
+        std::cout << "    FAIL: " << label << " WDL[" << i << "] mismatch"
+                  << std::endl;
         return false;
       }
     }
@@ -179,14 +180,13 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
 
   if (single.has_moves_left &&
       !close_enough(single.moves_left, batched.moves_left, kValueTolerance)) {
-    std::cout << "    FAIL: " << label << " moves-left mismatch"
-              << std::endl;
+    std::cout << "    FAIL: " << label << " moves-left mismatch" << std::endl;
     return false;
   }
 
   if (single.policy_priors.size() != batched.policy_priors.size()) {
-    std::cout << "    FAIL: " << label << " policy size mismatch single="
-              << single.policy_priors.size()
+    std::cout << "    FAIL: " << label
+              << " policy size mismatch single=" << single.policy_priors.size()
               << " batch=" << batched.policy_priors.size() << std::endl;
     return false;
   }
@@ -271,8 +271,8 @@ bool test_mcts_evaluator_batch_parity_optional() {
         return false;
     }
 
-    std::cout << "    PASS: checked " << histories.size()
-              << " varied positions" << std::endl;
+    std::cout << "    PASS: checked " << histories.size() << " varied positions"
+              << std::endl;
     return true;
   } catch (const std::exception &e) {
     std::cout << "    FAIL: exception: " << e.what() << std::endl;

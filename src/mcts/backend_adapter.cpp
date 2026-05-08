@@ -34,13 +34,11 @@ inline void MixInto(uint64_t &key, uint64_t value) {
   key *= kFNVPrime;
 }
 
-inline void MixPositionState(uint64_t &key, int history_index,
-                             uint64_t raw_key, int rule50_count,
-                             int repetition_distance) {
+inline void MixPositionState(uint64_t &key, int history_index, uint64_t raw_key,
+                             int rule50_count, int repetition_distance) {
   MixInto(key, raw_key);
-  MixInto(key,
-          static_cast<uint64_t>(static_cast<uint32_t>(rule50_count)) |
-              (static_cast<uint64_t>(history_index) << 32));
+  MixInto(key, static_cast<uint64_t>(static_cast<uint32_t>(rule50_count)) |
+                   (static_cast<uint64_t>(history_index) << 32));
   MixInto(key,
           static_cast<uint64_t>(static_cast<int64_t>(repetition_distance)));
 }
@@ -91,10 +89,13 @@ bool NNCache::Lookup(uint64_t key, int expected_moves,
   const Entry &e = entries_[key % size_];
 
   uint64_t gen1 = e.generation.load(std::memory_order_acquire);
-  if (gen1 & 1) return false;
+  if (gen1 & 1)
+    return false;
 
-  if (!e.occupied || e.key != key) return false;
-  if (expected_moves >= 0 && e.legal_moves != expected_moves) return false;
+  if (!e.occupied || e.key != key)
+    return false;
+  if (expected_moves >= 0 && e.legal_moves != expected_moves)
+    return false;
 
   out.value = e.value;
   out.has_wdl = e.has_wdl;
@@ -114,7 +115,8 @@ bool NNCache::Lookup(uint64_t key, int expected_moves,
   }
 
   uint64_t gen2 = e.generation.load(std::memory_order_acquire);
-  if (gen1 != gen2) return false;
+  if (gen1 != gen2)
+    return false;
 
   return true;
 }
@@ -176,8 +178,7 @@ BackendComputation::AddInput(const Position &pos, uint64_t key) {
   return AddInputWithHistory(history, 1, key);
 }
 
-BackendComputation::AddInputResult
-BackendComputation::AddInputWithHistory(
+BackendComputation::AddInputResult BackendComputation::AddInputWithHistory(
     const std::vector<const Position *> &history, uint64_t key) {
   return AddInputWithHistory(history.data(), static_cast<int>(history.size()),
                              key);
@@ -191,11 +192,9 @@ BackendComputation::AddInputWithHistory(const Position *const *history,
                              expected_moves);
 }
 
-BackendComputation::AddInputResult
-BackendComputation::AddInputWithHistory(const Position *const *history,
-                                        int history_depth, uint64_t key,
-                                        const Move *legal_moves,
-                                        int legal_move_count) {
+BackendComputation::AddInputResult BackendComputation::AddInputWithHistory(
+    const Position *const *history, int history_depth, uint64_t key,
+    const Move *legal_moves, int legal_move_count) {
   int idx = total_inputs_++;
   results_.emplace_back();
   from_cache_.push_back(false);
@@ -219,8 +218,8 @@ BackendComputation::AddInputWithHistory(const Position *const *history,
       std::min(history_depth, static_cast<int>(pending.history.size()));
   pending.legal_move_count = -1;
   if (legal_moves && legal_move_count >= 0) {
-    pending.legal_move_count =
-        std::min(legal_move_count, static_cast<int>(pending.legal_moves.size()));
+    pending.legal_move_count = std::min(
+        legal_move_count, static_cast<int>(pending.legal_moves.size()));
     for (int i = 0; i < pending.legal_move_count; ++i) {
       pending.legal_moves[i] = legal_moves[i];
     }
@@ -234,7 +233,8 @@ BackendComputation::AddInputWithHistory(const Position *const *history,
 }
 
 void BackendComputation::ComputeBlocking() {
-  if (pending_.empty()) return;
+  if (pending_.empty())
+    return;
 
   std::vector<NNMCTSEvaluator::PositionHistoryView> histories;
   histories.reserve(pending_.size());
@@ -250,11 +250,10 @@ void BackendComputation::ComputeBlocking() {
     }
   }
 
-  auto batch_results = all_have_legal_moves
-                           ? evaluator_->EvaluateBatchWithHistoryViews(
-                                 histories, legal_moves)
-                           : evaluator_->EvaluateBatchWithHistoryViews(
-                                 histories);
+  auto batch_results =
+      all_have_legal_moves
+          ? evaluator_->EvaluateBatchWithHistoryViews(histories, legal_moves)
+          : evaluator_->EvaluateBatchWithHistoryViews(histories);
 
   for (size_t i = 0; i < pending_.size(); ++i) {
     int idx = pending_[i].result_idx;
@@ -275,9 +274,7 @@ int BackendComputation::UsedBatchSize() const {
   return static_cast<int>(pending_.size());
 }
 
-int BackendComputation::TotalInputs() const {
-  return total_inputs_;
-}
+int BackendComputation::TotalInputs() const { return total_inputs_; }
 
 Backend::Backend(const std::string &weights_path, size_t cache_entries)
     : cache_(cache_entries) {

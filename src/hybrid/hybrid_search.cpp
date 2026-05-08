@@ -64,7 +64,7 @@ ParallelHybridSearch::~ParallelHybridSearch() {
   join_all_threads();
 
   if (mcts_search_) {
-      mcts_search_->ClearCallbacks();
+    mcts_search_->ClearCallbacks();
     mcts_search_->Stop();
     mcts_search_->Wait();
   }
@@ -127,7 +127,8 @@ bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
     }
   }
 
-  mcts_search_ = std::make_unique<Search>(config_.mcts_config,
+  mcts_search_ = std::make_unique<Search>(
+      config_.mcts_config,
       std::make_unique<Backend>(
           config_.mcts_config.nn_weights_path,
           static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size))));
@@ -144,10 +145,9 @@ bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
   return true;
 }
 
-void ParallelHybridSearch::start_search(const Position &pos,
-                                        const ::MetalFish::Search::LimitsType &limits,
-                                        BestMoveCallback best_move_cb,
-                                        InfoCallback info_cb) {
+void ParallelHybridSearch::start_search(
+    const Position &pos, const ::MetalFish::Search::LimitsType &limits,
+    BestMoveCallback best_move_cb, InfoCallback info_cb) {
   if (shutdown_requested_.load(std::memory_order_acquire)) {
     if (best_move_cb)
       best_move_cb(Move::none(), Move::none());
@@ -261,7 +261,8 @@ void ParallelHybridSearch::wait() {
     std::this_thread::sleep_for(std::chrono::microseconds(200));
   }
 
-  // Join all threads (never detach -- detached threads can access destroyed objects)
+  // Join all threads (never detach -- detached threads can access destroyed
+  // objects)
   {
     std::lock_guard<std::mutex> lock(thread_mutex_);
 
@@ -305,10 +306,11 @@ void ParallelHybridSearch::new_game() {
   }
 
   if (mcts_search_) {
-    mcts_search_ = std::make_unique<Search>(config_.mcts_config,
-      std::make_unique<Backend>(
-          config_.mcts_config.nn_weights_path,
-          static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size))));
+    mcts_search_ = std::make_unique<Search>(
+        config_.mcts_config,
+        std::make_unique<Backend>(config_.mcts_config.nn_weights_path,
+                                  static_cast<size_t>(std::max(
+                                      1, config_.mcts_config.nn_cache_size))));
     if (engine_) {
       shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
       mcts_search_->SetSharedTT(shared_tt_reader_.get());
@@ -351,9 +353,12 @@ bool ParallelHybridSearch::should_stop() const {
     return true;
 
   if (limits_.nodes > 0) {
-    uint64_t mcts_n = mcts_search_ ?
-        mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed) : 0;
-    uint64_t total = mcts_n + ab_state_.nodes_searched.load(std::memory_order_relaxed);
+    uint64_t mcts_n =
+        mcts_search_
+            ? mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed)
+            : 0;
+    uint64_t total =
+        mcts_n + ab_state_.nodes_searched.load(std::memory_order_relaxed);
     if (total >= limits_.nodes)
       return true;
   }
@@ -450,28 +455,32 @@ void ParallelHybridSearch::publish_mcts_state() {
   if (!mcts_search_)
     return;
 
-  Move best = mcts_search_->GetBestMove();
+  const auto best_stats = mcts_search_->GetBestMoveStats();
+  Move best = best_stats.move;
   if (best == Move::none())
     return;
 
-  float best_q = mcts_search_->GetBestQ();
-
   mcts_state_.best_move_raw.store(best.raw(), std::memory_order_relaxed);
-  mcts_state_.best_q.store(best_q, std::memory_order_relaxed);
-  mcts_state_.best_visits.store(mcts_search_->Stats().total_nodes.load(),
-                                std::memory_order_relaxed);
-  mcts_state_.total_nodes.store(mcts_search_->Stats().total_nodes.load(),
-                                std::memory_order_relaxed);
+  mcts_state_.best_q.store(best_stats.q, std::memory_order_relaxed);
+  mcts_state_.best_visits.store(best_stats.visits, std::memory_order_relaxed);
+  const uint64_t total_nodes =
+      mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed);
+  mcts_state_.total_nodes.store(total_nodes, std::memory_order_relaxed);
   mcts_state_.has_result.store(true, std::memory_order_release);
   mcts_state_.update_counter.fetch_add(1, std::memory_order_release);
 }
 
 void ParallelHybridSearch::update_mcts_policy_from_ab() {
   int depth = ab_state_.pv_depth.load(std::memory_order_acquire);
-  if (depth < 10) return;
+  if (depth < 10)
+    return;
 
-  uint64_t mcts_nodes = mcts_search_ ? mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed) : 0;
-  if (mcts_nodes < 100) return;
+  uint64_t mcts_nodes =
+      mcts_search_
+          ? mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed)
+          : 0;
+  if (mcts_nodes < 100)
+    return;
 
   int pv_len = ab_state_.pv_length.load(std::memory_order_acquire);
   if (pv_len <= 0 || !mcts_search_)
@@ -542,56 +551,55 @@ void ParallelHybridSearch::run_ab_search() {
   int ab_depth = 0;
 
   // Hook per-depth update to capture score and PV
-  engine_->set_on_update_full(
-      [this, &ab_score, &ab_depth](const Engine::InfoFull &info) {
-        ab_score = info.score.visit([](auto &&val) -> int {
-          using T = std::decay_t<decltype(val)>;
-          if constexpr (std::is_same_v<T, Score::InternalUnits>)
-            return val.value;
-          else if constexpr (std::is_same_v<T, Score::Mate>)
-            return val.plies > 0 ? 30000 - val.plies : -30000 - val.plies;
-          else if constexpr (std::is_same_v<T, Score::Tablebase>)
-            return val.win ? 20000 - val.plies : -20000 + val.plies;
-          else
-            return 0;
-        });
-        ab_depth = info.depth;
+  engine_->set_on_update_full([this, &ab_score,
+                               &ab_depth](const Engine::InfoFull &info) {
+    ab_score = info.score.visit([](auto &&val) -> int {
+      using T = std::decay_t<decltype(val)>;
+      if constexpr (std::is_same_v<T, Score::InternalUnits>)
+        return val.value;
+      else if constexpr (std::is_same_v<T, Score::Mate>)
+        return val.plies > 0 ? 30000 - val.plies : -30000 - val.plies;
+      else if constexpr (std::is_same_v<T, Score::Tablebase>)
+        return val.win ? 20000 - val.plies : -20000 + val.plies;
+      else
+        return 0;
+    });
+    ab_depth = info.depth;
 
-        Position pos;
-        StateInfo root_st;
-        pos.set(root_fen_, false, &root_st);
+    Position pos;
+    StateInfo root_st;
+    pos.set(root_fen_, false, &root_st);
 
-        std::vector<Move> pv_moves;
-        pv_moves.reserve(ABSharedState::MAX_PV);
-        std::vector<StateInfo> pv_states;
-        pv_states.reserve(ABSharedState::MAX_PV);
+    std::vector<Move> pv_moves;
+    pv_moves.reserve(ABSharedState::MAX_PV);
+    std::vector<StateInfo> pv_states;
+    pv_states.reserve(ABSharedState::MAX_PV);
 
-        std::istringstream pv_stream(std::string(info.pv));
-        std::string move_token;
-        while (pv_stream >> move_token &&
-               pv_moves.size() < ABSharedState::MAX_PV) {
-          Move move = UCIEngine::to_move(pos, move_token);
-          if (move == Move::none()) {
-            break;
-          }
+    std::istringstream pv_stream(std::string(info.pv));
+    std::string move_token;
+    while (pv_stream >> move_token && pv_moves.size() < ABSharedState::MAX_PV) {
+      Move move = UCIEngine::to_move(pos, move_token);
+      if (move == Move::none()) {
+        break;
+      }
 
-          pv_moves.push_back(move);
-          if (pv_moves.size() >= ABSharedState::MAX_PV) {
-            break;
-          }
+      pv_moves.push_back(move);
+      if (pv_moves.size() >= ABSharedState::MAX_PV) {
+        break;
+      }
 
-          pv_states.emplace_back();
-          pos.do_move(move, pv_states.back());
-        }
+      pv_states.emplace_back();
+      pos.do_move(move, pv_states.back());
+    }
 
-        const Move current_best =
-            pv_moves.empty() ? Move::none() : pv_moves.front();
-        if (current_best != Move::none()) {
-          ab_state_.publish_pv(pv_moves, ab_depth);
-          publish_ab_state(current_best, ab_score, ab_depth,
-                           engine_->threads_nodes_searched());
-        }
-      });
+    const Move current_best =
+        pv_moves.empty() ? Move::none() : pv_moves.front();
+    if (current_best != Move::none()) {
+      ab_state_.publish_pv(pv_moves, ab_depth);
+      publish_ab_state(current_best, ab_score, ab_depth,
+                       engine_->threads_nodes_searched());
+    }
+  });
 
   engine_->set_on_bestmove([this, &ab_best_move, &ab_score, &ab_depth](
                                std::string_view bestmove, std::string_view) {
@@ -711,9 +719,12 @@ void ParallelHybridSearch::coordinator_thread_main() {
     // Send combined info every ~500ms
     if (ms - last_info_ms >= 500) {
       last_info_ms = ms;
-      uint64_t mcts_nodes = mcts_search_ ?
-          mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed) : 0;
-      uint64_t ab_nodes = ab_state_.nodes_searched.load(std::memory_order_relaxed);
+      uint64_t mcts_nodes = mcts_search_
+                                ? mcts_search_->Stats().total_nodes.load(
+                                      std::memory_order_relaxed)
+                                : 0;
+      uint64_t ab_nodes =
+          ab_state_.nodes_searched.load(std::memory_order_relaxed);
       uint64_t total_nodes = mcts_nodes + ab_nodes;
       int ab_depth = ab_state_.completed_depth.load(std::memory_order_relaxed);
       int ab_score = ab_state_.best_score.load(std::memory_order_relaxed);
@@ -798,7 +809,8 @@ void ParallelHybridSearch::coordinator_thread_main() {
             static_cast<int>(stats_.total_time_ms), final_pv_, "hybrid-final");
 
   send_info_string(
-      "Final: MCTS=" + std::to_string(stats_.mcts_nodes.load()) +
+      "Final: MCTS=" + std::to_string(stats_.mcts_nodes.load()) + " MCTSBest=" +
+      std::to_string(mcts_state_.best_visits.load(std::memory_order_relaxed)) +
       " AB=" + std::to_string(stats_.ab_nodes.load()) +
       " agreements=" + std::to_string(stats_.move_agreements.load()) +
       " overrides=" + std::to_string(stats_.ab_overrides.load()));
@@ -808,13 +820,13 @@ void ParallelHybridSearch::coordinator_thread_main() {
 
 void ParallelHybridSearch::refresh_final_state(Move final_move) {
   const uint64_t mcts_nodes =
-      mcts_search_ ? mcts_search_->Stats().total_nodes.load(
-                         std::memory_order_relaxed)
-                   : 0;
+      mcts_search_
+          ? mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed)
+          : 0;
   const uint64_t mcts_evals =
-      mcts_search_ ? mcts_search_->Stats().nn_evaluations.load(
-                         std::memory_order_relaxed)
-                   : 0;
+      mcts_search_
+          ? mcts_search_->Stats().nn_evaluations.load(std::memory_order_relaxed)
+          : 0;
   const uint64_t ab_nodes =
       ab_state_.nodes_searched.load(std::memory_order_relaxed);
   const uint64_t ab_depth =
@@ -830,9 +842,9 @@ void ParallelHybridSearch::refresh_final_state(Move final_move) {
   const Move mcts_best = mcts_state_.get_best_move();
 
   if (final_move == ab_best) {
-    const int pv_len = std::min<int>(
-        ab_state_.pv_length.load(std::memory_order_acquire),
-        ABSharedState::MAX_PV);
+    const int pv_len =
+        std::min<int>(ab_state_.pv_length.load(std::memory_order_acquire),
+                      ABSharedState::MAX_PV);
     pv.reserve(static_cast<size_t>(pv_len));
     for (int i = 0; i < pv_len; ++i) {
       Move m(ab_state_.pv_moves[i].load(std::memory_order_relaxed));
@@ -878,7 +890,10 @@ Move ParallelHybridSearch::make_final_decision() {
   Move mcts_best = mcts_state_.get_best_move();
   int ab_score = ab_state_.best_score.load(std::memory_order_relaxed);
   float mcts_q = mcts_state_.best_q.load(std::memory_order_relaxed);
-  uint32_t mcts_visits = mcts_state_.best_visits.load(std::memory_order_relaxed);
+  const uint32_t mcts_visits =
+      mcts_state_.best_visits.load(std::memory_order_relaxed);
+  const uint64_t mcts_total_nodes =
+      mcts_state_.total_nodes.load(std::memory_order_relaxed);
 
   if (ab_best == Move::none() && mcts_best != Move::none()) {
     stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
@@ -902,10 +917,17 @@ Move ParallelHybridSearch::make_final_decision() {
   }
 
   int mcts_cp = QToNnueScore(mcts_q);
-  bool mcts_reliable = mcts_visits > 5000;
+  const bool enough_total_search = mcts_total_nodes >= 5000;
+  const bool enough_best_visits = mcts_visits >= 512;
+  const bool concentrated_on_best =
+      mcts_total_nodes > 0 &&
+      static_cast<uint64_t>(mcts_visits) * 100 >= mcts_total_nodes * 30;
+  bool mcts_reliable =
+      enough_total_search && enough_best_visits && concentrated_on_best;
   bool mcts_much_better = mcts_cp > ab_score + 200;
-  bool is_tactical = (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
-                      current_strategy_.position_type == PositionType::TACTICAL);
+  bool is_tactical =
+      (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
+       current_strategy_.position_type == PositionType::TACTICAL);
 
   if (mcts_reliable && mcts_much_better && !is_tactical) {
     stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
@@ -942,7 +964,10 @@ void ParallelHybridSearch::send_info(int depth, int score, uint64_t nodes,
   if (!pv.empty()) {
     bool has_valid = false;
     for (const auto &m : pv) {
-      if (m != Move::none()) { has_valid = true; break; }
+      if (m != Move::none()) {
+        has_valid = true;
+        break;
+      }
     }
     if (has_valid) {
       ss << " pv";

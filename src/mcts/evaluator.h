@@ -29,8 +29,9 @@ struct EvaluationResult {
   EvaluationResult() : value(0.0f), has_wdl(false), wdl{0.0f, 0.0f, 0.0f} {}
 
   float get_policy(Move move) const {
-    for (const auto& [m, p] : policy_priors) {
-      if (m == move) return p;
+    for (const auto &[m, p] : policy_priors) {
+      if (m == move)
+        return p;
     }
     return 0.0f;
   }
@@ -48,10 +49,10 @@ public:
   EvaluationResult EvaluateWithHistory(PositionHistoryView history);
   EvaluationResult EvaluateWithHistoryAndMoves(PositionHistoryView history,
                                                LegalMovesView legal_moves);
-  EvaluationResult EvaluateWithHistory(
-      const std::vector<const Position *> &history) {
-    return EvaluateWithHistory(PositionHistoryView(history.data(),
-                                                  history.size()));
+  EvaluationResult
+  EvaluateWithHistory(const std::vector<const Position *> &history) {
+    return EvaluateWithHistory(
+        PositionHistoryView(history.data(), history.size()));
   }
 
   // Batch evaluation with per-position history

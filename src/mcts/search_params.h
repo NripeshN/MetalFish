@@ -17,116 +17,114 @@ namespace MetalFish {
 namespace MCTS {
 
 struct SearchParams {
-    // PUCT exploration (Lc0 defaults)
-    float cpuct = 1.745f;
-    float cpuct_at_root = 1.745f;
-    float cpuct_base = 38739.0f;
-    float cpuct_factor = 3.894f;
-    float cpuct_base_at_root = 38739.0f;
-    float cpuct_factor_at_root = 3.894f;
+  // PUCT exploration (Lc0 defaults)
+  float cpuct = 1.745f;
+  float cpuct_at_root = 1.745f;
+  float cpuct_base = 38739.0f;
+  float cpuct_factor = 3.894f;
+  float cpuct_base_at_root = 38739.0f;
+  float cpuct_factor_at_root = 3.894f;
 
-    // First Play Urgency (Lc0 defaults: reduction strategy, same at root)
-    bool  fpu_absolute = false;
-    float fpu_value = 0.33f;
-    bool  fpu_absolute_at_root = false;
-    float fpu_value_at_root = 0.33f;
-    float fpu_reduction = 0.33f;
-    float fpu_reduction_at_root = 0.33f;
+  // First Play Urgency (Lc0 defaults: reduction strategy, same at root)
+  bool fpu_absolute = false;
+  float fpu_value = 0.33f;
+  bool fpu_absolute_at_root = false;
+  float fpu_value_at_root = 0.33f;
+  float fpu_reduction = 0.33f;
+  float fpu_reduction_at_root = 0.33f;
 
-    // Policy softmax temperature
-    float policy_softmax_temp = 1.359f;
+  // Policy softmax temperature
+  float policy_softmax_temp = 1.359f;
 
-    // Dirichlet exploration noise (disabled for competitive play)
-    bool  add_dirichlet_noise = false;
-    float noise_epsilon = 0.0f;
-    float noise_alpha = 0.3f;
+  // Dirichlet exploration noise (disabled for competitive play)
+  bool add_dirichlet_noise = false;
+  float noise_epsilon = 0.0f;
+  float noise_alpha = 0.3f;
 
-    // Moves left head utility (Lc0 defaults)
-    float moves_left_max_effect = 0.03f;
-    float moves_left_threshold = 0.80f;
-    float moves_left_slope = 0.0027f;
-    float moves_left_constant_factor = 0.0f;
-    float moves_left_scaled_factor = 1.65f;
-    float moves_left_quadratic_factor = -0.65f;
+  // Moves left head utility (Lc0 defaults)
+  float moves_left_max_effect = 0.03f;
+  float moves_left_threshold = 0.80f;
+  float moves_left_slope = 0.0027f;
+  float moves_left_constant_factor = 0.0f;
+  float moves_left_scaled_factor = 1.65f;
+  float moves_left_quadratic_factor = -0.65f;
 
-    // Search control
-    int   max_concurrent_searchers = 1;
-    int   thread_idling_threshold = 1;
-    float smart_pruning_factor = 1.33f;
-    int   solid_tree_threshold = 100;
-    bool  two_fold_draws = true;
-    bool  sticky_endgames = true;
-    float draw_score = 0.0f;
+  // Search control
+  int max_concurrent_searchers = 1;
+  int thread_idling_threshold = 1;
+  float smart_pruning_factor = 1.33f;
+  int solid_tree_threshold = 100;
+  bool two_fold_draws = true;
+  bool sticky_endgames = true;
+  float draw_score = 0.0f;
 
-    // WDL rescaling (ratio=1.0 means no rescaling)
-    float wdl_rescale_ratio = 1.0f;
-    float wdl_rescale_diff = 0.0f;
+  // WDL rescaling (ratio=1.0 means no rescaling)
+  float wdl_rescale_ratio = 1.0f;
+  float wdl_rescale_diff = 0.0f;
 
-    // Temperature for final move selection (0 = always best, >0 = sample)
-    float temperature = 0.0f;
-    float temp_winpct_cutoff = 50.0f;
+  // Temperature for final move selection (0 = always best, >0 = sample)
+  float temperature = 0.0f;
+  float temp_winpct_cutoff = 50.0f;
 
-    // Contempt (positive = avoid draws, negative = prefer draws)
-    float contempt = 0.0f;
+  // Contempt (positive = avoid draws, negative = prefer draws)
+  float contempt = 0.0f;
 
-    // Threading
-    int num_threads = 2;
-    int virtual_loss = 1;
-    int minibatch_size = 32;
+  // Threading
+  int num_threads = 2;
+  int virtual_loss = 1;
+  int minibatch_size = 32;
 
-    // Time management (Lc0 defaults)
-    float slowmover = 2.2f;
-    float move_overhead_ms = 10.0f;
+  // Time management (Lc0 defaults)
+  float slowmover = 2.2f;
+  float move_overhead_ms = 10.0f;
 
-    // Minibatch gathering (Lc0 defaults)
-    int max_prefetch = 32;
-    float max_out_of_order_evals_factor = 2.4f;
-    int max_collision_events = 917;
-    int max_collision_visits = 80000;
-    int max_collision_visits_scaling_start = 28;
-    int max_collision_visits_scaling_end = 145000;
-    float max_collision_visits_scaling_power = 1.25f;
-    bool out_of_order_eval = true;
+  // Minibatch gathering (Lc0 defaults)
+  int max_prefetch = 32;
+  float max_out_of_order_evals_factor = 2.4f;
+  int max_collision_events = 917;
+  int max_collision_visits = 80000;
+  int max_collision_visits_scaling_start = 28;
+  int max_collision_visits_scaling_end = 145000;
+  float max_collision_visits_scaling_power = 1.25f;
+  bool out_of_order_eval = true;
 
-    // KLD gain stopper (disabled by default, matching lc0)
-    // Set kld_gain_min > 0 to enable (e.g. 0.00001)
-    bool use_kld_gain_stopper = false;
-    float kld_gain_min = 0.0f;
-    int kld_gain_average_interval = 100;
+  // KLD gain stopper (disabled by default, matching lc0)
+  // Set kld_gain_min > 0 to enable (e.g. 0.00001)
+  bool use_kld_gain_stopper = false;
+  float kld_gain_min = 0.0f;
+  int kld_gain_average_interval = 100;
 
-    // NNCache
-    int nn_cache_size = 500000;
+  // NNCache
+  int nn_cache_size = 500000;
 
-    // Backend
-    std::string nn_weights_path;
+  // Backend
+  std::string nn_weights_path;
 
-    int GetNumThreads() const {
-        if (num_threads <= 0) {
-            int hw = static_cast<int>(std::thread::hardware_concurrency());
-            return std::min(std::max(2, hw / 4), 4);
-        }
-        return num_threads;
+  int GetNumThreads() const {
+    if (num_threads <= 0) {
+      int hw = static_cast<int>(std::thread::hardware_concurrency());
+      return std::min(std::max(2, hw / 4), 4);
     }
+    return num_threads;
+  }
 
-    float GetCpuct(bool is_root) const {
-        return is_root ? cpuct_at_root : cpuct;
-    }
+  float GetCpuct(bool is_root) const { return is_root ? cpuct_at_root : cpuct; }
 
-    float GetCpuctBase(bool is_root) const {
-        return is_root ? cpuct_base_at_root : cpuct_base;
-    }
+  float GetCpuctBase(bool is_root) const {
+    return is_root ? cpuct_base_at_root : cpuct_base;
+  }
 
-    float GetCpuctFactor(bool is_root) const {
-        return is_root ? cpuct_factor_at_root : cpuct_factor;
-    }
+  float GetCpuctFactor(bool is_root) const {
+    return is_root ? cpuct_factor_at_root : cpuct_factor;
+  }
 
-    bool GetFpuAbsolute(bool is_root) const {
-        return is_root ? fpu_absolute_at_root : fpu_absolute;
-    }
+  bool GetFpuAbsolute(bool is_root) const {
+    return is_root ? fpu_absolute_at_root : fpu_absolute;
+  }
 
-    float GetFpuValue(bool is_root) const {
-        return is_root ? fpu_value_at_root : fpu_value;
-    }
+  float GetFpuValue(bool is_root) const {
+    return is_root ? fpu_value_at_root : fpu_value;
+  }
 };
 
 } // namespace MCTS

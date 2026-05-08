@@ -40,8 +40,7 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
                          std::span<const Position *const> position_history,
                          int history_planes,
                          FillEmptyHistory fill_empty_history,
-                         InputPlanes &output,
-                         int *transform_out = nullptr);
+                         InputPlanes &output, int *transform_out = nullptr);
 
 InputPlanes
 EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,

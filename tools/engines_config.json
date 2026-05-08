@@ -85,7 +85,10 @@
       "description": "Lc0 with BT4-1024x15x32h network (Metal backend)",
       "path": "reference/lc0/build/release/lc0",
       "expected_elo": 3700,
-      "cmd_args": ["--weights=networks/BT4-1024x15x32h-swa-6147500.pb", "--backend=metal"],
+      "cmd_args": [
+        "--weights=networks/BT4-1024x15x32h-swa-6147500.pb",
+        "--backend=metal"
+      ],
       "options": {
         "Threads": "auto",
         "Temperature": "0"

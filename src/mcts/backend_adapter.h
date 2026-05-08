@@ -8,8 +8,8 @@
 #pragma once
 
 #include <array>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -57,8 +57,7 @@ private:
 uint64_t ComputeNNCacheKey(const Position *const *history, int count);
 uint64_t ComputeNNCacheKeyFromState(const uint64_t *raw_keys,
                                     const int *rule50_counts,
-                                    const int *repetition_distances,
-                                    int count);
+                                    const int *repetition_distances, int count);
 
 class BackendComputation {
 public:
@@ -67,8 +66,9 @@ public:
   BackendComputation(NNMCTSEvaluator *eval, NNCache *cache);
 
   AddInputResult AddInput(const Position &pos, uint64_t key);
-  AddInputResult AddInputWithHistory(
-      const std::vector<const Position *> &history, uint64_t key);
+  AddInputResult
+  AddInputWithHistory(const std::vector<const Position *> &history,
+                      uint64_t key);
   AddInputResult AddInputWithHistory(const Position *const *history,
                                      int history_depth, uint64_t key,
                                      int expected_moves = -1);

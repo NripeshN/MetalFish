@@ -60,8 +60,8 @@ void Position::copy_from(const Position &src, StateInfo *si) {
   std::copy(src.pieceCount, src.pieceCount + PIECE_NB, pieceCount);
   std::copy(src.castlingRightsMask, src.castlingRightsMask + SQUARE_NB,
             castlingRightsMask);
-  std::copy(src.castlingRookSquare,
-            src.castlingRookSquare + CASTLING_RIGHT_NB, castlingRookSquare);
+  std::copy(src.castlingRookSquare, src.castlingRookSquare + CASTLING_RIGHT_NB,
+            castlingRookSquare);
   std::copy(src.castlingPath, src.castlingPath + CASTLING_RIGHT_NB,
             castlingPath);
 

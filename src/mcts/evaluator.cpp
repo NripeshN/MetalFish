@@ -63,17 +63,16 @@ public:
     int transform = 0;
     NN::InputPlanes planes;
     NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
-                            NN::FillEmptyHistory::FEN_ONLY, planes,
-                            &transform);
+                            NN::FillEmptyHistory::FEN_ONLY, planes, &transform);
 
     auto output = network_->Evaluate(planes);
 
     return BuildResult(output, pos, transform, nullptr);
   }
 
-  EvaluationResult EvaluateWithHistoryAndMoves(
-      NNMCTSEvaluator::PositionHistoryView history,
-      NNMCTSEvaluator::LegalMovesView legal_moves) {
+  EvaluationResult
+  EvaluateWithHistoryAndMoves(NNMCTSEvaluator::PositionHistoryView history,
+                              NNMCTSEvaluator::LegalMovesView legal_moves) {
     if (history.empty())
       return EvaluationResult{};
     const Position &pos = *history.back();
@@ -81,8 +80,7 @@ public:
     int transform = 0;
     NN::InputPlanes planes;
     NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
-                            NN::FillEmptyHistory::FEN_ONLY, planes,
-                            &transform);
+                            NN::FillEmptyHistory::FEN_ONLY, planes, &transform);
 
     auto output = network_->Evaluate(planes);
     return BuildResult(output, pos, transform, &legal_moves);
@@ -97,8 +95,8 @@ public:
       const Position &pos = *positions[idx];
       std::array<const Position *, 1> history = {&pos};
       NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
-                              NN::FillEmptyHistory::FEN_ONLY,
-                              planes_batch[idx], &transforms[idx]);
+                              NN::FillEmptyHistory::FEN_ONLY, planes_batch[idx],
+                              &transforms[idx]);
     }
 
     auto outputs = network_->EvaluateBatch(planes_batch);
@@ -107,8 +105,8 @@ public:
     results.reserve(outputs.size());
 
     for (size_t i = 0; i < outputs.size(); ++i) {
-      results.push_back(BuildResult(outputs[i], *positions[i], transforms[i],
-                                    nullptr));
+      results.push_back(
+          BuildResult(outputs[i], *positions[i], transforms[i], nullptr));
     }
 
     return results;
@@ -132,10 +130,9 @@ public:
     std::vector<int> transforms(count);
 
     for (size_t idx = 0; idx < count; ++idx) {
-      NN::EncodePositionForNN(
-          input_format_, histories[idx], NN::kMoveHistory,
-          NN::FillEmptyHistory::FEN_ONLY, planes_batch[idx],
-          &transforms[idx]);
+      NN::EncodePositionForNN(input_format_, histories[idx], NN::kMoveHistory,
+                              NN::FillEmptyHistory::FEN_ONLY, planes_batch[idx],
+                              &transforms[idx]);
     }
 
     auto outputs = network_->EvaluateBatch(planes_batch);
@@ -153,10 +150,10 @@ public:
   std::string GetNetworkInfo() const { return network_->GetNetworkInfo(); }
 
 private:
-  EvaluationResult BuildResult(const NN::NetworkOutput &output,
-                               const Position &pos, int transform,
-                               const NNMCTSEvaluator::LegalMovesView
-                                   *legal_moves) const {
+  EvaluationResult
+  BuildResult(const NN::NetworkOutput &output, const Position &pos,
+              int transform,
+              const NNMCTSEvaluator::LegalMovesView *legal_moves) const {
     EvaluationResult result;
     result.value = output.value;
     result.has_wdl = output.has_wdl;
@@ -212,13 +209,14 @@ EvaluationResult NNMCTSEvaluator::Evaluate(const Position &pos) {
   return impl_->Evaluate(pos);
 }
 
-EvaluationResult NNMCTSEvaluator::EvaluateWithHistory(
-    PositionHistoryView history) {
+EvaluationResult
+NNMCTSEvaluator::EvaluateWithHistory(PositionHistoryView history) {
   return impl_->EvaluateWithHistory(history);
 }
 
-EvaluationResult NNMCTSEvaluator::EvaluateWithHistoryAndMoves(
-    PositionHistoryView history, LegalMovesView legal_moves) {
+EvaluationResult
+NNMCTSEvaluator::EvaluateWithHistoryAndMoves(PositionHistoryView history,
+                                             LegalMovesView legal_moves) {
   return impl_->EvaluateWithHistoryAndMoves(history, legal_moves);
 }
 
@@ -227,8 +225,7 @@ NNMCTSEvaluator::EvaluateBatch(const Position *const *positions, size_t count) {
   return impl_->EvaluateBatch(positions, count);
 }
 
-std::vector<EvaluationResult>
-NNMCTSEvaluator::EvaluateBatchWithHistory(
+std::vector<EvaluationResult> NNMCTSEvaluator::EvaluateBatchWithHistory(
     const std::vector<std::vector<const Position *>> &histories) {
   std::vector<PositionHistoryView> views;
   views.reserve(histories.size());
@@ -238,14 +235,12 @@ NNMCTSEvaluator::EvaluateBatchWithHistory(
   return impl_->EvaluateBatchWithHistoryViews(views);
 }
 
-std::vector<EvaluationResult>
-NNMCTSEvaluator::EvaluateBatchWithHistoryViews(
+std::vector<EvaluationResult> NNMCTSEvaluator::EvaluateBatchWithHistoryViews(
     const std::vector<PositionHistoryView> &histories) {
   return impl_->EvaluateBatchWithHistoryViews(histories);
 }
 
-std::vector<EvaluationResult>
-NNMCTSEvaluator::EvaluateBatchWithHistoryViews(
+std::vector<EvaluationResult> NNMCTSEvaluator::EvaluateBatchWithHistoryViews(
     const std::vector<PositionHistoryView> &histories,
     const std::vector<LegalMovesView> &legal_moves) {
   return impl_->EvaluateBatchWithHistoryViews(histories, legal_moves);

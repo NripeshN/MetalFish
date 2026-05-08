@@ -19,7 +19,8 @@ void ChainedStopper::Add(std::unique_ptr<SearchStopper> s) {
 
 bool ChainedStopper::ShouldStop(const SearchStats &stats) {
   for (auto &s : stoppers_) {
-    if (s->ShouldStop(stats)) return true;
+    if (s->ShouldStop(stats))
+      return true;
   }
   return false;
 }
@@ -40,9 +41,11 @@ SmartPruningStopper::SmartPruningStopper(float factor, int64_t time_limit_ms)
     : factor_(factor), time_limit_ms_(time_limit_ms) {}
 
 bool SmartPruningStopper::ShouldStop(const SearchStats &stats) {
-  if (stats.edge_n.size() <= 1) return true;
+  if (stats.edge_n.size() <= 1)
+    return true;
 
-  if (stats.nodes_since_movestart % 32 != 0) return false;
+  if (stats.nodes_since_movestart % 32 != 0)
+    return false;
 
   uint32_t best_n = 0, second_n = 0;
   for (uint32_t n : stats.edge_n) {
@@ -78,11 +81,13 @@ bool KLDGainStopper::ShouldStop(const SearchStats &stats) {
   const double new_child_nodes = static_cast<double>(stats.total_nodes) - 1.0;
 
   // Need a meaningful distribution before triggering
-  if (new_child_nodes < 500) return false;
+  if (new_child_nodes < 500)
+    return false;
 
-  if (new_child_nodes < prev_child_nodes_ + average_interval_) return false;
+  if (new_child_nodes < prev_child_nodes_ + average_interval_)
+    return false;
 
-  const auto& new_visits = stats.edge_n;
+  const auto &new_visits = stats.edge_n;
   if (!prev_visits_.empty() && prev_visits_.size() == new_visits.size()) {
     double kldgain = 0.0;
     for (size_t i = 0; i < new_visits.size(); ++i) {
@@ -111,8 +116,8 @@ MemoryWatchingStopper::MemoryWatchingStopper(size_t max_bytes)
     : max_bytes_(max_bytes) {}
 
 bool MemoryWatchingStopper::ShouldStop(const SearchStats &stats) {
-    size_t estimated = stats.total_nodes * 624;
-    return estimated > max_bytes_;
+  size_t estimated = stats.total_nodes * 624;
+  return estimated > max_bytes_;
 }
 
 std::unique_ptr<SearchStopper>
@@ -124,7 +129,8 @@ SigmoidTimeManager::CreateStopper(Color /*us*/, int64_t time_left, int64_t inc,
     return std::make_unique<TimeLimitStopper>(movetime);
   }
 
-  if (infinite) return nullptr;
+  if (infinite)
+    return nullptr;
 
   double est_moves = 10.0 + 50.0 / (1.0 + std::exp((ply - 45.0) / 6.0));
 
@@ -132,12 +138,10 @@ SigmoidTimeManager::CreateStopper(Color /*us*/, int64_t time_left, int64_t inc,
     est_moves = static_cast<double>(movestogo);
   }
 
-  double total_time =
-      static_cast<double>(time_left) +
-      static_cast<double>(inc) * std::max(0.0, est_moves - 1.0);
+  double total_time = static_cast<double>(time_left) +
+                      static_cast<double>(inc) * std::max(0.0, est_moves - 1.0);
 
-  int64_t time_for_move =
-      static_cast<int64_t>(total_time / est_moves);
+  int64_t time_for_move = static_cast<int64_t>(total_time / est_moves);
 
   int64_t max_time = static_cast<int64_t>(time_left * 0.3);
   time_for_move = std::min(time_for_move, max_time);
@@ -145,8 +149,8 @@ SigmoidTimeManager::CreateStopper(Color /*us*/, int64_t time_left, int64_t inc,
 
   auto chain = std::make_unique<ChainedStopper>();
   chain->Add(std::make_unique<TimeLimitStopper>(time_for_move));
-  chain->Add(
-      std::make_unique<SmartPruningStopper>(smart_pruning_factor, time_for_move));
+  chain->Add(std::make_unique<SmartPruningStopper>(smart_pruning_factor,
+                                                   time_for_move));
 
   if (node_limit > 0) {
     chain->Add(std::make_unique<NodeLimitStopper>(node_limit));

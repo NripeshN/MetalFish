@@ -10,9 +10,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <cstdint>
+#include <filesystem>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -23,7 +24,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-#include <filesystem>
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -74,8 +74,7 @@ bool uci_trace_enabled() {
     std::string value(env);
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char c) { return std::tolower(c); });
-    return value != "0" && value != "false" && value != "off" &&
-           value != "no";
+    return value != "0" && value != "false" && value != "off" && value != "no";
   }();
   return enabled;
 }
@@ -186,7 +185,7 @@ void UCIEngine::loop() {
         parallel_hybrid_go(is);
       else
         go(is);
-      }
+    }
 
     // ======================================================================
     // MetalFish Extensions (debugging / CLI only)
@@ -1333,7 +1332,8 @@ void UCIEngine::gpu_benchmark() {
 // Preload search objects during isready
 // ============================================================================
 
-static float get_float_option(Engine &engine, const char *name, float fallback) {
+static float get_float_option(Engine &engine, const char *name,
+                              float fallback) {
   if (!engine.get_options().count(name))
     return fallback;
   try {
@@ -1361,8 +1361,8 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       get_float_option(engine, "MCTSCPuctBase", config.cpuct_base);
   config.cpuct_factor =
       get_float_option(engine, "MCTSCPuctFactor", config.cpuct_factor);
-  config.cpuct_base_at_root =
-      get_float_option(engine, "MCTSCPuctBaseAtRoot", config.cpuct_base_at_root);
+  config.cpuct_base_at_root = get_float_option(engine, "MCTSCPuctBaseAtRoot",
+                                               config.cpuct_base_at_root);
   config.cpuct_factor_at_root = get_float_option(
       engine, "MCTSCPuctFactorAtRoot", config.cpuct_factor_at_root);
 
@@ -1376,10 +1376,10 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   config.fpu_reduction_at_root = get_float_option(
       engine, "MCTSFpuReductionAtRoot", config.fpu_reduction_at_root);
 
-  config.policy_softmax_temp = get_float_option(
-      engine, "MCTSPolicySoftmaxTemp", config.policy_softmax_temp);
-  config.virtual_loss = std::max(1, static_cast<int>(
-                                        engine.get_options()["MCTSVirtualLoss"]));
+  config.policy_softmax_temp = get_float_option(engine, "MCTSPolicySoftmaxTemp",
+                                                config.policy_softmax_temp);
+  config.virtual_loss =
+      std::max(1, static_cast<int>(engine.get_options()["MCTSVirtualLoss"]));
   const int requested_minibatch =
       static_cast<int>(engine.get_options()["MCTSMinibatchSize"]);
   config.minibatch_size = requested_minibatch > 0
@@ -1483,30 +1483,22 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights) {
 static std::string make_mcts_cache_key(const std::string &nn_weights,
                                        const MCTS::SearchParams &config);
 
-static std::string make_hybrid_cache_key(
-    const std::string &nn_weights,
-    const MCTS::ParallelHybridConfig &config) {
+static std::string
+make_hybrid_cache_key(const std::string &nn_weights,
+                      const MCTS::ParallelHybridConfig &config) {
   std::ostringstream key;
-  key << make_mcts_cache_key(nn_weights, config.mcts_config)
-      << "|hybrid"
-      << "|" << config.mcts_threads
-      << "|" << config.ab_threads
-      << "|" << config.ab_min_depth
-      << "|" << config.ab_max_depth
-      << "|" << config.ab_use_time
-      << "|" << config.ab_policy_weight
-      << "|" << config.agreement_threshold
-      << "|" << config.override_threshold
-      << "|" << config.policy_update_interval_ms
-      << "|" << config.use_position_classifier
-      << "|" << static_cast<int>(config.decision_mode)
-      << "|" << config.gpu_batch_size
-      << "|" << config.gpu_batch_timeout_us
-      << "|" << config.use_async_gpu_eval
-      << "|" << config.use_gpu_resident_batches
-      << "|" << config.prefetch_positions
-      << "|" << config.use_simd_kernels
-      << "|" << config.metal_threadgroup_size;
+  key << make_mcts_cache_key(nn_weights, config.mcts_config) << "|hybrid"
+      << "|" << config.mcts_threads << "|" << config.ab_threads << "|"
+      << config.ab_min_depth << "|" << config.ab_max_depth << "|"
+      << config.ab_use_time << "|" << config.ab_policy_weight << "|"
+      << config.agreement_threshold << "|" << config.override_threshold << "|"
+      << config.policy_update_interval_ms << "|"
+      << config.use_position_classifier << "|"
+      << static_cast<int>(config.decision_mode) << "|" << config.gpu_batch_size
+      << "|" << config.gpu_batch_timeout_us << "|" << config.use_async_gpu_eval
+      << "|" << config.use_gpu_resident_batches << "|"
+      << config.prefetch_positions << "|" << config.use_simd_kernels << "|"
+      << config.metal_threadgroup_size;
   return key.str();
 }
 
@@ -1520,10 +1512,12 @@ static std::string get_nn_weights_path(Engine &engine) {
   if (nn_weights.empty()) {
     namespace fs = std::filesystem;
     auto try_dir = [&](const fs::path &dir) -> std::string {
-      if (!fs::is_directory(dir)) return {};
+      if (!fs::is_directory(dir))
+        return {};
       std::string best;
       for (const auto &entry : fs::directory_iterator(dir)) {
-        if (!entry.is_regular_file()) continue;
+        if (!entry.is_regular_file())
+          continue;
         auto ext = entry.path().extension().string();
         if (ext == ".pb" || ext == ".gz" || ext == ".onnx") {
           auto name = entry.path().filename().string();
@@ -1535,14 +1529,14 @@ static std::string get_nn_weights_path(Engine &engine) {
     };
 
     auto exe_dir = fs::path("/proc/self/exe").parent_path();
-    #ifdef __APPLE__
+#ifdef __APPLE__
     {
       char buf[4096];
       uint32_t sz = sizeof(buf);
       if (_NSGetExecutablePath(buf, &sz) == 0)
         exe_dir = fs::path(buf).parent_path();
     }
-    #endif
+#endif
 
     nn_weights = try_dir(exe_dir / "networks");
     if (nn_weights.empty())
@@ -1553,7 +1547,8 @@ static std::string get_nn_weights_path(Engine &engine) {
       nn_weights = try_dir("networks");
 
     if (!nn_weights.empty())
-      sync_cout << "info string Auto-detected NN weights: " << nn_weights << sync_endl;
+      sync_cout << "info string Auto-detected NN weights: " << nn_weights
+                << sync_endl;
   }
   return nn_weights;
 }
@@ -1569,10 +1564,8 @@ static std::mutex g_cached_mcts_mutex;
 static std::thread g_search_waiter;
 static std::mutex g_search_waiter_mutex;
 
-static int resolve_mcts_thread_count(Engine &engine,
-                                     bool explicit_threads_arg,
-                                     int requested_threads,
-                                     bool announce_cap) {
+static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
+                                     int requested_threads, bool announce_cap) {
   int num_threads = requested_threads;
   if (num_threads <= 0) {
     num_threads = static_cast<int>(std::thread::hardware_concurrency());
@@ -1580,7 +1573,8 @@ static int resolve_mcts_thread_count(Engine &engine,
       num_threads = 4;
   }
 
-  int mcts_thread_cap = static_cast<int>(engine.get_options()["MCTSMaxThreads"]);
+  int mcts_thread_cap =
+      static_cast<int>(engine.get_options()["MCTSMaxThreads"]);
   if (!explicit_threads_arg && mcts_thread_cap <= 0) {
     // Strength-first auto mode:
     // Apple Silicon MPSGraph latency is better with one MCTS worker for the
@@ -1605,29 +1599,18 @@ static int resolve_mcts_thread_count(Engine &engine,
 static std::string make_mcts_cache_key(const std::string &nn_weights,
                                        const MCTS::SearchParams &config) {
   std::ostringstream key;
-  key << nn_weights
-      << "|" << config.num_threads
-      << "|" << config.cpuct
-      << "|" << config.cpuct_at_root
-      << "|" << config.cpuct_base
-      << "|" << config.cpuct_factor
-      << "|" << config.cpuct_base_at_root
-      << "|" << config.cpuct_factor_at_root
-      << "|" << config.fpu_absolute
-      << "|" << config.fpu_absolute_at_root
-      << "|" << config.fpu_value
-      << "|" << config.fpu_value_at_root
-      << "|" << config.fpu_reduction
-      << "|" << config.fpu_reduction_at_root
-      << "|" << config.policy_softmax_temp
-      << "|" << config.virtual_loss
-      << "|" << config.minibatch_size
-      << "|" << config.max_out_of_order_evals_factor
-      << "|" << config.add_dirichlet_noise
-      << "|" << config.noise_epsilon
-      << "|" << config.noise_alpha
-      << "|" << config.out_of_order_eval
-      << "|" << config.nn_cache_size;
+  key << nn_weights << "|" << config.num_threads << "|" << config.cpuct << "|"
+      << config.cpuct_at_root << "|" << config.cpuct_base << "|"
+      << config.cpuct_factor << "|" << config.cpuct_base_at_root << "|"
+      << config.cpuct_factor_at_root << "|" << config.fpu_absolute << "|"
+      << config.fpu_absolute_at_root << "|" << config.fpu_value << "|"
+      << config.fpu_value_at_root << "|" << config.fpu_reduction << "|"
+      << config.fpu_reduction_at_root << "|" << config.policy_softmax_temp
+      << "|" << config.virtual_loss << "|" << config.minibatch_size << "|"
+      << config.max_out_of_order_evals_factor << "|"
+      << config.add_dirichlet_noise << "|" << config.noise_epsilon << "|"
+      << config.noise_alpha << "|" << config.out_of_order_eval << "|"
+      << config.nn_cache_size;
   return key.str();
 }
 
@@ -1679,9 +1662,9 @@ static void preload_search_objects(Engine &engine) {
 
     auto config = make_hybrid_config(engine, nn_weights);
     const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
-    const bool needs_reinit =
-        !g_parallel_hybrid_search || g_hybrid_gpu_manager != gpu_manager ||
-        g_parallel_hybrid_key != cache_key;
+    const bool needs_reinit = !g_parallel_hybrid_search ||
+                              g_hybrid_gpu_manager != gpu_manager ||
+                              g_parallel_hybrid_key != cache_key;
 
     if (needs_reinit && (!g_parallel_hybrid_search ||
                          !g_parallel_hybrid_search->is_searching())) {
@@ -1717,8 +1700,8 @@ static void preload_search_objects(Engine &engine) {
 
     const int requested_threads =
         static_cast<int>(engine.get_options()["Threads"]);
-    const int num_threads = resolve_mcts_thread_count(
-        engine, false, requested_threads, false);
+    const int num_threads =
+        resolve_mcts_thread_count(engine, false, requested_threads, false);
     MCTS::SearchParams config =
         make_mcts_config(engine, nn_weights, num_threads);
     const std::string cache_key = make_mcts_cache_key(nn_weights, config);
@@ -1818,18 +1801,17 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   }
 
   auto config = make_hybrid_config(engine, nn_weights);
-  sync_cout << "info string Hybrid thread split: MCTS="
-            << config.mcts_threads << " AB=" << config.ab_threads
-            << " (search workers="
-            << (config.mcts_threads + config.ab_threads)
+  sync_cout << "info string Hybrid thread split: MCTS=" << config.mcts_threads
+            << " AB=" << config.ab_threads
+            << " (search workers=" << (config.mcts_threads + config.ab_threads)
             << ", +1 coordinator, total="
             << (config.mcts_threads + config.ab_threads + 1) << ")"
             << sync_endl;
 
   const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
-  bool need_reinit =
-      !g_parallel_hybrid_search || g_hybrid_gpu_manager != gpu_manager ||
-      g_parallel_hybrid_key != cache_key;
+  bool need_reinit = !g_parallel_hybrid_search ||
+                     g_hybrid_gpu_manager != gpu_manager ||
+                     g_parallel_hybrid_key != cache_key;
 
   if (need_reinit) {
     if (g_parallel_hybrid_search) {
@@ -1871,7 +1853,6 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
 
   join_search_waiter();
   g_parallel_hybrid_search->start_search(pos, limits, best_move_cb, info_cb);
-
 }
 
 // ============================================================================
@@ -1896,8 +1877,8 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
 
   std::istringstream limit_args(args);
   Search::LimitsType limits = parse_limits(limit_args);
-  num_threads = resolve_mcts_thread_count(
-      engine, explicit_threads_arg, num_threads, true);
+  num_threads = resolve_mcts_thread_count(engine, explicit_threads_arg,
+                                          num_threads, true);
 
   sync_cout << "info string Starting Multi-Threaded MCTS Search with "
             << num_threads << " threads..." << sync_endl;
@@ -1962,25 +1943,24 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
           g_active_mcts.reset();
       }
 
-  auto end_time = std::chrono::steady_clock::now();
-  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        end_time - start_time)
-                        .count();
+      auto end_time = std::chrono::steady_clock::now();
+      auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            end_time - start_time)
+                            .count();
 
       const auto &stats = mcts->Stats();
-  uint64_t nodes = stats.total_nodes.load();
+      uint64_t nodes = stats.total_nodes.load();
       uint64_t nn_evals = stats.nn_evaluations.load();
-  uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
+      uint64_t nps = elapsed_ms > 0 ? (nodes * 1000) / elapsed_ms : 0;
 
-  sync_cout << "info string Final stats:" << sync_endl;
-  sync_cout << "info string   Nodes: " << nodes << sync_endl;
-  sync_cout << "info string   NPS: " << nps << sync_endl;
-  sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
-  sync_cout << "info string   Threads: " << num_threads << sync_endl;
+      sync_cout << "info string Final stats:" << sync_endl;
+      sync_cout << "info string   Nodes: " << nodes << sync_endl;
+      sync_cout << "info string   NPS: " << nps << sync_endl;
+      sync_cout << "info string   Time: " << elapsed_ms << "ms" << sync_endl;
+      sync_cout << "info string   Threads: " << num_threads << sync_endl;
       sync_cout << "info string   NN evals: " << nn_evals << sync_endl;
-  sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
-            << " misses: " << stats.cache_misses.load() << sync_endl;
-
+      sync_cout << "info string   Cache hits: " << stats.cache_hits.load()
+                << " misses: " << stats.cache_misses.load() << sync_endl;
     });
   }
 }

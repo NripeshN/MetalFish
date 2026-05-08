@@ -227,6 +227,6 @@ static MPSImageFeatureChannelFormat fcFormat =
                     subBatchSize:(NSUInteger)subBatchSize;
 
 - (void)copyResultsToBuffers:(float *__nonnull *__nonnull)outputBuffers
-                subBatchSizes:(const std::vector<NSUInteger> &)subBatchSizes;
+               subBatchSizes:(const std::vector<NSUInteger> &)subBatchSizes;
 
 @end

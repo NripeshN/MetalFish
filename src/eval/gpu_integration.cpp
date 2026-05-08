@@ -1598,7 +1598,8 @@ bool GPUNNUEManager::evaluate_batch(GPUEvalBatch &batch, bool use_big_network,
 
   auto encoder = backend.create_parallel_encoder();
 
-  // Testing showed fused kernel uses too much threadgroup memory, reducing occupancy
+  // Testing showed fused kernel uses too much threadgroup memory, reducing
+  // occupancy
   const bool use_fused_kernel = false;
   const bool use_dual_kernel =
       feature_transform_dual_kernel_ && feature_transform_dual_kernel_->valid();
@@ -1896,8 +1897,7 @@ bool GPUNNUEManager::evaluate_batch_async(
   std::atomic<size_t> *batch_count_ptr = &batch_count_;
 
   backend.submit_async(encoder.get(),
-                       [=,
-                        async_white_features = async_white_features,
+                       [=, async_white_features = async_white_features,
                         async_black_features = async_black_features,
                         async_white_counts = async_white_counts,
                         async_black_counts = async_black_counts,
@@ -1927,7 +1927,8 @@ std::pair<int32_t, int32_t> GPUNNUEManager::evaluate_single(const Position &pos,
   batch.add_position(pos);
 
   // force_gpu=true bypasses min_batch_for_gpu threshold.
-  // Don't modify tuning_.min_batch_for_gpu here - would race with other threads.
+  // Don't modify tuning_.min_batch_for_gpu here - would race with other
+  // threads.
   bool success = evaluate_batch(batch, use_big, /*force_gpu=*/true);
 
   if (success && !batch.positional_scores.empty()) {

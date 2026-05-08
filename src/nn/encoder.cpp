@@ -178,9 +178,7 @@ void SetBitsInZeroedPlane(std::array<float, 64> &plane, uint64_t bitboard) {
   }
 }
 
-void SetPlane(std::array<float, 64> &plane, float value) {
-  plane.fill(value);
-}
+void SetPlane(std::array<float, 64> &plane, float value) { plane.fill(value); }
 
 } // namespace
 

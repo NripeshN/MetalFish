@@ -15,7 +15,9 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+  set(CMAKE_BUILD_TYPE
+      Release
+      CACHE STRING "Build type" FORCE)
 endif()
 
 option(METALFISH_ENABLE_IPO
@@ -24,15 +26,14 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   option(METALFISH_ENABLE_NATIVE_ARCH
          "Tune code generation for the local Apple Silicon CPU" ON)
 else()
-  option(METALFISH_ENABLE_NATIVE_ARCH
-         "Tune code generation for the local CPU" OFF)
+  option(METALFISH_ENABLE_NATIVE_ARCH "Tune code generation for the local CPU"
+         OFF)
 endif()
 
 set(METALFISH_IPO_SUPPORTED OFF)
 if(METALFISH_ENABLE_IPO)
   include(CheckIPOSupported)
-  check_ipo_supported(RESULT METALFISH_IPO_SUPPORTED
-                      OUTPUT METALFISH_IPO_ERROR)
+  check_ipo_supported(RESULT METALFISH_IPO_SUPPORTED OUTPUT METALFISH_IPO_ERROR)
   if(NOT METALFISH_IPO_SUPPORTED)
     message(STATUS "IPO/LTO disabled: ${METALFISH_IPO_ERROR}")
   endif()
@@ -152,13 +153,13 @@ set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
 # MCTS search engine
-set(MCTS_SOURCES src/mcts/search.cpp src/mcts/backend_adapter.cpp
-                 src/mcts/stoppers.cpp src/mcts/evaluator.cpp
-                 src/mcts/gpu_backend.cpp)
+set(MCTS_SOURCES
+    src/mcts/search.cpp src/mcts/backend_adapter.cpp src/mcts/stoppers.cpp
+    src/mcts/evaluator.cpp src/mcts/gpu_backend.cpp)
 
 # Hybrid search engine
-set(HYBRID_SOURCES src/hybrid/hybrid_search.cpp
-                   src/hybrid/position_adapter.cpp src/hybrid/classifier.cpp)
+set(HYBRID_SOURCES src/hybrid/hybrid_search.cpp src/hybrid/position_adapter.cpp
+                   src/hybrid/classifier.cpp)
 
 # Protobuf generation for transformer network weights
 find_package(Protobuf 3.0 REQUIRED)

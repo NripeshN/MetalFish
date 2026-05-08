@@ -240,7 +240,8 @@ double GPUMCTSBackend::avg_batch_size() const {
   size_t batches = batch_evals_.load(std::memory_order_relaxed);
   if (batches == 0)
     return 0.0;
-  return static_cast<double>(total_positions_.load(std::memory_order_relaxed)) / batches;
+  return static_cast<double>(total_positions_.load(std::memory_order_relaxed)) /
+         batches;
 }
 
 std::unique_ptr<GPUMCTSBackend>

@@ -245,7 +245,8 @@ public:
   void set_config(const ParallelHybridConfig &config) { config_ = config; }
   const ParallelHybridConfig &config() const { return config_; }
 
-  void start_search(const Position &pos, const ::MetalFish::Search::LimitsType &limits,
+  void start_search(const Position &pos,
+                    const ::MetalFish::Search::LimitsType &limits,
                     BestMoveCallback best_move_cb,
                     InfoCallback info_cb = nullptr);
   void stop();

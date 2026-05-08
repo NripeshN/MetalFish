@@ -41,8 +41,12 @@ public:
   void set_wdl_rescale(float win_rate, float draw_rate);
 
   // Statistics
-  size_t total_evaluations() const { return total_evals_.load(std::memory_order_relaxed); }
-  size_t batch_evaluations() const { return batch_evals_.load(std::memory_order_relaxed); }
+  size_t total_evaluations() const {
+    return total_evals_.load(std::memory_order_relaxed);
+  }
+  size_t batch_evaluations() const {
+    return batch_evals_.load(std::memory_order_relaxed);
+  }
   double avg_batch_size() const;
 
 private:
