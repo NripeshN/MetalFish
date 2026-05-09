@@ -1344,7 +1344,41 @@ static float get_float_option(Engine &engine, const char *name,
 }
 
 static int auto_mcts_minibatch_size(int num_threads) {
+#ifdef __APPLE__
+  // Short Apple Silicon searches lose time waiting for moderate MPSGraph
+  // batches to fill. Longer pure-MCTS searches can opt back into batching once
+  // the go limits are known.
+  if (num_threads > 1)
+    return 1;
+  return 32;
+#else
   return num_threads >= 8 ? 64 : 32;
+#endif
+}
+
+static void tune_mcts_minibatch_for_limits(MCTS::SearchParams &config,
+                                           Engine &engine,
+                                           const Search::LimitsType &limits,
+                                           int num_threads) {
+#ifdef __APPLE__
+  if (static_cast<int>(engine.get_options()["MCTSMinibatchSize"]) > 0)
+    return;
+  if (num_threads < 8 || limits.nodes > 0)
+    return;
+
+  const int64_t max_clock_ms =
+      std::max<int64_t>(limits.time[WHITE], limits.time[BLACK]);
+  const bool long_fixed_movetime = limits.movetime >= 3000;
+  const bool long_clock_search = limits.movetime == 0 && max_clock_ms >= 15000;
+
+  if (limits.infinite || long_fixed_movetime || long_clock_search)
+    config.minibatch_size = 32;
+#else
+  (void)config;
+  (void)engine;
+  (void)limits;
+  (void)num_threads;
+#endif
 }
 
 static MCTS::SearchParams make_mcts_config(Engine &engine,
@@ -1893,6 +1927,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   }
 
   MCTS::SearchParams config = make_mcts_config(engine, nn_weights, num_threads);
+  tune_mcts_minibatch_for_limits(config, engine, limits, num_threads);
 
   std::shared_ptr<MCTS::Search> mcts;
   const std::string cache_key = make_mcts_cache_key(nn_weights, config);

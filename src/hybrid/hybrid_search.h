@@ -336,6 +336,7 @@ private:
 
   Move make_final_decision();
   void refresh_final_state(Move final_move);
+  Move first_allowed_legal_move() const;
   int calculate_time_budget() const;
   bool should_stop() const;
 

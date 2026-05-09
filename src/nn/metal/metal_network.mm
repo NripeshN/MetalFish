@@ -15,6 +15,7 @@
 #include <span>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace MetalFish {
 namespace NN {
@@ -185,7 +186,7 @@ void MetalNetwork::ReleaseIO(InputsOutputs *io) {
 NetworkOutput MetalNetwork::Evaluate(const InputPlanes &input) {
   std::vector<NetworkOutput> outputs(1);
   RunBatch(std::span<const InputPlanes>(&input, 1), outputs);
-  return outputs.front();
+  return std::move(outputs.front());
 }
 
 std::vector<NetworkOutput>
@@ -237,7 +238,6 @@ void MetalNetwork::RunBatch(std::span<const InputPlanes> inputs,
   // Convert outputs.
   for (int b = 0; b < batch; ++b) {
     NetworkOutput &out = outputs[b];
-    out.policy.resize(kNumOutputPolicy);
     std::memcpy(out.policy.data(), &io->op_policy_mem_[b * kNumOutputPolicy],
                 sizeof(float) * kNumOutputPolicy);
 

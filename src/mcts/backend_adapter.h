@@ -76,6 +76,9 @@ public:
                                      int history_depth, uint64_t key,
                                      const Move *legal_moves,
                                      int legal_move_count);
+  AddInputResult AddInputWithHistoryKnownCacheMiss(
+      const Position *const *history, int history_depth, uint64_t key,
+      const Move *legal_moves, int legal_move_count);
   void ComputeBlocking();
   const EvaluationResult &GetResult(int idx) const;
   int UsedBatchSize() const;
@@ -83,6 +86,8 @@ public:
   void Reset() {
     pending_.clear();
     results_.clear();
+    history_views_.clear();
+    legal_move_views_.clear();
     from_cache_.clear();
     total_inputs_ = 0;
   }
@@ -102,8 +107,16 @@ private:
 
   std::vector<PendingInput> pending_;
   std::vector<EvaluationResult> results_;
+  std::vector<NNMCTSEvaluator::PositionHistoryView> history_views_;
+  std::vector<NNMCTSEvaluator::LegalMovesView> legal_move_views_;
   int total_inputs_ = 0;
   std::vector<bool> from_cache_;
+
+  AddInputResult AddInputWithHistoryImpl(const Position *const *history,
+                                         int history_depth, uint64_t key,
+                                         const Move *legal_moves,
+                                         int legal_move_count,
+                                         bool skip_cache_lookup);
 };
 
 class Backend {

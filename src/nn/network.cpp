@@ -23,7 +23,7 @@ public:
 
   NetworkOutput Evaluate(const InputPlanes &input) override {
     NetworkOutput output;
-    output.policy.resize(kPolicyOutputs, 1.0f / kPolicyOutputs);
+    output.policy.fill(1.0f / kPolicyOutputs);
     output.value = 0.0f;
     output.has_wdl = false;
     output.wdl[0] = output.wdl[1] = output.wdl[2] = 0.0f;

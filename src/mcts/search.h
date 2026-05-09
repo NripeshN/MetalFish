@@ -179,6 +179,9 @@ struct SearchWorkerCtx {
     }
   };
 
+  std::deque<HistoryBuffer> batch_histories;
+  std::deque<HistoryBuffer> prefetch_histories;
+
   void BuildHistory(HistoryBuffer &buf) {
     int total_plies = static_cast<int>(move_stack.size());
     buf.depth = std::min(total_plies + 1, HistoryBuffer::kMaxHistory);
@@ -301,7 +304,12 @@ private:
   PuctResult SelectChildPuct(Node *node, bool is_root, SearchWorkerCtx &ctx);
   void Backpropagate(Node *node, float value, float draw, float moves_left,
                      int multivisit = 1);
+  void CancelPathScoreUpdate(Node *leaf, int multivisit);
   void AddDirichletNoise(Node *root);
+  void UpdateBackendLatencyMargin(int64_t elapsed_ms);
+  void BuildRootSearchMoves(const Position &root_pos);
+  void CreateLeafEdges(Node *leaf, const MoveList<LEGAL> &moves);
+  Move FirstRootMoveOrLegal() const;
 
   // Prefetch likely-needed positions into unused GPU batch slots
   void MaybePrefetchIntoCache(
@@ -348,6 +356,10 @@ private:
   std::chrono::steady_clock::time_point search_start_;
   int64_t time_budget_ms_ = 0;
   Color root_color_ = WHITE;
+  bool root_search_filter_active_ = false;
+  bool active_root_search_filter_active_ = false;
+  std::vector<Move> root_search_moves_;
+  std::vector<Move> active_root_search_moves_;
 
   BestMoveCallback best_move_cb_;
   InfoCallback info_cb_;
@@ -358,6 +370,7 @@ private:
 
   std::atomic<int> gathering_permit_{1};
   std::atomic<int> backend_waiting_{0};
+  std::atomic<int64_t> backend_latency_margin_ms_{0};
 
   std::unique_ptr<KLDGainStopper> kld_stopper_;
 

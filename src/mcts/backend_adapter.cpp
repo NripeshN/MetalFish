@@ -195,6 +195,21 @@ BackendComputation::AddInputWithHistory(const Position *const *history,
 BackendComputation::AddInputResult BackendComputation::AddInputWithHistory(
     const Position *const *history, int history_depth, uint64_t key,
     const Move *legal_moves, int legal_move_count) {
+  return AddInputWithHistoryImpl(history, history_depth, key, legal_moves,
+                                 legal_move_count, false);
+}
+
+BackendComputation::AddInputResult
+BackendComputation::AddInputWithHistoryKnownCacheMiss(
+    const Position *const *history, int history_depth, uint64_t key,
+    const Move *legal_moves, int legal_move_count) {
+  return AddInputWithHistoryImpl(history, history_depth, key, legal_moves,
+                                 legal_move_count, true);
+}
+
+BackendComputation::AddInputResult BackendComputation::AddInputWithHistoryImpl(
+    const Position *const *history, int history_depth, uint64_t key,
+    const Move *legal_moves, int legal_move_count, bool skip_cache_lookup) {
   int idx = total_inputs_++;
   results_.emplace_back();
   from_cache_.push_back(false);
@@ -205,13 +220,15 @@ BackendComputation::AddInputResult BackendComputation::AddInputWithHistory(
     MoveList<LEGAL> moves(*history[history_depth - 1]);
     expected_moves = static_cast<int>(moves.size());
   }
-  if (cache_ && cache_->Lookup(key, expected_moves, cached)) {
+  if (!skip_cache_lookup && cache_ &&
+      cache_->Lookup(key, expected_moves, cached)) {
     results_[idx] = std::move(cached);
     from_cache_[idx] = true;
     return CACHE_HIT;
   }
 
-  PendingInput pending;
+  pending_.emplace_back();
+  PendingInput &pending = pending_.back();
   pending.key = key;
   pending.result_idx = idx;
   pending.history_depth =
@@ -228,7 +245,6 @@ BackendComputation::AddInputResult BackendComputation::AddInputWithHistory(
   for (int i = 0; i < pending.history_depth; ++i) {
     pending.history[i] = history[start + i];
   }
-  pending_.push_back(pending);
   return QUEUED;
 }
 
@@ -236,15 +252,17 @@ void BackendComputation::ComputeBlocking() {
   if (pending_.empty())
     return;
 
-  std::vector<NNMCTSEvaluator::PositionHistoryView> histories;
-  histories.reserve(pending_.size());
-  std::vector<NNMCTSEvaluator::LegalMovesView> legal_moves;
-  legal_moves.reserve(pending_.size());
+  history_views_.clear();
+  history_views_.reserve(pending_.size());
+  legal_move_views_.clear();
+  legal_move_views_.reserve(pending_.size());
+
   bool all_have_legal_moves = true;
   for (const auto &p : pending_) {
-    histories.emplace_back(p.history.data(), p.history_depth);
+    history_views_.emplace_back(p.history.data(), p.history_depth);
     if (p.legal_move_count >= 0) {
-      legal_moves.emplace_back(p.legal_moves.data(), p.legal_move_count);
+      legal_move_views_.emplace_back(p.legal_moves.data(),
+                                     p.legal_move_count);
     } else {
       all_have_legal_moves = false;
     }
@@ -252,8 +270,9 @@ void BackendComputation::ComputeBlocking() {
 
   auto batch_results =
       all_have_legal_moves
-          ? evaluator_->EvaluateBatchWithHistoryViews(histories, legal_moves)
-          : evaluator_->EvaluateBatchWithHistoryViews(histories);
+          ? evaluator_->EvaluateBatchWithHistoryViews(history_views_,
+                                                      legal_move_views_)
+          : evaluator_->EvaluateBatchWithHistoryViews(history_views_);
 
   for (size_t i = 0; i < pending_.size(); ++i) {
     int idx = pending_[i].result_idx;

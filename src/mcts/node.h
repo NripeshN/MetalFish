@@ -504,11 +504,17 @@ public:
 
   bool TryReuse(const std::string &new_fen) {
     Node *r = Root();
-    if (!r || r->NumEdges() == 0)
+    if (!r)
       return false;
 
     std::string old_fen = RootFen();
     if (old_fen.empty())
+      return false;
+
+    if (old_fen == new_fen)
+      return true;
+
+    if (r->NumEdges() == 0)
       return false;
 
     Position new_pos;

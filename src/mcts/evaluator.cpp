@@ -33,6 +33,16 @@ inline Move MirrorMoveVertical(Move move) {
   return Move(from, to);
 }
 
+struct BatchEncodeScratch {
+  std::vector<NN::InputPlanes> planes;
+  std::vector<int> transforms;
+};
+
+BatchEncodeScratch &GetBatchEncodeScratch() {
+  static thread_local BatchEncodeScratch scratch;
+  return scratch;
+}
+
 } // namespace
 
 class NNMCTSEvaluator::Impl {
@@ -88,25 +98,27 @@ public:
 
   std::vector<EvaluationResult> EvaluateBatch(const Position *const *positions,
                                               size_t count) {
-    std::vector<NN::InputPlanes> planes_batch(count);
-    std::vector<int> transforms(count);
+    BatchEncodeScratch &scratch = GetBatchEncodeScratch();
+    scratch.planes.resize(count);
+    scratch.transforms.resize(count);
 
     for (size_t idx = 0; idx < count; ++idx) {
       const Position &pos = *positions[idx];
       std::array<const Position *, 1> history = {&pos};
       NN::EncodePositionForNN(input_format_, history, NN::kMoveHistory,
-                              NN::FillEmptyHistory::FEN_ONLY, planes_batch[idx],
-                              &transforms[idx]);
+                              NN::FillEmptyHistory::FEN_ONLY,
+                              scratch.planes[idx], &scratch.transforms[idx]);
     }
 
-    auto outputs = network_->EvaluateBatch(planes_batch);
+    auto outputs = network_->EvaluateBatch(scratch.planes);
 
     std::vector<EvaluationResult> results;
     results.reserve(outputs.size());
 
     for (size_t i = 0; i < outputs.size(); ++i) {
       results.push_back(
-          BuildResult(outputs[i], *positions[i], transforms[i], nullptr));
+          BuildResult(outputs[i], *positions[i], scratch.transforms[i],
+                      nullptr));
     }
 
     return results;
@@ -126,23 +138,25 @@ public:
     }
 
     size_t count = histories.size();
-    std::vector<NN::InputPlanes> planes_batch(count);
-    std::vector<int> transforms(count);
+    BatchEncodeScratch &scratch = GetBatchEncodeScratch();
+    scratch.planes.resize(count);
+    scratch.transforms.resize(count);
 
     for (size_t idx = 0; idx < count; ++idx) {
       NN::EncodePositionForNN(input_format_, histories[idx], NN::kMoveHistory,
-                              NN::FillEmptyHistory::FEN_ONLY, planes_batch[idx],
-                              &transforms[idx]);
+                              NN::FillEmptyHistory::FEN_ONLY,
+                              scratch.planes[idx], &scratch.transforms[idx]);
     }
 
-    auto outputs = network_->EvaluateBatch(planes_batch);
+    auto outputs = network_->EvaluateBatch(scratch.planes);
 
     std::vector<EvaluationResult> results;
     results.reserve(outputs.size());
     for (size_t i = 0; i < outputs.size(); ++i) {
       const Position &pos = *histories[i].back();
       const auto *moves = legal_moves.empty() ? nullptr : &legal_moves[i];
-      results.push_back(BuildResult(outputs[i], pos, transforms[i], moves));
+      results.push_back(
+          BuildResult(outputs[i], pos, scratch.transforms[i], moves));
     }
     return results;
   }

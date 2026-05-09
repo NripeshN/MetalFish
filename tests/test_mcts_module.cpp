@@ -416,8 +416,156 @@ void test_nodes_limit_with_callback(TestCounter &tc) {
          "async best move child visits should not exceed total visits", tc);
 }
 
-void test_node_limited_batches_do_not_prefetch(TestCounter &tc) {
-  std::cout << "  Node-limited batch eval budget..." << std::endl;
+void test_searchmoves_restrict_root(TestCounter &tc) {
+  std::cout << "  Searchmoves restrict root..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  SearchParams params;
+  params.num_threads = 1;
+  params.nn_weights_path = weights;
+  params.add_dirichlet_noise = false;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 32;
+  limits.searchmoves = {"h2h3"};
+
+  auto search = CreateSearch(params);
+  search->StartSearch(
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", limits,
+      nullptr, nullptr);
+  search->Wait();
+
+  Move expected(SQ_H2, SQ_H3);
+  expect(search->GetBestMove() == expected,
+         "MCTS best move should obey root searchmoves", tc);
+  auto pv = search->GetPV();
+  expect(!pv.empty() && pv.front() == expected,
+         "MCTS PV should start with the allowed searchmove", tc);
+}
+
+void test_empty_searchmoves_filter_blocks_root(TestCounter &tc) {
+  std::cout << "  Empty searchmoves filter blocks root..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  SearchParams params;
+  params.num_threads = 1;
+  params.nn_weights_path = weights;
+  params.add_dirichlet_noise = false;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 8;
+  limits.searchmoves = {"a1a2"};
+
+  auto search = CreateSearch(params);
+  const std::string fen =
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  search->StartSearch(fen, limits, nullptr, nullptr);
+  search->Wait();
+
+  expect(search->GetBestMove() == Move::none(),
+         "MCTS should not fall back to unrestricted moves for an empty filter",
+         tc);
+  expect(search->GetPV().empty(),
+         "MCTS PV should stay empty when searchmoves resolves to no moves", tc);
+
+  MetalFish::Search::LimitsType unrestricted;
+  unrestricted.nodes = 8;
+  search->StartSearch(fen, unrestricted, nullptr, nullptr);
+  search->Wait();
+
+  expect(search->GetBestMove() != Move::none(),
+         "same-root unrestricted search should reset an empty root filter", tc);
+}
+
+void test_same_root_search_reuses_tree(TestCounter &tc) {
+  std::cout << "  Same-root tree reuse..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  SearchParams params;
+  params.num_threads = 1;
+  params.nn_weights_path = weights;
+  params.add_dirichlet_noise = false;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 16;
+  limits.searchmoves = {"h2h3"};
+
+  auto search = CreateSearch(params);
+  const std::string fen =
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  search->StartSearch(fen, limits, nullptr, nullptr);
+  search->Wait();
+  const auto first = search->GetBestMoveStats();
+
+  search->StartSearch(fen, limits, nullptr, nullptr);
+  search->Wait();
+  const auto second = search->GetBestMoveStats();
+
+  Move expected(SQ_H2, SQ_H3);
+  expect(first.move == expected && second.move == expected,
+         "same-root reuse should preserve the root searchmove", tc);
+  expect(second.visits > first.visits,
+         "same-root search should continue the existing MCTS tree", tc);
+}
+
+uint64_t run_endgame_eval_count(const char *weights, const std::string &fen) {
+  SearchParams params;
+  params.num_threads = 1;
+  params.nn_weights_path = weights;
+  params.add_dirichlet_noise = false;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 24;
+
+  auto search = CreateSearch(params);
+  search->StartSearch(fen, limits, nullptr, nullptr);
+  search->Wait();
+  return search->Stats().nn_evaluations.load();
+}
+
+void test_mating_material_adjudication(TestCounter &tc) {
+  std::cout << "  Mating material adjudication..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  const uint64_t bare_bishop = run_endgame_eval_count(
+      weights, "8/8/8/4k3/8/8/2K2B2/8 w - - 0 1");
+  expect(bare_bishop == 1,
+         "K+B vs K should be adjudicated as insufficient material", tc);
+
+  const uint64_t two_knights = run_endgame_eval_count(
+      weights, "8/8/8/3k4/8/5N2/2K2N2/8 w - - 0 1");
+  expect(two_knights > 1,
+         "K+NN vs K should keep searching as mating material", tc);
+
+  const uint64_t same_color_bishops = run_endgame_eval_count(
+      weights, "8/8/8/4k3/8/4b3/5B2/2K5 w - - 0 1");
+  expect(same_color_bishops == 1,
+         "same-color bishop-only endings should be insufficient material", tc);
+
+  const uint64_t opposite_bishops = run_endgame_eval_count(
+      weights, "8/8/8/4k3/8/2K2b2/5B2/8 w - - 0 1");
+  expect(opposite_bishops > 1,
+         "opposite-colored bishop-only endings should keep searching", tc);
+}
+
+void test_node_limited_search_uses_tight_eval_budget(TestCounter &tc) {
+  std::cout << "  Node-limited eval budget..." << std::endl;
   const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
   if (!weights) {
     std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
@@ -444,7 +592,9 @@ void test_node_limited_batches_do_not_prefetch(TestCounter &tc) {
   const uint64_t nodes = stats.total_nodes.load();
   const uint64_t evals = stats.nn_evaluations.load();
   std::cout << "    Nodes: " << nodes << ", NN evals: " << evals << std::endl;
-  expect(nodes >= limits.nodes, "batched MCTS should honor node limit", tc);
+  expect(nodes >= limits.nodes, "MCTS should honor node limit", tc);
+  expect(nodes <= limits.nodes + static_cast<uint64_t>(params.num_threads),
+         "node-limited MCTS should avoid large batch overshoot", tc);
   expect(evals <= nodes,
          "node-limited MCTS should not spend NN evals on speculative prefetch",
          tc);
@@ -471,6 +621,13 @@ void test_cache_hit_rate(TestCounter &tc) {
 
   auto search = CreateSearch(params);
   search->StartSearch(fen, limits, nullptr, nullptr);
+  search->Wait();
+
+  MetalFish::Search::LimitsType reset_limits;
+  reset_limits.nodes = 1;
+  search->StartSearch(
+      "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+      reset_limits, nullptr, nullptr);
   search->Wait();
 
   search->StartSearch(fen, limits, nullptr, nullptr);
@@ -504,7 +661,11 @@ bool test_mcts_all() {
   test_evaluator_legal_move_view_parity(tc);
   test_deterministic_repro(tc);
   test_nodes_limit_with_callback(tc);
-  test_node_limited_batches_do_not_prefetch(tc);
+  test_searchmoves_restrict_root(tc);
+  test_empty_searchmoves_filter_blocks_root(tc);
+  test_same_root_search_reuses_tree(tc);
+  test_mating_material_adjudication(tc);
+  test_node_limited_search_uses_tight_eval_budget(tc);
   test_cache_hit_rate(tc);
 
   std::cout << "  Passed: " << tc.passed << ", Failed: " << tc.failed

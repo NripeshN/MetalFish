@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,7 +19,7 @@ namespace MetalFish {
 namespace NN {
 
 struct NetworkOutput {
-  std::vector<float> policy;
+  std::array<float, kPolicyOutputs> policy{};
   float value;
   float wdl[3];
   bool has_wdl;

@@ -307,11 +307,12 @@ void ThreadPool::start_thinking(const OptionsMap &options, Position &pos,
     auto move = UCIEngine::to_move(pos, uciMove);
 
     if (std::find(legalmoves.begin(), legalmoves.end(), move) !=
-        legalmoves.end())
+            legalmoves.end() &&
+        std::find(rootMoves.begin(), rootMoves.end(), move) == rootMoves.end())
       rootMoves.emplace_back(move);
   }
 
-  if (rootMoves.empty())
+  if (limits.searchmoves.empty())
     for (const auto &m : legalmoves)
       rootMoves.emplace_back(m);
 

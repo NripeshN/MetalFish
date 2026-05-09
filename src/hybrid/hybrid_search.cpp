@@ -397,6 +397,7 @@ void ParallelHybridSearch::mcts_thread_main() {
   ::MetalFish::Search::LimitsType mcts_limits;
   mcts_limits.infinite = 1;
   mcts_limits.startTime = now();
+  mcts_limits.searchmoves = limits_.searchmoves;
 
   Move best_move = Move::none();
   std::atomic<bool> mcts_done{false};
@@ -769,13 +770,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
 
   // Fallback: if no valid move, find any legal move
   if (final_move == Move::none()) {
-    Position pos;
-    StateInfo st;
-    pos.set(root_fen_, false, &st);
-    MoveList<LEGAL> moves(pos);
-    if (moves.size() > 0) {
-      final_move = *moves.begin();
-    }
+    final_move = first_allowed_legal_move();
   }
 
   final_best_move_.store(final_move.raw(), std::memory_order_release);
@@ -904,11 +899,7 @@ Move ParallelHybridSearch::make_final_decision() {
       stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
       return ab_best;
     }
-    Position pos;
-    StateInfo st;
-    pos.set(root_fen_, false, &st);
-    MoveList<LEGAL> moves(pos);
-    return moves.size() > 0 ? *moves.begin() : Move::none();
+    return first_allowed_legal_move();
   }
 
   if (ab_best == mcts_best) {
@@ -936,6 +927,24 @@ Move ParallelHybridSearch::make_final_decision() {
 
   stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
   return ab_best;
+}
+
+Move ParallelHybridSearch::first_allowed_legal_move() const {
+  Position pos;
+  StateInfo st;
+  pos.set(root_fen_, false, &st);
+
+  for (const auto &uci_move : limits_.searchmoves) {
+    Move move = UCIEngine::to_move(pos, uci_move);
+    if (move != Move::none())
+      return move;
+  }
+
+  if (!limits_.searchmoves.empty())
+    return Move::none();
+
+  MoveList<LEGAL> moves(pos);
+  return moves.size() > 0 ? *moves.begin() : Move::none();
 }
 
 void ParallelHybridSearch::send_info(int depth, int score, uint64_t nodes,

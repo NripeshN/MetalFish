@@ -33,31 +33,23 @@ namespace {
 constexpr int kMaxEdges = 256;
 constexpr uint64_t kFNVPrime = 1099511628211ULL;
 
-bool IsInsufficientMaterial(const Position &pos) {
-  const int pawns = popcount(pos.pieces(PAWN));
-  const int rooks = popcount(pos.pieces(ROOK));
-  const int queens = popcount(pos.pieces(QUEEN));
-  if (pawns || rooks || queens)
-    return false;
+bool HasMatingMaterial(const Position &pos) {
+  if (pos.pieces(PAWN) || pos.pieces(ROOK) || pos.pieces(QUEEN))
+    return true;
 
-  const int wn = popcount(pos.pieces(WHITE, KNIGHT));
-  const int bn = popcount(pos.pieces(BLACK, KNIGHT));
-  const int wb = popcount(pos.pieces(WHITE, BISHOP));
-  const int bb = popcount(pos.pieces(BLACK, BISHOP));
-  const int minors = wn + bn + wb + bb;
+  const Bitboard knights = pos.pieces(KNIGHT);
+  const Bitboard bishops = pos.pieces(BISHOP);
+  if (popcount(knights | bishops) < 2)
+    return false; // K vs K, K+B vs K, K+N vs K.
 
-  if (minors == 0)
-    return true; // K vs K
-  if (minors == 1)
-    return true; // K+N/B vs K
-  if (wb == 0 && bb == 0 && wn <= 2 && bn == 0)
-    return true; // K+NN vs K
-  if (wb == 0 && bb == 0 && bn <= 2 && wn == 0)
-    return true; // K vs K+NN
-  if (wn == 0 && bn == 0 && wb == 1 && bb == 1)
-    return true; // KB vs KB
+  if (knights)
+    return true; // Any knight plus another minor can produce mate.
 
-  return false;
+  // Only kings and bishops remain. Bishop-only material can mate only when
+  // at least one bishop exists on each square colour.
+  constexpr Bitboard LightSquares = 0x55AA55AA55AA55AAULL;
+  constexpr Bitboard DarkSquares = 0xAA55AA55AA55AA55ULL;
+  return (bishops & LightSquares) && (bishops & DarkSquares);
 }
 
 bool ShouldAdjudicateRepetitionDraw(const Position &pos, int plies_from_root,
@@ -210,7 +202,13 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
                        warmup_base ^ (0xd1b54a32d192ed03ULL +
                                       static_cast<uint64_t>(i) * kFNVPrime));
       }
+      const auto batch_start = std::chrono::steady_clock::now();
       comp->ComputeBlocking();
+      const auto batch_elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - batch_start)
+              .count();
+      UpdateBackendLatencyMargin(batch_elapsed);
     }
     backend_->Cache().Clear();
   }
@@ -236,7 +234,22 @@ void Search::StartSearch(const std::string &fen,
   info_cb_ = info_cb;
   search_start_ = std::chrono::steady_clock::now();
 
-  if (!tree_.TryReuse(fen)) {
+  {
+    Position root_pos;
+    StateInfo root_st;
+    root_pos.set(fen, false, &root_st);
+    root_color_ = root_pos.side_to_move();
+    BuildRootSearchMoves(root_pos);
+  }
+
+  const bool same_tree_root = tree_.RootFen() == fen;
+  const bool root_filter_changed =
+      root_search_filter_active_ != active_root_search_filter_active_ ||
+      root_search_moves_ != active_root_search_moves_;
+  const bool needs_filtered_root_reset =
+      root_filter_changed && (same_tree_root || root_search_filter_active_);
+
+  if (needs_filtered_root_reset || !tree_.TryReuse(fen)) {
     tree_.Reset(fen);
   } else {
     std::function<void(Node *, int)> fixTwoFold = [&](Node *node, int depth) {
@@ -254,13 +267,8 @@ void Search::StartSearch(const std::string &fen,
     };
     fixTwoFold(tree_.Root(), 0);
   }
-
-  {
-    Position root_pos;
-    StateInfo root_st;
-    root_pos.set(fen, false, &root_st);
-    root_color_ = root_pos.side_to_move();
-  }
+  active_root_search_filter_active_ = root_search_filter_active_;
+  active_root_search_moves_ = root_search_moves_;
 
   if (params_.contempt != 0.0f) {
     params_.draw_score = -params_.contempt / 10000.0f;
@@ -358,12 +366,7 @@ void Search::Wait() {
       best = GetBestMove();
     }
     if (best == Move::none()) {
-      Position pos;
-      StateInfo st;
-      pos.set(tree_.RootFen(), false, &st);
-      MoveList<LEGAL> moves(pos);
-      if (moves.size() > 0)
-        best = *moves.begin();
+      best = FirstRootMoveOrLegal();
     }
     std::vector<Move> pv = GetPV();
     Move ponder = pv.size() > 1 ? pv[1] : Move::none();
@@ -510,7 +513,13 @@ bool Search::ShouldStop() const {
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                        now - search_start_)
                        .count();
-    if (elapsed >= time_budget_ms_)
+    int64_t latency_margin = 0;
+    if (params_.GetNumThreads() > 1 && params_.minibatch_size > 1 &&
+        stats_.nn_evaluations.load(std::memory_order_relaxed) > 0) {
+      latency_margin =
+          backend_latency_margin_ms_.load(std::memory_order_relaxed);
+    }
+    if (elapsed + latency_margin >= time_budget_ms_)
       return true;
 
     if (params_.smart_pruning_factor > 0.0f &&
@@ -612,8 +621,11 @@ void Search::WorkerThreadMain(int thread_id) {
 
   auto last_info = std::chrono::steady_clock::now();
   int num_threads = params_.GetNumThreads();
-  bool use_semaphore =
-      (num_threads > 1) && backend_ && params_.minibatch_size > 1;
+  // Fixed-node searches are used for benchmarks and correctness probes. Large
+  // MPSGraph batches can be slower to fill in exact-node mode, so keep them on
+  // direct evaluations and reserve batching for time-managed searches.
+  bool use_semaphore = (limits_.nodes == 0) && (num_threads > 1) && backend_ &&
+                       params_.minibatch_size > 1;
 
   do {
     if (use_semaphore)
@@ -662,7 +674,7 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
 
   const bool is_root_leaf = (leaf == tree_.Root());
   if (!is_root_leaf) {
-    if (IsInsufficientMaterial(ctx.pos) || ctx.pos.rule50_count() > 99) {
+    if (!HasMatingMaterial(ctx.pos) || ctx.pos.rule50_count() > 99) {
       leaf->MakeTerminal(Node::Terminal::EndOfGame, 0.0f, 1.0f, 0.0f);
       leaf->FinalizeScoreUpdate(0.0f, 1.0f, 0.0f, multivisit);
       if (leaf->Parent())
@@ -715,7 +727,7 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
   if (shared_tt_ && leaf->NumEdges() == 0) {
     auto tt_result = shared_tt_->Probe(ctx.pos, 8);
     if (tt_result.found) {
-      leaf->CreateEdges(moves);
+      CreateLeafEdges(leaf, moves);
       float v = -tt_result.value;
       float d = tt_result.draw;
       Backpropagate(leaf, v, d, 30.0f, multivisit);
@@ -727,7 +739,7 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
   if (leaf->NumEdges() == 0 && backend_) {
     auto apply_nn_result = [&](const EvaluationResult &result) {
       if (leaf->NumEdges() == 0) {
-        leaf->CreateEdges(moves);
+        CreateLeafEdges(leaf, moves);
         ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
         leaf->SortEdges();
       }
@@ -752,7 +764,7 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
       SearchWorkerCtx::HistoryBuffer history;
       ctx.BuildHistory(history);
       auto computation = AcquireComputation();
-      auto add_result = computation->AddInputWithHistory(
+      auto add_result = computation->AddInputWithHistoryKnownCacheMiss(
           history.ptrs, history.depth, cache_key, moves.begin(),
           static_cast<int>(moves.size()));
 
@@ -772,7 +784,7 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
     draw = leaf->GetD();
     moves_left_val = leaf->GetM();
   } else if (leaf->NumEdges() > 0) {
-    leaf->CancelScoreUpdate(multivisit);
+    CancelPathScoreUpdate(leaf, multivisit);
     return;
   }
 
@@ -800,7 +812,8 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
 
   std::vector<BatchEntry> local_batch;
   local_batch.reserve(params_.minibatch_size);
-  std::deque<SearchWorkerCtx::HistoryBuffer> batch_histories;
+  ctx.batch_histories.clear();
+  auto &batch_histories = ctx.batch_histories;
   uint64_t planned_visits = 0;
 
   std::unique_ptr<BackendComputation> computation;
@@ -880,7 +893,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
 
     const bool is_root_leaf = (leaf == tree_.Root());
     if (!is_root_leaf) {
-      if (IsInsufficientMaterial(ctx.pos) || ctx.pos.rule50_count() > 99) {
+      if (!HasMatingMaterial(ctx.pos) || ctx.pos.rule50_count() > 99) {
         leaf->MakeTerminal(Node::Terminal::EndOfGame, 0.0f, 1.0f, 0.0f);
         leaf->FinalizeScoreUpdate(0.0f, 1.0f, 0.0f, multivisit);
         if (leaf->Parent())
@@ -941,7 +954,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
     if (shared_tt_ && leaf->NumEdges() == 0) {
       auto tt_result = shared_tt_->Probe(ctx.pos, 8);
       if (tt_result.found) {
-        leaf->CreateEdges(moves);
+        CreateLeafEdges(leaf, moves);
         float v = -tt_result.value;
         float d = tt_result.draw;
         Backpropagate(leaf, v, d, 30.0f, multivisit);
@@ -956,7 +969,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
     if (leaf->NumEdges() > 0 || !backend_) {
       collision_events++;
       collision_visits++;
-      leaf->CancelScoreUpdate(multivisit);
+      CancelPathScoreUpdate(leaf, multivisit);
       continue;
     }
 
@@ -973,7 +986,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
       batch_histories.emplace_back();
       SearchWorkerCtx::HistoryBuffer &hist_buf_sem = batch_histories.back();
       ctx.BuildHistory(hist_buf_sem);
-      add_result = computation->AddInputWithHistory(
+      add_result = computation->AddInputWithHistoryKnownCacheMiss(
           hist_buf_sem.ptrs, hist_buf_sem.depth, cache_key, moves.begin(),
           static_cast<int>(moves.size()));
       computation_idx = computation->TotalInputs() - 1;
@@ -987,7 +1000,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
       const auto &result =
           direct_cache_hit ? cached : computation->GetResult(computation_idx);
       if (leaf->NumEdges() == 0) {
-        leaf->CreateEdges(moves);
+        CreateLeafEdges(leaf, moves);
         ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
         leaf->SortEdges();
       }
@@ -1021,18 +1034,48 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
 
   if (local_batch.empty()) {
     gathering_permit_.store(1, std::memory_order_release);
+    if (computation)
+      ReleaseComputation(std::move(computation));
+    return;
+  }
+
+  auto cancel_local_batch = [&]() {
+    for (const auto &entry : local_batch)
+      CancelPathScoreUpdate(entry.leaf, entry.multivisit);
+  };
+
+  if (ShouldStop()) {
+    gathering_permit_.store(1, std::memory_order_release);
+    cancel_local_batch();
+    if (computation)
+      ReleaseComputation(std::move(computation));
     return;
   }
 
   backend_waiting_.fetch_add(1, std::memory_order_release);
   gathering_permit_.store(1, std::memory_order_release);
 
-  std::deque<SearchWorkerCtx::HistoryBuffer> prefetch_histories;
+  ctx.prefetch_histories.clear();
+  auto &prefetch_histories = ctx.prefetch_histories;
   MaybePrefetchIntoCache(ctx, computation.get(), prefetch_histories);
   const int backend_evaluations = computation->UsedBatchSize();
 
+  if (ShouldStop()) {
+    backend_waiting_.fetch_sub(1, std::memory_order_relaxed);
+    cancel_local_batch();
+    if (computation)
+      ReleaseComputation(std::move(computation));
+    return;
+  }
+
   try {
+    const auto batch_start = std::chrono::steady_clock::now();
     computation->ComputeBlocking();
+    const auto batch_elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - batch_start)
+            .count();
+    UpdateBackendLatencyMargin(batch_elapsed);
   } catch (...) {
     uint64_t failed_visits = 0;
     for (auto &entry : local_batch) {
@@ -1041,6 +1084,8 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
     }
     backend_waiting_.fetch_sub(1, std::memory_order_relaxed);
     stats_.total_nodes.fetch_add(failed_visits, std::memory_order_relaxed);
+    if (computation)
+      ReleaseComputation(std::move(computation));
     return;
   }
 
@@ -1051,7 +1096,16 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
     const auto &result = computation->GetResult(entry.computation_idx);
 
     if (entry.leaf->NumEdges() == 0) {
-      if (!result.policy_priors.empty()) {
+      if (entry.leaf == tree_.Root() && root_search_filter_active_) {
+        const Position &leaf_pos =
+            *entry.history->ptrs[entry.history->depth - 1];
+        MoveList<LEGAL> leaf_moves(leaf_pos);
+        CreateLeafEdges(entry.leaf, leaf_moves);
+        ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
+        entry.leaf->SortEdges();
+        if (params_.add_dirichlet_noise)
+          AddDirichletNoise(entry.leaf);
+      } else if (!result.policy_priors.empty()) {
         entry.leaf->CreateEdges(result.policy_priors);
         ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
         entry.leaf->SortEdges();
@@ -1062,7 +1116,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
             *entry.history->ptrs[entry.history->depth - 1];
         MoveList<LEGAL> leaf_moves(leaf_pos);
         if (leaf_moves.size() > 0) {
-          entry.leaf->CreateEdges(leaf_moves);
+          CreateLeafEdges(entry.leaf, leaf_moves);
           ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
           entry.leaf->SortEdges();
           if (params_.add_dirichlet_noise && entry.leaf == tree_.Root())
@@ -1095,12 +1149,23 @@ Search::SelectedLeaf Search::SelectLeaf(SearchWorkerCtx &ctx) {
   Node *node = tree_.Root();
   int path_multivisit = std::max(1, params_.virtual_loss);
 
-  std::vector<Node *> vl_path;
+  std::array<Node *, MAX_PLY + 16> vl_path{};
+  int vl_path_size = 0;
   bool root_marked = false;
 
   auto cancel_virtual_loss = [&]() {
-    for (Node *n : vl_path)
+    for (int i = 0; i < vl_path_size; ++i)
+      vl_path[i]->CancelScoreUpdate(path_multivisit);
+    vl_path_size = 0;
+  };
+  auto push_virtual_loss_node = [&](Node *n) {
+    if (vl_path_size >= static_cast<int>(vl_path.size())) {
       n->CancelScoreUpdate(path_multivisit);
+      cancel_virtual_loss();
+      return false;
+    }
+    vl_path[vl_path_size++] = n;
+    return true;
   };
 
   while (node->NumEdges() > 0 && !node->IsTerminal()) {
@@ -1120,7 +1185,8 @@ Search::SelectedLeaf Search::SelectLeaf(SearchWorkerCtx &ctx) {
         cancel_virtual_loss();
         return {nullptr, 0};
       }
-      vl_path.push_back(node);
+      if (!push_virtual_loss_node(node))
+        return {nullptr, 0};
       root_marked = true;
     }
 
@@ -1144,7 +1210,8 @@ Search::SelectedLeaf Search::SelectLeaf(SearchWorkerCtx &ctx) {
       return {nullptr, 0};
     }
 
-    vl_path.push_back(child);
+    if (!push_virtual_loss_node(child))
+      return {nullptr, 0};
     ctx.DoMove(edge.move);
     node = child;
   }
@@ -1154,7 +1221,8 @@ Search::SelectedLeaf Search::SelectLeaf(SearchWorkerCtx &ctx) {
       cancel_virtual_loss();
       return {nullptr, 0};
     }
-    vl_path.push_back(node);
+    if (!push_virtual_loss_node(node))
+      return {nullptr, 0};
     root_marked = true;
   }
 
@@ -1293,6 +1361,12 @@ void Search::Backpropagate(Node *node, float value, float draw,
   }
 }
 
+void Search::CancelPathScoreUpdate(Node *leaf, int multivisit) {
+  const int visits = std::max(1, multivisit);
+  for (Node *node = leaf; node; node = node->Parent())
+    node->CancelScoreUpdate(visits);
+}
+
 void Search::MaybePrefetchIntoCache(
     SearchWorkerCtx &ctx, BackendComputation *computation,
     std::deque<SearchWorkerCtx::HistoryBuffer> &prefetch_histories) {
@@ -1330,7 +1404,7 @@ int Search::PrefetchIntoCache(
     prefetch_histories.emplace_back();
     SearchWorkerCtx::HistoryBuffer &history = prefetch_histories.back();
     ctx.BuildHistory(history);
-    auto add_result = computation->AddInputWithHistory(
+    auto add_result = computation->AddInputWithHistoryKnownCacheMiss(
         history.ptrs, history.depth, key, moves.begin(),
         static_cast<int>(moves.size()));
     if (add_result != BackendComputation::QUEUED)
@@ -1429,6 +1503,57 @@ void Search::AddDirichletNoise(Node *root) {
                   params_.noise_epsilon * (noise[i] / noise_sum);
     edges[i].SetP(noisy);
   }
+}
+
+void Search::UpdateBackendLatencyMargin(int64_t elapsed_ms) {
+  if (elapsed_ms <= 0)
+    return;
+
+  const int64_t sample = std::clamp<int64_t>(elapsed_ms + 10, 10, 2000);
+  const int64_t previous =
+      backend_latency_margin_ms_.load(std::memory_order_relaxed);
+  const int64_t updated =
+      previous > 0 ? (previous * 3 + sample + 2) / 4 : sample;
+  backend_latency_margin_ms_.store(updated, std::memory_order_relaxed);
+}
+
+void Search::BuildRootSearchMoves(const Position &root_pos) {
+  root_search_moves_.clear();
+  root_search_filter_active_ = !limits_.searchmoves.empty();
+  if (!root_search_filter_active_)
+    return;
+
+  root_search_moves_.reserve(limits_.searchmoves.size());
+  for (const auto &uci_move : limits_.searchmoves) {
+    Move move = UCIEngine::to_move(root_pos, uci_move);
+    if (move == Move::none())
+      continue;
+    if (std::find(root_search_moves_.begin(), root_search_moves_.end(),
+                  move) == root_search_moves_.end()) {
+      root_search_moves_.push_back(move);
+    }
+  }
+}
+
+void Search::CreateLeafEdges(Node *leaf, const MoveList<LEGAL> &moves) {
+  if (leaf == tree_.Root() && root_search_filter_active_) {
+    leaf->CreateEdges(root_search_moves_.data(),
+                      static_cast<int>(root_search_moves_.size()));
+    return;
+  }
+  leaf->CreateEdges(moves);
+}
+
+Move Search::FirstRootMoveOrLegal() const {
+  if (root_search_filter_active_)
+    return root_search_moves_.empty() ? Move::none()
+                                      : root_search_moves_.front();
+
+  Position pos;
+  StateInfo st;
+  pos.set(tree_.RootFen(), false, &st);
+  MoveList<LEGAL> moves(pos);
+  return moves.size() > 0 ? *moves.begin() : Move::none();
 }
 
 void Search::ApplyNNPolicy(Node *node, const EvaluationResult &result,
