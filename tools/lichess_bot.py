@@ -556,6 +556,10 @@ class LichessBot:
         if not challenge_id:
             return
 
+        if reason == "game started":
+            self._clear_pending_challenge()
+            return
+
         print(f"  Canceling challenge to {target} ({reason})")
         try:
             self.api_post(f"/challenge/{challenge_id}/cancel")
@@ -793,6 +797,7 @@ class LichessBot:
                     state = event.get("state", {})
                     status = state.get("status", "started")
                     if status != "started":
+                        print(f"  [{game_id}] Game already ended: {status}")
                         break
                     moves = state.get("moves", "").split() if state.get("moves") else []
                     self._try_move(game_id, engine, initial_fen, moves, my_color, state)
@@ -800,6 +805,12 @@ class LichessBot:
                 elif etype == "gameState":
                     status = event.get("status", "started")
                     if status != "started":
+                        moves = event.get("moves", "").split() if event.get("moves") else []
+                        winner = event.get("winner", "")
+                        result = f"{status}"
+                        if winner:
+                            result += f" ({winner} wins)"
+                        print(f"  [{game_id}] Game over: {result}, {len(moves)} moves")
                         break
                     moves = event.get("moves", "").split() if event.get("moves") else []
                     self._try_move(game_id, engine, initial_fen, moves, my_color, event)
