@@ -448,6 +448,7 @@ class LichessBot:
         self._seek_timer: threading.Timer | None = None
         self._warm_engine: UCIEngine | None = None
         self._elo_widen_steps = 0
+        self._declined_cooldown: dict[str, float] = {}  # bot_id -> timestamp
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -611,6 +612,8 @@ class LichessBot:
 
         if self._pending_challenge_id:
             self._cancel_pending_challenge("expired")
+            self._cooldown_bot(self._pending_challenge_target)
+
         limit, inc = self._next_tc()
         tc_label = f"{limit//60}+{inc}"
         speed = self._tc_to_speed(limit, inc)
@@ -622,6 +625,7 @@ class LichessBot:
                 return
 
             bots: list[dict] = []
+            now = time.time()
             for line in r.text.strip().split("\n"):
                 if not line.strip():
                     continue
@@ -630,11 +634,16 @@ class LichessBot:
                 except json.JSONDecodeError:
                     continue
                 bot_id = bot.get("id", "")
-                if bot_id and bot_id != self.bot_id:
-                    bots.append(bot)
+                if not bot_id or bot_id == self.bot_id:
+                    continue
+                # Skip bots on cooldown
+                cooldown_until = self._declined_cooldown.get(bot_id, 0)
+                if now < cooldown_until:
+                    continue
+                bots.append(bot)
 
             if not bots:
-                print("  No online bots, retrying in 30s...")
+                print("  No eligible bots online, retrying in 30s...")
                 self._schedule_retry(30)
                 return
 
@@ -643,41 +652,54 @@ class LichessBot:
                 candidates = [b.get("id", "") for b in bots]
                 random.shuffle(candidates)
 
-            for target in candidates[:8]:
-                rated = self.args.accept_rated
-                r = self.api_post(
-                    f"/challenge/{target}",
-                    json={
-                        "rated": rated,
-                        "clock.limit": limit,
-                        "clock.increment": inc,
-                    },
+            # Challenge ONE bot at a time, wait for response
+            target = candidates[0]
+            rated = self.args.accept_rated
+            r = self.api_post(
+                f"/challenge/{target}",
+                json={
+                    "rated": rated,
+                    "clock.limit": limit,
+                    "clock.increment": inc,
+                },
+            )
+            if r.status_code == 200:
+                challenge_id = self._challenge_id_from_response(r)
+                if not challenge_id:
+                    print(f"  Could not read challenge id for {target}")
+                    self._cooldown_bot(target, duration=60)
+                    self._schedule_retry(5)
+                    return
+                self._pending_challenge_id = challenge_id
+                self._pending_challenge_target = target
+                self._challenge_sent_at = time.time()
+                self._challenge_retries = 0
+                print(
+                    f"  Challenged {target} ({tc_label}, {'rated' if rated else 'casual'})"
                 )
-                if r.status_code == 200:
-                    challenge_id = self._challenge_id_from_response(r)
-                    if not challenge_id:
-                        print(f"  Could not read challenge id for {target}")
-                        continue
-                    self._pending_challenge_id = challenge_id
-                    self._pending_challenge_target = target
-                    self._challenge_sent_at = time.time()
-                    self._challenge_retries = 0
-                    print(
-                        f"  Challenged {target} ({tc_label}, {'rated' if rated else 'casual'})"
-                    )
-                    self._schedule_challenge_timeout()
-                    return
-                elif r.status_code == 429:
-                    print("  Rate limited, waiting 60s...")
-                    self._schedule_retry(60)
-                    return
-                # 400 = bot doesn't accept this TC, try next
-
-            print(f"  No bot accepted, retrying in 10s...")
-            self._schedule_retry(10)
+                self._schedule_challenge_timeout()
+            elif r.status_code == 429:
+                print("  Rate limited, waiting 60s...")
+                self._schedule_retry(60)
+            else:
+                # Bot doesn't accept — cooldown and try another
+                self._cooldown_bot(target, duration=300)
+                self._schedule_retry(2)
         except Exception as e:
             print(f"  Seek error: {e}")
             self._schedule_retry(15)
+
+    def _cooldown_bot(self, bot_id: str | None, duration: int = 600):
+        """Put a bot on cooldown so we don't re-challenge it."""
+        if bot_id:
+            self._declined_cooldown[bot_id] = time.time() + duration
+
+    def _cleanup_cooldowns(self):
+        """Remove expired cooldowns."""
+        now = time.time()
+        self._declined_cooldown = {
+            k: v for k, v in self._declined_cooldown.items() if v > now
+        }
 
     def _schedule_retry(self, delay: float = 10):
         if self._seek_timer:
@@ -701,12 +723,14 @@ class LichessBot:
         if self._pending_challenge_id:
             target = self._pending_challenge_target or self._pending_challenge_id
             print(f"  Challenge to {target} timed out")
+            self._cooldown_bot(target, duration=600)
             self._cancel_pending_challenge("timeout")
             self._challenge_retries += 1
             if self._challenge_retries < MAX_CHALLENGE_RETRIES and self._should_seek():
                 self.seek_game()
             elif self._should_seek():
                 self._challenge_retries = 0
+                self._cleanup_cooldowns()
                 self._schedule_retry(15)
 
     def _next_tc(self) -> tuple[int, int]:
@@ -1398,9 +1422,11 @@ class LichessBot:
                 self._shutdown.set()
 
         elif etype in ("challengeDeclined", "challengeCanceled"):
+            target = self._pending_challenge_target
+            self._cooldown_bot(target, duration=600)
             self._clear_pending_challenge()
             if self._should_seek():
-                self._schedule_retry(5)
+                self._schedule_retry(2)
 
 
 def main():
