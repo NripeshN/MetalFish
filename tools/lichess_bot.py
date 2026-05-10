@@ -447,6 +447,7 @@ class LichessBot:
         self.book = OpeningBook(api_key=api_key, min_games=5)
         self._seek_timer: threading.Timer | None = None
         self._warm_engine: UCIEngine | None = None
+        self._elo_widen_steps = 0
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -612,6 +613,7 @@ class LichessBot:
             self._cancel_pending_challenge("expired")
         limit, inc = self._next_tc()
         tc_label = f"{limit//60}+{inc}"
+        speed = self._tc_to_speed(limit, inc)
 
         try:
             r = self.api_get("/bot/online", params={"nb": 100})
@@ -619,7 +621,7 @@ class LichessBot:
                 self._schedule_retry()
                 return
 
-            bots = []
+            bots: list[dict] = []
             for line in r.text.strip().split("\n"):
                 if not line.strip():
                     continue
@@ -629,16 +631,19 @@ class LichessBot:
                     continue
                 bot_id = bot.get("id", "")
                 if bot_id and bot_id != self.bot_id:
-                    bots.append(bot_id)
+                    bots.append(bot)
 
             if not bots:
                 print("  No online bots, retrying in 30s...")
                 self._schedule_retry(30)
                 return
 
-            random.shuffle(bots)
+            candidates = self._filter_bots_by_elo(bots, speed)
+            if not candidates:
+                candidates = [b.get("id", "") for b in bots]
+                random.shuffle(candidates)
 
-            for target in bots[:8]:
+            for target in candidates[:8]:
                 rated = self.args.accept_rated
                 r = self.api_post(
                     f"/challenge/{target}",
@@ -715,6 +720,91 @@ class LichessBot:
     def _advance_rotation(self):
         """Advance to next TC. Call only after a game starts successfully."""
         self._rotation_idx += 1
+
+    def _tc_to_speed(self, limit: int, inc: int) -> str:
+        estimated_duration = limit + 40 * inc
+        if estimated_duration < 120:
+            return "bullet"
+        elif estimated_duration < 480:
+            return "blitz"
+        elif estimated_duration < 1500:
+            return "rapid"
+        return "classical"
+
+    def _get_bot_rating(self, bot: dict, speed: str) -> int | None:
+        perfs = bot.get("perfs", {})
+        perf = perfs.get(speed, {})
+        rating = perf.get("rating")
+        if rating and not perf.get("prov", False):
+            return rating
+        # Fall back: try any available rating
+        for s in ("blitz", "rapid", "bullet", "classical"):
+            p = perfs.get(s, {})
+            if p.get("rating") and not p.get("prov", False):
+                return p["rating"]
+        return None
+
+    def _filter_bots_by_elo(self, bots: list[dict], speed: str) -> list[str]:
+        """Filter and sort bots by Elo proximity with widening range."""
+        if not self.args.elo_seek:
+            ids = [b.get("id", "") for b in bots]
+            random.shuffle(ids)
+            return ids
+
+        our_rating = self._our_rating(speed)
+        elo_range = self._current_elo_range()
+
+        scored: list[tuple[int, str]] = []
+        for bot in bots:
+            bot_id = bot.get("id", "")
+            if not bot_id:
+                continue
+            rating = self._get_bot_rating(bot, speed)
+            if rating is None:
+                continue
+            diff = abs(rating - our_rating)
+            if diff <= elo_range:
+                scored.append((diff, bot_id))
+
+        if not scored:
+            self._widen_elo_range()
+            ids = [b.get("id", "") for b in bots]
+            random.shuffle(ids)
+            return ids
+
+        scored.sort(key=lambda x: x[0])
+        # Slight randomization among close-rated bots
+        top = scored[:15]
+        random.shuffle(top)
+        return [bot_id for _, bot_id in top]
+
+    def _our_rating(self, speed: str) -> int:
+        """Get our bot's rating for the given speed."""
+        if not hasattr(self, "_cached_ratings"):
+            self._cached_ratings = {}
+            try:
+                profile = self.get_profile()
+                perfs = profile.get("perfs", {})
+                for s in ("bullet", "blitz", "rapid", "classical"):
+                    p = perfs.get(s, {})
+                    if p.get("rating"):
+                        self._cached_ratings[s] = p["rating"]
+            except Exception:
+                pass
+        return self._cached_ratings.get(speed, self.args.elo_target or 1500)
+
+    def _current_elo_range(self) -> int:
+        """Returns the current Elo range, widening after failed attempts."""
+        base = self.args.elo_range if self.args.elo_range else 200
+        return base + self._elo_widen_steps * 100
+
+    def _widen_elo_range(self):
+        self._elo_widen_steps += 1
+        new_range = self._current_elo_range()
+        print(f"  Widening Elo range to ±{new_range}")
+
+    def _reset_elo_range(self):
+        self._elo_widen_steps = 0
 
     def _should_seek(self) -> bool:
         return (
@@ -1286,6 +1376,7 @@ class LichessBot:
                 return
             self._cancel_pending_challenge("game started")
             self._advance_rotation()
+            self._reset_elo_range()
             if self._draining.is_set():
                 print(f"  [{game_id}] Drain mode active, aborting new game")
                 self.abort_or_resign(game_id)
@@ -1347,6 +1438,24 @@ def main():
         action="store_false",
         default=True,
         help="Skip startup transformer preload (faster startup, weaker first search)",
+    )
+    parser.add_argument(
+        "--elo-seek",
+        action="store_true",
+        default=False,
+        help="Filter opponents by Elo proximity (starts tight, widens if no match)",
+    )
+    parser.add_argument(
+        "--elo-range",
+        type=int,
+        default=200,
+        help="Initial Elo range ± for opponent filtering (default: 200)",
+    )
+    parser.add_argument(
+        "--elo-target",
+        type=int,
+        default=None,
+        help="Target Elo to seek around (default: use bot's own rating)",
     )
     args = parser.parse_args()
 
