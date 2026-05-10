@@ -705,9 +705,12 @@ class LichessBot:
             return parse_tc(self.args.tc)
         if self.args.rotate:
             tc = ROTATION_TCS[self._rotation_idx % len(ROTATION_TCS)]
-            self._rotation_idx += 1
             return tc
         return (300, 3)
+
+    def _advance_rotation(self):
+        """Advance to next TC. Call only after a game starts successfully."""
+        self._rotation_idx += 1
 
     def _should_seek(self) -> bool:
         return (
@@ -1271,6 +1274,7 @@ class LichessBot:
             if game_id in self.active_games:
                 return
             self._cancel_pending_challenge("game started")
+            self._advance_rotation()
             if self._draining.is_set():
                 print(f"  [{game_id}] Drain mode active, aborting new game")
                 self.abort_or_resign(game_id)
