@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import pathlib
+import queue
 import random
 import subprocess
 import sys
@@ -118,11 +119,22 @@ class UCIEngine:
         *,
         preload_transformer: bool = False,
     ):
+        self.path = path
+        self.options = dict(options)
+        self.preload_transformer = preload_transformer
+        self.proc: subprocess.Popen | None = None
+        self._output: queue.Queue[str | None] = queue.Queue()
+        self._reader_thread: threading.Thread | None = None
+        self._pondering = False
+        self._ponder_move: str | None = None
+        self._launch()
+
+    def _launch(self):
         env = os.environ.copy()
-        if preload_transformer:
+        if self.preload_transformer:
             env["METALFISH_PRELOAD_TRANSFORMER"] = "1"
         self.proc = subprocess.Popen(
-            [str(path)],
+            [str(self.path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -130,17 +142,31 @@ class UCIEngine:
             bufsize=1,
             env=env,
         )
+        self._output = queue.Queue()
+        self._reader_thread = threading.Thread(target=self._read_stdout, daemon=True)
+        self._reader_thread.start()
         self._send("uci")
         self._wait_for("uciok")
-        for name, value in options.items():
+        for name, value in self.options.items():
             self._send(f"setoption name {name} value {value}")
         self._send("isready")
         self._wait_for("readyok", timeout=120)
         self._pondering = False
         self._ponder_move: str | None = None
 
+    def _read_stdout(self):
+        try:
+            if self.proc is None or self.proc.stdout is None:
+                return
+            for line in self.proc.stdout:
+                self._output.put(line.strip())
+        finally:
+            self._output.put(None)
+
     def _send(self, cmd: str):
         try:
+            if self.proc is None or self.proc.stdin is None:
+                return
             self.proc.stdin.write(cmd + "\n")
             self.proc.stdin.flush()
         except (BrokenPipeError, OSError):
@@ -149,15 +175,43 @@ class UCIEngine:
     def _wait_for(self, prefix: str, timeout: float = 60) -> str:
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if self.proc.poll() is not None:
-                raise RuntimeError("Engine process died")
-            line = self.proc.stdout.readline()
-            if not line:
+            if self.proc is None:
+                raise RuntimeError("Engine process is not running")
+            remaining = max(0.0, deadline - time.time())
+            try:
+                line = self._output.get(timeout=min(0.1, remaining))
+            except queue.Empty:
+                if self.proc.poll() is not None:
+                    raise RuntimeError("Engine process died")
+                continue
+            if line is None:
                 raise RuntimeError("Engine closed stdout")
-            line = line.strip()
             if line.startswith(prefix):
                 return line
         raise TimeoutError(f"Timeout waiting for '{prefix}'")
+
+    def _drain_available_output(self):
+        while True:
+            try:
+                self._output.get_nowait()
+            except queue.Empty:
+                return
+
+    def restart(self):
+        self._pondering = False
+        self._ponder_move = None
+        if self.proc is not None:
+            try:
+                self._send("quit")
+                self.proc.wait(timeout=2)
+            except Exception:
+                try:
+                    self.proc.kill()
+                    self.proc.wait(timeout=2)
+                except Exception:
+                    pass
+        self._launch()
+        self.new_game()
 
     def new_game(self):
         self.stop_pondering()
@@ -187,6 +241,7 @@ class UCIEngine:
         """Returns (bestmove, ponder_move_or_None)."""
         self._send("isready")
         self._wait_for("readyok")
+        self._drain_available_output()
 
         self._send(
             self._go_command(
@@ -219,6 +274,7 @@ class UCIEngine:
         self.stop_pondering()
         all_moves = moves + [ponder_move]
         self.set_position(initial_fen, all_moves)
+        self._drain_available_output()
         self._send(
             self._go_command(
                 ponder=True,
@@ -268,7 +324,7 @@ class UCIEngine:
         # ponderhit, so stop and use the best move found on opponent time.
         self._send("stop")
         self._pondering = False
-        line = self._wait_for("bestmove", timeout=600)
+        line = self._wait_for("bestmove", timeout=10)
         parts = line.split()
         best = parts[1] if len(parts) > 1 else "0000"
         ponder = parts[3] if len(parts) > 3 and parts[2] == "ponder" else None
@@ -290,16 +346,18 @@ class UCIEngine:
         return self._ponder_move if self._pondering else None
 
     def alive(self) -> bool:
-        return self.proc.poll() is None
+        return self.proc is not None and self.proc.poll() is None
 
     def quit(self):
         self.stop_pondering()
         try:
             self._send("quit")
-            self.proc.wait(timeout=5)
+            if self.proc is not None:
+                self.proc.wait(timeout=5)
         except Exception:
             try:
-                self.proc.kill()
+                if self.proc is not None:
+                    self.proc.kill()
             except Exception:
                 pass
 
@@ -382,12 +440,15 @@ class LichessBot:
         self.bot_id = ""
         self.username = ""
         self._rotation_idx = 0
-        self._pending_challenge: str | None = None
+        self._pending_challenge_id: str | None = None
+        self._pending_challenge_target: str | None = None
         self._challenge_sent_at: float = 0
         self._challenge_retries = 0
         self.book = OpeningBook(api_key=api_key, min_games=5)
         self._seek_timer: threading.Timer | None = None
         self._warm_engine: UCIEngine | None = None
+        self._draining = threading.Event()
+        self._shutdown = threading.Event()
 
     def api_get(self, path: str, **kwargs):
         return requests.get(f"{LICHESS_API}{path}", headers=self.headers, **kwargs)
@@ -419,6 +480,19 @@ class LichessBot:
 
     def resign(self, game_id: str):
         self.api_post(f"/bot/game/{game_id}/resign")
+
+    def abort_game(self, game_id: str) -> bool:
+        r = self.api_post(f"/bot/game/{game_id}/abort")
+        if r.status_code != 200:
+            detail = r.text.strip().replace("\n", " ")[:200]
+            suffix = f": {detail}" if detail else ""
+            print(f"  [{game_id}] Abort failed: {r.status_code}{suffix}")
+            return False
+        return True
+
+    def abort_or_resign(self, game_id: str):
+        if not self.abort_game(game_id):
+            self.resign(game_id)
 
     def _create_engine(self, *, preload_transformer: bool) -> UCIEngine:
         return UCIEngine(
@@ -454,15 +528,84 @@ class LichessBot:
         self._warm_engine.quit()
         self._warm_engine = None
 
+    def _reserved_games(self) -> int:
+        pending = 1 if self._pending_challenge_id else 0
+        return len(self.active_games) + pending
+
+    def _challenge_id_from_response(self, response: requests.Response) -> str | None:
+        try:
+            data = response.json()
+        except ValueError:
+            return None
+
+        challenge = data.get("challenge") if isinstance(data, dict) else None
+        if isinstance(challenge, dict) and challenge.get("id"):
+            return str(challenge["id"])
+        if isinstance(data, dict) and data.get("id"):
+            return str(data["id"])
+        return None
+
+    def _clear_pending_challenge(self):
+        self._pending_challenge_id = None
+        self._pending_challenge_target = None
+        self._challenge_sent_at = 0
+
+    def _cancel_pending_challenge(self, reason: str):
+        challenge_id = self._pending_challenge_id
+        target = self._pending_challenge_target or challenge_id
+        if not challenge_id:
+            return
+
+        print(f"  Canceling challenge to {target} ({reason})")
+        try:
+            self.api_post(f"/challenge/{challenge_id}/cancel")
+        except Exception as e:
+            print(f"  Could not cancel challenge {challenge_id}: {e}")
+        self._clear_pending_challenge()
+
+    def _enter_drain_mode(self):
+        if self._draining.is_set():
+            return
+        self._draining.set()
+        print("\n  Drain requested: no new games will be started.")
+        if self._seek_timer:
+            self._seek_timer.cancel()
+            self._seek_timer = None
+        self._cancel_pending_challenge("drain requested")
+        self._close_warm_engine()
+        if not self.active_games:
+            self._shutdown.set()
+
+    def _start_stdin_watcher(self):
+        if not sys.stdin.isatty():
+            return
+
+        def watch_stdin():
+            try:
+                while not self._shutdown.is_set():
+                    ch = sys.stdin.read(1)
+                    if ch == "":
+                        self._enter_drain_mode()
+                        return
+            except Exception:
+                return
+
+        t = threading.Thread(target=watch_stdin, daemon=True)
+        t.start()
+
     # ---- Seeking ----
 
     def seek_game(self):
-        if self._pending_challenge and (
+        if not self._should_seek():
+            return
+
+        if self._pending_challenge_id and (
             time.time() - self._challenge_sent_at < CHALLENGE_TIMEOUT
         ):
             return
 
-        self._pending_challenge = None
+        if self._pending_challenge_id:
+            self._cancel_pending_challenge("expired")
         limit, inc = self._next_tc()
         tc_label = f"{limit//60}+{inc}"
 
@@ -502,7 +645,12 @@ class LichessBot:
                     },
                 )
                 if r.status_code == 200:
-                    self._pending_challenge = target
+                    challenge_id = self._challenge_id_from_response(r)
+                    if not challenge_id:
+                        print(f"  Could not read challenge id for {target}")
+                        continue
+                    self._pending_challenge_id = challenge_id
+                    self._pending_challenge_target = target
                     self._challenge_sent_at = time.time()
                     self._challenge_retries = 0
                     print(
@@ -541,12 +689,10 @@ class LichessBot:
         self._seek_timer.start()
 
     def _challenge_timed_out(self):
-        if self._pending_challenge:
-            print(f"  Challenge to {self._pending_challenge} timed out")
-            # Cancel the outgoing challenge
-            if self._pending_challenge:
-                self.api_post(f"/challenge/{self._pending_challenge}/cancel")
-            self._pending_challenge = None
+        if self._pending_challenge_id:
+            target = self._pending_challenge_target or self._pending_challenge_id
+            print(f"  Challenge to {target} timed out")
+            self._cancel_pending_challenge("timeout")
             self._challenge_retries += 1
             if self._challenge_retries < MAX_CHALLENGE_RETRIES and self._should_seek():
                 self.seek_game()
@@ -564,11 +710,17 @@ class LichessBot:
         return (300, 3)
 
     def _should_seek(self) -> bool:
-        return self.args.seek and len(self.active_games) < self.args.max_games
+        return (
+            self.args.seek
+            and not self._draining.is_set()
+            and self._reserved_games() < self.args.max_games
+        )
 
     # ---- Challenge acceptance ----
 
     def should_accept(self, challenge: dict) -> bool:
+        if self._draining.is_set():
+            return False
         ch = challenge.get("challenge", challenge)
         challenger_id = ch.get("challenger", {}).get("id", "")
         if challenger_id == self.bot_id:
@@ -584,7 +736,7 @@ class LichessBot:
         speed = ch.get("speed", "")
         if speed not in ACCEPTED_SPEEDS:
             return False
-        if len(self.active_games) >= self.args.max_games:
+        if self._reserved_games() >= self.args.max_games:
             return False
         return True
 
@@ -605,7 +757,10 @@ class LichessBot:
                 engine.quit()
             self.active_games.pop(game_id, None)
             print(f"  [{game_id}] Finished.")
-            if self._should_seek():
+            if self._draining.is_set():
+                if not self.active_games:
+                    self._shutdown.set()
+            elif self._should_seek():
                 self._prepare_warm_engine()
                 self._schedule_retry(3)
 
@@ -681,12 +836,20 @@ class LichessBot:
         # search before doing any new book/engine work.
         if engine.ponder_move:
             if moves and moves[-1] == engine.ponder_move:
-                best, ponder = engine.ponderhit()
+                try:
+                    best, ponder = engine.ponderhit()
+                except (TimeoutError, RuntimeError) as e:
+                    print(f"  [{game_id}] Ponder stop failed: {e}; restarting")
+                    engine.restart()
+                    best, ponder = "0000", None
                 if best and best not in ("0000", "(none)"):
                     print(f"  [{game_id}] Ponderhit! {best}")
                     parsed = self._parse_legal_move(game_id, best, board, "ponder")
                     if parsed is None:
-                        print(f"  [{game_id}] Searching after rejected ponder move")
+                        print(
+                            f"  [{game_id}] Restarting after rejected ponder move"
+                        )
+                        engine.restart()
                     elif self.make_move(game_id, parsed.uci()):
                         self._start_pondering_if_legal(
                             game_id,
@@ -744,8 +907,19 @@ class LichessBot:
             if best == "0000" or best == "(none)":
                 return
             if not self._is_legal_move(best, board):
+                remaining_wtime, remaining_btime = self._after_search_clock(
+                    my_color, wtime, btime, search_ms
+                )
                 best, ponder = self._recover_engine_move(
-                    game_id, engine, initial_fen, moves, board, best
+                    game_id,
+                    engine,
+                    initial_fen,
+                    moves,
+                    board,
+                    best,
+                    my_color=my_color,
+                    wtime=remaining_wtime,
+                    btime=remaining_btime,
                 )
                 if not best:
                     return
@@ -915,15 +1089,21 @@ class LichessBot:
         moves: list[str],
         board: chess.Board,
         illegal_move: str,
+        *,
+        my_color: str,
+        wtime: int,
+        btime: int,
     ) -> tuple[str | None, str | None]:
         print(
             f"  [{game_id}] Engine returned illegal move {illegal_move} "
-            f"for FEN: {board.fen()}; retrying once"
+            f"for FEN: {board.fen()}; restarting engine and retrying once"
         )
         try:
-            engine.new_game()
+            engine.restart()
             engine.set_position(initial_fen, moves)
-            best, ponder = engine.go(movetime=250)
+            our_time = wtime if my_color == "white" else btime
+            movetime = max(100, min(1000, our_time // 20))
+            best, ponder = engine.go(movetime=movetime)
             if best not in ("0000", "(none)") and self._is_legal_move(best, board):
                 print(f"  [{game_id}] Retry move: {best}")
                 return best, ponder
@@ -992,7 +1172,7 @@ class LichessBot:
         print(f"  Account:  {self.username}")
         print(
             f"  Engine:   Hybrid (AB {HYBRID_AB_THREADS}T + "
-            f"MCTS {HYBRID_MCTS_THREADS}T + Ponder)"
+            f"MCTS {HYBRID_MCTS_THREADS}T + GPU + Ponder)"
         )
         print(
             f"  Workers:  {SEARCH_WORKERS} search + 1 coordinator "
@@ -1008,7 +1188,8 @@ class LichessBot:
         print("=" * 60)
 
         self._prepare_warm_engine()
-        print("\nListening... (Ctrl+C to stop)\n")
+        self._start_stdin_watcher()
+        print("\nListening... (Ctrl+C to stop, Ctrl+D to drain after current game)\n")
 
         self._event_loop()
 
@@ -1016,11 +1197,13 @@ class LichessBot:
         if self._should_seek():
             self.seek_game()
 
-        while True:
+        while not self._shutdown.is_set():
             try:
                 with self.api_get("/stream/event", stream=True, timeout=(10, 30)) as r:
                     r.raise_for_status()
                     for line in r.iter_lines():
+                        if self._shutdown.is_set():
+                            break
                         if not line:
                             continue
                         try:
@@ -1028,27 +1211,33 @@ class LichessBot:
                         except json.JSONDecodeError:
                             continue
                         self._handle_event(event)
+                        if self._shutdown.is_set():
+                            break
 
             except (
                 requests.exceptions.ConnectionError,
                 requests.exceptions.ChunkedEncodingError,
             ):
-                print("  Connection lost, reconnecting in 3s...")
-                time.sleep(3)
+                if not self._shutdown.is_set():
+                    print("  Connection lost, reconnecting in 3s...")
+                    time.sleep(3)
             except requests.exceptions.ReadTimeout:
                 pass  # normal — just reconnect
             except KeyboardInterrupt:
                 print("\n\nShutting down...")
                 if self._seek_timer:
                     self._seek_timer.cancel()
+                    self._seek_timer = None
+                self._cancel_pending_challenge("shutdown")
                 self._close_warm_engine()
                 for gid in list(self.active_games.keys()):
                     print(f"  Resigning {gid}...")
                     self.resign(gid)
                 break
             except Exception as e:
-                print(f"  Event loop error: {e}")
-                time.sleep(5)
+                if not self._shutdown.is_set():
+                    print(f"  Event loop error: {e}")
+                    time.sleep(5)
 
     def _handle_event(self, event: dict):
         etype = event.get("type", "")
@@ -1076,22 +1265,34 @@ class LichessBot:
 
         elif etype == "gameStart":
             game_id = event["game"]["gameId"]
-            self._pending_challenge = None
             if self._seek_timer:
                 self._seek_timer.cancel()
-            if game_id not in self.active_games:
-                t = threading.Thread(
-                    target=self.play_game, args=(game_id,), daemon=True
-                )
-                self.active_games[game_id] = t
-                t.start()
+                self._seek_timer = None
+            if game_id in self.active_games:
+                return
+            self._cancel_pending_challenge("game started")
+            if self._draining.is_set():
+                print(f"  [{game_id}] Drain mode active, aborting new game")
+                self.abort_or_resign(game_id)
+                if not self.active_games:
+                    self._shutdown.set()
+                return
+            if len(self.active_games) >= self.args.max_games:
+                print(f"  [{game_id}] Max games reached, aborting overflow game")
+                self.abort_or_resign(game_id)
+                return
+            t = threading.Thread(target=self.play_game, args=(game_id,), daemon=True)
+            self.active_games[game_id] = t
+            t.start()
 
         elif etype == "gameFinish":
             game_id = event.get("game", {}).get("gameId", "")
             self.active_games.pop(game_id, None)
+            if self._draining.is_set() and not self.active_games:
+                self._shutdown.set()
 
         elif etype in ("challengeDeclined", "challengeCanceled"):
-            self._pending_challenge = None
+            self._clear_pending_challenge()
             if self._should_seek():
                 self._schedule_retry(5)
 
