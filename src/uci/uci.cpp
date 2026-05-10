@@ -57,6 +57,7 @@ static void join_search_waiter();
 static void preload_search_objects(Engine &engine);
 
 constexpr auto BenchmarkCommand = "speedtest";
+constexpr TimePoint TransformerLowTimeFallbackMs = 5000;
 
 constexpr auto StartFEN =
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -1356,6 +1357,47 @@ static int auto_mcts_minibatch_size(int num_threads) {
 #endif
 }
 
+static std::optional<std::string>
+transformer_low_time_fallback_reason(Engine &engine,
+                                     const Search::LimitsType &limits) {
+  if (limits.infinite || limits.nodes > 0)
+    return std::nullopt;
+
+  if (limits.movetime > 0 && limits.movetime < TransformerLowTimeFallbackMs) {
+    return "fixed movetime " + std::to_string(limits.movetime) + "ms";
+  }
+
+  const bool has_clock_time = limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
+  if (!has_clock_time)
+    return std::nullopt;
+
+  Position pos;
+  StateInfo st;
+  pos.set(engine.fen(), static_cast<bool>(engine.get_options()["UCI_Chess960"]),
+          &st);
+
+  const Color us = pos.side_to_move();
+  const TimePoint time_left = limits.time[us];
+  if (time_left < TransformerLowTimeFallbackMs) {
+    return std::string(us == WHITE ? "white" : "black") + " clock " +
+           std::to_string(time_left) + "ms";
+  }
+
+  return std::nullopt;
+}
+
+static bool should_preload_transformer_search() {
+  const char *env = std::getenv("METALFISH_PRELOAD_TRANSFORMER");
+  if (!env || !*env)
+    return false;
+
+  std::string value(env);
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return value != "0" && value != "false" && value != "off" &&
+         value != "no";
+}
+
 static void tune_mcts_minibatch_for_limits(MCTS::SearchParams &config,
                                            Engine &engine,
                                            const Search::LimitsType &limits,
@@ -1678,14 +1720,17 @@ get_or_create_cached_mcts(const MCTS::SearchParams &config,
 }
 
 static void preload_search_objects(Engine &engine) {
-  std::string nn_weights = get_nn_weights_path(engine);
-  if (nn_weights.empty())
-    return; // No weights configured -- nothing to preload
-
   bool need_hybrid = engine.get_options()["UseHybridSearch"];
   bool need_mcts = engine.get_options()["UseMCTS"];
   if (!need_hybrid && !need_mcts)
     return; // AB mode -- no transformer needed
+
+  if (!should_preload_transformer_search())
+    return;
+
+  std::string nn_weights = get_nn_weights_path(engine);
+  if (nn_weights.empty())
+    return; // No weights configured -- nothing to preload
 
   // Preload hybrid search object (includes transformer weight loading). Rebuild
   // it whenever UCI options that affect the embedded MCTS object change.
@@ -1805,10 +1850,17 @@ void MetalFish::cleanup_parallel_hybrid_search() {
 namespace MetalFish {
 
 void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
+  Search::LimitsType limits = parse_limits(is);
+
+  if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
+    sync_cout << "info string Time safety: " << *reason
+              << " below 5000ms; using Alpha-Beta without MCTS" << sync_endl;
+    engine.go(limits);
+    return;
+  }
+
   sync_cout << "info string Starting Parallel Hybrid Search (MCTS + AB)..."
             << sync_endl;
-
-  Search::LimitsType limits = parse_limits(is);
 
   const int total_threads =
       std::max(1, static_cast<int>(engine.get_options()["Threads"]));
@@ -1871,7 +1923,8 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
 
   Position pos;
   StateInfo st;
-  pos.set(engine.fen(), false, &st);
+  pos.set(engine.fen(), static_cast<bool>(engine.get_options()["UCI_Chess960"]),
+          &st);
 
   auto best_move_cb = [](Move best, Move ponder) {
     std::string best_str = UCIEngine::move(best, false);
@@ -1911,6 +1964,14 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
 
   std::istringstream limit_args(args);
   Search::LimitsType limits = parse_limits(limit_args);
+
+  if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
+    sync_cout << "info string Time safety: " << *reason
+              << " below 5000ms; using Alpha-Beta without MCTS" << sync_endl;
+    engine.go(limits);
+    return;
+  }
+
   num_threads = resolve_mcts_thread_count(engine, explicit_threads_arg,
                                           num_threads, true);
 

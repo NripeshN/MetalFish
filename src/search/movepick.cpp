@@ -122,14 +122,16 @@ template <GenType Type> ExtMove *MovePicker::score(MoveList<Type> &ml) {
     const Square from = m.from_sq();
     const Square to = m.to_sq();
     const Piece pc = pos.moved_piece(m);
-    const PieceType pt = type_of(pc);
-    const Piece capturedPiece = pos.piece_on(to);
 
-    if constexpr (Type == CAPTURES)
+    if constexpr (Type == CAPTURES) {
+      const Piece capturedPiece = pos.piece_on(to);
       m.value = (*captureHistory)[pc][to][type_of(capturedPiece)] +
                 7 * int(PieceValue[capturedPiece]);
+    }
 
     else if constexpr (Type == QUIETS) {
+      const PieceType pt = type_of(pc);
+
       // histories
       m.value = 2 * (*mainHistory)[us][m.raw()];
       m.value += 2 * sharedHistory->pawn_entry(pos)[pc][to];
@@ -155,6 +157,8 @@ template <GenType Type> ExtMove *MovePicker::score(MoveList<Type> &ml) {
 
     else // Type == EVASIONS
     {
+      const Piece capturedPiece = pos.piece_on(to);
+
       if (pos.capture_stage(m))
         m.value = PieceValue[capturedPiece] + (1 << 28);
       else
