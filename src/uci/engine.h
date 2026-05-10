@@ -158,6 +158,10 @@ private:
   Search::SearchManager::UpdateContext updateContext;
   std::function<void(std::string_view)> onVerifyNetworks;
   std::map<NumaIndex, SharedHistories> sharedHists;
+
+  mutable bool networksVerified = false;
+  mutable std::string verifiedBigEvalFile;
+  mutable std::string verifiedSmallEvalFile;
 };
 
 } // namespace MetalFish

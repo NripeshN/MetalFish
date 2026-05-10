@@ -188,8 +188,6 @@ Engine::Engine(std::optional<std::string> path)
 
 std::uint64_t Engine::perft(const std::string &fen, Depth depth,
                             bool isChess960) {
-  verify_networks();
-
   return Benchmark::perft(fen, depth, isChess960);
 }
 
@@ -297,6 +295,7 @@ void Engine::resize_threads() {
   if (!tt.is_allocated())
     set_tt_size(options["Hash"]);
   threads.ensure_network_replicated();
+  networksVerified = false;
 }
 
 void Engine::set_tt_size(size_t mb) {
@@ -309,8 +308,15 @@ void Engine::set_ponderhit(bool b) { threads.main_manager()->ponder = b; }
 // network related
 
 void Engine::verify_networks() const {
-  networks->big.verify(options["EvalFile"], onVerifyNetworks);
-  networks->small.verify(options["EvalFileSmall"], onVerifyNetworks);
+  const std::string bigEvalFile = std::string(options["EvalFile"]);
+  const std::string smallEvalFile = std::string(options["EvalFileSmall"]);
+
+  if (networksVerified && verifiedBigEvalFile == bigEvalFile &&
+      verifiedSmallEvalFile == smallEvalFile)
+    return;
+
+  networks->big.verify(bigEvalFile, onVerifyNetworks);
+  networks->small.verify(smallEvalFile, onVerifyNetworks);
 
   auto statuses = networks.get_status_and_errors();
   for (size_t i = 0; i < statuses.size(); ++i) {
@@ -334,9 +340,14 @@ void Engine::verify_networks() const {
 
     onVerifyNetworks(message);
   }
+
+  verifiedBigEvalFile = bigEvalFile;
+  verifiedSmallEvalFile = smallEvalFile;
+  networksVerified = true;
 }
 
 void Engine::load_networks() {
+  networksVerified = false;
   networks.modify_and_replicate([this](NN::Networks &networks_) {
     networks_.big.load(binaryDirectory, options["EvalFile"]);
     networks_.small.load(binaryDirectory, options["EvalFileSmall"]);
@@ -351,6 +362,7 @@ void Engine::load_networks() {
 }
 
 void Engine::load_big_network(const std::string &file) {
+  networksVerified = false;
   networks.modify_and_replicate([this, &file](NN::Networks &networks_) {
     networks_.big.load(binaryDirectory, file);
   });
@@ -359,6 +371,7 @@ void Engine::load_big_network(const std::string &file) {
 }
 
 void Engine::load_small_network(const std::string &file) {
+  networksVerified = false;
   networks.modify_and_replicate([this, &file](NN::Networks &networks_) {
     networks_.small.load(binaryDirectory, file);
   });
