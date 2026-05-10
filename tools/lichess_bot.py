@@ -34,17 +34,44 @@ WEIGHTS = PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"
 LICHESS_API = "https://lichess.org/api"
 EXPLORER_API = "https://explorer.lichess.ovh"
 
+LOGICAL_CORES = os.cpu_count() or 4
+SEARCH_WORKERS = max(3, LOGICAL_CORES - 1)
+HYBRID_MCTS_THREADS = 1
+HYBRID_AB_THREADS = max(1, SEARCH_WORKERS - HYBRID_MCTS_THREADS)
+
+
+def machine_memory_mb() -> int:
+    if hasattr(os, "sysconf"):
+        try:
+            return (os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")) // (
+                1024 * 1024
+            )
+        except (OSError, ValueError):
+            pass
+    return 0
+
+
+def local_hash_mb() -> int:
+    memory_mb = machine_memory_mb()
+    if memory_mb <= 0:
+        return 8192
+    target = (memory_mb * 3) // 8
+    return max(1024, min(16384, (target // 1024) * 1024))
+
+
 ENGINE_OPTIONS = {
-    "Threads": "11",
-    "Hash": "8192",
+    "Threads": str(SEARCH_WORKERS),
+    "Hash": str(local_hash_mb()),
     "Ponder": "true",
     "UseHybridSearch": "true",
+    "UseGPU": "true",
     "NNWeights": str(WEIGHTS),
-    "HybridMCTSThreads": "1",
-    "HybridABThreads": "10",
-    "Move Overhead": "150",
-    "MCTSMinibatchSize": "256",
-    "MCTSPolicySoftmaxTemp": "1.36",
+    "HybridMCTSThreads": str(HYBRID_MCTS_THREADS),
+    "HybridABThreads": str(HYBRID_AB_THREADS),
+    "MCTSMaxThreads": str(HYBRID_MCTS_THREADS),
+    "Move Overhead": "200",
+    "MCTSMinibatchSize": "0",
+    "MCTSPolicySoftmaxTemp": "1.359",
 }
 
 ROTATION_TCS = [
@@ -84,7 +111,16 @@ def load_api_key() -> str:
 
 
 class UCIEngine:
-    def __init__(self, path: pathlib.Path, options: dict):
+    def __init__(
+        self,
+        path: pathlib.Path,
+        options: dict,
+        *,
+        preload_transformer: bool = False,
+    ):
+        env = os.environ.copy()
+        if preload_transformer:
+            env["METALFISH_PRELOAD_TRANSFORMER"] = "1"
         self.proc = subprocess.Popen(
             [str(path)],
             stdin=subprocess.PIPE,
@@ -92,6 +128,7 @@ class UCIEngine:
             stderr=subprocess.DEVNULL,
             text=True,
             bufsize=1,
+            env=env,
         )
         self._send("uci")
         self._wait_for("uciok")
@@ -151,42 +188,85 @@ class UCIEngine:
         self._send("isready")
         self._wait_for("readyok")
 
-        cmd = "go"
-        if movetime is not None:
-            cmd += f" movetime {movetime}"
-        else:
-            if wtime is not None:
-                cmd += f" wtime {wtime}"
-            if btime is not None:
-                cmd += f" btime {btime}"
-            if winc is not None:
-                cmd += f" winc {winc}"
-            if binc is not None:
-                cmd += f" binc {binc}"
-            if movestogo is not None:
-                cmd += f" movestogo {movestogo}"
-
-        self._send(cmd)
+        self._send(
+            self._go_command(
+                wtime=wtime,
+                btime=btime,
+                winc=winc,
+                binc=binc,
+                movetime=movetime,
+                movestogo=movestogo,
+            )
+        )
         line = self._wait_for("bestmove", timeout=600)
         parts = line.split()
         best = parts[1] if len(parts) > 1 else "0000"
         ponder = parts[3] if len(parts) > 3 and parts[2] == "ponder" else None
         return best, ponder
 
-    def start_pondering(self, initial_fen: str, moves: list[str], ponder_move: str):
+    def start_pondering(
+        self,
+        initial_fen: str,
+        moves: list[str],
+        ponder_move: str,
+        *,
+        wtime=None,
+        btime=None,
+        winc=None,
+        binc=None,
+    ):
         """Start thinking on opponent's time (go ponder)."""
         self.stop_pondering()
         all_moves = moves + [ponder_move]
         self.set_position(initial_fen, all_moves)
-        self._send("go ponder")
+        self._send(
+            self._go_command(
+                ponder=True,
+                wtime=wtime,
+                btime=btime,
+                winc=winc,
+                binc=binc,
+            )
+        )
         self._pondering = True
         self._ponder_move = ponder_move
 
+    def _go_command(
+        self,
+        *,
+        ponder: bool = False,
+        wtime=None,
+        btime=None,
+        winc=None,
+        binc=None,
+        movetime=None,
+        movestogo=None,
+    ) -> str:
+        parts = ["go"]
+        if ponder:
+            parts.append("ponder")
+        if movetime is not None:
+            parts.extend(["movetime", str(movetime)])
+        else:
+            if wtime is not None:
+                parts.extend(["wtime", str(wtime)])
+            if btime is not None:
+                parts.extend(["btime", str(btime)])
+            if winc is not None:
+                parts.extend(["winc", str(winc)])
+            if binc is not None:
+                parts.extend(["binc", str(binc)])
+            if movestogo is not None:
+                parts.extend(["movestogo", str(movestogo)])
+        return " ".join(parts)
+
     def ponderhit(self) -> tuple[str, str | None]:
-        """Opponent played the predicted move — convert ponder to real search."""
+        """Opponent played the predicted move; use the current ponder result."""
         if not self._pondering:
             return "0000", None
-        self._send("ponderhit")
+        # The hybrid coordinator does not reliably finish promptly on UCI
+        # ponderhit, so stop and use the best move found on opponent time.
+        self._send("stop")
         self._pondering = False
         line = self._wait_for("bestmove", timeout=600)
         parts = line.split()
@@ -225,8 +305,9 @@ class UCIEngine:
 
 
 class OpeningBook:
-    def __init__(self, api_key: str, min_games: int = 5):
+    def __init__(self, api_key: str, min_games: int = 5, timeout: float = 1.0):
         self.min_games = min_games
+        self.timeout = timeout
         self.headers = {"Authorization": f"Bearer {api_key}"}
         self._cache: dict[str, str | None] = {}
 
@@ -247,7 +328,7 @@ class OpeningBook:
                     "recentGames": 0,
                 },
                 headers=self.headers,
-                timeout=3,
+                timeout=self.timeout,
             )
             if r.status_code == 200:
                 return self._pick_best_move(r.json())
@@ -267,7 +348,7 @@ class OpeningBook:
                     "recentGames": 0,
                 },
                 headers=self.headers,
-                timeout=3,
+                timeout=self.timeout,
             )
             if r.status_code == 200:
                 return self._pick_best_move(r.json())
@@ -306,6 +387,7 @@ class LichessBot:
         self._challenge_retries = 0
         self.book = OpeningBook(api_key=api_key, min_games=5)
         self._seek_timer: threading.Timer | None = None
+        self._warm_engine: UCIEngine | None = None
 
     def api_get(self, path: str, **kwargs):
         return requests.get(f"{LICHESS_API}{path}", headers=self.headers, **kwargs)
@@ -329,12 +411,48 @@ class LichessBot:
     def make_move(self, game_id: str, move: str) -> bool:
         r = self.api_post(f"/bot/game/{game_id}/move/{move}")
         if r.status_code != 200:
-            print(f"  [{game_id}] Move {move} failed: {r.status_code}")
+            detail = r.text.strip().replace("\n", " ")[:200]
+            suffix = f": {detail}" if detail else ""
+            print(f"  [{game_id}] Move {move} failed: {r.status_code}{suffix}")
             return False
         return True
 
     def resign(self, game_id: str):
         self.api_post(f"/bot/game/{game_id}/resign")
+
+    def _create_engine(self, *, preload_transformer: bool) -> UCIEngine:
+        return UCIEngine(
+            ENGINE,
+            ENGINE_OPTIONS,
+            preload_transformer=preload_transformer,
+        )
+
+    def _prepare_warm_engine(self):
+        if not self.args.prewarm_engine or self._warm_engine is not None:
+            return
+        print("  Preparing engine: transformer preload + NNUE replicas...")
+        start = time.time()
+        try:
+            self._warm_engine = self._create_engine(preload_transformer=True)
+        except Exception as e:
+            print(f"  Engine warmup failed, will initialize on game start: {e}")
+            self._warm_engine = None
+            return
+        elapsed = time.time() - start
+        print(f"  Engine ready ({elapsed:.1f}s warmup)")
+
+    def _acquire_engine(self) -> UCIEngine:
+        if self._warm_engine is not None:
+            engine = self._warm_engine
+            self._warm_engine = None
+            return engine
+        return self._create_engine(preload_transformer=False)
+
+    def _close_warm_engine(self):
+        if self._warm_engine is None:
+            return
+        self._warm_engine.quit()
+        self._warm_engine = None
 
     # ---- Seeking ----
 
@@ -476,7 +594,7 @@ class LichessBot:
         print(f"  [{game_id}] Starting...")
         engine = None
         try:
-            engine = UCIEngine(ENGINE, ENGINE_OPTIONS)
+            engine = self._acquire_engine()
             engine.new_game()
             self._game_loop(game_id, engine)
         except Exception as e:
@@ -488,6 +606,7 @@ class LichessBot:
             self.active_games.pop(game_id, None)
             print(f"  [{game_id}] Finished.")
             if self._should_seek():
+                self._prepare_warm_engine()
                 self._schedule_retry(3)
 
     def _game_loop(self, game_id: str, engine: UCIEngine):
@@ -549,39 +668,65 @@ class LichessBot:
         )
 
         if not is_my_turn:
-            # Opponent's turn — start pondering if we have a prediction
-            last_opponent_move = moves[-1] if moves else None
-            if engine.ponder_move and last_opponent_move == engine.ponder_move:
-                # Opponent played our predicted move — ponderhit!
-                best, ponder = engine.ponderhit()
-                if best and best != "0000":
-                    print(f"  [{game_id}] Ponderhit! {best}")
-                    if self.make_move(game_id, best) and ponder:
-                        engine.start_pondering(initial_fen, moves + [best], ponder)
-            else:
-                engine.stop_pondering()
+            # Keep any active ponder search running while the opponent is on move.
             return
 
-        # My turn — check if ponderhit already handled it
-        # (ponderhit path above sends the move, so we only get here if no ponderhit)
+        board = self._build_board(game_id, initial_fen, moves)
+        if board is None:
+            return
+
+        wtime, btime, winc, binc = self._clock_values(state)
+
+        # My turn: if the opponent played the predicted ponder move, convert that
+        # search before doing any new book/engine work.
+        if engine.ponder_move:
+            if moves and moves[-1] == engine.ponder_move:
+                best, ponder = engine.ponderhit()
+                if best and best not in ("0000", "(none)"):
+                    print(f"  [{game_id}] Ponderhit! {best}")
+                    parsed = self._parse_legal_move(game_id, best, board, "ponder")
+                    if parsed is None:
+                        print(f"  [{game_id}] Searching after rejected ponder move")
+                    elif self.make_move(game_id, parsed.uci()):
+                        self._start_pondering_if_legal(
+                            game_id,
+                            engine,
+                            initial_fen,
+                            moves,
+                            board,
+                            best,
+                            ponder,
+                            wtime=wtime,
+                            btime=btime,
+                            winc=winc,
+                            binc=binc,
+                        )
+                        return
+                    else:
+                        return
+            else:
+                engine.stop_pondering()
 
         # Opening book (instant, zero clock cost)
-        board = chess.Board(initial_fen) if initial_fen != "startpos" else chess.Board()
-        for m in moves:
-            try:
-                board.push_uci(m)
-            except ValueError:
-                break
-
         book_move = self.book.lookup(board.fen())
         if book_move:
-            try:
-                if chess.Move.from_uci(book_move) in board.legal_moves:
+            parsed = self._parse_legal_move(game_id, book_move, board, "book")
+            if parsed is not None:
+                if self.make_move(game_id, parsed.uci()):
                     print(f"  [{game_id}] Book: {book_move}")
-                    self.make_move(game_id, book_move)
-                    return
-            except ValueError:
-                pass
+                    self._start_book_pondering(
+                        game_id,
+                        engine,
+                        initial_fen,
+                        moves,
+                        board,
+                        parsed.uci(),
+                        wtime=wtime,
+                        btime=btime,
+                        winc=winc,
+                        binc=binc,
+                    )
+                return
 
         # Engine search
         if not engine.alive():
@@ -592,6 +737,85 @@ class LichessBot:
         engine.stop_pondering()
         engine.set_position(initial_fen, moves)
 
+        try:
+            search_start = time.time()
+            best, ponder = engine.go(wtime=wtime, btime=btime, winc=winc, binc=binc)
+            search_ms = int((time.time() - search_start) * 1000)
+            if best == "0000" or best == "(none)":
+                return
+            if not self._is_legal_move(best, board):
+                best, ponder = self._recover_engine_move(
+                    game_id, engine, initial_fen, moves, board, best
+                )
+                if not best:
+                    return
+            parsed = self._parse_legal_move(game_id, best, board, "engine")
+            if parsed is not None and self.make_move(game_id, parsed.uci()):
+                print(f"  [{game_id}] Engine: {best}")
+                ponder_wtime, ponder_btime = self._after_search_clock(
+                    my_color, wtime, btime, search_ms
+                )
+                self._start_pondering_if_legal(
+                    game_id,
+                    engine,
+                    initial_fen,
+                    moves,
+                    board,
+                    best,
+                    ponder,
+                    wtime=ponder_wtime,
+                    btime=ponder_btime,
+                    winc=winc,
+                    binc=binc,
+                )
+        except (TimeoutError, RuntimeError) as e:
+            print(f"  [{game_id}] Engine error: {e}, resigning")
+            self.resign(game_id)
+
+    def _build_board(
+        self, game_id: str, initial_fen: str, moves: list[str]
+    ) -> chess.Board | None:
+        try:
+            board = (
+                chess.Board(initial_fen)
+                if initial_fen != "startpos"
+                else chess.Board()
+            )
+        except ValueError as e:
+            print(f"  [{game_id}] Bad initial FEN from stream: {e}")
+            return None
+
+        for ply, move in enumerate(moves, start=1):
+            try:
+                board.push_uci(move)
+            except ValueError as e:
+                print(f"  [{game_id}] Bad stream move {move} at ply {ply}: {e}")
+                return None
+        return board
+
+    def _is_legal_move(self, move: str, board: chess.Board) -> bool:
+        try:
+            return chess.Move.from_uci(move) in board.legal_moves
+        except ValueError:
+            return False
+
+    def _parse_legal_move(
+        self, game_id: str, move: str, board: chess.Board, source: str
+    ) -> chess.Move | None:
+        try:
+            parsed = chess.Move.from_uci(move)
+        except ValueError:
+            print(f"  [{game_id}] Ignoring malformed {source} move {move}")
+            return None
+        if parsed not in board.legal_moves:
+            print(
+                f"  [{game_id}] Ignoring illegal {source} move {move} "
+                f"for FEN: {board.fen()}"
+            )
+            return None
+        return parsed
+
+    def _clock_values(self, state: dict) -> tuple[int, int, int, int]:
         wtime = state.get("wtime", 60000)
         btime = state.get("btime", 60000)
         winc = state.get("winc", 0)
@@ -601,16 +825,152 @@ class LichessBot:
             wtime = 300000
         if not isinstance(btime, int):
             btime = 300000
+        if not isinstance(winc, int):
+            winc = 0
+        if not isinstance(binc, int):
+            binc = 0
+        return wtime, btime, winc, binc
 
+    def _after_search_clock(
+        self, my_color: str, wtime: int, btime: int, elapsed_ms: int
+    ) -> tuple[int, int]:
+        if my_color == "white":
+            wtime = max(1, wtime - elapsed_ms)
+        else:
+            btime = max(1, btime - elapsed_ms)
+        return wtime, btime
+
+    def _start_pondering_if_legal(
+        self,
+        game_id: str,
+        engine: UCIEngine,
+        initial_fen: str,
+        moves: list[str],
+        board: chess.Board,
+        best: str,
+        ponder: str | None,
+        *,
+        wtime: int,
+        btime: int,
+        winc: int,
+        binc: int,
+    ):
+        if not ponder:
+            return
+
+        board_after = board.copy(stack=False)
+        board_after.push_uci(best)
+        if not self._is_legal_move(ponder, board_after):
+            print(
+                f"  [{game_id}] Ignoring illegal ponder move {ponder} "
+                f"after {best}"
+            )
+            return
+        print(f"  [{game_id}] Ponder: {ponder}")
+        engine.start_pondering(
+            initial_fen,
+            moves + [best],
+            ponder,
+            wtime=wtime,
+            btime=btime,
+            winc=winc,
+            binc=binc,
+        )
+
+    def _start_book_pondering(
+        self,
+        game_id: str,
+        engine: UCIEngine,
+        initial_fen: str,
+        moves: list[str],
+        board: chess.Board,
+        best: str,
+        *,
+        wtime: int,
+        btime: int,
+        winc: int,
+        binc: int,
+    ):
+        board_after = board.copy(stack=False)
+        board_after.push_uci(best)
+        reply = self.book.lookup(board_after.fen())
+        if not reply or not self._is_legal_move(reply, board_after):
+            return
+        print(f"  [{game_id}] Book ponder: {reply}")
+        engine.start_pondering(
+            initial_fen,
+            moves + [best],
+            reply,
+            wtime=wtime,
+            btime=btime,
+            winc=winc,
+            binc=binc,
+        )
+
+    def _recover_engine_move(
+        self,
+        game_id: str,
+        engine: UCIEngine,
+        initial_fen: str,
+        moves: list[str],
+        board: chess.Board,
+        illegal_move: str,
+    ) -> tuple[str | None, str | None]:
+        print(
+            f"  [{game_id}] Engine returned illegal move {illegal_move} "
+            f"for FEN: {board.fen()}; retrying once"
+        )
         try:
-            best, ponder = engine.go(wtime=wtime, btime=btime, winc=winc, binc=binc)
-            if best == "0000" or best == "(none)":
-                return
-            if self.make_move(game_id, best) and ponder:
-                engine.start_pondering(initial_fen, moves + [best], ponder)
+            engine.new_game()
+            engine.set_position(initial_fen, moves)
+            best, ponder = engine.go(movetime=250)
+            if best not in ("0000", "(none)") and self._is_legal_move(best, board):
+                print(f"  [{game_id}] Retry move: {best}")
+                return best, ponder
+            print(f"  [{game_id}] Retry also returned illegal move: {best}")
         except (TimeoutError, RuntimeError) as e:
-            print(f"  [{game_id}] Engine error: {e}, resigning")
-            self.resign(game_id)
+            print(f"  [{game_id}] Engine retry failed: {e}")
+
+        fallback = self._fallback_move(board)
+        if fallback:
+            print(f"  [{game_id}] Fallback legal move: {fallback}")
+            return fallback, None
+        return None, None
+
+    def _fallback_move(self, board: chess.Board) -> str | None:
+        legal_moves = list(board.legal_moves)
+        if not legal_moves:
+            return None
+
+        piece_values = {
+            chess.PAWN: 100,
+            chess.KNIGHT: 320,
+            chess.BISHOP: 330,
+            chess.ROOK: 500,
+            chess.QUEEN: 900,
+            chess.KING: 0,
+        }
+
+        def score(move: chess.Move) -> int:
+            total = 0
+            if move.promotion:
+                total += piece_values.get(move.promotion, 0)
+            if board.is_capture(move):
+                victim = board.piece_at(move.to_square)
+                attacker = board.piece_at(move.from_square)
+                if victim:
+                    total += piece_values.get(victim.piece_type, 0)
+                if attacker:
+                    total -= piece_values.get(attacker.piece_type, 0) // 10
+            board.push(move)
+            if board.is_checkmate():
+                total += 100000
+            elif board.is_check():
+                total += 50
+            board.pop()
+            return total
+
+        return max(legal_moves, key=score).uci()
 
     # ---- Main loop ----
 
@@ -626,11 +986,19 @@ class LichessBot:
             sys.exit(1)
 
         tc_mode = "rotate" if self.args.rotate else (self.args.tc or "5+3")
+        hash_mb = ENGINE_OPTIONS["Hash"]
         print("=" * 60)
         print(f"  MetalFish Lichess Bot")
         print(f"  Account:  {self.username}")
-        print(f"  Engine:   Hybrid (AB 10T + MCTS 1T + GPU + Ponder)")
-        print(f"  Hash:     8192 MB | Network: BT4-1024x15x32h")
+        print(
+            f"  Engine:   Hybrid (AB {HYBRID_AB_THREADS}T + "
+            f"MCTS {HYBRID_MCTS_THREADS}T + Ponder)"
+        )
+        print(
+            f"  Workers:  {SEARCH_WORKERS} search + 1 coordinator "
+            f"| CPU: {LOGICAL_CORES} logical"
+        )
+        print(f"  Hash:     {hash_mb} MB | Network: BT4-1024x15x32h")
         print(f"  Book:     Lichess Masters DB (instant moves)")
         print(
             f"  Rated:    {self.args.accept_rated} | Casual: {self.args.accept_casual}"
@@ -638,6 +1006,8 @@ class LichessBot:
         print(f"  Seek:     {self.args.seek} | TC: {tc_mode}")
         print(f"  Max games: {self.args.max_games}")
         print("=" * 60)
+
+        self._prepare_warm_engine()
         print("\nListening... (Ctrl+C to stop)\n")
 
         self._event_loop()
@@ -671,6 +1041,7 @@ class LichessBot:
                 print("\n\nShutting down...")
                 if self._seek_timer:
                     self._seek_timer.cancel()
+                self._close_warm_engine()
                 for gid in list(self.active_games.keys()):
                     print(f"  Resigning {gid}...")
                     self.resign(gid)
@@ -753,6 +1124,13 @@ def main():
         action="store_true",
         default=False,
         help="Cycle through blitz/rapid/bullet time controls",
+    )
+    parser.add_argument(
+        "--no-prewarm",
+        dest="prewarm_engine",
+        action="store_false",
+        default=True,
+        help="Skip startup transformer preload (faster startup, weaker first search)",
     )
     args = parser.parse_args()
 
