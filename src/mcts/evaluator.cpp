@@ -116,9 +116,8 @@ public:
     results.reserve(outputs.size());
 
     for (size_t i = 0; i < outputs.size(); ++i) {
-      results.push_back(
-          BuildResult(outputs[i], *positions[i], scratch.transforms[i],
-                      nullptr));
+      results.push_back(BuildResult(outputs[i], *positions[i],
+                                    scratch.transforms[i], nullptr));
     }
 
     return results;

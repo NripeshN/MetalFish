@@ -261,8 +261,7 @@ void BackendComputation::ComputeBlocking() {
   for (const auto &p : pending_) {
     history_views_.emplace_back(p.history.data(), p.history_depth);
     if (p.legal_move_count >= 0) {
-      legal_move_views_.emplace_back(p.legal_moves.data(),
-                                     p.legal_move_count);
+      legal_move_views_.emplace_back(p.legal_moves.data(), p.legal_move_count);
     } else {
       all_have_legal_moves = false;
     }

@@ -543,23 +543,23 @@ void test_mating_material_adjudication(TestCounter &tc) {
     return;
   }
 
-  const uint64_t bare_bishop = run_endgame_eval_count(
-      weights, "8/8/8/4k3/8/8/2K2B2/8 w - - 0 1");
+  const uint64_t bare_bishop =
+      run_endgame_eval_count(weights, "8/8/8/4k3/8/8/2K2B2/8 w - - 0 1");
   expect(bare_bishop == 1,
          "K+B vs K should be adjudicated as insufficient material", tc);
 
-  const uint64_t two_knights = run_endgame_eval_count(
-      weights, "8/8/8/3k4/8/5N2/2K2N2/8 w - - 0 1");
-  expect(two_knights > 1,
-         "K+NN vs K should keep searching as mating material", tc);
+  const uint64_t two_knights =
+      run_endgame_eval_count(weights, "8/8/8/3k4/8/5N2/2K2N2/8 w - - 0 1");
+  expect(two_knights > 1, "K+NN vs K should keep searching as mating material",
+         tc);
 
-  const uint64_t same_color_bishops = run_endgame_eval_count(
-      weights, "8/8/8/4k3/8/4b3/5B2/2K5 w - - 0 1");
+  const uint64_t same_color_bishops =
+      run_endgame_eval_count(weights, "8/8/8/4k3/8/4b3/5B2/2K5 w - - 0 1");
   expect(same_color_bishops == 1,
          "same-color bishop-only endings should be insufficient material", tc);
 
-  const uint64_t opposite_bishops = run_endgame_eval_count(
-      weights, "8/8/8/4k3/8/2K2b2/5B2/8 w - - 0 1");
+  const uint64_t opposite_bishops =
+      run_endgame_eval_count(weights, "8/8/8/4k3/8/2K2b2/5B2/8 w - - 0 1");
   expect(opposite_bishops > 1,
          "opposite-colored bishop-only endings should keep searching", tc);
 }

@@ -1528,8 +1528,8 @@ void Search::BuildRootSearchMoves(const Position &root_pos) {
     Move move = UCIEngine::to_move(root_pos, uci_move);
     if (move == Move::none())
       continue;
-    if (std::find(root_search_moves_.begin(), root_search_moves_.end(),
-                  move) == root_search_moves_.end()) {
+    if (std::find(root_search_moves_.begin(), root_search_moves_.end(), move) ==
+        root_search_moves_.end()) {
       root_search_moves_.push_back(move);
     }
   }

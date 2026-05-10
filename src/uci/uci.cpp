@@ -1394,8 +1394,7 @@ static bool should_preload_transformer_search() {
   std::string value(env);
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char c) { return std::tolower(c); });
-  return value != "0" && value != "false" && value != "off" &&
-         value != "no";
+  return value != "0" && value != "false" && value != "off" && value != "no";
 }
 
 static void tune_mcts_minibatch_for_limits(MCTS::SearchParams &config,
