@@ -683,8 +683,13 @@ class LichessBot:
             elif r.status_code == 429:
                 print("  Rate limited, backing off...")
                 self._rate_limit_count += 1
-                backoff = min(300, 60 * self._rate_limit_count)
-                print(f"  Waiting {backoff}s (attempt {self._rate_limit_count})")
+                if self._rate_limit_count >= 3:
+                    # Likely hit daily challenge cap — back off aggressively
+                    backoff = 900  # 15 minutes
+                    print(f"  Possible daily cap hit. Waiting {backoff//60}min before retrying.")
+                else:
+                    backoff = 90  # Lichess docs say "wait a full minute"
+                    print(f"  Waiting {backoff}s...")
                 self._schedule_retry(backoff)
             else:
                 # Bot doesn't accept — cooldown and try another
