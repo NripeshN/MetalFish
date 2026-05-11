@@ -449,6 +449,7 @@ class LichessBot:
         self._warm_engine: UCIEngine | None = None
         self._elo_widen_steps = 0
         self._declined_cooldown: dict[str, float] = {}  # bot_id -> timestamp
+        self._rate_limit_count = 0
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -674,13 +675,17 @@ class LichessBot:
                 self._pending_challenge_target = target
                 self._challenge_sent_at = time.time()
                 self._challenge_retries = 0
+                self._rate_limit_count = 0
                 print(
                     f"  Challenged {target} ({tc_label}, {'rated' if rated else 'casual'})"
                 )
                 self._schedule_challenge_timeout()
             elif r.status_code == 429:
-                print("  Rate limited, waiting 60s...")
-                self._schedule_retry(60)
+                print("  Rate limited, backing off...")
+                self._rate_limit_count += 1
+                backoff = min(300, 60 * self._rate_limit_count)
+                print(f"  Waiting {backoff}s (attempt {self._rate_limit_count})")
+                self._schedule_retry(backoff)
             else:
                 # Bot doesn't accept — cooldown and try another
                 self._cooldown_bot(target, duration=300)
