@@ -31,6 +31,10 @@ BUILD_PATH = PATH.parent / "build"
 # Find MetalFish binary - handle different build configurations
 def find_metalfish_binary():
     """Find the MetalFish binary across different build configurations."""
+    env_path = os.environ.get("METALFISH_BIN")
+    if env_path:
+        return pathlib.Path(env_path).expanduser()
+
     # Check common locations in order of preference
     candidates = [
         BUILD_PATH / "metalfish",  # Unix default
@@ -40,6 +44,10 @@ def find_metalfish_binary():
         BUILD_PATH / "Release" / "metalfish",  # Unix Release config
         BUILD_PATH / "Debug" / "metalfish",  # Unix Debug config
     ]
+
+    candidates.extend(sorted(BUILD_PATH.glob("*/metalfish")))
+    candidates.extend(sorted(BUILD_PATH.glob("*/metalfish.exe")))
+
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -78,10 +86,10 @@ def timeout_decorator(timeout: float):
 class MetalFish:
     """Wrapper for interacting with MetalFish engine via UCI"""
 
-    def __init__(self, path: str = None, args: List[str] = []):
+    def __init__(self, path: Optional[str] = None, args: Optional[List[str]] = None):
         self.path = path or str(METALFISH_BIN)
         self.process = None
-        self.args = args
+        self.args = args or []
         self.output = []
         self.start()
 
@@ -283,7 +291,7 @@ def run_perft_test(engine: MetalFish, fen: str, depth: int, expected: int) -> bo
     return False
 
 
-def test_perft():
+def test_perft(quick: bool = False):
     """Run all perft tests"""
     print(f"\n{WHITE_BOLD}Running Perft Tests{RESET_COLOR}")
 
@@ -293,7 +301,9 @@ def test_perft():
     passed = 0
     failed = 0
 
-    for fen, depth, expected in PERFT_POSITIONS:
+    positions = [p for p in PERFT_POSITIONS if p[1] <= 3] if quick else PERFT_POSITIONS
+
+    for fen, depth, expected in positions:
         short_fen = fen[:30] + "..." if len(fen) > 30 else fen
         print(f"  perft({depth}) {short_fen}: ", end="", flush=True)
 
@@ -743,7 +753,7 @@ def main():
         all_passed = False
 
     # Run perft tests
-    if not test_perft():
+    if not test_perft(args.quick):
         all_passed = False
 
     print("\n" + "=" * 50)

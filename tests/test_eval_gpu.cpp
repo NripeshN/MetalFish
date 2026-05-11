@@ -1,17 +1,16 @@
 /*
-  MetalFish - Metal GPU & NNUE Evaluation Tests
-  Merged from test_metal.cpp, test_gpu_module.cpp, test_gpu_nnue.cpp
+  MetalFish - Metal GPU Backend Tests
+  Covers Metal backend basics and verifies GPU NNUE stays disabled.
 
-  Tests Metal backend availability, buffer management, shader compilation,
-  GPU NNUE evaluation, and batch processing.
+  Tests Metal backend availability and buffer management. NNUE is CPU-only.
 */
 
 #include "test_common.h"
 
 #include "../src/core/bitboard.h"
 #include "../src/core/position.h"
+#include "../src/eval/evaluate.h"
 #include "../src/eval/gpu_backend.h"
-#include "../src/eval/gpu_integration.h"
 
 using namespace MetalFish;
 using namespace MetalFish::Test;
@@ -86,36 +85,14 @@ static bool test_metal_buffers() {
   return tc.passed;
 }
 
-static bool test_gpu_nnue_manager() {
-  TestCase tc{"GPU NNUE manager initialization"};
+static bool test_gpu_nnue_disabled() {
+  TestCase tc{"GPU NNUE disabled by policy"};
 
-#ifdef USE_METAL
-  if (!GPU::gpu_available()) {
-    std::cout << "    Skipped (no Metal)" << std::endl;
-    EXPECT(tc, true);
-    tc.print_result();
-    return tc.passed;
-  }
-
-  bool manager_available = GPU::gpu_nnue_manager_available();
-  // Manager may or may not be initialized depending on test order
-  // Just verify no crash
-  EXPECT(tc, true);
-  std::cout << "    Manager available: " << (manager_available ? "yes" : "no")
-            << std::endl;
-
-  if (manager_available) {
-    auto &manager = GPU::gpu_nnue_manager();
-    // Verify batch creation works
-    GPU::GPUEvalBatch batch;
-    EXPECT_EQ(tc, batch.count, 0);
-    batch.reserve(64);
-    EXPECT(tc, true); // No crash
-  }
-#else
-  std::cout << "    Skipped (no Metal)" << std::endl;
-  EXPECT(tc, true);
-#endif
+  Eval::set_use_apple_silicon_nnue(true);
+  EXPECT(tc, !Eval::use_apple_silicon_nnue());
+  Eval::set_use_apple_silicon_nnue(false);
+  EXPECT(tc, !Eval::use_apple_silicon_nnue());
+  std::cout << "    GPU NNUE unavailable: yes" << std::endl;
 
   tc.print_result();
   return tc.passed;
@@ -126,7 +103,7 @@ bool test_eval_gpu() {
 
   all_passed &= test_metal_availability();
   all_passed &= test_metal_buffers();
-  all_passed &= test_gpu_nnue_manager();
+  all_passed &= test_gpu_nnue_disabled();
 
   return all_passed;
 }

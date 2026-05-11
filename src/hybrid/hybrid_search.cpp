@@ -43,9 +43,8 @@ ParallelHybridSearch::ParallelHybridSearch() {
   config_.agreement_threshold = 0.3f;
   config_.override_threshold = 1.0f;
 
-  config_.gpu_batch_size = 128;
-  config_.use_async_gpu_eval = true;
-  config_.use_gpu_resident_batches = true;
+  config_.transformer_batch_size = 128;
+  config_.use_transformer_prefetch = true;
 
   mcts_thread_state_.store(ThreadState::IDLE, std::memory_order_relaxed);
   ab_thread_state_.store(ThreadState::IDLE, std::memory_order_relaxed);
@@ -67,11 +66,6 @@ ParallelHybridSearch::~ParallelHybridSearch() {
     mcts_search_->ClearCallbacks();
     mcts_search_->Stop();
     mcts_search_->Wait();
-  }
-
-  // On unified memory, only a light sync is needed for in-flight GPU ops
-  if (GPU::gpu_available() && !GPU::gpu_backend_shutdown()) {
-    GPU::gpu().synchronize();
   }
 
   {
@@ -112,20 +106,11 @@ bool ParallelHybridSearch::all_threads_done() const {
          coordinator_thread_done_.load(std::memory_order_acquire);
 }
 
-bool ParallelHybridSearch::initialize(GPU::GPUNNUEManager *gpu_manager,
-                                      Engine *engine) {
+bool ParallelHybridSearch::initialize(Engine *engine) {
   if (!engine)
     return false;
 
-  gpu_manager_ = gpu_manager;
   engine_ = engine;
-
-  if (gpu_manager && gpu_manager->is_ready()) {
-    gpu_backend_ = GPU::create_gpu_mcts_backend(gpu_manager);
-    if (gpu_backend_) {
-      gpu_backend_->set_optimal_batch_size(config_.gpu_batch_size);
-    }
-  }
 
   mcts_search_ = std::make_unique<Search>(
       config_.mcts_config,
@@ -374,7 +359,7 @@ bool ParallelHybridSearch::should_stop() const {
   return false;
 }
 
-// MCTS thread - runs GPU-accelerated MCTS
+// MCTS thread - runs transformer-backed MCTS. NNUE remains CPU-only in AB.
 void ParallelHybridSearch::mcts_thread_main() {
 #ifdef __APPLE__
   set_thread_qos(QOS_CLASS_USER_INITIATED);
@@ -448,8 +433,9 @@ void ParallelHybridSearch::mcts_thread_main() {
   stats_.mcts_time_ms =
       std::chrono::duration<double, std::milli>(end - start).count();
   stats_.mcts_nodes = mcts_search_->Stats().total_nodes.load();
-  stats_.gpu_evaluations = mcts_search_->Stats().nn_evaluations.load();
-  stats_.gpu_batches = mcts_search_->Stats().nn_evaluations.load();
+  stats_.transformer_evaluations =
+      mcts_search_->Stats().nn_evaluations.load();
+  stats_.transformer_batches = mcts_search_->Stats().nn_evaluations.load();
 }
 
 void ParallelHybridSearch::publish_mcts_state() {
@@ -828,7 +814,7 @@ void ParallelHybridSearch::refresh_final_state(Move final_move) {
       ab_state_.completed_depth.load(std::memory_order_relaxed);
 
   stats_.mcts_nodes.store(mcts_nodes, std::memory_order_relaxed);
-  stats_.gpu_evaluations.store(mcts_evals, std::memory_order_relaxed);
+  stats_.transformer_evaluations.store(mcts_evals, std::memory_order_relaxed);
   stats_.ab_nodes.store(ab_nodes, std::memory_order_relaxed);
   stats_.ab_depth.store(ab_depth, std::memory_order_relaxed);
 
@@ -1004,11 +990,11 @@ void ParallelHybridSearch::send_info_string(const std::string &msg) {
 }
 
 std::unique_ptr<ParallelHybridSearch>
-create_parallel_hybrid_search(GPU::GPUNNUEManager *gpu_manager, Engine *engine,
+create_parallel_hybrid_search(Engine *engine,
                               const ParallelHybridConfig &config) {
   auto search = std::make_unique<ParallelHybridSearch>();
   search->set_config(config);
-  if (search->initialize(gpu_manager, engine)) {
+  if (search->initialize(engine)) {
     return search;
   }
   return nullptr;

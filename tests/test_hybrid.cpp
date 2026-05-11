@@ -227,11 +227,11 @@ void test_hybrid_config() {
     EXPECT(tc, config.ab_policy_weight <= 1.0f);
   }
   {
-    TestCase tc("GPU settings");
+    TestCase tc("Transformer batching settings");
     ParallelHybridConfig config;
 
-    EXPECT(tc, config.gpu_batch_size > 0);
-    EXPECT(tc, config.gpu_batch_timeout_us > 0);
+    EXPECT(tc, config.transformer_batch_size > 0);
+    EXPECT(tc, config.transformer_batch_timeout_us > 0);
   }
   {
     TestCase tc("Coordinator explicit budgets keep MCTS alive");

@@ -65,7 +65,7 @@ ENGINE_OPTIONS = {
     "Hash": str(local_hash_mb()),
     "Ponder": "true",
     "UseHybridSearch": "true",
-    "UseGPU": "true",
+    "UseGPU": "false",
     "NNWeights": str(WEIGHTS),
     "HybridMCTSThreads": str(HYBRID_MCTS_THREADS),
     "HybridABThreads": str(HYBRID_AB_THREADS),

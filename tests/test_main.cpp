@@ -6,10 +6,10 @@
   Tests are organized by module:
     - core:   Bitboard, position, move generation
     - search: Alpha-Beta search, TT, move ordering, time management
-    - eval:   NNUE evaluation, GPU integration
+    - eval:   CPU NNUE evaluation, GPU policy
     - mcts:   MCTS tree, PUCT, batched evaluation
     - hybrid: Parallel hybrid search, PV injection
-    - metal:  Metal GPU backend, shaders, buffers
+    - metal:  Metal backend and buffers
 */
 
 #include <functional>

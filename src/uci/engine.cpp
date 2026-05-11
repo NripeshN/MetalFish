@@ -25,8 +25,6 @@
 #include "core/shm.h"
 #include "core/types.h"
 #include "eval/evaluate.h"
-#include "eval/gpu_backend.h"
-#include "eval/gpu_integration.h"
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_common.h"
 #include "eval/nnue/nnue_misc.h"

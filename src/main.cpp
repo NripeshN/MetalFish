@@ -13,7 +13,6 @@
 #include "core/misc.h"
 #include "core/position.h"
 #include "eval/gpu_backend.h"
-#include "eval/gpu_integration.h"
 #include "uci/uci.h"
 
 using namespace MetalFish;
@@ -23,7 +22,7 @@ static std::atomic<bool> g_cleanup_done{false};
 
 // Global cleanup function registered with atexit
 // This ensures GPU resources are cleaned up before static destruction
-// The order is critical: MCTS components -> GPU NNUE -> GPU Backend
+// The order is critical: MCTS/Hybrid components -> generic GPU backend.
 static void cleanup_gpu_resources() {
   // Only cleanup once - prevent double cleanup
   bool expected = false;
@@ -34,8 +33,8 @@ static void cleanup_gpu_resources() {
   // 0. Cleanup parallel hybrid search first (it holds GPU resources)
   cleanup_parallel_hybrid_search();
 
-  // 2. Shutdown GPU NNUE manager (this also shuts down the GPU backend)
-  GPU::shutdown_gpu_nnue();
+  // 1. Shutdown generic Metal resources. NNUE is CPU-only by design.
+  GPU::shutdown_gpu_backend();
 }
 
 int main(int argc, char *argv[]) {

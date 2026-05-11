@@ -39,7 +39,8 @@ Value evaluate(const NNUE::Networks &networks, const Position &pos,
                Eval::NNUE::AccumulatorStack &accumulators,
                Eval::NNUE::AccumulatorCaches &caches, int optimism);
 
-// Apple Silicon GPU NNUE control
+// NNUE is CPU-only. These legacy accessors intentionally keep the old API
+// surface inert so external callers cannot enable GPU NNUE.
 void set_use_apple_silicon_nnue(bool use);
 bool use_apple_silicon_nnue();
 } // namespace Eval

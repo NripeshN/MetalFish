@@ -10,9 +10,6 @@
 
 #pragma once
 
-#include "../eval/gpu_backend.h"
-#include "../eval/gpu_integration.h"
-#include "../mcts/gpu_backend.h"
 #include "../mcts/search.h"
 #include "../search/search.h"
 #include "../search/tt.h"
@@ -140,8 +137,8 @@ struct alignas(APPLE_CACHE_LINE_SIZE) MCTSSharedState {
 struct ParallelSearchStats {
   std::atomic<uint64_t> mcts_nodes{0};
   std::atomic<uint64_t> mcts_iterations{0};
-  std::atomic<uint64_t> gpu_evaluations{0};
-  std::atomic<uint64_t> gpu_batches{0};
+  std::atomic<uint64_t> transformer_evaluations{0};
+  std::atomic<uint64_t> transformer_batches{0};
 
   std::atomic<uint64_t> ab_nodes{0};
   std::atomic<uint64_t> ab_depth{0};
@@ -160,8 +157,8 @@ struct ParallelSearchStats {
   void reset() {
     mcts_nodes = 0;
     mcts_iterations = 0;
-    gpu_evaluations = 0;
-    gpu_batches = 0;
+    transformer_evaluations = 0;
+    transformer_batches = 0;
     ab_nodes = 0;
     ab_depth = 0;
     ab_iterations = 0;
@@ -199,18 +196,11 @@ struct ParallelHybridConfig {
 
   bool use_position_classifier = true;
 
-  // GPU batch evaluation
-  int gpu_batch_size = 128;
-  int gpu_batch_timeout_us = 200;
-  bool use_async_gpu_eval = true;
-
-  // Unified memory optimizations
-  bool use_gpu_resident_batches = true;
-  bool prefetch_positions = true;
-
-  // Metal-specific
-  bool use_simd_kernels = true;
-  int metal_threadgroup_size = 256;
+  // Transformer batching. NNUE stays on CPU; these values tune MCTS network
+  // inference only.
+  int transformer_batch_size = 128;
+  int transformer_batch_timeout_us = 200;
+  bool use_transformer_prefetch = true;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees
@@ -238,7 +228,7 @@ public:
   ParallelHybridSearch(ParallelHybridSearch &&) = delete;
   ParallelHybridSearch &operator=(ParallelHybridSearch &&) = delete;
 
-  bool initialize(GPU::GPUNNUEManager *gpu_manager, Engine *engine);
+  bool initialize(Engine *engine);
   bool is_ready() const { return initialized_; }
 
   // Configuration
@@ -269,9 +259,7 @@ private:
 
   // MCTS search engine
   std::unique_ptr<Search> mcts_search_;
-  std::unique_ptr<GPU::GPUMCTSBackend> gpu_backend_;
   std::unique_ptr<SharedTTReader> shared_tt_reader_;
-  GPU::GPUNNUEManager *gpu_manager_ = nullptr;
   Engine *engine_ = nullptr;
 
   PositionClassifier classifier_;
@@ -352,9 +340,10 @@ private:
 };
 
 // Factory function
-std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
-    GPU::GPUNNUEManager *gpu_manager, Engine *engine,
-    const ParallelHybridConfig &config = ParallelHybridConfig());
+std::unique_ptr<ParallelHybridSearch>
+create_parallel_hybrid_search(Engine *engine,
+                              const ParallelHybridConfig &config =
+                                  ParallelHybridConfig());
 
 // Returns true when the coordinator, not AB's time manager, owns the outer
 // search budget and should keep MCTS running after AB has produced a result.

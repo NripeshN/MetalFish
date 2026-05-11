@@ -51,11 +51,11 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
   set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} ${APPLE_ARM_FLAGS}")
 endif()
 
-# Metal GPU acceleration (Apple Silicon)
+# Metal transformer acceleration (Apple Silicon)
 if(APPLE)
-  option(USE_METAL "Enable Metal GPU acceleration" ON)
+  option(USE_METAL "Enable Metal transformer acceleration" ON)
 else()
-  option(USE_METAL "Enable Metal GPU acceleration" OFF)
+  option(USE_METAL "Enable Metal transformer acceleration" OFF)
 endif()
 
 # Metal-cpp headers
@@ -134,11 +134,10 @@ set(SEARCH_SOURCES
     src/search/search.cpp src/search/movepick.cpp src/search/thread.cpp
     src/search/tt.cpp src/search/timeman.cpp)
 
-# NNUE evaluation + GPU integration
+# NNUE evaluation. NNUE stays CPU-only; Metal is reserved for transformer MCTS.
 set(EVAL_SOURCES
     src/eval/evaluate.cpp
     src/eval/score.cpp
-    src/eval/gpu_integration.cpp
     src/eval/nnue/network.cpp
     src/eval/nnue/nnue_accumulator.cpp
     src/eval/nnue/nnue_misc.cpp
@@ -155,7 +154,7 @@ set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 # MCTS search engine
 set(MCTS_SOURCES
     src/mcts/search.cpp src/mcts/backend_adapter.cpp src/mcts/stoppers.cpp
-    src/mcts/evaluator.cpp src/mcts/gpu_backend.cpp)
+    src/mcts/evaluator.cpp)
 
 # Hybrid search engine
 set(HYBRID_SOURCES src/hybrid/hybrid_search.cpp src/hybrid/position_adapter.cpp
@@ -185,9 +184,11 @@ set(NN_SOURCES
     ${PROTO_OUTPUT_DIR}/net.pb.cc src/nn/loader.cpp src/nn/encoder.cpp
     src/nn/weights.cpp src/nn/policy_map.cpp src/nn/network.cpp)
 
-# Metal GPU acceleration (macOS only)
+# Metal transformer acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
-  # NNUE Metal shaders
+  # Generic Metal device/buffer backend used by diagnostics and shutdown.
+  # NNUE is deliberately not compiled for Metal; CPU incremental NNUE is faster
+  # for AB search and avoids starving transformer inference on Apple GPUs.
   set(EVAL_SOURCES ${EVAL_SOURCES} src/eval/metal/metal_backend.mm)
 
   # Transformer Metal/MPSGraph backend
@@ -201,29 +202,7 @@ if(USE_METAL AND METAL_CPP_AVAILABLE)
     src/nn/metal/mps/NetworkGraph.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_METAL")
-  message(STATUS "Metal GPU acceleration: ENABLED")
-
-  # Compile Metal shaders
-  set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/eval/metal/kernels)
-  set(SHADER_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/metalfish.metallib)
-
-  find_program(METAL_COMPILER xcrun)
-  if(METAL_COMPILER)
-    add_custom_command(
-      OUTPUT ${SHADER_OUTPUT}
-      COMMAND ${CMAKE_COMMAND} -E echo "Compiling Metal shaders..."
-      COMMAND
-        sh -c
-        "xcrun -sdk macosx metal -c ${SHADER_DIR}/nnue.metal -o ${CMAKE_CURRENT_BINARY_DIR}/nnue.air 2>&1 || echo 'Metal shader compilation skipped'"
-      COMMAND
-        sh -c
-        "if [ -f ${CMAKE_CURRENT_BINARY_DIR}/nnue.air ]; then xcrun -sdk macosx metallib ${CMAKE_CURRENT_BINARY_DIR}/nnue.air -o ${SHADER_OUTPUT} 2>&1 || echo 'Metallib creation skipped'; fi"
-      COMMAND ${CMAKE_COMMAND} -E touch ${SHADER_OUTPUT}
-      DEPENDS ${SHADER_DIR}/nnue.metal
-      COMMENT "Compiling Metal shaders"
-      VERBATIM)
-    add_custom_target(metal_shaders DEPENDS ${SHADER_OUTPUT})
-  endif()
+  message(STATUS "Metal transformer acceleration: ENABLED")
 else()
   # CPU fallback backend
   set(EVAL_SOURCES ${EVAL_SOURCES} src/eval/cpu_backend.cpp)
@@ -247,10 +226,6 @@ set(SOURCES
     ${NN_SOURCES})
 
 add_executable(metalfish ${SOURCES})
-
-if(TARGET metal_shaders)
-  add_dependencies(metalfish metal_shaders)
-endif()
 
 if(METALFISH_IPO_SUPPORTED)
   set_property(TARGET metalfish PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE
@@ -293,6 +268,10 @@ if(APPLE)
   find_library(MPS_FRAMEWORK MetalPerformanceShaders)
   find_library(MPSGRAPH_FRAMEWORK MetalPerformanceShadersGraph)
 
+  if(ACCELERATE_FRAMEWORK)
+    target_link_libraries(metalfish ${ACCELERATE_FRAMEWORK})
+  endif()
+
   if(USE_METAL AND METAL_CPP_AVAILABLE)
     target_link_libraries(
       metalfish
@@ -301,8 +280,7 @@ if(APPLE)
       ${COREFOUNDATION_FRAMEWORK}
       ${QUARTZCORE_FRAMEWORK}
       ${MPS_FRAMEWORK}
-      ${MPSGRAPH_FRAMEWORK}
-      ${ACCELERATE_FRAMEWORK})
+      ${MPSGRAPH_FRAMEWORK})
   endif()
 endif()
 
@@ -350,6 +328,10 @@ if(BUILD_TESTS)
   target_link_libraries(metalfish_tests Threads::Threads ${Protobuf_LIBRARIES}
                         ${ZLIB_LIBRARIES} ${ABSL_LIBS})
 
+  if(APPLE AND ACCELERATE_FRAMEWORK)
+    target_link_libraries(metalfish_tests ${ACCELERATE_FRAMEWORK})
+  endif()
+
   if(APPLE
      AND USE_METAL
      AND METAL_CPP_AVAILABLE)
@@ -360,8 +342,7 @@ if(BUILD_TESTS)
       ${COREFOUNDATION_FRAMEWORK}
       ${QUARTZCORE_FRAMEWORK}
       ${MPS_FRAMEWORK}
-      ${MPSGRAPH_FRAMEWORK}
-      ${ACCELERATE_FRAMEWORK})
+      ${MPSGRAPH_FRAMEWORK})
   endif()
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
 
@@ -384,6 +365,10 @@ if(BUILD_TESTS)
   target_link_libraries(test_nn_comparison Threads::Threads
                         ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES} ${ABSL_LIBS})
 
+  if(APPLE AND ACCELERATE_FRAMEWORK)
+    target_link_libraries(test_nn_comparison ${ACCELERATE_FRAMEWORK})
+  endif()
+
   if(APPLE
      AND USE_METAL
      AND METAL_CPP_AVAILABLE)
@@ -394,8 +379,7 @@ if(BUILD_TESTS)
       ${COREFOUNDATION_FRAMEWORK}
       ${QUARTZCORE_FRAMEWORK}
       ${MPS_FRAMEWORK}
-      ${MPSGRAPH_FRAMEWORK}
-      ${ACCELERATE_FRAMEWORK})
+      ${MPSGRAPH_FRAMEWORK})
   endif()
   add_test(NAME test_nn_comparison COMMAND test_nn_comparison)
 endif()
@@ -407,7 +391,7 @@ message(STATUS "")
 message(STATUS "MetalFish Configuration Summary:")
 message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
-message(STATUS "  Metal GPU: ${USE_METAL}")
+message(STATUS "  Metal transformer: ${USE_METAL}")
 message(STATUS "  Native arch tuning: ${METALFISH_ENABLE_NATIVE_ARCH}")
 message(STATUS "  IPO/LTO: ${METALFISH_IPO_SUPPORTED}")
 message(STATUS "  Tests: ${BUILD_TESTS}")

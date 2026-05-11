@@ -16,7 +16,7 @@
 #include <iostream>
 
 #ifdef __APPLE__
-#import <Foundation/Foundation.h>
+#include <sys/sysctl.h>
 #elif defined(__linux__)
 #include <unistd.h>
 #elif defined(_WIN32)
@@ -87,7 +87,12 @@ public:
 
   size_t total_system_memory() const override {
 #ifdef __APPLE__
-    return [[NSProcessInfo processInfo] physicalMemory];
+    uint64_t memory_bytes = 0;
+    size_t size = sizeof(memory_bytes);
+    if (sysctlbyname("hw.memsize", &memory_bytes, &size, nullptr, 0) == 0) {
+      return static_cast<size_t>(memory_bytes);
+    }
+    return 8ULL * 1024 * 1024 * 1024; // Default 8GB
 #elif defined(__linux__)
     long pages = sysconf(_SC_PHYS_PAGES);
     long page_size = sysconf(_SC_PAGE_SIZE);

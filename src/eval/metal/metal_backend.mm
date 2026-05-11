@@ -348,8 +348,7 @@ public:
     // Base: 16 positions per core, but adjust based on memory
     int base_batch = cores * 16;
 
-    // Consider available memory - each position needs ~128 bytes for data
-    // plus ~4KB for NNUE evaluation workspace
+    // Consider available memory for batched transformer/diagnostic workloads.
     size_t working_set = recommended_working_set_size();
     size_t memory_per_position = 4 * 1024; // Conservative estimate
     int memory_limited_batch =

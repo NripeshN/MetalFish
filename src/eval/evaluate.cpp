@@ -22,23 +22,13 @@
 #include "eval/nnue/network.h"
 #include "eval/nnue/nnue_accumulator.h"
 #include "eval/nnue/nnue_misc.h"
-#include "gpu_integration.h"
 #include "uci/uci.h"
 
 namespace MetalFish {
 
-// Global flag for GPU NNUE - controls whether MCTS batch evaluation uses GPU.
-// The AB search always uses CPU NNUE with incremental accumulator updates
-// regardless of this flag, since single-position GPU dispatch is too slow.
-static std::atomic<bool> g_use_gpu_nnue{false};
+void Eval::set_use_apple_silicon_nnue(bool) {}
 
-void Eval::set_use_apple_silicon_nnue(bool use) {
-  g_use_gpu_nnue.store(use, std::memory_order_relaxed);
-}
-
-bool Eval::use_apple_silicon_nnue() {
-  return g_use_gpu_nnue.load(std::memory_order_relaxed);
-}
+bool Eval::use_apple_silicon_nnue() { return false; }
 
 // Returns a static, purely materialistic evaluation of the position from
 // the point of view of the side to move. It can be divided by PawnValue to get
@@ -55,10 +45,8 @@ bool Eval::use_smallnet(const Position &pos) {
 
 // Evaluate is the evaluator for the outer world. It returns a static evaluation
 // of the position from the point of view of the side to move.
-// Always uses CPU NNUE with incremental accumulator updates (~80ns per
-// position). GPU NNUE is reserved for batched evaluation in MCTS only --
-// single-position GPU dispatch overhead (~140us) makes it ~1750x slower than
-// CPU for AB search.
+// Always uses CPU NNUE with incremental accumulator updates. On Apple Silicon
+// this keeps AB latency low and leaves the GPU free for transformer MCTS.
 Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
                      Eval::NNUE::AccumulatorStack &accumulators,
                      Eval::NNUE::AccumulatorCaches &caches, int optimism) {

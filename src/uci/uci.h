@@ -52,7 +52,7 @@ private:
   void go(std::istringstream &is);
   void bench(std::istream &args);
   void benchmark(std::istream &args);
-  void nnue_benchmark(std::istream &args); // CPU vs GPU NNUE comparison
+  void nnue_benchmark(std::istream &args); // CPU-only NNUE policy message
   void position(std::istringstream &is);
   void setoption(std::istringstream &is);
   std::uint64_t perft(const Search::LimitsType &);
@@ -61,8 +61,7 @@ private:
   void parallel_hybrid_go(
       std::istringstream &is); // Parallel MCTS+AB search (best hybrid)
   void mcts_mt_go(std::istringstream &is); // Pure GPU MCTS search
-  void mcts_batch_benchmark(
-      std::istringstream &is); // Batched vs direct eval benchmark
+  void mcts_batch_benchmark(std::istringstream &is); // Legacy policy message
 
   static void on_update_no_moves(const Engine::InfoShort &info);
   static void on_update_full(const Engine::InfoFull &info, bool showWDL);

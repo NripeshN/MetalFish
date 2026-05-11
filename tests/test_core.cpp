@@ -88,8 +88,9 @@ void test_types() {
     EXPECT(tc, promo.type_of() == PROMOTION);
     EXPECT(tc, promo.promotion_type() == QUEEN);
 
-    Move castle = Move::make<CASTLING>(SQ_E1, SQ_G1);
+    Move castle = Move::make<CASTLING>(SQ_E1, SQ_H1);
     EXPECT(tc, castle.type_of() == CASTLING);
+    EXPECT(tc, castle.to_sq() == SQ_H1);
 
     EXPECT(tc, Move::none() != Move::null());
     EXPECT(tc, !Move::none().is_ok());
@@ -268,7 +269,7 @@ void test_position() {
     EXPECT(tc, pos.can_castle(WHITE_OO));
     EXPECT(tc, pos.can_castle(WHITE_OOO));
 
-    Move castle_ks = Move::make<CASTLING>(SQ_E1, SQ_G1);
+    Move castle_ks = Move::make<CASTLING>(SQ_E1, SQ_H1);
     pos.do_move(castle_ks, states[1]);
 
     EXPECT(tc, pos.piece_on(SQ_G1) == W_KING);

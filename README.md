@@ -1,10 +1,10 @@
 # MetalFish
 
-A high-performance UCI chess engine built for Apple Silicon, featuring Metal GPU-accelerated neural network evaluation and three distinct search engines.
+A high-performance UCI chess engine built for Apple Silicon, featuring CPU-optimized NNUE, Metal transformer inference, and three distinct search engines.
 
 ## Overview
 
-MetalFish exploits Apple Silicon's unified memory architecture and Metal GPU compute to deliver competitive chess analysis. It ships three search modes selectable at runtime via standard UCI options:
+MetalFish uses Apple Silicon CPU cores for low-latency NNUE alpha-beta search and reserves Metal GPU compute for transformer inference in MCTS and Hybrid modes. It ships three search modes selectable at runtime via standard UCI options:
 
 | Engine | Description | UCI Option |
 |--------|-------------|------------|
@@ -88,11 +88,11 @@ Attention-based network for the MCTS engine:
 | **Unified memory** | Zero-copy CPU/GPU data sharing, no transfer overhead |
 | **Buffer pooling** | Pre-allocated I/O buffers with `os_unfair_lock` avoid per-inference allocation |
 | **Sub-batch parallelism** | Large batches split across parallel Metal command buffers |
-| **Actual batch eval** | GPU evaluates only the real batch size, not the padded maximum |
+| **Actual transformer batch eval** | MCTS GPU inference evaluates only the real batch size, not the padded maximum |
 | **vDSP softmax** | Accelerate framework SIMD for policy softmax in MCTS |
 | **Fast math** | Bit-hack `FastLog`, `FastTanh`, `FastExp`, `FastSqrt` for PUCT |
 | **128-byte alignment** | Node structures aligned to Apple Silicon cache lines |
-| **Metal compute** | Custom Metal shaders for NNUE sparse inference |
+| **CPU-only NNUE** | Incremental NNUE stays on CPU; GPU time is reserved for transformer inference |
 | **MPSGraph** | Apple's graph API for transformer encoder/attention/FFN |
 | **ARM yield** | `__builtin_arm_yield()` in spin-wait loops |
 | **NEON dot product** | `-march=armv8.2-a+dotprod` for NNUE feature transforms |
@@ -104,9 +104,9 @@ metalfish/
   src/
     main.cpp                 Entry point
     core/                    Bitboard, position, move generation, types
-    eval/                    NNUE evaluation + Metal GPU acceleration
+    eval/                    CPU NNUE evaluation + generic GPU backend hooks
       nnue/                  Network layers, features, accumulator
-      metal/                 Metal compute shaders for NNUE
+      metal/                 Generic Metal device/buffer backend
     nn/                      Transformer network for MCTS
       metal/                 MPSGraph backend
         mps/                 Network graph builder
@@ -144,7 +144,7 @@ make -j$(sysctl -n hw.ncpu)
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `USE_METAL` | ON (macOS) | Metal GPU acceleration |
+| `USE_METAL` | ON (macOS) | Metal transformer acceleration; NNUE remains CPU-only |
 | `BUILD_TESTS` | ON | Build test suite |
 
 ### Network Files
@@ -212,7 +212,7 @@ go movetime 5000
 | `Skill Level` | spin | 20 | Strength (0-20) |
 | `UseMCTS` | check | false | Use MCTS engine |
 | `UseHybridSearch` | check | false | Use Hybrid engine |
-| `UseGPU` | check | true | Enable GPU NNUE for MCTS batching |
+| `UseGPU` | check | false | Reserved for transformer/GPU diagnostics; NNUE remains CPU-only |
 | `NNWeights` | string | | Transformer network path |
 | `SyzygyPath` | string | | Tablebase directory |
 | `Ponder` | check | false | Pondering |
@@ -241,7 +241,7 @@ cd .. && python3 tests/testing.py
 |--------|-------|----------------|
 | core | 29 | Bitboard, position, move generation, FEN, castling, en passant |
 | search | 21 | History tables, limits, root moves, skill, stack, values |
-| eval_gpu | 1031 | Metal detection, buffer alloc/read/write, unified memory, NNUE manager |
+| eval_gpu | 1031 | Metal detection, buffer alloc/read/write, unified memory, GPU-NNUE disabled policy |
 | mcts | 27 | Node creation, edges, policy, tree structure, PUCT, thread safety |
 | hybrid | 22 | Config, shared state, classifier, position adapter, strategy |
 

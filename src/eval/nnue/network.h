@@ -30,12 +30,6 @@ namespace MetalFish {
 class Position;
 }
 
-// Forward declarations for GPU integration
-namespace MetalFish::GPU {
-template <typename N> struct NNUEWeightAccessor;
-template <typename N> class GPUNNUEWeightExtractor;
-} // namespace MetalFish::GPU
-
 namespace MetalFish::Eval::NNUE {
 
 enum class EmbeddedNNUEType {
@@ -108,9 +102,6 @@ private:
 
   template <IndexType Size> friend struct AccumulatorCaches::Cache;
 
-  // Friend for GPU weight extraction
-  template <typename N> friend struct ::MetalFish::GPU::NNUEWeightAccessor;
-  template <typename N> friend class ::MetalFish::GPU::GPUNNUEWeightExtractor;
 };
 
 // Definitions of the network types
