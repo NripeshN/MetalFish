@@ -291,7 +291,7 @@ private:
 
   // Core MCTS algorithms
   void RunIteration(SearchWorkerCtx &ctx);
-  void RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers);
+  void RunIterationSemaphore(SearchWorkerCtx &ctx);
   struct SelectedLeaf {
     Node *node = nullptr;
     int multivisit = 1;

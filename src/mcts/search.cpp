@@ -620,16 +620,17 @@ void Search::WorkerThreadMain(int thread_id) {
   ctx.SetRootFen(tree_.RootFen());
 
   auto last_info = std::chrono::steady_clock::now();
-  int num_threads = params_.GetNumThreads();
-  // Fixed-node searches are used for benchmarks and correctness probes. Large
-  // MPSGraph batches can be slower to fill in exact-node mode, so keep them on
-  // direct evaluations and reserve batching for time-managed searches.
-  bool use_semaphore = (limits_.nodes == 0) && (num_threads > 1) && backend_ &&
-                       params_.minibatch_size > 1;
+  // The batch path is useful even with a single worker in real timed searches:
+  // after the root eval it can gather independent leaves and amortize MPSGraph
+  // launch latency. Keep fixed-node diagnostics on direct evaluations because
+  // small exact-node runs are latency-sensitive and are used for reproducible
+  // correctness probes.
+  bool use_semaphore =
+      limits_.nodes == 0 && backend_ && params_.minibatch_size > 1;
 
   do {
     if (use_semaphore)
-      RunIterationSemaphore(ctx, num_threads);
+      RunIterationSemaphore(ctx);
     else
       RunIteration(ctx);
 
@@ -792,7 +793,7 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
   stats_.total_nodes.fetch_add(multivisit, std::memory_order_relaxed);
 }
 
-void Search::RunIterationSemaphore(SearchWorkerCtx &ctx, int num_workers) {
+void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
   while (true) {
     if (ShouldStop())
       return;
