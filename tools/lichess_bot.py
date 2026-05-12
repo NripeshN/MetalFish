@@ -76,12 +76,12 @@ ENGINE_OPTIONS = {
 }
 
 ROTATION_TCS = [
-    (180, 2),  # 3+2 blitz
-    (300, 0),  # 5+0 blitz
-    (300, 3),  # 5+3 blitz
-    (600, 0),  # 10+0 rapid
-    (600, 5),  # 10+5 rapid
     (900, 10),  # 15+10 rapid
+    (600, 5),  # 10+5 rapid
+    (600, 0),  # 10+0 rapid
+    (300, 3),  # 5+3 blitz
+    (300, 0),  # 5+0 blitz
+    (180, 2),  # 3+2 blitz
     (120, 1),  # 2+1 bullet
 ]
 
