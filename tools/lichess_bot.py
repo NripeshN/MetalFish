@@ -765,6 +765,13 @@ class LichessBot:
             return "rapid"
         return "classical"
 
+    def _bot_plays_speed(self, bot: dict, speed: str) -> bool:
+        """Check if bot has played games in this speed (non-provisional)."""
+        perfs = bot.get("perfs", {})
+        perf = perfs.get(speed, {})
+        games = perf.get("games", 0)
+        return games >= 5 and not perf.get("prov", False)
+
     def _get_bot_rating(self, bot: dict, speed: str) -> int | None:
         perfs = bot.get("perfs", {})
         perf = perfs.get(speed, {})
@@ -779,9 +786,13 @@ class LichessBot:
         return None
 
     def _filter_bots_by_elo(self, bots: list[dict], speed: str) -> list[str]:
-        """Filter and sort bots by Elo proximity with widening range."""
+        """Filter bots that actually play the target speed, sorted by Elo proximity."""
         if not self.args.elo_seek:
-            ids = [b.get("id", "") for b in bots]
+            # Still filter by speed activity even without elo-seek
+            active = [b for b in bots if self._bot_plays_speed(b, speed)]
+            if not active:
+                active = bots
+            ids = [b.get("id", "") for b in active]
             random.shuffle(ids)
             return ids
 
@@ -793,6 +804,8 @@ class LichessBot:
             bot_id = bot.get("id", "")
             if not bot_id:
                 continue
+            if not self._bot_plays_speed(bot, speed):
+                continue
             rating = self._get_bot_rating(bot, speed)
             if rating is None:
                 continue
@@ -802,7 +815,10 @@ class LichessBot:
 
         if not scored:
             self._widen_elo_range()
-            ids = [b.get("id", "") for b in bots]
+            active = [b for b in bots if self._bot_plays_speed(b, speed)]
+            if not active:
+                active = bots
+            ids = [b.get("id", "") for b in active]
             random.shuffle(ids)
             return ids
 
