@@ -78,10 +78,10 @@ ENGINE_OPTIONS = {
 ROTATION_TCS = [
     (900, 10),  # 15+10 rapid
     (600, 5),  # 10+5 rapid
-    (600, 0),  # 10+0 rapid
     (300, 3),  # 5+3 blitz
-    (300, 0),  # 5+0 blitz
     (180, 2),  # 3+2 blitz
+    (600, 0),  # 10+0 rapid
+    (300, 0),  # 5+0 blitz
     (120, 1),  # 2+1 bullet
 ]
 
@@ -450,6 +450,7 @@ class LichessBot:
         self._elo_widen_steps = 0
         self._declined_cooldown: dict[str, float] = {}  # bot_id -> timestamp
         self._rate_limit_count = 0
+        self._tc_failures = 0
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -736,6 +737,13 @@ class LichessBot:
             self._cooldown_bot(target, duration=600)
             self._cancel_pending_challenge("timeout")
             self._challenge_retries += 1
+            self._tc_failures += 1
+            if self._tc_failures >= 3 and self.args.rotate:
+                print(f"  TC not working, trying next format...")
+                self._advance_rotation()
+                self._tc_failures = 0
+                self._challenge_retries = 0
+                self._cleanup_cooldowns()
             if self._challenge_retries < MAX_CHALLENGE_RETRIES and self._should_seek():
                 self.seek_game()
             elif self._should_seek():
@@ -1427,6 +1435,7 @@ class LichessBot:
             self._cancel_pending_challenge("game started")
             self._advance_rotation()
             self._reset_elo_range()
+            self._tc_failures = 0
             if self._draining.is_set():
                 print(f"  [{game_id}] Drain mode active, aborting new game")
                 self.abort_or_resign(game_id)
@@ -1451,6 +1460,12 @@ class LichessBot:
             target = self._pending_challenge_target
             self._cooldown_bot(target, duration=600)
             self._clear_pending_challenge()
+            self._tc_failures += 1
+            if self._tc_failures >= 5 and self.args.rotate:
+                print(f"  TC getting too many declines, trying next format...")
+                self._advance_rotation()
+                self._tc_failures = 0
+                self._cleanup_cooldowns()
             if self._should_seek():
                 self._schedule_retry(2)
 
