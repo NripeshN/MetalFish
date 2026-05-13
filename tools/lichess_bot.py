@@ -2,8 +2,8 @@
 """Lichess Bot: runs MetalFish Hybrid on Lichess via the Bot API.
 
 Features:
-  - Opening book from Lichess masters database (instant moves)
-  - Pondering (thinks on opponent's time)
+  - Bounded opening book from Lichess masters database
+  - Optional pondering (off by default for clock safety)
   - Aggressive challenge seeking with timeout/retry
   - Rate limit awareness
   - Engine crash recovery
@@ -39,6 +39,9 @@ LOGICAL_CORES = os.cpu_count() or 4
 SEARCH_WORKERS = max(3, LOGICAL_CORES - 1)
 HYBRID_MCTS_THREADS = 1
 HYBRID_AB_THREADS = max(1, SEARCH_WORKERS - HYBRID_MCTS_THREADS)
+BOOK_MAX_PLY = 12
+BOOK_MIN_CLOCK_MS = 30_000
+BOOK_TIMEOUT_S = 0.35
 
 
 def machine_memory_mb() -> int:
@@ -63,14 +66,14 @@ def local_hash_mb() -> int:
 ENGINE_OPTIONS = {
     "Threads": str(SEARCH_WORKERS),
     "Hash": str(local_hash_mb()),
-    "Ponder": "true",
+    "Ponder": "false",
     "UseHybridSearch": "true",
     "UseGPU": "false",
     "NNWeights": str(WEIGHTS),
     "HybridMCTSThreads": str(HYBRID_MCTS_THREADS),
     "HybridABThreads": str(HYBRID_AB_THREADS),
     "MCTSMaxThreads": str(HYBRID_MCTS_THREADS),
-    "Move Overhead": "200",
+    "Move Overhead": "500",
     "MCTSMinibatchSize": "0",
     "MCTSPolicySoftmaxTemp": "1.359",
 }
@@ -444,7 +447,9 @@ class LichessBot:
         self._pending_challenge_target: str | None = None
         self._challenge_sent_at: float = 0
         self._challenge_retries = 0
-        self.book = OpeningBook(api_key=api_key, min_games=5)
+        self.book = OpeningBook(
+            api_key=api_key, min_games=5, timeout=BOOK_TIMEOUT_S
+        )
         self._seek_timer: threading.Timer | None = None
         self._warm_engine: UCIEngine | None = None
         self._elo_widen_steps = 0
@@ -499,9 +504,12 @@ class LichessBot:
             self.resign(game_id)
 
     def _create_engine(self, *, preload_transformer: bool) -> UCIEngine:
+        options = dict(ENGINE_OPTIONS)
+        if self.args.ponder:
+            options["Ponder"] = "true"
         return UCIEngine(
             ENGINE,
-            ENGINE_OPTIONS,
+            options,
             preload_transformer=preload_transformer,
         )
 
@@ -1032,26 +1040,30 @@ class LichessBot:
             else:
                 engine.stop_pondering()
 
-        # Opening book (instant, zero clock cost)
-        book_move = self.book.lookup(board.fen())
-        if book_move:
-            parsed = self._parse_legal_move(game_id, book_move, board, "book")
-            if parsed is not None:
-                if self.make_move(game_id, parsed.uci()):
-                    print(f"  [{game_id}] Book: {book_move}")
-                    self._start_book_pondering(
-                        game_id,
-                        engine,
-                        initial_fen,
-                        moves,
-                        board,
-                        parsed.uci(),
-                        wtime=wtime,
-                        btime=btime,
-                        winc=winc,
-                        binc=binc,
-                    )
-                return
+        # Opening book. Explorer calls are remote and count against our clock on
+        # Lichess, so only use them early while there is enough clock cushion.
+        if self._should_query_book(board, my_color, wtime, btime):
+            book_move = self.book.lookup(board.fen())
+            if book_move:
+                parsed = self._parse_legal_move(
+                    game_id, book_move, board, "book"
+                )
+                if parsed is not None:
+                    if self.make_move(game_id, parsed.uci()):
+                        print(f"  [{game_id}] Book: {book_move}")
+                        self._start_book_pondering(
+                            game_id,
+                            engine,
+                            initial_fen,
+                            moves,
+                            board,
+                            parsed.uci(),
+                            wtime=wtime,
+                            btime=btime,
+                            winc=winc,
+                            binc=binc,
+                        )
+                    return
 
         # Engine search
         if not engine.alive():
@@ -1167,6 +1179,14 @@ class LichessBot:
             binc = 0
         return wtime, btime, winc, binc
 
+    def _should_query_book(
+        self, board: chess.Board, my_color: str, wtime: int, btime: int
+    ) -> bool:
+        if board.ply() >= BOOK_MAX_PLY:
+            return False
+        our_time = wtime if my_color == "white" else btime
+        return our_time >= BOOK_MIN_CLOCK_MS
+
     def _after_search_clock(
         self, my_color: str, wtime: int, btime: int, elapsed_ms: int
     ) -> tuple[int, int]:
@@ -1192,6 +1212,8 @@ class LichessBot:
         binc: int,
     ):
         if not ponder:
+            return
+        if not self.args.ponder:
             return
 
         board_after = board.copy(stack=False)
@@ -1229,6 +1251,8 @@ class LichessBot:
     ):
         board_after = board.copy(stack=False)
         board_after.push_uci(best)
+        if not self.args.ponder:
+            return
         reply = self.book.lookup(board_after.fen())
         if not reply or not self._is_legal_move(reply, board_after):
             return
@@ -1334,14 +1358,18 @@ class LichessBot:
         print(f"  Account:  {self.username}")
         print(
             f"  Engine:   Hybrid (AB {HYBRID_AB_THREADS}T + "
-            f"MCTS {HYBRID_MCTS_THREADS}T + GPU + Ponder)"
+            f"MCTS {HYBRID_MCTS_THREADS}T + GPU"
+            f"{' + Ponder' if self.args.ponder else ''})"
         )
         print(
             f"  Workers:  {SEARCH_WORKERS} search + 1 coordinator "
             f"| CPU: {LOGICAL_CORES} logical"
         )
         print(f"  Hash:     {hash_mb} MB | Network: BT4-1024x15x32h")
-        print(f"  Book:     Lichess Masters DB (instant moves)")
+        print(
+            f"  Book:     Lichess Masters DB "
+            f"(ply < {BOOK_MAX_PLY}, clock >= {BOOK_MIN_CLOCK_MS // 1000}s)"
+        )
         print(
             f"  Rated:    {self.args.accept_rated} | Casual: {self.args.accept_casual}"
         )
@@ -1505,6 +1533,12 @@ def main():
         action="store_false",
         default=True,
         help="Skip startup transformer preload (faster startup, weaker first search)",
+    )
+    parser.add_argument(
+        "--ponder",
+        action="store_true",
+        default=False,
+        help="Enable UCI pondering; off by default to avoid Lichess clock drain",
     )
     parser.add_argument(
         "--elo-seek",
