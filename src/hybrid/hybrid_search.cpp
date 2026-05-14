@@ -775,15 +775,13 @@ void ParallelHybridSearch::coordinator_thread_main() {
     engine_->stop();
 
   // Wait for both AB and MCTS threads to finish before making decision.
-  // Use a short timeout: if they haven't finished by then, proceed with
-  // whatever results we have (the outer wait() will join them properly).
-  int max_wait = external_stop ? 600 : 8000;
-  int wait_count = 0;
-  while ((!ab_thread_done_.load(std::memory_order_acquire) ||
-          !mcts_thread_done_.load(std::memory_order_acquire)) &&
-         wait_count < max_wait) {
+  // MCTS must finish because it owns GPU resources that can't be accessed
+  // after the coordinator fires the callback. AB is fast to stop (CPU-only).
+  // No cap on MCTS wait — it WILL finish after Stop() since Metal dispatches
+  // complete in bounded time (~500ms max on Apple Silicon).
+  while (!mcts_thread_done_.load(std::memory_order_acquire) ||
+         !ab_thread_done_.load(std::memory_order_acquire)) {
     std::this_thread::sleep_for(std::chrono::microseconds(500));
-    wait_count++;
   }
 
   // Capture freshest MCTS result before deciding
