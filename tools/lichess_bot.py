@@ -3,7 +3,7 @@
 
 Features:
   - Bounded opening book from Lichess masters database
-  - Optional pondering (off by default for clock safety)
+  - Pondering by default, with hard stop budgets for clock safety
   - Aggressive challenge seeking with timeout/retry
   - Rate limit awareness
   - Engine crash recovery
@@ -39,9 +39,15 @@ LOGICAL_CORES = os.cpu_count() or 4
 SEARCH_WORKERS = max(3, LOGICAL_CORES - 1)
 HYBRID_MCTS_THREADS = 1
 HYBRID_AB_THREADS = max(1, SEARCH_WORKERS - HYBRID_MCTS_THREADS)
-BOOK_MAX_PLY = 12
+BOOK_MAX_PLY = 10
 BOOK_MIN_CLOCK_MS = 30_000
-BOOK_TIMEOUT_S = 0.35
+BOOK_TIMEOUT_S = 0.25
+ENGINE_STOP_GRACE_S = 1.0
+PONDER_STOP_TIMEOUT_S = 1.0
+PONDER_HIT_TIMEOUT_S = 2.0
+MIN_SEARCH_TIMEOUT_S = 0.2
+MAX_SEARCH_TIMEOUT_S = 30.0
+CLOCK_SAFETY_MS = 1_500
 
 
 def machine_memory_mb() -> int:
@@ -66,9 +72,8 @@ def local_hash_mb() -> int:
 ENGINE_OPTIONS = {
     "Threads": str(SEARCH_WORKERS),
     "Hash": str(local_hash_mb()),
-    "Ponder": "false",
+    "Ponder": "true",
     "UseHybridSearch": "true",
-    "UseGPU": "false",
     "NNWeights": str(WEIGHTS),
     "HybridMCTSThreads": str(HYBRID_MCTS_THREADS),
     "HybridABThreads": str(HYBRID_AB_THREADS),
@@ -76,6 +81,9 @@ ENGINE_OPTIONS = {
     "Move Overhead": "500",
     "MCTSMinibatchSize": "0",
     "MCTSPolicySoftmaxTemp": "1.359",
+    "SyzygyPath": str(PROJ / "syzygy"),
+    "SyzygyProbeDepth": "2",
+    "SyzygyProbeLimit": "6",
 }
 
 ROTATION_TCS = [
@@ -83,8 +91,14 @@ ROTATION_TCS = [
     (600, 5),  # 10+5 rapid
     (300, 3),  # 5+3 blitz
     (180, 2),  # 3+2 blitz
+]
+
+ZERO_INCREMENT_ROTATION_TCS = [
     (600, 0),  # 10+0 rapid
     (300, 0),  # 5+0 blitz
+]
+
+BULLET_ROTATION_TCS = [
     (120, 1),  # 2+1 bullet
 ]
 
@@ -240,6 +254,7 @@ class UCIEngine:
         binc=None,
         movetime=None,
         movestogo=None,
+        timeout: float = 600,
     ) -> tuple[str, str | None]:
         """Returns (bestmove, ponder_move_or_None)."""
         self._send("isready")
@@ -256,7 +271,11 @@ class UCIEngine:
                 movestogo=movestogo,
             )
         )
-        line = self._wait_for("bestmove", timeout=600)
+        try:
+            line = self._wait_for("bestmove", timeout=timeout)
+        except TimeoutError:
+            self._send("stop")
+            line = self._wait_for("bestmove", timeout=ENGINE_STOP_GRACE_S)
         parts = line.split()
         best = parts[1] if len(parts) > 1 else "0000"
         ponder = parts[3] if len(parts) > 3 and parts[2] == "ponder" else None
@@ -319,30 +338,48 @@ class UCIEngine:
                 parts.extend(["movestogo", str(movestogo)])
         return " ".join(parts)
 
-    def ponderhit(self) -> tuple[str, str | None]:
+    def ponderhit(self, timeout: float = PONDER_HIT_TIMEOUT_S) -> tuple[str, str | None]:
         """Opponent played the predicted move; use the current ponder result."""
         if not self._pondering:
             return "0000", None
         # The hybrid coordinator does not reliably finish promptly on UCI
         # ponderhit, so stop and use the best move found on opponent time.
         self._send("stop")
-        self._pondering = False
-        line = self._wait_for("bestmove", timeout=10)
+        try:
+            line = self._wait_for("bestmove", timeout=timeout)
+        finally:
+            self._pondering = False
+            self._ponder_move = None
         parts = line.split()
         best = parts[1] if len(parts) > 1 else "0000"
         ponder = parts[3] if len(parts) > 3 and parts[2] == "ponder" else None
         return best, ponder
 
-    def stop_pondering(self):
+    def stop_pondering(
+        self,
+        timeout: float = PONDER_STOP_TIMEOUT_S,
+        *,
+        restart_on_failure: bool = True,
+    ) -> bool:
         """Stop pondering if active."""
-        if self._pondering:
-            self._send("stop")
+        if not self._pondering:
+            return True
+
+        ok = True
+        self._send("stop")
+        try:
+            self._wait_for("bestmove", timeout=timeout)
+        except (TimeoutError, RuntimeError):
+            ok = False
+        self._pondering = False
+        self._ponder_move = None
+
+        if not ok and restart_on_failure:
             try:
-                self._wait_for("bestmove", timeout=5)
-            except (TimeoutError, RuntimeError):
+                self.restart()
+            except Exception:
                 pass
-            self._pondering = False
-            self._ponder_move = None
+        return ok
 
     @property
     def ponder_move(self) -> str | None:
@@ -352,7 +389,7 @@ class UCIEngine:
         return self.proc is not None and self.proc.poll() is None
 
     def quit(self):
-        self.stop_pondering()
+        self.stop_pondering(restart_on_failure=False)
         try:
             self._send("quit")
             if self.proc is not None:
@@ -456,6 +493,7 @@ class LichessBot:
         self._declined_cooldown: dict[str, float] = {}  # bot_id -> timestamp
         self._rate_limit_count = 0
         self._tc_failures = 0
+        self._seek_lock = threading.Lock()
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -505,8 +543,7 @@ class LichessBot:
 
     def _create_engine(self, *, preload_transformer: bool) -> UCIEngine:
         options = dict(ENGINE_OPTIONS)
-        if self.args.ponder:
-            options["Ponder"] = "true"
+        options["Ponder"] = "true" if self.args.ponder else "false"
         return UCIEngine(
             ENGINE,
             options,
@@ -612,6 +649,14 @@ class LichessBot:
     # ---- Seeking ----
 
     def seek_game(self):
+        if not self._seek_lock.acquire(blocking=False):
+            return
+        try:
+            self._seek_game_once()
+        finally:
+            self._seek_lock.release()
+
+    def _seek_game_once(self):
         if not self._should_seek():
             return
 
@@ -621,8 +666,9 @@ class LichessBot:
             return
 
         if self._pending_challenge_id:
+            target = self._pending_challenge_target
             self._cancel_pending_challenge("expired")
-            self._cooldown_bot(self._pending_challenge_target)
+            self._cooldown_bot(target)
 
         limit, inc = self._next_tc()
         tc_label = f"{limit//60}+{inc}"
@@ -763,13 +809,23 @@ class LichessBot:
         if self.args.tc:
             return parse_tc(self.args.tc)
         if self.args.rotate:
-            tc = ROTATION_TCS[self._rotation_idx % len(ROTATION_TCS)]
+            rotation_tcs = self._rotation_tcs()
+            tc = rotation_tcs[self._rotation_idx % len(rotation_tcs)]
             return tc
         return (300, 3)
 
+    def _rotation_tcs(self) -> list[tuple[int, int]]:
+        rotation_tcs = list(ROTATION_TCS)
+        if self.args.include_zero_increment:
+            rotation_tcs.extend(ZERO_INCREMENT_ROTATION_TCS)
+        if self.args.include_bullet:
+            rotation_tcs.extend(BULLET_ROTATION_TCS)
+        return rotation_tcs
+
     def _advance_rotation(self):
         """Advance to next TC. Call only after a game starts successfully."""
-        self._rotation_idx += 1
+        rotation_tcs = self._rotation_tcs()
+        self._rotation_idx = (self._rotation_idx + 1) % len(rotation_tcs)
 
     def _tc_to_speed(self, limit: int, inc: int) -> str:
         estimated_duration = limit + 40 * inc
@@ -899,6 +955,13 @@ class LichessBot:
         speed = ch.get("speed", "")
         if speed not in ACCEPTED_SPEEDS:
             return False
+        tc = ch.get("timeControl", {})
+        if tc.get("type") == "clock":
+            increment = int(tc.get("increment", 0) or 0)
+            if speed == "bullet" and not self.args.include_bullet:
+                return False
+            if increment == 0 and not self.args.include_zero_increment:
+                return False
         if self._reserved_games() >= self.args.max_games:
             return False
         return True
@@ -978,6 +1041,19 @@ class LichessBot:
         white_id = game_full.get("white", {}).get("id", "")
         return "white" if white_id == self.bot_id else "black"
 
+    def _last_move_matches_ponder(
+        self, game_id: str, initial_fen: str, moves: list[str], ponder_move: str
+    ) -> bool:
+        if not moves:
+            return False
+        if moves[-1] == ponder_move:
+            return True
+        previous = self._build_board(game_id, initial_fen, moves[:-1])
+        if previous is None:
+            return False
+        parsed = self._normalize_uci_move(moves[-1], previous)
+        return parsed is not None and parsed.uci() == ponder_move
+
     def _try_move(
         self,
         game_id: str,
@@ -1001,19 +1077,26 @@ class LichessBot:
             return
 
         wtime, btime, winc, binc = self._clock_values(state)
+        search_timeout = self._search_timeout_seconds(
+            my_color, wtime, btime, winc, binc
+        )
+        ponder_stop_timeout = self._ponder_stop_timeout_seconds(
+            my_color, wtime, btime, winc, binc
+        )
 
         # My turn: if the opponent played the predicted ponder move, convert that
         # search before doing any new book/engine work.
         if engine.ponder_move:
-            if moves and moves[-1] == engine.ponder_move:
+            if self._last_move_matches_ponder(
+                game_id, initial_fen, moves, engine.ponder_move
+            ):
                 try:
-                    best, ponder = engine.ponderhit()
+                    best, ponder = engine.ponderhit(timeout=ponder_stop_timeout)
                 except (TimeoutError, RuntimeError) as e:
                     print(f"  [{game_id}] Ponder stop failed: {e}; restarting")
                     engine.restart()
                     best, ponder = "0000", None
                 if best and best not in ("0000", "(none)"):
-                    print(f"  [{game_id}] Ponderhit! {best}")
                     parsed = self._parse_legal_move(game_id, best, board, "ponder")
                     if parsed is None:
                         print(
@@ -1021,13 +1104,15 @@ class LichessBot:
                         )
                         engine.restart()
                     elif self.make_move(game_id, parsed.uci()):
+                        move_uci = parsed.uci()
+                        print(f"  [{game_id}] Ponderhit! {move_uci}")
                         self._start_pondering_if_legal(
                             game_id,
                             engine,
                             initial_fen,
                             moves,
                             board,
-                            best,
+                            move_uci,
                             ponder,
                             wtime=wtime,
                             btime=btime,
@@ -1038,7 +1123,8 @@ class LichessBot:
                     else:
                         return
             else:
-                engine.stop_pondering()
+                if not engine.stop_pondering(timeout=ponder_stop_timeout):
+                    print(f"  [{game_id}] Ponder stop timed out; engine restarted")
 
         # Opening book. Explorer calls are remote and count against our clock on
         # Lichess, so only use them early while there is enough clock cushion.
@@ -1050,14 +1136,15 @@ class LichessBot:
                 )
                 if parsed is not None:
                     if self.make_move(game_id, parsed.uci()):
-                        print(f"  [{game_id}] Book: {book_move}")
+                        move_uci = parsed.uci()
+                        print(f"  [{game_id}] Book: {move_uci}")
                         self._start_book_pondering(
                             game_id,
                             engine,
                             initial_fen,
                             moves,
                             board,
-                            parsed.uci(),
+                            move_uci,
                             wtime=wtime,
                             btime=btime,
                             winc=winc,
@@ -1067,19 +1154,35 @@ class LichessBot:
 
         # Engine search
         if not engine.alive():
-            print(f"  [{game_id}] Engine died, resigning")
-            self.resign(game_id)
-            return
+            print(f"  [{game_id}] Engine died, restarting")
+            try:
+                engine.restart()
+            except Exception as e:
+                print(f"  [{game_id}] Engine restart failed: {e}")
+                fallback = self._fallback_move(board)
+                if fallback and self.make_move(game_id, fallback):
+                    print(f"  [{game_id}] Fallback legal move: {fallback}")
+                return
 
-        engine.stop_pondering()
+        if not engine.stop_pondering(timeout=ponder_stop_timeout):
+            print(f"  [{game_id}] Ponder stop timed out; engine restarted")
         engine.set_position(initial_fen, moves)
 
         try:
             search_start = time.time()
-            best, ponder = engine.go(wtime=wtime, btime=btime, winc=winc, binc=binc)
+            best, ponder = engine.go(
+                wtime=wtime,
+                btime=btime,
+                winc=winc,
+                binc=binc,
+                timeout=search_timeout,
+            )
             search_ms = int((time.time() - search_start) * 1000)
             if best == "0000" or best == "(none)":
-                return
+                fallback = self._fallback_move(board)
+                if not fallback:
+                    return
+                best, ponder = fallback, None
             if not self._is_legal_move(best, board):
                 remaining_wtime, remaining_btime = self._after_search_clock(
                     my_color, wtime, btime, search_ms
@@ -1099,7 +1202,8 @@ class LichessBot:
                     return
             parsed = self._parse_legal_move(game_id, best, board, "engine")
             if parsed is not None and self.make_move(game_id, parsed.uci()):
-                print(f"  [{game_id}] Engine: {best}")
+                move_uci = parsed.uci()
+                print(f"  [{game_id}] Engine: {move_uci}")
                 ponder_wtime, ponder_btime = self._after_search_clock(
                     my_color, wtime, btime, search_ms
                 )
@@ -1109,7 +1213,7 @@ class LichessBot:
                     initial_fen,
                     moves,
                     board,
-                    best,
+                    move_uci,
                     ponder,
                     wtime=ponder_wtime,
                     btime=ponder_btime,
@@ -1117,8 +1221,23 @@ class LichessBot:
                     binc=binc,
                 )
         except (TimeoutError, RuntimeError) as e:
-            print(f"  [{game_id}] Engine error: {e}, resigning")
-            self.resign(game_id)
+            print(f"  [{game_id}] Engine error: {e}; restarting and recovering")
+            best, _ = self._recover_engine_move(
+                game_id,
+                engine,
+                initial_fen,
+                moves,
+                board,
+                f"error: {e}",
+                my_color=my_color,
+                wtime=wtime,
+                btime=btime,
+            )
+            if not best:
+                return
+            parsed = self._parse_legal_move(game_id, best, board, "recovery")
+            if parsed is not None and self.make_move(game_id, parsed.uci()):
+                print(f"  [{game_id}] Recovery: {parsed.uci()}")
 
     def _build_board(
         self, game_id: str, initial_fen: str, moves: list[str]
@@ -1134,28 +1253,80 @@ class LichessBot:
             return None
 
         for ply, move in enumerate(moves, start=1):
-            try:
-                board.push_uci(move)
-            except ValueError as e:
-                print(f"  [{game_id}] Bad stream move {move} at ply {ply}: {e}")
+            parsed = self._normalize_uci_move(move, board)
+            if parsed is None:
+                print(f"  [{game_id}] Bad stream move {move} at ply {ply}")
                 return None
+            board.push(parsed)
         return board
 
-    def _is_legal_move(self, move: str, board: chess.Board) -> bool:
-        try:
-            return chess.Move.from_uci(move) in board.legal_moves
-        except ValueError:
-            return False
-
-    def _parse_legal_move(
-        self, game_id: str, move: str, board: chess.Board, source: str
+    def _normalize_uci_move(
+        self, move: str, board: chess.Board
     ) -> chess.Move | None:
         try:
             parsed = chess.Move.from_uci(move)
         except ValueError:
-            print(f"  [{game_id}] Ignoring malformed {source} move {move}")
             return None
-        if parsed not in board.legal_moves:
+        if parsed in board.legal_moves:
+            return self._canonical_castle_move(parsed, board)
+
+        return self._normalize_lichess_castle(parsed, board)
+
+    def _canonical_castle_move(
+        self, move: chess.Move, board: chess.Board
+    ) -> chess.Move:
+        if not board.is_castling(move):
+            return move
+
+        kingside = move.to_square > move.from_square
+        for candidate in board.legal_moves:
+            if candidate.from_square != move.from_square:
+                continue
+            if not board.is_castling(candidate):
+                continue
+            if (candidate.to_square > candidate.from_square) == kingside:
+                return candidate
+        return move
+
+    def _normalize_lichess_castle(
+        self, move: chess.Move, board: chess.Board
+    ) -> chess.Move | None:
+        piece = board.piece_at(move.from_square)
+        target = board.piece_at(move.to_square)
+        if not piece or piece.piece_type != chess.KING or piece.color != board.turn:
+            return None
+        if (
+            not target
+            or target.piece_type != chess.ROOK
+            or target.color != board.turn
+        ):
+            return None
+        if chess.square_rank(move.from_square) != chess.square_rank(move.to_square):
+            return None
+
+        kingside = move.to_square > move.from_square
+        for candidate in board.legal_moves:
+            if candidate.from_square != move.from_square:
+                continue
+            if not board.is_castling(candidate):
+                continue
+            if (candidate.to_square > candidate.from_square) == kingside:
+                return candidate
+        return None
+
+    def _is_legal_move(self, move: str, board: chess.Board) -> bool:
+        return self._normalize_uci_move(move, board) is not None
+
+    def _parse_legal_move(
+        self, game_id: str, move: str, board: chess.Board, source: str
+    ) -> chess.Move | None:
+        parsed = self._normalize_uci_move(move, board)
+        if parsed is None:
+            try:
+                chess.Move.from_uci(move)
+            except ValueError:
+                print(f"  [{game_id}] Ignoring malformed {source} move {move}")
+                return None
             print(
                 f"  [{game_id}] Ignoring illegal {source} move {move} "
                 f"for FEN: {board.fen()}"
@@ -1196,6 +1367,45 @@ class LichessBot:
             btime = max(1, btime - elapsed_ms)
         return wtime, btime
 
+    def _our_clock(
+        self, my_color: str, wtime: int, btime: int, winc: int, binc: int
+    ) -> tuple[int, int]:
+        if my_color == "white":
+            return wtime, winc
+        return btime, binc
+
+    def _search_timeout_seconds(
+        self, my_color: str, wtime: int, btime: int, winc: int, binc: int
+    ) -> float:
+        our_time, our_inc = self._our_clock(my_color, wtime, btime, winc, binc)
+        if our_time <= 0:
+            return MIN_SEARCH_TIMEOUT_S
+
+        reserve = CLOCK_SAFETY_MS if our_time >= 15_000 else 2_000
+        spendable = max(MIN_SEARCH_TIMEOUT_S * 1000, our_time - reserve)
+
+        if our_inc > 0:
+            budget = our_time / 30.0 + our_inc * 0.75
+        else:
+            budget = our_time / 22.0
+
+        if our_time < 10_000:
+            budget = min(budget, our_time * 0.35)
+        elif our_time < 60_000:
+            budget = min(budget, our_time * 0.25)
+        else:
+            budget = min(budget, our_time * 0.14)
+
+        budget = min(budget, spendable, MAX_SEARCH_TIMEOUT_S * 1000)
+        return max(MIN_SEARCH_TIMEOUT_S, budget / 1000.0)
+
+    def _ponder_stop_timeout_seconds(
+        self, my_color: str, wtime: int, btime: int, winc: int, binc: int
+    ) -> float:
+        our_time, _ = self._our_clock(my_color, wtime, btime, winc, binc)
+        spendable = max(MIN_SEARCH_TIMEOUT_S, (our_time - CLOCK_SAFETY_MS) / 1000.0)
+        return min(PONDER_HIT_TIMEOUT_S, spendable)
+
     def _start_pondering_if_legal(
         self,
         game_id: str,
@@ -1216,19 +1426,23 @@ class LichessBot:
         if not self.args.ponder:
             return
 
+        parsed_best = self._normalize_uci_move(best, board)
+        if parsed_best is None:
+            return
         board_after = board.copy(stack=False)
-        board_after.push_uci(best)
-        if not self._is_legal_move(ponder, board_after):
+        board_after.push(parsed_best)
+        parsed_ponder = self._normalize_uci_move(ponder, board_after)
+        if parsed_ponder is None:
             print(
                 f"  [{game_id}] Ignoring illegal ponder move {ponder} "
-                f"after {best}"
+                f"after {parsed_best.uci()}"
             )
             return
-        print(f"  [{game_id}] Ponder: {ponder}")
+        print(f"  [{game_id}] Ponder: {parsed_ponder.uci()}")
         engine.start_pondering(
             initial_fen,
-            moves + [best],
-            ponder,
+            moves + [parsed_best.uci()],
+            parsed_ponder.uci(),
             wtime=wtime,
             btime=btime,
             winc=winc,
@@ -1249,18 +1463,22 @@ class LichessBot:
         winc: int,
         binc: int,
     ):
+        parsed_best = self._normalize_uci_move(best, board)
+        if parsed_best is None:
+            return
         board_after = board.copy(stack=False)
-        board_after.push_uci(best)
+        board_after.push(parsed_best)
         if not self.args.ponder:
             return
         reply = self.book.lookup(board_after.fen())
-        if not reply or not self._is_legal_move(reply, board_after):
+        parsed_reply = self._normalize_uci_move(reply, board_after) if reply else None
+        if parsed_reply is None:
             return
-        print(f"  [{game_id}] Book ponder: {reply}")
+        print(f"  [{game_id}] Book ponder: {parsed_reply.uci()}")
         engine.start_pondering(
             initial_fen,
-            moves + [best],
-            reply,
+            moves + [parsed_best.uci()],
+            parsed_reply.uci(),
             wtime=wtime,
             btime=btime,
             winc=winc,
@@ -1289,10 +1507,14 @@ class LichessBot:
             engine.set_position(initial_fen, moves)
             our_time = wtime if my_color == "white" else btime
             movetime = max(100, min(1000, our_time // 20))
-            best, ponder = engine.go(movetime=movetime)
-            if best not in ("0000", "(none)") and self._is_legal_move(best, board):
-                print(f"  [{game_id}] Retry move: {best}")
-                return best, ponder
+            best, ponder = engine.go(
+                movetime=movetime,
+                timeout=movetime / 1000.0 + ENGINE_STOP_GRACE_S,
+            )
+            parsed = self._normalize_uci_move(best, board)
+            if best not in ("0000", "(none)") and parsed is not None:
+                print(f"  [{game_id}] Retry move: {parsed.uci()}")
+                return parsed.uci(), ponder
             print(f"  [{game_id}] Retry also returned illegal move: {best}")
         except (TimeoutError, RuntimeError) as e:
             print(f"  [{game_id}] Engine retry failed: {e}")
@@ -1351,7 +1573,12 @@ class LichessBot:
             print("Upgrade at: https://lichess.org/account/bot")
             sys.exit(1)
 
-        tc_mode = "rotate" if self.args.rotate else (self.args.tc or "5+3")
+        if self.args.rotate:
+            tc_mode = "rotate " + ", ".join(
+                f"{limit // 60}+{inc}" for limit, inc in self._rotation_tcs()
+            )
+        else:
+            tc_mode = self.args.tc or "5+3"
         hash_mb = ENGINE_OPTIONS["Hash"]
         print("=" * 60)
         print(f"  MetalFish Lichess Bot")
@@ -1366,6 +1593,10 @@ class LichessBot:
             f"| CPU: {LOGICAL_CORES} logical"
         )
         print(f"  Hash:     {hash_mb} MB | Network: BT4-1024x15x32h")
+        print(
+            f"  Clock:    Move overhead {ENGINE_OPTIONS['Move Overhead']} ms "
+            f"| hard cap {MAX_SEARCH_TIMEOUT_S:.0f}s"
+        )
         print(
             f"  Book:     Lichess Masters DB "
             f"(ply < {BOOK_MAX_PLY}, clock >= {BOOK_MIN_CLOCK_MS // 1000}s)"
@@ -1461,7 +1692,6 @@ class LichessBot:
             if game_id in self.active_games:
                 return
             self._cancel_pending_challenge("game started")
-            self._advance_rotation()
             self._reset_elo_range()
             self._tc_failures = 0
             if self._draining.is_set():
@@ -1474,13 +1704,12 @@ class LichessBot:
                 print(f"  [{game_id}] Max games reached, aborting overflow game")
                 self.abort_or_resign(game_id)
                 return
+            self._advance_rotation()
             t = threading.Thread(target=self.play_game, args=(game_id,), daemon=True)
             self.active_games[game_id] = t
             t.start()
 
         elif etype == "gameFinish":
-            game_id = event.get("game", {}).get("gameId", "")
-            self.active_games.pop(game_id, None)
             if self._draining.is_set() and not self.active_games:
                 self._shutdown.set()
 
@@ -1525,7 +1754,19 @@ def main():
         "--rotate",
         action="store_true",
         default=False,
-        help="Cycle through blitz/rapid/bullet time controls",
+        help="Cycle through strength-first increment time controls",
+    )
+    parser.add_argument(
+        "--include-zero-increment",
+        action="store_true",
+        default=False,
+        help="Also rotate into 10+0 and 5+0 (weaker due flag risk)",
+    )
+    parser.add_argument(
+        "--include-bullet",
+        action="store_true",
+        default=False,
+        help="Also rotate into 2+1 bullet (weakest clock profile)",
     )
     parser.add_argument(
         "--no-prewarm",
@@ -1536,9 +1777,16 @@ def main():
     )
     parser.add_argument(
         "--ponder",
+        dest="ponder",
         action="store_true",
-        default=False,
-        help="Enable UCI pondering; off by default to avoid Lichess clock drain",
+        default=True,
+        help="Enable UCI pondering (default)",
+    )
+    parser.add_argument(
+        "--no-ponder",
+        dest="ponder",
+        action="store_false",
+        help="Disable pondering",
     )
     parser.add_argument(
         "--elo-seek",

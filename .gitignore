@@ -399,4 +399,4 @@ m1 ultra.pem
 *build*
 .env
 .venv/
-graphify-out/
+graphify-out/syzygy/
