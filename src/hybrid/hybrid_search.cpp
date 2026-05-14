@@ -12,6 +12,7 @@
 #include "../uci/engine.h"
 #include "../uci/uci.h"
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -148,6 +149,12 @@ void ParallelHybridSearch::start_search(
   stop();
   wait();
 
+  // Verify all threads are truly dead before resetting shared state.
+  // wait() guarantees joins, but this assertion catches logic errors.
+  assert(!coordinator_thread_.joinable() && "coordinator still joinable after wait()");
+  assert(!mcts_thread_.joinable() && "mcts_thread still joinable after wait()");
+  assert(!ab_thread_.joinable() && "ab_thread still joinable after wait()");
+
   stats_.reset();
   ab_state_.reset();
   mcts_state_.reset();
@@ -226,28 +233,31 @@ void ParallelHybridSearch::stop() {
 }
 
 void ParallelHybridSearch::wait() {
-  auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
+  // Ensure stop signals have been sent to sub-engines so they will terminate.
+  stop_flag_.store(true, std::memory_order_release);
+  if (mcts_search_)
+    mcts_search_->Stop();
+  if (engine_)
+    engine_->stop();
+
+  // Wait for all threads to signal completion. No timeout-break — threads
+  // WILL finish because stop_flag + sub-engine stops guarantee that workers
+  // exit after their current GPU dispatch (at most ~300ms on Apple Silicon).
+  auto warn_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  bool warned = false;
 
   while (!all_threads_done()) {
-    if (std::chrono::steady_clock::now() > deadline) {
-      std::cerr << "[HYB] wait() TIMEOUT - coord_done="
+    if (!warned && std::chrono::steady_clock::now() > warn_deadline) {
+      std::cerr << "[HYB] wait() taking >10s - coord_done="
                 << coordinator_thread_done_.load()
                 << " mcts_done=" << mcts_thread_done_.load()
                 << " ab_done=" << ab_thread_done_.load() << std::endl;
-      stop_flag_.store(true, std::memory_order_release);
-      if (mcts_search_)
-        mcts_search_->Stop();
-      if (engine_)
-        engine_->stop();
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      break;
+      warned = true;
     }
-    std::this_thread::sleep_for(std::chrono::microseconds(200));
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
   }
 
-  // Join all threads (never detach -- detached threads can access destroyed
-  // objects)
   {
     std::lock_guard<std::mutex> lock(thread_mutex_);
 
@@ -304,8 +314,8 @@ void ParallelHybridSearch::new_game() {
 }
 
 int ParallelHybridSearch::calculate_time_budget() const {
-  // Only computes a hard safety cap for the coordinator — AB's Stockfish
-  // time manager is the master clock and decides when to stop.
+  if (limits_.ponderMode)
+    return 0;
   if (limits_.movetime > 0)
     return limits_.movetime;
   if (limits_.infinite)
@@ -384,6 +394,12 @@ void ParallelHybridSearch::mcts_thread_main() {
   mcts_limits.startTime = now();
   mcts_limits.searchmoves = limits_.searchmoves;
 
+  // Check if stop was already requested before launching MCTS.
+  // This prevents the race where stop() clears the flag before StartSearch
+  // can see it (StartSearch resets its own stop_flag at the start).
+  if (should_stop())
+    return;
+
   Move best_move = Move::none();
   std::atomic<bool> mcts_done{false};
 
@@ -394,6 +410,12 @@ void ParallelHybridSearch::mcts_thread_main() {
 
   // Start MCTS search with FEN string
   mcts_search_->StartSearch(root_fen_, mcts_limits, mcts_callback, nullptr);
+
+  // Re-check after StartSearch: if stop was requested during launch, ensure
+  // the MCTS search sees it (StartSearch resets its own internal stop_flag).
+  if (should_stop()) {
+    mcts_search_->Stop();
+  }
 
   // Periodically update shared state and check for AB policy updates
   int update_interval_ms = config_.policy_update_interval_ms;
@@ -508,6 +530,8 @@ void ParallelHybridSearch::ab_thread_main() {
 
 void ParallelHybridSearch::run_ab_search() {
   if (!engine_)
+    return;
+  if (should_stop())
     return;
 
   // Temporarily resize AB worker threads to avoid oversubscribing cores
@@ -738,10 +762,13 @@ void ParallelHybridSearch::coordinator_thread_main() {
   if (engine_)
     engine_->stop();
 
-  // Wait for AB thread before making decision; MCTS might be stuck in GPU
-  int max_wait = external_stop ? 100 : 4000;
+  // Wait for both AB and MCTS threads to finish before making decision.
+  // Use a short timeout: if they haven't finished by then, proceed with
+  // whatever results we have (the outer wait() will join them properly).
+  int max_wait = external_stop ? 600 : 8000;
   int wait_count = 0;
-  while (!ab_thread_done_.load(std::memory_order_acquire) &&
+  while ((!ab_thread_done_.load(std::memory_order_acquire) ||
+          !mcts_thread_done_.load(std::memory_order_acquire)) &&
          wait_count < max_wait) {
     std::this_thread::sleep_for(std::chrono::microseconds(500));
     wait_count++;

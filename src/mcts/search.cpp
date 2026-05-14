@@ -1090,6 +1090,16 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
     return;
   }
 
+  // Early exit after GPU returns if stop was requested during computation.
+  // Cancel virtual losses and release resources without processing results.
+  if (ShouldStop()) {
+    cancel_local_batch();
+    backend_waiting_.fetch_sub(1, std::memory_order_relaxed);
+    if (computation)
+      ReleaseComputation(std::move(computation));
+    return;
+  }
+
   backend_waiting_.fetch_sub(1, std::memory_order_relaxed);
 
   uint64_t total_visits = 0;
