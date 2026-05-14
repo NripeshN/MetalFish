@@ -72,7 +72,7 @@ def local_hash_mb() -> int:
 ENGINE_OPTIONS = {
     "Threads": str(SEARCH_WORKERS),
     "Hash": str(local_hash_mb()),
-    "Ponder": "true",
+    "Ponder": "false",
     "UseHybridSearch": "true",
     "NNWeights": str(WEIGHTS),
     "HybridMCTSThreads": str(HYBRID_MCTS_THREADS),
