@@ -232,6 +232,18 @@ void ParallelHybridSearch::stop() {
     engine_->stop();
 }
 
+void ParallelHybridSearch::ponderhit() {
+  if (!is_searching())
+    return;
+
+  limits_.ponderMode = false;
+  search_start_ = std::chrono::steady_clock::now();
+  time_budget_ms_ = calculate_time_budget();
+
+  if (engine_)
+    engine_->set_ponderhit(false);
+}
+
 void ParallelHybridSearch::wait() {
   // Ensure stop signals have been sent to sub-engines so they will terminate.
   stop_flag_.store(true, std::memory_order_release);

@@ -51,6 +51,7 @@
 namespace MetalFish {
 
 static void stop_active_searches();
+static void ponderhit_active_searches(Engine &engine);
 static void wait_active_searches();
 static void join_search_waiter();
 static void preload_search_objects(Engine &engine);
@@ -173,7 +174,7 @@ void UCIEngine::loop() {
       setoption(is);
 
     else if (token == "ponderhit")
-      engine.set_ponderhit(false);
+      ponderhit_active_searches(engine);
 
     else if (token == "go") {
       // The standard `go` command routes to the active engine mode
@@ -1261,6 +1262,14 @@ static void stop_active_searches() {
     if (g_active_mcts)
       g_active_mcts->Stop();
   }
+}
+
+static void ponderhit_active_searches(Engine &engine) {
+  if (g_parallel_hybrid_search && g_parallel_hybrid_search->is_searching()) {
+    g_parallel_hybrid_search->ponderhit();
+    return;
+  }
+  engine.set_ponderhit(false);
 }
 
 static void wait_active_searches() {

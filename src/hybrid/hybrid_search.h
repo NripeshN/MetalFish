@@ -239,6 +239,7 @@ public:
                     const ::MetalFish::Search::LimitsType &limits,
                     BestMoveCallback best_move_cb,
                     InfoCallback info_cb = nullptr);
+  void ponderhit();
   void stop();
   void wait();
   bool is_searching() const {

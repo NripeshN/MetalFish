@@ -72,7 +72,7 @@ def local_hash_mb() -> int:
 ENGINE_OPTIONS = {
     "Threads": str(SEARCH_WORKERS),
     "Hash": str(local_hash_mb()),
-    "Ponder": "false",
+    "Ponder": "true",
     "UseHybridSearch": "true",
     "NNWeights": str(WEIGHTS),
     "HybridMCTSThreads": str(HYBRID_MCTS_THREADS),
@@ -342,9 +342,7 @@ class UCIEngine:
         """Opponent played the predicted move; use the current ponder result."""
         if not self._pondering:
             return "0000", None
-        # The hybrid coordinator does not reliably finish promptly on UCI
-        # ponderhit, so stop and use the best move found on opponent time.
-        self._send("stop")
+        self._send("ponderhit")
         try:
             line = self._wait_for("bestmove", timeout=timeout)
         finally:
