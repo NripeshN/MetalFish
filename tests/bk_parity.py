@@ -125,6 +125,7 @@ class UCISession:
         self.send(f"setoption name {name} value {value}")
 
     def warmup(self, mode: str, movetime_ms: int, nodes: int) -> None:
+        self.send("ucinewgame")
         self.send("position startpos")
         if mode == "nodes":
             self.send(f"go nodes {nodes}")
@@ -135,6 +136,10 @@ class UCISession:
         self.wait_for("readyok", 120)
 
     def search(self, fen: str, mode: str, movetime_ms: int, nodes: int) -> SearchResult:
+        # BK positions are independent tactical positions, not one game.
+        self.send("ucinewgame")
+        self.send("isready")
+        self.wait_for("readyok", 120)
         self.send(f"position fen {fen}")
         if mode == "nodes":
             self.send(f"go nodes {nodes}")

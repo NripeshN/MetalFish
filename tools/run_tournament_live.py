@@ -26,9 +26,11 @@ import json
 import math
 import os
 import pathlib
+import queue
 import random
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -79,38 +81,130 @@ def detect_default_threads() -> int:
 class UCIEngine:
     def __init__(self, cmd: Sequence[str], name: str, options: Dict[str, str] = None):
         self.name = name
+        self.cmd = list(cmd)
+        self.options = dict(options or {})
+        self.proc: Optional[subprocess.Popen[str]] = None
+        self._lines: "queue.Queue[Optional[str]]" = queue.Queue()
+        self.last_output: List[str] = []
+        self.last_error: List[str] = []
+        self.last_search_output: List[str] = []
+        self._start()
+
+    def _start(self):
         self.proc = subprocess.Popen(
-            list(cmd),
+            self.cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
         )
+        self._lines = queue.Queue()
+        assert self.proc.stdout is not None
+        threading.Thread(
+            target=self._read_stdout,
+            args=(self.proc.stdout, self._lines),
+            daemon=True,
+        ).start()
+        self.last_error = []
+        assert self.proc.stderr is not None
+        threading.Thread(
+            target=self._read_stderr,
+            args=(self.proc.stderr, self.last_error),
+            daemon=True,
+        ).start()
+        self.last_output = []
         self._send("uci")
         self._wait_for("uciok", 30)
-        if options:
-            for k, v in options.items():
-                self._send(f"setoption name {k} value {v}")
+        for k, v in self.options.items():
+            self._send(f"setoption name {k} value {v}")
         self._send("isready")
         self._wait_for("readyok", 60)
 
-    def _send(self, cmd: str):
-        self.proc.stdin.write(cmd + "\n")
-        self.proc.stdin.flush()
+    @staticmethod
+    def _read_stdout(stream, lines: "queue.Queue[Optional[str]]"):
+        try:
+            for line in stream:
+                lines.put(line.rstrip("\r\n"))
+        finally:
+            lines.put(None)
 
-    def _wait_for(self, prefix: str, timeout: int) -> str:
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            line = self.proc.stdout.readline()
-            if not line:
-                if self.proc.poll() is not None:
-                    raise RuntimeError(f"{self.name} process died")
+    @staticmethod
+    def _read_stderr(stream, errors: List[str]):
+        for line in stream:
+            errors.append(line.rstrip("\r\n"))
+            if len(errors) > 20:
+                errors.pop(0)
+
+    def _send(self, cmd: str):
+        if self.proc is None or self.proc.stdin is None:
+            raise RuntimeError(f"{self.name}: process is not started")
+        if self.proc.poll() is not None:
+            raise RuntimeError(
+                f"{self.name}: process exited with code {self.proc.returncode}"
+            )
+        try:
+            self.proc.stdin.write(cmd + "\n")
+            self.proc.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            raise RuntimeError(f"{self.name}: failed to send '{cmd}': {exc}") from exc
+
+    def _remember_output(self, line: str):
+        self.last_output.append(line)
+        if len(self.last_output) > 20:
+            self.last_output.pop(0)
+
+    def _output_tail(self) -> str:
+        parts = []
+        if self.last_output:
+            parts.append("last output: " + " | ".join(self.last_output[-3:]))
+        if self.last_error:
+            parts.append("last stderr: " + " | ".join(self.last_error[-3:]))
+        return "; " + "; ".join(parts) if parts else ""
+
+    def _wait_for(
+        self, prefix: str, timeout: int, collect: Optional[List[str]] = None
+    ) -> str:
+        if self.proc is None or self.proc.stdout is None:
+            raise RuntimeError(f"{self.name}: process is not started")
+        deadline = time.monotonic() + timeout
+        while True:
+            if self.proc.poll() is not None:
+                raise RuntimeError(
+                    f"{self.name}: process died with code {self.proc.returncode} "
+                    f"while waiting for '{prefix}'{self._output_tail()}"
+                )
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"{self.name}: timeout waiting for '{prefix}'"
+                    f"{self._output_tail()}"
+                )
+
+            try:
+                line = self._lines.get(timeout=min(remaining, 0.25))
+            except queue.Empty:
                 continue
-            line = line.strip()
+            if line is None:
+                if self.proc.poll() is not None:
+                    raise RuntimeError(
+                        f"{self.name}: process died with code {self.proc.returncode} "
+                        f"while waiting for '{prefix}'{self._output_tail()}"
+                    )
+                continue
+            self._remember_output(line)
+            if collect is not None:
+                collect.append(line)
             if line.startswith(prefix):
                 return line
-        raise TimeoutError(f"{self.name}: timeout waiting for '{prefix}'")
+
+    def is_running(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def restart(self):
+        self.close()
+        self._start()
 
     def new_game(self):
         self._send("ucinewgame")
@@ -140,17 +234,23 @@ class UCIEngine:
         timeout = (
             max(wtime, btime) // 1000 + 30 if not movetime else movetime // 1000 + 30
         )
-        line = self._wait_for("bestmove", timeout)
+        search_output: List[str] = []
+        line = self._wait_for("bestmove", timeout, search_output)
+        self.last_search_output = search_output
         parts = line.split()
         return parts[1] if len(parts) > 1 else "0000"
 
     def close(self):
+        if self.proc is None:
+            return
         try:
-            self._send("quit")
-            self.proc.wait(timeout=5)
+            if self.proc.poll() is None:
+                self._send("quit")
+                self.proc.wait(timeout=5)
         except Exception:
-            self.proc.kill()
-            self.proc.wait()
+            if self.proc.poll() is None:
+                self.proc.kill()
+                self.proc.wait()
 
 
 # ============================================================================
@@ -159,7 +259,10 @@ class UCIEngine:
 
 
 def load_openings(
-    book_path: pathlib.Path, max_openings: int = 500
+    book_path: pathlib.Path,
+    max_openings: int = 500,
+    seed: int = 6147500,
+    order: str = "random",
 ) -> List[chess.Board]:
     """Load opening positions from a PGN book."""
     openings = []
@@ -174,7 +277,8 @@ def load_openings(
             for move in game.mainline_moves():
                 board.push(move)
             openings.append(board.copy())
-    random.shuffle(openings)
+    if order == "random":
+        random.Random(seed).shuffle(openings)
     return openings
 
 
@@ -191,6 +295,19 @@ class GameResult:
     reason: str
     moves: int
     pgn: str = ""
+    search_log: List[dict] = field(default_factory=list)
+    engine_error: bool = False
+
+
+def extract_search_log_lines(lines: Sequence[str]) -> List[str]:
+    """Keep compact per-move diagnostics that are useful for hybrid debugging."""
+    keep = []
+    for line in lines:
+        if line.startswith("info string HybridTrace:"):
+            keep.append(line)
+        elif line.startswith("info string Final:"):
+            keep.append(line)
+    return keep
 
 
 def play_game(
@@ -201,6 +318,7 @@ def play_game(
     tc_inc_ms: int = 100,
     movetime_ms: int = 0,
     max_moves: int = 300,
+    capture_search_log: bool = False,
 ) -> GameResult:
     """Play one game between two engines."""
     if opening:
@@ -225,6 +343,7 @@ def play_game(
     if opening:
         game_pgn.setup(opening.fen())
     node = game_pgn
+    search_log: List[dict] = []
 
     for ply in range(max_moves * 2):
         if board.is_game_over(claim_draw=True):
@@ -241,20 +360,35 @@ def play_game(
             elif board.is_insufficient_material():
                 reason = "insufficient material"
             return GameResult(
-                white.name, black.name, result, reason, ply // 2, str(game_pgn)
+                white.name,
+                black.name,
+                result,
+                reason,
+                ply // 2,
+                str(game_pgn),
+                search_log,
             )
 
         eng = white if board.turn == chess.WHITE else black
+        fen_before = board.fen()
         t0 = time.time()
 
         try:
             move_str = eng.go(
                 start_fen, move_list, wtime, btime, tc_inc_ms, tc_inc_ms, movetime_ms
             )
-        except (TimeoutError, RuntimeError):
+        except (TimeoutError, RuntimeError) as exc:
             result = "0-1" if board.turn == chess.WHITE else "1-0"
+            reason = f"{eng.name} {type(exc).__name__}: {exc}"
             return GameResult(
-                white.name, black.name, result, "timeout/crash", ply // 2, str(game_pgn)
+                white.name,
+                black.name,
+                result,
+                reason,
+                ply // 2,
+                str(game_pgn),
+                search_log,
+                True,
             )
 
         elapsed_ms = int((time.time() - t0) * 1000)
@@ -275,6 +409,7 @@ def play_game(
                     "illegal move",
                     ply // 2,
                     str(game_pgn),
+                    search_log,
                 )
         except Exception:
             result = "0-1" if board.turn == chess.WHITE else "1-0"
@@ -285,14 +420,36 @@ def play_game(
                 "invalid move string",
                 ply // 2,
                 str(game_pgn),
+                search_log,
             )
+
+        if capture_search_log:
+            lines = extract_search_log_lines(eng.last_search_output)
+            if lines:
+                search_log.append(
+                    {
+                        "ply": ply + 1,
+                        "engine": eng.name,
+                        "side": "white" if board.turn == chess.WHITE else "black",
+                        "fen": fen_before,
+                        "move": move_str,
+                        "elapsed_ms": elapsed_ms,
+                        "lines": lines,
+                    }
+                )
 
         move_list.append(move_str)
         node = node.add_variation(move)
         board.push(move)
 
     return GameResult(
-        white.name, black.name, "1/2-1/2", "max moves", max_moves, str(game_pgn)
+        white.name,
+        black.name,
+        "1/2-1/2",
+        "max moves",
+        max_moves,
+        str(game_pgn),
+        search_log,
     )
 
 
@@ -340,6 +497,7 @@ def run_match(
     tc_base_ms: int = 60000,
     tc_inc_ms: int = 100,
     movetime_ms: int = 0,
+    capture_search_log: bool = False,
 ) -> MatchResult:
     """Run a match between two engines."""
     result = MatchResult(eng1_name, eng2_name)
@@ -357,10 +515,23 @@ def run_match(
             w, b = eng2, eng1
             w_name, b_name = eng2_name, eng1_name
 
+        if not w.is_running():
+            w.restart()
+        if not b.is_running():
+            b.restart()
+
         w.new_game()
         b.new_game()
 
-        gr = play_game(w, b, opening, tc_base_ms, tc_inc_ms, movetime_ms)
+        gr = play_game(
+            w,
+            b,
+            opening,
+            tc_base_ms,
+            tc_inc_ms,
+            movetime_ms,
+            capture_search_log=capture_search_log,
+        )
 
         if g % 2 == 0:
             if gr.result == "1-0":
@@ -385,8 +556,12 @@ def run_match(
                 "result": gr.result,
                 "reason": gr.reason,
                 "moves": gr.moves,
+                "pgn": gr.pgn,
+                "engine_error": gr.engine_error,
             }
         )
+        if gr.search_log:
+            result.games[-1]["search_log"] = gr.search_log
 
         marker = (
             "+"
@@ -404,6 +579,11 @@ def run_match(
             f"  Game {g+1:2d}/{num_games}: {marker} {gr.result:7s} "
             f"({gr.reason}, {gr.moves} moves) [{score_str}]"
         )
+
+        if gr.engine_error:
+            print("    Restarting engines after UCI failure")
+            w.restart()
+            b.restart()
 
     elo = result.elo_diff
     print(
@@ -430,6 +610,11 @@ def create_engine(name: str, cfg: dict, default_threads: int) -> Optional[UCIEng
         t = str(options["Threads"]).strip().lower()
         if t in {"auto", "max", "native"}:
             options["Threads"] = str(default_threads)
+    for path_option in ("NNWeights", "SyzygyPath"):
+        if path_option in options:
+            path_value = pathlib.Path(str(options[path_option]))
+            if str(path_value) and not path_value.is_absolute():
+                options[path_option] = str(PROJ / path_value)
     try:
         eng = UCIEngine(cmd, name, options)
         return eng
@@ -448,7 +633,12 @@ def run_tournament(args):
 
     # Load openings
     book_path = PROJ / book_cfg.get("file", "")
-    openings = load_openings(book_path, max_openings=200)
+    openings = load_openings(
+        book_path,
+        max_openings=200,
+        seed=args.seed,
+        order=args.opening_order,
+    )
     if openings:
         print(f"Loaded {len(openings)} openings from book")
     else:
@@ -498,6 +688,7 @@ def run_tournament(args):
     print(f"Results: {results_dir}")
     print(f"Matches: {len(matches)}")
     print(f"Default thread budget: {default_threads}")
+    print(f"Openings: order={args.opening_order} | seed={args.seed}")
     print()
 
     # Run matches
@@ -532,6 +723,7 @@ def run_tournament(args):
                 tc_base_ms,
                 tc_inc_ms,
                 movetime_ms,
+                args.save_search_log,
             )
 
             match_data = {
@@ -560,6 +752,8 @@ def run_tournament(args):
                             else f"{movetime_ms}ms/move"
                         ),
                         "games_per_match": args.games,
+                        "opening_order": args.opening_order,
+                        "seed": args.seed,
                     },
                     f,
                     indent=2,
@@ -642,6 +836,23 @@ def main():
         nargs=2,
         metavar=("E1", "E2"),
         help="Run single match between two engines",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=6147500,
+        help="Opening shuffle seed (default: 6147500)",
+    )
+    parser.add_argument(
+        "--opening-order",
+        choices=("random", "sequential"),
+        default="random",
+        help="Opening order from book (default: random)",
+    )
+    parser.add_argument(
+        "--save-search-log",
+        action="store_true",
+        help="Save compact per-move info string diagnostics in results JSON",
     )
     parser.add_argument("--resume", type=str, help="Resume from results directory")
     args = parser.parse_args()

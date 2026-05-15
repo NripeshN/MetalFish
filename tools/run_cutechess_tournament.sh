@@ -1,6 +1,6 @@
 #!/bin/bash
 # MetalFish Tournament via cutechess-cli
-# Usage: ./tools/run_cutechess_tournament.sh [--quick]
+# Usage: ./tools/run_cutechess_tournament.sh [--quick] [--games=N] [--tc=300+0.1] [--seed=N]
 
 set -e
 cd "$(dirname "$0")/.."
@@ -11,14 +11,30 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 RESULTS="$PROJ/results/cutechess_$TIMESTAMP"
 mkdir -p "$RESULTS"
 
-# Defaults: 300+0.1, 20 games
+# Defaults: 300+0.1, 20 games. Use a fixed cutechess seed so
+# repeated engine/config comparisons see the same opening sample.
 GAMES=20
 TC="300+0.1"
-if [ "$1" = "--quick" ]; then
-    GAMES=4
-    TC="10+0.1"
-    echo "Quick mode: $GAMES games, TC=$TC"
-fi
+CUTECHESS_SEED="${CUTECHESS_SEED:-6147500}"
+OPENING_ORDER="${OPENING_ORDER:-random}"
+
+for arg in "$@"; do
+    case "$arg" in
+        --quick)
+            GAMES=4
+            TC="10+0.1"
+            echo "Quick mode: $GAMES games, TC=$TC"
+            ;;
+        --games=*) GAMES="${arg#*=}" ;;
+        --tc=*) TC="${arg#*=}" ;;
+        --seed=*) CUTECHESS_SEED="${arg#*=}" ;;
+        --opening-order=*) OPENING_ORDER="${arg#*=}" ;;
+        *)
+            echo "Unknown option: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
 
 # Engine definitions
 MF="$PROJ/build/metalfish"
@@ -38,15 +54,33 @@ if [ -z "${THREADS:-}" ]; then
 fi
 [ -n "$THREADS" ] || THREADS=8
 
-MCTS_THREADS="${MCTS_THREADS:-2}"
-if [ "$MCTS_THREADS" -ge "$THREADS" ]; then
-    MCTS_THREADS=$(( THREADS > 1 ? THREADS - 1 : 1 ))
+MCTS_THREADS="${MCTS_THREADS:-1}"
+if [ "$MCTS_THREADS" -lt 1 ]; then
+    MCTS_THREADS=1
 fi
-HYBRID_MCTS_THREADS="${HYBRID_MCTS_THREADS:-$MCTS_THREADS}"
+if [ "$MCTS_THREADS" -ge "$THREADS" ] && [ "$THREADS" -gt 1 ]; then
+    MCTS_THREADS=$(( THREADS - 1 ))
+fi
+
+HYBRID_THREADS="${HYBRID_THREADS:-$THREADS}"
+if [ "$HYBRID_THREADS" -lt 3 ]; then
+    HYBRID_THREADS=3
+fi
+HYBRID_MCTS_THREADS="${HYBRID_MCTS_THREADS:-0}"
+if [ "$HYBRID_MCTS_THREADS" -gt 0 ] && [ "$HYBRID_MCTS_THREADS" -ge "$HYBRID_THREADS" ]; then
+    HYBRID_MCTS_THREADS=$(( HYBRID_THREADS - 1 ))
+fi
+# 0 = engine auto. Fixed-budget searches use the tactical 2/1 split; real game
+# clocks use the capped 1/2 split unless explicit overrides are provided.
+HYBRID_AB_THREADS="${HYBRID_AB_THREADS:-0}"
+if [ "$HYBRID_AB_THREADS" -gt 0 ] && [ "$HYBRID_AB_THREADS" -gt "$HYBRID_THREADS" ]; then
+    HYBRID_AB_THREADS=$HYBRID_THREADS
+fi
+HYBRID_AUTO_AB_THREADS_CAP="${HYBRID_AUTO_AB_THREADS_CAP:-2}"
 
 AB="cmd=$MF name=MetalFish-AB option.Threads=$THREADS option.Hash=256"
-MCTS="cmd=$MF name=MetalFish-MCTS option.Threads=$MCTS_THREADS option.Hash=256 option.UseMCTS=true option.NNWeights=$WEIGHTS"
-HYBRID="cmd=$MF name=MetalFish-Hybrid option.Threads=$THREADS option.Hash=256 option.UseHybridSearch=true option.NNWeights=$WEIGHTS option.HybridMCTSThreads=$HYBRID_MCTS_THREADS"
+MCTS="cmd=$MF name=MetalFish-MCTS option.Threads=$MCTS_THREADS option.Hash=256 option.UseMCTS=true option.NNWeights=$WEIGHTS option.MCTSMaxThreads=$MCTS_THREADS option.MCTSMinibatchSize=0"
+HYBRID="cmd=$MF name=MetalFish-Hybrid option.Threads=$HYBRID_THREADS option.Hash=256 option.UseHybridSearch=true option.NNWeights=$WEIGHTS option.HybridMCTSThreads=$HYBRID_MCTS_THREADS option.HybridABThreads=$HYBRID_AB_THREADS option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP option.MCTSMaxThreads=$HYBRID_MCTS_THREADS option.MCTSMinibatchSize=0"
 SFULL="cmd=$SF name=Stockfish option.Threads=$THREADS option.Hash=256"
 SL15="cmd=$SF name=Stockfish-L15 option.Threads=$THREADS option.Hash=256 option.\"Skill Level\"=15"
 SL10="cmd=$SF name=Stockfish-L10 option.Threads=$THREADS option.Hash=256 option.\"Skill Level\"=10"
@@ -56,10 +90,11 @@ LC0_E="cmd=$LC0 name=Lc0 arg=\"--weights=$WEIGHTS\" arg=\"--backend=metal\" opti
 
 BOOK_ARGS=""
 if [ -f "$BOOK" ]; then
-    BOOK_ARGS="-openings file=$BOOK format=pgn order=random"
+    BOOK_ARGS="-openings file=$BOOK format=pgn order=$OPENING_ORDER"
 fi
 
 COMMON="-each tc=$TC -games $GAMES -repeat -recover $BOOK_ARGS \
+    -srand $CUTECHESS_SEED \
     -resign movecount=3 score=1000 \
     -draw movenumber=40 movecount=8 score=10"
 
@@ -68,7 +103,8 @@ echo "============================================"
 echo "  MetalFish Tournament (cutechess-cli)"
 echo "============================================"
 echo "TC: $TC | Games/match: $GAMES"
-echo "Threads: $THREADS (MCTS=$MCTS_THREADS, HybridMCTS=$HYBRID_MCTS_THREADS)"
+echo "Openings: order=$OPENING_ORDER | seed=$CUTECHESS_SEED"
+echo "Threads: AB=$THREADS MCTS=$MCTS_THREADS Hybrid=$HYBRID_THREADS (HybridMCTS=$HYBRID_MCTS_THREADS, HybridAB=$HYBRID_AB_THREADS, HybridAutoABCap=$HYBRID_AUTO_AB_THREADS_CAP)"
 echo "Results: $RESULTS"
 echo ""
 

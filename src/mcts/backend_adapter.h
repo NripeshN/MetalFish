@@ -21,7 +21,7 @@ namespace MCTS {
 
 class NNCache {
 public:
-  static constexpr size_t kDefaultEntries = 500000;
+  static constexpr size_t kDefaultEntries = 2000000;
 
   explicit NNCache(size_t size = kDefaultEntries);
   bool Lookup(uint64_t key, int expected_moves, EvaluationResult &out) const;

@@ -36,9 +36,46 @@ LICHESS_API = "https://lichess.org/api"
 EXPLORER_API = "https://explorer.lichess.ovh"
 
 LOGICAL_CORES = os.cpu_count() or 4
-SEARCH_WORKERS = max(3, LOGICAL_CORES - 1)
-HYBRID_MCTS_THREADS = 1
-HYBRID_AB_THREADS = max(1, SEARCH_WORKERS - HYBRID_MCTS_THREADS)
+
+
+def apple_performance_cores() -> int | None:
+    if sys.platform != "darwin":
+        return None
+    for key in ("hw.perflevel0.physicalcpu_max", "hw.physicalcpu_max"):
+        try:
+            value = subprocess.check_output(
+                ["sysctl", "-n", key], text=True, stderr=subprocess.DEVNULL
+            ).strip()
+            cores = int(value)
+            if cores > 0:
+                return cores
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+    return None
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+PERFORMANCE_CORES = apple_performance_cores()
+SEARCH_WORKERS = max(3, PERFORMANCE_CORES or (LOGICAL_CORES - 1))
+HYBRID_MCTS_THREADS = max(
+    0,
+    min(SEARCH_WORKERS - 1, env_int("METALFISH_HYBRID_MCTS_THREADS", 0)),
+)
+HYBRID_AB_THREADS = max(
+    0, min(SEARCH_WORKERS, env_int("METALFISH_HYBRID_AB_THREADS", 0))
+)
+HYBRID_AUTO_AB_THREADS_CAP = max(
+    0, min(SEARCH_WORKERS, env_int("METALFISH_HYBRID_AUTO_AB_THREADS_CAP", 6))
+)
+TRANSFORMER_MIN_MOVE_BUDGET_MS = max(
+    0, min(5000, env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 1200))
+)
 BOOK_MAX_PLY = 10
 BOOK_MIN_CLOCK_MS = 30_000
 BOOK_TIMEOUT_S = 0.25
@@ -77,10 +114,18 @@ ENGINE_OPTIONS = {
     "NNWeights": str(WEIGHTS),
     "HybridMCTSThreads": str(HYBRID_MCTS_THREADS),
     "HybridABThreads": str(HYBRID_AB_THREADS),
+    "HybridAutoABThreadsCap": str(HYBRID_AUTO_AB_THREADS_CAP),
+    "TransformerMinMoveBudgetMs": str(TRANSFORMER_MIN_MOVE_BUDGET_MS),
     "MCTSMaxThreads": str(HYBRID_MCTS_THREADS),
+    "HybridMCTSMinimumKLDGainPerNode": "0.0",
+    "HybridMCTSRootReject": "true",
     "Move Overhead": "500",
     "MCTSMinibatchSize": "0",
+    "MCTSMinimumKLDGainPerNode": "0.00005",
     "MCTSPolicySoftmaxTemp": "1.359",
+    "MCTSSmartPruningFactor": "1.33",
+    "MCTSCacheHistoryLength": "0",
+    "MCTSSolidTreeThreshold": "100",
     "SyzygyPath": str(PROJ / "syzygy"),
     "SyzygyProbeDepth": "2",
     "SyzygyProbeLimit": "6",
@@ -338,7 +383,9 @@ class UCIEngine:
                 parts.extend(["movestogo", str(movestogo)])
         return " ".join(parts)
 
-    def ponderhit(self, timeout: float = PONDER_HIT_TIMEOUT_S) -> tuple[str, str | None]:
+    def ponderhit(
+        self, timeout: float = PONDER_HIT_TIMEOUT_S
+    ) -> tuple[str, str | None]:
         """Opponent played the predicted move; use the current ponder result."""
         if not self._pondering:
             return "0000", None
@@ -482,9 +529,7 @@ class LichessBot:
         self._pending_challenge_target: str | None = None
         self._challenge_sent_at: float = 0
         self._challenge_retries = 0
-        self.book = OpeningBook(
-            api_key=api_key, min_games=5, timeout=BOOK_TIMEOUT_S
-        )
+        self.book = OpeningBook(api_key=api_key, min_games=5, timeout=BOOK_TIMEOUT_S)
         self._seek_timer: threading.Timer | None = None
         self._warm_engine: UCIEngine | None = None
         self._elo_widen_steps = 0
@@ -739,7 +784,9 @@ class LichessBot:
                 if self._rate_limit_count >= 3:
                     # Likely hit daily challenge cap — back off aggressively
                     backoff = 900  # 15 minutes
-                    print(f"  Possible daily cap hit. Waiting {backoff//60}min before retrying.")
+                    print(
+                        f"  Possible daily cap hit. Waiting {backoff//60}min before retrying."
+                    )
                 else:
                     backoff = 90  # Lichess docs say "wait a full minute"
                     print(f"  Waiting {backoff}s...")
@@ -1022,7 +1069,9 @@ class LichessBot:
                 elif etype == "gameState":
                     status = event.get("status", "started")
                     if status != "started":
-                        moves = event.get("moves", "").split() if event.get("moves") else []
+                        moves = (
+                            event.get("moves", "").split() if event.get("moves") else []
+                        )
                         winner = event.get("winner", "")
                         result = f"{status}"
                         if winner:
@@ -1097,9 +1146,7 @@ class LichessBot:
                 if best and best not in ("0000", "(none)"):
                     parsed = self._parse_legal_move(game_id, best, board, "ponder")
                     if parsed is None:
-                        print(
-                            f"  [{game_id}] Restarting after rejected ponder move"
-                        )
+                        print(f"  [{game_id}] Restarting after rejected ponder move")
                         engine.restart()
                     elif self.make_move(game_id, parsed.uci()):
                         move_uci = parsed.uci()
@@ -1129,9 +1176,7 @@ class LichessBot:
         if self._should_query_book(board, my_color, wtime, btime):
             book_move = self.book.lookup(board.fen())
             if book_move:
-                parsed = self._parse_legal_move(
-                    game_id, book_move, board, "book"
-                )
+                parsed = self._parse_legal_move(game_id, book_move, board, "book")
                 if parsed is not None:
                     if self.make_move(game_id, parsed.uci()):
                         move_uci = parsed.uci()
@@ -1242,9 +1287,7 @@ class LichessBot:
     ) -> chess.Board | None:
         try:
             board = (
-                chess.Board(initial_fen)
-                if initial_fen != "startpos"
-                else chess.Board()
+                chess.Board(initial_fen) if initial_fen != "startpos" else chess.Board()
             )
         except ValueError as e:
             print(f"  [{game_id}] Bad initial FEN from stream: {e}")
@@ -1258,9 +1301,7 @@ class LichessBot:
             board.push(parsed)
         return board
 
-    def _normalize_uci_move(
-        self, move: str, board: chess.Board
-    ) -> chess.Move | None:
+    def _normalize_uci_move(self, move: str, board: chess.Board) -> chess.Move | None:
         try:
             parsed = chess.Move.from_uci(move)
         except ValueError:
@@ -1293,11 +1334,7 @@ class LichessBot:
         target = board.piece_at(move.to_square)
         if not piece or piece.piece_type != chess.KING or piece.color != board.turn:
             return None
-        if (
-            not target
-            or target.piece_type != chess.ROOK
-            or target.color != board.turn
-        ):
+        if not target or target.piece_type != chess.ROOK or target.color != board.turn:
             return None
         if chess.square_rank(move.from_square) != chess.square_rank(move.to_square):
             return None
@@ -1578,12 +1615,22 @@ class LichessBot:
         else:
             tc_mode = self.args.tc or "5+3"
         hash_mb = ENGINE_OPTIONS["Hash"]
+        if HYBRID_MCTS_THREADS == 0 and HYBRID_AB_THREADS == 0:
+            cap = (
+                "uncapped"
+                if HYBRID_AUTO_AB_THREADS_CAP == 0
+                else f"AB cap {HYBRID_AUTO_AB_THREADS_CAP}"
+            )
+            hybrid_split = f"auto split ({cap}) + GPU"
+        else:
+            hybrid_split = (
+                f"AB {HYBRID_AB_THREADS}T + MCTS {HYBRID_MCTS_THREADS}T + GPU"
+            )
         print("=" * 60)
         print(f"  MetalFish Lichess Bot")
         print(f"  Account:  {self.username}")
         print(
-            f"  Engine:   Hybrid (AB {HYBRID_AB_THREADS}T + "
-            f"MCTS {HYBRID_MCTS_THREADS}T + GPU"
+            f"  Engine:   Hybrid ({hybrid_split}"
             f"{' + Ponder' if self.args.ponder else ''})"
         )
         print(

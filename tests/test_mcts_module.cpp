@@ -105,14 +105,152 @@ void test_root_search_smoke(TestCounter &tc) {
   expect(stats.total_nodes.load() > 0, "search produced visits", tc);
 }
 
+void test_pv_boost_respects_weight(TestCounter &tc) {
+  std::cout << "  PV boost weight..." << std::endl;
+  SearchParams params;
+  params.num_threads = 1;
+  params.nn_weights_path.clear();
+  params.add_dirichlet_noise = false;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 8;
+
+  auto search = CreateSearch(params);
+  search->StartSearch(
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", limits,
+      nullptr, nullptr);
+  search->Wait();
+
+  auto root_stats = search->GetRootMoveStats();
+  expect(!root_stats.empty(), "root stats should be available for PV boost",
+         tc);
+  if (root_stats.empty())
+    return;
+
+  const Move target = root_stats.front().move;
+  auto policy_for = [&](Move move) {
+    for (const auto &entry : search->GetRootMoveStats()) {
+      if (entry.move == move)
+        return entry.policy;
+    }
+    return -1.0f;
+  };
+  auto policy_sum = [&]() {
+    float total = 0.0f;
+    for (const auto &entry : search->GetRootMoveStats())
+      total += entry.policy;
+    return total;
+  };
+
+  const float before = policy_for(target);
+  const float total_before = policy_sum();
+  Move pv[] = {target};
+
+  search->InjectPVBoost(pv, 1, 20, 0.0f);
+  expect(std::abs(policy_for(target) - before) < 1e-6f,
+         "zero PV boost weight should leave policy unchanged", tc);
+
+  search->InjectPVBoost(pv, 1, 20, 0.5f);
+  const float boosted = policy_for(target);
+  const float total_after = policy_sum();
+  expect(boosted > before, "positive PV boost weight should raise PV policy",
+         tc);
+  expect(std::abs(total_after - total_before) < 1e-4f,
+         "PV boost should preserve root policy mass", tc);
+}
+
 void test_search_params_defaults(TestCounter &tc) {
   std::cout << "  Search params..." << std::endl;
   SearchParams params;
   expect(params.fpu_reduction_at_root == 0.33f, "root FPU default aligned", tc);
+  expect(params.smart_pruning_factor == 1.33f, "smart pruning default aligned",
+         tc);
+  expect(params.kld_gain_min == 0.00005f, "KLD stopper tactical default", tc);
+  expect(params.cache_history_length == 0,
+         "classic cache history default uses current position", tc);
+  expect(params.nn_cache_size == 2000000, "NN cache default aligned", tc);
+  expect(params.moves_left_max_effect == 0.0345f,
+         "moves-left max effect default aligned", tc);
+  expect(params.moves_left_scaled_factor == 1.6521f,
+         "moves-left scaled factor default aligned", tc);
+  expect(params.moves_left_quadratic_factor == -0.6521f,
+         "moves-left quadratic factor default aligned", tc);
+  expect(params.temp_winpct_cutoff == 100.0f,
+         "temperature value cutoff default aligned", tc);
   expect(params.GetCpuctBase(true) == params.cpuct_base_at_root,
          "root cpuct base getter", tc);
   expect(params.GetFpuValue(true) == params.fpu_value_at_root,
          "root fpu value getter", tc);
+}
+
+void test_lc0_stoppers(TestCounter &tc) {
+  std::cout << "  Lc0 stopper behavior..." << std::endl;
+
+  KLDGainStopper kld(1.0f, 1);
+  StoppersHints hints;
+  hints.UpdateEstimatedRemainingTimeMs(1000);
+  hints.UpdateEstimatedRemainingTimeMs(1500);
+  hints.UpdateEstimatedRemainingPlayouts(100);
+  hints.UpdateEstimatedRemainingPlayouts(200);
+  expect(hints.GetEstimatedRemainingTimeMs() == 1000,
+         "stopper hints keep the tightest time bound", tc);
+  expect(hints.GetEstimatedRemainingPlayouts() == 100,
+         "stopper hints keep the tightest playout bound", tc);
+
+  SearchStats stats;
+  stats.total_nodes = 2;
+  stats.nodes_since_movestart = 2;
+  stats.edge_n = {1, 0};
+  expect(!kld.ShouldStop(stats, &hints), "KLD needs a prior window", tc);
+  stats.total_nodes = 3;
+  stats.nodes_since_movestart = 3;
+  stats.edge_n = {2, 0};
+  expect(kld.ShouldStop(stats, &hints), "KLD stops on low distribution gain",
+         tc);
+
+  SmartPruningStopper smart(1.33f, 0);
+  SearchStats sp_stats;
+  sp_stats.total_nodes = 10;
+  sp_stats.nodes_since_movestart = 10;
+  sp_stats.time_since_movestart_ms = 1;
+  sp_stats.edge_n = {100, 1};
+  StoppersHints sp_hints;
+  sp_hints.UpdateEstimatedRemainingTimeMs(0);
+  sp_hints.UpdateEstimatedRemainingPlayouts(0);
+  expect(!smart.ShouldStop(sp_stats, &sp_hints),
+         "smart pruning waits for tolerance window", tc);
+
+  sp_stats.total_nodes = 400;
+  sp_stats.nodes_since_movestart = 400;
+  sp_stats.time_since_movestart_ms = 250;
+  expect(smart.ShouldStop(sp_stats, &sp_hints),
+         "smart pruning stops when second move cannot overtake", tc);
+}
+
+void test_solid_tree_repairs_child_parents(TestCounter &tc) {
+  std::cout << "  Solid tree parent repair..." << std::endl;
+
+  Node root;
+  Move root_moves[] = {Move(SQ_E2, SQ_E4), Move(SQ_D2, SQ_D4)};
+  root.CreateEdges(root_moves, 2);
+
+  auto child = std::make_unique<Node>(&root, 0);
+  root.Edges()[0].child.store(child.get(), std::memory_order_release);
+
+  Move child_moves[] = {Move(SQ_E7, SQ_E5)};
+  child->CreateEdges(child_moves, 1);
+  auto grandchild = std::make_unique<Node>(child.get(), 0);
+  child->Edges()[0].child.store(grandchild.get(), std::memory_order_release);
+
+  expect(root.MakeSolid(), "root should solidify when no visits are in flight",
+         tc);
+  Node *solid_child = root.Edges()[0].child.load(std::memory_order_acquire);
+  Node *solid_grandchild =
+      solid_child->Edges()[0].child.load(std::memory_order_acquire);
+  expect(solid_child->Parent() == &root,
+         "solid child should point at solidified parent", tc);
+  expect(solid_grandchild->Parent() == solid_child,
+         "grandchild parent should be repaired after edge transfer", tc);
 }
 
 void test_nn_cache_policy_capacity(TestCounter &tc) {
@@ -223,6 +361,13 @@ void test_history_buffer_tail_replay(TestCounter &tc) {
   expect(ctx.CurrentNNCacheKey() ==
              ComputeNNCacheKey(history.ptrs, history.depth),
          "tail history should match incremental cache key", tc);
+
+  const Position *current_only[] = {history.ptrs[history.depth - 1]};
+  expect(ctx.CurrentNNCacheKey(0) == ComputeNNCacheKey(current_only, 1),
+         "cache history length 0 should hash only current position", tc);
+  expect(ctx.CurrentNNCacheKey(7) ==
+             ComputeNNCacheKey(history.ptrs, history.depth),
+         "cache history length 7 should hash full NN history tail", tc);
 
   std::deque<StateInfo> replay_states(line.size() + 1);
   Position replay;
@@ -578,6 +723,7 @@ void test_node_limited_search_uses_tight_eval_budget(TestCounter &tc) {
   params.max_prefetch = 16;
   params.nn_weights_path = weights;
   params.add_dirichlet_noise = false;
+  params.smart_pruning_factor = 0.0f;
 
   MetalFish::Search::LimitsType limits;
   limits.nodes = 32;
@@ -653,11 +799,14 @@ bool test_mcts_all() {
   test_node_basics(tc);
   test_tablebase_wdl_conversion(tc);
   test_search_params_defaults(tc);
+  test_lc0_stoppers(tc);
+  test_solid_tree_repairs_child_parents(tc);
   test_nn_cache_policy_capacity(tc);
   test_history_buffer_ownership(tc);
   test_history_buffer_tail_replay(tc);
   test_nn_cache_key_tracks_encoded_state(tc);
   test_root_search_smoke(tc);
+  test_pv_boost_respects_weight(tc);
   test_evaluator_legal_move_view_parity(tc);
   test_deterministic_repro(tc);
   test_nodes_limit_with_callback(tc);

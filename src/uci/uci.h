@@ -60,7 +60,7 @@ private:
   void gpu_benchmark();
   void parallel_hybrid_go(
       std::istringstream &is); // Parallel MCTS+AB search (best hybrid)
-  void mcts_mt_go(std::istringstream &is); // Pure GPU MCTS search
+  void mcts_mt_go(std::istringstream &is);           // Pure GPU MCTS search
   void mcts_batch_benchmark(std::istringstream &is); // Legacy policy message
 
   static void on_update_no_moves(const Engine::InfoShort &info);

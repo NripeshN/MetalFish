@@ -91,6 +91,9 @@ struct alignas(APPLE_CACHE_LINE_SIZE) MCTSSharedState {
   std::atomic<uint32_t> best_move_raw{0};
   std::atomic<float> best_q{0.0f};
   std::atomic<uint32_t> best_visits{0};
+  // Sum of root-edge visits in the current MCTS root. This can differ from
+  // per-search node stats when a tree is reused, and is the right denominator
+  // for root confidence / visit-share decisions.
   std::atomic<uint64_t> total_nodes{0};
 
   static constexpr int MAX_TOP_MOVES = 10;
@@ -185,7 +188,9 @@ struct ParallelHybridConfig {
   int ab_max_depth = 64;
   bool ab_use_time = true;
 
-  float ab_policy_weight = 0.3f;
+  // Experimental AB PV -> MCTS prior mutation. Keep opt-in until it is
+  // Elo-proven; unsafe prior mutation can overpower the network root policy.
+  float ab_policy_weight = 0.0f;
   float agreement_threshold = 0.3f;
   float override_threshold = 1.0f;
   int policy_update_interval_ms = 50;
@@ -201,6 +206,8 @@ struct ParallelHybridConfig {
   int transformer_batch_size = 128;
   int transformer_batch_timeout_us = 200;
   bool use_transformer_prefetch = true;
+  bool trace_decisions = false;
+  bool mcts_root_reject = true;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees
@@ -282,6 +289,9 @@ private:
   std::atomic<bool> stop_flag_{false};
   std::atomic<bool> searching_{false};
   std::atomic<bool> shutdown_requested_{false};
+  std::atomic<int> last_injected_ab_depth_{0};
+  std::atomic<uint32_t> last_injected_ab_move_raw_{0};
+  std::atomic<int> ab_policy_injections_{0};
 
   std::thread mcts_thread_;
   std::thread ab_thread_;
@@ -341,10 +351,9 @@ private:
 };
 
 // Factory function
-std::unique_ptr<ParallelHybridSearch>
-create_parallel_hybrid_search(Engine *engine,
-                              const ParallelHybridConfig &config =
-                                  ParallelHybridConfig());
+std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
+    Engine *engine,
+    const ParallelHybridConfig &config = ParallelHybridConfig());
 
 // Returns true when the coordinator, not AB's time manager, owns the outer
 // search budget and should keep MCTS running after AB has produced a result.

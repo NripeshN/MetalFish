@@ -35,7 +35,7 @@ inline void set_thread_qos(qos_class_t qos) {
 
 ParallelHybridSearch::ParallelHybridSearch() {
   config_.mcts_config.cpuct = 1.745f;
-  config_.mcts_config.cpuct_at_root = 2.15f;
+  config_.mcts_config.cpuct_at_root = 1.745f;
   config_.mcts_config.fpu_reduction = 0.330f;
   config_.mcts_config.cpuct_base = 38739.0f;
   config_.mcts_config.cpuct_factor = 3.894f;
@@ -151,7 +151,8 @@ void ParallelHybridSearch::start_search(
 
   // Verify all threads are truly dead before resetting shared state.
   // wait() guarantees joins, but this assertion catches logic errors.
-  assert(!coordinator_thread_.joinable() && "coordinator still joinable after wait()");
+  assert(!coordinator_thread_.joinable() &&
+         "coordinator still joinable after wait()");
   assert(!mcts_thread_.joinable() && "mcts_thread still joinable after wait()");
   assert(!ab_thread_.joinable() && "ab_thread still joinable after wait()");
 
@@ -163,6 +164,9 @@ void ParallelHybridSearch::start_search(
   final_best_move_.store(0, std::memory_order_relaxed);
   final_ponder_move_.store(0, std::memory_order_relaxed);
   callback_invoked_.store(false, std::memory_order_relaxed);
+  last_injected_ab_depth_.store(0, std::memory_order_relaxed);
+  last_injected_ab_move_raw_.store(0, std::memory_order_relaxed);
+  ab_policy_injections_.store(0, std::memory_order_relaxed);
 
   {
     std::lock_guard<std::mutex> lock(callback_mutex_);
@@ -305,6 +309,9 @@ void ParallelHybridSearch::new_game() {
   ab_state_.reset();
   mcts_state_.reset();
   callback_invoked_.store(false, std::memory_order_relaxed);
+  last_injected_ab_depth_.store(0, std::memory_order_relaxed);
+  last_injected_ab_move_raw_.store(0, std::memory_order_relaxed);
+  ab_policy_injections_.store(0, std::memory_order_relaxed);
 
   {
     std::lock_guard<std::mutex> lock(callback_mutex_);
@@ -341,13 +348,21 @@ int ParallelHybridSearch::calculate_time_budget() const {
   Color us = pos.side_to_move();
 
   int time_left = (us == WHITE) ? limits_.time[WHITE] : limits_.time[BLACK];
+  int increment = (us == WHITE) ? limits_.inc[WHITE] : limits_.inc[BLACK];
   if (time_left <= 0) {
-    int increment = (us == WHITE) ? limits_.inc[WHITE] : limits_.inc[BLACK];
     return std::max(1000, increment);
   }
 
-  // Safety hard cap at 76% of remaining time (Stockfish's internal max)
-  return std::max(500, static_cast<int>(time_left * 0.76f));
+  if (time_left < 500)
+    return std::max(50, std::min(time_left / 4, increment));
+
+  const int moves_to_go = limits_.movestogo > 0 ? limits_.movestogo : 30;
+  const int base = time_left / std::max(1, moves_to_go);
+  const int inc_bonus = std::max(0, increment) * 3 / 4;
+  const int budget = base + inc_bonus;
+  const int hard_cap = std::max(500, time_left / 4);
+  const int reserve_cap = std::max(1, time_left - 100);
+  return std::max(250, std::min({budget, hard_cap, reserve_cap}));
 }
 
 bool HybridShouldContinueMCTSAfterAB(
@@ -400,9 +415,14 @@ void ParallelHybridSearch::mcts_thread_main() {
 
   auto start = std::chrono::steady_clock::now();
 
-  // MCTS runs until the coordinator stops it; don't pass time controls
-  ::MetalFish::Search::LimitsType mcts_limits;
-  mcts_limits.infinite = 1;
+  // Give MCTS the real outer limits so its Lc0-style smart pruning, KLD, node
+  // and time stoppers stay active. Ponder is the exception: before ponderhit
+  // there is no move clock to spend, so the coordinator owns cancellation.
+  ::MetalFish::Search::LimitsType mcts_limits = limits_;
+  if (limits_.ponderMode) {
+    mcts_limits = ::MetalFish::Search::LimitsType{};
+    mcts_limits.infinite = 1;
+  }
   mcts_limits.startTime = now();
   mcts_limits.searchmoves = limits_.searchmoves;
 
@@ -467,9 +487,8 @@ void ParallelHybridSearch::mcts_thread_main() {
   stats_.mcts_time_ms =
       std::chrono::duration<double, std::milli>(end - start).count();
   stats_.mcts_nodes = mcts_search_->Stats().total_nodes.load();
-  stats_.transformer_evaluations =
-      mcts_search_->Stats().nn_evaluations.load();
-  stats_.transformer_batches = mcts_search_->Stats().nn_evaluations.load();
+  stats_.transformer_evaluations = mcts_search_->Stats().nn_evaluations.load();
+  stats_.transformer_batches = mcts_search_->Stats().total_batches.load();
 }
 
 void ParallelHybridSearch::publish_mcts_state() {
@@ -484,16 +503,43 @@ void ParallelHybridSearch::publish_mcts_state() {
   mcts_state_.best_move_raw.store(best.raw(), std::memory_order_relaxed);
   mcts_state_.best_q.store(best_stats.q, std::memory_order_relaxed);
   mcts_state_.best_visits.store(best_stats.visits, std::memory_order_relaxed);
-  const uint64_t total_nodes =
-      mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed);
-  mcts_state_.total_nodes.store(total_nodes, std::memory_order_relaxed);
+
+  const auto root_moves = mcts_search_->GetRootMoveStats();
+  uint64_t root_visits = 0;
+  for (const auto &move : root_moves)
+    root_visits += move.visits;
+  mcts_state_.total_nodes.store(root_visits, std::memory_order_relaxed);
+
+  const int top_count = std::min<int>(static_cast<int>(root_moves.size()),
+                                      MCTSSharedState::MAX_TOP_MOVES);
+  for (int i = 0; i < top_count; ++i) {
+    mcts_state_.top_moves[i].move_raw.store(root_moves[i].move.raw(),
+                                            std::memory_order_relaxed);
+    mcts_state_.top_moves[i].policy.store(root_moves[i].policy,
+                                          std::memory_order_relaxed);
+    mcts_state_.top_moves[i].visits.store(root_moves[i].visits,
+                                          std::memory_order_relaxed);
+    mcts_state_.top_moves[i].q.store(root_moves[i].q,
+                                     std::memory_order_relaxed);
+  }
+  for (int i = top_count; i < MCTSSharedState::MAX_TOP_MOVES; ++i) {
+    mcts_state_.top_moves[i].move_raw.store(0, std::memory_order_relaxed);
+    mcts_state_.top_moves[i].policy.store(0.0f, std::memory_order_relaxed);
+    mcts_state_.top_moves[i].visits.store(0, std::memory_order_relaxed);
+    mcts_state_.top_moves[i].q.store(0.0f, std::memory_order_relaxed);
+  }
+  mcts_state_.num_top_moves.store(top_count, std::memory_order_release);
+
   mcts_state_.has_result.store(true, std::memory_order_release);
   mcts_state_.update_counter.fetch_add(1, std::memory_order_release);
 }
 
 void ParallelHybridSearch::update_mcts_policy_from_ab() {
+  if (config_.ab_policy_weight <= 0.0f)
+    return;
+
   int depth = ab_state_.pv_depth.load(std::memory_order_acquire);
-  if (depth < 10)
+  if (depth < std::max(10, current_strategy_.ab_verify_depth))
     return;
 
   uint64_t mcts_nodes =
@@ -511,7 +557,27 @@ void ParallelHybridSearch::update_mcts_policy_from_ab() {
   for (int i = 0; i < pv_len; ++i) {
     pv[i] = Move(ab_state_.pv_moves[i].load(std::memory_order_relaxed));
   }
-  mcts_search_->InjectPVBoost(pv, pv_len, depth);
+  if (pv[0] == Move::none())
+    return;
+
+  // Policy boosting is intentionally sparse. Re-applying the same AB line
+  // every iterative-deepening update compounds the root prior and can turn the
+  // GPU search into an AB echo. Only inject meaningfully new or deeper PVs.
+  const uint32_t first_raw = pv[0].raw();
+  const int last_depth =
+      last_injected_ab_depth_.load(std::memory_order_acquire);
+  const uint32_t last_move =
+      last_injected_ab_move_raw_.load(std::memory_order_acquire);
+  const int injections = ab_policy_injections_.load(std::memory_order_acquire);
+  if (injections >= 4)
+    return;
+  if (first_raw == last_move && depth < last_depth + 4)
+    return;
+
+  mcts_search_->InjectPVBoost(pv, pv_len, depth, config_.ab_policy_weight);
+  last_injected_ab_depth_.store(depth, std::memory_order_release);
+  last_injected_ab_move_raw_.store(first_raw, std::memory_order_release);
+  ab_policy_injections_.fetch_add(1, std::memory_order_acq_rel);
   stats_.policy_updates.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -830,8 +896,12 @@ void ParallelHybridSearch::coordinator_thread_main() {
       "Final: MCTS=" + std::to_string(stats_.mcts_nodes.load()) + " MCTSBest=" +
       std::to_string(mcts_state_.best_visits.load(std::memory_order_relaxed)) +
       " AB=" + std::to_string(stats_.ab_nodes.load()) +
+      " ABMove=" + UCIEngine::move(ab_best, false) +
+      " MCTSMove=" + UCIEngine::move(mcts_best, false) +
       " agreements=" + std::to_string(stats_.move_agreements.load()) +
-      " overrides=" + std::to_string(stats_.ab_overrides.load()));
+      " ab_overrides=" + std::to_string(stats_.ab_overrides.load()) +
+      " mcts_overrides=" + std::to_string(stats_.mcts_overrides.load()) +
+      " policy_updates=" + std::to_string(stats_.policy_updates.load()));
 
   invoke_best_move_callback(final_move, ponder_move);
 }
@@ -913,37 +983,198 @@ Move ParallelHybridSearch::make_final_decision() {
   const uint64_t mcts_total_nodes =
       mcts_state_.total_nodes.load(std::memory_order_relaxed);
 
+  const auto move_to_string = [](Move move) {
+    return move == Move::none() ? std::string("none")
+                                : UCIEngine::move(move, false);
+  };
+  const auto mode_to_string = [](ParallelHybridConfig::DecisionMode mode) {
+    switch (mode) {
+    case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
+      return "mcts_primary";
+    case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
+      return "ab_primary";
+    case ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED:
+      return "vote_weighted";
+    case ParallelHybridConfig::DecisionMode::DYNAMIC:
+      return "dynamic";
+    }
+    return "unknown";
+  };
+  const auto top_moves_to_string = [&]() {
+    std::ostringstream ss;
+    const int count = std::min<int>(
+        mcts_state_.num_top_moves.load(std::memory_order_acquire), 5);
+    ss << "[";
+    for (int i = 0; i < count; ++i) {
+      if (i > 0)
+        ss << ",";
+      Move move(
+          mcts_state_.top_moves[i].move_raw.load(std::memory_order_relaxed));
+      ss << move_to_string(move) << ":n="
+         << mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed)
+         << ":q=" << std::fixed << std::setprecision(3)
+         << mcts_state_.top_moves[i].q.load(std::memory_order_relaxed)
+         << ":p=" << std::fixed << std::setprecision(3)
+         << mcts_state_.top_moves[i].policy.load(std::memory_order_relaxed);
+    }
+    ss << "]";
+    return ss.str();
+  };
+  const auto trace_simple = [&](const char *reason, Move selected) {
+    if (!config_.trace_decisions)
+      return;
+    std::ostringstream ss;
+    ss << "HybridTrace: reason=" << reason
+       << " mode=" << mode_to_string(config_.decision_mode)
+       << " selected=" << move_to_string(selected)
+       << " ABMove=" << move_to_string(ab_best)
+       << " MCTSMove=" << move_to_string(mcts_best) << " ABScore=" << ab_score
+       << " MCTSQ=" << std::fixed << std::setprecision(3) << mcts_q
+       << " MCTSBestVisits=" << mcts_visits
+       << " MCTSRootVisits=" << mcts_total_nodes
+       << " MCTSTop=" << top_moves_to_string();
+    send_info_string(ss.str());
+  };
+
   if (ab_best == Move::none() && mcts_best != Move::none()) {
     stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+    trace_simple("mcts_only_result", mcts_best);
     return mcts_best;
   }
   if (mcts_best == Move::none() || ab_best == Move::none()) {
     if (ab_best != Move::none()) {
       stats_.ab_overrides.fetch_add(1, std::memory_order_relaxed);
+      trace_simple("ab_only_result", ab_best);
       return ab_best;
     }
+    trace_simple("fallback_legal", Move::none());
     return first_allowed_legal_move();
   }
 
   if (ab_best == mcts_best) {
     stats_.move_agreements.fetch_add(1, std::memory_order_relaxed);
+    trace_simple("engines_agree", ab_best);
     return ab_best;
   }
 
-  int mcts_cp = QToNnueScore(mcts_q);
-  const bool enough_total_search = mcts_total_nodes >= 5000;
-  const bool enough_best_visits = mcts_visits >= 512;
-  const bool concentrated_on_best =
-      mcts_total_nodes > 0 &&
-      static_cast<uint64_t>(mcts_visits) * 100 >= mcts_total_nodes * 30;
-  bool mcts_reliable =
-      enough_total_search && enough_best_visits && concentrated_on_best;
-  bool mcts_much_better = mcts_cp > ab_score + 200;
-  bool is_tactical =
-      (current_strategy_.position_type == PositionType::HIGHLY_TACTICAL ||
-       current_strategy_.position_type == PositionType::TACTICAL);
+  const int mcts_cp = QToNnueScore(mcts_q);
+  const int ab_depth =
+      ab_state_.completed_depth.load(std::memory_order_relaxed);
+  const float visit_share = mcts_total_nodes > 0
+                                ? static_cast<float>(mcts_visits) /
+                                      static_cast<float>(mcts_total_nodes)
+                                : 0.0f;
+  const bool fixed_budget =
+      limits_.movetime > 0 || limits_.nodes > 0 || limits_.infinite;
+  const uint64_t min_nodes =
+      fixed_budget ? 180u
+                   : static_cast<uint64_t>(
+                         std::max(100, current_strategy_.min_mcts_nodes));
+  const uint32_t min_visits =
+      fixed_budget ? 72u
+                   : static_cast<uint32_t>(
+                         std::max(48, current_strategy_.min_mcts_nodes / 2));
+  const bool mcts_reliable = mcts_total_nodes >= min_nodes &&
+                             mcts_visits >= min_visits && visit_share >= 0.24f;
+  const bool mcts_strong =
+      mcts_reliable && (mcts_visits >= 512 || visit_share >= 0.55f);
+  const bool mcts_overwhelming =
+      mcts_total_nodes >= 5000 && mcts_visits >= 512 && visit_share >= 0.30f;
+  const bool ab_verified =
+      ab_depth >=
+      std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
+  const int eval_delta = mcts_cp - ab_score;
+  const bool ab_has_clear_preference = ab_verified && std::abs(ab_score) >= 15;
+  bool mcts_root_rejects_ab = false;
+  {
+    const int top_count =
+        std::min<int>(mcts_state_.num_top_moves.load(std::memory_order_acquire),
+                      MCTSSharedState::MAX_TOP_MOVES);
+    if (config_.mcts_root_reject && top_count > 0 && mcts_reliable &&
+        mcts_visits >= 160 && visit_share >= 0.35f && ab_score >= -120 &&
+        ab_score <= 40) {
+      Move top_move(
+          mcts_state_.top_moves[0].move_raw.load(std::memory_order_relaxed));
+      if (top_move == mcts_best) {
+        const float top_q =
+            mcts_state_.top_moves[0].q.load(std::memory_order_relaxed);
+        const uint32_t top_visits =
+            mcts_state_.top_moves[0].visits.load(std::memory_order_relaxed);
+        for (int i = 1; i < top_count; ++i) {
+          Move move(mcts_state_.top_moves[i].move_raw.load(
+              std::memory_order_relaxed));
+          if (move != ab_best)
+            continue;
+          const uint32_t ab_visits =
+              mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed);
+          const float ab_q =
+              mcts_state_.top_moves[i].q.load(std::memory_order_relaxed);
+          if (ab_visits >= 25 &&
+              top_visits >= 3 * std::max<uint32_t>(1, ab_visits) &&
+              top_q - ab_q >= 0.25f) {
+            mcts_root_rejects_ab = true;
+          }
+          break;
+        }
+      }
+    }
+  }
 
-  if (mcts_reliable && mcts_much_better && !is_tactical) {
+  bool choose_mcts = false;
+  const char *reason = "ab_default";
+  switch (config_.decision_mode) {
+  case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
+    choose_mcts =
+        mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180);
+    if (choose_mcts)
+      reason = "mcts_primary_reliable";
+    break;
+  case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
+    choose_mcts = mcts_overwhelming && eval_delta >= 250;
+    if (choose_mcts)
+      reason = "ab_primary_mcts_overwhelming";
+    break;
+  case ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED:
+  case ParallelHybridConfig::DecisionMode::DYNAMIC:
+    if (mcts_overwhelming && eval_delta >= 180) {
+      choose_mcts = true;
+      reason = "mcts_overwhelming_delta";
+    } else if (mcts_root_rejects_ab) {
+      choose_mcts = true;
+      reason = "mcts_root_rejects_ab";
+    } else if (!ab_verified && mcts_reliable && eval_delta >= -80) {
+      choose_mcts = true;
+      reason = "mcts_reliable_ab_unverified";
+    } else if (!ab_has_clear_preference && mcts_strong && eval_delta >= 80) {
+      choose_mcts = true;
+      reason = "mcts_strong_no_clear_ab_preference";
+    }
+    break;
+  }
+
+  if (config_.trace_decisions) {
+    std::ostringstream ss;
+    ss << "HybridTrace: reason=" << reason
+       << " mode=" << mode_to_string(config_.decision_mode)
+       << " selected=" << move_to_string(choose_mcts ? mcts_best : ab_best)
+       << " ABMove=" << move_to_string(ab_best)
+       << " MCTSMove=" << move_to_string(mcts_best) << " ABScore=" << ab_score
+       << " ABDepth=" << ab_depth << " MCTSQ=" << std::fixed
+       << std::setprecision(3) << mcts_q << " MCTSCP=" << mcts_cp
+       << " EvalDelta=" << eval_delta << " MCTSBestVisits=" << mcts_visits
+       << " MCTSRootVisits=" << mcts_total_nodes
+       << " VisitShare=" << visit_share
+       << " MCTSReliable=" << (mcts_reliable ? 1 : 0)
+       << " MCTSStrong=" << (mcts_strong ? 1 : 0)
+       << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
+       << " ABVerified=" << (ab_verified ? 1 : 0)
+       << " ABClearPreference=" << (ab_has_clear_preference ? 1 : 0)
+       << " MCTSRootRejectsAB=" << (mcts_root_rejects_ab ? 1 : 0)
+       << " MCTSTop=" << top_moves_to_string();
+    send_info_string(ss.str());
+  }
+
+  if (choose_mcts) {
     stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
     return mcts_best;
   }

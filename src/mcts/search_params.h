@@ -42,17 +42,18 @@ struct SearchParams {
   float noise_alpha = 0.3f;
 
   // Moves left head utility (Lc0 defaults)
-  float moves_left_max_effect = 0.03f;
+  float moves_left_max_effect = 0.0345f;
   float moves_left_threshold = 0.80f;
   float moves_left_slope = 0.0027f;
   float moves_left_constant_factor = 0.0f;
-  float moves_left_scaled_factor = 1.65f;
-  float moves_left_quadratic_factor = -0.65f;
+  float moves_left_scaled_factor = 1.6521f;
+  float moves_left_quadratic_factor = -0.6521f;
 
   // Search control
   int max_concurrent_searchers = 1;
   int thread_idling_threshold = 1;
   float smart_pruning_factor = 1.33f;
+  int smart_pruning_minimum_batches = 0;
   int solid_tree_threshold = 100;
   bool two_fold_draws = true;
   bool sticky_endgames = true;
@@ -64,7 +65,7 @@ struct SearchParams {
 
   // Temperature for final move selection (0 = always best, >0 = sample)
   float temperature = 0.0f;
-  float temp_winpct_cutoff = 50.0f;
+  float temp_winpct_cutoff = 100.0f;
 
   // Contempt (positive = avoid draws, negative = prefer draws)
   float contempt = 0.0f;
@@ -75,8 +76,10 @@ struct SearchParams {
   int minibatch_size = 32;
 
   // Time management (Lc0 defaults)
+  std::string time_manager = "smooth";
   float slowmover = 2.2f;
   float move_overhead_ms = 10.0f;
+  float alphazero_time_pct = 12.0f;
 
   // Minibatch gathering (Lc0 defaults)
   int max_prefetch = 32;
@@ -88,14 +91,14 @@ struct SearchParams {
   float max_collision_visits_scaling_power = 1.25f;
   bool out_of_order_eval = true;
 
-  // KLD gain stopper (disabled by default, matching lc0)
-  // Set kld_gain_min > 0 to enable (e.g. 0.00001)
-  bool use_kld_gain_stopper = false;
-  float kld_gain_min = 0.0f;
+  // KLD gain stopper. Lc0 keeps this disabled by default, but MetalFish's
+  // Apple Silicon tactical profile benefits from a small early-stop threshold.
+  float kld_gain_min = 0.00005f;
   int kld_gain_average_interval = 100;
 
-  // NNCache
-  int nn_cache_size = 500000;
+  // NNCache. Lc0 classic defaults to current-position cache keys.
+  int cache_history_length = 0;
+  int nn_cache_size = 2000000;
 
   // Backend
   std::string nn_weights_path;

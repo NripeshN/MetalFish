@@ -357,15 +357,14 @@ public:
   }
 
   bool MakeSolid() {
-    if (solid_children_ || num_edges_ == 0 || IsTerminal())
+    if (solid_children_ || num_edges_ == 0 || IsTerminal() ||
+        GetNInFlight() != 0)
       return false;
 
     for (int i = 0; i < num_edges_; ++i) {
       Node *ch = edges_[i].child.load(std::memory_order_acquire);
       if (ch) {
-        if (ch->GetN() <= 1 && ch->GetNInFlight() > 0)
-          return false;
-        if (ch->IsTerminal() && ch->GetNInFlight() > 0)
+        if (ch->GetNInFlight() > 0)
           return false;
       }
     }
@@ -388,6 +387,7 @@ public:
           arr[i].MakeTerminal(old->GetTerminalType(), old->GetWL(), old->GetD(),
                               old->GetM());
         }
+        arr[i].UpdateChildrenParents();
       }
       edges_[i].child.store(&arr[i], std::memory_order_release);
     }
@@ -404,6 +404,17 @@ public:
   bool is_terminal() const { return IsTerminal(); }
 
 private:
+  void UpdateChildrenParents() {
+    for (int i = 0; i < num_edges_; ++i) {
+      Node *ch = edges_[i].child.load(std::memory_order_acquire);
+      if (!ch)
+        continue;
+      ch->parent_ = this;
+      ch->index_ = static_cast<uint16_t>(i);
+      ch->UpdateChildrenParents();
+    }
+  }
+
   std::atomic<double> wl_{0.0};   // 8  bytes - Win-Loss (double precision)
   std::unique_ptr<Edge[]> edges_; // 8  bytes
   Node *parent_ = nullptr;        // 8  bytes
@@ -487,12 +498,13 @@ public:
   NodeTree &operator=(const NodeTree &) = delete;
 
   void Reset(const std::string &fen) {
+    root_arena_.reset();
+    retained_heap_roots_.clear();
     arenas_.clear();
     current_arena_.store(0, std::memory_order_relaxed);
     AllocateNewArena();
     if (root_heap_)
       GetNodeGC().AddToQueue(std::move(root_heap_));
-    root_arena_.reset();
     root_is_arena_ = false;
 
     root_heap_ = std::make_unique<Node>();
@@ -517,6 +529,16 @@ public:
     if (r->NumEdges() == 0)
       return false;
 
+    auto retire_heap_root = [&]() {
+      if (!root_heap_)
+        return;
+      if (root_heap_->IsSolid()) {
+        retained_heap_roots_.push_back(std::move(root_heap_));
+      } else {
+        GetNodeGC().AddToQueue(std::move(root_heap_));
+      }
+    };
+
     Position new_pos;
     StateInfo ns;
     new_pos.set(new_fen, false, &ns);
@@ -538,8 +560,7 @@ public:
       if (test.key() == target_key) {
         edges[i].child.store(nullptr, std::memory_order_relaxed);
         child->DetachFromParentForReuse();
-        if (root_heap_)
-          GetNodeGC().AddToQueue(std::move(root_heap_));
+        retire_heap_root();
         root_arena_.reset(child);
         root_is_arena_ = true;
         {
@@ -560,8 +581,7 @@ public:
           if (test.key() == target_key) {
             ce[j].child.store(nullptr, std::memory_order_relaxed);
             gc->DetachFromParentForReuse();
-            if (root_heap_)
-              GetNodeGC().AddToQueue(std::move(root_heap_));
+            retire_heap_root();
             root_arena_.reset(gc);
             root_is_arena_ = true;
             {
@@ -624,6 +644,7 @@ private:
   };
   std::unique_ptr<Node> root_heap_;
   std::unique_ptr<Node, NoDelete> root_arena_;
+  std::vector<std::unique_ptr<Node>> retained_heap_roots_;
   bool root_is_arena_ = false;
 
   std::string root_fen_;

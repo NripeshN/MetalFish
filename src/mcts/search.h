@@ -23,6 +23,7 @@
 #include <functional>
 #include <memory>
 #include <random>
+#include <shared_mutex>
 #include <sstream>
 #include <thread>
 
@@ -58,12 +59,14 @@ struct PipelineStats {
   std::atomic<uint64_t> nn_evaluations{0};
   std::atomic<uint64_t> cache_hits{0};
   std::atomic<uint64_t> cache_misses{0};
+  std::atomic<uint64_t> total_batches{0};
 
   void reset() {
     total_nodes.store(0, std::memory_order_relaxed);
     nn_evaluations.store(0, std::memory_order_relaxed);
     cache_hits.store(0, std::memory_order_relaxed);
     cache_misses.store(0, std::memory_order_relaxed);
+    total_batches.store(0, std::memory_order_relaxed);
   }
 };
 
@@ -233,12 +236,15 @@ struct SearchWorkerCtx {
     return buf;
   }
 
-  uint64_t CurrentNNCacheKey() const {
+  uint64_t CurrentNNCacheKey(
+      int cache_history_length = HistoryBuffer::kMaxHistory - 1) const {
     const int total_positions = static_cast<int>(hash_stack.size());
     if (total_positions <= 0)
       return ComputeNNCacheKeyFromState(nullptr, nullptr, nullptr, 0);
 
-    const int depth = std::min(total_positions, HistoryBuffer::kMaxHistory);
+    const int requested_positions =
+        std::clamp(cache_history_length + 1, 1, HistoryBuffer::kMaxHistory);
+    const int depth = std::min(total_positions, requested_positions);
     const int start = total_positions - depth;
     return ComputeNNCacheKeyFromState(hash_stack.data() + start,
                                       rule50_stack.data() + start,
@@ -269,16 +275,18 @@ public:
     Move move = Move::none();
     float q = 0.0f;
     uint32_t visits = 0;
+    float policy = 0.0f;
   };
 
   Move GetBestMove() const;
   Move GetBestMoveWithTemperature(float temperature) const;
   float GetBestQ() const;
   RootMoveStats GetBestMoveStats() const;
+  std::vector<RootMoveStats> GetRootMoveStats(int max_moves = 0) const;
   std::vector<Move> GetPV() const;
   const PipelineStats &Stats() const { return stats_; }
 
-  void InjectPVBoost(const Move *pv, int pv_len, int ab_depth);
+  void InjectPVBoost(const Move *pv, int pv_len, int ab_depth, float weight);
 
   void SetSharedTT(SharedTTReader *tt) { shared_tt_ = tt; }
 
@@ -286,8 +294,10 @@ private:
   void WorkerThreadMain(int thread_id);
   bool IsSearchActive() const;
   bool ShouldStop() const;
+  SearchStats CollectSearchStats() const;
   void SendInfo();
   int64_t CalculateTimeBudget();
+  RootMoveStats GetBestMoveStatsLocked() const;
 
   // Core MCTS algorithms
   void RunIteration(SearchWorkerCtx &ctx);
@@ -358,6 +368,7 @@ private:
   Color root_color_ = WHITE;
   bool root_search_filter_active_ = false;
   bool active_root_search_filter_active_ = false;
+  bool smart_pruning_enabled_ = false;
   std::vector<Move> root_search_moves_;
   std::vector<Move> active_root_search_moves_;
 
@@ -372,14 +383,17 @@ private:
   std::atomic<int> backend_waiting_{0};
   std::atomic<int64_t> backend_latency_margin_ms_{0};
 
-  std::unique_ptr<KLDGainStopper> kld_stopper_;
+  std::unique_ptr<ChainedStopper> stopper_;
+  mutable StoppersHints latest_hints_;
+  mutable std::mutex stopper_mutex_;
+  mutable std::shared_mutex tree_structure_mutex_;
 
   // Track when the first NN eval arrives for smart pruning
   mutable int64_t first_eval_time_ms_ = -1;
 
   // Lc0-style smooth time management (persistent across searches)
   struct TimeManagerState {
-    float nps = 200.0f;
+    float nps = 20000.0f;
     bool nps_reliable = false;
     float tree_reuse = 0.52f;
     float timeuse = 0.70f;

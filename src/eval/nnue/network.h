@@ -101,7 +101,6 @@ private:
       Transformer::get_hash_value() ^ Arch::get_hash_value();
 
   template <IndexType Size> friend struct AccumulatorCaches::Cache;
-
 };
 
 // Definitions of the network types

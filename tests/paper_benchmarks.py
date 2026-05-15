@@ -139,6 +139,12 @@ class UCIEngine:
         self.send(f"setoption name {name} value {value}")
 
     def search(self, fen: str, movetime_ms: int = 10000) -> SearchResult:
+        # Benchmark FENs are independent positions, not a single game. Reset
+        # TT/history between searches so one puzzle cannot train or poison the
+        # next one through UCI game state.
+        self.send("ucinewgame")
+        self.send("isready")
+        self.wait_for("readyok", 120)
         self.send(f"position fen {fen}")
         self.send(f"go movetime {movetime_ms}")
         r = SearchResult()
@@ -248,6 +254,7 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
     engines = {}
     mf = METALFISH
     w = str(WEIGHTS)
+    hybrid_threads = max(3, threads)
 
     engines["metalfish-ab"] = EngineConfig(
         name="MetalFish-AB", path=mf, uci_options={"Threads": str(threads)}
@@ -256,7 +263,14 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
     engines["metalfish-mcts"] = EngineConfig(
         name="MetalFish-MCTS",
         path=mf,
-        uci_options={"UseMCTS": "true", "NNWeights": w, "Threads": "2"},
+        uci_options={
+            "UseMCTS": "true",
+            "NNWeights": w,
+            "Threads": str(threads),
+            "MCTSMaxThreads": "1",
+            "MCTSMinibatchSize": "0",
+            "MCTSMinimumKLDGainPerNode": "0.00005",
+        },
     )
 
     engines["metalfish-hybrid"] = EngineConfig(
@@ -265,7 +279,13 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
         uci_options={
             "UseHybridSearch": "true",
             "NNWeights": w,
-            "Threads": str(threads),
+            "Threads": str(hybrid_threads),
+            "HybridMCTSThreads": "2",
+            "HybridABThreads": "1",
+            "MCTSMaxThreads": "2",
+            "MCTSMinibatchSize": "0",
+            "HybridMCTSMinimumKLDGainPerNode": "0.0",
+            "HybridMCTSRootReject": "true",
         },
     )
 

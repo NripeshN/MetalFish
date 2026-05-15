@@ -17,7 +17,10 @@
         "Threads": "auto",
         "Hash": "256",
         "UseMCTS": "true",
-        "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb"
+        "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb",
+        "MCTSMaxThreads": "1",
+        "MCTSMinibatchSize": "0",
+        "MCTSMinimumKLDGainPerNode": "0.00005"
       }
     },
     "MetalFish-Hybrid": {
@@ -28,7 +31,15 @@
         "Threads": "auto",
         "Hash": "256",
         "UseHybridSearch": "true",
-        "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb"
+        "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb",
+        "HybridMCTSThreads": "0",
+        "HybridABThreads": "0",
+        "HybridAutoABThreadsCap": "6",
+        "TransformerMinMoveBudgetMs": "1200",
+        "MCTSMaxThreads": "0",
+        "MCTSMinibatchSize": "0",
+        "HybridMCTSMinimumKLDGainPerNode": "0.0",
+        "HybridMCTSRootReject": "true"
       }
     },
     "Stockfish": {

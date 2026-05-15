@@ -8,8 +8,8 @@
 #include "uci/uci.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -22,6 +22,7 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -810,9 +811,8 @@ static int auto_mcts_minibatch_size(int num_threads) {
   // Short Apple Silicon searches lose time waiting for moderate MPSGraph
   // batches to fill. Longer pure-MCTS searches can opt back into batching once
   // the go limits are known.
-  if (num_threads > 1)
-    return 1;
-  return 32;
+  (void)num_threads;
+  return 1;
 #else
   return num_threads >= 8 ? 64 : 32;
 #endif
@@ -842,6 +842,23 @@ transformer_low_time_fallback_reason(Engine &engine,
   if (time_left < TransformerLowTimeFallbackMs) {
     return std::string(us == WHITE ? "white" : "black") + " clock " +
            std::to_string(time_left) + "ms";
+  }
+
+  const TimePoint increment = limits.inc[us];
+  const int moves_to_go = limits.movestogo > 0 ? limits.movestogo : 30;
+  const TimePoint base_budget = time_left / std::max(1, moves_to_go);
+  const TimePoint inc_bonus = std::max<TimePoint>(0, increment) * 3 / 4;
+  const TimePoint budget = base_budget + inc_bonus;
+  const TimePoint hard_cap = std::max<TimePoint>(500, time_left / 4);
+  const TimePoint reserve_cap = std::max<TimePoint>(1, time_left - 100);
+  const TimePoint estimated_move_budget =
+      std::max<TimePoint>(250, std::min({budget, hard_cap, reserve_cap}));
+  const TimePoint min_transformer_move_budget = static_cast<TimePoint>(
+      static_cast<int>(engine.get_options()["TransformerMinMoveBudgetMs"]));
+  if (min_transformer_move_budget > 0 &&
+      estimated_move_budget < min_transformer_move_budget) {
+    return "estimated move budget " + std::to_string(estimated_move_budget) +
+           "ms";
   }
 
   return std::nullopt;
@@ -914,6 +931,51 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
 
   config.policy_softmax_temp = get_float_option(engine, "MCTSPolicySoftmaxTemp",
                                                 config.policy_softmax_temp);
+  config.moves_left_max_effect = get_float_option(
+      engine, "MCTSMovesLeftMaxEffect", config.moves_left_max_effect);
+  config.moves_left_threshold = get_float_option(
+      engine, "MCTSMovesLeftThreshold", config.moves_left_threshold);
+  config.moves_left_slope =
+      get_float_option(engine, "MCTSMovesLeftSlope", config.moves_left_slope);
+  config.moves_left_constant_factor = get_float_option(
+      engine, "MCTSMovesLeftConstantFactor", config.moves_left_constant_factor);
+  config.moves_left_scaled_factor = get_float_option(
+      engine, "MCTSMovesLeftScaledFactor", config.moves_left_scaled_factor);
+  config.moves_left_quadratic_factor =
+      get_float_option(engine, "MCTSMovesLeftQuadraticFactor",
+                       config.moves_left_quadratic_factor);
+  config.temperature =
+      get_float_option(engine, "MCTSTemperature", config.temperature);
+  config.temp_winpct_cutoff = get_float_option(engine, "MCTSTempValueCutoff",
+                                               config.temp_winpct_cutoff);
+  config.smart_pruning_factor = get_float_option(
+      engine, "MCTSSmartPruningFactor", config.smart_pruning_factor);
+  config.smart_pruning_minimum_batches =
+      static_cast<int>(engine.get_options()["MCTSSmartPruningMinimumBatches"]);
+  config.kld_gain_min = get_float_option(engine, "MCTSMinimumKLDGainPerNode",
+                                         config.kld_gain_min);
+  config.kld_gain_average_interval =
+      static_cast<int>(engine.get_options()["MCTSKLDGainAverageInterval"]);
+  config.time_manager = std::string(engine.get_options()["MCTSTimeManager"]);
+  config.cache_history_length =
+      static_cast<int>(engine.get_options()["MCTSCacheHistoryLength"]);
+  config.nn_cache_size =
+      static_cast<int>(engine.get_options()["MCTSNNCacheSize"]);
+  config.solid_tree_threshold =
+      static_cast<int>(engine.get_options()["MCTSSolidTreeThreshold"]);
+  config.max_prefetch =
+      static_cast<int>(engine.get_options()["MCTSMaxPrefetch"]);
+  config.max_collision_events =
+      static_cast<int>(engine.get_options()["MCTSMaxCollisionEvents"]);
+  config.max_collision_visits =
+      static_cast<int>(engine.get_options()["MCTSMaxCollisionVisits"]);
+  config.max_collision_visits_scaling_start = static_cast<int>(
+      engine.get_options()["MCTSMaxCollisionVisitsScalingStart"]);
+  config.max_collision_visits_scaling_end = static_cast<int>(
+      engine.get_options()["MCTSMaxCollisionVisitsScalingEnd"]);
+  config.max_collision_visits_scaling_power =
+      get_float_option(engine, "MCTSMaxCollisionVisitsScalingPower",
+                       config.max_collision_visits_scaling_power);
   config.virtual_loss =
       std::max(1, static_cast<int>(engine.get_options()["MCTSVirtualLoss"]));
   const int requested_minibatch =
@@ -923,6 +985,8 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
                               : auto_mcts_minibatch_size(num_threads);
   config.max_out_of_order_evals_factor = get_float_option(
       engine, "MCTSMaxOutOfOrderFactor", config.max_out_of_order_evals_factor);
+  if (config.max_out_of_order_evals_factor <= 0.0f)
+    config.out_of_order_eval = false;
 
   config.add_dirichlet_noise = engine.get_options()["MCTSAddDirichletNoise"];
   config.noise_epsilon =
@@ -946,13 +1010,22 @@ struct HybridThreadSplit {
   int ab_threads = 1;
 };
 
-static HybridThreadSplit compute_hybrid_thread_split(Engine &engine) {
+static bool is_fixed_budget_hybrid_search(const Search::LimitsType *limits) {
+  return limits && (limits->movetime > 0 || limits->nodes > 0 ||
+                    limits->depth > 0 || limits->mate > 0 || limits->infinite);
+}
+
+static HybridThreadSplit
+compute_hybrid_thread_split(Engine &engine,
+                            const Search::LimitsType *limits = nullptr) {
   const int total_threads =
       std::max(1, static_cast<int>(engine.get_options()["Threads"]));
   const int mcts_override =
       static_cast<int>(engine.get_options()["HybridMCTSThreads"]);
   const int ab_override =
       static_cast<int>(engine.get_options()["HybridABThreads"]);
+  const int auto_ab_cap =
+      static_cast<int>(engine.get_options()["HybridAutoABThreadsCap"]);
   // UCI Threads should describe search workers. The hybrid coordinator is a
   // lightweight sleeping monitor, so keep it outside the AB+MCTS worker budget
   // instead of stealing a core from the engines on Apple Silicon.
@@ -962,16 +1035,28 @@ static HybridThreadSplit compute_hybrid_thread_split(Engine &engine) {
   if (mcts_override > 0) {
     mcts_threads = std::clamp(mcts_override, 1, available);
   } else {
-    // Strength-first default: keep MCTS single-threaded unless explicitly
-    // overridden, and use additional cores for AB.
-    mcts_threads = 1;
+    // Fixed-budget searches are usually tactical benchmarks or analysis
+    // probes; the BK sweep strongly favored two low-batch MCTS workers there.
+    // Real game-clock searches need CPU verification, but the Patricia sweep
+    // showed that dumping every spare worker into AB makes the hybrid too
+    // drawish on Apple Silicon. Cap auto AB by default; larger AB splits remain
+    // available through explicit HybridABThreads or HybridAutoABThreadsCap=0.
+    mcts_threads = is_fixed_budget_hybrid_search(limits)
+                       ? std::min(2, std::max(1, available - 1))
+                       : 1;
   }
 
   int ab_threads = 0;
   if (ab_override > 0) {
     ab_threads = std::clamp(ab_override, 1, available);
   } else {
-    ab_threads = std::max(1, available - mcts_threads);
+    if (is_fixed_budget_hybrid_search(limits)) {
+      ab_threads = 1;
+    } else {
+      ab_threads = std::max(1, available - mcts_threads);
+      if (auto_ab_cap > 0)
+        ab_threads = std::min(auto_ab_cap, ab_threads);
+    }
   }
 
   while (mcts_threads + ab_threads > available) {
@@ -987,23 +1072,32 @@ static HybridThreadSplit compute_hybrid_thread_split(Engine &engine) {
 }
 
 static MCTS::ParallelHybridConfig
-make_hybrid_config(Engine &engine, const std::string &nn_weights) {
+make_hybrid_config(Engine &engine, const std::string &nn_weights,
+                   const Search::LimitsType *limits = nullptr) {
   MCTS::ParallelHybridConfig config;
-  auto split = compute_hybrid_thread_split(engine);
+  auto split = compute_hybrid_thread_split(engine, limits);
 
   // Use the same UCI-configurable MCTS params as pure MCTS mode,
   // so all improvements (cache key fix, KLD stopper, solidification,
   // prefetching, TB probing, etc.) apply to hybrid too.
   config.mcts_config = make_mcts_config(engine, nn_weights, split.mcts_threads);
+  // Pure MCTS benefits tactically from a small KLD threshold, but hybrid uses
+  // AB as the clock owner and final verifier. Keep hybrid KLD disabled unless
+  // it is explicitly requested so MCTS does not prematurely agree with
+  // transient AB mistakes in sharp positions.
+  config.mcts_config.kld_gain_min =
+      get_float_option(engine, "HybridMCTSMinimumKLDGainPerNode", 0.0f);
   config.mcts_threads = split.mcts_threads;
   config.ab_threads = split.ab_threads;
 
-  // Hybrid-specific override: slightly higher exploration at root
-  config.mcts_config.cpuct_at_root = 2.15f;
-
   config.ab_min_depth = 10;
   config.ab_use_time = true;
-  config.ab_policy_weight = 0.3f;
+  // AB PV policy injection into MCTS is available in the hybrid code path, but
+  // defaults off because repeated root-prior mutation has not yet shown Elo
+  // strength. The engines still communicate through shared state and final
+  // arbitration without corrupting the neural prior.
+  config.ab_policy_weight = std::clamp(
+      get_float_option(engine, "HybridABPolicyWeight", 0.0f), 0.0f, 1.0f);
   config.agreement_threshold = 0.3f;
   config.override_threshold = 1.0f;
   config.policy_update_interval_ms = 50;
@@ -1011,6 +1105,8 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights) {
   config.decision_mode = MCTS::ParallelHybridConfig::DecisionMode::DYNAMIC;
   config.transformer_batch_size = 128;
   config.use_transformer_prefetch = true;
+  config.mcts_root_reject = engine.get_options()["HybridMCTSRootReject"];
+  config.trace_decisions = engine.get_options()["HybridTrace"];
   return config;
 }
 
@@ -1035,12 +1131,57 @@ make_hybrid_cache_key(const std::string &nn_weights,
   return key.str();
 }
 
+static std::filesystem::path executable_dir() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::current_path();
+#ifdef __APPLE__
+  char buf[4096];
+  uint32_t sz = sizeof(buf);
+  if (_NSGetExecutablePath(buf, &sz) == 0)
+    dir = fs::path(buf).parent_path();
+#elif defined(__linux__)
+  std::error_code ec;
+  auto exe = fs::read_symlink("/proc/self/exe", ec);
+  if (!ec)
+    dir = exe.parent_path();
+#endif
+  return dir;
+}
+
+static std::string resolve_nn_weights_path(const std::string &raw_path) {
+  namespace fs = std::filesystem;
+  if (raw_path.empty())
+    return {};
+
+  fs::path path(raw_path);
+  if (path.is_absolute())
+    return raw_path;
+
+  const fs::path exe_dir = executable_dir();
+  const std::vector<fs::path> candidates = {
+      fs::current_path() / path,
+      exe_dir / path,
+      exe_dir.parent_path() / path,
+  };
+
+  for (const auto &candidate : candidates) {
+    std::error_code ec;
+    if (!fs::is_regular_file(candidate, ec))
+      continue;
+    auto canonical = fs::weakly_canonical(candidate, ec);
+    return ec ? candidate.string() : canonical.string();
+  }
+
+  return raw_path;
+}
+
 static std::string get_nn_weights_path(Engine &engine) {
-  std::string nn_weights = std::string(engine.get_options()["NNWeights"]);
+  std::string nn_weights =
+      resolve_nn_weights_path(std::string(engine.get_options()["NNWeights"]));
   if (nn_weights.empty()) {
     const char *env_path = std::getenv("METALFISH_NN_WEIGHTS");
     if (env_path)
-      nn_weights = env_path;
+      nn_weights = resolve_nn_weights_path(env_path);
   }
   if (nn_weights.empty()) {
     namespace fs = std::filesystem;
@@ -1061,15 +1202,7 @@ static std::string get_nn_weights_path(Engine &engine) {
       return best;
     };
 
-    auto exe_dir = fs::path("/proc/self/exe").parent_path();
-#ifdef __APPLE__
-    {
-      char buf[4096];
-      uint32_t sz = sizeof(buf);
-      if (_NSGetExecutablePath(buf, &sz) == 0)
-        exe_dir = fs::path(buf).parent_path();
-    }
-#endif
+    auto exe_dir = executable_dir();
 
     nn_weights = try_dir(exe_dir / "networks");
     if (nn_weights.empty())
@@ -1138,11 +1271,27 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.fpu_absolute_at_root << "|" << config.fpu_value << "|"
       << config.fpu_value_at_root << "|" << config.fpu_reduction << "|"
       << config.fpu_reduction_at_root << "|" << config.policy_softmax_temp
-      << "|" << config.virtual_loss << "|" << config.minibatch_size << "|"
+      << "|" << config.moves_left_max_effect << "|"
+      << config.moves_left_threshold << "|" << config.moves_left_slope << "|"
+      << config.moves_left_constant_factor << "|"
+      << config.moves_left_scaled_factor << "|"
+      << config.moves_left_quadratic_factor << "|" << config.temperature << "|"
+      << config.temp_winpct_cutoff << "|" << config.draw_score << "|"
+      << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff << "|"
+      << config.two_fold_draws << "|" << config.sticky_endgames << "|"
+      << config.virtual_loss << "|" << config.minibatch_size << "|"
       << config.max_out_of_order_evals_factor << "|"
       << config.add_dirichlet_noise << "|" << config.noise_epsilon << "|"
       << config.noise_alpha << "|" << config.out_of_order_eval << "|"
-      << config.nn_cache_size;
+      << config.nn_cache_size << "|" << config.smart_pruning_factor << "|"
+      << config.smart_pruning_minimum_batches << "|" << config.kld_gain_min
+      << "|" << config.kld_gain_average_interval << "|" << config.time_manager
+      << "|" << config.cache_history_length << "|"
+      << config.solid_tree_threshold << "|" << config.max_prefetch << "|"
+      << config.max_collision_events << "|" << config.max_collision_visits
+      << "|" << config.max_collision_visits_scaling_start << "|"
+      << config.max_collision_visits_scaling_end << "|"
+      << config.max_collision_visits_scaling_power;
   return key.str();
 }
 
@@ -1193,8 +1342,8 @@ static void preload_search_objects(Engine &engine) {
   if (need_hybrid) {
     auto config = make_hybrid_config(engine, nn_weights);
     const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
-    const bool needs_reinit = !g_parallel_hybrid_search ||
-                              g_parallel_hybrid_key != cache_key;
+    const bool needs_reinit =
+        !g_parallel_hybrid_search || g_parallel_hybrid_key != cache_key;
 
     if (needs_reinit && (!g_parallel_hybrid_search ||
                          !g_parallel_hybrid_search->is_searching())) {
@@ -1311,7 +1460,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
 
   if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
     sync_cout << "info string Time safety: " << *reason
-              << " below 5000ms; using Alpha-Beta without MCTS" << sync_endl;
+              << "; using Alpha-Beta without transformer MCTS" << sync_endl;
     engine.go(limits);
     return;
   }
@@ -1338,7 +1487,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
     return;
   }
 
-  auto config = make_hybrid_config(engine, nn_weights);
+  auto config = make_hybrid_config(engine, nn_weights, &limits);
   sync_cout << "info string Hybrid thread split: MCTS=" << config.mcts_threads
             << " AB=" << config.ab_threads
             << " (search workers=" << (config.mcts_threads + config.ab_threads)
@@ -1347,8 +1496,8 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
             << sync_endl;
 
   const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
-  bool need_reinit = !g_parallel_hybrid_search ||
-                     g_parallel_hybrid_key != cache_key;
+  bool need_reinit =
+      !g_parallel_hybrid_search || g_parallel_hybrid_key != cache_key;
 
   if (need_reinit) {
     if (g_parallel_hybrid_search) {
@@ -1417,7 +1566,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
 
   if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
     sync_cout << "info string Time safety: " << *reason
-              << " below 5000ms; using Alpha-Beta without MCTS" << sync_endl;
+              << "; using Alpha-Beta without transformer MCTS" << sync_endl;
     engine.go(limits);
     return;
   }

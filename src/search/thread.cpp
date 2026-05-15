@@ -312,7 +312,7 @@ void ThreadPool::start_thinking(const OptionsMap &options, Position &pos,
       rootMoves.emplace_back(move);
   }
 
-  if (limits.searchmoves.empty())
+  if (rootMoves.empty())
     for (const auto &m : legalmoves)
       rootMoves.emplace_back(m);
 
@@ -326,9 +326,9 @@ void ThreadPool::start_thinking(const OptionsMap &options, Position &pos,
   if (states.get())
     setupStates = std::move(states); // Ownership transfer, states is now empty
 
-  // Copy the already parsed root position across threads, then restore the
-  // game-history state below. The rootState is per thread, earlier states are
-  // shared since they are read-only.
+  // Match Stockfish worker root setup: rebuild from FEN, then restore the
+  // game-history state below. Some StateInfo fields cannot be inferred from
+  // FEN.
   for (auto &&th : threads) {
     th->run_custom_job([&]() {
       th->worker->limits = limits;
@@ -336,7 +336,8 @@ void ThreadPool::start_thinking(const OptionsMap &options, Position &pos,
       th->worker->nmpMinPly = 0;
       th->worker->rootDepth = th->worker->completedDepth = 0;
       th->worker->rootMoves = rootMoves;
-      th->worker->rootPos.copy_from(pos, &th->worker->rootState);
+      th->worker->rootPos.set(pos.fen(), pos.is_chess960(),
+                              &th->worker->rootState);
       th->worker->rootState = setupStates->back();
       th->worker->tbConfig = tbConfig;
     });

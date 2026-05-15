@@ -152,9 +152,8 @@ set(UCI_SOURCES src/uci/uci.cpp src/uci/ucioption.cpp src/uci/engine.cpp
 set(SYZYGY_SOURCES src/syzygy/tbprobe.cpp)
 
 # MCTS search engine
-set(MCTS_SOURCES
-    src/mcts/search.cpp src/mcts/backend_adapter.cpp src/mcts/stoppers.cpp
-    src/mcts/evaluator.cpp)
+set(MCTS_SOURCES src/mcts/search.cpp src/mcts/backend_adapter.cpp
+                 src/mcts/stoppers.cpp src/mcts/evaluator.cpp)
 
 # Hybrid search engine
 set(HYBRID_SOURCES src/hybrid/hybrid_search.cpp src/hybrid/position_adapter.cpp
@@ -186,9 +185,9 @@ set(NN_SOURCES
 
 # Metal transformer acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
-  # Generic Metal device/buffer backend used by diagnostics and shutdown.
-  # NNUE is deliberately not compiled for Metal; CPU incremental NNUE is faster
-  # for AB search and avoids starving transformer inference on Apple GPUs.
+  # Generic Metal device/buffer backend used by diagnostics and shutdown. NNUE
+  # is deliberately not compiled for Metal; CPU incremental NNUE is faster for
+  # AB search and avoids starving transformer inference on Apple GPUs.
   set(EVAL_SOURCES ${EVAL_SOURCES} src/eval/metal/metal_backend.mm)
 
   # Transformer Metal/MPSGraph backend

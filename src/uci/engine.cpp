@@ -151,9 +151,15 @@ Engine::Engine(std::optional<std::string> path)
   options.add("UseMCTS", Option(false));
 
   // Hybrid thread budgeting:
-  // 0 = auto (derived from Threads while reserving one coordinator thread).
+  // 0 = auto (derived from Threads; coordinator is outside the worker budget).
   options.add("HybridMCTSThreads", Option(0, 0, MaxThreads));
   options.add("HybridABThreads", Option(0, 0, MaxThreads));
+  options.add("HybridAutoABThreadsCap", Option(6, 0, MaxThreads));
+  options.add("HybridABPolicyWeight", Option("0.0"));
+  options.add("HybridMCTSMinimumKLDGainPerNode", Option("0.0"));
+  options.add("HybridMCTSRootReject", Option(true));
+  options.add("HybridTrace", Option(false));
+  options.add("TransformerMinMoveBudgetMs", Option(1200, 0, 5000));
 
   // Optional parity preset and exposed MCTS tuning controls
   options.add("MCTSParityPreset", Option(false));
@@ -170,6 +176,28 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSFpuReduction", Option("0.33"));
   options.add("MCTSFpuReductionAtRoot", Option("0.33"));
   options.add("MCTSPolicySoftmaxTemp", Option("1.359"));
+  options.add("MCTSMovesLeftMaxEffect", Option("0.0345"));
+  options.add("MCTSMovesLeftThreshold", Option("0.8"));
+  options.add("MCTSMovesLeftSlope", Option("0.0027"));
+  options.add("MCTSMovesLeftConstantFactor", Option("0.0"));
+  options.add("MCTSMovesLeftScaledFactor", Option("1.6521"));
+  options.add("MCTSMovesLeftQuadraticFactor", Option("-0.6521"));
+  options.add("MCTSTemperature", Option("0.0"));
+  options.add("MCTSTempValueCutoff", Option("100.0"));
+  options.add("MCTSSmartPruningFactor", Option("1.33"));
+  options.add("MCTSSmartPruningMinimumBatches", Option(0, 0, 10000));
+  options.add("MCTSMinimumKLDGainPerNode", Option("0.00005"));
+  options.add("MCTSKLDGainAverageInterval", Option(100, 1, 10000000));
+  options.add("MCTSTimeManager", Option("smooth"));
+  options.add("MCTSCacheHistoryLength", Option(0, 0, 7));
+  options.add("MCTSNNCacheSize", Option(2000000, 1, 100000000));
+  options.add("MCTSSolidTreeThreshold", Option(100, 0, 2000000000));
+  options.add("MCTSMaxPrefetch", Option(32, 0, 1024));
+  options.add("MCTSMaxCollisionEvents", Option(917, 1, 65536));
+  options.add("MCTSMaxCollisionVisits", Option(80000, 1, 100000000));
+  options.add("MCTSMaxCollisionVisitsScalingStart", Option(28, 1, 100000));
+  options.add("MCTSMaxCollisionVisitsScalingEnd", Option(145000, 0, 100000000));
+  options.add("MCTSMaxCollisionVisitsScalingPower", Option("1.25"));
   options.add("MCTSVirtualLoss", Option(1, 1, 128));
   // 0 = auto. On Apple Silicon, smaller batches win at the low MCTS thread
   // counts used for strength play; explicit values still override this.

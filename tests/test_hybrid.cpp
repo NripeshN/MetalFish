@@ -206,11 +206,21 @@ void test_shared_state() {
   {
     TestCase tc("MCTSSharedState reset");
     MCTSSharedState state;
+    state.num_top_moves.store(1);
+    state.top_moves[0].move_raw.store(Move(SQ_E2, SQ_E4).raw());
+    state.top_moves[0].policy.store(0.25f);
+    state.top_moves[0].visits.store(42);
+    state.top_moves[0].q.store(0.5f);
     state.reset();
 
     EXPECT(tc, state.best_move_raw.load() == 0);
     EXPECT(tc, state.best_q.load() == 0.0f);
     EXPECT(tc, state.best_visits.load() == 0);
+    EXPECT(tc, state.num_top_moves.load() == 0);
+    EXPECT(tc, state.top_moves[0].move_raw.load() == 0);
+    EXPECT(tc, state.top_moves[0].policy.load() == 0.0f);
+    EXPECT(tc, state.top_moves[0].visits.load() == 0);
+    EXPECT(tc, state.top_moves[0].q.load() == 0.0f);
     EXPECT(tc, !state.mcts_running.load());
   }
 }
@@ -225,6 +235,7 @@ void test_hybrid_config() {
     EXPECT(tc, config.ab_max_depth > config.ab_min_depth);
     EXPECT(tc, config.ab_policy_weight >= 0.0f);
     EXPECT(tc, config.ab_policy_weight <= 1.0f);
+    EXPECT(tc, config.mcts_root_reject);
   }
   {
     TestCase tc("Transformer batching settings");

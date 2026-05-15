@@ -20,6 +20,14 @@ CLEAN_REMOTE=1
 REMOTE_BUILD_DIR="build-native-ec2"
 REMOTE_CMAKE="/opt/homebrew/bin/cmake"
 ENGINE_BIN="$RDIR/$REMOTE_BUILD_DIR/metalfish"
+ENGINE_THREADS="${ENGINE_THREADS:-16}"
+MCTS_THREADS="${MCTS_THREADS:-1}"
+HYBRID_THREADS="${HYBRID_THREADS:-$ENGINE_THREADS}"
+HYBRID_MCTS_THREADS="${HYBRID_MCTS_THREADS:-0}"
+HYBRID_AB_THREADS="${HYBRID_AB_THREADS:-0}"
+HYBRID_AUTO_AB_THREADS_CAP="${HYBRID_AUTO_AB_THREADS_CAP:-2}"
+CUTECHESS_SEED="${CUTECHESS_SEED:-6147500}"
+OPENING_ORDER="${OPENING_ORDER:-random}"
 
 for arg in "$@"; do
     case $arg in
@@ -27,12 +35,39 @@ for arg in "$@"; do
         --games=*) GAMES="${arg#*=}" ;;
         --tc=*) TC="${arg#*=}" ;;
         --wait-ms=*) WAIT_MS="${arg#*=}" ;;
+        --threads=*) ENGINE_THREADS="${arg#*=}"; HYBRID_THREADS="${arg#*=}" ;;
+        --mcts-threads=*) MCTS_THREADS="${arg#*=}" ;;
+        --hybrid-threads=*) HYBRID_THREADS="${arg#*=}" ;;
+        --hybrid-mcts-threads=*) HYBRID_MCTS_THREADS="${arg#*=}" ;;
+        --hybrid-ab-threads=*) HYBRID_AB_THREADS="${arg#*=}" ;;
+        --hybrid-auto-ab-cap=*) HYBRID_AUTO_AB_THREADS_CAP="${arg#*=}" ;;
+        --seed=*) CUTECHESS_SEED="${arg#*=}" ;;
+        --opening-order=*) OPENING_ORDER="${arg#*=}" ;;
         --sync-local) SYNC_BIN=1 ;;
         --no-sync) SYNC_BIN=0 ;;
         --no-remote-build) REMOTE_BUILD=0 ;;
         --no-clean) CLEAN_REMOTE=0 ;;
     esac
 done
+
+if [ "$ENGINE_THREADS" -lt 1 ]; then
+    ENGINE_THREADS=1
+fi
+if [ "$MCTS_THREADS" -lt 1 ]; then
+    MCTS_THREADS=1
+fi
+if [ "$MCTS_THREADS" -ge "$ENGINE_THREADS" ] && [ "$ENGINE_THREADS" -gt 1 ]; then
+    MCTS_THREADS=$(( ENGINE_THREADS - 1 ))
+fi
+if [ "$HYBRID_THREADS" -lt 3 ]; then
+    HYBRID_THREADS=3
+fi
+if [ "$HYBRID_MCTS_THREADS" -gt 0 ] && [ "$HYBRID_MCTS_THREADS" -ge "$HYBRID_THREADS" ]; then
+    HYBRID_MCTS_THREADS=$(( HYBRID_THREADS - 1 ))
+fi
+if [ "$HYBRID_AB_THREADS" -gt 0 ] && [ "$HYBRID_AB_THREADS" -gt "$HYBRID_THREADS" ]; then
+    HYBRID_AB_THREADS=$HYBRID_THREADS
+fi
 
 mkdir -p "$RESULTS_DIR"
 ssh_cmd() { ssh -i "$PEM" -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=60 "$USER@$1" "${@:2}"; }
@@ -77,15 +112,13 @@ wait
 CC="$RDIR/reference/cutechess/build/cutechess-cli"
 BK="$RDIR/reference/books/8moves_v3.pgn"
 W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
-CA="-each tc=$TC -games $GAMES -repeat -recover -wait $WAIT_MS -openings file=$BK format=pgn order=random -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
+CA="-each tc=$TC -games $GAMES -repeat -recover -wait $WAIT_MS -srand $CUTECHESS_SEED -openings file=$BK format=pgn order=$OPENING_ORDER -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
 
-# Our engines — optimal thread configs per engine
-# AB: scales well with threads, give it all available cores
-# MCTS: best at 2 threads (more causes collisions), GPU does heavy lifting
-# Hybrid: all 20 cores — internally splits to 18 AB + 2 MCTS + GPU
-AB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-AB option.Threads=20 option.Hash=512"
-MCTS="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-MCTS option.Threads=2 option.UseMCTS=true option.NNWeights=$W timemargin=30000"
-HYB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-Hybrid option.Threads=20 option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W timemargin=30000"
+# Our engines: use Apple performance cores by default; the coordinator and OS
+# can occupy efficiency cores while search threads stay latency-oriented.
+AB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-AB option.Threads=$ENGINE_THREADS option.Hash=512"
+MCTS="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-MCTS option.Threads=$MCTS_THREADS option.UseMCTS=true option.NNWeights=$W option.MCTSMaxThreads=$MCTS_THREADS option.MCTSMinibatchSize=0 timemargin=30000"
+HYB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-Hybrid option.Threads=$HYBRID_THREADS option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W option.HybridMCTSThreads=$HYBRID_MCTS_THREADS option.HybridABThreads=$HYBRID_AB_THREADS option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP option.MCTSMaxThreads=$HYBRID_MCTS_THREADS option.MCTSMinibatchSize=0 timemargin=30000"
 
 # Opponents — 1 thread each for controlled comparison
 S="$RDIR/reference/stockfish/src/stockfish"
@@ -158,6 +191,8 @@ echo "  Opponents:   Stockfish, SF-L16, SF-L14, SF-L12, SF-L10,"
 echo "               SF-L8, SF-L5, Berserk, Patricia, Lc0"
 echo ""
 echo "  33 matches × $GAMES games = $((33 * GAMES)) games | TC: $TC | wait: ${WAIT_MS}ms"
+echo "  Openings: order=$OPENING_ORDER | seed=$CUTECHESS_SEED"
+echo "  Threads: AB=$ENGINE_THREADS MCTS=$MCTS_THREADS Hybrid=$HYBRID_THREADS (HybridMCTS=$HYBRID_MCTS_THREADS, HybridAB=$HYBRID_AB_THREADS, HybridAutoABCap=$HYBRID_AUTO_AB_THREADS_CAP)"
 echo "  Results: $RESULTS_DIR"
 echo ""
 echo "  [1] AB vs 9 opponents       (~3100-3800 Elo ladder)"
