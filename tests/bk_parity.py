@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Unified BK parity harness for MetalFish MCTS and Lc0."""
 
 from __future__ import annotations
 
@@ -136,7 +135,6 @@ class UCISession:
         self.wait_for("readyok", 120)
 
     def search(self, fen: str, mode: str, movetime_ms: int, nodes: int) -> SearchResult:
-        # BK positions are independent tactical positions, not one game.
         self.send("ucinewgame")
         self.send("isready")
         self.wait_for("readyok", 120)

@@ -19,15 +19,15 @@ namespace NN {
 
 enum BoardTransform {
   kNoTransform = 0,
-  kFlipTransform = 1,     // Horizontal flip
-  kMirrorTransform = 2,   // Vertical mirror
-  kTransposeTransform = 4 // Diagonal transpose
+  kFlipTransform = 1,
+  kMirrorTransform = 2,
+  kTransposeTransform = 4
 };
 
 constexpr int kMoveHistory = 8;
 constexpr int kPlanesPerBoard = 13;
 constexpr int kAuxPlaneBase = kPlanesPerBoard * kMoveHistory;
-constexpr int kTotalPlanes = 112; // 8 history * 13 planes + 8 auxiliary
+constexpr int kTotalPlanes = 112;
 
 // 1792 regular moves + 66 underpromotions (22 directions * 3 piece types)
 constexpr int kPolicyOutputs = 1858;

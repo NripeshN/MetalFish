@@ -1,7 +1,6 @@
 /*
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
-  MCTS Search Stoppers - Time and node management
   Licensed under GPL-3.0
 */
 

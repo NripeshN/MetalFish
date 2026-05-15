@@ -90,9 +90,6 @@ constexpr Bitboard square_bb(Square s) {
   return (1ULL << s);
 }
 
-// Overloads of bitwise operators between a Bitboard and a Square for testing
-// whether a given bit is set in a bitboard, and for setting and clearing bits.
-
 constexpr Bitboard operator&(Bitboard b, Square s) { return b & square_bb(s); }
 constexpr Bitboard operator|(Bitboard b, Square s) { return b | square_bb(s); }
 constexpr Bitboard operator^(Bitboard b, Square s) { return b ^ square_bb(s); }
@@ -113,9 +110,6 @@ constexpr Bitboard operator|(Square s1, Square s2) {
 
 constexpr bool more_than_one(Bitboard b) { return b & (b - 1); }
 
-// rank_bb() and file_bb() return a bitboard representing all the squares on
-// the given file or rank.
-
 constexpr Bitboard rank_bb(Rank r) { return Rank1BB << (8 * r); }
 
 constexpr Bitboard rank_bb(Square s) { return rank_bb(rank_of(s)); }
@@ -124,7 +118,6 @@ constexpr Bitboard file_bb(File f) { return FileABB << f; }
 
 constexpr Bitboard file_bb(Square s) { return file_bb(file_of(s)); }
 
-// Moves a bitboard one or two steps as specified by the direction D
 template <Direction D> constexpr Bitboard shift(Bitboard b) {
   return D == NORTH           ? b << 8
          : D == SOUTH         ? b >> 8
@@ -139,39 +132,22 @@ template <Direction D> constexpr Bitboard shift(Bitboard b) {
                               : 0;
 }
 
-// Returns the squares attacked by pawns of the given color
-// from the squares in the given bitboard.
 template <Color C> constexpr Bitboard pawn_attacks_bb(Bitboard b) {
   return C == WHITE ? shift<NORTH_WEST>(b) | shift<NORTH_EAST>(b)
                     : shift<SOUTH_WEST>(b) | shift<SOUTH_EAST>(b);
 }
 
-// Returns a bitboard representing an entire line (from board edge
-// to board edge) that intersects the two given squares. If the given squares
-// are not on a same file/rank/diagonal, the function returns 0. For instance,
-// line_bb(SQ_C4, SQ_F7) will return a bitboard with the A2-G8 diagonal.
 inline Bitboard line_bb(Square s1, Square s2) {
 
   assert(is_ok(s1) && is_ok(s2));
   return LineBB[s1][s2];
 }
 
-// Returns a bitboard representing the squares in the semi-open
-// segment between the squares s1 and s2 (excluding s1 but including s2). If the
-// given squares are not on a same file/rank/diagonal, it returns s2. For
-// instance, between_bb(SQ_C4, SQ_F7) will return a bitboard with squares D5, E6
-// and F7, but between_bb(SQ_E6, SQ_F8) will return a bitboard with the square
-// F8. This trick allows to generate non-king evasion moves faster: the
-// defending piece must either interpose itself to cover the check or capture
-// the checking piece.
 inline Bitboard between_bb(Square s1, Square s2) {
 
   assert(is_ok(s1) && is_ok(s2));
   return BetweenBB[s1][s2];
 }
-
-// distance() functions return the distance between x and y, defined as the
-// number of steps for a king in x to reach y.
 
 template <typename T1 = Square> inline int distance(Square x, Square y);
 
@@ -196,7 +172,6 @@ constexpr int constexpr_popcount(Bitboard b) {
   return static_cast<int>((b * 0x0101010101010101ULL) >> 56);
 }
 
-// Counts the number of non-zero bits in a bitboard.
 inline int popcount(Bitboard b) {
 
 #ifndef USE_POPCNT
@@ -217,7 +192,6 @@ inline int popcount(Bitboard b) {
 #endif
 }
 
-// Returns the least significant bit in a non-zero bitboard.
 inline Square lsb(Bitboard b) {
   assert(b);
 
@@ -248,7 +222,6 @@ inline Square lsb(Bitboard b) {
 #endif
 }
 
-// Returns the most significant bit in a non-zero bitboard.
 inline Square msb(Bitboard b) {
   assert(b);
 
@@ -280,14 +253,11 @@ inline Square msb(Bitboard b) {
 #endif
 }
 
-// Returns the bitboard of the least significant
-// square of a non-zero bitboard. It is equivalent to square_bb(lsb(bb)).
 inline Bitboard least_significant_square_bb(Bitboard b) {
   assert(b);
   return b & -b;
 }
 
-// Finds and clears the least significant bit in a non-zero bitboard.
 inline Square pop_lsb(Bitboard &b) {
   assert(b);
   const Square s = lsb(b);
@@ -376,8 +346,6 @@ inline constexpr auto PseudoAttacks = []() constexpr {
   return attacks;
 }();
 
-// Returns the pseudo attacks of the given piece type
-// assuming an empty board.
 template <PieceType Pt>
 inline Bitboard attacks_bb(Square s, Color c = COLOR_NB) {
 
@@ -385,9 +353,6 @@ inline Bitboard attacks_bb(Square s, Color c = COLOR_NB) {
   return Pt == PAWN ? PseudoAttacks[c][s] : PseudoAttacks[Pt][s];
 }
 
-// Returns the attacks by the given piece
-// assuming the board is occupied according to the passed Bitboard.
-// Sliding piece attacks do not continue passed an occupied square.
 template <PieceType Pt>
 inline Bitboard attacks_bb(Square s, Bitboard occupied) {
 
@@ -404,9 +369,6 @@ inline Bitboard attacks_bb(Square s, Bitboard occupied) {
   }
 }
 
-// Returns the attacks by the given piece
-// assuming the board is occupied according to the passed Bitboard.
-// Sliding piece attacks do not continue passed an occupied square.
 inline Bitboard attacks_bb(PieceType pt, Square s, Bitboard occupied) {
 
   assert((pt != PAWN) && (is_ok(s)));

@@ -55,7 +55,6 @@ public:
         PositionHistoryView(history.data(), history.size()));
   }
 
-  // Batch evaluation with per-position history
   std::vector<EvaluationResult> EvaluateBatch(const Position *const *positions,
                                               size_t count);
   std::vector<EvaluationResult> EvaluateBatchWithHistory(
@@ -66,7 +65,6 @@ public:
       const std::vector<PositionHistoryView> &histories,
       const std::vector<LegalMovesView> &legal_moves);
 
-  // Get network information
   std::string GetNetworkInfo() const;
 
 private:

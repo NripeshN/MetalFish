@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""
-MetalFish Tournament Runner
-
-Single script for running head-to-head engine matches with:
-- UCI protocol communication
-- Opening book support (PGN)
-- Alternating colors
-- Resign detection
-- Draw adjudication (50-move, 3-fold repetition, insufficient material)
-- Live board display
-- JSON results output
-- Resume capability
-
-Usage:
-    python3 tools/run_tournament_live.py                    # Run full tournament
-    python3 tools/run_tournament_live.py --quick            # Quick 4-game matches
-    python3 tools/run_tournament_live.py --match AB Berserk # Single match
-    python3 tools/run_tournament_live.py --resume results/tournament_20260318/
-"""
 from __future__ import annotations
 
 import argparse
@@ -72,10 +53,6 @@ def detect_default_threads() -> int:
     n = os.cpu_count() or 8
     return max(1, n)
 
-
-# ============================================================================
-# UCI Engine
-# ============================================================================
 
 
 class UCIEngine:
@@ -253,10 +230,6 @@ class UCIEngine:
                 self.proc.wait()
 
 
-# ============================================================================
-# Opening Book
-# ============================================================================
-
 
 def load_openings(
     book_path: pathlib.Path,
@@ -264,7 +237,6 @@ def load_openings(
     seed: int = 6147500,
     order: str = "random",
 ) -> List[chess.Board]:
-    """Load opening positions from a PGN book."""
     openings = []
     if not book_path.exists():
         return openings
@@ -281,10 +253,6 @@ def load_openings(
         random.Random(seed).shuffle(openings)
     return openings
 
-
-# ============================================================================
-# Game Playing
-# ============================================================================
 
 
 @dataclass
@@ -320,7 +288,6 @@ def play_game(
     max_moves: int = 300,
     capture_search_log: bool = False,
 ) -> GameResult:
-    """Play one game between two engines."""
     if opening:
         board = opening.copy()
         start_fen = opening.fen()
@@ -453,10 +420,6 @@ def play_game(
     )
 
 
-# ============================================================================
-# Match Management
-# ============================================================================
-
 
 @dataclass
 class MatchResult:
@@ -499,7 +462,6 @@ def run_match(
     movetime_ms: int = 0,
     capture_search_log: bool = False,
 ) -> MatchResult:
-    """Run a match between two engines."""
     result = MatchResult(eng1_name, eng2_name)
     print(f"\n{'='*60}")
     print(f"  {eng1_name} vs {eng2_name}  ({num_games} games)")
@@ -593,13 +555,8 @@ def run_match(
     return result
 
 
-# ============================================================================
-# Tournament
-# ============================================================================
-
 
 def create_engine(name: str, cfg: dict, default_threads: int) -> Optional[UCIEngine]:
-    """Create a UCI engine from config."""
     path = PROJ / cfg["path"]
     if not path.exists():
         print(f"  SKIP {name}: binary not found at {path}")
@@ -631,7 +588,6 @@ def run_tournament(args):
     book_cfg = config.get("opening_book", {})
     default_threads = detect_default_threads()
 
-    # Load openings
     book_path = PROJ / book_cfg.get("file", "")
     openings = load_openings(
         book_path,
@@ -644,14 +600,11 @@ def run_tournament(args):
     else:
         print("No opening book found, using startpos")
 
-    # Parse time control
     tc_base_ms = args.tc_base * 1000
     tc_inc_ms = int(args.tc_inc * 1000)
     movetime_ms = args.movetime if args.movetime > 0 else 0
 
-    # Define matches
     if args.match:
-        # Single match mode
         matches = [(args.match[0], args.match[1])]
     else:
         matches = [
@@ -673,7 +626,6 @@ def run_tournament(args):
             ("MetalFish-Hybrid", "Lc0"),
         ]
 
-    # Setup results directory
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = RESULTS_BASE / f"tournament_{timestamp}"
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -691,7 +643,6 @@ def run_tournament(args):
     print(f"Openings: order={args.opening_order} | seed={args.seed}")
     print()
 
-    # Run matches
     all_results: List[dict] = []
     active_engines: Dict[str, UCIEngine] = {}
 
@@ -701,7 +652,6 @@ def run_tournament(args):
                 print(f"\n  SKIP {e1_name} vs {e2_name}: engine not in config")
                 continue
 
-            # Start engines (reuse if already running)
             for ename in [e1_name, e2_name]:
                 if ename not in active_engines:
                     eng = create_engine(ename, engines_cfg[ename], default_threads)
@@ -740,7 +690,6 @@ def run_tournament(args):
             }
             all_results.append(match_data)
 
-            # Save incremental results
             with open(results_dir / "results.json", "w") as f:
                 json.dump(
                     {
@@ -763,7 +712,6 @@ def run_tournament(args):
         for eng in active_engines.values():
             eng.close()
 
-    # Print summary
     print(f"\n{'='*60}")
     print(f"  TOURNAMENT SUMMARY")
     print(f"{'='*60}")
@@ -781,7 +729,6 @@ def run_tournament(args):
             f"{m['pct']*100:5.1f}% {m['elo_diff']:+6.0f}"
         )
 
-    # Estimate Elo ratings
     print(f"\n  Estimated Elo Ratings (relative to anchors):")
     anchors = {
         n: c["expected_elo"]
@@ -805,10 +752,6 @@ def run_tournament(args):
     print(f"\nResults saved: {results_dir / 'results.json'}")
     return 0
 
-
-# ============================================================================
-# Main
-# ============================================================================
 
 
 def main():

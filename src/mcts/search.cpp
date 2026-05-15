@@ -196,7 +196,6 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
     }
   }
 
-  // Warm up MPSGraph before the search clock starts.
   if (backend_) {
     Position warmup_pos;
     StateInfo warmup_st;
@@ -296,17 +295,20 @@ void Search::StartSearch(const std::string &fen,
 
   stopper_ = std::make_unique<ChainedStopper>();
   if (!limits_.infinite) {
+    const bool node_only_limit =
+        limits_.nodes > 0 && time_budget_ms_ <= 0 && limits_.movetime <= 0 &&
+        limits_.time[WHITE] <= 0 && limits_.time[BLACK] <= 0;
     if (time_budget_ms_ > 0) {
       stopper_->Add(std::make_unique<TimeLimitStopper>(time_budget_ms_));
     }
     if (limits_.nodes > 0) {
       stopper_->Add(std::make_unique<NodeLimitStopper>(limits_.nodes));
     }
-    if (params_.kld_gain_min > 0.0f) {
+    if (!node_only_limit && params_.kld_gain_min > 0.0f) {
       stopper_->Add(std::make_unique<KLDGainStopper>(
           params_.kld_gain_min, params_.kld_gain_average_interval));
     }
-    if (params_.smart_pruning_factor > 0.0f) {
+    if (!node_only_limit && params_.smart_pruning_factor > 0.0f) {
       stopper_->Add(std::make_unique<SmartPruningStopper>(
           params_.smart_pruning_factor, params_.smart_pruning_minimum_batches));
       smart_pruning_enabled_ = true;
@@ -352,7 +354,6 @@ void Search::Wait() {
   workers_.clear();
   running_.store(false, std::memory_order_release);
 
-  // Update time management state for next search
   auto elapsed = std::chrono::steady_clock::now() - search_start_;
   int64_t elapsed_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
@@ -684,8 +685,6 @@ bool Search::ShouldStop() const {
   if (stop)
     return true;
 
-  // Stop if the best-visited move is a proven checkmate even when smart
-  // pruning is disabled.
   if (stats.win_found)
     return true;
 
@@ -701,11 +700,6 @@ void Search::WorkerThreadMain(int thread_id) {
   ctx.SetRootFen(tree_.RootFen());
 
   auto last_info = std::chrono::steady_clock::now();
-  // The batch path is useful even with a single worker in real timed searches:
-  // after the root eval it can gather independent leaves and amortize MPSGraph
-  // launch latency. Keep fixed-node diagnostics on direct evaluations because
-  // small exact-node runs are latency-sensitive and are used for reproducible
-  // correctness probes.
   bool use_semaphore =
       limits_.nodes == 0 && backend_ && params_.minibatch_size > 1;
 
@@ -858,6 +852,7 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
         computation->ComputeBlocking();
         apply_nn_result(computation->GetResult(0));
         stats_.nn_evaluations.fetch_add(1, std::memory_order_relaxed);
+        stats_.total_batches.fetch_add(1, std::memory_order_relaxed);
       }
       ReleaseComputation(std::move(computation));
     }
@@ -1151,31 +1146,14 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
     return;
   }
 
-  try {
-    const auto batch_start = std::chrono::steady_clock::now();
-    computation->ComputeBlocking();
-    const auto batch_elapsed =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - batch_start)
-            .count();
-    UpdateBackendLatencyMargin(batch_elapsed);
-  } catch (...) {
-    uint64_t failed_visits = 0;
-    for (auto &entry : local_batch) {
-      Backpropagate(entry.leaf, 0.0f, 1.0f, 30.0f, entry.multivisit);
-      failed_visits += static_cast<uint64_t>(entry.multivisit);
-    }
-    backend_waiting_.fetch_sub(1, std::memory_order_relaxed);
-    stats_.total_nodes.fetch_add(failed_visits, std::memory_order_relaxed);
-    if (failed_visits > 0)
-      stats_.total_batches.fetch_add(1, std::memory_order_relaxed);
-    if (computation)
-      ReleaseComputation(std::move(computation));
-    return;
-  }
+  const auto batch_start = std::chrono::steady_clock::now();
+  computation->ComputeBlocking();
+  const auto batch_elapsed =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - batch_start)
+          .count();
+  UpdateBackendLatencyMargin(batch_elapsed);
 
-  // Early exit after GPU returns if stop was requested during computation.
-  // Cancel virtual losses and release resources without processing results.
   if (ShouldStop()) {
     cancel_local_batch();
     backend_waiting_.fetch_sub(1, std::memory_order_relaxed);
@@ -1402,7 +1380,6 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
     const Edge &edge = edges[i];
     Node *child = edge.child.load(std::memory_order_acquire);
 
-    // Skip children already queued for neural evaluation to avoid collisions.
     if (child && child->GetN() == 0 && child->GetNInFlight() > 0) {
       continue;
     }
@@ -1448,7 +1425,6 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
     }
   }
 
-  // Multivisit: visits until second-best overtakes (Lc0 visits_to_perform).
   int visits_to_assign = 1;
   if (best_idx >= 0 && num_edges > 1 && second_best_score > -1e8f) {
     float best_q_component =
@@ -1459,7 +1435,6 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       float v = cpuct_sqrt_n * best_policy / margin -
                 static_cast<float>(best_n_started) - 1.0f;
       visits_to_assign = std::max(1, static_cast<int>(v));
-      // Cap at reasonable maximum
       visits_to_assign = std::min(visits_to_assign, 128);
     }
   }

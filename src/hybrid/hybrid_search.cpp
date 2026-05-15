@@ -119,10 +119,9 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
           config_.mcts_config.nn_weights_path,
           static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size))));
 
-  if (engine_) {
-    shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
-    mcts_search_->SetSharedTT(shared_tt_reader_.get());
-  }
+  shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
+  mcts_search_->SetSharedTT(config_.use_shared_tt ? shared_tt_reader_.get()
+                                                  : nullptr);
 
   ab_state_.reset();
   mcts_state_.reset();
@@ -249,7 +248,6 @@ void ParallelHybridSearch::ponderhit() {
 }
 
 void ParallelHybridSearch::wait() {
-  // Ensure stop signals have been sent to sub-engines so they will terminate.
   stop_flag_.store(true, std::memory_order_release);
   if (mcts_search_)
     mcts_search_->Stop();
@@ -327,7 +325,11 @@ void ParallelHybridSearch::new_game() {
                                       1, config_.mcts_config.nn_cache_size))));
     if (engine_) {
       shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
-      mcts_search_->SetSharedTT(shared_tt_reader_.get());
+      mcts_search_->SetSharedTT(config_.use_shared_tt ? shared_tt_reader_.get()
+                                                      : nullptr);
+    } else {
+      shared_tt_reader_.reset();
+      mcts_search_->SetSharedTT(nullptr);
     }
   }
 }
@@ -396,13 +398,11 @@ bool ParallelHybridSearch::should_stop() const {
   return false;
 }
 
-// MCTS thread - runs transformer-backed MCTS. NNUE remains CPU-only in AB.
 void ParallelHybridSearch::mcts_thread_main() {
 #ifdef __APPLE__
   set_thread_qos(QOS_CLASS_USER_INITIATED);
 #endif
 
-  // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
     ~ThreadGuard() {
@@ -426,9 +426,7 @@ void ParallelHybridSearch::mcts_thread_main() {
   mcts_limits.startTime = now();
   mcts_limits.searchmoves = limits_.searchmoves;
 
-  // Check if stop was already requested before launching MCTS.
-  // This prevents the race where stop() clears the flag before StartSearch
-  // can see it (StartSearch resets its own stop_flag at the start).
+  // Prevent race: stop() may fire before StartSearch resets its own stop_flag.
   if (should_stop())
     return;
 
@@ -440,16 +438,22 @@ void ParallelHybridSearch::mcts_thread_main() {
     mcts_done = true;
   };
 
-  // Start MCTS search with FEN string
+  // AB TT probes currently expand MCTS leaves with uniform policy, which is
+  // not strength-safe for normal searches. Ponder is the exception: the older
+  // TT-backed path avoids repeated pure-NN ponder lifecycle crashes on
+  // MPSGraph, and final arbitration remains AB-verified after ponderhit.
+  if (shared_tt_reader_) {
+    mcts_search_->SetSharedTT((config_.use_shared_tt || limits_.ponderMode)
+                                  ? shared_tt_reader_.get()
+                                  : nullptr);
+  }
+
   mcts_search_->StartSearch(root_fen_, mcts_limits, mcts_callback, nullptr);
 
-  // Re-check after StartSearch: if stop was requested during launch, ensure
-  // the MCTS search sees it (StartSearch resets its own internal stop_flag).
   if (should_stop()) {
     mcts_search_->Stop();
   }
 
-  // Periodically update shared state and check for AB policy updates
   int update_interval_ms = config_.policy_update_interval_ms;
   auto last_update = std::chrono::steady_clock::now();
   uint64_t last_ab_counter = 0;
@@ -586,7 +590,6 @@ void ParallelHybridSearch::ab_thread_main() {
   set_thread_qos(QOS_CLASS_USER_INITIATED);
 #endif
 
-  // RAII guard to ensure we always signal completion
   struct ThreadGuard {
     ParallelHybridSearch *self;
     ~ThreadGuard() {
@@ -612,7 +615,6 @@ void ParallelHybridSearch::run_ab_search() {
   if (should_stop())
     return;
 
-  // Temporarily resize AB worker threads to avoid oversubscribing cores
   const int original_threads =
       static_cast<int>(engine_->get_options()["Threads"]);
   const int requested_ab_threads = std::max(1, config_.ab_threads);
@@ -629,7 +631,6 @@ void ParallelHybridSearch::run_ab_search() {
 
   engine_->set_position(root_fen_, {});
 
-  // Pass real time controls so Stockfish's time manager handles allocation
   ::MetalFish::Search::LimitsType ab_limits = limits_;
   ab_limits.startTime = now();
 
@@ -639,7 +640,6 @@ void ParallelHybridSearch::run_ab_search() {
   int ab_score = 0;
   int ab_depth = 0;
 
-  // Hook per-depth update to capture score and PV
   engine_->set_on_update_full([this, &ab_score,
                                &ab_depth](const Engine::InfoFull &info) {
     ab_score = info.score.visit([](auto &&val) -> int {
@@ -673,9 +673,6 @@ void ParallelHybridSearch::run_ab_search() {
       }
 
       pv_moves.push_back(move);
-      if (pv_moves.size() >= ABSharedState::MAX_PV) {
-        break;
-      }
 
       pv_states.emplace_back();
       pos.do_move(move, pv_states.back());
@@ -722,7 +719,6 @@ void ParallelHybridSearch::publish_ab_state(Move best, int score, int depth,
   ab_state_.set_best_move(best, score, depth, nodes);
 }
 
-// Coordinator thread - monitors both searches and makes final decision
 void ParallelHybridSearch::coordinator_thread_main() {
 #ifdef __APPLE__
   set_thread_qos(QOS_CLASS_UTILITY);
@@ -745,16 +741,12 @@ void ParallelHybridSearch::coordinator_thread_main() {
   uint32_t last_mcts_move_raw = 0;
   int64_t last_info_ms = 0;
 
-  // AB's time manager is the master clock. Coordinator stops when:
-  // (1) AB finishes, (2) both agree on a move, or (3) safety hard cap fires.
   while (!should_stop()) {
     std::this_thread::sleep_for(std::chrono::microseconds(500));
 
     bool ab_done = !ab_state_.ab_running.load(std::memory_order_acquire);
     bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
 
-    // AB finished -- for clock-managed games AB owns the move allocation,
-    // but explicit analysis budgets should still give MCTS the requested time
     if (ab_done && ab_state_.has_result.load(std::memory_order_acquire)) {
       if (!HybridShouldContinueMCTSAfterAB(limits_) || mcts_done) {
         break;
@@ -765,7 +757,6 @@ void ParallelHybridSearch::coordinator_thread_main() {
     auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
-    // Agreement-based early stopping (only safe in clock-managed play)
     uint32_t ab_move = ab_state_.best_move_raw.load(std::memory_order_relaxed);
     uint32_t mcts_move =
         mcts_state_.best_move_raw.load(std::memory_order_relaxed);
@@ -805,7 +796,6 @@ void ParallelHybridSearch::coordinator_thread_main() {
       }
     }
 
-    // Send combined info every ~500ms
     if (ms - last_info_ms >= 500) {
       last_info_ms = ms;
       uint64_t mcts_nodes = mcts_search_
@@ -840,24 +830,19 @@ void ParallelHybridSearch::coordinator_thread_main() {
   if (engine_)
     engine_->stop();
 
-  // Wait for both AB and MCTS threads to finish before making decision.
-  // MCTS must finish because it owns GPU resources that can't be accessed
-  // after the coordinator fires the callback. AB is fast to stop (CPU-only).
-  // No cap on MCTS wait — it WILL finish after Stop() since Metal dispatches
+  // MCTS must finish before callback — it owns GPU resources. Metal dispatches
   // complete in bounded time (~500ms max on Apple Silicon).
   while (!mcts_thread_done_.load(std::memory_order_acquire) ||
          !ab_thread_done_.load(std::memory_order_acquire)) {
     std::this_thread::sleep_for(std::chrono::microseconds(500));
   }
 
-  // Capture freshest MCTS result before deciding
   if (mcts_search_) {
     publish_mcts_state();
   }
 
   Move final_move = make_final_decision();
 
-  // Fallback: if no valid move, find any legal move
   if (final_move == Move::none()) {
     final_move = first_allowed_legal_move();
   }
@@ -895,7 +880,19 @@ void ParallelHybridSearch::coordinator_thread_main() {
   send_info_string(
       "Final: MCTS=" + std::to_string(stats_.mcts_nodes.load()) + " MCTSBest=" +
       std::to_string(mcts_state_.best_visits.load(std::memory_order_relaxed)) +
+      " MCTSRootVisits=" +
+      std::to_string(mcts_state_.total_nodes.load(std::memory_order_relaxed)) +
+      " MCTSEvals=" +
+      std::to_string(stats_.transformer_evaluations.load(
+          std::memory_order_relaxed)) +
+      " MCTSBatches=" +
+      std::to_string(stats_.transformer_batches.load(
+          std::memory_order_relaxed)) +
+      " MCTSTimeMs=" + std::to_string(static_cast<int>(stats_.mcts_time_ms)) +
       " AB=" + std::to_string(stats_.ab_nodes.load()) +
+      " ABDepth=" + std::to_string(stats_.ab_depth.load()) +
+      " ABTimeMs=" + std::to_string(static_cast<int>(stats_.ab_time_ms)) +
+      " TotalTimeMs=" + std::to_string(static_cast<int>(stats_.total_time_ms)) +
       " ABMove=" + UCIEngine::move(ab_best, false) +
       " MCTSMove=" + UCIEngine::move(mcts_best, false) +
       " agreements=" + std::to_string(stats_.move_agreements.load()) +

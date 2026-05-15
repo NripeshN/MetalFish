@@ -2,8 +2,6 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Implementation of the position adapter layer for MCTS.
-
   Licensed under GPL-3.0
 */
 
@@ -112,14 +110,12 @@ bool MCTSPosition::can_castle_queenside(Color c) const {
 }
 
 std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
-  // 112 input planes of 8x8 = 7168 values
   std::vector<float> planes(kTotalPlanes * 64, 0.0f);
 
   const Position &p = pos.internal_position();
   Color us = p.side_to_move();
   Color them = ~us;
 
-  // Encode piece positions (planes 0-11: our pieces, their pieces)
   auto encode_pieces = [&](int base_plane, Color c) {
     for (PieceType pt = PAWN; pt <= KING; ++pt) {
       Bitboard bb = p.pieces(c, pt);
@@ -134,15 +130,13 @@ std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
     }
   };
 
-  encode_pieces(0, us);   // Our pieces: planes 0-5
-  encode_pieces(6, them); // Their pieces: planes 6-11
+  encode_pieces(0, us);
+  encode_pieces(6, them);
 
-  // Repetition planes (plane 12)
   if (pos.repetition_count() >= 1) {
     std::fill_n(planes.data() + 12 * 64, 64, 1.0f);
   }
 
-  // Castling rights (planes 13-16)
   if (pos.can_castle_kingside(us))
     std::fill_n(planes.data() + 13 * 64, 64, 1.0f);
   if (pos.can_castle_queenside(us))
@@ -152,14 +146,12 @@ std::vector<float> MCTSEncoder::encode_position(const MCTSPosition &pos) {
   if (pos.can_castle_queenside(them))
     std::fill_n(planes.data() + 16 * 64, 64, 1.0f);
 
-  // En passant (plane 17)
   Square ep = pos.en_passant_square();
   if (ep != SQ_NONE) {
     Square encoded_ep = (us == BLACK) ? flip_rank(ep) : ep;
     planes[17 * 64 + encoded_ep] = 1.0f;
   }
 
-  // 50-move rule counter (plane 18), normalized
   float rule50 = static_cast<float>(pos.rule50_count()) / 100.0f;
   std::fill_n(planes.data() + 18 * 64, 64, rule50);
 

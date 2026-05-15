@@ -1,8 +1,6 @@
 /*
   MetalFish - Metal GPU Backend Tests
   Covers Metal backend basics and verifies GPU NNUE stays disabled.
-
-  Tests Metal backend availability and buffer management. NNUE is CPU-only.
 */
 
 #include "test_common.h"
@@ -55,14 +53,12 @@ static bool test_metal_buffers() {
 
   auto &backend = GPU::gpu();
 
-  // Test buffer allocation
   constexpr size_t BUF_SIZE = 1024;
   auto buf = backend.create_buffer(BUF_SIZE * sizeof(float));
   EXPECT(tc, buf != nullptr);
   EXPECT(tc, buf->data() != nullptr);
   EXPECT_GE(tc, buf->size(), BUF_SIZE * sizeof(float));
 
-  // Test write + read back
   float *ptr = static_cast<float *>(buf->data());
   for (size_t i = 0; i < BUF_SIZE; ++i)
     ptr[i] = static_cast<float>(i);
@@ -71,7 +67,6 @@ static bool test_metal_buffers() {
     EXPECT_NEAR(tc, ptr[i], static_cast<float>(i), 0.001f);
   }
 
-  // Test unified memory (zero-copy)
   if (backend.has_unified_memory()) {
     ptr[0] = 42.0f;
     EXPECT_NEAR(tc, ptr[0], 42.0f, 0.001f);

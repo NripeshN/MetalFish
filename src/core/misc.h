@@ -110,7 +110,6 @@ std::ostream &operator<<(std::ostream &, SyncCout);
 void sync_cout_start();
 void sync_cout_end();
 
-// True if and only if the binary is compiled on a little-endian machine
 static inline const std::uint16_t Le = 1;
 static inline const bool IsLittleEndian =
     *reinterpret_cast<const char *>(&Le) == 1;
@@ -393,7 +392,6 @@ void move_to_front(std::vector<T> &vec, Predicate pred) {
 #elif defined(_MSC_VER)
 #define sf_always_inline __forceinline
 #else
-  // do nothing for other compilers
 #define sf_always_inline
 #endif
 
@@ -408,7 +406,6 @@ void move_to_front(std::vector<T> &vec, Predicate pred) {
   } while (0)
 #endif
 #else
-  // do nothing for other compilers
 #define sf_assume(cond)
 #endif
 

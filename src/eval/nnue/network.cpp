@@ -25,14 +25,6 @@
 #include "nnue_common.h"
 #include "nnue_misc.h"
 
-// Macro to embed the default efficiently updatable neural network (NNUE) file
-// data in the engine binary (using incbin.h, by Dale Weiler).
-// This macro invocation will declare the following three variables
-//     const unsigned char        gEmbeddedNNUEData[];  // a pointer to the
-//     embedded data const unsigned char *const gEmbeddedNNUEEnd;     // a
-//     marker to the end const unsigned int         gEmbeddedNNUESize;    // the
-//     size of the embedded file
-// Note that this does not work in Microsoft Visual Studio.
 #if !defined(_MSC_VER) && !defined(NNUE_EMBEDDING_OFF)
 INCBIN(EmbeddedNNUEBig, EvalFileDefaultNameBig);
 INCBIN(EmbeddedNNUESmall, EvalFileDefaultNameSmall);
@@ -74,7 +66,6 @@ namespace MetalFish::Eval::NNUE {
 
 namespace Detail {
 
-// Read evaluation function parameters
 template <typename T> bool read_parameters(std::istream &stream, T &reference) {
 
   std::uint32_t header;
@@ -84,7 +75,6 @@ template <typename T> bool read_parameters(std::istream &stream, T &reference) {
   return reference.read_parameters(stream);
 }
 
-// Write evaluation function parameters
 template <typename T>
 bool write_parameters(std::ostream &stream, const T &reference) {
 
@@ -254,7 +244,6 @@ void Network<Arch, Transformer>::load_user_net(
 
 template <typename Arch, typename Transformer>
 void Network<Arch, Transformer>::load_internal() {
-  // C++ way to prepare a buffer for a memory stream
   class MemoryBuffer : public std::basic_streambuf<char> {
   public:
     MemoryBuffer(char *p, size_t n) {
@@ -317,7 +306,6 @@ std::size_t Network<Arch, Transformer>::get_content_hash() const {
   return h;
 }
 
-// Read network header
 template <typename Arch, typename Transformer>
 bool Network<Arch, Transformer>::read_header(std::istream &stream,
                                              std::uint32_t *hashValue,
@@ -334,7 +322,6 @@ bool Network<Arch, Transformer>::read_header(std::istream &stream,
   return !stream.fail();
 }
 
-// Write network header
 template <typename Arch, typename Transformer>
 bool Network<Arch, Transformer>::write_header(std::ostream &stream,
                                               std::uint32_t hashValue,
@@ -376,8 +363,6 @@ bool Network<Arch, Transformer>::write_parameters(
   }
   return bool(stream);
 }
-
-// Explicit template instantiations
 
 template class Network<
     NetworkArchitecture<TransformedFeatureDimensionsBig, L2Big, L3Big>,

@@ -16,15 +16,13 @@
 #include <string>
 
 namespace MetalFish {
-// Define a custom comparator, because the UCI options should be
-// case-insensitive
+
 struct CaseInsensitiveLess {
   bool operator()(const std::string &, const std::string &) const;
 };
 
 class OptionsMap;
 
-// The Option class implements each option as specified by the UCI protocol
 class Option {
 public:
   using OnChange = std::function<std::optional<std::string>(const Option &)>;
@@ -84,7 +82,6 @@ private:
 
   friend std::ostream &operator<<(std::ostream &, const OptionsMap &);
 
-  // The options container is defined as a std::map
   using OptionsStore = std::map<std::string, Option, CaseInsensitiveLess>;
 
   OptionsStore options_map;

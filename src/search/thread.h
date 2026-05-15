@@ -87,7 +87,7 @@ private:
   std::mutex mutex;
   std::condition_variable cv;
   size_t idx, idxInNuma, totalNuma, nthreads;
-  bool exit = false, searching = true; // Set before starting std::thread
+  bool exit = false, searching = true;
   NativeThread stdThread;
   NumaReplicatedAccessToken numaAccessToken;
 };
@@ -100,10 +100,8 @@ public:
   ThreadPool() {}
 
   ~ThreadPool() {
-    // destroy any existing thread(s)
     if (threads.size() > 0) {
       main_thread()->wait_for_search_finished();
-
       threads.clear();
     }
   }

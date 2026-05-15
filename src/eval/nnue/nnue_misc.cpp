@@ -5,8 +5,6 @@
   Licensed under GPL-3.0
 */
 
-// Code for calculating NNUE evaluation function
-
 #include "nnue_misc.h"
 
 #include <cmath>
@@ -30,8 +28,6 @@ namespace MetalFish::Eval::NNUE {
 constexpr std::string_view PieceToChar(" PNBRQK  pnbrqk");
 
 namespace {
-// Converts a Value into (centi)pawns and writes it in a buffer.
-// The buffer must have capacity for at least 5 chars.
 void format_cp_compact(Value v, char *buffer, const Position &pos) {
 
   buffer[0] = (v < 0 ? '-' : v > 0 ? '+' : ' ');
@@ -61,7 +57,6 @@ void format_cp_compact(Value v, char *buffer, const Position &pos) {
   }
 }
 
-// Converts a Value into pawns, always keeping two decimals
 void format_cp_aligned_dot(Value v, std::stringstream &stream,
                            const Position &pos) {
 
@@ -75,8 +70,6 @@ void format_cp_aligned_dot(Value v, std::stringstream &stream,
 }
 } // namespace
 
-// Returns a string with the value of each piece on a board,
-// and a table for (PSQT, Layers) values bucket by bucket.
 std::string trace(Position &pos, const Eval::NNUE::Networks &networks,
                   Eval::NNUE::AccumulatorCaches &caches) {
 
@@ -105,8 +98,6 @@ std::string trace(Position &pos, const Eval::NNUE::Networks &networks,
 
   auto accumulators = std::make_unique<AccumulatorStack>();
 
-  // We estimate the value of each piece by doing a differential evaluation from
-  // the current base eval, simulating the removal of the piece from its square.
   auto [psqt, positional] =
       networks.big.evaluate(pos, *accumulators, caches.big);
   Value base = psqt + positional;

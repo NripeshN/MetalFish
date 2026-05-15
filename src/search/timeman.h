@@ -43,8 +43,8 @@ private:
   TimePoint optimumTime;
   TimePoint maximumTime;
 
-  std::int64_t availableNodes = -1; // When in 'nodes as time' mode
-  bool useNodesTime = false;        // True if we are in 'nodes as time' mode
+  std::int64_t availableNodes = -1;
+  bool useNodesTime = false;
 };
 
 } // namespace MetalFish

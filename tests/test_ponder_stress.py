@@ -137,7 +137,6 @@ def main():
             except OSError:
                 pass
 
-    # Init
     send("uci")
     r = read_until("uciok", 30)
     if not r or r == "TIMEOUT":
@@ -182,7 +181,6 @@ def main():
 
         stats["total"] += 1
 
-        # === Pattern A: go ponder -> ponderhit -> bestmove ===
         send(pos_cmd)
         send("go ponder wtime 60000 btime 60000 winc 1000 binc 1000")
         time.sleep(0.3 + (i % 3) * 0.1)
@@ -207,7 +205,6 @@ def main():
             continue
         stats["ponderhit_ok"] += 1
 
-        # === Pattern B: follow-up search must work ===
         send(pos_cmd)
         send("go movetime 200")
         r = read_until("bestmove", TIMEOUT_FOLLOWUP)
@@ -223,7 +220,6 @@ def main():
             continue
         stats["followup_ok"] += 1
 
-        # === Pattern C: go ponder -> stop (not ponderhit) -> bestmove ===
         send(pos_cmd)
         send("go ponder wtime 60000 btime 60000")
         time.sleep(0.2)

@@ -28,7 +28,6 @@ namespace MetalFish {
 
 namespace {
 
-// Version number or dev.
 constexpr std::string_view version = "dev";
 
 // Our fancy logging facility. The trick here is to replace cin.rdbuf() and
@@ -146,7 +145,6 @@ std::string engine_info(bool to_uci) {
          "Nripesh Niketan";
 }
 
-// Returns a string trying to describe the compiler we use
 std::string compiler_info() {
 
 #define make_version_string(major, minor, patch)                               \
@@ -395,8 +393,6 @@ void dbg_clear() {
   extremes.fill({});
 }
 
-// Used to serialize access to std::cout
-// to avoid multiple threads writing at the same time.
 std::ostream &operator<<(std::ostream &os, SyncCout sc) {
 
   static std::mutex m;
@@ -487,10 +483,8 @@ std::string CommandLine::get_binary_directory(std::string argv0) {
   pathSeparator = "/";
 #endif
 
-  // Extract the working directory
   auto workingDirectory = CommandLine::get_working_directory();
 
-  // Extract the binary directory path from argv0
   auto binaryDirectory = argv0;
   size_t pos = binaryDirectory.find_last_of("\\/");
   if (pos == std::string::npos)
@@ -498,8 +492,6 @@ std::string CommandLine::get_binary_directory(std::string argv0) {
   else
     binaryDirectory.resize(pos + 1);
 
-  // Pattern replacement: "./" at the start of path is replaced by the working
-  // directory
   if (binaryDirectory.find("." + pathSeparator) == 0)
     binaryDirectory.replace(0, 1, workingDirectory);
 

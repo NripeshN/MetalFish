@@ -85,14 +85,11 @@ MetalNetwork::MetalNetwork(const WeightsFile &file, int gpu_id, int max_batch,
       attn_policy_(file.format().network_format().policy() ==
                    MetalFishNN::NetworkFormat_PolicyFormat_POLICY_ATTENTION),
       max_batch_size_(max_batch), batch_size_(batch) {
-  // Build weights representation.
   MultiHeadWeights weights(file.weights());
 
-  // Initialize Metal builder.
   builder_ = std::make_unique<MetalNetworkBuilder>();
   device_name_ = builder_->init(gpu_id);
 
-  // Activation selection.
   const auto &nf = file.format().network_format();
   Activations activations;
   activations.default_activation =
@@ -113,7 +110,6 @@ MetalNetwork::MetalNetwork(const WeightsFile &file, int gpu_id, int max_batch,
     activations.ffn_activation = activations.default_activation;
   }
 
-  // Policy/value head selection.
   std::string policy_head = "vanilla";
   if (weights.policy_heads.count(policy_head) == 0) {
     if (!weights.policy_heads.empty()) {
@@ -147,8 +143,6 @@ MetalNetwork::MetalNetwork(const WeightsFile &file, int gpu_id, int max_batch,
 
 MetalNetwork::~MetalNetwork() = default;
 
-// ---- Buffer pool: avoids heap allocation on every inference call ----
-
 InputsOutputs *MetalNetwork::AcquireIO() {
 #ifdef __APPLE__
   os_unfair_lock_lock(&io_pool_lock_);
@@ -181,8 +175,6 @@ void MetalNetwork::ReleaseIO(InputsOutputs *io) {
 #endif
 }
 
-// ---- Inference entry points ----
-
 NetworkOutput MetalNetwork::Evaluate(const InputPlanes &input) {
   std::vector<NetworkOutput> outputs(1);
   RunBatch(std::span<const InputPlanes>(&input, 1), outputs);
@@ -203,13 +195,8 @@ void MetalNetwork::RunBatch(std::span<const InputPlanes> inputs,
     throw std::runtime_error("Batch size exceeds configured max batch size");
   }
 
-  // Acquire a pre-allocated IO buffer from the pool (no heap alloc).
   InputsOutputs *io = AcquireIO();
 
-  // Pack inputs into mask/value representation.
-  // Optimized: known uniform planes can be represented without scanning 64
-  // floats. This is hot in MCTS/Hybrid because every transformer request is
-  // repacked into Metal's mask/value layout.
   for (int b = 0; b < batch; ++b) {
     const int base = b * kInputPlanes;
     for (int p = 0; p < kInputPlanes; ++p) {
@@ -235,7 +222,6 @@ void MetalNetwork::RunBatch(std::span<const InputPlanes> inputs,
     }
   }
 
-  // Convert outputs.
   for (int b = 0; b < batch; ++b) {
     NetworkOutput &out = outputs[b];
     std::memcpy(out.policy.data(), &io->op_policy_mem_[b * kNumOutputPolicy],
@@ -258,7 +244,6 @@ void MetalNetwork::RunBatch(std::span<const InputPlanes> inputs,
     }
   }
 
-  // Return IO buffer to the pool for reuse.
   ReleaseIO(io);
 }
 

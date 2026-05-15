@@ -20,7 +20,6 @@
 #include "../src/core/bitboard.h"
 #include "../src/core/position.h"
 
-// Test module declarations
 bool test_core();
 bool test_search();
 bool test_eval_gpu();
@@ -33,7 +32,6 @@ int main(int argc, char *argv[]) {
 
   std::cout << "=== MetalFish Test Suite ===" << std::endl;
 
-  // Filter: if a test name is passed as argument, run only that test
   std::string filter = (argc > 1) ? argv[1] : "";
 
   struct TestEntry {

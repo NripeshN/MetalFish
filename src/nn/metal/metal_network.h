@@ -43,7 +43,6 @@ private:
   void RunBatch(std::span<const InputPlanes> inputs,
                 std::vector<NetworkOutput> &outputs);
 
-  // Buffer pool to avoid per-inference heap allocations.
   InputsOutputs *AcquireIO();
   void ReleaseIO(InputsOutputs *io);
 

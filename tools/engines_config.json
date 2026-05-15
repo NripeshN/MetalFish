@@ -39,7 +39,8 @@
         "MCTSMaxThreads": "0",
         "MCTSMinibatchSize": "0",
         "HybridMCTSMinimumKLDGainPerNode": "0.0",
-        "HybridMCTSRootReject": "true"
+        "HybridMCTSRootReject": "true",
+        "HybridMCTSUseSharedTT": "false"
       }
     },
     "Stockfish": {

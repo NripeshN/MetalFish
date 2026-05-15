@@ -415,24 +415,23 @@ private:
     }
   }
 
-  std::atomic<double> wl_{0.0};   // 8  bytes - Win-Loss (double precision)
-  std::unique_ptr<Edge[]> edges_; // 8  bytes
-  Node *parent_ = nullptr;        // 8  bytes
-  std::atomic<float> d_{0.0f};    // 4  bytes - Draw probability
-  std::atomic<float> m_{0.0f};    // 4  bytes - Moves left estimate
-  std::atomic<uint32_t> n_{0};    // 4  bytes - Visit count
-  std::atomic<uint32_t> n_in_flight_{0};  // 4  bytes - In-flight virtual visits
-  uint16_t index_ = 0;                    // 2  bytes - Edge index in parent
-  uint8_t num_edges_ = 0;                 // 1  byte  - Number of edges
-  std::atomic<uint8_t> terminal_type_{0}; // 1  byte  - Terminal enum
+  std::atomic<double> wl_{0.0};
+  std::unique_ptr<Edge[]> edges_;
+  Node *parent_ = nullptr;
+  std::atomic<float> d_{0.0f};
+  std::atomic<float> m_{0.0f};
+  std::atomic<uint32_t> n_{0};
+  std::atomic<uint32_t> n_in_flight_{0};
+  uint16_t index_ = 0;
+  uint8_t num_edges_ = 0;
+  std::atomic<uint8_t> terminal_type_{0};
 #ifdef __APPLE__
-  mutable os_unfair_lock score_lock_ = OS_UNFAIR_LOCK_INIT; // 4 bytes
+  mutable os_unfair_lock score_lock_ = OS_UNFAIR_LOCK_INIT;
 #else
   mutable std::mutex score_lock_;
 #endif
-  Node *solid_base_ = nullptr;  // 8 bytes — contiguous child array
-  bool solid_children_ = false; // 1 byte  — children are solidified
-  // Total: 48 + 8 + 1 + 7 padding = 64 bytes on Apple
+  Node *solid_base_ = nullptr;
+  bool solid_children_ = false;
 };
 
 class NodeGarbageCollector {
@@ -449,8 +448,6 @@ public:
   NodeGarbageCollector &operator=(const NodeGarbageCollector &) = delete;
 
   void AddToQueue(std::unique_ptr<Node> node) {
-    if (!node)
-      return;
     std::lock_guard<std::mutex> lock(gc_mutex_);
     gc_queue_.push_back(std::move(node));
   }
@@ -621,20 +618,12 @@ public:
         }
       }
       // Current arena is full – allocate a new one under lock.
-#ifdef __APPLE__
       os_unfair_lock_lock(&arena_lock_);
-#else
-      os_unfair_lock_lock(&arena_lock_);
-#endif
       if (current_arena_.load(std::memory_order_acquire) == arena_idx) {
         AllocateNewArena();
         current_arena_.store(arenas_.size() - 1, std::memory_order_release);
       }
-#ifdef __APPLE__
       os_unfair_lock_unlock(&arena_lock_);
-#else
-      os_unfair_lock_unlock(&arena_lock_);
-#endif
     }
   }
 
@@ -679,11 +668,7 @@ private:
   std::vector<std::unique_ptr<NodeArena>> arenas_;
   std::atomic<size_t> current_arena_{0};
 
-#ifdef __APPLE__
   os_unfair_lock arena_lock_ = OS_UNFAIR_LOCK_INIT;
-#else
-  os_unfair_lock arena_lock_ = OS_UNFAIR_LOCK_INIT;
-#endif
 
   void AllocateNewArena() { arenas_.push_back(std::make_unique<NodeArena>()); }
 };

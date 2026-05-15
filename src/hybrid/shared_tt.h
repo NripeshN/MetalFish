@@ -33,10 +33,8 @@ public:
 
     int cp = std::clamp(static_cast<int>(data.value), -10000, 10000);
 
-    // Logistic cp → win probability
     float win_prob = 1.0f / (1.0f + std::pow(10.0f, -cp / 400.0f));
 
-    // Estimate draw probability from score magnitude
     float draw_est = std::max(0.0f, 1.0f - 2.0f * std::abs(win_prob - 0.5f));
     float w = win_prob * (1.0f - draw_est);
     float l = (1.0f - win_prob) * (1.0f - draw_est);

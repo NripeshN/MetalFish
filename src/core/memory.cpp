@@ -92,7 +92,6 @@ aligned_large_pages_alloc_windows([[maybe_unused]] size_t allocSize) {
 
   return windows_try_with_large_page_priviliges(
       [&](size_t largePageSize) {
-        // Round up size to full pages and allocate
         allocSize =
             (allocSize + largePageSize - 1) & ~size_t(largePageSize - 1);
         return VirtualAlloc(nullptr, allocSize,
@@ -104,10 +103,8 @@ aligned_large_pages_alloc_windows([[maybe_unused]] size_t allocSize) {
 
 void *aligned_large_pages_alloc(size_t allocSize) {
 
-  // Try to allocate large pages
   void *mem = aligned_large_pages_alloc_windows(allocSize);
 
-  // Fall back to regular, page-aligned, allocation if necessary
   if (!mem)
     mem = VirtualAlloc(nullptr, allocSize, MEM_RESERVE | MEM_COMMIT,
                        PAGE_READWRITE);
@@ -127,7 +124,6 @@ void *aligned_large_pages_alloc(size_t allocSize) {
   constexpr size_t alignment = 4096; // small page size assumed
 #endif
 
-  // Round up to multiples of alignment
   size_t size = ((allocSize + alignment - 1) / alignment) * alignment;
   void *mem = std_aligned_alloc(alignment, size);
 #if defined(MADV_HUGEPAGE)
@@ -165,9 +161,6 @@ bool has_large_pages() {
 
 #endif
 }
-
-// aligned_large_pages_free() will free the previously memory allocated
-// by aligned_large_pages_alloc(). The effect is a nop if mem == nullptr.
 
 #if defined(_WIN32)
 

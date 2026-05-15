@@ -119,6 +119,7 @@ ENGINE_OPTIONS = {
     "MCTSMaxThreads": str(HYBRID_MCTS_THREADS),
     "HybridMCTSMinimumKLDGainPerNode": "0.0",
     "HybridMCTSRootReject": "true",
+    "HybridMCTSUseSharedTT": "false",
     "Move Overhead": "500",
     "MCTSMinibatchSize": "0",
     "MCTSMinimumKLDGainPerNode": "0.00005",
@@ -301,7 +302,6 @@ class UCIEngine:
         movestogo=None,
         timeout: float = 600,
     ) -> tuple[str, str | None]:
-        """Returns (bestmove, ponder_move_or_None)."""
         self._send("isready")
         self._wait_for("readyok")
         self._drain_available_output()
@@ -337,7 +337,6 @@ class UCIEngine:
         winc=None,
         binc=None,
     ):
-        """Start thinking on opponent's time (go ponder)."""
         self.stop_pondering()
         all_moves = moves + [ponder_move]
         self.set_position(initial_fen, all_moves)
@@ -406,7 +405,6 @@ class UCIEngine:
         *,
         restart_on_failure: bool = True,
     ) -> bool:
-        """Stop pondering if active."""
         if not self._pondering:
             return True
 
@@ -689,8 +687,6 @@ class LichessBot:
         t = threading.Thread(target=watch_stdin, daemon=True)
         t.start()
 
-    # ---- Seeking ----
-
     def seek_game(self):
         if not self._seek_lock.acquire(blocking=False):
             return
@@ -735,7 +731,6 @@ class LichessBot:
                 bot_id = bot.get("id", "")
                 if not bot_id or bot_id == self.bot_id:
                     continue
-                # Skip bots on cooldown
                 cooldown_until = self._declined_cooldown.get(bot_id, 0)
                 if now < cooldown_until:
                     continue
@@ -751,7 +746,6 @@ class LichessBot:
                 candidates = [b.get("id", "") for b in bots]
                 random.shuffle(candidates)
 
-            # Challenge ONE bot at a time, wait for response
             target = candidates[0]
             rated = self.args.accept_rated
             r = self.api_post(
@@ -782,7 +776,6 @@ class LichessBot:
                 print("  Rate limited, backing off...")
                 self._rate_limit_count += 1
                 if self._rate_limit_count >= 3:
-                    # Likely hit daily challenge cap — back off aggressively
                     backoff = 900  # 15 minutes
                     print(
                         f"  Possible daily cap hit. Waiting {backoff//60}min before retrying."
@@ -792,7 +785,6 @@ class LichessBot:
                     print(f"  Waiting {backoff}s...")
                 self._schedule_retry(backoff)
             else:
-                # Bot doesn't accept — cooldown and try another
                 self._cooldown_bot(target, duration=300)
                 self._schedule_retry(2)
         except Exception as e:
@@ -800,12 +792,10 @@ class LichessBot:
             self._schedule_retry(15)
 
     def _cooldown_bot(self, bot_id: str | None, duration: int = 600):
-        """Put a bot on cooldown so we don't re-challenge it."""
         if bot_id:
             self._declined_cooldown[bot_id] = time.time() + duration
 
     def _cleanup_cooldowns(self):
-        """Remove expired cooldowns."""
         now = time.time()
         self._declined_cooldown = {
             k: v for k, v in self._declined_cooldown.items() if v > now
@@ -868,7 +858,6 @@ class LichessBot:
         return rotation_tcs
 
     def _advance_rotation(self):
-        """Advance to next TC. Call only after a game starts successfully."""
         rotation_tcs = self._rotation_tcs()
         self._rotation_idx = (self._rotation_idx + 1) % len(rotation_tcs)
 
@@ -883,7 +872,6 @@ class LichessBot:
         return "classical"
 
     def _bot_plays_speed(self, bot: dict, speed: str) -> bool:
-        """Check if bot has played games in this speed (non-provisional)."""
         perfs = bot.get("perfs", {})
         perf = perfs.get(speed, {})
         games = perf.get("games", 0)
@@ -895,7 +883,6 @@ class LichessBot:
         rating = perf.get("rating")
         if rating and not perf.get("prov", False):
             return rating
-        # Fall back: try any available rating
         for s in ("blitz", "rapid", "bullet", "classical"):
             p = perfs.get(s, {})
             if p.get("rating") and not p.get("prov", False):
@@ -903,7 +890,6 @@ class LichessBot:
         return None
 
     def _filter_bots_by_elo(self, bots: list[dict], speed: str) -> list[str]:
-        """Filter bots that actually play the target speed, sorted by Elo proximity."""
         if not self.args.elo_seek:
             # Still filter by speed activity even without elo-seek
             active = [b for b in bots if self._bot_plays_speed(b, speed)]
@@ -940,13 +926,11 @@ class LichessBot:
             return ids
 
         scored.sort(key=lambda x: x[0])
-        # Slight randomization among close-rated bots
         top = scored[:15]
         random.shuffle(top)
         return [bot_id for _, bot_id in top]
 
     def _our_rating(self, speed: str) -> int:
-        """Get our bot's rating for the given speed."""
         if not hasattr(self, "_cached_ratings"):
             self._cached_ratings = {}
             try:
@@ -961,7 +945,6 @@ class LichessBot:
         return self._cached_ratings.get(speed, self.args.elo_target or 1500)
 
     def _current_elo_range(self) -> int:
-        """Returns the current Elo range, widening after failed attempts."""
         base = self.args.elo_range if self.args.elo_range else 200
         return base + self._elo_widen_steps * 100
 
@@ -979,8 +962,6 @@ class LichessBot:
             and not self._draining.is_set()
             and self._reserved_games() < self.args.max_games
         )
-
-    # ---- Challenge acceptance ----
 
     def should_accept(self, challenge: dict) -> bool:
         if self._draining.is_set():
@@ -1010,8 +991,6 @@ class LichessBot:
         if self._reserved_games() >= self.args.max_games:
             return False
         return True
-
-    # ---- Game play ----
 
     def play_game(self, game_id: str):
         print(f"  [{game_id}] Starting...")
@@ -1116,7 +1095,6 @@ class LichessBot:
         )
 
         if not is_my_turn:
-            # Keep any active ponder search running while the opponent is on move.
             return
 
         board = self._build_board(game_id, initial_fen, moves)
@@ -1131,8 +1109,6 @@ class LichessBot:
             my_color, wtime, btime, winc, binc
         )
 
-        # My turn: if the opponent played the predicted ponder move, convert that
-        # search before doing any new book/engine work.
         if engine.ponder_move:
             if self._last_move_matches_ponder(
                 game_id, initial_fen, moves, engine.ponder_move
@@ -1171,8 +1147,6 @@ class LichessBot:
                 if not engine.stop_pondering(timeout=ponder_stop_timeout):
                     print(f"  [{game_id}] Ponder stop timed out; engine restarted")
 
-        # Opening book. Explorer calls are remote and count against our clock on
-        # Lichess, so only use them early while there is enough clock cushion.
         if self._should_query_book(board, my_color, wtime, btime):
             book_move = self.book.lookup(board.fen())
             if book_move:
@@ -1195,7 +1169,6 @@ class LichessBot:
                         )
                     return
 
-        # Engine search
         if not engine.alive():
             print(f"  [{game_id}] Engine died, restarting")
             try:
@@ -1594,8 +1567,6 @@ class LichessBot:
             return total
 
         return max(legal_moves, key=score).uci()
-
-    # ---- Main loop ----
 
     def run(self):
         profile = self.get_profile()

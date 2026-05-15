@@ -61,11 +61,6 @@ void partial_insertion_sort(ExtMove *begin, ExtMove *end, int limit) {
 
 } // namespace
 
-// Constructors of the MovePicker class. As arguments, we pass information
-// to decide which class of moves to emit, to help sorting the (presumably)
-// good moves first, and how important move ordering is at the current node.
-
-// MovePicker constructor for the main search and for the quiescence search
 MovePicker::MovePicker(const Position &p, Move ttm, Depth d,
                        const ButterflyHistory *mh, const LowPlyHistory *lph,
                        const CapturePieceToHistory *cph,
@@ -83,8 +78,6 @@ MovePicker::MovePicker(const Position &p, Move ttm, Depth d,
         (depth > 0 ? MAIN_TT : QSEARCH_TT) + !(ttm && pos.pseudo_legal(ttm));
 }
 
-// MovePicker constructor for ProbCut: we generate captures with Static Exchange
-// Evaluation (SEE) greater than or equal to the given threshold.
 MovePicker::MovePicker(const Position &p, Move ttm, int th,
                        const CapturePieceToHistory *cph)
     : pos(p), captureHistory(cph), ttMove(ttm), threshold(th) {
@@ -132,7 +125,6 @@ template <GenType Type> ExtMove *MovePicker::score(MoveList<Type> &ml) {
     else if constexpr (Type == QUIETS) {
       const PieceType pt = type_of(pc);
 
-      // histories
       m.value = 2 * (*mainHistory)[us][m.raw()];
       m.value += 2 * sharedHistory->pawn_entry(pos)[pc][to];
       m.value += (*continuationHistory[0])[pc][to];
@@ -141,12 +133,9 @@ template <GenType Type> ExtMove *MovePicker::score(MoveList<Type> &ml) {
       m.value += (*continuationHistory[3])[pc][to];
       m.value += (*continuationHistory[5])[pc][to];
 
-      // bonus for checks
       m.value +=
           (bool(pos.check_squares(pt) & to) && pos.see_ge(m, -75)) * 16384;
 
-      // penalty for moving to a square threatened by a lesser piece
-      // or bonus for escaping an attack by a lesser piece.
       int v =
           threatByLesser[pt] & to ? -19 : 20 * bool(threatByLesser[pt] & from);
       m.value += PieceValue[pt] * v;
@@ -169,8 +158,6 @@ template <GenType Type> ExtMove *MovePicker::score(MoveList<Type> &ml) {
   return it;
 }
 
-// Returns the next move satisfying a predicate function.
-// This never returns the TT move, as it was emitted before.
 template <typename Pred> Move MovePicker::select(Pred filter) {
 
   for (; cur < endCur; ++cur)
@@ -180,9 +167,6 @@ template <typename Pred> Move MovePicker::select(Pred filter) {
   return Move::none();
 }
 
-// This is the most important method of the MovePicker class. We emit one
-// new pseudo-legal move on every call until there are no more moves left,
-// picking the move with the highest score from a list of generated moves.
 Move MovePicker::next_move() {
 
   constexpr int goodQuietThreshold = -14000;
@@ -238,7 +222,6 @@ top:
         select([&]() { return cur->value > goodQuietThreshold; }))
       return *(cur - 1);
 
-    // Prepare the pointers to loop over the bad captures
     cur = moves;
     endCur = endBadCaptures;
 
@@ -249,7 +232,6 @@ top:
     if (select([]() { return true; }))
       return *(cur - 1);
 
-    // Prepare the pointers to loop over quiets again
     cur = endCaptures;
     endCur = endGenerated;
 
@@ -282,7 +264,7 @@ top:
   }
 
   assert(false);
-  return Move::none(); // Silence warning
+  return Move::none();
 }
 
 void MovePicker::skip_quiet_moves() { skipQuiets = true; }

@@ -43,14 +43,11 @@ using WeightType = std::int16_t;
 using PSQTWeightType = std::int32_t;
 using IndexType = std::uint32_t;
 
-// Version of the evaluation file
 constexpr std::uint32_t Version = 0x7AF32F20u;
 
-// Constant used in evaluation value calculation
 constexpr int OutputScale = 16;
 constexpr int WeightScaleBits = 6;
 
-// Size of cache line (in bytes)
 constexpr std::size_t CacheLineSize = 64;
 
 constexpr const char Leb128MagicString[] = "COMPRESSED_LEB128";
@@ -70,19 +67,13 @@ constexpr std::size_t SimdWidth = 16;
 
 constexpr std::size_t MaxSimdWidth = 32;
 
-// Type of input feature after conversion
 using TransformedFeatureType = std::uint8_t;
 
-// Round n up to be a multiple of base
 template <typename IntType>
 constexpr IntType ceil_to_multiple(IntType n, IntType base) {
   return (n + base - 1) / base * base;
 }
 
-// Utility to read an integer (signed or unsigned, any size)
-// from a stream in little-endian order. We swap the byte order after the read
-// if necessary to return a result with the byte ordering of the compiling
-// machine.
 template <typename IntType>
 inline IntType read_little_endian(std::istream &stream) {
   IntType result;
@@ -103,10 +94,6 @@ inline IntType read_little_endian(std::istream &stream) {
   return result;
 }
 
-// Utility to write an integer (signed or unsigned, any size)
-// to a stream in little-endian order. We swap the byte order before the write
-// if necessary to always write in little-endian order, independently of the
-// byte ordering of the compiling machine.
 template <typename IntType>
 inline void write_little_endian(std::ostream &stream, IntType value) {
 
@@ -130,8 +117,6 @@ inline void write_little_endian(std::ostream &stream, IntType value) {
   }
 }
 
-// Read integers in bulk from a little-endian stream.
-// This reads N integers from stream s and puts them in array out.
 template <typename IntType>
 inline void read_little_endian(std::istream &stream, IntType *out,
                                std::size_t count) {
@@ -142,8 +127,6 @@ inline void read_little_endian(std::istream &stream, IntType *out,
       out[i] = read_little_endian<IntType>(stream);
 }
 
-// Write integers in bulk to a little-endian stream.
-// This takes N integers from array values and writes them on stream s.
 template <typename IntType>
 inline void write_little_endian(std::ostream &stream, const IntType *values,
                                 std::size_t count) {
@@ -155,10 +138,6 @@ inline void write_little_endian(std::ostream &stream, const IntType *values,
       write_little_endian<IntType>(stream, values[i]);
 }
 
-// Read N signed integers from the stream s, putting them in the array out.
-// The stream is assumed to be compressed using the signed LEB128 format.
-// See https://en.wikipedia.org/wiki/LEB128 for a description of the compression
-// scheme.
 template <typename BufType, typename IntType, std::size_t Count>
 inline void read_leb_128_detail(std::istream &stream,
                                 std::array<IntType, Count> &out,
@@ -196,7 +175,6 @@ inline void read_leb_128_detail(std::istream &stream,
 
 template <typename... Arrays>
 inline void read_leb_128(std::istream &stream, Arrays &...outs) {
-  // Check the presence of our LEB128 magic string
   char leb128MagicString[Leb128MagicStringSize];
   stream.read(leb128MagicString, Leb128MagicStringSize);
   assert(strncmp(Leb128MagicString, leb128MagicString, Leb128MagicStringSize) ==
@@ -211,16 +189,10 @@ inline void read_leb_128(std::istream &stream, Arrays &...outs) {
   assert(bytes_left == 0);
 }
 
-// Write signed integers to a stream with LEB128 compression.
-// This takes N integers from array values, compresses them with
-// the LEB128 algorithm and writes the result on the stream s.
-// See https://en.wikipedia.org/wiki/LEB128 for a description of the compression
-// scheme.
 template <typename IntType, std::size_t Count>
 inline void write_leb_128(std::ostream &stream,
                           const std::array<IntType, Count> &values) {
 
-  // Write our LEB128 magic string
   stream.write(Leb128MagicString, Leb128MagicStringSize);
 
   static_assert(std::is_signed_v<IntType>,

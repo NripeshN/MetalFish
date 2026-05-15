@@ -156,11 +156,6 @@ int ChooseTransform(const Position &pos, Color us) {
   return transform;
 }
 
-uint64_t GetPieceBitboard(const Position &pos, PieceType pt, Color c) {
-  Bitboard bb = pos.pieces(c, pt);
-  return bb;
-}
-
 void FillPlaneFromBitboard(std::array<float, 64> &plane, uint64_t bitboard) {
   plane.fill(0.0f);
   while (bitboard) {
@@ -414,16 +409,16 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
     int base = i * kPlanesPerBoard;
 
     uint64_t our_pieces[6] = {
-        GetPieceBitboard(pos, PAWN, us),   GetPieceBitboard(pos, KNIGHT, us),
-        GetPieceBitboard(pos, BISHOP, us), GetPieceBitboard(pos, ROOK, us),
-        GetPieceBitboard(pos, QUEEN, us),  GetPieceBitboard(pos, KING, us)};
+        pos.pieces(us, PAWN),   pos.pieces(us, KNIGHT),
+        pos.pieces(us, BISHOP), pos.pieces(us, ROOK),
+        pos.pieces(us, QUEEN),  pos.pieces(us, KING)};
 
-    uint64_t their_pieces[6] = {GetPieceBitboard(pos, PAWN, them),
-                                GetPieceBitboard(pos, KNIGHT, them),
-                                GetPieceBitboard(pos, BISHOP, them),
-                                GetPieceBitboard(pos, ROOK, them),
-                                GetPieceBitboard(pos, QUEEN, them),
-                                GetPieceBitboard(pos, KING, them)};
+    uint64_t their_pieces[6] = {pos.pieces(them, PAWN),
+                                pos.pieces(them, KNIGHT),
+                                pos.pieces(them, BISHOP),
+                                pos.pieces(them, ROOK),
+                                pos.pieces(them, QUEEN),
+                                pos.pieces(them, KING)};
 
     if (us == BLACK) {
       for (int piece = 0; piece < 6; ++piece) {

@@ -32,8 +32,6 @@ Bitboard BishopTable[0x1480]; // To store bishop attacks
 void init_magics(PieceType pt, Bitboard table[], Magic magics[][2]);
 } // namespace
 
-// Returns an ASCII representation of a bitboard suitable
-// to be printed to standard output. Useful for debugging.
 std::string Bitboards::pretty(Bitboard b) {
 
   std::string s = "+---+---+---+---+---+---+---+---+\n";
@@ -49,8 +47,6 @@ std::string Bitboards::pretty(Bitboard b) {
   return s;
 }
 
-// Initializes various bitboard tables. It is called at
-// startup and relies on global objects to be already zero-initialized.
 void Bitboards::init() {
 
   for (unsigned i = 0; i < (1 << 16); ++i)

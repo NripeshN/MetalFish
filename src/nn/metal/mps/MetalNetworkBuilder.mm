@@ -18,18 +18,15 @@ MetalNetworkBuilder::MetalNetworkBuilder(void) {}
 MetalNetworkBuilder::~MetalNetworkBuilder(void) {}
 
 std::string MetalNetworkBuilder::init(int gpu_id) {
-  // All metal devices.
   NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
 
   if ((NSUInteger)gpu_id >= [devices count]) {
-    // No GPU device matching ID.
     [NSException
          raise:@"Could not find device"
         format:@"Could not find a GPU or CPU compute device with specified id"];
     return "";
   }
 
-  // Initialize the metal MPS Graph executor with the selected device.
   [MetalNetworkGraph graphWithDevice:devices[gpu_id]
                                index:[NSNumber numberWithInt:gpu_id]];
 
@@ -55,7 +52,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
   NSString *policyHead = [NSString stringWithUTF8String:policy_head.c_str()];
   NSString *valueHead = [NSString stringWithUTF8String:value_head.c_str()];
 
-  // 0. Input value and mask placeholders.
   MPSGraphTensor *layer = [graph inputPlaceholderWithInputChannels:kInputPlanes
                                                              label:@"inputs"];
 
@@ -71,18 +67,15 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
   const bool isPeDenseEmbedding =
       embedding == InputEmbedding::INPUT_EMBEDDING_PE_DENSE;
 
-  // Initialize global smolgen weights.
   if (weights.has_smolgen) {
     [graph setGlobalSmolgenWeights:&weights.smolgen_w[0]];
   }
 
-  // Input conv layer only when there are residual blocks.
   if (weights.residual.size() > 0) {
 
     const NSUInteger channelSize =
         weights.input.weights.size() / (kInputPlanes * kernelSize * kernelSize);
 
-    // 1. Input layer
     layer = [graph addConvolutionBlockWithParent:layer
                                   outputChannels:channelSize
                                       kernelSize:kernelSize
@@ -91,7 +84,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                       activation:defaultActivation
                                            label:@"input/conv"];
 
-    // 2. Residual blocks
     for (size_t i = 0; i < weights.residual.size(); i++) {
       layer = [graph
           addResidualBlockWithParent:layer
@@ -112,20 +104,16 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
     }
   }
 
-  // Attention body.
   if (attn_body) {
     assert(weights.ip_emb_b.size() > 0);
 
-    // 1. NCHW -> NHWC
     layer = [graph transposeChannelsWithTensor:layer
                                      withShape:@[ @(-1), @64, layer.shape[1] ]
                                          label:@"input/nchw_nhwc"];
 
-    // 2a. Input embedding for attention body.
     if (weights.residual.size() == 0) {
       // No residual means pure transformer, so process input position encoding.
       if (isPeDenseEmbedding) {
-        // New input position encoding.
         layer = [graph
             dynamicPositionEncodingWithTensor:layer
                                         width:weights.ip_emb_preproc_b.size() /
@@ -134,7 +122,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                        biases:&weights.ip_emb_preproc_b[0]
                                         label:@"input/position_encoding"];
       } else {
-        // Old input position encoding with map.
         layer = [graph positionEncodingWithTensor:layer
                                         withShape:@[ @64, @64 ]
                                           weights:&kPosEncoding[0][0]
@@ -143,7 +130,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
       }
     }
 
-    // Embedding layer.
     layer = [graph addFullyConnectedLayerWithParent:layer
                                      outputChannels:weights.ip_emb_b.size()
                                             weights:&weights.ip_emb_w[0]
@@ -151,7 +137,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                          activation:defaultActivation
                                               label:@"input/embedding"];
 
-    // Add layernorm for new nets.
     if (isPeDenseEmbedding) {
       layer =
           [graph addLayerNormalizationWithParent:layer
@@ -183,7 +168,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
 
     float alpha = (float)pow(2.0 * weights.encoder.size(), -0.25);
     if (isPeDenseEmbedding) {
-      // Input embedding feedforward network added for new multihead nets.
       MPSGraphTensor *ffn = [graph
           addFullyConnectedLayerWithParent:layer
                             outputChannels:weights.ip_emb_ffn.dense1_b.size()
@@ -200,7 +184,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                 activation:nil
                                      label:@"input/embedding/ffn/dense2"];
 
-      // Skip connection + RMS Norm.
       layer = [graph
           addLayerNormalizationWithParent:layer
                     scaledSecondaryTensor:ffn
@@ -211,7 +194,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                     label:@"input/embedding/ffn_ln"];
     }
 
-    // 2b. Attention body encoder layers.
     for (size_t i = 0; i < weights.encoder.size(); i++) {
       layer = [graph
           addEncoderLayerWithParent:layer
@@ -228,10 +210,8 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
     }
   }
 
-  // 3. Policy head.
   MPSGraphTensor *policy;
   if (attn_policy && !attn_body) {
-    // NCHW -> NHWC
     policy = [graph transposeChannelsWithTensor:layer
                                       withShape:@[ @(-1), @64, layer.shape[1] ]
                                           label:@"policy/nchw_nhwc"];
@@ -251,7 +231,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                 label:[NSString stringWithFormat:@"policy/%@",
                                                                  policyHead]];
 
-  // 4. Value head.
   MPSGraphTensor *value =
       [graph makeValueHeadWithTensor:layer
                        attentionBody:attn_body
@@ -261,7 +240,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                label:[NSString stringWithFormat:@"value/%@",
                                                                 valueHead]];
 
-  // 5. Moves left head.
   MPSGraphTensor *mlh;
   if (moves_left) {
     if (attn_body) {
@@ -299,7 +277,6 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                             label:@"moves_left/fc2"];
   }
 
-  // Select the outputs to be run through the inference graph.
   if (moves_left) {
     [graph setResultTensors:@[ policy, value, mlh ]];
   } else {

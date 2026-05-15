@@ -34,13 +34,11 @@ void OptionsMap::add_info_listener(InfoListener &&message_func) {
 void OptionsMap::setoption(std::istringstream &is) {
   std::string token, name, value;
 
-  is >> token; // Consume the "name" token
+  is >> token;
 
-  // Read the option name (can contain spaces)
   while (is >> token && token != "value")
     name += (name.empty() ? "" : " ") + token;
 
-  // Read the option value (can contain spaces)
   while (is >> token)
     value += (value.empty() ? "" : " ") + token;
 
@@ -56,7 +54,6 @@ const Option &OptionsMap::operator[](const std::string &name) const {
   return it->second;
 }
 
-// Inits options and assigns idx in the correct printing order
 void OptionsMap::add(const std::string &name, const Option &option) {
   if (!options_map.count(name)) {
     static size_t insert_order = 0;
@@ -119,9 +116,8 @@ bool Option::operator==(const char *s) const {
 
 bool Option::operator!=(const char *s) const { return !(*this == s); }
 
-// Updates currentValue and triggers on_change() action. It's up to
-// the GUI to check for option's limits, but we could receive the new value
-// from the user by console window, so let's check the bounds anyway.
+// It's up to the GUI to check option limits, but we validate bounds anyway
+// since values can also arrive via the console.
 Option &Option::operator=(const std::string &v) {
 
   assert(!type.empty());

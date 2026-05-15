@@ -63,7 +63,6 @@ public:
   }
 
   void operator<<(int bonus) {
-    // Make sure that bonus is in range [-D, D]
     int clampedBonus = std::clamp(bonus, -D, D);
     T val = *this;
     *this = val + clampedBonus - val * std::abs(clampedBonus) / D;
@@ -88,7 +87,6 @@ template <typename T, int SizeMultiplier> struct DynStats {
     size = s * SizeMultiplier;
     data = make_unique_large_page<T[]>(size);
   }
-  // Sets all values in the range to 0
   void clear_range(int value, size_t threadIdx, size_t numaTotal) {
     size_t start = uint64_t(threadIdx) * size / numaTotal;
     assert(start < size);

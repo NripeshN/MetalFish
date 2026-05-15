@@ -48,18 +48,12 @@ public:
 
   std::uint64_t perft(const std::string &fen, Depth depth, bool isChess960);
 
-  // non blocking call to start searching
   void go(Search::LimitsType &);
-  // non blocking call to stop searching
   void stop();
 
-  // blocking call to wait for search to finish
   void wait_for_search_finished();
-  // set a new position, moves are in UCI format
   void set_position(const std::string &fen,
                     const std::vector<std::string> &moves);
-
-  // modifiers
 
   void set_numa_config_from_option(const std::string &o);
   void resize_threads();
@@ -74,15 +68,11 @@ public:
   set_on_bestmove(std::function<void(std::string_view, std::string_view)> &&);
   void set_on_verify_networks(std::function<void(std::string_view)> &&);
 
-  // Getters for callbacks (for save/restore in hybrid search)
   std::function<void(std::string_view, std::string_view)> get_on_bestmove();
   std::function<void(const InfoFull &)> get_on_update_full();
 
-  // Thread accessors for hybrid search
   Thread *threads_get_best();
   uint64_t threads_nodes_searched();
-
-  // network related
 
   void verify_networks() const;
   void load_networks();
@@ -90,8 +80,6 @@ public:
   void load_small_network(const std::string &file);
   void save_network(
       const std::pair<std::optional<std::string>, std::string> files[2]);
-
-  // utility functions
 
   void trace_eval() const;
 
@@ -109,10 +97,6 @@ public:
   std::string numa_config_information_as_string() const;
   std::string thread_allocation_information_as_string() const;
   std::string thread_binding_information_as_string() const;
-
-  // ============================================================================
-  // Hybrid Search Integration
-  // ============================================================================
 
   struct QuickSearchResult {
     Move best_move = Move::none();

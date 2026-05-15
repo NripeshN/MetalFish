@@ -32,7 +32,7 @@ namespace NN {
 namespace {
 
 const std::uint32_t kWeightMagic = 0x1c0;
-const int kStartingSize = 8 * 1024 * 1024; // 8M
+const int kStartingSize = 8 * 1024 * 1024;
 
 std::string DecompressGzip(const std::string &filename) {
   std::string buffer;

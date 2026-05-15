@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """
-MetalFish Testing Framework
 MetalFish testing utilities
 """
 
@@ -28,21 +27,19 @@ PATH = pathlib.Path(__file__).parent.resolve()
 BUILD_PATH = PATH.parent / "build"
 
 
-# Find MetalFish binary - handle different build configurations
 def find_metalfish_binary():
-    """Find the MetalFish binary across different build configurations."""
     env_path = os.environ.get("METALFISH_BIN")
     if env_path:
         return pathlib.Path(env_path).expanduser()
 
     # Check common locations in order of preference
     candidates = [
-        BUILD_PATH / "metalfish",  # Unix default
-        BUILD_PATH / "metalfish.exe",  # Windows default
-        BUILD_PATH / "Release" / "metalfish.exe",  # Windows MSVC Release
-        BUILD_PATH / "Debug" / "metalfish.exe",  # Windows MSVC Debug
-        BUILD_PATH / "Release" / "metalfish",  # Unix Release config
-        BUILD_PATH / "Debug" / "metalfish",  # Unix Debug config
+        BUILD_PATH / "metalfish",
+        BUILD_PATH / "metalfish.exe",
+        BUILD_PATH / "Release" / "metalfish.exe",
+        BUILD_PATH / "Debug" / "metalfish.exe",
+        BUILD_PATH / "Release" / "metalfish",
+        BUILD_PATH / "Debug" / "metalfish",
     ]
 
     candidates.extend(sorted(BUILD_PATH.glob("*/metalfish")))
@@ -51,7 +48,6 @@ def find_metalfish_binary():
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    # Fallback to default path (will fail with helpful error message)
     return BUILD_PATH / "metalfish"
 
 
@@ -212,11 +208,6 @@ class TestRunner:
         return self.failed == 0
 
 
-# ============================================================================
-# PERFT TESTS
-# ============================================================================
-
-# Standard perft test positions
 PERFT_POSITIONS = [
     # (FEN, depth, expected_nodes)
     # Starting position
@@ -283,7 +274,6 @@ def run_perft_test(engine: MetalFish, fen: str, depth: int, expected: int) -> bo
     engine.send_command(f"position fen {fen}")
     engine.send_command(f"go perft {depth}")
 
-    # Wait for "Nodes searched: XXXXX"
     for line in engine.readline():
         if line.startswith("Nodes searched:"):
             nodes = int(line.split(":")[1].strip())
@@ -311,7 +301,6 @@ def test_perft(quick: bool = False):
         engine.send_command(f"position fen {fen}")
         engine.send_command(f"go perft {depth}")
 
-        # Wait for result
         try:
             result_line = engine.contains("Nodes searched:")
             nodes = int(result_line.split(":")[1].strip())
@@ -333,11 +322,6 @@ def test_perft(quick: bool = False):
         f"\n  Perft: {GREEN_COLOR}{passed} passed{RESET_COLOR}, {RED_COLOR}{failed} failed{RESET_COLOR}"
     )
     return failed == 0
-
-
-# ============================================================================
-# UCI TESTS
-# ============================================================================
 
 
 def test_uci_protocol():
@@ -476,10 +460,6 @@ def test_uci_protocol():
     return runner.summary()
 
 
-# ============================================================================
-# BENCHMARK
-# ============================================================================
-
 REFERENCE_BIN = PATH.parent / "reference" / "engines" / "reference_engine"
 
 
@@ -574,7 +554,6 @@ def benchmark_comparison():
     print("BENCHMARK COMPARISON: MetalFish performance test")
     print("=" * 60 + f"{RESET_COLOR}\n")
 
-    # Check if reference engine exists
     ref_engine_exists = REFERENCE_BIN.exists()
     if not ref_engine_exists:
         print(f"{CYAN_COLOR}Note: Reference engine not found at {REFERENCE_BIN}")
@@ -592,7 +571,6 @@ def benchmark_comparison():
                 f"{RED_COLOR}Could not build reference engine. Skipping comparison.{RESET_COLOR}"
             )
 
-    # Run MetalFish perft benchmark
     print(f"\n{WHITE_BOLD}Perft Benchmark (depth 6 - 119M nodes){RESET_COLOR}")
     print("-" * 50)
 
@@ -611,8 +589,7 @@ def benchmark_comparison():
 
     if ref_engine_exists:
         # Run reference perft benchmark
-        print(f"\n  Running reference engine perft 6...")
-        try:
+        print(f"\n  Running reference engine perft 6...")        try:
             sf_start = time.time()
             sf_result = subprocess.run(
                 [str(REFERENCE_BIN)],
@@ -633,7 +610,6 @@ def benchmark_comparison():
             print(f"  Reference: {sf_nodes:,} nodes in {int(sf_time*1000)}ms")
             print(f"             NPS: {sf_nps:,}")
 
-            # Comparison
             print(f"\n{WHITE_BOLD}Comparison:{RESET_COLOR}")
             if mf_perft["nps"] > 0 and sf_nps > 0:
                 ratio = mf_perft["nps"] / sf_nps
@@ -648,7 +624,6 @@ def benchmark_comparison():
         except Exception as e:
             print(f"  {RED_COLOR}Reference benchmark failed: {e}{RESET_COLOR}")
 
-    # Search benchmark
     print(f"\n{WHITE_BOLD}Search Benchmark (depth 12){RESET_COLOR}")
     print("-" * 50)
 
@@ -719,11 +694,6 @@ def benchmark_comparison():
     print()
 
 
-# ============================================================================
-# MAIN
-# ============================================================================
-
-
 def main():
     import argparse
 
@@ -748,11 +718,9 @@ def main():
 
     all_passed = True
 
-    # Run UCI tests
     if not test_uci_protocol():
         all_passed = False
 
-    # Run perft tests
     if not test_perft(args.quick):
         all_passed = False
 

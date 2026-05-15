@@ -127,7 +127,7 @@ void UCIEngine::loop() {
 
     std::istringstream is(cmd);
 
-    token.clear(); // Avoid a stale if getline() returns nothing or a blank line
+    token.clear();
     is >> std::skipws >> token;
 
     // Debug command trace is opt-in via METALFISH_UCI_TRACE=1.
@@ -137,10 +137,6 @@ void UCIEngine::loop() {
                     .count();
       std::cerr << "[UCI:" << ms << "] " << cmd << std::endl;
     }
-
-    // ======================================================================
-    // Standard UCI Protocol Commands
-    // ======================================================================
 
     if (token == "quit" || token == "stop") {
       stop_active_searches();
@@ -156,8 +152,6 @@ void UCIEngine::loop() {
     }
 
     else if (token == "isready") {
-      // Don't wait for active MCTS/Hybrid searches -- they're non-blocking
-      // and fire bestmove via callback. Just preload if needed and respond.
       preload_search_objects(engine);
       sync_cout << "readyok" << sync_endl;
     }
@@ -178,9 +172,6 @@ void UCIEngine::loop() {
       ponderhit_active_searches(engine);
 
     else if (token == "go") {
-      // The standard `go` command routes to the active engine mode
-      // based on UCI options. GUIs set UseMCTS or UseHybridSearch
-      // via `setoption` before sending `go`.
       if (engine.get_options()["UseMCTS"])
         mcts_mt_go(is);
       else if (engine.get_options()["UseHybridSearch"])
@@ -188,10 +179,6 @@ void UCIEngine::loop() {
       else
         go(is);
     }
-
-    // ======================================================================
-    // MetalFish Extensions (debugging / CLI only)
-    // ======================================================================
 
     else if (token == "d")
       sync_cout << engine.visualize() << sync_endl;
@@ -253,9 +240,8 @@ void UCIEngine::loop() {
                 << "'. Type help for more information." << sync_endl;
 
   } while (token != "quit" &&
-           cli.argc == 1); // The command-line arguments are one-shot
+           cli.argc == 1);
 
-  // Clean up background search threads before exiting
   stop_active_searches();
   wait_active_searches();
   join_search_waiter();
@@ -265,7 +251,7 @@ Search::LimitsType UCIEngine::parse_limits(std::istream &is) {
   Search::LimitsType limits;
   std::string token;
 
-  limits.startTime = now(); // The search starts as early as possible
+  limits.startTime = now();
 
   while (is >> token)
     if (token == "searchmoves") // Needs to be the last command on the line
@@ -355,13 +341,13 @@ void UCIEngine::bench(std::istream &args) {
     else if (token == "position")
       position(is);
     else if (token == "ucinewgame") {
-      engine.search_clear(); // search_clear may take a while
+      engine.search_clear();
       elapsed = now();
     }
   }
 
   elapsed =
-      now() - elapsed + 1; // Ensure positivity to avoid a 'divide by zero'
+      now() - elapsed + 1;
 
   dbg_print();
 
@@ -370,14 +356,12 @@ void UCIEngine::bench(std::istream &args) {
             << "\nNodes searched  : " << nodes   //
             << "\nNodes/second    : " << 1000 * nodes / elapsed << std::endl;
 
-  // reset callback, to not capture a dangling reference to nodesSearched
+  // reset callback to avoid dangling reference to nodesSearched
   engine.set_on_update_full(
       [&](const auto &i) { on_update_full(i, options["UCI_ShowWDL"]); });
 }
 
 void UCIEngine::benchmark(std::istream &args) {
-  // Probably not very important for a test this long, but include for
-  // completeness and sanity.
   static constexpr int NUM_WARMUP_POSITIONS = 3;
 
   std::string token;
@@ -400,7 +384,6 @@ void UCIEngine::benchmark(std::istream &args) {
 
   TimePoint totalTime = 0;
 
-  // Set options once at the start.
   auto ss =
       std::istringstream("name Threads value " + std::to_string(setup.threads));
   setoption(ss);
@@ -409,24 +392,21 @@ void UCIEngine::benchmark(std::istream &args) {
   ss = std::istringstream("name UCI_Chess960 value false");
   setoption(ss);
 
-  // Warmup
   for (const auto &cmd : setup.commands) {
     std::istringstream is(cmd);
     is >> std::skipws >> token;
 
     if (token == "go") {
-      // One new line is produced by the search, so omit it here
       std::cerr << "\rWarmup position " << cnt++ << '/' << NUM_WARMUP_POSITIONS;
 
       Search::LimitsType limits = parse_limits(is);
 
-      // Run with silenced network verification
       engine.go(limits);
       engine.wait_for_search_finished();
     } else if (token == "position")
       position(is);
     else if (token == "ucinewgame") {
-      engine.search_clear(); // search_clear may take a while
+      engine.search_clear();
     }
 
     if (cnt > NUM_WARMUP_POSITIONS)
@@ -455,14 +435,13 @@ void UCIEngine::benchmark(std::istream &args) {
     }
   };
 
-  engine.search_clear(); // search_clear may take a while
+  engine.search_clear();
 
   for (const auto &cmd : setup.commands) {
     std::istringstream is(cmd);
     is >> std::skipws >> token;
 
     if (token == "go") {
-      // One new line is produced by the search, so omit it here
       std::cerr << "\rPosition " << cnt++ << '/' << numGoCommands;
 
       Search::LimitsType limits = parse_limits(is);
@@ -470,7 +449,6 @@ void UCIEngine::benchmark(std::istream &args) {
       nodesSearched = 0;
       TimePoint elapsed = now();
 
-      // Run with silenced network verification
       engine.go(limits);
       engine.wait_for_search_finished();
 
@@ -482,12 +460,12 @@ void UCIEngine::benchmark(std::istream &args) {
     } else if (token == "position")
       position(is);
     else if (token == "ucinewgame") {
-      engine.search_clear(); // search_clear may take a while
+      engine.search_clear();
     }
   }
 
   totalTime = std::max<TimePoint>(
-      totalTime, 1); // Ensure positivity to avoid a 'divide by zero'
+      totalTime, 1);
 
   dbg_print();
 
@@ -791,10 +769,6 @@ void UCIEngine::gpu_benchmark() {
             << sync_endl;
 }
 
-// ============================================================================
-// Preload search objects during isready
-// ============================================================================
-
 static float get_float_option(Engine &engine, const char *name,
                               float fallback) {
   if (!engine.get_options().count(name))
@@ -1030,7 +1004,6 @@ compute_hybrid_thread_split(Engine &engine,
   // lightweight sleeping monitor, so keep it outside the AB+MCTS worker budget
   // instead of stealing a core from the engines on Apple Silicon.
   const int available = total_threads;
-
   int mcts_threads = 0;
   if (mcts_override > 0) {
     mcts_threads = std::clamp(mcts_override, 1, available);
@@ -1077,14 +1050,7 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   MCTS::ParallelHybridConfig config;
   auto split = compute_hybrid_thread_split(engine, limits);
 
-  // Use the same UCI-configurable MCTS params as pure MCTS mode,
-  // so all improvements (cache key fix, KLD stopper, solidification,
-  // prefetching, TB probing, etc.) apply to hybrid too.
   config.mcts_config = make_mcts_config(engine, nn_weights, split.mcts_threads);
-  // Pure MCTS benefits tactically from a small KLD threshold, but hybrid uses
-  // AB as the clock owner and final verifier. Keep hybrid KLD disabled unless
-  // it is explicitly requested so MCTS does not prematurely agree with
-  // transient AB mistakes in sharp positions.
   config.mcts_config.kld_gain_min =
       get_float_option(engine, "HybridMCTSMinimumKLDGainPerNode", 0.0f);
   config.mcts_threads = split.mcts_threads;
@@ -1092,10 +1058,6 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
 
   config.ab_min_depth = 10;
   config.ab_use_time = true;
-  // AB PV policy injection into MCTS is available in the hybrid code path, but
-  // defaults off because repeated root-prior mutation has not yet shown Elo
-  // strength. The engines still communicate through shared state and final
-  // arbitration without corrupting the neural prior.
   config.ab_policy_weight = std::clamp(
       get_float_option(engine, "HybridABPolicyWeight", 0.0f), 0.0f, 1.0f);
   config.agreement_threshold = 0.3f;
@@ -1106,6 +1068,7 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.transformer_batch_size = 128;
   config.use_transformer_prefetch = true;
   config.mcts_root_reject = engine.get_options()["HybridMCTSRootReject"];
+  config.use_shared_tt = engine.get_options()["HybridMCTSUseSharedTT"];
   config.trace_decisions = engine.get_options()["HybridTrace"];
   return config;
 }
@@ -1127,7 +1090,7 @@ make_hybrid_cache_key(const std::string &nn_weights,
       << static_cast<int>(config.decision_mode) << "|"
       << config.transformer_batch_size << "|"
       << config.transformer_batch_timeout_us << "|"
-      << config.use_transformer_prefetch;
+      << config.use_transformer_prefetch << "|" << config.use_shared_tt;
   return key.str();
 }
 
@@ -1328,17 +1291,15 @@ static void preload_search_objects(Engine &engine) {
   bool need_hybrid = engine.get_options()["UseHybridSearch"];
   bool need_mcts = engine.get_options()["UseMCTS"];
   if (!need_hybrid && !need_mcts)
-    return; // AB mode -- no transformer needed
+    return;
 
   if (!should_preload_transformer_search())
     return;
 
   std::string nn_weights = get_nn_weights_path(engine);
   if (nn_weights.empty())
-    return; // No weights configured -- nothing to preload
+    return;
 
-  // Preload hybrid search object (includes transformer weight loading). Rebuild
-  // it whenever UCI options that affect the embedded MCTS object change.
   if (need_hybrid) {
     auto config = make_hybrid_config(engine, nn_weights);
     const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
@@ -1392,10 +1353,6 @@ static void preload_search_objects(Engine &engine) {
     }
   }
 }
-
-// ============================================================================
-// Parallel Hybrid Search Command
-// ============================================================================
 
 static void join_search_waiter() {
   std::lock_guard<std::mutex> lock(g_search_waiter_mutex);
@@ -1541,14 +1498,10 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   g_parallel_hybrid_search->start_search(pos, limits, best_move_cb, info_cb);
 }
 
-// ============================================================================
-// Multi-Threaded MCTS Search Command
-// ============================================================================
 void UCIEngine::mcts_mt_go(std::istringstream &is) {
   std::string args;
   std::getline(is, args, '\0');
 
-  // Parse threads option
   std::string token;
   int num_threads = static_cast<int>(engine.get_options()["Threads"]);
   bool explicit_threads_arg = false;
@@ -1577,7 +1530,6 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   sync_cout << "info string Starting Multi-Threaded MCTS Search with "
             << num_threads << " threads..." << sync_endl;
 
-  // Get transformer weights path from UCI option
   std::string nn_weights = get_nn_weights_path(engine);
   if (nn_weights.empty()) {
     sync_cout << "info string ERROR: No transformer weights. Set UCI option "
@@ -1660,9 +1612,6 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   }
 }
 
-// ============================================================================
-// MCTS Batch vs Direct Benchmark
-// ============================================================================
 void UCIEngine::mcts_batch_benchmark(std::istringstream &is) {
   (void)is;
   sync_cout << "info string MCTS NNUE batch benchmark disabled: hybrid MCTS "
@@ -1670,9 +1619,6 @@ void UCIEngine::mcts_batch_benchmark(std::istringstream &is) {
             << sync_endl;
 }
 
-// ============================================================================
-// NNUE Benchmark - CPU-only policy
-// ============================================================================
 void UCIEngine::nnue_benchmark(std::istream &is) {
   (void)is;
   sync_cout << "info string NNUE benchmark policy: CPU-only. GPU NNUE is "

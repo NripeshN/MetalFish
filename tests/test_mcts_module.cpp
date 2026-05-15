@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -107,9 +108,15 @@ void test_root_search_smoke(TestCounter &tc) {
 
 void test_pv_boost_respects_weight(TestCounter &tc) {
   std::cout << "  PV boost weight..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights || std::string(weights).empty()) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
   SearchParams params;
   params.num_threads = 1;
-  params.nn_weights_path.clear();
+  params.nn_weights_path = weights;
   params.add_dirichlet_noise = false;
 
   MetalFish::Search::LimitsType limits;

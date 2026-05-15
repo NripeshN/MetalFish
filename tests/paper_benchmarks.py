@@ -236,11 +236,6 @@ class UCIEngine:
             self.proc.kill()
 
 
-# ============================================================================
-# Engine configuration and detection
-# ============================================================================
-
-
 @dataclass
 class EngineConfig:
     name: str
@@ -324,11 +319,6 @@ def start_engine(cfg: EngineConfig) -> UCIEngine:
     eng.send("isready")
     eng.wait_for("readyok")
     return eng
-
-
-# ============================================================================
-# Experiment 1: Tactical Accuracy (BK Suite)
-# ============================================================================
 
 
 def run_tactical(
@@ -451,11 +441,6 @@ def run_tactical(
     return results
 
 
-# ============================================================================
-# Experiment 2: NPS Throughput Comparison
-# ============================================================================
-
-
 def run_nps(
     engines: Dict[str, EngineConfig], thread_counts: List[int], movetime_ms: int = 10000
 ) -> dict:
@@ -544,11 +529,6 @@ def run_nps(
     return results
 
 
-# ============================================================================
-# Experiment 3: Thread Scaling
-# ============================================================================
-
-
 def run_scaling(
     engines: Dict[str, EngineConfig], thread_counts: List[int], movetime_ms: int = 10000
 ) -> dict:
@@ -619,11 +599,6 @@ def run_scaling(
             eng.close()
 
     return results
-
-
-# ============================================================================
-# Experiment 4: Tournament (simplified head-to-head)
-# ============================================================================
 
 
 def play_game(
@@ -741,11 +716,6 @@ def run_tournament(
     return results
 
 
-# ============================================================================
-# Results Summary Generator
-# ============================================================================
-
-
 def generate_summary(all_results: Dict[str, dict]) -> str:
     lines = [
         "# MetalFish Paper Benchmark Results",
@@ -847,11 +817,6 @@ def generate_summary(all_results: Dict[str, dict]) -> str:
         lines.append("")
 
     return "\n".join(lines)
-
-
-# ============================================================================
-# Main CLI
-# ============================================================================
 
 
 def main() -> int:

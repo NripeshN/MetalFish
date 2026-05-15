@@ -384,7 +384,6 @@ std::vector<std::string> setup_bench(const std::string &currentFen,
   std::vector<std::string> fens, list;
   std::string go, token;
 
-  // Assign default values to missing arguments
   std::string ttSize = (is >> token) ? token : "16";
   std::string threads = (is >> token) ? token : "1";
   std::string limit = (is >> token) ? token : "13";
@@ -431,15 +430,14 @@ std::vector<std::string> setup_bench(const std::string &currentFen,
 }
 
 BenchmarkSetup setup_benchmark(std::istream &is) {
-  // TT_SIZE_PER_THREAD is chosen such that roughly half of the hash is used all
-  // positions for the current sequence have been searched.
+  // TT size chosen so roughly half the hash is used once all positions in the
+  // current sequence have been searched.
   static constexpr int TT_SIZE_PER_THREAD = 128;
 
   static constexpr int DEFAULT_DURATION_S = 150;
 
   BenchmarkSetup setup{};
 
-  // Assign default values to missing arguments
   int desiredTimeS;
 
   if (!(is >> setup.threads))

@@ -56,19 +56,14 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
     try {
       return std::make_unique<Metal::MetalNetwork>(weights);
     } catch (const std::exception &e) {
-      // Surface the backend construction failure to aid debugging rather than
-      // silently falling back to the stub implementation.
       std::cerr << "Metal backend unavailable: " << e.what() << std::endl;
       if (backend == "metal") {
-        // If Metal was explicitly requested, propagate error
         throw;
       }
-      // Otherwise fall through to stub
     }
   }
 #endif
 
-  // Fallback to stub implementation
   return std::make_unique<StubNetwork>(weights);
 }
 

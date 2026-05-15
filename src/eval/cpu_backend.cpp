@@ -2,10 +2,7 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  CPU Fallback Backend Implementation
-
-  This provides stub implementations when no GPU backend is available.
-  All GPU operations gracefully fall back to CPU.
+  Licensed under GPL-3.0
 */
 
 #ifndef USE_METAL

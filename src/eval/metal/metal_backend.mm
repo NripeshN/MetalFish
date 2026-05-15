@@ -22,9 +22,7 @@
 namespace MetalFish {
 namespace GPU {
 
-// ============================================================================
-// Metal Buffer Implementation
-// ============================================================================
+static std::atomic<bool> g_backend_shutdown{false};
 
 class MetalBuffer : public Buffer {
 public:
@@ -58,10 +56,6 @@ private:
   size_t size_;
 };
 
-// ============================================================================
-// Metal Compute Kernel Implementation
-// ============================================================================
-
 class MetalKernel : public ComputeKernel {
 public:
   MetalKernel(const std::string &name, id<MTLComputePipelineState> pipeline)
@@ -92,27 +86,18 @@ private:
   id<MTLComputePipelineState> pipeline_;
 };
 
-// ============================================================================
-// Metal Command Encoder Implementation
-// ============================================================================
-
 class MetalCommandEncoder : public CommandEncoder {
 public:
   MetalCommandEncoder(id<MTLCommandQueue> queue)
       : queue_(queue), buffer_(nil), encoder_(nil), ended_(false) {
-    // Use commandBufferWithUnretainedReferences for faster allocation
-    // This avoids the overhead of retaining/releasing all referenced objects
-    // We manage object lifetimes manually, so this is safe
     buffer_ = [queue_ commandBufferWithUnretainedReferences];
     encoder_ = [buffer_ computeCommandEncoder];
   }
 
   ~MetalCommandEncoder() override {
-    // Ensure encoding is ended before releasing
     if (encoder_ && !ended_) {
       [encoder_ endEncoding];
     }
-    // No need to release - we're using unretained references
   }
 
   void set_kernel(ComputeKernel *kernel) override {
@@ -147,23 +132,19 @@ public:
     NSUInteger thread_width, thread_height, thread_depth;
 
     if (depth > 1) {
-      // 3D dispatch - balance across all dimensions
       thread_depth = std::min(depth, (size_t)4);
       thread_height = std::min(height, (size_t)4);
       thread_width =
           std::min(width, max_threads / (thread_height * thread_depth));
     } else if (height > 1) {
-      // 2D dispatch - use square-ish threadgroups for better cache locality
       // For feature transform: width=hidden_dim (1024), height=batch_size
       thread_height = std::min(height, (size_t)8);
       thread_width = std::min(width, max_threads / thread_height);
-      // Ensure thread_width is a multiple of 32 (simdgroup size) when possible
       if (thread_width >= 32) {
         thread_width = (thread_width / 32) * 32;
       }
       thread_depth = 1;
     } else {
-      // 1D dispatch
       thread_width = std::min(width, max_threads);
       thread_height = 1;
       thread_depth = 1;
@@ -223,10 +204,6 @@ private:
   bool ended_ = false;
 };
 
-// ============================================================================
-// Metal Backend Implementation
-// ============================================================================
-
 class MetalBackend : public Backend {
 public:
   static MetalBackend &instance() {
@@ -261,19 +238,14 @@ public:
   size_t recommended_working_set_size() const override {
     if (!device_)
       return 0;
-    // recommendedMaxWorkingSetSize gives the optimal GPU memory allocation
     return [device_ recommendedMaxWorkingSetSize];
   }
 
   size_t total_system_memory() const override {
-    // On Apple Silicon with unified memory, we can query total RAM
-    // This is useful for determining how much memory to allocate for caches
     return [[NSProcessInfo processInfo] physicalMemory];
   }
 
   int gpu_core_count() const override {
-    // Apple doesn't expose GPU core count directly via Metal API
-    // We infer it from the device name and known configurations
     if (!device_)
       return 0;
 
@@ -324,18 +296,15 @@ public:
     if (name.find("M1") != std::string::npos)
       return 8;
 
-    // Fallback: estimate from recommended working set size
-    // Rough heuristic: ~256MB per GPU core for Apple Silicon
     size_t working_set = recommended_working_set_size();
     if (working_set > 0) {
       return static_cast<int>(working_set / (256 * 1024 * 1024));
     }
 
-    return 8; // Safe default
+    return 8;
   }
 
   int max_threads_per_simd_group() const override {
-    // Apple GPUs use 32-wide SIMD groups
     return 32;
   }
 
@@ -344,26 +313,19 @@ public:
     if (cores <= 0)
       return 128;
 
-    // Scale batch size with GPU cores
-    // Base: 16 positions per core, but adjust based on memory
     int base_batch = cores * 16;
 
-    // Consider available memory for batched transformer/diagnostic workloads.
     size_t working_set = recommended_working_set_size();
-    size_t memory_per_position = 4 * 1024; // Conservative estimate
+    size_t memory_per_position = 4 * 1024;
     int memory_limited_batch =
         static_cast<int>(working_set / (4 * memory_per_position));
 
     int batch = std::min(base_batch, memory_limited_batch);
 
-    // Round to nearest multiple of SIMD width (32) for optimal GPU utilization
     batch = ((batch + 31) / 32) * 32;
-
-    // Clamp to reasonable range
     return std::max(32, std::min(512, batch));
   }
 
-  // Command buffer pool management
   id<MTLCommandBuffer> acquire_command_buffer() {
     std::lock_guard<std::mutex> lock(pool_mutex_);
     if (!command_buffer_pool_.empty()) {
@@ -375,8 +337,6 @@ public:
   }
 
   void release_command_buffer(id<MTLCommandBuffer> buffer) {
-    // Command buffers can't be reused after commit, so we just let them go
-    // This is here for future optimization with MTLCommandBufferDescriptor
     (void)buffer;
   }
 
@@ -395,13 +355,10 @@ public:
       options = MTLResourceStorageModePrivate;
       break;
     case MemoryMode::Managed:
-      // On Apple Silicon, Managed behaves like Shared
       options = MTLResourceStorageModeShared;
       break;
     }
 
-    // On unified memory systems, disable hazard tracking for better performance
-    // We manage synchronization manually via barriers
     if (has_unified_memory()) {
       options |= MTLResourceHazardTrackingModeUntracked;
     } else {
@@ -427,7 +384,6 @@ public:
 
     MTLResourceOptions options = MTLResourceStorageModeShared;
 
-    // On unified memory systems, disable hazard tracking for better performance
     if (has_unified_memory()) {
       options |= MTLResourceHazardTrackingModeUntracked;
     } else {
@@ -510,7 +466,6 @@ public:
     if (mtl_encoder) {
       mtl_encoder->end_encoding();
 
-      // Add completion handler before commit
       id<MTLCommandBuffer> buffer = mtl_encoder->mtl_buffer();
       if (buffer && completion_handler) {
         [buffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull) {
@@ -523,8 +478,6 @@ public:
   }
 
   void synchronize() override {
-    // Create and immediately complete a command buffer to ensure all work is
-    // done
     if (queue_) {
       id<MTLCommandBuffer> buffer = [queue_ commandBuffer];
       [buffer commit];
@@ -538,7 +491,6 @@ public:
 
   bool is_available() const { return device_ != nil && queue_ != nil; }
 
-  // Load or compile a shader library
   bool load_library(const std::string &name, const std::string &path) override {
     if (!device_)
       return false;
@@ -567,7 +519,6 @@ public:
     return false;
   }
 
-  // Compile shader from source
   bool compile_library(const std::string &name,
                        const std::string &source) override {
     if (!device_)
@@ -612,18 +563,15 @@ public:
   }
 
 private:
-  static constexpr int NUM_COMMAND_QUEUES =
-      4; // Multiple queues for parallelism
+  static constexpr int NUM_COMMAND_QUEUES = 4;
 
   MetalBackend() {
     @autoreleasepool {
       device_ = MTLCreateSystemDefaultDevice();
       if (device_) {
-        // Create primary queue
         queue_ = [device_ newCommandQueue];
         [queue_ retain];
 
-        // Create additional queues for parallel command submission
         for (int i = 0; i < NUM_COMMAND_QUEUES; ++i) {
           id<MTLCommandQueue> q = [device_ newCommandQueue];
           if (q) {
@@ -632,8 +580,6 @@ private:
           }
         }
 
-        // Use stderr for initialization messages to avoid interfering with UCI
-        // protocol
         std::cerr << "[MetalBackend] Initialized: " << device_name()
                   << std::endl;
         std::cerr << "[MetalBackend] Unified memory: "
@@ -646,9 +592,6 @@ private:
 
   ~MetalBackend() {
     @autoreleasepool {
-      // Synchronize all command queues before releasing resources
-      // This ensures all pending GPU operations complete before we destroy the
-      // backend
       if (queue_) {
         id<MTLCommandBuffer> buffer = [queue_ commandBuffer];
         if (buffer) {
@@ -667,7 +610,6 @@ private:
         }
       }
 
-      // Now release all resources
       for (auto &[name, lib] : libraries_) {
         if (lib)
           [lib release];
@@ -686,13 +628,11 @@ private:
   id<MTLLibrary> get_library(const std::string &name) {
     std::lock_guard<std::mutex> lock(library_mutex_);
 
-    // Return cached library
     auto it = libraries_.find(name);
     if (it != libraries_.end()) {
       return it->second;
     }
 
-    // Try default library
     if (name.empty()) {
       id<MTLLibrary> lib = [device_ newDefaultLibrary];
       if (lib) {
@@ -704,7 +644,6 @@ private:
     return nil;
   }
 
-  // Get a command queue for parallel work (round-robin selection)
   id<MTLCommandQueue> get_parallel_queue() {
     if (parallel_queues_.empty())
       return queue_;
@@ -714,7 +653,6 @@ private:
   }
 
 public:
-  // Create encoder on a parallel queue for async work
   std::unique_ptr<CommandEncoder> create_parallel_encoder() override {
     id<MTLCommandQueue> q = get_parallel_queue();
     if (!q)
@@ -722,7 +660,6 @@ public:
     return std::make_unique<MetalCommandEncoder>(q);
   }
 
-  // Get number of parallel queues available
   size_t num_parallel_queues() const override {
     return parallel_queues_.size();
   }
@@ -740,13 +677,6 @@ private:
   std::atomic<size_t> peak_memory_{0};
 };
 
-// ============================================================================
-// Backend Interface Implementation
-// ============================================================================
-
-// Global shutdown flag - prevents access to backend after shutdown
-static std::atomic<bool> g_backend_shutdown{false};
-
 Backend &Backend::get() { return MetalBackend::instance(); }
 
 bool Backend::available() {
@@ -757,10 +687,8 @@ bool Backend::available() {
 }
 
 void shutdown_gpu_backend() {
-  // Set shutdown flag first to prevent any new access
   g_backend_shutdown.store(true, std::memory_order_release);
 
-  // Synchronize all pending GPU operations
   if (MetalBackend::instance().is_available()) {
     MetalBackend::instance().synchronize();
   }
@@ -769,10 +697,6 @@ void shutdown_gpu_backend() {
 bool gpu_backend_shutdown() {
   return g_backend_shutdown.load(std::memory_order_acquire);
 }
-
-// ============================================================================
-// Scoped Timer Implementation
-// ============================================================================
 
 struct ScopedTimer::Impl {
   std::string name;

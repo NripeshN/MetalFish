@@ -133,10 +133,6 @@ struct alignas(APPLE_CACHE_LINE_SIZE) MCTSSharedState {
   }
 };
 
-// ============================================================================
-// Statistics
-// ============================================================================
-
 struct ParallelSearchStats {
   std::atomic<uint64_t> mcts_nodes{0};
   std::atomic<uint64_t> mcts_iterations{0};
@@ -152,7 +148,6 @@ struct ParallelSearchStats {
   std::atomic<uint64_t> ab_overrides{0};
   std::atomic<uint64_t> mcts_overrides{0};
 
-  // Timing
   double mcts_time_ms = 0;
   double ab_time_ms = 0;
   double total_time_ms = 0;
@@ -174,10 +169,6 @@ struct ParallelSearchStats {
     total_time_ms = 0;
   }
 };
-
-// ============================================================================
-// Configuration
-// ============================================================================
 
 struct ParallelHybridConfig {
   SearchParams mcts_config;
@@ -208,6 +199,7 @@ struct ParallelHybridConfig {
   bool use_transformer_prefetch = true;
   bool trace_decisions = false;
   bool mcts_root_reject = true;
+  bool use_shared_tt = false;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees
@@ -217,10 +209,6 @@ struct ParallelHybridConfig {
   };
   DecisionMode decision_mode = DecisionMode::DYNAMIC;
 };
-
-// ============================================================================
-// Parallel Hybrid Search Engine
-// ============================================================================
 
 class ParallelHybridSearch {
 public:
@@ -238,7 +226,6 @@ public:
   bool initialize(Engine *engine);
   bool is_ready() const { return initialized_; }
 
-  // Configuration
   void set_config(const ParallelHybridConfig &config) { config_ = config; }
   const ParallelHybridConfig &config() const { return config_; }
 
@@ -253,7 +240,6 @@ public:
     return searching_.load(std::memory_order_acquire);
   }
 
-  // Results
   const ParallelSearchStats &stats() const { return stats_; }
   Move get_best_move() const;
   Move get_ponder_move() const;
@@ -265,7 +251,6 @@ private:
   ParallelHybridConfig config_;
   ParallelSearchStats stats_;
 
-  // MCTS search engine
   std::unique_ptr<Search> mcts_search_;
   std::unique_ptr<SharedTTReader> shared_tt_reader_;
   Engine *engine_ = nullptr;
@@ -276,14 +261,11 @@ private:
 
   std::unordered_map<uint16_t, float> nn_policy_hints_;
 
-  // Shared state (cache-line aligned)
   ABSharedState ab_state_;
   MCTSSharedState mcts_state_;
 
-  // Thread management
   enum class ThreadState { IDLE, RUNNING, STOPPING };
 
-  // Centralized thread control
   std::mutex thread_mutex_;
   std::condition_variable thread_cv_;
   std::atomic<bool> stop_flag_{false};
@@ -305,13 +287,11 @@ private:
   std::atomic<bool> ab_thread_done_{true};
   std::atomic<bool> coordinator_thread_done_{true};
 
-  // Search state
   std::string root_fen_;
   ::MetalFish::Search::LimitsType limits_;
   std::chrono::steady_clock::time_point search_start_;
   int time_budget_ms_ = 0;
 
-  // Final result
   std::atomic<uint32_t> final_best_move_{0};
   std::atomic<uint32_t> final_ponder_move_{0};
   std::vector<Move> final_pv_;
@@ -322,7 +302,6 @@ private:
   InfoCallback info_callback_;
   std::atomic<bool> callback_invoked_{false};
 
-  // Thread functions
   void mcts_thread_main();
   void ab_thread_main();
   void coordinator_thread_main();
@@ -350,7 +329,6 @@ private:
   void invoke_best_move_callback(Move best, Move ponder);
 };
 
-// Factory function
 std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
     Engine *engine,
     const ParallelHybridConfig &config = ParallelHybridConfig());

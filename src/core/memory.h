@@ -58,8 +58,6 @@ void aligned_large_pages_free(void *mem);
 
 bool has_large_pages();
 
-// Frees memory which was placed there with placement new.
-// Works for both single objects and arrays of unknown bound.
 template <typename T, typename FREE_FUNC>
 void memory_deleter(T *ptr, FREE_FUNC free_func) {
   if (!ptr)
@@ -72,8 +70,6 @@ void memory_deleter(T *ptr, FREE_FUNC free_func) {
   free_func(ptr);
 }
 
-// Frees memory which was placed there with placement new.
-// Works for both single objects and arrays of unknown bound.
 template <typename T, typename FREE_FUNC>
 void memory_deleter_array(T *ptr, FREE_FUNC free_func) {
   if (!ptr)
@@ -94,7 +90,6 @@ void memory_deleter_array(T *ptr, FREE_FUNC free_func) {
   free_func(raw_memory);
 }
 
-// Allocates memory for a single object and places it there with placement new
 template <typename T, typename ALLOC_FUNC, typename... Args>
 inline std::enable_if_t<!std::is_array_v<T>, T *>
 memory_allocator(ALLOC_FUNC alloc_func, Args &&...args) {
@@ -103,8 +98,6 @@ memory_allocator(ALLOC_FUNC alloc_func, Args &&...args) {
   return new (raw_memory) T(std::forward<Args>(args)...);
 }
 
-// Allocates memory for an array of unknown bound and places it there with
-// placement new
 template <typename T, typename ALLOC_FUNC>
 inline std::enable_if_t<std::is_array_v<T>, std::remove_extent_t<T> *>
 memory_allocator(ALLOC_FUNC alloc_func, size_t num) {
@@ -122,16 +115,8 @@ memory_allocator(ALLOC_FUNC alloc_func, size_t num) {
   for (size_t i = 0; i < num; ++i)
     new (raw_memory + array_offset + i * sizeof(ElementType)) ElementType();
 
-  // Need to return the pointer at the start of the array so that
-  // the indexing in unique_ptr<T[]> works.
   return reinterpret_cast<ElementType *>(raw_memory + array_offset);
 }
-
-//
-//
-// aligned large page unique ptr
-//
-//
 
 template <typename T> struct LargePageDeleter {
   void operator()(T *ptr) const {
@@ -151,7 +136,6 @@ using LargePagePtr = std::conditional_t<
     std::unique_ptr<T, LargePageArrayDeleter<std::remove_extent_t<T>>>,
     std::unique_ptr<T, LargePageDeleter<T>>>;
 
-// make_unique_large_page for single objects
 template <typename T, typename... Args>
 std::enable_if_t<!std::is_array_v<T>, LargePagePtr<T>>
 make_unique_large_page(Args &&...args) {
@@ -164,7 +148,6 @@ make_unique_large_page(Args &&...args) {
   return LargePagePtr<T>(obj);
 }
 
-// make_unique_large_page for arrays of unknown bound
 template <typename T>
 std::enable_if_t<std::is_array_v<T>, LargePagePtr<T>>
 make_unique_large_page(size_t num) {
@@ -178,12 +161,6 @@ make_unique_large_page(size_t num) {
 
   return LargePagePtr<T>(memory);
 }
-
-//
-//
-// aligned unique ptr
-//
-//
 
 template <typename T> struct AlignedDeleter {
   void operator()(T *ptr) const {
@@ -203,7 +180,6 @@ using AlignedPtr = std::conditional_t<
     std::unique_ptr<T, AlignedArrayDeleter<std::remove_extent_t<T>>>,
     std::unique_ptr<T, AlignedDeleter<T>>>;
 
-// make_unique_aligned for single objects
 template <typename T, typename... Args>
 std::enable_if_t<!std::is_array_v<T>, AlignedPtr<T>>
 make_unique_aligned(Args &&...args) {
@@ -215,7 +191,6 @@ make_unique_aligned(Args &&...args) {
   return AlignedPtr<T>(obj);
 }
 
-// make_unique_aligned for arrays of unknown bound
 template <typename T>
 std::enable_if_t<std::is_array_v<T>, AlignedPtr<T>>
 make_unique_aligned(size_t num) {
@@ -229,9 +204,6 @@ make_unique_aligned(size_t num) {
   return AlignedPtr<T>(memory);
 }
 
-// Get the first aligned element of an array.
-// ptr must point to an array of size at least `sizeof(T) * N + alignment`
-// bytes, where N is the number of elements in the array.
 template <uintptr_t Alignment, typename T> T *align_ptr_up(T *ptr) {
   static_assert(alignof(T) < Alignment);
 

@@ -71,10 +71,7 @@ static const NSInteger kMinSubBatchSize = 20;
 
 @implementation MetalNetworkGraph
 
-// This is the MetalNetworkGraph dictionary getter method.
-// It is a singleton object that is used to store the MetalNetworkGraph.
 + (NSMutableDictionary *_Nonnull)getGraphs {
-  // This is the MetalNetworkGraph dictionary.
   static NSMutableDictionary *graphs = nil;
 
   @synchronized(self) {
@@ -86,17 +83,12 @@ static const NSInteger kMinSubBatchSize = 20;
   return graphs;
 }
 
-// This is the MetalNetworkGraph getter method.
 + (MetalNetworkGraph *_Nonnull)getGraphAt:(NSNumber *_Nonnull)index {
   NSMutableDictionary *graphs = [MetalNetworkGraph getGraphs];
 
   return graphs[index];
 }
 
-// This is the MetalNetworkGraph factory method.
-// It is used to create a MetalNetworkGraph object.
-// The MetalNetworkGraph object is stored in the dictionary.
-// The MetalNetworkGraph object is initialized with the Metal device.
 + (void)graphWithDevice:(id<MTLDevice> __nonnull)device
                   index:(NSNumber *_Nonnull)index {
   NSMutableDictionary *graphs = [MetalNetworkGraph getGraphs];
@@ -139,7 +131,6 @@ static const NSInteger kMinSubBatchSize = 20;
 
   [_resultDataDicts removeAllObjects];
 
-  // Split batchSize into smaller sub-batches and run using double-buffering.
   NSMutableArray<MPSCommandBuffer *> *commandBuffers =
       [NSMutableArray arrayWithCapacity:splits];
   std::vector<NSUInteger> subBatchSizes;
@@ -178,7 +169,6 @@ static const NSInteger kMinSubBatchSize = 20;
   // Double buffering semaphore to correctly double buffer iterations.
   dispatch_semaphore_wait(_doubleBufferingSemaphore, DISPATCH_TIME_FOREVER);
 
-  // Create command buffer for this sub-batch.
   MPSCommandBuffer *commandBuffer =
       [MPSCommandBuffer commandBufferFromCommandQueue:_queue];
 
@@ -235,14 +225,12 @@ static const NSInteger kMinSubBatchSize = 20;
              targetOperations:nil
           executionDescriptor:executionDescriptor];
 
-  // Commit the command buffer
   [commandBuffer commit];
   return commandBuffer;
 }
 
 - (void)copyResultsToBuffers:(float *__nonnull *__nonnull)outputBuffers
                subBatchSizes:(const std::vector<NSUInteger> &)subBatchSizes {
-  // Copy results for batch back into the output buffers.
   for (NSUInteger rsIdx = 0; rsIdx < [_resultTensors count]; rsIdx++) {
     const NSUInteger elementsPerSample =
         [_resultTensors[rsIdx] sizeOfDimensions:@[ @1, @2, @3 ]];
@@ -263,10 +251,7 @@ static const NSInteger kMinSubBatchSize = 20;
 }
 
 - (void)setResultTensors:(NSArray<MPSGraphTensor *> *__nonnull)results {
-  // Set the results we're interested in.
   _resultTensors = results;
-
-  // Target tensor for graph is combination of both.
   _targetTensors = [NSArray arrayWithArray:_resultTensors];
   _targetTensors =
       [_targetTensors arrayByAddingObjectsFromArray:[_readVariables allValues]];
@@ -581,14 +566,12 @@ static const NSInteger kMinSubBatchSize = 20;
              activation:(NSString *__nullable)activation
                   label:(NSString *__nonnull)label {
 
-  // 1. Global Average Pooling 2D
   MPSGraphTensor *seunit =
       [self avgPooling2DWithSourceTensor:parent
                               descriptor:averagePoolingDescriptor
                                     name:[NSString stringWithFormat:@"%@/pool",
                                                                     label]];
 
-  // 2. FC Layer 1.
   seunit =
       [self flatten2DTensor:seunit
                        axis:1
@@ -603,7 +586,6 @@ static const NSInteger kMinSubBatchSize = 20;
                                  label:[NSString
                                            stringWithFormat:@"%@/fc1", label]];
 
-  // 3. FC Layer 2.
   NSUInteger inputChannels = [parent.shape[1] intValue];
   seunit = [self
       addFullyConnectedLayerWithParent:seunit
@@ -659,7 +641,6 @@ static const NSInteger kMinSubBatchSize = 20;
                 secondaryTensor:skipTensor
                            name:[NSString stringWithFormat:@"%@/add2", label]];
 
-  // 6. Default activation.
   return [self applyActivationWithTensor:seunit
                               activation:activation
                                    label:label];
@@ -762,7 +743,6 @@ static const NSInteger kMinSubBatchSize = 20;
                smolgenActivation:smolgenActivation
                            label:[NSString stringWithFormat:@"%@/mha", label]];
 
-  // MHA final dense layer.
   mha = [self
       addFullyConnectedLayerWithParent:mha
                         outputChannels:embeddingSize
@@ -1027,7 +1007,6 @@ static const NSInteger kMinSubBatchSize = 20;
                                     *__nullable)smolgen
              smolgenActivation:(NSString *__nullable)smolgenActivation
                          label:(NSString *__nonnull)label {
-  // Split heads.
   const NSUInteger dmodel = [[queries.shape lastObject] intValue];
   const NSUInteger depth = dmodel / heads;
 
@@ -1061,7 +1040,6 @@ static const NSInteger kMinSubBatchSize = 20;
         withDimension:2
                  name:[NSString stringWithFormat:@"%@/transpose_v", label]];
 
-  // Scaled attention matmul.
   keys = [self
       transposeTensor:keys
             dimension:2
@@ -1178,7 +1156,6 @@ static const NSInteger kMinSubBatchSize = 20;
                               activation:@"softmax"
                                    label:label];
 
-  // matmul(scaled_attention_weights, v).
   attn = [self
       matrixMultiplicationWithPrimaryTensor:attn
                             secondaryTensor:values
@@ -1818,7 +1795,6 @@ static const NSInteger kMinSubBatchSize = 20;
                                 label:[NSString
                                           stringWithFormat:@"%@/conv1", label]];
 
-    // No activation.
     policy = [self
         addConvolutionBlockWithParent:policy
                        outputChannels:head.policy.biases.size()

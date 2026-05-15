@@ -40,7 +40,7 @@ enum NodeType { NonPV, PV, Root };
 class TranspositionTable;
 class ThreadPool;
 class OptionsMap;
-class Engine; // Forward declaration for friend access
+class Engine;
 
 namespace Search {
 
@@ -247,12 +247,7 @@ public:
   Worker(SharedState &, std::unique_ptr<ISearchManager>, size_t, size_t, size_t,
          NumaReplicatedAccessToken);
 
-  // Called at instantiation to initialize reductions tables.
-  // Reset histories, usually before a new game.
   void clear();
-
-  // Called when the program receives the UCI 'go' command.
-  // It searches from the root position and outputs the "bestmove".
   void start_searching();
 
   bool is_mainthread() const { return threadIdx == 0; }
@@ -280,18 +275,15 @@ private:
   void undo_move(Position &pos, const Move move);
   void undo_null_move(Position &pos);
 
-  // This is the main search function, for both PV and non-PV nodes
   template <NodeType nodeType>
   Value search(Position &pos, Stack *ss, Value alpha, Value beta, Depth depth,
                bool cutNode);
 
-  // Quiescence search function, which is called by the main search
   template <NodeType nodeType>
   Value qsearch(Position &pos, Stack *ss, Value alpha, Value beta);
 
   Depth reduction(bool i, Depth d, int mn, int delta) const;
 
-  // Pointer to the search manager, only allowed to be called by the main thread
   SearchManager *main_manager() const {
     assert(threadIdx == 0);
     return static_cast<SearchManager *>(manager.get());
@@ -319,10 +311,8 @@ private:
   size_t threadIdx, numaThreadIdx, numaTotal;
   NumaReplicatedAccessToken numaAccessToken;
 
-  // Reductions lookup table initialized at startup
-  std::array<int, MAX_MOVES> reductions; // [depth or moveNumber]
+  std::array<int, MAX_MOVES> reductions;
 
-  // The main thread has a SearchManager, the others have a NullSearchManager
   std::unique_ptr<ISearchManager> manager;
 
   Tablebases::Config tbConfig;
@@ -332,7 +322,6 @@ private:
   TranspositionTable &tt;
   const LazyNumaReplicatedSystemWide<Eval::NNUE::Networks> &networks;
 
-  // Used by NNUE
   Eval::NNUE::AccumulatorStack accumulatorStack;
   Eval::NNUE::AccumulatorCaches refreshTable;
 

@@ -2,8 +2,6 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Position Classifier - Implementation
-
   Licensed under GPL-3.0
 */
 
@@ -32,7 +30,6 @@ PositionType PositionFeatures::classify() const {
     strategic += 0.2f;
   }
 
-  // Normalize
   float total = tactical + strategic;
   if (total > 0) {
     tactical /= total;
@@ -41,7 +38,6 @@ PositionType PositionFeatures::classify() const {
     tactical = strategic = 0.5f;
   }
 
-  // Classify
   if (tactical > 0.8f)
     return PositionType::HIGHLY_TACTICAL;
   if (tactical > 0.6f)
@@ -68,31 +64,26 @@ PositionFeatures PositionClassifier::analyze(const Position &pos) const {
       f.num_checks_available++;
   }
 
-  // Hanging and attacked pieces
   for (Color c : {WHITE, BLACK}) {
     f.hanging_pieces[c] = count_hanging_pieces(pos, c);
     f.attacked_pieces[c] = count_attacked_pieces(pos, c);
     f.king_attackers[c] = count_king_attackers(pos, c);
   }
 
-  // Pawn structure
   for (Color c : {WHITE, BLACK}) {
     f.pawn_islands[c] = count_pawn_islands(pos, c);
     f.passed_pawns[c] = count_passed_pawns(pos, c);
   }
 
-  // Mobility
   for (Color c : {WHITE, BLACK}) {
     f.mobility[c] = calculate_mobility(pos, c);
   }
 
-  // Position structure
   f.is_closed = is_position_closed(pos);
   f.is_open = !f.is_closed && popcount(pos.pieces(PAWN)) < 10;
   f.is_endgame = is_endgame_position(pos);
   f.is_middlegame = !f.is_endgame && pos.game_ply() > 10;
 
-  // Material
   for (Color c : {WHITE, BLACK}) {
     f.material[c] = 0;
     for (PieceType pt = PAWN; pt <= QUEEN; ++pt) {
@@ -101,7 +92,6 @@ PositionFeatures PositionClassifier::analyze(const Position &pos) const {
   }
   f.material_imbalance = std::abs(f.material[WHITE] - f.material[BLACK]);
 
-  // Tactical score
   float tactical = 0.0f;
   if (f.in_check)
     tactical += 0.3f;
@@ -119,7 +109,6 @@ PositionFeatures PositionClassifier::analyze(const Position &pos) const {
     tactical += 0.1f;
   f.tactical_score = std::min(1.0f, tactical);
 
-  // Strategic score
   float strategic = 0.0f;
   if (f.is_closed)
     strategic += 0.3f;
@@ -136,7 +125,6 @@ PositionFeatures PositionClassifier::analyze(const Position &pos) const {
     strategic += 0.1f;
   f.strategic_score = std::min(1.0f, strategic);
 
-  // Complexity
   f.complexity = (f.tactical_score + f.strategic_score) / 2.0f;
   f.complexity += 0.1f * std::min(moves.size() / 40.0f, 1.0f);
   f.complexity = std::min(1.0f, f.complexity);
@@ -292,28 +280,24 @@ int PositionClassifier::calculate_mobility(const Position &pos, Color c) const {
   Bitboard occupied = pos.pieces();
   Bitboard our_pieces = pos.pieces(c);
 
-  // Knights
   Bitboard knights = pos.pieces(c, KNIGHT);
   while (knights) {
     Square s = pop_lsb(knights);
     mobility += popcount(attacks_bb<KNIGHT>(s) & ~our_pieces);
   }
 
-  // Bishops
   Bitboard bishops = pos.pieces(c, BISHOP);
   while (bishops) {
     Square s = pop_lsb(bishops);
     mobility += popcount(attacks_bb<BISHOP>(s, occupied) & ~our_pieces);
   }
 
-  // Rooks
   Bitboard rooks = pos.pieces(c, ROOK);
   while (rooks) {
     Square s = pop_lsb(rooks);
     mobility += popcount(attacks_bb<ROOK>(s, occupied) & ~our_pieces);
   }
 
-  // Queens
   Bitboard queens = pos.pieces(c, QUEEN);
   while (queens) {
     Square s = pop_lsb(queens);
@@ -324,7 +308,6 @@ int PositionClassifier::calculate_mobility(const Position &pos, Color c) const {
 }
 
 bool PositionClassifier::is_position_closed(const Position &pos) const {
-  // A position is closed if there are many pawns and few open files
   Bitboard all_pawns = pos.pieces(PAWN);
   int pawn_count = popcount(all_pawns);
 
@@ -430,7 +413,6 @@ SearchStrategy StrategySelector::get_strategy(const PositionFeatures &f) const {
     break;
   }
 
-  // Adjust for endgame
   if (f.is_endgame) {
     s.ab_depth += 1;
     s.ab_verify_depth += 1;
@@ -462,7 +444,6 @@ void StrategySelector::adjust_for_time(SearchStrategy &s, int time_left_ms,
     s.min_mcts_nodes = 300;
   }
 
-  // Increment affects strategy
   if (increment_ms > 5000)
     s.time_multiplier *= 1.1f;
 }

@@ -36,7 +36,6 @@ for arg in "$@"; do
     esac
 done
 
-# Engine definitions
 MF="$PROJ/build/metalfish"
 WEIGHTS="$PROJ/networks/BT4-1024x15x32h-swa-6147500.pb"
 SF="$PROJ/reference/stockfish/src/stockfish"
@@ -120,21 +119,17 @@ run_match() {
     echo "  PGN saved: $pgn"
 }
 
-# Internal head-to-head
 run_match "$AB" "$MCTS" "01_AB_vs_MCTS"
 run_match "$AB" "$HYBRID" "02_AB_vs_Hybrid"
 run_match "$MCTS" "$HYBRID" "03_MCTS_vs_Hybrid"
 
-# MetalFish-AB vs reference engines
 run_match "$AB" "$SFULL" "04_AB_vs_Stockfish"
 run_match "$AB" "$BERSERK_E" "05_AB_vs_Berserk"
 run_match "$AB" "$PATRICIA_E" "06_AB_vs_Patricia"
 
-# MetalFish-MCTS vs NN baselines
 run_match "$MCTS" "$LC0_E" "07_MCTS_vs_Lc0"
 run_match "$MCTS" "$PATRICIA_E" "08_MCTS_vs_Patricia"
 
-# MetalFish-Hybrid vs reference engines
 run_match "$HYBRID" "$SL15" "09_Hybrid_vs_Stockfish-L15"
 run_match "$HYBRID" "$BERSERK_E" "10_Hybrid_vs_Berserk"
 run_match "$HYBRID" "$PATRICIA_E" "11_Hybrid_vs_Patricia"

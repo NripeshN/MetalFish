@@ -17,7 +17,7 @@
 */
 
 #include "policy_map.h"
-#include "encoder.h" // For kPolicyOutputs
+#include "encoder.h"
 #include "metal/tables/attention_policy_map.h"
 
 #include <array>
@@ -30,9 +30,8 @@ namespace NN {
 
 namespace {
 
-// All 1858 policy output moves in UCI format
-// Indices 0-1791: Regular moves (including queen promotions as queen-direction
-// moves) Indices 1792-1857: Underpromotions only (r/b/n suffix)
+// All 1858 policy output moves in UCI format.
+// Indices 1792-1857: underpromotions only (r/b/n suffix).
 const char *kMoveStrings[kPolicyOutputs] = {
     "a1b1", "a1c1", "a1d1", "a1e1", "a1f1", "a1g1", "a1h1", "a1a2", "a1b2",
     "a1c2", "a1a3", "a1b3", "a1c3", "a1a4", "a1d4", "a1a5", "a1e5", "a1a6",
@@ -276,7 +275,7 @@ uint16_t ParseMoveStr(const char *str) {
 
   int from_sq = from_rank * 8 + from_file;
   int to_sq = to_rank * 8 + to_file;
-  char promo = str[4]; // Will be 0 if string is only 4 chars
+  char promo = str[4];
 
   return PackMove(from_sq, to_sq, promo);
 }
@@ -284,7 +283,7 @@ uint16_t ParseMoveStr(const char *str) {
 constexpr std::array<uint16_t, 65536> BuildLookupTable() {
   std::array<uint16_t, 65536> table{};
   for (auto &val : table)
-    val = 0xFFFF; // Invalid marker
+    val = 0xFFFF;
 
   for (int i = 0; i < kPolicyOutputs; ++i) {
     uint16_t packed = ParseMoveStr(kMoveStrings[i]);
@@ -327,10 +326,6 @@ int MoveToNNIndex(Move move, int transform) {
 
   const int from_sq = static_cast<int>(move.from_sq());
   const int to_sq = static_cast<int>(move.to_sq());
-
-  if (from_sq < 0 || from_sq > 63 || to_sq < 0 || to_sq > 63) {
-    return -1;
-  }
 
   char promo_char = 0;
   if (move.type_of() == PROMOTION) {
@@ -375,11 +370,6 @@ Move IndexToNNMove(int index, int transform) {
   int from_rank = move_str[1] - '1';
   int to_file = move_str[2] - 'a';
   int to_rank = move_str[3] - '1';
-
-  if (from_file < 0 || from_file > 7 || from_rank < 0 || from_rank > 7 ||
-      to_file < 0 || to_file > 7 || to_rank < 0 || to_rank > 7) {
-    return Move::none();
-  }
 
   Square from = make_square(File(from_file), Rank(from_rank));
   Square to = make_square(File(to_file), Rank(to_rank));

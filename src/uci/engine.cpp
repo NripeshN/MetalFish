@@ -132,25 +132,17 @@ Engine::Engine(std::optional<std::string> path)
         return std::nullopt;
       }));
 
-  // GPU acceleration options
-  // NOTE: GPU is used ONLY for transformer network inference (MCTS/Hybrid).
-  // AB search always uses CPU NNUE. There is no "GPU NNUE" mode.
   // Default to false -- Metal is initialized on demand when MCTS/Hybrid starts.
   options.add("UseGPU", Option(false));
 
-  // Transformer network weights for MCTS/Hybrid (.pb or .pb.gz file)
   options.add("NNWeights", Option("", [](const Option &) {
-                // Path is read when MCTS/Hybrid search starts
                 return std::nullopt;
               }));
 
-  // Hybrid search mode - use parallel MCTS+AB instead of pure AB
   options.add("UseHybridSearch", Option(false));
 
-  // Pure MCTS mode - use GPU-accelerated MCTS instead of AB
   options.add("UseMCTS", Option(false));
 
-  // Hybrid thread budgeting:
   // 0 = auto (derived from Threads; coordinator is outside the worker budget).
   options.add("HybridMCTSThreads", Option(0, 0, MaxThreads));
   options.add("HybridABThreads", Option(0, 0, MaxThreads));
@@ -158,6 +150,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridABPolicyWeight", Option("0.0"));
   options.add("HybridMCTSMinimumKLDGainPerNode", Option("0.0"));
   options.add("HybridMCTSRootReject", Option(true));
+  options.add("HybridMCTSUseSharedTT", Option(false));
   options.add("HybridTrace", Option(false));
   options.add("TransformerMinMoveBudgetMs", Option(1200, 0, 5000));
 
@@ -199,8 +192,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSMaxCollisionVisitsScalingEnd", Option(145000, 0, 100000000));
   options.add("MCTSMaxCollisionVisitsScalingPower", Option("1.25"));
   options.add("MCTSVirtualLoss", Option(1, 1, 128));
-  // 0 = auto. On Apple Silicon, smaller batches win at the low MCTS thread
-  // counts used for strength play; explicit values still override this.
+  // 0 = auto; on Apple Silicon smaller batches are better at low thread counts.
   options.add("MCTSMinibatchSize", Option(0, 0, 4096));
   options.add("MCTSMaxThreads", Option(0, 0, MaxThreads));
   options.add("MCTSMaxOutOfOrderFactor", Option("2.4"));
@@ -291,8 +283,6 @@ void Engine::set_position(const std::string &fen,
   }
 }
 
-// modifiers
-
 void Engine::set_numa_config_from_option(const std::string &o) {
   if (o == "auto" || o == "system") {
     numaContext.set_numa_config(NumaConfig::from_system());
@@ -330,8 +320,6 @@ void Engine::set_tt_size(size_t mb) {
 }
 
 void Engine::set_ponderhit(bool b) { threads.main_manager()->ponder = b; }
-
-// network related
 
 void Engine::verify_networks() const {
   const std::string bigEvalFile = std::string(options["EvalFile"]);
@@ -380,11 +368,6 @@ void Engine::load_networks() {
   });
   threads.clear();
   threads.ensure_network_replicated();
-
-  // NOTE: No GPU NNUE initialization here.
-  // AB search uses CPU NNUE only.
-  // Transformer network (for MCTS/Hybrid) is loaded on demand when
-  // those search modes are activated, using the NNWeights UCI option.
 }
 
 void Engine::load_big_network(const std::string &file) {
@@ -412,8 +395,6 @@ void Engine::save_network(
     networks_.small.save(files[1].first);
   });
 }
-
-// utility functions
 
 void Engine::trace_eval() const {
   StateListPtr trace_states(new std::deque<StateInfo>(1));
@@ -497,10 +478,6 @@ std::string Engine::thread_allocation_information_as_string() const {
   return ss.str();
 }
 
-// ============================================================================
-// Hybrid Search Integration
-// ============================================================================
-
 Engine::QuickSearchResult Engine::search_sync(const std::string &fen, int depth,
                                               int time_ms) {
   QuickSearchResult result;
@@ -536,7 +513,7 @@ Engine::QuickSearchResult Engine::search_sync(const std::string &fen, int depth,
   return result;
 }
 
-// Silent search - runs AB search WITHOUT triggering bestmove callback
+// Runs AB search without triggering the bestmove callback.
 Engine::QuickSearchResult Engine::search_silent(const std::string &fen,
                                                 int depth, int time_ms) {
   QuickSearchResult result;
@@ -552,7 +529,6 @@ Engine::QuickSearchResult Engine::search_silent(const std::string &fen,
     limits.movetime = time_ms;
   }
 
-  // Temporarily set a no-op callback before starting, restore after.
   auto saved_callback = updateContext.onBestmove;
 
   updateContext.onBestmove = [](std::string_view, std::string_view) {};
@@ -596,7 +572,6 @@ void Engine::search_with_callbacks(const std::string &fen, int time_ms,
 
   updateContext.onUpdateFull = [this, &on_iteration,
                                 &saved_update](const Search::InfoFull &info) {
-    // Build QuickSearchResult from the search state
     Thread *best = threads.get_best_thread();
     if (best && !best->worker->rootMoves.empty()) {
       QuickSearchResult result;
@@ -617,7 +592,6 @@ void Engine::search_with_callbacks(const std::string &fen, int time_ms,
 
   go(limits);
 
-  // Poll for external stop signal from hybrid coordinator
   while (!threads.stop.load(std::memory_order_acquire)) {
     if (stop_flag.load(std::memory_order_acquire)) {
       threads.stop = true;

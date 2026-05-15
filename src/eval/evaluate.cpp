@@ -30,9 +30,6 @@ void Eval::set_use_apple_silicon_nnue(bool) {}
 
 bool Eval::use_apple_silicon_nnue() { return false; }
 
-// Returns a static, purely materialistic evaluation of the position from
-// the point of view of the side to move. It can be divided by PawnValue to get
-// an approximation of the material advantage on the board in terms of pawns.
 int Eval::simple_eval(const Position &pos) {
   Color c = pos.side_to_move();
   return PawnValue * (pos.count<PAWN>(c) - pos.count<PAWN>(~c)) +
@@ -43,8 +40,6 @@ bool Eval::use_smallnet(const Position &pos) {
   return std::abs(simple_eval(pos)) > 962;
 }
 
-// Evaluate is the evaluator for the outer world. It returns a static evaluation
-// of the position from the point of view of the side to move.
 // Always uses CPU NNUE with incremental accumulator updates. On Apple Silicon
 // this keeps AB latency low and leaves the GPU free for transformer MCTS.
 Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
@@ -56,7 +51,6 @@ Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
   int32_t psqt, positional;
   bool smallNet = use_smallnet(pos);
 
-  // CPU NNUE evaluation with incremental accumulator updates
   auto [cpu_psqt, cpu_positional] =
       smallNet ? networks.small.evaluate(pos, accumulators, caches.small)
                : networks.big.evaluate(pos, accumulators, caches.big);
@@ -73,7 +67,6 @@ Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
     smallNet = false;
   }
 
-  // Blend optimism and eval with nnue complexity
   int nnueComplexity = std::abs(psqt - positional);
   optimism += optimism * nnueComplexity / 476;
   nnue -= nnue * nnueComplexity / 18236;
@@ -81,18 +74,13 @@ Value Eval::evaluate(const Eval::NNUE::Networks &networks, const Position &pos,
   int material = 534 * pos.count<PAWN>() + pos.non_pawn_material();
   int v = (nnue * (77871 + material) + optimism * (7191 + material)) / 77871;
 
-  // Damp down the evaluation linearly when shuffling
   v -= v * pos.rule50_count() / 199;
 
-  // Guarantee evaluation does not hit the tablebase range
   v = std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);
 
   return v;
 }
 
-// Like evaluate(), but instead of returning a value, it returns
-// a string (suitable for outputting to stdout) that contains the detailed
-// descriptions and values of each evaluation term. Useful for debugging.
 // Trace scores are from white's point of view
 std::string Eval::trace(Position &pos, const Eval::NNUE::Networks &networks) {
 

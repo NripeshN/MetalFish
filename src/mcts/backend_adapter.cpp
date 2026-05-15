@@ -1,7 +1,6 @@
 /*
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
-  MCTS Backend Adapter - Wraps NN evaluator for batch computation
   Licensed under GPL-3.0
 */
 
@@ -46,9 +45,6 @@ inline void MixPositionState(uint64_t &key, int history_index, uint64_t raw_key,
 } // namespace
 
 uint64_t ComputeNNCacheKey(const Position *const *history, int count) {
-  if (count <= 0 || !history)
-    return kFNVOffset;
-
   uint64_t key = kFNVOffset;
   MixInto(key, static_cast<uint64_t>(count));
   for (int i = 0; i < count; ++i) {
@@ -69,9 +65,6 @@ uint64_t ComputeNNCacheKeyFromState(const uint64_t *raw_keys,
                                     const int *rule50_counts,
                                     const int *repetition_distances,
                                     int count) {
-  if (count <= 0 || !raw_keys || !rule50_counts || !repetition_distances)
-    return kFNVOffset;
-
   uint64_t key = kFNVOffset;
   MixInto(key, static_cast<uint64_t>(count));
   for (int i = 0; i < count; ++i) {

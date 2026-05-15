@@ -32,8 +32,6 @@
 
 namespace MetalFish {
 
-// Constructor launches the thread and waits until it goes to sleep
-// in idle_loop(). Note that 'searching' and 'exit' should be already set.
 Thread::Thread(Search::SharedState &sharedState,
                std::unique_ptr<Search::ISearchManager> sm, size_t n,
                size_t numaN, size_t totalNumaCount,
@@ -45,9 +43,6 @@ Thread::Thread(Search::SharedState &sharedState,
   wait_for_search_finished();
 
   run_custom_job([this, &binder, &sharedState, &sm, n]() {
-    // Use the binder to [maybe] bind the threads to a NUMA node before doing
-    // the Worker allocation. Ideally we would also allocate the SearchManager
-    // here, but that's minor.
     this->numaAccessToken = binder();
     this->worker = make_unique_large_page<Search::Worker>(
         sharedState, std::move(sm), n, idxInNuma, totalNuma,
@@ -57,8 +52,6 @@ Thread::Thread(Search::SharedState &sharedState,
   wait_for_search_finished();
 }
 
-// Destructor wakes up the thread in idle_loop() and waits
-// for its termination. Thread should be already waiting.
 Thread::~Thread() {
 
   assert(!searching);
@@ -68,26 +61,22 @@ Thread::~Thread() {
   stdThread.join();
 }
 
-// Wakes up the thread that will start the search
 void Thread::start_searching() {
   assert(worker != nullptr);
   run_custom_job([this]() { worker->start_searching(); });
 }
 
-// Clears the histories for the thread worker (usually before a new game)
 void Thread::clear_worker() {
   assert(worker != nullptr);
   run_custom_job([this]() { worker->clear(); });
 }
 
-// Blocks on the condition variable until the thread has finished searching
 void Thread::wait_for_search_finished() {
 
   std::unique_lock<std::mutex> lk(mutex);
   cv.wait(lk, [&] { return !searching; });
 }
 
-// Launching a function in the thread
 void Thread::run_custom_job(std::function<void()> f) {
   {
     std::unique_lock<std::mutex> lk(mutex);
@@ -102,9 +91,6 @@ void Thread::ensure_network_replicated() {
   worker->ensure_network_replicated();
 }
 
-// Thread gets parked here, blocked on the condition variable
-// when the thread has no work to do.
-
 void Thread::idle_loop() {
 #if defined(__APPLE__)
   // Request P-core scheduling via QoS class.
@@ -116,7 +102,7 @@ void Thread::idle_loop() {
   while (true) {
     std::unique_lock<std::mutex> lk(mutex);
     searching = false;
-    cv.notify_one(); // Wake up anyone waiting for search finished
+    cv.notify_one();
     cv.wait(lk, [&] { return searching; });
 
     if (exit)
@@ -147,14 +133,11 @@ static size_t next_power_of_two(uint64_t count) {
   return count > 1 ? (2ULL << msb(count - 1)) : 1;
 }
 
-// Creates/destroys threads to match the requested number.
-// Created and launched threads will immediately go to sleep in idle_loop.
-// Upon resizing, threads are recreated to allow for binding if necessary.
 void ThreadPool::set(
     const NumaConfig &numaConfig, Search::SharedState sharedState,
     const Search::SearchManager::UpdateContext &updateContext) {
 
-  if (threads.size() > 0) // destroy any existing thread(s)
+  if (threads.size() > 0)
   {
     main_thread()->wait_for_search_finished();
 
@@ -165,7 +148,7 @@ void ThreadPool::set(
 
   const size_t requested = sharedState.options["Threads"];
 
-  if (requested > 0) // create new thread(s)
+  if (requested > 0)
   {
     // Binding threads may be problematic when there's multiple NUMA nodes and
     // multiple MetalFish instances running. In particular, if each instance
@@ -192,8 +175,8 @@ void ThreadPool::set(
             ? numaConfig.distribute_threads_among_numa_nodes(requested)
             : std::vector<NumaIndex>{};
 
-    if (boundThreadToNumaNode.empty())
-      counts[0] = requested; // Pretend all threads are part of numa node 0
+      if (boundThreadToNumaNode.empty())
+        counts[0] = requested;
     else {
       for (size_t i = 0; i < boundThreadToNumaNode.size(); ++i)
         counts[boundThreadToNumaNode[i]]++;
@@ -227,10 +210,6 @@ void ThreadPool::set(
                       std::make_unique<Search::SearchManager>(updateContext))
                 : std::make_unique<Search::NullSearchManager>();
 
-        // When not binding threads we want to force all access to happen
-        // from the same NUMA node, because in case of NUMA replicated memory
-        // accesses we don't want to trash cache in case the threads get
-        // scheduled on the same NUMA node.
         auto binder = doBindThreads
                           ? OptionalThreadToNumaNodeBinder(numaConfig, numaId)
                           : OptionalThreadToNumaNodeBinder(numaId);
@@ -240,8 +219,6 @@ void ThreadPool::set(
             threadsPerNode[numaId], binder));
       };
 
-      // Ensure the worker thread inherits the intended NUMA affinity at
-      // creation.
       if (doBindThreads)
         numaConfig.execute_on_numa_node(numaId, create_thread);
       else
@@ -254,7 +231,6 @@ void ThreadPool::set(
   }
 }
 
-// Sets threadPool data to initial values
 void ThreadPool::clear() {
   if (threads.size() == 0)
     return;
@@ -265,7 +241,6 @@ void ThreadPool::clear() {
   for (auto &&th : threads)
     th->wait_for_search_finished();
 
-  // These two affect the time taken on the first move of a game:
   main_manager()->bestPreviousAverageScore = VALUE_INFINITE;
   main_manager()->previousTimeReduction = 0.85;
 
@@ -287,8 +262,6 @@ void ThreadPool::wait_on_thread(size_t threadId) {
 
 size_t ThreadPool::num_threads() const { return threads.size(); }
 
-// Wakes up main thread waiting in idle_loop() and returns immediately.
-// Main thread will wake up other threads and start the search.
 void ThreadPool::start_thinking(const OptionsMap &options, Position &pos,
                                 StateListPtr &states,
                                 Search::LimitsType limits) {
@@ -319,16 +292,11 @@ void ThreadPool::start_thinking(const OptionsMap &options, Position &pos,
   Tablebases::Config tbConfig =
       Tablebases::rank_root_moves(options, pos, rootMoves);
 
-  // After ownership transfer 'states' becomes empty, so if we stop the search
-  // and call 'go' again without setting a new position states.get() == nullptr.
   assert(states.get() || setupStates.get());
 
   if (states.get())
-    setupStates = std::move(states); // Ownership transfer, states is now empty
+    setupStates = std::move(states);
 
-  // Match Stockfish worker root setup: rebuild from FEN, then restore the
-  // game-history state below. Some StateInfo fields cannot be inferred from
-  // FEN.
   for (auto &&th : threads) {
     th->run_custom_job([&]() {
       th->worker->limits = limits;
@@ -357,11 +325,9 @@ Thread *ThreadPool::get_best_thread() const {
   std::unordered_map<Move, int64_t, Move::MoveHash> votes(
       2 * std::min(size(), bestThread->worker->rootMoves.size()));
 
-  // Find the minimum score of all threads
   for (auto &&th : threads)
     minScore = std::min(minScore, th->worker->rootMoves[0].score);
 
-  // Vote according to score and depth, and select the best thread
   auto thread_voting_value = [minScore](Thread *th) {
     return (th->worker->rootMoves[0].score - minScore + 14) *
            int(th->worker->completedDepth);
@@ -394,11 +360,9 @@ Thread *ThreadPool::get_best_thread() const {
         thread_voting_value(bestThread) * int(bestThreadPV.size() > 2);
 
     if (bestThreadInProvenWin) {
-      // Make sure we pick the shortest mate / TB conversion
       if (newThreadScore > bestThreadScore)
         bestThread = th.get();
     } else if (bestThreadInProvenLoss) {
-      // Make sure we pick the shortest mated / TB conversion
       if (newThreadInProvenLoss && newThreadScore < bestThreadScore)
         bestThread = th.get();
     } else if (newThreadInProvenWin || newThreadInProvenLoss ||
@@ -412,18 +376,13 @@ Thread *ThreadPool::get_best_thread() const {
   return bestThread;
 }
 
-// Start non-main threads.
-// Will be invoked by main thread after it has started searching.
 void ThreadPool::start_searching() {
-
   for (auto &&th : threads)
     if (th != threads.front())
       th->start_searching();
 }
 
-// Wait for non-main threads
 void ThreadPool::wait_for_search_finished() const {
-
   for (auto &&th : threads)
     if (th != threads.front())
       th->wait_for_search_finished();

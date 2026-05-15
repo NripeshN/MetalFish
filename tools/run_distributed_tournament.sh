@@ -1,8 +1,4 @@
 #!/bin/bash
-# ============================================================================
-# MetalFish Tournament: All 3 engines vs 10 opponents + internal H2H
-# 33 matches × 10 games = 330 games across 4 M1 Ultra instances
-# ============================================================================
 set -euo pipefail
 
 PROJ="$(cd "$(dirname "$0")/.." && pwd)"
@@ -73,7 +69,6 @@ mkdir -p "$RESULTS_DIR"
 ssh_cmd() { ssh -i "$PEM" -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=60 "$USER@$1" "${@:2}"; }
 scp_cmd() { scp -i "$PEM" -o StrictHostKeyChecking=no -q "$@"; }
 
-# Preflight: ensure all hosts run the same binary and no stale matches are alive.
 if [ "$SYNC_BIN" -eq 1 ]; then
     echo "--- Building local metalfish for deployment ---"
     cmake --build "$PROJ/build" -j8 --target metalfish
@@ -114,13 +109,10 @@ BK="$RDIR/reference/books/8moves_v3.pgn"
 W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
 CA="-each tc=$TC -games $GAMES -repeat -recover -wait $WAIT_MS -srand $CUTECHESS_SEED -openings file=$BK format=pgn order=$OPENING_ORDER -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
 
-# Our engines: use Apple performance cores by default; the coordinator and OS
-# can occupy efficiency cores while search threads stay latency-oriented.
 AB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-AB option.Threads=$ENGINE_THREADS option.Hash=512"
 MCTS="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-MCTS option.Threads=$MCTS_THREADS option.UseMCTS=true option.NNWeights=$W option.MCTSMaxThreads=$MCTS_THREADS option.MCTSMinibatchSize=0 timemargin=30000"
 HYB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-Hybrid option.Threads=$HYBRID_THREADS option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W option.HybridMCTSThreads=$HYBRID_MCTS_THREADS option.HybridABThreads=$HYBRID_AB_THREADS option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP option.MCTSMaxThreads=$HYBRID_MCTS_THREADS option.MCTSMinibatchSize=0 timemargin=30000"
 
-# Opponents — 1 thread each for controlled comparison
 S="$RDIR/reference/stockfish/src/stockfish"
 SF="-engine proto=uci cmd=$S name=Stockfish option.Threads=1 option.Hash=512"
 S16='-engine proto=uci cmd='$S' name=SF-L16 option.Threads=1 option.Hash=512 "option.Skill Level=16"'
@@ -133,7 +125,6 @@ BER="-engine proto=uci cmd=$RDIR/reference/berserk/src/berserk name=Berserk opti
 PAT="-engine proto=uci cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=1 option.Hash=512"
 LC0="-engine proto=uci cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$W arg=--backend=metal option.Threads=1"
 
-# Instance 1 (9 matches): AB vs everyone except Lc0
 I1="cd $RDIR"
 I1="$I1 && echo '>>> AB vs Stockfish' && $CC $AB $SF $CA -pgnout $RDIR/01_AB_vs_SF.pgn"
 I1="$I1 && echo '>>> AB vs SF-L16' && $CC $AB $S16 $CA -pgnout $RDIR/02_AB_vs_SF16.pgn"
@@ -146,7 +137,6 @@ I1="$I1 && echo '>>> AB vs Berserk' && $CC $AB $BER $CA -pgnout $RDIR/08_AB_vs_B
 I1="$I1 && echo '>>> AB vs Patricia' && $CC $AB $PAT $CA -pgnout $RDIR/09_AB_vs_Patricia.pgn"
 I1="$I1 && echo '=== Instance 1 DONE ==='"
 
-# Instance 2 (9 matches): MCTS vs everyone except SF/SF16
 I2="cd $RDIR"
 I2="$I2 && echo '>>> MCTS vs Lc0' && $CC $MCTS $LC0 $CA -pgnout $RDIR/10_MCTS_vs_Lc0.pgn"
 I2="$I2 && echo '>>> MCTS vs SF-L14' && $CC $MCTS $S14 $CA -pgnout $RDIR/11_MCTS_vs_SF14.pgn"
@@ -159,7 +149,6 @@ I2="$I2 && echo '>>> MCTS vs Patricia' && $CC $MCTS $PAT $CA -pgnout $RDIR/17_MC
 I2="$I2 && echo '>>> MCTS vs Stockfish' && $CC $MCTS $SF $CA -pgnout $RDIR/18_MCTS_vs_SF.pgn"
 I2="$I2 && echo '=== Instance 2 DONE ==='"
 
-# Instance 3 (9 matches): Hybrid vs everyone except SF8/SF5
 I3="cd $RDIR"
 I3="$I3 && echo '>>> Hybrid vs Stockfish' && $CC $HYB $SF $CA -pgnout $RDIR/19_Hybrid_vs_SF.pgn"
 I3="$I3 && echo '>>> Hybrid vs SF-L16' && $CC $HYB $S16 $CA -pgnout $RDIR/20_Hybrid_vs_SF16.pgn"
@@ -172,7 +161,6 @@ I3="$I3 && echo '>>> Hybrid vs Lc0' && $CC $HYB $LC0 $CA -pgnout $RDIR/26_Hybrid
 I3="$I3 && echo '>>> Hybrid vs SF-L8' && $CC $HYB $S8 $CA -pgnout $RDIR/27_Hybrid_vs_SF8.pgn"
 I3="$I3 && echo '=== Instance 3 DONE ==='"
 
-# Instance 4 (6 matches): Internal H2H + remaining
 I4="cd $RDIR"
 I4="$I4 && echo '>>> AB vs MCTS' && $CC $AB $MCTS $CA -pgnout $RDIR/28_AB_vs_MCTS.pgn"
 I4="$I4 && echo '>>> AB vs Hybrid' && $CC $AB $HYB $CA -pgnout $RDIR/29_AB_vs_Hybrid.pgn"

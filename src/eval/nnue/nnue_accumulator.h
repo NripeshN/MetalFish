@@ -30,7 +30,6 @@ template <IndexType Size> struct alignas(CacheLineSize) Accumulator;
 
 template <IndexType TransformedFeatureDimensions> class FeatureTransformer;
 
-// Class that holds the result of affine transformation of input features
 template <IndexType Size> struct alignas(CacheLineSize) Accumulator {
   std::array<std::array<std::int16_t, Size>, COLOR_NB> accumulation;
   std::array<std::array<std::int32_t, PSQTBuckets>, COLOR_NB> psqtAccumulation;
@@ -57,8 +56,6 @@ struct AccumulatorCaches {
       std::array<Piece, SQUARE_NB> pieces;
       Bitboard pieceBB;
 
-      // To initialize a refresh entry, we set all its bitboards empty,
-      // so we put the biases in the accumulation, without any weights on top
       void clear(const std::array<BiasType, Size> &biases) {
         accumulation = biases;
         std::memset(reinterpret_cast<std::byte *>(this) +

@@ -1,7 +1,6 @@
 /*
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
-  MCTS Search Pipeline - Optimized for Apple Silicon
   Licensed under GPL-3.0
 */
 
@@ -299,7 +298,6 @@ private:
   int64_t CalculateTimeBudget();
   RootMoveStats GetBestMoveStatsLocked() const;
 
-  // Core MCTS algorithms
   void RunIteration(SearchWorkerCtx &ctx);
   void RunIterationSemaphore(SearchWorkerCtx &ctx);
   struct SelectedLeaf {
@@ -321,7 +319,6 @@ private:
   void CreateLeafEdges(Node *leaf, const MoveList<LEGAL> &moves);
   Move FirstRootMoveOrLegal() const;
 
-  // Prefetch likely-needed positions into unused GPU batch slots
   void MaybePrefetchIntoCache(
       SearchWorkerCtx &ctx, BackendComputation *computation,
       std::deque<SearchWorkerCtx::HistoryBuffer> &prefetch_histories);
@@ -330,7 +327,6 @@ private:
       BackendComputation *computation,
       std::deque<SearchWorkerCtx::HistoryBuffer> &prefetch_histories);
 
-  // NN policy application
   static void ApplyNNPolicy(Node *node, const EvaluationResult &result,
                             float softmax_temp);
 
@@ -338,7 +334,6 @@ private:
   std::unique_ptr<Backend> backend_;
   NodeTree tree_;
 
-  // BackendComputation pool to avoid per-iteration heap allocation
   std::vector<std::unique_ptr<BackendComputation>> computation_pool_;
   std::mutex pool_mutex_;
 
@@ -388,10 +383,9 @@ private:
   mutable std::mutex stopper_mutex_;
   mutable std::shared_mutex tree_structure_mutex_;
 
-  // Track when the first NN eval arrives for smart pruning
   mutable int64_t first_eval_time_ms_ = -1;
 
-  // Lc0-style smooth time management (persistent across searches)
+  // Lc0-style smooth time management state (persistent across searches)
   struct TimeManagerState {
     float nps = 20000.0f;
     bool nps_reliable = false;
@@ -408,7 +402,6 @@ private:
   SharedTTReader *shared_tt_ = nullptr;
 };
 
-// Factory function
 std::unique_ptr<Search> CreateSearch(const SearchParams &config);
 
 } // namespace MCTS

@@ -160,7 +160,7 @@ set(HYBRID_SOURCES src/hybrid/hybrid_search.cpp src/hybrid/position_adapter.cpp
                    src/hybrid/classifier.cpp)
 
 # Protobuf generation for transformer network weights
-find_package(Protobuf 3.0 REQUIRED)
+find_package(Protobuf REQUIRED)
 include_directories(${Protobuf_INCLUDE_DIRS})
 
 set(PROTO_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/proto/net.proto)

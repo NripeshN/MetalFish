@@ -2,16 +2,6 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Position Classifier
-
-  Classifies positions as tactical or strategic to determine the optimal
-  search strategy. This is crucial for the hybrid approach - we want to
-  use alpha-beta for tactical positions and MCTS for strategic ones.
-
-  Key indicators:
-  - Tactical: checks, captures available, hanging pieces, king safety issues
-  - Strategic: closed positions, pawn structures, piece maneuvering
-
   Licensed under GPL-3.0
 */
 
@@ -32,7 +22,6 @@ enum class PositionType {
 };
 
 struct PositionFeatures {
-  // Tactical indicators
   bool in_check = false;
   int num_checks_available = 0;
   int num_captures = 0;
@@ -41,36 +30,30 @@ struct PositionFeatures {
   int attacked_pieces[2] = {0, 0};
   bool has_mate_threat = false;
 
-  // King safety
   int king_attackers[2] = {0, 0};
   int king_zone_attacks[2] = {0, 0};
   bool kings_castled[2] = {false, false};
 
-  // Strategic indicators
   int pawn_islands[2] = {0, 0};
   int passed_pawns[2] = {0, 0};
   int backward_pawns[2] = {0, 0};
   int isolated_pawns[2] = {0, 0};
   int pawn_chain_length[2] = {0, 0};
 
-  // Piece activity
   int mobility[2] = {0, 0};
   int outposts[2] = {0, 0};
   int piece_coordination[2] = {0, 0};
 
-  // Position structure
   bool is_closed = false;
   bool is_open = false;
   int center_control[2] = {0, 0};
   int space_advantage[2] = {0, 0};
 
-  // Material
   int material[2] = {0, 0};
   int material_imbalance = 0;
   bool is_endgame = false;
   bool is_middlegame = false;
 
-  // Computed scores
   float tactical_score = 0.0f;  // 0-1, higher = more tactical
   float strategic_score = 0.0f; // 0-1, higher = more strategic
   float complexity = 0.0f;      // 0-1, higher = more complex

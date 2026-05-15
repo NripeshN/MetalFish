@@ -85,10 +85,8 @@ private:
   bool read_parameters(std::istream &, std::string &);
   bool write_parameters(std::ostream &, const std::string &) const;
 
-  // Input feature converter
   Transformer featureTransformer;
 
-  // Evaluation function
   Arch network[LayerStacks];
 
   EvalFile evalFile;
@@ -96,14 +94,12 @@ private:
 
   bool initialized = false;
 
-  // Hash value of evaluation function structure
   static constexpr std::uint32_t hash =
       Transformer::get_hash_value() ^ Arch::get_hash_value();
 
   template <IndexType Size> friend struct AccumulatorCaches::Cache;
 };
 
-// Definitions of the network types
 using SmallFeatureTransformer =
     FeatureTransformer<TransformedFeatureDimensionsSmall>;
 using SmallNetworkArchitecture =

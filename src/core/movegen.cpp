@@ -263,13 +263,10 @@ template <GenType Type> Move *generate(const Position &pos, Move *moveList) {
                      : generate_all<BLACK, Type>(pos, moveList);
 }
 
-// Explicit template instantiations
 template Move *generate<CAPTURES>(const Position &, Move *);
 template Move *generate<QUIETS>(const Position &, Move *);
 template Move *generate<EVASIONS>(const Position &, Move *);
 template Move *generate<NON_EVASIONS>(const Position &, Move *);
-
-// generate<LEGAL> generates all the legal moves in the given position
 
 template <> Move *generate<LEGAL>(const Position &pos, Move *moveList) {
 

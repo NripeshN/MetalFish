@@ -19,8 +19,6 @@ namespace NN {
 namespace {
 static constexpr float kEpsilon = 1e-5f;
 
-// Lightweight weight extraction utility that relies on
-// MetalFish's DecodeLayer helper.
 class LayerAdapter {
 public:
   explicit LayerAdapter(const MetalFishNN::Weights::Layer &layer)
@@ -84,12 +82,10 @@ BaseWeights::ConvBlock::ConvBlock(const MetalFishNN::Weights::ConvBlock &block)
       bn_means(LayerAdapter(block.bn_means()).as_vector()),
       bn_stddivs(LayerAdapter(block.bn_stddivs()).as_vector()) {
   if (weights.size() == 0) {
-    // Empty ConvBlock.
     return;
   }
 
   if (bn_betas.size() == 0) {
-    // Old net without gamma and beta.
     for (auto i = size_t{0}; i < bn_means.size(); i++) {
       bn_betas.emplace_back(0.0f);
       bn_gammas.emplace_back(1.0f);
@@ -102,12 +98,9 @@ BaseWeights::ConvBlock::ConvBlock(const MetalFishNN::Weights::ConvBlock &block)
   }
 
   if (bn_means.size() == 0) {
-    // No batch norm.
     return;
   }
 
-  // Fold batch norm into weights and biases.
-  // Variance to gamma.
   for (auto i = size_t{0}; i < bn_stddivs.size(); i++) {
     bn_gammas[i] *= 1.0f / std::sqrt(bn_stddivs[i] + kEpsilon);
     bn_means[i] -= biases[i];
@@ -126,7 +119,6 @@ BaseWeights::ConvBlock::ConvBlock(const MetalFishNN::Weights::ConvBlock &block)
     biases[o] = -bn_gammas[o] * bn_means[o] + bn_betas[o];
   }
 
-  // Batch norm weights are not needed anymore.
   bn_stddivs.clear();
   bn_means.clear();
   bn_betas.clear();

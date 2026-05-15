@@ -28,25 +28,20 @@ static MPSImageFeatureChannelFormat fcFormat =
 
 @interface MetalNetworkGraph : MPSGraph {
 @public
-  // Keep the device and command queue objects around for ease of use.
   MPSGraphDevice *_device;
   id<MTLCommandQueue> _queue;
 
-  // Input tensor and tensor data placeholders.
   MPSGraphTensor *_inputTensor;
   MPSGraphTensor *_maskTensor;
 
-  // Variables to track results of graph inference.
   NSArray<MPSGraphTensor *> *_resultTensors;
   NSArray<MPSGraphTensor *> *_targetTensors;
   NSMutableDictionary<NSNumber *, MPSGraphTensorDataDictionary *>
       *_resultDataDicts;
   NSMutableDictionary<NSString *, MPSGraphTensor *> *_readVariables;
 
-  // Variables for triple buffering
   dispatch_semaphore_t _doubleBufferingSemaphore;
 
-  // Global smolgen weights.
   float *__nullable _globalSmolgenWeights;
 }
 

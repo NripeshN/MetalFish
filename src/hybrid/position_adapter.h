@@ -2,8 +2,6 @@
   MetalFish - A GPU-accelerated UCI chess engine
   Copyright (C) 2025 Nripesh Niketan
 
-  Position adapter layer for the MCTS search infrastructure.
-
   Licensed under GPL-3.0
 */
 
@@ -102,7 +100,6 @@ private:
   std::vector<Move> move_stack_;
 };
 
-// Neural network input encoding
 class MCTSEncoder {
 public:
   static std::vector<float> encode_position(const MCTSPosition &pos);
