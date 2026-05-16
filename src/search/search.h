@@ -109,6 +109,7 @@ struct LimitsType {
   bool use_time_management() const { return time[WHITE] || time[BLACK]; }
 
   std::vector<std::string> searchmoves;
+  std::vector<Move> root_order_hints;
   TimePoint time[COLOR_NB], inc[COLOR_NB], npmsec, movetime, startTime;
   int movestogo, depth, mate, perft, infinite;
   uint64_t nodes;

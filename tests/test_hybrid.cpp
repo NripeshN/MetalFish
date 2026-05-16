@@ -236,6 +236,9 @@ void test_hybrid_config() {
     EXPECT(tc, config.ab_policy_weight >= 0.0f);
     EXPECT(tc, config.ab_policy_weight <= 1.0f);
     EXPECT(tc, config.mcts_root_reject);
+    EXPECT(tc, !config.mcts_ab_root_hints);
+    EXPECT(tc, config.mcts_ab_root_hint_delay_ms == 0);
+    EXPECT(tc, config.mcts_ab_root_hint_count == 4);
   }
   {
     TestCase tc("Transformer batching settings");
@@ -454,13 +457,14 @@ void test_hybrid_config() {
                                          0.705f, 0.410f));
   }
   {
-    TestCase tc("MCTS visit evidence rejects multivisit inflation");
+    TestCase tc("MCTS visit evidence handles cache-heavy playouts");
 
-    EXPECT(tc, HybridMCTSVisitEvidenceSane(260, 270, 140));
-    EXPECT(tc, HybridMCTSVisitEvidenceSane(260, 1024, 512));
-    EXPECT(tc, !HybridMCTSVisitEvidenceSane(260, 1100, 512));
-    EXPECT(tc, !HybridMCTSVisitEvidenceSane(260, 1024, 600));
-    EXPECT(tc, !HybridMCTSVisitEvidenceSane(0, 10, 1));
+    EXPECT(tc, HybridMCTSVisitEvidenceSane(270, 260, 270, 140));
+    EXPECT(tc, HybridMCTSVisitEvidenceSane(1024, 260, 1024, 512));
+    EXPECT(tc, HybridMCTSVisitEvidenceSane(12645, 234, 12644, 12493));
+    EXPECT(tc, !HybridMCTSVisitEvidenceSane(260, 260, 340, 200));
+    EXPECT(tc, !HybridMCTSVisitEvidenceSane(260, 260, 270, 300));
+    EXPECT(tc, !HybridMCTSVisitEvidenceSane(0, 0, 10, 1));
   }
   {
     TestCase tc("Root Q gap ignores unvisited placeholders");

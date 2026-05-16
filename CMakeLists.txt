@@ -179,6 +179,11 @@ add_custom_command(
   COMMENT "Generating protobuf files from net.proto"
   VERBATIM)
 
+if(APPLE AND METALFISH_IPO_SUPPORTED)
+  set_source_files_properties(${PROTO_OUTPUT_DIR}/net.pb.cc
+                              PROPERTIES COMPILE_FLAGS "-fno-lto")
+endif()
+
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/nn)
 

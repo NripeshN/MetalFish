@@ -281,6 +281,41 @@ class EngineConfig:
     available: bool = False
 
 
+HYBRID_ENV_OPTION_OVERRIDES = {
+    "HYBRID_MCTS_THREADS": "HybridMCTSThreads",
+    "HYBRID_AB_THREADS": "HybridABThreads",
+    "HYBRID_AUTO_AB_THREADS_CAP": "HybridAutoABThreadsCap",
+    "HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS": "TransformerLowTimeFallbackMs",
+    "HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS": "TransformerMinMoveBudgetMs",
+    "HYBRID_MCTS_KLD": "HybridMCTSMinimumKLDGainPerNode",
+    "HYBRID_MCTS_ROOT_REJECT": "HybridMCTSRootReject",
+    "HYBRID_MCTS_SHARED_TT": "HybridMCTSUseSharedTT",
+    "HYBRID_MCTS_AB_ROOT_HINTS": "HybridMCTSABRootHints",
+    "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "HybridMCTSABRootHintDelayMs",
+    "HYBRID_MCTS_AB_ROOT_HINT_COUNT": "HybridMCTSABRootHintCount",
+    "HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight",
+    "HYBRID_TRACE": "HybridTrace",
+    "HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize",
+    "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor",
+    "HYBRID_MCTS_MAX_PREFETCH": "MCTSMaxPrefetch",
+}
+
+
+def env_option(name: str) -> Optional[str]:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value if value else None
+
+
+def apply_hybrid_env_options(options: Dict[str, str]) -> None:
+    for env_name, option_name in HYBRID_ENV_OPTION_OVERRIDES.items():
+        value = env_option(env_name)
+        if value is not None:
+            options[option_name] = value
+
+
 def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
     engines = {}
     mf = METALFISH
@@ -324,21 +359,26 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
             "NNWeights": w,
             "Threads": str(hybrid_threads),
             "MultiPV": "1",
-            "HybridMCTSThreads": "2",
-            "HybridABThreads": "1",
+            "HybridMCTSThreads": "0",
+            "HybridABThreads": "0",
+            "HybridAutoABThreadsCap": "0",
             "TransformerLowTimeFallbackMs": "5000",
-            "TransformerMinMoveBudgetMs": "1200",
-            "MCTSMaxThreads": "2",
+            "TransformerMinMoveBudgetMs": "800",
+            "MCTSMaxThreads": "0",
             "MCTSMinibatchSize": "0",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
             "HybridMCTSMinimumKLDGainPerNode": "0.0",
             "HybridMCTSRootReject": "true",
             "HybridMCTSUseSharedTT": "false",
+            "HybridMCTSABRootHints": "false",
+            "HybridMCTSABRootHintDelayMs": "0",
+            "HybridMCTSABRootHintCount": "4",
             "HybridABPolicyWeight": "0.0",
             "HybridTrace": "false",
         },
     )
+    apply_hybrid_env_options(engines["metalfish-hybrid"].uci_options)
 
     engines["lc0"] = EngineConfig(
         name="Lc0",
@@ -394,6 +434,18 @@ def parse_engine_ids(raw: str) -> Optional[List[str]]:
     return ids or None
 
 
+def benchmark_warmup_ms(cfg: EngineConfig, movetime_ms: int) -> int:
+    warmup_ms = min(3000, movetime_ms)
+    if cfg.uci_options.get("UseHybridSearch") == "true":
+        try:
+            fallback_ms = int(cfg.uci_options.get("TransformerLowTimeFallbackMs", "0"))
+        except ValueError:
+            fallback_ms = 0
+        if fallback_ms > 0 and movetime_ms >= fallback_ms:
+            warmup_ms = max(warmup_ms, fallback_ms)
+    return warmup_ms
+
+
 def run_tactical(
     engines: Dict[str, EngineConfig],
     movetime_ms: int = 10000,
@@ -433,7 +485,7 @@ def run_tactical(
         try:
             eng = start_engine(cfg)
             try:
-                eng.warmup(min(3000, movetime_ms))
+                eng.warmup(benchmark_warmup_ms(cfg, movetime_ms))
             except TimeoutError:
                 print(f"  WARNING: warmup timeout, continuing...")
 
@@ -568,7 +620,7 @@ def run_nps(
             eng = start_engine(cfg_copy)
             try:
                 try:
-                    eng.warmup(min(3000, movetime_ms))
+                    eng.warmup(benchmark_warmup_ms(cfg_copy, movetime_ms))
                 except TimeoutError:
                     print("  WARNING: warmup timeout")
 
@@ -646,7 +698,7 @@ def run_scaling(
             eng = start_engine(cfg_copy)
             try:
                 try:
-                    eng.warmup(min(3000, movetime_ms))
+                    eng.warmup(benchmark_warmup_ms(cfg_copy, movetime_ms))
                 except TimeoutError:
                     print("  WARNING: warmup timeout")
 

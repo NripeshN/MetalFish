@@ -17,6 +17,7 @@ PROJ = pathlib.Path(__file__).resolve().parent.parent
 METALFISH = PROJ / "build" / "metalfish"
 LC0 = PROJ / "reference" / "lc0" / "build" / "release" / "lc0"
 WEIGHTS = PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"
+HYBRID_LOW_TIME_FALLBACK_MS = 5000
 
 BK_POSITIONS: List[Tuple[str, List[str], str]] = [
     ("1k1r4/pp1b1R2/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - -", ["Qd1+"], "BK.01"),
@@ -73,6 +74,13 @@ BK_POSITIONS: List[Tuple[str, List[str], str]] = [
 def san_to_uci(fen: str, san: str) -> str:
     board = chess.Board(fen)
     return board.parse_san(san).uci()
+
+
+def warmup_movetime_ms(movetime_ms: int, *, hybrid: bool = False) -> int:
+    warmup_ms = min(3000, movetime_ms)
+    if hybrid and movetime_ms >= HYBRID_LOW_TIME_FALLBACK_MS:
+        warmup_ms = max(warmup_ms, HYBRID_LOW_TIME_FALLBACK_MS)
+    return warmup_ms
 
 
 @dataclass
@@ -334,8 +342,9 @@ def setup_metalfish_hybrid(
     sess.setoption("MultiPV", str(multipv))
     sess.setoption("HybridMCTSThreads", str(mcts_threads))
     sess.setoption("HybridABThreads", str(ab_threads))
+    sess.setoption("HybridAutoABThreadsCap", "0")
     sess.setoption("TransformerLowTimeFallbackMs", "5000")
-    sess.setoption("TransformerMinMoveBudgetMs", "1200")
+    sess.setoption("TransformerMinMoveBudgetMs", "800")
     sess.setoption("MCTSMaxThreads", str(mcts_threads))
     sess.setoption("MCTSMinibatchSize", "0")
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
@@ -343,6 +352,9 @@ def setup_metalfish_hybrid(
     sess.setoption("HybridMCTSMinimumKLDGainPerNode", str(hybrid_mcts_kld))
     sess.setoption("HybridMCTSRootReject", "true" if hybrid_root_reject else "false")
     sess.setoption("HybridMCTSUseSharedTT", "true" if hybrid_shared_tt else "false")
+    sess.setoption("HybridMCTSABRootHints", "false")
+    sess.setoption("HybridMCTSABRootHintDelayMs", "0")
+    sess.setoption("HybridMCTSABRootHintCount", "4")
     sess.setoption("HybridABPolicyWeight", str(ab_policy_weight))
     sess.setoption("HybridTrace", "true" if trace else "false")
     sess.send("isready")
@@ -547,7 +559,7 @@ def run_once(
                 return 2
             s = UCISession([str(args.metalfish)], "metalfish-ab")
             setup_metalfish_ab(s, threads, args.multipv)
-            s.warmup(mode, min(3000, movetime_ms), min(200, nodes))
+            s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
             sessions["metalfish-ab"] = s
 
         if want_mcts:
@@ -559,7 +571,7 @@ def run_once(
                 env["METALFISH_MCTS_ROOT_TRACE"] = "1"
             s = UCISession([str(args.metalfish)], "metalfish-mcts", env=env)
             setup_metalfish(s, args.weights, threads, args.deterministic, args.multipv)
-            s.warmup(mode, min(3000, movetime_ms), min(200, nodes))
+            s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
             sessions["metalfish-mcts"] = s
 
         if want_hybrid:
@@ -584,7 +596,11 @@ def run_once(
                 args.hybrid_shared_tt,
                 args.hybrid_ab_policy_weight,
             )
-            s.warmup(mode, min(3000, movetime_ms), min(200, nodes))
+            s.warmup(
+                mode,
+                warmup_movetime_ms(movetime_ms, hybrid=True),
+                min(200, nodes),
+            )
             sessions["metalfish-hybrid"] = s
 
         if want_lc0:
@@ -600,7 +616,7 @@ def run_once(
                 "lc0",
             )
             setup_lc0(s, threads)
-            s.warmup(mode, min(3000, movetime_ms), min(200, nodes))
+            s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
             sessions["lc0"] = s
 
         all_results: Dict[str, Dict[str, SearchResult]] = {}
@@ -694,8 +710,8 @@ def main() -> int:
         action="store_true",
         help="Print AB primary-move update counts during Hybrid searches",
     )
-    parser.add_argument("--hybrid-mcts-threads", type=int, default=2)
-    parser.add_argument("--hybrid-ab-threads", type=int, default=1)
+    parser.add_argument("--hybrid-mcts-threads", type=int, default=0)
+    parser.add_argument("--hybrid-ab-threads", type=int, default=0)
     parser.add_argument("--hybrid-mcts-kld", type=float, default=0.0)
     parser.add_argument(
         "--hybrid-root-reject",

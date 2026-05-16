@@ -149,6 +149,7 @@ void test_limits() {
     EXPECT(tc, limits.depth == 0);
     EXPECT(tc, limits.nodes == 0);
     EXPECT(tc, !limits.ponderMode);
+    EXPECT(tc, limits.root_order_hints.empty());
     EXPECT(tc, !limits.use_time_management());
   }
   {

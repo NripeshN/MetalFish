@@ -43,9 +43,9 @@
         "MultiPV": "1",
         "HybridMCTSThreads": "0",
         "HybridABThreads": "0",
-        "HybridAutoABThreadsCap": "2",
+        "HybridAutoABThreadsCap": "0",
         "TransformerLowTimeFallbackMs": "5000",
-        "TransformerMinMoveBudgetMs": "1200",
+        "TransformerMinMoveBudgetMs": "800",
         "MCTSMaxThreads": "0",
         "MCTSMinibatchSize": "0",
         "MCTSParityPreset": "false",
@@ -53,6 +53,9 @@
         "HybridMCTSMinimumKLDGainPerNode": "0.0",
         "HybridMCTSRootReject": "true",
         "HybridMCTSUseSharedTT": "false",
+        "HybridMCTSABRootHints": "false",
+        "HybridMCTSABRootHintDelayMs": "0",
+        "HybridMCTSABRootHintCount": "4",
         "HybridABPolicyWeight": "0.0",
         "HybridTrace": "false"
       }

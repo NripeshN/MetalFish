@@ -200,6 +200,9 @@ struct ParallelHybridConfig {
   bool trace_decisions = false;
   bool mcts_root_reject = true;
   bool use_shared_tt = false;
+  bool mcts_ab_root_hints = false;
+  int mcts_ab_root_hint_delay_ms = 0;
+  int mcts_ab_root_hint_count = 4;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees
@@ -319,6 +322,7 @@ private:
 
   void update_mcts_policy_from_ab();
   void publish_mcts_state();
+  std::vector<Move> collect_mcts_root_order_hints();
 
   void run_ab_search();
   void publish_ab_state(Move best, int score, int depth, uint64_t nodes);
@@ -385,8 +389,8 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
     int eval_delta);
 
-bool HybridMCTSVisitEvidenceSane(uint64_t mcts_evals, uint64_t root_visits,
-                                 uint32_t best_visits);
+bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
+                                 uint64_t root_visits, uint32_t best_visits);
 
 bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
                               uint32_t top_visits, float top_q,

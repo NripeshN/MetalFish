@@ -1030,10 +1030,9 @@ compute_hybrid_thread_split(Engine &engine,
   } else {
     // Fixed-budget searches are usually tactical benchmarks or analysis
     // probes; the BK sweep strongly favored two low-batch MCTS workers there.
-    // Real game-clock searches need CPU verification, but the Patricia sweep
-    // showed that dumping every spare worker into AB makes the hybrid too
-    // drawish on Apple Silicon. Cap auto AB by default; larger AB splits remain
-    // available through explicit HybridABThreads or HybridAutoABThreadsCap=0.
+    // Real game-clock searches need CPU verification. Keep the MCTS worker on
+    // the transformer side, then let AB use the remaining CPU workers unless
+    // the user explicitly caps the auto split.
     mcts_threads = is_fixed_budget_hybrid_search(limits)
                        ? std::min(2, std::max(1, available - 1))
                        : 1;
@@ -1089,6 +1088,11 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.use_transformer_prefetch = true;
   config.mcts_root_reject = engine.get_options()["HybridMCTSRootReject"];
   config.use_shared_tt = engine.get_options()["HybridMCTSUseSharedTT"];
+  config.mcts_ab_root_hints = engine.get_options()["HybridMCTSABRootHints"];
+  config.mcts_ab_root_hint_delay_ms =
+      static_cast<int>(engine.get_options()["HybridMCTSABRootHintDelayMs"]);
+  config.mcts_ab_root_hint_count =
+      static_cast<int>(engine.get_options()["HybridMCTSABRootHintCount"]);
   config.trace_decisions = engine.get_options()["HybridTrace"];
   return config;
 }
@@ -1330,27 +1334,37 @@ static void preload_search_objects(Engine &engine) {
     return;
 
   if (need_hybrid) {
-    auto config = make_hybrid_config(engine, nn_weights);
-    const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
-    const bool needs_reinit =
-        !g_parallel_hybrid_search || g_parallel_hybrid_key != cache_key;
+    const int hybrid_mcts_override =
+        static_cast<int>(engine.get_options()["HybridMCTSThreads"]);
+    const int hybrid_ab_override =
+        static_cast<int>(engine.get_options()["HybridABThreads"]);
+    const bool stable_hybrid_split =
+        hybrid_mcts_override > 0 && hybrid_ab_override > 0;
+    const bool can_preload_hybrid =
+        stable_hybrid_split || !g_parallel_hybrid_search;
+    if (can_preload_hybrid) {
+      auto config = make_hybrid_config(engine, nn_weights);
+      const std::string cache_key = make_hybrid_cache_key(nn_weights, config);
+      const bool needs_reinit =
+          !g_parallel_hybrid_search || g_parallel_hybrid_key != cache_key;
 
-    if (needs_reinit && (!g_parallel_hybrid_search ||
-                         !g_parallel_hybrid_search->is_searching())) {
-      if (g_parallel_hybrid_search) {
-        g_parallel_hybrid_search->stop();
-        g_parallel_hybrid_search->wait();
-        g_parallel_hybrid_search.reset();
-        g_parallel_hybrid_key.clear();
+      if (needs_reinit && (!g_parallel_hybrid_search ||
+                           !g_parallel_hybrid_search->is_searching())) {
+        if (g_parallel_hybrid_search) {
+          g_parallel_hybrid_search->stop();
+          g_parallel_hybrid_search->wait();
+          g_parallel_hybrid_search.reset();
+          g_parallel_hybrid_key.clear();
+        }
+        g_parallel_hybrid_search =
+            MCTS::create_parallel_hybrid_search(&engine, config);
+        g_parallel_hybrid_key = g_parallel_hybrid_search ? cache_key : "";
       }
-      g_parallel_hybrid_search =
-          MCTS::create_parallel_hybrid_search(&engine, config);
-      g_parallel_hybrid_key = g_parallel_hybrid_search ? cache_key : "";
-    }
 
-    if (g_parallel_hybrid_search && needs_reinit) {
-      sync_cout << "info string Hybrid search preloaded (transformer ready)"
-                << sync_endl;
+      if (g_parallel_hybrid_search && needs_reinit) {
+        sync_cout << "info string Hybrid search preloaded (transformer ready)"
+                  << sync_endl;
+      }
     }
   }
 

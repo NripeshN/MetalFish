@@ -13,6 +13,7 @@
 #endif
 #include <cassert>
 #include <deque>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -289,6 +290,32 @@ void ThreadPool::start_thinking(const OptionsMap &options, Position &pos,
 
   Tablebases::Config tbConfig =
       Tablebases::rank_root_moves(options, pos, rootMoves);
+
+  if (!limits.root_order_hints.empty() && rootMoves.size() > 1) {
+    std::unordered_map<uint16_t, int> hintRanks;
+    int rank = 0;
+    for (Move hint : limits.root_order_hints)
+      if (hint != Move::none() && !hintRanks.count(hint.raw()))
+        hintRanks.emplace(hint.raw(), rank++);
+
+    auto hint_rank = [&](const Search::RootMove &rm) {
+      auto it = hintRanks.find(rm.pv[0].raw());
+      return it == hintRanks.end() ? std::numeric_limits<int>::max()
+                                   : it->second;
+    };
+
+    for (auto first = rootMoves.begin(); first != rootMoves.end();) {
+      auto last = first + 1;
+      while (last != rootMoves.end() && last->tbRank == first->tbRank)
+        ++last;
+      std::stable_sort(
+          first, last,
+          [&](const Search::RootMove &a, const Search::RootMove &b) {
+            return hint_rank(a) < hint_rank(b);
+          });
+      first = last;
+    }
+  }
 
   assert(states.get() || setupStates.get());
 

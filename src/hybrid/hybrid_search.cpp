@@ -496,15 +496,25 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
   return value_gap_confident || compact_root_confident;
 }
 
-bool HybridMCTSVisitEvidenceSane(uint64_t mcts_evals, uint64_t root_visits,
-                                 uint32_t best_visits) {
-  if (mcts_evals == 0) {
+bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
+                                 uint64_t root_visits, uint32_t best_visits) {
+  if (mcts_playouts == 0) {
     return root_visits == 0 && best_visits == 0;
   }
 
-  const uint64_t best_limit = std::max<uint64_t>(512, mcts_evals * 2);
-  const uint64_t root_limit = std::max<uint64_t>(1024, mcts_evals * 4);
-  return best_visits <= best_limit && root_visits <= root_limit;
+  if (best_visits > root_visits)
+    return false;
+
+  const uint64_t visit_slack = std::max<uint64_t>(64, mcts_playouts / 32);
+  if (root_visits > mcts_playouts + visit_slack)
+    return false;
+
+  if (mcts_evals == 0)
+    return true;
+
+  const uint64_t best_eval_limit = std::max<uint64_t>(512, mcts_evals * 64);
+  const uint64_t root_eval_limit = std::max<uint64_t>(1024, mcts_evals * 96);
+  return best_visits <= best_eval_limit && root_visits <= root_eval_limit;
 }
 
 bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
@@ -579,6 +589,17 @@ void ParallelHybridSearch::mcts_thread_main() {
   } guard{this};
 
   auto start = std::chrono::steady_clock::now();
+
+  if (limits_.ponderMode) {
+    while (!ponderhit_received_.load(std::memory_order_acquire) &&
+           !stop_flag_.load(std::memory_order_acquire)) {
+      std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
+    if (stop_flag_.load(std::memory_order_acquire) &&
+        !ponderhit_received_.load(std::memory_order_acquire)) {
+      return;
+    }
+  }
 
   const int mcts_time_budget_ms =
       time_budget_ms_.load(std::memory_order_acquire);
@@ -748,6 +769,41 @@ void ParallelHybridSearch::update_mcts_policy_from_ab() {
   stats_.policy_updates.fetch_add(1, std::memory_order_relaxed);
 }
 
+std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
+  std::vector<Move> hints;
+  if (!config_.mcts_ab_root_hints || !mcts_search_)
+    return hints;
+  if (limits_.ponderMode &&
+      !ponderhit_received_.load(std::memory_order_acquire))
+    return hints;
+
+  const int hint_count = std::clamp(config_.mcts_ab_root_hint_count, 1, 16);
+  const int delay_ms = std::max(0, config_.mcts_ab_root_hint_delay_ms);
+  const int64_t deadline_ms = SteadyNowMs() + delay_ms;
+
+  while (!should_stop()) {
+    const auto root_moves = mcts_search_->GetRootMoveStats(hint_count);
+    for (const auto &root_move : root_moves) {
+      if (root_move.move == Move::none())
+        continue;
+      if (std::find(hints.begin(), hints.end(), root_move.move) == hints.end())
+        hints.push_back(root_move.move);
+    }
+    if (!hints.empty() || delay_ms == 0 || SteadyNowMs() >= deadline_ms)
+      break;
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
+  }
+
+  if (config_.trace_decisions && !hints.empty()) {
+    std::ostringstream ss;
+    ss << "Hybrid: AB root hints from MCTS";
+    for (Move hint : hints)
+      ss << " " << UCIEngine::move(hint, false);
+    send_info_string(ss.str());
+  }
+  return hints;
+}
+
 void ParallelHybridSearch::ab_thread_main() {
 #ifdef __APPLE__
   set_thread_qos(QOS_CLASS_USER_INITIATED);
@@ -806,6 +862,7 @@ void ParallelHybridSearch::run_ab_search() {
       ponderhit_received_.load(std::memory_order_acquire)) {
     ab_limits.ponderMode = false;
   }
+  ab_limits.root_order_hints = collect_mcts_root_order_hints();
 
   auto saved_bestmove = engine_->get_on_bestmove();
   auto saved_update_full = engine_->get_on_update_full();
@@ -1245,6 +1302,72 @@ Move ParallelHybridSearch::make_final_decision() {
     ss << "]";
     return ss.str();
   };
+  struct MCTSRootLookup {
+    int rank = -1;
+    uint32_t visits = 0;
+    float q = 0.0f;
+    float policy = 0.0f;
+  };
+  const auto find_mcts_root_move = [&](Move target) {
+    MCTSRootLookup result;
+    if (target == Move::none())
+      return result;
+
+    const int count =
+        std::min<int>(mcts_state_.num_top_moves.load(std::memory_order_acquire),
+                      MCTSSharedState::MAX_TOP_MOVES);
+    for (int i = 0; i < count; ++i) {
+      Move move(
+          mcts_state_.top_moves[i].move_raw.load(std::memory_order_relaxed));
+      if (move != target)
+        continue;
+      result.rank = i + 1;
+      result.visits =
+          mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed);
+      result.q = mcts_state_.top_moves[i].q.load(std::memory_order_relaxed);
+      result.policy =
+          mcts_state_.top_moves[i].policy.load(std::memory_order_relaxed);
+      break;
+    }
+    return result;
+  };
+  struct ABRootLookup {
+    int rank = -1;
+    int score = 0;
+    int average_score = 0;
+    uint64_t effort = 0;
+  };
+  const auto find_ab_root_move = [&](Move target) {
+    ABRootLookup result;
+    if (target == Move::none())
+      return result;
+
+    std::lock_guard<std::mutex> lock(ab_root_mutex_);
+    const int count = std::min<int>(static_cast<int>(ab_root_moves_.size()),
+                                    ABSharedState::MAX_PV);
+    for (int i = 0; i < count; ++i) {
+      if (ab_root_moves_[i].move != target)
+        continue;
+      result.rank = i + 1;
+      result.score = ab_root_moves_[i].score;
+      result.average_score = ab_root_moves_[i].average_score;
+      result.effort = ab_root_moves_[i].effort;
+      break;
+    }
+    return result;
+  };
+  const auto append_cross_root_trace = [&](std::ostringstream &ss) {
+    const MCTSRootLookup ab_in_mcts = find_mcts_root_move(ab_best);
+    const ABRootLookup mcts_in_ab = find_ab_root_move(mcts_best);
+    ss << " ABInMCTSRank=" << ab_in_mcts.rank
+       << " ABInMCTSVisits=" << ab_in_mcts.visits << " ABInMCTSQ=" << std::fixed
+       << std::setprecision(3) << ab_in_mcts.q
+       << " ABInMCTSPolicy=" << std::fixed << std::setprecision(3)
+       << ab_in_mcts.policy << " MCTSInABRank=" << mcts_in_ab.rank
+       << " MCTSInABScore=" << mcts_in_ab.score
+       << " MCTSInABAvg=" << mcts_in_ab.average_score
+       << " MCTSInABEffort=" << mcts_in_ab.effort;
+  };
   const auto root_q_gap_for_best = [&]() {
     const int count =
         std::min<int>(mcts_state_.num_top_moves.load(std::memory_order_acquire),
@@ -1275,8 +1398,8 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool mcts_decision_budget = HybridHasMCTSDecisionBudget(
       limits_, time_budget_ms_.load(std::memory_order_acquire),
       ponderhit_received_.load(std::memory_order_acquire));
-  const bool mcts_visit_evidence_sane =
-      HybridMCTSVisitEvidenceSane(mcts_evals, mcts_total_nodes, mcts_visits);
+  const bool mcts_visit_evidence_sane = HybridMCTSVisitEvidenceSane(
+      mcts_playouts, mcts_evals, mcts_total_nodes, mcts_visits);
   const auto trace_simple = [&](const char *reason, Move selected) {
     if (!config_.trace_decisions)
       return;
@@ -1292,8 +1415,9 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSRootVisits=" << mcts_total_nodes
        << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
        << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
-       << " MCTSTop=" << top_moves_to_string()
-       << " ABRoot=" << ab_root_moves_to_string();
+       << " MCTSTop=" << top_moves_to_string();
+    append_cross_root_trace(ss);
+    ss << " ABRoot=" << ab_root_moves_to_string();
     send_info_string(ss.str());
   };
 
@@ -1530,8 +1654,9 @@ Move ParallelHybridSearch::make_final_decision() {
        << " ABVerified=" << (ab_verified ? 1 : 0)
        << " ABClearPreference=" << (ab_has_clear_preference ? 1 : 0)
        << " MCTSRootRejectsAB=" << (mcts_root_rejects_ab ? 1 : 0)
-       << " MCTSTop=" << top_moves_to_string()
-       << " ABRoot=" << ab_root_moves_to_string();
+       << " MCTSTop=" << top_moves_to_string();
+    append_cross_root_trace(ss);
+    ss << " ABRoot=" << ab_root_moves_to_string();
     send_info_string(ss.str());
   }
 

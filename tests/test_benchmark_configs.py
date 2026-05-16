@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import sys
 
@@ -50,8 +51,8 @@ def capture_parity_hybrid() -> dict[str, str]:
         threads=1,
         deterministic=False,
         trace=False,
-        mcts_threads=2,
-        ab_threads=1,
+        mcts_threads=0,
+        ab_threads=0,
         multipv=1,
         hybrid_mcts_kld=0.0,
         hybrid_root_reject=True,
@@ -94,8 +95,56 @@ def assert_file_contains(path: pathlib.Path, required: list[str]) -> None:
         )
 
 
+def with_clean_hybrid_env(callback):
+    env_names = paper_benchmarks.HYBRID_ENV_OPTION_OVERRIDES.keys()
+    old_values = {key: os.environ.get(key) for key in env_names}
+    try:
+        for key in env_names:
+            os.environ.pop(key, None)
+        return callback()
+    finally:
+        for key, value in old_values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def assert_paper_hybrid_env_overrides() -> None:
+    overrides = {
+        "HYBRID_AB_POLICY_WEIGHT": "0.02",
+        "HYBRID_MCTS_ROOT_REJECT": "false",
+        "HYBRID_MCTS_AB_ROOT_HINTS": "true",
+        "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "50",
+        "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "1.5",
+    }
+
+    def detect_with_overrides() -> dict[str, str]:
+        os.environ.update(overrides)
+        return paper_benchmarks.detect_engines(threads=1)[
+            "metalfish-hybrid"
+        ].uci_options
+
+    options = with_clean_hybrid_env(detect_with_overrides)
+    assert_options_include(
+        "paper hybrid env overrides",
+        options,
+        {
+            "HybridABPolicyWeight": "0.02",
+            "HybridMCTSRootReject": "false",
+            "HybridMCTSABRootHints": "true",
+            "HybridMCTSABRootHintDelayMs": "50",
+            "MCTSMaxOutOfOrderEvalsFactor": "1.5",
+        },
+    )
+
+
+def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
+    return with_clean_hybrid_env(lambda: paper_benchmarks.detect_engines(threads=1))
+
+
 def main() -> int:
-    paper = paper_benchmarks.detect_engines(threads=1)
+    paper = detect_paper_engines_clean()
 
     mcts_keys = [
         "UseHybridSearch",
@@ -124,6 +173,7 @@ def main() -> int:
         "MultiPV",
         "HybridMCTSThreads",
         "HybridABThreads",
+        "HybridAutoABThreadsCap",
         "TransformerLowTimeFallbackMs",
         "TransformerMinMoveBudgetMs",
         "MCTSMaxThreads",
@@ -133,6 +183,9 @@ def main() -> int:
         "HybridMCTSMinimumKLDGainPerNode",
         "HybridMCTSRootReject",
         "HybridMCTSUseSharedTT",
+        "HybridMCTSABRootHints",
+        "HybridMCTSABRootHintDelayMs",
+        "HybridMCTSABRootHintCount",
         "HybridABPolicyWeight",
         "HybridTrace",
     ]
@@ -142,6 +195,7 @@ def main() -> int:
         paper["metalfish-hybrid"].uci_options,
         hybrid_keys,
     )
+    assert_paper_hybrid_env_overrides()
 
     assert_file_contains(
         PROJ / "src/uci/engine.cpp",
@@ -150,15 +204,24 @@ def main() -> int:
             'options.add("MCTSPolicyTemperature"',
             'options.add("MCTSMaxOutOfOrderFactor"',
             'options.add("MCTSMaxOutOfOrderEvalsFactor"',
+            'options.add("HybridMCTSABRootHints"',
+            'options.add("HybridMCTSABRootHintDelayMs"',
         ],
     )
     assert_file_contains(
         PROJ / "src/uci/uci.cpp",
         [
-            'get_float_option_alias(engine, "MCTSPolicyTemperature"',
+            "get_float_option_alias(",
+            '"MCTSPolicyTemperature"',
             '"MCTSPolicySoftmaxTemp"',
-            'get_float_option_alias(engine, "MCTSMaxOutOfOrderEvalsFactor"',
+            '"MCTSMaxOutOfOrderEvalsFactor"',
             '"MCTSMaxOutOfOrderFactor"',
+            "stable_hybrid_split",
+            "can_preload_hybrid",
+            '"HybridMCTSThreads"',
+            '"HybridABThreads"',
+            '"HybridMCTSABRootHints"',
+            '"HybridMCTSABRootHintDelayMs"',
         ],
     )
 
@@ -195,12 +258,15 @@ def main() -> int:
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
             "TransformerLowTimeFallbackMs": "5000",
-            "TransformerMinMoveBudgetMs": "1200",
+            "TransformerMinMoveBudgetMs": "800",
             "HybridMCTSMinimumKLDGainPerNode": "0.0",
             "HybridMCTSRootReject": "true",
             "HybridMCTSUseSharedTT": "false",
+            "HybridMCTSABRootHints": "false",
+            "HybridMCTSABRootHintDelayMs": "0",
+            "HybridMCTSABRootHintCount": "4",
             "HybridABPolicyWeight": "0.0",
-            "HybridAutoABThreadsCap": "2",
+            "HybridAutoABThreadsCap": "0",
             "HybridTrace": "false",
         },
     )
@@ -215,6 +281,9 @@ def main() -> int:
         "option.HybridMCTSMinimumKLDGainPerNode=$HYBRID_MCTS_KLD",
         "option.HybridMCTSRootReject=$HYBRID_MCTS_ROOT_REJECT",
         "option.HybridMCTSUseSharedTT=$HYBRID_MCTS_SHARED_TT",
+        "option.HybridMCTSABRootHints=$HYBRID_MCTS_AB_ROOT_HINTS",
+        "option.HybridMCTSABRootHintDelayMs=$HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS",
+        "option.HybridMCTSABRootHintCount=$HYBRID_MCTS_AB_ROOT_HINT_COUNT",
         "option.HybridABPolicyWeight=$HYBRID_AB_POLICY_WEIGHT",
         "option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP",
         "option.MCTSMinibatchSize=$HYBRID_MCTS_MINIBATCH",
@@ -229,11 +298,14 @@ def main() -> int:
             'HYBRID_MCTS_KLD="${HYBRID_MCTS_KLD:-0.0}"',
             'HYBRID_MCTS_ROOT_REJECT="${HYBRID_MCTS_ROOT_REJECT:-true}"',
             'HYBRID_MCTS_SHARED_TT="${HYBRID_MCTS_SHARED_TT:-false}"',
+            'HYBRID_MCTS_AB_ROOT_HINTS="${HYBRID_MCTS_AB_ROOT_HINTS:-false}"',
+            'HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS="${HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS:-0}"',
+            'HYBRID_MCTS_AB_ROOT_HINT_COUNT="${HYBRID_MCTS_AB_ROOT_HINT_COUNT:-4}"',
             'HYBRID_AB_POLICY_WEIGHT="${HYBRID_AB_POLICY_WEIGHT:-0.0}"',
             'HYBRID_TRACE="${HYBRID_TRACE:-false}"',
             'HYBRID_MCTS_MINIBATCH="${HYBRID_MCTS_MINIBATCH:-0}"',
             'HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS="${HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS:-5000}"',
-            'HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS="${HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS:-1200}"',
+            'HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS="${HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS:-800}"',
             'restart="$ENGINE_RESTART"',
             *tournament_tokens,
         ],
@@ -245,11 +317,14 @@ def main() -> int:
             'HYBRID_MCTS_KLD="${HYBRID_MCTS_KLD:-0.0}"',
             'HYBRID_MCTS_ROOT_REJECT="${HYBRID_MCTS_ROOT_REJECT:-true}"',
             'HYBRID_MCTS_SHARED_TT="${HYBRID_MCTS_SHARED_TT:-false}"',
+            'HYBRID_MCTS_AB_ROOT_HINTS="${HYBRID_MCTS_AB_ROOT_HINTS:-false}"',
+            'HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS="${HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS:-0}"',
+            'HYBRID_MCTS_AB_ROOT_HINT_COUNT="${HYBRID_MCTS_AB_ROOT_HINT_COUNT:-4}"',
             'HYBRID_AB_POLICY_WEIGHT="${HYBRID_AB_POLICY_WEIGHT:-0.0}"',
             'HYBRID_TRACE="${HYBRID_TRACE:-false}"',
             'HYBRID_MCTS_MINIBATCH="${HYBRID_MCTS_MINIBATCH:-0}"',
             'HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS="${HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS:-5000}"',
-            'HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS="${HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS:-1200}"',
+            'HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS="${HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS:-800}"',
             "restart=$ENGINE_RESTART",
             *tournament_tokens,
         ],
@@ -257,12 +332,15 @@ def main() -> int:
     assert_file_contains(
         PROJ / "tools/lichess_bot.py",
         [
-            'env_int("METALFISH_HYBRID_AUTO_AB_THREADS_CAP", 2)',
+            'env_int("METALFISH_HYBRID_AUTO_AB_THREADS_CAP", 0)',
             'env_int("METALFISH_TRANSFORMER_LOW_TIME_FALLBACK_MS", 5000)',
-            'env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 1200)',
+            'env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 800)',
             'env_float("METALFISH_HYBRID_MCTS_KLD", 0.0)',
             '"METALFISH_HYBRID_MCTS_ROOT_REJECT", True',
             '"METALFISH_HYBRID_MCTS_SHARED_TT", False',
+            '"METALFISH_HYBRID_MCTS_AB_ROOT_HINTS", False',
+            'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 0)',
+            'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_COUNT", 4)',
             'env_float("METALFISH_HYBRID_AB_POLICY_WEIGHT", 0.0)',
             'env_bool_string("METALFISH_HYBRID_TRACE", False)',
             'env_int("METALFISH_HYBRID_MCTS_MINIBATCH", 0)',
@@ -272,9 +350,33 @@ def main() -> int:
             '"HybridMCTSMinimumKLDGainPerNode": str(HYBRID_MCTS_KLD)',
             '"HybridMCTSRootReject": HYBRID_MCTS_ROOT_REJECT',
             '"HybridMCTSUseSharedTT": HYBRID_MCTS_SHARED_TT',
+            '"HybridMCTSABRootHints": HYBRID_MCTS_AB_ROOT_HINTS',
+            '"HybridMCTSABRootHintDelayMs": str(HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS)',
+            '"HybridMCTSABRootHintCount": str(HYBRID_MCTS_AB_ROOT_HINT_COUNT)',
             '"HybridABPolicyWeight": str(HYBRID_AB_POLICY_WEIGHT)',
             '"HybridTrace": HYBRID_TRACE',
             '"MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH)',
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tests/paper_benchmarks.py",
+        [
+            "HYBRID_ENV_OPTION_OVERRIDES",
+            "def apply_hybrid_env_options",
+            '"HYBRID_MCTS_AB_ROOT_HINTS"',
+            '"HYBRID_MCTS_OUT_OF_ORDER_FACTOR"',
+            "def benchmark_warmup_ms",
+            '"TransformerLowTimeFallbackMs"',
+            "eng.warmup(benchmark_warmup_ms(cfg, movetime_ms))",
+            "eng.warmup(benchmark_warmup_ms(cfg_copy, movetime_ms))",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tests/bk_parity.py",
+        [
+            "def warmup_movetime_ms",
+            "HYBRID_LOW_TIME_FALLBACK_MS",
+            "warmup_movetime_ms(movetime_ms, hybrid=True)",
         ],
     )
     assert_file_contains(
@@ -289,15 +391,35 @@ def main() -> int:
             '"HYBRID_MCTS_KLD": "HybridMCTSMinimumKLDGainPerNode"',
             '"HYBRID_MCTS_ROOT_REJECT": "HybridMCTSRootReject"',
             '"HYBRID_MCTS_SHARED_TT": "HybridMCTSUseSharedTT"',
+            '"HYBRID_MCTS_AB_ROOT_HINTS": "HybridMCTSABRootHints"',
+            '"HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "HybridMCTSABRootHintDelayMs"',
+            '"HYBRID_MCTS_AB_ROOT_HINT_COUNT": "HybridMCTSABRootHintCount"',
             '"HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight"',
             '"HYBRID_TRACE": "HybridTrace"',
             '"HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize"',
+            '"HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor"',
+            '"HYBRID_MCTS_MAX_PREFETCH": "MCTSMaxPrefetch"',
+            'help="Games per match (default: 6)"',
+            "max-moves below 100 can mask long conversion wins",
             'options["HybridTrace"] = "true"',
             'line.startswith("info string Time safety:")',
             'line.startswith("info string Starting Parallel Hybrid Search")',
             'line.startswith("info string Hybrid thread split:")',
             '"--max-moves"',
             "args.save_search_log",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "src/hybrid/hybrid_search.cpp",
+        [
+            "ABInMCTSRank=",
+            "ABInMCTSVisits=",
+            "ABInMCTSQ=",
+            "ABInMCTSPolicy=",
+            "MCTSInABRank=",
+            "MCTSInABScore=",
+            "MCTSInABAvg=",
+            "MCTSInABEffort=",
         ],
     )
 

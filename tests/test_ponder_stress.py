@@ -56,9 +56,20 @@ def parse_args():
         help="Write engine stderr to this path instead of a temporary file",
     )
     parser.add_argument(
+        "--engine",
+        type=pathlib.Path,
+        default=ENGINE,
+        help=f"Engine binary to test (default: {ENGINE})",
+    )
+    parser.add_argument(
         "--keep-stderr",
         action="store_true",
         help="Keep the temporary stderr log after the test finishes",
+    )
+    parser.add_argument(
+        "--transformer-min-move-budget-ms",
+        type=int,
+        help="Override TransformerMinMoveBudgetMs for stress reproduction",
     )
     return parser.parse_args()
 
@@ -88,8 +99,10 @@ def main():
     args = parse_args()
     iterations = max(1, args.iterations)
 
-    if not ENGINE.exists():
-        print(f"ERROR: Engine not found at {ENGINE}")
+    engine_path = args.engine
+
+    if not engine_path.exists():
+        print(f"ERROR: Engine not found at {engine_path}")
         return 1
     if not WEIGHTS.exists():
         print(f"ERROR: Weights not found at {WEIGHTS}")
@@ -98,7 +111,7 @@ def main():
     stderr_file, stderr_path, remove_stderr = open_stderr_log(args)
 
     proc = subprocess.Popen(
-        [str(ENGINE)],
+        [str(engine_path)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=stderr_file,
@@ -188,6 +201,9 @@ def main():
     send("setoption name MCTSAddDirichletNoise value false")
     send("setoption name HybridABPolicyWeight value 0.0")
     send("setoption name HybridTrace value false")
+    if args.transformer_min_move_budget_ms is not None:
+        budget = max(0, min(5000, args.transformer_min_move_budget_ms))
+        send(f"setoption name TransformerMinMoveBudgetMs value {budget}")
     send("setoption name Ponder value true")
     send("setoption name Hash value 256")
     send("isready")
@@ -198,7 +214,7 @@ def main():
         return 1
 
     print(f"Ponder stress test: {iterations} iterations")
-    print(f"Engine: {ENGINE.name}")
+    print(f"Engine: {engine_path.name}")
     print()
 
     stats = {

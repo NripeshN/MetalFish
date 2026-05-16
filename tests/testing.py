@@ -345,7 +345,7 @@ def test_uci_protocol():
         min_budget = engine.contains("option name TransformerMinMoveBudgetMs")
         assert "default 5000" in low_time, low_time
         assert "min 0" in low_time and "max 30000" in low_time, low_time
-        assert "default 1200" in min_budget, min_budget
+        assert "default 800" in min_budget, min_budget
         assert "min 0" in min_budget and "max 5000" in min_budget, min_budget
         engine.equals("uciok")
         engine.quit()

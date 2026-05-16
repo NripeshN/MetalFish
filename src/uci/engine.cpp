@@ -145,14 +145,17 @@ Engine::Engine(std::optional<std::string> path)
   // 0 = auto (derived from Threads; coordinator is outside the worker budget).
   options.add("HybridMCTSThreads", Option(0, 0, MaxThreads));
   options.add("HybridABThreads", Option(0, 0, MaxThreads));
-  options.add("HybridAutoABThreadsCap", Option(2, 0, MaxThreads));
+  options.add("HybridAutoABThreadsCap", Option(0, 0, MaxThreads));
   options.add("HybridABPolicyWeight", Option("0.0"));
   options.add("HybridMCTSMinimumKLDGainPerNode", Option("0.0"));
   options.add("HybridMCTSRootReject", Option(true));
   options.add("HybridMCTSUseSharedTT", Option(false));
+  options.add("HybridMCTSABRootHints", Option(false));
+  options.add("HybridMCTSABRootHintDelayMs", Option(0, 0, 1000));
+  options.add("HybridMCTSABRootHintCount", Option(4, 1, 16));
   options.add("HybridTrace", Option(false));
   options.add("TransformerLowTimeFallbackMs", Option(5000, 0, 30000));
-  options.add("TransformerMinMoveBudgetMs", Option(1200, 0, 5000));
+  options.add("TransformerMinMoveBudgetMs", Option(800, 0, 5000));
 
   // Optional parity preset and exposed MCTS tuning controls
   options.add("MCTSParityPreset", Option(false));

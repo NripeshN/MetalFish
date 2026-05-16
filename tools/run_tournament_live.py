@@ -72,9 +72,14 @@ def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None
         "HYBRID_MCTS_KLD": "HybridMCTSMinimumKLDGainPerNode",
         "HYBRID_MCTS_ROOT_REJECT": "HybridMCTSRootReject",
         "HYBRID_MCTS_SHARED_TT": "HybridMCTSUseSharedTT",
+        "HYBRID_MCTS_AB_ROOT_HINTS": "HybridMCTSABRootHints",
+        "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "HybridMCTSABRootHintDelayMs",
+        "HYBRID_MCTS_AB_ROOT_HINT_COUNT": "HybridMCTSABRootHintCount",
         "HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight",
         "HYBRID_TRACE": "HybridTrace",
         "HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize",
+        "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor",
+        "HYBRID_MCTS_MAX_PREFETCH": "MCTSMaxPrefetch",
     }
     for env_name, option_name in overrides.items():
         value = env_option(env_name)
@@ -703,6 +708,11 @@ def run_tournament(args):
     print(f"Matches: {len(matches)}")
     print(f"Default thread budget: {default_threads}")
     print(f"Openings: order={args.opening_order} | seed={args.seed}")
+    if args.max_moves < 100:
+        print(
+            "Warning: max-moves below 100 can mask long conversion wins; "
+            "use it only for quick lifecycle smoke tests."
+        )
     print()
 
     all_results: List[dict] = []
@@ -829,7 +839,7 @@ def run_tournament(args):
 def main():
     parser = argparse.ArgumentParser(description="MetalFish Tournament Runner")
     parser.add_argument(
-        "--games", type=int, default=6, help="Games per match (default: 20)"
+        "--games", type=int, default=6, help="Games per match (default: 6)"
     )
     parser.add_argument(
         "--tc-base", type=float, default=300, help="Base time in seconds (default: 300)"
