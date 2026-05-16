@@ -245,30 +245,235 @@ void test_hybrid_config() {
     EXPECT(tc, config.transformer_batch_timeout_us > 0);
   }
   {
-    TestCase tc("Coordinator explicit budgets keep MCTS alive");
+    TestCase tc("Coordinator budgets keep MCTS alive");
     ::MetalFish::Search::LimitsType limits;
 
     limits.movetime = 1000;
     EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
+    EXPECT(tc, !HybridCanStopEarlyOnAgreement(limits));
+    EXPECT(tc, HybridHasMCTSDecisionBudget(limits, 0, false));
 
     limits.movetime = 0;
     limits.nodes = 1024;
     EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
+    EXPECT(tc, !HybridCanStopEarlyOnAgreement(limits));
+    EXPECT(tc, HybridHasMCTSDecisionBudget(limits, 0, false));
 
     limits.nodes = 0;
     limits.infinite = 1;
     EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
+    EXPECT(tc, !HybridCanStopEarlyOnAgreement(limits));
+    EXPECT(tc, HybridHasMCTSDecisionBudget(limits, 0, false));
 
     limits.infinite = 0;
     limits.depth = 8;
     EXPECT(tc, !HybridShouldContinueMCTSAfterAB(limits));
+    EXPECT(tc, !HybridCanStopEarlyOnAgreement(limits));
+    EXPECT(tc, !HybridHasMCTSDecisionBudget(limits, 1500, false));
 
+    limits.depth = 0;
+    limits.mate = 2;
+    EXPECT(tc, !HybridShouldContinueMCTSAfterAB(limits));
+    EXPECT(tc, !HybridCanStopEarlyOnAgreement(limits));
+    EXPECT(tc, !HybridHasMCTSDecisionBudget(limits, 1500, false));
+
+    limits.mate = 0;
+    limits.searchmoves = {"e2e4"};
     limits.time[WHITE] = 30000;
     limits.inc[WHITE] = 1000;
-    EXPECT(tc, !HybridShouldContinueMCTSAfterAB(limits));
+    EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
+    EXPECT(tc, HybridCanStopEarlyOnAgreement(limits));
+    EXPECT(tc, HybridHasMCTSDecisionBudget(limits, 1500, false));
+    EXPECT(tc, !HybridHasMCTSDecisionBudget(limits, 0, false));
+    auto mcts_limits = HybridBuildMCTSLimits(limits, 1500, false);
+    EXPECT(tc, mcts_limits.movetime == 1500);
+    EXPECT(tc, mcts_limits.time[WHITE] == 0);
+    EXPECT(tc, mcts_limits.inc[WHITE] == 0);
+    EXPECT(tc, mcts_limits.searchmoves.size() == 1);
 
     limits.movetime = 1000;
     EXPECT(tc, HybridShouldContinueMCTSAfterAB(limits));
+    EXPECT(tc, !HybridCanStopEarlyOnAgreement(limits));
+    mcts_limits = HybridBuildMCTSLimits(limits, 1500, false);
+    EXPECT(tc, mcts_limits.movetime == 1000);
+
+    limits.movetime = 0;
+    limits.ponderMode = true;
+    EXPECT(tc, !HybridHasMCTSDecisionBudget(limits, 1500, false));
+    EXPECT(tc, HybridHasMCTSDecisionBudget(limits, 1500, true));
+    mcts_limits = HybridBuildMCTSLimits(limits, 1500, true);
+    EXPECT(tc, mcts_limits.infinite == 1);
+    EXPECT(tc, mcts_limits.searchmoves.size() == 1);
+  }
+  {
+    TestCase tc("Fixed-budget decisive MCTS override predicate");
+
+    EXPECT(tc, HybridMCTSDecisiveFixedBudgetOverride(true, true, 456, 313,
+                                                     0.686f, 117));
+    EXPECT(tc, HybridMCTSDecisiveFixedBudgetOverride(true, true, 359, 237,
+                                                     0.660f, 449));
+    EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(false, true, 456, 313,
+                                                      0.686f, 117));
+    EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(true, false, 456, 313,
+                                                      0.686f, 117));
+    EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(true, true, 299, 250,
+                                                      0.836f, 117));
+    EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(true, true, 456, 209,
+                                                      0.686f, 117));
+    EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(true, true, 456, 313,
+                                                      0.599f, 117));
+    EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(true, true, 456, 313,
+                                                      0.686f, 74));
+  }
+  {
+    TestCase tc("Fixed-budget high-value MCTS override predicate");
+
+    EXPECT(tc, HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 187,
+                                                      0.399f, 581, 450));
+    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(false, true, 469, 187,
+                                                       0.399f, 581, 450));
+    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, false, 469, 187,
+                                                       0.399f, 581, 450));
+    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 375, 95,
+                                                       0.253f, 384, 321));
+    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 249, 187,
+                                                       0.536f, 581, 450));
+    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 79,
+                                                       0.339f, 581, 450));
+    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 187,
+                                                       0.199f, 581, 450));
+    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 187,
+                                                       0.399f, 499, 355));
+    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 187,
+                                                       0.399f, 581, 299));
+  }
+  {
+    TestCase tc("Fixed-budget no-clear AB MCTS override predicate");
+
+    EXPECT(tc,
+           HybridMCTSNoClearFixedBudgetOverride(true, true, 293, 0.590f, 39));
+    EXPECT(tc,
+           !HybridMCTSNoClearFixedBudgetOverride(false, true, 293, 0.590f, 39));
+    EXPECT(tc,
+           !HybridMCTSNoClearFixedBudgetOverride(true, false, 293, 0.590f, 39));
+    EXPECT(tc,
+           !HybridMCTSNoClearFixedBudgetOverride(true, true, 224, 0.590f, 39));
+    EXPECT(tc,
+           !HybridMCTSNoClearFixedBudgetOverride(true, true, 293, 0.579f, 39));
+    EXPECT(tc,
+           !HybridMCTSNoClearFixedBudgetOverride(true, true, 293, 0.590f, 29));
+  }
+  {
+    TestCase tc("Fixed-budget root-dominant MCTS override predicate");
+
+    EXPECT(tc, HybridMCTSRootDominantFixedBudgetOverride(true, true, 275, 211,
+                                                         0.767f, 179, 99));
+    EXPECT(tc, !HybridMCTSRootDominantFixedBudgetOverride(false, true, 275, 211,
+                                                          0.767f, 179, 99));
+    EXPECT(tc, !HybridMCTSRootDominantFixedBudgetOverride(true, false, 275, 211,
+                                                          0.767f, 179, 99));
+    EXPECT(tc, !HybridMCTSRootDominantFixedBudgetOverride(true, true, 249, 211,
+                                                          0.767f, 179, 99));
+    EXPECT(tc, !HybridMCTSRootDominantFixedBudgetOverride(true, true, 275, 199,
+                                                          0.767f, 179, 99));
+    EXPECT(tc, !HybridMCTSRootDominantFixedBudgetOverride(true, true, 275, 211,
+                                                          0.739f, 179, 99));
+    EXPECT(tc, !HybridMCTSRootDominantFixedBudgetOverride(true, true, 275, 211,
+                                                          0.767f, 149, 99));
+    EXPECT(tc, !HybridMCTSRootDominantFixedBudgetOverride(true, true, 275, 211,
+                                                          0.767f, 179, 79));
+  }
+  {
+    TestCase tc("Fixed-budget tactical-gap MCTS override predicate");
+
+    EXPECT(tc, HybridMCTSTacticalGapFixedBudgetOverride(true, 344, 64, 0.186f,
+                                                        0.240f, 366, 307));
+    EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(false, 344, 64, 0.186f,
+                                                         0.240f, 366, 307));
+    EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 249, 64, 0.186f,
+                                                         0.240f, 366, 307));
+    EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 344, 54, 0.186f,
+                                                         0.240f, 366, 307));
+    EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 344, 64, 0.159f,
+                                                         0.240f, 366, 307));
+    EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 344, 64, 0.186f,
+                                                         0.119f, 366, 307));
+    EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 344, 64, 0.186f,
+                                                         0.240f, 299, 307));
+    EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 344, 64, 0.186f,
+                                                         0.240f, 366, 249));
+    EXPECT(tc, !HybridMCTSTacticalGapFixedBudgetOverride(true, 295, 109, 0.369f,
+                                                         0.011f, 499, 311));
+  }
+  {
+    TestCase tc("Fixed-budget root-confidence MCTS override predicate");
+
+    EXPECT(tc, HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 277, 186, 0.671f, 0.195f, 233, 123));
+    EXPECT(tc, HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 242, 184, 0.760f, 0.080f, 182, 76));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   false, true, 277, 186, 0.671f, 0.195f, 233, 123));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, false, 277, 186, 0.671f, 0.195f, 233, 123));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 229, 186, 0.671f, 0.195f, 233, 123));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 277, 179, 0.671f, 0.195f, 233, 123));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 277, 186, 0.649f, 0.195f, 233, 123));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 277, 186, 0.671f, 0.119f, 233, 123));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 277, 186, 0.671f, 0.195f, 169, 123));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 277, 186, 0.671f, 0.195f, 233, 109));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 262, 137, 0.523f, 0.066f, 20, 20));
+  }
+  {
+    TestCase tc("Fixed-budget root policy tie-break predicate");
+
+    EXPECT(tc, HybridRootPolicyTieBreak(true, 698, 339, 0.747f, 0.170f, 300,
+                                        0.705f, 0.410f));
+    EXPECT(tc, !HybridRootPolicyTieBreak(false, 698, 339, 0.747f, 0.170f, 300,
+                                         0.705f, 0.410f));
+    EXPECT(tc, !HybridRootPolicyTieBreak(true, 599, 339, 0.747f, 0.170f, 300,
+                                         0.705f, 0.410f));
+    EXPECT(tc, !HybridRootPolicyTieBreak(true, 698, 255, 0.747f, 0.170f, 300,
+                                         0.705f, 0.410f));
+    EXPECT(tc, !HybridRootPolicyTieBreak(true, 698, 339, 0.747f, 0.170f, 255,
+                                         0.705f, 0.410f));
+    EXPECT(tc, !HybridRootPolicyTieBreak(true, 698, 339, 0.747f, 0.170f, 277,
+                                         0.705f, 0.410f));
+    EXPECT(tc, !HybridRootPolicyTieBreak(true, 698, 339, 0.747f, 0.170f, 300,
+                                         0.690f, 0.410f));
+    EXPECT(tc, !HybridRootPolicyTieBreak(true, 698, 339, 0.747f, 0.170f, 300,
+                                         0.705f, 0.299f));
+    EXPECT(tc, !HybridRootPolicyTieBreak(true, 698, 339, 0.747f, 0.210f, 300,
+                                         0.705f, 0.410f));
+  }
+  {
+    TestCase tc("MCTS visit evidence rejects multivisit inflation");
+
+    EXPECT(tc, HybridMCTSVisitEvidenceSane(260, 270, 140));
+    EXPECT(tc, HybridMCTSVisitEvidenceSane(260, 1024, 512));
+    EXPECT(tc, !HybridMCTSVisitEvidenceSane(260, 1100, 512));
+    EXPECT(tc, !HybridMCTSVisitEvidenceSane(260, 1024, 600));
+    EXPECT(tc, !HybridMCTSVisitEvidenceSane(0, 10, 1));
+  }
+  {
+    TestCase tc("Root Q gap ignores unvisited placeholders");
+
+    const uint32_t visits[] = {141, 96, 0, 0};
+    const float qs[] = {-0.402f, -0.466f, 0.0f, 0.0f};
+    const float gap = HybridVisitedRootQGap(-0.360f, visits, qs, 4);
+    EXPECT(tc, gap > 0.041f && gap < 0.043f);
+
+    const uint32_t unvisited[] = {0, 0};
+    const float placeholder_qs[] = {0.0f, 0.0f};
+    EXPECT(tc, HybridVisitedRootQGap(-0.250f, unvisited, placeholder_qs, 2) ==
+                   0.0f);
   }
 }
 

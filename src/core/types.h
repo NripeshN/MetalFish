@@ -62,7 +62,7 @@
 #define ASSERT_ALIGNED(ptr, alignment)                                         \
   assert(reinterpret_cast<uintptr_t>(ptr) % alignment == 0)
 
-#if defined(_WIN64) && defined(_MSC_VER) // No Makefile used
+#if defined(_WIN64) && defined(_MSC_VER) && !defined(IS_64BIT)
 #include <intrin.h> // Microsoft header for _BitScanForward64()
 #define IS_64BIT
 #endif

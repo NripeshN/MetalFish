@@ -22,8 +22,17 @@ HYBRID_THREADS="${HYBRID_THREADS:-$ENGINE_THREADS}"
 HYBRID_MCTS_THREADS="${HYBRID_MCTS_THREADS:-0}"
 HYBRID_AB_THREADS="${HYBRID_AB_THREADS:-0}"
 HYBRID_AUTO_AB_THREADS_CAP="${HYBRID_AUTO_AB_THREADS_CAP:-2}"
+HYBRID_MCTS_KLD="${HYBRID_MCTS_KLD:-0.0}"
+HYBRID_MCTS_ROOT_REJECT="${HYBRID_MCTS_ROOT_REJECT:-true}"
+HYBRID_MCTS_SHARED_TT="${HYBRID_MCTS_SHARED_TT:-false}"
+HYBRID_AB_POLICY_WEIGHT="${HYBRID_AB_POLICY_WEIGHT:-0.0}"
+HYBRID_TRACE="${HYBRID_TRACE:-false}"
+HYBRID_MCTS_MINIBATCH="${HYBRID_MCTS_MINIBATCH:-0}"
+HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS="${HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS:-5000}"
+HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS="${HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS:-1200}"
 CUTECHESS_SEED="${CUTECHESS_SEED:-6147500}"
 OPENING_ORDER="${OPENING_ORDER:-random}"
+ENGINE_RESTART="${ENGINE_RESTART:-on}"
 
 for arg in "$@"; do
     case $arg in
@@ -39,6 +48,7 @@ for arg in "$@"; do
         --hybrid-auto-ab-cap=*) HYBRID_AUTO_AB_THREADS_CAP="${arg#*=}" ;;
         --seed=*) CUTECHESS_SEED="${arg#*=}" ;;
         --opening-order=*) OPENING_ORDER="${arg#*=}" ;;
+        --restart=*) ENGINE_RESTART="${arg#*=}" ;;
         --sync-local) SYNC_BIN=1 ;;
         --no-sync) SYNC_BIN=0 ;;
         --no-remote-build) REMOTE_BUILD=0 ;;
@@ -109,21 +119,21 @@ BK="$RDIR/reference/books/8moves_v3.pgn"
 W="$RDIR/networks/BT4-1024x15x32h-swa-6147500.pb"
 CA="-each tc=$TC -games $GAMES -repeat -recover -wait $WAIT_MS -srand $CUTECHESS_SEED -openings file=$BK format=pgn order=$OPENING_ORDER -resign movecount=3 score=1000 twosided=true -draw movenumber=40 movecount=8 score=10"
 
-AB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-AB option.Threads=$ENGINE_THREADS option.Hash=512"
-MCTS="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-MCTS option.Threads=$MCTS_THREADS option.UseMCTS=true option.NNWeights=$W option.MCTSMaxThreads=$MCTS_THREADS option.MCTSMinibatchSize=0 timemargin=30000"
-HYB="-engine proto=uci cmd=$ENGINE_BIN name=MetalFish-Hybrid option.Threads=$HYBRID_THREADS option.Hash=512 option.UseHybridSearch=true option.NNWeights=$W option.HybridMCTSThreads=$HYBRID_MCTS_THREADS option.HybridABThreads=$HYBRID_AB_THREADS option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP option.MCTSMaxThreads=$HYBRID_MCTS_THREADS option.MCTSMinibatchSize=0 timemargin=30000"
+AB="-engine proto=uci restart=$ENGINE_RESTART cmd=$ENGINE_BIN name=MetalFish-AB option.Threads=$ENGINE_THREADS option.Hash=512 option.UseMCTS=false option.UseHybridSearch=false option.MultiPV=1"
+MCTS="-engine proto=uci restart=$ENGINE_RESTART cmd=$ENGINE_BIN name=MetalFish-MCTS option.Threads=$MCTS_THREADS option.UseHybridSearch=false option.UseMCTS=true option.NNWeights=$W option.MultiPV=1 option.MCTSMaxThreads=$MCTS_THREADS option.MCTSMinibatchSize=0 option.MCTSParityPreset=false option.MCTSAddDirichletNoise=false option.MCTSMinimumKLDGainPerNode=0.00005 timemargin=30000"
+HYB="-engine proto=uci restart=$ENGINE_RESTART cmd=$ENGINE_BIN name=MetalFish-Hybrid option.Threads=$HYBRID_THREADS option.Hash=512 option.UseMCTS=false option.UseHybridSearch=true option.NNWeights=$W option.MultiPV=1 option.HybridMCTSThreads=$HYBRID_MCTS_THREADS option.HybridABThreads=$HYBRID_AB_THREADS option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP option.TransformerLowTimeFallbackMs=$HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS option.TransformerMinMoveBudgetMs=$HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS option.MCTSMaxThreads=$HYBRID_MCTS_THREADS option.MCTSMinibatchSize=$HYBRID_MCTS_MINIBATCH option.MCTSParityPreset=false option.MCTSAddDirichletNoise=false option.HybridMCTSMinimumKLDGainPerNode=$HYBRID_MCTS_KLD option.HybridMCTSRootReject=$HYBRID_MCTS_ROOT_REJECT option.HybridMCTSUseSharedTT=$HYBRID_MCTS_SHARED_TT option.HybridABPolicyWeight=$HYBRID_AB_POLICY_WEIGHT option.HybridTrace=$HYBRID_TRACE timemargin=30000"
 
 S="$RDIR/reference/stockfish/src/stockfish"
-SF="-engine proto=uci cmd=$S name=Stockfish option.Threads=1 option.Hash=512"
-S16='-engine proto=uci cmd='$S' name=SF-L16 option.Threads=1 option.Hash=512 "option.Skill Level=16"'
-S14='-engine proto=uci cmd='$S' name=SF-L14 option.Threads=1 option.Hash=512 "option.Skill Level=14"'
-S12='-engine proto=uci cmd='$S' name=SF-L12 option.Threads=1 option.Hash=512 "option.Skill Level=12"'
-S10='-engine proto=uci cmd='$S' name=SF-L10 option.Threads=1 option.Hash=512 "option.Skill Level=10"'
-S8='-engine proto=uci cmd='$S' name=SF-L8 option.Threads=1 option.Hash=512 "option.Skill Level=8"'
-S5='-engine proto=uci cmd='$S' name=SF-L5 option.Threads=1 option.Hash=512 "option.Skill Level=5"'
-BER="-engine proto=uci cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=1 option.Hash=512"
-PAT="-engine proto=uci cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=1 option.Hash=512"
-LC0="-engine proto=uci cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$W arg=--backend=metal option.Threads=1"
+SF="-engine proto=uci restart=$ENGINE_RESTART cmd=$S name=Stockfish option.Threads=1 option.Hash=512"
+S16='-engine proto=uci restart='$ENGINE_RESTART' cmd='$S' name=SF-L16 option.Threads=1 option.Hash=512 "option.Skill Level=16"'
+S14='-engine proto=uci restart='$ENGINE_RESTART' cmd='$S' name=SF-L14 option.Threads=1 option.Hash=512 "option.Skill Level=14"'
+S12='-engine proto=uci restart='$ENGINE_RESTART' cmd='$S' name=SF-L12 option.Threads=1 option.Hash=512 "option.Skill Level=12"'
+S10='-engine proto=uci restart='$ENGINE_RESTART' cmd='$S' name=SF-L10 option.Threads=1 option.Hash=512 "option.Skill Level=10"'
+S8='-engine proto=uci restart='$ENGINE_RESTART' cmd='$S' name=SF-L8 option.Threads=1 option.Hash=512 "option.Skill Level=8"'
+S5='-engine proto=uci restart='$ENGINE_RESTART' cmd='$S' name=SF-L5 option.Threads=1 option.Hash=512 "option.Skill Level=5"'
+BER="-engine proto=uci restart=$ENGINE_RESTART cmd=$RDIR/reference/berserk/src/berserk name=Berserk option.Threads=1 option.Hash=512"
+PAT="-engine proto=uci restart=$ENGINE_RESTART cmd=$RDIR/reference/Patricia/engine/patricia name=Patricia option.Threads=1 option.Hash=512"
+LC0="-engine proto=uci restart=$ENGINE_RESTART cmd=$RDIR/reference/lc0/build/release/lc0 name=Lc0 arg=--weights=$W arg=--backend=metal option.Threads=1"
 
 I1="cd $RDIR"
 I1="$I1 && echo '>>> AB vs Stockfish' && $CC $AB $SF $CA -pgnout $RDIR/01_AB_vs_SF.pgn"
@@ -181,6 +191,7 @@ echo ""
 echo "  33 matches × $GAMES games = $((33 * GAMES)) games | TC: $TC | wait: ${WAIT_MS}ms"
 echo "  Openings: order=$OPENING_ORDER | seed=$CUTECHESS_SEED"
 echo "  Threads: AB=$ENGINE_THREADS MCTS=$MCTS_THREADS Hybrid=$HYBRID_THREADS (HybridMCTS=$HYBRID_MCTS_THREADS, HybridAB=$HYBRID_AB_THREADS, HybridAutoABCap=$HYBRID_AUTO_AB_THREADS_CAP)"
+echo "  Hybrid knobs: KLD=$HYBRID_MCTS_KLD RootReject=$HYBRID_MCTS_ROOT_REJECT SharedTT=$HYBRID_MCTS_SHARED_TT ABPolicyWeight=$HYBRID_AB_POLICY_WEIGHT Trace=$HYBRID_TRACE"
 echo "  Results: $RESULTS_DIR"
 echo ""
 echo "  [1] AB vs 9 opponents       (~3100-3800 Elo ladder)"

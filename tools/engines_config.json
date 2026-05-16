@@ -6,7 +6,10 @@
       "expected_elo": null,
       "options": {
         "Threads": "auto",
-        "Hash": "256"
+        "Hash": "256",
+        "UseMCTS": "false",
+        "UseHybridSearch": "false",
+        "MultiPV": "1"
       }
     },
     "MetalFish-MCTS": {
@@ -16,10 +19,14 @@
       "options": {
         "Threads": "auto",
         "Hash": "256",
+        "UseHybridSearch": "false",
         "UseMCTS": "true",
         "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb",
+        "MultiPV": "1",
         "MCTSMaxThreads": "1",
         "MCTSMinibatchSize": "0",
+        "MCTSParityPreset": "false",
+        "MCTSAddDirichletNoise": "false",
         "MCTSMinimumKLDGainPerNode": "0.00005"
       }
     },
@@ -30,17 +37,24 @@
       "options": {
         "Threads": "auto",
         "Hash": "256",
+        "UseMCTS": "false",
         "UseHybridSearch": "true",
         "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb",
+        "MultiPV": "1",
         "HybridMCTSThreads": "0",
         "HybridABThreads": "0",
-        "HybridAutoABThreadsCap": "6",
+        "HybridAutoABThreadsCap": "2",
+        "TransformerLowTimeFallbackMs": "5000",
         "TransformerMinMoveBudgetMs": "1200",
         "MCTSMaxThreads": "0",
         "MCTSMinibatchSize": "0",
+        "MCTSParityPreset": "false",
+        "MCTSAddDirichletNoise": "false",
         "HybridMCTSMinimumKLDGainPerNode": "0.0",
         "HybridMCTSRootReject": "true",
-        "HybridMCTSUseSharedTT": "false"
+        "HybridMCTSUseSharedTT": "false",
+        "HybridABPolicyWeight": "0.0",
+        "HybridTrace": "false"
       }
     },
     "Stockfish": {

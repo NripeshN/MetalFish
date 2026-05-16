@@ -20,9 +20,7 @@ namespace MetalFish {
 TimePoint TimeManagement::optimum() const { return optimumTime; }
 TimePoint TimeManagement::maximum() const { return maximumTime; }
 
-void TimeManagement::clear() {
-  availableNodes = -1;
-}
+void TimeManagement::clear() { availableNodes = -1; }
 
 void TimeManagement::advance_nodes_time(std::int64_t nodes) {
   assert(useNodesTime);

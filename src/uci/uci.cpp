@@ -56,9 +56,9 @@ static void ponderhit_active_searches(Engine &engine);
 static void wait_active_searches();
 static void join_search_waiter();
 static void preload_search_objects(Engine &engine);
+static void reset_cached_search_objects();
 
 constexpr auto BenchmarkCommand = "speedtest";
-constexpr TimePoint TransformerLowTimeFallbackMs = 5000;
 
 constexpr auto StartFEN =
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -160,6 +160,7 @@ void UCIEngine::loop() {
       stop_active_searches();
       wait_active_searches();
       engine.search_clear();
+      reset_cached_search_objects();
     }
 
     else if (token == "position")
@@ -239,8 +240,7 @@ void UCIEngine::loop() {
       sync_cout << "Unknown command: '" << cmd
                 << "'. Type help for more information." << sync_endl;
 
-  } while (token != "quit" &&
-           cli.argc == 1);
+  } while (token != "quit" && cli.argc == 1);
 
   stop_active_searches();
   wait_active_searches();
@@ -346,8 +346,7 @@ void UCIEngine::bench(std::istream &args) {
     }
   }
 
-  elapsed =
-      now() - elapsed + 1;
+  elapsed = now() - elapsed + 1;
 
   dbg_print();
 
@@ -464,8 +463,7 @@ void UCIEngine::benchmark(std::istream &args) {
     }
   }
 
-  totalTime = std::max<TimePoint>(
-      totalTime, 1);
+  totalTime = std::max<TimePoint>(totalTime, 1);
 
   dbg_print();
 
@@ -780,6 +778,22 @@ static float get_float_option(Engine &engine, const char *name,
   }
 }
 
+static bool float_option_is_non_default(Engine &engine, const char *name,
+                                        float default_value) {
+  return std::abs(get_float_option(engine, name, default_value) -
+                  default_value) > 1e-6f;
+}
+
+static float get_float_option_alias(Engine &engine, const char *preferred,
+                                    const char *legacy, float fallback) {
+  const float preferred_value = get_float_option(engine, preferred, fallback);
+  if (float_option_is_non_default(engine, preferred, fallback))
+    return preferred_value;
+  if (float_option_is_non_default(engine, legacy, fallback))
+    return get_float_option(engine, legacy, fallback);
+  return preferred_value;
+}
+
 static int auto_mcts_minibatch_size(int num_threads) {
 #ifdef __APPLE__
   // Short Apple Silicon searches lose time waiting for moderate MPSGraph
@@ -798,7 +812,11 @@ transformer_low_time_fallback_reason(Engine &engine,
   if (limits.infinite || limits.nodes > 0)
     return std::nullopt;
 
-  if (limits.movetime > 0 && limits.movetime < TransformerLowTimeFallbackMs) {
+  const TimePoint low_time_fallback = static_cast<TimePoint>(
+      static_cast<int>(engine.get_options()["TransformerLowTimeFallbackMs"]));
+
+  if (low_time_fallback > 0 && limits.movetime > 0 &&
+      limits.movetime < low_time_fallback) {
     return "fixed movetime " + std::to_string(limits.movetime) + "ms";
   }
 
@@ -813,7 +831,7 @@ transformer_low_time_fallback_reason(Engine &engine,
 
   const Color us = pos.side_to_move();
   const TimePoint time_left = limits.time[us];
-  if (time_left < TransformerLowTimeFallbackMs) {
+  if (low_time_fallback > 0 && time_left < low_time_fallback) {
     return std::string(us == WHITE ? "white" : "black") + " clock " +
            std::to_string(time_left) + "ms";
   }
@@ -841,7 +859,7 @@ transformer_low_time_fallback_reason(Engine &engine,
 static bool should_preload_transformer_search() {
   const char *env = std::getenv("METALFISH_PRELOAD_TRANSFORMER");
   if (!env || !*env)
-    return false;
+    return true;
 
   std::string value(env);
   std::transform(value.begin(), value.end(), value.begin(),
@@ -903,8 +921,9 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   config.fpu_reduction_at_root = get_float_option(
       engine, "MCTSFpuReductionAtRoot", config.fpu_reduction_at_root);
 
-  config.policy_softmax_temp = get_float_option(engine, "MCTSPolicySoftmaxTemp",
-                                                config.policy_softmax_temp);
+  config.policy_softmax_temp = get_float_option_alias(
+      engine, "MCTSPolicyTemperature", "MCTSPolicySoftmaxTemp",
+      config.policy_softmax_temp);
   config.moves_left_max_effect = get_float_option(
       engine, "MCTSMovesLeftMaxEffect", config.moves_left_max_effect);
   config.moves_left_threshold = get_float_option(
@@ -957,8 +976,9 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   config.minibatch_size = requested_minibatch > 0
                               ? requested_minibatch
                               : auto_mcts_minibatch_size(num_threads);
-  config.max_out_of_order_evals_factor = get_float_option(
-      engine, "MCTSMaxOutOfOrderFactor", config.max_out_of_order_evals_factor);
+  config.max_out_of_order_evals_factor = get_float_option_alias(
+      engine, "MCTSMaxOutOfOrderEvalsFactor", "MCTSMaxOutOfOrderFactor",
+      config.max_out_of_order_evals_factor);
   if (config.max_out_of_order_evals_factor <= 0.0f)
     config.out_of_order_eval = false;
 
@@ -1192,6 +1212,15 @@ static std::mutex g_cached_mcts_mutex;
 static std::thread g_search_waiter;
 static std::mutex g_search_waiter_mutex;
 
+static void reset_cached_search_objects() {
+  if (g_parallel_hybrid_search)
+    g_parallel_hybrid_search->new_game();
+
+  std::lock_guard<std::mutex> lock(g_cached_mcts_mutex);
+  if (g_cached_mcts)
+    g_cached_mcts->NewGame();
+}
+
 static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
                                      int requested_threads, bool announce_cap) {
   int num_threads = requested_threads;
@@ -1374,6 +1403,13 @@ static void ponderhit_active_searches(Engine &engine) {
   if (g_parallel_hybrid_search && g_parallel_hybrid_search->is_searching()) {
     g_parallel_hybrid_search->ponderhit();
     return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_active_mcts_mutex);
+    if (g_active_mcts) {
+      g_active_mcts->PonderHit();
+      return;
+    }
   }
   engine.set_ponderhit(false);
 }

@@ -107,6 +107,18 @@ public:
     std::vector<Move> pv;
   };
 
+  struct RootMoveSnapshot {
+    Move move = Move::none();
+    Value score = VALUE_NONE;
+    Value previous_score = VALUE_NONE;
+    Value average_score = VALUE_NONE;
+    uint64_t effort = 0;
+    int sel_depth = 0;
+    std::vector<Move> pv;
+  };
+
+  std::vector<RootMoveSnapshot> root_move_snapshot(size_t max_moves = 0) const;
+
   QuickSearchResult search_sync(const std::string &fen, int depth,
                                 int time_ms = 0);
 

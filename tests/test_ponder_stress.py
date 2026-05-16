@@ -15,9 +15,11 @@ import argparse
 import json
 import os
 import pathlib
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 PROJ = pathlib.Path(__file__).resolve().parent.parent
@@ -104,6 +106,16 @@ def main():
         bufsize=1,
     )
 
+    stdout_lines = queue.Queue()
+
+    def pump_stdout():
+        for line in proc.stdout:
+            stdout_lines.put(line.strip())
+        stdout_lines.put(None)
+
+    stdout_thread = threading.Thread(target=pump_stdout, daemon=True)
+    stdout_thread.start()
+
     def send(cmd):
         proc.stdin.write(cmd + "\n")
         proc.stdin.flush()
@@ -111,12 +123,34 @@ def main():
     def read_until(prefix, timeout=TIMEOUT_BESTMOVE):
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if proc.poll() is not None:
+            if proc.poll() is not None and stdout_lines.empty():
                 return None
-            line = proc.stdout.readline().strip()
+            remaining = max(0.0, min(0.1, deadline - time.time()))
+            try:
+                line = stdout_lines.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if line is None:
+                return None
             if line.startswith(prefix):
                 return line
         return "TIMEOUT"
+
+    def read_bestmove_for(duration):
+        deadline = time.time() + duration
+        while time.time() < deadline:
+            if proc.poll() is not None and stdout_lines.empty():
+                return None
+            remaining = max(0.0, min(0.1, deadline - time.time()))
+            try:
+                line = stdout_lines.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if line is None:
+                return None
+            if line.startswith("bestmove"):
+                return line
+        return None
 
     def alive():
         if proc.poll() is not None:
@@ -144,11 +178,16 @@ def main():
         close_failed_startup()
         return 1
 
+    send("setoption name UseMCTS value false")
     send("setoption name UseHybridSearch value true")
     send(f"setoption name NNWeights value {WEIGHTS}")
     send("setoption name Threads value 4")
+    send("setoption name MultiPV value 1")
     send("setoption name HybridMCTSThreads value 1")
     send("setoption name HybridABThreads value 3")
+    send("setoption name MCTSAddDirichletNoise value false")
+    send("setoption name HybridABPolicyWeight value 0.0")
+    send("setoption name HybridTrace value false")
     send("setoption name Ponder value true")
     send("setoption name Hash value 256")
     send("isready")
@@ -166,6 +205,7 @@ def main():
         "ponderhit_ok": 0,
         "stop_ok": 0,
         "followup_ok": 0,
+        "pure_mcts_ponder_ok": 0,
         "crashes": 0,
         "timeouts": 0,
         "total": 0,
@@ -186,14 +226,14 @@ def main():
         time.sleep(0.3 + (i % 3) * 0.1)
 
         if not alive():
-            print(f"  [{i}] CRASH during ponder")
+            print(f"  [{i}] CRASH during ponder (exit {proc.returncode})")
             stats["crashes"] += 1
             break
 
         send("ponderhit")
         r = read_until("bestmove", TIMEOUT_BESTMOVE)
         if not alive():
-            print(f"  [{i}] CRASH after ponderhit")
+            print(f"  [{i}] CRASH after ponderhit (exit {proc.returncode})")
             stats["crashes"] += 1
             break
         if r is None or r == "TIMEOUT":
@@ -209,7 +249,7 @@ def main():
         send("go movetime 200")
         r = read_until("bestmove", TIMEOUT_FOLLOWUP)
         if not alive():
-            print(f"  [{i}] CRASH during follow-up")
+            print(f"  [{i}] CRASH during follow-up (exit {proc.returncode})")
             stats["crashes"] += 1
             break
         if r is None or r == "TIMEOUT":
@@ -226,7 +266,7 @@ def main():
         send("stop")
         r = read_until("bestmove", TIMEOUT_BESTMOVE)
         if not alive():
-            print(f"  [{i}] CRASH after stop-ponder")
+            print(f"  [{i}] CRASH after stop-ponder (exit {proc.returncode})")
             stats["crashes"] += 1
             break
         if r is None or r == "TIMEOUT":
@@ -237,6 +277,36 @@ def main():
 
         if (i + 1) % 5 == 0:
             print(f"  [{i+1}/{iterations}] OK")
+
+    if alive() and stats["crashes"] == 0 and stats["timeouts"] == 0:
+        send("setoption name UseHybridSearch value false")
+        send("setoption name UseMCTS value true")
+        send("setoption name MCTSMaxThreads value 1")
+        send("setoption name MCTSMinibatchSize value 0")
+        send("ucinewgame")
+        send("isready")
+        r = read_until("readyok", 120)
+        if r is None or r == "TIMEOUT":
+            print("  [pure-mcts] TIMEOUT waiting for readyok")
+            stats["timeouts"] += 1
+        else:
+            send("position startpos")
+            send("go ponder wtime 60000 btime 60000 winc 1000 binc 1000")
+            early = read_bestmove_for(7.0)
+            if early:
+                print(f"  [pure-mcts] EARLY bestmove before ponderhit: {early}")
+                stats["timeouts"] += 1
+            else:
+                send("ponderhit")
+                r = read_until("bestmove", TIMEOUT_BESTMOVE)
+                if r is None or r == "TIMEOUT":
+                    print("  [pure-mcts] TIMEOUT after ponderhit")
+                    stats["timeouts"] += 1
+                    send("stop")
+                    read_until("bestmove", 5)
+                else:
+                    stats["pure_mcts_ponder_ok"] = 1
+                    print("  [pure-mcts] OK")
 
     if alive():
         send("quit")
@@ -256,6 +326,7 @@ def main():
         and stats["ponderhit_ok"] == iterations
         and stats["followup_ok"] == iterations
         and stats["stop_ok"] == iterations
+        and stats["pure_mcts_ponder_ok"] == 1
     )
 
     if not passed or args.keep_stderr or args.stderr_log:

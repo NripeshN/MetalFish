@@ -135,9 +135,8 @@ Engine::Engine(std::optional<std::string> path)
   // Default to false -- Metal is initialized on demand when MCTS/Hybrid starts.
   options.add("UseGPU", Option(false));
 
-  options.add("NNWeights", Option("", [](const Option &) {
-                return std::nullopt;
-              }));
+  options.add("NNWeights",
+              Option("", [](const Option &) { return std::nullopt; }));
 
   options.add("UseHybridSearch", Option(false));
 
@@ -146,12 +145,13 @@ Engine::Engine(std::optional<std::string> path)
   // 0 = auto (derived from Threads; coordinator is outside the worker budget).
   options.add("HybridMCTSThreads", Option(0, 0, MaxThreads));
   options.add("HybridABThreads", Option(0, 0, MaxThreads));
-  options.add("HybridAutoABThreadsCap", Option(6, 0, MaxThreads));
+  options.add("HybridAutoABThreadsCap", Option(2, 0, MaxThreads));
   options.add("HybridABPolicyWeight", Option("0.0"));
   options.add("HybridMCTSMinimumKLDGainPerNode", Option("0.0"));
   options.add("HybridMCTSRootReject", Option(true));
   options.add("HybridMCTSUseSharedTT", Option(false));
   options.add("HybridTrace", Option(false));
+  options.add("TransformerLowTimeFallbackMs", Option(5000, 0, 30000));
   options.add("TransformerMinMoveBudgetMs", Option(1200, 0, 5000));
 
   // Optional parity preset and exposed MCTS tuning controls
@@ -169,6 +169,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSFpuReduction", Option("0.33"));
   options.add("MCTSFpuReductionAtRoot", Option("0.33"));
   options.add("MCTSPolicySoftmaxTemp", Option("1.359"));
+  options.add("MCTSPolicyTemperature", Option("1.359"));
   options.add("MCTSMovesLeftMaxEffect", Option("0.0345"));
   options.add("MCTSMovesLeftThreshold", Option("0.8"));
   options.add("MCTSMovesLeftSlope", Option("0.0027"));
@@ -196,6 +197,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSMinibatchSize", Option(0, 0, 4096));
   options.add("MCTSMaxThreads", Option(0, 0, MaxThreads));
   options.add("MCTSMaxOutOfOrderFactor", Option("2.4"));
+  options.add("MCTSMaxOutOfOrderEvalsFactor", Option("2.4"));
   options.add("MCTSAddDirichletNoise", Option(false));
   options.add("MCTSNoiseEpsilon", Option("0.0"));
   options.add("MCTSNoiseAlpha", Option("0.3"));
@@ -476,6 +478,57 @@ std::string Engine::thread_allocation_information_as_string() const {
   ss << boundThreadsByNodeStr;
 
   return ss.str();
+}
+
+std::vector<Engine::RootMoveSnapshot>
+Engine::root_move_snapshot(size_t max_moves) const {
+  std::vector<RootMoveSnapshot> snapshot;
+  if (threads.empty())
+    return snapshot;
+
+  bool can_vote_best_thread = true;
+  for (auto it = threads.cbegin(); it != threads.cend(); ++it) {
+    const Thread *thread = it->get();
+    if (!thread || !thread->worker || thread->worker->rootMoves.empty() ||
+        thread->worker->rootMoves[0].pv.empty()) {
+      can_vote_best_thread = false;
+      break;
+    }
+  }
+
+  Thread *best_thread = nullptr;
+  if (can_vote_best_thread)
+    best_thread = threads.get_best_thread();
+  else {
+    for (auto it = threads.cbegin(); it != threads.cend(); ++it) {
+      Thread *thread = it->get();
+      if (thread && thread->worker && !thread->worker->rootMoves.empty()) {
+        best_thread = thread;
+        break;
+      }
+    }
+  }
+
+  if (!best_thread || best_thread->worker->rootMoves.empty())
+    return snapshot;
+
+  const auto &root_moves = best_thread->worker->rootMoves;
+  const size_t count = max_moves > 0 ? std::min(max_moves, root_moves.size())
+                                     : root_moves.size();
+  snapshot.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    const auto &rm = root_moves[i];
+    RootMoveSnapshot item;
+    item.move = rm.pv.empty() ? Move::none() : rm.pv[0];
+    item.score = rm.score;
+    item.previous_score = rm.previousScore;
+    item.average_score = rm.averageScore;
+    item.effort = rm.effort;
+    item.sel_depth = rm.selDepth;
+    item.pv = rm.pv;
+    snapshot.push_back(std::move(item));
+  }
+  return snapshot;
 }
 
 Engine::QuickSearchResult Engine::search_sync(const std::string &fen, int depth,

@@ -408,17 +408,14 @@ void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
 
     int base = i * kPlanesPerBoard;
 
-    uint64_t our_pieces[6] = {
-        pos.pieces(us, PAWN),   pos.pieces(us, KNIGHT),
-        pos.pieces(us, BISHOP), pos.pieces(us, ROOK),
-        pos.pieces(us, QUEEN),  pos.pieces(us, KING)};
+    uint64_t our_pieces[6] = {pos.pieces(us, PAWN),   pos.pieces(us, KNIGHT),
+                              pos.pieces(us, BISHOP), pos.pieces(us, ROOK),
+                              pos.pieces(us, QUEEN),  pos.pieces(us, KING)};
 
-    uint64_t their_pieces[6] = {pos.pieces(them, PAWN),
-                                pos.pieces(them, KNIGHT),
-                                pos.pieces(them, BISHOP),
-                                pos.pieces(them, ROOK),
-                                pos.pieces(them, QUEEN),
-                                pos.pieces(them, KING)};
+    uint64_t their_pieces[6] = {
+        pos.pieces(them, PAWN),   pos.pieces(them, KNIGHT),
+        pos.pieces(them, BISHOP), pos.pieces(them, ROOK),
+        pos.pieces(them, QUEEN),  pos.pieces(them, KING)};
 
     if (us == BLACK) {
       for (int piece = 0; piece < 6; ++piece) {

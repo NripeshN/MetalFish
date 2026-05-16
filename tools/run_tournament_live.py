@@ -54,6 +54,35 @@ def detect_default_threads() -> int:
     return max(1, n)
 
 
+def env_option(name: str) -> Optional[str]:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value if value else None
+
+
+def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None:
+    overrides = {
+        "HYBRID_MCTS_THREADS": "HybridMCTSThreads",
+        "HYBRID_AB_THREADS": "HybridABThreads",
+        "HYBRID_AUTO_AB_THREADS_CAP": "HybridAutoABThreadsCap",
+        "HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS": "TransformerLowTimeFallbackMs",
+        "HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS": "TransformerMinMoveBudgetMs",
+        "HYBRID_MCTS_KLD": "HybridMCTSMinimumKLDGainPerNode",
+        "HYBRID_MCTS_ROOT_REJECT": "HybridMCTSRootReject",
+        "HYBRID_MCTS_SHARED_TT": "HybridMCTSUseSharedTT",
+        "HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight",
+        "HYBRID_TRACE": "HybridTrace",
+        "HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize",
+    }
+    for env_name, option_name in overrides.items():
+        value = env_option(env_name)
+        if value is not None:
+            options[option_name] = value
+    if force_trace and "HYBRID_TRACE" not in os.environ:
+        options["HybridTrace"] = "true"
+
 
 class UCIEngine:
     def __init__(self, cmd: Sequence[str], name: str, options: Dict[str, str] = None):
@@ -197,25 +226,34 @@ class UCIEngine:
         winc: int = 0,
         binc: int = 0,
         movetime: int = 0,
+        nodes: int = 0,
     ) -> str:
         pos_cmd = f"position fen {fen}"
         if moves:
             pos_cmd += " moves " + " ".join(moves)
         self._send(pos_cmd)
 
-        if movetime > 0:
+        if nodes > 0:
+            self._send(f"go nodes {nodes}")
+        elif movetime > 0:
             self._send(f"go movetime {movetime}")
         else:
             self._send(f"go wtime {wtime} btime {btime} winc {winc} binc {binc}")
 
-        timeout = (
-            max(wtime, btime) // 1000 + 30 if not movetime else movetime // 1000 + 30
-        )
+        if nodes > 0:
+            timeout = max(30, nodes // 1000 + 30)
+        elif movetime > 0:
+            timeout = movetime // 1000 + 30
+        else:
+            timeout = max(wtime, btime) // 1000 + 30
         search_output: List[str] = []
         line = self._wait_for("bestmove", timeout, search_output)
-        self.last_search_output = search_output
         parts = line.split()
-        return parts[1] if len(parts) > 1 else "0000"
+        bestmove = parts[1] if len(parts) > 1 else "0000"
+        self._send("isready")
+        self._wait_for("readyok", 30, search_output)
+        self.last_search_output = search_output
+        return bestmove
 
     def close(self):
         if self.proc is None:
@@ -228,7 +266,6 @@ class UCIEngine:
             if self.proc.poll() is None:
                 self.proc.kill()
                 self.proc.wait()
-
 
 
 def load_openings(
@@ -254,7 +291,6 @@ def load_openings(
     return openings
 
 
-
 @dataclass
 class GameResult:
     white: str
@@ -275,6 +311,12 @@ def extract_search_log_lines(lines: Sequence[str]) -> List[str]:
             keep.append(line)
         elif line.startswith("info string Final:"):
             keep.append(line)
+        elif line.startswith("info string Time safety:"):
+            keep.append(line)
+        elif line.startswith("info string Starting Parallel Hybrid Search"):
+            keep.append(line)
+        elif line.startswith("info string Hybrid thread split:"):
+            keep.append(line)
     return keep
 
 
@@ -285,6 +327,7 @@ def play_game(
     tc_base_ms: int = 60000,
     tc_inc_ms: int = 100,
     movetime_ms: int = 0,
+    nodes: int = 0,
     max_moves: int = 300,
     capture_search_log: bool = False,
 ) -> GameResult:
@@ -342,7 +385,14 @@ def play_game(
 
         try:
             move_str = eng.go(
-                start_fen, move_list, wtime, btime, tc_inc_ms, tc_inc_ms, movetime_ms
+                start_fen,
+                move_list,
+                wtime,
+                btime,
+                tc_inc_ms,
+                tc_inc_ms,
+                movetime_ms,
+                nodes,
             )
         except (TimeoutError, RuntimeError) as exc:
             result = "0-1" if board.turn == chess.WHITE else "1-0"
@@ -359,7 +409,7 @@ def play_game(
             )
 
         elapsed_ms = int((time.time() - t0) * 1000)
-        if not movetime_ms:
+        if not movetime_ms and nodes <= 0:
             if board.turn == chess.WHITE:
                 wtime = max(100, wtime - elapsed_ms + tc_inc_ms)
             else:
@@ -420,7 +470,6 @@ def play_game(
     )
 
 
-
 @dataclass
 class MatchResult:
     engine1: str
@@ -460,6 +509,8 @@ def run_match(
     tc_base_ms: int = 60000,
     tc_inc_ms: int = 100,
     movetime_ms: int = 0,
+    nodes: int = 0,
+    max_moves: int = 300,
     capture_search_log: bool = False,
 ) -> MatchResult:
     result = MatchResult(eng1_name, eng2_name)
@@ -492,6 +543,8 @@ def run_match(
             tc_base_ms,
             tc_inc_ms,
             movetime_ms,
+            nodes,
+            max_moves,
             capture_search_log=capture_search_log,
         )
 
@@ -555,14 +608,20 @@ def run_match(
     return result
 
 
-
-def create_engine(name: str, cfg: dict, default_threads: int) -> Optional[UCIEngine]:
+def create_engine(
+    name: str,
+    cfg: dict,
+    default_threads: int,
+    force_hybrid_trace: bool = False,
+) -> Optional[UCIEngine]:
     path = PROJ / cfg["path"]
     if not path.exists():
         print(f"  SKIP {name}: binary not found at {path}")
         return None
     cmd = [str(path)] + cfg.get("cmd_args", [])
     options = dict(cfg.get("options", {}))
+    if name == "MetalFish-Hybrid":
+        apply_hybrid_env_options(options, force_hybrid_trace)
     if "Threads" in options:
         t = str(options["Threads"]).strip().lower()
         if t in {"auto", "max", "native"}:
@@ -603,6 +662,7 @@ def run_tournament(args):
     tc_base_ms = args.tc_base * 1000
     tc_inc_ms = int(args.tc_inc * 1000)
     movetime_ms = args.movetime if args.movetime > 0 else 0
+    nodes = args.nodes if args.nodes > 0 else 0
 
     if args.match:
         matches = [(args.match[0], args.match[1])]
@@ -633,7 +693,9 @@ def run_tournament(args):
     print(f"\nMetalFish Tournament")
     print(f"{'='*60}")
     print(f"Games per match: {args.games}")
-    if movetime_ms:
+    if nodes:
+        print(f"Search limit: {nodes} nodes/move")
+    elif movetime_ms:
         print(f"Time control: {movetime_ms}ms/move")
     else:
         print(f"Time control: {args.tc_base}s + {args.tc_inc}s/move")
@@ -654,7 +716,12 @@ def run_tournament(args):
 
             for ename in [e1_name, e2_name]:
                 if ename not in active_engines:
-                    eng = create_engine(ename, engines_cfg[ename], default_threads)
+                    eng = create_engine(
+                        ename,
+                        engines_cfg[ename],
+                        default_threads,
+                        args.save_search_log,
+                    )
                     if eng is None:
                         break
                     active_engines[ename] = eng
@@ -673,6 +740,8 @@ def run_tournament(args):
                 tc_base_ms,
                 tc_inc_ms,
                 movetime_ms,
+                nodes,
+                args.max_moves,
                 args.save_search_log,
             )
 
@@ -696,9 +765,13 @@ def run_tournament(args):
                         "matches": all_results,
                         "timestamp": timestamp,
                         "tc": (
-                            f"{args.tc_base}+{args.tc_inc}"
-                            if not movetime_ms
-                            else f"{movetime_ms}ms/move"
+                            f"{nodes} nodes/move"
+                            if nodes
+                            else (
+                                f"{args.tc_base}+{args.tc_inc}"
+                                if not movetime_ms
+                                else f"{movetime_ms}ms/move"
+                            )
                         ),
                         "games_per_match": args.games,
                         "opening_order": args.opening_order,
@@ -753,7 +826,6 @@ def run_tournament(args):
     return 0
 
 
-
 def main():
     parser = argparse.ArgumentParser(description="MetalFish Tournament Runner")
     parser.add_argument(
@@ -770,6 +842,18 @@ def main():
         type=int,
         default=0,
         help="Fixed movetime in ms (overrides tc, 0=disabled)",
+    )
+    parser.add_argument(
+        "--nodes",
+        type=int,
+        default=0,
+        help="Fixed node limit per move (overrides tc/movetime, 0=disabled)",
+    )
+    parser.add_argument(
+        "--max-moves",
+        type=int,
+        default=300,
+        help="Adjudicate as a draw after this many full moves",
     )
     parser.add_argument(
         "--quick", action="store_true", help="Quick mode: 4 games, 10s+0.1s"

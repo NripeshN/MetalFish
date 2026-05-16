@@ -26,11 +26,6 @@
 #include <sstream>
 #include <thread>
 
-#ifdef __APPLE__
-#include <Accelerate/Accelerate.h>
-#include <pthread/qos.h>
-#endif
-
 #ifdef __aarch64__
 #define CPU_PAUSE() __asm__ __volatile__("yield" ::: "memory")
 #else
@@ -267,8 +262,10 @@ public:
                    BestMoveCallback best_cb = nullptr,
                    InfoCallback info_cb = nullptr);
   void Stop();
+  void PonderHit();
   void Wait();
   void ClearCallbacks();
+  void NewGame();
 
   struct RootMoveStats {
     Move move = Move::none();
@@ -294,6 +291,7 @@ private:
   bool IsSearchActive() const;
   bool ShouldStop() const;
   SearchStats CollectSearchStats() const;
+  void ConfigureStopper();
   void SendInfo();
   int64_t CalculateTimeBudget();
   RootMoveStats GetBestMoveStatsLocked() const;
@@ -358,12 +356,14 @@ private:
   std::atomic<bool> stop_flag_{false};
   std::atomic<bool> running_{false};
   ::MetalFish::Search::LimitsType limits_;
-  std::chrono::steady_clock::time_point search_start_;
-  int64_t time_budget_ms_ = 0;
+  std::atomic<int64_t> search_start_ms_{0};
+  std::atomic<int64_t> time_budget_ms_{0};
+  std::atomic<uint64_t> nodes_at_movestart_{0};
+  std::atomic<uint64_t> batches_at_movestart_{0};
   Color root_color_ = WHITE;
   bool root_search_filter_active_ = false;
   bool active_root_search_filter_active_ = false;
-  bool smart_pruning_enabled_ = false;
+  std::atomic<bool> smart_pruning_enabled_{false};
   std::vector<Move> root_search_moves_;
   std::vector<Move> active_root_search_moves_;
 
@@ -383,7 +383,7 @@ private:
   mutable std::mutex stopper_mutex_;
   mutable std::shared_mutex tree_structure_mutex_;
 
-  mutable int64_t first_eval_time_ms_ = -1;
+  mutable std::atomic<int64_t> first_eval_time_ms_{-1};
 
   // Lc0-style smooth time management state (persistent across searches)
   struct TimeManagerState {

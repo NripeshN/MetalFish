@@ -247,6 +247,14 @@ public:
   void new_game();
 
 private:
+  struct ABRootMoveInfo {
+    Move move = Move::none();
+    int score = 0;
+    int previous_score = 0;
+    int average_score = 0;
+    uint64_t effort = 0;
+  };
+
   bool initialized_ = false;
   ParallelHybridConfig config_;
   ParallelSearchStats stats_;
@@ -289,8 +297,9 @@ private:
 
   std::string root_fen_;
   ::MetalFish::Search::LimitsType limits_;
-  std::chrono::steady_clock::time_point search_start_;
-  int time_budget_ms_ = 0;
+  std::atomic<int64_t> search_start_ms_{0};
+  std::atomic<int> time_budget_ms_{0};
+  std::atomic<bool> ponderhit_received_{false};
 
   std::atomic<uint32_t> final_best_move_{0};
   std::atomic<uint32_t> final_ponder_move_{0};
@@ -300,6 +309,8 @@ private:
   std::mutex callback_mutex_;
   BestMoveCallback best_move_callback_;
   InfoCallback info_callback_;
+  std::mutex ab_root_mutex_;
+  std::vector<ABRootMoveInfo> ab_root_moves_;
   std::atomic<bool> callback_invoked_{false};
 
   void mcts_thread_main();
@@ -337,6 +348,53 @@ std::unique_ptr<ParallelHybridSearch> create_parallel_hybrid_search(
 // search budget and should keep MCTS running after AB has produced a result.
 bool HybridShouldContinueMCTSAfterAB(
     const ::MetalFish::Search::LimitsType &limits);
+
+bool HybridCanStopEarlyOnAgreement(
+    const ::MetalFish::Search::LimitsType &limits);
+
+bool HybridHasMCTSDecisionBudget(const ::MetalFish::Search::LimitsType &limits,
+                                 int time_budget_ms, bool ponderhit_received);
+
+::MetalFish::Search::LimitsType
+HybridBuildMCTSLimits(const ::MetalFish::Search::LimitsType &limits,
+                      int time_budget_ms, bool waiting_for_ponderhit);
+
+bool HybridMCTSDecisiveFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
+                                           uint64_t mcts_total_nodes,
+                                           uint32_t mcts_visits,
+                                           float visit_share, int eval_delta);
+
+bool HybridMCTSHighValueFixedBudgetOverride(
+    bool fixed_budget, bool mcts_reliable, uint64_t mcts_total_nodes,
+    uint32_t mcts_visits, float visit_share, int mcts_cp, int eval_delta);
+
+bool HybridMCTSNoClearFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
+                                          uint32_t mcts_visits,
+                                          float visit_share, int eval_delta);
+
+bool HybridMCTSRootDominantFixedBudgetOverride(
+    bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
+    uint32_t mcts_visits, float visit_share, int mcts_cp, int eval_delta);
+
+bool HybridMCTSTacticalGapFixedBudgetOverride(
+    bool fixed_budget, uint64_t mcts_total_nodes, uint32_t mcts_visits,
+    float visit_share, float root_q_gap, int mcts_cp, int eval_delta);
+
+bool HybridMCTSRootConfidenceFixedBudgetOverride(
+    bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
+    uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta);
+
+bool HybridMCTSVisitEvidenceSane(uint64_t mcts_evals, uint64_t root_visits,
+                                 uint32_t best_visits);
+
+bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
+                              uint32_t top_visits, float top_q,
+                              float top_policy, uint32_t candidate_visits,
+                              float candidate_q, float candidate_policy);
+
+float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
+                            const float *candidate_qs, int candidate_count);
 
 } // namespace MCTS
 } // namespace MetalFish

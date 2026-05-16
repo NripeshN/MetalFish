@@ -304,9 +304,7 @@ public:
     return 8;
   }
 
-  int max_threads_per_simd_group() const override {
-    return 32;
-  }
+  int max_threads_per_simd_group() const override { return 32; }
 
   int recommended_batch_size() const override {
     int cores = gpu_core_count();
@@ -336,9 +334,7 @@ public:
     return [queue_ commandBuffer];
   }
 
-  void release_command_buffer(id<MTLCommandBuffer> buffer) {
-    (void)buffer;
-  }
+  void release_command_buffer(id<MTLCommandBuffer> buffer) { (void)buffer; }
 
   std::unique_ptr<Buffer> create_buffer(size_t size, MemoryMode mode,
                                         BufferUsage usage) override {

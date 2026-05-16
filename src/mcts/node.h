@@ -31,15 +31,21 @@
 #include <mutex>
 
 struct os_unfair_lock_s {
-  std::mutex mtx;
+  std::atomic_flag flag = ATOMIC_FLAG_INIT;
 };
 using os_unfair_lock_t = os_unfair_lock_s *;
 using os_unfair_lock = os_unfair_lock_s;
 
 #define OS_UNFAIR_LOCK_INIT                                                    \
   os_unfair_lock_s {}
-inline void os_unfair_lock_lock(os_unfair_lock_t lock) { lock->mtx.lock(); }
-inline void os_unfair_lock_unlock(os_unfair_lock_t lock) { lock->mtx.unlock(); }
+inline void os_unfair_lock_lock(os_unfair_lock_t lock) {
+  while (lock->flag.test_and_set(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+}
+inline void os_unfair_lock_unlock(os_unfair_lock_t lock) {
+  lock->flag.clear(std::memory_order_release);
+}
 #endif
 
 namespace MetalFish {
@@ -181,11 +187,7 @@ public:
   }
 
   void FinalizeScoreUpdate(float v, float d, float m, int multivisit = 1) {
-#ifdef __APPLE__
     os_unfair_lock_lock(&score_lock_);
-#else
-    std::lock_guard<std::mutex> _guard(score_lock_);
-#endif
     const uint32_t visits = static_cast<uint32_t>(std::max(1, multivisit));
     const uint32_t old_n = n_.load(std::memory_order_relaxed);
     const double total = static_cast<double>(old_n + visits);
@@ -216,9 +218,7 @@ public:
         break;
       }
     }
-#ifdef __APPLE__
     os_unfair_lock_unlock(&score_lock_);
-#endif
   }
 
   // If every child is terminal, propagate bounds up the tree.
@@ -317,18 +317,12 @@ public:
   }
 
   void MakeTerminal(Terminal type, float wl, float d, float m) {
-#ifdef __APPLE__
     os_unfair_lock_lock(&score_lock_);
-#else
-    std::lock_guard<std::mutex> _guard(score_lock_);
-#endif
     wl_.store(static_cast<double>(wl), std::memory_order_release);
     d_.store(d, std::memory_order_release);
     m_.store(m, std::memory_order_release);
     terminal_type_.store(static_cast<uint8_t>(type), std::memory_order_release);
-#ifdef __APPLE__
     os_unfair_lock_unlock(&score_lock_);
-#endif
   }
 
   void SetTerminal(Terminal type, float value) {
@@ -425,11 +419,7 @@ private:
   uint16_t index_ = 0;
   uint8_t num_edges_ = 0;
   std::atomic<uint8_t> terminal_type_{0};
-#ifdef __APPLE__
   mutable os_unfair_lock score_lock_ = OS_UNFAIR_LOCK_INIT;
-#else
-  mutable std::mutex score_lock_;
-#endif
   Node *solid_base_ = nullptr;
   bool solid_children_ = false;
 };

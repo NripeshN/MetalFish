@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import chess
@@ -81,10 +82,24 @@ class SearchResult:
     nps: int
     nn_evals: int
     elapsed: float
+    root_summary: str = ""
+    hybrid_trace: str = ""
+    final_summary: str = ""
+    ab_updates: Dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class AggregateStats:
+    runs: int = 0
+    passes: int = 0
+    nodes_total: int = 0
+    move_counts: Dict[str, int] = field(default_factory=dict)
 
 
 class UCISession:
-    def __init__(self, cmd: Sequence[str], name: str):
+    def __init__(
+        self, cmd: Sequence[str], name: str, env: Optional[Dict[str, str]] = None
+    ):
         self.name = name
         self.proc = subprocess.Popen(
             list(cmd),
@@ -93,6 +108,7 @@ class UCISession:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env=env,
         )
         self.send("uci")
         self.wait_for("uciok", 120)
@@ -134,7 +150,14 @@ class UCISession:
         self.send("isready")
         self.wait_for("readyok", 120)
 
-    def search(self, fen: str, mode: str, movetime_ms: int, nodes: int) -> SearchResult:
+    def search(
+        self,
+        fen: str,
+        mode: str,
+        movetime_ms: int,
+        nodes: int,
+        collect_ab_updates: bool = False,
+    ) -> SearchResult:
         self.send("ucinewgame")
         self.send("isready")
         self.wait_for("readyok", 120)
@@ -148,6 +171,10 @@ class UCISession:
         info_nodes = 0
         info_nps = 0
         info_nn_evals = 0
+        root_summary = ""
+        hybrid_trace = ""
+        final_summary = ""
+        ab_updates: Dict[str, int] = {}
         t0 = time.time()
         timeout = max(movetime_ms / 1000.0, nodes / 10.0 if nodes > 0 else 0) + 60
         assert self.proc.stdout is not None
@@ -168,6 +195,19 @@ class UCISession:
                     bestmove = parts[1]
                 break
             if line.startswith("info "):
+                if " root " in line:
+                    root_summary = line.split(" root ", 1)[1]
+                if collect_ab_updates and line.endswith(" string hybrid"):
+                    move = parse_info_pv_first_move(line)
+                    if move:
+                        ab_updates[move] = ab_updates.get(move, 0) + 1
+                if line.startswith("info string HybridTrace:"):
+                    hybrid_trace = line.removeprefix("info string ").strip()
+                if line.startswith("info string Final:"):
+                    final_summary = line.removeprefix("info string ").strip()
+                    evals = parse_keyed_int(final_summary, "MCTSEvals")
+                    if evals is not None:
+                        info_nn_evals = evals
                 parts = line.split()
                 for i, tok in enumerate(parts):
                     if tok == "nodes" and i + 1 < len(parts):
@@ -199,6 +239,13 @@ class UCISession:
             line = line.strip()
             if line.startswith("readyok"):
                 break
+            if line.startswith("info string HybridTrace:"):
+                hybrid_trace = line.removeprefix("info string ").strip()
+            if line.startswith("info string Final:"):
+                final_summary = line.removeprefix("info string ").strip()
+                evals = parse_keyed_int(final_summary, "MCTSEvals")
+                if evals is not None:
+                    info_nn_evals = evals
             if "info string   Nodes:" in line:
                 try:
                     info_nodes = int(line.split(":")[-1].strip())
@@ -221,6 +268,10 @@ class UCISession:
             nps=info_nps,
             nn_evals=info_nn_evals,
             elapsed=time.time() - t0,
+            root_summary=root_summary,
+            hybrid_trace=hybrid_trace,
+            final_summary=final_summary,
+            ab_updates=ab_updates,
         )
 
     def close(self) -> None:
@@ -232,13 +283,68 @@ class UCISession:
 
 
 def setup_metalfish(
-    sess: UCISession, weights: pathlib.Path, threads: int, deterministic: bool
+    sess: UCISession,
+    weights: pathlib.Path,
+    threads: int,
+    deterministic: bool,
+    multipv: int,
 ) -> None:
+    sess.setoption("UseHybridSearch", "false")
     sess.setoption("UseMCTS", "true")
     sess.setoption("NNWeights", str(weights))
     sess.setoption("Threads", str(threads))
+    sess.setoption("MultiPV", str(multipv))
+    sess.setoption("MCTSMaxThreads", str(threads))
+    sess.setoption("MCTSMinibatchSize", "0")
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
+    sess.setoption("MCTSMinimumKLDGainPerNode", "0.00005")
+    sess.send("isready")
+    sess.wait_for("readyok", 120)
+
+
+def setup_metalfish_ab(sess: UCISession, threads: int, multipv: int) -> None:
+    sess.setoption("UseMCTS", "false")
+    sess.setoption("UseHybridSearch", "false")
+    sess.setoption("Threads", str(max(1, threads)))
+    sess.setoption("MultiPV", str(multipv))
+    sess.send("isready")
+    sess.wait_for("readyok", 120)
+
+
+def setup_metalfish_hybrid(
+    sess: UCISession,
+    weights: pathlib.Path,
+    threads: int,
+    deterministic: bool,
+    trace: bool,
+    mcts_threads: int,
+    ab_threads: int,
+    multipv: int,
+    hybrid_mcts_kld: float,
+    hybrid_root_reject: bool,
+    hybrid_shared_tt: bool,
+    ab_policy_weight: float,
+) -> None:
+    total_threads = max(3, threads, mcts_threads + ab_threads)
+    sess.setoption("UseMCTS", "false")
+    sess.setoption("UseHybridSearch", "true")
+    sess.setoption("NNWeights", str(weights))
+    sess.setoption("Threads", str(total_threads))
+    sess.setoption("MultiPV", str(multipv))
+    sess.setoption("HybridMCTSThreads", str(mcts_threads))
+    sess.setoption("HybridABThreads", str(ab_threads))
+    sess.setoption("TransformerLowTimeFallbackMs", "5000")
+    sess.setoption("TransformerMinMoveBudgetMs", "1200")
+    sess.setoption("MCTSMaxThreads", str(mcts_threads))
+    sess.setoption("MCTSMinibatchSize", "0")
+    sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
+    sess.setoption("MCTSAddDirichletNoise", "false")
+    sess.setoption("HybridMCTSMinimumKLDGainPerNode", str(hybrid_mcts_kld))
+    sess.setoption("HybridMCTSRootReject", "true" if hybrid_root_reject else "false")
+    sess.setoption("HybridMCTSUseSharedTT", "true" if hybrid_shared_tt else "false")
+    sess.setoption("HybridABPolicyWeight", str(ab_policy_weight))
+    sess.setoption("HybridTrace", "true" if trace else "false")
     sess.send("isready")
     sess.wait_for("readyok", 120)
 
@@ -256,11 +362,15 @@ def run_engine(
     mode: str,
     movetime_ms: int,
     nodes: int,
+    positions: Sequence[Tuple[str, List[str], str]],
+    quiet: bool,
+    collect_ab_updates: bool,
 ) -> Dict[str, SearchResult]:
     results: Dict[str, SearchResult] = {}
     passed = 0
-    print(f"\n{name}:")
-    for fen, expected_sans, bk_id in BK_POSITIONS:
+    if not quiet:
+        print(f"\n{name}:", flush=True)
+    for fen, expected_sans, bk_id in positions:
         expected_uci = set()
         for san in expected_sans:
             try:
@@ -268,22 +378,153 @@ def run_engine(
             except Exception:
                 expected_uci.add(san.lower().replace("+", "").replace("#", ""))
 
-        out = sess.search(fen, mode, movetime_ms, nodes)
+        out = sess.search(
+            fen, mode, movetime_ms, nodes, collect_ab_updates=collect_ab_updates
+        )
         results[bk_id] = out
         ok = out.bestmove in expected_uci
         passed += int(ok)
-        status = "PASS" if ok else "FAIL"
-        print(
-            f"  {bk_id}: {status:4s} {out.bestmove:8s}"
-            f" expected={expected_sans} nodes={out.nodes} nps={out.nps}"
-            f" nn_evals={out.nn_evals} t={out.elapsed:.2f}s"
-        )
+        if not quiet:
+            status = "PASS" if ok else "FAIL"
+            print(
+                f"  {bk_id}: {status:4s} {out.bestmove:8s}"
+                f" expected={expected_sans} nodes={out.nodes} nps={out.nps}"
+                f" nn_evals={out.nn_evals} t={out.elapsed:.2f}s",
+                flush=True,
+            )
+            if out.root_summary:
+                print(f"    root {out.root_summary}", flush=True)
+            if out.hybrid_trace:
+                print(f"    {out.hybrid_trace}", flush=True)
+            if out.final_summary:
+                print(f"    {out.final_summary}", flush=True)
+            if out.ab_updates:
+                print(f"    ABUpdates {format_move_counts(out.ab_updates)}", flush=True)
 
-    print(f"  Score: {passed}/{len(BK_POSITIONS)}")
+    if quiet:
+        print(f"{name}: {passed}/{len(positions)}", flush=True)
+    else:
+        print(f"  Score: {passed}/{len(positions)}", flush=True)
     return results
 
 
-def run_once(args: argparse.Namespace) -> int:
+def select_positions(selection: str) -> List[Tuple[str, List[str], str]]:
+    if not selection:
+        return BK_POSITIONS
+
+    wanted = set()
+    for raw_token in selection.replace(",", " ").split():
+        token = raw_token.strip().upper()
+        if not token:
+            continue
+        if token.isdigit():
+            token = f"BK.{int(token):02d}"
+        elif token.startswith("BK.") and token[3:].isdigit():
+            token = f"BK.{int(token[3:]):02d}"
+        elif token.startswith("BK") and not token.startswith("BK."):
+            token = f"BK.{int(token[2:]):02d}"
+        wanted.add(token)
+
+    selected = [entry for entry in BK_POSITIONS if entry[2].upper() in wanted]
+    found = {entry[2].upper() for entry in selected}
+    missing = sorted(wanted - found)
+    if missing:
+        raise ValueError(f"Unknown BK position(s): {', '.join(missing)}")
+    return selected
+
+
+def parse_keyed_int(text: str, key: str) -> Optional[int]:
+    prefix = key + "="
+    for token in text.split():
+        if token.startswith(prefix):
+            try:
+                return int(token[len(prefix) :])
+            except ValueError:
+                return None
+    return None
+
+
+def parse_info_pv_first_move(line: str) -> str:
+    parts = line.split()
+    try:
+        pv_index = parts.index("pv")
+    except ValueError:
+        return ""
+    if pv_index + 1 >= len(parts):
+        return ""
+    return parts[pv_index + 1]
+
+
+def format_move_counts(counts: Dict[str, int]) -> str:
+    return (
+        "["
+        + ", ".join(
+            f"{move}:{count}"
+            for move, count in sorted(
+                counts.items(), key=lambda item: (-item[1], item[0])
+            )
+        )
+        + "]"
+    )
+
+
+def update_aggregate(
+    aggregate: Dict[str, Dict[str, AggregateStats]],
+    positions: Sequence[Tuple[str, List[str], str]],
+    all_results: Dict[str, Dict[str, SearchResult]],
+) -> None:
+    expected_by_id: Dict[str, set[str]] = {}
+    for fen, expected_sans, bk_id in positions:
+        expected_uci = set()
+        for san in expected_sans:
+            try:
+                expected_uci.add(san_to_uci(fen, san))
+            except Exception:
+                expected_uci.add(san.lower().replace("+", "").replace("#", ""))
+        expected_by_id[bk_id] = expected_uci
+
+    for engine_name, results in all_results.items():
+        engine_stats = aggregate.setdefault(engine_name, {})
+        for _, _, bk_id in positions:
+            out = results[bk_id]
+            stats = engine_stats.setdefault(bk_id, AggregateStats())
+            stats.runs += 1
+            stats.passes += int(out.bestmove in expected_by_id[bk_id])
+            stats.nodes_total += out.nodes
+            stats.move_counts[out.bestmove] = stats.move_counts.get(out.bestmove, 0) + 1
+
+
+def print_repeat_summary(
+    aggregate: Dict[str, Dict[str, AggregateStats]],
+    positions: Sequence[Tuple[str, List[str], str]],
+) -> None:
+    print("\nRepeat summary:", flush=True)
+    for engine_name, engine_stats in aggregate.items():
+        total_passes = sum(stats.passes for stats in engine_stats.values())
+        total_runs = sum(stats.runs for stats in engine_stats.values())
+        print(f"\n{engine_name}: {total_passes}/{total_runs}", flush=True)
+        for _, _, bk_id in positions:
+            stats = engine_stats.get(bk_id)
+            if not stats:
+                continue
+            avg_nodes = stats.nodes_total // stats.runs if stats.runs else 0
+            moves = ", ".join(
+                f"{move}:{count}"
+                for move, count in sorted(
+                    stats.move_counts.items(), key=lambda item: (-item[1], item[0])
+                )
+            )
+            print(
+                f"  {bk_id}: {stats.passes}/{stats.runs}"
+                f" avg_nodes={avg_nodes} moves=[{moves}]",
+                flush=True,
+            )
+
+
+def run_once(
+    args: argparse.Namespace,
+    aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = None,
+) -> int:
     if not args.weights.exists():
         print(f"ERROR: weights not found: {args.weights}")
         return 2
@@ -292,19 +533,61 @@ def run_once(args: argparse.Namespace) -> int:
     threads = 1 if args.deterministic else args.threads
     nodes = args.nodes if args.nodes > 0 else 800
     movetime_ms = args.movetime
+    positions = select_positions(args.positions)
+    want_ab = args.engine in ("ab", "metalfish-ab", "all")
+    want_mcts = args.engine in ("metalfish", "metalfish-mcts", "both", "all")
+    want_hybrid = args.engine in ("hybrid", "metalfish-hybrid", "all")
+    want_lc0 = args.engine in ("lc0", "both", "all")
 
     sessions: Dict[str, UCISession] = {}
     try:
-        if args.engine in ("metalfish", "both"):
+        if want_ab:
             if not args.metalfish.exists():
                 print(f"ERROR: metalfish not found: {args.metalfish}")
                 return 2
-            s = UCISession([str(args.metalfish)], "metalfish")
-            setup_metalfish(s, args.weights, threads, args.deterministic)
+            s = UCISession([str(args.metalfish)], "metalfish-ab")
+            setup_metalfish_ab(s, threads, args.multipv)
             s.warmup(mode, min(3000, movetime_ms), min(200, nodes))
-            sessions["metalfish"] = s
+            sessions["metalfish-ab"] = s
 
-        if args.engine in ("lc0", "both"):
+        if want_mcts:
+            if not args.metalfish.exists():
+                print(f"ERROR: metalfish not found: {args.metalfish}")
+                return 2
+            env = os.environ.copy()
+            if args.root_trace:
+                env["METALFISH_MCTS_ROOT_TRACE"] = "1"
+            s = UCISession([str(args.metalfish)], "metalfish-mcts", env=env)
+            setup_metalfish(s, args.weights, threads, args.deterministic, args.multipv)
+            s.warmup(mode, min(3000, movetime_ms), min(200, nodes))
+            sessions["metalfish-mcts"] = s
+
+        if want_hybrid:
+            if not args.metalfish.exists():
+                print(f"ERROR: metalfish not found: {args.metalfish}")
+                return 2
+            env = os.environ.copy()
+            if args.root_trace:
+                env["METALFISH_MCTS_ROOT_TRACE"] = "1"
+            s = UCISession([str(args.metalfish)], "metalfish-hybrid", env=env)
+            setup_metalfish_hybrid(
+                s,
+                args.weights,
+                threads,
+                args.deterministic,
+                args.hybrid_trace,
+                args.hybrid_mcts_threads,
+                args.hybrid_ab_threads,
+                args.multipv,
+                args.hybrid_mcts_kld,
+                args.hybrid_root_reject,
+                args.hybrid_shared_tt,
+                args.hybrid_ab_policy_weight,
+            )
+            s.warmup(mode, min(3000, movetime_ms), min(200, nodes))
+            sessions["metalfish-hybrid"] = s
+
+        if want_lc0:
             if not args.lc0.exists():
                 print(f"ERROR: lc0 not found: {args.lc0}")
                 return 2
@@ -322,18 +605,37 @@ def run_once(args: argparse.Namespace) -> int:
 
         all_results: Dict[str, Dict[str, SearchResult]] = {}
         for name, sess in sessions.items():
-            all_results[name] = run_engine(name, sess, mode, movetime_ms, nodes)
+            all_results[name] = run_engine(
+                name,
+                sess,
+                mode,
+                movetime_ms,
+                nodes,
+                positions,
+                args.quiet,
+                args.ab_trace,
+            )
 
-        if "metalfish" in all_results and "lc0" in all_results:
-            agree = 0
+        if aggregate is not None:
+            update_aggregate(aggregate, positions, all_results)
+
+        names = list(all_results)
+        if len(names) > 1 and not args.quiet:
             print("\nAgreement:")
-            for _, _, bk_id in BK_POSITIONS:
-                m = all_results["metalfish"][bk_id].bestmove
-                l = all_results["lc0"][bk_id].bestmove
-                ok = m == l
-                agree += int(ok)
-                print(f"  {bk_id}: {'MATCH' if ok else 'DIFF '} {m} vs {l}")
-            print(f"  Bestmove agreement: {agree}/{len(BK_POSITIONS)}")
+            for left_index, left in enumerate(names):
+                for right in names[left_index + 1 :]:
+                    agree = 0
+                    print(f"  {left} vs {right}:")
+                    for _, _, bk_id in positions:
+                        lmove = all_results[left][bk_id].bestmove
+                        rmove = all_results[right][bk_id].bestmove
+                        ok = lmove == rmove
+                        agree += int(ok)
+                        print(
+                            f"    {bk_id}: {'MATCH' if ok else 'DIFF '} "
+                            f"{lmove} vs {rmove}"
+                        )
+                    print(f"    Bestmove agreement: {agree}/{len(positions)}")
         return 0
     finally:
         for sess in sessions.values():
@@ -343,26 +645,84 @@ def run_once(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="BK parity harness")
     parser.add_argument(
-        "--engine", choices=["metalfish", "lc0", "both"], default="both"
+        "--engine",
+        choices=[
+            "ab",
+            "metalfish-ab",
+            "metalfish",
+            "metalfish-mcts",
+            "hybrid",
+            "metalfish-hybrid",
+            "lc0",
+            "both",
+            "all",
+        ],
+        default="both",
     )
     parser.add_argument("--movetime", type=int, default=10_000)
     parser.add_argument("--nodes", type=int, default=0, help="If >0, uses go nodes")
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument(
+        "--repeat-summary",
+        action="store_true",
+        help="Print per-engine move counts and pass rates across repeats",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Print one score line per engine and suppress per-position details",
+    )
+    parser.add_argument(
+        "--positions",
+        default="",
+        help="Comma or space separated BK IDs to run, for example BK.09,11",
+    )
+    parser.add_argument(
+        "--root-trace",
+        action="store_true",
+        help="Print MetalFish MCTS root visit summaries when available",
+    )
+    parser.add_argument(
+        "--hybrid-trace",
+        action="store_true",
+        help="Print MetalFish Hybrid final arbitration traces",
+    )
+    parser.add_argument(
+        "--ab-trace",
+        action="store_true",
+        help="Print AB primary-move update counts during Hybrid searches",
+    )
+    parser.add_argument("--hybrid-mcts-threads", type=int, default=2)
+    parser.add_argument("--hybrid-ab-threads", type=int, default=1)
+    parser.add_argument("--hybrid-mcts-kld", type=float, default=0.0)
+    parser.add_argument(
+        "--hybrid-root-reject",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--hybrid-shared-tt", action="store_true")
+    parser.add_argument("--hybrid-ab-policy-weight", type=float, default=0.0)
+    parser.add_argument("--multipv", type=int, default=1)
     parser.add_argument("--backend", default="metal")
     parser.add_argument("--weights", type=pathlib.Path, default=WEIGHTS)
     parser.add_argument("--metalfish", type=pathlib.Path, default=METALFISH)
     parser.add_argument("--lc0", type=pathlib.Path, default=LC0)
     args = parser.parse_args()
 
+    aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = (
+        {} if args.repeat_summary or args.repeat > 1 else None
+    )
     rc = 0
     for i in range(args.repeat):
         if args.repeat > 1:
-            print(f"\n=== Run {i + 1}/{args.repeat} ===")
-        rc = run_once(args)
+            print(f"\n=== Run {i + 1}/{args.repeat} ===", flush=True)
+        rc = run_once(args, aggregate)
         if rc != 0:
             return rc
+    if aggregate:
+        print_repeat_summary(aggregate, select_positions(args.positions))
     return 0
 
 

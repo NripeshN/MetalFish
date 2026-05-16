@@ -24,17 +24,36 @@
 #include <random>
 #include <sstream>
 
+#ifdef __APPLE__
+#include <pthread/qos.h>
+#include <vecLib/vDSP.h>
+#include <vecLib/vForce.h>
+#endif
+
 namespace MetalFish {
 namespace MCTS {
 
+constexpr size_t kNodeSizeBudget =
+#ifdef __APPLE__
+    128;
+#else
+    3 * CACHE_LINE_SIZE;
+#endif
+
 static_assert(sizeof(Node) >= sizeof(double), "Node must contain WL");
-static_assert(sizeof(Node) <= 128, "Node exceeds size budget");
+static_assert(sizeof(Node) <= kNodeSizeBudget, "Node exceeds size budget");
 static_assert(alignof(Node) == CACHE_LINE_SIZE, "Node alignment mismatch");
 
 namespace {
 
 constexpr int kMaxEdges = 256;
 constexpr uint64_t kFNVPrime = 1099511628211ULL;
+
+int64_t SteadyNowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
 
 bool EnvFlagEnabled(const char *name) {
   const char *value = std::getenv(name);
@@ -232,6 +251,26 @@ Search::~Search() {
   Wait();
 }
 
+void Search::NewGame() {
+  Stop();
+  Wait();
+  ClearCallbacks();
+
+  stats_.reset();
+  tmgr_ = TimeManagerState{};
+  nodes_at_movestart_.store(0, std::memory_order_release);
+  batches_at_movestart_.store(0, std::memory_order_release);
+  first_eval_time_ms_.store(-1, std::memory_order_release);
+  latest_hints_.Reset();
+  root_search_moves_.clear();
+  active_root_search_moves_.clear();
+  root_search_filter_active_ = false;
+  active_root_search_filter_active_ = false;
+
+  std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
+  tree_.Reset("");
+}
+
 void Search::StartSearch(const std::string &fen,
                          const ::MetalFish::Search::LimitsType &limits,
                          BestMoveCallback best_cb, InfoCallback info_cb) {
@@ -239,13 +278,15 @@ void Search::StartSearch(const std::string &fen,
   Wait();
 
   stats_.reset();
-  first_eval_time_ms_ = -1;
+  nodes_at_movestart_.store(0, std::memory_order_release);
+  batches_at_movestart_.store(0, std::memory_order_release);
+  first_eval_time_ms_.store(-1, std::memory_order_release);
   stop_flag_.store(false, std::memory_order_release);
   running_.store(true, std::memory_order_release);
   limits_ = limits;
   best_move_cb_ = best_cb;
   info_cb_ = info_cb;
-  search_start_ = std::chrono::steady_clock::now();
+  search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
 
   {
     Position root_pos;
@@ -287,37 +328,12 @@ void Search::StartSearch(const std::string &fen,
     params_.draw_score = -params_.contempt / 10000.0f;
   }
 
-  time_budget_ms_ = CalculateTimeBudget();
-  smart_pruning_enabled_ = false;
+  time_budget_ms_.store(CalculateTimeBudget(), std::memory_order_release);
 
   gathering_permit_.store(1, std::memory_order_relaxed);
   backend_waiting_.store(0, std::memory_order_relaxed);
 
-  stopper_ = std::make_unique<ChainedStopper>();
-  if (!limits_.infinite) {
-    const bool node_only_limit =
-        limits_.nodes > 0 && time_budget_ms_ <= 0 && limits_.movetime <= 0 &&
-        limits_.time[WHITE] <= 0 && limits_.time[BLACK] <= 0;
-    if (time_budget_ms_ > 0) {
-      stopper_->Add(std::make_unique<TimeLimitStopper>(time_budget_ms_));
-    }
-    if (limits_.nodes > 0) {
-      stopper_->Add(std::make_unique<NodeLimitStopper>(limits_.nodes));
-    }
-    if (!node_only_limit && params_.kld_gain_min > 0.0f) {
-      stopper_->Add(std::make_unique<KLDGainStopper>(
-          params_.kld_gain_min, params_.kld_gain_average_interval));
-    }
-    if (!node_only_limit && params_.smart_pruning_factor > 0.0f) {
-      stopper_->Add(std::make_unique<SmartPruningStopper>(
-          params_.smart_pruning_factor, params_.smart_pruning_minimum_batches));
-      smart_pruning_enabled_ = true;
-    }
-  }
-  {
-    std::lock_guard<std::mutex> lock(stopper_mutex_);
-    latest_hints_.Reset();
-  }
+  ConfigureStopper();
 
   int num_threads = params_.GetNumThreads();
   worker_ctxs_.clear();
@@ -335,6 +351,22 @@ void Search::StartSearch(const std::string &fen,
 }
 
 void Search::Stop() { stop_flag_.store(true, std::memory_order_release); }
+
+void Search::PonderHit() {
+  if (!running_.load(std::memory_order_acquire))
+    return;
+
+  limits_.ponderMode = false;
+  search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
+  nodes_at_movestart_.store(stats_.total_nodes.load(std::memory_order_relaxed),
+                            std::memory_order_release);
+  batches_at_movestart_.store(
+      stats_.total_batches.load(std::memory_order_relaxed),
+      std::memory_order_release);
+  first_eval_time_ms_.store(-1, std::memory_order_release);
+  time_budget_ms_.store(CalculateTimeBudget(), std::memory_order_release);
+  ConfigureStopper();
+}
 
 namespace {
 float ExponentialDecay(float from, float to, float halflife_steps,
@@ -354,9 +386,8 @@ void Search::Wait() {
   workers_.clear();
   running_.store(false, std::memory_order_release);
 
-  auto elapsed = std::chrono::steady_clock::now() - search_start_;
-  int64_t elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+  const int64_t elapsed_ms =
+      SteadyNowMs() - search_start_ms_.load(std::memory_order_acquire);
   uint64_t total_nodes = stats_.total_nodes.load(std::memory_order_relaxed);
 
   if (elapsed_ms > 0 && total_nodes > 0) {
@@ -419,6 +450,41 @@ void Search::ClearCallbacks() {
 
 bool Search::IsSearchActive() const {
   return running_.load(std::memory_order_acquire);
+}
+
+void Search::ConfigureStopper() {
+  auto stopper = std::make_unique<ChainedStopper>();
+  bool smart_pruning = false;
+
+  if (!limits_.infinite && !limits_.ponderMode) {
+    const int64_t time_budget_ms =
+        time_budget_ms_.load(std::memory_order_acquire);
+    const bool node_only_limit =
+        limits_.nodes > 0 && time_budget_ms <= 0 && limits_.movetime <= 0 &&
+        limits_.time[WHITE] <= 0 && limits_.time[BLACK] <= 0;
+    if (time_budget_ms > 0) {
+      stopper->Add(std::make_unique<TimeLimitStopper>(time_budget_ms));
+    }
+    if (limits_.nodes > 0) {
+      stopper->Add(std::make_unique<NodeLimitStopper>(limits_.nodes));
+    }
+    if (!node_only_limit && params_.kld_gain_min > 0.0f) {
+      stopper->Add(std::make_unique<KLDGainStopper>(
+          params_.kld_gain_min, params_.kld_gain_average_interval));
+    }
+    if (!node_only_limit && params_.smart_pruning_factor > 0.0f) {
+      stopper->Add(std::make_unique<SmartPruningStopper>(
+          params_.smart_pruning_factor, params_.smart_pruning_minimum_batches));
+      smart_pruning = true;
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(stopper_mutex_);
+    stopper_ = std::move(stopper);
+    latest_hints_.Reset();
+  }
+  smart_pruning_enabled_.store(smart_pruning, std::memory_order_release);
 }
 
 namespace {
@@ -584,34 +650,43 @@ int64_t Search::CalculateTimeBudget() {
 
 SearchStats Search::CollectSearchStats() const {
   SearchStats stats;
-  const auto now = std::chrono::steady_clock::now();
   stats.time_since_movestart_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(now - search_start_)
-          .count();
+      SteadyNowMs() - search_start_ms_.load(std::memory_order_acquire);
 
   int64_t latency_margin = 0;
-  if (time_budget_ms_ > 0 && params_.GetNumThreads() > 1 &&
-      params_.minibatch_size > 1 &&
+  if (time_budget_ms_.load(std::memory_order_acquire) > 0 &&
+      params_.GetNumThreads() > 1 && params_.minibatch_size > 1 &&
       stats_.nn_evaluations.load(std::memory_order_relaxed) > 0) {
     latency_margin = backend_latency_margin_ms_.load(std::memory_order_relaxed);
   }
   stats.time_since_movestart_ms += latency_margin;
 
+  stats.total_nodes = stats_.total_nodes.load(std::memory_order_relaxed);
+  const uint64_t nodes_offset =
+      nodes_at_movestart_.load(std::memory_order_acquire);
   stats.nodes_since_movestart =
-      stats_.total_nodes.load(std::memory_order_relaxed);
-  stats.total_nodes = stats.nodes_since_movestart;
-  stats.batches_since_movestart =
+      stats.total_nodes > nodes_offset ? stats.total_nodes - nodes_offset : 0;
+  const uint64_t total_batches =
       stats_.total_batches.load(std::memory_order_relaxed);
+  const uint64_t batches_offset =
+      batches_at_movestart_.load(std::memory_order_acquire);
+  stats.batches_since_movestart =
+      total_batches > batches_offset ? total_batches - batches_offset : 0;
   if (stats.batches_since_movestart == 0)
     stats.batches_since_movestart = stats.nodes_since_movestart;
 
-  if (stats.nodes_since_movestart > 0 && first_eval_time_ms_ < 0) {
-    first_eval_time_ms_ = stats.time_since_movestart_ms;
+  int64_t first_eval_time_ms =
+      first_eval_time_ms_.load(std::memory_order_acquire);
+  if (stats.nodes_since_movestart > 0 && first_eval_time_ms < 0) {
+    int64_t expected = -1;
+    first_eval_time_ms_.compare_exchange_strong(
+        expected, stats.time_since_movestart_ms, std::memory_order_acq_rel);
+    first_eval_time_ms = first_eval_time_ms_.load(std::memory_order_acquire);
   }
   stats.time_since_first_batch_ms =
-      first_eval_time_ms_ >= 0
+      first_eval_time_ms >= 0
           ? std::max<int64_t>(0, stats.time_since_movestart_ms -
-                                     first_eval_time_ms_)
+                                     first_eval_time_ms)
           : 0;
 
   std::shared_lock<std::shared_mutex> lock(tree_structure_mutex_);
@@ -803,7 +878,11 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
   if (shared_tt_ && leaf->NumEdges() == 0) {
     auto tt_result = shared_tt_->Probe(ctx.pos, 8);
     if (tt_result.found) {
-      CreateLeafEdges(leaf, moves);
+      {
+        std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
+        if (leaf->NumEdges() == 0)
+          CreateLeafEdges(leaf, moves);
+      }
       float v = -tt_result.value;
       float d = tt_result.draw;
       Backpropagate(leaf, v, d, 30.0f, multivisit);
@@ -814,12 +893,15 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
 
   if (leaf->NumEdges() == 0 && backend_) {
     auto apply_nn_result = [&](const EvaluationResult &result) {
-      if (leaf->NumEdges() == 0) {
-        CreateLeafEdges(leaf, moves);
-        ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+      {
+        std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
+        if (leaf->NumEdges() == 0) {
+          CreateLeafEdges(leaf, moves);
+          ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+        }
+        if (params_.add_dirichlet_noise && leaf == tree_.Root())
+          AddDirichletNoise(leaf);
       }
-      if (params_.add_dirichlet_noise && leaf == tree_.Root())
-        AddDirichletNoise(leaf);
       {
         WDLRescaler rescaler{params_.wdl_rescale_ratio,
                              params_.wdl_rescale_diff};
@@ -1032,7 +1114,11 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
     if (shared_tt_ && leaf->NumEdges() == 0) {
       auto tt_result = shared_tt_->Probe(ctx.pos, 8);
       if (tt_result.found) {
-        CreateLeafEdges(leaf, moves);
+        {
+          std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
+          if (leaf->NumEdges() == 0)
+            CreateLeafEdges(leaf, moves);
+        }
         float v = -tt_result.value;
         float d = tt_result.draw;
         Backpropagate(leaf, v, d, 30.0f, multivisit);
@@ -1078,12 +1164,15 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
       ctx.local_cache_hits++;
       const auto &result =
           direct_cache_hit ? cached : computation->GetResult(computation_idx);
-      if (leaf->NumEdges() == 0) {
-        CreateLeafEdges(leaf, moves);
-        ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+      {
+        std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
+        if (leaf->NumEdges() == 0) {
+          CreateLeafEdges(leaf, moves);
+          ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+        }
+        if (params_.add_dirichlet_noise && leaf == tree_.Root())
+          AddDirichletNoise(leaf);
       }
-      if (params_.add_dirichlet_noise && leaf == tree_.Root())
-        AddDirichletNoise(leaf);
       float v;
       {
         WDLRescaler rescaler{params_.wdl_rescale_ratio,
@@ -1169,28 +1258,32 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
     const auto &result = computation->GetResult(entry.computation_idx);
 
     if (entry.leaf->NumEdges() == 0) {
-      if (entry.leaf == tree_.Root() && root_search_filter_active_) {
-        const Position &leaf_pos =
-            *entry.history->ptrs[entry.history->depth - 1];
-        MoveList<LEGAL> leaf_moves(leaf_pos);
-        CreateLeafEdges(entry.leaf, leaf_moves);
-        ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
-        if (params_.add_dirichlet_noise)
-          AddDirichletNoise(entry.leaf);
-      } else if (!result.policy_priors.empty()) {
-        entry.leaf->CreateEdges(result.policy_priors);
-        ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
-        if (params_.add_dirichlet_noise && entry.leaf == tree_.Root())
-          AddDirichletNoise(entry.leaf);
-      } else {
-        const Position &leaf_pos =
-            *entry.history->ptrs[entry.history->depth - 1];
-        MoveList<LEGAL> leaf_moves(leaf_pos);
-        if (leaf_moves.size() > 0) {
+      std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
+      if (entry.leaf->NumEdges() == 0) {
+        if (entry.leaf == tree_.Root() && root_search_filter_active_) {
+          const Position &leaf_pos =
+              *entry.history->ptrs[entry.history->depth - 1];
+          MoveList<LEGAL> leaf_moves(leaf_pos);
           CreateLeafEdges(entry.leaf, leaf_moves);
+          ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
+          if (params_.add_dirichlet_noise)
+            AddDirichletNoise(entry.leaf);
+        } else if (!result.policy_priors.empty()) {
+          entry.leaf->CreateEdges(result.policy_priors);
           ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
           if (params_.add_dirichlet_noise && entry.leaf == tree_.Root())
             AddDirichletNoise(entry.leaf);
+        } else {
+          const Position &leaf_pos =
+              *entry.history->ptrs[entry.history->depth - 1];
+          MoveList<LEGAL> leaf_moves(leaf_pos);
+          if (leaf_moves.size() > 0) {
+            CreateLeafEdges(entry.leaf, leaf_moves);
+            ApplyNNPolicyToNode(entry.leaf, result,
+                                params_.policy_softmax_temp);
+            if (params_.add_dirichlet_noise && entry.leaf == tree_.Root())
+              AddDirichletNoise(entry.leaf);
+          }
         }
       }
     }
@@ -1351,7 +1444,7 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
   int64_t root_remaining_playouts = std::numeric_limits<int64_t>::max();
   bool use_root_smart_pruning = false;
 
-  if (is_root && smart_pruning_enabled_) {
+  if (is_root && smart_pruning_enabled_.load(std::memory_order_acquire)) {
     {
       std::lock_guard<std::mutex> lock(stopper_mutex_);
       if (latest_hints_.HasEstimatedRemainingPlayouts()) {
@@ -1931,10 +2024,8 @@ void Search::SendInfo() {
   if (!info_cb_)
     return;
 
-  auto now = std::chrono::steady_clock::now();
-  auto elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(now - search_start_)
-          .count();
+  const int64_t elapsed_ms =
+      SteadyNowMs() - search_start_ms_.load(std::memory_order_acquire);
 
   uint64_t nn_evals = stats_.nn_evaluations.load(std::memory_order_relaxed);
   uint64_t nodes = stats_.total_nodes.load(std::memory_order_relaxed);

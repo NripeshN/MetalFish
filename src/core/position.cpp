@@ -592,8 +592,7 @@ bool Position::pseudo_legal(const Move m) const {
 
       if (!(between_bb(square<KING>(us), lsb(checkers())) & to))
         return false;
-    }
-    else if (attackers_to_exist(to, pieces() ^ from, ~us))
+    } else if (attackers_to_exist(to, pieces() ^ from, ~us))
       return false;
   }
 
@@ -712,9 +711,9 @@ void Position::do_move(Move m, StateInfo &newSt, bool givesCheck,
         assert(piece_on(to) == NO_PIECE);
         assert(piece_on(capsq) == make_piece(them, PAWN));
 
-      // Update board and piece lists in ep case, normal captures are updated
-      // later
-      remove_piece(capsq, &dts);
+        // Update board and piece lists in ep case, normal captures are updated
+        // later
+        remove_piece(capsq, &dts);
       }
 
       st->pawnKey ^= Zobrist::psq[captured][capsq];
@@ -733,7 +732,7 @@ void Position::do_move(Move m, StateInfo &newSt, bool givesCheck,
     st->materialKey ^= Zobrist::psq[captured][8 + pieceCount[captured] -
                                               (m.type_of() != EN_PASSANT)];
 
-      st->rule50 = 0;
+    st->rule50 = 0;
   } else
     dp.remove_sq = SQ_NONE;
 
@@ -865,7 +864,8 @@ void Position::do_move(Move m, StateInfo &newSt, bool givesCheck,
 
   // Calculate the repetition info. It is the ply distance from the previous
   // occurrence of the same position, negative in the 3-fold case, or zero
-  // if the position was not repeated.  st->repetition = 0;
+  // if the position was not repeated.
+  st->repetition = 0;
   int end = std::min(st->rule50, st->pliesFromNull);
   if (end >= 4) {
     StateInfo *stp = st->previous->previous;
@@ -918,9 +918,9 @@ void Position::undo_move(Move m) {
     Square rfrom, rto;
     do_castling<false>(us, from, to, rfrom, rto);
   } else {
-      move_piece(to, from);
+    move_piece(to, from);
 
-      if (st->capturedPiece) {
+    if (st->capturedPiece) {
       Square capsq = to;
 
       if (m.type_of() == EN_PASSANT) {

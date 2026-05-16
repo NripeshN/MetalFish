@@ -235,6 +235,18 @@ void test_position() {
     EXPECT(tc, pos.key() == original_key);
   }
   {
+    TestCase tc("Repetition state reset");
+    std::deque<StateInfo> states(2);
+    Position pos;
+    pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+            &states[0]);
+
+    states[1].repetition = 12345;
+    pos.do_move(Move(SQ_E2, SQ_E4), states[1]);
+
+    EXPECT(tc, pos.repetition_distance() == 0);
+  }
+  {
     TestCase tc("Captures");
     StateInfo st;
     Position pos;

@@ -1935,7 +1935,7 @@ void syzygy_extend_pv(const OptionsMap &options,
     auto &st = sts.emplace_back();
     pos.do_move(pvMove, st);
 
-  // Do not allow for repetitions or drawing moves along the PV in TB regime
+    // Do not allow for repetitions or drawing moves along the PV in TB regime
     if (config.rootInTB &&
         ((rule50 && pos.is_draw(ply)) || pos.is_repetition(ply))) {
       pos.undo_move(pvMove);

@@ -61,6 +61,25 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+def env_bool_string(name: str, default: bool) -> str:
+    raw = os.environ.get(name)
+    if raw is None:
+        return "true" if default else "false"
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return "true"
+    if value in {"0", "false", "no", "off"}:
+        return "false"
+    return "true" if default else "false"
+
+
 PERFORMANCE_CORES = apple_performance_cores()
 SEARCH_WORKERS = max(3, PERFORMANCE_CORES or (LOGICAL_CORES - 1))
 HYBRID_MCTS_THREADS = max(
@@ -71,7 +90,18 @@ HYBRID_AB_THREADS = max(
     0, min(SEARCH_WORKERS, env_int("METALFISH_HYBRID_AB_THREADS", 0))
 )
 HYBRID_AUTO_AB_THREADS_CAP = max(
-    0, min(SEARCH_WORKERS, env_int("METALFISH_HYBRID_AUTO_AB_THREADS_CAP", 6))
+    0, min(SEARCH_WORKERS, env_int("METALFISH_HYBRID_AUTO_AB_THREADS_CAP", 2))
+)
+HYBRID_MCTS_KLD = max(0.0, min(1.0, env_float("METALFISH_HYBRID_MCTS_KLD", 0.0)))
+HYBRID_MCTS_ROOT_REJECT = env_bool_string("METALFISH_HYBRID_MCTS_ROOT_REJECT", True)
+HYBRID_MCTS_SHARED_TT = env_bool_string("METALFISH_HYBRID_MCTS_SHARED_TT", False)
+HYBRID_AB_POLICY_WEIGHT = max(
+    0.0, min(1.0, env_float("METALFISH_HYBRID_AB_POLICY_WEIGHT", 0.0))
+)
+HYBRID_TRACE = env_bool_string("METALFISH_HYBRID_TRACE", False)
+HYBRID_MCTS_MINIBATCH = max(0, min(4096, env_int("METALFISH_HYBRID_MCTS_MINIBATCH", 0)))
+TRANSFORMER_LOW_TIME_FALLBACK_MS = max(
+    0, min(30000, env_int("METALFISH_TRANSFORMER_LOW_TIME_FALLBACK_MS", 5000))
 )
 TRANSFORMER_MIN_MOVE_BUDGET_MS = max(
     0, min(5000, env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 1200))
@@ -110,18 +140,25 @@ ENGINE_OPTIONS = {
     "Threads": str(SEARCH_WORKERS),
     "Hash": str(local_hash_mb()),
     "Ponder": "true",
+    "UseMCTS": "false",
     "UseHybridSearch": "true",
     "NNWeights": str(WEIGHTS),
+    "MultiPV": "1",
     "HybridMCTSThreads": str(HYBRID_MCTS_THREADS),
     "HybridABThreads": str(HYBRID_AB_THREADS),
     "HybridAutoABThreadsCap": str(HYBRID_AUTO_AB_THREADS_CAP),
+    "TransformerLowTimeFallbackMs": str(TRANSFORMER_LOW_TIME_FALLBACK_MS),
     "TransformerMinMoveBudgetMs": str(TRANSFORMER_MIN_MOVE_BUDGET_MS),
     "MCTSMaxThreads": str(HYBRID_MCTS_THREADS),
-    "HybridMCTSMinimumKLDGainPerNode": "0.0",
-    "HybridMCTSRootReject": "true",
-    "HybridMCTSUseSharedTT": "false",
+    "MCTSParityPreset": "false",
+    "MCTSAddDirichletNoise": "false",
+    "HybridMCTSMinimumKLDGainPerNode": str(HYBRID_MCTS_KLD),
+    "HybridMCTSRootReject": HYBRID_MCTS_ROOT_REJECT,
+    "HybridMCTSUseSharedTT": HYBRID_MCTS_SHARED_TT,
+    "HybridABPolicyWeight": str(HYBRID_AB_POLICY_WEIGHT),
+    "HybridTrace": HYBRID_TRACE,
     "Move Overhead": "500",
-    "MCTSMinibatchSize": "0",
+    "MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH),
     "MCTSMinimumKLDGainPerNode": "0.00005",
     "MCTSPolicySoftmaxTemp": "1.359",
     "MCTSSmartPruningFactor": "1.33",
@@ -194,8 +231,7 @@ class UCIEngine:
 
     def _launch(self):
         env = os.environ.copy()
-        if self.preload_transformer:
-            env["METALFISH_PRELOAD_TRANSFORMER"] = "1"
+        env["METALFISH_PRELOAD_TRANSFORMER"] = "1" if self.preload_transformer else "0"
         self.proc = subprocess.Popen(
             [str(self.path)],
             stdin=subprocess.PIPE,

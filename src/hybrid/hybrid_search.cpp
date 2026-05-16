@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <type_traits>
 #ifdef __APPLE__
@@ -32,6 +33,14 @@ inline void set_thread_qos(qos_class_t qos) {
 }
 } // namespace
 #endif
+
+namespace {
+int64_t SteadyNowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+} // namespace
 
 ParallelHybridSearch::ParallelHybridSearch() {
   config_.mcts_config.cpuct = 1.745f;
@@ -172,11 +181,17 @@ void ParallelHybridSearch::start_search(
     best_move_callback_ = best_move_cb;
     info_callback_ = info_cb;
   }
+  {
+    std::lock_guard<std::mutex> lock(ab_root_mutex_);
+    ab_root_moves_.clear();
+  }
 
   root_fen_ = pos.fen();
   limits_ = limits;
-  search_start_ = std::chrono::steady_clock::now();
-  time_budget_ms_ = calculate_time_budget();
+  ponderhit_received_.store(false, std::memory_order_release);
+  search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
+  const int time_budget_ms = calculate_time_budget();
+  time_budget_ms_.store(time_budget_ms, std::memory_order_release);
   nn_policy_hints_.clear();
 
   if (config_.use_position_classifier) {
@@ -200,7 +215,7 @@ void ParallelHybridSearch::start_search(
                         : "STRATEGIC"));
   }
 
-  send_info_string("Time budget: " + std::to_string(time_budget_ms_) + "ms");
+  send_info_string("Time budget: " + std::to_string(time_budget_ms) + "ms");
 
   mcts_thread_done_.store(false, std::memory_order_release);
   ab_thread_done_.store(false, std::memory_order_release);
@@ -239,9 +254,9 @@ void ParallelHybridSearch::ponderhit() {
   if (!is_searching())
     return;
 
-  limits_.ponderMode = false;
-  search_start_ = std::chrono::steady_clock::now();
-  time_budget_ms_ = calculate_time_budget();
+  ponderhit_received_.store(true, std::memory_order_release);
+  search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
+  time_budget_ms_.store(calculate_time_budget(), std::memory_order_release);
 
   if (engine_)
     engine_->set_ponderhit(false);
@@ -310,19 +325,20 @@ void ParallelHybridSearch::new_game() {
   last_injected_ab_depth_.store(0, std::memory_order_relaxed);
   last_injected_ab_move_raw_.store(0, std::memory_order_relaxed);
   ab_policy_injections_.store(0, std::memory_order_relaxed);
+  ponderhit_received_.store(false, std::memory_order_release);
 
   {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     best_move_callback_ = nullptr;
     info_callback_ = nullptr;
   }
+  {
+    std::lock_guard<std::mutex> lock(ab_root_mutex_);
+    ab_root_moves_.clear();
+  }
 
   if (mcts_search_) {
-    mcts_search_ = std::make_unique<Search>(
-        config_.mcts_config,
-        std::make_unique<Backend>(config_.mcts_config.nn_weights_path,
-                                  static_cast<size_t>(std::max(
-                                      1, config_.mcts_config.nn_cache_size))));
+    mcts_search_->NewGame();
     if (engine_) {
       shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
       mcts_search_->SetSharedTT(config_.use_shared_tt ? shared_tt_reader_.get()
@@ -335,7 +351,8 @@ void ParallelHybridSearch::new_game() {
 }
 
 int ParallelHybridSearch::calculate_time_budget() const {
-  if (limits_.ponderMode)
+  if (limits_.ponderMode &&
+      !ponderhit_received_.load(std::memory_order_acquire))
     return 0;
   if (limits_.movetime > 0)
     return limits_.movetime;
@@ -369,7 +386,154 @@ int ParallelHybridSearch::calculate_time_budget() const {
 
 bool HybridShouldContinueMCTSAfterAB(
     const ::MetalFish::Search::LimitsType &limits) {
-  return limits.movetime > 0 || limits.nodes > 0 || limits.infinite;
+  if (limits.movetime > 0 || limits.nodes > 0 || limits.infinite)
+    return true;
+  if (limits.depth > 0 || limits.mate > 0)
+    return false;
+  return limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
+}
+
+bool HybridCanStopEarlyOnAgreement(
+    const ::MetalFish::Search::LimitsType &limits) {
+  return limits.movetime <= 0 && limits.nodes <= 0 && !limits.infinite &&
+         limits.depth <= 0 && limits.mate <= 0;
+}
+
+bool HybridHasMCTSDecisionBudget(const ::MetalFish::Search::LimitsType &limits,
+                                 int time_budget_ms, bool ponderhit_received) {
+  if (limits.movetime > 0 || limits.nodes > 0 || limits.infinite)
+    return true;
+  if (limits.depth > 0 || limits.mate > 0)
+    return false;
+  if (limits.ponderMode && !ponderhit_received)
+    return false;
+  if (time_budget_ms <= 0)
+    return false;
+  return limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
+}
+
+::MetalFish::Search::LimitsType
+HybridBuildMCTSLimits(const ::MetalFish::Search::LimitsType &limits,
+                      int time_budget_ms, bool waiting_for_ponderhit) {
+  if (limits.ponderMode && waiting_for_ponderhit) {
+    ::MetalFish::Search::LimitsType ponder_limits;
+    ponder_limits.infinite = 1;
+    ponder_limits.searchmoves = limits.searchmoves;
+    return ponder_limits;
+  }
+
+  ::MetalFish::Search::LimitsType mcts_limits = limits;
+  const bool fixed_or_analysis = limits.movetime > 0 || limits.nodes > 0 ||
+                                 limits.infinite || limits.depth > 0 ||
+                                 limits.mate > 0;
+  const bool clock_search = limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
+
+  if (!fixed_or_analysis && clock_search && time_budget_ms > 0) {
+    mcts_limits.movetime = time_budget_ms;
+    mcts_limits.time[WHITE] = 0;
+    mcts_limits.time[BLACK] = 0;
+    mcts_limits.inc[WHITE] = 0;
+    mcts_limits.inc[BLACK] = 0;
+    mcts_limits.movestogo = 0;
+    mcts_limits.ponderMode = false;
+  }
+
+  return mcts_limits;
+}
+
+bool HybridMCTSDecisiveFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
+                                           uint64_t mcts_total_nodes,
+                                           uint32_t mcts_visits,
+                                           float visit_share, int eval_delta) {
+  return fixed_budget && mcts_strong && mcts_total_nodes >= 300 &&
+         mcts_visits >= 210 && visit_share >= 0.60f && eval_delta >= 75;
+}
+
+bool HybridMCTSHighValueFixedBudgetOverride(
+    bool fixed_budget, bool mcts_reliable, uint64_t mcts_total_nodes,
+    uint32_t mcts_visits, float visit_share, int mcts_cp, int eval_delta) {
+  return fixed_budget && mcts_reliable && mcts_total_nodes >= 250 &&
+         mcts_visits >= 80 && visit_share >= 0.20f && mcts_cp >= 500 &&
+         eval_delta >= 300;
+}
+
+bool HybridMCTSNoClearFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
+                                          uint32_t mcts_visits,
+                                          float visit_share, int eval_delta) {
+  return fixed_budget && mcts_strong && mcts_visits >= 225 &&
+         visit_share >= 0.58f && eval_delta >= 30;
+}
+
+bool HybridMCTSRootDominantFixedBudgetOverride(
+    bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
+    uint32_t mcts_visits, float visit_share, int mcts_cp, int eval_delta) {
+  return fixed_budget && mcts_strong && mcts_total_nodes >= 250 &&
+         mcts_visits >= 200 && visit_share >= 0.74f && mcts_cp >= 150 &&
+         eval_delta >= 80;
+}
+
+bool HybridMCTSTacticalGapFixedBudgetOverride(
+    bool fixed_budget, uint64_t mcts_total_nodes, uint32_t mcts_visits,
+    float visit_share, float root_q_gap, int mcts_cp, int eval_delta) {
+  return fixed_budget && mcts_total_nodes >= 250 && mcts_visits >= 55 &&
+         visit_share >= 0.16f && root_q_gap >= 0.12f && mcts_cp >= 300 &&
+         eval_delta >= 250;
+}
+
+bool HybridMCTSRootConfidenceFixedBudgetOverride(
+    bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
+    uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta) {
+  if (!fixed_budget || !mcts_strong || mcts_total_nodes < 230 ||
+      mcts_visits < 180 || mcts_cp < 170) {
+    return false;
+  }
+
+  const bool value_gap_confident =
+      visit_share >= 0.65f && root_q_gap >= 0.12f && eval_delta >= 110;
+  const bool compact_root_confident =
+      visit_share >= 0.74f && root_q_gap >= 0.06f && eval_delta >= 70;
+  return value_gap_confident || compact_root_confident;
+}
+
+bool HybridMCTSVisitEvidenceSane(uint64_t mcts_evals, uint64_t root_visits,
+                                 uint32_t best_visits) {
+  if (mcts_evals == 0) {
+    return root_visits == 0 && best_visits == 0;
+  }
+
+  const uint64_t best_limit = std::max<uint64_t>(512, mcts_evals * 2);
+  const uint64_t root_limit = std::max<uint64_t>(1024, mcts_evals * 4);
+  return best_visits <= best_limit && root_visits <= root_limit;
+}
+
+bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
+                              uint32_t top_visits, float top_q,
+                              float top_policy, uint32_t candidate_visits,
+                              float candidate_q, float candidate_policy) {
+  return fixed_budget && root_visits >= 600 && top_visits >= 256 &&
+         candidate_visits >= 256 &&
+         static_cast<uint64_t>(candidate_visits) * 100 >=
+             static_cast<uint64_t>(top_visits) * 82 &&
+         top_q - candidate_q <= 0.05f && candidate_policy >= 0.30f &&
+         candidate_policy >= top_policy * 2.0f;
+}
+
+float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
+                            const float *candidate_qs, int candidate_count) {
+  if (!candidate_visits || !candidate_qs || candidate_count <= 0) {
+    return 0.0f;
+  }
+
+  float next_best_q = -std::numeric_limits<float>::infinity();
+  for (int i = 0; i < candidate_count; ++i) {
+    if (candidate_visits[i] == 0) {
+      continue;
+    }
+    next_best_q = std::max(next_best_q, candidate_qs[i]);
+  }
+
+  return std::isfinite(next_best_q) ? best_q - next_best_q : 0.0f;
 }
 
 bool ParallelHybridSearch::should_stop() const {
@@ -387,11 +551,12 @@ bool ParallelHybridSearch::should_stop() const {
       return true;
   }
 
-  if (time_budget_ms_ > 0) {
-    auto elapsed = std::chrono::steady_clock::now() - search_start_;
-    auto ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-    if (ms >= time_budget_ms_)
+  const int time_budget_ms = time_budget_ms_.load(std::memory_order_acquire);
+  if (time_budget_ms > 0) {
+    const int64_t search_start_ms =
+        search_start_ms_.load(std::memory_order_acquire);
+    const int64_t elapsed_ms = SteadyNowMs() - search_start_ms;
+    if (elapsed_ms >= time_budget_ms)
       return true;
   }
 
@@ -400,7 +565,7 @@ bool ParallelHybridSearch::should_stop() const {
 
 void ParallelHybridSearch::mcts_thread_main() {
 #ifdef __APPLE__
-  set_thread_qos(QOS_CLASS_USER_INITIATED);
+  set_thread_qos(QOS_CLASS_UTILITY);
 #endif
 
   struct ThreadGuard {
@@ -415,14 +580,12 @@ void ParallelHybridSearch::mcts_thread_main() {
 
   auto start = std::chrono::steady_clock::now();
 
-  // Give MCTS the real outer limits so its Lc0-style smart pruning, KLD, node
-  // and time stoppers stay active. Ponder is the exception: before ponderhit
-  // there is no move clock to spend, so the coordinator owns cancellation.
-  ::MetalFish::Search::LimitsType mcts_limits = limits_;
-  if (limits_.ponderMode) {
-    mcts_limits = ::MetalFish::Search::LimitsType{};
-    mcts_limits.infinite = 1;
-  }
+  const int mcts_time_budget_ms =
+      time_budget_ms_.load(std::memory_order_acquire);
+  ::MetalFish::Search::LimitsType mcts_limits = HybridBuildMCTSLimits(
+      limits_, mcts_time_budget_ms,
+      limits_.ponderMode &&
+          !ponderhit_received_.load(std::memory_order_acquire));
   mcts_limits.startTime = now();
   mcts_limits.searchmoves = limits_.searchmoves;
 
@@ -619,20 +782,30 @@ void ParallelHybridSearch::run_ab_search() {
       static_cast<int>(engine_->get_options()["Threads"]);
   const int requested_ab_threads = std::max(1, config_.ab_threads);
   const bool needs_thread_resize = (requested_ab_threads != original_threads);
+  const int original_multipv =
+      static_cast<int>(engine_->get_options()["MultiPV"]);
+  const bool needs_multipv_reset = original_multipv != 1;
 
-  auto set_engine_threads = [this](int n) {
-    std::istringstream ss("name Threads value " + std::to_string(n));
+  auto set_engine_option = [this](const std::string &name, int value) {
+    std::istringstream ss("name " + name + " value " + std::to_string(value));
     engine_->get_options().setoption(ss);
   };
 
   if (needs_thread_resize) {
-    set_engine_threads(requested_ab_threads);
+    set_engine_option("Threads", requested_ab_threads);
+  }
+  if (needs_multipv_reset) {
+    set_engine_option("MultiPV", 1);
   }
 
   engine_->set_position(root_fen_, {});
 
   ::MetalFish::Search::LimitsType ab_limits = limits_;
   ab_limits.startTime = now();
+  if (limits_.ponderMode &&
+      ponderhit_received_.load(std::memory_order_acquire)) {
+    ab_limits.ponderMode = false;
+  }
 
   auto saved_bestmove = engine_->get_on_bestmove();
   auto saved_update_full = engine_->get_on_update_full();
@@ -642,6 +815,9 @@ void ParallelHybridSearch::run_ab_search() {
 
   engine_->set_on_update_full([this, &ab_score,
                                &ab_depth](const Engine::InfoFull &info) {
+    if (info.multiPV != 1)
+      return;
+
     ab_score = info.score.visit([](auto &&val) -> int {
       using T = std::decay_t<decltype(val)>;
       if constexpr (std::is_same_v<T, Score::InternalUnits>)
@@ -700,17 +876,40 @@ void ParallelHybridSearch::run_ab_search() {
   });
 
   engine_->go(ab_limits);
+  if (should_stop()) {
+    engine_->stop();
+  }
+  if (limits_.ponderMode &&
+      ponderhit_received_.load(std::memory_order_acquire)) {
+    engine_->set_ponderhit(false);
+  }
   engine_->wait_for_search_finished();
 
   stats_.ab_nodes.store(engine_->threads_nodes_searched(),
                         std::memory_order_relaxed);
   stats_.ab_depth.store(ab_depth, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lock(ab_root_mutex_);
+    ab_root_moves_.clear();
+    for (const auto &rm : engine_->root_move_snapshot(ABSharedState::MAX_PV)) {
+      ABRootMoveInfo item;
+      item.move = rm.move;
+      item.score = rm.score;
+      item.previous_score = rm.previous_score;
+      item.average_score = rm.average_score;
+      item.effort = rm.effort;
+      ab_root_moves_.push_back(item);
+    }
+  }
 
   engine_->set_on_update_full(std::move(saved_update_full));
   engine_->set_on_bestmove(std::move(saved_bestmove));
 
+  if (needs_multipv_reset) {
+    set_engine_option("MultiPV", original_multipv);
+  }
   if (needs_thread_resize) {
-    set_engine_threads(original_threads);
+    set_engine_option("Threads", original_threads);
   }
 }
 
@@ -770,10 +969,11 @@ void ParallelHybridSearch::coordinator_thread_main() {
     if (ab_move != 0 && mcts_move != 0) {
       if (ab_move == mcts_move) {
         agreement_count++;
-        const bool fixed_movetime =
-            limits_.movetime > 0 && limits_.time[WHITE] <= 0 &&
-            limits_.time[BLACK] <= 0 && limits_.nodes <= 0;
-        const int min_time = (time_budget_ms_ > 0) ? time_budget_ms_ / 4 : 500;
+        const bool allow_agreement_stop =
+            HybridCanStopEarlyOnAgreement(limits_);
+        const int time_budget_ms =
+            time_budget_ms_.load(std::memory_order_acquire);
+        const int min_time = (time_budget_ms > 0) ? time_budget_ms / 4 : 500;
         const uint64_t mcts_nodes =
             mcts_search_ ? mcts_search_->Stats().total_nodes.load(
                                std::memory_order_relaxed)
@@ -785,7 +985,7 @@ void ParallelHybridSearch::coordinator_thread_main() {
         const int min_ab_depth =
             std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
 
-        if (!fixed_movetime && agreement_count >= 3 && ms > min_time &&
+        if (allow_agreement_stop && agreement_count >= 3 && ms > min_time &&
             mcts_nodes >= min_mcts_nodes && ab_depth >= min_ab_depth) {
           send_info_string("Hybrid: engines agree, stopping early at " +
                            std::to_string(ms) + "ms");
@@ -878,16 +1078,17 @@ void ParallelHybridSearch::coordinator_thread_main() {
             static_cast<int>(stats_.total_time_ms), final_pv_, "hybrid-final");
 
   send_info_string(
-      "Final: MCTS=" + std::to_string(stats_.mcts_nodes.load()) + " MCTSBest=" +
+      "Final: MCTSPlayouts=" + std::to_string(stats_.mcts_nodes.load()) +
+      " MCTSBest=" +
       std::to_string(mcts_state_.best_visits.load(std::memory_order_relaxed)) +
       " MCTSRootVisits=" +
       std::to_string(mcts_state_.total_nodes.load(std::memory_order_relaxed)) +
       " MCTSEvals=" +
-      std::to_string(stats_.transformer_evaluations.load(
-          std::memory_order_relaxed)) +
+      std::to_string(
+          stats_.transformer_evaluations.load(std::memory_order_relaxed)) +
       " MCTSBatches=" +
-      std::to_string(stats_.transformer_batches.load(
-          std::memory_order_relaxed)) +
+      std::to_string(
+          stats_.transformer_batches.load(std::memory_order_relaxed)) +
       " MCTSTimeMs=" + std::to_string(static_cast<int>(stats_.mcts_time_ms)) +
       " AB=" + std::to_string(stats_.ab_nodes.load()) +
       " ABDepth=" + std::to_string(stats_.ab_depth.load()) +
@@ -979,6 +1180,10 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_state_.best_visits.load(std::memory_order_relaxed);
   const uint64_t mcts_total_nodes =
       mcts_state_.total_nodes.load(std::memory_order_relaxed);
+  const uint64_t mcts_playouts =
+      stats_.mcts_nodes.load(std::memory_order_relaxed);
+  const uint64_t mcts_evals =
+      stats_.transformer_evaluations.load(std::memory_order_relaxed);
 
   const auto move_to_string = [](Move move) {
     return move == Move::none() ? std::string("none")
@@ -999,8 +1204,9 @@ Move ParallelHybridSearch::make_final_decision() {
   };
   const auto top_moves_to_string = [&]() {
     std::ostringstream ss;
-    const int count = std::min<int>(
-        mcts_state_.num_top_moves.load(std::memory_order_acquire), 5);
+    const int count =
+        std::min<int>(mcts_state_.num_top_moves.load(std::memory_order_acquire),
+                      MCTSSharedState::MAX_TOP_MOVES);
     ss << "[";
     for (int i = 0; i < count; ++i) {
       if (i > 0)
@@ -1017,6 +1223,60 @@ Move ParallelHybridSearch::make_final_decision() {
     ss << "]";
     return ss.str();
   };
+  const auto ab_root_moves_to_string = [&]() {
+    std::vector<ABRootMoveInfo> root_moves;
+    {
+      std::lock_guard<std::mutex> lock(ab_root_mutex_);
+      root_moves = ab_root_moves_;
+    }
+
+    std::ostringstream ss;
+    ss << "[";
+    const int count = std::min<int>(static_cast<int>(root_moves.size()),
+                                    ABSharedState::MAX_PV);
+    for (int i = 0; i < count; ++i) {
+      if (i > 0)
+        ss << ",";
+      ss << move_to_string(root_moves[i].move) << ":s=" << root_moves[i].score
+         << ":ps=" << root_moves[i].previous_score
+         << ":avg=" << root_moves[i].average_score
+         << ":eff=" << root_moves[i].effort;
+    }
+    ss << "]";
+    return ss.str();
+  };
+  const auto root_q_gap_for_best = [&]() {
+    const int count =
+        std::min<int>(mcts_state_.num_top_moves.load(std::memory_order_acquire),
+                      MCTSSharedState::MAX_TOP_MOVES);
+    if (count <= 1) {
+      return 0.0f;
+    }
+    Move top_move(
+        mcts_state_.top_moves[0].move_raw.load(std::memory_order_relaxed));
+    if (top_move != mcts_best) {
+      return 0.0f;
+    }
+    const float best_q =
+        mcts_state_.top_moves[0].q.load(std::memory_order_relaxed);
+    uint32_t candidate_visits[MCTSSharedState::MAX_TOP_MOVES]{};
+    float candidate_qs[MCTSSharedState::MAX_TOP_MOVES]{};
+    int candidate_count = 0;
+    for (int i = 1; i < count; ++i) {
+      candidate_visits[candidate_count] =
+          mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed);
+      candidate_qs[candidate_count] =
+          mcts_state_.top_moves[i].q.load(std::memory_order_relaxed);
+      ++candidate_count;
+    }
+    return HybridVisitedRootQGap(best_q, candidate_visits, candidate_qs,
+                                 candidate_count);
+  };
+  const bool mcts_decision_budget = HybridHasMCTSDecisionBudget(
+      limits_, time_budget_ms_.load(std::memory_order_acquire),
+      ponderhit_received_.load(std::memory_order_acquire));
+  const bool mcts_visit_evidence_sane =
+      HybridMCTSVisitEvidenceSane(mcts_evals, mcts_total_nodes, mcts_visits);
   const auto trace_simple = [&](const char *reason, Move selected) {
     if (!config_.trace_decisions)
       return;
@@ -1027,9 +1287,13 @@ Move ParallelHybridSearch::make_final_decision() {
        << " ABMove=" << move_to_string(ab_best)
        << " MCTSMove=" << move_to_string(mcts_best) << " ABScore=" << ab_score
        << " MCTSQ=" << std::fixed << std::setprecision(3) << mcts_q
+       << " MCTSPlayouts=" << mcts_playouts << " MCTSEvals=" << mcts_evals
        << " MCTSBestVisits=" << mcts_visits
        << " MCTSRootVisits=" << mcts_total_nodes
-       << " MCTSTop=" << top_moves_to_string();
+       << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
+       << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
+       << " MCTSTop=" << top_moves_to_string()
+       << " ABRoot=" << ab_root_moves_to_string();
     send_info_string(ss.str());
   };
 
@@ -1049,6 +1313,49 @@ Move ParallelHybridSearch::make_final_decision() {
   }
 
   if (ab_best == mcts_best) {
+    Move policy_tiebreak = Move::none();
+    const int top_count =
+        std::min<int>(mcts_state_.num_top_moves.load(std::memory_order_acquire),
+                      MCTSSharedState::MAX_TOP_MOVES);
+    if (mcts_decision_budget && mcts_visit_evidence_sane && top_count > 1) {
+      Move top_move(
+          mcts_state_.top_moves[0].move_raw.load(std::memory_order_relaxed));
+      if (top_move == ab_best) {
+        const uint32_t top_visits =
+            mcts_state_.top_moves[0].visits.load(std::memory_order_relaxed);
+        const float top_q =
+            mcts_state_.top_moves[0].q.load(std::memory_order_relaxed);
+        const float top_policy =
+            mcts_state_.top_moves[0].policy.load(std::memory_order_relaxed);
+        float best_policy = 0.0f;
+        for (int i = 1; i < top_count; ++i) {
+          Move move(mcts_state_.top_moves[i].move_raw.load(
+              std::memory_order_relaxed));
+          if (move == Move::none())
+            continue;
+          const uint32_t candidate_visits =
+              mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed);
+          const float candidate_q =
+              mcts_state_.top_moves[i].q.load(std::memory_order_relaxed);
+          const float candidate_policy =
+              mcts_state_.top_moves[i].policy.load(std::memory_order_relaxed);
+          if (candidate_policy > best_policy &&
+              HybridRootPolicyTieBreak(mcts_decision_budget, mcts_total_nodes,
+                                       top_visits, top_q, top_policy,
+                                       candidate_visits, candidate_q,
+                                       candidate_policy)) {
+            best_policy = candidate_policy;
+            policy_tiebreak = move;
+          }
+        }
+      }
+    }
+    if (policy_tiebreak != Move::none()) {
+      stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
+      trace_simple("root_policy_tiebreak", policy_tiebreak);
+      return policy_tiebreak;
+    }
+
     stats_.move_agreements.fetch_add(1, std::memory_order_relaxed);
     trace_simple("engines_agree", ab_best);
     return ab_best;
@@ -1061,16 +1368,14 @@ Move ParallelHybridSearch::make_final_decision() {
                                 ? static_cast<float>(mcts_visits) /
                                       static_cast<float>(mcts_total_nodes)
                                 : 0.0f;
-  const bool fixed_budget =
-      limits_.movetime > 0 || limits_.nodes > 0 || limits_.infinite;
-  const uint64_t min_nodes =
-      fixed_budget ? 180u
-                   : static_cast<uint64_t>(
-                         std::max(100, current_strategy_.min_mcts_nodes));
+  const uint64_t min_nodes = mcts_decision_budget
+                                 ? 180u
+                                 : static_cast<uint64_t>(std::max(
+                                       100, current_strategy_.min_mcts_nodes));
   const uint32_t min_visits =
-      fixed_budget ? 72u
-                   : static_cast<uint32_t>(
-                         std::max(48, current_strategy_.min_mcts_nodes / 2));
+      mcts_decision_budget ? 72u
+                           : static_cast<uint32_t>(std::max(
+                                 48, current_strategy_.min_mcts_nodes / 2));
   const bool mcts_reliable = mcts_total_nodes >= min_nodes &&
                              mcts_visits >= min_visits && visit_share >= 0.24f;
   const bool mcts_strong =
@@ -1082,6 +1387,37 @@ Move ParallelHybridSearch::make_final_decision() {
       std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
   const int eval_delta = mcts_cp - ab_score;
   const bool ab_has_clear_preference = ab_verified && std::abs(ab_score) >= 15;
+  const float root_q_gap = root_q_gap_for_best();
+  const bool mcts_decisive_fixed_budget =
+      mcts_visit_evidence_sane &&
+      HybridMCTSDecisiveFixedBudgetOverride(mcts_decision_budget, mcts_strong,
+                                            mcts_total_nodes, mcts_visits,
+                                            visit_share, eval_delta);
+  const bool mcts_high_value_fixed_budget =
+      mcts_visit_evidence_sane &&
+      HybridMCTSHighValueFixedBudgetOverride(
+          mcts_decision_budget, mcts_reliable, mcts_total_nodes, mcts_visits,
+          visit_share, mcts_cp, eval_delta);
+  const bool mcts_no_clear_fixed_budget =
+      mcts_visit_evidence_sane && !ab_has_clear_preference &&
+      HybridMCTSNoClearFixedBudgetOverride(mcts_decision_budget, mcts_strong,
+                                           mcts_visits, visit_share,
+                                           eval_delta);
+  const bool mcts_root_dominant_fixed_budget =
+      mcts_visit_evidence_sane &&
+      HybridMCTSRootDominantFixedBudgetOverride(
+          mcts_decision_budget, mcts_strong, mcts_total_nodes, mcts_visits,
+          visit_share, mcts_cp, eval_delta);
+  const bool mcts_tactical_gap_fixed_budget =
+      mcts_visit_evidence_sane &&
+      HybridMCTSTacticalGapFixedBudgetOverride(
+          mcts_decision_budget, mcts_total_nodes, mcts_visits, visit_share,
+          root_q_gap, mcts_cp, eval_delta);
+  const bool mcts_root_confidence_fixed_budget =
+      mcts_visit_evidence_sane &&
+      HybridMCTSRootConfidenceFixedBudgetOverride(
+          mcts_decision_budget, mcts_strong, mcts_total_nodes, mcts_visits,
+          visit_share, root_q_gap, mcts_cp, eval_delta);
   bool mcts_root_rejects_ab = false;
   {
     const int top_count =
@@ -1106,7 +1442,7 @@ Move ParallelHybridSearch::make_final_decision() {
               mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed);
           const float ab_q =
               mcts_state_.top_moves[i].q.load(std::memory_order_relaxed);
-          if (ab_visits >= 25 &&
+          if (mcts_visit_evidence_sane && ab_visits >= 25 &&
               top_visits >= 3 * std::max<uint32_t>(1, ab_visits) &&
               top_q - ab_q >= 0.25f) {
             mcts_root_rejects_ab = true;
@@ -1133,12 +1469,30 @@ Move ParallelHybridSearch::make_final_decision() {
     break;
   case ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED:
   case ParallelHybridConfig::DecisionMode::DYNAMIC:
-    if (mcts_overwhelming && eval_delta >= 180) {
+    if (mcts_visit_evidence_sane && mcts_overwhelming && eval_delta >= 180) {
       choose_mcts = true;
       reason = "mcts_overwhelming_delta";
+    } else if (mcts_decisive_fixed_budget) {
+      choose_mcts = true;
+      reason = "mcts_decisive_fixed_budget";
+    } else if (mcts_high_value_fixed_budget) {
+      choose_mcts = true;
+      reason = "mcts_high_value_fixed_budget";
+    } else if (mcts_tactical_gap_fixed_budget) {
+      choose_mcts = true;
+      reason = "mcts_tactical_gap_fixed_budget";
+    } else if (mcts_root_dominant_fixed_budget) {
+      choose_mcts = true;
+      reason = "mcts_root_dominant_fixed_budget";
+    } else if (mcts_root_confidence_fixed_budget) {
+      choose_mcts = true;
+      reason = "mcts_root_confidence_fixed_budget";
     } else if (mcts_root_rejects_ab) {
       choose_mcts = true;
       reason = "mcts_root_rejects_ab";
+    } else if (mcts_no_clear_fixed_budget) {
+      choose_mcts = true;
+      reason = "mcts_no_clear_fixed_budget";
     } else if (!ab_verified && mcts_reliable && eval_delta >= -80) {
       choose_mcts = true;
       reason = "mcts_reliable_ab_unverified";
@@ -1159,15 +1513,25 @@ Move ParallelHybridSearch::make_final_decision() {
        << " ABDepth=" << ab_depth << " MCTSQ=" << std::fixed
        << std::setprecision(3) << mcts_q << " MCTSCP=" << mcts_cp
        << " EvalDelta=" << eval_delta << " MCTSBestVisits=" << mcts_visits
+       << " MCTSPlayouts=" << mcts_playouts << " MCTSEvals=" << mcts_evals
        << " MCTSRootVisits=" << mcts_total_nodes
        << " VisitShare=" << visit_share
+       << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
+       << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
+       << " RootQGap=" << root_q_gap
        << " MCTSReliable=" << (mcts_reliable ? 1 : 0)
        << " MCTSStrong=" << (mcts_strong ? 1 : 0)
+       << " MCTSHighValue=" << (mcts_high_value_fixed_budget ? 1 : 0)
+       << " MCTSNoClearFixed=" << (mcts_no_clear_fixed_budget ? 1 : 0)
+       << " MCTSRootDominant=" << (mcts_root_dominant_fixed_budget ? 1 : 0)
+       << " MCTSTacticalGap=" << (mcts_tactical_gap_fixed_budget ? 1 : 0)
+       << " MCTSRootConfidence=" << (mcts_root_confidence_fixed_budget ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
        << " ABVerified=" << (ab_verified ? 1 : 0)
        << " ABClearPreference=" << (ab_has_clear_preference ? 1 : 0)
        << " MCTSRootRejectsAB=" << (mcts_root_rejects_ab ? 1 : 0)
-       << " MCTSTop=" << top_moves_to_string();
+       << " MCTSTop=" << top_moves_to_string()
+       << " ABRoot=" << ab_root_moves_to_string();
     send_info_string(ss.str());
   }
 

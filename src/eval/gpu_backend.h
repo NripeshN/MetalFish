@@ -49,12 +49,7 @@ enum class BackendType {
 };
 
 // Buffer usage hints for optimal memory allocation
-enum class BufferUsage {
-  Default,
-  Transient,
-  Persistent,
-  Streaming
-};
+enum class BufferUsage { Default, Transient, Persistent, Streaming };
 
 // Memory access mode (relevant for unified memory systems)
 enum class MemoryMode {

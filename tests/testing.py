@@ -338,6 +338,19 @@ def test_uci_protocol():
         engine.quit()
         engine.close()
 
+    def test_hybrid_time_safety_options():
+        engine = MetalFish()
+        engine.send_command("uci")
+        low_time = engine.contains("option name TransformerLowTimeFallbackMs")
+        min_budget = engine.contains("option name TransformerMinMoveBudgetMs")
+        assert "default 5000" in low_time, low_time
+        assert "min 0" in low_time and "max 30000" in low_time, low_time
+        assert "default 1200" in min_budget, min_budget
+        assert "min 0" in min_budget and "max 5000" in min_budget, min_budget
+        engine.equals("uciok")
+        engine.quit()
+        engine.close()
+
     def test_isready_command():
         engine = MetalFish()
         engine.send_command("uci")
@@ -448,6 +461,7 @@ def test_uci_protocol():
     #     assert "bestmove" in result.stdout, f"No bestmove found in output: {result.stdout[-500:]}"
 
     runner.run_test("uci command", test_uci_command)
+    runner.run_test("hybrid time safety options", test_hybrid_time_safety_options)
     runner.run_test("isready command", test_isready_command)
     runner.run_test("position startpos", test_position_startpos)
     runner.run_test("position fen", test_position_fen)
@@ -589,7 +603,8 @@ def benchmark_comparison():
 
     if ref_engine_exists:
         # Run reference perft benchmark
-        print(f"\n  Running reference engine perft 6...")        try:
+        print(f"\n  Running reference engine perft 6...")
+        try:
             sf_start = time.time()
             sf_result = subprocess.run(
                 [str(REFERENCE_BIN)],

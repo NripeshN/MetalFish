@@ -83,6 +83,26 @@ SCALING_POSITIONS = [
     "r1bq1rk1/pp2ppbp/2np1np1/8/3NP3/2N1BP2/PPPQ2PP/R3KB1R w KQ - 2 9",
 ]
 
+TOURNAMENT_OPENINGS: List[Tuple[str, str]] = [
+    ("startpos", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
+    (
+        "sicilian_najdorf",
+        "rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 6",
+    ),
+    ("ruy_lopez", "r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 4 6"),
+    (
+        "queens_gambit",
+        "rnbq1rk1/ppp1bppp/4pn2/3p2B1/2PP4/2N1P3/PP3PPP/R2QKBNR w KQ - 1 6",
+    ),
+    (
+        "kings_indian",
+        "rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/2N2N2/PP3PPP/R1BQKB1R w KQ - 2 6",
+    ),
+    ("english", "rnbqkb1r/ppp2ppp/1n6/4p3/8/2N3P1/PP1PPPBP/R1BQK1NR w KQkq - 2 6"),
+    ("caro_kann", "rn1qkbnr/pp2pppp/2p3b1/8/3P4/6N1/PPP2PPP/R1BQKBNR w KQkq - 3 6"),
+    ("french", "rnbqk2r/pppnbppp/4p3/3pP1B1/3P4/2N5/PPP2PPP/R2QKBNR w KQkq - 1 6"),
+]
+
 
 def san_to_uci(fen: str, san: str) -> str:
     return chess.Board(fen).parse_san(san).uci()
@@ -138,13 +158,16 @@ class UCIEngine:
     def setoption(self, name: str, value: str) -> None:
         self.send(f"setoption name {name} value {value}")
 
+    def new_game(self) -> None:
+        self.send("ucinewgame")
+        self.send("isready")
+        self.wait_for("readyok", 120)
+
     def search(self, fen: str, movetime_ms: int = 10000) -> SearchResult:
         # Benchmark FENs are independent positions, not a single game. Reset
         # TT/history between searches so one puzzle cannot train or poison the
         # next one through UCI game state.
-        self.send("ucinewgame")
-        self.send("isready")
-        self.wait_for("readyok", 120)
+        self.new_game()
         self.send(f"position fen {fen}")
         self.send(f"go movetime {movetime_ms}")
         r = SearchResult()
@@ -230,10 +253,23 @@ class UCIEngine:
 
     def close(self) -> None:
         try:
-            self.send("quit")
-            self.proc.wait(timeout=5)
-        except Exception:
-            self.proc.kill()
+            if self.proc.poll() is None:
+                try:
+                    self.send("quit")
+                except Exception:
+                    pass
+                try:
+                    self.proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.proc.kill()
+                    self.proc.wait(timeout=5)
+        finally:
+            for stream in (self.proc.stdin, self.proc.stdout):
+                try:
+                    if stream:
+                        stream.close()
+                except Exception:
+                    pass
 
 
 @dataclass
@@ -252,18 +288,29 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
     hybrid_threads = max(3, threads)
 
     engines["metalfish-ab"] = EngineConfig(
-        name="MetalFish-AB", path=mf, uci_options={"Threads": str(threads)}
+        name="MetalFish-AB",
+        path=mf,
+        uci_options={
+            "UseMCTS": "false",
+            "UseHybridSearch": "false",
+            "Threads": str(threads),
+            "MultiPV": "1",
+        },
     )
 
     engines["metalfish-mcts"] = EngineConfig(
         name="MetalFish-MCTS",
         path=mf,
         uci_options={
+            "UseHybridSearch": "false",
             "UseMCTS": "true",
             "NNWeights": w,
             "Threads": str(threads),
+            "MultiPV": "1",
             "MCTSMaxThreads": "1",
             "MCTSMinibatchSize": "0",
+            "MCTSParityPreset": "false",
+            "MCTSAddDirichletNoise": "false",
             "MCTSMinimumKLDGainPerNode": "0.00005",
         },
     )
@@ -272,15 +319,24 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
         name="MetalFish-Hybrid",
         path=mf,
         uci_options={
+            "UseMCTS": "false",
             "UseHybridSearch": "true",
             "NNWeights": w,
             "Threads": str(hybrid_threads),
+            "MultiPV": "1",
             "HybridMCTSThreads": "2",
             "HybridABThreads": "1",
+            "TransformerLowTimeFallbackMs": "5000",
+            "TransformerMinMoveBudgetMs": "1200",
             "MCTSMaxThreads": "2",
             "MCTSMinibatchSize": "0",
+            "MCTSParityPreset": "false",
+            "MCTSAddDirichletNoise": "false",
             "HybridMCTSMinimumKLDGainPerNode": "0.0",
             "HybridMCTSRootReject": "true",
+            "HybridMCTSUseSharedTT": "false",
+            "HybridABPolicyWeight": "0.0",
+            "HybridTrace": "false",
         },
     )
 
@@ -321,6 +377,23 @@ def start_engine(cfg: EngineConfig) -> UCIEngine:
     return eng
 
 
+def parse_engine_ids(raw: str) -> Optional[List[str]]:
+    if not raw:
+        return None
+    aliases = {
+        "ab": "metalfish-ab",
+        "mcts": "metalfish-mcts",
+        "hybrid": "metalfish-hybrid",
+        "metalfish": "metalfish-hybrid",
+    }
+    ids = []
+    for item in raw.replace(",", " ").split():
+        eid = aliases.get(item, item)
+        if eid not in ids:
+            ids.append(eid)
+    return ids or None
+
+
 def run_tactical(
     engines: Dict[str, EngineConfig],
     movetime_ms: int = 10000,
@@ -356,70 +429,76 @@ def run_tactical(
             continue
 
         print(f"\n--- {cfg.name} ---")
-        eng = start_engine(cfg)
+        eng = None
         try:
-            eng.warmup(min(3000, movetime_ms))
-        except TimeoutError:
-            print(f"  WARNING: warmup timeout, continuing...")
-
-        score = 0
-        positions = []
-        bestmoves = {}
-
-        for fen, expected_sans, bk_id in BK_POSITIONS:
-            expected_uci = set()
-            for san in expected_sans:
-                try:
-                    expected_uci.add(san_to_uci(fen, san))
-                except Exception:
-                    expected_uci.add(san.lower().replace("+", "").replace("#", ""))
-
+            eng = start_engine(cfg)
             try:
-                r = eng.search(fen, movetime_ms)
-            except (RuntimeError, TimeoutError) as e:
-                print(f"  {bk_id}: ERROR {e}")
+                eng.warmup(min(3000, movetime_ms))
+            except TimeoutError:
+                print(f"  WARNING: warmup timeout, continuing...")
+
+            score = 0
+            positions = []
+            bestmoves = {}
+
+            for fen, expected_sans, bk_id in BK_POSITIONS:
+                expected_uci = set()
+                for san in expected_sans:
+                    try:
+                        expected_uci.add(san_to_uci(fen, san))
+                    except Exception:
+                        expected_uci.add(san.lower().replace("+", "").replace("#", ""))
+
+                try:
+                    r = eng.search(fen, movetime_ms)
+                except (RuntimeError, TimeoutError) as e:
+                    print(f"  {bk_id}: ERROR {e}")
+                    print(
+                        f"  Engine crashed/timed out — reporting partial results for {cfg.name}"
+                    )
+                    break
+
+                ok = r.bestmove in expected_uci
+                score += int(ok)
+                bestmoves[bk_id] = r.bestmove
+
+                pos_data = {
+                    "id": bk_id,
+                    "fen": fen,
+                    "expected": expected_sans,
+                    "bestmove": r.bestmove,
+                    "pass": ok,
+                    "nodes": r.nodes,
+                    "nps": r.nps,
+                    "nn_evals": r.nn_evals,
+                    "depth": r.depth,
+                    "time_s": round(r.elapsed, 2),
+                }
+                positions.append(pos_data)
+                status = "PASS" if ok else "FAIL"
                 print(
-                    f"  Engine crashed/timed out — reporting partial results for {cfg.name}"
+                    f"  {bk_id}: {status:4s} {r.bestmove:8s} exp={expected_sans}"
+                    f" n={r.nodes} nps={r.nps} t={r.elapsed:.1f}s"
                 )
-                break
 
-            ok = r.bestmove in expected_uci
-            score += int(ok)
-            bestmoves[bk_id] = r.bestmove
+            total = len(BK_POSITIONS)
+            print(f"  Score: {score}/{total} ({100*score/total:.1f}%)")
 
-            pos_data = {
-                "id": bk_id,
-                "fen": fen,
-                "expected": expected_sans,
-                "bestmove": r.bestmove,
-                "pass": ok,
-                "nodes": r.nodes,
-                "nps": r.nps,
-                "nn_evals": r.nn_evals,
-                "depth": r.depth,
-                "time_s": round(r.elapsed, 2),
+            avg_nps = sum(p["nps"] for p in positions) // max(1, len(positions))
+            results["engines"][eid] = {
+                "name": cfg.name,
+                "score": score,
+                "total": total,
+                "solve_rate": round(score / total, 3),
+                "avg_nps": avg_nps,
+                "positions": positions,
             }
-            positions.append(pos_data)
-            status = "PASS" if ok else "FAIL"
-            print(
-                f"  {bk_id}: {status:4s} {r.bestmove:8s} exp={expected_sans}"
-                f" n={r.nodes} nps={r.nps} t={r.elapsed:.1f}s"
-            )
-
-        total = len(BK_POSITIONS)
-        print(f"  Score: {score}/{total} ({100*score/total:.1f}%)")
-
-        avg_nps = sum(p["nps"] for p in positions) // max(1, len(positions))
-        results["engines"][eid] = {
-            "name": cfg.name,
-            "score": score,
-            "total": total,
-            "solve_rate": round(score / total, 3),
-            "avg_nps": avg_nps,
-            "positions": positions,
-        }
-        all_bestmoves[eid] = bestmoves
-        eng.close()
+            all_bestmoves[eid] = bestmoves
+        except (RuntimeError, TimeoutError) as e:
+            print(f"  ERROR starting {cfg.name}: {e}")
+        finally:
+            if eng:
+                eng.close()
 
     eids = list(all_bestmoves.keys())
     for i in range(len(eids)):
@@ -488,33 +567,35 @@ def run_nps(
             )
             eng = start_engine(cfg_copy)
             try:
-                eng.warmup(min(3000, movetime_ms))
-            except TimeoutError:
-                print("  WARNING: warmup timeout")
+                try:
+                    eng.warmup(min(3000, movetime_ms))
+                except TimeoutError:
+                    print("  WARNING: warmup timeout")
 
-            pos_results = []
-            for label, fen in test_fens:
-                r = eng.search(fen, movetime_ms)
-                pos_results.append(
-                    {
-                        "position": label,
-                        "fen": fen,
-                        "nodes": r.nodes,
-                        "nps": r.nps,
-                        "nn_evals": r.nn_evals,
-                        "depth": r.depth,
-                        "time_s": round(r.elapsed, 2),
-                    }
-                )
-                print(f"  {label}: nps={r.nps} nodes={r.nodes} depth={r.depth}")
+                pos_results = []
+                for label, fen in test_fens:
+                    r = eng.search(fen, movetime_ms)
+                    pos_results.append(
+                        {
+                            "position": label,
+                            "fen": fen,
+                            "nodes": r.nodes,
+                            "nps": r.nps,
+                            "nn_evals": r.nn_evals,
+                            "depth": r.depth,
+                            "time_s": round(r.elapsed, 2),
+                        }
+                    )
+                    print(f"  {label}: nps={r.nps} nodes={r.nodes} depth={r.depth}")
 
-            avg_nps = sum(p["nps"] for p in pos_results) // max(1, len(pos_results))
-            results["engines"][eid]["by_threads"][str(tc)] = {
-                "threads": tc,
-                "avg_nps": avg_nps,
-                "positions": pos_results,
-            }
-            eng.close()
+                avg_nps = sum(p["nps"] for p in pos_results) // max(1, len(pos_results))
+                results["engines"][eid]["by_threads"][str(tc)] = {
+                    "threads": tc,
+                    "avg_nps": avg_nps,
+                    "positions": pos_results,
+                }
+            finally:
+                eng.close()
 
     mf_data = results["engines"].get("metalfish-mcts", {}).get("by_threads", {})
     lc0_data = results["engines"].get("lc0", {}).get("by_threads", {})
@@ -564,39 +645,43 @@ def run_scaling(
             )
             eng = start_engine(cfg_copy)
             try:
-                eng.warmup(min(3000, movetime_ms))
-            except TimeoutError:
-                print("  WARNING: warmup timeout")
+                try:
+                    eng.warmup(min(3000, movetime_ms))
+                except TimeoutError:
+                    print("  WARNING: warmup timeout")
 
-            total_nps = 0
-            total_nodes = 0
-            total_depth = 0
-            n_pos = len(SCALING_POSITIONS)
+                total_nps = 0
+                total_nodes = 0
+                total_depth = 0
+                n_pos = len(SCALING_POSITIONS)
 
-            for i, fen in enumerate(SCALING_POSITIONS):
-                r = eng.search(fen, movetime_ms)
-                total_nps += r.nps
-                total_nodes += r.nodes
-                total_depth += r.depth
+                for i, fen in enumerate(SCALING_POSITIONS):
+                    r = eng.search(fen, movetime_ms)
+                    total_nps += r.nps
+                    total_nodes += r.nodes
+                    total_depth += r.depth
+                    print(
+                        f"  pos {i+1}/{n_pos}: nps={r.nps} nodes={r.nodes} depth={r.depth}"
+                    )
+
+                avg_nps = total_nps // n_pos
+                avg_depth = total_depth / n_pos
+                if baseline_nps is None:
+                    baseline_nps = max(1, avg_nps)
+                scaling = avg_nps / baseline_nps
+
+                results["engines"][eid]["by_threads"][str(tc)] = {
+                    "threads": tc,
+                    "avg_nps": avg_nps,
+                    "total_nodes": total_nodes,
+                    "avg_depth": round(avg_depth, 1),
+                    "scaling_factor": round(scaling, 2),
+                }
                 print(
-                    f"  pos {i+1}/{n_pos}: nps={r.nps} nodes={r.nodes} depth={r.depth}"
+                    f"  AVG: nps={avg_nps} depth={avg_depth:.1f} scaling={scaling:.2f}x"
                 )
-
-            avg_nps = total_nps // n_pos
-            avg_depth = total_depth / n_pos
-            if baseline_nps is None:
-                baseline_nps = max(1, avg_nps)
-            scaling = avg_nps / baseline_nps
-
-            results["engines"][eid]["by_threads"][str(tc)] = {
-                "threads": tc,
-                "avg_nps": avg_nps,
-                "total_nodes": total_nodes,
-                "avg_depth": round(avg_depth, 1),
-                "scaling_factor": round(scaling, 2),
-            }
-            print(f"  AVG: nps={avg_nps} depth={avg_depth:.1f} scaling={scaling:.2f}x")
-            eng.close()
+            finally:
+                eng.close()
 
     return results
 
@@ -606,35 +691,91 @@ def play_game(
     black: UCIEngine,
     fen: str,
     movetime_ms: int = 5000,
-    max_moves: int = 200,
-) -> str:
-    """Play one game, return '1-0', '0-1', or '1/2-1/2'."""
+    max_plies: int = 200,
+) -> dict:
+    """Play one game and return result plus enough data to debug it."""
+    white.new_game()
+    black.new_game()
     board = chess.Board(fen)
-    for _ in range(max_moves):
+    moves: List[str] = []
+    for _ in range(max_plies):
         if board.is_game_over():
-            result = board.result()
-            return result
+            return {
+                "result": board.result(),
+                "termination": (
+                    board.outcome().termination.name if board.outcome() else "GAME_OVER"
+                ),
+                "ply_count": len(moves),
+                "final_fen": board.fen(),
+                "moves": moves,
+            }
+        if board.can_claim_threefold_repetition():
+            return {
+                "result": "1/2-1/2",
+                "termination": "THREEFOLD_REPETITION_CLAIM",
+                "ply_count": len(moves),
+                "final_fen": board.fen(),
+                "moves": moves,
+            }
+        if board.can_claim_fifty_moves():
+            return {
+                "result": "1/2-1/2",
+                "termination": "FIFTY_MOVES_CLAIM",
+                "ply_count": len(moves),
+                "final_fen": board.fen(),
+                "moves": moves,
+            }
         eng = white if board.turn == chess.WHITE else black
         eng.send(f"position fen {board.fen()}")
         eng.send(f"go movetime {movetime_ms}")
         try:
             line = eng.wait_for("bestmove", movetime_ms // 1000 + 30)
         except TimeoutError:
-            return "0-1" if board.turn == chess.WHITE else "1-0"
+            return {
+                "result": "0-1" if board.turn == chess.WHITE else "1-0",
+                "termination": "TIMEOUT",
+                "ply_count": len(moves),
+                "final_fen": board.fen(),
+                "moves": moves,
+            }
         move_str = line.split()[1] if len(line.split()) > 1 else "0000"
         try:
             move = chess.Move.from_uci(move_str)
             if move in board.legal_moves:
+                moves.append(move_str)
                 board.push(move)
             else:
-                return "0-1" if board.turn == chess.WHITE else "1-0"
+                return {
+                    "result": "0-1" if board.turn == chess.WHITE else "1-0",
+                    "termination": "ILLEGAL_MOVE",
+                    "ply_count": len(moves),
+                    "final_fen": board.fen(),
+                    "moves": moves,
+                    "illegal_move": move_str,
+                }
         except Exception:
-            return "0-1" if board.turn == chess.WHITE else "1-0"
-    return "1/2-1/2"
+            return {
+                "result": "0-1" if board.turn == chess.WHITE else "1-0",
+                "termination": "INVALID_MOVE",
+                "ply_count": len(moves),
+                "final_fen": board.fen(),
+                "moves": moves,
+                "invalid_move": move_str,
+            }
+    return {
+        "result": "1/2-1/2",
+        "termination": "MAX_MOVES",
+        "ply_count": len(moves),
+        "final_fen": board.fen(),
+        "moves": moves,
+    }
 
 
 def run_tournament(
-    engines: Dict[str, EngineConfig], games_per_match: int = 10, movetime_ms: int = 5000
+    engines: Dict[str, EngineConfig],
+    games_per_match: int = 10,
+    movetime_ms: int = 5000,
+    max_game_plies: int = 200,
 ) -> dict:
     print("\n" + "=" * 60)
     print("EXPERIMENT 4: Elo Tournament")
@@ -655,11 +796,10 @@ def run_tournament(
         "experiment": "tournament",
         "movetime_ms": movetime_ms,
         "games_per_match": games_per_match,
+        "max_game_plies": max_game_plies,
         "timestamp": datetime.datetime.now().isoformat(),
         "matches": [],
     }
-
-    startpos = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
     for e1_id, e2_id in matches:
         c1, c2 = engines.get(e1_id), engines.get(e2_id)
@@ -669,31 +809,56 @@ def run_tournament(
 
         print(f"\n--- {c1.name} vs {c2.name} ({games_per_match} games) ---")
         wins, draws, losses = 0, 0, 0
+        games = []
 
         eng1 = start_engine(c1)
         eng2 = start_engine(c2)
-
-        for g in range(games_per_match):
-            if g % 2 == 0:
-                result = play_game(eng1, eng2, startpos, movetime_ms)
-                if result == "1-0":
-                    wins += 1
-                elif result == "0-1":
-                    losses += 1
+        try:
+            for g in range(games_per_match):
+                opening_name, opening_fen = TOURNAMENT_OPENINGS[
+                    g % len(TOURNAMENT_OPENINGS)
+                ]
+                if g % 2 == 0:
+                    game_data = play_game(
+                        eng1, eng2, opening_fen, movetime_ms, max_game_plies
+                    )
+                    result = game_data["result"]
+                    white_name, black_name = c1.name, c2.name
+                    if result == "1-0":
+                        wins += 1
+                    elif result == "0-1":
+                        losses += 1
+                    else:
+                        draws += 1
                 else:
-                    draws += 1
-            else:
-                result = play_game(eng2, eng1, startpos, movetime_ms)
-                if result == "1-0":
-                    losses += 1
-                elif result == "0-1":
-                    wins += 1
-                else:
-                    draws += 1
-            print(f"  Game {g+1}: {result} (W{wins}-D{draws}-L{losses})")
-
-        eng1.close()
-        eng2.close()
+                    game_data = play_game(
+                        eng2, eng1, opening_fen, movetime_ms, max_game_plies
+                    )
+                    result = game_data["result"]
+                    white_name, black_name = c2.name, c1.name
+                    if result == "1-0":
+                        losses += 1
+                    elif result == "0-1":
+                        wins += 1
+                    else:
+                        draws += 1
+                games.append(
+                    {
+                        "game": g + 1,
+                        "opening": opening_name,
+                        "white": white_name,
+                        "black": black_name,
+                        **game_data,
+                    }
+                )
+                print(
+                    f"  Game {g+1} ({opening_name}): {result} "
+                    f"{game_data['termination']} {game_data['ply_count']} plies "
+                    f"(W{wins}-D{draws}-L{losses})"
+                )
+        finally:
+            eng1.close()
+            eng2.close()
 
         total = wins + draws + losses
         score = wins + draws * 0.5
@@ -709,6 +874,7 @@ def run_tournament(
             "score": score,
             "total": total,
             "pct": round(pct, 3),
+            "games": games,
         }
         results["matches"].append(match_data)
         print(f"  Result: {c1.name} {wins}W-{draws}D-{losses}L ({pct:.1%})")
@@ -842,6 +1008,18 @@ def main() -> int:
     parser.add_argument(
         "--tc-movetime", type=int, default=5000, help="Movetime for tournament games"
     )
+    parser.add_argument(
+        "--max-game-plies",
+        type=int,
+        default=200,
+        help="Maximum plies per tournament game before adjudicating a draw",
+    )
+    parser.add_argument(
+        "--engines",
+        type=str,
+        default="",
+        help="Optional comma/space-separated engine IDs to benchmark",
+    )
     args = parser.parse_args()
 
     if args.all:
@@ -854,13 +1032,17 @@ def main() -> int:
     all_results: Dict[str, dict] = {}
 
     engines = detect_engines(threads=thread_counts[0] if len(thread_counts) == 1 else 2)
+    selected_engine_ids = parse_engine_ids(args.engines)
+    if selected_engine_ids is not None:
+        selected = set(selected_engine_ids)
+        engines = {eid: cfg for eid, cfg in engines.items() if eid in selected}
     print("Detected engines:")
     for eid, cfg in engines.items():
         status = "OK" if cfg.available else "MISSING"
         print(f"  {eid}: {status} ({cfg.path})")
 
     if args.tactical:
-        r = run_tactical(engines, args.movetime)
+        r = run_tactical(engines, args.movetime, selected_engine_ids)
         all_results["tactical"] = r
         with open(RESULTS_DIR / "paper_tactical.json", "w") as f:
             json.dump(r, f, indent=2)
@@ -881,7 +1063,7 @@ def main() -> int:
         print(f"\nSaved: results/paper_scaling.json")
 
     if args.tournament:
-        r = run_tournament(engines, args.games, args.tc_movetime)
+        r = run_tournament(engines, args.games, args.tc_movetime, args.max_game_plies)
         all_results["tournament"] = r
         with open(RESULTS_DIR / "paper_tournament.json", "w") as f:
             json.dump(r, f, indent=2)

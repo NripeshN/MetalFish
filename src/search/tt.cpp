@@ -167,9 +167,7 @@ int TranspositionTable::hashfull(int maxAge) const {
   return cnt / ClusterSize;
 }
 
-void TranspositionTable::new_search() {
-  generation8 += GENERATION_DELTA;
-}
+void TranspositionTable::new_search() { generation8 += GENERATION_DELTA; }
 
 uint8_t TranspositionTable::generation() const { return generation8; }
 

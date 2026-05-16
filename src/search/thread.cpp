@@ -137,8 +137,7 @@ void ThreadPool::set(
     const NumaConfig &numaConfig, Search::SharedState sharedState,
     const Search::SearchManager::UpdateContext &updateContext) {
 
-  if (threads.size() > 0)
-  {
+  if (threads.size() > 0) {
     main_thread()->wait_for_search_finished();
 
     threads.clear();
@@ -148,8 +147,7 @@ void ThreadPool::set(
 
   const size_t requested = sharedState.options["Threads"];
 
-  if (requested > 0)
-  {
+  if (requested > 0) {
     // Binding threads may be problematic when there's multiple NUMA nodes and
     // multiple MetalFish instances running. In particular, if each instance
     // runs a single thread then they would all be mapped to the first NUMA
@@ -175,8 +173,8 @@ void ThreadPool::set(
             ? numaConfig.distribute_threads_among_numa_nodes(requested)
             : std::vector<NumaIndex>{};
 
-      if (boundThreadToNumaNode.empty())
-        counts[0] = requested;
+    if (boundThreadToNumaNode.empty())
+      counts[0] = requested;
     else {
       for (size_t i = 0; i < boundThreadToNumaNode.size(); ++i)
         counts[boundThreadToNumaNode[i]]++;
@@ -297,17 +295,21 @@ void ThreadPool::start_thinking(const OptionsMap &options, Position &pos,
   if (states.get())
     setupStates = std::move(states);
 
+  const std::string rootFen = pos.fen();
+  const bool chess960 = pos.is_chess960();
+
   for (auto &&th : threads) {
-    th->run_custom_job([&]() {
-      th->worker->limits = limits;
-      th->worker->nodes = th->worker->tbHits = th->worker->bestMoveChanges = 0;
-      th->worker->nmpMinPly = 0;
-      th->worker->rootDepth = th->worker->completedDepth = 0;
-      th->worker->rootMoves = rootMoves;
-      th->worker->rootPos.set(pos.fen(), pos.is_chess960(),
-                              &th->worker->rootState);
-      th->worker->rootState = setupStates->back();
-      th->worker->tbConfig = tbConfig;
+    Thread *thread = th.get();
+    thread->run_custom_job([&, thread]() {
+      auto &worker = *thread->worker;
+      worker.limits = limits;
+      worker.nodes = worker.tbHits = worker.bestMoveChanges = 0;
+      worker.nmpMinPly = 0;
+      worker.rootDepth = worker.completedDepth = 0;
+      worker.rootMoves = rootMoves;
+      worker.rootPos.set(rootFen, chess960, &worker.rootState);
+      worker.rootState = setupStates->back();
+      worker.tbConfig = tbConfig;
     });
   }
 

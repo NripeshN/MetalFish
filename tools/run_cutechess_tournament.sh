@@ -1,6 +1,6 @@
 #!/bin/bash
 # MetalFish Tournament via cutechess-cli
-# Usage: ./tools/run_cutechess_tournament.sh [--quick] [--games=N] [--tc=300+0.1] [--seed=N]
+# Usage: ./tools/run_cutechess_tournament.sh [--quick] [--games=N] [--tc=300+0.1] [--match=AB_vs_Hybrid]
 
 set -e
 cd "$(dirname "$0")/.."
@@ -17,6 +17,10 @@ GAMES=20
 TC="300+0.1"
 CUTECHESS_SEED="${CUTECHESS_SEED:-6147500}"
 OPENING_ORDER="${OPENING_ORDER:-random}"
+MATCH_FILTER=""
+CONCURRENCY="${CONCURRENCY:-1}"
+MAXMOVES="${MAXMOVES:-160}"
+ENGINE_RESTART="${ENGINE_RESTART:-on}"
 
 for arg in "$@"; do
     case "$arg" in
@@ -29,6 +33,10 @@ for arg in "$@"; do
         --tc=*) TC="${arg#*=}" ;;
         --seed=*) CUTECHESS_SEED="${arg#*=}" ;;
         --opening-order=*) OPENING_ORDER="${arg#*=}" ;;
+        --match=*) MATCH_FILTER="${arg#*=}" ;;
+        --concurrency=*) CONCURRENCY="${arg#*=}" ;;
+        --maxmoves=*) MAXMOVES="${arg#*=}" ;;
+        --restart=*) ENGINE_RESTART="${arg#*=}" ;;
         *)
             echo "Unknown option: $arg" >&2
             exit 2
@@ -76,26 +84,64 @@ if [ "$HYBRID_AB_THREADS" -gt 0 ] && [ "$HYBRID_AB_THREADS" -gt "$HYBRID_THREADS
     HYBRID_AB_THREADS=$HYBRID_THREADS
 fi
 HYBRID_AUTO_AB_THREADS_CAP="${HYBRID_AUTO_AB_THREADS_CAP:-2}"
+HYBRID_MCTS_KLD="${HYBRID_MCTS_KLD:-0.0}"
+HYBRID_MCTS_ROOT_REJECT="${HYBRID_MCTS_ROOT_REJECT:-true}"
+HYBRID_MCTS_SHARED_TT="${HYBRID_MCTS_SHARED_TT:-false}"
+HYBRID_AB_POLICY_WEIGHT="${HYBRID_AB_POLICY_WEIGHT:-0.0}"
+HYBRID_TRACE="${HYBRID_TRACE:-false}"
+HYBRID_MCTS_MINIBATCH="${HYBRID_MCTS_MINIBATCH:-0}"
+HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS="${HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS:-5000}"
+HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS="${HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS:-1200}"
 
-AB="cmd=$MF name=MetalFish-AB option.Threads=$THREADS option.Hash=256"
-MCTS="cmd=$MF name=MetalFish-MCTS option.Threads=$MCTS_THREADS option.Hash=256 option.UseMCTS=true option.NNWeights=$WEIGHTS option.MCTSMaxThreads=$MCTS_THREADS option.MCTSMinibatchSize=0"
-HYBRID="cmd=$MF name=MetalFish-Hybrid option.Threads=$HYBRID_THREADS option.Hash=256 option.UseHybridSearch=true option.NNWeights=$WEIGHTS option.HybridMCTSThreads=$HYBRID_MCTS_THREADS option.HybridABThreads=$HYBRID_AB_THREADS option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP option.MCTSMaxThreads=$HYBRID_MCTS_THREADS option.MCTSMinibatchSize=0"
-SFULL="cmd=$SF name=Stockfish option.Threads=$THREADS option.Hash=256"
-SL15="cmd=$SF name=Stockfish-L15 option.Threads=$THREADS option.Hash=256 option.\"Skill Level\"=15"
-SL10="cmd=$SF name=Stockfish-L10 option.Threads=$THREADS option.Hash=256 option.\"Skill Level\"=10"
-BERSERK_E="cmd=$BERSERK name=Berserk option.Threads=$THREADS option.Hash=256"
-PATRICIA_E="cmd=$PATRICIA name=Patricia option.Threads=$THREADS option.Hash=256"
-LC0_E="cmd=$LC0 name=Lc0 arg=\"--weights=$WEIGHTS\" arg=\"--backend=metal\" option.Threads=$THREADS option.Temperature=0"
+AB=(proto=uci restart="$ENGINE_RESTART" cmd="$MF" name=MetalFish-AB "option.Threads=$THREADS"
+    option.Hash=256 option.UseMCTS=false option.UseHybridSearch=false
+    option.MultiPV=1)
+MCTS=(proto=uci restart="$ENGINE_RESTART" cmd="$MF" name=MetalFish-MCTS
+      "option.Threads=$MCTS_THREADS" option.Hash=256
+      option.UseHybridSearch=false option.UseMCTS=true
+      "option.NNWeights=$WEIGHTS" option.MultiPV=1
+      "option.MCTSMaxThreads=$MCTS_THREADS" option.MCTSMinibatchSize=0
+      option.MCTSParityPreset=false option.MCTSAddDirichletNoise=false
+      option.MCTSMinimumKLDGainPerNode=0.00005)
+HYBRID=(proto=uci restart="$ENGINE_RESTART" cmd="$MF" name=MetalFish-Hybrid
+        "option.Threads=$HYBRID_THREADS" option.Hash=256
+        option.UseMCTS=false option.UseHybridSearch=true
+        "option.NNWeights=$WEIGHTS" option.MultiPV=1
+        "option.HybridMCTSThreads=$HYBRID_MCTS_THREADS"
+        "option.HybridABThreads=$HYBRID_AB_THREADS"
+        "option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP"
+        "option.TransformerLowTimeFallbackMs=$HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS"
+        "option.TransformerMinMoveBudgetMs=$HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS"
+        "option.MCTSMaxThreads=$HYBRID_MCTS_THREADS"
+        "option.MCTSMinibatchSize=$HYBRID_MCTS_MINIBATCH"
+        option.MCTSParityPreset=false
+        option.MCTSAddDirichletNoise=false
+        "option.HybridMCTSMinimumKLDGainPerNode=$HYBRID_MCTS_KLD"
+        "option.HybridMCTSRootReject=$HYBRID_MCTS_ROOT_REJECT"
+        "option.HybridMCTSUseSharedTT=$HYBRID_MCTS_SHARED_TT"
+        "option.HybridABPolicyWeight=$HYBRID_AB_POLICY_WEIGHT"
+        "option.HybridTrace=$HYBRID_TRACE")
+SFULL=(proto=uci restart="$ENGINE_RESTART" cmd="$SF" name=Stockfish "option.Threads=$THREADS"
+       option.Hash=256)
+SL15=(proto=uci restart="$ENGINE_RESTART" cmd="$SF" name=Stockfish-L15 "option.Threads=$THREADS"
+      option.Hash=256 "option.Skill Level=15")
+SL10=(proto=uci restart="$ENGINE_RESTART" cmd="$SF" name=Stockfish-L10 "option.Threads=$THREADS"
+      option.Hash=256 "option.Skill Level=10")
+BERSERK_E=(proto=uci restart="$ENGINE_RESTART" cmd="$BERSERK" name=Berserk
+           "option.Threads=$THREADS" option.Hash=256)
+PATRICIA_E=(proto=uci restart="$ENGINE_RESTART" cmd="$PATRICIA" name=Patricia
+            "option.Threads=$THREADS" option.Hash=256)
+LC0_E=(proto=uci restart="$ENGINE_RESTART" cmd="$LC0" name=Lc0 "arg=--weights=$WEIGHTS"
+       arg=--backend=metal "option.Threads=$THREADS" option.Temperature=0)
 
-BOOK_ARGS=""
+COMMON_ARGS=(-each "tc=$TC" -games "$GAMES" -repeat -recover
+             -concurrency "$CONCURRENCY" -maxmoves "$MAXMOVES"
+             -srand "$CUTECHESS_SEED"
+             -resign movecount=3 score=1000 twosided=true
+             -draw movenumber=40 movecount=8 score=10)
 if [ -f "$BOOK" ]; then
-    BOOK_ARGS="-openings file=$BOOK format=pgn order=$OPENING_ORDER"
+    COMMON_ARGS+=(-openings "file=$BOOK" format=pgn "order=$OPENING_ORDER")
 fi
-
-COMMON="-each tc=$TC -games $GAMES -repeat -recover $BOOK_ARGS \
-    -srand $CUTECHESS_SEED \
-    -resign movecount=3 score=1000 \
-    -draw movenumber=40 movecount=8 score=10"
 
 echo ""
 echo "============================================"
@@ -103,37 +149,50 @@ echo "  MetalFish Tournament (cutechess-cli)"
 echo "============================================"
 echo "TC: $TC | Games/match: $GAMES"
 echo "Openings: order=$OPENING_ORDER | seed=$CUTECHESS_SEED"
+echo "Match filter: ${MATCH_FILTER:-all} | Concurrency: $CONCURRENCY | Max moves: $MAXMOVES | Restart: $ENGINE_RESTART"
 echo "Threads: AB=$THREADS MCTS=$MCTS_THREADS Hybrid=$HYBRID_THREADS (HybridMCTS=$HYBRID_MCTS_THREADS, HybridAB=$HYBRID_AB_THREADS, HybridAutoABCap=$HYBRID_AUTO_AB_THREADS_CAP)"
+echo "Hybrid knobs: KLD=$HYBRID_MCTS_KLD RootReject=$HYBRID_MCTS_ROOT_REJECT SharedTT=$HYBRID_MCTS_SHARED_TT ABPolicyWeight=$HYBRID_AB_POLICY_WEIGHT Trace=$HYBRID_TRACE LowTimeFallbackMs=$HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS MinMoveBudgetMs=$HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS"
 echo "Results: $RESULTS"
 echo ""
 
 run_match() {
-    local e1="$1"
-    local e2="$2"
+    local e1_name="$1"
+    local e2_name="$2"
     local label="$3"
     local pgn="$RESULTS/${label}.pgn"
+    local log="$RESULTS/${label}.log"
+    local -a e1
+    local -a e2
+    if [ -n "$MATCH_FILTER" ] && [[ "$label" != *"$MATCH_FILTER"* ]]; then
+        return
+    fi
+    eval 'e1=( "${'"$e1_name"'[@]}" )'
+    eval 'e2=( "${'"$e2_name"'[@]}" )'
 
     echo ""
     echo "--- $label ---"
-    $CUTECHESS -engine $e1 -engine $e2 $COMMON -pgnout "$pgn" 2>&1 | tail -5
+    "$CUTECHESS" -engine "${e1[@]}" -engine "${e2[@]}" \
+        "${COMMON_ARGS[@]}" -pgnout "$pgn" 2>&1 |
+        tee "$log" | tail -20
     echo "  PGN saved: $pgn"
+    echo "  Log saved: $log"
 }
 
-run_match "$AB" "$MCTS" "01_AB_vs_MCTS"
-run_match "$AB" "$HYBRID" "02_AB_vs_Hybrid"
-run_match "$MCTS" "$HYBRID" "03_MCTS_vs_Hybrid"
+run_match AB MCTS "01_AB_vs_MCTS"
+run_match AB HYBRID "02_AB_vs_Hybrid"
+run_match MCTS HYBRID "03_MCTS_vs_Hybrid"
 
-run_match "$AB" "$SFULL" "04_AB_vs_Stockfish"
-run_match "$AB" "$BERSERK_E" "05_AB_vs_Berserk"
-run_match "$AB" "$PATRICIA_E" "06_AB_vs_Patricia"
+run_match AB SFULL "04_AB_vs_Stockfish"
+run_match AB BERSERK_E "05_AB_vs_Berserk"
+run_match AB PATRICIA_E "06_AB_vs_Patricia"
 
-run_match "$MCTS" "$LC0_E" "07_MCTS_vs_Lc0"
-run_match "$MCTS" "$PATRICIA_E" "08_MCTS_vs_Patricia"
+run_match MCTS LC0_E "07_MCTS_vs_Lc0"
+run_match MCTS PATRICIA_E "08_MCTS_vs_Patricia"
 
-run_match "$HYBRID" "$SL15" "09_Hybrid_vs_Stockfish-L15"
-run_match "$HYBRID" "$BERSERK_E" "10_Hybrid_vs_Berserk"
-run_match "$HYBRID" "$PATRICIA_E" "11_Hybrid_vs_Patricia"
-run_match "$HYBRID" "$LC0_E" "12_Hybrid_vs_Lc0"
+run_match HYBRID SL15 "09_Hybrid_vs_Stockfish-L15"
+run_match HYBRID BERSERK_E "10_Hybrid_vs_Berserk"
+run_match HYBRID PATRICIA_E "11_Hybrid_vs_Patricia"
+run_match HYBRID LC0_E "12_Hybrid_vs_Lc0"
 
 echo ""
 echo "============================================"

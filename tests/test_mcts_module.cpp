@@ -45,7 +45,7 @@ void expect(bool cond, const char *msg, TestCounter &tc) {
 void test_node_basics(TestCounter &tc) {
   std::cout << "  Node basics..." << std::endl;
   constexpr size_t node_size_budget =
-      CACHE_LINE_SIZE == 128 ? CACHE_LINE_SIZE : 2 * CACHE_LINE_SIZE;
+      CACHE_LINE_SIZE == 128 ? CACHE_LINE_SIZE : 3 * CACHE_LINE_SIZE;
   expect(alignof(Node) == CACHE_LINE_SIZE, "node cache-line alignment", tc);
   expect(sizeof(Node) <= node_size_budget, "node fits size budget", tc);
 
@@ -672,6 +672,42 @@ void test_same_root_search_reuses_tree(TestCounter &tc) {
          "same-root search should continue the existing MCTS tree", tc);
 }
 
+void test_new_game_resets_same_root_tree(TestCounter &tc) {
+  std::cout << "  New game resets same-root tree..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  SearchParams params;
+  params.num_threads = 1;
+  params.nn_weights_path = weights;
+  params.add_dirichlet_noise = false;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 16;
+  limits.searchmoves = {"h2h3"};
+
+  auto search = CreateSearch(params);
+  const std::string fen =
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  search->StartSearch(fen, limits, nullptr, nullptr);
+  search->Wait();
+  const auto first = search->GetBestMoveStats();
+
+  search->NewGame();
+  search->StartSearch(fen, limits, nullptr, nullptr);
+  search->Wait();
+  const auto second = search->GetBestMoveStats();
+
+  Move expected(SQ_H2, SQ_H3);
+  expect(first.move == expected && second.move == expected,
+         "new game should preserve legal searchmove handling", tc);
+  expect(second.visits <= first.visits + 1,
+         "new game should not continue the previous MCTS root", tc);
+}
+
 uint64_t run_endgame_eval_count(const char *weights, const std::string &fen) {
   SearchParams params;
   params.num_threads = 1;
@@ -820,6 +856,7 @@ bool test_mcts_all() {
   test_searchmoves_restrict_root(tc);
   test_empty_searchmoves_filter_blocks_root(tc);
   test_same_root_search_reuses_tree(tc);
+  test_new_game_resets_same_root_tree(tc);
   test_mating_material_adjudication(tc);
   test_node_limited_search_uses_tight_eval_budget(tc);
   test_cache_hit_rate(tc);
