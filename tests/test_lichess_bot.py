@@ -36,6 +36,53 @@ def test_reader_uses_launch_queue() -> None:
     expect("new queue untouched", new_queue.empty())
 
 
+def test_live_defaults_avoid_crash_prone_resources() -> None:
+    options, profile = lichess_bot.build_engine_options()
+
+    expect("syzygy default disabled", "SyzygyPath" not in options)
+    expect("resource reserve", lichess_bot.RESOURCE_RESERVE_MB >= 1024)
+    expect("thread lower bound", int(options["Threads"]) >= 3)
+    expect(
+        "thread upper bound",
+        int(options["Threads"]) <= lichess_bot.MAX_SEARCH_WORKERS,
+    )
+    expect("hash lower bound", int(options["Hash"]) >= 512)
+    expect(
+        "profile mirrors threads",
+        int(profile["threads"]) == int(options["Threads"]),
+    )
+
+
+def test_engine_configure_applies_changed_options() -> None:
+    engine = object.__new__(lichess_bot.UCIEngine)
+    engine.options = {"Hash": "1024", "Threads": "8"}
+    sent: list[str] = []
+
+    def send(command: str) -> None:
+        sent.append(command)
+
+    def wait_for(prefix: str, timeout: float = 60) -> str:
+        expect("configure ready wait", prefix == "readyok")
+        return "readyok"
+
+    engine.stop_pondering = lambda: True
+    engine._send = send
+    engine._wait_for = wait_for
+
+    engine.configure({"Hash": "2048", "Threads": "8", "Ponder": "false"})
+
+    expect(
+        "changed options sent",
+        sent
+        == [
+            "setoption name Hash value 2048",
+            "setoption name Ponder value false",
+            "isready",
+        ],
+    )
+    expect("options updated", engine.options["Hash"] == "2048")
+
+
 def test_ponderhit_stops_after_timeout() -> None:
     engine = object.__new__(lichess_bot.UCIEngine)
     engine._pondering = True
@@ -137,12 +184,33 @@ def test_ponder_game_circuit_breaker() -> None:
     expect("ponder disabled", not bot._ponder_allowed_for_game("game"))
 
 
+def test_quit_after_games_limit() -> None:
+    class Args:
+        quit_after_games = 1
+        seek = True
+        max_games = 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._completed_games = 0
+    bot._draining = threading.Event()
+    bot._pending_challenge_id = None
+    bot.active_games = {}
+
+    expect("seek before completed limit", bot._should_seek())
+    bot._completed_games = 1
+    expect("no seek after completed limit", not bot._should_seek())
+
+
 def main() -> int:
     test_reader_uses_launch_queue()
+    test_live_defaults_avoid_crash_prone_resources()
+    test_engine_configure_applies_changed_options()
     test_ponderhit_stops_after_timeout()
     test_submitted_turn_guard()
     test_duplicate_game_state_does_not_resubmit()
     test_ponder_game_circuit_breaker()
+    test_quit_after_games_limit()
     print("Lichess bot tests: OK")
     return 0
 

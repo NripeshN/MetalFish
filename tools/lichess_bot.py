@@ -14,12 +14,15 @@ Usage:
     python3 tools/lichess_bot.py --seek --rotate --no-casual
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
 import pathlib
 import queue
 import random
+import re
 import subprocess
 import sys
 import threading
@@ -27,7 +30,11 @@ import time
 import traceback
 
 import chess
-import requests
+
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = None
 
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = PROJ / "build" / "metalfish"
@@ -81,16 +88,23 @@ def env_bool_string(name: str, default: bool) -> str:
 
 
 PERFORMANCE_CORES = apple_performance_cores()
-SEARCH_WORKERS = max(3, PERFORMANCE_CORES or (LOGICAL_CORES - 1))
+MAX_SEARCH_WORKERS = max(3, PERFORMANCE_CORES or (LOGICAL_CORES - 1))
+REQUESTED_SEARCH_WORKERS = max(
+    0,
+    min(
+        MAX_SEARCH_WORKERS,
+        env_int("METALFISH_SEARCH_WORKERS", env_int("METALFISH_THREADS", 0)),
+    ),
+)
 HYBRID_MCTS_THREADS = max(
     0,
-    min(SEARCH_WORKERS - 1, env_int("METALFISH_HYBRID_MCTS_THREADS", 0)),
+    min(MAX_SEARCH_WORKERS - 1, env_int("METALFISH_HYBRID_MCTS_THREADS", 0)),
 )
 HYBRID_AB_THREADS = max(
-    0, min(SEARCH_WORKERS, env_int("METALFISH_HYBRID_AB_THREADS", 0))
+    0, min(MAX_SEARCH_WORKERS, env_int("METALFISH_HYBRID_AB_THREADS", 0))
 )
 HYBRID_AUTO_AB_THREADS_CAP = max(
-    0, min(SEARCH_WORKERS, env_int("METALFISH_HYBRID_AUTO_AB_THREADS_CAP", 0))
+    0, min(MAX_SEARCH_WORKERS, env_int("METALFISH_HYBRID_AUTO_AB_THREADS_CAP", 0))
 )
 HYBRID_MCTS_KLD = max(0.0, min(1.0, env_float("METALFISH_HYBRID_MCTS_KLD", 0.0)))
 HYBRID_MCTS_ROOT_REJECT = env_bool_string("METALFISH_HYBRID_MCTS_ROOT_REJECT", True)
@@ -113,6 +127,8 @@ TRANSFORMER_LOW_TIME_FALLBACK_MS = max(
 TRANSFORMER_MIN_MOVE_BUDGET_MS = max(
     0, min(5000, env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 400))
 )
+SYZYGY_PATH = os.environ.get("METALFISH_SYZYGY_PATH", "").strip()
+RESOURCE_RESERVE_MB = max(1024, env_int("METALFISH_RESOURCE_RESERVE_MB", 2048))
 BOOK_MAX_PLY = 10
 BOOK_MIN_CLOCK_MS = 30_000
 BOOK_TIMEOUT_S = 0.25
@@ -135,17 +151,109 @@ def machine_memory_mb() -> int:
     return 0
 
 
-def local_hash_mb() -> int:
+def available_memory_mb() -> int:
+    if sys.platform == "darwin":
+        try:
+            page_size = int(
+                subprocess.check_output(
+                    ["sysctl", "-n", "hw.pagesize"],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
+            )
+            out = subprocess.check_output(
+                ["vm_stat"], text=True, stderr=subprocess.DEVNULL
+            )
+            pages: dict[str, int] = {}
+            for line in out.splitlines():
+                match = re.match(r"Pages ([^:]+):\s+([0-9]+)\.", line.strip())
+                if match:
+                    pages[match.group(1)] = int(match.group(2))
+            free_pages = pages.get("free", 0)
+            speculative_pages = pages.get("speculative", 0)
+            purgeable_pages = pages.get("purgeable", 0)
+            inactive_pages = pages.get("inactive", 0)
+            available_pages = (
+                free_pages
+                + speculative_pages
+                + purgeable_pages
+                + inactive_pages // 2
+            )
+            return (available_pages * page_size) // (1024 * 1024)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+
+    meminfo = pathlib.Path("/proc/meminfo")
+    if meminfo.exists():
+        try:
+            for line in meminfo.read_text().splitlines():
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+        except (OSError, ValueError):
+            pass
+
+    return 0
+
+
+def system_load_ratio() -> float:
+    try:
+        return os.getloadavg()[0] / max(1, LOGICAL_CORES)
+    except (AttributeError, OSError):
+        return 0.0
+
+
+def dynamic_search_workers(active_peer_engines: int = 0) -> int:
+    if REQUESTED_SEARCH_WORKERS > 0:
+        return REQUESTED_SEARCH_WORKERS
+
+    workers = MAX_SEARCH_WORKERS
+    available_mb = available_memory_mb()
+
+    if active_peer_engines > 0:
+        workers = max(3, workers // (active_peer_engines + 1))
+
+    if available_mb and available_mb < RESOURCE_RESERVE_MB:
+        workers -= 2
+    elif available_mb and available_mb < RESOURCE_RESERVE_MB * 2:
+        workers -= 1
+
+    return max(3, min(MAX_SEARCH_WORKERS, workers))
+
+
+def local_hash_mb(active_peer_engines: int = 0) -> int:
+    requested = env_int("METALFISH_HASH_MB", 0)
+    if requested > 0:
+        return max(128, min(32768, requested))
+
     memory_mb = machine_memory_mb()
     if memory_mb <= 0:
-        return 8192
-    target = (memory_mb * 3) // 8
-    return max(1024, min(16384, (target // 1024) * 1024))
+        return 4096
+
+    available_mb = available_memory_mb()
+    engine_count = max(1, active_peer_engines + 1)
+    if available_mb > 0:
+        target = (available_mb - RESOURCE_RESERVE_MB) // engine_count
+    else:
+        target = (memory_mb * 3 // 8) // engine_count
+
+    target = min(target, (memory_mb * 3) // 4, 32768)
+
+    if target >= 1024:
+        return max(1024, (target // 1024) * 1024)
+    return max(512, (target // 256) * 256)
 
 
-ENGINE_OPTIONS = {
-    "Threads": str(SEARCH_WORKERS),
-    "Hash": str(local_hash_mb()),
+def live_resource_profile(active_peer_engines: int = 0) -> dict[str, float | int]:
+    return {
+        "threads": dynamic_search_workers(active_peer_engines),
+        "hash_mb": local_hash_mb(active_peer_engines),
+        "available_mb": available_memory_mb(),
+        "total_mb": machine_memory_mb(),
+        "load_ratio": system_load_ratio(),
+    }
+
+
+BASE_ENGINE_OPTIONS = {
     "Ponder": "true",
     "UseMCTS": "false",
     "UseHybridSearch": "true",
@@ -174,10 +282,45 @@ ENGINE_OPTIONS = {
     "MCTSSmartPruningFactor": "1.33",
     "MCTSCacheHistoryLength": "0",
     "MCTSSolidTreeThreshold": "100",
-    "SyzygyPath": str(PROJ / "syzygy"),
-    "SyzygyProbeDepth": "2",
-    "SyzygyProbeLimit": "6",
 }
+
+if SYZYGY_PATH:
+    BASE_ENGINE_OPTIONS["SyzygyPath"] = SYZYGY_PATH
+    BASE_ENGINE_OPTIONS["SyzygyProbeDepth"] = "2"
+    BASE_ENGINE_OPTIONS["SyzygyProbeLimit"] = "6"
+
+
+def build_engine_options(active_peer_engines: int = 0) -> tuple[dict[str, str], dict]:
+    profile = live_resource_profile(active_peer_engines)
+    threads = int(profile["threads"])
+    options = dict(BASE_ENGINE_OPTIONS)
+    options["Threads"] = str(threads)
+    options["Hash"] = str(int(profile["hash_mb"]))
+
+    if HYBRID_MCTS_THREADS > 0:
+        mcts_threads = min(HYBRID_MCTS_THREADS, max(1, threads - 1))
+        options["HybridMCTSThreads"] = str(mcts_threads)
+        options["MCTSMaxThreads"] = str(mcts_threads)
+    else:
+        options["HybridMCTSThreads"] = "0"
+        options["MCTSMaxThreads"] = "0"
+
+    if HYBRID_AB_THREADS > 0:
+        options["HybridABThreads"] = str(min(HYBRID_AB_THREADS, threads))
+    else:
+        options["HybridABThreads"] = "0"
+
+    if HYBRID_AUTO_AB_THREADS_CAP > 0:
+        options["HybridAutoABThreadsCap"] = str(
+            min(HYBRID_AUTO_AB_THREADS_CAP, threads)
+        )
+    else:
+        options["HybridAutoABThreadsCap"] = "0"
+
+    return options, profile
+
+
+ENGINE_OPTIONS, RESOURCE_PROFILE = build_engine_options()
 
 ROTATION_TCS = [
     (900, 10),  # 15+10 rapid
@@ -235,6 +378,8 @@ class UCIEngine:
         self.proc: subprocess.Popen | None = None
         self._output: queue.Queue[str | None] = queue.Queue()
         self._reader_thread: threading.Thread | None = None
+        self._stderr_tail: list[str] = []
+        self._stderr_thread: threading.Thread | None = None
         self._pondering = False
         self._ponder_move: str | None = None
         self._launch()
@@ -248,20 +393,28 @@ class UCIEngine:
                 [str(self.path)],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
                 env=env,
             )
             output: queue.Queue[str | None] = queue.Queue()
+            stderr_tail: list[str] = []
             self.proc = proc
             self._output = output
+            self._stderr_tail = stderr_tail
             self._reader_thread = threading.Thread(
                 target=self._read_stdout,
                 args=(proc.stdout, output),
                 daemon=True,
             )
             self._reader_thread.start()
+            self._stderr_thread = threading.Thread(
+                target=self._read_stderr,
+                args=(proc.stderr, stderr_tail),
+                daemon=True,
+            )
+            self._stderr_thread.start()
             self._send("uci")
             self._wait_for("uciok")
             for name, value in self.options.items():
@@ -278,7 +431,7 @@ class UCIEngine:
                 except Exception:
                     pass
             if proc is not None:
-                for stream in (proc.stdin, proc.stdout):
+                for stream in (proc.stdin, proc.stdout, proc.stderr):
                     try:
                         if stream:
                             stream.close()
@@ -296,6 +449,23 @@ class UCIEngine:
                 output.put(line.strip())
         finally:
             output.put(None)
+
+    @staticmethod
+    def _read_stderr(stream, tail: list[str]):
+        if stream is None:
+            return
+        for line in stream:
+            tail.append(line.strip())
+            if len(tail) > 20:
+                tail.pop(0)
+
+    def _diagnostic_tail(self) -> str:
+        parts = []
+        if self.proc is not None and self.proc.poll() is not None:
+            parts.append(f"exit={self.proc.returncode}")
+        if self._stderr_tail:
+            parts.append("stderr=" + " | ".join(self._stderr_tail[-3:]))
+        return " (" + "; ".join(parts) + ")" if parts else ""
 
     def _send(self, cmd: str):
         try:
@@ -316,10 +486,10 @@ class UCIEngine:
                 line = self._output.get(timeout=min(0.1, remaining))
             except queue.Empty:
                 if self.proc.poll() is not None:
-                    raise RuntimeError("Engine process died")
+                    raise RuntimeError(f"Engine process died{self._diagnostic_tail()}")
                 continue
             if line is None:
-                raise RuntimeError("Engine closed stdout")
+                raise RuntimeError(f"Engine closed stdout{self._diagnostic_tail()}")
             if line.startswith(prefix):
                 return line
         raise TimeoutError(f"Timeout waiting for '{prefix}'")
@@ -345,7 +515,7 @@ class UCIEngine:
                 except Exception:
                     pass
             finally:
-                for stream in (self.proc.stdin, self.proc.stdout):
+                for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
                     try:
                         if stream:
                             stream.close()
@@ -353,6 +523,20 @@ class UCIEngine:
                         pass
         self._launch()
         self.new_game()
+
+    def configure(self, options: dict[str, str]):
+        self.stop_pondering()
+        changed = False
+        for name, value in options.items():
+            value = str(value)
+            if self.options.get(name) == value:
+                continue
+            self._send(f"setoption name {name} value {value}")
+            changed = True
+        self.options = dict(options)
+        if changed:
+            self._send("isready")
+            self._wait_for("readyok", timeout=120)
 
     def new_game(self):
         self.stop_pondering()
@@ -527,7 +711,7 @@ class UCIEngine:
                 pass
         finally:
             if self.proc is not None:
-                for stream in (self.proc.stdin, self.proc.stdout):
+                for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
                     try:
                         if stream:
                             stream.close()
@@ -624,11 +808,13 @@ class LichessBot:
         self._declined_cooldown: dict[str, float] = {}  # bot_id -> timestamp
         self._rate_limit_count = 0
         self._tc_failures = 0
+        self._completed_games = 0
         self._seek_lock = threading.Lock()
         self._submitted_turns: dict[str, tuple[str, ...]] = {}
         self._submitted_turns_lock = threading.Lock()
         self._ponder_disabled_games: set[str] = set()
         self._ponder_disabled_lock = threading.Lock()
+        self._last_resource_profile: dict[str, float | int] | None = None
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -697,9 +883,34 @@ class LichessBot:
         if not self.abort_game(game_id):
             self.resign(game_id)
 
-    def _create_engine(self, *, preload_transformer: bool) -> UCIEngine:
-        options = dict(ENGINE_OPTIONS)
+    def _active_peer_engines(self) -> int:
+        return max(0, len(self.active_games) - 1)
+
+    def _live_engine_options(self) -> tuple[dict[str, str], dict]:
+        options, profile = build_engine_options(self._active_peer_engines())
         options["Ponder"] = "true" if self.args.ponder else "false"
+        return options, profile
+
+    def _print_resource_profile(self, game_id: str | None, profile: dict) -> None:
+        prefix = f"  [{game_id}] " if game_id else "  "
+        available_mb = int(profile.get("available_mb", 0))
+        total_mb = int(profile.get("total_mb", 0))
+        load_ratio = float(profile.get("load_ratio", 0.0))
+        memory = (
+            f"{available_mb}/{total_mb} MB"
+            if available_mb and total_mb
+            else "unknown"
+        )
+        print(
+            f"{prefix}Resources: {int(profile['threads'])} search threads, "
+            f"Hash {int(profile['hash_mb'])} MB, "
+            f"memory available {memory}, reserve {RESOURCE_RESERVE_MB} MB, "
+            f"load {load_ratio:.2f}"
+        )
+
+    def _create_engine(self, *, preload_transformer: bool) -> UCIEngine:
+        options, profile = self._live_engine_options()
+        self._last_resource_profile = profile
         return UCIEngine(
             ENGINE,
             options,
@@ -718,14 +929,32 @@ class LichessBot:
             self._warm_engine = None
             return
         elapsed = time.time() - start
-        print(f"  Engine ready ({elapsed:.1f}s warmup)")
+        profile = self._last_resource_profile or RESOURCE_PROFILE
+        print(
+            f"  Engine ready ({elapsed:.1f}s warmup, "
+            f"{int(profile['threads'])}T, Hash {int(profile['hash_mb'])} MB)"
+        )
 
-    def _acquire_engine(self) -> UCIEngine:
+    def _acquire_engine(self, game_id: str | None = None) -> UCIEngine:
+        options, profile = self._live_engine_options()
         if self._warm_engine is not None:
             engine = self._warm_engine
             self._warm_engine = None
+            try:
+                engine.configure(options)
+            except Exception:
+                engine.quit()
+                engine = UCIEngine(
+                    ENGINE,
+                    options,
+                    preload_transformer=True,
+                )
+            self._last_resource_profile = profile
+            self._print_resource_profile(game_id, profile)
             return engine
-        return self._create_engine(preload_transformer=False)
+        self._last_resource_profile = profile
+        self._print_resource_profile(game_id, profile)
+        return UCIEngine(ENGINE, options, preload_transformer=False)
 
     def _close_warm_engine(self):
         if self._warm_engine is None:
@@ -733,9 +962,95 @@ class LichessBot:
         self._warm_engine.quit()
         self._warm_engine = None
 
+    def _validate_self_test_move(
+        self, label: str, move: str, board: chess.Board
+    ) -> None:
+        if move in ("0000", "(none)", ""):
+            raise RuntimeError(f"{label}: engine returned no move")
+        parsed = self._normalize_uci_move(move, board)
+        if parsed is None:
+            raise RuntimeError(f"{label}: illegal move {move} for {board.fen()}")
+
+    def _run_engine_self_test(self) -> bool:
+        print("  Engine self-test: UCI, search, ponder, and recovery probes...")
+        engine = self._warm_engine
+        created_engine = False
+        if engine is None:
+            try:
+                engine = self._create_engine(preload_transformer=True)
+                created_engine = True
+            except Exception as e:
+                print(f"  Engine self-test failed during startup: {e}")
+                return False
+
+        try:
+            engine.new_game()
+
+            board = chess.Board()
+            engine.set_position("startpos", [])
+            best, ponder = engine.go(movetime=150, timeout=10)
+            self._validate_self_test_move("quick search", best, board)
+            print(f"  Engine self-test: quick search {best}")
+
+            engine.start_pondering(
+                "startpos",
+                [],
+                "e2e4",
+                wtime=60_000,
+                btime=60_000,
+                winc=1_000,
+                binc=1_000,
+            )
+            time.sleep(0.2)
+            if not engine.stop_pondering(timeout=PONDER_STOP_TIMEOUT_S):
+                raise RuntimeError("ponder stop did not return bestmove")
+            print("  Engine self-test: ponder stop OK")
+
+            ponder_board = chess.Board()
+            ponder_board.push(chess.Move.from_uci("e2e4"))
+            engine.start_pondering(
+                "startpos",
+                [],
+                "e2e4",
+                wtime=60_000,
+                btime=60_000,
+                winc=1_000,
+                binc=1_000,
+            )
+            time.sleep(0.2)
+            best, ponder = engine.ponderhit(timeout=10)
+            self._validate_self_test_move("ponderhit", best, ponder_board)
+            print(f"  Engine self-test: ponderhit {best}")
+
+            if SYZYGY_PATH:
+                tb_board = chess.Board("7k/8/8/8/8/8/QRR5/K7 w - - 0 1")
+                engine.set_position(tb_board.fen(), [])
+                best, _ = engine.go(movetime=100, timeout=10)
+                self._validate_self_test_move("syzygy probe", best, tb_board)
+                print("  Engine self-test: Syzygy probe OK")
+            else:
+                print("  Engine self-test: Syzygy probe skipped (disabled)")
+
+            engine.new_game()
+            print("  Engine self-test: OK")
+            return True
+        except Exception as e:
+            diagnostic = engine._diagnostic_tail() if engine is not None else ""
+            print(f"  Engine self-test failed: {e}{diagnostic}")
+            if engine is self._warm_engine:
+                self._close_warm_engine()
+            return False
+        finally:
+            if created_engine and engine is not None:
+                engine.quit()
+
     def _reserved_games(self) -> int:
         pending = 1 if self._pending_challenge_id else 0
         return len(self.active_games) + pending
+
+    def _completed_limit_reached(self) -> bool:
+        limit = getattr(self.args, "quit_after_games", 0) or 0
+        return limit > 0 and self._completed_games >= limit
 
     def _challenge_id_from_response(self, response: requests.Response) -> str | None:
         try:
@@ -1075,6 +1390,7 @@ class LichessBot:
         return (
             self.args.seek
             and not self._draining.is_set()
+            and not self._completed_limit_reached()
             and self._reserved_games() < self.args.max_games
         )
 
@@ -1111,7 +1427,7 @@ class LichessBot:
         print(f"  [{game_id}] Starting...")
         engine = None
         try:
-            engine = self._acquire_engine()
+            engine = self._acquire_engine(game_id)
             engine.new_game()
             self._game_loop(game_id, engine)
         except Exception as e:
@@ -1125,8 +1441,15 @@ class LichessBot:
             with self._ponder_disabled_lock:
                 self._ponder_disabled_games.discard(game_id)
             self.active_games.pop(game_id, None)
+            self._completed_games += 1
             print(f"  [{game_id}] Finished.")
-            if self._draining.is_set():
+            if self._completed_limit_reached():
+                print(
+                    f"  Completed {self._completed_games} game(s); shutting down."
+                )
+                self._draining.set()
+                self._shutdown.set()
+            elif self._draining.is_set():
                 if not self.active_games:
                     self._shutdown.set()
             elif self._should_seek():
@@ -1719,18 +2042,25 @@ class LichessBot:
             )
         else:
             tc_mode = self.args.tc or "5+3"
-        hash_mb = ENGINE_OPTIONS["Hash"]
+        header_options, header_profile = build_engine_options()
         if HYBRID_MCTS_THREADS == 0 and HYBRID_AB_THREADS == 0:
             cap = (
-                "uncapped"
+                "auto"
                 if HYBRID_AUTO_AB_THREADS_CAP == 0
                 else f"AB cap {HYBRID_AUTO_AB_THREADS_CAP}"
             )
-            hybrid_split = f"auto split ({cap}) + GPU"
+            hybrid_split = f"{cap} split + GPU"
         else:
             hybrid_split = (
                 f"AB {HYBRID_AB_THREADS}T + MCTS {HYBRID_MCTS_THREADS}T + GPU"
             )
+        available_mb = int(header_profile.get("available_mb", 0))
+        total_mb = int(header_profile.get("total_mb", 0))
+        memory = (
+            f"{available_mb}/{total_mb} MB"
+            if available_mb and total_mb
+            else "unknown"
+        )
         print("=" * 60)
         print(f"  MetalFish Lichess Bot")
         print(f"  Account:  {self.username}")
@@ -1739,12 +2069,17 @@ class LichessBot:
             f"{' + Ponder' if self.args.ponder else ''})"
         )
         print(
-            f"  Workers:  {SEARCH_WORKERS} search + 1 coordinator "
+            f"  Workers:  dynamic up to {MAX_SEARCH_WORKERS} search + 1 coordinator "
             f"| CPU: {LOGICAL_CORES} logical"
         )
-        print(f"  Hash:     {hash_mb} MB | Network: BT4-1024x15x32h")
         print(
-            f"  Clock:    Move overhead {ENGINE_OPTIONS['Move Overhead']} ms "
+            f"  Initial:  {int(header_profile['threads'])} search threads "
+            f"| Hash {header_options['Hash']} MB | Free {memory}"
+        )
+        print(f"  Reserve:  {RESOURCE_RESERVE_MB} MB | Network: BT4-1024x15x32h")
+        print(f"  Syzygy:   {SYZYGY_PATH if SYZYGY_PATH else 'disabled'}")
+        print(
+            f"  Clock:    Move overhead {BASE_ENGINE_OPTIONS['Move Overhead']} ms "
             f"| hard cap {MAX_SEARCH_TIMEOUT_S:.0f}s"
         )
         print(
@@ -1756,9 +2091,14 @@ class LichessBot:
         )
         print(f"  Seek:     {self.args.seek} | TC: {tc_mode}")
         print(f"  Max games: {self.args.max_games}")
+        if self.args.quit_after_games:
+            print(f"  Quit after: {self.args.quit_after_games} completed game(s)")
         print("=" * 60)
 
         self._prepare_warm_engine()
+        if self.args.engine_self_test and not self._run_engine_self_test():
+            self._close_warm_engine()
+            sys.exit(1)
         self._start_stdin_watcher()
         print("\nListening... (Ctrl+C to stop, Ctrl+D to drain after current game)\n")
 
@@ -1889,6 +2229,12 @@ def main():
         "--max-games", type=int, default=1, help="Max concurrent games (default: 1)"
     )
     parser.add_argument(
+        "--quit-after-games",
+        type=int,
+        default=0,
+        help="Stop the bot after this many completed games (default: run until stopped)",
+    )
+    parser.add_argument(
         "--seek",
         action="store_true",
         default=False,
@@ -1939,6 +2285,25 @@ def main():
         help="Disable pondering",
     )
     parser.add_argument(
+        "--engine-self-test",
+        dest="engine_self_test",
+        action="store_true",
+        default=True,
+        help="Run startup engine probes before listening to Lichess (default)",
+    )
+    parser.add_argument(
+        "--no-engine-self-test",
+        dest="engine_self_test",
+        action="store_false",
+        help="Skip startup engine probes",
+    )
+    parser.add_argument(
+        "--self-test-only",
+        action="store_true",
+        default=False,
+        help="Run the engine self-test and exit without connecting to Lichess",
+    )
+    parser.add_argument(
         "--elo-seek",
         action="store_true",
         default=False,
@@ -1964,6 +2329,15 @@ def main():
         sys.exit(1)
     if not WEIGHTS.exists():
         print(f"ERROR: Weights not found at {WEIGHTS}")
+        sys.exit(1)
+
+    if args.self_test_only:
+        bot = LichessBot("", args)
+        sys.exit(0 if bot._run_engine_self_test() else 1)
+
+    if requests is None:
+        print("ERROR: Python package 'requests' is required for Lichess API mode.")
+        print("Install it in this environment or run with the project Python.")
         sys.exit(1)
 
     api_key = load_api_key()
