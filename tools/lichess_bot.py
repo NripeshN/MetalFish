@@ -127,10 +127,47 @@ TRANSFORMER_LOW_TIME_FALLBACK_MS = max(
 TRANSFORMER_MIN_MOVE_BUDGET_MS = max(
     0, min(5000, env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 400))
 )
-SYZYGY_PATH = os.environ.get("METALFISH_SYZYGY_PATH", "").strip()
+DEFAULT_SYZYGY_PATH = PROJ / "syzygy"
+
+
+def syzygy_path_is_safe(path: pathlib.Path) -> bool:
+    if not path.is_dir():
+        return False
+    if not any(path.glob("*.rtbw")) or not any(path.glob("*.rtbz")):
+        return False
+    try:
+        import chess.syzygy
+
+        with chess.syzygy.open_tablebase(str(path)) as tablebase:
+            for fen in (
+                "7k/8/8/8/8/8/QRR5/K7 w - - 0 1",
+                "7k/8/8/8/8/8/6R1/K7 w - - 0 1",
+            ):
+                board = chess.Board(fen)
+                tablebase.probe_wdl(board)
+                tablebase.probe_dtz(board)
+            if (path / "KPPvKPP.rtbw").exists():
+                board = chess.Board("7k/6pp/8/8/8/8/1PP5/K7 w - - 0 1")
+                tablebase.probe_wdl(board)
+        return True
+    except Exception:
+        return False
+
+
+def resolve_syzygy_path() -> str:
+    explicit = os.environ.get("METALFISH_SYZYGY_PATH", "").strip()
+    candidates = [pathlib.Path(explicit)] if explicit else [DEFAULT_SYZYGY_PATH]
+    for path in candidates:
+        if syzygy_path_is_safe(path):
+            return str(path)
+    return ""
+
+
+SYZYGY_PATH = resolve_syzygy_path()
 RESOURCE_RESERVE_MB = max(1024, env_int("METALFISH_RESOURCE_RESERVE_MB", 2048))
 BOOK_MAX_PLY = 10
 BOOK_MIN_CLOCK_MS = 30_000
+SUBMITTED_TURN_HISTORY_LIMIT = 512
 BOOK_TIMEOUT_S = 0.25
 ENGINE_STOP_GRACE_S = 3.0
 PONDER_STOP_TIMEOUT_S = 4.0
@@ -174,10 +211,7 @@ def available_memory_mb() -> int:
             purgeable_pages = pages.get("purgeable", 0)
             inactive_pages = pages.get("inactive", 0)
             available_pages = (
-                free_pages
-                + speculative_pages
-                + purgeable_pages
-                + inactive_pages // 2
+                free_pages + speculative_pages + purgeable_pages + inactive_pages // 2
             )
             return (available_pages * page_size) // (1024 * 1024)
         except (OSError, subprocess.SubprocessError, ValueError):
@@ -467,14 +501,25 @@ class UCIEngine:
             parts.append("stderr=" + " | ".join(self._stderr_tail[-3:]))
         return " (" + "; ".join(parts) + ")" if parts else ""
 
-    def _send(self, cmd: str):
+    def _send(self, cmd: str, *, ignore_errors: bool = False):
         try:
             if self.proc is None or self.proc.stdin is None:
-                return
+                if ignore_errors:
+                    return
+                raise RuntimeError("Engine process is not running")
+            if self.proc.poll() is not None:
+                if ignore_errors:
+                    return
+                raise RuntimeError(f"Engine process died{self._diagnostic_tail()}")
+            assert self.proc.stdin is not None
             self.proc.stdin.write(cmd + "\n")
             self.proc.stdin.flush()
-        except (BrokenPipeError, OSError):
-            pass
+        except (BrokenPipeError, OSError) as exc:
+            if ignore_errors:
+                return
+            raise RuntimeError(
+                f"Engine stdin write failed{self._diagnostic_tail()}"
+            ) from exc
 
     def _wait_for(self, prefix: str, timeout: float = 60) -> str:
         deadline = time.time() + timeout
@@ -506,7 +551,7 @@ class UCIEngine:
         self._ponder_move = None
         if self.proc is not None:
             try:
-                self._send("quit")
+                self._send("quit", ignore_errors=True)
                 self.proc.wait(timeout=2)
             except Exception:
                 try:
@@ -650,8 +695,8 @@ class UCIEngine:
         """Opponent played the predicted move; use the current ponder result."""
         if not self._pondering:
             return "0000", None
-        self._send("ponderhit")
         try:
+            self._send("ponderhit")
             try:
                 line = self._wait_for("bestmove", timeout=timeout)
             except TimeoutError:
@@ -675,8 +720,8 @@ class UCIEngine:
             return True
 
         ok = True
-        self._send("stop")
         try:
+            self._send("stop")
             self._wait_for("bestmove", timeout=timeout)
         except (TimeoutError, RuntimeError):
             ok = False
@@ -700,7 +745,7 @@ class UCIEngine:
     def quit(self):
         self.stop_pondering(restart_on_failure=False)
         try:
-            self._send("quit")
+            self._send("quit", ignore_errors=True)
             if self.proc is not None:
                 self.proc.wait(timeout=5)
         except Exception:
@@ -810,11 +855,13 @@ class LichessBot:
         self._tc_failures = 0
         self._completed_games = 0
         self._seek_lock = threading.Lock()
-        self._submitted_turns: dict[str, tuple[str, ...]] = {}
+        self._submitted_turns: dict[str, list[tuple[str, ...]]] = {}
+        self._max_seen_ply: dict[str, int] = {}
         self._submitted_turns_lock = threading.Lock()
         self._ponder_disabled_games: set[str] = set()
         self._ponder_disabled_lock = threading.Lock()
         self._last_resource_profile: dict[str, float | int] | None = None
+        self._last_move_failure_detail = ""
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -838,10 +885,12 @@ class LichessBot:
         self.api_post(f"/challenge/{challenge_id}/decline", json={"reason": reason})
 
     def make_move(self, game_id: str, move: str) -> bool:
+        self._last_move_failure_detail = ""
         r = self.api_post(f"/bot/game/{game_id}/move/{move}")
         if r.status_code != 200:
             detail = r.text.strip().replace("\n", " ")[:200]
             suffix = f": {detail}" if detail else ""
+            self._last_move_failure_detail = f"{r.status_code}{suffix}"
             print(f"  [{game_id}] Move {move} failed: {r.status_code}{suffix}")
             return False
         return True
@@ -849,12 +898,55 @@ class LichessBot:
     def _already_submitted_for_turn(self, game_id: str, moves: list[str]) -> bool:
         key = tuple(moves)
         with self._submitted_turns_lock:
-            return self._submitted_turns.get(game_id) == key
+            return key in self._submitted_turns.get(game_id, [])
+
+    def _remember_stream_ply(self, game_id: str, moves: list[str]) -> bool:
+        ply = len(moves)
+        with self._submitted_turns_lock:
+            if not hasattr(self, "_max_seen_ply"):
+                self._max_seen_ply = {}
+            max_seen = self._max_seen_ply.get(game_id, -1)
+            if ply < max_seen:
+                return False
+            self._max_seen_ply[game_id] = ply
+            return True
 
     def _record_submitted_turn(self, game_id: str, moves: list[str]) -> None:
         key = tuple(moves)
         with self._submitted_turns_lock:
-            self._submitted_turns[game_id] = key
+            history = self._submitted_turns.setdefault(game_id, [])
+            if key in history:
+                return
+            history.append(key)
+            overflow = len(history) - SUBMITTED_TURN_HISTORY_LIMIT
+            if overflow > 0:
+                del history[:overflow]
+
+    def _move_failure_looks_stale(self) -> bool:
+        detail = self._last_move_failure_detail.lower()
+        return any(
+            marker in detail
+            for marker in (
+                "not your turn",
+                "game already over",
+                "cannot move",
+                "no piece",
+                "illegal move",
+            )
+        )
+
+    def _submit_move(self, game_id: str, moves: list[str], move: str) -> bool:
+        if self.make_move(game_id, move):
+            self._record_submitted_turn(game_id, moves)
+            return True
+
+        if self._move_failure_looks_stale():
+            self._record_submitted_turn(game_id, moves)
+            print(
+                f"  [{game_id}] Suppressing retries for stale turn after "
+                f"rejected move {move}"
+            )
+        return False
 
     def _ponder_allowed_for_game(self, game_id: str) -> bool:
         with self._ponder_disabled_lock:
@@ -897,9 +989,7 @@ class LichessBot:
         total_mb = int(profile.get("total_mb", 0))
         load_ratio = float(profile.get("load_ratio", 0.0))
         memory = (
-            f"{available_mb}/{total_mb} MB"
-            if available_mb and total_mb
-            else "unknown"
+            f"{available_mb}/{total_mb} MB" if available_mb and total_mb else "unknown"
         )
         print(
             f"{prefix}Resources: {int(profile['threads'])} search threads, "
@@ -1023,11 +1113,15 @@ class LichessBot:
             print(f"  Engine self-test: ponderhit {best}")
 
             if SYZYGY_PATH:
-                tb_board = chess.Board("7k/8/8/8/8/8/QRR5/K7 w - - 0 1")
+                tb_board = chess.Board("8/8/8/8/8/8/P1k5/K7 w - - 0 1")
                 engine.set_position(tb_board.fen(), [])
                 best, _ = engine.go(movetime=100, timeout=10)
                 self._validate_self_test_move("syzygy probe", best, tb_board)
-                print("  Engine self-test: Syzygy probe OK")
+                if self._normalize_uci_move(best, tb_board).uci() != "a2a4":
+                    raise RuntimeError(
+                        f"syzygy probe: expected tablebase win a2a4, got {best}"
+                    )
+                print("  Engine self-test: Syzygy root ranking OK")
             else:
                 print("  Engine self-test: Syzygy probe skipped (disabled)")
 
@@ -1064,6 +1158,23 @@ class LichessBot:
         if isinstance(data, dict) and data.get("id"):
             return str(data["id"])
         return None
+
+    def _challenge_event_identity(self, event: dict) -> tuple[str | None, str | None]:
+        ch = event.get("challenge") if isinstance(event.get("challenge"), dict) else {}
+        challenge_id = ch.get("id") or event.get("challengeId") or event.get("id")
+        target = None
+        for key in ("destUser", "challenger"):
+            user = ch.get(key)
+            if isinstance(user, dict):
+                user_id = user.get("id")
+            elif isinstance(user, str):
+                user_id = user
+            else:
+                user_id = None
+            if user_id and user_id != self.bot_id:
+                target = user_id
+                break
+        return (str(challenge_id) if challenge_id else None, target)
 
     def _clear_pending_challenge(self):
         self._pending_challenge_id = None
@@ -1438,15 +1549,14 @@ class LichessBot:
                 engine.quit()
             with self._submitted_turns_lock:
                 self._submitted_turns.pop(game_id, None)
+                self._max_seen_ply.pop(game_id, None)
             with self._ponder_disabled_lock:
                 self._ponder_disabled_games.discard(game_id)
             self.active_games.pop(game_id, None)
             self._completed_games += 1
             print(f"  [{game_id}] Finished.")
             if self._completed_limit_reached():
-                print(
-                    f"  Completed {self._completed_games} game(s); shutting down."
-                )
+                print(f"  Completed {self._completed_games} game(s); shutting down.")
                 self._draining.set()
                 self._shutdown.set()
             elif self._draining.is_set():
@@ -1536,14 +1646,18 @@ class LichessBot:
             not is_white_turn and my_color == "black"
         )
 
+        board = self._build_board(game_id, initial_fen, moves)
+        if board is None:
+            return
+
+        if not self._remember_stream_ply(game_id, moves):
+            print(f"  [{game_id}] Ignoring stale stream state at ply {len(moves)}")
+            return
+
         if not is_my_turn:
             return
 
         if self._already_submitted_for_turn(game_id, moves):
-            return
-
-        board = self._build_board(game_id, initial_fen, moves)
-        if board is None:
             return
 
         wtime, btime, winc, binc = self._clock_values(state)
@@ -1570,8 +1684,7 @@ class LichessBot:
                     if parsed is None:
                         print(f"  [{game_id}] Restarting after rejected ponder move")
                         engine.restart()
-                    elif self.make_move(game_id, parsed.uci()):
-                        self._record_submitted_turn(game_id, moves)
+                    elif self._submit_move(game_id, moves, parsed.uci()):
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Ponderhit! {move_uci}")
                         self._start_pondering_if_legal(
@@ -1600,8 +1713,7 @@ class LichessBot:
             if book_move:
                 parsed = self._parse_legal_move(game_id, book_move, board, "book")
                 if parsed is not None:
-                    if self.make_move(game_id, parsed.uci()):
-                        self._record_submitted_turn(game_id, moves)
+                    if self._submit_move(game_id, moves, parsed.uci()):
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Book: {move_uci}")
                         self._start_book_pondering(
@@ -1625,8 +1737,7 @@ class LichessBot:
             except Exception as e:
                 print(f"  [{game_id}] Engine restart failed: {e}")
                 fallback = self._fallback_move(board)
-                if fallback and self.make_move(game_id, fallback):
-                    self._record_submitted_turn(game_id, moves)
+                if fallback and self._submit_move(game_id, moves, fallback):
                     print(f"  [{game_id}] Fallback legal move: {fallback}")
                 return
 
@@ -1668,8 +1779,7 @@ class LichessBot:
                 if not best:
                     return
             parsed = self._parse_legal_move(game_id, best, board, "engine")
-            if parsed is not None and self.make_move(game_id, parsed.uci()):
-                self._record_submitted_turn(game_id, moves)
+            if parsed is not None and self._submit_move(game_id, moves, parsed.uci()):
                 move_uci = parsed.uci()
                 print(f"  [{game_id}] Engine: {move_uci}")
                 ponder_wtime, ponder_btime = self._after_search_clock(
@@ -1704,8 +1814,7 @@ class LichessBot:
             if not best:
                 return
             parsed = self._parse_legal_move(game_id, best, board, "recovery")
-            if parsed is not None and self.make_move(game_id, parsed.uci()):
-                self._record_submitted_turn(game_id, moves)
+            if parsed is not None and self._submit_move(game_id, moves, parsed.uci()):
                 print(f"  [{game_id}] Recovery: {parsed.uci()}")
 
     def _build_board(
@@ -2057,9 +2166,7 @@ class LichessBot:
         available_mb = int(header_profile.get("available_mb", 0))
         total_mb = int(header_profile.get("total_mb", 0))
         memory = (
-            f"{available_mb}/{total_mb} MB"
-            if available_mb and total_mb
-            else "unknown"
+            f"{available_mb}/{total_mb} MB" if available_mb and total_mb else "unknown"
         )
         print("=" * 60)
         print(f"  MetalFish Lichess Bot")
@@ -2204,7 +2311,17 @@ class LichessBot:
                 self._shutdown.set()
 
         elif etype in ("challengeDeclined", "challengeCanceled"):
-            target = self._pending_challenge_target
+            challenge_id, event_target = self._challenge_event_identity(event)
+            if not self._pending_challenge_id:
+                self._cooldown_bot(event_target, duration=600)
+                return
+            if challenge_id and challenge_id != self._pending_challenge_id:
+                self._cooldown_bot(event_target, duration=600)
+                return
+            if self._pending_challenge_id and not challenge_id:
+                return
+
+            target = self._pending_challenge_target or event_target
             self._cooldown_bot(target, duration=600)
             self._clear_pending_challenge()
             self._tc_failures += 1

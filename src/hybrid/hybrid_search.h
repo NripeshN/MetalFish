@@ -394,6 +394,11 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits);
 
+bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
+                             int ab_average_score, int mcts_average_score,
+                             uint64_t ab_effort, uint64_t mcts_effort,
+                             int mcts_score);
+
 bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
                               uint32_t top_visits, float top_q,
                               float top_policy, uint32_t candidate_visits,

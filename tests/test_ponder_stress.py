@@ -134,20 +134,39 @@ def main():
         proc.stdin.flush()
 
     def read_until(prefix, timeout=TIMEOUT_BESTMOVE):
+        line, _ = read_until_collect(prefix, timeout)
+        return line
+
+    def read_until_collect(prefix, timeout=TIMEOUT_BESTMOVE):
         deadline = time.time() + timeout
+        seen = []
         while time.time() < deadline:
             if proc.poll() is not None and stdout_lines.empty():
-                return None
+                return None, seen
             remaining = max(0.0, min(0.1, deadline - time.time()))
             try:
                 line = stdout_lines.get(timeout=remaining)
             except queue.Empty:
                 continue
             if line is None:
-                return None
+                return None, seen
+            seen.append(line)
             if line.startswith(prefix):
-                return line
-        return "TIMEOUT"
+                return line, seen
+        return "TIMEOUT", seen
+
+    def mcts_playouts_from_info(lines):
+        for line in reversed(lines):
+            marker = "MCTSPlayouts="
+            if marker not in line:
+                continue
+            tail = line.split(marker, 1)[1]
+            token = tail.split()[0]
+            try:
+                return int(token)
+            except ValueError:
+                return None
+        return None
 
     def read_bestmove_for(duration):
         deadline = time.time() + duration
@@ -222,6 +241,10 @@ def main():
         "stop_ok": 0,
         "followup_ok": 0,
         "pure_mcts_ponder_ok": 0,
+        "early_bestmove": 0,
+        "ponder_mcts_active": 0,
+        "low_clock_ponder_mcts_ok": 0,
+        "nbcejrue_regression_ok": 0,
         "crashes": 0,
         "timeouts": 0,
         "total": 0,
@@ -244,6 +267,12 @@ def main():
         if not alive():
             print(f"  [{i}] CRASH during ponder (exit {proc.returncode})")
             stats["crashes"] += 1
+            break
+
+        early = read_bestmove_for(0.05)
+        if early:
+            print(f"  [{i}] EARLY bestmove before ponderhit: {early}")
+            stats["early_bestmove"] += 1
             break
 
         send("ponderhit")
@@ -278,9 +307,9 @@ def main():
 
         send(pos_cmd)
         send("go ponder wtime 60000 btime 60000")
-        time.sleep(0.2)
+        time.sleep(0.6)
         send("stop")
-        r = read_until("bestmove", TIMEOUT_BESTMOVE)
+        r, stop_lines = read_until_collect("bestmove", TIMEOUT_BESTMOVE)
         if not alive():
             print(f"  [{i}] CRASH after stop-ponder (exit {proc.returncode})")
             stats["crashes"] += 1
@@ -289,10 +318,63 @@ def main():
             print(f"  [{i}] TIMEOUT after stop-ponder")
             stats["timeouts"] += 1
             continue
+        mcts_playouts = mcts_playouts_from_info(stop_lines)
+        if not mcts_playouts or mcts_playouts <= 0:
+            print(f"  [{i}] No MCTS playouts during stop-ponder")
+            stats["timeouts"] += 1
+            continue
+        stats["ponder_mcts_active"] += 1
         stats["stop_ok"] += 1
 
         if (i + 1) % 5 == 0:
             print(f"  [{i+1}/{iterations}] OK")
+
+    if alive() and stats["crashes"] == 0 and stats["timeouts"] == 0:
+        send("position startpos")
+        send("go ponder wtime 100 btime 100 winc 0 binc 0")
+        time.sleep(0.6)
+        send("stop")
+        r, low_clock_lines = read_until_collect("bestmove", TIMEOUT_BESTMOVE)
+        if r is None or r == "TIMEOUT":
+            print("  [low-clock ponder] TIMEOUT after stop")
+            stats["timeouts"] += 1
+        else:
+            mcts_playouts = mcts_playouts_from_info(low_clock_lines)
+            if not mcts_playouts or mcts_playouts <= 0:
+                print("  [low-clock ponder] no MCTS playouts")
+                stats["timeouts"] += 1
+            else:
+                stats["low_clock_ponder_mcts_ok"] = 1
+
+    if alive() and stats["crashes"] == 0 and stats["timeouts"] == 0:
+        fen = "3r1k2/1pr1n3/p3R1p1/N2n1p1p/8/1BP5/PP4PP/1K2R3 b - - 10 29"
+        send(f"position fen {fen}")
+        send("go ponder wtime 60000 btime 60000 winc 1000 binc 1000")
+        time.sleep(1.0)
+        early = read_bestmove_for(0.05)
+        if early:
+            print(f"  [NBCejRUE] EARLY bestmove before ponderhit: {early}")
+            stats["early_bestmove"] += 1
+        else:
+            send("ponderhit")
+            r, regression_lines = read_until_collect("bestmove", TIMEOUT_BESTMOVE)
+            if r is None or r == "TIMEOUT":
+                print("  [NBCejRUE] TIMEOUT after ponderhit")
+                stats["timeouts"] += 1
+                send("stop")
+                read_until("bestmove", 5)
+            else:
+                parts = r.split()
+                best = parts[1] if len(parts) > 1 else "0000"
+                mcts_playouts = mcts_playouts_from_info(regression_lines)
+                if best == "d5f4":
+                    print("  [NBCejRUE] regression: rejected blunder returned")
+                    stats["timeouts"] += 1
+                elif not mcts_playouts or mcts_playouts <= 0:
+                    print("  [NBCejRUE] no MCTS playouts during regression")
+                    stats["timeouts"] += 1
+                else:
+                    stats["nbcejrue_regression_ok"] = 1
 
     if alive() and stats["crashes"] == 0 and stats["timeouts"] == 0:
         send("setoption name UseHybridSearch value false")
@@ -343,6 +425,10 @@ def main():
         and stats["followup_ok"] == iterations
         and stats["stop_ok"] == iterations
         and stats["pure_mcts_ponder_ok"] == 1
+        and stats["early_bestmove"] == 0
+        and stats["ponder_mcts_active"] == iterations
+        and stats["low_clock_ponder_mcts_ok"] == 1
+        and stats["nbcejrue_regression_ok"] == 1
     )
 
     if not passed or args.keep_stderr or args.stderr_log:

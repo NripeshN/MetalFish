@@ -1475,11 +1475,13 @@ namespace MetalFish {
 void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   Search::LimitsType limits = parse_limits(is);
 
-  if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
-    sync_cout << "info string Time safety: " << *reason
-              << "; using Alpha-Beta without transformer MCTS" << sync_endl;
-    engine.go(limits);
-    return;
+  if (!limits.ponderMode) {
+    if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
+      sync_cout << "info string Time safety: " << *reason
+                << "; using Alpha-Beta without transformer MCTS" << sync_endl;
+      engine.go(limits);
+      return;
+    }
   }
 
   sync_cout << "info string Starting Parallel Hybrid Search (MCTS + AB)..."

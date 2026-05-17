@@ -254,9 +254,17 @@ void ParallelHybridSearch::ponderhit() {
   if (!is_searching())
     return;
 
-  ponderhit_received_.store(true, std::memory_order_release);
+  if (ponderhit_received_.exchange(true, std::memory_order_acq_rel)) {
+    if (engine_)
+      engine_->set_ponderhit(false);
+    return;
+  }
+
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
   time_budget_ms_.store(calculate_time_budget(), std::memory_order_release);
+
+  if (mcts_search_)
+    mcts_search_->PonderHit();
 
   if (engine_)
     engine_->set_ponderhit(false);
@@ -416,9 +424,8 @@ bool HybridHasMCTSDecisionBudget(const ::MetalFish::Search::LimitsType &limits,
 HybridBuildMCTSLimits(const ::MetalFish::Search::LimitsType &limits,
                       int time_budget_ms, bool waiting_for_ponderhit) {
   if (limits.ponderMode && waiting_for_ponderhit) {
-    ::MetalFish::Search::LimitsType ponder_limits;
-    ponder_limits.infinite = 1;
-    ponder_limits.searchmoves = limits.searchmoves;
+    ::MetalFish::Search::LimitsType ponder_limits = limits;
+    ponder_limits.ponderMode = true;
     return ponder_limits;
   }
 
@@ -509,6 +516,21 @@ bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
   return best_visits <= best_eval_limit && root_visits <= root_eval_limit;
 }
 
+bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
+                             int ab_average_score, int mcts_average_score,
+                             uint64_t ab_effort, uint64_t mcts_effort,
+                             int mcts_score) {
+  if (!ab_verified || ab_rank != 1 || mcts_rank <= 1)
+    return false;
+
+  const int average_gap = ab_average_score - mcts_average_score;
+  if (average_gap >= 30 && ab_effort >= 10000)
+    return true;
+
+  return mcts_score <= -30000 && ab_effort >= 10000 &&
+         ab_effort >= 10 * std::max<uint64_t>(1, mcts_effort);
+}
+
 bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
                               uint32_t top_visits, float top_q,
                               float top_policy, uint32_t candidate_visits,
@@ -541,6 +563,10 @@ float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
 bool ParallelHybridSearch::should_stop() const {
   if (stop_flag_.load(std::memory_order_acquire))
     return true;
+
+  if (limits_.ponderMode &&
+      !ponderhit_received_.load(std::memory_order_acquire))
+    return false;
 
   if (limits_.nodes > 0) {
     uint64_t mcts_n =
@@ -582,17 +608,6 @@ void ParallelHybridSearch::mcts_thread_main() {
 
   auto start = std::chrono::steady_clock::now();
 
-  if (limits_.ponderMode) {
-    while (!ponderhit_received_.load(std::memory_order_acquire) &&
-           !stop_flag_.load(std::memory_order_acquire)) {
-      std::this_thread::sleep_for(std::chrono::microseconds(500));
-    }
-    if (stop_flag_.load(std::memory_order_acquire) &&
-        !ponderhit_received_.load(std::memory_order_acquire)) {
-      return;
-    }
-  }
-
   const int mcts_time_budget_ms =
       time_budget_ms_.load(std::memory_order_acquire);
   ::MetalFish::Search::LimitsType mcts_limits = HybridBuildMCTSLimits(
@@ -614,17 +629,16 @@ void ParallelHybridSearch::mcts_thread_main() {
     mcts_done = true;
   };
 
-  // AB TT probes currently expand MCTS leaves with uniform policy, which is
-  // not strength-safe for normal searches. Ponder is the exception: the older
-  // TT-backed path avoids repeated pure-NN ponder lifecycle crashes on
-  // MPSGraph, and final arbitration remains AB-verified after ponderhit.
   if (shared_tt_reader_) {
-    mcts_search_->SetSharedTT((config_.use_shared_tt || limits_.ponderMode)
-                                  ? shared_tt_reader_.get()
-                                  : nullptr);
+    mcts_search_->SetSharedTT(config_.use_shared_tt ? shared_tt_reader_.get()
+                                                    : nullptr);
   }
 
   mcts_search_->StartSearch(root_fen_, mcts_limits, mcts_callback, nullptr);
+  if (limits_.ponderMode &&
+      ponderhit_received_.load(std::memory_order_acquire)) {
+    mcts_search_->PonderHit();
+  }
 
   if (should_stop()) {
     mcts_search_->Stop();
@@ -1001,6 +1015,11 @@ void ParallelHybridSearch::coordinator_thread_main() {
 
   while (!should_stop()) {
     std::this_thread::sleep_for(std::chrono::microseconds(500));
+
+    if (limits_.ponderMode &&
+        !ponderhit_received_.load(std::memory_order_acquire)) {
+      continue;
+    }
 
     bool ab_done = !ab_state_.ab_running.load(std::memory_order_acquire);
     bool mcts_done = !mcts_state_.mcts_running.load(std::memory_order_acquire);
@@ -1547,6 +1566,12 @@ Move ParallelHybridSearch::make_final_decision() {
       std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
   const int eval_delta = mcts_cp - ab_score;
   const bool ab_has_clear_preference = ab_verified && std::abs(ab_score) >= 15;
+  const ABRootLookup ab_in_ab = find_ab_root_move(ab_best);
+  const ABRootLookup mcts_in_ab = find_ab_root_move(mcts_best);
+  const bool ab_root_rejects_mcts = HybridABRootRejectsMCTS(
+      ab_verified, ab_in_ab.rank, mcts_in_ab.rank, ab_in_ab.average_score,
+      mcts_in_ab.average_score, ab_in_ab.effort, mcts_in_ab.effort,
+      mcts_in_ab.score);
   const float root_q_gap = root_q_gap_for_best();
   const bool mcts_decisive_fixed_budget =
       mcts_visit_evidence_sane &&
@@ -1609,24 +1634,30 @@ Move ParallelHybridSearch::make_final_decision() {
       }
     }
   }
+  const bool mcts_override_allowed =
+      !ab_root_rejects_mcts || (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
   switch (config_.decision_mode) {
   case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
-    choose_mcts =
-        mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180);
+    choose_mcts = mcts_override_allowed && mcts_reliable &&
+                  (!ab_has_clear_preference || eval_delta >= 180);
     if (choose_mcts)
       reason = "mcts_primary_reliable";
     break;
   case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
-    choose_mcts = mcts_overwhelming && eval_delta >= 250;
+    choose_mcts =
+        mcts_override_allowed && mcts_overwhelming && eval_delta >= 250;
     if (choose_mcts)
       reason = "ab_primary_mcts_overwhelming";
     break;
   case ParallelHybridConfig::DecisionMode::VOTE_WEIGHTED:
   case ParallelHybridConfig::DecisionMode::DYNAMIC:
-    if (mcts_visit_evidence_sane && mcts_overwhelming && eval_delta >= 180) {
+    if (!mcts_override_allowed) {
+      reason = "ab_root_rejects_mcts";
+    } else if (mcts_visit_evidence_sane && mcts_overwhelming &&
+               eval_delta >= 180) {
       choose_mcts = true;
       reason = "mcts_overwhelming_delta";
     } else if (mcts_decisive_fixed_budget) {
@@ -1685,6 +1716,8 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
        << " ABVerified=" << (ab_verified ? 1 : 0)
        << " ABClearPreference=" << (ab_has_clear_preference ? 1 : 0)
+       << " ABRootRejectsMCTS=" << (ab_root_rejects_mcts ? 1 : 0)
+       << " MCTSOverrideAllowed=" << (mcts_override_allowed ? 1 : 0)
        << " MCTSRootRejectsAB=" << (mcts_root_rejects_ab ? 1 : 0)
        << " MCTSTop=" << top_moves_to_string();
     append_cross_root_trace(ss);

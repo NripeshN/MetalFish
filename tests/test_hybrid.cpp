@@ -311,7 +311,10 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridHasMCTSDecisionBudget(limits, 1500, false));
     EXPECT(tc, HybridHasMCTSDecisionBudget(limits, 1500, true));
     mcts_limits = HybridBuildMCTSLimits(limits, 1500, true);
-    EXPECT(tc, mcts_limits.infinite == 1);
+    EXPECT(tc, mcts_limits.infinite == 0);
+    EXPECT(tc, mcts_limits.ponderMode);
+    EXPECT(tc, mcts_limits.time[WHITE] == 30000);
+    EXPECT(tc, mcts_limits.inc[WHITE] == 1000);
     EXPECT(tc, mcts_limits.searchmoves.size() == 1);
   }
   {
@@ -449,6 +452,20 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSVisitEvidenceSane(260, 260, 340, 200));
     EXPECT(tc, !HybridMCTSVisitEvidenceSane(260, 260, 270, 300));
     EXPECT(tc, !HybridMCTSVisitEvidenceSane(0, 0, 10, 1));
+  }
+  {
+    TestCase tc("AB root rejection blocks low-effort MCTS blunders");
+
+    EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
+                                       -32001));
+    EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 4, -432, -436, 25349399, 1663,
+                                       -32001));
+    EXPECT(tc, !HybridABRootRejectsMCTS(false, 1, 5, -410, -447, 2523397, 649,
+                                        -32001));
+    EXPECT(tc, !HybridABRootRejectsMCTS(true, 1, 1, -410, -410, 2523397,
+                                        2523397, -401));
+    EXPECT(tc, !HybridABRootRejectsMCTS(true, 1, 4, -410, -425, 2523397,
+                                        2200000, -420));
   }
   {
     TestCase tc("Root Q gap ignores unvisited placeholders");

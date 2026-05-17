@@ -297,6 +297,7 @@ private:
   void SendInfo();
   int64_t CalculateTimeBudget();
   RootMoveStats GetBestMoveStatsLocked() const;
+  bool TryGetRootTablebaseMoveStatsLocked(RootMoveStats *out) const;
 
   void RunIteration(SearchWorkerCtx &ctx);
   void RunIterationSemaphore(SearchWorkerCtx &ctx);
@@ -359,6 +360,7 @@ private:
 
   std::atomic<bool> stop_flag_{false};
   std::atomic<bool> running_{false};
+  std::atomic<bool> ponder_mode_active_{false};
   ::MetalFish::Search::LimitsType limits_;
   std::atomic<int64_t> search_start_ms_{0};
   std::atomic<int64_t> time_budget_ms_{0};

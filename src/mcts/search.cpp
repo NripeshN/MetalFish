@@ -260,6 +260,7 @@ void Search::NewGame() {
   tmgr_ = TimeManagerState{};
   nodes_at_movestart_.store(0, std::memory_order_release);
   batches_at_movestart_.store(0, std::memory_order_release);
+  ponder_mode_active_.store(false, std::memory_order_release);
   first_eval_time_ms_.store(-1, std::memory_order_release);
   latest_hints_.Reset();
   root_search_moves_.clear();
@@ -285,6 +286,7 @@ void Search::StartSearch(const std::string &fen,
   stop_flag_.store(false, std::memory_order_release);
   running_.store(true, std::memory_order_release);
   limits_ = limits;
+  ponder_mode_active_.store(limits.ponderMode, std::memory_order_release);
   best_move_cb_ = best_cb;
   info_cb_ = info_cb;
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
@@ -361,7 +363,9 @@ void Search::PonderHit() {
   if (!running_.load(std::memory_order_acquire))
     return;
 
-  limits_.ponderMode = false;
+  if (!ponder_mode_active_.exchange(false, std::memory_order_acq_rel))
+    return;
+
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
   nodes_at_movestart_.store(stats_.total_nodes.load(std::memory_order_relaxed),
                             std::memory_order_release);
@@ -394,9 +398,13 @@ void Search::Wait() {
   const int64_t elapsed_ms =
       SteadyNowMs() - search_start_ms_.load(std::memory_order_acquire);
   uint64_t total_nodes = stats_.total_nodes.load(std::memory_order_relaxed);
+  const uint64_t nodes_offset =
+      nodes_at_movestart_.load(std::memory_order_acquire);
+  const uint64_t move_nodes =
+      total_nodes > nodes_offset ? total_nodes - nodes_offset : total_nodes;
 
-  if (elapsed_ms > 0 && total_nodes > 0) {
-    float actual_nps = 1000.0f * total_nodes / elapsed_ms;
+  if (elapsed_ms > 0 && move_nodes > 0) {
+    float actual_nps = 1000.0f * move_nodes / elapsed_ms;
     if (tmgr_.nps_reliable) {
       tmgr_.nps = tmgr_.nps * 0.5f + actual_nps * 0.5f;
     } else {
@@ -461,7 +469,8 @@ void Search::ConfigureStopper() {
   auto stopper = std::make_unique<ChainedStopper>();
   bool smart_pruning = false;
 
-  if (!limits_.infinite && !limits_.ponderMode) {
+  if (!limits_.infinite &&
+      !ponder_mode_active_.load(std::memory_order_acquire)) {
     const int64_t time_budget_ms =
         time_budget_ms_.load(std::memory_order_acquire);
     const bool node_only_limit =
@@ -511,6 +520,8 @@ int64_t Search::CalculateTimeBudget() {
     return 0;
   }
   const int64_t overhead = static_cast<int64_t>(params_.move_overhead_ms);
+  if (ponder_mode_active_.load(std::memory_order_acquire))
+    return 0;
   if (limits_.movetime > 0)
     return std::max<int64_t>(1, limits_.movetime - overhead);
   if (limits_.infinite)
@@ -1791,6 +1802,10 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
   if (!root || root->NumEdges() == 0)
     return {};
 
+  RootMoveStats tablebase_best;
+  if (TryGetRootTablebaseMoveStatsLocked(&tablebase_best))
+    return tablebase_best;
+
   int num_edges = root->NumEdges();
   const Edge *edges = root->Edges();
 
@@ -1898,6 +1913,99 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
   const uint32_t current_n = best_n >= baseline ? best_n - baseline : 0;
   return {edges[best_idx].move, best_q, best_n, edges[best_idx].GetP(),
           current_n};
+}
+
+bool Search::TryGetRootTablebaseMoveStatsLocked(RootMoveStats *out) const {
+  if (!out || Tablebases::MaxCardinality <= 0)
+    return false;
+
+  const Node *root = tree_.Root();
+  if (!root || root->NumEdges() == 0)
+    return false;
+
+  Position pos;
+  StateInfo st;
+  pos.set(tree_.RootFen(), false, &st);
+  if (pos.can_castle(ANY_CASTLING) ||
+      popcount(pos.pieces()) > Tablebases::MaxCardinality) {
+    return false;
+  }
+
+  const Edge *edges = root->Edges();
+  const int num_edges = root->NumEdges();
+  int best_idx = -1;
+  int best_wdl = -3;
+  int best_dtz = 0;
+  bool best_has_dtz = false;
+
+  for (int i = 0; i < num_edges; ++i) {
+    StateInfo child_st;
+    pos.do_move(edges[i].move, child_st);
+
+    Tablebases::ProbeState wdl_state;
+    int root_wdl = 0;
+    if (pos.is_draw(1)) {
+      root_wdl = static_cast<int>(Tablebases::WDLDraw);
+      wdl_state = Tablebases::OK;
+    } else {
+      root_wdl = -static_cast<int>(Tablebases::probe_wdl(pos, &wdl_state));
+    }
+
+    bool has_dtz = false;
+    int root_dtz = 0;
+    if (wdl_state != Tablebases::FAIL) {
+      Tablebases::ProbeState dtz_state;
+      root_dtz = -Tablebases::probe_dtz(pos, &dtz_state);
+      has_dtz = dtz_state != Tablebases::FAIL;
+    }
+
+    pos.undo_move(edges[i].move);
+
+    if (wdl_state == Tablebases::FAIL)
+      return false;
+
+    bool prefer = best_idx < 0 || root_wdl > best_wdl;
+    if (!prefer && root_wdl == best_wdl) {
+      if (root_wdl > 0 && has_dtz &&
+          (!best_has_dtz || std::abs(root_dtz) < std::abs(best_dtz))) {
+        prefer = true;
+      } else if (root_wdl < 0 && has_dtz &&
+                 (!best_has_dtz || std::abs(root_dtz) > std::abs(best_dtz))) {
+        prefer = true;
+      } else if (root_wdl == 0 && best_idx >= 0) {
+        Node *child = edges[i].child.load(std::memory_order_acquire);
+        Node *best_child =
+            edges[best_idx].child.load(std::memory_order_acquire);
+        const uint32_t cn = child ? child->GetN() : 0;
+        const uint32_t best_n = best_child ? best_child->GetN() : 0;
+        prefer = cn > best_n ||
+                 (cn == best_n && edges[i].GetP() > edges[best_idx].GetP());
+      }
+    }
+
+    if (prefer) {
+      best_idx = i;
+      best_wdl = root_wdl;
+      best_dtz = root_dtz;
+      best_has_dtz = has_dtz;
+    }
+  }
+
+  if (best_idx < 0)
+    return false;
+
+  Node *child = edges[best_idx].child.load(std::memory_order_acquire);
+  const uint32_t visits = child ? child->GetN() : 0;
+  const uint32_t baseline = RootVisitBaselineLocked(edges[best_idx].move);
+  const uint32_t current_visits = visits >= baseline ? visits - baseline : 0;
+  float q = 0.0f;
+  if (best_wdl >= static_cast<int>(Tablebases::WDLWin))
+    q = 1.0f;
+  else if (best_wdl <= static_cast<int>(Tablebases::WDLLoss))
+    q = -1.0f;
+  *out = {edges[best_idx].move, q, visits, edges[best_idx].GetP(),
+          current_visits};
+  return true;
 }
 
 Search::RootMoveStats Search::GetBestMoveStats() const {

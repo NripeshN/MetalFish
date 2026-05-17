@@ -347,6 +347,8 @@ def main() -> int:
             'env_int("METALFISH_HASH_MB", 0)',
             'env_int("METALFISH_RESOURCE_RESERVE_MB", 2048)',
             'os.environ.get("METALFISH_SYZYGY_PATH", "").strip()',
+            "def syzygy_path_is_safe(",
+            "def resolve_syzygy_path(",
             "def available_memory_mb(",
             "def build_engine_options(",
             "def configure(self, options:",
@@ -381,6 +383,17 @@ def main() -> int:
             '"TransformerLowTimeFallbackMs"',
             "eng.warmup(benchmark_warmup_ms(cfg, movetime_ms))",
             "eng.warmup(benchmark_warmup_ms(cfg_copy, movetime_ms))",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/syzygy_manager.py",
+        [
+            "BASE_URL =",
+            '"3-4-5":',
+            "def manifest_for_set(",
+            "def validate_probes(",
+            "def command_download(",
+            "def command_validate(",
         ],
     )
     assert_file_contains(
