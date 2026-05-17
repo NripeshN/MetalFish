@@ -23,6 +23,7 @@ namespace MetalFish {
 namespace GPU {
 
 static std::atomic<bool> g_backend_shutdown{false};
+static std::atomic<bool> g_backend_initialized{false};
 
 class MetalBuffer : public Buffer {
 public:
@@ -207,13 +208,11 @@ private:
 class MetalBackend : public Backend {
 public:
   static MetalBackend &instance() {
-    // Use a pointer to avoid static destruction order issues.
-    // The backend is intentionally leaked to prevent crashes during static
-    // destruction when Metal objects are torn down after other global/static
-    // state that may still reference the GPU backend.
-    // The GPU backend is cleaned up via explicit shutdown_gpu_backend() call
-    // before program exit (see main.cpp).
-    static MetalBackend *instance = new MetalBackend();
+    static MetalBackend *instance = [] {
+      auto *backend = new MetalBackend();
+      g_backend_initialized.store(true, std::memory_order_release);
+      return backend;
+    }();
     return *instance;
   }
 
@@ -684,6 +683,10 @@ bool Backend::available() {
 
 void shutdown_gpu_backend() {
   g_backend_shutdown.store(true, std::memory_order_release);
+
+  if (!g_backend_initialized.load(std::memory_order_acquire)) {
+    return;
+  }
 
   if (MetalBackend::instance().is_available()) {
     MetalBackend::instance().synchronize();

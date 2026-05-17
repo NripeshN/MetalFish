@@ -167,6 +167,14 @@ set(HYBRID_SOURCES src/hybrid/hybrid_search.cpp src/hybrid/position_adapter.cpp
 find_package(Protobuf REQUIRED)
 include_directories(${Protobuf_INCLUDE_DIRS})
 
+if(TARGET protobuf::libprotobuf)
+  set(METALFISH_PROTOBUF_LIB protobuf::libprotobuf)
+elseif(TARGET libprotobuf)
+  set(METALFISH_PROTOBUF_LIB libprotobuf)
+else()
+  set(METALFISH_PROTOBUF_LIB ${Protobuf_LIBRARIES})
+endif()
+
 set(PROTO_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/proto/net.proto)
 set(PROTO_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/proto)
 file(MAKE_DIRECTORY ${PROTO_OUTPUT_DIR})
@@ -263,7 +271,7 @@ else()
 endif()
 
 find_package(Threads REQUIRED)
-target_link_libraries(metalfish Threads::Threads ${Protobuf_LIBRARIES}
+target_link_libraries(metalfish Threads::Threads ${METALFISH_PROTOBUF_LIB}
                       ${ZLIB_LIBRARIES} ${ABSL_LIBS})
 
 # macOS frameworks
@@ -333,8 +341,9 @@ if(BUILD_TESTS)
     set_property(TARGET metalfish_tests
                  PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
   endif()
-  target_link_libraries(metalfish_tests Threads::Threads ${Protobuf_LIBRARIES}
-                        ${ZLIB_LIBRARIES} ${ABSL_LIBS})
+  target_link_libraries(
+    metalfish_tests Threads::Threads ${METALFISH_PROTOBUF_LIB}
+    ${ZLIB_LIBRARIES} ${ABSL_LIBS})
 
   if(APPLE AND ACCELERATE_FRAMEWORK)
     target_link_libraries(metalfish_tests ${ACCELERATE_FRAMEWORK})
@@ -370,8 +379,9 @@ if(BUILD_TESTS)
     set_property(TARGET test_nn_comparison
                  PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
   endif()
-  target_link_libraries(test_nn_comparison Threads::Threads
-                        ${Protobuf_LIBRARIES} ${ZLIB_LIBRARIES} ${ABSL_LIBS})
+  target_link_libraries(
+    test_nn_comparison Threads::Threads ${METALFISH_PROTOBUF_LIB}
+    ${ZLIB_LIBRARIES} ${ABSL_LIBS})
 
   if(APPLE AND ACCELERATE_FRAMEWORK)
     target_link_libraries(test_nn_comparison ${ACCELERATE_FRAMEWORK})

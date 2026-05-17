@@ -210,16 +210,22 @@ void test_shared_state() {
     state.top_moves[0].move_raw.store(Move(SQ_E2, SQ_E4).raw());
     state.top_moves[0].policy.store(0.25f);
     state.top_moves[0].visits.store(42);
+    state.top_moves[0].current_visits.store(12);
     state.top_moves[0].q.store(0.5f);
+    state.best_current_visits.store(12);
+    state.total_current_nodes.store(24);
     state.reset();
 
     EXPECT(tc, state.best_move_raw.load() == 0);
     EXPECT(tc, state.best_q.load() == 0.0f);
     EXPECT(tc, state.best_visits.load() == 0);
+    EXPECT(tc, state.best_current_visits.load() == 0);
+    EXPECT(tc, state.total_current_nodes.load() == 0);
     EXPECT(tc, state.num_top_moves.load() == 0);
     EXPECT(tc, state.top_moves[0].move_raw.load() == 0);
     EXPECT(tc, state.top_moves[0].policy.load() == 0.0f);
     EXPECT(tc, state.top_moves[0].visits.load() == 0);
+    EXPECT(tc, state.top_moves[0].current_visits.load() == 0);
     EXPECT(tc, state.top_moves[0].q.load() == 0.0f);
     EXPECT(tc, !state.mcts_running.load());
   }
@@ -236,8 +242,8 @@ void test_hybrid_config() {
     EXPECT(tc, config.ab_policy_weight >= 0.0f);
     EXPECT(tc, config.ab_policy_weight <= 1.0f);
     EXPECT(tc, config.mcts_root_reject);
-    EXPECT(tc, !config.mcts_ab_root_hints);
-    EXPECT(tc, config.mcts_ab_root_hint_delay_ms == 0);
+    EXPECT(tc, config.mcts_ab_root_hints);
+    EXPECT(tc, config.mcts_ab_root_hint_delay_ms == 25);
     EXPECT(tc, config.mcts_ab_root_hint_count == 4);
   }
   {
@@ -326,29 +332,7 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(true, true, 456, 313,
                                                       0.599f, 117));
     EXPECT(tc, !HybridMCTSDecisiveFixedBudgetOverride(true, true, 456, 313,
-                                                      0.686f, 74));
-  }
-  {
-    TestCase tc("Fixed-budget high-value MCTS override predicate");
-
-    EXPECT(tc, HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 187,
-                                                      0.399f, 581, 450));
-    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(false, true, 469, 187,
-                                                       0.399f, 581, 450));
-    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, false, 469, 187,
-                                                       0.399f, 581, 450));
-    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 375, 95,
-                                                       0.253f, 384, 321));
-    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 249, 187,
-                                                       0.536f, 581, 450));
-    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 79,
-                                                       0.339f, 581, 450));
-    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 187,
-                                                       0.199f, 581, 450));
-    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 187,
-                                                       0.399f, 499, 355));
-    EXPECT(tc, !HybridMCTSHighValueFixedBudgetOverride(true, true, 469, 187,
-                                                       0.399f, 581, 299));
+                                                      0.686f, 89));
   }
   {
     TestCase tc("Fixed-budget no-clear AB MCTS override predicate");

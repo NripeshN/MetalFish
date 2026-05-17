@@ -93,6 +93,9 @@ struct RootMove {
 
 using RootMoves = std::vector<RootMove>;
 
+void ApplyRootOrderHints(RootMoves &rootMoves,
+                         const std::vector<Move> &rootOrderHints);
+
 // LimitsType struct stores information sent by the caller about the analysis
 // required.
 struct LimitsType {

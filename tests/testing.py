@@ -343,9 +343,9 @@ def test_uci_protocol():
         engine.send_command("uci")
         low_time = engine.contains("option name TransformerLowTimeFallbackMs")
         min_budget = engine.contains("option name TransformerMinMoveBudgetMs")
-        assert "default 5000" in low_time, low_time
+        assert "default 3000" in low_time, low_time
         assert "min 0" in low_time and "max 30000" in low_time, low_time
-        assert "default 800" in min_budget, min_budget
+        assert "default 400" in min_budget, min_budget
         assert "min 0" in min_budget and "max 5000" in min_budget, min_budget
         engine.equals("uciok")
         engine.quit()
@@ -483,7 +483,7 @@ def run_bench(engine_path: str, engine_name: str, depth: int = 13) -> dict:
 
     try:
         result = subprocess.run(
-            [engine_path, "bench", str(depth)],
+            [engine_path, "bench", "16", "1", str(depth), "default", "depth"],
             capture_output=True,
             text=True,
             timeout=300,
@@ -497,14 +497,14 @@ def run_bench(engine_path: str, engine_name: str, depth: int = 13) -> dict:
         time_ms = 0
 
         for line in output.split("\n"):
-            if "Nodes searched" in line or "nodes" in line.lower():
+            if line.startswith("Nodes searched"):
                 parts = line.split(":")
                 if len(parts) >= 2:
                     try:
                         nodes = int("".join(filter(str.isdigit, parts[-1])))
                     except:
                         pass
-            if "nps" in line.lower() or "NPS" in line:
+            if line.startswith("Nodes/second"):
                 parts = line.split(":")
                 if len(parts) >= 2:
                     try:

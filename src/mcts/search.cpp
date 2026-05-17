@@ -268,6 +268,7 @@ void Search::NewGame() {
   active_root_search_filter_active_ = false;
 
   std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
+  root_visit_baseline_.clear();
   tree_.Reset("");
 }
 
@@ -303,23 +304,27 @@ void Search::StartSearch(const std::string &fen,
   const bool needs_filtered_root_reset =
       root_filter_changed && (same_tree_root || root_search_filter_active_);
 
-  if (needs_filtered_root_reset || !tree_.TryReuse(fen)) {
-    tree_.Reset(fen);
-  } else {
-    std::function<void(Node *, int)> fixTwoFold = [&](Node *node, int depth) {
-      if (!node || depth > 50)
-        return;
-      node->MaybeRevertTwoFold(depth);
-      if (node->NumEdges() > 0) {
-        Edge *edges = node->Edges();
-        for (int i = 0; i < node->NumEdges(); ++i) {
-          Node *child = edges[i].child.load(std::memory_order_acquire);
-          if (child)
-            fixTwoFold(child, depth + 1);
+  {
+    std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
+    if (needs_filtered_root_reset || !tree_.TryReuse(fen)) {
+      tree_.Reset(fen);
+    } else {
+      std::function<void(Node *, int)> fixTwoFold = [&](Node *node, int depth) {
+        if (!node || depth > 50)
+          return;
+        node->MaybeRevertTwoFold(depth);
+        if (node->NumEdges() > 0) {
+          Edge *edges = node->Edges();
+          for (int i = 0; i < node->NumEdges(); ++i) {
+            Node *child = edges[i].child.load(std::memory_order_acquire);
+            if (child)
+              fixTwoFold(child, depth + 1);
+          }
         }
-      }
-    };
-    fixTwoFold(tree_.Root(), 0);
+      };
+      fixTwoFold(tree_.Root(), 0);
+    }
+    CaptureRootVisitBaselineLocked();
   }
   active_root_search_filter_active_ = root_search_filter_active_;
   active_root_search_moves_ = root_search_moves_;
@@ -1750,6 +1755,32 @@ Move Search::FirstRootMoveOrLegal() const {
   return moves.size() > 0 ? *moves.begin() : Move::none();
 }
 
+void Search::CaptureRootVisitBaselineLocked() {
+  root_visit_baseline_.clear();
+
+  const Node *root = tree_.Root();
+  if (!root || root->NumEdges() == 0)
+    return;
+
+  const int num_edges = root->NumEdges();
+  const Edge *edges = root->Edges();
+  root_visit_baseline_.reserve(static_cast<size_t>(num_edges));
+  for (int i = 0; i < num_edges; ++i) {
+    const Node *child = edges[i].child.load(std::memory_order_acquire);
+    root_visit_baseline_.push_back(
+        {edges[i].move.raw(), child ? child->GetN() : 0});
+  }
+}
+
+uint32_t Search::RootVisitBaselineLocked(Move move) const {
+  const uint32_t raw = move.raw();
+  for (const auto &[candidate, visits] : root_visit_baseline_) {
+    if (candidate == raw)
+      return visits;
+  }
+  return 0;
+}
+
 void Search::ApplyNNPolicy(Node *node, const EvaluationResult &result,
                            float softmax_temp) {
   ApplyNNPolicyToNode(node, result, softmax_temp);
@@ -1860,10 +1891,13 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       }
     }
     return {edges[best_policy_idx].move, root->GetWL(), 0,
-            edges[best_policy_idx].GetP()};
+            edges[best_policy_idx].GetP(), 0};
   }
 
-  return {edges[best_idx].move, best_q, best_n, edges[best_idx].GetP()};
+  const uint32_t baseline = RootVisitBaselineLocked(edges[best_idx].move);
+  const uint32_t current_n = best_n >= baseline ? best_n - baseline : 0;
+  return {edges[best_idx].move, best_q, best_n, edges[best_idx].GetP(),
+          current_n};
 }
 
 Search::RootMoveStats Search::GetBestMoveStats() const {
@@ -1886,8 +1920,11 @@ Search::GetRootMoveStats(int max_moves) const {
   for (int i = 0; i < num_edges; ++i) {
     Node *child = edges[i].child.load(std::memory_order_acquire);
     const uint32_t visits = child ? child->GetN() : 0;
+    const uint32_t baseline = RootVisitBaselineLocked(edges[i].move);
+    const uint32_t current_visits = visits >= baseline ? visits - baseline : 0;
     const float q = child ? child->GetWL() : root->GetWL();
-    stats.push_back({edges[i].move, q, visits, edges[i].GetP()});
+    stats.push_back(
+        {edges[i].move, q, visits, edges[i].GetP(), current_visits});
   }
 
   std::sort(stats.begin(), stats.end(),

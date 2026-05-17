@@ -17,7 +17,7 @@ PROJ = pathlib.Path(__file__).resolve().parent.parent
 METALFISH = PROJ / "build" / "metalfish"
 LC0 = PROJ / "reference" / "lc0" / "build" / "release" / "lc0"
 WEIGHTS = PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"
-HYBRID_LOW_TIME_FALLBACK_MS = 5000
+HYBRID_LOW_TIME_FALLBACK_MS = 3000
 
 BK_POSITIONS: List[Tuple[str, List[str], str]] = [
     ("1k1r4/pp1b1R2/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - -", ["Qd1+"], "BK.01"),
@@ -118,10 +118,14 @@ class UCISession:
             bufsize=1,
             env=env,
         )
-        self.send("uci")
-        self.wait_for("uciok", 120)
-        self.send("isready")
-        self.wait_for("readyok", 120)
+        try:
+            self.send("uci")
+            self.wait_for("uciok", 120)
+            self.send("isready")
+            self.wait_for("readyok", 120)
+        except Exception:
+            self.close()
+            raise
 
     def send(self, cmd: str) -> None:
         assert self.proc.stdin is not None
@@ -284,10 +288,20 @@ class UCISession:
 
     def close(self) -> None:
         try:
-            self.send("quit")
-            self.proc.wait(timeout=5)
+            if self.proc.poll() is None:
+                self.send("quit")
+                self.proc.wait(timeout=5)
         except Exception:
-            self.proc.kill()
+            if self.proc.poll() is None:
+                self.proc.kill()
+                self.proc.wait(timeout=5)
+        finally:
+            for stream in (self.proc.stdin, self.proc.stdout):
+                try:
+                    if stream:
+                        stream.close()
+                except Exception:
+                    pass
 
 
 def setup_metalfish(
@@ -343,8 +357,8 @@ def setup_metalfish_hybrid(
     sess.setoption("HybridMCTSThreads", str(mcts_threads))
     sess.setoption("HybridABThreads", str(ab_threads))
     sess.setoption("HybridAutoABThreadsCap", "0")
-    sess.setoption("TransformerLowTimeFallbackMs", "5000")
-    sess.setoption("TransformerMinMoveBudgetMs", "800")
+    sess.setoption("TransformerLowTimeFallbackMs", "3000")
+    sess.setoption("TransformerMinMoveBudgetMs", "400")
     sess.setoption("MCTSMaxThreads", str(mcts_threads))
     sess.setoption("MCTSMinibatchSize", "0")
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
@@ -352,8 +366,8 @@ def setup_metalfish_hybrid(
     sess.setoption("HybridMCTSMinimumKLDGainPerNode", str(hybrid_mcts_kld))
     sess.setoption("HybridMCTSRootReject", "true" if hybrid_root_reject else "false")
     sess.setoption("HybridMCTSUseSharedTT", "true" if hybrid_shared_tt else "false")
-    sess.setoption("HybridMCTSABRootHints", "false")
-    sess.setoption("HybridMCTSABRootHintDelayMs", "0")
+    sess.setoption("HybridMCTSABRootHints", "true")
+    sess.setoption("HybridMCTSABRootHintDelayMs", "25")
     sess.setoption("HybridMCTSABRootHintCount", "4")
     sess.setoption("HybridABPolicyWeight", str(ab_policy_weight))
     sess.setoption("HybridTrace", "true" if trace else "false")

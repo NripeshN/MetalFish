@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
 #include <list>
 #include <ratio>
 #include <string>
@@ -49,6 +50,47 @@ void syzygy_extend_pv(const OptionsMap &options,
                       MetalFish::Search::RootMove &rootMove, Value &v);
 
 using namespace Search;
+
+void Search::ApplyRootOrderHints(RootMoves &rootMoves,
+                                 const std::vector<Move> &rootOrderHints) {
+  if (rootOrderHints.empty() || rootMoves.size() <= 1)
+    return;
+
+  auto hint_rank = [&](const RootMove &rm) -> int {
+    int rank = 0;
+    for (size_t i = 0; i < rootOrderHints.size(); ++i) {
+      Move hint = rootOrderHints[i];
+      if (hint == Move::none())
+        continue;
+
+      bool duplicate = false;
+      for (size_t j = 0; j < i; ++j) {
+        if (rootOrderHints[j] == hint) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (duplicate)
+        continue;
+
+      if (rm == hint)
+        return rank;
+      ++rank;
+    }
+    return std::numeric_limits<int>::max();
+  };
+
+  for (auto first = rootMoves.begin(); first != rootMoves.end();) {
+    auto last = first + 1;
+    while (last != rootMoves.end() && last->tbRank == first->tbRank)
+      ++last;
+
+    std::stable_sort(first, last, [&](const RootMove &a, const RootMove &b) {
+      return hint_rank(a) < hint_rank(b);
+    });
+    first = last;
+  }
+}
 
 namespace {
 
@@ -418,8 +460,18 @@ void Search::Worker::iterative_deepening() {
 
     // We make sure not to pick an unproven mated-in score,
     // in case this thread prematurely stopped search (aborted-search).
-    if (threads.abortedSearch && rootMoves[0].score != -VALUE_INFINITE &&
-        is_loss(rootMoves[0].score)) {
+    // Keep the last completed PV if the stop landed on an unproven fail-high.
+    if (threads.stop && lastBestPV[0] != Move::none() &&
+        rootMoves[0].pv[0] != lastBestPV[0] && rootMoves[0].scoreLowerbound) {
+      Utility::move_to_front(
+          rootMoves, [&lastBestPV = std::as_const(lastBestPV)](const auto &rm) {
+            return rm == lastBestPV[0];
+          });
+      rootMoves[0].pv = lastBestPV;
+      rootMoves[0].score = rootMoves[0].uciScore = lastBestScore;
+      rootMoves[0].scoreLowerbound = rootMoves[0].scoreUpperbound = false;
+    } else if (threads.abortedSearch && rootMoves[0].score != -VALUE_INFINITE &&
+               is_loss(rootMoves[0].score)) {
       // Bring the last best move to the front for best thread selection.
       Utility::move_to_front(
           rootMoves, [&lastBestPV = std::as_const(lastBestPV)](const auto &rm) {

@@ -150,12 +150,12 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridMCTSMinimumKLDGainPerNode", Option("0.0"));
   options.add("HybridMCTSRootReject", Option(true));
   options.add("HybridMCTSUseSharedTT", Option(false));
-  options.add("HybridMCTSABRootHints", Option(false));
-  options.add("HybridMCTSABRootHintDelayMs", Option(0, 0, 1000));
+  options.add("HybridMCTSABRootHints", Option(true));
+  options.add("HybridMCTSABRootHintDelayMs", Option(25, 0, 1000));
   options.add("HybridMCTSABRootHintCount", Option(4, 1, 16));
   options.add("HybridTrace", Option(false));
-  options.add("TransformerLowTimeFallbackMs", Option(5000, 0, 30000));
-  options.add("TransformerMinMoveBudgetMs", Option(800, 0, 5000));
+  options.add("TransformerLowTimeFallbackMs", Option(3000, 0, 30000));
+  options.add("TransformerMinMoveBudgetMs", Option(400, 0, 5000));
 
   // Optional parity preset and exposed MCTS tuning controls
   options.add("MCTSParityPreset", Option(false));
@@ -199,8 +199,8 @@ Engine::Engine(std::optional<std::string> path)
   // 0 = auto; on Apple Silicon smaller batches are better at low thread counts.
   options.add("MCTSMinibatchSize", Option(0, 0, 4096));
   options.add("MCTSMaxThreads", Option(0, 0, MaxThreads));
-  options.add("MCTSMaxOutOfOrderFactor", Option("2.4"));
-  options.add("MCTSMaxOutOfOrderEvalsFactor", Option("2.4"));
+  options.add("MCTSMaxOutOfOrderFactor", Option("4.0"));
+  options.add("MCTSMaxOutOfOrderEvalsFactor", Option("4.0"));
   options.add("MCTSAddDirichletNoise", Option(false));
   options.add("MCTSNoiseEpsilon", Option("0.0"));
   options.add("MCTSNoiseAlpha", Option("0.3"));

@@ -25,6 +25,7 @@
 #include <shared_mutex>
 #include <sstream>
 #include <thread>
+#include <utility>
 
 #ifdef __aarch64__
 #define CPU_PAUSE() __asm__ __volatile__("yield" ::: "memory")
@@ -272,6 +273,7 @@ public:
     float q = 0.0f;
     uint32_t visits = 0;
     float policy = 0.0f;
+    uint32_t current_visits = 0;
   };
 
   Move GetBestMove() const;
@@ -316,6 +318,8 @@ private:
   void BuildRootSearchMoves(const Position &root_pos);
   void CreateLeafEdges(Node *leaf, const MoveList<LEGAL> &moves);
   Move FirstRootMoveOrLegal() const;
+  void CaptureRootVisitBaselineLocked();
+  uint32_t RootVisitBaselineLocked(Move move) const;
 
   void MaybePrefetchIntoCache(
       SearchWorkerCtx &ctx, BackendComputation *computation,
@@ -366,6 +370,7 @@ private:
   std::atomic<bool> smart_pruning_enabled_{false};
   std::vector<Move> root_search_moves_;
   std::vector<Move> active_root_search_moves_;
+  std::vector<std::pair<uint32_t, uint32_t>> root_visit_baseline_;
 
   BestMoveCallback best_move_cb_;
   InfoCallback info_cb_;

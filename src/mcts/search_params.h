@@ -83,7 +83,7 @@ struct SearchParams {
 
   // Minibatch gathering (Lc0 defaults)
   int max_prefetch = 32;
-  float max_out_of_order_evals_factor = 2.4f;
+  float max_out_of_order_evals_factor = 4.0f;
   int max_collision_events = 917;
   int max_collision_visits = 80000;
   int max_collision_visits_scaling_start = 28;

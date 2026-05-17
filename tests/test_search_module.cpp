@@ -216,6 +216,26 @@ void test_rootmove() {
     EXPECT(tc, moves[1].score == 50);
     EXPECT(tc, moves[2].score == 25);
   }
+  {
+    TestCase tc("RootMove order hints");
+    Search::RootMoves moves;
+    Move e4(SQ_E2, SQ_E4);
+    Move d4(SQ_D2, SQ_D4);
+    Move nf3(SQ_G1, SQ_F3);
+    Move nc3(SQ_B1, SQ_C3);
+    moves.emplace_back(e4);
+    moves.emplace_back(d4);
+    moves.emplace_back(nf3);
+    moves.emplace_back(nc3);
+    moves[3].tbRank = 1;
+
+    Search::ApplyRootOrderHints(moves, {nc3, nf3, e4, nf3});
+
+    EXPECT(tc, moves[0] == nf3);
+    EXPECT(tc, moves[1] == e4);
+    EXPECT(tc, moves[2] == d4);
+    EXPECT(tc, moves[3] == nc3);
+  }
 }
 
 // ============================================================================

@@ -1009,6 +1009,15 @@ static bool is_fixed_budget_hybrid_search(const Search::LimitsType *limits) {
                     limits->depth > 0 || limits->mate > 0 || limits->infinite);
 }
 
+static int auto_hybrid_ab_threads_cap(int available) {
+#ifdef __APPLE__
+  if (available >= 8)
+    return available - 2;
+#endif
+  (void)available;
+  return 0;
+}
+
 static HybridThreadSplit
 compute_hybrid_thread_split(Engine &engine,
                             const Search::LimitsType *limits = nullptr) {
@@ -1030,9 +1039,8 @@ compute_hybrid_thread_split(Engine &engine,
   } else {
     // Fixed-budget searches are usually tactical benchmarks or analysis
     // probes; the BK sweep strongly favored two low-batch MCTS workers there.
-    // Real game-clock searches need CPU verification. Keep the MCTS worker on
-    // the transformer side, then let AB use the remaining CPU workers unless
-    // the user explicitly caps the auto split.
+    // Game-clock searches keep one transformer worker and let AB use the rest,
+    // subject to the auto cap below.
     mcts_threads = is_fixed_budget_hybrid_search(limits)
                        ? std::min(2, std::max(1, available - 1))
                        : 1;
@@ -1045,9 +1053,11 @@ compute_hybrid_thread_split(Engine &engine,
     if (is_fixed_budget_hybrid_search(limits)) {
       ab_threads = 1;
     } else {
+      const int effective_ab_cap =
+          auto_ab_cap > 0 ? auto_ab_cap : auto_hybrid_ab_threads_cap(available);
       ab_threads = std::max(1, available - mcts_threads);
-      if (auto_ab_cap > 0)
-        ab_threads = std::min(auto_ab_cap, ab_threads);
+      if (effective_ab_cap > 0)
+        ab_threads = std::min(effective_ab_cap, ab_threads);
     }
   }
 

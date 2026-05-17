@@ -446,15 +446,7 @@ bool HybridMCTSDecisiveFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                            uint32_t mcts_visits,
                                            float visit_share, int eval_delta) {
   return fixed_budget && mcts_strong && mcts_total_nodes >= 300 &&
-         mcts_visits >= 210 && visit_share >= 0.60f && eval_delta >= 75;
-}
-
-bool HybridMCTSHighValueFixedBudgetOverride(
-    bool fixed_budget, bool mcts_reliable, uint64_t mcts_total_nodes,
-    uint32_t mcts_visits, float visit_share, int mcts_cp, int eval_delta) {
-  return fixed_budget && mcts_reliable && mcts_total_nodes >= 250 &&
-         mcts_visits >= 80 && visit_share >= 0.20f && mcts_cp >= 500 &&
-         eval_delta >= 300;
+         mcts_visits >= 210 && visit_share >= 0.60f && eval_delta >= 90;
 }
 
 bool HybridMCTSNoClearFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
@@ -691,12 +683,19 @@ void ParallelHybridSearch::publish_mcts_state() {
   mcts_state_.best_move_raw.store(best.raw(), std::memory_order_relaxed);
   mcts_state_.best_q.store(best_stats.q, std::memory_order_relaxed);
   mcts_state_.best_visits.store(best_stats.visits, std::memory_order_relaxed);
+  mcts_state_.best_current_visits.store(best_stats.current_visits,
+                                        std::memory_order_relaxed);
 
   const auto root_moves = mcts_search_->GetRootMoveStats();
   uint64_t root_visits = 0;
-  for (const auto &move : root_moves)
+  uint64_t root_current_visits = 0;
+  for (const auto &move : root_moves) {
     root_visits += move.visits;
+    root_current_visits += move.current_visits;
+  }
   mcts_state_.total_nodes.store(root_visits, std::memory_order_relaxed);
+  mcts_state_.total_current_nodes.store(root_current_visits,
+                                        std::memory_order_relaxed);
 
   const int top_count = std::min<int>(static_cast<int>(root_moves.size()),
                                       MCTSSharedState::MAX_TOP_MOVES);
@@ -707,6 +706,8 @@ void ParallelHybridSearch::publish_mcts_state() {
                                           std::memory_order_relaxed);
     mcts_state_.top_moves[i].visits.store(root_moves[i].visits,
                                           std::memory_order_relaxed);
+    mcts_state_.top_moves[i].current_visits.store(root_moves[i].current_visits,
+                                                  std::memory_order_relaxed);
     mcts_state_.top_moves[i].q.store(root_moves[i].q,
                                      std::memory_order_relaxed);
   }
@@ -714,6 +715,7 @@ void ParallelHybridSearch::publish_mcts_state() {
     mcts_state_.top_moves[i].move_raw.store(0, std::memory_order_relaxed);
     mcts_state_.top_moves[i].policy.store(0.0f, std::memory_order_relaxed);
     mcts_state_.top_moves[i].visits.store(0, std::memory_order_relaxed);
+    mcts_state_.top_moves[i].current_visits.store(0, std::memory_order_relaxed);
     mcts_state_.top_moves[i].q.store(0.0f, std::memory_order_relaxed);
   }
   mcts_state_.num_top_moves.store(top_count, std::memory_order_release);
@@ -1138,8 +1140,14 @@ void ParallelHybridSearch::coordinator_thread_main() {
       "Final: MCTSPlayouts=" + std::to_string(stats_.mcts_nodes.load()) +
       " MCTSBest=" +
       std::to_string(mcts_state_.best_visits.load(std::memory_order_relaxed)) +
+      " MCTSBestCurrent=" +
+      std::to_string(
+          mcts_state_.best_current_visits.load(std::memory_order_relaxed)) +
       " MCTSRootVisits=" +
       std::to_string(mcts_state_.total_nodes.load(std::memory_order_relaxed)) +
+      " MCTSRootCurrentVisits=" +
+      std::to_string(
+          mcts_state_.total_current_nodes.load(std::memory_order_relaxed)) +
       " MCTSEvals=" +
       std::to_string(
           stats_.transformer_evaluations.load(std::memory_order_relaxed)) +
@@ -1235,8 +1243,12 @@ Move ParallelHybridSearch::make_final_decision() {
   float mcts_q = mcts_state_.best_q.load(std::memory_order_relaxed);
   const uint32_t mcts_visits =
       mcts_state_.best_visits.load(std::memory_order_relaxed);
+  const uint32_t mcts_current_visits =
+      mcts_state_.best_current_visits.load(std::memory_order_relaxed);
   const uint64_t mcts_total_nodes =
       mcts_state_.total_nodes.load(std::memory_order_relaxed);
+  const uint64_t mcts_total_current_nodes =
+      mcts_state_.total_current_nodes.load(std::memory_order_relaxed);
   const uint64_t mcts_playouts =
       stats_.mcts_nodes.load(std::memory_order_relaxed);
   const uint64_t mcts_evals =
@@ -1272,6 +1284,9 @@ Move ParallelHybridSearch::make_final_decision() {
           mcts_state_.top_moves[i].move_raw.load(std::memory_order_relaxed));
       ss << move_to_string(move) << ":n="
          << mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed)
+         << ":cn="
+         << mcts_state_.top_moves[i].current_visits.load(
+                std::memory_order_relaxed)
          << ":q=" << std::fixed << std::setprecision(3)
          << mcts_state_.top_moves[i].q.load(std::memory_order_relaxed)
          << ":p=" << std::fixed << std::setprecision(3)
@@ -1305,6 +1320,7 @@ Move ParallelHybridSearch::make_final_decision() {
   struct MCTSRootLookup {
     int rank = -1;
     uint32_t visits = 0;
+    uint32_t current_visits = 0;
     float q = 0.0f;
     float policy = 0.0f;
   };
@@ -1324,6 +1340,8 @@ Move ParallelHybridSearch::make_final_decision() {
       result.rank = i + 1;
       result.visits =
           mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed);
+      result.current_visits = mcts_state_.top_moves[i].current_visits.load(
+          std::memory_order_relaxed);
       result.q = mcts_state_.top_moves[i].q.load(std::memory_order_relaxed);
       result.policy =
           mcts_state_.top_moves[i].policy.load(std::memory_order_relaxed);
@@ -1360,8 +1378,9 @@ Move ParallelHybridSearch::make_final_decision() {
     const MCTSRootLookup ab_in_mcts = find_mcts_root_move(ab_best);
     const ABRootLookup mcts_in_ab = find_ab_root_move(mcts_best);
     ss << " ABInMCTSRank=" << ab_in_mcts.rank
-       << " ABInMCTSVisits=" << ab_in_mcts.visits << " ABInMCTSQ=" << std::fixed
-       << std::setprecision(3) << ab_in_mcts.q
+       << " ABInMCTSVisits=" << ab_in_mcts.visits
+       << " ABInMCTSCurrentVisits=" << ab_in_mcts.current_visits
+       << " ABInMCTSQ=" << std::fixed << std::setprecision(3) << ab_in_mcts.q
        << " ABInMCTSPolicy=" << std::fixed << std::setprecision(3)
        << ab_in_mcts.policy << " MCTSInABRank=" << mcts_in_ab.rank
        << " MCTSInABScore=" << mcts_in_ab.score
@@ -1387,7 +1406,8 @@ Move ParallelHybridSearch::make_final_decision() {
     int candidate_count = 0;
     for (int i = 1; i < count; ++i) {
       candidate_visits[candidate_count] =
-          mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed);
+          mcts_state_.top_moves[i].current_visits.load(
+              std::memory_order_relaxed);
       candidate_qs[candidate_count] =
           mcts_state_.top_moves[i].q.load(std::memory_order_relaxed);
       ++candidate_count;
@@ -1398,8 +1418,11 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool mcts_decision_budget = HybridHasMCTSDecisionBudget(
       limits_, time_budget_ms_.load(std::memory_order_acquire),
       ponderhit_received_.load(std::memory_order_acquire));
+  const uint32_t mcts_confidence_visits = mcts_current_visits;
+  const uint64_t mcts_confidence_total_nodes = mcts_total_current_nodes;
   const bool mcts_visit_evidence_sane = HybridMCTSVisitEvidenceSane(
-      mcts_playouts, mcts_evals, mcts_total_nodes, mcts_visits);
+      mcts_playouts, mcts_evals, mcts_confidence_total_nodes,
+      mcts_confidence_visits);
   const auto trace_simple = [&](const char *reason, Move selected) {
     if (!config_.trace_decisions)
       return;
@@ -1412,7 +1435,11 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSQ=" << std::fixed << std::setprecision(3) << mcts_q
        << " MCTSPlayouts=" << mcts_playouts << " MCTSEvals=" << mcts_evals
        << " MCTSBestVisits=" << mcts_visits
+       << " MCTSBestCurrentVisits=" << mcts_current_visits
        << " MCTSRootVisits=" << mcts_total_nodes
+       << " MCTSRootCurrentVisits=" << mcts_total_current_nodes
+       << " MCTSConfidenceVisits=" << mcts_confidence_visits
+       << " MCTSConfidenceRootVisits=" << mcts_confidence_total_nodes
        << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
        << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
        << " MCTSTop=" << top_moves_to_string();
@@ -1446,7 +1473,8 @@ Move ParallelHybridSearch::make_final_decision() {
           mcts_state_.top_moves[0].move_raw.load(std::memory_order_relaxed));
       if (top_move == ab_best) {
         const uint32_t top_visits =
-            mcts_state_.top_moves[0].visits.load(std::memory_order_relaxed);
+            mcts_state_.top_moves[0].current_visits.load(
+                std::memory_order_relaxed);
         const float top_q =
             mcts_state_.top_moves[0].q.load(std::memory_order_relaxed);
         const float top_policy =
@@ -1458,16 +1486,17 @@ Move ParallelHybridSearch::make_final_decision() {
           if (move == Move::none())
             continue;
           const uint32_t candidate_visits =
-              mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed);
+              mcts_state_.top_moves[i].current_visits.load(
+                  std::memory_order_relaxed);
           const float candidate_q =
               mcts_state_.top_moves[i].q.load(std::memory_order_relaxed);
           const float candidate_policy =
               mcts_state_.top_moves[i].policy.load(std::memory_order_relaxed);
           if (candidate_policy > best_policy &&
-              HybridRootPolicyTieBreak(mcts_decision_budget, mcts_total_nodes,
-                                       top_visits, top_q, top_policy,
-                                       candidate_visits, candidate_q,
-                                       candidate_policy)) {
+              HybridRootPolicyTieBreak(mcts_decision_budget,
+                                       mcts_confidence_total_nodes, top_visits,
+                                       top_q, top_policy, candidate_visits,
+                                       candidate_q, candidate_policy)) {
             best_policy = candidate_policy;
             policy_tiebreak = move;
           }
@@ -1488,10 +1517,15 @@ Move ParallelHybridSearch::make_final_decision() {
   const int mcts_cp = QToNnueScore(mcts_q);
   const int ab_depth =
       ab_state_.completed_depth.load(std::memory_order_relaxed);
-  const float visit_share = mcts_total_nodes > 0
-                                ? static_cast<float>(mcts_visits) /
-                                      static_cast<float>(mcts_total_nodes)
-                                : 0.0f;
+  const float absolute_visit_share =
+      mcts_total_nodes > 0 ? static_cast<float>(mcts_visits) /
+                                 static_cast<float>(mcts_total_nodes)
+                           : 0.0f;
+  const float visit_share =
+      mcts_confidence_total_nodes > 0
+          ? static_cast<float>(mcts_confidence_visits) /
+                static_cast<float>(mcts_confidence_total_nodes)
+          : 0.0f;
   const uint64_t min_nodes = mcts_decision_budget
                                  ? 180u
                                  : static_cast<uint64_t>(std::max(
@@ -1500,12 +1534,14 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_decision_budget ? 72u
                            : static_cast<uint32_t>(std::max(
                                  48, current_strategy_.min_mcts_nodes / 2));
-  const bool mcts_reliable = mcts_total_nodes >= min_nodes &&
-                             mcts_visits >= min_visits && visit_share >= 0.24f;
+  const bool mcts_reliable = mcts_confidence_total_nodes >= min_nodes &&
+                             mcts_confidence_visits >= min_visits &&
+                             visit_share >= 0.24f;
   const bool mcts_strong =
-      mcts_reliable && (mcts_visits >= 512 || visit_share >= 0.55f);
-  const bool mcts_overwhelming =
-      mcts_total_nodes >= 5000 && mcts_visits >= 512 && visit_share >= 0.30f;
+      mcts_reliable && (mcts_confidence_visits >= 512 || visit_share >= 0.55f);
+  const bool mcts_overwhelming = mcts_confidence_total_nodes >= 5000 &&
+                                 mcts_confidence_visits >= 512 &&
+                                 visit_share >= 0.30f;
   const bool ab_verified =
       ab_depth >=
       std::max(config_.ab_min_depth, current_strategy_.ab_verify_depth);
@@ -1514,56 +1550,53 @@ Move ParallelHybridSearch::make_final_decision() {
   const float root_q_gap = root_q_gap_for_best();
   const bool mcts_decisive_fixed_budget =
       mcts_visit_evidence_sane &&
-      HybridMCTSDecisiveFixedBudgetOverride(mcts_decision_budget, mcts_strong,
-                                            mcts_total_nodes, mcts_visits,
-                                            visit_share, eval_delta);
-  const bool mcts_high_value_fixed_budget =
-      mcts_visit_evidence_sane &&
-      HybridMCTSHighValueFixedBudgetOverride(
-          mcts_decision_budget, mcts_reliable, mcts_total_nodes, mcts_visits,
-          visit_share, mcts_cp, eval_delta);
+      HybridMCTSDecisiveFixedBudgetOverride(
+          mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, eval_delta);
   const bool mcts_no_clear_fixed_budget =
       mcts_visit_evidence_sane && !ab_has_clear_preference &&
       HybridMCTSNoClearFixedBudgetOverride(mcts_decision_budget, mcts_strong,
-                                           mcts_visits, visit_share,
+                                           mcts_confidence_visits, visit_share,
                                            eval_delta);
   const bool mcts_root_dominant_fixed_budget =
       mcts_visit_evidence_sane &&
       HybridMCTSRootDominantFixedBudgetOverride(
-          mcts_decision_budget, mcts_strong, mcts_total_nodes, mcts_visits,
-          visit_share, mcts_cp, eval_delta);
+          mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, mcts_cp, eval_delta);
   const bool mcts_tactical_gap_fixed_budget =
       mcts_visit_evidence_sane &&
       HybridMCTSTacticalGapFixedBudgetOverride(
-          mcts_decision_budget, mcts_total_nodes, mcts_visits, visit_share,
-          root_q_gap, mcts_cp, eval_delta);
+          mcts_decision_budget, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta);
   const bool mcts_root_confidence_fixed_budget =
       mcts_visit_evidence_sane &&
       HybridMCTSRootConfidenceFixedBudgetOverride(
-          mcts_decision_budget, mcts_strong, mcts_total_nodes, mcts_visits,
-          visit_share, root_q_gap, mcts_cp, eval_delta);
+          mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta);
   bool mcts_root_rejects_ab = false;
   {
     const int top_count =
         std::min<int>(mcts_state_.num_top_moves.load(std::memory_order_acquire),
                       MCTSSharedState::MAX_TOP_MOVES);
     if (config_.mcts_root_reject && top_count > 0 && mcts_reliable &&
-        mcts_visits >= 160 && visit_share >= 0.35f && ab_score >= -120 &&
-        ab_score <= 40) {
+        mcts_confidence_visits >= 160 && visit_share >= 0.35f &&
+        ab_score >= -120 && ab_score <= 40) {
       Move top_move(
           mcts_state_.top_moves[0].move_raw.load(std::memory_order_relaxed));
       if (top_move == mcts_best) {
         const float top_q =
             mcts_state_.top_moves[0].q.load(std::memory_order_relaxed);
         const uint32_t top_visits =
-            mcts_state_.top_moves[0].visits.load(std::memory_order_relaxed);
+            mcts_state_.top_moves[0].current_visits.load(
+                std::memory_order_relaxed);
         for (int i = 1; i < top_count; ++i) {
           Move move(mcts_state_.top_moves[i].move_raw.load(
               std::memory_order_relaxed));
           if (move != ab_best)
             continue;
           const uint32_t ab_visits =
-              mcts_state_.top_moves[i].visits.load(std::memory_order_relaxed);
+              mcts_state_.top_moves[i].current_visits.load(
+                  std::memory_order_relaxed);
           const float ab_q =
               mcts_state_.top_moves[i].q.load(std::memory_order_relaxed);
           if (mcts_visit_evidence_sane && ab_visits >= 25 &&
@@ -1599,9 +1632,6 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_decisive_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_decisive_fixed_budget";
-    } else if (mcts_high_value_fixed_budget) {
-      choose_mcts = true;
-      reason = "mcts_high_value_fixed_budget";
     } else if (mcts_tactical_gap_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_tactical_gap_fixed_budget";
@@ -1617,12 +1647,10 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_no_clear_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_no_clear_fixed_budget";
-    } else if (!ab_verified && mcts_reliable && eval_delta >= -80) {
+    } else if (mcts_visit_evidence_sane && !ab_verified && mcts_reliable &&
+               eval_delta >= -80) {
       choose_mcts = true;
       reason = "mcts_reliable_ab_unverified";
-    } else if (!ab_has_clear_preference && mcts_strong && eval_delta >= 80) {
-      choose_mcts = true;
-      reason = "mcts_strong_no_clear_ab_preference";
     }
     break;
   }
@@ -1637,15 +1665,19 @@ Move ParallelHybridSearch::make_final_decision() {
        << " ABDepth=" << ab_depth << " MCTSQ=" << std::fixed
        << std::setprecision(3) << mcts_q << " MCTSCP=" << mcts_cp
        << " EvalDelta=" << eval_delta << " MCTSBestVisits=" << mcts_visits
+       << " MCTSBestCurrentVisits=" << mcts_current_visits
        << " MCTSPlayouts=" << mcts_playouts << " MCTSEvals=" << mcts_evals
        << " MCTSRootVisits=" << mcts_total_nodes
+       << " MCTSRootCurrentVisits=" << mcts_total_current_nodes
+       << " MCTSConfidenceVisits=" << mcts_confidence_visits
+       << " MCTSConfidenceRootVisits=" << mcts_confidence_total_nodes
+       << " AbsoluteVisitShare=" << absolute_visit_share
        << " VisitShare=" << visit_share
        << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
        << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
        << " RootQGap=" << root_q_gap
        << " MCTSReliable=" << (mcts_reliable ? 1 : 0)
        << " MCTSStrong=" << (mcts_strong ? 1 : 0)
-       << " MCTSHighValue=" << (mcts_high_value_fixed_budget ? 1 : 0)
        << " MCTSNoClearFixed=" << (mcts_no_clear_fixed_budget ? 1 : 0)
        << " MCTSRootDominant=" << (mcts_root_dominant_fixed_budget ? 1 : 0)
        << " MCTSTacticalGap=" << (mcts_tactical_gap_fixed_budget ? 1 : 0)

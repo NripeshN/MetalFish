@@ -129,10 +129,14 @@ class UCIEngine:
             text=True,
             bufsize=1,
         )
-        self.send("uci")
-        self.wait_for("uciok", 120)
-        self.send("isready")
-        self.wait_for("readyok", 120)
+        try:
+            self.send("uci")
+            self.wait_for("uciok", 120)
+            self.send("isready")
+            self.wait_for("readyok", 120)
+        except Exception:
+            self.close()
+            raise
 
     def send(self, cmd: str) -> None:
         assert self.proc.stdin
@@ -362,8 +366,8 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
             "HybridMCTSThreads": "0",
             "HybridABThreads": "0",
             "HybridAutoABThreadsCap": "0",
-            "TransformerLowTimeFallbackMs": "5000",
-            "TransformerMinMoveBudgetMs": "800",
+            "TransformerLowTimeFallbackMs": "3000",
+            "TransformerMinMoveBudgetMs": "400",
             "MCTSMaxThreads": "0",
             "MCTSMinibatchSize": "0",
             "MCTSParityPreset": "false",
@@ -371,8 +375,8 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
             "HybridMCTSMinimumKLDGainPerNode": "0.0",
             "HybridMCTSRootReject": "true",
             "HybridMCTSUseSharedTT": "false",
-            "HybridMCTSABRootHints": "false",
-            "HybridMCTSABRootHintDelayMs": "0",
+            "HybridMCTSABRootHints": "true",
+            "HybridMCTSABRootHintDelayMs": "25",
             "HybridMCTSABRootHintCount": "4",
             "HybridABPolicyWeight": "0.0",
             "HybridTrace": "false",

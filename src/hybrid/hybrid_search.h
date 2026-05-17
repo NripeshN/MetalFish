@@ -91,16 +91,19 @@ struct alignas(APPLE_CACHE_LINE_SIZE) MCTSSharedState {
   std::atomic<uint32_t> best_move_raw{0};
   std::atomic<float> best_q{0.0f};
   std::atomic<uint32_t> best_visits{0};
+  std::atomic<uint32_t> best_current_visits{0};
   // Sum of root-edge visits in the current MCTS root. This can differ from
   // per-search node stats when a tree is reused, and is the right denominator
   // for root confidence / visit-share decisions.
   std::atomic<uint64_t> total_nodes{0};
+  std::atomic<uint64_t> total_current_nodes{0};
 
   static constexpr int MAX_TOP_MOVES = 10;
   struct TopMove {
     std::atomic<uint32_t> move_raw{0};
     std::atomic<float> policy{0.0f};
     std::atomic<uint32_t> visits{0};
+    std::atomic<uint32_t> current_visits{0};
     std::atomic<float> q{0.0f};
   };
   TopMove top_moves[MAX_TOP_MOVES];
@@ -114,7 +117,9 @@ struct alignas(APPLE_CACHE_LINE_SIZE) MCTSSharedState {
     best_move_raw.store(0, std::memory_order_relaxed);
     best_q.store(0.0f, std::memory_order_relaxed);
     best_visits.store(0, std::memory_order_relaxed);
+    best_current_visits.store(0, std::memory_order_relaxed);
     total_nodes.store(0, std::memory_order_relaxed);
+    total_current_nodes.store(0, std::memory_order_relaxed);
     num_top_moves.store(0, std::memory_order_relaxed);
     update_counter.store(0, std::memory_order_relaxed);
     mcts_running.store(false, std::memory_order_relaxed);
@@ -123,6 +128,7 @@ struct alignas(APPLE_CACHE_LINE_SIZE) MCTSSharedState {
       top_moves[i].move_raw.store(0, std::memory_order_relaxed);
       top_moves[i].policy.store(0.0f, std::memory_order_relaxed);
       top_moves[i].visits.store(0, std::memory_order_relaxed);
+      top_moves[i].current_visits.store(0, std::memory_order_relaxed);
       top_moves[i].q.store(0.0f, std::memory_order_relaxed);
     }
   }
@@ -200,8 +206,8 @@ struct ParallelHybridConfig {
   bool trace_decisions = false;
   bool mcts_root_reject = true;
   bool use_shared_tt = false;
-  bool mcts_ab_root_hints = false;
-  int mcts_ab_root_hint_delay_ms = 0;
+  bool mcts_ab_root_hints = true;
+  int mcts_ab_root_hint_delay_ms = 25;
   int mcts_ab_root_hint_count = 4;
 
   enum class DecisionMode {
@@ -367,10 +373,6 @@ bool HybridMCTSDecisiveFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                            uint64_t mcts_total_nodes,
                                            uint32_t mcts_visits,
                                            float visit_share, int eval_delta);
-
-bool HybridMCTSHighValueFixedBudgetOverride(
-    bool fixed_budget, bool mcts_reliable, uint64_t mcts_total_nodes,
-    uint32_t mcts_visits, float visit_share, int mcts_cp, int eval_delta);
 
 bool HybridMCTSNoClearFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                           uint32_t mcts_visits,

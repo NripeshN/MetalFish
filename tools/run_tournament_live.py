@@ -102,35 +102,39 @@ class UCIEngine:
         self._start()
 
     def _start(self):
-        self.proc = subprocess.Popen(
-            self.cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-        self._lines = queue.Queue()
-        assert self.proc.stdout is not None
-        threading.Thread(
-            target=self._read_stdout,
-            args=(self.proc.stdout, self._lines),
-            daemon=True,
-        ).start()
-        self.last_error = []
-        assert self.proc.stderr is not None
-        threading.Thread(
-            target=self._read_stderr,
-            args=(self.proc.stderr, self.last_error),
-            daemon=True,
-        ).start()
-        self.last_output = []
-        self._send("uci")
-        self._wait_for("uciok", 30)
-        for k, v in self.options.items():
-            self._send(f"setoption name {k} value {v}")
-        self._send("isready")
-        self._wait_for("readyok", 60)
+        try:
+            self.proc = subprocess.Popen(
+                self.cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+            self._lines = queue.Queue()
+            assert self.proc.stdout is not None
+            threading.Thread(
+                target=self._read_stdout,
+                args=(self.proc.stdout, self._lines),
+                daemon=True,
+            ).start()
+            self.last_error = []
+            assert self.proc.stderr is not None
+            threading.Thread(
+                target=self._read_stderr,
+                args=(self.proc.stderr, self.last_error),
+                daemon=True,
+            ).start()
+            self.last_output = []
+            self._send("uci")
+            self._wait_for("uciok", 30)
+            for k, v in self.options.items():
+                self._send(f"setoption name {k} value {v}")
+            self._send("isready")
+            self._wait_for("readyok", 60)
+        except Exception:
+            self.close()
+            raise
 
     @staticmethod
     def _read_stdout(stream, lines: "queue.Queue[Optional[str]]"):
@@ -271,6 +275,14 @@ class UCIEngine:
             if self.proc.poll() is None:
                 self.proc.kill()
                 self.proc.wait()
+        finally:
+            for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
+                try:
+                    if stream:
+                        stream.close()
+                except Exception:
+                    pass
+            self.proc = None
 
 
 def load_openings(
@@ -315,6 +327,8 @@ def extract_search_log_lines(lines: Sequence[str]) -> List[str]:
         if line.startswith("info string HybridTrace:"):
             keep.append(line)
         elif line.startswith("info string Final:"):
+            keep.append(line)
+        elif line.startswith("info string Hybrid: AB root hints from MCTS"):
             keep.append(line)
         elif line.startswith("info string Time safety:"):
             keep.append(line)
