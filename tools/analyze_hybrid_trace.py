@@ -343,8 +343,7 @@ def print_trace_log_stats(stats: TraceLogStats) -> None:
     if stats.root_hint_events:
         avg_hints = stats.root_hint_moves_total / stats.root_hint_events
         sizes = ", ".join(
-            f"{size}:{count}x"
-            for size, count in sorted(stats.root_hint_sizes.items())
+            f"{size}:{count}x" for size, count in sorted(stats.root_hint_sizes.items())
         )
         print(f"  MCTS-to-AB root hint avg moves: {avg_hints:.2f}")
         print(f"  MCTS-to-AB root hint sizes: {sizes}")
@@ -610,7 +609,9 @@ def main() -> int:
             comparisons.append(
                 MoveComparison(
                     decision=decision,
-                    ab_eval=probe.eval_after(decision.fen, decision.ab_move, args.depth),
+                    ab_eval=probe.eval_after(
+                        decision.fen, decision.ab_move, args.depth
+                    ),
                     mcts_eval=probe.eval_after(
                         decision.fen, decision.mcts_move, args.depth
                     ),

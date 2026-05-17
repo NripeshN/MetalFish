@@ -116,9 +116,9 @@ TRANSFORMER_MIN_MOVE_BUDGET_MS = max(
 BOOK_MAX_PLY = 10
 BOOK_MIN_CLOCK_MS = 30_000
 BOOK_TIMEOUT_S = 0.25
-ENGINE_STOP_GRACE_S = 1.0
-PONDER_STOP_TIMEOUT_S = 1.0
-PONDER_HIT_TIMEOUT_S = 2.0
+ENGINE_STOP_GRACE_S = 3.0
+PONDER_STOP_TIMEOUT_S = 4.0
+PONDER_HIT_TIMEOUT_S = 6.0
 MIN_SEARCH_TIMEOUT_S = 0.2
 MAX_SEARCH_TIMEOUT_S = 30.0
 CLOCK_SAFETY_MS = 1_500
@@ -242,35 +242,60 @@ class UCIEngine:
     def _launch(self):
         env = os.environ.copy()
         env["METALFISH_PRELOAD_TRANSFORMER"] = "1" if self.preload_transformer else "0"
-        self.proc = subprocess.Popen(
-            [str(self.path)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
-            env=env,
-        )
-        self._output = queue.Queue()
-        self._reader_thread = threading.Thread(target=self._read_stdout, daemon=True)
-        self._reader_thread.start()
-        self._send("uci")
-        self._wait_for("uciok")
-        for name, value in self.options.items():
-            self._send(f"setoption name {name} value {value}")
-        self._send("isready")
-        self._wait_for("readyok", timeout=120)
-        self._pondering = False
-        self._ponder_move: str | None = None
-
-    def _read_stdout(self):
+        proc: subprocess.Popen | None = None
         try:
-            if self.proc is None or self.proc.stdout is None:
+            proc = subprocess.Popen(
+                [str(self.path)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+            output: queue.Queue[str | None] = queue.Queue()
+            self.proc = proc
+            self._output = output
+            self._reader_thread = threading.Thread(
+                target=self._read_stdout,
+                args=(proc.stdout, output),
+                daemon=True,
+            )
+            self._reader_thread.start()
+            self._send("uci")
+            self._wait_for("uciok")
+            for name, value in self.options.items():
+                self._send(f"setoption name {name} value {value}")
+            self._send("isready")
+            self._wait_for("readyok", timeout=120)
+            self._pondering = False
+            self._ponder_move: str | None = None
+        except Exception:
+            if proc is not None and proc.poll() is None:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=2)
+                except Exception:
+                    pass
+            if proc is not None:
+                for stream in (proc.stdin, proc.stdout):
+                    try:
+                        if stream:
+                            stream.close()
+                    except Exception:
+                        pass
+            self.proc = None
+            raise
+
+    @staticmethod
+    def _read_stdout(stream, output: "queue.Queue[str | None]"):
+        try:
+            if stream is None:
                 return
-            for line in self.proc.stdout:
-                self._output.put(line.strip())
+            for line in stream:
+                output.put(line.strip())
         finally:
-            self._output.put(None)
+            output.put(None)
 
     def _send(self, cmd: str):
         try:
@@ -319,6 +344,13 @@ class UCIEngine:
                     self.proc.wait(timeout=2)
                 except Exception:
                     pass
+            finally:
+                for stream in (self.proc.stdin, self.proc.stdout):
+                    try:
+                        if stream:
+                            stream.close()
+                    except Exception:
+                        pass
         self._launch()
         self.new_game()
 
@@ -436,7 +468,11 @@ class UCIEngine:
             return "0000", None
         self._send("ponderhit")
         try:
-            line = self._wait_for("bestmove", timeout=timeout)
+            try:
+                line = self._wait_for("bestmove", timeout=timeout)
+            except TimeoutError:
+                self._send("stop")
+                line = self._wait_for("bestmove", timeout=ENGINE_STOP_GRACE_S)
         finally:
             self._pondering = False
             self._ponder_move = None
@@ -489,6 +525,14 @@ class UCIEngine:
                     self.proc.kill()
             except Exception:
                 pass
+        finally:
+            if self.proc is not None:
+                for stream in (self.proc.stdin, self.proc.stdout):
+                    try:
+                        if stream:
+                            stream.close()
+                    except Exception:
+                        pass
 
 
 class OpeningBook:
@@ -581,6 +625,10 @@ class LichessBot:
         self._rate_limit_count = 0
         self._tc_failures = 0
         self._seek_lock = threading.Lock()
+        self._submitted_turns: dict[str, tuple[str, ...]] = {}
+        self._submitted_turns_lock = threading.Lock()
+        self._ponder_disabled_games: set[str] = set()
+        self._ponder_disabled_lock = threading.Lock()
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -611,6 +659,27 @@ class LichessBot:
             print(f"  [{game_id}] Move {move} failed: {r.status_code}{suffix}")
             return False
         return True
+
+    def _already_submitted_for_turn(self, game_id: str, moves: list[str]) -> bool:
+        key = tuple(moves)
+        with self._submitted_turns_lock:
+            return self._submitted_turns.get(game_id) == key
+
+    def _record_submitted_turn(self, game_id: str, moves: list[str]) -> None:
+        key = tuple(moves)
+        with self._submitted_turns_lock:
+            self._submitted_turns[game_id] = key
+
+    def _ponder_allowed_for_game(self, game_id: str) -> bool:
+        with self._ponder_disabled_lock:
+            return game_id not in self._ponder_disabled_games
+
+    def _disable_ponder_for_game(self, game_id: str, reason: str) -> None:
+        with self._ponder_disabled_lock:
+            already_disabled = game_id in self._ponder_disabled_games
+            self._ponder_disabled_games.add(game_id)
+        if not already_disabled:
+            print(f"  [{game_id}] Disabling ponder for this game: {reason}")
 
     def resign(self, game_id: str):
         self.api_post(f"/bot/game/{game_id}/resign")
@@ -1051,6 +1120,10 @@ class LichessBot:
         finally:
             if engine:
                 engine.quit()
+            with self._submitted_turns_lock:
+                self._submitted_turns.pop(game_id, None)
+            with self._ponder_disabled_lock:
+                self._ponder_disabled_games.discard(game_id)
             self.active_games.pop(game_id, None)
             print(f"  [{game_id}] Finished.")
             if self._draining.is_set():
@@ -1143,6 +1216,9 @@ class LichessBot:
         if not is_my_turn:
             return
 
+        if self._already_submitted_for_turn(game_id, moves):
+            return
+
         board = self._build_board(game_id, initial_fen, moves)
         if board is None:
             return
@@ -1160,9 +1236,10 @@ class LichessBot:
                 game_id, initial_fen, moves, engine.ponder_move
             ):
                 try:
-                    best, ponder = engine.ponderhit(timeout=ponder_stop_timeout)
+                    best, ponder = engine.ponderhit(timeout=search_timeout)
                 except (TimeoutError, RuntimeError) as e:
-                    print(f"  [{game_id}] Ponder stop failed: {e}; restarting")
+                    print(f"  [{game_id}] Ponderhit failed: {e}; restarting")
+                    self._disable_ponder_for_game(game_id, "ponderhit failed")
                     engine.restart()
                     best, ponder = "0000", None
                 if best and best not in ("0000", "(none)"):
@@ -1171,6 +1248,7 @@ class LichessBot:
                         print(f"  [{game_id}] Restarting after rejected ponder move")
                         engine.restart()
                     elif self.make_move(game_id, parsed.uci()):
+                        self._record_submitted_turn(game_id, moves)
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Ponderhit! {move_uci}")
                         self._start_pondering_if_legal(
@@ -1191,6 +1269,7 @@ class LichessBot:
                         return
             else:
                 if not engine.stop_pondering(timeout=ponder_stop_timeout):
+                    self._disable_ponder_for_game(game_id, "ponder stop timed out")
                     print(f"  [{game_id}] Ponder stop timed out; engine restarted")
 
         if self._should_query_book(board, my_color, wtime, btime):
@@ -1199,6 +1278,7 @@ class LichessBot:
                 parsed = self._parse_legal_move(game_id, book_move, board, "book")
                 if parsed is not None:
                     if self.make_move(game_id, parsed.uci()):
+                        self._record_submitted_turn(game_id, moves)
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Book: {move_uci}")
                         self._start_book_pondering(
@@ -1223,10 +1303,12 @@ class LichessBot:
                 print(f"  [{game_id}] Engine restart failed: {e}")
                 fallback = self._fallback_move(board)
                 if fallback and self.make_move(game_id, fallback):
+                    self._record_submitted_turn(game_id, moves)
                     print(f"  [{game_id}] Fallback legal move: {fallback}")
                 return
 
         if not engine.stop_pondering(timeout=ponder_stop_timeout):
+            self._disable_ponder_for_game(game_id, "ponder stop timed out")
             print(f"  [{game_id}] Ponder stop timed out; engine restarted")
         engine.set_position(initial_fen, moves)
 
@@ -1264,6 +1346,7 @@ class LichessBot:
                     return
             parsed = self._parse_legal_move(game_id, best, board, "engine")
             if parsed is not None and self.make_move(game_id, parsed.uci()):
+                self._record_submitted_turn(game_id, moves)
                 move_uci = parsed.uci()
                 print(f"  [{game_id}] Engine: {move_uci}")
                 ponder_wtime, ponder_btime = self._after_search_clock(
@@ -1299,6 +1382,7 @@ class LichessBot:
                 return
             parsed = self._parse_legal_move(game_id, best, board, "recovery")
             if parsed is not None and self.make_move(game_id, parsed.uci()):
+                self._record_submitted_turn(game_id, moves)
                 print(f"  [{game_id}] Recovery: {parsed.uci()}")
 
     def _build_board(
@@ -1479,6 +1563,8 @@ class LichessBot:
             return
         if not self.args.ponder:
             return
+        if not self._ponder_allowed_for_game(game_id):
+            return
 
         parsed_best = self._normalize_uci_move(best, board)
         if parsed_best is None:
@@ -1523,6 +1609,8 @@ class LichessBot:
         board_after = board.copy(stack=False)
         board_after.push(parsed_best)
         if not self.args.ponder:
+            return
+        if not self._ponder_allowed_for_game(game_id):
             return
         reply = self.book.lookup(board_after.fen())
         parsed_reply = self._normalize_uci_move(reply, board_after) if reply else None
