@@ -66,6 +66,22 @@ jobs:
             tools/uci_smoke.py
           python3 tests/test_benchmark_configs.py
           python3 tools/uci_smoke.py --engine build-linux/metalfish --go "depth 3"
+          python3 tools/uci_smoke.py \
+            --engine build-linux/metalfish \
+            --setoption NNBackend=stub \
+            --setoption UseMCTS=true \
+            --go "nodes 8"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: metalfish-linux-x86_64-cpu
+          path: |
+            build-linux/metalfish
+            README.md
+            CHANGELOG.md
+            LICENSE
+          if-no-files-found: error
 
   windows-mingw-cpu:
     name: Windows MinGW CPU
@@ -124,3 +140,27 @@ jobs:
             tools/uci_smoke.py
           python tests/test_benchmark_configs.py
           python tools/uci_smoke.py --engine build-windows/metalfish.exe --go "depth 3"
+          python tools/uci_smoke.py \
+            --engine build-windows/metalfish.exe \
+            --setoption NNBackend=stub \
+            --setoption UseMCTS=true \
+            --go "nodes 8"
+
+      - name: Package Windows artifact
+        run: |
+          mkdir -p portable-windows
+          cp build-windows/metalfish.exe portable-windows/
+          cp README.md CHANGELOG.md LICENSE portable-windows/
+          ldd build-windows/metalfish.exe \
+            | awk '/=> \/ucrt64\// {print $3} /^\/ucrt64\// {print $1}' \
+            | sort -u \
+            | while read -r dll; do
+                [ -n "$dll" ] && cp "$dll" portable-windows/
+              done
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: metalfish-windows-x86_64-mingw-cpu
+          path: portable-windows/
+          if-no-files-found: error

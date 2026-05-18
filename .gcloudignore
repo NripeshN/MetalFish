@@ -26,3 +26,7 @@ networks/*.pb.gz
 books/*.bin
 books/*.book
 books/*.polyglot
+
+build-portable-*/
+build-windows/
+build-linux/

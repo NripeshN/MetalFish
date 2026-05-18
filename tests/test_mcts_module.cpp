@@ -10,6 +10,7 @@
 #include "core/position.h"
 #include "mcts/backend_adapter.h"
 #include "mcts/core.h"
+#include "mcts/evaluator.h"
 #include "mcts/search.h"
 #include "nn/loader.h"
 #include "nn/network.h"
@@ -456,6 +457,19 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
   expect(static_cast<bool>(stub), "explicit stub backend should construct", tc);
   expect(stub->GetNetworkInfo().find("Stub network") != std::string::npos,
          "explicit stub backend should not select a platform backend", tc);
+  auto path_stub = NN::CreateNetwork("", "stub");
+  expect(static_cast<bool>(path_stub),
+         "explicit stub backend should not require a weights path", tc);
+
+  Position pos;
+  StateInfo st;
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          false, &st);
+  NNMCTSEvaluator stub_evaluator("", "stub");
+  const auto stub_eval = stub_evaluator.Evaluate(pos);
+  expect(stub_eval.policy_priors.size() == 20,
+         "stub evaluator should generate legal root priors without weights",
+         tc);
 
   auto expect_throws = [&](const std::function<void()> &fn, const char *msg) {
     bool threw = false;

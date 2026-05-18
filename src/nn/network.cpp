@@ -101,6 +101,11 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
 
 std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
                                        const std::string &backend) {
+  if (backend == "stub") {
+    WeightsFile empty_weights;
+    return CreateNetwork(empty_weights, backend);
+  }
+
   auto weights_opt = LoadWeights(weights_path);
 
   if (!weights_opt.has_value()) {

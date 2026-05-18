@@ -48,6 +48,13 @@ BatchEncodeScratch &GetBatchEncodeScratch() {
 class NNMCTSEvaluator::Impl {
 public:
   Impl(const std::string &weights_path, const std::string &backend) {
+    if (backend == "stub" && weights_path.empty()) {
+      input_format_ = MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE;
+      NN::WeightsFile empty_weights;
+      network_ = NN::CreateNetwork(empty_weights, backend);
+      return;
+    }
+
     auto weights_opt = NN::LoadWeights(weights_path);
     if (!weights_opt.has_value()) {
       throw std::runtime_error("Could not load network weights");
