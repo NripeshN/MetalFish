@@ -7,10 +7,11 @@ import datetime
 import json
 import os
 import pathlib
+import platform
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import chess
@@ -23,6 +24,53 @@ PATRICIA = PROJ / "reference" / "Patricia" / "engine" / "patricia"
 BERSERK = PROJ / "reference" / "berserk" / "src" / "berserk"
 WEIGHTS = PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"
 RESULTS_DIR = PROJ / "results"
+
+
+def _run_int(cmd: Sequence[str]) -> Optional[int]:
+    try:
+        out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return None
+    try:
+        return int(out.strip().splitlines()[-1])
+    except (IndexError, ValueError):
+        return None
+
+
+def detect_default_threads() -> int:
+    """Return a fair default worker budget for one engine process.
+
+    On Apple Silicon, the performance-core count is the cleanest full-strength
+    default: it gives CPU engines all high-performance cores without forcing
+    them onto efficiency cores that can distort NPS and time-to-depth. On other
+    systems, fall back to the online logical CPU count.
+    """
+    if platform.system() == "Darwin":
+        perf = _run_int(["sysctl", "-n", "hw.perflevel0.physicalcpu_max"])
+        if perf and perf > 0:
+            return perf
+        logical = _run_int(["sysctl", "-n", "hw.logicalcpu"])
+        if logical and logical > 0:
+            return logical
+    return max(1, os.cpu_count() or 1)
+
+
+def detect_memory_mib() -> Optional[int]:
+    if platform.system() == "Darwin":
+        mem_bytes = _run_int(["sysctl", "-n", "hw.memsize"])
+        if mem_bytes and mem_bytes > 0:
+            return mem_bytes // (1024 * 1024)
+    return None
+
+
+def default_hash_mb() -> int:
+    mem_mib = detect_memory_mib()
+    if not mem_mib:
+        return 1024
+    # Benchmarks run engines sequentially. Use enough TT for serious searches
+    # while leaving memory for transformer weights, OS cache, and tooling.
+    return min(4096, max(512, mem_mib // 8))
+
 
 BK_POSITIONS: List[Tuple[str, List[str], str]] = [
     ("1k1r4/pp1b1R2/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - -", ["Qd1+"], "BK.01"),
@@ -320,11 +368,23 @@ def apply_hybrid_env_options(options: Dict[str, str]) -> None:
             options[option_name] = value
 
 
-def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
+def hybrid_split_for_threads(threads: int) -> Tuple[int, int]:
+    if threads <= 3:
+        return 1, max(1, threads - 1)
+    # Keep the transformer side present while giving the CPU AB search most of
+    # the worker budget. On an 8-performance-core M2 Max this becomes 2 + 6.
+    mcts_threads = min(2, max(1, threads // 4))
+    return mcts_threads, max(1, threads - mcts_threads)
+
+
+def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
     engines = {}
     mf = METALFISH
     w = str(WEIGHTS)
+    threads = max(1, threads)
+    hash_mb = max(16, hash_mb)
     hybrid_threads = max(3, threads)
+    hybrid_mcts_threads, hybrid_ab_threads = hybrid_split_for_threads(hybrid_threads)
 
     engines["metalfish-ab"] = EngineConfig(
         name="MetalFish-AB",
@@ -333,6 +393,7 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
             "UseMCTS": "false",
             "UseHybridSearch": "false",
             "Threads": str(threads),
+            "Hash": str(hash_mb),
             "MultiPV": "1",
         },
     )
@@ -345,8 +406,9 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
             "UseMCTS": "true",
             "NNWeights": w,
             "Threads": str(threads),
+            "Hash": str(hash_mb),
             "MultiPV": "1",
-            "MCTSMaxThreads": "1",
+            "MCTSMaxThreads": str(threads),
             "MCTSMinibatchSize": "0",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
@@ -362,13 +424,14 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
             "UseHybridSearch": "true",
             "NNWeights": w,
             "Threads": str(hybrid_threads),
+            "Hash": str(hash_mb),
             "MultiPV": "1",
-            "HybridMCTSThreads": "0",
-            "HybridABThreads": "0",
+            "HybridMCTSThreads": str(hybrid_mcts_threads),
+            "HybridABThreads": str(hybrid_ab_threads),
             "HybridAutoABThreadsCap": "0",
             "TransformerLowTimeFallbackMs": "3000",
             "TransformerMinMoveBudgetMs": "400",
-            "MCTSMaxThreads": "0",
+            "MCTSMaxThreads": str(hybrid_mcts_threads),
             "MCTSMinibatchSize": "0",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
@@ -388,21 +451,29 @@ def detect_engines(threads: int = 12) -> Dict[str, EngineConfig]:
         name="Lc0",
         path=LC0,
         cmd_args=[f"--weights={w}", "--backend=metal"],
-        uci_options={"Threads": "1", "Temperature": "0"},
+        uci_options={"Threads": str(threads), "Temperature": "0"},
     )
 
     engines["stockfish"] = EngineConfig(
         name="Stockfish",
         path=STOCKFISH,
-        uci_options={"Threads": "1", "Skill Level": "20"},
+        uci_options={
+            "Threads": str(threads),
+            "Hash": str(hash_mb),
+            "Skill Level": "20",
+        },
     )
 
     engines["patricia"] = EngineConfig(
-        name="Patricia", path=PATRICIA, uci_options={"Threads": "1"}
+        name="Patricia",
+        path=PATRICIA,
+        uci_options={"Threads": str(threads), "Hash": str(hash_mb)},
     )
 
     engines["berserk"] = EngineConfig(
-        name="Berserk", path=BERSERK, uci_options={"Threads": "1"}
+        name="Berserk",
+        path=BERSERK,
+        uci_options={"Threads": str(threads), "Hash": str(hash_mb)},
     )
 
     for eid, cfg in engines.items():
@@ -421,6 +492,27 @@ def start_engine(cfg: EngineConfig) -> UCIEngine:
     return eng
 
 
+def config_with_thread_count(cfg: EngineConfig, threads: int) -> EngineConfig:
+    options = {**cfg.uci_options, "Threads": str(max(1, threads))}
+    if options.get("UseMCTS") == "true":
+        options["MCTSMaxThreads"] = str(max(1, threads))
+    if options.get("UseHybridSearch") == "true":
+        hybrid_threads = max(3, threads)
+        mcts_threads, ab_threads = hybrid_split_for_threads(hybrid_threads)
+        options["Threads"] = str(hybrid_threads)
+        options["HybridMCTSThreads"] = str(mcts_threads)
+        options["HybridABThreads"] = str(ab_threads)
+        options["HybridAutoABThreadsCap"] = "0"
+        options["MCTSMaxThreads"] = str(mcts_threads)
+    return EngineConfig(
+        name=cfg.name,
+        path=cfg.path,
+        cmd_args=list(cfg.cmd_args),
+        uci_options=options,
+        available=True,
+    )
+
+
 def parse_engine_ids(raw: str) -> Optional[List[str]]:
     if not raw:
         return None
@@ -436,6 +528,54 @@ def parse_engine_ids(raw: str) -> Optional[List[str]]:
         if eid not in ids:
             ids.append(eid)
     return ids or None
+
+
+def parse_thread_counts(raw: str) -> List[int]:
+    values: List[int] = []
+    for item in raw.replace(",", " ").split():
+        token = item.strip().lower()
+        if not token:
+            continue
+        if token == "auto":
+            value = detect_default_threads()
+        else:
+            value = int(token)
+        if value < 1:
+            raise ValueError("thread counts must be positive")
+        values.append(value)
+    return values or [detect_default_threads()]
+
+
+def parse_hash_mb(raw: str) -> int:
+    token = raw.strip().lower()
+    if token == "auto":
+        return default_hash_mb()
+    value = int(token)
+    if value < 16:
+        raise ValueError("hash must be at least 16 MB")
+    return value
+
+
+def resource_policy(threads: int, hash_mb: int) -> dict:
+    return {
+        "thread_policy": (
+            "one shared worker budget per engine; Darwin defaults to Apple "
+            "Silicon performance cores"
+        ),
+        "threads": threads,
+        "hash_mb": hash_mb,
+        "detected_default_threads": detect_default_threads(),
+        "detected_memory_mib": detect_memory_mib(),
+        "hybrid_split": {
+            "mcts_threads": hybrid_split_for_threads(max(3, threads))[0],
+            "ab_threads": hybrid_split_for_threads(max(3, threads))[1],
+        },
+        "notes": [
+            "Reference engines are no longer pinned to one thread.",
+            "MetalFish pure MCTS and Lc0 both receive the same Threads value.",
+            "Hybrid receives the same total worker budget split between MCTS and AB.",
+        ],
+    }
 
 
 def benchmark_warmup_ms(cfg: EngineConfig, movetime_ms: int) -> int:
@@ -496,6 +636,7 @@ def run_tactical(
             score = 0
             positions = []
             bestmoves = {}
+            error_message = None
 
             for fen, expected_sans, bk_id in BK_POSITIONS:
                 expected_uci = set()
@@ -508,6 +649,7 @@ def run_tactical(
                 try:
                     r = eng.search(fen, movetime_ms)
                 except (RuntimeError, TimeoutError) as e:
+                    error_message = str(e)
                     print(f"  {bk_id}: ERROR {e}")
                     print(
                         f"  Engine crashed/timed out — reporting partial results for {cfg.name}"
@@ -538,13 +680,18 @@ def run_tactical(
                 )
 
             total = len(BK_POSITIONS)
-            print(f"  Score: {score}/{total} ({100*score/total:.1f}%)")
+            completed = len(positions)
+            suffix = "" if completed == total else f", completed {completed}/{total}"
+            print(f"  Score: {score}/{total} ({100*score/total:.1f}%){suffix}")
 
             avg_nps = sum(p["nps"] for p in positions) // max(1, len(positions))
             results["engines"][eid] = {
                 "name": cfg.name,
                 "score": score,
                 "total": total,
+                "completed": completed,
+                "complete": completed == total,
+                "error": error_message,
                 "solve_rate": round(score / total, 3),
                 "avg_nps": avg_nps,
                 "positions": positions,
@@ -614,13 +761,7 @@ def run_nps(
 
         for tc in thread_counts:
             print(f"\n--- {cfg.name} @ {tc} threads ---")
-            cfg_copy = EngineConfig(
-                name=cfg.name,
-                path=cfg.path,
-                cmd_args=list(cfg.cmd_args),
-                uci_options={**cfg.uci_options, "Threads": str(tc)},
-                available=True,
-            )
+            cfg_copy = config_with_thread_count(cfg, tc)
             eng = start_engine(cfg_copy)
             try:
                 try:
@@ -692,13 +833,7 @@ def run_scaling(
 
         for tc in thread_counts:
             print(f"\n--- {cfg.name} @ {tc} threads ---")
-            cfg_copy = EngineConfig(
-                name=cfg.name,
-                path=cfg.path,
-                cmd_args=list(cfg.cmd_args),
-                uci_options={**cfg.uci_options, "Threads": str(tc)},
-                available=True,
-            )
+            cfg_copy = config_with_thread_count(cfg, tc)
             eng = start_engine(cfg_copy)
             try:
                 try:
@@ -939,12 +1074,21 @@ def run_tournament(
 
 
 def generate_summary(all_results: Dict[str, dict]) -> str:
+    first_result = next(iter(all_results.values()), {})
+    resources = first_result.get("resource_policy", {})
+    hybrid_split = resources.get("hybrid_split", {})
     lines = [
         "# MetalFish Paper Benchmark Results",
         "",
         f"Generated: {datetime.datetime.now().isoformat()}",
         "",
-        f"Hardware: Apple Silicon (see sysctl output)",
+        "## Resource Policy",
+        "",
+        f"- Threads: {resources.get('threads', 'unknown')}",
+        f"- Hash: {resources.get('hash_mb', 'unknown')} MB",
+        f"- Hybrid split: MCTS={hybrid_split.get('mcts_threads', 'unknown')}, "
+        f"AB={hybrid_split.get('ab_threads', 'unknown')}",
+        "- Reference engines use the same thread and hash budget where supported.",
         "",
     ]
 
@@ -953,14 +1097,19 @@ def generate_summary(all_results: Dict[str, dict]) -> str:
         lines += [
             "## Table 1: Tactical Accuracy (Bratko-Kopec, 24 positions)",
             "",
-            "| Engine | Solved | Rate (%) | Avg NPS |",
-            "|--------|--------|----------|---------|",
+            "| Engine | Solved | Completed | Rate (%) | Avg NPS | Status |",
+            "|--------|--------|-----------|----------|---------|--------|",
         ]
         for eid, data in tactical.get("engines", {}).items():
+            status = "complete" if data.get("complete", True) else "partial"
             lines.append(
                 f"| {data['name']} | {data['score']}/24 | "
-                f"{data['solve_rate']*100:.1f} | {data['avg_nps']:,} |"
+                f"{data.get('completed', len(data.get('positions', [])))}/24 | "
+                f"{data['solve_rate']*100:.1f} | {data['avg_nps']:,} | "
+                f"{status} |"
             )
+            if data.get("error"):
+                lines.append(f"<!-- {data['name']} partial error: {data['error']} -->")
         lines += [
             "",
             "### Per-Position Breakdown",
@@ -1053,7 +1202,16 @@ def main() -> int:
     parser.add_argument("--tournament", action="store_true", help="Run Elo tournament")
     parser.add_argument("--all", action="store_true", help="Run all experiments")
     parser.add_argument(
-        "--threads", type=str, default="12", help="Thread counts (comma-sep)"
+        "--threads",
+        type=str,
+        default="auto",
+        help="Thread counts (comma-sep; use auto for Apple performance cores)",
+    )
+    parser.add_argument(
+        "--hash",
+        type=str,
+        default="auto",
+        help="Hash/TT size in MB for engines that support it, or auto",
     )
     parser.add_argument(
         "--movetime", type=int, default=10000, help="Movetime per position (ms)"
@@ -1083,11 +1241,14 @@ def main() -> int:
     if not any([args.tactical, args.nps, args.scaling, args.tournament]):
         args.tactical = args.nps = args.scaling = True
 
-    thread_counts = [int(t.strip()) for t in args.threads.split(",")]
+    thread_counts = parse_thread_counts(args.threads)
+    hash_mb = parse_hash_mb(args.hash)
     RESULTS_DIR.mkdir(exist_ok=True)
     all_results: Dict[str, dict] = {}
 
-    engines = detect_engines(threads=thread_counts[0] if len(thread_counts) == 1 else 2)
+    primary_threads = thread_counts[0] if len(thread_counts) == 1 else thread_counts[-1]
+    resources = resource_policy(primary_threads, hash_mb)
+    engines = detect_engines(threads=primary_threads, hash_mb=hash_mb)
     selected_engine_ids = parse_engine_ids(args.engines)
     if selected_engine_ids is not None:
         selected = set(selected_engine_ids)
@@ -1095,10 +1256,16 @@ def main() -> int:
     print("Detected engines:")
     for eid, cfg in engines.items():
         status = "OK" if cfg.available else "MISSING"
-        print(f"  {eid}: {status} ({cfg.path})")
+        print(f"  {eid}: {status} ({cfg.path}) options={cfg.uci_options}")
+    print(
+        f"Resource policy: threads={primary_threads}, hash={hash_mb} MB, "
+        f"hybrid={resources['hybrid_split']['mcts_threads']} MCTS + "
+        f"{resources['hybrid_split']['ab_threads']} AB"
+    )
 
     if args.tactical:
         r = run_tactical(engines, args.movetime, selected_engine_ids)
+        r["resource_policy"] = resources
         all_results["tactical"] = r
         with open(RESULTS_DIR / "paper_tactical.json", "w") as f:
             json.dump(r, f, indent=2)
@@ -1106,6 +1273,7 @@ def main() -> int:
 
     if args.nps:
         r = run_nps(engines, thread_counts, args.movetime)
+        r["resource_policy"] = resources
         all_results["nps_throughput"] = r
         with open(RESULTS_DIR / "paper_nps.json", "w") as f:
             json.dump(r, f, indent=2)
@@ -1113,6 +1281,7 @@ def main() -> int:
 
     if args.scaling:
         r = run_scaling(engines, thread_counts, args.movetime)
+        r["resource_policy"] = resources
         all_results["thread_scaling"] = r
         with open(RESULTS_DIR / "paper_scaling.json", "w") as f:
             json.dump(r, f, indent=2)
@@ -1120,6 +1289,7 @@ def main() -> int:
 
     if args.tournament:
         r = run_tournament(engines, args.games, args.tc_movetime, args.max_game_plies)
+        r["resource_policy"] = resources
         all_results["tournament"] = r
         with open(RESULTS_DIR / "paper_tournament.json", "w") as f:
             json.dump(r, f, indent=2)

@@ -60,13 +60,14 @@ if [ -z "${THREADS:-}" ]; then
     fi
 fi
 [ -n "$THREADS" ] || THREADS=8
+HASH="${HASH:-4096}"
 
-MCTS_THREADS="${MCTS_THREADS:-1}"
+MCTS_THREADS="${MCTS_THREADS:-$THREADS}"
 if [ "$MCTS_THREADS" -lt 1 ]; then
     MCTS_THREADS=1
 fi
-if [ "$MCTS_THREADS" -ge "$THREADS" ] && [ "$THREADS" -gt 1 ]; then
-    MCTS_THREADS=$(( THREADS - 1 ))
+if [ "$MCTS_THREADS" -gt "$THREADS" ]; then
+    MCTS_THREADS=$THREADS
 fi
 
 HYBRID_THREADS="${HYBRID_THREADS:-$THREADS}"
@@ -97,17 +98,17 @@ HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS="${HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_
 HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS="${HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS:-400}"
 
 AB=(proto=uci restart="$ENGINE_RESTART" cmd="$MF" name=MetalFish-AB "option.Threads=$THREADS"
-    option.Hash=256 option.UseMCTS=false option.UseHybridSearch=false
+    "option.Hash=$HASH" option.UseMCTS=false option.UseHybridSearch=false
     option.MultiPV=1)
 MCTS=(proto=uci restart="$ENGINE_RESTART" cmd="$MF" name=MetalFish-MCTS
-      "option.Threads=$MCTS_THREADS" option.Hash=256
+      "option.Threads=$MCTS_THREADS" "option.Hash=$HASH"
       option.UseHybridSearch=false option.UseMCTS=true
       "option.NNWeights=$WEIGHTS" option.MultiPV=1
       "option.MCTSMaxThreads=$MCTS_THREADS" option.MCTSMinibatchSize=0
       option.MCTSParityPreset=false option.MCTSAddDirichletNoise=false
       option.MCTSMinimumKLDGainPerNode=0.00005)
 HYBRID=(proto=uci restart="$ENGINE_RESTART" cmd="$MF" name=MetalFish-Hybrid
-        "option.Threads=$HYBRID_THREADS" option.Hash=256
+        "option.Threads=$HYBRID_THREADS" "option.Hash=$HASH"
         option.UseMCTS=false option.UseHybridSearch=true
         "option.NNWeights=$WEIGHTS" option.MultiPV=1
         "option.HybridMCTSThreads=$HYBRID_MCTS_THREADS"
@@ -128,15 +129,15 @@ HYBRID=(proto=uci restart="$ENGINE_RESTART" cmd="$MF" name=MetalFish-Hybrid
         "option.HybridABPolicyWeight=$HYBRID_AB_POLICY_WEIGHT"
         "option.HybridTrace=$HYBRID_TRACE")
 SFULL=(proto=uci restart="$ENGINE_RESTART" cmd="$SF" name=Stockfish "option.Threads=$THREADS"
-       option.Hash=256)
+       "option.Hash=$HASH")
 SL15=(proto=uci restart="$ENGINE_RESTART" cmd="$SF" name=Stockfish-L15 "option.Threads=$THREADS"
-      option.Hash=256 "option.Skill Level=15")
+      "option.Hash=$HASH" "option.Skill Level=15")
 SL10=(proto=uci restart="$ENGINE_RESTART" cmd="$SF" name=Stockfish-L10 "option.Threads=$THREADS"
-      option.Hash=256 "option.Skill Level=10")
+      "option.Hash=$HASH" "option.Skill Level=10")
 BERSERK_E=(proto=uci restart="$ENGINE_RESTART" cmd="$BERSERK" name=Berserk
-           "option.Threads=$THREADS" option.Hash=256)
+           "option.Threads=$THREADS" "option.Hash=$HASH")
 PATRICIA_E=(proto=uci restart="$ENGINE_RESTART" cmd="$PATRICIA" name=Patricia
-            "option.Threads=$THREADS" option.Hash=256)
+            "option.Threads=$THREADS" "option.Hash=$HASH")
 LC0_E=(proto=uci restart="$ENGINE_RESTART" cmd="$LC0" name=Lc0 "arg=--weights=$WEIGHTS"
        arg=--backend=metal "option.Threads=$THREADS" option.Temperature=0)
 
@@ -157,6 +158,7 @@ echo "TC: $TC | Games/match: $GAMES"
 echo "Openings: order=$OPENING_ORDER | seed=$CUTECHESS_SEED"
 echo "Match filter: ${MATCH_FILTER:-all} | Concurrency: $CONCURRENCY | Max moves: $MAXMOVES | Restart: $ENGINE_RESTART"
 echo "Threads: AB=$THREADS MCTS=$MCTS_THREADS Hybrid=$HYBRID_THREADS (HybridMCTS=$HYBRID_MCTS_THREADS, HybridAB=$HYBRID_AB_THREADS, HybridAutoABCap=$HYBRID_AUTO_AB_THREADS_CAP)"
+echo "Hash: $HASH MB for engines that support UCI Hash"
 echo "Hybrid knobs: KLD=$HYBRID_MCTS_KLD RootReject=$HYBRID_MCTS_ROOT_REJECT SharedTT=$HYBRID_MCTS_SHARED_TT ABPolicyWeight=$HYBRID_AB_POLICY_WEIGHT Trace=$HYBRID_TRACE LowTimeFallbackMs=$HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS MinMoveBudgetMs=$HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS"
 echo "Results: $RESULTS"
 echo ""

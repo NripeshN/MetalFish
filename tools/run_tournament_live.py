@@ -641,10 +641,11 @@ def create_engine(
     options = dict(cfg.get("options", {}))
     if name == "MetalFish-Hybrid":
         apply_hybrid_env_options(options, force_hybrid_trace)
-    if "Threads" in options:
-        t = str(options["Threads"]).strip().lower()
-        if t in {"auto", "max", "native"}:
-            options["Threads"] = str(default_threads)
+    for thread_option in ("Threads", "MCTSMaxThreads"):
+        if thread_option in options:
+            t = str(options[thread_option]).strip().lower()
+            if t in {"auto", "max", "native"}:
+                options[thread_option] = str(default_threads)
     for path_option in ("NNWeights", "SyzygyPath"):
         if path_option in options:
             path_value = pathlib.Path(str(options[path_option]))

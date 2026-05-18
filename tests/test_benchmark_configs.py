@@ -10,68 +10,7 @@ import sys
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ / "tests"))
 
-import bk_parity  # noqa: E402
 import paper_benchmarks  # noqa: E402
-
-
-class CaptureSession:
-    def __init__(self) -> None:
-        self.options: dict[str, str] = {}
-
-    def setoption(self, name: str, value: str) -> None:
-        self.options[name] = value
-
-    def send(self, cmd: str) -> None:
-        if cmd != "isready":
-            raise AssertionError(f"unexpected command: {cmd}")
-
-    def wait_for(self, prefix: str, timeout: int = 120) -> str:
-        if prefix != "readyok":
-            raise AssertionError(f"unexpected wait prefix: {prefix}")
-        return "readyok"
-
-
-def capture_parity_mcts() -> dict[str, str]:
-    session = CaptureSession()
-    bk_parity.setup_metalfish(
-        session,
-        paper_benchmarks.WEIGHTS,
-        threads=1,
-        deterministic=False,
-        multipv=1,
-    )
-    return session.options
-
-
-def capture_parity_hybrid() -> dict[str, str]:
-    session = CaptureSession()
-    bk_parity.setup_metalfish_hybrid(
-        session,
-        paper_benchmarks.WEIGHTS,
-        threads=1,
-        deterministic=False,
-        trace=False,
-        mcts_threads=0,
-        ab_threads=0,
-        multipv=1,
-        hybrid_mcts_kld=0.0,
-        hybrid_root_reject=True,
-        hybrid_shared_tt=False,
-        ab_policy_weight=0.0,
-    )
-    return session.options
-
-
-def assert_options_equal(
-    label: str, left: dict[str, str], right: dict[str, str], keys: list[str]
-) -> None:
-    mismatches = [
-        f"{key}: parity={left.get(key)!r} paper={right.get(key)!r}"
-        for key in keys
-        if left.get(key) != right.get(key)
-    ]
-    if mismatches:
-        raise AssertionError(f"{label} option drift:\n" + "\n".join(mismatches))
 
 
 def assert_options_include(
@@ -121,7 +60,7 @@ def assert_paper_hybrid_env_overrides() -> None:
 
     def detect_with_overrides() -> dict[str, str]:
         os.environ.update(overrides)
-        return paper_benchmarks.detect_engines(threads=1)[
+        return paper_benchmarks.detect_engines(threads=8, hash_mb=4096)[
             "metalfish-hybrid"
         ].uci_options
 
@@ -140,60 +79,66 @@ def assert_paper_hybrid_env_overrides() -> None:
 
 
 def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
-    return with_clean_hybrid_env(lambda: paper_benchmarks.detect_engines(threads=1))
+    return with_clean_hybrid_env(
+        lambda: paper_benchmarks.detect_engines(threads=8, hash_mb=4096)
+    )
 
 
 def main() -> int:
     paper = detect_paper_engines_clean()
 
-    mcts_keys = [
-        "UseHybridSearch",
-        "UseMCTS",
-        "NNWeights",
-        "Threads",
-        "MultiPV",
-        "MCTSMaxThreads",
-        "MCTSMinibatchSize",
-        "MCTSParityPreset",
-        "MCTSAddDirichletNoise",
-        "MCTSMinimumKLDGainPerNode",
-    ]
-    assert_options_equal(
-        "MCTS",
-        capture_parity_mcts(),
+    assert_options_include(
+        "paper MCTS fair resources",
         paper["metalfish-mcts"].uci_options,
-        mcts_keys,
+        {
+            "Threads": "8",
+            "Hash": "4096",
+            "MCTSMaxThreads": "8",
+            "UseHybridSearch": "false",
+            "UseMCTS": "true",
+            "MultiPV": "1",
+            "MCTSParityPreset": "false",
+            "MCTSAddDirichletNoise": "false",
+            "MCTSMinimumKLDGainPerNode": "0.00005",
+        },
     )
 
-    hybrid_keys = [
-        "UseMCTS",
-        "UseHybridSearch",
-        "NNWeights",
-        "Threads",
-        "MultiPV",
-        "HybridMCTSThreads",
-        "HybridABThreads",
-        "HybridAutoABThreadsCap",
-        "TransformerLowTimeFallbackMs",
-        "TransformerMinMoveBudgetMs",
-        "MCTSMaxThreads",
-        "MCTSMinibatchSize",
-        "MCTSParityPreset",
-        "MCTSAddDirichletNoise",
-        "HybridMCTSMinimumKLDGainPerNode",
-        "HybridMCTSRootReject",
-        "HybridMCTSUseSharedTT",
-        "HybridMCTSABRootHints",
-        "HybridMCTSABRootHintDelayMs",
-        "HybridMCTSABRootHintCount",
-        "HybridABPolicyWeight",
-        "HybridTrace",
-    ]
-    assert_options_equal(
-        "Hybrid",
-        capture_parity_hybrid(),
+    assert_options_include(
+        "paper Hybrid fair resources",
         paper["metalfish-hybrid"].uci_options,
-        hybrid_keys,
+        {
+            "Threads": "8",
+            "Hash": "4096",
+            "HybridMCTSThreads": "2",
+            "HybridABThreads": "6",
+            "HybridAutoABThreadsCap": "0",
+            "MCTSMaxThreads": "2",
+            "UseMCTS": "false",
+            "UseHybridSearch": "true",
+            "MultiPV": "1",
+            "MCTSParityPreset": "false",
+            "MCTSAddDirichletNoise": "false",
+            "TransformerLowTimeFallbackMs": "3000",
+            "TransformerMinMoveBudgetMs": "400",
+            "HybridMCTSMinimumKLDGainPerNode": "0.0",
+            "HybridMCTSRootReject": "true",
+            "HybridMCTSUseSharedTT": "false",
+            "HybridMCTSABRootHints": "true",
+            "HybridMCTSABRootHintDelayMs": "25",
+            "HybridMCTSABRootHintCount": "4",
+            "HybridABPolicyWeight": "0.0",
+            "HybridTrace": "false",
+        },
+    )
+    assert_options_include(
+        "paper Stockfish fair resources",
+        paper["stockfish"].uci_options,
+        {"Threads": "8", "Hash": "4096", "Skill Level": "20"},
+    )
+    assert_options_include(
+        "paper Lc0 fair resources",
+        paper["lc0"].uci_options,
+        {"Threads": "8", "Temperature": "0"},
     )
     assert_paper_hybrid_env_overrides()
 
@@ -234,6 +179,7 @@ def main() -> int:
             "UseMCTS": "false",
             "UseHybridSearch": "false",
             "MultiPV": "1",
+            "Hash": "4096",
         },
     )
     assert_options_include(
@@ -243,6 +189,8 @@ def main() -> int:
             "UseHybridSearch": "false",
             "UseMCTS": "true",
             "MultiPV": "1",
+            "Hash": "4096",
+            "MCTSMaxThreads": "auto",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
             "MCTSMinimumKLDGainPerNode": "0.00005",
@@ -255,6 +203,7 @@ def main() -> int:
             "UseMCTS": "false",
             "UseHybridSearch": "true",
             "MultiPV": "1",
+            "Hash": "4096",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
             "TransformerLowTimeFallbackMs": "3000",
