@@ -66,3 +66,6 @@ tournament.log
 *.synctex.gz
 *.toc
 *.pdf
+
+# Google Cloud Platform
+.gcp-org-credentials.json

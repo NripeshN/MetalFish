@@ -215,6 +215,12 @@ EXPLORER_API_MIN_INTERVAL_S = env_float("METALFISH_EXPLORER_API_MIN_INTERVAL_S",
 LICHESS_429_BACKOFF_S = env_float("METALFISH_LICHESS_429_BACKOFF_S", 65.0)
 BOT_ONLINE_CACHE_TTL_S = env_float("METALFISH_BOT_ONLINE_CACHE_TTL_S", 20.0)
 PLAYING_STATUS_CACHE_TTL_S = env_float("METALFISH_PLAYING_STATUS_CACHE_TTL_S", 5.0)
+CHALLENGE_COOLDOWN_PATH = pathlib.Path(
+    os.environ.get(
+        "METALFISH_CHALLENGE_COOLDOWN_FILE",
+        str(PROJ / "results" / "lichess_challenge_cooldowns.json"),
+    )
+)
 PRE_GAME_RESOURCE_PREP = (
     env_bool_string("METALFISH_PRE_GAME_RESOURCE_PREP", True) == "true"
 )
@@ -1288,7 +1294,8 @@ class LichessBot:
         self._seek_timer: threading.Timer | None = None
         self._warm_engine: UCIEngine | None = None
         self._elo_widen_steps = 0
-        self._declined_cooldown: dict[str, float] = {}  # bot_id -> timestamp
+        self._persist_challenge_cooldowns = True
+        self._declined_cooldown: dict[str, float] = self._load_challenge_cooldowns()
         self._rate_limit_count = 0
         self._tc_failures = 0
         self._completed_games = 0
@@ -1788,10 +1795,23 @@ class LichessBot:
                 user_id = user
             else:
                 user_id = None
-            if user_id and user_id != self.bot_id:
+            if user_id and self._cooldown_key(user_id) != self._cooldown_key(
+                self.bot_id
+            ):
                 target = user_id
                 break
         return (str(challenge_id) if challenge_id else None, target)
+
+    def _challenge_event_reason(self, event: dict) -> str:
+        ch = event.get("challenge") if isinstance(event.get("challenge"), dict) else {}
+        for source in (event, ch):
+            if not isinstance(source, dict):
+                continue
+            for key in ("reason", "declineReason", "status"):
+                value = source.get(key)
+                if value:
+                    return str(value)
+        return ""
 
     def _clear_pending_challenge(self):
         self._pending_challenge_id = None
@@ -1872,9 +1892,58 @@ class LichessBot:
             return f"rated ({self._rated_policy_label()})"
         return "casual"
 
+    def _cooldown_key(self, bot_id: str | None) -> str | None:
+        if not bot_id:
+            return None
+        key = str(bot_id).strip().lower()
+        return key or None
+
+    def _load_challenge_cooldowns(self) -> dict[str, float]:
+        try:
+            data = json.loads(CHALLENGE_COOLDOWN_PATH.read_text())
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        now = time.time()
+        cooldowns: dict[str, float] = {}
+        for key, value in data.items():
+            norm_key = self._cooldown_key(str(key))
+            if not norm_key:
+                continue
+            try:
+                expires = float(value)
+            except (TypeError, ValueError):
+                continue
+            if expires > now:
+                cooldowns[norm_key] = expires
+        return cooldowns
+
+    def _save_challenge_cooldowns(self) -> None:
+        if not getattr(self, "_persist_challenge_cooldowns", False):
+            return
+        cooldowns = getattr(self, "_declined_cooldown", {})
+        now = time.time()
+        data = {
+            key: expires
+            for key, expires in sorted(cooldowns.items())
+            if key and expires > now
+        }
+        try:
+            CHALLENGE_COOLDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
+            CHALLENGE_COOLDOWN_PATH.write_text(json.dumps(data, indent=2))
+        except Exception:
+            pass
+
+    def _bot_on_cooldown(self, bot_id: str | None, now: float | None = None) -> bool:
+        key = self._cooldown_key(bot_id)
+        if not key:
+            return False
+        cooldowns = getattr(self, "_declined_cooldown", {})
+        return (now or time.time()) < cooldowns.get(key, 0)
+
     def _online_bots_from_ndjson(self, text: str) -> list[dict]:
         bots: list[dict] = []
-        now = time.time()
         for line in text.strip().split("\n"):
             if not line.strip():
                 continue
@@ -1885,10 +1954,9 @@ class LichessBot:
             if not isinstance(bot, dict):
                 continue
             bot_id = str(bot.get("id") or bot.get("name") or "")
-            if not bot_id or bot_id == self.bot_id:
-                continue
-            cooldown_until = self._declined_cooldown.get(bot_id, 0)
-            if now < cooldown_until:
+            if not bot_id or self._cooldown_key(bot_id) == self._cooldown_key(
+                self.bot_id
+            ):
                 continue
             bots.append(bot)
         return bots
@@ -1914,6 +1982,15 @@ class LichessBot:
     ) -> tuple[list[str], str | None]:
         if not bots:
             return [], "No eligible bots online"
+
+        now = time.time()
+        bots = [
+            b
+            for b in bots
+            if not self._bot_on_cooldown(str(b.get("id") or b.get("name") or ""), now)
+        ]
+        if not bots:
+            return [], "All eligible bots are cooling down after declines/timeouts"
 
         if rated:
             bots = [b for b in bots if self._rated_opponent_allowed(b, speed)]
@@ -1992,6 +2069,7 @@ class LichessBot:
         try:
             bots, status_code = self._online_bots()
             if bots is None:
+                print(f"  /bot/online failed with {status_code}, retrying...")
                 self._schedule_retry()
                 return
 
@@ -2023,7 +2101,9 @@ class LichessBot:
                 self._challenge_retries = 0
                 self._rate_limit_count = 0
                 print(
-                    f"  Challenged {target} ({tc_label}, {'rated' if rated else 'casual'})"
+                    f"  Challenged {target} "
+                    f"({tc_label}, {'rated' if rated else 'casual'}, "
+                    f"candidates={len(candidates)})"
                 )
                 self._schedule_challenge_timeout()
             elif r.status_code == 429:
@@ -2039,21 +2119,64 @@ class LichessBot:
                     print(f"  Waiting {backoff}s...")
                 self._schedule_retry(backoff)
             else:
-                self._cooldown_bot(target, duration=300)
+                detail = (r.text or "").strip().replace("\n", " ")[:180]
+                suffix = f": {detail}" if detail else ""
+                print(f"  Challenge to {target} failed ({r.status_code}){suffix}")
+                cooldown_s = self._challenge_failure_cooldown_seconds(r)
+                if cooldown_s > 300:
+                    print(
+                        f"  Cooling down {target} for {self._format_duration(cooldown_s)}"
+                    )
+                self._cooldown_bot(target, duration=cooldown_s)
                 self._schedule_retry(2)
         except Exception as e:
             print(f"  Seek error: {e}")
             self._schedule_retry(15)
 
+    def _challenge_failure_cooldown_seconds(self, response: requests.Response) -> int:
+        cooldown = 300
+        try:
+            data = response.json()
+        except ValueError:
+            return cooldown
+        if not isinstance(data, dict):
+            return cooldown
+        ratelimit = data.get("ratelimit")
+        if isinstance(ratelimit, dict):
+            try:
+                seconds = int(float(ratelimit.get("seconds", 0) or 0))
+            except (TypeError, ValueError):
+                seconds = 0
+            if seconds > 0:
+                cooldown = max(cooldown, min(86_400, seconds + 60))
+        return cooldown
+
+    def _format_duration(self, seconds: int) -> str:
+        seconds = max(0, int(seconds))
+        if seconds >= 3600:
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            return f"{hours}h{minutes:02d}m"
+        if seconds >= 60:
+            return f"{seconds // 60}m{seconds % 60:02d}s"
+        return f"{seconds}s"
+
     def _cooldown_bot(self, bot_id: str | None, duration: int = 600):
-        if bot_id:
-            self._declined_cooldown[bot_id] = time.time() + duration
+        key = self._cooldown_key(bot_id)
+        if key:
+            if not hasattr(self, "_declined_cooldown"):
+                self._declined_cooldown = {}
+            self._declined_cooldown[key] = max(
+                self._declined_cooldown.get(key, 0), time.time() + duration
+            )
+            self._save_challenge_cooldowns()
 
     def _cleanup_cooldowns(self):
         now = time.time()
         self._declined_cooldown = {
             k: v for k, v in self._declined_cooldown.items() if v > now
         }
+        self._save_challenge_cooldowns()
 
     def _schedule_retry(self, delay: float = 10):
         if self._seek_timer:
@@ -3550,6 +3673,7 @@ class LichessBot:
 
         elif etype in ("challengeDeclined", "challengeCanceled"):
             challenge_id, event_target = self._challenge_event_identity(event)
+            event_reason = self._challenge_event_reason(event)
             if not self._pending_challenge_id:
                 self._cooldown_bot(event_target, duration=600)
                 return
@@ -3560,6 +3684,9 @@ class LichessBot:
                 return
 
             target = self._pending_challenge_target or event_target
+            label = "declined" if etype == "challengeDeclined" else "canceled"
+            reason_suffix = f": {event_reason}" if event_reason else ""
+            print(f"  Challenge to {target} {label}{reason_suffix}")
             self._cooldown_bot(target, duration=600)
             self._clear_pending_challenge()
             self._tc_failures += 1

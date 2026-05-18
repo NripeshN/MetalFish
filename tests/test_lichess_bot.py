@@ -343,6 +343,46 @@ def test_seek_candidates_tolerate_malformed_perf_records() -> None:
     expect("valid active speed retained", candidates == ["good"])
 
 
+def test_seek_candidates_filter_cached_cooldowns_case_insensitively() -> None:
+    class Args:
+        elo_seek = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._declined_cooldown = {}
+    bot._cooldown_bot("TargetBot", duration=600)
+    bots = [
+        {
+            "id": "targetbot",
+            "perfs": {"rapid": {"games": 20, "rating": 2300, "prov": False}},
+        },
+        {
+            "id": "otherbot",
+            "perfs": {"rapid": {"games": 20, "rating": 2300, "prov": False}},
+        },
+    ]
+
+    candidates, reason = bot._seek_candidates(bots, "rapid", rated=False)
+
+    expect("cooldown candidate skipped", reason is None)
+    expect("non-cooldown candidate remains", candidates == ["otherbot"])
+
+
+def test_challenge_failure_ratelimit_sets_long_cooldown() -> None:
+    class Response:
+        status_code = 400
+        text = '{"ratelimit":{"seconds":50207}}'
+
+        def json(self) -> dict:
+            return {"ratelimit": {"seconds": 50207}}
+
+    bot = object.__new__(lichess_bot.LichessBot)
+
+    cooldown = bot._challenge_failure_cooldown_seconds(Response())
+
+    expect("ratelimit cooldown includes server seconds", cooldown == 50267)
+
+
 def test_opening_book_does_not_send_bot_token_to_explorer() -> None:
     class Response:
         status_code = 200
@@ -1392,7 +1432,8 @@ def test_matching_challenge_event_clears_pending() -> None:
         "type": "challengeDeclined",
         "challenge": {"id": "current", "destUser": {"id": "targetbot"}},
     }
-    bot._handle_event(event)
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event)
 
     expect("pending cleared", bot._pending_challenge_id is None)
     expect("target cooled down", "targetbot" in bot._declined_cooldown)
@@ -1908,6 +1949,8 @@ def main() -> int:
     test_seek_dry_run_does_not_post_challenge()
     test_seek_dry_run_reports_rating_floor_block()
     test_seek_candidates_tolerate_malformed_perf_records()
+    test_seek_candidates_filter_cached_cooldowns_case_insensitively()
+    test_challenge_failure_ratelimit_sets_long_cooldown()
     test_opening_book_does_not_send_bot_token_to_explorer()
     test_opening_book_scores_for_side_to_move()
     test_opening_book_local_reader_uses_entry_move_attribute()
