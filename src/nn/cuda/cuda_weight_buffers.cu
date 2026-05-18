@@ -66,13 +66,14 @@ void CudaWeightBuffers::Upload(const NetworkWeightInventory &inventory) {
 
       DeviceTensor device_tensor;
       device_tensor.elements = tensor.elements;
+      device_tensor.dims = tensor.dims;
+      device_tensor.kind = tensor.kind;
       const cudaError_t alloc_status =
           cudaMalloc(reinterpret_cast<void **>(&device_tensor.data),
                      tensor.elements * sizeof(float));
       if (alloc_status != cudaSuccess) {
         throw std::runtime_error(
-            CudaErrorMessage("cudaMalloc(" + tensor.name + ")",
-                             alloc_status));
+            CudaErrorMessage("cudaMalloc(" + tensor.name + ")", alloc_status));
       }
 
       const cudaError_t copy_status =
@@ -111,15 +112,19 @@ bool CudaWeightBuffers::DownloadMatches(const NetworkWeightInventory &inventory,
     const auto &device = device_tensors_[i];
     if (device.elements != host.elements)
       return fail("CUDA weight tensor element count mismatch: " + host.name);
+    if (device.dims != host.dims)
+      return fail("CUDA weight tensor shape metadata mismatch: " + host.name);
+    if (device.kind != host.kind)
+      return fail("CUDA weight tensor kind metadata mismatch: " + host.name);
     if (host.elements == 0)
       continue;
 
     float first = 0.0f;
-    cudaError_t status = cudaMemcpy(&first, device.data, sizeof(float),
-                                    cudaMemcpyDeviceToHost);
+    cudaError_t status =
+        cudaMemcpy(&first, device.data, sizeof(float), cudaMemcpyDeviceToHost);
     if (status != cudaSuccess)
-      return fail(CudaErrorMessage("cudaMemcpy(first " + host.name + ")",
-                                   status));
+      return fail(
+          CudaErrorMessage("cudaMemcpy(first " + host.name + ")", status));
     if (first != host.data[0])
       return fail("CUDA first-value mismatch: " + host.name);
 
@@ -127,8 +132,8 @@ bool CudaWeightBuffers::DownloadMatches(const NetworkWeightInventory &inventory,
     status = cudaMemcpy(&last, device.data + host.elements - 1, sizeof(float),
                         cudaMemcpyDeviceToHost);
     if (status != cudaSuccess)
-      return fail(CudaErrorMessage("cudaMemcpy(last " + host.name + ")",
-                                   status));
+      return fail(
+          CudaErrorMessage("cudaMemcpy(last " + host.name + ")", status));
     if (last != host.data[host.elements - 1])
       return fail("CUDA last-value mismatch: " + host.name);
   }

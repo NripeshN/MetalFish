@@ -85,8 +85,9 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `299e6c64-ea84-4082-b387-b2a84c1b5948` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `337a5901-6b58-4c42-b56b-739a54cdbd28` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `83df03b5-9e80-42ba-9185-334c86c211cc` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `ac358c0f-dde5-4d39-8ace-a964c31838c2` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26066730767` |
 
 Current CUDA backend boundary:
 
@@ -95,6 +96,10 @@ Current CUDA backend boundary:
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength
   inference is implemented.
+
+Portable CI now builds Linux CPU and Windows MinGW CPU artifacts. Both jobs run
+AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds
+verify the MCTS construction path without downloading BT4 weights.
 
 ## First Milestones
 

@@ -66,6 +66,7 @@ void set_test_float_layer(MetalFishNN::Weights::Layer *layer) {
   std::memcpy(bytes.data(), &value, sizeof(value));
   layer->set_encoding(MetalFishNN::Weights::Layer::FLOAT32);
   layer->set_params(bytes);
+  layer->add_dims(1);
 }
 
 NN::WeightsFile make_minimal_attention_weights_file() {
@@ -326,12 +327,25 @@ void test_network_weight_inventory(TestCounter &tc) {
 
   const auto inventory = NN::CreateNetworkWeightInventory(
       weights, policy_head, value_head, tensor_plan);
+  std::string shape_error;
+  expect(inventory.AllShapesMatchElements(&shape_error),
+         "minimal fixture tensor shapes should match element counts", tc);
   expect(inventory.Contains("policy.vanilla.ip_pol_w"),
          "inventory should include selected policy head", tc);
   expect(inventory.Contains("value.winner.ip_val_w"),
          "inventory should include selected value head", tc);
   expect(inventory.Contains("moves_left.weights"),
          "inventory should include declared moves-left tensors", tc);
+  const auto *policy_tensor = inventory.Find("policy.vanilla.ip_pol_w");
+  expect(policy_tensor &&
+             policy_tensor->kind == NN::NetworkWeightTensorKind::DenseWeight,
+         "inventory should tag dense policy weights", tc);
+  expect(policy_tensor && policy_tensor->ShapeString() == "1",
+         "inventory should preserve layer dimensions", tc);
+  const auto *moves_left_tensor = inventory.Find("moves_left.weights");
+  expect(moves_left_tensor &&
+             moves_left_tensor->kind == NN::NetworkWeightTensorKind::ConvWeight,
+         "inventory should tag convolution weights", tc);
   expect(inventory.tensors.size() == 3,
          "minimal fixture should inventory exactly three tensors", tc);
   expect(inventory.TotalElements() == 3,
@@ -361,6 +375,9 @@ void test_network_weight_inventory(TestCounter &tc) {
       loaded_weights, loaded_policy_head, loaded_value_head, loaded_plan);
   std::cout << "    Loaded inventory: " << loaded_inventory.Summary()
             << std::endl;
+  std::string loaded_shape_error;
+  expect(loaded_inventory.AllShapesMatchElements(&loaded_shape_error),
+         "loaded BT4 inventory tensor shapes should match element counts", tc);
   expect(!loaded_inventory.tensors.empty(),
          "loaded BT4 inventory should expose tensors", tc);
   expect(loaded_inventory.TotalElements() > 1000000,
@@ -463,8 +480,8 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
 
   Position pos;
   StateInfo st;
-  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-          false, &st);
+  pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+          &st);
   NNMCTSEvaluator stub_evaluator("", "stub");
   const auto stub_eval = stub_evaluator.Evaluate(pos);
   expect(stub_eval.policy_priors.size() == 20,

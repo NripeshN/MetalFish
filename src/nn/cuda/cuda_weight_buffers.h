@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "cuda_input_packing.h"
 #include "../network_weight_inventory.h"
+#include "cuda_input_packing.h"
 
 namespace MetalFish {
 namespace NN {
@@ -39,6 +39,8 @@ private:
   struct DeviceTensor {
     float *data = nullptr;
     std::size_t elements = 0;
+    std::vector<std::uint32_t> dims;
+    NetworkWeightTensorKind kind = NetworkWeightTensorKind::Generic;
   };
 
   std::vector<DeviceTensor> device_tensors_;
