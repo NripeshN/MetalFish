@@ -57,6 +57,8 @@ if(APPLE)
 else()
   option(USE_METAL "Enable Metal transformer acceleration" OFF)
 endif()
+option(USE_CUDA "Enable CUDA transformer backend entry point" OFF)
+set(METALFISH_CUDA_LIBS "")
 
 # Metal-cpp headers
 set(METAL_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/metal-cpp")
@@ -193,8 +195,16 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/nn)
 
 # Transformer neural network (for MCTS)
 set(NN_SOURCES
-    ${PROTO_OUTPUT_DIR}/net.pb.cc src/nn/loader.cpp src/nn/encoder.cpp
-    src/nn/weights.cpp src/nn/policy_map.cpp src/nn/network.cpp)
+    ${PROTO_OUTPUT_DIR}/net.pb.cc
+    src/nn/loader.cpp
+    src/nn/encoder.cpp
+    src/nn/weights.cpp
+    src/nn/policy_map.cpp
+    src/nn/network_format.cpp
+    src/nn/network_tensor_plan.cpp
+    src/nn/network_weight_inventory.cpp
+    src/nn/network_output_decoder.cpp
+    src/nn/network.cpp)
 
 # Metal transformer acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
@@ -219,6 +229,30 @@ else()
   # CPU fallback backend
   set(EVAL_SOURCES ${EVAL_SOURCES} src/eval/cpu_backend.cpp)
   message(STATUS "GPU acceleration: DISABLED (CPU fallback)")
+endif()
+
+if(USE_CUDA)
+  enable_language(CUDA)
+  set(CMAKE_CUDA_STANDARD 17)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES
+        75 80 86 89
+        CACHE STRING "CUDA architectures for NVIDIA tournament hosts")
+  endif()
+  find_package(CUDAToolkit REQUIRED)
+  set(NN_SOURCES
+      ${NN_SOURCES}
+      src/nn/cuda/cuda_executor.cpp
+      src/nn/cuda/cuda_network.cpp
+      src/nn/cuda/cuda_null_executor_smoke.cpp
+      src/nn/cuda/cuda_runtime_probe.cu
+      src/nn/cuda/cuda_input_packing.cu
+      src/nn/cuda/cuda_buffers.cu
+      src/nn/cuda/cuda_weight_buffers.cu)
+  set(METALFISH_CUDA_LIBS CUDA::cudart)
+  add_compile_definitions(USE_CUDA)
+  message(STATUS "CUDA transformer backend: ENABLED (entry point)")
 endif()
 
 # ============================================================================
@@ -246,13 +280,24 @@ endif()
 
 # Libraries
 find_package(ZLIB REQUIRED)
+if(TARGET ZLIB::ZLIB)
+  set(METALFISH_ZLIB_LIB ZLIB::ZLIB)
+else()
+  set(METALFISH_ZLIB_LIB ${ZLIB_LIBRARIES})
+endif()
 
 set(ABSL_LIBS "")
 find_package(absl CONFIG QUIET)
 if(absl_FOUND)
-  message(STATUS "Found abseil - linking absl::log")
-  set(ABSL_LIBS absl::log absl::log_internal_check_op
-                absl::log_internal_message)
+  foreach(ABSL_TARGET absl::log absl::log_internal_check_op
+                      absl::log_internal_message)
+    if(TARGET ${ABSL_TARGET})
+      list(APPEND ABSL_LIBS ${ABSL_TARGET})
+    endif()
+  endforeach()
+  if(ABSL_LIBS)
+    message(STATUS "Found abseil CMake targets: ${ABSL_LIBS}")
+  endif()
 else()
   find_package(PkgConfig QUIET)
   if(PKG_CONFIG_FOUND)
@@ -268,7 +313,7 @@ endif()
 
 find_package(Threads REQUIRED)
 target_link_libraries(metalfish Threads::Threads ${METALFISH_PROTOBUF_LIB}
-                      ${ZLIB_LIBRARIES} ${ABSL_LIBS})
+                      ${METALFISH_ZLIB_LIB} ${ABSL_LIBS} ${METALFISH_CUDA_LIBS})
 
 # macOS frameworks
 if(APPLE)
@@ -319,8 +364,13 @@ if(BUILD_TESTS)
   enable_testing()
 
   set(TEST_SOURCES
-      tests/test_main.cpp tests/test_core.cpp tests/test_search_module.cpp
-      tests/test_mcts_module.cpp tests/test_hybrid.cpp tests/test_eval_gpu.cpp)
+      tests/test_main.cpp
+      tests/test_core.cpp
+      tests/test_search_module.cpp
+      tests/test_mcts_module.cpp
+      tests/test_hybrid.cpp
+      tests/test_eval_gpu.cpp
+      tests/nn_input_fixture.cpp)
 
   add_executable(
     metalfish_tests
@@ -339,7 +389,7 @@ if(BUILD_TESTS)
   endif()
   target_link_libraries(
     metalfish_tests Threads::Threads ${METALFISH_PROTOBUF_LIB}
-    ${ZLIB_LIBRARIES} ${ABSL_LIBS})
+    ${METALFISH_ZLIB_LIB} ${ABSL_LIBS} ${METALFISH_CUDA_LIBS})
 
   if(APPLE AND ACCELERATE_FRAMEWORK)
     target_link_libraries(metalfish_tests ${ACCELERATE_FRAMEWORK})
@@ -377,7 +427,7 @@ if(BUILD_TESTS)
   endif()
   target_link_libraries(
     test_nn_comparison Threads::Threads ${METALFISH_PROTOBUF_LIB}
-    ${ZLIB_LIBRARIES} ${ABSL_LIBS})
+    ${METALFISH_ZLIB_LIB} ${ABSL_LIBS} ${METALFISH_CUDA_LIBS})
 
   if(APPLE AND ACCELERATE_FRAMEWORK)
     target_link_libraries(test_nn_comparison ${ACCELERATE_FRAMEWORK})

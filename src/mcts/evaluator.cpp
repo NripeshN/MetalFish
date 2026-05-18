@@ -47,7 +47,7 @@ BatchEncodeScratch &GetBatchEncodeScratch() {
 
 class NNMCTSEvaluator::Impl {
 public:
-  Impl(const std::string &weights_path) {
+  Impl(const std::string &weights_path, const std::string &backend) {
     auto weights_opt = NN::LoadWeights(weights_path);
     if (!weights_opt.has_value()) {
       throw std::runtime_error("Could not load network weights");
@@ -56,7 +56,7 @@ public:
     input_format_ = weights_.format().has_network_format()
                         ? weights_.format().network_format().input()
                         : MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE;
-    network_ = NN::CreateNetwork(weights_, "auto");
+    network_ = NN::CreateNetwork(weights_, backend);
   }
 
   EvaluationResult Evaluate(const Position &pos) {
@@ -213,8 +213,9 @@ private:
   std::unique_ptr<NN::Network> network_;
 };
 
-NNMCTSEvaluator::NNMCTSEvaluator(const std::string &weights_path)
-    : impl_(std::make_unique<Impl>(weights_path)) {}
+NNMCTSEvaluator::NNMCTSEvaluator(const std::string &weights_path,
+                                 const std::string &backend)
+    : impl_(std::make_unique<Impl>(weights_path, backend)) {}
 
 NNMCTSEvaluator::~NNMCTSEvaluator() = default;
 

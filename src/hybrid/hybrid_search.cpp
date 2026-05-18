@@ -126,7 +126,8 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
   try {
     auto backend = std::make_unique<Backend>(
         config_.mcts_config.nn_weights_path,
-        static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size)));
+        static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size)),
+        config_.mcts_config.nn_backend);
     mcts_search_ =
         std::make_unique<Search>(config_.mcts_config, std::move(backend));
   } catch (const std::exception &e) {

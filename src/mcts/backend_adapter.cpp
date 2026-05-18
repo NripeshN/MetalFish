@@ -287,12 +287,13 @@ int BackendComputation::UsedBatchSize() const {
 
 int BackendComputation::TotalInputs() const { return total_inputs_; }
 
-Backend::Backend(const std::string &weights_path, size_t cache_entries)
+Backend::Backend(const std::string &weights_path, size_t cache_entries,
+                 const std::string &nn_backend)
     : cache_(cache_entries) {
   try {
-    evaluator_ = std::make_unique<NNMCTSEvaluator>(weights_path);
+    evaluator_ = std::make_unique<NNMCTSEvaluator>(weights_path, nn_backend);
     std::cerr << "info string Backend loaded weights: " << weights_path
-              << std::endl;
+              << " backend=" << nn_backend << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "info string Backend failed to load weights: " << e.what()
               << std::endl;

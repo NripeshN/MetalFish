@@ -6,25 +6,27 @@
 */
 
 #pragma once
+#include "../network_tensor_plan.h"
+
+#include <cstdint>
 #include <vector>
 
 namespace MetalFish {
 namespace NN {
 namespace Metal {
 
-static int kNumOutputPolicy = 1858;
-static int kInputPlanes = 112;
+static int kNumOutputPolicy = kNetworkPolicyOutputs;
+static int kInputPlanes = kPackedInputPlaneCount;
 
 struct InputsOutputs {
-  InputsOutputs(int maxBatchSize, bool wdl, bool moves_left, bool conv_policy,
-                bool attn_policy) {
-    input_masks_mem_.resize(maxBatchSize * kInputPlanes);
-    input_val_mem_.resize(maxBatchSize * kInputPlanes);
-    op_policy_mem_.resize(maxBatchSize * kNumOutputPolicy);
-    op_value_mem_.resize(maxBatchSize * (wdl ? 3 : 1));
+  InputsOutputs(int maxBatchSize, const NetworkTensorPlan &plan) {
+    input_masks_mem_.resize(plan.InputMaskEntries(maxBatchSize));
+    input_val_mem_.resize(plan.InputValueEntries(maxBatchSize));
+    op_policy_mem_.resize(plan.PolicyEntries(maxBatchSize));
+    op_value_mem_.resize(plan.ValueEntries(maxBatchSize));
 
-    if (moves_left) {
-      op_moves_left_mem_.resize(maxBatchSize);
+    if (plan.moves_left) {
+      op_moves_left_mem_.resize(plan.MovesLeftEntries(maxBatchSize));
     };
 
     /**
@@ -33,10 +35,8 @@ struct InputsOutputs {
      *
      * Remove this op_policy_raw_mem_ memory allocation when bug is fixed.
      */
-    if (attn_policy) {
-      op_policy_raw_mem_.resize(maxBatchSize * (64 * 64 + 8 * 24));
-    } else if (conv_policy) {
-      op_policy_raw_mem_.resize(maxBatchSize * 73 * 64);
+    if (plan.raw_policy_outputs > 0) {
+      op_policy_raw_mem_.resize(plan.RawPolicyEntries(maxBatchSize));
     }
   }
   ~InputsOutputs() {}

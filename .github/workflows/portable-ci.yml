@@ -1,0 +1,126 @@
+name: Portable CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: metalfish-portable-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  linux-cpu:
+    name: Linux CPU
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            protobuf-compiler \
+            libprotobuf-dev \
+            zlib1g-dev \
+            libabsl-dev \
+            python3-pip
+          python3 -m pip install -r tests/requirements.txt || \
+            python3 -m pip install --break-system-packages -r tests/requirements.txt
+
+      - name: Download NNUE files
+        run: python3 tools/download_engine_networks.py --nnue-only
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-linux -G Ninja \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DUSE_METAL=OFF \
+            -DBUILD_TESTS=ON \
+            -DMETALFISH_ENABLE_IPO=OFF
+
+      - name: Build
+        run: cmake --build build-linux --target metalfish metalfish_tests
+
+      - name: Test
+        run: |
+          ./build-linux/metalfish_tests
+          python3 -m py_compile \
+            tests/paper_benchmarks.py \
+            tests/test_benchmark_configs.py \
+            tools/run_tournament_live.py \
+            tools/lichess_puzzle_runner.py \
+            tools/download_engine_networks.py \
+            tools/uci_smoke.py
+          python3 tests/test_benchmark_configs.py
+          python3 tools/uci_smoke.py --engine build-linux/metalfish --go "depth 3"
+
+  windows-mingw-cpu:
+    name: Windows MinGW CPU
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-protobuf
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-abseil-cpp
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+
+      - name: Install Python dependencies
+        run: python -m pip install -r tests/requirements.txt
+
+      - name: Download NNUE files
+        run: python tools/download_engine_networks.py --nnue-only
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-windows -G Ninja \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DUSE_METAL=OFF \
+            -DBUILD_TESTS=ON \
+            -DMETALFISH_ENABLE_IPO=OFF
+
+      - name: Build
+        run: cmake --build build-windows --target metalfish metalfish_tests
+
+      - name: Test
+        run: |
+          ./build-windows/metalfish_tests.exe
+          python -m py_compile \
+            tests/paper_benchmarks.py \
+            tests/test_benchmark_configs.py \
+            tools/run_tournament_live.py \
+            tools/lichess_puzzle_runner.py \
+            tools/download_engine_networks.py \
+            tools/uci_smoke.py
+          python tests/test_benchmark_configs.py
+          python tools/uci_smoke.py --engine build-windows/metalfish.exe --go "depth 3"

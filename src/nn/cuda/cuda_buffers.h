@@ -1,0 +1,98 @@
+/*
+  MetalFish - A GPU-accelerated UCI chess engine
+  Copyright (C) 2025 Nripesh Niketan
+
+  Licensed under GPL-3.0
+*/
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "cuda_input_packing.h"
+#include "../network_tensor_plan.h"
+
+namespace MetalFish {
+namespace NN {
+namespace Cuda {
+
+constexpr int kCudaPolicyOutputs = kNetworkPolicyOutputs;
+constexpr int kCudaAttentionPolicyScratch = kNetworkAttentionPolicyScratch;
+constexpr int kCudaConvPolicyScratch = kNetworkConvPolicyScratch;
+
+struct CudaBufferLayout {
+  int max_batch_size = 0;
+  bool wdl = false;
+  bool moves_left = false;
+  bool conv_policy = false;
+  bool attention_policy = false;
+  NetworkTensorPlan tensor_plan;
+
+  size_t InputPlaneEntries() const;
+  size_t PolicyEntries() const;
+  size_t ValueEntries() const;
+  size_t MovesLeftEntries() const;
+  size_t RawPolicyEntries() const;
+  size_t TotalBytes() const;
+};
+
+CudaBufferLayout LayoutFromTensorPlan(const NetworkTensorPlan &plan,
+                                      int max_batch_size);
+CudaBufferLayout LayoutFromNetworkFormat(const NetworkFormatDescriptor &format,
+                                         int max_batch_size);
+
+struct CudaOutputDownload {
+  std::vector<float> policy;
+  std::vector<float> value;
+  std::vector<float> moves_left;
+  std::vector<float> raw_policy;
+};
+
+class CudaInferenceBuffers {
+public:
+  CudaInferenceBuffers() = default;
+  CudaInferenceBuffers(const CudaInferenceBuffers &) = delete;
+  CudaInferenceBuffers &operator=(const CudaInferenceBuffers &) = delete;
+  CudaInferenceBuffers(CudaInferenceBuffers &&other) noexcept;
+  CudaInferenceBuffers &operator=(CudaInferenceBuffers &&other) noexcept;
+  ~CudaInferenceBuffers();
+
+  void Allocate(const CudaBufferLayout &layout);
+  void UploadPackedInputs(const std::vector<std::uint64_t> &masks,
+                          const std::vector<float> &values, int batch_size);
+  void ClearOutputs(int batch_size);
+  CudaOutputDownload DownloadOutputs(int batch_size) const;
+  void Release();
+
+  const CudaBufferLayout &Layout() const { return layout_; }
+  size_t AllocationBytes() const { return allocation_bytes_; }
+
+  std::uint64_t *input_masks = nullptr;
+  float *input_values = nullptr;
+  float *policy = nullptr;
+  float *value = nullptr;
+  float *moves_left = nullptr;
+  float *raw_policy = nullptr;
+
+private:
+  CudaBufferLayout layout_;
+  size_t allocation_bytes_ = 0;
+};
+
+struct CudaBufferSmokeResult {
+  CudaSmokeStatus status = CudaSmokeStatus::RuntimeError;
+  std::string message;
+  size_t allocation_bytes = 0;
+};
+
+CudaBufferSmokeResult RunInferenceBufferSmoke();
+CudaBufferSmokeResult RunPackedInputUploadSmokeRaw(const float *input);
+CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
+                                                      int batch_size);
+
+} // namespace Cuda
+} // namespace NN
+} // namespace MetalFish

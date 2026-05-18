@@ -51,6 +51,7 @@ private:
   bool moves_left_;
   bool conv_policy_;
   bool attn_policy_;
+  NetworkTensorPlan tensor_plan_;
   int max_batch_size_;
   int batch_size_;
   std::string device_name_;

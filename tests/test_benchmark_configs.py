@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import platform
 import sys
 
 PROJ = pathlib.Path(__file__).resolve().parent.parent
@@ -86,6 +87,7 @@ def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
 
 def main() -> int:
     paper = detect_paper_engines_clean()
+    expected_pure_mcts_threads = "1" if platform.system() == "Darwin" else "8"
 
     assert_options_include(
         "paper MCTS strength resources",
@@ -93,7 +95,7 @@ def main() -> int:
         {
             "Threads": "8",
             "Hash": "4096",
-            "MCTSMaxThreads": "1",
+            "MCTSMaxThreads": expected_pure_mcts_threads,
             "MCTSParallelSearch": "false",
             "UseHybridSearch": "false",
             "UseMCTS": "true",
