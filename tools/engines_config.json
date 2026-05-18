@@ -1,0 +1,133 @@
+{
+  "engines": {
+    "MetalFish-AB": {
+      "description": "MetalFish Alpha-Beta + NNUE evaluation",
+      "path": "build/metalfish",
+      "expected_elo": null,
+      "options": {
+        "Threads": "auto",
+        "Hash": "256",
+        "UseMCTS": "false",
+        "UseHybridSearch": "false",
+        "MultiPV": "1"
+      }
+    },
+    "MetalFish-MCTS": {
+      "description": "MetalFish pure GPU MCTS (transformer network)",
+      "path": "build/metalfish",
+      "expected_elo": null,
+      "options": {
+        "Threads": "auto",
+        "Hash": "256",
+        "UseHybridSearch": "false",
+        "UseMCTS": "true",
+        "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb",
+        "MultiPV": "1",
+        "MCTSMaxThreads": "1",
+        "MCTSMinibatchSize": "0",
+        "MCTSParityPreset": "false",
+        "MCTSAddDirichletNoise": "false",
+        "MCTSMinimumKLDGainPerNode": "0.00005"
+      }
+    },
+    "MetalFish-Hybrid": {
+      "description": "MetalFish parallel MCTS + Alpha-Beta hybrid",
+      "path": "build/metalfish",
+      "expected_elo": null,
+      "options": {
+        "Threads": "auto",
+        "Hash": "256",
+        "UseMCTS": "false",
+        "UseHybridSearch": "true",
+        "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb",
+        "MultiPV": "1",
+        "HybridMCTSThreads": "0",
+        "HybridABThreads": "0",
+        "HybridAutoABThreadsCap": "0",
+        "TransformerLowTimeFallbackMs": "3000",
+        "TransformerMinMoveBudgetMs": "400",
+        "MCTSMaxThreads": "0",
+        "MCTSMinibatchSize": "0",
+        "MCTSParityPreset": "false",
+        "MCTSAddDirichletNoise": "false",
+        "HybridMCTSMinimumKLDGainPerNode": "0.0",
+        "HybridMCTSRootReject": "true",
+        "HybridMCTSUseSharedTT": "false",
+        "HybridMCTSABRootHints": "true",
+        "HybridMCTSABRootHintDelayMs": "25",
+        "HybridMCTSABRootHintCount": "4",
+        "HybridABPolicyWeight": "0.0",
+        "HybridTrace": "false"
+      }
+    },
+    "Stockfish": {
+      "description": "Stockfish dev-20260106 (full strength)",
+      "path": "reference/stockfish/src/stockfish",
+      "expected_elo": 3800,
+      "anchor": true,
+      "options": {
+        "Threads": "auto",
+        "Hash": "256"
+      }
+    },
+    "Stockfish-L15": {
+      "description": "Stockfish dev-20260106 (Skill Level 15)",
+      "path": "reference/stockfish/src/stockfish",
+      "expected_elo": 3551,
+      "options": {
+        "Threads": "auto",
+        "Hash": "256",
+        "Skill Level": "15"
+      }
+    },
+    "Stockfish-L10": {
+      "description": "Stockfish dev-20260106 (Skill Level 10)",
+      "path": "reference/stockfish/src/stockfish",
+      "expected_elo": 3304,
+      "options": {
+        "Threads": "auto",
+        "Hash": "256",
+        "Skill Level": "10"
+      }
+    },
+    "Berserk": {
+      "description": "Berserk 20250622 by Jay Honnold",
+      "path": "reference/berserk/src/berserk",
+      "expected_elo": 3722,
+      "anchor": true,
+      "options": {
+        "Threads": "auto",
+        "Hash": "256"
+      }
+    },
+    "Patricia": {
+      "description": "Patricia by Adam Kulju",
+      "path": "reference/Patricia/engine/patricia",
+      "expected_elo": 3415,
+      "anchor": true,
+      "options": {
+        "Threads": "auto",
+        "Hash": "256"
+      }
+    },
+    "Lc0": {
+      "description": "Lc0 with BT4-1024x15x32h network (Metal backend)",
+      "path": "reference/lc0/build/release/lc0",
+      "expected_elo": 3700,
+      "cmd_args": [
+        "--weights=networks/BT4-1024x15x32h-swa-6147500.pb",
+        "--backend=metal"
+      ],
+      "options": {
+        "Threads": "auto",
+        "Temperature": "0"
+      }
+    }
+  },
+  "opening_book": {
+    "file": "reference/books/8moves_v3.pgn",
+    "format": "pgn",
+    "total_positions": 34700,
+    "depth_plies": 16
+  }
+}

@@ -1,0 +1,66 @@
+/*
+  MetalFish - A GPU-accelerated UCI chess engine
+  Copyright (C) 2025 Nripesh Niketan
+
+  Licensed under GPL-3.0
+*/
+
+#include <cstdlib>
+#include <iostream>
+#include <memory>
+
+#include "core/bitboard.h"
+#include "core/misc.h"
+#include "core/position.h"
+#include "eval/gpu_backend.h"
+#include "uci/uci.h"
+
+using namespace MetalFish;
+
+// Global flag to track if cleanup has been done
+static std::atomic<bool> g_cleanup_done{false};
+
+// Global cleanup function registered with atexit
+// This ensures GPU resources are cleaned up before static destruction
+// The order is critical: MCTS/Hybrid components -> generic GPU backend.
+static void cleanup_gpu_resources() {
+  // Only cleanup once - prevent double cleanup
+  bool expected = false;
+  if (!g_cleanup_done.compare_exchange_strong(expected, true)) {
+    return; // Already cleaned up
+  }
+
+  // 0. Cleanup parallel hybrid search first (it holds GPU resources)
+  cleanup_parallel_hybrid_search();
+
+  // 1. Shutdown generic Metal resources. NNUE is CPU-only by design.
+  GPU::shutdown_gpu_backend();
+}
+
+int main(int argc, char *argv[]) {
+  // NOTE: Don't print anything before UCI loop starts.
+  // The UCI protocol requires engines to wait for 'uci' before responding.
+
+  Bitboards::init();
+  Position::init();
+
+  // Register cleanup function with atexit
+  // This ensures cleanup happens before static destruction
+  std::atexit(cleanup_gpu_resources);
+
+  {
+    // Scope the UCIEngine to ensure it's destroyed before GPU cleanup
+    auto uci = std::make_unique<UCIEngine>(argc, argv);
+
+    uci->loop();
+
+    // Explicitly destroy the UCI engine before GPU cleanup
+    uci.reset();
+  }
+
+  // Call cleanup explicitly here to ensure it happens before
+  // any other static destructors run
+  cleanup_gpu_resources();
+
+  return 0;
+}

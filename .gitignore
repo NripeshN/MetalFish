@@ -1,0 +1,68 @@
+# Local secrets
+.env
+.env.*
+
+# macOS and editor noise
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# C/C++ build outputs
+build/
+build_debug/
+_codeql_build_dir/
+*.d
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.dSYM/
+
+# Generated dependencies and references
+external/
+reference/
+lc0_ref/
+
+# Engine assets downloaded locally
+networks/*.nnue
+networks/*.pb
+networks/*.pb.gz
+books/*.bin
+books/*.book
+books/*.polyglot
+syzygy/
+*.rtbw
+*.rtbz
+*.tbw
+*.tbz
+
+# Generated results and diagnostics
+results/
+graphify-out/
+tournament.log
+*.log
+
+# Paper/tooling byproducts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.toc
+*.pdf

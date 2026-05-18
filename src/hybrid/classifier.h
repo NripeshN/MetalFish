@@ -1,0 +1,121 @@
+/*
+  MetalFish - A GPU-accelerated UCI chess engine
+  Copyright (C) 2025 Nripesh Niketan
+
+  Licensed under GPL-3.0
+*/
+
+#pragma once
+
+#include "../core/bitboard.h"
+#include "../core/movegen.h"
+#include "../core/position.h"
+
+namespace MetalFish {
+
+enum class PositionType {
+  HIGHLY_TACTICAL, // Forcing moves, immediate threats
+  TACTICAL,        // Some tactical elements
+  BALANCED,        // Mix of tactical and strategic
+  STRATEGIC,       // Quiet maneuvering
+  HIGHLY_STRATEGIC // Closed position, long-term planning
+};
+
+struct PositionFeatures {
+  bool in_check = false;
+  int num_checks_available = 0;
+  int num_captures = 0;
+  int num_promotions = 0;
+  int hanging_pieces[2] = {0, 0}; // [WHITE, BLACK]
+  int attacked_pieces[2] = {0, 0};
+  bool has_mate_threat = false;
+
+  int king_attackers[2] = {0, 0};
+  int king_zone_attacks[2] = {0, 0};
+  bool kings_castled[2] = {false, false};
+
+  int pawn_islands[2] = {0, 0};
+  int passed_pawns[2] = {0, 0};
+  int backward_pawns[2] = {0, 0};
+  int isolated_pawns[2] = {0, 0};
+  int pawn_chain_length[2] = {0, 0};
+
+  int mobility[2] = {0, 0};
+  int outposts[2] = {0, 0};
+  int piece_coordination[2] = {0, 0};
+
+  bool is_closed = false;
+  bool is_open = false;
+  int center_control[2] = {0, 0};
+  int space_advantage[2] = {0, 0};
+
+  int material[2] = {0, 0};
+  int material_imbalance = 0;
+  bool is_endgame = false;
+  bool is_middlegame = false;
+
+  float tactical_score = 0.0f;  // 0-1, higher = more tactical
+  float strategic_score = 0.0f; // 0-1, higher = more strategic
+  float complexity = 0.0f;      // 0-1, higher = more complex
+
+  PositionType classify() const;
+};
+
+class PositionClassifier {
+public:
+  PositionClassifier() = default;
+
+  PositionFeatures analyze(const Position &pos) const;
+
+private:
+  int count_hanging_pieces(const Position &pos, Color c) const;
+  int count_attacked_pieces(const Position &pos, Color c) const;
+  int count_king_attackers(const Position &pos, Color c) const;
+  int count_pawn_islands(const Position &pos, Color c) const;
+  int count_passed_pawns(const Position &pos, Color c) const;
+  int calculate_mobility(const Position &pos, Color c) const;
+  bool is_position_closed(const Position &pos) const;
+  bool is_endgame_position(const Position &pos) const;
+
+  Bitboard get_king_zone(Square ksq) const;
+};
+
+// Search strategy recommendation based on position
+struct SearchStrategy {
+  PositionType position_type;
+
+  float mcts_weight = 0.5f;
+  float ab_weight = 0.5f;
+
+  float cpuct = 2.5f;
+  int min_mcts_nodes = 100;
+  int max_mcts_depth = 50;
+  bool use_policy_network = true;
+
+  int ab_depth = 6;
+  bool use_null_move = true;
+  bool use_lmr = true;
+  int aspiration_window = 25;
+
+  int ab_verify_depth = 4;
+  float ab_override_threshold = 0.3f;
+  bool use_ab_for_tactics = true;
+
+  float time_multiplier = 1.0f;
+};
+
+class StrategySelector {
+public:
+  StrategySelector() = default;
+
+  SearchStrategy get_strategy(const Position &pos) const;
+  SearchStrategy get_strategy(const PositionFeatures &features) const;
+
+  void adjust_for_time(SearchStrategy &strategy, int time_left_ms,
+                       int increment_ms) const;
+
+private:
+  PositionClassifier classifier_;
+};
+
+} // namespace MetalFish

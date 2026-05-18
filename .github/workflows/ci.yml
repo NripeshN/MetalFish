@@ -1,0 +1,155 @@
+name: MetalFish CI
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: metalfish-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: Release
+  METALFISH_BT4_WEIGHTS_URL: https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz
+
+jobs:
+  build-and-test:
+    name: Build & Test (macOS Metal)
+    runs-on: macos-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          sw_vers
+          sysctl -n hw.ncpu
+          sysctl -n hw.memsize
+          system_profiler SPDisplaysDataType | grep -A 8 "Metal" || true
+          brew install protobuf zlib abseil
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r tests/requirements.txt
+
+      - name: Download engine networks
+        run: |
+          mkdir -p networks
+          curl --fail -L --retry 3 --retry-delay 2 \
+            -o networks/nn-c288c895ea92.nnue \
+            https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl --fail -L --retry 3 --retry-delay 2 \
+            -o networks/nn-37f18f62d772.nnue \
+            https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          curl --fail -L --retry 3 --retry-delay 5 \
+            -o networks/BT4-1024x15x32h-swa-6147500.pb.gz \
+            "${METALFISH_BT4_WEIGHTS_URL}"
+          gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \
+            > networks/BT4-1024x15x32h-swa-6147500.pb
+          test -s networks/BT4-1024x15x32h-swa-6147500.pb
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DUSE_METAL=ON \
+            -DBUILD_TESTS=ON
+
+      - name: Build
+        run: |
+          cmake --build build --target metalfish metalfish_tests \
+            -j"$(sysctl -n hw.ncpu)"
+
+      - name: Run C++ tests
+        run: ./build/metalfish_tests
+
+      - name: Run Python tests
+        run: |
+          python3 tests/testing.py --quick
+          python3 tests/test_lichess_bot.py
+          python3 tests/test_lichess_puzzle_runner.py
+
+      - name: Run UCI smoke
+        run: |
+          printf "uci\nisready\nsetoption name UseHybridSearch value true\nsetoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb\nisready\nposition startpos\ngo depth 4\nquit\n" \
+            | ./build/metalfish
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: metalfish-macos-arm64
+          path: |
+            build/metalfish
+            README.md
+            CHANGELOG.md
+            LICENSE
+          if-no-files-found: error
+
+  release:
+    name: Create macOS ARM64 Release
+    needs: [build-and-test]
+    runs-on: macos-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: brew install protobuf zlib abseil
+
+      - name: Download engine networks
+        run: |
+          mkdir -p networks
+          curl --fail -L --retry 3 --retry-delay 2 \
+            -o networks/nn-c288c895ea92.nnue \
+            https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl --fail -L --retry 3 --retry-delay 2 \
+            -o networks/nn-37f18f62d772.nnue \
+            https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+          curl --fail -L --retry 3 --retry-delay 5 \
+            -o networks/BT4-1024x15x32h-swa-6147500.pb.gz \
+            "${METALFISH_BT4_WEIGHTS_URL}"
+          gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \
+            > networks/BT4-1024x15x32h-swa-6147500.pb
+
+      - name: Build release binary
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_METAL=ON \
+            -DBUILD_TESTS=OFF
+          cmake --build build --target metalfish -j"$(sysctl -n hw.ncpu)"
+
+      - name: Package release
+        run: |
+          mkdir -p release
+          cp build/metalfish release/
+          cp README.md CHANGELOG.md LICENSE release/
+          tar -czvf metalfish-${{ github.ref_name }}-macos-arm64.tar.gz \
+            -C release .
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: metalfish-${{ github.ref_name }}-macos-arm64.tar.gz
+          draft: false
+          prerelease: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

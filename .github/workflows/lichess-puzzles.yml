@@ -1,0 +1,185 @@
+name: Lichess Puzzle Solver
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_minutes:
+        description: "Internal runtime budget. GitHub-hosted macOS jobs hard-stop at 6h."
+        required: false
+        default: "300"
+      movetime_ms:
+        description: "Per engine move search time."
+        required: false
+        default: "3000"
+      batch_size:
+        description: "Official Lichess puzzle batch size, max 50."
+        required: false
+        default: "50"
+      rated:
+        description: "Submit puzzle rounds as rated."
+        type: boolean
+        required: false
+        default: false
+  schedule:
+    - cron: "17 */6 * * *"
+
+concurrency:
+  group: lichess-puzzles-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: Release
+  LICHESS_PUZZLES_TOKEN: ${{ secrets.Lichess_Puzzles || secrets.LICHESS_PUZZLES }}
+  METALFISH_BT4_WEIGHTS_URL: ${{ vars.METALFISH_BT4_WEIGHTS_URL || 'https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz' }}
+  MAX_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.max_minutes || '300' }}
+  MOVETIME_MS: ${{ github.event_name == 'workflow_dispatch' && inputs.movetime_ms || '3000' }}
+  BATCH_SIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.batch_size || '50' }}
+  RATED_PUZZLES: ${{ github.event_name == 'workflow_dispatch' && inputs.rated || false }}
+  METALFISH_PUZZLE_THREAD_RESERVE: "1"
+  METALFISH_PUZZLE_MEMORY_RESERVE_MB: "1536"
+
+jobs:
+  solve:
+    name: Solve Puzzles (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Preflight token
+        run: |
+          if [ -z "${LICHESS_PUZZLES_TOKEN:-}" ]; then
+            echo "::error::Missing GitHub Actions secret Lichess_Puzzles"
+            exit 1
+          fi
+          {
+            echo "## Lichess Puzzle Solver"
+            echo ""
+            echo "- BT4 weights: ${METALFISH_BT4_WEIGHTS_URL}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          echo "Runner hardware:"
+          sw_vers
+          sysctl -n hw.ncpu
+          sysctl -n hw.memsize
+          system_profiler SPDisplaysDataType | grep -A 8 "Metal" || true
+          brew install protobuf zlib abseil
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r tests/requirements.txt
+
+      - name: Download NNUE files
+        run: |
+          mkdir -p networks
+          curl --fail -L --retry 3 --retry-delay 2 \
+            -o networks/nn-c288c895ea92.nnue \
+            https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
+          curl --fail -L --retry 3 --retry-delay 2 \
+            -o networks/nn-37f18f62d772.nnue \
+            https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
+
+      - name: Download transformer weights
+        run: |
+          curl --fail -L --retry 3 --retry-delay 5 \
+            -o networks/BT4-1024x15x32h-swa-6147500.pb.gz \
+            "${METALFISH_BT4_WEIGHTS_URL}"
+          gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \
+            > networks/BT4-1024x15x32h-swa-6147500.pb
+          test -s networks/BT4-1024x15x32h-swa-6147500.pb
+
+      - name: Cache Syzygy 3-4-5
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: syzygy
+          key: syzygy-3-4-5-v1
+
+      - name: Download Syzygy 3-4-5
+        run: |
+          set +e
+          python3 tools/syzygy_manager.py download \
+            --dest syzygy \
+            --set 3-4-5 \
+            --jobs "$(sysctl -n hw.ncpu 2>/dev/null || echo 2)" \
+            --reserve-gib 2
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::Syzygy download failed; continuing without tablebases"
+            rm -rf syzygy
+          fi
+          exit 0
+
+      - name: Configure MetalFish
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+            -DUSE_METAL=ON \
+            -DBUILD_TESTS=OFF
+
+      - name: Build MetalFish
+        run: |
+          cmake --build build --target metalfish \
+            -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+          cp networks/*.nnue build/ 2>/dev/null || true
+
+      - name: Run puzzle runner smoke tests
+        run: |
+          python3 tests/test_lichess_puzzle_runner.py
+
+      - name: Run puzzle solver
+        run: |
+          set +e
+          rated_flag=""
+          if [ "${RATED_PUZZLES}" = "true" ]; then
+            rated_flag="--rated"
+          fi
+          syzygy_args=""
+          if [ -d syzygy ]; then
+            syzygy_args="--syzygy-path syzygy"
+          fi
+          safe_minutes="$(awk -v m="${MAX_MINUTES}" 'BEGIN {
+            if (m !~ /^[0-9]+([.][0-9]+)?$/) m = 300;
+            if (m < 1) m = 1;
+            if (m > 320) m = 320;
+            print m;
+          }')"
+          if [ "${safe_minutes}" != "${MAX_MINUTES}" ]; then
+            echo "::warning::Clamped puzzle runtime to ${safe_minutes} minutes to avoid GitHub's 6h job timeout"
+          fi
+          python3 tools/lichess_puzzle_runner.py \
+            --engine build/metalfish \
+            --mode hybrid \
+            ${syzygy_args} \
+            --max-minutes "${safe_minutes}" \
+            --movetime-ms "${MOVETIME_MS}" \
+            --batch-size "${BATCH_SIZE}" \
+            ${rated_flag}
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Puzzle solver exited with status ${status}"
+          fi
+          {
+            echo "- Solver exit status: ${status}"
+            echo "- Results directory: results/lichess_puzzles"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${status}"
+
+      - name: Upload puzzle results
+        if: always()
+        uses: actions/upload-artifact@v6
+        continue-on-error: true
+        with:
+          name: lichess-puzzle-results
+          path: results/lichess_puzzles/
+          if-no-files-found: ignore

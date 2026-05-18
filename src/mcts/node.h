@@ -1,0 +1,667 @@
+/*
+  MetalFish - A GPU-accelerated UCI chess engine
+  Copyright (C) 2025 Nripesh Niketan
+
+  MCTS Node and Tree - Optimized for Apple Silicon
+
+  Licensed under GPL-3.0
+*/
+
+#pragma once
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <shared_mutex>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include "../core/movegen.h"
+#include "../core/position.h"
+#include "../core/types.h"
+
+#ifdef __APPLE__
+#include <os/lock.h>
+#else
+#include <mutex>
+
+struct os_unfair_lock_s {
+  std::atomic_flag flag = ATOMIC_FLAG_INIT;
+};
+using os_unfair_lock_t = os_unfair_lock_s *;
+using os_unfair_lock = os_unfair_lock_s;
+
+#define OS_UNFAIR_LOCK_INIT                                                    \
+  os_unfair_lock_s {}
+inline void os_unfair_lock_lock(os_unfair_lock_t lock) {
+  while (lock->flag.test_and_set(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+}
+inline void os_unfair_lock_unlock(os_unfair_lock_t lock) {
+  lock->flag.clear(std::memory_order_release);
+}
+#endif
+
+namespace MetalFish {
+namespace MCTS {
+
+#ifdef __APPLE__
+constexpr size_t CACHE_LINE_SIZE = 128;
+#else
+constexpr size_t CACHE_LINE_SIZE = 64;
+#endif
+
+class Node;
+
+struct Edge {
+  Move move = Move::none();
+  uint16_t p_ = 0;
+  std::atomic<Node *> child{nullptr};
+
+  Edge() = default;
+  Edge(Move m, float p) : move(m), child(nullptr) { SetP(p); }
+
+  Edge(const Edge &) = delete;
+  Edge &operator=(const Edge &) = delete;
+
+  Edge(Edge &&other) noexcept
+      : move(other.move), p_(other.p_),
+        child(other.child.load(std::memory_order_relaxed)) {}
+
+  Edge &operator=(Edge &&other) noexcept {
+    move = other.move;
+    p_ = other.p_;
+    child.store(other.child.load(std::memory_order_relaxed),
+                std::memory_order_relaxed);
+    return *this;
+  }
+
+  // 16-bit compressed policy: store bits 27..12 of IEEE 754 float
+  void SetP(float p) {
+    constexpr int32_t roundings = (1 << 11) - (3 << 28);
+    int32_t tmp;
+    std::memcpy(&tmp, &p, sizeof(float));
+    tmp += roundings;
+    p_ = (tmp < 0) ? 0 : static_cast<uint16_t>(tmp >> 12);
+  }
+
+  float GetP() const {
+    uint32_t tmp = (static_cast<uint32_t>(p_) << 12) | (3 << 28);
+    float ret;
+    std::memcpy(&ret, &tmp, sizeof(uint32_t));
+    return ret;
+  }
+};
+
+class alignas(CACHE_LINE_SIZE) Node {
+public:
+  enum class Terminal : uint8_t {
+    NonTerminal = 0,
+    EndOfGame = 1,
+    Tablebase = 2,
+    TwoFold = 3
+  };
+
+  explicit Node(Node *parent = nullptr, int edge_idx = -1)
+      : parent_(parent),
+        index_(edge_idx >= 0 ? static_cast<uint16_t>(edge_idx) : 0) {}
+
+  ~Node() {
+    if (solid_children_ && solid_base_) {
+      for (int i = 0; i < num_edges_; ++i) {
+        solid_base_[i].~Node();
+      }
+      ::operator delete[](solid_base_, std::align_val_t(alignof(Node)));
+      solid_base_ = nullptr;
+    }
+  }
+
+  Node(const Node &) = delete;
+  Node &operator=(const Node &) = delete;
+
+  uint32_t GetN() const { return n_.load(std::memory_order_acquire); }
+
+  uint32_t GetNInFlight() const {
+    return n_in_flight_.load(std::memory_order_acquire);
+  }
+
+  int GetNStarted() const {
+    return static_cast<int>(GetN()) + static_cast<int>(GetNInFlight());
+  }
+
+  uint32_t GetChildrenVisits() const {
+    uint32_t n = GetN();
+    return n > 0 ? n - 1 : 0;
+  }
+
+  float GetQ(float draw_score = 0.0f) const {
+    return static_cast<float>(wl_.load(std::memory_order_acquire)) +
+           draw_score * d_.load(std::memory_order_acquire);
+  }
+
+  float GetWL() const {
+    return static_cast<float>(wl_.load(std::memory_order_acquire));
+  }
+  float GetD() const { return d_.load(std::memory_order_acquire); }
+  float GetM() const { return m_.load(std::memory_order_acquire); }
+
+  float GetVisitedPolicy() const {
+    float dominated = 0.0f;
+    for (int i = 0; i < num_edges_; ++i) {
+      Node *ch = edges_[i].child.load(std::memory_order_acquire);
+      if (ch && ch->GetN() > 0) {
+        dominated += edges_[i].GetP();
+      }
+    }
+    return dominated;
+  }
+
+  // Returns false on collision (another thread is expanding this node).
+  bool TryStartScoreUpdate(int multivisit = 1) {
+    const uint32_t visits = static_cast<uint32_t>(std::max(1, multivisit));
+    uint32_t n = n_.load(std::memory_order_acquire);
+    if (n == 0 && n_in_flight_.load(std::memory_order_acquire) > 0) {
+      return false;
+    }
+    n_in_flight_.fetch_add(visits, std::memory_order_acq_rel);
+    return true;
+  }
+
+  void CancelScoreUpdate(int count = 1) {
+    uint32_t to_sub = static_cast<uint32_t>(std::max(1, count));
+    uint32_t cur = n_in_flight_.load(std::memory_order_acquire);
+    while (true) {
+      const uint32_t next = (cur > to_sub) ? (cur - to_sub) : 0;
+      if (n_in_flight_.compare_exchange_weak(cur, next,
+                                             std::memory_order_acq_rel,
+                                             std::memory_order_acquire)) {
+        break;
+      }
+    }
+  }
+
+  void FinalizeScoreUpdate(float v, float d, float m, int multivisit = 1) {
+    os_unfair_lock_lock(&score_lock_);
+    const uint32_t visits = static_cast<uint32_t>(std::max(1, multivisit));
+    const uint32_t old_n = n_.load(std::memory_order_relaxed);
+    const double total = static_cast<double>(old_n + visits);
+
+    const double old_wl = wl_.load(std::memory_order_relaxed);
+    const float old_d = d_.load(std::memory_order_relaxed);
+    const float old_m = m_.load(std::memory_order_relaxed);
+
+    wl_.store((old_wl * old_n + static_cast<double>(v) * visits) / total,
+              std::memory_order_release);
+    d_.store(static_cast<float>((static_cast<double>(old_d) * old_n +
+                                 static_cast<double>(d) * visits) /
+                                total),
+             std::memory_order_release);
+    m_.store(static_cast<float>((static_cast<double>(old_m) * old_n +
+                                 static_cast<double>(m) * visits) /
+                                total),
+             std::memory_order_release);
+
+    n_.store(old_n + visits, std::memory_order_release);
+
+    uint32_t cur = n_in_flight_.load(std::memory_order_acquire);
+    while (true) {
+      const uint32_t next = (cur > visits) ? (cur - visits) : 0;
+      if (n_in_flight_.compare_exchange_weak(cur, next,
+                                             std::memory_order_acq_rel,
+                                             std::memory_order_acquire)) {
+        break;
+      }
+    }
+    os_unfair_lock_unlock(&score_lock_);
+  }
+
+  // If every child is terminal, propagate bounds up the tree.
+  void MaybeSetBounds() {
+    if (num_edges_ == 0)
+      return;
+
+    bool all_terminal = true;
+    float best_parent_wl = -2.0f;
+    float best_d = 0.0f;
+    float best_m = 999.0f;
+
+    for (int i = 0; i < num_edges_; ++i) {
+      Node *ch = edges_[i].child.load(std::memory_order_acquire);
+      if (!ch || !ch->IsTerminal()) {
+        all_terminal = false;
+        break;
+      }
+      float parent_val = -ch->GetWL();
+      float child_d = ch->GetD();
+      float child_m = ch->GetM() + 1.0f;
+
+      if (parent_val > best_parent_wl) {
+        best_parent_wl = parent_val;
+        best_d = child_d;
+        best_m = child_m;
+      }
+    }
+
+    if (!all_terminal)
+      return;
+
+    MakeTerminal(Terminal::EndOfGame, best_parent_wl, best_d, best_m);
+  }
+
+  void CreateEdges(const MoveList<LEGAL> &moves) {
+    CreateEdges(moves.begin(), static_cast<int>(moves.size()));
+  }
+
+  void CreateEdges(const Move *moves, int count) {
+    if (count == 0)
+      return;
+    edges_ = std::make_unique<Edge[]>(count);
+    float uniform = 1.0f / static_cast<float>(count);
+    for (int idx = 0; idx < count; ++idx) {
+      edges_[idx].move = moves[idx];
+      edges_[idx].SetP(uniform);
+      edges_[idx].child.store(nullptr, std::memory_order_relaxed);
+    }
+    num_edges_ = static_cast<uint8_t>(count);
+  }
+
+  void CreateEdges(const std::vector<std::pair<Move, float>> &policy_priors) {
+    int count = static_cast<int>(policy_priors.size());
+    if (count == 0)
+      return;
+    edges_ = std::make_unique<Edge[]>(count);
+    float uniform = 1.0f / static_cast<float>(count);
+    for (int idx = 0; idx < count; ++idx) {
+      edges_[idx].move = policy_priors[idx].first;
+      edges_[idx].SetP(uniform);
+      edges_[idx].child.store(nullptr, std::memory_order_relaxed);
+    }
+    num_edges_ = static_cast<uint8_t>(count);
+  }
+
+  void SortEdges() {
+    if (!edges_ || num_edges_ <= 1)
+      return;
+    for (int i = 0; i < num_edges_; ++i) {
+      if (edges_[i].child.load(std::memory_order_relaxed) != nullptr)
+        return;
+    }
+    std::sort(edges_.get(), edges_.get() + num_edges_,
+              [](const Edge &a, const Edge &b) { return a.p_ > b.p_; });
+  }
+
+  int NumEdges() const { return num_edges_; }
+  Edge *Edges() { return edges_.get(); }
+  const Edge *Edges() const { return edges_.get(); }
+
+  Node *Parent() const { return parent_; }
+  int EdgeIndex() const { return static_cast<int>(index_); }
+  void DetachFromParentForReuse() {
+    parent_ = nullptr;
+    index_ = 0;
+  }
+
+  bool IsTerminal() const {
+    return terminal_type_.load(std::memory_order_acquire) != 0;
+  }
+
+  Terminal GetTerminalType() const {
+    return static_cast<Terminal>(
+        terminal_type_.load(std::memory_order_acquire));
+  }
+
+  void MakeTerminal(Terminal type, float wl, float d, float m) {
+    os_unfair_lock_lock(&score_lock_);
+    wl_.store(static_cast<double>(wl), std::memory_order_release);
+    d_.store(d, std::memory_order_release);
+    m_.store(m, std::memory_order_release);
+    terminal_type_.store(static_cast<uint8_t>(type), std::memory_order_release);
+    os_unfair_lock_unlock(&score_lock_);
+  }
+
+  void SetTerminal(Terminal type, float value) {
+    MakeTerminal(type, value, 0.0f, 0.0f);
+  }
+
+  void RevertTerminal() {
+    terminal_type_.store(static_cast<uint8_t>(Terminal::NonTerminal),
+                         std::memory_order_release);
+  }
+
+  void MaybeRevertTwoFold(int depth_from_root) {
+    if (GetTerminalType() != Terminal::TwoFold)
+      return;
+    if (depth_from_root < 4) {
+      RevertTerminal();
+    }
+  }
+
+  bool IsSolid() const { return solid_children_; }
+
+  void TakeEdgesFrom(Node &other) {
+    edges_ = std::move(other.edges_);
+    num_edges_ = other.num_edges_;
+    other.num_edges_ = 0;
+  }
+
+  bool MakeSolid() {
+    if (solid_children_ || num_edges_ == 0 || IsTerminal() ||
+        GetNInFlight() != 0)
+      return false;
+
+    for (int i = 0; i < num_edges_; ++i) {
+      Node *ch = edges_[i].child.load(std::memory_order_acquire);
+      if (ch) {
+        if (ch->GetNInFlight() > 0)
+          return false;
+      }
+    }
+
+    void *raw = ::operator new[](static_cast<size_t>(num_edges_) * sizeof(Node),
+                                 std::align_val_t(alignof(Node)));
+    Node *arr = static_cast<Node *>(raw);
+    for (int i = 0; i < num_edges_; ++i) {
+      new (&arr[i]) Node(this, i);
+      Node *old = edges_[i].child.load(std::memory_order_acquire);
+      if (old) {
+        if (old->GetN() > 0) {
+          arr[i].FinalizeScoreUpdate(old->GetWL(), old->GetD(), old->GetM(),
+                                     static_cast<int>(old->GetN()));
+        }
+        if (old->NumEdges() > 0) {
+          arr[i].TakeEdgesFrom(*old);
+        }
+        if (old->IsTerminal()) {
+          arr[i].MakeTerminal(old->GetTerminalType(), old->GetWL(), old->GetD(),
+                              old->GetM());
+        }
+        arr[i].UpdateChildrenParents();
+      }
+      edges_[i].child.store(&arr[i], std::memory_order_release);
+    }
+
+    solid_base_ = arr;
+    solid_children_ = true;
+    return true;
+  }
+
+  uint32_t n() const { return GetN(); }
+  float q() const { return GetWL(); }
+  float d() const { return GetD(); }
+  float m() const { return GetM(); }
+  bool is_terminal() const { return IsTerminal(); }
+
+private:
+  void UpdateChildrenParents() {
+    for (int i = 0; i < num_edges_; ++i) {
+      Node *ch = edges_[i].child.load(std::memory_order_acquire);
+      if (!ch)
+        continue;
+      ch->parent_ = this;
+      ch->index_ = static_cast<uint16_t>(i);
+      ch->UpdateChildrenParents();
+    }
+  }
+
+  std::atomic<double> wl_{0.0};
+  std::unique_ptr<Edge[]> edges_;
+  Node *parent_ = nullptr;
+  std::atomic<float> d_{0.0f};
+  std::atomic<float> m_{0.0f};
+  std::atomic<uint32_t> n_{0};
+  std::atomic<uint32_t> n_in_flight_{0};
+  uint16_t index_ = 0;
+  uint8_t num_edges_ = 0;
+  std::atomic<uint8_t> terminal_type_{0};
+  mutable os_unfair_lock score_lock_ = OS_UNFAIR_LOCK_INIT;
+  Node *solid_base_ = nullptr;
+  bool solid_children_ = false;
+};
+
+class NodeGarbageCollector {
+public:
+  NodeGarbageCollector() : gc_thread_([this]() { Worker(); }) {}
+
+  ~NodeGarbageCollector() {
+    stop_.store(true, std::memory_order_release);
+    if (gc_thread_.joinable())
+      gc_thread_.join();
+  }
+
+  NodeGarbageCollector(const NodeGarbageCollector &) = delete;
+  NodeGarbageCollector &operator=(const NodeGarbageCollector &) = delete;
+
+  void AddToQueue(std::unique_ptr<Node> node) {
+    std::lock_guard<std::mutex> lock(gc_mutex_);
+    gc_queue_.push_back(std::move(node));
+  }
+
+private:
+  void Worker() {
+    while (!stop_.load(std::memory_order_acquire)) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      ProcessQueue();
+    }
+    ProcessQueue();
+  }
+
+  void ProcessQueue() {
+    while (true) {
+      std::unique_ptr<Node> item;
+      {
+        std::lock_guard<std::mutex> lock(gc_mutex_);
+        if (gc_queue_.empty())
+          return;
+        item = std::move(gc_queue_.back());
+        gc_queue_.pop_back();
+      }
+      item.reset();
+    }
+  }
+
+  std::atomic<bool> stop_{false};
+  std::mutex gc_mutex_;
+  std::vector<std::unique_ptr<Node>> gc_queue_;
+  std::thread gc_thread_;
+};
+
+inline NodeGarbageCollector &GetNodeGC() {
+  static NodeGarbageCollector gc;
+  return gc;
+}
+
+class NodeTree {
+public:
+  NodeTree() { AllocateNewArena(); }
+  ~NodeTree() = default;
+
+  NodeTree(const NodeTree &) = delete;
+  NodeTree &operator=(const NodeTree &) = delete;
+
+  void Reset(const std::string &fen) {
+    root_arena_.reset();
+    retained_heap_roots_.clear();
+    arenas_.clear();
+    current_arena_.store(0, std::memory_order_relaxed);
+    AllocateNewArena();
+    if (root_heap_)
+      GetNodeGC().AddToQueue(std::move(root_heap_));
+    root_is_arena_ = false;
+
+    root_heap_ = std::make_unique<Node>();
+    {
+      std::unique_lock<std::shared_mutex> lock(fen_mutex_);
+      root_fen_ = fen;
+    }
+  }
+
+  bool TryReuse(const std::string &new_fen) {
+    Node *r = Root();
+    if (!r)
+      return false;
+
+    std::string old_fen = RootFen();
+    if (old_fen.empty())
+      return false;
+
+    if (old_fen == new_fen)
+      return true;
+
+    if (r->NumEdges() == 0)
+      return false;
+
+    auto retire_heap_root = [&]() {
+      if (!root_heap_)
+        return;
+      if (root_heap_->IsSolid()) {
+        retained_heap_roots_.push_back(std::move(root_heap_));
+      } else {
+        GetNodeGC().AddToQueue(std::move(root_heap_));
+      }
+    };
+
+    Position new_pos;
+    StateInfo ns;
+    new_pos.set(new_fen, false, &ns);
+    uint64_t target_key = new_pos.key();
+
+    Edge *edges = r->Edges();
+    int num = r->NumEdges();
+
+    for (int i = 0; i < num; ++i) {
+      Node *child = edges[i].child.load(std::memory_order_acquire);
+      if (!child)
+        continue;
+
+      Position test;
+      StateInfo ts, ts2;
+      test.set(old_fen, false, &ts);
+      test.do_move(edges[i].move, ts2);
+
+      if (test.key() == target_key) {
+        edges[i].child.store(nullptr, std::memory_order_relaxed);
+        child->DetachFromParentForReuse();
+        retire_heap_root();
+        root_arena_.reset(child);
+        root_is_arena_ = true;
+        {
+          std::unique_lock<std::shared_mutex> lock(fen_mutex_);
+          root_fen_ = new_fen;
+        }
+        return true;
+      }
+
+      if (child->NumEdges() > 0) {
+        Edge *ce = child->Edges();
+        for (int j = 0; j < child->NumEdges(); ++j) {
+          Node *gc = ce[j].child.load(std::memory_order_acquire);
+          if (!gc)
+            continue;
+          StateInfo ts3;
+          test.do_move(ce[j].move, ts3);
+          if (test.key() == target_key) {
+            ce[j].child.store(nullptr, std::memory_order_relaxed);
+            gc->DetachFromParentForReuse();
+            retire_heap_root();
+            root_arena_.reset(gc);
+            root_is_arena_ = true;
+            {
+              std::unique_lock<std::shared_mutex> lock(fen_mutex_);
+              root_fen_ = new_fen;
+            }
+            return true;
+          }
+          test.undo_move(ce[j].move);
+        }
+      }
+    }
+    return false;
+  }
+
+  Node *Root() { return root_is_arena_ ? root_arena_.get() : root_heap_.get(); }
+
+  const Node *Root() const {
+    return root_is_arena_ ? root_arena_.get() : root_heap_.get();
+  }
+
+  std::string RootFen() const {
+    std::shared_lock<std::shared_mutex> lock(fen_mutex_);
+    return root_fen_;
+  }
+
+  Node *AllocateNode(Node *parent, int edge_idx) {
+    while (true) {
+      size_t arena_idx = current_arena_.load(std::memory_order_acquire);
+      if (arena_idx < arenas_.size()) {
+        NodeArena &arena = *arenas_[arena_idx];
+        size_t slot = arena.next.fetch_add(1, std::memory_order_acq_rel);
+        if (slot < ARENA_SIZE) {
+          Node *n = &arena.nodes[slot];
+          new (n) Node(parent, edge_idx);
+          return n;
+        }
+      }
+      // Current arena is full – allocate a new one under lock.
+      os_unfair_lock_lock(&arena_lock_);
+      if (current_arena_.load(std::memory_order_acquire) == arena_idx) {
+        AllocateNewArena();
+        current_arena_.store(arenas_.size() - 1, std::memory_order_release);
+      }
+      os_unfair_lock_unlock(&arena_lock_);
+    }
+  }
+
+private:
+  struct NoDelete {
+    void operator()(Node *) const {}
+  };
+  std::unique_ptr<Node> root_heap_;
+  std::unique_ptr<Node, NoDelete> root_arena_;
+  std::vector<std::unique_ptr<Node>> retained_heap_roots_;
+  bool root_is_arena_ = false;
+
+  std::string root_fen_;
+  mutable std::shared_mutex fen_mutex_;
+
+  // Arena pool
+  static constexpr size_t ARENA_SIZE = 8192;
+
+  struct NodeArena {
+    Node *nodes = nullptr;
+    std::atomic<size_t> next{0};
+
+    NodeArena() {
+      void *raw = ::operator new[](ARENA_SIZE * sizeof(Node),
+                                   std::align_val_t(alignof(Node)));
+      nodes = static_cast<Node *>(raw);
+    }
+
+    ~NodeArena() {
+      const size_t count =
+          std::min(next.load(std::memory_order_acquire), ARENA_SIZE);
+      for (size_t i = 0; i < count; ++i) {
+        nodes[i].~Node();
+      }
+      ::operator delete[](nodes, std::align_val_t(alignof(Node)));
+    }
+
+    NodeArena(const NodeArena &) = delete;
+    NodeArena &operator=(const NodeArena &) = delete;
+  };
+
+  std::vector<std::unique_ptr<NodeArena>> arenas_;
+  std::atomic<size_t> current_arena_{0};
+
+  os_unfair_lock arena_lock_ = OS_UNFAIR_LOCK_INIT;
+
+  void AllocateNewArena() { arenas_.push_back(std::make_unique<NodeArena>()); }
+};
+
+} // namespace MCTS
+} // namespace MetalFish
