@@ -377,12 +377,25 @@ def hybrid_split_for_threads(threads: int) -> Tuple[int, int]:
     return mcts_threads, max(1, threads - mcts_threads)
 
 
+def pure_mcts_strength_threads(threads: int) -> int:
+    override = env_option("METALFISH_PURE_MCTS_THREADS")
+    if override is not None:
+        try:
+            return max(1, min(threads, int(override)))
+        except ValueError:
+            pass
+    if platform.system() == "Darwin":
+        return 1
+    return max(1, threads)
+
+
 def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
     engines = {}
     mf = METALFISH
     w = str(WEIGHTS)
     threads = max(1, threads)
     hash_mb = max(16, hash_mb)
+    pure_mcts_threads = pure_mcts_strength_threads(threads)
     hybrid_threads = max(3, threads)
     hybrid_mcts_threads, hybrid_ab_threads = hybrid_split_for_threads(hybrid_threads)
 
@@ -408,7 +421,8 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "Threads": str(threads),
             "Hash": str(hash_mb),
             "MultiPV": "1",
-            "MCTSMaxThreads": str(threads),
+            "MCTSMaxThreads": str(pure_mcts_threads),
+            "MCTSParallelSearch": "false",
             "MCTSMinibatchSize": "0",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
@@ -496,6 +510,7 @@ def config_with_thread_count(cfg: EngineConfig, threads: int) -> EngineConfig:
     options = {**cfg.uci_options, "Threads": str(max(1, threads))}
     if options.get("UseMCTS") == "true":
         options["MCTSMaxThreads"] = str(max(1, threads))
+        options["MCTSParallelSearch"] = "true"
     if options.get("UseHybridSearch") == "true":
         hybrid_threads = max(3, threads)
         mcts_threads, ab_threads = hybrid_split_for_threads(hybrid_threads)
@@ -560,10 +575,12 @@ def resource_policy(threads: int, hash_mb: int) -> dict:
     return {
         "thread_policy": (
             "one shared worker budget per engine; Darwin defaults to Apple "
-            "Silicon performance cores"
+            "Silicon performance cores; pure MetalFish MCTS uses its "
+            "strength-first Apple worker cap"
         ),
         "threads": threads,
         "hash_mb": hash_mb,
+        "metalfish_mcts_threads": pure_mcts_strength_threads(threads),
         "detected_default_threads": detect_default_threads(),
         "detected_memory_mib": detect_memory_mib(),
         "hybrid_split": {
@@ -572,7 +589,8 @@ def resource_policy(threads: int, hash_mb: int) -> dict:
         },
         "notes": [
             "Reference engines are no longer pinned to one thread.",
-            "MetalFish pure MCTS and Lc0 both receive the same Threads value.",
+            "MetalFish pure MCTS keeps the engine-recommended MCTSMaxThreads cap.",
+            "Lc0 receives the requested Threads value for its own backend.",
             "Hybrid receives the same total worker budget split between MCTS and AB.",
         ],
     }
@@ -1086,9 +1104,11 @@ def generate_summary(all_results: Dict[str, dict]) -> str:
         "",
         f"- Threads: {resources.get('threads', 'unknown')}",
         f"- Hash: {resources.get('hash_mb', 'unknown')} MB",
+        f"- MetalFish pure MCTS workers: "
+        f"{resources.get('metalfish_mcts_threads', 'unknown')}",
         f"- Hybrid split: MCTS={hybrid_split.get('mcts_threads', 'unknown')}, "
         f"AB={hybrid_split.get('ab_threads', 'unknown')}",
-        "- Reference engines use the same thread and hash budget where supported.",
+        "- CPU/reference engines use the same thread and hash budget where supported.",
         "",
     ]
 
@@ -1259,6 +1279,7 @@ def main() -> int:
         print(f"  {eid}: {status} ({cfg.path}) options={cfg.uci_options}")
     print(
         f"Resource policy: threads={primary_threads}, hash={hash_mb} MB, "
+        f"pure-mcts={resources['metalfish_mcts_threads']}, "
         f"hybrid={resources['hybrid_split']['mcts_threads']} MCTS + "
         f"{resources['hybrid_split']['ab_threads']} AB"
     )

@@ -24,6 +24,7 @@
         "NNWeights": "networks/BT4-1024x15x32h-swa-6147500.pb",
         "MultiPV": "1",
         "MCTSMaxThreads": "auto",
+        "MCTSParallelSearch": "false",
         "MCTSMinibatchSize": "0",
         "MCTSParityPreset": "false",
         "MCTSAddDirichletNoise": "false",

@@ -801,9 +801,9 @@ static float get_float_option_alias(Engine &engine, const char *preferred,
 
 static int auto_mcts_minibatch_size(int num_threads) {
 #ifdef __APPLE__
-  // Short Apple Silicon searches lose time waiting for moderate MPSGraph
-  // batches to fill. Longer pure-MCTS searches can opt back into batching once
-  // the go limits are known.
+  // The current BT4/MPSGraph path is strongest and most predictable with
+  // direct single-position evals. Explicit MCTSMinibatchSize values remain
+  // available for throughput experiments.
   (void)num_threads;
   return 1;
 #else
@@ -870,31 +870,6 @@ static bool should_preload_transformer_search() {
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char c) { return std::tolower(c); });
   return value != "0" && value != "false" && value != "off" && value != "no";
-}
-
-static void tune_mcts_minibatch_for_limits(MCTS::SearchParams &config,
-                                           Engine &engine,
-                                           const Search::LimitsType &limits,
-                                           int num_threads) {
-#ifdef __APPLE__
-  if (static_cast<int>(engine.get_options()["MCTSMinibatchSize"]) > 0)
-    return;
-  if (num_threads < 8 || limits.nodes > 0)
-    return;
-
-  const int64_t max_clock_ms =
-      std::max<int64_t>(limits.time[WHITE], limits.time[BLACK]);
-  const bool long_fixed_movetime = limits.movetime >= 3000;
-  const bool long_clock_search = limits.movetime == 0 && max_clock_ms >= 15000;
-
-  if (limits.infinite || long_fixed_movetime || long_clock_search)
-    config.minibatch_size = 32;
-#else
-  (void)config;
-  (void)engine;
-  (void)limits;
-  (void)num_threads;
-#endif
 }
 
 static MCTS::SearchParams make_mcts_config(Engine &engine,
@@ -1249,13 +1224,26 @@ static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
       num_threads = 4;
   }
 
+  const bool allow_parallel_mcts =
+      static_cast<bool>(engine.get_options()["MCTSParallelSearch"]);
+#ifdef __APPLE__
+  if (!allow_parallel_mcts && num_threads > 1) {
+    if (announce_cap) {
+      sync_cout << "info string Capping pure MCTS threads from " << num_threads
+                << " to 1 for Apple Silicon strength stability"
+                << sync_endl;
+    }
+    num_threads = 1;
+  }
+#endif
+
   int mcts_thread_cap =
       static_cast<int>(engine.get_options()["MCTSMaxThreads"]);
   if (!explicit_threads_arg && mcts_thread_cap <= 0) {
     // Strength-first auto mode:
     // Apple Silicon MPSGraph latency is better with one MCTS worker for the
-    // current transformer. Higher worker counts can still be requested via
-    // `go ... threads=N` or MCTSMaxThreads for explicit throughput tests.
+    // current transformer. Higher worker counts require MCTSParallelSearch for
+    // explicit throughput tests.
     mcts_thread_cap = 1;
   }
 
@@ -1612,7 +1600,6 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   }
 
   MCTS::SearchParams config = make_mcts_config(engine, nn_weights, num_threads);
-  tune_mcts_minibatch_for_limits(config, engine, limits, num_threads);
 
   std::shared_ptr<MCTS::Search> mcts;
   const std::string cache_key = make_mcts_cache_key(nn_weights, config);

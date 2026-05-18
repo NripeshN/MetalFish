@@ -88,12 +88,13 @@ def main() -> int:
     paper = detect_paper_engines_clean()
 
     assert_options_include(
-        "paper MCTS fair resources",
+        "paper MCTS strength resources",
         paper["metalfish-mcts"].uci_options,
         {
             "Threads": "8",
             "Hash": "4096",
-            "MCTSMaxThreads": "8",
+            "MCTSMaxThreads": "1",
+            "MCTSParallelSearch": "false",
             "UseHybridSearch": "false",
             "UseMCTS": "true",
             "MultiPV": "1",
@@ -191,6 +192,7 @@ def main() -> int:
             "MultiPV": "1",
             "Hash": "4096",
             "MCTSMaxThreads": "auto",
+            "MCTSParallelSearch": "false",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
             "MCTSMinimumKLDGainPerNode": "0.00005",

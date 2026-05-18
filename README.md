@@ -30,12 +30,17 @@ root signals and the coordinator chooses the final move from both engines.
 
 ## Benchmarking Policy
 
-Benchmark results in this repository must use a fair resource policy:
+Benchmark results in this repository must use a fair, strength-first resource
+policy:
 
 - One shared worker-thread budget per engine.
 - On Apple Silicon, `auto` uses the performance-core count.
 - CPU engines receive the same `Threads` and `Hash` settings where supported.
-- Lc0 and MetalFish MCTS receive the same `Threads` value.
+- Pure MetalFish MCTS keeps its engine-recommended Apple worker cap unless a
+  test is explicitly measuring throughput scaling. For the current BT4/MPSGraph
+  backend this is one search worker with direct evals; `MCTSParallelSearch`
+  must be enabled explicitly for pure-MCTS throughput experiments.
+- Lc0 receives the requested `Threads` value for its own backend.
 - MetalFish Hybrid receives the same total worker budget split between MCTS and
   AB workers.
 - Tactical-suite scores are reported as tactical accuracy only, not Elo.
@@ -53,16 +58,20 @@ a report to `results/paper_summary.md`. Any headline strength claims should be
 based on those generated artifacts or on a larger cutechess tournament, not on
 stale README tables.
 
-Latest local fair tactical run, M2 Max, 2026-05-18, 5 seconds per position,
-8 performance-core workers, 4096 MB hash where supported:
+Latest local tactical runs, M2 Max, 2026-05-18, 5 seconds per position:
 
 | Engine | Score | Completed | Notes |
 | --- | ---: | ---: | --- |
-| MetalFish AB | 21/24 | 24/24 | CPU NNUE alpha-beta |
+| MetalFish AB | 21/24 | 24/24 | 8 workers, 4096 MB hash |
 | MetalFish Hybrid | 21/24 | 24/24 | 2 MCTS workers + 6 AB workers |
-| Stockfish reference | 20/24 | 24/24 | same `Threads`/`Hash` budget |
-| Lc0 with BT4 weights | 17/24 | 24/24 | Metal backend, `Threads=8` |
-| MetalFish MCTS | 12/24 | 23/24 | timed out on BK.24 with full-worker MCTS |
+| Stockfish reference | 20/24 | 24/24 | 8 workers, 4096 MB hash |
+| MetalFish MCTS | 20/24 | 24/24 | BT4 weights, one Apple MCTS worker |
+| Lc0 with BT4 weights | 17/24 | 24/24 | Metal backend, `Threads=8` in the strength run |
+
+A forced full-worker pure-MCTS stress run (`MCTSMaxThreads=8`) is not a
+strength profile for the current backend. It previously scored 12/24 and timed
+out on BK.24, which is why pure MCTS now caps Apple workers unless
+`MCTSParallelSearch=true` is set.
 
 This is a tactical-suite result only. It is useful for regression tracking, but
 it is not an Elo estimate.
