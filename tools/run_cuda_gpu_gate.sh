@@ -8,14 +8,49 @@ JOBS="${METALFISH_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 UCI_GO="${METALFISH_CUDA_UCI_GO:-nodes 8}"
 UCI_TIMEOUT="${METALFISH_CUDA_UCI_TIMEOUT:-180}"
 WEIGHTS="${METALFISH_NN_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-6147500.pb}"
+APT_LOCK_TIMEOUT="${METALFISH_APT_LOCK_TIMEOUT:-600}"
 
 export PATH="/usr/local/cuda/bin:/usr/local/cuda-12.9/bin:/usr/local/cuda-12.8/bin:/usr/local/cuda-12.4/bin:${PATH}"
 export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda-12.9/lib64:/usr/local/cuda-12.8/lib64:/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH:-}"
 
+wait_for_apt_locks() {
+  local deadline=$((SECONDS + APT_LOCK_TIMEOUT))
+  local locks=(
+    /var/lib/dpkg/lock-frontend
+    /var/lib/dpkg/lock
+    /var/lib/apt/lists/lock
+    /var/cache/apt/archives/lock
+  )
+
+  while command -v fuser >/dev/null 2>&1 &&
+        sudo fuser "${locks[@]}" >/dev/null 2>&1; do
+    if ((SECONDS >= deadline)); then
+      echo "timed out waiting for apt/dpkg locks" >&2
+      sudo fuser -v "${locks[@]}" >&2 || true
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+run_apt_get() {
+  local attempt
+  for attempt in 1 2 3; do
+    wait_for_apt_locks
+    if sudo apt-get "$@"; then
+      return 0
+    fi
+    if [[ "${attempt}" == "3" ]]; then
+      return 1
+    fi
+    sleep 10
+  done
+}
+
 if [[ "${METALFISH_INSTALL_DEPS:-0}" == "1" ]]; then
   export DEBIAN_FRONTEND=noninteractive
-  sudo apt-get update
-  sudo apt-get install -y \
+  run_apt_get update
+  run_apt_get install -y \
     build-essential \
     cmake \
     curl \
