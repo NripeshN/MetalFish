@@ -8,6 +8,7 @@
 #include "cuda_buffers.h"
 
 #include "cuda_runtime_probe.h"
+#include "cuda_workspace.h"
 
 #include <cuda_runtime_api.h>
 
@@ -51,27 +52,48 @@ void ValidateBatchSize(const CudaBufferLayout &layout, int batch_size) {
     throw std::runtime_error("CUDA buffer batch size is out of range");
 }
 
-void ClearDeviceFloats(float *ptr, size_t entries, const char *name) {
+void ClearDeviceFloats(float *ptr, size_t entries, const char *name,
+                       cudaStream_t stream) {
   if (entries == 0)
     return;
   if (!ptr)
     throw std::runtime_error(std::string("CUDA output buffer is missing: ") +
                              name);
-  const cudaError_t status = cudaMemset(ptr, 0, entries * sizeof(float));
+  cudaError_t status = cudaSuccess;
+  if (stream) {
+    status = cudaMemsetAsync(ptr, 0, entries * sizeof(float), stream);
+  } else {
+    status = cudaMemset(ptr, 0, entries * sizeof(float));
+  }
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
 
-void DownloadDeviceFloats(float *ptr, size_t entries, std::vector<float> &host,
-                          const char *name) {
+void DownloadDeviceFloats(const float *ptr, size_t entries,
+                          std::vector<float> &host, const char *name,
+                          cudaStream_t stream) {
   host.assign(entries, 0.0f);
   if (entries == 0)
     return;
   if (!ptr)
     throw std::runtime_error(std::string("CUDA output buffer is missing: ") +
                              name);
-  const cudaError_t status = cudaMemcpy(
-      host.data(), ptr, entries * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaError_t status = cudaSuccess;
+  if (stream) {
+    status = cudaMemcpyAsync(host.data(), ptr, entries * sizeof(float),
+                             cudaMemcpyDeviceToHost, stream);
+  } else {
+    status = cudaMemcpy(host.data(), ptr, entries * sizeof(float),
+                        cudaMemcpyDeviceToHost);
+  }
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage(name, status));
+}
+
+void SyncStream(cudaStream_t stream, const char *name) {
+  if (!stream)
+    return;
+  const cudaError_t status = cudaStreamSynchronize(stream);
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
@@ -195,7 +217,7 @@ void CudaInferenceBuffers::Allocate(const CudaBufferLayout &layout) {
 
 void CudaInferenceBuffers::UploadPackedInputs(
     const std::vector<std::uint64_t> &masks, const std::vector<float> &values,
-    int batch_size) {
+    int batch_size, cudaStream_t stream) {
   if (!input_masks || !input_values)
     throw std::runtime_error("CUDA inference buffers are not allocated");
   ValidateBatchSize(layout_, batch_size);
@@ -205,47 +227,63 @@ void CudaInferenceBuffers::UploadPackedInputs(
   if (masks.size() != entries || values.size() != entries)
     throw std::runtime_error("CUDA input upload size mismatch");
 
-  cudaError_t status =
-      cudaMemcpy(input_masks, masks.data(), entries * sizeof(std::uint64_t),
-                 cudaMemcpyHostToDevice);
+  cudaError_t status = cudaSuccess;
+  if (stream) {
+    status = cudaMemcpyAsync(input_masks, masks.data(),
+                             entries * sizeof(std::uint64_t),
+                             cudaMemcpyHostToDevice, stream);
+  } else {
+    status = cudaMemcpy(input_masks, masks.data(),
+                        entries * sizeof(std::uint64_t),
+                        cudaMemcpyHostToDevice);
+  }
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("cudaMemcpy(input_masks)", status));
 
-  status = cudaMemcpy(input_values, values.data(), entries * sizeof(float),
-                      cudaMemcpyHostToDevice);
+  if (stream) {
+    status = cudaMemcpyAsync(input_values, values.data(),
+                             entries * sizeof(float), cudaMemcpyHostToDevice,
+                             stream);
+  } else {
+    status = cudaMemcpy(input_values, values.data(), entries * sizeof(float),
+                        cudaMemcpyHostToDevice);
+  }
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("cudaMemcpy(input_values)", status));
 }
 
-void CudaInferenceBuffers::ClearOutputs(int batch_size) {
+void CudaInferenceBuffers::ClearOutputs(int batch_size, cudaStream_t stream) {
   ValidateBatchSize(layout_, batch_size);
   ClearDeviceFloats(policy, layout_.tensor_plan.PolicyEntries(batch_size),
-                    "cudaMemset(policy)");
+                    "cudaMemset(policy)", stream);
   ClearDeviceFloats(value, layout_.tensor_plan.ValueEntries(batch_size),
-                    "cudaMemset(value)");
+                    "cudaMemset(value)", stream);
   ClearDeviceFloats(moves_left,
                     layout_.tensor_plan.MovesLeftEntries(batch_size),
-                    "cudaMemset(moves_left)");
+                    "cudaMemset(moves_left)", stream);
   ClearDeviceFloats(raw_policy,
                     layout_.tensor_plan.RawPolicyEntries(batch_size),
-                    "cudaMemset(raw_policy)");
+                    "cudaMemset(raw_policy)", stream);
 }
 
-CudaOutputDownload CudaInferenceBuffers::DownloadOutputs(int batch_size) const {
+CudaOutputDownload
+CudaInferenceBuffers::DownloadOutputs(int batch_size,
+                                      cudaStream_t stream) const {
   ValidateBatchSize(layout_, batch_size);
   CudaOutputDownload output;
   DownloadDeviceFloats(policy, layout_.tensor_plan.PolicyEntries(batch_size),
-                       output.policy, "cudaMemcpy(policy)");
+                       output.policy, "cudaMemcpy(policy)", stream);
   DownloadDeviceFloats(value, layout_.tensor_plan.ValueEntries(batch_size),
-                       output.value, "cudaMemcpy(value)");
+                       output.value, "cudaMemcpy(value)", stream);
   DownloadDeviceFloats(moves_left,
                        layout_.tensor_plan.MovesLeftEntries(batch_size),
-                       output.moves_left, "cudaMemcpy(moves_left)");
+                       output.moves_left, "cudaMemcpy(moves_left)", stream);
   DownloadDeviceFloats(raw_policy,
                        layout_.tensor_plan.RawPolicyEntries(batch_size),
-                       output.raw_policy, "cudaMemcpy(raw_policy)");
+                       output.raw_policy, "cudaMemcpy(raw_policy)", stream);
+  SyncStream(stream, "cudaStreamSynchronize(download_outputs)");
   return output;
 }
 
@@ -287,7 +325,9 @@ CudaBufferSmokeResult RunInferenceBufferSmoke() {
   try {
     CudaInferenceBuffers buffers;
     buffers.Allocate(layout);
-    buffers.ClearOutputs(4);
+    CudaExecutionWorkspace workspace;
+    cudaStream_t stream = workspace.Stream();
+    buffers.ClearOutputs(4, stream);
     result.allocation_bytes = buffers.AllocationBytes();
     if (!buffers.input_masks || !buffers.input_values || !buffers.policy ||
         !buffers.value || !buffers.moves_left || !buffers.raw_policy ||
@@ -296,7 +336,7 @@ CudaBufferSmokeResult RunInferenceBufferSmoke() {
       result.message = "CUDA inference buffer layout mismatch";
       return result;
     }
-    const auto output = buffers.DownloadOutputs(4);
+    const auto output = buffers.DownloadOutputs(4, stream);
     if (output.policy.size() != layout.PolicyEntries() ||
         output.value.size() != layout.ValueEntries() ||
         output.moves_left.size() != layout.MovesLeftEntries() ||
@@ -342,7 +382,10 @@ CudaBufferSmokeResult RunPackedInputUploadSmokeRaw(const float *input) {
   try {
     CudaInferenceBuffers buffers;
     buffers.Allocate(layout);
-    buffers.UploadPackedInputs(masks, values, 1);
+    CudaExecutionWorkspace workspace;
+    cudaStream_t stream = workspace.Stream();
+    buffers.UploadPackedInputs(masks, values, 1, stream);
+    workspace.Synchronize();
     result.allocation_bytes = buffers.AllocationBytes();
 
     std::vector<std::uint64_t> actual_masks(masks.size());

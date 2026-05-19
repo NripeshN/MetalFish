@@ -221,18 +221,19 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   try {
     CudaInferenceBuffers buffers;
     buffers.Allocate(LayoutFromTensorPlan(plan, kBatch));
-    buffers.UploadPackedInputs(input_masks, input_values, kBatch);
-    buffers.ClearOutputs(kBatch);
+    CudaExecutionWorkspace workspace;
+    cudaStream_t stream = workspace.Stream();
+    buffers.UploadPackedInputs(input_masks, input_values, kBatch, stream);
+    buffers.ClearOutputs(kBatch, stream);
 
     CudaWeightBuffers weights;
     weights.Upload(inventory);
     auto executor = CreatePlanSmokeCudaExecutor();
-    CudaExecutionWorkspace workspace;
     executor->Execute(plan, execution_plan, weights, buffers, workspace,
                       kBatch);
 
     result.allocation_bytes = buffers.AllocationBytes();
-    const auto downloaded = buffers.DownloadOutputs(kBatch);
+    const auto downloaded = buffers.DownloadOutputs(kBatch, stream);
     if (downloaded.policy.size() != plan.PolicyEntries(kBatch) ||
         downloaded.raw_policy.size() != plan.RawPolicyEntries(kBatch)) {
       result.status = CudaSmokeStatus::Mismatch;

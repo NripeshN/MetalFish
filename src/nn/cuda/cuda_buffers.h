@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include <cuda_runtime_api.h>
+
 #include "../network_tensor_plan.h"
 #include "cuda_input_packing.h"
 
@@ -62,9 +64,11 @@ public:
 
   void Allocate(const CudaBufferLayout &layout);
   void UploadPackedInputs(const std::vector<std::uint64_t> &masks,
-                          const std::vector<float> &values, int batch_size);
-  void ClearOutputs(int batch_size);
-  CudaOutputDownload DownloadOutputs(int batch_size) const;
+                          const std::vector<float> &values, int batch_size,
+                          cudaStream_t stream = nullptr);
+  void ClearOutputs(int batch_size, cudaStream_t stream = nullptr);
+  CudaOutputDownload DownloadOutputs(int batch_size,
+                                     cudaStream_t stream = nullptr) const;
   void Release();
 
   const CudaBufferLayout &Layout() const { return layout_; }
