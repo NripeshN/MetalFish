@@ -9,6 +9,7 @@
 
 #include "cuda_execution_schedule.h"
 #include "cuda_kernels.h"
+#include "cuda_plan_analysis.h"
 
 #include <cstddef>
 #include <sstream>
@@ -55,56 +56,6 @@ void RequireLayerNormTensors(const NetworkResolvedExecutionStep &norm) {
       norm.tensors.size() < 2) {
     throw std::runtime_error("CUDA layernorm stage has missing tensors");
   }
-}
-
-bool StartsWith(std::string_view value, std::string_view prefix) {
-  return value.size() >= prefix.size() &&
-         value.substr(0, prefix.size()) == prefix;
-}
-
-bool IsDenseStage(CudaExecutionScheduleKind kind) {
-  return kind == CudaExecutionScheduleKind::DenseActivationStage ||
-         kind == CudaExecutionScheduleKind::DenseLayerNormStage;
-}
-
-std::string HeadPrefix(const NetworkResolvedExecutionPlan &execution_plan,
-                       std::string_view head) {
-  if (head == "policy")
-    return "policy." + execution_plan.policy_head + ".";
-  if (head == "value")
-    return "value." + execution_plan.value_head + ".";
-  if (head == "moves_left")
-    return "moves_left.";
-  return {};
-}
-
-std::string StageHead(const NetworkResolvedExecutionPlan &execution_plan,
-                      std::string_view stage_name) {
-  const std::string policy = HeadPrefix(execution_plan, "policy");
-  if (!policy.empty() && StartsWith(stage_name, policy))
-    return "policy";
-  const std::string value = HeadPrefix(execution_plan, "value");
-  if (!value.empty() && StartsWith(stage_name, value))
-    return "value";
-  const std::string moves_left = HeadPrefix(execution_plan, "moves_left");
-  if (!moves_left.empty() && StartsWith(stage_name, moves_left))
-    return "moves_left";
-  return {};
-}
-
-std::string LastBodyStageName(const NetworkResolvedExecutionPlan &execution_plan,
-                              const CudaExecutionSchedule &schedule) {
-  std::string last_body_stage;
-  for (const auto &entry : schedule.entries) {
-    if (!IsDenseStage(entry.kind) ||
-        entry.first_step >= execution_plan.steps.size()) {
-      continue;
-    }
-    const auto &step = execution_plan.steps[entry.first_step];
-    if (StartsWith(step.name, "body."))
-      last_body_stage = step.name;
-  }
-  return last_body_stage;
 }
 
 } // namespace
@@ -173,7 +124,8 @@ CudaStageInputBindings CreateCudaStageInputBindings(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaExecutionSchedule &schedule) {
   CudaStageInputBindings bindings;
-  const std::string body_stage = LastBodyStageName(execution_plan, schedule);
+  const std::string body_stage = LastCudaDenseStageInGroup(
+      execution_plan, schedule, CudaPlanStageGroup::Body);
   if (body_stage.empty())
     return bindings;
 
@@ -181,21 +133,19 @@ CudaStageInputBindings CreateCudaStageInputBindings(
   bool value_bound = false;
   bool moves_left_bound = false;
   for (const auto &entry : schedule.entries) {
-    if (!IsDenseStage(entry.kind) ||
+    if (!IsCudaDenseScheduleEntry(entry.kind) ||
         entry.first_step >= execution_plan.steps.size()) {
       continue;
     }
     const auto &step = execution_plan.steps[entry.first_step];
-    const std::string head = StageHead(execution_plan, step.name);
-    if (head.empty())
-      continue;
-
+    const CudaPlanStageGroup group =
+        ClassifyCudaPlanStage(execution_plan, step.name);
     bool *seen = nullptr;
-    if (head == "policy")
+    if (group == CudaPlanStageGroup::Policy)
       seen = &policy_bound;
-    else if (head == "value")
+    else if (group == CudaPlanStageGroup::Value)
       seen = &value_bound;
-    else if (head == "moves_left")
+    else if (group == CudaPlanStageGroup::MovesLeft)
       seen = &moves_left_bound;
 
     if (seen && !*seen) {

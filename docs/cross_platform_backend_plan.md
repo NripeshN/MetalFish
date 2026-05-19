@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `b5ca0673-3dd8-408f-87af-96f6f85076f0` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `ab8a64c1-7d33-45b4-be65-b8390b07bfe9` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `158de937-91b8-4c8e-9e1a-76f0e2e6f08b` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `aeca6b3f-1450-4702-aa9f-25d6226e2a9d` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -116,6 +116,10 @@ Current CUDA backend boundary:
   supported dense/activation stages, supported dense/layernorm stages,
   CUDA-managed boundaries, and explicit unsupported operations before any
   kernels launch.
+- `src/nn/cuda/cuda_plan_analysis.*` provides the shared CUDA-local view of
+  resolved stage groups, dense stage widths, value-error exclusion, and last
+  body/head stage discovery. Stage execution and output mapping use this helper
+  so head branching and output source selection stay aligned.
 - `src/nn/cuda/cuda_stage_executor.*` owns reusable dense/activation/layernorm
   stage execution and strided device-row copies, so smoke and production CUDA
   executors share the same launch path. It derives CUDA-local stage input

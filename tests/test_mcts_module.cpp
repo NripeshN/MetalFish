@@ -27,6 +27,7 @@
 #include "nn/cuda/cuda_input_packing.h"
 #include "nn/cuda/cuda_kernels.h"
 #include "nn/cuda/cuda_output_mapping.h"
+#include "nn/cuda/cuda_plan_analysis.h"
 #include "nn/cuda/cuda_runtime_probe.h"
 #include "nn/cuda/cuda_weight_buffers.h"
 #include "nn/cuda/cuda_workspace.h"
@@ -875,6 +876,20 @@ void test_cuda_output_mapping(TestCounter &tc) {
       }});
 
   const auto schedule = NN::Cuda::CreateCudaExecutionSchedule(plan);
+  expect(NN::Cuda::ClassifyCudaPlanStage(plan, "policy.smoke.output") ==
+             NN::Cuda::CudaPlanStageGroup::Policy,
+         "CUDA plan analysis should classify selected policy head stages", tc);
+  expect(NN::Cuda::ClassifyCudaPlanStage(plan, "value.smoke.dense2") ==
+             NN::Cuda::CudaPlanStageGroup::Value,
+         "CUDA plan analysis should classify selected value head stages", tc);
+  expect(NN::Cuda::ClassifyCudaPlanStage(plan, "moves_left.output") ==
+             NN::Cuda::CudaPlanStageGroup::MovesLeft,
+         "CUDA plan analysis should classify moves-left stages", tc);
+  expect(NN::Cuda::ClassifyCudaPlanStage(plan, "policy.other.output") ==
+             NN::Cuda::CudaPlanStageGroup::Other,
+         "CUDA plan analysis should reject non-selected policy heads", tc);
+  expect(NN::Cuda::CudaDenseStageWidth(plan, schedule.entries[0]) == 2,
+         "CUDA plan analysis should expose dense stage output width", tc);
   NN::Cuda::CudaOutputMappingOptions options;
   options.allow_partial_policy_rows = true;
   options.allow_partial_raw_policy_rows = true;

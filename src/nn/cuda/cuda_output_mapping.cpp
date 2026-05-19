@@ -7,58 +7,17 @@
 
 #include "cuda_output_mapping.h"
 
+#include "cuda_plan_analysis.h"
+
 #include <cstddef>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 
 namespace MetalFish {
 namespace NN {
 namespace Cuda {
 namespace {
-
-bool IsDenseStage(CudaExecutionScheduleKind kind) {
-  return kind == CudaExecutionScheduleKind::DenseActivationStage ||
-         kind == CudaExecutionScheduleKind::DenseLayerNormStage;
-}
-
-bool StartsWith(std::string_view value, std::string_view prefix) {
-  return value.size() >= prefix.size() &&
-         value.substr(0, prefix.size()) == prefix;
-}
-
-bool EndsWith(std::string_view value, std::string_view suffix) {
-  return value.size() >= suffix.size() &&
-         value.substr(value.size() - suffix.size()) == suffix;
-}
-
-const CudaExecutionScheduleEntry *
-FindStageEntry(const NetworkResolvedExecutionPlan &execution_plan,
-               const CudaExecutionSchedule &schedule,
-               std::string_view stage_name) {
-  for (const auto &entry : schedule.entries) {
-    if (!IsDenseStage(entry.kind))
-      continue;
-    if (entry.first_step >= execution_plan.steps.size())
-      continue;
-    if (execution_plan.steps[entry.first_step].name == stage_name)
-      return &entry;
-  }
-  return nullptr;
-}
-
-int DenseStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
-                    const CudaExecutionScheduleEntry &entry) {
-  if (entry.first_step >= execution_plan.steps.size())
-    throw std::runtime_error("CUDA output mapping stage index is invalid");
-  const auto &step = execution_plan.steps[entry.first_step];
-  if (step.kind != NetworkExecutionOpKind::Dense || step.tensors.empty() ||
-      step.tensors[0].dims.size() != 2) {
-    throw std::runtime_error("CUDA output mapping stage tensor is invalid");
-  }
-  return static_cast<int>(step.tensors[0].dims[0]);
-}
 
 float *TargetPointer(CudaInferenceBuffers &buffers, CudaOutputTarget target) {
   switch (target) {
@@ -118,21 +77,21 @@ std::string SelectCompatibleStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaExecutionSchedule &schedule,
     const CudaOutputMappingOptions &options, CudaOutputTarget target,
-    std::string_view prefix, bool first_match) {
+    CudaPlanStageGroup group, bool first_match) {
   const int target_stride = TargetStride(tensor_plan, target);
   std::string selected;
   for (const auto &entry : schedule.entries) {
-    if (!IsDenseStage(entry.kind) ||
+    if (!IsCudaDenseScheduleEntry(entry.kind) ||
         entry.first_step >= execution_plan.steps.size()) {
       continue;
     }
     const auto &step = execution_plan.steps[entry.first_step];
-    if (!StartsWith(step.name, prefix))
+    if (ClassifyCudaPlanStage(execution_plan, step.name) != group)
       continue;
-    if (target == CudaOutputTarget::Value && EndsWith(step.name, ".error"))
+    if (target == CudaOutputTarget::Value && IsCudaValueErrorStage(step.name))
       continue;
 
-    const int source_width = DenseStageWidth(execution_plan, entry);
+    const int source_width = CudaDenseStageWidth(execution_plan, entry);
     if (!StageWidthFitsTarget(source_width, target_stride, target, options))
       continue;
 
@@ -169,7 +128,8 @@ void AddBinding(CudaOutputMapping &mapping,
     return;
   }
 
-  const auto *entry = FindStageEntry(execution_plan, schedule, source_stage);
+  const auto *entry =
+      FindCudaStageEntry(execution_plan, schedule, source_stage);
   if (!entry) {
     if (required) {
       AddError(mapping, "missing CUDA output source for " +
@@ -179,7 +139,7 @@ void AddBinding(CudaOutputMapping &mapping,
     return;
   }
 
-  const int source_width = DenseStageWidth(execution_plan, *entry);
+  const int source_width = CudaDenseStageWidth(execution_plan, *entry);
   const bool partial = AllowsPartialRows(target, options);
   if (source_width > target_stride ||
       (!partial && source_width != target_stride)) {
@@ -193,14 +153,6 @@ void AddBinding(CudaOutputMapping &mapping,
 
   mapping.bindings.push_back(
       CudaOutputBinding{target, source_stage, source_width, target_stride});
-}
-
-std::string PolicyPrefix(const NetworkResolvedExecutionPlan &plan) {
-  return "policy." + plan.policy_head + ".";
-}
-
-std::string ValuePrefix(const NetworkResolvedExecutionPlan &plan) {
-  return "value." + plan.value_head + ".";
 }
 
 } // namespace
@@ -253,10 +205,10 @@ CudaOutputMapping CreateCudaOutputMapping(
 
   const std::string policy_source = SelectCompatibleStage(
       tensor_plan, execution_plan, schedule, options, CudaOutputTarget::Policy,
-      PolicyPrefix(execution_plan), true);
+      CudaPlanStageGroup::Policy, true);
   const std::string value_source = SelectCompatibleStage(
       tensor_plan, execution_plan, schedule, options, CudaOutputTarget::Value,
-      ValuePrefix(execution_plan), false);
+      CudaPlanStageGroup::Value, false);
   AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
              CudaOutputTarget::Policy, policy_source, true);
   AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
@@ -264,7 +216,7 @@ CudaOutputMapping CreateCudaOutputMapping(
   if (tensor_plan.moves_left) {
     const std::string moves_left_source = SelectCompatibleStage(
         tensor_plan, execution_plan, schedule, options,
-        CudaOutputTarget::MovesLeft, "moves_left.", false);
+        CudaOutputTarget::MovesLeft, CudaPlanStageGroup::MovesLeft, false);
     AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
                CudaOutputTarget::MovesLeft, moves_left_source, true);
   }
