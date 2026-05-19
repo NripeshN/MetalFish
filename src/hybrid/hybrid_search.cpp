@@ -556,6 +556,34 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
   return value_gap_confident || compact_root_confident;
 }
 
+bool HybridMCTSCrossRootConfidenceOverride(
+    bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
+    uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_in_ab_rank,
+    int mcts_in_ab_score, int mcts_average_score, uint64_t mcts_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
+    float mcts_q) {
+  if (!fixed_budget || !mcts_strong || mcts_total_nodes < 250 ||
+      mcts_visits < 180 || visit_share < 0.62f || root_q_gap < 0.12f ||
+      mcts_cp < 170 || eval_delta < 40) {
+    return false;
+  }
+
+  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 4 ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_effort < 100000) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 80)
+    return false;
+
+  if (ab_in_mcts_rank < 4 || ab_in_mcts_visits == 0)
+    return false;
+
+  return mcts_visits >= 3 * std::max<uint32_t>(1, ab_in_mcts_visits) &&
+         mcts_q - ab_in_mcts_q >= 0.20f;
+}
+
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits) {
   if (mcts_playouts == 0) {
@@ -1896,6 +1924,7 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool ab_has_clear_preference = ab_verified && std::abs(ab_score) >= 15;
   const ABRootLookup ab_in_ab = find_ab_root_move(ab_best);
   const ABRootLookup mcts_in_ab = find_ab_root_move(mcts_best);
+  const MCTSRootLookup ab_in_mcts = find_mcts_root_move(ab_best);
   const bool ab_root_rejects_mcts = HybridABRootRejectsMCTS(
       ab_verified, ab_in_ab.rank, mcts_in_ab.rank, ab_in_ab.average_score,
       mcts_in_ab.average_score, ab_in_ab.effort, mcts_in_ab.effort,
@@ -1926,6 +1955,14 @@ Move ParallelHybridSearch::make_final_decision() {
       HybridMCTSRootConfidenceFixedBudgetOverride(
           mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
           mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta);
+  const bool mcts_cross_root_confidence_fixed_budget =
+      mcts_visit_evidence_sane &&
+      HybridMCTSCrossRootConfidenceOverride(
+          mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          ab_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.average_score, mcts_in_ab.effort, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   bool mcts_root_rejects_ab = false;
   {
     const int top_count =
@@ -1963,7 +2000,9 @@ Move ParallelHybridSearch::make_final_decision() {
     }
   }
   const bool mcts_override_allowed =
-      !ab_root_rejects_mcts || (mcts_overwhelming && eval_delta >= 250);
+      !ab_root_rejects_mcts ||
+      mcts_cross_root_confidence_fixed_budget ||
+      (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
@@ -2000,6 +2039,9 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_root_confidence_fixed_budget";
+    } else if (mcts_cross_root_confidence_fixed_budget) {
+      choose_mcts = true;
+      reason = "mcts_cross_root_confidence_fixed_budget";
     } else if (mcts_root_rejects_ab) {
       choose_mcts = true;
       reason = "mcts_root_rejects_ab";
@@ -2041,6 +2083,8 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSRootDominant=" << (mcts_root_dominant_fixed_budget ? 1 : 0)
        << " MCTSTacticalGap=" << (mcts_tactical_gap_fixed_budget ? 1 : 0)
        << " MCTSRootConfidence=" << (mcts_root_confidence_fixed_budget ? 1 : 0)
+       << " MCTSCrossRootConfidence="
+       << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
        << " ABVerified=" << (ab_verified ? 1 : 0)
        << " ABClearPreference=" << (ab_has_clear_preference ? 1 : 0)

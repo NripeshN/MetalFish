@@ -498,6 +498,8 @@ void test_hybrid_config() {
     TestCase tc("AB root rejection blocks low-effort MCTS blunders");
 
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
+                                       -447));
+    EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
                                        -32001));
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 4, -432, -436, 25349399, 1663,
                                        -32001));
@@ -507,6 +509,22 @@ void test_hybrid_config() {
                                         2523397, -401));
     EXPECT(tc, !HybridABRootRejectsMCTS(true, 1, 4, -410, -425, 2523397,
                                         2200000, -420));
+  }
+  {
+    TestCase tc("Fixed-budget cross-root MCTS override predicate");
+
+    EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
+                   -32001, 585, 1339424, 5, 16, 0.372f, 0.634f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
+                   580, 585, 1339424, 5, 16, 0.372f, 0.634f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 700, 2,
+                   -32001, 585, 1339424, 5, 16, 0.372f, 0.634f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
+                   -32001, 585, 1339424, 2, 80, 0.520f, 0.634f));
   }
   {
     TestCase tc("Root Q gap ignores unvisited placeholders");
