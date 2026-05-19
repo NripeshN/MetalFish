@@ -79,7 +79,6 @@ void set_test_float_layer(MetalFishNN::Weights::Layer *layer) {
   layer->add_dims(1);
 }
 
-#ifdef USE_CUDA
 std::size_t
 find_resolved_step_index(const NN::NetworkResolvedExecutionPlan &plan,
                          const std::string &name) {
@@ -89,7 +88,6 @@ find_resolved_step_index(const NN::NetworkResolvedExecutionPlan &plan,
   }
   throw std::runtime_error("missing resolved execution step: " + name);
 }
-#endif
 
 NN::WeightsFile make_minimal_attention_weights_file() {
   NN::WeightsFile file;
@@ -514,6 +512,48 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_resolved_plan.steps.front().kind ==
              NN::NetworkExecutionOpKind::InputPack,
          "resolved execution plan should start with input packing", tc);
+  auto find_tensor_suffix =
+      [&](const std::string &step_name,
+          const std::string &suffix) -> const NN::NetworkResolvedTensorRef * {
+    const auto &step =
+        loaded_resolved_plan.steps[find_resolved_step_index(loaded_resolved_plan,
+                                                            step_name)];
+    for (const auto &tensor : step.tensors) {
+      if (tensor.name.size() >= suffix.size() &&
+          tensor.name.substr(tensor.name.size() - suffix.size()) == suffix) {
+        return &tensor;
+      }
+    }
+    return nullptr;
+  };
+  auto expect_dims = [&](const std::string &step_name,
+                         const std::string &suffix,
+                         std::vector<std::uint32_t> dims, const char *msg) {
+    const auto *tensor = find_tensor_suffix(step_name, suffix);
+    expect(tensor && tensor->dims == dims, msg, tc);
+  };
+  expect_dims("body.input_embedding_preprocess", "_w", {32768, 768},
+              "resolved BT4 dynamic PE dense should infer flattened input "
+              "shape");
+  expect_dims("body.input_embedding", "_w", {1024, 624},
+              "resolved BT4 input embedding should infer post-PE channel "
+              "shape");
+  expect_dims("body.encoder.0.mha", ".q_w", {1024, 1024},
+              "resolved BT4 attention query should infer model width");
+  const auto *smolgen_compress =
+      find_tensor_suffix("body.encoder.0.mha.smolgen.dense", ".compress");
+  expect(smolgen_compress && smolgen_compress->dims.size() == 2 &&
+             smolgen_compress->dims[1] == 1024,
+         "resolved BT4 smolgen compress should infer parent width", tc);
+  const auto *global_smolgen =
+      find_tensor_suffix("body.smolgen_positional", "body.smolgen_w");
+  expect(global_smolgen && global_smolgen->dims.size() == 2 &&
+             global_smolgen->dims[0] == 4096,
+         "resolved BT4 global smolgen should infer 64x64 rows", tc);
+  expect_dims("policy." + loaded_policy_head + ".policy_map", "ip4_pol_w",
+              {4, 1024},
+              "resolved BT4 attention policy promotion weights should infer "
+              "promotion rows");
 #ifdef USE_CUDA
   const auto loaded_cuda_schedule =
       NN::Cuda::CreateCudaExecutionSchedule(loaded_resolved_plan);

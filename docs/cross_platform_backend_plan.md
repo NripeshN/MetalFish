@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `bed42a44-ea4c-4c59-80c8-18ee7ac0d6c0` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `27ad1a9c-b02a-41a8-b88d-349a9925f1c0` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `14d12a05-dabc-4e32-99d2-d0726b4fd392` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `421183b0-65c9-4f4c-92b0-a43b1ce4d7a4` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -94,6 +94,9 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_executor.*` is the inference execution seam.
 - `src/nn/network_execution_plan.*` builds the shared ordered and resolved
   tensor/stage plan that CUDA and future portable backends will execute.
+  Resolution now infers dense, attention, feed-forward, smolgen, positional,
+  and attention-policy matrix shapes from flat BT4 protobuf tensors while
+  preserving explicit tensor dimensions when present.
 - The CUDA executor seam receives the resolved plan and uploaded weight buffers,
   so real kernels can index device tensors without backend-local name lookups.
 - `src/nn/cuda/cuda_kernels.*` contains tested CUDA compute primitives for
