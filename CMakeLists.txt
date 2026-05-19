@@ -249,6 +249,7 @@ if(USE_CUDA)
       src/nn/cuda/cuda_null_executor_smoke.cpp
       src/nn/cuda/cuda_runtime_probe.cu
       src/nn/cuda/cuda_input_packing.cu
+      src/nn/cuda/cuda_kernels.cu
       src/nn/cuda/cuda_buffers.cu
       src/nn/cuda/cuda_weight_buffers.cu)
   set(METALFISH_CUDA_LIBS CUDA::cudart)

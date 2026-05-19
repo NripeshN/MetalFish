@@ -23,6 +23,7 @@
 #ifdef USE_CUDA
 #include "nn/cuda/cuda_buffers.h"
 #include "nn/cuda/cuda_input_packing.h"
+#include "nn/cuda/cuda_kernels.h"
 #include "nn/cuda/cuda_runtime_probe.h"
 #include "nn/cuda/cuda_weight_buffers.h"
 #endif
@@ -769,6 +770,16 @@ void test_cuda_weight_upload(TestCounter &tc) {
            "CUDA weight upload should preserve tensor count", tc);
   }
 }
+
+void test_cuda_dense_kernels(TestCounter &tc) {
+  std::cout << "  CUDA dense kernels..." << std::endl;
+
+  auto smoke = NN::Cuda::RunDenseAffineKernelSmoke();
+  std::cout << "    " << smoke.message << std::endl;
+  expect(smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA dense affine kernel should pass or skip without a device", tc);
+}
 #endif
 
 void test_lc0_stoppers(TestCounter &tc) {
@@ -1433,6 +1444,7 @@ bool test_mcts_all() {
   test_cuda_input_packing(tc);
   test_cuda_inference_buffers(tc);
   test_cuda_weight_upload(tc);
+  test_cuda_dense_kernels(tc);
 #endif
   test_lc0_stoppers(tc);
   test_solid_tree_repairs_child_parents(tc);
