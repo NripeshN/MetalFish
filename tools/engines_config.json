@@ -57,7 +57,10 @@
         "HybridMCTSABRootHints": "true",
         "HybridMCTSABRootHintDelayMs": "25",
         "HybridMCTSABRootHintCount": "4",
+        "HybridABCandidateVerifyMs": "120",
+        "HybridABCandidateVerifyCount": "4",
         "HybridABPolicyWeight": "0.0",
+        "HybridRootPawnLeverTieBreak": "true",
         "HybridTrace": "false"
       }
     },

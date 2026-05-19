@@ -245,6 +245,9 @@ void test_hybrid_config() {
     EXPECT(tc, config.mcts_ab_root_hints);
     EXPECT(tc, config.mcts_ab_root_hint_delay_ms == 25);
     EXPECT(tc, config.mcts_ab_root_hint_count == 4);
+    EXPECT(tc, config.ab_candidate_verify_ms == 120);
+    EXPECT(tc, config.ab_candidate_verify_count == 4);
+    EXPECT(tc, config.root_pawn_lever_tiebreak);
   }
   {
     TestCase tc("Transformer batching settings");
@@ -316,6 +319,26 @@ void test_hybrid_config() {
     EXPECT(tc, mcts_limits.time[WHITE] == 30000);
     EXPECT(tc, mcts_limits.inc[WHITE] == 1000);
     EXPECT(tc, mcts_limits.searchmoves.size() == 1);
+  }
+  {
+    TestCase tc("AB candidate verification budget");
+    ::MetalFish::Search::LimitsType limits;
+
+    limits.movetime = 5000;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 150, false) ==
+                   150);
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 1000, false) ==
+                   833);
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 150, true) == 0);
+
+    limits = ::MetalFish::Search::LimitsType();
+    limits.time[WHITE] = 30000;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 4000, 600, false) ==
+                   500);
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 999, 100, false) == 0);
+
+    limits.nodes = 1000;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 4000, 100, false) == 0);
   }
   {
     TestCase tc("Fixed-budget decisive MCTS override predicate");
@@ -444,6 +467,24 @@ void test_hybrid_config() {
                                          0.705f, 0.410f));
   }
   {
+    TestCase tc("Pawn lever root tie-break classifier");
+
+    Position pos;
+    StateInfo st;
+    pos.set(
+        "2q1rr1k/3bbnnp/p2p1pp1/2pPp3/PpP1P1P1/1P2BNNP/2BQ1PRK/7R b - -",
+        false, &st);
+    EXPECT(tc, HybridIsPawnLever(pos, UCIEngine::to_move(pos, "f6f5")));
+    EXPECT(tc, !HybridIsPawnLever(pos, UCIEngine::to_move(pos, "e7d8")));
+    EXPECT(tc, !HybridIsPawnLever(pos, UCIEngine::to_move(pos, "a6a5")));
+
+    pos.set(
+        "r2q1rk1/1ppnbppp/p2p1nb1/3Pp3/2P1P1P1/2N2N1P/PPB1QP2/R1B2RK1 b - -",
+        false, &st);
+    EXPECT(tc, HybridIsPawnLever(pos, UCIEngine::to_move(pos, "h7h5")));
+    EXPECT(tc, !HybridIsPawnLever(pos, UCIEngine::to_move(pos, "c7c6")));
+  }
+  {
     TestCase tc("MCTS visit evidence handles cache-heavy playouts");
 
     EXPECT(tc, HybridMCTSVisitEvidenceSane(270, 260, 270, 140));
@@ -457,6 +498,8 @@ void test_hybrid_config() {
     TestCase tc("AB root rejection blocks low-effort MCTS blunders");
 
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
+                                       -447));
+    EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
                                        -32001));
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 4, -432, -436, 25349399, 1663,
                                        -32001));
@@ -466,6 +509,28 @@ void test_hybrid_config() {
                                         2523397, -401));
     EXPECT(tc, !HybridABRootRejectsMCTS(true, 1, 4, -410, -425, 2523397,
                                         2200000, -420));
+  }
+  {
+    TestCase tc("Fixed-budget cross-root MCTS override predicate");
+
+    EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
+                   -32001, 585, 1339424, 5, 16, 0.372f, 0.634f));
+    EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 265, 175, 0.660f, 0.145f, 226, 55, 619, 2,
+                   -32001, 564, 2095896, 5, 16, 0.372f, 0.638f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 265, 169, 0.660f, 0.145f, 226, 55, 619, 2,
+                   -32001, 564, 2095896, 5, 16, 0.372f, 0.638f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
+                   580, 585, 1339424, 5, 16, 0.372f, 0.634f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 700, 2,
+                   -32001, 585, 1339424, 5, 16, 0.372f, 0.634f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
+                   -32001, 585, 1339424, 2, 80, 0.520f, 0.634f));
   }
   {
     TestCase tc("Root Q gap ignores unvisited placeholders");

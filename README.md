@@ -81,6 +81,10 @@ BK.09 and BK.17; Stockfish and Lc0 also missed those two positions in matching
 5-second spot checks, so they are tracked as hard-suite misses rather than
 hybrid coordinator regressions.
 
+Current hybrid-only paper-harness sanity run on this branch, M2 Max,
+2026-05-19, 5 seconds per position: `21/24` with the updated 1 MCTS + 7 AB
+split and `HybridABCandidateVerifyMs=120`.
+
 A forced full-worker pure-MCTS stress run (`MCTSMaxThreads=8`) is not a
 strength profile for the current backend. It previously scored 12/24 and timed
 out on BK.24, which is why pure MCTS now caps Apple workers unless
@@ -174,6 +178,7 @@ setoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb
 setoption name Threads value 8
 setoption name Hash value 4096
 setoption name Ponder value true
+setoption name HybridABCandidateVerifyMs value 120
 isready
 position startpos
 go movetime 5000
