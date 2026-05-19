@@ -370,7 +370,10 @@ HYBRID_ENV_OPTION_OVERRIDES = {
     "HYBRID_MCTS_AB_ROOT_HINTS": "HybridMCTSABRootHints",
     "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "HybridMCTSABRootHintDelayMs",
     "HYBRID_MCTS_AB_ROOT_HINT_COUNT": "HybridMCTSABRootHintCount",
+    "HYBRID_AB_CANDIDATE_VERIFY_MS": "HybridABCandidateVerifyMs",
+    "HYBRID_AB_CANDIDATE_VERIFY_COUNT": "HybridABCandidateVerifyCount",
     "HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight",
+    "HYBRID_ROOT_PAWN_LEVER_TIEBREAK": "HybridRootPawnLeverTieBreak",
     "HYBRID_TRACE": "HybridTrace",
     "HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize",
     "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor",
@@ -391,14 +394,16 @@ def apply_hybrid_env_options(options: Dict[str, str]) -> None:
         value = env_option(env_name)
         if value is not None:
             options[option_name] = value
+    if "HybridMCTSThreads" in options:
+        options["MCTSMaxThreads"] = options["HybridMCTSThreads"]
 
 
 def hybrid_split_for_threads(threads: int) -> Tuple[int, int]:
     if threads <= 3:
         return 1, max(1, threads - 1)
-    # Keep the transformer side present while giving the CPU AB search most of
-    # the worker budget. On an 8-performance-core M2 Max this becomes 2 + 6.
-    mcts_threads = min(2, max(1, threads // 4))
+    # Keep the transformer side present while giving AB the CPU budget it needs
+    # for tactical verification. On an 8-performance-core M2 Max this is 1 + 7.
+    mcts_threads = 1
     return mcts_threads, max(1, threads - mcts_threads)
 
 
@@ -480,7 +485,10 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "HybridMCTSABRootHints": "true",
             "HybridMCTSABRootHintDelayMs": "25",
             "HybridMCTSABRootHintCount": "4",
+            "HybridABCandidateVerifyMs": "120",
+            "HybridABCandidateVerifyCount": "4",
             "HybridABPolicyWeight": "0.0",
+            "HybridRootPawnLeverTieBreak": "true",
             "HybridTrace": "false",
         },
     )
@@ -553,21 +561,73 @@ def config_with_thread_count(cfg: EngineConfig, threads: int) -> EngineConfig:
     )
 
 
+ENGINE_ID_ALIASES = {
+    "ab": "metalfish-ab",
+    "mcts": "metalfish-mcts",
+    "hybrid": "metalfish-hybrid",
+    "metalfish": "metalfish-hybrid",
+}
+
+
+def normalize_engine_id(raw: str) -> str:
+    token = raw.strip()
+    return ENGINE_ID_ALIASES.get(token, token)
+
+
 def parse_engine_ids(raw: str) -> Optional[List[str]]:
     if not raw:
         return None
-    aliases = {
-        "ab": "metalfish-ab",
-        "mcts": "metalfish-mcts",
-        "hybrid": "metalfish-hybrid",
-        "metalfish": "metalfish-hybrid",
-    }
     ids = []
     for item in raw.replace(",", " ").split():
-        eid = aliases.get(item, item)
+        eid = normalize_engine_id(item)
         if eid not in ids:
             ids.append(eid)
     return ids or None
+
+
+def parse_tactical_fail_under(
+    raw: str, selected_engine_ids: Optional[List[str]]
+) -> Dict[str, int]:
+    if not raw:
+        return {}
+
+    tokens = [token for token in raw.replace(",", " ").split() if token]
+    if not tokens:
+        return {}
+
+    def parse_score(token: str) -> int:
+        try:
+            value = int(token)
+        except ValueError as exc:
+            raise ValueError(f"invalid tactical fail-under score: {token!r}") from exc
+        if not 0 <= value <= len(BK_POSITIONS):
+            raise ValueError(
+                f"tactical fail-under score must be between 0 and {len(BK_POSITIONS)}"
+            )
+        return value
+
+    if all("=" not in token for token in tokens):
+        if len(tokens) != 1:
+            raise ValueError(
+                "use a single score or engine=score pairs for --tactical-fail-under"
+            )
+        score = parse_score(tokens[0])
+        if selected_engine_ids:
+            return {eid: score for eid in selected_engine_ids}
+        return {"*": score}
+
+    thresholds: Dict[str, int] = {}
+    for token in tokens:
+        if "=" not in token:
+            raise ValueError(
+                "mixing bare scores and engine=score pairs is not supported"
+            )
+        engine_id, score_text = token.split("=", 1)
+        engine_id = normalize_engine_id(engine_id)
+        if not engine_id:
+            raise ValueError(f"missing engine id in fail-under token: {token!r}")
+        thresholds[engine_id] = parse_score(score_text)
+    return thresholds
 
 
 def parse_thread_counts(raw: str) -> List[int]:
@@ -817,6 +877,36 @@ def run_tactical(
             print(f"  Agreement {a} vs {b}: {agree}/{len(tactical_positions)}")
 
     return results
+
+
+def enforce_tactical_fail_under(
+    results: dict, thresholds: Dict[str, int]
+) -> List[str]:
+    if not thresholds:
+        return []
+
+    engines = results.get("engines", {})
+    if "*" in thresholds:
+        items = [(eid, thresholds["*"]) for eid in engines]
+    else:
+        items = list(thresholds.items())
+
+    failures = []
+    for eid, threshold in items:
+        data = engines.get(eid)
+        if not data:
+            failures.append(f"{eid}=missing (floor {threshold})")
+            continue
+        if not data.get("complete", False):
+            completed = data.get("completed", 0)
+            total = data.get("total", len(BK_POSITIONS))
+            failures.append(f"{eid}=incomplete {completed}/{total} (floor {threshold})")
+            continue
+        score = int(data.get("score", 0))
+        if score < threshold:
+            total = data.get("total", len(BK_POSITIONS))
+            failures.append(f"{eid}={score}/{total} (floor {threshold})")
+    return failures
 
 
 def run_nps(
@@ -1360,6 +1450,15 @@ def main() -> int:
         help="Optional comma/space-separated engine IDs to benchmark",
     )
     parser.add_argument(
+        "--tactical-fail-under",
+        type=str,
+        default="",
+        help=(
+            "Fail tactical runs below a floor. Use SCORE for selected engines "
+            "or engine=SCORE pairs, e.g. hybrid=21,mcts=12."
+        ),
+    )
+    parser.add_argument(
         "--positions",
         type=str,
         default="",
@@ -1376,16 +1475,19 @@ def main() -> int:
     hash_mb = parse_hash_mb(args.hash)
     RESULTS_DIR.mkdir(exist_ok=True)
     all_results: Dict[str, dict] = {}
+    exit_code = 0
 
     primary_threads = thread_counts[0] if len(thread_counts) == 1 else thread_counts[-1]
     resources = resource_policy(primary_threads, hash_mb)
     engines = detect_engines(threads=primary_threads, hash_mb=hash_mb)
     selected_engine_ids = parse_engine_ids(args.engines)
     try:
+        tactical_thresholds = parse_tactical_fail_under(
+            args.tactical_fail_under, selected_engine_ids
+        )
         tactical_positions = select_bk_positions(args.positions)
     except ValueError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+        parser.error(str(exc))
     if selected_engine_ids is not None:
         selected = set(selected_engine_ids)
         engines = {eid: cfg for eid, cfg in engines.items() if eid in selected}
@@ -1413,6 +1515,14 @@ def main() -> int:
         with open(RESULTS_DIR / "paper_tactical.json", "w") as f:
             json.dump(r, f, indent=2)
         print(f"\nSaved: results/paper_tactical.json")
+        floor_failures = enforce_tactical_fail_under(r, tactical_thresholds)
+        if floor_failures:
+            print(
+                "ERROR: tactical fail-under guard tripped: "
+                + "; ".join(floor_failures),
+                file=sys.stderr,
+            )
+            exit_code = 1
 
     if args.nps:
         r = run_nps(engines, thread_counts, args.movetime)
@@ -1445,7 +1555,7 @@ def main() -> int:
         print(f"\nSaved: {summary_path}")
         print("\n" + summary)
 
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@
 #include "mcts/core.h"
 #include "mcts/evaluator.h"
 #include "mcts/search.h"
+#include "nn/input_plane_packing.h"
 #include "nn/loader.h"
 #include "nn/network.h"
 #include "nn/network_execution_plan.h"

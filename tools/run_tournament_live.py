@@ -27,6 +27,19 @@ PROJ = pathlib.Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJ / "tools" / "engines_config.json"
 RESULTS_BASE = PROJ / "results"
 
+BUILTIN_OPENING_LINES = [
+    "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6",
+    "e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6",
+    "d2d4 g8f6 c2c4 e7e6 g1f3 d7d5 g2g3",
+    "d2d4 g8f6 c2c4 g7g6 b1c3 d7d5",
+    "c2c4 e7e5 b1c3 g8f6 g2g3 d7d5 c4d5 f6d5",
+    "g1f3 d7d5 g2g3 g8f6 f1g2 e7e6 e1g1 f8e7",
+    "e2e4 e7e6 d2d4 d7d5 b1c3 g8f6",
+    "e2e4 c7c6 d2d4 d7d5 e4e5 c8f5",
+    "d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c1g5 f8e7",
+    "e2e4 d7d6 d2d4 g8f6 b1c3 g7g6",
+]
+
 
 def detect_default_threads() -> int:
     """Best-effort thread budget for local tournaments."""
@@ -75,7 +88,10 @@ def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None
         "HYBRID_MCTS_AB_ROOT_HINTS": "HybridMCTSABRootHints",
         "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "HybridMCTSABRootHintDelayMs",
         "HYBRID_MCTS_AB_ROOT_HINT_COUNT": "HybridMCTSABRootHintCount",
+        "HYBRID_AB_CANDIDATE_VERIFY_MS": "HybridABCandidateVerifyMs",
+        "HYBRID_AB_CANDIDATE_VERIFY_COUNT": "HybridABCandidateVerifyCount",
         "HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight",
+        "HYBRID_ROOT_PAWN_LEVER_TIEBREAK": "HybridRootPawnLeverTieBreak",
         "HYBRID_TRACE": "HybridTrace",
         "HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize",
         "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor",
@@ -85,6 +101,8 @@ def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None
         value = env_option(env_name)
         if value is not None:
             options[option_name] = value
+    if "HybridMCTSThreads" in options:
+        options["MCTSMaxThreads"] = options["HybridMCTSThreads"]
     if force_trace and "HYBRID_TRACE" not in os.environ:
         options["HybridTrace"] = "true"
 
@@ -285,15 +303,33 @@ class UCIEngine:
             self.proc = None
 
 
+def builtin_openings(max_openings: int, seed: int, order: str) -> List[chess.Board]:
+    openings: List[chess.Board] = []
+    for line in BUILTIN_OPENING_LINES[:max_openings]:
+        board = chess.Board()
+        try:
+            for token in line.split():
+                move = chess.Move.from_uci(token)
+                if move not in board.legal_moves:
+                    raise ValueError(token)
+                board.push(move)
+        except ValueError:
+            continue
+        openings.append(board.copy())
+    if order == "random":
+        random.Random(seed).shuffle(openings)
+    return openings
+
+
 def load_openings(
     book_path: pathlib.Path,
     max_openings: int = 500,
     seed: int = 6147500,
     order: str = "random",
-) -> List[chess.Board]:
+) -> Tuple[List[chess.Board], str]:
     openings = []
     if not book_path.exists():
-        return openings
+        return builtin_openings(max_openings, seed, order), "built-in fallback"
     with open(book_path) as f:
         while len(openings) < max_openings:
             game = chess.pgn.read_game(f)
@@ -305,7 +341,9 @@ def load_openings(
             openings.append(board.copy())
     if order == "random":
         random.Random(seed).shuffle(openings)
-    return openings
+    if openings:
+        return openings, str(book_path.relative_to(PROJ))
+    return builtin_openings(max_openings, seed, order), "built-in fallback"
 
 
 @dataclass
@@ -668,14 +706,14 @@ def run_tournament(args):
     default_threads = detect_default_threads()
 
     book_path = PROJ / book_cfg.get("file", "")
-    openings = load_openings(
+    openings, opening_source = load_openings(
         book_path,
         max_openings=200,
         seed=args.seed,
         order=args.opening_order,
     )
     if openings:
-        print(f"Loaded {len(openings)} openings from book")
+        print(f"Loaded {len(openings)} openings from {opening_source}")
     else:
         print("No opening book found, using startpos")
 
@@ -799,6 +837,7 @@ def run_tournament(args):
                             )
                         ),
                         "games_per_match": args.games,
+                        "opening_source": opening_source,
                         "opening_order": args.opening_order,
                         "seed": args.seed,
                     },

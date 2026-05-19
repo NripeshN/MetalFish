@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import subprocess
@@ -348,10 +349,15 @@ def setup_metalfish_hybrid(
     hybrid_mcts_kld: float,
     hybrid_root_reject: bool,
     hybrid_shared_tt: bool,
+    hybrid_root_hints: bool,
     ab_policy_weight: float,
     root_hint_delay_ms: int,
     root_hint_count: int,
-    minibatch_size: int,
+    ab_candidate_verify_ms: int,
+    ab_candidate_verify_count: int,
+    mcts_minibatch: int,
+    low_time_fallback_ms: int,
+    root_pawn_lever_tiebreak: bool,
 ) -> None:
     total_threads = max(3, threads, mcts_threads + ab_threads)
     sess.setoption("UseMCTS", "false")
@@ -362,18 +368,24 @@ def setup_metalfish_hybrid(
     sess.setoption("HybridMCTSThreads", str(mcts_threads))
     sess.setoption("HybridABThreads", str(ab_threads))
     sess.setoption("HybridAutoABThreadsCap", "0")
-    sess.setoption("TransformerLowTimeFallbackMs", "3000")
+    sess.setoption("TransformerLowTimeFallbackMs", str(low_time_fallback_ms))
     sess.setoption("TransformerMinMoveBudgetMs", "400")
     sess.setoption("MCTSMaxThreads", str(mcts_threads))
-    sess.setoption("MCTSMinibatchSize", str(minibatch_size))
+    sess.setoption("MCTSMinibatchSize", str(mcts_minibatch))
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
     sess.setoption("HybridMCTSMinimumKLDGainPerNode", str(hybrid_mcts_kld))
     sess.setoption("HybridMCTSRootReject", "true" if hybrid_root_reject else "false")
     sess.setoption("HybridMCTSUseSharedTT", "true" if hybrid_shared_tt else "false")
-    sess.setoption("HybridMCTSABRootHints", "true")
+    sess.setoption("HybridMCTSABRootHints", "true" if hybrid_root_hints else "false")
     sess.setoption("HybridMCTSABRootHintDelayMs", str(root_hint_delay_ms))
     sess.setoption("HybridMCTSABRootHintCount", str(root_hint_count))
+    sess.setoption("HybridABCandidateVerifyMs", str(ab_candidate_verify_ms))
+    sess.setoption("HybridABCandidateVerifyCount", str(ab_candidate_verify_count))
+    sess.setoption(
+        "HybridRootPawnLeverTieBreak",
+        "true" if root_pawn_lever_tiebreak else "false",
+    )
     sess.setoption("HybridABPolicyWeight", str(ab_policy_weight))
     sess.setoption("HybridTrace", "true" if trace else "false")
     sess.send("isready")
@@ -552,9 +564,123 @@ def print_repeat_summary(
             )
 
 
+def expected_uci_moves(fen: str, expected_sans: Sequence[str]) -> List[str]:
+    moves: List[str] = []
+    for san in expected_sans:
+        try:
+            moves.append(san_to_uci(fen, san))
+        except Exception:
+            moves.append(san.lower().replace("+", "").replace("#", ""))
+    return moves
+
+
+def search_result_payload(
+    fen: str, expected_sans: Sequence[str], bk_id: str, out: SearchResult
+) -> Dict[str, object]:
+    expected_uci = expected_uci_moves(fen, expected_sans)
+    return {
+        "id": bk_id,
+        "fen": fen,
+        "expected_san": list(expected_sans),
+        "expected_uci": expected_uci,
+        "bestmove": out.bestmove,
+        "pass": out.bestmove in set(expected_uci),
+        "nodes": out.nodes,
+        "nps": out.nps,
+        "nn_evals": out.nn_evals,
+        "elapsed_sec": round(out.elapsed, 3),
+        "root_summary": out.root_summary,
+        "hybrid_trace": out.hybrid_trace,
+        "final_summary": out.final_summary,
+        "ab_updates": dict(sorted(out.ab_updates.items())),
+    }
+
+
+def json_output_path(path: pathlib.Path, repeat: int, run_index: int) -> pathlib.Path:
+    if repeat <= 1:
+        return path
+    if path.suffix:
+        return path.with_name(f"{path.stem}.run{run_index + 1:02d}{path.suffix}")
+    return path / f"bk_parity.run{run_index + 1:02d}.json"
+
+
+def write_json_report(
+    path: pathlib.Path,
+    args: argparse.Namespace,
+    positions: Sequence[Tuple[str, List[str], str]],
+    all_results: Dict[str, Dict[str, SearchResult]],
+    run_index: int,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    by_id = {bk_id: (fen, expected_sans) for fen, expected_sans, bk_id in positions}
+    report: Dict[str, object] = {
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "run_index": run_index,
+        "mode": "nodes" if args.nodes > 0 else "movetime",
+        "movetime_ms": args.movetime,
+        "nodes": args.nodes,
+        "threads": args.threads,
+        "deterministic": args.deterministic,
+        "positions": [bk_id for _, _, bk_id in positions],
+        "options": {
+            "engine": args.engine,
+            "multipv": args.multipv,
+            "root_trace": args.root_trace,
+            "hybrid_trace": args.hybrid_trace,
+            "ab_trace": args.ab_trace,
+            "hybrid_mcts_threads": args.hybrid_mcts_threads,
+            "hybrid_ab_threads": args.hybrid_ab_threads,
+            "hybrid_mcts_kld": args.hybrid_mcts_kld,
+            "hybrid_root_reject": args.hybrid_root_reject,
+            "hybrid_shared_tt": args.hybrid_shared_tt,
+            "hybrid_root_hints": args.hybrid_root_hints,
+            "hybrid_ab_policy_weight": args.hybrid_ab_policy_weight,
+            "hybrid_root_hint_delay_ms": args.hybrid_root_hint_delay_ms,
+            "hybrid_root_hint_count": args.hybrid_root_hint_count,
+            "hybrid_ab_candidate_verify_ms": args.hybrid_ab_candidate_verify_ms,
+            "hybrid_ab_candidate_verify_count": args.hybrid_ab_candidate_verify_count,
+            "hybrid_mcts_minibatch": args.hybrid_mcts_minibatch_size,
+            "hybrid_low_time_fallback_ms": args.hybrid_low_time_fallback_ms,
+            "hybrid_root_pawn_lever_tiebreak": args.hybrid_root_pawn_lever_tiebreak,
+        },
+        "engines": {},
+    }
+
+    engines = report["engines"]
+    assert isinstance(engines, dict)
+    for engine_name, results in all_results.items():
+        payloads = []
+        for _, _, bk_id in positions:
+            fen, expected_sans = by_id[bk_id]
+            payloads.append(
+                search_result_payload(fen, expected_sans, bk_id, results[bk_id])
+            )
+        engines[engine_name] = {
+            "score": sum(1 for item in payloads if item["pass"]),
+            "total": len(payloads),
+            "positions": payloads,
+        }
+
+    with open(path, "w") as f:
+        json.dump(report, f, indent=2)
+        f.write("\n")
+
+
+def engine_score(
+    positions: Sequence[Tuple[str, List[str], str]],
+    results: Dict[str, SearchResult],
+) -> Tuple[int, int]:
+    passed = 0
+    for fen, expected_sans, bk_id in positions:
+        expected = set(expected_uci_moves(fen, expected_sans))
+        passed += int(results[bk_id].bestmove in expected)
+    return passed, len(positions)
+
+
 def run_once(
     args: argparse.Namespace,
     aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = None,
+    run_index: int = 0,
 ) -> int:
     if not args.weights.exists():
         print(f"ERROR: weights not found: {args.weights}")
@@ -627,10 +753,15 @@ def run_once(
                 args.hybrid_mcts_kld,
                 args.hybrid_root_reject,
                 args.hybrid_shared_tt,
+                args.hybrid_root_hints,
                 args.hybrid_ab_policy_weight,
                 args.hybrid_root_hint_delay_ms,
                 args.hybrid_root_hint_count,
+                args.hybrid_ab_candidate_verify_ms,
+                args.hybrid_ab_candidate_verify_count,
                 args.hybrid_mcts_minibatch_size,
+                args.hybrid_low_time_fallback_ms,
+                args.hybrid_root_pawn_lever_tiebreak,
             )
             s.warmup(
                 mode,
@@ -688,6 +819,25 @@ def run_once(
                             f"{lmove} vs {rmove}"
                         )
                     print(f"    Bestmove agreement: {agree}/{len(positions)}")
+        if args.json_out:
+            path = json_output_path(args.json_out, args.repeat, run_index)
+            write_json_report(path, args, positions, all_results, run_index)
+            if not args.quiet:
+                print(f"\nSaved JSON report: {path}", flush=True)
+        if args.fail_under is not None:
+            below_threshold = []
+            for name, results in all_results.items():
+                passed, total = engine_score(positions, results)
+                if passed < args.fail_under:
+                    below_threshold.append(f"{name}={passed}/{total}")
+            if below_threshold:
+                print(
+                    "ERROR: score below --fail-under "
+                    f"{args.fail_under}: {', '.join(below_threshold)}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 1
         return 0
     finally:
         for sess in sessions.values():
@@ -756,17 +906,48 @@ def main() -> int:
         default=True,
     )
     parser.add_argument("--hybrid-shared-tt", action="store_true")
+    parser.add_argument(
+        "--hybrid-root-hints",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--hybrid-ab-policy-weight", type=float, default=0.0)
     parser.add_argument("--hybrid-root-hint-delay-ms", type=int, default=25)
     parser.add_argument("--hybrid-root-hint-count", type=int, default=4)
+    parser.add_argument("--hybrid-ab-candidate-verify-ms", type=int, default=120)
+    parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=4)
     parser.add_argument("--mcts-minibatch-size", type=int, default=0)
     parser.add_argument("--mcts-kld", type=float, default=0.00005)
-    parser.add_argument("--hybrid-mcts-minibatch-size", type=int, default=0)
+    parser.add_argument(
+        "--hybrid-mcts-minibatch",
+        "--hybrid-mcts-minibatch-size",
+        dest="hybrid_mcts_minibatch_size",
+        type=int,
+        default=0,
+    )
+    parser.add_argument("--hybrid-low-time-fallback-ms", type=int, default=3000)
+    parser.add_argument(
+        "--hybrid-root-pawn-lever-tiebreak",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--multipv", type=int, default=1)
     parser.add_argument("--backend", default="metal")
     parser.add_argument("--weights", type=pathlib.Path, default=WEIGHTS)
     parser.add_argument("--metalfish", type=pathlib.Path, default=METALFISH)
     parser.add_argument("--lc0", type=pathlib.Path, default=LC0)
+    parser.add_argument(
+        "--fail-under",
+        type=int,
+        default=None,
+        help="Exit non-zero if any selected engine scores below this many positions",
+    )
+    parser.add_argument(
+        "--json-out",
+        type=pathlib.Path,
+        default=None,
+        help="Write a machine-readable per-position report",
+    )
     args = parser.parse_args()
 
     aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = (
@@ -776,7 +957,7 @@ def main() -> int:
     for i in range(args.repeat):
         if args.repeat > 1:
             print(f"\n=== Run {i + 1}/{args.repeat} ===", flush=True)
-        rc = run_once(args, aggregate)
+        rc = run_once(args, aggregate, i)
         if rc != 0:
             return rc
     if aggregate:

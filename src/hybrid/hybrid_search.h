@@ -209,6 +209,9 @@ struct ParallelHybridConfig {
   bool mcts_ab_root_hints = true;
   int mcts_ab_root_hint_delay_ms = 25;
   int mcts_ab_root_hint_count = 4;
+  int ab_candidate_verify_ms = 120;
+  int ab_candidate_verify_count = 4;
+  bool root_pawn_lever_tiebreak = true;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees
@@ -333,6 +336,9 @@ private:
   void update_mcts_policy_from_ab();
   void publish_mcts_state();
   std::vector<Move> collect_mcts_root_order_hints();
+  std::vector<Move>
+  verify_ab_root_candidates(const std::vector<Move> &candidates,
+                            int verify_ms);
 
   void run_ab_search();
   void publish_ab_state(Move best, int score, int depth, uint64_t nodes);
@@ -373,6 +379,10 @@ bool HybridHasMCTSDecisionBudget(const ::MetalFish::Search::LimitsType &limits,
 HybridBuildMCTSLimits(const ::MetalFish::Search::LimitsType &limits,
                       int time_budget_ms, bool waiting_for_ponderhit);
 
+int HybridABCandidateVerifyBudgetMs(
+    const ::MetalFish::Search::LimitsType &limits, int time_budget_ms,
+    int requested_ms, bool waiting_for_ponderhit);
+
 bool HybridMCTSDecisiveFixedBudgetOverride(bool fixed_budget, bool mcts_strong,
                                            uint64_t mcts_total_nodes,
                                            uint32_t mcts_visits,
@@ -395,6 +405,14 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
     int eval_delta);
 
+bool HybridMCTSCrossRootConfidenceOverride(
+    bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
+    uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_in_ab_rank,
+    int mcts_in_ab_score, int mcts_average_score, uint64_t mcts_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
+    float mcts_q);
+
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits);
 
@@ -407,6 +425,8 @@ bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
                               uint32_t top_visits, float top_q,
                               float top_policy, uint32_t candidate_visits,
                               float candidate_q, float candidate_policy);
+
+bool HybridIsPawnLever(const Position &pos, Move move);
 
 float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
                             const float *candidate_qs, int candidate_count);
