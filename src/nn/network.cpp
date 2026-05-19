@@ -10,6 +10,9 @@
 #ifdef USE_METAL
 #include "metal/metal_network.h"
 #endif
+#ifdef USE_CUDA
+#include "cuda/cuda_network.h"
+#endif
 
 #include <iostream>
 #include <stdexcept>
@@ -62,13 +65,47 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
       }
     }
   }
+#else
+  if (backend == "metal") {
+    throw std::runtime_error("Metal backend was not compiled into this build");
+  }
 #endif
 
-  return std::make_unique<StubNetwork>(weights);
+#ifdef USE_CUDA
+  if (backend == "auto" || backend == "cuda") {
+    try {
+      return std::make_unique<Cuda::CudaNetwork>(weights);
+    } catch (const std::exception &e) {
+      std::cerr << "CUDA backend unavailable: " << e.what() << std::endl;
+      if (backend == "cuda") {
+        throw;
+      }
+    }
+  }
+#else
+  if (backend == "cuda") {
+    throw std::runtime_error("CUDA backend was not compiled into this build");
+  }
+#endif
+
+  if (backend == "stub") {
+    return std::make_unique<StubNetwork>(weights);
+  }
+
+  if (backend == "auto") {
+    throw std::runtime_error("No functional NN backend available");
+  }
+
+  throw std::runtime_error("Unknown NN backend: " + backend);
 }
 
 std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
                                        const std::string &backend) {
+  if (backend == "stub") {
+    WeightsFile empty_weights;
+    return CreateNetwork(empty_weights, backend);
+  }
+
   auto weights_opt = LoadWeights(weights_path);
 
   if (!weights_opt.has_value()) {

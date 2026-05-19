@@ -42,7 +42,8 @@ public:
   using PositionHistoryView = std::span<const Position *const>;
   using LegalMovesView = std::span<const Move>;
 
-  explicit NNMCTSEvaluator(const std::string &weights_path);
+  explicit NNMCTSEvaluator(const std::string &weights_path,
+                           const std::string &backend = "auto");
   ~NNMCTSEvaluator();
 
   EvaluationResult Evaluate(const Position &pos);

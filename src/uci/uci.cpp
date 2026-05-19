@@ -877,6 +877,7 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
                                            int num_threads) {
   MCTS::SearchParams config;
   config.nn_weights_path = nn_weights;
+  config.nn_backend = std::string(engine.get_options()["NNBackend"]);
   config.num_threads = num_threads;
 
   config.cpuct = get_float_option(engine, "MCTSCPuct", config.cpuct);
@@ -1230,8 +1231,7 @@ static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
   if (!allow_parallel_mcts && num_threads > 1) {
     if (announce_cap) {
       sync_cout << "info string Capping pure MCTS threads from " << num_threads
-                << " to 1 for Apple Silicon strength stability"
-                << sync_endl;
+                << " to 1 for Apple Silicon strength stability" << sync_endl;
     }
     num_threads = 1;
   }
@@ -1264,15 +1264,15 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
                                        const MCTS::SearchParams &config) {
   std::ostringstream key;
   key << nn_weights << "|" << config.num_threads << "|" << config.cpuct << "|"
-      << config.cpuct_at_root << "|" << config.cpuct_base << "|"
-      << config.cpuct_factor << "|" << config.cpuct_base_at_root << "|"
-      << config.cpuct_factor_at_root << "|" << config.fpu_absolute << "|"
-      << config.fpu_absolute_at_root << "|" << config.fpu_value << "|"
-      << config.fpu_value_at_root << "|" << config.fpu_reduction << "|"
-      << config.fpu_reduction_at_root << "|" << config.policy_softmax_temp
-      << "|" << config.moves_left_max_effect << "|"
-      << config.moves_left_threshold << "|" << config.moves_left_slope << "|"
-      << config.moves_left_constant_factor << "|"
+      << config.nn_backend << "|" << config.cpuct_at_root << "|"
+      << config.cpuct_base << "|" << config.cpuct_factor << "|"
+      << config.cpuct_base_at_root << "|" << config.cpuct_factor_at_root << "|"
+      << config.fpu_absolute << "|" << config.fpu_absolute_at_root << "|"
+      << config.fpu_value << "|" << config.fpu_value_at_root << "|"
+      << config.fpu_reduction << "|" << config.fpu_reduction_at_root << "|"
+      << config.policy_softmax_temp << "|" << config.moves_left_max_effect
+      << "|" << config.moves_left_threshold << "|" << config.moves_left_slope
+      << "|" << config.moves_left_constant_factor << "|"
       << config.moves_left_scaled_factor << "|"
       << config.moves_left_quadratic_factor << "|" << config.temperature << "|"
       << config.temp_winpct_cutoff << "|" << config.draw_score << "|"

@@ -102,6 +102,7 @@ struct SearchParams {
 
   // Backend
   std::string nn_weights_path;
+  std::string nn_backend = "auto";
 
   int GetNumThreads() const {
     if (num_threads <= 0) {
