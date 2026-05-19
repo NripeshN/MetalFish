@@ -85,6 +85,51 @@ def assert_paper_hybrid_env_overrides() -> None:
     )
 
 
+def assert_tactical_fail_under_guard() -> None:
+    selected = ["metalfish-hybrid"]
+    if paper_benchmarks.parse_tactical_fail_under("", selected) != {}:
+        raise AssertionError("empty tactical fail-under should parse to no floors")
+    if paper_benchmarks.parse_tactical_fail_under("21", selected) != {
+        "metalfish-hybrid": 21
+    }:
+        raise AssertionError("bare tactical fail-under should apply to selected engines")
+    if paper_benchmarks.parse_tactical_fail_under("hybrid=21,mcts=12", None) != {
+        "metalfish-hybrid": 21,
+        "metalfish-mcts": 12,
+    }:
+        raise AssertionError("engine-specific tactical floors parsed incorrectly")
+
+    sample = {
+        "engines": {
+            "metalfish-hybrid": {
+                "score": 21,
+                "total": 24,
+                "completed": 24,
+                "complete": True,
+            },
+            "metalfish-mcts": {
+                "score": 12,
+                "total": 24,
+                "completed": 23,
+                "complete": False,
+            },
+        }
+    }
+    if paper_benchmarks.enforce_tactical_fail_under(
+        sample, {"metalfish-hybrid": 21}
+    ):
+        raise AssertionError("hybrid tactical floor should pass at the threshold")
+    failures = paper_benchmarks.enforce_tactical_fail_under(
+        sample, {"metalfish-hybrid": 22, "metalfish-mcts": 12}
+    )
+    expected = [
+        "metalfish-hybrid=21/24 (floor 22)",
+        "metalfish-mcts=incomplete 23/24 (floor 12)",
+    ]
+    if failures != expected:
+        raise AssertionError(f"unexpected tactical floor failures: {failures!r}")
+
+
 def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
     return with_clean_hybrid_env(
         lambda: paper_benchmarks.detect_engines(threads=8, hash_mb=4096)
@@ -92,6 +137,7 @@ def detect_paper_engines_clean() -> dict[str, paper_benchmarks.EngineConfig]:
 
 
 def main() -> int:
+    assert_tactical_fail_under_guard()
     paper = detect_paper_engines_clean()
 
     assert_options_include(
@@ -328,6 +374,9 @@ def main() -> int:
         [
             "HYBRID_ENV_OPTION_OVERRIDES",
             "def apply_hybrid_env_options",
+            "def parse_tactical_fail_under",
+            "def enforce_tactical_fail_under",
+            "--tactical-fail-under",
             '"HYBRID_MCTS_AB_ROOT_HINTS"',
             '"HYBRID_MCTS_OUT_OF_ORDER_FACTOR"',
             "def benchmark_warmup_ms",
