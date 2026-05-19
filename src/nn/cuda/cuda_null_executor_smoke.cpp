@@ -164,12 +164,12 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   const std::vector<float> gamma2 = {1.25f, -0.75f};
   const std::vector<float> beta2 = {0.05f, 0.30f};
   const std::vector<float> dense3_weights = {
-      0.5f, -0.25f,
-      -1.0f, 0.75f,
-      0.25f, 1.5f,
+      0.5f, -0.25f, 0.75f, 0.10f,
+      -1.0f, 0.75f, 0.20f, -0.30f,
+      0.25f, 1.5f, -0.50f, 0.40f,
   };
   const std::vector<float> dense3_bias = {-0.1f, 0.2f, 0.05f};
-  const std::vector<float> moves_weights = {0.5f, -0.25f, 1.25f};
+  const std::vector<float> moves_weights = {0.5f, -0.25f, 1.25f, 0.75f};
   const std::vector<float> moves_bias = {0.4f};
 
   NetworkWeightInventory inventory;
@@ -191,11 +191,11 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
       {"policy.smoke.norm_betas", beta2.data(), beta2.size(), {kPolicy},
        NetworkWeightTensorKind::NormBias},
       {"value.smoke.ip2_val_w", dense3_weights.data(), dense3_weights.size(),
-       {kValue, kPolicy}, NetworkWeightTensorKind::DenseWeight},
+       {kValue, kHidden}, NetworkWeightTensorKind::DenseWeight},
       {"value.smoke.ip2_val_b", dense3_bias.data(), dense3_bias.size(), {kValue},
        NetworkWeightTensorKind::DenseBias},
       {"moves_left.ip2_mov_w", moves_weights.data(), moves_weights.size(),
-       {kMovesLeft, kValue}, NetworkWeightTensorKind::DenseWeight},
+       {kMovesLeft, kHidden}, NetworkWeightTensorKind::DenseWeight},
       {"moves_left.ip2_mov_b", moves_bias.data(), moves_bias.size(), {kMovesLeft},
        NetworkWeightTensorKind::DenseBias},
   };
@@ -245,7 +245,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
       NetworkExecutionOpKind::Dense,
       "value.smoke.dense2",
       {
-          {8, "value.smoke.ip2_val_w", dense3_weights.size(), {kValue, kPolicy},
+          {8, "value.smoke.ip2_val_w", dense3_weights.size(), {kValue, kHidden},
            NetworkWeightTensorKind::DenseWeight},
           {9, "value.smoke.ip2_val_b", dense3_bias.size(), {kValue},
            NetworkWeightTensorKind::DenseBias},
@@ -255,7 +255,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
       "moves_left.output",
       {
           {10, "moves_left.ip2_mov_w", moves_weights.size(),
-           {kMovesLeft, kValue}, NetworkWeightTensorKind::DenseWeight},
+           {kMovesLeft, kHidden}, NetworkWeightTensorKind::DenseWeight},
           {11, "moves_left.ip2_mov_b", moves_bias.size(), {kMovesLeft},
            NetworkWeightTensorKind::DenseBias},
       }});
@@ -338,9 +338,9 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     const size_t value_offset = static_cast<size_t>(batch) * kValue;
     for (int out = 0; out < kValue; ++out) {
       float dense = dense3_bias[static_cast<size_t>(out)];
-      for (int in = 0; in < kPolicy; ++in) {
-        dense += policy_expected[policy_offset + in] *
-                 dense3_weights[static_cast<size_t>(out) * kPolicy + in];
+      for (int in = 0; in < kHidden; ++in) {
+        dense += hidden_normalized[hidden_offset + in] *
+                 dense3_weights[static_cast<size_t>(out) * kHidden + in];
       }
       const float relu = std::max(dense, 0.0f);
       value_expected[value_offset + out] = relu * relu;
@@ -348,9 +348,9 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
 
     for (int out = 0; out < kMovesLeft; ++out) {
       float dense = moves_bias[static_cast<size_t>(out)];
-      for (int in = 0; in < kValue; ++in) {
-        dense += value_expected[value_offset + in] *
-                 moves_weights[static_cast<size_t>(out) * kValue + in];
+      for (int in = 0; in < kHidden; ++in) {
+        dense += hidden_normalized[hidden_offset + in] *
+                 moves_weights[static_cast<size_t>(out) * kHidden + in];
       }
       const float relu = std::max(dense, 0.0f);
       moves_expected[static_cast<size_t>(batch) * kMovesLeft + out] =

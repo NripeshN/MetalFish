@@ -14,6 +14,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace MetalFish {
 namespace NN {
@@ -93,6 +94,27 @@ CudaDenseStageSequenceOutput::FindStage(std::string_view name) const {
   for (const auto &stage : stages) {
     if (stage.first == name)
       return &stage.second;
+  }
+  return nullptr;
+}
+
+void CudaStageInputBindings::Add(std::string stage_name,
+                                 std::string source_stage_name) {
+  if (stage_name.empty())
+    throw std::runtime_error("CUDA stage input binding has empty stage name");
+  if (FindSource(stage_name)) {
+    throw std::runtime_error("CUDA stage input binding is duplicated: " +
+                             stage_name);
+  }
+  bindings_.push_back(CudaStageInputBinding{std::move(stage_name),
+                                            std::move(source_stage_name)});
+}
+
+const std::string *
+CudaStageInputBindings::FindSource(std::string_view stage_name) const {
+  for (const auto &binding : bindings_) {
+    if (binding.stage_name == stage_name)
+      return &binding.source_stage_name;
   }
   return nullptr;
 }
@@ -192,6 +214,17 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const CudaWeightBuffers &weights, const float *input,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
     int batch_size) {
+  const CudaStageInputBindings input_bindings;
+  return ExecuteDenseActivationLayerNormSequence(
+      execution_plan, weights, input, tape, workspace, batch_size,
+      input_bindings);
+}
+
+CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaWeightBuffers &weights, const float *input,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size, const CudaStageInputBindings &input_bindings) {
   if (!input)
     throw std::runtime_error("CUDA dense stage sequence input is missing");
 
@@ -211,15 +244,33 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     }
 
     const auto &step = execution_plan.steps[entry.first_step];
+    const float *stage_input = current_input;
+    int stage_input_width = current_width;
+    if (const std::string *source = input_bindings.FindSource(step.name)) {
+      if (source->empty()) {
+        stage_input = input;
+        stage_input_width = 0;
+      } else {
+        const CudaDenseStageOutput *source_stage =
+            sequence.FindStage(*source);
+        if (!source_stage || !source_stage->output) {
+          throw std::runtime_error("CUDA stage input source is missing for " +
+                                   step.name + ": " + *source);
+        }
+        stage_input = source_stage->output;
+        stage_input_width = source_stage->output_width;
+      }
+    }
+
     const CudaDenseStageOutput stage =
         entry.kind == CudaExecutionScheduleKind::DenseLayerNormStage
             ? ExecuteDenseActivationLayerNormStage(
                   execution_plan, step, execution_plan.steps[entry.second_step],
-                  weights, current_input, tape, workspace, batch_size)
+                  weights, stage_input, tape, workspace, batch_size)
             : ExecuteDenseActivationStage(execution_plan, step, weights,
-                                          current_input, tape, workspace,
+                                          stage_input, tape, workspace,
                                           batch_size);
-    if (current_width != 0 && stage.input_width != current_width) {
+    if (stage_input_width != 0 && stage.input_width != stage_input_width) {
       throw std::runtime_error(
           "CUDA dense stage sequence input width mismatch");
     }

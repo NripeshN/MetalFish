@@ -896,6 +896,24 @@ void test_cuda_output_mapping(TestCounter &tc) {
   expect(mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
          "CUDA output mapping should bind raw policy scratch source", tc);
 
+  NN::Cuda::CudaStageInputBindings stage_inputs;
+  stage_inputs.Add("policy.smoke.output", "body.smoke.dense");
+  stage_inputs.Add("value.smoke.dense2", "body.smoke.dense");
+  expect(stage_inputs.Size() == 2,
+         "CUDA stage input bindings should count explicit sources", tc);
+  expect(stage_inputs.FindSource("policy.smoke.output") &&
+             *stage_inputs.FindSource("policy.smoke.output") ==
+                 "body.smoke.dense",
+         "CUDA stage input bindings should return policy source", tc);
+  bool duplicate_rejected = false;
+  try {
+    stage_inputs.Add("policy.smoke.output", "other.source");
+  } catch (const std::exception &) {
+    duplicate_rejected = true;
+  }
+  expect(duplicate_rejected,
+         "CUDA stage input bindings should reject duplicate stages", tc);
+
   NN::NetworkResolvedExecutionPlan missing_value = plan;
   missing_value.steps.erase(missing_value.steps.begin() + 1);
   const auto incomplete = NN::Cuda::CreateCudaOutputMapping(

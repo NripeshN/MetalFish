@@ -14,6 +14,7 @@
 
 #include <cuda_runtime_api.h>
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -40,6 +41,21 @@ struct CudaDenseStageSequenceOutput {
   const CudaDenseStageOutput *FindStage(std::string_view name) const;
 };
 
+struct CudaStageInputBinding {
+  std::string stage_name;
+  std::string source_stage_name;
+};
+
+class CudaStageInputBindings {
+public:
+  void Add(std::string stage_name, std::string source_stage_name);
+  const std::string *FindSource(std::string_view stage_name) const;
+  std::size_t Size() const { return bindings_.size(); }
+
+private:
+  std::vector<CudaStageInputBinding> bindings_;
+};
+
 CudaDenseStageOutput ExecuteDenseActivationStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &dense, const CudaWeightBuffers &weights,
@@ -58,6 +74,12 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const CudaWeightBuffers &weights, const float *input,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
     int batch_size);
+
+CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaWeightBuffers &weights, const float *input,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size, const CudaStageInputBindings &input_bindings);
 
 void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
                          int src_stride, int rows, int width,

@@ -110,9 +110,13 @@ public:
     const auto tape =
         CreatePlanSmokeExecutionTape(plan, execution_plan, batch_size);
     const auto schedule = CreateCudaExecutionSchedule(execution_plan);
+    CudaStageInputBindings stage_inputs;
+    stage_inputs.Add("policy.smoke.output", "body.smoke.dense");
+    stage_inputs.Add("value.smoke.dense2", "body.smoke.dense");
+    stage_inputs.Add("moves_left.output", "body.smoke.dense");
     const auto sequence = ExecuteDenseActivationLayerNormSequence(
         execution_plan, weights, buffers.input_values, tape, workspace,
-        batch_size);
+        batch_size, stage_inputs);
     CudaOutputMappingOptions options;
     options.allow_partial_policy_rows = true;
     options.allow_partial_raw_policy_rows = true;
