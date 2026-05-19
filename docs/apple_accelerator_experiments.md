@@ -22,12 +22,13 @@ On the M2 Max test machine:
 This only proves that ANE/Core ML experiments are possible. It does not prove
 that they are faster than the existing engine path.
 
-## Dense Microbenchmark
+## Microbenchmark Tool
 
 `tools/apple_coreml_microbench.py` builds a temporary Core ML ML Program with a
-single dense layer and compares Core ML prediction latency against NumPy on the
-same shape. It requires `coremltools`; keep that dependency in a temporary venv
-unless the branch later gains a real converter pipeline.
+single dense layer or a transformer-shaped block and compares Core ML prediction
+latency against NumPy on the same shape. It requires `coremltools`; keep that
+dependency in a temporary venv unless the branch later gains a real converter
+pipeline.
 
 Temporary setup used for the first run:
 
@@ -38,6 +39,8 @@ python3.11 -m venv /tmp/metalfish-coremltools-venv
 
 Measured on Apple M2 Max:
 
+Dense-only kernels:
+
 | Shape | Compute unit | Core ML median | NumPy median | Result |
 | --- | --- | ---: | ---: | --- |
 | batch=1, inputs=32, outputs=16 | cpu-ne | 0.0348 ms | 0.0012 ms | CPU wins |
@@ -47,14 +50,31 @@ Measured on Apple M2 Max:
 | batch=32, inputs=1024, outputs=1024 | cpu-ne | 0.2884 ms | 0.1393 ms | CPU wins |
 | batch=64, inputs=1024, outputs=1024 | all | 0.3088 ms | 0.1880 ms | CPU wins |
 
+Transformer-shaped single-block kernels:
+
+| Shape | Compute unit | Core ML median | NumPy median | Result |
+| --- | --- | ---: | ---: | --- |
+| batch=1, tokens=8, channels=32, heads=4, ffn=2x | cpu-ne | 0.0637 ms | 0.0777 ms | Core ML wins narrowly |
+| batch=1, tokens=64, channels=128, heads=8, ffn=4x | cpu-ne | 0.3104 ms | 1.0997 ms | Core ML wins |
+| batch=8, tokens=64, channels=128, heads=8, ffn=4x | cpu-ne | 0.6771 ms | 7.9926 ms | Core ML wins |
+| batch=1, tokens=64, channels=256, heads=8, ffn=4x | cpu-ne | 0.4035 ms | 2.6909 ms | Core ML wins |
+| batch=1, tokens=64, channels=512, heads=16, ffn=4x | cpu-ne | 0.5063 ms | 6.1806 ms | Core ML wins |
+| batch=1, tokens=64, channels=1024, heads=32, ffn=4x | cpu-ne | 1.4772 ms | 53.1024 ms | Core ML wins |
+| batch=1, tokens=64, channels=128, heads=8, ffn=4x | cpu | 1.6400 ms | 1.2066 ms | CPU wins |
+| batch=1, tokens=64, channels=128, heads=8, ffn=4x | all | 1.5859 ms | 1.1094 ms | CPU wins |
+| batch=1, tokens=64, channels=128, heads=8, ffn=4x | cpu-gpu | 2.0020 ms | 4.2539 ms | Core ML wins, but slower than cpu-ne |
+
 ## Decision
 
 Do not move AB NNUE inference to Core ML/ANE based on these measurements. The
 per-call Core ML runtime overhead is too high for the small dense operations
 that remain after NNUE accumulator updates.
 
-Core ML/ANE may still be worth revisiting for larger end-to-end transformer
-subgraphs, but Metal/MPSGraph is already the production transformer path. Any
-future ANE work should start with a transformer-shaped model benchmark that
-includes attention, layer norms, activations, and policy/value outputs, not
-isolated NNUE or dense-layer fragments.
+Core ML/ANE is worth further isolated investigation for transformer-shaped
+subgraphs. The `cpu-ne` compute unit is the only promising Core ML mode in the
+current data; `cpu`, `all`, and `cpu-gpu` do not justify integration work.
+
+This is still not enough evidence to replace Metal/MPSGraph in the engine.
+The next useful experiment is a side-by-side Core ML versus MPSGraph benchmark
+for the same one-block transformer shape, followed by a whole-network BT4 graph
+only if Core ML beats MPSGraph on the block-level test.
