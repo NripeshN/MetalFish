@@ -132,6 +132,13 @@ CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
     const float *context, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size);
 
+CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &norm, const float *parent,
+    const CudaAttentionProjectionOutput &attention_output,
+    const CudaWeightBuffers &weights, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size);
+
 CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     std::size_t attention_step_index,

@@ -226,6 +226,19 @@ float FeedForwardLayerNormEpsilon(
   return 1e-5f;
 }
 
+float AttentionLayerNormEpsilon(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::string_view stage_name) {
+  if (CudaStageNameStartsWith(stage_name, "body.encoder.")) {
+    return execution_plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE
+               ? 1e-3f
+               : 1e-6f;
+  }
+  if (CudaStageNameStartsWith(stage_name, "policy."))
+    return 1e-6f;
+  return 1e-5f;
+}
+
 } // namespace
 
 void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
@@ -652,6 +665,62 @@ CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
   LaunchDenseAffineKernel(context, dense_weight.data, dense_bias.data,
                           output.projection, rows, attention.qkv_width,
                           attention.output_width, workspace.Stream());
+  return output;
+}
+
+CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &norm, const float *parent,
+    const CudaAttentionProjectionOutput &attention_output,
+    const CudaWeightBuffers &weights, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA attention layernorm received empty batch");
+  if (!parent)
+    throw std::runtime_error("CUDA attention layernorm parent is missing");
+  if (!attention_output.projection)
+    throw std::runtime_error(
+        "CUDA attention layernorm projection is missing");
+  RequireLayerNormTensors(norm);
+
+  const int rows = batch_size * kCudaAttentionSquares;
+  const int width = attention_output.output_width;
+  if (width <= 0 || attention_output.rows != rows ||
+      attention_output.input_width != width) {
+    throw std::runtime_error(
+        "CUDA attention layernorm projection shape mismatch");
+  }
+
+  const auto gamma = weights.TensorAt(norm.tensors[0].inventory_index);
+  const auto beta = weights.TensorAt(norm.tensors[1].inventory_index);
+  if (gamma.dims.size() != 1 || beta.dims.size() != 1 ||
+      gamma.elements != static_cast<std::size_t>(width) ||
+      beta.elements != static_cast<std::size_t>(width)) {
+    throw std::runtime_error(
+        "CUDA attention layernorm tensor dimensions mismatch");
+  }
+
+  const auto &residual_binding =
+      tape.RequireName(norm.name + ".attention_residual");
+  const auto &norm_binding = tape.RequireName(norm.name + ".normalized");
+  RequireTapeShape(residual_binding, rows, width,
+                   "attention residual");
+  RequireTapeShape(norm_binding, rows, width, "attention layernorm");
+
+  CudaDenseStageOutput output;
+  output.residual = tape.Reserve(workspace, residual_binding);
+  output.normalized = tape.Reserve(workspace, norm_binding);
+  output.output = output.normalized;
+  output.input_width = width;
+  output.output_width = width;
+
+  cudaStream_t stream = workspace.Stream();
+  LaunchResidualAddKernel(parent, attention_output.projection,
+                          output.residual, rows, width, 1.0f, stream);
+  LaunchLayerNormKernel(output.residual, gamma.data, beta.data,
+                        output.normalized, rows, width,
+                        AttentionLayerNormEpsilon(execution_plan, norm.name),
+                        stream);
   return output;
 }
 
