@@ -348,6 +348,7 @@ HYBRID_ENV_OPTION_OVERRIDES = {
     "HYBRID_AB_CANDIDATE_VERIFY_MS": "HybridABCandidateVerifyMs",
     "HYBRID_AB_CANDIDATE_VERIFY_COUNT": "HybridABCandidateVerifyCount",
     "HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight",
+    "HYBRID_ROOT_PAWN_LEVER_TIEBREAK": "HybridRootPawnLeverTieBreak",
     "HYBRID_TRACE": "HybridTrace",
     "HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize",
     "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor",
@@ -462,6 +463,7 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "HybridABCandidateVerifyMs": "120",
             "HybridABCandidateVerifyCount": "4",
             "HybridABPolicyWeight": "0.0",
+            "HybridRootPawnLeverTieBreak": "true",
             "HybridTrace": "false",
         },
     )

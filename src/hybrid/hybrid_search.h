@@ -211,7 +211,7 @@ struct ParallelHybridConfig {
   int mcts_ab_root_hint_count = 4;
   int ab_candidate_verify_ms = 120;
   int ab_candidate_verify_count = 4;
-  bool root_pawn_lever_tiebreak = false;
+  bool root_pawn_lever_tiebreak = true;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees

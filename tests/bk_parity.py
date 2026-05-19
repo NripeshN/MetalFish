@@ -901,7 +901,11 @@ def main() -> int:
     parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=4)
     parser.add_argument("--hybrid-mcts-minibatch", type=int, default=0)
     parser.add_argument("--hybrid-low-time-fallback-ms", type=int, default=3000)
-    parser.add_argument("--hybrid-root-pawn-lever-tiebreak", action="store_true")
+    parser.add_argument(
+        "--hybrid-root-pawn-lever-tiebreak",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--multipv", type=int, default=1)
     parser.add_argument("--backend", default="metal")
     parser.add_argument("--weights", type=pathlib.Path, default=WEIGHTS)

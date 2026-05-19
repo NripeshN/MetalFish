@@ -247,7 +247,7 @@ void test_hybrid_config() {
     EXPECT(tc, config.mcts_ab_root_hint_count == 4);
     EXPECT(tc, config.ab_candidate_verify_ms == 120);
     EXPECT(tc, config.ab_candidate_verify_count == 4);
-    EXPECT(tc, !config.root_pawn_lever_tiebreak);
+    EXPECT(tc, config.root_pawn_lever_tiebreak);
   }
   {
     TestCase tc("Transformer batching settings");

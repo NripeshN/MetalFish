@@ -59,6 +59,7 @@ def assert_paper_hybrid_env_overrides() -> None:
         "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "50",
         "HYBRID_AB_CANDIDATE_VERIFY_MS": "120",
         "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "1.5",
+        "HYBRID_ROOT_PAWN_LEVER_TIEBREAK": "false",
     }
 
     def detect_with_overrides() -> dict[str, str]:
@@ -81,6 +82,7 @@ def assert_paper_hybrid_env_overrides() -> None:
             "HybridMCTSABRootHintDelayMs": "50",
             "HybridABCandidateVerifyMs": "120",
             "MCTSMaxOutOfOrderEvalsFactor": "1.5",
+            "HybridRootPawnLeverTieBreak": "false",
         },
     )
 
@@ -183,6 +185,7 @@ def main() -> int:
             "HybridABCandidateVerifyMs": "120",
             "HybridABCandidateVerifyCount": "4",
             "HybridABPolicyWeight": "0.0",
+            "HybridRootPawnLeverTieBreak": "true",
             "HybridTrace": "false",
         },
     )
@@ -278,6 +281,7 @@ def main() -> int:
             "HybridABCandidateVerifyMs": "120",
             "HybridABCandidateVerifyCount": "4",
             "HybridABPolicyWeight": "0.0",
+            "HybridRootPawnLeverTieBreak": "true",
             "HybridAutoABThreadsCap": "0",
             "HybridTrace": "false",
         },
@@ -299,6 +303,7 @@ def main() -> int:
         "option.HybridABCandidateVerifyMs=$HYBRID_AB_CANDIDATE_VERIFY_MS",
         "option.HybridABCandidateVerifyCount=$HYBRID_AB_CANDIDATE_VERIFY_COUNT",
         "option.HybridABPolicyWeight=$HYBRID_AB_POLICY_WEIGHT",
+        "option.HybridRootPawnLeverTieBreak=$HYBRID_ROOT_PAWN_LEVER_TIEBREAK",
         "option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP",
         "option.MCTSMinibatchSize=$HYBRID_MCTS_MINIBATCH",
         "option.TransformerLowTimeFallbackMs=$HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS",
@@ -316,6 +321,7 @@ def main() -> int:
             'HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS="${HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS:-25}"',
             'HYBRID_MCTS_AB_ROOT_HINT_COUNT="${HYBRID_MCTS_AB_ROOT_HINT_COUNT:-4}"',
             'HYBRID_AB_POLICY_WEIGHT="${HYBRID_AB_POLICY_WEIGHT:-0.0}"',
+            'HYBRID_ROOT_PAWN_LEVER_TIEBREAK="${HYBRID_ROOT_PAWN_LEVER_TIEBREAK:-true}"',
             'HYBRID_TRACE="${HYBRID_TRACE:-false}"',
             'HYBRID_MCTS_MINIBATCH="${HYBRID_MCTS_MINIBATCH:-0}"',
             'HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS="${HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS:-3000}"',
@@ -337,6 +343,7 @@ def main() -> int:
             'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 25)',
             'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_COUNT", 4)',
             'env_float("METALFISH_HYBRID_AB_POLICY_WEIGHT", 0.0)',
+            '"METALFISH_HYBRID_ROOT_PAWN_LEVER_TIEBREAK", True',
             'env_bool_string("METALFISH_HYBRID_TRACE", False)',
             'env_int("METALFISH_HYBRID_MCTS_MINIBATCH", 0)',
             'env_int("METALFISH_HASH_MB", 0)',
@@ -362,6 +369,7 @@ def main() -> int:
             '"HybridABCandidateVerifyMs": str(HYBRID_AB_CANDIDATE_VERIFY_MS)',
             '"HybridABCandidateVerifyCount": str(HYBRID_AB_CANDIDATE_VERIFY_COUNT)',
             '"HybridABPolicyWeight": str(HYBRID_AB_POLICY_WEIGHT)',
+            '"HybridRootPawnLeverTieBreak": HYBRID_ROOT_PAWN_LEVER_TIEBREAK',
             '"HybridTrace": HYBRID_TRACE',
             '"MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH)',
             "if SYZYGY_PATH:",
@@ -422,6 +430,7 @@ def main() -> int:
             '"HYBRID_AB_CANDIDATE_VERIFY_MS": "HybridABCandidateVerifyMs"',
             '"HYBRID_AB_CANDIDATE_VERIFY_COUNT": "HybridABCandidateVerifyCount"',
             '"HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight"',
+            '"HYBRID_ROOT_PAWN_LEVER_TIEBREAK": "HybridRootPawnLeverTieBreak"',
             '"HYBRID_TRACE": "HybridTrace"',
             '"HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize"',
             '"HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor"',

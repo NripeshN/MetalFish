@@ -1775,9 +1775,9 @@ Move ParallelHybridSearch::make_final_decision() {
       const MCTSRootLookup mcts_lookup = find_mcts_root_move(candidate.move);
       if (mcts_lookup.rank <= 0 || mcts_lookup.rank > 8)
         continue;
-      if (selected_ab.average_score - candidate.average_score > 35)
+      if (selected_ab.average_score - candidate.average_score > 40)
         continue;
-      if (candidate.effort < 500)
+      if (candidate.effort < 200)
         continue;
 
       if (candidate.average_score > best_lever_average ||
@@ -1876,8 +1876,15 @@ Move ParallelHybridSearch::make_final_decision() {
       return policy_tiebreak;
     }
 
-    Move pawn_lever_tiebreak =
-        find_root_pawn_lever_tiebreak(ab_best, false);
+    const float agreement_visit_share =
+        mcts_confidence_total_nodes > 0
+            ? static_cast<float>(mcts_confidence_visits) /
+                  static_cast<float>(mcts_confidence_total_nodes)
+            : 0.0f;
+    const bool allow_non_pawn_agreement_lever =
+        agreement_visit_share < 0.50f && root_q_gap_for_best() < 0.08f;
+    Move pawn_lever_tiebreak = find_root_pawn_lever_tiebreak(
+        ab_best, allow_non_pawn_agreement_lever);
     if (pawn_lever_tiebreak != Move::none()) {
       stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
       trace_simple("root_pawn_lever_tiebreak", pawn_lever_tiebreak);

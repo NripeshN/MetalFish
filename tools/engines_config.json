@@ -60,6 +60,7 @@
         "HybridABCandidateVerifyMs": "120",
         "HybridABCandidateVerifyCount": "4",
         "HybridABPolicyWeight": "0.0",
+        "HybridRootPawnLeverTieBreak": "true",
         "HybridTrace": "false"
       }
     },

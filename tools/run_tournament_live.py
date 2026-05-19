@@ -78,6 +78,7 @@ def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None
         "HYBRID_AB_CANDIDATE_VERIFY_MS": "HybridABCandidateVerifyMs",
         "HYBRID_AB_CANDIDATE_VERIFY_COUNT": "HybridABCandidateVerifyCount",
         "HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight",
+        "HYBRID_ROOT_PAWN_LEVER_TIEBREAK": "HybridRootPawnLeverTieBreak",
         "HYBRID_TRACE": "HybridTrace",
         "HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize",
         "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor",
