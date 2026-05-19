@@ -81,7 +81,7 @@ std::string SelectCompatibleStage(
   const int target_stride = TargetStride(tensor_plan, target);
   std::string selected;
   for (const auto &entry : schedule.entries) {
-    if (!IsCudaDenseScheduleEntry(entry.kind) ||
+    if (!IsCudaOutputScheduleEntry(entry.kind) ||
         entry.first_step >= execution_plan.steps.size()) {
       continue;
     }
@@ -91,7 +91,7 @@ std::string SelectCompatibleStage(
     if (target == CudaOutputTarget::Value && IsCudaValueErrorStage(step.name))
       continue;
 
-    const int source_width = CudaDenseStageWidth(execution_plan, entry);
+    const int source_width = CudaOutputStageWidth(execution_plan, entry);
     if (!StageWidthFitsTarget(source_width, target_stride, target, options))
       continue;
 
@@ -139,7 +139,7 @@ void AddBinding(CudaOutputMapping &mapping,
     return;
   }
 
-  const int source_width = CudaDenseStageWidth(execution_plan, *entry);
+  const int source_width = CudaOutputStageWidth(execution_plan, *entry);
   const bool partial = AllowsPartialRows(target, options);
   if (source_width > target_stride ||
       (!partial && source_width != target_stride)) {

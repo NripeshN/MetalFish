@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `f091d069-0d7e-4a65-ad5a-73763d8eef39` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `dc9e2dd8-d8d6-494c-bc46-f405f0429a7c` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `08e42b9d-50f8-4753-b8c1-48709f400a8c` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `1b989ef8-ce85-4610-b8c6-86455a45bd9b` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -98,7 +98,8 @@ Current CUDA backend boundary:
   so real kernels can index device tensors without backend-local name lookups.
 - `src/nn/cuda/cuda_kernels.*` contains tested CUDA compute primitives for
   dense-affine projections/heads, last-axis layer normalization, shared
-  elementwise activation functions, and input-embedding gate multiply/add.
+  elementwise activation functions, input-embedding gate multiply/add, and
+  scaled residual addition for feed-forward normalization.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production
@@ -110,22 +111,23 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_execution_tape.*` binds resolved execution steps to named
   intermediate device buffers. The current smoke executor uses it for
   dense/activation/normalization intermediates, including multi-stage
-  dense/layernorm sequences; production CUDA layers should extend this rather
-  than allocating anonymous scratch.
+  dense/layernorm, gate, and feed-forward/layernorm sequences; production CUDA
+  layers should extend this rather than allocating anonymous scratch.
 - `src/nn/cuda/cuda_execution_schedule.*` classifies resolved plan steps into
   supported dense/activation stages, supported dense/layernorm stages,
-  supported gate stages, CUDA-managed boundaries, and explicit unsupported
-  operations before any kernels launch.
+  supported gate stages, supported feed-forward stages, CUDA-managed
+  boundaries, and explicit unsupported operations before any kernels launch.
 - `src/nn/cuda/cuda_plan_analysis.*` provides the shared CUDA-local view of
   resolved stage groups, dense stage widths, value-error exclusion, and last
   body/head stage discovery. Stage execution and output mapping use this helper
   so head branching and output source selection stay aligned.
 - `src/nn/cuda/cuda_stage_executor.*` owns reusable dense/activation/layernorm
-  stage execution, input-embedding gate execution, and strided device-row
-  copies, so smoke and production CUDA executors share the same launch path. It
-  derives CUDA-local stage input bindings from the resolved plan and schedule,
-  allowing independent heads to branch from the last supported body output
-  instead of forcing every stage into one linear chain.
+  stage execution, input-embedding gate execution, feed-forward residual
+  layernorm execution, and strided device-row copies, so smoke and production
+  CUDA executors share the same launch path. It derives CUDA-local stage input
+  bindings from the resolved plan and schedule, allowing independent heads to
+  branch from the last supported body output instead of forcing every stage into
+  one linear chain.
 - `src/nn/cuda/cuda_output_mapping.*` maps named executed CUDA stages to
   policy, value, moves-left, and raw-policy output buffers. This keeps output
   ownership explicit instead of treating the last executed stage as every
@@ -136,8 +138,9 @@ Current CUDA backend boundary:
   uploaded device weights and real dense/activation/layernorm kernels without
   enabling production CUDA inference prematurely. Its smoke coverage includes
   named output mapping, explicit branching from a shared body output, chained
-  dense/layernorm stages, dense-only stages, multi-row batches, and strided
-  policy/value/moves-left/raw-policy writes.
+  dense/layernorm stages, dense-only stages, input gates, feed-forward residual
+  layernorm, multi-row batches, and strided policy/value/moves-left/raw-policy
+  writes.
 - Production CUDA still installs a missing executor and refuses real inference.
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength

@@ -55,10 +55,16 @@ void LaunchGateKernel(const float *input, const float *weights, float *output,
                       int batch_size, int width, CudaGateKind kind,
                       cudaStream_t stream = nullptr);
 
+void LaunchResidualAddKernel(const float *parent, const float *secondary,
+                             float *output, int batch_size, int width,
+                             float secondary_scale,
+                             cudaStream_t stream = nullptr);
+
 CudaKernelSmokeResult RunDenseAffineKernelSmoke();
 CudaKernelSmokeResult RunLayerNormKernelSmoke();
 CudaKernelSmokeResult RunActivationKernelSmoke();
 CudaKernelSmokeResult RunGateKernelSmoke();
+CudaKernelSmokeResult RunResidualAddKernelSmoke();
 
 } // namespace Cuda
 } // namespace NN

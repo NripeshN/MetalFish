@@ -136,6 +136,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   constexpr int kBatch = 3;
   constexpr int kInput = 3;
   constexpr int kHidden = 4;
+  constexpr int kFfnHidden = 5;
   constexpr int kPolicy = 2;
   constexpr int kValue = 3;
   constexpr int kMovesLeft = 1;
@@ -158,6 +159,24 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   const std::vector<float> beta = {0.0f, -0.25f, 0.5f, 1.0f};
   const std::vector<float> mult_gate = {1.5f, -0.5f, 2.0f, 0.25f};
   const std::vector<float> add_gate = {0.25f, 1.0f, -0.75f, 0.5f};
+  const std::vector<float> ffn1_weights = {
+      0.20f, -0.10f, 0.50f, 0.75f,
+      -0.40f, 0.30f, 0.10f, -0.20f,
+      0.60f, 0.25f, -0.35f, 0.15f,
+      -0.10f, 0.90f, 0.05f, -0.45f,
+      0.30f, -0.60f, 0.20f, 0.40f,
+  };
+  const std::vector<float> ffn1_bias = {0.10f, -0.20f, 0.05f, 0.30f,
+                                        -0.15f};
+  const std::vector<float> ffn2_weights = {
+      0.50f, -0.25f, 0.10f, 0.20f, -0.40f,
+      -0.30f, 0.60f, 0.15f, -0.10f, 0.25f,
+      0.20f, 0.35f, -0.45f, 0.50f, 0.10f,
+      -0.15f, 0.05f, 0.30f, -0.35f, 0.70f,
+  };
+  const std::vector<float> ffn2_bias = {0.05f, -0.10f, 0.20f, -0.25f};
+  const std::vector<float> ffn_gamma = {1.10f, -0.60f, 0.80f, 1.40f};
+  const std::vector<float> ffn_beta = {0.20f, 0.05f, -0.30f, 0.45f};
   const std::vector<float> dense2_weights = {
       0.25f, -0.5f, 1.0f, 0.75f,
       -1.0f, 0.5f, 0.25f, -0.25f,
@@ -204,6 +223,18 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
        NetworkWeightTensorKind::Gate},
       {"body.ip_add_gate", add_gate.data(), add_gate.size(), {kHidden},
        NetworkWeightTensorKind::Gate},
+      {"body.ip_emb_ffn.dense1_w", ffn1_weights.data(), ffn1_weights.size(),
+       {kFfnHidden, kHidden}, NetworkWeightTensorKind::DenseWeight},
+      {"body.ip_emb_ffn.dense1_b", ffn1_bias.data(), ffn1_bias.size(),
+       {kFfnHidden}, NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ffn.dense2_w", ffn2_weights.data(), ffn2_weights.size(),
+       {kHidden, kFfnHidden}, NetworkWeightTensorKind::DenseWeight},
+      {"body.ip_emb_ffn.dense2_b", ffn2_bias.data(), ffn2_bias.size(),
+       {kHidden}, NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ffn_ln_gammas", ffn_gamma.data(), ffn_gamma.size(),
+       {kHidden}, NetworkWeightTensorKind::NormScale},
+      {"body.ip_emb_ffn_ln_betas", ffn_beta.data(), ffn_beta.size(),
+       {kHidden}, NetworkWeightTensorKind::NormBias},
   };
 
   NetworkResolvedExecutionPlan execution_plan;
@@ -237,6 +268,28 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
            NetworkWeightTensorKind::Gate},
           {13, "body.ip_add_gate", add_gate.size(), {kHidden},
            NetworkWeightTensorKind::Gate},
+      }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::FeedForward,
+      "body.input_embedding_ffn",
+      {
+          {14, "body.ip_emb_ffn.dense1_w", ffn1_weights.size(),
+           {kFfnHidden, kHidden}, NetworkWeightTensorKind::DenseWeight},
+          {15, "body.ip_emb_ffn.dense1_b", ffn1_bias.size(), {kFfnHidden},
+           NetworkWeightTensorKind::DenseBias},
+          {16, "body.ip_emb_ffn.dense2_w", ffn2_weights.size(),
+           {kHidden, kFfnHidden}, NetworkWeightTensorKind::DenseWeight},
+          {17, "body.ip_emb_ffn.dense2_b", ffn2_bias.size(), {kHidden},
+           NetworkWeightTensorKind::DenseBias},
+      }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::LayerNorm,
+      "body.input_embedding_ffn_norm",
+      {
+          {18, "body.ip_emb_ffn_ln_gammas", ffn_gamma.size(), {kHidden},
+           NetworkWeightTensorKind::NormScale},
+          {19, "body.ip_emb_ffn_ln_betas", ffn_beta.size(), {kHidden},
+           NetworkWeightTensorKind::NormBias},
       }});
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
       NetworkExecutionOpKind::Dense,
@@ -281,6 +334,11 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
                                        0.0f);
   std::vector<float> hidden_gated(static_cast<size_t>(kBatch) * kHidden,
                                   0.0f);
+  std::vector<float> ffn_activated(static_cast<size_t>(kBatch) * kFfnHidden,
+                                   0.0f);
+  std::vector<float> ffn_output(static_cast<size_t>(kBatch) * kHidden, 0.0f);
+  std::vector<float> hidden_ffn_normalized(
+      static_cast<size_t>(kBatch) * kHidden, 0.0f);
   std::vector<float> activated(static_cast<size_t>(kBatch) * kPolicy, 0.0f);
   std::vector<float> policy_expected(static_cast<size_t>(kBatch) * kPolicy,
                                      0.0f);
@@ -324,11 +382,52 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
           add_gate[static_cast<size_t>(i)];
     }
 
+    const size_t ffn_offset = static_cast<size_t>(batch) * kFfnHidden;
+    for (int out = 0; out < kFfnHidden; ++out) {
+      float dense = ffn1_bias[static_cast<size_t>(out)];
+      for (int in = 0; in < kHidden; ++in) {
+        dense += hidden_gated[hidden_offset + in] *
+                 ffn1_weights[static_cast<size_t>(out) * kHidden + in];
+      }
+      const float relu = std::max(dense, 0.0f);
+      ffn_activated[ffn_offset + out] = relu * relu;
+    }
+    for (int out = 0; out < kHidden; ++out) {
+      float dense = ffn2_bias[static_cast<size_t>(out)];
+      for (int in = 0; in < kFfnHidden; ++in) {
+        dense += ffn_activated[ffn_offset + in] *
+                 ffn2_weights[static_cast<size_t>(out) * kFfnHidden + in];
+      }
+      ffn_output[hidden_offset + out] = hidden_gated[hidden_offset + out] +
+                                        dense;
+    }
+
+    sum = 0.0f;
+    square_sum = 0.0f;
+    for (int i = 0; i < kHidden; ++i) {
+      const float value = ffn_output[hidden_offset + i];
+      sum += value;
+      square_sum += value * value;
+    }
+    const float ffn_mean = sum / static_cast<float>(kHidden);
+    float ffn_variance =
+        square_sum / static_cast<float>(kHidden) - ffn_mean * ffn_mean;
+    if (ffn_variance < 0.0f)
+      ffn_variance = 0.0f;
+    const float ffn_inv_std = 1.0f / std::sqrt(ffn_variance + 1e-3f);
+    for (int i = 0; i < kHidden; ++i) {
+      const float normalized =
+          (ffn_output[hidden_offset + i] - ffn_mean) * ffn_inv_std;
+      hidden_ffn_normalized[hidden_offset + i] =
+          normalized * ffn_gamma[static_cast<size_t>(i)] +
+          ffn_beta[static_cast<size_t>(i)];
+    }
+
     const size_t policy_offset = static_cast<size_t>(batch) * kPolicy;
     for (int out = 0; out < kPolicy; ++out) {
       float dense = dense2_bias[static_cast<size_t>(out)];
       for (int in = 0; in < kHidden; ++in) {
-        dense += hidden_gated[hidden_offset + in] *
+        dense += hidden_ffn_normalized[hidden_offset + in] *
                  dense2_weights[static_cast<size_t>(out) * kHidden + in];
       }
       const float relu = std::max(dense, 0.0f);
@@ -360,7 +459,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     for (int out = 0; out < kValue; ++out) {
       float dense = dense3_bias[static_cast<size_t>(out)];
       for (int in = 0; in < kHidden; ++in) {
-        dense += hidden_gated[hidden_offset + in] *
+        dense += hidden_ffn_normalized[hidden_offset + in] *
                  dense3_weights[static_cast<size_t>(out) * kHidden + in];
       }
       const float relu = std::max(dense, 0.0f);
@@ -370,7 +469,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     for (int out = 0; out < kMovesLeft; ++out) {
       float dense = moves_bias[static_cast<size_t>(out)];
       for (int in = 0; in < kHidden; ++in) {
-        dense += hidden_gated[hidden_offset + in] *
+        dense += hidden_ffn_normalized[hidden_offset + in] *
                  moves_weights[static_cast<size_t>(out) * kHidden + in];
       }
       const float relu = std::max(dense, 0.0f);

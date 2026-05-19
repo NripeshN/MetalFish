@@ -57,6 +57,25 @@ int GateWidth(const NetworkResolvedExecutionStep &gate) {
   return static_cast<int>(width);
 }
 
+struct FeedForwardWidths {
+  int hidden = 0;
+  int output = 0;
+};
+
+FeedForwardWidths FeedForwardOutputWidths(
+    const NetworkResolvedExecutionStep &ffn) {
+  if (ffn.kind != NetworkExecutionOpKind::FeedForward ||
+      ffn.tensors.size() < 4 || ffn.tensors[0].dims.size() != 2 ||
+      ffn.tensors[2].dims.size() != 2) {
+    throw std::runtime_error("CUDA execution tape feed-forward tensor is invalid");
+  }
+  const auto hidden = ffn.tensors[0].dims[0];
+  const auto output = ffn.tensors[2].dims[0];
+  if (hidden == 0 || output == 0)
+    throw std::runtime_error("CUDA execution tape feed-forward width is zero");
+  return FeedForwardWidths{static_cast<int>(hidden), static_cast<int>(output)};
+}
+
 } // namespace
 
 std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
@@ -69,6 +88,12 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
     return "normalized_output";
   case CudaExecutionBufferRole::GateOutput:
     return "gate_output";
+  case CudaExecutionBufferRole::FeedForwardHiddenOutput:
+    return "feed_forward_hidden_output";
+  case CudaExecutionBufferRole::FeedForwardOutput:
+    return "feed_forward_output";
+  case CudaExecutionBufferRole::ResidualOutput:
+    return "residual_output";
   }
   return "unknown";
 }
@@ -169,9 +194,33 @@ CudaExecutionTape CreateResolvedExecutionTape(
                batch_size, width);
       break;
     }
+    case NetworkExecutionOpKind::FeedForward: {
+      const auto widths = FeedForwardOutputWidths(step);
+      tape.Add(step.name + ".dense1",
+               CudaExecutionBufferRole::FeedForwardHiddenOutput, batch_size,
+               widths.hidden);
+      tape.Add(step.name + ".activation",
+               CudaExecutionBufferRole::ActivationOutput, batch_size,
+               widths.hidden);
+      tape.Add(step.name + ".dense2",
+               CudaExecutionBufferRole::FeedForwardOutput, batch_size,
+               widths.output);
+      break;
+    }
     default:
       break;
     }
+  }
+
+  for (std::size_t i = 1; i < plan.steps.size(); ++i) {
+    const auto &step = plan.steps[i];
+    if (step.kind != NetworkExecutionOpKind::LayerNorm ||
+        plan.steps[i - 1].kind != NetworkExecutionOpKind::FeedForward) {
+      continue;
+    }
+    const int width = LayerNormWidth(step);
+    tape.Add(step.name + ".residual", CudaExecutionBufferRole::ResidualOutput,
+             batch_size, width);
   }
   return tape;
 }

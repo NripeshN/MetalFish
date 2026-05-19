@@ -173,6 +173,15 @@ __global__ void GateKernel(const float *input, const float *weights,
       kind == CudaGateKind::Add ? value + gate : value * gate;
 }
 
+__global__ void ResidualAddKernel(const float *parent, const float *secondary,
+                                  float *output, int total,
+                                  float secondary_scale) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+  output[index] = parent[index] + secondary[index] * secondary_scale;
+}
+
 } // namespace
 
 void LaunchDenseAffineKernel(const float *input, const float *weights,
@@ -270,6 +279,31 @@ void LaunchGateKernel(const float *input, const float *weights, float *output,
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage("GateKernel synchronize",
                                              status));
+}
+
+void LaunchResidualAddKernel(const float *parent, const float *secondary,
+                             float *output, int batch_size, int width,
+                             float secondary_scale, cudaStream_t stream) {
+  if (!parent || !secondary || !output)
+    throw std::runtime_error("CUDA residual add kernel received null buffer");
+  if (batch_size <= 0 || width <= 0)
+    throw std::runtime_error("CUDA residual add kernel dimensions are invalid");
+
+  const int total = batch_size * width;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  ResidualAddKernel<<<blocks, kThreads, 0, stream>>>(
+      parent, secondary, output, total, secondary_scale);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("ResidualAddKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("ResidualAddKernel synchronize", status));
 }
 
 CudaKernelSmokeResult RunDenseAffineKernelSmoke() {
@@ -601,6 +635,73 @@ CudaKernelSmokeResult RunGateKernelSmoke() {
   FreeDevice(device_input);
   FreeDevice(device_mult);
   FreeDevice(device_add);
+  FreeDevice(device_output);
+
+  if (result.message.empty())
+    result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunResidualAddKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 2;
+  constexpr int kWidth = 4;
+  constexpr float kScale = 0.375f;
+  const std::vector<float> parent = {
+      1.0f, -2.0f, 0.5f, 3.0f,
+      -1.0f, 0.25f, 2.0f, -0.5f,
+  };
+  const std::vector<float> secondary = {
+      2.0f, 0.5f, -4.0f, 1.5f,
+      -2.5f, 3.0f, 0.25f, -1.0f,
+  };
+  std::vector<float> actual(kBatch * kWidth, 0.0f);
+  std::vector<float> expected(kBatch * kWidth, 0.0f);
+  for (std::size_t i = 0; i < expected.size(); ++i)
+    expected[i] = parent[i] + secondary[i] * kScale;
+
+  float *device_parent = nullptr;
+  float *device_secondary = nullptr;
+  float *device_output = nullptr;
+  try {
+    AllocateDevice(&device_parent, parent.size(),
+                   "cudaMalloc(residual_parent)");
+    AllocateDevice(&device_secondary, secondary.size(),
+                   "cudaMalloc(residual_secondary)");
+    AllocateDevice(&device_output, actual.size(),
+                   "cudaMalloc(residual_output)");
+    UploadFloats(device_parent, parent, "cudaMemcpy(residual_parent)");
+    UploadFloats(device_secondary, secondary,
+                 "cudaMemcpy(residual_secondary)");
+
+    LaunchResidualAddKernel(device_parent, device_secondary, device_output,
+                            kBatch, kWidth, kScale);
+    DownloadFloats(actual, device_output, "cudaMemcpy(residual_output)");
+
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+      if (std::fabs(actual[i] - expected[i]) > 1e-6f) {
+        result.status = CudaSmokeStatus::Mismatch;
+        result.message = "CUDA residual add kernel output mismatch";
+        break;
+      }
+    }
+    if (result.message.empty())
+      result.status = CudaSmokeStatus::Success;
+  } catch (const std::exception &e) {
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+  }
+
+  FreeDevice(device_parent);
+  FreeDevice(device_secondary);
   FreeDevice(device_output);
 
   if (result.message.empty())

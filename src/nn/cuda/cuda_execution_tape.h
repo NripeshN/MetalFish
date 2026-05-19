@@ -25,6 +25,9 @@ enum class CudaExecutionBufferRole {
   ActivationOutput,
   NormalizedOutput,
   GateOutput,
+  FeedForwardHiddenOutput,
+  FeedForwardOutput,
+  ResidualOutput,
 };
 
 std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role);

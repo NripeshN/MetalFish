@@ -23,6 +23,8 @@ enum class CudaExecutionScheduleKind {
   DenseActivationStage,
   DenseLayerNormStage,
   GateStage,
+  FeedForwardStage,
+  FeedForwardLayerNormStage,
   Unsupported,
 };
 
@@ -43,6 +45,8 @@ struct CudaExecutionSchedule {
   int dense_activation_stage_count = 0;
   int dense_layernorm_stage_count = 0;
   int gate_stage_count = 0;
+  int feed_forward_stage_count = 0;
+  int feed_forward_layernorm_stage_count = 0;
   int unsupported_count = 0;
 
   bool FullySupported() const { return unsupported_count == 0; }

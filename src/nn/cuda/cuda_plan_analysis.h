@@ -42,6 +42,8 @@ const CudaExecutionScheduleEntry *FindCudaStageEntry(
     const CudaExecutionSchedule &schedule, std::string_view stage_name);
 int CudaDenseStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
                         const CudaExecutionScheduleEntry &entry);
+int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
+                         const CudaExecutionScheduleEntry &entry);
 std::string LastCudaDenseStageInGroup(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaExecutionSchedule &schedule, CudaPlanStageGroup group);

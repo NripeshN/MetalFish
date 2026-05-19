@@ -66,6 +66,31 @@ CudaExecutionScheduleEntry GateEntry(const NetworkResolvedExecutionPlan &plan,
                                     "elementwise gate"};
 }
 
+CudaExecutionScheduleEntry FeedForwardLayerNormEntry(
+    const NetworkResolvedExecutionPlan &plan, std::size_t ffn_index,
+    std::size_t norm_index) {
+  const auto &ffn = plan.steps[ffn_index];
+  return CudaExecutionScheduleEntry{
+      CudaExecutionScheduleKind::FeedForwardLayerNormStage,
+      ffn_index,
+      norm_index,
+      ffn.kind,
+      ffn.name + " -> " + plan.steps[norm_index].name,
+      "feed-forward residual plus layernorm"};
+}
+
+CudaExecutionScheduleEntry FeedForwardEntry(
+    const NetworkResolvedExecutionPlan &plan, std::size_t ffn_index) {
+  const auto &ffn = plan.steps[ffn_index];
+  return CudaExecutionScheduleEntry{
+      CudaExecutionScheduleKind::FeedForwardStage,
+      ffn_index,
+      std::numeric_limits<std::size_t>::max(),
+      ffn.kind,
+      ffn.name,
+      "feed-forward block"};
+}
+
 CudaExecutionScheduleEntry UnsupportedEntry(
     const NetworkResolvedExecutionPlan &plan, std::size_t step_index,
     std::string reason) {
@@ -93,6 +118,12 @@ void AddEntry(CudaExecutionSchedule &schedule,
   case CudaExecutionScheduleKind::GateStage:
     ++schedule.gate_stage_count;
     break;
+  case CudaExecutionScheduleKind::FeedForwardStage:
+    ++schedule.feed_forward_stage_count;
+    break;
+  case CudaExecutionScheduleKind::FeedForwardLayerNormStage:
+    ++schedule.feed_forward_layernorm_stage_count;
+    break;
   case CudaExecutionScheduleKind::Unsupported:
     ++schedule.unsupported_count;
     break;
@@ -112,6 +143,10 @@ std::string CudaExecutionScheduleKindName(CudaExecutionScheduleKind kind) {
     return "dense_layernorm_stage";
   case CudaExecutionScheduleKind::GateStage:
     return "gate_stage";
+  case CudaExecutionScheduleKind::FeedForwardStage:
+    return "feed_forward_stage";
+  case CudaExecutionScheduleKind::FeedForwardLayerNormStage:
+    return "feed_forward_layernorm_stage";
   case CudaExecutionScheduleKind::Unsupported:
     return "unsupported";
   }
@@ -133,6 +168,9 @@ std::string CudaExecutionSchedule::Summary() const {
       << dense_activation_stage_count << " dense/activation stages, "
       << dense_layernorm_stage_count << " dense/layernorm stages, "
       << gate_stage_count << " gate stages, "
+      << feed_forward_stage_count << " feed-forward stages, "
+      << feed_forward_layernorm_stage_count
+      << " feed-forward/layernorm stages, "
       << boundary_count << " boundaries, " << unsupported_count
       << " unsupported";
   if (const auto *unsupported = FirstUnsupported()) {
@@ -167,6 +205,18 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
 
     if (step.kind == NetworkExecutionOpKind::Gate) {
       AddEntry(schedule, GateEntry(plan, i));
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::FeedForward) {
+      const std::size_t norm_index = i + 1;
+      if (norm_index < plan.steps.size() &&
+          plan.steps[norm_index].kind == NetworkExecutionOpKind::LayerNorm) {
+        AddEntry(schedule, FeedForwardLayerNormEntry(plan, i, norm_index));
+        i = norm_index;
+        continue;
+      }
+      AddEntry(schedule, FeedForwardEntry(plan, i));
       continue;
     }
 

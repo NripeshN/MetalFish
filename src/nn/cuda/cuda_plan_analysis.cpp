@@ -20,7 +20,9 @@ bool IsCudaDenseScheduleEntry(CudaExecutionScheduleKind kind) {
 
 bool IsCudaOutputScheduleEntry(CudaExecutionScheduleKind kind) {
   return IsCudaDenseScheduleEntry(kind) ||
-         kind == CudaExecutionScheduleKind::GateStage;
+         kind == CudaExecutionScheduleKind::GateStage ||
+         kind == CudaExecutionScheduleKind::FeedForwardStage ||
+         kind == CudaExecutionScheduleKind::FeedForwardLayerNormStage;
 }
 
 bool CudaStageNameStartsWith(std::string_view value,
@@ -86,7 +88,7 @@ const CudaExecutionScheduleEntry *FindCudaStageEntry(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaExecutionSchedule &schedule, std::string_view stage_name) {
   for (const auto &entry : schedule.entries) {
-    if (!IsCudaDenseScheduleEntry(entry.kind))
+    if (!IsCudaOutputScheduleEntry(entry.kind))
       continue;
     if (entry.first_step >= execution_plan.steps.size())
       continue;
@@ -106,6 +108,29 @@ int CudaDenseStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
     throw std::runtime_error("CUDA dense stage tensor is invalid");
   }
   return static_cast<int>(step.tensors[0].dims[0]);
+}
+
+int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
+                         const CudaExecutionScheduleEntry &entry) {
+  if (entry.first_step >= execution_plan.steps.size())
+    throw std::runtime_error("CUDA output stage index is invalid");
+  const auto &step = execution_plan.steps[entry.first_step];
+  if (IsCudaDenseScheduleEntry(entry.kind))
+    return CudaDenseStageWidth(execution_plan, entry);
+  if (entry.kind == CudaExecutionScheduleKind::GateStage) {
+    if (step.kind != NetworkExecutionOpKind::Gate || step.tensors.empty())
+      throw std::runtime_error("CUDA gate stage tensor is invalid");
+    return static_cast<int>(step.tensors[0].elements);
+  }
+  if (entry.kind == CudaExecutionScheduleKind::FeedForwardStage ||
+      entry.kind == CudaExecutionScheduleKind::FeedForwardLayerNormStage) {
+    if (step.kind != NetworkExecutionOpKind::FeedForward ||
+        step.tensors.size() < 4 || step.tensors[2].dims.size() != 2) {
+      throw std::runtime_error("CUDA feed-forward stage tensor is invalid");
+    }
+    return static_cast<int>(step.tensors[2].dims[0]);
+  }
+  throw std::runtime_error("CUDA output stage kind has no width");
 }
 
 std::string LastCudaDenseStageInGroup(

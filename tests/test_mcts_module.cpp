@@ -795,6 +795,11 @@ void test_cuda_execution_schedule(TestCounter &tc) {
          "CUDA schedule should count dense/layernorm stages", tc);
   expect(schedule.gate_stage_count == 0,
          "CUDA schedule should not count absent gate stages", tc);
+  expect(schedule.feed_forward_stage_count == 0,
+         "CUDA schedule should not count absent feed-forward stages", tc);
+  expect(schedule.feed_forward_layernorm_stage_count == 0,
+         "CUDA schedule should not count absent feed-forward/layernorm stages",
+         tc);
   expect(schedule.unsupported_count == 0,
          "CUDA schedule should not report unsupported stages", tc);
   expect(schedule.entries.size() == 3,
@@ -849,6 +854,39 @@ void test_cuda_execution_schedule(TestCounter &tc) {
              gated_schedule.entries[2].kind ==
                  NN::Cuda::CudaExecutionScheduleKind::GateStage,
          "CUDA schedule should classify gates explicitly", tc);
+
+  NN::NetworkResolvedExecutionPlan ffn = gated;
+  ffn.steps.insert(
+      ffn.steps.begin() + 3,
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::FeedForward,
+          "body.input_embedding_ffn",
+          {}});
+  ffn.steps.insert(
+      ffn.steps.begin() + 4,
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::LayerNorm,
+          "body.input_embedding_ffn_norm",
+          {}});
+  const auto ffn_schedule = NN::Cuda::CreateCudaExecutionSchedule(ffn);
+  expect(ffn_schedule.FullySupported(),
+         "feed-forward/layernorm schedule should be supported", tc);
+  expect(ffn_schedule.feed_forward_layernorm_stage_count == 1,
+         "CUDA schedule should fuse feed-forward/layernorm stages", tc);
+  expect(ffn_schedule.entries[2].kind ==
+             NN::Cuda::CudaExecutionScheduleKind::FeedForwardLayerNormStage,
+         "CUDA schedule should classify fused feed-forward stages explicitly",
+         tc);
+
+  NN::NetworkResolvedExecutionPlan ffn_only;
+  ffn_only.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::FeedForward, "body.ffn_only", {}});
+  const auto ffn_only_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(ffn_only);
+  expect(ffn_only_schedule.FullySupported(),
+         "feed-forward without layernorm should be supported", tc);
+  expect(ffn_only_schedule.feed_forward_stage_count == 1,
+         "CUDA schedule should count standalone feed-forward stages", tc);
 }
 
 void test_cuda_output_mapping(TestCounter &tc) {
@@ -1011,12 +1049,38 @@ void test_cuda_output_mapping(TestCounter &tc) {
   branched.steps.insert(
       branched.steps.begin() + 4,
       NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::FeedForward,
+          "body.input_embedding_ffn",
+          {
+              {10, "body.ip_emb_ffn.dense1_w", 24, {6, 4},
+               NN::NetworkWeightTensorKind::DenseWeight},
+              {11, "body.ip_emb_ffn.dense1_b", 6, {6},
+               NN::NetworkWeightTensorKind::DenseBias},
+              {12, "body.ip_emb_ffn.dense2_w", 24, {4, 6},
+               NN::NetworkWeightTensorKind::DenseWeight},
+              {13, "body.ip_emb_ffn.dense2_b", 4, {4},
+               NN::NetworkWeightTensorKind::DenseBias},
+          }});
+  branched.steps.insert(
+      branched.steps.begin() + 5,
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::LayerNorm,
+          "body.input_embedding_ffn_norm",
+          {
+              {14, "body.ip_emb_ffn_ln_gammas", 4, {4},
+               NN::NetworkWeightTensorKind::NormScale},
+              {15, "body.ip_emb_ffn_ln_betas", 4, {4},
+               NN::NetworkWeightTensorKind::NormBias},
+          }});
+  branched.steps.insert(
+      branched.steps.begin() + 6,
+      NN::NetworkResolvedExecutionStep{
           NN::NetworkExecutionOpKind::Dense,
           "policy.smoke.dense2",
           {
-              {10, "policy.smoke.ip2_pol_w", 4, {2, 2},
+              {16, "policy.smoke.ip2_pol_w", 4, {2, 2},
                NN::NetworkWeightTensorKind::DenseWeight},
-              {11, "policy.smoke.ip2_pol_b", 2, {2},
+              {17, "policy.smoke.ip2_pol_b", 2, {2},
                NN::NetworkWeightTensorKind::DenseBias},
           }});
   const auto branched_schedule = NN::Cuda::CreateCudaExecutionSchedule(branched);
@@ -1028,7 +1092,7 @@ void test_cuda_output_mapping(TestCounter &tc) {
          tc);
   expect(derived_inputs.FindSource("policy.smoke.output") &&
              *derived_inputs.FindSource("policy.smoke.output") ==
-                 "body.smoke.gates",
+                 "body.input_embedding_ffn",
          "CUDA stage input derivation should branch policy from last body output",
          tc);
   expect(!derived_inputs.FindSource("policy.smoke.dense2"),
@@ -1036,11 +1100,11 @@ void test_cuda_output_mapping(TestCounter &tc) {
          tc);
   expect(derived_inputs.FindSource("value.smoke.dense2") &&
              *derived_inputs.FindSource("value.smoke.dense2") ==
-                 "body.smoke.gates",
+                 "body.input_embedding_ffn",
          "CUDA stage input derivation should branch value from body", tc);
   expect(derived_inputs.FindSource("moves_left.output") &&
              *derived_inputs.FindSource("moves_left.output") ==
-                 "body.smoke.gates",
+                 "body.input_embedding_ffn",
          "CUDA stage input derivation should branch moves-left from body", tc);
 
   NN::NetworkResolvedExecutionPlan value_with_error = plan;
@@ -1125,6 +1189,12 @@ void test_cuda_dense_kernels(TestCounter &tc) {
   expect(gate_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              gate_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA gate kernel should pass or skip without a device", tc);
+
+  auto residual_smoke = NN::Cuda::RunResidualAddKernelSmoke();
+  std::cout << "    " << residual_smoke.message << std::endl;
+  expect(residual_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             residual_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA residual add kernel should pass or skip without a device", tc);
 }
 #endif
 
