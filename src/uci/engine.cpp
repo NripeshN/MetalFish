@@ -155,6 +155,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridMCTSABRootHintCount", Option(4, 1, 16));
   options.add("HybridABCandidateVerifyMs", Option(120, 0, 1000));
   options.add("HybridABCandidateVerifyCount", Option(4, 1, 10));
+  options.add("HybridRootPawnLeverTieBreak", Option(false));
   options.add("HybridTrace", Option(false));
   options.add("TransformerLowTimeFallbackMs", Option(3000, 0, 30000));
   options.add("TransformerMinMoveBudgetMs", Option(400, 0, 5000));

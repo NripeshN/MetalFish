@@ -162,6 +162,7 @@ def main() -> int:
             'options.add("HybridMCTSABRootHints"',
             'options.add("HybridMCTSABRootHintDelayMs"',
             'options.add("HybridABCandidateVerifyMs"',
+            'options.add("HybridRootPawnLeverTieBreak"',
         ],
     )
     assert_file_contains(
@@ -179,6 +180,7 @@ def main() -> int:
             '"HybridMCTSABRootHints"',
             '"HybridMCTSABRootHintDelayMs"',
             '"HybridABCandidateVerifyMs"',
+            '"HybridRootPawnLeverTieBreak"',
         ],
     )
 

@@ -1083,6 +1083,8 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
       static_cast<int>(engine.get_options()["HybridABCandidateVerifyMs"]);
   config.ab_candidate_verify_count =
       static_cast<int>(engine.get_options()["HybridABCandidateVerifyCount"]);
+  config.root_pawn_lever_tiebreak =
+      engine.get_options()["HybridRootPawnLeverTieBreak"];
   config.trace_decisions = engine.get_options()["HybridTrace"];
   return config;
 }

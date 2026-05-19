@@ -211,6 +211,7 @@ struct ParallelHybridConfig {
   int mcts_ab_root_hint_count = 4;
   int ab_candidate_verify_ms = 120;
   int ab_candidate_verify_count = 4;
+  bool root_pawn_lever_tiebreak = false;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees
@@ -416,6 +417,8 @@ bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
                               uint32_t top_visits, float top_q,
                               float top_policy, uint32_t candidate_visits,
                               float candidate_q, float candidate_policy);
+
+bool HybridIsPawnLever(const Position &pos, Move move);
 
 float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
                             const float *candidate_qs, int candidate_count);

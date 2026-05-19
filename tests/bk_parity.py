@@ -355,6 +355,7 @@ def setup_metalfish_hybrid(
     ab_candidate_verify_count: int,
     mcts_minibatch: int,
     low_time_fallback_ms: int,
+    root_pawn_lever_tiebreak: bool,
 ) -> None:
     total_threads = max(3, threads, mcts_threads + ab_threads)
     sess.setoption("UseMCTS", "false")
@@ -379,6 +380,10 @@ def setup_metalfish_hybrid(
     sess.setoption("HybridMCTSABRootHintCount", str(root_hint_count))
     sess.setoption("HybridABCandidateVerifyMs", str(ab_candidate_verify_ms))
     sess.setoption("HybridABCandidateVerifyCount", str(ab_candidate_verify_count))
+    sess.setoption(
+        "HybridRootPawnLeverTieBreak",
+        "true" if root_pawn_lever_tiebreak else "false",
+    )
     sess.setoption("HybridABPolicyWeight", str(ab_policy_weight))
     sess.setoption("HybridTrace", "true" if trace else "false")
     sess.send("isready")
@@ -634,6 +639,7 @@ def write_json_report(
             "hybrid_ab_candidate_verify_count": args.hybrid_ab_candidate_verify_count,
             "hybrid_mcts_minibatch": args.hybrid_mcts_minibatch,
             "hybrid_low_time_fallback_ms": args.hybrid_low_time_fallback_ms,
+            "hybrid_root_pawn_lever_tiebreak": args.hybrid_root_pawn_lever_tiebreak,
         },
         "engines": {},
     }
@@ -739,6 +745,7 @@ def run_once(
                 args.hybrid_ab_candidate_verify_count,
                 args.hybrid_mcts_minibatch,
                 args.hybrid_low_time_fallback_ms,
+                args.hybrid_root_pawn_lever_tiebreak,
             )
             s.warmup(
                 mode,
@@ -894,6 +901,7 @@ def main() -> int:
     parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=4)
     parser.add_argument("--hybrid-mcts-minibatch", type=int, default=0)
     parser.add_argument("--hybrid-low-time-fallback-ms", type=int, default=3000)
+    parser.add_argument("--hybrid-root-pawn-lever-tiebreak", action="store_true")
     parser.add_argument("--multipv", type=int, default=1)
     parser.add_argument("--backend", default="metal")
     parser.add_argument("--weights", type=pathlib.Path, default=WEIGHTS)
