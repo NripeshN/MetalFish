@@ -38,8 +38,21 @@ class TraceDecision:
 @dataclass
 class MoveComparison:
     decision: TraceDecision
+    selected_eval: Optional[int] = None
     ab_eval: Optional[int] = None
     mcts_eval: Optional[int] = None
+
+    @property
+    def selected_minus_ab(self) -> Optional[int]:
+        if self.selected_eval is None or self.ab_eval is None:
+            return None
+        return self.selected_eval - self.ab_eval
+
+    @property
+    def selected_minus_mcts(self) -> Optional[int]:
+        if self.selected_eval is None or self.mcts_eval is None:
+            return None
+        return self.selected_eval - self.mcts_eval
 
     @property
     def mcts_minus_ab(self) -> Optional[int]:
@@ -172,6 +185,20 @@ def legal_uci(fen: str, move: str) -> bool:
         return False
 
 
+def comparable_trace_decision(decision: TraceDecision) -> bool:
+    selected_legal = legal_uci(decision.fen, decision.selected)
+    ab_legal = legal_uci(decision.fen, decision.ab_move)
+    mcts_legal = legal_uci(decision.fen, decision.mcts_move)
+    if not selected_legal or not (ab_legal or mcts_legal):
+        return False
+    legal_moves = {decision.selected}
+    if ab_legal:
+        legal_moves.add(decision.ab_move)
+    if mcts_legal:
+        legal_moves.add(decision.mcts_move)
+    return len(legal_moves) > 1
+
+
 def field_float(fields: dict[str, str], name: str, default: float = 0.0) -> float:
     try:
         return float(fields.get(name, default))
@@ -212,7 +239,12 @@ def bucket(value: float, cuts: list[float], labels: list[str]) -> str:
 
 def interesting_score(decision: TraceDecision) -> tuple[int, float, int, int]:
     fields = decision.fields
-    reason_bonus = 1000 if decision.reason.startswith("mcts_") else 0
+    reason_bonus = (
+        1000
+        if decision.reason.startswith("mcts_")
+        or decision.reason == "root_pawn_lever_tiebreak"
+        else 0
+    )
     share = field_float(fields, "VisitShare")
     gap = field_float(fields, "RootQGap")
     visits = field_int(fields, "MCTSBestVisits")
@@ -450,45 +482,111 @@ def print_bucket_summary(comparisons: list[MoveComparison], min_count: int) -> N
             )
 
 
+def format_cp(value: Optional[int], width: int = 6) -> str:
+    if value is None:
+        return " " * (width - 2) + "--"
+    return f"{value:+{width}d}"
+
+
+def format_diff(value: Optional[int], width: int = 7) -> str:
+    if value is None:
+        return " " * (width - 2) + "--"
+    return f"{value:+{width}d}"
+
+
+def summarize_diffs(
+    label: str,
+    diffs: list[int],
+    better_label: str,
+    worse_label: str,
+    average_label: str,
+) -> str:
+    better = sum(1 for diff in diffs if diff > 0)
+    equal = sum(1 for diff in diffs if diff == 0)
+    worse = sum(1 for diff in diffs if diff < 0)
+    average = sum(diffs) / len(diffs)
+    return (
+        f"    {label}: n={len(diffs)} {better_label}={better} "
+        f"equal={equal} {worse_label}={worse} {average_label}={average:+.1f}"
+    )
+
+
 def print_comparisons(comparisons: list[MoveComparison], bucket_min: int) -> None:
     if not comparisons:
-        print("No disagreement candidates matched the filters.")
+        print("No decision candidates matched the filters.")
         return
 
-    by_reason: dict[str, list[int]] = {}
+    by_reason: dict[str, dict[str, list[int]]] = {}
     for comparison in comparisons:
-        diff = comparison.mcts_minus_ab
-        if diff is None:
-            continue
-        by_reason.setdefault(comparison.decision.reason, []).append(diff)
+        groups = by_reason.setdefault(
+            comparison.decision.reason,
+            {
+                "selected_minus_ab": [],
+                "selected_minus_mcts": [],
+                "mcts_minus_ab": [],
+            },
+        )
+        if comparison.selected_minus_ab is not None:
+            groups["selected_minus_ab"].append(comparison.selected_minus_ab)
+        if comparison.selected_minus_mcts is not None:
+            groups["selected_minus_mcts"].append(comparison.selected_minus_mcts)
+        if comparison.mcts_minus_ab is not None:
+            groups["mcts_minus_ab"].append(comparison.mcts_minus_ab)
 
     print("Stockfish comparison summary, centipawns from original side:")
-    for reason, diffs in sorted(by_reason.items()):
-        better = sum(1 for diff in diffs if diff > 0)
-        equal = sum(1 for diff in diffs if diff == 0)
-        worse = sum(1 for diff in diffs if diff < 0)
-        average = sum(diffs) / len(diffs)
-        print(
-            f"  {reason}: n={len(diffs)} mcts_better={better} "
-            f"equal={equal} ab_better={worse} avg_mcts_minus_ab={average:+.1f}"
-        )
+    for reason, groups in sorted(by_reason.items()):
+        print(f"  {reason}:")
+        if groups["selected_minus_ab"]:
+            print(
+                summarize_diffs(
+                    "selected_vs_ab",
+                    groups["selected_minus_ab"],
+                    "selected_better",
+                    "ab_better",
+                    "avg_selected_minus_ab",
+                )
+            )
+        if groups["selected_minus_mcts"]:
+            print(
+                summarize_diffs(
+                    "selected_vs_mcts",
+                    groups["selected_minus_mcts"],
+                    "selected_better",
+                    "mcts_better",
+                    "avg_selected_minus_mcts",
+                )
+            )
+        if groups["mcts_minus_ab"]:
+            print(
+                summarize_diffs(
+                    "mcts_vs_ab",
+                    groups["mcts_minus_ab"],
+                    "mcts_better",
+                    "ab_better",
+                    "avg_mcts_minus_ab",
+                )
+            )
     print()
 
     header = (
-        "game ply side reason selected AB sfAB MCTS sfMCTS "
-        "MCTS-AB share gap delta visits/root current/root confidence/root"
+        "game ply side reason selected sfSelected AB sfAB selected-AB "
+        "MCTS sfMCTS selected-MCTS MCTS-AB share gap delta "
+        "visits/root current/root confidence/root"
     )
     print(header)
     for comparison in comparisons:
         d = comparison.decision
         fields = d.fields
-        diff = comparison.mcts_minus_ab
         visits, root_visits, current_visits, current_root_visits = visit_pair(fields)
         confidence_visits, confidence_root_visits = confidence_pair(fields)
         print(
             f"{d.game:>4} {d.ply:>3} {d.side:<5} {d.reason:<34} "
-            f"{d.selected:<5} {d.ab_move:<5} {comparison.ab_eval:+5d} "
-            f"{d.mcts_move:<5} {comparison.mcts_eval:+6d} {diff:+7d} "
+            f"{d.selected:<5} {format_cp(comparison.selected_eval)} "
+            f"{d.ab_move:<5} {format_cp(comparison.ab_eval)} "
+            f"{format_diff(comparison.selected_minus_ab)} "
+            f"{d.mcts_move:<5} {format_cp(comparison.mcts_eval)} "
+            f"{format_diff(comparison.selected_minus_mcts)} "
+            f"{format_diff(comparison.mcts_minus_ab)} "
             f"{field_float(fields, 'VisitShare'):.3f} "
             f"{field_float(fields, 'RootQGap'):.3f} "
             f"{field_int(fields, 'EvalDelta'):>5} "
@@ -496,6 +594,52 @@ def print_comparisons(comparisons: list[MoveComparison], bucket_min: int) -> Non
             f"{confidence_visits}/{confidence_root_visits}"
         )
     print_bucket_summary(comparisons, bucket_min)
+
+
+def evaluate_trace_decision(
+    probe: StockfishProbe, decision: TraceDecision, depth: int
+) -> MoveComparison:
+    evals: dict[str, int] = {}
+    for move in (decision.selected, decision.ab_move, decision.mcts_move):
+        if move in evals or not legal_uci(decision.fen, move):
+            continue
+        evals[move] = probe.eval_after(decision.fen, move, depth)
+    return MoveComparison(
+        decision=decision,
+        selected_eval=evals.get(decision.selected),
+        ab_eval=evals.get(decision.ab_move),
+        mcts_eval=evals.get(decision.mcts_move),
+    )
+
+
+def selected_quality_failures(
+    comparisons: list[MoveComparison], threshold_cp: int
+) -> list[str]:
+    if threshold_cp <= 0:
+        return []
+
+    failures: list[str] = []
+    for comparison in comparisons:
+        d = comparison.decision
+        if (
+            comparison.selected_minus_ab is not None
+            and comparison.selected_minus_ab < -threshold_cp
+        ):
+            failures.append(
+                f"game={d.game} ply={d.ply} reason={d.reason} "
+                f"selected={d.selected} AB={d.ab_move} "
+                f"selected_minus_ab={comparison.selected_minus_ab}"
+            )
+        if (
+            comparison.selected_minus_mcts is not None
+            and comparison.selected_minus_mcts < -threshold_cp
+        ):
+            failures.append(
+                f"game={d.game} ply={d.ply} reason={d.reason} "
+                f"selected={d.selected} MCTS={d.mcts_move} "
+                f"selected_minus_mcts={comparison.selected_minus_mcts}"
+            )
+    return failures
 
 
 def main() -> int:
@@ -527,6 +671,16 @@ def main() -> int:
     parser.add_argument("--no-stockfish", action="store_true")
     parser.add_argument("--require-sane-visits", action="store_true")
     parser.add_argument(
+        "--fail-selected-worse-than",
+        type=int,
+        default=0,
+        metavar="CP",
+        help=(
+            "Exit non-zero if the selected move is worse than AB or MCTS by "
+            "more than this many Stockfish centipawns (0=disabled)."
+        ),
+    )
+    parser.add_argument(
         "--keep-hash",
         action="store_true",
         help="Do not clear Stockfish hash before each candidate eval.",
@@ -548,9 +702,7 @@ def main() -> int:
     candidates = [
         d
         for d in decisions
-        if d.ab_move != d.mcts_move
-        and legal_uci(d.fen, d.ab_move)
-        and legal_uci(d.fen, d.mcts_move)
+        if comparable_trace_decision(d)
         and field_float(d.fields, "VisitShare") >= args.min_share
         and field_float(d.fields, "VisitShare") <= args.max_share
         and field_int(d.fields, "MCTSBestVisits") >= args.min_visits
@@ -606,21 +758,21 @@ def main() -> int:
     comparisons: list[MoveComparison] = []
     try:
         for decision in candidates:
-            comparisons.append(
-                MoveComparison(
-                    decision=decision,
-                    ab_eval=probe.eval_after(
-                        decision.fen, decision.ab_move, args.depth
-                    ),
-                    mcts_eval=probe.eval_after(
-                        decision.fen, decision.mcts_move, args.depth
-                    ),
-                )
-            )
+            comparisons.append(evaluate_trace_decision(probe, decision, args.depth))
     finally:
         probe.close()
 
     print_comparisons(comparisons, args.bucket_min)
+    failures = selected_quality_failures(comparisons, args.fail_selected_worse_than)
+    if failures:
+        print()
+        print(
+            "Selected-move quality failures "
+            f"(threshold {args.fail_selected_worse_than} cp):"
+        )
+        for failure in failures:
+            print(f"  {failure}")
+        return 1
     return 0
 
 

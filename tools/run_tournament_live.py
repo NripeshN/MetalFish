@@ -13,8 +13,8 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 try:
     import chess
@@ -386,6 +386,7 @@ def play_game(
     movetime_ms: int = 0,
     nodes: int = 0,
     max_moves: int = 300,
+    max_plies: int = 0,
     capture_search_log: bool = False,
 ) -> GameResult:
     if opening:
@@ -411,8 +412,9 @@ def play_game(
         game_pgn.setup(opening.fen())
     node = game_pgn
     search_log: List[dict] = []
+    ply_limit = max_plies if max_plies > 0 else max_moves * 2
 
-    for ply in range(max_moves * 2):
+    for ply in range(ply_limit):
         if board.is_game_over(claim_draw=True):
             result = board.result(claim_draw=True)
             reason = "adjudication"
@@ -516,12 +518,13 @@ def play_game(
         node = node.add_variation(move)
         board.push(move)
 
+    completed_plies = len(move_list)
     return GameResult(
         white.name,
         black.name,
         "1/2-1/2",
-        "max moves",
-        max_moves,
+        "max plies" if max_plies > 0 else "max moves",
+        (completed_plies + 1) // 2,
         str(game_pgn),
         search_log,
     )
@@ -556,6 +559,55 @@ class MatchResult:
         return -400.0 * math.log10(1.0 / p - 1.0)
 
 
+def match_result_to_dict(mr: MatchResult) -> dict:
+    return {
+        "engine1": mr.engine1,
+        "engine2": mr.engine2,
+        "wins": mr.wins,
+        "draws": mr.draws,
+        "losses": mr.losses,
+        "score": mr.score,
+        "total": mr.total,
+        "pct": round(mr.pct, 3),
+        "elo_diff": round(mr.elo_diff, 1),
+        "games": mr.games,
+    }
+
+
+def tournament_tc_label(args: argparse.Namespace, nodes: int, movetime_ms: int) -> str:
+    if nodes:
+        return f"{nodes} nodes/move"
+    if movetime_ms:
+        return f"{movetime_ms}ms/move"
+    return f"{args.tc_base}+{args.tc_inc}"
+
+
+def write_results_json(
+    results_dir: pathlib.Path,
+    timestamp: str,
+    args: argparse.Namespace,
+    nodes: int,
+    movetime_ms: int,
+    matches: List[dict],
+    opening_source: str,
+) -> None:
+    payload = {
+        "matches": matches,
+        "timestamp": timestamp,
+        "tc": tournament_tc_label(args, nodes, movetime_ms),
+        "games_per_match": args.games,
+        "opening_source": opening_source,
+        "opening_order": args.opening_order,
+        "seed": args.seed,
+        "max_plies": args.max_plies,
+    }
+    tmp_path = results_dir / "results.json.tmp"
+    final_path = results_dir / "results.json"
+    with open(tmp_path, "w") as f:
+        json.dump(payload, f, indent=2)
+    tmp_path.replace(final_path)
+
+
 def run_match(
     eng1_name: str,
     eng2_name: str,
@@ -568,12 +620,14 @@ def run_match(
     movetime_ms: int = 0,
     nodes: int = 0,
     max_moves: int = 300,
+    max_plies: int = 0,
     capture_search_log: bool = False,
+    progress_callback: Optional[Callable[[MatchResult], None]] = None,
 ) -> MatchResult:
     result = MatchResult(eng1_name, eng2_name)
-    print(f"\n{'='*60}")
-    print(f"  {eng1_name} vs {eng2_name}  ({num_games} games)")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}", flush=True)
+    print(f"  {eng1_name} vs {eng2_name}  ({num_games} games)", flush=True)
+    print(f"{'='*60}", flush=True)
 
     for g in range(num_games):
         opening = openings[g % len(openings)] if openings else None
@@ -602,6 +656,7 @@ def run_match(
             movetime_ms,
             nodes,
             max_moves,
+            max_plies,
             capture_search_log=capture_search_log,
         )
 
@@ -649,18 +704,23 @@ def run_match(
         score_str = f"W{result.wins}-D{result.draws}-L{result.losses}"
         print(
             f"  Game {g+1:2d}/{num_games}: {marker} {gr.result:7s} "
-            f"({gr.reason}, {gr.moves} moves) [{score_str}]"
+            f"({gr.reason}, {gr.moves} moves) [{score_str}]",
+            flush=True,
         )
 
+        if progress_callback:
+            progress_callback(result)
+
         if gr.engine_error:
-            print("    Restarting engines after UCI failure")
+            print("    Restarting engines after UCI failure", flush=True)
             w.restart()
             b.restart()
 
     elo = result.elo_diff
     print(
         f"\n  Result: {eng1_name} {result.wins}W-{result.draws}D-{result.losses}L "
-        f"({result.score}/{result.total}) Elo diff: {elo:+.0f}"
+        f"({result.score}/{result.total}) Elo diff: {elo:+.0f}",
+        flush=True,
     )
     return result
 
@@ -761,7 +821,9 @@ def run_tournament(args):
     print(f"Matches: {len(matches)}")
     print(f"Default thread budget: {default_threads}")
     print(f"Openings: order={args.opening_order} | seed={args.seed}")
-    if args.max_moves < 100:
+    if args.max_plies > 0:
+        print(f"Ply cap: {args.max_plies}")
+    elif args.max_moves < 100:
         print(
             "Warning: max-moves below 100 can mask long conversion wins; "
             "use it only for quick lifecycle smoke tests."
@@ -793,6 +855,17 @@ def run_tournament(args):
                 print(f"\n  SKIP {e1_name} vs {e2_name}: engine unavailable")
                 continue
 
+            def checkpoint_match(partial: MatchResult) -> None:
+                write_results_json(
+                    results_dir,
+                    timestamp,
+                    args,
+                    nodes,
+                    movetime_ms,
+                    [*all_results, match_result_to_dict(partial)],
+                    opening_source,
+                )
+
             mr = run_match(
                 e1_name,
                 e2_name,
@@ -805,45 +878,23 @@ def run_tournament(args):
                 movetime_ms,
                 nodes,
                 args.max_moves,
+                args.max_plies,
                 args.save_search_log,
+                checkpoint_match,
             )
 
-            match_data = {
-                "engine1": mr.engine1,
-                "engine2": mr.engine2,
-                "wins": mr.wins,
-                "draws": mr.draws,
-                "losses": mr.losses,
-                "score": mr.score,
-                "total": mr.total,
-                "pct": round(mr.pct, 3),
-                "elo_diff": round(mr.elo_diff, 1),
-                "games": mr.games,
-            }
+            match_data = match_result_to_dict(mr)
             all_results.append(match_data)
 
-            with open(results_dir / "results.json", "w") as f:
-                json.dump(
-                    {
-                        "matches": all_results,
-                        "timestamp": timestamp,
-                        "tc": (
-                            f"{nodes} nodes/move"
-                            if nodes
-                            else (
-                                f"{args.tc_base}+{args.tc_inc}"
-                                if not movetime_ms
-                                else f"{movetime_ms}ms/move"
-                            )
-                        ),
-                        "games_per_match": args.games,
-                        "opening_source": opening_source,
-                        "opening_order": args.opening_order,
-                        "seed": args.seed,
-                    },
-                    f,
-                    indent=2,
-                )
+            write_results_json(
+                results_dir,
+                timestamp,
+                args,
+                nodes,
+                movetime_ms,
+                all_results,
+                opening_source,
+            )
 
     finally:
         for eng in active_engines.values():
@@ -918,6 +969,12 @@ def main():
         type=int,
         default=300,
         help="Adjudicate as a draw after this many full moves",
+    )
+    parser.add_argument(
+        "--max-plies",
+        type=int,
+        default=0,
+        help="Adjudicate as a draw after this many searched plies (0=disabled)",
     )
     parser.add_argument(
         "--quick", action="store_true", help="Quick mode: 4 games, 10s+0.1s"

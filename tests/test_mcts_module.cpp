@@ -622,6 +622,36 @@ void test_nodes_limit_with_callback(TestCounter &tc) {
          "async best move child visits should not exceed total visits", tc);
 }
 
+void test_bk07_low_node_regression(TestCounter &tc) {
+  std::cout << "  BK.07 low-node regression..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  SearchParams params;
+  params.num_threads = 1;
+  params.nn_weights_path = weights;
+  params.add_dirichlet_noise = false;
+  params.minibatch_size = 1;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 50;
+
+  auto search = CreateSearch(params);
+  search->StartSearch(
+      "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - - 0 1",
+      limits, nullptr, nullptr);
+  search->Wait();
+
+  const uint64_t nodes = search->Stats().total_nodes.load();
+  const Move best = search->GetBestMove();
+  expect(nodes >= limits.nodes, "BK.07 nodes limit should be honored", tc);
+  expect(best == Move(SQ_H5, SQ_F6),
+         "BK.07 low-node MCTS should find Nf6", tc);
+}
+
 void test_searchmoves_restrict_root(TestCounter &tc) {
   std::cout << "  Searchmoves restrict root..." << std::endl;
   const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
@@ -909,6 +939,7 @@ bool test_mcts_all() {
   test_evaluator_legal_move_view_parity(tc);
   test_deterministic_repro(tc);
   test_nodes_limit_with_callback(tc);
+  test_bk07_low_node_regression(tc);
   test_searchmoves_restrict_root(tc);
   test_empty_searchmoves_filter_blocks_root(tc);
   test_same_root_search_reuses_tree(tc);

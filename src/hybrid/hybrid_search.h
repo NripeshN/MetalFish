@@ -208,7 +208,7 @@ struct ParallelHybridConfig {
   bool use_shared_tt = false;
   bool mcts_ab_root_hints = true;
   int mcts_ab_root_hint_delay_ms = 25;
-  int mcts_ab_root_hint_count = 4;
+  int mcts_ab_root_hint_count = 8;
   int ab_candidate_verify_ms = 120;
   int ab_candidate_verify_count = 4;
   bool root_pawn_lever_tiebreak = true;
@@ -426,7 +426,32 @@ bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
                               float top_policy, uint32_t candidate_visits,
                               float candidate_q, float candidate_policy);
 
+bool HybridMCTSRootRejectsAB(bool fixed_budget, bool visit_evidence_sane,
+                             bool mcts_strong, bool ab_has_clear_preference,
+                             uint32_t top_visits, uint32_t ab_visits,
+                             float top_q, float ab_q, float visit_share,
+                             int eval_delta);
+
+bool HybridRootPawnLeverAgreementTieBreak(bool fixed_budget,
+                                          bool visit_evidence_sane,
+                                          float agreement_visit_share,
+                                          float root_q_gap);
+
+bool HybridRootPawnLeverCandidate(int selected_average_score,
+                                  int candidate_average_score,
+                                  uint64_t candidate_effort, int mcts_rank,
+                                  uint32_t mcts_current_visits,
+                                  int selected_mcts_rank,
+                                  float selected_mcts_q,
+                                  float selected_mcts_policy,
+                                  float candidate_mcts_q,
+                                  float candidate_mcts_policy);
+
 bool HybridIsPawnLever(const Position &pos, Move move);
+
+bool HybridIsKingsidePawnLever(const Position &pos, Move move);
+
+bool HybridIsKingsidePawnPush(const Position &pos, Move move);
 
 float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
                             const float *candidate_qs, int candidate_count);
