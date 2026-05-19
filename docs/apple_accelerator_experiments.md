@@ -44,6 +44,8 @@ Measured on Apple M2 Max:
 | batch=64, inputs=32, outputs=16 | cpu-ne | 0.0416 ms | 0.0028 ms | CPU wins |
 | batch=32, inputs=1024, outputs=256 | cpu-ne | 0.2086 ms | 0.0378 ms | CPU wins |
 | batch=32, inputs=1024, outputs=256 | all | 0.2351 ms | 0.0405 ms | CPU wins |
+| batch=32, inputs=1024, outputs=1024 | cpu-ne | 0.2884 ms | 0.1393 ms | CPU wins |
+| batch=64, inputs=1024, outputs=1024 | all | 0.3088 ms | 0.1880 ms | CPU wins |
 
 ## Decision
 
@@ -51,6 +53,8 @@ Do not move AB NNUE inference to Core ML/ANE based on these measurements. The
 per-call Core ML runtime overhead is too high for the small dense operations
 that remain after NNUE accumulator updates.
 
-Core ML/ANE may still be worth revisiting for larger batched transformer
+Core ML/ANE may still be worth revisiting for larger end-to-end transformer
 subgraphs, but Metal/MPSGraph is already the production transformer path. Any
-future ANE work should start with a transformer-shaped benchmark, not NNUE.
+future ANE work should start with a transformer-shaped model benchmark that
+includes attention, layer norms, activations, and policy/value outputs, not
+isolated NNUE or dense-layer fragments.
