@@ -22,6 +22,7 @@
 #include "nn_input_fixture.h"
 #ifdef USE_CUDA
 #include "nn/cuda/cuda_buffers.h"
+#include "nn/cuda/cuda_execution_schedule.h"
 #include "nn/cuda/cuda_execution_tape.h"
 #include "nn/cuda/cuda_input_packing.h"
 #include "nn/cuda/cuda_kernels.h"
@@ -768,6 +769,64 @@ void test_cuda_inference_buffers(TestCounter &tc) {
          tc);
 }
 
+void test_cuda_execution_schedule(TestCounter &tc) {
+  std::cout << "  CUDA execution schedule..." << std::endl;
+
+  NN::NetworkResolvedExecutionPlan plan;
+  plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::InputPack, "input.pack", {}});
+  plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense, "smoke.dense", {}});
+  plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::LayerNorm, "smoke.norm", {}});
+  plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::OutputDecode, "output.decode", {}});
+
+  const auto schedule = NN::Cuda::CreateCudaExecutionSchedule(plan);
+  expect(schedule.FullySupported(),
+         "input/dense-layernorm/output schedule should be supported", tc);
+  expect(schedule.boundary_count == 2,
+         "CUDA schedule should count boundary steps", tc);
+  expect(schedule.dense_layernorm_stage_count == 1,
+         "CUDA schedule should count dense/layernorm stages", tc);
+  expect(schedule.unsupported_count == 0,
+         "CUDA schedule should not report unsupported stages", tc);
+  expect(schedule.entries.size() == 3,
+         "CUDA schedule should fuse dense/layernorm into one entry", tc);
+
+  NN::NetworkResolvedExecutionPlan unsupported = plan;
+  unsupported.steps.insert(
+      unsupported.steps.begin() + 1,
+      NN::NetworkResolvedExecutionStep{NN::NetworkExecutionOpKind::Attention,
+                                       "body.encoder.0.mha",
+                                       {}});
+  const auto unsupported_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(unsupported);
+  expect(!unsupported_schedule.FullySupported(),
+         "attention schedule should be unsupported until kernels exist", tc);
+  expect(unsupported_schedule.unsupported_count == 1,
+         "CUDA schedule should count unsupported stages", tc);
+  expect(unsupported_schedule.FirstUnsupported() &&
+             unsupported_schedule.FirstUnsupported()->op_kind ==
+                 NN::NetworkExecutionOpKind::Attention,
+         "CUDA schedule should preserve first unsupported op kind", tc);
+  expect(unsupported_schedule.Summary().find("body.encoder.0.mha") !=
+             std::string::npos,
+         "CUDA schedule summary should name first unsupported step", tc);
+
+  NN::NetworkResolvedExecutionPlan dense_only;
+  dense_only.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense, "orphan.dense", {}});
+  const auto dense_only_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(dense_only);
+  expect(!dense_only_schedule.FullySupported(),
+         "dense without layernorm should be explicit unsupported", tc);
+  expect(dense_only_schedule.FirstUnsupported() &&
+             dense_only_schedule.FirstUnsupported()->reason.find(
+                 "not followed by layernorm") != std::string::npos,
+         "CUDA schedule should explain dense/layernorm pairing failure", tc);
+}
+
 void test_cuda_weight_upload(TestCounter &tc) {
   std::cout << "  CUDA weight upload..." << std::endl;
 
@@ -1476,6 +1535,7 @@ bool test_mcts_all() {
 #ifdef USE_CUDA
   test_cuda_input_packing(tc);
   test_cuda_inference_buffers(tc);
+  test_cuda_execution_schedule(tc);
   test_cuda_weight_upload(tc);
   test_cuda_dense_kernels(tc);
 #endif

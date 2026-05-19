@@ -1,0 +1,144 @@
+/*
+  MetalFish - A GPU-accelerated UCI chess engine
+  Copyright (C) 2025 Nripesh Niketan
+
+  Licensed under GPL-3.0
+*/
+
+#include "cuda_execution_schedule.h"
+
+#include <sstream>
+#include <utility>
+
+namespace MetalFish {
+namespace NN {
+namespace Cuda {
+namespace {
+
+bool IsBoundary(NetworkExecutionOpKind kind) {
+  return kind == NetworkExecutionOpKind::InputPack ||
+         kind == NetworkExecutionOpKind::OutputDecode;
+}
+
+CudaExecutionScheduleEntry BoundaryEntry(
+    const NetworkResolvedExecutionPlan &plan, std::size_t step_index) {
+  const auto &step = plan.steps[step_index];
+  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::Boundary,
+                                    step_index,
+                                    std::numeric_limits<std::size_t>::max(),
+                                    step.kind,
+                                    step.name,
+                                    "handled by CUDA buffer plumbing"};
+}
+
+CudaExecutionScheduleEntry DenseLayerNormEntry(
+    const NetworkResolvedExecutionPlan &plan, std::size_t dense_index,
+    std::size_t norm_index) {
+  const auto &dense = plan.steps[dense_index];
+  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::DenseLayerNormStage,
+                                    dense_index,
+                                    norm_index,
+                                    dense.kind,
+                                    dense.name + " -> " +
+                                        plan.steps[norm_index].name,
+                                    "dense activation plus layernorm"};
+}
+
+CudaExecutionScheduleEntry UnsupportedEntry(
+    const NetworkResolvedExecutionPlan &plan, std::size_t step_index,
+    std::string reason) {
+  const auto &step = plan.steps[step_index];
+  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::Unsupported,
+                                    step_index,
+                                    std::numeric_limits<std::size_t>::max(),
+                                    step.kind,
+                                    step.name,
+                                    std::move(reason)};
+}
+
+void AddEntry(CudaExecutionSchedule &schedule,
+              CudaExecutionScheduleEntry entry) {
+  switch (entry.kind) {
+  case CudaExecutionScheduleKind::Boundary:
+    ++schedule.boundary_count;
+    break;
+  case CudaExecutionScheduleKind::DenseLayerNormStage:
+    ++schedule.dense_layernorm_stage_count;
+    break;
+  case CudaExecutionScheduleKind::Unsupported:
+    ++schedule.unsupported_count;
+    break;
+  }
+  schedule.entries.push_back(std::move(entry));
+}
+
+} // namespace
+
+std::string CudaExecutionScheduleKindName(CudaExecutionScheduleKind kind) {
+  switch (kind) {
+  case CudaExecutionScheduleKind::Boundary:
+    return "boundary";
+  case CudaExecutionScheduleKind::DenseLayerNormStage:
+    return "dense_layernorm_stage";
+  case CudaExecutionScheduleKind::Unsupported:
+    return "unsupported";
+  }
+  return "unknown";
+}
+
+const CudaExecutionScheduleEntry *
+CudaExecutionSchedule::FirstUnsupported() const {
+  for (const auto &entry : entries) {
+    if (entry.kind == CudaExecutionScheduleKind::Unsupported)
+      return &entry;
+  }
+  return nullptr;
+}
+
+std::string CudaExecutionSchedule::Summary() const {
+  std::ostringstream out;
+  out << entries.size() << " CUDA schedule entries, "
+      << dense_layernorm_stage_count << " dense/layernorm stages, "
+      << boundary_count << " boundaries, " << unsupported_count
+      << " unsupported";
+  if (const auto *unsupported = FirstUnsupported()) {
+    out << "; first unsupported: " << unsupported->name << " ("
+        << NetworkExecutionOpKindName(unsupported->op_kind)
+        << "): " << unsupported->reason;
+  }
+  return out.str();
+}
+
+CudaExecutionSchedule
+CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
+  CudaExecutionSchedule schedule;
+  for (std::size_t i = 0; i < plan.steps.size(); ++i) {
+    const auto &step = plan.steps[i];
+    if (IsBoundary(step.kind)) {
+      AddEntry(schedule, BoundaryEntry(plan, i));
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::Dense) {
+      const std::size_t norm_index = i + 1;
+      if (norm_index < plan.steps.size() &&
+          plan.steps[norm_index].kind == NetworkExecutionOpKind::LayerNorm) {
+        AddEntry(schedule, DenseLayerNormEntry(plan, i, norm_index));
+        i = norm_index;
+        continue;
+      }
+      AddEntry(schedule,
+               UnsupportedEntry(plan, i,
+                                "dense stage is not followed by layernorm"));
+      continue;
+    }
+
+    AddEntry(schedule,
+             UnsupportedEntry(plan, i, "CUDA kernel not implemented yet"));
+  }
+  return schedule;
+}
+
+} // namespace Cuda
+} // namespace NN
+} // namespace MetalFish
