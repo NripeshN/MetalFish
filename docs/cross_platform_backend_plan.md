@@ -85,9 +85,9 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `69ff9a93-0916-47f9-b8c6-278269406c85` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `e152e4f6-6c12-45d7-bd98-4116b2b5af3a` |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26069157516` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `2c0069de-1a89-4202-aabe-1d30b76e596a` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `fb74ace9-b181-419a-a27c-ceeb2fda21d0` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
 
@@ -96,6 +96,8 @@ Current CUDA backend boundary:
   tensor/stage plan that CUDA and future portable backends will execute.
 - The CUDA executor seam receives the resolved plan and uploaded weight buffers,
   so real kernels can index device tensors without backend-local name lookups.
+- `src/nn/cuda/cuda_kernels.*` contains the first tested CUDA compute
+  primitive, a dense-affine kernel for transformer projections and heads.
 - Production CUDA still installs a missing executor and refuses real inference.
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength
