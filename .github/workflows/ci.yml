@@ -81,12 +81,12 @@ jobs:
         run: |
           python3 tools/uci_smoke.py \
             --engine build/metalfish \
-            --timeout 120 \
+            --timeout 90 \
             --setoption UseHybridSearch=false \
             --setoption UseMCTS=true \
             --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
             --setoption Threads=8 \
-            --setoption MCTSMaxThreads=8 \
+            --setoption MCTSMaxThreads=1 \
             --setoption MCTSParallelSearch=true \
             --setoption MCTSMinibatchSize=0 \
             --setoption MCTSAddDirichletNoise=false \

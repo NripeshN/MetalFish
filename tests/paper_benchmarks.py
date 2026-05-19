@@ -484,7 +484,7 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "HybridMCTSUseSharedTT": "false",
             "HybridMCTSABRootHints": "true",
             "HybridMCTSABRootHintDelayMs": "25",
-            "HybridMCTSABRootHintCount": "4",
+            "HybridMCTSABRootHintCount": "8",
             "HybridABCandidateVerifyMs": "120",
             "HybridABCandidateVerifyCount": "4",
             "HybridABPolicyWeight": "0.0",
@@ -542,8 +542,8 @@ def start_engine(cfg: EngineConfig) -> UCIEngine:
 def config_with_thread_count(cfg: EngineConfig, threads: int) -> EngineConfig:
     options = {**cfg.uci_options, "Threads": str(max(1, threads))}
     if options.get("UseMCTS") == "true":
-        options["MCTSMaxThreads"] = str(max(1, threads))
-        options["MCTSParallelSearch"] = "true"
+        options["MCTSMaxThreads"] = str(pure_mcts_strength_threads(max(1, threads)))
+        options["MCTSParallelSearch"] = "false"
     if options.get("UseHybridSearch") == "true":
         hybrid_threads = max(3, threads)
         mcts_threads, ab_threads = hybrid_split_for_threads(hybrid_threads)
