@@ -11,6 +11,7 @@
 #include "../metal/tables/attention_policy_map.h"
 #include "../network_tensor_plan.h"
 
+#include <cublas_v2.h>
 #include <cuda_runtime_api.h>
 
 #include <algorithm>
@@ -30,6 +31,78 @@ std::string CudaErrorMessage(const char *op, cudaError_t status) {
   std::ostringstream out;
   out << op << " failed: " << cudaGetErrorString(status);
   return out.str();
+}
+
+const char *CublasStatusName(cublasStatus_t status) {
+  switch (status) {
+  case CUBLAS_STATUS_SUCCESS:
+    return "success";
+  case CUBLAS_STATUS_NOT_INITIALIZED:
+    return "not_initialized";
+  case CUBLAS_STATUS_ALLOC_FAILED:
+    return "alloc_failed";
+  case CUBLAS_STATUS_INVALID_VALUE:
+    return "invalid_value";
+  case CUBLAS_STATUS_ARCH_MISMATCH:
+    return "arch_mismatch";
+  case CUBLAS_STATUS_MAPPING_ERROR:
+    return "mapping_error";
+  case CUBLAS_STATUS_EXECUTION_FAILED:
+    return "execution_failed";
+  case CUBLAS_STATUS_INTERNAL_ERROR:
+    return "internal_error";
+  case CUBLAS_STATUS_NOT_SUPPORTED:
+    return "not_supported";
+  case CUBLAS_STATUS_LICENSE_ERROR:
+    return "license_error";
+  }
+  return "unknown";
+}
+
+std::string CublasErrorMessage(const char *op, cublasStatus_t status) {
+  std::ostringstream out;
+  out << op << " failed: " << CublasStatusName(status);
+  return out.str();
+}
+
+class ThreadLocalCublasHandle {
+public:
+  ThreadLocalCublasHandle() {
+    cublasStatus_t status = cublasCreate(&handle_);
+    if (status != CUBLAS_STATUS_SUCCESS)
+      throw std::runtime_error(CublasErrorMessage("cublasCreate", status));
+
+    status = cublasSetPointerMode(handle_, CUBLAS_POINTER_MODE_HOST);
+    if (status != CUBLAS_STATUS_SUCCESS)
+      throw std::runtime_error(
+          CublasErrorMessage("cublasSetPointerMode", status));
+
+#if CUDART_VERSION >= 11000
+    status = cublasSetMathMode(handle_, CUBLAS_PEDANTIC_MATH);
+#else
+    status = cublasSetMathMode(handle_, CUBLAS_DEFAULT_MATH);
+#endif
+    if (status != CUBLAS_STATUS_SUCCESS)
+      throw std::runtime_error(CublasErrorMessage("cublasSetMathMode", status));
+  }
+
+  ThreadLocalCublasHandle(const ThreadLocalCublasHandle &) = delete;
+  ThreadLocalCublasHandle &operator=(const ThreadLocalCublasHandle &) = delete;
+
+  ~ThreadLocalCublasHandle() {
+    if (handle_)
+      cublasDestroy(handle_);
+  }
+
+  cublasHandle_t Get() const { return handle_; }
+
+private:
+  cublasHandle_t handle_ = nullptr;
+};
+
+cublasHandle_t CublasHandle() {
+  static thread_local ThreadLocalCublasHandle handle;
+  return handle.Get();
 }
 
 const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
@@ -83,23 +156,12 @@ void DownloadFloats(std::vector<float> &host, const float *device,
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
 
-__global__ void DenseAffineKernel(const float *input, const float *weights,
-                                  const float *bias, float *output,
-                                  int input_width, int output_width,
-                                  int total_outputs) {
+__global__ void BiasAddKernel(float *output, const float *bias,
+                              int output_width, int total_outputs) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index >= total_outputs)
     return;
-
-  const int out = index % output_width;
-  const int batch = index / output_width;
-  const float *input_row = input + static_cast<std::size_t>(batch) * input_width;
-  const float *weight_row = weights + static_cast<std::size_t>(out) * input_width;
-
-  float sum = bias ? bias[out] : 0.0f;
-  for (int i = 0; i < input_width; ++i)
-    sum += input_row[i] * weight_row[i];
-  output[index] = sum;
+  output[index] += bias[index % output_width];
 }
 
 __global__ void LayerNormKernel(const float *input, const float *gamma,
@@ -446,17 +508,37 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
     throw std::runtime_error("CUDA dense affine kernel dimensions are invalid");
 
   const int total_outputs = batch_size * output_width;
+  cublasHandle_t handle = CublasHandle();
+  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
+  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+    throw std::runtime_error(
+        CublasErrorMessage("cublasSetStream", cublas_status));
+  }
+
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+  cublas_status = cublasSgemm(
+      handle, CUBLAS_OP_T, CUBLAS_OP_N, output_width, batch_size, input_width,
+      &alpha, weights, input_width, input, input_width, &beta, output,
+      output_width);
+  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+    throw std::runtime_error(CublasErrorMessage("cublasSgemm(dense_affine)",
+                                               cublas_status));
+  }
+
   constexpr int kThreads = 256;
-  const int blocks = (total_outputs + kThreads - 1) / kThreads;
-  DenseAffineKernel<<<blocks, kThreads, 0, stream>>>(
-      input, weights, bias, output, input_width, output_width, total_outputs);
-  cudaError_t status = cudaGetLastError();
-  if (status != cudaSuccess)
-    throw std::runtime_error(CudaErrorMessage("DenseAffineKernel launch",
-                                             status));
+  if (bias) {
+    const int blocks = (total_outputs + kThreads - 1) / kThreads;
+    BiasAddKernel<<<blocks, kThreads, 0, stream>>>(output, bias, output_width,
+                                                  total_outputs);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+      throw std::runtime_error(CudaErrorMessage("BiasAddKernel launch",
+                                               status));
+  }
   if (stream)
     return;
-  status = cudaDeviceSynchronize();
+  cudaError_t status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("DenseAffineKernel synchronize", status));

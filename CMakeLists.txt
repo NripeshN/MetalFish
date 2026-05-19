@@ -259,7 +259,7 @@ if(USE_CUDA)
       src/nn/cuda/cuda_workspace.cu
       src/nn/cuda/cuda_buffers.cu
       src/nn/cuda/cuda_weight_buffers.cu)
-  set(METALFISH_CUDA_LIBS CUDA::cudart)
+  set(METALFISH_CUDA_LIBS CUDA::cudart CUDA::cublas)
   add_compile_definitions(USE_CUDA)
   message(STATUS "CUDA transformer backend: ENABLED (entry point)")
 endif()
