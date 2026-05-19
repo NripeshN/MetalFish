@@ -785,6 +785,12 @@ void test_cuda_dense_kernels(TestCounter &tc) {
   expect(layernorm_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              layernorm_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA layernorm kernel should pass or skip without a device", tc);
+
+  auto activation_smoke = NN::Cuda::RunActivationKernelSmoke();
+  std::cout << "    " << activation_smoke.message << std::endl;
+  expect(activation_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             activation_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA activation kernel should pass or skip without a device", tc);
 }
 #endif
 

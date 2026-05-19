@@ -11,6 +11,7 @@
 
 #include <cuda_runtime_api.h>
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
@@ -127,6 +128,37 @@ __global__ void LayerNormKernel(const float *input, const float *gamma,
   }
 }
 
+__device__ float ApplyActivationValue(float value, CudaActivationKind kind) {
+  switch (kind) {
+  case CudaActivationKind::Relu:
+    return fmaxf(value, 0.0f);
+  case CudaActivationKind::Relu2: {
+    const float relu = fmaxf(value, 0.0f);
+    return relu * relu;
+  }
+  case CudaActivationKind::Tanh:
+    return tanhf(value);
+  case CudaActivationKind::Sigmoid:
+    return 1.0f / (1.0f + expf(-value));
+  case CudaActivationKind::Swish:
+    return value / (1.0f + expf(-value));
+  case CudaActivationKind::Mish:
+    return value * tanhf(log1pf(expf(value)));
+  case CudaActivationKind::Selu:
+    return 1.05070098f *
+           (value > 0.0f ? value : 1.67326324f * (expf(value) - 1.0f));
+  }
+  return value;
+}
+
+__global__ void ActivationKernel(const float *input, float *output,
+                                 int elements, CudaActivationKind kind) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= elements)
+    return;
+  output[index] = ApplyActivationValue(input[index], kind);
+}
+
 } // namespace
 
 void LaunchDenseAffineKernel(const float *input, const float *weights,
@@ -173,6 +205,26 @@ void LaunchLayerNormKernel(const float *input, const float *gamma,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("LayerNormKernel synchronize", status));
+}
+
+void LaunchActivationKernel(const float *input, float *output, int elements,
+                            CudaActivationKind kind) {
+  if (!input || !output)
+    throw std::runtime_error("CUDA activation kernel received null buffer");
+  if (elements <= 0)
+    throw std::runtime_error("CUDA activation kernel dimensions are invalid");
+
+  constexpr int kThreads = 256;
+  const int blocks = (elements + kThreads - 1) / kThreads;
+  ActivationKernel<<<blocks, kThreads>>>(input, output, elements, kind);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("ActivationKernel launch", status));
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("ActivationKernel synchronize", status));
 }
 
 CudaKernelSmokeResult RunDenseAffineKernelSmoke() {
@@ -252,6 +304,98 @@ CudaKernelSmokeResult RunDenseAffineKernelSmoke() {
       return result;
     }
   }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunActivationKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  const std::vector<float> input = {-3.0f, -1.0f, -0.25f, 0.0f,
+                                    0.25f, 1.0f, 3.0f};
+  const std::vector<CudaActivationKind> activations = {
+      CudaActivationKind::Relu,    CudaActivationKind::Relu2,
+      CudaActivationKind::Tanh,    CudaActivationKind::Sigmoid,
+      CudaActivationKind::Swish,   CudaActivationKind::Mish,
+      CudaActivationKind::Selu,
+  };
+
+  float *device_input = nullptr;
+  float *device_output = nullptr;
+  try {
+    AllocateDevice(&device_input, input.size(), "cudaMalloc(activation_input)");
+    AllocateDevice(&device_output, input.size(),
+                   "cudaMalloc(activation_output)");
+    UploadFloats(device_input, input, "cudaMemcpy(activation_input)");
+
+    for (CudaActivationKind activation : activations) {
+      std::vector<float> actual(input.size(), 0.0f);
+      std::vector<float> expected(input.size(), 0.0f);
+
+      for (std::size_t i = 0; i < input.size(); ++i) {
+        const float value = input[i];
+        switch (activation) {
+        case CudaActivationKind::Relu:
+          expected[i] = std::max(value, 0.0f);
+          break;
+        case CudaActivationKind::Relu2: {
+          const float relu = std::max(value, 0.0f);
+          expected[i] = relu * relu;
+          break;
+        }
+        case CudaActivationKind::Tanh:
+          expected[i] = std::tanh(value);
+          break;
+        case CudaActivationKind::Sigmoid:
+          expected[i] = 1.0f / (1.0f + std::exp(-value));
+          break;
+        case CudaActivationKind::Swish:
+          expected[i] = value / (1.0f + std::exp(-value));
+          break;
+        case CudaActivationKind::Mish:
+          expected[i] = value * std::tanh(std::log1p(std::exp(value)));
+          break;
+        case CudaActivationKind::Selu:
+          expected[i] =
+              1.05070098f *
+              (value > 0.0f ? value : 1.67326324f * (std::exp(value) - 1.0f));
+          break;
+        }
+      }
+
+      LaunchActivationKernel(device_input, device_output,
+                             static_cast<int>(input.size()), activation);
+      DownloadFloats(actual, device_output, "cudaMemcpy(activation_output)");
+
+      for (std::size_t i = 0; i < expected.size(); ++i) {
+        if (std::fabs(actual[i] - expected[i]) > 1e-5f) {
+          FreeDevice(device_input);
+          FreeDevice(device_output);
+          result.status = CudaSmokeStatus::Mismatch;
+          result.message = "CUDA activation kernel output mismatch";
+          return result;
+        }
+      }
+    }
+  } catch (const std::exception &e) {
+    FreeDevice(device_input);
+    FreeDevice(device_output);
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  FreeDevice(device_input);
+  FreeDevice(device_output);
 
   result.status = CudaSmokeStatus::Success;
   result.message = RuntimeCudaDeviceSummary();
