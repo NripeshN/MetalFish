@@ -150,6 +150,7 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
       throw std::runtime_error(output_mapping.Summary());
     }
     executor_ = CreateResolvedCudaExecutor(schedule, output_mapping);
+    WarmupExecution();
   } catch (const std::exception &e) {
     throw std::runtime_error("CUDA transformer backend is compiled (" +
                              RuntimeCudaDeviceSummary() +
@@ -158,6 +159,30 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
                              resolved_execution_plan_.Summary() +
                              ") but executor setup failed: " + e.what());
   }
+}
+
+void CudaNetwork::WarmupExecution() {
+  constexpr int kWarmupBatchSize = 1;
+
+  const bool batch_size_changed = workspace_batch_size_ != kWarmupBatchSize;
+  if (batch_size_changed) {
+    workspace_.Release();
+    workspace_batch_size_ = kWarmupBatchSize;
+  }
+
+  cudaStream_t stream = workspace_.Stream();
+  buffers_.ClearAll(stream);
+  std::vector<std::uint64_t> input_masks(
+      tensor_plan_.InputMaskEntries(kWarmupBatchSize), 0);
+  std::vector<float> input_values(
+      tensor_plan_.InputValueEntries(kWarmupBatchSize), 0.0f);
+  buffers_.UploadPackedInputs(input_masks, input_values, kWarmupBatchSize,
+                              stream);
+  buffers_.ClearOutputs(kWarmupBatchSize, stream);
+
+  CudaProfileSuppressionScope suppress_profile;
+  executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
+                     buffers_, workspace_, kWarmupBatchSize);
 }
 
 NetworkOutput CudaNetwork::Evaluate(const InputPlanes &input) {

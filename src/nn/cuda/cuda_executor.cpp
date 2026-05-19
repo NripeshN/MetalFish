@@ -32,6 +32,8 @@ namespace NN {
 namespace Cuda {
 namespace {
 
+thread_local bool g_cuda_profile_suppressed = false;
+
 std::string CudaErrorMessage(const char *op, cudaError_t status) {
   std::ostringstream out;
   out << op << " failed: " << cudaGetErrorString(status);
@@ -55,6 +57,8 @@ int EnvIntOrDefault(const char *name, int fallback) {
 }
 
 int ReserveCudaProfileReportIndex() {
+  if (g_cuda_profile_suppressed)
+    return -1;
   if (!EnvFlagEnabled("METALFISH_CUDA_PROFILE"))
     return -1;
   const int limit = EnvIntOrDefault("METALFISH_CUDA_PROFILE_LIMIT", 1);
@@ -286,6 +290,15 @@ private:
 };
 
 } // namespace
+
+CudaProfileSuppressionScope::CudaProfileSuppressionScope()
+    : previous_(g_cuda_profile_suppressed) {
+  g_cuda_profile_suppressed = true;
+}
+
+CudaProfileSuppressionScope::~CudaProfileSuppressionScope() {
+  g_cuda_profile_suppressed = previous_;
+}
 
 std::unique_ptr<CudaExecutor> CreateMissingCudaExecutor() {
   return std::make_unique<MissingCudaExecutor>();

@@ -33,6 +33,19 @@ public:
   virtual std::string Name() const = 0;
 };
 
+class CudaProfileSuppressionScope {
+public:
+  CudaProfileSuppressionScope();
+  ~CudaProfileSuppressionScope();
+
+  CudaProfileSuppressionScope(const CudaProfileSuppressionScope &) = delete;
+  CudaProfileSuppressionScope &
+  operator=(const CudaProfileSuppressionScope &) = delete;
+
+private:
+  bool previous_ = false;
+};
+
 std::unique_ptr<CudaExecutor> CreateMissingCudaExecutor();
 std::unique_ptr<CudaExecutor> CreateNullCudaExecutorForSmoke();
 std::unique_ptr<CudaExecutor> CreatePlanSmokeCudaExecutor();

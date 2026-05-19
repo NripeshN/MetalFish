@@ -32,6 +32,8 @@ public:
   std::string GetNetworkInfo() const override;
 
 private:
+  void WarmupExecution();
+
   NetworkFormatDescriptor format_;
   NetworkTensorPlan tensor_plan_;
   NetworkExecutionPlan execution_plan_;
