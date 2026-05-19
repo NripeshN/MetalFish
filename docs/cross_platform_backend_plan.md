@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `a6f9ca51-e333-4156-835b-0ca05374824d` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `7777de0d-ba36-478c-9096-180fb126e4b8` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `192a9587-5266-47ca-8423-79412c38979f` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `6f20cbb7-e02f-4604-b669-dd2905ed0233` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -119,9 +119,10 @@ Current CUDA backend boundary:
   projection, and residual scratch using resolved head and square geometry.
 - `src/nn/cuda/cuda_execution_schedule.*` classifies resolved plan steps into
   supported dense/activation stages, supported dense/layernorm stages,
-  supported gate stages, supported feed-forward stages, supported non-output
-  positional encoding metadata stages, CUDA-managed boundaries, and explicit
-  unsupported operations before any kernels launch.
+  supported gate stages, supported adjacent attention/layernorm stages,
+  supported feed-forward stages, supported non-output positional encoding
+  metadata stages, CUDA-managed boundaries, and explicit unsupported operations
+  before any kernels launch.
 - `src/nn/cuda/cuda_plan_analysis.*` provides the shared CUDA-local view of
   resolved stage groups, dense stage widths, value-error exclusion, and last
   body/head stage discovery. Stage execution and output mapping use this helper

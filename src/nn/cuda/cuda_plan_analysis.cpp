@@ -21,6 +21,7 @@ bool IsCudaDenseScheduleEntry(CudaExecutionScheduleKind kind) {
 bool IsCudaOutputScheduleEntry(CudaExecutionScheduleKind kind) {
   return IsCudaDenseScheduleEntry(kind) ||
          kind == CudaExecutionScheduleKind::GateStage ||
+         kind == CudaExecutionScheduleKind::AttentionLayerNormStage ||
          kind == CudaExecutionScheduleKind::FeedForwardStage ||
          kind == CudaExecutionScheduleKind::FeedForwardLayerNormStage;
 }
@@ -121,6 +122,13 @@ int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
     if (step.kind != NetworkExecutionOpKind::Gate || step.tensors.empty())
       throw std::runtime_error("CUDA gate stage tensor is invalid");
     return static_cast<int>(step.tensors[0].elements);
+  }
+  if (entry.kind == CudaExecutionScheduleKind::AttentionLayerNormStage) {
+    if (step.kind != NetworkExecutionOpKind::Attention ||
+        step.tensors.size() < 8 || step.tensors[6].dims.size() != 2) {
+      throw std::runtime_error("CUDA attention stage tensor is invalid");
+    }
+    return static_cast<int>(step.tensors[6].dims[0]);
   }
   if (entry.kind == CudaExecutionScheduleKind::FeedForwardStage ||
       entry.kind == CudaExecutionScheduleKind::FeedForwardLayerNormStage) {

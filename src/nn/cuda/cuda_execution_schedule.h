@@ -23,6 +23,7 @@ enum class CudaExecutionScheduleKind {
   DenseActivationStage,
   DenseLayerNormStage,
   GateStage,
+  AttentionLayerNormStage,
   FeedForwardStage,
   FeedForwardLayerNormStage,
   PositionalEncodingStage,
@@ -46,6 +47,7 @@ struct CudaExecutionSchedule {
   int dense_activation_stage_count = 0;
   int dense_layernorm_stage_count = 0;
   int gate_stage_count = 0;
+  int attention_layernorm_stage_count = 0;
   int feed_forward_stage_count = 0;
   int feed_forward_layernorm_stage_count = 0;
   int positional_encoding_stage_count = 0;

@@ -66,6 +66,19 @@ CudaExecutionScheduleEntry GateEntry(const NetworkResolvedExecutionPlan &plan,
                                     "elementwise gate"};
 }
 
+CudaExecutionScheduleEntry AttentionLayerNormEntry(
+    const NetworkResolvedExecutionPlan &plan, std::size_t attention_index,
+    std::size_t norm_index) {
+  const auto &attention = plan.steps[attention_index];
+  return CudaExecutionScheduleEntry{
+      CudaExecutionScheduleKind::AttentionLayerNormStage,
+      attention_index,
+      norm_index,
+      attention.kind,
+      attention.name + " -> " + plan.steps[norm_index].name,
+      "attention core plus residual layernorm"};
+}
+
 CudaExecutionScheduleEntry FeedForwardLayerNormEntry(
     const NetworkResolvedExecutionPlan &plan, std::size_t ffn_index,
     std::size_t norm_index) {
@@ -130,6 +143,9 @@ void AddEntry(CudaExecutionSchedule &schedule,
   case CudaExecutionScheduleKind::GateStage:
     ++schedule.gate_stage_count;
     break;
+  case CudaExecutionScheduleKind::AttentionLayerNormStage:
+    ++schedule.attention_layernorm_stage_count;
+    break;
   case CudaExecutionScheduleKind::FeedForwardStage:
     ++schedule.feed_forward_stage_count;
     break;
@@ -158,6 +174,8 @@ std::string CudaExecutionScheduleKindName(CudaExecutionScheduleKind kind) {
     return "dense_layernorm_stage";
   case CudaExecutionScheduleKind::GateStage:
     return "gate_stage";
+  case CudaExecutionScheduleKind::AttentionLayerNormStage:
+    return "attention_layernorm_stage";
   case CudaExecutionScheduleKind::FeedForwardStage:
     return "feed_forward_stage";
   case CudaExecutionScheduleKind::FeedForwardLayerNormStage:
@@ -185,6 +203,7 @@ std::string CudaExecutionSchedule::Summary() const {
       << dense_activation_stage_count << " dense/activation stages, "
       << dense_layernorm_stage_count << " dense/layernorm stages, "
       << gate_stage_count << " gate stages, "
+      << attention_layernorm_stage_count << " attention/layernorm stages, "
       << feed_forward_stage_count << " feed-forward stages, "
       << feed_forward_layernorm_stage_count
       << " feed-forward/layernorm stages, "
@@ -223,6 +242,20 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
 
     if (step.kind == NetworkExecutionOpKind::Gate) {
       AddEntry(schedule, GateEntry(plan, i));
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::Attention) {
+      const std::size_t norm_index = i + 1;
+      if (norm_index < plan.steps.size() &&
+          plan.steps[norm_index].kind == NetworkExecutionOpKind::LayerNorm) {
+        AddEntry(schedule, AttentionLayerNormEntry(plan, i, norm_index));
+        i = norm_index;
+        continue;
+      }
+      AddEntry(schedule,
+               UnsupportedEntry(plan, i,
+                                "CUDA attention requires adjacent layernorm"));
       continue;
     }
 

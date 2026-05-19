@@ -911,6 +911,23 @@ void test_cuda_execution_schedule(TestCounter &tc) {
              std::string::npos,
          "CUDA schedule summary should name first unsupported step", tc);
 
+  NN::NetworkResolvedExecutionPlan attention_fused;
+  attention_fused.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Attention, "body.encoder.0.mha", {}});
+  attention_fused.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::LayerNorm, "body.encoder.0.ln1", {}});
+  const auto attention_fused_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(attention_fused);
+  expect(attention_fused_schedule.FullySupported(),
+         "adjacent attention/layernorm schedule should be supported", tc);
+  expect(attention_fused_schedule.attention_layernorm_stage_count == 1,
+         "CUDA schedule should count fused attention/layernorm stages", tc);
+  expect(attention_fused_schedule.entries.size() == 1 &&
+             attention_fused_schedule.entries[0].kind ==
+                 NN::Cuda::CudaExecutionScheduleKind::
+                     AttentionLayerNormStage,
+         "CUDA schedule should classify fused attention stages explicitly", tc);
+
   NN::NetworkResolvedExecutionPlan dense_only;
   dense_only.steps.push_back(NN::NetworkResolvedExecutionStep{
       NN::NetworkExecutionOpKind::Dense, "orphan.dense", {}});

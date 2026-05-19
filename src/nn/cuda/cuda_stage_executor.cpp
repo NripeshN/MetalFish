@@ -819,6 +819,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     if (entry.kind != CudaExecutionScheduleKind::DenseLayerNormStage &&
         entry.kind != CudaExecutionScheduleKind::DenseActivationStage &&
         entry.kind != CudaExecutionScheduleKind::GateStage &&
+        entry.kind != CudaExecutionScheduleKind::AttentionLayerNormStage &&
         entry.kind != CudaExecutionScheduleKind::FeedForwardStage &&
         entry.kind !=
             CudaExecutionScheduleKind::FeedForwardLayerNormStage) {
@@ -848,6 +849,20 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     if (entry.kind == CudaExecutionScheduleKind::GateStage) {
       stage = ExecuteGateStage(step, weights, stage_input, stage_input_width,
                                tape, workspace, batch_size);
+    } else if (entry.kind ==
+               CudaExecutionScheduleKind::AttentionLayerNormStage) {
+      const auto input_projection = ExecuteAttentionInputProjectionStage(
+          execution_plan, entry.first_step, weights, stage_input, tape,
+          workspace, batch_size);
+      const auto core = ExecuteAttentionCoreStage(
+          execution_plan, entry.first_step, input_projection, tape, workspace,
+          batch_size);
+      const auto output_projection = ExecuteAttentionOutputProjectionStage(
+          execution_plan, entry.first_step, weights, core.context, tape,
+          workspace, batch_size);
+      stage = ExecuteAttentionResidualLayerNormStage(
+          execution_plan, execution_plan.steps[entry.second_step], stage_input,
+          output_projection, weights, tape, workspace, batch_size);
     } else if (entry.kind ==
                CudaExecutionScheduleKind::FeedForwardLayerNormStage) {
       stage = ExecuteFeedForwardLayerNormStage(

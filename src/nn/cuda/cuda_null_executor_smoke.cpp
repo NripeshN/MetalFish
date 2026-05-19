@@ -493,6 +493,31 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       result.message = "CUDA attention output mismatch";
       return result;
     }
+
+    CudaExecutionWorkspace sequence_workspace;
+    float *sequence_input = sequence_workspace.ReserveNamedFloats(
+        "attention.sequence.input", input.size());
+    UploadFloats(sequence_input, input, sequence_workspace.Stream(),
+                 "cudaMemcpy(attention_sequence_input)");
+    const auto sequence = ExecuteDenseActivationLayerNormSequence(
+        execution_plan, weights, sequence_input, tape, sequence_workspace,
+        kBatch);
+    sequence_workspace.Synchronize();
+    const auto *sequence_stage = sequence.FindStage("body.encoder.0.mha");
+    if (!sequence_stage || !sequence_stage->output ||
+        sequence_stage->output_width != kOutput) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA attention sequence metadata mismatch";
+      return result;
+    }
+    std::vector<float> actual_sequence(expected_normalized.size(), 0.0f);
+    DownloadFloats(actual_sequence, sequence_stage->output,
+                   "cudaMemcpy(attention_sequence_output)");
+    if (!AlmostEqual(actual_sequence, expected_normalized, 1e-5f)) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA attention sequence output mismatch";
+      return result;
+    }
     result.allocation_bytes = workspace.TotalBytes() + weights.AllocationBytes();
   } catch (const std::exception &e) {
     result.status = CudaSmokeStatus::RuntimeError;
