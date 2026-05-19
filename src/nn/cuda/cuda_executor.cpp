@@ -33,9 +33,8 @@ void UploadDeviceFloats(float *ptr, const std::vector<float> &host,
     throw std::runtime_error(std::string("CUDA output buffer is missing: ") +
                              name);
   }
-  const cudaError_t status =
-      cudaMemcpy(ptr, host.data(), host.size() * sizeof(float),
-                 cudaMemcpyHostToDevice);
+  const cudaError_t status = cudaMemcpy(
+      ptr, host.data(), host.size() * sizeof(float), cudaMemcpyHostToDevice);
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
@@ -61,8 +60,7 @@ public:
     std::vector<float> raw_policy(plan.RawPolicyEntries(batch_size), 0.0f);
 
     for (int b = 0; b < batch_size; ++b) {
-      const size_t policy_offset =
-          static_cast<size_t>(b) * plan.policy_outputs;
+      const size_t policy_offset = static_cast<size_t>(b) * plan.policy_outputs;
       policy[policy_offset] = 0.25f + static_cast<float>(b);
       policy[policy_offset + plan.policy_outputs - 1] =
           -0.75f - static_cast<float>(b);

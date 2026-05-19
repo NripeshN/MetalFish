@@ -13,7 +13,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-
 NNUE_URLS = {
     "nn-c288c895ea92.nnue": "https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue",
     "nn-37f18f62d772.nnue": "https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue",

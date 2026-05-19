@@ -12,8 +12,8 @@
 #include <string>
 #include <vector>
 
-#include "cuda_input_packing.h"
 #include "../network_tensor_plan.h"
+#include "cuda_input_packing.h"
 
 namespace MetalFish {
 namespace NN {

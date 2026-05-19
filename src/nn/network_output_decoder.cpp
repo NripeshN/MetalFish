@@ -15,8 +15,8 @@ namespace MetalFish {
 namespace NN {
 namespace {
 
-void ValidateTensorView(const char *name, const float *data,
-                        std::size_t actual, std::size_t expected) {
+void ValidateTensorView(const char *name, const float *data, std::size_t actual,
+                        std::size_t expected) {
   if (actual != expected) {
     throw std::runtime_error(std::string("NN output tensor size mismatch: ") +
                              name);
@@ -31,8 +31,7 @@ void ValidateTensorView(const char *name, const float *data,
 std::vector<NetworkOutput>
 DecodeNetworkOutputBatch(const NetworkTensorPlan &plan, const float *policy,
                          std::size_t policy_count, const float *value,
-                         std::size_t value_count,
-                         const float *moves_left,
+                         std::size_t value_count, const float *moves_left,
                          std::size_t moves_left_count, int batch_size) {
   if (batch_size <= 0)
     throw std::runtime_error("NN output batch size must be positive");

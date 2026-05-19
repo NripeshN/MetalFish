@@ -21,8 +21,7 @@ public:
   virtual ~CudaExecutor() = default;
 
   virtual void Execute(const NetworkTensorPlan &plan,
-                       CudaInferenceBuffers &buffers,
-                       int batch_size) = 0;
+                       CudaInferenceBuffers &buffers, int batch_size) = 0;
   virtual std::string Name() const = 0;
 };
 

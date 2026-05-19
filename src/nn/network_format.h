@@ -33,8 +33,8 @@ struct NetworkFormatDescriptor {
   std::string Summary() const;
 };
 
-std::string ActivationToString(
-    MetalFishNN::NetworkFormat_ActivationFunction activation);
+std::string
+ActivationToString(MetalFishNN::NetworkFormat_ActivationFunction activation);
 
 NetworkFormatDescriptor DescribeNetworkFormat(const WeightsFile &file);
 

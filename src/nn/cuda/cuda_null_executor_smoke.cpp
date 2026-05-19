@@ -7,9 +7,9 @@
 
 #include "cuda_buffers.h"
 
+#include "../network_output_decoder.h"
 #include "cuda_executor.h"
 #include "cuda_runtime_probe.h"
-#include "../network_output_decoder.h"
 
 #include <cmath>
 #include <string>
@@ -69,8 +69,7 @@ CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
     }
     for (int b = 0; b < batch_size; ++b) {
       const auto &out = decoded[static_cast<size_t>(b)];
-      const float expected_value =
-          0.60f - 0.05f * static_cast<float>(b);
+      const float expected_value = 0.60f - 0.05f * static_cast<float>(b);
       if (!out.has_wdl || !out.has_moves_left ||
           std::fabs(out.value - expected_value) > 1e-6f ||
           out.moves_left != 12.0f + static_cast<float>(b) ||
@@ -84,8 +83,7 @@ CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
       if (!downloaded.raw_policy.empty()) {
         const size_t raw_offset =
             static_cast<size_t>(b) * plan.raw_policy_outputs;
-        if (downloaded.raw_policy[raw_offset] !=
-            3.0f + static_cast<float>(b)) {
+        if (downloaded.raw_policy[raw_offset] != 3.0f + static_cast<float>(b)) {
           result.status = CudaSmokeStatus::Mismatch;
           result.message = "CUDA null executor raw policy download mismatch";
           return result;

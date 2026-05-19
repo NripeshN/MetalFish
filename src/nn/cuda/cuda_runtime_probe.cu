@@ -52,9 +52,9 @@ std::string RuntimeCudaDeviceSummary() {
 
   cudaDeviceProp prop{};
   if (cudaGetDeviceProperties(&prop, current) == cudaSuccess) {
-    out << ", active=" << current << " " << prop.name << " sm_"
-        << prop.major << prop.minor << ", memory="
-        << (prop.totalGlobalMem / (1024ULL * 1024ULL)) << "MiB";
+    out << ", active=" << current << " " << prop.name << " sm_" << prop.major
+        << prop.minor
+        << ", memory=" << (prop.totalGlobalMem / (1024ULL * 1024ULL)) << "MiB";
   } else {
     out << ", active=" << current << " properties unavailable";
     cudaGetLastError();

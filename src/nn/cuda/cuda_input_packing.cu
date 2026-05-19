@@ -58,8 +58,7 @@ CudaInputPackingSmokeResult RunInputPackingSmokeRaw(const float *input) {
   std::vector<float> expected_values;
   PackInputPlanesHostRaw(input, 1, expected_masks, expected_values);
 
-  std::vector<float> flat_input(input,
-                                input + kCudaInputPlanes * kCudaSquares);
+  std::vector<float> flat_input(input, input + kCudaInputPlanes * kCudaSquares);
 
   float *device_input = nullptr;
   std::uint64_t *device_masks = nullptr;
@@ -99,9 +98,8 @@ CudaInputPackingSmokeResult RunInputPackingSmokeRaw(const float *input) {
     return result;
   }
 
-  status =
-      cudaMemcpy(device_input, flat_input.data(), input_bytes,
-                 cudaMemcpyHostToDevice);
+  status = cudaMemcpy(device_input, flat_input.data(), input_bytes,
+                      cudaMemcpyHostToDevice);
   if (status != cudaSuccess) {
     result.status = CudaSmokeStatus::RuntimeError;
     result.message = CudaErrorMessage("cudaMemcpy(input)", status);

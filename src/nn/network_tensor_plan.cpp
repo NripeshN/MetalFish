@@ -88,8 +88,8 @@ std::string NetworkTensorPlan::Summary() const {
   return out.str();
 }
 
-NetworkTensorPlan CreateNetworkTensorPlan(
-    const NetworkFormatDescriptor &format) {
+NetworkTensorPlan
+CreateNetworkTensorPlan(const NetworkFormatDescriptor &format) {
   NetworkTensorPlan plan;
   plan.wdl = format.wdl;
   plan.moves_left = format.moves_left;
@@ -137,7 +137,8 @@ NetworkTensorValidation ValidateNetworkTensorPlan(
       plan.raw_policy_outputs != kNetworkAttentionPolicyScratch) {
     AddError(validation, "attention policy scratch width mismatch");
   }
-  if (plan.conv_policy && plan.raw_policy_outputs != kNetworkConvPolicyScratch) {
+  if (plan.conv_policy &&
+      plan.raw_policy_outputs != kNetworkConvPolicyScratch) {
     AddError(validation, "convolution policy scratch width mismatch");
   }
   if (!plan.attention_policy && !plan.conv_policy &&
@@ -149,8 +150,7 @@ NetworkTensorValidation ValidateNetworkTensorPlan(
   if (policy_head.empty() || policy_it == weights.policy_heads.end()) {
     AddError(validation, "selected policy head is missing: " + policy_head);
   } else if (!HasPolicyHeadWeights(policy_it->second)) {
-    AddError(validation, "selected policy head has no weights: " +
-                             policy_head);
+    AddError(validation, "selected policy head has no weights: " + policy_head);
   }
 
   const auto value_it = weights.value_heads.find(value_head);

@@ -43,8 +43,8 @@ struct NetworkTensorPlan {
   std::string Summary() const;
 };
 
-NetworkTensorPlan CreateNetworkTensorPlan(
-    const NetworkFormatDescriptor &format);
+NetworkTensorPlan
+CreateNetworkTensorPlan(const NetworkFormatDescriptor &format);
 
 struct NetworkTensorValidation {
   std::vector<std::string> errors;

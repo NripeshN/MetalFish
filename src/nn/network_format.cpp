@@ -47,8 +47,8 @@ std::string SelectHeadName(const Map &heads, const std::string &preferred) {
 
 } // namespace
 
-std::string ActivationToString(
-    MetalFishNN::NetworkFormat_ActivationFunction activation) {
+std::string
+ActivationToString(MetalFishNN::NetworkFormat_ActivationFunction activation) {
   switch (activation) {
   case MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_RELU:
     return "relu";
@@ -79,8 +79,7 @@ NetworkFormatDescriptor DescribeNetworkFormat(const WeightsFile &file) {
       nf.moves_left() ==
       MetalFishNN::NetworkFormat_MovesLeftFormat_MOVES_LEFT_V1;
   descriptor.conv_policy =
-      nf.policy() ==
-      MetalFishNN::NetworkFormat_PolicyFormat_POLICY_CONVOLUTION;
+      nf.policy() == MetalFishNN::NetworkFormat_PolicyFormat_POLICY_CONVOLUTION;
   descriptor.attention_policy =
       nf.policy() == MetalFishNN::NetworkFormat_PolicyFormat_POLICY_ATTENTION;
   descriptor.attention_body =
@@ -111,7 +110,8 @@ NetworkFormatDescriptor DescribeNetworkFormat(const WeightsFile &file) {
         descriptor.activations.default_activation;
   }
 
-  descriptor.activations.ffn_activation = ActivationToString(nf.ffn_activation());
+  descriptor.activations.ffn_activation =
+      ActivationToString(nf.ffn_activation());
   if (descriptor.activations.ffn_activation == "relu" &&
       nf.ffn_activation() ==
           MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_DEFAULT) {
@@ -124,8 +124,7 @@ NetworkFormatDescriptor DescribeNetworkFormat(const WeightsFile &file) {
 
 std::string NetworkFormatDescriptor::Summary() const {
   std::ostringstream out;
-  out << "attention_body=" << BoolString(attention_body)
-      << ", policy="
+  out << "attention_body=" << BoolString(attention_body) << ", policy="
       << (attention_policy ? "attention" : (conv_policy ? "conv" : "classical"))
       << ", value=" << (wdl ? "wdl" : "scalar")
       << ", moves_left=" << BoolString(moves_left)
