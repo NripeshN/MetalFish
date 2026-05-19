@@ -85,12 +85,31 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
                                     int batch_size, int channels,
                                     cudaStream_t stream = nullptr);
 
+void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
+                                         const float *values, float *expanded,
+                                         int batch_size, int planes,
+                                         int squares,
+                                         cudaStream_t stream = nullptr);
+
+void LaunchDynamicPositionEncodingInputKernel(const float *expanded,
+                                              float *position_input,
+                                              int batch_size, int input_planes,
+                                              int position_planes,
+                                              int squares,
+                                              cudaStream_t stream = nullptr);
+
+void LaunchDynamicPositionEncodingConcatKernel(
+    const float *expanded, const float *position_encoding, float *output,
+    int batch_size, int input_planes, int position_width, int squares,
+    cudaStream_t stream = nullptr);
+
 CudaKernelSmokeResult RunDenseAffineKernelSmoke();
 CudaKernelSmokeResult RunLayerNormKernelSmoke();
 CudaKernelSmokeResult RunActivationKernelSmoke();
 CudaKernelSmokeResult RunGateKernelSmoke();
 CudaKernelSmokeResult RunResidualAddKernelSmoke();
 CudaKernelSmokeResult RunAttentionCoreKernelSmoke();
+CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke();
 
 } // namespace Cuda
 } // namespace NN

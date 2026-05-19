@@ -1596,6 +1596,15 @@ void test_cuda_dense_kernels(TestCounter &tc) {
              attention_core_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA attention core kernels should pass or skip without a device",
          tc);
+
+  auto dynamic_pe_smoke =
+      NN::Cuda::RunDynamicPositionEncodingKernelSmoke();
+  std::cout << "    " << dynamic_pe_smoke.message << std::endl;
+  expect(dynamic_pe_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             dynamic_pe_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA dynamic position encoding kernels should pass or skip without a "
+         "device",
+         tc);
 }
 #endif
 

@@ -345,6 +345,66 @@ __global__ void AttentionPolicyMapKernel(const float *query, const float *key,
   }
 }
 
+__global__ void ExpandPackedInputPlanesKernel(const std::uint64_t *masks,
+                                              const float *values,
+                                              float *expanded, int planes,
+                                              int squares, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int plane = index % planes;
+  const int square = (index / planes) % squares;
+  const int batch = index / (planes * squares);
+  const int packed_index = batch * planes + plane;
+  const std::uint64_t bit = 1ULL << square;
+  expanded[index] = (masks[packed_index] & bit) ? values[packed_index] : 0.0f;
+}
+
+__global__ void DynamicPositionEncodingInputKernel(const float *expanded,
+                                                   float *position_input,
+                                                   int input_planes,
+                                                   int position_planes,
+                                                   int squares, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int channel = index % position_planes;
+  const int square = (index / position_planes) % squares;
+  const int batch = index / (position_planes * squares);
+  position_input[index] =
+      expanded[(static_cast<std::size_t>(batch) * squares + square) *
+                   input_planes +
+               channel];
+}
+
+__global__ void DynamicPositionEncodingConcatKernel(
+    const float *expanded, const float *position_encoding, float *output,
+    int input_planes, int position_width, int squares, int output_width,
+    int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int channel = index % output_width;
+  const int square = (index / output_width) % squares;
+  const int batch = index / (output_width * squares);
+  if (channel < input_planes) {
+    output[index] =
+        expanded[(static_cast<std::size_t>(batch) * squares + square) *
+                     input_planes +
+                 channel];
+    return;
+  }
+
+  const int pe_channel = channel - input_planes;
+  output[index] =
+      position_encoding[(static_cast<std::size_t>(batch) * squares + square) *
+                            position_width +
+                        pe_channel];
+}
+
 } // namespace
 
 void LaunchDenseAffineKernel(const float *input, const float *weights,
@@ -614,6 +674,104 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("AttentionPolicyMapKernel synchronize", status));
+  }
+}
+
+void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
+                                         const float *values, float *expanded,
+                                         int batch_size, int planes,
+                                         int squares, cudaStream_t stream) {
+  if (!masks || !values || !expanded)
+    throw std::runtime_error("CUDA input expansion kernel received null buffer");
+  if (batch_size <= 0 || planes <= 0 || squares <= 0 || squares > 64) {
+    throw std::runtime_error("CUDA input expansion dimensions are invalid");
+  }
+
+  const int total = batch_size * squares * planes;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  ExpandPackedInputPlanesKernel<<<blocks, kThreads, 0, stream>>>(
+      masks, values, expanded, planes, squares, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("ExpandPackedInputPlanesKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "ExpandPackedInputPlanesKernel synchronize", status));
+  }
+}
+
+void LaunchDynamicPositionEncodingInputKernel(const float *expanded,
+                                              float *position_input,
+                                              int batch_size, int input_planes,
+                                              int position_planes, int squares,
+                                              cudaStream_t stream) {
+  if (!expanded || !position_input) {
+    throw std::runtime_error(
+        "CUDA dynamic position input kernel received null buffer");
+  }
+  if (batch_size <= 0 || input_planes <= 0 || position_planes <= 0 ||
+      position_planes > input_planes || squares <= 0) {
+    throw std::runtime_error(
+        "CUDA dynamic position input dimensions are invalid");
+  }
+
+  const int total = batch_size * squares * position_planes;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  DynamicPositionEncodingInputKernel<<<blocks, kThreads, 0, stream>>>(
+      expanded, position_input, input_planes, position_planes, squares, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "DynamicPositionEncodingInputKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "DynamicPositionEncodingInputKernel synchronize", status));
+  }
+}
+
+void LaunchDynamicPositionEncodingConcatKernel(
+    const float *expanded, const float *position_encoding, float *output,
+    int batch_size, int input_planes, int position_width, int squares,
+    cudaStream_t stream) {
+  if (!expanded || !position_encoding || !output) {
+    throw std::runtime_error(
+        "CUDA dynamic position concat kernel received null buffer");
+  }
+  if (batch_size <= 0 || input_planes <= 0 || position_width <= 0 ||
+      squares <= 0) {
+    throw std::runtime_error(
+        "CUDA dynamic position concat dimensions are invalid");
+  }
+
+  const int output_width = input_planes + position_width;
+  const int total = batch_size * squares * output_width;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  DynamicPositionEncodingConcatKernel<<<blocks, kThreads, 0, stream>>>(
+      expanded, position_encoding, output, input_planes, position_width,
+      squares, output_width, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "DynamicPositionEncodingConcatKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "DynamicPositionEncodingConcatKernel synchronize", status));
   }
 }
 
@@ -1185,6 +1343,197 @@ CudaKernelSmokeResult RunAttentionCoreKernelSmoke() {
     if (std::fabs(actual_context[i] - expected_context[i]) > 1e-5f) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA attention context output mismatch";
+      return result;
+    }
+  }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 2;
+  constexpr int kPlanes = kPackedInputPlaneCount;
+  constexpr int kSquares = kPackedInputSquareCount;
+  constexpr int kPositionPlanes = 12;
+  constexpr int kPositionWidth = 5;
+  constexpr int kOutputWidth = kPlanes + kPositionWidth;
+
+  std::vector<std::uint64_t> masks(kBatch * kPlanes, 0);
+  std::vector<float> values(kBatch * kPlanes, 0.0f);
+  auto set_plane = [&](int batch, int plane, std::uint64_t mask, float value) {
+    const std::size_t index = static_cast<std::size_t>(batch) * kPlanes + plane;
+    masks[index] = mask;
+    values[index] = value;
+  };
+  set_plane(0, 0, (1ULL << 1) | (1ULL << 3), 2.0f);
+  set_plane(0, 1, ~0ULL, -1.0f);
+  set_plane(0, 13, 1ULL << 7, 4.0f);
+  set_plane(1, 0, 1ULL << 5, 0.5f);
+  set_plane(1, 11, 1ULL << 63, 3.0f);
+  set_plane(1, 12, ~0ULL, 8.0f);
+
+  std::vector<float> expected_expanded(kBatch * kSquares * kPlanes, 0.0f);
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int square = 0; square < kSquares; ++square) {
+      for (int plane = 0; plane < kPlanes; ++plane) {
+        const std::size_t packed =
+            static_cast<std::size_t>(batch) * kPlanes + plane;
+        const std::size_t expanded =
+            (static_cast<std::size_t>(batch) * kSquares + square) * kPlanes +
+            plane;
+        expected_expanded[expanded] =
+            (masks[packed] & (1ULL << square)) ? values[packed] : 0.0f;
+      }
+    }
+  }
+
+  std::vector<float> expected_position_input(
+      kBatch * kSquares * kPositionPlanes, 0.0f);
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int square = 0; square < kSquares; ++square) {
+      for (int plane = 0; plane < kPositionPlanes; ++plane) {
+        expected_position_input[(static_cast<std::size_t>(batch) * kSquares +
+                                 square) *
+                                    kPositionPlanes +
+                                plane] =
+            expected_expanded[(static_cast<std::size_t>(batch) * kSquares +
+                               square) *
+                                  kPlanes +
+                              plane];
+      }
+    }
+  }
+
+  std::vector<float> position_encoding(kBatch * kSquares * kPositionWidth,
+                                       0.0f);
+  for (std::size_t i = 0; i < position_encoding.size(); ++i) {
+    position_encoding[i] =
+        static_cast<float>(static_cast<int>(i % 17) - 8) * 0.125f;
+  }
+
+  std::vector<float> expected_output(kBatch * kSquares * kOutputWidth, 0.0f);
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int square = 0; square < kSquares; ++square) {
+      for (int channel = 0; channel < kOutputWidth; ++channel) {
+        const std::size_t output_index =
+            (static_cast<std::size_t>(batch) * kSquares + square) *
+                kOutputWidth +
+            channel;
+        if (channel < kPlanes) {
+          expected_output[output_index] =
+              expected_expanded[(static_cast<std::size_t>(batch) * kSquares +
+                                 square) *
+                                    kPlanes +
+                                channel];
+        } else {
+          expected_output[output_index] =
+              position_encoding[(static_cast<std::size_t>(batch) * kSquares +
+                                 square) *
+                                    kPositionWidth +
+                                channel - kPlanes];
+        }
+      }
+    }
+  }
+
+  std::vector<float> actual_expanded(expected_expanded.size(), 0.0f);
+  std::vector<float> actual_position_input(expected_position_input.size(),
+                                           0.0f);
+  std::vector<float> actual_output(expected_output.size(), 0.0f);
+  std::uint64_t *device_masks = nullptr;
+  float *device_values = nullptr;
+  float *device_expanded = nullptr;
+  float *device_position_input = nullptr;
+  float *device_position_encoding = nullptr;
+  float *device_output = nullptr;
+
+  try {
+    AllocateDevice(&device_masks, masks.size(), "cudaMalloc(dynamic_masks)");
+    AllocateDevice(&device_values, values.size(), "cudaMalloc(dynamic_values)");
+    AllocateDevice(&device_expanded, actual_expanded.size(),
+                   "cudaMalloc(dynamic_expanded)");
+    AllocateDevice(&device_position_input, actual_position_input.size(),
+                   "cudaMalloc(dynamic_position_input)");
+    AllocateDevice(&device_position_encoding, position_encoding.size(),
+                   "cudaMalloc(dynamic_position_encoding)");
+    AllocateDevice(&device_output, actual_output.size(),
+                   "cudaMalloc(dynamic_position_output)");
+
+    cudaError_t status =
+        cudaMemcpy(device_masks, masks.data(),
+                   masks.size() * sizeof(std::uint64_t),
+                   cudaMemcpyHostToDevice);
+    if (status != cudaSuccess)
+      throw std::runtime_error(CudaErrorMessage("cudaMemcpy(dynamic_masks)",
+                                               status));
+    UploadFloats(device_values, values, "cudaMemcpy(dynamic_values)");
+    UploadFloats(device_position_encoding, position_encoding,
+                 "cudaMemcpy(dynamic_position_encoding)");
+
+    LaunchExpandPackedInputPlanesKernel(device_masks, device_values,
+                                        device_expanded, kBatch, kPlanes,
+                                        kSquares);
+    LaunchDynamicPositionEncodingInputKernel(
+        device_expanded, device_position_input, kBatch, kPlanes,
+        kPositionPlanes, kSquares);
+    LaunchDynamicPositionEncodingConcatKernel(
+        device_expanded, device_position_encoding, device_output, kBatch,
+        kPlanes, kPositionWidth, kSquares);
+
+    DownloadFloats(actual_expanded, device_expanded,
+                   "cudaMemcpy(dynamic_expanded)");
+    DownloadFloats(actual_position_input, device_position_input,
+                   "cudaMemcpy(dynamic_position_input)");
+    DownloadFloats(actual_output, device_output,
+                   "cudaMemcpy(dynamic_position_output)");
+  } catch (const std::exception &e) {
+    FreeDevice(device_masks);
+    FreeDevice(device_values);
+    FreeDevice(device_expanded);
+    FreeDevice(device_position_input);
+    FreeDevice(device_position_encoding);
+    FreeDevice(device_output);
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  FreeDevice(device_masks);
+  FreeDevice(device_values);
+  FreeDevice(device_expanded);
+  FreeDevice(device_position_input);
+  FreeDevice(device_position_encoding);
+  FreeDevice(device_output);
+
+  for (std::size_t i = 0; i < expected_expanded.size(); ++i) {
+    if (actual_expanded[i] != expected_expanded[i]) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA dynamic input expansion mismatch";
+      return result;
+    }
+  }
+  for (std::size_t i = 0; i < expected_position_input.size(); ++i) {
+    if (actual_position_input[i] != expected_position_input[i]) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA dynamic position input mismatch";
+      return result;
+    }
+  }
+  for (std::size_t i = 0; i < expected_output.size(); ++i) {
+    if (actual_output[i] != expected_output[i]) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA dynamic position concat mismatch";
       return result;
     }
   }

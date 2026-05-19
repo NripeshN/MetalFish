@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `14d12a05-dabc-4e32-99d2-d0726b4fd392` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `421183b0-65c9-4f4c-92b0-a43b1ce4d7a4` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `709ae3c3-29f0-431e-b7ad-59adfd6423e2` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `1dc8bd33-e213-427c-b4fb-c83882f155b5` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -106,7 +106,10 @@ Current CUDA backend boundary:
   the first attention-core kernels for scaled QK scores, row softmax, and
   probability-weighted value context construction, smolgen attention-bias
   addition before attention softmax, and attention-policy scratch-to-1858
-  mapping.
+  mapping. CUDA also has the BT4 dynamic-position-input kernels that expand
+  packed plane masks/values to NHWC board rows, gather the first 12 planes for
+  dense positional encoding, and concatenate generated positional channels
+  back onto the 112 input channels.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production
