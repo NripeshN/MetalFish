@@ -177,6 +177,8 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   const std::vector<float> ffn2_bias = {0.05f, -0.10f, 0.20f, -0.25f};
   const std::vector<float> ffn_gamma = {1.10f, -0.60f, 0.80f, 1.40f};
   const std::vector<float> ffn_beta = {0.20f, 0.05f, -0.30f, 0.45f};
+  const std::vector<float> positional(static_cast<size_t>(kHidden) * kHidden,
+                                      0.0f);
   const std::vector<float> dense2_weights = {
       0.25f, -0.5f, 1.0f, 0.75f,
       -1.0f, 0.5f, 0.25f, -0.25f,
@@ -235,6 +237,8 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
        {kHidden}, NetworkWeightTensorKind::NormScale},
       {"body.ip_emb_ffn_ln_betas", ffn_beta.data(), ffn_beta.size(),
        {kHidden}, NetworkWeightTensorKind::NormBias},
+      {"body.smolgen_w", positional.data(), positional.size(),
+       {kHidden, kHidden}, NetworkWeightTensorKind::PositionalEncoding},
   };
 
   NetworkResolvedExecutionPlan execution_plan;
@@ -290,6 +294,13 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
            NetworkWeightTensorKind::NormScale},
           {19, "body.ip_emb_ffn_ln_betas", ffn_beta.size(), {kHidden},
            NetworkWeightTensorKind::NormBias},
+      }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::PositionalEncoding,
+      "body.smolgen_positional",
+      {
+          {20, "body.smolgen_w", positional.size(), {kHidden, kHidden},
+           NetworkWeightTensorKind::PositionalEncoding},
       }});
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
       NetworkExecutionOpKind::Dense,

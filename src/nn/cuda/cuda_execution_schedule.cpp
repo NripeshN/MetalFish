@@ -91,6 +91,18 @@ CudaExecutionScheduleEntry FeedForwardEntry(
       "feed-forward block"};
 }
 
+CudaExecutionScheduleEntry PositionalEncodingEntry(
+    const NetworkResolvedExecutionPlan &plan, std::size_t positional_index) {
+  const auto &positional = plan.steps[positional_index];
+  return CudaExecutionScheduleEntry{
+      CudaExecutionScheduleKind::PositionalEncodingStage,
+      positional_index,
+      std::numeric_limits<std::size_t>::max(),
+      positional.kind,
+      positional.name,
+      "global positional encoding weights"};
+}
+
 CudaExecutionScheduleEntry UnsupportedEntry(
     const NetworkResolvedExecutionPlan &plan, std::size_t step_index,
     std::string reason) {
@@ -124,6 +136,9 @@ void AddEntry(CudaExecutionSchedule &schedule,
   case CudaExecutionScheduleKind::FeedForwardLayerNormStage:
     ++schedule.feed_forward_layernorm_stage_count;
     break;
+  case CudaExecutionScheduleKind::PositionalEncodingStage:
+    ++schedule.positional_encoding_stage_count;
+    break;
   case CudaExecutionScheduleKind::Unsupported:
     ++schedule.unsupported_count;
     break;
@@ -147,6 +162,8 @@ std::string CudaExecutionScheduleKindName(CudaExecutionScheduleKind kind) {
     return "feed_forward_stage";
   case CudaExecutionScheduleKind::FeedForwardLayerNormStage:
     return "feed_forward_layernorm_stage";
+  case CudaExecutionScheduleKind::PositionalEncodingStage:
+    return "positional_encoding_stage";
   case CudaExecutionScheduleKind::Unsupported:
     return "unsupported";
   }
@@ -171,6 +188,7 @@ std::string CudaExecutionSchedule::Summary() const {
       << feed_forward_stage_count << " feed-forward stages, "
       << feed_forward_layernorm_stage_count
       << " feed-forward/layernorm stages, "
+      << positional_encoding_stage_count << " positional encoding stages, "
       << boundary_count << " boundaries, " << unsupported_count
       << " unsupported";
   if (const auto *unsupported = FirstUnsupported()) {
@@ -217,6 +235,11 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
         continue;
       }
       AddEntry(schedule, FeedForwardEntry(plan, i));
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::PositionalEncoding) {
+      AddEntry(schedule, PositionalEncodingEntry(plan, i));
       continue;
     }
 

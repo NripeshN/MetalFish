@@ -493,6 +493,18 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_resolved_plan.steps.front().kind ==
              NN::NetworkExecutionOpKind::InputPack,
          "resolved execution plan should start with input packing", tc);
+#ifdef USE_CUDA
+  const auto loaded_cuda_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(loaded_resolved_plan);
+  expect(loaded_cuda_schedule.positional_encoding_stage_count > 0,
+         "loaded CUDA schedule should classify smolgen positional weights", tc);
+  expect(loaded_cuda_schedule.FirstUnsupported() &&
+             loaded_cuda_schedule.FirstUnsupported()->op_kind ==
+                 NN::NetworkExecutionOpKind::Attention,
+         "loaded CUDA schedule should now reach attention as first unsupported "
+         "operator",
+         tc);
+#endif
 }
 
 void test_network_output_decoder(TestCounter &tc) {
@@ -800,6 +812,9 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   expect(schedule.feed_forward_layernorm_stage_count == 0,
          "CUDA schedule should not count absent feed-forward/layernorm stages",
          tc);
+  expect(schedule.positional_encoding_stage_count == 0,
+         "CUDA schedule should not count absent positional encoding stages",
+         tc);
   expect(schedule.unsupported_count == 0,
          "CUDA schedule should not report unsupported stages", tc);
   expect(schedule.entries.size() == 3,
@@ -887,6 +902,26 @@ void test_cuda_execution_schedule(TestCounter &tc) {
          "feed-forward without layernorm should be supported", tc);
   expect(ffn_only_schedule.feed_forward_stage_count == 1,
          "CUDA schedule should count standalone feed-forward stages", tc);
+
+  NN::NetworkResolvedExecutionPlan positional = ffn;
+  positional.steps.insert(
+      positional.steps.begin() + 5,
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::PositionalEncoding,
+          "body.smolgen_positional",
+          {
+              {0, "body.smolgen_w", 64 * 64, {64, 64},
+               NN::NetworkWeightTensorKind::PositionalEncoding},
+          }});
+  const auto positional_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(positional);
+  expect(positional_schedule.FullySupported(),
+         "positional encoding metadata schedule should be supported", tc);
+  expect(positional_schedule.positional_encoding_stage_count == 1,
+         "CUDA schedule should count positional encoding stages", tc);
+  expect(positional_schedule.entries[3].kind ==
+             NN::Cuda::CudaExecutionScheduleKind::PositionalEncodingStage,
+         "CUDA schedule should classify positional encoding explicitly", tc);
 }
 
 void test_cuda_output_mapping(TestCounter &tc) {

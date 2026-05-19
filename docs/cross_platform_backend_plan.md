@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `08e42b9d-50f8-4753-b8c1-48709f400a8c` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `1b989ef8-ce85-4610-b8c6-86455a45bd9b` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `4a624006-6de8-4c6c-b00c-47e276fe4fd5` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `7ebe79a3-c97c-472d-be06-25782beb1d83` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -115,8 +115,9 @@ Current CUDA backend boundary:
   layers should extend this rather than allocating anonymous scratch.
 - `src/nn/cuda/cuda_execution_schedule.*` classifies resolved plan steps into
   supported dense/activation stages, supported dense/layernorm stages,
-  supported gate stages, supported feed-forward stages, CUDA-managed
-  boundaries, and explicit unsupported operations before any kernels launch.
+  supported gate stages, supported feed-forward stages, supported non-output
+  positional encoding metadata stages, CUDA-managed boundaries, and explicit
+  unsupported operations before any kernels launch.
 - `src/nn/cuda/cuda_plan_analysis.*` provides the shared CUDA-local view of
   resolved stage groups, dense stage widths, value-error exclusion, and last
   body/head stage discovery. Stage execution and output mapping use this helper
@@ -139,8 +140,8 @@ Current CUDA backend boundary:
   enabling production CUDA inference prematurely. Its smoke coverage includes
   named output mapping, explicit branching from a shared body output, chained
   dense/layernorm stages, dense-only stages, input gates, feed-forward residual
-  layernorm, multi-row batches, and strided policy/value/moves-left/raw-policy
-  writes.
+  layernorm, non-output positional encoding metadata, multi-row batches, and
+  strided policy/value/moves-left/raw-policy writes.
 - Production CUDA still installs a missing executor and refuses real inference.
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength

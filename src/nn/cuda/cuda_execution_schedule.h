@@ -25,6 +25,7 @@ enum class CudaExecutionScheduleKind {
   GateStage,
   FeedForwardStage,
   FeedForwardLayerNormStage,
+  PositionalEncodingStage,
   Unsupported,
 };
 
@@ -47,6 +48,7 @@ struct CudaExecutionSchedule {
   int gate_stage_count = 0;
   int feed_forward_stage_count = 0;
   int feed_forward_layernorm_stage_count = 0;
+  int positional_encoding_stage_count = 0;
   int unsupported_count = 0;
 
   bool FullySupported() const { return unsupported_count == 0; }
