@@ -102,6 +102,26 @@ std::string SelectCompatibleStage(
   return selected;
 }
 
+std::string SelectPolicyStage(const NetworkTensorPlan &tensor_plan,
+                              const NetworkResolvedExecutionPlan &execution_plan,
+                              const CudaExecutionSchedule &schedule,
+                              const CudaOutputMappingOptions &options) {
+  for (const auto &entry : schedule.entries) {
+    if (entry.kind != CudaExecutionScheduleKind::PolicyMapStage ||
+        entry.first_step >= execution_plan.steps.size()) {
+      continue;
+    }
+    const auto &step = execution_plan.steps[entry.first_step];
+    if (ClassifyCudaPlanStage(execution_plan, step.name) ==
+        CudaPlanStageGroup::Policy) {
+      return step.name;
+    }
+  }
+  return SelectCompatibleStage(tensor_plan, execution_plan, schedule, options,
+                               CudaOutputTarget::Policy,
+                               CudaPlanStageGroup::Policy, true);
+}
+
 void AddError(CudaOutputMapping &mapping, const std::string &error) {
   mapping.errors.push_back(error);
 }
@@ -203,9 +223,8 @@ CudaOutputMapping CreateCudaOutputMapping(
     return mapping;
   }
 
-  const std::string policy_source = SelectCompatibleStage(
-      tensor_plan, execution_plan, schedule, options, CudaOutputTarget::Policy,
-      CudaPlanStageGroup::Policy, true);
+  const std::string policy_source =
+      SelectPolicyStage(tensor_plan, execution_plan, schedule, options);
   const std::string value_source = SelectCompatibleStage(
       tensor_plan, execution_plan, schedule, options, CudaOutputTarget::Value,
       CudaPlanStageGroup::Value, false);
@@ -220,7 +239,10 @@ CudaOutputMapping CreateCudaOutputMapping(
     AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
                CudaOutputTarget::MovesLeft, moves_left_source, true);
   }
-  if (tensor_plan.raw_policy_outputs > 0) {
+  const auto *policy_entry =
+      FindCudaStageEntry(execution_plan, schedule, policy_source);
+  if (tensor_plan.raw_policy_outputs > 0 && policy_entry &&
+      policy_entry->kind != CudaExecutionScheduleKind::PolicyMapStage) {
     AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
                CudaOutputTarget::RawPolicy, policy_source, true);
   }

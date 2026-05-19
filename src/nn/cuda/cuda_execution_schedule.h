@@ -26,6 +26,7 @@ enum class CudaExecutionScheduleKind {
   AttentionLayerNormStage,
   FeedForwardStage,
   FeedForwardLayerNormStage,
+  PolicyMapStage,
   PositionalEncodingStage,
   Unsupported,
 };
@@ -50,6 +51,7 @@ struct CudaExecutionSchedule {
   int attention_layernorm_stage_count = 0;
   int feed_forward_stage_count = 0;
   int feed_forward_layernorm_stage_count = 0;
+  int policy_map_stage_count = 0;
   int positional_encoding_stage_count = 0;
   int unsupported_count = 0;
 

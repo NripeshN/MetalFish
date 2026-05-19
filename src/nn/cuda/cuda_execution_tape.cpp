@@ -149,6 +149,10 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
     return "attention_smolgen_bias";
   case CudaExecutionBufferRole::AttentionResidualOutput:
     return "attention_residual_output";
+  case CudaExecutionBufferRole::PolicyMapRawOutput:
+    return "policy_map_raw_output";
+  case CudaExecutionBufferRole::PolicyMapOutput:
+    return "policy_map_output";
   }
   return "unknown";
 }
@@ -321,6 +325,15 @@ CudaExecutionTape CreateResolvedExecutionTape(
                  batch_size * attention.heads,
                  attention.squares * attention.squares);
       }
+      break;
+    }
+    case NetworkExecutionOpKind::PolicyMap: {
+      if (!plan.format.attention_policy)
+        break;
+      tape.Add(step.name + ".raw", CudaExecutionBufferRole::PolicyMapRawOutput,
+               batch_size, kNetworkAttentionPolicyScratch);
+      tape.Add(step.name + ".mapped", CudaExecutionBufferRole::PolicyMapOutput,
+               batch_size, kNetworkPolicyOutputs);
       break;
     }
     default:

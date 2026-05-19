@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `e8a3d26e-f4dd-4e21-aab4-a3c13203f9fc` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `e970a5dd-e187-42b9-a6c0-c74e73ba1d58` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `6b0aaace-fa62-4e41-bb7e-06dd906f0628` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `a7d4684a-ca31-4cd8-9165-ee682feda787` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -101,8 +101,9 @@ Current CUDA backend boundary:
   elementwise activation functions, input-embedding gate multiply/add, and
   scaled residual addition for feed-forward normalization. It also contains
   the first attention-core kernels for scaled QK scores, row softmax, and
-  probability-weighted value context construction, plus smolgen attention-bias
-  addition before attention softmax.
+  probability-weighted value context construction, smolgen attention-bias
+  addition before attention softmax, and attention-policy scratch-to-1858
+  mapping.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production
@@ -118,14 +119,15 @@ Current CUDA backend boundary:
   layers should extend this rather than allocating anonymous scratch. Attention
   tape bindings now reserve explicit Q/K/V, score, probability, context, output
   projection, residual, and smolgen compress/dense/norm/global-bias scratch
-  using resolved head and square geometry.
+  using resolved head and square geometry. Attention-policy heads reserve both
+  raw scratch logits and mapped 1858-policy logits.
 - `src/nn/cuda/cuda_execution_schedule.*` classifies resolved plan steps into
   supported dense/activation stages, supported dense/layernorm stages,
   supported gate stages, supported adjacent attention/layernorm stages,
   supported attention/smolgen/layernorm stages,
   supported feed-forward stages, supported non-output positional encoding
-  metadata stages, CUDA-managed boundaries, and explicit unsupported operations
-  before any kernels launch.
+  metadata stages, supported attention-policy map stages, CUDA-managed
+  boundaries, and explicit unsupported operations before any kernels launch.
 - `src/nn/cuda/cuda_plan_analysis.*` provides the shared CUDA-local view of
   resolved stage groups, dense stage widths, value-error exclusion, and last
   body/head stage discovery. Stage execution and output mapping use this helper
@@ -138,7 +140,8 @@ Current CUDA backend boundary:
   layernorm execution, attention Q/K/V projection launches, attention
   score/softmax/context execution, attention output projection launches,
   attention residual layernorm execution, smolgen compress/dense/layernorm
-  execution with global positional bias injection, and strided device-row
+  execution with global positional bias injection, attention-policy map
+  execution, and strided device-row
   copies, so smoke and production CUDA executors share the same launch path. It
   derives CUDA-local stage input bindings from the
   resolved plan and schedule, allowing independent heads to branch from the
@@ -149,14 +152,16 @@ Current CUDA backend boundary:
   ownership explicit instead of treating the last executed stage as every
   output tensor. Output sources are selected from compatible scheduled head
   stages by target width, so the smoke and production paths do not depend on
-  one fixed CUDA stage name per head.
+  one fixed CUDA stage name per head. Attention-policy maps are preferred as
+  policy sources and suppress redundant raw-policy output binding because the
+  CUDA stage already performs the final scatter.
 - `CreatePlanSmokeCudaExecutor()` runs a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without
   enabling production CUDA inference prematurely. Its smoke coverage includes
   named output mapping, explicit branching from a shared body output, chained
   dense/layernorm stages, dense-only stages, input gates, feed-forward residual
-  layernorm, non-output positional encoding metadata, multi-row batches, and
-  strided policy/value/moves-left/raw-policy writes.
+  layernorm, attention-policy mapping, non-output positional encoding metadata,
+  multi-row batches, and strided policy/value/moves-left/raw-policy writes.
 - Production CUDA still installs a missing executor and refuses real inference.
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength

@@ -37,6 +37,8 @@ enum class CudaExecutionBufferRole {
   AttentionOutputProjection,
   AttentionSmolgenBias,
   AttentionResidualOutput,
+  PolicyMapRawOutput,
+  PolicyMapOutput,
 };
 
 std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role);

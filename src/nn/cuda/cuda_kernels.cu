@@ -8,6 +8,8 @@
 #include "cuda_kernels.h"
 
 #include "cuda_runtime_probe.h"
+#include "../metal/tables/attention_policy_map.h"
+#include "../network_tensor_plan.h"
 
 #include <cuda_runtime_api.h>
 
@@ -287,6 +289,62 @@ __global__ void AttentionContextKernel(const float *probabilities,
   context[index] = sum;
 }
 
+__device__ __constant__
+    short kAttentionPolicyMapDevice[kNetworkAttentionPolicyScratch];
+
+__global__ void AttentionPolicyMapKernel(const float *query, const float *key,
+                                         const float *promotion_weights,
+                                         float *raw_policy, float *policy,
+                                         int channels, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int raw_index = index % kNetworkAttentionPolicyScratch;
+  const int batch = index / kNetworkAttentionPolicyScratch;
+  constexpr int kSquares = kPackedInputSquareCount;
+  float value = 0.0f;
+
+  if (raw_index < kSquares * kSquares) {
+    const int query_square = raw_index / kSquares;
+    const int key_square = raw_index % kSquares;
+    const float *query_row =
+        query + (static_cast<std::size_t>(batch) * kSquares + query_square) *
+                    channels;
+    const float *key_row =
+        key + (static_cast<std::size_t>(batch) * kSquares + key_square) *
+                  channels;
+    for (int channel = 0; channel < channels; ++channel)
+      value += query_row[channel] * key_row[channel];
+    value *= rsqrtf(static_cast<float>(channels));
+  } else {
+    const int promo_index = raw_index - kSquares * kSquares;
+    const int query_square = 48 + promo_index / 24;
+    const int key_square = 56 + (promo_index % 24) / 3;
+    const int promotion_row = promo_index % 3;
+    const float *query_row =
+        query + (static_cast<std::size_t>(batch) * kSquares + query_square) *
+                    channels;
+    const float *key_row =
+        key + (static_cast<std::size_t>(batch) * kSquares + key_square) *
+                  channels;
+    for (int channel = 0; channel < channels; ++channel) {
+      value += query_row[channel] * key_row[channel] *
+               rsqrtf(static_cast<float>(channels));
+      value += key_row[channel] *
+               (promotion_weights[promotion_row * channels + channel] +
+                promotion_weights[3 * channels + channel]);
+    }
+  }
+
+  raw_policy[index] = value;
+  const short mapped = kAttentionPolicyMapDevice[raw_index];
+  if (mapped >= 0) {
+    policy[static_cast<std::size_t>(batch) * kNetworkPolicyOutputs + mapped] =
+        value;
+  }
+}
+
 } // namespace
 
 void LaunchDenseAffineKernel(const float *input, const float *weights,
@@ -517,6 +575,46 @@ void LaunchAttentionContextKernel(const float *probabilities,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("AttentionContextKernel synchronize", status));
+}
+
+void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
+                                    const float *promotion_weights,
+                                    float *raw_policy, float *policy,
+                                    int batch_size, int channels,
+                                    cudaStream_t stream) {
+  if (!query || !key || !promotion_weights || !raw_policy || !policy) {
+    throw std::runtime_error(
+        "CUDA attention policy map kernel received null buffer");
+  }
+  if (batch_size <= 0 || channels <= 0) {
+    throw std::runtime_error("CUDA attention policy map dimensions are invalid");
+  }
+
+  cudaError_t status = cudaMemcpyToSymbolAsync(
+      kAttentionPolicyMapDevice, Metal::kAttnPolicyMap,
+      sizeof(Metal::kAttnPolicyMap), 0, cudaMemcpyHostToDevice, stream);
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionPolicyMap table upload", status));
+  }
+
+  const int total = batch_size * kNetworkAttentionPolicyScratch;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  AttentionPolicyMapKernel<<<blocks, kThreads, 0, stream>>>(
+      query, key, promotion_weights, raw_policy, policy, channels, total);
+  status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionPolicyMapKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionPolicyMapKernel synchronize", status));
+  }
 }
 
 CudaKernelSmokeResult RunDenseAffineKernelSmoke() {

@@ -104,6 +104,18 @@ CudaExecutionScheduleEntry FeedForwardEntry(
       "feed-forward block"};
 }
 
+CudaExecutionScheduleEntry PolicyMapEntry(
+    const NetworkResolvedExecutionPlan &plan, std::size_t policy_map_index) {
+  const auto &policy_map = plan.steps[policy_map_index];
+  return CudaExecutionScheduleEntry{
+      CudaExecutionScheduleKind::PolicyMapStage,
+      policy_map_index,
+      std::numeric_limits<std::size_t>::max(),
+      policy_map.kind,
+      policy_map.name,
+      "attention policy scratch mapping"};
+}
+
 CudaExecutionScheduleEntry PositionalEncodingEntry(
     const NetworkResolvedExecutionPlan &plan, std::size_t positional_index) {
   const auto &positional = plan.steps[positional_index];
@@ -164,6 +176,9 @@ void AddEntry(CudaExecutionSchedule &schedule,
   case CudaExecutionScheduleKind::FeedForwardLayerNormStage:
     ++schedule.feed_forward_layernorm_stage_count;
     break;
+  case CudaExecutionScheduleKind::PolicyMapStage:
+    ++schedule.policy_map_stage_count;
+    break;
   case CudaExecutionScheduleKind::PositionalEncodingStage:
     ++schedule.positional_encoding_stage_count;
     break;
@@ -192,6 +207,8 @@ std::string CudaExecutionScheduleKindName(CudaExecutionScheduleKind kind) {
     return "feed_forward_stage";
   case CudaExecutionScheduleKind::FeedForwardLayerNormStage:
     return "feed_forward_layernorm_stage";
+  case CudaExecutionScheduleKind::PolicyMapStage:
+    return "policy_map_stage";
   case CudaExecutionScheduleKind::PositionalEncodingStage:
     return "positional_encoding_stage";
   case CudaExecutionScheduleKind::Unsupported:
@@ -219,6 +236,7 @@ std::string CudaExecutionSchedule::Summary() const {
       << feed_forward_stage_count << " feed-forward stages, "
       << feed_forward_layernorm_stage_count
       << " feed-forward/layernorm stages, "
+      << policy_map_stage_count << " policy-map stages, "
       << positional_encoding_stage_count << " positional encoding stages, "
       << boundary_count << " boundaries, " << unsupported_count
       << " unsupported";
@@ -298,6 +316,18 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
 
     if (step.kind == NetworkExecutionOpKind::PositionalEncoding) {
       AddEntry(schedule, PositionalEncodingEntry(plan, i));
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::PolicyMap) {
+      if (plan.format.attention_policy) {
+        AddEntry(schedule, PolicyMapEntry(plan, i));
+      } else {
+        AddEntry(schedule,
+                 UnsupportedEntry(
+                     plan, i,
+                     "CUDA policy map currently supports attention policy"));
+      }
       continue;
     }
 

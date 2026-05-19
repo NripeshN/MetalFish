@@ -74,6 +74,13 @@ void RequireFeedForwardTensors(const NetworkResolvedExecutionStep &ffn) {
   }
 }
 
+void RequirePolicyMapTensors(const NetworkResolvedExecutionStep &policy_map) {
+  if (policy_map.kind != NetworkExecutionOpKind::PolicyMap ||
+      policy_map.tensors.empty()) {
+    throw std::runtime_error("CUDA policy-map stage has missing tensors");
+  }
+}
+
 bool IsMultiplyGate(std::string_view name) {
   return name.find("mult_gate") != std::string_view::npos;
 }
@@ -356,6 +363,23 @@ CudaStageInputBindings CreateCudaStageInputBindings(
       *seen = true;
     }
   }
+  const std::string policy_prefix =
+      CudaPlanStagePrefix(execution_plan, CudaPlanStageGroup::Policy);
+  if (!policy_prefix.empty()) {
+    const std::string policy_embedding = policy_prefix + "output";
+    if (FindCudaStageEntry(execution_plan, schedule, policy_embedding)) {
+      const std::string query_stage = policy_prefix + "dense2";
+      const std::string key_stage = policy_prefix + "dense3";
+      if (FindCudaStageEntry(execution_plan, schedule, query_stage) &&
+          !bindings.FindSource(query_stage)) {
+        bindings.Add(query_stage, policy_embedding);
+      }
+      if (FindCudaStageEntry(execution_plan, schedule, key_stage) &&
+          !bindings.FindSource(key_stage)) {
+        bindings.Add(key_stage, policy_embedding);
+      }
+    }
+  }
   return bindings;
 }
 
@@ -594,6 +618,69 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
                         output.normalized, batch_size, output.output_width,
                         FeedForwardLayerNormEpsilon(execution_plan, ffn.name),
                         stream);
+  return output;
+}
+
+CudaDenseStageOutput ExecuteAttentionPolicyMapStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &policy_map,
+    const CudaWeightBuffers &weights,
+    const CudaDenseStageSequenceOutput &sequence,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA policy-map stage received empty batch");
+  if (!execution_plan.format.attention_policy) {
+    throw std::runtime_error(
+        "CUDA policy-map stage requires attention policy format");
+  }
+  RequirePolicyMapTensors(policy_map);
+
+  const std::string suffix = ".policy_map";
+  if (!EndsWith(policy_map.name, suffix)) {
+    throw std::runtime_error("CUDA policy-map stage name is invalid");
+  }
+  const std::string policy_prefix =
+      policy_map.name.substr(0, policy_map.name.size() - suffix.size());
+  const CudaDenseStageOutput *query_stage =
+      sequence.FindStage(policy_prefix + ".dense2");
+  const CudaDenseStageOutput *key_stage =
+      sequence.FindStage(policy_prefix + ".dense3");
+  if (!query_stage || !query_stage->output || !key_stage ||
+      !key_stage->output) {
+    throw std::runtime_error("CUDA policy-map Q/K stages are missing");
+  }
+  if (query_stage->output_width <= 0 ||
+      query_stage->output_width != key_stage->output_width) {
+    throw std::runtime_error("CUDA policy-map Q/K dimensions mismatch");
+  }
+
+  const auto promotion_weights =
+      weights.TensorAt(policy_map.tensors[0].inventory_index);
+  const int channels = query_stage->output_width;
+  if (promotion_weights.elements != static_cast<std::size_t>(4 * channels)) {
+    throw std::runtime_error(
+        "CUDA policy-map promotion tensor dimensions mismatch");
+  }
+
+  const auto &raw_binding = tape.RequireName(policy_map.name + ".raw");
+  const auto &mapped_binding = tape.RequireName(policy_map.name + ".mapped");
+  RequireTapeShape(raw_binding, batch_size, kNetworkAttentionPolicyScratch,
+                   "attention policy raw map");
+  RequireTapeShape(mapped_binding, batch_size, kNetworkPolicyOutputs,
+                   "attention policy mapped logits");
+
+  CudaDenseStageOutput output;
+  output.dense = tape.Reserve(workspace, raw_binding);
+  output.activation = tape.Reserve(workspace, mapped_binding);
+  output.output = output.activation;
+  output.input_width = channels;
+  output.output_width = kNetworkPolicyOutputs;
+
+  LaunchAttentionPolicyMapKernel(query_stage->output, key_stage->output,
+                                 promotion_weights.data, output.dense,
+                                 output.output, batch_size, channels,
+                                 workspace.Stream());
   return output;
 }
 
@@ -978,7 +1065,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
         entry.kind != CudaExecutionScheduleKind::AttentionLayerNormStage &&
         entry.kind != CudaExecutionScheduleKind::FeedForwardStage &&
         entry.kind !=
-            CudaExecutionScheduleKind::FeedForwardLayerNormStage) {
+            CudaExecutionScheduleKind::FeedForwardLayerNormStage &&
+        entry.kind != CudaExecutionScheduleKind::PolicyMapStage) {
       continue;
     }
 
@@ -1028,6 +1116,10 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
       stage = ExecuteFeedForwardStage(execution_plan, step, weights,
                                       stage_input, tape, workspace,
                                       batch_size);
+    } else if (entry.kind == CudaExecutionScheduleKind::PolicyMapStage) {
+      stage = ExecuteAttentionPolicyMapStage(execution_plan, step, weights,
+                                             sequence, tape, workspace,
+                                             batch_size);
     } else if (entry.kind == CudaExecutionScheduleKind::DenseLayerNormStage) {
       stage = ExecuteDenseActivationLayerNormStage(
           execution_plan, step, execution_plan.steps[entry.second_step],

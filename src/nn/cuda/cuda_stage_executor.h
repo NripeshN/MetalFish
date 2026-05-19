@@ -120,6 +120,14 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
     const float *input, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size);
 
+CudaDenseStageOutput ExecuteAttentionPolicyMapStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &policy_map,
+    const CudaWeightBuffers &weights,
+    const CudaDenseStageSequenceOutput &sequence,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size);
+
 CudaAttentionProjectionOutput ExecuteAttentionInputProjectionStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     std::size_t attention_step_index, const CudaWeightBuffers &weights,

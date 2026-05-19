@@ -883,6 +883,8 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   expect(schedule.feed_forward_layernorm_stage_count == 0,
          "CUDA schedule should not count absent feed-forward/layernorm stages",
          tc);
+  expect(schedule.policy_map_stage_count == 0,
+         "CUDA schedule should not count absent policy-map stages", tc);
   expect(schedule.positional_encoding_stage_count == 0,
          "CUDA schedule should not count absent positional encoding stages",
          tc);
@@ -1010,6 +1012,36 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   expect(positional_schedule.entries[3].kind ==
              NN::Cuda::CudaExecutionScheduleKind::PositionalEncodingStage,
          "CUDA schedule should classify positional encoding explicitly", tc);
+
+  NN::NetworkResolvedExecutionPlan policy_map = dense_only;
+  policy_map.format.attention_policy = true;
+  policy_map.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::PolicyMap,
+      "policy.smoke.policy_map",
+      {
+          {0, "policy.smoke.ip4_pol_w", 8, {4, 2},
+           NN::NetworkWeightTensorKind::DenseWeight},
+      }});
+  const auto policy_map_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(policy_map);
+  expect(policy_map_schedule.FullySupported(),
+         "attention policy-map schedule should be supported", tc);
+  expect(policy_map_schedule.policy_map_stage_count == 1,
+         "CUDA schedule should count policy-map stages", tc);
+  expect(policy_map_schedule.entries.back().kind ==
+             NN::Cuda::CudaExecutionScheduleKind::PolicyMapStage,
+         "CUDA schedule should classify policy-map stages explicitly", tc);
+
+  NN::NetworkResolvedExecutionPlan conv_policy_map = policy_map;
+  conv_policy_map.format.attention_policy = false;
+  const auto conv_policy_map_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(conv_policy_map);
+  expect(!conv_policy_map_schedule.FullySupported(),
+         "non-attention policy-map schedule should stay unsupported", tc);
+  expect(conv_policy_map_schedule.FirstUnsupported() &&
+             conv_policy_map_schedule.FirstUnsupported()->op_kind ==
+                 NN::NetworkExecutionOpKind::PolicyMap,
+         "CUDA schedule should preserve unsupported policy-map op kind", tc);
 
   auto tensor = [](std::size_t index, const std::string &name,
                    std::size_t elements,
@@ -1214,6 +1246,34 @@ void test_cuda_output_mapping(TestCounter &tc) {
   expect(mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
          "CUDA output mapping should bind raw policy scratch source", tc);
 
+  NN::NetworkResolvedExecutionPlan mapped_policy = plan;
+  mapped_policy.format.attention_policy = true;
+  mapped_policy.steps.insert(
+      mapped_policy.steps.begin() + 1,
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::PolicyMap,
+          "policy.smoke.policy_map",
+          {
+              {6, "policy.smoke.ip4_pol_w", 8, {4, 2},
+               NN::NetworkWeightTensorKind::DenseWeight},
+          }});
+  const auto mapped_policy_mapping = NN::Cuda::CreateCudaOutputMapping(
+      tensor_plan, mapped_policy,
+      NN::Cuda::CreateCudaExecutionSchedule(mapped_policy), options);
+  expect(mapped_policy_mapping.ok(),
+         "CUDA output mapping should accept mapped attention policy", tc);
+  expect(mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
+             mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy)
+                     ->source_stage == "policy.smoke.policy_map",
+         "CUDA output mapping should prefer policy-map logits", tc);
+  expect(mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
+             mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy)
+                     ->source_width == NN::kNetworkPolicyOutputs,
+         "CUDA output mapping should expose mapped policy width", tc);
+  expect(!mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
+         "CUDA output mapping should not require raw policy after GPU mapping",
+         tc);
+
   NN::NetworkResolvedExecutionPlan renamed = plan;
   renamed.steps[0].name = "policy.smoke.primary_logits";
   renamed.steps[1].name = "value.smoke.wdl_logits";
@@ -1333,17 +1393,19 @@ void test_cuda_output_mapping(TestCounter &tc) {
   const auto branched_schedule = NN::Cuda::CreateCudaExecutionSchedule(branched);
   const auto derived_inputs =
       NN::Cuda::CreateCudaStageInputBindings(branched, branched_schedule);
-  expect(derived_inputs.Size() == 3,
-         "CUDA stage input derivation should bind first policy/value/moves "
-         "head stages",
+  expect(derived_inputs.Size() == 4,
+         "CUDA stage input derivation should bind head branches and policy Q/K",
          tc);
   expect(derived_inputs.FindSource("policy.smoke.output") &&
              *derived_inputs.FindSource("policy.smoke.output") ==
                  "body.input_embedding_ffn",
          "CUDA stage input derivation should branch policy from last body output",
          tc);
-  expect(!derived_inputs.FindSource("policy.smoke.dense2"),
-         "CUDA stage input derivation should not rebind later policy stages",
+  expect(derived_inputs.FindSource("policy.smoke.dense2") &&
+             *derived_inputs.FindSource("policy.smoke.dense2") ==
+                 "policy.smoke.output",
+         "CUDA stage input derivation should branch policy queries from policy "
+         "embedding",
          tc);
   expect(derived_inputs.FindSource("value.smoke.dense2") &&
              *derived_inputs.FindSource("value.smoke.dense2") ==

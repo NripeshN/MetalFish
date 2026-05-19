@@ -23,7 +23,8 @@ bool IsCudaOutputScheduleEntry(CudaExecutionScheduleKind kind) {
          kind == CudaExecutionScheduleKind::GateStage ||
          kind == CudaExecutionScheduleKind::AttentionLayerNormStage ||
          kind == CudaExecutionScheduleKind::FeedForwardStage ||
-         kind == CudaExecutionScheduleKind::FeedForwardLayerNormStage;
+         kind == CudaExecutionScheduleKind::FeedForwardLayerNormStage ||
+         kind == CudaExecutionScheduleKind::PolicyMapStage;
 }
 
 bool CudaStageNameStartsWith(std::string_view value,
@@ -137,6 +138,11 @@ int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
       throw std::runtime_error("CUDA feed-forward stage tensor is invalid");
     }
     return static_cast<int>(step.tensors[2].dims[0]);
+  }
+  if (entry.kind == CudaExecutionScheduleKind::PolicyMapStage) {
+    if (step.kind != NetworkExecutionOpKind::PolicyMap)
+      throw std::runtime_error("CUDA policy-map stage tensor is invalid");
+    return kNetworkPolicyOutputs;
   }
   throw std::runtime_error("CUDA output stage kind has no width");
 }

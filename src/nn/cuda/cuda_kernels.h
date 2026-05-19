@@ -79,6 +79,12 @@ void LaunchAttentionContextKernel(const float *probabilities,
                                   int head_depth, int qkv_width,
                                   cudaStream_t stream = nullptr);
 
+void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
+                                    const float *promotion_weights,
+                                    float *raw_policy, float *policy,
+                                    int batch_size, int channels,
+                                    cudaStream_t stream = nullptr);
+
 CudaKernelSmokeResult RunDenseAffineKernelSmoke();
 CudaKernelSmokeResult RunLayerNormKernelSmoke();
 CudaKernelSmokeResult RunActivationKernelSmoke();
