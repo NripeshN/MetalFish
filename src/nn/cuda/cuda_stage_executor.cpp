@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -97,6 +98,10 @@ bool StartsWith(std::string_view value, std::string_view prefix) {
 bool EndsWith(std::string_view value, std::string_view suffix) {
   return value.size() >= suffix.size() &&
          value.substr(value.size() - suffix.size()) == suffix;
+}
+
+bool IsDynamicPositionPreprocessName(std::string_view name) {
+  return name == "body.input_embedding_preprocess";
 }
 
 int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
@@ -471,6 +476,83 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
   LaunchLayerNormKernel(output.activation, gamma.data, beta.data,
                         output.normalized, rows, output.output_width,
                         1e-5f, stream);
+  return output;
+}
+
+CudaDenseStageOutput ExecuteDynamicPositionEncodingStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &dense, const CudaWeightBuffers &weights,
+    const std::uint64_t *input_masks, const float *input_values,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA dynamic PE stage received empty batch");
+  if (!input_masks || !input_values)
+    throw std::runtime_error("CUDA dynamic PE stage input is missing");
+  if (!IsDynamicPositionPreprocessName(dense.name))
+    throw std::runtime_error("CUDA dynamic PE stage name is invalid");
+  RequireDenseTensors(dense);
+
+  constexpr int kPositionPlanes = 12;
+  const int input_planes = execution_plan.tensors.input_planes;
+  const int squares = execution_plan.tensors.input_squares;
+  if (input_planes <= 0 || squares <= 0 || input_planes < kPositionPlanes)
+    throw std::runtime_error("CUDA dynamic PE tensor plan is invalid");
+
+  const auto dense_weight = weights.TensorAt(dense.tensors[0].inventory_index);
+  const auto dense_bias = weights.TensorAt(dense.tensors[1].inventory_index);
+  if (dense_weight.dims.size() != 2 || dense_bias.dims.size() != 1)
+    throw std::runtime_error("CUDA dynamic PE dense tensor shape is invalid");
+
+  const int output_width = static_cast<int>(dense_weight.dims[0]);
+  const int input_width = static_cast<int>(dense_weight.dims[1]);
+  if (input_width != squares * kPositionPlanes || output_width <= 0 ||
+      output_width % squares != 0 ||
+      dense_bias.elements != static_cast<std::size_t>(output_width)) {
+    throw std::runtime_error(
+        "CUDA dynamic PE dense tensor dimensions mismatch");
+  }
+  const int pe_width = output_width / squares;
+  const int concat_width = input_planes + pe_width;
+  const int square_rows = batch_size * squares;
+
+  const auto &expanded_binding = tape.RequireName(dense.name + ".expanded");
+  const auto &position_input_binding =
+      tape.RequireName(dense.name + ".position_input");
+  const auto &dense_binding = tape.RequireName(dense.name + ".dense");
+  const auto &concat_binding = tape.RequireName(dense.name + ".concat");
+  RequireTapeShape(expanded_binding, square_rows, input_planes,
+                   "dynamic PE expanded input");
+  RequireTapeShape(position_input_binding, batch_size, input_width,
+                   "dynamic PE dense input");
+  RequireTapeShape(dense_binding, batch_size, output_width,
+                   "dynamic PE dense output");
+  RequireTapeShape(concat_binding, square_rows, concat_width,
+                   "dynamic PE concat output");
+
+  CudaDenseStageOutput output;
+  output.dense = tape.Reserve(workspace, dense_binding);
+  output.expanded_input = tape.Reserve(workspace, expanded_binding);
+  output.position_input = tape.Reserve(workspace, position_input_binding);
+  output.normalized = tape.Reserve(workspace, concat_binding);
+  output.output = output.normalized;
+  output.input_width = input_width;
+  output.output_width = concat_width;
+  output.rows = square_rows;
+
+  cudaStream_t stream = workspace.Stream();
+  LaunchExpandPackedInputPlanesKernel(input_masks, input_values,
+                                      output.expanded_input, batch_size,
+                                      input_planes, squares, stream);
+  LaunchDynamicPositionEncodingInputKernel(
+      output.expanded_input, output.position_input, batch_size, input_planes,
+      kPositionPlanes, squares, stream);
+  LaunchDenseAffineKernel(output.position_input, dense_weight.data,
+                          dense_bias.data, output.dense, batch_size,
+                          input_width, output_width, stream);
+  LaunchDynamicPositionEncodingConcatKernel(
+      output.expanded_input, output.dense, output.output, batch_size,
+      input_planes, pe_width, squares, stream);
   return output;
 }
 
@@ -1051,6 +1133,17 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const CudaWeightBuffers &weights, const float *input,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
     int batch_size, const CudaStageInputBindings &input_bindings) {
+  return ExecuteDenseActivationLayerNormSequence(
+      execution_plan, weights, input, nullptr, nullptr, tape, workspace,
+      batch_size, input_bindings);
+}
+
+CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaWeightBuffers &weights, const float *input,
+    const std::uint64_t *input_masks, const float *input_values,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size, const CudaStageInputBindings &input_bindings) {
   if (!input)
     throw std::runtime_error("CUDA dense stage sequence input is missing");
 
@@ -1099,7 +1192,12 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     }
 
     CudaDenseStageOutput stage;
-    if (entry.kind == CudaExecutionScheduleKind::GateStage) {
+    if (entry.kind == CudaExecutionScheduleKind::DenseActivationStage &&
+        IsDynamicPositionPreprocessName(step.name)) {
+      stage = ExecuteDynamicPositionEncodingStage(
+          execution_plan, step, weights, input_masks, input_values, tape,
+          workspace, batch_size);
+    } else if (entry.kind == CudaExecutionScheduleKind::GateStage) {
       stage = ExecuteGateStage(step, weights, stage_input, stage_input_width,
                                tape, workspace, stage_input_rows);
     } else if (entry.kind ==

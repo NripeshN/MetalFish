@@ -104,6 +104,10 @@ bool IsSmolgenNormName(std::string_view name) {
   return EndsWith(name, ".smolgen.norm");
 }
 
+bool IsDynamicPositionPreprocessName(std::string_view name) {
+  return name == "body.input_embedding_preprocess";
+}
+
 int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
                        std::string_view name) {
   if (StartsWith(name, "body.encoder."))
@@ -174,6 +178,12 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
     return "attention_smolgen_bias";
   case CudaExecutionBufferRole::AttentionResidualOutput:
     return "attention_residual_output";
+  case CudaExecutionBufferRole::InputPlaneExpanded:
+    return "input_plane_expanded";
+  case CudaExecutionBufferRole::DynamicPositionInput:
+    return "dynamic_position_input";
+  case CudaExecutionBufferRole::DynamicPositionOutput:
+    return "dynamic_position_output";
   case CudaExecutionBufferRole::PolicyMapRawOutput:
     return "policy_map_raw_output";
   case CudaExecutionBufferRole::PolicyMapOutput:
@@ -264,6 +274,28 @@ CudaExecutionTape CreateResolvedExecutionTape(
       if (IsSmolgenDenseName(step.name))
         break;
       const int width = DenseOutputWidth(step);
+      if (IsDynamicPositionPreprocessName(step.name)) {
+        if (plan.tensors.input_squares <= 0 ||
+            width % plan.tensors.input_squares != 0) {
+          throw std::runtime_error(
+              "CUDA execution tape dynamic PE width is invalid");
+        }
+        tape.Add(step.name + ".expanded",
+                 CudaExecutionBufferRole::InputPlaneExpanded,
+                 batch_size * plan.tensors.input_squares,
+                 plan.tensors.input_planes);
+        tape.Add(step.name + ".position_input",
+                 CudaExecutionBufferRole::DynamicPositionInput, batch_size,
+                 plan.tensors.input_squares * 12);
+        tape.Add(step.name + ".dense", CudaExecutionBufferRole::DenseOutput,
+                 batch_size, width);
+        const int pe_width = width / plan.tensors.input_squares;
+        tape.Add(step.name + ".concat",
+                 CudaExecutionBufferRole::DynamicPositionOutput,
+                 batch_size * plan.tensors.input_squares,
+                 plan.tensors.input_planes + pe_width);
+        break;
+      }
       const int rows = DenseLikeRows(plan, step.name, batch_size);
       tape.Add(step.name + ".dense", CudaExecutionBufferRole::DenseOutput,
                rows, width);

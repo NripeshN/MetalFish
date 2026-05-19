@@ -16,6 +16,7 @@
 #include <cuda_runtime_api.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -32,6 +33,8 @@ struct CudaDenseStageOutput {
   float *gated = nullptr;
   float *feed_forward = nullptr;
   float *residual = nullptr;
+  float *expanded_input = nullptr;
+  float *position_input = nullptr;
   float *output = nullptr;
   int input_width = 0;
   int output_width = 0;
@@ -103,6 +106,13 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
     const float *input, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int rows);
 
+CudaDenseStageOutput ExecuteDynamicPositionEncodingStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &dense, const CudaWeightBuffers &weights,
+    const std::uint64_t *input_masks, const float *input_values,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size);
+
 CudaDenseStageOutput ExecuteGateStage(
     const NetworkResolvedExecutionStep &gate, const CudaWeightBuffers &weights,
     const float *input, int input_width, const CudaExecutionTape &tape,
@@ -165,6 +175,13 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size, const CudaStageInputBindings &input_bindings);
+
+CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaWeightBuffers &weights, const float *input,
+    const std::uint64_t *input_masks, const float *input_values,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
     int batch_size, const CudaStageInputBindings &input_bindings);
 

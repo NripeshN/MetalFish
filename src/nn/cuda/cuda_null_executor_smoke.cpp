@@ -720,6 +720,137 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
   return result;
 }
 
+CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
+  CudaBufferSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 1;
+  constexpr int kPlanes = kPackedInputPlaneCount;
+  constexpr int kSquares = kPackedInputSquareCount;
+  constexpr int kPositionPlanes = 12;
+  constexpr int kPositionWidth = 3;
+  constexpr int kPositionInput = kSquares * kPositionPlanes;
+  constexpr int kPositionOutput = kSquares * kPositionWidth;
+  constexpr int kConcatWidth = kPlanes + kPositionWidth;
+
+  std::vector<std::uint64_t> masks(kBatch * kPlanes, 0);
+  std::vector<float> values(kBatch * kPlanes, 0.0f);
+  auto set_plane = [&](int plane, std::uint64_t mask, float value) {
+    masks[plane] = mask;
+    values[plane] = value;
+  };
+  set_plane(0, (1ULL << 0) | (1ULL << 5), 2.0f);
+  set_plane(11, (1ULL << 0) | (1ULL << 63), -1.5f);
+  set_plane(12, ~0ULL, 7.0f);
+
+  std::vector<float> preproc_weights(
+      static_cast<std::size_t>(kPositionOutput) * kPositionInput, 0.0f);
+  std::vector<float> preproc_bias(kPositionOutput, 0.0f);
+  for (int square = 0; square < kSquares; ++square) {
+    const int output_offset = square * kPositionWidth;
+    const int input_offset = square * kPositionPlanes;
+    preproc_weights[static_cast<std::size_t>(output_offset) *
+                        kPositionInput +
+                    input_offset] = 0.5f;
+    preproc_weights[static_cast<std::size_t>(output_offset + 1) *
+                        kPositionInput +
+                    input_offset + 11] = 2.0f;
+    preproc_bias[output_offset + 2] =
+        1.0f + static_cast<float>(square) * 0.01f;
+  }
+
+  NetworkTensorPlan tensor_plan;
+  tensor_plan.input_planes = kPlanes;
+  tensor_plan.input_squares = kSquares;
+
+  NetworkResolvedExecutionPlan execution_plan;
+  execution_plan.tensors = tensor_plan;
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::Dense,
+      "body.input_embedding_preprocess",
+      {
+          {0, "body.ip_emb_preproc_w", preproc_weights.size(),
+           {kPositionOutput, kPositionInput},
+           NetworkWeightTensorKind::DenseWeight},
+          {1, "body.ip_emb_preproc_b", preproc_bias.size(),
+           {kPositionOutput}, NetworkWeightTensorKind::DenseBias},
+      }});
+
+  NetworkWeightInventory inventory;
+  inventory.tensors = {
+      {"body.ip_emb_preproc_w", preproc_weights.data(),
+       preproc_weights.size(), {kPositionOutput, kPositionInput},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.ip_emb_preproc_b", preproc_bias.data(), preproc_bias.size(),
+       {kPositionOutput}, NetworkWeightTensorKind::DenseBias},
+  };
+
+  std::vector<float> expected(kSquares * kConcatWidth, 0.0f);
+  for (int square = 0; square < kSquares; ++square) {
+    for (int plane = 0; plane < kPlanes; ++plane) {
+      const float expanded =
+          (masks[plane] & (1ULL << square)) ? values[plane] : 0.0f;
+      expected[static_cast<std::size_t>(square) * kConcatWidth + plane] =
+          expanded;
+    }
+    const float plane0 = (masks[0] & (1ULL << square)) ? values[0] : 0.0f;
+    const float plane11 = (masks[11] & (1ULL << square)) ? values[11] : 0.0f;
+    const std::size_t pe_offset =
+        static_cast<std::size_t>(square) * kConcatWidth + kPlanes;
+    expected[pe_offset + 0] = plane0 * 0.5f;
+    expected[pe_offset + 1] = plane11 * 2.0f;
+    expected[pe_offset + 2] = 1.0f + static_cast<float>(square) * 0.01f;
+  }
+
+  try {
+    CudaInferenceBuffers buffers;
+    buffers.Allocate(LayoutFromTensorPlan(tensor_plan, kBatch));
+    CudaExecutionWorkspace workspace;
+    buffers.UploadPackedInputs(masks, values, kBatch, workspace.Stream());
+
+    CudaWeightBuffers weights;
+    weights.Upload(inventory);
+    const auto tape = CreateResolvedExecutionTape(execution_plan, kBatch);
+    const auto output = ExecuteDynamicPositionEncodingStage(
+        execution_plan, execution_plan.steps.front(), weights,
+        buffers.input_masks, buffers.input_values, tape, workspace, kBatch);
+    workspace.Synchronize();
+
+    if (!output.output || output.rows != kSquares ||
+        output.output_width != kConcatWidth) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA dynamic PE stage metadata mismatch";
+      return result;
+    }
+
+    std::vector<float> actual(expected.size(), 0.0f);
+    DownloadFloats(actual, output.output, "cudaMemcpy(dynamic_stage_output)");
+    if (!AlmostEqual(actual, expected, 1e-5f)) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA dynamic PE stage output mismatch";
+      return result;
+    }
+
+    result.allocation_bytes =
+        buffers.AllocationBytes() + workspace.TotalBytes() +
+        weights.AllocationBytes();
+  } catch (const std::exception &e) {
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
 CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   CudaBufferSmokeResult result;
 

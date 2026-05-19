@@ -962,6 +962,13 @@ void test_cuda_inference_buffers(TestCounter &tc) {
                  NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA attention projections should pass or skip without a device",
          tc);
+
+  auto dynamic_stage_smoke =
+      NN::Cuda::RunDynamicPositionEncodingStageSmoke();
+  std::cout << "    " << dynamic_stage_smoke.message << std::endl;
+  expect(dynamic_stage_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             dynamic_stage_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA dynamic PE stage should pass or skip without a device", tc);
 }
 
 void test_cuda_execution_schedule(TestCounter &tc) {
