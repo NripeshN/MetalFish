@@ -35,6 +35,7 @@ struct CudaDenseStageOutput {
   float *output = nullptr;
   int input_width = 0;
   int output_width = 0;
+  int rows = 0;
 };
 
 struct CudaDenseStageSequenceOutput {
@@ -93,32 +94,32 @@ CudaDenseStageOutput ExecuteDenseActivationStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &dense, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size);
+    CudaExecutionWorkspace &workspace, int rows);
 
 CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &dense,
     const NetworkResolvedExecutionStep &norm, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size);
+    CudaExecutionWorkspace &workspace, int rows);
 
 CudaDenseStageOutput ExecuteGateStage(
     const NetworkResolvedExecutionStep &gate, const CudaWeightBuffers &weights,
     const float *input, int input_width, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size);
+    CudaExecutionWorkspace &workspace, int rows);
 
 CudaDenseStageOutput ExecuteFeedForwardStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &ffn, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size);
+    CudaExecutionWorkspace &workspace, int rows);
 
 CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &ffn,
     const NetworkResolvedExecutionStep &norm, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size);
+    CudaExecutionWorkspace &workspace, int rows);
 
 CudaDenseStageOutput ExecuteAttentionPolicyMapStage(
     const NetworkResolvedExecutionPlan &execution_plan,

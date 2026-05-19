@@ -387,8 +387,8 @@ CudaDenseStageOutput ExecuteDenseActivationStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &dense, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size) {
-  if (batch_size <= 0)
+    CudaExecutionWorkspace &workspace, int rows) {
+  if (rows <= 0)
     throw std::runtime_error("CUDA dense stage received empty batch");
   if (!input)
     throw std::runtime_error("CUDA dense stage input is missing");
@@ -410,7 +410,7 @@ CudaDenseStageOutput ExecuteDenseActivationStage(
   const auto &dense_binding = tape.RequireName(dense.name + ".dense");
   const auto &activation_binding =
       tape.RequireName(dense.name + ".activation");
-  const std::size_t entries = static_cast<std::size_t>(batch_size) *
+  const std::size_t entries = static_cast<std::size_t>(rows) *
                               static_cast<std::size_t>(output_width);
   if (dense_binding.entries != entries ||
       activation_binding.entries != entries) {
@@ -423,10 +423,11 @@ CudaDenseStageOutput ExecuteDenseActivationStage(
   output.output = output.activation;
   output.input_width = input_width;
   output.output_width = output_width;
+  output.rows = rows;
 
   cudaStream_t stream = workspace.Stream();
   LaunchDenseAffineKernel(input, dense_weight.data, dense_bias.data,
-                          output.dense, batch_size, input_width, output_width,
+                          output.dense, rows, input_width, output_width,
                           stream);
   LaunchActivationKernel(
       output.dense, output.activation, static_cast<int>(entries),
@@ -440,11 +441,11 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
     const NetworkResolvedExecutionStep &dense,
     const NetworkResolvedExecutionStep &norm, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size) {
+    CudaExecutionWorkspace &workspace, int rows) {
   RequireLayerNormTensors(norm);
 
   CudaDenseStageOutput output = ExecuteDenseActivationStage(
-      execution_plan, dense, weights, input, tape, workspace, batch_size);
+      execution_plan, dense, weights, input, tape, workspace, rows);
   const auto gamma = weights.TensorAt(norm.tensors[0].inventory_index);
   const auto beta = weights.TensorAt(norm.tensors[1].inventory_index);
   if (gamma.dims.size() != 1 || beta.dims.size() != 1) {
@@ -457,7 +458,7 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
   }
 
   const auto &norm_binding = tape.RequireName(norm.name + ".normalized");
-  const std::size_t entries = static_cast<std::size_t>(batch_size) *
+  const std::size_t entries = static_cast<std::size_t>(rows) *
                               static_cast<std::size_t>(output.output_width);
   if (norm_binding.entries != entries) {
     throw std::runtime_error("CUDA layernorm stage tape size mismatch");
@@ -468,7 +469,7 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
 
   cudaStream_t stream = workspace.Stream();
   LaunchLayerNormKernel(output.activation, gamma.data, beta.data,
-                        output.normalized, batch_size, output.output_width,
+                        output.normalized, rows, output.output_width,
                         1e-5f, stream);
   return output;
 }
@@ -476,15 +477,15 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
 CudaDenseStageOutput ExecuteGateStage(
     const NetworkResolvedExecutionStep &gate, const CudaWeightBuffers &weights,
     const float *input, int input_width, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size) {
-  if (batch_size <= 0)
+    CudaExecutionWorkspace &workspace, int rows) {
+  if (rows <= 0)
     throw std::runtime_error("CUDA gate stage received empty batch");
   if (!input || input_width <= 0)
     throw std::runtime_error("CUDA gate stage input is missing");
   RequireGateTensors(gate);
 
   const auto &gate_binding = tape.RequireName(gate.name + ".gated");
-  const std::size_t entries = static_cast<std::size_t>(batch_size) *
+  const std::size_t entries = static_cast<std::size_t>(rows) *
                               static_cast<std::size_t>(input_width);
   if (gate_binding.entries != entries) {
     throw std::runtime_error("CUDA gate stage tape size mismatch");
@@ -495,6 +496,7 @@ CudaDenseStageOutput ExecuteGateStage(
   output.output = output.gated;
   output.input_width = input_width;
   output.output_width = input_width;
+  output.rows = rows;
 
   const float *source = input;
   cudaStream_t stream = workspace.Stream();
@@ -505,10 +507,10 @@ CudaDenseStageOutput ExecuteGateStage(
       throw std::runtime_error("CUDA gate stage tensor dimensions mismatch");
     }
     if (IsMultiplyGate(tensor.name)) {
-      LaunchGateKernel(source, gate_weights.data, output.gated, batch_size,
+      LaunchGateKernel(source, gate_weights.data, output.gated, rows,
                        input_width, CudaGateKind::Multiply, stream);
     } else if (IsAddGate(tensor.name)) {
-      LaunchGateKernel(source, gate_weights.data, output.gated, batch_size,
+      LaunchGateKernel(source, gate_weights.data, output.gated, rows,
                        input_width, CudaGateKind::Add, stream);
     } else {
       throw std::runtime_error("CUDA gate stage tensor is unknown: " +
@@ -526,8 +528,8 @@ CudaDenseStageOutput ExecuteFeedForwardStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &ffn, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size) {
-  if (batch_size <= 0)
+    CudaExecutionWorkspace &workspace, int rows) {
+  if (rows <= 0)
     throw std::runtime_error("CUDA feed-forward stage received empty batch");
   if (!input)
     throw std::runtime_error("CUDA feed-forward stage input is missing");
@@ -537,10 +539,10 @@ CudaDenseStageOutput ExecuteFeedForwardStage(
   const auto &activation_binding =
       tape.RequireName(ffn.name + ".activation");
   const auto &dense2_binding = tape.RequireName(ffn.name + ".dense2");
-  const std::size_t hidden_entries = static_cast<std::size_t>(batch_size) *
+  const std::size_t hidden_entries = static_cast<std::size_t>(rows) *
                                      static_cast<std::size_t>(
                                          tensors.hidden_width);
-  const std::size_t output_entries = static_cast<std::size_t>(batch_size) *
+  const std::size_t output_entries = static_cast<std::size_t>(rows) *
                                      static_cast<std::size_t>(
                                          tensors.output_width);
   if (dense1_binding.entries != hidden_entries ||
@@ -556,10 +558,11 @@ CudaDenseStageOutput ExecuteFeedForwardStage(
   output.output = output.feed_forward;
   output.input_width = tensors.input_width;
   output.output_width = tensors.output_width;
+  output.rows = rows;
 
   cudaStream_t stream = workspace.Stream();
   LaunchDenseAffineKernel(input, tensors.dense1_weight.data,
-                          tensors.dense1_bias.data, output.dense, batch_size,
+                          tensors.dense1_bias.data, output.dense, rows,
                           tensors.input_width, tensors.hidden_width, stream);
   LaunchActivationKernel(
       output.dense, output.activation, static_cast<int>(hidden_entries),
@@ -567,8 +570,8 @@ CudaDenseStageOutput ExecuteFeedForwardStage(
       stream);
   LaunchDenseAffineKernel(output.activation, tensors.dense2_weight.data,
                           tensors.dense2_bias.data, output.feed_forward,
-                          batch_size, tensors.hidden_width,
-                          tensors.output_width, stream);
+                          rows, tensors.hidden_width, tensors.output_width,
+                          stream);
   return output;
 }
 
@@ -577,11 +580,11 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
     const NetworkResolvedExecutionStep &ffn,
     const NetworkResolvedExecutionStep &norm, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size) {
+    CudaExecutionWorkspace &workspace, int rows) {
   RequireLayerNormTensors(norm);
 
   CudaDenseStageOutput output = ExecuteFeedForwardStage(
-      execution_plan, ffn, weights, input, tape, workspace, batch_size);
+      execution_plan, ffn, weights, input, tape, workspace, rows);
   if (output.input_width != output.output_width) {
     throw std::runtime_error(
         "CUDA feed-forward residual width mismatch");
@@ -598,7 +601,7 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
 
   const auto &residual_binding = tape.RequireName(norm.name + ".residual");
   const auto &norm_binding = tape.RequireName(norm.name + ".normalized");
-  const std::size_t entries = static_cast<std::size_t>(batch_size) *
+  const std::size_t entries = static_cast<std::size_t>(rows) *
                               static_cast<std::size_t>(output.output_width);
   if (residual_binding.entries != entries || norm_binding.entries != entries) {
     throw std::runtime_error(
@@ -611,11 +614,11 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
 
   cudaStream_t stream = workspace.Stream();
   LaunchResidualAddKernel(input, output.feed_forward, output.residual,
-                          batch_size, output.output_width,
+                          rows, output.output_width,
                           FeedForwardResidualScale(execution_plan, ffn.name),
                           stream);
   LaunchLayerNormKernel(output.residual, gamma.data, beta.data,
-                        output.normalized, batch_size, output.output_width,
+                        output.normalized, rows, output.output_width,
                         FeedForwardLayerNormEpsilon(execution_plan, ffn.name),
                         stream);
   return output;
@@ -676,6 +679,7 @@ CudaDenseStageOutput ExecuteAttentionPolicyMapStage(
   output.output = output.activation;
   output.input_width = channels;
   output.output_width = kNetworkPolicyOutputs;
+  output.rows = batch_size;
 
   LaunchAttentionPolicyMapKernel(query_stage->output, key_stage->output,
                                  promotion_weights.data, output.dense,
@@ -944,6 +948,7 @@ CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
   output.output = output.normalized;
   output.input_width = width;
   output.output_width = width;
+  output.rows = rows;
 
   cudaStream_t stream = workspace.Stream();
   LaunchResidualAddKernel(parent, attention_output.projection,
@@ -1058,6 +1063,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
   CudaDenseStageSequenceOutput sequence;
   const float *current_input = input;
   int current_width = 0;
+  int current_rows = batch_size;
   for (const auto &entry : schedule.entries) {
     if (entry.kind != CudaExecutionScheduleKind::DenseLayerNormStage &&
         entry.kind != CudaExecutionScheduleKind::DenseActivationStage &&
@@ -1073,10 +1079,12 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const auto &step = execution_plan.steps[entry.first_step];
     const float *stage_input = current_input;
     int stage_input_width = current_width;
+    int stage_input_rows = current_rows;
     if (const std::string *source = input_bindings.FindSource(step.name)) {
       if (source->empty()) {
         stage_input = input;
         stage_input_width = 0;
+        stage_input_rows = batch_size;
       } else {
         const CudaDenseStageOutput *source_stage =
             sequence.FindStage(*source);
@@ -1086,13 +1094,14 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
         }
         stage_input = source_stage->output;
         stage_input_width = source_stage->output_width;
+        stage_input_rows = source_stage->rows;
       }
     }
 
     CudaDenseStageOutput stage;
     if (entry.kind == CudaExecutionScheduleKind::GateStage) {
       stage = ExecuteGateStage(step, weights, stage_input, stage_input_width,
-                               tape, workspace, batch_size);
+                               tape, workspace, stage_input_rows);
     } else if (entry.kind ==
                CudaExecutionScheduleKind::AttentionLayerNormStage) {
       const auto input_projection = ExecuteAttentionInputProjectionStage(
@@ -1111,11 +1120,11 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
                CudaExecutionScheduleKind::FeedForwardLayerNormStage) {
       stage = ExecuteFeedForwardLayerNormStage(
           execution_plan, step, execution_plan.steps[entry.second_step],
-          weights, stage_input, tape, workspace, batch_size);
+          weights, stage_input, tape, workspace, stage_input_rows);
     } else if (entry.kind == CudaExecutionScheduleKind::FeedForwardStage) {
       stage = ExecuteFeedForwardStage(execution_plan, step, weights,
                                       stage_input, tape, workspace,
-                                      batch_size);
+                                      stage_input_rows);
     } else if (entry.kind == CudaExecutionScheduleKind::PolicyMapStage) {
       stage = ExecuteAttentionPolicyMapStage(execution_plan, step, weights,
                                              sequence, tape, workspace,
@@ -1123,11 +1132,11 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     } else if (entry.kind == CudaExecutionScheduleKind::DenseLayerNormStage) {
       stage = ExecuteDenseActivationLayerNormStage(
           execution_plan, step, execution_plan.steps[entry.second_step],
-          weights, stage_input, tape, workspace, batch_size);
+          weights, stage_input, tape, workspace, stage_input_rows);
     } else {
       stage = ExecuteDenseActivationStage(execution_plan, step, weights,
                                           stage_input, tape, workspace,
-                                          batch_size);
+                                          stage_input_rows);
     }
     if (stage_input_width != 0 && stage.input_width != stage_input_width) {
       throw std::runtime_error(
@@ -1139,6 +1148,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     ++sequence.stage_count;
     current_input = stage.output;
     current_width = stage.output_width;
+    current_rows = stage.rows;
   }
 
   if (sequence.stage_count == 0)

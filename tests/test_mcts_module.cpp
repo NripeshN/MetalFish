@@ -606,6 +606,31 @@ void test_network_execution_plan(TestCounter &tc) {
                              loaded_attention_plan.output_width,
          "loaded CUDA tape should allocate body attention residual scratch",
          tc);
+  const auto loaded_tape_batch2 =
+      NN::Cuda::CreateResolvedExecutionTape(loaded_resolved_plan, 2);
+  expect(loaded_tape_batch2
+             .RequireName("body.input_embedding_preprocess.dense")
+             .rows == 2,
+         "loaded CUDA tape should keep dynamic PE dense at batch rows", tc);
+  expect(loaded_tape_batch2.RequireName("body.input_embedding.dense").rows ==
+             2 * NN::Cuda::kCudaAttentionSquares,
+         "loaded CUDA tape should run input embedding on board-square rows",
+         tc);
+  expect(loaded_tape_batch2
+             .RequireName("body.input_embedding_norm.normalized")
+             .rows == 2 * NN::Cuda::kCudaAttentionSquares,
+         "loaded CUDA tape should run input embedding norm on board-square "
+         "rows",
+         tc);
+  expect(loaded_tape_batch2.RequireName("body.input_embedding_gates.gated")
+             .rows == 2 * NN::Cuda::kCudaAttentionSquares,
+         "loaded CUDA tape should run input gates on board-square rows", tc);
+  expect(loaded_tape_batch2.RequireName("body.input_embedding_ffn.dense1")
+             .rows == 2 * NN::Cuda::kCudaAttentionSquares,
+         "loaded CUDA tape should run input FFN on board-square rows", tc);
+  expect(loaded_tape_batch2.RequireName("body.encoder.0.ffn.dense1").rows ==
+             2 * NN::Cuda::kCudaAttentionSquares,
+         "loaded CUDA tape should run encoder FFN on board-square rows", tc);
 #endif
 }
 
