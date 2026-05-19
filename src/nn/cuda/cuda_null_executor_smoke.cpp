@@ -739,6 +739,7 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
   constexpr int kPositionOutput = kSquares * kPositionWidth;
   constexpr int kConcatWidth = kPlanes + kPositionWidth;
   constexpr int kEmbeddingWidth = 4;
+  constexpr int kFfnHidden = 5;
 
   std::vector<std::uint64_t> masks(kBatch * kPlanes, 0);
   std::vector<float> values(kBatch * kPlanes, 0.0f);
@@ -776,12 +777,35 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
   embedding_weights[2 * kConcatWidth + kPlanes + 2] = 0.5f;
   embedding_weights[3 * kConcatWidth + 0] = -0.25f;
   embedding_weights[3 * kConcatWidth + 12] = 0.2f;
+  const std::vector<float> embedding_gamma = {1.10f, -0.75f, 0.50f, 1.25f};
+  const std::vector<float> embedding_beta = {0.20f, -0.10f, 0.35f, -0.40f};
+  const std::vector<float> mult_gate = {1.50f, -0.25f, 0.75f, 1.10f};
+  const std::vector<float> add_gate = {-0.20f, 0.45f, 0.10f, -0.30f};
+  const std::vector<float> ffn1_weights = {
+      0.30f, -0.20f, 0.50f, 0.10f,
+      -0.40f, 0.25f, 0.15f, -0.35f,
+      0.60f, -0.10f, 0.20f, 0.45f,
+      0.05f, 0.70f, -0.30f, 0.20f,
+      -0.25f, 0.15f, 0.35f, -0.50f,
+  };
+  const std::vector<float> ffn1_bias = {0.10f, -0.05f, 0.20f, -0.15f,
+                                        0.30f};
+  const std::vector<float> ffn2_weights = {
+      0.40f, -0.10f, 0.25f, 0.35f, -0.20f,
+      -0.30f, 0.55f, -0.15f, 0.10f, 0.45f,
+      0.15f, 0.20f, -0.50f, 0.60f, 0.05f,
+      -0.45f, 0.30f, 0.10f, -0.25f, 0.50f,
+  };
+  const std::vector<float> ffn2_bias = {0.05f, -0.20f, 0.15f, 0.25f};
+  const std::vector<float> ffn_gamma = {0.90f, 1.20f, -0.80f, 0.65f};
+  const std::vector<float> ffn_beta = {-0.05f, 0.25f, 0.10f, -0.35f};
 
   NetworkTensorPlan tensor_plan;
   tensor_plan.input_planes = kPlanes;
   tensor_plan.input_squares = kSquares;
 
   NetworkResolvedExecutionPlan execution_plan;
+  execution_plan.format.input_embedding = INPUT_EMBEDDING_PE_DENSE;
   execution_plan.tensors = tensor_plan;
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
       NetworkExecutionOpKind::Dense,
@@ -803,6 +827,46 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
           {3, "body.input_embedding_b", embedding_bias.size(),
            {kEmbeddingWidth}, NetworkWeightTensorKind::DenseBias},
       }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::LayerNorm,
+      "body.input_embedding_norm",
+      {
+          {4, "body.ip_emb_ln_gammas", embedding_gamma.size(),
+           {kEmbeddingWidth}, NetworkWeightTensorKind::NormScale},
+          {5, "body.ip_emb_ln_betas", embedding_beta.size(),
+           {kEmbeddingWidth}, NetworkWeightTensorKind::NormBias},
+      }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::Gate,
+      "body.input_embedding_gates",
+      {
+          {6, "body.ip_mult_gate", mult_gate.size(), {kEmbeddingWidth},
+           NetworkWeightTensorKind::Gate},
+          {7, "body.ip_add_gate", add_gate.size(), {kEmbeddingWidth},
+           NetworkWeightTensorKind::Gate},
+      }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::FeedForward,
+      "body.input_embedding_ffn",
+      {
+          {8, "body.ip_emb_ffn.dense1_w", ffn1_weights.size(),
+           {kFfnHidden, kEmbeddingWidth}, NetworkWeightTensorKind::DenseWeight},
+          {9, "body.ip_emb_ffn.dense1_b", ffn1_bias.size(), {kFfnHidden},
+           NetworkWeightTensorKind::DenseBias},
+          {10, "body.ip_emb_ffn.dense2_w", ffn2_weights.size(),
+           {kEmbeddingWidth, kFfnHidden}, NetworkWeightTensorKind::DenseWeight},
+          {11, "body.ip_emb_ffn.dense2_b", ffn2_bias.size(),
+           {kEmbeddingWidth}, NetworkWeightTensorKind::DenseBias},
+      }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::LayerNorm,
+      "body.input_embedding_ffn_norm",
+      {
+          {12, "body.ip_emb_ffn_ln_gammas", ffn_gamma.size(),
+           {kEmbeddingWidth}, NetworkWeightTensorKind::NormScale},
+          {13, "body.ip_emb_ffn_ln_betas", ffn_beta.size(),
+           {kEmbeddingWidth}, NetworkWeightTensorKind::NormBias},
+      }});
 
   NetworkWeightInventory inventory;
   inventory.tensors = {
@@ -817,6 +881,30 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
       {"body.input_embedding_b", embedding_bias.data(),
        embedding_bias.size(), {kEmbeddingWidth},
        NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ln_gammas", embedding_gamma.data(),
+       embedding_gamma.size(), {kEmbeddingWidth},
+       NetworkWeightTensorKind::NormScale},
+      {"body.ip_emb_ln_betas", embedding_beta.data(),
+       embedding_beta.size(), {kEmbeddingWidth},
+       NetworkWeightTensorKind::NormBias},
+      {"body.ip_mult_gate", mult_gate.data(), mult_gate.size(),
+       {kEmbeddingWidth}, NetworkWeightTensorKind::Gate},
+      {"body.ip_add_gate", add_gate.data(), add_gate.size(),
+       {kEmbeddingWidth}, NetworkWeightTensorKind::Gate},
+      {"body.ip_emb_ffn.dense1_w", ffn1_weights.data(),
+       ffn1_weights.size(), {kFfnHidden, kEmbeddingWidth},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.ip_emb_ffn.dense1_b", ffn1_bias.data(), ffn1_bias.size(),
+       {kFfnHidden}, NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ffn.dense2_w", ffn2_weights.data(),
+       ffn2_weights.size(), {kEmbeddingWidth, kFfnHidden},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.ip_emb_ffn.dense2_b", ffn2_bias.data(), ffn2_bias.size(),
+       {kEmbeddingWidth}, NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ffn_ln_gammas", ffn_gamma.data(), ffn_gamma.size(),
+       {kEmbeddingWidth}, NetworkWeightTensorKind::NormScale},
+      {"body.ip_emb_ffn_ln_betas", ffn_beta.data(), ffn_beta.size(),
+       {kEmbeddingWidth}, NetworkWeightTensorKind::NormBias},
   };
 
   std::vector<float> expected(kSquares * kConcatWidth, 0.0f);
@@ -870,6 +958,36 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
         kEmbeddingWidth);
     const auto expected_embedding =
         ActivationHost(expected_embedding_dense, CudaActivationKind::Relu);
+    const auto expected_embedding_norm =
+        LayerNormRowsHost(expected_embedding, embedding_gamma, embedding_beta,
+                          kSquares, kEmbeddingWidth, 1e-3f);
+    std::vector<float> expected_gated(expected_embedding_norm.size(), 0.0f);
+    for (int square = 0; square < kSquares; ++square) {
+      const std::size_t offset =
+          static_cast<std::size_t>(square) * kEmbeddingWidth;
+      for (int channel = 0; channel < kEmbeddingWidth; ++channel) {
+        expected_gated[offset + channel] =
+            expected_embedding_norm[offset + channel] *
+                mult_gate[static_cast<std::size_t>(channel)] +
+            add_gate[static_cast<std::size_t>(channel)];
+      }
+    }
+    const auto expected_ffn_dense1 =
+        DenseAffineHost(expected_gated, ffn1_weights, ffn1_bias, kSquares,
+                        kEmbeddingWidth, kFfnHidden);
+    const auto expected_ffn_activation =
+        ActivationHost(expected_ffn_dense1, CudaActivationKind::Relu);
+    const auto expected_ffn_dense2 =
+        DenseAffineHost(expected_ffn_activation, ffn2_weights, ffn2_bias,
+                        kSquares, kFfnHidden, kEmbeddingWidth);
+    std::vector<float> expected_ffn_residual(expected_ffn_dense2.size(),
+                                             0.0f);
+    for (std::size_t i = 0; i < expected_ffn_residual.size(); ++i)
+      expected_ffn_residual[i] = expected_gated[i] + expected_ffn_dense2[i];
+    const auto expected_ffn_norm =
+        LayerNormRowsHost(expected_ffn_residual, ffn_gamma, ffn_beta, kSquares,
+                          kEmbeddingWidth, 1e-3f);
+
     CudaExecutionWorkspace sequence_workspace;
     const CudaStageInputBindings input_bindings;
     const auto sequence = ExecuteDenseActivationLayerNormSequence(
@@ -880,24 +998,49 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
     const auto *preprocess_stage =
         sequence.FindStage("body.input_embedding_preprocess");
     const auto *embedding_stage = sequence.FindStage("body.input_embedding");
-    if (sequence.stage_count != 2 || !preprocess_stage ||
+    const auto *gate_stage = sequence.FindStage("body.input_embedding_gates");
+    const auto *ffn_stage = sequence.FindStage("body.input_embedding_ffn");
+    if (sequence.stage_count != 4 || !preprocess_stage ||
         !preprocess_stage->output ||
         preprocess_stage->output_width != kConcatWidth ||
-        !embedding_stage || !embedding_stage->output ||
+        !embedding_stage || !embedding_stage->activation ||
+        !embedding_stage->output ||
         embedding_stage->rows != kSquares ||
-        embedding_stage->output_width != kEmbeddingWidth) {
+        embedding_stage->output_width != kEmbeddingWidth || !gate_stage ||
+        !gate_stage->output || gate_stage->rows != kSquares ||
+        gate_stage->output_width != kEmbeddingWidth || !ffn_stage ||
+        !ffn_stage->feed_forward || !ffn_stage->residual ||
+        !ffn_stage->output || ffn_stage->rows != kSquares ||
+        ffn_stage->output_width != kEmbeddingWidth) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA dynamic PE sequence metadata mismatch";
       return result;
     }
     std::vector<float> actual_sequence(expected.size(), 0.0f);
     std::vector<float> actual_embedding(expected_embedding.size(), 0.0f);
+    std::vector<float> actual_embedding_norm(expected_embedding_norm.size(),
+                                             0.0f);
+    std::vector<float> actual_gated(expected_gated.size(), 0.0f);
+    std::vector<float> actual_ffn_residual(expected_ffn_residual.size(), 0.0f);
+    std::vector<float> actual_ffn_norm(expected_ffn_norm.size(), 0.0f);
     DownloadFloats(actual_sequence, preprocess_stage->output,
                    "cudaMemcpy(dynamic_sequence_preprocess)");
-    DownloadFloats(actual_embedding, embedding_stage->output,
+    DownloadFloats(actual_embedding, embedding_stage->activation,
                    "cudaMemcpy(dynamic_sequence_embedding)");
+    DownloadFloats(actual_embedding_norm, embedding_stage->output,
+                   "cudaMemcpy(dynamic_sequence_embedding_norm)");
+    DownloadFloats(actual_gated, gate_stage->output,
+                   "cudaMemcpy(dynamic_sequence_gate)");
+    DownloadFloats(actual_ffn_residual, ffn_stage->residual,
+                   "cudaMemcpy(dynamic_sequence_ffn_residual)");
+    DownloadFloats(actual_ffn_norm, ffn_stage->output,
+                   "cudaMemcpy(dynamic_sequence_ffn_norm)");
     if (!AlmostEqual(actual_sequence, expected, 1e-5f) ||
-        !AlmostEqual(actual_embedding, expected_embedding, 1e-5f)) {
+        !AlmostEqual(actual_embedding, expected_embedding, 1e-5f) ||
+        !AlmostEqual(actual_embedding_norm, expected_embedding_norm, 1e-5f) ||
+        !AlmostEqual(actual_gated, expected_gated, 1e-5f) ||
+        !AlmostEqual(actual_ffn_residual, expected_ffn_residual, 1e-5f) ||
+        !AlmostEqual(actual_ffn_norm, expected_ffn_norm, 1e-5f)) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA dynamic PE sequence output mismatch";
       return result;

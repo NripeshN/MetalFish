@@ -249,6 +249,15 @@ float FeedForwardLayerNormEpsilon(
   return 1e-5f;
 }
 
+float DenseLayerNormEpsilon(const NetworkResolvedExecutionPlan &execution_plan,
+                            std::string_view stage_name) {
+  if (stage_name == "body.input_embedding_norm" &&
+      execution_plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE) {
+    return 1e-3f;
+  }
+  return 1e-5f;
+}
+
 float AttentionLayerNormEpsilon(
     const NetworkResolvedExecutionPlan &execution_plan,
     std::string_view stage_name) {
@@ -475,7 +484,8 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
   cudaStream_t stream = workspace.Stream();
   LaunchLayerNormKernel(output.activation, gamma.data, beta.data,
                         output.normalized, rows, output.output_width,
-                        1e-5f, stream);
+                        DenseLayerNormEpsilon(execution_plan, norm.name),
+                        stream);
   return output;
 }
 
