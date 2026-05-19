@@ -1012,8 +1012,22 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
   embedding_weights[3 * kConcatWidth + 12] = 0.2f;
   const std::vector<float> embedding_gamma = {1.10f, -0.75f, 0.50f, 1.25f};
   const std::vector<float> embedding_beta = {0.20f, -0.10f, 0.35f, -0.40f};
-  const std::vector<float> mult_gate = {1.50f, -0.25f, 0.75f, 1.10f};
-  const std::vector<float> add_gate = {-0.20f, 0.45f, 0.10f, -0.30f};
+  std::vector<float> mult_gate(
+      static_cast<std::size_t>(kEmbeddingWidth) * kSquares, 0.0f);
+  std::vector<float> add_gate(
+      static_cast<std::size_t>(kEmbeddingWidth) * kSquares, 0.0f);
+  for (int channel = 0; channel < kEmbeddingWidth; ++channel) {
+    for (int square = 0; square < kSquares; ++square) {
+      const std::size_t offset =
+          static_cast<std::size_t>(channel) * kSquares + square;
+      mult_gate[offset] =
+          0.75f + 0.01f * static_cast<float>(square) -
+          0.15f * static_cast<float>(channel);
+      add_gate[offset] =
+          -0.20f + 0.005f * static_cast<float>(square) +
+          0.10f * static_cast<float>(channel);
+    }
+  }
   const std::vector<float> ffn1_weights = {
       0.30f, -0.20f, 0.50f, 0.10f,
       -0.40f, 0.25f, 0.15f, -0.35f,
@@ -1075,9 +1089,10 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
       NetworkExecutionOpKind::Gate,
       "body.input_embedding_gates",
       {
-          {6, "body.ip_mult_gate", mult_gate.size(), {kEmbeddingWidth},
-           NetworkWeightTensorKind::Gate},
-          {7, "body.ip_add_gate", add_gate.size(), {kEmbeddingWidth},
+          {6, "body.ip_mult_gate", mult_gate.size(),
+           {kEmbeddingWidth, kSquares}, NetworkWeightTensorKind::Gate},
+          {7, "body.ip_add_gate", add_gate.size(),
+           {kEmbeddingWidth, kSquares},
            NetworkWeightTensorKind::Gate},
       }});
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
@@ -1123,9 +1138,9 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
        embedding_beta.size(), {kEmbeddingWidth},
        NetworkWeightTensorKind::NormBias},
       {"body.ip_mult_gate", mult_gate.data(), mult_gate.size(),
-       {kEmbeddingWidth}, NetworkWeightTensorKind::Gate},
+       {kEmbeddingWidth, kSquares}, NetworkWeightTensorKind::Gate},
       {"body.ip_add_gate", add_gate.data(), add_gate.size(),
-       {kEmbeddingWidth}, NetworkWeightTensorKind::Gate},
+       {kEmbeddingWidth, kSquares}, NetworkWeightTensorKind::Gate},
       {"body.ip_emb_ffn.dense1_w", ffn1_weights.data(),
        ffn1_weights.size(), {kFfnHidden, kEmbeddingWidth},
        NetworkWeightTensorKind::DenseWeight},
@@ -1203,8 +1218,9 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
       for (int channel = 0; channel < kEmbeddingWidth; ++channel) {
         expected_gated[offset + channel] =
             expected_embedding_norm[offset + channel] *
-                mult_gate[static_cast<std::size_t>(channel)] +
-            add_gate[static_cast<std::size_t>(channel)];
+                mult_gate[static_cast<std::size_t>(channel) * kSquares +
+                          square] +
+            add_gate[static_cast<std::size_t>(channel) * kSquares + square];
       }
     }
     const auto expected_ffn_dense1 =

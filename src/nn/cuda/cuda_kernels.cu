@@ -186,7 +186,8 @@ __global__ void GateKernel(const float *input, const float *weights,
   const int row = index / width;
   const int column = index % width;
   const int gate_row = gate_rows == 1 ? 0 : row % gate_rows;
-  const float gate = weights[gate_row * width + column];
+  const float gate = gate_rows == 1 ? weights[column]
+                                    : weights[column * gate_rows + gate_row];
   const float value = input[index];
   output[index] =
       kind == CudaGateKind::Add ? value + gate : value * gate;
@@ -1110,7 +1111,7 @@ CudaKernelSmokeResult RunGateKernelSmoke() {
     for (int i = 0; i < kWidth; ++i) {
       const std::size_t index = static_cast<std::size_t>(b) * kWidth + i;
       const std::size_t gate_index =
-          static_cast<std::size_t>(b % 2) * kWidth + i;
+          static_cast<std::size_t>(i) * 2 + (b % 2);
       expected[index] = input[index] * mult_gate[gate_index] +
                         add_gate[gate_index];
     }
