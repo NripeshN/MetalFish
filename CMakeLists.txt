@@ -193,8 +193,17 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/nn)
 
 # Transformer neural network (for MCTS)
 set(NN_SOURCES
-    ${PROTO_OUTPUT_DIR}/net.pb.cc src/nn/loader.cpp src/nn/encoder.cpp
-    src/nn/weights.cpp src/nn/policy_map.cpp src/nn/network.cpp)
+    ${PROTO_OUTPUT_DIR}/net.pb.cc
+    src/nn/loader.cpp
+    src/nn/encoder.cpp
+    src/nn/weights.cpp
+    src/nn/policy_map.cpp
+    src/nn/network_format.cpp
+    src/nn/network_tensor_plan.cpp
+    src/nn/network_weight_inventory.cpp
+    src/nn/network_execution_plan.cpp
+    src/nn/network_output_decoder.cpp
+    src/nn/network.cpp)
 
 # Metal transformer acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
@@ -320,7 +329,8 @@ if(BUILD_TESTS)
 
   set(TEST_SOURCES
       tests/test_main.cpp tests/test_core.cpp tests/test_search_module.cpp
-      tests/test_mcts_module.cpp tests/test_hybrid.cpp tests/test_eval_gpu.cpp)
+      tests/test_mcts_module.cpp tests/test_hybrid.cpp tests/test_eval_gpu.cpp
+      tests/nn_input_fixture.cpp)
 
   add_executable(
     metalfish_tests

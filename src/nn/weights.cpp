@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <utility>
 
@@ -22,13 +23,26 @@ static constexpr float kEpsilon = 1e-5f;
 class LayerAdapter {
 public:
   explicit LayerAdapter(const MetalFishNN::Weights::Layer &layer)
-      : data_(DecodeLayer(layer)) {}
+      : data_(DecodeLayer(layer)),
+        dims_(layer.dims().begin(), layer.dims().end()) {}
 
-  std::vector<float> as_vector() const { return data_; }
+  BaseWeights::Vec as_vector() const { return BaseWeights::Vec(data_, dims_); }
 
 private:
   std::vector<float> data_;
+  std::vector<std::uint32_t> dims_;
 };
+
+void SetFlatDimsIfEmpty(BaseWeights::Vec &values) {
+  if (!values.empty() && values.dims.empty()) {
+    values.dims.push_back(static_cast<std::uint32_t>(values.size()));
+  }
+}
+
+void ClearWithDims(BaseWeights::Vec &values) {
+  values.clear();
+  values.dims.clear();
+}
 } // namespace
 
 BaseWeights::BaseWeights(const MetalFishNN::Weights &weights)
@@ -90,11 +104,14 @@ BaseWeights::ConvBlock::ConvBlock(const MetalFishNN::Weights::ConvBlock &block)
       bn_betas.emplace_back(0.0f);
       bn_gammas.emplace_back(1.0f);
     }
+    SetFlatDimsIfEmpty(bn_betas);
+    SetFlatDimsIfEmpty(bn_gammas);
   }
   if (biases.size() == 0) {
     for (auto i = size_t{0}; i < bn_means.size(); i++) {
       biases.emplace_back(0.0f);
     }
+    SetFlatDimsIfEmpty(biases);
   }
 
   if (bn_means.size() == 0) {
@@ -119,10 +136,10 @@ BaseWeights::ConvBlock::ConvBlock(const MetalFishNN::Weights::ConvBlock &block)
     biases[o] = -bn_gammas[o] * bn_means[o] + bn_betas[o];
   }
 
-  bn_stddivs.clear();
-  bn_means.clear();
-  bn_betas.clear();
-  bn_gammas.clear();
+  ClearWithDims(bn_stddivs);
+  ClearWithDims(bn_means);
+  ClearWithDims(bn_betas);
+  ClearWithDims(bn_gammas);
 }
 
 BaseWeights::MHA::MHA(const MetalFishNN::Weights::MHA &mha)
