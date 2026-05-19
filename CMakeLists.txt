@@ -248,6 +248,7 @@ if(USE_CUDA)
       src/nn/cuda/cuda_executor.cpp
       src/nn/cuda/cuda_network.cpp
       src/nn/cuda/cuda_null_executor_smoke.cpp
+      src/nn/cuda/cuda_stage_executor.cpp
       src/nn/cuda/cuda_runtime_probe.cu
       src/nn/cuda/cuda_input_packing.cu
       src/nn/cuda/cuda_kernels.cu

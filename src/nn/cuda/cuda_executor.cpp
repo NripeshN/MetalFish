@@ -8,7 +8,7 @@
 #include "cuda_executor.h"
 
 #include "cuda_execution_tape.h"
-#include "cuda_kernels.h"
+#include "cuda_stage_executor.h"
 
 #include <cuda_runtime_api.h>
 
@@ -41,51 +41,6 @@ void UploadDeviceFloats(float *ptr, const std::vector<float> &host,
       ptr, host.data(), host.size() * sizeof(float), cudaMemcpyHostToDevice);
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
-}
-
-void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
-                         int src_stride, int rows, int width, const char *name,
-                         cudaStream_t stream) {
-  if (rows <= 0 || width <= 0)
-    return;
-  if (!dst || !src)
-    throw std::runtime_error(std::string("CUDA row copy missing buffer: ") +
-                             name);
-  if (dst_stride < width || src_stride < width)
-    throw std::runtime_error(std::string("CUDA row copy stride too small: ") +
-                             name);
-  cudaError_t status = cudaSuccess;
-  if (stream) {
-    status = cudaMemcpy2DAsync(
-        dst, static_cast<std::size_t>(dst_stride) * sizeof(float), src,
-        static_cast<std::size_t>(src_stride) * sizeof(float),
-        static_cast<std::size_t>(width) * sizeof(float), rows,
-        cudaMemcpyDeviceToDevice, stream);
-  } else {
-    status = cudaMemcpy2D(
-        dst, static_cast<std::size_t>(dst_stride) * sizeof(float), src,
-        static_cast<std::size_t>(src_stride) * sizeof(float),
-        static_cast<std::size_t>(width) * sizeof(float), rows,
-        cudaMemcpyDeviceToDevice);
-  }
-  if (status != cudaSuccess)
-    throw std::runtime_error(CudaErrorMessage(name, status));
-}
-
-CudaActivationKind ActivationFromString(const std::string &activation) {
-  if (activation == "relu_2")
-    return CudaActivationKind::Relu2;
-  if (activation == "tanh")
-    return CudaActivationKind::Tanh;
-  if (activation == "sigmoid")
-    return CudaActivationKind::Sigmoid;
-  if (activation == "swish")
-    return CudaActivationKind::Swish;
-  if (activation == "mish")
-    return CudaActivationKind::Mish;
-  if (activation == "selu")
-    return CudaActivationKind::Selu;
-  return CudaActivationKind::Relu;
 }
 
 const NetworkResolvedExecutionStep &
@@ -169,18 +124,11 @@ public:
 
     const auto dense_weight =
         weights.TensorAt(dense.tensors[0].inventory_index);
-    const auto dense_bias = weights.TensorAt(dense.tensors[1].inventory_index);
-    const auto gamma = weights.TensorAt(norm.tensors[0].inventory_index);
-    const auto beta = weights.TensorAt(norm.tensors[1].inventory_index);
-    if (dense_weight.dims.size() != 2 || dense_bias.elements == 0)
+    if (dense_weight.dims.size() != 2)
       throw std::runtime_error("CUDA smoke dense tensor shape is invalid");
 
     const int output_width = static_cast<int>(dense_weight.dims[0]);
-    const int input_width = static_cast<int>(dense_weight.dims[1]);
-    if (dense_bias.elements != static_cast<std::size_t>(output_width) ||
-        gamma.elements != static_cast<std::size_t>(output_width) ||
-        beta.elements != static_cast<std::size_t>(output_width) ||
-        output_width > plan.policy_outputs) {
+    if (output_width > plan.policy_outputs) {
       throw std::runtime_error("CUDA smoke tensor dimensions are inconsistent");
     }
     if (buffers.raw_policy && output_width > plan.raw_policy_outputs) {
@@ -190,44 +138,20 @@ public:
 
     const auto tape =
         CreatePlanSmokeExecutionTape(plan, execution_plan, batch_size);
-    const auto &dense_binding =
-        tape.RequireName(dense.name + ".dense");
-    const auto &activation_binding =
-        tape.RequireName(dense.name + ".activation");
-    const auto &norm_binding =
-        tape.RequireName(norm.name + ".normalized");
-    const std::size_t scratch_entries =
-        static_cast<std::size_t>(batch_size) * output_width;
-    if (dense_binding.entries != scratch_entries ||
-        activation_binding.entries != scratch_entries ||
-        norm_binding.entries != scratch_entries) {
-      throw std::runtime_error("CUDA smoke execution tape size mismatch");
-    }
-
-    float *dense_output = tape.Reserve(workspace, dense_binding);
-    float *activation_output = tape.Reserve(workspace, activation_binding);
-    float *norm_output = tape.Reserve(workspace, norm_binding);
+    const auto stage = ExecuteDenseActivationLayerNormStage(
+        execution_plan, dense, norm, weights, buffers.input_values, tape,
+        workspace, batch_size);
     cudaStream_t stream = workspace.Stream();
 
-    LaunchDenseAffineKernel(buffers.input_values, dense_weight.data,
-                            dense_bias.data, dense_output, batch_size,
-                            input_width, output_width, stream);
-    LaunchActivationKernel(
-        dense_output, activation_output, static_cast<int>(scratch_entries),
-        ActivationFromString(execution_plan.format.activations.ffn_activation),
-        stream);
-    LaunchLayerNormKernel(activation_output, gamma.data, beta.data, norm_output,
-                          batch_size, output_width, 1e-5f, stream);
-
-    CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, norm_output,
-                        output_width, batch_size, output_width,
+    CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, stage.normalized,
+                        stage.output_width, batch_size, stage.output_width,
                         "cudaMemcpy(smoke_policy_rows)", stream);
 
     if (buffers.raw_policy)
       CopyDeviceFloatRows(buffers.raw_policy, plan.raw_policy_outputs,
-                          activation_output, output_width, batch_size,
-                          output_width, "cudaMemcpy(smoke_raw_policy_rows)",
-                          stream);
+                          stage.activation, stage.output_width, batch_size,
+                          stage.output_width,
+                          "cudaMemcpy(smoke_raw_policy_rows)", stream);
     workspace.Synchronize();
   }
 
