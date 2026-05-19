@@ -1544,7 +1544,25 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
 
     CudaWeightBuffers weights;
     weights.Upload(inventory);
-    auto executor = CreatePlanSmokeCudaExecutor();
+    const auto schedule = CreateCudaExecutionSchedule(execution_plan);
+    if (!schedule.FullySupported()) {
+      result.status = CudaSmokeStatus::RuntimeError;
+      result.message = "CUDA resolved executor smoke schedule unsupported: " +
+                       schedule.Summary();
+      return result;
+    }
+    CudaOutputMappingOptions mapping_options;
+    mapping_options.allow_partial_policy_rows = true;
+    mapping_options.allow_partial_raw_policy_rows = true;
+    const auto mapping = CreateCudaOutputMapping(
+        plan, execution_plan, schedule, mapping_options);
+    if (!mapping.ok()) {
+      result.status = CudaSmokeStatus::RuntimeError;
+      result.message = "CUDA resolved executor smoke mapping failed: " +
+                       mapping.Summary();
+      return result;
+    }
+    auto executor = CreateResolvedCudaExecutor(schedule, mapping);
     executor->Execute(plan, execution_plan, weights, buffers, workspace,
                       kBatch);
 

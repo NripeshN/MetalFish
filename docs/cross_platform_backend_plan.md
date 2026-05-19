@@ -86,7 +86,7 @@ Current remote gates:
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `c81e4a94-f5ac-42c7-a026-129193781c44` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -172,7 +172,11 @@ Current CUDA backend boundary:
   derivation, packed input mask/value buffers, stage sequence launcher, and
   named output copier as the smoke path. GPU-device parity against Metal/Lc0 is
   still a release-blocking gate before CUDA can be called strength-ready.
-- `CreatePlanSmokeCudaExecutor()` runs a tiny resolved-plan pipeline through
+- The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
+  a resolved schedule and named output mapping, so a real NVIDIA-device test
+  exercises the same executor class that `CudaNetwork` installs.
+- `CreatePlanSmokeCudaExecutor()` remains available for narrow executor
+  diagnostics and can run a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without
   depending on production weights. Its smoke coverage includes named output
   mapping, explicit branching from a shared body output, chained
