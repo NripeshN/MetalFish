@@ -124,7 +124,7 @@ CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
   buffers_.UploadPackedInputs(input_masks, input_values, batch_size);
   buffers_.ClearOutputs(batch_size);
   executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
-                     buffers_, batch_size);
+                     buffers_, workspace_, batch_size);
 
   const auto downloaded = buffers_.DownloadOutputs(batch_size);
   const float *moves_left =

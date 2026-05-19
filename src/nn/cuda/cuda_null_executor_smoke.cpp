@@ -11,6 +11,7 @@
 #include "../network_weight_inventory.h"
 #include "cuda_executor.h"
 #include "cuda_runtime_probe.h"
+#include "cuda_workspace.h"
 
 #include <algorithm>
 #include <cmath>
@@ -56,7 +57,9 @@ CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
     auto executor = CreateNullCudaExecutorForSmoke();
     NetworkResolvedExecutionPlan resolved_plan;
     CudaWeightBuffers weights;
-    executor->Execute(plan, resolved_plan, weights, buffers, batch_size);
+    CudaExecutionWorkspace workspace;
+    executor->Execute(plan, resolved_plan, weights, buffers, workspace,
+                      batch_size);
 
     result.allocation_bytes = buffers.AllocationBytes();
     const auto downloaded = buffers.DownloadOutputs(batch_size);
@@ -224,7 +227,9 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     CudaWeightBuffers weights;
     weights.Upload(inventory);
     auto executor = CreatePlanSmokeCudaExecutor();
-    executor->Execute(plan, execution_plan, weights, buffers, kBatch);
+    CudaExecutionWorkspace workspace;
+    executor->Execute(plan, execution_plan, weights, buffers, workspace,
+                      kBatch);
 
     result.allocation_bytes = buffers.AllocationBytes();
     const auto downloaded = buffers.DownloadOutputs(kBatch);

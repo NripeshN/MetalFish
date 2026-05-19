@@ -39,6 +39,7 @@ private:
   CudaBufferLayout buffer_layout_;
   CudaInferenceBuffers buffers_;
   CudaWeightBuffers weight_buffers_;
+  CudaExecutionWorkspace workspace_;
   std::unique_ptr<CudaExecutor> executor_;
   std::mutex execution_mutex_;
 };

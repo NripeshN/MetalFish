@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `7f3f1db6-4ba0-49f3-9b60-d8b9e38bbda6` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `5295fcb1-dbb7-4ec0-a496-2e32009cb86c` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `69207c94-196d-4931-8252-5445443f01c6` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `509c8bc2-fc2c-44fa-b5ba-6ffde6fed17e` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -99,6 +99,10 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_kernels.*` contains tested CUDA compute primitives for
   dense-affine projections/heads, last-axis layer normalization, and shared
   elementwise activation functions.
+- `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
+  slots for dense, activation, and normalization intermediates. The executor
+  seam receives the workspace so future production kernels can avoid per-batch
+  `cudaMalloc` and `cudaFree`.
 - `CreatePlanSmokeCudaExecutor()` runs a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without
   enabling production CUDA inference prematurely. Its smoke coverage includes

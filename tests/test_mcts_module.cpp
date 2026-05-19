@@ -26,6 +26,7 @@
 #include "nn/cuda/cuda_kernels.h"
 #include "nn/cuda/cuda_runtime_probe.h"
 #include "nn/cuda/cuda_weight_buffers.h"
+#include "nn/cuda/cuda_workspace.h"
 #endif
 #include "syzygy/tbprobe.h"
 
@@ -735,6 +736,12 @@ void test_cuda_inference_buffers(TestCounter &tc) {
   expect(upload_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              upload_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA packed input upload should pass or skip without a device", tc);
+
+  auto workspace_smoke = NN::Cuda::RunExecutionWorkspaceSmoke();
+  std::cout << "    " << workspace_smoke.message << std::endl;
+  expect(workspace_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             workspace_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA execution workspace should pass or skip without a device", tc);
 
   std::array<NN::InputPlanes, 2> null_executor_inputs = {fixture.planes,
                                                          fixture.planes};

@@ -42,22 +42,6 @@ void UploadDeviceFloats(float *ptr, const std::vector<float> &host,
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
 
-void FreeDevice(float *ptr) {
-  if (ptr)
-    cudaFree(ptr);
-}
-
-float *AllocateDeviceFloats(std::size_t entries, const char *name) {
-  if (entries == 0)
-    throw std::runtime_error(std::string("CUDA scratch size is zero: ") + name);
-  float *ptr = nullptr;
-  const cudaError_t status =
-      cudaMalloc(reinterpret_cast<void **>(&ptr), entries * sizeof(float));
-  if (status != cudaSuccess)
-    throw std::runtime_error(CudaErrorMessage(name, status));
-  return ptr;
-}
-
 void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
                          int src_stride, int rows, int width,
                          const char *name) {
@@ -107,7 +91,8 @@ FindStep(const NetworkResolvedExecutionPlan &execution_plan,
 class MissingCudaExecutor final : public CudaExecutor {
 public:
   void Execute(const NetworkTensorPlan &, const NetworkResolvedExecutionPlan &,
-               const CudaWeightBuffers &, CudaInferenceBuffers &, int) override {
+               const CudaWeightBuffers &, CudaInferenceBuffers &,
+               CudaExecutionWorkspace &, int) override {
     throw std::runtime_error(
         "CUDA transformer executor is not implemented yet");
   }
@@ -119,7 +104,7 @@ class NullCudaExecutor final : public CudaExecutor {
 public:
   void Execute(const NetworkTensorPlan &plan, const NetworkResolvedExecutionPlan &,
                const CudaWeightBuffers &, CudaInferenceBuffers &buffers,
-               int batch_size) override {
+               CudaExecutionWorkspace &, int batch_size) override {
     std::vector<float> policy(plan.PolicyEntries(batch_size), 0.0f);
     std::vector<float> value(plan.ValueEntries(batch_size), 0.0f);
     std::vector<float> moves_left(plan.MovesLeftEntries(batch_size), 0.0f);
@@ -160,7 +145,7 @@ public:
   void Execute(const NetworkTensorPlan &plan,
                const NetworkResolvedExecutionPlan &execution_plan,
                const CudaWeightBuffers &weights, CudaInferenceBuffers &buffers,
-               int batch_size) override {
+               CudaExecutionWorkspace &workspace, int batch_size) override {
     if (batch_size <= 0)
       throw std::runtime_error("CUDA plan smoke executor received empty batch");
     if (!buffers.input_values || !buffers.policy)
@@ -193,46 +178,32 @@ public:
           "CUDA smoke raw policy stride is smaller than output");
     }
 
-    float *dense_output = nullptr;
-    float *activation_output = nullptr;
-    float *norm_output = nullptr;
-    try {
-      const std::size_t scratch_entries =
-          static_cast<std::size_t>(batch_size) * output_width;
-      dense_output = AllocateDeviceFloats(scratch_entries,
-                                          "cudaMalloc(smoke_dense_output)");
-      activation_output = AllocateDeviceFloats(
-          scratch_entries, "cudaMalloc(smoke_activation_output)");
-      norm_output =
-          AllocateDeviceFloats(scratch_entries, "cudaMalloc(smoke_norm_output)");
+    const std::size_t scratch_entries =
+        static_cast<std::size_t>(batch_size) * output_width;
+    float *dense_output =
+        workspace.ReserveFloats(CudaWorkspaceSlot::Dense, scratch_entries);
+    float *activation_output =
+        workspace.ReserveFloats(CudaWorkspaceSlot::Activation, scratch_entries);
+    float *norm_output =
+        workspace.ReserveFloats(CudaWorkspaceSlot::Norm, scratch_entries);
 
-      LaunchDenseAffineKernel(buffers.input_values, dense_weight.data,
-                              dense_bias.data, dense_output, batch_size,
-                              input_width, output_width);
-      LaunchActivationKernel(
-          dense_output, activation_output, static_cast<int>(scratch_entries),
-          ActivationFromString(execution_plan.format.activations.ffn_activation));
-      LaunchLayerNormKernel(activation_output, gamma.data, beta.data,
-                            norm_output, batch_size, output_width, 1e-5f);
+    LaunchDenseAffineKernel(buffers.input_values, dense_weight.data,
+                            dense_bias.data, dense_output, batch_size,
+                            input_width, output_width);
+    LaunchActivationKernel(
+        dense_output, activation_output, static_cast<int>(scratch_entries),
+        ActivationFromString(execution_plan.format.activations.ffn_activation));
+    LaunchLayerNormKernel(activation_output, gamma.data, beta.data, norm_output,
+                          batch_size, output_width, 1e-5f);
 
-      CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, norm_output,
-                          output_width, batch_size, output_width,
-                          "cudaMemcpy(smoke_policy_rows)");
+    CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, norm_output,
+                        output_width, batch_size, output_width,
+                        "cudaMemcpy(smoke_policy_rows)");
 
-      if (buffers.raw_policy)
-        CopyDeviceFloatRows(buffers.raw_policy, plan.raw_policy_outputs,
-                            activation_output, output_width, batch_size,
-                            output_width, "cudaMemcpy(smoke_raw_policy_rows)");
-    } catch (...) {
-      FreeDevice(dense_output);
-      FreeDevice(activation_output);
-      FreeDevice(norm_output);
-      throw;
-    }
-
-    FreeDevice(dense_output);
-    FreeDevice(activation_output);
-    FreeDevice(norm_output);
+    if (buffers.raw_policy)
+      CopyDeviceFloatRows(buffers.raw_policy, plan.raw_policy_outputs,
+                          activation_output, output_width, batch_size,
+                          output_width, "cudaMemcpy(smoke_raw_policy_rows)");
   }
 
   std::string Name() const override { return "plan-smoke"; }

@@ -9,6 +9,7 @@
 
 #include "../network_execution_plan.h"
 #include "cuda_buffers.h"
+#include "cuda_workspace.h"
 #include "cuda_weight_buffers.h"
 
 #include <memory>
@@ -25,7 +26,9 @@ public:
   virtual void Execute(const NetworkTensorPlan &tensor_plan,
                        const NetworkResolvedExecutionPlan &execution_plan,
                        const CudaWeightBuffers &weights,
-                       CudaInferenceBuffers &buffers, int batch_size) = 0;
+                       CudaInferenceBuffers &buffers,
+                       CudaExecutionWorkspace &workspace,
+                       int batch_size) = 0;
   virtual std::string Name() const = 0;
 };
 
