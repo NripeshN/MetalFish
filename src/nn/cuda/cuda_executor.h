@@ -9,6 +9,7 @@
 
 #include "../network_execution_plan.h"
 #include "cuda_buffers.h"
+#include "cuda_output_mapping.h"
 #include "cuda_workspace.h"
 #include "cuda_weight_buffers.h"
 
@@ -35,6 +36,9 @@ public:
 std::unique_ptr<CudaExecutor> CreateMissingCudaExecutor();
 std::unique_ptr<CudaExecutor> CreateNullCudaExecutorForSmoke();
 std::unique_ptr<CudaExecutor> CreatePlanSmokeCudaExecutor();
+std::unique_ptr<CudaExecutor>
+CreateResolvedCudaExecutor(CudaExecutionSchedule schedule,
+                           CudaOutputMapping output_mapping);
 
 } // namespace Cuda
 } // namespace NN

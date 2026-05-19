@@ -10,6 +10,8 @@
 #include "../network_execution_plan.h"
 #include "../network_output_decoder.h"
 #include "../network_weight_inventory.h"
+#include "cuda_execution_schedule.h"
+#include "cuda_output_mapping.h"
 #include "cuda_runtime_probe.h"
 
 #include <cstddef>
@@ -89,13 +91,26 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
                              ") but weight upload failed: " + e.what());
   }
 
-  throw std::runtime_error(
-      "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
-      "; format: " + format_.Summary() +
-      "; execution=" + resolved_execution_plan_.Summary() +
-      "; buffer_bytes=" + std::to_string(buffers_.AllocationBytes()) +
-      "; weight_bytes=" + std::to_string(weight_buffers_.AllocationBytes()) +
-      ") but inference is not implemented yet");
+  try {
+    const auto schedule = CreateCudaExecutionSchedule(resolved_execution_plan_);
+    if (!schedule.FullySupported()) {
+      throw std::runtime_error(schedule.Summary());
+    }
+    const auto output_mapping =
+        CreateCudaOutputMapping(tensor_plan_, resolved_execution_plan_,
+                                schedule);
+    if (!output_mapping.ok()) {
+      throw std::runtime_error(output_mapping.Summary());
+    }
+    executor_ = CreateResolvedCudaExecutor(schedule, output_mapping);
+  } catch (const std::exception &e) {
+    throw std::runtime_error("CUDA transformer backend is compiled (" +
+                             RuntimeCudaDeviceSummary() +
+                             "; format: " + format_.Summary() +
+                             "; execution=" +
+                             resolved_execution_plan_.Summary() +
+                             ") but executor setup failed: " + e.what());
+  }
 }
 
 NetworkOutput CudaNetwork::Evaluate(const InputPlanes &input) {
@@ -148,7 +163,7 @@ std::string CudaNetwork::GetNetworkInfo() const {
       << ", execution: " << resolved_execution_plan_.Summary()
       << ", buffer_bytes=" << buffers_.AllocationBytes()
       << ", weight_bytes=" << weight_buffers_.AllocationBytes()
-      << ", executor=" << executor_->Name() << ", inference not implemented)";
+      << ", executor=" << executor_->Name() << ")";
   return out.str();
 }
 

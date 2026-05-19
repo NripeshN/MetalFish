@@ -17,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace MetalFish {
@@ -127,6 +128,48 @@ public:
   std::string Name() const override { return "plan-smoke"; }
 };
 
+class ResolvedCudaExecutor final : public CudaExecutor {
+public:
+  ResolvedCudaExecutor(CudaExecutionSchedule schedule,
+                       CudaOutputMapping output_mapping)
+      : schedule_(std::move(schedule)),
+        output_mapping_(std::move(output_mapping)) {}
+
+  void Execute(const NetworkTensorPlan &,
+               const NetworkResolvedExecutionPlan &execution_plan,
+               const CudaWeightBuffers &weights, CudaInferenceBuffers &buffers,
+               CudaExecutionWorkspace &workspace, int batch_size) override {
+    if (batch_size <= 0)
+      throw std::runtime_error("CUDA resolved executor received empty batch");
+    if (!buffers.input_masks || !buffers.input_values || !buffers.policy)
+      throw std::runtime_error("CUDA resolved executor received no buffers");
+    if (!schedule_.FullySupported()) {
+      throw std::runtime_error("CUDA resolved executor schedule is unsupported: " +
+                               schedule_.Summary());
+    }
+    if (!output_mapping_.ok()) {
+      throw std::runtime_error("CUDA resolved executor output mapping failed: " +
+                               output_mapping_.Summary());
+    }
+
+    const auto tape = CreateResolvedExecutionTape(execution_plan, batch_size);
+    const auto stage_inputs =
+        CreateCudaStageInputBindings(execution_plan, schedule_);
+    const auto sequence = ExecuteDenseActivationLayerNormSequence(
+        execution_plan, weights, buffers.input_values, buffers.input_masks,
+        buffers.input_values, tape, workspace, batch_size, stage_inputs);
+    CopyMappedOutputs(output_mapping_, sequence, buffers, workspace,
+                      batch_size);
+    workspace.Synchronize();
+  }
+
+  std::string Name() const override { return "resolved"; }
+
+private:
+  CudaExecutionSchedule schedule_;
+  CudaOutputMapping output_mapping_;
+};
+
 } // namespace
 
 std::unique_ptr<CudaExecutor> CreateMissingCudaExecutor() {
@@ -139,6 +182,13 @@ std::unique_ptr<CudaExecutor> CreateNullCudaExecutorForSmoke() {
 
 std::unique_ptr<CudaExecutor> CreatePlanSmokeCudaExecutor() {
   return std::make_unique<PlanSmokeCudaExecutor>();
+}
+
+std::unique_ptr<CudaExecutor>
+CreateResolvedCudaExecutor(CudaExecutionSchedule schedule,
+                           CudaOutputMapping output_mapping) {
+  return std::make_unique<ResolvedCudaExecutor>(std::move(schedule),
+                                                std::move(output_mapping));
 }
 
 } // namespace Cuda

@@ -86,7 +86,7 @@ Current remote gates:
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `cc885777-fcd6-4cf1-a5b8-c313aef870e0` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `c81e4a94-f5ac-42c7-a026-129193781c44` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -165,14 +165,20 @@ Current CUDA backend boundary:
   one fixed CUDA stage name per head. Attention-policy maps are preferred as
   policy sources and suppress redundant raw-policy output binding because the
   CUDA stage already performs the final scatter.
+- `CreateResolvedCudaExecutor()` is now the production CUDA executor shell:
+  `CudaNetwork` validates a fully supported resolved schedule, validates named
+  output mapping, uploads weights, and installs this executor instead of the
+  missing placeholder. The executor uses the same resolved tape, stage input
+  derivation, packed input mask/value buffers, stage sequence launcher, and
+  named output copier as the smoke path. GPU-device parity against Metal/Lc0 is
+  still a release-blocking gate before CUDA can be called strength-ready.
 - `CreatePlanSmokeCudaExecutor()` runs a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without
-  enabling production CUDA inference prematurely. Its smoke coverage includes
-  named output mapping, explicit branching from a shared body output, chained
+  depending on production weights. Its smoke coverage includes named output
+  mapping, explicit branching from a shared body output, chained
   dense/layernorm stages, dense-only stages, input gates, feed-forward residual
   layernorm, attention-policy mapping, non-output positional encoding metadata,
   multi-row batches, and strided policy/value/moves-left/raw-policy writes.
-- Production CUDA still installs a missing executor and refuses real inference.
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength
   inference is implemented.
