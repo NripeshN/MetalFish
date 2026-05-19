@@ -85,6 +85,7 @@ def build_transformer_model(
     channels: int,
     heads: int,
     ffn_channels: int,
+    activation: str,
     compute_unit: Any,
     seed: int,
 ) -> tuple[Any, dict[str, Any]]:
@@ -115,6 +116,7 @@ def build_transformer_model(
         "ffn2_b": np.zeros((channels,), dtype=np.float32),
         "heads": heads,
         "head_dim": head_dim,
+        "activation": activation,
     }
 
     @mb.program(
@@ -167,7 +169,10 @@ def build_transformer_model(
             weight=mb.const(val=params["ffn1_w"]),
             bias=mb.const(val=params["ffn1_b"]),
         )
-        z = mb.gelu(x=z, mode="TANH_APPROXIMATION")
+        if activation == "swish":
+            z = mb.mul(x=z, y=mb.sigmoid(x=z))
+        else:
+            z = mb.gelu(x=z, mode="TANH_APPROXIMATION")
         z = mb.linear(
             x=z,
             weight=mb.const(val=params["ffn2_w"]),
@@ -268,7 +273,10 @@ def transformer_numpy_once(np: Any, sample: Any, params: dict[str, Any]) -> Any:
 
     z = layer_norm_np(np, residual, params["ln2_gamma"], params["ln2_beta"])
     z = z @ params["ffn1_w"].T + params["ffn1_b"]
-    z = gelu_tanh_np(np, z)
+    if params["activation"] == "swish":
+        z = z / (1.0 + np.exp(-z))
+    else:
+        z = gelu_tanh_np(np, z)
     z = z @ params["ffn2_w"].T + params["ffn2_b"]
     return residual + z
 
@@ -339,6 +347,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             args.channels,
             args.heads,
             args.channels * args.ffn_mult,
+            args.activation,
             compute_unit,
             args.seed,
         )
@@ -365,6 +374,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         "channels": args.channels,
         "heads": args.heads,
         "ffn_mult": args.ffn_mult,
+        "activation": args.activation,
         "compute_unit": args.compute_unit,
         "build_ms": build_ms,
         "model_package": package_path if args.save_model else "",
@@ -385,7 +395,7 @@ def print_human(result: dict[str, Any]) -> None:
         print(
             f"  Shape:        batch={result['batch']} tokens={result['tokens']} "
             f"channels={result['channels']} heads={result['heads']} "
-            f"ffn_mult={result['ffn_mult']}"
+            f"ffn_mult={result['ffn_mult']} activation={result['activation']}"
         )
     print(f"  Compute unit: {result['compute_unit']}")
     print(f"  Build time:   {result['build_ms']:.3f} ms")
@@ -419,6 +429,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--ffn-mult", type=int, default=4)
+    parser.add_argument("--activation", choices=["gelu", "swish"], default="gelu")
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--iterations", type=int, default=100)
     parser.add_argument("--seed", type=int, default=1)

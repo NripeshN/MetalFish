@@ -64,6 +64,21 @@ Transformer-shaped single-block kernels:
 | batch=1, tokens=64, channels=128, heads=8, ffn=4x | all | 1.5859 ms | 1.1094 ms | CPU wins |
 | batch=1, tokens=64, channels=128, heads=8, ffn=4x | cpu-gpu | 2.0020 ms | 4.2539 ms | Core ML wins, but slower than cpu-ne |
 
+The first Core ML transformer runs used GELU. For a fairer comparison against
+the current MPSGraph helper path, `tools/apple_coreml_microbench.py` also
+supports `--activation swish`.
+
+Swish transformer-block checks:
+
+| Shape | Backend | Median |
+| --- | --- | ---: |
+| batch=1, tokens=64, channels=128, heads=8, ffn=4x | Core ML cpu-ne | 0.3133 ms |
+| batch=1, tokens=64, channels=128, heads=8, ffn=4x | MPSGraph | 0.6853 ms |
+| batch=1, tokens=64, channels=512, heads=16, ffn=4x | Core ML cpu-ne | 0.5704 ms |
+| batch=1, tokens=64, channels=512, heads=16, ffn=4x | MPSGraph | 0.8502 ms |
+| batch=1, tokens=64, channels=1024, heads=32, ffn=4x | Core ML cpu-ne | 1.4101 ms |
+| batch=1, tokens=64, channels=1024, heads=32, ffn=4x | MPSGraph | 1.4827 ms |
+
 ## Decision
 
 Do not move AB NNUE inference to Core ML/ANE based on these measurements. The
@@ -74,7 +89,9 @@ Core ML/ANE is worth further isolated investigation for transformer-shaped
 subgraphs. The `cpu-ne` compute unit is the only promising Core ML mode in the
 current data; `cpu`, `all`, and `cpu-gpu` do not justify integration work.
 
-This is still not enough evidence to replace Metal/MPSGraph in the engine.
-The next useful experiment is a side-by-side Core ML versus MPSGraph benchmark
-for the same one-block transformer shape, followed by a whole-network BT4 graph
-only if Core ML beats MPSGraph on the block-level test.
+This is still not enough evidence to replace Metal/MPSGraph in the engine. The
+single-block swish data says Core ML `cpu-ne` can beat the current helper-style
+MPSGraph block at smaller channel widths and roughly ties it at the BT4-like
+1024-channel block. The next useful experiment is a whole-network BT4-shaped
+Core ML graph, because per-block wins can disappear once model conversion,
+input packing, policy/value heads, cache behavior, and batching are included.
