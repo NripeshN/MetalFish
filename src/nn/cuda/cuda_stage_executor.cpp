@@ -50,6 +50,17 @@ void RequireDenseNormTensors(const NetworkResolvedExecutionStep &dense,
   }
 }
 
+std::size_t FindPairedLayerNorm(const NetworkResolvedExecutionPlan &plan,
+                                std::size_t dense_index) {
+  for (std::size_t i = dense_index + 1; i < plan.steps.size(); ++i) {
+    if (plan.steps[i].kind == NetworkExecutionOpKind::LayerNorm)
+      return i;
+    if (plan.steps[i].kind == NetworkExecutionOpKind::Dense)
+      break;
+  }
+  throw std::runtime_error("CUDA dense stage sequence is missing layernorm");
+}
+
 } // namespace
 
 void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
@@ -143,6 +154,43 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
                         output.normalized, batch_size, output_width, 1e-5f,
                         stream);
   return output;
+}
+
+CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaWeightBuffers &weights, const float *input,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size) {
+  if (!input)
+    throw std::runtime_error("CUDA dense stage sequence input is missing");
+
+  CudaDenseStageSequenceOutput sequence;
+  const float *current_input = input;
+  int current_width = 0;
+  for (std::size_t i = 0; i < execution_plan.steps.size(); ++i) {
+    const auto &step = execution_plan.steps[i];
+    if (step.kind != NetworkExecutionOpKind::Dense)
+      continue;
+
+    const std::size_t norm_index = FindPairedLayerNorm(execution_plan, i);
+    const auto stage = ExecuteDenseActivationLayerNormStage(
+        execution_plan, step, execution_plan.steps[norm_index], weights,
+        current_input, tape, workspace, batch_size);
+    if (current_width != 0 && stage.input_width != current_width) {
+      throw std::runtime_error(
+          "CUDA dense stage sequence input width mismatch");
+    }
+
+    sequence.last = stage;
+    ++sequence.stage_count;
+    current_input = stage.normalized;
+    current_width = stage.output_width;
+    i = norm_index;
+  }
+
+  if (sequence.stage_count == 0)
+    throw std::runtime_error("CUDA dense stage sequence found no stages");
+  return sequence;
 }
 
 } // namespace Cuda

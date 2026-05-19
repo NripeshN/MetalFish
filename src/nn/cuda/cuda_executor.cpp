@@ -43,16 +43,6 @@ void UploadDeviceFloats(float *ptr, const std::vector<float> &host,
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
 
-const NetworkResolvedExecutionStep &
-FindStep(const NetworkResolvedExecutionPlan &execution_plan,
-         NetworkExecutionOpKind kind) {
-  for (const auto &step : execution_plan.steps) {
-    if (step.kind == kind)
-      return step;
-  }
-  throw std::runtime_error("CUDA smoke execution plan is missing step");
-}
-
 class MissingCudaExecutor final : public CudaExecutor {
 public:
   void Execute(const NetworkTensorPlan &, const NetworkResolvedExecutionPlan &,
@@ -116,31 +106,16 @@ public:
     if (!buffers.input_values || !buffers.policy)
       throw std::runtime_error("CUDA plan smoke executor received no buffers");
 
-    const auto &dense = FindStep(execution_plan, NetworkExecutionOpKind::Dense);
-    const auto &norm =
-        FindStep(execution_plan, NetworkExecutionOpKind::LayerNorm);
-    if (dense.tensors.size() < 2 || norm.tensors.size() < 2)
-      throw std::runtime_error("CUDA smoke execution plan has missing tensors");
-
-    const auto dense_weight =
-        weights.TensorAt(dense.tensors[0].inventory_index);
-    if (dense_weight.dims.size() != 2)
-      throw std::runtime_error("CUDA smoke dense tensor shape is invalid");
-
-    const int output_width = static_cast<int>(dense_weight.dims[0]);
-    if (output_width > plan.policy_outputs) {
-      throw std::runtime_error("CUDA smoke tensor dimensions are inconsistent");
-    }
-    if (buffers.raw_policy && output_width > plan.raw_policy_outputs) {
-      throw std::runtime_error(
-          "CUDA smoke raw policy stride is smaller than output");
-    }
-
     const auto tape =
         CreatePlanSmokeExecutionTape(plan, execution_plan, batch_size);
-    const auto stage = ExecuteDenseActivationLayerNormStage(
-        execution_plan, dense, norm, weights, buffers.input_values, tape,
-        workspace, batch_size);
+    const auto sequence = ExecuteDenseActivationLayerNormSequence(
+        execution_plan, weights, buffers.input_values, tape, workspace,
+        batch_size);
+    const auto &stage = sequence.last;
+    if (stage.output_width > plan.policy_outputs ||
+        (buffers.raw_policy && stage.output_width > plan.raw_policy_outputs)) {
+      throw std::runtime_error("CUDA smoke output stride is smaller than stage");
+    }
     cudaStream_t stream = workspace.Stream();
 
     CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, stage.normalized,

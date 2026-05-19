@@ -28,12 +28,23 @@ struct CudaDenseStageOutput {
   int output_width = 0;
 };
 
+struct CudaDenseStageSequenceOutput {
+  CudaDenseStageOutput last;
+  int stage_count = 0;
+};
+
 CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &dense,
     const NetworkResolvedExecutionStep &norm, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size);
+
+CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaWeightBuffers &weights, const float *input,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size);
 
 void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
                          int src_stride, int rows, int width,

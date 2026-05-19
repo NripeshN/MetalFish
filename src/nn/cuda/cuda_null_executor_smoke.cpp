@@ -129,7 +129,8 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
 
   constexpr int kBatch = 3;
   constexpr int kInput = 3;
-  constexpr int kOutput = 4;
+  constexpr int kHidden = 4;
+  constexpr int kOutput = 2;
   const std::vector<float> input_values = {
       1.0f, -2.0f, 0.5f,
       -0.5f, 2.0f, 1.5f,
@@ -147,16 +148,31 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   const std::vector<float> dense_bias = {0.25f, -0.75f, 0.0f, 1.0f};
   const std::vector<float> gamma = {1.0f, 0.5f, -1.0f, 2.0f};
   const std::vector<float> beta = {0.0f, -0.25f, 0.5f, 1.0f};
+  const std::vector<float> dense2_weights = {
+      0.25f, -0.5f, 1.0f, 0.75f,
+      -1.0f, 0.5f, 0.25f, -0.25f,
+  };
+  const std::vector<float> dense2_bias = {0.1f, -0.2f};
+  const std::vector<float> gamma2 = {1.25f, -0.75f};
+  const std::vector<float> beta2 = {0.05f, 0.30f};
 
   NetworkWeightInventory inventory;
   inventory.tensors = {
       {"smoke.dense_w", dense_weights.data(), dense_weights.size(),
-       {kOutput, kInput}, NetworkWeightTensorKind::DenseWeight},
-      {"smoke.dense_b", dense_bias.data(), dense_bias.size(), {kOutput},
+       {kHidden, kInput}, NetworkWeightTensorKind::DenseWeight},
+      {"smoke.dense_b", dense_bias.data(), dense_bias.size(), {kHidden},
        NetworkWeightTensorKind::DenseBias},
-      {"smoke.norm_gammas", gamma.data(), gamma.size(), {kOutput},
+      {"smoke.norm_gammas", gamma.data(), gamma.size(), {kHidden},
        NetworkWeightTensorKind::NormScale},
-      {"smoke.norm_betas", beta.data(), beta.size(), {kOutput},
+      {"smoke.norm_betas", beta.data(), beta.size(), {kHidden},
+       NetworkWeightTensorKind::NormBias},
+      {"smoke.dense2_w", dense2_weights.data(), dense2_weights.size(),
+       {kOutput, kHidden}, NetworkWeightTensorKind::DenseWeight},
+      {"smoke.dense2_b", dense2_bias.data(), dense2_bias.size(), {kOutput},
+       NetworkWeightTensorKind::DenseBias},
+      {"smoke.norm2_gammas", gamma2.data(), gamma2.size(), {kOutput},
+       NetworkWeightTensorKind::NormScale},
+      {"smoke.norm2_betas", beta2.data(), beta2.size(), {kOutput},
        NetworkWeightTensorKind::NormBias},
   };
 
@@ -169,52 +185,107 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
       NetworkExecutionOpKind::Dense,
       "smoke.dense",
       {
-          {0, "smoke.dense_w", dense_weights.size(), {kOutput, kInput},
+          {0, "smoke.dense_w", dense_weights.size(), {kHidden, kInput},
            NetworkWeightTensorKind::DenseWeight},
-          {1, "smoke.dense_b", dense_bias.size(), {kOutput},
+          {1, "smoke.dense_b", dense_bias.size(), {kHidden},
            NetworkWeightTensorKind::DenseBias},
       }});
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
       NetworkExecutionOpKind::LayerNorm,
       "smoke.norm",
       {
-          {2, "smoke.norm_gammas", gamma.size(), {kOutput},
+          {2, "smoke.norm_gammas", gamma.size(), {kHidden},
            NetworkWeightTensorKind::NormScale},
-          {3, "smoke.norm_betas", beta.size(), {kOutput},
+          {3, "smoke.norm_betas", beta.size(), {kHidden},
+           NetworkWeightTensorKind::NormBias},
+      }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::Dense,
+      "smoke.dense2",
+      {
+          {4, "smoke.dense2_w", dense2_weights.size(), {kOutput, kHidden},
+           NetworkWeightTensorKind::DenseWeight},
+          {5, "smoke.dense2_b", dense2_bias.size(), {kOutput},
+           NetworkWeightTensorKind::DenseBias},
+      }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::LayerNorm,
+      "smoke.norm2",
+      {
+          {6, "smoke.norm2_gammas", gamma2.size(), {kOutput},
+           NetworkWeightTensorKind::NormScale},
+          {7, "smoke.norm2_betas", beta2.size(), {kOutput},
            NetworkWeightTensorKind::NormBias},
       }});
 
+  std::vector<float> hidden_activated(static_cast<size_t>(kBatch) * kHidden,
+                                      0.0f);
+  std::vector<float> hidden_normalized(static_cast<size_t>(kBatch) * kHidden,
+                                       0.0f);
   std::vector<float> activated(static_cast<size_t>(kBatch) * kOutput, 0.0f);
   std::vector<float> expected(static_cast<size_t>(kBatch) * kOutput, 0.0f);
   for (int batch = 0; batch < kBatch; ++batch) {
-    const size_t batch_offset = static_cast<size_t>(batch) * kOutput;
-    for (int out = 0; out < kOutput; ++out) {
+    const size_t hidden_offset = static_cast<size_t>(batch) * kHidden;
+    for (int out = 0; out < kHidden; ++out) {
       float dense = dense_bias[static_cast<size_t>(out)];
       for (int in = 0; in < kInput; ++in) {
         dense += input_values[static_cast<size_t>(batch) * kInput + in] *
                  dense_weights[static_cast<size_t>(out) * kInput + in];
       }
       const float relu = std::max(dense, 0.0f);
-      activated[batch_offset + out] = relu * relu;
+      hidden_activated[hidden_offset + out] = relu * relu;
     }
 
     float sum = 0.0f;
     float square_sum = 0.0f;
-    for (int i = 0; i < kOutput; ++i) {
-      const float value = activated[batch_offset + i];
+    for (int i = 0; i < kHidden; ++i) {
+      const float value = hidden_activated[hidden_offset + i];
       sum += value;
       square_sum += value * value;
     }
-    const float mean = sum / static_cast<float>(kOutput);
-    float variance = square_sum / static_cast<float>(kOutput) - mean * mean;
+    const float mean = sum / static_cast<float>(kHidden);
+    float variance = square_sum / static_cast<float>(kHidden) - mean * mean;
     if (variance < 0.0f)
       variance = 0.0f;
     const float inv_std = 1.0f / std::sqrt(variance + 1e-5f);
-    for (int i = 0; i < kOutput; ++i) {
-      const float normalized = (activated[batch_offset + i] - mean) * inv_std;
-      expected[batch_offset + i] =
+    for (int i = 0; i < kHidden; ++i) {
+      const float normalized =
+          (hidden_activated[hidden_offset + i] - mean) * inv_std;
+      hidden_normalized[hidden_offset + i] =
           normalized * gamma[static_cast<size_t>(i)] +
           beta[static_cast<size_t>(i)];
+    }
+
+    const size_t output_offset = static_cast<size_t>(batch) * kOutput;
+    for (int out = 0; out < kOutput; ++out) {
+      float dense = dense2_bias[static_cast<size_t>(out)];
+      for (int in = 0; in < kHidden; ++in) {
+        dense += hidden_normalized[hidden_offset + in] *
+                 dense2_weights[static_cast<size_t>(out) * kHidden + in];
+      }
+      const float relu = std::max(dense, 0.0f);
+      activated[output_offset + out] = relu * relu;
+    }
+
+    sum = 0.0f;
+    square_sum = 0.0f;
+    for (int i = 0; i < kOutput; ++i) {
+      const float value = activated[output_offset + i];
+      sum += value;
+      square_sum += value * value;
+    }
+    const float output_mean = sum / static_cast<float>(kOutput);
+    float output_variance =
+        square_sum / static_cast<float>(kOutput) - output_mean * output_mean;
+    if (output_variance < 0.0f)
+      output_variance = 0.0f;
+    const float output_inv_std = 1.0f / std::sqrt(output_variance + 1e-5f);
+    for (int i = 0; i < kOutput; ++i) {
+      const float normalized =
+          (activated[output_offset + i] - output_mean) * output_inv_std;
+      expected[output_offset + i] =
+          normalized * gamma2[static_cast<size_t>(i)] +
+          beta2[static_cast<size_t>(i)];
     }
   }
 
