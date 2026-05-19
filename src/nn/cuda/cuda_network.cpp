@@ -157,13 +157,10 @@ CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
                      buffers_, workspace_, batch_size);
 
   const auto downloaded = buffers_.DownloadOutputs(batch_size, stream);
-  NetworkTensorPlan decode_plan = tensor_plan_;
-  decode_plan.moves_left = false;
-  decode_plan.moves_left_outputs = 0;
   return DecodeNetworkOutputBatch(
-      decode_plan, downloaded.policy.data(), downloaded.policy.size(),
-      downloaded.value.data(), downloaded.value.size(), nullptr, 0,
-      batch_size);
+      tensor_plan_, downloaded.policy.data(), downloaded.policy.size(),
+      downloaded.value.data(), downloaded.value.size(),
+      downloaded.moves_left.data(), downloaded.moves_left.size(), batch_size);
 }
 
 std::string CudaNetwork::GetNetworkInfo() const {
