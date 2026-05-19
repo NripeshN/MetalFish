@@ -29,11 +29,22 @@ FindStep(const NetworkResolvedExecutionPlan &execution_plan,
 }
 
 int DenseOutputWidth(const NetworkResolvedExecutionStep &dense) {
-  if (dense.tensors.empty() || dense.tensors[0].dims.size() != 2)
+  if (dense.kind != NetworkExecutionOpKind::Dense || dense.tensors.empty() ||
+      dense.tensors[0].dims.size() != 2)
     throw std::runtime_error("CUDA execution tape dense tensor is invalid");
   const auto width = dense.tensors[0].dims[0];
   if (width == 0)
     throw std::runtime_error("CUDA execution tape dense width is zero");
+  return static_cast<int>(width);
+}
+
+int LayerNormWidth(const NetworkResolvedExecutionStep &norm) {
+  if (norm.kind != NetworkExecutionOpKind::LayerNorm || norm.tensors.empty() ||
+      norm.tensors[0].dims.size() != 1)
+    throw std::runtime_error("CUDA execution tape layernorm tensor is invalid");
+  const auto width = norm.tensors[0].dims[0];
+  if (width == 0)
+    throw std::runtime_error("CUDA execution tape layernorm width is zero");
   return static_cast<int>(width);
 }
 
@@ -51,6 +62,24 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
   return "unknown";
 }
 
+const CudaExecutionBufferBinding *
+CudaExecutionTape::FindName(std::string_view name) const {
+  for (const auto &binding : bindings_) {
+    if (binding.name == name)
+      return &binding;
+  }
+  return nullptr;
+}
+
+const CudaExecutionBufferBinding &
+CudaExecutionTape::RequireName(std::string_view name) const {
+  const CudaExecutionBufferBinding *binding = FindName(name);
+  if (!binding)
+    throw std::runtime_error("CUDA execution tape is missing buffer: " +
+                             std::string(name));
+  return *binding;
+}
+
 const CudaExecutionBufferBinding &
 CudaExecutionTape::RequireRole(CudaExecutionBufferRole role) const {
   for (const auto &binding : bindings_) {
@@ -65,6 +94,15 @@ float *CudaExecutionTape::Reserve(
     CudaExecutionWorkspace &workspace,
     const CudaExecutionBufferBinding &binding) const {
   return workspace.ReserveNamedFloats(binding.name, binding.entries);
+}
+
+std::size_t CudaExecutionTape::CountRole(CudaExecutionBufferRole role) const {
+  std::size_t count = 0;
+  for (const auto &binding : bindings_) {
+    if (binding.role == role)
+      ++count;
+  }
+  return count;
 }
 
 std::size_t CudaExecutionTape::TotalEntries() const {
@@ -85,9 +123,40 @@ void CudaExecutionTape::Add(std::string name, CudaExecutionBufferRole role,
                             int rows, int width) {
   if (name.empty() || rows <= 0 || width <= 0)
     throw std::runtime_error("CUDA execution tape binding is invalid");
+  if (FindName(name))
+    throw std::runtime_error("CUDA execution tape duplicate binding: " + name);
   bindings_.push_back(CudaExecutionBufferBinding{
       std::move(name), role, static_cast<std::size_t>(rows) * width, rows,
       width});
+}
+
+CudaExecutionTape CreateResolvedExecutionTape(
+    const NetworkResolvedExecutionPlan &plan, int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA execution tape batch size is invalid");
+
+  CudaExecutionTape tape;
+  for (const auto &step : plan.steps) {
+    switch (step.kind) {
+    case NetworkExecutionOpKind::Dense: {
+      const int width = DenseOutputWidth(step);
+      tape.Add(step.name + ".dense", CudaExecutionBufferRole::DenseOutput,
+               batch_size, width);
+      tape.Add(step.name + ".activation",
+               CudaExecutionBufferRole::ActivationOutput, batch_size, width);
+      break;
+    }
+    case NetworkExecutionOpKind::LayerNorm: {
+      const int width = LayerNormWidth(step);
+      tape.Add(step.name + ".normalized",
+               CudaExecutionBufferRole::NormalizedOutput, batch_size, width);
+      break;
+    }
+    default:
+      break;
+    }
+  }
+  return tape;
 }
 
 CudaExecutionTape
@@ -105,16 +174,7 @@ CreatePlanSmokeExecutionTape(const NetworkTensorPlan &tensor_plan,
     throw std::runtime_error("CUDA execution tape output width exceeds head");
   }
 
-  CudaExecutionTape tape;
-  tape.Add(dense.name + ".dense", CudaExecutionBufferRole::DenseOutput,
-           batch_size, output_width);
-  tape.Add(dense.name + ".activation",
-           CudaExecutionBufferRole::ActivationOutput, batch_size,
-           output_width);
-  tape.Add(norm.name + ".normalized",
-           CudaExecutionBufferRole::NormalizedOutput, batch_size,
-           output_width);
-  return tape;
+  return CreateResolvedExecutionTape(plan, batch_size);
 }
 
 CudaWorkspaceSmokeResult RunExecutionTapeSmoke() {
@@ -179,6 +239,56 @@ CudaWorkspaceSmokeResult RunExecutionTapeSmoke() {
         workspace.TotalCapacityFloats() != tape.TotalEntries()) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA execution tape workspace mismatch";
+      return result;
+    }
+
+    NetworkResolvedExecutionStep dense2;
+    dense2.kind = NetworkExecutionOpKind::Dense;
+    dense2.name = "smoke.dense2";
+    NetworkResolvedTensorRef dense2_weight;
+    dense2_weight.name = "smoke.dense2_w";
+    dense2_weight.elements = 10;
+    dense2_weight.dims = {5, 2};
+    dense2.tensors.push_back(dense2_weight);
+
+    NetworkResolvedExecutionStep norm2;
+    norm2.kind = NetworkExecutionOpKind::LayerNorm;
+    norm2.name = "smoke.norm2";
+    NetworkResolvedTensorRef gamma2;
+    gamma2.name = "smoke.gamma2";
+    gamma2.elements = 5;
+    gamma2.dims = {5};
+    norm2.tensors.push_back(gamma2);
+
+    NetworkResolvedExecutionPlan stacked = plan;
+    stacked.steps.push_back(dense2);
+    stacked.steps.push_back(norm2);
+    const auto stacked_tape = CreateResolvedExecutionTape(stacked, 2);
+    if (stacked_tape.BindingCount() != 6 ||
+        stacked_tape.CountRole(CudaExecutionBufferRole::DenseOutput) != 2 ||
+        stacked_tape.CountRole(CudaExecutionBufferRole::ActivationOutput) !=
+            2 ||
+        stacked_tape.CountRole(CudaExecutionBufferRole::NormalizedOutput) !=
+            2 ||
+        stacked_tape.RequireName("smoke.dense2.activation").width != 5 ||
+        stacked_tape.TotalEntries() != 42) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA resolved execution tape sequence mismatch";
+      return result;
+    }
+
+    CudaExecutionWorkspace stacked_workspace;
+    for (const auto &binding : stacked_tape.Bindings()) {
+      if (!stacked_tape.Reserve(stacked_workspace, binding)) {
+        result.status = CudaSmokeStatus::Mismatch;
+        result.message = "CUDA resolved execution tape reserve returned null";
+        return result;
+      }
+    }
+    if (stacked_workspace.NamedBufferCount() != stacked_tape.BindingCount() ||
+        stacked_workspace.TotalCapacityFloats() != stacked_tape.TotalEntries()) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA resolved execution tape workspace mismatch";
       return result;
     }
   } catch (const std::exception &e) {

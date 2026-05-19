@@ -191,11 +191,11 @@ public:
     const auto tape =
         CreatePlanSmokeExecutionTape(plan, execution_plan, batch_size);
     const auto &dense_binding =
-        tape.RequireRole(CudaExecutionBufferRole::DenseOutput);
+        tape.RequireName(dense.name + ".dense");
     const auto &activation_binding =
-        tape.RequireRole(CudaExecutionBufferRole::ActivationOutput);
+        tape.RequireName(dense.name + ".activation");
     const auto &norm_binding =
-        tape.RequireRole(CudaExecutionBufferRole::NormalizedOutput);
+        tape.RequireName(norm.name + ".normalized");
     const std::size_t scratch_entries =
         static_cast<std::size_t>(batch_size) * output_width;
     if (dense_binding.entries != scratch_entries ||

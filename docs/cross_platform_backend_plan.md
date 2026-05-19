@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `f7234baf-206c-4eb1-be87-5c67e6dc9cb4` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `99b79127-6db7-4b4a-96a3-8695bc07e5b0` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `47b8ade8-5b82-487b-a59d-b70e09b109ce` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `f1b09bf8-8d95-4317-be7b-4ec06341eec0` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -109,8 +109,9 @@ Current CUDA backend boundary:
   for smoke tests and fallback call sites.
 - `src/nn/cuda/cuda_execution_tape.*` binds resolved execution steps to named
   intermediate device buffers. The current smoke executor uses it for
-  dense/activation/normalization intermediates; production CUDA layers should
-  extend this rather than allocating anonymous scratch.
+  dense/activation/normalization intermediates, including multi-stage
+  dense/layernorm sequences; production CUDA layers should extend this rather
+  than allocating anonymous scratch.
 - `CreatePlanSmokeCudaExecutor()` runs a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without
   enabling production CUDA inference prematurely. Its smoke coverage includes

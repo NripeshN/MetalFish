@@ -41,15 +41,21 @@ public:
   const std::vector<CudaExecutionBufferBinding> &Bindings() const {
     return bindings_;
   }
+  const CudaExecutionBufferBinding *FindName(std::string_view name) const;
+  const CudaExecutionBufferBinding &RequireName(std::string_view name) const;
   const CudaExecutionBufferBinding &
   RequireRole(CudaExecutionBufferRole role) const;
   float *Reserve(CudaExecutionWorkspace &workspace,
                  const CudaExecutionBufferBinding &binding) const;
   std::size_t BindingCount() const { return bindings_.size(); }
+  std::size_t CountRole(CudaExecutionBufferRole role) const;
   std::size_t TotalEntries() const;
   std::string Summary() const;
 
 private:
+  friend CudaExecutionTape
+  CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
+                              int batch_size);
   friend CudaExecutionTape
   CreatePlanSmokeExecutionTape(const NetworkTensorPlan &tensor_plan,
                                const NetworkResolvedExecutionPlan &plan,
@@ -59,6 +65,9 @@ private:
 
   std::vector<CudaExecutionBufferBinding> bindings_;
 };
+
+CudaExecutionTape CreateResolvedExecutionTape(
+    const NetworkResolvedExecutionPlan &plan, int batch_size);
 
 CudaExecutionTape
 CreatePlanSmokeExecutionTape(const NetworkTensorPlan &tensor_plan,
