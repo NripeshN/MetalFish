@@ -65,6 +65,17 @@ bool EnvFlagEnabled(const char *name) {
   return s != "0" && s != "false" && s != "off" && s != "no";
 }
 
+int EnvInt(const char *name, int fallback, int min_value, int max_value) {
+  const char *value = std::getenv(name);
+  if (!value || !*value)
+    return fallback;
+  char *end = nullptr;
+  long parsed = std::strtol(value, &end, 10);
+  if (end == value)
+    return fallback;
+  return std::clamp(static_cast<int>(parsed), min_value, max_value);
+}
+
 bool HasMatingMaterial(const Position &pos) {
   if (pos.pieces(PAWN) || pos.pieces(ROOK) || pos.pieces(QUEEN))
     return true;
@@ -2206,13 +2217,16 @@ void Search::SendInfo() {
   }
 
   if (EnvFlagEnabled("METALFISH_MCTS_ROOT_TRACE")) {
-    const auto root_stats = GetRootMoveStats(8);
+    const int root_trace_moves =
+        EnvInt("METALFISH_MCTS_ROOT_TRACE_MOVES", 8, 1, 64);
+    const auto root_stats = GetRootMoveStats(root_trace_moves);
     if (!root_stats.empty()) {
       ss << " root";
       ss << std::fixed << std::setprecision(3);
       for (const auto &entry : root_stats) {
         ss << " " << UCIEngine::move(entry.move, false) << ":n=" << entry.visits
-           << ":q=" << entry.q << ":p=" << entry.policy;
+           << ":cn=" << entry.current_visits << ":q=" << entry.q
+           << ":p=" << entry.policy;
       }
     }
   }

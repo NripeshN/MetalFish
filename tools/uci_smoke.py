@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import queue
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -31,6 +33,7 @@ class UCI:
     def __init__(self, engine: Path, timeout: float) -> None:
         self.timeout = timeout
         self.output: list[str] = []
+        self.lines: queue.Queue[str] = queue.Queue()
         self.proc = subprocess.Popen(
             [str(engine)],
             stdin=subprocess.PIPE,
@@ -39,6 +42,13 @@ class UCI:
             text=True,
             bufsize=1,
         )
+        self.reader = threading.Thread(target=self._read_stdout, daemon=True)
+        self.reader.start()
+
+    def _read_stdout(self) -> None:
+        assert self.proc.stdout is not None
+        for line in self.proc.stdout:
+            self.lines.put(line.rstrip())
 
     def send(self, command: str) -> None:
         assert self.proc.stdin is not None
@@ -46,26 +56,31 @@ class UCI:
         self.proc.stdin.flush()
 
     def read_until(self, predicate) -> list[str]:
-        assert self.proc.stdout is not None
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
-            line = self.proc.stdout.readline()
-            if not line:
+            if self.proc.poll() is not None and self.lines.empty():
                 break
-            text = line.rstrip()
+            remaining = max(0.05, deadline - time.monotonic())
+            try:
+                text = self.lines.get(timeout=remaining)
+            except queue.Empty:
+                break
             self.output.append(text)
             if predicate(text):
                 return self.output
         tail = "\n".join(self.output[-80:])
         raise TimeoutError(f"Timed out waiting for engine response. Tail:\n{tail}")
 
-    def close(self) -> None:
+    def close(self) -> int | None:
         if self.proc.poll() is None:
             try:
                 self.send("quit")
                 self.proc.wait(timeout=5)
             except Exception:
                 self.proc.kill()
+                self.proc.wait(timeout=5)
+        self.reader.join(timeout=1)
+        return self.proc.returncode
 
 
 def set_option_command(raw: str) -> str:
@@ -83,21 +98,31 @@ def main() -> int:
         return 2
 
     uci = UCI(engine, args.timeout)
+    returncode: int | None = None
     try:
-        uci.send("uci")
-        uci.read_until(lambda line: line == "uciok")
-        for option in args.setoption:
-            uci.send(set_option_command(option))
-        uci.send("isready")
-        uci.read_until(lambda line: line == "readyok")
-        if args.position == "startpos" or args.position.startswith("fen "):
-            uci.send(f"position {args.position}")
-        else:
-            uci.send(f"position fen {args.position}")
-        uci.send(f"go {args.go}")
-        uci.read_until(lambda line: line.startswith("bestmove "))
+        try:
+            uci.send("uci")
+            uci.read_until(lambda line: line == "uciok")
+            for option in args.setoption:
+                uci.send(set_option_command(option))
+            uci.send("isready")
+            uci.read_until(lambda line: line == "readyok")
+            if args.position == "startpos" or args.position.startswith("fen "):
+                uci.send(f"position {args.position}")
+            else:
+                uci.send(f"position fen {args.position}")
+            uci.send(f"go {args.go}")
+            uci.read_until(lambda line: line.startswith("bestmove "))
+        except (OSError, TimeoutError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     finally:
-        uci.close()
+        returncode = uci.close()
+
+    if returncode not in (0, None):
+        tail = "\n".join(uci.output[-80:])
+        print(f"Engine exited with status {returncode}. Tail:\n{tail}", file=sys.stderr)
+        return 1
 
     best_line = next(
         line for line in reversed(uci.output) if line.startswith("bestmove ")

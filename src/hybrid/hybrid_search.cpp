@@ -848,14 +848,36 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
   const int delay_ms = std::max(0, config_.mcts_ab_root_hint_delay_ms);
   const int64_t deadline_ms = SteadyNowMs() + delay_ms;
 
+  auto add_hint = [&hints, hint_count](Move move) {
+    if (move == Move::none())
+      return;
+    if (static_cast<int>(hints.size()) >= hint_count)
+      return;
+    if (std::find(hints.begin(), hints.end(), move) == hints.end())
+      hints.push_back(move);
+  };
+
   while (!should_stop()) {
-    const auto root_moves = mcts_search_->GetRootMoveStats(hint_count);
-    for (const auto &root_move : root_moves) {
-      if (root_move.move == Move::none())
-        continue;
-      if (std::find(hints.begin(), hints.end(), root_move.move) == hints.end())
-        hints.push_back(root_move.move);
+    auto root_moves = mcts_search_->GetRootMoveStats();
+    const int visit_hints = std::max(1, hint_count / 2);
+    for (int i = 0; i < static_cast<int>(root_moves.size()) &&
+                    static_cast<int>(hints.size()) < visit_hints;
+         ++i) {
+      add_hint(root_moves[i].move);
     }
+
+    std::stable_sort(root_moves.begin(), root_moves.end(),
+                     [](const Search::RootMoveStats &a,
+                        const Search::RootMoveStats &b) {
+                       if (std::abs(a.policy - b.policy) > 0.000001f)
+                         return a.policy > b.policy;
+                       if (a.visits != b.visits)
+                         return a.visits > b.visits;
+                       return a.q > b.q;
+                     });
+    for (const auto &root_move : root_moves)
+      add_hint(root_move.move);
+
     if (!hints.empty() || delay_ms == 0 || SteadyNowMs() >= deadline_ms)
       break;
     std::this_thread::sleep_for(std::chrono::microseconds(500));

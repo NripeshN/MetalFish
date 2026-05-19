@@ -77,6 +77,22 @@ jobs:
             --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
             --go "depth 4"
 
+      - name: Run MCTS low-node tactical smoke
+        run: |
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=8 \
+            --setoption MCTSParallelSearch=true \
+            --setoption MCTSMinibatchSize=0 \
+            --setoption MCTSAddDirichletNoise=false \
+            --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
+            --go "nodes 50" \
+            --expect-bestmove h5f6
+
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v6
         with:
