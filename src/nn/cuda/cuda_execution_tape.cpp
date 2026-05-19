@@ -96,6 +96,14 @@ bool IsAttentionLayerNormName(std::string_view name) {
          name.find(".encoder.") != std::string_view::npos;
 }
 
+bool IsSmolgenDenseName(std::string_view name) {
+  return EndsWith(name, ".smolgen.dense");
+}
+
+bool IsSmolgenNormName(std::string_view name) {
+  return EndsWith(name, ".smolgen.norm");
+}
+
 int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
                        std::string_view name) {
   if (StartsWith(name, "body.encoder."))
@@ -137,6 +145,8 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
     return "attention_context";
   case CudaExecutionBufferRole::AttentionOutputProjection:
     return "attention_output_projection";
+  case CudaExecutionBufferRole::AttentionSmolgenBias:
+    return "attention_smolgen_bias";
   case CudaExecutionBufferRole::AttentionResidualOutput:
     return "attention_residual_output";
   }
@@ -222,6 +232,8 @@ CudaExecutionTape CreateResolvedExecutionTape(
     const auto &step = plan.steps[step_index];
     switch (step.kind) {
     case NetworkExecutionOpKind::Dense: {
+      if (IsSmolgenDenseName(step.name))
+        break;
       const int width = DenseOutputWidth(step);
       tape.Add(step.name + ".dense", CudaExecutionBufferRole::DenseOutput,
                batch_size, width);
@@ -230,6 +242,8 @@ CudaExecutionTape CreateResolvedExecutionTape(
       break;
     }
     case NetworkExecutionOpKind::LayerNorm: {
+      if (IsSmolgenNormName(step.name))
+        break;
       const int width = LayerNormWidth(step);
       const int rows = IsAttentionLayerNormName(step.name)
                            ? batch_size * kCudaAttentionSquares
@@ -280,6 +294,33 @@ CudaExecutionTape CreateResolvedExecutionTape(
       tape.Add(step.name + ".projection",
                CudaExecutionBufferRole::AttentionOutputProjection, square_rows,
                attention.output_width);
+      if (attention.smolgen.present) {
+        tape.Add(step.name + ".smolgen.compress",
+                 CudaExecutionBufferRole::DenseOutput, square_rows,
+                 attention.smolgen.compressed_channels);
+        tape.Add(step.name + ".smolgen.dense1",
+                 CudaExecutionBufferRole::DenseOutput, batch_size,
+                 attention.smolgen.dense1_width);
+        tape.Add(step.name + ".smolgen.activation1",
+                 CudaExecutionBufferRole::ActivationOutput, batch_size,
+                 attention.smolgen.dense1_width);
+        tape.Add(step.name + ".smolgen.norm1",
+                 CudaExecutionBufferRole::NormalizedOutput, batch_size,
+                 attention.smolgen.dense1_width);
+        tape.Add(step.name + ".smolgen.dense2",
+                 CudaExecutionBufferRole::DenseOutput, batch_size,
+                 attention.smolgen.dense2_width);
+        tape.Add(step.name + ".smolgen.activation2",
+                 CudaExecutionBufferRole::ActivationOutput, batch_size,
+                 attention.smolgen.dense2_width);
+        tape.Add(step.name + ".smolgen.norm2",
+                 CudaExecutionBufferRole::NormalizedOutput, batch_size,
+                 attention.smolgen.dense2_width);
+        tape.Add(step.name + ".smolgen.global",
+                 CudaExecutionBufferRole::AttentionSmolgenBias,
+                 batch_size * attention.heads,
+                 attention.squares * attention.squares);
+      }
       break;
     }
     default:

@@ -138,6 +138,17 @@ struct CudaFeedForwardTensors {
   int output_width = 0;
 };
 
+struct CudaSmolgenStageOutput {
+  float *compressed = nullptr;
+  float *dense1 = nullptr;
+  float *activation1 = nullptr;
+  float *norm1 = nullptr;
+  float *dense2 = nullptr;
+  float *activation2 = nullptr;
+  float *norm2 = nullptr;
+  float *global_bias = nullptr;
+};
+
 CudaFeedForwardTensors ResolveFeedForwardTensors(
     const NetworkResolvedExecutionStep &ffn, const CudaWeightBuffers &weights) {
   RequireFeedForwardTensors(ffn);
@@ -237,6 +248,16 @@ float AttentionLayerNormEpsilon(
   if (CudaStageNameStartsWith(stage_name, "policy."))
     return 1e-6f;
   return 1e-5f;
+}
+
+const NetworkResolvedExecutionStep *FindStep(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::string_view name) {
+  for (const auto &step : execution_plan.steps) {
+    if (step.name == name)
+      return &step;
+  }
+  return nullptr;
 }
 
 } // namespace
@@ -668,6 +689,129 @@ CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
   return output;
 }
 
+CudaSmolgenStageOutput ExecuteAttentionSmolgenStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::size_t attention_step_index, const CudaAttentionStagePlan &attention,
+    const CudaWeightBuffers &weights, const float *parent,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size) {
+  if (!attention.smolgen.present)
+    return {};
+  if (!attention.smolgen.has_global_positional_weights) {
+    throw std::runtime_error(
+        "CUDA attention smolgen requires global positional weights");
+  }
+  if (!parent)
+    throw std::runtime_error("CUDA attention smolgen parent is missing");
+  if (attention_step_index >= execution_plan.steps.size())
+    throw std::runtime_error("CUDA attention smolgen index is out of range");
+
+  const auto &attention_step = execution_plan.steps[attention_step_index];
+  const auto *dense =
+      FindStep(execution_plan, attention_step.name + ".smolgen.dense");
+  const auto *norm =
+      FindStep(execution_plan, attention_step.name + ".smolgen.norm");
+  const auto *global_step = FindCudaGlobalPositionalEncodingStep(execution_plan);
+  if (!dense || !norm || !global_step) {
+    throw std::runtime_error("CUDA attention smolgen steps are incomplete");
+  }
+
+  const auto compress = TensorBySuffix(*dense, weights, ".compress");
+  const auto dense1_weight = TensorBySuffix(*dense, weights, ".dense1_w");
+  const auto dense1_bias = TensorBySuffix(*dense, weights, ".dense1_b");
+  const auto dense2_weight = TensorBySuffix(*dense, weights, ".dense2_w");
+  const auto dense2_bias = TensorBySuffix(*dense, weights, ".dense2_b");
+  const auto ln1_gamma = TensorBySuffix(*norm, weights, ".ln1_gammas");
+  const auto ln1_beta = TensorBySuffix(*norm, weights, ".ln1_betas");
+  const auto ln2_gamma = TensorBySuffix(*norm, weights, ".ln2_gammas");
+  const auto ln2_beta = TensorBySuffix(*norm, weights, ".ln2_betas");
+  const auto global = TensorBySuffix(*global_step, weights, "body.smolgen_w");
+
+  const int square_rows = batch_size * attention.squares;
+  const int flattened_width =
+      attention.squares * attention.smolgen.compressed_channels;
+  const int global_rows = batch_size * attention.heads;
+  const int global_width = attention.squares * attention.squares;
+
+  const auto &compress_binding =
+      tape.RequireName(attention.name + ".smolgen.compress");
+  const auto &dense1_binding =
+      tape.RequireName(attention.name + ".smolgen.dense1");
+  const auto &activation1_binding =
+      tape.RequireName(attention.name + ".smolgen.activation1");
+  const auto &norm1_binding =
+      tape.RequireName(attention.name + ".smolgen.norm1");
+  const auto &dense2_binding =
+      tape.RequireName(attention.name + ".smolgen.dense2");
+  const auto &activation2_binding =
+      tape.RequireName(attention.name + ".smolgen.activation2");
+  const auto &norm2_binding =
+      tape.RequireName(attention.name + ".smolgen.norm2");
+  const auto &global_binding =
+      tape.RequireName(attention.name + ".smolgen.global");
+  RequireTapeShape(compress_binding, square_rows,
+                   attention.smolgen.compressed_channels,
+                   "smolgen compress");
+  RequireTapeShape(dense1_binding, batch_size,
+                   attention.smolgen.dense1_width, "smolgen dense1");
+  RequireTapeShape(activation1_binding, batch_size,
+                   attention.smolgen.dense1_width, "smolgen activation1");
+  RequireTapeShape(norm1_binding, batch_size, attention.smolgen.dense1_width,
+                   "smolgen norm1");
+  RequireTapeShape(dense2_binding, batch_size,
+                   attention.smolgen.dense2_width, "smolgen dense2");
+  RequireTapeShape(activation2_binding, batch_size,
+                   attention.smolgen.dense2_width, "smolgen activation2");
+  RequireTapeShape(norm2_binding, batch_size, attention.smolgen.dense2_width,
+                   "smolgen norm2");
+  RequireTapeShape(global_binding, global_rows, global_width,
+                   "smolgen global");
+
+  CudaSmolgenStageOutput output;
+  output.compressed = tape.Reserve(workspace, compress_binding);
+  output.dense1 = tape.Reserve(workspace, dense1_binding);
+  output.activation1 = tape.Reserve(workspace, activation1_binding);
+  output.norm1 = tape.Reserve(workspace, norm1_binding);
+  output.dense2 = tape.Reserve(workspace, dense2_binding);
+  output.activation2 = tape.Reserve(workspace, activation2_binding);
+  output.norm2 = tape.Reserve(workspace, norm2_binding);
+  output.global_bias = tape.Reserve(workspace, global_binding);
+
+  cudaStream_t stream = workspace.Stream();
+  LaunchDenseAffineKernel(parent, compress.data, nullptr, output.compressed,
+                          square_rows, attention.input_width,
+                          attention.smolgen.compressed_channels, stream);
+  LaunchDenseAffineKernel(output.compressed, dense1_weight.data,
+                          dense1_bias.data, output.dense1, batch_size,
+                          flattened_width, attention.smolgen.dense1_width,
+                          stream);
+  LaunchActivationKernel(
+      output.dense1, output.activation1,
+      batch_size * attention.smolgen.dense1_width,
+      ActivationFromString(execution_plan.format.activations.smolgen_activation),
+      stream);
+  LaunchLayerNormKernel(output.activation1, ln1_gamma.data, ln1_beta.data,
+                        output.norm1, batch_size,
+                        attention.smolgen.dense1_width, 1e-3f, stream);
+  LaunchDenseAffineKernel(output.norm1, dense2_weight.data, dense2_bias.data,
+                          output.dense2, batch_size,
+                          attention.smolgen.dense1_width,
+                          attention.smolgen.dense2_width, stream);
+  LaunchActivationKernel(
+      output.dense2, output.activation2,
+      batch_size * attention.smolgen.dense2_width,
+      ActivationFromString(execution_plan.format.activations.smolgen_activation),
+      stream);
+  LaunchLayerNormKernel(output.activation2, ln2_gamma.data, ln2_beta.data,
+                        output.norm2, batch_size,
+                        attention.smolgen.dense2_width, 1e-3f, stream);
+  LaunchDenseAffineKernel(output.norm2, global.data, nullptr,
+                          output.global_bias, global_rows,
+                          attention.smolgen.dense2_width_per_head,
+                          global_width, stream);
+  return output;
+}
+
 CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &norm, const float *parent,
@@ -729,7 +873,7 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     std::size_t attention_step_index,
     const CudaAttentionProjectionOutput &projections,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size) {
+    int batch_size, const CudaWeightBuffers *weights, const float *parent) {
   if (batch_size <= 0)
     throw std::runtime_error("CUDA attention core received empty batch");
   if (!projections.query || !projections.key || !projections.value)
@@ -778,6 +922,18 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
       attention.heads, attention.squares, attention.head_depth,
       attention.qkv_width,
       1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
+  if (attention.smolgen.present) {
+    if (!weights || !parent) {
+      throw std::runtime_error(
+          "CUDA attention smolgen requires weights and parent input");
+    }
+    const auto smolgen = ExecuteAttentionSmolgenStage(
+        execution_plan, attention_step_index, attention, *weights, parent, tape,
+        workspace, batch_size);
+    LaunchAttentionBiasAddKernel(output.scores, smolgen.global_bias,
+                                 batch_size, attention.heads,
+                                 attention.squares, stream);
+  }
   LaunchAttentionSoftmaxKernel(output.scores, output.probabilities, score_rows,
                                attention.squares, stream);
   LaunchAttentionContextKernel(output.probabilities, projections.value,
@@ -856,7 +1012,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
           workspace, batch_size);
       const auto core = ExecuteAttentionCoreStage(
           execution_plan, entry.first_step, input_projection, tape, workspace,
-          batch_size);
+          batch_size, &weights, stage_input);
       const auto output_projection = ExecuteAttentionOutputProjectionStage(
           execution_plan, entry.first_step, weights, core.context, tape,
           workspace, batch_size);

@@ -128,6 +128,18 @@ CudaExecutionScheduleEntry UnsupportedEntry(
                                     std::move(reason)};
 }
 
+bool IsSmolgenDenseFor(const NetworkResolvedExecutionStep &step,
+                       const NetworkResolvedExecutionStep &attention) {
+  return step.kind == NetworkExecutionOpKind::Dense &&
+         step.name == attention.name + ".smolgen.dense";
+}
+
+bool IsSmolgenNormFor(const NetworkResolvedExecutionStep &step,
+                      const NetworkResolvedExecutionStep &attention) {
+  return step.kind == NetworkExecutionOpKind::LayerNorm &&
+         step.name == attention.name + ".smolgen.norm";
+}
+
 void AddEntry(CudaExecutionSchedule &schedule,
               CudaExecutionScheduleEntry entry) {
   switch (entry.kind) {
@@ -251,6 +263,19 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
           plan.steps[norm_index].kind == NetworkExecutionOpKind::LayerNorm) {
         AddEntry(schedule, AttentionLayerNormEntry(plan, i, norm_index));
         i = norm_index;
+        continue;
+      }
+      const std::size_t smolgen_dense_index = i + 1;
+      const std::size_t smolgen_norm_index = i + 2;
+      const std::size_t layernorm_index = i + 3;
+      if (layernorm_index < plan.steps.size() &&
+          IsSmolgenDenseFor(plan.steps[smolgen_dense_index], step) &&
+          IsSmolgenNormFor(plan.steps[smolgen_norm_index], step) &&
+          plan.steps[layernorm_index].kind ==
+              NetworkExecutionOpKind::LayerNorm) {
+        AddEntry(schedule,
+                 AttentionLayerNormEntry(plan, i, layernorm_index));
+        i = layernorm_index;
         continue;
       }
       AddEntry(schedule,

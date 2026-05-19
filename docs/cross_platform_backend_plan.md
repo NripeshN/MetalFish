@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `192a9587-5266-47ca-8423-79412c38979f` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `6f20cbb7-e02f-4604-b669-dd2905ed0233` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `e8a3d26e-f4dd-4e21-aab4-a3c13203f9fc` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `e970a5dd-e187-42b9-a6c0-c74e73ba1d58` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -101,7 +101,8 @@ Current CUDA backend boundary:
   elementwise activation functions, input-embedding gate multiply/add, and
   scaled residual addition for feed-forward normalization. It also contains
   the first attention-core kernels for scaled QK scores, row softmax, and
-  probability-weighted value context construction.
+  probability-weighted value context construction, plus smolgen attention-bias
+  addition before attention softmax.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production
@@ -116,10 +117,12 @@ Current CUDA backend boundary:
   dense/layernorm, gate, and feed-forward/layernorm sequences; production CUDA
   layers should extend this rather than allocating anonymous scratch. Attention
   tape bindings now reserve explicit Q/K/V, score, probability, context, output
-  projection, and residual scratch using resolved head and square geometry.
+  projection, residual, and smolgen compress/dense/norm/global-bias scratch
+  using resolved head and square geometry.
 - `src/nn/cuda/cuda_execution_schedule.*` classifies resolved plan steps into
   supported dense/activation stages, supported dense/layernorm stages,
   supported gate stages, supported adjacent attention/layernorm stages,
+  supported attention/smolgen/layernorm stages,
   supported feed-forward stages, supported non-output positional encoding
   metadata stages, CUDA-managed boundaries, and explicit unsupported operations
   before any kernels launch.
@@ -134,9 +137,10 @@ Current CUDA backend boundary:
   stage execution, input-embedding gate execution, feed-forward residual
   layernorm execution, attention Q/K/V projection launches, attention
   score/softmax/context execution, attention output projection launches,
-  attention residual layernorm execution, and strided device-row copies, so
-  smoke and production CUDA executors share the same launch path. It derives
-  CUDA-local stage input bindings from the
+  attention residual layernorm execution, smolgen compress/dense/layernorm
+  execution with global positional bias injection, and strided device-row
+  copies, so smoke and production CUDA executors share the same launch path. It
+  derives CUDA-local stage input bindings from the
   resolved plan and schedule, allowing independent heads to branch from the
   last supported body output instead of forcing every stage into one linear
   chain.

@@ -210,6 +210,14 @@ __global__ void AttentionScoreKernel(const float *query, const float *key,
   scores[index] = dot * scale;
 }
 
+__global__ void AttentionBiasAddKernel(float *scores, const float *bias,
+                                       int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+  scores[index] += bias[index];
+}
+
 __global__ void AttentionSoftmaxKernel(const float *scores,
                                        float *probabilities, int width) {
   extern __shared__ float reductions[];
@@ -429,6 +437,31 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("AttentionScoreKernel synchronize", status));
+}
+
+void LaunchAttentionBiasAddKernel(float *scores, const float *bias,
+                                  int batch_size, int heads, int squares,
+                                  cudaStream_t stream) {
+  if (!scores || !bias)
+    throw std::runtime_error(
+        "CUDA attention bias add kernel received null buffer");
+  if (batch_size <= 0 || heads <= 0 || squares <= 0)
+    throw std::runtime_error("CUDA attention bias add dimensions are invalid");
+
+  const int total = batch_size * heads * squares * squares;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  AttentionBiasAddKernel<<<blocks, kThreads, 0, stream>>>(scores, bias, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionBiasAddKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionBiasAddKernel synchronize", status));
 }
 
 void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,

@@ -65,6 +65,10 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
                                 int squares, int head_depth, int qkv_width,
                                 float scale, cudaStream_t stream = nullptr);
 
+void LaunchAttentionBiasAddKernel(float *scores, const float *bias,
+                                  int batch_size, int heads, int squares,
+                                  cudaStream_t stream = nullptr);
+
 void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
                                   int rows, int width,
                                   cudaStream_t stream = nullptr);

@@ -144,7 +144,8 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     std::size_t attention_step_index,
     const CudaAttentionProjectionOutput &projections,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size);
+    int batch_size, const CudaWeightBuffers *weights = nullptr,
+    const float *parent = nullptr);
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,

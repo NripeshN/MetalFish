@@ -35,6 +35,7 @@ enum class CudaExecutionBufferRole {
   AttentionProbabilities,
   AttentionContext,
   AttentionOutputProjection,
+  AttentionSmolgenBias,
   AttentionResidualOutput,
 };
 
