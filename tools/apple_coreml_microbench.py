@@ -85,6 +85,7 @@ def build_transformer_model(
     channels: int,
     heads: int,
     ffn_channels: int,
+    layers: int,
     activation: str,
     compute_unit: Any,
     seed: int,
@@ -116,6 +117,7 @@ def build_transformer_model(
         "ffn2_b": np.zeros((channels,), dtype=np.float32),
         "heads": heads,
         "head_dim": head_dim,
+        "layers": layers,
         "activation": activation,
     }
 
@@ -123,62 +125,12 @@ def build_transformer_model(
         input_specs=[mb.TensorSpec(shape=(batch, tokens, channels), dtype=types.fp32)]
     )
     def program(x):  # type: ignore[no-untyped-def]
-        ln1_gamma = mb.const(val=params["ln1_gamma"])
-        ln1_beta = mb.const(val=params["ln1_beta"])
-        y = mb.layer_norm(
-            x=x, axes=[-1], gamma=ln1_gamma, beta=ln1_beta, epsilon=1e-5
-        )
-
-        q = mb.linear(
-            x=y, weight=mb.const(val=params["q_w"]), bias=mb.const(val=params["q_b"])
-        )
-        k = mb.linear(
-            x=y, weight=mb.const(val=params["k_w"]), bias=mb.const(val=params["k_b"])
-        )
-        v = mb.linear(
-            x=y, weight=mb.const(val=params["v_w"]), bias=mb.const(val=params["v_b"])
-        )
-
-        q = mb.reshape(x=q, shape=[batch, tokens, heads, head_dim])
-        k = mb.reshape(x=k, shape=[batch, tokens, heads, head_dim])
-        v = mb.reshape(x=v, shape=[batch, tokens, heads, head_dim])
-        q = mb.transpose(x=q, perm=[0, 2, 1, 3])
-        k = mb.transpose(x=k, perm=[0, 2, 3, 1])
-        v = mb.transpose(x=v, perm=[0, 2, 1, 3])
-        scores = mb.matmul(x=q, y=k)
-        scale = mb.const(val=np.array(1.0 / np.sqrt(head_dim), dtype=np.float32))
-        scores = mb.mul(x=scores, y=scale)
-        probs = mb.softmax(x=scores, axis=-1)
-        context = mb.matmul(x=probs, y=v)
-        context = mb.transpose(x=context, perm=[0, 2, 1, 3])
-        context = mb.reshape(x=context, shape=[batch, tokens, channels])
-        attn_out = mb.linear(
-            x=context,
-            weight=mb.const(val=params["o_w"]),
-            bias=mb.const(val=params["o_b"]),
-        )
-        residual = mb.add(x=x, y=attn_out)
-
-        ln2_gamma = mb.const(val=params["ln2_gamma"])
-        ln2_beta = mb.const(val=params["ln2_beta"])
-        z = mb.layer_norm(
-            x=residual, axes=[-1], gamma=ln2_gamma, beta=ln2_beta, epsilon=1e-5
-        )
-        z = mb.linear(
-            x=z,
-            weight=mb.const(val=params["ffn1_w"]),
-            bias=mb.const(val=params["ffn1_b"]),
-        )
-        if activation == "swish":
-            z = mb.mul(x=z, y=mb.sigmoid(x=z))
-        else:
-            z = mb.gelu(x=z, mode="TANH_APPROXIMATION")
-        z = mb.linear(
-            x=z,
-            weight=mb.const(val=params["ffn2_w"]),
-            bias=mb.const(val=params["ffn2_b"]),
-        )
-        return mb.add(x=residual, y=z)
+        layer = x
+        for _ in range(layers):
+            layer = transformer_block_mb(
+                mb, np, layer, params, batch, tokens, channels, heads, head_dim, activation
+            )
+        return layer
 
     model = ct.convert(
         program,
@@ -187,6 +139,76 @@ def build_transformer_model(
         compute_units=compute_unit,
     )
     return model, params
+
+
+def transformer_block_mb(
+    mb: Any,
+    np: Any,
+    x: Any,
+    params: dict[str, Any],
+    batch: int,
+    tokens: int,
+    channels: int,
+    heads: int,
+    head_dim: int,
+    activation: str,
+) -> Any:
+    ln1_gamma = mb.const(val=params["ln1_gamma"])
+    ln1_beta = mb.const(val=params["ln1_beta"])
+    y = mb.layer_norm(
+        x=x, axes=[-1], gamma=ln1_gamma, beta=ln1_beta, epsilon=1e-5
+    )
+
+    q = mb.linear(
+        x=y, weight=mb.const(val=params["q_w"]), bias=mb.const(val=params["q_b"])
+    )
+    k = mb.linear(
+        x=y, weight=mb.const(val=params["k_w"]), bias=mb.const(val=params["k_b"])
+    )
+    v = mb.linear(
+        x=y, weight=mb.const(val=params["v_w"]), bias=mb.const(val=params["v_b"])
+    )
+
+    q = mb.reshape(x=q, shape=[batch, tokens, heads, head_dim])
+    k = mb.reshape(x=k, shape=[batch, tokens, heads, head_dim])
+    v = mb.reshape(x=v, shape=[batch, tokens, heads, head_dim])
+    q = mb.transpose(x=q, perm=[0, 2, 1, 3])
+    k = mb.transpose(x=k, perm=[0, 2, 3, 1])
+    v = mb.transpose(x=v, perm=[0, 2, 1, 3])
+    scores = mb.matmul(x=q, y=k)
+    scale = mb.const(val=np.array(1.0 / np.sqrt(head_dim), dtype=np.float32))
+    scores = mb.mul(x=scores, y=scale)
+    probs = mb.softmax(x=scores, axis=-1)
+    context = mb.matmul(x=probs, y=v)
+    context = mb.transpose(x=context, perm=[0, 2, 1, 3])
+    context = mb.reshape(x=context, shape=[batch, tokens, channels])
+    attn_out = mb.linear(
+        x=context,
+        weight=mb.const(val=params["o_w"]),
+        bias=mb.const(val=params["o_b"]),
+    )
+    residual = mb.add(x=x, y=attn_out)
+
+    ln2_gamma = mb.const(val=params["ln2_gamma"])
+    ln2_beta = mb.const(val=params["ln2_beta"])
+    z = mb.layer_norm(
+        x=residual, axes=[-1], gamma=ln2_gamma, beta=ln2_beta, epsilon=1e-5
+    )
+    z = mb.linear(
+        x=z,
+        weight=mb.const(val=params["ffn1_w"]),
+        bias=mb.const(val=params["ffn1_b"]),
+    )
+    if activation == "swish":
+        z = mb.mul(x=z, y=mb.sigmoid(x=z))
+    else:
+        z = mb.gelu(x=z, mode="TANH_APPROXIMATION")
+    z = mb.linear(
+        x=z,
+        weight=mb.const(val=params["ffn2_w"]),
+        bias=mb.const(val=params["ffn2_b"]),
+    )
+    return mb.add(x=residual, y=z)
 
 
 def benchmark_predict(model: Any, sample: Any, warmup: int, iterations: int) -> dict[str, Any]:
@@ -258,27 +280,30 @@ def transformer_numpy_once(np: Any, sample: Any, params: dict[str, Any]) -> Any:
     heads = params["heads"]
     head_dim = params["head_dim"]
     batch, tokens, channels = sample.shape
+    layer = sample
 
-    y = layer_norm_np(np, sample, params["ln1_gamma"], params["ln1_beta"])
-    q = y @ params["q_w"].T + params["q_b"]
-    k = y @ params["k_w"].T + params["k_b"]
-    v = y @ params["v_w"].T + params["v_b"]
-    q = q.reshape(batch, tokens, heads, head_dim).transpose(0, 2, 1, 3)
-    k = k.reshape(batch, tokens, heads, head_dim).transpose(0, 2, 3, 1)
-    v = v.reshape(batch, tokens, heads, head_dim).transpose(0, 2, 1, 3)
-    scores = (q @ k) * (1.0 / np.sqrt(head_dim))
-    probs = softmax_np(np, scores, axis=-1)
-    context = (probs @ v).transpose(0, 2, 1, 3).reshape(batch, tokens, channels)
-    residual = sample + context @ params["o_w"].T + params["o_b"]
+    for _ in range(params["layers"]):
+        y = layer_norm_np(np, layer, params["ln1_gamma"], params["ln1_beta"])
+        q = y @ params["q_w"].T + params["q_b"]
+        k = y @ params["k_w"].T + params["k_b"]
+        v = y @ params["v_w"].T + params["v_b"]
+        q = q.reshape(batch, tokens, heads, head_dim).transpose(0, 2, 1, 3)
+        k = k.reshape(batch, tokens, heads, head_dim).transpose(0, 2, 3, 1)
+        v = v.reshape(batch, tokens, heads, head_dim).transpose(0, 2, 1, 3)
+        scores = (q @ k) * (1.0 / np.sqrt(head_dim))
+        probs = softmax_np(np, scores, axis=-1)
+        context = (probs @ v).transpose(0, 2, 1, 3).reshape(batch, tokens, channels)
+        residual = layer + context @ params["o_w"].T + params["o_b"]
 
-    z = layer_norm_np(np, residual, params["ln2_gamma"], params["ln2_beta"])
-    z = z @ params["ffn1_w"].T + params["ffn1_b"]
-    if params["activation"] == "swish":
-        z = z / (1.0 + np.exp(-z))
-    else:
-        z = gelu_tanh_np(np, z)
-    z = z @ params["ffn2_w"].T + params["ffn2_b"]
-    return residual + z
+        z = layer_norm_np(np, residual, params["ln2_gamma"], params["ln2_beta"])
+        z = z @ params["ffn1_w"].T + params["ffn1_b"]
+        if params["activation"] == "swish":
+            z = z / (1.0 + np.exp(-z))
+        else:
+            z = gelu_tanh_np(np, z)
+        z = z @ params["ffn2_w"].T + params["ffn2_b"]
+        layer = residual + z
+    return layer
 
 
 def benchmark_numpy_transformer(
@@ -347,6 +372,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             args.channels,
             args.heads,
             args.channels * args.ffn_mult,
+            args.layers,
             args.activation,
             compute_unit,
             args.seed,
@@ -374,6 +400,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         "channels": args.channels,
         "heads": args.heads,
         "ffn_mult": args.ffn_mult,
+        "layers": args.layers,
         "activation": args.activation,
         "compute_unit": args.compute_unit,
         "build_ms": build_ms,
@@ -395,7 +422,8 @@ def print_human(result: dict[str, Any]) -> None:
         print(
             f"  Shape:        batch={result['batch']} tokens={result['tokens']} "
             f"channels={result['channels']} heads={result['heads']} "
-            f"ffn_mult={result['ffn_mult']} activation={result['activation']}"
+            f"ffn_mult={result['ffn_mult']} layers={result['layers']} "
+            f"activation={result['activation']}"
         )
     print(f"  Compute unit: {result['compute_unit']}")
     print(f"  Build time:   {result['build_ms']:.3f} ms")
@@ -429,6 +457,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--ffn-mult", type=int, default=4)
+    parser.add_argument("--layers", type=int, default=1)
     parser.add_argument("--activation", choices=["gelu", "swish"], default="gelu")
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--iterations", type=int, default=100)
