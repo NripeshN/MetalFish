@@ -22,6 +22,7 @@
 #include "nn_input_fixture.h"
 #ifdef USE_CUDA
 #include "nn/cuda/cuda_buffers.h"
+#include "nn/cuda/cuda_execution_tape.h"
 #include "nn/cuda/cuda_input_packing.h"
 #include "nn/cuda/cuda_kernels.h"
 #include "nn/cuda/cuda_runtime_probe.h"
@@ -742,6 +743,12 @@ void test_cuda_inference_buffers(TestCounter &tc) {
   expect(workspace_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              workspace_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA execution workspace should pass or skip without a device", tc);
+
+  auto tape_smoke = NN::Cuda::RunExecutionTapeSmoke();
+  std::cout << "    " << tape_smoke.message << std::endl;
+  expect(tape_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             tape_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA execution tape should pass or skip without a device", tc);
 
   std::array<NN::InputPlanes, 2> null_executor_inputs = {fixture.planes,
                                                          fixture.planes};

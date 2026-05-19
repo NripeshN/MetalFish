@@ -7,6 +7,7 @@
 
 #include "cuda_executor.h"
 
+#include "cuda_execution_tape.h"
 #include "cuda_kernels.h"
 
 #include <cuda_runtime_api.h>
@@ -187,14 +188,25 @@ public:
           "CUDA smoke raw policy stride is smaller than output");
     }
 
+    const auto tape =
+        CreatePlanSmokeExecutionTape(plan, execution_plan, batch_size);
+    const auto &dense_binding =
+        tape.RequireRole(CudaExecutionBufferRole::DenseOutput);
+    const auto &activation_binding =
+        tape.RequireRole(CudaExecutionBufferRole::ActivationOutput);
+    const auto &norm_binding =
+        tape.RequireRole(CudaExecutionBufferRole::NormalizedOutput);
     const std::size_t scratch_entries =
         static_cast<std::size_t>(batch_size) * output_width;
-    float *dense_output =
-        workspace.ReserveFloats(CudaWorkspaceSlot::Dense, scratch_entries);
-    float *activation_output =
-        workspace.ReserveFloats(CudaWorkspaceSlot::Activation, scratch_entries);
-    float *norm_output =
-        workspace.ReserveFloats(CudaWorkspaceSlot::Norm, scratch_entries);
+    if (dense_binding.entries != scratch_entries ||
+        activation_binding.entries != scratch_entries ||
+        norm_binding.entries != scratch_entries) {
+      throw std::runtime_error("CUDA smoke execution tape size mismatch");
+    }
+
+    float *dense_output = tape.Reserve(workspace, dense_binding);
+    float *activation_output = tape.Reserve(workspace, activation_binding);
+    float *norm_output = tape.Reserve(workspace, norm_binding);
     cudaStream_t stream = workspace.Stream();
 
     LaunchDenseAffineKernel(buffers.input_values, dense_weight.data,

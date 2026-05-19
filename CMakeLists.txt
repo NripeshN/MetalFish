@@ -244,6 +244,7 @@ if(USE_CUDA)
   find_package(CUDAToolkit REQUIRED)
   set(NN_SOURCES
       ${NN_SOURCES}
+      src/nn/cuda/cuda_execution_tape.cpp
       src/nn/cuda/cuda_executor.cpp
       src/nn/cuda/cuda_network.cpp
       src/nn/cuda/cuda_null_executor_smoke.cpp

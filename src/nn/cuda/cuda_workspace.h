@@ -10,6 +10,8 @@
 #include <array>
 #include <cstddef>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <cuda_runtime_api.h>
 
@@ -26,6 +28,12 @@ enum class CudaWorkspaceSlot {
   Count,
 };
 
+struct CudaNamedWorkspaceBuffer {
+  std::string name;
+  float *buffer = nullptr;
+  std::size_t capacity = 0;
+};
+
 class CudaExecutionWorkspace {
 public:
   CudaExecutionWorkspace() = default;
@@ -34,9 +42,12 @@ public:
   ~CudaExecutionWorkspace();
 
   float *ReserveFloats(CudaWorkspaceSlot slot, std::size_t entries);
+  float *ReserveNamedFloats(std::string_view name, std::size_t entries);
   cudaStream_t Stream();
   void Synchronize();
   std::size_t CapacityFloats(CudaWorkspaceSlot slot) const;
+  std::size_t NamedCapacityFloats(std::string_view name) const;
+  std::size_t NamedBufferCount() const;
   std::size_t TotalCapacityFloats() const;
   std::size_t TotalBytes() const;
   void Release();
@@ -47,6 +58,7 @@ private:
 
   std::array<float *, kSlotCount> buffers_{};
   std::array<std::size_t, kSlotCount> capacities_{};
+  std::vector<CudaNamedWorkspaceBuffer> named_buffers_;
   cudaStream_t stream_ = nullptr;
 };
 
