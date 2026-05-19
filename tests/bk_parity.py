@@ -658,6 +658,17 @@ def write_json_report(
         f.write("\n")
 
 
+def engine_score(
+    positions: Sequence[Tuple[str, List[str], str]],
+    results: Dict[str, SearchResult],
+) -> Tuple[int, int]:
+    passed = 0
+    for fen, expected_sans, bk_id in positions:
+        expected = set(expected_uci_moves(fen, expected_sans))
+        passed += int(results[bk_id].bestmove in expected)
+    return passed, len(positions)
+
+
 def run_once(
     args: argparse.Namespace,
     aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = None,
@@ -790,6 +801,20 @@ def run_once(
             write_json_report(path, args, positions, all_results, run_index)
             if not args.quiet:
                 print(f"\nSaved JSON report: {path}", flush=True)
+        if args.fail_under is not None:
+            below_threshold = []
+            for name, results in all_results.items():
+                passed, total = engine_score(positions, results)
+                if passed < args.fail_under:
+                    below_threshold.append(f"{name}={passed}/{total}")
+            if below_threshold:
+                print(
+                    "ERROR: score below --fail-under "
+                    f"{args.fail_under}: {', '.join(below_threshold)}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 1
         return 0
     finally:
         for sess in sessions.values():
@@ -874,6 +899,12 @@ def main() -> int:
     parser.add_argument("--weights", type=pathlib.Path, default=WEIGHTS)
     parser.add_argument("--metalfish", type=pathlib.Path, default=METALFISH)
     parser.add_argument("--lc0", type=pathlib.Path, default=LC0)
+    parser.add_argument(
+        "--fail-under",
+        type=int,
+        default=None,
+        help="Exit non-zero if any selected engine scores below this many positions",
+    )
     parser.add_argument(
         "--json-out",
         type=pathlib.Path,
