@@ -405,6 +405,8 @@ void test_network_execution_plan(TestCounter &tc) {
   const auto execution_plan = NN::CreateNetworkExecutionPlan(
       descriptor, tensor_plan, policy_head, value_head, inventory);
   const auto validation = execution_plan.ValidateAgainstInventory(inventory);
+  const auto resolved_plan =
+      NN::ResolveNetworkExecutionPlan(execution_plan, inventory);
   if (!validation.ok())
     std::cout << "    " << validation.Summary() << std::endl;
   expect(validation.ok(), "minimal execution plan should cover all tensors",
@@ -419,6 +421,12 @@ void test_network_execution_plan(TestCounter &tc) {
          "execution plan should reference moves-left weights", tc);
   expect(execution_plan.TensorReferenceCount() == inventory.tensors.size(),
          "minimal execution plan should reference each tensor once", tc);
+  expect(resolved_plan.TotalParameterElements() == inventory.TotalElements(),
+         "resolved execution plan should account for all parameters", tc);
+  expect(resolved_plan.TotalParameterBytes() == inventory.TotalBytes(),
+         "resolved execution plan byte accounting should match inventory", tc);
+  expect(resolved_plan.StepCount(NN::NetworkExecutionOpKind::Dense) == 2,
+         "minimal resolved plan should expose dense policy/value outputs", tc);
 
   const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
   if (!weights_path || std::string(weights_path).empty()) {
@@ -443,9 +451,11 @@ void test_network_execution_plan(TestCounter &tc) {
       loaded_value_head, loaded_inventory);
   const auto loaded_validation =
       loaded_execution_plan.ValidateAgainstInventory(loaded_inventory);
+  const auto loaded_resolved_plan =
+      NN::ResolveNetworkExecutionPlan(loaded_execution_plan, loaded_inventory);
   if (!loaded_validation.ok())
     std::cout << "    " << loaded_validation.Summary() << std::endl;
-  std::cout << "    Loaded execution: " << loaded_execution_plan.Summary()
+  std::cout << "    Loaded execution: " << loaded_resolved_plan.Summary()
             << std::endl;
   expect(loaded_validation.ok(),
          "loaded BT4 execution plan should cover all tensors", tc);
@@ -461,6 +471,22 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_execution_plan.ReferencesTensor(
              "value." + loaded_value_head + ".ip_val_w"),
          "loaded execution plan should reference selected value output", tc);
+  expect(loaded_resolved_plan.TotalParameterElements() ==
+             loaded_inventory.TotalElements(),
+         "loaded resolved plan should account for all BT4 parameters", tc);
+  expect(loaded_resolved_plan.TotalParameterBytes() ==
+             loaded_inventory.TotalBytes(),
+         "loaded resolved plan byte accounting should match BT4 inventory", tc);
+  expect(loaded_resolved_plan.StepCount(NN::NetworkExecutionOpKind::Attention) >
+             0,
+         "loaded resolved plan should expose attention operators", tc);
+  expect(
+      loaded_resolved_plan.StepCount(NN::NetworkExecutionOpKind::FeedForward) >
+          0,
+      "loaded resolved plan should expose feed-forward operators", tc);
+  expect(loaded_resolved_plan.steps.front().kind ==
+             NN::NetworkExecutionOpKind::InputPack,
+         "resolved execution plan should start with input packing", tc);
 }
 
 void test_network_output_decoder(TestCounter &tc) {

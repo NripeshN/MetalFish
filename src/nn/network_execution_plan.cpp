@@ -9,6 +9,7 @@
 
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -222,6 +223,94 @@ std::string NetworkExecutionValidation::Summary() const {
   return out.str();
 }
 
+std::string NetworkResolvedTensorRef::ShapeString() const {
+  if (dims.empty())
+    return "flat";
+  std::ostringstream out;
+  for (std::size_t i = 0; i < dims.size(); ++i) {
+    if (i > 0)
+      out << "x";
+    out << dims[i];
+  }
+  return out.str();
+}
+
+std::size_t NetworkResolvedExecutionStep::ParameterElements() const {
+  std::size_t total = 0;
+  for (const auto &tensor : tensors)
+    total += tensor.elements;
+  return total;
+}
+
+std::size_t NetworkResolvedExecutionStep::ParameterBytes() const {
+  return ParameterElements() * sizeof(float);
+}
+
+bool NetworkResolvedExecutionStep::HasTensorKind(
+    NetworkWeightTensorKind kind) const {
+  for (const auto &tensor : tensors) {
+    if (tensor.kind == kind)
+      return true;
+  }
+  return false;
+}
+
+bool NetworkResolvedExecutionPlan::ContainsStep(std::string_view name) const {
+  for (const auto &step : steps) {
+    if (step.name == name)
+      return true;
+  }
+  return false;
+}
+
+bool NetworkResolvedExecutionPlan::ReferencesTensor(
+    std::string_view name) const {
+  for (const auto &step : steps) {
+    for (const auto &tensor : step.tensors) {
+      if (tensor.name == name)
+        return true;
+    }
+  }
+  return false;
+}
+
+std::size_t NetworkResolvedExecutionPlan::TensorReferenceCount() const {
+  std::size_t count = 0;
+  for (const auto &step : steps)
+    count += step.tensors.size();
+  return count;
+}
+
+std::size_t NetworkResolvedExecutionPlan::TotalParameterElements() const {
+  std::size_t total = 0;
+  for (const auto &step : steps)
+    total += step.ParameterElements();
+  return total;
+}
+
+std::size_t NetworkResolvedExecutionPlan::TotalParameterBytes() const {
+  return TotalParameterElements() * sizeof(float);
+}
+
+std::size_t
+NetworkResolvedExecutionPlan::StepCount(NetworkExecutionOpKind kind) const {
+  std::size_t count = 0;
+  for (const auto &step : steps) {
+    if (step.kind == kind)
+      ++count;
+  }
+  return count;
+}
+
+std::string NetworkResolvedExecutionPlan::Summary() const {
+  std::ostringstream out;
+  out << steps.size() << " resolved execution steps, "
+      << TensorReferenceCount() << " tensor refs, "
+      << TotalParameterElements() << " parameter floats, policy_head="
+      << policy_head << ", value_head=" << value_head;
+  return out.str();
+}
+
 bool NetworkExecutionPlan::ContainsStep(std::string_view name) const {
   for (const auto &step : steps) {
     if (step.name == name)
@@ -329,6 +418,48 @@ NetworkExecutionPlan CreateNetworkExecutionPlan(
   AddStep(plan, NetworkExecutionOpKind::OutputDecode, "output.decode", {});
 
   return plan;
+}
+
+NetworkResolvedExecutionPlan ResolveNetworkExecutionPlan(
+    const NetworkExecutionPlan &plan, const NetworkWeightInventory &inventory) {
+  const auto validation = plan.ValidateAgainstInventory(inventory);
+  if (!validation.ok()) {
+    throw std::runtime_error("cannot resolve invalid NN execution plan: " +
+                             validation.Summary());
+  }
+
+  NetworkResolvedExecutionPlan resolved;
+  resolved.format = plan.format;
+  resolved.tensors = plan.tensors;
+  resolved.policy_head = plan.policy_head;
+  resolved.value_head = plan.value_head;
+  resolved.steps.reserve(plan.steps.size());
+
+  for (const auto &step : plan.steps) {
+    NetworkResolvedExecutionStep resolved_step;
+    resolved_step.kind = step.kind;
+    resolved_step.name = step.name;
+    resolved_step.tensors.reserve(step.tensors.size());
+    for (const auto &tensor_name : step.tensors) {
+      bool found = false;
+      for (std::size_t i = 0; i < inventory.tensors.size(); ++i) {
+        const auto &tensor = inventory.tensors[i];
+        if (tensor.name != tensor_name)
+          continue;
+        resolved_step.tensors.push_back(NetworkResolvedTensorRef{
+            i, tensor.name, tensor.elements, tensor.dims, tensor.kind});
+        found = true;
+        break;
+      }
+      if (!found) {
+        throw std::runtime_error("cannot resolve missing NN tensor: " +
+                                 tensor_name);
+      }
+    }
+    resolved.steps.push_back(std::move(resolved_step));
+  }
+
+  return resolved;
 }
 
 } // namespace NN

@@ -35,6 +35,7 @@ private:
   NetworkFormatDescriptor format_;
   NetworkTensorPlan tensor_plan_;
   NetworkExecutionPlan execution_plan_;
+  NetworkResolvedExecutionPlan resolved_execution_plan_;
   CudaBufferLayout buffer_layout_;
   CudaInferenceBuffers buffers_;
   CudaWeightBuffers weight_buffers_;

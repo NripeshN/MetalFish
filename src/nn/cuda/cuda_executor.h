@@ -7,7 +7,9 @@
 
 #pragma once
 
+#include "../network_execution_plan.h"
 #include "cuda_buffers.h"
+#include "cuda_weight_buffers.h"
 
 #include <memory>
 #include <string>
@@ -20,7 +22,9 @@ class CudaExecutor {
 public:
   virtual ~CudaExecutor() = default;
 
-  virtual void Execute(const NetworkTensorPlan &plan,
+  virtual void Execute(const NetworkTensorPlan &tensor_plan,
+                       const NetworkResolvedExecutionPlan &execution_plan,
+                       const CudaWeightBuffers &weights,
                        CudaInferenceBuffers &buffers, int batch_size) = 0;
   virtual std::string Name() const = 0;
 };

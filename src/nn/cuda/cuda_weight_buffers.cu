@@ -52,6 +52,14 @@ CudaWeightBuffers::operator=(CudaWeightBuffers &&other) noexcept {
 
 CudaWeightBuffers::~CudaWeightBuffers() { Release(); }
 
+CudaDeviceTensorView CudaWeightBuffers::TensorAt(std::size_t index) const {
+  if (index >= device_tensors_.size())
+    throw std::out_of_range("CUDA weight tensor index is out of range");
+  const auto &tensor = device_tensors_[index];
+  return CudaDeviceTensorView{tensor.data, tensor.elements, tensor.dims,
+                              tensor.kind};
+}
+
 void CudaWeightBuffers::Upload(const NetworkWeightInventory &inventory) {
   CudaWeightBuffers next;
   next.device_tensors_.reserve(inventory.tensors.size());

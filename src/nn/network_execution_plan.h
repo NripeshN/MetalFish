@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,10 +39,46 @@ struct NetworkExecutionStep {
   std::vector<std::string> tensors;
 };
 
+struct NetworkResolvedTensorRef {
+  std::size_t inventory_index = 0;
+  std::string name;
+  std::size_t elements = 0;
+  std::vector<std::uint32_t> dims;
+  NetworkWeightTensorKind kind = NetworkWeightTensorKind::Generic;
+
+  std::string ShapeString() const;
+};
+
+struct NetworkResolvedExecutionStep {
+  NetworkExecutionOpKind kind = NetworkExecutionOpKind::Dense;
+  std::string name;
+  std::vector<NetworkResolvedTensorRef> tensors;
+
+  std::size_t ParameterElements() const;
+  std::size_t ParameterBytes() const;
+  bool HasTensorKind(NetworkWeightTensorKind kind) const;
+};
+
 struct NetworkExecutionValidation {
   std::vector<std::string> errors;
 
   bool ok() const { return errors.empty(); }
+  std::string Summary() const;
+};
+
+struct NetworkResolvedExecutionPlan {
+  NetworkFormatDescriptor format;
+  NetworkTensorPlan tensors;
+  std::string policy_head;
+  std::string value_head;
+  std::vector<NetworkResolvedExecutionStep> steps;
+
+  bool ContainsStep(std::string_view name) const;
+  bool ReferencesTensor(std::string_view name) const;
+  std::size_t TensorReferenceCount() const;
+  std::size_t TotalParameterElements() const;
+  std::size_t TotalParameterBytes() const;
+  std::size_t StepCount(NetworkExecutionOpKind kind) const;
   std::string Summary() const;
 };
 
@@ -66,6 +103,9 @@ NetworkExecutionPlan CreateNetworkExecutionPlan(
     const NetworkFormatDescriptor &format, const NetworkTensorPlan &tensors,
     const std::string &policy_head, const std::string &value_head,
     const NetworkWeightInventory &inventory);
+
+NetworkResolvedExecutionPlan ResolveNetworkExecutionPlan(
+    const NetworkExecutionPlan &plan, const NetworkWeightInventory &inventory);
 
 } // namespace NN
 } // namespace MetalFish

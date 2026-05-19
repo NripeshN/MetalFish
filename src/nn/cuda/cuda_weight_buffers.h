@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,13 @@
 namespace MetalFish {
 namespace NN {
 namespace Cuda {
+
+struct CudaDeviceTensorView {
+  const float *data = nullptr;
+  std::size_t elements = 0;
+  std::vector<std::uint32_t> dims;
+  NetworkWeightTensorKind kind = NetworkWeightTensorKind::Generic;
+};
 
 class CudaWeightBuffers {
 public:
@@ -34,6 +42,7 @@ public:
 
   std::size_t AllocationBytes() const { return allocation_bytes_; }
   std::size_t TensorCount() const { return device_tensors_.size(); }
+  CudaDeviceTensorView TensorAt(std::size_t index) const;
 
 private:
   struct DeviceTensor {

@@ -41,8 +41,8 @@ void UploadDeviceFloats(float *ptr, const std::vector<float> &host,
 
 class MissingCudaExecutor final : public CudaExecutor {
 public:
-  void Execute(const NetworkTensorPlan &, CudaInferenceBuffers &,
-               int) override {
+  void Execute(const NetworkTensorPlan &, const NetworkResolvedExecutionPlan &,
+               const CudaWeightBuffers &, CudaInferenceBuffers &, int) override {
     throw std::runtime_error(
         "CUDA transformer executor is not implemented yet");
   }
@@ -52,7 +52,8 @@ public:
 
 class NullCudaExecutor final : public CudaExecutor {
 public:
-  void Execute(const NetworkTensorPlan &plan, CudaInferenceBuffers &buffers,
+  void Execute(const NetworkTensorPlan &plan, const NetworkResolvedExecutionPlan &,
+               const CudaWeightBuffers &, CudaInferenceBuffers &buffers,
                int batch_size) override {
     std::vector<float> policy(plan.PolicyEntries(batch_size), 0.0f);
     std::vector<float> value(plan.ValueEntries(batch_size), 0.0f);

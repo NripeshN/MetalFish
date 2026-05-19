@@ -51,7 +51,9 @@ CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
     buffers.UploadPackedInputs(masks, values, batch_size);
     buffers.ClearOutputs(batch_size);
     auto executor = CreateNullCudaExecutorForSmoke();
-    executor->Execute(plan, buffers, batch_size);
+    NetworkResolvedExecutionPlan resolved_plan;
+    CudaWeightBuffers weights;
+    executor->Execute(plan, resolved_plan, weights, buffers, batch_size);
 
     result.allocation_bytes = buffers.AllocationBytes();
     const auto downloaded = buffers.DownloadOutputs(batch_size);
