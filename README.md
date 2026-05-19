@@ -69,8 +69,9 @@ position:
 | MetalFish MCTS | 20/24 | 24/24 | BT4 weights, one Apple MCTS worker |
 | Lc0 with BT4 weights | 17/24 | 24/24 | Metal backend, `Threads=8` in the strength run |
 
-Current hybrid-only sanity run on this branch, M2 Max, 2026-05-19, 5 seconds
-per position: `20/24` with `HybridABCandidateVerifyMs=120`.
+Current hybrid-only paper-harness sanity run on this branch, M2 Max,
+2026-05-19, 5 seconds per position: `21/24` with the updated 1 MCTS + 7 AB
+split and `HybridABCandidateVerifyMs=120`.
 
 A forced full-worker pure-MCTS stress run (`MCTSMaxThreads=8`) is not a
 strength profile for the current backend. It previously scored 12/24 and timed

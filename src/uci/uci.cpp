@@ -1017,13 +1017,9 @@ compute_hybrid_thread_split(Engine &engine,
   if (mcts_override > 0) {
     mcts_threads = std::clamp(mcts_override, 1, available);
   } else {
-    // Fixed-budget searches are usually tactical benchmarks or analysis
-    // probes; the BK sweep strongly favored two low-batch MCTS workers there.
-    // Game-clock searches keep one transformer worker and let AB use the rest,
-    // subject to the auto cap below.
-    mcts_threads = is_fixed_budget_hybrid_search(limits)
-                       ? std::min(2, std::max(1, available - 1))
-                       : 1;
+    // One transformer worker keeps the GPU side active while leaving the CPU
+    // search enough cores to finish tactical verification.
+    mcts_threads = 1;
   }
 
   int ab_threads = 0;
@@ -1031,7 +1027,7 @@ compute_hybrid_thread_split(Engine &engine,
     ab_threads = std::clamp(ab_override, 1, available);
   } else {
     if (is_fixed_budget_hybrid_search(limits)) {
-      ab_threads = 1;
+      ab_threads = std::max(1, available - mcts_threads);
     } else {
       const int effective_ab_cap =
           auto_ab_cap > 0 ? auto_ab_cap : auto_hybrid_ab_threads_cap(available);

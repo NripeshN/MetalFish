@@ -117,10 +117,10 @@ def main() -> int:
         {
             "Threads": "8",
             "Hash": "4096",
-            "HybridMCTSThreads": "2",
-            "HybridABThreads": "6",
+            "HybridMCTSThreads": "1",
+            "HybridABThreads": "7",
             "HybridAutoABThreadsCap": "0",
-            "MCTSMaxThreads": "2",
+            "MCTSMaxThreads": "1",
             "UseMCTS": "false",
             "UseHybridSearch": "true",
             "MultiPV": "1",

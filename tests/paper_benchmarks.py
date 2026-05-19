@@ -375,9 +375,9 @@ def apply_hybrid_env_options(options: Dict[str, str]) -> None:
 def hybrid_split_for_threads(threads: int) -> Tuple[int, int]:
     if threads <= 3:
         return 1, max(1, threads - 1)
-    # Keep the transformer side present while giving the CPU AB search most of
-    # the worker budget. On an 8-performance-core M2 Max this becomes 2 + 6.
-    mcts_threads = min(2, max(1, threads // 4))
+    # Keep the transformer side present while giving AB the CPU budget it needs
+    # for tactical verification. On an 8-performance-core M2 Max this is 1 + 7.
+    mcts_threads = 1
     return mcts_threads, max(1, threads - mcts_threads)
 
 
