@@ -1774,6 +1774,8 @@ Move ParallelHybridSearch::make_final_decision() {
     const ABRootLookup selected_ab = find_ab_root_move(selected);
     if (selected_ab.rank <= 0)
       return Move::none();
+    if (std::abs(selected_ab.average_score) > 1000)
+      return Move::none();
 
     std::vector<ABRootMoveInfo> root_moves;
     {
@@ -1794,6 +1796,8 @@ Move ParallelHybridSearch::make_final_decision() {
         continue;
       const MCTSRootLookup mcts_lookup = find_mcts_root_move(candidate.move);
       if (mcts_lookup.rank <= 0 || mcts_lookup.rank > 8)
+        continue;
+      if (mcts_lookup.current_visits < 8)
         continue;
       if (selected_ab.average_score - candidate.average_score > 40)
         continue;
