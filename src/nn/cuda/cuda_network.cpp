@@ -14,6 +14,8 @@
 #include "cuda_output_mapping.h"
 #include "cuda_runtime_probe.h"
 
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -29,6 +31,48 @@ namespace Cuda {
 namespace {
 
 constexpr int kDefaultMaxBatchSize = 256;
+
+bool IsFinitePolicy(const std::array<float, kPolicyOutputs> &policy) {
+  for (float value : policy) {
+    if (!std::isfinite(value))
+      return false;
+  }
+  return true;
+}
+
+bool IsValidCudaOutput(const NetworkOutput &output,
+                       const NetworkTensorPlan &plan) {
+  if (!std::isfinite(output.value) || !IsFinitePolicy(output.policy))
+    return false;
+
+  if (plan.wdl) {
+    if (!output.has_wdl)
+      return false;
+    const float wdl_sum = output.wdl[0] + output.wdl[1] + output.wdl[2];
+    for (float value : output.wdl) {
+      if (!std::isfinite(value))
+        return false;
+    }
+    if (wdl_sum < 0.5f || wdl_sum > 1.5f)
+      return false;
+  }
+
+  if (plan.moves_left) {
+    if (!output.has_moves_left || !std::isfinite(output.moves_left))
+      return false;
+  }
+
+  return true;
+}
+
+bool OutputsAreValid(const std::vector<NetworkOutput> &outputs,
+                     const NetworkTensorPlan &plan) {
+  for (const auto &output : outputs) {
+    if (!IsValidCudaOutput(output, plan))
+      return false;
+  }
+  return true;
+}
 
 } // namespace
 
@@ -142,25 +186,40 @@ CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
   std::vector<float> input_values;
   PackInputPlaneBatchHostRaw(input_plane_ptrs, input_masks, input_values);
 
-  std::lock_guard<std::mutex> lock(execution_mutex_);
-  const bool batch_size_changed = workspace_batch_size_ != batch_size;
-  if (workspace_batch_size_ != batch_size) {
-    workspace_.Release();
-    workspace_batch_size_ = batch_size;
-  }
-  cudaStream_t stream = workspace_.Stream();
-  if (batch_size_changed)
-    buffers_.ClearAll(stream);
-  buffers_.UploadPackedInputs(input_masks, input_values, batch_size, stream);
-  buffers_.ClearOutputs(batch_size, stream);
-  executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
-                     buffers_, workspace_, batch_size);
+  auto run_once = [&]() {
+    const bool batch_size_changed = workspace_batch_size_ != batch_size;
+    if (workspace_batch_size_ != batch_size) {
+      workspace_.Release();
+      workspace_batch_size_ = batch_size;
+    }
+    cudaStream_t stream = workspace_.Stream();
+    if (batch_size_changed)
+      buffers_.ClearAll(stream);
+    buffers_.UploadPackedInputs(input_masks, input_values, batch_size, stream);
+    buffers_.ClearOutputs(batch_size, stream);
+    executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
+                       buffers_, workspace_, batch_size);
 
-  const auto downloaded = buffers_.DownloadOutputs(batch_size, stream);
-  return DecodeNetworkOutputBatch(
-      tensor_plan_, downloaded.policy.data(), downloaded.policy.size(),
-      downloaded.value.data(), downloaded.value.size(),
-      downloaded.moves_left.data(), downloaded.moves_left.size(), batch_size);
+    const auto downloaded = buffers_.DownloadOutputs(batch_size, stream);
+    return DecodeNetworkOutputBatch(
+        tensor_plan_, downloaded.policy.data(), downloaded.policy.size(),
+        downloaded.value.data(), downloaded.value.size(),
+        downloaded.moves_left.data(), downloaded.moves_left.size(), batch_size);
+  };
+
+  std::lock_guard<std::mutex> lock(execution_mutex_);
+  auto outputs = run_once();
+  if (OutputsAreValid(outputs, tensor_plan_))
+    return outputs;
+
+  workspace_.Release();
+  workspace_batch_size_ = 0;
+  outputs = run_once();
+  if (OutputsAreValid(outputs, tensor_plan_))
+    return outputs;
+
+  throw std::runtime_error(
+      "CUDA transformer backend produced invalid network output");
 }
 
 std::string CudaNetwork::GetNetworkInfo() const {
