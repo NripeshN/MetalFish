@@ -90,11 +90,45 @@ def build_transformer_model(
     compute_unit: Any,
     seed: int,
 ) -> tuple[Any, dict[str, Any]]:
+    params = make_transformer_params(
+        np, channels, heads, ffn_channels, layers, activation, seed
+    )
+    head_dim = params["head_dim"]
+
+    @mb.program(
+        input_specs=[mb.TensorSpec(shape=(batch, tokens, channels), dtype=types.fp32)]
+    )
+    def program(x):  # type: ignore[no-untyped-def]
+        layer = x
+        for _ in range(layers):
+            layer = transformer_block_mb(
+                mb, np, layer, params, batch, tokens, channels, heads, head_dim, activation
+            )
+        return layer
+
+    model = ct.convert(
+        program,
+        convert_to="mlprogram",
+        minimum_deployment_target=ct.target.macOS14,
+        compute_units=compute_unit,
+    )
+    return model, params
+
+
+def make_transformer_params(
+    np: Any,
+    channels: int,
+    heads: int,
+    ffn_channels: int,
+    layers: int,
+    activation: str,
+    seed: int,
+) -> dict[str, Any]:
     if channels % heads != 0:
         raise RuntimeError("transformer channels must be divisible by heads")
     head_dim = channels // heads
     rng = np.random.default_rng(seed)
-    params: dict[str, Any] = {
+    return {
         "ln1_gamma": np.ones((channels,), dtype=np.float32),
         "ln1_beta": np.zeros((channels,), dtype=np.float32),
         "q_w": rng.normal(0.0, 0.02, size=(channels, channels)).astype(np.float32),
@@ -121,16 +155,77 @@ def build_transformer_model(
         "activation": activation,
     }
 
+
+def build_toy_network_model(
+    np: Any,
+    ct: Any,
+    mb: Any,
+    types: Any,
+    batch: int,
+    tokens: int,
+    input_channels: int,
+    channels: int,
+    heads: int,
+    ffn_channels: int,
+    layers: int,
+    activation: str,
+    policy_channels: int,
+    value_outputs: int,
+    compute_unit: Any,
+    seed: int,
+) -> tuple[Any, dict[str, Any]]:
+    rng = np.random.default_rng(seed)
+    params = make_transformer_params(
+        np, channels, heads, ffn_channels, layers, activation, seed + 100
+    )
+    params.update(
+        {
+            "embed_w": rng.normal(0.0, 0.02, size=(channels, input_channels)).astype(
+                np.float32
+            ),
+            "embed_b": np.zeros((channels,), dtype=np.float32),
+            "policy_w": rng.normal(
+                0.0, 0.02, size=(policy_channels, channels)
+            ).astype(np.float32),
+            "policy_b": np.zeros((policy_channels,), dtype=np.float32),
+            "value_w": rng.normal(0.0, 0.02, size=(value_outputs, channels)).astype(
+                np.float32
+            ),
+            "value_b": np.zeros((value_outputs,), dtype=np.float32),
+            "input_channels": input_channels,
+            "policy_channels": policy_channels,
+            "value_outputs": value_outputs,
+        }
+    )
+    head_dim = params["head_dim"]
+
     @mb.program(
-        input_specs=[mb.TensorSpec(shape=(batch, tokens, channels), dtype=types.fp32)]
+        input_specs=[
+            mb.TensorSpec(shape=(batch, tokens, input_channels), dtype=types.fp32)
+        ]
     )
     def program(x):  # type: ignore[no-untyped-def]
-        layer = x
+        layer = mb.linear(
+            x=x,
+            weight=mb.const(val=params["embed_w"]),
+            bias=mb.const(val=params["embed_b"]),
+        )
         for _ in range(layers):
             layer = transformer_block_mb(
                 mb, np, layer, params, batch, tokens, channels, heads, head_dim, activation
             )
-        return layer
+        policy = mb.linear(
+            x=layer,
+            weight=mb.const(val=params["policy_w"]),
+            bias=mb.const(val=params["policy_b"]),
+        )
+        pooled = mb.reduce_mean(x=layer, axes=[1], keep_dims=False)
+        value = mb.linear(
+            x=pooled,
+            weight=mb.const(val=params["value_w"]),
+            bias=mb.const(val=params["value_b"]),
+        )
+        return policy, value
 
     model = ct.convert(
         program,
@@ -306,6 +401,15 @@ def transformer_numpy_once(np: Any, sample: Any, params: dict[str, Any]) -> Any:
     return layer
 
 
+def toy_network_numpy_once(np: Any, sample: Any, params: dict[str, Any]) -> tuple[Any, Any]:
+    layer = sample @ params["embed_w"].T + params["embed_b"]
+    layer = transformer_numpy_once(np, layer, params)
+    policy = layer @ params["policy_w"].T + params["policy_b"]
+    pooled = np.mean(layer, axis=1)
+    value = pooled @ params["value_w"].T + params["value_b"]
+    return policy, value
+
+
 def benchmark_numpy_transformer(
     np: Any,
     sample: Any,
@@ -332,6 +436,32 @@ def benchmark_numpy_transformer(
     }
 
 
+def benchmark_numpy_toy_network(
+    np: Any,
+    sample: Any,
+    params: dict[str, Any],
+    warmup: int,
+    iterations: int,
+) -> dict[str, Any]:
+    for _ in range(warmup):
+        toy_network_numpy_once(np, sample, params)
+
+    latencies_ms: list[float] = []
+    for _ in range(iterations):
+        start = time.perf_counter()
+        toy_network_numpy_once(np, sample, params)
+        latencies_ms.append((time.perf_counter() - start) * 1000.0)
+
+    return {
+        "iterations": iterations,
+        "median_ms": statistics.median(latencies_ms),
+        "mean_ms": statistics.fmean(latencies_ms),
+        "p90_ms": percentile(latencies_ms, 0.90),
+        "min_ms": min(latencies_ms),
+        "max_ms": max(latencies_ms),
+    }
+
+
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     np, ct, mb, types = load_coremltools()
     compute_unit = compute_unit_from_name(ct, args.compute_unit)
@@ -342,9 +472,13 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         sample = np.random.default_rng(args.seed + 1).normal(
             0.0, 1.0, size=(args.batch, args.inputs)
         ).astype(np.float32)
-    else:
+    elif args.model == "transformer":
         sample = np.random.default_rng(args.seed + 1).normal(
             0.0, 1.0, size=(args.batch, args.tokens, args.channels)
+        ).astype(np.float32)
+    else:
+        sample = np.random.default_rng(args.seed + 1).normal(
+            0.0, 1.0, size=(args.batch, args.tokens, args.input_channels)
         ).astype(np.float32)
 
     build_start = time.perf_counter()
@@ -363,7 +497,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         numpy_result = benchmark_numpy(
             np, sample, weight, bias, args.warmup, args.iterations
         )
-    else:
+    elif args.model == "transformer":
         model, params = build_transformer_model(
             np,
             ct,
@@ -380,6 +514,28 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             args.seed,
         )
         numpy_result = benchmark_numpy_transformer(
+            np, sample, params, args.warmup, args.iterations
+        )
+    else:
+        model, params = build_toy_network_model(
+            np,
+            ct,
+            mb,
+            types,
+            args.batch,
+            args.tokens,
+            args.input_channels,
+            args.channels,
+            args.heads,
+            args.channels * args.ffn_mult,
+            args.layers,
+            args.activation,
+            args.policy_channels,
+            args.value_outputs,
+            compute_unit,
+            args.seed,
+        )
+        numpy_result = benchmark_numpy_toy_network(
             np, sample, params, args.warmup, args.iterations
         )
     build_ms = (time.perf_counter() - build_start) * 1000.0
@@ -399,11 +555,14 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         "inputs": args.inputs,
         "outputs": args.outputs,
         "tokens": args.tokens,
+        "input_channels": args.input_channels,
         "channels": args.channels,
         "heads": args.heads,
         "ffn_mult": args.ffn_mult,
         "layers": args.layers,
         "activation": args.activation,
+        "policy_channels": args.policy_channels,
+        "value_outputs": args.value_outputs,
         "compute_unit": args.compute_unit,
         "build_ms": build_ms,
         "model_package": package_path if args.save_model else "",
@@ -420,11 +579,21 @@ def print_human(result: dict[str, Any]) -> None:
             f"  Shape:        batch={result['batch']} "
             f"inputs={result['inputs']} outputs={result['outputs']}"
         )
-    else:
+    elif result["model"] == "transformer":
         print(
             f"  Shape:        batch={result['batch']} tokens={result['tokens']} "
             f"channels={result['channels']} heads={result['heads']} "
             f"ffn_mult={result['ffn_mult']} layers={result['layers']} "
+            f"activation={result['activation']}"
+        )
+    else:
+        print(
+            f"  Shape:        batch={result['batch']} tokens={result['tokens']} "
+            f"input_channels={result['input_channels']} "
+            f"channels={result['channels']} heads={result['heads']} "
+            f"ffn_mult={result['ffn_mult']} layers={result['layers']} "
+            f"policy_channels={result['policy_channels']} "
+            f"value_outputs={result['value_outputs']} "
             f"activation={result['activation']}"
         )
     print(f"  Compute unit: {result['compute_unit']}")
@@ -451,16 +620,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Benchmark Core ML kernels for Apple accelerator experiments."
     )
-    parser.add_argument("--model", choices=["dense", "transformer"], default="dense")
+    parser.add_argument(
+        "--model", choices=["dense", "transformer", "toy-network"], default="dense"
+    )
     parser.add_argument("--batch", type=int, default=1)
     parser.add_argument("--inputs", type=int, default=32)
     parser.add_argument("--outputs", type=int, default=16)
     parser.add_argument("--tokens", type=int, default=64)
+    parser.add_argument("--input-channels", type=int, default=112)
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--ffn-mult", type=int, default=4)
     parser.add_argument("--layers", type=int, default=1)
     parser.add_argument("--activation", choices=["gelu", "swish"], default="gelu")
+    parser.add_argument("--policy-channels", type=int, default=32)
+    parser.add_argument("--value-outputs", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--iterations", type=int, default=100)
     parser.add_argument("--seed", type=int, default=1)

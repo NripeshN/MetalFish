@@ -20,8 +20,12 @@ def test_render_source_substitutes_shape() -> None:
         [
             "--batch",
             "2",
+            "--model",
+            "toy-network",
             "--tokens",
             "64",
+            "--input-channels",
+            "112",
             "--channels",
             "128",
             "--heads",
@@ -29,6 +33,10 @@ def test_render_source_substitutes_shape() -> None:
             "--ffn-mult",
             "4",
             "--layers",
+            "3",
+            "--policy-channels",
+            "48",
+            "--value-outputs",
             "3",
             "--warmup",
             "3",
@@ -40,10 +48,19 @@ def test_render_source_substitutes_shape() -> None:
     source = bench.render_source(args)
 
     expect("batch substituted", "constexpr NSUInteger batch = 2;" in source)
+    expect("toy flag substituted", "constexpr bool toyNetwork = true;" in source)
+    expect(
+        "input channels substituted",
+        "constexpr NSUInteger inputChannels = 112;" in source,
+    )
     expect("channels substituted", "constexpr NSUInteger channels = 128;" in source)
     expect("heads substituted", "constexpr NSUInteger heads = 8;" in source)
     expect("ffn substituted", "constexpr NSUInteger ffnChannels = 512;" in source)
     expect("layers substituted", "constexpr NSUInteger layers = 3;" in source)
+    expect(
+        "policy channels substituted",
+        "constexpr NSUInteger policyChannels = 48;" in source,
+    )
 
 
 def test_render_source_rejects_non_64_tokens() -> None:
@@ -79,11 +96,23 @@ def test_render_source_rejects_zero_layers() -> None:
         raise AssertionError("zero layers should fail")
 
 
+def test_render_source_rejects_bad_output_head_shape() -> None:
+    args = bench.parse_args(["--model", "toy-network", "--policy-channels", "0"])
+
+    try:
+        bench.render_source(args)
+    except ValueError as exc:
+        expect("mentions policy channels", "policy-channels" in str(exc))
+    else:
+        raise AssertionError("zero policy channels should fail")
+
+
 def main() -> int:
     test_render_source_substitutes_shape()
     test_render_source_rejects_non_64_tokens()
     test_render_source_rejects_bad_heads()
     test_render_source_rejects_zero_layers()
+    test_render_source_rejects_bad_output_head_shape()
     print("Apple MPSGraph transformer bench tests: OK")
     return 0
 

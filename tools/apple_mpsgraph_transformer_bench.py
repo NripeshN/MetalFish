@@ -55,12 +55,17 @@ int main() {
   @autoreleasepool {
     constexpr NSUInteger batch = __BATCH__;
     constexpr NSUInteger tokens = 64;
+    constexpr bool toyNetwork = __TOY_NETWORK__;
+    constexpr NSUInteger inputChannels = __INPUT_CHANNELS__;
     constexpr NSUInteger channels = __CHANNELS__;
     constexpr NSUInteger heads = __HEADS__;
     constexpr NSUInteger ffnChannels = __FFN_CHANNELS__;
     constexpr NSUInteger layers = __LAYERS__;
+    constexpr NSUInteger policyChannels = __POLICY_CHANNELS__;
+    constexpr NSUInteger valueOutputs = __VALUE_OUTPUTS__;
     constexpr int warmup = __WARMUP__;
     constexpr int iterations = __ITERATIONS__;
+    const NSUInteger inputFeatureChannels = toyNetwork ? inputChannels : channels;
 
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (device == nil) {
@@ -70,10 +75,12 @@ int main() {
 
     MetalNetworkGraph *graph = [[MetalNetworkGraph alloc] initWithDevice:device];
     MPSGraphTensor *input =
-        [graph placeholderWithShape:@[ @(batch), @(tokens), @(channels) ]
+        [graph placeholderWithShape:@[ @(batch), @(tokens), @(inputFeatureChannels) ]
                             dataType:MPSDataTypeFloat32
                                 name:@"input"];
 
+    auto embedW = RandomVector(channels * inputChannels, 0.02f, 10);
+    auto embedB = FillVector(channels, 0.0f);
     auto ln1Gamma = FillVector(channels, 1.0f);
     auto ln1Beta = FillVector(channels, 0.0f);
     auto ln2Gamma = FillVector(channels, 1.0f);
@@ -90,8 +97,20 @@ int main() {
     auto ffn1B = FillVector(ffnChannels, 0.0f);
     auto ffn2W = RandomVector(channels * ffnChannels, 0.02f, 16);
     auto ffn2B = FillVector(channels, 0.0f);
+    auto policyW = RandomVector(policyChannels * channels, 0.02f, 17);
+    auto policyB = FillVector(policyChannels, 0.0f);
+    auto valueW = RandomVector(valueOutputs * channels, 0.02f, 18);
+    auto valueB = FillVector(valueOutputs, 0.0f);
 
     MPSGraphTensor *layer = input;
+    if (toyNetwork) {
+      layer = [graph addFullyConnectedLayerWithParent:layer
+                                       outputChannels:channels
+                                              weights:embedW.data()
+                                               biases:embedB.data()
+                                           activation:nil
+                                                label:@"embedding"];
+    }
     for (NSUInteger layerIdx = 0; layerIdx < layers; ++layerIdx) {
       NSString *prefix =
           [NSString stringWithFormat:@"layer_%lu", (unsigned long)layerIdx];
@@ -168,11 +187,33 @@ int main() {
                                secondaryTensor:ffn
                                           name:[prefix stringByAppendingString:@"/output"]];
     }
-    MPSGraphTensor *output = layer;
+    NSArray *targets;
+    if (toyNetwork) {
+      MPSGraphTensor *policy =
+          [graph addFullyConnectedLayerWithParent:layer
+                                   outputChannels:policyChannels
+                                          weights:policyW.data()
+                                           biases:policyB.data()
+                                       activation:nil
+                                            label:@"policy"];
+      MPSGraphTensor *pooled =
+          [graph meanOfTensor:layer axes:@[ @1 ] name:@"value/pool"];
+      MPSGraphTensor *value =
+          [graph addFullyConnectedLayerWithParent:pooled
+                                   outputChannels:valueOutputs
+                                          weights:valueW.data()
+                                           biases:valueB.data()
+                                       activation:nil
+                                            label:@"value"];
+      targets = @[ policy, value ];
+    } else {
+      targets = @[ layer ];
+    }
 
     MPSGraphDevice *graphDevice = [MPSGraphDevice deviceWithMTLDevice:device];
     id<MTLCommandQueue> queue = [device newCommandQueue];
-    auto inputValues = RandomVector(batch * tokens * channels, 1.0f, 21);
+    auto inputValues =
+        RandomVector(batch * tokens * inputFeatureChannels, 1.0f, 21);
     NSData *inputData =
         [NSData dataWithBytesNoCopy:inputValues.data()
                               length:inputValues.size() * sizeof(float)
@@ -180,10 +221,9 @@ int main() {
     MPSGraphTensorData *inputTensorData =
         [[MPSGraphTensorData alloc] initWithDevice:graphDevice
                                               data:inputData
-                                             shape:@[ @(batch), @(tokens), @(channels) ]
+                                             shape:@[ @(batch), @(tokens), @(inputFeatureChannels) ]
                                           dataType:MPSDataTypeFloat32];
     NSDictionary *feeds = @{input : inputTensorData};
-    NSArray *targets = @[ output ];
 
     auto runOnce = [&]() {
       MPSCommandBuffer *commandBuffer =
@@ -231,12 +271,16 @@ int main() {
         latencies.empty() ? 0.0 : *std::max_element(latencies.begin(), latencies.end());
 
     std::cout << "{"
+              << "\"model\":\"" << (toyNetwork ? "toy-network" : "transformer") << "\","
               << "\"batch\":" << batch << ","
               << "\"tokens\":" << tokens << ","
+              << "\"input_channels\":" << inputChannels << ","
               << "\"channels\":" << channels << ","
               << "\"heads\":" << heads << ","
               << "\"ffn_channels\":" << ffnChannels << ","
               << "\"layers\":" << layers << ","
+              << "\"policy_channels\":" << policyChannels << ","
+              << "\"value_outputs\":" << valueOutputs << ","
               << "\"iterations\":" << iterations << ","
               << "\"median_ms\":" << median << ","
               << "\"mean_ms\":" << mean << ","
@@ -267,12 +311,22 @@ def render_source(args: argparse.Namespace) -> str:
         raise ValueError("--channels must be divisible by --heads")
     if args.layers < 1:
         raise ValueError("--layers must be at least 1")
+    if args.input_channels < 1:
+        raise ValueError("--input-channels must be at least 1")
+    if args.policy_channels < 1:
+        raise ValueError("--policy-channels must be at least 1")
+    if args.value_outputs < 1:
+        raise ValueError("--value-outputs must be at least 1")
     return (
         SOURCE_TEMPLATE.replace("__BATCH__", str(args.batch))
+        .replace("__TOY_NETWORK__", "true" if args.model == "toy-network" else "false")
+        .replace("__INPUT_CHANNELS__", str(args.input_channels))
         .replace("__CHANNELS__", str(args.channels))
         .replace("__HEADS__", str(args.heads))
         .replace("__FFN_CHANNELS__", str(args.channels * args.ffn_mult))
         .replace("__LAYERS__", str(args.layers))
+        .replace("__POLICY_CHANNELS__", str(args.policy_channels))
+        .replace("__VALUE_OUTPUTS__", str(args.value_outputs))
         .replace("__WARMUP__", str(args.warmup))
         .replace("__ITERATIONS__", str(args.iterations))
     )
@@ -317,12 +371,15 @@ def compile_benchmark(source: Path, output: Path) -> subprocess.CompletedProcess
     )
 
 
-def print_human(result: dict[str, float | int]) -> None:
+def print_human(result: dict[str, object]) -> None:
     print("MetalFish MPSGraph transformer microbenchmark")
     print(
-        f"  Shape:  batch={result['batch']} tokens={result['tokens']} "
-        f"channels={result['channels']} heads={result['heads']} "
-        f"ffn={result['ffn_channels']} layers={result['layers']}"
+        f"  Shape:  model={result.get('model', 'transformer')} "
+        f"batch={result['batch']} tokens={result['tokens']} "
+        f"input_channels={result['input_channels']} channels={result['channels']} "
+        f"heads={result['heads']} ffn={result['ffn_channels']} "
+        f"layers={result['layers']} policy_channels={result['policy_channels']} "
+        f"value_outputs={result['value_outputs']}"
     )
     print(
         "  MPSGraph: "
@@ -334,14 +391,20 @@ def print_human(result: dict[str, float | int]) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Benchmark a one-block transformer shape on MPSGraph."
+        description="Benchmark transformer-shaped MPSGraph kernels."
+    )
+    parser.add_argument(
+        "--model", choices=["transformer", "toy-network"], default="transformer"
     )
     parser.add_argument("--batch", type=int, default=1)
     parser.add_argument("--tokens", type=int, default=64)
+    parser.add_argument("--input-channels", type=int, default=112)
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--ffn-mult", type=int, default=4)
     parser.add_argument("--layers", type=int, default=1)
+    parser.add_argument("--policy-channels", type=int, default=32)
+    parser.add_argument("--value-outputs", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--json", action="store_true")

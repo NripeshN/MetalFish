@@ -94,6 +94,22 @@ Stacked swish transformer checks:
 | layers=2, batch=1, tokens=64, channels=1024, heads=32, ffn=4x | Core ML cpu-ne | 2.5622 ms |
 | layers=2, batch=1, tokens=64, channels=1024, heads=32, ffn=4x | MPSGraph | 1.5283 ms |
 
+Toy whole-network checks include an input embedding, repeated transformer
+blocks, a per-token policy projection, and a pooled value projection. These are
+still synthetic weights, but they measure more of the inference shape than a
+naked transformer block.
+
+| Shape | Backend | Median |
+| --- | --- | ---: |
+| batch=1, layers=2, tokens=64, input=112, channels=128, heads=8, ffn=4x, policy=32, value=3 | Core ML cpu-ne | 0.3709 ms |
+| batch=1, layers=2, tokens=64, input=112, channels=128, heads=8, ffn=4x, policy=32, value=3 | MPSGraph | 1.8700 ms |
+| batch=1, layers=2, tokens=64, input=112, channels=512, heads=16, ffn=4x, policy=32, value=3 | Core ML cpu-ne | 0.8872 ms |
+| batch=1, layers=2, tokens=64, input=112, channels=512, heads=16, ffn=4x, policy=32, value=3 | MPSGraph | 0.9370 ms |
+| batch=1, layers=2, tokens=64, input=112, channels=1024, heads=32, ffn=4x, policy=32, value=3 | Core ML cpu-ne | 1.3202 ms |
+| batch=1, layers=2, tokens=64, input=112, channels=1024, heads=32, ffn=4x, policy=32, value=3 | MPSGraph | 1.3323 ms |
+| batch=8, layers=2, tokens=64, input=112, channels=128, heads=8, ffn=4x, policy=32, value=3 | Core ML cpu-ne | 0.5468 ms |
+| batch=8, layers=2, tokens=64, input=112, channels=128, heads=8, ffn=4x, policy=32, value=3 | MPSGraph | 0.7958 ms |
+
 ## Decision
 
 Do not move AB NNUE inference to Core ML/ANE based on these measurements. The
@@ -107,8 +123,12 @@ current data; `cpu`, `all`, and `cpu-gpu` do not justify integration work.
 This is still not enough evidence to replace Metal/MPSGraph in the engine. The
 single-block and stacked swish data says Core ML `cpu-ne` can beat the current
 helper-style MPSGraph block at 128-512 channels, but MPSGraph wins on the
-2-layer 1024-channel shape closest to BT4 width. A whole-network BT4 Core ML
-replacement is therefore not justified yet.
+2-layer 1024-channel block shape closest to BT4 width. The toy whole-network
+checks narrow that gap, with Core ML winning small shapes and landing at rough
+parity for the 1024-channel, 2-layer synthetic network. That is promising for
+small side networks, but it is still not a production replacement signal for
+BT4: the real network is 15 layers, has real policy/value heads, uses engine
+input packing, and depends on batching/caching behavior.
 
 The next useful experiment is narrower: test whether Core ML can accelerate
 only small transformer side modules or low-channel experimental networks. Do

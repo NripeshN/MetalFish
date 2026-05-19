@@ -54,6 +54,40 @@ def test_parse_transformer_args() -> None:
     expect("compute unit parsed", args.compute_unit == "cpu-ne")
 
 
+def test_parse_toy_network_args() -> None:
+    args = microbench.parse_args(
+        [
+            "--model",
+            "toy-network",
+            "--batch",
+            "2",
+            "--tokens",
+            "64",
+            "--input-channels",
+            "112",
+            "--channels",
+            "256",
+            "--heads",
+            "8",
+            "--ffn-mult",
+            "2",
+            "--layers",
+            "3",
+            "--policy-channels",
+            "32",
+            "--value-outputs",
+            "3",
+        ]
+    )
+
+    expect("toy model parsed", args.model == "toy-network")
+    expect("input channels parsed", args.input_channels == 112)
+    expect("channels parsed", args.channels == 256)
+    expect("layers parsed", args.layers == 3)
+    expect("policy channels parsed", args.policy_channels == 32)
+    expect("value outputs parsed", args.value_outputs == 3)
+
+
 def test_compute_unit_mapping_uses_expected_names() -> None:
     fake_ct = types.SimpleNamespace(
         ComputeUnit=types.SimpleNamespace(
@@ -71,6 +105,7 @@ def test_compute_unit_mapping_uses_expected_names() -> None:
 def main() -> int:
     test_percentile_uses_sorted_values()
     test_parse_transformer_args()
+    test_parse_toy_network_args()
     test_compute_unit_mapping_uses_expected_names()
     print("Apple Core ML microbench tests: OK")
     return 0
