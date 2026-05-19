@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `afbc6225-d888-49e1-9893-4475de632ebe` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `1fc268b2-fb4f-4aaf-bc68-3e6b29b41a42` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `b5ca0673-3dd8-408f-87af-96f6f85076f0` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `ab8a64c1-7d33-45b4-be65-b8390b07bfe9` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -125,7 +125,9 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_output_mapping.*` maps named executed CUDA stages to
   policy, value, moves-left, and raw-policy output buffers. This keeps output
   ownership explicit instead of treating the last executed stage as every
-  output tensor.
+  output tensor. Output sources are selected from compatible scheduled head
+  stages by target width, so the smoke and production paths do not depend on
+  one fixed CUDA stage name per head.
 - `CreatePlanSmokeCudaExecutor()` runs a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without
   enabling production CUDA inference prematurely. Its smoke coverage includes

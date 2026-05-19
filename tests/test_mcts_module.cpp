@@ -896,6 +896,28 @@ void test_cuda_output_mapping(TestCounter &tc) {
   expect(mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
          "CUDA output mapping should bind raw policy scratch source", tc);
 
+  NN::NetworkResolvedExecutionPlan renamed = plan;
+  renamed.steps[0].name = "policy.smoke.primary_logits";
+  renamed.steps[1].name = "value.smoke.wdl_logits";
+  renamed.steps[2].name = "moves_left.final_logits";
+  const auto renamed_mapping = NN::Cuda::CreateCudaOutputMapping(
+      tensor_plan, renamed, NN::Cuda::CreateCudaExecutionSchedule(renamed),
+      options);
+  expect(renamed_mapping.ok(),
+         "CUDA output mapping should derive sources from head prefixes", tc);
+  expect(renamed_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
+             renamed_mapping.Find(NN::Cuda::CudaOutputTarget::Policy)
+                     ->source_stage == "policy.smoke.primary_logits",
+         "CUDA output mapping should bind renamed policy source", tc);
+  expect(renamed_mapping.Find(NN::Cuda::CudaOutputTarget::Value) &&
+             renamed_mapping.Find(NN::Cuda::CudaOutputTarget::Value)
+                     ->source_stage == "value.smoke.wdl_logits",
+         "CUDA output mapping should bind renamed value source", tc);
+  expect(renamed_mapping.Find(NN::Cuda::CudaOutputTarget::MovesLeft) &&
+             renamed_mapping.Find(NN::Cuda::CudaOutputTarget::MovesLeft)
+                     ->source_stage == "moves_left.final_logits",
+         "CUDA output mapping should bind renamed moves-left source", tc);
+
   const auto no_body_inputs =
       NN::Cuda::CreateCudaStageInputBindings(plan, schedule);
   expect(no_body_inputs.Size() == 0,
@@ -976,6 +998,27 @@ void test_cuda_output_mapping(TestCounter &tc) {
                  "body.smoke.dense",
          "CUDA stage input derivation should branch moves-left from body", tc);
 
+  NN::NetworkResolvedExecutionPlan value_with_error = plan;
+  value_with_error.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense,
+      "value.smoke.error",
+      {
+          {10, "value.smoke.ip_val_err_w", 3, {3, 3},
+           NN::NetworkWeightTensorKind::DenseWeight},
+          {11, "value.smoke.ip_val_err_b", 3, {3},
+           NN::NetworkWeightTensorKind::DenseBias},
+      }});
+  const auto value_with_error_mapping = NN::Cuda::CreateCudaOutputMapping(
+      tensor_plan, value_with_error,
+      NN::Cuda::CreateCudaExecutionSchedule(value_with_error), options);
+  expect(value_with_error_mapping.ok(),
+         "CUDA output mapping should ignore value error heads", tc);
+  expect(value_with_error_mapping.Find(NN::Cuda::CudaOutputTarget::Value) &&
+             value_with_error_mapping.Find(NN::Cuda::CudaOutputTarget::Value)
+                     ->source_stage == "value.smoke.dense2",
+         "CUDA output mapping should keep primary value source before error",
+         tc);
+
   NN::NetworkResolvedExecutionPlan missing_value = plan;
   missing_value.steps.erase(missing_value.steps.begin() + 1);
   const auto incomplete = NN::Cuda::CreateCudaOutputMapping(
@@ -983,8 +1026,7 @@ void test_cuda_output_mapping(TestCounter &tc) {
       NN::Cuda::CreateCudaExecutionSchedule(missing_value), options);
   expect(!incomplete.ok(),
          "CUDA output mapping should reject missing value output", tc);
-  expect(incomplete.Summary().find("value.smoke.dense2") !=
-             std::string::npos,
+  expect(incomplete.Summary().find("value") != std::string::npos,
          "CUDA output mapping summary should name missing value source", tc);
 }
 

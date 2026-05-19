@@ -23,6 +23,16 @@ bool IsDenseStage(CudaExecutionScheduleKind kind) {
          kind == CudaExecutionScheduleKind::DenseLayerNormStage;
 }
 
+bool StartsWith(std::string_view value, std::string_view prefix) {
+  return value.size() >= prefix.size() &&
+         value.substr(0, prefix.size()) == prefix;
+}
+
+bool EndsWith(std::string_view value, std::string_view suffix) {
+  return value.size() >= suffix.size() &&
+         value.substr(value.size() - suffix.size()) == suffix;
+}
+
 const CudaExecutionScheduleEntry *
 FindStageEntry(const NetworkResolvedExecutionPlan &execution_plan,
                const CudaExecutionSchedule &schedule,
@@ -93,6 +103,46 @@ bool AllowsPartialRows(CudaOutputTarget target,
   return false;
 }
 
+bool StageWidthFitsTarget(int source_width, int target_stride,
+                          CudaOutputTarget target,
+                          const CudaOutputMappingOptions &options) {
+  if (target_stride <= 0 || source_width <= 0)
+    return false;
+  if (source_width > target_stride)
+    return false;
+  return AllowsPartialRows(target, options) || source_width == target_stride;
+}
+
+std::string SelectCompatibleStage(
+    const NetworkTensorPlan &tensor_plan,
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaExecutionSchedule &schedule,
+    const CudaOutputMappingOptions &options, CudaOutputTarget target,
+    std::string_view prefix, bool first_match) {
+  const int target_stride = TargetStride(tensor_plan, target);
+  std::string selected;
+  for (const auto &entry : schedule.entries) {
+    if (!IsDenseStage(entry.kind) ||
+        entry.first_step >= execution_plan.steps.size()) {
+      continue;
+    }
+    const auto &step = execution_plan.steps[entry.first_step];
+    if (!StartsWith(step.name, prefix))
+      continue;
+    if (target == CudaOutputTarget::Value && EndsWith(step.name, ".error"))
+      continue;
+
+    const int source_width = DenseStageWidth(execution_plan, entry);
+    if (!StageWidthFitsTarget(source_width, target_stride, target, options))
+      continue;
+
+    selected = step.name;
+    if (first_match)
+      break;
+  }
+  return selected;
+}
+
 void AddError(CudaOutputMapping &mapping, const std::string &error) {
   mapping.errors.push_back(error);
 }
@@ -108,6 +158,14 @@ void AddBinding(CudaOutputMapping &mapping,
   if (target_stride == 0) {
     if (required)
       AddError(mapping, CudaOutputTargetName(target) + " output is disabled");
+    return;
+  }
+
+  if (source_stage.empty()) {
+    if (required) {
+      AddError(mapping, "missing CUDA output source for " +
+                            CudaOutputTargetName(target));
+    }
     return;
   }
 
@@ -137,12 +195,12 @@ void AddBinding(CudaOutputMapping &mapping,
       CudaOutputBinding{target, source_stage, source_width, target_stride});
 }
 
-std::string PolicySourceName(const NetworkResolvedExecutionPlan &plan) {
-  return "policy." + plan.policy_head + ".output";
+std::string PolicyPrefix(const NetworkResolvedExecutionPlan &plan) {
+  return "policy." + plan.policy_head + ".";
 }
 
-std::string ValueSourceName(const NetworkResolvedExecutionPlan &plan) {
-  return "value." + plan.value_head + ".dense2";
+std::string ValuePrefix(const NetworkResolvedExecutionPlan &plan) {
+  return "value." + plan.value_head + ".";
 }
 
 } // namespace
@@ -193,14 +251,22 @@ CudaOutputMapping CreateCudaOutputMapping(
     return mapping;
   }
 
-  const std::string policy_source = PolicySourceName(execution_plan);
+  const std::string policy_source = SelectCompatibleStage(
+      tensor_plan, execution_plan, schedule, options, CudaOutputTarget::Policy,
+      PolicyPrefix(execution_plan), true);
+  const std::string value_source = SelectCompatibleStage(
+      tensor_plan, execution_plan, schedule, options, CudaOutputTarget::Value,
+      ValuePrefix(execution_plan), false);
   AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
              CudaOutputTarget::Policy, policy_source, true);
   AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
-             CudaOutputTarget::Value, ValueSourceName(execution_plan), true);
+             CudaOutputTarget::Value, value_source, true);
   if (tensor_plan.moves_left) {
+    const std::string moves_left_source = SelectCompatibleStage(
+        tensor_plan, execution_plan, schedule, options,
+        CudaOutputTarget::MovesLeft, "moves_left.", false);
     AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
-               CudaOutputTarget::MovesLeft, "moves_left.output", true);
+               CudaOutputTarget::MovesLeft, moves_left_source, true);
   }
   if (tensor_plan.raw_policy_outputs > 0) {
     AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
