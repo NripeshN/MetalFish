@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `da6f4c8a-9d78-4cdc-8958-fe47ceeb4d63` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `4cb94fb0-1b5d-434c-b54b-29ec8b7dd18e` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `7c1e70ba-f7ff-42a7-bbd1-5137039d8067` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
