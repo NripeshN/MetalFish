@@ -85,15 +85,17 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `754df8ff-1d1b-4a38-9bd7-b3ec146ebe02` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `daa18d91-69e2-4b9d-9e83-91a3a74b20fa` |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26067973825` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `69ff9a93-0916-47f9-b8c6-278269406c85` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `e152e4f6-6c12-45d7-bd98-4116b2b5af3a` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26069157516` |
 
 Current CUDA backend boundary:
 
 - `src/nn/cuda/cuda_executor.*` is the inference execution seam.
-- `src/nn/network_execution_plan.*` builds the shared ordered tensor/stage plan
-  that CUDA and future portable backends will execute.
+- `src/nn/network_execution_plan.*` builds the shared ordered and resolved
+  tensor/stage plan that CUDA and future portable backends will execute.
+- The CUDA executor seam receives the resolved plan and uploaded weight buffers,
+  so real kernels can index device tensors without backend-local name lookups.
 - Production CUDA still installs a missing executor and refuses real inference.
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength
