@@ -264,34 +264,6 @@ __global__ void ResidualAddKernel(const float *parent, const float *secondary,
   output[index] = parent[index] + secondary[index] * secondary_scale;
 }
 
-__global__ void AttentionScoreKernel(const float *query, const float *key,
-                                     float *scores, int heads, int squares,
-                                     int head_depth, int qkv_width,
-                                     float scale, int total) {
-  const int index = blockIdx.x * blockDim.x + threadIdx.x;
-  if (index >= total)
-    return;
-
-  const int key_square = index % squares;
-  const int query_square = (index / squares) % squares;
-  const int head = (index / (squares * squares)) % heads;
-  const int batch = index / (heads * squares * squares);
-  const int head_offset = head * head_depth;
-  const float *query_row =
-      query + (static_cast<std::size_t>(batch) * squares + query_square) *
-                  qkv_width +
-      head_offset;
-  const float *key_row =
-      key + (static_cast<std::size_t>(batch) * squares + key_square) *
-                qkv_width +
-      head_offset;
-
-  float dot = 0.0f;
-  for (int i = 0; i < head_depth; ++i)
-    dot += query_row[i] * key_row[i];
-  scores[index] = dot * scale;
-}
-
 __global__ void AttentionBiasAddKernel(float *scores, const float *bias,
                                        int total) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -340,33 +312,6 @@ __global__ void AttentionSoftmaxKernel(const float *scores,
 
   for (int col = threadIdx.x; col < width; col += blockDim.x)
     probability_row[col] = sum > 0.0f ? probability_row[col] / sum : 0.0f;
-}
-
-__global__ void AttentionContextKernel(const float *probabilities,
-                                       const float *value, float *context,
-                                       int heads, int squares, int head_depth,
-                                       int qkv_width, int total) {
-  const int index = blockIdx.x * blockDim.x + threadIdx.x;
-  if (index >= total)
-    return;
-
-  const int column = index % qkv_width;
-  const int query_square = (index / qkv_width) % squares;
-  const int batch = index / (squares * qkv_width);
-  const int head = column / head_depth;
-  const int probability_row =
-      ((batch * heads + head) * squares + query_square) * squares;
-
-  float sum = 0.0f;
-  for (int key_square = 0; key_square < squares; ++key_square) {
-    const float probability = probabilities[probability_row + key_square];
-    const float value_cell =
-        value[(static_cast<std::size_t>(batch) * squares + key_square) *
-                  qkv_width +
-              column];
-    sum += probability * value_cell;
-  }
-  context[index] = sum;
 }
 
 __device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
@@ -651,18 +596,37 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
     throw std::runtime_error("CUDA attention score dimensions are invalid");
   }
 
-  const int total = batch_size * heads * squares * squares;
-  constexpr int kThreads = 256;
-  const int blocks = (total + kThreads - 1) / kThreads;
-  AttentionScoreKernel<<<blocks, kThreads, 0, stream>>>(
-      query, key, scores, heads, squares, head_depth, qkv_width, scale, total);
-  cudaError_t status = cudaGetLastError();
-  if (status != cudaSuccess)
+  cublasHandle_t handle = CublasHandle();
+  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
+  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
     throw std::runtime_error(
-        CudaErrorMessage("AttentionScoreKernel launch", status));
+        CublasErrorMessage("cublasSetStream", cublas_status));
+  }
+
+  const float beta = 0.0f;
+  const long long head_stride = head_depth;
+  const long long score_stride =
+      static_cast<long long>(squares) * squares;
+  const std::size_t qkv_batch_stride =
+      static_cast<std::size_t>(squares) * qkv_width;
+  const std::size_t score_batch_stride =
+      static_cast<std::size_t>(heads) * squares * squares;
+  for (int batch = 0; batch < batch_size; ++batch) {
+    const float *query_base = query + batch * qkv_batch_stride;
+    const float *key_base = key + batch * qkv_batch_stride;
+    float *score_base = scores + batch * score_batch_stride;
+    cublas_status = cublasSgemmStridedBatched(
+        handle, CUBLAS_OP_T, CUBLAS_OP_N, squares, squares, head_depth,
+        &scale, key_base, qkv_width, head_stride, query_base, qkv_width,
+        head_stride, &beta, score_base, squares, score_stride, heads);
+    if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+      throw std::runtime_error(CublasErrorMessage(
+          "cublasSgemmStridedBatched(attention_score)", cublas_status));
+    }
+  }
   if (stream)
     return;
-  status = cudaDeviceSynchronize();
+  cudaError_t status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("AttentionScoreKernel synchronize", status));
@@ -730,19 +694,40 @@ void LaunchAttentionContextKernel(const float *probabilities,
     throw std::runtime_error("CUDA attention context dimensions are invalid");
   }
 
-  const int total = batch_size * squares * qkv_width;
-  constexpr int kThreads = 256;
-  const int blocks = (total + kThreads - 1) / kThreads;
-  AttentionContextKernel<<<blocks, kThreads, 0, stream>>>(
-      probabilities, value, context, heads, squares, head_depth, qkv_width,
-      total);
-  cudaError_t status = cudaGetLastError();
-  if (status != cudaSuccess)
+  cublasHandle_t handle = CublasHandle();
+  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
+  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
     throw std::runtime_error(
-        CudaErrorMessage("AttentionContextKernel launch", status));
+        CublasErrorMessage("cublasSetStream", cublas_status));
+  }
+
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+  const long long head_stride = head_depth;
+  const long long probability_stride =
+      static_cast<long long>(squares) * squares;
+  const std::size_t qkv_batch_stride =
+      static_cast<std::size_t>(squares) * qkv_width;
+  const std::size_t probability_batch_stride =
+      static_cast<std::size_t>(heads) * squares * squares;
+  for (int batch = 0; batch < batch_size; ++batch) {
+    const float *value_base = value + batch * qkv_batch_stride;
+    const float *probability_base =
+        probabilities + batch * probability_batch_stride;
+    float *context_base = context + batch * qkv_batch_stride;
+    cublas_status = cublasSgemmStridedBatched(
+        handle, CUBLAS_OP_N, CUBLAS_OP_N, head_depth, squares, squares,
+        &alpha, value_base, qkv_width, head_stride, probability_base, squares,
+        probability_stride, &beta, context_base, qkv_width, head_stride,
+        heads);
+    if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+      throw std::runtime_error(CublasErrorMessage(
+          "cublasSgemmStridedBatched(attention_context)", cublas_status));
+    }
+  }
   if (stream)
     return;
-  status = cudaDeviceSynchronize();
+  cudaError_t status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("AttentionContextKernel synchronize", status));
