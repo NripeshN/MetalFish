@@ -9,19 +9,87 @@
 
 #include "../network_output_decoder.h"
 #include "../network_weight_inventory.h"
+#include "cuda_attention_plan.h"
 #include "cuda_executor.h"
 #include "cuda_runtime_probe.h"
+#include "cuda_stage_executor.h"
 #include "cuda_workspace.h"
+
+#include <cuda_runtime_api.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace MetalFish {
 namespace NN {
 namespace Cuda {
+namespace {
+
+std::string CudaErrorMessage(const char *op, cudaError_t status) {
+  std::ostringstream out;
+  out << op << " failed: " << cudaGetErrorString(status);
+  return out.str();
+}
+
+void UploadFloats(float *device, const std::vector<float> &host,
+                  cudaStream_t stream, const char *name) {
+  if (host.empty())
+    return;
+  const cudaError_t status = cudaMemcpyAsync(
+      device, host.data(), host.size() * sizeof(float), cudaMemcpyHostToDevice,
+      stream);
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage(name, status));
+}
+
+void DownloadFloats(std::vector<float> &host, const float *device,
+                    const char *name) {
+  if (host.empty())
+    return;
+  const cudaError_t status =
+      cudaMemcpy(host.data(), device, host.size() * sizeof(float),
+                 cudaMemcpyDeviceToHost);
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage(name, status));
+}
+
+std::vector<float> DenseAffineHost(const std::vector<float> &input,
+                                   const std::vector<float> &weights,
+                                   const std::vector<float> &bias, int rows,
+                                   int input_width, int output_width) {
+  std::vector<float> output(static_cast<std::size_t>(rows) * output_width,
+                            0.0f);
+  for (int row = 0; row < rows; ++row) {
+    for (int out = 0; out < output_width; ++out) {
+      float sum = bias[static_cast<std::size_t>(out)];
+      for (int in = 0; in < input_width; ++in) {
+        sum += input[static_cast<std::size_t>(row) * input_width + in] *
+               weights[static_cast<std::size_t>(out) * input_width + in];
+      }
+      output[static_cast<std::size_t>(row) * output_width + out] = sum;
+    }
+  }
+  return output;
+}
+
+bool AlmostEqual(const std::vector<float> &actual,
+                 const std::vector<float> &expected, float tolerance) {
+  if (actual.size() != expected.size())
+    return false;
+  for (std::size_t i = 0; i < actual.size(); ++i) {
+    if (std::fabs(actual[i] - expected[i]) > tolerance)
+      return false;
+  }
+  return true;
+}
+
+} // namespace
+
 CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
                                                       int batch_size) {
   CudaBufferSmokeResult result;
@@ -98,6 +166,170 @@ CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
         }
       }
     }
+  } catch (const std::exception &e) {
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaBufferSmokeResult RunAttentionProjectionSmoke() {
+  CudaBufferSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 2;
+  constexpr int kRows = kBatch * kCudaAttentionSquares;
+  constexpr int kInput = 3;
+  constexpr int kQkv = 4;
+  constexpr int kHeads = 2;
+  constexpr int kOutput = 3;
+  std::vector<float> input(static_cast<std::size_t>(kRows) * kInput, 0.0f);
+  std::vector<float> context(static_cast<std::size_t>(kRows) * kQkv, 0.0f);
+  for (std::size_t i = 0; i < input.size(); ++i)
+    input[i] = static_cast<float>(static_cast<int>(i % 11) - 5) * 0.125f;
+  for (std::size_t i = 0; i < context.size(); ++i)
+    context[i] = static_cast<float>(static_cast<int>(i % 13) - 6) * 0.0625f;
+
+  const std::vector<float> q_weight = {
+      0.25f, -0.50f, 0.75f,
+      -0.10f, 0.30f, 0.20f,
+      0.60f, -0.15f, -0.35f,
+      0.40f, 0.10f, -0.20f,
+  };
+  const std::vector<float> k_weight = {
+      -0.20f, 0.15f, 0.50f,
+      0.35f, -0.25f, 0.45f,
+      0.10f, 0.55f, -0.40f,
+      -0.30f, 0.20f, 0.25f,
+  };
+  const std::vector<float> v_weight = {
+      0.50f, 0.25f, -0.10f,
+      -0.45f, 0.15f, 0.35f,
+      0.20f, -0.60f, 0.30f,
+      0.05f, 0.40f, -0.25f,
+  };
+  const std::vector<float> projection_weight = {
+      0.30f, -0.20f, 0.10f, 0.45f,
+      -0.35f, 0.50f, 0.25f, -0.15f,
+      0.20f, 0.05f, -0.40f, 0.60f,
+  };
+  const std::vector<float> q_bias = {0.10f, -0.20f, 0.30f, -0.40f};
+  const std::vector<float> k_bias = {-0.05f, 0.15f, -0.25f, 0.35f};
+  const std::vector<float> v_bias = {0.20f, 0.00f, -0.10f, 0.05f};
+  const std::vector<float> projection_bias = {0.25f, -0.15f, 0.05f};
+
+  NetworkWeightInventory inventory;
+  inventory.tensors = {
+      {"body.encoder.0.mha.q_w", q_weight.data(), q_weight.size(),
+       {kQkv, kInput}, NetworkWeightTensorKind::DenseWeight},
+      {"body.encoder.0.mha.q_b", q_bias.data(), q_bias.size(), {kQkv},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.encoder.0.mha.k_w", k_weight.data(), k_weight.size(),
+       {kQkv, kInput}, NetworkWeightTensorKind::DenseWeight},
+      {"body.encoder.0.mha.k_b", k_bias.data(), k_bias.size(), {kQkv},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.encoder.0.mha.v_w", v_weight.data(), v_weight.size(),
+       {kQkv, kInput}, NetworkWeightTensorKind::DenseWeight},
+      {"body.encoder.0.mha.v_b", v_bias.data(), v_bias.size(), {kQkv},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.encoder.0.mha.dense_w", projection_weight.data(),
+       projection_weight.size(), {kOutput, kQkv},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.encoder.0.mha.dense_b", projection_bias.data(),
+       projection_bias.size(), {kOutput}, NetworkWeightTensorKind::DenseBias},
+  };
+
+  NetworkResolvedExecutionPlan execution_plan;
+  execution_plan.format.body_attention_heads = kHeads;
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::Attention,
+      "body.encoder.0.mha",
+      {
+          {0, "body.encoder.0.mha.q_w", q_weight.size(), {kQkv, kInput},
+           NetworkWeightTensorKind::DenseWeight},
+          {1, "body.encoder.0.mha.q_b", q_bias.size(), {kQkv},
+           NetworkWeightTensorKind::DenseBias},
+          {2, "body.encoder.0.mha.k_w", k_weight.size(), {kQkv, kInput},
+           NetworkWeightTensorKind::DenseWeight},
+          {3, "body.encoder.0.mha.k_b", k_bias.size(), {kQkv},
+           NetworkWeightTensorKind::DenseBias},
+          {4, "body.encoder.0.mha.v_w", v_weight.size(), {kQkv, kInput},
+           NetworkWeightTensorKind::DenseWeight},
+          {5, "body.encoder.0.mha.v_b", v_bias.size(), {kQkv},
+           NetworkWeightTensorKind::DenseBias},
+          {6, "body.encoder.0.mha.dense_w", projection_weight.size(),
+           {kOutput, kQkv}, NetworkWeightTensorKind::DenseWeight},
+          {7, "body.encoder.0.mha.dense_b", projection_bias.size(),
+           {kOutput}, NetworkWeightTensorKind::DenseBias},
+      }});
+
+  const auto expected_q =
+      DenseAffineHost(input, q_weight, q_bias, kRows, kInput, kQkv);
+  const auto expected_k =
+      DenseAffineHost(input, k_weight, k_bias, kRows, kInput, kQkv);
+  const auto expected_v =
+      DenseAffineHost(input, v_weight, v_bias, kRows, kInput, kQkv);
+  const auto expected_projection = DenseAffineHost(
+      context, projection_weight, projection_bias, kRows, kQkv, kOutput);
+
+  try {
+    CudaExecutionWorkspace workspace;
+    cudaStream_t stream = workspace.Stream();
+    float *device_input =
+        workspace.ReserveNamedFloats("attention.input", input.size());
+    float *device_context =
+        workspace.ReserveNamedFloats("attention.context.input", context.size());
+    UploadFloats(device_input, input, stream, "cudaMemcpy(attention_input)");
+    UploadFloats(device_context, context, stream,
+                 "cudaMemcpy(attention_context)");
+
+    CudaWeightBuffers weights;
+    weights.Upload(inventory);
+    const auto tape = CreateResolvedExecutionTape(execution_plan, kBatch);
+    const auto input_output = ExecuteAttentionInputProjectionStage(
+        execution_plan, 0, weights, device_input, tape, workspace, kBatch);
+    const auto projection_output = ExecuteAttentionOutputProjectionStage(
+        execution_plan, 0, weights, device_context, tape, workspace, kBatch);
+    workspace.Synchronize();
+
+    if (input_output.rows != kRows || input_output.qkv_width != kQkv ||
+        input_output.heads != kHeads || input_output.head_depth != 2 ||
+        projection_output.output_width != kOutput) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA attention projection metadata mismatch";
+      return result;
+    }
+
+    std::vector<float> actual_q(expected_q.size(), 0.0f);
+    std::vector<float> actual_k(expected_k.size(), 0.0f);
+    std::vector<float> actual_v(expected_v.size(), 0.0f);
+    std::vector<float> actual_projection(expected_projection.size(), 0.0f);
+    DownloadFloats(actual_q, input_output.query,
+                   "cudaMemcpy(attention_q)");
+    DownloadFloats(actual_k, input_output.key, "cudaMemcpy(attention_k)");
+    DownloadFloats(actual_v, input_output.value,
+                   "cudaMemcpy(attention_v)");
+    DownloadFloats(actual_projection, projection_output.projection,
+                   "cudaMemcpy(attention_projection)");
+    if (!AlmostEqual(actual_q, expected_q, 1e-5f) ||
+        !AlmostEqual(actual_k, expected_k, 1e-5f) ||
+        !AlmostEqual(actual_v, expected_v, 1e-5f) ||
+        !AlmostEqual(actual_projection, expected_projection, 1e-5f)) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA attention projection output mismatch";
+      return result;
+    }
+    result.allocation_bytes = workspace.TotalBytes() + weights.AllocationBytes();
   } catch (const std::exception &e) {
     result.status = CudaSmokeStatus::RuntimeError;
     result.message = e.what();

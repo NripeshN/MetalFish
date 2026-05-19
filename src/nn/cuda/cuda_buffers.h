@@ -97,6 +97,7 @@ CudaBufferSmokeResult RunPackedInputUploadSmokeRaw(const float *input);
 CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
                                                       int batch_size);
 CudaBufferSmokeResult RunPlanExecutorPipelineSmoke();
+CudaBufferSmokeResult RunAttentionProjectionSmoke();
 
 } // namespace Cuda
 } // namespace NN

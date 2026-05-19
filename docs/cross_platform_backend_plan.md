@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `c4f69c6b-0d93-41f7-9d08-163964ed32f0` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `beddfe77-44df-463b-89c9-c9955b7a2ee1` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `bc2d2f2f-23a0-4999-a494-31d2430b4dc2` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `271cc9e6-5f25-45c2-b87a-7e9ae878a709` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -129,11 +129,12 @@ Current CUDA backend boundary:
   weights before attention kernels are allowed into the executor path.
 - `src/nn/cuda/cuda_stage_executor.*` owns reusable dense/activation/layernorm
   stage execution, input-embedding gate execution, feed-forward residual
-  layernorm execution, and strided device-row copies, so smoke and production
-  CUDA executors share the same launch path. It derives CUDA-local stage input
-  bindings from the resolved plan and schedule, allowing independent heads to
-  branch from the last supported body output instead of forcing every stage into
-  one linear chain.
+  layernorm execution, attention Q/K/V and output projection launches, and
+  strided device-row copies, so smoke and production CUDA executors share the
+  same launch path. It derives CUDA-local stage input bindings from the
+  resolved plan and schedule, allowing independent heads to branch from the
+  last supported body output instead of forcing every stage into one linear
+  chain.
 - `src/nn/cuda/cuda_output_mapping.*` maps named executed CUDA stages to
   policy, value, moves-left, and raw-policy output buffers. This keeps output
   ownership explicit instead of treating the last executed stage as every

@@ -7,6 +7,7 @@
 
 #include "cuda_stage_executor.h"
 
+#include "cuda_attention_plan.h"
 #include "cuda_execution_schedule.h"
 #include "cuda_kernels.h"
 #include "cuda_plan_analysis.h"
@@ -79,6 +80,52 @@ bool IsMultiplyGate(std::string_view name) {
 
 bool IsAddGate(std::string_view name) {
   return name.find("add_gate") != std::string_view::npos;
+}
+
+bool StartsWith(std::string_view value, std::string_view prefix) {
+  return value.size() >= prefix.size() &&
+         value.substr(0, prefix.size()) == prefix;
+}
+
+bool EndsWith(std::string_view value, std::string_view suffix) {
+  return value.size() >= suffix.size() &&
+         value.substr(value.size() - suffix.size()) == suffix;
+}
+
+int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
+                       std::string_view name) {
+  if (StartsWith(name, "body.encoder."))
+    return plan.format.body_attention_heads;
+  if (StartsWith(name, "policy."))
+    return plan.format.policy_attention_heads;
+  return 0;
+}
+
+const NetworkResolvedTensorRef &
+RequireTensorSuffix(const NetworkResolvedExecutionStep &step,
+                    std::string_view suffix) {
+  for (const auto &tensor : step.tensors) {
+    if (EndsWith(tensor.name, suffix))
+      return tensor;
+  }
+  throw std::runtime_error("CUDA stage is missing tensor " +
+                           std::string(suffix) + " in " + step.name);
+}
+
+CudaDeviceTensorView TensorBySuffix(const NetworkResolvedExecutionStep &step,
+                                    const CudaWeightBuffers &weights,
+                                    std::string_view suffix) {
+  const auto &ref = RequireTensorSuffix(step, suffix);
+  return weights.TensorAt(ref.inventory_index);
+}
+
+void RequireTapeShape(const CudaExecutionBufferBinding &binding, int rows,
+                      int width, std::string_view role) {
+  if (binding.rows != rows || binding.width != width ||
+      binding.entries != static_cast<std::size_t>(rows) * width) {
+    throw std::runtime_error("CUDA " + std::string(role) +
+                             " tape size mismatch");
+  }
 }
 
 struct CudaFeedForwardTensors {
@@ -513,6 +560,98 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
                         output.normalized, batch_size, output.output_width,
                         FeedForwardLayerNormEpsilon(execution_plan, ffn.name),
                         stream);
+  return output;
+}
+
+CudaAttentionProjectionOutput ExecuteAttentionInputProjectionStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::size_t attention_step_index, const CudaWeightBuffers &weights,
+    const float *input, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA attention projection received empty batch");
+  if (!input)
+    throw std::runtime_error("CUDA attention projection input is missing");
+  if (attention_step_index >= execution_plan.steps.size())
+    throw std::runtime_error("CUDA attention projection index is out of range");
+
+  const auto &step = execution_plan.steps[attention_step_index];
+  const auto attention = ResolveCudaAttentionStagePlan(
+      execution_plan, attention_step_index,
+      AttentionHeadCount(execution_plan, step.name));
+  const int rows = batch_size * attention.squares;
+
+  const auto q_weight = TensorBySuffix(step, weights, ".q_w");
+  const auto q_bias = TensorBySuffix(step, weights, ".q_b");
+  const auto k_weight = TensorBySuffix(step, weights, ".k_w");
+  const auto k_bias = TensorBySuffix(step, weights, ".k_b");
+  const auto v_weight = TensorBySuffix(step, weights, ".v_w");
+  const auto v_bias = TensorBySuffix(step, weights, ".v_b");
+  const auto &q_binding = tape.RequireName(step.name + ".q");
+  const auto &k_binding = tape.RequireName(step.name + ".k");
+  const auto &v_binding = tape.RequireName(step.name + ".v");
+  RequireTapeShape(q_binding, rows, attention.qkv_width, "query");
+  RequireTapeShape(k_binding, rows, attention.qkv_width, "key");
+  RequireTapeShape(v_binding, rows, attention.qkv_width, "value");
+
+  CudaAttentionProjectionOutput output;
+  output.query = tape.Reserve(workspace, q_binding);
+  output.key = tape.Reserve(workspace, k_binding);
+  output.value = tape.Reserve(workspace, v_binding);
+  output.rows = rows;
+  output.input_width = attention.input_width;
+  output.qkv_width = attention.qkv_width;
+  output.output_width = attention.output_width;
+  output.heads = attention.heads;
+  output.head_depth = attention.head_depth;
+
+  cudaStream_t stream = workspace.Stream();
+  LaunchDenseAffineKernel(input, q_weight.data, q_bias.data, output.query,
+                          rows, attention.input_width, attention.qkv_width,
+                          stream);
+  LaunchDenseAffineKernel(input, k_weight.data, k_bias.data, output.key, rows,
+                          attention.input_width, attention.qkv_width, stream);
+  LaunchDenseAffineKernel(input, v_weight.data, v_bias.data, output.value,
+                          rows, attention.input_width, attention.qkv_width,
+                          stream);
+  return output;
+}
+
+CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::size_t attention_step_index, const CudaWeightBuffers &weights,
+    const float *context, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA attention output received empty batch");
+  if (!context)
+    throw std::runtime_error("CUDA attention output context is missing");
+  if (attention_step_index >= execution_plan.steps.size())
+    throw std::runtime_error("CUDA attention output index is out of range");
+
+  const auto &step = execution_plan.steps[attention_step_index];
+  const auto attention = ResolveCudaAttentionStagePlan(
+      execution_plan, attention_step_index,
+      AttentionHeadCount(execution_plan, step.name));
+  const int rows = batch_size * attention.squares;
+  const auto dense_weight = TensorBySuffix(step, weights, ".dense_w");
+  const auto dense_bias = TensorBySuffix(step, weights, ".dense_b");
+  const auto &projection_binding = tape.RequireName(step.name + ".projection");
+  RequireTapeShape(projection_binding, rows, attention.output_width,
+                   "attention output projection");
+
+  CudaAttentionProjectionOutput output;
+  output.projection = tape.Reserve(workspace, projection_binding);
+  output.rows = rows;
+  output.input_width = attention.input_width;
+  output.qkv_width = attention.qkv_width;
+  output.output_width = attention.output_width;
+  output.heads = attention.heads;
+  output.head_depth = attention.head_depth;
+
+  LaunchDenseAffineKernel(context, dense_weight.data, dense_bias.data,
+                          output.projection, rows, attention.qkv_width,
+                          attention.output_width, workspace.Stream());
   return output;
 }
 

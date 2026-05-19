@@ -843,6 +843,15 @@ void test_cuda_inference_buffers(TestCounter &tc) {
              plan_executor_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA plan executor pipeline should pass or skip without a device",
          tc);
+
+  auto attention_projection_smoke = NN::Cuda::RunAttentionProjectionSmoke();
+  std::cout << "    " << attention_projection_smoke.message << std::endl;
+  expect(attention_projection_smoke.status ==
+                 NN::Cuda::CudaSmokeStatus::Success ||
+             attention_projection_smoke.status ==
+                 NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA attention projections should pass or skip without a device",
+         tc);
 }
 
 void test_cuda_execution_schedule(TestCounter &tc) {

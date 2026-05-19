@@ -45,6 +45,19 @@ struct CudaDenseStageSequenceOutput {
   const CudaDenseStageOutput *FindStage(std::string_view name) const;
 };
 
+struct CudaAttentionProjectionOutput {
+  float *query = nullptr;
+  float *key = nullptr;
+  float *value = nullptr;
+  float *projection = nullptr;
+  int rows = 0;
+  int input_width = 0;
+  int qkv_width = 0;
+  int output_width = 0;
+  int heads = 0;
+  int head_depth = 0;
+};
+
 struct CudaStageInputBinding {
   std::string stage_name;
   std::string source_stage_name;
@@ -93,6 +106,18 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
     const NetworkResolvedExecutionStep &ffn,
     const NetworkResolvedExecutionStep &norm, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size);
+
+CudaAttentionProjectionOutput ExecuteAttentionInputProjectionStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::size_t attention_step_index, const CudaWeightBuffers &weights,
+    const float *input, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size);
+
+CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::size_t attention_step_index, const CudaWeightBuffers &weights,
+    const float *context, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size);
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
