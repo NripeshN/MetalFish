@@ -81,6 +81,7 @@ jobs:
         run: |
           python3 tools/uci_smoke.py \
             --engine build/metalfish \
+            --timeout 120 \
             --setoption UseHybridSearch=false \
             --setoption UseMCTS=true \
             --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
