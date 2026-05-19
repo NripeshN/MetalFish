@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `9495a71d-328e-4c91-98c9-6253c7ba4a79` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `83b6d9ee-c7d0-4fdd-b644-27fb3a3e0d4e` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `30020286-2b1e-46d7-b323-79cbf863849a` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92eb2639-2d35-41cd-991d-ca9bf82ac627` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -99,6 +99,9 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_kernels.*` contains tested CUDA compute primitives for
   dense-affine projections/heads, last-axis layer normalization, and shared
   elementwise activation functions.
+- `CreatePlanSmokeCudaExecutor()` runs a tiny resolved-plan pipeline through
+  uploaded device weights and real dense/activation/layernorm kernels without
+  enabling production CUDA inference prematurely.
 - Production CUDA still installs a missing executor and refuses real inference.
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength

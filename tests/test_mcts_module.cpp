@@ -745,6 +745,13 @@ void test_cuda_inference_buffers(TestCounter &tc) {
              null_executor_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA null executor pipeline should pass or skip without a device",
          tc);
+
+  auto plan_executor_smoke = NN::Cuda::RunPlanExecutorPipelineSmoke();
+  std::cout << "    " << plan_executor_smoke.message << std::endl;
+  expect(plan_executor_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             plan_executor_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA plan executor pipeline should pass or skip without a device",
+         tc);
 }
 
 void test_cuda_weight_upload(TestCounter &tc) {
