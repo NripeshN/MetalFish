@@ -21,6 +21,7 @@
 #include "nn/network_weight_inventory.h"
 #include "nn_input_fixture.h"
 #ifdef USE_CUDA
+#include "nn/cuda/cuda_attention_plan.h"
 #include "nn/cuda/cuda_buffers.h"
 #include "nn/cuda/cuda_execution_schedule.h"
 #include "nn/cuda/cuda_execution_tape.h"
@@ -43,8 +44,10 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace MetalFish;
@@ -75,6 +78,18 @@ void set_test_float_layer(MetalFishNN::Weights::Layer *layer) {
   layer->set_params(bytes);
   layer->add_dims(1);
 }
+
+#ifdef USE_CUDA
+std::size_t
+find_resolved_step_index(const NN::NetworkResolvedExecutionPlan &plan,
+                         const std::string &name) {
+  for (std::size_t i = 0; i < plan.steps.size(); ++i) {
+    if (plan.steps[i].name == name)
+      return i;
+  }
+  throw std::runtime_error("missing resolved execution step: " + name);
+}
+#endif
 
 NN::WeightsFile make_minimal_attention_weights_file() {
   NN::WeightsFile file;
@@ -504,6 +519,25 @@ void test_network_execution_plan(TestCounter &tc) {
          "loaded CUDA schedule should now reach attention as first unsupported "
          "operator",
          tc);
+  const auto first_body_attention = find_resolved_step_index(
+      loaded_resolved_plan, "body.encoder.0.mha");
+  const auto loaded_attention_plan = NN::Cuda::ResolveCudaAttentionStagePlan(
+      loaded_resolved_plan, first_body_attention,
+      loaded_weights.encoder_head_count);
+  expect(loaded_attention_plan.heads == loaded_weights.encoder_head_count,
+         "loaded CUDA attention plan should preserve body head count", tc);
+  expect(loaded_attention_plan.squares == NN::Cuda::kCudaAttentionSquares,
+         "loaded CUDA attention plan should use 64 board squares", tc);
+  expect(loaded_attention_plan.qkv_width ==
+             loaded_attention_plan.input_width,
+         "loaded CUDA attention QKV width should match model width", tc);
+  expect(loaded_attention_plan.head_depth > 0,
+         "loaded CUDA attention plan should derive per-head depth", tc);
+  expect(loaded_attention_plan.smolgen.present,
+         "loaded CUDA attention plan should detect smolgen branch", tc);
+  expect(loaded_attention_plan.smolgen.has_global_positional_weights,
+         "loaded CUDA attention plan should attach global smolgen weights",
+         tc);
 #endif
 }
 
@@ -922,6 +956,89 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   expect(positional_schedule.entries[3].kind ==
              NN::Cuda::CudaExecutionScheduleKind::PositionalEncodingStage,
          "CUDA schedule should classify positional encoding explicitly", tc);
+
+  auto tensor = [](std::size_t index, const std::string &name,
+                   std::size_t elements,
+                   std::vector<std::uint32_t> dims,
+                   NN::NetworkWeightTensorKind kind) {
+    return NN::NetworkResolvedTensorRef{index, name, elements,
+                                        std::move(dims), kind};
+  };
+  NN::NetworkResolvedExecutionPlan attention_plan;
+  attention_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::PositionalEncoding,
+      "body.smolgen_positional",
+      {tensor(0, "body.smolgen_w", 4096 * 4, {4096, 4},
+              NN::NetworkWeightTensorKind::PositionalEncoding)}});
+  attention_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Attention,
+      "body.encoder.0.mha",
+      {
+          tensor(1, "body.encoder.0.mha.q_w", 64, {8, 8},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(2, "body.encoder.0.mha.q_b", 8, {8},
+                 NN::NetworkWeightTensorKind::DenseBias),
+          tensor(3, "body.encoder.0.mha.k_w", 64, {8, 8},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(4, "body.encoder.0.mha.k_b", 8, {8},
+                 NN::NetworkWeightTensorKind::DenseBias),
+          tensor(5, "body.encoder.0.mha.v_w", 64, {8, 8},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(6, "body.encoder.0.mha.v_b", 8, {8},
+                 NN::NetworkWeightTensorKind::DenseBias),
+          tensor(7, "body.encoder.0.mha.dense_w", 64, {8, 8},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(8, "body.encoder.0.mha.dense_b", 8, {8},
+                 NN::NetworkWeightTensorKind::DenseBias),
+      }});
+  attention_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense,
+      "body.encoder.0.mha.smolgen.dense",
+      {
+          tensor(9, "body.encoder.0.mha.smolgen.compress", 32, {4, 8},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(10, "body.encoder.0.mha.smolgen.dense1_w", 1536,
+                 {6, 256}, NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(11, "body.encoder.0.mha.smolgen.dense1_b", 6, {6},
+                 NN::NetworkWeightTensorKind::DenseBias),
+          tensor(12, "body.encoder.0.mha.smolgen.dense2_w", 48, {8, 6},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(13, "body.encoder.0.mha.smolgen.dense2_b", 8, {8},
+                 NN::NetworkWeightTensorKind::DenseBias),
+      }});
+  attention_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::LayerNorm,
+      "body.encoder.0.mha.smolgen.norm",
+      {
+          tensor(14, "body.encoder.0.mha.smolgen.ln1_gammas", 6, {6},
+                 NN::NetworkWeightTensorKind::NormScale),
+          tensor(15, "body.encoder.0.mha.smolgen.ln1_betas", 6, {6},
+                 NN::NetworkWeightTensorKind::NormBias),
+          tensor(16, "body.encoder.0.mha.smolgen.ln2_gammas", 8, {8},
+                 NN::NetworkWeightTensorKind::NormScale),
+          tensor(17, "body.encoder.0.mha.smolgen.ln2_betas", 8, {8},
+                 NN::NetworkWeightTensorKind::NormBias),
+      }});
+  const auto resolved_attention =
+      NN::Cuda::ResolveCudaAttentionStagePlan(attention_plan, 1, 2);
+  expect(resolved_attention.heads == 2,
+         "CUDA attention plan should preserve synthetic head count", tc);
+  expect(resolved_attention.head_depth == 4,
+         "CUDA attention plan should derive synthetic head depth", tc);
+  expect(resolved_attention.smolgen.present,
+         "CUDA attention plan should detect synthetic smolgen", tc);
+  expect(resolved_attention.smolgen.dense2_width_per_head == 4,
+         "CUDA attention plan should derive smolgen per-head width", tc);
+  expect(resolved_attention.smolgen.has_global_positional_weights,
+         "CUDA attention plan should validate global smolgen dimensions", tc);
+  bool bad_heads_rejected = false;
+  try {
+    (void)NN::Cuda::ResolveCudaAttentionStagePlan(attention_plan, 1, 3);
+  } catch (const std::exception &) {
+    bad_heads_rejected = true;
+  }
+  expect(bad_heads_rejected,
+         "CUDA attention plan should reject incompatible head counts", tc);
 }
 
 void test_cuda_output_mapping(TestCounter &tc) {

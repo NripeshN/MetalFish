@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `4a624006-6de8-4c6c-b00c-47e276fe4fd5` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `7ebe79a3-c97c-472d-be06-25782beb1d83` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `55a4bb7b-904e-4efb-9ed8-f4e771852005` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `7e7134c7-4846-49e4-8e51-0e0fe41e798b` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -122,6 +122,9 @@ Current CUDA backend boundary:
   resolved stage groups, dense stage widths, value-error exclusion, and last
   body/head stage discovery. Stage execution and output mapping use this helper
   so head branching and output source selection stay aligned.
+- `src/nn/cuda/cuda_attention_plan.*` validates resolved MHA tensor shapes,
+  head/depth geometry, smolgen branch dimensions, and global smolgen positional
+  weights before attention kernels are allowed into the executor path.
 - `src/nn/cuda/cuda_stage_executor.*` owns reusable dense/activation/layernorm
   stage execution, input-embedding gate execution, feed-forward residual
   layernorm execution, and strided device-row copies, so smoke and production
