@@ -335,6 +335,8 @@ def benchmark_numpy_transformer(
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     np, ct, mb, types = load_coremltools()
     compute_unit = compute_unit_from_name(ct, args.compute_unit)
+    if args.layers < 1:
+        raise RuntimeError("--layers must be at least 1")
 
     if args.model == "dense":
         sample = np.random.default_rng(args.seed + 1).normal(

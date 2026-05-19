@@ -39,6 +39,8 @@ def test_parse_transformer_args() -> None:
             "8",
             "--ffn-mult",
             "4",
+            "--layers",
+            "2",
             "--compute-unit",
             "cpu-ne",
         ]
@@ -48,6 +50,7 @@ def test_parse_transformer_args() -> None:
     expect("tokens parsed", args.tokens == 64)
     expect("channels parsed", args.channels == 128)
     expect("heads parsed", args.heads == 8)
+    expect("layers parsed", args.layers == 2)
     expect("compute unit parsed", args.compute_unit == "cpu-ne")
 
 

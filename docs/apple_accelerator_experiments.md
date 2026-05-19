@@ -79,6 +79,21 @@ Swish transformer-block checks:
 | batch=1, tokens=64, channels=1024, heads=32, ffn=4x | Core ML cpu-ne | 1.4101 ms |
 | batch=1, tokens=64, channels=1024, heads=32, ffn=4x | MPSGraph | 1.4827 ms |
 
+Stacked swish transformer checks:
+
+| Shape | Backend | Median |
+| --- | --- | ---: |
+| layers=2, batch=1, tokens=64, channels=128, heads=8, ffn=4x | Core ML cpu-ne | 0.3051 ms |
+| layers=2, batch=1, tokens=64, channels=128, heads=8, ffn=4x | MPSGraph | 0.9004 ms |
+| layers=4, batch=1, tokens=64, channels=128, heads=8, ffn=4x | Core ML cpu-ne | 0.4041 ms |
+| layers=4, batch=1, tokens=64, channels=128, heads=8, ffn=4x | MPSGraph | 1.2681 ms |
+| layers=2, batch=1, tokens=64, channels=512, heads=16, ffn=4x | Core ML cpu-ne | 0.8587 ms |
+| layers=2, batch=1, tokens=64, channels=512, heads=16, ffn=4x | MPSGraph | 1.0139 ms |
+| layers=4, batch=1, tokens=64, channels=512, heads=16, ffn=4x | Core ML cpu-ne | 1.4058 ms |
+| layers=4, batch=1, tokens=64, channels=512, heads=16, ffn=4x | MPSGraph | 1.6838 ms |
+| layers=2, batch=1, tokens=64, channels=1024, heads=32, ffn=4x | Core ML cpu-ne | 2.5622 ms |
+| layers=2, batch=1, tokens=64, channels=1024, heads=32, ffn=4x | MPSGraph | 1.5283 ms |
+
 ## Decision
 
 Do not move AB NNUE inference to Core ML/ANE based on these measurements. The
@@ -90,8 +105,13 @@ subgraphs. The `cpu-ne` compute unit is the only promising Core ML mode in the
 current data; `cpu`, `all`, and `cpu-gpu` do not justify integration work.
 
 This is still not enough evidence to replace Metal/MPSGraph in the engine. The
-single-block swish data says Core ML `cpu-ne` can beat the current helper-style
-MPSGraph block at smaller channel widths and roughly ties it at the BT4-like
-1024-channel block. The next useful experiment is a whole-network BT4-shaped
-Core ML graph, because per-block wins can disappear once model conversion,
-input packing, policy/value heads, cache behavior, and batching are included.
+single-block and stacked swish data says Core ML `cpu-ne` can beat the current
+helper-style MPSGraph block at 128-512 channels, but MPSGraph wins on the
+2-layer 1024-channel shape closest to BT4 width. A whole-network BT4 Core ML
+replacement is therefore not justified yet.
+
+The next useful experiment is narrower: test whether Core ML can accelerate
+only small transformer side modules or low-channel experimental networks. Do
+not wire Core ML into the production BT4 MCTS path unless a whole-network
+BT4-shaped benchmark beats the current Metal/MPSGraph path including input
+packing, heads, cache behavior, and batching.

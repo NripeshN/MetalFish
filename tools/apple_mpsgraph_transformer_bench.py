@@ -58,6 +58,7 @@ int main() {
     constexpr NSUInteger channels = __CHANNELS__;
     constexpr NSUInteger heads = __HEADS__;
     constexpr NSUInteger ffnChannels = __FFN_CHANNELS__;
+    constexpr NSUInteger layers = __LAYERS__;
     constexpr int warmup = __WARMUP__;
     constexpr int iterations = __ITERATIONS__;
 
@@ -90,79 +91,84 @@ int main() {
     auto ffn2W = RandomVector(channels * ffnChannels, 0.02f, 16);
     auto ffn2B = FillVector(channels, 0.0f);
 
-    MPSGraphTensor *layer =
-        [graph addLayerNormalizationWithParent:input
-                         scaledSecondaryTensor:nil
-                                        gammas:ln1Gamma.data()
-                                         betas:ln1Beta.data()
-                                         alpha:1.0f
-                                       epsilon:1e-5f
-                                         label:@"ln1"];
-    MPSGraphTensor *q =
-        [graph addFullyConnectedLayerWithParent:layer
-                                 outputChannels:channels
-                                        weights:qW.data()
-                                         biases:qB.data()
-                                     activation:nil
-                                          label:@"q"];
-    MPSGraphTensor *k =
-        [graph addFullyConnectedLayerWithParent:layer
-                                 outputChannels:channels
-                                        weights:kW.data()
-                                         biases:kB.data()
-                                     activation:nil
-                                          label:@"k"];
-    MPSGraphTensor *v =
-        [graph addFullyConnectedLayerWithParent:layer
-                                 outputChannels:channels
-                                        weights:vW.data()
-                                         biases:vB.data()
-                                     activation:nil
-                                          label:@"v"];
-    MPSGraphTensor *attn =
-        [graph scaledMHAMatmulWithQueries:q
-                                 withKeys:k
-                               withValues:v
-                                    heads:heads
-                                   parent:layer
-                                  smolgen:nil
-                        smolgenActivation:nil
-                                    label:@"mha"];
-    MPSGraphTensor *projected =
-        [graph addFullyConnectedLayerWithParent:attn
-                                 outputChannels:channels
-                                        weights:oW.data()
-                                         biases:oB.data()
-                                     activation:nil
-                                          label:@"out"];
-    MPSGraphTensor *residual =
-        [graph additionWithPrimaryTensor:input
-                         secondaryTensor:projected
-                                    name:@"residual"];
-    MPSGraphTensor *ffn =
-        [graph addLayerNormalizationWithParent:residual
-                         scaledSecondaryTensor:nil
-                                        gammas:ln2Gamma.data()
-                                         betas:ln2Beta.data()
-                                         alpha:1.0f
-                                       epsilon:1e-5f
-                                         label:@"ln2"];
-    ffn = [graph addFullyConnectedLayerWithParent:ffn
-                                   outputChannels:ffnChannels
-                                          weights:ffn1W.data()
-                                           biases:ffn1B.data()
-                                       activation:@"swish"
-                                            label:@"ffn1"];
-    ffn = [graph addFullyConnectedLayerWithParent:ffn
+    MPSGraphTensor *layer = input;
+    for (NSUInteger layerIdx = 0; layerIdx < layers; ++layerIdx) {
+      NSString *prefix =
+          [NSString stringWithFormat:@"layer_%lu", (unsigned long)layerIdx];
+      MPSGraphTensor *norm =
+          [graph addLayerNormalizationWithParent:layer
+                           scaledSecondaryTensor:nil
+                                          gammas:ln1Gamma.data()
+                                           betas:ln1Beta.data()
+                                           alpha:1.0f
+                                         epsilon:1e-5f
+                                           label:[prefix stringByAppendingString:@"/ln1"]];
+      MPSGraphTensor *q =
+          [graph addFullyConnectedLayerWithParent:norm
                                    outputChannels:channels
-                                          weights:ffn2W.data()
-                                           biases:ffn2B.data()
+                                          weights:qW.data()
+                                           biases:qB.data()
                                        activation:nil
-                                            label:@"ffn2"];
-    MPSGraphTensor *output =
-        [graph additionWithPrimaryTensor:residual
-                         secondaryTensor:ffn
-                                    name:@"output"];
+                                            label:[prefix stringByAppendingString:@"/q"]];
+      MPSGraphTensor *k =
+          [graph addFullyConnectedLayerWithParent:norm
+                                   outputChannels:channels
+                                          weights:kW.data()
+                                           biases:kB.data()
+                                       activation:nil
+                                            label:[prefix stringByAppendingString:@"/k"]];
+      MPSGraphTensor *v =
+          [graph addFullyConnectedLayerWithParent:norm
+                                   outputChannels:channels
+                                          weights:vW.data()
+                                           biases:vB.data()
+                                       activation:nil
+                                            label:[prefix stringByAppendingString:@"/v"]];
+      MPSGraphTensor *attn =
+          [graph scaledMHAMatmulWithQueries:q
+                                   withKeys:k
+                                 withValues:v
+                                      heads:heads
+                                     parent:norm
+                                    smolgen:nil
+                          smolgenActivation:nil
+                                      label:[prefix stringByAppendingString:@"/mha"]];
+      MPSGraphTensor *projected =
+          [graph addFullyConnectedLayerWithParent:attn
+                                   outputChannels:channels
+                                          weights:oW.data()
+                                           biases:oB.data()
+                                       activation:nil
+                                            label:[prefix stringByAppendingString:@"/out"]];
+      MPSGraphTensor *residual =
+          [graph additionWithPrimaryTensor:layer
+                           secondaryTensor:projected
+                                      name:[prefix stringByAppendingString:@"/residual"]];
+      MPSGraphTensor *ffn =
+          [graph addLayerNormalizationWithParent:residual
+                           scaledSecondaryTensor:nil
+                                          gammas:ln2Gamma.data()
+                                           betas:ln2Beta.data()
+                                           alpha:1.0f
+                                         epsilon:1e-5f
+                                           label:[prefix stringByAppendingString:@"/ln2"]];
+      ffn = [graph addFullyConnectedLayerWithParent:ffn
+                                     outputChannels:ffnChannels
+                                            weights:ffn1W.data()
+                                             biases:ffn1B.data()
+                                         activation:@"swish"
+                                              label:[prefix stringByAppendingString:@"/ffn1"]];
+      ffn = [graph addFullyConnectedLayerWithParent:ffn
+                                     outputChannels:channels
+                                            weights:ffn2W.data()
+                                             biases:ffn2B.data()
+                                         activation:nil
+                                              label:[prefix stringByAppendingString:@"/ffn2"]];
+      layer = [graph additionWithPrimaryTensor:residual
+                               secondaryTensor:ffn
+                                          name:[prefix stringByAppendingString:@"/output"]];
+    }
+    MPSGraphTensor *output = layer;
 
     MPSGraphDevice *graphDevice = [MPSGraphDevice deviceWithMTLDevice:device];
     id<MTLCommandQueue> queue = [device newCommandQueue];
@@ -230,6 +236,7 @@ int main() {
               << "\"channels\":" << channels << ","
               << "\"heads\":" << heads << ","
               << "\"ffn_channels\":" << ffnChannels << ","
+              << "\"layers\":" << layers << ","
               << "\"iterations\":" << iterations << ","
               << "\"median_ms\":" << median << ","
               << "\"mean_ms\":" << mean << ","
@@ -258,11 +265,14 @@ def render_source(args: argparse.Namespace) -> str:
         raise ValueError("MPSGraph helper benchmark currently requires --tokens 64")
     if args.channels % args.heads != 0:
         raise ValueError("--channels must be divisible by --heads")
+    if args.layers < 1:
+        raise ValueError("--layers must be at least 1")
     return (
         SOURCE_TEMPLATE.replace("__BATCH__", str(args.batch))
         .replace("__CHANNELS__", str(args.channels))
         .replace("__HEADS__", str(args.heads))
         .replace("__FFN_CHANNELS__", str(args.channels * args.ffn_mult))
+        .replace("__LAYERS__", str(args.layers))
         .replace("__WARMUP__", str(args.warmup))
         .replace("__ITERATIONS__", str(args.iterations))
     )
@@ -312,7 +322,7 @@ def print_human(result: dict[str, float | int]) -> None:
     print(
         f"  Shape:  batch={result['batch']} tokens={result['tokens']} "
         f"channels={result['channels']} heads={result['heads']} "
-        f"ffn={result['ffn_channels']}"
+        f"ffn={result['ffn_channels']} layers={result['layers']}"
     )
     print(
         "  MPSGraph: "
@@ -331,6 +341,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--ffn-mult", type=int, default=4)
+    parser.add_argument("--layers", type=int, default=1)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--json", action="store_true")

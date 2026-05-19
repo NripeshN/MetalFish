@@ -28,6 +28,8 @@ def test_render_source_substitutes_shape() -> None:
             "8",
             "--ffn-mult",
             "4",
+            "--layers",
+            "3",
             "--warmup",
             "3",
             "--iterations",
@@ -41,6 +43,7 @@ def test_render_source_substitutes_shape() -> None:
     expect("channels substituted", "constexpr NSUInteger channels = 128;" in source)
     expect("heads substituted", "constexpr NSUInteger heads = 8;" in source)
     expect("ffn substituted", "constexpr NSUInteger ffnChannels = 512;" in source)
+    expect("layers substituted", "constexpr NSUInteger layers = 3;" in source)
 
 
 def test_render_source_rejects_non_64_tokens() -> None:
@@ -65,10 +68,22 @@ def test_render_source_rejects_bad_heads() -> None:
         raise AssertionError("non-divisible channels should fail")
 
 
+def test_render_source_rejects_zero_layers() -> None:
+    args = bench.parse_args(["--layers", "0"])
+
+    try:
+        bench.render_source(args)
+    except ValueError as exc:
+        expect("mentions layer floor", "at least 1" in str(exc))
+    else:
+        raise AssertionError("zero layers should fail")
+
+
 def main() -> int:
     test_render_source_substitutes_shape()
     test_render_source_rejects_non_64_tokens()
     test_render_source_rejects_bad_heads()
+    test_render_source_rejects_zero_layers()
     print("Apple MPSGraph transformer bench tests: OK")
     return 0
 
