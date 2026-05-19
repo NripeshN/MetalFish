@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import subprocess
@@ -556,9 +557,111 @@ def print_repeat_summary(
             )
 
 
+def expected_uci_moves(fen: str, expected_sans: Sequence[str]) -> List[str]:
+    moves: List[str] = []
+    for san in expected_sans:
+        try:
+            moves.append(san_to_uci(fen, san))
+        except Exception:
+            moves.append(san.lower().replace("+", "").replace("#", ""))
+    return moves
+
+
+def search_result_payload(
+    fen: str, expected_sans: Sequence[str], bk_id: str, out: SearchResult
+) -> Dict[str, object]:
+    expected_uci = expected_uci_moves(fen, expected_sans)
+    return {
+        "id": bk_id,
+        "fen": fen,
+        "expected_san": list(expected_sans),
+        "expected_uci": expected_uci,
+        "bestmove": out.bestmove,
+        "pass": out.bestmove in set(expected_uci),
+        "nodes": out.nodes,
+        "nps": out.nps,
+        "nn_evals": out.nn_evals,
+        "elapsed_sec": round(out.elapsed, 3),
+        "root_summary": out.root_summary,
+        "hybrid_trace": out.hybrid_trace,
+        "final_summary": out.final_summary,
+        "ab_updates": dict(sorted(out.ab_updates.items())),
+    }
+
+
+def json_output_path(path: pathlib.Path, repeat: int, run_index: int) -> pathlib.Path:
+    if repeat <= 1:
+        return path
+    if path.suffix:
+        return path.with_name(f"{path.stem}.run{run_index + 1:02d}{path.suffix}")
+    return path / f"bk_parity.run{run_index + 1:02d}.json"
+
+
+def write_json_report(
+    path: pathlib.Path,
+    args: argparse.Namespace,
+    positions: Sequence[Tuple[str, List[str], str]],
+    all_results: Dict[str, Dict[str, SearchResult]],
+    run_index: int,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    by_id = {bk_id: (fen, expected_sans) for fen, expected_sans, bk_id in positions}
+    report: Dict[str, object] = {
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "run_index": run_index,
+        "mode": "nodes" if args.nodes > 0 else "movetime",
+        "movetime_ms": args.movetime,
+        "nodes": args.nodes,
+        "threads": args.threads,
+        "deterministic": args.deterministic,
+        "positions": [bk_id for _, _, bk_id in positions],
+        "options": {
+            "engine": args.engine,
+            "multipv": args.multipv,
+            "root_trace": args.root_trace,
+            "hybrid_trace": args.hybrid_trace,
+            "ab_trace": args.ab_trace,
+            "hybrid_mcts_threads": args.hybrid_mcts_threads,
+            "hybrid_ab_threads": args.hybrid_ab_threads,
+            "hybrid_mcts_kld": args.hybrid_mcts_kld,
+            "hybrid_root_reject": args.hybrid_root_reject,
+            "hybrid_shared_tt": args.hybrid_shared_tt,
+            "hybrid_root_hints": args.hybrid_root_hints,
+            "hybrid_ab_policy_weight": args.hybrid_ab_policy_weight,
+            "hybrid_root_hint_delay_ms": args.hybrid_root_hint_delay_ms,
+            "hybrid_root_hint_count": args.hybrid_root_hint_count,
+            "hybrid_ab_candidate_verify_ms": args.hybrid_ab_candidate_verify_ms,
+            "hybrid_ab_candidate_verify_count": args.hybrid_ab_candidate_verify_count,
+            "hybrid_mcts_minibatch": args.hybrid_mcts_minibatch,
+            "hybrid_low_time_fallback_ms": args.hybrid_low_time_fallback_ms,
+        },
+        "engines": {},
+    }
+
+    engines = report["engines"]
+    assert isinstance(engines, dict)
+    for engine_name, results in all_results.items():
+        payloads = []
+        for _, _, bk_id in positions:
+            fen, expected_sans = by_id[bk_id]
+            payloads.append(
+                search_result_payload(fen, expected_sans, bk_id, results[bk_id])
+            )
+        engines[engine_name] = {
+            "score": sum(1 for item in payloads if item["pass"]),
+            "total": len(payloads),
+            "positions": payloads,
+        }
+
+    with open(path, "w") as f:
+        json.dump(report, f, indent=2)
+        f.write("\n")
+
+
 def run_once(
     args: argparse.Namespace,
     aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = None,
+    run_index: int = 0,
 ) -> int:
     if not args.weights.exists():
         print(f"ERROR: weights not found: {args.weights}")
@@ -682,6 +785,11 @@ def run_once(
                             f"{lmove} vs {rmove}"
                         )
                     print(f"    Bestmove agreement: {agree}/{len(positions)}")
+        if args.json_out:
+            path = json_output_path(args.json_out, args.repeat, run_index)
+            write_json_report(path, args, positions, all_results, run_index)
+            if not args.quiet:
+                print(f"\nSaved JSON report: {path}", flush=True)
         return 0
     finally:
         for sess in sessions.values():
@@ -766,6 +874,12 @@ def main() -> int:
     parser.add_argument("--weights", type=pathlib.Path, default=WEIGHTS)
     parser.add_argument("--metalfish", type=pathlib.Path, default=METALFISH)
     parser.add_argument("--lc0", type=pathlib.Path, default=LC0)
+    parser.add_argument(
+        "--json-out",
+        type=pathlib.Path,
+        default=None,
+        help="Write a machine-readable per-position report",
+    )
     args = parser.parse_args()
 
     aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = (
@@ -775,7 +889,7 @@ def main() -> int:
     for i in range(args.repeat):
         if args.repeat > 1:
             print(f"\n=== Run {i + 1}/{args.repeat} ===", flush=True)
-        rc = run_once(args, aggregate)
+        rc = run_once(args, aggregate, i)
         if rc != 0:
             return rc
     if aggregate:
