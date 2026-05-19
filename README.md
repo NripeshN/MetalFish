@@ -58,7 +58,8 @@ a report to `results/paper_summary.md`. Any headline strength claims should be
 based on those generated artifacts or on a larger cutechess tournament, not on
 stale README tables.
 
-Latest local tactical runs, M2 Max, 2026-05-18, 5 seconds per position:
+Last full local tactical comparison, M2 Max, 2026-05-18, 5 seconds per
+position:
 
 | Engine | Score | Completed | Notes |
 | --- | ---: | ---: | --- |
@@ -67,6 +68,9 @@ Latest local tactical runs, M2 Max, 2026-05-18, 5 seconds per position:
 | Stockfish reference | 20/24 | 24/24 | 8 workers, 4096 MB hash |
 | MetalFish MCTS | 20/24 | 24/24 | BT4 weights, one Apple MCTS worker |
 | Lc0 with BT4 weights | 17/24 | 24/24 | Metal backend, `Threads=8` in the strength run |
+
+Current hybrid-only sanity run on this branch, M2 Max, 2026-05-19, 5 seconds
+per position: `20/24` with `HybridABCandidateVerifyMs=120`.
 
 A forced full-worker pure-MCTS stress run (`MCTSMaxThreads=8`) is not a
 strength profile for the current backend. It previously scored 12/24 and timed
@@ -146,6 +150,7 @@ setoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb
 setoption name Threads value 8
 setoption name Hash value 4096
 setoption name Ponder value true
+setoption name HybridABCandidateVerifyMs value 120
 isready
 position startpos
 go movetime 5000

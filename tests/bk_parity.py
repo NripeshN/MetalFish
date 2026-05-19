@@ -350,6 +350,8 @@ def setup_metalfish_hybrid(
     ab_policy_weight: float,
     root_hint_delay_ms: int,
     root_hint_count: int,
+    ab_candidate_verify_ms: int,
+    ab_candidate_verify_count: int,
     mcts_minibatch: int,
     low_time_fallback_ms: int,
 ) -> None:
@@ -374,6 +376,8 @@ def setup_metalfish_hybrid(
     sess.setoption("HybridMCTSABRootHints", "true" if hybrid_root_hints else "false")
     sess.setoption("HybridMCTSABRootHintDelayMs", str(root_hint_delay_ms))
     sess.setoption("HybridMCTSABRootHintCount", str(root_hint_count))
+    sess.setoption("HybridABCandidateVerifyMs", str(ab_candidate_verify_ms))
+    sess.setoption("HybridABCandidateVerifyCount", str(ab_candidate_verify_count))
     sess.setoption("HybridABPolicyWeight", str(ab_policy_weight))
     sess.setoption("HybridTrace", "true" if trace else "false")
     sess.send("isready")
@@ -617,6 +621,8 @@ def run_once(
                 args.hybrid_ab_policy_weight,
                 args.hybrid_root_hint_delay_ms,
                 args.hybrid_root_hint_count,
+                args.hybrid_ab_candidate_verify_ms,
+                args.hybrid_ab_candidate_verify_count,
                 args.hybrid_mcts_minibatch,
                 args.hybrid_low_time_fallback_ms,
             )
@@ -751,6 +757,8 @@ def main() -> int:
     parser.add_argument("--hybrid-ab-policy-weight", type=float, default=0.0)
     parser.add_argument("--hybrid-root-hint-delay-ms", type=int, default=25)
     parser.add_argument("--hybrid-root-hint-count", type=int, default=4)
+    parser.add_argument("--hybrid-ab-candidate-verify-ms", type=int, default=120)
+    parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=4)
     parser.add_argument("--hybrid-mcts-minibatch", type=int, default=0)
     parser.add_argument("--hybrid-low-time-fallback-ms", type=int, default=3000)
     parser.add_argument("--multipv", type=int, default=1)

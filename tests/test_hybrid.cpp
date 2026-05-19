@@ -245,6 +245,8 @@ void test_hybrid_config() {
     EXPECT(tc, config.mcts_ab_root_hints);
     EXPECT(tc, config.mcts_ab_root_hint_delay_ms == 25);
     EXPECT(tc, config.mcts_ab_root_hint_count == 4);
+    EXPECT(tc, config.ab_candidate_verify_ms == 120);
+    EXPECT(tc, config.ab_candidate_verify_count == 4);
   }
   {
     TestCase tc("Transformer batching settings");
@@ -316,6 +318,26 @@ void test_hybrid_config() {
     EXPECT(tc, mcts_limits.time[WHITE] == 30000);
     EXPECT(tc, mcts_limits.inc[WHITE] == 1000);
     EXPECT(tc, mcts_limits.searchmoves.size() == 1);
+  }
+  {
+    TestCase tc("AB candidate verification budget");
+    ::MetalFish::Search::LimitsType limits;
+
+    limits.movetime = 5000;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 150, false) ==
+                   150);
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 1000, false) ==
+                   833);
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 150, true) == 0);
+
+    limits = ::MetalFish::Search::LimitsType();
+    limits.time[WHITE] = 30000;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 4000, 600, false) ==
+                   500);
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 999, 100, false) == 0);
+
+    limits.nodes = 1000;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 4000, 100, false) == 0);
   }
   {
     TestCase tc("Fixed-budget decisive MCTS override predicate");

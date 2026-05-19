@@ -57,6 +57,7 @@ def assert_paper_hybrid_env_overrides() -> None:
         "HYBRID_MCTS_ROOT_REJECT": "false",
         "HYBRID_MCTS_AB_ROOT_HINTS": "true",
         "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "50",
+        "HYBRID_AB_CANDIDATE_VERIFY_MS": "120",
         "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "1.5",
     }
 
@@ -78,6 +79,7 @@ def assert_paper_hybrid_env_overrides() -> None:
             "HybridMCTSRootReject": "false",
             "HybridMCTSABRootHints": "true",
             "HybridMCTSABRootHintDelayMs": "50",
+            "HybridABCandidateVerifyMs": "120",
             "MCTSMaxOutOfOrderEvalsFactor": "1.5",
         },
     )
@@ -132,6 +134,8 @@ def main() -> int:
             "HybridMCTSABRootHints": "true",
             "HybridMCTSABRootHintDelayMs": "25",
             "HybridMCTSABRootHintCount": "4",
+            "HybridABCandidateVerifyMs": "120",
+            "HybridABCandidateVerifyCount": "4",
             "HybridABPolicyWeight": "0.0",
             "HybridTrace": "false",
         },
@@ -157,6 +161,7 @@ def main() -> int:
             'options.add("MCTSMaxOutOfOrderEvalsFactor"',
             'options.add("HybridMCTSABRootHints"',
             'options.add("HybridMCTSABRootHintDelayMs"',
+            'options.add("HybridABCandidateVerifyMs"',
         ],
     )
     assert_file_contains(
@@ -173,6 +178,7 @@ def main() -> int:
             '"HybridABThreads"',
             '"HybridMCTSABRootHints"',
             '"HybridMCTSABRootHintDelayMs"',
+            '"HybridABCandidateVerifyMs"',
         ],
     )
 
@@ -221,6 +227,8 @@ def main() -> int:
             "HybridMCTSABRootHints": "true",
             "HybridMCTSABRootHintDelayMs": "25",
             "HybridMCTSABRootHintCount": "4",
+            "HybridABCandidateVerifyMs": "120",
+            "HybridABCandidateVerifyCount": "4",
             "HybridABPolicyWeight": "0.0",
             "HybridAutoABThreadsCap": "0",
             "HybridTrace": "false",
@@ -240,6 +248,8 @@ def main() -> int:
         "option.HybridMCTSABRootHints=$HYBRID_MCTS_AB_ROOT_HINTS",
         "option.HybridMCTSABRootHintDelayMs=$HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS",
         "option.HybridMCTSABRootHintCount=$HYBRID_MCTS_AB_ROOT_HINT_COUNT",
+        "option.HybridABCandidateVerifyMs=$HYBRID_AB_CANDIDATE_VERIFY_MS",
+        "option.HybridABCandidateVerifyCount=$HYBRID_AB_CANDIDATE_VERIFY_COUNT",
         "option.HybridABPolicyWeight=$HYBRID_AB_POLICY_WEIGHT",
         "option.HybridAutoABThreadsCap=$HYBRID_AUTO_AB_THREADS_CAP",
         "option.MCTSMinibatchSize=$HYBRID_MCTS_MINIBATCH",
@@ -301,6 +311,8 @@ def main() -> int:
             '"HybridMCTSABRootHints": HYBRID_MCTS_AB_ROOT_HINTS',
             '"HybridMCTSABRootHintDelayMs": str(HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS)',
             '"HybridMCTSABRootHintCount": str(HYBRID_MCTS_AB_ROOT_HINT_COUNT)',
+            '"HybridABCandidateVerifyMs": str(HYBRID_AB_CANDIDATE_VERIFY_MS)',
+            '"HybridABCandidateVerifyCount": str(HYBRID_AB_CANDIDATE_VERIFY_COUNT)',
             '"HybridABPolicyWeight": str(HYBRID_AB_POLICY_WEIGHT)',
             '"HybridTrace": HYBRID_TRACE',
             '"MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH)',
@@ -356,6 +368,8 @@ def main() -> int:
             '"HYBRID_MCTS_AB_ROOT_HINTS": "HybridMCTSABRootHints"',
             '"HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "HybridMCTSABRootHintDelayMs"',
             '"HYBRID_MCTS_AB_ROOT_HINT_COUNT": "HybridMCTSABRootHintCount"',
+            '"HYBRID_AB_CANDIDATE_VERIFY_MS": "HybridABCandidateVerifyMs"',
+            '"HYBRID_AB_CANDIDATE_VERIFY_COUNT": "HybridABCandidateVerifyCount"',
             '"HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight"',
             '"HYBRID_TRACE": "HybridTrace"',
             '"HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize"',

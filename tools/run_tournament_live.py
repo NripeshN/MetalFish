@@ -75,6 +75,8 @@ def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None
         "HYBRID_MCTS_AB_ROOT_HINTS": "HybridMCTSABRootHints",
         "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "HybridMCTSABRootHintDelayMs",
         "HYBRID_MCTS_AB_ROOT_HINT_COUNT": "HybridMCTSABRootHintCount",
+        "HYBRID_AB_CANDIDATE_VERIFY_MS": "HybridABCandidateVerifyMs",
+        "HYBRID_AB_CANDIDATE_VERIFY_COUNT": "HybridABCandidateVerifyCount",
         "HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight",
         "HYBRID_TRACE": "HybridTrace",
         "HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize",

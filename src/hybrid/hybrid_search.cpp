@@ -456,6 +456,31 @@ bool HybridHasMCTSDecisionBudget(const ::MetalFish::Search::LimitsType &limits,
   return limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
 }
 
+int HybridABCandidateVerifyBudgetMs(
+    const ::MetalFish::Search::LimitsType &limits, int time_budget_ms,
+    int requested_ms, bool waiting_for_ponderhit) {
+  if (requested_ms <= 0)
+    return 0;
+  if (waiting_for_ponderhit)
+    return 0;
+  if (limits.nodes > 0 || limits.depth > 0 || limits.mate > 0 ||
+      limits.infinite)
+    return 0;
+
+  int budget_cap = 0;
+  if (limits.movetime > 0) {
+    budget_cap = static_cast<int>(std::max<TimePoint>(0, limits.movetime)) / 6;
+  } else if ((limits.time[WHITE] > 0 || limits.time[BLACK] > 0) &&
+             time_budget_ms >= 1000) {
+    budget_cap = time_budget_ms / 8;
+  } else {
+    return 0;
+  }
+
+  const int budget = std::min(requested_ms, budget_cap);
+  return budget >= 10 ? budget : 0;
+}
+
 ::MetalFish::Search::LimitsType
 HybridBuildMCTSLimits(const ::MetalFish::Search::LimitsType &limits,
                       int time_budget_ms, bool waiting_for_ponderhit) {
@@ -843,7 +868,12 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
       !ponderhit_received_.load(std::memory_order_acquire))
     return hints;
 
-  const int hint_count = std::clamp(config_.mcts_ab_root_hint_count, 1, 16);
+  int hint_count = std::clamp(config_.mcts_ab_root_hint_count, 1, 16);
+  if (config_.ab_candidate_verify_ms > 0) {
+    hint_count =
+        std::max(hint_count, std::clamp(config_.ab_candidate_verify_count, 1,
+                                        MCTSSharedState::MAX_TOP_MOVES));
+  }
   const int delay_ms = std::max(0, config_.mcts_ab_root_hint_delay_ms);
   const int64_t deadline_ms = SteadyNowMs() + delay_ms;
 
@@ -868,6 +898,95 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
     send_info_string(ss.str());
   }
   return hints;
+}
+
+std::vector<Move> ParallelHybridSearch::verify_ab_root_candidates(
+    const std::vector<Move> &candidates, int verify_ms) {
+  std::vector<Move> verified_order;
+  if (!engine_ || candidates.empty() || verify_ms <= 0)
+    return verified_order;
+
+  const int candidate_count = std::clamp(config_.ab_candidate_verify_count, 1,
+                                         MCTSSharedState::MAX_TOP_MOVES);
+  std::vector<Move> limited_candidates;
+  limited_candidates.reserve(
+      std::min<int>(candidate_count, static_cast<int>(candidates.size())));
+  for (Move candidate : candidates) {
+    if (candidate == Move::none())
+      continue;
+    if (std::find(limited_candidates.begin(), limited_candidates.end(),
+                  candidate) != limited_candidates.end())
+      continue;
+    limited_candidates.push_back(candidate);
+    if (static_cast<int>(limited_candidates.size()) >= candidate_count)
+      break;
+  }
+  if (limited_candidates.empty())
+    return verified_order;
+
+  ::MetalFish::Search::LimitsType verify_limits;
+  verify_limits.movetime = verify_ms;
+  verify_limits.startTime = now();
+  verify_limits.ponderMode = false;
+  verify_limits.root_order_hints = limited_candidates;
+  verify_limits.searchmoves.reserve(limited_candidates.size());
+  for (Move candidate : limited_candidates) {
+    verify_limits.searchmoves.push_back(UCIEngine::move(candidate, false));
+  }
+
+  auto saved_bestmove = engine_->get_on_bestmove();
+  auto saved_update_full = engine_->get_on_update_full();
+  engine_->set_on_update_full([](const Engine::InfoFull &) {});
+  engine_->set_on_bestmove([](std::string_view, std::string_view) {});
+
+  bool verify_started = false;
+  {
+    std::lock_guard<std::mutex> lock(ab_start_mutex_);
+    if (!should_stop()) {
+      engine_->go(verify_limits);
+      ab_search_started_.store(true, std::memory_order_release);
+      verify_started = true;
+    }
+  }
+
+  if (verify_started) {
+    if (should_stop()) {
+      engine_->stop();
+    }
+    engine_->wait_for_search_finished();
+
+    for (const auto &root_move : engine_->root_move_snapshot(candidate_count)) {
+      if (root_move.move == Move::none())
+        continue;
+      if (std::find(limited_candidates.begin(), limited_candidates.end(),
+                    root_move.move) == limited_candidates.end())
+        continue;
+      if (std::find(verified_order.begin(), verified_order.end(),
+                    root_move.move) == verified_order.end()) {
+        verified_order.push_back(root_move.move);
+      }
+    }
+  }
+
+  engine_->set_on_update_full(std::move(saved_update_full));
+  engine_->set_on_bestmove(std::move(saved_bestmove));
+
+  for (Move candidate : limited_candidates) {
+    if (std::find(verified_order.begin(), verified_order.end(), candidate) ==
+        verified_order.end()) {
+      verified_order.push_back(candidate);
+    }
+  }
+
+  if (config_.trace_decisions && verify_started && !verified_order.empty()) {
+    std::ostringstream ss;
+    ss << "Hybrid: AB candidate verify " << verify_ms << "ms";
+    for (Move move : verified_order)
+      ss << " " << UCIEngine::move(move, false);
+    send_info_string(ss.str());
+  }
+
+  return verified_order;
 }
 
 void ParallelHybridSearch::ab_thread_main() {
@@ -929,6 +1048,26 @@ void ParallelHybridSearch::run_ab_search() {
     ab_limits.ponderMode = false;
   }
   ab_limits.root_order_hints = collect_mcts_root_order_hints();
+  const int candidate_verify_ms = HybridABCandidateVerifyBudgetMs(
+      limits_, time_budget_ms_.load(std::memory_order_acquire),
+      config_.ab_candidate_verify_ms,
+      limits_.ponderMode &&
+          !ponderhit_received_.load(std::memory_order_acquire));
+  if (candidate_verify_ms > 0 && !ab_limits.root_order_hints.empty()) {
+    std::vector<Move> verified_order =
+        verify_ab_root_candidates(ab_limits.root_order_hints,
+                                  candidate_verify_ms);
+    if (!verified_order.empty()) {
+      for (Move hint : ab_limits.root_order_hints) {
+        if (std::find(verified_order.begin(), verified_order.end(), hint) ==
+            verified_order.end()) {
+          verified_order.push_back(hint);
+        }
+      }
+      ab_limits.root_order_hints = std::move(verified_order);
+    }
+    ab_limits.startTime = now();
+  }
 
   auto saved_bestmove = engine_->get_on_bestmove();
   auto saved_update_full = engine_->get_on_update_full();
