@@ -13,6 +13,7 @@
 #include "nn/policy_map.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
@@ -20,11 +21,46 @@
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <string>
 #include <vector>
 
 using namespace MetalFish;
 
 namespace {
+
+std::string move_to_string(Move move) {
+  std::string text;
+  text.push_back(static_cast<char>('a' + file_of(move.from_sq())));
+  text.push_back(static_cast<char>('1' + rank_of(move.from_sq())));
+  text.push_back(static_cast<char>('a' + file_of(move.to_sq())));
+  text.push_back(static_cast<char>('1' + rank_of(move.to_sq())));
+  if (move.type_of() == PROMOTION) {
+    char promotion = 'q';
+    if (move.promotion_type() == ROOK)
+      promotion = 'r';
+    else if (move.promotion_type() == BISHOP)
+      promotion = 'b';
+    else if (move.promotion_type() == KNIGHT)
+      promotion = 'n';
+    text.push_back(promotion);
+  }
+  return text;
+}
+
+std::vector<std::pair<Move, float>>
+sorted_priors(const MCTS::EvaluationResult &result) {
+  std::vector<std::pair<Move, float>> priors = result.policy_priors;
+  std::sort(priors.begin(), priors.end(), [](const auto &lhs,
+                                             const auto &rhs) {
+    return lhs.second > rhs.second;
+  });
+  return priors;
+}
+
+bool should_dump_nn_debug() {
+  const char *dump = std::getenv("METALFISH_NN_DEBUG_DUMP");
+  return dump && dump[0] != '\0' && std::string(dump) != "0";
+}
 
 bool test_encoder_policy_roundtrip() {
   std::cout << "  Encoder/policy roundtrip..." << std::endl;
@@ -137,33 +173,8 @@ bool test_mcts_evaluator_optional() {
       std::cout << "    FAIL: empty policy output" << std::endl;
       return false;
     }
-    if (const char *dump = std::getenv("METALFISH_NN_DEBUG_DUMP");
-        dump && dump[0] != '\0' && std::string(dump) != "0") {
-      auto move_to_string = [](Move move) {
-        std::string text;
-        text.push_back(static_cast<char>('a' + file_of(move.from_sq())));
-        text.push_back(static_cast<char>('1' + rank_of(move.from_sq())));
-        text.push_back(static_cast<char>('a' + file_of(move.to_sq())));
-        text.push_back(static_cast<char>('1' + rank_of(move.to_sq())));
-        if (move.type_of() == PROMOTION) {
-          char promotion = 'q';
-          if (move.promotion_type() == ROOK)
-            promotion = 'r';
-          else if (move.promotion_type() == BISHOP)
-            promotion = 'b';
-          else if (move.promotion_type() == KNIGHT)
-            promotion = 'n';
-          text.push_back(promotion);
-        }
-        return text;
-      };
-
-      std::vector<std::pair<Move, float>> priors = result.policy_priors;
-      std::sort(priors.begin(), priors.end(),
-                [](const auto &lhs, const auto &rhs) {
-                  return lhs.second > rhs.second;
-                });
-
+    if (should_dump_nn_debug()) {
+      const auto priors = sorted_priors(result);
       std::cout << std::fixed << std::setprecision(6);
       std::cout << "    DEBUG backend: " << eval.GetNetworkInfo() << std::endl;
       std::cout << "    DEBUG value=" << result.value;
@@ -192,8 +203,182 @@ bool test_mcts_evaluator_optional() {
   }
 }
 
+struct ReferenceFenCase {
+  const char *name;
+  const char *fen;
+  float value;
+  std::array<float, 3> wdl;
+  float moves_left;
+  size_t legal_moves;
+  std::array<std::pair<const char *, float>, 5> top_policy;
+};
+
 bool close_enough(float a, float b, float tolerance) {
   return std::fabs(a - b) <= tolerance;
+}
+
+struct ReferenceTolerances {
+  float value = 3e-2f;
+  float wdl = 3e-2f;
+  float moves_left = 2.5e-1f;
+  float policy = 6e-2f;
+};
+
+bool test_bt4_reference_outputs_optional() {
+  std::cout << "  BT4 fixed-position reference outputs..." << std::endl;
+  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights_path) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return true;
+  }
+
+  const std::array<ReferenceFenCase, 5> cases = {{
+      {"start",
+       "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+       0.024781f,
+       {0.190430f, 0.643920f, 0.165650f},
+       198.672256f,
+       20,
+       {{{"d2d4", 1.631536f},
+         {"g1f3", 1.593553f},
+         {"c2c4", 1.429961f},
+         {"g2g3", 1.142768f},
+         {"e2e3", 1.060148f}}}},
+      {"after-e4-black",
+       "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+       -0.017762f,
+       {0.167213f, 0.647812f, 0.184975f},
+       196.408340f,
+       20,
+       {{{"e7e5", 3.334562f},
+         {"c7c6", 0.555071f},
+         {"c7c5", 0.270597f},
+         {"b8c6", -0.813998f},
+         {"e7e6", -0.823254f}}}},
+      {"bk07",
+       "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/"
+       "R2Q2K1 w - - 0 1",
+       0.514738f,
+       {0.609163f, 0.296411f, 0.094425f},
+       118.599846f,
+       34,
+       {{{"a3d6", 2.325019f},
+         {"f3g3", 2.061997f},
+         {"a3b4", 1.848635f},
+         {"d1c1", 1.614317f},
+         {"h5f6", 0.444747f}}}},
+      {"castling-rights",
+       "r3k2r/pppq1ppp/2npbn2/4p3/2B1P3/2NP1N2/PPP2PPP/"
+       "R1BQ1RK1 w kq - 0 8",
+       0.985659f,
+       {0.989455f, 0.006749f, 0.003796f},
+       79.126686f,
+       36,
+       {{{"c1g5", 1.983281f},
+         {"c3d5", 1.477554f},
+         {"a2a4", 1.432842f},
+         {"h2h3", 1.250058f},
+         {"c4b5", 1.065558f}}}},
+      {"rook-endgame",
+       "8/2k5/8/8/8/8/4K3/6R1 w - - 0 1",
+       0.999972f,
+       {0.999975f, 0.000023f, 0.000002f},
+       22.327986f,
+       22,
+       {{{"g1d1", 1.443181f},
+         {"e2d3", 1.430409f},
+         {"e2e3", 1.318428f},
+         {"g1g6", 1.297542f},
+         {"e2f3", 1.032590f}}}},
+  }};
+
+  try {
+    MCTS::NNMCTSEvaluator eval(weights_path);
+    const ReferenceTolerances tolerances;
+    for (const auto &test_case : cases) {
+      StateInfo st;
+      Position pos;
+      pos.set(test_case.fen, false, &st);
+      const auto result = eval.Evaluate(pos);
+      const auto priors = sorted_priors(result);
+      if (result.policy_priors.empty()) {
+        std::cout << "    FAIL: " << test_case.name
+                  << " empty policy output" << std::endl;
+        return false;
+      }
+      if (!result.has_wdl || !result.has_moves_left) {
+        std::cout << "    FAIL: " << test_case.name
+                  << " missing WDL or moves-left head" << std::endl;
+        return false;
+      }
+      if (result.policy_priors.size() != test_case.legal_moves) {
+        std::cout << "    FAIL: " << test_case.name
+                  << " legal count mismatch actual="
+                  << result.policy_priors.size()
+                  << " expected=" << test_case.legal_moves << std::endl;
+        return false;
+      }
+      if (!close_enough(result.value, test_case.value, tolerances.value)) {
+        std::cout << "    FAIL: " << test_case.name
+                  << " value drift actual=" << result.value
+                  << " expected=" << test_case.value << std::endl;
+        return false;
+      }
+      for (size_t i = 0; i < test_case.wdl.size(); ++i) {
+        if (!close_enough(result.wdl[i], test_case.wdl[i], tolerances.wdl)) {
+          std::cout << "    FAIL: " << test_case.name << " WDL[" << i
+                    << "] drift actual=" << result.wdl[i]
+                    << " expected=" << test_case.wdl[i] << std::endl;
+          return false;
+        }
+      }
+      if (!close_enough(result.moves_left, test_case.moves_left,
+                        tolerances.moves_left)) {
+        std::cout << "    FAIL: " << test_case.name
+                  << " moves-left drift actual=" << result.moves_left
+                  << " expected=" << test_case.moves_left << std::endl;
+        return false;
+      }
+      for (size_t i = 0; i < test_case.top_policy.size(); ++i) {
+        const auto actual_move = move_to_string(priors[i].first);
+        const auto &[expected_move, expected_logit] = test_case.top_policy[i];
+        if (actual_move != expected_move) {
+          std::cout << "    FAIL: " << test_case.name << " top policy " << i
+                    << " move drift actual=" << actual_move
+                    << " expected=" << expected_move << std::endl;
+          return false;
+        }
+        if (!close_enough(priors[i].second, expected_logit,
+                          tolerances.policy)) {
+          std::cout << "    FAIL: " << test_case.name << " top policy " << i
+                    << " logit drift actual=" << priors[i].second
+                    << " expected=" << expected_logit << std::endl;
+          return false;
+        }
+      }
+      if (should_dump_nn_debug()) {
+        std::cout << std::fixed << std::setprecision(6);
+        std::cout << "    DEBUG reference " << test_case.name
+                  << " value=" << result.value << " wdl=[" << result.wdl[0]
+                  << "," << result.wdl[1] << "," << result.wdl[2]
+                  << "] moves_left=" << result.moves_left
+                  << " legal=" << result.policy_priors.size() << " top:";
+        const size_t limit = std::min<size_t>(priors.size(), 5);
+        for (size_t i = 0; i < limit; ++i) {
+          std::cout << " " << move_to_string(priors[i].first) << "="
+                    << priors[i].second;
+        }
+        std::cout << std::endl;
+      }
+    }
+
+    std::cout << "    PASS: checked " << cases.size()
+              << " fixed positions" << std::endl;
+    return true;
+  } catch (const std::exception &e) {
+    std::cout << "    FAIL: exception: " << e.what() << std::endl;
+    return false;
+  }
 }
 
 struct EvalTolerances {
@@ -376,6 +561,7 @@ int main() {
   const bool ok1 = test_encoder_policy_roundtrip();
   const bool ok2 = test_encoder_repetition_plane();
   const bool ok3 = test_mcts_evaluator_optional();
-  const bool ok4 = test_mcts_evaluator_batch_parity_optional();
-  return (ok1 && ok2 && ok3 && ok4) ? 0 : 1;
+  const bool ok4 = test_bt4_reference_outputs_optional();
+  const bool ok5 = test_mcts_evaluator_batch_parity_optional();
+  return (ok1 && ok2 && ok3 && ok4 && ok5) ? 0 : 1;
 }
