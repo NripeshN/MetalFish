@@ -878,6 +878,25 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
   const int64_t deadline_ms = SteadyNowMs() + delay_ms;
 
   while (!should_stop()) {
+    std::vector<Move> latest_hints;
+    const auto root_moves = mcts_search_->GetRootMoveStats(hint_count);
+    for (const auto &root_move : root_moves) {
+      if (root_move.move == Move::none())
+        continue;
+      if (std::find(latest_hints.begin(), latest_hints.end(),
+                    root_move.move) == latest_hints.end()) {
+        latest_hints.push_back(root_move.move);
+      }
+    }
+    if (!latest_hints.empty()) {
+      hints = std::move(latest_hints);
+    }
+    if (delay_ms == 0 || SteadyNowMs() >= deadline_ms)
+      break;
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
+  }
+
+  if (hints.empty()) {
     const auto root_moves = mcts_search_->GetRootMoveStats(hint_count);
     for (const auto &root_move : root_moves) {
       if (root_move.move == Move::none())
@@ -885,9 +904,6 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
       if (std::find(hints.begin(), hints.end(), root_move.move) == hints.end())
         hints.push_back(root_move.move);
     }
-    if (!hints.empty() || delay_ms == 0 || SteadyNowMs() >= deadline_ms)
-      break;
-    std::this_thread::sleep_for(std::chrono::microseconds(500));
   }
 
   if (config_.trace_decisions && !hints.empty()) {
