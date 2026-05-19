@@ -60,6 +60,11 @@ void LaunchResidualAddKernel(const float *parent, const float *secondary,
                              float secondary_scale,
                              cudaStream_t stream = nullptr);
 
+void LaunchResidualLayerNormKernel(
+    const float *parent, const float *secondary, const float *gamma,
+    const float *beta, float *residual, float *output, int rows, int width,
+    float secondary_scale, float epsilon, cudaStream_t stream = nullptr);
+
 void LaunchAttentionScoreKernel(const float *query, const float *key,
                                 float *scores, int batch_size, int heads,
                                 int squares, int head_depth, int qkv_width,

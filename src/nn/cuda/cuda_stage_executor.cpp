@@ -908,14 +908,11 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
   output.output = output.normalized;
 
   cudaStream_t stream = workspace.Stream();
-  LaunchResidualAddKernel(input, output.feed_forward, output.residual,
-                          rows, output.output_width,
-                          FeedForwardResidualScale(execution_plan, ffn.name),
-                          stream);
-  LaunchLayerNormKernel(output.residual, gamma.data, beta.data,
-                        output.normalized, rows, output.output_width,
-                        FeedForwardLayerNormEpsilon(execution_plan, ffn.name),
-                        stream);
+  LaunchResidualLayerNormKernel(
+      input, output.feed_forward, gamma.data, beta.data, output.residual,
+      output.normalized, rows, output.output_width,
+      FeedForwardResidualScale(execution_plan, ffn.name),
+      FeedForwardLayerNormEpsilon(execution_plan, ffn.name), stream);
   return output;
 }
 
@@ -1246,14 +1243,11 @@ CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
   output.rows = rows;
 
   cudaStream_t stream = workspace.Stream();
-  LaunchResidualAddKernel(parent, attention_output.projection,
-                          output.residual, rows, width,
-                          FeedForwardResidualScale(execution_plan, norm.name),
-                          stream);
-  LaunchLayerNormKernel(output.residual, gamma.data, beta.data,
-                        output.normalized, rows, width,
-                        AttentionLayerNormEpsilon(execution_plan, norm.name),
-                        stream);
+  LaunchResidualLayerNormKernel(
+      parent, attention_output.projection, gamma.data, beta.data,
+      output.residual, output.normalized, rows, width,
+      FeedForwardResidualScale(execution_plan, norm.name),
+      AttentionLayerNormEpsilon(execution_plan, norm.name), stream);
   return output;
 }
 

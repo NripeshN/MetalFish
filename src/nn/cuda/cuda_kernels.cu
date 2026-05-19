@@ -264,6 +264,55 @@ __global__ void ResidualAddKernel(const float *parent, const float *secondary,
   output[index] = parent[index] + secondary[index] * secondary_scale;
 }
 
+__global__ void ResidualLayerNormKernel(
+    const float *parent, const float *secondary, const float *gamma,
+    const float *beta, float *residual, float *output, int width,
+    float secondary_scale, float epsilon) {
+  extern __shared__ float reductions[];
+  float *sum_storage = reductions;
+  float *square_storage = reductions + blockDim.x;
+
+  const int row = blockIdx.x;
+  const std::size_t row_offset = static_cast<std::size_t>(row) * width;
+  const float *parent_row = parent + row_offset;
+  const float *secondary_row = secondary + row_offset;
+  float *residual_row = residual + row_offset;
+  float *output_row = output + row_offset;
+
+  float sum = 0.0f;
+  float square_sum = 0.0f;
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float value = parent_row[col] + secondary_row[col] * secondary_scale;
+    sum += value;
+    square_sum += value * value;
+  }
+
+  sum_storage[threadIdx.x] = sum;
+  square_storage[threadIdx.x] = square_sum;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      sum_storage[threadIdx.x] += sum_storage[threadIdx.x + stride];
+      square_storage[threadIdx.x] += square_storage[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+
+  const float mean = sum_storage[0] / static_cast<float>(width);
+  float variance = square_storage[0] / static_cast<float>(width) - mean * mean;
+  if (variance < 0.0f)
+    variance = 0.0f;
+  const float inv_std = rsqrtf(variance + epsilon);
+
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float value = parent_row[col] + secondary_row[col] * secondary_scale;
+    residual_row[col] = value;
+    const float normalized = (value - mean) * inv_std;
+    output_row[col] = normalized * gamma[col] + beta[col];
+  }
+}
+
 __global__ void AttentionBiasAddKernel(float *scores, const float *bias,
                                        int total) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -583,6 +632,38 @@ void LaunchResidualAddKernel(const float *parent, const float *secondary,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("ResidualAddKernel synchronize", status));
+}
+
+void LaunchResidualLayerNormKernel(
+    const float *parent, const float *secondary, const float *gamma,
+    const float *beta, float *residual, float *output, int rows, int width,
+    float secondary_scale, float epsilon, cudaStream_t stream) {
+  if (!parent || !secondary || !gamma || !beta || !residual || !output) {
+    throw std::runtime_error(
+        "CUDA residual layernorm kernel received null buffer");
+  }
+  if (rows <= 0 || width <= 0 || epsilon <= 0.0f) {
+    throw std::runtime_error(
+        "CUDA residual layernorm kernel dimensions are invalid");
+  }
+
+  constexpr int kThreads = 256;
+  const std::size_t shared_bytes = 2 * kThreads * sizeof(float);
+  ResidualLayerNormKernel<<<rows, kThreads, shared_bytes, stream>>>(
+      parent, secondary, gamma, beta, residual, output, width,
+      secondary_scale, epsilon);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("ResidualLayerNormKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("ResidualLayerNormKernel synchronize", status));
+  }
 }
 
 void LaunchAttentionScoreKernel(const float *query, const float *key,
