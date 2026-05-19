@@ -7,6 +7,7 @@
 
 #include "cuda_execution_tape.h"
 
+#include "cuda_attention_plan.h"
 #include "cuda_runtime_probe.h"
 
 #include <sstream>
@@ -76,6 +77,34 @@ FeedForwardWidths FeedForwardOutputWidths(
   return FeedForwardWidths{static_cast<int>(hidden), static_cast<int>(output)};
 }
 
+bool StartsWith(std::string_view value, std::string_view prefix) {
+  return value.size() >= prefix.size() &&
+         value.substr(0, prefix.size()) == prefix;
+}
+
+bool EndsWith(std::string_view value, std::string_view suffix) {
+  return value.size() >= suffix.size() &&
+         value.substr(value.size() - suffix.size()) == suffix;
+}
+
+bool IsAttentionLayerNormName(std::string_view name) {
+  if (!EndsWith(name, ".ln1"))
+    return false;
+  if (StartsWith(name, "body.encoder."))
+    return true;
+  return StartsWith(name, "policy.") &&
+         name.find(".encoder.") != std::string_view::npos;
+}
+
+int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
+                       std::string_view name) {
+  if (StartsWith(name, "body.encoder."))
+    return plan.format.body_attention_heads;
+  if (StartsWith(name, "policy."))
+    return plan.format.policy_attention_heads;
+  return 0;
+}
+
 } // namespace
 
 std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
@@ -94,6 +123,22 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
     return "feed_forward_output";
   case CudaExecutionBufferRole::ResidualOutput:
     return "residual_output";
+  case CudaExecutionBufferRole::AttentionQuery:
+    return "attention_query";
+  case CudaExecutionBufferRole::AttentionKey:
+    return "attention_key";
+  case CudaExecutionBufferRole::AttentionValue:
+    return "attention_value";
+  case CudaExecutionBufferRole::AttentionScores:
+    return "attention_scores";
+  case CudaExecutionBufferRole::AttentionProbabilities:
+    return "attention_probabilities";
+  case CudaExecutionBufferRole::AttentionContext:
+    return "attention_context";
+  case CudaExecutionBufferRole::AttentionOutputProjection:
+    return "attention_output_projection";
+  case CudaExecutionBufferRole::AttentionResidualOutput:
+    return "attention_residual_output";
   }
   return "unknown";
 }
@@ -172,7 +217,9 @@ CudaExecutionTape CreateResolvedExecutionTape(
     throw std::runtime_error("CUDA execution tape batch size is invalid");
 
   CudaExecutionTape tape;
-  for (const auto &step : plan.steps) {
+  for (std::size_t step_index = 0; step_index < plan.steps.size();
+       ++step_index) {
+    const auto &step = plan.steps[step_index];
     switch (step.kind) {
     case NetworkExecutionOpKind::Dense: {
       const int width = DenseOutputWidth(step);
@@ -184,8 +231,11 @@ CudaExecutionTape CreateResolvedExecutionTape(
     }
     case NetworkExecutionOpKind::LayerNorm: {
       const int width = LayerNormWidth(step);
+      const int rows = IsAttentionLayerNormName(step.name)
+                           ? batch_size * kCudaAttentionSquares
+                           : batch_size;
       tape.Add(step.name + ".normalized",
-               CudaExecutionBufferRole::NormalizedOutput, batch_size, width);
+               CudaExecutionBufferRole::NormalizedOutput, rows, width);
       break;
     }
     case NetworkExecutionOpKind::Gate: {
@@ -207,6 +257,31 @@ CudaExecutionTape CreateResolvedExecutionTape(
                widths.output);
       break;
     }
+    case NetworkExecutionOpKind::Attention: {
+      const int head_count = AttentionHeadCount(plan, step.name);
+      const auto attention =
+          ResolveCudaAttentionStagePlan(plan, step_index, head_count);
+      const int square_rows = batch_size * attention.squares;
+      tape.Add(step.name + ".q", CudaExecutionBufferRole::AttentionQuery,
+               square_rows, attention.qkv_width);
+      tape.Add(step.name + ".k", CudaExecutionBufferRole::AttentionKey,
+               square_rows, attention.qkv_width);
+      tape.Add(step.name + ".v", CudaExecutionBufferRole::AttentionValue,
+               square_rows, attention.qkv_width);
+      tape.Add(step.name + ".scores", CudaExecutionBufferRole::AttentionScores,
+               batch_size * attention.heads * attention.squares,
+               attention.squares);
+      tape.Add(step.name + ".probabilities",
+               CudaExecutionBufferRole::AttentionProbabilities,
+               batch_size * attention.heads * attention.squares,
+               attention.squares);
+      tape.Add(step.name + ".context", CudaExecutionBufferRole::AttentionContext,
+               square_rows, attention.qkv_width);
+      tape.Add(step.name + ".projection",
+               CudaExecutionBufferRole::AttentionOutputProjection, square_rows,
+               attention.output_width);
+      break;
+    }
     default:
       break;
     }
@@ -221,6 +296,17 @@ CudaExecutionTape CreateResolvedExecutionTape(
     const int width = LayerNormWidth(step);
     tape.Add(step.name + ".residual", CudaExecutionBufferRole::ResidualOutput,
              batch_size, width);
+  }
+  for (std::size_t i = 1; i < plan.steps.size(); ++i) {
+    const auto &step = plan.steps[i];
+    if (step.kind != NetworkExecutionOpKind::LayerNorm ||
+        !IsAttentionLayerNormName(step.name)) {
+      continue;
+    }
+    const int width = LayerNormWidth(step);
+    tape.Add(step.name + ".attention_residual",
+             CudaExecutionBufferRole::AttentionResidualOutput,
+             batch_size * kCudaAttentionSquares, width);
   }
   return tape;
 }

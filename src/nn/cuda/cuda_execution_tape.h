@@ -28,6 +28,14 @@ enum class CudaExecutionBufferRole {
   FeedForwardHiddenOutput,
   FeedForwardOutput,
   ResidualOutput,
+  AttentionQuery,
+  AttentionKey,
+  AttentionValue,
+  AttentionScores,
+  AttentionProbabilities,
+  AttentionContext,
+  AttentionOutputProjection,
+  AttentionResidualOutput,
 };
 
 std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role);

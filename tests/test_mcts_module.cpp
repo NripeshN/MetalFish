@@ -277,6 +277,10 @@ void test_network_format_descriptor(TestCounter &tc) {
          tc);
   expect(descriptor.wdl, "WDL value head should be detected", tc);
   expect(descriptor.moves_left, "moves-left head should be detected", tc);
+  expect(descriptor.body_attention_heads == 0,
+         "minimal fixture should preserve absent body head count", tc);
+  expect(descriptor.policy_attention_heads == 0,
+         "minimal fixture should preserve absent policy head count", tc);
   expect(descriptor.input_embedding == NN::INPUT_EMBEDDING_PE_DENSE,
          "input embedding should be preserved", tc);
   expect(descriptor.activations.default_activation == "mish",
@@ -392,6 +396,8 @@ void test_network_weight_inventory(TestCounter &tc) {
       loaded_plan, loaded_weights, loaded_policy_head, loaded_value_head);
   expect(loaded_validation.ok(),
          "loaded BT4 tensor plan should validate selected heads", tc);
+  expect(loaded_descriptor.body_attention_heads > 0,
+         "loaded BT4 descriptor should expose body attention heads", tc);
 
   const auto loaded_inventory = NN::CreateNetworkWeightInventory(
       loaded_weights, loaded_policy_head, loaded_value_head, loaded_plan);
@@ -537,6 +543,28 @@ void test_network_execution_plan(TestCounter &tc) {
          "loaded CUDA attention plan should detect smolgen branch", tc);
   expect(loaded_attention_plan.smolgen.has_global_positional_weights,
          "loaded CUDA attention plan should attach global smolgen weights",
+         tc);
+  const auto loaded_tape =
+      NN::Cuda::CreateResolvedExecutionTape(loaded_resolved_plan, 1);
+  const auto loaded_attention_count =
+      loaded_resolved_plan.StepCount(NN::NetworkExecutionOpKind::Attention);
+  expect(loaded_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::AttentionQuery) ==
+             loaded_attention_count,
+         "loaded CUDA tape should allocate one query buffer per attention",
+         tc);
+  const auto &loaded_scores =
+      loaded_tape.RequireName("body.encoder.0.mha.scores");
+  expect(loaded_scores.rows == loaded_attention_plan.heads *
+                                   loaded_attention_plan.squares &&
+             loaded_scores.width == loaded_attention_plan.squares,
+         "loaded CUDA tape should shape attention score matrices by head and "
+         "square",
+         tc);
+  expect(loaded_tape.RequireName("body.encoder.0.ln1.attention_residual")
+             .entries == static_cast<std::size_t>(loaded_attention_plan.squares) *
+                             loaded_attention_plan.output_width,
+         "loaded CUDA tape should allocate body attention residual scratch",
          tc);
 #endif
 }
@@ -1019,6 +1047,15 @@ void test_cuda_execution_schedule(TestCounter &tc) {
           tensor(17, "body.encoder.0.mha.smolgen.ln2_betas", 8, {8},
                  NN::NetworkWeightTensorKind::NormBias),
       }});
+  attention_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::LayerNorm,
+      "body.encoder.0.ln1",
+      {
+          tensor(18, "body.encoder.0.ln1_gammas", 8, {8},
+                 NN::NetworkWeightTensorKind::NormScale),
+          tensor(19, "body.encoder.0.ln1_betas", 8, {8},
+                 NN::NetworkWeightTensorKind::NormBias),
+      }});
   const auto resolved_attention =
       NN::Cuda::ResolveCudaAttentionStagePlan(attention_plan, 1, 2);
   expect(resolved_attention.heads == 2,
@@ -1031,6 +1068,38 @@ void test_cuda_execution_schedule(TestCounter &tc) {
          "CUDA attention plan should derive smolgen per-head width", tc);
   expect(resolved_attention.smolgen.has_global_positional_weights,
          "CUDA attention plan should validate global smolgen dimensions", tc);
+  attention_plan.format.body_attention_heads = 2;
+  const auto attention_tape =
+      NN::Cuda::CreateResolvedExecutionTape(attention_plan, 2);
+  expect(attention_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::AttentionQuery) == 1,
+         "CUDA attention tape should allocate a query buffer", tc);
+  expect(attention_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::AttentionScores) == 1,
+         "CUDA attention tape should allocate score scratch", tc);
+  expect(attention_tape.RequireName("body.encoder.0.mha.q").rows ==
+             2 * NN::Cuda::kCudaAttentionSquares,
+         "CUDA attention query rows should scale by batch and board squares",
+         tc);
+  expect(attention_tape.RequireName("body.encoder.0.mha.q").width == 8,
+         "CUDA attention query width should match QKV width", tc);
+  expect(attention_tape.RequireName("body.encoder.0.mha.scores").rows ==
+             2 * 2 * NN::Cuda::kCudaAttentionSquares,
+         "CUDA attention score rows should scale by batch, heads, and queries",
+         tc);
+  expect(attention_tape.RequireName("body.encoder.0.mha.scores").width ==
+             NN::Cuda::kCudaAttentionSquares,
+         "CUDA attention score width should cover every key square", tc);
+  expect(attention_tape.RequireName("body.encoder.0.mha.projection").entries ==
+             2U * NN::Cuda::kCudaAttentionSquares * 8U,
+         "CUDA attention projection buffer should return model-width rows",
+         tc);
+  expect(attention_tape.RequireName("body.encoder.0.ln1.normalized").rows ==
+             2 * NN::Cuda::kCudaAttentionSquares,
+         "CUDA attention layernorm rows should scale by board squares", tc);
+  expect(attention_tape.RequireName("body.encoder.0.ln1.attention_residual")
+             .entries == 2U * NN::Cuda::kCudaAttentionSquares * 8U,
+         "CUDA attention residual scratch should match model-width rows", tc);
   bool bad_heads_rejected = false;
   try {
     (void)NN::Cuda::ResolveCudaAttentionStagePlan(attention_plan, 1, 3);

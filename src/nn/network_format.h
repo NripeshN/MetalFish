@@ -27,6 +27,8 @@ struct NetworkFormatDescriptor {
   bool conv_policy = false;
   bool attention_policy = false;
   bool attention_body = false;
+  int body_attention_heads = 0;
+  int policy_attention_heads = 0;
   InputEmbedding input_embedding = INPUT_EMBEDDING_PE_MAP;
   NetworkActivations activations;
 

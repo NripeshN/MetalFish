@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `55a4bb7b-904e-4efb-9ed8-f4e771852005` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `7e7134c7-4846-49e4-8e51-0e0fe41e798b` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `c4f69c6b-0d93-41f7-9d08-163964ed32f0` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `beddfe77-44df-463b-89c9-c9955b7a2ee1` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -112,7 +112,9 @@ Current CUDA backend boundary:
   intermediate device buffers. The current smoke executor uses it for
   dense/activation/normalization intermediates, including multi-stage
   dense/layernorm, gate, and feed-forward/layernorm sequences; production CUDA
-  layers should extend this rather than allocating anonymous scratch.
+  layers should extend this rather than allocating anonymous scratch. Attention
+  tape bindings now reserve explicit Q/K/V, score, probability, context, output
+  projection, and residual scratch using resolved head and square geometry.
 - `src/nn/cuda/cuda_execution_schedule.*` classifies resolved plan steps into
   supported dense/activation stages, supported dense/layernorm stages,
   supported gate stages, supported feed-forward stages, supported non-output
