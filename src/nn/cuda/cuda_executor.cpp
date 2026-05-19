@@ -58,15 +58,22 @@ float *AllocateDeviceFloats(std::size_t entries, const char *name) {
   return ptr;
 }
 
-void CopyDeviceFloats(float *dst, const float *src, std::size_t entries,
-                      const char *name) {
-  if (entries == 0)
+void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
+                         int src_stride, int rows, int width,
+                         const char *name) {
+  if (rows <= 0 || width <= 0)
     return;
   if (!dst || !src)
-    throw std::runtime_error(std::string("CUDA device copy missing buffer: ") +
+    throw std::runtime_error(std::string("CUDA row copy missing buffer: ") +
                              name);
-  const cudaError_t status =
-      cudaMemcpy(dst, src, entries * sizeof(float), cudaMemcpyDeviceToDevice);
+  if (dst_stride < width || src_stride < width)
+    throw std::runtime_error(std::string("CUDA row copy stride too small: ") +
+                             name);
+  const cudaError_t status = cudaMemcpy2D(
+      dst, static_cast<std::size_t>(dst_stride) * sizeof(float), src,
+      static_cast<std::size_t>(src_stride) * sizeof(float),
+      static_cast<std::size_t>(width) * sizeof(float), rows,
+      cudaMemcpyDeviceToDevice);
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
@@ -154,8 +161,8 @@ public:
                const NetworkResolvedExecutionPlan &execution_plan,
                const CudaWeightBuffers &weights, CudaInferenceBuffers &buffers,
                int batch_size) override {
-    if (batch_size != 1)
-      throw std::runtime_error("CUDA plan smoke executor supports batch size 1");
+    if (batch_size <= 0)
+      throw std::runtime_error("CUDA plan smoke executor received empty batch");
     if (!buffers.input_values || !buffers.policy)
       throw std::runtime_error("CUDA plan smoke executor received no buffers");
 
@@ -181,9 +188,14 @@ public:
         output_width > plan.policy_outputs) {
       throw std::runtime_error("CUDA smoke tensor dimensions are inconsistent");
     }
+    if (buffers.raw_policy && output_width > plan.raw_policy_outputs) {
+      throw std::runtime_error(
+          "CUDA smoke raw policy stride is smaller than output");
+    }
 
     float *dense_output = nullptr;
     float *activation_output = nullptr;
+    float *norm_output = nullptr;
     try {
       const std::size_t scratch_entries =
           static_cast<std::size_t>(batch_size) * output_width;
@@ -191,6 +203,8 @@ public:
                                           "cudaMalloc(smoke_dense_output)");
       activation_output = AllocateDeviceFloats(
           scratch_entries, "cudaMalloc(smoke_activation_output)");
+      norm_output =
+          AllocateDeviceFloats(scratch_entries, "cudaMalloc(smoke_norm_output)");
 
       LaunchDenseAffineKernel(buffers.input_values, dense_weight.data,
                               dense_bias.data, dense_output, batch_size,
@@ -199,19 +213,26 @@ public:
           dense_output, activation_output, static_cast<int>(scratch_entries),
           ActivationFromString(execution_plan.format.activations.ffn_activation));
       LaunchLayerNormKernel(activation_output, gamma.data, beta.data,
-                            buffers.policy, batch_size, output_width, 1e-5f);
+                            norm_output, batch_size, output_width, 1e-5f);
+
+      CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, norm_output,
+                          output_width, batch_size, output_width,
+                          "cudaMemcpy(smoke_policy_rows)");
 
       if (buffers.raw_policy)
-        CopyDeviceFloats(buffers.raw_policy, activation_output, scratch_entries,
-                         "cudaMemcpy(smoke_raw_policy)");
+        CopyDeviceFloatRows(buffers.raw_policy, plan.raw_policy_outputs,
+                            activation_output, output_width, batch_size,
+                            output_width, "cudaMemcpy(smoke_raw_policy_rows)");
     } catch (...) {
       FreeDevice(dense_output);
       FreeDevice(activation_output);
+      FreeDevice(norm_output);
       throw;
     }
 
     FreeDevice(dense_output);
     FreeDevice(activation_output);
+    FreeDevice(norm_output);
   }
 
   std::string Name() const override { return "plan-smoke"; }

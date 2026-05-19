@@ -124,11 +124,17 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   format.attention_policy = true;
   format.activations.ffn_activation = "relu_2";
 
-  constexpr int kBatch = 1;
+  constexpr int kBatch = 3;
   constexpr int kInput = 3;
   constexpr int kOutput = 4;
-  const std::vector<float> input_values = {1.0f, -2.0f, 0.5f};
-  const std::vector<std::uint64_t> input_masks = {~0ULL, ~0ULL, ~0ULL};
+  const std::vector<float> input_values = {
+      1.0f, -2.0f, 0.5f,
+      -0.5f, 2.0f, 1.5f,
+      0.25f, -0.75f, 3.0f,
+  };
+  const std::vector<std::uint64_t> input_masks(static_cast<size_t>(kBatch) *
+                                                   kInput,
+                                               ~0ULL);
   const std::vector<float> dense_weights = {
       1.0f, 0.0f, 0.5f,
       -0.5f, 1.0f, 0.25f,
@@ -175,37 +181,38 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
            NetworkWeightTensorKind::NormBias},
       }});
 
-  std::vector<float> dense(kOutput, 0.0f);
-  std::vector<float> activated(kOutput, 0.0f);
-  for (int out = 0; out < kOutput; ++out) {
-    float sum = dense_bias[static_cast<size_t>(out)];
-    for (int in = 0; in < kInput; ++in) {
-      sum += input_values[static_cast<size_t>(in)] *
-             dense_weights[static_cast<size_t>(out) * kInput + in];
+  std::vector<float> activated(static_cast<size_t>(kBatch) * kOutput, 0.0f);
+  std::vector<float> expected(static_cast<size_t>(kBatch) * kOutput, 0.0f);
+  for (int batch = 0; batch < kBatch; ++batch) {
+    const size_t batch_offset = static_cast<size_t>(batch) * kOutput;
+    for (int out = 0; out < kOutput; ++out) {
+      float dense = dense_bias[static_cast<size_t>(out)];
+      for (int in = 0; in < kInput; ++in) {
+        dense += input_values[static_cast<size_t>(batch) * kInput + in] *
+                 dense_weights[static_cast<size_t>(out) * kInput + in];
+      }
+      const float relu = std::max(dense, 0.0f);
+      activated[batch_offset + out] = relu * relu;
     }
-    dense[static_cast<size_t>(out)] = sum;
-    const float relu = std::max(sum, 0.0f);
-    activated[static_cast<size_t>(out)] = relu * relu;
-  }
 
-  float sum = 0.0f;
-  float square_sum = 0.0f;
-  for (float value : activated) {
-    sum += value;
-    square_sum += value * value;
-  }
-  const float mean = sum / static_cast<float>(kOutput);
-  float variance = square_sum / static_cast<float>(kOutput) - mean * mean;
-  if (variance < 0.0f)
-    variance = 0.0f;
-  const float inv_std = 1.0f / std::sqrt(variance + 1e-5f);
-  std::vector<float> expected(kOutput, 0.0f);
-  for (int i = 0; i < kOutput; ++i) {
-    const float normalized =
-        (activated[static_cast<size_t>(i)] - mean) * inv_std;
-    expected[static_cast<size_t>(i)] =
-        normalized * gamma[static_cast<size_t>(i)] +
-        beta[static_cast<size_t>(i)];
+    float sum = 0.0f;
+    float square_sum = 0.0f;
+    for (int i = 0; i < kOutput; ++i) {
+      const float value = activated[batch_offset + i];
+      sum += value;
+      square_sum += value * value;
+    }
+    const float mean = sum / static_cast<float>(kOutput);
+    float variance = square_sum / static_cast<float>(kOutput) - mean * mean;
+    if (variance < 0.0f)
+      variance = 0.0f;
+    const float inv_std = 1.0f / std::sqrt(variance + 1e-5f);
+    for (int i = 0; i < kOutput; ++i) {
+      const float normalized = (activated[batch_offset + i] - mean) * inv_std;
+      expected[batch_offset + i] =
+          normalized * gamma[static_cast<size_t>(i)] +
+          beta[static_cast<size_t>(i)];
+    }
   }
 
   try {
@@ -221,18 +228,33 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
 
     result.allocation_bytes = buffers.AllocationBytes();
     const auto downloaded = buffers.DownloadOutputs(kBatch);
-    if (downloaded.policy.size() < expected.size() ||
-        downloaded.raw_policy.size() < activated.size()) {
+    if (downloaded.policy.size() != plan.PolicyEntries(kBatch) ||
+        downloaded.raw_policy.size() != plan.RawPolicyEntries(kBatch)) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA plan executor output size mismatch";
       return result;
     }
 
-    for (std::size_t i = 0; i < expected.size(); ++i) {
-      if (std::fabs(downloaded.policy[i] - expected[i]) > 1e-5f ||
-          std::fabs(downloaded.raw_policy[i] - activated[i]) > 1e-5f) {
+    for (int batch = 0; batch < kBatch; ++batch) {
+      const size_t expected_offset = static_cast<size_t>(batch) * kOutput;
+      const size_t policy_offset =
+          static_cast<size_t>(batch) * plan.policy_outputs;
+      const size_t raw_policy_offset =
+          static_cast<size_t>(batch) * plan.raw_policy_outputs;
+      for (int i = 0; i < kOutput; ++i) {
+        if (std::fabs(downloaded.policy[policy_offset + i] -
+                      expected[expected_offset + i]) > 1e-5f ||
+            std::fabs(downloaded.raw_policy[raw_policy_offset + i] -
+                      activated[expected_offset + i]) > 1e-5f) {
+          result.status = CudaSmokeStatus::Mismatch;
+          result.message = "CUDA plan executor pipeline output mismatch";
+          return result;
+        }
+      }
+      if (downloaded.policy[policy_offset + kOutput] != 0.0f ||
+          downloaded.raw_policy[raw_policy_offset + kOutput] != 0.0f) {
         result.status = CudaSmokeStatus::Mismatch;
-        result.message = "CUDA plan executor pipeline output mismatch";
+        result.message = "CUDA plan executor row stride overwrite";
         return result;
       }
     }
