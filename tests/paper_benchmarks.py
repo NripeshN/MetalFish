@@ -366,6 +366,8 @@ def apply_hybrid_env_options(options: Dict[str, str]) -> None:
         value = env_option(env_name)
         if value is not None:
             options[option_name] = value
+    if "HybridMCTSThreads" in options:
+        options["MCTSMaxThreads"] = options["HybridMCTSThreads"]
 
 
 def hybrid_split_for_threads(threads: int) -> Tuple[int, int]:

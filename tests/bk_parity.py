@@ -346,7 +346,12 @@ def setup_metalfish_hybrid(
     hybrid_mcts_kld: float,
     hybrid_root_reject: bool,
     hybrid_shared_tt: bool,
+    hybrid_root_hints: bool,
     ab_policy_weight: float,
+    root_hint_delay_ms: int,
+    root_hint_count: int,
+    mcts_minibatch: int,
+    low_time_fallback_ms: int,
 ) -> None:
     total_threads = max(3, threads, mcts_threads + ab_threads)
     sess.setoption("UseMCTS", "false")
@@ -357,18 +362,18 @@ def setup_metalfish_hybrid(
     sess.setoption("HybridMCTSThreads", str(mcts_threads))
     sess.setoption("HybridABThreads", str(ab_threads))
     sess.setoption("HybridAutoABThreadsCap", "0")
-    sess.setoption("TransformerLowTimeFallbackMs", "3000")
+    sess.setoption("TransformerLowTimeFallbackMs", str(low_time_fallback_ms))
     sess.setoption("TransformerMinMoveBudgetMs", "400")
     sess.setoption("MCTSMaxThreads", str(mcts_threads))
-    sess.setoption("MCTSMinibatchSize", "0")
+    sess.setoption("MCTSMinibatchSize", str(mcts_minibatch))
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
     sess.setoption("HybridMCTSMinimumKLDGainPerNode", str(hybrid_mcts_kld))
     sess.setoption("HybridMCTSRootReject", "true" if hybrid_root_reject else "false")
     sess.setoption("HybridMCTSUseSharedTT", "true" if hybrid_shared_tt else "false")
-    sess.setoption("HybridMCTSABRootHints", "true")
-    sess.setoption("HybridMCTSABRootHintDelayMs", "25")
-    sess.setoption("HybridMCTSABRootHintCount", "4")
+    sess.setoption("HybridMCTSABRootHints", "true" if hybrid_root_hints else "false")
+    sess.setoption("HybridMCTSABRootHintDelayMs", str(root_hint_delay_ms))
+    sess.setoption("HybridMCTSABRootHintCount", str(root_hint_count))
     sess.setoption("HybridABPolicyWeight", str(ab_policy_weight))
     sess.setoption("HybridTrace", "true" if trace else "false")
     sess.send("isready")
@@ -608,7 +613,12 @@ def run_once(
                 args.hybrid_mcts_kld,
                 args.hybrid_root_reject,
                 args.hybrid_shared_tt,
+                args.hybrid_root_hints,
                 args.hybrid_ab_policy_weight,
+                args.hybrid_root_hint_delay_ms,
+                args.hybrid_root_hint_count,
+                args.hybrid_mcts_minibatch,
+                args.hybrid_low_time_fallback_ms,
             )
             s.warmup(
                 mode,
@@ -733,7 +743,16 @@ def main() -> int:
         default=True,
     )
     parser.add_argument("--hybrid-shared-tt", action="store_true")
+    parser.add_argument(
+        "--hybrid-root-hints",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--hybrid-ab-policy-weight", type=float, default=0.0)
+    parser.add_argument("--hybrid-root-hint-delay-ms", type=int, default=25)
+    parser.add_argument("--hybrid-root-hint-count", type=int, default=4)
+    parser.add_argument("--hybrid-mcts-minibatch", type=int, default=0)
+    parser.add_argument("--hybrid-low-time-fallback-ms", type=int, default=3000)
     parser.add_argument("--multipv", type=int, default=1)
     parser.add_argument("--backend", default="metal")
     parser.add_argument("--weights", type=pathlib.Path, default=WEIGHTS)

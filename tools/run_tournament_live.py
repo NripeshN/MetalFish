@@ -85,6 +85,8 @@ def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None
         value = env_option(env_name)
         if value is not None:
             options[option_name] = value
+    if "HybridMCTSThreads" in options:
+        options["MCTSMaxThreads"] = options["HybridMCTSThreads"]
     if force_trace and "HYBRID_TRACE" not in os.environ:
         options["HybridTrace"] = "true"
 

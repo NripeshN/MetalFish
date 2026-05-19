@@ -51,6 +51,8 @@ def with_clean_hybrid_env(callback):
 
 def assert_paper_hybrid_env_overrides() -> None:
     overrides = {
+        "HYBRID_MCTS_THREADS": "1",
+        "HYBRID_AB_THREADS": "7",
         "HYBRID_AB_POLICY_WEIGHT": "0.02",
         "HYBRID_MCTS_ROOT_REJECT": "false",
         "HYBRID_MCTS_AB_ROOT_HINTS": "true",
@@ -69,6 +71,9 @@ def assert_paper_hybrid_env_overrides() -> None:
         "paper hybrid env overrides",
         options,
         {
+            "HybridMCTSThreads": "1",
+            "HybridABThreads": "7",
+            "MCTSMaxThreads": "1",
             "HybridABPolicyWeight": "0.02",
             "HybridMCTSRootReject": "false",
             "HybridMCTSABRootHints": "true",
