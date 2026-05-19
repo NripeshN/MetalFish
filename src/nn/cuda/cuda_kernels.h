@@ -24,7 +24,12 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
                              const float *bias, float *output, int batch_size,
                              int input_width, int output_width);
 
+void LaunchLayerNormKernel(const float *input, const float *gamma,
+                           const float *beta, float *output, int rows,
+                           int width, float epsilon);
+
 CudaKernelSmokeResult RunDenseAffineKernelSmoke();
+CudaKernelSmokeResult RunLayerNormKernelSmoke();
 
 } // namespace Cuda
 } // namespace NN

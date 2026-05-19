@@ -84,6 +84,49 @@ __global__ void DenseAffineKernel(const float *input, const float *weights,
   output[index] = sum;
 }
 
+__global__ void LayerNormKernel(const float *input, const float *gamma,
+                                const float *beta, float *output, int width,
+                                float epsilon) {
+  extern __shared__ float reductions[];
+  float *sum_storage = reductions;
+  float *square_storage = reductions + blockDim.x;
+
+  const int row = blockIdx.x;
+  const float *input_row = input + static_cast<std::size_t>(row) * width;
+  float *output_row = output + static_cast<std::size_t>(row) * width;
+
+  float sum = 0.0f;
+  float square_sum = 0.0f;
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float value = input_row[col];
+    sum += value;
+    square_sum += value * value;
+  }
+
+  sum_storage[threadIdx.x] = sum;
+  square_storage[threadIdx.x] = square_sum;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      sum_storage[threadIdx.x] += sum_storage[threadIdx.x + stride];
+      square_storage[threadIdx.x] += square_storage[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+
+  const float mean = sum_storage[0] / static_cast<float>(width);
+  float variance = square_storage[0] / static_cast<float>(width) - mean * mean;
+  if (variance < 0.0f)
+    variance = 0.0f;
+  const float inv_std = rsqrtf(variance + epsilon);
+
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float normalized = (input_row[col] - mean) * inv_std;
+    output_row[col] = normalized * gamma[col] + beta[col];
+  }
+}
+
 } // namespace
 
 void LaunchDenseAffineKernel(const float *input, const float *weights,
@@ -108,6 +151,28 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("DenseAffineKernel synchronize", status));
+}
+
+void LaunchLayerNormKernel(const float *input, const float *gamma,
+                           const float *beta, float *output, int rows,
+                           int width, float epsilon) {
+  if (!input || !gamma || !beta || !output)
+    throw std::runtime_error("CUDA layernorm kernel received null buffer");
+  if (rows <= 0 || width <= 0 || epsilon <= 0.0f)
+    throw std::runtime_error("CUDA layernorm kernel dimensions are invalid");
+
+  constexpr int kThreads = 256;
+  const std::size_t shared_bytes = 2 * kThreads * sizeof(float);
+  LayerNormKernel<<<rows, kThreads, shared_bytes>>>(input, gamma, beta, output,
+                                                    width, epsilon);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("LayerNormKernel launch", status));
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("LayerNormKernel synchronize", status));
 }
 
 CudaKernelSmokeResult RunDenseAffineKernelSmoke() {
@@ -184,6 +249,95 @@ CudaKernelSmokeResult RunDenseAffineKernelSmoke() {
     if (std::fabs(actual[i] - expected[i]) > 1e-5f) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA dense affine kernel output mismatch";
+      return result;
+    }
+  }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunLayerNormKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kRows = 3;
+  constexpr int kWidth = 5;
+  constexpr float kEpsilon = 1e-5f;
+  const std::vector<float> input = {
+      1.0f, 2.0f, 4.0f, 8.0f, 16.0f,
+      -3.0f, -1.0f, 0.0f, 1.0f, 3.0f,
+      0.25f, 0.25f, 0.25f, 0.25f, 0.25f,
+  };
+  const std::vector<float> gamma = {1.0f, 0.5f, -1.5f, 2.0f, 0.25f};
+  const std::vector<float> beta = {0.0f, -0.25f, 0.5f, 1.0f, -1.0f};
+  std::vector<float> actual(kRows * kWidth, 0.0f);
+  std::vector<float> expected(kRows * kWidth, 0.0f);
+
+  for (int row = 0; row < kRows; ++row) {
+    const std::size_t row_offset = static_cast<std::size_t>(row) * kWidth;
+    float sum = 0.0f;
+    float square_sum = 0.0f;
+    for (int col = 0; col < kWidth; ++col) {
+      const float value = input[row_offset + col];
+      sum += value;
+      square_sum += value * value;
+    }
+    const float mean = sum / static_cast<float>(kWidth);
+    float variance = square_sum / static_cast<float>(kWidth) - mean * mean;
+    if (variance < 0.0f)
+      variance = 0.0f;
+    const float inv_std = 1.0f / std::sqrt(variance + kEpsilon);
+    for (int col = 0; col < kWidth; ++col) {
+      const float normalized = (input[row_offset + col] - mean) * inv_std;
+      expected[row_offset + col] = normalized * gamma[col] + beta[col];
+    }
+  }
+
+  float *device_input = nullptr;
+  float *device_gamma = nullptr;
+  float *device_beta = nullptr;
+  float *device_output = nullptr;
+  try {
+    AllocateDevice(&device_input, input.size(), "cudaMalloc(layernorm_input)");
+    AllocateDevice(&device_gamma, gamma.size(), "cudaMalloc(layernorm_gamma)");
+    AllocateDevice(&device_beta, beta.size(), "cudaMalloc(layernorm_beta)");
+    AllocateDevice(&device_output, actual.size(),
+                   "cudaMalloc(layernorm_output)");
+
+    UploadFloats(device_input, input, "cudaMemcpy(layernorm_input)");
+    UploadFloats(device_gamma, gamma, "cudaMemcpy(layernorm_gamma)");
+    UploadFloats(device_beta, beta, "cudaMemcpy(layernorm_beta)");
+
+    LaunchLayerNormKernel(device_input, device_gamma, device_beta,
+                          device_output, kRows, kWidth, kEpsilon);
+    DownloadFloats(actual, device_output, "cudaMemcpy(layernorm_output)");
+  } catch (const std::exception &e) {
+    FreeDevice(device_input);
+    FreeDevice(device_gamma);
+    FreeDevice(device_beta);
+    FreeDevice(device_output);
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  FreeDevice(device_input);
+  FreeDevice(device_gamma);
+  FreeDevice(device_beta);
+  FreeDevice(device_output);
+
+  for (std::size_t i = 0; i < expected.size(); ++i) {
+    if (std::fabs(actual[i] - expected[i]) > 1e-5f) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA layernorm kernel output mismatch";
       return result;
     }
   }
