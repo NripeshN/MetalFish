@@ -14,6 +14,7 @@
 #include "mcts/search.h"
 #include "nn/loader.h"
 #include "nn/network.h"
+#include "nn/network_execution_plan.h"
 #include "nn/network_format.h"
 #include "nn/network_output_decoder.h"
 #include "nn/network_tensor_plan.h"
@@ -387,6 +388,79 @@ void test_network_weight_inventory(TestCounter &tc) {
       "loaded inventory should include selected policy head output", tc);
   expect(loaded_inventory.Contains("value." + loaded_value_head + ".ip_val_w"),
          "loaded inventory should include selected value head output", tc);
+}
+
+void test_network_execution_plan(TestCounter &tc) {
+  std::cout << "  Network execution plan..." << std::endl;
+
+  const auto file = make_minimal_attention_weights_file();
+  const auto descriptor = NN::DescribeNetworkFormat(file);
+  const auto tensor_plan = NN::CreateNetworkTensorPlan(descriptor);
+  NN::MultiHeadWeights weights(file.weights());
+  const std::string policy_head = NN::SelectPolicyHeadName(weights);
+  const std::string value_head = NN::SelectValueHeadName(weights);
+  const auto inventory =
+      NN::CreateNetworkWeightInventory(weights, policy_head, value_head,
+                                       tensor_plan);
+  const auto execution_plan = NN::CreateNetworkExecutionPlan(
+      descriptor, tensor_plan, policy_head, value_head, inventory);
+  const auto validation = execution_plan.ValidateAgainstInventory(inventory);
+  if (!validation.ok())
+    std::cout << "    " << validation.Summary() << std::endl;
+  expect(validation.ok(), "minimal execution plan should cover all tensors",
+         tc);
+  expect(execution_plan.ContainsStep("input.pack"),
+         "execution plan should begin with input packing", tc);
+  expect(execution_plan.ContainsStep("policy.vanilla.output"),
+         "execution plan should include selected policy output", tc);
+  expect(execution_plan.ContainsStep("value.winner.output"),
+         "execution plan should include selected value output", tc);
+  expect(execution_plan.ReferencesTensor("moves_left.weights"),
+         "execution plan should reference moves-left weights", tc);
+  expect(execution_plan.TensorReferenceCount() == inventory.tensors.size(),
+         "minimal execution plan should reference each tensor once", tc);
+
+  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights_path || std::string(weights_path).empty()) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  const auto loaded = NN::LoadWeightsFromFile(weights_path);
+  const auto loaded_descriptor = NN::DescribeNetworkFormat(loaded);
+  const auto loaded_tensor_plan =
+      NN::CreateNetworkTensorPlan(loaded_descriptor);
+  NN::MultiHeadWeights loaded_weights(loaded.weights());
+  const std::string loaded_policy_head =
+      NN::SelectPolicyHeadName(loaded_weights);
+  const std::string loaded_value_head =
+      NN::SelectValueHeadName(loaded_weights);
+  const auto loaded_inventory = NN::CreateNetworkWeightInventory(
+      loaded_weights, loaded_policy_head, loaded_value_head,
+      loaded_tensor_plan);
+  const auto loaded_execution_plan = NN::CreateNetworkExecutionPlan(
+      loaded_descriptor, loaded_tensor_plan, loaded_policy_head,
+      loaded_value_head, loaded_inventory);
+  const auto loaded_validation =
+      loaded_execution_plan.ValidateAgainstInventory(loaded_inventory);
+  if (!loaded_validation.ok())
+    std::cout << "    " << loaded_validation.Summary() << std::endl;
+  std::cout << "    Loaded execution: " << loaded_execution_plan.Summary()
+            << std::endl;
+  expect(loaded_validation.ok(),
+         "loaded BT4 execution plan should cover all tensors", tc);
+  expect(loaded_execution_plan.steps.size() > 20,
+         "loaded BT4 execution plan should expose transformer stages", tc);
+  expect(loaded_execution_plan.ContainsStep("body.encoder.0.mha"),
+         "loaded BT4 execution plan should include body attention", tc);
+  expect(loaded_execution_plan.ContainsStep("body.encoder.0.ffn"),
+         "loaded BT4 execution plan should include body FFN", tc);
+  expect(loaded_execution_plan.ReferencesTensor(
+             "policy." + loaded_policy_head + ".ip_pol_w"),
+         "loaded execution plan should reference selected policy output", tc);
+  expect(loaded_execution_plan.ReferencesTensor(
+             "value." + loaded_value_head + ".ip_val_w"),
+         "loaded execution plan should reference selected value output", tc);
 }
 
 void test_network_output_decoder(TestCounter &tc) {
@@ -1326,6 +1400,7 @@ bool test_mcts_all() {
   test_network_format_descriptor(tc);
   test_shared_nn_input_fixture(tc);
   test_network_weight_inventory(tc);
+  test_network_execution_plan(tc);
   test_network_output_decoder(tc);
   test_nn_backend_selector_contract(tc);
 #ifdef USE_CUDA

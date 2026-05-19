@@ -7,9 +7,10 @@
 
 #include "cuda_network.h"
 
-#include "cuda_runtime_probe.h"
+#include "../network_execution_plan.h"
 #include "../network_output_decoder.h"
 #include "../network_weight_inventory.h"
+#include "cuda_runtime_probe.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -32,8 +33,7 @@ constexpr int kDefaultMaxBatchSize = 256;
 CudaNetwork::CudaNetwork(const WeightsFile &weights)
     : format_(DescribeNetworkFormat(weights)),
       tensor_plan_(CreateNetworkTensorPlan(format_)),
-      buffer_layout_(LayoutFromTensorPlan(tensor_plan_,
-                                          kDefaultMaxBatchSize)),
+      buffer_layout_(LayoutFromTensorPlan(tensor_plan_, kDefaultMaxBatchSize)),
       executor_(CreateMissingCudaExecutor()) {
   std::unique_ptr<MultiHeadWeights> decoded_weights;
   std::string policy_head;
@@ -48,46 +48,51 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
       throw std::runtime_error(validation.Summary());
     }
   } catch (const std::exception &e) {
-    throw std::runtime_error(
-        "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
-        "; format: " + format_.Summary() +
-        ") but weight validation failed: " + e.what());
+    throw std::runtime_error("CUDA transformer backend is compiled (" +
+                             RuntimeCudaDeviceSummary() +
+                             "; format: " + format_.Summary() +
+                             ") but weight validation failed: " + e.what());
   }
 
   const int device_count = RuntimeCudaDeviceCount();
   if (device_count <= 0) {
     throw std::runtime_error(
         "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
-        "; format: " + format_.Summary() +
-        ") but no CUDA device is available");
+        "; format: " + format_.Summary() + ") but no CUDA device is available");
   }
 
   try {
     buffers_.Allocate(buffer_layout_);
   } catch (const std::exception &e) {
-    throw std::runtime_error(
-        "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
-        "; format: " + format_.Summary() +
-        ") but buffer allocation failed: " + e.what());
+    throw std::runtime_error("CUDA transformer backend is compiled (" +
+                             RuntimeCudaDeviceSummary() +
+                             "; format: " + format_.Summary() +
+                             ") but buffer allocation failed: " + e.what());
   }
 
   try {
     const auto inventory = CreateNetworkWeightInventory(
         *decoded_weights, policy_head, value_head, tensor_plan_);
+    execution_plan_ = CreateNetworkExecutionPlan(
+        format_, tensor_plan_, policy_head, value_head, inventory);
+    const auto execution_validation =
+        execution_plan_.ValidateAgainstInventory(inventory);
+    if (!execution_validation.ok())
+      throw std::runtime_error(execution_validation.Summary());
     weight_buffers_.Upload(inventory);
   } catch (const std::exception &e) {
-    throw std::runtime_error(
-        "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
-        "; format: " + format_.Summary() +
-        ") but weight upload failed: " + e.what());
+    throw std::runtime_error("CUDA transformer backend is compiled (" +
+                             RuntimeCudaDeviceSummary() +
+                             "; format: " + format_.Summary() +
+                             ") but weight upload failed: " + e.what());
   }
 
   throw std::runtime_error(
       "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
       "; format: " + format_.Summary() +
+      "; execution=" + execution_plan_.Summary() +
       "; buffer_bytes=" + std::to_string(buffers_.AllocationBytes()) +
-      "; weight_bytes=" +
-      std::to_string(weight_buffers_.AllocationBytes()) +
+      "; weight_bytes=" + std::to_string(weight_buffers_.AllocationBytes()) +
       ") but inference is not implemented yet");
 }
 
@@ -132,10 +137,10 @@ std::string CudaNetwork::GetNetworkInfo() const {
   out << "CUDA transformer backend (" << RuntimeCudaDeviceSummary()
       << ", format: " << format_.Summary()
       << ", tensors: " << tensor_plan_.Summary()
+      << ", execution: " << execution_plan_.Summary()
       << ", buffer_bytes=" << buffers_.AllocationBytes()
       << ", weight_bytes=" << weight_buffers_.AllocationBytes()
-      << ", executor=" << executor_->Name()
-      << ", inference not implemented)";
+      << ", executor=" << executor_->Name() << ", inference not implemented)";
   return out.str();
 }
 

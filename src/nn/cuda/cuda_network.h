@@ -12,6 +12,7 @@
 #include "cuda_weight_buffers.h"
 
 #include "../network.h"
+#include "../network_execution_plan.h"
 #include "../network_format.h"
 
 #include <memory>
@@ -33,6 +34,7 @@ public:
 private:
   NetworkFormatDescriptor format_;
   NetworkTensorPlan tensor_plan_;
+  NetworkExecutionPlan execution_plan_;
   CudaBufferLayout buffer_layout_;
   CudaInferenceBuffers buffers_;
   CudaWeightBuffers weight_buffers_;
