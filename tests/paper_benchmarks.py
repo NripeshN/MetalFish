@@ -123,6 +123,31 @@ BK_POSITIONS: List[Tuple[str, List[str], str]] = [
     ("r2qnrnk/p2b2b1/1p1p2pp/2pPpp2/1PP1P3/PRNBB3/3QNPPP/5RK1 w - -", ["f4"], "BK.24"),
 ]
 
+
+def select_bk_positions(selection: str) -> List[Tuple[str, List[str], str]]:
+    if not selection or not selection.strip():
+        return BK_POSITIONS
+
+    wanted = set()
+    for raw_token in selection.replace(",", " ").split():
+        token = raw_token.strip().upper()
+        if not token:
+            continue
+        if token.isdigit():
+            token = f"BK.{int(token):02d}"
+        elif token.startswith("BK.") and token[3:].isdigit():
+            token = f"BK.{int(token[3:]):02d}"
+        elif token.startswith("BK") and not token.startswith("BK."):
+            token = f"BK.{int(token[2:]):02d}"
+        wanted.add(token)
+
+    selected = [entry for entry in BK_POSITIONS if entry[2].upper() in wanted]
+    found = {entry[2].upper() for entry in selected}
+    missing = sorted(wanted - found)
+    if missing:
+        raise ValueError(f"Unknown BK position(s): {', '.join(missing)}")
+    return selected
+
 SCALING_POSITIONS = [
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     "r1bqkb1r/pppppppp/2n2n2/8/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
@@ -345,7 +370,10 @@ HYBRID_ENV_OPTION_OVERRIDES = {
     "HYBRID_MCTS_AB_ROOT_HINTS": "HybridMCTSABRootHints",
     "HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS": "HybridMCTSABRootHintDelayMs",
     "HYBRID_MCTS_AB_ROOT_HINT_COUNT": "HybridMCTSABRootHintCount",
+    "HYBRID_AB_CANDIDATE_VERIFY_MS": "HybridABCandidateVerifyMs",
+    "HYBRID_AB_CANDIDATE_VERIFY_COUNT": "HybridABCandidateVerifyCount",
     "HYBRID_AB_POLICY_WEIGHT": "HybridABPolicyWeight",
+    "HYBRID_ROOT_PAWN_LEVER_TIEBREAK": "HybridRootPawnLeverTieBreak",
     "HYBRID_TRACE": "HybridTrace",
     "HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize",
     "HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor",
@@ -366,14 +394,16 @@ def apply_hybrid_env_options(options: Dict[str, str]) -> None:
         value = env_option(env_name)
         if value is not None:
             options[option_name] = value
+    if "HybridMCTSThreads" in options:
+        options["MCTSMaxThreads"] = options["HybridMCTSThreads"]
 
 
 def hybrid_split_for_threads(threads: int) -> Tuple[int, int]:
     if threads <= 3:
         return 1, max(1, threads - 1)
-    # Keep the transformer side present while giving the CPU AB search most of
-    # the worker budget. On an 8-performance-core M2 Max this becomes 2 + 6.
-    mcts_threads = min(2, max(1, threads // 4))
+    # Keep the transformer side present while giving AB the CPU budget it needs
+    # for tactical verification. On an 8-performance-core M2 Max this is 1 + 7.
+    mcts_threads = 1
     return mcts_threads, max(1, threads - mcts_threads)
 
 
@@ -454,8 +484,11 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "HybridMCTSUseSharedTT": "false",
             "HybridMCTSABRootHints": "true",
             "HybridMCTSABRootHintDelayMs": "25",
-            "HybridMCTSABRootHintCount": "4",
+            "HybridMCTSABRootHintCount": "8",
+            "HybridABCandidateVerifyMs": "120",
+            "HybridABCandidateVerifyCount": "4",
             "HybridABPolicyWeight": "0.0",
+            "HybridRootPawnLeverTieBreak": "true",
             "HybridTrace": "false",
         },
     )
@@ -509,8 +542,8 @@ def start_engine(cfg: EngineConfig) -> UCIEngine:
 def config_with_thread_count(cfg: EngineConfig, threads: int) -> EngineConfig:
     options = {**cfg.uci_options, "Threads": str(max(1, threads))}
     if options.get("UseMCTS") == "true":
-        options["MCTSMaxThreads"] = str(max(1, threads))
-        options["MCTSParallelSearch"] = "true"
+        options["MCTSMaxThreads"] = str(pure_mcts_strength_threads(max(1, threads)))
+        options["MCTSParallelSearch"] = "false"
     if options.get("UseHybridSearch") == "true":
         hybrid_threads = max(3, threads)
         mcts_threads, ab_threads = hybrid_split_for_threads(hybrid_threads)
@@ -528,21 +561,73 @@ def config_with_thread_count(cfg: EngineConfig, threads: int) -> EngineConfig:
     )
 
 
+ENGINE_ID_ALIASES = {
+    "ab": "metalfish-ab",
+    "mcts": "metalfish-mcts",
+    "hybrid": "metalfish-hybrid",
+    "metalfish": "metalfish-hybrid",
+}
+
+
+def normalize_engine_id(raw: str) -> str:
+    token = raw.strip()
+    return ENGINE_ID_ALIASES.get(token, token)
+
+
 def parse_engine_ids(raw: str) -> Optional[List[str]]:
     if not raw:
         return None
-    aliases = {
-        "ab": "metalfish-ab",
-        "mcts": "metalfish-mcts",
-        "hybrid": "metalfish-hybrid",
-        "metalfish": "metalfish-hybrid",
-    }
     ids = []
     for item in raw.replace(",", " ").split():
-        eid = aliases.get(item, item)
+        eid = normalize_engine_id(item)
         if eid not in ids:
             ids.append(eid)
     return ids or None
+
+
+def parse_tactical_fail_under(
+    raw: str, selected_engine_ids: Optional[List[str]]
+) -> Dict[str, int]:
+    if not raw:
+        return {}
+
+    tokens = [token for token in raw.replace(",", " ").split() if token]
+    if not tokens:
+        return {}
+
+    def parse_score(token: str) -> int:
+        try:
+            value = int(token)
+        except ValueError as exc:
+            raise ValueError(f"invalid tactical fail-under score: {token!r}") from exc
+        if not 0 <= value <= len(BK_POSITIONS):
+            raise ValueError(
+                f"tactical fail-under score must be between 0 and {len(BK_POSITIONS)}"
+            )
+        return value
+
+    if all("=" not in token for token in tokens):
+        if len(tokens) != 1:
+            raise ValueError(
+                "use a single score or engine=score pairs for --tactical-fail-under"
+            )
+        score = parse_score(tokens[0])
+        if selected_engine_ids:
+            return {eid: score for eid in selected_engine_ids}
+        return {"*": score}
+
+    thresholds: Dict[str, int] = {}
+    for token in tokens:
+        if "=" not in token:
+            raise ValueError(
+                "mixing bare scores and engine=score pairs is not supported"
+            )
+        engine_id, score_text = token.split("=", 1)
+        engine_id = normalize_engine_id(engine_id)
+        if not engine_id:
+            raise ValueError(f"missing engine id in fail-under token: {token!r}")
+        thresholds[engine_id] = parse_score(score_text)
+    return thresholds
 
 
 def parse_thread_counts(raw: str) -> List[int]:
@@ -612,7 +697,10 @@ def run_tactical(
     engines: Dict[str, EngineConfig],
     movetime_ms: int = 10000,
     engine_ids: Optional[List[str]] = None,
+    repeat_count: int = 1,
+    positions: Optional[Sequence[Tuple[str, List[str], str]]] = None,
 ) -> dict:
+    tactical_positions = list(positions or BK_POSITIONS)
     print("\n" + "=" * 60)
     print("EXPERIMENT 1: Tactical Accuracy (Bratko-Kopec)")
     print("=" * 60)
@@ -629,6 +717,12 @@ def run_tactical(
     results = {
         "experiment": "tactical",
         "movetime_ms": movetime_ms,
+        "repeat_count": repeat_count,
+        "position_count": len(tactical_positions),
+        "position_ids": [bk_id for _, _, bk_id in tactical_positions],
+        "position_expected": {
+            bk_id: expected_sans for _, expected_sans, bk_id in tactical_positions
+        },
         "timestamp": datetime.datetime.now().isoformat(),
         "engines": {},
         "agreement": {},
@@ -652,11 +746,12 @@ def run_tactical(
                 print(f"  WARNING: warmup timeout, continuing...")
 
             score = 0
+            completed_runs = 0
             positions = []
             bestmoves = {}
             error_message = None
 
-            for fen, expected_sans, bk_id in BK_POSITIONS:
+            for fen, expected_sans, bk_id in tactical_positions:
                 expected_uci = set()
                 for san in expected_sans:
                     try:
@@ -664,42 +759,84 @@ def run_tactical(
                     except Exception:
                         expected_uci.add(san.lower().replace("+", "").replace("#", ""))
 
-                try:
-                    r = eng.search(fen, movetime_ms)
-                except (RuntimeError, TimeoutError) as e:
-                    error_message = str(e)
-                    print(f"  {bk_id}: ERROR {e}")
-                    print(
-                        f"  Engine crashed/timed out — reporting partial results for {cfg.name}"
-                    )
+                runs = []
+                move_counts: Dict[str, int] = {}
+                passes = 0
+                for run_idx in range(repeat_count):
+                    try:
+                        r = eng.search(fen, movetime_ms)
+                    except (RuntimeError, TimeoutError) as e:
+                        error_message = str(e)
+                        print(f"  {bk_id}: ERROR {e}")
+                        print(
+                            f"  Engine crashed/timed out — reporting partial results for {cfg.name}"
+                        )
+                        break
+
+                    ok = r.bestmove in expected_uci
+                    passes += int(ok)
+                    score += int(ok)
+                    completed_runs += 1
+                    move_counts[r.bestmove] = move_counts.get(r.bestmove, 0) + 1
+                    runs.append((r, ok))
+
+                if not runs:
                     break
 
-                ok = r.bestmove in expected_uci
-                score += int(ok)
-                bestmoves[bk_id] = r.bestmove
+                modal_move = sorted(
+                    move_counts.items(), key=lambda item: (-item[1], item[0])
+                )[0][0]
+                bestmoves[bk_id] = modal_move
+                first_result = runs[0][0]
+                nodes_total = sum(item[0].nodes for item in runs)
+                nps_total = sum(item[0].nps for item in runs)
+                nn_evals_total = sum(item[0].nn_evals for item in runs)
+                elapsed_total = sum(item[0].elapsed for item in runs)
 
                 pos_data = {
                     "id": bk_id,
                     "fen": fen,
                     "expected": expected_sans,
-                    "bestmove": r.bestmove,
-                    "pass": ok,
-                    "nodes": r.nodes,
-                    "nps": r.nps,
-                    "nn_evals": r.nn_evals,
-                    "depth": r.depth,
-                    "time_s": round(r.elapsed, 2),
+                    "bestmove": modal_move,
+                    "pass": passes == len(runs),
+                    "passes": passes,
+                    "runs": len(runs),
+                    "pass_rate": round(passes / max(1, len(runs)), 3),
+                    "move_counts": move_counts,
+                    "nodes": nodes_total // max(1, len(runs)),
+                    "nps": nps_total // max(1, len(runs)),
+                    "nn_evals": nn_evals_total // max(1, len(runs)),
+                    "depth": max(item[0].depth for item in runs),
+                    "time_s": round(elapsed_total / max(1, len(runs)), 2),
+                    "first_bestmove": first_result.bestmove,
                 }
                 positions.append(pos_data)
-                status = "PASS" if ok else "FAIL"
-                print(
-                    f"  {bk_id}: {status:4s} {r.bestmove:8s} exp={expected_sans}"
-                    f" n={r.nodes} nps={r.nps} t={r.elapsed:.1f}s"
-                )
+                if repeat_count == 1:
+                    status = "PASS" if passes else "FAIL"
+                    print(
+                        f"  {bk_id}: {status:4s} {modal_move:8s} exp={expected_sans}"
+                        f" n={pos_data['nodes']} nps={pos_data['nps']}"
+                        f" t={pos_data['time_s']:.1f}s"
+                    )
+                else:
+                    moves = ",".join(
+                        f"{move}:{count}"
+                        for move, count in sorted(
+                            move_counts.items(), key=lambda item: (-item[1], item[0])
+                        )
+                    )
+                    print(
+                        f"  {bk_id}: {passes}/{len(runs)} modal={modal_move:8s}"
+                        f" exp={expected_sans} avg_n={pos_data['nodes']}"
+                        f" avg_nps={pos_data['nps']} moves=[{moves}]"
+                    )
 
-            total = len(BK_POSITIONS)
+                if error_message:
+                    break
+
+            total = len(tactical_positions) * repeat_count
             completed = len(positions)
-            suffix = "" if completed == total else f", completed {completed}/{total}"
+            suffix = "" if completed_runs == total else f", completed {completed_runs}/{total}"
             print(f"  Score: {score}/{total} ({100*score/total:.1f}%){suffix}")
 
             avg_nps = sum(p["nps"] for p in positions) // max(1, len(positions))
@@ -707,8 +844,9 @@ def run_tactical(
                 "name": cfg.name,
                 "score": score,
                 "total": total,
-                "completed": completed,
-                "complete": completed == total,
+                "completed": completed_runs,
+                "completed_positions": completed,
+                "complete": completed_runs == total,
                 "error": error_message,
                 "solve_rate": round(score / total, 3),
                 "avg_nps": avg_nps,
@@ -727,18 +865,48 @@ def run_tactical(
             a, b = eids[i], eids[j]
             agree = sum(
                 1
-                for bk_id in [p[2] for p in BK_POSITIONS]
+                for bk_id in [p[2] for p in tactical_positions]
                 if all_bestmoves[a].get(bk_id) == all_bestmoves[b].get(bk_id)
             )
             key = f"{a}_vs_{b}"
             results["agreement"][key] = {
                 "agree": agree,
-                "total": len(BK_POSITIONS),
-                "rate": round(agree / len(BK_POSITIONS), 3),
+                "total": len(tactical_positions),
+                "rate": round(agree / len(tactical_positions), 3),
             }
-            print(f"  Agreement {a} vs {b}: {agree}/{len(BK_POSITIONS)}")
+            print(f"  Agreement {a} vs {b}: {agree}/{len(tactical_positions)}")
 
     return results
+
+
+def enforce_tactical_fail_under(
+    results: dict, thresholds: Dict[str, int]
+) -> List[str]:
+    if not thresholds:
+        return []
+
+    engines = results.get("engines", {})
+    if "*" in thresholds:
+        items = [(eid, thresholds["*"]) for eid in engines]
+    else:
+        items = list(thresholds.items())
+
+    failures = []
+    for eid, threshold in items:
+        data = engines.get(eid)
+        if not data:
+            failures.append(f"{eid}=missing (floor {threshold})")
+            continue
+        if not data.get("complete", False):
+            completed = data.get("completed", 0)
+            total = data.get("total", len(BK_POSITIONS))
+            failures.append(f"{eid}=incomplete {completed}/{total} (floor {threshold})")
+            continue
+        score = int(data.get("score", 0))
+        if score < threshold:
+            total = data.get("total", len(BK_POSITIONS))
+            failures.append(f"{eid}={score}/{total} (floor {threshold})")
+    return failures
 
 
 def run_nps(
@@ -1114,17 +1282,31 @@ def generate_summary(all_results: Dict[str, dict]) -> str:
 
     tactical = all_results.get("tactical")
     if tactical:
+        repeat_count = max(1, int(tactical.get("repeat_count", 1)))
+        position_ids = tactical.get("position_ids") or [p[2] for p in BK_POSITIONS]
+        position_expected = tactical.get("position_expected") or {
+            bk_id: expected for _, expected, bk_id in BK_POSITIONS
+        }
+        position_count = int(tactical.get("position_count", len(position_ids)))
+        total_runs = position_count * repeat_count
+        solved_header = "Solved" if repeat_count == 1 else "Solved Runs"
+        completed_header = "Completed" if repeat_count == 1 else "Completed Runs"
         lines += [
-            "## Table 1: Tactical Accuracy (Bratko-Kopec, 24 positions)",
+            f"## Table 1: Tactical Accuracy (Bratko-Kopec, {position_count} positions)",
             "",
-            "| Engine | Solved | Completed | Rate (%) | Avg NPS | Status |",
+        ]
+        if repeat_count > 1:
+            lines += [f"Repeats per position: {repeat_count}", ""]
+        lines += [
+            f"| Engine | {solved_header} | {completed_header} | Rate (%) | Avg NPS | Status |",
             "|--------|--------|-----------|----------|---------|--------|",
         ]
         for eid, data in tactical.get("engines", {}).items():
             status = "complete" if data.get("complete", True) else "partial"
             lines.append(
-                f"| {data['name']} | {data['score']}/24 | "
-                f"{data.get('completed', len(data.get('positions', [])))}/24 | "
+                f"| {data['name']} | {data['score']}/{data.get('total', total_runs)} | "
+                f"{data.get('completed', len(data.get('positions', [])))}/"
+                f"{data.get('total', total_runs)} | "
                 f"{data['solve_rate']*100:.1f} | {data['avg_nps']:,} | "
                 f"{status} |"
             )
@@ -1141,12 +1323,19 @@ def generate_summary(all_results: Dict[str, dict]) -> str:
             + "|".join("-------" for _ in tactical.get("engines", {}))
             + "|",
         ]
-        for i, (fen, exp, bk_id) in enumerate(BK_POSITIONS):
+        for i, bk_id in enumerate(position_ids):
+            exp = position_expected.get(bk_id, [])
             row = f"| {bk_id} ({','.join(exp)}) |"
             for eid, data in tactical.get("engines", {}).items():
                 p = data["positions"][i] if i < len(data["positions"]) else {}
-                status = "PASS" if p.get("pass") else "FAIL"
-                row += f" {status} ({p.get('bestmove','?')}) |"
+                if repeat_count == 1:
+                    status = "PASS" if p.get("pass") else "FAIL"
+                    row += f" {status} ({p.get('bestmove','?')}) |"
+                else:
+                    row += (
+                        f" {p.get('passes', 0)}/{p.get('runs', 0)}"
+                        f" ({p.get('bestmove','?')}) |"
+                    )
             lines.append(row)
         lines += ["", "### Agreement Matrix", ""]
         for key, data in tactical.get("agreement", {}).items():
@@ -1237,6 +1426,12 @@ def main() -> int:
         "--movetime", type=int, default=10000, help="Movetime per position (ms)"
     )
     parser.add_argument(
+        "--tactical-repeat",
+        type=int,
+        default=1,
+        help="Repeat each tactical position this many times and aggregate runs",
+    )
+    parser.add_argument(
         "--games", type=int, default=10, help="Games per tournament match"
     )
     parser.add_argument(
@@ -1254,6 +1449,21 @@ def main() -> int:
         default="",
         help="Optional comma/space-separated engine IDs to benchmark",
     )
+    parser.add_argument(
+        "--tactical-fail-under",
+        type=str,
+        default="",
+        help=(
+            "Fail tactical runs below a floor. Use SCORE for selected engines "
+            "or engine=SCORE pairs, e.g. hybrid=21,mcts=12."
+        ),
+    )
+    parser.add_argument(
+        "--positions",
+        type=str,
+        default="",
+        help="Optional comma/space-separated BK IDs for tactical runs, e.g. BK.03,BK.07",
+    )
     args = parser.parse_args()
 
     if args.all:
@@ -1265,11 +1475,19 @@ def main() -> int:
     hash_mb = parse_hash_mb(args.hash)
     RESULTS_DIR.mkdir(exist_ok=True)
     all_results: Dict[str, dict] = {}
+    exit_code = 0
 
     primary_threads = thread_counts[0] if len(thread_counts) == 1 else thread_counts[-1]
     resources = resource_policy(primary_threads, hash_mb)
     engines = detect_engines(threads=primary_threads, hash_mb=hash_mb)
     selected_engine_ids = parse_engine_ids(args.engines)
+    try:
+        tactical_thresholds = parse_tactical_fail_under(
+            args.tactical_fail_under, selected_engine_ids
+        )
+        tactical_positions = select_bk_positions(args.positions)
+    except ValueError as exc:
+        parser.error(str(exc))
     if selected_engine_ids is not None:
         selected = set(selected_engine_ids)
         engines = {eid: cfg for eid, cfg in engines.items() if eid in selected}
@@ -1285,12 +1503,26 @@ def main() -> int:
     )
 
     if args.tactical:
-        r = run_tactical(engines, args.movetime, selected_engine_ids)
+        r = run_tactical(
+            engines,
+            args.movetime,
+            selected_engine_ids,
+            max(1, args.tactical_repeat),
+            tactical_positions,
+        )
         r["resource_policy"] = resources
         all_results["tactical"] = r
         with open(RESULTS_DIR / "paper_tactical.json", "w") as f:
             json.dump(r, f, indent=2)
         print(f"\nSaved: results/paper_tactical.json")
+        floor_failures = enforce_tactical_fail_under(r, tactical_thresholds)
+        if floor_failures:
+            print(
+                "ERROR: tactical fail-under guard tripped: "
+                + "; ".join(floor_failures),
+                file=sys.stderr,
+            )
+            exit_code = 1
 
     if args.nps:
         r = run_nps(engines, thread_counts, args.movetime)
@@ -1323,7 +1555,7 @@ def main() -> int:
         print(f"\nSaved: {summary_path}")
         print("\n" + summary)
 
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

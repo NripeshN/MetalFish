@@ -58,20 +58,46 @@ a report to `results/paper_summary.md`. Any headline strength claims should be
 based on those generated artifacts or on a larger cutechess tournament, not on
 stale README tables.
 
-Latest local tactical runs, M2 Max, 2026-05-18, 5 seconds per position:
+For noisy tactical changes, add repeats and compare aggregate run counts:
+
+```bash
+python3 tests/paper_benchmarks.py --tactical --movetime 5000 \
+  --threads auto --hash auto --tactical-repeat 3
+```
+
+Latest local tactical runs, M2 Max, 5 seconds per position:
 
 | Engine | Score | Completed | Notes |
 | --- | ---: | ---: | --- |
-| MetalFish AB | 21/24 | 24/24 | 8 workers, 4096 MB hash |
-| MetalFish Hybrid | 21/24 | 24/24 | 2 MCTS workers + 6 AB workers |
-| Stockfish reference | 20/24 | 24/24 | 8 workers, 4096 MB hash |
-| MetalFish MCTS | 20/24 | 24/24 | BT4 weights, one Apple MCTS worker |
-| Lc0 with BT4 weights | 17/24 | 24/24 | Metal backend, `Threads=8` in the strength run |
+| Stockfish reference | 21/24 | 24/24 | 8 workers, 4096 MB hash, rechecked 2026-05-19 |
+| MetalFish AB | 20/24 | 24/24 | 8 workers, 4096 MB hash, rechecked 2026-05-19 |
+| MetalFish MCTS | 20/24 | 24/24 | BT4 weights, one Apple MCTS worker, strength KLD profile, rechecked 2026-05-19 |
+| MetalFish Hybrid | 20/24 | 24/24 | 2 MCTS workers + 6 AB workers, rechecked 2026-05-19 |
+| Lc0 with BT4 weights | 16/24 | 24/24 | Metal backend, `Threads=8`, rechecked 2026-05-19 |
+
+A Hybrid-only repeat stability check on the same machine scored 42/48 solved
+runs with `--tactical-repeat 2` (87.5%). The stable misses in that run were
+BK.09 and BK.17; Stockfish and Lc0 also missed those two positions in matching
+5-second spot checks, so they are tracked as hard-suite misses rather than
+hybrid coordinator regressions.
+
+Current hybrid-only paper-harness sanity run on this branch, M2 Max,
+2026-05-19, 5 seconds per position: `21/24` with the updated 1 MCTS + 7 AB
+split and `HybridABCandidateVerifyMs=120`.
 
 A forced full-worker pure-MCTS stress run (`MCTSMaxThreads=8`) is not a
 strength profile for the current backend. It previously scored 12/24 and timed
 out on BK.24, which is why pure MCTS now caps Apple workers unless
 `MCTSParallelSearch=true` is set.
+
+MetalFish's pure-MCTS strength profile intentionally uses a small
+`MCTSMinimumKLDGainPerNode=0.00005` tactical stopper. For an exact Lc0-style
+KLD-off diagnostic comparison, run:
+
+```bash
+python3 tests/bk_parity.py --engine both --movetime 5000 \
+  --threads 8 --mcts-kld 0.0
+```
 
 This is a tactical-suite result only. It is useful for regression tracking, but
 it is not an Elo estimate.
@@ -115,6 +141,12 @@ MetalFish expects network files under `networks/`.
 
 ```bash
 mkdir -p networks
+python3 tools/download_engine_networks.py --dest networks
+```
+
+Manual download equivalent:
+
+```bash
 curl -L -o networks/nn-c288c895ea92.nnue \
   https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
 curl -L -o networks/nn-37f18f62d772.nnue \
@@ -146,6 +178,7 @@ setoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb
 setoption name Threads value 8
 setoption name Hash value 4096
 setoption name Ponder value true
+setoption name HybridABCandidateVerifyMs value 120
 isready
 position startpos
 go movetime 5000

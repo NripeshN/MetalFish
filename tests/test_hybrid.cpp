@@ -244,7 +244,10 @@ void test_hybrid_config() {
     EXPECT(tc, config.mcts_root_reject);
     EXPECT(tc, config.mcts_ab_root_hints);
     EXPECT(tc, config.mcts_ab_root_hint_delay_ms == 25);
-    EXPECT(tc, config.mcts_ab_root_hint_count == 4);
+    EXPECT(tc, config.mcts_ab_root_hint_count == 8);
+    EXPECT(tc, config.ab_candidate_verify_ms == 120);
+    EXPECT(tc, config.ab_candidate_verify_count == 4);
+    EXPECT(tc, config.root_pawn_lever_tiebreak);
   }
   {
     TestCase tc("Transformer batching settings");
@@ -316,6 +319,26 @@ void test_hybrid_config() {
     EXPECT(tc, mcts_limits.time[WHITE] == 30000);
     EXPECT(tc, mcts_limits.inc[WHITE] == 1000);
     EXPECT(tc, mcts_limits.searchmoves.size() == 1);
+  }
+  {
+    TestCase tc("AB candidate verification budget");
+    ::MetalFish::Search::LimitsType limits;
+
+    limits.movetime = 5000;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 150, false) ==
+                   150);
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 1000, false) ==
+                   833);
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 5000, 150, true) == 0);
+
+    limits = ::MetalFish::Search::LimitsType();
+    limits.time[WHITE] = 30000;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 4000, 600, false) ==
+                   500);
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 999, 100, false) == 0);
+
+    limits.nodes = 1000;
+    EXPECT(tc, HybridABCandidateVerifyBudgetMs(limits, 4000, 100, false) == 0);
   }
   {
     TestCase tc("Fixed-budget decisive MCTS override predicate");
@@ -402,6 +425,8 @@ void test_hybrid_config() {
                    true, true, 277, 186, 0.671f, 0.195f, 233, 123));
     EXPECT(tc, HybridMCTSRootConfidenceFixedBudgetOverride(
                    true, true, 242, 184, 0.760f, 0.080f, 182, 76));
+    EXPECT(tc, HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 380, 260, 0.684f, 0.137f, 222, 65));
     EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
                    false, true, 277, 186, 0.671f, 0.195f, 233, 123));
     EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
@@ -418,6 +443,16 @@ void test_hybrid_config() {
                    true, true, 277, 186, 0.671f, 0.195f, 169, 123));
     EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
                    true, true, 277, 186, 0.671f, 0.195f, 233, 109));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 380, 239, 0.684f, 0.137f, 222, 65));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 380, 260, 0.639f, 0.137f, 222, 65));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 380, 260, 0.684f, 0.119f, 222, 65));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 380, 260, 0.684f, 0.137f, 199, 65));
+    EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
+                   true, true, 380, 260, 0.684f, 0.137f, 222, 59));
     EXPECT(tc, !HybridMCTSRootConfidenceFixedBudgetOverride(
                    true, true, 262, 137, 0.523f, 0.066f, 20, 20));
   }
@@ -444,6 +479,121 @@ void test_hybrid_config() {
                                          0.705f, 0.410f));
   }
   {
+    TestCase tc("MCTS root rejection of AB predicate");
+
+    EXPECT(tc, HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
+                                       0.137f, 0.007f, 0.808f, 31));
+    EXPECT(tc, HybridMCTSRootRejectsAB(true, true, true, false, 210, 52,
+                                       0.142f, 0.020f, 0.680f, 32));
+    EXPECT(tc, HybridMCTSRootRejectsAB(true, true, false, true, 260, 40,
+                                       0.750f, 0.490f, 0.500f, 0));
+    EXPECT(tc, !HybridMCTSRootRejectsAB(false, true, true, false, 198, 21,
+                                        0.137f, 0.007f, 0.808f, 31));
+    EXPECT(tc, !HybridMCTSRootRejectsAB(true, false, true, false, 198, 21,
+                                        0.137f, 0.007f, 0.808f, 31));
+    EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, false, false, 198, 21,
+                                        0.137f, 0.007f, 0.808f, 31));
+    EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, true, 198, 21,
+                                        0.137f, 0.007f, 0.808f, 31));
+    EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 179, 21,
+                                        0.137f, 0.007f, 0.808f, 31));
+    EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 210, 53,
+                                        0.142f, 0.020f, 0.680f, 32));
+    EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
+                                        0.126f, 0.007f, 0.808f, 31));
+    EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
+                                        0.137f, 0.007f, 0.649f, 31));
+    EXPECT(tc, !HybridMCTSRootRejectsAB(true, true, true, false, 198, 21,
+                                        0.137f, 0.007f, 0.808f, 24));
+  }
+  {
+    TestCase tc("Pawn lever root tie-break classifier");
+
+    EXPECT(tc, HybridRootPawnLeverAgreementTieBreak(true, true, 0.549f,
+                                                    0.079f));
+    EXPECT(tc, !HybridRootPawnLeverAgreementTieBreak(false, true, 0.549f,
+                                                     0.079f));
+    EXPECT(tc, !HybridRootPawnLeverAgreementTieBreak(true, false, 0.549f,
+                                                     0.079f));
+    EXPECT(tc, !HybridRootPawnLeverAgreementTieBreak(true, true, 0.550f,
+                                                     0.079f));
+    EXPECT(tc, !HybridRootPawnLeverAgreementTieBreak(true, true, 0.549f,
+                                                     0.080f));
+
+    EXPECT(tc, HybridRootPawnLeverCandidate(-507, -555, 7869, 3, 37, 1,
+                                            -0.200f, 0.200f, -0.230f,
+                                            0.250f));
+    EXPECT(tc, HybridRootPawnLeverCandidate(-521, -548, 705292, 3, 38, 1,
+                                            -0.200f, 0.200f, -0.240f,
+                                            0.250f));
+    EXPECT(tc, HybridRootPawnLeverCandidate(-522, -510, 369245, 2, 38, 1,
+                                            -0.433f, 0.208f, -0.630f,
+                                            0.260f));
+    EXPECT(tc, HybridRootPawnLeverCandidate(929, 899, 3233, 7, 13, 1,
+                                            0.892f, 0.188f, 0.878f, 0.050f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(166, 156, 59965, 3, 28, 2,
+                                             0.195f, 0.279f, 0.139f,
+                                             0.088f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(111, 112, 10443, 6, 15, 1,
+                                             0.216f, 0.048f, 0.097f,
+                                             0.078f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(-507, -568, 7869, 3, 37, 1,
+                                             -0.200f, 0.200f, -0.230f,
+                                             0.250f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(-507, -555, 199, 3, 37, 1,
+                                             -0.200f, 0.200f, -0.230f,
+                                             0.250f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(-507, -555, 7869, 9, 37, 1,
+                                             -0.200f, 0.200f, -0.230f,
+                                             0.250f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(-507, -555, 7869, 3, 7, 1,
+                                             -0.200f, 0.200f, -0.230f,
+                                             0.250f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(-47, -77, 373, 5, 13, 1,
+                                             -0.038f, 0.220f, -0.112f,
+                                             0.050f));
+
+    Position pos;
+    StateInfo st;
+    pos.set(
+        "2q1rr1k/3bbnnp/p2p1pp1/2pPp3/PpP1P1P1/1P2BNNP/2BQ1PRK/7R b - -",
+        false, &st);
+    EXPECT(tc, HybridIsPawnLever(pos, UCIEngine::to_move(pos, "f6f5")));
+    EXPECT(tc,
+           HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "f6f5")));
+    EXPECT(tc, HybridIsKingsidePawnPush(pos, UCIEngine::to_move(pos, "f6f5")));
+    EXPECT(tc, !HybridIsPawnLever(pos, UCIEngine::to_move(pos, "e7d8")));
+    EXPECT(tc, !HybridIsPawnLever(pos, UCIEngine::to_move(pos, "a6a5")));
+    EXPECT(tc,
+           !HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "a6a5")));
+    EXPECT(tc, !HybridIsKingsidePawnPush(pos, UCIEngine::to_move(pos, "a6a5")));
+
+    pos.set(
+        "r2q1rk1/1ppnbppp/p2p1nb1/3Pp3/2P1P1P1/2N2N1P/PPB1QP2/R1B2RK1 b - -",
+        false, &st);
+    EXPECT(tc, HybridIsPawnLever(pos, UCIEngine::to_move(pos, "h7h5")));
+    EXPECT(tc,
+           HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "h7h5")));
+    EXPECT(tc, HybridIsKingsidePawnPush(pos, UCIEngine::to_move(pos, "h7h5")));
+    EXPECT(tc, !HybridIsPawnLever(pos, UCIEngine::to_move(pos, "c7c6")));
+    EXPECT(tc,
+           !HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "c7c6")));
+    EXPECT(tc, !HybridIsKingsidePawnPush(pos, UCIEngine::to_move(pos, "c7c6")));
+
+    pos.set(
+        "r2rn1k1/1p1nbp2/2p1p1p1/p2p3p/2P5/1P1PPNPP/P1R2PB1/1RB3K1 w - -",
+        false, &st);
+    EXPECT(tc, HybridIsKingsidePawnPush(pos, UCIEngine::to_move(pos, "h3h4")));
+    EXPECT(tc, HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "g3g4")));
+
+    pos.set(
+        "r1b2rk1/pppn1pp1/3ppq1p/b7/3PP3/P1N2N2/1PPQ1PPP/1K1R1B1R b - -",
+        false, &st);
+    EXPECT(tc, HybridIsPawnLever(pos, UCIEngine::to_move(pos, "e6e5")));
+    EXPECT(tc,
+           !HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "e6e5")));
+  }
+  {
     TestCase tc("MCTS visit evidence handles cache-heavy playouts");
 
     EXPECT(tc, HybridMCTSVisitEvidenceSane(270, 260, 270, 140));
@@ -457,6 +607,8 @@ void test_hybrid_config() {
     TestCase tc("AB root rejection blocks low-effort MCTS blunders");
 
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
+                                       -447));
+    EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 5, -410, -447, 2523397, 649,
                                        -32001));
     EXPECT(tc, HybridABRootRejectsMCTS(true, 1, 4, -432, -436, 25349399, 1663,
                                        -32001));
@@ -466,6 +618,28 @@ void test_hybrid_config() {
                                         2523397, -401));
     EXPECT(tc, !HybridABRootRejectsMCTS(true, 1, 4, -410, -425, 2523397,
                                         2200000, -420));
+  }
+  {
+    TestCase tc("Fixed-budget cross-root MCTS override predicate");
+
+    EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
+                   -32001, 585, 1339424, 5, 16, 0.372f, 0.634f));
+    EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 265, 175, 0.660f, 0.145f, 226, 55, 619, 2,
+                   -32001, 564, 2095896, 5, 16, 0.372f, 0.638f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 265, 169, 0.660f, 0.145f, 226, 55, 619, 2,
+                   -32001, 564, 2095896, 5, 16, 0.372f, 0.638f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
+                   580, 585, 1339424, 5, 16, 0.372f, 0.634f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 700, 2,
+                   -32001, 585, 1339424, 5, 16, 0.372f, 0.634f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
+                   -32001, 585, 1339424, 2, 80, 0.520f, 0.634f));
   }
   {
     TestCase tc("Root Q gap ignores unvisited placeholders");

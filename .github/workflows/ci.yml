@@ -2,11 +2,11 @@ name: MetalFish CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags:
       - "v*"
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 concurrency:
@@ -45,20 +45,7 @@ jobs:
           python3 -m pip install -r tests/requirements.txt
 
       - name: Download engine networks
-        run: |
-          mkdir -p networks
-          curl --fail -L --retry 3 --retry-delay 2 \
-            -o networks/nn-c288c895ea92.nnue \
-            https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-          curl --fail -L --retry 3 --retry-delay 2 \
-            -o networks/nn-37f18f62d772.nnue \
-            https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
-          curl --fail -L --retry 3 --retry-delay 5 \
-            -o networks/BT4-1024x15x32h-swa-6147500.pb.gz \
-            "${METALFISH_BT4_WEIGHTS_URL}"
-          gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \
-            > networks/BT4-1024x15x32h-swa-6147500.pb
-          test -s networks/BT4-1024x15x32h-swa-6147500.pb
+        run: python3 tools/download_engine_networks.py
 
       - name: Configure
         run: |
@@ -83,8 +70,27 @@ jobs:
 
       - name: Run UCI smoke
         run: |
-          printf "uci\nisready\nsetoption name UseHybridSearch value true\nsetoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb\nisready\nposition startpos\ngo depth 4\nquit\n" \
-            | ./build/metalfish
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --setoption UseHybridSearch=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --go "depth 4"
+
+      - name: Run MCTS low-node tactical smoke
+        run: |
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=8 \
+            --setoption MCTSParallelSearch=true \
+            --setoption MCTSMinibatchSize=0 \
+            --setoption MCTSAddDirichletNoise=false \
+            --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
+            --go "nodes 50" \
+            --expect-bestmove h5f6
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v6
@@ -114,19 +120,7 @@ jobs:
         run: brew install protobuf zlib abseil
 
       - name: Download engine networks
-        run: |
-          mkdir -p networks
-          curl --fail -L --retry 3 --retry-delay 2 \
-            -o networks/nn-c288c895ea92.nnue \
-            https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-          curl --fail -L --retry 3 --retry-delay 2 \
-            -o networks/nn-37f18f62d772.nnue \
-            https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
-          curl --fail -L --retry 3 --retry-delay 5 \
-            -o networks/BT4-1024x15x32h-swa-6147500.pb.gz \
-            "${METALFISH_BT4_WEIGHTS_URL}"
-          gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \
-            > networks/BT4-1024x15x32h-swa-6147500.pb
+        run: python3 tools/download_engine_networks.py
 
       - name: Build release binary
         run: |

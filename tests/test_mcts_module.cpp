@@ -11,6 +11,10 @@
 #include "mcts/backend_adapter.h"
 #include "mcts/core.h"
 #include "mcts/search.h"
+#include "nn/input_plane_packing.h"
+#include "nn/network_output_decoder.h"
+#include "nn/network_tensor_plan.h"
+#include "nn_input_fixture.h"
 #include "syzygy/tbprobe.h"
 
 #include <array>
@@ -25,6 +29,7 @@
 
 using namespace MetalFish;
 using namespace MetalFish::MCTS;
+using namespace MetalFish::Tests;
 
 namespace {
 
@@ -188,6 +193,55 @@ void test_search_params_defaults(TestCounter &tc) {
          "root cpuct base getter", tc);
   expect(params.GetFpuValue(true) == params.fpu_value_at_root,
          "root fpu value getter", tc);
+}
+
+void test_shared_nn_input_contract(TestCounter &tc) {
+  std::cout << "  Shared NN input contract..." << std::endl;
+
+  expect(NN::kPackedInputPlaneCount == NN::kTotalPlanes,
+         "packed input plane count should match encoder", tc);
+  expect(NN::kPackedInputSquareCount == 64,
+         "packed input square count should match board", tc);
+
+  const auto fixture = BuildStartPositionPackedInputFixture();
+  std::string error;
+  expect(ValidateStartPositionPackedInputFixture(fixture, &error),
+         error.empty() ? "start position input packing should be stable"
+                       : error.c_str(),
+         tc);
+}
+
+void test_shared_nn_output_decoder(TestCounter &tc) {
+  std::cout << "  Shared NN output decoder..." << std::endl;
+
+  NN::NetworkTensorPlan plan;
+  plan.policy_outputs = NN::kPolicyOutputs;
+  plan.value_outputs = 3;
+  plan.moves_left_outputs = 1;
+  plan.wdl = true;
+  plan.moves_left = true;
+
+  std::vector<float> policy(static_cast<std::size_t>(2) * NN::kPolicyOutputs,
+                            0.0f);
+  policy[0] = 0.25f;
+  policy[static_cast<std::size_t>(NN::kPolicyOutputs) + 5] = 0.75f;
+  const std::vector<float> value = {0.6f, 0.3f, 0.1f, 0.2f, 0.5f, 0.3f};
+  const std::vector<float> moves_left = {12.0f, 34.0f};
+
+  const auto decoded = NN::DecodeNetworkOutputBatch(
+      plan, policy.data(), policy.size(), value.data(), value.size(),
+      moves_left.data(), moves_left.size(), 2);
+
+  expect(decoded.size() == 2, "decoder should return one output per batch row",
+         tc);
+  expect(decoded[0].has_wdl && decoded[1].has_wdl,
+         "decoder should preserve WDL metadata", tc);
+  expect(std::abs(decoded[0].value - 0.5f) < 1e-6f,
+         "decoder should convert WDL to scalar value", tc);
+  expect(decoded[1].has_moves_left && decoded[1].moves_left == 34.0f,
+         "decoder should preserve moves-left output", tc);
+  expect(decoded[0].policy[0] == 0.25f && decoded[1].policy[5] == 0.75f,
+         "decoder should copy policy rows independently", tc);
 }
 
 void test_lc0_stoppers(TestCounter &tc) {
@@ -568,6 +622,36 @@ void test_nodes_limit_with_callback(TestCounter &tc) {
          "async best move child visits should not exceed total visits", tc);
 }
 
+void test_bk07_low_node_regression(TestCounter &tc) {
+  std::cout << "  BK.07 low-node regression..." << std::endl;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return;
+  }
+
+  SearchParams params;
+  params.num_threads = 1;
+  params.nn_weights_path = weights;
+  params.add_dirichlet_noise = false;
+  params.minibatch_size = 1;
+
+  MetalFish::Search::LimitsType limits;
+  limits.nodes = 50;
+
+  auto search = CreateSearch(params);
+  search->StartSearch(
+      "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - - 0 1",
+      limits, nullptr, nullptr);
+  search->Wait();
+
+  const uint64_t nodes = search->Stats().total_nodes.load();
+  const Move best = search->GetBestMove();
+  expect(nodes >= limits.nodes, "BK.07 nodes limit should be honored", tc);
+  expect(best == Move(SQ_H5, SQ_F6),
+         "BK.07 low-node MCTS should find Nf6", tc);
+}
+
 void test_searchmoves_restrict_root(TestCounter &tc) {
   std::cout << "  Searchmoves restrict root..." << std::endl;
   const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
@@ -842,6 +926,8 @@ bool test_mcts_all() {
   test_node_basics(tc);
   test_tablebase_wdl_conversion(tc);
   test_search_params_defaults(tc);
+  test_shared_nn_input_contract(tc);
+  test_shared_nn_output_decoder(tc);
   test_lc0_stoppers(tc);
   test_solid_tree_repairs_child_parents(tc);
   test_nn_cache_policy_capacity(tc);
@@ -853,6 +939,7 @@ bool test_mcts_all() {
   test_evaluator_legal_move_view_parity(tc);
   test_deterministic_repro(tc);
   test_nodes_limit_with_callback(tc);
+  test_bk07_low_node_regression(tc);
   test_searchmoves_restrict_root(tc);
   test_empty_searchmoves_filter_blocks_root(tc);
   test_same_root_search_reuses_tree(tc);

@@ -7,8 +7,10 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "proto/net.pb.h"
@@ -19,7 +21,17 @@ namespace NN {
 struct BaseWeights {
   explicit BaseWeights(const MetalFishNN::Weights &weights);
 
-  using Vec = std::vector<float>;
+  struct Vec : public std::vector<float> {
+    using std::vector<float>::vector;
+
+    Vec() = default;
+    explicit Vec(std::vector<float> values,
+                 std::vector<std::uint32_t> layer_dims = {})
+        : std::vector<float>(std::move(values)), dims(std::move(layer_dims)) {}
+
+    std::vector<std::uint32_t> dims;
+  };
+
   struct ConvBlock {
     explicit ConvBlock(const MetalFishNN::Weights::ConvBlock &block);
 

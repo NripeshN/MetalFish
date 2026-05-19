@@ -1017,13 +1017,9 @@ compute_hybrid_thread_split(Engine &engine,
   if (mcts_override > 0) {
     mcts_threads = std::clamp(mcts_override, 1, available);
   } else {
-    // Fixed-budget searches are usually tactical benchmarks or analysis
-    // probes; the BK sweep strongly favored two low-batch MCTS workers there.
-    // Game-clock searches keep one transformer worker and let AB use the rest,
-    // subject to the auto cap below.
-    mcts_threads = is_fixed_budget_hybrid_search(limits)
-                       ? std::min(2, std::max(1, available - 1))
-                       : 1;
+    // One transformer worker keeps the GPU side active while leaving the CPU
+    // search enough cores to finish tactical verification.
+    mcts_threads = 1;
   }
 
   int ab_threads = 0;
@@ -1031,7 +1027,7 @@ compute_hybrid_thread_split(Engine &engine,
     ab_threads = std::clamp(ab_override, 1, available);
   } else {
     if (is_fixed_budget_hybrid_search(limits)) {
-      ab_threads = 1;
+      ab_threads = std::max(1, available - mcts_threads);
     } else {
       const int effective_ab_cap =
           auto_ab_cap > 0 ? auto_ab_cap : auto_hybrid_ab_threads_cap(available);
@@ -1083,6 +1079,12 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
       static_cast<int>(engine.get_options()["HybridMCTSABRootHintDelayMs"]);
   config.mcts_ab_root_hint_count =
       static_cast<int>(engine.get_options()["HybridMCTSABRootHintCount"]);
+  config.ab_candidate_verify_ms =
+      static_cast<int>(engine.get_options()["HybridABCandidateVerifyMs"]);
+  config.ab_candidate_verify_count =
+      static_cast<int>(engine.get_options()["HybridABCandidateVerifyCount"]);
+  config.root_pawn_lever_tiebreak =
+      engine.get_options()["HybridRootPawnLeverTieBreak"];
   config.trace_decisions = engine.get_options()["HybridTrace"];
   return config;
 }
@@ -1104,7 +1106,12 @@ make_hybrid_cache_key(const std::string &nn_weights,
       << static_cast<int>(config.decision_mode) << "|"
       << config.transformer_batch_size << "|"
       << config.transformer_batch_timeout_us << "|"
-      << config.use_transformer_prefetch << "|" << config.use_shared_tt;
+      << config.use_transformer_prefetch << "|" << config.mcts_root_reject
+      << "|" << config.use_shared_tt << "|" << config.mcts_ab_root_hints << "|"
+      << config.mcts_ab_root_hint_delay_ms << "|"
+      << config.mcts_ab_root_hint_count << "|"
+      << config.ab_candidate_verify_ms << "|"
+      << config.ab_candidate_verify_count;
   return key.str();
 }
 
@@ -1585,6 +1592,18 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
 
   num_threads = resolve_mcts_thread_count(engine, explicit_threads_arg,
                                           num_threads, true);
+
+#ifdef __APPLE__
+  constexpr std::uint64_t kLowNodeMctsThreadCap = 1024;
+  if (limits.nodes > 0 && limits.nodes <= kLowNodeMctsThreadCap &&
+      num_threads > 1) {
+    sync_cout << "info string Capping low-node pure MCTS search from "
+              << num_threads
+              << " to 1 thread for Apple Silicon tactical stability"
+              << sync_endl;
+    num_threads = 1;
+  }
+#endif
 
   sync_cout << "info string Starting Multi-Threaded MCTS Search with "
             << num_threads << " threads..." << sync_endl;
