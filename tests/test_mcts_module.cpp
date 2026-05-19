@@ -896,6 +896,11 @@ void test_cuda_output_mapping(TestCounter &tc) {
   expect(mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
          "CUDA output mapping should bind raw policy scratch source", tc);
 
+  const auto no_body_inputs =
+      NN::Cuda::CreateCudaStageInputBindings(plan, schedule);
+  expect(no_body_inputs.Size() == 0,
+         "CUDA stage input derivation should not bind head-only plans", tc);
+
   NN::Cuda::CudaStageInputBindings stage_inputs;
   stage_inputs.Add("policy.smoke.output", "body.smoke.dense");
   stage_inputs.Add("value.smoke.dense2", "body.smoke.dense");
@@ -913,6 +918,63 @@ void test_cuda_output_mapping(TestCounter &tc) {
   }
   expect(duplicate_rejected,
          "CUDA stage input bindings should reject duplicate stages", tc);
+
+  NN::NetworkResolvedExecutionPlan branched = plan;
+  branched.steps.insert(
+      branched.steps.begin(),
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::LayerNorm,
+          "body.smoke.norm",
+          {
+              {7, "body.smoke.norm_gammas", 4, {4},
+               NN::NetworkWeightTensorKind::NormScale},
+              {8, "body.smoke.norm_betas", 4, {4},
+               NN::NetworkWeightTensorKind::NormBias},
+          }});
+  branched.steps.insert(
+      branched.steps.begin(),
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::Dense,
+          "body.smoke.dense",
+          {
+              {6, "body.smoke.dense_w", 16, {4, 4},
+               NN::NetworkWeightTensorKind::DenseWeight},
+              {7, "body.smoke.dense_b", 4, {4},
+               NN::NetworkWeightTensorKind::DenseBias},
+          }});
+  branched.steps.insert(
+      branched.steps.begin() + 3,
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::Dense,
+          "policy.smoke.dense2",
+          {
+              {8, "policy.smoke.ip2_pol_w", 4, {2, 2},
+               NN::NetworkWeightTensorKind::DenseWeight},
+              {9, "policy.smoke.ip2_pol_b", 2, {2},
+               NN::NetworkWeightTensorKind::DenseBias},
+          }});
+  const auto branched_schedule = NN::Cuda::CreateCudaExecutionSchedule(branched);
+  const auto derived_inputs =
+      NN::Cuda::CreateCudaStageInputBindings(branched, branched_schedule);
+  expect(derived_inputs.Size() == 3,
+         "CUDA stage input derivation should bind first policy/value/moves "
+         "head stages",
+         tc);
+  expect(derived_inputs.FindSource("policy.smoke.output") &&
+             *derived_inputs.FindSource("policy.smoke.output") ==
+                 "body.smoke.dense",
+         "CUDA stage input derivation should branch policy from body", tc);
+  expect(!derived_inputs.FindSource("policy.smoke.dense2"),
+         "CUDA stage input derivation should not rebind later policy stages",
+         tc);
+  expect(derived_inputs.FindSource("value.smoke.dense2") &&
+             *derived_inputs.FindSource("value.smoke.dense2") ==
+                 "body.smoke.dense",
+         "CUDA stage input derivation should branch value from body", tc);
+  expect(derived_inputs.FindSource("moves_left.output") &&
+             *derived_inputs.FindSource("moves_left.output") ==
+                 "body.smoke.dense",
+         "CUDA stage input derivation should branch moves-left from body", tc);
 
   NN::NetworkResolvedExecutionPlan missing_value = plan;
   missing_value.steps.erase(missing_value.steps.begin() + 1);

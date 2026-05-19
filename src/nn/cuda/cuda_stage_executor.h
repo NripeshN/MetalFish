@@ -8,6 +8,7 @@
 #pragma once
 
 #include "../network_execution_plan.h"
+#include "cuda_execution_schedule.h"
 #include "cuda_execution_tape.h"
 #include "cuda_weight_buffers.h"
 #include "cuda_workspace.h"
@@ -55,6 +56,10 @@ public:
 private:
   std::vector<CudaStageInputBinding> bindings_;
 };
+
+CudaStageInputBindings CreateCudaStageInputBindings(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaExecutionSchedule &schedule);
 
 CudaDenseStageOutput ExecuteDenseActivationStage(
     const NetworkResolvedExecutionPlan &execution_plan,
