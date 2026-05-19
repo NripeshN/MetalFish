@@ -9,6 +9,8 @@
 
 #include <string>
 
+#include <cuda_runtime_api.h>
+
 #include "cuda_input_packing.h"
 
 namespace MetalFish {
@@ -32,14 +34,17 @@ enum class CudaActivationKind {
 
 void LaunchDenseAffineKernel(const float *input, const float *weights,
                              const float *bias, float *output, int batch_size,
-                             int input_width, int output_width);
+                             int input_width, int output_width,
+                             cudaStream_t stream = nullptr);
 
 void LaunchLayerNormKernel(const float *input, const float *gamma,
                            const float *beta, float *output, int rows,
-                           int width, float epsilon);
+                           int width, float epsilon,
+                           cudaStream_t stream = nullptr);
 
 void LaunchActivationKernel(const float *input, float *output, int elements,
-                            CudaActivationKind kind);
+                            CudaActivationKind kind,
+                            cudaStream_t stream = nullptr);
 
 CudaKernelSmokeResult RunDenseAffineKernelSmoke();
 CudaKernelSmokeResult RunLayerNormKernelSmoke();

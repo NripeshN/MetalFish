@@ -43,8 +43,8 @@ void UploadDeviceFloats(float *ptr, const std::vector<float> &host,
 }
 
 void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
-                         int src_stride, int rows, int width,
-                         const char *name) {
+                         int src_stride, int rows, int width, const char *name,
+                         cudaStream_t stream) {
   if (rows <= 0 || width <= 0)
     return;
   if (!dst || !src)
@@ -53,11 +53,20 @@ void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
   if (dst_stride < width || src_stride < width)
     throw std::runtime_error(std::string("CUDA row copy stride too small: ") +
                              name);
-  const cudaError_t status = cudaMemcpy2D(
-      dst, static_cast<std::size_t>(dst_stride) * sizeof(float), src,
-      static_cast<std::size_t>(src_stride) * sizeof(float),
-      static_cast<std::size_t>(width) * sizeof(float), rows,
-      cudaMemcpyDeviceToDevice);
+  cudaError_t status = cudaSuccess;
+  if (stream) {
+    status = cudaMemcpy2DAsync(
+        dst, static_cast<std::size_t>(dst_stride) * sizeof(float), src,
+        static_cast<std::size_t>(src_stride) * sizeof(float),
+        static_cast<std::size_t>(width) * sizeof(float), rows,
+        cudaMemcpyDeviceToDevice, stream);
+  } else {
+    status = cudaMemcpy2D(
+        dst, static_cast<std::size_t>(dst_stride) * sizeof(float), src,
+        static_cast<std::size_t>(src_stride) * sizeof(float),
+        static_cast<std::size_t>(width) * sizeof(float), rows,
+        cudaMemcpyDeviceToDevice);
+  }
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
@@ -186,24 +195,28 @@ public:
         workspace.ReserveFloats(CudaWorkspaceSlot::Activation, scratch_entries);
     float *norm_output =
         workspace.ReserveFloats(CudaWorkspaceSlot::Norm, scratch_entries);
+    cudaStream_t stream = workspace.Stream();
 
     LaunchDenseAffineKernel(buffers.input_values, dense_weight.data,
                             dense_bias.data, dense_output, batch_size,
-                            input_width, output_width);
+                            input_width, output_width, stream);
     LaunchActivationKernel(
         dense_output, activation_output, static_cast<int>(scratch_entries),
-        ActivationFromString(execution_plan.format.activations.ffn_activation));
+        ActivationFromString(execution_plan.format.activations.ffn_activation),
+        stream);
     LaunchLayerNormKernel(activation_output, gamma.data, beta.data, norm_output,
-                          batch_size, output_width, 1e-5f);
+                          batch_size, output_width, 1e-5f, stream);
 
     CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, norm_output,
                         output_width, batch_size, output_width,
-                        "cudaMemcpy(smoke_policy_rows)");
+                        "cudaMemcpy(smoke_policy_rows)", stream);
 
     if (buffers.raw_policy)
       CopyDeviceFloatRows(buffers.raw_policy, plan.raw_policy_outputs,
                           activation_output, output_width, batch_size,
-                          output_width, "cudaMemcpy(smoke_raw_policy_rows)");
+                          output_width, "cudaMemcpy(smoke_raw_policy_rows)",
+                          stream);
+    workspace.Synchronize();
   }
 
   std::string Name() const override { return "plan-smoke"; }

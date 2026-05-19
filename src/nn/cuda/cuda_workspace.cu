@@ -37,9 +37,19 @@ void FreeDevice(float *ptr) {
     cudaFree(ptr);
 }
 
+void DestroyStream(cudaStream_t stream) {
+  if (stream)
+    cudaStreamDestroy(stream);
+}
+
 } // namespace
 
-CudaExecutionWorkspace::~CudaExecutionWorkspace() { Release(); }
+CudaExecutionWorkspace::~CudaExecutionWorkspace() {
+  try {
+    Release();
+  } catch (...) {
+  }
+}
 
 float *CudaExecutionWorkspace::ReserveFloats(CudaWorkspaceSlot slot,
                                              std::size_t entries) {
@@ -62,6 +72,25 @@ float *CudaExecutionWorkspace::ReserveFloats(CudaWorkspaceSlot slot,
   return buffers_[index];
 }
 
+cudaStream_t CudaExecutionWorkspace::Stream() {
+  if (stream_)
+    return stream_;
+
+  const cudaError_t status =
+      cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking);
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage("cudaStreamCreate", status));
+  return stream_;
+}
+
+void CudaExecutionWorkspace::Synchronize() {
+  if (!stream_)
+    return;
+  const cudaError_t status = cudaStreamSynchronize(stream_);
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage("cudaStreamSynchronize", status));
+}
+
 std::size_t
 CudaExecutionWorkspace::CapacityFloats(CudaWorkspaceSlot slot) const {
   return capacities_[SlotIndex(slot)];
@@ -79,11 +108,15 @@ std::size_t CudaExecutionWorkspace::TotalBytes() const {
 }
 
 void CudaExecutionWorkspace::Release() {
+  if (stream_)
+    cudaStreamSynchronize(stream_);
   for (std::size_t i = 0; i < buffers_.size(); ++i) {
     FreeDevice(buffers_[i]);
     buffers_[i] = nullptr;
     capacities_[i] = 0;
   }
+  DestroyStream(stream_);
+  stream_ = nullptr;
 }
 
 CudaWorkspaceSmokeResult RunExecutionWorkspaceSmoke() {
@@ -103,8 +136,10 @@ CudaWorkspaceSmokeResult RunExecutionWorkspaceSmoke() {
         workspace.ReserveFloats(CudaWorkspaceSlot::Activation, 4);
     float *dense_reused = workspace.ReserveFloats(CudaWorkspaceSlot::Dense, 4);
     float *norm = workspace.ReserveFloats(CudaWorkspaceSlot::Norm, 16);
+    cudaStream_t stream = workspace.Stream();
 
     if (!dense || !activation || !norm || dense != dense_reused ||
+        !stream ||
         workspace.CapacityFloats(CudaWorkspaceSlot::Dense) != 8 ||
         workspace.CapacityFloats(CudaWorkspaceSlot::Activation) != 4 ||
         workspace.CapacityFloats(CudaWorkspaceSlot::Norm) != 16) {

@@ -163,7 +163,8 @@ __global__ void ActivationKernel(const float *input, float *output,
 
 void LaunchDenseAffineKernel(const float *input, const float *weights,
                              const float *bias, float *output, int batch_size,
-                             int input_width, int output_width) {
+                             int input_width, int output_width,
+                             cudaStream_t stream) {
   if (!input || !weights || !output)
     throw std::runtime_error("CUDA dense affine kernel received null buffer");
   if (batch_size <= 0 || input_width <= 0 || output_width <= 0)
@@ -172,13 +173,14 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
   const int total_outputs = batch_size * output_width;
   constexpr int kThreads = 256;
   const int blocks = (total_outputs + kThreads - 1) / kThreads;
-  DenseAffineKernel<<<blocks, kThreads>>>(input, weights, bias, output,
-                                          input_width, output_width,
-                                          total_outputs);
+  DenseAffineKernel<<<blocks, kThreads, 0, stream>>>(
+      input, weights, bias, output, input_width, output_width, total_outputs);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage("DenseAffineKernel launch",
                                              status));
+  if (stream)
+    return;
   status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
     throw std::runtime_error(
@@ -187,7 +189,7 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
 
 void LaunchLayerNormKernel(const float *input, const float *gamma,
                            const float *beta, float *output, int rows,
-                           int width, float epsilon) {
+                           int width, float epsilon, cudaStream_t stream) {
   if (!input || !gamma || !beta || !output)
     throw std::runtime_error("CUDA layernorm kernel received null buffer");
   if (rows <= 0 || width <= 0 || epsilon <= 0.0f)
@@ -195,12 +197,14 @@ void LaunchLayerNormKernel(const float *input, const float *gamma,
 
   constexpr int kThreads = 256;
   const std::size_t shared_bytes = 2 * kThreads * sizeof(float);
-  LayerNormKernel<<<rows, kThreads, shared_bytes>>>(input, gamma, beta, output,
-                                                    width, epsilon);
+  LayerNormKernel<<<rows, kThreads, shared_bytes, stream>>>(
+      input, gamma, beta, output, width, epsilon);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("LayerNormKernel launch", status));
+  if (stream)
+    return;
   status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
     throw std::runtime_error(
@@ -208,7 +212,7 @@ void LaunchLayerNormKernel(const float *input, const float *gamma,
 }
 
 void LaunchActivationKernel(const float *input, float *output, int elements,
-                            CudaActivationKind kind) {
+                            CudaActivationKind kind, cudaStream_t stream) {
   if (!input || !output)
     throw std::runtime_error("CUDA activation kernel received null buffer");
   if (elements <= 0)
@@ -216,11 +220,14 @@ void LaunchActivationKernel(const float *input, float *output, int elements,
 
   constexpr int kThreads = 256;
   const int blocks = (elements + kThreads - 1) / kThreads;
-  ActivationKernel<<<blocks, kThreads>>>(input, output, elements, kind);
+  ActivationKernel<<<blocks, kThreads, 0, stream>>>(input, output, elements,
+                                                   kind);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("ActivationKernel launch", status));
+  if (stream)
+    return;
   status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
     throw std::runtime_error(

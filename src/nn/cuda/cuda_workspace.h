@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <string>
 
+#include <cuda_runtime_api.h>
+
 #include "cuda_input_packing.h"
 
 namespace MetalFish {
@@ -32,6 +34,8 @@ public:
   ~CudaExecutionWorkspace();
 
   float *ReserveFloats(CudaWorkspaceSlot slot, std::size_t entries);
+  cudaStream_t Stream();
+  void Synchronize();
   std::size_t CapacityFloats(CudaWorkspaceSlot slot) const;
   std::size_t TotalCapacityFloats() const;
   std::size_t TotalBytes() const;
@@ -43,6 +47,7 @@ private:
 
   std::array<float *, kSlotCount> buffers_{};
   std::array<std::size_t, kSlotCount> capacities_{};
+  cudaStream_t stream_ = nullptr;
 };
 
 struct CudaWorkspaceSmokeResult {
