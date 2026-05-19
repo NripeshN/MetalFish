@@ -58,6 +58,20 @@ void RequireLayerNormTensors(const NetworkResolvedExecutionStep &norm) {
   }
 }
 
+void RequireGateTensors(const NetworkResolvedExecutionStep &gate) {
+  if (gate.kind != NetworkExecutionOpKind::Gate || gate.tensors.empty()) {
+    throw std::runtime_error("CUDA gate stage has missing tensors");
+  }
+}
+
+bool IsMultiplyGate(std::string_view name) {
+  return name.find("mult_gate") != std::string_view::npos;
+}
+
+bool IsAddGate(std::string_view name) {
+  return name.find("add_gate") != std::string_view::npos;
+}
+
 } // namespace
 
 void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
@@ -124,7 +138,7 @@ CudaStageInputBindings CreateCudaStageInputBindings(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaExecutionSchedule &schedule) {
   CudaStageInputBindings bindings;
-  const std::string body_stage = LastCudaDenseStageInGroup(
+  const std::string body_stage = LastCudaOutputStageInGroup(
       execution_plan, schedule, CudaPlanStageGroup::Body);
   if (body_stage.empty())
     return bindings;
@@ -133,7 +147,7 @@ CudaStageInputBindings CreateCudaStageInputBindings(
   bool value_bound = false;
   bool moves_left_bound = false;
   for (const auto &entry : schedule.entries) {
-    if (!IsCudaDenseScheduleEntry(entry.kind) ||
+    if (!IsCudaOutputScheduleEntry(entry.kind) ||
         entry.first_step >= execution_plan.steps.size()) {
       continue;
     }
@@ -247,6 +261,55 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
   return output;
 }
 
+CudaDenseStageOutput ExecuteGateStage(
+    const NetworkResolvedExecutionStep &gate, const CudaWeightBuffers &weights,
+    const float *input, int input_width, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA gate stage received empty batch");
+  if (!input || input_width <= 0)
+    throw std::runtime_error("CUDA gate stage input is missing");
+  RequireGateTensors(gate);
+
+  const auto &gate_binding = tape.RequireName(gate.name + ".gated");
+  const std::size_t entries = static_cast<std::size_t>(batch_size) *
+                              static_cast<std::size_t>(input_width);
+  if (gate_binding.entries != entries) {
+    throw std::runtime_error("CUDA gate stage tape size mismatch");
+  }
+
+  CudaDenseStageOutput output;
+  output.gated = tape.Reserve(workspace, gate_binding);
+  output.output = output.gated;
+  output.input_width = input_width;
+  output.output_width = input_width;
+
+  const float *source = input;
+  cudaStream_t stream = workspace.Stream();
+  bool launched = false;
+  for (const auto &tensor : gate.tensors) {
+    const auto gate_weights = weights.TensorAt(tensor.inventory_index);
+    if (gate_weights.elements != static_cast<std::size_t>(input_width)) {
+      throw std::runtime_error("CUDA gate stage tensor dimensions mismatch");
+    }
+    if (IsMultiplyGate(tensor.name)) {
+      LaunchGateKernel(source, gate_weights.data, output.gated, batch_size,
+                       input_width, CudaGateKind::Multiply, stream);
+    } else if (IsAddGate(tensor.name)) {
+      LaunchGateKernel(source, gate_weights.data, output.gated, batch_size,
+                       input_width, CudaGateKind::Add, stream);
+    } else {
+      throw std::runtime_error("CUDA gate stage tensor is unknown: " +
+                               tensor.name);
+    }
+    source = output.gated;
+    launched = true;
+  }
+  if (!launched)
+    throw std::runtime_error("CUDA gate stage launched no operations");
+  return output;
+}
+
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,
@@ -277,7 +340,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
   int current_width = 0;
   for (const auto &entry : schedule.entries) {
     if (entry.kind != CudaExecutionScheduleKind::DenseLayerNormStage &&
-        entry.kind != CudaExecutionScheduleKind::DenseActivationStage) {
+        entry.kind != CudaExecutionScheduleKind::DenseActivationStage &&
+        entry.kind != CudaExecutionScheduleKind::GateStage) {
       continue;
     }
 
@@ -300,14 +364,19 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
       }
     }
 
-    const CudaDenseStageOutput stage =
-        entry.kind == CudaExecutionScheduleKind::DenseLayerNormStage
-            ? ExecuteDenseActivationLayerNormStage(
-                  execution_plan, step, execution_plan.steps[entry.second_step],
-                  weights, stage_input, tape, workspace, batch_size)
-            : ExecuteDenseActivationStage(execution_plan, step, weights,
+    CudaDenseStageOutput stage;
+    if (entry.kind == CudaExecutionScheduleKind::GateStage) {
+      stage = ExecuteGateStage(step, weights, stage_input, stage_input_width,
+                               tape, workspace, batch_size);
+    } else if (entry.kind == CudaExecutionScheduleKind::DenseLayerNormStage) {
+      stage = ExecuteDenseActivationLayerNormStage(
+          execution_plan, step, execution_plan.steps[entry.second_step],
+          weights, stage_input, tape, workspace, batch_size);
+    } else {
+      stage = ExecuteDenseActivationStage(execution_plan, step, weights,
                                           stage_input, tape, workspace,
                                           batch_size);
+    }
     if (stage_input_width != 0 && stage.input_width != stage_input_width) {
       throw std::runtime_error(
           "CUDA dense stage sequence input width mismatch");

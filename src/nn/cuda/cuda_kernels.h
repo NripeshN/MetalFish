@@ -32,6 +32,11 @@ enum class CudaActivationKind {
   Selu,
 };
 
+enum class CudaGateKind {
+  Multiply,
+  Add,
+};
+
 void LaunchDenseAffineKernel(const float *input, const float *weights,
                              const float *bias, float *output, int batch_size,
                              int input_width, int output_width,
@@ -46,9 +51,14 @@ void LaunchActivationKernel(const float *input, float *output, int elements,
                             CudaActivationKind kind,
                             cudaStream_t stream = nullptr);
 
+void LaunchGateKernel(const float *input, const float *weights, float *output,
+                      int batch_size, int width, CudaGateKind kind,
+                      cudaStream_t stream = nullptr);
+
 CudaKernelSmokeResult RunDenseAffineKernelSmoke();
 CudaKernelSmokeResult RunLayerNormKernelSmoke();
 CudaKernelSmokeResult RunActivationKernelSmoke();
+CudaKernelSmokeResult RunGateKernelSmoke();
 
 } // namespace Cuda
 } // namespace NN

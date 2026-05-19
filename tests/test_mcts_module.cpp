@@ -793,6 +793,8 @@ void test_cuda_execution_schedule(TestCounter &tc) {
          "CUDA schedule should not count dense-only stages in fused plan", tc);
   expect(schedule.dense_layernorm_stage_count == 1,
          "CUDA schedule should count dense/layernorm stages", tc);
+  expect(schedule.gate_stage_count == 0,
+         "CUDA schedule should not count absent gate stages", tc);
   expect(schedule.unsupported_count == 0,
          "CUDA schedule should not report unsupported stages", tc);
   expect(schedule.entries.size() == 3,
@@ -831,6 +833,22 @@ void test_cuda_execution_schedule(TestCounter &tc) {
              dense_only_schedule.entries[0].kind ==
                  NN::Cuda::CudaExecutionScheduleKind::DenseActivationStage,
          "CUDA schedule should classify dense-only stages explicitly", tc);
+
+  NN::NetworkResolvedExecutionPlan gated = plan;
+  gated.steps.insert(
+      gated.steps.begin() + 3,
+      NN::NetworkResolvedExecutionStep{NN::NetworkExecutionOpKind::Gate,
+                                       "body.input_embedding_gates",
+                                       {}});
+  const auto gated_schedule = NN::Cuda::CreateCudaExecutionSchedule(gated);
+  expect(gated_schedule.FullySupported(),
+         "gate schedule should be supported", tc);
+  expect(gated_schedule.gate_stage_count == 1,
+         "CUDA schedule should count gate stages", tc);
+  expect(gated_schedule.entries.size() == 4 &&
+             gated_schedule.entries[2].kind ==
+                 NN::Cuda::CudaExecutionScheduleKind::GateStage,
+         "CUDA schedule should classify gates explicitly", tc);
 }
 
 void test_cuda_output_mapping(TestCounter &tc) {
@@ -982,12 +1000,23 @@ void test_cuda_output_mapping(TestCounter &tc) {
   branched.steps.insert(
       branched.steps.begin() + 3,
       NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::Gate,
+          "body.smoke.gates",
+          {
+              {8, "body.ip_mult_gate", 4, {4},
+               NN::NetworkWeightTensorKind::Gate},
+              {9, "body.ip_add_gate", 4, {4},
+               NN::NetworkWeightTensorKind::Gate},
+          }});
+  branched.steps.insert(
+      branched.steps.begin() + 4,
+      NN::NetworkResolvedExecutionStep{
           NN::NetworkExecutionOpKind::Dense,
           "policy.smoke.dense2",
           {
-              {8, "policy.smoke.ip2_pol_w", 4, {2, 2},
+              {10, "policy.smoke.ip2_pol_w", 4, {2, 2},
                NN::NetworkWeightTensorKind::DenseWeight},
-              {9, "policy.smoke.ip2_pol_b", 2, {2},
+              {11, "policy.smoke.ip2_pol_b", 2, {2},
                NN::NetworkWeightTensorKind::DenseBias},
           }});
   const auto branched_schedule = NN::Cuda::CreateCudaExecutionSchedule(branched);
@@ -999,18 +1028,19 @@ void test_cuda_output_mapping(TestCounter &tc) {
          tc);
   expect(derived_inputs.FindSource("policy.smoke.output") &&
              *derived_inputs.FindSource("policy.smoke.output") ==
-                 "body.smoke.dense",
-         "CUDA stage input derivation should branch policy from body", tc);
+                 "body.smoke.gates",
+         "CUDA stage input derivation should branch policy from last body output",
+         tc);
   expect(!derived_inputs.FindSource("policy.smoke.dense2"),
          "CUDA stage input derivation should not rebind later policy stages",
          tc);
   expect(derived_inputs.FindSource("value.smoke.dense2") &&
              *derived_inputs.FindSource("value.smoke.dense2") ==
-                 "body.smoke.dense",
+                 "body.smoke.gates",
          "CUDA stage input derivation should branch value from body", tc);
   expect(derived_inputs.FindSource("moves_left.output") &&
              *derived_inputs.FindSource("moves_left.output") ==
-                 "body.smoke.dense",
+                 "body.smoke.gates",
          "CUDA stage input derivation should branch moves-left from body", tc);
 
   NN::NetworkResolvedExecutionPlan value_with_error = plan;
@@ -1089,6 +1119,12 @@ void test_cuda_dense_kernels(TestCounter &tc) {
   expect(activation_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              activation_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA activation kernel should pass or skip without a device", tc);
+
+  auto gate_smoke = NN::Cuda::RunGateKernelSmoke();
+  std::cout << "    " << gate_smoke.message << std::endl;
+  expect(gate_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             gate_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA gate kernel should pass or skip without a device", tc);
 }
 #endif
 

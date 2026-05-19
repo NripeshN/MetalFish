@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `158de937-91b8-4c8e-9e1a-76f0e2e6f08b` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `aeca6b3f-1450-4702-aa9f-25d6226e2a9d` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `f091d069-0d7e-4a65-ad5a-73763d8eef39` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `dc9e2dd8-d8d6-494c-bc46-f405f0429a7c` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -97,8 +97,8 @@ Current CUDA backend boundary:
 - The CUDA executor seam receives the resolved plan and uploaded weight buffers,
   so real kernels can index device tensors without backend-local name lookups.
 - `src/nn/cuda/cuda_kernels.*` contains tested CUDA compute primitives for
-  dense-affine projections/heads, last-axis layer normalization, and shared
-  elementwise activation functions.
+  dense-affine projections/heads, last-axis layer normalization, shared
+  elementwise activation functions, and input-embedding gate multiply/add.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production
@@ -114,18 +114,18 @@ Current CUDA backend boundary:
   than allocating anonymous scratch.
 - `src/nn/cuda/cuda_execution_schedule.*` classifies resolved plan steps into
   supported dense/activation stages, supported dense/layernorm stages,
-  CUDA-managed boundaries, and explicit unsupported operations before any
-  kernels launch.
+  supported gate stages, CUDA-managed boundaries, and explicit unsupported
+  operations before any kernels launch.
 - `src/nn/cuda/cuda_plan_analysis.*` provides the shared CUDA-local view of
   resolved stage groups, dense stage widths, value-error exclusion, and last
   body/head stage discovery. Stage execution and output mapping use this helper
   so head branching and output source selection stay aligned.
 - `src/nn/cuda/cuda_stage_executor.*` owns reusable dense/activation/layernorm
-  stage execution and strided device-row copies, so smoke and production CUDA
-  executors share the same launch path. It derives CUDA-local stage input
-  bindings from the resolved plan and schedule, allowing independent heads to
-  branch from a shared body stage instead of forcing every stage into one linear
-  chain.
+  stage execution, input-embedding gate execution, and strided device-row
+  copies, so smoke and production CUDA executors share the same launch path. It
+  derives CUDA-local stage input bindings from the resolved plan and schedule,
+  allowing independent heads to branch from the last supported body output
+  instead of forcing every stage into one linear chain.
 - `src/nn/cuda/cuda_output_mapping.*` maps named executed CUDA stages to
   policy, value, moves-left, and raw-policy output buffers. This keeps output
   ownership explicit instead of treating the last executed stage as every

@@ -156,6 +156,8 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   const std::vector<float> dense_bias = {0.25f, -0.75f, 0.0f, 1.0f};
   const std::vector<float> gamma = {1.0f, 0.5f, -1.0f, 2.0f};
   const std::vector<float> beta = {0.0f, -0.25f, 0.5f, 1.0f};
+  const std::vector<float> mult_gate = {1.5f, -0.5f, 2.0f, 0.25f};
+  const std::vector<float> add_gate = {0.25f, 1.0f, -0.75f, 0.5f};
   const std::vector<float> dense2_weights = {
       0.25f, -0.5f, 1.0f, 0.75f,
       -1.0f, 0.5f, 0.25f, -0.25f,
@@ -198,6 +200,10 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
        {kMovesLeft, kHidden}, NetworkWeightTensorKind::DenseWeight},
       {"moves_left.ip2_mov_b", moves_bias.data(), moves_bias.size(), {kMovesLeft},
        NetworkWeightTensorKind::DenseBias},
+      {"body.ip_mult_gate", mult_gate.data(), mult_gate.size(), {kHidden},
+       NetworkWeightTensorKind::Gate},
+      {"body.ip_add_gate", add_gate.data(), add_gate.size(), {kHidden},
+       NetworkWeightTensorKind::Gate},
   };
 
   NetworkResolvedExecutionPlan execution_plan;
@@ -222,6 +228,15 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
            NetworkWeightTensorKind::NormScale},
           {3, "smoke.norm_betas", beta.size(), {kHidden},
            NetworkWeightTensorKind::NormBias},
+      }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::Gate,
+      "body.smoke.gates",
+      {
+          {12, "body.ip_mult_gate", mult_gate.size(), {kHidden},
+           NetworkWeightTensorKind::Gate},
+          {13, "body.ip_add_gate", add_gate.size(), {kHidden},
+           NetworkWeightTensorKind::Gate},
       }});
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
       NetworkExecutionOpKind::Dense,
@@ -264,6 +279,8 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
                                       0.0f);
   std::vector<float> hidden_normalized(static_cast<size_t>(kBatch) * kHidden,
                                        0.0f);
+  std::vector<float> hidden_gated(static_cast<size_t>(kBatch) * kHidden,
+                                  0.0f);
   std::vector<float> activated(static_cast<size_t>(kBatch) * kPolicy, 0.0f);
   std::vector<float> policy_expected(static_cast<size_t>(kBatch) * kPolicy,
                                      0.0f);
@@ -301,13 +318,17 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
       hidden_normalized[hidden_offset + i] =
           normalized * gamma[static_cast<size_t>(i)] +
           beta[static_cast<size_t>(i)];
+      hidden_gated[hidden_offset + i] =
+          hidden_normalized[hidden_offset + i] *
+              mult_gate[static_cast<size_t>(i)] +
+          add_gate[static_cast<size_t>(i)];
     }
 
     const size_t policy_offset = static_cast<size_t>(batch) * kPolicy;
     for (int out = 0; out < kPolicy; ++out) {
       float dense = dense2_bias[static_cast<size_t>(out)];
       for (int in = 0; in < kHidden; ++in) {
-        dense += hidden_normalized[hidden_offset + in] *
+        dense += hidden_gated[hidden_offset + in] *
                  dense2_weights[static_cast<size_t>(out) * kHidden + in];
       }
       const float relu = std::max(dense, 0.0f);
@@ -339,7 +360,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     for (int out = 0; out < kValue; ++out) {
       float dense = dense3_bias[static_cast<size_t>(out)];
       for (int in = 0; in < kHidden; ++in) {
-        dense += hidden_normalized[hidden_offset + in] *
+        dense += hidden_gated[hidden_offset + in] *
                  dense3_weights[static_cast<size_t>(out) * kHidden + in];
       }
       const float relu = std::max(dense, 0.0f);
@@ -349,7 +370,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     for (int out = 0; out < kMovesLeft; ++out) {
       float dense = moves_bias[static_cast<size_t>(out)];
       for (int in = 0; in < kHidden; ++in) {
-        dense += hidden_normalized[hidden_offset + in] *
+        dense += hidden_gated[hidden_offset + in] *
                  moves_weights[static_cast<size_t>(out) * kHidden + in];
       }
       const float relu = std::max(dense, 0.0f);

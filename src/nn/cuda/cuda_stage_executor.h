@@ -29,6 +29,7 @@ struct CudaDenseStageOutput {
   float *dense = nullptr;
   float *activation = nullptr;
   float *normalized = nullptr;
+  float *gated = nullptr;
   float *output = nullptr;
   int input_width = 0;
   int output_width = 0;
@@ -72,6 +73,11 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
     const NetworkResolvedExecutionStep &dense,
     const NetworkResolvedExecutionStep &norm, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size);
+
+CudaDenseStageOutput ExecuteGateStage(
+    const NetworkResolvedExecutionStep &gate, const CudaWeightBuffers &weights,
+    const float *input, int input_width, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size);
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(

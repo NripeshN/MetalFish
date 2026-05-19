@@ -26,6 +26,7 @@ enum class CudaPlanStageGroup {
 };
 
 bool IsCudaDenseScheduleEntry(CudaExecutionScheduleKind kind);
+bool IsCudaOutputScheduleEntry(CudaExecutionScheduleKind kind);
 bool CudaStageNameStartsWith(std::string_view value,
                              std::string_view prefix);
 bool CudaStageNameEndsWith(std::string_view value, std::string_view suffix);
@@ -42,6 +43,9 @@ const CudaExecutionScheduleEntry *FindCudaStageEntry(
 int CudaDenseStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
                         const CudaExecutionScheduleEntry &entry);
 std::string LastCudaDenseStageInGroup(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaExecutionSchedule &schedule, CudaPlanStageGroup group);
+std::string LastCudaOutputStageInGroup(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaExecutionSchedule &schedule, CudaPlanStageGroup group);
 

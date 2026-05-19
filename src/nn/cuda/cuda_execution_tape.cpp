@@ -48,6 +48,15 @@ int LayerNormWidth(const NetworkResolvedExecutionStep &norm) {
   return static_cast<int>(width);
 }
 
+int GateWidth(const NetworkResolvedExecutionStep &gate) {
+  if (gate.kind != NetworkExecutionOpKind::Gate || gate.tensors.empty())
+    throw std::runtime_error("CUDA execution tape gate tensor is invalid");
+  const auto width = gate.tensors[0].elements;
+  if (width == 0)
+    throw std::runtime_error("CUDA execution tape gate width is zero");
+  return static_cast<int>(width);
+}
+
 } // namespace
 
 std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
@@ -58,6 +67,8 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
     return "activation_output";
   case CudaExecutionBufferRole::NormalizedOutput:
     return "normalized_output";
+  case CudaExecutionBufferRole::GateOutput:
+    return "gate_output";
   }
   return "unknown";
 }
@@ -150,6 +161,12 @@ CudaExecutionTape CreateResolvedExecutionTape(
       const int width = LayerNormWidth(step);
       tape.Add(step.name + ".normalized",
                CudaExecutionBufferRole::NormalizedOutput, batch_size, width);
+      break;
+    }
+    case NetworkExecutionOpKind::Gate: {
+      const int width = GateWidth(step);
+      tape.Add(step.name + ".gated", CudaExecutionBufferRole::GateOutput,
+               batch_size, width);
       break;
     }
     default:

@@ -55,6 +55,17 @@ CudaExecutionScheduleEntry DenseActivationEntry(
                                     "dense activation"};
 }
 
+CudaExecutionScheduleEntry GateEntry(const NetworkResolvedExecutionPlan &plan,
+                                     std::size_t gate_index) {
+  const auto &gate = plan.steps[gate_index];
+  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::GateStage,
+                                    gate_index,
+                                    std::numeric_limits<std::size_t>::max(),
+                                    gate.kind,
+                                    gate.name,
+                                    "elementwise gate"};
+}
+
 CudaExecutionScheduleEntry UnsupportedEntry(
     const NetworkResolvedExecutionPlan &plan, std::size_t step_index,
     std::string reason) {
@@ -79,6 +90,9 @@ void AddEntry(CudaExecutionSchedule &schedule,
   case CudaExecutionScheduleKind::DenseLayerNormStage:
     ++schedule.dense_layernorm_stage_count;
     break;
+  case CudaExecutionScheduleKind::GateStage:
+    ++schedule.gate_stage_count;
+    break;
   case CudaExecutionScheduleKind::Unsupported:
     ++schedule.unsupported_count;
     break;
@@ -96,6 +110,8 @@ std::string CudaExecutionScheduleKindName(CudaExecutionScheduleKind kind) {
     return "dense_activation_stage";
   case CudaExecutionScheduleKind::DenseLayerNormStage:
     return "dense_layernorm_stage";
+  case CudaExecutionScheduleKind::GateStage:
+    return "gate_stage";
   case CudaExecutionScheduleKind::Unsupported:
     return "unsupported";
   }
@@ -116,6 +132,7 @@ std::string CudaExecutionSchedule::Summary() const {
   out << entries.size() << " CUDA schedule entries, "
       << dense_activation_stage_count << " dense/activation stages, "
       << dense_layernorm_stage_count << " dense/layernorm stages, "
+      << gate_stage_count << " gate stages, "
       << boundary_count << " boundaries, " << unsupported_count
       << " unsupported";
   if (const auto *unsupported = FirstUnsupported()) {
@@ -145,6 +162,11 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
         continue;
       }
       AddEntry(schedule, DenseActivationEntry(plan, i));
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::Gate) {
+      AddEntry(schedule, GateEntry(plan, i));
       continue;
     }
 

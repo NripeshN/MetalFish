@@ -18,6 +18,11 @@ bool IsCudaDenseScheduleEntry(CudaExecutionScheduleKind kind) {
          kind == CudaExecutionScheduleKind::DenseLayerNormStage;
 }
 
+bool IsCudaOutputScheduleEntry(CudaExecutionScheduleKind kind) {
+  return IsCudaDenseScheduleEntry(kind) ||
+         kind == CudaExecutionScheduleKind::GateStage;
+}
+
 bool CudaStageNameStartsWith(std::string_view value,
                              std::string_view prefix) {
   return value.size() >= prefix.size() &&
@@ -109,6 +114,22 @@ std::string LastCudaDenseStageInGroup(
   std::string last_stage;
   for (const auto &entry : schedule.entries) {
     if (!IsCudaDenseScheduleEntry(entry.kind) ||
+        entry.first_step >= execution_plan.steps.size()) {
+      continue;
+    }
+    const auto &step = execution_plan.steps[entry.first_step];
+    if (ClassifyCudaPlanStage(execution_plan, step.name) == group)
+      last_stage = step.name;
+  }
+  return last_stage;
+}
+
+std::string LastCudaOutputStageInGroup(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaExecutionSchedule &schedule, CudaPlanStageGroup group) {
+  std::string last_stage;
+  for (const auto &entry : schedule.entries) {
+    if (!IsCudaOutputScheduleEntry(entry.kind) ||
         entry.first_step >= execution_plan.steps.size()) {
       continue;
     }

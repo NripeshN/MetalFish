@@ -159,6 +159,20 @@ __global__ void ActivationKernel(const float *input, float *output,
   output[index] = ApplyActivationValue(input[index], kind);
 }
 
+__global__ void GateKernel(const float *input, const float *weights,
+                           float *output, int width, int total,
+                           CudaGateKind kind) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int column = index % width;
+  const float gate = weights[column];
+  const float value = input[index];
+  output[index] =
+      kind == CudaGateKind::Add ? value + gate : value * gate;
+}
+
 } // namespace
 
 void LaunchDenseAffineKernel(const float *input, const float *weights,
@@ -232,6 +246,30 @@ void LaunchActivationKernel(const float *input, float *output, int elements,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("ActivationKernel synchronize", status));
+}
+
+void LaunchGateKernel(const float *input, const float *weights, float *output,
+                      int batch_size, int width, CudaGateKind kind,
+                      cudaStream_t stream) {
+  if (!input || !weights || !output)
+    throw std::runtime_error("CUDA gate kernel received null buffer");
+  if (batch_size <= 0 || width <= 0)
+    throw std::runtime_error("CUDA gate kernel dimensions are invalid");
+
+  const int total = batch_size * width;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  GateKernel<<<blocks, kThreads, 0, stream>>>(input, weights, output, width,
+                                             total, kind);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage("GateKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage("GateKernel synchronize",
+                                             status));
 }
 
 CudaKernelSmokeResult RunDenseAffineKernelSmoke() {
@@ -495,6 +533,78 @@ CudaKernelSmokeResult RunLayerNormKernelSmoke() {
 
   result.status = CudaSmokeStatus::Success;
   result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunGateKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 2;
+  constexpr int kWidth = 4;
+  const std::vector<float> input = {
+      1.0f, -2.0f, 0.5f, 3.0f,
+      -1.0f, 0.25f, 2.0f, -0.5f,
+  };
+  const std::vector<float> mult_gate = {2.0f, -0.5f, 4.0f, 0.25f};
+  const std::vector<float> add_gate = {0.5f, 1.0f, -2.0f, 3.0f};
+  std::vector<float> actual(kBatch * kWidth, 0.0f);
+  std::vector<float> expected(kBatch * kWidth, 0.0f);
+
+  for (int b = 0; b < kBatch; ++b) {
+    for (int i = 0; i < kWidth; ++i) {
+      const std::size_t index = static_cast<std::size_t>(b) * kWidth + i;
+      expected[index] = input[index] * mult_gate[static_cast<std::size_t>(i)] +
+                        add_gate[static_cast<std::size_t>(i)];
+    }
+  }
+
+  float *device_input = nullptr;
+  float *device_mult = nullptr;
+  float *device_add = nullptr;
+  float *device_output = nullptr;
+  try {
+    AllocateDevice(&device_input, input.size(), "cudaMalloc(gate_input)");
+    AllocateDevice(&device_mult, mult_gate.size(), "cudaMalloc(gate_mult)");
+    AllocateDevice(&device_add, add_gate.size(), "cudaMalloc(gate_add)");
+    AllocateDevice(&device_output, actual.size(), "cudaMalloc(gate_output)");
+    UploadFloats(device_input, input, "cudaMemcpy(gate_input)");
+    UploadFloats(device_mult, mult_gate, "cudaMemcpy(gate_mult)");
+    UploadFloats(device_add, add_gate, "cudaMemcpy(gate_add)");
+
+    LaunchGateKernel(device_input, device_mult, device_output, kBatch, kWidth,
+                     CudaGateKind::Multiply);
+    LaunchGateKernel(device_output, device_add, device_output, kBatch, kWidth,
+                     CudaGateKind::Add);
+    DownloadFloats(actual, device_output, "cudaMemcpy(gate_output)");
+
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+      if (std::fabs(actual[i] - expected[i]) > 1e-6f) {
+        result.status = CudaSmokeStatus::Mismatch;
+        result.message = "CUDA gate kernel output mismatch";
+        break;
+      }
+    }
+    if (result.message.empty())
+      result.status = CudaSmokeStatus::Success;
+  } catch (const std::exception &e) {
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+  }
+
+  FreeDevice(device_input);
+  FreeDevice(device_mult);
+  FreeDevice(device_add);
+  FreeDevice(device_output);
+
+  if (result.message.empty())
+    result.message = RuntimeCudaDeviceSummary();
   return result;
 }
 
