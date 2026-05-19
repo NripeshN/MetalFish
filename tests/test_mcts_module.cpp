@@ -539,6 +539,19 @@ void test_network_execution_plan(TestCounter &tc) {
   expect_dims("body.input_embedding", "_w", {1024, 624},
               "resolved BT4 input embedding should infer post-PE channel "
               "shape");
+  const auto loaded_resolved_inventory =
+      NN::CreateResolvedNetworkWeightInventory(loaded_inventory,
+                                               loaded_resolved_plan);
+  const auto *loaded_preproc =
+      loaded_resolved_inventory.Find("body.ip_emb_preproc_w");
+  const auto *loaded_embedding =
+      loaded_resolved_inventory.Find("body.ip_emb_w");
+  expect(loaded_preproc &&
+             loaded_preproc->dims == std::vector<std::uint32_t>{32768, 768},
+         "resolved BT4 inventory should carry dynamic PE dense shape", tc);
+  expect(loaded_embedding &&
+             loaded_embedding->dims == std::vector<std::uint32_t>{1024, 624},
+         "resolved BT4 inventory should carry input embedding shape", tc);
   expect_dims("body.encoder.0.mha", ".q_w", {1024, 1024},
               "resolved BT4 attention query should infer model width");
   const auto *smolgen_compress =
@@ -626,6 +639,10 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_tape_batch2.RequireName("body.input_embedding_gates.gated")
              .rows == 2 * NN::Cuda::kCudaAttentionSquares,
          "loaded CUDA tape should run input gates on board-square rows", tc);
+  expect(loaded_tape_batch2.RequireName("body.input_embedding_gates.gated")
+             .width == 1024,
+         "loaded CUDA tape should shape positional input gates by channel",
+         tc);
   expect(loaded_tape_batch2.RequireName("body.input_embedding_ffn.dense1")
              .rows == 2 * NN::Cuda::kCudaAttentionSquares,
          "loaded CUDA tape should run input FFN on board-square rows", tc);

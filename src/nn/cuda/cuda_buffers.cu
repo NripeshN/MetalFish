@@ -52,7 +52,8 @@ void ValidateBatchSize(const CudaBufferLayout &layout, int batch_size) {
     throw std::runtime_error("CUDA buffer batch size is out of range");
 }
 
-void ClearDeviceFloats(float *ptr, size_t entries, const char *name,
+template <typename T>
+void ClearDeviceValues(T *ptr, size_t entries, const char *name,
                        cudaStream_t stream) {
   if (entries == 0)
     return;
@@ -61,12 +62,17 @@ void ClearDeviceFloats(float *ptr, size_t entries, const char *name,
                              name);
   cudaError_t status = cudaSuccess;
   if (stream) {
-    status = cudaMemsetAsync(ptr, 0, entries * sizeof(float), stream);
+    status = cudaMemsetAsync(ptr, 0, entries * sizeof(T), stream);
   } else {
-    status = cudaMemset(ptr, 0, entries * sizeof(float));
+    status = cudaMemset(ptr, 0, entries * sizeof(T));
   }
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
+}
+
+void ClearDeviceFloats(float *ptr, size_t entries, const char *name,
+                       cudaStream_t stream) {
+  ClearDeviceValues(ptr, entries, name, stream);
 }
 
 void DownloadDeviceFloats(const float *ptr, size_t entries,
@@ -252,6 +258,21 @@ void CudaInferenceBuffers::UploadPackedInputs(
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("cudaMemcpy(input_values)", status));
+}
+
+void CudaInferenceBuffers::ClearAll(cudaStream_t stream) {
+  ClearDeviceValues(input_masks, layout_.InputPlaneEntries(),
+                    "cudaMemset(input_masks)", stream);
+  ClearDeviceFloats(input_values, layout_.InputPlaneEntries(),
+                    "cudaMemset(input_values)", stream);
+  ClearDeviceFloats(policy, layout_.PolicyEntries(), "cudaMemset(policy)",
+                    stream);
+  ClearDeviceFloats(value, layout_.ValueEntries(), "cudaMemset(value)",
+                    stream);
+  ClearDeviceFloats(moves_left, layout_.MovesLeftEntries(),
+                    "cudaMemset(moves_left)", stream);
+  ClearDeviceFloats(raw_policy, layout_.RawPolicyEntries(),
+                    "cudaMemset(raw_policy)", stream);
 }
 
 void CudaInferenceBuffers::ClearOutputs(int batch_size, cudaStream_t stream) {

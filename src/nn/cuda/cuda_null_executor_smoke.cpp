@@ -231,6 +231,54 @@ bool AlmostEqual(const std::vector<float> &actual,
   return true;
 }
 
+std::string MismatchMessage(std::string_view label,
+                            const std::vector<float> &actual,
+                            const std::vector<float> &expected,
+                            float tolerance) {
+  std::ostringstream out;
+  out << label << " mismatch";
+  if (actual.size() != expected.size()) {
+    out << ": size actual=" << actual.size()
+        << " expected=" << expected.size();
+    return out.str();
+  }
+  std::size_t first = actual.size();
+  std::size_t worst = 0;
+  float max_diff = 0.0f;
+  for (std::size_t i = 0; i < actual.size(); ++i) {
+    const float diff = std::fabs(actual[i] - expected[i]);
+    if (diff > tolerance && first == actual.size())
+      first = i;
+    if (diff > max_diff) {
+      max_diff = diff;
+      worst = i;
+    }
+  }
+  out << ": max_abs=" << max_diff << " at " << worst
+      << " actual=" << actual[worst]
+      << " expected=" << expected[worst]
+      << " tolerance=" << tolerance;
+  if (first != actual.size()) {
+    out << ", first=" << first << " actual=" << actual[first]
+        << " expected=" << expected[first];
+  }
+  constexpr std::size_t kAttentionBiasWidth =
+      kPackedInputSquareCount * kPackedInputSquareCount;
+  if (actual.size() >= kAttentionBiasWidth &&
+      actual.size() % kAttentionBiasWidth == 0) {
+    const std::size_t rows =
+        std::min<std::size_t>(actual.size() / kAttentionBiasWidth, 4);
+    out << ", row0s=";
+    for (std::size_t row = 0; row < rows; ++row) {
+      if (row > 0)
+        out << ";";
+      const std::size_t index = row * kAttentionBiasWidth;
+      out << row << ":" << actual[index] << "/" << expected[index];
+    }
+  }
+  return out.str();
+}
+
 } // namespace
 
 CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
@@ -397,13 +445,14 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       0.20f, -0.35f, 0.45f,
       -0.10f, 0.25f, 0.15f,
   };
-  const std::vector<float> smolgen_dense1_weight = {
-      0.15f, -0.25f, 0.35f, 0.05f, -0.10f, 0.20f,
-      -0.30f, 0.40f, 0.10f, -0.15f, 0.25f, -0.05f,
-      0.20f, 0.05f, -0.35f, 0.30f, -0.25f, 0.15f,
-      -0.10f, 0.45f, -0.20f, 0.10f, 0.05f, -0.30f,
-      0.35f, -0.05f, 0.25f, -0.40f, 0.15f, 0.20f,
-  };
+  std::vector<float> smolgen_dense1_weight(
+      static_cast<std::size_t>(kSmolgenDense1) * kCudaAttentionSquares *
+          kSmolgenCompressed,
+      0.0f);
+  for (std::size_t i = 0; i < smolgen_dense1_weight.size(); ++i) {
+    smolgen_dense1_weight[i] =
+        static_cast<float>(static_cast<int>(i % 17) - 8) * 0.015f;
+  }
   const std::vector<float> smolgen_dense1_bias = {0.10f, -0.20f, 0.05f,
                                                   0.15f, -0.10f};
   const std::vector<float> smolgen_ln1_gamma = {1.00f, -0.50f, 0.75f,
@@ -509,7 +558,7 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       NetworkExecutionOpKind::PositionalEncoding,
       "body.smolgen_positional",
       {
-          {10, "body.smolgen_w", smolgen_global.size(),
+          {16, "body.smolgen_w", smolgen_global.size(),
            {kSmolgenGlobal, kSmolgenPerHead},
            NetworkWeightTensorKind::PositionalEncoding},
       }});
@@ -538,20 +587,20 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       NetworkExecutionOpKind::Dense,
       "body.encoder.0.mha.smolgen.dense",
       {
-          {11, "body.encoder.0.mha.smolgen.compress",
+          {17, "body.encoder.0.mha.smolgen.compress",
            smolgen_compress.size(), {kSmolgenCompressed, kInput},
            NetworkWeightTensorKind::DenseWeight},
-          {12, "body.encoder.0.mha.smolgen.dense1_w",
+          {18, "body.encoder.0.mha.smolgen.dense1_w",
            smolgen_dense1_weight.size(),
            {kSmolgenDense1, kCudaAttentionSquares * kSmolgenCompressed},
            NetworkWeightTensorKind::DenseWeight},
-          {13, "body.encoder.0.mha.smolgen.dense1_b",
+          {19, "body.encoder.0.mha.smolgen.dense1_b",
            smolgen_dense1_bias.size(), {kSmolgenDense1},
            NetworkWeightTensorKind::DenseBias},
-          {14, "body.encoder.0.mha.smolgen.dense2_w",
+          {20, "body.encoder.0.mha.smolgen.dense2_w",
            smolgen_dense2_weight.size(), {kSmolgenDense2, kSmolgenDense1},
            NetworkWeightTensorKind::DenseWeight},
-          {15, "body.encoder.0.mha.smolgen.dense2_b",
+          {21, "body.encoder.0.mha.smolgen.dense2_b",
            smolgen_dense2_bias.size(), {kSmolgenDense2},
            NetworkWeightTensorKind::DenseBias},
       }});
@@ -559,16 +608,16 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       NetworkExecutionOpKind::LayerNorm,
       "body.encoder.0.mha.smolgen.norm",
       {
-          {16, "body.encoder.0.mha.smolgen.ln1_gammas",
+          {22, "body.encoder.0.mha.smolgen.ln1_gammas",
            smolgen_ln1_gamma.size(), {kSmolgenDense1},
            NetworkWeightTensorKind::NormScale},
-          {17, "body.encoder.0.mha.smolgen.ln1_betas",
+          {23, "body.encoder.0.mha.smolgen.ln1_betas",
            smolgen_ln1_beta.size(), {kSmolgenDense1},
            NetworkWeightTensorKind::NormBias},
-          {18, "body.encoder.0.mha.smolgen.ln2_gammas",
+          {24, "body.encoder.0.mha.smolgen.ln2_gammas",
            smolgen_ln2_gamma.size(), {kSmolgenDense2},
            NetworkWeightTensorKind::NormScale},
-          {19, "body.encoder.0.mha.smolgen.ln2_betas",
+          {25, "body.encoder.0.mha.smolgen.ln2_betas",
            smolgen_ln2_beta.size(), {kSmolgenDense2},
            NetworkWeightTensorKind::NormBias},
       }});
@@ -585,22 +634,22 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       NetworkExecutionOpKind::FeedForward,
       "body.encoder.0.ffn",
       {
-          {20, "body.encoder.0.ffn.dense1_w", ffn1_weight.size(),
+          {10, "body.encoder.0.ffn.dense1_w", ffn1_weight.size(),
            {kFfnHidden, kOutput}, NetworkWeightTensorKind::DenseWeight},
-          {21, "body.encoder.0.ffn.dense1_b", ffn1_bias.size(),
+          {11, "body.encoder.0.ffn.dense1_b", ffn1_bias.size(),
            {kFfnHidden}, NetworkWeightTensorKind::DenseBias},
-          {22, "body.encoder.0.ffn.dense2_w", ffn2_weight.size(),
+          {12, "body.encoder.0.ffn.dense2_w", ffn2_weight.size(),
            {kOutput, kFfnHidden}, NetworkWeightTensorKind::DenseWeight},
-          {23, "body.encoder.0.ffn.dense2_b", ffn2_bias.size(), {kOutput},
+          {13, "body.encoder.0.ffn.dense2_b", ffn2_bias.size(), {kOutput},
            NetworkWeightTensorKind::DenseBias},
       }});
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
       NetworkExecutionOpKind::LayerNorm,
       "body.encoder.0.ln2",
       {
-          {24, "body.encoder.0.ln2_gammas", ln2_gamma.size(), {kOutput},
+          {14, "body.encoder.0.ln2_gammas", ln2_gamma.size(), {kOutput},
            NetworkWeightTensorKind::NormScale},
-          {25, "body.encoder.0.ln2_betas", ln2_beta.size(), {kOutput},
+          {15, "body.encoder.0.ln2_betas", ln2_beta.size(), {kOutput},
            NetworkWeightTensorKind::NormBias},
       }});
 
@@ -657,8 +706,10 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       expected_context, projection_weight, projection_bias, kRows, kQkv,
       kOutput);
   std::vector<float> expected_residual(expected_projection.size(), 0.0f);
+  const float encoder_residual_scale = std::pow(2.0f, -0.25f);
   for (std::size_t i = 0; i < expected_residual.size(); ++i)
-    expected_residual[i] = input[i] + expected_projection[i];
+    expected_residual[i] =
+        input[i] + expected_projection[i] * encoder_residual_scale;
   const auto expected_normalized = LayerNormRowsHost(
       expected_residual, ln_gamma, ln_beta, kRows, kOutput, 1e-3f);
   const auto expected_ffn_dense1 = DenseAffineHost(
@@ -669,10 +720,10 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       expected_ffn_activation, ffn2_weight, ffn2_bias, kRows, kFfnHidden,
       kOutput);
   std::vector<float> expected_ffn_residual(expected_ffn_dense2.size(), 0.0f);
-  const float ffn_residual_scale = std::pow(2.0f, -0.25f);
   for (std::size_t i = 0; i < expected_ffn_residual.size(); ++i) {
     expected_ffn_residual[i] =
-        expected_normalized[i] + expected_ffn_dense2[i] * ffn_residual_scale;
+        expected_normalized[i] +
+        expected_ffn_dense2[i] * encoder_residual_scale;
   }
   const auto expected_ffn_normalized = LayerNormRowsHost(
       expected_ffn_residual, ln2_gamma, ln2_beta, kRows, kOutput, 1e-3f);
@@ -719,6 +770,17 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
     std::vector<float> actual_q(expected_q.size(), 0.0f);
     std::vector<float> actual_k(expected_k.size(), 0.0f);
     std::vector<float> actual_v(expected_v.size(), 0.0f);
+    std::vector<float> actual_smolgen_dense1(expected_smolgen_dense1.size(),
+                                             0.0f);
+    std::vector<float> actual_smolgen_norm1(expected_smolgen_norm1.size(),
+                                            0.0f);
+    std::vector<float> actual_smolgen_dense2(expected_smolgen_dense2.size(),
+                                             0.0f);
+    std::vector<float> actual_smolgen_activation2(
+        expected_smolgen_activation2.size(), 0.0f);
+    std::vector<float> actual_smolgen_norm2(expected_smolgen_norm2.size(),
+                                            0.0f);
+    std::vector<float> actual_bias(expected_smolgen_global.size(), 0.0f);
     std::vector<float> actual_scores(expected_scores.size(), 0.0f);
     std::vector<float> actual_probabilities(expected_probabilities.size(),
                                             0.0f);
@@ -735,6 +797,19 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
     DownloadFloats(actual_k, input_output.key, "cudaMemcpy(attention_k)");
     DownloadFloats(actual_v, input_output.value,
                    "cudaMemcpy(attention_v)");
+    DownloadFloats(actual_smolgen_dense1, core_output.smolgen_dense1,
+                   "cudaMemcpy(attention_smolgen_dense1)");
+    DownloadFloats(actual_smolgen_norm1, core_output.smolgen_norm1,
+                   "cudaMemcpy(attention_smolgen_norm1)");
+    DownloadFloats(actual_smolgen_dense2, core_output.smolgen_dense2,
+                   "cudaMemcpy(attention_smolgen_dense2)");
+    DownloadFloats(actual_smolgen_activation2,
+                   core_output.smolgen_activation2,
+                   "cudaMemcpy(attention_smolgen_activation2)");
+    DownloadFloats(actual_smolgen_norm2, core_output.smolgen_norm2,
+                   "cudaMemcpy(attention_smolgen_norm2)");
+    DownloadFloats(actual_bias, core_output.attention_bias,
+                   "cudaMemcpy(attention_bias)");
     DownloadFloats(actual_scores, core_output.scores,
                    "cudaMemcpy(attention_scores)");
     DownloadFloats(actual_probabilities, core_output.probabilities,
@@ -751,19 +826,47 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
                    "cudaMemcpy(attention_ffn_residual)");
     DownloadFloats(actual_ffn_normalized, ffn_output.normalized,
                    "cudaMemcpy(attention_ffn_normalized)");
-    if (!AlmostEqual(actual_q, expected_q, 1e-5f) ||
-        !AlmostEqual(actual_k, expected_k, 1e-5f) ||
-        !AlmostEqual(actual_v, expected_v, 1e-5f) ||
-        !AlmostEqual(actual_scores, expected_scores, 1e-5f) ||
-        !AlmostEqual(actual_probabilities, expected_probabilities, 1e-5f) ||
-        !AlmostEqual(actual_context, expected_context, 1e-5f) ||
-        !AlmostEqual(actual_projection, expected_projection, 1e-5f) ||
-        !AlmostEqual(actual_residual, expected_residual, 1e-5f) ||
-        !AlmostEqual(actual_normalized, expected_normalized, 1e-5f) ||
-        !AlmostEqual(actual_ffn_residual, expected_ffn_residual, 1e-5f) ||
-        !AlmostEqual(actual_ffn_normalized, expected_ffn_normalized, 1e-5f)) {
+    auto attention_mismatch = [&](std::string_view label,
+                                  const std::vector<float> &actual,
+                                  const std::vector<float> &expected) {
+      if (AlmostEqual(actual, expected, 1e-5f))
+        return false;
       result.status = CudaSmokeStatus::Mismatch;
-      result.message = "CUDA attention output mismatch";
+      result.message = MismatchMessage(label, actual, expected, 1e-5f);
+      return true;
+    };
+    if (attention_mismatch("CUDA attention q", actual_q, expected_q) ||
+        attention_mismatch("CUDA attention k", actual_k, expected_k) ||
+        attention_mismatch("CUDA attention v", actual_v, expected_v) ||
+        attention_mismatch("CUDA attention smolgen dense1",
+                           actual_smolgen_dense1, expected_smolgen_dense1) ||
+        attention_mismatch("CUDA attention smolgen norm1",
+                           actual_smolgen_norm1, expected_smolgen_norm1) ||
+        attention_mismatch("CUDA attention smolgen dense2",
+                           actual_smolgen_dense2, expected_smolgen_dense2) ||
+        attention_mismatch("CUDA attention smolgen activation2",
+                           actual_smolgen_activation2,
+                           expected_smolgen_activation2) ||
+        attention_mismatch("CUDA attention smolgen norm2",
+                           actual_smolgen_norm2, expected_smolgen_norm2) ||
+        attention_mismatch("CUDA attention bias", actual_bias,
+                           expected_smolgen_global) ||
+        attention_mismatch("CUDA attention scores", actual_scores,
+                           expected_scores) ||
+        attention_mismatch("CUDA attention probabilities",
+                           actual_probabilities, expected_probabilities) ||
+        attention_mismatch("CUDA attention context", actual_context,
+                           expected_context) ||
+        attention_mismatch("CUDA attention projection", actual_projection,
+                           expected_projection) ||
+        attention_mismatch("CUDA attention residual", actual_residual,
+                           expected_residual) ||
+        attention_mismatch("CUDA attention normalized", actual_normalized,
+                           expected_normalized) ||
+        attention_mismatch("CUDA attention ffn residual", actual_ffn_residual,
+                           expected_ffn_residual) ||
+        attention_mismatch("CUDA attention ffn normalized",
+                           actual_ffn_normalized, expected_ffn_normalized)) {
       return result;
     }
 
@@ -795,10 +898,18 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
                    "cudaMemcpy(attention_sequence_output)");
     DownloadFloats(actual_sequence_ffn, sequence_ffn_stage->output,
                    "cudaMemcpy(attention_sequence_ffn)");
-    if (!AlmostEqual(actual_sequence, expected_normalized, 1e-5f) ||
-        !AlmostEqual(actual_sequence_ffn, expected_ffn_normalized, 1e-5f)) {
+    if (!AlmostEqual(actual_sequence, expected_normalized, 1e-5f)) {
       result.status = CudaSmokeStatus::Mismatch;
-      result.message = "CUDA attention sequence output mismatch";
+      result.message = MismatchMessage("CUDA attention sequence",
+                                       actual_sequence, expected_normalized,
+                                       1e-5f);
+      return result;
+    }
+    if (!AlmostEqual(actual_sequence_ffn, expected_ffn_normalized, 1e-5f)) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = MismatchMessage("CUDA attention sequence ffn",
+                                       actual_sequence_ffn,
+                                       expected_ffn_normalized, 1e-5f);
       return result;
     }
     result.allocation_bytes = workspace.TotalBytes() + weights.AllocationBytes();
@@ -899,6 +1010,8 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
 
   NetworkResolvedExecutionPlan execution_plan;
   execution_plan.format.input_embedding = INPUT_EMBEDDING_PE_DENSE;
+  execution_plan.format.activations.default_activation = "relu";
+  execution_plan.format.activations.ffn_activation = "relu";
   execution_plan.tensors = tensor_plan;
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
       NetworkExecutionOpKind::Dense,
@@ -1175,7 +1288,9 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   NetworkFormatDescriptor format;
   format.wdl = true;
   format.moves_left = true;
+  format.attention_body = true;
   format.attention_policy = true;
+  format.activations.default_activation = "relu_2";
   format.activations.ffn_activation = "relu_2";
 
   constexpr int kBatch = 3;
@@ -1512,14 +1627,26 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     }
 
     const size_t value_offset = static_cast<size_t>(batch) * kValue;
+    float max_value_logit = 0.0f;
     for (int out = 0; out < kValue; ++out) {
       float dense = dense3_bias[static_cast<size_t>(out)];
       for (int in = 0; in < kHidden; ++in) {
         dense += hidden_ffn_normalized[hidden_offset + in] *
                  dense3_weights[static_cast<size_t>(out) * kHidden + in];
       }
-      const float relu = std::max(dense, 0.0f);
-      value_expected[value_offset + out] = relu * relu;
+      value_expected[value_offset + out] = dense;
+      if (out == 0 || dense > max_value_logit)
+        max_value_logit = dense;
+    }
+    float value_sum = 0.0f;
+    for (int out = 0; out < kValue; ++out) {
+      float probability =
+          std::exp(value_expected[value_offset + out] - max_value_logit);
+      value_expected[value_offset + out] = probability;
+      value_sum += probability;
+    }
+    for (int out = 0; out < kValue; ++out) {
+      value_expected[value_offset + out] /= value_sum;
     }
 
     for (int out = 0; out < kMovesLeft; ++out) {
@@ -1530,7 +1657,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
       }
       const float relu = std::max(dense, 0.0f);
       moves_expected[static_cast<size_t>(batch) * kMovesLeft + out] =
-          relu * relu;
+          relu;
     }
   }
 

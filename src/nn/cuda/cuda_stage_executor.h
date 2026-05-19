@@ -64,6 +64,12 @@ struct CudaAttentionProjectionOutput {
 
 struct CudaAttentionCoreOutput {
   float *scores = nullptr;
+  float *attention_bias = nullptr;
+  float *smolgen_dense1 = nullptr;
+  float *smolgen_norm1 = nullptr;
+  float *smolgen_dense2 = nullptr;
+  float *smolgen_activation2 = nullptr;
+  float *smolgen_norm2 = nullptr;
   float *probabilities = nullptr;
   float *context = nullptr;
   int score_rows = 0;

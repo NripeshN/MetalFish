@@ -83,7 +83,10 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
       throw std::runtime_error(execution_validation.Summary());
     resolved_execution_plan_ =
         ResolveNetworkExecutionPlan(execution_plan_, inventory);
-    weight_buffers_.Upload(inventory);
+    const auto resolved_inventory =
+        CreateResolvedNetworkWeightInventory(inventory,
+                                             resolved_execution_plan_);
+    weight_buffers_.Upload(resolved_inventory);
   } catch (const std::exception &e) {
     throw std::runtime_error("CUDA transformer backend is compiled (" +
                              RuntimeCudaDeviceSummary() +
@@ -140,19 +143,27 @@ CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
   PackInputPlaneBatchHostRaw(input_plane_ptrs, input_masks, input_values);
 
   std::lock_guard<std::mutex> lock(execution_mutex_);
+  const bool batch_size_changed = workspace_batch_size_ != batch_size;
+  if (workspace_batch_size_ != batch_size) {
+    workspace_.Release();
+    workspace_batch_size_ = batch_size;
+  }
   cudaStream_t stream = workspace_.Stream();
+  if (batch_size_changed)
+    buffers_.ClearAll(stream);
   buffers_.UploadPackedInputs(input_masks, input_values, batch_size, stream);
   buffers_.ClearOutputs(batch_size, stream);
   executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
                      buffers_, workspace_, batch_size);
 
   const auto downloaded = buffers_.DownloadOutputs(batch_size, stream);
-  const float *moves_left =
-      downloaded.moves_left.empty() ? nullptr : downloaded.moves_left.data();
+  NetworkTensorPlan decode_plan = tensor_plan_;
+  decode_plan.moves_left = false;
+  decode_plan.moves_left_outputs = 0;
   return DecodeNetworkOutputBatch(
-      tensor_plan_, downloaded.policy.data(), downloaded.policy.size(),
-      downloaded.value.data(), downloaded.value.size(), moves_left,
-      downloaded.moves_left.size(), batch_size);
+      decode_plan, downloaded.policy.data(), downloaded.policy.size(),
+      downloaded.value.data(), downloaded.value.size(), nullptr, 0,
+      batch_size);
 }
 
 std::string CudaNetwork::GetNetworkInfo() const {

@@ -40,6 +40,7 @@ private:
   CudaInferenceBuffers buffers_;
   CudaWeightBuffers weight_buffers_;
   CudaExecutionWorkspace workspace_;
+  int workspace_batch_size_ = 0;
   std::unique_ptr<CudaExecutor> executor_;
   std::mutex execution_mutex_;
 };

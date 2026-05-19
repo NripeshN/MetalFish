@@ -28,8 +28,7 @@ bool StartsWith(std::string_view value, std::string_view prefix) {
 }
 
 bool EndsWith(std::string_view value, std::string_view suffix) {
-  return value.size() >= suffix.size() &&
-         value.substr(value.size() - suffix.size()) == suffix;
+  return value.ends_with(suffix);
 }
 
 bool HasTensorWithPrefix(const NetworkWeightInventory &inventory,
@@ -425,6 +424,15 @@ void InferResolvedExecutionTensorShapes(NetworkResolvedExecutionPlan &plan) {
   InferPositionalEncodingShapes(plan);
 }
 
+std::size_t ShapeElements(const std::vector<std::uint32_t> &dims) {
+  if (dims.empty())
+    return 0;
+  std::size_t elements = 1;
+  for (std::uint32_t dim : dims)
+    elements *= dim;
+  return elements;
+}
+
 } // namespace
 
 std::string NetworkExecutionValidation::Summary() const {
@@ -677,6 +685,43 @@ NetworkResolvedExecutionPlan ResolveNetworkExecutionPlan(
 
   InferResolvedExecutionTensorShapes(resolved);
   return resolved;
+}
+
+NetworkWeightInventory CreateResolvedNetworkWeightInventory(
+    const NetworkWeightInventory &inventory,
+    const NetworkResolvedExecutionPlan &resolved_plan) {
+  NetworkWeightInventory resolved_inventory = inventory;
+  std::vector<bool> assigned(resolved_inventory.tensors.size(), false);
+
+  for (const auto &step : resolved_plan.steps) {
+    for (const auto &ref : step.tensors) {
+      if (ref.inventory_index >= resolved_inventory.tensors.size()) {
+        throw std::runtime_error("resolved NN tensor index is out of range: " +
+                                 ref.name);
+      }
+      auto &tensor = resolved_inventory.tensors[ref.inventory_index];
+      if (tensor.name != ref.name || tensor.elements != ref.elements ||
+          tensor.kind != ref.kind) {
+        throw std::runtime_error(
+            "resolved NN tensor metadata does not match inventory: " +
+            ref.name);
+      }
+      if (ref.dims.empty())
+        continue;
+      if (ShapeElements(ref.dims) != ref.elements) {
+        throw std::runtime_error("resolved NN tensor shape is invalid: " +
+                                 ref.name);
+      }
+      if (assigned[ref.inventory_index] && tensor.dims != ref.dims) {
+        throw std::runtime_error(
+            "resolved NN tensor shape is inconsistent: " + ref.name);
+      }
+      tensor.dims = ref.dims;
+      assigned[ref.inventory_index] = true;
+    }
+  }
+
+  return resolved_inventory;
 }
 
 } // namespace NN

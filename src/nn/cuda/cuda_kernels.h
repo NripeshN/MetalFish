@@ -52,7 +52,7 @@ void LaunchActivationKernel(const float *input, float *output, int elements,
                             cudaStream_t stream = nullptr);
 
 void LaunchGateKernel(const float *input, const float *weights, float *output,
-                      int batch_size, int width, CudaGateKind kind,
+                      int rows, int width, int gate_rows, CudaGateKind kind,
                       cudaStream_t stream = nullptr);
 
 void LaunchResidualAddKernel(const float *parent, const float *secondary,

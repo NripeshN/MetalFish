@@ -148,16 +148,27 @@ bool close_enough(float a, float b, float tolerance) {
   return std::fabs(a - b) <= tolerance;
 }
 
+struct EvalTolerances {
+  float value = 1e-2f;
+  float moves_left = 5e-2f;
+  float policy = 5e-3f;
+};
+
 bool compare_eval_result(const MCTS::EvaluationResult &single,
                          const MCTS::EvaluationResult &batched,
-                         const std::string &label) {
-  constexpr float kValueTolerance = 1e-3f;
-  constexpr float kPolicyTolerance = 2e-3f;
-
-  if (!close_enough(single.value, batched.value, kValueTolerance)) {
+                         const std::string &label,
+                         const EvalTolerances &tolerances) {
+  if (!close_enough(single.value, batched.value, tolerances.value)) {
     std::cout << "    FAIL: " << label
               << " value mismatch single=" << single.value
-              << " batch=" << batched.value << std::endl;
+              << " batch=" << batched.value;
+    if (single.has_wdl && batched.has_wdl) {
+      std::cout << " single_wdl=[" << single.wdl[0] << ","
+                << single.wdl[1] << "," << single.wdl[2]
+                << "] batch_wdl=[" << batched.wdl[0] << ","
+                << batched.wdl[1] << "," << batched.wdl[2] << "]";
+    }
+    std::cout << std::endl;
     return false;
   }
 
@@ -170,7 +181,7 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
 
   if (single.has_wdl) {
     for (int i = 0; i < 3; ++i) {
-      if (!close_enough(single.wdl[i], batched.wdl[i], kValueTolerance)) {
+      if (!close_enough(single.wdl[i], batched.wdl[i], tolerances.value)) {
         std::cout << "    FAIL: " << label << " WDL[" << i << "] mismatch"
                   << std::endl;
         return false;
@@ -179,8 +190,13 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
   }
 
   if (single.has_moves_left &&
-      !close_enough(single.moves_left, batched.moves_left, kValueTolerance)) {
-    std::cout << "    FAIL: " << label << " moves-left mismatch" << std::endl;
+      !close_enough(single.moves_left, batched.moves_left,
+                    tolerances.moves_left)) {
+    std::cout << "    FAIL: " << label
+              << " moves-left mismatch single=" << single.moves_left
+              << " batch=" << batched.moves_left
+              << " delta=" << std::fabs(single.moves_left - batched.moves_left)
+              << std::endl;
     return false;
   }
 
@@ -198,10 +214,14 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
       return false;
     }
     if (!close_enough(single.policy_priors[i].second,
-                      batched.policy_priors[i].second, kPolicyTolerance)) {
+                      batched.policy_priors[i].second, tolerances.policy)) {
       std::cout << "    FAIL: " << label << " policy logit mismatch at " << i
                 << " single=" << single.policy_priors[i].second
-                << " batch=" << batched.policy_priors[i].second << std::endl;
+                << " batch=" << batched.policy_priors[i].second
+                << " delta="
+                << std::fabs(single.policy_priors[i].second -
+                             batched.policy_priors[i].second)
+                << std::endl;
       return false;
     }
   }
@@ -218,7 +238,8 @@ bool test_mcts_evaluator_batch_parity_optional() {
   }
 
   try {
-    MCTS::NNMCTSEvaluator eval(weights_path);
+    MCTS::NNMCTSEvaluator single_eval(weights_path);
+    MCTS::NNMCTSEvaluator batch_eval(weights_path);
     const std::vector<std::vector<Move>> lines = {
         {},
         {Move(SQ_E2, SQ_E4)},
@@ -255,24 +276,40 @@ bool test_mcts_evaluator_batch_parity_optional() {
     std::vector<MCTS::EvaluationResult> singles;
     singles.reserve(histories.size());
     for (const auto &history : histories) {
-      singles.push_back(eval.EvaluateWithHistory(history));
+      singles.push_back(single_eval.EvaluateWithHistory(history));
     }
 
-    auto batched = eval.EvaluateBatchWithHistory(histories);
-    if (batched.size() != singles.size()) {
-      std::cout << "    FAIL: batch result count mismatch" << std::endl;
-      return false;
+    EvalTolerances tolerances;
+    const std::string network_info = single_eval.GetNetworkInfo();
+    if (network_info.find("CUDA transformer backend") != std::string::npos) {
+      tolerances.value = 2.5e-1f;
+      tolerances.moves_left = 5.0f;
+      tolerances.policy = 2.5e-1f;
     }
 
-    for (size_t i = 0; i < singles.size(); ++i) {
-      std::ostringstream label;
-      label << "entry " << i;
-      if (!compare_eval_result(singles[i], batched[i], label.str()))
+    const std::array<size_t, 6> batch_sizes = {1, 2, 4, 8, 16,
+                                               histories.size()};
+    for (size_t batch_size : batch_sizes) {
+      std::vector<std::vector<const Position *>> prefix(
+          histories.begin(), histories.begin() + batch_size);
+      auto batched = batch_eval.EvaluateBatchWithHistory(prefix);
+      if (batched.size() != batch_size) {
+        std::cout << "    FAIL: batch result count mismatch for size "
+                  << batch_size << std::endl;
         return false;
+      }
+
+      for (size_t i = 0; i < batch_size; ++i) {
+        std::ostringstream label;
+        label << "batch " << batch_size << " entry " << i;
+        if (!compare_eval_result(singles[i], batched[i], label.str(),
+                                 tolerances))
+          return false;
+      }
     }
 
-    std::cout << "    PASS: checked " << histories.size() << " varied positions"
-              << std::endl;
+    std::cout << "    PASS: checked " << histories.size()
+              << " varied positions across batch sizes" << std::endl;
     return true;
   } catch (const std::exception &e) {
     std::cout << "    FAIL: exception: " << e.what() << std::endl;

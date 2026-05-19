@@ -14,6 +14,7 @@
 #include <cuda_runtime_api.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
@@ -29,6 +30,20 @@ std::string CudaErrorMessage(const char *op, cudaError_t status) {
   std::ostringstream out;
   out << op << " failed: " << cudaGetErrorString(status);
   return out.str();
+}
+
+const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
+  static const auto gather = [] {
+    std::array<int, kNetworkPolicyOutputs> indices{};
+    indices.fill(-1);
+    for (int raw = 0; raw < kNetworkAttentionPolicyScratch; ++raw) {
+      const short mapped = Metal::kAttnPolicyMap[raw];
+      if (mapped >= 0)
+        indices[static_cast<std::size_t>(mapped)] = raw;
+    }
+    return indices;
+  }();
+  return gather;
 }
 
 template <typename T>
@@ -163,13 +178,15 @@ __global__ void ActivationKernel(const float *input, float *output,
 
 __global__ void GateKernel(const float *input, const float *weights,
                            float *output, int width, int total,
-                           CudaGateKind kind) {
+                           int gate_rows, CudaGateKind kind) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index >= total)
     return;
 
+  const int row = index / width;
   const int column = index % width;
-  const float gate = weights[column];
+  const int gate_row = gate_rows == 1 ? 0 : row % gate_rows;
+  const float gate = weights[gate_row * width + column];
   const float value = input[index];
   output[index] =
       kind == CudaGateKind::Add ? value + gate : value * gate;
@@ -289,13 +306,12 @@ __global__ void AttentionContextKernel(const float *probabilities,
   context[index] = sum;
 }
 
-__device__ __constant__
-    short kAttentionPolicyMapDevice[kNetworkAttentionPolicyScratch];
+__device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
 
 __global__ void AttentionPolicyMapKernel(const float *query, const float *key,
                                          const float *promotion_weights,
-                                         float *raw_policy, float *policy,
-                                         int channels, int total) {
+                                         float *raw_policy, int channels,
+                                         int total) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index >= total)
     return;
@@ -338,11 +354,23 @@ __global__ void AttentionPolicyMapKernel(const float *query, const float *key,
   }
 
   raw_policy[index] = value;
-  const short mapped = kAttentionPolicyMapDevice[raw_index];
-  if (mapped >= 0) {
-    policy[static_cast<std::size_t>(batch) * kNetworkPolicyOutputs + mapped] =
-        value;
-  }
+}
+
+__global__ void AttentionPolicyGatherKernel(const float *raw_policy,
+                                            float *policy, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int policy_index = index % kNetworkPolicyOutputs;
+  const int batch = index / kNetworkPolicyOutputs;
+  const int raw_index = kAttentionPolicyGatherDevice[policy_index];
+  policy[index] =
+      raw_index >= 0
+          ? raw_policy[static_cast<std::size_t>(batch) *
+                           kNetworkAttentionPolicyScratch +
+                       raw_index]
+          : 0.0f;
 }
 
 __global__ void ExpandPackedInputPlanesKernel(const std::uint64_t *masks,
@@ -481,18 +509,18 @@ void LaunchActivationKernel(const float *input, float *output, int elements,
 }
 
 void LaunchGateKernel(const float *input, const float *weights, float *output,
-                      int batch_size, int width, CudaGateKind kind,
+                      int rows, int width, int gate_rows, CudaGateKind kind,
                       cudaStream_t stream) {
   if (!input || !weights || !output)
     throw std::runtime_error("CUDA gate kernel received null buffer");
-  if (batch_size <= 0 || width <= 0)
+  if (rows <= 0 || width <= 0 || gate_rows <= 0 || rows % gate_rows != 0)
     throw std::runtime_error("CUDA gate kernel dimensions are invalid");
 
-  const int total = batch_size * width;
+  const int total = rows * width;
   constexpr int kThreads = 256;
   const int blocks = (total + kThreads - 1) / kThreads;
   GateKernel<<<blocks, kThreads, 0, stream>>>(input, weights, output, width,
-                                             total, kind);
+                                             total, gate_rows, kind);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage("GateKernel launch", status));
@@ -650,30 +678,40 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
     throw std::runtime_error("CUDA attention policy map dimensions are invalid");
   }
 
+  const auto &gather_map = AttentionPolicyGatherMap();
   cudaError_t status = cudaMemcpyToSymbolAsync(
-      kAttentionPolicyMapDevice, Metal::kAttnPolicyMap,
-      sizeof(Metal::kAttnPolicyMap), 0, cudaMemcpyHostToDevice, stream);
+      kAttentionPolicyGatherDevice, gather_map.data(),
+      gather_map.size() * sizeof(int), 0, cudaMemcpyHostToDevice, stream);
   if (status != cudaSuccess) {
     throw std::runtime_error(
-        CudaErrorMessage("AttentionPolicyMap table upload", status));
+        CudaErrorMessage("AttentionPolicyGather table upload", status));
   }
 
   const int total = batch_size * kNetworkAttentionPolicyScratch;
   constexpr int kThreads = 256;
   const int blocks = (total + kThreads - 1) / kThreads;
   AttentionPolicyMapKernel<<<blocks, kThreads, 0, stream>>>(
-      query, key, promotion_weights, raw_policy, policy, channels, total);
+      query, key, promotion_weights, raw_policy, channels, total);
   status = cudaGetLastError();
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("AttentionPolicyMapKernel launch", status));
+  }
+  const int policy_total = batch_size * kNetworkPolicyOutputs;
+  const int gather_blocks = (policy_total + kThreads - 1) / kThreads;
+  AttentionPolicyGatherKernel<<<gather_blocks, kThreads, 0, stream>>>(
+      raw_policy, policy, policy_total);
+  status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionPolicyGatherKernel launch", status));
   }
   if (stream)
     return;
   status = cudaDeviceSynchronize();
   if (status != cudaSuccess) {
     throw std::runtime_error(
-        CudaErrorMessage("AttentionPolicyMapKernel synchronize", status));
+        CudaErrorMessage("AttentionPolicyGatherKernel synchronize", status));
   }
 }
 
@@ -1049,22 +1087,32 @@ CudaKernelSmokeResult RunGateKernelSmoke() {
     return result;
   }
 
-  constexpr int kBatch = 2;
+  constexpr int kRows = 4;
   constexpr int kWidth = 4;
   const std::vector<float> input = {
       1.0f, -2.0f, 0.5f, 3.0f,
       -1.0f, 0.25f, 2.0f, -0.5f,
+      0.75f, -1.25f, 1.5f, 0.0f,
+      -0.75f, 1.25f, -1.5f, 0.5f,
   };
-  const std::vector<float> mult_gate = {2.0f, -0.5f, 4.0f, 0.25f};
-  const std::vector<float> add_gate = {0.5f, 1.0f, -2.0f, 3.0f};
-  std::vector<float> actual(kBatch * kWidth, 0.0f);
-  std::vector<float> expected(kBatch * kWidth, 0.0f);
+  const std::vector<float> mult_gate = {
+      2.0f, -0.5f, 4.0f, 0.25f,
+      -1.0f, 0.75f, 0.5f, 3.0f,
+  };
+  const std::vector<float> add_gate = {
+      0.5f, 1.0f, -2.0f, 3.0f,
+      -0.25f, 0.5f, 1.5f, -1.0f,
+  };
+  std::vector<float> actual(kRows * kWidth, 0.0f);
+  std::vector<float> expected(kRows * kWidth, 0.0f);
 
-  for (int b = 0; b < kBatch; ++b) {
+  for (int b = 0; b < kRows; ++b) {
     for (int i = 0; i < kWidth; ++i) {
       const std::size_t index = static_cast<std::size_t>(b) * kWidth + i;
-      expected[index] = input[index] * mult_gate[static_cast<std::size_t>(i)] +
-                        add_gate[static_cast<std::size_t>(i)];
+      const std::size_t gate_index =
+          static_cast<std::size_t>(b % 2) * kWidth + i;
+      expected[index] = input[index] * mult_gate[gate_index] +
+                        add_gate[gate_index];
     }
   }
 
@@ -1081,10 +1129,10 @@ CudaKernelSmokeResult RunGateKernelSmoke() {
     UploadFloats(device_mult, mult_gate, "cudaMemcpy(gate_mult)");
     UploadFloats(device_add, add_gate, "cudaMemcpy(gate_add)");
 
-    LaunchGateKernel(device_input, device_mult, device_output, kBatch, kWidth,
-                     CudaGateKind::Multiply);
-    LaunchGateKernel(device_output, device_add, device_output, kBatch, kWidth,
-                     CudaGateKind::Add);
+    LaunchGateKernel(device_input, device_mult, device_output, kRows, kWidth,
+                     2, CudaGateKind::Multiply);
+    LaunchGateKernel(device_output, device_add, device_output, kRows, kWidth,
+                     2, CudaGateKind::Add);
     DownloadFloats(actual, device_output, "cudaMemcpy(gate_output)");
 
     for (std::size_t i = 0; i < actual.size(); ++i) {

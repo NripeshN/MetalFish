@@ -100,6 +100,33 @@ const CudaExecutionScheduleEntry *FindCudaStageEntry(
   return nullptr;
 }
 
+int PreviousCudaOutputWidth(const NetworkResolvedExecutionPlan &execution_plan,
+                            std::size_t step_index) {
+  for (std::size_t i = step_index; i-- > 0;) {
+    const auto &step = execution_plan.steps[i];
+    if (step.kind == NetworkExecutionOpKind::Dense &&
+        !step.tensors.empty() && step.tensors[0].dims.size() == 2) {
+      return static_cast<int>(step.tensors[0].dims[0]);
+    }
+    if (step.kind == NetworkExecutionOpKind::LayerNorm &&
+        !step.tensors.empty() && step.tensors[0].dims.size() == 1) {
+      return static_cast<int>(step.tensors[0].dims[0]);
+    }
+    if (step.kind == NetworkExecutionOpKind::Attention &&
+        step.tensors.size() >= 8 && step.tensors[6].dims.size() == 2) {
+      return static_cast<int>(step.tensors[6].dims[0]);
+    }
+    if (step.kind == NetworkExecutionOpKind::FeedForward &&
+        step.tensors.size() >= 4 && step.tensors[2].dims.size() == 2) {
+      return static_cast<int>(step.tensors[2].dims[0]);
+    }
+    if (step.kind == NetworkExecutionOpKind::Gate && !step.tensors.empty()) {
+      return static_cast<int>(step.tensors[0].elements);
+    }
+  }
+  return 0;
+}
+
 int CudaDenseStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
                         const CudaExecutionScheduleEntry &entry) {
   if (entry.first_step >= execution_plan.steps.size())
@@ -122,6 +149,13 @@ int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
   if (entry.kind == CudaExecutionScheduleKind::GateStage) {
     if (step.kind != NetworkExecutionOpKind::Gate || step.tensors.empty())
       throw std::runtime_error("CUDA gate stage tensor is invalid");
+    const int previous_width =
+        PreviousCudaOutputWidth(execution_plan, entry.first_step);
+    if (previous_width > 0 &&
+        step.tensors[0].elements % static_cast<std::size_t>(previous_width) ==
+            0) {
+      return previous_width;
+    }
     return static_cast<int>(step.tensors[0].elements);
   }
   if (entry.kind == CudaExecutionScheduleKind::AttentionLayerNormStage) {

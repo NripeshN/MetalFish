@@ -66,6 +66,7 @@ public:
   void UploadPackedInputs(const std::vector<std::uint64_t> &masks,
                           const std::vector<float> &values, int batch_size,
                           cudaStream_t stream = nullptr);
+  void ClearAll(cudaStream_t stream = nullptr);
   void ClearOutputs(int batch_size, cudaStream_t stream = nullptr);
   CudaOutputDownload DownloadOutputs(int batch_size,
                                      cudaStream_t stream = nullptr) const;

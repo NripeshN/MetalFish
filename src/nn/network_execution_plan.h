@@ -107,5 +107,9 @@ NetworkExecutionPlan CreateNetworkExecutionPlan(
 NetworkResolvedExecutionPlan ResolveNetworkExecutionPlan(
     const NetworkExecutionPlan &plan, const NetworkWeightInventory &inventory);
 
+NetworkWeightInventory CreateResolvedNetworkWeightInventory(
+    const NetworkWeightInventory &inventory,
+    const NetworkResolvedExecutionPlan &resolved_plan);
+
 } // namespace NN
 } // namespace MetalFish

@@ -87,6 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | local wrapper added; first L4 run pending |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -175,6 +176,16 @@ Current CUDA backend boundary:
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
+- `tools/run_cuda_gpu_gate.sh` is the reusable NVIDIA-host gate. It verifies
+  `nvidia-smi` and `nvcc`, builds CUDA with BT4 weights, runs CUDA unit tests,
+  runs `test_nn_comparison` through `NNBackend=auto` on the CUDA host, and runs
+  a one-thread `NNBackend=cuda` MCTS UCI smoke.
+- `tools/run_gcp_cuda_gpu_gate.sh` creates an ephemeral GCP L4 VM from a clean
+  `git archive`, runs `tools/run_cuda_gpu_gate.sh` on the VM, and deletes the
+  VM by default. It uses explicit `METALFISH_GCP_*` variables so the current
+  local gcloud project cannot accidentally steer the CUDA gate. The default
+  zone list covers central, east, west, and northamerica L4 zones to avoid
+  treating temporary stockouts as engine failures.
 - `CreatePlanSmokeCudaExecutor()` remains available for narrow executor
   diagnostics and can run a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without

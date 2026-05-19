@@ -18,8 +18,7 @@ namespace Cuda {
 namespace {
 
 bool EndsWith(std::string_view value, std::string_view suffix) {
-  return value.size() >= suffix.size() &&
-         value.substr(value.size() - suffix.size()) == suffix;
+  return value.ends_with(suffix);
 }
 
 const NetworkResolvedTensorRef &RequireTensorSuffix(

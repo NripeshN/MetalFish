@@ -32,6 +32,15 @@ void FreeDevice(float *ptr) {
     cudaFree(ptr);
 }
 
+std::size_t ShapeElements(const std::vector<std::uint32_t> &dims) {
+  if (dims.empty())
+    return 0;
+  std::size_t elements = 1;
+  for (std::uint32_t dim : dims)
+    elements *= dim;
+  return elements;
+}
+
 } // namespace
 
 CudaWeightBuffers::CudaWeightBuffers(CudaWeightBuffers &&other) noexcept {
@@ -68,6 +77,11 @@ void CudaWeightBuffers::Upload(const NetworkWeightInventory &inventory) {
     for (const auto &tensor : inventory.tensors) {
       if (tensor.elements == 0)
         continue;
+      const std::size_t shape_elements = ShapeElements(tensor.dims);
+      if (shape_elements != 0 && shape_elements != tensor.elements) {
+        throw std::runtime_error("CUDA weight tensor shape mismatch: " +
+                                 tensor.name);
+      }
       if (tensor.data == nullptr)
         throw std::runtime_error("CUDA weight tensor has null host data: " +
                                  tensor.name);

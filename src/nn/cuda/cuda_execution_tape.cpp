@@ -83,8 +83,7 @@ bool StartsWith(std::string_view value, std::string_view prefix) {
 }
 
 bool EndsWith(std::string_view value, std::string_view suffix) {
-  return value.size() >= suffix.size() &&
-         value.substr(value.size() - suffix.size()) == suffix;
+  return value.ends_with(suffix);
 }
 
 bool IsAttentionLayerNormName(std::string_view name) {
@@ -126,18 +125,39 @@ bool HasStepNamed(const NetworkResolvedExecutionPlan &plan,
   return false;
 }
 
-bool IsTransformerBodyRowStage(const NetworkResolvedExecutionPlan &plan,
-                               std::string_view name) {
-  if (!HasStepNamed(plan, "body.input_embedding"))
+bool IsAttentionPolicySquareRowStage(const NetworkResolvedExecutionPlan &plan,
+                                     std::string_view name) {
+  if (!plan.format.attention_policy)
     return false;
-  return name == "body.input_embedding" ||
-         StartsWith(name, "body.input_embedding_") ||
-         StartsWith(name, "body.encoder.");
+  const std::string prefix = "policy." + plan.policy_head + ".";
+  if (!StartsWith(name, prefix) || !HasStepNamed(plan, prefix + "policy_map"))
+    return false;
+  return name == prefix + "output" || name == prefix + "dense2" ||
+         name == prefix + "dense3" ||
+         name.find(".encoder.") != std::string_view::npos;
+}
+
+bool IsSquareRowStage(const NetworkResolvedExecutionPlan &plan,
+                      std::string_view name) {
+  if (StartsWith(name, "body.encoder."))
+    return plan.format.body_attention_heads > 0;
+  if (HasStepNamed(plan, "body.input_embedding") &&
+      (name == "body.input_embedding" ||
+       StartsWith(name, "body.input_embedding_"))) {
+    return true;
+  }
+  if (IsAttentionPolicySquareRowStage(plan, name))
+    return true;
+  if (plan.format.attention_body &&
+      name == "value." + plan.value_head + ".output") {
+    return true;
+  }
+  return plan.format.attention_body && name == "moves_left.dense0";
 }
 
 int DenseLikeRows(const NetworkResolvedExecutionPlan &plan,
                   std::string_view name, int batch_size) {
-  if (IsTransformerBodyRowStage(plan, name))
+  if (IsSquareRowStage(plan, name))
     return batch_size * kCudaAttentionSquares;
   return batch_size;
 }
@@ -266,6 +286,8 @@ CudaExecutionTape CreateResolvedExecutionTape(
     throw std::runtime_error("CUDA execution tape batch size is invalid");
 
   CudaExecutionTape tape;
+  int current_rows = batch_size;
+  int current_width = 0;
   for (std::size_t step_index = 0; step_index < plan.steps.size();
        ++step_index) {
     const auto &step = plan.steps[step_index];
@@ -294,6 +316,8 @@ CudaExecutionTape CreateResolvedExecutionTape(
                  CudaExecutionBufferRole::DynamicPositionOutput,
                  batch_size * plan.tensors.input_squares,
                  plan.tensors.input_planes + pe_width);
+        current_rows = batch_size * plan.tensors.input_squares;
+        current_width = plan.tensors.input_planes + pe_width;
         break;
       }
       const int rows = DenseLikeRows(plan, step.name, batch_size);
@@ -301,6 +325,8 @@ CudaExecutionTape CreateResolvedExecutionTape(
                rows, width);
       tape.Add(step.name + ".activation",
                CudaExecutionBufferRole::ActivationOutput, rows, width);
+      current_rows = rows;
+      current_width = width;
       break;
     }
     case NetworkExecutionOpKind::LayerNorm: {
@@ -312,13 +338,24 @@ CudaExecutionTape CreateResolvedExecutionTape(
                            : DenseLikeRows(plan, step.name, batch_size);
       tape.Add(step.name + ".normalized",
                CudaExecutionBufferRole::NormalizedOutput, rows, width);
+      current_rows = rows;
+      current_width = width;
       break;
     }
     case NetworkExecutionOpKind::Gate: {
-      const int width = GateWidth(step);
-      const int rows = DenseLikeRows(plan, step.name, batch_size);
+      int width = GateWidth(step);
+      if (current_width > 0 && !step.tensors.empty() &&
+          step.tensors[0].elements % static_cast<std::size_t>(current_width) ==
+              0) {
+        width = current_width;
+      }
+      const int rows = current_width > 0
+                           ? current_rows
+                           : DenseLikeRows(plan, step.name, batch_size);
       tape.Add(step.name + ".gated", CudaExecutionBufferRole::GateOutput,
                rows, width);
+      current_rows = rows;
+      current_width = width;
       break;
     }
     case NetworkExecutionOpKind::FeedForward: {
@@ -333,6 +370,8 @@ CudaExecutionTape CreateResolvedExecutionTape(
       tape.Add(step.name + ".dense2",
                CudaExecutionBufferRole::FeedForwardOutput, rows,
                widths.output);
+      current_rows = rows;
+      current_width = widths.output;
       break;
     }
     case NetworkExecutionOpKind::Attention: {
@@ -385,6 +424,8 @@ CudaExecutionTape CreateResolvedExecutionTape(
                  batch_size * attention.heads,
                  attention.squares * attention.squares);
       }
+      current_rows = square_rows;
+      current_width = attention.output_width;
       break;
     }
     case NetworkExecutionOpKind::PolicyMap: {
