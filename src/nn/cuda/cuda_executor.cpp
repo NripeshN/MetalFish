@@ -8,6 +8,7 @@
 #include "cuda_executor.h"
 
 #include "cuda_execution_tape.h"
+#include "cuda_output_mapping.h"
 #include "cuda_stage_executor.h"
 
 #include <cuda_runtime_api.h>
@@ -108,25 +109,16 @@ public:
 
     const auto tape =
         CreatePlanSmokeExecutionTape(plan, execution_plan, batch_size);
+    const auto schedule = CreateCudaExecutionSchedule(execution_plan);
     const auto sequence = ExecuteDenseActivationLayerNormSequence(
         execution_plan, weights, buffers.input_values, tape, workspace,
         batch_size);
-    const auto &stage = sequence.last;
-    if (!stage.output || stage.output_width > plan.policy_outputs ||
-        (buffers.raw_policy && stage.output_width > plan.raw_policy_outputs)) {
-      throw std::runtime_error("CUDA smoke output stride is smaller than stage");
-    }
-    cudaStream_t stream = workspace.Stream();
-
-    CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, stage.output,
-                        stage.output_width, batch_size, stage.output_width,
-                        "cudaMemcpy(smoke_policy_rows)", stream);
-
-    if (buffers.raw_policy)
-      CopyDeviceFloatRows(buffers.raw_policy, plan.raw_policy_outputs,
-                          stage.activation, stage.output_width, batch_size,
-                          stage.output_width,
-                          "cudaMemcpy(smoke_raw_policy_rows)", stream);
+    CudaOutputMappingOptions options;
+    options.allow_partial_policy_rows = true;
+    options.allow_partial_raw_policy_rows = true;
+    const auto mapping =
+        CreateCudaOutputMapping(plan, execution_plan, schedule, options);
+    CopyMappedOutputs(mapping, sequence, buffers, workspace, batch_size);
     workspace.Synchronize();
   }
 

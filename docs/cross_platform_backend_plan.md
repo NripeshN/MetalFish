@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `09c4e287-ca80-4a63-8ed4-537f262ccd74` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `59228007-9d06-4e72-9c9a-0d539c1e674b` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `1b898e0c-4cf7-4922-a330-65e6cb7fd92a` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0af05094-41b1-4d13-9b57-d993ef627b7a` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -119,11 +119,15 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_stage_executor.*` owns reusable dense/activation/layernorm
   stage execution and strided device-row copies, so smoke and production CUDA
   executors share the same launch path.
+- `src/nn/cuda/cuda_output_mapping.*` maps named executed CUDA stages to
+  policy, value, moves-left, and raw-policy output buffers. This keeps output
+  ownership explicit instead of treating the last executed stage as every
+  output tensor.
 - `CreatePlanSmokeCudaExecutor()` runs a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without
   enabling production CUDA inference prematurely. Its smoke coverage includes
-  chained dense/layernorm stages, multi-row batches, and strided
-  policy/raw-policy output writes.
+  named output mapping, chained dense/layernorm stages, dense-only stages,
+  multi-row batches, and strided policy/value/moves-left/raw-policy writes.
 - Production CUDA still installs a missing executor and refuses real inference.
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength

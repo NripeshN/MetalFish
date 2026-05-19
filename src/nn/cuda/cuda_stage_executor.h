@@ -14,7 +14,10 @@
 
 #include <cuda_runtime_api.h>
 
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace MetalFish {
 namespace NN {
@@ -31,7 +34,10 @@ struct CudaDenseStageOutput {
 
 struct CudaDenseStageSequenceOutput {
   CudaDenseStageOutput last;
+  std::vector<std::pair<std::string, CudaDenseStageOutput>> stages;
   int stage_count = 0;
+
+  const CudaDenseStageOutput *FindStage(std::string_view name) const;
 };
 
 CudaDenseStageOutput ExecuteDenseActivationStage(

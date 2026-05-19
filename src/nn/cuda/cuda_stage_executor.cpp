@@ -88,6 +88,15 @@ void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
 
+const CudaDenseStageOutput *
+CudaDenseStageSequenceOutput::FindStage(std::string_view name) const {
+  for (const auto &stage : stages) {
+    if (stage.first == name)
+      return &stage.second;
+  }
+  return nullptr;
+}
+
 CudaDenseStageOutput ExecuteDenseActivationStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &dense, const CudaWeightBuffers &weights,
@@ -216,6 +225,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     }
 
     sequence.last = stage;
+    sequence.stages.push_back({step.name, stage});
     ++sequence.stage_count;
     current_input = stage.output;
     current_width = stage.output_width;

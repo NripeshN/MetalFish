@@ -26,6 +26,7 @@
 #include "nn/cuda/cuda_execution_tape.h"
 #include "nn/cuda/cuda_input_packing.h"
 #include "nn/cuda/cuda_kernels.h"
+#include "nn/cuda/cuda_output_mapping.h"
 #include "nn/cuda/cuda_runtime_probe.h"
 #include "nn/cuda/cuda_weight_buffers.h"
 #include "nn/cuda/cuda_workspace.h"
@@ -831,6 +832,82 @@ void test_cuda_execution_schedule(TestCounter &tc) {
          "CUDA schedule should classify dense-only stages explicitly", tc);
 }
 
+void test_cuda_output_mapping(TestCounter &tc) {
+  std::cout << "  CUDA output mapping..." << std::endl;
+
+  NN::NetworkTensorPlan tensor_plan;
+  tensor_plan.value_outputs = 3;
+  tensor_plan.moves_left_outputs = 1;
+  tensor_plan.wdl = true;
+  tensor_plan.moves_left = true;
+  tensor_plan.raw_policy_outputs = NN::kNetworkAttentionPolicyScratch;
+
+  NN::NetworkResolvedExecutionPlan plan;
+  plan.tensors = tensor_plan;
+  plan.policy_head = "smoke";
+  plan.value_head = "smoke";
+  plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense,
+      "policy.smoke.output",
+      {
+          {0, "policy.smoke.ip_pol_w", 8, {2, 4},
+           NN::NetworkWeightTensorKind::DenseWeight},
+          {1, "policy.smoke.ip_pol_b", 2, {2},
+           NN::NetworkWeightTensorKind::DenseBias},
+      }});
+  plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense,
+      "value.smoke.dense2",
+      {
+          {2, "value.smoke.ip2_val_w", 6, {3, 2},
+           NN::NetworkWeightTensorKind::DenseWeight},
+          {3, "value.smoke.ip2_val_b", 3, {3},
+           NN::NetworkWeightTensorKind::DenseBias},
+      }});
+  plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense,
+      "moves_left.output",
+      {
+          {4, "moves_left.ip2_mov_w", 3, {1, 3},
+           NN::NetworkWeightTensorKind::DenseWeight},
+          {5, "moves_left.ip2_mov_b", 1, {1},
+           NN::NetworkWeightTensorKind::DenseBias},
+      }});
+
+  const auto schedule = NN::Cuda::CreateCudaExecutionSchedule(plan);
+  NN::Cuda::CudaOutputMappingOptions options;
+  options.allow_partial_policy_rows = true;
+  options.allow_partial_raw_policy_rows = true;
+  const auto mapping =
+      NN::Cuda::CreateCudaOutputMapping(tensor_plan, plan, schedule, options);
+  expect(mapping.ok(), "CUDA output mapping should accept smoke outputs", tc);
+  expect(mapping.bindings.size() == 4,
+         "CUDA output mapping should bind policy/value/moves/raw outputs", tc);
+  expect(mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
+             mapping.Find(NN::Cuda::CudaOutputTarget::Policy)->source_width ==
+                 2,
+         "CUDA output mapping should retain policy source width", tc);
+  expect(mapping.Find(NN::Cuda::CudaOutputTarget::Value) &&
+             mapping.Find(NN::Cuda::CudaOutputTarget::Value)->source_width ==
+                 3,
+         "CUDA output mapping should bind WDL value width", tc);
+  expect(mapping.Find(NN::Cuda::CudaOutputTarget::MovesLeft),
+         "CUDA output mapping should bind moves-left output", tc);
+  expect(mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
+         "CUDA output mapping should bind raw policy scratch source", tc);
+
+  NN::NetworkResolvedExecutionPlan missing_value = plan;
+  missing_value.steps.erase(missing_value.steps.begin() + 1);
+  const auto incomplete = NN::Cuda::CreateCudaOutputMapping(
+      tensor_plan, missing_value,
+      NN::Cuda::CreateCudaExecutionSchedule(missing_value), options);
+  expect(!incomplete.ok(),
+         "CUDA output mapping should reject missing value output", tc);
+  expect(incomplete.Summary().find("value.smoke.dense2") !=
+             std::string::npos,
+         "CUDA output mapping summary should name missing value source", tc);
+}
+
 void test_cuda_weight_upload(TestCounter &tc) {
   std::cout << "  CUDA weight upload..." << std::endl;
 
@@ -1540,6 +1617,7 @@ bool test_mcts_all() {
   test_cuda_input_packing(tc);
   test_cuda_inference_buffers(tc);
   test_cuda_execution_schedule(tc);
+  test_cuda_output_mapping(tc);
   test_cuda_weight_upload(tc);
   test_cuda_dense_kernels(tc);
 #endif
