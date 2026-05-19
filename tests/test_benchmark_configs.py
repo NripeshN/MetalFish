@@ -416,6 +416,9 @@ def main() -> int:
         PROJ / "tools/run_tournament_live.py",
         [
             "def apply_hybrid_env_options",
+            "BUILTIN_OPENING_LINES",
+            "def builtin_openings",
+            "built-in fallback",
             '"HYBRID_MCTS_THREADS": "HybridMCTSThreads"',
             '"HYBRID_AB_THREADS": "HybridABThreads"',
             '"HYBRID_AUTO_AB_THREADS_CAP": "HybridAutoABThreadsCap"',
