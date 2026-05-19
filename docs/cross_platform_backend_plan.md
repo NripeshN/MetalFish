@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `6b0aaace-fa62-4e41-bb7e-06dd906f0628` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `a7d4684a-ca31-4cd8-9165-ee682feda787` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `bed42a44-ea4c-4c59-80c8-18ee7ac0d6c0` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `27ad1a9c-b02a-41a8-b88d-349a9925f1c0` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -112,6 +112,10 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_buffers.*` exposes stream-aware packed-input upload,
   output clear, and output download paths while preserving synchronous defaults
   for smoke tests and fallback call sites.
+- `src/nn/cuda/cuda_input_packing.*` has both contiguous raw packing for
+  fixtures and per-position host batch packing for `Network::EvaluateBatch()`,
+  so CUDA batching does not depend on unrelated `InputPlanes` objects sharing
+  one raw allocation.
 - `src/nn/cuda/cuda_execution_tape.*` binds resolved execution steps to named
   intermediate device buffers. The current smoke executor uses it for
   dense/activation/normalization intermediates, including multi-stage

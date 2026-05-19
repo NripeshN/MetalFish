@@ -115,10 +115,14 @@ CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
     throw std::runtime_error("CUDA batch size exceeds configured max batch");
   }
 
+  std::vector<const float *> input_plane_ptrs;
+  input_plane_ptrs.reserve(inputs.size());
+  for (const auto &input : inputs)
+    input_plane_ptrs.push_back(input[0].data());
+
   std::vector<std::uint64_t> input_masks;
   std::vector<float> input_values;
-  PackInputPlanesHostRaw(inputs.front()[0].data(), batch_size, input_masks,
-                         input_values);
+  PackInputPlaneBatchHostRaw(input_plane_ptrs, input_masks, input_values);
 
   std::lock_guard<std::mutex> lock(execution_mutex_);
   cudaStream_t stream = workspace_.Stream();

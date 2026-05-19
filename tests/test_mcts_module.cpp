@@ -726,6 +726,51 @@ void test_cuda_input_packing(TestCounter &tc) {
   expect(fixture_values == fixture.values,
          "CUDA host pack should match shared fixture values", tc);
 
+  NN::InputPlanes first_batch_item{};
+  NN::InputPlanes second_batch_item{};
+  first_batch_item[0][1] = 1.0f;
+  first_batch_item[2][9] = 0.5f;
+  second_batch_item[0][5] = 1.0f;
+  second_batch_item[3][12] = -0.25f;
+  second_batch_item[NN::kAuxPlaneBase + 2][0] = 1.0f;
+
+  std::vector<const float *> batch_inputs = {first_batch_item[0].data(),
+                                             second_batch_item[0].data()};
+  std::vector<std::uint64_t> batch_masks;
+  std::vector<float> batch_values;
+  NN::Cuda::PackInputPlaneBatchHostRaw(batch_inputs, batch_masks, batch_values);
+  expect(batch_masks.size() == 2U * NN::kTotalPlanes,
+         "CUDA host batch pack should emit one mask per item plane", tc);
+  expect(batch_values.size() == 2U * NN::kTotalPlanes,
+         "CUDA host batch pack should emit one value per item plane", tc);
+  expect(batch_masks[0] == (1ULL << 1),
+         "CUDA host batch pack should preserve first item sparse mask", tc);
+  expect(batch_values[2] == 0.5f,
+         "CUDA host batch pack should preserve first item plane value", tc);
+  expect(batch_masks[NN::kTotalPlanes] == (1ULL << 5),
+         "CUDA host batch pack should preserve second item sparse mask", tc);
+  expect(batch_values[NN::kTotalPlanes + 3] == -0.25f,
+         "CUDA host batch pack should preserve second item plane value", tc);
+  expect(batch_masks[NN::kTotalPlanes + NN::kAuxPlaneBase + 2] == ~0ULL,
+         "CUDA host batch pack should expand second item uniform plane", tc);
+
+  std::vector<float> contiguous_batch(2U * NN::kTotalPlanes *
+                                      NN::Cuda::kCudaSquares);
+  const size_t input_plane_floats =
+      static_cast<size_t>(NN::kTotalPlanes) * NN::Cuda::kCudaSquares;
+  std::memcpy(contiguous_batch.data(), first_batch_item[0].data(),
+              input_plane_floats * sizeof(float));
+  std::memcpy(contiguous_batch.data() + input_plane_floats,
+              second_batch_item[0].data(), input_plane_floats * sizeof(float));
+  std::vector<std::uint64_t> contiguous_masks;
+  std::vector<float> contiguous_values;
+  NN::Cuda::PackInputPlanesHostRaw(contiguous_batch.data(), 2,
+                                   contiguous_masks, contiguous_values);
+  expect(batch_masks == contiguous_masks,
+         "CUDA host batch pack should match contiguous raw batch masks", tc);
+  expect(batch_values == contiguous_values,
+         "CUDA host batch pack should match contiguous raw batch values", tc);
+
   NN::InputPlanes input{};
   input[0][0] = 1.0f;
   input[0][7] = 1.0f;

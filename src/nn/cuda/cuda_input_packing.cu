@@ -12,6 +12,7 @@
 #include <cuda_runtime_api.h>
 
 #include <sstream>
+#include <stdexcept>
 
 namespace MetalFish {
 namespace NN {
@@ -42,6 +43,31 @@ void PackInputPlanesHostRaw(const float *inputs, int batch_size,
                             std::vector<std::uint64_t> &masks,
                             std::vector<float> &values) {
   PackInputPlanesRaw(inputs, batch_size, masks, values);
+}
+
+void PackInputPlaneBatchHostRaw(const std::vector<const float *> &inputs,
+                                std::vector<std::uint64_t> &masks,
+                                std::vector<float> &values) {
+  if (inputs.empty()) {
+    masks.clear();
+    values.clear();
+    return;
+  }
+
+  const size_t total_planes = inputs.size() * kCudaInputPlanes;
+  masks.assign(total_planes, 0);
+  values.assign(total_planes, 0.0f);
+
+  for (size_t batch = 0; batch < inputs.size(); ++batch) {
+    const float *planes = inputs[batch];
+    if (!planes)
+      throw std::runtime_error("CUDA host batch pack received null input");
+    for (int plane = 0; plane < kCudaInputPlanes; ++plane) {
+      const size_t index = batch * kCudaInputPlanes + static_cast<size_t>(plane);
+      PackInputPlaneRaw(planes + static_cast<size_t>(plane) * kCudaSquares,
+                        plane, masks[index], values[index]);
+    }
+  }
 }
 
 CudaInputPackingSmokeResult RunInputPackingSmokeRaw(const float *input) {

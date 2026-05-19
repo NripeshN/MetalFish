@@ -35,6 +35,9 @@ constexpr int kCudaSquares = kPackedInputSquareCount;
 void PackInputPlanesHostRaw(const float *inputs, int batch_size,
                             std::vector<std::uint64_t> &masks,
                             std::vector<float> &values);
+void PackInputPlaneBatchHostRaw(const std::vector<const float *> &inputs,
+                                std::vector<std::uint64_t> &masks,
+                                std::vector<float> &values);
 
 CudaInputPackingSmokeResult RunInputPackingSmokeRaw(const float *input);
 
