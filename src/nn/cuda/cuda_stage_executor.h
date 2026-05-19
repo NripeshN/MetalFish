@@ -58,6 +58,18 @@ struct CudaAttentionProjectionOutput {
   int head_depth = 0;
 };
 
+struct CudaAttentionCoreOutput {
+  float *scores = nullptr;
+  float *probabilities = nullptr;
+  float *context = nullptr;
+  int score_rows = 0;
+  int score_width = 0;
+  int rows = 0;
+  int qkv_width = 0;
+  int heads = 0;
+  int head_depth = 0;
+};
+
 struct CudaStageInputBinding {
   std::string stage_name;
   std::string source_stage_name;
@@ -119,6 +131,13 @@ CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
     std::size_t attention_step_index, const CudaWeightBuffers &weights,
     const float *context, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size);
+
+CudaAttentionCoreOutput ExecuteAttentionCoreStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::size_t attention_step_index,
+    const CudaAttentionProjectionOutput &projections,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size);
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,

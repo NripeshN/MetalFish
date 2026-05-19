@@ -655,6 +655,69 @@ CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
   return output;
 }
 
+CudaAttentionCoreOutput ExecuteAttentionCoreStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::size_t attention_step_index,
+    const CudaAttentionProjectionOutput &projections,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA attention core received empty batch");
+  if (!projections.query || !projections.key || !projections.value)
+    throw std::runtime_error("CUDA attention core projections are missing");
+  if (attention_step_index >= execution_plan.steps.size())
+    throw std::runtime_error("CUDA attention core index is out of range");
+
+  const auto &step = execution_plan.steps[attention_step_index];
+  const auto attention = ResolveCudaAttentionStagePlan(
+      execution_plan, attention_step_index,
+      AttentionHeadCount(execution_plan, step.name));
+  const int square_rows = batch_size * attention.squares;
+  const int score_rows = batch_size * attention.heads * attention.squares;
+  if (projections.rows != square_rows ||
+      projections.qkv_width != attention.qkv_width ||
+      projections.heads != attention.heads ||
+      projections.head_depth != attention.head_depth) {
+    throw std::runtime_error("CUDA attention core projection shape mismatch");
+  }
+
+  const auto &scores_binding = tape.RequireName(step.name + ".scores");
+  const auto &probabilities_binding =
+      tape.RequireName(step.name + ".probabilities");
+  const auto &context_binding = tape.RequireName(step.name + ".context");
+  RequireTapeShape(scores_binding, score_rows, attention.squares,
+                   "attention scores");
+  RequireTapeShape(probabilities_binding, score_rows, attention.squares,
+                   "attention probabilities");
+  RequireTapeShape(context_binding, square_rows, attention.qkv_width,
+                   "attention context");
+
+  CudaAttentionCoreOutput output;
+  output.scores = tape.Reserve(workspace, scores_binding);
+  output.probabilities = tape.Reserve(workspace, probabilities_binding);
+  output.context = tape.Reserve(workspace, context_binding);
+  output.score_rows = score_rows;
+  output.score_width = attention.squares;
+  output.rows = square_rows;
+  output.qkv_width = attention.qkv_width;
+  output.heads = attention.heads;
+  output.head_depth = attention.head_depth;
+
+  cudaStream_t stream = workspace.Stream();
+  LaunchAttentionScoreKernel(
+      projections.query, projections.key, output.scores, batch_size,
+      attention.heads, attention.squares, attention.head_depth,
+      attention.qkv_width,
+      1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
+  LaunchAttentionSoftmaxKernel(output.scores, output.probabilities, score_rows,
+                               attention.squares, stream);
+  LaunchAttentionContextKernel(output.probabilities, projections.value,
+                               output.context, batch_size, attention.heads,
+                               attention.squares, attention.head_depth,
+                               attention.qkv_width, stream);
+  return output;
+}
+
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,

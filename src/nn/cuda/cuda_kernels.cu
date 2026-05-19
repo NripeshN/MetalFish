@@ -182,6 +182,103 @@ __global__ void ResidualAddKernel(const float *parent, const float *secondary,
   output[index] = parent[index] + secondary[index] * secondary_scale;
 }
 
+__global__ void AttentionScoreKernel(const float *query, const float *key,
+                                     float *scores, int heads, int squares,
+                                     int head_depth, int qkv_width,
+                                     float scale, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int key_square = index % squares;
+  const int query_square = (index / squares) % squares;
+  const int head = (index / (squares * squares)) % heads;
+  const int batch = index / (heads * squares * squares);
+  const int head_offset = head * head_depth;
+  const float *query_row =
+      query + (static_cast<std::size_t>(batch) * squares + query_square) *
+                  qkv_width +
+      head_offset;
+  const float *key_row =
+      key + (static_cast<std::size_t>(batch) * squares + key_square) *
+                qkv_width +
+      head_offset;
+
+  float dot = 0.0f;
+  for (int i = 0; i < head_depth; ++i)
+    dot += query_row[i] * key_row[i];
+  scores[index] = dot * scale;
+}
+
+__global__ void AttentionSoftmaxKernel(const float *scores,
+                                       float *probabilities, int width) {
+  extern __shared__ float reductions[];
+  const int row = blockIdx.x;
+  const float *score_row = scores + static_cast<std::size_t>(row) * width;
+  float *probability_row =
+      probabilities + static_cast<std::size_t>(row) * width;
+
+  float max_value = -3.4028234663852886e+38F;
+  for (int col = threadIdx.x; col < width; col += blockDim.x)
+    max_value = fmaxf(max_value, score_row[col]);
+  reductions[threadIdx.x] = max_value;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride)
+      reductions[threadIdx.x] =
+          fmaxf(reductions[threadIdx.x], reductions[threadIdx.x + stride]);
+    __syncthreads();
+  }
+  max_value = reductions[0];
+
+  float sum = 0.0f;
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float value = expf(score_row[col] - max_value);
+    probability_row[col] = value;
+    sum += value;
+  }
+  reductions[threadIdx.x] = sum;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride)
+      reductions[threadIdx.x] += reductions[threadIdx.x + stride];
+    __syncthreads();
+  }
+  sum = reductions[0];
+
+  for (int col = threadIdx.x; col < width; col += blockDim.x)
+    probability_row[col] = sum > 0.0f ? probability_row[col] / sum : 0.0f;
+}
+
+__global__ void AttentionContextKernel(const float *probabilities,
+                                       const float *value, float *context,
+                                       int heads, int squares, int head_depth,
+                                       int qkv_width, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int column = index % qkv_width;
+  const int query_square = (index / qkv_width) % squares;
+  const int batch = index / (squares * qkv_width);
+  const int head = column / head_depth;
+  const int probability_row =
+      ((batch * heads + head) * squares + query_square) * squares;
+
+  float sum = 0.0f;
+  for (int key_square = 0; key_square < squares; ++key_square) {
+    const float probability = probabilities[probability_row + key_square];
+    const float value_cell =
+        value[(static_cast<std::size_t>(batch) * squares + key_square) *
+                  qkv_width +
+              column];
+    sum += probability * value_cell;
+  }
+  context[index] = sum;
+}
+
 } // namespace
 
 void LaunchDenseAffineKernel(const float *input, const float *weights,
@@ -304,6 +401,89 @@ void LaunchResidualAddKernel(const float *parent, const float *secondary,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("ResidualAddKernel synchronize", status));
+}
+
+void LaunchAttentionScoreKernel(const float *query, const float *key,
+                                float *scores, int batch_size, int heads,
+                                int squares, int head_depth, int qkv_width,
+                                float scale, cudaStream_t stream) {
+  if (!query || !key || !scores)
+    throw std::runtime_error("CUDA attention score kernel received null buffer");
+  if (batch_size <= 0 || heads <= 0 || squares <= 0 || head_depth <= 0 ||
+      qkv_width <= 0 || qkv_width != heads * head_depth || scale <= 0.0f) {
+    throw std::runtime_error("CUDA attention score dimensions are invalid");
+  }
+
+  const int total = batch_size * heads * squares * squares;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  AttentionScoreKernel<<<blocks, kThreads, 0, stream>>>(
+      query, key, scores, heads, squares, head_depth, qkv_width, scale, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionScoreKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionScoreKernel synchronize", status));
+}
+
+void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
+                                  int rows, int width, cudaStream_t stream) {
+  if (!scores || !probabilities)
+    throw std::runtime_error(
+        "CUDA attention softmax kernel received null buffer");
+  if (rows <= 0 || width <= 0)
+    throw std::runtime_error("CUDA attention softmax dimensions are invalid");
+
+  constexpr int kThreads = 128;
+  const std::size_t shared_bytes = kThreads * sizeof(float);
+  AttentionSoftmaxKernel<<<rows, kThreads, shared_bytes, stream>>>(
+      scores, probabilities, width);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionSoftmaxKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionSoftmaxKernel synchronize", status));
+}
+
+void LaunchAttentionContextKernel(const float *probabilities,
+                                  const float *value, float *context,
+                                  int batch_size, int heads, int squares,
+                                  int head_depth, int qkv_width,
+                                  cudaStream_t stream) {
+  if (!probabilities || !value || !context)
+    throw std::runtime_error(
+        "CUDA attention context kernel received null buffer");
+  if (batch_size <= 0 || heads <= 0 || squares <= 0 || head_depth <= 0 ||
+      qkv_width <= 0 || qkv_width != heads * head_depth) {
+    throw std::runtime_error("CUDA attention context dimensions are invalid");
+  }
+
+  const int total = batch_size * squares * qkv_width;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  AttentionContextKernel<<<blocks, kThreads, 0, stream>>>(
+      probabilities, value, context, heads, squares, head_depth, qkv_width,
+      total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionContextKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionContextKernel synchronize", status));
 }
 
 CudaKernelSmokeResult RunDenseAffineKernelSmoke() {
@@ -706,6 +886,180 @@ CudaKernelSmokeResult RunResidualAddKernelSmoke() {
 
   if (result.message.empty())
     result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunAttentionCoreKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 2;
+  constexpr int kHeads = 2;
+  constexpr int kSquares = 4;
+  constexpr int kHeadDepth = 3;
+  constexpr int kQkv = kHeads * kHeadDepth;
+  constexpr float kScale = 0.57735026919f;
+  const int score_entries = kBatch * kHeads * kSquares * kSquares;
+  const int qkv_entries = kBatch * kSquares * kQkv;
+
+  std::vector<float> query(qkv_entries, 0.0f);
+  std::vector<float> key(qkv_entries, 0.0f);
+  std::vector<float> value(qkv_entries, 0.0f);
+  for (std::size_t i = 0; i < query.size(); ++i) {
+    query[i] = static_cast<float>(static_cast<int>(i % 13) - 6) * 0.125f;
+    key[i] = static_cast<float>(static_cast<int>(i % 17) - 8) * 0.0625f;
+    value[i] = static_cast<float>(static_cast<int>(i % 19) - 9) * 0.03125f;
+  }
+
+  std::vector<float> expected_scores(score_entries, 0.0f);
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int head = 0; head < kHeads; ++head) {
+      for (int query_square = 0; query_square < kSquares; ++query_square) {
+        for (int key_square = 0; key_square < kSquares; ++key_square) {
+          float dot = 0.0f;
+          for (int depth = 0; depth < kHeadDepth; ++depth) {
+            const int column = head * kHeadDepth + depth;
+            dot += query[(static_cast<std::size_t>(batch) * kSquares +
+                          query_square) *
+                             kQkv +
+                         column] *
+                   key[(static_cast<std::size_t>(batch) * kSquares +
+                        key_square) *
+                           kQkv +
+                       column];
+          }
+          expected_scores[((batch * kHeads + head) * kSquares +
+                           query_square) *
+                              kSquares +
+                          key_square] = dot * kScale;
+        }
+      }
+    }
+  }
+
+  std::vector<float> expected_probabilities(score_entries, 0.0f);
+  const int softmax_rows = kBatch * kHeads * kSquares;
+  for (int row = 0; row < softmax_rows; ++row) {
+    const std::size_t offset = static_cast<std::size_t>(row) * kSquares;
+    float max_value = expected_scores[offset];
+    for (int col = 1; col < kSquares; ++col)
+      max_value = std::max(max_value, expected_scores[offset + col]);
+    float sum = 0.0f;
+    for (int col = 0; col < kSquares; ++col) {
+      const float probability = std::exp(expected_scores[offset + col] -
+                                         max_value);
+      expected_probabilities[offset + col] = probability;
+      sum += probability;
+    }
+    for (int col = 0; col < kSquares; ++col)
+      expected_probabilities[offset + col] /= sum;
+  }
+
+  std::vector<float> expected_context(qkv_entries, 0.0f);
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int query_square = 0; query_square < kSquares; ++query_square) {
+      for (int column = 0; column < kQkv; ++column) {
+        const int head = column / kHeadDepth;
+        const std::size_t probability_offset =
+            static_cast<std::size_t>((batch * kHeads + head) * kSquares +
+                                     query_square) *
+            kSquares;
+        float sum = 0.0f;
+        for (int key_square = 0; key_square < kSquares; ++key_square) {
+          sum += expected_probabilities[probability_offset + key_square] *
+                 value[(static_cast<std::size_t>(batch) * kSquares +
+                        key_square) *
+                           kQkv +
+                       column];
+        }
+        expected_context[(static_cast<std::size_t>(batch) * kSquares +
+                          query_square) *
+                             kQkv +
+                         column] = sum;
+      }
+    }
+  }
+
+  std::vector<float> actual_scores(score_entries, 0.0f);
+  std::vector<float> actual_probabilities(score_entries, 0.0f);
+  std::vector<float> actual_context(qkv_entries, 0.0f);
+  float *device_query = nullptr;
+  float *device_key = nullptr;
+  float *device_value = nullptr;
+  float *device_scores = nullptr;
+  float *device_probabilities = nullptr;
+  float *device_context = nullptr;
+  try {
+    AllocateDevice(&device_query, query.size(), "cudaMalloc(attention_query)");
+    AllocateDevice(&device_key, key.size(), "cudaMalloc(attention_key)");
+    AllocateDevice(&device_value, value.size(), "cudaMalloc(attention_value)");
+    AllocateDevice(&device_scores, actual_scores.size(),
+                   "cudaMalloc(attention_scores)");
+    AllocateDevice(&device_probabilities, actual_probabilities.size(),
+                   "cudaMalloc(attention_probabilities)");
+    AllocateDevice(&device_context, actual_context.size(),
+                   "cudaMalloc(attention_context)");
+    UploadFloats(device_query, query, "cudaMemcpy(attention_query)");
+    UploadFloats(device_key, key, "cudaMemcpy(attention_key)");
+    UploadFloats(device_value, value, "cudaMemcpy(attention_value)");
+
+    LaunchAttentionScoreKernel(device_query, device_key, device_scores, kBatch,
+                               kHeads, kSquares, kHeadDepth, kQkv, kScale);
+    LaunchAttentionSoftmaxKernel(device_scores, device_probabilities,
+                                 softmax_rows, kSquares);
+    LaunchAttentionContextKernel(device_probabilities, device_value,
+                                 device_context, kBatch, kHeads, kSquares,
+                                 kHeadDepth, kQkv);
+    DownloadFloats(actual_scores, device_scores,
+                   "cudaMemcpy(attention_scores)");
+    DownloadFloats(actual_probabilities, device_probabilities,
+                   "cudaMemcpy(attention_probabilities)");
+    DownloadFloats(actual_context, device_context,
+                   "cudaMemcpy(attention_context)");
+  } catch (const std::exception &e) {
+    FreeDevice(device_query);
+    FreeDevice(device_key);
+    FreeDevice(device_value);
+    FreeDevice(device_scores);
+    FreeDevice(device_probabilities);
+    FreeDevice(device_context);
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  FreeDevice(device_query);
+  FreeDevice(device_key);
+  FreeDevice(device_value);
+  FreeDevice(device_scores);
+  FreeDevice(device_probabilities);
+  FreeDevice(device_context);
+
+  for (std::size_t i = 0; i < expected_scores.size(); ++i) {
+    if (std::fabs(actual_scores[i] - expected_scores[i]) > 1e-5f ||
+        std::fabs(actual_probabilities[i] - expected_probabilities[i]) >
+            1e-5f) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA attention score/softmax output mismatch";
+      return result;
+    }
+  }
+  for (std::size_t i = 0; i < expected_context.size(); ++i) {
+    if (std::fabs(actual_context[i] - expected_context[i]) > 1e-5f) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA attention context output mismatch";
+      return result;
+    }
+  }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
   return result;
 }
 

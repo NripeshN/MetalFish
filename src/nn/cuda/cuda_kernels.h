@@ -60,11 +60,27 @@ void LaunchResidualAddKernel(const float *parent, const float *secondary,
                              float secondary_scale,
                              cudaStream_t stream = nullptr);
 
+void LaunchAttentionScoreKernel(const float *query, const float *key,
+                                float *scores, int batch_size, int heads,
+                                int squares, int head_depth, int qkv_width,
+                                float scale, cudaStream_t stream = nullptr);
+
+void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
+                                  int rows, int width,
+                                  cudaStream_t stream = nullptr);
+
+void LaunchAttentionContextKernel(const float *probabilities,
+                                  const float *value, float *context,
+                                  int batch_size, int heads, int squares,
+                                  int head_depth, int qkv_width,
+                                  cudaStream_t stream = nullptr);
+
 CudaKernelSmokeResult RunDenseAffineKernelSmoke();
 CudaKernelSmokeResult RunLayerNormKernelSmoke();
 CudaKernelSmokeResult RunActivationKernelSmoke();
 CudaKernelSmokeResult RunGateKernelSmoke();
 CudaKernelSmokeResult RunResidualAddKernelSmoke();
+CudaKernelSmokeResult RunAttentionCoreKernelSmoke();
 
 } // namespace Cuda
 } // namespace NN

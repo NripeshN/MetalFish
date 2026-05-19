@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `bc2d2f2f-23a0-4999-a494-31d2430b4dc2` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `271cc9e6-5f25-45c2-b87a-7e9ae878a709` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `d5563080-aef1-4831-96cd-ed71a7f3e1ef` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `f148e4d5-7cce-4ec2-b40d-806a670947d7` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -99,7 +99,9 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_kernels.*` contains tested CUDA compute primitives for
   dense-affine projections/heads, last-axis layer normalization, shared
   elementwise activation functions, input-embedding gate multiply/add, and
-  scaled residual addition for feed-forward normalization.
+  scaled residual addition for feed-forward normalization. It also contains
+  the first attention-core kernels for scaled QK scores, row softmax, and
+  probability-weighted value context construction.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production
@@ -129,7 +131,8 @@ Current CUDA backend boundary:
   weights before attention kernels are allowed into the executor path.
 - `src/nn/cuda/cuda_stage_executor.*` owns reusable dense/activation/layernorm
   stage execution, input-embedding gate execution, feed-forward residual
-  layernorm execution, attention Q/K/V and output projection launches, and
+  layernorm execution, attention Q/K/V projection launches, attention
+  score/softmax/context execution, attention output projection launches, and
   strided device-row copies, so smoke and production CUDA executors share the
   same launch path. It derives CUDA-local stage input bindings from the
   resolved plan and schedule, allowing independent heads to branch from the

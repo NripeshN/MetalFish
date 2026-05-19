@@ -77,6 +77,88 @@ std::vector<float> DenseAffineHost(const std::vector<float> &input,
   return output;
 }
 
+std::vector<float> AttentionScoresHost(const std::vector<float> &query,
+                                       const std::vector<float> &key,
+                                       int batch_size, int heads, int squares,
+                                       int head_depth, int qkv_width,
+                                       float scale) {
+  std::vector<float> scores(
+      static_cast<std::size_t>(batch_size) * heads * squares * squares, 0.0f);
+  for (int batch = 0; batch < batch_size; ++batch) {
+    for (int head = 0; head < heads; ++head) {
+      for (int query_square = 0; query_square < squares; ++query_square) {
+        for (int key_square = 0; key_square < squares; ++key_square) {
+          float dot = 0.0f;
+          for (int depth = 0; depth < head_depth; ++depth) {
+            const int column = head * head_depth + depth;
+            dot += query[(static_cast<std::size_t>(batch) * squares +
+                          query_square) *
+                             qkv_width +
+                         column] *
+                   key[(static_cast<std::size_t>(batch) * squares +
+                        key_square) *
+                           qkv_width +
+                       column];
+          }
+          scores[((batch * heads + head) * squares + query_square) * squares +
+                 key_square] = dot * scale;
+        }
+      }
+    }
+  }
+  return scores;
+}
+
+std::vector<float> SoftmaxRowsHost(const std::vector<float> &scores, int rows,
+                                   int width) {
+  std::vector<float> probabilities(scores.size(), 0.0f);
+  for (int row = 0; row < rows; ++row) {
+    const std::size_t offset = static_cast<std::size_t>(row) * width;
+    float max_value = scores[offset];
+    for (int col = 1; col < width; ++col)
+      max_value = std::max(max_value, scores[offset + col]);
+    float sum = 0.0f;
+    for (int col = 0; col < width; ++col) {
+      const float probability = std::exp(scores[offset + col] - max_value);
+      probabilities[offset + col] = probability;
+      sum += probability;
+    }
+    for (int col = 0; col < width; ++col)
+      probabilities[offset + col] /= sum;
+  }
+  return probabilities;
+}
+
+std::vector<float> AttentionContextHost(
+    const std::vector<float> &probabilities, const std::vector<float> &value,
+    int batch_size, int heads, int squares, int head_depth, int qkv_width) {
+  std::vector<float> context(
+      static_cast<std::size_t>(batch_size) * squares * qkv_width, 0.0f);
+  for (int batch = 0; batch < batch_size; ++batch) {
+    for (int query_square = 0; query_square < squares; ++query_square) {
+      for (int column = 0; column < qkv_width; ++column) {
+        const int head = column / head_depth;
+        const std::size_t probability_offset =
+            static_cast<std::size_t>((batch * heads + head) * squares +
+                                     query_square) *
+            squares;
+        float sum = 0.0f;
+        for (int key_square = 0; key_square < squares; ++key_square) {
+          sum += probabilities[probability_offset + key_square] *
+                 value[(static_cast<std::size_t>(batch) * squares +
+                        key_square) *
+                           qkv_width +
+                       column];
+        }
+        context[(static_cast<std::size_t>(batch) * squares + query_square) *
+                    qkv_width +
+                column] = sum;
+      }
+    }
+  }
+  return context;
+}
+
 bool AlmostEqual(const std::vector<float> &actual,
                  const std::vector<float> &expected, float tolerance) {
   if (actual.size() != expected.size())
@@ -192,13 +274,11 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
   constexpr int kInput = 3;
   constexpr int kQkv = 4;
   constexpr int kHeads = 2;
+  constexpr int kHeadDepth = kQkv / kHeads;
   constexpr int kOutput = 3;
   std::vector<float> input(static_cast<std::size_t>(kRows) * kInput, 0.0f);
-  std::vector<float> context(static_cast<std::size_t>(kRows) * kQkv, 0.0f);
   for (std::size_t i = 0; i < input.size(); ++i)
     input[i] = static_cast<float>(static_cast<int>(i % 11) - 5) * 0.125f;
-  for (std::size_t i = 0; i < context.size(); ++i)
-    context[i] = static_cast<float>(static_cast<int>(i % 13) - 6) * 0.0625f;
 
   const std::vector<float> q_weight = {
       0.25f, -0.50f, 0.75f,
@@ -279,54 +359,77 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       DenseAffineHost(input, k_weight, k_bias, kRows, kInput, kQkv);
   const auto expected_v =
       DenseAffineHost(input, v_weight, v_bias, kRows, kInput, kQkv);
+  const float attention_scale =
+      1.0f / std::sqrt(static_cast<float>(kHeadDepth));
+  const auto expected_scores = AttentionScoresHost(
+      expected_q, expected_k, kBatch, kHeads, kCudaAttentionSquares,
+      kHeadDepth, kQkv, attention_scale);
+  const auto expected_probabilities = SoftmaxRowsHost(
+      expected_scores, kBatch * kHeads * kCudaAttentionSquares,
+      kCudaAttentionSquares);
+  const auto expected_context = AttentionContextHost(
+      expected_probabilities, expected_v, kBatch, kHeads, kCudaAttentionSquares,
+      kHeadDepth, kQkv);
   const auto expected_projection = DenseAffineHost(
-      context, projection_weight, projection_bias, kRows, kQkv, kOutput);
+      expected_context, projection_weight, projection_bias, kRows, kQkv,
+      kOutput);
 
   try {
     CudaExecutionWorkspace workspace;
     cudaStream_t stream = workspace.Stream();
     float *device_input =
         workspace.ReserveNamedFloats("attention.input", input.size());
-    float *device_context =
-        workspace.ReserveNamedFloats("attention.context.input", context.size());
     UploadFloats(device_input, input, stream, "cudaMemcpy(attention_input)");
-    UploadFloats(device_context, context, stream,
-                 "cudaMemcpy(attention_context)");
 
     CudaWeightBuffers weights;
     weights.Upload(inventory);
     const auto tape = CreateResolvedExecutionTape(execution_plan, kBatch);
     const auto input_output = ExecuteAttentionInputProjectionStage(
         execution_plan, 0, weights, device_input, tape, workspace, kBatch);
+    const auto core_output = ExecuteAttentionCoreStage(
+        execution_plan, 0, input_output, tape, workspace, kBatch);
     const auto projection_output = ExecuteAttentionOutputProjectionStage(
-        execution_plan, 0, weights, device_context, tape, workspace, kBatch);
+        execution_plan, 0, weights, core_output.context, tape, workspace,
+        kBatch);
     workspace.Synchronize();
 
     if (input_output.rows != kRows || input_output.qkv_width != kQkv ||
-        input_output.heads != kHeads || input_output.head_depth != 2 ||
+        input_output.heads != kHeads || input_output.head_depth != kHeadDepth ||
+        core_output.score_rows != kBatch * kHeads * kCudaAttentionSquares ||
+        core_output.score_width != kCudaAttentionSquares ||
+        core_output.rows != kRows || core_output.qkv_width != kQkv ||
         projection_output.output_width != kOutput) {
       result.status = CudaSmokeStatus::Mismatch;
-      result.message = "CUDA attention projection metadata mismatch";
+      result.message = "CUDA attention metadata mismatch";
       return result;
     }
 
     std::vector<float> actual_q(expected_q.size(), 0.0f);
     std::vector<float> actual_k(expected_k.size(), 0.0f);
     std::vector<float> actual_v(expected_v.size(), 0.0f);
+    std::vector<float> actual_probabilities(expected_probabilities.size(),
+                                            0.0f);
+    std::vector<float> actual_context(expected_context.size(), 0.0f);
     std::vector<float> actual_projection(expected_projection.size(), 0.0f);
     DownloadFloats(actual_q, input_output.query,
                    "cudaMemcpy(attention_q)");
     DownloadFloats(actual_k, input_output.key, "cudaMemcpy(attention_k)");
     DownloadFloats(actual_v, input_output.value,
                    "cudaMemcpy(attention_v)");
+    DownloadFloats(actual_probabilities, core_output.probabilities,
+                   "cudaMemcpy(attention_probabilities)");
+    DownloadFloats(actual_context, core_output.context,
+                   "cudaMemcpy(attention_context)");
     DownloadFloats(actual_projection, projection_output.projection,
                    "cudaMemcpy(attention_projection)");
     if (!AlmostEqual(actual_q, expected_q, 1e-5f) ||
         !AlmostEqual(actual_k, expected_k, 1e-5f) ||
         !AlmostEqual(actual_v, expected_v, 1e-5f) ||
+        !AlmostEqual(actual_probabilities, expected_probabilities, 1e-5f) ||
+        !AlmostEqual(actual_context, expected_context, 1e-5f) ||
         !AlmostEqual(actual_projection, expected_projection, 1e-5f)) {
       result.status = CudaSmokeStatus::Mismatch;
-      result.message = "CUDA attention projection output mismatch";
+      result.message = "CUDA attention output mismatch";
       return result;
     }
     result.allocation_bytes = workspace.TotalBytes() + weights.AllocationBytes();
