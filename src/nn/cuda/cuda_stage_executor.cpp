@@ -167,6 +167,68 @@ DenseStageActivation DenseStageActivationForName(
   return ActivationFromName(execution_plan.format.activations.ffn_activation);
 }
 
+void CreateTimingEvent(cudaEvent_t *event) {
+  const cudaError_t status = cudaEventCreateWithFlags(event, cudaEventDefault);
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage("cudaEventCreate", status));
+}
+
+class CudaStageTimer {
+public:
+  CudaStageTimer(CudaStageTimingCollector *collector, std::string name,
+                 CudaExecutionScheduleKind kind, cudaStream_t stream)
+      : collector_(collector), name_(std::move(name)), kind_(kind),
+        stream_(stream) {
+    if (!collector_)
+      return;
+    CreateTimingEvent(&start_);
+    CreateTimingEvent(&stop_);
+    const cudaError_t status = cudaEventRecord(start_, stream_);
+    if (status != cudaSuccess)
+      throw std::runtime_error(CudaErrorMessage("cudaEventRecord(start)",
+                                                status));
+  }
+
+  CudaStageTimer(const CudaStageTimer &) = delete;
+  CudaStageTimer &operator=(const CudaStageTimer &) = delete;
+
+  ~CudaStageTimer() {
+    if (start_)
+      cudaEventDestroy(start_);
+    if (stop_)
+      cudaEventDestroy(stop_);
+  }
+
+  void Stop() {
+    if (!collector_ || stopped_)
+      return;
+    cudaError_t status = cudaEventRecord(stop_, stream_);
+    if (status != cudaSuccess)
+      throw std::runtime_error(CudaErrorMessage("cudaEventRecord(stop)",
+                                                status));
+    status = cudaEventSynchronize(stop_);
+    if (status != cudaSuccess)
+      throw std::runtime_error(CudaErrorMessage("cudaEventSynchronize",
+                                                status));
+    float millis = 0.0f;
+    status = cudaEventElapsedTime(&millis, start_, stop_);
+    if (status != cudaSuccess)
+      throw std::runtime_error(CudaErrorMessage("cudaEventElapsedTime",
+                                                status));
+    collector_->Add(name_, kind_, millis);
+    stopped_ = true;
+  }
+
+private:
+  CudaStageTimingCollector *collector_ = nullptr;
+  std::string name_;
+  CudaExecutionScheduleKind kind_ = CudaExecutionScheduleKind::Unsupported;
+  cudaStream_t stream_ = nullptr;
+  cudaEvent_t start_ = nullptr;
+  cudaEvent_t stop_ = nullptr;
+  bool stopped_ = false;
+};
+
 bool IsDynamicPositionPreprocessName(std::string_view name) {
   return name == "body.input_embedding_preprocess";
 }
@@ -424,6 +486,12 @@ CudaDenseStageSequenceOutput::FindStage(std::string_view name) const {
       return &stage.second;
   }
   return nullptr;
+}
+
+void CudaStageTimingCollector::Add(std::string name,
+                                   CudaExecutionScheduleKind kind,
+                                   float millis) {
+  records_.push_back(CudaStageTimingRecord{std::move(name), kind, millis});
 }
 
 void CudaStageInputBindings::Add(std::string stage_name,
@@ -1274,21 +1342,22 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size) {
+    int batch_size, CudaStageTimingCollector *timings) {
   const CudaStageInputBindings input_bindings;
   return ExecuteDenseActivationLayerNormSequence(
       execution_plan, weights, input, tape, workspace, batch_size,
-      input_bindings);
+      input_bindings, timings);
 }
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size, const CudaStageInputBindings &input_bindings) {
+    int batch_size, const CudaStageInputBindings &input_bindings,
+    CudaStageTimingCollector *timings) {
   return ExecuteDenseActivationLayerNormSequence(
       execution_plan, weights, input, nullptr, nullptr, tape, workspace,
-      batch_size, input_bindings);
+      batch_size, input_bindings, timings);
 }
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
@@ -1296,7 +1365,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const CudaWeightBuffers &weights, const float *input,
     const std::uint64_t *input_masks, const float *input_values,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size, const CudaStageInputBindings &input_bindings) {
+    int batch_size, const CudaStageInputBindings &input_bindings,
+    CudaStageTimingCollector *timings) {
   if (!input)
     throw std::runtime_error("CUDA dense stage sequence input is missing");
 
@@ -1347,6 +1417,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
                                         stage_input_rows, stage_input_width);
 
     CudaDenseStageOutput stage;
+    CudaStageTimer timer(timings, step.name, entry.kind, workspace.Stream());
     if (entry.kind == CudaExecutionScheduleKind::DenseActivationStage &&
         IsDynamicPositionPreprocessName(step.name)) {
       stage = ExecuteDynamicPositionEncodingStage(
@@ -1391,6 +1462,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
                                           stage_input, tape, workspace,
                                           stage_input_rows);
     }
+    timer.Stop();
     if (stage_input_width != 0 && stage.input_width != stage_input_width) {
       throw std::runtime_error(
           "CUDA dense stage sequence input width mismatch");

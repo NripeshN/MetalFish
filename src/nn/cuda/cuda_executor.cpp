@@ -7,13 +7,20 @@
 
 #include "cuda_executor.h"
 
+#include "cuda_execution_schedule.h"
 #include "cuda_execution_tape.h"
 #include "cuda_output_mapping.h"
 #include "cuda_stage_executor.h"
 
 #include <cuda_runtime_api.h>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <cstdlib>
+#include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -29,6 +36,99 @@ std::string CudaErrorMessage(const char *op, cudaError_t status) {
   std::ostringstream out;
   out << op << " failed: " << cudaGetErrorString(status);
   return out.str();
+}
+
+bool EnvFlagEnabled(const char *name) {
+  const char *value = std::getenv(name);
+  return value && value[0] != '\0' && std::string(value) != "0";
+}
+
+int EnvIntOrDefault(const char *name, int fallback) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  try {
+    return std::stoi(value);
+  } catch (...) {
+    return fallback;
+  }
+}
+
+int ReserveCudaProfileReportIndex() {
+  if (!EnvFlagEnabled("METALFISH_CUDA_PROFILE"))
+    return -1;
+  const int limit = EnvIntOrDefault("METALFISH_CUDA_PROFILE_LIMIT", 1);
+  if (limit <= 0)
+    return -1;
+  static std::atomic<int> reports{0};
+  const int index = reports.fetch_add(1, std::memory_order_relaxed);
+  return index < limit ? index : -1;
+}
+
+double MillisSince(std::chrono::steady_clock::time_point start) {
+  return std::chrono::duration<double, std::milli>(
+             std::chrono::steady_clock::now() - start)
+      .count();
+}
+
+struct CudaProfileBucket {
+  CudaExecutionScheduleKind kind = CudaExecutionScheduleKind::Unsupported;
+  int count = 0;
+  double millis = 0.0;
+};
+
+void AddCudaProfileBucket(std::vector<CudaProfileBucket> &buckets,
+                          const CudaStageTimingRecord &record) {
+  for (auto &bucket : buckets) {
+    if (bucket.kind == record.kind) {
+      ++bucket.count;
+      bucket.millis += record.millis;
+      return;
+    }
+  }
+  buckets.push_back(CudaProfileBucket{record.kind, 1, record.millis});
+}
+
+void PrintCudaProfileReport(int report_index, int batch_size,
+                            const CudaStageTimingCollector &timings,
+                            double sequence_ms, double output_ms,
+                            std::size_t workspace_bytes) {
+  std::vector<CudaProfileBucket> buckets;
+  for (const auto &record : timings.Records())
+    AddCudaProfileBucket(buckets, record);
+  std::sort(buckets.begin(), buckets.end(),
+            [](const auto &lhs, const auto &rhs) {
+              return lhs.millis > rhs.millis;
+            });
+
+  std::vector<CudaStageTimingRecord> slowest = timings.Records();
+  std::sort(slowest.begin(), slowest.end(), [](const auto &lhs,
+                                               const auto &rhs) {
+    return lhs.millis > rhs.millis;
+  });
+
+  std::cerr << std::fixed << std::setprecision(3)
+            << "CUDA profile report=" << report_index
+            << " batch=" << batch_size
+            << " sequence_ms=" << sequence_ms
+            << " output_sync_ms=" << output_ms
+            << " workspace_mb="
+            << (static_cast<double>(workspace_bytes) / (1024.0 * 1024.0))
+            << " stages=" << timings.Records().size() << '\n';
+
+  std::cerr << "CUDA profile buckets:";
+  for (const auto &bucket : buckets) {
+    std::cerr << ' ' << CudaExecutionScheduleKindName(bucket.kind) << '='
+              << bucket.millis << "ms/" << bucket.count;
+  }
+  std::cerr << '\n';
+
+  std::cerr << "CUDA profile slowest:";
+  const std::size_t limit = std::min<std::size_t>(slowest.size(), 8);
+  for (std::size_t i = 0; i < limit; ++i) {
+    std::cerr << ' ' << slowest[i].name << '=' << slowest[i].millis << "ms";
+  }
+  std::cerr << std::endl;
 }
 
 void UploadDeviceFloats(float *ptr, const std::vector<float> &host,
@@ -155,12 +255,27 @@ public:
     const auto tape = CreateResolvedExecutionTape(execution_plan, batch_size);
     const auto stage_inputs =
         CreateCudaStageInputBindings(execution_plan, schedule_);
+    const int profile_index = ReserveCudaProfileReportIndex();
+    CudaStageTimingCollector timings;
+    CudaStageTimingCollector *timing_collector =
+        profile_index >= 0 ? &timings : nullptr;
+    const auto sequence_start = std::chrono::steady_clock::now();
     const auto sequence = ExecuteDenseActivationLayerNormSequence(
         execution_plan, weights, buffers.input_values, buffers.input_masks,
-        buffers.input_values, tape, workspace, batch_size, stage_inputs);
+        buffers.input_values, tape, workspace, batch_size, stage_inputs,
+        timing_collector);
+    const double sequence_ms =
+        profile_index >= 0 ? MillisSince(sequence_start) : 0.0;
+    const auto output_start = std::chrono::steady_clock::now();
     CopyMappedOutputs(output_mapping_, sequence, buffers, workspace,
                       batch_size);
     workspace.Synchronize();
+    const double output_ms =
+        profile_index >= 0 ? MillisSince(output_start) : 0.0;
+    if (profile_index >= 0) {
+      PrintCudaProfileReport(profile_index, batch_size, timings, sequence_ms,
+                             output_ms, workspace.TotalBytes());
+    }
   }
 
   std::string Name() const override { return "resolved"; }

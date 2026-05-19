@@ -85,6 +85,24 @@ struct CudaStageInputBinding {
   std::string source_stage_name;
 };
 
+struct CudaStageTimingRecord {
+  std::string name;
+  CudaExecutionScheduleKind kind = CudaExecutionScheduleKind::Unsupported;
+  float millis = 0.0f;
+};
+
+class CudaStageTimingCollector {
+public:
+  void Add(std::string name, CudaExecutionScheduleKind kind, float millis);
+  const std::vector<CudaStageTimingRecord> &Records() const {
+    return records_;
+  }
+  void Clear() { records_.clear(); }
+
+private:
+  std::vector<CudaStageTimingRecord> records_;
+};
+
 class CudaStageInputBindings {
 public:
   void Add(std::string stage_name, std::string source_stage_name);
@@ -176,20 +194,22 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size);
+    int batch_size, CudaStageTimingCollector *timings = nullptr);
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size, const CudaStageInputBindings &input_bindings);
+    int batch_size, const CudaStageInputBindings &input_bindings,
+    CudaStageTimingCollector *timings = nullptr);
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,
     const std::uint64_t *input_masks, const float *input_values,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size, const CudaStageInputBindings &input_bindings);
+    int batch_size, const CudaStageInputBindings &input_bindings,
+    CudaStageTimingCollector *timings = nullptr);
 
 void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
                          int src_stride, int rows, int width,
