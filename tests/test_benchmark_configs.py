@@ -315,6 +315,12 @@ def main() -> int:
             '"TransformerLowTimeFallbackMs"',
             "eng.warmup(benchmark_warmup_ms(cfg, movetime_ms))",
             "eng.warmup(benchmark_warmup_ms(cfg_copy, movetime_ms))",
+            "--tactical-repeat",
+            "--positions",
+            "def select_bk_positions",
+            "repeat_count",
+            "move_counts",
+            "position_ids",
         ],
     )
     assert_file_contains(
@@ -334,6 +340,13 @@ def main() -> int:
             "def warmup_movetime_ms",
             "HYBRID_LOW_TIME_FALLBACK_MS",
             "warmup_movetime_ms(movetime_ms, hybrid=True)",
+            "METALFISH_MCTS_ROOT_TRACE_MOVES",
+            "--root-trace-moves",
+            "--mcts-minibatch-size",
+            "--mcts-kld",
+            "--hybrid-mcts-minibatch-size",
+            'sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))',
+            'sess.setoption("MCTSMinibatchSize", str(minibatch_size))',
         ],
     )
     assert_file_contains(
@@ -378,6 +391,52 @@ def main() -> int:
             "MCTSInABScore=",
             "MCTSInABAvg=",
             "MCTSInABEffort=",
+        ],
+    )
+    assert_file_contains(
+        PROJ / ".github/workflows/ci.yml",
+        [
+            "python3 tools/download_engine_networks.py",
+            "python3 tools/uci_smoke.py",
+            "Run MCTS low-node tactical smoke",
+            "MCTSParallelSearch=true",
+            "go \"nodes 50\"",
+            "--expect-bestmove h5f6",
+        ],
+    )
+    assert_file_contains(
+        PROJ / ".github/workflows/lichess-puzzles.yml",
+        ["python3 tools/download_engine_networks.py"],
+    )
+    assert_file_contains(
+        PROJ / "tools/uci_smoke.py",
+        [
+            "queue.Queue",
+            "threading.Thread",
+            "Timed out waiting for engine response",
+            "Engine exited with status",
+            "--expect-bestmove",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/download_engine_networks.py",
+        [
+            "BT4-1024x15x32h-swa-6147500.pb.gz",
+            "METALFISH_BT4_WEIGHTS_URL",
+            "Decompressing",
+            "--nnue-only",
+            "--bt4-only",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "src/mcts/search.cpp",
+        [
+            'EnvFlagEnabled("METALFISH_MCTS_ROOT_TRACE")',
+            'EnvInt("METALFISH_MCTS_ROOT_TRACE_MOVES", 8, 1, 64)',
+            '<< ":n=" << entry.visits',
+            '<< ":cn=" << entry.current_visits',
+            '<< ":q=" << entry.q',
+            '<< ":p=" << entry.policy',
         ],
     )
     assert_file_contains(

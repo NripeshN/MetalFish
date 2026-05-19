@@ -79,24 +79,8 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install -r tests/requirements.txt
 
-      - name: Download NNUE files
-        run: |
-          mkdir -p networks
-          curl --fail -L --retry 3 --retry-delay 2 \
-            -o networks/nn-c288c895ea92.nnue \
-            https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue
-          curl --fail -L --retry 3 --retry-delay 2 \
-            -o networks/nn-37f18f62d772.nnue \
-            https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue
-
-      - name: Download transformer weights
-        run: |
-          curl --fail -L --retry 3 --retry-delay 5 \
-            -o networks/BT4-1024x15x32h-swa-6147500.pb.gz \
-            "${METALFISH_BT4_WEIGHTS_URL}"
-          gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \
-            > networks/BT4-1024x15x32h-swa-6147500.pb
-          test -s networks/BT4-1024x15x32h-swa-6147500.pb
+      - name: Download engine networks
+        run: python3 tools/download_engine_networks.py
 
       - name: Cache Syzygy 3-4-5
         uses: actions/cache@v5
