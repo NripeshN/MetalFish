@@ -20,6 +20,7 @@ namespace Cuda {
 
 enum class CudaExecutionScheduleKind {
   Boundary,
+  DenseActivationStage,
   DenseLayerNormStage,
   Unsupported,
 };
@@ -38,6 +39,7 @@ struct CudaExecutionScheduleEntry {
 struct CudaExecutionSchedule {
   std::vector<CudaExecutionScheduleEntry> entries;
   int boundary_count = 0;
+  int dense_activation_stage_count = 0;
   int dense_layernorm_stage_count = 0;
   int unsupported_count = 0;
 

@@ -131,6 +131,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   constexpr int kInput = 3;
   constexpr int kHidden = 4;
   constexpr int kOutput = 2;
+  constexpr int kFinal = 3;
   const std::vector<float> input_values = {
       1.0f, -2.0f, 0.5f,
       -0.5f, 2.0f, 1.5f,
@@ -155,6 +156,12 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   const std::vector<float> dense2_bias = {0.1f, -0.2f};
   const std::vector<float> gamma2 = {1.25f, -0.75f};
   const std::vector<float> beta2 = {0.05f, 0.30f};
+  const std::vector<float> dense3_weights = {
+      0.5f, -0.25f,
+      -1.0f, 0.75f,
+      0.25f, 1.5f,
+  };
+  const std::vector<float> dense3_bias = {-0.1f, 0.2f, 0.05f};
 
   NetworkWeightInventory inventory;
   inventory.tensors = {
@@ -174,6 +181,10 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
        NetworkWeightTensorKind::NormScale},
       {"smoke.norm2_betas", beta2.data(), beta2.size(), {kOutput},
        NetworkWeightTensorKind::NormBias},
+      {"smoke.dense3_w", dense3_weights.data(), dense3_weights.size(),
+       {kFinal, kOutput}, NetworkWeightTensorKind::DenseWeight},
+      {"smoke.dense3_b", dense3_bias.data(), dense3_bias.size(), {kFinal},
+       NetworkWeightTensorKind::DenseBias},
   };
 
   NetworkResolvedExecutionPlan execution_plan;
@@ -217,6 +228,15 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
           {7, "smoke.norm2_betas", beta2.size(), {kOutput},
            NetworkWeightTensorKind::NormBias},
       }});
+  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
+      NetworkExecutionOpKind::Dense,
+      "smoke.dense3",
+      {
+          {8, "smoke.dense3_w", dense3_weights.size(), {kFinal, kOutput},
+           NetworkWeightTensorKind::DenseWeight},
+          {9, "smoke.dense3_b", dense3_bias.size(), {kFinal},
+           NetworkWeightTensorKind::DenseBias},
+      }});
 
   std::vector<float> hidden_activated(static_cast<size_t>(kBatch) * kHidden,
                                       0.0f);
@@ -224,6 +244,8 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
                                        0.0f);
   std::vector<float> activated(static_cast<size_t>(kBatch) * kOutput, 0.0f);
   std::vector<float> expected(static_cast<size_t>(kBatch) * kOutput, 0.0f);
+  std::vector<float> final_expected(static_cast<size_t>(kBatch) * kFinal,
+                                    0.0f);
   for (int batch = 0; batch < kBatch; ++batch) {
     const size_t hidden_offset = static_cast<size_t>(batch) * kHidden;
     for (int out = 0; out < kHidden; ++out) {
@@ -287,6 +309,17 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
           normalized * gamma2[static_cast<size_t>(i)] +
           beta2[static_cast<size_t>(i)];
     }
+
+    const size_t final_offset = static_cast<size_t>(batch) * kFinal;
+    for (int out = 0; out < kFinal; ++out) {
+      float dense = dense3_bias[static_cast<size_t>(out)];
+      for (int in = 0; in < kOutput; ++in) {
+        dense += expected[output_offset + in] *
+                 dense3_weights[static_cast<size_t>(out) * kOutput + in];
+      }
+      const float relu = std::max(dense, 0.0f);
+      final_expected[final_offset + out] = relu * relu;
+    }
   }
 
   try {
@@ -313,23 +346,23 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     }
 
     for (int batch = 0; batch < kBatch; ++batch) {
-      const size_t expected_offset = static_cast<size_t>(batch) * kOutput;
+      const size_t expected_offset = static_cast<size_t>(batch) * kFinal;
       const size_t policy_offset =
           static_cast<size_t>(batch) * plan.policy_outputs;
       const size_t raw_policy_offset =
           static_cast<size_t>(batch) * plan.raw_policy_outputs;
-      for (int i = 0; i < kOutput; ++i) {
+      for (int i = 0; i < kFinal; ++i) {
         if (std::fabs(downloaded.policy[policy_offset + i] -
-                      expected[expected_offset + i]) > 1e-5f ||
+                      final_expected[expected_offset + i]) > 1e-5f ||
             std::fabs(downloaded.raw_policy[raw_policy_offset + i] -
-                      activated[expected_offset + i]) > 1e-5f) {
+                      final_expected[expected_offset + i]) > 1e-5f) {
           result.status = CudaSmokeStatus::Mismatch;
           result.message = "CUDA plan executor pipeline output mismatch";
           return result;
         }
       }
-      if (downloaded.policy[policy_offset + kOutput] != 0.0f ||
-          downloaded.raw_policy[raw_policy_offset + kOutput] != 0.0f) {
+      if (downloaded.policy[policy_offset + kFinal] != 0.0f ||
+          downloaded.raw_policy[raw_policy_offset + kFinal] != 0.0f) {
         result.status = CudaSmokeStatus::Mismatch;
         result.message = "CUDA plan executor row stride overwrite";
         return result;

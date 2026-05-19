@@ -42,12 +42,17 @@ CudaActivationKind ActivationFromString(const std::string &activation) {
   return CudaActivationKind::Relu;
 }
 
-void RequireDenseNormTensors(const NetworkResolvedExecutionStep &dense,
-                             const NetworkResolvedExecutionStep &norm) {
+void RequireDenseTensors(const NetworkResolvedExecutionStep &dense) {
   if (dense.kind != NetworkExecutionOpKind::Dense ||
-      norm.kind != NetworkExecutionOpKind::LayerNorm ||
-      dense.tensors.size() < 2 || norm.tensors.size() < 2) {
+      dense.tensors.size() < 2) {
     throw std::runtime_error("CUDA dense stage has missing tensors");
+  }
+}
+
+void RequireLayerNormTensors(const NetworkResolvedExecutionStep &norm) {
+  if (norm.kind != NetworkExecutionOpKind::LayerNorm ||
+      norm.tensors.size() < 2) {
+    throw std::runtime_error("CUDA layernorm stage has missing tensors");
   }
 }
 
@@ -83,52 +88,44 @@ void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
 
-CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
+CudaDenseStageOutput ExecuteDenseActivationStage(
     const NetworkResolvedExecutionPlan &execution_plan,
-    const NetworkResolvedExecutionStep &dense,
-    const NetworkResolvedExecutionStep &norm, const CudaWeightBuffers &weights,
+    const NetworkResolvedExecutionStep &dense, const CudaWeightBuffers &weights,
     const float *input, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size) {
   if (batch_size <= 0)
     throw std::runtime_error("CUDA dense stage received empty batch");
   if (!input)
     throw std::runtime_error("CUDA dense stage input is missing");
-  RequireDenseNormTensors(dense, norm);
+  RequireDenseTensors(dense);
 
   const auto dense_weight = weights.TensorAt(dense.tensors[0].inventory_index);
   const auto dense_bias = weights.TensorAt(dense.tensors[1].inventory_index);
-  const auto gamma = weights.TensorAt(norm.tensors[0].inventory_index);
-  const auto beta = weights.TensorAt(norm.tensors[1].inventory_index);
-  if (dense_weight.dims.size() != 2 || dense_bias.dims.size() != 1 ||
-      gamma.dims.size() != 1 || beta.dims.size() != 1) {
+  if (dense_weight.dims.size() != 2 || dense_bias.dims.size() != 1) {
     throw std::runtime_error("CUDA dense stage tensor shape is invalid");
   }
 
   const int output_width = static_cast<int>(dense_weight.dims[0]);
   const int input_width = static_cast<int>(dense_weight.dims[1]);
   if (input_width <= 0 || output_width <= 0 ||
-      dense_bias.elements != static_cast<std::size_t>(output_width) ||
-      gamma.elements != static_cast<std::size_t>(output_width) ||
-      beta.elements != static_cast<std::size_t>(output_width)) {
+      dense_bias.elements != static_cast<std::size_t>(output_width)) {
     throw std::runtime_error("CUDA dense stage tensor dimensions mismatch");
   }
 
   const auto &dense_binding = tape.RequireName(dense.name + ".dense");
   const auto &activation_binding =
       tape.RequireName(dense.name + ".activation");
-  const auto &norm_binding = tape.RequireName(norm.name + ".normalized");
   const std::size_t entries = static_cast<std::size_t>(batch_size) *
                               static_cast<std::size_t>(output_width);
   if (dense_binding.entries != entries ||
-      activation_binding.entries != entries ||
-      norm_binding.entries != entries) {
+      activation_binding.entries != entries) {
     throw std::runtime_error("CUDA dense stage tape size mismatch");
   }
 
   CudaDenseStageOutput output;
   output.dense = tape.Reserve(workspace, dense_binding);
   output.activation = tape.Reserve(workspace, activation_binding);
-  output.normalized = tape.Reserve(workspace, norm_binding);
+  output.output = output.activation;
   output.input_width = input_width;
   output.output_width = output_width;
 
@@ -140,9 +137,44 @@ CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
       output.dense, output.activation, static_cast<int>(entries),
       ActivationFromString(execution_plan.format.activations.ffn_activation),
       stream);
+  return output;
+}
+
+CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &dense,
+    const NetworkResolvedExecutionStep &norm, const CudaWeightBuffers &weights,
+    const float *input, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size) {
+  RequireLayerNormTensors(norm);
+
+  CudaDenseStageOutput output = ExecuteDenseActivationStage(
+      execution_plan, dense, weights, input, tape, workspace, batch_size);
+  const auto gamma = weights.TensorAt(norm.tensors[0].inventory_index);
+  const auto beta = weights.TensorAt(norm.tensors[1].inventory_index);
+  if (gamma.dims.size() != 1 || beta.dims.size() != 1) {
+    throw std::runtime_error("CUDA layernorm stage tensor shape is invalid");
+  }
+
+  if (gamma.elements != static_cast<std::size_t>(output.output_width) ||
+      beta.elements != static_cast<std::size_t>(output.output_width)) {
+    throw std::runtime_error("CUDA layernorm stage tensor dimensions mismatch");
+  }
+
+  const auto &norm_binding = tape.RequireName(norm.name + ".normalized");
+  const std::size_t entries = static_cast<std::size_t>(batch_size) *
+                              static_cast<std::size_t>(output.output_width);
+  if (norm_binding.entries != entries) {
+    throw std::runtime_error("CUDA layernorm stage tape size mismatch");
+  }
+
+  output.normalized = tape.Reserve(workspace, norm_binding);
+  output.output = output.normalized;
+
+  cudaStream_t stream = workspace.Stream();
   LaunchLayerNormKernel(output.activation, gamma.data, beta.data,
-                        output.normalized, batch_size, output_width, 1e-5f,
-                        stream);
+                        output.normalized, batch_size, output.output_width,
+                        1e-5f, stream);
   return output;
 }
 
@@ -164,13 +196,20 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
   const float *current_input = input;
   int current_width = 0;
   for (const auto &entry : schedule.entries) {
-    if (entry.kind != CudaExecutionScheduleKind::DenseLayerNormStage)
+    if (entry.kind != CudaExecutionScheduleKind::DenseLayerNormStage &&
+        entry.kind != CudaExecutionScheduleKind::DenseActivationStage) {
       continue;
+    }
 
     const auto &step = execution_plan.steps[entry.first_step];
-    const auto stage = ExecuteDenseActivationLayerNormStage(
-        execution_plan, step, execution_plan.steps[entry.second_step],
-        weights, current_input, tape, workspace, batch_size);
+    const CudaDenseStageOutput stage =
+        entry.kind == CudaExecutionScheduleKind::DenseLayerNormStage
+            ? ExecuteDenseActivationLayerNormStage(
+                  execution_plan, step, execution_plan.steps[entry.second_step],
+                  weights, current_input, tape, workspace, batch_size)
+            : ExecuteDenseActivationStage(execution_plan, step, weights,
+                                          current_input, tape, workspace,
+                                          batch_size);
     if (current_width != 0 && stage.input_width != current_width) {
       throw std::runtime_error(
           "CUDA dense stage sequence input width mismatch");
@@ -178,7 +217,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
 
     sequence.last = stage;
     ++sequence.stage_count;
-    current_input = stage.normalized;
+    current_input = stage.output;
     current_width = stage.output_width;
   }
 

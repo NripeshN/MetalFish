@@ -44,6 +44,17 @@ CudaExecutionScheduleEntry DenseLayerNormEntry(
                                     "dense activation plus layernorm"};
 }
 
+CudaExecutionScheduleEntry DenseActivationEntry(
+    const NetworkResolvedExecutionPlan &plan, std::size_t dense_index) {
+  const auto &dense = plan.steps[dense_index];
+  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::DenseActivationStage,
+                                    dense_index,
+                                    std::numeric_limits<std::size_t>::max(),
+                                    dense.kind,
+                                    dense.name,
+                                    "dense activation"};
+}
+
 CudaExecutionScheduleEntry UnsupportedEntry(
     const NetworkResolvedExecutionPlan &plan, std::size_t step_index,
     std::string reason) {
@@ -62,6 +73,9 @@ void AddEntry(CudaExecutionSchedule &schedule,
   case CudaExecutionScheduleKind::Boundary:
     ++schedule.boundary_count;
     break;
+  case CudaExecutionScheduleKind::DenseActivationStage:
+    ++schedule.dense_activation_stage_count;
+    break;
   case CudaExecutionScheduleKind::DenseLayerNormStage:
     ++schedule.dense_layernorm_stage_count;
     break;
@@ -78,6 +92,8 @@ std::string CudaExecutionScheduleKindName(CudaExecutionScheduleKind kind) {
   switch (kind) {
   case CudaExecutionScheduleKind::Boundary:
     return "boundary";
+  case CudaExecutionScheduleKind::DenseActivationStage:
+    return "dense_activation_stage";
   case CudaExecutionScheduleKind::DenseLayerNormStage:
     return "dense_layernorm_stage";
   case CudaExecutionScheduleKind::Unsupported:
@@ -98,6 +114,7 @@ CudaExecutionSchedule::FirstUnsupported() const {
 std::string CudaExecutionSchedule::Summary() const {
   std::ostringstream out;
   out << entries.size() << " CUDA schedule entries, "
+      << dense_activation_stage_count << " dense/activation stages, "
       << dense_layernorm_stage_count << " dense/layernorm stages, "
       << boundary_count << " boundaries, " << unsupported_count
       << " unsupported";
@@ -127,9 +144,7 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
         i = norm_index;
         continue;
       }
-      AddEntry(schedule,
-               UnsupportedEntry(plan, i,
-                                "dense stage is not followed by layernorm"));
+      AddEntry(schedule, DenseActivationEntry(plan, i));
       continue;
     }
 

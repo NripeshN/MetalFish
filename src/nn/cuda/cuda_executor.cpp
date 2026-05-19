@@ -112,13 +112,13 @@ public:
         execution_plan, weights, buffers.input_values, tape, workspace,
         batch_size);
     const auto &stage = sequence.last;
-    if (stage.output_width > plan.policy_outputs ||
+    if (!stage.output || stage.output_width > plan.policy_outputs ||
         (buffers.raw_policy && stage.output_width > plan.raw_policy_outputs)) {
       throw std::runtime_error("CUDA smoke output stride is smaller than stage");
     }
     cudaStream_t stream = workspace.Stream();
 
-    CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, stage.normalized,
+    CopyDeviceFloatRows(buffers.policy, plan.policy_outputs, stage.output,
                         stage.output_width, batch_size, stage.output_width,
                         "cudaMemcpy(smoke_policy_rows)", stream);
 

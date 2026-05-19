@@ -787,6 +787,8 @@ void test_cuda_execution_schedule(TestCounter &tc) {
          "input/dense-layernorm/output schedule should be supported", tc);
   expect(schedule.boundary_count == 2,
          "CUDA schedule should count boundary steps", tc);
+  expect(schedule.dense_activation_stage_count == 0,
+         "CUDA schedule should not count dense-only stages in fused plan", tc);
   expect(schedule.dense_layernorm_stage_count == 1,
          "CUDA schedule should count dense/layernorm stages", tc);
   expect(schedule.unsupported_count == 0,
@@ -819,12 +821,14 @@ void test_cuda_execution_schedule(TestCounter &tc) {
       NN::NetworkExecutionOpKind::Dense, "orphan.dense", {}});
   const auto dense_only_schedule =
       NN::Cuda::CreateCudaExecutionSchedule(dense_only);
-  expect(!dense_only_schedule.FullySupported(),
-         "dense without layernorm should be explicit unsupported", tc);
-  expect(dense_only_schedule.FirstUnsupported() &&
-             dense_only_schedule.FirstUnsupported()->reason.find(
-                 "not followed by layernorm") != std::string::npos,
-         "CUDA schedule should explain dense/layernorm pairing failure", tc);
+  expect(dense_only_schedule.FullySupported(),
+         "dense without layernorm should run as dense/activation", tc);
+  expect(dense_only_schedule.dense_activation_stage_count == 1,
+         "CUDA schedule should count dense/activation stages", tc);
+  expect(dense_only_schedule.entries.size() == 1 &&
+             dense_only_schedule.entries[0].kind ==
+                 NN::Cuda::CudaExecutionScheduleKind::DenseActivationStage,
+         "CUDA schedule should classify dense-only stages explicitly", tc);
 }
 
 void test_cuda_weight_upload(TestCounter &tc) {
