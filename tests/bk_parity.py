@@ -311,6 +311,8 @@ def setup_metalfish(
     threads: int,
     deterministic: bool,
     multipv: int,
+    minibatch_size: int,
+    mcts_kld: float,
 ) -> None:
     sess.setoption("UseHybridSearch", "false")
     sess.setoption("UseMCTS", "true")
@@ -318,10 +320,10 @@ def setup_metalfish(
     sess.setoption("Threads", str(threads))
     sess.setoption("MultiPV", str(multipv))
     sess.setoption("MCTSMaxThreads", str(threads))
-    sess.setoption("MCTSMinibatchSize", "0")
+    sess.setoption("MCTSMinibatchSize", str(minibatch_size))
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
-    sess.setoption("MCTSMinimumKLDGainPerNode", "0.00005")
+    sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))
     sess.send("isready")
     sess.wait_for("readyok", 120)
 
@@ -637,7 +639,7 @@ def write_json_report(
             "hybrid_root_hint_count": args.hybrid_root_hint_count,
             "hybrid_ab_candidate_verify_ms": args.hybrid_ab_candidate_verify_ms,
             "hybrid_ab_candidate_verify_count": args.hybrid_ab_candidate_verify_count,
-            "hybrid_mcts_minibatch": args.hybrid_mcts_minibatch,
+            "hybrid_mcts_minibatch": args.hybrid_mcts_minibatch_size,
             "hybrid_low_time_fallback_ms": args.hybrid_low_time_fallback_ms,
             "hybrid_root_pawn_lever_tiebreak": args.hybrid_root_pawn_lever_tiebreak,
         },
@@ -712,8 +714,19 @@ def run_once(
             env = os.environ.copy()
             if args.root_trace:
                 env["METALFISH_MCTS_ROOT_TRACE"] = "1"
+                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(
+                    args.root_trace_moves
+                )
             s = UCISession([str(args.metalfish)], "metalfish-mcts", env=env)
-            setup_metalfish(s, args.weights, threads, args.deterministic, args.multipv)
+            setup_metalfish(
+                s,
+                args.weights,
+                threads,
+                args.deterministic,
+                args.multipv,
+                args.mcts_minibatch_size,
+                args.mcts_kld,
+            )
             s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
             sessions["metalfish-mcts"] = s
 
@@ -724,6 +737,9 @@ def run_once(
             env = os.environ.copy()
             if args.root_trace:
                 env["METALFISH_MCTS_ROOT_TRACE"] = "1"
+                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(
+                    args.root_trace_moves
+                )
             s = UCISession([str(args.metalfish)], "metalfish-hybrid", env=env)
             setup_metalfish_hybrid(
                 s,
@@ -743,7 +759,7 @@ def run_once(
                 args.hybrid_root_hint_count,
                 args.hybrid_ab_candidate_verify_ms,
                 args.hybrid_ab_candidate_verify_count,
-                args.hybrid_mcts_minibatch,
+                args.hybrid_mcts_minibatch_size,
                 args.hybrid_low_time_fallback_ms,
                 args.hybrid_root_pawn_lever_tiebreak,
             )
@@ -870,6 +886,7 @@ def main() -> int:
         action="store_true",
         help="Print MetalFish MCTS root visit summaries when available",
     )
+    parser.add_argument("--root-trace-moves", type=int, default=8)
     parser.add_argument(
         "--hybrid-trace",
         action="store_true",
@@ -899,7 +916,15 @@ def main() -> int:
     parser.add_argument("--hybrid-root-hint-count", type=int, default=4)
     parser.add_argument("--hybrid-ab-candidate-verify-ms", type=int, default=120)
     parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=4)
-    parser.add_argument("--hybrid-mcts-minibatch", type=int, default=0)
+    parser.add_argument("--mcts-minibatch-size", type=int, default=0)
+    parser.add_argument("--mcts-kld", type=float, default=0.00005)
+    parser.add_argument(
+        "--hybrid-mcts-minibatch",
+        "--hybrid-mcts-minibatch-size",
+        dest="hybrid_mcts_minibatch_size",
+        type=int,
+        default=0,
+    )
     parser.add_argument("--hybrid-low-time-fallback-ms", type=int, default=3000)
     parser.add_argument(
         "--hybrid-root-pawn-lever-tiebreak",

@@ -564,7 +564,7 @@ bool HybridMCTSCrossRootConfidenceOverride(
     int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
     float mcts_q) {
   if (!fixed_budget || !mcts_strong || mcts_total_nodes < 250 ||
-      mcts_visits < 180 || visit_share < 0.62f || root_q_gap < 0.12f ||
+      mcts_visits < 170 || visit_share < 0.62f || root_q_gap < 0.12f ||
       mcts_cp < 170 || eval_delta < 40) {
     return false;
   }
@@ -929,33 +929,53 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
   const int delay_ms = std::max(0, config_.mcts_ab_root_hint_delay_ms);
   const int64_t deadline_ms = SteadyNowMs() + delay_ms;
 
-  while (!should_stop()) {
+  auto collect_latest_hints = [&]() {
     std::vector<Move> latest_hints;
-    const auto root_moves = mcts_search_->GetRootMoveStats(hint_count);
-    for (const auto &root_move : root_moves) {
-      if (root_move.move == Move::none())
-        continue;
-      if (std::find(latest_hints.begin(), latest_hints.end(),
-                    root_move.move) == latest_hints.end()) {
-        latest_hints.push_back(root_move.move);
+    auto add_latest_hint = [&latest_hints, hint_count](Move move) {
+      if (move == Move::none())
+        return;
+      if (static_cast<int>(latest_hints.size()) >= hint_count)
+        return;
+      if (std::find(latest_hints.begin(), latest_hints.end(), move) ==
+          latest_hints.end()) {
+        latest_hints.push_back(move);
       }
+    };
+
+    auto root_moves = mcts_search_->GetRootMoveStats();
+    const int visit_hints = std::max(1, hint_count / 2);
+    for (int i = 0; i < static_cast<int>(root_moves.size()) &&
+                    static_cast<int>(latest_hints.size()) < visit_hints;
+         ++i) {
+      add_latest_hint(root_moves[i].move);
     }
-    if (!latest_hints.empty()) {
+
+    std::stable_sort(root_moves.begin(), root_moves.end(),
+                     [](const Search::RootMoveStats &a,
+                        const Search::RootMoveStats &b) {
+                       if (std::abs(a.policy - b.policy) > 0.000001f)
+                         return a.policy > b.policy;
+                       if (a.visits != b.visits)
+                         return a.visits > b.visits;
+                       return a.q > b.q;
+                     });
+    for (const auto &root_move : root_moves)
+      add_latest_hint(root_move.move);
+
+    return latest_hints;
+  };
+
+  while (!should_stop()) {
+    auto latest_hints = collect_latest_hints();
+    if (!latest_hints.empty())
       hints = std::move(latest_hints);
-    }
     if (delay_ms == 0 || SteadyNowMs() >= deadline_ms)
       break;
     std::this_thread::sleep_for(std::chrono::microseconds(500));
   }
 
   if (hints.empty()) {
-    const auto root_moves = mcts_search_->GetRootMoveStats(hint_count);
-    for (const auto &root_move : root_moves) {
-      if (root_move.move == Move::none())
-        continue;
-      if (std::find(hints.begin(), hints.end(), root_move.move) == hints.end())
-        hints.push_back(root_move.move);
-    }
+    hints = collect_latest_hints();
   }
 
   if (config_.trace_decisions && !hints.empty()) {

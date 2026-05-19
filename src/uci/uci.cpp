@@ -1593,6 +1593,18 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   num_threads = resolve_mcts_thread_count(engine, explicit_threads_arg,
                                           num_threads, true);
 
+#ifdef __APPLE__
+  constexpr std::uint64_t kLowNodeMctsThreadCap = 1024;
+  if (limits.nodes > 0 && limits.nodes <= kLowNodeMctsThreadCap &&
+      num_threads > 1) {
+    sync_cout << "info string Capping low-node pure MCTS search from "
+              << num_threads
+              << " to 1 thread for Apple Silicon tactical stability"
+              << sync_endl;
+    num_threads = 1;
+  }
+#endif
+
   sync_cout << "info string Starting Multi-Threaded MCTS Search with "
             << num_threads << " threads..." << sync_endl;
 
