@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace MetalFish {
 namespace NN {
@@ -141,23 +142,19 @@ bool CudaWeightBuffers::DownloadMatches(const NetworkWeightInventory &inventory,
     if (host.elements == 0)
       continue;
 
-    float first = 0.0f;
+    std::vector<float> downloaded(host.elements, 0.0f);
     cudaError_t status =
-        cudaMemcpy(&first, device.data, sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(downloaded.data(), device.data,
+                   host.elements * sizeof(float), cudaMemcpyDeviceToHost);
     if (status != cudaSuccess)
       return fail(
-          CudaErrorMessage("cudaMemcpy(first " + host.name + ")", status));
-    if (first != host.data[0])
-      return fail("CUDA first-value mismatch: " + host.name);
-
-    float last = 0.0f;
-    status = cudaMemcpy(&last, device.data + host.elements - 1, sizeof(float),
-                        cudaMemcpyDeviceToHost);
-    if (status != cudaSuccess)
-      return fail(
-          CudaErrorMessage("cudaMemcpy(last " + host.name + ")", status));
-    if (last != host.data[host.elements - 1])
-      return fail("CUDA last-value mismatch: " + host.name);
+          CudaErrorMessage("cudaMemcpy(" + host.name + ")", status));
+    for (std::size_t j = 0; j < host.elements; ++j) {
+      if (downloaded[j] != host.data[j]) {
+        return fail("CUDA weight value mismatch: " + host.name +
+                    " at " + std::to_string(j));
+      }
+    }
   }
 
   return true;

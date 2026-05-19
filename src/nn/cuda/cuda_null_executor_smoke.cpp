@@ -869,6 +869,48 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
                            actual_ffn_normalized, expected_ffn_normalized)) {
       return result;
     }
+    std::string weight_error;
+    if (!weights.DownloadMatches(inventory, &weight_error)) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA attention weights mutated: " + weight_error;
+      return result;
+    }
+
+    NetworkResolvedExecutionPlan attention_only_plan = execution_plan;
+    attention_only_plan.steps.resize(5);
+    const auto attention_only_tape =
+        CreateResolvedExecutionTape(attention_only_plan, kBatch);
+    CudaExecutionWorkspace attention_sequence_workspace;
+    float *attention_sequence_input =
+        attention_sequence_workspace.ReserveNamedFloats(
+            "attention.sequence.only.input", input.size());
+    UploadFloats(attention_sequence_input, input,
+                 attention_sequence_workspace.Stream(),
+                 "cudaMemcpy(attention_sequence_only_input)");
+    const auto attention_sequence = ExecuteDenseActivationLayerNormSequence(
+        attention_only_plan, weights, attention_sequence_input,
+        attention_only_tape, attention_sequence_workspace, kBatch);
+    attention_sequence_workspace.Synchronize();
+    const auto *attention_sequence_stage =
+        attention_sequence.FindStage("body.encoder.0.mha");
+    if (!attention_sequence_stage || !attention_sequence_stage->output ||
+        attention_sequence_stage->output_width != kOutput ||
+        attention_sequence_stage->rows != kRows) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA attention-only sequence metadata mismatch";
+      return result;
+    }
+    std::vector<float> actual_attention_sequence(expected_normalized.size(),
+                                                 0.0f);
+    DownloadFloats(actual_attention_sequence, attention_sequence_stage->output,
+                   "cudaMemcpy(attention_sequence_only_output)");
+    if (!AlmostEqual(actual_attention_sequence, expected_normalized, 1e-5f)) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = MismatchMessage("CUDA attention-only sequence",
+                                       actual_attention_sequence,
+                                       expected_normalized, 1e-5f);
+      return result;
+    }
 
     CudaExecutionWorkspace sequence_workspace;
     float *sequence_input = sequence_workspace.ReserveNamedFloats(
@@ -879,32 +921,19 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
         execution_plan, weights, sequence_input, tape, sequence_workspace,
         kBatch);
     sequence_workspace.Synchronize();
-    const auto *sequence_stage = sequence.FindStage("body.encoder.0.mha");
     const auto *sequence_ffn_stage =
         sequence.FindStage("body.encoder.0.ffn");
-    if (!sequence_stage || !sequence_stage->output ||
-        sequence_stage->output_width != kOutput || !sequence_ffn_stage ||
-        !sequence_ffn_stage->output ||
+    if (!sequence_ffn_stage || !sequence_ffn_stage->output ||
         sequence_ffn_stage->output_width != kOutput ||
         sequence_ffn_stage->rows != kRows) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA attention sequence metadata mismatch";
       return result;
     }
-    std::vector<float> actual_sequence(expected_normalized.size(), 0.0f);
     std::vector<float> actual_sequence_ffn(expected_ffn_normalized.size(),
                                            0.0f);
-    DownloadFloats(actual_sequence, sequence_stage->output,
-                   "cudaMemcpy(attention_sequence_output)");
     DownloadFloats(actual_sequence_ffn, sequence_ffn_stage->output,
                    "cudaMemcpy(attention_sequence_ffn)");
-    if (!AlmostEqual(actual_sequence, expected_normalized, 1e-5f)) {
-      result.status = CudaSmokeStatus::Mismatch;
-      result.message = MismatchMessage("CUDA attention sequence",
-                                       actual_sequence, expected_normalized,
-                                       1e-5f);
-      return result;
-    }
     if (!AlmostEqual(actual_sequence_ffn, expected_ffn_normalized, 1e-5f)) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = MismatchMessage("CUDA attention sequence ffn",

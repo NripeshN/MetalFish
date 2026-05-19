@@ -95,6 +95,7 @@ append_remote_env METALFISH_CUDA_UCI_GO
 append_remote_env METALFISH_BT4_WEIGHTS_URL
 append_remote_env METALFISH_NNUE_BIG_URL
 append_remote_env METALFISH_NNUE_SMALL_URL
+append_remote_env METALFISH_NN_DEBUG_DUMP
 
 gcloud compute ssh "${INSTANCE}" \
   --project "${PROJECT}" \

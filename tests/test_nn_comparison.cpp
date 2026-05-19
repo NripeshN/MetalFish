@@ -12,8 +12,10 @@
 #include "nn/encoder.h"
 #include "nn/policy_map.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -134,6 +136,52 @@ bool test_mcts_evaluator_optional() {
     if (result.policy_priors.empty()) {
       std::cout << "    FAIL: empty policy output" << std::endl;
       return false;
+    }
+    if (const char *dump = std::getenv("METALFISH_NN_DEBUG_DUMP");
+        dump && dump[0] != '\0' && std::string(dump) != "0") {
+      auto move_to_string = [](Move move) {
+        std::string text;
+        text.push_back(static_cast<char>('a' + file_of(move.from_sq())));
+        text.push_back(static_cast<char>('1' + rank_of(move.from_sq())));
+        text.push_back(static_cast<char>('a' + file_of(move.to_sq())));
+        text.push_back(static_cast<char>('1' + rank_of(move.to_sq())));
+        if (move.type_of() == PROMOTION) {
+          char promotion = 'q';
+          if (move.promotion_type() == ROOK)
+            promotion = 'r';
+          else if (move.promotion_type() == BISHOP)
+            promotion = 'b';
+          else if (move.promotion_type() == KNIGHT)
+            promotion = 'n';
+          text.push_back(promotion);
+        }
+        return text;
+      };
+
+      std::vector<std::pair<Move, float>> priors = result.policy_priors;
+      std::sort(priors.begin(), priors.end(),
+                [](const auto &lhs, const auto &rhs) {
+                  return lhs.second > rhs.second;
+                });
+
+      std::cout << std::fixed << std::setprecision(6);
+      std::cout << "    DEBUG backend: " << eval.GetNetworkInfo() << std::endl;
+      std::cout << "    DEBUG value=" << result.value;
+      if (result.has_wdl) {
+        std::cout << " wdl=[" << result.wdl[0] << "," << result.wdl[1]
+                  << "," << result.wdl[2] << "]";
+      }
+      if (result.has_moves_left)
+        std::cout << " moves_left=" << result.moves_left;
+      std::cout << std::endl;
+
+      std::cout << "    DEBUG top_policy:";
+      const size_t limit = std::min<size_t>(priors.size(), 8);
+      for (size_t i = 0; i < limit; ++i) {
+        std::cout << " " << move_to_string(priors[i].first) << "="
+                  << priors[i].second;
+      }
+      std::cout << std::endl;
     }
     std::cout << "    PASS: policy_priors=" << result.policy_priors.size()
               << " value=" << result.value << std::endl;
