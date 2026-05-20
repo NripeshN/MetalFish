@@ -2098,7 +2098,8 @@ def test_game_loop_uses_long_read_timeout_tuple() -> None:
     expect("failed stream not finished", not finished)
     expect(
         "game stream uses connect/read timeout tuple",
-        calls == [
+        calls
+        == [
             {
                 "path": "/bot/game/stream/g1",
                 "stream": True,
