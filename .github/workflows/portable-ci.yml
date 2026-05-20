@@ -157,10 +157,12 @@ jobs:
             | while read -r dll; do
                 [ -n "$dll" ] && cp "$dll" portable-windows/
               done
+          rm -f metalfish-windows-x86_64-mingw-cpu.zip
+          bsdtar -a -cf metalfish-windows-x86_64-mingw-cpu.zip -C portable-windows .
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v6
         with:
           name: metalfish-windows-x86_64-mingw-cpu
-          path: portable-windows/
+          path: metalfish-windows-x86_64-mingw-cpu.zip
           if-no-files-found: error
