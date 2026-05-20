@@ -113,7 +113,8 @@ cmake -S . -B "${BUILD_DIR}" -G Ninja \
 
 cmake --build "${BUILD_DIR}" --target metalfish metalfish_tests test_nn_comparison -j"${JOBS}"
 
-"${BUILD_DIR}/metalfish_tests" | tee "${BUILD_DIR}/cuda-gpu-tests.log"
+METALFISH_CUDA_PROFILE=0 \
+  "${BUILD_DIR}/metalfish_tests" | tee "${BUILD_DIR}/cuda-gpu-tests.log"
 grep -q "CUDA runtime" "${BUILD_DIR}/cuda-gpu-tests.log"
 
 METALFISH_NN_WEIGHTS="${WEIGHTS}" \

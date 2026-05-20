@@ -188,6 +188,7 @@ void CudaNetwork::WarmupExecution() {
   CudaProfileSuppressionScope suppress_profile;
   executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
                      buffers_, workspace_, kWarmupBatchSize);
+  workspace_.Synchronize();
 }
 
 NetworkOutput CudaNetwork::Evaluate(const InputPlanes &input) {

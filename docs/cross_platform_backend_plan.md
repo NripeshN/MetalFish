@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260520-185237`, L4, 2026-05-20 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260520-192610`, L4, 2026-05-20 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -302,16 +302,20 @@ Current CUDA backend boundary:
   and retries around apt/dpkg locks and refreshes the package index before each
   install attempt so fresh cloud images do not fail the gate while unattended
   upgrades or transient mirror failures are still running. The 2026-05-20 L4
-  gate `metalfish-cuda-gate-20260520-185237` accepted the hybrid-CUDA smoke
+  gate `metalfish-cuda-gate-20260520-192610` accepted the hybrid-CUDA smoke
   with `bestmove e2e4`.
 - `METALFISH_CUDA_PROFILE=1` now runs as a separate hybrid-CUDA profiling
-  smoke after the correctness gate. The parity binary is kept unprofiled so
-  CUDA event synchronization cannot perturb the tight single-vs-batch parity
+  smoke after the correctness gate. CUDA unit tests and the parity binary are
+  kept unprofiled so CUDA event synchronization cannot perturb correctness
   checks. The optional trace-pair diagnostic uses fresh evaluator instances so
   it cannot perturb the parity loop, while `cuda-gpu-profile.log` and the
   summary still capture stage buckets for performance work. On the accepted L4
-  profile smoke, the first profiled BT4 eval was `7.360 ms`, led by
-  attention/layernorm stages at `4.218 ms`.
+  profile smoke, the first profiled BT4 eval was `7.385 ms`, led by
+  attention/layernorm stages at `4.231 ms`.
+- CUDA warmup now synchronizes its stream before the backend constructor
+  returns. That keeps cuBLAS work from one freshly-created evaluator from
+  overlapping another evaluator on a different stream and prevents first-use
+  policy drift in the BT4 batch-parity gate.
 - `tools/run_gcp_cuda_gpu_gate.sh` creates an ephemeral GCP L4 VM from a clean
   `git archive`, runs `tools/run_cuda_gpu_gate.sh` on the VM, and deletes the
   VM by default. It uses explicit `METALFISH_GCP_*` variables so the current
