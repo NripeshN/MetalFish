@@ -18,6 +18,10 @@ on:
         description: Performance movetime in milliseconds
         required: false
         default: "2000"
+      candidate_setoptions:
+        description: Optional comma-separated candidate-only UCI options, NAME=VALUE
+        required: false
+        default: ""
 
 concurrency:
   group: metalfish-hybrid-regression-${{ github.event.pull_request.number || github.ref }}
@@ -107,10 +111,20 @@ jobs:
           BENCH_REPEAT: ${{ github.event.inputs.repeat }}
           BK_MOVETIME: ${{ github.event.inputs.bk_movetime }}
           PERF_MOVETIME: ${{ github.event.inputs.perf_movetime }}
+          CANDIDATE_SETOPTIONS: ${{ github.event.inputs.candidate_setoptions }}
         run: |
           : "${BENCH_REPEAT:=3}"
           : "${BK_MOVETIME:=5000}"
           : "${PERF_MOVETIME:=2000}"
+          candidate_args=()
+          if [ -n "${CANDIDATE_SETOPTIONS:-}" ]; then
+            IFS=',' read -ra opts <<< "$CANDIDATE_SETOPTIONS"
+            for opt in "${opts[@]}"; do
+              if [ -n "$opt" ]; then
+                candidate_args+=(--candidate-setoption "$opt")
+              fi
+            done
+          fi
           mkdir -p results/hybrid_regression
           python3 tests/hybrid_regression_compare.py \
             --baseline-engine ../baseline/build/metalfish \
@@ -127,7 +141,8 @@ jobs:
             --max-bk-mean-drop 0.67 \
             --max-bk-min-drop 1 \
             --max-perf-regression 0.25 \
-            --json-out results/hybrid_regression/report.json
+            --json-out results/hybrid_regression/report.json \
+            "${candidate_args[@]}"
 
       - name: Upload regression report
         if: always()

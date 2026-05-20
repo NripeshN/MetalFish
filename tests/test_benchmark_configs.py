@@ -615,6 +615,8 @@ def main() -> int:
             "Checkout main baseline",
             "Repeated hybrid regression benchmark",
             "tests/hybrid_regression_compare.py",
+            "candidate_setoptions",
+            "--candidate-setoption",
             "--repeat \"$BENCH_REPEAT\"",
             "--min-candidate-bk-score 23",
             "--max-bk-mean-drop 0.67",

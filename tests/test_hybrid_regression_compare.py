@@ -101,12 +101,51 @@ def test_parse_args_defaults() -> None:
     expect("perf movetime", args.perf_movetime == 2000)
 
 
+def test_parse_setoption() -> None:
+    name, value = compare.parse_setoption("HybridANERootProbe=true")
+    expect("name parsed", name == "HybridANERootProbe")
+    expect("value parsed", value == "true")
+    name, value = compare.parse_setoption("Move Overhead=500")
+    expect("space name", name == "Move Overhead")
+    expect("space value", value == "500")
+
+
+def test_parse_extra_setoptions() -> None:
+    args = compare.parse_args(
+        [
+            "--baseline-engine",
+            "baseline/build/metalfish",
+            "--candidate-engine",
+            "build/metalfish",
+            "--weights",
+            "networks/BT4-1024x15x32h-swa-6147500.pb",
+            "--setoption",
+            "HybridTrace=false",
+            "--candidate-setoption",
+            "HybridANERootProbe=true",
+        ]
+    )
+    args.threads_resolved = compare.resolve_threads(args.threads)
+    args.baseline_engine = pathlib.Path(__file__)
+    args.candidate_engine = pathlib.Path(__file__)
+    args.weights = pathlib.Path(__file__)
+    compare.validate_paths(args)
+    expect("common option", args.common_options == [("HybridTrace", "false")])
+    expect(
+        "candidate options",
+        args.candidate_options
+        == [("HybridTrace", "false"), ("HybridANERootProbe", "true")],
+    )
+
+
 def main() -> int:
     test_regression_thresholds_allow_noise()
     test_regression_thresholds_catch_accuracy_drop()
     test_regression_thresholds_catch_perf_drop()
     test_select_positions_by_label()
     test_parse_args_defaults()
+    test_parse_setoption()
+    test_parse_extra_setoptions()
     print("Hybrid regression compare tests: OK")
     return 0
 

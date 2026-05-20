@@ -226,10 +226,27 @@ def engine_options(weights: pathlib.Path, threads: int, hash_mb: int) -> Dict[st
     }
 
 
+def parse_setoption(raw: str) -> Tuple[str, str]:
+    if "=" not in raw:
+        raise ValueError(f"setoption must be NAME=VALUE, got: {raw}")
+    name, value = raw.split("=", 1)
+    name = name.strip()
+    value = value.strip()
+    if not name:
+        raise ValueError(f"setoption name is empty: {raw}")
+    return name, value
+
+
 def configure_engine(
-    session: UCISession, weights: pathlib.Path, threads: int, hash_mb: int
+    session: UCISession,
+    weights: pathlib.Path,
+    threads: int,
+    hash_mb: int,
+    extra_options: Sequence[Tuple[str, str]],
 ) -> None:
     for name, value in engine_options(weights, threads, hash_mb).items():
+        session.setoption(name, value)
+    for name, value in extra_options:
         session.setoption(name, value)
     session.ready()
 
@@ -257,11 +274,12 @@ def run_engine_once(
     bk_movetime_ms: int,
     perf_movetime_ms: int,
     timeout_margin_s: float,
+    extra_options: Sequence[Tuple[str, str]],
 ) -> EngineRun:
     run = EngineRun(label=label, run_index=run_index)
     session = UCISession(engine, label, cwd, timeout_margin_s)
     try:
-        configure_engine(session, weights, threads, hash_mb)
+        configure_engine(session, weights, threads, hash_mb, extra_options)
         session.search("warmup", PERF_POSITIONS[0][1], min(1000, bk_movetime_ms))
 
         for fen, expected_san, name in bk_positions:
@@ -294,7 +312,13 @@ def run_engine_once(
     return run
 
 
-def run_repeated(args: argparse.Namespace, label: str, engine: pathlib.Path, cwd: pathlib.Path) -> List[EngineRun]:
+def run_repeated(
+    args: argparse.Namespace,
+    label: str,
+    engine: pathlib.Path,
+    cwd: pathlib.Path,
+    extra_options: Sequence[Tuple[str, str]],
+) -> List[EngineRun]:
     runs = []
     bk_positions = select_bk_positions(args.positions)
     for run_index in range(args.repeat):
@@ -311,6 +335,7 @@ def run_repeated(args: argparse.Namespace, label: str, engine: pathlib.Path, cwd
             args.bk_movetime,
             args.perf_movetime,
             args.timeout_margin,
+            extra_options,
         )
         print(
             f"  tactical {run.tactical_score}/{len(bk_positions)} "
@@ -419,6 +444,27 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-bk-min-drop", type=int, default=1)
     parser.add_argument("--min-candidate-bk-score", type=int, default=0)
     parser.add_argument("--max-perf-regression", type=float, default=0.25)
+    parser.add_argument(
+        "--setoption",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Extra UCI option applied to both baseline and candidate",
+    )
+    parser.add_argument(
+        "--baseline-setoption",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Extra UCI option applied only to the baseline engine",
+    )
+    parser.add_argument(
+        "--candidate-setoption",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Extra UCI option applied only to the candidate engine",
+    )
     parser.add_argument("--json-out", type=pathlib.Path)
     return parser.parse_args(argv)
 
@@ -431,6 +477,13 @@ def validate_paths(args: argparse.Namespace) -> None:
         raise ValueError("--repeat must be >= 1")
     if args.max_perf_regression < 0 or args.max_perf_regression >= 1:
         raise ValueError("--max-perf-regression must be in [0, 1)")
+    args.common_options = [parse_setoption(raw) for raw in args.setoption]
+    args.baseline_options = args.common_options + [
+        parse_setoption(raw) for raw in args.baseline_setoption
+    ]
+    args.candidate_options = args.common_options + [
+        parse_setoption(raw) for raw in args.candidate_setoption
+    ]
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -449,13 +502,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
 
     baseline_runs = run_repeated(
-        args, "baseline-main", args.baseline_engine.resolve(), args.baseline_cwd.resolve()
+        args,
+        "baseline-main",
+        args.baseline_engine.resolve(),
+        args.baseline_cwd.resolve(),
+        args.baseline_options,
     )
     candidate_runs = run_repeated(
         args,
         "candidate-pr",
         args.candidate_engine.resolve(),
         args.candidate_cwd.resolve(),
+        args.candidate_options,
     )
 
     baseline_summary = summarize_engine(baseline_runs)
@@ -477,6 +535,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "max_bk_min_drop": args.max_bk_min_drop,
             "min_candidate_bk_score": args.min_candidate_bk_score,
             "max_perf_regression": args.max_perf_regression,
+            "common_setoptions": args.setoption,
+            "baseline_setoptions": args.baseline_setoption,
+            "candidate_setoptions": args.candidate_setoption,
         },
         "baseline": {
             "summary": asdict(baseline_summary),
