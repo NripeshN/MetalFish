@@ -34,6 +34,11 @@ def parse_args() -> argparse.Namespace:
         help="Substring that must not appear in combined engine stdout/stderr; may be repeated",
     )
     parser.add_argument(
+        "--echo-output",
+        action="store_true",
+        help="Print the captured engine transcript instead of only the bestmove line",
+    )
+    parser.add_argument(
         "--setoption",
         action="append",
         default=[],
@@ -142,7 +147,10 @@ def main() -> int:
         line for line in reversed(uci.output) if line.startswith("bestmove ")
     )
     bestmove = best_line.split()[1]
-    print(best_line)
+    if args.echo_output:
+        print("\n".join(uci.output))
+    else:
+        print(best_line)
     if args.expect_bestmove and bestmove != args.expect_bestmove:
         print(
             f"Expected bestmove {args.expect_bestmove}, got {bestmove}",

@@ -11,6 +11,8 @@ WEIGHTS="${METALFISH_NN_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-614750
 APT_LOCK_TIMEOUT="${METALFISH_APT_LOCK_TIMEOUT:-600}"
 SUMMARY="${METALFISH_CUDA_SUMMARY:-${BUILD_DIR}/cuda-gpu-summary.md}"
 PARITY_REPORT="${METALFISH_NN_PARITY_REPORT:-${BUILD_DIR}/cuda-gpu-parity-report.md}"
+CUDA_PROFILE_REQUESTED="${METALFISH_CUDA_PROFILE:-0}"
+CUDA_PROFILE_LIMIT="${METALFISH_CUDA_PROFILE_LIMIT:-8}"
 
 export PATH="/usr/local/cuda/bin:/usr/local/cuda-12.9/bin:/usr/local/cuda-12.8/bin:/usr/local/cuda-12.4/bin:${PATH}"
 export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda-12.9/lib64:/usr/local/cuda-12.8/lib64:/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH:-}"
@@ -119,6 +121,7 @@ METALFISH_NN_WEIGHTS="${WEIGHTS}" \
   METALFISH_NN_BATCH_BENCH="${METALFISH_NN_BATCH_BENCH:-1}" \
   METALFISH_NN_BENCH_ITERS="${METALFISH_NN_BENCH_ITERS:-2}" \
   METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
+  METALFISH_CUDA_PROFILE=0 \
   "${BUILD_DIR}/test_nn_comparison" | tee "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
 grep -q "backend: CUDA transformer backend" \
   "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
@@ -165,6 +168,30 @@ python3 tools/uci_smoke.py \
   --expect-output "CUDA transformer backend" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
 
+if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; then
+  METALFISH_CUDA_PROFILE=1 \
+    METALFISH_CUDA_PROFILE_LIMIT="${CUDA_PROFILE_LIMIT}" \
+    python3 tools/uci_smoke.py \
+      --engine "${BUILD_DIR}/metalfish" \
+      --timeout "${UCI_TIMEOUT}" \
+      --setoption Threads=3 \
+      --setoption NNBackend=cuda \
+      --setoption NNWeights="${WEIGHTS}" \
+      --setoption UseMCTS=false \
+      --setoption UseHybridSearch=true \
+      --setoption HybridMCTSThreads=1 \
+      --setoption HybridABThreads=2 \
+      --setoption HybridAutoABThreadsCap=0 \
+      --setoption MCTSMaxThreads=1 \
+      --setoption MCTSMinibatchSize=1 \
+      --go "nodes 8" \
+      --echo-output \
+      --expect-output "CUDA profile report=" \
+      --expect-output "Starting Parallel Hybrid Search" \
+      --expect-output "CUDA transformer backend" \
+      | tee "${BUILD_DIR}/cuda-gpu-profile.log"
+fi
+
 {
   echo "# MetalFish CUDA GPU Gate Summary"
   echo
@@ -207,6 +234,14 @@ python3 tools/uci_smoke.py \
   echo "- auto: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
   echo "- cuda: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
   echo "- hybrid-cuda: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
+  if [[ -s "${BUILD_DIR}/cuda-gpu-profile.log" ]]; then
+    echo
+    echo "## CUDA Profile"
+    echo
+    grep -m1 "CUDA profile report=" "${BUILD_DIR}/cuda-gpu-profile.log"
+    grep -m1 "CUDA profile buckets:" "${BUILD_DIR}/cuda-gpu-profile.log"
+    grep -m1 "CUDA profile slowest:" "${BUILD_DIR}/cuda-gpu-profile.log"
+  fi
 } >"${SUMMARY}"
 
 cat "${SUMMARY}"

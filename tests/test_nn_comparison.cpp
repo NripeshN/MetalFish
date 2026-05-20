@@ -773,8 +773,12 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
                              trace_batch_size - 1);
       std::vector<std::vector<const Position *>> trace_batch(
           histories.begin(), histories.begin() + trace_batch_size);
-      auto single_target = single_eval.EvaluateWithHistory(histories[target]);
-      auto batched_targets = batch_eval.EvaluateBatchWithHistory(trace_batch);
+      MCTS::NNMCTSEvaluator trace_single_eval(weights_path);
+      MCTS::NNMCTSEvaluator trace_batch_eval(weights_path);
+      auto single_target =
+          trace_single_eval.EvaluateWithHistory(histories[target]);
+      auto batched_targets =
+          trace_batch_eval.EvaluateBatchWithHistory(trace_batch);
       if (batched_targets.size() != static_cast<size_t>(trace_batch_size)) {
         std::cout << "    FAIL: trace pair batch result count mismatch"
                   << std::endl;
