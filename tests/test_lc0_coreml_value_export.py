@@ -53,14 +53,36 @@ def test_parse_args() -> None:
             "2",
             "--iterations",
             "7",
+            "--value-head-fp32",
+            "--output-stage",
+            "body",
+            "--encoder-layers",
+            "3",
         ]
     )
     expect("weights parsed", args.weights.endswith(".pb.gz"))
     expect("compute parsed", args.compute_unit == "cpu-ne")
     expect("precision parsed", args.precision == "fp32")
     expect("benchmark parsed", args.benchmark)
+    expect("value head fp32 parsed", args.value_head_fp32)
     expect("warmup parsed", args.warmup == 2)
     expect("iterations parsed", args.iterations == 7)
+    expect("output stage parsed", args.output_stage == "body")
+    expect("encoder layers parsed", args.encoder_layers == 3)
+
+
+def test_prediction_summary() -> None:
+    fake_np = types.SimpleNamespace(
+        asarray=lambda value, dtype=None: value.astype(dtype),
+        float32="float32",
+    )
+    import numpy as real_np
+
+    output = {"x": real_np.array([[1.0, 2.0, 3.0]], dtype=real_np.float32)}
+    summary = exporter.summarize_prediction_outputs(fake_np, output)
+    expect("summary shape", summary["x"]["shape"] == [1, 3])
+    expect("summary mean", summary["x"]["mean"] == 2.0)
+    expect("summary first", summary["x"]["first8"] == [1.0, 2.0, 3.0])
 
 
 def main() -> int:
@@ -68,6 +90,7 @@ def main() -> int:
     test_compute_unit_mapping()
     test_precision_mapping()
     test_parse_args()
+    test_prediction_summary()
     print("Lc0 Core ML value exporter tests: OK")
     return 0
 

@@ -19,6 +19,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 PROTO = ROOT / "src" / "nn" / "proto" / "net.proto"
 POS_TABLE = ROOT / "src" / "nn" / "metal" / "tables" / "attention_policy_map.h"
+OUTPUT_STAGES = ("body", "value-embed", "value-hidden", "value-logits", "wdl")
 
 
 def load_coremltools() -> tuple[Any, Any, Any, Any]:
@@ -51,6 +52,19 @@ def precision_from_name(ct: Any, name: str) -> Any:
         "fp16": ct.precision.FLOAT16,
         "fp32": ct.precision.FLOAT32,
     }[name]
+
+
+def compute_precision_for_args(args: argparse.Namespace, ct: Any) -> Any:
+    if args.precision == "fp16" and getattr(args, "value_head_fp32", False):
+        from coremltools.converters.mil.mil.passes.defs.quantization import (
+            FP16ComputePrecision,
+        )
+
+        def op_selector(op: Any) -> bool:
+            return not str(getattr(op, "name", "")).startswith("value_")
+
+        return FP16ComputePrecision(op_selector=op_selector)
+    return precision_from_name(ct, args.precision)
 
 
 def percentile(values: list[float], pct: float) -> float:
@@ -142,15 +156,25 @@ def dense_weight(np: Any, layer: Any, rows: int | None = None) -> Any:
     return values.reshape(rows, values.size // rows).astype(np.float32)
 
 
-def activation_mb(mb: Any, np: Any, x: Any, name: str) -> Any:
-    if name == "mish":
+def activation_mb(mb: Any, np: Any, x: Any, activation: str, name: str | None = None) -> Any:
+    def named(op: Any, suffix: str, **kwargs: Any) -> Any:
+        if name:
+            kwargs["name"] = f"{name}_{suffix}"
+        return op(**kwargs)
+
+    if activation == "mish":
         one = mb.const(val=np.array(1.0, dtype=np.float32))
-        return mb.mul(x=x, y=mb.tanh(x=mb.log(x=mb.add(x=one, y=mb.exp(x=x)))))
-    if name == "swish":
-        return mb.mul(x=x, y=mb.sigmoid(x=x))
-    if name == "relu":
-        return mb.relu(x=x)
-    raise RuntimeError(f"unsupported activation {name}")
+        exp = named(mb.exp, "exp", x=x)
+        plus = named(mb.add, "plus", x=one, y=exp)
+        log = named(mb.log, "log", x=plus)
+        tanh = named(mb.tanh, "tanh", x=log)
+        return named(mb.mul, "mul", x=x, y=tanh)
+    if activation == "swish":
+        sigmoid = named(mb.sigmoid, "sigmoid", x=x)
+        return named(mb.mul, "mul", x=x, y=sigmoid)
+    if activation == "relu":
+        return named(mb.relu, "relu", x=x)
+    raise RuntimeError(f"unsupported activation {activation}")
 
 
 def layer_norm_mb(
@@ -176,12 +200,15 @@ def layer_norm_mb(
     )
 
 
-def linear_mb(mb: Any, x: Any, weight: Any, bias: Any) -> Any:
-    return mb.linear(
-        x=x,
-        weight=mb.const(val=weight.astype("float32")),
-        bias=mb.const(val=bias.astype("float32")),
-    )
+def linear_mb(mb: Any, x: Any, weight: Any, bias: Any, name: str | None = None) -> Any:
+    kwargs = {
+        "x": x,
+        "weight": mb.const(val=weight.astype("float32")),
+        "bias": mb.const(val=bias.astype("float32")),
+    }
+    if name:
+        kwargs["name"] = name
+    return mb.linear(**kwargs)
 
 
 def parse_pos_encoding(np: Any) -> Any:
@@ -224,6 +251,8 @@ def build_value_model(
     net: Any,
     compute_unit: Any,
     compute_precision: Any,
+    output_stage: str = "wdl",
+    encoder_layers_limit: int | None = None,
 ) -> Any:
     weights = net.weights
     layers = len(weights.encoder)
@@ -260,6 +289,11 @@ def build_value_model(
                 "ln2_b": decode_layer(np, enc.ln2_betas),
             }
         )
+
+    if output_stage not in OUTPUT_STAGES:
+        raise RuntimeError(f"unsupported output stage {output_stage}")
+    if encoder_layers_limit is not None:
+        encoders = encoders[:encoder_layers_limit]
 
     value_embed_b = decode_layer(np, weights.ip_val_b)
     value_embed_w = dense_weight(np, weights.ip_val_w, value_embed_b.size)
@@ -307,13 +341,22 @@ def build_value_model(
                 mb, np, body, ffn, enc["ln2_g"], enc["ln2_b"], alpha, 1e-6
             )
 
-        value = linear_mb(mb, body, value_embed_w, value_embed_b)
-        value = activation_mb(mb, np, value, "mish")
-        value = mb.reshape(x=value, shape=[1, 64 * value_embed_b.size])
-        value = linear_mb(mb, value, value_fc1_w, value_fc1_b)
-        value = activation_mb(mb, np, value, "mish")
-        value = linear_mb(mb, value, value_fc2_w, value_fc2_b)
-        return mb.softmax(x=value, axis=-1)
+        if output_stage == "body":
+            return body
+
+        value = linear_mb(mb, body, value_embed_w, value_embed_b, name="value_embed_linear")
+        value = activation_mb(mb, np, value, "mish", name="value_embed_mish")
+        if output_stage == "value-embed":
+            return value
+        value = mb.reshape(x=value, shape=[1, 64 * value_embed_b.size], name="value_flatten")
+        value = linear_mb(mb, value, value_fc1_w, value_fc1_b, name="value_fc1_linear")
+        value = activation_mb(mb, np, value, "mish", name="value_fc1_mish")
+        if output_stage == "value-hidden":
+            return value
+        value = linear_mb(mb, value, value_fc2_w, value_fc2_b, name="value_fc2_linear")
+        if output_stage == "value-logits":
+            return value
+        return mb.softmax(x=value, axis=-1, name="value_wdl")
 
     return ct.convert(
         program,
@@ -342,7 +385,24 @@ def benchmark_predict(np: Any, model: Any, warmup: int, iterations: int) -> dict
         "min_ms": min(latencies),
         "max_ms": max(latencies),
         "output": {k: v.tolist() for k, v in (last or {}).items()},
+        "output_summary": summarize_prediction_outputs(np, last or {}),
     }
+
+
+def summarize_prediction_outputs(np: Any, outputs: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for name, value in outputs.items():
+        array = np.asarray(value, dtype=np.float32)
+        flat = array.reshape(-1)
+        summary[name] = {
+            "shape": list(array.shape),
+            "min": float(array.min()) if flat.size else 0.0,
+            "max": float(array.max()) if flat.size else 0.0,
+            "mean": float(array.mean()) if flat.size else 0.0,
+            "std": float(array.std()) if flat.size else 0.0,
+            "first8": flat[:8].tolist(),
+        }
+    return summary
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -352,9 +412,28 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if info["encoder_layers"] < 1 or info["ip_emb_channels"] != 256:
         raise RuntimeError("this experimental exporter currently expects the T1-256 attention net")
     compute_unit = compute_unit_from_name(ct, args.compute_unit)
-    compute_precision = precision_from_name(ct, args.precision)
+    compute_precision = compute_precision_for_args(args, ct)
+    output_stage = getattr(args, "output_stage", "wdl")
+    value_head_fp32 = bool(getattr(args, "value_head_fp32", False))
+    encoder_layers_arg = getattr(args, "encoder_layers", -1)
+    encoder_layers_limit = None if encoder_layers_arg < 0 else encoder_layers_arg
+    if encoder_layers_limit is not None and encoder_layers_limit > info["encoder_layers"]:
+        raise RuntimeError(
+            f"encoder layer probe {encoder_layers_limit} exceeds "
+            f"network depth {info['encoder_layers']}"
+        )
     start = time.perf_counter()
-    model = build_value_model(np, ct, mb, types, net, compute_unit, compute_precision)
+    model = build_value_model(
+        np,
+        ct,
+        mb,
+        types,
+        net,
+        compute_unit,
+        compute_precision,
+        output_stage,
+        encoder_layers_limit,
+    )
     build_ms = (time.perf_counter() - start) * 1000.0
     package_path = ""
     if args.save_model:
@@ -364,6 +443,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "weights": str(Path(args.weights).resolve()),
         "compute_unit": args.compute_unit,
         "precision": args.precision,
+        "value_head_fp32": value_head_fp32,
+        "output_stage": output_stage,
+        "encoder_layers": encoder_layers_limit,
         "build_ms": build_ms,
         "model_package": package_path,
         "network": info,
@@ -384,7 +466,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="cpu-ne",
     )
     parser.add_argument("--precision", choices=["fp16", "fp32"], default="fp16")
+    parser.add_argument(
+        "--value-head-fp32",
+        action="store_true",
+        help="keep the WDL value head in fp32 while using fp16 elsewhere",
+    )
     parser.add_argument("--save-model", default="")
+    parser.add_argument(
+        "--output-stage",
+        choices=OUTPUT_STAGES,
+        default="wdl",
+        help="experimental probe output to return instead of only final WDL",
+    )
+    parser.add_argument(
+        "--encoder-layers",
+        type=int,
+        default=-1,
+        help="limit encoder layers for probe models; -1 uses the full net",
+    )
     parser.add_argument("--benchmark", action="store_true")
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--iterations", type=int, default=20)
@@ -406,6 +505,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  Weights:      {result['weights']}")
         print(f"  Compute unit: {result['compute_unit']}")
         print(f"  Precision:    {result['precision']}")
+        if result["value_head_fp32"]:
+            print("  Mixed:       value head fp32")
+        print(f"  Output:       {result['output_stage']}")
+        if result["encoder_layers"] is not None:
+            print(f"  Encoders:     {result['encoder_layers']}")
         print(f"  Build time:   {result['build_ms']:.1f} ms")
         print(f"  Network:      {result['network']}")
         if result["model_package"]:
