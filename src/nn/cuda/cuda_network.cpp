@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -32,6 +33,7 @@ namespace Cuda {
 namespace {
 
 constexpr int kDefaultMaxBatchSize = 256;
+constexpr int kMaxStableExecutionBatchSize = 16;
 
 bool IsFinitePolicy(const std::array<float, kPolicyOutputs> &policy) {
   for (float value : policy) {
@@ -195,6 +197,20 @@ NetworkOutput CudaNetwork::Evaluate(const InputPlanes &input) {
 
 std::vector<NetworkOutput>
 CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
+  if (inputs.size() > static_cast<size_t>(kMaxStableExecutionBatchSize)) {
+    std::vector<NetworkOutput> outputs;
+    outputs.reserve(inputs.size());
+    for (size_t offset = 0; offset < inputs.size();) {
+      const size_t chunk_size =
+          std::min<size_t>(kMaxStableExecutionBatchSize, inputs.size() - offset);
+      auto chunk = RunBatch(std::span<const InputPlanes>(
+          inputs.data() + offset, chunk_size));
+      outputs.insert(outputs.end(), std::make_move_iterator(chunk.begin()),
+                     std::make_move_iterator(chunk.end()));
+      offset += chunk_size;
+    }
+    return outputs;
+  }
   return RunBatch(inputs);
 }
 
