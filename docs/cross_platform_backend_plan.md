@@ -87,8 +87,8 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, smolgen bias-activation fusion gate |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, workspace reuse gate |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
 
@@ -207,6 +207,11 @@ Current CUDA backend boundary:
   smolgen dense layers, preserving the checked dense and activation tensors. The
   2026-05-20 T4 gate kept CUDA smoke, fixed BT4 outputs, batch parity, and UCI
   smoke green; steady profiled BT4 evals were `17.57-17.60 ms`.
+- `CudaNetwork` now keeps its execution workspace across batch-size changes and
+  lets named CUDA scratch buffers grow on demand. This avoids `cudaFree` /
+  `cudaMalloc` churn when MCTS alternates between tactical low-latency batches
+  and fuller queued batches. The 2026-05-20 T4 gate kept CUDA smoke, fixed BT4
+  outputs, batch parity, and UCI smoke green.
 - A CUDA Q/K/V bias fusion attempt was rejected on the 2026-05-20 T4 gate after
   fixed-output drift in the castling-rights reference case, and was reverted.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with

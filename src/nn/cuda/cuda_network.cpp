@@ -213,8 +213,7 @@ CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
 
   auto run_once = [&]() {
     const bool batch_size_changed = workspace_batch_size_ != batch_size;
-    if (workspace_batch_size_ != batch_size) {
-      workspace_.Release();
+    if (batch_size_changed) {
       workspace_batch_size_ = batch_size;
     }
     cudaStream_t stream = workspace_.Stream();
