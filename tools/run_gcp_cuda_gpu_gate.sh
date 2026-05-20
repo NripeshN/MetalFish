@@ -119,6 +119,7 @@ collect_remote_artifacts() {
     cuda-gpu-summary.md \
     cuda-gpu-tests.log \
     cuda-gpu-nn-comparison.log \
+    cuda-gpu-parity-report.md \
     cuda-gpu-uci-auto-smoke.log \
     cuda-gpu-uci-smoke.log; do
     if gcloud compute scp \

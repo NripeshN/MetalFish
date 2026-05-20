@@ -10,6 +10,7 @@ UCI_TIMEOUT="${METALFISH_CUDA_UCI_TIMEOUT:-180}"
 WEIGHTS="${METALFISH_NN_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-6147500.pb}"
 APT_LOCK_TIMEOUT="${METALFISH_APT_LOCK_TIMEOUT:-600}"
 SUMMARY="${METALFISH_CUDA_SUMMARY:-${BUILD_DIR}/cuda-gpu-summary.md}"
+PARITY_REPORT="${METALFISH_NN_PARITY_REPORT:-${BUILD_DIR}/cuda-gpu-parity-report.md}"
 
 export PATH="/usr/local/cuda/bin:/usr/local/cuda-12.9/bin:/usr/local/cuda-12.8/bin:/usr/local/cuda-12.4/bin:${PATH}"
 export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda-12.9/lib64:/usr/local/cuda-12.8/lib64:/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH:-}"
@@ -114,6 +115,7 @@ cmake --build "${BUILD_DIR}" --target metalfish metalfish_tests test_nn_comparis
 grep -q "CUDA runtime" "${BUILD_DIR}/cuda-gpu-tests.log"
 
 METALFISH_NN_WEIGHTS="${WEIGHTS}" \
+  METALFISH_NN_PARITY_REPORT="${PARITY_REPORT}" \
   METALFISH_NN_BATCH_BENCH="${METALFISH_NN_BATCH_BENCH:-1}" \
   METALFISH_NN_BENCH_ITERS="${METALFISH_NN_BENCH_ITERS:-2}" \
   METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
@@ -153,6 +155,7 @@ python3 tools/uci_smoke.py \
   echo "- CUDA architectures: ${CUDA_ARCHS}"
   echo "- Build directory: ${BUILD_DIR}"
   echo "- Weights: ${WEIGHTS}"
+  echo "- Parity report: ${PARITY_REPORT}"
   echo "- Explicit CUDA UCI go: ${UCI_GO}"
   echo
   echo "## Device"
@@ -168,6 +171,18 @@ python3 tools/uci_smoke.py \
   echo "## Batch Timings"
   echo
   grep -m1 "batches:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+  echo
+  echo "## Parity Report"
+  echo
+  if [[ -s "${PARITY_REPORT}" ]]; then
+    grep -m1 "^- Backend:" "${PARITY_REPORT}"
+    fixed_rows=$(awk '/^## Fixed BT4 Reference/{section=1;next} /^## Batch Parity/{section=0} section && /^\| [[:lower:]][^|]* \|/{count++} END{print count + 0}' "${PARITY_REPORT}")
+    batch_rows=$(awk '/^## Batch Parity/{section=1;next} section && /^\| [0-9]+ \|/{count++} END{print count + 0}' "${PARITY_REPORT}")
+    echo "- Fixed references: ${fixed_rows}"
+    echo "- Batch rows: ${batch_rows}"
+  else
+    echo "- missing"
+  fi
   echo
   echo "## UCI Smokes"
   echo

@@ -563,10 +563,13 @@ def main() -> int:
         PROJ / "tools/run_cuda_gpu_gate.sh",
         [
             "METALFISH_CUDA_SUMMARY",
+            "METALFISH_NN_PARITY_REPORT",
             "MetalFish CUDA GPU Gate Summary",
             "cuda-gpu-nn-comparison.log",
+            "cuda-gpu-parity-report.md",
             "cuda-gpu-uci-auto-smoke.log",
             "cuda-gpu-uci-smoke.log",
+            "Parity Report",
             "Batch Timings",
             "UCI Smokes",
         ],
@@ -581,6 +584,7 @@ def main() -> int:
             "cuda-gpu-summary.md",
             "cuda-gpu-tests.log",
             "cuda-gpu-nn-comparison.log",
+            "cuda-gpu-parity-report.md",
             "REMOTE_STATUS",
         ],
     )

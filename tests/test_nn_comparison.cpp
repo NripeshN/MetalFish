@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -59,6 +60,42 @@ sorted_priors(const MCTS::EvaluationResult &result) {
   return priors;
 }
 
+std::string format_float(double value, int precision = 6) {
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(precision) << value;
+  return out.str();
+}
+
+std::string single_line(std::string text) {
+  std::string result;
+  result.reserve(text.size());
+  for (char ch : text) {
+    if (ch == '\n' || ch == '\r') {
+      if (!result.empty() && result.back() != ' ')
+        result += "; ";
+    } else if (ch == '|') {
+      result += ';';
+    } else {
+      result.push_back(ch);
+    }
+  }
+  return result;
+}
+
+std::string result_top_policy_string(const MCTS::EvaluationResult &result,
+                                     size_t limit) {
+  const auto priors = sorted_priors(result);
+  std::ostringstream out;
+  const size_t count = std::min(limit, priors.size());
+  for (size_t i = 0; i < count; ++i) {
+    if (i != 0)
+      out << ", ";
+    out << move_to_string(priors[i].first) << "="
+        << format_float(priors[i].second);
+  }
+  return out.str();
+}
+
 bool should_dump_nn_debug() {
   const char *dump = std::getenv("METALFISH_NN_DEBUG_DUMP");
   return dump && dump[0] != '\0' && std::string(dump) != "0";
@@ -80,6 +117,73 @@ int env_int_or_default(const char *name, int fallback, int min_value,
   } catch (...) {
     return fallback;
   }
+}
+
+struct ParityReport {
+  std::string output_path;
+  std::string weights_path;
+  std::string backend_info;
+  std::ostringstream fixed_rows;
+  std::ostringstream batch_rows;
+  std::string fixed_note;
+  std::string batch_note;
+  bool has_fixed_rows = false;
+  bool has_batch_rows = false;
+};
+
+std::unique_ptr<ParityReport> create_parity_report() {
+  const char *path = std::getenv("METALFISH_NN_PARITY_REPORT");
+  if (!path || path[0] == '\0')
+    return nullptr;
+
+  auto report = std::make_unique<ParityReport>();
+  report->output_path = path;
+  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
+  report->weights_path = weights ? weights : "";
+  return report;
+}
+
+bool write_parity_report(const ParityReport &report) {
+  if (report.output_path.empty())
+    return true;
+
+  std::ofstream out(report.output_path);
+  if (!out) {
+    std::cout << "  FAIL: could not write parity report: "
+              << report.output_path << std::endl;
+    return false;
+  }
+
+  out << "# MetalFish NN Parity Report\n\n";
+  out << "- Weights: "
+      << (report.weights_path.empty() ? "not set" : report.weights_path)
+      << "\n";
+  out << "- Backend: "
+      << (report.backend_info.empty() ? "not resolved"
+                                      : single_line(report.backend_info))
+      << "\n\n";
+
+  out << "## Fixed BT4 Reference\n\n";
+  if (!report.fixed_note.empty())
+    out << report.fixed_note << "\n\n";
+  if (report.has_fixed_rows) {
+    out << "| Case | Value actual/expected/delta | Max WDL delta | Moves-left actual/expected/delta | Max top-policy delta | Actual top policy |\n";
+    out << "| --- | ---: | ---: | ---: | ---: | --- |\n";
+    out << report.fixed_rows.str();
+    out << "\n";
+  }
+
+  out << "## Batch Parity\n\n";
+  if (!report.batch_note.empty())
+    out << report.batch_note << "\n\n";
+  if (report.has_batch_rows) {
+    out << "| Batch | Entries | Max value delta | Max WDL delta | Max moves-left delta | Max policy delta | Worst field |\n";
+    out << "| ---: | ---: | ---: | ---: | ---: | ---: | --- |\n";
+    out << report.batch_rows.str();
+    out << "\n";
+  }
+
+  return true;
 }
 
 bool test_encoder_policy_roundtrip() {
@@ -244,10 +348,12 @@ struct ReferenceTolerances {
   float policy = 6e-2f;
 };
 
-bool test_bt4_reference_outputs_optional() {
+bool test_bt4_reference_outputs_optional(ParityReport *report) {
   std::cout << "  BT4 fixed-position reference outputs..." << std::endl;
   const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
   if (!weights_path) {
+    if (report)
+      report->fixed_note = "Skipped because `METALFISH_NN_WEIGHTS` is not set.";
     std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
     return true;
   }
@@ -345,13 +451,17 @@ bool test_bt4_reference_outputs_optional() {
                   << " expected=" << test_case.legal_moves << std::endl;
         return false;
       }
+      const float value_delta = std::fabs(result.value - test_case.value);
       if (!close_enough(result.value, test_case.value, tolerances.value)) {
         std::cout << "    FAIL: " << test_case.name
                   << " value drift actual=" << result.value
                   << " expected=" << test_case.value << std::endl;
         return false;
       }
+      float max_wdl_delta = 0.0f;
       for (size_t i = 0; i < test_case.wdl.size(); ++i) {
+        max_wdl_delta =
+            std::max(max_wdl_delta, std::fabs(result.wdl[i] - test_case.wdl[i]));
         if (!close_enough(result.wdl[i], test_case.wdl[i], tolerances.wdl)) {
           std::cout << "    FAIL: " << test_case.name << " WDL[" << i
                     << "] drift actual=" << result.wdl[i]
@@ -359,6 +469,8 @@ bool test_bt4_reference_outputs_optional() {
           return false;
         }
       }
+      const float moves_left_delta =
+          std::fabs(result.moves_left - test_case.moves_left);
       if (!close_enough(result.moves_left, test_case.moves_left,
                         tolerances.moves_left)) {
         std::cout << "    FAIL: " << test_case.name
@@ -366,6 +478,7 @@ bool test_bt4_reference_outputs_optional() {
                   << " expected=" << test_case.moves_left << std::endl;
         return false;
       }
+      float max_top_policy_delta = 0.0f;
       for (size_t i = 0; i < test_case.top_policy.size(); ++i) {
         const auto actual_move = move_to_string(priors[i].first);
         const auto &[expected_move, expected_logit] = test_case.top_policy[i];
@@ -375,6 +488,9 @@ bool test_bt4_reference_outputs_optional() {
                     << " expected=" << expected_move << std::endl;
           return false;
         }
+        max_top_policy_delta =
+            std::max(max_top_policy_delta,
+                     std::fabs(priors[i].second - expected_logit));
         if (!close_enough(priors[i].second, expected_logit,
                           tolerances.policy)) {
           std::cout << "    FAIL: " << test_case.name << " top policy " << i
@@ -382,6 +498,22 @@ bool test_bt4_reference_outputs_optional() {
                     << " expected=" << expected_logit << std::endl;
           return false;
         }
+      }
+      if (report) {
+        report->backend_info = network_info;
+        report->has_fixed_rows = true;
+        report->fixed_rows
+            << "| " << test_case.name << " | "
+            << format_float(result.value) << " / "
+            << format_float(test_case.value) << " / "
+            << format_float(value_delta) << " | "
+            << format_float(max_wdl_delta) << " | "
+            << format_float(result.moves_left) << " / "
+            << format_float(test_case.moves_left) << " / "
+            << format_float(moves_left_delta) << " | "
+            << format_float(max_top_policy_delta) << " | "
+            << result_top_policy_string(result, test_case.top_policy.size())
+            << " |\n";
       }
       if (should_dump_nn_debug()) {
         std::cout << std::fixed << std::setprecision(6);
@@ -413,6 +545,89 @@ struct EvalTolerances {
   float moves_left = 5e-2f;
   float policy = 5e-3f;
 };
+
+struct EvalDiffMetrics {
+  float value_delta = 0.0f;
+  float wdl_delta = 0.0f;
+  float moves_left_delta = 0.0f;
+  float policy_delta = 0.0f;
+  std::string worst_field = "none";
+};
+
+EvalDiffMetrics measure_eval_result(const MCTS::EvaluationResult &single,
+                                    const MCTS::EvaluationResult &batched,
+                                    const std::string &label) {
+  EvalDiffMetrics metrics;
+  auto update_worst = [&](float delta, const std::string &field) {
+    const float current_max =
+        std::max({metrics.value_delta, metrics.wdl_delta,
+                  metrics.moves_left_delta, metrics.policy_delta});
+    if (delta >= current_max)
+      metrics.worst_field = label + " " + field;
+  };
+
+  metrics.value_delta = std::fabs(single.value - batched.value);
+  update_worst(metrics.value_delta, "value");
+
+  if (single.has_wdl && batched.has_wdl) {
+    for (int i = 0; i < 3; ++i) {
+      const float delta = std::fabs(single.wdl[i] - batched.wdl[i]);
+      if (delta > metrics.wdl_delta) {
+        metrics.wdl_delta = delta;
+        update_worst(delta, "wdl" + std::to_string(i));
+      }
+    }
+  }
+
+  if (single.has_moves_left && batched.has_moves_left) {
+    metrics.moves_left_delta =
+        std::fabs(single.moves_left - batched.moves_left);
+    update_worst(metrics.moves_left_delta, "moves_left");
+  }
+
+  if (single.policy_priors.size() != batched.policy_priors.size()) {
+    metrics.policy_delta = std::numeric_limits<float>::infinity();
+    metrics.worst_field = label + " policy_size";
+    return metrics;
+  }
+
+  for (size_t i = 0; i < single.policy_priors.size(); ++i) {
+    if (single.policy_priors[i].first != batched.policy_priors[i].first) {
+      metrics.policy_delta = std::numeric_limits<float>::infinity();
+      metrics.worst_field = label + " policy_move";
+      return metrics;
+    }
+    const float delta = std::fabs(single.policy_priors[i].second -
+                                  batched.policy_priors[i].second);
+    if (delta > metrics.policy_delta) {
+      metrics.policy_delta = delta;
+      metrics.worst_field = label + " policy " +
+                            move_to_string(single.policy_priors[i].first);
+    }
+  }
+
+  return metrics;
+}
+
+void merge_eval_metrics(EvalDiffMetrics &target, const EvalDiffMetrics &source) {
+  if (source.value_delta > target.value_delta)
+    target.value_delta = source.value_delta;
+  if (source.wdl_delta > target.wdl_delta)
+    target.wdl_delta = source.wdl_delta;
+  if (source.moves_left_delta > target.moves_left_delta)
+    target.moves_left_delta = source.moves_left_delta;
+  if (source.policy_delta > target.policy_delta)
+    target.policy_delta = source.policy_delta;
+
+  const float target_max =
+      std::max({target.value_delta, target.wdl_delta, target.moves_left_delta,
+                target.policy_delta});
+  const float source_max =
+      std::max({source.value_delta, source.wdl_delta, source.moves_left_delta,
+                source.policy_delta});
+  if (source_max >= target_max && !source.worst_field.empty())
+    target.worst_field = source.worst_field;
+}
 
 bool compare_eval_result(const MCTS::EvaluationResult &single,
                          const MCTS::EvaluationResult &batched,
@@ -492,10 +707,12 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
   return true;
 }
 
-bool test_mcts_evaluator_batch_parity_optional() {
+bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
   std::cout << "  MCTS evaluator batch parity..." << std::endl;
   const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
   if (!weights_path) {
+    if (report)
+      report->batch_note = "Skipped because `METALFISH_NN_WEIGHTS` is not set.";
     std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
     return true;
   }
@@ -544,6 +761,8 @@ bool test_mcts_evaluator_batch_parity_optional() {
 
     EvalTolerances tolerances;
     const std::string network_info = single_eval.GetNetworkInfo();
+    if (report && report->backend_info.empty())
+      report->backend_info = network_info;
     if (network_info.find("CUDA transformer backend") != std::string::npos) {
       tolerances.value = 2.5e-1f;
       tolerances.moves_left = 5.0f;
@@ -562,14 +781,28 @@ bool test_mcts_evaluator_batch_parity_optional() {
         return false;
       }
 
+      EvalDiffMetrics batch_max;
       for (size_t i = 0; i < batch_size; ++i) {
         std::ostringstream label;
         label << "batch " << batch_size << " entry " << i;
         if (batch_size == histories.size())
           label << " line " << (i % lines.size());
+        merge_eval_metrics(batch_max,
+                           measure_eval_result(singles[i], batched[i],
+                                               label.str()));
         if (!compare_eval_result(singles[i], batched[i], label.str(),
                                  tolerances))
           return false;
+      }
+      if (report) {
+        report->has_batch_rows = true;
+        report->batch_rows << "| " << batch_size << " | " << batch_size
+                           << " | " << format_float(batch_max.value_delta)
+                           << " | " << format_float(batch_max.wdl_delta)
+                           << " | "
+                           << format_float(batch_max.moves_left_delta)
+                           << " | " << format_float(batch_max.policy_delta)
+                           << " | " << batch_max.worst_field << " |\n";
       }
     }
 
@@ -682,13 +915,16 @@ int main() {
   Bitboards::init();
   Position::init();
   NN::InitPolicyTables();
+  auto parity_report = create_parity_report();
 
   std::cout << "=== NN Comparison Smoke ===" << std::endl;
   const bool ok1 = test_encoder_policy_roundtrip();
   const bool ok2 = test_encoder_repetition_plane();
   const bool ok3 = test_mcts_evaluator_optional();
-  const bool ok4 = test_bt4_reference_outputs_optional();
-  const bool ok5 = test_mcts_evaluator_batch_parity_optional();
+  const bool ok4 = test_bt4_reference_outputs_optional(parity_report.get());
+  const bool ok5 = test_mcts_evaluator_batch_parity_optional(parity_report.get());
   const bool ok6 = benchmark_nn_batch_optional();
-  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6) ? 0 : 1;
+  const bool ok7 =
+      !parity_report || write_parity_report(*parity_report);
+  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7) ? 0 : 1;
 }

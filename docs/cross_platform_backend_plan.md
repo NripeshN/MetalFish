@@ -251,11 +251,14 @@ Current CUDA backend boundary:
   The current portable packages are CPU AB plus diagnostic stub-MCTS builds;
   they do not imply CUDA or DirectML strength support.
 - The CUDA GPU gate now emits `cuda-gpu-summary.md` with the selected NVIDIA
-  device, resolved backend string, batch timings, and UCI bestmoves. The
-  accepted 2026-05-20 T4 summary was device `Tesla T4 sm_75`, `NNBackend=auto`
-  resolved to the CUDA transformer backend, and timings were `b1=16.881ms`,
-  `b2=25.545ms`, `b4=23.217ms`, `b8=43.702ms`, `b16=82.698ms`,
-  `b32=157.486ms` (`4.9214ms/eval` at batch 32).
+  device, resolved backend string, batch timings, UCI bestmoves, and a pointer
+  to `cuda-gpu-parity-report.md`. The parity report records fixed BT4
+  reference deltas plus single-vs-batch drift across the expanded batch corpus,
+  so remote CUDA runs preserve the evidence needed to investigate silent
+  backend drift. The accepted 2026-05-20 L4 summary was device `NVIDIA L4 sm_89`,
+  `NNBackend=auto` resolved to the CUDA transformer backend, and timings were
+  `b1=6.556ms`, `b2=8.338ms`, `b4=12.706ms`, `b8=22.099ms`,
+  `b16=36.951ms`, `b32=85.319ms` (`2.6662ms/eval` at batch 32).
 - The CUDA attention smoke keeps strict `1e-5` checks for individual Q/K/V,
   smolgen, score, softmax, context, projection, residual, and layernorm
   tensors. The attention-only sequence-level check now uses a `5e-3`
@@ -282,13 +285,13 @@ Current CUDA backend boundary:
   local gcloud project cannot accidentally steer the CUDA gate. The default
   zone list covers central, east, west, and northamerica L4 zones to avoid
   treating temporary stockouts as engine failures. By default it collects
-  `cuda-gpu-summary.md` and CUDA gate logs into
+  `cuda-gpu-summary.md`, `cuda-gpu-parity-report.md`, and CUDA gate logs into
   `results/cuda_gpu_gate/<instance>/` before deleting the VM; set
   `METALFISH_GCP_GCS_PREFIX=gs://...` to also upload those artifacts to Cloud
   Storage, or `METALFISH_GCP_COLLECT_ARTIFACTS=0` to disable collection. The
-  2026-05-20 T4 artifact-collection gate copied five files locally: summary,
-  CUDA unit-test log, NN comparison log, auto-backend UCI smoke log, and
-  explicit-CUDA UCI smoke log.
+  2026-05-20 L4 artifact-collection gate copied six files locally: summary,
+  parity report, CUDA unit-test log, NN comparison log, auto-backend UCI smoke
+  log, and explicit-CUDA UCI smoke log.
 - `CreatePlanSmokeCudaExecutor()` remains available for narrow executor
   diagnostics and can run a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without
