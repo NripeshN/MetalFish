@@ -121,7 +121,10 @@ private:
 class Backend {
 public:
   explicit Backend(const std::string &weights_path,
-                   size_t cache_entries = NNCache::kDefaultEntries);
+                   size_t cache_entries = NNCache::kDefaultEntries,
+                   const std::string &backend = "auto",
+                   const std::string &coreml_model_path = "",
+                   const std::string &coreml_compute_units = "cpu-ne");
 
   std::unique_ptr<BackendComputation> CreateComputation();
   NNCache &Cache() { return cache_; }

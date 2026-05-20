@@ -884,6 +884,11 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   MCTS::SearchParams config;
   config.nn_weights_path = nn_weights;
   config.num_threads = num_threads;
+  config.nn_backend = std::string(engine.get_options()["NNBackend"]);
+  config.coreml_model_path =
+      std::string(engine.get_options()["NNCoreMLModelPath"]);
+  config.coreml_compute_units =
+      std::string(engine.get_options()["NNCoreMLComputeUnits"]);
 
   config.cpuct = get_float_option(engine, "MCTSCPuct", config.cpuct);
   config.cpuct_at_root =
@@ -1279,7 +1284,9 @@ static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
 static std::string make_mcts_cache_key(const std::string &nn_weights,
                                        const MCTS::SearchParams &config) {
   std::ostringstream key;
-  key << nn_weights << "|" << config.num_threads << "|" << config.cpuct << "|"
+  key << nn_weights << "|" << config.nn_backend << "|"
+      << config.coreml_model_path << "|" << config.coreml_compute_units << "|"
+      << config.num_threads << "|" << config.cpuct << "|"
       << config.cpuct_at_root << "|" << config.cpuct_base << "|"
       << config.cpuct_factor << "|" << config.cpuct_base_at_root << "|"
       << config.cpuct_factor_at_root << "|" << config.fpu_absolute << "|"

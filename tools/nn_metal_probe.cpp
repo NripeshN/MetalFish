@@ -39,6 +39,8 @@ namespace {
 struct Options {
   std::string weights;
   std::string backend = "metal";
+  std::string coreml_model;
+  std::string coreml_compute_units = "cpu-ne";
   std::string fen =
       "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   int top = 8;
@@ -109,6 +111,8 @@ std::string MoveString(Move move) {
 void PrintUsage(const char *argv0) {
   std::cerr << "Usage: " << argv0
             << " --weights <file.pb[.gz]> [--backend metal|auto]"
+               " [--coreml-model model.mlpackage]"
+               " [--coreml-compute-units cpu|cpu-gpu|cpu-ne|all]"
                " [--fen <fen>] [--top n] [--batch-size n] [--warmup n]"
                " [--iterations n] [--full-input] [--full-policy]"
                " [--ready-file path] [--start-file path]\n";
@@ -128,6 +132,10 @@ Options ParseArgs(int argc, char **argv) {
       options.weights = require_value("--weights");
     } else if (arg == "--backend") {
       options.backend = require_value("--backend");
+    } else if (arg == "--coreml-model") {
+      options.coreml_model = require_value("--coreml-model");
+    } else if (arg == "--coreml-compute-units") {
+      options.coreml_compute_units = require_value("--coreml-compute-units");
     } else if (arg == "--fen") {
       options.fen = require_value("--fen");
     } else if (arg == "--top") {
@@ -166,6 +174,8 @@ Options ParseArgs(int argc, char **argv) {
     throw std::runtime_error("--iterations must be positive");
   if (options.backend.empty())
     throw std::runtime_error("--backend must be non-empty");
+  if (options.backend == "coreml" && options.coreml_model.empty())
+    throw std::runtime_error("--coreml-model is required for backend coreml");
   return options;
 }
 
@@ -258,7 +268,8 @@ void RunProbe(const Options &options) {
       input_format, history, NN::kMoveHistory, NN::FillEmptyHistory::FEN_ONLY,
       &transform);
 
-  auto network = NN::CreateNetwork(weights, options.backend);
+  auto network = NN::CreateNetwork(weights, options.backend, options.coreml_model,
+                                   options.coreml_compute_units);
   const std::vector<NN::InputPlanes> batch_inputs(options.batch_size, planes);
   for (int i = 0; i < options.warmup; ++i)
     (void)network->EvaluateBatch(batch_inputs);
