@@ -17,6 +17,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <cstdint>
 #include <iterator>
 #include <memory>
@@ -34,6 +35,13 @@ namespace {
 
 constexpr int kDefaultMaxBatchSize = 256;
 constexpr int kMaxStableExecutionBatchSize = 16;
+
+bool EnvFlagEnabled(const char *name) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return false;
+  return !(value[0] == '0' && value[1] == '\0');
+}
 
 bool IsFinitePolicy(const std::array<float, kPolicyOutputs> &policy) {
   for (float value : policy) {
@@ -234,14 +242,24 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
   std::vector<float> input_values;
   PackInputPlaneBatchHostRaw(input_plane_ptrs, input_masks, input_values);
 
+  const bool force_full_buffer_clear =
+      EnvFlagEnabled("METALFISH_CUDA_FULL_BUFFER_CLEAR");
+  const bool release_workspace_each_run =
+      EnvFlagEnabled("METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN");
+
   auto run_once = [&]() {
+    if (release_workspace_each_run) {
+      workspace_.Release();
+      workspace_batch_size_ = 0;
+    }
+
     const bool batch_size_changed = workspace_batch_size_ != batch_size;
     if (batch_size_changed) {
       workspace_.Release();
       workspace_batch_size_ = batch_size;
     }
     cudaStream_t stream = workspace_.Stream();
-    if (batch_size_changed)
+    if (batch_size_changed || force_full_buffer_clear)
       buffers_.ClearAll(stream);
     buffers_.UploadPackedInputs(input_masks, input_values, batch_size, stream);
     buffers_.ClearOutputs(batch_size, stream);
