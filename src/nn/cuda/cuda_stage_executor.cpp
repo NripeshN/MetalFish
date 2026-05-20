@@ -857,10 +857,11 @@ CudaDenseStageOutput ExecuteFeedForwardStage(
 
   cudaStream_t stream = workspace.Stream();
   LaunchDenseAffineKernel(input, tensors.dense1_weight.data,
-                          tensors.dense1_bias.data, output.dense, rows,
+                          nullptr, output.dense, rows,
                           tensors.input_width, tensors.hidden_width, stream);
-  LaunchActivationKernel(
-      output.dense, output.activation, static_cast<int>(hidden_entries),
+  LaunchBiasActivationKernel(
+      output.dense, tensors.dense1_bias.data, output.activation, rows,
+      tensors.hidden_width,
       ActivationFromString(execution_plan.format.activations.ffn_activation),
       stream);
   LaunchDenseAffineKernel(output.activation, tensors.dense2_weight.data,

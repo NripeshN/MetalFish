@@ -239,6 +239,17 @@ __global__ void ActivationKernel(const float *input, float *output,
   output[index] = ApplyActivationValue(input[index], kind);
 }
 
+__global__ void BiasActivationKernel(float *input, const float *bias,
+                                     float *output, int width, int total,
+                                     CudaActivationKind kind) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+  const float value = input[index] + bias[index % width];
+  input[index] = value;
+  output[index] = ApplyActivationValue(value, kind);
+}
+
 __global__ void GateKernel(const float *input, const float *weights,
                            float *output, int width, int total,
                            int gate_rows, CudaGateKind kind) {
@@ -602,6 +613,33 @@ void LaunchActivationKernel(const float *input, float *output, int elements,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("ActivationKernel synchronize", status));
+}
+
+void LaunchBiasActivationKernel(float *input, const float *bias, float *output,
+                                int rows, int width, CudaActivationKind kind,
+                                cudaStream_t stream) {
+  if (!input || !bias || !output)
+    throw std::runtime_error(
+        "CUDA bias activation kernel received null buffer");
+  if (rows <= 0 || width <= 0)
+    throw std::runtime_error(
+        "CUDA bias activation kernel dimensions are invalid");
+
+  constexpr int kThreads = 256;
+  const int total = rows * width;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  BiasActivationKernel<<<blocks, kThreads, 0, stream>>>(input, bias, output,
+                                                       width, total, kind);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("BiasActivationKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("BiasActivationKernel synchronize", status));
 }
 
 void LaunchGateKernel(const float *input, const float *weights, float *output,

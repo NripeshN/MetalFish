@@ -51,6 +51,10 @@ void LaunchActivationKernel(const float *input, float *output, int elements,
                             CudaActivationKind kind,
                             cudaStream_t stream = nullptr);
 
+void LaunchBiasActivationKernel(float *input, const float *bias, float *output,
+                                int rows, int width, CudaActivationKind kind,
+                                cudaStream_t stream = nullptr);
+
 void LaunchGateKernel(const float *input, const float *weights, float *output,
                       int rows, int width, int gate_rows, CudaGateKind kind,
                       cudaStream_t stream = nullptr);

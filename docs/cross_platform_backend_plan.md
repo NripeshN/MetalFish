@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, cuBLAS policy-map gate |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, FFN bias-activation fusion gate |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -113,7 +113,8 @@ Current CUDA backend boundary:
   attention-policy scratch-to-1858 mapping. The CUDA policy map uses cuBLAS for
   the 64x64 square-policy logits, a narrow CUDA kernel for promotion logits, and
   a fixed gather table kept in device constant memory and uploaded once per
-  active CUDA device. CUDA also has the BT4
+  active CUDA device. CUDA feed-forward stages fuse dense1 bias addition with
+  activation while preserving the biased dense scratch tensor. CUDA also has the BT4
   dynamic-position-input kernels that expand packed plane masks/values to NHWC
   board rows, gather the first 12 planes for dense positional encoding, and
   concatenate generated positional channels back onto the 112 input channels.
@@ -189,6 +190,11 @@ Current CUDA backend boundary:
   normalization into one kernel for attention and FFN blocks. The 2026-05-20 T4
   gate kept reference-output parity and moved profiled BT4 evals from roughly
   `16.4/18.25 ms` to `15.9/17.8-18.1 ms`.
+- The CUDA FFN dense1 path now fuses bias addition and activation into one
+  kernel while leaving the dense pre-activation buffer biased for diagnostics.
+  The 2026-05-20 T4 gate kept fixed BT4 outputs, batch parity, and UCI smoke
+  green; profiled BT4 evals were `17.85-17.94 ms` with the feed-forward bucket
+  around `4.87-4.90 ms`.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
