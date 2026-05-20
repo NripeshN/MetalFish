@@ -1257,6 +1257,122 @@ bool test_mcts_evaluator_batch_reuse_stress_optional() {
   }
 }
 
+bool test_mcts_evaluator_single_reuse_stress_optional() {
+  std::cout << "  MCTS evaluator single reuse stress..." << std::endl;
+  if (!env_flag_enabled("METALFISH_NN_SINGLE_REUSE_STRESS")) {
+    std::cout << "    SKIP: METALFISH_NN_SINGLE_REUSE_STRESS not set"
+              << std::endl;
+    return true;
+  }
+
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (weights_path.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
+    return true;
+  }
+
+  try {
+    const auto &lines = batch_parity_lines();
+    std::vector<HistoryFixture> fixtures;
+    fixtures.reserve(33);
+    std::vector<std::vector<const Position *>> histories;
+    histories.reserve(33);
+    for (int i = 0; i < 33; ++i) {
+      fixtures.push_back(build_history(lines[i % lines.size()]));
+      histories.push_back(fixtures.back().ptrs);
+    }
+
+    MCTS::NNMCTSEvaluator reuse_eval(weights_path);
+    EvalTolerances tolerances;
+    const std::string network_info = reuse_eval.GetNetworkInfo();
+    if (network_info.find("CUDA transformer backend") != std::string::npos) {
+      tolerances.value = 2e-3f;
+      tolerances.moves_left = 1.25e-1f;
+      tolerances.policy = 7.5e-2f;
+    }
+
+    std::vector<MCTS::EvaluationResult> baseline;
+    baseline.reserve(histories.size());
+    for (const auto &history : histories)
+      baseline.push_back(reuse_eval.EvaluateWithHistory(history));
+
+    const std::array<size_t, 5> probes = {0, 1, 9, 14, 30};
+    const int iterations =
+        env_int_or_default("METALFISH_NN_SINGLE_REUSE_STRESS_ITERS", 2, 1, 16);
+    EvalDiffMetrics worst;
+    bool worst_set = false;
+    std::string worst_line;
+    std::string worst_baseline_top;
+    std::string worst_replay_top;
+
+    for (int iter = 0; iter < iterations; ++iter) {
+      std::vector<MCTS::EvaluationResult> replay;
+      replay.reserve(histories.size());
+      for (const auto &history : histories)
+        replay.push_back(reuse_eval.EvaluateWithHistory(history));
+
+      for (size_t probe : probes) {
+        std::ostringstream label;
+        label << "single reuse iter " << iter << " entry " << probe;
+        const auto metrics =
+            measure_eval_result(baseline[probe], replay[probe], label.str());
+        std::cout << "    SINGLE_REUSE_STRESS_STEP: iter=" << iter
+                  << " entry=" << probe
+                  << " line=" << move_line_string(lines[probe % lines.size()])
+                  << " value_delta=" << format_float(metrics.value_delta)
+                  << " wdl_delta=" << format_float(metrics.wdl_delta)
+                  << " moves_left_delta="
+                  << format_float(metrics.moves_left_delta)
+                  << " policy_delta=" << format_float(metrics.policy_delta)
+                  << " worst=" << metrics.worst_field << std::endl;
+        if (!worst_set || metrics_worse_than(metrics, worst)) {
+          worst = metrics;
+          worst_set = true;
+          worst_line = move_line_string(lines[probe % lines.size()]);
+          worst_baseline_top = result_top_policy_string(baseline[probe], 5);
+          worst_replay_top = result_top_policy_string(replay[probe], 5);
+        }
+        if (!compare_eval_result(baseline[probe], replay[probe], label.str(),
+                                 tolerances))
+          return false;
+      }
+    }
+
+    if (worst_set) {
+      std::cout << "    SINGLE_REUSE_STRESS_MAX: value_delta="
+                << format_float(worst.value_delta)
+                << " wdl_delta=" << format_float(worst.wdl_delta)
+                << " moves_left_delta="
+                << format_float(worst.moves_left_delta)
+                << " policy_delta=" << format_float(worst.policy_delta)
+                << " line=" << worst_line << " worst=" << worst.worst_field
+                << std::endl;
+      if (worst.policy_index != std::numeric_limits<size_t>::max()) {
+        std::cout << "    SINGLE_REUSE_STRESS_POLICY: index="
+                  << worst.policy_index
+                  << " move=" << move_to_string(worst.policy_move)
+                  << " baseline=" << format_float(worst.policy_single)
+                  << " replay=" << format_float(worst.policy_batched)
+                  << " delta="
+                  << format_float(std::fabs(worst.policy_single -
+                                            worst.policy_batched))
+                  << std::endl;
+      }
+      std::cout << "    SINGLE_REUSE_STRESS_BASELINE_TOP: "
+                << worst_baseline_top << std::endl;
+      std::cout << "    SINGLE_REUSE_STRESS_REPLAY_TOP: " << worst_replay_top
+                << std::endl;
+    }
+
+    std::cout << "    PASS: checked " << iterations
+              << " single-reuse iteration(s)" << std::endl;
+    return true;
+  } catch (const std::exception &e) {
+    std::cout << "    FAIL: exception: " << e.what() << std::endl;
+    return false;
+  }
+}
+
 bool benchmark_nn_batch_optional() {
   std::cout << "  NN backend batch benchmark..." << std::endl;
   if (!env_flag_enabled("METALFISH_NN_BATCH_BENCH")) {
@@ -1345,10 +1461,13 @@ int main() {
   const bool ok5 =
       test_mcts_evaluator_batch_parity_optional(parity_report.get());
   const bool ok6 = test_mcts_evaluator_first_use_stress_optional();
-  const bool ok7 = test_mcts_evaluator_batch_reuse_stress_optional();
-  const bool ok8 = benchmark_nn_batch_optional();
-  const bool ok9 =
+  const bool ok7 = test_mcts_evaluator_single_reuse_stress_optional();
+  const bool ok8 = test_mcts_evaluator_batch_reuse_stress_optional();
+  const bool ok9 = benchmark_nn_batch_optional();
+  const bool ok10 =
       !parity_report || write_parity_report(*parity_report);
-  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9) ? 0
-                                                                        : 1;
+  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 &&
+          ok10)
+             ? 0
+             : 1;
 }
