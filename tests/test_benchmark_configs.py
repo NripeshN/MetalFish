@@ -589,6 +589,11 @@ def main() -> int:
             "avg_mcts_minus_ab",
             "StockfishProbe",
             "legal_uci",
+            "MetalFishProbe",
+            "--replay-current",
+            "Current MetalFish replay",
+            "Replay deltas",
+            "replay_hybrid_mcts_threads",
         ],
     )
 

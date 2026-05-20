@@ -19,6 +19,8 @@ except ImportError:
 
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_STOCKFISH = PROJ / "reference" / "stockfish" / "src" / "stockfish"
+DEFAULT_METALFISH = PROJ / "build" / "metalfish"
+DEFAULT_WEIGHTS = PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"
 
 
 @dataclass
@@ -348,6 +350,165 @@ class StockfishProbe:
                     pass
 
 
+@dataclass
+class ReplayResult:
+    decision: TraceDecision
+    bestmove: str
+    reason: str
+    selected: str
+    ab_move: str
+    mcts_move: str
+    elapsed_ms: int
+
+
+class MetalFishProbe:
+    def __init__(
+        self,
+        path: pathlib.Path,
+        weights: pathlib.Path,
+        threads: int,
+        hash_mb: int,
+        hybrid_mcts_threads: int,
+        hybrid_ab_threads: int,
+        low_time_fallback_ms: int,
+    ) -> None:
+        self.proc = subprocess.Popen(
+            [str(path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        try:
+            if self.proc.stdin is None or self.proc.stdout is None:
+                raise RuntimeError("failed to start MetalFish")
+            self.send("uci")
+            self.wait_for("uciok", 60)
+            options = {
+                "UseMCTS": "false",
+                "UseHybridSearch": "true",
+                "NNWeights": str(weights),
+                "Threads": str(threads),
+                "Hash": str(hash_mb),
+                "MultiPV": "1",
+                "HybridMCTSThreads": str(hybrid_mcts_threads),
+                "HybridABThreads": str(hybrid_ab_threads),
+                "HybridAutoABThreadsCap": "0",
+                "TransformerLowTimeFallbackMs": str(low_time_fallback_ms),
+                "TransformerMinMoveBudgetMs": "400",
+                "MCTSMaxThreads": str(hybrid_mcts_threads),
+                "MCTSMinibatchSize": "0",
+                "MCTSParityPreset": "false",
+                "MCTSAddDirichletNoise": "false",
+                "HybridMCTSMinimumKLDGainPerNode": "0.0",
+                "HybridMCTSRootReject": "true",
+                "HybridMCTSABRootHints": "true",
+                "HybridMCTSABRootHintDelayMs": "25",
+                "HybridMCTSABRootHintCount": "8",
+                "HybridABCandidateVerifyMs": "120",
+                "HybridABCandidateVerifyCount": "4",
+                "HybridABPolicyWeight": "0.0",
+                "HybridRootPawnLeverTieBreak": "true",
+                "HybridTrace": "true",
+            }
+            for name, value in options.items():
+                self.send(f"setoption name {name} value {value}")
+            self.send("isready")
+            self.wait_for("readyok", 120)
+        except Exception:
+            self.close()
+            raise
+
+    def send(self, command: str) -> None:
+        assert self.proc.stdin is not None
+        self.proc.stdin.write(command + "\n")
+        self.proc.stdin.flush()
+
+    def wait_for(self, prefix: str, timeout: int = 30) -> str:
+        assert self.proc.stdout is not None
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            line = self.proc.stdout.readline()
+            if not line:
+                if self.proc.poll() is not None:
+                    raise RuntimeError(
+                        f"MetalFish exited with code {self.proc.returncode}"
+                    )
+                continue
+            line = line.strip()
+            if line.startswith(prefix):
+                return line
+        raise TimeoutError(prefix)
+
+    def replay(
+        self, decision: TraceDecision, movetime_ms: int, nodes: int
+    ) -> ReplayResult:
+        assert self.proc.stdout is not None
+        self.send("ucinewgame")
+        self.send("isready")
+        self.wait_for("readyok", 120)
+        self.send(f"position fen {decision.fen}")
+        start = time.time()
+        if nodes > 0:
+            self.send(f"go nodes {nodes}")
+            timeout = max(60.0, nodes / 10.0 + 30.0)
+        else:
+            self.send(f"go movetime {movetime_ms}")
+            timeout = max(60.0, movetime_ms / 1000.0 + 30.0)
+
+        bestmove = "0000"
+        trace_fields: dict[str, str] = {}
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            line = self.proc.stdout.readline()
+            if not line:
+                if self.proc.poll() is not None:
+                    raise RuntimeError(
+                        f"MetalFish exited during search with code {self.proc.returncode}"
+                    )
+                continue
+            line = line.strip()
+            if line.startswith("info string HybridTrace:"):
+                trace_fields = parse_fields(
+                    line.removeprefix("info string ").strip()
+                )
+            if line.startswith("bestmove"):
+                parts = line.split()
+                if len(parts) > 1:
+                    bestmove = parts[1]
+                break
+        else:
+            raise TimeoutError("bestmove")
+
+        return ReplayResult(
+            decision=decision,
+            bestmove=bestmove,
+            reason=trace_fields.get("reason", "?"),
+            selected=trace_fields.get("selected", bestmove),
+            ab_move=trace_fields.get("ABMove", "none"),
+            mcts_move=trace_fields.get("MCTSMove", "none"),
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def close(self) -> None:
+        try:
+            if self.proc.poll() is None:
+                self.send("quit")
+                self.proc.wait(timeout=5)
+        except Exception:
+            if self.proc.poll() is None:
+                self.proc.kill()
+                self.proc.wait()
+        finally:
+            for stream in (self.proc.stdin, self.proc.stdout):
+                try:
+                    if stream:
+                        stream.close()
+                except Exception:
+                    pass
+
+
 def print_summary(decisions: list[TraceDecision]) -> None:
     reasons: dict[str, int] = {}
     disagreements = 0
@@ -596,6 +757,30 @@ def print_comparisons(comparisons: list[MoveComparison], bucket_min: int) -> Non
     print_bucket_summary(comparisons, bucket_min)
 
 
+def print_replay_results(results: list[ReplayResult]) -> None:
+    if not results:
+        return
+
+    print()
+    print("Current MetalFish replay:")
+    changed = 0
+    for result in results:
+        decision = result.decision
+        same_move = result.bestmove == decision.selected
+        same_reason = result.reason == decision.reason
+        if not same_move or not same_reason:
+            changed += 1
+        marker = "=" if same_move and same_reason else "*"
+        print(
+            f"  {marker} game={decision.game} ply={decision.ply} side={decision.side} "
+            f"orig={decision.selected}/{decision.reason} "
+            f"replay={result.bestmove}/{result.reason} "
+            f"AB={result.ab_move} MCTS={result.mcts_move} "
+            f"elapsed={result.elapsed_ms}ms"
+        )
+    print(f"Replay deltas: {changed}/{len(results)} changed move or reason")
+
+
 def evaluate_trace_decision(
     probe: StockfishProbe, decision: TraceDecision, depth: int
 ) -> MoveComparison:
@@ -610,6 +795,35 @@ def evaluate_trace_decision(
         ab_eval=evals.get(decision.ab_move),
         mcts_eval=evals.get(decision.mcts_move),
     )
+
+
+def replay_candidates(args: argparse.Namespace, candidates: list[TraceDecision]) -> None:
+    if not args.replay_current:
+        return
+    if not args.metalfish.exists():
+        print(f"ERROR: MetalFish not found at {args.metalfish}", file=sys.stderr)
+        raise SystemExit(2)
+    if not args.weights.exists():
+        print(f"ERROR: weights not found at {args.weights}", file=sys.stderr)
+        raise SystemExit(2)
+
+    probe = MetalFishProbe(
+        args.metalfish,
+        args.weights,
+        args.replay_threads,
+        args.replay_hash,
+        args.replay_hybrid_mcts_threads,
+        args.replay_hybrid_ab_threads,
+        args.replay_low_time_fallback_ms,
+    )
+    try:
+        replay_results = [
+            probe.replay(d, args.replay_movetime, args.replay_nodes)
+            for d in candidates
+        ]
+    finally:
+        probe.close()
+    print_replay_results(replay_results)
 
 
 def selected_quality_failures(
@@ -657,6 +871,8 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--hash", type=int, default=256)
+    parser.add_argument("--metalfish", type=pathlib.Path, default=DEFAULT_METALFISH)
+    parser.add_argument("--weights", type=pathlib.Path, default=DEFAULT_WEIGHTS)
     parser.add_argument("--min-share", type=float, default=0.0)
     parser.add_argument("--max-share", type=float, default=10.0)
     parser.add_argument("--min-visits", type=int, default=0)
@@ -685,6 +901,18 @@ def main() -> int:
         action="store_true",
         help="Do not clear Stockfish hash before each candidate eval.",
     )
+    parser.add_argument(
+        "--replay-current",
+        action="store_true",
+        help="Replay filtered candidate FENs with the current MetalFish Hybrid binary.",
+    )
+    parser.add_argument("--replay-movetime", type=int, default=3000)
+    parser.add_argument("--replay-nodes", type=int, default=0)
+    parser.add_argument("--replay-threads", type=int, default=8)
+    parser.add_argument("--replay-hash", type=int, default=4096)
+    parser.add_argument("--replay-hybrid-mcts-threads", type=int, default=0)
+    parser.add_argument("--replay-hybrid-ab-threads", type=int, default=0)
+    parser.add_argument("--replay-low-time-fallback-ms", type=int, default=3000)
     args = parser.parse_args()
 
     results_paths = args.results_json or [latest_results_file()]
@@ -732,6 +960,7 @@ def main() -> int:
     candidates = candidates[: max(0, args.limit)]
 
     if args.no_stockfish:
+        replay_candidates(args, candidates)
         for d in candidates:
             fields = d.fields
             visits, root_visits, current_visits, current_root_visits = visit_pair(
@@ -762,6 +991,7 @@ def main() -> int:
     finally:
         probe.close()
 
+    replay_candidates(args, candidates)
     print_comparisons(comparisons, args.bucket_min)
     failures = selected_quality_failures(comparisons, args.fail_selected_worse_than)
     if failures:
