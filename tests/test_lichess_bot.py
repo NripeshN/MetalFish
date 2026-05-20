@@ -478,7 +478,8 @@ def test_online_bots_uses_documented_fetch_limit() -> None:
     expect("online bot parsed", [bot["id"] for bot in bots or []] == ["targetbot"])
     expect(
         "online bots fetches max documented page",
-        calls == [
+        calls
+        == [
             {
                 "path": "/bot/online",
                 "params": {"nb": lichess_bot.BOT_ONLINE_FETCH_LIMIT},

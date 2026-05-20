@@ -322,9 +322,7 @@ def setup_metalfish(
     sess.setoption("Threads", str(threads))
     sess.setoption("MultiPV", str(multipv))
     sess.setoption("MCTSMaxThreads", str(mcts_threads))
-    sess.setoption(
-        "MCTSParallelSearch", "true" if mcts_parallel_search else "false"
-    )
+    sess.setoption("MCTSParallelSearch", "true" if mcts_parallel_search else "false")
     sess.setoption("MCTSMinibatchSize", str(minibatch_size))
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
@@ -720,9 +718,7 @@ def run_once(
             env = os.environ.copy()
             if args.root_trace:
                 env["METALFISH_MCTS_ROOT_TRACE"] = "1"
-                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(
-                    args.root_trace_moves
-                )
+                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(args.root_trace_moves)
             s = UCISession([str(args.metalfish)], "metalfish-mcts", env=env)
             setup_metalfish(
                 s,
@@ -744,9 +740,7 @@ def run_once(
             env = os.environ.copy()
             if args.root_trace:
                 env["METALFISH_MCTS_ROOT_TRACE"] = "1"
-                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(
-                    args.root_trace_moves
-                )
+                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(args.root_trace_moves)
             s = UCISession([str(args.metalfish)], "metalfish-hybrid", env=env)
             setup_metalfish_hybrid(
                 s,

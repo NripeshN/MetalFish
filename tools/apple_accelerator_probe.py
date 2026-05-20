@@ -12,7 +12,6 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-
 SWIFT_PROBE = r"""
 import CoreML
 import Metal
@@ -47,7 +46,9 @@ print("mpsgraph=available")
 """
 
 
-def run_command(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
+def run_command(
+    args: list[str], timeout: float = 30.0
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
         check=False,
@@ -167,7 +168,9 @@ def print_human(result: dict[str, Any]) -> None:
         f"{capabilities.get('coreml_cpu_and_neural_engine', 'unknown')}"
     )
     print(f"  Metal device:    {capabilities.get('metal_device', 'unknown')}")
-    print(f"  Unified memory:  {capabilities.get('metal_has_unified_memory', 'unknown')}")
+    print(
+        f"  Unified memory:  {capabilities.get('metal_has_unified_memory', 'unknown')}"
+    )
     print(f"  MPSGraph:        {capabilities.get('mpsgraph', 'unknown')}")
     print(f"  ANE candidate:   {result['ane_candidate']}")
     print(f"  MPSGraph candidate: {result['mpsgraph_candidate']}")
@@ -183,7 +186,9 @@ def main(argv: list[str] | None = None) -> int:
             "MetalFish backend work."
         )
     )
-    parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    parser.add_argument(
+        "--json", action="store_true", help="print machine-readable JSON"
+    )
     parser.add_argument(
         "--skip-swift",
         action="store_true",

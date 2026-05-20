@@ -127,8 +127,7 @@ def hybrid_low_time_warnings(
         name
         for match in matches
         for name in match
-        if engines_cfg.get(name, {}).get("options", {}).get("UseHybridSearch")
-        == "true"
+        if engines_cfg.get(name, {}).get("options", {}).get("UseHybridSearch") == "true"
     }
     for name in sorted(hybrid_names):
         options = dict(engines_cfg[name].get("options", {}))

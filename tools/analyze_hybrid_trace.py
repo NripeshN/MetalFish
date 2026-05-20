@@ -473,9 +473,7 @@ class MetalFishProbe:
                 continue
             line = line.strip()
             if line.startswith("info string HybridTrace:"):
-                trace_fields = parse_fields(
-                    line.removeprefix("info string ").strip()
-                )
+                trace_fields = parse_fields(line.removeprefix("info string ").strip())
             if line.startswith("bestmove"):
                 parts = line.split()
                 if len(parts) > 1:
@@ -800,7 +798,9 @@ def evaluate_trace_decision(
     )
 
 
-def replay_candidates(args: argparse.Namespace, candidates: list[TraceDecision]) -> None:
+def replay_candidates(
+    args: argparse.Namespace, candidates: list[TraceDecision]
+) -> None:
     if not args.replay_current:
         return
     if not args.metalfish.exists():
@@ -821,8 +821,7 @@ def replay_candidates(args: argparse.Namespace, candidates: list[TraceDecision])
     )
     try:
         replay_results = [
-            probe.replay(d, args.replay_movetime, args.replay_nodes)
-            for d in candidates
+            probe.replay(d, args.replay_movetime, args.replay_nodes) for d in candidates
         ]
     finally:
         probe.close()

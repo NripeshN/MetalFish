@@ -328,8 +328,12 @@ if(BUILD_TESTS)
   enable_testing()
 
   set(TEST_SOURCES
-      tests/test_main.cpp tests/test_core.cpp tests/test_search_module.cpp
-      tests/test_mcts_module.cpp tests/test_hybrid.cpp tests/test_eval_gpu.cpp
+      tests/test_main.cpp
+      tests/test_core.cpp
+      tests/test_search_module.cpp
+      tests/test_mcts_module.cpp
+      tests/test_hybrid.cpp
+      tests/test_eval_gpu.cpp
       tests/nn_input_fixture.cpp)
 
   add_executable(

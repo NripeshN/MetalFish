@@ -148,6 +148,7 @@ def select_bk_positions(selection: str) -> List[Tuple[str, List[str], str]]:
         raise ValueError(f"Unknown BK position(s): {', '.join(missing)}")
     return selected
 
+
 SCALING_POSITIONS = [
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     "r1bqkb1r/pppppppp/2n2n2/8/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
@@ -836,7 +837,11 @@ def run_tactical(
 
             total = len(tactical_positions) * repeat_count
             completed = len(positions)
-            suffix = "" if completed_runs == total else f", completed {completed_runs}/{total}"
+            suffix = (
+                ""
+                if completed_runs == total
+                else f", completed {completed_runs}/{total}"
+            )
             print(f"  Score: {score}/{total} ({100*score/total:.1f}%){suffix}")
 
             avg_nps = sum(p["nps"] for p in positions) // max(1, len(positions))
@@ -879,9 +884,7 @@ def run_tactical(
     return results
 
 
-def enforce_tactical_fail_under(
-    results: dict, thresholds: Dict[str, int]
-) -> List[str]:
+def enforce_tactical_fail_under(results: dict, thresholds: Dict[str, int]) -> List[str]:
     if not thresholds:
         return []
 

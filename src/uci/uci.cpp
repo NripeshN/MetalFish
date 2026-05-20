@@ -935,9 +935,8 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
                                          config.kld_gain_min);
   config.kld_gain_average_interval =
       static_cast<int>(engine.get_options()["MCTSKLDGainAverageInterval"]);
-  config.move_overhead_ms =
-      static_cast<float>(static_cast<int>(
-          engine.get_options()["Move Overhead"]));
+  config.move_overhead_ms = static_cast<float>(
+      static_cast<int>(engine.get_options()["Move Overhead"]));
   config.time_manager = std::string(engine.get_options()["MCTSTimeManager"]);
   config.cache_history_length =
       static_cast<int>(engine.get_options()["MCTSCacheHistoryLength"]);
@@ -1118,9 +1117,8 @@ make_hybrid_cache_key(const std::string &nn_weights,
       << config.use_transformer_prefetch << "|" << config.mcts_root_reject
       << "|" << config.use_shared_tt << "|" << config.mcts_ab_root_hints << "|"
       << config.mcts_ab_root_hint_delay_ms << "|"
-      << config.mcts_ab_root_hint_count << "|"
-      << config.ab_candidate_verify_ms << "|"
-      << config.ab_candidate_verify_count;
+      << config.mcts_ab_root_hint_count << "|" << config.ab_candidate_verify_ms
+      << "|" << config.ab_candidate_verify_count;
   return key.str();
 }
 
@@ -1246,8 +1244,7 @@ static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
   if (!allow_parallel_mcts && num_threads > 1) {
     if (announce_cap) {
       sync_cout << "info string Capping pure MCTS threads from " << num_threads
-                << " to 1 for Apple Silicon strength stability"
-                << sync_endl;
+                << " to 1 for Apple Silicon strength stability" << sync_endl;
     }
     num_threads = 1;
   }

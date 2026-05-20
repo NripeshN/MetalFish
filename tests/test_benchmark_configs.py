@@ -151,7 +151,9 @@ def assert_tactical_fail_under_guard() -> None:
     if paper_benchmarks.parse_tactical_fail_under("21", selected) != {
         "metalfish-hybrid": 21
     }:
-        raise AssertionError("bare tactical fail-under should apply to selected engines")
+        raise AssertionError(
+            "bare tactical fail-under should apply to selected engines"
+        )
     if paper_benchmarks.parse_tactical_fail_under("hybrid=21,mcts=12", None) != {
         "metalfish-hybrid": 21,
         "metalfish-mcts": 12,
@@ -174,9 +176,7 @@ def assert_tactical_fail_under_guard() -> None:
             },
         }
     }
-    if paper_benchmarks.enforce_tactical_fail_under(
-        sample, {"metalfish-hybrid": 21}
-    ):
+    if paper_benchmarks.enforce_tactical_fail_under(sample, {"metalfish-hybrid": 21}):
         raise AssertionError("hybrid tactical floor should pass at the threshold")
     failures = paper_benchmarks.enforce_tactical_fail_under(
         sample, {"metalfish-hybrid": 22, "metalfish-mcts": 12}
@@ -215,9 +215,7 @@ def main() -> int:
             "MCTSMinimumKLDGainPerNode": "0.00005",
         },
     )
-    scaled_mcts = paper_benchmarks.config_with_thread_count(
-        paper["metalfish-mcts"], 8
-    )
+    scaled_mcts = paper_benchmarks.config_with_thread_count(paper["metalfish-mcts"], 8)
     assert_options_include(
         "paper MCTS scaled strength resources",
         scaled_mcts.uci_options,
@@ -580,7 +578,7 @@ def main() -> int:
             '--reject-output "Time safety:"',
             "Run MCTS low-node tactical smoke",
             "MCTSParallelSearch=false",
-            "go \"nodes 50\"",
+            'go "nodes 50"',
             "--expect-bestmove h5f6",
         ],
     )

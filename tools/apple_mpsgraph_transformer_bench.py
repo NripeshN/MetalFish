@@ -9,7 +9,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -293,7 +292,9 @@ int main() {
 """
 
 
-def run_command(args: list[str], timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
+def run_command(
+    args: list[str], timeout: float = 120.0
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
         check=False,

@@ -645,9 +645,9 @@ bool HybridMCTSRootRejectsAB(bool fixed_budget, bool visit_evidence_sane,
     return false;
 
   const float root_q_gap = top_q - ab_q;
-  const bool hard_reject =
-      ab_visits >= 25 && top_visits >= 3 * std::max<uint32_t>(1, ab_visits) &&
-      root_q_gap >= 0.25f;
+  const bool hard_reject = ab_visits >= 25 &&
+                           top_visits >= 3 * std::max<uint32_t>(1, ab_visits) &&
+                           root_q_gap >= 0.25f;
   const bool no_clear_ab_reject =
       fixed_budget && mcts_strong && !ab_has_clear_preference &&
       top_visits >= 180 && top_visits >= 4 * std::max<uint32_t>(1, ab_visits) &&
@@ -664,16 +664,11 @@ bool HybridRootPawnLeverAgreementTieBreak(bool fixed_budget,
          root_q_gap < 0.08f;
 }
 
-bool HybridRootPawnLeverCandidate(int selected_average_score,
-                                  int candidate_average_score,
-                                  uint64_t candidate_effort, int mcts_rank,
-                                  uint32_t mcts_current_visits,
-                                  int selected_mcts_rank,
-                                  float selected_mcts_q,
-                                  float selected_mcts_policy,
-                                  float best_mcts_q,
-                                  float candidate_mcts_q,
-                                  float candidate_mcts_policy) {
+bool HybridRootPawnLeverCandidate(
+    int selected_average_score, int candidate_average_score,
+    uint64_t candidate_effort, int mcts_rank, uint32_t mcts_current_visits,
+    int selected_mcts_rank, float selected_mcts_q, float selected_mcts_policy,
+    float best_mcts_q, float candidate_mcts_q, float candidate_mcts_policy) {
   const bool high_policy_lever =
       selected_mcts_rank > 0 && candidate_mcts_policy >= 0.25f &&
       candidate_mcts_policy >= selected_mcts_policy * 1.15f;
@@ -694,9 +689,8 @@ bool HybridRootPawnLeverCandidate(int selected_average_score,
       return false;
     if (mcts_rank > 4 && q_gap > 0.055f)
       return false;
-    if (candidate_average_score < selected_average_score &&
-        mcts_rank <= 4 && q_gap > 0.05f &&
-        candidate_mcts_policy <= selected_mcts_policy)
+    if (candidate_average_score < selected_average_score && mcts_rank <= 4 &&
+        q_gap > 0.05f && candidate_mcts_policy <= selected_mcts_policy)
       return false;
   }
 
@@ -1081,15 +1075,15 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
       add_latest_hint(root_moves[i].move);
     }
 
-    std::stable_sort(root_moves.begin(), root_moves.end(),
-                     [](const Search::RootMoveStats &a,
-                        const Search::RootMoveStats &b) {
-                       if (std::abs(a.policy - b.policy) > 0.000001f)
-                         return a.policy > b.policy;
-                       if (a.visits != b.visits)
-                         return a.visits > b.visits;
-                       return a.q > b.q;
-                     });
+    std::stable_sort(
+        root_moves.begin(), root_moves.end(),
+        [](const Search::RootMoveStats &a, const Search::RootMoveStats &b) {
+          if (std::abs(a.policy - b.policy) > 0.000001f)
+            return a.policy > b.policy;
+          if (a.visits != b.visits)
+            return a.visits > b.visits;
+          return a.q > b.q;
+        });
     for (const auto &root_move : root_moves)
       add_latest_hint(root_move.move);
 
@@ -1273,9 +1267,8 @@ void ParallelHybridSearch::run_ab_search() {
       limits_.ponderMode &&
           !ponderhit_received_.load(std::memory_order_acquire));
   if (candidate_verify_ms > 0 && !ab_limits.root_order_hints.empty()) {
-    std::vector<Move> verified_order =
-        verify_ab_root_candidates(ab_limits.root_order_hints,
-                                  candidate_verify_ms);
+    std::vector<Move> verified_order = verify_ab_root_candidates(
+        ab_limits.root_order_hints, candidate_verify_ms);
     if (!verified_order.empty()) {
       for (Move hint : ab_limits.root_order_hints) {
         if (std::find(verified_order.begin(), verified_order.end(), hint) ==
@@ -1929,10 +1922,9 @@ Move ParallelHybridSearch::make_final_decision() {
       const MCTSRootLookup mcts_lookup = find_mcts_root_move(candidate.move);
       if (!HybridRootPawnLeverCandidate(
               selected_ab.average_score, candidate.average_score,
-              candidate.effort, mcts_lookup.rank,
-              mcts_lookup.current_visits, selected_mcts.rank, selected_mcts.q,
-              selected_mcts.policy, best_mcts_q, mcts_lookup.q,
-              mcts_lookup.policy))
+              candidate.effort, mcts_lookup.rank, mcts_lookup.current_visits,
+              selected_mcts.rank, selected_mcts.q, selected_mcts.policy,
+              best_mcts_q, mcts_lookup.q, mcts_lookup.policy))
         continue;
 
       if (candidate.average_score > best_lever_average ||
@@ -2040,8 +2032,8 @@ Move ParallelHybridSearch::make_final_decision() {
         HybridRootPawnLeverAgreementTieBreak(
             mcts_decision_budget, mcts_visit_evidence_sane,
             agreement_visit_share, root_q_gap_for_best());
-    Move pawn_lever_tiebreak = find_root_pawn_lever_tiebreak(
-        ab_best, allow_non_pawn_agreement_lever);
+    Move pawn_lever_tiebreak =
+        find_root_pawn_lever_tiebreak(ab_best, allow_non_pawn_agreement_lever);
     if (pawn_lever_tiebreak != Move::none()) {
       stats_.mcts_overrides.fetch_add(1, std::memory_order_relaxed);
       trace_simple("root_pawn_lever_tiebreak", pawn_lever_tiebreak);
@@ -2165,10 +2157,8 @@ Move ParallelHybridSearch::make_final_decision() {
     }
   }
   const bool mcts_override_allowed =
-      !ab_root_rejects_mcts ||
-      mcts_cross_root_confidence_fixed_budget ||
-      mcts_root_rejects_ab ||
-      (mcts_overwhelming && eval_delta >= 250);
+      !ab_root_rejects_mcts || mcts_cross_root_confidence_fixed_budget ||
+      mcts_root_rejects_ab || (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";

@@ -23,7 +23,9 @@ def choose_engine(report: Dict[str, object], requested: str) -> str:
     if requested:
         if requested not in engines:
             available = ", ".join(sorted(engines))
-            raise ValueError(f"engine '{requested}' not in report; available: {available}")
+            raise ValueError(
+                f"engine '{requested}' not in report; available: {available}"
+            )
         return requested
     if len(engines) != 1:
         available = ", ".join(sorted(engines))
@@ -31,7 +33,9 @@ def choose_engine(report: Dict[str, object], requested: str) -> str:
     return next(iter(engines))
 
 
-def position_map(report: Dict[str, object], engine: str) -> Dict[str, Dict[str, object]]:
+def position_map(
+    report: Dict[str, object], engine: str
+) -> Dict[str, Dict[str, object]]:
     engines = report["engines"]
     assert isinstance(engines, dict)
     engine_data = engines[engine]
