@@ -19,7 +19,6 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
-#include <numeric>
 #include <sstream>
 #include <type_traits>
 #ifdef __APPLE__
@@ -74,6 +73,8 @@ ParallelHybridSearch::~ParallelHybridSearch() {
 
   // Join our threads before touching MCTS to avoid use-after-free
   join_all_threads();
+  if (ane_root_hints_future_.valid())
+    ane_root_hints_future_.wait();
 
   if (mcts_search_) {
     mcts_search_->ClearCallbacks();
@@ -1311,8 +1312,8 @@ std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
     add_hint(move);
 
   const int max_hints =
-      std::max(std::clamp(config_.mcts_ab_root_hint_count, 1, 16),
-               std::clamp(config_.ane_root_hint_count, 1, 32));
+      std::clamp(config_.mcts_ab_root_hint_count, 1, 16) +
+      std::clamp(config_.ane_root_hint_count, 1, 32);
   if (static_cast<int>(hints.size()) > max_hints)
     hints.resize(max_hints);
   return hints;

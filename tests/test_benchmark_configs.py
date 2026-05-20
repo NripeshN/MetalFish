@@ -609,6 +609,19 @@ def main() -> int:
         ["python3 tools/download_engine_networks.py"],
     )
     assert_file_contains(
+        PROJ / ".github/workflows/hybrid-regression.yml",
+        [
+            "Hybrid Regression Benchmarks",
+            "Checkout main baseline",
+            "Repeated hybrid regression benchmark",
+            "tests/hybrid_regression_compare.py",
+            "--repeat \"$BENCH_REPEAT\"",
+            "--min-candidate-bk-score 23",
+            "--max-bk-mean-drop 0.67",
+            "--max-perf-regression 0.25",
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/uci_smoke.py",
         [
             "queue.Queue",

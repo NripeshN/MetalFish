@@ -218,7 +218,6 @@ struct ParallelHybridConfig {
   std::string ane_weights_path;
   std::string ane_model_path;
   std::string ane_compute_units = "cpu-ne";
-  int ane_batch_size = 8;
   int ane_root_hint_count = 10;
   int ane_root_hint_wait_ms = 75;
   int ane_min_budget_ms = 1000;

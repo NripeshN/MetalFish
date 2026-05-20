@@ -1106,8 +1106,6 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
       std::string(engine.get_options()["HybridANEModelPath"]);
   config.ane_compute_units =
       std::string(engine.get_options()["HybridANEComputeUnits"]);
-  config.ane_batch_size =
-      static_cast<int>(engine.get_options()["HybridANEBatchSize"]);
   config.ane_root_hint_count =
       static_cast<int>(engine.get_options()["HybridANERootHintCount"]);
   config.ane_root_hint_wait_ms =
@@ -1143,8 +1141,8 @@ make_hybrid_cache_key(const std::string &nn_weights,
       << config.ab_candidate_verify_count << "|"
       << config.root_pawn_lever_tiebreak << "|" << config.ane_root_probe << "|"
       << config.ane_weights_path << "|" << config.ane_model_path << "|"
-      << config.ane_compute_units << "|" << config.ane_batch_size << "|"
-      << config.ane_root_hint_count << "|" << config.ane_root_hint_wait_ms
+      << config.ane_compute_units << "|" << config.ane_root_hint_count << "|"
+      << config.ane_root_hint_wait_ms
       << "|" << config.ane_min_budget_ms << "|" << config.trace_decisions;
   return key.str();
 }
