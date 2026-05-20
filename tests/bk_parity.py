@@ -350,6 +350,7 @@ def setup_metalfish_hybrid(
     ab_threads: int,
     multipv: int,
     hybrid_mcts_kld: float,
+    hybrid_ab_root_reject_mcts: bool,
     hybrid_root_reject: bool,
     hybrid_shared_tt: bool,
     hybrid_root_hints: bool,
@@ -378,6 +379,10 @@ def setup_metalfish_hybrid(
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
     sess.setoption("HybridMCTSMinimumKLDGainPerNode", str(hybrid_mcts_kld))
+    sess.setoption(
+        "HybridABRootRejectMCTS",
+        "true" if hybrid_ab_root_reject_mcts else "false",
+    )
     sess.setoption("HybridMCTSRootReject", "true" if hybrid_root_reject else "false")
     sess.setoption("HybridMCTSUseSharedTT", "true" if hybrid_shared_tt else "false")
     sess.setoption("HybridMCTSABRootHints", "true" if hybrid_root_hints else "false")
@@ -752,6 +757,7 @@ def run_once(
                 args.hybrid_ab_threads,
                 args.multipv,
                 args.hybrid_mcts_kld,
+                args.hybrid_ab_root_reject_mcts,
                 args.hybrid_root_reject,
                 args.hybrid_shared_tt,
                 args.hybrid_root_hints,
@@ -901,6 +907,11 @@ def main() -> int:
     parser.add_argument("--hybrid-mcts-threads", type=int, default=0)
     parser.add_argument("--hybrid-ab-threads", type=int, default=0)
     parser.add_argument("--hybrid-mcts-kld", type=float, default=0.0)
+    parser.add_argument(
+        "--hybrid-ab-root-reject-mcts",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument(
         "--hybrid-root-reject",
         action=argparse.BooleanOptionalAction,

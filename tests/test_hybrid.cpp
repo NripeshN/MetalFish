@@ -241,6 +241,7 @@ void test_hybrid_config() {
     EXPECT(tc, config.ab_max_depth > config.ab_min_depth);
     EXPECT(tc, config.ab_policy_weight >= 0.0f);
     EXPECT(tc, config.ab_policy_weight <= 1.0f);
+    EXPECT(tc, config.ab_root_reject_mcts);
     EXPECT(tc, config.mcts_root_reject);
     EXPECT(tc, config.mcts_ab_root_hints);
     EXPECT(tc, config.mcts_ab_root_hint_delay_ms == 25);

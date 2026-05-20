@@ -2081,10 +2081,12 @@ Move ParallelHybridSearch::make_final_decision() {
   const ABRootLookup ab_in_ab = find_ab_root_move(ab_best);
   const ABRootLookup mcts_in_ab = find_ab_root_move(mcts_best);
   const MCTSRootLookup ab_in_mcts = find_mcts_root_move(ab_best);
-  const bool ab_root_rejects_mcts = HybridABRootRejectsMCTS(
-      ab_verified, ab_in_ab.rank, mcts_in_ab.rank, ab_in_ab.average_score,
-      mcts_in_ab.average_score, ab_in_ab.effort, mcts_in_ab.effort,
-      mcts_in_ab.score);
+  const bool ab_root_rejects_mcts =
+      config_.ab_root_reject_mcts &&
+      HybridABRootRejectsMCTS(ab_verified, ab_in_ab.rank, mcts_in_ab.rank,
+                              ab_in_ab.average_score, mcts_in_ab.average_score,
+                              ab_in_ab.effort, mcts_in_ab.effort,
+                              mcts_in_ab.score);
   const float root_q_gap = root_q_gap_for_best();
   const bool mcts_decisive_fixed_budget =
       mcts_visit_evidence_sane &&

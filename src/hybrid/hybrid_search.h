@@ -204,6 +204,7 @@ struct ParallelHybridConfig {
   int transformer_batch_timeout_us = 200;
   bool use_transformer_prefetch = true;
   bool trace_decisions = false;
+  bool ab_root_reject_mcts = true;
   bool mcts_root_reject = true;
   bool use_shared_tt = false;
   bool mcts_ab_root_hints = true;

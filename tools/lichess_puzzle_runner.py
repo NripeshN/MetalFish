@@ -362,6 +362,7 @@ def engine_options(args) -> dict[str, str]:
                 "UseHybridSearch": "true",
                 "NNWeights": str(args.weights),
                 "MCTSAddDirichletNoise": "false",
+                "HybridABRootRejectMCTS": "true",
                 "HybridMCTSRootReject": "true",
                 "HybridMCTSABRootHints": "true",
                 "HybridMCTSABRootHintDelayMs": "25",
