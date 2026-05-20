@@ -241,7 +241,6 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
       workspace_batch_size_ = batch_size;
     }
     cudaStream_t stream = workspace_.Stream();
-    workspace_.Clear(stream);
     if (batch_size_changed)
       buffers_.ClearAll(stream);
     buffers_.UploadPackedInputs(input_masks, input_values, batch_size, stream);

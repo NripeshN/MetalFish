@@ -75,6 +75,17 @@ double MillisSince(std::chrono::steady_clock::time_point start) {
       .count();
 }
 
+void PrepareExecutionWorkspace(const CudaExecutionTape &tape,
+                               CudaExecutionWorkspace &workspace) {
+  for (const auto &binding : tape.Bindings()) {
+    if (!tape.Reserve(workspace, binding)) {
+      throw std::runtime_error("CUDA execution tape reserve returned null: " +
+                               binding.name);
+    }
+  }
+  workspace.Clear(workspace.Stream());
+}
+
 struct CudaProfileBucket {
   CudaExecutionScheduleKind kind = CudaExecutionScheduleKind::Unsupported;
   int count = 0;
@@ -214,6 +225,7 @@ public:
 
     const auto tape =
         CreatePlanSmokeExecutionTape(plan, execution_plan, batch_size);
+    PrepareExecutionWorkspace(tape, workspace);
     const auto schedule = CreateCudaExecutionSchedule(execution_plan);
     const auto stage_inputs =
         CreateCudaStageInputBindings(execution_plan, schedule);
@@ -257,6 +269,7 @@ public:
     }
 
     const auto tape = CreateResolvedExecutionTape(execution_plan, batch_size);
+    PrepareExecutionWorkspace(tape, workspace);
     const auto stage_inputs =
         CreateCudaStageInputBindings(execution_plan, schedule_);
     const int profile_index = ReserveCudaProfileReportIndex();
