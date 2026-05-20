@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import statistics
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -218,6 +219,36 @@ def compare_arrays(ref: np.ndarray, candidate: np.ndarray) -> dict[str, float]:
     }
 
 
+def run_metal_probe(args: argparse.Namespace, fen: str) -> dict[str, Any]:
+    if not args.metal_probe:
+        return {}
+    command = [
+        str(Path(args.metal_probe)),
+        "--weights",
+        str(Path(args.weights)),
+        "--fen",
+        fen,
+        "--top",
+        str(args.top),
+        "--full-policy",
+    ]
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    except OSError as exc:
+        raise RuntimeError(f"failed to run Metal probe {args.metal_probe}: {exc}") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.strip()
+        raise RuntimeError(
+            f"Metal probe failed with exit code {exc.returncode}: {stderr or exc.stdout.strip()}"
+        ) from exc
+
+    for line in reversed(completed.stdout.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            return json.loads(line)
+    raise RuntimeError("Metal probe did not emit JSON")
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     moves = load_policy_moves()
     fens = args.fen or DEFAULT_FENS
@@ -240,6 +271,27 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         cand_policy, cand_policy_ms = predict(
             models["candidate_policy"], planes, args.warmup, args.iterations
         )
+        metal = run_metal_probe(args, fen)
+        metal_result = None
+        if metal:
+            metal_wdl = np.asarray(metal["wdl"], dtype=np.float32).reshape(ref_wdl.shape)
+            metal_policy = np.asarray(metal["policy"], dtype=np.float32).reshape(
+                ref_policy.shape
+            )
+            metal_result = {
+                "backend": metal["backend"],
+                "network_info": metal["network_info"],
+                "format": metal["format"],
+                "transform": metal["transform"],
+                "value": metal["value"],
+                "wdl": metal["wdl"],
+                "moves_left": metal["moves_left"],
+                "policy_top": metal["policy_top"],
+                "reference_wdl_delta": compare_arrays(metal_wdl, ref_wdl),
+                "candidate_wdl_delta": compare_arrays(metal_wdl, cand_wdl),
+                "reference_policy_delta": compare_arrays(metal_policy, ref_policy),
+                "candidate_policy_delta": compare_arrays(metal_policy, cand_policy),
+            }
         positions.append(
             {
                 "fen": fen,
@@ -257,6 +309,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     "reference_top": top_policy(ref_policy, moves, args.top),
                     "candidate_top": top_policy(cand_policy, moves, args.top),
                 },
+                "metal": metal_result,
             }
         )
     return {
@@ -282,6 +335,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--candidate-precision", choices=["fp16", "fp32"], default="fp16")
     parser.add_argument("--candidate-value-head-fp32", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--candidate-policy-head-fp32", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--metal-probe", default="", help="Optional path to build/metalfish_nn_probe for Metal backend parity")
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=4)
     parser.add_argument("--top", type=int, default=8)
@@ -311,6 +365,20 @@ def print_human(result: dict[str, Any]) -> None:
         cand_moves = ", ".join(item["move"] for item in policy["candidate_top"][:5])
         print(f"  Ref top:  {ref_moves}")
         print(f"  Cand top: {cand_moves}")
+        if position.get("metal"):
+            metal = position["metal"]
+            print(
+                "  Metal vs ref:  "
+                f"WDL max={metal['reference_wdl_delta']['max_abs']:.7f} "
+                f"policy max={metal['reference_policy_delta']['max_abs']:.7f}"
+            )
+            print(
+                "  Metal vs cand: "
+                f"WDL max={metal['candidate_wdl_delta']['max_abs']:.7f} "
+                f"policy max={metal['candidate_policy_delta']['max_abs']:.7f}"
+            )
+            metal_moves = ", ".join(item["move"] for item in metal["policy_top"][:5])
+            print(f"  Metal top: {metal_moves}")
 
 
 def main(argv: list[str] | None = None) -> int:

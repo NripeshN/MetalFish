@@ -410,6 +410,32 @@ if(BUILD_TESTS)
       ${MPSGRAPH_FRAMEWORK})
   endif()
   add_test(NAME test_nn_comparison COMMAND test_nn_comparison)
+
+  add_executable(
+    metalfish_nn_probe
+    tools/nn_metal_probe.cpp
+    ${CORE_SOURCES}
+    ${NN_SOURCES})
+  target_link_libraries(
+    metalfish_nn_probe Threads::Threads ${METALFISH_PROTOBUF_LIB}
+    ${ZLIB_LIBRARIES} ${ABSL_LIBS})
+
+  if(APPLE AND ACCELERATE_FRAMEWORK)
+    target_link_libraries(metalfish_nn_probe ${ACCELERATE_FRAMEWORK})
+  endif()
+
+  if(APPLE
+     AND USE_METAL
+     AND METAL_CPP_AVAILABLE)
+    target_link_libraries(
+      metalfish_nn_probe
+      ${METAL_FRAMEWORK}
+      ${FOUNDATION_FRAMEWORK}
+      ${COREFOUNDATION_FRAMEWORK}
+      ${QUARTZCORE_FRAMEWORK}
+      ${MPS_FRAMEWORK}
+      ${MPSGRAPH_FRAMEWORK})
+  endif()
 endif()
 
 # ============================================================================

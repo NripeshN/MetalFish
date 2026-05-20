@@ -96,6 +96,31 @@ def test_attention_policy_map() -> None:
     expect("policy index max", int(indices.max()) < 64 * 64 + 8 * 24)
 
 
+def test_effective_activation_fixup() -> None:
+    class FakeWeights:
+        encoder = [object()]
+
+        @staticmethod
+        def HasField(name: str) -> bool:
+            return name == "smolgen_w"
+
+    fake_net = types.SimpleNamespace(
+        format=types.SimpleNamespace(
+            network_format=types.SimpleNamespace(
+                default_activation=1,
+                smolgen_activation=0,
+                ffn_activation=0,
+                network=4,
+            )
+        ),
+        weights=FakeWeights(),
+    )
+    activations = exporter.effective_activations(fake_net)
+    expect("default mish", activations["default"] == "mish")
+    expect("smolgen swish", activations["smolgen"] == "swish")
+    expect("ffn relu2", activations["ffn"] == "relu_2")
+
+
 def main() -> int:
     test_percentile_uses_sorted_values()
     test_compute_unit_mapping()
@@ -103,6 +128,7 @@ def main() -> int:
     test_parse_args()
     test_prediction_summary()
     test_attention_policy_map()
+    test_effective_activation_fixup()
     print("Lc0 Core ML value exporter tests: OK")
     return 0
 

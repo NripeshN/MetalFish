@@ -54,6 +54,7 @@ def test_parse_args_defaults() -> None:
     expect("candidate fp16", args.candidate_precision == "fp16")
     expect("value head fp32 default", args.candidate_value_head_fp32)
     expect("policy head fp32 default", not args.candidate_policy_head_fp32)
+    expect("metal probe off", args.metal_probe == "")
 
 
 def main() -> int:

@@ -192,6 +192,11 @@ def activation_mb(mb: Any, np: Any, x: Any, activation: str, name: str | None = 
         return named(mb.mul, "mul", x=x, y=sigmoid)
     if activation == "relu":
         return named(mb.relu, "relu", x=x)
+    if activation == "relu_2":
+        relu = named(mb.relu, "relu", x=x)
+        return named(mb.mul, "square", x=relu, y=relu)
+    if activation == "selu":
+        return named(mb.selu, "selu", x=x)
     raise RuntimeError(f"unsupported activation {activation}")
 
 
@@ -218,12 +223,15 @@ def layer_norm_mb(
     )
 
 
-def linear_mb(mb: Any, x: Any, weight: Any, bias: Any, name: str | None = None) -> Any:
+def linear_mb(
+    mb: Any, x: Any, weight: Any, bias: Any | None, name: str | None = None
+) -> Any:
     kwargs = {
         "x": x,
         "weight": mb.const(val=weight.astype("float32")),
-        "bias": mb.const(val=bias.astype("float32")),
     }
+    if bias is not None:
+        kwargs["bias"] = mb.const(val=bias.astype("float32"))
     if name:
         kwargs["name"] = name
     return mb.linear(**kwargs)
@@ -301,6 +309,34 @@ def inspect_t1(net: Any) -> dict[str, Any]:
     }
 
 
+def activation_name(nf: Any, value: int, default: str) -> str:
+    names = {
+        1: "mish",
+        2: "relu",
+        4: "tanh",
+        5: "sigmoid",
+        6: "selu",
+        7: "swish",
+        8: "relu_2",
+    }
+    if value == 0:
+        return default
+    if value not in names:
+        raise RuntimeError(f"unsupported activation enum {value}")
+    return names[value]
+
+
+def effective_activations(net: Any) -> dict[str, str]:
+    nf = net.format.network_format
+    default = "mish" if nf.default_activation == 1 else "relu"
+    smolgen = activation_name(nf, nf.smolgen_activation, default)
+    ffn = activation_name(nf, nf.ffn_activation, default)
+    if nf.network == 4 and len(net.weights.encoder) > 0 and net.weights.HasField("smolgen_w"):
+        smolgen = "swish"
+        ffn = "relu_2"
+    return {"default": default, "smolgen": smolgen, "ffn": ffn}
+
+
 def select_policy_head(weights: Any) -> Any:
     if weights.HasField("policy_heads"):
         policy_heads = weights.policy_heads
@@ -322,6 +358,7 @@ def build_value_model(
     encoder_layers_limit: int | None = None,
 ) -> Any:
     weights = net.weights
+    activations = effective_activations(net)
     layers = len(weights.encoder)
     channels = len(decode_layer(np, weights.ip_emb_b))
     heads = int(weights.headcount)
@@ -337,6 +374,24 @@ def build_value_model(
 
     encoders: list[dict[str, Any]] = []
     for enc in weights.encoder:
+        smolgen = None
+        if enc.mha.HasField("smolgen"):
+            sg = enc.mha.smolgen
+            hidden_channels = decode_layer(np, sg.compress).size // channels
+            dense1_b = decode_layer(np, sg.dense1_b)
+            dense2_b = decode_layer(np, sg.dense2_b)
+            smolgen = {
+                "compress_w": dense_weight(np, sg.compress, hidden_channels),
+                "hidden_channels": hidden_channels,
+                "dense1_w": dense_weight(np, sg.dense1_w, dense1_b.size),
+                "dense1_b": dense1_b,
+                "ln1_g": decode_layer(np, sg.ln1_gammas),
+                "ln1_b": decode_layer(np, sg.ln1_betas),
+                "dense2_w": dense_weight(np, sg.dense2_w, dense2_b.size),
+                "dense2_b": dense2_b,
+                "ln2_g": decode_layer(np, sg.ln2_gammas),
+                "ln2_b": decode_layer(np, sg.ln2_betas),
+            }
         encoders.append(
             {
                 "q_w": dense_weight(np, enc.mha.q_w, channels),
@@ -355,6 +410,7 @@ def build_value_model(
                 "ffn2_b": decode_layer(np, enc.ffn.dense2_b),
                 "ln2_g": decode_layer(np, enc.ln2_gammas),
                 "ln2_b": decode_layer(np, enc.ln2_betas),
+                "smolgen": smolgen,
             }
         )
 
@@ -377,6 +433,11 @@ def build_value_model(
     policy_k_w = dense_weight(np, policy_head.ip3_pol_w, policy_k_b.size)
     policy_promo_w = dense_weight(np, policy_head.ip4_pol_w, 4)
     policy_d_model = policy_q_b.size
+    global_smolgen_w = (
+        dense_weight(np, weights.smolgen_w, 64 * 64)
+        if weights.HasField("smolgen_w")
+        else None
+    )
     if policy_d_model == 0 or policy_k_b.size != policy_d_model:
         raise RuntimeError("attention policy q/k weights are missing")
     if len(policy_head.pol_encoder):
@@ -409,6 +470,48 @@ def build_value_model(
             scores = mb.matmul(x=q, y=k)
             scale = mb.const(val=np.array(1.0 / math.sqrt(head_dim), dtype=np.float32))
             scores = mb.mul(x=scores, y=scale)
+            if enc["smolgen"] is not None:
+                if global_smolgen_w is None:
+                    raise RuntimeError("encoder smolgen exists without global smolgen weights")
+                sg = enc["smolgen"]
+                smolgen = linear_mb(
+                    mb, body, sg["compress_w"], None, name="smolgen_compress_linear"
+                )
+                smolgen = mb.reshape(
+                    x=smolgen,
+                    shape=[1, 64 * sg["hidden_channels"]],
+                    name="smolgen_flatten",
+                )
+                smolgen = linear_mb(
+                    mb, smolgen, sg["dense1_w"], sg["dense1_b"], name="smolgen_dense1"
+                )
+                smolgen = activation_mb(
+                    mb, np, smolgen, activations["smolgen"], name="smolgen_dense1_act"
+                )
+                smolgen = layer_norm_mb(
+                    mb, np, smolgen, None, sg["ln1_g"], sg["ln1_b"], 0.0, 1e-3
+                )
+                smolgen = linear_mb(
+                    mb, smolgen, sg["dense2_w"], sg["dense2_b"], name="smolgen_dense2"
+                )
+                smolgen = activation_mb(
+                    mb, np, smolgen, activations["smolgen"], name="smolgen_dense2_act"
+                )
+                smolgen = layer_norm_mb(
+                    mb, np, smolgen, None, sg["ln2_g"], sg["ln2_b"], 0.0, 1e-3
+                )
+                smolgen = mb.reshape(
+                    x=smolgen,
+                    shape=[1, heads, sg["dense2_b"].size // heads],
+                    name="smolgen_reshape1",
+                )
+                smolgen = linear_mb(
+                    mb, smolgen, global_smolgen_w, None, name="smolgen_global"
+                )
+                smolgen = mb.reshape(
+                    x=smolgen, shape=[1, heads, 64, 64], name="smolgen_reshape2"
+                )
+                scores = mb.add(x=scores, y=smolgen, name="smolgen_add")
             probs = mb.softmax(x=scores, axis=-1)
             attn = mb.matmul(x=probs, y=v)
             attn = mb.transpose(x=attn, perm=[0, 2, 1, 3])
@@ -419,7 +522,7 @@ def build_value_model(
             )
 
             ffn = linear_mb(mb, body, enc["ffn1_w"], enc["ffn1_b"])
-            ffn = activation_mb(mb, np, ffn, "mish")
+            ffn = activation_mb(mb, np, ffn, activations["ffn"])
             ffn = linear_mb(mb, ffn, enc["ffn2_w"], enc["ffn2_b"])
             body = layer_norm_mb(
                 mb, np, body, ffn, enc["ln2_g"], enc["ln2_b"], alpha, 1e-6
