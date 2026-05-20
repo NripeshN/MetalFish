@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -364,6 +365,34 @@ __global__ void AttentionSoftmaxKernel(const float *scores,
 }
 
 __device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
+
+void EnsureAttentionPolicyGatherMapUploaded() {
+  int device = 0;
+  cudaError_t status = cudaGetDevice(&device);
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("cudaGetDevice(policy_gather)", status));
+  }
+
+  static std::mutex mutex;
+  static std::vector<int> uploaded_devices;
+
+  std::lock_guard<std::mutex> lock(mutex);
+  if (std::find(uploaded_devices.begin(), uploaded_devices.end(), device) !=
+      uploaded_devices.end()) {
+    return;
+  }
+
+  const auto &gather_map = AttentionPolicyGatherMap();
+  status = cudaMemcpyToSymbol(kAttentionPolicyGatherDevice, gather_map.data(),
+                              gather_map.size() * sizeof(int), 0,
+                              cudaMemcpyHostToDevice);
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionPolicyGather table upload", status));
+  }
+  uploaded_devices.push_back(device);
+}
 
 __global__ void AttentionPolicyMapKernel(const float *query, const float *key,
                                          const float *promotion_weights,
@@ -827,21 +856,14 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
     throw std::runtime_error("CUDA attention policy map dimensions are invalid");
   }
 
-  const auto &gather_map = AttentionPolicyGatherMap();
-  cudaError_t status = cudaMemcpyToSymbolAsync(
-      kAttentionPolicyGatherDevice, gather_map.data(),
-      gather_map.size() * sizeof(int), 0, cudaMemcpyHostToDevice, stream);
-  if (status != cudaSuccess) {
-    throw std::runtime_error(
-        CudaErrorMessage("AttentionPolicyGather table upload", status));
-  }
+  EnsureAttentionPolicyGatherMapUploaded();
 
   const int total = batch_size * kNetworkAttentionPolicyScratch;
   constexpr int kThreads = 256;
   const int blocks = (total + kThreads - 1) / kThreads;
   AttentionPolicyMapKernel<<<blocks, kThreads, 0, stream>>>(
       query, key, promotion_weights, raw_policy, channels, total);
-  status = cudaGetLastError();
+  cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("AttentionPolicyMapKernel launch", status));
