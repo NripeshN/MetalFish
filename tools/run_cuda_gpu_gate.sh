@@ -49,19 +49,26 @@ run_apt_get() {
 
 if [[ "${METALFISH_INSTALL_DEPS:-0}" == "1" ]]; then
   export DEBIAN_FRONTEND=noninteractive
-  run_apt_get update
-  run_apt_get install -y \
-    build-essential \
-    cmake \
-    curl \
-    ninja-build \
-    pkg-config \
-    protobuf-compiler \
-    libprotobuf-dev \
-    zlib1g-dev \
-    libabsl-dev \
-    python3 \
-    python3-pip
+  for attempt in 1 2 3; do
+    if run_apt_get update && run_apt_get install -y \
+      build-essential \
+      cmake \
+      curl \
+      ninja-build \
+      pkg-config \
+      protobuf-compiler \
+      libprotobuf-dev \
+      zlib1g-dev \
+      libabsl-dev \
+      python3 \
+      python3-pip; then
+      break
+    fi
+    if [[ "${attempt}" == "3" ]]; then
+      exit 1
+    fi
+    sleep 20
+  done
 fi
 
 if ! command -v nvidia-smi >/dev/null 2>&1; then
