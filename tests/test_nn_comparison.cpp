@@ -753,6 +753,16 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
       histories.push_back(fixtures.back().ptrs);
     }
 
+    EvalTolerances tolerances;
+    const std::string network_info = single_eval.GetNetworkInfo();
+    if (report && report->backend_info.empty())
+      report->backend_info = network_info;
+    if (network_info.find("CUDA transformer backend") != std::string::npos) {
+      tolerances.value = 2e-3f;
+      tolerances.moves_left = 1.25e-1f;
+      tolerances.policy = 5e-2f;
+    }
+
     if (env_flag_enabled("METALFISH_NN_BATCH_TRACE_PAIR")) {
       const int trace_batch_size = env_int_or_default(
           "METALFISH_NN_BATCH_TRACE_BATCH", 32, 1,
@@ -782,20 +792,31 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
                 << " worst=" << metrics.worst_field << std::endl;
     }
 
+    const size_t shrink_batch_size = std::min<size_t>(32, histories.size());
+    if (shrink_batch_size > 1) {
+      std::vector<std::vector<const Position *>> warm_batch(
+          histories.begin(), histories.begin() + shrink_batch_size);
+      (void)batch_eval.EvaluateBatchWithHistory(warm_batch);
+      std::vector<std::vector<const Position *>> small_batch = {
+          histories.front()};
+      auto shrink_outputs = batch_eval.EvaluateBatchWithHistory(small_batch);
+      if (shrink_outputs.size() != 1) {
+        std::cout << "    FAIL: batch shrink result count mismatch"
+                  << std::endl;
+        return false;
+      }
+      const auto shrink_single =
+          single_eval.EvaluateWithHistory(histories.front());
+      if (!compare_eval_result(shrink_single, shrink_outputs.front(),
+                               "batch shrink reuse entry 0", tolerances)) {
+        return false;
+      }
+    }
+
     std::vector<MCTS::EvaluationResult> singles;
     singles.reserve(histories.size());
     for (const auto &history : histories) {
       singles.push_back(single_eval.EvaluateWithHistory(history));
-    }
-
-    EvalTolerances tolerances;
-    const std::string network_info = single_eval.GetNetworkInfo();
-    if (report && report->backend_info.empty())
-      report->backend_info = network_info;
-    if (network_info.find("CUDA transformer backend") != std::string::npos) {
-      tolerances.value = 2e-3f;
-      tolerances.moves_left = 1.25e-1f;
-      tolerances.policy = 5e-2f;
     }
 
     const std::array<size_t, 7> batch_sizes = {1, 2, 4, 8, 16, 32,

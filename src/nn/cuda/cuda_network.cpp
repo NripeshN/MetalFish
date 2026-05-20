@@ -220,6 +220,7 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
   auto run_once = [&]() {
     const bool batch_size_changed = workspace_batch_size_ != batch_size;
     if (batch_size_changed) {
+      workspace_.Release();
       workspace_batch_size_ = batch_size;
     }
     cudaStream_t stream = workspace_.Stream();
