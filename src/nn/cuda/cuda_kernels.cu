@@ -85,6 +85,12 @@ public:
 #endif
     if (status != CUBLAS_STATUS_SUCCESS)
       throw std::runtime_error(CublasErrorMessage("cublasSetMathMode", status));
+
+    status = cublasSetAtomicsMode(handle_, CUBLAS_ATOMICS_NOT_ALLOWED);
+    if (status != CUBLAS_STATUS_SUCCESS) {
+      throw std::runtime_error(
+          CublasErrorMessage("cublasSetAtomicsMode", status));
+    }
   }
 
   ThreadLocalCublasHandle(const ThreadLocalCublasHandle &) = delete;
