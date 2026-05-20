@@ -394,52 +394,42 @@ void EnsureAttentionPolicyGatherMapUploaded() {
   uploaded_devices.push_back(device);
 }
 
-__global__ void AttentionPolicyMapKernel(const float *query, const float *key,
-                                         const float *promotion_weights,
-                                         float *raw_policy, int channels,
-                                         int total) {
+__global__ void AttentionPolicyPromotionKernel(const float *query,
+                                               const float *key,
+                                               const float *promotion_weights,
+                                               float *raw_policy, int channels,
+                                               int total) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index >= total)
     return;
 
-  const int raw_index = index % kNetworkAttentionPolicyScratch;
-  const int batch = index / kNetworkAttentionPolicyScratch;
   constexpr int kSquares = kPackedInputSquareCount;
-  float value = 0.0f;
+  constexpr int kPromotionCount = kNetworkAttentionPolicyScratch -
+                                  kPackedInputSquareCount *
+                                      kPackedInputSquareCount;
+  const int promo_index = index % kPromotionCount;
+  const int batch = index / kPromotionCount;
+  const int query_square = 48 + promo_index / 24;
+  const int key_square = 56 + (promo_index % 24) / 3;
+  const int promotion_row = promo_index % 3;
+  const float *query_row =
+      query + (static_cast<std::size_t>(batch) * kSquares + query_square) *
+                  channels;
+  const float *key_row =
+      key + (static_cast<std::size_t>(batch) * kSquares + key_square) *
+                channels;
 
-  if (raw_index < kSquares * kSquares) {
-    const int query_square = raw_index / kSquares;
-    const int key_square = raw_index % kSquares;
-    const float *query_row =
-        query + (static_cast<std::size_t>(batch) * kSquares + query_square) *
-                    channels;
-    const float *key_row =
-        key + (static_cast<std::size_t>(batch) * kSquares + key_square) *
-                  channels;
-    for (int channel = 0; channel < channels; ++channel)
-      value += query_row[channel] * key_row[channel];
-    value *= rsqrtf(static_cast<float>(channels));
-  } else {
-    const int promo_index = raw_index - kSquares * kSquares;
-    const int query_square = 48 + promo_index / 24;
-    const int key_square = 56 + (promo_index % 24) / 3;
-    const int promotion_row = promo_index % 3;
-    const float *query_row =
-        query + (static_cast<std::size_t>(batch) * kSquares + query_square) *
-                    channels;
-    const float *key_row =
-        key + (static_cast<std::size_t>(batch) * kSquares + key_square) *
-                  channels;
-    for (int channel = 0; channel < channels; ++channel) {
-      value += query_row[channel] * key_row[channel] *
-               rsqrtf(static_cast<float>(channels));
-      value += key_row[channel] *
-               (promotion_weights[promotion_row * channels + channel] +
-                promotion_weights[3 * channels + channel]);
-    }
+  float value = 0.0f;
+  const float scale = rsqrtf(static_cast<float>(channels));
+  for (int channel = 0; channel < channels; ++channel) {
+    value += query_row[channel] * key_row[channel] * scale;
+    value += key_row[channel] *
+             (promotion_weights[promotion_row * channels + channel] +
+              promotion_weights[3 * channels + channel]);
   }
 
-  raw_policy[index] = value;
+  raw_policy[static_cast<std::size_t>(batch) * kNetworkAttentionPolicyScratch +
+             kSquares * kSquares + promo_index] = value;
 }
 
 __global__ void AttentionPolicyGatherKernel(const float *raw_policy,
@@ -858,15 +848,39 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
 
   EnsureAttentionPolicyGatherMapUploaded();
 
-  const int total = batch_size * kNetworkAttentionPolicyScratch;
+  cublasHandle_t handle = CublasHandle();
+  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
+  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+    throw std::runtime_error(
+        CublasErrorMessage("cublasSetStream", cublas_status));
+  }
+
+  constexpr int kSquares = kPackedInputSquareCount;
+  const float alpha = 1.0f / std::sqrt(static_cast<float>(channels));
+  const float beta = 0.0f;
+  const long long input_stride =
+      static_cast<long long>(kSquares) * channels;
+  const long long raw_policy_stride = kNetworkAttentionPolicyScratch;
+  cublas_status = cublasSgemmStridedBatched(
+      handle, CUBLAS_OP_T, CUBLAS_OP_N, kSquares, kSquares, channels, &alpha,
+      key, channels, input_stride, query, channels, input_stride, &beta,
+      raw_policy, kSquares, raw_policy_stride, batch_size);
+  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+    throw std::runtime_error(CublasErrorMessage(
+        "cublasSgemmStridedBatched(attention_policy_map)", cublas_status));
+  }
+
+  constexpr int kPromotionCount =
+      kNetworkAttentionPolicyScratch - kSquares * kSquares;
+  const int total = batch_size * kPromotionCount;
   constexpr int kThreads = 256;
   const int blocks = (total + kThreads - 1) / kThreads;
-  AttentionPolicyMapKernel<<<blocks, kThreads, 0, stream>>>(
+  AttentionPolicyPromotionKernel<<<blocks, kThreads, 0, stream>>>(
       query, key, promotion_weights, raw_policy, channels, total);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess) {
     throw std::runtime_error(
-        CudaErrorMessage("AttentionPolicyMapKernel launch", status));
+        CudaErrorMessage("AttentionPolicyPromotionKernel launch", status));
   }
   const int policy_total = batch_size * kNetworkPolicyOutputs;
   const int gather_blocks = (policy_total + kThreads - 1) / kThreads;

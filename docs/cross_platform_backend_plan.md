@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, policy-gather upload cache gate |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, cuBLAS policy-map gate |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -110,9 +110,10 @@ Current CUDA backend boundary:
   attention/FFN blocks. It also contains the first attention-core kernels for
   scaled QK scores, row softmax, and probability-weighted value context
   construction, smolgen attention-bias addition before attention softmax, and
-  attention-policy scratch-to-1858 mapping. The CUDA policy map keeps its fixed
-  gather table in device constant memory and uploads it once per active CUDA
-  device instead of once per inference. CUDA also has the BT4
+  attention-policy scratch-to-1858 mapping. The CUDA policy map uses cuBLAS for
+  the 64x64 square-policy logits, a narrow CUDA kernel for promotion logits, and
+  a fixed gather table kept in device constant memory and uploaded once per
+  active CUDA device. CUDA also has the BT4
   dynamic-position-input kernels that expand packed plane masks/values to NHWC
   board rows, gather the first 12 planes for dense positional encoding, and
   concatenate generated positional channels back onto the 112 input channels.
@@ -195,8 +196,9 @@ Current CUDA backend boundary:
   `nvidia-smi` and `nvcc`, builds CUDA with BT4 weights, runs CUDA unit tests,
   runs `test_nn_comparison` through `NNBackend=auto` on the CUDA host, and runs
   a one-thread `NNBackend=cuda` MCTS UCI smoke. Dependency installation waits
-  and retries around apt/dpkg locks so fresh cloud images do not fail the gate
-  while unattended upgrades are still running.
+  and retries around apt/dpkg locks and refreshes the package index before each
+  install attempt so fresh cloud images do not fail the gate while unattended
+  upgrades or transient mirror failures are still running.
 - `tools/run_gcp_cuda_gpu_gate.sh` creates an ephemeral GCP L4 VM from a clean
   `git archive`, runs `tools/run_cuda_gpu_gate.sh` on the VM, and deletes the
   VM by default. It uses explicit `METALFISH_GCP_*` variables so the current
