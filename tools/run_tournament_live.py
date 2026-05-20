@@ -377,6 +377,10 @@ def extract_search_log_lines(lines: Sequence[str]) -> List[str]:
     return keep
 
 
+def clock_label(ms: int) -> str:
+    return f"{max(0, ms) / 1000.0:.1f}s"
+
+
 def play_game(
     white: UCIEngine,
     black: UCIEngine,
@@ -388,6 +392,8 @@ def play_game(
     max_moves: int = 300,
     max_plies: int = 0,
     capture_search_log: bool = False,
+    progress_label: str = "",
+    progress_plies: int = 10,
 ) -> GameResult:
     if opening:
         board = opening.copy()
@@ -518,6 +524,16 @@ def play_game(
         node = node.add_variation(move)
         board.push(move)
 
+        completed_plies = ply + 1
+        if progress_plies > 0 and completed_plies % progress_plies == 0:
+            label = f"{progress_label} " if progress_label else ""
+            print(
+                f"    {label}ply {completed_plies:3d}/{ply_limit}: "
+                f"{eng.name} {move_str} "
+                f"(W {clock_label(wtime)}, B {clock_label(btime)})",
+                flush=True,
+            )
+
     completed_plies = len(move_list)
     return GameResult(
         white.name,
@@ -623,6 +639,7 @@ def run_match(
     max_plies: int = 0,
     capture_search_log: bool = False,
     progress_callback: Optional[Callable[[MatchResult], None]] = None,
+    progress_plies: int = 10,
 ) -> MatchResult:
     result = MatchResult(eng1_name, eng2_name)
     print(f"\n{'='*60}", flush=True)
@@ -658,6 +675,8 @@ def run_match(
             max_moves,
             max_plies,
             capture_search_log=capture_search_log,
+            progress_label=f"Game {g + 1}/{num_games}",
+            progress_plies=progress_plies,
         )
 
         if g % 2 == 0:
@@ -881,6 +900,7 @@ def run_tournament(args):
                 args.max_plies,
                 args.save_search_log,
                 checkpoint_match,
+                args.progress_plies,
             )
 
             match_data = match_result_to_dict(mr)
@@ -1001,6 +1021,12 @@ def main():
         "--save-search-log",
         action="store_true",
         help="Save compact per-move info string diagnostics in results JSON",
+    )
+    parser.add_argument(
+        "--progress-plies",
+        type=int,
+        default=10,
+        help="Print in-game progress every N plies (0 disables, default: 10)",
     )
     parser.add_argument("--resume", type=str, help="Resume from results directory")
     args = parser.parse_args()

@@ -476,6 +476,8 @@ def main() -> int:
             '"--max-plies"',
             '"max_plies": args.max_plies',
             "Ply cap:",
+            '"--progress-plies"',
+            "Print in-game progress every N plies",
             'options["HybridTrace"] = "true"',
             'line.startswith("info string Time safety:")',
             'line.startswith("info string Hybrid: AB root hints from MCTS")',
