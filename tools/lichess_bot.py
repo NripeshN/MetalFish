@@ -35,6 +35,11 @@ import chess
 import chess.polyglot
 
 try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
+
+try:
     import requests
 except ModuleNotFoundError:
     requests = None
@@ -206,6 +211,15 @@ BOOK_CACHE_PATH = pathlib.Path(
 BOOK_CACHE_LIMIT = max(0, env_int("METALFISH_BOOK_CACHE_LIMIT", 50000))
 DEFAULT_BOOK_DIR = PROJ / "books"
 BOOK_ALLOW_ONLINE = env_bool_string("METALFISH_BOOK_ALLOW_ONLINE", False) == "true"
+BOT_LOCK_PATH = pathlib.Path(
+    os.environ.get(
+        "METALFISH_BOT_LOCK",
+        str(PROJ / "results" / "lichess_bot.lock"),
+    )
+)
+ALLOW_CONCURRENT_BOT = (
+    env_bool_string("METALFISH_ALLOW_CONCURRENT_BOT", False) == "true"
+)
 ENGINE_STOP_GRACE_S = 3.0
 PONDER_STOP_TIMEOUT_S = 4.0
 PONDER_HIT_TIMEOUT_S = 6.0
@@ -222,6 +236,9 @@ EVENT_STREAM_RECONNECT_DELAY_S = env_float(
 LICHESS_API_MIN_INTERVAL_S = env_float("METALFISH_LICHESS_API_MIN_INTERVAL_S", 0.35)
 EXPLORER_API_MIN_INTERVAL_S = env_float("METALFISH_EXPLORER_API_MIN_INTERVAL_S", 0.25)
 LICHESS_429_BACKOFF_S = env_float("METALFISH_LICHESS_429_BACKOFF_S", 65.0)
+BOT_ONLINE_FETCH_LIMIT = max(
+    1, min(512, env_int("METALFISH_BOT_ONLINE_FETCH_LIMIT", 512))
+)
 BOT_ONLINE_CACHE_TTL_S = env_float("METALFISH_BOT_ONLINE_CACHE_TTL_S", 20.0)
 PLAYING_STATUS_CACHE_TTL_S = env_float("METALFISH_PLAYING_STATUS_CACHE_TTL_S", 5.0)
 CHALLENGE_COOLDOWN_PATH = pathlib.Path(
@@ -229,6 +246,15 @@ CHALLENGE_COOLDOWN_PATH = pathlib.Path(
         "METALFISH_CHALLENGE_COOLDOWN_FILE",
         str(PROJ / "results" / "lichess_challenge_cooldowns.json"),
     )
+)
+PLAYED_FORMAT_HISTORY_PATH = pathlib.Path(
+    os.environ.get(
+        "METALFISH_PLAYED_FORMAT_FILE",
+        str(PROJ / "results" / "lichess_played_formats.json"),
+    )
+)
+PLAYED_FORMAT_HISTORY_LIMIT = max(
+    128, min(20000, env_int("METALFISH_PLAYED_FORMAT_HISTORY_LIMIT", 4096))
 )
 PRE_GAME_RESOURCE_PREP = (
     env_bool_string("METALFISH_PRE_GAME_RESOURCE_PREP", True) == "true"
@@ -494,7 +520,7 @@ BULLET_ROTATION_TCS = [
 ]
 
 ACCEPTED_SPEEDS = {"bullet", "blitz", "rapid", "classical", "correspondence"}
-CHALLENGE_TIMEOUT = 20
+CHALLENGE_TIMEOUT = max(20.0, env_float("METALFISH_CHALLENGE_TIMEOUT_S", 21.0))
 MAX_CHALLENGE_RETRIES = 3
 
 
@@ -536,8 +562,13 @@ def validate_bot_config(args) -> list[str]:
         errors.append("--elo-range must be > 0 when --elo-seek is enabled.")
 
     if args_seek_is_rated(args):
-        if not getattr(args, "elo_seek", False):
-            errors.append("Rated outgoing seeks require --elo-seek.")
+        if not (
+            getattr(args, "elo_seek", False)
+            or getattr(args, "seek_highest_rated", False)
+        ):
+            errors.append(
+                "Rated outgoing seeks require --elo-seek or --seek-highest-rated."
+            )
         if floor <= 0:
             errors.append("Rated outgoing seeks require --min-rated-opponent-elo > 0.")
     return errors
@@ -562,6 +593,10 @@ def print_config_check(args) -> None:
     print(f"  Seek: {checker._seek_policy_label()}")
     print(f"  Incoming rated: {checker._rated_policy_label()}")
     print(
+        "  Repeat seek: "
+        f"{'avoid same bot/speed' if getattr(args, 'avoid_repeat_format', False) else 'allowed'}"
+    )
+    print(
         f"  Resources: {int(profile['threads'])} search threads, "
         f"Hash {int(profile['hash_mb'])} MB, Free {memory}, "
         f"load {float(profile['load_ratio']):.2f}"
@@ -580,6 +615,61 @@ def print_config_check(args) -> None:
         f"({LICHESS_AUDIT_DIR})"
     )
     print(f"  Ponder: {args.ponder}")
+
+
+class BotInstanceLock:
+    def __init__(self, path: pathlib.Path, enabled: bool = True):
+        self.path = pathlib.Path(path)
+        self.enabled = enabled and not ALLOW_CONCURRENT_BOT and fcntl is not None
+        self._file = None
+
+    def acquire(self) -> None:
+        if not self.enabled:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = self.path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            lock_file.seek(0)
+            owner = lock_file.read().strip()
+            lock_file.close()
+            detail = f" ({owner})" if owner else ""
+            raise RuntimeError(
+                f"another MetalFish Lichess bot is already running{detail}"
+            ) from exc
+
+        lock_file.seek(0)
+        lock_file.truncate()
+        lock_file.write(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "started": int(time.time()),
+                    "argv": sys.argv,
+                },
+                sort_keys=True,
+            )
+        )
+        lock_file.flush()
+        self._file = lock_file
+
+    def release(self) -> None:
+        if self._file is None:
+            return
+        try:
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._file.close()
+            self._file = None
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.release()
+        return False
 
 
 class UCIEngine:
@@ -1293,6 +1383,7 @@ class LichessBot:
         self._rotation_idx = 0
         self._pending_challenge_id: str | None = None
         self._pending_challenge_target: str | None = None
+        self._pending_challenge_speed: str | None = None
         self._challenge_sent_at: float = 0
         self._challenge_retries = 0
         self.book = OpeningBook(
@@ -1308,6 +1399,10 @@ class LichessBot:
         self._elo_widen_steps = 0
         self._persist_challenge_cooldowns = True
         self._declined_cooldown: dict[str, float] = self._load_challenge_cooldowns()
+        self._persist_played_format_history = True
+        self._played_by_speed: dict[str, dict[str, float]] = (
+            self._load_played_format_history()
+        )
         self._rate_limit_count = 0
         self._tc_failures = 0
         self._completed_games = 0
@@ -1828,6 +1923,7 @@ class LichessBot:
     def _clear_pending_challenge(self):
         self._pending_challenge_id = None
         self._pending_challenge_target = None
+        self._pending_challenge_speed = None
         self._challenge_sent_at = 0
 
     def _cancel_pending_challenge(self, reason: str):
@@ -1888,12 +1984,14 @@ class LichessBot:
     def _seek_is_rated(self) -> bool:
         return bool(self.args.accept_rated and not self.args.accept_casual)
 
-    def _rated_policy_label(self) -> str:
+    def _rated_policy_label(self, *, outgoing: bool = False) -> str:
         if not self.args.accept_rated:
             return "disabled"
         floor = getattr(self.args, "min_rated_opponent_elo", 0) or 0
         parts = [f">= {floor}" if floor > 0 else "no floor"]
-        if getattr(self.args, "elo_seek", False):
+        if outgoing and getattr(self.args, "seek_highest_rated", False):
+            parts.append("highest-rated first")
+        elif getattr(self.args, "elo_seek", False):
             parts.append(f"within +/-{self._current_elo_range()} Elo")
         return ", ".join(parts)
 
@@ -1901,7 +1999,7 @@ class LichessBot:
         if not self.args.seek:
             return "disabled"
         if self._seek_is_rated():
-            return f"rated ({self._rated_policy_label()})"
+            return f"rated ({self._rated_policy_label(outgoing=True)})"
         return "casual"
 
     def _cooldown_key(self, bot_id: str | None) -> str | None:
@@ -1947,12 +2045,87 @@ class LichessBot:
         except Exception:
             pass
 
+    def _load_played_format_history(self) -> dict[str, dict[str, float]]:
+        try:
+            data = json.loads(PLAYED_FORMAT_HISTORY_PATH.read_text())
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+
+        history: dict[str, dict[str, float]] = {}
+        for speed, entries in data.items():
+            if speed not in ACCEPTED_SPEEDS or not isinstance(entries, dict):
+                continue
+            clean_entries: dict[str, float] = {}
+            for bot_id, played_at in entries.items():
+                key = self._cooldown_key(str(bot_id))
+                if not key:
+                    continue
+                try:
+                    clean_entries[key] = float(played_at)
+                except (TypeError, ValueError):
+                    clean_entries[key] = 0.0
+            if clean_entries:
+                history[speed] = clean_entries
+        return history
+
+    def _save_played_format_history(self) -> None:
+        if not getattr(self, "_persist_played_format_history", False):
+            return
+        history = getattr(self, "_played_by_speed", {})
+        if not isinstance(history, dict):
+            return
+
+        data: dict[str, dict[str, float]] = {}
+        remaining = PLAYED_FORMAT_HISTORY_LIMIT
+        for speed in sorted(history):
+            entries = history.get(speed, {})
+            if speed not in ACCEPTED_SPEEDS or not isinstance(entries, dict):
+                continue
+            ordered = sorted(entries.items(), key=lambda item: item[1], reverse=True)
+            limited = ordered[: max(0, remaining)]
+            if limited:
+                data[speed] = {key: played_at for key, played_at in limited}
+                remaining -= len(limited)
+            if remaining <= 0:
+                break
+
+        try:
+            PLAYED_FORMAT_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+            PLAYED_FORMAT_HISTORY_PATH.write_text(json.dumps(data, indent=2))
+        except Exception:
+            pass
+
     def _bot_on_cooldown(self, bot_id: str | None, now: float | None = None) -> bool:
         key = self._cooldown_key(bot_id)
         if not key:
             return False
         cooldowns = getattr(self, "_declined_cooldown", {})
         return (now or time.time()) < cooldowns.get(key, 0)
+
+    def _bot_played_in_speed(self, bot_id: str | None, speed: str) -> bool:
+        if not getattr(self.args, "avoid_repeat_format", False):
+            return False
+        key = self._cooldown_key(bot_id)
+        if not key:
+            return False
+        history = getattr(self, "_played_by_speed", {})
+        entries = history.get(speed, {}) if isinstance(history, dict) else {}
+        return key in entries
+
+    def _mark_seek_opponent_played(self, bot_id: str | None, speed: str | None):
+        if not getattr(self.args, "avoid_repeat_format", False):
+            return
+        key = self._cooldown_key(bot_id)
+        if not key or speed not in ACCEPTED_SPEEDS:
+            return
+        if not hasattr(self, "_played_by_speed") or not isinstance(
+            self._played_by_speed, dict
+        ):
+            self._played_by_speed = {}
+        self._played_by_speed.setdefault(str(speed), {})[key] = time.time()
+        self._save_played_format_history()
 
     def _online_bots_from_ndjson(self, text: str) -> list[dict]:
         bots: list[dict] = []
@@ -1981,7 +2154,7 @@ class LichessBot:
         if not force_refresh and cached is not None and cached[0] > now:
             return cached[1], None
 
-        r = self.api_get("/bot/online", params={"nb": 100})
+        r = self.api_get("/bot/online", params={"nb": BOT_ONLINE_FETCH_LIMIT})
         if r.status_code != 200:
             return None, r.status_code
 
@@ -2003,6 +2176,17 @@ class LichessBot:
         ]
         if not bots:
             return [], "All eligible bots are cooling down after declines/timeouts"
+
+        if getattr(self.args, "avoid_repeat_format", False):
+            bots = [
+                b
+                for b in bots
+                if not self._bot_played_in_speed(
+                    str(b.get("id") or b.get("name") or ""), speed
+                )
+            ]
+            if not bots:
+                return [], f"All eligible bots were already played in {speed}"
 
         if rated:
             bots = [b for b in bots if self._rated_opponent_allowed(b, speed)]
@@ -2109,6 +2293,7 @@ class LichessBot:
                     return
                 self._pending_challenge_id = challenge_id
                 self._pending_challenge_target = target
+                self._pending_challenge_speed = speed
                 self._challenge_sent_at = time.time()
                 self._challenge_retries = 0
                 self._rate_limit_count = 0
@@ -2121,14 +2306,16 @@ class LichessBot:
             elif r.status_code == 429:
                 print("  Rate limited, backing off...")
                 self._rate_limit_count += 1
+                retry_after = _retry_after_seconds(r)
                 if self._rate_limit_count >= 3:
-                    backoff = 900  # 15 minutes
+                    backoff = max(900, retry_after)
                     print(
-                        f"  Possible daily cap hit. Waiting {backoff//60}min before retrying."
+                        "  Possible daily cap hit. "
+                        f"Waiting {int(backoff) // 60}min before retrying."
                     )
                 else:
-                    backoff = 90  # Lichess docs say "wait a full minute"
-                    print(f"  Waiting {backoff}s...")
+                    backoff = max(65, retry_after)
+                    print(f"  Waiting {int(backoff)}s...")
                 self._schedule_retry(backoff)
             else:
                 detail = (r.text or "").strip().replace("\n", " ")[:180]
@@ -2213,7 +2400,7 @@ class LichessBot:
             target = self._pending_challenge_target or self._pending_challenge_id
             print(f"  Challenge to {target} timed out")
             self._cooldown_bot(target, duration=600)
-            self._cancel_pending_challenge("timeout")
+            self._clear_pending_challenge()
             self._challenge_retries += 1
             self._tc_failures += 1
             if self._tc_failures >= 3 and self.args.rotate:
@@ -2306,7 +2493,19 @@ class LichessBot:
         return rating is not None and rating >= floor
 
     def _filter_bots_by_elo(self, bots: list[dict], speed: str) -> list[str]:
-        if not self.args.elo_seek:
+        if getattr(self.args, "seek_highest_rated", False):
+            scored: list[tuple[int, str]] = []
+            for bot in bots:
+                bot_id = bot.get("id", "")
+                if not bot_id or not self._bot_plays_speed(bot, speed):
+                    continue
+                rating = self._get_bot_rating(bot, speed)
+                if rating is not None:
+                    scored.append((rating, str(bot_id)))
+            scored.sort(key=lambda item: (-item[0], item[1].lower()))
+            return [bot_id for _, bot_id in scored]
+
+        if not getattr(self.args, "elo_seek", False):
             # Still filter by speed activity even without elo-seek
             active = [b for b in bots if self._bot_plays_speed(b, speed)]
             if not active:
@@ -3528,6 +3727,10 @@ class LichessBot:
         )
         print(f"  Seek:     {self._seek_policy_label()} | TC: {tc_mode}")
         print(f"  Incoming rated: {self._rated_policy_label()}")
+        print(
+            f"  Repeat:   "
+            f"{'avoid same bot/speed' if self.args.avoid_repeat_format else 'allowed'}"
+        )
         print(f"  Max games: {self.args.max_games}")
         if self.args.quit_after_games:
             print(f"  Quit after: {self.args.quit_after_games} completed game(s)")
@@ -3597,6 +3800,45 @@ class LichessBot:
                     print(f"  Event loop error: {e}")
                     time.sleep(5)
 
+    def _handle_game_start(self, game_id: str) -> None:
+        if not game_id:
+            return
+        if self._game_was_completed(game_id):
+            print(f"  [{game_id}] Ignoring stale gameStart for completed game")
+            return
+        if self._seek_timer:
+            self._seek_timer.cancel()
+            self._seek_timer = None
+        if game_id in self.active_games:
+            return
+
+        pending_id = self._pending_challenge_id
+        pending_target = self._pending_challenge_target
+        pending_speed = getattr(self, "_pending_challenge_speed", None)
+        if pending_id:
+            if self._same_game_id(pending_id, game_id):
+                self._mark_seek_opponent_played(pending_target, pending_speed)
+                self._cancel_pending_challenge("game started")
+            else:
+                self._cancel_pending_challenge("game started elsewhere")
+
+        self._reset_elo_range()
+        self._tc_failures = 0
+        if self._draining.is_set():
+            print(f"  [{game_id}] Drain mode active, aborting new game")
+            self.abort_or_resign(game_id)
+            if not self.active_games:
+                self._shutdown.set()
+            return
+        if len(self.active_games) >= self.args.max_games:
+            print(f"  [{game_id}] Max games reached, aborting overflow game")
+            self.abort_or_resign(game_id)
+            return
+        self._advance_rotation()
+        t = threading.Thread(target=self.play_game, args=(game_id,), daemon=True)
+        self.active_games[game_id] = t
+        t.start()
+
     def _handle_event(self, event: dict):
         if not isinstance(event, dict):
             return
@@ -3648,33 +3890,12 @@ class LichessBot:
 
         elif etype == "gameStart":
             game_id = self._event_game_id(event)
-            if not game_id:
-                return
-            if self._game_was_completed(game_id):
-                print(f"  [{game_id}] Ignoring stale gameStart for completed game")
-                return
-            if self._seek_timer:
-                self._seek_timer.cancel()
-                self._seek_timer = None
-            if game_id in self.active_games:
-                return
-            self._cancel_pending_challenge("game started")
-            self._reset_elo_range()
-            self._tc_failures = 0
-            if self._draining.is_set():
-                print(f"  [{game_id}] Drain mode active, aborting new game")
-                self.abort_or_resign(game_id)
-                if not self.active_games:
-                    self._shutdown.set()
-                return
-            if len(self.active_games) >= self.args.max_games:
-                print(f"  [{game_id}] Max games reached, aborting overflow game")
-                self.abort_or_resign(game_id)
-                return
-            self._advance_rotation()
-            t = threading.Thread(target=self.play_game, args=(game_id,), daemon=True)
-            self.active_games[game_id] = t
-            t.start()
+            seek_lock = getattr(self, "_seek_lock", None)
+            if seek_lock is None:
+                self._handle_game_start(game_id)
+            else:
+                with seek_lock:
+                    self._handle_game_start(game_id)
 
         elif etype == "gameFinish":
             game_id = self._event_game_id(event)
@@ -3816,6 +4037,21 @@ def main():
         help="Filter opponents by Elo proximity (starts tight, widens if no match)",
     )
     parser.add_argument(
+        "--seek-highest-rated",
+        action="store_true",
+        default=False,
+        help=(
+            "Seek the highest-rated eligible online bot first, then descend as "
+            "declines/cooldowns remove candidates"
+        ),
+    )
+    parser.add_argument(
+        "--avoid-repeat-format",
+        action="store_true",
+        default=False,
+        help="Do not seek the same bot twice in the same speed category",
+    )
+    parser.add_argument(
         "--elo-range",
         type=int,
         default=200,
@@ -3849,10 +4085,6 @@ def main():
         print(f"ERROR: Weights not found at {WEIGHTS}")
         sys.exit(1)
 
-    if args.self_test_only:
-        bot = LichessBot("", args)
-        sys.exit(0 if bot._run_engine_self_test() else 1)
-
     config_errors = validate_bot_config(args)
     if config_errors:
         for error in config_errors:
@@ -3863,20 +4095,48 @@ def main():
         print_config_check(args)
         sys.exit(0)
 
-    if requests is None:
-        print("ERROR: Python package 'requests' is required for Lichess API mode.")
-        print("Install it in this environment or run with the project Python.")
-        sys.exit(1)
-
-    api_key = load_api_key()
-    bot = LichessBot(api_key, args)
     if args.seek_dry_run:
+        if requests is None:
+            print("ERROR: Python package 'requests' is required for Lichess API mode.")
+            print("Install it in this environment or run with the project Python.")
+            sys.exit(1)
+        api_key = load_api_key()
+        bot = LichessBot(api_key, args)
         profile = bot.get_profile()
         bot.bot_id = profile.get("id", "")
         bot.username = profile.get("username", bot.bot_id)
         sys.exit(0 if bot.preview_seek_once() else 1)
 
-    bot.run()
+    try:
+        bot_lock = BotInstanceLock(BOT_LOCK_PATH)
+        bot_lock.acquire()
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
+        print(
+            "Set METALFISH_ALLOW_CONCURRENT_BOT=1 only for deliberate "
+            "throughput experiments."
+        )
+        sys.exit(2)
+
+    if args.self_test_only:
+        try:
+            bot = LichessBot("", args)
+            sys.exit(0 if bot._run_engine_self_test() else 1)
+        finally:
+            bot_lock.release()
+
+    if requests is None:
+        print("ERROR: Python package 'requests' is required for Lichess API mode.")
+        print("Install it in this environment or run with the project Python.")
+        bot_lock.release()
+        sys.exit(1)
+
+    api_key = load_api_key()
+    bot = LichessBot(api_key, args)
+    try:
+        bot.run()
+    finally:
+        bot_lock.release()
 
 
 if __name__ == "__main__":

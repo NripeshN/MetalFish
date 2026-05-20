@@ -313,13 +313,16 @@ def setup_metalfish(
     multipv: int,
     minibatch_size: int,
     mcts_kld: float,
+    mcts_parallel_search: bool,
 ) -> None:
+    mcts_threads = max(1, threads) if mcts_parallel_search else 1
     sess.setoption("UseHybridSearch", "false")
     sess.setoption("UseMCTS", "true")
     sess.setoption("NNWeights", str(weights))
     sess.setoption("Threads", str(threads))
     sess.setoption("MultiPV", str(multipv))
-    sess.setoption("MCTSMaxThreads", str(threads))
+    sess.setoption("MCTSMaxThreads", str(mcts_threads))
+    sess.setoption("MCTSParallelSearch", "true" if mcts_parallel_search else "false")
     sess.setoption("MCTSMinibatchSize", str(minibatch_size))
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
@@ -642,6 +645,7 @@ def write_json_report(
             "hybrid_mcts_minibatch": args.hybrid_mcts_minibatch_size,
             "hybrid_low_time_fallback_ms": args.hybrid_low_time_fallback_ms,
             "hybrid_root_pawn_lever_tiebreak": args.hybrid_root_pawn_lever_tiebreak,
+            "mcts_parallel_search": args.mcts_parallel_search,
         },
         "engines": {},
     }
@@ -714,9 +718,7 @@ def run_once(
             env = os.environ.copy()
             if args.root_trace:
                 env["METALFISH_MCTS_ROOT_TRACE"] = "1"
-                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(
-                    args.root_trace_moves
-                )
+                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(args.root_trace_moves)
             s = UCISession([str(args.metalfish)], "metalfish-mcts", env=env)
             setup_metalfish(
                 s,
@@ -726,6 +728,7 @@ def run_once(
                 args.multipv,
                 args.mcts_minibatch_size,
                 args.mcts_kld,
+                args.mcts_parallel_search,
             )
             s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
             sessions["metalfish-mcts"] = s
@@ -737,9 +740,7 @@ def run_once(
             env = os.environ.copy()
             if args.root_trace:
                 env["METALFISH_MCTS_ROOT_TRACE"] = "1"
-                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(
-                    args.root_trace_moves
-                )
+                env["METALFISH_MCTS_ROOT_TRACE_MOVES"] = str(args.root_trace_moves)
             s = UCISession([str(args.metalfish)], "metalfish-hybrid", env=env)
             setup_metalfish_hybrid(
                 s,
@@ -918,6 +919,11 @@ def main() -> int:
     parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=4)
     parser.add_argument("--mcts-minibatch-size", type=int, default=0)
     parser.add_argument("--mcts-kld", type=float, default=0.00005)
+    parser.add_argument(
+        "--mcts-parallel-search",
+        action="store_true",
+        help="Use all requested threads for pure MCTS throughput experiments",
+    )
     parser.add_argument(
         "--hybrid-mcts-minibatch",
         "--hybrid-mcts-minibatch-size",

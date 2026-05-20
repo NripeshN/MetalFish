@@ -121,6 +121,28 @@ def test_pre_game_resource_prep_runs_cleanup_before_allocation() -> None:
     expect("resource prep logs purge", "purge=ok" in text)
 
 
+def test_bot_instance_lock_blocks_second_holder() -> None:
+    if lichess_bot.fcntl is None:
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        lock_path = pathlib.Path(tmp) / "lichess_bot.lock"
+        first = lichess_bot.BotInstanceLock(lock_path)
+        second = lichess_bot.BotInstanceLock(lock_path)
+        first.acquire()
+        try:
+            blocked = False
+            try:
+                second.acquire()
+            except RuntimeError as exc:
+                blocked = "already running" in str(exc)
+            expect("second bot instance blocked", blocked)
+        finally:
+            first.release()
+
+        second.acquire()
+        second.release()
+
+
 def test_seek_rating_requires_rated_only_mode() -> None:
     class Args:
         accept_rated = False
@@ -144,6 +166,7 @@ def test_seek_and_rated_policy_labels_are_explicit() -> None:
         accept_casual = True
         min_rated_opponent_elo = 2200
         elo_seek = False
+        seek_highest_rated = False
         elo_range = 200
 
     bot = object.__new__(lichess_bot.LichessBot)
@@ -167,6 +190,13 @@ def test_seek_and_rated_policy_labels_are_explicit() -> None:
         bot._seek_policy_label() == "rated (>= 2200, within +/-200 Elo)",
     )
 
+    bot.args.elo_seek = False
+    bot.args.seek_highest_rated = True
+    expect(
+        "highest-rated seek label",
+        bot._seek_policy_label() == "rated (>= 2200, highest-rated first)",
+    )
+
 
 def test_bot_config_rejects_dangerous_rated_seek() -> None:
     args = types.SimpleNamespace(
@@ -174,13 +204,17 @@ def test_bot_config_rejects_dangerous_rated_seek() -> None:
         accept_rated=True,
         accept_casual=False,
         elo_seek=False,
+        seek_highest_rated=False,
         elo_range=200,
         min_rated_opponent_elo=2200,
     )
     errors = lichess_bot.validate_bot_config(args)
-    expect("rated seek requires elo seek", any("--elo-seek" in e for e in errors))
+    expect(
+        "rated seek requires bounded mode",
+        any("--elo-seek or --seek-highest-rated" in e for e in errors),
+    )
 
-    args.elo_seek = True
+    args.seek_highest_rated = True
     args.min_rated_opponent_elo = 0
     errors = lichess_bot.validate_bot_config(args)
     expect("rated seek requires floor", any("opponent-elo > 0" in e for e in errors))
@@ -196,6 +230,7 @@ def test_bot_config_rejects_invalid_common_modes() -> None:
         accept_rated=False,
         accept_casual=False,
         elo_seek=False,
+        seek_highest_rated=False,
         elo_range=200,
         min_rated_opponent_elo=2200,
     )
@@ -346,6 +381,8 @@ def test_seek_candidates_tolerate_malformed_perf_records() -> None:
 def test_seek_candidates_filter_cached_cooldowns_case_insensitively() -> None:
     class Args:
         elo_seek = False
+        seek_highest_rated = False
+        avoid_repeat_format = False
 
     bot = object.__new__(lichess_bot.LichessBot)
     bot.args = Args()
@@ -366,6 +403,89 @@ def test_seek_candidates_filter_cached_cooldowns_case_insensitively() -> None:
 
     expect("cooldown candidate skipped", reason is None)
     expect("non-cooldown candidate remains", candidates == ["otherbot"])
+
+
+def test_highest_rated_seek_orders_candidates_descending() -> None:
+    class Args:
+        elo_seek = False
+        seek_highest_rated = True
+        avoid_repeat_format = False
+        min_rated_opponent_elo = 2200
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._declined_cooldown = {}
+    bots = [
+        {"id": "mid", "perfs": {"rapid": {"games": 20, "rating": 2500}}},
+        {"id": "top", "perfs": {"rapid": {"games": 20, "rating": 2850}}},
+        {"id": "low", "perfs": {"rapid": {"games": 20, "rating": 2250}}},
+        {"id": "inactive", "perfs": {"rapid": {"games": 1, "rating": 3000}}},
+    ]
+
+    candidates, reason = bot._seek_candidates(bots, "rapid", rated=True)
+
+    expect("highest-rated seek has candidates", reason is None)
+    expect("highest-rated order", candidates == ["top", "mid", "low"])
+
+
+def test_avoid_repeat_format_filters_only_matching_speed() -> None:
+    class Args:
+        elo_seek = False
+        seek_highest_rated = True
+        avoid_repeat_format = True
+        min_rated_opponent_elo = 0
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._declined_cooldown = {}
+    bot._played_by_speed = {"rapid": {"targetbot": 1.0}}
+    bot._persist_played_format_history = False
+    bots = [
+        {"id": "targetbot", "perfs": {"rapid": {"games": 20, "rating": 2800}}},
+        {"id": "freshbot", "perfs": {"rapid": {"games": 20, "rating": 2600}}},
+    ]
+
+    candidates, reason = bot._seek_candidates(bots, "rapid", rated=False)
+    expect("repeat rapid filtered", reason is None)
+    expect("fresh rapid remains", candidates == ["freshbot"])
+
+    bots[0]["perfs"]["blitz"] = {"games": 20, "rating": 2800}
+    bots[1]["perfs"]["blitz"] = {"games": 20, "rating": 2600}
+    candidates, reason = bot._seek_candidates(bots, "blitz", rated=False)
+    expect("same bot allowed in new format", reason is None)
+    expect("blitz highest still includes target", candidates[0] == "targetbot")
+
+
+def test_online_bots_uses_documented_fetch_limit() -> None:
+    class Response:
+        status_code = 200
+        text = '{"id":"targetbot","perfs":{"rapid":{"games":20,"rating":2400}}}\n'
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.bot_id = "metalfish"
+    bot._online_bots_cache = None
+    calls: list[dict] = []
+
+    def api_get(path: str, **kwargs):
+        calls.append({"path": path, **kwargs})
+        return Response()
+
+    bot.api_get = api_get
+
+    bots, status = bot._online_bots()
+
+    expect("online bots request ok", status is None)
+    expect("online bot parsed", [bot["id"] for bot in bots or []] == ["targetbot"])
+    expect(
+        "online bots fetches max documented page",
+        calls
+        == [
+            {
+                "path": "/bot/online",
+                "params": {"nb": lichess_bot.BOT_ONLINE_FETCH_LIMIT},
+            }
+        ],
+    )
 
 
 def test_challenge_failure_ratelimit_sets_long_cooldown() -> None:
@@ -1489,12 +1609,44 @@ def test_challenge_event_identity_accepts_string_users() -> None:
     expect("string target parsed", target == "targetbot")
 
 
+def test_challenge_timeout_does_not_post_cancel_after_auto_expiry() -> None:
+    class Args:
+        seek = False
+        rotate = False
+        max_games = 1
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {}
+    bot._pending_challenge_id = "challenge"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_retries = 0
+    bot._tc_failures = 0
+    bot._draining = threading.Event()
+    bot._declined_cooldown = {}
+    bot._persist_challenge_cooldowns = False
+
+    def api_post(*args, **kwargs):
+        raise AssertionError("timed-out challenges should auto-expire")
+
+    bot.api_post = api_post
+
+    with redirect_stdout(io.StringIO()):
+        bot._challenge_timed_out()
+
+    expect("timeout clears pending challenge", bot._pending_challenge_id is None)
+    expect("timeout cools target", "targetbot" in bot._declined_cooldown)
+    expect("timeout counts tc failure", bot._tc_failures == 1)
+
+
 def test_game_start_claims_slot_and_clears_pending() -> None:
     class Args:
         seek = True
         max_games = 1
         include_zero_increment = False
         include_bullet = False
+        avoid_repeat_format = True
 
     class Timer:
         canceled = False
@@ -1505,14 +1657,17 @@ def test_game_start_claims_slot_and_clears_pending() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     bot.args = Args()
     bot.active_games = {}
-    bot._pending_challenge_id = "challenge"
+    bot._pending_challenge_id = "g1"
     bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
     bot._challenge_sent_at = 123.0
     bot._rotation_idx = 0
     bot._tc_failures = 3
     bot._draining = threading.Event()
     bot._shutdown = threading.Event()
     bot._seek_timer = Timer()
+    bot._played_by_speed = {}
+    bot._persist_played_format_history = False
 
     posted: list[str] = []
     played: list[str] = []
@@ -1533,6 +1688,50 @@ def test_game_start_claims_slot_and_clears_pending() -> None:
     expect("game thread ran", played == ["g1"])
     expect("tc failures reset", bot._tc_failures == 0)
     expect("seek blocked by active game", not bot._should_seek())
+    expect(
+        "target marked as played in speed",
+        "targetbot" in bot._played_by_speed.get("rapid", {}),
+    )
+
+
+def test_game_start_cancels_unrelated_pending_challenge() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        include_zero_increment = False
+        include_bullet = False
+        avoid_repeat_format = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {}
+    bot._pending_challenge_id = "oldchallenge"
+    bot._pending_challenge_target = "oldbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_sent_at = 123.0
+    bot._rotation_idx = 0
+    bot._tc_failures = 2
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._seek_timer = None
+    bot._seek_lock = threading.Lock()
+
+    posted: list[str] = []
+    played: list[str] = []
+    bot.api_post = lambda path, **kwargs: posted.append(path)
+    bot.play_game = lambda game_id: played.append(game_id)
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event({"type": "gameStart", "game": {"gameId": "g1"}})
+
+    thread = bot.active_games.get("g1")
+    if thread is not None:
+        thread.join(timeout=1)
+
+    expect("unrelated pending canceled", posted == ["/challenge/oldchallenge/cancel"])
+    expect("unrelated pending cleared", bot._pending_challenge_id is None)
+    expect("game still started", played == ["g1"])
+    expect("seek blocked after race", not bot._should_seek())
 
 
 def test_malformed_global_events_are_ignored() -> None:
@@ -1940,6 +2139,7 @@ def main() -> int:
     test_live_defaults_avoid_crash_prone_resources()
     test_load_adjusted_workers_preserves_floor()
     test_pre_game_resource_prep_runs_cleanup_before_allocation()
+    test_bot_instance_lock_blocks_second_holder()
     test_seek_rating_requires_rated_only_mode()
     test_seek_and_rated_policy_labels_are_explicit()
     test_bot_config_rejects_dangerous_rated_seek()
@@ -1950,6 +2150,9 @@ def main() -> int:
     test_seek_dry_run_reports_rating_floor_block()
     test_seek_candidates_tolerate_malformed_perf_records()
     test_seek_candidates_filter_cached_cooldowns_case_insensitively()
+    test_highest_rated_seek_orders_candidates_descending()
+    test_avoid_repeat_format_filters_only_matching_speed()
+    test_online_bots_uses_documented_fetch_limit()
     test_challenge_failure_ratelimit_sets_long_cooldown()
     test_opening_book_does_not_send_bot_token_to_explorer()
     test_opening_book_scores_for_side_to_move()
@@ -1988,7 +2191,9 @@ def main() -> int:
     test_matching_challenge_event_clears_pending()
     test_unrelated_challenge_event_without_pending_is_ignored()
     test_challenge_event_identity_accepts_string_users()
+    test_challenge_timeout_does_not_post_cancel_after_auto_expiry()
     test_game_start_claims_slot_and_clears_pending()
+    test_game_start_cancels_unrelated_pending_challenge()
     test_malformed_global_events_are_ignored()
     test_game_finish_marks_game_completed()
     test_stale_game_start_for_completed_game_is_ignored()

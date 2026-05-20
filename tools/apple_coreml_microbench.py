@@ -13,8 +13,8 @@ from typing import Any
 
 def load_coremltools() -> tuple[Any, Any, Any, Any]:
     try:
-        import numpy as np
         import coremltools as ct
+        import numpy as np
         from coremltools.converters.mil import Builder as mb
         from coremltools.converters.mil.mil import types
     except ModuleNotFoundError as exc:
@@ -102,7 +102,16 @@ def build_transformer_model(
         layer = x
         for _ in range(layers):
             layer = transformer_block_mb(
-                mb, np, layer, params, batch, tokens, channels, heads, head_dim, activation
+                mb,
+                np,
+                layer,
+                params,
+                batch,
+                tokens,
+                channels,
+                heads,
+                head_dim,
+                activation,
             )
         return layer
 
@@ -184,9 +193,9 @@ def build_toy_network_model(
                 np.float32
             ),
             "embed_b": np.zeros((channels,), dtype=np.float32),
-            "policy_w": rng.normal(
-                0.0, 0.02, size=(policy_channels, channels)
-            ).astype(np.float32),
+            "policy_w": rng.normal(0.0, 0.02, size=(policy_channels, channels)).astype(
+                np.float32
+            ),
             "policy_b": np.zeros((policy_channels,), dtype=np.float32),
             "value_w": rng.normal(0.0, 0.02, size=(value_outputs, channels)).astype(
                 np.float32
@@ -212,7 +221,16 @@ def build_toy_network_model(
         )
         for _ in range(layers):
             layer = transformer_block_mb(
-                mb, np, layer, params, batch, tokens, channels, heads, head_dim, activation
+                mb,
+                np,
+                layer,
+                params,
+                batch,
+                tokens,
+                channels,
+                heads,
+                head_dim,
+                activation,
             )
         policy = mb.linear(
             x=layer,
@@ -250,9 +268,7 @@ def transformer_block_mb(
 ) -> Any:
     ln1_gamma = mb.const(val=params["ln1_gamma"])
     ln1_beta = mb.const(val=params["ln1_beta"])
-    y = mb.layer_norm(
-        x=x, axes=[-1], gamma=ln1_gamma, beta=ln1_beta, epsilon=1e-5
-    )
+    y = mb.layer_norm(x=x, axes=[-1], gamma=ln1_gamma, beta=ln1_beta, epsilon=1e-5)
 
     q = mb.linear(
         x=y, weight=mb.const(val=params["q_w"]), bias=mb.const(val=params["q_b"])
@@ -306,7 +322,9 @@ def transformer_block_mb(
     return mb.add(x=residual, y=z)
 
 
-def benchmark_predict(model: Any, sample: Any, warmup: int, iterations: int) -> dict[str, Any]:
+def benchmark_predict(
+    model: Any, sample: Any, warmup: int, iterations: int
+) -> dict[str, Any]:
     for _ in range(warmup):
         model.predict({"x": sample})
 
@@ -401,7 +419,9 @@ def transformer_numpy_once(np: Any, sample: Any, params: dict[str, Any]) -> Any:
     return layer
 
 
-def toy_network_numpy_once(np: Any, sample: Any, params: dict[str, Any]) -> tuple[Any, Any]:
+def toy_network_numpy_once(
+    np: Any, sample: Any, params: dict[str, Any]
+) -> tuple[Any, Any]:
     layer = sample @ params["embed_w"].T + params["embed_b"]
     layer = transformer_numpy_once(np, layer, params)
     policy = layer @ params["policy_w"].T + params["policy_b"]
@@ -469,17 +489,23 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("--layers must be at least 1")
 
     if args.model == "dense":
-        sample = np.random.default_rng(args.seed + 1).normal(
-            0.0, 1.0, size=(args.batch, args.inputs)
-        ).astype(np.float32)
+        sample = (
+            np.random.default_rng(args.seed + 1)
+            .normal(0.0, 1.0, size=(args.batch, args.inputs))
+            .astype(np.float32)
+        )
     elif args.model == "transformer":
-        sample = np.random.default_rng(args.seed + 1).normal(
-            0.0, 1.0, size=(args.batch, args.tokens, args.channels)
-        ).astype(np.float32)
+        sample = (
+            np.random.default_rng(args.seed + 1)
+            .normal(0.0, 1.0, size=(args.batch, args.tokens, args.channels))
+            .astype(np.float32)
+        )
     else:
-        sample = np.random.default_rng(args.seed + 1).normal(
-            0.0, 1.0, size=(args.batch, args.tokens, args.input_channels)
-        ).astype(np.float32)
+        sample = (
+            np.random.default_rng(args.seed + 1)
+            .normal(0.0, 1.0, size=(args.batch, args.tokens, args.input_channels))
+            .astype(np.float32)
+        )
 
     build_start = time.perf_counter()
     if args.model == "dense":

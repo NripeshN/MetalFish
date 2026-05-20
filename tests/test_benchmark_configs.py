@@ -7,11 +7,16 @@ import os
 import pathlib
 import platform
 import sys
+import tempfile
 
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ / "tests"))
 
 import paper_benchmarks  # noqa: E402
+
+sys.path.insert(0, str(PROJ / "tools"))
+import analyze_hybrid_trace  # noqa: E402
+import run_tournament_live  # noqa: E402
 
 
 def assert_options_include(
@@ -88,6 +93,58 @@ def assert_paper_hybrid_env_overrides() -> None:
     )
 
 
+def assert_hybrid_trace_final_decision_only() -> None:
+    data = {
+        "matches": [
+            {
+                "games": [
+                    {
+                        "game": 1,
+                        "search_log": [
+                            {
+                                "ply": 12,
+                                "side": "black",
+                                "fen": "8/8/8/8/8/8/8/8 b - - 0 1",
+                                "move": "b7b5",
+                                "lines": [
+                                    "info string HybridTrace: reason=ab_default "
+                                    "selected=a7a6 ABMove=a7a6 MCTSMove=b7b5",
+                                    "info string HybridTrace: reason=root_pawn_lever_tiebreak "
+                                    "selected=b7b5 ABMove=a7a6 MCTSMove=b7b5",
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "results.json"
+        path.write_text(json.dumps(data))
+        decisions = list(analyze_hybrid_trace.iter_trace_decisions(path))
+    if len(decisions) != 1:
+        raise AssertionError(f"expected one final trace decision, got {len(decisions)}")
+    decision = decisions[0]
+    if decision.reason != "root_pawn_lever_tiebreak" or decision.selected != "b7b5":
+        raise AssertionError(
+            "trace analyzer did not keep the final HybridTrace decision"
+        )
+
+
+def assert_tournament_draw_reason_precision() -> None:
+    claimable = paper_benchmarks.chess.Board()
+    for move in ["g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1"]:
+        claimable.push(paper_benchmarks.chess.Move.from_uci(move))
+    if run_tournament_live.game_over_reason(claimable) != "claimable 3-fold repetition":
+        raise AssertionError("claimable repetition reason was not precise")
+
+    repeated = claimable.copy()
+    repeated.push(paper_benchmarks.chess.Move.from_uci("f6g8"))
+    if run_tournament_live.game_over_reason(repeated) != "3-fold repetition":
+        raise AssertionError("actual repetition reason was not precise")
+
+
 def assert_tactical_fail_under_guard() -> None:
     selected = ["metalfish-hybrid"]
     if paper_benchmarks.parse_tactical_fail_under("", selected) != {}:
@@ -95,7 +152,9 @@ def assert_tactical_fail_under_guard() -> None:
     if paper_benchmarks.parse_tactical_fail_under("21", selected) != {
         "metalfish-hybrid": 21
     }:
-        raise AssertionError("bare tactical fail-under should apply to selected engines")
+        raise AssertionError(
+            "bare tactical fail-under should apply to selected engines"
+        )
     if paper_benchmarks.parse_tactical_fail_under("hybrid=21,mcts=12", None) != {
         "metalfish-hybrid": 21,
         "metalfish-mcts": 12,
@@ -118,9 +177,7 @@ def assert_tactical_fail_under_guard() -> None:
             },
         }
     }
-    if paper_benchmarks.enforce_tactical_fail_under(
-        sample, {"metalfish-hybrid": 21}
-    ):
+    if paper_benchmarks.enforce_tactical_fail_under(sample, {"metalfish-hybrid": 21}):
         raise AssertionError("hybrid tactical floor should pass at the threshold")
     failures = paper_benchmarks.enforce_tactical_fail_under(
         sample, {"metalfish-hybrid": 22, "metalfish-mcts": 12}
@@ -160,9 +217,7 @@ def main() -> int:
             "MCTSMinimumKLDGainPerNode": "0.00005",
         },
     )
-    scaled_mcts = paper_benchmarks.config_with_thread_count(
-        paper["metalfish-mcts"], 8
-    )
+    scaled_mcts = paper_benchmarks.config_with_thread_count(paper["metalfish-mcts"], 8)
     assert_options_include(
         "paper MCTS scaled strength resources",
         scaled_mcts.uci_options,
@@ -216,6 +271,8 @@ def main() -> int:
         {"Threads": "8", "Temperature": "0"},
     )
     assert_paper_hybrid_env_overrides()
+    assert_hybrid_trace_final_decision_only()
+    assert_tournament_draw_reason_precision()
 
     assert_file_contains(
         PROJ / "src/uci/engine.cpp",
@@ -439,7 +496,10 @@ def main() -> int:
             "--root-trace-moves",
             "--mcts-minibatch-size",
             "--mcts-kld",
+            "--mcts-parallel-search",
             "--hybrid-mcts-minibatch-size",
+            'sess.setoption("MCTSMaxThreads", str(mcts_threads))',
+            '"MCTSParallelSearch", "true" if mcts_parallel_search else "false"',
             'sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))',
             'sess.setoption("MCTSMinibatchSize", str(minibatch_size))',
         ],
@@ -470,11 +530,16 @@ def main() -> int:
             '"HYBRID_MCTS_MINIBATCH": "MCTSMinibatchSize"',
             '"HYBRID_MCTS_OUT_OF_ORDER_FACTOR": "MCTSMaxOutOfOrderEvalsFactor"',
             '"HYBRID_MCTS_MAX_PREFETCH": "MCTSMaxPrefetch"',
+            "def hybrid_low_time_warnings",
+            "TransformerLowTimeFallbackMs=",
+            "AB time-safety fallback rather than full Hybrid MCTS",
             'help="Games per match (default: 6)"',
             "max-moves below 100 can mask long conversion wins",
             '"--max-plies"',
             '"max_plies": args.max_plies',
             "Ply cap:",
+            '"--progress-plies"',
+            "Print in-game progress every N plies",
             'options["HybridTrace"] = "true"',
             'line.startswith("info string Time safety:")',
             'line.startswith("info string Hybrid: AB root hints from MCTS")',
@@ -506,9 +571,17 @@ def main() -> int:
         [
             "python3 tools/download_engine_networks.py",
             "python3 tools/uci_smoke.py",
+            "Run Hybrid clock safety smoke",
+            "Move\\ Overhead=500",
+            'go "wtime 1000 btime 1000 winc 3000 binc 3000"',
+            'go "wtime 800 btime 800 winc 3000 binc 3000"',
+            '--expect-output "Starting Parallel Hybrid Search"',
+            '--expect-output "Time safety: estimated move budget"',
+            '--reject-output "Time safety:"',
             "Run MCTS low-node tactical smoke",
+            "MCTSMaxThreads=1",
             "MCTSParallelSearch=true",
-            "go \"nodes 50\"",
+            'go "nodes 50"',
             "--expect-bestmove h5f6",
         ],
     )
@@ -536,6 +609,7 @@ def main() -> int:
             "Engine exited with status",
             "--expect-bestmove",
             "--expect-output",
+            "--reject-output",
         ],
     )
     assert_file_contains(
@@ -626,6 +700,11 @@ def main() -> int:
             "avg_mcts_minus_ab",
             "StockfishProbe",
             "legal_uci",
+            "MetalFishProbe",
+            "--replay-current",
+            "Current MetalFish replay",
+            "Replay deltas",
+            "replay_hybrid_mcts_threads",
         ],
     )
 

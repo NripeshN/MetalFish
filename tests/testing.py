@@ -474,6 +474,70 @@ def test_uci_protocol():
         assert "bestmove " in result.stdout, output[-1000:]
         assert "bestmove 0000" not in result.stdout, output[-1000:]
 
+    def test_hybrid_increment_clock_uses_transformer_safely():
+        """Increment can make a low-clock hybrid search safe enough to run."""
+        import subprocess
+
+        weights = PATH.parent / "networks" / "BT4-1024x15x32h-swa-6147500.pb"
+        if not weights.exists():
+            return
+
+        result = subprocess.run(
+            [str(METALFISH_BIN)],
+            input=(
+                "uci\n"
+                "setoption name UseMCTS value false\n"
+                "setoption name UseHybridSearch value true\n"
+                f"setoption name NNWeights value {weights}\n"
+                "setoption name Threads value 8\n"
+                "setoption name Move Overhead value 500\n"
+                "setoption name TransformerLowTimeFallbackMs value 3000\n"
+                "setoption name TransformerMinMoveBudgetMs value 400\n"
+                "setoption name MCTSAddDirichletNoise value false\n"
+                "isready\n"
+                "position startpos\n"
+                "go wtime 1000 btime 1000 winc 3000 binc 3000\n"
+                "quit\n"
+            ),
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output[-1000:]
+        assert "Starting Parallel Hybrid Search" in output, output[-1000:]
+        assert "Time safety:" not in output, output[-1000:]
+        assert "bestmove " in result.stdout, output[-1000:]
+
+    def test_hybrid_increment_clock_keeps_overhead_guard():
+        """Increment does not bypass the overhead-adjusted minimum budget."""
+        import subprocess
+
+        result = subprocess.run(
+            [str(METALFISH_BIN)],
+            input=(
+                "uci\n"
+                "setoption name UseMCTS value false\n"
+                "setoption name UseHybridSearch value true\n"
+                "setoption name Threads value 8\n"
+                "setoption name Move Overhead value 500\n"
+                "setoption name TransformerLowTimeFallbackMs value 3000\n"
+                "setoption name TransformerMinMoveBudgetMs value 400\n"
+                "isready\n"
+                "position startpos\n"
+                "go wtime 800 btime 800 winc 3000 binc 3000\n"
+                "quit\n"
+            ),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output[-1000:]
+        assert "Time safety: estimated move budget" in output, output[-1000:]
+        assert "Starting Parallel Hybrid Search" not in output, output[-1000:]
+        assert "bestmove " in result.stdout, output[-1000:]
+
     # Temporarily disabled - movetime requires deeper investigation
     # def test_movetime():
     #     """Test movetime limit"""
@@ -498,6 +562,14 @@ def test_uci_protocol():
     runner.run_test("searchmoves", test_searchmoves)
     runner.run_test("nodes limit", test_nodes_limit)
     runner.run_test("hybrid init fallback", test_hybrid_init_failure_falls_back_to_ab)
+    runner.run_test(
+        "hybrid increment clock uses transformer",
+        test_hybrid_increment_clock_uses_transformer_safely,
+    )
+    runner.run_test(
+        "hybrid increment clock overhead guard",
+        test_hybrid_increment_clock_keeps_overhead_guard,
+    )
 
     return runner.summary()
 

@@ -77,6 +77,34 @@ jobs:
             --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
             --go "depth 4"
 
+      - name: Run Hybrid clock safety smoke
+        run: |
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption UseMCTS=false \
+            --setoption UseHybridSearch=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption Move\ Overhead=500 \
+            --setoption TransformerLowTimeFallbackMs=3000 \
+            --setoption TransformerMinMoveBudgetMs=400 \
+            --setoption MCTSAddDirichletNoise=false \
+            --go "wtime 1000 btime 1000 winc 3000 binc 3000" \
+            --expect-output "Starting Parallel Hybrid Search" \
+            --reject-output "Time safety:"
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --setoption UseMCTS=false \
+            --setoption UseHybridSearch=true \
+            --setoption Threads=8 \
+            --setoption Move\ Overhead=500 \
+            --setoption TransformerLowTimeFallbackMs=3000 \
+            --setoption TransformerMinMoveBudgetMs=400 \
+            --go "wtime 800 btime 800 winc 3000 binc 3000" \
+            --expect-output "Time safety: estimated move budget" \
+            --reject-output "Starting Parallel Hybrid Search"
+
       - name: Run MCTS low-node tactical smoke
         run: |
           python3 tools/uci_smoke.py \

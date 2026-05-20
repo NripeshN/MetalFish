@@ -2069,8 +2069,7 @@ void test_bk07_low_node_regression(TestCounter &tc) {
   const uint64_t nodes = search->Stats().total_nodes.load();
   const Move best = search->GetBestMove();
   expect(nodes >= limits.nodes, "BK.07 nodes limit should be honored", tc);
-  expect(best == Move(SQ_H5, SQ_F6),
-         "BK.07 low-node MCTS should find Nf6", tc);
+  expect(best == Move(SQ_H5, SQ_F6), "BK.07 low-node MCTS should find Nf6", tc);
 }
 
 void test_searchmoves_restrict_root(TestCounter &tc) {

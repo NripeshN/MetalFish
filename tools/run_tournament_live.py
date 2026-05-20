@@ -107,6 +107,41 @@ def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None
         options["HybridTrace"] = "true"
 
 
+def parse_int_option(value: Optional[str], default: int = 0) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def hybrid_low_time_warnings(
+    matches: Sequence[Tuple[str, str]],
+    engines_cfg: Dict[str, dict],
+    movetime_ms: int,
+) -> List[str]:
+    if movetime_ms <= 0:
+        return []
+
+    warnings: List[str] = []
+    hybrid_names = {
+        name
+        for match in matches
+        for name in match
+        if engines_cfg.get(name, {}).get("options", {}).get("UseHybridSearch") == "true"
+    }
+    for name in sorted(hybrid_names):
+        options = dict(engines_cfg[name].get("options", {}))
+        apply_hybrid_env_options(options, force_trace=False)
+        fallback_ms = parse_int_option(options.get("TransformerLowTimeFallbackMs"), 0)
+        if fallback_ms > 0 and movetime_ms < fallback_ms:
+            warnings.append(
+                f"{name}: --movetime {movetime_ms}ms is below "
+                f"TransformerLowTimeFallbackMs={fallback_ms}ms; this run will "
+                "exercise the AB time-safety fallback rather than full Hybrid MCTS."
+            )
+    return warnings
+
+
 class UCIEngine:
     def __init__(self, cmd: Sequence[str], name: str, options: Dict[str, str] = None):
         self.name = name
@@ -377,6 +412,28 @@ def extract_search_log_lines(lines: Sequence[str]) -> List[str]:
     return keep
 
 
+def clock_label(ms: int) -> str:
+    return f"{max(0, ms) / 1000.0:.1f}s"
+
+
+def game_over_reason(board: chess.Board) -> str:
+    if board.is_checkmate():
+        return "checkmate"
+    if board.is_stalemate():
+        return "stalemate"
+    if board.can_claim_fifty_moves():
+        return "50-move rule" if board.is_fifty_moves() else "claimable 50-move rule"
+    if board.can_claim_threefold_repetition():
+        return (
+            "3-fold repetition"
+            if board.is_repetition(3)
+            else "claimable 3-fold repetition"
+        )
+    if board.is_insufficient_material():
+        return "insufficient material"
+    return "adjudication"
+
+
 def play_game(
     white: UCIEngine,
     black: UCIEngine,
@@ -388,6 +445,8 @@ def play_game(
     max_moves: int = 300,
     max_plies: int = 0,
     capture_search_log: bool = False,
+    progress_label: str = "",
+    progress_plies: int = 10,
 ) -> GameResult:
     if opening:
         board = opening.copy()
@@ -417,17 +476,7 @@ def play_game(
     for ply in range(ply_limit):
         if board.is_game_over(claim_draw=True):
             result = board.result(claim_draw=True)
-            reason = "adjudication"
-            if board.is_checkmate():
-                reason = "checkmate"
-            elif board.is_stalemate():
-                reason = "stalemate"
-            elif board.can_claim_fifty_moves():
-                reason = "50-move rule"
-            elif board.can_claim_threefold_repetition():
-                reason = "3-fold repetition"
-            elif board.is_insufficient_material():
-                reason = "insufficient material"
+            reason = game_over_reason(board)
             return GameResult(
                 white.name,
                 black.name,
@@ -517,6 +566,16 @@ def play_game(
         move_list.append(move_str)
         node = node.add_variation(move)
         board.push(move)
+
+        completed_plies = ply + 1
+        if progress_plies > 0 and completed_plies % progress_plies == 0:
+            label = f"{progress_label} " if progress_label else ""
+            print(
+                f"    {label}ply {completed_plies:3d}/{ply_limit}: "
+                f"{eng.name} {move_str} "
+                f"(W {clock_label(wtime)}, B {clock_label(btime)})",
+                flush=True,
+            )
 
     completed_plies = len(move_list)
     return GameResult(
@@ -623,6 +682,7 @@ def run_match(
     max_plies: int = 0,
     capture_search_log: bool = False,
     progress_callback: Optional[Callable[[MatchResult], None]] = None,
+    progress_plies: int = 10,
 ) -> MatchResult:
     result = MatchResult(eng1_name, eng2_name)
     print(f"\n{'='*60}", flush=True)
@@ -658,6 +718,8 @@ def run_match(
             max_moves,
             max_plies,
             capture_search_log=capture_search_log,
+            progress_label=f"Game {g + 1}/{num_games}",
+            progress_plies=progress_plies,
         )
 
         if g % 2 == 0:
@@ -821,6 +883,8 @@ def run_tournament(args):
     print(f"Matches: {len(matches)}")
     print(f"Default thread budget: {default_threads}")
     print(f"Openings: order={args.opening_order} | seed={args.seed}")
+    for warning in hybrid_low_time_warnings(matches, engines_cfg, movetime_ms):
+        print(f"Warning: {warning}", flush=True)
     if args.max_plies > 0:
         print(f"Ply cap: {args.max_plies}")
     elif args.max_moves < 100:
@@ -881,6 +945,7 @@ def run_tournament(args):
                 args.max_plies,
                 args.save_search_log,
                 checkpoint_match,
+                args.progress_plies,
             )
 
             match_data = match_result_to_dict(mr)
@@ -1001,6 +1066,12 @@ def main():
         "--save-search-log",
         action="store_true",
         help="Save compact per-move info string diagnostics in results JSON",
+    )
+    parser.add_argument(
+        "--progress-plies",
+        type=int,
+        default=10,
+        help="Print in-game progress every N plies (0 disables, default: 10)",
     )
     parser.add_argument("--resume", type=str, help="Resume from results directory")
     args = parser.parse_args()

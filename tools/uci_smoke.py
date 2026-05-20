@@ -24,7 +24,14 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         metavar="TEXT",
-        help="Substring that must appear in combined engine stdout/stderr",
+        help="Substring that must appear in combined engine stdout/stderr; may be repeated",
+    )
+    parser.add_argument(
+        "--reject-output",
+        action="append",
+        default=[],
+        metavar="TEXT",
+        help="Substring that must not appear in combined engine stdout/stderr; may be repeated",
     )
     parser.add_argument(
         "--setoption",
@@ -142,11 +149,21 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    output = "\n".join(uci.output)
     for expected in args.expect_output:
-        if not any(expected in line for line in uci.output):
+        if expected not in output:
             tail = "\n".join(uci.output[-80:])
             print(
                 f"Expected engine output containing {expected!r}. Tail:\n{tail}",
+                file=sys.stderr,
+            )
+            return 1
+    for rejected in args.reject_output:
+        if rejected in output:
+            tail = "\n".join(uci.output[-80:])
+            print(
+                f"Rejected engine output containing {rejected!r}. Tail:\n{tail}",
                 file=sys.stderr,
             )
             return 1

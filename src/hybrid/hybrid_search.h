@@ -337,8 +337,7 @@ private:
   void publish_mcts_state();
   std::vector<Move> collect_mcts_root_order_hints();
   std::vector<Move>
-  verify_ab_root_candidates(const std::vector<Move> &candidates,
-                            int verify_ms);
+  verify_ab_root_candidates(const std::vector<Move> &candidates, int verify_ms);
 
   void run_ab_search();
   void publish_ab_state(Move best, int score, int depth, uint64_t nodes);
@@ -437,21 +436,23 @@ bool HybridRootPawnLeverAgreementTieBreak(bool fixed_budget,
                                           float agreement_visit_share,
                                           float root_q_gap);
 
-bool HybridRootPawnLeverCandidate(int selected_average_score,
-                                  int candidate_average_score,
-                                  uint64_t candidate_effort, int mcts_rank,
-                                  uint32_t mcts_current_visits,
-                                  int selected_mcts_rank,
-                                  float selected_mcts_q,
-                                  float selected_mcts_policy,
-                                  float candidate_mcts_q,
-                                  float candidate_mcts_policy);
+bool HybridRootPawnLeverCandidate(
+    int selected_average_score, int candidate_average_score,
+    uint64_t candidate_effort, int mcts_rank, uint32_t mcts_current_visits,
+    int selected_mcts_rank, float selected_mcts_q, float selected_mcts_policy,
+    float best_mcts_q, float candidate_mcts_q, float candidate_mcts_policy);
 
 bool HybridIsPawnLever(const Position &pos, Move move);
 
 bool HybridIsKingsidePawnLever(const Position &pos, Move move);
 
 bool HybridIsKingsidePawnPush(const Position &pos, Move move);
+
+bool HybridRootPawnLeverCanChallengeSelected(const Position &pos, Move selected,
+                                             bool allow_non_pawn_selected);
+
+bool HybridHighPolicyRootLeverHint(const Position &pos, Move move, float policy,
+                                   float leader_policy);
 
 float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
                             const float *candidate_qs, int candidate_count);
