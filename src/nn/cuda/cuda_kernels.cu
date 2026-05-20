@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -27,6 +28,8 @@ namespace MetalFish {
 namespace NN {
 namespace Cuda {
 namespace {
+
+constexpr std::size_t kCublasWorkspaceBytes = 16ULL * 1024ULL * 1024ULL;
 
 std::string CudaErrorMessage(const char *op, cudaError_t status) {
   std::ostringstream out;
@@ -68,48 +71,102 @@ std::string CublasErrorMessage(const char *op, cublasStatus_t status) {
 
 class ThreadLocalCublasHandle {
 public:
-  ThreadLocalCublasHandle() {
+  explicit ThreadLocalCublasHandle(int device) : device_(device) {
+    cudaError_t cuda_status = cudaSetDevice(device_);
+    if (cuda_status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("cudaSetDevice(cublas)", cuda_status));
+
     cublasStatus_t status = cublasCreate(&handle_);
     if (status != CUBLAS_STATUS_SUCCESS)
       throw std::runtime_error(CublasErrorMessage("cublasCreate", status));
 
     status = cublasSetPointerMode(handle_, CUBLAS_POINTER_MODE_HOST);
-    if (status != CUBLAS_STATUS_SUCCESS)
+    if (status != CUBLAS_STATUS_SUCCESS) {
+      Cleanup();
       throw std::runtime_error(
           CublasErrorMessage("cublasSetPointerMode", status));
+    }
 
 #if CUDART_VERSION >= 11000
     status = cublasSetMathMode(handle_, CUBLAS_PEDANTIC_MATH);
 #else
     status = cublasSetMathMode(handle_, CUBLAS_DEFAULT_MATH);
 #endif
-    if (status != CUBLAS_STATUS_SUCCESS)
+    if (status != CUBLAS_STATUS_SUCCESS) {
+      Cleanup();
       throw std::runtime_error(CublasErrorMessage("cublasSetMathMode", status));
+    }
 
     status = cublasSetAtomicsMode(handle_, CUBLAS_ATOMICS_NOT_ALLOWED);
     if (status != CUBLAS_STATUS_SUCCESS) {
+      Cleanup();
       throw std::runtime_error(
           CublasErrorMessage("cublasSetAtomicsMode", status));
+    }
+
+    cuda_status = cudaMalloc(&workspace_, kCublasWorkspaceBytes);
+    if (cuda_status != cudaSuccess) {
+      Cleanup();
+      throw std::runtime_error(
+          CudaErrorMessage("cudaMalloc(cublas_workspace)", cuda_status));
     }
   }
 
   ThreadLocalCublasHandle(const ThreadLocalCublasHandle &) = delete;
   ThreadLocalCublasHandle &operator=(const ThreadLocalCublasHandle &) = delete;
 
-  ~ThreadLocalCublasHandle() {
-    if (handle_)
-      cublasDestroy(handle_);
+  ~ThreadLocalCublasHandle() { Cleanup(); }
+
+  cublasHandle_t Configure(cudaStream_t stream) {
+    cublasStatus_t status = cublasSetStream(handle_, stream);
+    if (status != CUBLAS_STATUS_SUCCESS)
+      throw std::runtime_error(
+          CublasErrorMessage("cublasSetStream", status));
+
+    status = cublasSetWorkspace(handle_, workspace_, kCublasWorkspaceBytes);
+    if (status != CUBLAS_STATUS_SUCCESS)
+      throw std::runtime_error(
+          CublasErrorMessage("cublasSetWorkspace", status));
+    return handle_;
   }
 
-  cublasHandle_t Get() const { return handle_; }
-
 private:
+  void Cleanup() noexcept {
+    int previous_device = -1;
+    cudaGetDevice(&previous_device);
+    if (device_ >= 0)
+      cudaSetDevice(device_);
+    if (handle_)
+      cublasDestroy(handle_);
+    handle_ = nullptr;
+    if (workspace_)
+      cudaFree(workspace_);
+    workspace_ = nullptr;
+    if (previous_device >= 0 && previous_device != device_)
+      cudaSetDevice(previous_device);
+  }
+
+  int device_ = -1;
   cublasHandle_t handle_ = nullptr;
+  void *workspace_ = nullptr;
 };
 
-cublasHandle_t CublasHandle() {
-  static thread_local ThreadLocalCublasHandle handle;
-  return handle.Get();
+cublasHandle_t CublasHandle(cudaStream_t stream) {
+  int device = 0;
+  const cudaError_t status = cudaGetDevice(&device);
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage("cudaGetDevice(cublas)",
+                                             status));
+
+  static thread_local std::vector<std::unique_ptr<ThreadLocalCublasHandle>>
+      handles;
+  if (device >= static_cast<int>(handles.size()))
+    handles.resize(static_cast<std::size_t>(device) + 1);
+  auto &handle = handles[static_cast<std::size_t>(device)];
+  if (!handle)
+    handle = std::make_unique<ThreadLocalCublasHandle>(device);
+  return handle->Configure(stream);
 }
 
 const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
@@ -585,16 +642,11 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
     throw std::runtime_error("CUDA dense affine kernel dimensions are invalid");
 
   const int total_outputs = batch_size * output_width;
-  cublasHandle_t handle = CublasHandle();
-  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(
-        CublasErrorMessage("cublasSetStream", cublas_status));
-  }
+  cublasHandle_t handle = CublasHandle(stream);
 
   const float alpha = 1.0f;
   const float beta = 0.0f;
-  cublas_status = cublasSgemm(
+  cublasStatus_t cublas_status = cublasSgemm(
       handle, CUBLAS_OP_T, CUBLAS_OP_N, output_width, batch_size, input_width,
       &alpha, weights, input_width, input, input_width, &beta, output,
       output_width);
@@ -787,12 +839,7 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
     throw std::runtime_error("CUDA attention score dimensions are invalid");
   }
 
-  cublasHandle_t handle = CublasHandle();
-  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(
-        CublasErrorMessage("cublasSetStream", cublas_status));
-  }
+  cublasHandle_t handle = CublasHandle(stream);
 
   const float beta = 0.0f;
   const long long head_stride = head_depth;
@@ -806,7 +853,7 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
     const float *query_base = query + batch * qkv_batch_stride;
     const float *key_base = key + batch * qkv_batch_stride;
     float *score_base = scores + batch * score_batch_stride;
-    cublas_status = cublasSgemmStridedBatched(
+    cublasStatus_t cublas_status = cublasSgemmStridedBatched(
         handle, CUBLAS_OP_T, CUBLAS_OP_N, squares, squares, head_depth,
         &scale, key_base, qkv_width, head_stride, query_base, qkv_width,
         head_stride, &beta, score_base, squares, score_stride, heads);
@@ -911,12 +958,7 @@ void LaunchAttentionContextKernel(const float *probabilities,
     throw std::runtime_error("CUDA attention context dimensions are invalid");
   }
 
-  cublasHandle_t handle = CublasHandle();
-  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(
-        CublasErrorMessage("cublasSetStream", cublas_status));
-  }
+  cublasHandle_t handle = CublasHandle(stream);
 
   const float alpha = 1.0f;
   const float beta = 0.0f;
@@ -932,7 +974,7 @@ void LaunchAttentionContextKernel(const float *probabilities,
     const float *probability_base =
         probabilities + batch * probability_batch_stride;
     float *context_base = context + batch * qkv_batch_stride;
-    cublas_status = cublasSgemmStridedBatched(
+    cublasStatus_t cublas_status = cublasSgemmStridedBatched(
         handle, CUBLAS_OP_N, CUBLAS_OP_N, head_depth, squares, squares,
         &alpha, value_base, qkv_width, head_stride, probability_base, squares,
         probability_stride, &beta, context_base, qkv_width, head_stride,
@@ -965,12 +1007,7 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
 
   EnsureAttentionPolicyGatherMapUploaded();
 
-  cublasHandle_t handle = CublasHandle();
-  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(
-        CublasErrorMessage("cublasSetStream", cublas_status));
-  }
+  cublasHandle_t handle = CublasHandle(stream);
 
   constexpr int kSquares = kPackedInputSquareCount;
   const float alpha = 1.0f / std::sqrt(static_cast<float>(channels));
@@ -978,7 +1015,7 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
   const long long input_stride =
       static_cast<long long>(kSquares) * channels;
   const long long raw_policy_stride = kNetworkAttentionPolicyScratch;
-  cublas_status = cublasSgemmStridedBatched(
+  cublasStatus_t cublas_status = cublasSgemmStridedBatched(
       handle, CUBLAS_OP_T, CUBLAS_OP_N, kSquares, kSquares, channels, &alpha,
       key, channels, input_stride, query, channels, input_stride, &beta,
       raw_policy, kSquares, raw_policy_stride, batch_size);
