@@ -16,7 +16,9 @@ def expect(name: str, condition: bool) -> None:
 
 
 def test_parse_probe_json_uses_last_json_line() -> None:
-    parsed = bench.parse_probe_json('noise\n{"old": 1}\nmore\n{"latency": {"median_ms": 2.5}}\n')
+    parsed = bench.parse_probe_json(
+        'noise\n{"old": 1}\nmore\n{"latency": {"median_ms": 2.5}}\n'
+    )
     expect("last json", parsed["latency"]["median_ms"] == 2.5)
 
 

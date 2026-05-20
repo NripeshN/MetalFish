@@ -249,6 +249,12 @@ void test_hybrid_config() {
     EXPECT(tc, config.ab_candidate_verify_ms == 120);
     EXPECT(tc, config.ab_candidate_verify_count == 4);
     EXPECT(tc, config.root_pawn_lever_tiebreak);
+    EXPECT(tc, !config.ane_root_probe);
+    EXPECT(tc, config.ane_compute_units == "cpu-ne");
+    EXPECT(tc, config.ane_batch_size == 8);
+    EXPECT(tc, config.ane_root_hint_count == 10);
+    EXPECT(tc, config.ane_root_hint_wait_ms == 75);
+    EXPECT(tc, config.ane_min_budget_ms == 1000);
   }
   {
     TestCase tc("Transformer batching settings");

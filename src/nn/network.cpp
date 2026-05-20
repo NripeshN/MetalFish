@@ -52,10 +52,10 @@ private:
   WeightsFile weights_;
 };
 
-std::unique_ptr<Network>
-CreateNetwork(const WeightsFile &weights, const std::string &backend,
-              const std::string &model_path,
-              const std::string &compute_units) {
+std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
+                                       const std::string &backend,
+                                       const std::string &model_path,
+                                       const std::string &compute_units) {
 #ifdef USE_COREML
   if (backend == "coreml") {
     return std::make_unique<CoreML::CoreMLNetwork>(weights, model_path,

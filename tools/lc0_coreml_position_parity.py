@@ -18,7 +18,6 @@ sys.path.insert(0, str(ROOT))
 
 from tools import lc0_coreml_value_export as lc0_export
 
-
 DEFAULT_FENS = [
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - - 0 1",
@@ -188,7 +187,9 @@ def build_model(args: argparse.Namespace, output_stage: str, candidate: bool) ->
     )
 
 
-def predict(model: Any, planes: np.ndarray, warmup: int, iterations: int) -> tuple[np.ndarray, float]:
+def predict(
+    model: Any, planes: np.ndarray, warmup: int, iterations: int
+) -> tuple[np.ndarray, float]:
     outputs, latency = predict_outputs(model, planes, warmup, iterations)
     return np.asarray(next(iter(outputs.values())), dtype=np.float32), latency
 
@@ -220,15 +221,23 @@ def split_heads(outputs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
             policy = array
     if wdl is None or policy is None:
         shapes = [list(np.asarray(value).shape) for value in outputs.values()]
-        raise RuntimeError(f"combined model did not return WDL and policy outputs: {shapes}")
+        raise RuntimeError(
+            f"combined model did not return WDL and policy outputs: {shapes}"
+        )
     return wdl, policy
 
 
-def top_policy(policy: np.ndarray, moves: list[str], count: int) -> list[dict[str, Any]]:
+def top_policy(
+    policy: np.ndarray, moves: list[str], count: int
+) -> list[dict[str, Any]]:
     flat = policy.reshape(-1, policy.shape[-1])[0]
     top = np.argsort(-flat)[:count]
     return [
-        {"index": int(index), "move": moves[int(index)], "logit": float(flat[int(index)])}
+        {
+            "index": int(index),
+            "move": moves[int(index)],
+            "logit": float(flat[int(index)]),
+        }
         for index in top
     ]
 
@@ -264,7 +273,9 @@ def run_metal_probe(args: argparse.Namespace, fen: str) -> dict[str, Any]:
     try:
         completed = subprocess.run(command, check=True, capture_output=True, text=True)
     except OSError as exc:
-        raise RuntimeError(f"failed to run Metal probe {args.metal_probe}: {exc}") from exc
+        raise RuntimeError(
+            f"failed to run Metal probe {args.metal_probe}: {exc}"
+        ) from exc
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.strip()
         raise RuntimeError(
@@ -326,7 +337,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         metal_result = None
         if metal:
             metal_wdl = np.asarray(metal["wdl"], dtype=np.float32).reshape(1, 3)
-            metal_policy = np.asarray(metal["policy"], dtype=np.float32).reshape(1, 1858)
+            metal_policy = np.asarray(metal["policy"], dtype=np.float32).reshape(
+                1, 1858
+            )
             ref_wdl_first = ref_wdl.reshape(-1, 3)[:1]
             cand_wdl_first = cand_wdl.reshape(-1, 3)[:1]
             ref_policy_first = ref_policy.reshape(-1, 1858)[:1]
@@ -343,8 +356,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "policy_top": metal["policy_top"],
                 "reference_wdl_delta": compare_arrays(metal_wdl, ref_wdl_first),
                 "candidate_wdl_delta": compare_arrays(metal_wdl, cand_wdl_first),
-                "reference_policy_delta": compare_arrays(metal_policy, ref_policy_first),
-                "candidate_policy_delta": compare_arrays(metal_policy, cand_policy_first),
+                "reference_policy_delta": compare_arrays(
+                    metal_policy, ref_policy_first
+                ),
+                "candidate_policy_delta": compare_arrays(
+                    metal_policy, cand_policy_first
+                ),
             }
         positions.append(
             {
@@ -387,13 +404,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("weights", help="Lc0 T1 .pb or .pb.gz weights")
     parser.add_argument("--fen", action="append", default=[])
-    parser.add_argument("--candidate-compute-unit", choices=["all", "cpu", "cpu-gpu", "cpu-ne"], default="cpu-ne")
-    parser.add_argument("--candidate-precision", choices=["fp16", "fp32"], default="fp16")
-    parser.add_argument("--candidate-value-head-fp32", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--candidate-policy-head-fp32", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--metal-probe", default="", help="Optional path to build/metalfish_nn_probe for Metal backend parity")
-    parser.add_argument("--combined-model", action="store_true", help="Use one Core ML model that returns WDL and policy together")
-    parser.add_argument("--batch-size", type=int, default=1, help="Fixed Core ML/Metal batch size")
+    parser.add_argument(
+        "--candidate-compute-unit",
+        choices=["all", "cpu", "cpu-gpu", "cpu-ne"],
+        default="cpu-ne",
+    )
+    parser.add_argument(
+        "--candidate-precision", choices=["fp16", "fp32"], default="fp16"
+    )
+    parser.add_argument(
+        "--candidate-value-head-fp32",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--candidate-policy-head-fp32",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
+        "--metal-probe",
+        default="",
+        help="Optional path to build/metalfish_nn_probe for Metal backend parity",
+    )
+    parser.add_argument(
+        "--combined-model",
+        action="store_true",
+        help="Use one Core ML model that returns WDL and policy together",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=1, help="Fixed Core ML/Metal batch size"
+    )
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=4)
     parser.add_argument("--top", type=int, default=8)

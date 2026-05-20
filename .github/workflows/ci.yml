@@ -68,6 +68,24 @@ jobs:
           python3 tests/test_lichess_bot.py
           python3 tests/test_lichess_puzzle_runner.py
 
+      - name: Run Apple accelerator tool tests
+        run: |
+          python3 -m py_compile \
+            tools/apple_coreml_microbench.py \
+            tools/lc0_coreml_bk_policy_probe.py \
+            tools/lc0_coreml_concurrency_benchmark.py \
+            tools/lc0_coreml_position_parity.py \
+            tools/lc0_coreml_root_value_probe.py \
+            tools/lc0_coreml_value_export.py \
+            tools/lc0_mlx_value_benchmark.py
+          python3 tests/test_apple_coreml_microbench.py
+          python3 tests/test_lc0_coreml_bk_policy_probe.py
+          python3 tests/test_lc0_coreml_concurrency_benchmark.py
+          python3 tests/test_lc0_coreml_position_parity.py
+          python3 tests/test_lc0_coreml_root_value_probe.py
+          python3 tests/test_lc0_coreml_value_export.py
+          python3 tests/test_lc0_mlx_value_benchmark.py
+
       - name: Run UCI smoke
         run: |
           python3 tools/uci_smoke.py \

@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parent.parent
 PROTO = ROOT / "src" / "nn" / "proto" / "net.proto"
 POS_TABLE = ROOT / "src" / "nn" / "metal" / "tables" / "attention_policy_map.h"
@@ -29,6 +28,7 @@ OUTPUT_STAGES = (
     "policy-qk",
     "policy-raw",
     "policy",
+    "moves-left",
     "heads",
 )
 
@@ -97,7 +97,9 @@ def percentile(values: list[float], pct: float) -> float:
 def load_net_pb2() -> Any:
     protoc = shutil.which("protoc")
     if not protoc:
-        raise RuntimeError("protoc is required to generate Python bindings for net.proto")
+        raise RuntimeError(
+            "protoc is required to generate Python bindings for net.proto"
+        )
     tmp = tempfile.TemporaryDirectory(prefix="metalfish-lc0-proto-")
     out_dir = Path(tmp.name)
     result = subprocess.run(
@@ -171,11 +173,15 @@ def dense_weight(np: Any, layer: Any, rows: int | None = None) -> Any:
         else:
             raise RuntimeError("dense rows must be provided for layers without dims")
     if values.size % rows != 0:
-        raise RuntimeError(f"cannot reshape dense layer of {values.size} values to {rows} rows")
+        raise RuntimeError(
+            f"cannot reshape dense layer of {values.size} values to {rows} rows"
+        )
     return values.reshape(rows, values.size // rows).astype(np.float32)
 
 
-def activation_mb(mb: Any, np: Any, x: Any, activation: str, name: str | None = None) -> Any:
+def activation_mb(
+    mb: Any, np: Any, x: Any, activation: str, name: str | None = None
+) -> Any:
     def named(op: Any, suffix: str, **kwargs: Any) -> Any:
         if name:
             kwargs["name"] = f"{name}_{suffix}"
@@ -213,7 +219,9 @@ def layer_norm_mb(
 ) -> Any:
     if secondary is not None:
         if alpha != 1.0:
-            secondary = mb.mul(x=secondary, y=mb.const(val=np.array(alpha, dtype=np.float32)))
+            secondary = mb.mul(
+                x=secondary, y=mb.const(val=np.array(alpha, dtype=np.float32))
+            )
         parent = mb.add(x=parent, y=secondary)
     return mb.layer_norm(
         x=parent,
@@ -255,7 +263,13 @@ def parse_pos_encoding(np: Any) -> Any:
     start = text.index(marker) + len(marker)
     end = text.index("};", start)
     table_text = text[start:end]
-    values = [float(token) for token in table_text.replace("{", " ").replace("}", " ").replace(",", " ").split()]
+    values = [
+        float(token)
+        for token in table_text.replace("{", " ")
+        .replace("}", " ")
+        .replace(",", " ")
+        .split()
+    ]
     if len(values) != 64 * 64:
         raise RuntimeError(f"expected 4096 positional values, found {len(values)}")
     return np.array(values, dtype=np.float32).reshape(64, 64)
@@ -269,10 +283,15 @@ def parse_attention_policy_map(np: Any) -> Any:
     table_text = text[start:end]
     values = [
         int(token)
-        for token in table_text.replace("{", " ").replace("}", " ").replace(",", " ").split()
+        for token in table_text.replace("{", " ")
+        .replace("}", " ")
+        .replace(",", " ")
+        .split()
     ]
     if len(values) != 64 * 64 + 8 * 24:
-        raise RuntimeError(f"expected 4288 attention policy values, found {len(values)}")
+        raise RuntimeError(
+            f"expected 4288 attention policy values, found {len(values)}"
+        )
     return np.array(values, dtype=np.int32)
 
 
@@ -312,7 +331,9 @@ def inspect_t1(net: Any) -> dict[str, Any]:
 
 def validate_t1_attention_info(info: dict[str, Any]) -> None:
     if info["encoder_layers"] < 1 or info["network"] != 4 or info["policy"] != 3:
-        raise RuntimeError("this experimental exporter currently expects a T1 attention net")
+        raise RuntimeError(
+            "this experimental exporter currently expects a T1 attention net"
+        )
     if info["headcount"] < 1 or info["ip_emb_channels"] % info["headcount"] != 0:
         raise RuntimeError("network channels must be divisible by attention headcount")
 
@@ -339,7 +360,11 @@ def effective_activations(net: Any) -> dict[str, str]:
     default = "mish" if nf.default_activation == 1 else "relu"
     smolgen = activation_name(nf, nf.smolgen_activation, default)
     ffn = activation_name(nf, nf.ffn_activation, default)
-    if nf.network == 4 and len(net.weights.encoder) > 0 and net.weights.HasField("smolgen_w"):
+    if (
+        nf.network == 4
+        and len(net.weights.encoder) > 0
+        and net.weights.HasField("smolgen_w")
+    ):
         smolgen = "swish"
         ffn = "relu_2"
     return {"default": default, "smolgen": smolgen, "ffn": ffn}
@@ -436,6 +461,14 @@ def build_value_model(
     value_fc1_w = dense_weight(np, weights.ip1_val_w, value_fc1_b.size)
     value_fc2_b = decode_layer(np, weights.ip2_val_b)
     value_fc2_w = dense_weight(np, weights.ip2_val_w, value_fc2_b.size)
+    moves_left_enabled = net.format.network_format.moves_left == 1
+    if moves_left_enabled:
+        moves_embed_b = decode_layer(np, weights.ip_mov_b)
+        moves_embed_w = dense_weight(np, weights.ip_mov_w, moves_embed_b.size)
+        moves_fc1_b = decode_layer(np, weights.ip1_mov_b)
+        moves_fc1_w = dense_weight(np, weights.ip1_mov_w, moves_fc1_b.size)
+        moves_fc2_b = decode_layer(np, weights.ip2_mov_b)
+        moves_fc2_w = dense_weight(np, weights.ip2_mov_w, moves_fc2_b.size)
     policy_embed_b = decode_layer(np, policy_head.ip_pol_b)
     policy_embed_w = dense_weight(np, policy_head.ip_pol_w, policy_embed_b.size)
     policy_q_b = decode_layer(np, policy_head.ip2_pol_b)
@@ -452,7 +485,9 @@ def build_value_model(
     if policy_d_model == 0 or policy_k_b.size != policy_d_model:
         raise RuntimeError("attention policy q/k weights are missing")
     if len(policy_head.pol_encoder):
-        raise RuntimeError("policy encoder layers are not implemented in this experiment")
+        raise RuntimeError(
+            "policy encoder layers are not implemented in this experiment"
+        )
     policy_indices = attention_policy_gather_indices(np)
 
     @mb.program(
@@ -489,7 +524,9 @@ def build_value_model(
             scores = mb.mul(x=scores, y=scale)
             if enc["smolgen"] is not None:
                 if global_smolgen_w is None:
-                    raise RuntimeError("encoder smolgen exists without global smolgen weights")
+                    raise RuntimeError(
+                        "encoder smolgen exists without global smolgen weights"
+                    )
                 sg = enc["smolgen"]
                 smolgen = linear_mb(
                     mb, body, sg["compress_w"], None, name="smolgen_compress_linear"
@@ -558,11 +595,15 @@ def build_value_model(
             if output_stage == "policy-embed":
                 return policy
 
-            queries = linear_mb(mb, policy, policy_q_w, policy_q_b, name="policy_q_linear")
+            queries = linear_mb(
+                mb, policy, policy_q_w, policy_q_b, name="policy_q_linear"
+            )
             keys = linear_mb(mb, policy, policy_k_w, policy_k_b, name="policy_k_linear")
             keys_t = mb.transpose(x=keys, perm=[0, 2, 1], name="policy_k_transpose")
             policy = mb.matmul(x=queries, y=keys_t, name="policy_qk_matmul")
-            scale = mb.const(val=np.array(1.0 / math.sqrt(policy_d_model), dtype=np.float32))
+            scale = mb.const(
+                val=np.array(1.0 / math.sqrt(policy_d_model), dtype=np.float32)
+            )
             policy = mb.mul(x=policy, y=scale, name="policy_qk_scale")
             if output_stage == "policy-qk":
                 return policy
@@ -649,7 +690,9 @@ def build_value_model(
             if output_stage == "policy":
                 return policy
 
-        value = linear_mb(mb, body, value_embed_w, value_embed_b, name="value_embed_linear")
+        value = linear_mb(
+            mb, body, value_embed_w, value_embed_b, name="value_embed_linear"
+        )
         value = activation_mb(mb, np, value, "mish", name="value_embed_mish")
         if output_stage == "value-embed":
             return value
@@ -668,6 +711,34 @@ def build_value_model(
         value = mb.softmax(x=value, axis=-1, name="value_wdl")
         if output_stage == "heads":
             return value, policy
+        if output_stage == "moves-left":
+            if not moves_left_enabled:
+                raise RuntimeError("network has no moves-left head")
+            moves_left = linear_mb(
+                mb, body, moves_embed_w, moves_embed_b, name="moves_left_embed_linear"
+            )
+            moves_left = activation_mb(
+                mb, np, moves_left, activations["default"], name="moves_left_embed_act"
+            )
+            moves_left = mb.reshape(
+                x=moves_left,
+                shape=[batch_size, 64 * moves_embed_b.size],
+                name="moves_left_flatten",
+            )
+            moves_left = linear_mb(
+                mb, moves_left, moves_fc1_w, moves_fc1_b, name="moves_left_fc1_linear"
+            )
+            moves_left = activation_mb(
+                mb, np, moves_left, activations["default"], name="moves_left_fc1_act"
+            )
+            moves_left = linear_mb(
+                mb,
+                moves_left,
+                moves_fc2_w,
+                moves_fc2_b,
+                name="moves_left_output_linear",
+            )
+            return mb.relu(x=moves_left, name="moves_left_output")
         return value
 
     return ct.convert(
@@ -695,7 +766,9 @@ def benchmark_predict(
         "iterations": iterations,
         "batch_size": batch_size,
         "median_ms": statistics.median(latencies),
-        "median_positions_per_second": 1000.0 * batch_size / statistics.median(latencies),
+        "median_positions_per_second": 1000.0
+        * batch_size
+        / statistics.median(latencies),
         "mean_ms": statistics.fmean(latencies),
         "p90_ms": percentile(latencies, 0.90),
         "min_ms": min(latencies),
@@ -734,7 +807,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     encoder_layers_arg = getattr(args, "encoder_layers", -1)
     batch_size = getattr(args, "batch_size", 1)
     encoder_layers_limit = None if encoder_layers_arg < 0 else encoder_layers_arg
-    if encoder_layers_limit is not None and encoder_layers_limit > info["encoder_layers"]:
+    if (
+        encoder_layers_limit is not None
+        and encoder_layers_limit > info["encoder_layers"]
+    ):
         raise RuntimeError(
             f"encoder layer probe {encoder_layers_limit} exceeds "
             f"network depth {info['encoder_layers']}"

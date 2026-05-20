@@ -18,7 +18,6 @@ sys.path.insert(0, str(ROOT))
 
 from tools import lc0_coreml_position_parity as parity  # noqa: E402
 
-
 DEFAULT_FEN = parity.DEFAULT_FENS[1]
 
 
@@ -118,7 +117,9 @@ def run_metal_probe(args: argparse.Namespace, iterations: int) -> dict[str, Any]
     try:
         completed = subprocess.run(command, check=True, capture_output=True, text=True)
     except OSError as exc:
-        raise RuntimeError(f"failed to run Metal probe {args.metal_probe}: {exc}") from exc
+        raise RuntimeError(
+            f"failed to run Metal probe {args.metal_probe}: {exc}"
+        ) from exc
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.strip()
         stdout = exc.stdout.strip()
@@ -193,9 +194,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="metalfish-ane-overlap-") as tmp:
         ready_file = Path(tmp) / "metal.ready"
         start_file = Path(tmp) / "metal.start"
-        process = start_metal_probe(
-            args, args.metal_iterations, ready_file, start_file
-        )
+        process = start_metal_probe(args, args.metal_iterations, ready_file, start_file)
         wait_for_probe_ready(process, ready_file, args.timeout)
         start_file.touch()
         try:
@@ -246,13 +245,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Measure Core ML T1 heads while MetalFish Metal inference runs concurrently."
     )
     parser.add_argument("weights", help="Lc0 T1 .pb or .pb.gz weights")
-    parser.add_argument("--metal-probe", required=True, help="Path to build/metalfish_nn_probe")
+    parser.add_argument(
+        "--metal-probe", required=True, help="Path to build/metalfish_nn_probe"
+    )
     parser.add_argument("--fen", default=DEFAULT_FEN)
     parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--coreml-compute-unit", choices=["all", "cpu", "cpu-gpu", "cpu-ne"], default="cpu-ne")
+    parser.add_argument(
+        "--coreml-compute-unit",
+        choices=["all", "cpu", "cpu-gpu", "cpu-ne"],
+        default="cpu-ne",
+    )
     parser.add_argument("--coreml-precision", choices=["fp16", "fp32"], default="fp16")
-    parser.add_argument("--coreml-value-head-fp32", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--coreml-policy-head-fp32", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--coreml-value-head-fp32", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument(
+        "--coreml-policy-head-fp32",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--metal-iterations", type=int, default=60)
@@ -265,7 +276,9 @@ def print_human(result: dict[str, Any]) -> None:
     print("MetalFish Core ML/Metal concurrency benchmark")
     print(f"  Weights:    {result['weights']}")
     print(f"  Batch size: {result['batch_size']}")
-    print(f"  Core ML:    {result['coreml']['compute_unit']} {result['coreml']['precision']}")
+    print(
+        f"  Core ML:    {result['coreml']['compute_unit']} {result['coreml']['precision']}"
+    )
     print(f"  Build:      {result['coreml']['build_ms']:.1f} ms")
     core_solo = result["coreml"]["solo"]
     core_con = result["coreml"]["concurrent"]

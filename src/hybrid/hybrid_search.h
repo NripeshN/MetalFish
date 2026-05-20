@@ -17,6 +17,7 @@
 #include "shared_tt.h"
 #include <atomic>
 #include <condition_variable>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -213,6 +214,14 @@ struct ParallelHybridConfig {
   int ab_candidate_verify_ms = 120;
   int ab_candidate_verify_count = 4;
   bool root_pawn_lever_tiebreak = true;
+  bool ane_root_probe = false;
+  std::string ane_weights_path;
+  std::string ane_model_path;
+  std::string ane_compute_units = "cpu-ne";
+  int ane_batch_size = 8;
+  int ane_root_hint_count = 10;
+  int ane_root_hint_wait_ms = 75;
+  int ane_min_budget_ms = 1000;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees
@@ -273,6 +282,7 @@ private:
   ParallelSearchStats stats_;
 
   std::unique_ptr<Search> mcts_search_;
+  std::unique_ptr<NNMCTSEvaluator> ane_evaluator_;
   std::unique_ptr<SharedTTReader> shared_tt_reader_;
   Engine *engine_ = nullptr;
 
@@ -311,6 +321,7 @@ private:
   std::mutex ab_start_mutex_;
   std::atomic<bool> mcts_search_started_{false};
   std::atomic<bool> ab_search_started_{false};
+  std::future<std::vector<Move>> ane_root_hints_future_;
 
   std::string root_fen_;
   ::MetalFish::Search::LimitsType limits_;
@@ -337,6 +348,10 @@ private:
   void update_mcts_policy_from_ab();
   void publish_mcts_state();
   std::vector<Move> collect_mcts_root_order_hints();
+  void start_ane_root_probe();
+  std::vector<Move> compute_ane_root_order_hints();
+  std::vector<Move> collect_ane_root_order_hints();
+  std::vector<Move> collect_root_order_hints();
   std::vector<Move>
   verify_ab_root_candidates(const std::vector<Move> &candidates, int verify_ms);
 

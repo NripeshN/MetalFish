@@ -41,8 +41,7 @@ struct Options {
   std::string backend = "metal";
   std::string coreml_model;
   std::string coreml_compute_units = "cpu-ne";
-  std::string fen =
-      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   int top = 8;
   int batch_size = 1;
   int warmup = 1;
@@ -208,8 +207,9 @@ void PrintTopPolicy(const std::array<float, NN::kPolicyOutputs> &policy,
   const int count = std::min(top, NN::kPolicyOutputs);
   std::vector<int> indices(NN::kPolicyOutputs);
   std::iota(indices.begin(), indices.end(), 0);
-  std::partial_sort(indices.begin(), indices.begin() + count, indices.end(),
-                    [&](int lhs, int rhs) { return policy[lhs] > policy[rhs]; });
+  std::partial_sort(
+      indices.begin(), indices.begin() + count, indices.end(),
+      [&](int lhs, int rhs) { return policy[lhs] > policy[rhs]; });
 
   std::cout << ",\"policy_top\":[";
   for (int rank = 0; rank < count; ++rank) {
@@ -264,12 +264,13 @@ void RunProbe(const Options &options) {
   const Position *history_storage[] = {&position};
   std::span<const Position *const> history(history_storage, 1);
   int transform = 0;
-  const auto planes = NN::EncodePositionForNN(
-      input_format, history, NN::kMoveHistory, NN::FillEmptyHistory::FEN_ONLY,
-      &transform);
+  const auto planes =
+      NN::EncodePositionForNN(input_format, history, NN::kMoveHistory,
+                              NN::FillEmptyHistory::FEN_ONLY, &transform);
 
-  auto network = NN::CreateNetwork(weights, options.backend, options.coreml_model,
-                                   options.coreml_compute_units);
+  auto network =
+      NN::CreateNetwork(weights, options.backend, options.coreml_model,
+                        options.coreml_compute_units);
   const std::vector<NN::InputPlanes> batch_inputs(options.batch_size, planes);
   for (int i = 0; i < options.warmup; ++i)
     (void)network->EvaluateBatch(batch_inputs);
@@ -295,8 +296,8 @@ void RunProbe(const Options &options) {
   std::cout << "\"fen\":\"" << JsonEscape(options.fen) << '"';
   std::cout << ",\"weights\":\"" << JsonEscape(options.weights) << '"';
   std::cout << ",\"backend\":\"" << JsonEscape(options.backend) << '"';
-  std::cout << ",\"network_info\":\""
-            << JsonEscape(network->GetNetworkInfo()) << '"';
+  std::cout << ",\"network_info\":\"" << JsonEscape(network->GetNetworkInfo())
+            << '"';
   std::cout << ",\"format\":\"" << JsonEscape(descriptor.Summary()) << '"';
   std::cout << ",\"input_format\":" << static_cast<int>(input_format);
   std::cout << ",\"transform\":" << transform;
@@ -314,8 +315,7 @@ void RunProbe(const Options &options) {
             << ",\"median_positions_per_second\":"
             << (1000.0 * static_cast<double>(options.batch_size) /
                 Median(latencies))
-            << ",\"mean_ms\":" << Mean(latencies)
-            << ",\"min_ms\":"
+            << ",\"mean_ms\":" << Mean(latencies) << ",\"min_ms\":"
             << *std::min_element(latencies.begin(), latencies.end())
             << ",\"max_ms\":"
             << *std::max_element(latencies.begin(), latencies.end()) << '}';

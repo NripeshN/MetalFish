@@ -24,7 +24,9 @@ def test_startpos_encoder_shape_and_aux_planes() -> None:
     expect("shape", planes.shape == (1, 64, 112))
     expect("white pawns", float(planes[0, parity.square_index("a2"), 0]) == 1.0)
     expect("black king", float(planes[0, parity.square_index("e8"), 11]) == 1.0)
-    expect("start history empty", float(planes[0, parity.square_index("a2"), 13]) == 0.0)
+    expect(
+        "start history empty", float(planes[0, parity.square_index("a2"), 13]) == 0.0
+    )
     expect("our qs castling", np.all(planes[0, :, 104] == 1.0))
     expect("our ks castling", np.all(planes[0, :, 105] == 1.0))
     expect("their qs castling", np.all(planes[0, :, 106] == 1.0))
@@ -35,9 +37,18 @@ def test_startpos_encoder_shape_and_aux_planes() -> None:
 
 def test_black_to_move_is_oriented_to_side_to_move() -> None:
     planes = parity.encode_fen_classical_112("8/8/8/8/8/8/p7/K6k b - - 12 1")
-    expect("black pawn becomes our pawn", float(planes[0, parity.square_index("a7"), 0]) == 1.0)
-    expect("white king becomes their king", float(planes[0, parity.square_index("a8"), 11]) == 1.0)
-    expect("black king becomes our king", float(planes[0, parity.square_index("h8"), 5]) == 1.0)
+    expect(
+        "black pawn becomes our pawn",
+        float(planes[0, parity.square_index("a7"), 0]) == 1.0,
+    )
+    expect(
+        "white king becomes their king",
+        float(planes[0, parity.square_index("a8"), 11]) == 1.0,
+    )
+    expect(
+        "black king becomes our king",
+        float(planes[0, parity.square_index("h8"), 5]) == 1.0,
+    )
     expect("side plane black", np.all(planes[0, :, 108] == 1.0))
     expect("rule50", np.all(planes[0, :, 109] == 12.0))
 

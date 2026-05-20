@@ -385,7 +385,9 @@ if(BUILD_TESTS)
       ${MPS_FRAMEWORK}
       ${MPSGRAPH_FRAMEWORK})
   endif()
-  if(APPLE AND USE_COREML AND COREML_FRAMEWORK)
+  if(APPLE
+     AND USE_COREML
+     AND COREML_FRAMEWORK)
     target_link_libraries(metalfish_tests ${COREML_FRAMEWORK}
                           ${FOUNDATION_FRAMEWORK})
   endif()
@@ -427,17 +429,16 @@ if(BUILD_TESTS)
       ${MPS_FRAMEWORK}
       ${MPSGRAPH_FRAMEWORK})
   endif()
-  if(APPLE AND USE_COREML AND COREML_FRAMEWORK)
+  if(APPLE
+     AND USE_COREML
+     AND COREML_FRAMEWORK)
     target_link_libraries(test_nn_comparison ${COREML_FRAMEWORK}
                           ${FOUNDATION_FRAMEWORK})
   endif()
   add_test(NAME test_nn_comparison COMMAND test_nn_comparison)
 
-  add_executable(
-    metalfish_nn_probe
-    tools/nn_metal_probe.cpp
-    ${CORE_SOURCES}
-    ${NN_SOURCES})
+  add_executable(metalfish_nn_probe tools/nn_metal_probe.cpp ${CORE_SOURCES}
+                                    ${NN_SOURCES})
   target_link_libraries(
     metalfish_nn_probe Threads::Threads ${METALFISH_PROTOBUF_LIB}
     ${ZLIB_LIBRARIES} ${ABSL_LIBS})
@@ -458,7 +459,9 @@ if(BUILD_TESTS)
       ${MPS_FRAMEWORK}
       ${MPSGRAPH_FRAMEWORK})
   endif()
-  if(APPLE AND USE_COREML AND COREML_FRAMEWORK)
+  if(APPLE
+     AND USE_COREML
+     AND COREML_FRAMEWORK)
     target_link_libraries(metalfish_nn_probe ${COREML_FRAMEWORK}
                           ${FOUNDATION_FRAMEWORK})
   endif()

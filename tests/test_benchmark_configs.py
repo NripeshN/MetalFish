@@ -287,6 +287,8 @@ def main() -> int:
             'options.add("HybridABCandidateVerifyMs"',
             'options.add("HybridABRootRejectMCTS"',
             'options.add("HybridRootPawnLeverTieBreak"',
+            'options.add("HybridANERootProbe"',
+            'options.add("HybridANEModelPath"',
         ],
     )
     assert_file_contains(
@@ -306,6 +308,8 @@ def main() -> int:
             '"HybridABCandidateVerifyMs"',
             '"HybridABRootRejectMCTS"',
             '"HybridRootPawnLeverTieBreak"',
+            '"HybridANERootProbe"',
+            '"HybridANEModelPath"',
         ],
     )
 
@@ -594,6 +598,10 @@ def main() -> int:
             "MCTSParallelSearch=false",
             'go "nodes 50"',
             "--expect-bestmove h5f6",
+            "Run Apple accelerator tool tests",
+            "tools/lc0_coreml_root_value_probe.py",
+            "tests/test_lc0_coreml_root_value_probe.py",
+            "tests/test_lc0_coreml_value_export.py",
         ],
     )
     assert_file_contains(

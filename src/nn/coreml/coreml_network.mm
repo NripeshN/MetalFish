@@ -11,12 +11,14 @@
 #import <Foundation/Foundation.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace MetalFish {
@@ -116,14 +118,14 @@ float ReadMultiArrayValue(MLMultiArray *array, NSInteger offset) {
 }
 
 NSInteger ShapeValue(NSArray<NSNumber *> *shape, NSUInteger idx,
-                    NSInteger fallback) {
+                     NSInteger fallback) {
   if (!shape || idx >= [shape count])
     return fallback;
   return [shape[idx] integerValue];
 }
 
 NSInteger StrideValue(NSArray<NSNumber *> *strides, NSUInteger idx,
-                     NSInteger fallback) {
+                      NSInteger fallback) {
   if (!strides || idx >= [strides count])
     return fallback;
   return [strides[idx] integerValue];
@@ -160,8 +162,8 @@ public:
     }
 
     model_ = [MLModel modelWithContentsOfURL:load_url
-                                configuration:configuration
-                                        error:&error];
+                               configuration:configuration
+                                       error:&error];
     if (!model_)
       throw std::runtime_error("Could not load Core ML model: " +
                                ErrorString(error));
@@ -193,7 +195,8 @@ public:
     return EvaluateBatch(inputs).front();
   }
 
-  std::vector<NetworkOutput> EvaluateBatch(const std::vector<InputPlanes> &inputs) {
+  std::vector<NetworkOutput>
+  EvaluateBatch(const std::vector<InputPlanes> &inputs) {
     std::vector<NetworkOutput> outputs;
     outputs.reserve(inputs.size());
     for (size_t offset = 0; offset < inputs.size();
@@ -224,9 +227,7 @@ private:
   EvaluateFixedChunk(const std::vector<InputPlanes> &inputs, size_t offset,
                      size_t chunk) {
     NSError *error = nil;
-    NSArray<NSNumber *> *shape = @[
-      @(fixed_batch_), @(64), @(kTotalPlanes)
-    ];
+    NSArray<NSNumber *> *shape = @[ @(fixed_batch_), @(64), @(kTotalPlanes) ];
     MLMultiArray *input_array =
         [[MLMultiArray alloc] initWithShape:shape
                                    dataType:MLMultiArrayDataTypeFloat32
@@ -248,8 +249,8 @@ private:
       throw std::runtime_error("Could not create Core ML input provider: " +
                                ErrorString(error));
 
-    id<MLFeatureProvider> prediction =
-        [model_ predictionFromFeatures:provider error:&error];
+    id<MLFeatureProvider> prediction = [model_ predictionFromFeatures:provider
+                                                                error:&error];
     if (!prediction)
       throw std::runtime_error("Core ML prediction failed: " +
                                ErrorString(error));
@@ -262,7 +263,8 @@ private:
   void FillInput(MLMultiArray *array, const std::vector<InputPlanes> &inputs,
                  size_t offset, size_t chunk) {
     float *data = static_cast<float *>(array.dataPointer);
-    const NSInteger batch_stride = StrideValue(array.strides, 0, 64 * kTotalPlanes);
+    const NSInteger batch_stride =
+        StrideValue(array.strides, 0, 64 * kTotalPlanes);
     const NSInteger square_stride = StrideValue(array.strides, 1, kTotalPlanes);
     const NSInteger plane_stride = StrideValue(array.strides, 2, 1);
 
@@ -293,8 +295,8 @@ private:
       if ([shape count] == 0)
         continue;
 
-      const NSInteger last_dim =
-          ShapeValue(shape, [shape count] - 1, static_cast<NSInteger>(array.count));
+      const NSInteger last_dim = ShapeValue(
+          shape, [shape count] - 1, static_cast<NSInteger>(array.count));
       if (last_dim == kPolicyOutputs) {
         CopyPolicy(array, outputs);
         found_policy = true;
@@ -302,8 +304,17 @@ private:
         CopyWDL(array, outputs);
         found_wdl = true;
       } else if (last_dim == 1) {
-        CopyScalarValue(array, outputs);
-        found_scalar = true;
+        std::string feature_name = FromNSString(name);
+        std::transform(feature_name.begin(), feature_name.end(),
+                       feature_name.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (feature_name.find("moves") != std::string::npos ||
+            feature_name.find("left") != std::string::npos) {
+          continue;
+        } else {
+          CopyScalarValue(array, outputs);
+          found_scalar = true;
+        }
       }
     }
 
@@ -315,9 +326,9 @@ private:
 
   void CopyPolicy(MLMultiArray *array, std::vector<NetworkOutput> &outputs) {
     const NSUInteger rank = [array.shape count];
-    const NSInteger batch_stride = rank >= 2 ? StrideValue(array.strides, 0, 0) : 0;
-    const NSInteger feature_stride =
-        StrideValue(array.strides, rank - 1, 1);
+    const NSInteger batch_stride =
+        rank >= 2 ? StrideValue(array.strides, 0, 0) : 0;
+    const NSInteger feature_stride = StrideValue(array.strides, rank - 1, 1);
     for (size_t b = 0; b < outputs.size(); ++b) {
       for (int i = 0; i < kPolicyOutputs; ++i) {
         const NSInteger offset = static_cast<NSInteger>(b) * batch_stride +
@@ -329,9 +340,9 @@ private:
 
   void CopyWDL(MLMultiArray *array, std::vector<NetworkOutput> &outputs) {
     const NSUInteger rank = [array.shape count];
-    const NSInteger batch_stride = rank >= 2 ? StrideValue(array.strides, 0, 0) : 0;
-    const NSInteger feature_stride =
-        StrideValue(array.strides, rank - 1, 1);
+    const NSInteger batch_stride =
+        rank >= 2 ? StrideValue(array.strides, 0, 0) : 0;
+    const NSInteger feature_stride = StrideValue(array.strides, rank - 1, 1);
     for (size_t b = 0; b < outputs.size(); ++b) {
       NetworkOutput &out = outputs[b];
       out.has_wdl = true;
@@ -344,14 +355,15 @@ private:
     }
   }
 
-  void CopyScalarValue(MLMultiArray *array, std::vector<NetworkOutput> &outputs) {
+  void CopyScalarValue(MLMultiArray *array,
+                       std::vector<NetworkOutput> &outputs) {
     const NSUInteger rank = [array.shape count];
-    const NSInteger batch_stride = rank >= 2 ? StrideValue(array.strides, 0, 0) : 0;
-    const NSInteger feature_stride =
-        StrideValue(array.strides, rank - 1, 1);
+    const NSInteger batch_stride =
+        rank >= 2 ? StrideValue(array.strides, 0, 0) : 0;
+    const NSInteger feature_stride = StrideValue(array.strides, rank - 1, 1);
     for (size_t b = 0; b < outputs.size(); ++b) {
-      const NSInteger offset = static_cast<NSInteger>(b) * batch_stride +
-                               0 * feature_stride;
+      const NSInteger offset =
+          static_cast<NSInteger>(b) * batch_stride + 0 * feature_stride;
       outputs[b].value = ReadMultiArrayValue(array, offset);
       outputs[b].has_wdl = false;
       outputs[b].wdl[0] = outputs[b].wdl[1] = outputs[b].wdl[2] = 0.0f;

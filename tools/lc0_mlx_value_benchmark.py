@@ -102,7 +102,9 @@ def load_t1_params(mx: Any, weights_path: Path, dtype: Any) -> dict[str, Any]:
                 "dense_b": as_mx(mx, decode_layer(enc.mha.dense_b), dtype),
                 "ln1_g": as_mx(mx, decode_layer(enc.ln1_gammas), dtype),
                 "ln1_b": as_mx(mx, decode_layer(enc.ln1_betas), dtype),
-                "ffn1_w": as_mx(mx, dense_weight(enc.ffn.dense1_w, 4 * channels), dtype),
+                "ffn1_w": as_mx(
+                    mx, dense_weight(enc.ffn.dense1_w, 4 * channels), dtype
+                ),
                 "ffn1_b": as_mx(mx, decode_layer(enc.ffn.dense1_b), dtype),
                 "ffn2_w": as_mx(mx, dense_weight(enc.ffn.dense2_w, channels), dtype),
                 "ffn2_b": as_mx(mx, decode_layer(enc.ffn.dense2_b), dtype),
@@ -178,10 +180,14 @@ def forward(mx: Any, x: Any, params: dict[str, Any]) -> Any:
     value = mish(mx, linear(body, params["value_embed_w"], params["value_embed_b"]))
     value = mx.reshape(value, (1, 64 * params["value_channels"]))
     value = mish(mx, linear(value, params["value_fc1_w"], params["value_fc1_b"]))
-    return mx.softmax(linear(value, params["value_fc2_w"], params["value_fc2_b"]), axis=-1)
+    return mx.softmax(
+        linear(value, params["value_fc2_w"], params["value_fc2_b"]), axis=-1
+    )
 
 
-def benchmark(mx: Any, params: dict[str, Any], dtype: Any, warmup: int, iterations: int) -> dict[str, Any]:
+def benchmark(
+    mx: Any, params: dict[str, Any], dtype: Any, warmup: int, iterations: int
+) -> dict[str, Any]:
     sample = mx.zeros((1, 64, 112), dtype=dtype)
     for _ in range(warmup):
         out = forward(mx, sample, params)
