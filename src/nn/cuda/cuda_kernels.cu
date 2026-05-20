@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -28,8 +27,6 @@ namespace MetalFish {
 namespace NN {
 namespace Cuda {
 namespace {
-
-constexpr std::size_t kCublasWorkspaceBytes = 16ULL * 1024ULL * 1024ULL;
 
 std::string CudaErrorMessage(const char *op, cudaError_t status) {
   std::ostringstream out;
@@ -71,98 +68,48 @@ std::string CublasErrorMessage(const char *op, cublasStatus_t status) {
 
 class ThreadLocalCublasHandle {
 public:
-  explicit ThreadLocalCublasHandle(int device) : device_(device) {
-    cudaError_t cuda_status = cudaSetDevice(device_);
-    if (cuda_status != cudaSuccess) {
-      throw std::runtime_error(
-          CudaErrorMessage("cudaSetDevice(cublas)", cuda_status));
-    }
-
+  ThreadLocalCublasHandle() {
     cublasStatus_t status = cublasCreate(&handle_);
     if (status != CUBLAS_STATUS_SUCCESS)
       throw std::runtime_error(CublasErrorMessage("cublasCreate", status));
 
     status = cublasSetPointerMode(handle_, CUBLAS_POINTER_MODE_HOST);
-    if (status != CUBLAS_STATUS_SUCCESS) {
-      Cleanup();
+    if (status != CUBLAS_STATUS_SUCCESS)
       throw std::runtime_error(
           CublasErrorMessage("cublasSetPointerMode", status));
-    }
 
 #if CUDART_VERSION >= 11000
     status = cublasSetMathMode(handle_, CUBLAS_PEDANTIC_MATH);
 #else
     status = cublasSetMathMode(handle_, CUBLAS_DEFAULT_MATH);
 #endif
-    if (status != CUBLAS_STATUS_SUCCESS) {
-      Cleanup();
+    if (status != CUBLAS_STATUS_SUCCESS)
       throw std::runtime_error(CublasErrorMessage("cublasSetMathMode", status));
-    }
 
     status = cublasSetAtomicsMode(handle_, CUBLAS_ATOMICS_NOT_ALLOWED);
     if (status != CUBLAS_STATUS_SUCCESS) {
-      Cleanup();
       throw std::runtime_error(
           CublasErrorMessage("cublasSetAtomicsMode", status));
-    }
-
-    cuda_status = cudaMalloc(&workspace_, kCublasWorkspaceBytes);
-    if (cuda_status != cudaSuccess) {
-      Cleanup();
-      throw std::runtime_error(
-          CudaErrorMessage("cudaMalloc(cublas_workspace)", cuda_status));
-    }
-    status = cublasSetWorkspace(handle_, workspace_, kCublasWorkspaceBytes);
-    if (status != CUBLAS_STATUS_SUCCESS) {
-      Cleanup();
-      throw std::runtime_error(CublasErrorMessage("cublasSetWorkspace",
-                                                 status));
     }
   }
 
   ThreadLocalCublasHandle(const ThreadLocalCublasHandle &) = delete;
   ThreadLocalCublasHandle &operator=(const ThreadLocalCublasHandle &) = delete;
 
-  ~ThreadLocalCublasHandle() { Cleanup(); }
-
-  void Cleanup() noexcept {
-    int previous_device = -1;
-    cudaGetDevice(&previous_device);
-    if (device_ >= 0)
-      cudaSetDevice(device_);
+  ~ThreadLocalCublasHandle() {
     if (handle_)
       cublasDestroy(handle_);
-    handle_ = nullptr;
-    if (workspace_)
-      cudaFree(workspace_);
-    workspace_ = nullptr;
-    if (previous_device >= 0 && previous_device != device_)
-      cudaSetDevice(previous_device);
   }
 
   cublasHandle_t Get() const { return handle_; }
 
 private:
-  int device_ = -1;
   cublasHandle_t handle_ = nullptr;
-  void *workspace_ = nullptr;
 };
 
 cublasHandle_t CublasHandle() {
-  int device = 0;
-  const cudaError_t status = cudaGetDevice(&device);
-  if (status != cudaSuccess) {
-    throw std::runtime_error(CudaErrorMessage("cudaGetDevice(cublas)",
-                                             status));
-  }
-  static thread_local std::vector<std::unique_ptr<ThreadLocalCublasHandle>>
-      handles;
-  if (device >= static_cast<int>(handles.size()))
-    handles.resize(static_cast<std::size_t>(device) + 1);
-  if (!handles[static_cast<std::size_t>(device)])
-    handles[static_cast<std::size_t>(device)] =
-        std::make_unique<ThreadLocalCublasHandle>(device);
-  return handles[static_cast<std::size_t>(device)]->Get();
+  static thread_local ThreadLocalCublasHandle handle;
+  return handle.Get();
 }
 
 const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
