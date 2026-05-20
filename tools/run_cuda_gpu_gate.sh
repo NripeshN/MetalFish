@@ -120,6 +120,7 @@ grep -q "CUDA runtime" "${BUILD_DIR}/cuda-gpu-tests.log"
 METALFISH_NN_WEIGHTS="${WEIGHTS}" \
   METALFISH_NN_PARITY_REPORT="${PARITY_REPORT}" \
   METALFISH_NN_BATCH_BENCH="${METALFISH_NN_BATCH_BENCH:-1}" \
+  METALFISH_NN_BATCH_TRACE_WORST="${METALFISH_NN_BATCH_TRACE_WORST:-1}" \
   METALFISH_NN_BENCH_ITERS="${METALFISH_NN_BENCH_ITERS:-2}" \
   METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
   METALFISH_CUDA_PROFILE=0 \
@@ -203,6 +204,7 @@ fi
   echo "- Weights: ${WEIGHTS}"
   echo "- Parity report: ${PARITY_REPORT}"
   echo "- Explicit CUDA UCI go: ${UCI_GO}"
+  echo "- Batch worst trace: ${METALFISH_NN_BATCH_TRACE_WORST:-1}"
   echo
   echo "## Device"
   echo
@@ -217,6 +219,17 @@ fi
   echo "## Batch Timings"
   echo
   grep -m1 "batches:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+  if grep -q "TRACE_WORST:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+    echo
+    echo "## Batch Worst Trace"
+    echo
+    grep -m1 "TRACE_WORST:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+    grep -m1 "TRACE_WORST_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "TRACE_WORST_CONFIRMED:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "TRACE_WORST_CONFIRMED_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "TRACE_WORST_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "TRACE_WORST_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+  fi
   echo
   echo "## Parity Report"
   echo

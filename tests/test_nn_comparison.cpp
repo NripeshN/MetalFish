@@ -96,6 +96,19 @@ std::string result_top_policy_string(const MCTS::EvaluationResult &result,
   return out.str();
 }
 
+std::string move_line_string(const std::vector<Move> &line) {
+  if (line.empty())
+    return "startpos";
+
+  std::ostringstream out;
+  for (size_t i = 0; i < line.size(); ++i) {
+    if (i != 0)
+      out << ' ';
+    out << move_to_string(line[i]);
+  }
+  return out.str();
+}
+
 bool should_dump_nn_debug() {
   const char *dump = std::getenv("METALFISH_NN_DEBUG_DUMP");
   return dump && dump[0] != '\0' && std::string(dump) != "0";
@@ -552,7 +565,16 @@ struct EvalDiffMetrics {
   float moves_left_delta = 0.0f;
   float policy_delta = 0.0f;
   std::string worst_field = "none";
+  size_t policy_index = std::numeric_limits<size_t>::max();
+  Move policy_move = Move::none();
+  float policy_single = 0.0f;
+  float policy_batched = 0.0f;
 };
+
+float max_eval_delta(const EvalDiffMetrics &metrics) {
+  return std::max({metrics.value_delta, metrics.wdl_delta,
+                   metrics.moves_left_delta, metrics.policy_delta});
+}
 
 EvalDiffMetrics measure_eval_result(const MCTS::EvaluationResult &single,
                                     const MCTS::EvaluationResult &batched,
@@ -603,10 +625,19 @@ EvalDiffMetrics measure_eval_result(const MCTS::EvaluationResult &single,
       metrics.policy_delta = delta;
       metrics.worst_field = label + " policy " +
                             move_to_string(single.policy_priors[i].first);
+      metrics.policy_index = i;
+      metrics.policy_move = single.policy_priors[i].first;
+      metrics.policy_single = single.policy_priors[i].second;
+      metrics.policy_batched = batched.policy_priors[i].second;
     }
   }
 
   return metrics;
+}
+
+bool metrics_worse_than(const EvalDiffMetrics &candidate,
+                        const EvalDiffMetrics &current) {
+  return max_eval_delta(candidate) > max_eval_delta(current);
 }
 
 void merge_eval_metrics(EvalDiffMetrics &target, const EvalDiffMetrics &source) {
@@ -619,14 +650,17 @@ void merge_eval_metrics(EvalDiffMetrics &target, const EvalDiffMetrics &source) 
   if (source.policy_delta > target.policy_delta)
     target.policy_delta = source.policy_delta;
 
-  const float target_max =
-      std::max({target.value_delta, target.wdl_delta, target.moves_left_delta,
-                target.policy_delta});
-  const float source_max =
-      std::max({source.value_delta, source.wdl_delta, source.moves_left_delta,
-                source.policy_delta});
+  const float target_max = max_eval_delta(target);
+  const float source_max = max_eval_delta(source);
   if (source_max >= target_max && !source.worst_field.empty())
     target.worst_field = source.worst_field;
+  if (source.policy_delta >= target.policy_delta &&
+      source.policy_index != std::numeric_limits<size_t>::max()) {
+    target.policy_index = source.policy_index;
+    target.policy_move = source.policy_move;
+    target.policy_single = source.policy_single;
+    target.policy_batched = source.policy_batched;
+  }
 }
 
 bool compare_eval_result(const MCTS::EvaluationResult &single,
@@ -823,12 +857,27 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
       singles.push_back(single_eval.EvaluateWithHistory(history));
     }
 
+    EvalDiffMetrics trace_worst;
+    size_t trace_worst_batch = 0;
+    size_t trace_worst_entry = 0;
+    size_t trace_worst_line = 0;
+    bool trace_worst_set = false;
+    const bool trace_worst_enabled =
+        env_flag_enabled("METALFISH_NN_BATCH_TRACE_WORST");
+
     const std::array<size_t, 7> batch_sizes = {1, 2, 4, 8, 16, 32,
                                                histories.size()};
     for (size_t batch_size : batch_sizes) {
       std::vector<std::vector<const Position *>> prefix(
           histories.begin(), histories.begin() + batch_size);
-      auto batched = batch_eval.EvaluateBatchWithHistory(prefix);
+      std::vector<MCTS::EvaluationResult> batched;
+      try {
+        batched = batch_eval.EvaluateBatchWithHistory(prefix);
+      } catch (const std::exception &e) {
+        std::cout << "    FAIL: batch " << batch_size
+                  << " evaluation exception: " << e.what() << std::endl;
+        throw;
+      }
       if (batched.size() != batch_size) {
         std::cout << "    FAIL: batch result count mismatch for size "
                   << batch_size << std::endl;
@@ -841,9 +890,17 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
         label << "batch " << batch_size << " entry " << i;
         if (batch_size == histories.size())
           label << " line " << (i % lines.size());
-        merge_eval_metrics(batch_max,
-                           measure_eval_result(singles[i], batched[i],
-                                               label.str()));
+        const auto metrics =
+            measure_eval_result(singles[i], batched[i], label.str());
+        merge_eval_metrics(batch_max, metrics);
+        if (trace_worst_enabled &&
+            (!trace_worst_set || metrics_worse_than(metrics, trace_worst))) {
+          trace_worst = metrics;
+          trace_worst_batch = batch_size;
+          trace_worst_entry = i;
+          trace_worst_line = i % lines.size();
+          trace_worst_set = true;
+        }
         if (!compare_eval_result(singles[i], batched[i], label.str(),
                                  tolerances))
           return false;
@@ -858,6 +915,71 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
                            << " | " << format_float(batch_max.policy_delta)
                            << " | " << batch_max.worst_field << " |\n";
       }
+    }
+
+    if (trace_worst_enabled && trace_worst_set) {
+      std::vector<std::vector<const Position *>> trace_batch(
+          histories.begin(), histories.begin() + trace_worst_batch);
+      std::cout << "    TRACE_WORST: batch=" << trace_worst_batch
+                << " entry=" << trace_worst_entry
+                << " line_index=" << trace_worst_line
+                << " line=" << move_line_string(lines[trace_worst_line])
+                << " value_delta=" << format_float(trace_worst.value_delta)
+                << " wdl_delta=" << format_float(trace_worst.wdl_delta)
+                << " moves_left_delta="
+                << format_float(trace_worst.moves_left_delta)
+                << " policy_delta=" << format_float(trace_worst.policy_delta)
+                << " worst=" << trace_worst.worst_field << std::endl;
+      if (trace_worst.policy_index != std::numeric_limits<size_t>::max()) {
+        std::cout << "    TRACE_WORST_POLICY: index="
+                  << trace_worst.policy_index
+                  << " move=" << move_to_string(trace_worst.policy_move)
+                  << " single=" << format_float(trace_worst.policy_single)
+                  << " batch=" << format_float(trace_worst.policy_batched)
+                  << " delta="
+                  << format_float(std::fabs(trace_worst.policy_single -
+                                            trace_worst.policy_batched))
+                  << std::endl;
+      }
+
+      MCTS::NNMCTSEvaluator trace_single_eval(weights_path);
+      MCTS::NNMCTSEvaluator trace_batch_eval(weights_path);
+      const auto trace_single =
+          trace_single_eval.EvaluateWithHistory(histories[trace_worst_entry]);
+      const auto trace_outputs =
+          trace_batch_eval.EvaluateBatchWithHistory(trace_batch);
+      if (trace_outputs.size() != trace_worst_batch) {
+        std::cout << "    FAIL: worst trace batch result count mismatch"
+                  << std::endl;
+        return false;
+      }
+      const auto confirmed = measure_eval_result(
+          trace_single, trace_outputs[trace_worst_entry], "trace worst");
+      std::cout << "    TRACE_WORST_CONFIRMED: batch=" << trace_worst_batch
+                << " entry=" << trace_worst_entry
+                << " value_delta=" << format_float(confirmed.value_delta)
+                << " wdl_delta=" << format_float(confirmed.wdl_delta)
+                << " moves_left_delta="
+                << format_float(confirmed.moves_left_delta)
+                << " policy_delta=" << format_float(confirmed.policy_delta)
+                << " worst=" << confirmed.worst_field << std::endl;
+      if (confirmed.policy_index != std::numeric_limits<size_t>::max()) {
+        std::cout << "    TRACE_WORST_CONFIRMED_POLICY: index="
+                  << confirmed.policy_index
+                  << " move=" << move_to_string(confirmed.policy_move)
+                  << " single=" << format_float(confirmed.policy_single)
+                  << " batch=" << format_float(confirmed.policy_batched)
+                  << " delta="
+                  << format_float(std::fabs(confirmed.policy_single -
+                                            confirmed.policy_batched))
+                  << std::endl;
+      }
+      std::cout << "    TRACE_WORST_SINGLE_TOP: "
+                << result_top_policy_string(trace_single, 5) << std::endl;
+      std::cout << "    TRACE_WORST_BATCH_TOP: "
+                << result_top_policy_string(trace_outputs[trace_worst_entry],
+                                            5)
+                << std::endl;
     }
 
     std::cout << "    PASS: checked " << histories.size()
