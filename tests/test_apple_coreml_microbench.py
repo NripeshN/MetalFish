@@ -41,6 +41,8 @@ def test_parse_transformer_args() -> None:
             "4",
             "--layers",
             "2",
+            "--activation",
+            "mish",
             "--compute-unit",
             "cpu-ne",
         ]
@@ -51,6 +53,7 @@ def test_parse_transformer_args() -> None:
     expect("channels parsed", args.channels == 128)
     expect("heads parsed", args.heads == 8)
     expect("layers parsed", args.layers == 2)
+    expect("activation parsed", args.activation == "mish")
     expect("compute unit parsed", args.compute_unit == "cpu-ne")
 
 
