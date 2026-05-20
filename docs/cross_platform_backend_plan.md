@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, batch benchmark gate |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, restored attention batch parity |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -217,15 +217,14 @@ Current CUDA backend boundary:
   The first 2026-05-20 T4 baseline after workspace reuse was:
   `b1=16.922ms`, `b2=20.613ms`, `b4=27.251ms`, `b8=42.228ms`,
   `b16=80.917ms`, `b32=157.184ms` (`4.912ms/eval` at batch 32).
-- CUDA attention score/context execution now has a reusable pointer-array
-  cuBLAS path for multi-item batches, with pointer arrays built by small CUDA
-  kernels in the same stream instead of host vectors and host-to-device pointer
-  copies. The first host-built full multi-batch attempt compiled and passed
-  parity but slowed larger batches, and the batch-4-only fallback was
-  superseded by the device-built path. The accepted 2026-05-20 T4 gate kept
-  CUDA smoke, fixed BT4 outputs, batch parity, and UCI smoke green with
-  `b1=16.904ms`, `b2=20.634ms`, `b4=26.666ms`, `b8=42.439ms`,
-  `b16=81.267ms`, `b32=156.617ms` (`4.894ms/eval` at batch 32).
+- CUDA attention score/context execution uses the strided cuBLAS attention
+  path for all batch sizes. The pointer-array multi-batch path was removed
+  after a clean T4 rerun exposed batch-33 policy drift; the regression gate now
+  checks both batch 32 and batch 33 against single-position evaluation. The
+  accepted 2026-05-20 T4 gate kept CUDA smoke, fixed BT4 outputs, expanded
+  batch parity, and UCI smoke green with `b1=16.844ms`, `b2=25.530ms`,
+  `b4=26.723ms`, `b8=45.868ms`, `b16=88.098ms`, `b32=169.630ms`
+  (`5.301ms/eval` at batch 32).
 - A CUDA Q/K/V bias fusion attempt was rejected on the 2026-05-20 T4 gate after
   fixed-output drift in the castling-rights reference case, and was reverted.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with

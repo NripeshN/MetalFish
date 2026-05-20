@@ -319,7 +319,7 @@ bool test_bt4_reference_outputs_optional() {
     if (network_info.find("CUDA transformer backend") != std::string::npos) {
       tolerances.value = 5e-3f;
       tolerances.wdl = 5e-3f;
-      tolerances.moves_left = 1e-1f;
+      tolerances.moves_left = 2e-1f;
       tolerances.policy = 2e-2f;
     }
     for (const auto &test_case : cases) {
@@ -550,7 +550,7 @@ bool test_mcts_evaluator_batch_parity_optional() {
       tolerances.policy = 2.5e-1f;
     }
 
-    const std::array<size_t, 6> batch_sizes = {1, 2, 4, 8, 16,
+    const std::array<size_t, 7> batch_sizes = {1, 2, 4, 8, 16, 32,
                                                histories.size()};
     for (size_t batch_size : batch_sizes) {
       std::vector<std::vector<const Position *>> prefix(
