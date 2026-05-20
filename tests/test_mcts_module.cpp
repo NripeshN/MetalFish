@@ -1590,9 +1590,16 @@ void test_cuda_weight_upload(TestCounter &tc) {
   const auto descriptor = NN::DescribeNetworkFormat(file);
   const auto tensor_plan = NN::CreateNetworkTensorPlan(descriptor);
   NN::MultiHeadWeights weights(file.weights());
-  const auto inventory = NN::CreateNetworkWeightInventory(
+  auto inventory = NN::CreateNetworkWeightInventory(
       weights, NN::SelectPolicyHeadName(weights),
       NN::SelectValueHeadName(weights), tensor_plan);
+  const auto empty_tensor_at = inventory.tensors.size() > 1
+                                   ? inventory.tensors.begin() + 1
+                                   : inventory.tensors.end();
+  inventory.tensors.insert(
+      empty_tensor_at,
+      NN::NetworkWeightTensorView{"cuda.empty.optional", nullptr, 0, {},
+                                  NN::NetworkWeightTensorKind::Generic});
 
   auto smoke = NN::Cuda::RunWeightUploadSmoke(inventory);
   std::cout << "    " << smoke.message << std::endl;

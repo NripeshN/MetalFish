@@ -76,14 +76,12 @@ void CudaWeightBuffers::Upload(const NetworkWeightInventory &inventory) {
 
   try {
     for (const auto &tensor : inventory.tensors) {
-      if (tensor.elements == 0)
-        continue;
       const std::size_t shape_elements = ShapeElements(tensor.dims);
       if (shape_elements != 0 && shape_elements != tensor.elements) {
         throw std::runtime_error("CUDA weight tensor shape mismatch: " +
                                  tensor.name);
       }
-      if (tensor.data == nullptr)
+      if (tensor.elements != 0 && tensor.data == nullptr)
         throw std::runtime_error("CUDA weight tensor has null host data: " +
                                  tensor.name);
 
@@ -91,21 +89,25 @@ void CudaWeightBuffers::Upload(const NetworkWeightInventory &inventory) {
       device_tensor.elements = tensor.elements;
       device_tensor.dims = tensor.dims;
       device_tensor.kind = tensor.kind;
-      const cudaError_t alloc_status =
-          cudaMalloc(reinterpret_cast<void **>(&device_tensor.data),
-                     tensor.elements * sizeof(float));
-      if (alloc_status != cudaSuccess) {
-        throw std::runtime_error(
-            CudaErrorMessage("cudaMalloc(" + tensor.name + ")", alloc_status));
-      }
+      if (tensor.elements != 0) {
+        const cudaError_t alloc_status =
+            cudaMalloc(reinterpret_cast<void **>(&device_tensor.data),
+                       tensor.elements * sizeof(float));
+        if (alloc_status != cudaSuccess) {
+          throw std::runtime_error(CudaErrorMessage("cudaMalloc(" +
+                                                        tensor.name + ")",
+                                                    alloc_status));
+        }
 
-      const cudaError_t copy_status =
-          cudaMemcpy(device_tensor.data, tensor.data,
-                     tensor.elements * sizeof(float), cudaMemcpyHostToDevice);
-      if (copy_status != cudaSuccess) {
-        FreeDevice(device_tensor.data);
-        throw std::runtime_error(
-            CudaErrorMessage("cudaMemcpy(" + tensor.name + ")", copy_status));
+        const cudaError_t copy_status = cudaMemcpy(
+            device_tensor.data, tensor.data, tensor.elements * sizeof(float),
+            cudaMemcpyHostToDevice);
+        if (copy_status != cudaSuccess) {
+          FreeDevice(device_tensor.data);
+          throw std::runtime_error(CudaErrorMessage("cudaMemcpy(" +
+                                                        tensor.name + ")",
+                                                    copy_status));
+        }
       }
 
       next.allocation_bytes_ += tensor.elements * sizeof(float);

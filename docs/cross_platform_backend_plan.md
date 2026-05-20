@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, `3ba3770` |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, empty-tensor upload gate |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -100,6 +100,9 @@ Current CUDA backend boundary:
   preserving explicit tensor dimensions when present.
 - The CUDA executor seam receives the resolved plan and uploaded weight buffers,
   so real kernels can index device tensors without backend-local name lookups.
+- CUDA weight upload preserves empty optional inventory entries as zero-byte
+  device tensor views, keeping resolved inventory indices stable across common
+  backend contracts and future network variants.
 - `src/nn/cuda/cuda_kernels.*` contains tested CUDA compute primitives for
   dense-affine projections/heads, last-axis layer normalization, shared
   elementwise activation functions, input-embedding gate multiply/add, scaled
