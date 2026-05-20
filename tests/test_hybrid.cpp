@@ -567,6 +567,10 @@ void test_hybrid_config() {
     EXPECT(tc,
            !HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "a6a5")));
     EXPECT(tc, !HybridIsKingsidePawnPush(pos, UCIEngine::to_move(pos, "a6a5")));
+    EXPECT(tc, HybridRootPawnLeverCanChallengeSelected(
+                   pos, UCIEngine::to_move(pos, "e7d8"), true));
+    EXPECT(tc, !HybridRootPawnLeverCanChallengeSelected(
+                   pos, UCIEngine::to_move(pos, "f6f5"), true));
 
     pos.set(
         "r2q1rk1/1ppnbppp/p2p1nb1/3Pp3/2P1P1P1/2N2N1P/PPB1QP2/R1B2RK1 b - -",
@@ -592,6 +596,16 @@ void test_hybrid_config() {
     EXPECT(tc, HybridIsPawnLever(pos, UCIEngine::to_move(pos, "e6e5")));
     EXPECT(tc,
            !HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "e6e5")));
+
+    pos.set(
+        "r1bqk2r/4npbp/2pp2p1/p1p1p3/4P3/PPNP1N2/2P2PPP/"
+        "1RBQ1RK1 b kq -",
+        false, &st);
+    const Move castle = UCIEngine::to_move(pos, "e8g8");
+    EXPECT(tc, castle.type_of() == CASTLING);
+    EXPECT(tc,
+           HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "f7f5")));
+    EXPECT(tc, !HybridRootPawnLeverCanChallengeSelected(pos, castle, true));
   }
   {
     TestCase tc("MCTS visit evidence handles cache-heavy playouts");

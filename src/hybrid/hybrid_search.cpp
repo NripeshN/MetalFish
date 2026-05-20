@@ -736,6 +736,21 @@ bool HybridIsKingsidePawnPush(const Position &pos, Move move) {
          (to == from + push || to == from + push + push);
 }
 
+bool HybridRootPawnLeverCanChallengeSelected(const Position &pos, Move selected,
+                                             bool allow_non_pawn_selected) {
+  if (selected == Move::none() || selected.type_of() == CASTLING)
+    return false;
+
+  const Piece selected_piece = pos.piece_on(selected.from_sq());
+  if (!allow_non_pawn_selected &&
+      (selected_piece == NO_PIECE || type_of(selected_piece) != PAWN)) {
+    return false;
+  }
+
+  return !HybridIsPawnLever(pos, selected) &&
+         !HybridIsKingsidePawnPush(pos, selected);
+}
+
 float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
                             const float *candidate_qs, int candidate_count) {
   if (!candidate_visits || !candidate_qs || candidate_count <= 0) {
@@ -1843,15 +1858,10 @@ Move ParallelHybridSearch::make_final_decision() {
     StateInfo root_state;
     Position root_pos;
     root_pos.set(root_fen_, false, &root_state);
-    const Piece selected_piece = root_pos.piece_on(selected.from_sq());
-    if (!allow_non_pawn_selected &&
-        (selected_piece == NO_PIECE || type_of(selected_piece) != PAWN)) {
+    if (!HybridRootPawnLeverCanChallengeSelected(root_pos, selected,
+                                                 allow_non_pawn_selected)) {
       return Move::none();
     }
-    if (HybridIsPawnLever(root_pos, selected))
-      return Move::none();
-    if (HybridIsKingsidePawnPush(root_pos, selected))
-      return Move::none();
 
     const ABRootLookup selected_ab = find_ab_root_move(selected);
     if (selected_ab.rank <= 0)

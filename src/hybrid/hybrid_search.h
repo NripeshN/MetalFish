@@ -453,6 +453,9 @@ bool HybridIsKingsidePawnLever(const Position &pos, Move move);
 
 bool HybridIsKingsidePawnPush(const Position &pos, Move move);
 
+bool HybridRootPawnLeverCanChallengeSelected(const Position &pos, Move selected,
+                                             bool allow_non_pawn_selected);
+
 float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
                             const float *candidate_qs, int candidate_count);
 
