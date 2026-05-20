@@ -357,6 +357,7 @@ def build_value_model(
     compute_precision: Any,
     output_stage: str = "wdl",
     encoder_layers_limit: int | None = None,
+    batch_size: int = 1,
 ) -> Any:
     weights = net.weights
     activations = effective_activations(net)
@@ -446,12 +447,18 @@ def build_value_model(
     policy_indices = attention_policy_gather_indices(np)
 
     @mb.program(
-        input_specs=[mb.TensorSpec(shape=(1, 64, 112), dtype=types.fp32)],
+        input_specs=[mb.TensorSpec(shape=(batch_size, 64, 112), dtype=types.fp32)],
         opset_version=ct.target.iOS17,
     )
     def program(x):  # type: ignore[no-untyped-def]
         pos_const = mb.const(val=pos)
         pos_batch = mb.reshape(x=pos_const, shape=[1, 64, 64])
+        if batch_size > 1:
+            pos_batch = mb.tile(
+                x=pos_batch,
+                reps=np.array([batch_size, 1, 1], dtype=np.int32),
+                name="position_encoding_batch_tile",
+            )
         body = mb.concat(values=[x, pos_batch], axis=-1)
         body = linear_mb(mb, body, ip_emb_w, ip_emb_b)
         body = activation_mb(mb, np, body, "mish")
@@ -462,9 +469,9 @@ def build_value_model(
             q = linear_mb(mb, body, enc["q_w"], enc["q_b"])
             k = linear_mb(mb, body, enc["k_w"], enc["k_b"])
             v = linear_mb(mb, body, enc["v_w"], enc["v_b"])
-            q = mb.reshape(x=q, shape=[1, 64, heads, head_dim])
-            k = mb.reshape(x=k, shape=[1, 64, heads, head_dim])
-            v = mb.reshape(x=v, shape=[1, 64, heads, head_dim])
+            q = mb.reshape(x=q, shape=[batch_size, 64, heads, head_dim])
+            k = mb.reshape(x=k, shape=[batch_size, 64, heads, head_dim])
+            v = mb.reshape(x=v, shape=[batch_size, 64, heads, head_dim])
             q = mb.transpose(x=q, perm=[0, 2, 1, 3])
             k = mb.transpose(x=k, perm=[0, 2, 3, 1])
             v = mb.transpose(x=v, perm=[0, 2, 1, 3])
@@ -480,7 +487,7 @@ def build_value_model(
                 )
                 smolgen = mb.reshape(
                     x=smolgen,
-                    shape=[1, 64 * sg["hidden_channels"]],
+                    shape=[batch_size, 64 * sg["hidden_channels"]],
                     name="smolgen_flatten",
                 )
                 smolgen = linear_mb(
@@ -503,20 +510,22 @@ def build_value_model(
                 )
                 smolgen = mb.reshape(
                     x=smolgen,
-                    shape=[1, heads, sg["dense2_b"].size // heads],
+                    shape=[batch_size, heads, sg["dense2_b"].size // heads],
                     name="smolgen_reshape1",
                 )
                 smolgen = linear_mb(
                     mb, smolgen, global_smolgen_w, None, name="smolgen_global"
                 )
                 smolgen = mb.reshape(
-                    x=smolgen, shape=[1, heads, 64, 64], name="smolgen_reshape2"
+                    x=smolgen,
+                    shape=[batch_size, heads, 64, 64],
+                    name="smolgen_reshape2",
                 )
                 scores = mb.add(x=scores, y=smolgen, name="smolgen_add")
             probs = mb.softmax(x=scores, axis=-1)
             attn = mb.matmul(x=probs, y=v)
             attn = mb.transpose(x=attn, perm=[0, 2, 1, 3])
-            attn = mb.reshape(x=attn, shape=[1, 64, channels])
+            attn = mb.reshape(x=attn, shape=[batch_size, 64, channels])
             attn = linear_mb(mb, attn, enc["dense_w"], enc["dense_b"])
             body = layer_norm_mb(
                 mb, np, body, attn, enc["ln1_g"], enc["ln1_b"], alpha, 1e-6
@@ -554,7 +563,7 @@ def build_value_model(
                 np,
                 keys,
                 [0, 56, 0],
-                [1, 64, policy_d_model],
+                [batch_size, 64, policy_d_model],
                 "policy_promo_keys_slice",
             )
             promo_keys = mb.transpose(
@@ -565,10 +574,20 @@ def build_value_model(
                 x=promo_weights, y=promo_keys, name="policy_promo_weight_matmul"
             )
             offset1 = slice_by_index_mb(
-                mb, np, promo_logits, [0, 0, 0], [1, 3, 8], "policy_promo_offset1"
+                mb,
+                np,
+                promo_logits,
+                [0, 0, 0],
+                [batch_size, 3, 8],
+                "policy_promo_offset1",
             )
             offset2 = slice_by_index_mb(
-                mb, np, promo_logits, [0, 3, 0], [1, 4, 8], "policy_promo_offset2"
+                mb,
+                np,
+                promo_logits,
+                [0, 3, 0],
+                [batch_size, 4, 8],
+                "policy_promo_offset2",
             )
             promo = mb.add(x=offset1, y=offset2, name="policy_promo_offset_add")
             promo = mb.stack(
@@ -577,13 +596,22 @@ def build_value_model(
             promo = mb.transpose(
                 x=promo, perm=[0, 3, 2, 1], name="policy_promo_offset_transpose"
             )
-            promo = mb.reshape(x=promo, shape=[1, 3, 64], name="policy_promo_reshape")
+            promo = mb.reshape(
+                x=promo, shape=[batch_size, 3, 64], name="policy_promo_reshape"
+            )
 
             promo_parent = slice_by_index_mb(
-                mb, np, policy, [0, 48, 56], [1, 56, 64], "policy_promo_parent_slice"
+                mb,
+                np,
+                policy,
+                [0, 48, 56],
+                [batch_size, 56, 64],
+                "policy_promo_parent_slice",
             )
             promo_parent = mb.reshape(
-                x=promo_parent, shape=[1, 64], name="policy_promo_parent_flatten"
+                x=promo_parent,
+                shape=[batch_size, 64],
+                name="policy_promo_parent_flatten",
             )
             promo_parent = mb.stack(
                 values=[promo_parent] * 3,
@@ -598,7 +626,9 @@ def build_value_model(
             if output_stage == "policy-raw":
                 return policy
 
-            policy = mb.reshape(x=policy, shape=[1, 4288], name="policy_raw_flatten")
+            policy = mb.reshape(
+                x=policy, shape=[batch_size, 4288], name="policy_raw_flatten"
+            )
             gather_indices = mb.const(val=policy_indices)
             policy = mb.gather(
                 x=policy,
@@ -614,7 +644,11 @@ def build_value_model(
         value = activation_mb(mb, np, value, "mish", name="value_embed_mish")
         if output_stage == "value-embed":
             return value
-        value = mb.reshape(x=value, shape=[1, 64 * value_embed_b.size], name="value_flatten")
+        value = mb.reshape(
+            x=value,
+            shape=[batch_size, 64 * value_embed_b.size],
+            name="value_flatten",
+        )
         value = linear_mb(mb, value, value_fc1_w, value_fc1_b, name="value_fc1_linear")
         value = activation_mb(mb, np, value, "mish", name="value_fc1_mish")
         if output_stage == "value-hidden":
@@ -636,8 +670,10 @@ def build_value_model(
     )
 
 
-def benchmark_predict(np: Any, model: Any, warmup: int, iterations: int) -> dict[str, Any]:
-    sample = np.zeros((1, 64, 112), dtype=np.float32)
+def benchmark_predict(
+    np: Any, model: Any, warmup: int, iterations: int, batch_size: int
+) -> dict[str, Any]:
+    sample = np.zeros((batch_size, 64, 112), dtype=np.float32)
     for _ in range(warmup):
         model.predict({"x": sample})
     latencies: list[float] = []
@@ -648,7 +684,9 @@ def benchmark_predict(np: Any, model: Any, warmup: int, iterations: int) -> dict
         latencies.append((time.perf_counter() - start) * 1000.0)
     return {
         "iterations": iterations,
+        "batch_size": batch_size,
         "median_ms": statistics.median(latencies),
+        "median_positions_per_second": 1000.0 * batch_size / statistics.median(latencies),
         "mean_ms": statistics.fmean(latencies),
         "p90_ms": percentile(latencies, 0.90),
         "min_ms": min(latencies),
@@ -686,6 +724,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     value_head_fp32 = bool(getattr(args, "value_head_fp32", False))
     policy_head_fp32 = bool(getattr(args, "policy_head_fp32", False))
     encoder_layers_arg = getattr(args, "encoder_layers", -1)
+    batch_size = getattr(args, "batch_size", 1)
     encoder_layers_limit = None if encoder_layers_arg < 0 else encoder_layers_arg
     if encoder_layers_limit is not None and encoder_layers_limit > info["encoder_layers"]:
         raise RuntimeError(
@@ -703,6 +742,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         compute_precision,
         output_stage,
         encoder_layers_limit,
+        batch_size,
     )
     build_ms = (time.perf_counter() - start) * 1000.0
     package_path = ""
@@ -717,12 +757,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "policy_head_fp32": policy_head_fp32,
         "output_stage": output_stage,
         "encoder_layers": encoder_layers_limit,
+        "batch_size": batch_size,
         "build_ms": build_ms,
         "model_package": package_path,
         "network": info,
     }
     if args.benchmark:
-        result["benchmark"] = benchmark_predict(np, model, args.warmup, args.iterations)
+        result["benchmark"] = benchmark_predict(
+            np, model, args.warmup, args.iterations, batch_size
+        )
     return result
 
 
@@ -760,6 +803,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=-1,
         help="limit encoder layers for probe models; -1 uses the full net",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="fixed Core ML batch size for benchmark/export",
+    )
     parser.add_argument("--benchmark", action="store_true")
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--iterations", type=int, default=20)
@@ -786,6 +835,7 @@ def main(argv: list[str] | None = None) -> int:
         if result["policy_head_fp32"]:
             print("  Mixed:       policy head fp32")
         print(f"  Output:       {result['output_stage']}")
+        print(f"  Batch size:   {result['batch_size']}")
         if result["encoder_layers"] is not None:
             print(f"  Encoders:     {result['encoder_layers']}")
         print(f"  Build time:   {result['build_ms']:.1f} ms")
@@ -797,7 +847,8 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "  Predict:      "
                 f"median={bench['median_ms']:.3f} ms "
-                f"mean={bench['mean_ms']:.3f} ms p90={bench['p90_ms']:.3f} ms"
+                f"mean={bench['mean_ms']:.3f} ms p90={bench['p90_ms']:.3f} ms "
+                f"pps={bench['median_positions_per_second']:.1f}"
             )
     return 0
 

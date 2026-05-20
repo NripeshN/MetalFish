@@ -59,6 +59,8 @@ def test_parse_args() -> None:
             "heads",
             "--encoder-layers",
             "3",
+            "--batch-size",
+            "8",
         ]
     )
     expect("weights parsed", args.weights.endswith(".pb.gz"))
@@ -71,6 +73,7 @@ def test_parse_args() -> None:
     expect("iterations parsed", args.iterations == 7)
     expect("output stage parsed", args.output_stage == "heads")
     expect("encoder layers parsed", args.encoder_layers == 3)
+    expect("batch size parsed", args.batch_size == 8)
 
 
 def test_prediction_summary() -> None:

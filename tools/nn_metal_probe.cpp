@@ -39,6 +39,7 @@ struct Options {
   std::string fen =
       "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   int top = 8;
+  int batch_size = 1;
   int warmup = 1;
   int iterations = 1;
   bool full_input = false;
@@ -103,8 +104,8 @@ std::string MoveString(Move move) {
 void PrintUsage(const char *argv0) {
   std::cerr << "Usage: " << argv0
             << " --weights <file.pb[.gz]> [--backend metal|auto]"
-               " [--fen <fen>] [--top n] [--warmup n] [--iterations n]"
-               " [--full-input] [--full-policy]\n";
+               " [--fen <fen>] [--top n] [--batch-size n] [--warmup n]"
+               " [--iterations n] [--full-input] [--full-policy]\n";
 }
 
 Options ParseArgs(int argc, char **argv) {
@@ -125,6 +126,8 @@ Options ParseArgs(int argc, char **argv) {
       options.fen = require_value("--fen");
     } else if (arg == "--top") {
       options.top = std::stoi(require_value("--top"));
+    } else if (arg == "--batch-size") {
+      options.batch_size = std::stoi(require_value("--batch-size"));
     } else if (arg == "--warmup") {
       options.warmup = std::stoi(require_value("--warmup"));
     } else if (arg == "--iterations") {
@@ -145,6 +148,8 @@ Options ParseArgs(int argc, char **argv) {
     throw std::runtime_error("--weights is required");
   if (options.top < 0)
     throw std::runtime_error("--top must be non-negative");
+  if (options.batch_size < 1)
+    throw std::runtime_error("--batch-size must be positive");
   if (options.warmup < 0)
     throw std::runtime_error("--warmup must be non-negative");
   if (options.iterations < 1)
@@ -233,16 +238,18 @@ void RunProbe(const Options &options) {
       &transform);
 
   auto network = NN::CreateNetwork(weights, options.backend);
+  const std::vector<NN::InputPlanes> batch_inputs(options.batch_size, planes);
   for (int i = 0; i < options.warmup; ++i)
-    (void)network->Evaluate(planes);
+    (void)network->EvaluateBatch(batch_inputs);
 
   NN::NetworkOutput output;
   std::vector<double> latencies;
   latencies.reserve(options.iterations);
   for (int i = 0; i < options.iterations; ++i) {
     const auto start = std::chrono::steady_clock::now();
-    output = network->Evaluate(planes);
+    const auto outputs = network->EvaluateBatch(batch_inputs);
     const auto end = std::chrono::steady_clock::now();
+    output = outputs.front();
     latencies.push_back(
         std::chrono::duration<double, std::milli>(end - start).count());
   }
@@ -266,7 +273,11 @@ void RunProbe(const Options &options) {
   std::cout << ",\"moves_left\":" << output.moves_left;
   std::cout << ",\"latency\":{\"warmup\":" << options.warmup
             << ",\"iterations\":" << options.iterations
+            << ",\"batch_size\":" << options.batch_size
             << ",\"median_ms\":" << Median(latencies)
+            << ",\"median_positions_per_second\":"
+            << (1000.0 * static_cast<double>(options.batch_size) /
+                Median(latencies))
             << ",\"mean_ms\":" << Mean(latencies)
             << ",\"min_ms\":"
             << *std::min_element(latencies.begin(), latencies.end())

@@ -184,6 +184,7 @@ def build_model(args: argparse.Namespace, output_stage: str, candidate: bool) ->
         compute_precision,
         output_stage,
         None,
+        args.batch_size,
     )
 
 
@@ -213,9 +214,9 @@ def split_heads(outputs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
     policy = None
     for value in outputs.values():
         array = np.asarray(value, dtype=np.float32)
-        if array.size == 3:
+        if array.shape[-1] == 3:
             wdl = array
-        elif array.size == 1858:
+        elif array.shape[-1] == 1858:
             policy = array
     if wdl is None or policy is None:
         shapes = [list(np.asarray(value).shape) for value in outputs.values()]
@@ -224,7 +225,7 @@ def split_heads(outputs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
 
 
 def top_policy(policy: np.ndarray, moves: list[str], count: int) -> list[dict[str, Any]]:
-    flat = policy.reshape(-1)
+    flat = policy.reshape(-1, policy.shape[-1])[0]
     top = np.argsort(-flat)[:count]
     return [
         {"index": int(index), "move": moves[int(index)], "logit": float(flat[int(index)])}
@@ -257,6 +258,8 @@ def run_metal_probe(args: argparse.Namespace, fen: str) -> dict[str, Any]:
         str(args.warmup),
         "--iterations",
         str(args.iterations),
+        "--batch-size",
+        str(args.batch_size),
     ]
     try:
         completed = subprocess.run(command, check=True, capture_output=True, text=True)
@@ -293,6 +296,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     positions = []
     for fen in fens:
         planes = encode_fen_classical_112(fen)
+        if args.batch_size > 1:
+            planes = np.repeat(planes, args.batch_size, axis=0)
         if args.combined_model:
             ref_outputs, ref_heads_ms = predict_outputs(
                 models["ref_heads"], planes, args.warmup, args.iterations
@@ -320,10 +325,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         metal = run_metal_probe(args, fen)
         metal_result = None
         if metal:
-            metal_wdl = np.asarray(metal["wdl"], dtype=np.float32).reshape(ref_wdl.shape)
-            metal_policy = np.asarray(metal["policy"], dtype=np.float32).reshape(
-                ref_policy.shape
-            )
+            metal_wdl = np.asarray(metal["wdl"], dtype=np.float32).reshape(1, 3)
+            metal_policy = np.asarray(metal["policy"], dtype=np.float32).reshape(1, 1858)
+            ref_wdl_first = ref_wdl.reshape(-1, 3)[:1]
+            cand_wdl_first = cand_wdl.reshape(-1, 3)[:1]
+            ref_policy_first = ref_policy.reshape(-1, 1858)[:1]
+            cand_policy_first = cand_policy.reshape(-1, 1858)[:1]
             metal_result = {
                 "backend": metal["backend"],
                 "network_info": metal["network_info"],
@@ -334,10 +341,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "moves_left": metal["moves_left"],
                 "latency": metal.get("latency", {}),
                 "policy_top": metal["policy_top"],
-                "reference_wdl_delta": compare_arrays(metal_wdl, ref_wdl),
-                "candidate_wdl_delta": compare_arrays(metal_wdl, cand_wdl),
-                "reference_policy_delta": compare_arrays(metal_policy, ref_policy),
-                "candidate_policy_delta": compare_arrays(metal_policy, cand_policy),
+                "reference_wdl_delta": compare_arrays(metal_wdl, ref_wdl_first),
+                "candidate_wdl_delta": compare_arrays(metal_wdl, cand_wdl_first),
+                "reference_policy_delta": compare_arrays(metal_policy, ref_policy_first),
+                "candidate_policy_delta": compare_arrays(metal_policy, cand_policy_first),
             }
         positions.append(
             {
@@ -369,6 +376,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "policy_head_fp32": args.candidate_policy_head_fp32,
         },
         "combined_model": args.combined_model,
+        "batch_size": args.batch_size,
         "positions": positions,
     }
 
@@ -385,6 +393,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--candidate-policy-head-fp32", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--metal-probe", default="", help="Optional path to build/metalfish_nn_probe for Metal backend parity")
     parser.add_argument("--combined-model", action="store_true", help="Use one Core ML model that returns WDL and policy together")
+    parser.add_argument("--batch-size", type=int, default=1, help="Fixed Core ML/Metal batch size")
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=4)
     parser.add_argument("--top", type=int, default=8)
@@ -398,6 +407,7 @@ def print_human(result: dict[str, Any]) -> None:
     print(f"  Candidate: {result['candidate']}")
     if result.get("combined_model"):
         print("  Mode: combined WDL+policy model")
+    print(f"  Batch size: {result['batch_size']}")
     for idx, position in enumerate(result["positions"], 1):
         print(f"\nPosition {idx}: {position['fen']}")
         wdl = position["wdl"]
@@ -405,12 +415,14 @@ def print_human(result: dict[str, Any]) -> None:
         print(
             "  WDL: "
             f"max={wdl['delta']['max_abs']:.7f} mean={wdl['delta']['mean_abs']:.7f} "
-            f"ref={wdl['reference_ms']:.3f}ms cand={wdl['candidate_ms']:.3f}ms"
+            f"ref={wdl['reference_ms']:.3f}ms cand={wdl['candidate_ms']:.3f}ms "
+            f"cand_pps={1000.0 * result['batch_size'] / wdl['candidate_ms']:.1f}"
         )
         print(
             "  Policy: "
             f"max={policy['delta']['max_abs']:.7f} mean={policy['delta']['mean_abs']:.7f} "
-            f"ref={policy['reference_ms']:.3f}ms cand={policy['candidate_ms']:.3f}ms"
+            f"ref={policy['reference_ms']:.3f}ms cand={policy['candidate_ms']:.3f}ms "
+            f"cand_pps={1000.0 * result['batch_size'] / policy['candidate_ms']:.1f}"
         )
         ref_moves = ", ".join(item["move"] for item in policy["reference_top"][:5])
         cand_moves = ", ".join(item["move"] for item in policy["candidate_top"][:5])
@@ -429,7 +441,11 @@ def print_human(result: dict[str, Any]) -> None:
                 f"policy max={metal['candidate_policy_delta']['max_abs']:.7f}"
             )
             if metal.get("latency"):
-                print(f"  Metal latency: {metal['latency']['median_ms']:.3f}ms")
+                print(
+                    "  Metal latency: "
+                    f"{metal['latency']['median_ms']:.3f}ms "
+                    f"pps={metal['latency']['median_positions_per_second']:.1f}"
+                )
             metal_moves = ", ".join(item["move"] for item in metal["policy_top"][:5])
             print(f"  Metal top: {metal_moves}")
 

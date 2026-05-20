@@ -56,6 +56,7 @@ def test_parse_args_defaults() -> None:
     expect("policy head fp32 default", not args.candidate_policy_head_fp32)
     expect("metal probe off", args.metal_probe == "")
     expect("combined off", not args.combined_model)
+    expect("batch one", args.batch_size == 1)
 
 
 def test_split_heads_by_shape() -> None:
