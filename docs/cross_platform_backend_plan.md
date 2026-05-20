@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260520-175505`, L4, 2026-05-20 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260520-181049`, L4, 2026-05-20 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -296,11 +296,14 @@ Current CUDA backend boundary:
   `nvidia-smi` and `nvcc`, builds CUDA with BT4 weights, runs CUDA unit tests,
   runs `test_nn_comparison` through `NNBackend=auto` on the CUDA host, asserts
   that auto selected the CUDA transformer backend, and runs one-thread MCTS UCI
-  smokes for both `NNBackend=auto` and explicit `NNBackend=cuda`. Dependency
-  installation waits
+  smokes for `NNBackend=auto`, explicit `NNBackend=cuda`, and the production
+  hybrid search path with CUDA-backed transformer MCTS. Dependency installation
+  waits
   and retries around apt/dpkg locks and refreshes the package index before each
   install attempt so fresh cloud images do not fail the gate while unattended
-  upgrades or transient mirror failures are still running.
+  upgrades or transient mirror failures are still running. The 2026-05-20 L4
+  gate `metalfish-cuda-gate-20260520-181049` accepted the new hybrid-CUDA smoke
+  with `bestmove e2e4`.
 - `tools/run_gcp_cuda_gpu_gate.sh` creates an ephemeral GCP L4 VM from a clean
   `git archive`, runs `tools/run_cuda_gpu_gate.sh` on the VM, and deletes the
   VM by default. It uses explicit `METALFISH_GCP_*` variables so the current
@@ -311,9 +314,9 @@ Current CUDA backend boundary:
   `results/cuda_gpu_gate/<instance>/` before deleting the VM; set
   `METALFISH_GCP_GCS_PREFIX=gs://...` to also upload those artifacts to Cloud
   Storage, or `METALFISH_GCP_COLLECT_ARTIFACTS=0` to disable collection. The
-  2026-05-20 L4 artifact-collection gate copied six files locally: summary,
+  2026-05-20 L4 artifact-collection gate copied seven files locally: summary,
   parity report, CUDA unit-test log, NN comparison log, auto-backend UCI smoke
-  log, and explicit-CUDA UCI smoke log.
+  log, explicit-CUDA UCI smoke log, and hybrid-CUDA UCI smoke log.
 - `CreatePlanSmokeCudaExecutor()` remains available for narrow executor
   diagnostics and can run a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without

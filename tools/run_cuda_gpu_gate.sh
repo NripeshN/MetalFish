@@ -147,6 +147,24 @@ python3 tools/uci_smoke.py \
   --setoption MCTSMinibatchSize=1 \
   --go "${UCI_GO}" | tee "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
 
+python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption Threads=3 \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption UseMCTS=false \
+  --setoption UseHybridSearch=true \
+  --setoption HybridMCTSThreads=1 \
+  --setoption HybridABThreads=2 \
+  --setoption HybridAutoABThreadsCap=0 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=1 \
+  --go "nodes 8" \
+  --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "CUDA transformer backend" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
+
 {
   echo "# MetalFish CUDA GPU Gate Summary"
   echo
@@ -188,6 +206,7 @@ python3 tools/uci_smoke.py \
   echo
   echo "- auto: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
   echo "- cuda: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
+  echo "- hybrid-cuda: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
 } >"${SUMMARY}"
 
 cat "${SUMMARY}"
