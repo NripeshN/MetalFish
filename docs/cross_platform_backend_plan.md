@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, attention bias-softmax fusion gate |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, smolgen bias-activation fusion gate |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -114,7 +114,9 @@ Current CUDA backend boundary:
   the 64x64 square-policy logits, a narrow CUDA kernel for promotion logits, and
   a fixed gather table kept in device constant memory and uploaded once per
   active CUDA device. CUDA feed-forward stages fuse dense1 bias addition with
-  activation while preserving the biased dense scratch tensor. CUDA also has the BT4
+  activation while preserving the biased dense scratch tensor, and smolgen dense
+  stages use the same bias-activation fusion while preserving diagnostic dense
+  tensors. CUDA also has the BT4
   dynamic-position-input kernels that expand packed plane masks/values to NHWC
   board rows, gather the first 12 planes for dense positional encoding, and
   concatenate generated positional channels back onto the 112 input channels.
@@ -201,6 +203,12 @@ Current CUDA backend boundary:
   attention-smoke drift, then accepted the scratch-preserving variant with fixed
   BT4 outputs, batch parity, and UCI smoke green. Steady profiled BT4 evals were
   `17.74-17.76 ms`, with the attention bucket around `10.95 ms`.
+- The CUDA smolgen dense path now uses the same bias-activation fusion for both
+  smolgen dense layers, preserving the checked dense and activation tensors. The
+  2026-05-20 T4 gate kept CUDA smoke, fixed BT4 outputs, batch parity, and UCI
+  smoke green; steady profiled BT4 evals were `17.57-17.60 ms`.
+- A CUDA Q/K/V bias fusion attempt was rejected on the 2026-05-20 T4 gate after
+  fixed-output drift in the castling-rights reference case, and was reverted.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.

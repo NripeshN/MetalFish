@@ -1166,24 +1166,24 @@ CudaSmolgenStageOutput ExecuteAttentionSmolgenStage(
                           square_rows, attention.input_width,
                           attention.smolgen.compressed_channels, stream);
   LaunchDenseAffineKernel(output.compressed, dense1_weight.data,
-                          dense1_bias.data, output.dense1, batch_size,
+                          nullptr, output.dense1, batch_size,
                           flattened_width, attention.smolgen.dense1_width,
                           stream);
-  LaunchActivationKernel(
-      output.dense1, output.activation1,
-      batch_size * attention.smolgen.dense1_width,
+  LaunchBiasActivationKernel(
+      output.dense1, dense1_bias.data, output.activation1, batch_size,
+      attention.smolgen.dense1_width,
       ActivationFromString(execution_plan.format.activations.smolgen_activation),
       stream);
   LaunchLayerNormKernel(output.activation1, ln1_gamma.data, ln1_beta.data,
                         output.norm1, batch_size,
                         attention.smolgen.dense1_width, 1e-3f, stream);
-  LaunchDenseAffineKernel(output.norm1, dense2_weight.data, dense2_bias.data,
+  LaunchDenseAffineKernel(output.norm1, dense2_weight.data, nullptr,
                           output.dense2, batch_size,
                           attention.smolgen.dense1_width,
                           attention.smolgen.dense2_width, stream);
-  LaunchActivationKernel(
-      output.dense2, output.activation2,
-      batch_size * attention.smolgen.dense2_width,
+  LaunchBiasActivationKernel(
+      output.dense2, dense2_bias.data, output.activation2, batch_size,
+      attention.smolgen.dense2_width,
       ActivationFromString(execution_plan.format.activations.smolgen_activation),
       stream);
   LaunchLayerNormKernel(output.activation2, ln2_gamma.data, ln2_beta.data,
