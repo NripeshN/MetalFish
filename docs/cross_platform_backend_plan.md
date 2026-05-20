@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, CUDA device selection |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, CUDA auto-backend assertion |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -238,6 +238,13 @@ Current CUDA backend boundary:
   expanded batch parity, and UCI smoke green with `b1=16.885ms`,
   `b2=25.533ms`, `b4=26.380ms`, `b8=45.070ms`, `b16=86.075ms`,
   `b32=161.738ms` (`5.054ms/eval` at batch 32).
+- CUDA backend diagnostics now report the actual selected backend and CUDA
+  device in MCTS backend load logs, and the CUDA GPU gate asserts both the
+  batch benchmark and a UCI `NNBackend=auto` smoke selected the CUDA
+  transformer backend. The 2026-05-20 T4 gate kept CUDA smoke, fixed BT4
+  outputs, expanded batch parity, auto-backend UCI smoke, and explicit-CUDA UCI
+  smoke green with `b1=16.948ms`, `b2=18.971ms`, `b4=30.237ms`,
+  `b8=43.361ms`, `b16=83.492ms`, `b32=158.366ms` (`4.949ms/eval` at batch 32).
 - A CUDA Q/K/V bias fusion attempt was rejected on the 2026-05-20 T4 gate after
   fixed-output drift in the castling-rights reference case, and was reverted.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
@@ -245,8 +252,10 @@ Current CUDA backend boundary:
   exercises the same executor class that `CudaNetwork` installs.
 - `tools/run_cuda_gpu_gate.sh` is the reusable NVIDIA-host gate. It verifies
   `nvidia-smi` and `nvcc`, builds CUDA with BT4 weights, runs CUDA unit tests,
-  runs `test_nn_comparison` through `NNBackend=auto` on the CUDA host, and runs
-  a one-thread `NNBackend=cuda` MCTS UCI smoke. Dependency installation waits
+  runs `test_nn_comparison` through `NNBackend=auto` on the CUDA host, asserts
+  that auto selected the CUDA transformer backend, and runs one-thread MCTS UCI
+  smokes for both `NNBackend=auto` and explicit `NNBackend=cuda`. Dependency
+  installation waits
   and retries around apt/dpkg locks and refreshes the package index before each
   install attempt so fresh cloud images do not fail the gate while unattended
   upgrades or transient mirror failures are still running.

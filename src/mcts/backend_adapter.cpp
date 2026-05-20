@@ -293,7 +293,8 @@ Backend::Backend(const std::string &weights_path, size_t cache_entries,
   try {
     evaluator_ = std::make_unique<NNMCTSEvaluator>(weights_path, nn_backend);
     std::cerr << "info string Backend loaded weights: " << weights_path
-              << " backend=" << nn_backend << std::endl;
+              << " backend=" << nn_backend
+              << " actual=" << evaluator_->GetNetworkInfo() << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "info string Backend failed to load weights: " << e.what()
               << std::endl;

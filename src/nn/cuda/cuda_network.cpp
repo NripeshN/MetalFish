@@ -89,6 +89,7 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
                              "; format: " + format_.Summary() +
                              ") but " + device_selection.message);
   }
+  device_selection_summary_ = device_selection.message;
 
   std::unique_ptr<MultiHeadWeights> decoded_weights;
   std::string policy_head;
@@ -254,6 +255,7 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
 std::string CudaNetwork::GetNetworkInfo() const {
   std::ostringstream out;
   out << "CUDA transformer backend (" << RuntimeCudaDeviceSummary()
+      << ", selection=" << device_selection_summary_
       << ", format: " << format_.Summary()
       << ", tensors: " << tensor_plan_.Summary()
       << ", execution: " << resolved_execution_plan_.Summary()

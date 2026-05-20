@@ -117,6 +117,21 @@ METALFISH_NN_WEIGHTS="${WEIGHTS}" \
   METALFISH_NN_BENCH_ITERS="${METALFISH_NN_BENCH_ITERS:-2}" \
   METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
   "${BUILD_DIR}/test_nn_comparison" | tee "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+grep -q "backend: CUDA transformer backend" \
+  "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+
+python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption NNBackend=auto \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption UseMCTS=true \
+  --setoption UseHybridSearch=false \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=1 \
+  --go "nodes 1" \
+  --expect-output "CUDA transformer backend" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
 
 python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \

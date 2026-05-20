@@ -20,6 +20,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--expect-bestmove")
     parser.add_argument(
+        "--expect-output",
+        action="append",
+        default=[],
+        metavar="TEXT",
+        help="Substring that must appear in combined engine stdout/stderr",
+    )
+    parser.add_argument(
         "--setoption",
         action="append",
         default=[],
@@ -135,6 +142,14 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    for expected in args.expect_output:
+        if not any(expected in line for line in uci.output):
+            tail = "\n".join(uci.output[-80:])
+            print(
+                f"Expected engine output containing {expected!r}. Tail:\n{tail}",
+                file=sys.stderr,
+            )
+            return 1
     return 0
 
 
