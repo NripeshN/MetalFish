@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -186,14 +187,17 @@ void CudaNetwork::WarmupExecution() {
 }
 
 NetworkOutput CudaNetwork::Evaluate(const InputPlanes &input) {
-  std::vector<InputPlanes> batch;
-  batch.push_back(input);
-  auto outputs = EvaluateBatch(batch);
+  auto outputs = RunBatch(std::span<const InputPlanes>(&input, 1));
   return std::move(outputs.front());
 }
 
 std::vector<NetworkOutput>
 CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
+  return RunBatch(inputs);
+}
+
+std::vector<NetworkOutput>
+CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
   if (inputs.empty())
     return {};
 

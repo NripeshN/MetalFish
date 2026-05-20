@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <mutex>
+#include <span>
 
 namespace MetalFish {
 namespace NN {
@@ -33,6 +34,7 @@ public:
 
 private:
   void WarmupExecution();
+  std::vector<NetworkOutput> RunBatch(std::span<const InputPlanes> inputs);
 
   NetworkFormatDescriptor format_;
   NetworkTensorPlan tensor_plan_;

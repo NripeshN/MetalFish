@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, restored attention batch parity |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, CUDA single-eval span path |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -225,6 +225,12 @@ Current CUDA backend boundary:
   batch parity, and UCI smoke green with `b1=16.844ms`, `b2=25.530ms`,
   `b4=26.723ms`, `b8=45.868ms`, `b16=88.098ms`, `b32=169.630ms`
   (`5.301ms/eval` at batch 32).
+- `CudaNetwork::Evaluate()` now follows the Metal backend shape by passing a
+  one-position span into the shared CUDA batch runner instead of copying the
+  full `InputPlanes` object into a temporary vector. The 2026-05-20 T4 gate
+  kept CUDA smoke, fixed BT4 outputs, expanded batch parity, and UCI smoke
+  green with `b1=16.887ms`, `b2=18.756ms`, `b4=28.453ms`, `b8=47.599ms`,
+  `b16=90.355ms`, `b32=175.040ms` (`5.470ms/eval` at batch 32).
 - A CUDA Q/K/V bias fusion attempt was rejected on the 2026-05-20 T4 gate after
   fixed-output drift in the castling-rights reference case, and was reverted.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
