@@ -444,6 +444,7 @@ bool HybridRootPawnLeverCandidate(int selected_average_score,
                                   int selected_mcts_rank,
                                   float selected_mcts_q,
                                   float selected_mcts_policy,
+                                  float best_mcts_q,
                                   float candidate_mcts_q,
                                   float candidate_mcts_policy);
 

@@ -671,14 +671,16 @@ bool HybridRootPawnLeverCandidate(int selected_average_score,
                                   int selected_mcts_rank,
                                   float selected_mcts_q,
                                   float selected_mcts_policy,
+                                  float best_mcts_q,
                                   float candidate_mcts_q,
                                   float candidate_mcts_policy) {
   const bool high_policy_lever =
       selected_mcts_rank > 0 && candidate_mcts_policy >= 0.25f &&
       candidate_mcts_policy >= selected_mcts_policy * 1.15f;
+  const int max_average_gap = high_policy_lever ? 80 : 60;
   if (mcts_rank <= 0 || mcts_rank > 8 || mcts_current_visits < 8 ||
-      selected_average_score - candidate_average_score > 60 ||
-      (!high_policy_lever && candidate_effort < 200)) {
+      selected_average_score - candidate_average_score > max_average_gap ||
+      (!high_policy_lever && candidate_effort < 150)) {
     return false;
   }
 
@@ -697,6 +699,9 @@ bool HybridRootPawnLeverCandidate(int selected_average_score,
         candidate_mcts_policy <= selected_mcts_policy)
       return false;
   }
+
+  if (!high_policy_lever && best_mcts_q - candidate_mcts_q > 0.10f)
+    return false;
 
   return true;
 }
@@ -1895,6 +1900,9 @@ Move ParallelHybridSearch::make_final_decision() {
     if (std::abs(selected_ab.average_score) > 1000)
       return Move::none();
     const MCTSRootLookup selected_mcts = find_mcts_root_move(selected);
+    const MCTSRootLookup best_mcts = find_mcts_root_move(mcts_best);
+    const float best_mcts_q =
+        best_mcts.rank > 0 ? best_mcts.q : selected_mcts.q;
 
     std::vector<ABRootMoveInfo> root_moves;
     {
@@ -1918,7 +1926,8 @@ Move ParallelHybridSearch::make_final_decision() {
               selected_ab.average_score, candidate.average_score,
               candidate.effort, mcts_lookup.rank,
               mcts_lookup.current_visits, selected_mcts.rank, selected_mcts.q,
-              selected_mcts.policy, mcts_lookup.q, mcts_lookup.policy))
+              selected_mcts.policy, best_mcts_q, mcts_lookup.q,
+              mcts_lookup.policy))
         continue;
 
       if (candidate.average_score > best_lever_average ||
