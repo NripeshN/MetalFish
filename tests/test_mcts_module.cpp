@@ -16,11 +16,11 @@
 #include "nn/network_tensor_plan.h"
 #include "nn_input_fixture.h"
 #include "syzygy/tbprobe.h"
+#include "test_common.h"
 
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -113,9 +113,9 @@ void test_root_search_smoke(TestCounter &tc) {
 
 void test_pv_boost_respects_weight(TestCounter &tc) {
   std::cout << "  PV boost weight..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights || std::string(weights).empty()) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -488,9 +488,9 @@ void test_nn_cache_key_tracks_encoded_state(TestCounter &tc) {
 
 void test_deterministic_repro(TestCounter &tc) {
   std::cout << "  Deterministic reproducibility..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -520,9 +520,9 @@ void test_deterministic_repro(TestCounter &tc) {
 
 void test_evaluator_legal_move_view_parity(TestCounter &tc) {
   std::cout << "  Evaluator legal-move view parity..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -557,9 +557,9 @@ void test_evaluator_legal_move_view_parity(TestCounter &tc) {
 
 void test_nodes_limit_with_callback(TestCounter &tc) {
   std::cout << "  Nodes limit with callback..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -624,9 +624,9 @@ void test_nodes_limit_with_callback(TestCounter &tc) {
 
 void test_bk07_low_node_regression(TestCounter &tc) {
   std::cout << "  BK.07 low-node regression..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -653,9 +653,9 @@ void test_bk07_low_node_regression(TestCounter &tc) {
 
 void test_searchmoves_restrict_root(TestCounter &tc) {
   std::cout << "  Searchmoves restrict root..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -684,9 +684,9 @@ void test_searchmoves_restrict_root(TestCounter &tc) {
 
 void test_empty_searchmoves_filter_blocks_root(TestCounter &tc) {
   std::cout << "  Empty searchmoves filter blocks root..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -722,9 +722,9 @@ void test_empty_searchmoves_filter_blocks_root(TestCounter &tc) {
 
 void test_same_root_search_reuses_tree(TestCounter &tc) {
   std::cout << "  Same-root tree reuse..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -757,9 +757,9 @@ void test_same_root_search_reuses_tree(TestCounter &tc) {
 
 void test_new_game_resets_same_root_tree(TestCounter &tc) {
   std::cout << "  New game resets same-root tree..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -791,7 +791,8 @@ void test_new_game_resets_same_root_tree(TestCounter &tc) {
          "new game should not continue the previous MCTS root", tc);
 }
 
-uint64_t run_endgame_eval_count(const char *weights, const std::string &fen) {
+uint64_t run_endgame_eval_count(const std::string &weights,
+                                const std::string &fen) {
   SearchParams params;
   params.num_threads = 1;
   params.nn_weights_path = weights;
@@ -808,9 +809,9 @@ uint64_t run_endgame_eval_count(const char *weights, const std::string &fen) {
 
 void test_mating_material_adjudication(TestCounter &tc) {
   std::cout << "  Mating material adjudication..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -837,9 +838,9 @@ void test_mating_material_adjudication(TestCounter &tc) {
 
 void test_node_limited_search_uses_tight_eval_budget(TestCounter &tc) {
   std::cout << "  Node-limited eval budget..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 
@@ -874,9 +875,9 @@ void test_node_limited_search_uses_tight_eval_budget(TestCounter &tc) {
 
 void test_cache_hit_rate(TestCounter &tc) {
   std::cout << "  Cache hit rate..." << std::endl;
-  const char *weights = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights = MetalFish::Test::find_nn_weights_path();
+  if (weights.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return;
   }
 

@@ -11,9 +11,9 @@
 #include "mcts/evaluator.h"
 #include "nn/encoder.h"
 #include "nn/policy_map.h"
+#include "test_common.h"
 
 #include <cmath>
-#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -118,9 +118,9 @@ bool test_encoder_repetition_plane() {
 
 bool test_mcts_evaluator_optional() {
   std::cout << "  MCTS evaluator smoke..." << std::endl;
-  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights_path) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (weights_path.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return true;
   }
 
@@ -211,9 +211,9 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
 
 bool test_mcts_evaluator_batch_parity_optional() {
   std::cout << "  MCTS evaluator batch parity..." << std::endl;
-  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights_path) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (weights_path.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return true;
   }
 
