@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, CUDA summary gate |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, artifact collection gate |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -253,9 +253,9 @@ Current CUDA backend boundary:
 - The CUDA GPU gate now emits `cuda-gpu-summary.md` with the selected NVIDIA
   device, resolved backend string, batch timings, and UCI bestmoves. The
   accepted 2026-05-20 T4 summary was device `Tesla T4 sm_75`, `NNBackend=auto`
-  resolved to the CUDA transformer backend, and timings were `b1=16.932ms`,
-  `b2=25.511ms`, `b4=25.125ms`, `b8=49.155ms`, `b16=95.906ms`,
-  `b32=180.670ms` (`5.6459ms/eval` at batch 32).
+  resolved to the CUDA transformer backend, and timings were `b1=16.881ms`,
+  `b2=25.545ms`, `b4=23.217ms`, `b8=43.702ms`, `b16=82.698ms`,
+  `b32=157.486ms` (`4.9214ms/eval` at batch 32).
 - The CUDA attention smoke keeps strict `1e-5` checks for individual Q/K/V,
   smolgen, score, softmax, context, projection, residual, and layernorm
   tensors. The attention-only sequence-level check now uses a `5e-3`
@@ -281,7 +281,14 @@ Current CUDA backend boundary:
   VM by default. It uses explicit `METALFISH_GCP_*` variables so the current
   local gcloud project cannot accidentally steer the CUDA gate. The default
   zone list covers central, east, west, and northamerica L4 zones to avoid
-  treating temporary stockouts as engine failures.
+  treating temporary stockouts as engine failures. By default it collects
+  `cuda-gpu-summary.md` and CUDA gate logs into
+  `results/cuda_gpu_gate/<instance>/` before deleting the VM; set
+  `METALFISH_GCP_GCS_PREFIX=gs://...` to also upload those artifacts to Cloud
+  Storage, or `METALFISH_GCP_COLLECT_ARTIFACTS=0` to disable collection. The
+  2026-05-20 T4 artifact-collection gate copied five files locally: summary,
+  CUDA unit-test log, NN comparison log, auto-backend UCI smoke log, and
+  explicit-CUDA UCI smoke log.
 - `CreatePlanSmokeCudaExecutor()` remains available for narrow executor
   diagnostics and can run a tiny resolved-plan pipeline through
   uploaded device weights and real dense/activation/layernorm kernels without

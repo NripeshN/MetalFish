@@ -572,6 +572,19 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / "tools/run_gcp_cuda_gpu_gate.sh",
+        [
+            "METALFISH_GCP_COLLECT_ARTIFACTS",
+            "METALFISH_GCP_ARTIFACT_DIR",
+            "METALFISH_GCP_GCS_PREFIX",
+            "collect_remote_artifacts",
+            "cuda-gpu-summary.md",
+            "cuda-gpu-tests.log",
+            "cuda-gpu-nn-comparison.log",
+            "REMOTE_STATUS",
+        ],
+    )
+    assert_file_contains(
         PROJ / "src/mcts/search.cpp",
         [
             'EnvFlagEnabled("METALFISH_MCTS_ROOT_TRACE")',
