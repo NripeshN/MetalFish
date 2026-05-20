@@ -700,8 +700,13 @@ bool HybridRootPawnLeverCandidate(int selected_average_score,
       return false;
   }
 
-  if (!high_policy_lever && best_mcts_q - candidate_mcts_q > 0.10f)
-    return false;
+  if (!high_policy_lever) {
+    const float top_q_gap = best_mcts_q - candidate_mcts_q;
+    if (top_q_gap > 0.07f)
+      return false;
+    if (candidate_mcts_policy >= 0.20f && top_q_gap > 0.03f)
+      return false;
+  }
 
   return true;
 }
