@@ -1953,6 +1953,64 @@ def test_play_game_stream_active_status_extends_reconnects() -> None:
     expect("active dropped stream shuts down after budget", bot._shutdown.is_set())
 
 
+def test_play_game_transient_unknown_status_extends_reconnects() -> None:
+    class Args:
+        quit_after_games = 0
+        seek = True
+        max_games = 1
+
+    class Engine:
+        def new_game(self) -> None:
+            return None
+
+        def quit(self) -> None:
+            return None
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {"g1": threading.current_thread()}
+    bot._submitted_turns = {}
+    bot._max_seen_ply = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._ponder_disabled_games = set()
+    bot._ponder_disabled_lock = threading.Lock()
+    bot._completed_games = 0
+    bot._completed_game_ids = set()
+    bot._completed_game_order = []
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._acquire_engine = lambda game_id: Engine()
+    bot._game_active_status = lambda game_id: None
+
+    calls: list[str] = []
+
+    def game_loop(game_id: str, engine) -> bool:
+        calls.append(game_id)
+        bot._last_game_stream_status = 502
+        bot._last_game_stream_error = ""
+        return False
+
+    bot._game_loop = game_loop
+
+    old_retries = lichess_bot.GAME_STREAM_RETRIES
+    old_active_retries = lichess_bot.GAME_STREAM_ACTIVE_RETRIES
+    old_delay = lichess_bot.GAME_STREAM_RETRY_DELAY_S
+    lichess_bot.GAME_STREAM_RETRIES = 0
+    lichess_bot.GAME_STREAM_ACTIVE_RETRIES = 2
+    lichess_bot.GAME_STREAM_RETRY_DELAY_S = 0.0
+    try:
+        with redirect_stdout(io.StringIO()):
+            bot.play_game("g1")
+    finally:
+        lichess_bot.GAME_STREAM_RETRIES = old_retries
+        lichess_bot.GAME_STREAM_ACTIVE_RETRIES = old_active_retries
+        lichess_bot.GAME_STREAM_RETRY_DELAY_S = old_delay
+
+    expect("transient unknown active extends reconnects", calls == ["g1", "g1", "g1"])
+    expect("transient dropped stream not counted", bot._completed_games == 0)
+    expect("transient dropped stream shuts down after budget", bot._shutdown.is_set())
+
+
 def test_play_game_finished_stream_is_completed() -> None:
     class Args:
         quit_after_games = 0
@@ -2012,6 +2070,42 @@ def test_game_active_status_parses_now_playing_ids() -> None:
 
     expect("full id matches game id", bot._game_active_status("NBCejRUE") is True)
     expect("missing active game is false", bot._game_active_status("missing") is False)
+
+
+def test_game_loop_uses_long_read_timeout_tuple() -> None:
+    class Response:
+        status_code = 502
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._audit_enabled = False
+    calls: list[dict] = []
+
+    def api_get(path: str, **kwargs):
+        calls.append({"path": path, **kwargs})
+        return Response()
+
+    bot.api_get = api_get
+
+    with redirect_stdout(io.StringIO()):
+        finished = bot._game_loop("g1", object())
+
+    expect("failed stream not finished", not finished)
+    expect(
+        "game stream uses connect/read timeout tuple",
+        calls == [
+            {
+                "path": "/bot/game/stream/g1",
+                "stream": True,
+                "timeout": (10, lichess_bot.GAME_STREAM_TIMEOUT_S),
+            }
+        ],
+    )
 
 
 def test_game_loop_skips_malformed_stream_frames() -> None:
@@ -2201,8 +2295,10 @@ def main() -> int:
     test_play_game_stream_failure_is_not_completed()
     test_play_game_stream_inactive_status_is_completed()
     test_play_game_stream_active_status_extends_reconnects()
+    test_play_game_transient_unknown_status_extends_reconnects()
     test_play_game_finished_stream_is_completed()
     test_game_active_status_parses_now_playing_ids()
+    test_game_loop_uses_long_read_timeout_tuple()
     test_game_loop_skips_malformed_stream_frames()
     test_audit_writes_bounded_jsonl()
     test_submit_move_writes_audit_result()

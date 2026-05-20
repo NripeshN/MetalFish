@@ -119,6 +119,9 @@ HYBRID_AUTO_AB_THREADS_CAP = max(
     0, min(MAX_SEARCH_WORKERS, env_int("METALFISH_HYBRID_AUTO_AB_THREADS_CAP", 0))
 )
 HYBRID_MCTS_KLD = max(0.0, min(1.0, env_float("METALFISH_HYBRID_MCTS_KLD", 0.0)))
+HYBRID_AB_ROOT_REJECT_MCTS = env_bool_string(
+    "METALFISH_HYBRID_AB_ROOT_REJECT_MCTS", True
+)
 HYBRID_MCTS_ROOT_REJECT = env_bool_string("METALFISH_HYBRID_MCTS_ROOT_REJECT", True)
 HYBRID_MCTS_SHARED_TT = env_bool_string("METALFISH_HYBRID_MCTS_SHARED_TT", False)
 HYBRID_MCTS_AB_ROOT_HINTS = env_bool_string("METALFISH_HYBRID_MCTS_AB_ROOT_HINTS", True)
@@ -225,10 +228,17 @@ PONDER_STOP_TIMEOUT_S = 4.0
 PONDER_HIT_TIMEOUT_S = 6.0
 MIN_SEARCH_TIMEOUT_S = 0.2
 MAX_SEARCH_TIMEOUT_S = 30.0
-GAME_STREAM_TIMEOUT_S = 30.0
-GAME_STREAM_RETRIES = 2
-GAME_STREAM_ACTIVE_RETRIES = 8
-GAME_STREAM_RETRY_DELAY_S = 1.0
+GAME_STREAM_TIMEOUT_S = max(
+    30.0, min(1800.0, env_float("METALFISH_GAME_STREAM_TIMEOUT_S", 180.0))
+)
+GAME_STREAM_RETRIES = max(2, env_int("METALFISH_GAME_STREAM_RETRIES", 6))
+GAME_STREAM_ACTIVE_RETRIES = max(
+    8, env_int("METALFISH_GAME_STREAM_ACTIVE_RETRIES", 24)
+)
+GAME_STREAM_RETRY_DELAY_S = max(
+    0.0, env_float("METALFISH_GAME_STREAM_RETRY_DELAY_S", 1.0)
+)
+GAME_STREAM_TRANSIENT_STATUSES = {408, 429, 500, 502, 503, 504}
 EVENT_STREAM_READ_TIMEOUT_S = env_float("METALFISH_EVENT_STREAM_READ_TIMEOUT_S", 300.0)
 EVENT_STREAM_RECONNECT_DELAY_S = env_float(
     "METALFISH_EVENT_STREAM_RECONNECT_DELAY_S", 1.0
@@ -446,6 +456,7 @@ BASE_ENGINE_OPTIONS = {
     "MCTSParityPreset": "false",
     "MCTSAddDirichletNoise": "false",
     "HybridMCTSMinimumKLDGainPerNode": str(HYBRID_MCTS_KLD),
+    "HybridABRootRejectMCTS": HYBRID_AB_ROOT_REJECT_MCTS,
     "HybridMCTSRootReject": HYBRID_MCTS_ROOT_REJECT,
     "HybridMCTSUseSharedTT": HYBRID_MCTS_SHARED_TT,
     "HybridMCTSABRootHints": HYBRID_MCTS_AB_ROOT_HINTS,
@@ -1418,6 +1429,8 @@ class LichessBot:
         self._last_move_failure_detail = ""
         self._online_bots_cache: tuple[float, list[dict]] | None = None
         self._playing_status_cache: dict[str, tuple[float, bool | None]] = {}
+        self._last_game_stream_status: int | None = None
+        self._last_game_stream_error = ""
         self._audit_enabled = LICHESS_AUDIT_ENABLED
         self._audit_lock = threading.Lock()
         self._audit_counts: dict[str, int] = {}
@@ -2689,6 +2702,13 @@ class LichessBot:
             return False
         return abs(rating - self._our_rating(speed)) <= self._current_elo_range()
 
+    def _stream_failure_is_transient(self) -> bool:
+        status = getattr(self, "_last_game_stream_status", None)
+        if status in GAME_STREAM_TRANSIENT_STATUSES:
+            return True
+        error = getattr(self, "_last_game_stream_error", "")
+        return "timed out" in str(error).lower()
+
     def play_game(self, game_id: str):
         print(f"  [{game_id}] Starting...")
         self._audit(game_id, "game_start")
@@ -2705,6 +2725,8 @@ class LichessBot:
                 try:
                     finished = self._game_loop(game_id, engine)
                 except Exception as e:
+                    self._last_game_stream_status = None
+                    self._last_game_stream_error = str(e)
                     print(f"  [{game_id}] Stream error: {e}")
                     self._audit(game_id, "stream_error", error=str(e))
                 if finished:
@@ -2722,6 +2744,24 @@ class LichessBot:
                     finished = True
                     inferred_finished = True
                     break
+                if active_status is None and self._stream_failure_is_transient():
+                    if active_retries >= GAME_STREAM_ACTIVE_RETRIES:
+                        break
+                    active_retries += 1
+                    print(
+                        f"  [{game_id}] Stream transient; active status unknown, "
+                        "reconnecting"
+                    )
+                    self._audit(
+                        game_id,
+                        "stream_reconnect",
+                        reason="transient_unknown_active",
+                        active_retries=active_retries,
+                        status=getattr(self, "_last_game_stream_status", None),
+                        error=getattr(self, "_last_game_stream_error", ""),
+                    )
+                    time.sleep(GAME_STREAM_RETRY_DELAY_S)
+                    continue
                 if active_status is True:
                     if active_retries >= GAME_STREAM_ACTIVE_RETRIES:
                         break
@@ -2793,9 +2833,14 @@ class LichessBot:
                 self._schedule_retry(3)
 
     def _game_loop(self, game_id: str, engine: UCIEngine) -> bool:
+        self._last_game_stream_status = None
+        self._last_game_stream_error = ""
         with self.api_get(
-            f"/bot/game/stream/{game_id}", stream=True, timeout=GAME_STREAM_TIMEOUT_S
+            f"/bot/game/stream/{game_id}",
+            stream=True,
+            timeout=(10, GAME_STREAM_TIMEOUT_S),
         ) as r:
+            self._last_game_stream_status = r.status_code
             if r.status_code != 200:
                 print(f"  [{game_id}] Stream failed: {r.status_code}")
                 self._audit(game_id, "stream_failed", status_code=r.status_code)

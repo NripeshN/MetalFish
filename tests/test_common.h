@@ -6,6 +6,8 @@
 #pragma once
 
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -13,6 +15,30 @@
 
 namespace MetalFish {
 namespace Test {
+
+inline std::string find_nn_weights_path() {
+  const char *env = std::getenv("METALFISH_NN_WEIGHTS");
+  if (env && !std::string(env).empty())
+    return env;
+
+  const char *candidates[] = {
+      "networks/BT4-1024x15x32h-swa-6147500.pb",
+      "../networks/BT4-1024x15x32h-swa-6147500.pb",
+      "../../networks/BT4-1024x15x32h-swa-6147500.pb",
+  };
+  for (const char *path : candidates) {
+    std::ifstream file(path, std::ios::binary);
+    if (file.good())
+      return path;
+  }
+  return {};
+}
+
+inline void print_missing_nn_weights_skip() {
+  std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set and default BT4 weights "
+               "not found"
+            << std::endl;
+}
 
 struct TestCase {
   std::string name;

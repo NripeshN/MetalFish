@@ -12,6 +12,7 @@
 #include "nn/encoder.h"
 #include "nn/network.h"
 #include "nn/policy_map.h"
+#include "test_common.h"
 
 #include <algorithm>
 #include <array>
@@ -228,6 +229,33 @@ struct HistoryFixture {
   std::vector<const Position *> ptrs;
 };
 
+const std::vector<std::vector<Move>> &batch_parity_lines() {
+  static const std::vector<std::vector<Move>> lines = {
+      {},
+      {Move(SQ_E2, SQ_E4)},
+      {Move(SQ_D2, SQ_D4)},
+      {Move(SQ_G1, SQ_F3)},
+      {Move(SQ_C2, SQ_C4)},
+      {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5)},
+      {Move(SQ_D2, SQ_D4), Move(SQ_D7, SQ_D5)},
+      {Move(SQ_G1, SQ_F3), Move(SQ_G8, SQ_F6)},
+      {Move(SQ_C2, SQ_C4), Move(SQ_E7, SQ_E5)},
+      {Move(SQ_E2, SQ_E4), Move(SQ_C7, SQ_C5)},
+      {Move(SQ_D2, SQ_D4), Move(SQ_G8, SQ_F6), Move(SQ_C2, SQ_C4)},
+      {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5), Move(SQ_G1, SQ_F3),
+       Move(SQ_B8, SQ_C6)},
+      {Move(SQ_C2, SQ_C4), Move(SQ_E7, SQ_E5), Move(SQ_B1, SQ_C3),
+       Move(SQ_G8, SQ_F6)},
+      {Move(SQ_G1, SQ_F3), Move(SQ_D7, SQ_D5), Move(SQ_D2, SQ_D4),
+       Move(SQ_G8, SQ_F6)},
+      {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E6), Move(SQ_D2, SQ_D4),
+       Move(SQ_D7, SQ_D5)},
+      {Move(SQ_D2, SQ_D4), Move(SQ_D7, SQ_D5), Move(SQ_C2, SQ_C4),
+       Move(SQ_E7, SQ_E6), Move(SQ_B1, SQ_C3), Move(SQ_G8, SQ_F6)},
+  };
+  return lines;
+}
+
 HistoryFixture build_history(const std::vector<Move> &moves) {
   HistoryFixture h;
   const int total_plies = static_cast<int>(moves.size());
@@ -293,9 +321,9 @@ bool test_encoder_repetition_plane() {
 
 bool test_mcts_evaluator_optional() {
   std::cout << "  MCTS evaluator smoke..." << std::endl;
-  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights_path) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (weights_path.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return true;
   }
 
@@ -363,13 +391,18 @@ struct ReferenceTolerances {
 
 bool test_bt4_reference_outputs_optional(ParityReport *report) {
   std::cout << "  BT4 fixed-position reference outputs..." << std::endl;
-  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights_path) {
-    if (report)
-      report->fixed_note = "Skipped because `METALFISH_NN_WEIGHTS` is not set.";
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (weights_path.empty()) {
+    if (report) {
+      report->fixed_note =
+          "Skipped because `METALFISH_NN_WEIGHTS` is not set and default BT4 "
+          "weights were not found.";
+    }
+    MetalFish::Test::print_missing_nn_weights_skip();
     return true;
   }
+  if (report && report->weights_path.empty())
+    report->weights_path = weights_path;
 
   const std::array<ReferenceFenCase, 5> cases = {{
       {"start",
@@ -743,40 +776,23 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
 
 bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
   std::cout << "  MCTS evaluator batch parity..." << std::endl;
-  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights_path) {
-    if (report)
-      report->batch_note = "Skipped because `METALFISH_NN_WEIGHTS` is not set.";
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (weights_path.empty()) {
+    if (report) {
+      report->batch_note =
+          "Skipped because `METALFISH_NN_WEIGHTS` is not set and default BT4 "
+          "weights were not found.";
+    }
+    MetalFish::Test::print_missing_nn_weights_skip();
     return true;
   }
+  if (report && report->weights_path.empty())
+    report->weights_path = weights_path;
 
   try {
     MCTS::NNMCTSEvaluator single_eval(weights_path);
     MCTS::NNMCTSEvaluator batch_eval(weights_path);
-    const std::vector<std::vector<Move>> lines = {
-        {},
-        {Move(SQ_E2, SQ_E4)},
-        {Move(SQ_D2, SQ_D4)},
-        {Move(SQ_G1, SQ_F3)},
-        {Move(SQ_C2, SQ_C4)},
-        {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5)},
-        {Move(SQ_D2, SQ_D4), Move(SQ_D7, SQ_D5)},
-        {Move(SQ_G1, SQ_F3), Move(SQ_G8, SQ_F6)},
-        {Move(SQ_C2, SQ_C4), Move(SQ_E7, SQ_E5)},
-        {Move(SQ_E2, SQ_E4), Move(SQ_C7, SQ_C5)},
-        {Move(SQ_D2, SQ_D4), Move(SQ_G8, SQ_F6), Move(SQ_C2, SQ_C4)},
-        {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5), Move(SQ_G1, SQ_F3),
-         Move(SQ_B8, SQ_C6)},
-        {Move(SQ_C2, SQ_C4), Move(SQ_E7, SQ_E5), Move(SQ_B1, SQ_C3),
-         Move(SQ_G8, SQ_F6)},
-        {Move(SQ_G1, SQ_F3), Move(SQ_D7, SQ_D5), Move(SQ_D2, SQ_D4),
-         Move(SQ_G8, SQ_F6)},
-        {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E6), Move(SQ_D2, SQ_D4),
-         Move(SQ_D7, SQ_D5)},
-        {Move(SQ_D2, SQ_D4), Move(SQ_D7, SQ_D5), Move(SQ_C2, SQ_C4),
-         Move(SQ_E7, SQ_E6), Move(SQ_B1, SQ_C3), Move(SQ_G8, SQ_F6)},
-    };
+    const auto &lines = batch_parity_lines();
 
     std::vector<HistoryFixture> fixtures;
     fixtures.reserve(33);
@@ -993,9 +1009,9 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
 
 bool test_mcts_evaluator_first_use_stress_optional() {
   std::cout << "  MCTS evaluator first-use stress..." << std::endl;
-  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights_path) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (weights_path.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return true;
   }
 
@@ -1062,6 +1078,146 @@ bool test_mcts_evaluator_first_use_stress_optional() {
   }
 }
 
+bool test_mcts_evaluator_batch_reuse_stress_optional() {
+  std::cout << "  MCTS evaluator batch reuse stress..." << std::endl;
+  if (!env_flag_enabled("METALFISH_NN_BATCH_REUSE_STRESS")) {
+    std::cout << "    SKIP: METALFISH_NN_BATCH_REUSE_STRESS not set"
+              << std::endl;
+    return true;
+  }
+
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (weights_path.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
+    return true;
+  }
+
+  struct BatchProbe {
+    size_t batch_size;
+    size_t entry;
+    const char *label;
+  };
+
+  try {
+    const auto &lines = batch_parity_lines();
+    std::vector<HistoryFixture> fixtures;
+    fixtures.reserve(33);
+    std::vector<std::vector<const Position *>> histories;
+    histories.reserve(33);
+    for (int i = 0; i < 33; ++i) {
+      fixtures.push_back(build_history(lines[i % lines.size()]));
+      histories.push_back(fixtures.back().ptrs);
+    }
+
+    MCTS::NNMCTSEvaluator single_eval(weights_path);
+    MCTS::NNMCTSEvaluator reuse_eval(weights_path);
+    EvalTolerances tolerances;
+    const std::string network_info = single_eval.GetNetworkInfo();
+    if (network_info.find("CUDA transformer backend") != std::string::npos) {
+      tolerances.value = 2e-3f;
+      tolerances.moves_left = 1.25e-1f;
+      tolerances.policy = 7.5e-2f;
+    }
+
+    std::vector<MCTS::EvaluationResult> singles;
+    singles.reserve(histories.size());
+    for (const auto &history : histories)
+      singles.push_back(single_eval.EvaluateWithHistory(history));
+
+    const std::array<BatchProbe, 4> probes = {{
+        {32, 9, "warm32"},
+        {1, 0, "shrink1"},
+        {16, 9, "target16"},
+        {33, 9, "expand33"},
+    }};
+    const int iterations =
+        env_int_or_default("METALFISH_NN_BATCH_REUSE_STRESS_ITERS", 2, 1, 16);
+
+    EvalDiffMetrics worst;
+    bool worst_set = false;
+    std::string worst_line;
+    std::string worst_single_top;
+    std::string worst_batch_top;
+
+    for (int iter = 0; iter < iterations; ++iter) {
+      for (const auto &probe : probes) {
+        std::vector<std::vector<const Position *>> prefix(
+            histories.begin(), histories.begin() + probe.batch_size);
+        auto outputs = reuse_eval.EvaluateBatchWithHistory(prefix);
+        if (outputs.size() != probe.batch_size) {
+          std::cout << "    FAIL: reuse stress " << probe.label
+                    << " returned " << outputs.size() << " outputs"
+                    << std::endl;
+          return false;
+        }
+
+        std::ostringstream label;
+        label << "reuse iter " << iter << " " << probe.label << " batch "
+              << probe.batch_size << " entry " << probe.entry;
+        const auto metrics =
+            measure_eval_result(singles[probe.entry], outputs[probe.entry],
+                                label.str());
+        std::cout << "    REUSE_STRESS_STEP: iter=" << iter
+                  << " label=" << probe.label
+                  << " batch=" << probe.batch_size
+                  << " entry=" << probe.entry
+                  << " line=" << move_line_string(lines[probe.entry %
+                                                        lines.size()])
+                  << " value_delta=" << format_float(metrics.value_delta)
+                  << " wdl_delta=" << format_float(metrics.wdl_delta)
+                  << " moves_left_delta="
+                  << format_float(metrics.moves_left_delta)
+                  << " policy_delta=" << format_float(metrics.policy_delta)
+                  << " worst=" << metrics.worst_field << std::endl;
+        if (!worst_set || metrics_worse_than(metrics, worst)) {
+          worst = metrics;
+          worst_set = true;
+          worst_line = move_line_string(lines[probe.entry % lines.size()]);
+          worst_single_top = result_top_policy_string(singles[probe.entry], 5);
+          worst_batch_top =
+              result_top_policy_string(outputs[probe.entry], 5);
+        }
+
+        if (!compare_eval_result(singles[probe.entry], outputs[probe.entry],
+                                 label.str(), tolerances))
+          return false;
+      }
+    }
+
+    if (worst_set) {
+      std::cout << "    REUSE_STRESS_MAX: value_delta="
+                << format_float(worst.value_delta)
+                << " wdl_delta=" << format_float(worst.wdl_delta)
+                << " moves_left_delta="
+                << format_float(worst.moves_left_delta)
+                << " policy_delta=" << format_float(worst.policy_delta)
+                << " line=" << worst_line << " worst=" << worst.worst_field
+                << std::endl;
+      if (worst.policy_index != std::numeric_limits<size_t>::max()) {
+        std::cout << "    REUSE_STRESS_POLICY: index=" << worst.policy_index
+                  << " move=" << move_to_string(worst.policy_move)
+                  << " single=" << format_float(worst.policy_single)
+                  << " batch=" << format_float(worst.policy_batched)
+                  << " delta="
+                  << format_float(std::fabs(worst.policy_single -
+                                            worst.policy_batched))
+                  << std::endl;
+      }
+      std::cout << "    REUSE_STRESS_SINGLE_TOP: " << worst_single_top
+                << std::endl;
+      std::cout << "    REUSE_STRESS_BATCH_TOP: " << worst_batch_top
+                << std::endl;
+    }
+
+    std::cout << "    PASS: checked " << iterations
+              << " reuse-shape iteration(s)" << std::endl;
+    return true;
+  } catch (const std::exception &e) {
+    std::cout << "    FAIL: exception: " << e.what() << std::endl;
+    return false;
+  }
+}
+
 bool benchmark_nn_batch_optional() {
   std::cout << "  NN backend batch benchmark..." << std::endl;
   if (!env_flag_enabled("METALFISH_NN_BATCH_BENCH")) {
@@ -1069,9 +1225,9 @@ bool benchmark_nn_batch_optional() {
     return true;
   }
 
-  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
-  if (!weights_path) {
-    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (weights_path.empty()) {
+    MetalFish::Test::print_missing_nn_weights_skip();
     return true;
   }
 
@@ -1081,29 +1237,7 @@ bool benchmark_nn_batch_optional() {
     const int iterations =
         env_int_or_default("METALFISH_NN_BENCH_ITERS", 2, 1, 20);
 
-    const std::vector<std::vector<Move>> lines = {
-        {},
-        {Move(SQ_E2, SQ_E4)},
-        {Move(SQ_D2, SQ_D4)},
-        {Move(SQ_G1, SQ_F3)},
-        {Move(SQ_C2, SQ_C4)},
-        {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5)},
-        {Move(SQ_D2, SQ_D4), Move(SQ_D7, SQ_D5)},
-        {Move(SQ_G1, SQ_F3), Move(SQ_G8, SQ_F6)},
-        {Move(SQ_C2, SQ_C4), Move(SQ_E7, SQ_E5)},
-        {Move(SQ_E2, SQ_E4), Move(SQ_C7, SQ_C5)},
-        {Move(SQ_D2, SQ_D4), Move(SQ_G8, SQ_F6), Move(SQ_C2, SQ_C4)},
-        {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5), Move(SQ_G1, SQ_F3),
-         Move(SQ_B8, SQ_C6)},
-        {Move(SQ_C2, SQ_C4), Move(SQ_E7, SQ_E5), Move(SQ_B1, SQ_C3),
-         Move(SQ_G8, SQ_F6)},
-        {Move(SQ_G1, SQ_F3), Move(SQ_D7, SQ_D5), Move(SQ_D2, SQ_D4),
-         Move(SQ_G8, SQ_F6)},
-        {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E6), Move(SQ_D2, SQ_D4),
-         Move(SQ_D7, SQ_D5)},
-        {Move(SQ_D2, SQ_D4), Move(SQ_D7, SQ_D5), Move(SQ_C2, SQ_C4),
-         Move(SQ_E7, SQ_E6), Move(SQ_B1, SQ_C3), Move(SQ_G8, SQ_F6)},
-    };
+    const auto &lines = batch_parity_lines();
 
     std::vector<HistoryFixture> fixtures;
     fixtures.reserve(max_batch);
@@ -1172,8 +1306,10 @@ int main() {
   const bool ok5 =
       test_mcts_evaluator_batch_parity_optional(parity_report.get());
   const bool ok6 = test_mcts_evaluator_first_use_stress_optional();
-  const bool ok7 = benchmark_nn_batch_optional();
-  const bool ok8 =
+  const bool ok7 = test_mcts_evaluator_batch_reuse_stress_optional();
+  const bool ok8 = benchmark_nn_batch_optional();
+  const bool ok9 =
       !parity_report || write_parity_report(*parity_report);
-  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8) ? 0 : 1;
+  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9) ? 0
+                                                                        : 1;
 }

@@ -149,6 +149,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridAutoABThreadsCap", Option(0, 0, MaxThreads));
   options.add("HybridABPolicyWeight", Option("0.0"));
   options.add("HybridMCTSMinimumKLDGainPerNode", Option("0.0"));
+  options.add("HybridABRootRejectMCTS", Option(true));
   options.add("HybridMCTSRootReject", Option(true));
   options.add("HybridMCTSUseSharedTT", Option(false));
   options.add("HybridMCTSABRootHints", Option(true));

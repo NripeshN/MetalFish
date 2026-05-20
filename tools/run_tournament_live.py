@@ -83,6 +83,7 @@ def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None
         "HYBRID_TRANSFORMER_LOW_TIME_FALLBACK_MS": "TransformerLowTimeFallbackMs",
         "HYBRID_TRANSFORMER_MIN_MOVE_BUDGET_MS": "TransformerMinMoveBudgetMs",
         "HYBRID_MCTS_KLD": "HybridMCTSMinimumKLDGainPerNode",
+        "HYBRID_AB_ROOT_REJECT_MCTS": "HybridABRootRejectMCTS",
         "HYBRID_MCTS_ROOT_REJECT": "HybridMCTSRootReject",
         "HYBRID_MCTS_SHARED_TT": "HybridMCTSUseSharedTT",
         "HYBRID_MCTS_AB_ROOT_HINTS": "HybridMCTSABRootHints",

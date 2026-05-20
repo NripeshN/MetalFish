@@ -52,6 +52,7 @@
         "MCTSParityPreset": "false",
         "MCTSAddDirichletNoise": "false",
         "HybridMCTSMinimumKLDGainPerNode": "0.0",
+        "HybridABRootRejectMCTS": "true",
         "HybridMCTSRootReject": "true",
         "HybridMCTSUseSharedTT": "false",
         "HybridMCTSABRootHints": "true",

@@ -405,6 +405,7 @@ class MetalFishProbe:
                 "MCTSParityPreset": "false",
                 "MCTSAddDirichletNoise": "false",
                 "HybridMCTSMinimumKLDGainPerNode": "0.0",
+                "HybridABRootRejectMCTS": "true",
                 "HybridMCTSRootReject": "true",
                 "HybridMCTSABRootHints": "true",
                 "HybridMCTSABRootHintDelayMs": "25",
