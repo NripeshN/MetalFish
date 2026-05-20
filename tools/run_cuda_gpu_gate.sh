@@ -113,6 +113,9 @@ cmake --build "${BUILD_DIR}" --target metalfish metalfish_tests test_nn_comparis
 grep -q "CUDA runtime" "${BUILD_DIR}/cuda-gpu-tests.log"
 
 METALFISH_NN_WEIGHTS="${WEIGHTS}" \
+  METALFISH_NN_BATCH_BENCH="${METALFISH_NN_BATCH_BENCH:-1}" \
+  METALFISH_NN_BENCH_ITERS="${METALFISH_NN_BENCH_ITERS:-2}" \
+  METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
   "${BUILD_DIR}/test_nn_comparison" | tee "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
 
 python3 tools/uci_smoke.py \

@@ -10,10 +10,12 @@
 #include "core/position.h"
 #include "mcts/evaluator.h"
 #include "nn/encoder.h"
+#include "nn/network.h"
 #include "nn/policy_map.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
@@ -60,6 +62,24 @@ sorted_priors(const MCTS::EvaluationResult &result) {
 bool should_dump_nn_debug() {
   const char *dump = std::getenv("METALFISH_NN_DEBUG_DUMP");
   return dump && dump[0] != '\0' && std::string(dump) != "0";
+}
+
+bool env_flag_enabled(const char *name) {
+  const char *value = std::getenv(name);
+  return value && value[0] != '\0' && std::string(value) != "0";
+}
+
+int env_int_or_default(const char *name, int fallback, int min_value,
+                       int max_value) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  try {
+    const int parsed = std::stoi(value);
+    return std::clamp(parsed, min_value, max_value);
+  } catch (...) {
+    return fallback;
+  }
 }
 
 bool test_encoder_policy_roundtrip() {
@@ -562,6 +582,100 @@ bool test_mcts_evaluator_batch_parity_optional() {
   }
 }
 
+bool benchmark_nn_batch_optional() {
+  std::cout << "  NN backend batch benchmark..." << std::endl;
+  if (!env_flag_enabled("METALFISH_NN_BATCH_BENCH")) {
+    std::cout << "    SKIP: METALFISH_NN_BATCH_BENCH not set" << std::endl;
+    return true;
+  }
+
+  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights_path) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return true;
+  }
+
+  try {
+    const int max_batch =
+        env_int_or_default("METALFISH_NN_BENCH_MAX_BATCH", 32, 1, 128);
+    const int iterations =
+        env_int_or_default("METALFISH_NN_BENCH_ITERS", 2, 1, 20);
+
+    const std::vector<std::vector<Move>> lines = {
+        {},
+        {Move(SQ_E2, SQ_E4)},
+        {Move(SQ_D2, SQ_D4)},
+        {Move(SQ_G1, SQ_F3)},
+        {Move(SQ_C2, SQ_C4)},
+        {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5)},
+        {Move(SQ_D2, SQ_D4), Move(SQ_D7, SQ_D5)},
+        {Move(SQ_G1, SQ_F3), Move(SQ_G8, SQ_F6)},
+        {Move(SQ_C2, SQ_C4), Move(SQ_E7, SQ_E5)},
+        {Move(SQ_E2, SQ_E4), Move(SQ_C7, SQ_C5)},
+        {Move(SQ_D2, SQ_D4), Move(SQ_G8, SQ_F6), Move(SQ_C2, SQ_C4)},
+        {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E5), Move(SQ_G1, SQ_F3),
+         Move(SQ_B8, SQ_C6)},
+        {Move(SQ_C2, SQ_C4), Move(SQ_E7, SQ_E5), Move(SQ_B1, SQ_C3),
+         Move(SQ_G8, SQ_F6)},
+        {Move(SQ_G1, SQ_F3), Move(SQ_D7, SQ_D5), Move(SQ_D2, SQ_D4),
+         Move(SQ_G8, SQ_F6)},
+        {Move(SQ_E2, SQ_E4), Move(SQ_E7, SQ_E6), Move(SQ_D2, SQ_D4),
+         Move(SQ_D7, SQ_D5)},
+        {Move(SQ_D2, SQ_D4), Move(SQ_D7, SQ_D5), Move(SQ_C2, SQ_C4),
+         Move(SQ_E7, SQ_E6), Move(SQ_B1, SQ_C3), Move(SQ_G8, SQ_F6)},
+    };
+
+    std::vector<HistoryFixture> fixtures;
+    fixtures.reserve(max_batch);
+    std::vector<NN::InputPlanes> planes;
+    planes.reserve(max_batch);
+    for (int i = 0; i < max_batch; ++i) {
+      fixtures.push_back(build_history(lines[i % lines.size()]));
+      int transform = 0;
+      planes.push_back(NN::EncodePositionForNN(
+          MetalFishNN::NetworkFormat::INPUT_112_WITH_CANONICALIZATION_V2,
+          fixtures.back().ptrs, NN::kMoveHistory,
+          NN::FillEmptyHistory::FEN_ONLY, &transform));
+    }
+
+    auto network = NN::CreateNetwork(weights_path);
+    std::cout << "    backend: " << network->GetNetworkInfo() << std::endl;
+    std::cout << "    batches:";
+    double checksum = 0.0;
+    for (int batch_size = 1; batch_size <= max_batch; batch_size *= 2) {
+      std::vector<NN::InputPlanes> batch(planes.begin(),
+                                         planes.begin() + batch_size);
+      network->EvaluateBatch(batch);
+      const auto start = std::chrono::steady_clock::now();
+      for (int iter = 0; iter < iterations; ++iter) {
+        const auto outputs = network->EvaluateBatch(batch);
+        if (outputs.size() != static_cast<size_t>(batch_size)) {
+          std::cout << std::endl
+                    << "    FAIL: benchmark batch " << batch_size
+                    << " returned " << outputs.size() << " outputs"
+                    << std::endl;
+          return false;
+        }
+        checksum += outputs.front().value + outputs.back().policy[0];
+      }
+      const auto end = std::chrono::steady_clock::now();
+      const double total_ms =
+          std::chrono::duration<double, std::milli>(end - start).count();
+      const double batch_ms = total_ms / static_cast<double>(iterations);
+      const double eval_ms = batch_ms / static_cast<double>(batch_size);
+      std::cout << " b" << batch_size << "=" << std::fixed
+                << std::setprecision(3) << batch_ms << "ms/"
+                << std::setprecision(4) << eval_ms << "ms_eval";
+    }
+    std::cout << " checksum=" << std::setprecision(6) << checksum
+              << std::endl;
+    return true;
+  } catch (const std::exception &e) {
+    std::cout << "    FAIL: exception: " << e.what() << std::endl;
+    return false;
+  }
+}
+
 } // namespace
 
 int main() {
@@ -575,5 +689,6 @@ int main() {
   const bool ok3 = test_mcts_evaluator_optional();
   const bool ok4 = test_bt4_reference_outputs_optional();
   const bool ok5 = test_mcts_evaluator_batch_parity_optional();
-  return (ok1 && ok2 && ok3 && ok4 && ok5) ? 0 : 1;
+  const bool ok6 = benchmark_nn_batch_optional();
+  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6) ? 0 : 1;
 }

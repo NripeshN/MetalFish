@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, workspace reuse gate |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, batch benchmark gate |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -212,6 +212,11 @@ Current CUDA backend boundary:
   `cudaMalloc` churn when MCTS alternates between tactical low-latency batches
   and fuller queued batches. The 2026-05-20 T4 gate kept CUDA smoke, fixed BT4
   outputs, batch parity, and UCI smoke green.
+- The CUDA GPU gate now records opt-in backend batch timings through
+  `test_nn_comparison` without treating wall-clock variance as a hard failure.
+  The first 2026-05-20 T4 baseline after workspace reuse was:
+  `b1=16.922ms`, `b2=20.613ms`, `b4=27.251ms`, `b8=42.228ms`,
+  `b16=80.917ms`, `b32=157.184ms` (`4.912ms/eval` at batch 32).
 - A CUDA Q/K/V bias fusion attempt was rejected on the 2026-05-20 T4 gate after
   fixed-output drift in the castling-rights reference case, and was reverted.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
