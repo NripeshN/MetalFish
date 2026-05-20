@@ -753,6 +753,35 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
       histories.push_back(fixtures.back().ptrs);
     }
 
+    if (env_flag_enabled("METALFISH_NN_BATCH_TRACE_PAIR")) {
+      const int trace_batch_size = env_int_or_default(
+          "METALFISH_NN_BATCH_TRACE_BATCH", 32, 1,
+          static_cast<int>(histories.size()));
+      const int target =
+          env_int_or_default("METALFISH_NN_BATCH_TRACE_INDEX",
+                             std::min(6, trace_batch_size - 1), 0,
+                             trace_batch_size - 1);
+      std::vector<std::vector<const Position *>> trace_batch(
+          histories.begin(), histories.begin() + trace_batch_size);
+      auto single_target = single_eval.EvaluateWithHistory(histories[target]);
+      auto batched_targets = batch_eval.EvaluateBatchWithHistory(trace_batch);
+      if (batched_targets.size() != static_cast<size_t>(trace_batch_size)) {
+        std::cout << "    FAIL: trace pair batch result count mismatch"
+                  << std::endl;
+        return false;
+      }
+      const auto metrics = measure_eval_result(
+          single_target, batched_targets[static_cast<size_t>(target)],
+          "trace pair entry " + std::to_string(target));
+      std::cout << "    TRACE_PAIR: batch=" << trace_batch_size
+                << " entry=" << target
+                << " value_delta=" << format_float(metrics.value_delta)
+                << " moves_left_delta="
+                << format_float(metrics.moves_left_delta)
+                << " policy_delta=" << format_float(metrics.policy_delta)
+                << " worst=" << metrics.worst_field << std::endl;
+    }
+
     std::vector<MCTS::EvaluationResult> singles;
     singles.reserve(histories.size());
     for (const auto &history : histories) {
