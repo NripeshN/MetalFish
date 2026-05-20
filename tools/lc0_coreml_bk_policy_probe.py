@@ -190,7 +190,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Rank Bratko-Kopec expected moves by T1 Core ML policy over legal moves."
     )
-    parser.add_argument("weights", help="Lc0 T1-256 .pb or .pb.gz weights")
+    parser.add_argument("weights", help="Lc0 T1 .pb or .pb.gz weights")
     parser.add_argument(
         "--compute-unit", choices=["all", "cpu", "cpu-gpu", "cpu-ne"], default="cpu-ne"
     )

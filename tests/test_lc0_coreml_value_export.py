@@ -124,6 +124,34 @@ def test_effective_activation_fixup() -> None:
     expect("ffn relu2", activations["ffn"] == "relu_2")
 
 
+def test_t1_attention_validation_allows_512_channels() -> None:
+    exporter.validate_t1_attention_info(
+        {
+            "encoder_layers": 15,
+            "network": 4,
+            "policy": 3,
+            "headcount": 8,
+            "ip_emb_channels": 512,
+        }
+    )
+
+
+def test_t1_attention_validation_rejects_bad_headcount() -> None:
+    try:
+        exporter.validate_t1_attention_info(
+            {
+                "encoder_layers": 15,
+                "network": 4,
+                "policy": 3,
+                "headcount": 7,
+                "ip_emb_channels": 512,
+            }
+        )
+    except RuntimeError:
+        return
+    raise AssertionError("expected invalid headcount to be rejected")
+
+
 def main() -> int:
     test_percentile_uses_sorted_values()
     test_compute_unit_mapping()
@@ -132,6 +160,8 @@ def main() -> int:
     test_prediction_summary()
     test_attention_policy_map()
     test_effective_activation_fixup()
+    test_t1_attention_validation_allows_512_channels()
+    test_t1_attention_validation_rejects_bad_headcount()
     print("Lc0 Core ML value exporter tests: OK")
     return 0
 

@@ -245,7 +245,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Measure Core ML T1 heads while MetalFish Metal inference runs concurrently."
     )
-    parser.add_argument("weights", help="Lc0 T1-256 .pb or .pb.gz weights")
+    parser.add_argument("weights", help="Lc0 T1 .pb or .pb.gz weights")
     parser.add_argument("--metal-probe", required=True, help="Path to build/metalfish_nn_probe")
     parser.add_argument("--fen", default=DEFAULT_FEN)
     parser.add_argument("--batch-size", type=int, default=16)

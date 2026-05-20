@@ -383,9 +383,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare Core ML T1-256 CPU/fp32 and ANE candidate outputs on FENs."
+        description="Compare Core ML T1 CPU/fp32 and ANE candidate outputs on FENs."
     )
-    parser.add_argument("weights", help="Lc0 T1-256 .pb or .pb.gz weights")
+    parser.add_argument("weights", help="Lc0 T1 .pb or .pb.gz weights")
     parser.add_argument("--fen", action="append", default=[])
     parser.add_argument("--candidate-compute-unit", choices=["all", "cpu", "cpu-gpu", "cpu-ne"], default="cpu-ne")
     parser.add_argument("--candidate-precision", choices=["fp16", "fp32"], default="fp16")

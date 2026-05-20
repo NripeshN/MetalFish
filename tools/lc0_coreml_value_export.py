@@ -310,6 +310,13 @@ def inspect_t1(net: Any) -> dict[str, Any]:
     }
 
 
+def validate_t1_attention_info(info: dict[str, Any]) -> None:
+    if info["encoder_layers"] < 1 or info["network"] != 4 or info["policy"] != 3:
+        raise RuntimeError("this experimental exporter currently expects a T1 attention net")
+    if info["headcount"] < 1 or info["ip_emb_channels"] % info["headcount"] != 0:
+        raise RuntimeError("network channels must be divisible by attention headcount")
+
+
 def activation_name(nf: Any, value: int, default: str) -> str:
     names = {
         1: "mish",
@@ -376,6 +383,8 @@ def build_value_model(
 
     encoders: list[dict[str, Any]] = []
     for enc in weights.encoder:
+        ffn1_b = decode_layer(np, enc.ffn.dense1_b)
+        ffn2_b = decode_layer(np, enc.ffn.dense2_b)
         smolgen = None
         if enc.mha.HasField("smolgen"):
             sg = enc.mha.smolgen
@@ -406,10 +415,10 @@ def build_value_model(
                 "dense_b": decode_layer(np, enc.mha.dense_b),
                 "ln1_g": decode_layer(np, enc.ln1_gammas),
                 "ln1_b": decode_layer(np, enc.ln1_betas),
-                "ffn1_w": dense_weight(np, enc.ffn.dense1_w, 4 * channels),
-                "ffn1_b": decode_layer(np, enc.ffn.dense1_b),
-                "ffn2_w": dense_weight(np, enc.ffn.dense2_w, channels),
-                "ffn2_b": decode_layer(np, enc.ffn.dense2_b),
+                "ffn1_w": dense_weight(np, enc.ffn.dense1_w, ffn1_b.size),
+                "ffn1_b": ffn1_b,
+                "ffn2_w": dense_weight(np, enc.ffn.dense2_w, ffn2_b.size),
+                "ffn2_b": ffn2_b,
                 "ln2_g": decode_layer(np, enc.ln2_gammas),
                 "ln2_b": decode_layer(np, enc.ln2_betas),
                 "smolgen": smolgen,
@@ -716,8 +725,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     np, ct, mb, types = load_coremltools()
     net = load_weights_file(Path(args.weights))
     info = inspect_t1(net)
-    if info["encoder_layers"] < 1 or info["ip_emb_channels"] != 256:
-        raise RuntimeError("this experimental exporter currently expects the T1-256 attention net")
+    validate_t1_attention_info(info)
     compute_unit = compute_unit_from_name(ct, args.compute_unit)
     compute_precision = compute_precision_for_args(args, ct)
     output_stage = getattr(args, "output_stage", "wdl")
@@ -771,7 +779,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Experimental Core ML value-head export for the Lc0 T1-256 net."
+        description="Experimental Core ML export for Lc0 T1 attention nets."
     )
     parser.add_argument("weights", help="Lc0 .pb or .pb.gz weights")
     parser.add_argument(
