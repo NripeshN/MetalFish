@@ -63,7 +63,8 @@ void PackInputPlaneBatchHostRaw(const std::vector<const float *> &inputs,
     if (!planes)
       throw std::runtime_error("CUDA host batch pack received null input");
     for (int plane = 0; plane < kCudaInputPlanes; ++plane) {
-      const size_t index = batch * kCudaInputPlanes + static_cast<size_t>(plane);
+      const size_t index =
+          batch * kCudaInputPlanes + static_cast<size_t>(plane);
       PackInputPlaneRaw(planes + static_cast<size_t>(plane) * kCudaSquares,
                         plane, masks[index], values[index]);
     }

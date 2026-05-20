@@ -17,8 +17,8 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -94,10 +94,9 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
       executor_(CreateMissingCudaExecutor()) {
   const auto device_selection = SelectCudaDevice();
   if (!device_selection.ok) {
-    throw std::runtime_error("CUDA transformer backend is compiled (" +
-                             RuntimeCudaDeviceSummary() +
-                             "; format: " + format_.Summary() +
-                             ") but " + device_selection.message);
+    throw std::runtime_error(
+        "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
+        "; format: " + format_.Summary() + ") but " + device_selection.message);
   }
   device_selection_summary_ = device_selection.message;
 
@@ -140,9 +139,8 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
       throw std::runtime_error(execution_validation.Summary());
     resolved_execution_plan_ =
         ResolveNetworkExecutionPlan(execution_plan_, inventory);
-    const auto resolved_inventory =
-        CreateResolvedNetworkWeightInventory(inventory,
-                                             resolved_execution_plan_);
+    const auto resolved_inventory = CreateResolvedNetworkWeightInventory(
+        inventory, resolved_execution_plan_);
     weight_buffers_.Upload(resolved_inventory);
   } catch (const std::exception &e) {
     throw std::runtime_error("CUDA transformer backend is compiled (" +
@@ -156,21 +154,19 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
     if (!schedule.FullySupported()) {
       throw std::runtime_error(schedule.Summary());
     }
-    const auto output_mapping =
-        CreateCudaOutputMapping(tensor_plan_, resolved_execution_plan_,
-                                schedule);
+    const auto output_mapping = CreateCudaOutputMapping(
+        tensor_plan_, resolved_execution_plan_, schedule);
     if (!output_mapping.ok()) {
       throw std::runtime_error(output_mapping.Summary());
     }
     executor_ = CreateResolvedCudaExecutor(schedule, output_mapping);
     WarmupExecution();
   } catch (const std::exception &e) {
-    throw std::runtime_error("CUDA transformer backend is compiled (" +
-                             RuntimeCudaDeviceSummary() +
-                             "; format: " + format_.Summary() +
-                             "; execution=" +
-                             resolved_execution_plan_.Summary() +
-                             ") but executor setup failed: " + e.what());
+    throw std::runtime_error(
+        "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
+        "; format: " + format_.Summary() +
+        "; execution=" + resolved_execution_plan_.Summary() +
+        ") but executor setup failed: " + e.what());
   }
 }
 
@@ -210,10 +206,10 @@ CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
     std::vector<NetworkOutput> outputs;
     outputs.reserve(inputs.size());
     for (size_t offset = 0; offset < inputs.size();) {
-      const size_t chunk_size =
-          std::min<size_t>(kMaxStableExecutionBatchSize, inputs.size() - offset);
-      auto chunk = RunBatch(std::span<const InputPlanes>(
-          inputs.data() + offset, chunk_size));
+      const size_t chunk_size = std::min<size_t>(kMaxStableExecutionBatchSize,
+                                                 inputs.size() - offset);
+      auto chunk = RunBatch(
+          std::span<const InputPlanes>(inputs.data() + offset, chunk_size));
       outputs.insert(outputs.end(), std::make_move_iterator(chunk.begin()),
                      std::make_move_iterator(chunk.end()));
       offset += chunk_size;

@@ -21,8 +21,9 @@ bool EndsWith(std::string_view value, std::string_view suffix) {
   return value.ends_with(suffix);
 }
 
-const NetworkResolvedTensorRef &RequireTensorSuffix(
-    const NetworkResolvedExecutionStep &step, std::string_view suffix) {
+const NetworkResolvedTensorRef &
+RequireTensorSuffix(const NetworkResolvedExecutionStep &step,
+                    std::string_view suffix) {
   for (const auto &tensor : step.tensors) {
     if (EndsWith(tensor.name, suffix))
       return tensor;
@@ -31,9 +32,9 @@ const NetworkResolvedTensorRef &RequireTensorSuffix(
                            std::string(suffix) + " in " + step.name);
 }
 
-const NetworkResolvedExecutionStep *FindStep(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    std::string_view name) {
+const NetworkResolvedExecutionStep *
+FindStep(const NetworkResolvedExecutionPlan &execution_plan,
+         std::string_view name) {
   for (const auto &step : execution_plan.steps) {
     if (step.name == name)
       return &step;
@@ -66,10 +67,10 @@ void RequireBiasWidth(const NetworkResolvedTensorRef &bias, int width,
   }
 }
 
-void ResolveSmolgenPlan(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const NetworkResolvedExecutionStep &attention, int input_width, int heads,
-    CudaSmolgenStagePlan &smolgen) {
+void ResolveSmolgenPlan(const NetworkResolvedExecutionPlan &execution_plan,
+                        const NetworkResolvedExecutionStep &attention,
+                        int input_width, int heads,
+                        CudaSmolgenStagePlan &smolgen) {
   const auto *dense =
       FindStep(execution_plan, attention.name + ".smolgen.dense");
   if (!dense)
@@ -129,8 +130,7 @@ void ResolveSmolgenPlan(
   smolgen.dense2_width = dense2_width;
   smolgen.dense2_width_per_head = dense2_width / heads;
 
-  const auto *positional =
-      FindCudaGlobalPositionalEncodingStep(execution_plan);
+  const auto *positional = FindCudaGlobalPositionalEncodingStep(execution_plan);
   if (!positional)
     return;
 
@@ -188,8 +188,8 @@ CudaAttentionStagePlan ResolveCudaAttentionStagePlan(
 
   const int qkv_width = static_cast<int>(q_w.dims[0]);
   const int input_width = static_cast<int>(q_w.dims[1]);
-  if (qkv_width <= 0 || input_width <= 0 ||
-      k_w.dims != q_w.dims || v_w.dims != q_w.dims) {
+  if (qkv_width <= 0 || input_width <= 0 || k_w.dims != q_w.dims ||
+      v_w.dims != q_w.dims) {
     throw std::runtime_error("CUDA attention Q/K/V dimensions mismatch");
   }
   RequireBiasWidth(q_b, qkv_width, "query bias");

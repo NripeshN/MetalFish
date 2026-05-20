@@ -12,11 +12,14 @@ from pathlib import Path
 
 def git_value(args: list[str], fallback: str = "unknown") -> str:
     try:
-        return subprocess.check_output(
-            ["git", *args],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip() or fallback
+        return (
+            subprocess.check_output(
+                ["git", *args],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            or fallback
+        )
     except Exception:
         return fallback
 

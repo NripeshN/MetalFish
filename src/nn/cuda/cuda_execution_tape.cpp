@@ -63,12 +63,13 @@ struct FeedForwardWidths {
   int output = 0;
 };
 
-FeedForwardWidths FeedForwardOutputWidths(
-    const NetworkResolvedExecutionStep &ffn) {
+FeedForwardWidths
+FeedForwardOutputWidths(const NetworkResolvedExecutionStep &ffn) {
   if (ffn.kind != NetworkExecutionOpKind::FeedForward ||
       ffn.tensors.size() < 4 || ffn.tensors[0].dims.size() != 2 ||
       ffn.tensors[2].dims.size() != 2) {
-    throw std::runtime_error("CUDA execution tape feed-forward tensor is invalid");
+    throw std::runtime_error(
+        "CUDA execution tape feed-forward tensor is invalid");
   }
   const auto hidden = ffn.tensors[0].dims[0];
   const auto output = ffn.tensors[2].dims[0];
@@ -240,9 +241,9 @@ CudaExecutionTape::RequireRole(CudaExecutionBufferRole role) const {
                            CudaExecutionBufferRoleName(role));
 }
 
-float *CudaExecutionTape::Reserve(
-    CudaExecutionWorkspace &workspace,
-    const CudaExecutionBufferBinding &binding) const {
+float *
+CudaExecutionTape::Reserve(CudaExecutionWorkspace &workspace,
+                           const CudaExecutionBufferBinding &binding) const {
   return workspace.ReserveNamedFloats(binding.name, binding.entries);
 }
 
@@ -280,8 +281,9 @@ void CudaExecutionTape::Add(std::string name, CudaExecutionBufferRole role,
       width});
 }
 
-CudaExecutionTape CreateResolvedExecutionTape(
-    const NetworkResolvedExecutionPlan &plan, int batch_size) {
+CudaExecutionTape
+CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
+                            int batch_size) {
   if (batch_size <= 0)
     throw std::runtime_error("CUDA execution tape batch size is invalid");
 
@@ -321,8 +323,8 @@ CudaExecutionTape CreateResolvedExecutionTape(
         break;
       }
       const int rows = DenseLikeRows(plan, step.name, batch_size);
-      tape.Add(step.name + ".dense", CudaExecutionBufferRole::DenseOutput,
-               rows, width);
+      tape.Add(step.name + ".dense", CudaExecutionBufferRole::DenseOutput, rows,
+               width);
       tape.Add(step.name + ".activation",
                CudaExecutionBufferRole::ActivationOutput, rows, width);
       current_rows = rows;
@@ -352,8 +354,8 @@ CudaExecutionTape CreateResolvedExecutionTape(
       const int rows = current_width > 0
                            ? current_rows
                            : DenseLikeRows(plan, step.name, batch_size);
-      tape.Add(step.name + ".gated", CudaExecutionBufferRole::GateOutput,
-               rows, width);
+      tape.Add(step.name + ".gated", CudaExecutionBufferRole::GateOutput, rows,
+               width);
       current_rows = rows;
       current_width = width;
       break;
@@ -365,11 +367,9 @@ CudaExecutionTape CreateResolvedExecutionTape(
                CudaExecutionBufferRole::FeedForwardHiddenOutput, rows,
                widths.hidden);
       tape.Add(step.name + ".activation",
-               CudaExecutionBufferRole::ActivationOutput, rows,
-               widths.hidden);
+               CudaExecutionBufferRole::ActivationOutput, rows, widths.hidden);
       tape.Add(step.name + ".dense2",
-               CudaExecutionBufferRole::FeedForwardOutput, rows,
-               widths.output);
+               CudaExecutionBufferRole::FeedForwardOutput, rows, widths.output);
       current_rows = rows;
       current_width = widths.output;
       break;
@@ -392,8 +392,9 @@ CudaExecutionTape CreateResolvedExecutionTape(
                CudaExecutionBufferRole::AttentionProbabilities,
                batch_size * attention.heads * attention.squares,
                attention.squares);
-      tape.Add(step.name + ".context", CudaExecutionBufferRole::AttentionContext,
-               square_rows, attention.qkv_width);
+      tape.Add(step.name + ".context",
+               CudaExecutionBufferRole::AttentionContext, square_rows,
+               attention.qkv_width);
       tape.Add(step.name + ".projection",
                CudaExecutionBufferRole::AttentionOutputProjection, square_rows,
                attention.output_width);
@@ -594,7 +595,8 @@ CudaWorkspaceSmokeResult RunExecutionTapeSmoke() {
       }
     }
     if (stacked_workspace.NamedBufferCount() != stacked_tape.BindingCount() ||
-        stacked_workspace.TotalCapacityFloats() != stacked_tape.TotalEntries()) {
+        stacked_workspace.TotalCapacityFloats() !=
+            stacked_tape.TotalEntries()) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA resolved execution tape workspace mismatch";
       return result;

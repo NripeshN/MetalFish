@@ -41,9 +41,9 @@ void UploadFloats(float *device, const std::vector<float> &host,
                   cudaStream_t stream, const char *name) {
   if (host.empty())
     return;
-  const cudaError_t status = cudaMemcpyAsync(
-      device, host.data(), host.size() * sizeof(float), cudaMemcpyHostToDevice,
-      stream);
+  const cudaError_t status =
+      cudaMemcpyAsync(device, host.data(), host.size() * sizeof(float),
+                      cudaMemcpyHostToDevice, stream);
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
@@ -52,9 +52,8 @@ void DownloadFloats(std::vector<float> &host, const float *device,
                     const char *name) {
   if (host.empty())
     return;
-  const cudaError_t status =
-      cudaMemcpy(host.data(), device, host.size() * sizeof(float),
-                 cudaMemcpyDeviceToHost);
+  const cudaError_t status = cudaMemcpy(
+      host.data(), device, host.size() * sizeof(float), cudaMemcpyDeviceToHost);
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
@@ -92,14 +91,14 @@ std::vector<float> AttentionScoresHost(const std::vector<float> &query,
           float dot = 0.0f;
           for (int depth = 0; depth < head_depth; ++depth) {
             const int column = head * head_depth + depth;
-            dot += query[(static_cast<std::size_t>(batch) * squares +
-                          query_square) *
-                             qkv_width +
-                         column] *
-                   key[(static_cast<std::size_t>(batch) * squares +
-                        key_square) *
-                           qkv_width +
-                       column];
+            dot +=
+                query[(static_cast<std::size_t>(batch) * squares +
+                       query_square) *
+                          qkv_width +
+                      column] *
+                key[(static_cast<std::size_t>(batch) * squares + key_square) *
+                        qkv_width +
+                    column];
           }
           scores[((batch * heads + head) * squares + query_square) * squares +
                  key_square] = dot * scale;
@@ -176,8 +175,7 @@ float ActivationValueHost(float value, CudaActivationKind kind) {
     return value * std::tanh(std::log1p(std::exp(value)));
   case CudaActivationKind::Selu:
     return 1.05070098f *
-           (value > 0.0f ? value
-                          : 1.67326324f * (std::exp(value) - 1.0f));
+           (value > 0.0f ? value : 1.67326324f * (std::exp(value) - 1.0f));
   }
   return value;
 }
@@ -190,9 +188,10 @@ std::vector<float> ActivationHost(const std::vector<float> &input,
   return output;
 }
 
-std::vector<float> AttentionContextHost(
-    const std::vector<float> &probabilities, const std::vector<float> &value,
-    int batch_size, int heads, int squares, int head_depth, int qkv_width) {
+std::vector<float> AttentionContextHost(const std::vector<float> &probabilities,
+                                        const std::vector<float> &value,
+                                        int batch_size, int heads, int squares,
+                                        int head_depth, int qkv_width) {
   std::vector<float> context(
       static_cast<std::size_t>(batch_size) * squares * qkv_width, 0.0f);
   for (int batch = 0; batch < batch_size; ++batch) {
@@ -205,11 +204,11 @@ std::vector<float> AttentionContextHost(
             squares;
         float sum = 0.0f;
         for (int key_square = 0; key_square < squares; ++key_square) {
-          sum += probabilities[probability_offset + key_square] *
-                 value[(static_cast<std::size_t>(batch) * squares +
-                        key_square) *
-                           qkv_width +
-                       column];
+          sum +=
+              probabilities[probability_offset + key_square] *
+              value[(static_cast<std::size_t>(batch) * squares + key_square) *
+                        qkv_width +
+                    column];
         }
         context[(static_cast<std::size_t>(batch) * squares + query_square) *
                     qkv_width +
@@ -238,8 +237,7 @@ std::string MismatchMessage(std::string_view label,
   std::ostringstream out;
   out << label << " mismatch";
   if (actual.size() != expected.size()) {
-    out << ": size actual=" << actual.size()
-        << " expected=" << expected.size();
+    out << ": size actual=" << actual.size() << " expected=" << expected.size();
     return out.str();
   }
   std::size_t first = actual.size();
@@ -255,8 +253,7 @@ std::string MismatchMessage(std::string_view label,
     }
   }
   out << ": max_abs=" << max_diff << " at " << worst
-      << " actual=" << actual[worst]
-      << " expected=" << expected[worst]
+      << " actual=" << actual[worst] << " expected=" << expected[worst]
       << " tolerance=" << tolerance;
   if (first != actual.size()) {
     out << ", first=" << first << " actual=" << actual[first]
@@ -396,27 +393,20 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
     input[i] = static_cast<float>(static_cast<int>(i % 11) - 5) * 0.125f;
 
   const std::vector<float> q_weight = {
-      0.25f, -0.50f, 0.75f,
-      -0.10f, 0.30f, 0.20f,
-      0.60f, -0.15f, -0.35f,
-      0.40f, 0.10f, -0.20f,
+      0.25f, -0.50f, 0.75f,  -0.10f, 0.30f, 0.20f,
+      0.60f, -0.15f, -0.35f, 0.40f,  0.10f, -0.20f,
   };
   const std::vector<float> k_weight = {
-      -0.20f, 0.15f, 0.50f,
-      0.35f, -0.25f, 0.45f,
-      0.10f, 0.55f, -0.40f,
-      -0.30f, 0.20f, 0.25f,
+      -0.20f, 0.15f, 0.50f,  0.35f,  -0.25f, 0.45f,
+      0.10f,  0.55f, -0.40f, -0.30f, 0.20f,  0.25f,
   };
   const std::vector<float> v_weight = {
-      0.50f, 0.25f, -0.10f,
-      -0.45f, 0.15f, 0.35f,
-      0.20f, -0.60f, 0.30f,
-      0.05f, 0.40f, -0.25f,
+      0.50f, 0.25f,  -0.10f, -0.45f, 0.15f, 0.35f,
+      0.20f, -0.60f, 0.30f,  0.05f,  0.40f, -0.25f,
   };
   const std::vector<float> projection_weight = {
-      0.30f, -0.20f, 0.10f, 0.45f,
-      -0.35f, 0.50f, 0.25f, -0.15f,
-      0.20f, 0.05f, -0.40f, 0.60f,
+      0.30f, -0.20f, 0.10f, 0.45f, -0.35f, 0.50f,
+      0.25f, -0.15f, 0.20f, 0.05f, -0.40f, 0.60f,
   };
   const std::vector<float> q_bias = {0.10f, -0.20f, 0.30f, -0.40f};
   const std::vector<float> k_bias = {-0.05f, 0.15f, -0.25f, 0.35f};
@@ -425,25 +415,19 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
   const std::vector<float> ln_gamma = {1.20f, -0.70f, 0.50f};
   const std::vector<float> ln_beta = {0.10f, -0.20f, 0.30f};
   const std::vector<float> ffn1_weight = {
-      0.20f, -0.35f, 0.45f,
-      -0.15f, 0.30f, 0.10f,
-      0.55f, -0.25f, 0.05f,
-      -0.40f, 0.15f, 0.35f,
-      0.25f, 0.50f, -0.30f,
+      0.20f, -0.35f, 0.45f, -0.15f, 0.30f, 0.10f, 0.55f,  -0.25f,
+      0.05f, -0.40f, 0.15f, 0.35f,  0.25f, 0.50f, -0.30f,
   };
-  const std::vector<float> ffn1_bias = {0.10f, -0.20f, 0.05f, 0.15f,
-                                        -0.10f};
+  const std::vector<float> ffn1_bias = {0.10f, -0.20f, 0.05f, 0.15f, -0.10f};
   const std::vector<float> ffn2_weight = {
-      0.30f, -0.10f, 0.25f, 0.40f, -0.20f,
-      -0.35f, 0.45f, 0.15f, -0.05f, 0.20f,
-      0.10f, 0.35f, -0.30f, 0.25f, 0.50f,
+      0.30f,  -0.10f, 0.25f, 0.40f, -0.20f, -0.35f, 0.45f, 0.15f,
+      -0.05f, 0.20f,  0.10f, 0.35f, -0.30f, 0.25f,  0.50f,
   };
   const std::vector<float> ffn2_bias = {0.05f, -0.10f, 0.20f};
   const std::vector<float> ln2_gamma = {0.85f, 1.30f, -0.60f};
   const std::vector<float> ln2_beta = {-0.15f, 0.25f, 0.05f};
   const std::vector<float> smolgen_compress = {
-      0.20f, -0.35f, 0.45f,
-      -0.10f, 0.25f, 0.15f,
+      0.20f, -0.35f, 0.45f, -0.10f, 0.25f, 0.15f,
   };
   std::vector<float> smolgen_dense1_weight(
       static_cast<std::size_t>(kSmolgenDense1) * kCudaAttentionSquares *
@@ -453,26 +437,24 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
     smolgen_dense1_weight[i] =
         static_cast<float>(static_cast<int>(i % 17) - 8) * 0.015f;
   }
-  const std::vector<float> smolgen_dense1_bias = {0.10f, -0.20f, 0.05f,
-                                                  0.15f, -0.10f};
-  const std::vector<float> smolgen_ln1_gamma = {1.00f, -0.50f, 0.75f,
-                                                1.25f, 0.40f};
+  const std::vector<float> smolgen_dense1_bias = {0.10f, -0.20f, 0.05f, 0.15f,
+                                                  -0.10f};
+  const std::vector<float> smolgen_ln1_gamma = {1.00f, -0.50f, 0.75f, 1.25f,
+                                                0.40f};
   const std::vector<float> smolgen_ln1_beta = {0.05f, -0.10f, 0.15f, 0.00f,
                                                -0.05f};
   const std::vector<float> smolgen_dense2_weight = {
-      0.25f, -0.10f, 0.15f, 0.30f, -0.20f,
-      -0.35f, 0.20f, 0.10f, -0.15f, 0.25f,
-      0.05f, 0.30f, -0.25f, 0.10f, -0.05f,
-      0.40f, -0.30f, 0.20f, -0.10f, 0.15f,
-      -0.15f, 0.25f, 0.35f, -0.20f, 0.05f,
-      0.10f, -0.05f, 0.30f, 0.20f, -0.25f,
+      0.25f,  -0.10f, 0.15f,  0.30f, -0.20f, -0.35f, 0.20f,  0.10f,
+      -0.15f, 0.25f,  0.05f,  0.30f, -0.25f, 0.10f,  -0.05f, 0.40f,
+      -0.30f, 0.20f,  -0.10f, 0.15f, -0.15f, 0.25f,  0.35f,  -0.20f,
+      0.05f,  0.10f,  -0.05f, 0.30f, 0.20f,  -0.25f,
   };
-  const std::vector<float> smolgen_dense2_bias = {0.20f, -0.05f, 0.10f,
-                                                  -0.15f, 0.05f, -0.10f};
+  const std::vector<float> smolgen_dense2_bias = {0.20f,  -0.05f, 0.10f,
+                                                  -0.15f, 0.05f,  -0.10f};
   const std::vector<float> smolgen_ln2_gamma = {0.80f, -1.10f, 0.60f,
-                                                1.30f, 0.50f, -0.70f};
+                                                1.30f, 0.50f,  -0.70f};
   const std::vector<float> smolgen_ln2_beta = {-0.05f, 0.20f, -0.15f,
-                                               0.10f, 0.05f, -0.25f};
+                                               0.10f,  0.05f, -0.25f};
   std::vector<float> smolgen_global(
       static_cast<std::size_t>(kSmolgenGlobal) * kSmolgenPerHead, 0.0f);
   for (std::size_t i = 0; i < smolgen_global.size(); ++i) {
@@ -482,71 +464,135 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
 
   NetworkWeightInventory inventory;
   inventory.tensors = {
-      {"body.encoder.0.mha.q_w", q_weight.data(), q_weight.size(),
-       {kQkv, kInput}, NetworkWeightTensorKind::DenseWeight},
-      {"body.encoder.0.mha.q_b", q_bias.data(), q_bias.size(), {kQkv},
-       NetworkWeightTensorKind::DenseBias},
-      {"body.encoder.0.mha.k_w", k_weight.data(), k_weight.size(),
-       {kQkv, kInput}, NetworkWeightTensorKind::DenseWeight},
-      {"body.encoder.0.mha.k_b", k_bias.data(), k_bias.size(), {kQkv},
-       NetworkWeightTensorKind::DenseBias},
-      {"body.encoder.0.mha.v_w", v_weight.data(), v_weight.size(),
-       {kQkv, kInput}, NetworkWeightTensorKind::DenseWeight},
-      {"body.encoder.0.mha.v_b", v_bias.data(), v_bias.size(), {kQkv},
-       NetworkWeightTensorKind::DenseBias},
-      {"body.encoder.0.mha.dense_w", projection_weight.data(),
-       projection_weight.size(), {kOutput, kQkv},
+      {"body.encoder.0.mha.q_w",
+       q_weight.data(),
+       q_weight.size(),
+       {kQkv, kInput},
        NetworkWeightTensorKind::DenseWeight},
-      {"body.encoder.0.mha.dense_b", projection_bias.data(),
-       projection_bias.size(), {kOutput}, NetworkWeightTensorKind::DenseBias},
-      {"body.encoder.0.ln1_gammas", ln_gamma.data(), ln_gamma.size(),
-       {kOutput}, NetworkWeightTensorKind::NormScale},
-      {"body.encoder.0.ln1_betas", ln_beta.data(), ln_beta.size(),
-       {kOutput}, NetworkWeightTensorKind::NormBias},
-      {"body.encoder.0.ffn.dense1_w", ffn1_weight.data(),
-       ffn1_weight.size(), {kFfnHidden, kOutput},
+      {"body.encoder.0.mha.q_b",
+       q_bias.data(),
+       q_bias.size(),
+       {kQkv},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.encoder.0.mha.k_w",
+       k_weight.data(),
+       k_weight.size(),
+       {kQkv, kInput},
        NetworkWeightTensorKind::DenseWeight},
-      {"body.encoder.0.ffn.dense1_b", ffn1_bias.data(), ffn1_bias.size(),
-       {kFfnHidden}, NetworkWeightTensorKind::DenseBias},
-      {"body.encoder.0.ffn.dense2_w", ffn2_weight.data(),
-       ffn2_weight.size(), {kOutput, kFfnHidden},
+      {"body.encoder.0.mha.k_b",
+       k_bias.data(),
+       k_bias.size(),
+       {kQkv},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.encoder.0.mha.v_w",
+       v_weight.data(),
+       v_weight.size(),
+       {kQkv, kInput},
        NetworkWeightTensorKind::DenseWeight},
-      {"body.encoder.0.ffn.dense2_b", ffn2_bias.data(), ffn2_bias.size(),
-       {kOutput}, NetworkWeightTensorKind::DenseBias},
-      {"body.encoder.0.ln2_gammas", ln2_gamma.data(), ln2_gamma.size(),
-       {kOutput}, NetworkWeightTensorKind::NormScale},
-      {"body.encoder.0.ln2_betas", ln2_beta.data(), ln2_beta.size(),
-       {kOutput}, NetworkWeightTensorKind::NormBias},
-      {"body.smolgen_w", smolgen_global.data(), smolgen_global.size(),
+      {"body.encoder.0.mha.v_b",
+       v_bias.data(),
+       v_bias.size(),
+       {kQkv},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.encoder.0.mha.dense_w",
+       projection_weight.data(),
+       projection_weight.size(),
+       {kOutput, kQkv},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.encoder.0.mha.dense_b",
+       projection_bias.data(),
+       projection_bias.size(),
+       {kOutput},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.encoder.0.ln1_gammas",
+       ln_gamma.data(),
+       ln_gamma.size(),
+       {kOutput},
+       NetworkWeightTensorKind::NormScale},
+      {"body.encoder.0.ln1_betas",
+       ln_beta.data(),
+       ln_beta.size(),
+       {kOutput},
+       NetworkWeightTensorKind::NormBias},
+      {"body.encoder.0.ffn.dense1_w",
+       ffn1_weight.data(),
+       ffn1_weight.size(),
+       {kFfnHidden, kOutput},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.encoder.0.ffn.dense1_b",
+       ffn1_bias.data(),
+       ffn1_bias.size(),
+       {kFfnHidden},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.encoder.0.ffn.dense2_w",
+       ffn2_weight.data(),
+       ffn2_weight.size(),
+       {kOutput, kFfnHidden},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.encoder.0.ffn.dense2_b",
+       ffn2_bias.data(),
+       ffn2_bias.size(),
+       {kOutput},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.encoder.0.ln2_gammas",
+       ln2_gamma.data(),
+       ln2_gamma.size(),
+       {kOutput},
+       NetworkWeightTensorKind::NormScale},
+      {"body.encoder.0.ln2_betas",
+       ln2_beta.data(),
+       ln2_beta.size(),
+       {kOutput},
+       NetworkWeightTensorKind::NormBias},
+      {"body.smolgen_w",
+       smolgen_global.data(),
+       smolgen_global.size(),
        {kSmolgenGlobal, kSmolgenPerHead},
        NetworkWeightTensorKind::PositionalEncoding},
-      {"body.encoder.0.mha.smolgen.compress", smolgen_compress.data(),
-       smolgen_compress.size(), {kSmolgenCompressed, kInput},
+      {"body.encoder.0.mha.smolgen.compress",
+       smolgen_compress.data(),
+       smolgen_compress.size(),
+       {kSmolgenCompressed, kInput},
        NetworkWeightTensorKind::DenseWeight},
       {"body.encoder.0.mha.smolgen.dense1_w",
-       smolgen_dense1_weight.data(), smolgen_dense1_weight.size(),
+       smolgen_dense1_weight.data(),
+       smolgen_dense1_weight.size(),
        {kSmolgenDense1, kCudaAttentionSquares * kSmolgenCompressed},
        NetworkWeightTensorKind::DenseWeight},
-      {"body.encoder.0.mha.smolgen.dense1_b", smolgen_dense1_bias.data(),
-       smolgen_dense1_bias.size(), {kSmolgenDense1},
+      {"body.encoder.0.mha.smolgen.dense1_b",
+       smolgen_dense1_bias.data(),
+       smolgen_dense1_bias.size(),
+       {kSmolgenDense1},
        NetworkWeightTensorKind::DenseBias},
       {"body.encoder.0.mha.smolgen.dense2_w",
-       smolgen_dense2_weight.data(), smolgen_dense2_weight.size(),
-       {kSmolgenDense2, kSmolgenDense1}, NetworkWeightTensorKind::DenseWeight},
-      {"body.encoder.0.mha.smolgen.dense2_b", smolgen_dense2_bias.data(),
-       smolgen_dense2_bias.size(), {kSmolgenDense2},
+       smolgen_dense2_weight.data(),
+       smolgen_dense2_weight.size(),
+       {kSmolgenDense2, kSmolgenDense1},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.encoder.0.mha.smolgen.dense2_b",
+       smolgen_dense2_bias.data(),
+       smolgen_dense2_bias.size(),
+       {kSmolgenDense2},
        NetworkWeightTensorKind::DenseBias},
       {"body.encoder.0.mha.smolgen.ln1_gammas",
-       smolgen_ln1_gamma.data(), smolgen_ln1_gamma.size(), {kSmolgenDense1},
+       smolgen_ln1_gamma.data(),
+       smolgen_ln1_gamma.size(),
+       {kSmolgenDense1},
        NetworkWeightTensorKind::NormScale},
-      {"body.encoder.0.mha.smolgen.ln1_betas", smolgen_ln1_beta.data(),
-       smolgen_ln1_beta.size(), {kSmolgenDense1},
+      {"body.encoder.0.mha.smolgen.ln1_betas",
+       smolgen_ln1_beta.data(),
+       smolgen_ln1_beta.size(),
+       {kSmolgenDense1},
        NetworkWeightTensorKind::NormBias},
       {"body.encoder.0.mha.smolgen.ln2_gammas",
-       smolgen_ln2_gamma.data(), smolgen_ln2_gamma.size(), {kSmolgenDense2},
+       smolgen_ln2_gamma.data(),
+       smolgen_ln2_gamma.size(),
+       {kSmolgenDense2},
        NetworkWeightTensorKind::NormScale},
-      {"body.encoder.0.mha.smolgen.ln2_betas", smolgen_ln2_beta.data(),
-       smolgen_ln2_beta.size(), {kSmolgenDense2},
+      {"body.encoder.0.mha.smolgen.ln2_betas",
+       smolgen_ln2_beta.data(),
+       smolgen_ln2_beta.size(),
+       {kSmolgenDense2},
        NetworkWeightTensorKind::NormBias},
   };
 
@@ -558,100 +604,167 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       NetworkExecutionOpKind::PositionalEncoding,
       "body.smolgen_positional",
       {
-          {16, "body.smolgen_w", smolgen_global.size(),
+          {16,
+           "body.smolgen_w",
+           smolgen_global.size(),
            {kSmolgenGlobal, kSmolgenPerHead},
            NetworkWeightTensorKind::PositionalEncoding},
       }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::Attention,
-      "body.encoder.0.mha",
-      {
-          {0, "body.encoder.0.mha.q_w", q_weight.size(), {kQkv, kInput},
-           NetworkWeightTensorKind::DenseWeight},
-          {1, "body.encoder.0.mha.q_b", q_bias.size(), {kQkv},
-           NetworkWeightTensorKind::DenseBias},
-          {2, "body.encoder.0.mha.k_w", k_weight.size(), {kQkv, kInput},
-           NetworkWeightTensorKind::DenseWeight},
-          {3, "body.encoder.0.mha.k_b", k_bias.size(), {kQkv},
-           NetworkWeightTensorKind::DenseBias},
-          {4, "body.encoder.0.mha.v_w", v_weight.size(), {kQkv, kInput},
-           NetworkWeightTensorKind::DenseWeight},
-          {5, "body.encoder.0.mha.v_b", v_bias.size(), {kQkv},
-           NetworkWeightTensorKind::DenseBias},
-          {6, "body.encoder.0.mha.dense_w", projection_weight.size(),
-           {kOutput, kQkv}, NetworkWeightTensorKind::DenseWeight},
-          {7, "body.encoder.0.mha.dense_b", projection_bias.size(),
-           {kOutput}, NetworkWeightTensorKind::DenseBias},
-      }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Attention,
+                                   "body.encoder.0.mha",
+                                   {
+                                       {0,
+                                        "body.encoder.0.mha.q_w",
+                                        q_weight.size(),
+                                        {kQkv, kInput},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {1,
+                                        "body.encoder.0.mha.q_b",
+                                        q_bias.size(),
+                                        {kQkv},
+                                        NetworkWeightTensorKind::DenseBias},
+                                       {2,
+                                        "body.encoder.0.mha.k_w",
+                                        k_weight.size(),
+                                        {kQkv, kInput},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {3,
+                                        "body.encoder.0.mha.k_b",
+                                        k_bias.size(),
+                                        {kQkv},
+                                        NetworkWeightTensorKind::DenseBias},
+                                       {4,
+                                        "body.encoder.0.mha.v_w",
+                                        v_weight.size(),
+                                        {kQkv, kInput},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {5,
+                                        "body.encoder.0.mha.v_b",
+                                        v_bias.size(),
+                                        {kQkv},
+                                        NetworkWeightTensorKind::DenseBias},
+                                       {6,
+                                        "body.encoder.0.mha.dense_w",
+                                        projection_weight.size(),
+                                        {kOutput, kQkv},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {7,
+                                        "body.encoder.0.mha.dense_b",
+                                        projection_bias.size(),
+                                        {kOutput},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
       NetworkExecutionOpKind::Dense,
       "body.encoder.0.mha.smolgen.dense",
       {
-          {17, "body.encoder.0.mha.smolgen.compress",
-           smolgen_compress.size(), {kSmolgenCompressed, kInput},
+          {17,
+           "body.encoder.0.mha.smolgen.compress",
+           smolgen_compress.size(),
+           {kSmolgenCompressed, kInput},
            NetworkWeightTensorKind::DenseWeight},
-          {18, "body.encoder.0.mha.smolgen.dense1_w",
+          {18,
+           "body.encoder.0.mha.smolgen.dense1_w",
            smolgen_dense1_weight.size(),
            {kSmolgenDense1, kCudaAttentionSquares * kSmolgenCompressed},
            NetworkWeightTensorKind::DenseWeight},
-          {19, "body.encoder.0.mha.smolgen.dense1_b",
-           smolgen_dense1_bias.size(), {kSmolgenDense1},
+          {19,
+           "body.encoder.0.mha.smolgen.dense1_b",
+           smolgen_dense1_bias.size(),
+           {kSmolgenDense1},
            NetworkWeightTensorKind::DenseBias},
-          {20, "body.encoder.0.mha.smolgen.dense2_w",
-           smolgen_dense2_weight.size(), {kSmolgenDense2, kSmolgenDense1},
+          {20,
+           "body.encoder.0.mha.smolgen.dense2_w",
+           smolgen_dense2_weight.size(),
+           {kSmolgenDense2, kSmolgenDense1},
            NetworkWeightTensorKind::DenseWeight},
-          {21, "body.encoder.0.mha.smolgen.dense2_b",
-           smolgen_dense2_bias.size(), {kSmolgenDense2},
+          {21,
+           "body.encoder.0.mha.smolgen.dense2_b",
+           smolgen_dense2_bias.size(),
+           {kSmolgenDense2},
            NetworkWeightTensorKind::DenseBias},
       }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::LayerNorm,
-      "body.encoder.0.mha.smolgen.norm",
-      {
-          {22, "body.encoder.0.mha.smolgen.ln1_gammas",
-           smolgen_ln1_gamma.size(), {kSmolgenDense1},
-           NetworkWeightTensorKind::NormScale},
-          {23, "body.encoder.0.mha.smolgen.ln1_betas",
-           smolgen_ln1_beta.size(), {kSmolgenDense1},
-           NetworkWeightTensorKind::NormBias},
-          {24, "body.encoder.0.mha.smolgen.ln2_gammas",
-           smolgen_ln2_gamma.size(), {kSmolgenDense2},
-           NetworkWeightTensorKind::NormScale},
-          {25, "body.encoder.0.mha.smolgen.ln2_betas",
-           smolgen_ln2_beta.size(), {kSmolgenDense2},
-           NetworkWeightTensorKind::NormBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::LayerNorm,
-      "body.encoder.0.ln1",
-      {
-          {8, "body.encoder.0.ln1_gammas", ln_gamma.size(), {kOutput},
-           NetworkWeightTensorKind::NormScale},
-          {9, "body.encoder.0.ln1_betas", ln_beta.size(), {kOutput},
-           NetworkWeightTensorKind::NormBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::FeedForward,
-      "body.encoder.0.ffn",
-      {
-          {10, "body.encoder.0.ffn.dense1_w", ffn1_weight.size(),
-           {kFfnHidden, kOutput}, NetworkWeightTensorKind::DenseWeight},
-          {11, "body.encoder.0.ffn.dense1_b", ffn1_bias.size(),
-           {kFfnHidden}, NetworkWeightTensorKind::DenseBias},
-          {12, "body.encoder.0.ffn.dense2_w", ffn2_weight.size(),
-           {kOutput, kFfnHidden}, NetworkWeightTensorKind::DenseWeight},
-          {13, "body.encoder.0.ffn.dense2_b", ffn2_bias.size(), {kOutput},
-           NetworkWeightTensorKind::DenseBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::LayerNorm,
-      "body.encoder.0.ln2",
-      {
-          {14, "body.encoder.0.ln2_gammas", ln2_gamma.size(), {kOutput},
-           NetworkWeightTensorKind::NormScale},
-          {15, "body.encoder.0.ln2_betas", ln2_beta.size(), {kOutput},
-           NetworkWeightTensorKind::NormBias},
-      }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::LayerNorm,
+                                   "body.encoder.0.mha.smolgen.norm",
+                                   {
+                                       {22,
+                                        "body.encoder.0.mha.smolgen.ln1_gammas",
+                                        smolgen_ln1_gamma.size(),
+                                        {kSmolgenDense1},
+                                        NetworkWeightTensorKind::NormScale},
+                                       {23,
+                                        "body.encoder.0.mha.smolgen.ln1_betas",
+                                        smolgen_ln1_beta.size(),
+                                        {kSmolgenDense1},
+                                        NetworkWeightTensorKind::NormBias},
+                                       {24,
+                                        "body.encoder.0.mha.smolgen.ln2_gammas",
+                                        smolgen_ln2_gamma.size(),
+                                        {kSmolgenDense2},
+                                        NetworkWeightTensorKind::NormScale},
+                                       {25,
+                                        "body.encoder.0.mha.smolgen.ln2_betas",
+                                        smolgen_ln2_beta.size(),
+                                        {kSmolgenDense2},
+                                        NetworkWeightTensorKind::NormBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::LayerNorm,
+                                   "body.encoder.0.ln1",
+                                   {
+                                       {8,
+                                        "body.encoder.0.ln1_gammas",
+                                        ln_gamma.size(),
+                                        {kOutput},
+                                        NetworkWeightTensorKind::NormScale},
+                                       {9,
+                                        "body.encoder.0.ln1_betas",
+                                        ln_beta.size(),
+                                        {kOutput},
+                                        NetworkWeightTensorKind::NormBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::FeedForward,
+                                   "body.encoder.0.ffn",
+                                   {
+                                       {10,
+                                        "body.encoder.0.ffn.dense1_w",
+                                        ffn1_weight.size(),
+                                        {kFfnHidden, kOutput},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {11,
+                                        "body.encoder.0.ffn.dense1_b",
+                                        ffn1_bias.size(),
+                                        {kFfnHidden},
+                                        NetworkWeightTensorKind::DenseBias},
+                                       {12,
+                                        "body.encoder.0.ffn.dense2_w",
+                                        ffn2_weight.size(),
+                                        {kOutput, kFfnHidden},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {13,
+                                        "body.encoder.0.ffn.dense2_b",
+                                        ffn2_bias.size(),
+                                        {kOutput},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::LayerNorm,
+                                   "body.encoder.0.ln2",
+                                   {
+                                       {14,
+                                        "body.encoder.0.ln2_gammas",
+                                        ln2_gamma.size(),
+                                        {kOutput},
+                                        NetworkWeightTensorKind::NormScale},
+                                       {15,
+                                        "body.encoder.0.ln2_betas",
+                                        ln2_beta.size(),
+                                        {kOutput},
+                                        NetworkWeightTensorKind::NormBias},
+                                   }});
 
   const auto expected_q =
       DenseAffineHost(input, q_weight, q_bias, kRows, kInput, kQkv);
@@ -661,9 +774,9 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       DenseAffineHost(input, v_weight, v_bias, kRows, kInput, kQkv);
   const float attention_scale =
       1.0f / std::sqrt(static_cast<float>(kHeadDepth));
-  auto expected_scores = AttentionScoresHost(
-      expected_q, expected_k, kBatch, kHeads, kCudaAttentionSquares,
-      kHeadDepth, kQkv, attention_scale);
+  auto expected_scores = AttentionScoresHost(expected_q, expected_k, kBatch,
+                                             kHeads, kCudaAttentionSquares,
+                                             kHeadDepth, kQkv, attention_scale);
   const std::vector<float> zero_compress_bias(kSmolgenCompressed, 0.0f);
   const auto expected_smolgen_compress =
       DenseAffineHost(input, smolgen_compress, zero_compress_bias, kRows,
@@ -673,21 +786,21 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       kBatch, kCudaAttentionSquares * kSmolgenCompressed, kSmolgenDense1);
   const auto expected_smolgen_activation1 =
       ActivationHost(expected_smolgen_dense1, CudaActivationKind::Swish);
-  const auto expected_smolgen_norm1 = LayerNormRowsHost(
-      expected_smolgen_activation1, smolgen_ln1_gamma, smolgen_ln1_beta,
-      kBatch, kSmolgenDense1, 1e-3f);
+  const auto expected_smolgen_norm1 =
+      LayerNormRowsHost(expected_smolgen_activation1, smolgen_ln1_gamma,
+                        smolgen_ln1_beta, kBatch, kSmolgenDense1, 1e-3f);
   const auto expected_smolgen_dense2 = DenseAffineHost(
       expected_smolgen_norm1, smolgen_dense2_weight, smolgen_dense2_bias,
       kBatch, kSmolgenDense1, kSmolgenDense2);
   const auto expected_smolgen_activation2 =
       ActivationHost(expected_smolgen_dense2, CudaActivationKind::Swish);
-  const auto expected_smolgen_norm2 = LayerNormRowsHost(
-      expected_smolgen_activation2, smolgen_ln2_gamma, smolgen_ln2_beta,
-      kBatch, kSmolgenDense2, 1e-3f);
+  const auto expected_smolgen_norm2 =
+      LayerNormRowsHost(expected_smolgen_activation2, smolgen_ln2_gamma,
+                        smolgen_ln2_beta, kBatch, kSmolgenDense2, 1e-3f);
   const std::vector<float> zero_global_bias(kSmolgenGlobal, 0.0f);
-  const auto expected_smolgen_global = DenseAffineHost(
-      expected_smolgen_norm2, smolgen_global, zero_global_bias, kBatch * kHeads,
-      kSmolgenPerHead, kSmolgenGlobal);
+  const auto expected_smolgen_global =
+      DenseAffineHost(expected_smolgen_norm2, smolgen_global, zero_global_bias,
+                      kBatch * kHeads, kSmolgenPerHead, kSmolgenGlobal);
   for (int batch = 0; batch < kBatch; ++batch) {
     for (int head = 0; head < kHeads; ++head) {
       const std::size_t row =
@@ -696,15 +809,15 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
         expected_scores[row + index] += expected_smolgen_global[row + index];
     }
   }
-  const auto expected_probabilities = SoftmaxRowsHost(
-      expected_scores, kBatch * kHeads * kCudaAttentionSquares,
-      kCudaAttentionSquares);
-  const auto expected_context = AttentionContextHost(
-      expected_probabilities, expected_v, kBatch, kHeads, kCudaAttentionSquares,
-      kHeadDepth, kQkv);
-  const auto expected_projection = DenseAffineHost(
-      expected_context, projection_weight, projection_bias, kRows, kQkv,
-      kOutput);
+  const auto expected_probabilities =
+      SoftmaxRowsHost(expected_scores, kBatch * kHeads * kCudaAttentionSquares,
+                      kCudaAttentionSquares);
+  const auto expected_context =
+      AttentionContextHost(expected_probabilities, expected_v, kBatch, kHeads,
+                           kCudaAttentionSquares, kHeadDepth, kQkv);
+  const auto expected_projection =
+      DenseAffineHost(expected_context, projection_weight, projection_bias,
+                      kRows, kQkv, kOutput);
   std::vector<float> expected_residual(expected_projection.size(), 0.0f);
   const float encoder_residual_scale = std::pow(2.0f, -0.25f);
   for (std::size_t i = 0; i < expected_residual.size(); ++i)
@@ -716,14 +829,13 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
       expected_normalized, ffn1_weight, ffn1_bias, kRows, kOutput, kFfnHidden);
   const auto expected_ffn_activation =
       ActivationHost(expected_ffn_dense1, CudaActivationKind::Relu);
-  const auto expected_ffn_dense2 = DenseAffineHost(
-      expected_ffn_activation, ffn2_weight, ffn2_bias, kRows, kFfnHidden,
-      kOutput);
+  const auto expected_ffn_dense2 =
+      DenseAffineHost(expected_ffn_activation, ffn2_weight, ffn2_bias, kRows,
+                      kFfnHidden, kOutput);
   std::vector<float> expected_ffn_residual(expected_ffn_dense2.size(), 0.0f);
   for (std::size_t i = 0; i < expected_ffn_residual.size(); ++i) {
-    expected_ffn_residual[i] =
-        expected_normalized[i] +
-        expected_ffn_dense2[i] * encoder_residual_scale;
+    expected_ffn_residual[i] = expected_normalized[i] +
+                               expected_ffn_dense2[i] * encoder_residual_scale;
   }
   const auto expected_ffn_normalized = LayerNormRowsHost(
       expected_ffn_residual, ln2_gamma, ln2_beta, kRows, kOutput, 1e-3f);
@@ -740,9 +852,9 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
     const auto tape = CreateResolvedExecutionTape(execution_plan, kBatch);
     const auto input_output = ExecuteAttentionInputProjectionStage(
         execution_plan, 1, weights, device_input, tape, workspace, kBatch);
-    const auto core_output = ExecuteAttentionCoreStage(
-        execution_plan, 1, input_output, tape, workspace, kBatch, &weights,
-        device_input);
+    const auto core_output =
+        ExecuteAttentionCoreStage(execution_plan, 1, input_output, tape,
+                                  workspace, kBatch, &weights, device_input);
     const auto projection_output = ExecuteAttentionOutputProjectionStage(
         execution_plan, 1, weights, core_output.context, tape, workspace,
         kBatch);
@@ -788,23 +900,19 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
     std::vector<float> actual_projection(expected_projection.size(), 0.0f);
     std::vector<float> actual_residual(expected_residual.size(), 0.0f);
     std::vector<float> actual_normalized(expected_normalized.size(), 0.0f);
-    std::vector<float> actual_ffn_residual(expected_ffn_residual.size(),
-                                           0.0f);
+    std::vector<float> actual_ffn_residual(expected_ffn_residual.size(), 0.0f);
     std::vector<float> actual_ffn_normalized(expected_ffn_normalized.size(),
                                              0.0f);
-    DownloadFloats(actual_q, input_output.query,
-                   "cudaMemcpy(attention_q)");
+    DownloadFloats(actual_q, input_output.query, "cudaMemcpy(attention_q)");
     DownloadFloats(actual_k, input_output.key, "cudaMemcpy(attention_k)");
-    DownloadFloats(actual_v, input_output.value,
-                   "cudaMemcpy(attention_v)");
+    DownloadFloats(actual_v, input_output.value, "cudaMemcpy(attention_v)");
     DownloadFloats(actual_smolgen_dense1, core_output.smolgen_dense1,
                    "cudaMemcpy(attention_smolgen_dense1)");
     DownloadFloats(actual_smolgen_norm1, core_output.smolgen_norm1,
                    "cudaMemcpy(attention_smolgen_norm1)");
     DownloadFloats(actual_smolgen_dense2, core_output.smolgen_dense2,
                    "cudaMemcpy(attention_smolgen_dense2)");
-    DownloadFloats(actual_smolgen_activation2,
-                   core_output.smolgen_activation2,
+    DownloadFloats(actual_smolgen_activation2, core_output.smolgen_activation2,
                    "cudaMemcpy(attention_smolgen_activation2)");
     DownloadFloats(actual_smolgen_norm2, core_output.smolgen_norm2,
                    "cudaMemcpy(attention_smolgen_norm2)");
@@ -840,21 +948,21 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
         attention_mismatch("CUDA attention v", actual_v, expected_v) ||
         attention_mismatch("CUDA attention smolgen dense1",
                            actual_smolgen_dense1, expected_smolgen_dense1) ||
-        attention_mismatch("CUDA attention smolgen norm1",
-                           actual_smolgen_norm1, expected_smolgen_norm1) ||
+        attention_mismatch("CUDA attention smolgen norm1", actual_smolgen_norm1,
+                           expected_smolgen_norm1) ||
         attention_mismatch("CUDA attention smolgen dense2",
                            actual_smolgen_dense2, expected_smolgen_dense2) ||
         attention_mismatch("CUDA attention smolgen activation2",
                            actual_smolgen_activation2,
                            expected_smolgen_activation2) ||
-        attention_mismatch("CUDA attention smolgen norm2",
-                           actual_smolgen_norm2, expected_smolgen_norm2) ||
+        attention_mismatch("CUDA attention smolgen norm2", actual_smolgen_norm2,
+                           expected_smolgen_norm2) ||
         attention_mismatch("CUDA attention bias", actual_bias,
                            expected_smolgen_global) ||
         attention_mismatch("CUDA attention scores", actual_scores,
                            expected_scores) ||
-        attention_mismatch("CUDA attention probabilities",
-                           actual_probabilities, expected_probabilities) ||
+        attention_mismatch("CUDA attention probabilities", actual_probabilities,
+                           expected_probabilities) ||
         attention_mismatch("CUDA attention context", actual_context,
                            expected_context) ||
         attention_mismatch("CUDA attention projection", actual_projection,
@@ -908,10 +1016,9 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
     if (!AlmostEqual(actual_attention_sequence, expected_normalized,
                      kAttentionOnlySequenceTolerance)) {
       result.status = CudaSmokeStatus::Mismatch;
-      result.message = MismatchMessage("CUDA attention-only sequence",
-                                       actual_attention_sequence,
-                                       expected_normalized,
-                                       kAttentionOnlySequenceTolerance);
+      result.message = MismatchMessage(
+          "CUDA attention-only sequence", actual_attention_sequence,
+          expected_normalized, kAttentionOnlySequenceTolerance);
       return result;
     }
 
@@ -924,8 +1031,7 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
         execution_plan, weights, sequence_input, tape, sequence_workspace,
         kBatch);
     sequence_workspace.Synchronize();
-    const auto *sequence_ffn_stage =
-        sequence.FindStage("body.encoder.0.ffn");
+    const auto *sequence_ffn_stage = sequence.FindStage("body.encoder.0.ffn");
     if (!sequence_ffn_stage || !sequence_ffn_stage->output ||
         sequence_ffn_stage->output_width != kOutput ||
         sequence_ffn_stage->rows != kRows) {
@@ -941,13 +1047,13 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
     if (!AlmostEqual(actual_sequence_ffn, expected_ffn_normalized,
                      kSequenceTolerance)) {
       result.status = CudaSmokeStatus::Mismatch;
-      result.message = MismatchMessage("CUDA attention sequence ffn",
-                                       actual_sequence_ffn,
-                                       expected_ffn_normalized,
-                                       kSequenceTolerance);
+      result.message =
+          MismatchMessage("CUDA attention sequence ffn", actual_sequence_ffn,
+                          expected_ffn_normalized, kSequenceTolerance);
       return result;
     }
-    result.allocation_bytes = workspace.TotalBytes() + weights.AllocationBytes();
+    result.allocation_bytes =
+        workspace.TotalBytes() + weights.AllocationBytes();
   } catch (const std::exception &e) {
     result.status = CudaSmokeStatus::RuntimeError;
     result.message = e.what();
@@ -996,14 +1102,12 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
   for (int square = 0; square < kSquares; ++square) {
     const int output_offset = square * kPositionWidth;
     const int input_offset = square * kPositionPlanes;
-    preproc_weights[static_cast<std::size_t>(output_offset) *
-                        kPositionInput +
+    preproc_weights[static_cast<std::size_t>(output_offset) * kPositionInput +
                     input_offset] = 0.5f;
     preproc_weights[static_cast<std::size_t>(output_offset + 1) *
                         kPositionInput +
                     input_offset + 11] = 2.0f;
-    preproc_bias[output_offset + 2] =
-        1.0f + static_cast<float>(square) * 0.01f;
+    preproc_bias[output_offset + 2] = 1.0f + static_cast<float>(square) * 0.01f;
   }
   std::vector<float> embedding_weights(
       static_cast<std::size_t>(kEmbeddingWidth) * kConcatWidth, 0.0f);
@@ -1026,28 +1130,21 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
     for (int square = 0; square < kSquares; ++square) {
       const std::size_t offset =
           static_cast<std::size_t>(channel) * kSquares + square;
-      mult_gate[offset] =
-          0.75f + 0.01f * static_cast<float>(square) -
-          0.15f * static_cast<float>(channel);
-      add_gate[offset] =
-          -0.20f + 0.005f * static_cast<float>(square) +
-          0.10f * static_cast<float>(channel);
+      mult_gate[offset] = 0.75f + 0.01f * static_cast<float>(square) -
+                          0.15f * static_cast<float>(channel);
+      add_gate[offset] = -0.20f + 0.005f * static_cast<float>(square) +
+                         0.10f * static_cast<float>(channel);
     }
   }
   const std::vector<float> ffn1_weights = {
-      0.30f, -0.20f, 0.50f, 0.10f,
-      -0.40f, 0.25f, 0.15f, -0.35f,
-      0.60f, -0.10f, 0.20f, 0.45f,
-      0.05f, 0.70f, -0.30f, 0.20f,
-      -0.25f, 0.15f, 0.35f, -0.50f,
+      0.30f, -0.20f, 0.50f, 0.10f, -0.40f, 0.25f, 0.15f,  -0.35f, 0.60f, -0.10f,
+      0.20f, 0.45f,  0.05f, 0.70f, -0.30f, 0.20f, -0.25f, 0.15f,  0.35f, -0.50f,
   };
-  const std::vector<float> ffn1_bias = {0.10f, -0.05f, 0.20f, -0.15f,
-                                        0.30f};
+  const std::vector<float> ffn1_bias = {0.10f, -0.05f, 0.20f, -0.15f, 0.30f};
   const std::vector<float> ffn2_weights = {
-      0.40f, -0.10f, 0.25f, 0.35f, -0.20f,
-      -0.30f, 0.55f, -0.15f, 0.10f, 0.45f,
-      0.15f, 0.20f, -0.50f, 0.60f, 0.05f,
-      -0.45f, 0.30f, 0.10f, -0.25f, 0.50f,
+      0.40f,  -0.10f, 0.25f, 0.35f, -0.20f, -0.30f, 0.55f,
+      -0.15f, 0.10f,  0.45f, 0.15f, 0.20f,  -0.50f, 0.60f,
+      0.05f,  -0.45f, 0.30f, 0.10f, -0.25f, 0.50f,
   };
   const std::vector<float> ffn2_bias = {0.05f, -0.20f, 0.15f, 0.25f};
   const std::vector<float> ffn_gamma = {0.90f, 1.20f, -0.80f, 0.65f};
@@ -1062,105 +1159,179 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
   execution_plan.format.activations.default_activation = "relu";
   execution_plan.format.activations.ffn_activation = "relu";
   execution_plan.tensors = tensor_plan;
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::Dense,
-      "body.input_embedding_preprocess",
-      {
-          {0, "body.ip_emb_preproc_w", preproc_weights.size(),
-           {kPositionOutput, kPositionInput},
-           NetworkWeightTensorKind::DenseWeight},
-          {1, "body.ip_emb_preproc_b", preproc_bias.size(),
-           {kPositionOutput}, NetworkWeightTensorKind::DenseBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::Dense,
-      "body.input_embedding",
-      {
-          {2, "body.input_embedding_w", embedding_weights.size(),
-           {kEmbeddingWidth, kConcatWidth},
-           NetworkWeightTensorKind::DenseWeight},
-          {3, "body.input_embedding_b", embedding_bias.size(),
-           {kEmbeddingWidth}, NetworkWeightTensorKind::DenseBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::LayerNorm,
-      "body.input_embedding_norm",
-      {
-          {4, "body.ip_emb_ln_gammas", embedding_gamma.size(),
-           {kEmbeddingWidth}, NetworkWeightTensorKind::NormScale},
-          {5, "body.ip_emb_ln_betas", embedding_beta.size(),
-           {kEmbeddingWidth}, NetworkWeightTensorKind::NormBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::Gate,
-      "body.input_embedding_gates",
-      {
-          {6, "body.ip_mult_gate", mult_gate.size(),
-           {kEmbeddingWidth, kSquares}, NetworkWeightTensorKind::Gate},
-          {7, "body.ip_add_gate", add_gate.size(),
-           {kEmbeddingWidth, kSquares},
-           NetworkWeightTensorKind::Gate},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::FeedForward,
-      "body.input_embedding_ffn",
-      {
-          {8, "body.ip_emb_ffn.dense1_w", ffn1_weights.size(),
-           {kFfnHidden, kEmbeddingWidth}, NetworkWeightTensorKind::DenseWeight},
-          {9, "body.ip_emb_ffn.dense1_b", ffn1_bias.size(), {kFfnHidden},
-           NetworkWeightTensorKind::DenseBias},
-          {10, "body.ip_emb_ffn.dense2_w", ffn2_weights.size(),
-           {kEmbeddingWidth, kFfnHidden}, NetworkWeightTensorKind::DenseWeight},
-          {11, "body.ip_emb_ffn.dense2_b", ffn2_bias.size(),
-           {kEmbeddingWidth}, NetworkWeightTensorKind::DenseBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::LayerNorm,
-      "body.input_embedding_ffn_norm",
-      {
-          {12, "body.ip_emb_ffn_ln_gammas", ffn_gamma.size(),
-           {kEmbeddingWidth}, NetworkWeightTensorKind::NormScale},
-          {13, "body.ip_emb_ffn_ln_betas", ffn_beta.size(),
-           {kEmbeddingWidth}, NetworkWeightTensorKind::NormBias},
-      }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Dense,
+                                   "body.input_embedding_preprocess",
+                                   {
+                                       {0,
+                                        "body.ip_emb_preproc_w",
+                                        preproc_weights.size(),
+                                        {kPositionOutput, kPositionInput},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {1,
+                                        "body.ip_emb_preproc_b",
+                                        preproc_bias.size(),
+                                        {kPositionOutput},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Dense,
+                                   "body.input_embedding",
+                                   {
+                                       {2,
+                                        "body.input_embedding_w",
+                                        embedding_weights.size(),
+                                        {kEmbeddingWidth, kConcatWidth},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {3,
+                                        "body.input_embedding_b",
+                                        embedding_bias.size(),
+                                        {kEmbeddingWidth},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::LayerNorm,
+                                   "body.input_embedding_norm",
+                                   {
+                                       {4,
+                                        "body.ip_emb_ln_gammas",
+                                        embedding_gamma.size(),
+                                        {kEmbeddingWidth},
+                                        NetworkWeightTensorKind::NormScale},
+                                       {5,
+                                        "body.ip_emb_ln_betas",
+                                        embedding_beta.size(),
+                                        {kEmbeddingWidth},
+                                        NetworkWeightTensorKind::NormBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Gate,
+                                   "body.input_embedding_gates",
+                                   {
+                                       {6,
+                                        "body.ip_mult_gate",
+                                        mult_gate.size(),
+                                        {kEmbeddingWidth, kSquares},
+                                        NetworkWeightTensorKind::Gate},
+                                       {7,
+                                        "body.ip_add_gate",
+                                        add_gate.size(),
+                                        {kEmbeddingWidth, kSquares},
+                                        NetworkWeightTensorKind::Gate},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::FeedForward,
+                                   "body.input_embedding_ffn",
+                                   {
+                                       {8,
+                                        "body.ip_emb_ffn.dense1_w",
+                                        ffn1_weights.size(),
+                                        {kFfnHidden, kEmbeddingWidth},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {9,
+                                        "body.ip_emb_ffn.dense1_b",
+                                        ffn1_bias.size(),
+                                        {kFfnHidden},
+                                        NetworkWeightTensorKind::DenseBias},
+                                       {10,
+                                        "body.ip_emb_ffn.dense2_w",
+                                        ffn2_weights.size(),
+                                        {kEmbeddingWidth, kFfnHidden},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {11,
+                                        "body.ip_emb_ffn.dense2_b",
+                                        ffn2_bias.size(),
+                                        {kEmbeddingWidth},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::LayerNorm,
+                                   "body.input_embedding_ffn_norm",
+                                   {
+                                       {12,
+                                        "body.ip_emb_ffn_ln_gammas",
+                                        ffn_gamma.size(),
+                                        {kEmbeddingWidth},
+                                        NetworkWeightTensorKind::NormScale},
+                                       {13,
+                                        "body.ip_emb_ffn_ln_betas",
+                                        ffn_beta.size(),
+                                        {kEmbeddingWidth},
+                                        NetworkWeightTensorKind::NormBias},
+                                   }});
 
   NetworkWeightInventory inventory;
   inventory.tensors = {
-      {"body.ip_emb_preproc_w", preproc_weights.data(),
-       preproc_weights.size(), {kPositionOutput, kPositionInput},
+      {"body.ip_emb_preproc_w",
+       preproc_weights.data(),
+       preproc_weights.size(),
+       {kPositionOutput, kPositionInput},
        NetworkWeightTensorKind::DenseWeight},
-      {"body.ip_emb_preproc_b", preproc_bias.data(), preproc_bias.size(),
-       {kPositionOutput}, NetworkWeightTensorKind::DenseBias},
-      {"body.input_embedding_w", embedding_weights.data(),
-       embedding_weights.size(), {kEmbeddingWidth, kConcatWidth},
-       NetworkWeightTensorKind::DenseWeight},
-      {"body.input_embedding_b", embedding_bias.data(),
-       embedding_bias.size(), {kEmbeddingWidth},
+      {"body.ip_emb_preproc_b",
+       preproc_bias.data(),
+       preproc_bias.size(),
+       {kPositionOutput},
        NetworkWeightTensorKind::DenseBias},
-      {"body.ip_emb_ln_gammas", embedding_gamma.data(),
-       embedding_gamma.size(), {kEmbeddingWidth},
+      {"body.input_embedding_w",
+       embedding_weights.data(),
+       embedding_weights.size(),
+       {kEmbeddingWidth, kConcatWidth},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.input_embedding_b",
+       embedding_bias.data(),
+       embedding_bias.size(),
+       {kEmbeddingWidth},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ln_gammas",
+       embedding_gamma.data(),
+       embedding_gamma.size(),
+       {kEmbeddingWidth},
        NetworkWeightTensorKind::NormScale},
-      {"body.ip_emb_ln_betas", embedding_beta.data(),
-       embedding_beta.size(), {kEmbeddingWidth},
+      {"body.ip_emb_ln_betas",
+       embedding_beta.data(),
+       embedding_beta.size(),
+       {kEmbeddingWidth},
        NetworkWeightTensorKind::NormBias},
-      {"body.ip_mult_gate", mult_gate.data(), mult_gate.size(),
-       {kEmbeddingWidth, kSquares}, NetworkWeightTensorKind::Gate},
-      {"body.ip_add_gate", add_gate.data(), add_gate.size(),
-       {kEmbeddingWidth, kSquares}, NetworkWeightTensorKind::Gate},
-      {"body.ip_emb_ffn.dense1_w", ffn1_weights.data(),
-       ffn1_weights.size(), {kFfnHidden, kEmbeddingWidth},
+      {"body.ip_mult_gate",
+       mult_gate.data(),
+       mult_gate.size(),
+       {kEmbeddingWidth, kSquares},
+       NetworkWeightTensorKind::Gate},
+      {"body.ip_add_gate",
+       add_gate.data(),
+       add_gate.size(),
+       {kEmbeddingWidth, kSquares},
+       NetworkWeightTensorKind::Gate},
+      {"body.ip_emb_ffn.dense1_w",
+       ffn1_weights.data(),
+       ffn1_weights.size(),
+       {kFfnHidden, kEmbeddingWidth},
        NetworkWeightTensorKind::DenseWeight},
-      {"body.ip_emb_ffn.dense1_b", ffn1_bias.data(), ffn1_bias.size(),
-       {kFfnHidden}, NetworkWeightTensorKind::DenseBias},
-      {"body.ip_emb_ffn.dense2_w", ffn2_weights.data(),
-       ffn2_weights.size(), {kEmbeddingWidth, kFfnHidden},
+      {"body.ip_emb_ffn.dense1_b",
+       ffn1_bias.data(),
+       ffn1_bias.size(),
+       {kFfnHidden},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ffn.dense2_w",
+       ffn2_weights.data(),
+       ffn2_weights.size(),
+       {kEmbeddingWidth, kFfnHidden},
        NetworkWeightTensorKind::DenseWeight},
-      {"body.ip_emb_ffn.dense2_b", ffn2_bias.data(), ffn2_bias.size(),
-       {kEmbeddingWidth}, NetworkWeightTensorKind::DenseBias},
-      {"body.ip_emb_ffn_ln_gammas", ffn_gamma.data(), ffn_gamma.size(),
-       {kEmbeddingWidth}, NetworkWeightTensorKind::NormScale},
-      {"body.ip_emb_ffn_ln_betas", ffn_beta.data(), ffn_beta.size(),
-       {kEmbeddingWidth}, NetworkWeightTensorKind::NormBias},
+      {"body.ip_emb_ffn.dense2_b",
+       ffn2_bias.data(),
+       ffn2_bias.size(),
+       {kEmbeddingWidth},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ffn_ln_gammas",
+       ffn_gamma.data(),
+       ffn_gamma.size(),
+       {kEmbeddingWidth},
+       NetworkWeightTensorKind::NormScale},
+      {"body.ip_emb_ffn_ln_betas",
+       ffn_beta.data(),
+       ffn_beta.size(),
+       {kEmbeddingWidth},
+       NetworkWeightTensorKind::NormBias},
   };
 
   std::vector<float> expected(kSquares * kConcatWidth, 0.0f);
@@ -1209,9 +1380,9 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
       return result;
     }
 
-    const auto expected_embedding_dense = DenseAffineHost(
-        expected, embedding_weights, embedding_bias, kSquares, kConcatWidth,
-        kEmbeddingWidth);
+    const auto expected_embedding_dense =
+        DenseAffineHost(expected, embedding_weights, embedding_bias, kSquares,
+                        kConcatWidth, kEmbeddingWidth);
     const auto expected_embedding =
         ActivationHost(expected_embedding_dense, CudaActivationKind::Relu);
     const auto expected_embedding_norm =
@@ -1237,8 +1408,7 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
     const auto expected_ffn_dense2 =
         DenseAffineHost(expected_ffn_activation, ffn2_weights, ffn2_bias,
                         kSquares, kFfnHidden, kEmbeddingWidth);
-    std::vector<float> expected_ffn_residual(expected_ffn_dense2.size(),
-                                             0.0f);
+    std::vector<float> expected_ffn_residual(expected_ffn_dense2.size(), 0.0f);
     for (std::size_t i = 0; i < expected_ffn_residual.size(); ++i)
       expected_ffn_residual[i] = expected_gated[i] + expected_ffn_dense2[i];
     const auto expected_ffn_norm =
@@ -1249,8 +1419,7 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
     const CudaStageInputBindings input_bindings;
     const auto sequence = ExecuteDenseActivationLayerNormSequence(
         execution_plan, weights, buffers.input_values, buffers.input_masks,
-        buffers.input_values, tape, sequence_workspace, kBatch,
-        input_bindings);
+        buffers.input_values, tape, sequence_workspace, kBatch, input_bindings);
     sequence_workspace.Synchronize();
     const auto *preprocess_stage =
         sequence.FindStage("body.input_embedding_preprocess");
@@ -1259,9 +1428,8 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
     const auto *ffn_stage = sequence.FindStage("body.input_embedding_ffn");
     if (sequence.stage_count != 4 || !preprocess_stage ||
         !preprocess_stage->output ||
-        preprocess_stage->output_width != kConcatWidth ||
-        !embedding_stage || !embedding_stage->activation ||
-        !embedding_stage->output ||
+        preprocess_stage->output_width != kConcatWidth || !embedding_stage ||
+        !embedding_stage->activation || !embedding_stage->output ||
         embedding_stage->rows != kSquares ||
         embedding_stage->output_width != kEmbeddingWidth || !gate_stage ||
         !gate_stage->output || gate_stage->rows != kSquares ||
@@ -1305,8 +1473,7 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
 
     result.allocation_bytes =
         buffers.AllocationBytes() + workspace.TotalBytes() +
-        sequence_workspace.TotalBytes() +
-        weights.AllocationBytes();
+        sequence_workspace.TotalBytes() + weights.AllocationBytes();
   } catch (const std::exception &e) {
     result.status = CudaSmokeStatus::RuntimeError;
     result.message = e.what();
@@ -1352,18 +1519,13 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   constexpr int kValue = 3;
   constexpr int kMovesLeft = 1;
   const std::vector<float> input_values = {
-      1.0f, -2.0f, 0.5f,
-      -0.5f, 2.0f, 1.5f,
-      0.25f, -0.75f, 3.0f,
+      1.0f, -2.0f, 0.5f, -0.5f, 2.0f, 1.5f, 0.25f, -0.75f, 3.0f,
   };
-  const std::vector<std::uint64_t> input_masks(static_cast<size_t>(kBatch) *
-                                                   kInput,
-                                               ~0ULL);
+  const std::vector<std::uint64_t> input_masks(
+      static_cast<size_t>(kBatch) * kInput, ~0ULL);
   const std::vector<float> dense_weights = {
-      1.0f, 0.0f, 0.5f,
-      -0.5f, 1.0f, 0.25f,
-      0.0f, -1.0f, 0.5f,
-      2.0f, 0.5f, -1.0f,
+      1.0f, 0.0f,  0.5f, -0.5f, 1.0f, 0.25f,
+      0.0f, -1.0f, 0.5f, 2.0f,  0.5f, -1.0f,
   };
   const std::vector<float> dense_bias = {0.25f, -0.75f, 0.0f, 1.0f};
   const std::vector<float> gamma = {1.0f, 0.5f, -1.0f, 2.0f};
@@ -1371,19 +1533,14 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   const std::vector<float> mult_gate = {1.5f, -0.5f, 2.0f, 0.25f};
   const std::vector<float> add_gate = {0.25f, 1.0f, -0.75f, 0.5f};
   const std::vector<float> ffn1_weights = {
-      0.20f, -0.10f, 0.50f, 0.75f,
-      -0.40f, 0.30f, 0.10f, -0.20f,
-      0.60f, 0.25f, -0.35f, 0.15f,
-      -0.10f, 0.90f, 0.05f, -0.45f,
-      0.30f, -0.60f, 0.20f, 0.40f,
+      0.20f,  -0.10f, 0.50f, 0.75f,  -0.40f, 0.30f,  0.10f,
+      -0.20f, 0.60f,  0.25f, -0.35f, 0.15f,  -0.10f, 0.90f,
+      0.05f,  -0.45f, 0.30f, -0.60f, 0.20f,  0.40f,
   };
-  const std::vector<float> ffn1_bias = {0.10f, -0.20f, 0.05f, 0.30f,
-                                        -0.15f};
+  const std::vector<float> ffn1_bias = {0.10f, -0.20f, 0.05f, 0.30f, -0.15f};
   const std::vector<float> ffn2_weights = {
-      0.50f, -0.25f, 0.10f, 0.20f, -0.40f,
-      -0.30f, 0.60f, 0.15f, -0.10f, 0.25f,
-      0.20f, 0.35f, -0.45f, 0.50f, 0.10f,
-      -0.15f, 0.05f, 0.30f, -0.35f, 0.70f,
+      0.50f, -0.25f, 0.10f,  0.20f, -0.40f, -0.30f, 0.60f, 0.15f, -0.10f, 0.25f,
+      0.20f, 0.35f,  -0.45f, 0.50f, 0.10f,  -0.15f, 0.05f, 0.30f, -0.35f, 0.70f,
   };
   const std::vector<float> ffn2_bias = {0.05f, -0.10f, 0.20f, -0.25f};
   const std::vector<float> ffn_gamma = {1.10f, -0.60f, 0.80f, 1.40f};
@@ -1391,16 +1548,14 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   const std::vector<float> positional(static_cast<size_t>(kHidden) * kHidden,
                                       0.0f);
   const std::vector<float> dense2_weights = {
-      0.25f, -0.5f, 1.0f, 0.75f,
-      -1.0f, 0.5f, 0.25f, -0.25f,
+      0.25f, -0.5f, 1.0f, 0.75f, -1.0f, 0.5f, 0.25f, -0.25f,
   };
   const std::vector<float> dense2_bias = {0.1f, -0.2f};
   const std::vector<float> gamma2 = {1.25f, -0.75f};
   const std::vector<float> beta2 = {0.05f, 0.30f};
   const std::vector<float> dense3_weights = {
-      0.5f, -0.25f, 0.75f, 0.10f,
-      -1.0f, 0.75f, 0.20f, -0.30f,
-      0.25f, 1.5f, -0.50f, 0.40f,
+      0.5f,  -0.25f, 0.75f, 0.10f, -1.0f,  0.75f,
+      0.20f, -0.30f, 0.25f, 1.5f,  -0.50f, 0.40f,
   };
   const std::vector<float> dense3_bias = {-0.1f, 0.2f, 0.05f};
   const std::vector<float> moves_weights = {0.5f, -0.25f, 1.25f, 0.75f};
@@ -1408,48 +1563,111 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
 
   NetworkWeightInventory inventory;
   inventory.tensors = {
-      {"smoke.dense_w", dense_weights.data(), dense_weights.size(),
-       {kHidden, kInput}, NetworkWeightTensorKind::DenseWeight},
-      {"smoke.dense_b", dense_bias.data(), dense_bias.size(), {kHidden},
+      {"smoke.dense_w",
+       dense_weights.data(),
+       dense_weights.size(),
+       {kHidden, kInput},
+       NetworkWeightTensorKind::DenseWeight},
+      {"smoke.dense_b",
+       dense_bias.data(),
+       dense_bias.size(),
+       {kHidden},
        NetworkWeightTensorKind::DenseBias},
-      {"smoke.norm_gammas", gamma.data(), gamma.size(), {kHidden},
+      {"smoke.norm_gammas",
+       gamma.data(),
+       gamma.size(),
+       {kHidden},
        NetworkWeightTensorKind::NormScale},
-      {"smoke.norm_betas", beta.data(), beta.size(), {kHidden},
+      {"smoke.norm_betas",
+       beta.data(),
+       beta.size(),
+       {kHidden},
        NetworkWeightTensorKind::NormBias},
-      {"policy.smoke.ip_pol_w", dense2_weights.data(), dense2_weights.size(),
-       {kPolicy, kHidden}, NetworkWeightTensorKind::DenseWeight},
-      {"policy.smoke.ip_pol_b", dense2_bias.data(), dense2_bias.size(), {kPolicy},
+      {"policy.smoke.ip_pol_w",
+       dense2_weights.data(),
+       dense2_weights.size(),
+       {kPolicy, kHidden},
+       NetworkWeightTensorKind::DenseWeight},
+      {"policy.smoke.ip_pol_b",
+       dense2_bias.data(),
+       dense2_bias.size(),
+       {kPolicy},
        NetworkWeightTensorKind::DenseBias},
-      {"policy.smoke.norm_gammas", gamma2.data(), gamma2.size(), {kPolicy},
+      {"policy.smoke.norm_gammas",
+       gamma2.data(),
+       gamma2.size(),
+       {kPolicy},
        NetworkWeightTensorKind::NormScale},
-      {"policy.smoke.norm_betas", beta2.data(), beta2.size(), {kPolicy},
+      {"policy.smoke.norm_betas",
+       beta2.data(),
+       beta2.size(),
+       {kPolicy},
        NetworkWeightTensorKind::NormBias},
-      {"value.smoke.ip2_val_w", dense3_weights.data(), dense3_weights.size(),
-       {kValue, kHidden}, NetworkWeightTensorKind::DenseWeight},
-      {"value.smoke.ip2_val_b", dense3_bias.data(), dense3_bias.size(), {kValue},
+      {"value.smoke.ip2_val_w",
+       dense3_weights.data(),
+       dense3_weights.size(),
+       {kValue, kHidden},
+       NetworkWeightTensorKind::DenseWeight},
+      {"value.smoke.ip2_val_b",
+       dense3_bias.data(),
+       dense3_bias.size(),
+       {kValue},
        NetworkWeightTensorKind::DenseBias},
-      {"moves_left.ip2_mov_w", moves_weights.data(), moves_weights.size(),
-       {kMovesLeft, kHidden}, NetworkWeightTensorKind::DenseWeight},
-      {"moves_left.ip2_mov_b", moves_bias.data(), moves_bias.size(), {kMovesLeft},
+      {"moves_left.ip2_mov_w",
+       moves_weights.data(),
+       moves_weights.size(),
+       {kMovesLeft, kHidden},
+       NetworkWeightTensorKind::DenseWeight},
+      {"moves_left.ip2_mov_b",
+       moves_bias.data(),
+       moves_bias.size(),
+       {kMovesLeft},
        NetworkWeightTensorKind::DenseBias},
-      {"body.ip_mult_gate", mult_gate.data(), mult_gate.size(), {kHidden},
+      {"body.ip_mult_gate",
+       mult_gate.data(),
+       mult_gate.size(),
+       {kHidden},
        NetworkWeightTensorKind::Gate},
-      {"body.ip_add_gate", add_gate.data(), add_gate.size(), {kHidden},
+      {"body.ip_add_gate",
+       add_gate.data(),
+       add_gate.size(),
+       {kHidden},
        NetworkWeightTensorKind::Gate},
-      {"body.ip_emb_ffn.dense1_w", ffn1_weights.data(), ffn1_weights.size(),
-       {kFfnHidden, kHidden}, NetworkWeightTensorKind::DenseWeight},
-      {"body.ip_emb_ffn.dense1_b", ffn1_bias.data(), ffn1_bias.size(),
-       {kFfnHidden}, NetworkWeightTensorKind::DenseBias},
-      {"body.ip_emb_ffn.dense2_w", ffn2_weights.data(), ffn2_weights.size(),
-       {kHidden, kFfnHidden}, NetworkWeightTensorKind::DenseWeight},
-      {"body.ip_emb_ffn.dense2_b", ffn2_bias.data(), ffn2_bias.size(),
-       {kHidden}, NetworkWeightTensorKind::DenseBias},
-      {"body.ip_emb_ffn_ln_gammas", ffn_gamma.data(), ffn_gamma.size(),
-       {kHidden}, NetworkWeightTensorKind::NormScale},
-      {"body.ip_emb_ffn_ln_betas", ffn_beta.data(), ffn_beta.size(),
-       {kHidden}, NetworkWeightTensorKind::NormBias},
-      {"body.smolgen_w", positional.data(), positional.size(),
-       {kHidden, kHidden}, NetworkWeightTensorKind::PositionalEncoding},
+      {"body.ip_emb_ffn.dense1_w",
+       ffn1_weights.data(),
+       ffn1_weights.size(),
+       {kFfnHidden, kHidden},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.ip_emb_ffn.dense1_b",
+       ffn1_bias.data(),
+       ffn1_bias.size(),
+       {kFfnHidden},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ffn.dense2_w",
+       ffn2_weights.data(),
+       ffn2_weights.size(),
+       {kHidden, kFfnHidden},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.ip_emb_ffn.dense2_b",
+       ffn2_bias.data(),
+       ffn2_bias.size(),
+       {kHidden},
+       NetworkWeightTensorKind::DenseBias},
+      {"body.ip_emb_ffn_ln_gammas",
+       ffn_gamma.data(),
+       ffn_gamma.size(),
+       {kHidden},
+       NetworkWeightTensorKind::NormScale},
+      {"body.ip_emb_ffn_ln_betas",
+       ffn_beta.data(),
+       ffn_beta.size(),
+       {kHidden},
+       NetworkWeightTensorKind::NormBias},
+      {"body.smolgen_w",
+       positional.data(),
+       positional.size(),
+       {kHidden, kHidden},
+       NetworkWeightTensorKind::PositionalEncoding},
   };
 
   NetworkResolvedExecutionPlan execution_plan;
@@ -1457,105 +1675,167 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   execution_plan.tensors = plan;
   execution_plan.policy_head = "smoke";
   execution_plan.value_head = "smoke";
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::Dense,
-      "body.smoke.dense",
-      {
-          {0, "smoke.dense_w", dense_weights.size(), {kHidden, kInput},
-           NetworkWeightTensorKind::DenseWeight},
-          {1, "smoke.dense_b", dense_bias.size(), {kHidden},
-           NetworkWeightTensorKind::DenseBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::LayerNorm,
-      "body.smoke.norm",
-      {
-          {2, "smoke.norm_gammas", gamma.size(), {kHidden},
-           NetworkWeightTensorKind::NormScale},
-          {3, "smoke.norm_betas", beta.size(), {kHidden},
-           NetworkWeightTensorKind::NormBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::Gate,
-      "body.smoke.gates",
-      {
-          {12, "body.ip_mult_gate", mult_gate.size(), {kHidden},
-           NetworkWeightTensorKind::Gate},
-          {13, "body.ip_add_gate", add_gate.size(), {kHidden},
-           NetworkWeightTensorKind::Gate},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::FeedForward,
-      "body.input_embedding_ffn",
-      {
-          {14, "body.ip_emb_ffn.dense1_w", ffn1_weights.size(),
-           {kFfnHidden, kHidden}, NetworkWeightTensorKind::DenseWeight},
-          {15, "body.ip_emb_ffn.dense1_b", ffn1_bias.size(), {kFfnHidden},
-           NetworkWeightTensorKind::DenseBias},
-          {16, "body.ip_emb_ffn.dense2_w", ffn2_weights.size(),
-           {kHidden, kFfnHidden}, NetworkWeightTensorKind::DenseWeight},
-          {17, "body.ip_emb_ffn.dense2_b", ffn2_bias.size(), {kHidden},
-           NetworkWeightTensorKind::DenseBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::LayerNorm,
-      "body.input_embedding_ffn_norm",
-      {
-          {18, "body.ip_emb_ffn_ln_gammas", ffn_gamma.size(), {kHidden},
-           NetworkWeightTensorKind::NormScale},
-          {19, "body.ip_emb_ffn_ln_betas", ffn_beta.size(), {kHidden},
-           NetworkWeightTensorKind::NormBias},
-      }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Dense,
+                                   "body.smoke.dense",
+                                   {
+                                       {0,
+                                        "smoke.dense_w",
+                                        dense_weights.size(),
+                                        {kHidden, kInput},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {1,
+                                        "smoke.dense_b",
+                                        dense_bias.size(),
+                                        {kHidden},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::LayerNorm,
+                                   "body.smoke.norm",
+                                   {
+                                       {2,
+                                        "smoke.norm_gammas",
+                                        gamma.size(),
+                                        {kHidden},
+                                        NetworkWeightTensorKind::NormScale},
+                                       {3,
+                                        "smoke.norm_betas",
+                                        beta.size(),
+                                        {kHidden},
+                                        NetworkWeightTensorKind::NormBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Gate,
+                                   "body.smoke.gates",
+                                   {
+                                       {12,
+                                        "body.ip_mult_gate",
+                                        mult_gate.size(),
+                                        {kHidden},
+                                        NetworkWeightTensorKind::Gate},
+                                       {13,
+                                        "body.ip_add_gate",
+                                        add_gate.size(),
+                                        {kHidden},
+                                        NetworkWeightTensorKind::Gate},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::FeedForward,
+                                   "body.input_embedding_ffn",
+                                   {
+                                       {14,
+                                        "body.ip_emb_ffn.dense1_w",
+                                        ffn1_weights.size(),
+                                        {kFfnHidden, kHidden},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {15,
+                                        "body.ip_emb_ffn.dense1_b",
+                                        ffn1_bias.size(),
+                                        {kFfnHidden},
+                                        NetworkWeightTensorKind::DenseBias},
+                                       {16,
+                                        "body.ip_emb_ffn.dense2_w",
+                                        ffn2_weights.size(),
+                                        {kHidden, kFfnHidden},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {17,
+                                        "body.ip_emb_ffn.dense2_b",
+                                        ffn2_bias.size(),
+                                        {kHidden},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::LayerNorm,
+                                   "body.input_embedding_ffn_norm",
+                                   {
+                                       {18,
+                                        "body.ip_emb_ffn_ln_gammas",
+                                        ffn_gamma.size(),
+                                        {kHidden},
+                                        NetworkWeightTensorKind::NormScale},
+                                       {19,
+                                        "body.ip_emb_ffn_ln_betas",
+                                        ffn_beta.size(),
+                                        {kHidden},
+                                        NetworkWeightTensorKind::NormBias},
+                                   }});
   execution_plan.steps.push_back(NetworkResolvedExecutionStep{
       NetworkExecutionOpKind::PositionalEncoding,
       "body.smolgen_positional",
       {
-          {20, "body.smolgen_w", positional.size(), {kHidden, kHidden},
+          {20,
+           "body.smolgen_w",
+           positional.size(),
+           {kHidden, kHidden},
            NetworkWeightTensorKind::PositionalEncoding},
       }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::Dense,
-      "policy.smoke.output",
-      {
-          {4, "policy.smoke.ip_pol_w", dense2_weights.size(), {kPolicy, kHidden},
-           NetworkWeightTensorKind::DenseWeight},
-          {5, "policy.smoke.ip_pol_b", dense2_bias.size(), {kPolicy},
-           NetworkWeightTensorKind::DenseBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::LayerNorm,
-      "policy.smoke.norm",
-      {
-          {6, "policy.smoke.norm_gammas", gamma2.size(), {kPolicy},
-           NetworkWeightTensorKind::NormScale},
-          {7, "policy.smoke.norm_betas", beta2.size(), {kPolicy},
-           NetworkWeightTensorKind::NormBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::Dense,
-      "value.smoke.dense2",
-      {
-          {8, "value.smoke.ip2_val_w", dense3_weights.size(), {kValue, kHidden},
-           NetworkWeightTensorKind::DenseWeight},
-          {9, "value.smoke.ip2_val_b", dense3_bias.size(), {kValue},
-           NetworkWeightTensorKind::DenseBias},
-      }});
-  execution_plan.steps.push_back(NetworkResolvedExecutionStep{
-      NetworkExecutionOpKind::Dense,
-      "moves_left.output",
-      {
-          {10, "moves_left.ip2_mov_w", moves_weights.size(),
-           {kMovesLeft, kHidden}, NetworkWeightTensorKind::DenseWeight},
-          {11, "moves_left.ip2_mov_b", moves_bias.size(), {kMovesLeft},
-           NetworkWeightTensorKind::DenseBias},
-      }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Dense,
+                                   "policy.smoke.output",
+                                   {
+                                       {4,
+                                        "policy.smoke.ip_pol_w",
+                                        dense2_weights.size(),
+                                        {kPolicy, kHidden},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {5,
+                                        "policy.smoke.ip_pol_b",
+                                        dense2_bias.size(),
+                                        {kPolicy},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::LayerNorm,
+                                   "policy.smoke.norm",
+                                   {
+                                       {6,
+                                        "policy.smoke.norm_gammas",
+                                        gamma2.size(),
+                                        {kPolicy},
+                                        NetworkWeightTensorKind::NormScale},
+                                       {7,
+                                        "policy.smoke.norm_betas",
+                                        beta2.size(),
+                                        {kPolicy},
+                                        NetworkWeightTensorKind::NormBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Dense,
+                                   "value.smoke.dense2",
+                                   {
+                                       {8,
+                                        "value.smoke.ip2_val_w",
+                                        dense3_weights.size(),
+                                        {kValue, kHidden},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {9,
+                                        "value.smoke.ip2_val_b",
+                                        dense3_bias.size(),
+                                        {kValue},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Dense,
+                                   "moves_left.output",
+                                   {
+                                       {10,
+                                        "moves_left.ip2_mov_w",
+                                        moves_weights.size(),
+                                        {kMovesLeft, kHidden},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {11,
+                                        "moves_left.ip2_mov_b",
+                                        moves_bias.size(),
+                                        {kMovesLeft},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
 
   std::vector<float> hidden_activated(static_cast<size_t>(kBatch) * kHidden,
                                       0.0f);
   std::vector<float> hidden_normalized(static_cast<size_t>(kBatch) * kHidden,
                                        0.0f);
-  std::vector<float> hidden_gated(static_cast<size_t>(kBatch) * kHidden,
-                                  0.0f);
+  std::vector<float> hidden_gated(static_cast<size_t>(kBatch) * kHidden, 0.0f);
   std::vector<float> ffn_activated(static_cast<size_t>(kBatch) * kFfnHidden,
                                    0.0f);
   std::vector<float> ffn_output(static_cast<size_t>(kBatch) * kHidden, 0.0f);
@@ -1564,8 +1844,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
   std::vector<float> activated(static_cast<size_t>(kBatch) * kPolicy, 0.0f);
   std::vector<float> policy_expected(static_cast<size_t>(kBatch) * kPolicy,
                                      0.0f);
-  std::vector<float> value_expected(static_cast<size_t>(kBatch) * kValue,
-                                    0.0f);
+  std::vector<float> value_expected(static_cast<size_t>(kBatch) * kValue, 0.0f);
   std::vector<float> moves_expected(static_cast<size_t>(kBatch) * kMovesLeft,
                                     0.0f);
   for (int batch = 0; batch < kBatch; ++batch) {
@@ -1598,10 +1877,9 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
       hidden_normalized[hidden_offset + i] =
           normalized * gamma[static_cast<size_t>(i)] +
           beta[static_cast<size_t>(i)];
-      hidden_gated[hidden_offset + i] =
-          hidden_normalized[hidden_offset + i] *
-              mult_gate[static_cast<size_t>(i)] +
-          add_gate[static_cast<size_t>(i)];
+      hidden_gated[hidden_offset + i] = hidden_normalized[hidden_offset + i] *
+                                            mult_gate[static_cast<size_t>(i)] +
+                                        add_gate[static_cast<size_t>(i)];
     }
 
     const size_t ffn_offset = static_cast<size_t>(batch) * kFfnHidden;
@@ -1620,8 +1898,8 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
         dense += ffn_activated[ffn_offset + in] *
                  ffn2_weights[static_cast<size_t>(out) * kFfnHidden + in];
       }
-      ffn_output[hidden_offset + out] = hidden_gated[hidden_offset + out] +
-                                        dense;
+      ffn_output[hidden_offset + out] =
+          hidden_gated[hidden_offset + out] + dense;
     }
 
     sum = 0.0f;
@@ -1707,8 +1985,7 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
                  moves_weights[static_cast<size_t>(out) * kHidden + in];
       }
       const float relu = std::max(dense, 0.0f);
-      moves_expected[static_cast<size_t>(batch) * kMovesLeft + out] =
-          relu;
+      moves_expected[static_cast<size_t>(batch) * kMovesLeft + out] = relu;
     }
   }
 
@@ -1732,12 +2009,12 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     CudaOutputMappingOptions mapping_options;
     mapping_options.allow_partial_policy_rows = true;
     mapping_options.allow_partial_raw_policy_rows = true;
-    const auto mapping = CreateCudaOutputMapping(
-        plan, execution_plan, schedule, mapping_options);
+    const auto mapping = CreateCudaOutputMapping(plan, execution_plan, schedule,
+                                                 mapping_options);
     if (!mapping.ok()) {
       result.status = CudaSmokeStatus::RuntimeError;
-      result.message = "CUDA resolved executor smoke mapping failed: " +
-                       mapping.Summary();
+      result.message =
+          "CUDA resolved executor smoke mapping failed: " + mapping.Summary();
       return result;
     }
     auto executor = CreateResolvedCudaExecutor(schedule, mapping);
@@ -1756,7 +2033,8 @@ CudaBufferSmokeResult RunPlanExecutorPipelineSmoke() {
     }
 
     for (int batch = 0; batch < kBatch; ++batch) {
-      const size_t expected_policy_offset = static_cast<size_t>(batch) * kPolicy;
+      const size_t expected_policy_offset =
+          static_cast<size_t>(batch) * kPolicy;
       const size_t actual_policy_offset =
           static_cast<size_t>(batch) * plan.policy_outputs;
       const size_t raw_policy_offset =

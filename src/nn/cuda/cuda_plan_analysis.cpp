@@ -27,8 +27,7 @@ bool IsCudaOutputScheduleEntry(CudaExecutionScheduleKind kind) {
          kind == CudaExecutionScheduleKind::PolicyMapStage;
 }
 
-bool CudaStageNameStartsWith(std::string_view value,
-                             std::string_view prefix) {
+bool CudaStageNameStartsWith(std::string_view value, std::string_view prefix) {
   return value.size() >= prefix.size() &&
          value.substr(0, prefix.size()) == prefix;
 }
@@ -38,9 +37,9 @@ bool CudaStageNameEndsWith(std::string_view value, std::string_view suffix) {
          value.substr(value.size() - suffix.size()) == suffix;
 }
 
-std::string CudaPlanStagePrefix(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    CudaPlanStageGroup group) {
+std::string
+CudaPlanStagePrefix(const NetworkResolvedExecutionPlan &execution_plan,
+                    CudaPlanStageGroup group) {
   switch (group) {
   case CudaPlanStageGroup::Body:
     return "body.";
@@ -56,9 +55,9 @@ std::string CudaPlanStagePrefix(
   return {};
 }
 
-CudaPlanStageGroup ClassifyCudaPlanStage(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    std::string_view stage_name) {
+CudaPlanStageGroup
+ClassifyCudaPlanStage(const NetworkResolvedExecutionPlan &execution_plan,
+                      std::string_view stage_name) {
   if (CudaStageNameStartsWith(
           stage_name,
           CudaPlanStagePrefix(execution_plan, CudaPlanStageGroup::Body))) {
@@ -86,9 +85,10 @@ bool IsCudaValueErrorStage(std::string_view stage_name) {
   return CudaStageNameEndsWith(stage_name, ".error");
 }
 
-const CudaExecutionScheduleEntry *FindCudaStageEntry(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule, std::string_view stage_name) {
+const CudaExecutionScheduleEntry *
+FindCudaStageEntry(const NetworkResolvedExecutionPlan &execution_plan,
+                   const CudaExecutionSchedule &schedule,
+                   std::string_view stage_name) {
   for (const auto &entry : schedule.entries) {
     if (!IsCudaOutputScheduleEntry(entry.kind))
       continue;
@@ -104,8 +104,8 @@ int PreviousCudaOutputWidth(const NetworkResolvedExecutionPlan &execution_plan,
                             std::size_t step_index) {
   for (std::size_t i = step_index; i-- > 0;) {
     const auto &step = execution_plan.steps[i];
-    if (step.kind == NetworkExecutionOpKind::Dense &&
-        !step.tensors.empty() && step.tensors[0].dims.size() == 2) {
+    if (step.kind == NetworkExecutionOpKind::Dense && !step.tensors.empty() &&
+        step.tensors[0].dims.size() == 2) {
       return static_cast<int>(step.tensors[0].dims[0]);
     }
     if (step.kind == NetworkExecutionOpKind::LayerNorm &&
@@ -181,9 +181,10 @@ int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
   throw std::runtime_error("CUDA output stage kind has no width");
 }
 
-std::string LastCudaDenseStageInGroup(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule, CudaPlanStageGroup group) {
+std::string
+LastCudaDenseStageInGroup(const NetworkResolvedExecutionPlan &execution_plan,
+                          const CudaExecutionSchedule &schedule,
+                          CudaPlanStageGroup group) {
   std::string last_stage;
   for (const auto &entry : schedule.entries) {
     if (!IsCudaDenseScheduleEntry(entry.kind) ||
@@ -197,9 +198,10 @@ std::string LastCudaDenseStageInGroup(
   return last_stage;
 }
 
-std::string LastCudaOutputStageInGroup(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule, CudaPlanStageGroup group) {
+std::string
+LastCudaOutputStageInGroup(const NetworkResolvedExecutionPlan &execution_plan,
+                           const CudaExecutionSchedule &schedule,
+                           CudaPlanStageGroup group) {
   std::string last_stage;
   for (const auto &entry : schedule.entries) {
     if (!IsCudaOutputScheduleEntry(entry.kind) ||

@@ -94,19 +94,17 @@ void CudaWeightBuffers::Upload(const NetworkWeightInventory &inventory) {
             cudaMalloc(reinterpret_cast<void **>(&device_tensor.data),
                        tensor.elements * sizeof(float));
         if (alloc_status != cudaSuccess) {
-          throw std::runtime_error(CudaErrorMessage("cudaMalloc(" +
-                                                        tensor.name + ")",
-                                                    alloc_status));
+          throw std::runtime_error(CudaErrorMessage(
+              "cudaMalloc(" + tensor.name + ")", alloc_status));
         }
 
-        const cudaError_t copy_status = cudaMemcpy(
-            device_tensor.data, tensor.data, tensor.elements * sizeof(float),
-            cudaMemcpyHostToDevice);
+        const cudaError_t copy_status =
+            cudaMemcpy(device_tensor.data, tensor.data,
+                       tensor.elements * sizeof(float), cudaMemcpyHostToDevice);
         if (copy_status != cudaSuccess) {
           FreeDevice(device_tensor.data);
-          throw std::runtime_error(CudaErrorMessage("cudaMemcpy(" +
-                                                        tensor.name + ")",
-                                                    copy_status));
+          throw std::runtime_error(
+              CudaErrorMessage("cudaMemcpy(" + tensor.name + ")", copy_status));
         }
       }
 
@@ -149,12 +147,11 @@ bool CudaWeightBuffers::DownloadMatches(const NetworkWeightInventory &inventory,
         cudaMemcpy(downloaded.data(), device.data,
                    host.elements * sizeof(float), cudaMemcpyDeviceToHost);
     if (status != cudaSuccess)
-      return fail(
-          CudaErrorMessage("cudaMemcpy(" + host.name + ")", status));
+      return fail(CudaErrorMessage("cudaMemcpy(" + host.name + ")", status));
     for (std::size_t j = 0; j < host.elements; ++j) {
       if (downloaded[j] != host.data[j]) {
-        return fail("CUDA weight value mismatch: " + host.name +
-                    " at " + std::to_string(j));
+        return fail("CUDA weight value mismatch: " + host.name + " at " +
+                    std::to_string(j));
       }
     }
   }

@@ -239,18 +239,18 @@ void CudaInferenceBuffers::UploadPackedInputs(
                              entries * sizeof(std::uint64_t),
                              cudaMemcpyHostToDevice, stream);
   } else {
-    status = cudaMemcpy(input_masks, masks.data(),
-                        entries * sizeof(std::uint64_t),
-                        cudaMemcpyHostToDevice);
+    status =
+        cudaMemcpy(input_masks, masks.data(), entries * sizeof(std::uint64_t),
+                   cudaMemcpyHostToDevice);
   }
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("cudaMemcpy(input_masks)", status));
 
   if (stream) {
-    status = cudaMemcpyAsync(input_values, values.data(),
-                             entries * sizeof(float), cudaMemcpyHostToDevice,
-                             stream);
+    status =
+        cudaMemcpyAsync(input_values, values.data(), entries * sizeof(float),
+                        cudaMemcpyHostToDevice, stream);
   } else {
     status = cudaMemcpy(input_values, values.data(), entries * sizeof(float),
                         cudaMemcpyHostToDevice);
@@ -267,8 +267,7 @@ void CudaInferenceBuffers::ClearAll(cudaStream_t stream) {
                     "cudaMemset(input_values)", stream);
   ClearDeviceFloats(policy, layout_.PolicyEntries(), "cudaMemset(policy)",
                     stream);
-  ClearDeviceFloats(value, layout_.ValueEntries(), "cudaMemset(value)",
-                    stream);
+  ClearDeviceFloats(value, layout_.ValueEntries(), "cudaMemset(value)", stream);
   ClearDeviceFloats(moves_left, layout_.MovesLeftEntries(),
                     "cudaMemset(moves_left)", stream);
   ClearDeviceFloats(raw_policy, layout_.RawPolicyEntries(),

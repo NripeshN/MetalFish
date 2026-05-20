@@ -73,9 +73,9 @@ FindNamedBuffer(std::vector<CudaNamedWorkspaceBuffer> &buffers,
   return nullptr;
 }
 
-const CudaNamedWorkspaceBuffer *FindNamedBuffer(
-    const std::vector<CudaNamedWorkspaceBuffer> &buffers,
-    std::string_view name) {
+const CudaNamedWorkspaceBuffer *
+FindNamedBuffer(const std::vector<CudaNamedWorkspaceBuffer> &buffers,
+                std::string_view name) {
   for (const auto &buffer : buffers) {
     if (buffer.name == name)
       return &buffer;
@@ -93,9 +93,9 @@ FindNamedByteBuffer(std::vector<CudaNamedByteWorkspaceBuffer> &buffers,
   return nullptr;
 }
 
-const CudaNamedByteWorkspaceBuffer *FindNamedByteBuffer(
-    const std::vector<CudaNamedByteWorkspaceBuffer> &buffers,
-    std::string_view name) {
+const CudaNamedByteWorkspaceBuffer *
+FindNamedByteBuffer(const std::vector<CudaNamedByteWorkspaceBuffer> &buffers,
+                    std::string_view name) {
   for (const auto &buffer : buffers) {
     if (buffer.name == name)
       return &buffer;
@@ -311,8 +311,8 @@ CudaWorkspaceSmokeResult RunExecutionWorkspaceSmoke() {
     void *byte_buffer_reused = workspace.ReserveNamedBytes("smoke.ptrs", 48);
     cudaStream_t stream = workspace.Stream();
 
-    if (!dense || !activation || !norm || dense != dense_reused ||
-        !named || named != named_reused || !byte_buffer ||
+    if (!dense || !activation || !norm || dense != dense_reused || !named ||
+        named != named_reused || !byte_buffer ||
         byte_buffer != byte_buffer_reused || !stream ||
         workspace.CapacityFloats(CudaWorkspaceSlot::Dense) != 8 ||
         workspace.CapacityFloats(CudaWorkspaceSlot::Activation) != 4 ||

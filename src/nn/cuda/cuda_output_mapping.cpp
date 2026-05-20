@@ -72,12 +72,13 @@ bool StageWidthFitsTarget(int source_width, int target_stride,
   return AllowsPartialRows(target, options) || source_width == target_stride;
 }
 
-std::string SelectCompatibleStage(
-    const NetworkTensorPlan &tensor_plan,
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule,
-    const CudaOutputMappingOptions &options, CudaOutputTarget target,
-    CudaPlanStageGroup group, bool first_match) {
+std::string
+SelectCompatibleStage(const NetworkTensorPlan &tensor_plan,
+                      const NetworkResolvedExecutionPlan &execution_plan,
+                      const CudaExecutionSchedule &schedule,
+                      const CudaOutputMappingOptions &options,
+                      CudaOutputTarget target, CudaPlanStageGroup group,
+                      bool first_match) {
   const int target_stride = TargetStride(tensor_plan, target);
   std::string selected;
   for (const auto &entry : schedule.entries) {
@@ -102,10 +103,11 @@ std::string SelectCompatibleStage(
   return selected;
 }
 
-std::string SelectPolicyStage(const NetworkTensorPlan &tensor_plan,
-                              const NetworkResolvedExecutionPlan &execution_plan,
-                              const CudaExecutionSchedule &schedule,
-                              const CudaOutputMappingOptions &options) {
+std::string
+SelectPolicyStage(const NetworkTensorPlan &tensor_plan,
+                  const NetworkResolvedExecutionPlan &execution_plan,
+                  const CudaExecutionSchedule &schedule,
+                  const CudaOutputMappingOptions &options) {
   for (const auto &entry : schedule.entries) {
     if (entry.kind != CudaExecutionScheduleKind::PolicyMapStage ||
         entry.first_step >= execution_plan.steps.size()) {
@@ -153,8 +155,7 @@ void AddBinding(CudaOutputMapping &mapping,
   if (!entry) {
     if (required) {
       AddError(mapping, "missing CUDA output source for " +
-                            CudaOutputTargetName(target) + ": " +
-                            source_stage);
+                            CudaOutputTargetName(target) + ": " + source_stage);
     }
     return;
   }
@@ -212,14 +213,15 @@ std::string CudaOutputMapping::Summary() const {
   return out.str();
 }
 
-CudaOutputMapping CreateCudaOutputMapping(
-    const NetworkTensorPlan &tensor_plan,
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule,
-    CudaOutputMappingOptions options) {
+CudaOutputMapping
+CreateCudaOutputMapping(const NetworkTensorPlan &tensor_plan,
+                        const NetworkResolvedExecutionPlan &execution_plan,
+                        const CudaExecutionSchedule &schedule,
+                        CudaOutputMappingOptions options) {
   CudaOutputMapping mapping;
   if (!schedule.FullySupported()) {
-    AddError(mapping, "CUDA output mapping requires a fully supported schedule");
+    AddError(mapping,
+             "CUDA output mapping requires a fully supported schedule");
     return mapping;
   }
 
@@ -271,12 +273,10 @@ void CopyMappedOutputs(const CudaOutputMapping &mapping,
       throw std::runtime_error("CUDA output source width changed: " +
                                binding.source_stage);
     }
-    CopyDeviceFloatRows(TargetPointer(buffers, binding.target),
-                        binding.target_stride, stage->output,
-                        stage->output_width, batch_size, binding.source_width,
-                        "cudaMemcpy(" + CudaOutputTargetName(binding.target) +
-                            ")",
-                        stream);
+    CopyDeviceFloatRows(
+        TargetPointer(buffers, binding.target), binding.target_stride,
+        stage->output, stage->output_width, batch_size, binding.source_width,
+        "cudaMemcpy(" + CudaOutputTargetName(binding.target) + ")", stream);
   }
 }
 

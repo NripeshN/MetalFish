@@ -64,10 +64,12 @@ void LaunchResidualAddKernel(const float *parent, const float *secondary,
                              float secondary_scale,
                              cudaStream_t stream = nullptr);
 
-void LaunchResidualLayerNormKernel(
-    const float *parent, const float *secondary, const float *gamma,
-    const float *beta, float *residual, float *output, int rows, int width,
-    float secondary_scale, float epsilon, cudaStream_t stream = nullptr);
+void LaunchResidualLayerNormKernel(const float *parent, const float *secondary,
+                                   const float *gamma, const float *beta,
+                                   float *residual, float *output, int rows,
+                                   int width, float secondary_scale,
+                                   float epsilon,
+                                   cudaStream_t stream = nullptr);
 
 void LaunchAttentionScoreKernel(const float *query, const float *key,
                                 float *scores, int batch_size, int heads,
@@ -83,8 +85,7 @@ void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
                                   cudaStream_t stream = nullptr);
 
 void LaunchAttentionBiasSoftmaxKernel(float *scores, const float *bias,
-                                      float *probabilities, int rows,
-                                      int width,
+                                      float *probabilities, int rows, int width,
                                       cudaStream_t stream = nullptr);
 
 void LaunchAttentionContextKernel(const float *probabilities,
@@ -108,14 +109,15 @@ void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
 void LaunchDynamicPositionEncodingInputKernel(const float *expanded,
                                               float *position_input,
                                               int batch_size, int input_planes,
-                                              int position_planes,
-                                              int squares,
+                                              int position_planes, int squares,
                                               cudaStream_t stream = nullptr);
 
-void LaunchDynamicPositionEncodingConcatKernel(
-    const float *expanded, const float *position_encoding, float *output,
-    int batch_size, int input_planes, int position_width, int squares,
-    cudaStream_t stream = nullptr);
+void LaunchDynamicPositionEncodingConcatKernel(const float *expanded,
+                                               const float *position_encoding,
+                                               float *output, int batch_size,
+                                               int input_planes,
+                                               int position_width, int squares,
+                                               cudaStream_t stream = nullptr);
 
 CudaKernelSmokeResult RunDenseAffineKernelSmoke();
 CudaKernelSmokeResult RunLayerNormKernelSmoke();

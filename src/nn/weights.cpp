@@ -23,12 +23,10 @@ static constexpr float kEpsilon = 1e-5f;
 class LayerAdapter {
 public:
   explicit LayerAdapter(const MetalFishNN::Weights::Layer &layer)
-      : data_(DecodeLayer(layer)), dims_(layer.dims().begin(),
-                                         layer.dims().end()) {}
+      : data_(DecodeLayer(layer)),
+        dims_(layer.dims().begin(), layer.dims().end()) {}
 
-  BaseWeights::Vec as_vector() const {
-    return BaseWeights::Vec(data_, dims_);
-  }
+  BaseWeights::Vec as_vector() const { return BaseWeights::Vec(data_, dims_); }
 
 private:
   std::vector<float> data_;

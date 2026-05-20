@@ -27,29 +27,31 @@ enum class CudaPlanStageGroup {
 
 bool IsCudaDenseScheduleEntry(CudaExecutionScheduleKind kind);
 bool IsCudaOutputScheduleEntry(CudaExecutionScheduleKind kind);
-bool CudaStageNameStartsWith(std::string_view value,
-                             std::string_view prefix);
+bool CudaStageNameStartsWith(std::string_view value, std::string_view prefix);
 bool CudaStageNameEndsWith(std::string_view value, std::string_view suffix);
-std::string CudaPlanStagePrefix(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    CudaPlanStageGroup group);
-CudaPlanStageGroup ClassifyCudaPlanStage(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    std::string_view stage_name);
+std::string
+CudaPlanStagePrefix(const NetworkResolvedExecutionPlan &execution_plan,
+                    CudaPlanStageGroup group);
+CudaPlanStageGroup
+ClassifyCudaPlanStage(const NetworkResolvedExecutionPlan &execution_plan,
+                      std::string_view stage_name);
 bool IsCudaValueErrorStage(std::string_view stage_name);
-const CudaExecutionScheduleEntry *FindCudaStageEntry(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule, std::string_view stage_name);
+const CudaExecutionScheduleEntry *
+FindCudaStageEntry(const NetworkResolvedExecutionPlan &execution_plan,
+                   const CudaExecutionSchedule &schedule,
+                   std::string_view stage_name);
 int CudaDenseStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
                         const CudaExecutionScheduleEntry &entry);
 int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
                          const CudaExecutionScheduleEntry &entry);
-std::string LastCudaDenseStageInGroup(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule, CudaPlanStageGroup group);
-std::string LastCudaOutputStageInGroup(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule, CudaPlanStageGroup group);
+std::string
+LastCudaDenseStageInGroup(const NetworkResolvedExecutionPlan &execution_plan,
+                          const CudaExecutionSchedule &schedule,
+                          CudaPlanStageGroup group);
+std::string
+LastCudaOutputStageInGroup(const NetworkResolvedExecutionPlan &execution_plan,
+                           const CudaExecutionSchedule &schedule,
+                           CudaPlanStageGroup group);
 
 } // namespace Cuda
 } // namespace NN

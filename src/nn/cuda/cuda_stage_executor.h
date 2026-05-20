@@ -94,9 +94,7 @@ struct CudaStageTimingRecord {
 class CudaStageTimingCollector {
 public:
   void Add(std::string name, CudaExecutionScheduleKind kind, float millis);
-  const std::vector<CudaStageTimingRecord> &Records() const {
-    return records_;
-  }
+  const std::vector<CudaStageTimingRecord> &Records() const { return records_; }
   void Clear() { records_.clear(); }
 
 private:
@@ -113,15 +111,16 @@ private:
   std::vector<CudaStageInputBinding> bindings_;
 };
 
-CudaStageInputBindings CreateCudaStageInputBindings(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule);
+CudaStageInputBindings
+CreateCudaStageInputBindings(const NetworkResolvedExecutionPlan &execution_plan,
+                             const CudaExecutionSchedule &schedule);
 
-CudaDenseStageOutput ExecuteDenseActivationStage(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const NetworkResolvedExecutionStep &dense, const CudaWeightBuffers &weights,
-    const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int rows);
+CudaDenseStageOutput
+ExecuteDenseActivationStage(const NetworkResolvedExecutionPlan &execution_plan,
+                            const NetworkResolvedExecutionStep &dense,
+                            const CudaWeightBuffers &weights,
+                            const float *input, const CudaExecutionTape &tape,
+                            CudaExecutionWorkspace &workspace, int rows);
 
 CudaDenseStageOutput ExecuteDenseActivationLayerNormStage(
     const NetworkResolvedExecutionPlan &execution_plan,
@@ -137,16 +136,19 @@ CudaDenseStageOutput ExecuteDynamicPositionEncodingStage(
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
     int batch_size);
 
-CudaDenseStageOutput ExecuteGateStage(
-    const NetworkResolvedExecutionStep &gate, const CudaWeightBuffers &weights,
-    const float *input, int input_width, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int rows);
+CudaDenseStageOutput ExecuteGateStage(const NetworkResolvedExecutionStep &gate,
+                                      const CudaWeightBuffers &weights,
+                                      const float *input, int input_width,
+                                      const CudaExecutionTape &tape,
+                                      CudaExecutionWorkspace &workspace,
+                                      int rows);
 
-CudaDenseStageOutput ExecuteFeedForwardStage(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const NetworkResolvedExecutionStep &ffn, const CudaWeightBuffers &weights,
-    const float *input, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int rows);
+CudaDenseStageOutput
+ExecuteFeedForwardStage(const NetworkResolvedExecutionPlan &execution_plan,
+                        const NetworkResolvedExecutionStep &ffn,
+                        const CudaWeightBuffers &weights, const float *input,
+                        const CudaExecutionTape &tape,
+                        CudaExecutionWorkspace &workspace, int rows);
 
 CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
     const NetworkResolvedExecutionPlan &execution_plan,
@@ -159,9 +161,8 @@ CudaDenseStageOutput ExecuteAttentionPolicyMapStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &policy_map,
     const CudaWeightBuffers &weights,
-    const CudaDenseStageSequenceOutput &sequence,
-    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size);
+    const CudaDenseStageSequenceOutput &sequence, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size);
 
 CudaAttentionProjectionOutput ExecuteAttentionInputProjectionStage(
     const NetworkResolvedExecutionPlan &execution_plan,
@@ -182,13 +183,14 @@ CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
     const CudaWeightBuffers &weights, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size);
 
-CudaAttentionCoreOutput ExecuteAttentionCoreStage(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    std::size_t attention_step_index,
-    const CudaAttentionProjectionOutput &projections,
-    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size, const CudaWeightBuffers *weights = nullptr,
-    const float *parent = nullptr);
+CudaAttentionCoreOutput
+ExecuteAttentionCoreStage(const NetworkResolvedExecutionPlan &execution_plan,
+                          std::size_t attention_step_index,
+                          const CudaAttentionProjectionOutput &projections,
+                          const CudaExecutionTape &tape,
+                          CudaExecutionWorkspace &workspace, int batch_size,
+                          const CudaWeightBuffers *weights = nullptr,
+                          const float *parent = nullptr);
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,

@@ -7,9 +7,9 @@
 
 #include "cuda_kernels.h"
 
-#include "cuda_runtime_probe.h"
 #include "../metal/tables/attention_policy_map.h"
 #include "../network_tensor_plan.h"
+#include "cuda_runtime_probe.h"
 
 #include <cublas_v2.h>
 #include <cuda_runtime_api.h>
@@ -156,9 +156,8 @@ void DownloadFloats(std::vector<float> &host, const float *device,
                     const char *name) {
   if (host.empty())
     return;
-  const cudaError_t status =
-      cudaMemcpy(host.data(), device, host.size() * sizeof(float),
-                 cudaMemcpyDeviceToHost);
+  const cudaError_t status = cudaMemcpy(
+      host.data(), device, host.size() * sizeof(float), cudaMemcpyDeviceToHost);
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(name, status));
 }
@@ -257,8 +256,8 @@ __global__ void BiasActivationKernel(float *input, const float *bias,
 }
 
 __global__ void GateKernel(const float *input, const float *weights,
-                           float *output, int width, int total,
-                           int gate_rows, CudaGateKind kind) {
+                           float *output, int width, int total, int gate_rows,
+                           CudaGateKind kind) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index >= total)
     return;
@@ -266,11 +265,10 @@ __global__ void GateKernel(const float *input, const float *weights,
   const int row = index / width;
   const int column = index % width;
   const int gate_row = gate_rows == 1 ? 0 : row % gate_rows;
-  const float gate = gate_rows == 1 ? weights[column]
-                                    : weights[column * gate_rows + gate_row];
+  const float gate =
+      gate_rows == 1 ? weights[column] : weights[column * gate_rows + gate_row];
   const float value = input[index];
-  output[index] =
-      kind == CudaGateKind::Add ? value + gate : value * gate;
+  output[index] = kind == CudaGateKind::Add ? value + gate : value * gate;
 }
 
 __global__ void ResidualAddKernel(const float *parent, const float *secondary,
@@ -282,10 +280,12 @@ __global__ void ResidualAddKernel(const float *parent, const float *secondary,
   output[index] = parent[index] + secondary[index] * secondary_scale;
 }
 
-__global__ void ResidualLayerNormKernel(
-    const float *parent, const float *secondary, const float *gamma,
-    const float *beta, float *residual, float *output, int width,
-    float secondary_scale, float epsilon) {
+__global__ void ResidualLayerNormKernel(const float *parent,
+                                        const float *secondary,
+                                        const float *gamma, const float *beta,
+                                        float *residual, float *output,
+                                        int width, float secondary_scale,
+                                        float epsilon) {
   extern __shared__ float reductions[];
   float *sum_storage = reductions;
   float *square_storage = reductions + blockDim.x;
@@ -468,20 +468,20 @@ __global__ void AttentionPolicyPromotionKernel(const float *query,
     return;
 
   constexpr int kSquares = kPackedInputSquareCount;
-  constexpr int kPromotionCount = kNetworkAttentionPolicyScratch -
-                                  kPackedInputSquareCount *
-                                      kPackedInputSquareCount;
+  constexpr int kPromotionCount =
+      kNetworkAttentionPolicyScratch -
+      kPackedInputSquareCount * kPackedInputSquareCount;
   const int promo_index = index % kPromotionCount;
   const int batch = index / kPromotionCount;
   const int query_square = 48 + promo_index / 24;
   const int key_square = 56 + (promo_index % 24) / 3;
   const int promotion_row = promo_index % 3;
   const float *query_row =
-      query + (static_cast<std::size_t>(batch) * kSquares + query_square) *
-                  channels;
+      query +
+      (static_cast<std::size_t>(batch) * kSquares + query_square) * channels;
   const float *key_row =
-      key + (static_cast<std::size_t>(batch) * kSquares + key_square) *
-                channels;
+      key +
+      (static_cast<std::size_t>(batch) * kSquares + key_square) * channels;
 
   float value = 0.0f;
   const float scale = rsqrtf(static_cast<float>(channels));
@@ -505,12 +505,11 @@ __global__ void AttentionPolicyGatherKernel(const float *raw_policy,
   const int policy_index = index % kNetworkPolicyOutputs;
   const int batch = index / kNetworkPolicyOutputs;
   const int raw_index = kAttentionPolicyGatherDevice[policy_index];
-  policy[index] =
-      raw_index >= 0
-          ? raw_policy[static_cast<std::size_t>(batch) *
-                           kNetworkAttentionPolicyScratch +
-                       raw_index]
-          : 0.0f;
+  policy[index] = raw_index >= 0
+                      ? raw_policy[static_cast<std::size_t>(batch) *
+                                       kNetworkAttentionPolicyScratch +
+                                   raw_index]
+                      : 0.0f;
 }
 
 __global__ void ExpandPackedInputPlanesKernel(const std::uint64_t *masks,
@@ -594,24 +593,24 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
 
   const float alpha = 1.0f;
   const float beta = 0.0f;
-  cublas_status = cublasSgemm(
-      handle, CUBLAS_OP_T, CUBLAS_OP_N, output_width, batch_size, input_width,
-      &alpha, weights, input_width, input, input_width, &beta, output,
-      output_width);
+  cublas_status =
+      cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, output_width, batch_size,
+                  input_width, &alpha, weights, input_width, input, input_width,
+                  &beta, output, output_width);
   if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(CublasErrorMessage("cublasSgemm(dense_affine)",
-                                               cublas_status));
+    throw std::runtime_error(
+        CublasErrorMessage("cublasSgemm(dense_affine)", cublas_status));
   }
 
   constexpr int kThreads = 256;
   if (bias) {
     const int blocks = (total_outputs + kThreads - 1) / kThreads;
     BiasAddKernel<<<blocks, kThreads, 0, stream>>>(output, bias, output_width,
-                                                  total_outputs);
+                                                   total_outputs);
     cudaError_t status = cudaGetLastError();
     if (status != cudaSuccess)
-      throw std::runtime_error(CudaErrorMessage("BiasAddKernel launch",
-                                               status));
+      throw std::runtime_error(
+          CudaErrorMessage("BiasAddKernel launch", status));
   }
   if (stream)
     return;
@@ -655,7 +654,7 @@ void LaunchActivationKernel(const float *input, float *output, int elements,
   constexpr int kThreads = 256;
   const int blocks = (elements + kThreads - 1) / kThreads;
   ActivationKernel<<<blocks, kThreads, 0, stream>>>(input, output, elements,
-                                                   kind);
+                                                    kind);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(
@@ -682,7 +681,7 @@ void LaunchBiasActivationKernel(float *input, const float *bias, float *output,
   const int total = rows * width;
   const int blocks = (total + kThreads - 1) / kThreads;
   BiasActivationKernel<<<blocks, kThreads, 0, stream>>>(input, bias, output,
-                                                       width, total, kind);
+                                                        width, total, kind);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(
@@ -707,7 +706,7 @@ void LaunchGateKernel(const float *input, const float *weights, float *output,
   constexpr int kThreads = 256;
   const int blocks = (total + kThreads - 1) / kThreads;
   GateKernel<<<blocks, kThreads, 0, stream>>>(input, weights, output, width,
-                                             total, gate_rows, kind);
+                                              total, gate_rows, kind);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage("GateKernel launch", status));
@@ -715,8 +714,8 @@ void LaunchGateKernel(const float *input, const float *weights, float *output,
     return;
   status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
-    throw std::runtime_error(CudaErrorMessage("GateKernel synchronize",
-                                             status));
+    throw std::runtime_error(
+        CudaErrorMessage("GateKernel synchronize", status));
 }
 
 void LaunchResidualAddKernel(const float *parent, const float *secondary,
@@ -730,8 +729,8 @@ void LaunchResidualAddKernel(const float *parent, const float *secondary,
   const int total = batch_size * width;
   constexpr int kThreads = 256;
   const int blocks = (total + kThreads - 1) / kThreads;
-  ResidualAddKernel<<<blocks, kThreads, 0, stream>>>(
-      parent, secondary, output, total, secondary_scale);
+  ResidualAddKernel<<<blocks, kThreads, 0, stream>>>(parent, secondary, output,
+                                                     total, secondary_scale);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(
@@ -744,10 +743,11 @@ void LaunchResidualAddKernel(const float *parent, const float *secondary,
         CudaErrorMessage("ResidualAddKernel synchronize", status));
 }
 
-void LaunchResidualLayerNormKernel(
-    const float *parent, const float *secondary, const float *gamma,
-    const float *beta, float *residual, float *output, int rows, int width,
-    float secondary_scale, float epsilon, cudaStream_t stream) {
+void LaunchResidualLayerNormKernel(const float *parent, const float *secondary,
+                                   const float *gamma, const float *beta,
+                                   float *residual, float *output, int rows,
+                                   int width, float secondary_scale,
+                                   float epsilon, cudaStream_t stream) {
   if (!parent || !secondary || !gamma || !beta || !residual || !output) {
     throw std::runtime_error(
         "CUDA residual layernorm kernel received null buffer");
@@ -760,8 +760,8 @@ void LaunchResidualLayerNormKernel(
   constexpr int kThreads = 256;
   const std::size_t shared_bytes = 2 * kThreads * sizeof(float);
   ResidualLayerNormKernel<<<rows, kThreads, shared_bytes, stream>>>(
-      parent, secondary, gamma, beta, residual, output, width,
-      secondary_scale, epsilon);
+      parent, secondary, gamma, beta, residual, output, width, secondary_scale,
+      epsilon);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess) {
     throw std::runtime_error(
@@ -781,7 +781,8 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
                                 int squares, int head_depth, int qkv_width,
                                 float scale, cudaStream_t stream) {
   if (!query || !key || !scores)
-    throw std::runtime_error("CUDA attention score kernel received null buffer");
+    throw std::runtime_error(
+        "CUDA attention score kernel received null buffer");
   if (batch_size <= 0 || heads <= 0 || squares <= 0 || head_depth <= 0 ||
       qkv_width <= 0 || qkv_width != heads * head_depth || scale <= 0.0f) {
     throw std::runtime_error("CUDA attention score dimensions are invalid");
@@ -796,8 +797,7 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
 
   const float beta = 0.0f;
   const long long head_stride = head_depth;
-  const long long score_stride =
-      static_cast<long long>(squares) * squares;
+  const long long score_stride = static_cast<long long>(squares) * squares;
   const std::size_t qkv_batch_stride =
       static_cast<std::size_t>(squares) * qkv_width;
   const std::size_t score_batch_stride =
@@ -807,9 +807,9 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
     const float *key_base = key + batch * qkv_batch_stride;
     float *score_base = scores + batch * score_batch_stride;
     cublas_status = cublasSgemmStridedBatched(
-        handle, CUBLAS_OP_T, CUBLAS_OP_N, squares, squares, head_depth,
-        &scale, key_base, qkv_width, head_stride, query_base, qkv_width,
-        head_stride, &beta, score_base, squares, score_stride, heads);
+        handle, CUBLAS_OP_T, CUBLAS_OP_N, squares, squares, head_depth, &scale,
+        key_base, qkv_width, head_stride, query_base, qkv_width, head_stride,
+        &beta, score_base, squares, score_stride, heads);
     if (cublas_status != CUBLAS_STATUS_SUCCESS) {
       throw std::runtime_error(CublasErrorMessage(
           "cublasSgemmStridedBatched(attention_score)", cublas_status));
@@ -873,8 +873,8 @@ void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
 }
 
 void LaunchAttentionBiasSoftmaxKernel(float *scores, const float *bias,
-                                      float *probabilities, int rows,
-                                      int width, cudaStream_t stream) {
+                                      float *probabilities, int rows, int width,
+                                      cudaStream_t stream) {
   if (!scores || !bias || !probabilities)
     throw std::runtime_error(
         "CUDA attention bias softmax kernel received null buffer");
@@ -933,10 +933,9 @@ void LaunchAttentionContextKernel(const float *probabilities,
         probabilities + batch * probability_batch_stride;
     float *context_base = context + batch * qkv_batch_stride;
     cublas_status = cublasSgemmStridedBatched(
-        handle, CUBLAS_OP_N, CUBLAS_OP_N, head_depth, squares, squares,
-        &alpha, value_base, qkv_width, head_stride, probability_base, squares,
-        probability_stride, &beta, context_base, qkv_width, head_stride,
-        heads);
+        handle, CUBLAS_OP_N, CUBLAS_OP_N, head_depth, squares, squares, &alpha,
+        value_base, qkv_width, head_stride, probability_base, squares,
+        probability_stride, &beta, context_base, qkv_width, head_stride, heads);
     if (cublas_status != CUBLAS_STATUS_SUCCESS) {
       throw std::runtime_error(CublasErrorMessage(
           "cublasSgemmStridedBatched(attention_context)", cublas_status));
@@ -960,7 +959,8 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
         "CUDA attention policy map kernel received null buffer");
   }
   if (batch_size <= 0 || channels <= 0) {
-    throw std::runtime_error("CUDA attention policy map dimensions are invalid");
+    throw std::runtime_error(
+        "CUDA attention policy map dimensions are invalid");
   }
 
   EnsureAttentionPolicyGatherMapUploaded();
@@ -975,8 +975,7 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
   constexpr int kSquares = kPackedInputSquareCount;
   const float alpha = 1.0f / std::sqrt(static_cast<float>(channels));
   const float beta = 0.0f;
-  const long long input_stride =
-      static_cast<long long>(kSquares) * channels;
+  const long long input_stride = static_cast<long long>(kSquares) * channels;
   const long long raw_policy_stride = kNetworkAttentionPolicyScratch;
   cublas_status = cublasSgemmStridedBatched(
       handle, CUBLAS_OP_T, CUBLAS_OP_N, kSquares, kSquares, channels, &alpha,
@@ -1022,7 +1021,8 @@ void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
                                          int batch_size, int planes,
                                          int squares, cudaStream_t stream) {
   if (!masks || !values || !expanded)
-    throw std::runtime_error("CUDA input expansion kernel received null buffer");
+    throw std::runtime_error(
+        "CUDA input expansion kernel received null buffer");
   if (batch_size <= 0 || planes <= 0 || squares <= 0 || squares > 64) {
     throw std::runtime_error("CUDA input expansion dimensions are invalid");
   }
@@ -1041,8 +1041,8 @@ void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
     return;
   status = cudaDeviceSynchronize();
   if (status != cudaSuccess) {
-    throw std::runtime_error(CudaErrorMessage(
-        "ExpandPackedInputPlanesKernel synchronize", status));
+    throw std::runtime_error(
+        CudaErrorMessage("ExpandPackedInputPlanesKernel synchronize", status));
   }
 }
 
@@ -1068,8 +1068,8 @@ void LaunchDynamicPositionEncodingInputKernel(const float *expanded,
       expanded, position_input, input_planes, position_planes, squares, total);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess) {
-    throw std::runtime_error(CudaErrorMessage(
-        "DynamicPositionEncodingInputKernel launch", status));
+    throw std::runtime_error(
+        CudaErrorMessage("DynamicPositionEncodingInputKernel launch", status));
   }
   if (stream)
     return;
@@ -1080,10 +1080,12 @@ void LaunchDynamicPositionEncodingInputKernel(const float *expanded,
   }
 }
 
-void LaunchDynamicPositionEncodingConcatKernel(
-    const float *expanded, const float *position_encoding, float *output,
-    int batch_size, int input_planes, int position_width, int squares,
-    cudaStream_t stream) {
+void LaunchDynamicPositionEncodingConcatKernel(const float *expanded,
+                                               const float *position_encoding,
+                                               float *output, int batch_size,
+                                               int input_planes,
+                                               int position_width, int squares,
+                                               cudaStream_t stream) {
   if (!expanded || !position_encoding || !output) {
     throw std::runtime_error(
         "CUDA dynamic position concat kernel received null buffer");
@@ -1103,8 +1105,8 @@ void LaunchDynamicPositionEncodingConcatKernel(
       squares, output_width, total);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess) {
-    throw std::runtime_error(CudaErrorMessage(
-        "DynamicPositionEncodingConcatKernel launch", status));
+    throw std::runtime_error(
+        CudaErrorMessage("DynamicPositionEncodingConcatKernel launch", status));
   }
   if (stream)
     return;
@@ -1129,14 +1131,11 @@ CudaKernelSmokeResult RunDenseAffineKernelSmoke() {
   constexpr int kInput = 3;
   constexpr int kOutput = 4;
   const std::vector<float> input = {
-      1.0f, 2.0f, 3.0f,
-      -1.0f, 0.5f, 2.0f,
+      1.0f, 2.0f, 3.0f, -1.0f, 0.5f, 2.0f,
   };
   const std::vector<float> weights = {
-      1.0f, 0.0f, -1.0f,
-      0.5f, 0.5f, 0.5f,
-      -2.0f, 1.0f, 0.25f,
-      0.0f, -1.0f, 2.0f,
+      1.0f,  0.0f, -1.0f, 0.5f, 0.5f,  0.5f,
+      -2.0f, 1.0f, 0.25f, 0.0f, -1.0f, 2.0f,
   };
   const std::vector<float> bias = {0.25f, -1.0f, 0.5f, 2.0f};
   std::vector<float> actual(kBatch * kOutput, 0.0f);
@@ -1159,7 +1158,8 @@ CudaKernelSmokeResult RunDenseAffineKernelSmoke() {
   float *device_output = nullptr;
   try {
     AllocateDevice(&device_input, input.size(), "cudaMalloc(dense_input)");
-    AllocateDevice(&device_weights, weights.size(), "cudaMalloc(dense_weights)");
+    AllocateDevice(&device_weights, weights.size(),
+                   "cudaMalloc(dense_weights)");
     AllocateDevice(&device_bias, bias.size(), "cudaMalloc(dense_bias)");
     AllocateDevice(&device_output, actual.size(), "cudaMalloc(dense_output)");
 
@@ -1209,11 +1209,11 @@ CudaKernelSmokeResult RunActivationKernelSmoke() {
   }
 
   const std::vector<float> input = {-3.0f, -1.0f, -0.25f, 0.0f,
-                                    0.25f, 1.0f, 3.0f};
+                                    0.25f, 1.0f,  3.0f};
   const std::vector<CudaActivationKind> activations = {
-      CudaActivationKind::Relu,    CudaActivationKind::Relu2,
-      CudaActivationKind::Tanh,    CudaActivationKind::Sigmoid,
-      CudaActivationKind::Swish,   CudaActivationKind::Mish,
+      CudaActivationKind::Relu,  CudaActivationKind::Relu2,
+      CudaActivationKind::Tanh,  CudaActivationKind::Sigmoid,
+      CudaActivationKind::Swish, CudaActivationKind::Mish,
       CudaActivationKind::Selu,
   };
 
@@ -1304,9 +1304,8 @@ CudaKernelSmokeResult RunLayerNormKernelSmoke() {
   constexpr int kWidth = 5;
   constexpr float kEpsilon = 1e-5f;
   const std::vector<float> input = {
-      1.0f, 2.0f, 4.0f, 8.0f, 16.0f,
-      -3.0f, -1.0f, 0.0f, 1.0f, 3.0f,
-      0.25f, 0.25f, 0.25f, 0.25f, 0.25f,
+      1.0f, 2.0f, 4.0f,  8.0f,  16.0f, -3.0f, -1.0f, 0.0f,
+      1.0f, 3.0f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f,
   };
   const std::vector<float> gamma = {1.0f, 0.5f, -1.5f, 2.0f, 0.25f};
   const std::vector<float> beta = {0.0f, -0.25f, 0.5f, 1.0f, -1.0f};
@@ -1392,18 +1391,14 @@ CudaKernelSmokeResult RunGateKernelSmoke() {
   constexpr int kRows = 4;
   constexpr int kWidth = 4;
   const std::vector<float> input = {
-      1.0f, -2.0f, 0.5f, 3.0f,
-      -1.0f, 0.25f, 2.0f, -0.5f,
-      0.75f, -1.25f, 1.5f, 0.0f,
-      -0.75f, 1.25f, -1.5f, 0.5f,
+      1.0f,  -2.0f,  0.5f, 3.0f, -1.0f,  0.25f, 2.0f,  -0.5f,
+      0.75f, -1.25f, 1.5f, 0.0f, -0.75f, 1.25f, -1.5f, 0.5f,
   };
   const std::vector<float> mult_gate = {
-      2.0f, -0.5f, 4.0f, 0.25f,
-      -1.0f, 0.75f, 0.5f, 3.0f,
+      2.0f, -0.5f, 4.0f, 0.25f, -1.0f, 0.75f, 0.5f, 3.0f,
   };
   const std::vector<float> add_gate = {
-      0.5f, 1.0f, -2.0f, 3.0f,
-      -0.25f, 0.5f, 1.5f, -1.0f,
+      0.5f, 1.0f, -2.0f, 3.0f, -0.25f, 0.5f, 1.5f, -1.0f,
   };
   std::vector<float> actual(kRows * kWidth, 0.0f);
   std::vector<float> expected(kRows * kWidth, 0.0f);
@@ -1411,10 +1406,9 @@ CudaKernelSmokeResult RunGateKernelSmoke() {
   for (int b = 0; b < kRows; ++b) {
     for (int i = 0; i < kWidth; ++i) {
       const std::size_t index = static_cast<std::size_t>(b) * kWidth + i;
-      const std::size_t gate_index =
-          static_cast<std::size_t>(i) * 2 + (b % 2);
-      expected[index] = input[index] * mult_gate[gate_index] +
-                        add_gate[gate_index];
+      const std::size_t gate_index = static_cast<std::size_t>(i) * 2 + (b % 2);
+      expected[index] =
+          input[index] * mult_gate[gate_index] + add_gate[gate_index];
     }
   }
 
@@ -1431,10 +1425,10 @@ CudaKernelSmokeResult RunGateKernelSmoke() {
     UploadFloats(device_mult, mult_gate, "cudaMemcpy(gate_mult)");
     UploadFloats(device_add, add_gate, "cudaMemcpy(gate_add)");
 
-    LaunchGateKernel(device_input, device_mult, device_output, kRows, kWidth,
-                     2, CudaGateKind::Multiply);
-    LaunchGateKernel(device_output, device_add, device_output, kRows, kWidth,
-                     2, CudaGateKind::Add);
+    LaunchGateKernel(device_input, device_mult, device_output, kRows, kWidth, 2,
+                     CudaGateKind::Multiply);
+    LaunchGateKernel(device_output, device_add, device_output, kRows, kWidth, 2,
+                     CudaGateKind::Add);
     DownloadFloats(actual, device_output, "cudaMemcpy(gate_output)");
 
     for (std::size_t i = 0; i < actual.size(); ++i) {
@@ -1475,12 +1469,10 @@ CudaKernelSmokeResult RunResidualAddKernelSmoke() {
   constexpr int kWidth = 4;
   constexpr float kScale = 0.375f;
   const std::vector<float> parent = {
-      1.0f, -2.0f, 0.5f, 3.0f,
-      -1.0f, 0.25f, 2.0f, -0.5f,
+      1.0f, -2.0f, 0.5f, 3.0f, -1.0f, 0.25f, 2.0f, -0.5f,
   };
   const std::vector<float> secondary = {
-      2.0f, 0.5f, -4.0f, 1.5f,
-      -2.5f, 3.0f, 0.25f, -1.0f,
+      2.0f, 0.5f, -4.0f, 1.5f, -2.5f, 3.0f, 0.25f, -1.0f,
   };
   std::vector<float> actual(kBatch * kWidth, 0.0f);
   std::vector<float> expected(kBatch * kWidth, 0.0f);
@@ -1498,8 +1490,7 @@ CudaKernelSmokeResult RunResidualAddKernelSmoke() {
     AllocateDevice(&device_output, actual.size(),
                    "cudaMalloc(residual_output)");
     UploadFloats(device_parent, parent, "cudaMemcpy(residual_parent)");
-    UploadFloats(device_secondary, secondary,
-                 "cudaMemcpy(residual_secondary)");
+    UploadFloats(device_secondary, secondary, "cudaMemcpy(residual_secondary)");
 
     LaunchResidualAddKernel(device_parent, device_secondary, device_output,
                             kBatch, kWidth, kScale);
@@ -1564,17 +1555,16 @@ CudaKernelSmokeResult RunAttentionCoreKernelSmoke() {
           float dot = 0.0f;
           for (int depth = 0; depth < kHeadDepth; ++depth) {
             const int column = head * kHeadDepth + depth;
-            dot += query[(static_cast<std::size_t>(batch) * kSquares +
-                          query_square) *
-                             kQkv +
-                         column] *
-                   key[(static_cast<std::size_t>(batch) * kSquares +
-                        key_square) *
-                           kQkv +
-                       column];
+            dot +=
+                query[(static_cast<std::size_t>(batch) * kSquares +
+                       query_square) *
+                          kQkv +
+                      column] *
+                key[(static_cast<std::size_t>(batch) * kSquares + key_square) *
+                        kQkv +
+                    column];
           }
-          expected_scores[((batch * kHeads + head) * kSquares +
-                           query_square) *
+          expected_scores[((batch * kHeads + head) * kSquares + query_square) *
                               kSquares +
                           key_square] = dot * kScale;
         }
@@ -1591,8 +1581,8 @@ CudaKernelSmokeResult RunAttentionCoreKernelSmoke() {
       max_value = std::max(max_value, expected_scores[offset + col]);
     float sum = 0.0f;
     for (int col = 0; col < kSquares; ++col) {
-      const float probability = std::exp(expected_scores[offset + col] -
-                                         max_value);
+      const float probability =
+          std::exp(expected_scores[offset + col] - max_value);
       expected_probabilities[offset + col] = probability;
       sum += probability;
     }
@@ -1611,11 +1601,11 @@ CudaKernelSmokeResult RunAttentionCoreKernelSmoke() {
             kSquares;
         float sum = 0.0f;
         for (int key_square = 0; key_square < kSquares; ++key_square) {
-          sum += expected_probabilities[probability_offset + key_square] *
-                 value[(static_cast<std::size_t>(batch) * kSquares +
-                        key_square) *
-                           kQkv +
-                       column];
+          sum +=
+              expected_probabilities[probability_offset + key_square] *
+              value[(static_cast<std::size_t>(batch) * kSquares + key_square) *
+                        kQkv +
+                    column];
         }
         expected_context[(static_cast<std::size_t>(batch) * kSquares +
                           query_square) *
@@ -1756,11 +1746,9 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
         expected_position_input[(static_cast<std::size_t>(batch) * kSquares +
                                  square) *
                                     kPositionPlanes +
-                                plane] =
-            expected_expanded[(static_cast<std::size_t>(batch) * kSquares +
-                               square) *
-                                  kPlanes +
-                              plane];
+                                plane] = expected_expanded
+            [(static_cast<std::size_t>(batch) * kSquares + square) * kPlanes +
+             plane];
       }
     }
   }
@@ -1781,11 +1769,9 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
                 kOutputWidth +
             channel;
         if (channel < kPlanes) {
-          expected_output[output_index] =
-              expected_expanded[(static_cast<std::size_t>(batch) * kSquares +
-                                 square) *
-                                    kPlanes +
-                                channel];
+          expected_output[output_index] = expected_expanded
+              [(static_cast<std::size_t>(batch) * kSquares + square) * kPlanes +
+               channel];
         } else {
           expected_output[output_index] =
               position_encoding[(static_cast<std::size_t>(batch) * kSquares +
@@ -1820,13 +1806,12 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
     AllocateDevice(&device_output, actual_output.size(),
                    "cudaMalloc(dynamic_position_output)");
 
-    cudaError_t status =
-        cudaMemcpy(device_masks, masks.data(),
-                   masks.size() * sizeof(std::uint64_t),
-                   cudaMemcpyHostToDevice);
+    cudaError_t status = cudaMemcpy(device_masks, masks.data(),
+                                    masks.size() * sizeof(std::uint64_t),
+                                    cudaMemcpyHostToDevice);
     if (status != cudaSuccess)
-      throw std::runtime_error(CudaErrorMessage("cudaMemcpy(dynamic_masks)",
-                                               status));
+      throw std::runtime_error(
+          CudaErrorMessage("cudaMemcpy(dynamic_masks)", status));
     UploadFloats(device_values, values, "cudaMemcpy(dynamic_values)");
     UploadFloats(device_position_encoding, position_encoding,
                  "cudaMemcpy(dynamic_position_encoding)");

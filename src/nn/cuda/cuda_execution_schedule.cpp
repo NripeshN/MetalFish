@@ -20,8 +20,9 @@ bool IsBoundary(NetworkExecutionOpKind kind) {
          kind == NetworkExecutionOpKind::OutputDecode;
 }
 
-CudaExecutionScheduleEntry BoundaryEntry(
-    const NetworkResolvedExecutionPlan &plan, std::size_t step_index) {
+CudaExecutionScheduleEntry
+BoundaryEntry(const NetworkResolvedExecutionPlan &plan,
+              std::size_t step_index) {
   const auto &step = plan.steps[step_index];
   return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::Boundary,
                                     step_index,
@@ -31,28 +32,30 @@ CudaExecutionScheduleEntry BoundaryEntry(
                                     "handled by CUDA buffer plumbing"};
 }
 
-CudaExecutionScheduleEntry DenseLayerNormEntry(
-    const NetworkResolvedExecutionPlan &plan, std::size_t dense_index,
-    std::size_t norm_index) {
+CudaExecutionScheduleEntry
+DenseLayerNormEntry(const NetworkResolvedExecutionPlan &plan,
+                    std::size_t dense_index, std::size_t norm_index) {
   const auto &dense = plan.steps[dense_index];
-  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::DenseLayerNormStage,
-                                    dense_index,
-                                    norm_index,
-                                    dense.kind,
-                                    dense.name + " -> " +
-                                        plan.steps[norm_index].name,
-                                    "dense activation plus layernorm"};
+  return CudaExecutionScheduleEntry{
+      CudaExecutionScheduleKind::DenseLayerNormStage,
+      dense_index,
+      norm_index,
+      dense.kind,
+      dense.name + " -> " + plan.steps[norm_index].name,
+      "dense activation plus layernorm"};
 }
 
-CudaExecutionScheduleEntry DenseActivationEntry(
-    const NetworkResolvedExecutionPlan &plan, std::size_t dense_index) {
+CudaExecutionScheduleEntry
+DenseActivationEntry(const NetworkResolvedExecutionPlan &plan,
+                     std::size_t dense_index) {
   const auto &dense = plan.steps[dense_index];
-  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::DenseActivationStage,
-                                    dense_index,
-                                    std::numeric_limits<std::size_t>::max(),
-                                    dense.kind,
-                                    dense.name,
-                                    "dense activation"};
+  return CudaExecutionScheduleEntry{
+      CudaExecutionScheduleKind::DenseActivationStage,
+      dense_index,
+      std::numeric_limits<std::size_t>::max(),
+      dense.kind,
+      dense.name,
+      "dense activation"};
 }
 
 CudaExecutionScheduleEntry GateEntry(const NetworkResolvedExecutionPlan &plan,
@@ -66,9 +69,9 @@ CudaExecutionScheduleEntry GateEntry(const NetworkResolvedExecutionPlan &plan,
                                     "elementwise gate"};
 }
 
-CudaExecutionScheduleEntry AttentionLayerNormEntry(
-    const NetworkResolvedExecutionPlan &plan, std::size_t attention_index,
-    std::size_t norm_index) {
+CudaExecutionScheduleEntry
+AttentionLayerNormEntry(const NetworkResolvedExecutionPlan &plan,
+                        std::size_t attention_index, std::size_t norm_index) {
   const auto &attention = plan.steps[attention_index];
   return CudaExecutionScheduleEntry{
       CudaExecutionScheduleKind::AttentionLayerNormStage,
@@ -79,9 +82,9 @@ CudaExecutionScheduleEntry AttentionLayerNormEntry(
       "attention core plus residual layernorm"};
 }
 
-CudaExecutionScheduleEntry FeedForwardLayerNormEntry(
-    const NetworkResolvedExecutionPlan &plan, std::size_t ffn_index,
-    std::size_t norm_index) {
+CudaExecutionScheduleEntry
+FeedForwardLayerNormEntry(const NetworkResolvedExecutionPlan &plan,
+                          std::size_t ffn_index, std::size_t norm_index) {
   const auto &ffn = plan.steps[ffn_index];
   return CudaExecutionScheduleEntry{
       CudaExecutionScheduleKind::FeedForwardLayerNormStage,
@@ -92,32 +95,33 @@ CudaExecutionScheduleEntry FeedForwardLayerNormEntry(
       "feed-forward residual plus layernorm"};
 }
 
-CudaExecutionScheduleEntry FeedForwardEntry(
-    const NetworkResolvedExecutionPlan &plan, std::size_t ffn_index) {
+CudaExecutionScheduleEntry
+FeedForwardEntry(const NetworkResolvedExecutionPlan &plan,
+                 std::size_t ffn_index) {
   const auto &ffn = plan.steps[ffn_index];
-  return CudaExecutionScheduleEntry{
-      CudaExecutionScheduleKind::FeedForwardStage,
-      ffn_index,
-      std::numeric_limits<std::size_t>::max(),
-      ffn.kind,
-      ffn.name,
-      "feed-forward block"};
+  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::FeedForwardStage,
+                                    ffn_index,
+                                    std::numeric_limits<std::size_t>::max(),
+                                    ffn.kind,
+                                    ffn.name,
+                                    "feed-forward block"};
 }
 
-CudaExecutionScheduleEntry PolicyMapEntry(
-    const NetworkResolvedExecutionPlan &plan, std::size_t policy_map_index) {
+CudaExecutionScheduleEntry
+PolicyMapEntry(const NetworkResolvedExecutionPlan &plan,
+               std::size_t policy_map_index) {
   const auto &policy_map = plan.steps[policy_map_index];
-  return CudaExecutionScheduleEntry{
-      CudaExecutionScheduleKind::PolicyMapStage,
-      policy_map_index,
-      std::numeric_limits<std::size_t>::max(),
-      policy_map.kind,
-      policy_map.name,
-      "attention policy scratch mapping"};
+  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::PolicyMapStage,
+                                    policy_map_index,
+                                    std::numeric_limits<std::size_t>::max(),
+                                    policy_map.kind,
+                                    policy_map.name,
+                                    "attention policy scratch mapping"};
 }
 
-CudaExecutionScheduleEntry PositionalEncodingEntry(
-    const NetworkResolvedExecutionPlan &plan, std::size_t positional_index) {
+CudaExecutionScheduleEntry
+PositionalEncodingEntry(const NetworkResolvedExecutionPlan &plan,
+                        std::size_t positional_index) {
   const auto &positional = plan.steps[positional_index];
   return CudaExecutionScheduleEntry{
       CudaExecutionScheduleKind::PositionalEncodingStage,
@@ -128,9 +132,9 @@ CudaExecutionScheduleEntry PositionalEncodingEntry(
       "global positional encoding weights"};
 }
 
-CudaExecutionScheduleEntry UnsupportedEntry(
-    const NetworkResolvedExecutionPlan &plan, std::size_t step_index,
-    std::string reason) {
+CudaExecutionScheduleEntry
+UnsupportedEntry(const NetworkResolvedExecutionPlan &plan,
+                 std::size_t step_index, std::string reason) {
   const auto &step = plan.steps[step_index];
   return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::Unsupported,
                                     step_index,
@@ -231,15 +235,13 @@ std::string CudaExecutionSchedule::Summary() const {
   out << entries.size() << " CUDA schedule entries, "
       << dense_activation_stage_count << " dense/activation stages, "
       << dense_layernorm_stage_count << " dense/layernorm stages, "
-      << gate_stage_count << " gate stages, "
-      << attention_layernorm_stage_count << " attention/layernorm stages, "
-      << feed_forward_stage_count << " feed-forward stages, "
-      << feed_forward_layernorm_stage_count
-      << " feed-forward/layernorm stages, "
-      << policy_map_stage_count << " policy-map stages, "
-      << positional_encoding_stage_count << " positional encoding stages, "
-      << boundary_count << " boundaries, " << unsupported_count
-      << " unsupported";
+      << gate_stage_count << " gate stages, " << attention_layernorm_stage_count
+      << " attention/layernorm stages, " << feed_forward_stage_count
+      << " feed-forward stages, " << feed_forward_layernorm_stage_count
+      << " feed-forward/layernorm stages, " << policy_map_stage_count
+      << " policy-map stages, " << positional_encoding_stage_count
+      << " positional encoding stages, " << boundary_count << " boundaries, "
+      << unsupported_count << " unsupported";
   if (const auto *unsupported = FirstUnsupported()) {
     out << "; first unsupported: " << unsupported->name << " ("
         << NetworkExecutionOpKindName(unsupported->op_kind)
@@ -291,8 +293,7 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
           IsSmolgenNormFor(plan.steps[smolgen_norm_index], step) &&
           plan.steps[layernorm_index].kind ==
               NetworkExecutionOpKind::LayerNorm) {
-        AddEntry(schedule,
-                 AttentionLayerNormEntry(plan, i, layernorm_index));
+        AddEntry(schedule, AttentionLayerNormEntry(plan, i, layernorm_index));
         i = layernorm_index;
         continue;
       }

@@ -27,8 +27,7 @@ struct BaseWeights {
     Vec() = default;
     explicit Vec(std::vector<float> values,
                  std::vector<std::uint32_t> layer_dims = {})
-        : std::vector<float>(std::move(values)),
-          dims(std::move(layer_dims)) {}
+        : std::vector<float>(std::move(values)), dims(std::move(layer_dims)) {}
 
     std::vector<std::uint32_t> dims;
   };

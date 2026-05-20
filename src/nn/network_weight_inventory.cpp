@@ -25,8 +25,7 @@ std::vector<std::uint32_t> TensorDims(const BaseWeights::Vec &values) {
 }
 
 void AddVector(NetworkWeightInventory &inventory, std::string name,
-               const BaseWeights::Vec &values,
-               NetworkWeightTensorKind kind) {
+               const BaseWeights::Vec &values, NetworkWeightTensorKind kind) {
   if (values.empty())
     return;
   inventory.tensors.push_back(NetworkWeightTensorView{
@@ -133,10 +132,9 @@ void AddBodyWeights(NetworkWeightInventory &inventory,
             NetworkWeightTensorKind::Gate);
   AddFFN(inventory, "body.ip_emb_ffn", weights.ip_emb_ffn);
   AddVector(inventory, "body.ip_emb_ffn_ln_gammas",
-            weights.ip_emb_ffn_ln_gammas,
-            NetworkWeightTensorKind::NormScale);
-  AddVector(inventory, "body.ip_emb_ffn_ln_betas",
-            weights.ip_emb_ffn_ln_betas, NetworkWeightTensorKind::NormBias);
+            weights.ip_emb_ffn_ln_gammas, NetworkWeightTensorKind::NormScale);
+  AddVector(inventory, "body.ip_emb_ffn_ln_betas", weights.ip_emb_ffn_ln_betas,
+            NetworkWeightTensorKind::NormBias);
   AddVector(inventory, "body.smolgen_w", weights.smolgen_w,
             NetworkWeightTensorKind::PositionalEncoding);
 
@@ -285,8 +283,8 @@ bool NetworkWeightInventory::AllShapesMatchElements(std::string *error) const {
       if (error) {
         std::ostringstream out;
         out << tensor.name << " shape " << tensor.ShapeString()
-            << " has product " << tensor.ShapeElements()
-            << " but tensor has " << tensor.elements << " elements";
+            << " has product " << tensor.ShapeElements() << " but tensor has "
+            << tensor.elements << " elements";
         *error = out.str();
       }
       return false;

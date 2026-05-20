@@ -51,11 +51,11 @@ struct CudaOutputMapping {
   std::string Summary() const;
 };
 
-CudaOutputMapping CreateCudaOutputMapping(
-    const NetworkTensorPlan &tensor_plan,
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const CudaExecutionSchedule &schedule,
-    CudaOutputMappingOptions options = {});
+CudaOutputMapping
+CreateCudaOutputMapping(const NetworkTensorPlan &tensor_plan,
+                        const NetworkResolvedExecutionPlan &execution_plan,
+                        const CudaExecutionSchedule &schedule,
+                        CudaOutputMappingOptions options = {});
 
 void CopyMappedOutputs(const CudaOutputMapping &mapping,
                        const CudaDenseStageSequenceOutput &sequence,

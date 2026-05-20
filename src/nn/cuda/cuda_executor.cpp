@@ -111,22 +111,18 @@ void PrintCudaProfileReport(int report_index, int batch_size,
   std::vector<CudaProfileBucket> buckets;
   for (const auto &record : timings.Records())
     AddCudaProfileBucket(buckets, record);
-  std::sort(buckets.begin(), buckets.end(),
-            [](const auto &lhs, const auto &rhs) {
-              return lhs.millis > rhs.millis;
-            });
+  std::sort(
+      buckets.begin(), buckets.end(),
+      [](const auto &lhs, const auto &rhs) { return lhs.millis > rhs.millis; });
 
   std::vector<CudaStageTimingRecord> slowest = timings.Records();
-  std::sort(slowest.begin(), slowest.end(), [](const auto &lhs,
-                                               const auto &rhs) {
-    return lhs.millis > rhs.millis;
-  });
+  std::sort(
+      slowest.begin(), slowest.end(),
+      [](const auto &lhs, const auto &rhs) { return lhs.millis > rhs.millis; });
 
   std::cerr << std::fixed << std::setprecision(3)
-            << "CUDA profile report=" << report_index
-            << " batch=" << batch_size
-            << " sequence_ms=" << sequence_ms
-            << " output_sync_ms=" << output_ms
+            << "CUDA profile report=" << report_index << " batch=" << batch_size
+            << " sequence_ms=" << sequence_ms << " output_sync_ms=" << output_ms
             << " workspace_mb="
             << (static_cast<double>(workspace_bytes) / (1024.0 * 1024.0))
             << " stages=" << timings.Records().size() << '\n';
@@ -174,9 +170,10 @@ public:
 
 class NullCudaExecutor final : public CudaExecutor {
 public:
-  void Execute(const NetworkTensorPlan &plan, const NetworkResolvedExecutionPlan &,
-               const CudaWeightBuffers &, CudaInferenceBuffers &buffers,
-               CudaExecutionWorkspace &, int batch_size) override {
+  void Execute(const NetworkTensorPlan &plan,
+               const NetworkResolvedExecutionPlan &, const CudaWeightBuffers &,
+               CudaInferenceBuffers &buffers, CudaExecutionWorkspace &,
+               int batch_size) override {
     std::vector<float> policy(plan.PolicyEntries(batch_size), 0.0f);
     std::vector<float> value(plan.ValueEntries(batch_size), 0.0f);
     std::vector<float> moves_left(plan.MovesLeftEntries(batch_size), 0.0f);
@@ -260,12 +257,14 @@ public:
     if (!buffers.input_masks || !buffers.input_values || !buffers.policy)
       throw std::runtime_error("CUDA resolved executor received no buffers");
     if (!schedule_.FullySupported()) {
-      throw std::runtime_error("CUDA resolved executor schedule is unsupported: " +
-                               schedule_.Summary());
+      throw std::runtime_error(
+          "CUDA resolved executor schedule is unsupported: " +
+          schedule_.Summary());
     }
     if (!output_mapping_.ok()) {
-      throw std::runtime_error("CUDA resolved executor output mapping failed: " +
-                               output_mapping_.Summary());
+      throw std::runtime_error(
+          "CUDA resolved executor output mapping failed: " +
+          output_mapping_.Summary());
     }
 
     const auto tape = CreateResolvedExecutionTape(execution_plan, batch_size);

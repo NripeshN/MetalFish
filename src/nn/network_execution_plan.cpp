@@ -72,8 +72,9 @@ void AddStepIfAny(NetworkExecutionPlan &plan,
     AddStep(plan, kind, name, std::move(present));
 }
 
-std::vector<std::string> WithPrefix(
-    const std::string &prefix, std::initializer_list<const char *> suffixes) {
+std::vector<std::string>
+WithPrefix(const std::string &prefix,
+           std::initializer_list<const char *> suffixes) {
   std::vector<std::string> names;
   names.reserve(suffixes.size());
   for (const char *suffix : suffixes)
@@ -95,7 +96,8 @@ void AddLayerNorm(NetworkExecutionPlan &plan,
                WithPrefix(prefix, {"_gammas", "_betas"}));
 }
 
-void AddDense(NetworkExecutionPlan &plan, const NetworkWeightInventory &inventory,
+void AddDense(NetworkExecutionPlan &plan,
+              const NetworkWeightInventory &inventory,
               const std::string &prefix, const std::string &name) {
   AddStepIfAny(plan, inventory, NetworkExecutionOpKind::Dense, name,
                WithPrefix(prefix, {"_w", "_b"}));
@@ -103,9 +105,9 @@ void AddDense(NetworkExecutionPlan &plan, const NetworkWeightInventory &inventor
 
 void AddFFN(NetworkExecutionPlan &plan, const NetworkWeightInventory &inventory,
             const std::string &prefix, const std::string &name) {
-  AddStepIfAny(plan, inventory, NetworkExecutionOpKind::FeedForward, name,
-               WithPrefix(prefix, {".dense1_w", ".dense1_b", ".dense2_w",
-                                   ".dense2_b"}));
+  AddStepIfAny(
+      plan, inventory, NetworkExecutionOpKind::FeedForward, name,
+      WithPrefix(prefix, {".dense1_w", ".dense1_b", ".dense2_w", ".dense2_b"}));
 }
 
 void AddSmolgen(NetworkExecutionPlan &plan,
@@ -116,8 +118,8 @@ void AddSmolgen(NetworkExecutionPlan &plan,
                                    ".dense2_w", ".dense2_b"}));
   AddStepIfAny(plan, inventory, NetworkExecutionOpKind::LayerNorm,
                name + ".norm",
-               WithPrefix(prefix, {".ln1_gammas", ".ln1_betas",
-                                   ".ln2_gammas", ".ln2_betas"}));
+               WithPrefix(prefix, {".ln1_gammas", ".ln1_betas", ".ln2_gammas",
+                                   ".ln2_betas"}));
 }
 
 void AddMHA(NetworkExecutionPlan &plan, const NetworkWeightInventory &inventory,
@@ -229,8 +231,8 @@ void SetFlatShape(NetworkResolvedTensorRef &tensor,
     tensor.dims = std::move(dims);
 }
 
-NetworkResolvedTensorRef *
-FindTensorSuffix(NetworkResolvedExecutionStep &step, std::string_view suffix) {
+NetworkResolvedTensorRef *FindTensorSuffix(NetworkResolvedExecutionStep &step,
+                                           std::string_view suffix) {
   for (auto &tensor : step.tensors) {
     if (EndsWith(tensor.name, suffix))
       return &tensor;
@@ -285,7 +287,8 @@ void InferDenseStepShapes(NetworkResolvedExecutionStep &step) {
   if (EndsWith(step.name, ".smolgen.dense"))
     return;
 
-  InferMatrixFromBias(FindTensorSuffix(step, "_w"), FindTensorSuffix(step, "_b"));
+  InferMatrixFromBias(FindTensorSuffix(step, "_w"),
+                      FindTensorSuffix(step, "_b"));
 }
 
 void InferFeedForwardStepShapes(NetworkResolvedExecutionStep &step) {
@@ -299,9 +302,8 @@ void InferFeedForwardStepShapes(NetworkResolvedExecutionStep &step) {
   InferMatrixFromBias(dense1_w, dense1_b);
   if (dense1_b && dense2_w && dense2_b &&
       dense2_w->elements == dense2_b->elements * dense1_b->elements) {
-    SetFlatShape(*dense2_w,
-                 {static_cast<std::uint32_t>(dense2_b->elements),
-                  static_cast<std::uint32_t>(dense1_b->elements)});
+    SetFlatShape(*dense2_w, {static_cast<std::uint32_t>(dense2_b->elements),
+                             static_cast<std::uint32_t>(dense1_b->elements)});
     SetFlatShape(*dense2_b, {static_cast<std::uint32_t>(dense2_b->elements)});
   } else {
     InferMatrixFromBias(dense2_w, dense2_b);
@@ -325,9 +327,8 @@ void InferAttentionStepShapes(NetworkResolvedExecutionStep &step) {
   InferMatrixFromBias(v_w, v_b);
   if (q_b && dense_w && dense_b &&
       dense_w->elements == dense_b->elements * q_b->elements) {
-    SetFlatShape(*dense_w,
-                 {static_cast<std::uint32_t>(dense_b->elements),
-                  static_cast<std::uint32_t>(q_b->elements)});
+    SetFlatShape(*dense_w, {static_cast<std::uint32_t>(dense_b->elements),
+                            static_cast<std::uint32_t>(q_b->elements)});
     SetFlatShape(*dense_b, {static_cast<std::uint32_t>(dense_b->elements)});
   } else {
     InferMatrixFromBias(dense_w, dense_b);
@@ -339,8 +340,8 @@ void InferPolicyMapStepShapes(NetworkResolvedExecutionStep &step) {
     return;
   auto &promotion_weights = step.tensors[0];
   if (promotion_weights.elements % 4 == 0) {
-    SetFlatShape(promotion_weights,
-                 {4, static_cast<std::uint32_t>(promotion_weights.elements / 4)});
+    SetFlatShape(promotion_weights, {4, static_cast<std::uint32_t>(
+                                            promotion_weights.elements / 4)});
   }
 }
 
@@ -351,8 +352,8 @@ void InferSmolgenStepShapes(NetworkResolvedExecutionPlan &plan,
     return;
   }
 
-  const std::string attention_name =
-      step.name.substr(0, step.name.size() - std::string(".smolgen.dense").size());
+  const std::string attention_name = step.name.substr(
+      0, step.name.size() - std::string(".smolgen.dense").size());
   const auto *attention = FindResolvedStep(plan, attention_name);
   if (!attention)
     return;
@@ -378,15 +379,13 @@ void InferSmolgenStepShapes(NetworkResolvedExecutionPlan &plan,
   const std::uint32_t flattened_width =
       static_cast<std::uint32_t>(kPackedInputSquareCount) * compressed_channels;
   if (dense1_w->elements == dense1_b->elements * flattened_width) {
-    SetFlatShape(*dense1_w,
-                 {static_cast<std::uint32_t>(dense1_b->elements),
-                  flattened_width});
+    SetFlatShape(*dense1_w, {static_cast<std::uint32_t>(dense1_b->elements),
+                             flattened_width});
     SetFlatShape(*dense1_b, {static_cast<std::uint32_t>(dense1_b->elements)});
   }
   if (dense2_w->elements == dense2_b->elements * dense1_b->elements) {
-    SetFlatShape(*dense2_w,
-                 {static_cast<std::uint32_t>(dense2_b->elements),
-                  static_cast<std::uint32_t>(dense1_b->elements)});
+    SetFlatShape(*dense2_w, {static_cast<std::uint32_t>(dense2_b->elements),
+                             static_cast<std::uint32_t>(dense1_b->elements)});
     SetFlatShape(*dense2_b, {static_cast<std::uint32_t>(dense2_b->elements)});
   }
 }
@@ -400,16 +399,16 @@ void InferPositionalEncodingShapes(NetworkResolvedExecutionPlan &plan) {
     if (global)
       break;
   }
-  if (!global || global->elements % (kPackedInputSquareCount *
-                                     kPackedInputSquareCount) != 0) {
+  if (!global ||
+      global->elements % (kPackedInputSquareCount * kPackedInputSquareCount) !=
+          0) {
     return;
   }
-  SetFlatShape(*global,
-               {static_cast<std::uint32_t>(kPackedInputSquareCount *
-                                           kPackedInputSquareCount),
-                static_cast<std::uint32_t>(
-                    global->elements /
-                    (kPackedInputSquareCount * kPackedInputSquareCount))});
+  SetFlatShape(*global, {static_cast<std::uint32_t>(kPackedInputSquareCount *
+                                                    kPackedInputSquareCount),
+                         static_cast<std::uint32_t>(
+                             global->elements / (kPackedInputSquareCount *
+                                                 kPackedInputSquareCount))});
 }
 
 void InferResolvedExecutionTensorShapes(NetworkResolvedExecutionPlan &plan) {
@@ -528,10 +527,10 @@ NetworkResolvedExecutionPlan::StepCount(NetworkExecutionOpKind kind) const {
 
 std::string NetworkResolvedExecutionPlan::Summary() const {
   std::ostringstream out;
-  out << steps.size() << " resolved execution steps, "
-      << TensorReferenceCount() << " tensor refs, "
-      << TotalParameterElements() << " parameter floats, policy_head="
-      << policy_head << ", value_head=" << value_head;
+  out << steps.size() << " resolved execution steps, " << TensorReferenceCount()
+      << " tensor refs, " << TotalParameterElements()
+      << " parameter floats, policy_head=" << policy_head
+      << ", value_head=" << value_head;
   return out.str();
 }
 
@@ -580,9 +579,8 @@ NetworkExecutionValidation NetworkExecutionPlan::ValidateAgainstInventory(
   for (const auto &step : steps) {
     for (const auto &tensor : step.tensors) {
       if (!inventory.Contains(tensor)) {
-        AddError(validation,
-                 "execution step references missing tensor: " + step.name +
-                     " -> " + tensor);
+        AddError(validation, "execution step references missing tensor: " +
+                                 step.name + " -> " + tensor);
       }
       referenced.insert(tensor);
     }
@@ -644,8 +642,9 @@ NetworkExecutionPlan CreateNetworkExecutionPlan(
   return plan;
 }
 
-NetworkResolvedExecutionPlan ResolveNetworkExecutionPlan(
-    const NetworkExecutionPlan &plan, const NetworkWeightInventory &inventory) {
+NetworkResolvedExecutionPlan
+ResolveNetworkExecutionPlan(const NetworkExecutionPlan &plan,
+                            const NetworkWeightInventory &inventory) {
   const auto validation = plan.ValidateAgainstInventory(inventory);
   if (!validation.ok()) {
     throw std::runtime_error("cannot resolve invalid NN execution plan: " +
@@ -713,8 +712,8 @@ NetworkWeightInventory CreateResolvedNetworkWeightInventory(
                                  ref.name);
       }
       if (assigned[ref.inventory_index] && tensor.dims != ref.dims) {
-        throw std::runtime_error(
-            "resolved NN tensor shape is inconsistent: " + ref.name);
+        throw std::runtime_error("resolved NN tensor shape is inconsistent: " +
+                                 ref.name);
       }
       tensor.dims = ref.dims;
       assigned[ref.inventory_index] = true;

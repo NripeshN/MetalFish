@@ -104,8 +104,9 @@ NetworkExecutionPlan CreateNetworkExecutionPlan(
     const std::string &policy_head, const std::string &value_head,
     const NetworkWeightInventory &inventory);
 
-NetworkResolvedExecutionPlan ResolveNetworkExecutionPlan(
-    const NetworkExecutionPlan &plan, const NetworkWeightInventory &inventory);
+NetworkResolvedExecutionPlan
+ResolveNetworkExecutionPlan(const NetworkExecutionPlan &plan,
+                            const NetworkWeightInventory &inventory);
 
 NetworkWeightInventory CreateResolvedNetworkWeightInventory(
     const NetworkWeightInventory &inventory,

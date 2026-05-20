@@ -111,10 +111,10 @@ CudaDeviceSelection SelectCudaDevice() {
     }
     const std::string error = CudaErrorText(status);
     cudaGetLastError();
-    return {true, requested,
-            "selected CUDA device " + std::to_string(requested) +
-                " from METALFISH_CUDA_DEVICE; properties unavailable: " +
-                error};
+    return {
+        true, requested,
+        "selected CUDA device " + std::to_string(requested) +
+            " from METALFISH_CUDA_DEVICE; properties unavailable: " + error};
   }
 
   int best_device = 0;

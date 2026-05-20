@@ -10,8 +10,8 @@
 #include "../network_execution_plan.h"
 #include "cuda_buffers.h"
 #include "cuda_output_mapping.h"
-#include "cuda_workspace.h"
 #include "cuda_weight_buffers.h"
+#include "cuda_workspace.h"
 
 #include <memory>
 #include <string>
@@ -28,8 +28,7 @@ public:
                        const NetworkResolvedExecutionPlan &execution_plan,
                        const CudaWeightBuffers &weights,
                        CudaInferenceBuffers &buffers,
-                       CudaExecutionWorkspace &workspace,
-                       int batch_size) = 0;
+                       CudaExecutionWorkspace &workspace, int batch_size) = 0;
   virtual std::string Name() const = 0;
 };
 

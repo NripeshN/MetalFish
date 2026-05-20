@@ -84,8 +84,9 @@ private:
   std::vector<CudaExecutionBufferBinding> bindings_;
 };
 
-CudaExecutionTape CreateResolvedExecutionTape(
-    const NetworkResolvedExecutionPlan &plan, int batch_size);
+CudaExecutionTape
+CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
+                            int batch_size);
 
 CudaExecutionTape
 CreatePlanSmokeExecutionTape(const NetworkTensorPlan &tensor_plan,

@@ -426,9 +426,8 @@ void test_network_execution_plan(TestCounter &tc) {
   NN::MultiHeadWeights weights(file.weights());
   const std::string policy_head = NN::SelectPolicyHeadName(weights);
   const std::string value_head = NN::SelectValueHeadName(weights);
-  const auto inventory =
-      NN::CreateNetworkWeightInventory(weights, policy_head, value_head,
-                                       tensor_plan);
+  const auto inventory = NN::CreateNetworkWeightInventory(
+      weights, policy_head, value_head, tensor_plan);
   const auto execution_plan = NN::CreateNetworkExecutionPlan(
       descriptor, tensor_plan, policy_head, value_head, inventory);
   const auto validation = execution_plan.ValidateAgainstInventory(inventory);
@@ -468,11 +467,10 @@ void test_network_execution_plan(TestCounter &tc) {
   NN::MultiHeadWeights loaded_weights(loaded.weights());
   const std::string loaded_policy_head =
       NN::SelectPolicyHeadName(loaded_weights);
-  const std::string loaded_value_head =
-      NN::SelectValueHeadName(loaded_weights);
-  const auto loaded_inventory = NN::CreateNetworkWeightInventory(
-      loaded_weights, loaded_policy_head, loaded_value_head,
-      loaded_tensor_plan);
+  const std::string loaded_value_head = NN::SelectValueHeadName(loaded_weights);
+  const auto loaded_inventory =
+      NN::CreateNetworkWeightInventory(loaded_weights, loaded_policy_head,
+                                       loaded_value_head, loaded_tensor_plan);
   const auto loaded_execution_plan = NN::CreateNetworkExecutionPlan(
       loaded_descriptor, loaded_tensor_plan, loaded_policy_head,
       loaded_value_head, loaded_inventory);
@@ -492,11 +490,11 @@ void test_network_execution_plan(TestCounter &tc) {
          "loaded BT4 execution plan should include body attention", tc);
   expect(loaded_execution_plan.ContainsStep("body.encoder.0.ffn"),
          "loaded BT4 execution plan should include body FFN", tc);
-  expect(loaded_execution_plan.ReferencesTensor(
-             "policy." + loaded_policy_head + ".ip_pol_w"),
+  expect(loaded_execution_plan.ReferencesTensor("policy." + loaded_policy_head +
+                                                ".ip_pol_w"),
          "loaded execution plan should reference selected policy output", tc);
-  expect(loaded_execution_plan.ReferencesTensor(
-             "value." + loaded_value_head + ".ip_val_w"),
+  expect(loaded_execution_plan.ReferencesTensor("value." + loaded_value_head +
+                                                ".ip_val_w"),
          "loaded execution plan should reference selected value output", tc);
   expect(loaded_resolved_plan.TotalParameterElements() ==
              loaded_inventory.TotalElements(),
@@ -507,10 +505,9 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_resolved_plan.StepCount(NN::NetworkExecutionOpKind::Attention) >
              0,
          "loaded resolved plan should expose attention operators", tc);
-  expect(
-      loaded_resolved_plan.StepCount(NN::NetworkExecutionOpKind::FeedForward) >
-          0,
-      "loaded resolved plan should expose feed-forward operators", tc);
+  expect(loaded_resolved_plan.StepCount(
+             NN::NetworkExecutionOpKind::FeedForward) > 0,
+         "loaded resolved plan should expose feed-forward operators", tc);
   expect(loaded_resolved_plan.steps.front().kind ==
              NN::NetworkExecutionOpKind::InputPack,
          "resolved execution plan should start with input packing", tc);
@@ -518,8 +515,8 @@ void test_network_execution_plan(TestCounter &tc) {
       [&](const std::string &step_name,
           const std::string &suffix) -> const NN::NetworkResolvedTensorRef * {
     const auto &step =
-        loaded_resolved_plan.steps[find_resolved_step_index(loaded_resolved_plan,
-                                                            step_name)];
+        loaded_resolved_plan
+            .steps[find_resolved_step_index(loaded_resolved_plan, step_name)];
     for (const auto &tensor : step.tensors) {
       if (tensor.name.size() >= suffix.size() &&
           tensor.name.substr(tensor.name.size() - suffix.size()) == suffix) {
@@ -580,8 +577,8 @@ void test_network_execution_plan(TestCounter &tc) {
          "loaded CUDA schedule should now reach attention as first unsupported "
          "operator",
          tc);
-  const auto first_body_attention = find_resolved_step_index(
-      loaded_resolved_plan, "body.encoder.0.mha");
+  const auto first_body_attention =
+      find_resolved_step_index(loaded_resolved_plan, "body.encoder.0.mha");
   const auto loaded_attention_plan = NN::Cuda::ResolveCudaAttentionStagePlan(
       loaded_resolved_plan, first_body_attention,
       loaded_weights.encoder_head_count);
@@ -589,16 +586,14 @@ void test_network_execution_plan(TestCounter &tc) {
          "loaded CUDA attention plan should preserve body head count", tc);
   expect(loaded_attention_plan.squares == NN::Cuda::kCudaAttentionSquares,
          "loaded CUDA attention plan should use 64 board squares", tc);
-  expect(loaded_attention_plan.qkv_width ==
-             loaded_attention_plan.input_width,
+  expect(loaded_attention_plan.qkv_width == loaded_attention_plan.input_width,
          "loaded CUDA attention QKV width should match model width", tc);
   expect(loaded_attention_plan.head_depth > 0,
          "loaded CUDA attention plan should derive per-head depth", tc);
   expect(loaded_attention_plan.smolgen.present,
          "loaded CUDA attention plan should detect smolgen branch", tc);
   expect(loaded_attention_plan.smolgen.has_global_positional_weights,
-         "loaded CUDA attention plan should attach global smolgen weights",
-         tc);
+         "loaded CUDA attention plan should attach global smolgen weights", tc);
   const auto loaded_tape =
       NN::Cuda::CreateResolvedExecutionTape(loaded_resolved_plan, 1);
   const auto loaded_attention_count =
@@ -606,47 +601,46 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_tape.CountRole(
              NN::Cuda::CudaExecutionBufferRole::AttentionQuery) ==
              loaded_attention_count,
-         "loaded CUDA tape should allocate one query buffer per attention",
-         tc);
+         "loaded CUDA tape should allocate one query buffer per attention", tc);
   const auto &loaded_scores =
       loaded_tape.RequireName("body.encoder.0.mha.scores");
-  expect(loaded_scores.rows == loaded_attention_plan.heads *
-                                   loaded_attention_plan.squares &&
+  expect(loaded_scores.rows ==
+                 loaded_attention_plan.heads * loaded_attention_plan.squares &&
              loaded_scores.width == loaded_attention_plan.squares,
          "loaded CUDA tape should shape attention score matrices by head and "
          "square",
          tc);
   expect(loaded_tape.RequireName("body.encoder.0.ln1.attention_residual")
-             .entries == static_cast<std::size_t>(loaded_attention_plan.squares) *
-                             loaded_attention_plan.output_width,
+                 .entries ==
+             static_cast<std::size_t>(loaded_attention_plan.squares) *
+                 loaded_attention_plan.output_width,
          "loaded CUDA tape should allocate body attention residual scratch",
          tc);
   const auto loaded_tape_batch2 =
       NN::Cuda::CreateResolvedExecutionTape(loaded_resolved_plan, 2);
-  expect(loaded_tape_batch2
-             .RequireName("body.input_embedding_preprocess.dense")
-             .rows == 2,
+  expect(loaded_tape_batch2.RequireName("body.input_embedding_preprocess.dense")
+                 .rows == 2,
          "loaded CUDA tape should keep dynamic PE dense at batch rows", tc);
   expect(loaded_tape_batch2.RequireName("body.input_embedding.dense").rows ==
              2 * NN::Cuda::kCudaAttentionSquares,
          "loaded CUDA tape should run input embedding on board-square rows",
          tc);
-  expect(loaded_tape_batch2
-             .RequireName("body.input_embedding_norm.normalized")
-             .rows == 2 * NN::Cuda::kCudaAttentionSquares,
+  expect(loaded_tape_batch2.RequireName("body.input_embedding_norm.normalized")
+                 .rows == 2 * NN::Cuda::kCudaAttentionSquares,
          "loaded CUDA tape should run input embedding norm on board-square "
          "rows",
          tc);
+  expect(
+      loaded_tape_batch2.RequireName("body.input_embedding_gates.gated").rows ==
+          2 * NN::Cuda::kCudaAttentionSquares,
+      "loaded CUDA tape should run input gates on board-square rows", tc);
   expect(loaded_tape_batch2.RequireName("body.input_embedding_gates.gated")
-             .rows == 2 * NN::Cuda::kCudaAttentionSquares,
-         "loaded CUDA tape should run input gates on board-square rows", tc);
-  expect(loaded_tape_batch2.RequireName("body.input_embedding_gates.gated")
-             .width == 1024,
-         "loaded CUDA tape should shape positional input gates by channel",
-         tc);
-  expect(loaded_tape_batch2.RequireName("body.input_embedding_ffn.dense1")
-             .rows == 2 * NN::Cuda::kCudaAttentionSquares,
-         "loaded CUDA tape should run input FFN on board-square rows", tc);
+                 .width == 1024,
+         "loaded CUDA tape should shape positional input gates by channel", tc);
+  expect(
+      loaded_tape_batch2.RequireName("body.input_embedding_ffn.dense1").rows ==
+          2 * NN::Cuda::kCudaAttentionSquares,
+      "loaded CUDA tape should run input FFN on board-square rows", tc);
   expect(loaded_tape_batch2.RequireName("body.encoder.0.ffn.dense1").rows ==
              2 * NN::Cuda::kCudaAttentionSquares,
          "loaded CUDA tape should run encoder FFN on board-square rows", tc);
@@ -848,8 +842,8 @@ void test_cuda_input_packing(TestCounter &tc) {
               second_batch_item[0].data(), input_plane_floats * sizeof(float));
   std::vector<std::uint64_t> contiguous_masks;
   std::vector<float> contiguous_values;
-  NN::Cuda::PackInputPlanesHostRaw(contiguous_batch.data(), 2,
-                                   contiguous_masks, contiguous_values);
+  NN::Cuda::PackInputPlanesHostRaw(contiguous_batch.data(), 2, contiguous_masks,
+                                   contiguous_values);
   expect(batch_masks == contiguous_masks,
          "CUDA host batch pack should match contiguous raw batch masks", tc);
   expect(batch_values == contiguous_values,
@@ -979,11 +973,9 @@ void test_cuda_inference_buffers(TestCounter &tc) {
                  NN::Cuda::CudaSmokeStatus::Success ||
              attention_projection_smoke.status ==
                  NN::Cuda::CudaSmokeStatus::NoDevice,
-         "CUDA attention projections should pass or skip without a device",
-         tc);
+         "CUDA attention projections should pass or skip without a device", tc);
 
-  auto dynamic_stage_smoke =
-      NN::Cuda::RunDynamicPositionEncodingStageSmoke();
+  auto dynamic_stage_smoke = NN::Cuda::RunDynamicPositionEncodingStageSmoke();
   std::cout << "    " << dynamic_stage_smoke.message << std::endl;
   expect(dynamic_stage_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              dynamic_stage_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
@@ -1032,9 +1024,8 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   NN::NetworkResolvedExecutionPlan unsupported = plan;
   unsupported.steps.insert(
       unsupported.steps.begin() + 1,
-      NN::NetworkResolvedExecutionStep{NN::NetworkExecutionOpKind::Attention,
-                                       "body.encoder.0.mha",
-                                       {}});
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::Attention, "body.encoder.0.mha", {}});
   const auto unsupported_schedule =
       NN::Cuda::CreateCudaExecutionSchedule(unsupported);
   expect(!unsupported_schedule.FullySupported(),
@@ -1062,8 +1053,7 @@ void test_cuda_execution_schedule(TestCounter &tc) {
          "CUDA schedule should count fused attention/layernorm stages", tc);
   expect(attention_fused_schedule.entries.size() == 1 &&
              attention_fused_schedule.entries[0].kind ==
-                 NN::Cuda::CudaExecutionScheduleKind::
-                     AttentionLayerNormStage,
+                 NN::Cuda::CudaExecutionScheduleKind::AttentionLayerNormStage,
          "CUDA schedule should classify fused attention stages explicitly", tc);
 
   NN::NetworkResolvedExecutionPlan dense_only;
@@ -1083,12 +1073,11 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   NN::NetworkResolvedExecutionPlan gated = plan;
   gated.steps.insert(
       gated.steps.begin() + 3,
-      NN::NetworkResolvedExecutionStep{NN::NetworkExecutionOpKind::Gate,
-                                       "body.input_embedding_gates",
-                                       {}});
+      NN::NetworkResolvedExecutionStep{
+          NN::NetworkExecutionOpKind::Gate, "body.input_embedding_gates", {}});
   const auto gated_schedule = NN::Cuda::CreateCudaExecutionSchedule(gated);
-  expect(gated_schedule.FullySupported(),
-         "gate schedule should be supported", tc);
+  expect(gated_schedule.FullySupported(), "gate schedule should be supported",
+         tc);
   expect(gated_schedule.gate_stage_count == 1,
          "CUDA schedule should count gate stages", tc);
   expect(gated_schedule.entries.size() == 4 &&
@@ -1099,16 +1088,14 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   NN::NetworkResolvedExecutionPlan ffn = gated;
   ffn.steps.insert(
       ffn.steps.begin() + 3,
-      NN::NetworkResolvedExecutionStep{
-          NN::NetworkExecutionOpKind::FeedForward,
-          "body.input_embedding_ffn",
-          {}});
+      NN::NetworkResolvedExecutionStep{NN::NetworkExecutionOpKind::FeedForward,
+                                       "body.input_embedding_ffn",
+                                       {}});
   ffn.steps.insert(
       ffn.steps.begin() + 4,
-      NN::NetworkResolvedExecutionStep{
-          NN::NetworkExecutionOpKind::LayerNorm,
-          "body.input_embedding_ffn_norm",
-          {}});
+      NN::NetworkResolvedExecutionStep{NN::NetworkExecutionOpKind::LayerNorm,
+                                       "body.input_embedding_ffn_norm",
+                                       {}});
   const auto ffn_schedule = NN::Cuda::CreateCudaExecutionSchedule(ffn);
   expect(ffn_schedule.FullySupported(),
          "feed-forward/layernorm schedule should be supported", tc);
@@ -1136,7 +1123,10 @@ void test_cuda_execution_schedule(TestCounter &tc) {
           NN::NetworkExecutionOpKind::PositionalEncoding,
           "body.smolgen_positional",
           {
-              {0, "body.smolgen_w", 64 * 64, {64, 64},
+              {0,
+               "body.smolgen_w",
+               64 * 64,
+               {64, 64},
                NN::NetworkWeightTensorKind::PositionalEncoding},
           }});
   const auto positional_schedule =
@@ -1155,7 +1145,10 @@ void test_cuda_execution_schedule(TestCounter &tc) {
       NN::NetworkExecutionOpKind::PolicyMap,
       "policy.smoke.policy_map",
       {
-          {0, "policy.smoke.ip4_pol_w", 8, {4, 2},
+          {0,
+           "policy.smoke.ip4_pol_w",
+           8,
+           {4, 2},
            NN::NetworkWeightTensorKind::DenseWeight},
       }});
   const auto policy_map_schedule =
@@ -1180,11 +1173,10 @@ void test_cuda_execution_schedule(TestCounter &tc) {
          "CUDA schedule should preserve unsupported policy-map op kind", tc);
 
   auto tensor = [](std::size_t index, const std::string &name,
-                   std::size_t elements,
-                   std::vector<std::uint32_t> dims,
+                   std::size_t elements, std::vector<std::uint32_t> dims,
                    NN::NetworkWeightTensorKind kind) {
-    return NN::NetworkResolvedTensorRef{index, name, elements,
-                                        std::move(dims), kind};
+    return NN::NetworkResolvedTensorRef{index, name, elements, std::move(dims),
+                                        kind};
   };
   NN::NetworkResolvedExecutionPlan attention_plan;
   attention_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
@@ -1219,8 +1211,8 @@ void test_cuda_execution_schedule(TestCounter &tc) {
       {
           tensor(9, "body.encoder.0.mha.smolgen.compress", 32, {4, 8},
                  NN::NetworkWeightTensorKind::DenseWeight),
-          tensor(10, "body.encoder.0.mha.smolgen.dense1_w", 1536,
-                 {6, 256}, NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(10, "body.encoder.0.mha.smolgen.dense1_w", 1536, {6, 256},
+                 NN::NetworkWeightTensorKind::DenseWeight),
           tensor(11, "body.encoder.0.mha.smolgen.dense1_b", 6, {6},
                  NN::NetworkWeightTensorKind::DenseBias),
           tensor(12, "body.encoder.0.mha.smolgen.dense2_w", 48, {8, 6},
@@ -1286,13 +1278,12 @@ void test_cuda_execution_schedule(TestCounter &tc) {
          "CUDA attention score width should cover every key square", tc);
   expect(attention_tape.RequireName("body.encoder.0.mha.projection").entries ==
              2U * NN::Cuda::kCudaAttentionSquares * 8U,
-         "CUDA attention projection buffer should return model-width rows",
-         tc);
+         "CUDA attention projection buffer should return model-width rows", tc);
   expect(attention_tape.RequireName("body.encoder.0.ln1.normalized").rows ==
              2 * NN::Cuda::kCudaAttentionSquares,
          "CUDA attention layernorm rows should scale by board squares", tc);
   expect(attention_tape.RequireName("body.encoder.0.ln1.attention_residual")
-             .entries == 2U * NN::Cuda::kCudaAttentionSquares * 8U,
+                 .entries == 2U * NN::Cuda::kCudaAttentionSquares * 8U,
          "CUDA attention residual scratch should match model-width rows", tc);
   bool bad_heads_rejected = false;
   try {
@@ -1322,27 +1313,45 @@ void test_cuda_output_mapping(TestCounter &tc) {
       NN::NetworkExecutionOpKind::Dense,
       "policy.smoke.output",
       {
-          {0, "policy.smoke.ip_pol_w", 8, {2, 4},
+          {0,
+           "policy.smoke.ip_pol_w",
+           8,
+           {2, 4},
            NN::NetworkWeightTensorKind::DenseWeight},
-          {1, "policy.smoke.ip_pol_b", 2, {2},
+          {1,
+           "policy.smoke.ip_pol_b",
+           2,
+           {2},
            NN::NetworkWeightTensorKind::DenseBias},
       }});
   plan.steps.push_back(NN::NetworkResolvedExecutionStep{
       NN::NetworkExecutionOpKind::Dense,
       "value.smoke.dense2",
       {
-          {2, "value.smoke.ip2_val_w", 6, {3, 2},
+          {2,
+           "value.smoke.ip2_val_w",
+           6,
+           {3, 2},
            NN::NetworkWeightTensorKind::DenseWeight},
-          {3, "value.smoke.ip2_val_b", 3, {3},
+          {3,
+           "value.smoke.ip2_val_b",
+           3,
+           {3},
            NN::NetworkWeightTensorKind::DenseBias},
       }});
   plan.steps.push_back(NN::NetworkResolvedExecutionStep{
       NN::NetworkExecutionOpKind::Dense,
       "moves_left.output",
       {
-          {4, "moves_left.ip2_mov_w", 3, {1, 3},
+          {4,
+           "moves_left.ip2_mov_w",
+           3,
+           {1, 3},
            NN::NetworkWeightTensorKind::DenseWeight},
-          {5, "moves_left.ip2_mov_b", 1, {1},
+          {5,
+           "moves_left.ip2_mov_b",
+           1,
+           {1},
            NN::NetworkWeightTensorKind::DenseBias},
       }});
 
@@ -1374,8 +1383,7 @@ void test_cuda_output_mapping(TestCounter &tc) {
                  2,
          "CUDA output mapping should retain policy source width", tc);
   expect(mapping.Find(NN::Cuda::CudaOutputTarget::Value) &&
-             mapping.Find(NN::Cuda::CudaOutputTarget::Value)->source_width ==
-                 3,
+             mapping.Find(NN::Cuda::CudaOutputTarget::Value)->source_width == 3,
          "CUDA output mapping should bind WDL value width", tc);
   expect(mapping.Find(NN::Cuda::CudaOutputTarget::MovesLeft),
          "CUDA output mapping should bind moves-left output", tc);
@@ -1384,15 +1392,17 @@ void test_cuda_output_mapping(TestCounter &tc) {
 
   NN::NetworkResolvedExecutionPlan mapped_policy = plan;
   mapped_policy.format.attention_policy = true;
-  mapped_policy.steps.insert(
-      mapped_policy.steps.begin() + 1,
-      NN::NetworkResolvedExecutionStep{
-          NN::NetworkExecutionOpKind::PolicyMap,
-          "policy.smoke.policy_map",
-          {
-              {6, "policy.smoke.ip4_pol_w", 8, {4, 2},
-               NN::NetworkWeightTensorKind::DenseWeight},
-          }});
+  mapped_policy.steps.insert(mapped_policy.steps.begin() + 1,
+                             NN::NetworkResolvedExecutionStep{
+                                 NN::NetworkExecutionOpKind::PolicyMap,
+                                 "policy.smoke.policy_map",
+                                 {
+                                     {6,
+                                      "policy.smoke.ip4_pol_w",
+                                      8,
+                                      {4, 2},
+                                      NN::NetworkWeightTensorKind::DenseWeight},
+                                 }});
   const auto mapped_policy_mapping = NN::Cuda::CreateCudaOutputMapping(
       tensor_plan, mapped_policy,
       NN::Cuda::CreateCudaExecutionSchedule(mapped_policy), options);
@@ -1456,87 +1466,125 @@ void test_cuda_output_mapping(TestCounter &tc) {
          "CUDA stage input bindings should reject duplicate stages", tc);
 
   NN::NetworkResolvedExecutionPlan branched = plan;
-  branched.steps.insert(
-      branched.steps.begin(),
-      NN::NetworkResolvedExecutionStep{
-          NN::NetworkExecutionOpKind::LayerNorm,
-          "body.smoke.norm",
-          {
-              {7, "body.smoke.norm_gammas", 4, {4},
-               NN::NetworkWeightTensorKind::NormScale},
-              {8, "body.smoke.norm_betas", 4, {4},
-               NN::NetworkWeightTensorKind::NormBias},
-          }});
-  branched.steps.insert(
-      branched.steps.begin(),
-      NN::NetworkResolvedExecutionStep{
-          NN::NetworkExecutionOpKind::Dense,
-          "body.smoke.dense",
-          {
-              {6, "body.smoke.dense_w", 16, {4, 4},
-               NN::NetworkWeightTensorKind::DenseWeight},
-              {7, "body.smoke.dense_b", 4, {4},
-               NN::NetworkWeightTensorKind::DenseBias},
-          }});
+  branched.steps.insert(branched.steps.begin(),
+                        NN::NetworkResolvedExecutionStep{
+                            NN::NetworkExecutionOpKind::LayerNorm,
+                            "body.smoke.norm",
+                            {
+                                {7,
+                                 "body.smoke.norm_gammas",
+                                 4,
+                                 {4},
+                                 NN::NetworkWeightTensorKind::NormScale},
+                                {8,
+                                 "body.smoke.norm_betas",
+                                 4,
+                                 {4},
+                                 NN::NetworkWeightTensorKind::NormBias},
+                            }});
+  branched.steps.insert(branched.steps.begin(),
+                        NN::NetworkResolvedExecutionStep{
+                            NN::NetworkExecutionOpKind::Dense,
+                            "body.smoke.dense",
+                            {
+                                {6,
+                                 "body.smoke.dense_w",
+                                 16,
+                                 {4, 4},
+                                 NN::NetworkWeightTensorKind::DenseWeight},
+                                {7,
+                                 "body.smoke.dense_b",
+                                 4,
+                                 {4},
+                                 NN::NetworkWeightTensorKind::DenseBias},
+                            }});
   branched.steps.insert(
       branched.steps.begin() + 3,
-      NN::NetworkResolvedExecutionStep{
-          NN::NetworkExecutionOpKind::Gate,
-          "body.smoke.gates",
-          {
-              {8, "body.ip_mult_gate", 4, {4},
-               NN::NetworkWeightTensorKind::Gate},
-              {9, "body.ip_add_gate", 4, {4},
-               NN::NetworkWeightTensorKind::Gate},
-          }});
-  branched.steps.insert(
-      branched.steps.begin() + 4,
-      NN::NetworkResolvedExecutionStep{
-          NN::NetworkExecutionOpKind::FeedForward,
-          "body.input_embedding_ffn",
-          {
-              {10, "body.ip_emb_ffn.dense1_w", 24, {6, 4},
-               NN::NetworkWeightTensorKind::DenseWeight},
-              {11, "body.ip_emb_ffn.dense1_b", 6, {6},
-               NN::NetworkWeightTensorKind::DenseBias},
-              {12, "body.ip_emb_ffn.dense2_w", 24, {4, 6},
-               NN::NetworkWeightTensorKind::DenseWeight},
-              {13, "body.ip_emb_ffn.dense2_b", 4, {4},
-               NN::NetworkWeightTensorKind::DenseBias},
-          }});
-  branched.steps.insert(
-      branched.steps.begin() + 5,
-      NN::NetworkResolvedExecutionStep{
-          NN::NetworkExecutionOpKind::LayerNorm,
-          "body.input_embedding_ffn_norm",
-          {
-              {14, "body.ip_emb_ffn_ln_gammas", 4, {4},
-               NN::NetworkWeightTensorKind::NormScale},
-              {15, "body.ip_emb_ffn_ln_betas", 4, {4},
-               NN::NetworkWeightTensorKind::NormBias},
-          }});
-  branched.steps.insert(
-      branched.steps.begin() + 6,
-      NN::NetworkResolvedExecutionStep{
-          NN::NetworkExecutionOpKind::Dense,
-          "policy.smoke.dense2",
-          {
-              {16, "policy.smoke.ip2_pol_w", 4, {2, 2},
-               NN::NetworkWeightTensorKind::DenseWeight},
-              {17, "policy.smoke.ip2_pol_b", 2, {2},
-               NN::NetworkWeightTensorKind::DenseBias},
-          }});
-  const auto branched_schedule = NN::Cuda::CreateCudaExecutionSchedule(branched);
+      NN::NetworkResolvedExecutionStep{NN::NetworkExecutionOpKind::Gate,
+                                       "body.smoke.gates",
+                                       {
+                                           {8,
+                                            "body.ip_mult_gate",
+                                            4,
+                                            {4},
+                                            NN::NetworkWeightTensorKind::Gate},
+                                           {9,
+                                            "body.ip_add_gate",
+                                            4,
+                                            {4},
+                                            NN::NetworkWeightTensorKind::Gate},
+                                       }});
+  branched.steps.insert(branched.steps.begin() + 4,
+                        NN::NetworkResolvedExecutionStep{
+                            NN::NetworkExecutionOpKind::FeedForward,
+                            "body.input_embedding_ffn",
+                            {
+                                {10,
+                                 "body.ip_emb_ffn.dense1_w",
+                                 24,
+                                 {6, 4},
+                                 NN::NetworkWeightTensorKind::DenseWeight},
+                                {11,
+                                 "body.ip_emb_ffn.dense1_b",
+                                 6,
+                                 {6},
+                                 NN::NetworkWeightTensorKind::DenseBias},
+                                {12,
+                                 "body.ip_emb_ffn.dense2_w",
+                                 24,
+                                 {4, 6},
+                                 NN::NetworkWeightTensorKind::DenseWeight},
+                                {13,
+                                 "body.ip_emb_ffn.dense2_b",
+                                 4,
+                                 {4},
+                                 NN::NetworkWeightTensorKind::DenseBias},
+                            }});
+  branched.steps.insert(branched.steps.begin() + 5,
+                        NN::NetworkResolvedExecutionStep{
+                            NN::NetworkExecutionOpKind::LayerNorm,
+                            "body.input_embedding_ffn_norm",
+                            {
+                                {14,
+                                 "body.ip_emb_ffn_ln_gammas",
+                                 4,
+                                 {4},
+                                 NN::NetworkWeightTensorKind::NormScale},
+                                {15,
+                                 "body.ip_emb_ffn_ln_betas",
+                                 4,
+                                 {4},
+                                 NN::NetworkWeightTensorKind::NormBias},
+                            }});
+  branched.steps.insert(branched.steps.begin() + 6,
+                        NN::NetworkResolvedExecutionStep{
+                            NN::NetworkExecutionOpKind::Dense,
+                            "policy.smoke.dense2",
+                            {
+                                {16,
+                                 "policy.smoke.ip2_pol_w",
+                                 4,
+                                 {2, 2},
+                                 NN::NetworkWeightTensorKind::DenseWeight},
+                                {17,
+                                 "policy.smoke.ip2_pol_b",
+                                 2,
+                                 {2},
+                                 NN::NetworkWeightTensorKind::DenseBias},
+                            }});
+  const auto branched_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(branched);
   const auto derived_inputs =
       NN::Cuda::CreateCudaStageInputBindings(branched, branched_schedule);
   expect(derived_inputs.Size() == 4,
          "CUDA stage input derivation should bind head branches and policy Q/K",
          tc);
-  expect(derived_inputs.FindSource("policy.smoke.output") &&
-             *derived_inputs.FindSource("policy.smoke.output") ==
-                 "body.input_embedding_ffn",
-         "CUDA stage input derivation should branch policy from last body output",
-         tc);
+  expect(
+      derived_inputs.FindSource("policy.smoke.output") &&
+          *derived_inputs.FindSource("policy.smoke.output") ==
+              "body.input_embedding_ffn",
+      "CUDA stage input derivation should branch policy from last body output",
+      tc);
   expect(derived_inputs.FindSource("policy.smoke.dense2") &&
              *derived_inputs.FindSource("policy.smoke.dense2") ==
                  "policy.smoke.output",
@@ -1557,9 +1605,15 @@ void test_cuda_output_mapping(TestCounter &tc) {
       NN::NetworkExecutionOpKind::Dense,
       "value.smoke.error",
       {
-          {10, "value.smoke.ip_val_err_w", 3, {3, 3},
+          {10,
+           "value.smoke.ip_val_err_w",
+           3,
+           {3, 3},
            NN::NetworkWeightTensorKind::DenseWeight},
-          {11, "value.smoke.ip_val_err_b", 3, {3},
+          {11,
+           "value.smoke.ip_val_err_b",
+           3,
+           {3},
            NN::NetworkWeightTensorKind::DenseBias},
       }});
   const auto value_with_error_mapping = NN::Cuda::CreateCudaOutputMapping(
@@ -1599,7 +1653,10 @@ void test_cuda_weight_upload(TestCounter &tc) {
                                    : inventory.tensors.end();
   inventory.tensors.insert(
       empty_tensor_at,
-      NN::NetworkWeightTensorView{"cuda.empty.optional", nullptr, 0, {},
+      NN::NetworkWeightTensorView{"cuda.empty.optional",
+                                  nullptr,
+                                  0,
+                                  {},
                                   NN::NetworkWeightTensorKind::Generic});
 
   auto smoke = NN::Cuda::RunWeightUploadSmoke(inventory);
@@ -1655,8 +1712,7 @@ void test_cuda_dense_kernels(TestCounter &tc) {
          "CUDA attention core kernels should pass or skip without a device",
          tc);
 
-  auto dynamic_pe_smoke =
-      NN::Cuda::RunDynamicPositionEncodingKernelSmoke();
+  auto dynamic_pe_smoke = NN::Cuda::RunDynamicPositionEncodingKernelSmoke();
   std::cout << "    " << dynamic_pe_smoke.message << std::endl;
   expect(dynamic_pe_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              dynamic_pe_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,

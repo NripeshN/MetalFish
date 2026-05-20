@@ -54,8 +54,7 @@ std::string move_to_string(Move move) {
 std::vector<std::pair<Move, float>>
 sorted_priors(const MCTS::EvaluationResult &result) {
   std::vector<std::pair<Move, float>> priors = result.policy_priors;
-  std::sort(priors.begin(), priors.end(), [](const auto &lhs,
-                                             const auto &rhs) {
+  std::sort(priors.begin(), priors.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.second > rhs.second;
   });
   return priors;
@@ -163,8 +162,8 @@ bool write_parity_report(const ParityReport &report) {
 
   std::ofstream out(report.output_path);
   if (!out) {
-    std::cout << "  FAIL: could not write parity report: "
-              << report.output_path << std::endl;
+    std::cout << "  FAIL: could not write parity report: " << report.output_path
+              << std::endl;
     return false;
   }
 
@@ -181,7 +180,9 @@ bool write_parity_report(const ParityReport &report) {
   if (!report.fixed_note.empty())
     out << report.fixed_note << "\n\n";
   if (report.has_fixed_rows) {
-    out << "| Case | Value actual/expected/delta | Max WDL delta | Moves-left actual/expected/delta | Max top-policy delta | Actual top policy |\n";
+    out << "| Case | Value actual/expected/delta | Max WDL delta | Moves-left "
+           "actual/expected/delta | Max top-policy delta | Actual top policy "
+           "|\n";
     out << "| --- | ---: | ---: | ---: | ---: | --- |\n";
     out << report.fixed_rows.str();
     out << "\n";
@@ -191,7 +192,8 @@ bool write_parity_report(const ParityReport &report) {
   if (!report.batch_note.empty())
     out << report.batch_note << "\n\n";
   if (report.has_batch_rows) {
-    out << "| Batch | Entries | Max value delta | Max WDL delta | Max moves-left delta | Max policy delta | Worst field |\n";
+    out << "| Batch | Entries | Max value delta | Max WDL delta | Max "
+           "moves-left delta | Max policy delta | Worst field |\n";
     out << "| ---: | ---: | ---: | ---: | ---: | ---: | --- |\n";
     out << report.batch_rows.str();
     out << "\n";
@@ -344,8 +346,8 @@ bool test_mcts_evaluator_optional() {
       std::cout << "    DEBUG backend: " << eval.GetNetworkInfo() << std::endl;
       std::cout << "    DEBUG value=" << result.value;
       if (result.has_wdl) {
-        std::cout << " wdl=[" << result.wdl[0] << "," << result.wdl[1]
-                  << "," << result.wdl[2] << "]";
+        std::cout << " wdl=[" << result.wdl[0] << "," << result.wdl[1] << ","
+                  << result.wdl[2] << "]";
       }
       if (result.has_moves_left)
         std::cout << " moves_left=" << result.moves_left;
@@ -481,8 +483,8 @@ bool test_bt4_reference_outputs_optional(ParityReport *report) {
       const auto result = eval.Evaluate(pos);
       const auto priors = sorted_priors(result);
       if (result.policy_priors.empty()) {
-        std::cout << "    FAIL: " << test_case.name
-                  << " empty policy output" << std::endl;
+        std::cout << "    FAIL: " << test_case.name << " empty policy output"
+                  << std::endl;
         return false;
       }
       if (!result.has_wdl || !result.has_moves_left) {
@@ -506,8 +508,8 @@ bool test_bt4_reference_outputs_optional(ParityReport *report) {
       }
       float max_wdl_delta = 0.0f;
       for (size_t i = 0; i < test_case.wdl.size(); ++i) {
-        max_wdl_delta =
-            std::max(max_wdl_delta, std::fabs(result.wdl[i] - test_case.wdl[i]));
+        max_wdl_delta = std::max(max_wdl_delta,
+                                 std::fabs(result.wdl[i] - test_case.wdl[i]));
         if (!close_enough(result.wdl[i], test_case.wdl[i], tolerances.wdl)) {
           std::cout << "    FAIL: " << test_case.name << " WDL[" << i
                     << "] drift actual=" << result.wdl[i]
@@ -534,9 +536,8 @@ bool test_bt4_reference_outputs_optional(ParityReport *report) {
                     << " expected=" << expected_move << std::endl;
           return false;
         }
-        max_top_policy_delta =
-            std::max(max_top_policy_delta,
-                     std::fabs(priors[i].second - expected_logit));
+        max_top_policy_delta = std::max(
+            max_top_policy_delta, std::fabs(priors[i].second - expected_logit));
         if (!close_enough(priors[i].second, expected_logit,
                           tolerances.policy)) {
           std::cout << "    FAIL: " << test_case.name << " top policy " << i
@@ -548,18 +549,18 @@ bool test_bt4_reference_outputs_optional(ParityReport *report) {
       if (report) {
         report->backend_info = network_info;
         report->has_fixed_rows = true;
-        report->fixed_rows
-            << "| " << test_case.name << " | "
-            << format_float(result.value) << " / "
-            << format_float(test_case.value) << " / "
-            << format_float(value_delta) << " | "
-            << format_float(max_wdl_delta) << " | "
-            << format_float(result.moves_left) << " / "
-            << format_float(test_case.moves_left) << " / "
-            << format_float(moves_left_delta) << " | "
-            << format_float(max_top_policy_delta) << " | "
-            << result_top_policy_string(result, test_case.top_policy.size())
-            << " |\n";
+        report->fixed_rows << "| " << test_case.name << " | "
+                           << format_float(result.value) << " / "
+                           << format_float(test_case.value) << " / "
+                           << format_float(value_delta) << " | "
+                           << format_float(max_wdl_delta) << " | "
+                           << format_float(result.moves_left) << " / "
+                           << format_float(test_case.moves_left) << " / "
+                           << format_float(moves_left_delta) << " | "
+                           << format_float(max_top_policy_delta) << " | "
+                           << result_top_policy_string(
+                                  result, test_case.top_policy.size())
+                           << " |\n";
       }
       if (should_dump_nn_debug()) {
         std::cout << std::fixed << std::setprecision(6);
@@ -577,8 +578,8 @@ bool test_bt4_reference_outputs_optional(ParityReport *report) {
       }
     }
 
-    std::cout << "    PASS: checked " << cases.size()
-              << " fixed positions" << std::endl;
+    std::cout << "    PASS: checked " << cases.size() << " fixed positions"
+              << std::endl;
     return true;
   } catch (const std::exception &e) {
     std::cout << "    FAIL: exception: " << e.what() << std::endl;
@@ -656,8 +657,8 @@ EvalDiffMetrics measure_eval_result(const MCTS::EvaluationResult &single,
                                   batched.policy_priors[i].second);
     if (delta > metrics.policy_delta) {
       metrics.policy_delta = delta;
-      metrics.worst_field = label + " policy " +
-                            move_to_string(single.policy_priors[i].first);
+      metrics.worst_field =
+          label + " policy " + move_to_string(single.policy_priors[i].first);
       metrics.policy_index = i;
       metrics.policy_move = single.policy_priors[i].first;
       metrics.policy_single = single.policy_priors[i].second;
@@ -673,7 +674,8 @@ bool metrics_worse_than(const EvalDiffMetrics &candidate,
   return max_eval_delta(candidate) > max_eval_delta(current);
 }
 
-void merge_eval_metrics(EvalDiffMetrics &target, const EvalDiffMetrics &source) {
+void merge_eval_metrics(EvalDiffMetrics &target,
+                        const EvalDiffMetrics &source) {
   if (source.value_delta > target.value_delta)
     target.value_delta = source.value_delta;
   if (source.wdl_delta > target.wdl_delta)
@@ -705,10 +707,9 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
               << " value mismatch single=" << single.value
               << " batch=" << batched.value;
     if (single.has_wdl && batched.has_wdl) {
-      std::cout << " single_wdl=[" << single.wdl[0] << ","
-                << single.wdl[1] << "," << single.wdl[2]
-                << "] batch_wdl=[" << batched.wdl[0] << ","
-                << batched.wdl[1] << "," << batched.wdl[2] << "]";
+      std::cout << " single_wdl=[" << single.wdl[0] << "," << single.wdl[1]
+                << "," << single.wdl[2] << "] batch_wdl=[" << batched.wdl[0]
+                << "," << batched.wdl[1] << "," << batched.wdl[2] << "]";
     }
     std::cout << std::endl;
     return false;
@@ -762,8 +763,7 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
       std::cout << "    FAIL: " << label << " policy logit mismatch at " << i
                 << " move=" << move_to_string(single.policy_priors[i].first)
                 << " single=" << single.policy_priors[i].second
-                << " batch=" << batched.policy_priors[i].second
-                << " delta="
+                << " batch=" << batched.policy_priors[i].second << " delta="
                 << std::fabs(single.policy_priors[i].second -
                              batched.policy_priors[i].second)
                 << std::endl;
@@ -814,13 +814,12 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
     }
 
     if (env_flag_enabled("METALFISH_NN_BATCH_TRACE_PAIR")) {
-      const int trace_batch_size = env_int_or_default(
-          "METALFISH_NN_BATCH_TRACE_BATCH", 32, 1,
-          static_cast<int>(histories.size()));
-      const int target =
-          env_int_or_default("METALFISH_NN_BATCH_TRACE_INDEX",
-                             std::min(6, trace_batch_size - 1), 0,
-                             trace_batch_size - 1);
+      const int trace_batch_size =
+          env_int_or_default("METALFISH_NN_BATCH_TRACE_BATCH", 32, 1,
+                             static_cast<int>(histories.size()));
+      const int target = env_int_or_default("METALFISH_NN_BATCH_TRACE_INDEX",
+                                            std::min(6, trace_batch_size - 1),
+                                            0, trace_batch_size - 1);
       std::vector<std::vector<const Position *>> trace_batch(
           histories.begin(), histories.begin() + trace_batch_size);
       MCTS::NNMCTSEvaluator trace_single_eval(weights_path);
@@ -884,8 +883,8 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
         env_flag_enabled("METALFISH_NN_BATCH_TRACE_WORST");
     bool comparison_failed = false;
 
-    const std::array<size_t, 7> batch_sizes = {1, 2, 4, 8, 16, 32,
-                                               histories.size()};
+    const std::array<size_t, 7> batch_sizes = {
+        1, 2, 4, 8, 16, 32, histories.size()};
     for (size_t batch_size : batch_sizes) {
       std::vector<std::vector<const Position *>> prefix(
           histories.begin(), histories.begin() + batch_size);
@@ -932,13 +931,12 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
       }
       if (report) {
         report->has_batch_rows = true;
-        report->batch_rows << "| " << batch_size << " | " << batch_size
-                           << " | " << format_float(batch_max.value_delta)
-                           << " | " << format_float(batch_max.wdl_delta)
-                           << " | "
-                           << format_float(batch_max.moves_left_delta)
-                           << " | " << format_float(batch_max.policy_delta)
-                           << " | " << batch_max.worst_field << " |\n";
+        report->batch_rows << "| " << batch_size << " | " << batch_size << " | "
+                           << format_float(batch_max.value_delta) << " | "
+                           << format_float(batch_max.wdl_delta) << " | "
+                           << format_float(batch_max.moves_left_delta) << " | "
+                           << format_float(batch_max.policy_delta) << " | "
+                           << batch_max.worst_field << " |\n";
       }
     }
 
@@ -982,9 +980,9 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
           trace_single, trace_outputs[trace_worst_entry], "trace worst");
       const auto reused_single_delta = measure_eval_result(
           trace_single, trace_worst_reused_single, "trace reused single");
-      const auto reused_batch_delta = measure_eval_result(
-          trace_outputs[trace_worst_entry], trace_worst_reused_batch,
-          "trace reused batch");
+      const auto reused_batch_delta =
+          measure_eval_result(trace_outputs[trace_worst_entry],
+                              trace_worst_reused_batch, "trace reused batch");
       std::cout << "    TRACE_WORST_CONFIRMED: batch=" << trace_worst_batch
                 << " entry=" << trace_worst_entry
                 << " value_delta=" << format_float(confirmed.value_delta)
@@ -1023,8 +1021,7 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
       std::cout << "    TRACE_WORST_SINGLE_TOP: "
                 << result_top_policy_string(trace_single, 5) << std::endl;
       std::cout << "    TRACE_WORST_BATCH_TOP: "
-                << result_top_policy_string(trace_outputs[trace_worst_entry],
-                                            5)
+                << result_top_policy_string(trace_outputs[trace_worst_entry], 5)
                 << std::endl;
       std::cout << "    TRACE_WORST_REUSED_SINGLE_TOP: "
                 << result_top_policy_string(trace_worst_reused_single, 5)
@@ -1057,8 +1054,8 @@ bool test_mcts_evaluator_first_use_stress_optional() {
   try {
     StateInfo st;
     Position pos;
-    pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-            false, &st);
+    pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", false,
+            &st);
     auto fixture = build_history({});
     const std::vector<std::vector<const Position *>> one_history = {
         fixture.ptrs};
@@ -1077,7 +1074,7 @@ bool test_mcts_evaluator_first_use_stress_optional() {
     const int iterations = env_int_or_default(
         "METALFISH_NN_FIRST_USE_STRESS_ITERS",
         network_info.find("CUDA transformer backend") != std::string::npos ? 3
-                                                                            : 1,
+                                                                           : 1,
         1, 32);
 
     for (int iter = 0; iter < iterations; ++iter) {
@@ -1086,8 +1083,7 @@ bool test_mcts_evaluator_first_use_stress_optional() {
 
       const auto first = first_eval.Evaluate(pos);
       if (!compare_eval_result(reference, first,
-                               "first-use direct iter " +
-                                   std::to_string(iter),
+                               "first-use direct iter " + std::to_string(iter),
                                tolerances)) {
         return false;
       }
@@ -1095,21 +1091,19 @@ bool test_mcts_evaluator_first_use_stress_optional() {
       const auto second_batch =
           second_eval.EvaluateBatchWithHistory(one_history);
       if (second_batch.size() != 1) {
-        std::cout << "    FAIL: first-use batch iter " << iter
-                  << " returned " << second_batch.size() << " outputs"
-                  << std::endl;
+        std::cout << "    FAIL: first-use batch iter " << iter << " returned "
+                  << second_batch.size() << " outputs" << std::endl;
         return false;
       }
       if (!compare_eval_result(reference, second_batch.front(),
-                               "first-use batch iter " +
-                                   std::to_string(iter),
+                               "first-use batch iter " + std::to_string(iter),
                                tolerances)) {
         return false;
       }
     }
 
-    std::cout << "    PASS: checked " << iterations
-              << " fresh evaluator pairs" << std::endl;
+    std::cout << "    PASS: checked " << iterations << " fresh evaluator pairs"
+              << std::endl;
     return true;
   } catch (const std::exception &e) {
     std::cout << "    FAIL: exception: " << e.what() << std::endl;
@@ -1184,24 +1178,20 @@ bool test_mcts_evaluator_batch_reuse_stress_optional() {
             histories.begin(), histories.begin() + probe.batch_size);
         auto outputs = reuse_eval.EvaluateBatchWithHistory(prefix);
         if (outputs.size() != probe.batch_size) {
-          std::cout << "    FAIL: reuse stress " << probe.label
-                    << " returned " << outputs.size() << " outputs"
-                    << std::endl;
+          std::cout << "    FAIL: reuse stress " << probe.label << " returned "
+                    << outputs.size() << " outputs" << std::endl;
           return false;
         }
 
         std::ostringstream label;
         label << "reuse iter " << iter << " " << probe.label << " batch "
               << probe.batch_size << " entry " << probe.entry;
-        const auto metrics =
-            measure_eval_result(singles[probe.entry], outputs[probe.entry],
-                                label.str());
+        const auto metrics = measure_eval_result(
+            singles[probe.entry], outputs[probe.entry], label.str());
         std::cout << "    REUSE_STRESS_STEP: iter=" << iter
-                  << " label=" << probe.label
-                  << " batch=" << probe.batch_size
-                  << " entry=" << probe.entry
-                  << " line=" << move_line_string(lines[probe.entry %
-                                                        lines.size()])
+                  << " label=" << probe.label << " batch=" << probe.batch_size
+                  << " entry=" << probe.entry << " line="
+                  << move_line_string(lines[probe.entry % lines.size()])
                   << " value_delta=" << format_float(metrics.value_delta)
                   << " wdl_delta=" << format_float(metrics.wdl_delta)
                   << " moves_left_delta="
@@ -1213,8 +1203,7 @@ bool test_mcts_evaluator_batch_reuse_stress_optional() {
           worst_set = true;
           worst_line = move_line_string(lines[probe.entry % lines.size()]);
           worst_single_top = result_top_policy_string(singles[probe.entry], 5);
-          worst_batch_top =
-              result_top_policy_string(outputs[probe.entry], 5);
+          worst_batch_top = result_top_policy_string(outputs[probe.entry], 5);
         }
 
         if (!compare_eval_result(singles[probe.entry], outputs[probe.entry],
@@ -1227,8 +1216,7 @@ bool test_mcts_evaluator_batch_reuse_stress_optional() {
       std::cout << "    REUSE_STRESS_MAX: value_delta="
                 << format_float(worst.value_delta)
                 << " wdl_delta=" << format_float(worst.wdl_delta)
-                << " moves_left_delta="
-                << format_float(worst.moves_left_delta)
+                << " moves_left_delta=" << format_float(worst.moves_left_delta)
                 << " policy_delta=" << format_float(worst.policy_delta)
                 << " line=" << worst_line << " worst=" << worst.worst_field
                 << std::endl;
@@ -1238,8 +1226,8 @@ bool test_mcts_evaluator_batch_reuse_stress_optional() {
                   << " single=" << format_float(worst.policy_single)
                   << " batch=" << format_float(worst.policy_batched)
                   << " delta="
-                  << format_float(std::fabs(worst.policy_single -
-                                            worst.policy_batched))
+                  << format_float(
+                         std::fabs(worst.policy_single - worst.policy_batched))
                   << std::endl;
       }
       std::cout << "    REUSE_STRESS_SINGLE_TOP: " << worst_single_top
@@ -1342,8 +1330,7 @@ bool test_mcts_evaluator_single_reuse_stress_optional() {
       std::cout << "    SINGLE_REUSE_STRESS_MAX: value_delta="
                 << format_float(worst.value_delta)
                 << " wdl_delta=" << format_float(worst.wdl_delta)
-                << " moves_left_delta="
-                << format_float(worst.moves_left_delta)
+                << " moves_left_delta=" << format_float(worst.moves_left_delta)
                 << " policy_delta=" << format_float(worst.policy_delta)
                 << " line=" << worst_line << " worst=" << worst.worst_field
                 << std::endl;
@@ -1354,8 +1341,8 @@ bool test_mcts_evaluator_single_reuse_stress_optional() {
                   << " baseline=" << format_float(worst.policy_single)
                   << " replay=" << format_float(worst.policy_batched)
                   << " delta="
-                  << format_float(std::fabs(worst.policy_single -
-                                            worst.policy_batched))
+                  << format_float(
+                         std::fabs(worst.policy_single - worst.policy_batched))
                   << std::endl;
       }
       std::cout << "    SINGLE_REUSE_STRESS_BASELINE_TOP: "
@@ -1436,8 +1423,7 @@ bool benchmark_nn_batch_optional() {
                 << std::setprecision(3) << batch_ms << "ms/"
                 << std::setprecision(4) << eval_ms << "ms_eval";
     }
-    std::cout << " checksum=" << std::setprecision(6) << checksum
-              << std::endl;
+    std::cout << " checksum=" << std::setprecision(6) << checksum << std::endl;
     return true;
   } catch (const std::exception &e) {
     std::cout << "    FAIL: exception: " << e.what() << std::endl;
@@ -1464,10 +1450,8 @@ int main() {
   const bool ok7 = test_mcts_evaluator_single_reuse_stress_optional();
   const bool ok8 = test_mcts_evaluator_batch_reuse_stress_optional();
   const bool ok9 = benchmark_nn_batch_optional();
-  const bool ok10 =
-      !parity_report || write_parity_report(*parity_report);
-  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 &&
-          ok10)
+  const bool ok10 = !parity_report || write_parity_report(*parity_report);
+  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10)
              ? 0
              : 1;
 }
