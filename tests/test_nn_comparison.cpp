@@ -764,9 +764,9 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
     if (report && report->backend_info.empty())
       report->backend_info = network_info;
     if (network_info.find("CUDA transformer backend") != std::string::npos) {
-      tolerances.value = 2.5e-1f;
-      tolerances.moves_left = 5.0f;
-      tolerances.policy = 2.5e-1f;
+      tolerances.value = 2e-3f;
+      tolerances.moves_left = 1.25e-1f;
+      tolerances.policy = 5e-2f;
     }
 
     const std::array<size_t, 7> batch_sizes = {1, 2, 4, 8, 16, 32,
