@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <exception>
 #include <iomanip>
 #include <iostream>
@@ -38,6 +39,8 @@ struct Options {
   std::string fen =
       "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   int top = 8;
+  int warmup = 1;
+  int iterations = 1;
   bool full_input = false;
   bool full_policy = false;
 };
@@ -100,7 +103,8 @@ std::string MoveString(Move move) {
 void PrintUsage(const char *argv0) {
   std::cerr << "Usage: " << argv0
             << " --weights <file.pb[.gz]> [--backend metal|auto]"
-               " [--fen <fen>] [--top n] [--full-input] [--full-policy]\n";
+               " [--fen <fen>] [--top n] [--warmup n] [--iterations n]"
+               " [--full-input] [--full-policy]\n";
 }
 
 Options ParseArgs(int argc, char **argv) {
@@ -121,6 +125,10 @@ Options ParseArgs(int argc, char **argv) {
       options.fen = require_value("--fen");
     } else if (arg == "--top") {
       options.top = std::stoi(require_value("--top"));
+    } else if (arg == "--warmup") {
+      options.warmup = std::stoi(require_value("--warmup"));
+    } else if (arg == "--iterations") {
+      options.iterations = std::stoi(require_value("--iterations"));
     } else if (arg == "--full-input") {
       options.full_input = true;
     } else if (arg == "--full-policy") {
@@ -137,6 +145,10 @@ Options ParseArgs(int argc, char **argv) {
     throw std::runtime_error("--weights is required");
   if (options.top < 0)
     throw std::runtime_error("--top must be non-negative");
+  if (options.warmup < 0)
+    throw std::runtime_error("--warmup must be non-negative");
+  if (options.iterations < 1)
+    throw std::runtime_error("--iterations must be positive");
   if (options.backend.empty())
     throw std::runtime_error("--backend must be non-empty");
   return options;
@@ -186,6 +198,20 @@ void PrintTopPolicy(const std::array<float, NN::kPolicyOutputs> &policy,
   std::cout << ']';
 }
 
+double Mean(const std::vector<double> &values) {
+  double sum = 0.0;
+  for (double value : values)
+    sum += value;
+  return values.empty() ? 0.0 : sum / static_cast<double>(values.size());
+}
+
+double Median(std::vector<double> values) {
+  if (values.empty())
+    return 0.0;
+  std::sort(values.begin(), values.end());
+  return values[values.size() / 2];
+}
+
 void RunProbe(const Options &options) {
   Bitboards::init();
   Position::init();
@@ -207,7 +233,19 @@ void RunProbe(const Options &options) {
       &transform);
 
   auto network = NN::CreateNetwork(weights, options.backend);
-  const auto output = network->Evaluate(planes);
+  for (int i = 0; i < options.warmup; ++i)
+    (void)network->Evaluate(planes);
+
+  NN::NetworkOutput output;
+  std::vector<double> latencies;
+  latencies.reserve(options.iterations);
+  for (int i = 0; i < options.iterations; ++i) {
+    const auto start = std::chrono::steady_clock::now();
+    output = network->Evaluate(planes);
+    const auto end = std::chrono::steady_clock::now();
+    latencies.push_back(
+        std::chrono::duration<double, std::milli>(end - start).count());
+  }
 
   std::cout << std::setprecision(9);
   std::cout << '{';
@@ -226,6 +264,14 @@ void RunProbe(const Options &options) {
   std::cout << ",\"has_moves_left\":"
             << (output.has_moves_left ? "true" : "false");
   std::cout << ",\"moves_left\":" << output.moves_left;
+  std::cout << ",\"latency\":{\"warmup\":" << options.warmup
+            << ",\"iterations\":" << options.iterations
+            << ",\"median_ms\":" << Median(latencies)
+            << ",\"mean_ms\":" << Mean(latencies)
+            << ",\"min_ms\":"
+            << *std::min_element(latencies.begin(), latencies.end())
+            << ",\"max_ms\":"
+            << *std::max_element(latencies.begin(), latencies.end()) << '}';
   PrintTopPolicy(output.policy, transform, options.top);
   if (options.full_input)
     PrintInputArray(planes);

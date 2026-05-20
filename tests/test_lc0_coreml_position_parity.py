@@ -55,6 +55,18 @@ def test_parse_args_defaults() -> None:
     expect("value head fp32 default", args.candidate_value_head_fp32)
     expect("policy head fp32 default", not args.candidate_policy_head_fp32)
     expect("metal probe off", args.metal_probe == "")
+    expect("combined off", not args.combined_model)
+
+
+def test_split_heads_by_shape() -> None:
+    wdl, policy = parity.split_heads(
+        {
+            "policy": np.zeros((1, 1858), dtype=np.float32),
+            "wdl": np.zeros((1, 3), dtype=np.float32),
+        }
+    )
+    expect("wdl shape", wdl.shape == (1, 3))
+    expect("policy shape", policy.shape == (1, 1858))
 
 
 def main() -> int:
@@ -62,6 +74,7 @@ def main() -> int:
     test_black_to_move_is_oriented_to_side_to_move()
     test_policy_moves_loaded()
     test_parse_args_defaults()
+    test_split_heads_by_shape()
     print("Lc0 Core ML position parity tests: OK")
     return 0
 

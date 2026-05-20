@@ -29,6 +29,7 @@ OUTPUT_STAGES = (
     "policy-qk",
     "policy-raw",
     "policy",
+    "heads",
 )
 
 
@@ -531,7 +532,7 @@ def build_value_model(
         if output_stage == "body":
             return body
 
-        if output_stage.startswith("policy"):
+        if output_stage.startswith("policy") or output_stage == "heads":
             policy = linear_mb(
                 mb, body, policy_embed_w, policy_embed_b, name="policy_embed_linear"
             )
@@ -599,13 +600,15 @@ def build_value_model(
 
             policy = mb.reshape(x=policy, shape=[1, 4288], name="policy_raw_flatten")
             gather_indices = mb.const(val=policy_indices)
-            return mb.gather(
+            policy = mb.gather(
                 x=policy,
                 indices=gather_indices,
                 axis=1,
                 validate_indices=False,
                 name="policy_map_gather",
             )
+            if output_stage == "policy":
+                return policy
 
         value = linear_mb(mb, body, value_embed_w, value_embed_b, name="value_embed_linear")
         value = activation_mb(mb, np, value, "mish", name="value_embed_mish")
@@ -619,7 +622,10 @@ def build_value_model(
         value = linear_mb(mb, value, value_fc2_w, value_fc2_b, name="value_fc2_linear")
         if output_stage == "value-logits":
             return value
-        return mb.softmax(x=value, axis=-1, name="value_wdl")
+        value = mb.softmax(x=value, axis=-1, name="value_wdl")
+        if output_stage == "heads":
+            return value, policy
+        return value
 
     return ct.convert(
         program,

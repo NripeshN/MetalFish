@@ -188,6 +188,13 @@ def build_model(args: argparse.Namespace, output_stage: str, candidate: bool) ->
 
 
 def predict(model: Any, planes: np.ndarray, warmup: int, iterations: int) -> tuple[np.ndarray, float]:
+    outputs, latency = predict_outputs(model, planes, warmup, iterations)
+    return np.asarray(next(iter(outputs.values())), dtype=np.float32), latency
+
+
+def predict_outputs(
+    model: Any, planes: np.ndarray, warmup: int, iterations: int
+) -> tuple[dict[str, Any], float]:
     for _ in range(warmup):
         model.predict({"x": planes})
     latencies: list[float] = []
@@ -198,7 +205,22 @@ def predict(model: Any, planes: np.ndarray, warmup: int, iterations: int) -> tup
         latencies.append((time.perf_counter() - start) * 1000.0)
     if not output:
         raise RuntimeError("model returned no outputs")
-    return np.asarray(next(iter(output.values())), dtype=np.float32), statistics.median(latencies)
+    return output, statistics.median(latencies)
+
+
+def split_heads(outputs: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+    wdl = None
+    policy = None
+    for value in outputs.values():
+        array = np.asarray(value, dtype=np.float32)
+        if array.size == 3:
+            wdl = array
+        elif array.size == 1858:
+            policy = array
+    if wdl is None or policy is None:
+        shapes = [list(np.asarray(value).shape) for value in outputs.values()]
+        raise RuntimeError(f"combined model did not return WDL and policy outputs: {shapes}")
+    return wdl, policy
 
 
 def top_policy(policy: np.ndarray, moves: list[str], count: int) -> list[dict[str, Any]]:
@@ -231,6 +253,10 @@ def run_metal_probe(args: argparse.Namespace, fen: str) -> dict[str, Any]:
         "--top",
         str(args.top),
         "--full-policy",
+        "--warmup",
+        str(args.warmup),
+        "--iterations",
+        str(args.iterations),
     ]
     try:
         completed = subprocess.run(command, check=True, capture_output=True, text=True)
@@ -252,25 +278,45 @@ def run_metal_probe(args: argparse.Namespace, fen: str) -> dict[str, Any]:
 def run(args: argparse.Namespace) -> dict[str, Any]:
     moves = load_policy_moves()
     fens = args.fen or DEFAULT_FENS
-    models = {
-        "ref_wdl": build_model(args, "wdl", False),
-        "ref_policy": build_model(args, "policy", False),
-        "candidate_wdl": build_model(args, "wdl", True),
-        "candidate_policy": build_model(args, "policy", True),
-    }
+    if args.combined_model:
+        models = {
+            "ref_heads": build_model(args, "heads", False),
+            "candidate_heads": build_model(args, "heads", True),
+        }
+    else:
+        models = {
+            "ref_wdl": build_model(args, "wdl", False),
+            "ref_policy": build_model(args, "policy", False),
+            "candidate_wdl": build_model(args, "wdl", True),
+            "candidate_policy": build_model(args, "policy", True),
+        }
     positions = []
     for fen in fens:
         planes = encode_fen_classical_112(fen)
-        ref_wdl, ref_wdl_ms = predict(models["ref_wdl"], planes, args.warmup, args.iterations)
-        cand_wdl, cand_wdl_ms = predict(
-            models["candidate_wdl"], planes, args.warmup, args.iterations
-        )
-        ref_policy, ref_policy_ms = predict(
-            models["ref_policy"], planes, args.warmup, args.iterations
-        )
-        cand_policy, cand_policy_ms = predict(
-            models["candidate_policy"], planes, args.warmup, args.iterations
-        )
+        if args.combined_model:
+            ref_outputs, ref_heads_ms = predict_outputs(
+                models["ref_heads"], planes, args.warmup, args.iterations
+            )
+            cand_outputs, cand_heads_ms = predict_outputs(
+                models["candidate_heads"], planes, args.warmup, args.iterations
+            )
+            ref_wdl, ref_policy = split_heads(ref_outputs)
+            cand_wdl, cand_policy = split_heads(cand_outputs)
+            ref_wdl_ms = ref_policy_ms = ref_heads_ms
+            cand_wdl_ms = cand_policy_ms = cand_heads_ms
+        else:
+            ref_wdl, ref_wdl_ms = predict(
+                models["ref_wdl"], planes, args.warmup, args.iterations
+            )
+            cand_wdl, cand_wdl_ms = predict(
+                models["candidate_wdl"], planes, args.warmup, args.iterations
+            )
+            ref_policy, ref_policy_ms = predict(
+                models["ref_policy"], planes, args.warmup, args.iterations
+            )
+            cand_policy, cand_policy_ms = predict(
+                models["candidate_policy"], planes, args.warmup, args.iterations
+            )
         metal = run_metal_probe(args, fen)
         metal_result = None
         if metal:
@@ -286,6 +332,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "value": metal["value"],
                 "wdl": metal["wdl"],
                 "moves_left": metal["moves_left"],
+                "latency": metal.get("latency", {}),
                 "policy_top": metal["policy_top"],
                 "reference_wdl_delta": compare_arrays(metal_wdl, ref_wdl),
                 "candidate_wdl_delta": compare_arrays(metal_wdl, cand_wdl),
@@ -321,6 +368,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "value_head_fp32": args.candidate_value_head_fp32,
             "policy_head_fp32": args.candidate_policy_head_fp32,
         },
+        "combined_model": args.combined_model,
         "positions": positions,
     }
 
@@ -336,6 +384,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--candidate-value-head-fp32", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--candidate-policy-head-fp32", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--metal-probe", default="", help="Optional path to build/metalfish_nn_probe for Metal backend parity")
+    parser.add_argument("--combined-model", action="store_true", help="Use one Core ML model that returns WDL and policy together")
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=4)
     parser.add_argument("--top", type=int, default=8)
@@ -347,6 +396,8 @@ def print_human(result: dict[str, Any]) -> None:
     print("MetalFish Core ML T1 position parity")
     print(f"  Weights: {result['weights']}")
     print(f"  Candidate: {result['candidate']}")
+    if result.get("combined_model"):
+        print("  Mode: combined WDL+policy model")
     for idx, position in enumerate(result["positions"], 1):
         print(f"\nPosition {idx}: {position['fen']}")
         wdl = position["wdl"]
@@ -377,6 +428,8 @@ def print_human(result: dict[str, Any]) -> None:
                 f"WDL max={metal['candidate_wdl_delta']['max_abs']:.7f} "
                 f"policy max={metal['candidate_policy_delta']['max_abs']:.7f}"
             )
+            if metal.get("latency"):
+                print(f"  Metal latency: {metal['latency']['median_ms']:.3f}ms")
             metal_moves = ", ".join(item["move"] for item in metal["policy_top"][:5])
             print(f"  Metal top: {metal_moves}")
 

@@ -56,7 +56,7 @@ def test_parse_args() -> None:
             "--value-head-fp32",
             "--policy-head-fp32",
             "--output-stage",
-            "policy",
+            "heads",
             "--encoder-layers",
             "3",
         ]
@@ -69,7 +69,7 @@ def test_parse_args() -> None:
     expect("policy head fp32 parsed", args.policy_head_fp32)
     expect("warmup parsed", args.warmup == 2)
     expect("iterations parsed", args.iterations == 7)
-    expect("output stage parsed", args.output_stage == "policy")
+    expect("output stage parsed", args.output_stage == "heads")
     expect("encoder layers parsed", args.encoder_layers == 3)
 
 
