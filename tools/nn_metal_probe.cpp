@@ -21,12 +21,15 @@
 #include <cctype>
 #include <chrono>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace MetalFish;
@@ -44,6 +47,8 @@ struct Options {
   int iterations = 1;
   bool full_input = false;
   bool full_policy = false;
+  std::string ready_file;
+  std::string start_file;
 };
 
 std::string JsonEscape(const std::string &input) {
@@ -105,7 +110,8 @@ void PrintUsage(const char *argv0) {
   std::cerr << "Usage: " << argv0
             << " --weights <file.pb[.gz]> [--backend metal|auto]"
                " [--fen <fen>] [--top n] [--batch-size n] [--warmup n]"
-               " [--iterations n] [--full-input] [--full-policy]\n";
+               " [--iterations n] [--full-input] [--full-policy]"
+               " [--ready-file path] [--start-file path]\n";
 }
 
 Options ParseArgs(int argc, char **argv) {
@@ -136,6 +142,10 @@ Options ParseArgs(int argc, char **argv) {
       options.full_input = true;
     } else if (arg == "--full-policy") {
       options.full_policy = true;
+    } else if (arg == "--ready-file") {
+      options.ready_file = require_value("--ready-file");
+    } else if (arg == "--start-file") {
+      options.start_file = require_value("--start-file");
     } else if (arg == "-h" || arg == "--help") {
       PrintUsage(argv[0]);
       std::exit(0);
@@ -217,6 +227,17 @@ double Median(std::vector<double> values) {
   return values[values.size() / 2];
 }
 
+void TouchFile(const std::string &path) {
+  std::ofstream file(path);
+  if (!file)
+    throw std::runtime_error("Could not create signal file: " + path);
+}
+
+void WaitForFile(const std::string &path) {
+  while (!std::filesystem::exists(path))
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+}
+
 void RunProbe(const Options &options) {
   Bitboards::init();
   Position::init();
@@ -241,6 +262,10 @@ void RunProbe(const Options &options) {
   const std::vector<NN::InputPlanes> batch_inputs(options.batch_size, planes);
   for (int i = 0; i < options.warmup; ++i)
     (void)network->EvaluateBatch(batch_inputs);
+  if (!options.ready_file.empty())
+    TouchFile(options.ready_file);
+  if (!options.start_file.empty())
+    WaitForFile(options.start_file);
 
   NN::NetworkOutput output;
   std::vector<double> latencies;
