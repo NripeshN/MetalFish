@@ -877,9 +877,12 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
     size_t trace_worst_batch = 0;
     size_t trace_worst_entry = 0;
     size_t trace_worst_line = 0;
+    MCTS::EvaluationResult trace_worst_reused_single;
+    MCTS::EvaluationResult trace_worst_reused_batch;
     bool trace_worst_set = false;
     const bool trace_worst_enabled =
         env_flag_enabled("METALFISH_NN_BATCH_TRACE_WORST");
+    bool comparison_failed = false;
 
     const std::array<size_t, 7> batch_sizes = {1, 2, 4, 8, 16, 32,
                                                histories.size()};
@@ -915,11 +918,17 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
           trace_worst_batch = batch_size;
           trace_worst_entry = i;
           trace_worst_line = i % lines.size();
+          trace_worst_reused_single = singles[i];
+          trace_worst_reused_batch = batched[i];
           trace_worst_set = true;
         }
         if (!compare_eval_result(singles[i], batched[i], label.str(),
-                                 tolerances))
+                                 tolerances)) {
+          comparison_failed = true;
+          if (trace_worst_enabled)
+            continue;
           return false;
+        }
       }
       if (report) {
         report->has_batch_rows = true;
@@ -971,6 +980,11 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
       }
       const auto confirmed = measure_eval_result(
           trace_single, trace_outputs[trace_worst_entry], "trace worst");
+      const auto reused_single_delta = measure_eval_result(
+          trace_single, trace_worst_reused_single, "trace reused single");
+      const auto reused_batch_delta = measure_eval_result(
+          trace_outputs[trace_worst_entry], trace_worst_reused_batch,
+          "trace reused batch");
       std::cout << "    TRACE_WORST_CONFIRMED: batch=" << trace_worst_batch
                 << " entry=" << trace_worst_entry
                 << " value_delta=" << format_float(confirmed.value_delta)
@@ -990,13 +1004,38 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
                                             confirmed.policy_batched))
                   << std::endl;
       }
+      std::cout << "    TRACE_WORST_REUSED_SINGLE: value_delta="
+                << format_float(reused_single_delta.value_delta)
+                << " wdl_delta=" << format_float(reused_single_delta.wdl_delta)
+                << " moves_left_delta="
+                << format_float(reused_single_delta.moves_left_delta)
+                << " policy_delta="
+                << format_float(reused_single_delta.policy_delta)
+                << " worst=" << reused_single_delta.worst_field << std::endl;
+      std::cout << "    TRACE_WORST_REUSED_BATCH: value_delta="
+                << format_float(reused_batch_delta.value_delta)
+                << " wdl_delta=" << format_float(reused_batch_delta.wdl_delta)
+                << " moves_left_delta="
+                << format_float(reused_batch_delta.moves_left_delta)
+                << " policy_delta="
+                << format_float(reused_batch_delta.policy_delta)
+                << " worst=" << reused_batch_delta.worst_field << std::endl;
       std::cout << "    TRACE_WORST_SINGLE_TOP: "
                 << result_top_policy_string(trace_single, 5) << std::endl;
       std::cout << "    TRACE_WORST_BATCH_TOP: "
                 << result_top_policy_string(trace_outputs[trace_worst_entry],
                                             5)
                 << std::endl;
+      std::cout << "    TRACE_WORST_REUSED_SINGLE_TOP: "
+                << result_top_policy_string(trace_worst_reused_single, 5)
+                << std::endl;
+      std::cout << "    TRACE_WORST_REUSED_BATCH_TOP: "
+                << result_top_policy_string(trace_worst_reused_batch, 5)
+                << std::endl;
     }
+
+    if (comparison_failed)
+      return false;
 
     std::cout << "    PASS: checked " << histories.size()
               << " varied positions across batch sizes" << std::endl;

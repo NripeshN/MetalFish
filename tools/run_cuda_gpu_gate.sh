@@ -229,8 +229,12 @@ fi
     grep -m1 "TRACE_WORST_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     grep -m1 "TRACE_WORST_CONFIRMED:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     grep -m1 "TRACE_WORST_CONFIRMED_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "TRACE_WORST_REUSED_SINGLE:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "TRACE_WORST_REUSED_BATCH:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     grep -m1 "TRACE_WORST_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     grep -m1 "TRACE_WORST_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "TRACE_WORST_REUSED_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "TRACE_WORST_REUSED_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
   fi
   if grep -q "REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
     echo

@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260520-215541`, L4, 2026-05-20 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260520-224228`, L4, 2026-05-20 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -263,22 +263,33 @@ Current CUDA backend boundary:
   with `policy_delta=0.000004` and `moves_left_delta=0.000015`.
 - The CUDA GPU gate enables `METALFISH_NN_BATCH_TRACE_WORST=1` by default.
   The trace records the worst drift observed during the reused-evaluator batch
-  sequence, then reruns that entry with fresh single/batch evaluators. The
-  2026-05-20 L4 gate `metalfish-cuda-gate-20260520-215541` observed its largest
-  reused-evaluator drift at batch 8 entry 6 (`d2d4 d7d5`):
-  `moves_left_delta=0.057800` and `policy_delta=0.008372` on `a2a4`. The fresh
-  confirmation on the same entry dropped to `moves_left_delta=0.000000` and
-  `policy_delta=0.000004`, pointing
-  the next CUDA investigation toward reusable evaluator/workspace state rather
-  than fixed weight decoding.
+  sequence, then reruns that entry with fresh single/batch evaluators and
+  compares both reused sides against the fresh confirmation. If the strict
+  parity check fails while tracing is enabled, the test now finishes the pass
+  and emits the same worst-side diagnostics before returning failure. The
+  2026-05-20 L4 gate `metalfish-cuda-gate-20260520-224228` observed its largest
+  reused-evaluator drift at batch 32 entry 0 (start position):
+  `moves_left_delta=0.104477` and `policy_delta=0.017034` on `f2f4`. Fresh
+  confirmation dropped to `moves_left_delta=0.005859` and
+  `policy_delta=0.003063`; the reused-single side was small
+  (`moves_left_delta=0.004639`, `policy_delta=0.002441`), while the reused-batch
+  side carried most of the drift (`moves_left_delta=0.093979`,
+  `policy_delta=0.019798`). The next CUDA correctness pass should therefore
+  focus on reused batch workspace/output state, not weight decoding or single
+  eval encoding.
 - The CUDA GPU gate enables `METALFISH_NN_BATCH_REUSE_STRESS=1` by default.
   This reuses one CUDA evaluator across `32 -> 1 -> 16 -> 33` batch-size
   transitions and compares selected outputs against fresh single-position
   baselines. The 2026-05-20 L4 gate
-  `metalfish-cuda-gate-20260520-215541` accepted the stress with worst
-  `moves_left_delta=0.004593` and `policy_delta=0.001369` on the batch-1
-  shrink step from the start position, keeping the larger parity-loop drift
-  isolated to broader evaluator sequencing rather than simple batch resizing.
+  `metalfish-cuda-gate-20260520-224228` accepted the stress with worst
+  `moves_left_delta=0.002747` and `policy_delta=0.011105` on the batch-32
+  `e2e4 c7c5` probe, keeping the largest parity-loop drift isolated to broader
+  batch sequencing rather than simple batch resizing.
+- The NN-backed MCTS legal-move view test still checks move size and move order
+  exactly. For CUDA, value and policy logits use the same backend tolerance as
+  the parity tests because the test compares two separate CUDA inference calls
+  for the same position; exact equality remains required for Metal and stub
+  backends.
 - CUDA inference now chunks execution batches above 16 and clears reusable
   workspace buffers before each execution. This keeps same-size chunk reuse from
   leaking stale intermediate state while preserving allocated device buffers.
@@ -297,10 +308,10 @@ Current CUDA backend boundary:
   reference deltas plus single-vs-batch drift across the expanded batch corpus,
   so remote CUDA runs preserve the evidence needed to investigate silent
   backend drift. The accepted 2026-05-20 L4 summary
-  `metalfish-cuda-gate-20260520-215541` was device `NVIDIA L4 sm_89`,
+  `metalfish-cuda-gate-20260520-224228` was device `NVIDIA L4 sm_89`,
   `NNBackend=auto` resolved to the CUDA transformer backend, and timings were
-  `b1=7.677ms`, `b2=9.465ms`, `b4=13.998ms`, `b8=24.818ms`,
-  `b16=47.420ms`, `b32=134.886ms` (`4.2152ms/eval` at batch 32).
+  `b1=7.679ms`, `b2=9.650ms`, `b4=13.934ms`, `b8=25.949ms`,
+  `b16=48.903ms`, `b32=98.262ms` (`3.0707ms/eval` at batch 32).
 - The CUDA attention smoke keeps strict `1e-5` checks for individual Q/K/V,
   smolgen, score, softmax, context, projection, residual, and layernorm
   tensors. The attention-only sequence-level check now uses a `5e-3`
@@ -316,7 +327,7 @@ Current CUDA backend boundary:
   validated resolved schedule held by `PlanSmokeCudaExecutor` and
   `ResolvedCudaExecutor`. This removes per-inference schedule reconstruction
   from the hot path without changing the shared resolved-plan contract. The
-  2026-05-20 L4 gate `metalfish-cuda-gate-20260520-215541` kept CUDA unit tests,
+  2026-05-20 L4 gate `metalfish-cuda-gate-20260520-224228` kept CUDA unit tests,
   fixed BT4 references, expanded batch parity, first-use evaluator stress,
   reusable-evaluator batch stress, and auto/CUDA/hybrid UCI smokes green.
 - `tools/run_cuda_gpu_gate.sh` is the reusable NVIDIA-host gate. It verifies
@@ -329,7 +340,7 @@ Current CUDA backend boundary:
   and retries around apt/dpkg locks and refreshes the package index before each
   install attempt so fresh cloud images do not fail the gate while unattended
   upgrades or transient mirror failures are still running. The 2026-05-20 L4
-  gate `metalfish-cuda-gate-20260520-215541` accepted the hybrid-CUDA smoke
+  gate `metalfish-cuda-gate-20260520-224228` accepted the hybrid-CUDA smoke
   with `bestmove e2e4`.
 - `METALFISH_CUDA_PROFILE=1` now runs as a separate hybrid-CUDA profiling
   smoke after the correctness gate. CUDA unit tests and the parity binary are
@@ -337,8 +348,8 @@ Current CUDA backend boundary:
   checks. The optional trace-pair diagnostic uses fresh evaluator instances so
   it cannot perturb the parity loop, while `cuda-gpu-profile.log` and the
   summary still capture stage buckets for performance work. On the accepted L4
-  profile smoke, the first profiled BT4 eval was `7.382 ms`, led by
-  attention/layernorm stages at `4.221 ms`.
+  profile smoke, the first profiled BT4 eval was `7.491 ms`, led by
+  attention/layernorm stages at `4.277 ms`.
 - CUDA warmup now synchronizes its stream before the backend constructor
   returns. That keeps cuBLAS work from one freshly-created evaluator from
   overlapping another evaluator on a different stream and prevents first-use
