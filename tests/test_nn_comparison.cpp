@@ -869,6 +869,77 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
   }
 }
 
+bool test_mcts_evaluator_first_use_stress_optional() {
+  std::cout << "  MCTS evaluator first-use stress..." << std::endl;
+  const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
+  if (!weights_path) {
+    std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
+    return true;
+  }
+
+  try {
+    StateInfo st;
+    Position pos;
+    pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            false, &st);
+    auto fixture = build_history({});
+    const std::vector<std::vector<const Position *>> one_history = {
+        fixture.ptrs};
+
+    MCTS::NNMCTSEvaluator reference_eval(weights_path);
+    const auto reference = reference_eval.Evaluate(pos);
+    const std::string network_info = reference_eval.GetNetworkInfo();
+
+    EvalTolerances tolerances;
+    if (network_info.find("CUDA transformer backend") != std::string::npos) {
+      tolerances.value = 2e-3f;
+      tolerances.moves_left = 1.25e-1f;
+      tolerances.policy = 5e-2f;
+    }
+
+    const int iterations = env_int_or_default(
+        "METALFISH_NN_FIRST_USE_STRESS_ITERS",
+        network_info.find("CUDA transformer backend") != std::string::npos ? 3
+                                                                            : 1,
+        1, 32);
+
+    for (int iter = 0; iter < iterations; ++iter) {
+      MCTS::NNMCTSEvaluator first_eval(weights_path);
+      MCTS::NNMCTSEvaluator second_eval(weights_path);
+
+      const auto first = first_eval.Evaluate(pos);
+      if (!compare_eval_result(reference, first,
+                               "first-use direct iter " +
+                                   std::to_string(iter),
+                               tolerances)) {
+        return false;
+      }
+
+      const auto second_batch =
+          second_eval.EvaluateBatchWithHistory(one_history);
+      if (second_batch.size() != 1) {
+        std::cout << "    FAIL: first-use batch iter " << iter
+                  << " returned " << second_batch.size() << " outputs"
+                  << std::endl;
+        return false;
+      }
+      if (!compare_eval_result(reference, second_batch.front(),
+                               "first-use batch iter " +
+                                   std::to_string(iter),
+                               tolerances)) {
+        return false;
+      }
+    }
+
+    std::cout << "    PASS: checked " << iterations
+              << " fresh evaluator pairs" << std::endl;
+    return true;
+  } catch (const std::exception &e) {
+    std::cout << "    FAIL: exception: " << e.what() << std::endl;
+    return false;
+  }
+}
+
 bool benchmark_nn_batch_optional() {
   std::cout << "  NN backend batch benchmark..." << std::endl;
   if (!env_flag_enabled("METALFISH_NN_BATCH_BENCH")) {
@@ -976,9 +1047,11 @@ int main() {
   const bool ok2 = test_encoder_repetition_plane();
   const bool ok3 = test_mcts_evaluator_optional();
   const bool ok4 = test_bt4_reference_outputs_optional(parity_report.get());
-  const bool ok5 = test_mcts_evaluator_batch_parity_optional(parity_report.get());
-  const bool ok6 = benchmark_nn_batch_optional();
-  const bool ok7 =
+  const bool ok5 =
+      test_mcts_evaluator_batch_parity_optional(parity_report.get());
+  const bool ok6 = test_mcts_evaluator_first_use_stress_optional();
+  const bool ok7 = benchmark_nn_batch_optional();
+  const bool ok8 =
       !parity_report || write_parity_report(*parity_report);
-  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7) ? 0 : 1;
+  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8) ? 0 : 1;
 }
