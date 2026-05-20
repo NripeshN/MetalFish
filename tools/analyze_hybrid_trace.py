@@ -121,25 +121,28 @@ def iter_trace_decisions(results_path: pathlib.Path) -> Iterable[TraceDecision]:
                 played = str(entry.get("move", ""))
                 side = str(entry.get("side", ""))
                 ply = int(entry.get("ply", 0))
+                last_trace_fields: Optional[dict[str, str]] = None
                 for raw in entry.get("lines", []):
                     line = str(raw).removeprefix("info string ")
                     if not line.startswith("HybridTrace:"):
                         continue
-                    fields = parse_fields(line)
-                    ab_move = fields.get("ABMove", "none")
-                    mcts_move = fields.get("MCTSMove", "none")
-                    yield TraceDecision(
-                        game=game_no,
-                        ply=ply,
-                        side=side,
-                        fen=fen,
-                        played=played,
-                        reason=fields.get("reason", "?"),
-                        selected=fields.get("selected", "none"),
-                        ab_move=ab_move,
-                        mcts_move=mcts_move,
-                        fields=fields,
-                    )
+                    last_trace_fields = parse_fields(line)
+                if last_trace_fields is None:
+                    continue
+                ab_move = last_trace_fields.get("ABMove", "none")
+                mcts_move = last_trace_fields.get("MCTSMove", "none")
+                yield TraceDecision(
+                    game=game_no,
+                    ply=ply,
+                    side=side,
+                    fen=fen,
+                    played=played,
+                    reason=last_trace_fields.get("reason", "?"),
+                    selected=last_trace_fields.get("selected", "none"),
+                    ab_move=ab_move,
+                    mcts_move=mcts_move,
+                    fields=last_trace_fields,
+                )
 
 
 def collect_trace_log_stats(results_paths: list[pathlib.Path]) -> TraceLogStats:

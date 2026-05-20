@@ -6,11 +6,15 @@ import json
 import os
 import pathlib
 import sys
+import tempfile
 
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ / "tests"))
 
 import paper_benchmarks  # noqa: E402
+
+sys.path.insert(0, str(PROJ / "tools"))
+import analyze_hybrid_trace  # noqa: E402
 
 
 def assert_options_include(
@@ -85,6 +89,45 @@ def assert_paper_hybrid_env_overrides() -> None:
             "HybridRootPawnLeverTieBreak": "false",
         },
     )
+
+
+def assert_hybrid_trace_final_decision_only() -> None:
+    data = {
+        "matches": [
+            {
+                "games": [
+                    {
+                        "game": 1,
+                        "search_log": [
+                            {
+                                "ply": 12,
+                                "side": "black",
+                                "fen": "8/8/8/8/8/8/8/8 b - - 0 1",
+                                "move": "b7b5",
+                                "lines": [
+                                    "info string HybridTrace: reason=ab_default "
+                                    "selected=a7a6 ABMove=a7a6 MCTSMove=b7b5",
+                                    "info string HybridTrace: reason=root_pawn_lever_tiebreak "
+                                    "selected=b7b5 ABMove=a7a6 MCTSMove=b7b5",
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "results.json"
+        path.write_text(json.dumps(data))
+        decisions = list(analyze_hybrid_trace.iter_trace_decisions(path))
+    if len(decisions) != 1:
+        raise AssertionError(f"expected one final trace decision, got {len(decisions)}")
+    decision = decisions[0]
+    if decision.reason != "root_pawn_lever_tiebreak" or decision.selected != "b7b5":
+        raise AssertionError(
+            "trace analyzer did not keep the final HybridTrace decision"
+        )
 
 
 def assert_tactical_fail_under_guard() -> None:
@@ -214,6 +257,7 @@ def main() -> int:
         {"Threads": "8", "Temperature": "0"},
     )
     assert_paper_hybrid_env_overrides()
+    assert_hybrid_trace_final_decision_only()
 
     assert_file_contains(
         PROJ / "src/uci/engine.cpp",
