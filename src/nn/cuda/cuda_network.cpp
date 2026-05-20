@@ -82,6 +82,14 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
       tensor_plan_(CreateNetworkTensorPlan(format_)),
       buffer_layout_(LayoutFromTensorPlan(tensor_plan_, kDefaultMaxBatchSize)),
       executor_(CreateMissingCudaExecutor()) {
+  const auto device_selection = SelectCudaDevice();
+  if (!device_selection.ok) {
+    throw std::runtime_error("CUDA transformer backend is compiled (" +
+                             RuntimeCudaDeviceSummary() +
+                             "; format: " + format_.Summary() +
+                             ") but " + device_selection.message);
+  }
+
   std::unique_ptr<MultiHeadWeights> decoded_weights;
   std::string policy_head;
   std::string value_head;
@@ -99,13 +107,6 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
                              RuntimeCudaDeviceSummary() +
                              "; format: " + format_.Summary() +
                              ") but weight validation failed: " + e.what());
-  }
-
-  const int device_count = RuntimeCudaDeviceCount();
-  if (device_count <= 0) {
-    throw std::runtime_error(
-        "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
-        "; format: " + format_.Summary() + ") but no CUDA device is available");
   }
 
   try {

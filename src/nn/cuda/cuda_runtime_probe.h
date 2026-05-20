@@ -13,8 +13,15 @@ namespace MetalFish {
 namespace NN {
 namespace Cuda {
 
+struct CudaDeviceSelection {
+  bool ok = false;
+  int device = -1;
+  std::string message;
+};
+
 int CompiledCudaRuntimeVersion();
 int RuntimeCudaDeviceCount();
+CudaDeviceSelection SelectCudaDevice();
 std::string RuntimeCudaDeviceSummary();
 
 } // namespace Cuda

@@ -9,12 +9,55 @@
 
 #include <cuda_runtime_api.h>
 
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
+#include <limits>
 #include <sstream>
 #include <string>
 
 namespace MetalFish {
 namespace NN {
 namespace Cuda {
+namespace {
+
+std::string CudaErrorText(cudaError_t status) {
+  return cudaGetErrorString(status);
+}
+
+bool ParseDeviceIndex(const char *raw, int &device) {
+  if (!raw || !*raw)
+    return false;
+
+  char *end = nullptr;
+  errno = 0;
+  const long value = std::strtol(raw, &end, 10);
+  if (errno != 0 || end == raw || *end != '\0' || value < 0 ||
+      value > INT_MAX) {
+    return false;
+  }
+
+  device = static_cast<int>(value);
+  return true;
+}
+
+long long DeviceScore(const cudaDeviceProp &prop) {
+  return static_cast<long long>(prop.major) * 1'000'000'000'000LL +
+         static_cast<long long>(prop.minor) * 10'000'000'000LL +
+         static_cast<long long>(prop.multiProcessorCount) * 1'000'000LL +
+         static_cast<long long>(prop.clockRate) * 100LL +
+         static_cast<long long>(prop.totalGlobalMem / (1024ULL * 1024ULL));
+}
+
+std::string DeviceDescription(int device, const cudaDeviceProp &prop) {
+  std::ostringstream out;
+  out << device << " " << prop.name << " sm_" << prop.major << prop.minor
+      << ", sms=" << prop.multiProcessorCount
+      << ", memory=" << (prop.totalGlobalMem / (1024ULL * 1024ULL)) << "MiB";
+  return out.str();
+}
+
+} // namespace
 
 int CompiledCudaRuntimeVersion() { return CUDART_VERSION; }
 
@@ -26,6 +69,89 @@ int RuntimeCudaDeviceCount() {
     return -static_cast<int>(status);
   }
   return count;
+}
+
+CudaDeviceSelection SelectCudaDevice() {
+  int count = 0;
+  cudaError_t status = cudaGetDeviceCount(&count);
+  if (status != cudaSuccess) {
+    const std::string error = CudaErrorText(status);
+    cudaGetLastError();
+    return {false, -1, "device query failed: " + error};
+  }
+  if (count <= 0)
+    return {false, -1, "no CUDA device is available"};
+
+  const char *requested_raw = std::getenv("METALFISH_CUDA_DEVICE");
+  if (requested_raw && *requested_raw) {
+    int requested = -1;
+    if (!ParseDeviceIndex(requested_raw, requested)) {
+      return {false, -1,
+              "METALFISH_CUDA_DEVICE must be a non-negative integer"};
+    }
+    if (requested >= count) {
+      std::ostringstream out;
+      out << "METALFISH_CUDA_DEVICE=" << requested
+          << " is outside the visible CUDA device range 0.." << (count - 1);
+      return {false, -1, out.str()};
+    }
+    status = cudaSetDevice(requested);
+    if (status != cudaSuccess) {
+      const std::string error = CudaErrorText(status);
+      cudaGetLastError();
+      return {false, requested, "cudaSetDevice failed: " + error};
+    }
+
+    cudaDeviceProp prop{};
+    status = cudaGetDeviceProperties(&prop, requested);
+    if (status == cudaSuccess) {
+      return {true, requested,
+              "selected CUDA device " + DeviceDescription(requested, prop) +
+                  " from METALFISH_CUDA_DEVICE"};
+    }
+    const std::string error = CudaErrorText(status);
+    cudaGetLastError();
+    return {true, requested,
+            "selected CUDA device " + std::to_string(requested) +
+                " from METALFISH_CUDA_DEVICE; properties unavailable: " +
+                error};
+  }
+
+  int best_device = 0;
+  long long best_score = std::numeric_limits<long long>::min();
+  cudaDeviceProp best_prop{};
+  bool have_properties = false;
+  for (int device = 0; device < count; ++device) {
+    cudaDeviceProp prop{};
+    status = cudaGetDeviceProperties(&prop, device);
+    if (status != cudaSuccess) {
+      cudaGetLastError();
+      continue;
+    }
+
+    const long long score = DeviceScore(prop);
+    if (!have_properties || score > best_score) {
+      best_device = device;
+      best_score = score;
+      best_prop = prop;
+      have_properties = true;
+    }
+  }
+
+  status = cudaSetDevice(best_device);
+  if (status != cudaSuccess) {
+    const std::string error = CudaErrorText(status);
+    cudaGetLastError();
+    return {false, best_device, "cudaSetDevice failed: " + error};
+  }
+
+  if (have_properties) {
+    return {true, best_device,
+            "selected best visible CUDA device " +
+                DeviceDescription(best_device, best_prop)};
+  }
+  return {true, best_device,
+          "selected CUDA device 0; device properties unavailable"};
 }
 
 std::string RuntimeCudaDeviceSummary() {
