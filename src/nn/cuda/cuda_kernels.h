@@ -74,6 +74,13 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
                                 int squares, int head_depth, int qkv_width,
                                 float scale, cudaStream_t stream = nullptr);
 
+void LaunchAttentionScoreBatchedGemmKernel(
+    const float *query, const float *key, float *scores,
+    const float **device_key_ptrs, const float **device_query_ptrs,
+    float **device_score_ptrs, int batch_size, int heads, int squares,
+    int head_depth, int qkv_width, float scale,
+    cudaStream_t stream = nullptr);
+
 void LaunchAttentionBiasAddKernel(float *scores, const float *bias,
                                   int batch_size, int heads, int squares,
                                   cudaStream_t stream = nullptr);
@@ -92,6 +99,12 @@ void LaunchAttentionContextKernel(const float *probabilities,
                                   int batch_size, int heads, int squares,
                                   int head_depth, int qkv_width,
                                   cudaStream_t stream = nullptr);
+
+void LaunchAttentionContextBatchedGemmKernel(
+    const float *probabilities, const float *value, float *context,
+    const float **device_value_ptrs, const float **device_probability_ptrs,
+    float **device_context_ptrs, int batch_size, int heads, int squares,
+    int head_depth, int qkv_width, cudaStream_t stream = nullptr);
 
 void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
                                     const float *promotion_weights,

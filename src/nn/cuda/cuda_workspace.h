@@ -34,6 +34,12 @@ struct CudaNamedWorkspaceBuffer {
   std::size_t capacity = 0;
 };
 
+struct CudaNamedByteWorkspaceBuffer {
+  std::string name;
+  void *buffer = nullptr;
+  std::size_t capacity_bytes = 0;
+};
+
 class CudaExecutionWorkspace {
 public:
   CudaExecutionWorkspace() = default;
@@ -43,10 +49,12 @@ public:
 
   float *ReserveFloats(CudaWorkspaceSlot slot, std::size_t entries);
   float *ReserveNamedFloats(std::string_view name, std::size_t entries);
+  void *ReserveNamedBytes(std::string_view name, std::size_t bytes);
   cudaStream_t Stream();
   void Synchronize();
   std::size_t CapacityFloats(CudaWorkspaceSlot slot) const;
   std::size_t NamedCapacityFloats(std::string_view name) const;
+  std::size_t NamedCapacityBytes(std::string_view name) const;
   std::size_t NamedBufferCount() const;
   std::size_t TotalCapacityFloats() const;
   std::size_t TotalBytes() const;
@@ -59,6 +67,7 @@ private:
   std::array<float *, kSlotCount> buffers_{};
   std::array<std::size_t, kSlotCount> capacities_{};
   std::vector<CudaNamedWorkspaceBuffer> named_buffers_;
+  std::vector<CudaNamedByteWorkspaceBuffer> named_byte_buffers_;
   cudaStream_t stream_ = nullptr;
 };
 

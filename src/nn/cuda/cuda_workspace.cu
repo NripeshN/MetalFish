@@ -38,6 +38,11 @@ void FreeDevice(float *ptr) {
     cudaFree(ptr);
 }
 
+void FreeDeviceBytes(void *ptr) {
+  if (ptr)
+    cudaFree(ptr);
+}
+
 void DestroyStream(cudaStream_t stream) {
   if (stream)
     cudaStreamDestroy(stream);
@@ -55,6 +60,26 @@ FindNamedBuffer(std::vector<CudaNamedWorkspaceBuffer> &buffers,
 
 const CudaNamedWorkspaceBuffer *FindNamedBuffer(
     const std::vector<CudaNamedWorkspaceBuffer> &buffers,
+    std::string_view name) {
+  for (const auto &buffer : buffers) {
+    if (buffer.name == name)
+      return &buffer;
+  }
+  return nullptr;
+}
+
+CudaNamedByteWorkspaceBuffer *
+FindNamedByteBuffer(std::vector<CudaNamedByteWorkspaceBuffer> &buffers,
+                    std::string_view name) {
+  for (auto &buffer : buffers) {
+    if (buffer.name == name)
+      return &buffer;
+  }
+  return nullptr;
+}
+
+const CudaNamedByteWorkspaceBuffer *FindNamedByteBuffer(
+    const std::vector<CudaNamedByteWorkspaceBuffer> &buffers,
     std::string_view name) {
   for (const auto &buffer : buffers) {
     if (buffer.name == name)
@@ -122,6 +147,35 @@ float *CudaExecutionWorkspace::ReserveNamedFloats(std::string_view name,
   return buffer->buffer;
 }
 
+void *CudaExecutionWorkspace::ReserveNamedBytes(std::string_view name,
+                                                std::size_t bytes) {
+  if (name.empty())
+    throw std::runtime_error("CUDA workspace named byte buffer is empty");
+  if (bytes == 0)
+    return nullptr;
+
+  CudaNamedByteWorkspaceBuffer *buffer =
+      FindNamedByteBuffer(named_byte_buffers_, name);
+  if (!buffer) {
+    named_byte_buffers_.push_back(
+        CudaNamedByteWorkspaceBuffer{std::string(name), nullptr, 0});
+    buffer = &named_byte_buffers_.back();
+  }
+  if (buffer->capacity_bytes >= bytes)
+    return buffer->buffer;
+
+  void *next = nullptr;
+  const cudaError_t status = cudaMalloc(&next, bytes);
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("cudaMalloc(named_byte_workspace)", status));
+
+  FreeDeviceBytes(buffer->buffer);
+  buffer->buffer = next;
+  buffer->capacity_bytes = bytes;
+  return buffer->buffer;
+}
+
 cudaStream_t CudaExecutionWorkspace::Stream() {
   if (stream_)
     return stream_;
@@ -153,6 +207,13 @@ CudaExecutionWorkspace::NamedCapacityFloats(std::string_view name) const {
   return buffer ? buffer->capacity : 0;
 }
 
+std::size_t
+CudaExecutionWorkspace::NamedCapacityBytes(std::string_view name) const {
+  const CudaNamedByteWorkspaceBuffer *buffer =
+      FindNamedByteBuffer(named_byte_buffers_, name);
+  return buffer ? buffer->capacity_bytes : 0;
+}
+
 std::size_t CudaExecutionWorkspace::NamedBufferCount() const {
   return named_buffers_.size();
 }
@@ -167,7 +228,10 @@ std::size_t CudaExecutionWorkspace::TotalCapacityFloats() const {
 }
 
 std::size_t CudaExecutionWorkspace::TotalBytes() const {
-  return TotalCapacityFloats() * sizeof(float);
+  std::size_t total = TotalCapacityFloats() * sizeof(float);
+  for (const auto &buffer : named_byte_buffers_)
+    total += buffer.capacity_bytes;
+  return total;
 }
 
 void CudaExecutionWorkspace::Release() {
@@ -184,6 +248,12 @@ void CudaExecutionWorkspace::Release() {
     buffer.capacity = 0;
   }
   named_buffers_.clear();
+  for (auto &buffer : named_byte_buffers_) {
+    FreeDeviceBytes(buffer.buffer);
+    buffer.buffer = nullptr;
+    buffer.capacity_bytes = 0;
+  }
+  named_byte_buffers_.clear();
   DestroyStream(stream_);
   stream_ = nullptr;
 }
@@ -207,14 +277,18 @@ CudaWorkspaceSmokeResult RunExecutionWorkspaceSmoke() {
     float *norm = workspace.ReserveFloats(CudaWorkspaceSlot::Norm, 16);
     float *named = workspace.ReserveNamedFloats("smoke.step.output", 6);
     float *named_reused = workspace.ReserveNamedFloats("smoke.step.output", 2);
+    void *byte_buffer = workspace.ReserveNamedBytes("smoke.ptrs", 96);
+    void *byte_buffer_reused = workspace.ReserveNamedBytes("smoke.ptrs", 48);
     cudaStream_t stream = workspace.Stream();
 
     if (!dense || !activation || !norm || dense != dense_reused ||
-        !named || named != named_reused || !stream ||
+        !named || named != named_reused || !byte_buffer ||
+        byte_buffer != byte_buffer_reused || !stream ||
         workspace.CapacityFloats(CudaWorkspaceSlot::Dense) != 8 ||
         workspace.CapacityFloats(CudaWorkspaceSlot::Activation) != 4 ||
         workspace.CapacityFloats(CudaWorkspaceSlot::Norm) != 16 ||
         workspace.NamedCapacityFloats("smoke.step.output") != 6 ||
+        workspace.NamedCapacityBytes("smoke.ptrs") != 96 ||
         workspace.NamedBufferCount() != 1) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA workspace capacity reuse mismatch";
@@ -222,7 +296,7 @@ CudaWorkspaceSmokeResult RunExecutionWorkspaceSmoke() {
     }
 
     result.allocation_bytes = workspace.TotalBytes();
-    if (result.allocation_bytes != (8 + 4 + 16 + 6) * sizeof(float)) {
+    if (result.allocation_bytes != (8 + 4 + 16 + 6) * sizeof(float) + 96) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA workspace allocation byte mismatch";
       return result;

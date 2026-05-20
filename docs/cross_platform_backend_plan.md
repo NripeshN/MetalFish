@@ -217,6 +217,14 @@ Current CUDA backend boundary:
   The first 2026-05-20 T4 baseline after workspace reuse was:
   `b1=16.922ms`, `b2=20.613ms`, `b4=27.251ms`, `b8=42.228ms`,
   `b16=80.917ms`, `b32=157.184ms` (`4.912ms/eval` at batch 32).
+- CUDA attention score/context execution now has a reusable pointer-array
+  cuBLAS path for the measured batch-4 case, while batch 1/2/8/16/32 keep the
+  previous strided path. A full multi-batch pointer-array attempt compiled and
+  passed parity but slowed larger batches, so it was narrowed before keeping.
+  The accepted 2026-05-20 T4 gate kept CUDA smoke, fixed BT4 outputs, batch
+  parity, and UCI smoke green with
+  `b1=16.885ms`, `b2=25.529ms`, `b4=22.494ms`, `b8=43.980ms`,
+  `b16=82.024ms`, `b32=159.093ms` (`4.972ms/eval` at batch 32).
 - A CUDA Q/K/V bias fusion attempt was rejected on the 2026-05-20 T4 gate after
   fixed-output drift in the castling-rights reference case, and was reverted.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with

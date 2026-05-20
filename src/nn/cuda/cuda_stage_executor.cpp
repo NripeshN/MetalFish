@@ -1301,11 +1301,32 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
   output.head_depth = attention.head_depth;
 
   cudaStream_t stream = workspace.Stream();
-  LaunchAttentionScoreKernel(
-      projections.query, projections.key, output.scores, batch_size,
-      attention.heads, attention.squares, attention.head_depth,
-      attention.qkv_width,
-      1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
+  const int attention_pointer_count = batch_size * attention.heads;
+  if (batch_size == 4) {
+    auto **score_key_ptrs = reinterpret_cast<const float **>(
+        workspace.ReserveNamedBytes(step.name + ".score.key_ptrs",
+                                    attention_pointer_count *
+                                        sizeof(const float *)));
+    auto **score_query_ptrs = reinterpret_cast<const float **>(
+        workspace.ReserveNamedBytes(step.name + ".score.query_ptrs",
+                                    attention_pointer_count *
+                                        sizeof(const float *)));
+    auto **score_output_ptrs = reinterpret_cast<float **>(
+        workspace.ReserveNamedBytes(step.name + ".score.output_ptrs",
+                                    attention_pointer_count *
+                                        sizeof(float *)));
+    LaunchAttentionScoreBatchedGemmKernel(
+        projections.query, projections.key, output.scores, score_key_ptrs,
+        score_query_ptrs, score_output_ptrs, batch_size, attention.heads,
+        attention.squares, attention.head_depth, attention.qkv_width,
+        1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
+  } else {
+    LaunchAttentionScoreKernel(
+        projections.query, projections.key, output.scores, batch_size,
+        attention.heads, attention.squares, attention.head_depth,
+        attention.qkv_width,
+        1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
+  }
   bool applied_bias_with_softmax = false;
   if (attention.smolgen.present) {
     if (!weights || !parent) {
@@ -1330,10 +1351,30 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     LaunchAttentionSoftmaxKernel(output.scores, output.probabilities,
                                  score_rows, attention.squares, stream);
   }
-  LaunchAttentionContextKernel(output.probabilities, projections.value,
-                               output.context, batch_size, attention.heads,
-                               attention.squares, attention.head_depth,
-                               attention.qkv_width, stream);
+  if (batch_size == 4) {
+    auto **context_value_ptrs = reinterpret_cast<const float **>(
+        workspace.ReserveNamedBytes(step.name + ".context.value_ptrs",
+                                    attention_pointer_count *
+                                        sizeof(const float *)));
+    auto **context_probability_ptrs = reinterpret_cast<const float **>(
+        workspace.ReserveNamedBytes(step.name + ".context.probability_ptrs",
+                                    attention_pointer_count *
+                                        sizeof(const float *)));
+    auto **context_output_ptrs = reinterpret_cast<float **>(
+        workspace.ReserveNamedBytes(step.name + ".context.output_ptrs",
+                                    attention_pointer_count *
+                                        sizeof(float *)));
+    LaunchAttentionContextBatchedGemmKernel(
+        output.probabilities, projections.value, output.context,
+        context_value_ptrs, context_probability_ptrs, context_output_ptrs,
+        batch_size, attention.heads, attention.squares, attention.head_depth,
+        attention.qkv_width, stream);
+  } else {
+    LaunchAttentionContextKernel(output.probabilities, projections.value,
+                                 output.context, batch_size, attention.heads,
+                                 attention.squares, attention.head_depth,
+                                 attention.qkv_width, stream);
+  }
   return output;
 }
 
