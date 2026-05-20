@@ -121,6 +121,28 @@ def test_pre_game_resource_prep_runs_cleanup_before_allocation() -> None:
     expect("resource prep logs purge", "purge=ok" in text)
 
 
+def test_bot_instance_lock_blocks_second_holder() -> None:
+    if lichess_bot.fcntl is None:
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        lock_path = pathlib.Path(tmp) / "lichess_bot.lock"
+        first = lichess_bot.BotInstanceLock(lock_path)
+        second = lichess_bot.BotInstanceLock(lock_path)
+        first.acquire()
+        try:
+            blocked = False
+            try:
+                second.acquire()
+            except RuntimeError as exc:
+                blocked = "already running" in str(exc)
+            expect("second bot instance blocked", blocked)
+        finally:
+            first.release()
+
+        second.acquire()
+        second.release()
+
+
 def test_seek_rating_requires_rated_only_mode() -> None:
     class Args:
         accept_rated = False
@@ -1940,6 +1962,7 @@ def main() -> int:
     test_live_defaults_avoid_crash_prone_resources()
     test_load_adjusted_workers_preserves_floor()
     test_pre_game_resource_prep_runs_cleanup_before_allocation()
+    test_bot_instance_lock_blocks_second_holder()
     test_seek_rating_requires_rated_only_mode()
     test_seek_and_rated_policy_labels_are_explicit()
     test_bot_config_rejects_dangerous_rated_seek()

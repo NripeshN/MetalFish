@@ -35,6 +35,11 @@ import chess
 import chess.polyglot
 
 try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
+
+try:
     import requests
 except ModuleNotFoundError:
     requests = None
@@ -206,6 +211,15 @@ BOOK_CACHE_PATH = pathlib.Path(
 BOOK_CACHE_LIMIT = max(0, env_int("METALFISH_BOOK_CACHE_LIMIT", 50000))
 DEFAULT_BOOK_DIR = PROJ / "books"
 BOOK_ALLOW_ONLINE = env_bool_string("METALFISH_BOOK_ALLOW_ONLINE", False) == "true"
+BOT_LOCK_PATH = pathlib.Path(
+    os.environ.get(
+        "METALFISH_BOT_LOCK",
+        str(PROJ / "results" / "lichess_bot.lock"),
+    )
+)
+ALLOW_CONCURRENT_BOT = (
+    env_bool_string("METALFISH_ALLOW_CONCURRENT_BOT", False) == "true"
+)
 ENGINE_STOP_GRACE_S = 3.0
 PONDER_STOP_TIMEOUT_S = 4.0
 PONDER_HIT_TIMEOUT_S = 6.0
@@ -580,6 +594,61 @@ def print_config_check(args) -> None:
         f"({LICHESS_AUDIT_DIR})"
     )
     print(f"  Ponder: {args.ponder}")
+
+
+class BotInstanceLock:
+    def __init__(self, path: pathlib.Path, enabled: bool = True):
+        self.path = pathlib.Path(path)
+        self.enabled = enabled and not ALLOW_CONCURRENT_BOT and fcntl is not None
+        self._file = None
+
+    def acquire(self) -> None:
+        if not self.enabled:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = self.path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            lock_file.seek(0)
+            owner = lock_file.read().strip()
+            lock_file.close()
+            detail = f" ({owner})" if owner else ""
+            raise RuntimeError(
+                f"another MetalFish Lichess bot is already running{detail}"
+            ) from exc
+
+        lock_file.seek(0)
+        lock_file.truncate()
+        lock_file.write(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "started": int(time.time()),
+                    "argv": sys.argv,
+                },
+                sort_keys=True,
+            )
+        )
+        lock_file.flush()
+        self._file = lock_file
+
+    def release(self) -> None:
+        if self._file is None:
+            return
+        try:
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._file.close()
+            self._file = None
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.release()
+        return False
 
 
 class UCIEngine:
@@ -3849,10 +3918,6 @@ def main():
         print(f"ERROR: Weights not found at {WEIGHTS}")
         sys.exit(1)
 
-    if args.self_test_only:
-        bot = LichessBot("", args)
-        sys.exit(0 if bot._run_engine_self_test() else 1)
-
     config_errors = validate_bot_config(args)
     if config_errors:
         for error in config_errors:
@@ -3863,20 +3928,48 @@ def main():
         print_config_check(args)
         sys.exit(0)
 
-    if requests is None:
-        print("ERROR: Python package 'requests' is required for Lichess API mode.")
-        print("Install it in this environment or run with the project Python.")
-        sys.exit(1)
-
-    api_key = load_api_key()
-    bot = LichessBot(api_key, args)
     if args.seek_dry_run:
+        if requests is None:
+            print("ERROR: Python package 'requests' is required for Lichess API mode.")
+            print("Install it in this environment or run with the project Python.")
+            sys.exit(1)
+        api_key = load_api_key()
+        bot = LichessBot(api_key, args)
         profile = bot.get_profile()
         bot.bot_id = profile.get("id", "")
         bot.username = profile.get("username", bot.bot_id)
         sys.exit(0 if bot.preview_seek_once() else 1)
 
-    bot.run()
+    try:
+        bot_lock = BotInstanceLock(BOT_LOCK_PATH)
+        bot_lock.acquire()
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
+        print(
+            "Set METALFISH_ALLOW_CONCURRENT_BOT=1 only for deliberate "
+            "throughput experiments."
+        )
+        sys.exit(2)
+
+    if args.self_test_only:
+        try:
+            bot = LichessBot("", args)
+            sys.exit(0 if bot._run_engine_self_test() else 1)
+        finally:
+            bot_lock.release()
+
+    if requests is None:
+        print("ERROR: Python package 'requests' is required for Lichess API mode.")
+        print("Install it in this environment or run with the project Python.")
+        bot_lock.release()
+        sys.exit(1)
+
+    api_key = load_api_key()
+    bot = LichessBot(api_key, args)
+    try:
+        bot.run()
+    finally:
+        bot_lock.release()
 
 
 if __name__ == "__main__":
