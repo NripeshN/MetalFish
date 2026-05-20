@@ -218,8 +218,8 @@ public:
     const auto stage_inputs =
         CreateCudaStageInputBindings(execution_plan, schedule);
     const auto sequence = ExecuteDenseActivationLayerNormSequence(
-        execution_plan, weights, buffers.input_values, tape, workspace,
-        batch_size, stage_inputs);
+        execution_plan, weights, buffers.input_values, nullptr, nullptr, tape,
+        workspace, batch_size, stage_inputs, schedule);
     CudaOutputMappingOptions options;
     options.allow_partial_policy_rows = true;
     options.allow_partial_raw_policy_rows = true;
@@ -267,7 +267,7 @@ public:
     const auto sequence = ExecuteDenseActivationLayerNormSequence(
         execution_plan, weights, buffers.input_values, buffers.input_masks,
         buffers.input_values, tape, workspace, batch_size, stage_inputs,
-        timing_collector);
+        schedule_, timing_collector);
     const double sequence_ms =
         profile_index >= 0 ? MillisSince(sequence_start) : 0.0;
     const auto output_start = std::chrono::steady_clock::now();

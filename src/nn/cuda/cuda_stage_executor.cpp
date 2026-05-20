@@ -1366,10 +1366,22 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
     int batch_size, const CudaStageInputBindings &input_bindings,
     CudaStageTimingCollector *timings) {
+  const auto schedule = CreateCudaExecutionSchedule(execution_plan);
+  return ExecuteDenseActivationLayerNormSequence(
+      execution_plan, weights, input, input_masks, input_values, tape,
+      workspace, batch_size, input_bindings, schedule, timings);
+}
+
+CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaWeightBuffers &weights, const float *input,
+    const std::uint64_t *input_masks, const float *input_values,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size, const CudaStageInputBindings &input_bindings,
+    const CudaExecutionSchedule &schedule, CudaStageTimingCollector *timings) {
   if (!input)
     throw std::runtime_error("CUDA dense stage sequence input is missing");
 
-  const auto schedule = CreateCudaExecutionSchedule(execution_plan);
   if (!schedule.FullySupported()) {
     throw std::runtime_error("CUDA dense stage sequence is unsupported: " +
                              schedule.Summary());

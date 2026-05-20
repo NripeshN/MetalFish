@@ -211,6 +211,15 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     int batch_size, const CudaStageInputBindings &input_bindings,
     CudaStageTimingCollector *timings = nullptr);
 
+CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const CudaWeightBuffers &weights, const float *input,
+    const std::uint64_t *input_masks, const float *input_values,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size, const CudaStageInputBindings &input_bindings,
+    const CudaExecutionSchedule &schedule,
+    CudaStageTimingCollector *timings = nullptr);
+
 void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
                          int src_stride, int rows, int width,
                          std::string_view name, cudaStream_t stream);

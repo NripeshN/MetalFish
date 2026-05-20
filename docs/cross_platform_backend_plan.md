@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260520-194212`, L4, 2026-05-20 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260520-200350`, L4, 2026-05-20 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -279,8 +279,8 @@ Current CUDA backend boundary:
   so remote CUDA runs preserve the evidence needed to investigate silent
   backend drift. The accepted 2026-05-20 L4 summary was device `NVIDIA L4 sm_89`,
   `NNBackend=auto` resolved to the CUDA transformer backend, and timings were
-  `b1=6.593ms`, `b2=8.414ms`, `b4=12.744ms`, `b8=21.797ms`,
-  `b16=41.207ms`, `b32=86.466ms` (`2.7021ms/eval` at batch 32).
+  `b1=7.686ms`, `b2=9.648ms`, `b4=13.748ms`, `b8=25.284ms`,
+  `b16=47.962ms`, `b32=96.615ms` (`3.0192ms/eval` at batch 32).
 - The CUDA attention smoke keeps strict `1e-5` checks for individual Q/K/V,
   smolgen, score, softmax, context, projection, residual, and layernorm
   tensors. The attention-only sequence-level check now uses a `5e-3`
@@ -292,6 +292,13 @@ Current CUDA backend boundary:
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
+- The CUDA dense/attention execution sequence can now consume the already
+  validated resolved schedule held by `PlanSmokeCudaExecutor` and
+  `ResolvedCudaExecutor`. This removes per-inference schedule reconstruction
+  from the hot path without changing the shared resolved-plan contract. The
+  2026-05-20 L4 gate `metalfish-cuda-gate-20260520-200350` kept CUDA unit tests,
+  fixed BT4 references, expanded batch parity, first-use evaluator stress, and
+  auto/CUDA/hybrid UCI smokes green.
 - `tools/run_cuda_gpu_gate.sh` is the reusable NVIDIA-host gate. It verifies
   `nvidia-smi` and `nvcc`, builds CUDA with BT4 weights, runs CUDA unit tests,
   runs `test_nn_comparison` through `NNBackend=auto` on the CUDA host, asserts
@@ -302,7 +309,7 @@ Current CUDA backend boundary:
   and retries around apt/dpkg locks and refreshes the package index before each
   install attempt so fresh cloud images do not fail the gate while unattended
   upgrades or transient mirror failures are still running. The 2026-05-20 L4
-  gate `metalfish-cuda-gate-20260520-194212` accepted the hybrid-CUDA smoke
+  gate `metalfish-cuda-gate-20260520-200350` accepted the hybrid-CUDA smoke
   with `bestmove e2e4`.
 - `METALFISH_CUDA_PROFILE=1` now runs as a separate hybrid-CUDA profiling
   smoke after the correctness gate. CUDA unit tests and the parity binary are
@@ -310,8 +317,8 @@ Current CUDA backend boundary:
   checks. The optional trace-pair diagnostic uses fresh evaluator instances so
   it cannot perturb the parity loop, while `cuda-gpu-profile.log` and the
   summary still capture stage buckets for performance work. On the accepted L4
-  profile smoke, the first profiled BT4 eval was `7.406 ms`, led by
-  attention/layernorm stages at `4.215 ms`.
+  profile smoke, the first profiled BT4 eval was `7.517 ms`, led by
+  attention/layernorm stages at `4.268 ms`.
 - CUDA warmup now synchronizes its stream before the backend constructor
   returns. That keeps cuBLAS work from one freshly-created evaluator from
   overlapping another evaluator on a different stream and prevents first-use
