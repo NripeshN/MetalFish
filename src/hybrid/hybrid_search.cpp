@@ -673,9 +673,12 @@ bool HybridRootPawnLeverCandidate(int selected_average_score,
                                   float selected_mcts_policy,
                                   float candidate_mcts_q,
                                   float candidate_mcts_policy) {
+  const bool high_policy_lever =
+      selected_mcts_rank > 0 && candidate_mcts_policy >= 0.25f &&
+      candidate_mcts_policy >= selected_mcts_policy * 1.15f;
   if (mcts_rank <= 0 || mcts_rank > 8 || mcts_current_visits < 8 ||
       selected_average_score - candidate_average_score > 60 ||
-      candidate_effort < 200) {
+      (!high_policy_lever && candidate_effort < 200)) {
     return false;
   }
 
