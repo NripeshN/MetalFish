@@ -588,29 +588,6 @@ bool HybridMCTSCrossRootConfidenceOverride(
          mcts_q - ab_in_mcts_q >= 0.20f;
 }
 
-bool HybridMCTSUnscoredWinningFixedBudgetOverride(
-    bool fixed_budget, uint64_t mcts_total_nodes, uint32_t mcts_visits,
-    float visit_share, float root_q_gap, int mcts_cp, int eval_delta,
-    int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_visits) {
-  if (!fixed_budget || mcts_total_nodes < 100 || mcts_visits < 22 ||
-      visit_share < 0.20f || root_q_gap < -0.03f || mcts_cp < 350 ||
-      eval_delta < 200) {
-    return false;
-  }
-
-  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 3 ||
-      mcts_in_ab_score != -VALUE_INFINITE || mcts_effort < 15000) {
-    return false;
-  }
-
-  if (ab_in_mcts_rank <= 0 || ab_in_mcts_visits == 0)
-    return false;
-
-  return mcts_visits > ab_in_mcts_visits &&
-         mcts_visits - ab_in_mcts_visits >= 4;
-}
-
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits) {
   if (mcts_playouts == 0) {
@@ -2100,13 +2077,6 @@ Move ParallelHybridSearch::make_final_decision() {
           ab_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
           mcts_in_ab.average_score, mcts_in_ab.effort, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
-  const bool mcts_unscored_winning_fixed_budget =
-      mcts_visit_evidence_sane &&
-      HybridMCTSUnscoredWinningFixedBudgetOverride(
-          mcts_decision_budget, mcts_confidence_total_nodes,
-          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
-          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.effort,
-          ab_in_mcts.rank, ab_in_mcts.current_visits);
   bool mcts_root_rejects_ab = false;
   {
     const int top_count =
@@ -2188,9 +2158,6 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_cross_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_cross_root_confidence_fixed_budget";
-    } else if (mcts_unscored_winning_fixed_budget) {
-      choose_mcts = true;
-      reason = "mcts_unscored_winning_fixed_budget";
     } else if (mcts_root_rejects_ab) {
       choose_mcts = true;
       reason = "mcts_root_rejects_ab";
@@ -2236,8 +2203,6 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSRootConfidence=" << (mcts_root_confidence_fixed_budget ? 1 : 0)
        << " MCTSCrossRootConfidence="
        << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
-       << " MCTSUnscoredWinning="
-       << (mcts_unscored_winning_fixed_budget ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
        << " ABVerified=" << (ab_verified ? 1 : 0)
        << " ABClearPreference=" << (ab_has_clear_preference ? 1 : 0)
