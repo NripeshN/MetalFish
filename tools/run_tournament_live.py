@@ -107,6 +107,42 @@ def apply_hybrid_env_options(options: Dict[str, str], force_trace: bool) -> None
         options["HybridTrace"] = "true"
 
 
+def parse_int_option(value: Optional[str], default: int = 0) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def hybrid_low_time_warnings(
+    matches: Sequence[Tuple[str, str]],
+    engines_cfg: Dict[str, dict],
+    movetime_ms: int,
+) -> List[str]:
+    if movetime_ms <= 0:
+        return []
+
+    warnings: List[str] = []
+    hybrid_names = {
+        name
+        for match in matches
+        for name in match
+        if engines_cfg.get(name, {}).get("options", {}).get("UseHybridSearch")
+        == "true"
+    }
+    for name in sorted(hybrid_names):
+        options = dict(engines_cfg[name].get("options", {}))
+        apply_hybrid_env_options(options, force_trace=False)
+        fallback_ms = parse_int_option(options.get("TransformerLowTimeFallbackMs"), 0)
+        if fallback_ms > 0 and movetime_ms < fallback_ms:
+            warnings.append(
+                f"{name}: --movetime {movetime_ms}ms is below "
+                f"TransformerLowTimeFallbackMs={fallback_ms}ms; this run will "
+                "exercise the AB time-safety fallback rather than full Hybrid MCTS."
+            )
+    return warnings
+
+
 class UCIEngine:
     def __init__(self, cmd: Sequence[str], name: str, options: Dict[str, str] = None):
         self.name = name
@@ -840,6 +876,8 @@ def run_tournament(args):
     print(f"Matches: {len(matches)}")
     print(f"Default thread budget: {default_threads}")
     print(f"Openings: order={args.opening_order} | seed={args.seed}")
+    for warning in hybrid_low_time_warnings(matches, engines_cfg, movetime_ms):
+        print(f"Warning: {warning}", flush=True)
     if args.max_plies > 0:
         print(f"Ply cap: {args.max_plies}")
     elif args.max_moves < 100:
