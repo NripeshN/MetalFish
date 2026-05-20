@@ -1306,6 +1306,7 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
       attention.heads, attention.squares, attention.head_depth,
       attention.qkv_width,
       1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
+  bool applied_bias_with_softmax = false;
   if (attention.smolgen.present) {
     if (!weights || !parent) {
       throw std::runtime_error(
@@ -1320,12 +1321,15 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     output.smolgen_dense2 = smolgen.dense2;
     output.smolgen_activation2 = smolgen.activation2;
     output.smolgen_norm2 = smolgen.norm2;
-    LaunchAttentionBiasAddKernel(output.scores, smolgen.global_bias,
-                                 batch_size, attention.heads,
-                                 attention.squares, stream);
+    LaunchAttentionBiasSoftmaxKernel(output.scores, smolgen.global_bias,
+                                     output.probabilities, score_rows,
+                                     attention.squares, stream);
+    applied_bias_with_softmax = true;
   }
-  LaunchAttentionSoftmaxKernel(output.scores, output.probabilities, score_rows,
-                               attention.squares, stream);
+  if (!applied_bias_with_softmax) {
+    LaunchAttentionSoftmaxKernel(output.scores, output.probabilities,
+                                 score_rows, attention.squares, stream);
+  }
   LaunchAttentionContextKernel(output.probabilities, projections.value,
                                output.context, batch_size, attention.heads,
                                attention.squares, attention.head_depth,

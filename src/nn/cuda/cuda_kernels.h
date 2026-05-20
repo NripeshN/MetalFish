@@ -82,6 +82,11 @@ void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
                                   int rows, int width,
                                   cudaStream_t stream = nullptr);
 
+void LaunchAttentionBiasSoftmaxKernel(float *scores, const float *bias,
+                                      float *probabilities, int rows,
+                                      int width,
+                                      cudaStream_t stream = nullptr);
+
 void LaunchAttentionContextKernel(const float *probabilities,
                                   const float *value, float *context,
                                   int batch_size, int heads, int squares,

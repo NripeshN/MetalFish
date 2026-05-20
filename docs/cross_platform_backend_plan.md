@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, FFN bias-activation fusion gate |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, attention bias-softmax fusion gate |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -109,7 +109,7 @@ Current CUDA backend boundary:
   residual addition, and fused residual layer normalization for transformer
   attention/FFN blocks. It also contains the first attention-core kernels for
   scaled QK scores, row softmax, and probability-weighted value context
-  construction, smolgen attention-bias addition before attention softmax, and
+  construction, smolgen attention-bias plus softmax fusion, and
   attention-policy scratch-to-1858 mapping. The CUDA policy map uses cuBLAS for
   the 64x64 square-policy logits, a narrow CUDA kernel for promotion logits, and
   a fixed gather table kept in device constant memory and uploaded once per
@@ -195,6 +195,12 @@ Current CUDA backend boundary:
   The 2026-05-20 T4 gate kept fixed BT4 outputs, batch parity, and UCI smoke
   green; profiled BT4 evals were `17.85-17.94 ms` with the feed-forward bucket
   around `4.87-4.90 ms`.
+- The CUDA smolgen attention path now fuses attention-bias application and
+  softmax while preserving the biased score scratch tensor for diagnostics. The
+  2026-05-20 T4 gate rejected the first register-max variant for strict
+  attention-smoke drift, then accepted the scratch-preserving variant with fixed
+  BT4 outputs, batch parity, and UCI smoke green. Steady profiled BT4 evals were
+  `17.74-17.76 ms`, with the attention bucket around `10.95 ms`.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.

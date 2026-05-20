@@ -375,6 +375,53 @@ __global__ void AttentionSoftmaxKernel(const float *scores,
     probability_row[col] = sum > 0.0f ? probability_row[col] / sum : 0.0f;
 }
 
+__global__ void AttentionBiasSoftmaxKernel(float *scores, const float *bias,
+                                           float *probabilities, int width) {
+  extern __shared__ float reductions[];
+  const int row = blockIdx.x;
+  float *score_row = scores + static_cast<std::size_t>(row) * width;
+  const float *bias_row = bias + static_cast<std::size_t>(row) * width;
+  float *probability_row =
+      probabilities + static_cast<std::size_t>(row) * width;
+
+  for (int col = threadIdx.x; col < width; col += blockDim.x)
+    score_row[col] += bias_row[col];
+  __syncthreads();
+
+  float max_value = -3.4028234663852886e+38F;
+  for (int col = threadIdx.x; col < width; col += blockDim.x)
+    max_value = fmaxf(max_value, score_row[col]);
+  reductions[threadIdx.x] = max_value;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride)
+      reductions[threadIdx.x] =
+          fmaxf(reductions[threadIdx.x], reductions[threadIdx.x + stride]);
+    __syncthreads();
+  }
+  max_value = reductions[0];
+
+  float sum = 0.0f;
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float value = expf(score_row[col] - max_value);
+    probability_row[col] = value;
+    sum += value;
+  }
+  reductions[threadIdx.x] = sum;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride)
+      reductions[threadIdx.x] += reductions[threadIdx.x + stride];
+    __syncthreads();
+  }
+  sum = reductions[0];
+
+  for (int col = threadIdx.x; col < width; col += blockDim.x)
+    probability_row[col] = sum > 0.0f ? probability_row[col] / sum : 0.0f;
+}
+
 __device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
 
 void EnsureAttentionPolicyGatherMapUploaded() {
@@ -817,6 +864,32 @@ void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("AttentionSoftmaxKernel synchronize", status));
+}
+
+void LaunchAttentionBiasSoftmaxKernel(float *scores, const float *bias,
+                                      float *probabilities, int rows,
+                                      int width, cudaStream_t stream) {
+  if (!scores || !bias || !probabilities)
+    throw std::runtime_error(
+        "CUDA attention bias softmax kernel received null buffer");
+  if (rows <= 0 || width <= 0)
+    throw std::runtime_error(
+        "CUDA attention bias softmax dimensions are invalid");
+
+  constexpr int kThreads = 128;
+  const std::size_t shared_bytes = kThreads * sizeof(float);
+  AttentionBiasSoftmaxKernel<<<rows, kThreads, shared_bytes, stream>>>(
+      scores, bias, probabilities, width);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionBiasSoftmaxKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionBiasSoftmaxKernel synchronize", status));
 }
 
 void LaunchAttentionContextKernel(const float *probabilities,
