@@ -236,6 +236,9 @@ EVENT_STREAM_RECONNECT_DELAY_S = env_float(
 LICHESS_API_MIN_INTERVAL_S = env_float("METALFISH_LICHESS_API_MIN_INTERVAL_S", 0.35)
 EXPLORER_API_MIN_INTERVAL_S = env_float("METALFISH_EXPLORER_API_MIN_INTERVAL_S", 0.25)
 LICHESS_429_BACKOFF_S = env_float("METALFISH_LICHESS_429_BACKOFF_S", 65.0)
+BOT_ONLINE_FETCH_LIMIT = max(
+    1, min(512, env_int("METALFISH_BOT_ONLINE_FETCH_LIMIT", 512))
+)
 BOT_ONLINE_CACHE_TTL_S = env_float("METALFISH_BOT_ONLINE_CACHE_TTL_S", 20.0)
 PLAYING_STATUS_CACHE_TTL_S = env_float("METALFISH_PLAYING_STATUS_CACHE_TTL_S", 5.0)
 CHALLENGE_COOLDOWN_PATH = pathlib.Path(
@@ -517,7 +520,7 @@ BULLET_ROTATION_TCS = [
 ]
 
 ACCEPTED_SPEEDS = {"bullet", "blitz", "rapid", "classical", "correspondence"}
-CHALLENGE_TIMEOUT = 20
+CHALLENGE_TIMEOUT = max(20.0, env_float("METALFISH_CHALLENGE_TIMEOUT_S", 21.0))
 MAX_CHALLENGE_RETRIES = 3
 
 
@@ -2151,7 +2154,7 @@ class LichessBot:
         if not force_refresh and cached is not None and cached[0] > now:
             return cached[1], None
 
-        r = self.api_get("/bot/online", params={"nb": 100})
+        r = self.api_get("/bot/online", params={"nb": BOT_ONLINE_FETCH_LIMIT})
         if r.status_code != 200:
             return None, r.status_code
 
@@ -2303,14 +2306,16 @@ class LichessBot:
             elif r.status_code == 429:
                 print("  Rate limited, backing off...")
                 self._rate_limit_count += 1
+                retry_after = _retry_after_seconds(r)
                 if self._rate_limit_count >= 3:
-                    backoff = 900  # 15 minutes
+                    backoff = max(900, retry_after)
                     print(
-                        f"  Possible daily cap hit. Waiting {backoff//60}min before retrying."
+                        "  Possible daily cap hit. "
+                        f"Waiting {int(backoff) // 60}min before retrying."
                     )
                 else:
-                    backoff = 90  # Lichess docs say "wait a full minute"
-                    print(f"  Waiting {backoff}s...")
+                    backoff = max(65, retry_after)
+                    print(f"  Waiting {int(backoff)}s...")
                 self._schedule_retry(backoff)
             else:
                 detail = (r.text or "").strip().replace("\n", " ")[:180]
@@ -2395,7 +2400,7 @@ class LichessBot:
             target = self._pending_challenge_target or self._pending_challenge_id
             print(f"  Challenge to {target} timed out")
             self._cooldown_bot(target, duration=600)
-            self._cancel_pending_challenge("timeout")
+            self._clear_pending_challenge()
             self._challenge_retries += 1
             self._tc_failures += 1
             if self._tc_failures >= 3 and self.args.rotate:
@@ -3795,6 +3800,45 @@ class LichessBot:
                     print(f"  Event loop error: {e}")
                     time.sleep(5)
 
+    def _handle_game_start(self, game_id: str) -> None:
+        if not game_id:
+            return
+        if self._game_was_completed(game_id):
+            print(f"  [{game_id}] Ignoring stale gameStart for completed game")
+            return
+        if self._seek_timer:
+            self._seek_timer.cancel()
+            self._seek_timer = None
+        if game_id in self.active_games:
+            return
+
+        pending_id = self._pending_challenge_id
+        pending_target = self._pending_challenge_target
+        pending_speed = getattr(self, "_pending_challenge_speed", None)
+        if pending_id:
+            if self._same_game_id(pending_id, game_id):
+                self._mark_seek_opponent_played(pending_target, pending_speed)
+                self._cancel_pending_challenge("game started")
+            else:
+                self._cancel_pending_challenge("game started elsewhere")
+
+        self._reset_elo_range()
+        self._tc_failures = 0
+        if self._draining.is_set():
+            print(f"  [{game_id}] Drain mode active, aborting new game")
+            self.abort_or_resign(game_id)
+            if not self.active_games:
+                self._shutdown.set()
+            return
+        if len(self.active_games) >= self.args.max_games:
+            print(f"  [{game_id}] Max games reached, aborting overflow game")
+            self.abort_or_resign(game_id)
+            return
+        self._advance_rotation()
+        t = threading.Thread(target=self.play_game, args=(game_id,), daemon=True)
+        self.active_games[game_id] = t
+        t.start()
+
     def _handle_event(self, event: dict):
         if not isinstance(event, dict):
             return
@@ -3846,37 +3890,12 @@ class LichessBot:
 
         elif etype == "gameStart":
             game_id = self._event_game_id(event)
-            if not game_id:
-                return
-            if self._game_was_completed(game_id):
-                print(f"  [{game_id}] Ignoring stale gameStart for completed game")
-                return
-            if self._seek_timer:
-                self._seek_timer.cancel()
-                self._seek_timer = None
-            if game_id in self.active_games:
-                return
-            self._mark_seek_opponent_played(
-                self._pending_challenge_target,
-                getattr(self, "_pending_challenge_speed", None),
-            )
-            self._cancel_pending_challenge("game started")
-            self._reset_elo_range()
-            self._tc_failures = 0
-            if self._draining.is_set():
-                print(f"  [{game_id}] Drain mode active, aborting new game")
-                self.abort_or_resign(game_id)
-                if not self.active_games:
-                    self._shutdown.set()
-                return
-            if len(self.active_games) >= self.args.max_games:
-                print(f"  [{game_id}] Max games reached, aborting overflow game")
-                self.abort_or_resign(game_id)
-                return
-            self._advance_rotation()
-            t = threading.Thread(target=self.play_game, args=(game_id,), daemon=True)
-            self.active_games[game_id] = t
-            t.start()
+            seek_lock = getattr(self, "_seek_lock", None)
+            if seek_lock is None:
+                self._handle_game_start(game_id)
+            else:
+                with seek_lock:
+                    self._handle_game_start(game_id)
 
         elif etype == "gameFinish":
             game_id = self._event_game_id(event)
