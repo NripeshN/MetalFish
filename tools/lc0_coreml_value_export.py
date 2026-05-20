@@ -19,7 +19,17 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 PROTO = ROOT / "src" / "nn" / "proto" / "net.proto"
 POS_TABLE = ROOT / "src" / "nn" / "metal" / "tables" / "attention_policy_map.h"
-OUTPUT_STAGES = ("body", "value-embed", "value-hidden", "value-logits", "wdl")
+OUTPUT_STAGES = (
+    "body",
+    "value-embed",
+    "value-hidden",
+    "value-logits",
+    "wdl",
+    "policy-embed",
+    "policy-qk",
+    "policy-raw",
+    "policy",
+)
 
 
 def load_coremltools() -> tuple[Any, Any, Any, Any]:
@@ -55,13 +65,21 @@ def precision_from_name(ct: Any, name: str) -> Any:
 
 
 def compute_precision_for_args(args: argparse.Namespace, ct: Any) -> Any:
-    if args.precision == "fp16" and getattr(args, "value_head_fp32", False):
+    if args.precision == "fp16" and (
+        getattr(args, "value_head_fp32", False)
+        or getattr(args, "policy_head_fp32", False)
+    ):
         from coremltools.converters.mil.mil.passes.defs.quantization import (
             FP16ComputePrecision,
         )
 
         def op_selector(op: Any) -> bool:
-            return not str(getattr(op, "name", "")).startswith("value_")
+            name = str(getattr(op, "name", ""))
+            if getattr(args, "value_head_fp32", False) and name.startswith("value_"):
+                return False
+            if getattr(args, "policy_head_fp32", False) and name.startswith("policy_"):
+                return False
+            return True
 
         return FP16ComputePrecision(op_selector=op_selector)
     return precision_from_name(ct, args.precision)
@@ -211,6 +229,17 @@ def linear_mb(mb: Any, x: Any, weight: Any, bias: Any, name: str | None = None) 
     return mb.linear(**kwargs)
 
 
+def slice_by_index_mb(
+    mb: Any, np: Any, x: Any, begin: list[int], end: list[int], name: str
+) -> Any:
+    return mb.slice_by_index(
+        x=x,
+        begin=np.array(begin, dtype=np.int32),
+        end=np.array(end, dtype=np.int32),
+        name=name,
+    )
+
+
 def parse_pos_encoding(np: Any) -> Any:
     text = POS_TABLE.read_text(encoding="utf-8")
     marker = "const float kPosEncoding[64][kNumPosEncodingChannels] = {"
@@ -221,6 +250,35 @@ def parse_pos_encoding(np: Any) -> Any:
     if len(values) != 64 * 64:
         raise RuntimeError(f"expected 4096 positional values, found {len(values)}")
     return np.array(values, dtype=np.float32).reshape(64, 64)
+
+
+def parse_attention_policy_map(np: Any) -> Any:
+    text = POS_TABLE.read_text(encoding="utf-8")
+    marker = "const short kAttnPolicyMap[] = {"
+    start = text.index(marker) + len(marker)
+    end = text.index("};", start)
+    table_text = text[start:end]
+    values = [
+        int(token)
+        for token in table_text.replace("{", " ").replace("}", " ").replace(",", " ").split()
+    ]
+    if len(values) != 64 * 64 + 8 * 24:
+        raise RuntimeError(f"expected 4288 attention policy values, found {len(values)}")
+    return np.array(values, dtype=np.int32)
+
+
+def attention_policy_gather_indices(np: Any) -> Any:
+    policy_map = parse_attention_policy_map(np)
+    indices = np.full((1858,), -1, dtype=np.int32)
+    for scratch_index, policy_index in enumerate(policy_map.tolist()):
+        if policy_index >= 0:
+            if policy_index >= indices.size:
+                raise RuntimeError(f"policy index {policy_index} exceeds 1858 outputs")
+            indices[policy_index] = scratch_index
+    missing = np.where(indices < 0)[0]
+    if missing.size:
+        raise RuntimeError(f"attention policy map is missing {missing.size} outputs")
+    return indices
 
 
 def inspect_t1(net: Any) -> dict[str, Any]:
@@ -241,6 +299,15 @@ def inspect_t1(net: Any) -> dict[str, Any]:
         "ip_emb_channels": len(weights.ip_emb_b.params) // 2,
         "value_channels": len(weights.ip_val_b.params) // 2,
     }
+
+
+def select_policy_head(weights: Any) -> Any:
+    if weights.HasField("policy_heads"):
+        policy_heads = weights.policy_heads
+        for name in ("vanilla", "optimistic_st", "soft", "opponent"):
+            if policy_heads.HasField(name):
+                return getattr(policy_heads, name)
+    return weights
 
 
 def build_value_model(
@@ -266,6 +333,7 @@ def build_value_model(
     ip_emb_b = decode_layer(np, weights.ip_emb_b)
     mult_gate = decode_layer(np, weights.ip_mult_gate).reshape(channels, 64).T
     add_gate = decode_layer(np, weights.ip_add_gate).reshape(channels, 64).T
+    policy_head = select_policy_head(weights)
 
     encoders: list[dict[str, Any]] = []
     for enc in weights.encoder:
@@ -301,8 +369,24 @@ def build_value_model(
     value_fc1_w = dense_weight(np, weights.ip1_val_w, value_fc1_b.size)
     value_fc2_b = decode_layer(np, weights.ip2_val_b)
     value_fc2_w = dense_weight(np, weights.ip2_val_w, value_fc2_b.size)
+    policy_embed_b = decode_layer(np, policy_head.ip_pol_b)
+    policy_embed_w = dense_weight(np, policy_head.ip_pol_w, policy_embed_b.size)
+    policy_q_b = decode_layer(np, policy_head.ip2_pol_b)
+    policy_q_w = dense_weight(np, policy_head.ip2_pol_w, policy_q_b.size)
+    policy_k_b = decode_layer(np, policy_head.ip3_pol_b)
+    policy_k_w = dense_weight(np, policy_head.ip3_pol_w, policy_k_b.size)
+    policy_promo_w = dense_weight(np, policy_head.ip4_pol_w, 4)
+    policy_d_model = policy_q_b.size
+    if policy_d_model == 0 or policy_k_b.size != policy_d_model:
+        raise RuntimeError("attention policy q/k weights are missing")
+    if len(policy_head.pol_encoder):
+        raise RuntimeError("policy encoder layers are not implemented in this experiment")
+    policy_indices = attention_policy_gather_indices(np)
 
-    @mb.program(input_specs=[mb.TensorSpec(shape=(1, 64, 112), dtype=types.fp32)])
+    @mb.program(
+        input_specs=[mb.TensorSpec(shape=(1, 64, 112), dtype=types.fp32)],
+        opset_version=ct.target.iOS17,
+    )
     def program(x):  # type: ignore[no-untyped-def]
         pos_const = mb.const(val=pos)
         pos_batch = mb.reshape(x=pos_const, shape=[1, 64, 64])
@@ -343,6 +427,82 @@ def build_value_model(
 
         if output_stage == "body":
             return body
+
+        if output_stage.startswith("policy"):
+            policy = linear_mb(
+                mb, body, policy_embed_w, policy_embed_b, name="policy_embed_linear"
+            )
+            policy = activation_mb(mb, np, policy, "mish", name="policy_embed_mish")
+            if output_stage == "policy-embed":
+                return policy
+
+            queries = linear_mb(mb, policy, policy_q_w, policy_q_b, name="policy_q_linear")
+            keys = linear_mb(mb, policy, policy_k_w, policy_k_b, name="policy_k_linear")
+            keys_t = mb.transpose(x=keys, perm=[0, 2, 1], name="policy_k_transpose")
+            policy = mb.matmul(x=queries, y=keys_t, name="policy_qk_matmul")
+            scale = mb.const(val=np.array(1.0 / math.sqrt(policy_d_model), dtype=np.float32))
+            policy = mb.mul(x=policy, y=scale, name="policy_qk_scale")
+            if output_stage == "policy-qk":
+                return policy
+
+            promo_keys = slice_by_index_mb(
+                mb,
+                np,
+                keys,
+                [0, 56, 0],
+                [1, 64, policy_d_model],
+                "policy_promo_keys_slice",
+            )
+            promo_keys = mb.transpose(
+                x=promo_keys, perm=[0, 2, 1], name="policy_promo_keys_transpose"
+            )
+            promo_weights = mb.const(val=policy_promo_w.astype(np.float32))
+            promo_logits = mb.matmul(
+                x=promo_weights, y=promo_keys, name="policy_promo_weight_matmul"
+            )
+            offset1 = slice_by_index_mb(
+                mb, np, promo_logits, [0, 0, 0], [1, 3, 8], "policy_promo_offset1"
+            )
+            offset2 = slice_by_index_mb(
+                mb, np, promo_logits, [0, 3, 0], [1, 4, 8], "policy_promo_offset2"
+            )
+            promo = mb.add(x=offset1, y=offset2, name="policy_promo_offset_add")
+            promo = mb.stack(
+                values=[promo] * 8, axis=3, name="policy_promo_offset_broadcast"
+            )
+            promo = mb.transpose(
+                x=promo, perm=[0, 3, 2, 1], name="policy_promo_offset_transpose"
+            )
+            promo = mb.reshape(x=promo, shape=[1, 3, 64], name="policy_promo_reshape")
+
+            promo_parent = slice_by_index_mb(
+                mb, np, policy, [0, 48, 56], [1, 56, 64], "policy_promo_parent_slice"
+            )
+            promo_parent = mb.reshape(
+                x=promo_parent, shape=[1, 64], name="policy_promo_parent_flatten"
+            )
+            promo_parent = mb.stack(
+                values=[promo_parent] * 3,
+                axis=2,
+                name="policy_promo_parent_broadcast",
+            )
+            promo_parent = mb.transpose(
+                x=promo_parent, perm=[0, 2, 1], name="policy_promo_parent_transpose"
+            )
+            promo = mb.add(x=promo, y=promo_parent, name="policy_promo_add")
+            policy = mb.concat(values=[policy, promo], axis=1, name="policy_raw_concat")
+            if output_stage == "policy-raw":
+                return policy
+
+            policy = mb.reshape(x=policy, shape=[1, 4288], name="policy_raw_flatten")
+            gather_indices = mb.const(val=policy_indices)
+            return mb.gather(
+                x=policy,
+                indices=gather_indices,
+                axis=1,
+                validate_indices=False,
+                name="policy_map_gather",
+            )
 
         value = linear_mb(mb, body, value_embed_w, value_embed_b, name="value_embed_linear")
         value = activation_mb(mb, np, value, "mish", name="value_embed_mish")
@@ -415,6 +575,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     compute_precision = compute_precision_for_args(args, ct)
     output_stage = getattr(args, "output_stage", "wdl")
     value_head_fp32 = bool(getattr(args, "value_head_fp32", False))
+    policy_head_fp32 = bool(getattr(args, "policy_head_fp32", False))
     encoder_layers_arg = getattr(args, "encoder_layers", -1)
     encoder_layers_limit = None if encoder_layers_arg < 0 else encoder_layers_arg
     if encoder_layers_limit is not None and encoder_layers_limit > info["encoder_layers"]:
@@ -444,6 +605,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "compute_unit": args.compute_unit,
         "precision": args.precision,
         "value_head_fp32": value_head_fp32,
+        "policy_head_fp32": policy_head_fp32,
         "output_stage": output_stage,
         "encoder_layers": encoder_layers_limit,
         "build_ms": build_ms,
@@ -470,6 +632,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--value-head-fp32",
         action="store_true",
         help="keep the WDL value head in fp32 while using fp16 elsewhere",
+    )
+    parser.add_argument(
+        "--policy-head-fp32",
+        action="store_true",
+        help="keep the attention policy head in fp32 while using fp16 elsewhere",
     )
     parser.add_argument("--save-model", default="")
     parser.add_argument(
@@ -507,6 +674,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  Precision:    {result['precision']}")
         if result["value_head_fp32"]:
             print("  Mixed:       value head fp32")
+        if result["policy_head_fp32"]:
+            print("  Mixed:       policy head fp32")
         print(f"  Output:       {result['output_stage']}")
         if result["encoder_layers"] is not None:
             print(f"  Encoders:     {result['encoder_layers']}")

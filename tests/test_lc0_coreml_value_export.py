@@ -54,8 +54,9 @@ def test_parse_args() -> None:
             "--iterations",
             "7",
             "--value-head-fp32",
+            "--policy-head-fp32",
             "--output-stage",
-            "body",
+            "policy",
             "--encoder-layers",
             "3",
         ]
@@ -65,9 +66,10 @@ def test_parse_args() -> None:
     expect("precision parsed", args.precision == "fp32")
     expect("benchmark parsed", args.benchmark)
     expect("value head fp32 parsed", args.value_head_fp32)
+    expect("policy head fp32 parsed", args.policy_head_fp32)
     expect("warmup parsed", args.warmup == 2)
     expect("iterations parsed", args.iterations == 7)
-    expect("output stage parsed", args.output_stage == "body")
+    expect("output stage parsed", args.output_stage == "policy")
     expect("encoder layers parsed", args.encoder_layers == 3)
 
 
@@ -85,12 +87,22 @@ def test_prediction_summary() -> None:
     expect("summary first", summary["x"]["first8"] == [1.0, 2.0, 3.0])
 
 
+def test_attention_policy_map() -> None:
+    import numpy as real_np
+
+    indices = exporter.attention_policy_gather_indices(real_np)
+    expect("policy index count", indices.shape == (1858,))
+    expect("policy index min", int(indices.min()) >= 0)
+    expect("policy index max", int(indices.max()) < 64 * 64 + 8 * 24)
+
+
 def main() -> int:
     test_percentile_uses_sorted_values()
     test_compute_unit_mapping()
     test_precision_mapping()
     test_parse_args()
     test_prediction_summary()
+    test_attention_policy_map()
     print("Lc0 Core ML value exporter tests: OK")
     return 0
 
