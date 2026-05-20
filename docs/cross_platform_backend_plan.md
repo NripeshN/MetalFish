@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, `2e7d685` |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | manual T4 pass, 2026-05-20, `3ba3770` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26070306694` |
 
 Current CUDA backend boundary:
@@ -102,15 +102,15 @@ Current CUDA backend boundary:
   so real kernels can index device tensors without backend-local name lookups.
 - `src/nn/cuda/cuda_kernels.*` contains tested CUDA compute primitives for
   dense-affine projections/heads, last-axis layer normalization, shared
-  elementwise activation functions, input-embedding gate multiply/add, and
-  scaled residual addition for feed-forward normalization. It also contains
-  the first attention-core kernels for scaled QK scores, row softmax, and
-  probability-weighted value context construction, smolgen attention-bias
-  addition before attention softmax, and attention-policy scratch-to-1858
-  mapping. CUDA also has the BT4 dynamic-position-input kernels that expand
-  packed plane masks/values to NHWC board rows, gather the first 12 planes for
-  dense positional encoding, and concatenate generated positional channels
-  back onto the 112 input channels.
+  elementwise activation functions, input-embedding gate multiply/add, scaled
+  residual addition, and fused residual layer normalization for transformer
+  attention/FFN blocks. It also contains the first attention-core kernels for
+  scaled QK scores, row softmax, and probability-weighted value context
+  construction, smolgen attention-bias addition before attention softmax, and
+  attention-policy scratch-to-1858 mapping. CUDA also has the BT4
+  dynamic-position-input kernels that expand packed plane masks/values to NHWC
+  board rows, gather the first 12 planes for dense positional encoding, and
+  concatenate generated positional channels back onto the 112 input channels.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production
@@ -179,6 +179,10 @@ Current CUDA backend boundary:
   manual T4 gate, the first profiled BT4 eval was `16.4 ms` after warmup,
   compared with the previous cold path around `86 ms`; subsequent profiled
   BT4 evals remained in the same warm range.
+- The CUDA residual-layernorm path now fuses residual scratch write and
+  normalization into one kernel for attention and FFN blocks. The 2026-05-20 T4
+  gate kept reference-output parity and moved profiled BT4 evals from roughly
+  `16.4/18.25 ms` to `15.9/17.8-18.1 ms`.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
