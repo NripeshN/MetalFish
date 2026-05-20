@@ -20,6 +20,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--expect-bestmove")
     parser.add_argument(
+        "--expect-output",
+        action="append",
+        default=[],
+        help="Substring that must appear in engine output; may be repeated",
+    )
+    parser.add_argument(
+        "--reject-output",
+        action="append",
+        default=[],
+        help="Substring that must not appear in engine output; may be repeated",
+    )
+    parser.add_argument(
         "--setoption",
         action="append",
         default=[],
@@ -135,6 +147,24 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    output = "\n".join(uci.output)
+    for expected in args.expect_output:
+        if expected not in output:
+            tail = "\n".join(uci.output[-80:])
+            print(
+                f"Expected output containing {expected!r}. Tail:\n{tail}",
+                file=sys.stderr,
+            )
+            return 1
+    for rejected in args.reject_output:
+        if rejected in output:
+            tail = "\n".join(uci.output[-80:])
+            print(
+                f"Rejected output containing {rejected!r}. Tail:\n{tail}",
+                file=sys.stderr,
+            )
+            return 1
     return 0
 
 

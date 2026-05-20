@@ -836,18 +836,24 @@ transformer_low_time_fallback_reason(Engine &engine,
 
   const Color us = pos.side_to_move();
   const TimePoint time_left = limits.time[us];
-  if (low_time_fallback > 0 && time_left < low_time_fallback) {
+  const TimePoint increment = limits.inc[us];
+  const TimePoint move_overhead = static_cast<TimePoint>(
+      static_cast<int>(engine.get_options()["Move Overhead"]));
+  const TimePoint increment_backed_clock =
+      time_left + std::max<TimePoint>(0, increment) - move_overhead;
+  if (low_time_fallback > 0 && time_left < low_time_fallback &&
+      increment_backed_clock < low_time_fallback) {
     return std::string(us == WHITE ? "white" : "black") + " clock " +
            std::to_string(time_left) + "ms";
   }
 
-  const TimePoint increment = limits.inc[us];
   const int moves_to_go = limits.movestogo > 0 ? limits.movestogo : 30;
   const TimePoint base_budget = time_left / std::max(1, moves_to_go);
   const TimePoint inc_bonus = std::max<TimePoint>(0, increment) * 3 / 4;
   const TimePoint budget = base_budget + inc_bonus;
   const TimePoint hard_cap = std::max<TimePoint>(500, time_left / 4);
-  const TimePoint reserve_cap = std::max<TimePoint>(1, time_left - 100);
+  const TimePoint reserve_cap =
+      std::max<TimePoint>(1, time_left - move_overhead);
   const TimePoint estimated_move_budget =
       std::max<TimePoint>(250, std::min({budget, hard_cap, reserve_cap}));
   const TimePoint min_transformer_move_budget = static_cast<TimePoint>(
@@ -929,6 +935,9 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
                                          config.kld_gain_min);
   config.kld_gain_average_interval =
       static_cast<int>(engine.get_options()["MCTSKLDGainAverageInterval"]);
+  config.move_overhead_ms =
+      static_cast<float>(static_cast<int>(
+          engine.get_options()["Move Overhead"]));
   config.time_manager = std::string(engine.get_options()["MCTSTimeManager"]);
   config.cache_history_length =
       static_cast<int>(engine.get_options()["MCTSCacheHistoryLength"]);
