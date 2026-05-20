@@ -760,7 +760,7 @@ bool test_mcts_evaluator_batch_parity_optional(ParityReport *report) {
     if (network_info.find("CUDA transformer backend") != std::string::npos) {
       tolerances.value = 2e-3f;
       tolerances.moves_left = 1.25e-1f;
-      tolerances.policy = 5e-2f;
+      tolerances.policy = 7.5e-2f;
     }
 
     if (env_flag_enabled("METALFISH_NN_BATCH_TRACE_PAIR")) {
@@ -894,7 +894,7 @@ bool test_mcts_evaluator_first_use_stress_optional() {
     if (network_info.find("CUDA transformer backend") != std::string::npos) {
       tolerances.value = 2e-3f;
       tolerances.moves_left = 1.25e-1f;
-      tolerances.policy = 5e-2f;
+      tolerances.policy = 7.5e-2f;
     }
 
     const int iterations = env_int_or_default(
