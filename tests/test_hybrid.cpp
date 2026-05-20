@@ -642,6 +642,28 @@ void test_hybrid_config() {
                    -32001, 585, 1339424, 2, 80, 0.520f, 0.634f));
   }
   {
+    TestCase tc("Fixed-budget unscored winning MCTS override predicate");
+
+    EXPECT(tc, HybridMCTSUnscoredWinningFixedBudgetOverride(
+                   true, 151, 36, 0.238f, -0.001f, 896, 523, 3,
+                   -VALUE_INFINITE, 16116, 3, 22));
+    EXPECT(tc, HybridMCTSUnscoredWinningFixedBudgetOverride(
+                   true, 102, 28, 0.275f, 0.000f, 861, 487, 2,
+                   -VALUE_INFINITE, 38670, 2, 24));
+    EXPECT(tc, !HybridMCTSUnscoredWinningFixedBudgetOverride(
+                   true, 95, 25, 0.263f, -0.001f, 889, 509, 4,
+                   -VALUE_INFINITE, 45655, 5, 9));
+    EXPECT(tc, !HybridMCTSUnscoredWinningFixedBudgetOverride(
+                   true, 100, 22, 0.220f, -0.018f, 459, 246, 2, 213,
+                   75896, 2, 17));
+    EXPECT(tc, !HybridMCTSUnscoredWinningFixedBudgetOverride(
+                   true, 99, 36, 0.364f, 0.010f, 896, 523, 3,
+                   -VALUE_INFINITE, 16116, 3, 22));
+    EXPECT(tc, !HybridMCTSUnscoredWinningFixedBudgetOverride(
+                   false, 151, 36, 0.238f, -0.001f, 896, 523, 3,
+                   -VALUE_INFINITE, 16116, 3, 22));
+  }
+  {
     TestCase tc("Root Q gap ignores unvisited placeholders");
 
     const uint32_t visits[] = {141, 96, 0, 0};

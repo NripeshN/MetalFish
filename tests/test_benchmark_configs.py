@@ -502,6 +502,9 @@ def main() -> int:
             "MCTSInABScore=",
             "MCTSInABAvg=",
             "MCTSInABEffort=",
+            "MCTSUnscoredWinning=",
+            "HybridMCTSUnscoredWinningFixedBudgetOverride",
+            "mcts_unscored_winning_fixed_budget",
         ],
     )
     assert_file_contains(

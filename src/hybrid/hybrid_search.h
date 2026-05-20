@@ -413,6 +413,12 @@ bool HybridMCTSCrossRootConfidenceOverride(
     int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
     float mcts_q);
 
+bool HybridMCTSUnscoredWinningFixedBudgetOverride(
+    bool fixed_budget, uint64_t mcts_total_nodes, uint32_t mcts_visits,
+    float visit_share, float root_q_gap, int mcts_cp, int eval_delta,
+    int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_visits);
+
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits);
 
