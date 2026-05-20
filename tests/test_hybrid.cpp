@@ -571,6 +571,10 @@ void test_hybrid_config() {
                    pos, UCIEngine::to_move(pos, "e7d8"), true));
     EXPECT(tc, !HybridRootPawnLeverCanChallengeSelected(
                    pos, UCIEngine::to_move(pos, "f6f5"), true));
+    EXPECT(tc, HybridHighPolicyRootLeverHint(
+                   pos, UCIEngine::to_move(pos, "f6f5"), 0.260f, 0.208f));
+    EXPECT(tc, !HybridHighPolicyRootLeverHint(
+                   pos, UCIEngine::to_move(pos, "f6f5"), 0.240f, 0.208f));
 
     pos.set(
         "r2q1rk1/1ppnbppp/p2p1nb1/3Pp3/2P1P1P1/2N2N1P/PPB1QP2/R1B2RK1 b - -",
@@ -606,6 +610,14 @@ void test_hybrid_config() {
     EXPECT(tc,
            HybridIsKingsidePawnLever(pos, UCIEngine::to_move(pos, "f7f5")));
     EXPECT(tc, !HybridRootPawnLeverCanChallengeSelected(pos, castle, true));
+    EXPECT(tc, !HybridHighPolicyRootLeverHint(
+                   pos, UCIEngine::to_move(pos, "f7f5"), 0.147f, 0.326f));
+
+    pos.set(
+        "4r1k1/p3brp1/1p1p4/7p/1P1B4/P1R1P1P1/5P2/2R3K1 b - -",
+        false, &st);
+    EXPECT(tc, !HybridHighPolicyRootLeverHint(
+                   pos, UCIEngine::to_move(pos, "h5h4"), 0.218f, 0.181f));
   }
   {
     TestCase tc("MCTS visit evidence handles cache-heavy playouts");

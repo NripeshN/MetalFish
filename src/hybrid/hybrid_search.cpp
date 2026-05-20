@@ -751,6 +751,12 @@ bool HybridRootPawnLeverCanChallengeSelected(const Position &pos, Move selected,
          !HybridIsKingsidePawnPush(pos, selected);
 }
 
+bool HybridHighPolicyRootLeverHint(const Position &pos, Move move, float policy,
+                                   float leader_policy) {
+  return policy >= 0.25f && policy >= leader_policy * 1.15f &&
+         HybridIsKingsidePawnLever(pos, move);
+}
+
 float HybridVisitedRootQGap(float best_q, const uint32_t *candidate_visits,
                             const float *candidate_qs, int candidate_count) {
   if (!candidate_visits || !candidate_qs || candidate_count <= 0) {
@@ -1023,6 +1029,9 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
   }
   const int delay_ms = std::max(0, config_.mcts_ab_root_hint_delay_ms);
   const int64_t deadline_ms = SteadyNowMs() + delay_ms;
+  StateInfo root_state;
+  Position root_pos;
+  root_pos.set(root_fen_, false, &root_state);
 
   auto collect_latest_hints = [&]() {
     std::vector<Move> latest_hints;
@@ -1038,6 +1047,14 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
     };
 
     auto root_moves = mcts_search_->GetRootMoveStats();
+    const float leader_policy =
+        root_moves.empty() ? 0.0f : root_moves.front().policy;
+    for (const auto &root_move : root_moves) {
+      if (HybridHighPolicyRootLeverHint(root_pos, root_move.move,
+                                        root_move.policy, leader_policy)) {
+        add_latest_hint(root_move.move);
+      }
+    }
     const int visit_hints = std::max(1, hint_count / 2);
     for (int i = 0; i < static_cast<int>(root_moves.size()) &&
                     static_cast<int>(latest_hints.size()) < visit_hints;
