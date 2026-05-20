@@ -9,6 +9,7 @@ UCI_GO="${METALFISH_CUDA_UCI_GO:-nodes 8}"
 UCI_TIMEOUT="${METALFISH_CUDA_UCI_TIMEOUT:-180}"
 WEIGHTS="${METALFISH_NN_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-6147500.pb}"
 APT_LOCK_TIMEOUT="${METALFISH_APT_LOCK_TIMEOUT:-600}"
+SUMMARY="${METALFISH_CUDA_SUMMARY:-${BUILD_DIR}/cuda-gpu-summary.md}"
 
 export PATH="/usr/local/cuda/bin:/usr/local/cuda-12.9/bin:/usr/local/cuda-12.8/bin:/usr/local/cuda-12.4/bin:${PATH}"
 export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda-12.9/lib64:/usr/local/cuda-12.8/lib64:/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH:-}"
@@ -144,4 +145,35 @@ python3 tools/uci_smoke.py \
   --setoption MCTSMinibatchSize=1 \
   --go "${UCI_GO}" | tee "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
 
+{
+  echo "# MetalFish CUDA GPU Gate Summary"
+  echo
+  echo "- Timestamp UTC: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  echo "- Host: $(hostname)"
+  echo "- CUDA architectures: ${CUDA_ARCHS}"
+  echo "- Build directory: ${BUILD_DIR}"
+  echo "- Weights: ${WEIGHTS}"
+  echo "- Explicit CUDA UCI go: ${UCI_GO}"
+  echo
+  echo "## Device"
+  echo
+  nvidia-smi --query-gpu=index,name,compute_cap,memory.total,driver_version \
+    --format=csv,noheader || true
+  echo
+  echo "## Backend"
+  echo
+  grep -m1 "backend: CUDA transformer backend" \
+    "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+  echo
+  echo "## Batch Timings"
+  echo
+  grep -m1 "batches:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+  echo
+  echo "## UCI Smokes"
+  echo
+  echo "- auto: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
+  echo "- cuda: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
+} >"${SUMMARY}"
+
+cat "${SUMMARY}"
 echo "CUDA GPU gate passed"

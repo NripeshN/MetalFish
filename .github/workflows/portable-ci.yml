@@ -63,6 +63,7 @@ jobs:
             tools/run_tournament_live.py \
             tools/lichess_puzzle_runner.py \
             tools/download_engine_networks.py \
+            tools/write_portable_manifest.py \
             tools/uci_smoke.py
           python3 tests/test_benchmark_configs.py
           python3 tools/uci_smoke.py --engine build-linux/metalfish --go "depth 3"
@@ -71,6 +72,13 @@ jobs:
             --setoption NNBackend=stub \
             --setoption UseMCTS=true \
             --go "nodes 8"
+          python3 tools/write_portable_manifest.py \
+            --platform "Linux x86_64" \
+            --backend "CPU AB plus diagnostic stub MCTS; CUDA not included in this artifact" \
+            --binary "metalfish" \
+            --output build-linux/PORTABLE_ARTIFACT.md \
+            --notes "This portable artifact is a CPU build for Linux CI coverage." \
+            --notes "For CUDA transformer testing, use a USE_CUDA=ON build and the CUDA GPU gate."
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v6
@@ -78,6 +86,7 @@ jobs:
           name: metalfish-linux-x86_64-cpu
           path: |
             build-linux/metalfish
+            build-linux/PORTABLE_ARTIFACT.md
             README.md
             CHANGELOG.md
             LICENSE
@@ -137,6 +146,7 @@ jobs:
             tools/run_tournament_live.py \
             tools/lichess_puzzle_runner.py \
             tools/download_engine_networks.py \
+            tools/write_portable_manifest.py \
             tools/uci_smoke.py
           python tests/test_benchmark_configs.py
           python tools/uci_smoke.py --engine build-windows/metalfish.exe --go "depth 3"
@@ -145,12 +155,19 @@ jobs:
             --setoption NNBackend=stub \
             --setoption UseMCTS=true \
             --go "nodes 8"
+          python tools/write_portable_manifest.py \
+            --platform "Windows x86_64 MinGW" \
+            --backend "CPU AB plus diagnostic stub MCTS; CUDA not included in this artifact" \
+            --binary "metalfish.exe" \
+            --output build-windows/PORTABLE_ARTIFACT.md \
+            --notes "This portable artifact is a CPU MinGW build for Windows CI coverage." \
+            --notes "CUDA and DirectML Windows backends are not packaged in this artifact."
 
       - name: Package Windows artifact
         run: |
           mkdir -p portable-windows
           cp build-windows/metalfish.exe portable-windows/
-          cp README.md CHANGELOG.md LICENSE portable-windows/
+          cp build-windows/PORTABLE_ARTIFACT.md README.md CHANGELOG.md LICENSE portable-windows/
           ldd build-windows/metalfish.exe \
             | awk '/=> \/ucrt64\// {print $3} /^\/ucrt64\// {print $1}' \
             | sort -u \

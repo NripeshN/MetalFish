@@ -513,6 +513,17 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / ".github/workflows/portable-ci.yml",
+        [
+            "tools/write_portable_manifest.py",
+            "--output build-linux/PORTABLE_ARTIFACT.md",
+            "--output build-windows/PORTABLE_ARTIFACT.md",
+            "build-linux/PORTABLE_ARTIFACT.md",
+            "cp build-windows/PORTABLE_ARTIFACT.md",
+            "CPU AB plus diagnostic stub MCTS",
+        ],
+    )
+    assert_file_contains(
         PROJ / ".github/workflows/lichess-puzzles.yml",
         ["python3 tools/download_engine_networks.py"],
     )
@@ -524,6 +535,18 @@ def main() -> int:
             "Timed out waiting for engine response",
             "Engine exited with status",
             "--expect-bestmove",
+            "--expect-output",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/write_portable_manifest.py",
+        [
+            "MetalFish Portable Artifact",
+            "--platform",
+            "--backend",
+            "--binary",
+            "--output",
+            "NNBackend=stub",
         ],
     )
     assert_file_contains(
@@ -534,6 +557,18 @@ def main() -> int:
             "Decompressing",
             "--nnue-only",
             "--bt4-only",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/run_cuda_gpu_gate.sh",
+        [
+            "METALFISH_CUDA_SUMMARY",
+            "MetalFish CUDA GPU Gate Summary",
+            "cuda-gpu-nn-comparison.log",
+            "cuda-gpu-uci-auto-smoke.log",
+            "cuda-gpu-uci-smoke.log",
+            "Batch Timings",
+            "UCI Smokes",
         ],
     )
     assert_file_contains(
