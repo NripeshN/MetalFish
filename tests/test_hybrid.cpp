@@ -552,6 +552,12 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridRootPawnLeverCandidate(-47, -77, 373, 5, 13, 1,
                                              -0.038f, 0.220f, -0.112f,
                                              0.050f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(-305, -315, 8978, 2, 66, 3,
+                                             -0.422f, 0.142f, -0.372f,
+                                             0.086f));
+    EXPECT(tc, !HybridRootPawnLeverCandidate(-521, -546, 13286, 4, 19, 3,
+                                             -0.490f, 0.079f, -0.698f,
+                                             0.218f));
 
     Position pos;
     StateInfo st;

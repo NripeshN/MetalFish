@@ -681,6 +681,12 @@ bool HybridRootPawnLeverCandidate(int selected_average_score,
 
   if (selected_mcts_rank > 0) {
     const float q_gap = selected_mcts_q - candidate_mcts_q;
+    if (mcts_rank == 4 && candidate_average_score < selected_average_score &&
+        q_gap > 0.15f)
+      return false;
+    if (mcts_rank < selected_mcts_rank &&
+        candidate_mcts_policy < selected_mcts_policy && q_gap > -0.07f)
+      return false;
     if (mcts_rank > 4 && q_gap > 0.055f)
       return false;
     if (candidate_average_score < selected_average_score &&
