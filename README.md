@@ -65,25 +65,20 @@ python3 tests/paper_benchmarks.py --tactical --movetime 5000 \
   --threads auto --hash auto --tactical-repeat 3
 ```
 
-Latest local tactical runs, M2 Max, 5 seconds per position:
+Latest local tactical run, M2 Max, 5 seconds per position, generated
+2026-05-20 with `--threads auto --hash auto`:
 
 | Engine | Score | Completed | Notes |
 | --- | ---: | ---: | --- |
-| Stockfish reference | 21/24 | 24/24 | 8 workers, 4096 MB hash, rechecked 2026-05-19 |
-| MetalFish AB | 20/24 | 24/24 | 8 workers, 4096 MB hash, rechecked 2026-05-19 |
-| MetalFish MCTS | 20/24 | 24/24 | BT4 weights, one Apple MCTS worker, strength KLD profile, rechecked 2026-05-19 |
-| MetalFish Hybrid | 20/24 | 24/24 | 2 MCTS workers + 6 AB workers, rechecked 2026-05-19 |
-| Lc0 with BT4 weights | 16/24 | 24/24 | Metal backend, `Threads=8`, rechecked 2026-05-19 |
+| MetalFish Hybrid | 24/24 | 24/24 | 1 MCTS worker + 7 AB workers, BT4 weights |
+| Stockfish reference | 21/24 | 24/24 | 8 workers, 4096 MB hash |
+| MetalFish AB | 20/24 | 24/24 | 8 workers, 4096 MB hash |
+| MetalFish MCTS | 20/24 | 24/24 | BT4 weights, one Apple MCTS worker, strength KLD profile |
+| Lc0 with BT4 weights | 17/24 | 24/24 | Metal backend, `Threads=8`, `Temperature=0` |
 
-A Hybrid-only repeat stability check on the same machine scored 42/48 solved
-runs with `--tactical-repeat 2` (87.5%). The stable misses in that run were
-BK.09 and BK.17; Stockfish and Lc0 also missed those two positions in matching
-5-second spot checks, so they are tracked as hard-suite misses rather than
-hybrid coordinator regressions.
-
-Current hybrid-only paper-harness sanity run on this branch, M2 Max,
-2026-05-19, 5 seconds per position: `21/24` with the updated 1 MCTS + 7 AB
-split and `HybridABCandidateVerifyMs=120`.
+In this run, Hybrid solved BK.07, BK.09, BK.11, BK.17, and BK.22 where at
+least one standalone component or reference engine missed. This is a tactical
+suite result only; it is not an Elo estimate.
 
 A forced full-worker pure-MCTS stress run (`MCTSMaxThreads=8`) is not a
 strength profile for the current backend. It previously scored 12/24 and timed
