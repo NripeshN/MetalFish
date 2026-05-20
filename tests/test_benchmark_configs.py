@@ -15,6 +15,7 @@ import paper_benchmarks  # noqa: E402
 
 sys.path.insert(0, str(PROJ / "tools"))
 import analyze_hybrid_trace  # noqa: E402
+import run_tournament_live  # noqa: E402
 
 
 def assert_options_include(
@@ -128,6 +129,19 @@ def assert_hybrid_trace_final_decision_only() -> None:
         raise AssertionError(
             "trace analyzer did not keep the final HybridTrace decision"
         )
+
+
+def assert_tournament_draw_reason_precision() -> None:
+    claimable = paper_benchmarks.chess.Board()
+    for move in ["g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1"]:
+        claimable.push(paper_benchmarks.chess.Move.from_uci(move))
+    if run_tournament_live.game_over_reason(claimable) != "claimable 3-fold repetition":
+        raise AssertionError("claimable repetition reason was not precise")
+
+    repeated = claimable.copy()
+    repeated.push(paper_benchmarks.chess.Move.from_uci("f6g8"))
+    if run_tournament_live.game_over_reason(repeated) != "3-fold repetition":
+        raise AssertionError("actual repetition reason was not precise")
 
 
 def assert_tactical_fail_under_guard() -> None:
@@ -258,6 +272,7 @@ def main() -> int:
     )
     assert_paper_hybrid_env_overrides()
     assert_hybrid_trace_final_decision_only()
+    assert_tournament_draw_reason_precision()
 
     assert_file_contains(
         PROJ / "src/uci/engine.cpp",

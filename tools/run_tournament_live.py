@@ -417,6 +417,24 @@ def clock_label(ms: int) -> str:
     return f"{max(0, ms) / 1000.0:.1f}s"
 
 
+def game_over_reason(board: chess.Board) -> str:
+    if board.is_checkmate():
+        return "checkmate"
+    if board.is_stalemate():
+        return "stalemate"
+    if board.can_claim_fifty_moves():
+        return "50-move rule" if board.is_fifty_moves() else "claimable 50-move rule"
+    if board.can_claim_threefold_repetition():
+        return (
+            "3-fold repetition"
+            if board.is_repetition(3)
+            else "claimable 3-fold repetition"
+        )
+    if board.is_insufficient_material():
+        return "insufficient material"
+    return "adjudication"
+
+
 def play_game(
     white: UCIEngine,
     black: UCIEngine,
@@ -459,17 +477,7 @@ def play_game(
     for ply in range(ply_limit):
         if board.is_game_over(claim_draw=True):
             result = board.result(claim_draw=True)
-            reason = "adjudication"
-            if board.is_checkmate():
-                reason = "checkmate"
-            elif board.is_stalemate():
-                reason = "stalemate"
-            elif board.can_claim_fifty_moves():
-                reason = "50-move rule"
-            elif board.can_claim_threefold_repetition():
-                reason = "3-fold repetition"
-            elif board.is_insufficient_material():
-                reason = "insufficient material"
+            reason = game_over_reason(board)
             return GameResult(
                 white.name,
                 black.name,
