@@ -48,6 +48,21 @@ void DestroyStream(cudaStream_t stream) {
     cudaStreamDestroy(stream);
 }
 
+void ClearDeviceBytes(void *ptr, std::size_t bytes, const char *name,
+                      cudaStream_t stream) {
+  if (!ptr || bytes == 0)
+    return;
+
+  cudaError_t status = cudaSuccess;
+  if (stream) {
+    status = cudaMemsetAsync(ptr, 0, bytes, stream);
+  } else {
+    status = cudaMemset(ptr, 0, bytes);
+  }
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage(name, status));
+}
+
 CudaNamedWorkspaceBuffer *
 FindNamedBuffer(std::vector<CudaNamedWorkspaceBuffer> &buffers,
                 std::string_view name) {
@@ -232,6 +247,21 @@ std::size_t CudaExecutionWorkspace::TotalBytes() const {
   for (const auto &buffer : named_byte_buffers_)
     total += buffer.capacity_bytes;
   return total;
+}
+
+void CudaExecutionWorkspace::Clear(cudaStream_t stream) {
+  for (std::size_t i = 0; i < buffers_.size(); ++i) {
+    ClearDeviceBytes(buffers_[i], capacities_[i] * sizeof(float),
+                     "cudaMemset(workspace)", stream);
+  }
+  for (auto &buffer : named_buffers_) {
+    ClearDeviceBytes(buffer.buffer, buffer.capacity * sizeof(float),
+                     "cudaMemset(named_workspace)", stream);
+  }
+  for (auto &buffer : named_byte_buffers_) {
+    ClearDeviceBytes(buffer.buffer, buffer.capacity_bytes,
+                     "cudaMemset(named_byte_workspace)", stream);
+  }
 }
 
 void CudaExecutionWorkspace::Release() {

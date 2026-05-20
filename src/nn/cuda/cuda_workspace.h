@@ -58,6 +58,7 @@ public:
   std::size_t NamedBufferCount() const;
   std::size_t TotalCapacityFloats() const;
   std::size_t TotalBytes() const;
+  void Clear(cudaStream_t stream = nullptr);
   void Release();
 
 private:
