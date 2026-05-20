@@ -66,28 +66,6 @@ std::string CublasErrorMessage(const char *op, cublasStatus_t status) {
   return out.str();
 }
 
-void UploadConstPointerArray(const float **device_ptrs,
-                             const std::vector<const float *> &host_ptrs,
-                             cudaStream_t stream, const char *op) {
-  const cudaError_t status =
-      cudaMemcpyAsync(device_ptrs, host_ptrs.data(),
-                      host_ptrs.size() * sizeof(const float *),
-                      cudaMemcpyHostToDevice, stream);
-  if (status != cudaSuccess)
-    throw std::runtime_error(CudaErrorMessage(op, status));
-}
-
-void UploadMutablePointerArray(float **device_ptrs,
-                               const std::vector<float *> &host_ptrs,
-                               cudaStream_t stream, const char *op) {
-  const cudaError_t status =
-      cudaMemcpyAsync(device_ptrs, host_ptrs.data(),
-                      host_ptrs.size() * sizeof(float *),
-                      cudaMemcpyHostToDevice, stream);
-  if (status != cudaSuccess)
-    throw std::runtime_error(CudaErrorMessage(op, status));
-}
-
 class ThreadLocalCublasHandle {
 public:
   ThreadLocalCublasHandle() {
@@ -442,6 +420,58 @@ __global__ void AttentionBiasSoftmaxKernel(float *scores, const float *bias,
 
   for (int col = threadIdx.x; col < width; col += blockDim.x)
     probability_row[col] = sum > 0.0f ? probability_row[col] / sum : 0.0f;
+}
+
+__global__ void AttentionScorePointerArrayKernel(
+    const float *query, const float *key, float *scores,
+    const float **key_ptrs, const float **query_ptrs, float **score_ptrs,
+    int pointer_count, int heads, int squares, int head_depth, int qkv_width) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= pointer_count)
+    return;
+
+  const int batch = index / heads;
+  const int head = index - batch * heads;
+  const std::size_t qkv_batch_stride =
+      static_cast<std::size_t>(squares) * qkv_width;
+  const std::size_t score_batch_stride =
+      static_cast<std::size_t>(heads) * squares * squares;
+  const std::size_t score_head_stride =
+      static_cast<std::size_t>(squares) * squares;
+  const std::size_t qkv_offset =
+      static_cast<std::size_t>(head) * head_depth;
+
+  key_ptrs[index] = key + batch * qkv_batch_stride + qkv_offset;
+  query_ptrs[index] = query + batch * qkv_batch_stride + qkv_offset;
+  score_ptrs[index] =
+      scores + batch * score_batch_stride + head * score_head_stride;
+}
+
+__global__ void AttentionContextPointerArrayKernel(
+    const float *probabilities, const float *value, float *context,
+    const float **value_ptrs, const float **probability_ptrs,
+    float **context_ptrs, int pointer_count, int heads, int squares,
+    int head_depth, int qkv_width) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= pointer_count)
+    return;
+
+  const int batch = index / heads;
+  const int head = index - batch * heads;
+  const std::size_t qkv_batch_stride =
+      static_cast<std::size_t>(squares) * qkv_width;
+  const std::size_t probability_batch_stride =
+      static_cast<std::size_t>(heads) * squares * squares;
+  const std::size_t probability_head_stride =
+      static_cast<std::size_t>(squares) * squares;
+  const std::size_t qkv_offset =
+      static_cast<std::size_t>(head) * head_depth;
+
+  value_ptrs[index] = value + batch * qkv_batch_stride + qkv_offset;
+  probability_ptrs[index] =
+      probabilities + batch * probability_batch_stride +
+      head * probability_head_stride;
+  context_ptrs[index] = context + batch * qkv_batch_stride + qkv_offset;
 }
 
 __device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
@@ -856,35 +886,15 @@ void LaunchAttentionScoreBatchedGemmKernel(
   }
 
   const int pointer_count = batch_size * heads;
-  const std::size_t qkv_batch_stride =
-      static_cast<std::size_t>(squares) * qkv_width;
-  const std::size_t score_batch_stride =
-      static_cast<std::size_t>(heads) * squares * squares;
-  const std::size_t score_head_stride =
-      static_cast<std::size_t>(squares) * squares;
-  std::vector<const float *> key_ptrs(pointer_count);
-  std::vector<const float *> query_ptrs(pointer_count);
-  std::vector<float *> score_ptrs(pointer_count);
-  for (int batch = 0; batch < batch_size; ++batch) {
-    const float *query_base = query + batch * qkv_batch_stride;
-    const float *key_base = key + batch * qkv_batch_stride;
-    float *score_base = scores + batch * score_batch_stride;
-    for (int head = 0; head < heads; ++head) {
-      const int index = batch * heads + head;
-      const std::size_t qkv_offset =
-          static_cast<std::size_t>(head) * head_depth;
-      key_ptrs[index] = key_base + qkv_offset;
-      query_ptrs[index] = query_base + qkv_offset;
-      score_ptrs[index] = score_base + head * score_head_stride;
-    }
-  }
-
-  UploadConstPointerArray(device_key_ptrs, key_ptrs, stream,
-                          "cudaMemcpy(attention_score_key_ptrs)");
-  UploadConstPointerArray(device_query_ptrs, query_ptrs, stream,
-                          "cudaMemcpy(attention_score_query_ptrs)");
-  UploadMutablePointerArray(device_score_ptrs, score_ptrs, stream,
-                            "cudaMemcpy(attention_score_output_ptrs)");
+  constexpr int kThreads = 256;
+  const int blocks = (pointer_count + kThreads - 1) / kThreads;
+  AttentionScorePointerArrayKernel<<<blocks, kThreads, 0, stream>>>(
+      query, key, scores, device_key_ptrs, device_query_ptrs,
+      device_score_ptrs, pointer_count, heads, squares, head_depth, qkv_width);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionScorePointerArrayKernel launch", status));
 
   cublasHandle_t handle = CublasHandle();
   cublasStatus_t cublas_status = cublasSetStream(handle, stream);
@@ -904,7 +914,7 @@ void LaunchAttentionScoreBatchedGemmKernel(
   }
   if (stream)
     return;
-  cudaError_t status = cudaDeviceSynchronize();
+  status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(
         "AttentionScoreBatchedGemmKernel synchronize", status));
@@ -1054,37 +1064,16 @@ void LaunchAttentionContextBatchedGemmKernel(
   }
 
   const int pointer_count = batch_size * heads;
-  const std::size_t qkv_batch_stride =
-      static_cast<std::size_t>(squares) * qkv_width;
-  const std::size_t probability_batch_stride =
-      static_cast<std::size_t>(heads) * squares * squares;
-  const std::size_t probability_head_stride =
-      static_cast<std::size_t>(squares) * squares;
-  std::vector<const float *> value_ptrs(pointer_count);
-  std::vector<const float *> probability_ptrs(pointer_count);
-  std::vector<float *> context_ptrs(pointer_count);
-  for (int batch = 0; batch < batch_size; ++batch) {
-    const float *value_base = value + batch * qkv_batch_stride;
-    const float *probability_base =
-        probabilities + batch * probability_batch_stride;
-    float *context_base = context + batch * qkv_batch_stride;
-    for (int head = 0; head < heads; ++head) {
-      const int index = batch * heads + head;
-      const std::size_t qkv_offset =
-          static_cast<std::size_t>(head) * head_depth;
-      value_ptrs[index] = value_base + qkv_offset;
-      probability_ptrs[index] =
-          probability_base + head * probability_head_stride;
-      context_ptrs[index] = context_base + qkv_offset;
-    }
-  }
-
-  UploadConstPointerArray(device_value_ptrs, value_ptrs, stream,
-                          "cudaMemcpy(attention_context_value_ptrs)");
-  UploadConstPointerArray(device_probability_ptrs, probability_ptrs, stream,
-                          "cudaMemcpy(attention_context_probability_ptrs)");
-  UploadMutablePointerArray(device_context_ptrs, context_ptrs, stream,
-                            "cudaMemcpy(attention_context_output_ptrs)");
+  constexpr int kThreads = 256;
+  const int blocks = (pointer_count + kThreads - 1) / kThreads;
+  AttentionContextPointerArrayKernel<<<blocks, kThreads, 0, stream>>>(
+      probabilities, value, context, device_value_ptrs,
+      device_probability_ptrs, device_context_ptrs, pointer_count, heads,
+      squares, head_depth, qkv_width);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionContextPointerArrayKernel launch", status));
 
   cublasHandle_t handle = CublasHandle();
   cublasStatus_t cublas_status = cublasSetStream(handle, stream);
@@ -1105,7 +1094,7 @@ void LaunchAttentionContextBatchedGemmKernel(
   }
   if (stream)
     return;
-  cudaError_t status = cudaDeviceSynchronize();
+  status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage(
         "AttentionContextBatchedGemmKernel synchronize", status));

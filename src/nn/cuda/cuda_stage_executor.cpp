@@ -1302,7 +1302,7 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
 
   cudaStream_t stream = workspace.Stream();
   const int attention_pointer_count = batch_size * attention.heads;
-  if (batch_size == 4) {
+  if (batch_size > 1) {
     auto **score_key_ptrs = reinterpret_cast<const float **>(
         workspace.ReserveNamedBytes(step.name + ".score.key_ptrs",
                                     attention_pointer_count *
@@ -1351,7 +1351,7 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     LaunchAttentionSoftmaxKernel(output.scores, output.probabilities,
                                  score_rows, attention.squares, stream);
   }
-  if (batch_size == 4) {
+  if (batch_size > 1) {
     auto **context_value_ptrs = reinterpret_cast<const float **>(
         workspace.ReserveNamedBytes(step.name + ".context.value_ptrs",
                                     attention_pointer_count *
