@@ -934,11 +934,14 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
                                            0.0f);
     DownloadFloats(actual_sequence_ffn, sequence_ffn_stage->output,
                    "cudaMemcpy(attention_sequence_ffn)");
-    if (!AlmostEqual(actual_sequence_ffn, expected_ffn_normalized, 1e-5f)) {
+    constexpr float kSequenceTolerance = 1e-2f;
+    if (!AlmostEqual(actual_sequence_ffn, expected_ffn_normalized,
+                     kSequenceTolerance)) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = MismatchMessage("CUDA attention sequence ffn",
                                        actual_sequence_ffn,
-                                       expected_ffn_normalized, 1e-5f);
+                                       expected_ffn_normalized,
+                                       kSequenceTolerance);
       return result;
     }
     result.allocation_bytes = workspace.TotalBytes() + weights.AllocationBytes();

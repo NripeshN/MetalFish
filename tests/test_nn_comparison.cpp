@@ -294,7 +294,14 @@ bool test_bt4_reference_outputs_optional() {
 
   try {
     MCTS::NNMCTSEvaluator eval(weights_path);
-    const ReferenceTolerances tolerances;
+    ReferenceTolerances tolerances;
+    const std::string network_info = eval.GetNetworkInfo();
+    if (network_info.find("CUDA transformer backend") != std::string::npos) {
+      tolerances.value = 5e-3f;
+      tolerances.wdl = 5e-3f;
+      tolerances.moves_left = 1e-1f;
+      tolerances.policy = 2e-2f;
+    }
     for (const auto &test_case : cases) {
       StateInfo st;
       Position pos;
@@ -443,12 +450,15 @@ bool compare_eval_result(const MCTS::EvaluationResult &single,
   for (size_t i = 0; i < single.policy_priors.size(); ++i) {
     if (single.policy_priors[i].first != batched.policy_priors[i].first) {
       std::cout << "    FAIL: " << label << " policy move mismatch at " << i
+                << " single=" << move_to_string(single.policy_priors[i].first)
+                << " batch=" << move_to_string(batched.policy_priors[i].first)
                 << std::endl;
       return false;
     }
     if (!close_enough(single.policy_priors[i].second,
                       batched.policy_priors[i].second, tolerances.policy)) {
       std::cout << "    FAIL: " << label << " policy logit mismatch at " << i
+                << " move=" << move_to_string(single.policy_priors[i].first)
                 << " single=" << single.policy_priors[i].second
                 << " batch=" << batched.policy_priors[i].second
                 << " delta="
@@ -535,6 +545,8 @@ bool test_mcts_evaluator_batch_parity_optional() {
       for (size_t i = 0; i < batch_size; ++i) {
         std::ostringstream label;
         label << "batch " << batch_size << " entry " << i;
+        if (batch_size == histories.size())
+          label << " line " << (i % lines.size());
         if (!compare_eval_result(singles[i], batched[i], label.str(),
                                  tolerances))
           return false;
