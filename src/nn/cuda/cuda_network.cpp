@@ -355,6 +355,9 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
       EnvFlagEnabled("METALFISH_CUDA_FULL_BUFFER_CLEAR");
   const bool release_workspace_each_run =
       EnvFlagEnabled("METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN");
+  const bool release_single_workspace_each_run =
+      batch_size == 1 &&
+      EnvFlagEnabled("METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN");
 
   auto run_once = [&]() {
     if (release_workspace_each_run) {
@@ -383,16 +386,27 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
         downloaded.moves_left.data(), downloaded.moves_left.size(), batch_size);
   };
 
+  auto release_single_workspace_if_requested = [&]() {
+    if (!release_single_workspace_each_run)
+      return;
+    workspace_.Release();
+    workspace_batch_size_ = 0;
+  };
+
   std::lock_guard<std::mutex> lock(execution_mutex_);
   auto outputs = run_once();
-  if (OutputsAreValid(outputs, tensor_plan_))
+  if (OutputsAreValid(outputs, tensor_plan_)) {
+    release_single_workspace_if_requested();
     return outputs;
+  }
 
   workspace_.Release();
   workspace_batch_size_ = 0;
   outputs = run_once();
-  if (OutputsAreValid(outputs, tensor_plan_))
+  if (OutputsAreValid(outputs, tensor_plan_)) {
+    release_single_workspace_if_requested();
     return outputs;
+  }
 
   throw std::runtime_error(
       "CUDA transformer backend produced invalid network output");
