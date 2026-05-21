@@ -885,6 +885,10 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   config.nn_weights_path = nn_weights;
   config.nn_backend = std::string(engine.get_options()["NNBackend"]);
   config.num_threads = num_threads;
+  config.coreml_model_path =
+      std::string(engine.get_options()["NNCoreMLModelPath"]);
+  config.coreml_compute_units =
+      std::string(engine.get_options()["NNCoreMLComputeUnits"]);
 
   config.cpuct = get_float_option(engine, "MCTSCPuct", config.cpuct);
   config.cpuct_at_root =
@@ -1095,6 +1099,19 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
       static_cast<int>(engine.get_options()["HybridABCandidateVerifyCount"]);
   config.root_pawn_lever_tiebreak =
       engine.get_options()["HybridRootPawnLeverTieBreak"];
+  config.ane_root_probe = engine.get_options()["HybridANERootProbe"];
+  config.ane_weights_path =
+      std::string(engine.get_options()["HybridANEWeights"]);
+  config.ane_model_path =
+      std::string(engine.get_options()["HybridANEModelPath"]);
+  config.ane_compute_units =
+      std::string(engine.get_options()["HybridANEComputeUnits"]);
+  config.ane_root_hint_count =
+      static_cast<int>(engine.get_options()["HybridANERootHintCount"]);
+  config.ane_root_hint_wait_ms =
+      static_cast<int>(engine.get_options()["HybridANERootHintWaitMs"]);
+  config.ane_min_budget_ms =
+      static_cast<int>(engine.get_options()["HybridANEMinBudgetMs"]);
   config.trace_decisions = engine.get_options()["HybridTrace"];
   return config;
 }
@@ -1122,7 +1139,11 @@ make_hybrid_cache_key(const std::string &nn_weights,
       << "|" << config.mcts_ab_root_hint_count << "|"
       << config.ab_candidate_verify_ms << "|"
       << config.ab_candidate_verify_count << "|"
-      << config.root_pawn_lever_tiebreak << "|" << config.trace_decisions;
+      << config.root_pawn_lever_tiebreak << "|" << config.ane_root_probe << "|"
+      << config.ane_weights_path << "|" << config.ane_model_path << "|"
+      << config.ane_compute_units << "|" << config.ane_root_hint_count << "|"
+      << config.ane_root_hint_wait_ms
+      << "|" << config.ane_min_budget_ms << "|" << config.trace_decisions;
   return key.str();
 }
 
@@ -1280,16 +1301,18 @@ static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
 static std::string make_mcts_cache_key(const std::string &nn_weights,
                                        const MCTS::SearchParams &config) {
   std::ostringstream key;
-  key << nn_weights << "|" << config.num_threads << "|" << config.cpuct << "|"
-      << config.nn_backend << "|" << config.cpuct_at_root << "|"
-      << config.cpuct_base << "|" << config.cpuct_factor << "|"
-      << config.cpuct_base_at_root << "|" << config.cpuct_factor_at_root << "|"
-      << config.fpu_absolute << "|" << config.fpu_absolute_at_root << "|"
-      << config.fpu_value << "|" << config.fpu_value_at_root << "|"
-      << config.fpu_reduction << "|" << config.fpu_reduction_at_root << "|"
-      << config.policy_softmax_temp << "|" << config.moves_left_max_effect
-      << "|" << config.moves_left_threshold << "|" << config.moves_left_slope
-      << "|" << config.moves_left_constant_factor << "|"
+  key << nn_weights << "|" << config.nn_backend << "|"
+      << config.coreml_model_path << "|" << config.coreml_compute_units << "|"
+      << config.num_threads << "|" << config.cpuct << "|"
+      << config.cpuct_at_root << "|" << config.cpuct_base << "|"
+      << config.cpuct_factor << "|" << config.cpuct_base_at_root << "|"
+      << config.cpuct_factor_at_root << "|" << config.fpu_absolute << "|"
+      << config.fpu_absolute_at_root << "|" << config.fpu_value << "|"
+      << config.fpu_value_at_root << "|" << config.fpu_reduction << "|"
+      << config.fpu_reduction_at_root << "|" << config.policy_softmax_temp
+      << "|" << config.moves_left_max_effect << "|"
+      << config.moves_left_threshold << "|" << config.moves_left_slope << "|"
+      << config.moves_left_constant_factor << "|"
       << config.moves_left_scaled_factor << "|"
       << config.moves_left_quadratic_factor << "|" << config.temperature << "|"
       << config.temp_winpct_cutoff << "|" << config.draw_score << "|"

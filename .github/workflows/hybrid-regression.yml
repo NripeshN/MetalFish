@@ -1,0 +1,238 @@
+name: Hybrid Regression Benchmarks
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: Benchmark repeats
+        required: false
+        default: "3"
+      bk_movetime:
+        description: BK tactical movetime in milliseconds
+        required: false
+        default: "5000"
+      perf_movetime:
+        description: Performance movetime in milliseconds
+        required: false
+        default: "2000"
+      puzzle_count:
+        description: Offline Lichess puzzle sample size
+        required: false
+        default: "1000"
+      puzzle_movetime:
+        description: Offline puzzle movetime in milliseconds
+        required: false
+        default: "1000"
+      candidate_setoptions:
+        description: Optional comma-separated candidate-only UCI options, NAME=VALUE
+        required: false
+        default: ""
+
+concurrency:
+  group: metalfish-hybrid-regression-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  compare-main:
+    name: Compare PR Hybrid vs main
+    runs-on: macos-latest
+    timeout-minutes: 180
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout PR candidate
+        uses: actions/checkout@v6
+        with:
+          path: candidate
+
+      - name: Checkout main baseline
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: baseline
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          sw_vers
+          sysctl -n hw.ncpu
+          sysctl -n hw.memsize
+          system_profiler SPDisplaysDataType | grep -A 8 "Metal" || true
+          brew install protobuf zlib abseil zstd
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r candidate/tests/requirements.txt
+
+      - name: Download shared engine networks
+        working-directory: candidate
+        run: |
+          python3 tools/download_engine_networks.py
+          mkdir -p ../baseline/networks
+          rsync -a networks/ ../baseline/networks/
+
+      - name: Configure baseline
+        run: |
+          cmake -S baseline -B baseline/build \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DUSE_METAL=ON \
+            -DBUILD_TESTS=OFF
+
+      - name: Build baseline
+        run: |
+          cmake --build baseline/build --target metalfish \
+            -j"$(sysctl -n hw.ncpu)"
+
+      - name: Configure candidate
+        run: |
+          cmake -S candidate -B candidate/build \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DUSE_METAL=ON \
+            -DBUILD_TESTS=ON
+
+      - name: Build candidate
+        run: |
+          cmake --build candidate/build --target metalfish metalfish_tests \
+            -j"$(sysctl -n hw.ncpu)"
+
+      - name: Candidate correctness smoke
+        working-directory: candidate
+        run: |
+          ./build/metalfish_tests
+          python3 tests/test_benchmark_configs.py
+          python3 tests/test_hybrid_regression_compare.py
+          python3 tests/test_ponder_stress.py --smoke --engine build/metalfish
+
+      - name: Repeated hybrid regression benchmark
+        working-directory: candidate
+        env:
+          BENCH_REPEAT: ${{ github.event.inputs.repeat }}
+          BK_MOVETIME: ${{ github.event.inputs.bk_movetime }}
+          PERF_MOVETIME: ${{ github.event.inputs.perf_movetime }}
+          CANDIDATE_SETOPTIONS: ${{ github.event.inputs.candidate_setoptions }}
+        run: |
+          : "${BENCH_REPEAT:=3}"
+          : "${BK_MOVETIME:=5000}"
+          : "${PERF_MOVETIME:=2000}"
+          candidate_args=()
+          if [ -n "${CANDIDATE_SETOPTIONS:-}" ]; then
+            IFS=',' read -ra opts <<< "$CANDIDATE_SETOPTIONS"
+            for opt in "${opts[@]}"; do
+              if [ -n "$opt" ]; then
+                candidate_args+=(--candidate-setoption "$opt")
+              fi
+            done
+          fi
+          mkdir -p results/hybrid_regression
+          python3 tests/hybrid_regression_compare.py \
+            --baseline-engine ../baseline/build/metalfish \
+            --baseline-cwd ../baseline \
+            --candidate-engine build/metalfish \
+            --candidate-cwd . \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --threads auto \
+            --hash-mb 1024 \
+            --repeat "$BENCH_REPEAT" \
+            --bk-movetime "$BK_MOVETIME" \
+            --perf-movetime "$PERF_MOVETIME" \
+            --min-candidate-bk-score 20 \
+            --max-bk-mean-drop 0.67 \
+            --max-bk-min-drop 1 \
+            --max-perf-regression 0.25 \
+            --json-out results/hybrid_regression/report.json \
+            "${candidate_args[@]}"
+
+      - name: Download large offline puzzle sample
+        working-directory: candidate
+        env:
+          PUZZLE_COUNT: ${{ github.event.inputs.puzzle_count }}
+          LICHESS_PUZZLE_CSV_URL: https://database.lichess.org/lichess_db_puzzle.csv.zst
+        run: |
+          : "${PUZZLE_COUNT:=1000}"
+          mkdir -p results/hybrid_regression/puzzles
+          curl -L --fail --silent --show-error "${LICHESS_PUZZLE_CSV_URL}" \
+            | zstd -dc \
+            | python3 tools/filter_lichess_puzzle_csv.py \
+                --out results/hybrid_regression/puzzles/sample.csv \
+                --max-puzzles "${PUZZLE_COUNT}" \
+                --min-puzzles "${PUZZLE_COUNT}" \
+                --min-rating 1200 \
+                --max-rating 2800 \
+                --min-popularity 70 \
+                --themes "advantage,mate,fork,sacrifice,skewer,pin,discoveredAttack"
+
+      - name: Large offline puzzle regression
+        working-directory: candidate
+        env:
+          PUZZLE_COUNT: ${{ github.event.inputs.puzzle_count }}
+          PUZZLE_MOVETIME: ${{ github.event.inputs.puzzle_movetime }}
+          CANDIDATE_SETOPTIONS: ${{ github.event.inputs.candidate_setoptions }}
+        run: |
+          : "${PUZZLE_COUNT:=1000}"
+          : "${PUZZLE_MOVETIME:=1000}"
+          sample="results/hybrid_regression/puzzles/sample.csv"
+          baseline_engine="$(pwd)/../baseline/build/metalfish"
+          baseline_cwd="$(pwd)/../baseline"
+          candidate_engine="$(pwd)/build/metalfish"
+          candidate_cwd="$(pwd)"
+          candidate_args=()
+          if [ -n "${CANDIDATE_SETOPTIONS:-}" ]; then
+            IFS=',' read -ra opts <<< "$CANDIDATE_SETOPTIONS"
+            for opt in "${opts[@]}"; do
+              if [ -n "$opt" ]; then
+                candidate_args+=(--setoption "$opt")
+              fi
+            done
+          fi
+          python3 tools/lichess_puzzle_runner.py \
+            --offline-csv "$sample" \
+            --engine "$baseline_engine" \
+            --engine-cwd "$baseline_cwd" \
+            --mode hybrid \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --threads auto \
+            --hash-mb 1024 \
+            --movetime-ms "$PUZZLE_MOVETIME" \
+            --max-puzzles "$PUZZLE_COUNT" \
+            --progress-interval 50 \
+            --results-dir results/hybrid_regression/puzzles/baseline
+          python3 tools/lichess_puzzle_runner.py \
+            --offline-csv "$sample" \
+            --engine "$candidate_engine" \
+            --engine-cwd "$candidate_cwd" \
+            --mode hybrid \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --threads auto \
+            --hash-mb 1024 \
+            --movetime-ms "$PUZZLE_MOVETIME" \
+            --max-puzzles "$PUZZLE_COUNT" \
+            --progress-interval 50 \
+            --results-dir results/hybrid_regression/puzzles/candidate \
+            "${candidate_args[@]}"
+          baseline_json="$(ls -t results/hybrid_regression/puzzles/baseline/*.jsonl | head -n 1)"
+          candidate_json="$(ls -t results/hybrid_regression/puzzles/candidate/*.jsonl | head -n 1)"
+          python3 tools/compare_puzzle_runs.py \
+            --baseline "$baseline_json" \
+            --candidate "$candidate_json" \
+            --min-common "$PUZZLE_COUNT" \
+            --max-solved-drop 15 \
+            --max-accuracy-drop 0.03 \
+            --max-candidate-errors 0
+
+      - name: Upload regression report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: hybrid-regression-report
+          path: candidate/results/hybrid_regression/
+          if-no-files-found: warn

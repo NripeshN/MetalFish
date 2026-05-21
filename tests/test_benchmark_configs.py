@@ -289,6 +289,9 @@ def main() -> int:
             'options.add("HybridABCandidateVerifyMs"',
             'options.add("HybridABRootRejectMCTS"',
             'options.add("HybridRootPawnLeverTieBreak"',
+            'options.add("HybridANERootProbe"',
+            'options.add("HybridANEModelPath"',
+            'options.add("HybridANEMinBudgetMs"',
         ],
     )
     assert_file_contains(
@@ -308,6 +311,9 @@ def main() -> int:
             '"HybridABCandidateVerifyMs"',
             '"HybridABRootRejectMCTS"',
             '"HybridRootPawnLeverTieBreak"',
+            '"HybridANERootProbe"',
+            '"HybridANEModelPath"',
+            '"HybridANEMinBudgetMs"',
         ],
     )
 
@@ -510,6 +516,7 @@ def main() -> int:
             "--mcts-parallel-search",
             "--hybrid-ab-root-reject-mcts",
             "--hybrid-mcts-minibatch-size",
+            "--hybrid-ane-root-probe",
             'sess.setoption("MCTSMaxThreads", str(mcts_threads))',
             '"MCTSParallelSearch", "true" if mcts_parallel_search else "false"',
             'sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))',
@@ -597,6 +604,14 @@ def main() -> int:
             "MCTSParallelSearch=true",
             'go "nodes 50"',
             "--expect-bestmove h5f6",
+            "Run Apple accelerator tool tests",
+            "tools/lc0_coreml_root_value_probe.py",
+            "tests/test_lc0_coreml_root_value_probe.py",
+            "tests/test_lc0_coreml_value_export.py",
+            "Run ANE option/config smoke",
+            "--hybrid-ane-root-probe",
+            "--hybrid-ane-compute-units cpu-ne",
+            "--hybrid-ane-min-budget-ms 1000",
         ],
     )
     assert_file_contains(
@@ -613,6 +628,29 @@ def main() -> int:
     assert_file_contains(
         PROJ / ".github/workflows/lichess-puzzles.yml",
         ["python3 tools/download_engine_networks.py"],
+    )
+    assert_file_contains(
+        PROJ / ".github/workflows/hybrid-regression.yml",
+        [
+            "Hybrid Regression Benchmarks",
+            "Checkout main baseline",
+            "Repeated hybrid regression benchmark",
+            "Download large offline puzzle sample",
+            "Large offline puzzle regression",
+            "tests/hybrid_regression_compare.py",
+            "tools/filter_lichess_puzzle_csv.py",
+            "tools/lichess_puzzle_runner.py",
+            "tools/compare_puzzle_runs.py",
+            "candidate_setoptions",
+            "--candidate-setoption",
+            "puzzle_count",
+            "puzzle_movetime",
+            "--repeat \"$BENCH_REPEAT\"",
+            "--min-candidate-bk-score 20",
+            "--max-bk-mean-drop 0.67",
+            "--max-perf-regression 0.25",
+            "--max-solved-drop 15",
+        ],
     )
     assert_file_contains(
         PROJ / "tools/uci_smoke.py",

@@ -103,6 +103,8 @@ struct SearchParams {
   // Backend
   std::string nn_weights_path;
   std::string nn_backend = "auto";
+  std::string coreml_model_path;
+  std::string coreml_compute_units = "cpu-ne";
 
   int GetNumThreads() const {
     if (num_threads <= 0) {

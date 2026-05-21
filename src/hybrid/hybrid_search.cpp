@@ -7,6 +7,7 @@
 
 #include "hybrid_search.h"
 #include "../core/misc.h"
+#include "../core/movegen.h"
 #include "../eval/evaluate.h"
 #include "../mcts/core.h"
 #include "../uci/engine.h"
@@ -72,6 +73,8 @@ ParallelHybridSearch::~ParallelHybridSearch() {
 
   // Join our threads before touching MCTS to avoid use-after-free
   join_all_threads();
+  if (ane_root_hints_future_.valid())
+    ane_root_hints_future_.wait();
 
   if (mcts_search_) {
     mcts_search_->ClearCallbacks();
@@ -127,7 +130,8 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
     auto backend = std::make_unique<Backend>(
         config_.mcts_config.nn_weights_path,
         static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size)),
-        config_.mcts_config.nn_backend);
+        config_.mcts_config.nn_backend, config_.mcts_config.coreml_model_path,
+        config_.mcts_config.coreml_compute_units);
     mcts_search_ =
         std::make_unique<Search>(config_.mcts_config, std::move(backend));
   } catch (const std::exception &e) {
@@ -144,6 +148,34 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
     shared_tt_reader_.reset();
     initialized_ = false;
     return false;
+  }
+
+  ane_evaluator_.reset();
+  if (config_.ane_root_probe) {
+    if (config_.ane_weights_path.empty() || config_.ane_model_path.empty()) {
+      std::cerr << "[HYB] ANE root probe disabled: weights/model path missing"
+                << std::endl;
+    } else {
+      try {
+        ane_evaluator_ = std::make_unique<NNMCTSEvaluator>(
+            config_.ane_weights_path, "coreml", config_.ane_model_path,
+            config_.ane_compute_units);
+        StateInfo warmup_state;
+        Position warmup_pos;
+        warmup_pos.set(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/"
+            "RNBQKBNR w KQkq - 0 1",
+            false, &warmup_state);
+        (void)ane_evaluator_->Evaluate(warmup_pos);
+      } catch (const std::exception &e) {
+        std::cerr << "[HYB] ANE root probe disabled: " << e.what() << std::endl;
+        ane_evaluator_.reset();
+      } catch (...) {
+        std::cerr << "[HYB] ANE root probe disabled: unknown error"
+                  << std::endl;
+        ane_evaluator_.reset();
+      }
+    }
   }
 
   shared_tt_reader_ = std::make_unique<SharedTTReader>(&engine_->get_tt());
@@ -213,6 +245,7 @@ void ParallelHybridSearch::start_search(
   const int time_budget_ms = calculate_time_budget();
   time_budget_ms_.store(time_budget_ms, std::memory_order_release);
   nn_policy_hints_.clear();
+  start_ane_root_probe();
 
   if (config_.use_position_classifier) {
     PositionFeatures features = classifier_.analyze(pos);
@@ -331,6 +364,9 @@ void ParallelHybridSearch::wait() {
     }
     std::this_thread::sleep_for(std::chrono::microseconds(500));
   }
+
+  if (ane_root_hints_future_.valid())
+    ane_root_hints_future_.wait();
 
   {
     std::lock_guard<std::mutex> lock(thread_mutex_);
@@ -1114,6 +1150,184 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
   return hints;
 }
 
+void ParallelHybridSearch::start_ane_root_probe() {
+  if (ane_root_hints_future_.valid())
+    ane_root_hints_future_.wait();
+
+  if (!config_.ane_root_probe || !ane_evaluator_)
+    return;
+  if (limits_.ponderMode &&
+      !ponderhit_received_.load(std::memory_order_acquire))
+    return;
+  const int min_budget = std::max(0, config_.ane_min_budget_ms);
+  const int time_budget = time_budget_ms_.load(std::memory_order_acquire);
+  if (min_budget > 0 && time_budget > 0 && time_budget < min_budget)
+    return;
+  if (min_budget > 0 && time_budget == 0 &&
+      (limits_.nodes > 0 || limits_.infinite || limits_.depth > 0 ||
+       limits_.mate > 0))
+    return;
+
+  ane_root_hints_future_ =
+      std::async(std::launch::async,
+                 &ParallelHybridSearch::compute_ane_root_order_hints, this);
+}
+
+std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
+  std::vector<Move> hints;
+  if (!ane_evaluator_ || should_stop())
+    return hints;
+
+  try {
+    StateInfo root_state;
+    Position root_pos;
+    root_pos.set(root_fen_, false, &root_state);
+
+    MoveList<LEGAL> legal_moves(root_pos);
+    std::vector<Move> candidate_moves;
+    candidate_moves.reserve(legal_moves.size());
+    if (!limits_.searchmoves.empty()) {
+      for (const auto &uci_move : limits_.searchmoves) {
+        Move move = UCIEngine::to_move(root_pos, uci_move);
+        if (move != Move::none() && legal_moves.contains(move) &&
+            std::find(candidate_moves.begin(), candidate_moves.end(), move) ==
+                candidate_moves.end()) {
+          candidate_moves.push_back(move);
+        }
+      }
+    } else {
+      for (Move move : legal_moves)
+        candidate_moves.push_back(move);
+    }
+    if (candidate_moves.empty())
+      return hints;
+
+    struct ChildInput {
+      Move move = Move::none();
+      StateInfo base_state;
+      StateInfo child_state;
+      Position pos;
+      float score = 0.0f;
+      bool scored = false;
+    };
+
+    std::vector<std::unique_ptr<ChildInput>> children;
+    children.reserve(candidate_moves.size());
+    std::vector<const Position *> pending_positions;
+    pending_positions.reserve(candidate_moves.size());
+    std::vector<size_t> pending_indices;
+    pending_indices.reserve(candidate_moves.size());
+
+    for (Move move : candidate_moves) {
+      auto child = std::make_unique<ChildInput>();
+      child->move = move;
+      child->pos.copy_from(root_pos, &child->base_state);
+      child->pos.do_move(move, child->child_state, nullptr);
+
+      MoveList<LEGAL> child_moves(child->pos);
+      if (child_moves.size() == 0) {
+        child->score = child->pos.checkers() ? 1.0f : 0.0f;
+        child->scored = true;
+      } else {
+        pending_positions.push_back(&child->pos);
+        pending_indices.push_back(children.size());
+      }
+      children.push_back(std::move(child));
+    }
+
+    if (!pending_positions.empty() && !should_stop()) {
+      auto results = ane_evaluator_->EvaluateBatch(pending_positions.data(),
+                                                   pending_positions.size());
+      const size_t result_count =
+          std::min(results.size(), pending_indices.size());
+      for (size_t i = 0; i < result_count; ++i) {
+        auto &child = *children[pending_indices[i]];
+        const float root_score = -results[i].value;
+        child.score = std::isfinite(root_score) ? root_score : 0.0f;
+        child.scored = true;
+      }
+    }
+
+    std::vector<size_t> order;
+    order.reserve(children.size());
+    for (size_t i = 0; i < children.size(); ++i) {
+      if (children[i]->scored)
+        order.push_back(i);
+    }
+    std::stable_sort(order.begin(), order.end(), [&](size_t lhs, size_t rhs) {
+      return children[lhs]->score > children[rhs]->score;
+    });
+
+    const int hint_count = std::clamp(config_.ane_root_hint_count, 1, 32);
+    hints.reserve(std::min<int>(hint_count, static_cast<int>(order.size())));
+    for (size_t idx : order) {
+      if (should_stop())
+        break;
+      hints.push_back(children[idx]->move);
+      if (static_cast<int>(hints.size()) >= hint_count)
+        break;
+    }
+  } catch (const std::exception &e) {
+    if (config_.trace_decisions) {
+      send_info_string(std::string("Hybrid: ANE root probe failed: ") +
+                       e.what());
+    }
+    return {};
+  } catch (...) {
+    if (config_.trace_decisions)
+      send_info_string("Hybrid: ANE root probe failed: unknown error");
+    return {};
+  }
+
+  return hints;
+}
+
+std::vector<Move> ParallelHybridSearch::collect_ane_root_order_hints() {
+  std::vector<Move> hints;
+  if (!config_.ane_root_probe || !ane_root_hints_future_.valid())
+    return hints;
+
+  const int wait_ms = std::max(0, config_.ane_root_hint_wait_ms);
+  const auto status =
+      wait_ms == 0
+          ? ane_root_hints_future_.wait_for(std::chrono::milliseconds(0))
+          : ane_root_hints_future_.wait_for(std::chrono::milliseconds(wait_ms));
+  if (status != std::future_status::ready)
+    return hints;
+
+  hints = ane_root_hints_future_.get();
+  if (config_.trace_decisions && !hints.empty()) {
+    std::ostringstream ss;
+    ss << "Hybrid: AB root hints from ANE";
+    for (Move hint : hints)
+      ss << " " << UCIEngine::move(hint, false);
+    send_info_string(ss.str());
+  }
+  return hints;
+}
+
+std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
+  std::vector<Move> hints;
+  auto add_hint = [&hints](Move move) {
+    if (move == Move::none())
+      return;
+    if (std::find(hints.begin(), hints.end(), move) == hints.end())
+      hints.push_back(move);
+  };
+
+  for (Move move : collect_mcts_root_order_hints())
+    add_hint(move);
+  for (Move move : collect_ane_root_order_hints())
+    add_hint(move);
+
+  const int max_hints =
+      std::clamp(config_.mcts_ab_root_hint_count, 1, 16) +
+      std::clamp(config_.ane_root_hint_count, 1, 32);
+  if (static_cast<int>(hints.size()) > max_hints)
+    hints.resize(max_hints);
+  return hints;
+}
+
 std::vector<Move> ParallelHybridSearch::verify_ab_root_candidates(
     const std::vector<Move> &candidates, int verify_ms) {
   std::vector<Move> verified_order;
@@ -1261,7 +1475,7 @@ void ParallelHybridSearch::run_ab_search() {
       ponderhit_received_.load(std::memory_order_acquire)) {
     ab_limits.ponderMode = false;
   }
-  ab_limits.root_order_hints = collect_mcts_root_order_hints();
+  ab_limits.root_order_hints = collect_root_order_hints();
   const int candidate_verify_ms = HybridABCandidateVerifyBudgetMs(
       limits_, time_budget_ms_.load(std::memory_order_acquire),
       config_.ab_candidate_verify_ms,

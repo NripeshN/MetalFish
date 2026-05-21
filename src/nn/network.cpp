@@ -7,6 +7,9 @@
 
 #include "network.h"
 
+#ifdef USE_COREML
+#include "coreml/coreml_network.h"
+#endif
 #ifdef USE_METAL
 #include "metal/metal_network.h"
 #endif
@@ -53,7 +56,20 @@ private:
 };
 
 std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
-                                       const std::string &backend) {
+                                       const std::string &backend,
+                                       const std::string &model_path,
+                                       const std::string &compute_units) {
+#ifdef USE_COREML
+  if (backend == "coreml") {
+    return std::make_unique<CoreML::CoreMLNetwork>(weights, model_path,
+                                                   compute_units);
+  }
+#else
+  if (backend == "coreml") {
+    throw std::runtime_error("Core ML backend was not compiled into MetalFish");
+  }
+#endif
+
 #ifdef USE_METAL
   if (backend == "auto" || backend == "metal") {
     try {
@@ -97,6 +113,11 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
   }
 
   throw std::runtime_error("Unknown NN backend: " + backend);
+}
+
+std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
+                                       const std::string &backend) {
+  return CreateNetwork(weights, backend, "", "cpu-ne");
 }
 
 std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,

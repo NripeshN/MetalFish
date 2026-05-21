@@ -67,6 +67,41 @@ jobs:
           python3 tests/testing.py --quick
           python3 tests/test_lichess_bot.py
           python3 tests/test_lichess_puzzle_runner.py
+          python3 tests/test_hybrid_regression_compare.py
+
+      - name: Run ANE option/config smoke
+        run: |
+          mkdir -p build/ci-ane/t1-512-heads-b8.mlmodelc
+          : > build/ci-ane/t1-512x15x8h-distilled-swa-3395000.pb.gz
+          python3 tools/lichess_bot.py \
+            --config-check \
+            --hybrid-ane-root-probe \
+            --hybrid-ane-weights build/ci-ane/t1-512x15x8h-distilled-swa-3395000.pb.gz \
+            --hybrid-ane-model-path build/ci-ane/t1-512-heads-b8.mlmodelc \
+            --hybrid-ane-compute-units cpu-ne \
+            --hybrid-ane-root-hint-count 10 \
+            --hybrid-ane-root-hint-wait-ms 250 \
+            --hybrid-ane-min-budget-ms 1000
+
+      - name: Run Apple accelerator tool tests
+        run: |
+          python3 -m py_compile \
+            tools/compare_puzzle_runs.py \
+            tools/filter_lichess_puzzle_csv.py \
+            tools/apple_coreml_microbench.py \
+            tools/lc0_coreml_bk_policy_probe.py \
+            tools/lc0_coreml_concurrency_benchmark.py \
+            tools/lc0_coreml_position_parity.py \
+            tools/lc0_coreml_root_value_probe.py \
+            tools/lc0_coreml_value_export.py \
+            tools/lc0_mlx_value_benchmark.py
+          python3 tests/test_apple_coreml_microbench.py
+          python3 tests/test_lc0_coreml_bk_policy_probe.py
+          python3 tests/test_lc0_coreml_concurrency_benchmark.py
+          python3 tests/test_lc0_coreml_position_parity.py
+          python3 tests/test_lc0_coreml_root_value_probe.py
+          python3 tests/test_lc0_coreml_value_export.py
+          python3 tests/test_lc0_mlx_value_benchmark.py
 
       - name: Run UCI smoke
         run: |

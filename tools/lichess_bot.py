@@ -47,6 +47,8 @@ except ModuleNotFoundError:
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = PROJ / "build" / "metalfish"
 WEIGHTS = PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"
+DEFAULT_ANE_WEIGHTS = PROJ / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
+DEFAULT_ANE_MODEL = PROJ / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
 LICHESS_API = "https://lichess.org/api"
 EXPLORER_API = "https://explorer.lichess.ovh"
 HTTP_USER_AGENT = os.environ.get(
@@ -145,6 +147,27 @@ HYBRID_ROOT_PAWN_LEVER_TIEBREAK = env_bool_string(
 )
 HYBRID_TRACE = env_bool_string("METALFISH_HYBRID_TRACE", False)
 HYBRID_MCTS_MINIBATCH = max(0, min(4096, env_int("METALFISH_HYBRID_MCTS_MINIBATCH", 0)))
+HYBRID_ANE_ROOT_PROBE = (
+    env_bool_string("METALFISH_HYBRID_ANE_ROOT_PROBE", False) == "true"
+)
+HYBRID_ANE_WEIGHTS = pathlib.Path(
+    os.environ.get("METALFISH_HYBRID_ANE_WEIGHTS", str(DEFAULT_ANE_WEIGHTS))
+)
+HYBRID_ANE_MODEL = pathlib.Path(
+    os.environ.get("METALFISH_HYBRID_ANE_MODEL", str(DEFAULT_ANE_MODEL))
+)
+HYBRID_ANE_COMPUTE_UNITS = os.environ.get(
+    "METALFISH_HYBRID_ANE_COMPUTE_UNITS", "cpu-ne"
+).strip().lower()
+HYBRID_ANE_ROOT_HINT_COUNT = max(
+    1, min(32, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_COUNT", 10))
+)
+HYBRID_ANE_ROOT_HINT_WAIT_MS = max(
+    0, min(1000, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_WAIT_MS", 250))
+)
+HYBRID_ANE_MIN_BUDGET_MS = max(
+    0, min(30000, env_int("METALFISH_HYBRID_ANE_MIN_BUDGET_MS", 1000))
+)
 TRANSFORMER_LOW_TIME_FALLBACK_MS = max(
     0, min(30000, env_int("METALFISH_TRANSFORMER_LOW_TIME_FALLBACK_MS", 3000))
 )
@@ -510,6 +533,65 @@ def build_engine_options(active_peer_engines: int = 0) -> tuple[dict[str, str], 
     return options, profile
 
 
+def ane_engine_options(args) -> dict[str, str]:
+    if not getattr(args, "hybrid_ane_root_probe", HYBRID_ANE_ROOT_PROBE):
+        return {}
+    return {
+        "HybridANERootProbe": "true",
+        "HybridANEWeights": str(getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS)),
+        "HybridANEModelPath": str(
+            getattr(args, "hybrid_ane_model_path", HYBRID_ANE_MODEL)
+        ),
+        "HybridANEComputeUnits": str(
+            getattr(args, "hybrid_ane_compute_units", HYBRID_ANE_COMPUTE_UNITS)
+        ),
+        "HybridANERootHintCount": str(
+            getattr(args, "hybrid_ane_root_hint_count", HYBRID_ANE_ROOT_HINT_COUNT)
+        ),
+        "HybridANERootHintWaitMs": str(
+            getattr(args, "hybrid_ane_root_hint_wait_ms", HYBRID_ANE_ROOT_HINT_WAIT_MS)
+        ),
+        "HybridANEMinBudgetMs": str(
+            getattr(args, "hybrid_ane_min_budget_ms", HYBRID_ANE_MIN_BUDGET_MS)
+        ),
+    }
+
+
+def normalize_ane_args(args):
+    args.hybrid_ane_root_hint_count = max(
+        1, min(32, int(getattr(args, "hybrid_ane_root_hint_count", 10)))
+    )
+    args.hybrid_ane_root_hint_wait_ms = max(
+        0, min(1000, int(getattr(args, "hybrid_ane_root_hint_wait_ms", 250)))
+    )
+    args.hybrid_ane_min_budget_ms = max(
+        0, min(30000, int(getattr(args, "hybrid_ane_min_budget_ms", 1000)))
+    )
+    return args
+
+
+def apply_runtime_engine_options(options: dict[str, str], args) -> dict[str, str]:
+    options = dict(options)
+    options["Ponder"] = "true" if getattr(args, "ponder", True) else "false"
+    options.update(ane_engine_options(args))
+    return options
+
+
+def ane_status_label(args) -> str:
+    if not getattr(args, "hybrid_ane_root_probe", HYBRID_ANE_ROOT_PROBE):
+        return "disabled"
+    weights = pathlib.Path(getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS))
+    model = pathlib.Path(getattr(args, "hybrid_ane_model_path", HYBRID_ANE_MODEL))
+    compute = getattr(args, "hybrid_ane_compute_units", HYBRID_ANE_COMPUTE_UNITS)
+    wait_ms = getattr(args, "hybrid_ane_root_hint_wait_ms", HYBRID_ANE_ROOT_HINT_WAIT_MS)
+    min_budget = getattr(args, "hybrid_ane_min_budget_ms", HYBRID_ANE_MIN_BUDGET_MS)
+    status = "ready" if weights.exists() and model.exists() else "missing files"
+    return (
+        f"{status} | {compute}, wait {wait_ms} ms, min budget {min_budget} ms, "
+        f"weights={weights.name}, model={model.name}"
+    )
+
+
 ENGINE_OPTIONS, RESOURCE_PROFILE = build_engine_options()
 
 ROTATION_TCS = [
@@ -580,6 +662,13 @@ def validate_bot_config(args) -> list[str]:
             )
         if floor <= 0:
             errors.append("Rated outgoing seeks require --min-rated-opponent-elo > 0.")
+    if getattr(args, "hybrid_ane_root_probe", HYBRID_ANE_ROOT_PROBE):
+        weights = pathlib.Path(getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS))
+        model = pathlib.Path(getattr(args, "hybrid_ane_model_path", HYBRID_ANE_MODEL))
+        if not weights.exists():
+            errors.append(f"Hybrid ANE weights not found: {weights}")
+        if not model.exists():
+            errors.append(f"Hybrid ANE Core ML model not found: {model}")
     return errors
 
 
@@ -588,6 +677,7 @@ def print_config_check(args) -> None:
     checker.args = args
     checker._elo_widen_steps = 0
     options, profile = build_engine_options()
+    options = apply_runtime_engine_options(options, args)
 
     available_mb = int(profile.get("available_mb", 0))
     total_mb = int(profile.get("total_mb", 0))
@@ -612,6 +702,7 @@ def print_config_check(args) -> None:
     )
     print(f"  Resource gate allows new game: {checker._resources_allow_new_game()}")
     print(f"  Syzygy: {syzygy}")
+    print(f"  ANE: {ane_status_label(args)}")
     paths = configured_book_paths()
     if paths:
         print(
@@ -1672,7 +1763,7 @@ class LichessBot:
 
     def _live_engine_options(self) -> tuple[dict[str, str], dict]:
         options, profile = build_engine_options(self._active_peer_engines())
-        options["Ponder"] = "true" if self.args.ponder else "false"
+        options = apply_runtime_engine_options(options, self.args)
         return options, profile
 
     def _print_resource_profile(self, game_id: str | None, profile: dict) -> None:
@@ -3718,7 +3809,7 @@ class LichessBot:
             )
         else:
             tc_mode = self.args.tc or "5+3"
-        header_options, header_profile = build_engine_options()
+        header_options, header_profile = self._live_engine_options()
         if HYBRID_MCTS_THREADS == 0 and HYBRID_AB_THREADS == 0:
             cap = (
                 "auto"
@@ -3752,6 +3843,7 @@ class LichessBot:
         )
         print(f"  Reserve:  {RESOURCE_RESERVE_MB} MB | Network: BT4-1024x15x32h")
         print(f"  Syzygy:   {SYZYGY_PATH if SYZYGY_PATH else 'disabled'}")
+        print(f"  ANE:      {ane_status_label(self.args)}")
         print(
             f"  Audit:    {'enabled' if LICHESS_AUDIT_ENABLED else 'disabled'} "
             f"| {LICHESS_AUDIT_DIR}"
@@ -4068,6 +4160,49 @@ def main():
         help="Skip startup engine probes",
     )
     parser.add_argument(
+        "--hybrid-ane-root-probe",
+        action=argparse.BooleanOptionalAction,
+        default=HYBRID_ANE_ROOT_PROBE,
+        help="Enable the experimental Core ML/ANE root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-weights",
+        type=pathlib.Path,
+        default=HYBRID_ANE_WEIGHTS,
+        help="Lc0 T1 weights for the Core ML/ANE root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-model-path",
+        type=pathlib.Path,
+        default=HYBRID_ANE_MODEL,
+        help="Compiled .mlmodelc/.mlpackage for the Core ML/ANE root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-compute-units",
+        choices=("cpu", "cpu-gpu", "cpu-ne", "all"),
+        default=HYBRID_ANE_COMPUTE_UNITS
+        if HYBRID_ANE_COMPUTE_UNITS in {"cpu", "cpu-gpu", "cpu-ne", "all"}
+        else "cpu-ne",
+    )
+    parser.add_argument(
+        "--hybrid-ane-root-hint-count",
+        type=int,
+        default=HYBRID_ANE_ROOT_HINT_COUNT,
+        help="Maximum ANE root moves to add as AB root-order hints.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-root-hint-wait-ms",
+        type=int,
+        default=HYBRID_ANE_ROOT_HINT_WAIT_MS,
+        help="Milliseconds the hybrid coordinator may wait for ANE root hints.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-min-budget-ms",
+        type=int,
+        default=HYBRID_ANE_MIN_BUDGET_MS,
+        help="Minimum move budget required before starting the ANE root probe.",
+    )
+    parser.add_argument(
         "--self-test-only",
         action="store_true",
         default=False,
@@ -4116,6 +4251,7 @@ def main():
         ),
     )
     args = parser.parse_args()
+    normalize_ane_args(args)
 
     needs_engine = (
         not args.seek_dry_run and not args.config_check

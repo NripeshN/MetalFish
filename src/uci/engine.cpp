@@ -138,6 +138,8 @@ Engine::Engine(std::optional<std::string> path)
   options.add("NNWeights",
               Option("", [](const Option &) { return std::nullopt; }));
   options.add("NNBackend", Option("auto"));
+  options.add("NNCoreMLModelPath", Option(""));
+  options.add("NNCoreMLComputeUnits", Option("cpu-ne"));
 
   options.add("UseHybridSearch", Option(false));
 
@@ -158,6 +160,13 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridABCandidateVerifyMs", Option(120, 0, 1000));
   options.add("HybridABCandidateVerifyCount", Option(4, 1, 10));
   options.add("HybridRootPawnLeverTieBreak", Option(true));
+  options.add("HybridANERootProbe", Option(false));
+  options.add("HybridANEWeights", Option(""));
+  options.add("HybridANEModelPath", Option(""));
+  options.add("HybridANEComputeUnits", Option("cpu-ne"));
+  options.add("HybridANERootHintCount", Option(10, 1, 32));
+  options.add("HybridANERootHintWaitMs", Option(75, 0, 1000));
+  options.add("HybridANEMinBudgetMs", Option(1000, 0, 30000));
   options.add("HybridTrace", Option(false));
   options.add("TransformerLowTimeFallbackMs", Option(3000, 0, 30000));
   options.add("TransformerMinMoveBudgetMs", Option(400, 0, 5000));
