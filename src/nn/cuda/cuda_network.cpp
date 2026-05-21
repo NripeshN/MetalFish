@@ -14,6 +14,7 @@
 #include "cuda_output_mapping.h"
 #include "cuda_runtime_probe.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -41,6 +42,18 @@ bool EnvFlagEnabled(const char *name) {
   if (!value || value[0] == '\0')
     return false;
   return !(value[0] == '0' && value[1] == '\0');
+}
+
+int EnvIntOrDefault(const char *name, int fallback, int min_value,
+                    int max_value) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  try {
+    return std::clamp(std::stoi(value), min_value, max_value);
+  } catch (...) {
+    return fallback;
+  }
 }
 
 bool IsFinitePolicy(const std::array<float, kPolicyOutputs> &policy) {
@@ -224,15 +237,21 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
   if (inputs.empty())
     return {};
 
-  const int batch_size = static_cast<int>(inputs.size());
-  if (batch_size > buffer_layout_.max_batch_size) {
+  const int requested_batch_size = static_cast<int>(inputs.size());
+  const int min_execution_batch = EnvIntOrDefault(
+      "METALFISH_CUDA_MIN_EXECUTION_BATCH", 1, 1, kMaxStableExecutionBatchSize);
+  const int execution_batch_size =
+      std::max(requested_batch_size, min_execution_batch);
+  if (execution_batch_size > buffer_layout_.max_batch_size) {
     throw std::runtime_error("CUDA batch size exceeds configured max batch");
   }
 
   std::vector<const float *> input_plane_ptrs;
-  input_plane_ptrs.reserve(inputs.size());
+  input_plane_ptrs.reserve(static_cast<size_t>(execution_batch_size));
   for (const auto &input : inputs)
     input_plane_ptrs.push_back(input[0].data());
+  while (static_cast<int>(input_plane_ptrs.size()) < execution_batch_size)
+    input_plane_ptrs.push_back(input_plane_ptrs.back());
 
   std::vector<std::uint64_t> input_masks;
   std::vector<float> input_values;
@@ -249,36 +268,44 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
       workspace_batch_size_ = 0;
     }
 
-    const bool batch_size_changed = workspace_batch_size_ != batch_size;
+    const bool batch_size_changed =
+        workspace_batch_size_ != execution_batch_size;
     if (batch_size_changed) {
       workspace_.Release();
-      workspace_batch_size_ = batch_size;
+      workspace_batch_size_ = execution_batch_size;
     }
     cudaStream_t stream = workspace_.Stream();
     if (batch_size_changed || force_full_buffer_clear)
       buffers_.ClearAll(stream);
-    buffers_.UploadPackedInputs(input_masks, input_values, batch_size, stream);
-    buffers_.ClearOutputs(batch_size, stream);
+    buffers_.UploadPackedInputs(input_masks, input_values,
+                                execution_batch_size, stream);
+    buffers_.ClearOutputs(execution_batch_size, stream);
     executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
-                       buffers_, workspace_, batch_size);
+                       buffers_, workspace_, execution_batch_size);
 
-    const auto downloaded = buffers_.DownloadOutputs(batch_size, stream);
+    const auto downloaded =
+        buffers_.DownloadOutputs(execution_batch_size, stream);
     return DecodeNetworkOutputBatch(
         tensor_plan_, downloaded.policy.data(), downloaded.policy.size(),
         downloaded.value.data(), downloaded.value.size(),
-        downloaded.moves_left.data(), downloaded.moves_left.size(), batch_size);
+        downloaded.moves_left.data(), downloaded.moves_left.size(),
+        execution_batch_size);
   };
 
   std::lock_guard<std::mutex> lock(execution_mutex_);
   auto outputs = run_once();
-  if (OutputsAreValid(outputs, tensor_plan_))
+  if (OutputsAreValid(outputs, tensor_plan_)) {
+    outputs.resize(static_cast<size_t>(requested_batch_size));
     return outputs;
+  }
 
   workspace_.Release();
   workspace_batch_size_ = 0;
   outputs = run_once();
-  if (OutputsAreValid(outputs, tensor_plan_))
+  if (OutputsAreValid(outputs, tensor_plan_)) {
+    outputs.resize(static_cast<size_t>(requested_batch_size));
     return outputs;
+  }
 
   throw std::runtime_error(
       "CUDA transformer backend produced invalid network output");
