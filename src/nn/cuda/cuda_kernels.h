@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 #include <cuda_runtime_api.h>
@@ -76,6 +77,14 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
                                 int squares, int head_depth, int qkv_width,
                                 float scale, cudaStream_t stream = nullptr);
 
+std::size_t AttentionGemmPointerWorkspaceBytes(int batch_size, int heads);
+
+void LaunchAttentionScorePointerBatchedKernel(
+    const float *query, const float *key, float *scores, int batch_size,
+    int heads, int squares, int head_depth, int qkv_width, float scale,
+    void *pointer_workspace, std::size_t pointer_workspace_bytes,
+    cudaStream_t stream = nullptr);
+
 void LaunchAttentionBiasAddKernel(float *scores, const float *bias,
                                   int batch_size, int heads, int squares,
                                   cudaStream_t stream = nullptr);
@@ -95,6 +104,12 @@ void LaunchAttentionContextKernel(const float *probabilities,
                                   int batch_size, int heads, int squares,
                                   int head_depth, int qkv_width,
                                   cudaStream_t stream = nullptr);
+
+void LaunchAttentionContextPointerBatchedKernel(
+    const float *probabilities, const float *value, float *context,
+    int batch_size, int heads, int squares, int head_depth, int qkv_width,
+    void *pointer_workspace, std::size_t pointer_workspace_bytes,
+    cudaStream_t stream = nullptr);
 
 void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
                                     const float *promotion_weights,
