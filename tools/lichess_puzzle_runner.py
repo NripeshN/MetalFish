@@ -393,6 +393,7 @@ def engine_options(args) -> dict[str, str]:
                 "HybridABThreads": "0",
                 "HybridAutoABThreadsCap": "0",
                 "MCTSMaxThreads": "0",
+                "TransformerLowTimeFallbackMs": "0",
             }
         )
         if args.hybrid_ane_root_probe:
@@ -408,7 +409,6 @@ def engine_options(args) -> dict[str, str]:
                     "HybridANERootHintCount": str(args.hybrid_ane_root_hint_count),
                     "HybridANERootHintWaitMs": str(args.hybrid_ane_root_hint_wait_ms),
                     "HybridANEMinBudgetMs": str(args.hybrid_ane_min_budget_ms),
-                    "TransformerLowTimeFallbackMs": "0",
                 }
             )
     if args.syzygy_path:

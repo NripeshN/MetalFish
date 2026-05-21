@@ -178,6 +178,16 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
     )
 
 
+def test_hybrid_mode_keeps_transformer_active() -> None:
+    args = puzzle_runner.parse_args(["--mode", "hybrid"])
+    options = puzzle_runner.engine_options(args)
+
+    expect(
+        "hybrid benchmark disables low-time fallback",
+        options["TransformerLowTimeFallbackMs"] == "0",
+    )
+
+
 def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
     args = puzzle_runner.parse_args(["--mode", "hybrid", "--hybrid-ane-root-probe"])
     options = puzzle_runner.engine_options(args)
