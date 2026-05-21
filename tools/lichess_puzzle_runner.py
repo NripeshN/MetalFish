@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as dt
 import email.utils
 import io
@@ -202,13 +203,19 @@ class SearchAnswer:
 
 
 class UCIEngine:
-    def __init__(self, path: pathlib.Path, options: dict[str, str]):
+    def __init__(
+        self,
+        path: pathlib.Path,
+        options: dict[str, str],
+        cwd: pathlib.Path | None = None,
+    ):
         self.path = path
         self.proc = subprocess.Popen(
             [str(path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=str(cwd) if cwd else None,
             text=True,
             bufsize=1,
         )
@@ -381,6 +388,20 @@ def engine_options(args) -> dict[str, str]:
         options["SyzygyPath"] = str(args.syzygy_path)
         options["SyzygyProbeDepth"] = "2"
         options["SyzygyProbeLimit"] = "6"
+    options.update(parse_setoptions(args.setoption))
+    return options
+
+
+def parse_setoptions(items: list[str]) -> dict[str, str]:
+    options: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"--setoption requires NAME=VALUE, got {item!r}")
+        name, value = item.split("=", 1)
+        name = name.strip()
+        if not name:
+            raise ValueError(f"--setoption has an empty option name: {item!r}")
+        options[name] = value.strip()
     return options
 
 
@@ -403,6 +424,131 @@ def board_from_api_puzzle(item: dict) -> chess.Board:
     return board
 
 
+def board_from_csv_puzzle(item: dict) -> chess.Board:
+    puzzle = item.get("puzzle", {})
+    fen = puzzle.get("fen")
+    moves = puzzle.get("moves", [])
+    if not isinstance(fen, str) or not fen.strip():
+        raise ValueError("CSV puzzle is missing FEN")
+    if not isinstance(moves, list) or len(moves) < 2:
+        raise ValueError("CSV puzzle is missing opponent move and solution")
+    board = chess.Board(fen)
+    opponent_move = normalize_move(str(moves[0]), board)
+    if opponent_move is None:
+        raise ValueError("CSV puzzle has illegal opponent move")
+    board.push(chess.Move.from_uci(opponent_move))
+    return board
+
+
+def board_from_puzzle(item: dict) -> chess.Board:
+    if item.get("source") == "lichess_csv":
+        return board_from_csv_puzzle(item)
+    return board_from_api_puzzle(item)
+
+
+def csv_puzzle_item(row: dict[str, str]) -> dict:
+    moves = row.get("Moves", "").split()
+    themes = row.get("Themes", "").split()
+    puzzle: dict[str, object] = {
+        "id": row.get("PuzzleId", ""),
+        "fen": row.get("FEN", ""),
+        "moves": moves,
+        "solution": moves[1:],
+        "themes": themes,
+        "gameUrl": row.get("GameUrl", ""),
+        "openingTags": row.get("OpeningTags", ""),
+    }
+    for source_key, target_key in (
+        ("Rating", "rating"),
+        ("RatingDeviation", "ratingDeviation"),
+        ("Popularity", "popularity"),
+        ("NbPlays", "nbPlays"),
+    ):
+        try:
+            puzzle[target_key] = int(row.get(source_key, ""))
+        except ValueError:
+            pass
+    return {"source": "lichess_csv", "puzzle": puzzle}
+
+
+def csv_row_matches(
+    row: dict[str, str],
+    *,
+    min_rating: int,
+    max_rating: int,
+    min_popularity: int,
+    themes: set[str],
+) -> bool:
+    try:
+        rating = int(row.get("Rating", "0"))
+    except ValueError:
+        return False
+    if min_rating and rating < min_rating:
+        return False
+    if max_rating and rating > max_rating:
+        return False
+    if min_popularity > -100:
+        try:
+            popularity = int(row.get("Popularity", "-101"))
+        except ValueError:
+            return False
+        if popularity < min_popularity:
+            return False
+    if themes:
+        row_themes = set(row.get("Themes", "").split())
+        if not row_themes.intersection(themes):
+            return False
+    return True
+
+
+def parse_theme_filter(value: str) -> set[str]:
+    themes: set[str] = set()
+    for token in value.replace(",", " ").split():
+        token = token.strip()
+        if token:
+            themes.add(token)
+    return themes
+
+
+def parse_auto_int(value: str, *, option_name: str) -> int:
+    if value == "auto":
+        return 0
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"{option_name} must be an integer or 'auto'"
+        ) from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"{option_name} must be >= 0")
+    return parsed
+
+
+def iter_offline_csv_puzzles(args) -> list[dict]:
+    themes = parse_theme_filter(args.themes)
+    puzzles: list[dict] = []
+    with args.offline_csv.open(newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if not csv_row_matches(
+                row,
+                min_rating=args.min_rating,
+                max_rating=args.max_rating,
+                min_popularity=args.min_popularity,
+                themes=themes,
+            ):
+                continue
+            item = csv_puzzle_item(row)
+            try:
+                board_from_csv_puzzle(item)
+            except ValueError:
+                continue
+            puzzles.append(item)
+            if len(puzzles) >= args.max_puzzles:
+                break
+    return puzzles
+
+
 def normalize_move(uci: str, board: chess.Board) -> str | None:
     try:
         move = chess.Move.from_uci(uci)
@@ -413,6 +559,20 @@ def normalize_move(uci: str, board: chess.Board) -> str | None:
     return None
 
 
+def is_mating_move(board: chess.Board, uci: str | None) -> bool:
+    if uci is None:
+        return False
+    try:
+        move = chess.Move.from_uci(uci)
+    except ValueError:
+        return False
+    if move not in board.legal_moves:
+        return False
+    probe = board.copy(stack=False)
+    probe.push(move)
+    return probe.is_checkmate()
+
+
 def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
     puzzle = item.get("puzzle", {})
     puzzle_id = str(puzzle.get("id", ""))
@@ -421,7 +581,7 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
         return {"id": puzzle_id, "solved": False, "error": "missing_solution"}
 
     started = time.monotonic()
-    board = board_from_api_puzzle(item)
+    board = board_from_puzzle(item)
     engine.new_game()
     searches: list[dict] = []
 
@@ -451,7 +611,10 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
                 "depth": answer.depth,
             }
         )
-        if actual != expected:
+        mate_in_one_ok = idx == 0 and len(solution) == 1 and is_mating_move(
+            board, actual
+        )
+        if actual != expected and not mate_in_one_ok:
             return {
                 "id": puzzle_id,
                 "solved": False,
@@ -489,6 +652,8 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         f"- Rated submission: {stats.get('rated')}",
         f"- Duration: {stats.get('duration_s', 0):.1f}s",
     ]
+    if stats.get("source"):
+        lines.append(f"- Source: {stats.get('source')}")
     if stats.get("ended"):
         lines.append(f"- Ended: {stats.get('ended')}")
     if stats.get("rate_limit_events"):
@@ -513,6 +678,8 @@ def wait_after_rate_limit(
 
 
 def run(args) -> int:
+    if args.offline_csv:
+        return run_offline(args)
     if requests is None:
         raise RuntimeError("Python package 'requests' is required")
     token = load_token()
@@ -566,7 +733,7 @@ def run(args) -> int:
             print(f"Rate limited before first batch; retry after {exc.wait_s:.0f}s")
             return 0
 
-    engine = UCIEngine(args.engine, options)
+    engine = UCIEngine(args.engine, options, args.engine_cwd)
     solved = 0
     total = 0
     started = time.monotonic()
@@ -673,9 +840,95 @@ def run(args) -> int:
     return 0
 
 
+def run_offline(args) -> int:
+    if not args.engine.exists():
+        raise RuntimeError(f"Engine not found at {args.engine}")
+    if not args.offline_csv.exists():
+        raise RuntimeError(f"Offline puzzle CSV not found at {args.offline_csv}")
+    if args.mode in {"mcts", "hybrid"} and not args.weights.exists():
+        raise RuntimeError(f"Transformer weights not found at {args.weights}")
+
+    args.results_dir.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
+    jsonl_path = args.results_dir / f"lichess-puzzles-offline-{stamp}.jsonl"
+    summary_path = args.results_dir / f"lichess-puzzles-offline-{stamp}.md"
+
+    options = engine_options(args)
+    threads = int(options["Threads"])
+    hash_mb = int(options["Hash"])
+    puzzles = iter_offline_csv_puzzles(args)
+    if not puzzles:
+        raise RuntimeError("No offline puzzles matched the selected filters")
+
+    engine = UCIEngine(args.engine, options, args.engine_cwd)
+    solved = 0
+    total = 0
+    started = time.monotonic()
+    deadline = started + args.max_minutes * 60.0
+    ended = "completed"
+
+    print(
+        f"Offline puzzle run: mode={args.mode}, threads={threads}, "
+        f"hash={hash_mb} MB, movetime={args.movetime_ms} ms, "
+        f"puzzles={len(puzzles)}, source={args.offline_csv}"
+    )
+    try:
+        with jsonl_path.open("w") as out:
+            for item in puzzles:
+                if time.monotonic() >= deadline:
+                    ended = "time_budget"
+                    break
+                try:
+                    result = solve_puzzle(engine, item, args.movetime_ms)
+                except Exception as exc:
+                    result = {
+                        "id": str(item.get("puzzle", {}).get("id", "")),
+                        "solved": False,
+                        "error": str(exc),
+                    }
+                total += 1
+                solved += 1 if result.get("solved") else 0
+                out.write(json.dumps(result, sort_keys=True) + "\n")
+                out.flush()
+                if total % args.progress_interval == 0:
+                    print(f"Progress: {solved}/{total} ({solved / total:.1%})")
+    finally:
+        engine.close()
+
+    duration_s = time.monotonic() - started
+    stats = {
+        "puzzles": total,
+        "solved": solved,
+        "mode": args.mode,
+        "threads": threads,
+        "hash_mb": hash_mb,
+        "movetime_ms": args.movetime_ms,
+        "rated": False,
+        "duration_s": duration_s,
+        "ended": ended,
+        "source": str(args.offline_csv),
+        "rate_limit_events": 0,
+    }
+    write_summary(summary_path, stats)
+    print(
+        f"Finished: solved {solved}/{total} "
+        f"({solved / max(1, total):.2%}) in {duration_s:.1f}s"
+    )
+    print(f"Results: {jsonl_path}")
+    print(f"Summary: {summary_path}")
+
+    accuracy = solved / max(1, total)
+    if total == 0:
+        return 2
+    if accuracy < args.min_accuracy:
+        return 1
+    return 0
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", type=pathlib.Path, default=ENGINE)
+    parser.add_argument("--engine-cwd", type=pathlib.Path, default=None)
     parser.add_argument("--mode", choices=("ab", "mcts", "hybrid"), default="ab")
     parser.add_argument(
         "--weights",
@@ -683,8 +936,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=ROOT / "networks" / "BT4-1024x15x32h-swa-6147500.pb",
     )
     parser.add_argument("--syzygy-path", type=pathlib.Path, default=None)
-    parser.add_argument("--threads", type=int, default=0)
-    parser.add_argument("--hash-mb", type=int, default=0)
+    parser.add_argument(
+        "--setoption",
+        action="append",
+        default=[],
+        help="Additional UCI option as NAME=VALUE. Can be repeated.",
+    )
+    parser.add_argument(
+        "--threads",
+        type=lambda value: parse_auto_int(value, option_name="--threads"),
+        default=0,
+    )
+    parser.add_argument(
+        "--hash-mb",
+        type=lambda value: parse_auto_int(value, option_name="--hash-mb"),
+        default=0,
+    )
     parser.add_argument("--movetime-ms", type=int, default=3000)
     parser.add_argument("--max-minutes", type=float, default=335.0)
     parser.add_argument("--max-puzzles", type=int, default=1000000)
@@ -697,6 +964,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-rate-limit-waits", type=int, default=5)
     parser.add_argument("--progress-interval", type=int, default=25)
     parser.add_argument("--results-dir", type=pathlib.Path, default=RESULTS_DIR)
+    parser.add_argument(
+        "--offline-csv",
+        type=pathlib.Path,
+        default=None,
+        help="Run a local Lichess puzzle CSV sample instead of the live API.",
+    )
+    parser.add_argument("--min-rating", type=int, default=0)
+    parser.add_argument("--max-rating", type=int, default=0)
+    parser.add_argument("--min-popularity", type=int, default=-101)
+    parser.add_argument(
+        "--themes",
+        default="",
+        help="Comma/space-separated Lichess puzzle themes; any match is accepted.",
+    )
     args = parser.parse_args(argv)
     args.batch_size = max(1, min(50, args.batch_size))
     args.movetime_ms = max(1, args.movetime_ms)

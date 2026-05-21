@@ -72,6 +72,8 @@ jobs:
       - name: Run Apple accelerator tool tests
         run: |
           python3 -m py_compile \
+            tools/compare_puzzle_runs.py \
+            tools/filter_lichess_puzzle_csv.py \
             tools/apple_coreml_microbench.py \
             tools/lc0_coreml_bk_policy_probe.py \
             tools/lc0_coreml_concurrency_benchmark.py \

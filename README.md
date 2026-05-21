@@ -65,6 +65,27 @@ python3 tests/paper_benchmarks.py --tactical --movetime 5000 \
   --threads auto --hash auto --tactical-repeat 3
 ```
 
+For broad tactical regression testing, use an offline sample from the public
+Lichess puzzle CSV instead of the 24-position smoke suite. This avoids API
+quota and lets CI compare the same positions on `main` and the PR branch:
+
+```bash
+curl -L https://database.lichess.org/lichess_db_puzzle.csv.zst \
+  | zstd -dc \
+  | python3 tools/filter_lichess_puzzle_csv.py \
+      --out results/lichess_puzzles/sample.csv \
+      --max-puzzles 1000 --min-puzzles 1000 \
+      --min-rating 1200 --max-rating 2800 --min-popularity 70 \
+      --themes "advantage,mate,fork,sacrifice,skewer,pin,discoveredAttack"
+
+python3 tools/lichess_puzzle_runner.py \
+  --offline-csv results/lichess_puzzles/sample.csv \
+  --engine build/metalfish \
+  --mode hybrid \
+  --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+  --threads auto --hash-mb 4096 --movetime-ms 1000
+```
+
 Latest local tactical run, M2 Max, 5 seconds per position, generated
 2026-05-20 with `--threads auto --hash auto`:
 

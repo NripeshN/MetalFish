@@ -69,3 +69,5 @@ tournament.log
 
 # Google Cloud Platform
 .gcp-org-credentials.json
+
+puzzles/

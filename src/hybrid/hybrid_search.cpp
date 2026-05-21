@@ -160,6 +160,13 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
         ane_evaluator_ = std::make_unique<NNMCTSEvaluator>(
             config_.ane_weights_path, "coreml", config_.ane_model_path,
             config_.ane_compute_units);
+        StateInfo warmup_state;
+        Position warmup_pos;
+        warmup_pos.set(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/"
+            "RNBQKBNR w KQkq - 0 1",
+            false, &warmup_state);
+        (void)ane_evaluator_->Evaluate(warmup_pos);
       } catch (const std::exception &e) {
         std::cerr << "[HYB] ANE root probe disabled: " << e.what() << std::endl;
         ane_evaluator_.reset();
