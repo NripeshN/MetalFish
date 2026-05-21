@@ -381,6 +381,13 @@ Current CUDA backend boundary:
   batch reuse drift worsened (`REUSE_STRESS_STEP warm32` policy delta about
   `0.051`, value mismatch). Do not promote single-workspace release as a
   default; it is a diagnostic knob only.
+- The 2026-05-21 L4 gate `metalfish-cuda-gate-20260521-143922` tested
+  `CUBLAS_WORKSPACE_CONFIG=:4096:8`. It passed the CUDA, auto, and hybrid UCI
+  smokes with normal throughput (`b32` about `97.7ms`), but it did not improve
+  the main parity target: fresh batch-33 and single-reuse drift were worse than
+  the default gate (`TRACE_WORST_CONFIRMED` policy delta about `0.033`,
+  `SINGLE_REUSE_STRESS_MAX` policy delta about `0.032`). Keep it as an
+  opt-in diagnostic environment, not a deployment default.
 - The CUDA attention smoke keeps strict `1e-5` checks for individual Q/K/V,
   smolgen, score, softmax, context, projection, residual, and layernorm
   tensors. The attention-only sequence-level check now uses a `5e-3`
