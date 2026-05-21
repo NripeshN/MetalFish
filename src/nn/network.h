@@ -43,6 +43,10 @@ std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
                                        const std::string &backend = "auto");
 std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
                                        const std::string &backend = "auto");
+std::unique_ptr<Network>
+CreateNetwork(const WeightsFile &weights, const std::string &backend,
+              const std::string &model_path,
+              const std::string &compute_units = "cpu-ne");
 
 } // namespace NN
 } // namespace MetalFish

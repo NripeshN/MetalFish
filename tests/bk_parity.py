@@ -362,6 +362,13 @@ def setup_metalfish_hybrid(
     mcts_minibatch: int,
     low_time_fallback_ms: int,
     root_pawn_lever_tiebreak: bool,
+    ane_root_probe: bool,
+    ane_weights: pathlib.Path,
+    ane_model_path: pathlib.Path,
+    ane_compute_units: str,
+    ane_root_hint_count: int,
+    ane_root_hint_wait_ms: int,
+    ane_min_budget_ms: int,
 ) -> None:
     total_threads = max(3, threads, mcts_threads + ab_threads)
     sess.setoption("UseMCTS", "false")
@@ -394,6 +401,13 @@ def setup_metalfish_hybrid(
         "HybridRootPawnLeverTieBreak",
         "true" if root_pawn_lever_tiebreak else "false",
     )
+    sess.setoption("HybridANERootProbe", "true" if ane_root_probe else "false")
+    sess.setoption("HybridANEWeights", str(ane_weights))
+    sess.setoption("HybridANEModelPath", str(ane_model_path))
+    sess.setoption("HybridANEComputeUnits", ane_compute_units)
+    sess.setoption("HybridANERootHintCount", str(ane_root_hint_count))
+    sess.setoption("HybridANERootHintWaitMs", str(ane_root_hint_wait_ms))
+    sess.setoption("HybridANEMinBudgetMs", str(ane_min_budget_ms))
     sess.setoption("HybridABPolicyWeight", str(ab_policy_weight))
     sess.setoption("HybridTrace", "true" if trace else "false")
     sess.send("isready")
@@ -650,6 +664,13 @@ def write_json_report(
             "hybrid_mcts_minibatch": args.hybrid_mcts_minibatch_size,
             "hybrid_low_time_fallback_ms": args.hybrid_low_time_fallback_ms,
             "hybrid_root_pawn_lever_tiebreak": args.hybrid_root_pawn_lever_tiebreak,
+            "hybrid_ane_root_probe": args.hybrid_ane_root_probe,
+            "hybrid_ane_weights": str(args.hybrid_ane_weights),
+            "hybrid_ane_model_path": str(args.hybrid_ane_model_path),
+            "hybrid_ane_compute_units": args.hybrid_ane_compute_units,
+            "hybrid_ane_root_hint_count": args.hybrid_ane_root_hint_count,
+            "hybrid_ane_root_hint_wait_ms": args.hybrid_ane_root_hint_wait_ms,
+            "hybrid_ane_min_budget_ms": args.hybrid_ane_min_budget_ms,
             "mcts_parallel_search": args.mcts_parallel_search,
         },
         "engines": {},
@@ -694,6 +715,13 @@ def run_once(
     if not args.weights.exists():
         print(f"ERROR: weights not found: {args.weights}")
         return 2
+    if args.hybrid_ane_root_probe:
+        if not args.hybrid_ane_weights.exists():
+            print(f"ERROR: ANE weights not found: {args.hybrid_ane_weights}")
+            return 2
+        if not args.hybrid_ane_model_path.exists():
+            print(f"ERROR: ANE model not found: {args.hybrid_ane_model_path}")
+            return 2
 
     mode = "nodes" if args.nodes > 0 else "movetime"
     threads = 1 if args.deterministic else args.threads
@@ -769,6 +797,13 @@ def run_once(
                 args.hybrid_mcts_minibatch_size,
                 args.hybrid_low_time_fallback_ms,
                 args.hybrid_root_pawn_lever_tiebreak,
+                args.hybrid_ane_root_probe,
+                args.hybrid_ane_weights,
+                args.hybrid_ane_model_path,
+                args.hybrid_ane_compute_units,
+                args.hybrid_ane_root_hint_count,
+                args.hybrid_ane_root_hint_wait_ms,
+                args.hybrid_ane_min_budget_ms,
             )
             s.warmup(
                 mode,
@@ -948,6 +983,25 @@ def main() -> int:
         action=argparse.BooleanOptionalAction,
         default=True,
     )
+    parser.add_argument(
+        "--hybrid-ane-root-probe",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
+        "--hybrid-ane-weights",
+        type=pathlib.Path,
+        default=PROJ / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz",
+    )
+    parser.add_argument(
+        "--hybrid-ane-model-path",
+        type=pathlib.Path,
+        default=PROJ / "build" / "coreml" / "t1-512-heads-b8.mlpackage",
+    )
+    parser.add_argument("--hybrid-ane-compute-units", default="cpu-ne")
+    parser.add_argument("--hybrid-ane-root-hint-count", type=int, default=10)
+    parser.add_argument("--hybrid-ane-root-hint-wait-ms", type=int, default=250)
+    parser.add_argument("--hybrid-ane-min-budget-ms", type=int, default=1000)
     parser.add_argument("--multipv", type=int, default=1)
     parser.add_argument("--backend", default="metal")
     parser.add_argument("--weights", type=pathlib.Path, default=WEIGHTS)

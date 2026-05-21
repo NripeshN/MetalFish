@@ -59,6 +59,83 @@ def test_live_defaults_avoid_crash_prone_resources() -> None:
     )
 
 
+def test_runtime_ane_options_are_explicitly_opt_in() -> None:
+    base_options, _ = lichess_bot.build_engine_options()
+    disabled = types.SimpleNamespace(ponder=True, hybrid_ane_root_probe=False)
+    enabled = types.SimpleNamespace(
+        ponder=True,
+        hybrid_ane_root_probe=True,
+        hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
+        hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
+        hybrid_ane_compute_units="cpu-ne",
+        hybrid_ane_root_hint_count=10,
+        hybrid_ane_root_hint_wait_ms=250,
+        hybrid_ane_min_budget_ms=1000,
+    )
+
+    no_ane = lichess_bot.apply_runtime_engine_options(base_options, disabled)
+    with_ane = lichess_bot.apply_runtime_engine_options(base_options, enabled)
+
+    expect("ANE probe is opt-in", "HybridANERootProbe" not in no_ane)
+    expect("ANE probe option enabled", with_ane["HybridANERootProbe"] == "true")
+    expect("ANE weights passed", with_ane["HybridANEWeights"] == "networks/t1.pb.gz")
+    expect("ANE model passed", with_ane["HybridANEModelPath"] == "build/coreml/t1.mlmodelc")
+    expect("ANE wait uses retained profile", with_ane["HybridANERootHintWaitMs"] == "250")
+    expect("ANE min budget uses retained profile", with_ane["HybridANEMinBudgetMs"] == "1000")
+
+
+def test_ane_runtime_values_are_clamped_to_uci_bounds() -> None:
+    args = types.SimpleNamespace(
+        hybrid_ane_root_hint_count=999,
+        hybrid_ane_root_hint_wait_ms=999999,
+        hybrid_ane_min_budget_ms=999999,
+    )
+    lichess_bot.normalize_ane_args(args)
+
+    expect("ANE hint count upper bound", args.hybrid_ane_root_hint_count == 32)
+    expect("ANE wait upper bound", args.hybrid_ane_root_hint_wait_ms == 1000)
+    expect("ANE budget upper bound", args.hybrid_ane_min_budget_ms == 30000)
+
+    args = types.SimpleNamespace(
+        hybrid_ane_root_hint_count=-5,
+        hybrid_ane_root_hint_wait_ms=-5,
+        hybrid_ane_min_budget_ms=-5,
+    )
+    lichess_bot.normalize_ane_args(args)
+
+    expect("ANE hint count lower bound", args.hybrid_ane_root_hint_count == 1)
+    expect("ANE wait lower bound", args.hybrid_ane_root_hint_wait_ms == 0)
+    expect("ANE budget lower bound", args.hybrid_ane_min_budget_ms == 0)
+
+
+def test_ane_config_validation_requires_existing_files() -> None:
+    args = types.SimpleNamespace(
+        seek=False,
+        accept_rated=False,
+        accept_casual=True,
+        elo_seek=False,
+        seek_highest_rated=False,
+        elo_range=200,
+        min_rated_opponent_elo=2200,
+        hybrid_ane_root_probe=True,
+        hybrid_ane_weights=pathlib.Path("/missing/t1.pb.gz"),
+        hybrid_ane_model_path=pathlib.Path("/missing/t1.mlmodelc"),
+    )
+
+    errors = lichess_bot.validate_bot_config(args)
+    expect("missing ANE weights rejected", any("ANE weights not found" in e for e in errors))
+    expect("missing ANE model rejected", any("Core ML model not found" in e for e in errors))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        args.hybrid_ane_weights = root / "t1.pb.gz"
+        args.hybrid_ane_model_path = root / "t1.mlmodelc"
+        args.hybrid_ane_weights.write_bytes(b"weights")
+        args.hybrid_ane_model_path.mkdir()
+        errors = lichess_bot.validate_bot_config(args)
+        expect("existing ANE files accepted", errors == [])
+
+
 def test_load_adjusted_workers_preserves_floor() -> None:
     expect(
         "idle workers unchanged",
@@ -2232,6 +2309,9 @@ def test_quit_after_games_limit() -> None:
 def main() -> int:
     test_reader_uses_launch_queue()
     test_live_defaults_avoid_crash_prone_resources()
+    test_runtime_ane_options_are_explicitly_opt_in()
+    test_ane_runtime_values_are_clamped_to_uci_bounds()
+    test_ane_config_validation_requires_existing_files()
     test_load_adjusted_workers_preserves_floor()
     test_pre_game_resource_prep_runs_cleanup_before_allocation()
     test_bot_instance_lock_blocks_second_holder()

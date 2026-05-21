@@ -1,2 +1,3 @@
 python-chess
 requests
+numpy<3
