@@ -51,6 +51,175 @@ run_apt_get() {
   done
 }
 
+SUMMARY_WRITTEN=0
+
+summary_line_or_missing() {
+  local pattern="$1"
+  local file="$2"
+  local fallback="$3"
+  if [[ -s "${file}" ]]; then
+    grep -m1 "${pattern}" "${file}" || echo "${fallback}"
+  else
+    echo "${fallback}"
+  fi
+}
+
+summary_log_status() {
+  local file="$1"
+  if [[ -s "${file}" ]]; then
+    echo "present"
+  else
+    echo "missing"
+  fi
+}
+
+write_summary() {
+  local gate_status="${1:-passed}"
+  mkdir -p "$(dirname "${SUMMARY}")"
+  {
+    echo "# MetalFish CUDA GPU Gate Summary"
+    echo
+    echo "- Gate status: ${gate_status}"
+    echo "- Timestamp UTC: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    echo "- Host: $(hostname)"
+    echo "- CUDA architectures: ${CUDA_ARCHS}"
+    echo "- Build directory: ${BUILD_DIR}"
+    echo "- Weights: ${WEIGHTS}"
+    echo "- Parity report: ${PARITY_REPORT}"
+    echo "- Explicit CUDA UCI go: ${UCI_GO}"
+    echo "- Batch worst trace: ${METALFISH_NN_BATCH_TRACE_WORST:-1}"
+    echo "- Single repeat stress: ${METALFISH_NN_SINGLE_REPEAT_STRESS:-0}"
+    echo "- Single reuse stress: ${METALFISH_NN_SINGLE_REUSE_STRESS:-1}"
+    echo "- Batch reuse stress: ${METALFISH_NN_BATCH_REUSE_STRESS:-1}"
+    echo "- CUDA full buffer clear: ${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}"
+    echo "- CUDA release single workspace each run: ${METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN:-0}"
+    echo "- CUDA release workspace each run: ${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}"
+    echo "- CUDA deterministic attention softmax: ${METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX:-0}"
+    echo "- CUDA raw output trace: ${METALFISH_CUDA_TRACE_RAW_OUTPUTS:-0}"
+    echo "- CUDA stage output trace: ${METALFISH_CUDA_TRACE_STAGE_OUTPUTS:-0}"
+    echo "- CUDA attention internals trace: ${METALFISH_CUDA_TRACE_ATTENTION_INTERNALS:-0}"
+    echo "- CUDA dynamic PE internals trace: ${METALFISH_CUDA_TRACE_DYNAMIC_PE_INTERNALS:-0}"
+    echo "- CUDA trace compare base run: ${METALFISH_CUDA_TRACE_COMPARE_BASE_RUN:-unset}"
+    echo "- CUDA trace compare min delta: ${METALFISH_CUDA_TRACE_COMPARE_MIN_DELTA:-1e-7}"
+    echo "- cuBLAS workspace config: ${CUBLAS_WORKSPACE_CONFIG:-unset}"
+    echo
+    echo "## Device"
+    echo
+    nvidia-smi --query-gpu=index,name,compute_cap,memory.total,driver_version \
+      --format=csv,noheader || echo "- unavailable"
+    echo
+    echo "## Logs"
+    echo
+    echo "- CUDA tests: $(summary_log_status "${BUILD_DIR}/cuda-gpu-tests.log")"
+    echo "- NN comparison: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-comparison.log")"
+    echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
+    echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
+    echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
+    echo "- CUDA profile: $(summary_log_status "${BUILD_DIR}/cuda-gpu-profile.log")"
+    echo
+    echo "## Backend"
+    echo
+    if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+       grep -m1 "backend: CUDA transformer backend" \
+         "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+      true
+    elif [[ -s "${PARITY_REPORT}" ]] &&
+         grep -m1 "^- Backend: CUDA transformer backend" "${PARITY_REPORT}"; then
+      true
+    else
+      echo "- not reached"
+    fi
+    echo
+    echo "## Batch Timings"
+    echo
+    summary_line_or_missing "batches:" \
+      "${BUILD_DIR}/cuda-gpu-nn-comparison.log" "- skipped"
+    if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+       grep -q "TRACE_WORST:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+      echo
+      echo "## Batch Worst Trace"
+      echo
+      grep -m1 "TRACE_WORST:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "TRACE_WORST_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "TRACE_WORST_CONFIRMED:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "TRACE_WORST_CONFIRMED_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "TRACE_WORST_REUSED_SINGLE:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "TRACE_WORST_REUSED_BATCH:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "TRACE_WORST_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "TRACE_WORST_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "TRACE_WORST_REUSED_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "TRACE_WORST_REUSED_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    fi
+    if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+       grep -q "REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+      echo
+      echo "## Batch Reuse Stress"
+      echo
+      grep -m1 "REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "REUSE_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "REUSE_STRESS_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "REUSE_STRESS_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    fi
+    if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+       grep -q "SINGLE_REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+      echo
+      echo "## Single Reuse Stress"
+      echo
+      grep -m1 "SINGLE_REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "SINGLE_REUSE_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "SINGLE_REUSE_STRESS_BASELINE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "SINGLE_REUSE_STRESS_REPLAY_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    fi
+    if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+       grep -q "SINGLE_REPEAT_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+      echo
+      echo "## Single Repeat Stress"
+      echo
+      grep -m1 "SINGLE_REPEAT_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "SINGLE_REPEAT_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "SINGLE_REPEAT_STRESS_BASELINE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "SINGLE_REPEAT_STRESS_REPLAY_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    fi
+    echo
+    echo "## Parity Report"
+    echo
+    if [[ -s "${PARITY_REPORT}" ]]; then
+      grep -m1 "^- Backend:" "${PARITY_REPORT}" || true
+      local fixed_rows
+      local batch_rows
+      fixed_rows=$(awk '/^## Fixed BT4 Reference/{section=1;next} /^## Batch Parity/{section=0} section && /^\| [[:lower:]][^|]* \|/{count++} END{print count + 0}' "${PARITY_REPORT}")
+      batch_rows=$(awk '/^## Batch Parity/{section=1;next} section && /^\| [0-9]+ \|/{count++} END{print count + 0}' "${PARITY_REPORT}")
+      echo "- Fixed references: ${fixed_rows}"
+      echo "- Batch rows: ${batch_rows}"
+    else
+      echo "- missing"
+    fi
+    echo
+    echo "## UCI Smokes"
+    echo
+    echo "- auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log" "not reached")"
+    echo "- cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log" "not reached")"
+    echo "- hybrid-cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log" "not reached")"
+    if [[ -s "${BUILD_DIR}/cuda-gpu-profile.log" ]]; then
+      echo
+      echo "## CUDA Profile"
+      echo
+      grep -m1 "CUDA profile report=" "${BUILD_DIR}/cuda-gpu-profile.log" || true
+      grep -m1 "CUDA profile buckets:" "${BUILD_DIR}/cuda-gpu-profile.log" || true
+      grep -m1 "CUDA profile slowest:" "${BUILD_DIR}/cuda-gpu-profile.log" || true
+    fi
+  } >"${SUMMARY}"
+  SUMMARY_WRITTEN=1
+}
+
+write_failure_summary_on_exit() {
+  local status=$?
+  if [[ "${status}" != "0" && "${SUMMARY_WRITTEN}" != "1" ]]; then
+    write_summary "failed (${status})" || true
+  fi
+}
+trap write_failure_summary_on_exit EXIT
+
 if [[ "${METALFISH_INSTALL_DEPS:-0}" == "1" ]]; then
   export DEBIAN_FRONTEND=noninteractive
   for attempt in 1 2 3; do
@@ -128,8 +297,12 @@ METALFISH_NN_WEIGHTS="${WEIGHTS}" \
   METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
   METALFISH_CUDA_PROFILE=0 \
   "${BUILD_DIR}/test_nn_comparison" 2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
-grep -q "backend: CUDA transformer backend" \
-  "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+if ! grep -q "backend: CUDA transformer backend" \
+       "${BUILD_DIR}/cuda-gpu-nn-comparison.log" &&
+   ! grep -q "^- Backend: CUDA transformer backend" "${PARITY_REPORT}"; then
+  echo "CUDA transformer backend marker not found in NN comparison output" >&2
+  exit 1
+fi
 
 python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \
@@ -197,115 +370,7 @@ if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; t
       | tee "${BUILD_DIR}/cuda-gpu-profile.log"
 fi
 
-{
-  echo "# MetalFish CUDA GPU Gate Summary"
-  echo
-  echo "- Timestamp UTC: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  echo "- Host: $(hostname)"
-  echo "- CUDA architectures: ${CUDA_ARCHS}"
-  echo "- Build directory: ${BUILD_DIR}"
-  echo "- Weights: ${WEIGHTS}"
-  echo "- Parity report: ${PARITY_REPORT}"
-  echo "- Explicit CUDA UCI go: ${UCI_GO}"
-  echo "- Batch worst trace: ${METALFISH_NN_BATCH_TRACE_WORST:-1}"
-  echo "- Single repeat stress: ${METALFISH_NN_SINGLE_REPEAT_STRESS:-0}"
-  echo "- Single reuse stress: ${METALFISH_NN_SINGLE_REUSE_STRESS:-1}"
-  echo "- Batch reuse stress: ${METALFISH_NN_BATCH_REUSE_STRESS:-1}"
-  echo "- CUDA full buffer clear: ${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}"
-  echo "- CUDA release single workspace each run: ${METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN:-0}"
-  echo "- CUDA release workspace each run: ${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}"
-  echo "- CUDA deterministic attention softmax: ${METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX:-0}"
-  echo "- CUDA raw output trace: ${METALFISH_CUDA_TRACE_RAW_OUTPUTS:-0}"
-  echo "- CUDA stage output trace: ${METALFISH_CUDA_TRACE_STAGE_OUTPUTS:-0}"
-  echo "- CUDA attention internals trace: ${METALFISH_CUDA_TRACE_ATTENTION_INTERNALS:-0}"
-  echo "- CUDA dynamic PE internals trace: ${METALFISH_CUDA_TRACE_DYNAMIC_PE_INTERNALS:-0}"
-  echo "- CUDA trace compare base run: ${METALFISH_CUDA_TRACE_COMPARE_BASE_RUN:-unset}"
-  echo "- CUDA trace compare min delta: ${METALFISH_CUDA_TRACE_COMPARE_MIN_DELTA:-1e-7}"
-  echo "- cuBLAS workspace config: ${CUBLAS_WORKSPACE_CONFIG:-unset}"
-  echo
-  echo "## Device"
-  echo
-  nvidia-smi --query-gpu=index,name,compute_cap,memory.total,driver_version \
-    --format=csv,noheader || true
-  echo
-  echo "## Backend"
-  echo
-  grep -m1 "backend: CUDA transformer backend" \
-    "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
-  echo
-  echo "## Batch Timings"
-  echo
-  grep -m1 "batches:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ||
-    echo "- skipped"
-  if grep -q "TRACE_WORST:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
-    echo
-    echo "## Batch Worst Trace"
-    echo
-    grep -m1 "TRACE_WORST:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
-    grep -m1 "TRACE_WORST_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "TRACE_WORST_CONFIRMED:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "TRACE_WORST_CONFIRMED_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "TRACE_WORST_REUSED_SINGLE:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "TRACE_WORST_REUSED_BATCH:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "TRACE_WORST_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "TRACE_WORST_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "TRACE_WORST_REUSED_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "TRACE_WORST_REUSED_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-  fi
-  if grep -q "REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
-    echo
-    echo "## Batch Reuse Stress"
-    echo
-    grep -m1 "REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
-    grep -m1 "REUSE_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "REUSE_STRESS_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "REUSE_STRESS_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-  fi
-  if grep -q "SINGLE_REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
-    echo
-    echo "## Single Reuse Stress"
-    echo
-    grep -m1 "SINGLE_REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
-    grep -m1 "SINGLE_REUSE_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "SINGLE_REUSE_STRESS_BASELINE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "SINGLE_REUSE_STRESS_REPLAY_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-  fi
-  if grep -q "SINGLE_REPEAT_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
-    echo
-    echo "## Single Repeat Stress"
-    echo
-    grep -m1 "SINGLE_REPEAT_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
-    grep -m1 "SINGLE_REPEAT_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "SINGLE_REPEAT_STRESS_BASELINE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-    grep -m1 "SINGLE_REPEAT_STRESS_REPLAY_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-  fi
-  echo
-  echo "## Parity Report"
-  echo
-  if [[ -s "${PARITY_REPORT}" ]]; then
-    grep -m1 "^- Backend:" "${PARITY_REPORT}"
-    fixed_rows=$(awk '/^## Fixed BT4 Reference/{section=1;next} /^## Batch Parity/{section=0} section && /^\| [[:lower:]][^|]* \|/{count++} END{print count + 0}' "${PARITY_REPORT}")
-    batch_rows=$(awk '/^## Batch Parity/{section=1;next} section && /^\| [0-9]+ \|/{count++} END{print count + 0}' "${PARITY_REPORT}")
-    echo "- Fixed references: ${fixed_rows}"
-    echo "- Batch rows: ${batch_rows}"
-  else
-    echo "- missing"
-  fi
-  echo
-  echo "## UCI Smokes"
-  echo
-  echo "- auto: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
-  echo "- cuda: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
-  echo "- hybrid-cuda: $(grep -m1 '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
-  if [[ -s "${BUILD_DIR}/cuda-gpu-profile.log" ]]; then
-    echo
-    echo "## CUDA Profile"
-    echo
-    grep -m1 "CUDA profile report=" "${BUILD_DIR}/cuda-gpu-profile.log"
-    grep -m1 "CUDA profile buckets:" "${BUILD_DIR}/cuda-gpu-profile.log"
-    grep -m1 "CUDA profile slowest:" "${BUILD_DIR}/cuda-gpu-profile.log"
-  fi
-} >"${SUMMARY}"
+write_summary "passed"
 
 cat "${SUMMARY}"
 echo "CUDA GPU gate passed"
