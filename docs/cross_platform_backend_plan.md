@@ -265,6 +265,16 @@ Current CUDA backend boundary:
   (`3.2810ms/eval`). The prior default fast path was retained only as an opt-out
   because its reused evaluator paths showed percent-level policy-logit drift on
   the same L4 gate profile.
+- The deterministic attention softmax has a width-64 warp-specialized path for
+  transformer attention rows, with the generic shared-memory deterministic path
+  kept for other widths. The 2026-05-21 L4 fallback gate
+  `metalfish-cuda-gate-20260521-155241-warpsoftmax-g2s4` on `g2-standard-4`
+  accepted CUDA unit tests, batch parity, reuse stress, and auto/CUDA/hybrid UCI
+  smokes with `REUSE_STRESS_MAX policy_delta=0.000007`,
+  `SINGLE_REUSE_STRESS_MAX policy_delta=0.000000`, and `b32=97.004ms`
+  (`3.0314ms/eval`). A same-sized `g2-standard-8` rerun should replace this
+  timing record when L4 capacity is available; the fallback gate is retained as
+  the correctness proof for the warp reduction.
 - A second pointer-batched attention GEMM attempt was rejected after the
   2026-05-21 L4 gate `metalfish-cuda-gate-20260521-120602` failed the fixed
   BT4 reference check on BK.07 (`a3b4` policy-logit drift `0.057445` against

@@ -428,6 +428,65 @@ __global__ void AttentionBiasSoftmaxKernel(float *scores, const float *bias,
     probability_row[col] = sum > 0.0f ? probability_row[col] / sum : 0.0f;
 }
 
+__device__ double WarpMax(double value) {
+  for (int offset = 16; offset > 0; offset >>= 1)
+    value = fmax(value, __shfl_down_sync(0xffffffffu, value, offset));
+  return __shfl_sync(0xffffffffu, value, 0);
+}
+
+__device__ double WarpSum(double value) {
+  for (int offset = 16; offset > 0; offset >>= 1)
+    value += __shfl_down_sync(0xffffffffu, value, offset);
+  return __shfl_sync(0xffffffffu, value, 0);
+}
+
+__global__ void AttentionSoftmaxDeterministic64Kernel(const float *scores,
+                                                      float *probabilities) {
+  const int row = blockIdx.x;
+  const int lane = threadIdx.x;
+  const float *score_row = scores + static_cast<std::size_t>(row) * 64;
+  float *probability_row = probabilities + static_cast<std::size_t>(row) * 64;
+
+  const float score0 = score_row[lane];
+  const float score1 = score_row[lane + 32];
+  const double max_value =
+      WarpMax(fmax(static_cast<double>(score0), static_cast<double>(score1)));
+
+  const float value0 = expf(score0 - static_cast<float>(max_value));
+  const float value1 = expf(score1 - static_cast<float>(max_value));
+  const double sum =
+      WarpSum(static_cast<double>(value0) + static_cast<double>(value1));
+  const float scale = sum > 0.0 ? static_cast<float>(1.0 / sum) : 0.0f;
+
+  probability_row[lane] = value0 * scale;
+  probability_row[lane + 32] = value1 * scale;
+}
+
+__global__ void AttentionBiasSoftmaxDeterministic64Kernel(
+    float *scores, const float *bias, float *probabilities) {
+  const int row = blockIdx.x;
+  const int lane = threadIdx.x;
+  float *score_row = scores + static_cast<std::size_t>(row) * 64;
+  const float *bias_row = bias + static_cast<std::size_t>(row) * 64;
+  float *probability_row = probabilities + static_cast<std::size_t>(row) * 64;
+
+  const float score0 = score_row[lane] + bias_row[lane];
+  const float score1 = score_row[lane + 32] + bias_row[lane + 32];
+  score_row[lane] = score0;
+  score_row[lane + 32] = score1;
+
+  const double max_value =
+      WarpMax(fmax(static_cast<double>(score0), static_cast<double>(score1)));
+  const float value0 = expf(score0 - static_cast<float>(max_value));
+  const float value1 = expf(score1 - static_cast<float>(max_value));
+  const double sum =
+      WarpSum(static_cast<double>(value0) + static_cast<double>(value1));
+  const float scale = sum > 0.0 ? static_cast<float>(1.0 / sum) : 0.0f;
+
+  probability_row[lane] = value0 * scale;
+  probability_row[lane + 32] = value1 * scale;
+}
+
 __global__ void AttentionSoftmaxDeterministicKernel(const float *scores,
                                                     float *probabilities,
                                                     int width) {
@@ -964,11 +1023,16 @@ void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
     throw std::runtime_error("CUDA attention softmax dimensions are invalid");
 
   if (deterministic) {
-    const int threads = width <= 64 ? 64 : 128;
-    const std::size_t shared_bytes = threads * sizeof(double);
-    AttentionSoftmaxDeterministicKernel<<<rows, threads, shared_bytes,
-                                          stream>>>(scores, probabilities,
-                                                    width);
+    if (width == 64) {
+      AttentionSoftmaxDeterministic64Kernel<<<rows, 32, 0, stream>>>(
+          scores, probabilities);
+    } else {
+      const int threads = width <= 64 ? 64 : 128;
+      const std::size_t shared_bytes = threads * sizeof(double);
+      AttentionSoftmaxDeterministicKernel<<<rows, threads, shared_bytes,
+                                            stream>>>(scores, probabilities,
+                                                      width);
+    }
   } else {
     constexpr int kThreads = 128;
     const std::size_t shared_bytes = kThreads * sizeof(float);
@@ -998,11 +1062,16 @@ void LaunchAttentionBiasSoftmaxKernel(float *scores, const float *bias,
         "CUDA attention bias softmax dimensions are invalid");
 
   if (deterministic) {
-    const int threads = width <= 64 ? 64 : 128;
-    const std::size_t shared_bytes = threads * sizeof(double);
-    AttentionBiasSoftmaxDeterministicKernel<<<rows, threads, shared_bytes,
-                                              stream>>>(
-        scores, bias, probabilities, width);
+    if (width == 64) {
+      AttentionBiasSoftmaxDeterministic64Kernel<<<rows, 32, 0, stream>>>(
+          scores, bias, probabilities);
+    } else {
+      const int threads = width <= 64 ? 64 : 128;
+      const std::size_t shared_bytes = threads * sizeof(double);
+      AttentionBiasSoftmaxDeterministicKernel<<<rows, threads, shared_bytes,
+                                                stream>>>(
+          scores, bias, probabilities, width);
+    }
   } else {
     constexpr int kThreads = 128;
     const std::size_t shared_bytes = kThreads * sizeof(float);
