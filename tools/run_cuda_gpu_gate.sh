@@ -73,6 +73,29 @@ summary_log_status() {
   fi
 }
 
+summary_failure_lines() {
+  local label="$1"
+  local file="$2"
+  if [[ ! -s "${file}" ]]; then
+    return
+  fi
+
+  local matches
+  matches=$(grep -E \
+    '^[[:space:]]*(FAIL|ERROR|FATAL):|CMake Error|FAILED:|ninja: build stopped' \
+    "${file}" | head -20 || true)
+  if [[ -z "${matches}" ]]; then
+    return
+  fi
+
+  echo
+  echo "### ${label}"
+  echo
+  echo '```text'
+  echo "${matches}"
+  echo '```'
+}
+
 write_summary() {
   local gate_status="${1:-passed}"
   mkdir -p "$(dirname "${SUMMARY}")"
@@ -117,6 +140,18 @@ write_summary() {
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
     echo "- CUDA profile: $(summary_log_status "${BUILD_DIR}/cuda-gpu-profile.log")"
     echo
+    echo "## Failures"
+    summary_failure_lines "CUDA tests" "${BUILD_DIR}/cuda-gpu-tests.log"
+    summary_failure_lines "NN comparison" \
+      "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+    summary_failure_lines "auto UCI smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
+    summary_failure_lines "explicit CUDA UCI smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
+    summary_failure_lines "hybrid CUDA UCI smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
+    summary_failure_lines "CUDA profile" "${BUILD_DIR}/cuda-gpu-profile.log"
+    echo
     echo "## Backend"
     echo
     if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
@@ -151,34 +186,49 @@ write_summary() {
       grep -m1 "TRACE_WORST_REUSED_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     fi
     if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
-       grep -q "REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+       grep -q "^[[:space:]]*REUSE_STRESS_MAX:" \
+         "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
       echo
       echo "## Batch Reuse Stress"
       echo
-      grep -m1 "REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-      grep -m1 "REUSE_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-      grep -m1 "REUSE_STRESS_SINGLE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-      grep -m1 "REUSE_STRESS_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*REUSE_STRESS_MAX:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*REUSE_STRESS_POLICY:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*REUSE_STRESS_SINGLE_TOP:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*REUSE_STRESS_BATCH_TOP:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     fi
     if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
-       grep -q "SINGLE_REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+       grep -q "^[[:space:]]*SINGLE_REUSE_STRESS_MAX:" \
+         "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
       echo
       echo "## Single Reuse Stress"
       echo
-      grep -m1 "SINGLE_REUSE_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-      grep -m1 "SINGLE_REUSE_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-      grep -m1 "SINGLE_REUSE_STRESS_BASELINE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-      grep -m1 "SINGLE_REUSE_STRESS_REPLAY_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*SINGLE_REUSE_STRESS_MAX:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*SINGLE_REUSE_STRESS_POLICY:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*SINGLE_REUSE_STRESS_BASELINE_TOP:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*SINGLE_REUSE_STRESS_REPLAY_TOP:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     fi
     if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
-       grep -q "SINGLE_REPEAT_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+       grep -q "^[[:space:]]*SINGLE_REPEAT_STRESS_MAX:" \
+         "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
       echo
       echo "## Single Repeat Stress"
       echo
-      grep -m1 "SINGLE_REPEAT_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-      grep -m1 "SINGLE_REPEAT_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-      grep -m1 "SINGLE_REPEAT_STRESS_BASELINE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
-      grep -m1 "SINGLE_REPEAT_STRESS_REPLAY_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*SINGLE_REPEAT_STRESS_MAX:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*SINGLE_REPEAT_STRESS_POLICY:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*SINGLE_REPEAT_STRESS_BASELINE_TOP:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+      grep -m1 "^[[:space:]]*SINGLE_REPEAT_STRESS_REPLAY_TOP:" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     fi
     echo
     echo "## Parity Report"
