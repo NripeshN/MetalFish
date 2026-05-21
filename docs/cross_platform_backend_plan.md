@@ -351,6 +351,13 @@ Current CUDA backend boundary:
   2026-05-20 L4 summary `metalfish-cuda-gate-20260520-230541` recorded timings
   of `b1=7.630ms`, `b2=9.601ms`, `b4=13.890ms`, `b8=25.593ms`,
   `b16=47.127ms`, `b32=95.801ms` (`2.9938ms/eval` at batch 32).
+- The 2026-05-21 L4 diagnostic gate
+  `metalfish-cuda-gate-20260521-135430` accepted the dynamic positional
+  encoding trace path with `METALFISH_CUDA_TRACE_STAGE_OUTPUTS=1` and
+  `METALFISH_CUDA_TRACE_DYNAMIC_PE_INTERNALS=1` on a batch-16 target. The
+  sampled expanded input, dense positional input, and dense PE output matched
+  between traced runs at the compare threshold, so current preprocessing drift
+  is not the source of the observed downstream single-vs-batch variation.
 - The CUDA attention smoke keeps strict `1e-5` checks for individual Q/K/V,
   smolgen, score, softmax, context, projection, residual, and layernorm
   tensors. The attention-only sequence-level check now uses a `5e-3`
