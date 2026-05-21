@@ -375,6 +375,12 @@ Current CUDA backend boundary:
   effectively zero. The remaining measurable drift is now isolated to reused
   evaluator/workspace paths (`REUSE_STRESS_MAX` policy delta around `0.012`),
   not fresh single-vs-batch math or the first encoder attention block.
+- The 2026-05-21 L4 gate `metalfish-cuda-gate-20260521-143113` rejected
+  `METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN=1`: batch-1 latency rose
+  from about `7.6ms` to `14.3ms`, NN comparison failed before UCI smokes, and
+  batch reuse drift worsened (`REUSE_STRESS_STEP warm32` policy delta about
+  `0.051`, value mismatch). Do not promote single-workspace release as a
+  default; it is a diagnostic knob only.
 - The CUDA attention smoke keeps strict `1e-5` checks for individual Q/K/V,
   smolgen, score, softmax, context, projection, residual, and layernorm
   tensors. The attention-only sequence-level check now uses a `5e-3`
