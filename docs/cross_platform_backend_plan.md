@@ -414,6 +414,13 @@ Current CUDA backend boundary:
   catching meaningful drift.
 - A CUDA Q/K/V bias fusion attempt was rejected on the 2026-05-20 T4 gate after
   fixed-output drift in the castling-rights reference case, and was reverted.
+- A CUDA attention score/context pointer-batched cuBLAS attempt was rejected on
+  the 2026-05-21 L4 gate
+  `metalfish-cuda-gate-20260521-204030-batched-attn-g2s8`. It compiled through
+  the remote CUDA entrypoint build, but the runtime gate failed evaluator
+  legal-move parity, deterministic bestmove reproducibility, and the BK.07
+  low-node sentinel. Keep the per-position strided-batched cuBLAS calls until a
+  replacement proves identical pointer layout and search output.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
