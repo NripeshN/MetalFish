@@ -112,6 +112,53 @@ cublasHandle_t CublasHandle() {
   return handle.Get();
 }
 
+template <typename Pointer> class DevicePointerArray {
+public:
+  DevicePointerArray() = default;
+  DevicePointerArray(const DevicePointerArray &) = delete;
+  DevicePointerArray &operator=(const DevicePointerArray &) = delete;
+
+  ~DevicePointerArray() {
+    if (device_)
+      cudaFree(device_);
+  }
+
+  Pointer *const *Upload(const std::vector<Pointer *> &host, cudaStream_t stream,
+                         const char *label) {
+    if (host.empty())
+      return nullptr;
+    Ensure(host.size(), label);
+    const cudaError_t status =
+        cudaMemcpyAsync(device_, host.data(), host.size() * sizeof(Pointer *),
+                        cudaMemcpyHostToDevice, stream);
+    if (status != cudaSuccess)
+      throw std::runtime_error(CudaErrorMessage(label, status));
+    return device_;
+  }
+
+private:
+  void Ensure(std::size_t count, const char *label) {
+    if (count <= capacity_)
+      return;
+    if (device_) {
+      const cudaError_t free_status = cudaFree(device_);
+      if (free_status != cudaSuccess)
+        throw std::runtime_error(CudaErrorMessage(label, free_status));
+      device_ = nullptr;
+      capacity_ = 0;
+    }
+    const cudaError_t status =
+        cudaMalloc(reinterpret_cast<void **>(&device_),
+                   count * sizeof(Pointer *));
+    if (status != cudaSuccess)
+      throw std::runtime_error(CudaErrorMessage(label, status));
+    capacity_ = count;
+  }
+
+  Pointer **device_ = nullptr;
+  std::size_t capacity_ = 0;
+};
+
 const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
   static const auto gather = [] {
     std::array<int, kNetworkPolicyOutputs> indices{};
@@ -967,6 +1014,55 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
       static_cast<std::size_t>(squares) * qkv_width;
   const std::size_t score_batch_stride =
       static_cast<std::size_t>(heads) * squares * squares;
+  if (batch_size > 1) {
+    const int gemm_batches = batch_size * heads;
+    thread_local std::vector<const float *> key_matrices;
+    thread_local std::vector<const float *> query_matrices;
+    thread_local std::vector<float *> score_matrices;
+    thread_local DevicePointerArray<const float> device_key_matrices;
+    thread_local DevicePointerArray<const float> device_query_matrices;
+    thread_local DevicePointerArray<float> device_score_matrices;
+    key_matrices.resize(gemm_batches);
+    query_matrices.resize(gemm_batches);
+    score_matrices.resize(gemm_batches);
+
+    int matrix = 0;
+    for (int batch = 0; batch < batch_size; ++batch) {
+      const float *query_base = query + batch * qkv_batch_stride;
+      const float *key_base = key + batch * qkv_batch_stride;
+      float *score_base = scores + batch * score_batch_stride;
+      for (int head = 0; head < heads; ++head) {
+        key_matrices[matrix] = key_base + head * head_stride;
+        query_matrices[matrix] = query_base + head * head_stride;
+        score_matrices[matrix] = score_base + head * score_stride;
+        ++matrix;
+      }
+    }
+
+    cublas_status = cublasSgemmBatched(
+        handle, CUBLAS_OP_T, CUBLAS_OP_N, squares, squares, head_depth, &scale,
+        device_key_matrices.Upload(key_matrices, stream,
+                                   "cudaMemcpy(attention_score_key_ptrs)"),
+        qkv_width,
+        device_query_matrices.Upload(query_matrices, stream,
+                                     "cudaMemcpy(attention_score_query_ptrs)"),
+        qkv_width, &beta,
+        device_score_matrices.Upload(score_matrices, stream,
+                                     "cudaMemcpy(attention_score_score_ptrs)"),
+        squares, gemm_batches);
+    if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+      throw std::runtime_error(CublasErrorMessage(
+          "cublasSgemmBatched(attention_score)", cublas_status));
+    }
+    if (stream)
+      return;
+    cudaError_t status = cudaDeviceSynchronize();
+    if (status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("AttentionScoreKernel synchronize", status));
+    return;
+  }
+
   for (int batch = 0; batch < batch_size; ++batch) {
     const float *query_base = query + batch * qkv_batch_stride;
     const float *key_base = key + batch * qkv_batch_stride;
@@ -1119,6 +1215,59 @@ void LaunchAttentionContextKernel(const float *probabilities,
       static_cast<std::size_t>(squares) * qkv_width;
   const std::size_t probability_batch_stride =
       static_cast<std::size_t>(heads) * squares * squares;
+  if (batch_size > 1) {
+    const int gemm_batches = batch_size * heads;
+    thread_local std::vector<const float *> value_matrices;
+    thread_local std::vector<const float *> probability_matrices;
+    thread_local std::vector<float *> context_matrices;
+    thread_local DevicePointerArray<const float> device_value_matrices;
+    thread_local DevicePointerArray<const float> device_probability_matrices;
+    thread_local DevicePointerArray<float> device_context_matrices;
+    value_matrices.resize(gemm_batches);
+    probability_matrices.resize(gemm_batches);
+    context_matrices.resize(gemm_batches);
+
+    int matrix = 0;
+    for (int batch = 0; batch < batch_size; ++batch) {
+      const float *value_base = value + batch * qkv_batch_stride;
+      const float *probability_base =
+          probabilities + batch * probability_batch_stride;
+      float *context_base = context + batch * qkv_batch_stride;
+      for (int head = 0; head < heads; ++head) {
+        value_matrices[matrix] = value_base + head * head_stride;
+        probability_matrices[matrix] =
+            probability_base + head * probability_stride;
+        context_matrices[matrix] = context_base + head * head_stride;
+        ++matrix;
+      }
+    }
+
+    cublas_status = cublasSgemmBatched(
+        handle, CUBLAS_OP_N, CUBLAS_OP_N, head_depth, squares, squares, &alpha,
+        device_value_matrices.Upload(value_matrices, stream,
+                                     "cudaMemcpy(attention_context_value_ptrs)"),
+        qkv_width,
+        device_probability_matrices.Upload(
+            probability_matrices, stream,
+            "cudaMemcpy(attention_context_probability_ptrs)"),
+        squares, &beta,
+        device_context_matrices.Upload(
+            context_matrices, stream,
+            "cudaMemcpy(attention_context_context_ptrs)"),
+        qkv_width, gemm_batches);
+    if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+      throw std::runtime_error(CublasErrorMessage(
+          "cublasSgemmBatched(attention_context)", cublas_status));
+    }
+    if (stream)
+      return;
+    cudaError_t status = cudaDeviceSynchronize();
+    if (status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("AttentionContextKernel synchronize", status));
+    return;
+  }
+
   for (int batch = 0; batch < batch_size; ++batch) {
     const float *value_base = value + batch * qkv_batch_stride;
     const float *probability_base =
