@@ -990,12 +990,9 @@ CudaDenseStageOutput ExecuteDynamicPositionEncodingStage(
   output.rows = square_rows;
 
   cudaStream_t stream = workspace.Stream();
-  LaunchExpandPackedInputPlanesKernel(input_masks, input_values,
-                                      output.expanded_input, batch_size,
-                                      input_planes, squares, stream);
-  LaunchDynamicPositionEncodingInputKernel(
-      output.expanded_input, output.position_input, batch_size, input_planes,
-      kPositionPlanes, squares, stream);
+  LaunchExpandPackedInputPlanesWithPositionInputKernel(
+      input_masks, input_values, output.expanded_input, output.position_input,
+      batch_size, input_planes, kPositionPlanes, squares, stream);
   LaunchDenseAffineKernel(output.position_input, dense_weight.data,
                           dense_bias.data, output.dense, batch_size,
                           input_width, output_width, stream);

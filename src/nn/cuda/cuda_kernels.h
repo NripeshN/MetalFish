@@ -108,6 +108,11 @@ void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
                                          int squares,
                                          cudaStream_t stream = nullptr);
 
+void LaunchExpandPackedInputPlanesWithPositionInputKernel(
+    const std::uint64_t *masks, const float *values, float *expanded,
+    float *position_input, int batch_size, int planes, int position_planes,
+    int squares, cudaStream_t stream = nullptr);
+
 void LaunchDynamicPositionEncodingInputKernel(const float *expanded,
                                               float *position_input,
                                               int batch_size, int input_planes,
