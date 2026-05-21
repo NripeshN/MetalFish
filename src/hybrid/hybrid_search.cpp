@@ -240,6 +240,7 @@ void ParallelHybridSearch::start_search(
   {
     std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
     ane_root_hints_.clear();
+    ane_root_hint_infos_.clear();
   }
 
   root_fen_ = pos.fen();
@@ -424,6 +425,7 @@ void ParallelHybridSearch::new_game() {
   {
     std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
     ane_root_hints_.clear();
+    ane_root_hint_infos_.clear();
   }
 
   if (mcts_search_) {
@@ -660,11 +662,12 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
                                     uint64_t mcts_root_visits,
                                     uint32_t mcts_best_visits,
                                     float visit_share, float root_q_gap,
-                                    int mcts_cp, int eval_delta) {
+                                    int mcts_cp, int eval_delta,
+                                    float ane_score_margin) {
   return enabled && ane_agrees_mcts && fixed_budget && visit_evidence_sane &&
          mcts_root_visits >= 80 && mcts_best_visits >= 64 &&
          visit_share >= 0.70f && root_q_gap >= 0.20f && mcts_cp >= 120 &&
-         eval_delta >= 60;
+         eval_delta >= 60 && ane_score_margin >= 0.02f;
 }
 
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
