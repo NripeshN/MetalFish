@@ -118,6 +118,7 @@ jobs:
           python3 tests/test_ponder_stress.py --smoke --engine build/metalfish
 
       - name: Repeated hybrid regression benchmark
+        timeout-minutes: 40
         working-directory: candidate
         env:
           BENCH_REPEAT: ${{ github.event.inputs.repeat }}
