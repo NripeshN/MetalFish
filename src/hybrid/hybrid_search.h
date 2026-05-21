@@ -215,6 +215,7 @@ struct ParallelHybridConfig {
   int ab_candidate_verify_count = 4;
   bool root_pawn_lever_tiebreak = true;
   bool ane_root_probe = false;
+  bool ane_confirm_mcts_override = true;
   std::string ane_weights_path;
   std::string ane_model_path;
   std::string ane_compute_units = "cpu-ne";
@@ -276,6 +277,11 @@ private:
     uint64_t effort = 0;
   };
 
+  struct ANERootHintInfo {
+    Move move = Move::none();
+    float score = 0.0f;
+  };
+
   bool initialized_ = false;
   ParallelHybridConfig config_;
   ParallelSearchStats stats_;
@@ -321,6 +327,9 @@ private:
   std::atomic<bool> mcts_search_started_{false};
   std::atomic<bool> ab_search_started_{false};
   std::future<std::vector<Move>> ane_root_hints_future_;
+  std::mutex ane_root_hints_mutex_;
+  std::vector<Move> ane_root_hints_;
+  std::vector<ANERootHintInfo> ane_root_hint_infos_;
 
   std::string root_fen_;
   ::MetalFish::Search::LimitsType limits_;
@@ -429,6 +438,15 @@ bool HybridMCTSCrossRootConfidenceOverride(
 
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits);
+
+bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
+                                    bool fixed_budget,
+                                    bool visit_evidence_sane,
+                                    uint64_t mcts_root_visits,
+                                    uint32_t mcts_best_visits,
+                                    float visit_share, float root_q_gap,
+                                    int mcts_cp, int eval_delta,
+                                    float ane_score_margin);
 
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
                              int ab_average_score, int mcts_average_score,

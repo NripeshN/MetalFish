@@ -1100,6 +1100,8 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.root_pawn_lever_tiebreak =
       engine.get_options()["HybridRootPawnLeverTieBreak"];
   config.ane_root_probe = engine.get_options()["HybridANERootProbe"];
+  config.ane_confirm_mcts_override =
+      engine.get_options()["HybridANEConfirmMCTSOverride"];
   config.ane_weights_path =
       std::string(engine.get_options()["HybridANEWeights"]);
   config.ane_model_path =
@@ -1140,6 +1142,7 @@ make_hybrid_cache_key(const std::string &nn_weights,
       << config.ab_candidate_verify_ms << "|"
       << config.ab_candidate_verify_count << "|"
       << config.root_pawn_lever_tiebreak << "|" << config.ane_root_probe << "|"
+      << config.ane_confirm_mcts_override << "|"
       << config.ane_weights_path << "|" << config.ane_model_path << "|"
       << config.ane_compute_units << "|" << config.ane_root_hint_count << "|"
       << config.ane_root_hint_wait_ms

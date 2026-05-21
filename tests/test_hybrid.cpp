@@ -513,6 +513,34 @@ void test_hybrid_config() {
                                         0.137f, 0.007f, 0.808f, 24));
   }
   {
+    TestCase tc("ANE-confirmed MCTS override predicate");
+
+    EXPECT(tc, HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                             0.912f, 0.817f, 242, 242));
+    EXPECT(tc, HybridANEConfirmedMCTSOverride(true, true, true, true, 106, 100,
+                                             0.943f, 1.058f, 336, 306));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(false, true, true, true, 102, 93,
+                                              0.912f, 0.817f, 242, 242));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, false, true, true, 102, 93,
+                                              0.912f, 0.817f, 242, 242));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, false, true, 102, 93,
+                                              0.912f, 0.817f, 242, 242));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, false, 102, 93,
+                                              0.912f, 0.817f, 242, 242));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 79, 93,
+                                              0.912f, 0.817f, 242, 242));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 63,
+                                              0.912f, 0.817f, 242, 242));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                              0.699f, 0.817f, 242, 242));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                              0.912f, 0.199f, 242, 242));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                              0.912f, 0.817f, 119, 242));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                              0.912f, 0.817f, 242, 59));
+  }
+  {
     TestCase tc("Pawn lever root tie-break classifier");
 
     EXPECT(tc,
