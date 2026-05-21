@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdlib>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -65,19 +64,6 @@ std::string CublasErrorMessage(const char *op, cublasStatus_t status) {
   std::ostringstream out;
   out << op << " failed: " << CublasStatusName(status);
   return out.str();
-}
-
-bool EnvFlagEnabled(const char *name) {
-  const char *value = std::getenv(name);
-  if (!value || value[0] == '\0')
-    return false;
-  return !(value[0] == '0' && value[1] == '\0');
-}
-
-bool UseGemvForSingleBatch() {
-  static const bool enabled =
-      EnvFlagEnabled("METALFISH_CUDA_USE_GEMV_SINGLE");
-  return enabled;
 }
 
 class ThreadLocalCublasHandle {
@@ -607,23 +593,13 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
 
   const float alpha = 1.0f;
   const float beta = 0.0f;
-  if (batch_size == 1 && UseGemvForSingleBatch()) {
-    cublas_status =
-        cublasSgemv(handle, CUBLAS_OP_T, input_width, output_width, &alpha,
-                    weights, input_width, input, 1, &beta, output, 1);
-    if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-      throw std::runtime_error(
-          CublasErrorMessage("cublasSgemv(dense_affine)", cublas_status));
-    }
-  } else {
-    cublas_status =
-        cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, output_width, batch_size,
-                    input_width, &alpha, weights, input_width, input,
-                    input_width, &beta, output, output_width);
-    if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-      throw std::runtime_error(
-          CublasErrorMessage("cublasSgemm(dense_affine)", cublas_status));
-    }
+  cublas_status =
+      cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, output_width, batch_size,
+                  input_width, &alpha, weights, input_width, input, input_width,
+                  &beta, output, output_width);
+  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+    throw std::runtime_error(
+        CublasErrorMessage("cublasSgemm(dense_affine)", cublas_status));
   }
 
   constexpr int kThreads = 256;
