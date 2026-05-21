@@ -305,11 +305,6 @@ void CudaNetwork::WarmupExecution() {
       tensor_plan_.InputMaskEntries(kWarmupBatchSize), 0);
   std::vector<float> input_values(
       tensor_plan_.InputValueEntries(kWarmupBatchSize), 0.0f);
-  for (std::size_t i = 0; i < input_masks.size(); ++i) {
-    input_masks[i] = (i % 2 == 0) ? 0xaaaaaaaaaaaaaaaaULL
-                                  : 0x5555555555555555ULL;
-    input_values[i] = 1.0f;
-  }
   buffers_.UploadPackedInputs(input_masks, input_values, kWarmupBatchSize,
                               stream);
   buffers_.ClearOutputs(kWarmupBatchSize, stream);
