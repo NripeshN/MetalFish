@@ -217,16 +217,14 @@ Current CUDA backend boundary:
   The first 2026-05-20 T4 baseline after workspace reuse was:
   `b1=16.922ms`, `b2=20.613ms`, `b4=27.251ms`, `b8=42.228ms`,
   `b16=80.917ms`, `b32=157.184ms` (`4.912ms/eval` at batch 32).
-- CUDA attention score/context execution keeps the original strided cuBLAS path
-  for batch 1 and uses device-resident pointer arrays for larger batches. The
-  accepted 2026-05-21 T4 gate
-  `metalfish-cuda-gate-20260521-234025-device-ptrs-t4` kept CUDA unit tests,
-  fixed BT4 references, batch parity, reuse stresses, auto/CUDA/hybrid UCI
-  smokes, and profiling green. T4 timings were `b1=17.468ms`,
-  `b2=25.294ms`, `b4=29.811ms`, `b8=57.854ms`, `b16=103.487ms`, and
-  `b32=206.611ms`; this is a correctness acceptance, not a speed win. L4
-  profiling remains pending because the 2026-05-21 L4 allocation attempts were
-  stocked out across the tested zones.
+- CUDA attention score/context execution uses the strided cuBLAS attention
+  path for all batch sizes. The pointer-array multi-batch path was removed
+  after a clean T4 rerun exposed batch-33 policy drift; the regression gate now
+  checks both batch 32 and batch 33 against single-position evaluation. The
+  accepted 2026-05-20 T4 gate kept CUDA smoke, fixed BT4 outputs, expanded
+  batch parity, and UCI smoke green with `b1=16.844ms`, `b2=25.530ms`,
+  `b4=26.723ms`, `b8=45.868ms`, `b16=88.098ms`, `b32=169.630ms`
+  (`5.301ms/eval` at batch 32).
 - `CudaNetwork::Evaluate()` now follows the Metal backend shape by passing a
   one-position span into the shared CUDA batch runner instead of copying the
   full `InputPlanes` object into a temporary vector. The 2026-05-20 T4 gate
@@ -416,13 +414,13 @@ Current CUDA backend boundary:
   catching meaningful drift.
 - A CUDA Q/K/V bias fusion attempt was rejected on the 2026-05-20 T4 gate after
   fixed-output drift in the castling-rights reference case, and was reverted.
-- A CUDA attention score/context host-pointer-batched cuBLAS attempt was
-  rejected on the 2026-05-21 L4 gate
+- A CUDA attention score/context pointer-batched cuBLAS attempt was rejected on
+  the 2026-05-21 L4 gate
   `metalfish-cuda-gate-20260521-204030-batched-attn-g2s8`. It compiled through
   the remote CUDA entrypoint build, but the runtime gate failed evaluator
   legal-move parity, deterministic bestmove reproducibility, and the BK.07
-  low-node sentinel. Host pointer arrays must not be used with cuBLAS batched
-  attention calls.
+  low-node sentinel. Keep the per-position strided-batched cuBLAS calls until a
+  replacement proves identical pointer layout and search output.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
