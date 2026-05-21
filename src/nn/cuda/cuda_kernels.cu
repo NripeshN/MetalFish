@@ -634,29 +634,6 @@ __global__ void ExpandPackedInputPlanesKernel(const std::uint64_t *masks,
   expanded[index] = (masks[packed_index] & bit) ? values[packed_index] : 0.0f;
 }
 
-__global__ void ExpandPackedInputPlanesWithPositionInputKernel(
-    const std::uint64_t *masks, const float *values, float *expanded,
-    float *position_input, int planes, int position_planes, int squares,
-    int total) {
-  const int index = blockIdx.x * blockDim.x + threadIdx.x;
-  if (index >= total)
-    return;
-
-  const int plane = index % planes;
-  const int square = (index / planes) % squares;
-  const int batch = index / (planes * squares);
-  const int packed_index = batch * planes + plane;
-  const std::uint64_t bit = 1ULL << square;
-  const float value = (masks[packed_index] & bit) ? values[packed_index] : 0.0f;
-  expanded[index] = value;
-
-  if (plane < position_planes) {
-    position_input[(static_cast<std::size_t>(batch) * squares + square) *
-                       position_planes +
-                   plane] = value;
-  }
-}
-
 __global__ void DynamicPositionEncodingInputKernel(const float *expanded,
                                                    float *position_input,
                                                    int input_planes,
@@ -1189,40 +1166,6 @@ void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("ExpandPackedInputPlanesKernel synchronize", status));
-  }
-}
-
-void LaunchExpandPackedInputPlanesWithPositionInputKernel(
-    const std::uint64_t *masks, const float *values, float *expanded,
-    float *position_input, int batch_size, int planes, int position_planes,
-    int squares, cudaStream_t stream) {
-  if (!masks || !values || !expanded || !position_input)
-    throw std::runtime_error(
-        "CUDA fused input expansion kernel received null buffer");
-  if (batch_size <= 0 || planes <= 0 || position_planes <= 0 ||
-      position_planes > planes || squares <= 0 || squares > 64) {
-    throw std::runtime_error(
-        "CUDA fused input expansion dimensions are invalid");
-  }
-
-  const int total = batch_size * squares * planes;
-  constexpr int kThreads = 256;
-  const int blocks = (total + kThreads - 1) / kThreads;
-  ExpandPackedInputPlanesWithPositionInputKernel<<<blocks, kThreads, 0,
-                                                   stream>>>(
-      masks, values, expanded, position_input, planes, position_planes, squares,
-      total);
-  cudaError_t status = cudaGetLastError();
-  if (status != cudaSuccess) {
-    throw std::runtime_error(CudaErrorMessage(
-        "ExpandPackedInputPlanesWithPositionInputKernel launch", status));
-  }
-  if (stream)
-    return;
-  status = cudaDeviceSynchronize();
-  if (status != cudaSuccess) {
-    throw std::runtime_error(CudaErrorMessage(
-        "ExpandPackedInputPlanesWithPositionInputKernel synchronize", status));
   }
 }
 
@@ -1996,9 +1939,12 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
     UploadFloats(device_position_encoding, position_encoding,
                  "cudaMemcpy(dynamic_position_encoding)");
 
-    LaunchExpandPackedInputPlanesWithPositionInputKernel(
-        device_masks, device_values, device_expanded, device_position_input,
-        kBatch, kPlanes, kPositionPlanes, kSquares);
+    LaunchExpandPackedInputPlanesKernel(device_masks, device_values,
+                                        device_expanded, kBatch, kPlanes,
+                                        kSquares);
+    LaunchDynamicPositionEncodingInputKernel(
+        device_expanded, device_position_input, kBatch, kPlanes,
+        kPositionPlanes, kSquares);
     LaunchDynamicPositionEncodingConcatKernel(
         device_expanded, device_position_encoding, device_output, kBatch,
         kPlanes, kPositionWidth, kSquares);
