@@ -1380,11 +1380,15 @@ std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
 
   for (Move move : collect_mcts_root_order_hints())
     add_hint(move);
-  for (Move move : collect_ane_root_order_hints())
-    add_hint(move);
+  if (config_.ane_root_hints) {
+    for (Move move : collect_ane_root_order_hints())
+      add_hint(move);
+  }
 
-  const int max_hints = std::clamp(config_.mcts_ab_root_hint_count, 1, 16) +
-                        std::clamp(config_.ane_root_hint_count, 1, 32);
+  const int max_hints =
+      std::clamp(config_.mcts_ab_root_hint_count, 1, 16) +
+      (config_.ane_root_hints ? std::clamp(config_.ane_root_hint_count, 1, 32)
+                              : 0);
   if (static_cast<int>(hints.size()) > max_hints)
     hints.resize(max_hints);
   return hints;

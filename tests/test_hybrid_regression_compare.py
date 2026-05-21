@@ -60,7 +60,9 @@ def test_regression_thresholds_catch_accuracy_drop() -> None:
         args,
     )
     expect("accuracy drop detected", any("BK mean" in item for item in failures))
-    expect("absolute floor detected", any("absolute floor" in item for item in failures))
+    expect(
+        "absolute floor detected", any("absolute floor" in item for item in failures)
+    )
 
 
 def test_regression_thresholds_catch_perf_drop() -> None:

@@ -82,9 +82,7 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     expect(
         "ANE model passed", with_ane["HybridANEModelPath"] == "build/coreml/t1.mlmodelc"
     )
-    expect(
-        "ANE wait uses retained profile", with_ane["HybridANERootHintWaitMs"] == "0"
-    )
+    expect("ANE wait uses retained profile", with_ane["HybridANERootHintWaitMs"] == "0")
     expect(
         "ANE min budget uses retained profile",
         with_ane["HybridANEMinBudgetMs"] == "1000",

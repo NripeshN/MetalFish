@@ -144,6 +144,7 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
             "--mode",
             "hybrid",
             "--hybrid-ane-root-probe",
+            "--hybrid-ane-root-hints",
             "--hybrid-ane-weights",
             "networks/t1.pb.gz",
             "--hybrid-ane-model-path",
@@ -162,6 +163,7 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
     options = puzzle_runner.engine_options(args)
 
     expect("ANE probe enabled", options["HybridANERootProbe"] == "true")
+    expect("ANE root hints enabled", options["HybridANERootHints"] == "true")
     expect("ANE weights option", options["HybridANEWeights"] == "networks/t1.pb.gz")
     expect(
         "ANE model option", options["HybridANEModelPath"] == "build/coreml/t1.mlmodelc"
@@ -181,6 +183,7 @@ def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
     options = puzzle_runner.engine_options(args)
 
     expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "0")
+    expect("ANE root hints default off", options["HybridANERootHints"] == "false")
     expect(
         "ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "1000"
     )

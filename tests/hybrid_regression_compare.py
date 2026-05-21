@@ -363,7 +363,9 @@ def summarize_engine(runs: Sequence[EngineRun]) -> EngineSummary:
         score_max=max(scores) if scores else 0,
         nps_median=int(statistics.median(nps_values)) if nps_values else 0,
         nodes_median=int(statistics.median(node_values)) if node_values else 0,
-        elapsed_median_ms=int(statistics.median(elapsed_values)) if elapsed_values else 0,
+        elapsed_median_ms=(
+            int(statistics.median(elapsed_values)) if elapsed_values else 0
+        ),
         errors=errors,
     )
 
@@ -394,7 +396,10 @@ def compare_summaries(
             f"candidate BK worst run {candidate.score_min} below baseline worst "
             f"{baseline.score_min} by more than {args.max_bk_min_drop}"
         )
-    if args.min_candidate_bk_score > 0 and candidate.score_min < args.min_candidate_bk_score:
+    if (
+        args.min_candidate_bk_score > 0
+        and candidate.score_min < args.min_candidate_bk_score
+    ):
         failures.append(
             f"candidate BK worst run {candidate.score_min}/{total_positions} below "
             f"absolute floor {args.min_candidate_bk_score}/{total_positions}"

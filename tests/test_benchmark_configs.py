@@ -633,7 +633,7 @@ def main() -> int:
             "--candidate-setoption",
             "puzzle_count",
             "puzzle_movetime",
-            "--repeat \"$BENCH_REPEAT\"",
+            '--repeat "$BENCH_REPEAT"',
             "--min-candidate-bk-score 20",
             "--max-bk-mean-drop 0.67",
             "--max-perf-regression 0.25",

@@ -138,9 +138,10 @@ def ane_trace_summary(results: list[dict] | dict[str, dict]) -> dict[str, object
             score_margins.append(margin)
         if reason:
             reason_counts[reason] = reason_counts.get(reason, 0) + 1
-        if reason == "ane_confirmed_mcts" or str(
-            search.get("hybrid_ane_confirmed_mcts") or ""
-        ) == "1":
+        if (
+            reason == "ane_confirmed_mcts"
+            or str(search.get("hybrid_ane_confirmed_mcts") or "") == "1"
+        ):
             ane_confirmed_mcts += 1
         if not ane_top:
             continue
@@ -175,9 +176,9 @@ def ane_trace_summary(results: list[dict] | dict[str, dict]) -> dict[str, object
         "reason_counts": reason_counts,
         "blocked_examples": blocked_examples,
         "ane_score_margin_min": sorted_margins[0] if sorted_margins else None,
-        "ane_score_margin_median": sorted_margins[len(sorted_margins) // 2]
-        if sorted_margins
-        else None,
+        "ane_score_margin_median": (
+            sorted_margins[len(sorted_margins) // 2] if sorted_margins else None
+        ),
         "ane_score_margin_max": sorted_margins[-1] if sorted_margins else None,
     }
 

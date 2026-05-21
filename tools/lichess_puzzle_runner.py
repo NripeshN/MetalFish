@@ -399,6 +399,9 @@ def engine_options(args) -> dict[str, str]:
             options.update(
                 {
                     "HybridANERootProbe": "true",
+                    "HybridANERootHints": (
+                        "true" if args.hybrid_ane_root_hints else "false"
+                    ),
                     "HybridANEWeights": str(args.hybrid_ane_weights),
                     "HybridANEModelPath": str(args.hybrid_ane_model_path),
                     "HybridANEComputeUnits": args.hybrid_ane_compute_units,
@@ -1098,6 +1101,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Enable the Hybrid ANE/Core ML root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-root-hints",
+        action="store_true",
+        default=False,
+        help="Use ANE root ordering as AB search hints; final ANE evidence remains available without this.",
     )
     parser.add_argument(
         "--hybrid-ane-weights",
