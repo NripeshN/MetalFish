@@ -39,7 +39,7 @@ namespace Cuda {
 namespace {
 
 constexpr int kDefaultMaxBatchSize = 256;
-constexpr int kMaxStableExecutionBatchSize = 16;
+constexpr int kDefaultStableExecutionBatchSize = 16;
 
 bool EnvFlagEnabled(const char *name) {
   const char *value = std::getenv(name);
@@ -65,6 +65,12 @@ int EnvIntOrDefault(const char *name, int fallback, int min_value,
   if (!end || *end != '\0')
     return fallback;
   return std::clamp(static_cast<int>(parsed), min_value, max_value);
+}
+
+int StableExecutionBatchSize() {
+  return EnvIntOrDefault("METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE",
+                         kDefaultStableExecutionBatchSize, 1,
+                         kDefaultMaxBatchSize);
 }
 
 struct TensorTopEntry {
@@ -322,12 +328,14 @@ NetworkOutput CudaNetwork::Evaluate(const InputPlanes &input) {
 
 std::vector<NetworkOutput>
 CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
-  if (inputs.size() > static_cast<size_t>(kMaxStableExecutionBatchSize)) {
+  const auto max_stable_batch =
+      static_cast<size_t>(StableExecutionBatchSize());
+  if (inputs.size() > max_stable_batch) {
     std::vector<NetworkOutput> outputs;
     outputs.reserve(inputs.size());
     for (size_t offset = 0; offset < inputs.size();) {
-      const size_t chunk_size = std::min<size_t>(kMaxStableExecutionBatchSize,
-                                                 inputs.size() - offset);
+      const size_t chunk_size =
+          std::min<size_t>(max_stable_batch, inputs.size() - offset);
       auto chunk = RunBatch(
           std::span<const InputPlanes>(inputs.data() + offset, chunk_size));
       outputs.insert(outputs.end(), std::make_move_iterator(chunk.begin()),

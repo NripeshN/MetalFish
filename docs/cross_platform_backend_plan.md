@@ -324,7 +324,13 @@ Current CUDA backend boundary:
   scratch buffers, and preserves allocated device buffers. The 2026-05-20 L4
   gate `metalfish-cuda-gate-20260520-230541` accepted CUDA unit tests, fixed
   BT4 references, expanded batch parity, reuse stress, auto/CUDA UCI smokes, and
-  hybrid-CUDA smoke.
+  hybrid-CUDA smoke. `METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE` can raise the
+  chunk size for experiments, but the production default remains 16: the
+  2026-05-21 L4 fallback gate
+  `metalfish-cuda-gate-20260521-164547-stable32-g2s4` accepted a batch-32
+  experiment with `REUSE_STRESS_MAX policy_delta=0.000007`, but batch-32 timing
+  stayed flat at `97.446ms` (`3.0452ms/eval`), so the larger default was
+  rejected.
 - CUDA output/intermediate buffers are cleared on every inference by default.
   This keeps mixed singleton/batch reuse inside the fixed-reference tolerances
   without releasing device allocations or slowing the hot path. Two 2026-05-21
