@@ -339,54 +339,6 @@ __global__ void AttentionBiasAddKernel(float *scores, const float *bias,
   scores[index] += bias[index];
 }
 
-__global__ void FillAttentionScorePointerBatchesKernel(
-    const float *query, const float *key, float *scores, const float **key_ptrs,
-    const float **query_ptrs, float **score_ptrs, int batch_size, int heads,
-    int squares, int head_depth, int qkv_width) {
-  const int index = blockIdx.x * blockDim.x + threadIdx.x;
-  const int total = batch_size * heads;
-  if (index >= total)
-    return;
-
-  const int batch = index / heads;
-  const int head = index - batch * heads;
-  const std::size_t qkv_batch_stride =
-      static_cast<std::size_t>(squares) * qkv_width;
-  const std::size_t score_batch_stride =
-      static_cast<std::size_t>(heads) * squares * squares;
-  const std::size_t head_offset = static_cast<std::size_t>(head) * head_depth;
-
-  key_ptrs[index] = key + batch * qkv_batch_stride + head_offset;
-  query_ptrs[index] = query + batch * qkv_batch_stride + head_offset;
-  score_ptrs[index] = scores + batch * score_batch_stride +
-                      static_cast<std::size_t>(head) * squares * squares;
-}
-
-__global__ void FillAttentionContextPointerBatchesKernel(
-    const float *probabilities, const float *value, float *context,
-    const float **value_ptrs, const float **probability_ptrs,
-    float **context_ptrs, int batch_size, int heads, int squares,
-    int head_depth, int qkv_width) {
-  const int index = blockIdx.x * blockDim.x + threadIdx.x;
-  const int total = batch_size * heads;
-  if (index >= total)
-    return;
-
-  const int batch = index / heads;
-  const int head = index - batch * heads;
-  const std::size_t qkv_batch_stride =
-      static_cast<std::size_t>(squares) * qkv_width;
-  const std::size_t probability_batch_stride =
-      static_cast<std::size_t>(heads) * squares * squares;
-  const std::size_t head_offset = static_cast<std::size_t>(head) * head_depth;
-
-  value_ptrs[index] = value + batch * qkv_batch_stride + head_offset;
-  probability_ptrs[index] =
-      probabilities + batch * probability_batch_stride +
-      static_cast<std::size_t>(head) * squares * squares;
-  context_ptrs[index] = context + batch * qkv_batch_stride + head_offset;
-}
-
 __global__ void AttentionSoftmaxKernel(const float *scores,
                                        float *probabilities, int width) {
   extern __shared__ float reductions[];
@@ -977,77 +929,6 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
         CudaErrorMessage("AttentionScoreKernel synchronize", status));
 }
 
-std::size_t AttentionGemmPointerWorkspaceBytes(int batch_size, int heads) {
-  if (batch_size <= 0 || heads <= 0)
-    throw std::runtime_error("CUDA attention pointer batch dimensions invalid");
-  return static_cast<std::size_t>(batch_size) * heads * 3 * sizeof(void *);
-}
-
-void LaunchAttentionScorePointerBatchedKernel(
-    const float *query, const float *key, float *scores, int batch_size,
-    int heads, int squares, int head_depth, int qkv_width, float scale,
-    void *pointer_workspace, std::size_t pointer_workspace_bytes,
-    cudaStream_t stream) {
-  if (!query || !key || !scores || !pointer_workspace)
-    throw std::runtime_error(
-        "CUDA attention score pointer batch received null buffer");
-  if (batch_size <= 0 || heads <= 0 || squares <= 0 || head_depth <= 0 ||
-      qkv_width <= 0 || qkv_width != heads * head_depth || scale <= 0.0f) {
-    throw std::runtime_error(
-        "CUDA attention score pointer batch dimensions are invalid");
-  }
-  const std::size_t required_bytes =
-      AttentionGemmPointerWorkspaceBytes(batch_size, heads);
-  if (pointer_workspace_bytes < required_bytes) {
-    throw std::runtime_error(
-        "CUDA attention score pointer workspace is too small");
-  }
-
-  const int total_batches = batch_size * heads;
-  char *pointer_bytes = static_cast<char *>(pointer_workspace);
-  const float **key_ptrs =
-      reinterpret_cast<const float **>(pointer_bytes);
-  const float **query_ptrs = reinterpret_cast<const float **>(
-      pointer_bytes + total_batches * sizeof(void *));
-  float **score_ptrs =
-      reinterpret_cast<float **>(pointer_bytes +
-                                 total_batches * 2 * sizeof(void *));
-  constexpr int kThreads = 256;
-  const int blocks = (total_batches + kThreads - 1) / kThreads;
-  FillAttentionScorePointerBatchesKernel<<<blocks, kThreads, 0, stream>>>(
-      query, key, scores, key_ptrs, query_ptrs, score_ptrs, batch_size, heads,
-      squares, head_depth, qkv_width);
-  cudaError_t status = cudaGetLastError();
-  if (status != cudaSuccess) {
-    throw std::runtime_error(
-        CudaErrorMessage("FillAttentionScorePointerBatchesKernel launch",
-                         status));
-  }
-
-  cublasHandle_t handle = CublasHandle();
-  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(
-        CublasErrorMessage("cublasSetStream", cublas_status));
-  }
-
-  const float beta = 0.0f;
-  cublas_status = cublasSgemmBatched(
-      handle, CUBLAS_OP_T, CUBLAS_OP_N, squares, squares, head_depth, &scale,
-      key_ptrs, qkv_width, query_ptrs, qkv_width, &beta, score_ptrs, squares,
-      total_batches);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(CublasErrorMessage(
-        "cublasSgemmBatched(attention_score)", cublas_status));
-  }
-  if (stream)
-    return;
-  status = cudaDeviceSynchronize();
-  if (status != cudaSuccess)
-    throw std::runtime_error(CudaErrorMessage(
-        "AttentionScorePointerBatchedKernel synchronize", status));
-}
-
 void LaunchAttentionBiasAddKernel(float *scores, const float *bias,
                                   int batch_size, int heads, int squares,
                                   cudaStream_t stream) {
@@ -1189,72 +1070,6 @@ void LaunchAttentionContextKernel(const float *probabilities,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("AttentionContextKernel synchronize", status));
-}
-
-void LaunchAttentionContextPointerBatchedKernel(
-    const float *probabilities, const float *value, float *context,
-    int batch_size, int heads, int squares, int head_depth, int qkv_width,
-    void *pointer_workspace, std::size_t pointer_workspace_bytes,
-    cudaStream_t stream) {
-  if (!probabilities || !value || !context || !pointer_workspace)
-    throw std::runtime_error(
-        "CUDA attention context pointer batch received null buffer");
-  if (batch_size <= 0 || heads <= 0 || squares <= 0 || head_depth <= 0 ||
-      qkv_width <= 0 || qkv_width != heads * head_depth) {
-    throw std::runtime_error(
-        "CUDA attention context pointer batch dimensions are invalid");
-  }
-  const std::size_t required_bytes =
-      AttentionGemmPointerWorkspaceBytes(batch_size, heads);
-  if (pointer_workspace_bytes < required_bytes) {
-    throw std::runtime_error(
-        "CUDA attention context pointer workspace is too small");
-  }
-
-  const int total_batches = batch_size * heads;
-  char *pointer_bytes = static_cast<char *>(pointer_workspace);
-  const float **value_ptrs =
-      reinterpret_cast<const float **>(pointer_bytes);
-  const float **probability_ptrs = reinterpret_cast<const float **>(
-      pointer_bytes + total_batches * sizeof(void *));
-  float **context_ptrs =
-      reinterpret_cast<float **>(pointer_bytes +
-                                 total_batches * 2 * sizeof(void *));
-  constexpr int kThreads = 256;
-  const int blocks = (total_batches + kThreads - 1) / kThreads;
-  FillAttentionContextPointerBatchesKernel<<<blocks, kThreads, 0, stream>>>(
-      probabilities, value, context, value_ptrs, probability_ptrs, context_ptrs,
-      batch_size, heads, squares, head_depth, qkv_width);
-  cudaError_t status = cudaGetLastError();
-  if (status != cudaSuccess) {
-    throw std::runtime_error(
-        CudaErrorMessage("FillAttentionContextPointerBatchesKernel launch",
-                         status));
-  }
-
-  cublasHandle_t handle = CublasHandle();
-  cublasStatus_t cublas_status = cublasSetStream(handle, stream);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(
-        CublasErrorMessage("cublasSetStream", cublas_status));
-  }
-
-  const float alpha = 1.0f;
-  const float beta = 0.0f;
-  cublas_status = cublasSgemmBatched(
-      handle, CUBLAS_OP_N, CUBLAS_OP_N, head_depth, squares, squares, &alpha,
-      value_ptrs, qkv_width, probability_ptrs, squares, &beta, context_ptrs,
-      qkv_width, total_batches);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(CublasErrorMessage(
-        "cublasSgemmBatched(attention_context)", cublas_status));
-  }
-  if (stream)
-    return;
-  status = cudaDeviceSynchronize();
-  if (status != cudaSuccess)
-    throw std::runtime_error(CudaErrorMessage(
-        "AttentionContextPointerBatchedKernel synchronize", status));
 }
 
 void LaunchAttentionPolicyMapKernel(const float *query, const float *key,

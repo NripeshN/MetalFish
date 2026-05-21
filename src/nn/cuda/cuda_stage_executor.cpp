@@ -1544,35 +1544,11 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
   output.head_depth = attention.head_depth;
 
   cudaStream_t stream = workspace.Stream();
-  static const bool pointer_batched_attention_gemm =
-      EnvFlagEnabled("METALFISH_CUDA_POINTER_BATCHED_ATTENTION_GEMM");
-  static const int pointer_batched_attention_gemm_min_batch = EnvIntOrDefault(
-      "METALFISH_CUDA_POINTER_BATCHED_ATTENTION_GEMM_MIN_BATCH", 16, 2, 1024);
-  const bool use_pointer_batched_attention_gemm =
-      pointer_batched_attention_gemm &&
-      batch_size >= pointer_batched_attention_gemm_min_batch;
-  void *attention_gemm_pointer_workspace = nullptr;
-  std::size_t attention_gemm_pointer_workspace_bytes = 0;
-  if (use_pointer_batched_attention_gemm) {
-    attention_gemm_pointer_workspace_bytes =
-        AttentionGemmPointerWorkspaceBytes(batch_size, attention.heads);
-    attention_gemm_pointer_workspace = workspace.ReserveNamedBytes(
-        "attention.gemm.pointer_batches",
-        attention_gemm_pointer_workspace_bytes);
-    LaunchAttentionScorePointerBatchedKernel(
-        projections.query, projections.key, output.scores, batch_size,
-        attention.heads, attention.squares, attention.head_depth,
-        attention.qkv_width,
-        1.0f / std::sqrt(static_cast<float>(attention.head_depth)),
-        attention_gemm_pointer_workspace,
-        attention_gemm_pointer_workspace_bytes, stream);
-  } else {
-    LaunchAttentionScoreKernel(
-        projections.query, projections.key, output.scores, batch_size,
-        attention.heads, attention.squares, attention.head_depth,
-        attention.qkv_width,
-        1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
-  }
+  LaunchAttentionScoreKernel(
+      projections.query, projections.key, output.scores, batch_size,
+      attention.heads, attention.squares, attention.head_depth,
+      attention.qkv_width,
+      1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
   static const bool deterministic_softmax =
       EnvFlagEnabled("METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX");
   bool applied_bias_with_softmax = false;
@@ -1605,18 +1581,10 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
                            step.name + ".probabilities.post_softmax",
                            trace_kind, output.probabilities, score_rows,
                            attention.squares, stream);
-  if (use_pointer_batched_attention_gemm) {
-    LaunchAttentionContextPointerBatchedKernel(
-        output.probabilities, projections.value, output.context, batch_size,
-        attention.heads, attention.squares, attention.head_depth,
-        attention.qkv_width, attention_gemm_pointer_workspace,
-        attention_gemm_pointer_workspace_bytes, stream);
-  } else {
-    LaunchAttentionContextKernel(output.probabilities, projections.value,
-                                 output.context, batch_size, attention.heads,
-                                 attention.squares, attention.head_depth,
-                                 attention.qkv_width, stream);
-  }
+  LaunchAttentionContextKernel(output.probabilities, projections.value,
+                               output.context, batch_size, attention.heads,
+                               attention.squares, attention.head_depth,
+                               attention.qkv_width, stream);
   TraceCudaAttentionBuffer(trace_run, trace_stage_index, 15,
                            step.name + ".probabilities.post_context",
                            trace_kind, output.probabilities, score_rows,

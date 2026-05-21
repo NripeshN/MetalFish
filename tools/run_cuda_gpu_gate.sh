@@ -215,8 +215,6 @@ fi
   echo "- CUDA release single workspace each run: ${METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN:-0}"
   echo "- CUDA release workspace each run: ${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}"
   echo "- CUDA deterministic attention softmax: ${METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX:-0}"
-  echo "- CUDA pointer-batched attention GEMM: ${METALFISH_CUDA_POINTER_BATCHED_ATTENTION_GEMM:-0}"
-  echo "- CUDA pointer-batched attention GEMM min batch: ${METALFISH_CUDA_POINTER_BATCHED_ATTENTION_GEMM_MIN_BATCH:-16}"
   echo "- CUDA raw output trace: ${METALFISH_CUDA_TRACE_RAW_OUTPUTS:-0}"
   echo "- CUDA stage output trace: ${METALFISH_CUDA_TRACE_STAGE_OUTPUTS:-0}"
   echo "- CUDA attention internals trace: ${METALFISH_CUDA_TRACE_ATTENTION_INTERNALS:-0}"
