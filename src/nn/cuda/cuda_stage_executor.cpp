@@ -21,9 +21,11 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -132,6 +134,18 @@ int EnvIntOrDefault(const char *name, int fallback, int min_value,
   }
 }
 
+float EnvFloatOrDefault(const char *name, float fallback, float min_value,
+                        float max_value) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  char *end = nullptr;
+  const float parsed = std::strtof(value, &end);
+  if (!end || *end != '\0' || !std::isfinite(parsed))
+    return fallback;
+  return std::clamp(parsed, min_value, max_value);
+}
+
 bool EnvSubstringMatches(const char *name, std::string_view value) {
   const char *filter = std::getenv(name);
   if (!filter || filter[0] == '\0')
@@ -156,6 +170,84 @@ int ReserveCudaStageTraceReport(int batch_size) {
   if (run < skip || run >= skip + limit)
     return -1;
   return run;
+}
+
+struct CudaTraceBaseline {
+  std::vector<float> values;
+  int rows = 0;
+  int width = 0;
+};
+
+void CompareCudaTraceBuffer(int run, int stage_index, std::string_view name,
+                            const std::vector<float> &host, int rows,
+                            int width) {
+  const int base_run = EnvIntOrDefault(
+      "METALFISH_CUDA_TRACE_COMPARE_BASE_RUN", -1, -1, 1000000);
+  if (base_run < 0 || run < base_run)
+    return;
+
+  const float min_delta = EnvFloatOrDefault(
+      "METALFISH_CUDA_TRACE_COMPARE_MIN_DELTA", 1.0e-7f, 0.0f, 1.0e6f);
+  std::string key;
+  key.reserve(name.size() + 16);
+  key.append(std::to_string(stage_index));
+  key.push_back('|');
+  key.append(name);
+
+  static std::mutex mutex;
+  static std::unordered_map<std::string, CudaTraceBaseline> baselines;
+  std::lock_guard<std::mutex> lock(mutex);
+  if (run == base_run) {
+    baselines[key] = {host, rows, width};
+    return;
+  }
+
+  const auto baseline_it = baselines.find(key);
+  if (baseline_it == baselines.end())
+    return;
+  const CudaTraceBaseline &baseline = baseline_it->second;
+  const std::size_t count = std::min(host.size(), baseline.values.size());
+  if (count == 0)
+    return;
+
+  double sum_abs_delta = 0.0;
+  double sum_square_delta = 0.0;
+  float max_abs_delta = 0.0f;
+  std::size_t max_index = 0;
+  std::size_t changed = 0;
+  for (std::size_t i = 0; i < count; ++i) {
+    const float delta = std::fabs(host[i] - baseline.values[i]);
+    sum_abs_delta += delta;
+    sum_square_delta += static_cast<double>(delta) * delta;
+    if (delta > min_delta)
+      ++changed;
+    if (delta > max_abs_delta) {
+      max_abs_delta = delta;
+      max_index = i;
+    }
+  }
+  if (max_abs_delta < min_delta)
+    return;
+
+  const int row = width > 0 ? static_cast<int>(max_index / width) : 0;
+  const int col = width > 0 ? static_cast<int>(max_index % width)
+                            : static_cast<int>(max_index);
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(9)
+      << "CUDA_STAGE_TRACE_COMPARE run=" << run
+      << " base_run=" << base_run << " stage=" << stage_index
+      << " name=" << name << " rows=" << rows << " width=" << width
+      << " sampled=" << count << " max_abs_delta=" << max_abs_delta
+      << " mean_abs_delta=" << (sum_abs_delta / static_cast<double>(count))
+      << " rms_delta="
+      << std::sqrt(sum_square_delta / static_cast<double>(count))
+      << " changed=" << changed << " max_index=" << max_index
+      << " row=" << row << " col=" << col
+      << " baseline=" << baseline.values[max_index]
+      << " actual=" << host[max_index]
+      << " baseline_rows=" << baseline.rows
+      << " baseline_width=" << baseline.width;
+  std::cerr << out.str() << std::endl;
 }
 
 void TraceCudaBufferOutput(int run, int stage_index, std::string_view name,
@@ -213,6 +305,7 @@ void TraceCudaBufferOutput(int run, int stage_index, std::string_view name,
     min_value = 0.0f;
     max_value = 0.0f;
   }
+  CompareCudaTraceBuffer(run, stage_index, name, host, rows, width);
 
   std::ostringstream out;
   out << std::fixed << std::setprecision(6)

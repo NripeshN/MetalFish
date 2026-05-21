@@ -218,6 +218,8 @@ fi
   echo "- CUDA stage output trace: ${METALFISH_CUDA_TRACE_STAGE_OUTPUTS:-0}"
   echo "- CUDA attention internals trace: ${METALFISH_CUDA_TRACE_ATTENTION_INTERNALS:-0}"
   echo "- CUDA dynamic PE internals trace: ${METALFISH_CUDA_TRACE_DYNAMIC_PE_INTERNALS:-0}"
+  echo "- CUDA trace compare base run: ${METALFISH_CUDA_TRACE_COMPARE_BASE_RUN:-unset}"
+  echo "- CUDA trace compare min delta: ${METALFISH_CUDA_TRACE_COMPARE_MIN_DELTA:-1e-7}"
   echo "- cuBLAS workspace config: ${CUBLAS_WORKSPACE_CONFIG:-unset}"
   echo
   echo "## Device"
