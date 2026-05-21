@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -27,6 +28,11 @@ namespace MetalFish {
 namespace NN {
 namespace Cuda {
 namespace {
+
+bool EnvFlagEnabled(const char *name) {
+  const char *value = std::getenv(name);
+  return value && value[0] != '\0' && std::string(value) != "0";
+}
 
 std::string CudaErrorMessage(const char *op, cudaError_t status) {
   std::ostringstream out;
@@ -428,6 +434,62 @@ __global__ void AttentionBiasSoftmaxKernel(float *scores, const float *bias,
     probability_row[col] = sum > 0.0f ? probability_row[col] / sum : 0.0f;
 }
 
+__global__ void AttentionScoreDirectKernel(const float *query,
+                                           const float *key, float *scores,
+                                           int heads, int squares,
+                                           int head_depth, int qkv_width,
+                                           float scale, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int key_square = index % squares;
+  const int query_square = (index / squares) % squares;
+  const int head = (index / (squares * squares)) % heads;
+  const int batch = index / (heads * squares * squares);
+  const int channel_base = head * head_depth;
+  const std::size_t query_base =
+      (static_cast<std::size_t>(batch) * squares + query_square) * qkv_width +
+      channel_base;
+  const std::size_t key_base =
+      (static_cast<std::size_t>(batch) * squares + key_square) * qkv_width +
+      channel_base;
+
+  float sum = 0.0f;
+  for (int d = 0; d < head_depth; ++d)
+    sum += query[query_base + d] * key[key_base + d];
+  scores[index] = sum * scale;
+}
+
+__global__ void AttentionContextDirectKernel(const float *probabilities,
+                                             const float *value,
+                                             float *context, int heads,
+                                             int squares, int head_depth,
+                                             int qkv_width, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int channel = index % qkv_width;
+  const int query_square = (index / qkv_width) % squares;
+  const int batch = index / (squares * qkv_width);
+  const int head = channel / head_depth;
+  const int head_channel = channel % head_depth;
+  const std::size_t probability_base =
+      ((static_cast<std::size_t>(batch) * heads + head) * squares +
+       query_square) *
+      squares;
+
+  float sum = 0.0f;
+  for (int key_square = 0; key_square < squares; ++key_square) {
+    const std::size_t value_index =
+        (static_cast<std::size_t>(batch) * squares + key_square) * qkv_width +
+        head * head_depth + head_channel;
+    sum += probabilities[probability_base + key_square] * value[value_index];
+  }
+  context[index] = sum;
+}
+
 __device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
 
 void EnsureAttentionPolicyGatherMapUploaded() {
@@ -802,6 +864,25 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
       static_cast<std::size_t>(squares) * qkv_width;
   const std::size_t score_batch_stride =
       static_cast<std::size_t>(heads) * squares * squares;
+  if (EnvFlagEnabled("METALFISH_CUDA_DIRECT_ATTENTION_MATMUL")) {
+    const int total = batch_size * heads * squares * squares;
+    constexpr int kThreads = 256;
+    const int blocks = (total + kThreads - 1) / kThreads;
+    AttentionScoreDirectKernel<<<blocks, kThreads, 0, stream>>>(
+        query, key, scores, heads, squares, head_depth, qkv_width, scale,
+        total);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("AttentionScoreDirectKernel launch", status));
+    if (stream)
+      return;
+    status = cudaDeviceSynchronize();
+    if (status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("AttentionScoreDirectKernel synchronize", status));
+    return;
+  }
   for (int batch = 0; batch < batch_size; ++batch) {
     const float *query_base = query + batch * qkv_batch_stride;
     const float *key_base = key + batch * qkv_batch_stride;
@@ -927,6 +1008,25 @@ void LaunchAttentionContextKernel(const float *probabilities,
       static_cast<std::size_t>(squares) * qkv_width;
   const std::size_t probability_batch_stride =
       static_cast<std::size_t>(heads) * squares * squares;
+  if (EnvFlagEnabled("METALFISH_CUDA_DIRECT_ATTENTION_MATMUL")) {
+    const int total = batch_size * squares * qkv_width;
+    constexpr int kThreads = 256;
+    const int blocks = (total + kThreads - 1) / kThreads;
+    AttentionContextDirectKernel<<<blocks, kThreads, 0, stream>>>(
+        probabilities, value, context, heads, squares, head_depth, qkv_width,
+        total);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("AttentionContextDirectKernel launch", status));
+    if (stream)
+      return;
+    status = cudaDeviceSynchronize();
+    if (status != cudaSuccess)
+      throw std::runtime_error(CudaErrorMessage(
+          "AttentionContextDirectKernel synchronize", status));
+    return;
+  }
   for (int batch = 0; batch < batch_size; ++batch) {
     const float *value_base = value + batch * qkv_batch_stride;
     const float *probability_base =
