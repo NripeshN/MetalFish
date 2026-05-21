@@ -207,6 +207,7 @@ fi
   echo "- Parity report: ${PARITY_REPORT}"
   echo "- Explicit CUDA UCI go: ${UCI_GO}"
   echo "- Batch worst trace: ${METALFISH_NN_BATCH_TRACE_WORST:-1}"
+  echo "- Single repeat stress: ${METALFISH_NN_SINGLE_REPEAT_STRESS:-0}"
   echo "- Single reuse stress: ${METALFISH_NN_SINGLE_REUSE_STRESS:-1}"
   echo "- Batch reuse stress: ${METALFISH_NN_BATCH_REUSE_STRESS:-1}"
   echo "- CUDA full buffer clear: ${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}"
@@ -260,6 +261,15 @@ fi
     grep -m1 "SINGLE_REUSE_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     grep -m1 "SINGLE_REUSE_STRESS_BASELINE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     grep -m1 "SINGLE_REUSE_STRESS_REPLAY_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+  fi
+  if grep -q "SINGLE_REPEAT_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+    echo
+    echo "## Single Repeat Stress"
+    echo
+    grep -m1 "SINGLE_REPEAT_STRESS_MAX:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+    grep -m1 "SINGLE_REPEAT_STRESS_POLICY:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "SINGLE_REPEAT_STRESS_BASELINE_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    grep -m1 "SINGLE_REPEAT_STRESS_REPLAY_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
   fi
   echo
   echo "## Parity Report"
