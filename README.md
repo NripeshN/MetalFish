@@ -136,6 +136,7 @@ THREADS=8 HASH=4096 ./tools/run_cutechess_tournament.sh \
 - Native Apple CPU tuning and Release LTO by default
 - Local Polyglot opening books for the Lichess bot
 - Syzygy 3-4-5 tablebase support
+- Experimental Core ML/ANE root-probe sidecar, disabled by default
 
 ## Requirements
 
@@ -198,6 +199,49 @@ setoption name HybridABCandidateVerifyMs value 120
 isready
 position startpos
 go movetime 5000
+```
+
+## Experimental ANE Root Probe
+
+The Core ML/ANE path is an experimental Hybrid sidecar. It does not replace the
+BT4 transformer MCTS and it is not enabled by default. The retained profile uses
+the smaller T1-512 Lc0 network on `cpu-ne` to produce root-order hints while BT4
+continues to run on Metal/MPSGraph:
+
+```text
+setoption name HybridANERootProbe value true
+setoption name HybridANEWeights value networks/t1-512x15x8h-distilled-swa-3395000.pb.gz
+setoption name HybridANEModelPath value build/coreml/compiled/t1-512-heads-b8.mlmodelc
+setoption name HybridANEComputeUnits value cpu-ne
+setoption name HybridANERootHintCount value 10
+setoption name HybridANERootHintWaitMs value 250
+setoption name HybridANEMinBudgetMs value 1000
+```
+
+Current ANE findings:
+
+- `cpu-ne` is the only retained Core ML compute-unit profile. `all` and
+  `cpu-gpu` are faster in isolation but compete with Metal inference.
+- T1-512 is retained over T1-256. T1-256 is lower latency, but it regressed the
+  ANE-sensitive repeat gate.
+- ANE root hints often agree with MCTS on hard pawn-endgame positions, but the
+  current coordinator can still choose AB when AB rejects the MCTS move. Treat
+  ANE as useful evidence for future hybrid arbitration work, not a standalone
+  strength claim.
+
+Useful local probes:
+
+```bash
+python3 tools/lc0_coreml_concurrency_benchmark.py \
+  networks/t1-512x15x8h-distilled-swa-3395000.pb.gz \
+  --metal-probe build/metalfish_nn_probe \
+  --metal-weights networks/BT4-1024x15x32h-swa-6147500.pb \
+  --coreml-compute-unit cpu-ne --batch-size 8
+
+python3 tools/compare_puzzle_runs.py \
+  --baseline results/baseline.jsonl \
+  --candidate results/candidate.jsonl \
+  --match-repeat-ids --ane-summary
 ```
 
 ## Lichess Bot

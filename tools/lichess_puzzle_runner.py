@@ -32,7 +32,7 @@ LICHESS_API = "https://lichess.org/api"
 DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
 DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
 DEFAULT_ANE_ROOT_HINT_WAIT_MS = 250
-DEFAULT_ANE_MIN_BUDGET_MS = 2000
+DEFAULT_ANE_MIN_BUDGET_MS = 1000
 SETOPTION_ALIASES = {
     "HybridANEWeightsPath": "HybridANEWeights",
 }
@@ -210,6 +210,13 @@ class SearchAnswer:
     ane_hints: int = 0
     ane_hint_moves: int = 0
     ane_failures: int = 0
+    ane_last_hints: str = ""
+    hybrid_trace: str = ""
+    hybrid_reason: str = ""
+    hybrid_selected: str = ""
+    hybrid_ab_move: str = ""
+    hybrid_mcts_move: str = ""
+    final_summary: str = ""
 
 
 class UCIEngine:
@@ -408,8 +415,20 @@ def update_answer_from_info(line: str, answer: SearchAnswer) -> None:
     if line.startswith("info string Hybrid: AB root hints from ANE"):
         answer.ane_hints += 1
         answer.ane_hint_moves += max(0, len(line.split()) - 8)
+        answer.ane_last_hints = line.removeprefix(
+            "info string Hybrid: AB root hints from ANE"
+        ).strip()
     elif line.startswith("info string Hybrid: ANE root probe failed"):
         answer.ane_failures += 1
+    elif line.startswith("info string HybridTrace:"):
+        answer.hybrid_trace = line.removeprefix("info string ").strip()
+        fields = parse_hybrid_trace_fields(answer.hybrid_trace)
+        answer.hybrid_reason = fields.get("reason", "")
+        answer.hybrid_selected = fields.get("selected", "")
+        answer.hybrid_ab_move = fields.get("ABMove", "")
+        answer.hybrid_mcts_move = fields.get("MCTSMove", "")
+    elif line.startswith("info string Final:"):
+        answer.final_summary = line.removeprefix("info string ").strip()
 
     parts = line.split()
     for idx, token in enumerate(parts[:-1]):
@@ -422,6 +441,36 @@ def update_answer_from_info(line: str, answer: SearchAnswer) -> None:
                 answer.depth = int(parts[idx + 1])
         except ValueError:
             continue
+
+
+def parse_hybrid_trace_fields(trace: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for token in trace.split():
+        if "=" not in token:
+            continue
+        name, value = token.split("=", 1)
+        if name:
+            fields[name] = value
+    return fields
+
+
+def search_trace_fields(answer: SearchAnswer) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    if answer.ane_last_hints:
+        fields["ane_last_hints"] = answer.ane_last_hints
+    if answer.hybrid_trace:
+        fields["hybrid_trace"] = answer.hybrid_trace
+    if answer.hybrid_reason:
+        fields["hybrid_reason"] = answer.hybrid_reason
+    if answer.hybrid_selected:
+        fields["hybrid_selected"] = answer.hybrid_selected
+    if answer.hybrid_ab_move:
+        fields["hybrid_ab_move"] = answer.hybrid_ab_move
+    if answer.hybrid_mcts_move:
+        fields["hybrid_mcts_move"] = answer.hybrid_mcts_move
+    if answer.final_summary:
+        fields["final_summary"] = answer.final_summary
+    return fields
 
 
 def parse_setoptions(items: list[str]) -> dict[str, str]:
@@ -645,19 +694,19 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
 
         answer = engine.search(board, movetime_ms)
         actual = normalize_move(answer.bestmove, board)
-        searches.append(
-            {
-                "ply": idx,
-                "expected": expected,
-                "actual": actual or answer.bestmove,
-                "nodes": answer.nodes,
-                "nps": answer.nps,
-                "depth": answer.depth,
-                "ane_hints": answer.ane_hints,
-                "ane_hint_moves": answer.ane_hint_moves,
-                "ane_failures": answer.ane_failures,
-            }
-        )
+        search_record = {
+            "ply": idx,
+            "expected": expected,
+            "actual": actual or answer.bestmove,
+            "nodes": answer.nodes,
+            "nps": answer.nps,
+            "depth": answer.depth,
+            "ane_hints": answer.ane_hints,
+            "ane_hint_moves": answer.ane_hint_moves,
+            "ane_failures": answer.ane_failures,
+        }
+        search_record.update(search_trace_fields(answer))
+        searches.append(search_record)
         mate_in_one_ok = idx == 0 and len(solution) == 1 and is_mating_move(
             board, actual
         )

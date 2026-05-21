@@ -166,7 +166,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridANEComputeUnits", Option("cpu-ne"));
   options.add("HybridANERootHintCount", Option(10, 1, 32));
   options.add("HybridANERootHintWaitMs", Option(75, 0, 1000));
-  options.add("HybridANEMinBudgetMs", Option(2000, 0, 30000));
+  options.add("HybridANEMinBudgetMs", Option(1000, 0, 30000));
   options.add("HybridTrace", Option(false));
   options.add("TransformerLowTimeFallbackMs", Option(3000, 0, 30000));
   options.add("TransformerMinMoveBudgetMs", Option(400, 0, 5000));

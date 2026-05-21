@@ -69,6 +69,20 @@ jobs:
           python3 tests/test_lichess_puzzle_runner.py
           python3 tests/test_hybrid_regression_compare.py
 
+      - name: Run ANE option/config smoke
+        run: |
+          mkdir -p build/ci-ane/t1-512-heads-b8.mlmodelc
+          : > build/ci-ane/t1-512x15x8h-distilled-swa-3395000.pb.gz
+          python3 tools/lichess_bot.py \
+            --config-check \
+            --hybrid-ane-root-probe \
+            --hybrid-ane-weights build/ci-ane/t1-512x15x8h-distilled-swa-3395000.pb.gz \
+            --hybrid-ane-model-path build/ci-ane/t1-512-heads-b8.mlmodelc \
+            --hybrid-ane-compute-units cpu-ne \
+            --hybrid-ane-root-hint-count 10 \
+            --hybrid-ane-root-hint-wait-ms 250 \
+            --hybrid-ane-min-budget-ms 1000
+
       - name: Run Apple accelerator tool tests
         run: |
           python3 -m py_compile \

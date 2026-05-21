@@ -605,6 +605,10 @@ def main() -> int:
             "tools/lc0_coreml_root_value_probe.py",
             "tests/test_lc0_coreml_root_value_probe.py",
             "tests/test_lc0_coreml_value_export.py",
+            "Run ANE option/config smoke",
+            "--hybrid-ane-root-probe",
+            "--hybrid-ane-compute-units cpu-ne",
+            "--hybrid-ane-min-budget-ms 1000",
         ],
     )
     assert_file_contains(

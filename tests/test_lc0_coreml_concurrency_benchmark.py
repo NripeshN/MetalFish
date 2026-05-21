@@ -32,6 +32,7 @@ def test_latency_summary_reports_batch_throughput() -> None:
 def test_parse_args_defaults() -> None:
     args = bench.parse_args(["net.pb.gz", "--metal-probe", "build/metalfish_nn_probe"])
     expect("batch default", args.batch_size == 16)
+    expect("metal weights default", args.metal_weights is None)
     expect("coreml unit", args.coreml_compute_unit == "cpu-ne")
     expect("coreml precision", args.coreml_precision == "fp16")
     expect("value head fp32", args.coreml_value_head_fp32)
@@ -59,6 +60,20 @@ def test_metal_probe_command_contains_batch_and_iterations() -> None:
     expect("iterations", command[command.index("--iterations") + 1] == "11")
 
 
+def test_metal_probe_command_can_use_separate_metal_weights() -> None:
+    args = bench.parse_args(
+        [
+            "t1.pb.gz",
+            "--metal-probe",
+            "build/metalfish_nn_probe",
+            "--metal-weights",
+            "bt4.pb",
+        ]
+    )
+    command = bench.metal_probe_command(args, 5)
+    expect("separate metal weights", command[command.index("--weights") + 1] == "bt4.pb")
+
+
 def test_metal_probe_command_can_add_signal_files() -> None:
     args = bench.parse_args(["net.pb.gz", "--metal-probe", "build/metalfish_nn_probe"])
     command = bench.metal_probe_command(
@@ -83,6 +98,7 @@ def main() -> int:
     test_latency_summary_reports_batch_throughput()
     test_parse_args_defaults()
     test_metal_probe_command_contains_batch_and_iterations()
+    test_metal_probe_command_can_use_separate_metal_weights()
     test_metal_probe_command_can_add_signal_files()
     test_slowdown()
     print("Lc0 Core ML concurrency benchmark tests: OK")

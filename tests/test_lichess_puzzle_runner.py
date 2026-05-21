@@ -165,7 +165,7 @@ def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
     options = puzzle_runner.engine_options(args)
 
     expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "250")
-    expect("ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "2000")
+    expect("ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "1000")
 
 
 def test_search_info_parser_tracks_ane_hints() -> None:
@@ -182,12 +182,30 @@ def test_search_info_parser_tracks_ane_hints() -> None:
         "info string Hybrid: ANE root probe failed: synthetic",
         answer,
     )
+    update_answer_from_info(
+        "info string HybridTrace: reason=ab_default selected=h4h5 ABMove=h4h5 MCTSMove=c3c4",
+        answer,
+    )
+    update_answer_from_info(
+        "info string Final: MCTSPlayouts=10 ABMove=h4h5 MCTSMove=c3c4",
+        answer,
+    )
     expect("nodes parsed", answer.nodes == 123)
     expect("nps parsed", answer.nps == 456)
     expect("depth parsed", answer.depth == 7)
     expect("ANE hint event counted", answer.ane_hints == 1)
     expect("ANE hint moves counted", answer.ane_hint_moves == 3)
     expect("ANE failure counted", answer.ane_failures == 1)
+    expect("ANE hint move list retained", answer.ane_last_hints == "e2e4 d2d4 g1f3")
+    expect("hybrid reason parsed", answer.hybrid_reason == "ab_default")
+    expect("hybrid selected parsed", answer.hybrid_selected == "h4h5")
+    expect("hybrid AB parsed", answer.hybrid_ab_move == "h4h5")
+    expect("hybrid MCTS parsed", answer.hybrid_mcts_move == "c3c4")
+    expect("final summary retained", answer.final_summary.startswith("Final:"))
+
+    trace_fields = puzzle_runner.search_trace_fields(answer)
+    expect("trace fields include hints", trace_fields["ane_last_hints"] == "e2e4 d2d4 g1f3")
+    expect("trace fields include reason", trace_fields["hybrid_reason"] == "ab_default")
 
 
 def test_repeat_result_ids_are_comparable() -> None:
@@ -254,6 +272,138 @@ def test_compare_puzzle_runs_detects_regression() -> None:
             )
     expect("puzzle compare allows configured drop", ok == 0)
     expect("puzzle compare fails excessive drop", bad == 1)
+
+
+def test_compare_puzzle_runs_summarizes_ane_trace() -> None:
+    results = {
+        "p1": {
+            "id": "p1",
+            "solved": False,
+            "searches": [
+                {
+                    "ply": 0,
+                    "expected": "c3c4",
+                    "actual": "h4h5",
+                    "ane_last_hints": "c3c4 h4h5",
+                    "hybrid_mcts_move": "c3c4",
+                    "hybrid_ab_move": "h4h5",
+                    "hybrid_selected": "h4h5",
+                    "hybrid_reason": "ab_default",
+                }
+            ],
+        },
+        "p2": {
+            "id": "p2",
+            "solved": True,
+            "searches": [
+                {
+                    "ply": 0,
+                    "expected": "e2e4",
+                    "actual": "e2e4",
+                    "ane_last_hints": "e2e4 d2d4",
+                    "hybrid_mcts_move": "e2e4",
+                    "hybrid_ab_move": "e2e4",
+                    "hybrid_selected": "e2e4",
+                    "hybrid_reason": "engines_agree",
+                }
+            ],
+        },
+    }
+
+    summary = compare_puzzle_runs.ane_trace_summary(results)
+
+    expect("trace search count", summary["searches"] == 2)
+    expect("ANE hints counted", summary["ane_hint_searches"] == 2)
+    expect("ANE/MCTS agreement counted", summary["ane_mcts_agree"] == 2)
+    expect("ANE/MCTS selected counted", summary["ane_mcts_selected"] == 1)
+    expect("AB blocked counted", summary["ane_mcts_blocked_by_ab"] == 1)
+    expect("unsolved blocked counted", summary["unsolved_blocked"] == 1)
+
+
+def test_compare_puzzle_runs_matches_repeat_ids() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        baseline = root / "baseline.jsonl"
+        candidate = root / "candidate.jsonl"
+        baseline.write_text(json.dumps({"id": "abc", "solved": True}) + "\n")
+        candidate.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "id": "abc#r1",
+                            "puzzle_id": "abc",
+                            "repeat": 1,
+                            "solved": True,
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "id": "abc#r2",
+                            "puzzle_id": "abc",
+                            "repeat": 2,
+                            "solved": False,
+                        }
+                    ),
+                ]
+            )
+            + "\n"
+        )
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            no_match = compare_puzzle_runs.run(
+                compare_puzzle_runs.parse_args(
+                    [
+                        "--baseline",
+                        str(baseline),
+                        "--candidate",
+                        str(candidate),
+                        "--min-common",
+                        "1",
+                    ]
+                )
+            )
+            matched = compare_puzzle_runs.run(
+                compare_puzzle_runs.parse_args(
+                    [
+                        "--baseline",
+                        str(baseline),
+                        "--candidate",
+                        str(candidate),
+                        "--min-common",
+                        "2",
+                        "--max-solved-drop",
+                        "1",
+                        "--max-accuracy-drop",
+                        "1.0",
+                        "--match-repeat-ids",
+                    ]
+                )
+            )
+
+    expect("repeat ids do not match by default", no_match == 1)
+    expect("repeat ids match with flag", matched == 0)
+
+
+def test_compare_puzzle_runs_preserves_repeated_baseline_results() -> None:
+    baseline = [
+        {"id": "abc#r1", "puzzle_id": "abc", "repeat": 1, "solved": False},
+        {"id": "abc#r2", "puzzle_id": "abc", "repeat": 2, "solved": True},
+    ]
+    candidate = [
+        {"id": "abc#r1", "puzzle_id": "abc", "repeat": 1, "solved": True},
+        {"id": "abc#r2", "puzzle_id": "abc", "repeat": 2, "solved": True},
+    ]
+
+    pairs = compare_puzzle_runs.pair_results(
+        baseline, candidate, match_repeat_ids=True
+    )
+    baseline_common = [base for _, base, _ in pairs]
+    candidate_common = [cand for _, _, cand in pairs]
+
+    expect("exact repeat pairs retained", len(pairs) == 2)
+    expect("baseline repeated score preserved", compare_puzzle_runs.solved_count(baseline_common) == 1)
+    expect("candidate repeated score preserved", compare_puzzle_runs.solved_count(candidate_common) == 2)
 
 
 def test_filter_puzzle_csv_can_skip_and_exclude_ids() -> None:
@@ -349,6 +499,9 @@ def main() -> int:
     test_search_info_parser_tracks_ane_hints()
     test_repeat_result_ids_are_comparable()
     test_compare_puzzle_runs_detects_regression()
+    test_compare_puzzle_runs_summarizes_ane_trace()
+    test_compare_puzzle_runs_matches_repeat_ids()
+    test_compare_puzzle_runs_preserves_repeated_baseline_results()
     test_filter_puzzle_csv_can_skip_and_exclude_ids()
     test_rate_limit_wait_respects_budget()
     print("Lichess puzzle runner tests: OK")

@@ -90,10 +90,11 @@ def metal_probe_command(
     ready_file: Path | None = None,
     start_file: Path | None = None,
 ) -> list[str]:
+    metal_weights = Path(args.metal_weights or args.weights)
     command = [
         str(Path(args.metal_probe)),
         "--weights",
-        str(Path(args.weights)),
+        str(metal_weights),
         "--fen",
         args.fen,
         "--top",
@@ -233,6 +234,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         },
         "metal": {
             "probe": str(Path(args.metal_probe).resolve()),
+            "weights": str(Path(args.metal_weights or args.weights).resolve()),
             "solo": metal_solo,
             "concurrent": metal_concurrent,
             "slowdown": slowdown(metal_concurrent, metal_solo),
@@ -247,6 +249,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("weights", help="Lc0 T1 .pb or .pb.gz weights")
     parser.add_argument(
         "--metal-probe", required=True, help="Path to build/metalfish_nn_probe"
+    )
+    parser.add_argument(
+        "--metal-weights",
+        default=None,
+        help="Weights for the concurrent Metal probe; defaults to the Core ML weights.",
     )
     parser.add_argument("--fen", default=DEFAULT_FEN)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -274,7 +281,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def print_human(result: dict[str, Any]) -> None:
     print("MetalFish Core ML/Metal concurrency benchmark")
-    print(f"  Weights:    {result['weights']}")
+    print(f"  Core ML weights: {result['weights']}")
+    print(f"  Metal weights:   {result['metal']['weights']}")
     print(f"  Batch size: {result['batch_size']}")
     print(
         f"  Core ML:    {result['coreml']['compute_unit']} {result['coreml']['precision']}"
