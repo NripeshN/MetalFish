@@ -117,6 +117,7 @@ append_remote_env METALFISH_CUDA_FULL_BUFFER_CLEAR
 append_remote_env METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN
 append_remote_env METALFISH_CUDA_PROFILE
 append_remote_env METALFISH_CUDA_PROFILE_LIMIT
+append_remote_env CUBLAS_WORKSPACE_CONFIG
 
 collect_remote_artifacts() {
   if [[ "${COLLECT_ARTIFACTS}" != "1" ]]; then

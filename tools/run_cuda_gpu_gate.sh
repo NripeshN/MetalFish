@@ -211,6 +211,7 @@ fi
   echo "- Batch reuse stress: ${METALFISH_NN_BATCH_REUSE_STRESS:-1}"
   echo "- CUDA full buffer clear: ${METALFISH_CUDA_FULL_BUFFER_CLEAR:-0}"
   echo "- CUDA release workspace each run: ${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}"
+  echo "- cuBLAS workspace config: ${CUBLAS_WORKSPACE_CONFIG:-unset}"
   echo
   echo "## Device"
   echo
