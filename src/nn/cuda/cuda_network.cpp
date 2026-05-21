@@ -401,6 +401,15 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
   };
 
   std::lock_guard<std::mutex> lock(execution_mutex_);
+  if (batch_size == 1 && discard_next_singleton_ &&
+      EnvFlagOrDefault("METALFISH_CUDA_DISCARD_FIRST_SINGLETON", true)) {
+    discard_next_singleton_ = false;
+    const auto discarded = run_once();
+    if (!OutputsAreValid(discarded, tensor_plan_)) {
+      workspace_.Release();
+      workspace_batch_size_ = 0;
+    }
+  }
   auto outputs = run_once();
   if (OutputsAreValid(outputs, tensor_plan_)) {
     release_single_workspace_if_requested();
