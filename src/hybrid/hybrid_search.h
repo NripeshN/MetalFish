@@ -437,6 +437,13 @@ bool HybridMCTSCrossRootConfidenceOverride(
     int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
     float mcts_q);
 
+bool HybridMCTSLowBudgetSentinelOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
+    int mcts_in_ab_score, int ab_in_mcts_rank, float ab_in_mcts_q,
+    float mcts_q);
+
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits);
 

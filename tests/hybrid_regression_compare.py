@@ -347,6 +347,67 @@ def run_repeated(
     return runs
 
 
+def run_interleaved(
+    args: argparse.Namespace,
+    baseline_engine: pathlib.Path,
+    baseline_cwd: pathlib.Path,
+    baseline_options: Sequence[Tuple[str, str]],
+    candidate_engine: pathlib.Path,
+    candidate_cwd: pathlib.Path,
+    candidate_options: Sequence[Tuple[str, str]],
+) -> Tuple[List[EngineRun], List[EngineRun]]:
+    baseline_runs: List[EngineRun] = []
+    candidate_runs: List[EngineRun] = []
+    bk_positions = select_bk_positions(args.positions)
+
+    engines = [
+        (
+            "baseline-main",
+            baseline_runs,
+            baseline_engine,
+            baseline_cwd,
+            baseline_options,
+        ),
+        (
+            "candidate-pr",
+            candidate_runs,
+            candidate_engine,
+            candidate_cwd,
+            candidate_options,
+        ),
+    ]
+
+    for run_index in range(args.repeat):
+        order = engines if run_index % 2 == 0 else list(reversed(engines))
+        for label, runs, engine, cwd, options in order:
+            print(f"\n[{label}] run {run_index + 1}/{args.repeat}", flush=True)
+            run = run_engine_once(
+                label,
+                run_index,
+                engine,
+                cwd,
+                args.weights.resolve(),
+                args.threads_resolved,
+                args.hash_mb,
+                bk_positions,
+                args.bk_movetime,
+                args.perf_movetime,
+                args.timeout_margin,
+                options,
+            )
+            print(
+                f"  tactical {run.tactical_score}/{len(bk_positions)} "
+                f"completed={run.tactical_completed}/{len(bk_positions)} "
+                f"errors={len(run.errors)}",
+                flush=True,
+            )
+            runs.append(run)
+
+    baseline_runs.sort(key=lambda run: run.run_index)
+    candidate_runs.sort(key=lambda run: run.run_index)
+    return baseline_runs, candidate_runs
+
+
 def summarize_engine(runs: Sequence[EngineRun]) -> EngineSummary:
     scores = [run.tactical_score for run in runs]
     completed = [run.tactical_completed for run in runs]
@@ -506,16 +567,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         flush=True,
     )
 
-    baseline_runs = run_repeated(
+    baseline_runs, candidate_runs = run_interleaved(
         args,
-        "baseline-main",
         args.baseline_engine.resolve(),
         args.baseline_cwd.resolve(),
         args.baseline_options,
-    )
-    candidate_runs = run_repeated(
-        args,
-        "candidate-pr",
         args.candidate_engine.resolve(),
         args.candidate_cwd.resolve(),
         args.candidate_options,
