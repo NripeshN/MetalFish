@@ -967,33 +967,18 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
       static_cast<std::size_t>(squares) * qkv_width;
   const std::size_t score_batch_stride =
       static_cast<std::size_t>(heads) * squares * squares;
-  const int gemm_batches = batch_size * heads;
-  thread_local std::vector<const float *> key_matrices;
-  thread_local std::vector<const float *> query_matrices;
-  thread_local std::vector<float *> score_matrices;
-  key_matrices.resize(gemm_batches);
-  query_matrices.resize(gemm_batches);
-  score_matrices.resize(gemm_batches);
-
-  int matrix = 0;
   for (int batch = 0; batch < batch_size; ++batch) {
     const float *query_base = query + batch * qkv_batch_stride;
     const float *key_base = key + batch * qkv_batch_stride;
     float *score_base = scores + batch * score_batch_stride;
-    for (int head = 0; head < heads; ++head) {
-      key_matrices[matrix] = key_base + head * head_stride;
-      query_matrices[matrix] = query_base + head * head_stride;
-      score_matrices[matrix] = score_base + head * score_stride;
-      ++matrix;
+    cublas_status = cublasSgemmStridedBatched(
+        handle, CUBLAS_OP_T, CUBLAS_OP_N, squares, squares, head_depth, &scale,
+        key_base, qkv_width, head_stride, query_base, qkv_width, head_stride,
+        &beta, score_base, squares, score_stride, heads);
+    if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+      throw std::runtime_error(CublasErrorMessage(
+          "cublasSgemmStridedBatched(attention_score)", cublas_status));
     }
-  }
-  cublas_status = cublasSgemmBatched(
-      handle, CUBLAS_OP_T, CUBLAS_OP_N, squares, squares, head_depth, &scale,
-      key_matrices.data(), qkv_width, query_matrices.data(), qkv_width, &beta,
-      score_matrices.data(), squares, gemm_batches);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(CublasErrorMessage(
-        "cublasSgemmBatched(attention_score)", cublas_status));
   }
   if (stream)
     return;
@@ -1134,35 +1119,19 @@ void LaunchAttentionContextKernel(const float *probabilities,
       static_cast<std::size_t>(squares) * qkv_width;
   const std::size_t probability_batch_stride =
       static_cast<std::size_t>(heads) * squares * squares;
-  const int gemm_batches = batch_size * heads;
-  thread_local std::vector<const float *> value_matrices;
-  thread_local std::vector<const float *> probability_matrices;
-  thread_local std::vector<float *> context_matrices;
-  value_matrices.resize(gemm_batches);
-  probability_matrices.resize(gemm_batches);
-  context_matrices.resize(gemm_batches);
-
-  int matrix = 0;
   for (int batch = 0; batch < batch_size; ++batch) {
     const float *value_base = value + batch * qkv_batch_stride;
     const float *probability_base =
         probabilities + batch * probability_batch_stride;
     float *context_base = context + batch * qkv_batch_stride;
-    for (int head = 0; head < heads; ++head) {
-      value_matrices[matrix] = value_base + head * head_stride;
-      probability_matrices[matrix] =
-          probability_base + head * probability_stride;
-      context_matrices[matrix] = context_base + head * head_stride;
-      ++matrix;
+    cublas_status = cublasSgemmStridedBatched(
+        handle, CUBLAS_OP_N, CUBLAS_OP_N, head_depth, squares, squares, &alpha,
+        value_base, qkv_width, head_stride, probability_base, squares,
+        probability_stride, &beta, context_base, qkv_width, head_stride, heads);
+    if (cublas_status != CUBLAS_STATUS_SUCCESS) {
+      throw std::runtime_error(CublasErrorMessage(
+          "cublasSgemmStridedBatched(attention_context)", cublas_status));
     }
-  }
-  cublas_status = cublasSgemmBatched(
-      handle, CUBLAS_OP_N, CUBLAS_OP_N, head_depth, squares, squares, &alpha,
-      value_matrices.data(), qkv_width, probability_matrices.data(), squares,
-      &beta, context_matrices.data(), qkv_width, gemm_batches);
-  if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    throw std::runtime_error(CublasErrorMessage(
-        "cublasSgemmBatched(attention_context)", cublas_status));
   }
   if (stream)
     return;
