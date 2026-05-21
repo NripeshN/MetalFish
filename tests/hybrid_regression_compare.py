@@ -36,6 +36,8 @@ PERF_POSITIONS: List[Tuple[str, str]] = [
     ("endgame", "8/5pk1/5p1p/2R5/pp6/1P4PP/P4PK1/2r5 w - - 0 36"),
 ]
 
+_READ_TIMEOUT = object()
+
 
 @dataclass
 class SearchResult:
@@ -127,11 +129,11 @@ class UCISession:
         self.proc.stdin.write(command + "\n")
         self.proc.stdin.flush()
 
-    def read_line_until(self, deadline: float) -> Optional[str]:
+    def read_line_until(self, deadline: float):
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return ""
+                return _READ_TIMEOUT
             if self.proc.poll() is not None and self._stdout_queue.empty():
                 return None
             try:
@@ -153,8 +155,10 @@ class UCISession:
                     f"{self.label}: stdout closed while waiting for {prefix} "
                     f"(exit={self.proc.returncode}); tail={self.tail()}"
                 )
-            if text == "":
+            if text is _READ_TIMEOUT:
                 break
+            if text == "":
+                continue
             self.remember(text)
             if text.startswith(prefix):
                 return text
@@ -199,10 +203,12 @@ class UCISession:
                     f"{self.label}: stdout closed during {name} "
                     f"(exit={self.proc.returncode}); tail={self.tail()}"
                 )
-            if text == "":
+            if text is _READ_TIMEOUT:
                 raise TimeoutError(
                     f"{self.label}: search timeout on {name}; {self.tail()}"
                 )
+            if text == "":
+                continue
             self.remember(text)
             if text.startswith("bestmove"):
                 parts = text.split()
