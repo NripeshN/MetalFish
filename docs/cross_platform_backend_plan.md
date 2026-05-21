@@ -339,10 +339,11 @@ Current CUDA backend boundary:
 - The CUDA GPU gate now emits `cuda-gpu-summary.md` on both success and
   failure, with the selected NVIDIA device, resolved backend string, batch
   timings when enabled, direct failure snippets, UCI bestmoves when reached,
-  and a pointer to `cuda-gpu-parity-report.md`. The parity report records fixed
-  BT4 reference deltas plus single-vs-batch drift across the expanded batch
-  corpus, so remote CUDA runs preserve the evidence needed to investigate
-  silent backend drift. The accepted 2026-05-21 L4 gate
+  stage-trace compare lines when tracing is enabled, dynamic positional
+  encoding trace summaries, and a pointer to `cuda-gpu-parity-report.md`. The
+  parity report records fixed BT4 reference deltas plus single-vs-batch drift
+  across the expanded batch corpus, so remote CUDA runs preserve the evidence
+  needed to investigate silent backend drift. The accepted 2026-05-21 L4 gate
   `metalfish-cuda-gate-20260521-123738` verified the failure-summary trap and
   backend-marker fallback in a narrow no-benchmark pass; the rejected
   `metalfish-cuda-gate-20260521-125504` host-packing experiment validated that

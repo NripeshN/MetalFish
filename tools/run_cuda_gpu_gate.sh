@@ -186,6 +186,24 @@ write_summary() {
       grep -m1 "TRACE_WORST_REUSED_BATCH_TOP:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     fi
     if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+       grep -q "CUDA_STAGE_TRACE_COMPARE" \
+         "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+      echo
+      echo "## CUDA Stage Trace Compare"
+      echo
+      grep -m12 "CUDA_STAGE_TRACE_COMPARE" \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
+    fi
+    if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+       grep -Eq '^CUDA_STAGE_TRACE .*name=.*\.(expanded|position_input|dense)' \
+         "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+      echo
+      echo "## CUDA Dynamic PE Trace"
+      echo
+      grep -E '^CUDA_STAGE_TRACE .*name=.*\.(expanded|position_input|dense)' \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" | head -12 || true
+    fi
+    if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
        grep -q "^[[:space:]]*REUSE_STRESS_MAX:" \
          "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
       echo
