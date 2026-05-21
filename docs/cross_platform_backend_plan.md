@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260520-230541`, L4, 2026-05-20 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260521-113414`, L4, 2026-05-21 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -255,6 +255,20 @@ Current CUDA backend boundary:
   meaningful batch drift without failing on cuBLAS batch-shape variance. The
   accepted `metalfish-cuda-gate-20260520-213518` run reported worst batch
   policy drift `0.039534` and worst moves-left drift `0.054993`.
+- `METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX=1` enables an opt-in
+  deterministic CUDA attention softmax for repeatability probes. The 2026-05-21
+  L4 gate `metalfish-cuda-gate-20260521-112545` accepted CUDA unit tests,
+  single-repeat stress with zero observed policy/value/moves-left delta, and
+  auto/CUDA/hybrid UCI smokes. The default fast path remained enabled and
+  passed the follow-up L4 gate `metalfish-cuda-gate-20260521-113414` with the
+  known CUDA single-repeat variance still inside the existing parity limits
+  (`policy_delta=0.018697`, `moves_left_delta=0.083893`).
+- A second pointer-batched attention GEMM attempt was rejected after the
+  2026-05-21 L4 gate `metalfish-cuda-gate-20260521-120602` failed the fixed
+  BT4 reference check on BK.07 (`a3b4` policy-logit drift `0.057445` against
+  the CUDA fixed-reference tolerance). The batch-16/32 speed gain was modest,
+  so the experiment was reverted instead of loosening tolerances or leaving a
+  numerically unstable opt-in path.
 - `test_nn_comparison` has an opt-in targeted batch probe
   (`METALFISH_NN_BATCH_TRACE_PAIR=1`) that prints the delta for one selected
   entry as both a single eval and a member of a larger batch. This is the safe
