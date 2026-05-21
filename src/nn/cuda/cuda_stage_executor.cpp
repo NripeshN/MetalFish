@@ -158,25 +158,23 @@ int ReserveCudaStageTraceReport(int batch_size) {
   return run;
 }
 
-void TraceCudaStageOutput(int run, int stage_index, std::string_view name,
-                          CudaExecutionScheduleKind kind,
-                          const CudaDenseStageOutput &stage,
-                          cudaStream_t stream) {
-  if (run < 0 || !stage.output || stage.rows <= 0 || stage.output_width <= 0)
+void TraceCudaBufferOutput(int run, int stage_index, std::string_view name,
+                           CudaExecutionScheduleKind kind, const float *buffer,
+                           int rows, int width, cudaStream_t stream) {
+  if (run < 0 || !buffer || rows <= 0 || width <= 0)
     return;
   if (!EnvSubstringMatches("METALFISH_CUDA_TRACE_STAGE_FILTER", name))
     return;
 
   const std::size_t entries =
-      static_cast<std::size_t>(stage.rows) *
-      static_cast<std::size_t>(stage.output_width);
+      static_cast<std::size_t>(rows) * static_cast<std::size_t>(width);
   const int max_entries = EnvIntOrDefault(
       "METALFISH_CUDA_TRACE_STAGE_MAX_FLOATS", 0, 0, 100000000);
   const std::size_t sampled_entries =
       max_entries > 0 ? std::min<std::size_t>(entries, max_entries) : entries;
   std::vector<float> host(sampled_entries);
   const cudaError_t copy_status = cudaMemcpyAsync(
-      host.data(), stage.output, sampled_entries * sizeof(float),
+      host.data(), buffer, sampled_entries * sizeof(float),
       cudaMemcpyDeviceToHost, stream);
   if (copy_status != cudaSuccess) {
     throw std::runtime_error(
@@ -220,7 +218,7 @@ void TraceCudaStageOutput(int run, int stage_index, std::string_view name,
   out << std::fixed << std::setprecision(6)
       << "CUDA_STAGE_TRACE run=" << run << " stage=" << stage_index
       << " kind=" << CudaExecutionScheduleKindName(kind) << " name=" << name
-      << " rows=" << stage.rows << " width=" << stage.output_width
+      << " rows=" << rows << " width=" << width
       << " entries=" << entries << " sampled=" << sampled_entries
       << " sum=" << sum << " abs_sum=" << abs_sum
       << " weighted_sum=" << weighted_sum << " min=" << min_value
@@ -237,6 +235,25 @@ void TraceCudaStageOutput(int run, int stage_index, std::string_view name,
     out << ']';
   }
   std::cerr << out.str() << std::endl;
+}
+
+void TraceCudaStageOutput(int run, int stage_index, std::string_view name,
+                          CudaExecutionScheduleKind kind,
+                          const CudaDenseStageOutput &stage,
+                          cudaStream_t stream) {
+  TraceCudaBufferOutput(run, stage_index, name, kind, stage.output, stage.rows,
+                        stage.output_width, stream);
+}
+
+void TraceCudaAttentionBuffer(int run, int stage_index, int sub_index,
+                              std::string_view name,
+                              CudaExecutionScheduleKind kind,
+                              const float *buffer, int rows, int width,
+                              cudaStream_t stream) {
+  if (!EnvFlagEnabled("METALFISH_CUDA_TRACE_ATTENTION_INTERNALS"))
+    return;
+  TraceCudaBufferOutput(run, stage_index * 100 + sub_index, name, kind, buffer,
+                        rows, width, stream);
 }
 
 DenseStageActivation ActivationFromName(const std::string &activation) {
@@ -1414,6 +1431,8 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
   output.context = tape.Reserve(workspace, context_binding);
   output.score_rows = score_rows;
   output.score_width = attention.squares;
+  output.smolgen_dense1_width = attention.smolgen.dense1_width;
+  output.smolgen_dense2_width = attention.smolgen.dense2_width;
   output.rows = square_rows;
   output.qkv_width = attention.qkv_width;
   output.heads = attention.heads;
@@ -1561,12 +1580,74 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
       const auto input_projection = ExecuteAttentionInputProjectionStage(
           execution_plan, entry.first_step, weights, stage_input, tape,
           workspace, batch_size);
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 1,
+                               step.name + ".query", entry.kind,
+                               input_projection.query, input_projection.rows,
+                               input_projection.qkv_width,
+                               workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 2,
+                               step.name + ".key", entry.kind,
+                               input_projection.key, input_projection.rows,
+                               input_projection.qkv_width,
+                               workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 3,
+                               step.name + ".value", entry.kind,
+                               input_projection.value, input_projection.rows,
+                               input_projection.qkv_width,
+                               workspace.Stream());
       const auto core = ExecuteAttentionCoreStage(
           execution_plan, entry.first_step, input_projection, tape, workspace,
           batch_size, &weights, stage_input);
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 4,
+                               step.name + ".scores", entry.kind, core.scores,
+                               core.score_rows, core.score_width,
+                               workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 5,
+                               step.name + ".smolgen.bias", entry.kind,
+                               core.attention_bias, core.score_rows,
+                               core.score_width, workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 6,
+                               step.name + ".smolgen.dense1", entry.kind,
+                               core.smolgen_dense1, batch_size,
+                               core.smolgen_dense1_width,
+                               workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 7,
+                               step.name + ".smolgen.norm1", entry.kind,
+                               core.smolgen_norm1, batch_size,
+                               core.smolgen_dense1_width,
+                               workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 8,
+                               step.name + ".smolgen.dense2", entry.kind,
+                               core.smolgen_dense2, batch_size,
+                               core.smolgen_dense2_width,
+                               workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 9,
+                               step.name + ".smolgen.activation2", entry.kind,
+                               core.smolgen_activation2, batch_size,
+                               core.smolgen_dense2_width,
+                               workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 10,
+                               step.name + ".smolgen.norm2", entry.kind,
+                               core.smolgen_norm2, batch_size,
+                               core.smolgen_dense2_width,
+                               workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 11,
+                               step.name + ".probabilities", entry.kind,
+                               core.probabilities, core.score_rows,
+                               core.score_width, workspace.Stream());
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 12,
+                               step.name + ".context", entry.kind,
+                               core.context, core.rows, core.qkv_width,
+                               workspace.Stream());
       const auto output_projection = ExecuteAttentionOutputProjectionStage(
           execution_plan, entry.first_step, weights, core.context, tape,
           workspace, batch_size);
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 13,
+                               step.name + ".projection", entry.kind,
+                               output_projection.projection,
+                               output_projection.rows,
+                               output_projection.output_width,
+                               workspace.Stream());
       stage = ExecuteAttentionResidualLayerNormStage(
           execution_plan, execution_plan.steps[entry.second_step], stage_input,
           output_projection, weights, tape, workspace, batch_size);

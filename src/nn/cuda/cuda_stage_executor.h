@@ -74,6 +74,8 @@ struct CudaAttentionCoreOutput {
   float *context = nullptr;
   int score_rows = 0;
   int score_width = 0;
+  int smolgen_dense1_width = 0;
+  int smolgen_dense2_width = 0;
   int rows = 0;
   int qkv_width = 0;
   int heads = 0;
