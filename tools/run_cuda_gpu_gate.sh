@@ -214,6 +214,7 @@ fi
   echo "- CUDA full buffer clear: ${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}"
   echo "- CUDA release single workspace each run: ${METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN:-0}"
   echo "- CUDA release workspace each run: ${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}"
+  echo "- CUDA deterministic single attention: ${METALFISH_CUDA_DETERMINISTIC_SINGLE_ATTENTION:-0}"
   echo "- CUDA raw output trace: ${METALFISH_CUDA_TRACE_RAW_OUTPUTS:-0}"
   echo "- CUDA stage output trace: ${METALFISH_CUDA_TRACE_STAGE_OUTPUTS:-0}"
   echo "- cuBLAS workspace config: ${CUBLAS_WORKSPACE_CONFIG:-unset}"

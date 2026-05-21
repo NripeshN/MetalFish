@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -64,6 +65,19 @@ std::string CublasErrorMessage(const char *op, cublasStatus_t status) {
   std::ostringstream out;
   out << op << " failed: " << CublasStatusName(status);
   return out.str();
+}
+
+bool EnvFlagOrDefault(const char *name, bool fallback) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  return !(value[0] == '0' && value[1] == '\0');
+}
+
+bool UseDeterministicSingleAttention() {
+  static const bool enabled =
+      EnvFlagOrDefault("METALFISH_CUDA_DETERMINISTIC_SINGLE_ATTENTION", false);
+  return enabled;
 }
 
 class ThreadLocalCublasHandle {
@@ -428,6 +442,55 @@ __global__ void AttentionBiasSoftmaxKernel(float *scores, const float *bias,
     probability_row[col] = sum > 0.0f ? probability_row[col] / sum : 0.0f;
 }
 
+__global__ void AttentionScoreSingleKernel(const float *query,
+                                           const float *key, float *scores,
+                                           int heads, int squares,
+                                           int head_depth, int qkv_width,
+                                           float scale) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  const int total = heads * squares * squares;
+  if (index >= total)
+    return;
+
+  const int key_square = index % squares;
+  const int query_square = (index / squares) % squares;
+  const int head = index / (squares * squares);
+  const int head_offset = head * head_depth;
+  const float *query_row = query + query_square * qkv_width + head_offset;
+  const float *key_row = key + key_square * qkv_width + head_offset;
+
+  float sum = 0.0f;
+  for (int d = 0; d < head_depth; ++d)
+    sum = fmaf(query_row[d], key_row[d], sum);
+  scores[index] = sum * scale;
+}
+
+__global__ void AttentionContextSingleKernel(const float *probabilities,
+                                             const float *value,
+                                             float *context, int heads,
+                                             int squares, int head_depth,
+                                             int qkv_width) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  const int total = heads * squares * head_depth;
+  if (index >= total)
+    return;
+
+  const int depth = index % head_depth;
+  const int query_square = (index / head_depth) % squares;
+  const int head = index / (squares * head_depth);
+  const int head_offset = head * head_depth;
+  const float *probability_row =
+      probabilities + (head * squares + query_square) * squares;
+
+  float sum = 0.0f;
+  for (int key_square = 0; key_square < squares; ++key_square) {
+    const float value_entry =
+        value[key_square * qkv_width + head_offset + depth];
+    sum = fmaf(probability_row[key_square], value_entry, sum);
+  }
+  context[query_square * qkv_width + head_offset + depth] = sum;
+}
+
 __device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
 
 void EnsureAttentionPolicyGatherMapUploaded() {
@@ -788,6 +851,25 @@ void LaunchAttentionScoreKernel(const float *query, const float *key,
     throw std::runtime_error("CUDA attention score dimensions are invalid");
   }
 
+  if (batch_size == 1 && UseDeterministicSingleAttention()) {
+    constexpr int kThreads = 256;
+    const int total = heads * squares * squares;
+    const int blocks = (total + kThreads - 1) / kThreads;
+    AttentionScoreSingleKernel<<<blocks, kThreads, 0, stream>>>(
+        query, key, scores, heads, squares, head_depth, qkv_width, scale);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("AttentionScoreSingleKernel launch", status));
+    if (stream)
+      return;
+    status = cudaDeviceSynchronize();
+    if (status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("AttentionScoreSingleKernel synchronize", status));
+    return;
+  }
+
   cublasHandle_t handle = CublasHandle();
   cublasStatus_t cublas_status = cublasSetStream(handle, stream);
   if (cublas_status != CUBLAS_STATUS_SUCCESS) {
@@ -909,6 +991,25 @@ void LaunchAttentionContextKernel(const float *probabilities,
   if (batch_size <= 0 || heads <= 0 || squares <= 0 || head_depth <= 0 ||
       qkv_width <= 0 || qkv_width != heads * head_depth) {
     throw std::runtime_error("CUDA attention context dimensions are invalid");
+  }
+
+  if (batch_size == 1 && UseDeterministicSingleAttention()) {
+    constexpr int kThreads = 256;
+    const int total = heads * squares * head_depth;
+    const int blocks = (total + kThreads - 1) / kThreads;
+    AttentionContextSingleKernel<<<blocks, kThreads, 0, stream>>>(
+        probabilities, value, context, heads, squares, head_depth, qkv_width);
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("AttentionContextSingleKernel launch", status));
+    if (stream)
+      return;
+    status = cudaDeviceSynchronize();
+    if (status != cudaSuccess)
+      throw std::runtime_error(
+          CudaErrorMessage("AttentionContextSingleKernel synchronize", status));
+    return;
   }
 
   cublasHandle_t handle = CublasHandle();
