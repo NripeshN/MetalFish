@@ -86,8 +86,8 @@ Current remote gates:
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260521-200708-profile`, L4, 2026-05-21 |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `b87bc7a8-607f-4069-82f9-fc261726dbe4` |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-002213-graph`, L4, 2026-05-21 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
 Current CUDA backend boundary:
@@ -428,6 +428,17 @@ Current CUDA backend boundary:
   `157-170ms`). It was reverted as a speed regression; future attention work
   should target a custom kernel or graph-captured strided path instead of
   pointer-array cuBLAS.
+- CUDA resolved execution has an opt-in graph replay path behind
+  `METALFISH_CUDA_GRAPH=1` or `METALFISH_CUDA_GRAPH_EXECUTION=1`. The first
+  inference for a batch/workspace generation primes the normal path, the second
+  captures the existing workspace clear, resolved stage sequence, and output
+  mapping without changing math, and later same-key calls replay the graph.
+  The path is disabled when CUDA profiling, stage tracing, attention tracing,
+  dynamic PE tracing, or per-run workspace release knobs are active. The
+  2026-05-21 L4 gate `metalfish-cuda-gate-20260522-002213-graph` accepted the
+  opt-in path with CUDA unit tests, fixed BT4 references, batch parity,
+  single/batch reuse stress, auto/CUDA/hybrid UCI smokes, and batch timings of
+  `b1=6.797ms`, `b16=50.906ms`, and `b32=94.860ms`.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.

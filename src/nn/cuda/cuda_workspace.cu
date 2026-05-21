@@ -130,6 +130,7 @@ float *CudaExecutionWorkspace::ReserveFloats(CudaWorkspaceSlot slot,
   FreeDevice(buffers_[index]);
   buffers_[index] = next;
   capacities_[index] = entries;
+  ++generation_;
   return buffers_[index];
 }
 
@@ -159,6 +160,7 @@ float *CudaExecutionWorkspace::ReserveNamedFloats(std::string_view name,
   FreeDevice(buffer->buffer);
   buffer->buffer = next;
   buffer->capacity = entries;
+  ++generation_;
   return buffer->buffer;
 }
 
@@ -188,6 +190,7 @@ void *CudaExecutionWorkspace::ReserveNamedBytes(std::string_view name,
   FreeDeviceBytes(buffer->buffer);
   buffer->buffer = next;
   buffer->capacity_bytes = bytes;
+  ++generation_;
   return buffer->buffer;
 }
 
@@ -199,6 +202,7 @@ cudaStream_t CudaExecutionWorkspace::Stream() {
       cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking);
   if (status != cudaSuccess)
     throw std::runtime_error(CudaErrorMessage("cudaStreamCreate", status));
+  ++generation_;
   return stream_;
 }
 
@@ -249,6 +253,10 @@ std::size_t CudaExecutionWorkspace::TotalBytes() const {
   return total;
 }
 
+std::uint64_t CudaExecutionWorkspace::Generation() const {
+  return generation_;
+}
+
 void CudaExecutionWorkspace::Clear(cudaStream_t stream) {
   for (std::size_t i = 0; i < buffers_.size(); ++i) {
     ClearDeviceBytes(buffers_[i], capacities_[i] * sizeof(float),
@@ -265,6 +273,9 @@ void CudaExecutionWorkspace::Clear(cudaStream_t stream) {
 }
 
 void CudaExecutionWorkspace::Release() {
+  const bool had_state = stream_ != nullptr || TotalBytes() > 0 ||
+                         !named_buffers_.empty() ||
+                         !named_byte_buffers_.empty();
   if (stream_)
     cudaStreamSynchronize(stream_);
   for (std::size_t i = 0; i < buffers_.size(); ++i) {
@@ -286,6 +297,8 @@ void CudaExecutionWorkspace::Release() {
   named_byte_buffers_.clear();
   DestroyStream(stream_);
   stream_ = nullptr;
+  if (had_state)
+    ++generation_;
 }
 
 CudaWorkspaceSmokeResult RunExecutionWorkspaceSmoke() {

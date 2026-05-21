@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -58,6 +59,7 @@ public:
   std::size_t NamedBufferCount() const;
   std::size_t TotalCapacityFloats() const;
   std::size_t TotalBytes() const;
+  std::uint64_t Generation() const;
   void Clear(cudaStream_t stream = nullptr);
   void Release();
 
@@ -70,6 +72,7 @@ private:
   std::vector<CudaNamedWorkspaceBuffer> named_buffers_;
   std::vector<CudaNamedByteWorkspaceBuffer> named_byte_buffers_;
   cudaStream_t stream_ = nullptr;
+  std::uint64_t generation_ = 1;
 };
 
 struct CudaWorkspaceSmokeResult {

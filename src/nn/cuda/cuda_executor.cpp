@@ -18,8 +18,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <iomanip>
+#include <initializer_list>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -43,6 +45,14 @@ std::string CudaErrorMessage(const char *op, cudaError_t status) {
 bool EnvFlagEnabled(const char *name) {
   const char *value = std::getenv(name);
   return value && value[0] != '\0' && std::string(value) != "0";
+}
+
+bool EnvAnyFlagEnabled(std::initializer_list<const char *> names) {
+  for (const char *name : names) {
+    if (EnvFlagEnabled(name))
+      return true;
+  }
+  return false;
 }
 
 int EnvIntOrDefault(const char *name, int fallback) {
@@ -75,7 +85,7 @@ double MillisSince(std::chrono::steady_clock::time_point start) {
       .count();
 }
 
-void PrepareExecutionWorkspace(const CudaExecutionTape &tape,
+void ReserveExecutionWorkspace(const CudaExecutionTape &tape,
                                CudaExecutionWorkspace &workspace) {
   for (const auto &binding : tape.Bindings()) {
     if (!tape.Reserve(workspace, binding)) {
@@ -83,8 +93,124 @@ void PrepareExecutionWorkspace(const CudaExecutionTape &tape,
                                binding.name);
     }
   }
+}
+
+void PrepareExecutionWorkspace(const CudaExecutionTape &tape,
+                               CudaExecutionWorkspace &workspace) {
+  ReserveExecutionWorkspace(tape, workspace);
   workspace.Clear(workspace.Stream());
 }
+
+void CheckCudaSuccess(const char *op, cudaError_t status) {
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage(op, status));
+}
+
+bool CudaGraphExecutionRequested() {
+  return EnvAnyFlagEnabled(
+      {"METALFISH_CUDA_GRAPH", "METALFISH_CUDA_GRAPH_EXECUTION"});
+}
+
+bool CudaGraphExecutionCompatible() {
+  return !EnvAnyFlagEnabled({
+      "METALFISH_CUDA_PROFILE",
+      "METALFISH_CUDA_TRACE_STAGE_OUTPUTS",
+      "METALFISH_CUDA_TRACE_ATTENTION_INTERNALS",
+      "METALFISH_CUDA_TRACE_DYNAMIC_PE_INTERNALS",
+      "METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN",
+      "METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN",
+  });
+}
+
+void EndFailedCudaGraphCapture(cudaStream_t stream) {
+  cudaGraph_t abandoned = nullptr;
+  const cudaError_t status = cudaStreamEndCapture(stream, &abandoned);
+  if (abandoned)
+    cudaGraphDestroy(abandoned);
+  if (status == cudaSuccess || status == cudaErrorStreamCaptureInvalidated)
+    return;
+  cudaGetLastError();
+}
+
+cudaError_t InstantiateCudaGraph(cudaGraphExec_t *graph_exec,
+                                 cudaGraph_t graph) {
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
+  return cudaGraphInstantiate(graph_exec, graph, 0);
+#else
+  return cudaGraphInstantiate(graph_exec, graph, nullptr, nullptr, 0);
+#endif
+}
+
+struct CudaGraphExecutionKey {
+  int batch_size = 0;
+  std::uint64_t workspace_generation = 0;
+  cudaStream_t stream = nullptr;
+  std::uintptr_t input_masks = 0;
+  std::uintptr_t input_values = 0;
+  std::uintptr_t policy = 0;
+  std::uintptr_t value = 0;
+  std::uintptr_t moves_left = 0;
+  std::uintptr_t raw_policy = 0;
+
+  bool IsValid() const { return batch_size > 0 && stream != nullptr; }
+
+  bool operator==(const CudaGraphExecutionKey &other) const {
+    return batch_size == other.batch_size &&
+           workspace_generation == other.workspace_generation &&
+           stream == other.stream && input_masks == other.input_masks &&
+           input_values == other.input_values && policy == other.policy &&
+           value == other.value && moves_left == other.moves_left &&
+           raw_policy == other.raw_policy;
+  }
+};
+
+std::uintptr_t DevicePtrKey(const void *ptr) {
+  return reinterpret_cast<std::uintptr_t>(ptr);
+}
+
+CudaGraphExecutionKey MakeCudaGraphExecutionKey(
+    int batch_size, std::uint64_t workspace_generation, cudaStream_t stream,
+    const CudaInferenceBuffers &buffers) {
+  return CudaGraphExecutionKey{
+      batch_size,
+      workspace_generation,
+      stream,
+      DevicePtrKey(buffers.input_masks),
+      DevicePtrKey(buffers.input_values),
+      DevicePtrKey(buffers.policy),
+      DevicePtrKey(buffers.value),
+      DevicePtrKey(buffers.moves_left),
+      DevicePtrKey(buffers.raw_policy),
+  };
+}
+
+struct CudaGraphExecutionCache {
+  CudaGraphExecutionKey key;
+  cudaGraph_t graph = nullptr;
+  cudaGraphExec_t graph_exec = nullptr;
+
+  CudaGraphExecutionCache() = default;
+  CudaGraphExecutionCache(const CudaGraphExecutionCache &) = delete;
+  CudaGraphExecutionCache &operator=(const CudaGraphExecutionCache &) = delete;
+
+  ~CudaGraphExecutionCache() { Reset(); }
+
+  bool Matches(const CudaGraphExecutionKey &candidate) const {
+    return graph_exec && key == candidate;
+  }
+
+  void Reset() {
+    if (graph_exec) {
+      cudaGraphExecDestroy(graph_exec);
+      graph_exec = nullptr;
+    }
+    if (graph) {
+      cudaGraphDestroy(graph);
+      graph = nullptr;
+    }
+    key = {};
+  }
+};
 
 struct CudaProfileBucket {
   CudaExecutionScheduleKind kind = CudaExecutionScheduleKind::Unsupported;
@@ -246,12 +372,31 @@ public:
   ResolvedCudaExecutor(CudaExecutionSchedule schedule,
                        CudaOutputMapping output_mapping)
       : schedule_(std::move(schedule)),
-        output_mapping_(std::move(output_mapping)) {}
+        output_mapping_(std::move(output_mapping)),
+        graph_requested_(CudaGraphExecutionRequested()) {}
 
   void Execute(const NetworkTensorPlan &,
                const NetworkResolvedExecutionPlan &execution_plan,
                const CudaWeightBuffers &weights, CudaInferenceBuffers &buffers,
                CudaExecutionWorkspace &workspace, int batch_size) override {
+    Validate(execution_plan, buffers, batch_size);
+
+    if (GraphExecutionEnabled()) {
+      ExecuteGraph(execution_plan, weights, buffers, workspace, batch_size);
+      return;
+    }
+
+    ExecuteUncaptured(execution_plan, weights, buffers, workspace, batch_size,
+                      true);
+  }
+
+  std::string Name() const override {
+    return graph_requested_ ? "resolved+graph" : "resolved";
+  }
+
+private:
+  void Validate(const NetworkResolvedExecutionPlan &,
+                const CudaInferenceBuffers &buffers, int batch_size) const {
     if (batch_size <= 0)
       throw std::runtime_error("CUDA resolved executor received empty batch");
     if (!buffers.input_masks || !buffers.input_values || !buffers.policy)
@@ -266,20 +411,37 @@ public:
           "CUDA resolved executor output mapping failed: " +
           output_mapping_.Summary());
     }
+  }
 
-    const auto tape = CreateResolvedExecutionTape(execution_plan, batch_size);
-    PrepareExecutionWorkspace(tape, workspace);
+  CudaDenseStageSequenceOutput
+  RunSequence(const NetworkResolvedExecutionPlan &execution_plan,
+              const CudaWeightBuffers &weights,
+              const CudaInferenceBuffers &buffers,
+              const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+              int batch_size, CudaStageTimingCollector *timing_collector) const {
     const auto stage_inputs =
         CreateCudaStageInputBindings(execution_plan, schedule_);
-    const int profile_index = ReserveCudaProfileReportIndex();
+    return ExecuteDenseActivationLayerNormSequence(
+        execution_plan, weights, buffers.input_values, buffers.input_masks,
+        buffers.input_values, tape, workspace, batch_size, stage_inputs,
+        schedule_, timing_collector);
+  }
+
+  void ExecuteUncaptured(const NetworkResolvedExecutionPlan &execution_plan,
+                         const CudaWeightBuffers &weights,
+                         CudaInferenceBuffers &buffers,
+                         CudaExecutionWorkspace &workspace, int batch_size,
+                         bool allow_profile) const {
+    const auto tape = CreateResolvedExecutionTape(execution_plan, batch_size);
+    PrepareExecutionWorkspace(tape, workspace);
+    const int profile_index =
+        allow_profile ? ReserveCudaProfileReportIndex() : -1;
     CudaStageTimingCollector timings;
     CudaStageTimingCollector *timing_collector =
         profile_index >= 0 ? &timings : nullptr;
     const auto sequence_start = std::chrono::steady_clock::now();
-    const auto sequence = ExecuteDenseActivationLayerNormSequence(
-        execution_plan, weights, buffers.input_values, buffers.input_masks,
-        buffers.input_values, tape, workspace, batch_size, stage_inputs,
-        schedule_, timing_collector);
+    const auto sequence = RunSequence(execution_plan, weights, buffers, tape,
+                                      workspace, batch_size, timing_collector);
     const double sequence_ms =
         profile_index >= 0 ? MillisSince(sequence_start) : 0.0;
     const auto output_start = std::chrono::steady_clock::now();
@@ -294,11 +456,93 @@ public:
     }
   }
 
-  std::string Name() const override { return "resolved"; }
+  bool GraphExecutionEnabled() const {
+    return graph_requested_ && CudaGraphExecutionCompatible();
+  }
 
-private:
+  void ExecuteCapturedWork(const NetworkResolvedExecutionPlan &execution_plan,
+                           const CudaWeightBuffers &weights,
+                           CudaInferenceBuffers &buffers,
+                           CudaExecutionWorkspace &workspace, int batch_size,
+                           const CudaExecutionTape &tape) const {
+    PrepareExecutionWorkspace(tape, workspace);
+    const auto sequence =
+        RunSequence(execution_plan, weights, buffers, tape, workspace,
+                    batch_size, nullptr);
+    CopyMappedOutputs(output_mapping_, sequence, buffers, workspace,
+                      batch_size);
+  }
+
+  void ExecuteGraph(const NetworkResolvedExecutionPlan &execution_plan,
+                    const CudaWeightBuffers &weights,
+                    CudaInferenceBuffers &buffers,
+                    CudaExecutionWorkspace &workspace, int batch_size) {
+    const auto tape = CreateResolvedExecutionTape(execution_plan, batch_size);
+    ReserveExecutionWorkspace(tape, workspace);
+    cudaStream_t stream = workspace.Stream();
+    const auto key = MakeCudaGraphExecutionKey(
+        batch_size, workspace.Generation(), stream, buffers);
+
+    if (graph_cache_.Matches(key)) {
+      CheckCudaSuccess("cudaGraphLaunch",
+                       cudaGraphLaunch(graph_cache_.graph_exec, stream));
+      workspace.Synchronize();
+      return;
+    }
+
+    if (graph_cache_.graph_exec && !graph_cache_.Matches(key)) {
+      graph_cache_.Reset();
+      graph_primed_key_ = {};
+    }
+
+    if (!(graph_primed_key_ == key)) {
+      ExecuteUncaptured(execution_plan, weights, buffers, workspace,
+                        batch_size, false);
+      graph_primed_key_ = key;
+      return;
+    }
+
+    CheckCudaSuccess("cudaStreamBeginCapture",
+                     cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+    try {
+      ExecuteCapturedWork(execution_plan, weights, buffers, workspace,
+                          batch_size, tape);
+    } catch (...) {
+      EndFailedCudaGraphCapture(stream);
+      graph_cache_.Reset();
+      graph_primed_key_ = {};
+      throw;
+    }
+
+    cudaGraph_t graph = nullptr;
+    try {
+      CheckCudaSuccess("cudaStreamEndCapture",
+                       cudaStreamEndCapture(stream, &graph));
+      cudaGraphExec_t graph_exec = nullptr;
+      CheckCudaSuccess("cudaGraphInstantiate",
+                       InstantiateCudaGraph(&graph_exec, graph));
+      graph_cache_.Reset();
+      graph_cache_.graph = graph;
+      graph_cache_.graph_exec = graph_exec;
+      graph_cache_.key = key;
+    } catch (...) {
+      if (graph)
+        cudaGraphDestroy(graph);
+      graph_cache_.Reset();
+      graph_primed_key_ = {};
+      throw;
+    }
+
+    CheckCudaSuccess("cudaGraphLaunch",
+                     cudaGraphLaunch(graph_cache_.graph_exec, stream));
+    workspace.Synchronize();
+  }
+
   CudaExecutionSchedule schedule_;
   CudaOutputMapping output_mapping_;
+  bool graph_requested_ = false;
+  CudaGraphExecutionKey graph_primed_key_;
+  CudaGraphExecutionCache graph_cache_;
 };
 
 } // namespace

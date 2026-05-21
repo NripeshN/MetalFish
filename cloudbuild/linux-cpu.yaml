@@ -39,6 +39,11 @@ steps:
           tools/uci_smoke.py
         python3 tests/test_benchmark_configs.py
         python3 tools/uci_smoke.py --engine build-linux/metalfish --go "depth 3"
+        python3 tools/uci_smoke.py \
+          --engine build-linux/metalfish \
+          --setoption "UseMCTS=true" \
+          --setoption "NNBackend=stub" \
+          --go "nodes 16"
 
 timeout: 3600s
 options:
