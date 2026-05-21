@@ -349,15 +349,13 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
     throw std::runtime_error("CUDA batch size exceeds configured max batch");
   }
 
-  thread_local std::vector<const float *> input_plane_ptrs;
-  thread_local std::vector<std::uint64_t> input_masks;
-  thread_local std::vector<float> input_values;
-
-  input_plane_ptrs.clear();
+  std::vector<const float *> input_plane_ptrs;
   input_plane_ptrs.reserve(inputs.size());
   for (const auto &input : inputs)
     input_plane_ptrs.push_back(input[0].data());
 
+  std::vector<std::uint64_t> input_masks;
+  std::vector<float> input_values;
   PackInputPlaneBatchHostRaw(input_plane_ptrs, input_masks, input_values);
 
   const bool force_full_buffer_clear =
