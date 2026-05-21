@@ -220,7 +220,6 @@ fi
   echo "- CUDA dynamic PE internals trace: ${METALFISH_CUDA_TRACE_DYNAMIC_PE_INTERNALS:-0}"
   echo "- CUDA trace compare base run: ${METALFISH_CUDA_TRACE_COMPARE_BASE_RUN:-unset}"
   echo "- CUDA trace compare min delta: ${METALFISH_CUDA_TRACE_COMPARE_MIN_DELTA:-1e-7}"
-  echo "- CUDA split attention bias softmax: ${METALFISH_CUDA_SPLIT_ATTENTION_BIAS_SOFTMAX:-0}"
   echo "- cuBLAS workspace config: ${CUBLAS_WORKSPACE_CONFIG:-unset}"
   echo
   echo "## Device"

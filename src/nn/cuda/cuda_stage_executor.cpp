@@ -1563,17 +1563,9 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     output.smolgen_dense2 = smolgen.dense2;
     output.smolgen_activation2 = smolgen.activation2;
     output.smolgen_norm2 = smolgen.norm2;
-    if (EnvFlagEnabled("METALFISH_CUDA_SPLIT_ATTENTION_BIAS_SOFTMAX")) {
-      LaunchAttentionBiasAddKernel(output.scores, smolgen.global_bias,
-                                   batch_size, attention.heads,
-                                   attention.squares, stream);
-      LaunchAttentionSoftmaxKernel(output.scores, output.probabilities,
-                                   score_rows, attention.squares, stream);
-    } else {
-      LaunchAttentionBiasSoftmaxKernel(output.scores, smolgen.global_bias,
-                                       output.probabilities, score_rows,
-                                       attention.squares, stream);
-    }
+    LaunchAttentionBiasSoftmaxKernel(output.scores, smolgen.global_bias,
+                                     output.probabilities, score_rows,
+                                     attention.squares, stream);
     applied_bias_with_softmax = true;
   }
   if (!applied_bias_with_softmax) {
