@@ -195,6 +195,15 @@ write_summary() {
         "${BUILD_DIR}/cuda-gpu-nn-comparison.log" || true
     fi
     if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+       grep -Eq '^CUDA_STAGE_TRACE .*name=.*\.mha\.' \
+         "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+      echo
+      echo "## CUDA Attention Trace"
+      echo
+      grep -E '^CUDA_STAGE_TRACE .*name=.*\.mha\.' \
+        "${BUILD_DIR}/cuda-gpu-nn-comparison.log" | head -16 || true
+    fi
+    if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
        grep -Eq '^CUDA_STAGE_TRACE .*name=.*\.(expanded|position_input|dense)' \
          "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
       echo
