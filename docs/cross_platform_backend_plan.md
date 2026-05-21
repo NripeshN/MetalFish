@@ -343,7 +343,11 @@ Current CUDA backend boundary:
   dynamic positional encoding trace summaries, and a pointer to
   `cuda-gpu-parity-report.md`. Stage traces can now sample one batch entry with
   `METALFISH_CUDA_TRACE_STAGE_ENTRY`, which lets a single-position baseline be
-  compared against the same history entry inside a larger batch. The parity
+  compared against the same history entry inside a larger batch. When
+  `METALFISH_CUDA_TRACE_COMPARE_BASE_RUN=0`, the compare path now treats the
+  first reported trace slice as the baseline even if
+  `METALFISH_CUDA_TRACE_STAGE_SKIP` skipped earlier invocations; compare lines
+  include `baseline_actual_run` so diagnostic logs remain unambiguous. The parity
   report records fixed BT4 reference deltas plus single-vs-batch drift across
   the expanded batch corpus, so remote CUDA runs preserve the evidence needed
   to investigate silent backend drift. The accepted 2026-05-21 L4 gate

@@ -176,6 +176,7 @@ struct CudaTraceBaseline {
   std::vector<float> values;
   int rows = 0;
   int width = 0;
+  int run = -1;
 };
 
 void CompareCudaTraceBuffer(int run, int stage_index, std::string_view name,
@@ -197,12 +198,14 @@ void CompareCudaTraceBuffer(int run, int stage_index, std::string_view name,
   static std::mutex mutex;
   static std::unordered_map<std::string, CudaTraceBaseline> baselines;
   std::lock_guard<std::mutex> lock(mutex);
-  if (run == base_run) {
-    baselines[key] = {host, rows, width};
+  auto baseline_it = baselines.find(key);
+  if (run == base_run ||
+      (base_run == 0 && baseline_it == baselines.end())) {
+    baselines[key] = {host, rows, width, run};
     return;
   }
 
-  const auto baseline_it = baselines.find(key);
+  baseline_it = baselines.find(key);
   if (baseline_it == baselines.end())
     return;
   const CudaTraceBaseline &baseline = baseline_it->second;
@@ -245,6 +248,7 @@ void CompareCudaTraceBuffer(int run, int stage_index, std::string_view name,
       << " row=" << row << " col=" << col
       << " baseline=" << baseline.values[max_index]
       << " actual=" << host[max_index]
+      << " baseline_actual_run=" << baseline.run
       << " baseline_rows=" << baseline.rows
       << " baseline_width=" << baseline.width;
   std::cerr << out.str() << std::endl;
