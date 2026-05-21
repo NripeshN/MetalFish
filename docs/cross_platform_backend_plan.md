@@ -87,7 +87,7 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260521-113414`, L4, 2026-05-21 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260521-123738`, L4, 2026-05-21 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
 
 Current CUDA backend boundary:
@@ -269,6 +269,11 @@ Current CUDA backend boundary:
   the CUDA fixed-reference tolerance). The batch-16/32 speed gain was modest,
   so the experiment was reverted instead of loosening tolerances or leaving a
   numerically unstable opt-in path.
+- A per-thread host input packing buffer reuse attempt was rejected after the
+  2026-05-21 L4 gate `metalfish-cuda-gate-20260521-125504` failed single-reuse
+  stress (`moves_left_delta=0.197540` on
+  `e2e4 e7e6 d2d4 d7d5`). The change reduced CPU allocation churn but made
+  repeated singleton CUDA evals less stable, so it was reverted.
 - `test_nn_comparison` has an opt-in targeted batch probe
   (`METALFISH_NN_BATCH_TRACE_PAIR=1`) that prints the delta for one selected
   entry as both a single eval and a member of a larger batch. This is the safe
@@ -322,16 +327,18 @@ Current CUDA backend boundary:
   state the platform, binary name, source branch/commit, and backend scope.
   The current portable packages are CPU AB plus diagnostic stub-MCTS builds;
   they do not imply CUDA or DirectML strength support.
-- The CUDA GPU gate now emits `cuda-gpu-summary.md` with the selected NVIDIA
-  device, resolved backend string, batch timings, UCI bestmoves, and a pointer
-  to `cuda-gpu-parity-report.md`. The parity report records fixed BT4
-  reference deltas plus single-vs-batch drift across the expanded batch corpus,
-  so remote CUDA runs preserve the evidence needed to investigate silent
-  backend drift. The accepted 2026-05-20 L4 summary
-  `metalfish-cuda-gate-20260520-230541` was device `NVIDIA L4 sm_89`,
-  `NNBackend=auto` resolved to the CUDA transformer backend, and timings were
-  `b1=7.630ms`, `b2=9.601ms`, `b4=13.890ms`, `b8=25.593ms`,
-  `b16=47.127ms`, `b32=95.801ms` (`2.9938ms/eval` at batch 32).
+- The CUDA GPU gate now emits `cuda-gpu-summary.md` on both success and
+  failure, with the selected NVIDIA device, resolved backend string, batch
+  timings when enabled, UCI bestmoves when reached, and a pointer to
+  `cuda-gpu-parity-report.md`. The parity report records fixed BT4 reference
+  deltas plus single-vs-batch drift across the expanded batch corpus, so remote
+  CUDA runs preserve the evidence needed to investigate silent backend drift.
+  The accepted 2026-05-21 L4 gate `metalfish-cuda-gate-20260521-123738`
+  verified the failure-summary trap and backend-marker fallback in a narrow
+  no-benchmark pass; an earlier accepted 2026-05-20 L4 summary
+  `metalfish-cuda-gate-20260520-230541` recorded timings of `b1=7.630ms`,
+  `b2=9.601ms`, `b4=13.890ms`, `b8=25.593ms`, `b16=47.127ms`,
+  `b32=95.801ms` (`2.9938ms/eval` at batch 32).
 - The CUDA attention smoke keeps strict `1e-5` checks for individual Q/K/V,
   smolgen, score, softmax, context, projection, residual, and layernorm
   tensors. The attention-only sequence-level check now uses a `5e-3`
