@@ -1549,6 +1549,8 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
       attention.heads, attention.squares, attention.head_depth,
       attention.qkv_width,
       1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
+  static const bool deterministic_softmax =
+      EnvFlagEnabled("METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX");
   bool applied_bias_with_softmax = false;
   if (attention.smolgen.present) {
     if (!weights || !parent) {
@@ -1566,12 +1568,14 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     output.smolgen_norm2 = smolgen.norm2;
     LaunchAttentionBiasSoftmaxKernel(output.scores, smolgen.global_bias,
                                      output.probabilities, score_rows,
-                                     attention.squares, stream);
+                                     attention.squares, stream,
+                                     deterministic_softmax);
     applied_bias_with_softmax = true;
   }
   if (!applied_bias_with_softmax) {
     LaunchAttentionSoftmaxKernel(output.scores, output.probabilities,
-                                 score_rows, attention.squares, stream);
+                                 score_rows, attention.squares, stream,
+                                 deterministic_softmax);
   }
   TraceCudaAttentionBuffer(trace_run, trace_stage_index, 14,
                            step.name + ".probabilities.post_softmax",

@@ -82,11 +82,13 @@ void LaunchAttentionBiasAddKernel(float *scores, const float *bias,
 
 void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
                                   int rows, int width,
-                                  cudaStream_t stream = nullptr);
+                                  cudaStream_t stream = nullptr,
+                                  bool deterministic = false);
 
 void LaunchAttentionBiasSoftmaxKernel(float *scores, const float *bias,
                                       float *probabilities, int rows, int width,
-                                      cudaStream_t stream = nullptr);
+                                      cudaStream_t stream = nullptr,
+                                      bool deterministic = false);
 
 void LaunchAttentionContextKernel(const float *probabilities,
                                   const float *value, float *context,

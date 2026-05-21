@@ -428,6 +428,112 @@ __global__ void AttentionBiasSoftmaxKernel(float *scores, const float *bias,
     probability_row[col] = sum > 0.0f ? probability_row[col] / sum : 0.0f;
 }
 
+__global__ void AttentionSoftmaxDeterministicKernel(const float *scores,
+                                                    float *probabilities,
+                                                    int width) {
+  extern __shared__ double softmax_deterministic_reductions[];
+  const int row = blockIdx.x;
+  const float *score_row = scores + static_cast<std::size_t>(row) * width;
+  float *probability_row =
+      probabilities + static_cast<std::size_t>(row) * width;
+
+  double max_value = -1.7976931348623157e+308;
+  for (int col = threadIdx.x; col < width; col += blockDim.x)
+    max_value = fmax(max_value, static_cast<double>(score_row[col]));
+  softmax_deterministic_reductions[threadIdx.x] = max_value;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      softmax_deterministic_reductions[threadIdx.x] =
+          fmax(softmax_deterministic_reductions[threadIdx.x],
+               softmax_deterministic_reductions[threadIdx.x + stride]);
+    }
+    __syncthreads();
+  }
+  max_value = softmax_deterministic_reductions[0];
+
+  double sum = 0.0;
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float value = expf(score_row[col] - static_cast<float>(max_value));
+    probability_row[col] = value;
+    sum += static_cast<double>(value);
+  }
+  softmax_deterministic_reductions[threadIdx.x] = sum;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride)
+      softmax_deterministic_reductions[threadIdx.x] +=
+          softmax_deterministic_reductions[threadIdx.x + stride];
+    __syncthreads();
+  }
+  sum = softmax_deterministic_reductions[0];
+
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    probability_row[col] =
+        sum > 0.0 ? static_cast<float>(static_cast<double>(probability_row[col]) /
+                                       sum)
+                  : 0.0f;
+  }
+}
+
+__global__ void AttentionBiasSoftmaxDeterministicKernel(float *scores,
+                                                        const float *bias,
+                                                        float *probabilities,
+                                                        int width) {
+  extern __shared__ double bias_softmax_deterministic_reductions[];
+  const int row = blockIdx.x;
+  float *score_row = scores + static_cast<std::size_t>(row) * width;
+  const float *bias_row = bias + static_cast<std::size_t>(row) * width;
+  float *probability_row =
+      probabilities + static_cast<std::size_t>(row) * width;
+
+  for (int col = threadIdx.x; col < width; col += blockDim.x)
+    score_row[col] += bias_row[col];
+  __syncthreads();
+
+  double max_value = -1.7976931348623157e+308;
+  for (int col = threadIdx.x; col < width; col += blockDim.x)
+    max_value = fmax(max_value, static_cast<double>(score_row[col]));
+  bias_softmax_deterministic_reductions[threadIdx.x] = max_value;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      bias_softmax_deterministic_reductions[threadIdx.x] = fmax(
+          bias_softmax_deterministic_reductions[threadIdx.x],
+          bias_softmax_deterministic_reductions[threadIdx.x + stride]);
+    }
+    __syncthreads();
+  }
+  max_value = bias_softmax_deterministic_reductions[0];
+
+  double sum = 0.0;
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float value = expf(score_row[col] - static_cast<float>(max_value));
+    probability_row[col] = value;
+    sum += static_cast<double>(value);
+  }
+  bias_softmax_deterministic_reductions[threadIdx.x] = sum;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride)
+      bias_softmax_deterministic_reductions[threadIdx.x] +=
+          bias_softmax_deterministic_reductions[threadIdx.x + stride];
+    __syncthreads();
+  }
+  sum = bias_softmax_deterministic_reductions[0];
+
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    probability_row[col] =
+        sum > 0.0 ? static_cast<float>(static_cast<double>(probability_row[col]) /
+                                       sum)
+                  : 0.0f;
+  }
+}
+
 __device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
 
 void EnsureAttentionPolicyGatherMapUploaded() {
@@ -849,17 +955,26 @@ void LaunchAttentionBiasAddKernel(float *scores, const float *bias,
 }
 
 void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
-                                  int rows, int width, cudaStream_t stream) {
+                                  int rows, int width, cudaStream_t stream,
+                                  bool deterministic) {
   if (!scores || !probabilities)
     throw std::runtime_error(
         "CUDA attention softmax kernel received null buffer");
   if (rows <= 0 || width <= 0)
     throw std::runtime_error("CUDA attention softmax dimensions are invalid");
 
-  constexpr int kThreads = 128;
-  const std::size_t shared_bytes = kThreads * sizeof(float);
-  AttentionSoftmaxKernel<<<rows, kThreads, shared_bytes, stream>>>(
-      scores, probabilities, width);
+  if (deterministic) {
+    const int threads = width <= 64 ? 64 : 128;
+    const std::size_t shared_bytes = threads * sizeof(double);
+    AttentionSoftmaxDeterministicKernel<<<rows, threads, shared_bytes,
+                                          stream>>>(scores, probabilities,
+                                                    width);
+  } else {
+    constexpr int kThreads = 128;
+    const std::size_t shared_bytes = kThreads * sizeof(float);
+    AttentionSoftmaxKernel<<<rows, kThreads, shared_bytes, stream>>>(
+        scores, probabilities, width);
+  }
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(
@@ -874,7 +989,7 @@ void LaunchAttentionSoftmaxKernel(const float *scores, float *probabilities,
 
 void LaunchAttentionBiasSoftmaxKernel(float *scores, const float *bias,
                                       float *probabilities, int rows, int width,
-                                      cudaStream_t stream) {
+                                      cudaStream_t stream, bool deterministic) {
   if (!scores || !bias || !probabilities)
     throw std::runtime_error(
         "CUDA attention bias softmax kernel received null buffer");
@@ -882,10 +997,18 @@ void LaunchAttentionBiasSoftmaxKernel(float *scores, const float *bias,
     throw std::runtime_error(
         "CUDA attention bias softmax dimensions are invalid");
 
-  constexpr int kThreads = 128;
-  const std::size_t shared_bytes = kThreads * sizeof(float);
-  AttentionBiasSoftmaxKernel<<<rows, kThreads, shared_bytes, stream>>>(
-      scores, bias, probabilities, width);
+  if (deterministic) {
+    const int threads = width <= 64 ? 64 : 128;
+    const std::size_t shared_bytes = threads * sizeof(double);
+    AttentionBiasSoftmaxDeterministicKernel<<<rows, threads, shared_bytes,
+                                              stream>>>(
+        scores, bias, probabilities, width);
+  } else {
+    constexpr int kThreads = 128;
+    const std::size_t shared_bytes = kThreads * sizeof(float);
+    AttentionBiasSoftmaxKernel<<<rows, kThreads, shared_bytes, stream>>>(
+        scores, bias, probabilities, width);
+  }
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     throw std::runtime_error(
