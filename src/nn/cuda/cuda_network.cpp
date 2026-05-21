@@ -14,12 +14,17 @@
 #include "cuda_output_mapping.h"
 #include "cuda_runtime_probe.h"
 
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
+#include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -41,6 +46,114 @@ bool EnvFlagEnabled(const char *name) {
   if (!value || value[0] == '\0')
     return false;
   return !(value[0] == '0' && value[1] == '\0');
+}
+
+int EnvIntOrDefault(const char *name, int fallback, int min_value,
+                    int max_value) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  char *end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (!end || *end != '\0')
+    return fallback;
+  return std::clamp(static_cast<int>(parsed), min_value, max_value);
+}
+
+struct TensorTopEntry {
+  int index = -1;
+  float value = 0.0f;
+};
+
+TensorTopEntry TopEntry(const std::vector<float> &values, std::size_t offset,
+                        int width) {
+  TensorTopEntry top;
+  if (width <= 0 || offset >= values.size())
+    return top;
+  const std::size_t available = values.size() - offset;
+  const int count = std::min<int>(width, static_cast<int>(available));
+  float best = -std::numeric_limits<float>::infinity();
+  for (int i = 0; i < count; ++i) {
+    const float value = values[offset + static_cast<std::size_t>(i)];
+    if (value > best) {
+      best = value;
+      top.index = i;
+      top.value = value;
+    }
+  }
+  return top;
+}
+
+double TensorSum(const std::vector<float> &values, std::size_t offset,
+                 int width) {
+  if (width <= 0 || offset >= values.size())
+    return 0.0;
+  const std::size_t available = values.size() - offset;
+  const int count = std::min<int>(width, static_cast<int>(available));
+  double sum = 0.0;
+  for (int i = 0; i < count; ++i)
+    sum += values[offset + static_cast<std::size_t>(i)];
+  return sum;
+}
+
+void TraceRawOutputs(const CudaOutputDownload &downloaded,
+                     const NetworkTensorPlan &plan, int batch_size) {
+  if (!EnvFlagEnabled("METALFISH_CUDA_TRACE_RAW_OUTPUTS"))
+    return;
+
+  static std::atomic<int> run_counter{0};
+  static std::atomic<int> trace_counter{0};
+  const int run = run_counter.fetch_add(1, std::memory_order_relaxed);
+  const int limit =
+      EnvIntOrDefault("METALFISH_CUDA_TRACE_RAW_LIMIT", 64, 1, 100000);
+  const int target_entry = EnvIntOrDefault(
+      "METALFISH_CUDA_TRACE_RAW_ENTRY", 0, -1, std::max(0, batch_size - 1));
+
+  for (int b = 0; b < batch_size; ++b) {
+    if (target_entry >= 0 && b != target_entry)
+      continue;
+    const int trace = trace_counter.fetch_add(1, std::memory_order_relaxed);
+    if (trace >= limit)
+      return;
+
+    const std::size_t value_offset =
+        static_cast<std::size_t>(b) * plan.value_outputs;
+    const std::size_t policy_offset =
+        static_cast<std::size_t>(b) * plan.policy_outputs;
+    const std::size_t raw_policy_offset =
+        static_cast<std::size_t>(b) * plan.raw_policy_outputs;
+    const TensorTopEntry policy_top =
+        TopEntry(downloaded.policy, policy_offset, plan.policy_outputs);
+    const TensorTopEntry raw_policy_top =
+        TopEntry(downloaded.raw_policy, raw_policy_offset,
+                 plan.raw_policy_outputs);
+
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(6)
+        << "CUDA_RAW_TRACE run=" << run << " trace=" << trace
+        << " batch=" << batch_size << " entry=" << b;
+    if (plan.wdl && value_offset + 2 < downloaded.value.size()) {
+      out << " wdl=[" << downloaded.value[value_offset] << ','
+          << downloaded.value[value_offset + 1] << ','
+          << downloaded.value[value_offset + 2] << ']';
+    } else if (value_offset < downloaded.value.size()) {
+      out << " value=" << downloaded.value[value_offset];
+    }
+    if (plan.moves_left &&
+        static_cast<std::size_t>(b) < downloaded.moves_left.size()) {
+      out << " moves_left=" << downloaded.moves_left[static_cast<size_t>(b)];
+    }
+    out << " policy_top=" << policy_top.index << ':' << policy_top.value
+        << " policy_sum="
+        << TensorSum(downloaded.policy, policy_offset, plan.policy_outputs);
+    if (plan.raw_policy_outputs > 0) {
+      out << " raw_policy_top=" << raw_policy_top.index << ':'
+          << raw_policy_top.value << " raw_policy_sum="
+          << TensorSum(downloaded.raw_policy, raw_policy_offset,
+                       plan.raw_policy_outputs);
+    }
+    std::cerr << out.str() << std::endl;
+  }
 }
 
 bool IsFinitePolicy(const std::array<float, kPolicyOutputs> &policy) {
@@ -263,6 +376,7 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
                        buffers_, workspace_, batch_size);
 
     const auto downloaded = buffers_.DownloadOutputs(batch_size, stream);
+    TraceRawOutputs(downloaded, tensor_plan_, batch_size);
     return DecodeNetworkOutputBatch(
         tensor_plan_, downloaded.policy.data(), downloaded.policy.size(),
         downloaded.value.data(), downloaded.value.size(),
