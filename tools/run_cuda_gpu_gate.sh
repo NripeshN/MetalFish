@@ -126,7 +126,7 @@ METALFISH_NN_WEIGHTS="${WEIGHTS}" \
   METALFISH_NN_BENCH_ITERS="${METALFISH_NN_BENCH_ITERS:-2}" \
   METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
   METALFISH_CUDA_PROFILE=0 \
-  "${BUILD_DIR}/test_nn_comparison" | tee "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+  "${BUILD_DIR}/test_nn_comparison" 2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
 grep -q "backend: CUDA transformer backend" \
   "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
 
