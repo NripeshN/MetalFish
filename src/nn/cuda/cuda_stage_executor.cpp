@@ -256,6 +256,17 @@ void TraceCudaAttentionBuffer(int run, int stage_index, int sub_index,
                         rows, width, stream);
 }
 
+void TraceCudaDynamicPositionBuffer(int run, int stage_index, int sub_index,
+                                    std::string_view name,
+                                    CudaExecutionScheduleKind kind,
+                                    const float *buffer, int rows, int width,
+                                    cudaStream_t stream) {
+  if (!EnvFlagEnabled("METALFISH_CUDA_TRACE_DYNAMIC_PE_INTERNALS"))
+    return;
+  TraceCudaBufferOutput(run, stage_index * 100 + sub_index, name, kind, buffer,
+                        rows, width, stream);
+}
+
 DenseStageActivation ActivationFromName(const std::string &activation) {
   if (activation.empty())
     return {};
@@ -1572,6 +1583,23 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
       stage = ExecuteDynamicPositionEncodingStage(execution_plan, step, weights,
                                                   input_masks, input_values,
                                                   tape, workspace, batch_size);
+      const int pe_width =
+          stage.output_width - execution_plan.tensors.input_planes;
+      const int dense_width =
+          pe_width > 0 ? pe_width * execution_plan.tensors.input_squares : 0;
+      TraceCudaDynamicPositionBuffer(stage_trace_run, traced_stage_index, 1,
+                                     step.name + ".expanded", entry.kind,
+                                     stage.expanded_input, stage.rows,
+                                     execution_plan.tensors.input_planes,
+                                     workspace.Stream());
+      TraceCudaDynamicPositionBuffer(stage_trace_run, traced_stage_index, 2,
+                                     step.name + ".position_input", entry.kind,
+                                     stage.position_input, batch_size,
+                                     stage.input_width, workspace.Stream());
+      TraceCudaDynamicPositionBuffer(stage_trace_run, traced_stage_index, 3,
+                                     step.name + ".dense", entry.kind,
+                                     stage.dense, batch_size, dense_width,
+                                     workspace.Stream());
     } else if (entry.kind == CudaExecutionScheduleKind::GateStage) {
       stage = ExecuteGateStage(step, weights, stage_input, stage_input_width,
                                tape, workspace, stage_input_rows);
