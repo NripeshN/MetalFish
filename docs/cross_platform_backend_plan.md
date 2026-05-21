@@ -365,6 +365,16 @@ Current CUDA backend boundary:
   sampled expanded input, dense positional input, and dense PE output matched
   between traced runs at the compare threshold, so current preprocessing drift
   is not the source of the observed downstream single-vs-batch variation.
+- The 2026-05-21 L4 diagnostic gate
+  `metalfish-cuda-gate-20260521-142114` accepted skip-safe stage trace
+  baselines and selected attention tracing with
+  `METALFISH_CUDA_TRACE_STAGE_SKIP=8`, `METALFISH_CUDA_TRACE_STAGE_ENTRY=9`,
+  and `METALFISH_CUDA_TRACE_ATTENTION_INTERNALS=1`. The trace-pair target
+  showed identical first-block attention summaries between the selected single
+  baseline and the matching batch entry, while `TRACE_WORST_CONFIRMED` was
+  effectively zero. The remaining measurable drift is now isolated to reused
+  evaluator/workspace paths (`REUSE_STRESS_MAX` policy delta around `0.012`),
+  not fresh single-vs-batch math or the first encoder attention block.
 - The CUDA attention smoke keeps strict `1e-5` checks for individual Q/K/V,
   smolgen, score, softmax, context, projection, residual, and layernorm
   tensors. The attention-only sequence-level check now uses a `5e-3`
