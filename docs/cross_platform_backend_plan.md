@@ -255,14 +255,16 @@ Current CUDA backend boundary:
   meaningful batch drift without failing on cuBLAS batch-shape variance. The
   accepted `metalfish-cuda-gate-20260520-213518` run reported worst batch
   policy drift `0.039534` and worst moves-left drift `0.054993`.
-- `METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX=1` enables an opt-in
-  deterministic CUDA attention softmax for repeatability probes. The 2026-05-21
-  L4 gate `metalfish-cuda-gate-20260521-112545` accepted CUDA unit tests,
-  single-repeat stress with zero observed policy/value/moves-left delta, and
-  auto/CUDA/hybrid UCI smokes. The default fast path remained enabled and
-  passed the follow-up L4 gate `metalfish-cuda-gate-20260521-113414` with the
-  known CUDA single-repeat variance still inside the existing parity limits
-  (`policy_delta=0.018697`, `moves_left_delta=0.083893`).
+- CUDA attention softmax now uses the deterministic reduction path by default;
+  `METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX=0` restores the faster
+  non-deterministic profiling path. The 2026-05-21 L4 gate
+  `metalfish-cuda-gate-20260521-151512-detsoftmax-default` accepted CUDA unit tests,
+  batch parity, single-reuse stress, batch-reuse stress, and auto/CUDA/hybrid
+  UCI smokes with `REUSE_STRESS_MAX policy_delta=0.000008`,
+  `SINGLE_REUSE_STRESS_MAX policy_delta=0.000000`, and `b32=104.992ms`
+  (`3.2810ms/eval`). The prior default fast path was retained only as an opt-out
+  because its reused evaluator paths showed percent-level policy-logit drift on
+  the same L4 gate profile.
 - A second pointer-batched attention GEMM attempt was rejected after the
   2026-05-21 L4 gate `metalfish-cuda-gate-20260521-120602` failed the fixed
   BT4 reference check on BK.07 (`a3b4` policy-logit drift `0.057445` against

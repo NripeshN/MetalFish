@@ -122,6 +122,13 @@ bool EnvFlagEnabled(const char *name) {
   return value && value[0] != '\0' && std::string(value) != "0";
 }
 
+bool EnvFlagOrDefault(const char *name, bool fallback) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  return std::string(value) != "0";
+}
+
 int EnvIntOrDefault(const char *name, int fallback, int min_value,
                     int max_value) {
   const char *value = std::getenv(name);
@@ -1575,7 +1582,7 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
       attention.qkv_width,
       1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
   static const bool deterministic_softmax =
-      EnvFlagEnabled("METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX");
+      EnvFlagOrDefault("METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX", true);
   bool applied_bias_with_softmax = false;
   if (attention.smolgen.present) {
     if (!weights || !parent) {
