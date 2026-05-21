@@ -48,6 +48,13 @@ bool EnvFlagEnabled(const char *name) {
   return !(value[0] == '0' && value[1] == '\0');
 }
 
+bool EnvFlagOrDefault(const char *name, bool fallback) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  return !(value[0] == '0' && value[1] == '\0');
+}
+
 int EnvIntOrDefault(const char *name, int fallback, int min_value,
                     int max_value) {
   const char *value = std::getenv(name);
@@ -352,7 +359,7 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
   PackInputPlaneBatchHostRaw(input_plane_ptrs, input_masks, input_values);
 
   const bool force_full_buffer_clear =
-      EnvFlagEnabled("METALFISH_CUDA_FULL_BUFFER_CLEAR");
+      EnvFlagOrDefault("METALFISH_CUDA_FULL_BUFFER_CLEAR", true);
   const bool release_workspace_each_run =
       EnvFlagEnabled("METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN");
   const bool release_single_workspace_each_run =
