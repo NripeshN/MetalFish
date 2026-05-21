@@ -162,10 +162,9 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
             config_.ane_compute_units);
         StateInfo warmup_state;
         Position warmup_pos;
-        warmup_pos.set(
-            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/"
-            "RNBQKBNR w KQkq - 0 1",
-            false, &warmup_state);
+        warmup_pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/"
+                       "RNBQKBNR w KQkq - 0 1",
+                       false, &warmup_state);
         (void)ane_evaluator_->Evaluate(warmup_pos);
       } catch (const std::exception &e) {
         std::cerr << "[HYB] ANE root probe disabled: " << e.what() << std::endl;
@@ -657,17 +656,28 @@ bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
 }
 
 bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
-                                    bool fixed_budget,
-                                    bool visit_evidence_sane,
+                                    bool fixed_budget, bool visit_evidence_sane,
                                     uint64_t mcts_root_visits,
                                     uint32_t mcts_best_visits,
                                     float visit_share, float root_q_gap,
                                     int mcts_cp, int eval_delta,
                                     float ane_score_margin) {
-  return enabled && ane_agrees_mcts && fixed_budget && visit_evidence_sane &&
-         mcts_root_visits >= 80 && mcts_best_visits >= 64 &&
-         visit_share >= 0.70f && root_q_gap >= 0.20f && mcts_cp >= 120 &&
-         eval_delta >= 60 && ane_score_margin >= 0.02f;
+  if (!enabled || !ane_agrees_mcts || !fixed_budget || !visit_evidence_sane ||
+      root_q_gap < 0.20f || mcts_cp < 120 || eval_delta < 60) {
+    return false;
+  }
+  if (mcts_best_visits > mcts_root_visits)
+    return false;
+
+  if (mcts_root_visits >= 80 && mcts_best_visits >= 64 &&
+      visit_share >= 0.70f && ane_score_margin >= 0.02f) {
+    return true;
+  }
+
+  return mcts_root_visits < 80 && mcts_root_visits >= 50 &&
+         mcts_best_visits >= 50 && visit_share >= 0.90f &&
+         root_q_gap >= 0.50f && mcts_cp >= 200 && eval_delta >= 150 &&
+         ane_score_margin >= 0.10f;
 }
 
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
@@ -1284,21 +1294,27 @@ std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
 
     const int hint_count = std::clamp(config_.ane_root_hint_count, 1, 32);
     hints.reserve(std::min<int>(hint_count, static_cast<int>(order.size())));
+    std::vector<ANERootHintInfo> hint_infos;
+    hint_infos.reserve(
+        std::min<int>(hint_count, static_cast<int>(order.size())));
     for (size_t idx : order) {
       if (should_stop())
         break;
       hints.push_back(children[idx]->move);
+      hint_infos.push_back({children[idx]->move, children[idx]->score});
       if (static_cast<int>(hints.size()) >= hint_count)
         break;
     }
     {
       std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
       ane_root_hints_ = hints;
+      ane_root_hint_infos_ = hint_infos;
     }
   } catch (const std::exception &e) {
     {
       std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
       ane_root_hints_.clear();
+      ane_root_hint_infos_.clear();
     }
     if (config_.trace_decisions) {
       send_info_string(std::string("Hybrid: ANE root probe failed: ") +
@@ -1309,6 +1325,7 @@ std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
     {
       std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
       ane_root_hints_.clear();
+      ane_root_hint_infos_.clear();
     }
     if (config_.trace_decisions)
       send_info_string("Hybrid: ANE root probe failed: unknown error");
@@ -1335,6 +1352,12 @@ std::vector<Move> ParallelHybridSearch::collect_ane_root_order_hints() {
   {
     std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
     ane_root_hints_ = hints;
+    if (ane_root_hint_infos_.size() != ane_root_hints_.size()) {
+      ane_root_hint_infos_.clear();
+      ane_root_hint_infos_.reserve(ane_root_hints_.size());
+      for (Move move : ane_root_hints_)
+        ane_root_hint_infos_.push_back({move, 0.0f});
+    }
   }
   if (config_.trace_decisions && !hints.empty()) {
     std::ostringstream ss;
@@ -1360,9 +1383,8 @@ std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
   for (Move move : collect_ane_root_order_hints())
     add_hint(move);
 
-  const int max_hints =
-      std::clamp(config_.mcts_ab_root_hint_count, 1, 16) +
-      std::clamp(config_.ane_root_hint_count, 1, 32);
+  const int max_hints = std::clamp(config_.mcts_ab_root_hint_count, 1, 16) +
+                        std::clamp(config_.ane_root_hint_count, 1, 32);
   if (static_cast<int>(hints.size()) > max_hints)
     hints.resize(max_hints);
   return hints;
@@ -2084,23 +2106,40 @@ Move ParallelHybridSearch::make_final_decision() {
     return result;
   };
   std::vector<Move> ane_root_hints_snapshot;
+  std::vector<ANERootHintInfo> ane_root_hint_infos_snapshot;
   {
     std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
     ane_root_hints_snapshot = ane_root_hints_;
+    ane_root_hint_infos_snapshot = ane_root_hint_infos_;
   }
   const Move ane_top = ane_root_hints_snapshot.empty()
                            ? Move::none()
                            : ane_root_hints_snapshot.front();
   const bool ane_agrees_mcts = config_.ane_root_probe && ane_top == mcts_best &&
                                mcts_best != Move::none();
+  const float ane_top_score = ane_root_hint_infos_snapshot.empty()
+                                  ? 0.0f
+                                  : ane_root_hint_infos_snapshot[0].score;
+  const float ane_second_score = ane_root_hint_infos_snapshot.size() < 2
+                                     ? ane_top_score
+                                     : ane_root_hint_infos_snapshot[1].score;
+  const float ane_score_margin = ane_root_hint_infos_snapshot.empty()
+                                     ? 0.0f
+                                     : ane_top_score - ane_second_score;
   bool ane_confirmed_mcts_override = false;
   const auto ane_root_hints_to_string = [&]() {
     std::ostringstream ss;
     ss << "[";
+    const bool has_scores =
+        ane_root_hint_infos_snapshot.size() == ane_root_hints_snapshot.size();
     for (size_t i = 0; i < ane_root_hints_snapshot.size(); ++i) {
       if (i > 0)
         ss << ",";
       ss << move_to_string(ane_root_hints_snapshot[i]);
+      if (has_scores) {
+        ss << ":v=" << std::fixed << std::setprecision(3)
+           << ane_root_hint_infos_snapshot[i].score;
+      }
     }
     ss << "]";
     return ss.str();
@@ -2236,7 +2275,9 @@ Move ParallelHybridSearch::make_final_decision() {
        << " ANETop=" << move_to_string(ane_top)
        << " ANEAgreesMCTS=" << (ane_agrees_mcts ? 1 : 0)
        << " ANEConfirmedMCTS=" << (ane_confirmed_mcts_override ? 1 : 0)
-       << " ANERoot=" << ane_root_hints_to_string()
+       << " ANETopScore=" << std::fixed << std::setprecision(3) << ane_top_score
+       << " ANEScoreMargin=" << std::fixed << std::setprecision(3)
+       << ane_score_margin << " ANERoot=" << ane_root_hints_to_string()
        << " MCTSTop=" << top_moves_to_string();
     append_cross_root_trace(ss);
     ss << " ABRoot=" << ab_root_moves_to_string();
@@ -2405,7 +2446,8 @@ Move ParallelHybridSearch::make_final_decision() {
   ane_confirmed_mcts_override = HybridANEConfirmedMCTSOverride(
       config_.ane_confirm_mcts_override, ane_agrees_mcts, mcts_decision_budget,
       mcts_visit_evidence_sane, mcts_confidence_total_nodes,
-      mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta);
+      mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+      ane_score_margin);
   bool mcts_root_rejects_ab = false;
   {
     const int top_count =
@@ -2452,10 +2494,10 @@ Move ParallelHybridSearch::make_final_decision() {
   const char *reason = "ab_default";
   switch (config_.decision_mode) {
   case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
-    choose_mcts = mcts_override_allowed &&
-                  (ane_confirmed_mcts_override ||
-                   (mcts_reliable &&
-                    (!ab_has_clear_preference || eval_delta >= 180)));
+    choose_mcts =
+        mcts_override_allowed &&
+        (ane_confirmed_mcts_override ||
+         (mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180)));
     if (choose_mcts)
       reason = ane_confirmed_mcts_override ? "ane_confirmed_mcts"
                                            : "mcts_primary_reliable";
@@ -2546,7 +2588,9 @@ Move ParallelHybridSearch::make_final_decision() {
        << " ANETop=" << move_to_string(ane_top)
        << " ANEAgreesMCTS=" << (ane_agrees_mcts ? 1 : 0)
        << " ANEConfirmedMCTS=" << (ane_confirmed_mcts_override ? 1 : 0)
-       << " ANERoot=" << ane_root_hints_to_string()
+       << " ANETopScore=" << std::fixed << std::setprecision(3) << ane_top_score
+       << " ANEScoreMargin=" << std::fixed << std::setprecision(3)
+       << ane_score_margin << " ANERoot=" << ane_root_hints_to_string()
        << " MCTSTop=" << top_moves_to_string();
     append_cross_root_trace(ss);
     ss << " ABRoot=" << ab_root_moves_to_string();

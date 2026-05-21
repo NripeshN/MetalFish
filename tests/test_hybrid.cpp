@@ -515,30 +515,60 @@ void test_hybrid_config() {
   {
     TestCase tc("ANE-confirmed MCTS override predicate");
 
-    EXPECT(tc, HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
-                                             0.912f, 0.817f, 242, 242));
-    EXPECT(tc, HybridANEConfirmedMCTSOverride(true, true, true, true, 106, 100,
-                                             0.943f, 1.058f, 336, 306));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(false, true, true, true, 102, 93,
-                                              0.912f, 0.817f, 242, 242));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, false, true, true, 102, 93,
-                                              0.912f, 0.817f, 242, 242));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, false, true, 102, 93,
-                                              0.912f, 0.817f, 242, 242));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, false, 102, 93,
-                                              0.912f, 0.817f, 242, 242));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 79, 93,
-                                              0.912f, 0.817f, 242, 242));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 63,
-                                              0.912f, 0.817f, 242, 242));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
-                                              0.699f, 0.817f, 242, 242));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
-                                              0.912f, 0.199f, 242, 242));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
-                                              0.912f, 0.817f, 119, 242));
-    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
-                                              0.912f, 0.817f, 242, 59));
+    EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                          0.912f, 0.817f, 242, 242, 0.100f));
+    EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 106, 100,
+                                          0.943f, 1.058f, 336, 306, 0.100f));
+    EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
+                                          0.981f, 0.918f, 424, 437, 0.401f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(false, true, true, true, 102, 93,
+                                           0.912f, 0.817f, 242, 242, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, false, true, true, 102, 93,
+                                           0.912f, 0.817f, 242, 242, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, false, true, 102, 93,
+                                           0.912f, 0.817f, 242, 242, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, false, 102, 93,
+                                           0.912f, 0.817f, 242, 242, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 79, 93,
+                                           0.912f, 0.817f, 242, 242, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 63,
+                                           0.912f, 0.817f, 242, 242, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                           0.699f, 0.817f, 242, 242, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                           0.912f, 0.199f, 242, 242, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                           0.912f, 0.817f, 119, 242, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                           0.912f, 0.817f, 242, 59, 0.100f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
+                                           0.912f, 0.817f, 242, 242, 0.019f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
+                                           0.899f, 0.918f, 424, 437, 0.401f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
+                                           0.981f, 0.499f, 424, 437, 0.401f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
+                                           0.981f, 0.918f, 199, 437, 0.401f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
+                                           0.981f, 0.918f, 424, 149, 0.401f));
   }
   {
     TestCase tc("Pawn lever root tie-break classifier");

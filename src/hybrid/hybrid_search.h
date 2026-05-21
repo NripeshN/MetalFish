@@ -440,8 +440,7 @@ bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits);
 
 bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
-                                    bool fixed_budget,
-                                    bool visit_evidence_sane,
+                                    bool fixed_budget, bool visit_evidence_sane,
                                     uint64_t mcts_root_visits,
                                     uint32_t mcts_best_visits,
                                     float visit_share, float root_q_gap,
