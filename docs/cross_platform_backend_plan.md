@@ -87,8 +87,8 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `39a5467f-a249-440a-a4ca-0d698b18fb62` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260521-123738`, L4, 2026-05-21 |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26139638867` |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260521-200708-profile`, L4, 2026-05-21 |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
 Current CUDA backend boundary:
 
@@ -444,6 +444,20 @@ Current CUDA backend boundary:
   summary still capture stage buckets for performance work. On the accepted L4
   profile smoke, the first profiled BT4 eval was `7.351 ms`, led by
   attention/layernorm stages at `4.226 ms`.
+- The 2026-05-21 L4 profile gate
+  `metalfish-cuda-gate-20260521-200708-profile` passed after merging current
+  `main` into `cuda-support`, including CUDA unit tests, BT4 fixed references,
+  batch parity, reuse stresses, auto/CUDA/hybrid UCI smokes, and VM cleanup.
+  Stable execution batch timings on L4 were `b1=7.654ms`,
+  `b2=9.568ms`, `b4=13.860ms`, `b8=25.747ms`, `b16=47.972ms`, and
+  `b32=95.783ms`; batch 16 remains the default because batch 32 does not
+  improve per-eval latency enough to justify more queueing. The profile showed
+  `7.370 ms` sequence time, `0.031 ms` output sync, and `77.229 MB` workspace.
+  The dominant bucket is still attention/layernorm at `4.235 ms` across 15
+  stages, followed by feed-forward/layernorm at `1.707 ms`; the slowest named
+  stage is `body.input_embedding_preprocess` at `0.546 ms`. The next CUDA
+  performance target should be stage orchestration, attention/layernorm launch
+  overhead, or a parity-safe input embedding rewrite.
 - CUDA warmup now synchronizes its stream before the backend constructor
   returns. That keeps cuBLAS work from one freshly-created evaluator from
   overlapping another evaluator on a different stream and prevents first-use
@@ -481,6 +495,11 @@ Portable CI now builds Linux CPU and Windows MinGW CPU artifacts. Both jobs run
 AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds
 verify the MCTS construction path without downloading BT4 weights. The uploaded
 artifacts include a generated manifest that makes this backend scope explicit.
+On branch tip `45d0766`, Linux CPU, Windows MinGW CPU, macOS Metal, and the
+bounded hybrid regression gate were green. The hybrid gate now uses a bounded
+300-puzzle offline sample for PR runs; the accepted run scored candidate BK
+repeats `[22, 22, 22]` versus baseline `[21, 22, 22]`, and candidate puzzles
+`297/300` versus baseline `298/300` with zero candidate errors.
 
 ## First Milestones
 
