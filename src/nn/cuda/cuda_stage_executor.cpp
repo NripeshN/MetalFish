@@ -13,13 +13,19 @@
 #include "cuda_plan_analysis.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <iomanip>
+#include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace MetalFish {
 namespace NN {
@@ -107,6 +113,130 @@ bool StartsWith(std::string_view value, std::string_view prefix) {
 
 bool EndsWith(std::string_view value, std::string_view suffix) {
   return value.ends_with(suffix);
+}
+
+bool EnvFlagEnabled(const char *name) {
+  const char *value = std::getenv(name);
+  return value && value[0] != '\0' && std::string(value) != "0";
+}
+
+int EnvIntOrDefault(const char *name, int fallback, int min_value,
+                    int max_value) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  try {
+    return std::clamp(std::stoi(value), min_value, max_value);
+  } catch (...) {
+    return fallback;
+  }
+}
+
+bool EnvSubstringMatches(const char *name, std::string_view value) {
+  const char *filter = std::getenv(name);
+  if (!filter || filter[0] == '\0')
+    return true;
+  return value.find(filter) != std::string_view::npos;
+}
+
+int ReserveCudaStageTraceReport(int batch_size) {
+  if (!EnvFlagEnabled("METALFISH_CUDA_TRACE_STAGE_OUTPUTS"))
+    return -1;
+  const int target_batch =
+      EnvIntOrDefault("METALFISH_CUDA_TRACE_STAGE_BATCH", -1, -1, 4096);
+  if (target_batch >= 0 && target_batch != batch_size)
+    return -1;
+
+  static std::atomic<int> run_counter{0};
+  const int run = run_counter.fetch_add(1, std::memory_order_relaxed);
+  const int skip =
+      EnvIntOrDefault("METALFISH_CUDA_TRACE_STAGE_SKIP", 0, 0, 1000000);
+  const int limit =
+      EnvIntOrDefault("METALFISH_CUDA_TRACE_STAGE_LIMIT", 1, 1, 1000000);
+  if (run < skip || run >= skip + limit)
+    return -1;
+  return run;
+}
+
+void TraceCudaStageOutput(int run, int stage_index, std::string_view name,
+                          CudaExecutionScheduleKind kind,
+                          const CudaDenseStageOutput &stage,
+                          cudaStream_t stream) {
+  if (run < 0 || !stage.output || stage.rows <= 0 || stage.output_width <= 0)
+    return;
+  if (!EnvSubstringMatches("METALFISH_CUDA_TRACE_STAGE_FILTER", name))
+    return;
+
+  const std::size_t entries =
+      static_cast<std::size_t>(stage.rows) *
+      static_cast<std::size_t>(stage.output_width);
+  const int max_entries = EnvIntOrDefault(
+      "METALFISH_CUDA_TRACE_STAGE_MAX_FLOATS", 0, 0, 100000000);
+  const std::size_t sampled_entries =
+      max_entries > 0 ? std::min<std::size_t>(entries, max_entries) : entries;
+  std::vector<float> host(sampled_entries);
+  const cudaError_t copy_status = cudaMemcpyAsync(
+      host.data(), stage.output, sampled_entries * sizeof(float),
+      cudaMemcpyDeviceToHost, stream);
+  if (copy_status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("cudaMemcpyAsync(stage_trace)", copy_status));
+  }
+  const cudaError_t sync_status = cudaStreamSynchronize(stream);
+  if (sync_status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("cudaStreamSynchronize(stage_trace)", sync_status));
+  }
+
+  double sum = 0.0;
+  double abs_sum = 0.0;
+  double weighted_sum = 0.0;
+  float min_value = std::numeric_limits<float>::infinity();
+  float max_value = -std::numeric_limits<float>::infinity();
+  std::size_t max_index = 0;
+  int nonfinite = 0;
+  for (std::size_t i = 0; i < host.size(); ++i) {
+    const float value = host[i];
+    if (!std::isfinite(value)) {
+      ++nonfinite;
+      continue;
+    }
+    sum += value;
+    abs_sum += std::fabs(static_cast<double>(value));
+    weighted_sum += value * static_cast<double>((i % 997) + 1);
+    if (value < min_value)
+      min_value = value;
+    if (value > max_value) {
+      max_value = value;
+      max_index = i;
+    }
+  }
+  if (host.empty()) {
+    min_value = 0.0f;
+    max_value = 0.0f;
+  }
+
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(6)
+      << "CUDA_STAGE_TRACE run=" << run << " stage=" << stage_index
+      << " kind=" << CudaExecutionScheduleKindName(kind) << " name=" << name
+      << " rows=" << stage.rows << " width=" << stage.output_width
+      << " entries=" << entries << " sampled=" << sampled_entries
+      << " sum=" << sum << " abs_sum=" << abs_sum
+      << " weighted_sum=" << weighted_sum << " min=" << min_value
+      << " max=" << max_value << " max_index=" << max_index
+      << " nonfinite=" << nonfinite;
+  const int sample_count = std::min<int>(3, static_cast<int>(host.size()));
+  if (sample_count > 0) {
+    out << " first=[";
+    for (int i = 0; i < sample_count; ++i) {
+      if (i != 0)
+        out << ',';
+      out << host[static_cast<std::size_t>(i)];
+    }
+    out << ']';
+  }
+  std::cerr << out.str() << std::endl;
 }
 
 DenseStageActivation ActivationFromName(const std::string &activation) {
@@ -1380,6 +1510,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
   const float *current_input = input;
   int current_width = 0;
   int current_rows = batch_size;
+  const int stage_trace_run = ReserveCudaStageTraceReport(batch_size);
+  int traced_stage_index = 0;
   for (const auto &entry : schedule.entries) {
     if (entry.kind != CudaExecutionScheduleKind::DenseLayerNormStage &&
         entry.kind != CudaExecutionScheduleKind::DenseActivationStage &&
@@ -1460,6 +1592,9 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
                                           stage_input_rows);
     }
     timer.Stop();
+    TraceCudaStageOutput(stage_trace_run, traced_stage_index, step.name,
+                         entry.kind, stage, workspace.Stream());
+    ++traced_stage_index;
     if (stage_input_width != 0 && stage.input_width != stage_input_width) {
       throw std::runtime_error(
           "CUDA dense stage sequence input width mismatch");

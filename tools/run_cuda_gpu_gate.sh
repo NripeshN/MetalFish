@@ -113,7 +113,8 @@ cmake -S . -B "${BUILD_DIR}" -G Ninja \
 
 cmake --build "${BUILD_DIR}" --target metalfish metalfish_tests test_nn_comparison -j"${JOBS}"
 
-METALFISH_CUDA_PROFILE=0 \
+METALFISH_CUDA_TRACE_STAGE_OUTPUTS=0 \
+  METALFISH_CUDA_PROFILE=0 \
   "${BUILD_DIR}/metalfish_tests" | tee "${BUILD_DIR}/cuda-gpu-tests.log"
 grep -q "CUDA runtime" "${BUILD_DIR}/cuda-gpu-tests.log"
 
@@ -214,6 +215,7 @@ fi
   echo "- CUDA release single workspace each run: ${METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN:-0}"
   echo "- CUDA release workspace each run: ${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}"
   echo "- CUDA raw output trace: ${METALFISH_CUDA_TRACE_RAW_OUTPUTS:-0}"
+  echo "- CUDA stage output trace: ${METALFISH_CUDA_TRACE_STAGE_OUTPUTS:-0}"
   echo "- cuBLAS workspace config: ${CUBLAS_WORKSPACE_CONFIG:-unset}"
   echo
   echo "## Device"
@@ -228,7 +230,8 @@ fi
   echo
   echo "## Batch Timings"
   echo
-  grep -m1 "batches:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+  grep -m1 "batches:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ||
+    echo "- skipped"
   if grep -q "TRACE_WORST:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
     echo
     echo "## Batch Worst Trace"

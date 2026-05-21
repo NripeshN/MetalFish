@@ -132,6 +132,27 @@ int env_int_or_default(const char *name, int fallback, int min_value,
   }
 }
 
+std::vector<size_t> env_probe_list_or_default(const char *name,
+                                              std::vector<size_t> fallback,
+                                              size_t max_index) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+
+  std::vector<size_t> probes;
+  std::stringstream input(value);
+  std::string token;
+  while (std::getline(input, token, ',')) {
+    try {
+      const size_t probe = static_cast<size_t>(std::stoull(token));
+      if (probe <= max_index)
+        probes.push_back(probe);
+    } catch (...) {
+    }
+  }
+  return probes.empty() ? fallback : probes;
+}
+
 struct ParityReport {
   std::string output_path;
   std::string weights_path;
@@ -1261,7 +1282,9 @@ bool test_mcts_evaluator_single_repeat_stress_optional() {
 
   try {
     const auto &lines = batch_parity_lines();
-    const std::array<size_t, 5> probes = {0, 1, 9, 14, 30};
+    const std::vector<size_t> probes = env_probe_list_or_default(
+        "METALFISH_NN_SINGLE_REPEAT_STRESS_PROBES", {0, 1, 9, 14, 30},
+        lines.empty() ? 0 : lines.size() - 1);
     std::vector<HistoryFixture> fixtures;
     fixtures.reserve(probes.size());
     std::vector<std::vector<const Position *>> histories;
@@ -1274,6 +1297,7 @@ bool test_mcts_evaluator_single_repeat_stress_optional() {
     MCTS::NNMCTSEvaluator eval(weights_path);
     EvalTolerances tolerances;
     const std::string network_info = eval.GetNetworkInfo();
+    std::cout << "    backend: " << network_info << std::endl;
     if (network_info.find("CUDA transformer backend") != std::string::npos) {
       tolerances.value = 2e-3f;
       tolerances.moves_left = 1.25e-1f;
@@ -1544,6 +1568,14 @@ int main() {
   Bitboards::init();
   Position::init();
   NN::InitPolicyTables();
+
+  const char *only = std::getenv("METALFISH_NN_COMPARISON_ONLY");
+  if (only && std::string(only) == "single-repeat-stress") {
+    std::cout << "=== NN Comparison Smoke ===" << std::endl;
+    const bool ok = test_mcts_evaluator_single_repeat_stress_optional();
+    return ok ? 0 : 1;
+  }
+
   auto parity_report = create_parity_report();
 
   std::cout << "=== NN Comparison Smoke ===" << std::endl;
