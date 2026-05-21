@@ -310,7 +310,10 @@ def transformer_block_mb(
         weight=mb.const(val=params["ffn1_w"]),
         bias=mb.const(val=params["ffn1_b"]),
     )
-    if activation == "swish":
+    if activation == "mish":
+        one = mb.const(val=np.array(1.0, dtype=np.float32))
+        z = mb.mul(x=z, y=mb.tanh(x=mb.log(x=mb.add(x=one, y=mb.exp(x=z)))))
+    elif activation == "swish":
         z = mb.mul(x=z, y=mb.sigmoid(x=z))
     else:
         z = mb.gelu(x=z, mode="TANH_APPROXIMATION")
@@ -389,6 +392,10 @@ def gelu_tanh_np(np: Any, x: Any) -> Any:
     return 0.5 * x * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * x**3)))
 
 
+def mish_np(np: Any, x: Any) -> Any:
+    return x * np.tanh(np.log1p(np.exp(x)))
+
+
 def transformer_numpy_once(np: Any, sample: Any, params: dict[str, Any]) -> Any:
     heads = params["heads"]
     head_dim = params["head_dim"]
@@ -410,7 +417,9 @@ def transformer_numpy_once(np: Any, sample: Any, params: dict[str, Any]) -> Any:
 
         z = layer_norm_np(np, residual, params["ln2_gamma"], params["ln2_beta"])
         z = z @ params["ffn1_w"].T + params["ffn1_b"]
-        if params["activation"] == "swish":
+        if params["activation"] == "mish":
+            z = mish_np(np, z)
+        elif params["activation"] == "swish":
             z = z / (1.0 + np.exp(-z))
         else:
             z = gelu_tanh_np(np, z)
@@ -658,7 +667,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--ffn-mult", type=int, default=4)
     parser.add_argument("--layers", type=int, default=1)
-    parser.add_argument("--activation", choices=["gelu", "swish"], default="gelu")
+    parser.add_argument(
+        "--activation", choices=["gelu", "mish", "swish"], default="gelu"
+    )
     parser.add_argument("--policy-channels", type=int, default=32)
     parser.add_argument("--value-outputs", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=10)

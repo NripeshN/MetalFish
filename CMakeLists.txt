@@ -54,8 +54,10 @@ endif()
 # Metal transformer acceleration (Apple Silicon)
 if(APPLE)
   option(USE_METAL "Enable Metal transformer acceleration" ON)
+  option(USE_COREML "Enable Core ML transformer acceleration" ON)
 else()
   option(USE_METAL "Enable Metal transformer acceleration" OFF)
+  option(USE_COREML "Enable Core ML transformer acceleration" OFF)
 endif()
 
 # Metal-cpp headers
@@ -205,6 +207,14 @@ set(NN_SOURCES
     src/nn/network_output_decoder.cpp
     src/nn/network.cpp)
 
+if(APPLE AND USE_COREML)
+  set(NN_SOURCES ${NN_SOURCES} src/nn/coreml/coreml_network.mm)
+  set_source_files_properties(src/nn/coreml/coreml_network.mm
+                              PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_COREML")
+  message(STATUS "Core ML transformer acceleration: ENABLED")
+endif()
+
 # Metal transformer acceleration (macOS only)
 if(USE_METAL AND METAL_CPP_AVAILABLE)
   # Generic Metal device/buffer backend used by diagnostics and shutdown. NNUE
@@ -285,6 +295,7 @@ if(APPLE)
   find_library(FOUNDATION_FRAMEWORK Foundation)
   find_library(ACCELERATE_FRAMEWORK Accelerate)
   find_library(COREFOUNDATION_FRAMEWORK CoreFoundation)
+  find_library(COREML_FRAMEWORK CoreML)
   find_library(QUARTZCORE_FRAMEWORK QuartzCore)
   find_library(MPS_FRAMEWORK MetalPerformanceShaders)
   find_library(MPSGRAPH_FRAMEWORK MetalPerformanceShadersGraph)
@@ -302,6 +313,9 @@ if(APPLE)
       ${QUARTZCORE_FRAMEWORK}
       ${MPS_FRAMEWORK}
       ${MPSGRAPH_FRAMEWORK})
+  endif()
+  if(USE_COREML AND COREML_FRAMEWORK)
+    target_link_libraries(metalfish ${COREML_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
   endif()
 endif()
 
@@ -371,6 +385,12 @@ if(BUILD_TESTS)
       ${MPS_FRAMEWORK}
       ${MPSGRAPH_FRAMEWORK})
   endif()
+  if(APPLE
+     AND USE_COREML
+     AND COREML_FRAMEWORK)
+    target_link_libraries(metalfish_tests ${COREML_FRAMEWORK}
+                          ${FOUNDATION_FRAMEWORK})
+  endif()
   add_test(NAME metalfish_tests COMMAND metalfish_tests)
 
   # Neural network comparison test
@@ -409,7 +429,42 @@ if(BUILD_TESTS)
       ${MPS_FRAMEWORK}
       ${MPSGRAPH_FRAMEWORK})
   endif()
+  if(APPLE
+     AND USE_COREML
+     AND COREML_FRAMEWORK)
+    target_link_libraries(test_nn_comparison ${COREML_FRAMEWORK}
+                          ${FOUNDATION_FRAMEWORK})
+  endif()
   add_test(NAME test_nn_comparison COMMAND test_nn_comparison)
+
+  add_executable(metalfish_nn_probe tools/nn_metal_probe.cpp ${CORE_SOURCES}
+                                    ${NN_SOURCES})
+  target_link_libraries(
+    metalfish_nn_probe Threads::Threads ${METALFISH_PROTOBUF_LIB}
+    ${ZLIB_LIBRARIES} ${ABSL_LIBS})
+
+  if(APPLE AND ACCELERATE_FRAMEWORK)
+    target_link_libraries(metalfish_nn_probe ${ACCELERATE_FRAMEWORK})
+  endif()
+
+  if(APPLE
+     AND USE_METAL
+     AND METAL_CPP_AVAILABLE)
+    target_link_libraries(
+      metalfish_nn_probe
+      ${METAL_FRAMEWORK}
+      ${FOUNDATION_FRAMEWORK}
+      ${COREFOUNDATION_FRAMEWORK}
+      ${QUARTZCORE_FRAMEWORK}
+      ${MPS_FRAMEWORK}
+      ${MPSGRAPH_FRAMEWORK})
+  endif()
+  if(APPLE
+     AND USE_COREML
+     AND COREML_FRAMEWORK)
+    target_link_libraries(metalfish_nn_probe ${COREML_FRAMEWORK}
+                          ${FOUNDATION_FRAMEWORK})
+  endif()
 endif()
 
 # ============================================================================
@@ -420,6 +475,7 @@ message(STATUS "MetalFish Configuration Summary:")
 message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Metal transformer: ${USE_METAL}")
+message(STATUS "  Core ML transformer: ${USE_COREML}")
 message(STATUS "  Native arch tuning: ${METALFISH_ENABLE_NATIVE_ARCH}")
 message(STATUS "  IPO/LTO: ${METALFISH_IPO_SUPPORTED}")
 message(STATUS "  Tests: ${BUILD_TESTS}")

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as dt
 import email.utils
 import io
@@ -28,6 +29,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = ROOT / "build" / "metalfish"
 RESULTS_DIR = ROOT / "results" / "lichess_puzzles"
 LICHESS_API = "https://lichess.org/api"
+DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
+DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
+DEFAULT_ANE_ROOT_HINT_WAIT_MS = 250
+DEFAULT_ANE_MIN_BUDGET_MS = 1000
+SETOPTION_ALIASES = {
+    "HybridANEWeightsPath": "HybridANEWeights",
+}
 USER_AGENT = os.environ.get(
     "METALFISH_HTTP_USER_AGENT",
     "MetalFishPuzzleCI/1.0 (+https://github.com/NripeshN/MetalFish)",
@@ -199,16 +207,32 @@ class SearchAnswer:
     nodes: int = 0
     nps: int = 0
     depth: int = 0
+    ane_hints: int = 0
+    ane_hint_moves: int = 0
+    ane_failures: int = 0
+    ane_last_hints: str = ""
+    hybrid_trace: str = ""
+    hybrid_reason: str = ""
+    hybrid_selected: str = ""
+    hybrid_ab_move: str = ""
+    hybrid_mcts_move: str = ""
+    final_summary: str = ""
 
 
 class UCIEngine:
-    def __init__(self, path: pathlib.Path, options: dict[str, str]):
+    def __init__(
+        self,
+        path: pathlib.Path,
+        options: dict[str, str],
+        cwd: pathlib.Path | None = None,
+    ):
         self.path = path
         self.proc = subprocess.Popen(
             [str(path)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=str(cwd) if cwd else None,
             text=True,
             bufsize=1,
         )
@@ -296,19 +320,7 @@ class UCIEngine:
                 parts = line.split()
                 answer.bestmove = parts[1] if len(parts) > 1 else "0000"
                 return answer
-            if not line.startswith("info "):
-                continue
-            parts = line.split()
-            for idx, token in enumerate(parts[:-1]):
-                try:
-                    if token == "nodes":
-                        answer.nodes = int(parts[idx + 1])
-                    elif token == "nps":
-                        answer.nps = int(parts[idx + 1])
-                    elif token == "depth":
-                        answer.depth = int(parts[idx + 1])
-                except ValueError:
-                    continue
+            update_answer_from_info(line, answer)
         self.send("stop")
         line = self.wait_for("bestmove", 5)
         parts = line.split()
@@ -377,11 +389,113 @@ def engine_options(args) -> dict[str, str]:
                 "MCTSMaxThreads": "0",
             }
         )
+        if args.hybrid_ane_root_probe:
+            options.update(
+                {
+                    "HybridANERootProbe": "true",
+                    "HybridANEWeights": str(args.hybrid_ane_weights),
+                    "HybridANEModelPath": str(args.hybrid_ane_model_path),
+                    "HybridANEComputeUnits": args.hybrid_ane_compute_units,
+                    "HybridANERootHintCount": str(args.hybrid_ane_root_hint_count),
+                    "HybridANERootHintWaitMs": str(args.hybrid_ane_root_hint_wait_ms),
+                    "HybridANEMinBudgetMs": str(args.hybrid_ane_min_budget_ms),
+                }
+            )
     if args.syzygy_path:
         options["SyzygyPath"] = str(args.syzygy_path)
         options["SyzygyProbeDepth"] = "2"
         options["SyzygyProbeLimit"] = "6"
+    options.update(parse_setoptions(args.setoption))
     return options
+
+
+def update_answer_from_info(line: str, answer: SearchAnswer) -> None:
+    if not line.startswith("info "):
+        return
+    if line.startswith("info string Hybrid: AB root hints from ANE"):
+        answer.ane_hints += 1
+        answer.ane_hint_moves += max(0, len(line.split()) - 8)
+        answer.ane_last_hints = line.removeprefix(
+            "info string Hybrid: AB root hints from ANE"
+        ).strip()
+    elif line.startswith("info string Hybrid: ANE root probe failed"):
+        answer.ane_failures += 1
+    elif line.startswith("info string HybridTrace:"):
+        answer.hybrid_trace = line.removeprefix("info string ").strip()
+        fields = parse_hybrid_trace_fields(answer.hybrid_trace)
+        answer.hybrid_reason = fields.get("reason", "")
+        answer.hybrid_selected = fields.get("selected", "")
+        answer.hybrid_ab_move = fields.get("ABMove", "")
+        answer.hybrid_mcts_move = fields.get("MCTSMove", "")
+    elif line.startswith("info string Final:"):
+        answer.final_summary = line.removeprefix("info string ").strip()
+
+    parts = line.split()
+    for idx, token in enumerate(parts[:-1]):
+        try:
+            if token == "nodes":
+                answer.nodes = int(parts[idx + 1])
+            elif token == "nps":
+                answer.nps = int(parts[idx + 1])
+            elif token == "depth":
+                answer.depth = int(parts[idx + 1])
+        except ValueError:
+            continue
+
+
+def parse_hybrid_trace_fields(trace: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for token in trace.split():
+        if "=" not in token:
+            continue
+        name, value = token.split("=", 1)
+        if name:
+            fields[name] = value
+    return fields
+
+
+def search_trace_fields(answer: SearchAnswer) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    if answer.ane_last_hints:
+        fields["ane_last_hints"] = answer.ane_last_hints
+    if answer.hybrid_trace:
+        fields["hybrid_trace"] = answer.hybrid_trace
+    if answer.hybrid_reason:
+        fields["hybrid_reason"] = answer.hybrid_reason
+    if answer.hybrid_selected:
+        fields["hybrid_selected"] = answer.hybrid_selected
+    if answer.hybrid_ab_move:
+        fields["hybrid_ab_move"] = answer.hybrid_ab_move
+    if answer.hybrid_mcts_move:
+        fields["hybrid_mcts_move"] = answer.hybrid_mcts_move
+    if answer.final_summary:
+        fields["final_summary"] = answer.final_summary
+    return fields
+
+
+def parse_setoptions(items: list[str]) -> dict[str, str]:
+    options: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"--setoption requires NAME=VALUE, got {item!r}")
+        name, value = item.split("=", 1)
+        name = name.strip()
+        name = SETOPTION_ALIASES.get(name, name)
+        if not name:
+            raise ValueError(f"--setoption has an empty option name: {item!r}")
+        options[name] = value.strip()
+    return options
+
+
+def validate_ane_args(args) -> None:
+    if not args.hybrid_ane_root_probe:
+        return
+    if args.mode != "hybrid":
+        raise RuntimeError("--hybrid-ane-root-probe requires --mode hybrid")
+    if not args.hybrid_ane_weights.exists():
+        raise RuntimeError(f"ANE weights not found at {args.hybrid_ane_weights}")
+    if not args.hybrid_ane_model_path.exists():
+        raise RuntimeError(f"ANE Core ML model not found at {args.hybrid_ane_model_path}")
 
 
 def board_from_api_puzzle(item: dict) -> chess.Board:
@@ -403,6 +517,131 @@ def board_from_api_puzzle(item: dict) -> chess.Board:
     return board
 
 
+def board_from_csv_puzzle(item: dict) -> chess.Board:
+    puzzle = item.get("puzzle", {})
+    fen = puzzle.get("fen")
+    moves = puzzle.get("moves", [])
+    if not isinstance(fen, str) or not fen.strip():
+        raise ValueError("CSV puzzle is missing FEN")
+    if not isinstance(moves, list) or len(moves) < 2:
+        raise ValueError("CSV puzzle is missing opponent move and solution")
+    board = chess.Board(fen)
+    opponent_move = normalize_move(str(moves[0]), board)
+    if opponent_move is None:
+        raise ValueError("CSV puzzle has illegal opponent move")
+    board.push(chess.Move.from_uci(opponent_move))
+    return board
+
+
+def board_from_puzzle(item: dict) -> chess.Board:
+    if item.get("source") == "lichess_csv":
+        return board_from_csv_puzzle(item)
+    return board_from_api_puzzle(item)
+
+
+def csv_puzzle_item(row: dict[str, str]) -> dict:
+    moves = row.get("Moves", "").split()
+    themes = row.get("Themes", "").split()
+    puzzle: dict[str, object] = {
+        "id": row.get("PuzzleId", ""),
+        "fen": row.get("FEN", ""),
+        "moves": moves,
+        "solution": moves[1:],
+        "themes": themes,
+        "gameUrl": row.get("GameUrl", ""),
+        "openingTags": row.get("OpeningTags", ""),
+    }
+    for source_key, target_key in (
+        ("Rating", "rating"),
+        ("RatingDeviation", "ratingDeviation"),
+        ("Popularity", "popularity"),
+        ("NbPlays", "nbPlays"),
+    ):
+        try:
+            puzzle[target_key] = int(row.get(source_key, ""))
+        except ValueError:
+            pass
+    return {"source": "lichess_csv", "puzzle": puzzle}
+
+
+def csv_row_matches(
+    row: dict[str, str],
+    *,
+    min_rating: int,
+    max_rating: int,
+    min_popularity: int,
+    themes: set[str],
+) -> bool:
+    try:
+        rating = int(row.get("Rating", "0"))
+    except ValueError:
+        return False
+    if min_rating and rating < min_rating:
+        return False
+    if max_rating and rating > max_rating:
+        return False
+    if min_popularity > -100:
+        try:
+            popularity = int(row.get("Popularity", "-101"))
+        except ValueError:
+            return False
+        if popularity < min_popularity:
+            return False
+    if themes:
+        row_themes = set(row.get("Themes", "").split())
+        if not row_themes.intersection(themes):
+            return False
+    return True
+
+
+def parse_theme_filter(value: str) -> set[str]:
+    themes: set[str] = set()
+    for token in value.replace(",", " ").split():
+        token = token.strip()
+        if token:
+            themes.add(token)
+    return themes
+
+
+def parse_auto_int(value: str, *, option_name: str) -> int:
+    if value == "auto":
+        return 0
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"{option_name} must be an integer or 'auto'"
+        ) from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"{option_name} must be >= 0")
+    return parsed
+
+
+def iter_offline_csv_puzzles(args) -> list[dict]:
+    themes = parse_theme_filter(args.themes)
+    puzzles: list[dict] = []
+    with args.offline_csv.open(newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if not csv_row_matches(
+                row,
+                min_rating=args.min_rating,
+                max_rating=args.max_rating,
+                min_popularity=args.min_popularity,
+                themes=themes,
+            ):
+                continue
+            item = csv_puzzle_item(row)
+            try:
+                board_from_csv_puzzle(item)
+            except ValueError:
+                continue
+            puzzles.append(item)
+            if len(puzzles) >= args.max_puzzles:
+                break
+    return puzzles
+
+
 def normalize_move(uci: str, board: chess.Board) -> str | None:
     try:
         move = chess.Move.from_uci(uci)
@@ -413,6 +652,20 @@ def normalize_move(uci: str, board: chess.Board) -> str | None:
     return None
 
 
+def is_mating_move(board: chess.Board, uci: str | None) -> bool:
+    if uci is None:
+        return False
+    try:
+        move = chess.Move.from_uci(uci)
+    except ValueError:
+        return False
+    if move not in board.legal_moves:
+        return False
+    probe = board.copy(stack=False)
+    probe.push(move)
+    return probe.is_checkmate()
+
+
 def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
     puzzle = item.get("puzzle", {})
     puzzle_id = str(puzzle.get("id", ""))
@@ -421,7 +674,7 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
         return {"id": puzzle_id, "solved": False, "error": "missing_solution"}
 
     started = time.monotonic()
-    board = board_from_api_puzzle(item)
+    board = board_from_puzzle(item)
     engine.new_game()
     searches: list[dict] = []
 
@@ -441,17 +694,23 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
 
         answer = engine.search(board, movetime_ms)
         actual = normalize_move(answer.bestmove, board)
-        searches.append(
-            {
-                "ply": idx,
-                "expected": expected,
-                "actual": actual or answer.bestmove,
-                "nodes": answer.nodes,
-                "nps": answer.nps,
-                "depth": answer.depth,
-            }
+        search_record = {
+            "ply": idx,
+            "expected": expected,
+            "actual": actual or answer.bestmove,
+            "nodes": answer.nodes,
+            "nps": answer.nps,
+            "depth": answer.depth,
+            "ane_hints": answer.ane_hints,
+            "ane_hint_moves": answer.ane_hint_moves,
+            "ane_failures": answer.ane_failures,
+        }
+        search_record.update(search_trace_fields(answer))
+        searches.append(search_record)
+        mate_in_one_ok = idx == 0 and len(solution) == 1 and is_mating_move(
+            board, actual
         )
-        if actual != expected:
+        if actual != expected and not mate_in_one_ok:
             return {
                 "id": puzzle_id,
                 "solved": False,
@@ -472,6 +731,17 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
     }
 
 
+def tag_repeat_result(result: dict, repeat_idx: int, repeat_count: int) -> dict:
+    if repeat_count <= 1:
+        return result
+    tagged = dict(result)
+    puzzle_id = str(tagged.get("id", ""))
+    tagged["puzzle_id"] = puzzle_id
+    tagged["repeat"] = repeat_idx + 1
+    tagged["id"] = f"{puzzle_id}#r{repeat_idx + 1}"
+    return tagged
+
+
 def write_summary(path: pathlib.Path, stats: dict) -> None:
     total = max(1, int(stats.get("puzzles", 0)))
     solved = int(stats.get("solved", 0))
@@ -489,6 +759,10 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         f"- Rated submission: {stats.get('rated')}",
         f"- Duration: {stats.get('duration_s', 0):.1f}s",
     ]
+    if int(stats.get("repeat_puzzles", 1)) > 1:
+        lines.append(f"- Repeat passes: {stats.get('repeat_puzzles')}")
+    if stats.get("source"):
+        lines.append(f"- Source: {stats.get('source')}")
     if stats.get("ended"):
         lines.append(f"- Ended: {stats.get('ended')}")
     if stats.get("rate_limit_events"):
@@ -507,12 +781,14 @@ def wait_after_rate_limit(
     remaining_s = deadline - time.monotonic()
     if events_seen >= max_events or remaining_s <= wait_s + 5.0:
         return False
-    print(f"Rate limited; waiting {wait_s:.0f}s before retrying")
+        print(f"Rate limited; waiting {wait_s:.0f}s before retrying", flush=True)
     time.sleep(wait_s)
     return True
 
 
 def run(args) -> int:
+    if args.offline_csv:
+        return run_offline(args)
     if requests is None:
         raise RuntimeError("Python package 'requests' is required")
     token = load_token()
@@ -520,6 +796,7 @@ def run(args) -> int:
         raise RuntimeError(f"Engine not found at {args.engine}")
     if args.mode in {"mcts", "hybrid"} and not args.weights.exists():
         raise RuntimeError(f"Transformer weights not found at {args.weights}")
+    validate_ane_args(args)
 
     args.results_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
@@ -563,10 +840,13 @@ def run(args) -> int:
                 "rate_limit_events": rate_limit_events,
             }
             write_summary(summary_path, stats)
-            print(f"Rate limited before first batch; retry after {exc.wait_s:.0f}s")
+            print(
+                f"Rate limited before first batch; retry after {exc.wait_s:.0f}s",
+                flush=True,
+            )
             return 0
 
-    engine = UCIEngine(args.engine, options)
+    engine = UCIEngine(args.engine, options, args.engine_cwd)
     solved = 0
     total = 0
     started = time.monotonic()
@@ -574,12 +854,14 @@ def run(args) -> int:
 
     print(
         f"Puzzle run: mode={args.mode}, threads={threads}, hash={hash_mb} MB, "
-        f"movetime={args.movetime_ms} ms, batch={args.batch_size}, rated={args.rated}"
+        f"movetime={args.movetime_ms} ms, batch={args.batch_size}, rated={args.rated}",
+        flush=True,
     )
     print(
         f"Resources: logical={os.cpu_count() or 1}, available_memory={available_memory_mb()} MB, "
         f"thread_reserve={os.environ.get('METALFISH_PUZZLE_THREAD_RESERVE', '1')}, "
-        f"memory_reserve={os.environ.get('METALFISH_PUZZLE_MEMORY_RESERVE_MB', '1536')} MB"
+        f"memory_reserve={os.environ.get('METALFISH_PUZZLE_MEMORY_RESERVE_MB', '1536')} MB",
+        flush=True,
     )
 
     try:
@@ -606,7 +888,8 @@ def run(args) -> int:
                     if total % args.progress_interval == 0:
                         print(
                             f"Progress: {solved}/{total} "
-                            f"({solved / max(1, total):.1%})"
+                            f"({solved / max(1, total):.1%})",
+                            flush=True,
                         )
 
                 solutions = [
@@ -636,7 +919,8 @@ def run(args) -> int:
                             continue
                         print(
                             f"Rate limited after {total} puzzle(s); "
-                            f"retry after {exc.wait_s:.0f}s"
+                            f"retry after {exc.wait_s:.0f}s",
+                            flush=True,
                         )
                         ended = "rate_limited"
                         puzzles = []
@@ -660,10 +944,110 @@ def run(args) -> int:
     write_summary(summary_path, stats)
     print(
         f"Finished: solved {solved}/{total} "
-        f"({solved / max(1, total):.2%}) in {duration_s:.1f}s"
+        f"({solved / max(1, total):.2%}) in {duration_s:.1f}s",
+        flush=True,
     )
-    print(f"Results: {jsonl_path}")
-    print(f"Summary: {summary_path}")
+    print(f"Results: {jsonl_path}", flush=True)
+    print(f"Summary: {summary_path}", flush=True)
+
+    accuracy = solved / max(1, total)
+    if total == 0:
+        return 2
+    if accuracy < args.min_accuracy:
+        return 1
+    return 0
+
+
+def run_offline(args) -> int:
+    if not args.engine.exists():
+        raise RuntimeError(f"Engine not found at {args.engine}")
+    if not args.offline_csv.exists():
+        raise RuntimeError(f"Offline puzzle CSV not found at {args.offline_csv}")
+    if args.mode in {"mcts", "hybrid"} and not args.weights.exists():
+        raise RuntimeError(f"Transformer weights not found at {args.weights}")
+    validate_ane_args(args)
+
+    args.results_dir.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
+    jsonl_path = args.results_dir / f"lichess-puzzles-offline-{stamp}.jsonl"
+    summary_path = args.results_dir / f"lichess-puzzles-offline-{stamp}.md"
+
+    options = engine_options(args)
+    threads = int(options["Threads"])
+    hash_mb = int(options["Hash"])
+    puzzles = iter_offline_csv_puzzles(args)
+    if not puzzles:
+        raise RuntimeError("No offline puzzles matched the selected filters")
+
+    engine = UCIEngine(args.engine, options, args.engine_cwd)
+    solved = 0
+    total = 0
+    started = time.monotonic()
+    deadline = started + args.max_minutes * 60.0
+    ended = "completed"
+
+    print(
+        f"Offline puzzle run: mode={args.mode}, threads={threads}, "
+        f"hash={hash_mb} MB, movetime={args.movetime_ms} ms, "
+        f"puzzles={len(puzzles)}, repeats={args.repeat_puzzles}, "
+        f"source={args.offline_csv}",
+        flush=True,
+    )
+    try:
+        with jsonl_path.open("w") as out:
+            for repeat_idx in range(args.repeat_puzzles):
+                for item in puzzles:
+                    if time.monotonic() >= deadline:
+                        ended = "time_budget"
+                        break
+                    try:
+                        result = solve_puzzle(engine, item, args.movetime_ms)
+                    except Exception as exc:
+                        result = {
+                            "id": str(item.get("puzzle", {}).get("id", "")),
+                            "solved": False,
+                            "error": str(exc),
+                        }
+                    result = tag_repeat_result(
+                        result, repeat_idx, args.repeat_puzzles
+                    )
+                    total += 1
+                    solved += 1 if result.get("solved") else 0
+                    out.write(json.dumps(result, sort_keys=True) + "\n")
+                    out.flush()
+                    if total % args.progress_interval == 0:
+                        print(
+                            f"Progress: {solved}/{total} ({solved / total:.1%})",
+                            flush=True,
+                        )
+                if ended == "time_budget":
+                    break
+    finally:
+        engine.close()
+
+    duration_s = time.monotonic() - started
+    stats = {
+        "puzzles": total,
+        "solved": solved,
+        "mode": args.mode,
+        "threads": threads,
+        "hash_mb": hash_mb,
+        "movetime_ms": args.movetime_ms,
+        "rated": False,
+        "duration_s": duration_s,
+        "ended": ended,
+        "source": str(args.offline_csv),
+        "rate_limit_events": 0,
+        "repeat_puzzles": args.repeat_puzzles,
+    }
+    write_summary(summary_path, stats)
+    print(
+        f"Finished: solved {solved}/{total} "
+        f"({solved / max(1, total):.2%}) in {duration_s:.1f}s",
+        flush=True,
+    )
+    print(f"Results: {jsonl_path}", flush=True)
+    print(f"Summary: {summary_path}", flush=True)
 
     accuracy = solved / max(1, total)
     if total == 0:
@@ -676,6 +1060,7 @@ def run(args) -> int:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", type=pathlib.Path, default=ENGINE)
+    parser.add_argument("--engine-cwd", type=pathlib.Path, default=None)
     parser.add_argument("--mode", choices=("ab", "mcts", "hybrid"), default="ab")
     parser.add_argument(
         "--weights",
@@ -683,11 +1068,65 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=ROOT / "networks" / "BT4-1024x15x32h-swa-6147500.pb",
     )
     parser.add_argument("--syzygy-path", type=pathlib.Path, default=None)
-    parser.add_argument("--threads", type=int, default=0)
-    parser.add_argument("--hash-mb", type=int, default=0)
+    parser.add_argument(
+        "--hybrid-ane-root-probe",
+        action="store_true",
+        default=False,
+        help="Enable the Hybrid ANE/Core ML root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-weights",
+        type=pathlib.Path,
+        default=DEFAULT_ANE_WEIGHTS,
+        help="Lc0 weights for the ANE/Core ML root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-model-path",
+        type=pathlib.Path,
+        default=DEFAULT_ANE_MODEL,
+        help="Compiled .mlmodelc or .mlpackage for the ANE/Core ML root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-compute-units",
+        choices=("cpu", "cpu-gpu", "cpu-ne", "all"),
+        default="cpu-ne",
+    )
+    parser.add_argument("--hybrid-ane-root-hint-count", type=int, default=10)
+    parser.add_argument(
+        "--hybrid-ane-root-hint-wait-ms",
+        type=int,
+        default=DEFAULT_ANE_ROOT_HINT_WAIT_MS,
+    )
+    parser.add_argument(
+        "--hybrid-ane-min-budget-ms",
+        type=int,
+        default=DEFAULT_ANE_MIN_BUDGET_MS,
+    )
+    parser.add_argument(
+        "--setoption",
+        action="append",
+        default=[],
+        help="Additional UCI option as NAME=VALUE. Can be repeated.",
+    )
+    parser.add_argument(
+        "--threads",
+        type=lambda value: parse_auto_int(value, option_name="--threads"),
+        default=0,
+    )
+    parser.add_argument(
+        "--hash-mb",
+        type=lambda value: parse_auto_int(value, option_name="--hash-mb"),
+        default=0,
+    )
     parser.add_argument("--movetime-ms", type=int, default=3000)
     parser.add_argument("--max-minutes", type=float, default=335.0)
     parser.add_argument("--max-puzzles", type=int, default=1000000)
+    parser.add_argument(
+        "--repeat-puzzles",
+        type=int,
+        default=1,
+        help="Offline-only repeat passes for volatility/regression gates.",
+    )
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--angle", default="mix")
     parser.add_argument("--rated", action="store_true", default=False)
@@ -697,13 +1136,31 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-rate-limit-waits", type=int, default=5)
     parser.add_argument("--progress-interval", type=int, default=25)
     parser.add_argument("--results-dir", type=pathlib.Path, default=RESULTS_DIR)
+    parser.add_argument(
+        "--offline-csv",
+        type=pathlib.Path,
+        default=None,
+        help="Run a local Lichess puzzle CSV sample instead of the live API.",
+    )
+    parser.add_argument("--min-rating", type=int, default=0)
+    parser.add_argument("--max-rating", type=int, default=0)
+    parser.add_argument("--min-popularity", type=int, default=-101)
+    parser.add_argument(
+        "--themes",
+        default="",
+        help="Comma/space-separated Lichess puzzle themes; any match is accepted.",
+    )
     args = parser.parse_args(argv)
     args.batch_size = max(1, min(50, args.batch_size))
     args.movetime_ms = max(1, args.movetime_ms)
     args.max_minutes = max(0.1, args.max_minutes)
     args.max_puzzles = max(1, args.max_puzzles)
+    args.repeat_puzzles = max(1, args.repeat_puzzles)
     args.progress_interval = max(1, args.progress_interval)
     args.max_rate_limit_waits = max(0, args.max_rate_limit_waits)
+    args.hybrid_ane_root_hint_count = max(1, min(32, args.hybrid_ane_root_hint_count))
+    args.hybrid_ane_root_hint_wait_ms = max(0, args.hybrid_ane_root_hint_wait_ms)
+    args.hybrid_ane_min_budget_ms = max(0, args.hybrid_ane_min_budget_ms)
     return args
 
 

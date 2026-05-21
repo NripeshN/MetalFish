@@ -287,12 +287,21 @@ int BackendComputation::UsedBatchSize() const {
 
 int BackendComputation::TotalInputs() const { return total_inputs_; }
 
-Backend::Backend(const std::string &weights_path, size_t cache_entries)
+Backend::Backend(const std::string &weights_path, size_t cache_entries,
+                 const std::string &backend,
+                 const std::string &coreml_model_path,
+                 const std::string &coreml_compute_units)
     : cache_(cache_entries) {
   try {
-    evaluator_ = std::make_unique<NNMCTSEvaluator>(weights_path);
-    std::cerr << "info string Backend loaded weights: " << weights_path
-              << std::endl;
+    evaluator_ = std::make_unique<NNMCTSEvaluator>(
+        weights_path, backend, coreml_model_path, coreml_compute_units);
+    std::cerr << "info string Backend loaded weights: " << weights_path;
+    if (backend != "auto")
+      std::cerr << " via " << backend;
+    if (backend == "coreml")
+      std::cerr << " model " << coreml_model_path << " units "
+                << coreml_compute_units;
+    std::cerr << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "info string Backend failed to load weights: " << e.what()
               << std::endl;

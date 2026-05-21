@@ -213,7 +213,9 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
     if (!path.empty()) {
       try {
         backend_ = std::make_unique<Backend>(
-            path, static_cast<size_t>(std::max(1, params_.nn_cache_size)));
+            path, static_cast<size_t>(std::max(1, params_.nn_cache_size)),
+            params_.nn_backend, params_.coreml_model_path,
+            params_.coreml_compute_units);
         std::cerr << "[MCTS] Loaded transformer weights: " << path << std::endl;
       } catch (const std::exception &e) {
         std::cerr << "[MCTS] Failed to load weights (" << path
@@ -2290,7 +2292,9 @@ std::unique_ptr<Search> CreateSearch(const SearchParams &config) {
     try {
       backend = std::make_unique<Backend>(
           config.nn_weights_path,
-          static_cast<size_t>(std::max(1, config.nn_cache_size)));
+          static_cast<size_t>(std::max(1, config.nn_cache_size)),
+          config.nn_backend, config.coreml_model_path,
+          config.coreml_compute_units);
     } catch (const std::exception &e) {
       std::cerr << "[MCTS] CreateSearch: backend creation failed: " << e.what()
                 << std::endl;
