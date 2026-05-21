@@ -1698,6 +1698,10 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
                                tape, workspace, stage_input_rows);
     } else if (entry.kind ==
                CudaExecutionScheduleKind::AttentionLayerNormStage) {
+      TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 0,
+                               step.name + ".input", entry.kind, stage_input,
+                               stage_input_rows, stage_input_width,
+                               workspace.Stream());
       const auto input_projection = ExecuteAttentionInputProjectionStage(
           execution_plan, entry.first_step, weights, stage_input, tape,
           workspace, batch_size);
