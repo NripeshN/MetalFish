@@ -1666,6 +1666,8 @@ void ParallelHybridSearch::run_ab_search() {
         item.score = rm.score;
         item.previous_score = rm.previous_score;
         item.average_score = rm.average_score;
+        item.score_lowerbound = rm.score_lowerbound;
+        item.score_upperbound = rm.score_upperbound;
         item.effort = rm.effort;
         ab_root_moves_.push_back(item);
       }
@@ -2047,6 +2049,8 @@ Move ParallelHybridSearch::make_final_decision() {
       ss << move_to_string(root_moves[i].move) << ":s=" << root_moves[i].score
          << ":ps=" << root_moves[i].previous_score
          << ":avg=" << root_moves[i].average_score
+         << ":lb=" << (root_moves[i].score_lowerbound ? 1 : 0)
+         << ":ub=" << (root_moves[i].score_upperbound ? 1 : 0)
          << ":eff=" << root_moves[i].effort;
     }
     ss << "]";

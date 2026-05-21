@@ -112,6 +112,8 @@ public:
     Value score = VALUE_NONE;
     Value previous_score = VALUE_NONE;
     Value average_score = VALUE_NONE;
+    bool score_lowerbound = false;
+    bool score_upperbound = false;
     uint64_t effort = 0;
     int sel_depth = 0;
     std::vector<Move> pv;

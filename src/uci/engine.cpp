@@ -543,6 +543,8 @@ Engine::root_move_snapshot(size_t max_moves) const {
     item.score = rm.score;
     item.previous_score = rm.previousScore;
     item.average_score = rm.averageScore;
+    item.score_lowerbound = rm.scoreLowerbound;
+    item.score_upperbound = rm.scoreUpperbound;
     item.effort = rm.effort;
     item.sel_depth = rm.selDepth;
     item.pv = rm.pv;

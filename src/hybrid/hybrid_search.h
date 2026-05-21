@@ -275,6 +275,8 @@ private:
     int score = 0;
     int previous_score = 0;
     int average_score = 0;
+    bool score_lowerbound = false;
+    bool score_upperbound = false;
     uint64_t effort = 0;
   };
 
