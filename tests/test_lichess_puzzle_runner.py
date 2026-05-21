@@ -170,6 +170,10 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
     expect("ANE hint count", options["HybridANERootHintCount"] == "12")
     expect("ANE wait", options["HybridANERootHintWaitMs"] == "50")
     expect("ANE min budget", options["HybridANEMinBudgetMs"] == "500")
+    expect(
+        "ANE benchmark keeps transformer active",
+        options["TransformerLowTimeFallbackMs"] == "0",
+    )
 
 
 def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
@@ -179,6 +183,28 @@ def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
     expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "0")
     expect(
         "ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "1000"
+    )
+    expect(
+        "ANE benchmark disables low-time fallback",
+        options["TransformerLowTimeFallbackMs"] == "0",
+    )
+
+
+def test_hybrid_ane_low_time_fallback_can_be_overridden() -> None:
+    args = puzzle_runner.parse_args(
+        [
+            "--mode",
+            "hybrid",
+            "--hybrid-ane-root-probe",
+            "--setoption",
+            "TransformerLowTimeFallbackMs=3000",
+        ]
+    )
+    options = puzzle_runner.engine_options(args)
+
+    expect(
+        "explicit fallback override wins",
+        options["TransformerLowTimeFallbackMs"] == "3000",
     )
 
 
@@ -545,6 +571,7 @@ def main() -> int:
     test_csv_filter_and_setoption_parsing()
     test_hybrid_ane_flags_set_uci_options()
     test_hybrid_ane_default_wait_uses_benchmarked_profile()
+    test_hybrid_ane_low_time_fallback_can_be_overridden()
     test_search_info_parser_tracks_ane_hints()
     test_repeat_result_ids_are_comparable()
     test_compare_puzzle_runs_detects_regression()
