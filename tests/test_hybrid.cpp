@@ -743,49 +743,6 @@ void test_hybrid_config() {
                    -32001, 585, 1339424, 2, 80, 0.520f, 0.634f));
   }
   {
-    TestCase tc("Low-budget sentinel MCTS override predicate");
-
-    EXPECT(tc, HybridMCTSLowBudgetSentinelOverride(
-                   true, true, false, 34, 26, 0.765f, 0.470f, 99, 99, 2,
-                   -32001, 3, -0.162f, 0.321f));
-    EXPECT(tc, HybridMCTSLowBudgetSentinelOverride(
-                   true, true, false, 27, 23, 0.852f, 0.905f, 203, 203, 2,
-                   -32001, 2, -0.316f, 0.589f));
-    EXPECT(tc, HybridMCTSLowBudgetSentinelOverride(
-                   true, true, false, 27, 27, 1.000f, 0.000f, 762, 762, 2,
-                   -32001, 2, -0.094f, 0.988f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    false, true, false, 34, 26, 0.765f, 0.470f, 99, 99, 2,
-                    -32001, 3, -0.162f, 0.321f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    true, false, false, 34, 26, 0.765f, 0.470f, 99, 99, 2,
-                    -32001, 3, -0.162f, 0.321f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    true, true, true, 34, 26, 0.765f, 0.470f, 99, 99, 2,
-                    -32001, 3, -0.162f, 0.321f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    true, true, false, 23, 22, 0.957f, 0.470f, 99, 99, 2,
-                    -32001, 3, -0.162f, 0.321f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    true, true, false, 34, 21, 0.765f, 0.470f, 99, 99, 2,
-                    -32001, 3, -0.162f, 0.321f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    true, true, false, 34, 26, 0.739f, 0.470f, 99, 99, 2,
-                    -32001, 3, -0.162f, 0.321f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    true, true, false, 34, 26, 0.765f, 0.470f, 99, 99, 5,
-                    -32001, 3, -0.162f, 0.321f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    true, true, false, 34, 26, 0.765f, 0.470f, 99, 99, 2, 0,
-                    3, -0.162f, 0.321f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    true, true, false, 34, 26, 0.765f, 0.419f, 99, 99, 2,
-                    -32001, 3, -0.080f, 0.321f));
-    EXPECT(tc, !HybridMCTSLowBudgetSentinelOverride(
-                    true, true, false, 34, 26, 0.765f, 0.470f, 79, 99, 2,
-                    -32001, 3, -0.162f, 0.321f));
-  }
-  {
     TestCase tc("Root Q gap ignores unvisited placeholders");
 
     const uint32_t visits[] = {141, 96, 0, 0};

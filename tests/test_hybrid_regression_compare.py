@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import pathlib
 import sys
 
@@ -160,15 +162,16 @@ def test_interleaved_runs_alternate_order() -> None:
 
     compare.run_engine_once = fake_run_engine_once
     try:
-        baseline, candidate = compare.run_interleaved(
-            args,
-            pathlib.Path("baseline-engine"),
-            pathlib.Path("baseline-cwd"),
-            [],
-            pathlib.Path("candidate-engine"),
-            pathlib.Path("candidate-cwd"),
-            [],
-        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            baseline, candidate = compare.run_interleaved(
+                args,
+                pathlib.Path("baseline-engine"),
+                pathlib.Path("baseline-cwd"),
+                [],
+                pathlib.Path("candidate-engine"),
+                pathlib.Path("candidate-cwd"),
+                [],
+            )
     finally:
         compare.run_engine_once = original
 

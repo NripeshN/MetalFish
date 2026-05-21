@@ -634,39 +634,6 @@ bool HybridMCTSCrossRootConfidenceOverride(
          mcts_q - ab_in_mcts_q >= 0.20f;
 }
 
-bool HybridMCTSLowBudgetSentinelOverride(
-    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
-    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
-    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
-    int mcts_in_ab_score, int ab_in_mcts_rank, float ab_in_mcts_q,
-    float mcts_q) {
-  if (!fixed_budget || !visit_evidence_sane || ab_has_clear_preference)
-    return false;
-
-  if (mcts_root_visits < 24 || mcts_best_visits < 22 ||
-      visit_share < 0.74f || mcts_best_visits > mcts_root_visits)
-    return false;
-
-  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 4 ||
-      mcts_in_ab_score != -VALUE_INFINITE)
-    return false;
-
-  if (ab_in_mcts_rank <= 0 || ab_in_mcts_rank > 4)
-    return false;
-
-  const float direct_q_gap = mcts_q - ab_in_mcts_q;
-  const float effective_q_gap = std::max(root_q_gap, direct_q_gap);
-  const bool clear_root_gap =
-      effective_q_gap >= 0.42f && mcts_cp >= 80 && eval_delta >= 80;
-  const bool decisive_value_gap =
-      direct_q_gap >= 0.30f && mcts_cp >= 180 && eval_delta >= 150;
-  const bool overwhelming_short_root =
-      mcts_root_visits <= 60 && visit_share >= 0.95f &&
-      direct_q_gap >= 0.80f && mcts_cp >= 500 && eval_delta >= 400;
-
-  return clear_root_gap || decisive_value_gap || overwhelming_short_root;
-}
-
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits) {
   if (mcts_playouts == 0) {
@@ -2480,14 +2447,6 @@ Move ParallelHybridSearch::make_final_decision() {
           ab_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
           mcts_in_ab.average_score, mcts_in_ab.effort, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
-  const bool mcts_low_budget_sentinel_fixed_budget =
-      mcts_visit_evidence_sane &&
-      HybridMCTSLowBudgetSentinelOverride(
-          mcts_decision_budget, mcts_visit_evidence_sane,
-          ab_has_clear_preference, mcts_confidence_total_nodes,
-          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
-          mcts_in_ab.rank, mcts_in_ab.score, ab_in_mcts.rank, ab_in_mcts.q,
-          mcts_q);
   ane_confirmed_mcts_override = HybridANEConfirmedMCTSOverride(
       config_.ane_confirm_mcts_override, ane_agrees_mcts, mcts_decision_budget,
       mcts_visit_evidence_sane, mcts_confidence_total_nodes,
@@ -2532,8 +2491,7 @@ Move ParallelHybridSearch::make_final_decision() {
   }
   const bool mcts_override_allowed =
       !ab_root_rejects_mcts || ane_confirmed_mcts_override ||
-      mcts_cross_root_confidence_fixed_budget ||
-      mcts_low_budget_sentinel_fixed_budget || mcts_root_rejects_ab ||
+      mcts_cross_root_confidence_fixed_budget || mcts_root_rejects_ab ||
       (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
@@ -2580,9 +2538,6 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_cross_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_cross_root_confidence_fixed_budget";
-    } else if (mcts_low_budget_sentinel_fixed_budget) {
-      choose_mcts = true;
-      reason = "mcts_low_budget_sentinel_fixed_budget";
     } else if (mcts_root_rejects_ab) {
       choose_mcts = true;
       reason = "mcts_root_rejects_ab";
@@ -2628,8 +2583,6 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSRootConfidence=" << (mcts_root_confidence_fixed_budget ? 1 : 0)
        << " MCTSCrossRootConfidence="
        << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
-       << " MCTSLowBudgetSentinel="
-       << (mcts_low_budget_sentinel_fixed_budget ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
        << " ABVerified=" << (ab_verified ? 1 : 0)
        << " ABClearPreference=" << (ab_has_clear_preference ? 1 : 0)
