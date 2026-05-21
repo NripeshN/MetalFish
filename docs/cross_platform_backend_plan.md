@@ -281,16 +281,6 @@ Current CUDA backend boundary:
   `metalfish-cuda-gate-20260520-230541` accepted the stress with worst
   `moves_left_delta=0.000092` and `policy_delta=0.001270` on the shrink-to-1
   start-position probe.
-- CUDA now releases execution scratch after singleton transformer evaluations
-  by default. Repeated `batch=1` reuse was the remaining unstable path:
-  `metalfish-cuda-gate-20260521-014158` failed with
-  `value_delta=0.003905`, `moves_left_delta=0.434540`, and
-  `policy_delta=0.122332` in single-reuse stress, while reused batches stayed
-  stable. With `METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN=1`,
-  `metalfish-cuda-gate-20260521-015406` passed with singleton stress reduced
-  to `value_delta=0.000143`, `moves_left_delta=0.032501`, and
-  `policy_delta=0.004257`; batch reuse was effectively exact. Set the variable
-  to `0` only for profiling the faster but less stable singleton path.
 - The NN-backed MCTS legal-move view test still checks move size and move order
   exactly. For CUDA, value and policy logits use the same backend tolerance as
   the parity tests because the test compares two separate CUDA inference calls
