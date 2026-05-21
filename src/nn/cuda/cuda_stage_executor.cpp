@@ -1497,7 +1497,8 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     std::size_t attention_step_index,
     const CudaAttentionProjectionOutput &projections,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-    int batch_size, const CudaWeightBuffers *weights, const float *parent) {
+    int batch_size, const CudaWeightBuffers *weights, const float *parent,
+    int trace_run, int trace_stage_index, CudaExecutionScheduleKind trace_kind) {
   if (batch_size <= 0)
     throw std::runtime_error("CUDA attention core received empty batch");
   if (!projections.query || !projections.key || !projections.value)
@@ -1572,10 +1573,18 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     LaunchAttentionSoftmaxKernel(output.scores, output.probabilities,
                                  score_rows, attention.squares, stream);
   }
+  TraceCudaAttentionBuffer(trace_run, trace_stage_index, 14,
+                           step.name + ".probabilities.post_softmax",
+                           trace_kind, output.probabilities, score_rows,
+                           attention.squares, stream);
   LaunchAttentionContextKernel(output.probabilities, projections.value,
                                output.context, batch_size, attention.heads,
                                attention.squares, attention.head_depth,
                                attention.qkv_width, stream);
+  TraceCudaAttentionBuffer(trace_run, trace_stage_index, 15,
+                           step.name + ".probabilities.post_context",
+                           trace_kind, output.probabilities, score_rows,
+                           attention.squares, stream);
   return output;
 }
 
@@ -1722,7 +1731,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
                                workspace.Stream());
       const auto core = ExecuteAttentionCoreStage(
           execution_plan, entry.first_step, input_projection, tape, workspace,
-          batch_size, &weights, stage_input);
+          batch_size, &weights, stage_input, stage_trace_run,
+          traced_stage_index, entry.kind);
       TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 4,
                                step.name + ".scores", entry.kind, core.scores,
                                core.score_rows, core.score_width,
