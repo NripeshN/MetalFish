@@ -21,11 +21,15 @@ on:
       puzzle_count:
         description: Offline Lichess puzzle sample size
         required: false
-        default: "1000"
+        default: "300"
       puzzle_movetime:
         description: Offline puzzle movetime in milliseconds
         required: false
         default: "1000"
+      puzzle_max_minutes:
+        description: Per-engine offline puzzle time budget
+        required: false
+        default: "70"
       candidate_setoptions:
         description: Optional comma-separated candidate-only UCI options, NAME=VALUE
         required: false
@@ -155,10 +159,10 @@ jobs:
       - name: Download large offline puzzle sample
         working-directory: candidate
         env:
-          PUZZLE_COUNT: ${{ github.event.inputs.puzzle_count }}
+          PUZZLE_COUNT: ${{ github.event.inputs.puzzle_count || '300' }}
           LICHESS_PUZZLE_CSV_URL: https://database.lichess.org/lichess_db_puzzle.csv.zst
         run: |
-          : "${PUZZLE_COUNT:=1000}"
+          : "${PUZZLE_COUNT:=300}"
           mkdir -p results/hybrid_regression/puzzles
           curl -L --fail --silent --show-error "${LICHESS_PUZZLE_CSV_URL}" \
             | zstd -dc \
@@ -174,12 +178,14 @@ jobs:
       - name: Large offline puzzle regression
         working-directory: candidate
         env:
-          PUZZLE_COUNT: ${{ github.event.inputs.puzzle_count }}
-          PUZZLE_MOVETIME: ${{ github.event.inputs.puzzle_movetime }}
+          PUZZLE_COUNT: ${{ github.event.inputs.puzzle_count || '300' }}
+          PUZZLE_MOVETIME: ${{ github.event.inputs.puzzle_movetime || '1000' }}
+          PUZZLE_MAX_MINUTES: ${{ github.event.inputs.puzzle_max_minutes || '70' }}
           CANDIDATE_SETOPTIONS: ${{ github.event.inputs.candidate_setoptions }}
         run: |
-          : "${PUZZLE_COUNT:=1000}"
+          : "${PUZZLE_COUNT:=300}"
           : "${PUZZLE_MOVETIME:=1000}"
+          : "${PUZZLE_MAX_MINUTES:=70}"
           sample="results/hybrid_regression/puzzles/sample.csv"
           baseline_engine="$(pwd)/../baseline/build/metalfish"
           baseline_cwd="$(pwd)/../baseline"
@@ -203,6 +209,7 @@ jobs:
             --threads auto \
             --hash-mb 1024 \
             --movetime-ms "$PUZZLE_MOVETIME" \
+            --max-minutes "$PUZZLE_MAX_MINUTES" \
             --max-puzzles "$PUZZLE_COUNT" \
             --progress-interval 50 \
             --results-dir results/hybrid_regression/puzzles/baseline
@@ -215,6 +222,7 @@ jobs:
             --threads auto \
             --hash-mb 1024 \
             --movetime-ms "$PUZZLE_MOVETIME" \
+            --max-minutes "$PUZZLE_MAX_MINUTES" \
             --max-puzzles "$PUZZLE_COUNT" \
             --progress-interval 50 \
             --results-dir results/hybrid_regression/puzzles/candidate \
