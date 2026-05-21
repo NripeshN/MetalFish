@@ -105,6 +105,13 @@ def first_move(move_list: str | None) -> str:
     return move_list.split()[0] if move_list.split() else ""
 
 
+def parse_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def ane_trace_summary(results: list[dict] | dict[str, dict]) -> dict[str, object]:
     reason_counts: dict[str, int] = {}
     blocked_examples: list[str] = []
@@ -113,17 +120,28 @@ def ane_trace_summary(results: list[dict] | dict[str, dict]) -> dict[str, object
     ane_mcts_agree = 0
     ane_mcts_selected = 0
     ane_mcts_blocked_by_ab = 0
+    ane_confirmed_mcts = 0
     unsolved_blocked = 0
+    score_margins: list[float] = []
 
     for puzzle_id, solved, search in iter_search_records(results):
         total += 1
-        ane_top = first_move(search.get("ane_last_hints"))
+        ane_top = str(search.get("hybrid_ane_top") or "") or first_move(
+            search.get("ane_last_hints")
+        )
         mcts_move = str(search.get("hybrid_mcts_move") or "")
         ab_move = str(search.get("hybrid_ab_move") or "")
         selected = str(search.get("hybrid_selected") or search.get("actual") or "")
         reason = str(search.get("hybrid_reason") or "")
+        margin = parse_float(search.get("hybrid_ane_score_margin"))
+        if margin is not None:
+            score_margins.append(margin)
         if reason:
             reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        if reason == "ane_confirmed_mcts" or str(
+            search.get("hybrid_ane_confirmed_mcts") or ""
+        ) == "1":
+            ane_confirmed_mcts += 1
         if not ane_top:
             continue
         ane_hint_searches += 1
@@ -145,21 +163,26 @@ def ane_trace_summary(results: list[dict] | dict[str, dict]) -> dict[str, object
                     f"selected/ab={selected}, expected={expected}, reason={reason}"
                 )
 
+    sorted_margins = sorted(score_margins)
     return {
         "searches": total,
         "ane_hint_searches": ane_hint_searches,
         "ane_mcts_agree": ane_mcts_agree,
         "ane_mcts_selected": ane_mcts_selected,
         "ane_mcts_blocked_by_ab": ane_mcts_blocked_by_ab,
+        "ane_confirmed_mcts": ane_confirmed_mcts,
         "unsolved_blocked": unsolved_blocked,
         "reason_counts": reason_counts,
         "blocked_examples": blocked_examples,
+        "ane_score_margin_min": sorted_margins[0] if sorted_margins else None,
+        "ane_score_margin_median": sorted_margins[len(sorted_margins) // 2]
+        if sorted_margins
+        else None,
+        "ane_score_margin_max": sorted_margins[-1] if sorted_margins else None,
     }
 
 
-def print_ane_trace_summary(
-    results: list[dict] | dict[str, dict], label: str
-) -> None:
+def print_ane_trace_summary(results: list[dict] | dict[str, dict], label: str) -> None:
     summary = ane_trace_summary(results)
     print(
         f"ANE trace {label}: searches={summary['searches']}, "
@@ -167,8 +190,16 @@ def print_ane_trace_summary(
         f"ane_mcts_agree={summary['ane_mcts_agree']}, "
         f"ane_mcts_selected={summary['ane_mcts_selected']}, "
         f"ane_mcts_blocked_by_ab={summary['ane_mcts_blocked_by_ab']}, "
+        f"ane_confirmed_mcts={summary['ane_confirmed_mcts']}, "
         f"unsolved_blocked={summary['unsolved_blocked']}"
     )
+    if summary["ane_score_margin_median"] is not None:
+        print(
+            f"ANE trace {label} margin: "
+            f"min={summary['ane_score_margin_min']:.3f}, "
+            f"median={summary['ane_score_margin_median']:.3f}, "
+            f"max={summary['ane_score_margin_max']:.3f}"
+        )
     reason_counts = summary["reason_counts"]
     if isinstance(reason_counts, dict) and reason_counts:
         reasons = ", ".join(
@@ -185,9 +216,7 @@ def print_ane_trace_summary(
 def run(args: argparse.Namespace) -> int:
     baseline = load_results(args.baseline)
     candidate = load_results(args.candidate)
-    pairs = pair_results(
-        baseline, candidate, match_repeat_ids=args.match_repeat_ids
-    )
+    pairs = pair_results(baseline, candidate, match_repeat_ids=args.match_repeat_ids)
     if len(pairs) < args.min_common:
         print(
             f"ERROR: only {len(pairs)} common puzzle ids, "

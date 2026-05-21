@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import io
 import csv
+import io
 import json
 import pathlib
 import sys
@@ -14,20 +14,20 @@ import chess
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import tools.lichess_puzzle_runner as puzzle_runner  # noqa: E402
 import tools.compare_puzzle_runs as compare_puzzle_runs  # noqa: E402
 import tools.filter_lichess_puzzle_csv as filter_puzzle_csv  # noqa: E402
+import tools.lichess_puzzle_runner as puzzle_runner  # noqa: E402
 from tools.lichess_puzzle_runner import (  # noqa: E402
     LichessRateLimited,
     SearchAnswer,
+    board_from_api_puzzle,
     board_from_csv_puzzle,
     csv_puzzle_item,
     csv_row_matches,
-    board_from_api_puzzle,
     normalize_move,
+    parse_auto_int,
     parse_setoptions,
     parse_theme_filter,
-    parse_auto_int,
     tag_repeat_result,
     update_answer_from_info,
     wait_after_rate_limit,
@@ -81,7 +81,10 @@ def test_csv_puzzle_position_applies_opponent_move() -> None:
     board = board_from_csv_puzzle(item)
 
     expect("CSV puzzle applies opponent move", board.turn == chess.WHITE)
-    expect("CSV solution starts after opponent move", item["puzzle"]["solution"][0] == "a2e6")
+    expect(
+        "CSV solution starts after opponent move",
+        item["puzzle"]["solution"][0] == "a2e6",
+    )
     expect("CSV first solution move is legal", normalize_move("a2e6", board) == "a2e6")
 
 
@@ -113,19 +116,26 @@ def test_csv_filter_and_setoption_parsing() -> None:
     )
     expect(
         "setoptions parse NAME=VALUE",
-        parse_setoptions(["HybridANERootProbe=true", "Threads=8"]) == {
+        parse_setoptions(["HybridANERootProbe=true", "Threads=8"])
+        == {
             "HybridANERootProbe": "true",
             "Threads": "8",
         },
     )
     expect(
         "setoptions normalize ANE weights alias",
-        parse_setoptions(["HybridANEWeightsPath=networks/t1.pb.gz"]) == {
+        parse_setoptions(["HybridANEWeightsPath=networks/t1.pb.gz"])
+        == {
             "HybridANEWeights": "networks/t1.pb.gz",
         },
     )
-    expect("auto parser maps auto to zero", parse_auto_int("auto", option_name="--threads") == 0)
-    expect("auto parser keeps integers", parse_auto_int("8", option_name="--threads") == 8)
+    expect(
+        "auto parser maps auto to zero",
+        parse_auto_int("auto", option_name="--threads") == 0,
+    )
+    expect(
+        "auto parser keeps integers", parse_auto_int("8", option_name="--threads") == 8
+    )
 
 
 def test_hybrid_ane_flags_set_uci_options() -> None:
@@ -153,7 +163,9 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
 
     expect("ANE probe enabled", options["HybridANERootProbe"] == "true")
     expect("ANE weights option", options["HybridANEWeights"] == "networks/t1.pb.gz")
-    expect("ANE model option", options["HybridANEModelPath"] == "build/coreml/t1.mlmodelc")
+    expect(
+        "ANE model option", options["HybridANEModelPath"] == "build/coreml/t1.mlmodelc"
+    )
     expect("ANE compute units", options["HybridANEComputeUnits"] == "cpu-ne")
     expect("ANE hint count", options["HybridANERootHintCount"] == "12")
     expect("ANE wait", options["HybridANERootHintWaitMs"] == "50")
@@ -164,8 +176,10 @@ def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
     args = puzzle_runner.parse_args(["--mode", "hybrid", "--hybrid-ane-root-probe"])
     options = puzzle_runner.engine_options(args)
 
-    expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "250")
-    expect("ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "1000")
+    expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "0")
+    expect(
+        "ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "1000"
+    )
 
 
 def test_search_info_parser_tracks_ane_hints() -> None:
@@ -183,7 +197,10 @@ def test_search_info_parser_tracks_ane_hints() -> None:
         answer,
     )
     update_answer_from_info(
-        "info string HybridTrace: reason=ab_default selected=h4h5 ABMove=h4h5 MCTSMove=c3c4",
+        "info string HybridTrace: reason=ane_confirmed_mcts selected=c3c4 "
+        "ABMove=h4h5 MCTSMove=c3c4 ANETop=c3c4 ANEAgreesMCTS=1 "
+        "ANEConfirmedMCTS=1 ANETopScore=0.421 ANEScoreMargin=0.248 "
+        "ANERoot=[c3c4:v=0.421,h4h5:v=0.173]",
         answer,
     )
     update_answer_from_info(
@@ -197,15 +214,34 @@ def test_search_info_parser_tracks_ane_hints() -> None:
     expect("ANE hint moves counted", answer.ane_hint_moves == 3)
     expect("ANE failure counted", answer.ane_failures == 1)
     expect("ANE hint move list retained", answer.ane_last_hints == "e2e4 d2d4 g1f3")
-    expect("hybrid reason parsed", answer.hybrid_reason == "ab_default")
-    expect("hybrid selected parsed", answer.hybrid_selected == "h4h5")
+    expect("hybrid reason parsed", answer.hybrid_reason == "ane_confirmed_mcts")
+    expect("hybrid selected parsed", answer.hybrid_selected == "c3c4")
     expect("hybrid AB parsed", answer.hybrid_ab_move == "h4h5")
     expect("hybrid MCTS parsed", answer.hybrid_mcts_move == "c3c4")
+    expect("hybrid ANE top parsed", answer.hybrid_ane_top == "c3c4")
+    expect("hybrid ANE agreement parsed", answer.hybrid_ane_agrees_mcts == "1")
+    expect("hybrid ANE confirmed parsed", answer.hybrid_ane_confirmed_mcts == "1")
+    expect("hybrid ANE top score parsed", answer.hybrid_ane_top_score == "0.421")
+    expect("hybrid ANE margin parsed", answer.hybrid_ane_score_margin == "0.248")
+    expect(
+        "hybrid ANE root parsed",
+        answer.hybrid_ane_root == "[c3c4:v=0.421,h4h5:v=0.173]",
+    )
     expect("final summary retained", answer.final_summary.startswith("Final:"))
 
     trace_fields = puzzle_runner.search_trace_fields(answer)
-    expect("trace fields include hints", trace_fields["ane_last_hints"] == "e2e4 d2d4 g1f3")
-    expect("trace fields include reason", trace_fields["hybrid_reason"] == "ab_default")
+    expect(
+        "trace fields include hints", trace_fields["ane_last_hints"] == "e2e4 d2d4 g1f3"
+    )
+    expect(
+        "trace fields include reason",
+        trace_fields["hybrid_reason"] == "ane_confirmed_mcts",
+    )
+    expect("trace fields include ANE top", trace_fields["hybrid_ane_top"] == "c3c4")
+    expect(
+        "trace fields include ANE margin",
+        trace_fields["hybrid_ane_score_margin"] == "0.248",
+    )
 
 
 def test_repeat_result_ids_are_comparable() -> None:
@@ -285,6 +321,8 @@ def test_compare_puzzle_runs_summarizes_ane_trace() -> None:
                     "expected": "c3c4",
                     "actual": "h4h5",
                     "ane_last_hints": "c3c4 h4h5",
+                    "hybrid_ane_top": "c3c4",
+                    "hybrid_ane_score_margin": "0.100",
                     "hybrid_mcts_move": "c3c4",
                     "hybrid_ab_move": "h4h5",
                     "hybrid_selected": "h4h5",
@@ -301,10 +339,13 @@ def test_compare_puzzle_runs_summarizes_ane_trace() -> None:
                     "expected": "e2e4",
                     "actual": "e2e4",
                     "ane_last_hints": "e2e4 d2d4",
+                    "hybrid_ane_top": "e2e4",
+                    "hybrid_ane_score_margin": "0.250",
+                    "hybrid_ane_confirmed_mcts": "1",
                     "hybrid_mcts_move": "e2e4",
                     "hybrid_ab_move": "e2e4",
                     "hybrid_selected": "e2e4",
-                    "hybrid_reason": "engines_agree",
+                    "hybrid_reason": "ane_confirmed_mcts",
                 }
             ],
         },
@@ -317,6 +358,10 @@ def test_compare_puzzle_runs_summarizes_ane_trace() -> None:
     expect("ANE/MCTS agreement counted", summary["ane_mcts_agree"] == 2)
     expect("ANE/MCTS selected counted", summary["ane_mcts_selected"] == 1)
     expect("AB blocked counted", summary["ane_mcts_blocked_by_ab"] == 1)
+    expect("ANE-confirmed MCTS counted", summary["ane_confirmed_mcts"] == 1)
+    expect("ANE margin min", summary["ane_score_margin_min"] == 0.1)
+    expect("ANE margin median", summary["ane_score_margin_median"] == 0.25)
+    expect("ANE margin max", summary["ane_score_margin_max"] == 0.25)
     expect("unsolved blocked counted", summary["unsolved_blocked"] == 1)
 
 
@@ -395,15 +440,19 @@ def test_compare_puzzle_runs_preserves_repeated_baseline_results() -> None:
         {"id": "abc#r2", "puzzle_id": "abc", "repeat": 2, "solved": True},
     ]
 
-    pairs = compare_puzzle_runs.pair_results(
-        baseline, candidate, match_repeat_ids=True
-    )
+    pairs = compare_puzzle_runs.pair_results(baseline, candidate, match_repeat_ids=True)
     baseline_common = [base for _, base, _ in pairs]
     candidate_common = [cand for _, _, cand in pairs]
 
     expect("exact repeat pairs retained", len(pairs) == 2)
-    expect("baseline repeated score preserved", compare_puzzle_runs.solved_count(baseline_common) == 1)
-    expect("candidate repeated score preserved", compare_puzzle_runs.solved_count(candidate_common) == 2)
+    expect(
+        "baseline repeated score preserved",
+        compare_puzzle_runs.solved_count(baseline_common) == 1,
+    )
+    expect(
+        "candidate repeated score preserved",
+        compare_puzzle_runs.solved_count(candidate_common) == 2,
+    )
 
 
 def test_filter_puzzle_csv_can_skip_and_exclude_ids() -> None:

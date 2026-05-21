@@ -69,7 +69,7 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
         hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
         hybrid_ane_compute_units="cpu-ne",
         hybrid_ane_root_hint_count=10,
-        hybrid_ane_root_hint_wait_ms=250,
+        hybrid_ane_root_hint_wait_ms=0,
         hybrid_ane_min_budget_ms=1000,
     )
 
@@ -79,9 +79,16 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     expect("ANE probe is opt-in", "HybridANERootProbe" not in no_ane)
     expect("ANE probe option enabled", with_ane["HybridANERootProbe"] == "true")
     expect("ANE weights passed", with_ane["HybridANEWeights"] == "networks/t1.pb.gz")
-    expect("ANE model passed", with_ane["HybridANEModelPath"] == "build/coreml/t1.mlmodelc")
-    expect("ANE wait uses retained profile", with_ane["HybridANERootHintWaitMs"] == "250")
-    expect("ANE min budget uses retained profile", with_ane["HybridANEMinBudgetMs"] == "1000")
+    expect(
+        "ANE model passed", with_ane["HybridANEModelPath"] == "build/coreml/t1.mlmodelc"
+    )
+    expect(
+        "ANE wait uses retained profile", with_ane["HybridANERootHintWaitMs"] == "0"
+    )
+    expect(
+        "ANE min budget uses retained profile",
+        with_ane["HybridANEMinBudgetMs"] == "1000",
+    )
 
 
 def test_ane_runtime_values_are_clamped_to_uci_bounds() -> None:
@@ -123,8 +130,14 @@ def test_ane_config_validation_requires_existing_files() -> None:
     )
 
     errors = lichess_bot.validate_bot_config(args)
-    expect("missing ANE weights rejected", any("ANE weights not found" in e for e in errors))
-    expect("missing ANE model rejected", any("Core ML model not found" in e for e in errors))
+    expect(
+        "missing ANE weights rejected",
+        any("ANE weights not found" in e for e in errors),
+    )
+    expect(
+        "missing ANE model rejected",
+        any("Core ML model not found" in e for e in errors),
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)

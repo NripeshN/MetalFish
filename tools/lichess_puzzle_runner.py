@@ -31,7 +31,7 @@ RESULTS_DIR = ROOT / "results" / "lichess_puzzles"
 LICHESS_API = "https://lichess.org/api"
 DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
 DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
-DEFAULT_ANE_ROOT_HINT_WAIT_MS = 250
+DEFAULT_ANE_ROOT_HINT_WAIT_MS = 0
 DEFAULT_ANE_MIN_BUDGET_MS = 1000
 SETOPTION_ALIASES = {
     "HybridANEWeightsPath": "HybridANEWeights",
@@ -216,6 +216,12 @@ class SearchAnswer:
     hybrid_selected: str = ""
     hybrid_ab_move: str = ""
     hybrid_mcts_move: str = ""
+    hybrid_ane_top: str = ""
+    hybrid_ane_agrees_mcts: str = ""
+    hybrid_ane_confirmed_mcts: str = ""
+    hybrid_ane_top_score: str = ""
+    hybrid_ane_score_margin: str = ""
+    hybrid_ane_root: str = ""
     final_summary: str = ""
 
 
@@ -427,6 +433,12 @@ def update_answer_from_info(line: str, answer: SearchAnswer) -> None:
         answer.hybrid_selected = fields.get("selected", "")
         answer.hybrid_ab_move = fields.get("ABMove", "")
         answer.hybrid_mcts_move = fields.get("MCTSMove", "")
+        answer.hybrid_ane_top = fields.get("ANETop", "")
+        answer.hybrid_ane_agrees_mcts = fields.get("ANEAgreesMCTS", "")
+        answer.hybrid_ane_confirmed_mcts = fields.get("ANEConfirmedMCTS", "")
+        answer.hybrid_ane_top_score = fields.get("ANETopScore", "")
+        answer.hybrid_ane_score_margin = fields.get("ANEScoreMargin", "")
+        answer.hybrid_ane_root = fields.get("ANERoot", "")
     elif line.startswith("info string Final:"):
         answer.final_summary = line.removeprefix("info string ").strip()
 
@@ -468,6 +480,18 @@ def search_trace_fields(answer: SearchAnswer) -> dict[str, str]:
         fields["hybrid_ab_move"] = answer.hybrid_ab_move
     if answer.hybrid_mcts_move:
         fields["hybrid_mcts_move"] = answer.hybrid_mcts_move
+    if answer.hybrid_ane_top:
+        fields["hybrid_ane_top"] = answer.hybrid_ane_top
+    if answer.hybrid_ane_agrees_mcts:
+        fields["hybrid_ane_agrees_mcts"] = answer.hybrid_ane_agrees_mcts
+    if answer.hybrid_ane_confirmed_mcts:
+        fields["hybrid_ane_confirmed_mcts"] = answer.hybrid_ane_confirmed_mcts
+    if answer.hybrid_ane_top_score:
+        fields["hybrid_ane_top_score"] = answer.hybrid_ane_top_score
+    if answer.hybrid_ane_score_margin:
+        fields["hybrid_ane_score_margin"] = answer.hybrid_ane_score_margin
+    if answer.hybrid_ane_root:
+        fields["hybrid_ane_root"] = answer.hybrid_ane_root
     if answer.final_summary:
         fields["final_summary"] = answer.final_summary
     return fields
@@ -495,7 +519,9 @@ def validate_ane_args(args) -> None:
     if not args.hybrid_ane_weights.exists():
         raise RuntimeError(f"ANE weights not found at {args.hybrid_ane_weights}")
     if not args.hybrid_ane_model_path.exists():
-        raise RuntimeError(f"ANE Core ML model not found at {args.hybrid_ane_model_path}")
+        raise RuntimeError(
+            f"ANE Core ML model not found at {args.hybrid_ane_model_path}"
+        )
 
 
 def board_from_api_puzzle(item: dict) -> chess.Board:
@@ -707,8 +733,8 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
         }
         search_record.update(search_trace_fields(answer))
         searches.append(search_record)
-        mate_in_one_ok = idx == 0 and len(solution) == 1 and is_mating_move(
-            board, actual
+        mate_in_one_ok = (
+            idx == 0 and len(solution) == 1 and is_mating_move(board, actual)
         )
         if actual != expected and not mate_in_one_ok:
             return {
@@ -1008,9 +1034,7 @@ def run_offline(args) -> int:
                             "solved": False,
                             "error": str(exc),
                         }
-                    result = tag_repeat_result(
-                        result, repeat_idx, args.repeat_puzzles
-                    )
+                    result = tag_repeat_result(result, repeat_idx, args.repeat_puzzles)
                     total += 1
                     solved += 1 if result.get("solved") else 0
                     out.write(json.dumps(result, sort_keys=True) + "\n")
