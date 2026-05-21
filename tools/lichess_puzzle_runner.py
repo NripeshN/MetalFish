@@ -672,7 +672,7 @@ def wait_after_rate_limit(
     remaining_s = deadline - time.monotonic()
     if events_seen >= max_events or remaining_s <= wait_s + 5.0:
         return False
-    print(f"Rate limited; waiting {wait_s:.0f}s before retrying")
+        print(f"Rate limited; waiting {wait_s:.0f}s before retrying", flush=True)
     time.sleep(wait_s)
     return True
 
@@ -730,7 +730,10 @@ def run(args) -> int:
                 "rate_limit_events": rate_limit_events,
             }
             write_summary(summary_path, stats)
-            print(f"Rate limited before first batch; retry after {exc.wait_s:.0f}s")
+            print(
+                f"Rate limited before first batch; retry after {exc.wait_s:.0f}s",
+                flush=True,
+            )
             return 0
 
     engine = UCIEngine(args.engine, options, args.engine_cwd)
@@ -741,12 +744,14 @@ def run(args) -> int:
 
     print(
         f"Puzzle run: mode={args.mode}, threads={threads}, hash={hash_mb} MB, "
-        f"movetime={args.movetime_ms} ms, batch={args.batch_size}, rated={args.rated}"
+        f"movetime={args.movetime_ms} ms, batch={args.batch_size}, rated={args.rated}",
+        flush=True,
     )
     print(
         f"Resources: logical={os.cpu_count() or 1}, available_memory={available_memory_mb()} MB, "
         f"thread_reserve={os.environ.get('METALFISH_PUZZLE_THREAD_RESERVE', '1')}, "
-        f"memory_reserve={os.environ.get('METALFISH_PUZZLE_MEMORY_RESERVE_MB', '1536')} MB"
+        f"memory_reserve={os.environ.get('METALFISH_PUZZLE_MEMORY_RESERVE_MB', '1536')} MB",
+        flush=True,
     )
 
     try:
@@ -773,7 +778,8 @@ def run(args) -> int:
                     if total % args.progress_interval == 0:
                         print(
                             f"Progress: {solved}/{total} "
-                            f"({solved / max(1, total):.1%})"
+                            f"({solved / max(1, total):.1%})",
+                            flush=True,
                         )
 
                 solutions = [
@@ -803,7 +809,8 @@ def run(args) -> int:
                             continue
                         print(
                             f"Rate limited after {total} puzzle(s); "
-                            f"retry after {exc.wait_s:.0f}s"
+                            f"retry after {exc.wait_s:.0f}s",
+                            flush=True,
                         )
                         ended = "rate_limited"
                         puzzles = []
@@ -827,10 +834,11 @@ def run(args) -> int:
     write_summary(summary_path, stats)
     print(
         f"Finished: solved {solved}/{total} "
-        f"({solved / max(1, total):.2%}) in {duration_s:.1f}s"
+        f"({solved / max(1, total):.2%}) in {duration_s:.1f}s",
+        flush=True,
     )
-    print(f"Results: {jsonl_path}")
-    print(f"Summary: {summary_path}")
+    print(f"Results: {jsonl_path}", flush=True)
+    print(f"Summary: {summary_path}", flush=True)
 
     accuracy = solved / max(1, total)
     if total == 0:
@@ -870,7 +878,8 @@ def run_offline(args) -> int:
     print(
         f"Offline puzzle run: mode={args.mode}, threads={threads}, "
         f"hash={hash_mb} MB, movetime={args.movetime_ms} ms, "
-        f"puzzles={len(puzzles)}, source={args.offline_csv}"
+        f"puzzles={len(puzzles)}, source={args.offline_csv}",
+        flush=True,
     )
     try:
         with jsonl_path.open("w") as out:
@@ -891,7 +900,10 @@ def run_offline(args) -> int:
                 out.write(json.dumps(result, sort_keys=True) + "\n")
                 out.flush()
                 if total % args.progress_interval == 0:
-                    print(f"Progress: {solved}/{total} ({solved / total:.1%})")
+                    print(
+                        f"Progress: {solved}/{total} ({solved / total:.1%})",
+                        flush=True,
+                    )
     finally:
         engine.close()
 
@@ -912,10 +924,11 @@ def run_offline(args) -> int:
     write_summary(summary_path, stats)
     print(
         f"Finished: solved {solved}/{total} "
-        f"({solved / max(1, total):.2%}) in {duration_s:.1f}s"
+        f"({solved / max(1, total):.2%}) in {duration_s:.1f}s",
+        flush=True,
     )
-    print(f"Results: {jsonl_path}")
-    print(f"Summary: {summary_path}")
+    print(f"Results: {jsonl_path}", flush=True)
+    print(f"Summary: {summary_path}", flush=True)
 
     accuracy = solved / max(1, total)
     if total == 0:
