@@ -133,8 +133,7 @@ int env_int_or_default(const char *name, int fallback, int min_value,
 }
 
 std::vector<size_t> env_probe_list_or_default(const char *name,
-                                              std::vector<size_t> fallback,
-                                              size_t max_index) {
+                                              std::vector<size_t> fallback) {
   const char *value = std::getenv(name);
   if (!value || value[0] == '\0')
     return fallback;
@@ -145,8 +144,7 @@ std::vector<size_t> env_probe_list_or_default(const char *name,
   while (std::getline(input, token, ',')) {
     try {
       const size_t probe = static_cast<size_t>(std::stoull(token));
-      if (probe <= max_index)
-        probes.push_back(probe);
+      probes.push_back(probe);
     } catch (...) {
     }
   }
@@ -1283,8 +1281,7 @@ bool test_mcts_evaluator_single_repeat_stress_optional() {
   try {
     const auto &lines = batch_parity_lines();
     const std::vector<size_t> probes = env_probe_list_or_default(
-        "METALFISH_NN_SINGLE_REPEAT_STRESS_PROBES", {0, 1, 9, 14, 30},
-        lines.empty() ? 0 : lines.size() - 1);
+        "METALFISH_NN_SINGLE_REPEAT_STRESS_PROBES", {0, 1, 9, 14, 30});
     std::vector<HistoryFixture> fixtures;
     fixtures.reserve(probes.size());
     std::vector<std::vector<const Position *>> histories;
