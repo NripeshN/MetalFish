@@ -131,6 +131,26 @@ NSInteger StrideValue(NSArray<NSNumber *> *strides, NSUInteger idx,
   return [strides[idx] integerValue];
 }
 
+std::string FindCompiledModelPath(const std::string &model_path) {
+  namespace fs = std::filesystem;
+  fs::path path(model_path);
+  if (path.extension() == ".mlmodelc" && fs::exists(path))
+    return fs::absolute(path).string();
+
+  std::vector<fs::path> candidates;
+  fs::path sibling = path;
+  sibling.replace_extension(".mlmodelc");
+  candidates.push_back(sibling);
+  candidates.push_back(path.parent_path() / "compiled" /
+                       (path.stem().string() + ".mlmodelc"));
+
+  for (const fs::path &candidate : candidates) {
+    if (fs::exists(candidate))
+      return fs::absolute(candidate).string();
+  }
+  return {};
+}
+
 } // namespace
 
 class CoreMLNetwork::Impl {
@@ -149,11 +169,15 @@ public:
     actual_compute_units_ = configuration.computeUnits;
 
     NSError *error = nil;
-    NSURL *url = [NSURL fileURLWithPath:ToNSString(model_path_)
+    const std::string compiled_model_path = FindCompiledModelPath(model_path_);
+    const std::string load_model_path =
+        compiled_model_path.empty() ? model_path_ : compiled_model_path;
+    NSURL *url = [NSURL fileURLWithPath:ToNSString(load_model_path)
                             isDirectory:YES];
     NSString *extension = [[url pathExtension] lowercaseString];
     NSURL *load_url = url;
-    if (![extension isEqualToString:@"mlmodelc"]) {
+    if (compiled_model_path.empty() &&
+        ![extension isEqualToString:@"mlmodelc"]) {
       compiled_url_ = [MLModel compileModelAtURL:url error:&error];
       if (!compiled_url_)
         throw std::runtime_error("Could not compile Core ML model: " +

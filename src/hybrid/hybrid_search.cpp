@@ -1307,7 +1307,7 @@ std::vector<Move> ParallelHybridSearch::collect_ane_root_order_hints() {
 }
 
 std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
-  std::vector<Move> hints = collect_ane_root_order_hints();
+  std::vector<Move> hints;
   auto add_hint = [&hints](Move move) {
     if (move == Move::none())
       return;
@@ -1316,6 +1316,8 @@ std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
   };
 
   for (Move move : collect_mcts_root_order_hints())
+    add_hint(move);
+  for (Move move : collect_ane_root_order_hints())
     add_hint(move);
 
   const int max_hints =

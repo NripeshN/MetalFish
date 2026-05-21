@@ -220,7 +220,7 @@ struct ParallelHybridConfig {
   std::string ane_compute_units = "cpu-ne";
   int ane_root_hint_count = 10;
   int ane_root_hint_wait_ms = 75;
-  int ane_min_budget_ms = 1000;
+  int ane_min_budget_ms = 2000;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees

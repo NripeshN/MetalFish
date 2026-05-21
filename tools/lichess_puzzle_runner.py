@@ -29,6 +29,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = ROOT / "build" / "metalfish"
 RESULTS_DIR = ROOT / "results" / "lichess_puzzles"
 LICHESS_API = "https://lichess.org/api"
+DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
+DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
+DEFAULT_ANE_ROOT_HINT_WAIT_MS = 250
+DEFAULT_ANE_MIN_BUDGET_MS = 2000
+SETOPTION_ALIASES = {
+    "HybridANEWeightsPath": "HybridANEWeights",
+}
 USER_AGENT = os.environ.get(
     "METALFISH_HTTP_USER_AGENT",
     "MetalFishPuzzleCI/1.0 (+https://github.com/NripeshN/MetalFish)",
@@ -200,6 +207,9 @@ class SearchAnswer:
     nodes: int = 0
     nps: int = 0
     depth: int = 0
+    ane_hints: int = 0
+    ane_hint_moves: int = 0
+    ane_failures: int = 0
 
 
 class UCIEngine:
@@ -303,19 +313,7 @@ class UCIEngine:
                 parts = line.split()
                 answer.bestmove = parts[1] if len(parts) > 1 else "0000"
                 return answer
-            if not line.startswith("info "):
-                continue
-            parts = line.split()
-            for idx, token in enumerate(parts[:-1]):
-                try:
-                    if token == "nodes":
-                        answer.nodes = int(parts[idx + 1])
-                    elif token == "nps":
-                        answer.nps = int(parts[idx + 1])
-                    elif token == "depth":
-                        answer.depth = int(parts[idx + 1])
-                except ValueError:
-                    continue
+            update_answer_from_info(line, answer)
         self.send("stop")
         line = self.wait_for("bestmove", 5)
         parts = line.split()
@@ -384,12 +382,46 @@ def engine_options(args) -> dict[str, str]:
                 "MCTSMaxThreads": "0",
             }
         )
+        if args.hybrid_ane_root_probe:
+            options.update(
+                {
+                    "HybridANERootProbe": "true",
+                    "HybridANEWeights": str(args.hybrid_ane_weights),
+                    "HybridANEModelPath": str(args.hybrid_ane_model_path),
+                    "HybridANEComputeUnits": args.hybrid_ane_compute_units,
+                    "HybridANERootHintCount": str(args.hybrid_ane_root_hint_count),
+                    "HybridANERootHintWaitMs": str(args.hybrid_ane_root_hint_wait_ms),
+                    "HybridANEMinBudgetMs": str(args.hybrid_ane_min_budget_ms),
+                }
+            )
     if args.syzygy_path:
         options["SyzygyPath"] = str(args.syzygy_path)
         options["SyzygyProbeDepth"] = "2"
         options["SyzygyProbeLimit"] = "6"
     options.update(parse_setoptions(args.setoption))
     return options
+
+
+def update_answer_from_info(line: str, answer: SearchAnswer) -> None:
+    if not line.startswith("info "):
+        return
+    if line.startswith("info string Hybrid: AB root hints from ANE"):
+        answer.ane_hints += 1
+        answer.ane_hint_moves += max(0, len(line.split()) - 8)
+    elif line.startswith("info string Hybrid: ANE root probe failed"):
+        answer.ane_failures += 1
+
+    parts = line.split()
+    for idx, token in enumerate(parts[:-1]):
+        try:
+            if token == "nodes":
+                answer.nodes = int(parts[idx + 1])
+            elif token == "nps":
+                answer.nps = int(parts[idx + 1])
+            elif token == "depth":
+                answer.depth = int(parts[idx + 1])
+        except ValueError:
+            continue
 
 
 def parse_setoptions(items: list[str]) -> dict[str, str]:
@@ -399,10 +431,22 @@ def parse_setoptions(items: list[str]) -> dict[str, str]:
             raise ValueError(f"--setoption requires NAME=VALUE, got {item!r}")
         name, value = item.split("=", 1)
         name = name.strip()
+        name = SETOPTION_ALIASES.get(name, name)
         if not name:
             raise ValueError(f"--setoption has an empty option name: {item!r}")
         options[name] = value.strip()
     return options
+
+
+def validate_ane_args(args) -> None:
+    if not args.hybrid_ane_root_probe:
+        return
+    if args.mode != "hybrid":
+        raise RuntimeError("--hybrid-ane-root-probe requires --mode hybrid")
+    if not args.hybrid_ane_weights.exists():
+        raise RuntimeError(f"ANE weights not found at {args.hybrid_ane_weights}")
+    if not args.hybrid_ane_model_path.exists():
+        raise RuntimeError(f"ANE Core ML model not found at {args.hybrid_ane_model_path}")
 
 
 def board_from_api_puzzle(item: dict) -> chess.Board:
@@ -609,6 +653,9 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
                 "nodes": answer.nodes,
                 "nps": answer.nps,
                 "depth": answer.depth,
+                "ane_hints": answer.ane_hints,
+                "ane_hint_moves": answer.ane_hint_moves,
+                "ane_failures": answer.ane_failures,
             }
         )
         mate_in_one_ok = idx == 0 and len(solution) == 1 and is_mating_move(
@@ -635,6 +682,17 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
     }
 
 
+def tag_repeat_result(result: dict, repeat_idx: int, repeat_count: int) -> dict:
+    if repeat_count <= 1:
+        return result
+    tagged = dict(result)
+    puzzle_id = str(tagged.get("id", ""))
+    tagged["puzzle_id"] = puzzle_id
+    tagged["repeat"] = repeat_idx + 1
+    tagged["id"] = f"{puzzle_id}#r{repeat_idx + 1}"
+    return tagged
+
+
 def write_summary(path: pathlib.Path, stats: dict) -> None:
     total = max(1, int(stats.get("puzzles", 0)))
     solved = int(stats.get("solved", 0))
@@ -652,6 +710,8 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         f"- Rated submission: {stats.get('rated')}",
         f"- Duration: {stats.get('duration_s', 0):.1f}s",
     ]
+    if int(stats.get("repeat_puzzles", 1)) > 1:
+        lines.append(f"- Repeat passes: {stats.get('repeat_puzzles')}")
     if stats.get("source"):
         lines.append(f"- Source: {stats.get('source')}")
     if stats.get("ended"):
@@ -687,6 +747,7 @@ def run(args) -> int:
         raise RuntimeError(f"Engine not found at {args.engine}")
     if args.mode in {"mcts", "hybrid"} and not args.weights.exists():
         raise RuntimeError(f"Transformer weights not found at {args.weights}")
+    validate_ane_args(args)
 
     args.results_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
@@ -855,6 +916,7 @@ def run_offline(args) -> int:
         raise RuntimeError(f"Offline puzzle CSV not found at {args.offline_csv}")
     if args.mode in {"mcts", "hybrid"} and not args.weights.exists():
         raise RuntimeError(f"Transformer weights not found at {args.weights}")
+    validate_ane_args(args)
 
     args.results_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
@@ -878,32 +940,39 @@ def run_offline(args) -> int:
     print(
         f"Offline puzzle run: mode={args.mode}, threads={threads}, "
         f"hash={hash_mb} MB, movetime={args.movetime_ms} ms, "
-        f"puzzles={len(puzzles)}, source={args.offline_csv}",
+        f"puzzles={len(puzzles)}, repeats={args.repeat_puzzles}, "
+        f"source={args.offline_csv}",
         flush=True,
     )
     try:
         with jsonl_path.open("w") as out:
-            for item in puzzles:
-                if time.monotonic() >= deadline:
-                    ended = "time_budget"
-                    break
-                try:
-                    result = solve_puzzle(engine, item, args.movetime_ms)
-                except Exception as exc:
-                    result = {
-                        "id": str(item.get("puzzle", {}).get("id", "")),
-                        "solved": False,
-                        "error": str(exc),
-                    }
-                total += 1
-                solved += 1 if result.get("solved") else 0
-                out.write(json.dumps(result, sort_keys=True) + "\n")
-                out.flush()
-                if total % args.progress_interval == 0:
-                    print(
-                        f"Progress: {solved}/{total} ({solved / total:.1%})",
-                        flush=True,
+            for repeat_idx in range(args.repeat_puzzles):
+                for item in puzzles:
+                    if time.monotonic() >= deadline:
+                        ended = "time_budget"
+                        break
+                    try:
+                        result = solve_puzzle(engine, item, args.movetime_ms)
+                    except Exception as exc:
+                        result = {
+                            "id": str(item.get("puzzle", {}).get("id", "")),
+                            "solved": False,
+                            "error": str(exc),
+                        }
+                    result = tag_repeat_result(
+                        result, repeat_idx, args.repeat_puzzles
                     )
+                    total += 1
+                    solved += 1 if result.get("solved") else 0
+                    out.write(json.dumps(result, sort_keys=True) + "\n")
+                    out.flush()
+                    if total % args.progress_interval == 0:
+                        print(
+                            f"Progress: {solved}/{total} ({solved / total:.1%})",
+                            flush=True,
+                        )
+                if ended == "time_budget":
+                    break
     finally:
         engine.close()
 
@@ -920,6 +989,7 @@ def run_offline(args) -> int:
         "ended": ended,
         "source": str(args.offline_csv),
         "rate_limit_events": 0,
+        "repeat_puzzles": args.repeat_puzzles,
     }
     write_summary(summary_path, stats)
     print(
@@ -950,6 +1020,40 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--syzygy-path", type=pathlib.Path, default=None)
     parser.add_argument(
+        "--hybrid-ane-root-probe",
+        action="store_true",
+        default=False,
+        help="Enable the Hybrid ANE/Core ML root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-weights",
+        type=pathlib.Path,
+        default=DEFAULT_ANE_WEIGHTS,
+        help="Lc0 weights for the ANE/Core ML root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-model-path",
+        type=pathlib.Path,
+        default=DEFAULT_ANE_MODEL,
+        help="Compiled .mlmodelc or .mlpackage for the ANE/Core ML root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-compute-units",
+        choices=("cpu", "cpu-gpu", "cpu-ne", "all"),
+        default="cpu-ne",
+    )
+    parser.add_argument("--hybrid-ane-root-hint-count", type=int, default=10)
+    parser.add_argument(
+        "--hybrid-ane-root-hint-wait-ms",
+        type=int,
+        default=DEFAULT_ANE_ROOT_HINT_WAIT_MS,
+    )
+    parser.add_argument(
+        "--hybrid-ane-min-budget-ms",
+        type=int,
+        default=DEFAULT_ANE_MIN_BUDGET_MS,
+    )
+    parser.add_argument(
         "--setoption",
         action="append",
         default=[],
@@ -968,6 +1072,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--movetime-ms", type=int, default=3000)
     parser.add_argument("--max-minutes", type=float, default=335.0)
     parser.add_argument("--max-puzzles", type=int, default=1000000)
+    parser.add_argument(
+        "--repeat-puzzles",
+        type=int,
+        default=1,
+        help="Offline-only repeat passes for volatility/regression gates.",
+    )
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--angle", default="mix")
     parser.add_argument("--rated", action="store_true", default=False)
@@ -996,8 +1106,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args.movetime_ms = max(1, args.movetime_ms)
     args.max_minutes = max(0.1, args.max_minutes)
     args.max_puzzles = max(1, args.max_puzzles)
+    args.repeat_puzzles = max(1, args.repeat_puzzles)
     args.progress_interval = max(1, args.progress_interval)
     args.max_rate_limit_waits = max(0, args.max_rate_limit_waits)
+    args.hybrid_ane_root_hint_count = max(1, min(32, args.hybrid_ane_root_hint_count))
+    args.hybrid_ane_root_hint_wait_ms = max(0, args.hybrid_ane_root_hint_wait_ms)
+    args.hybrid_ane_min_budget_ms = max(0, args.hybrid_ane_min_budget_ms)
     return args
 
 

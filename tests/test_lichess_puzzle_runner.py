@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import csv
 import json
 import pathlib
 import sys
@@ -15,8 +16,10 @@ sys.path.insert(0, str(ROOT))
 
 import tools.lichess_puzzle_runner as puzzle_runner  # noqa: E402
 import tools.compare_puzzle_runs as compare_puzzle_runs  # noqa: E402
+import tools.filter_lichess_puzzle_csv as filter_puzzle_csv  # noqa: E402
 from tools.lichess_puzzle_runner import (  # noqa: E402
     LichessRateLimited,
+    SearchAnswer,
     board_from_csv_puzzle,
     csv_puzzle_item,
     csv_row_matches,
@@ -25,6 +28,8 @@ from tools.lichess_puzzle_runner import (  # noqa: E402
     parse_setoptions,
     parse_theme_filter,
     parse_auto_int,
+    tag_repeat_result,
+    update_answer_from_info,
     wait_after_rate_limit,
 )
 
@@ -113,8 +118,87 @@ def test_csv_filter_and_setoption_parsing() -> None:
             "Threads": "8",
         },
     )
+    expect(
+        "setoptions normalize ANE weights alias",
+        parse_setoptions(["HybridANEWeightsPath=networks/t1.pb.gz"]) == {
+            "HybridANEWeights": "networks/t1.pb.gz",
+        },
+    )
     expect("auto parser maps auto to zero", parse_auto_int("auto", option_name="--threads") == 0)
     expect("auto parser keeps integers", parse_auto_int("8", option_name="--threads") == 8)
+
+
+def test_hybrid_ane_flags_set_uci_options() -> None:
+    args = puzzle_runner.parse_args(
+        [
+            "--mode",
+            "hybrid",
+            "--hybrid-ane-root-probe",
+            "--hybrid-ane-weights",
+            "networks/t1.pb.gz",
+            "--hybrid-ane-model-path",
+            "build/coreml/t1.mlmodelc",
+            "--hybrid-ane-compute-units",
+            "cpu-ne",
+            "--hybrid-ane-root-hint-count",
+            "12",
+            "--hybrid-ane-root-hint-wait-ms",
+            "50",
+            "--hybrid-ane-min-budget-ms",
+            "500",
+        ]
+    )
+
+    options = puzzle_runner.engine_options(args)
+
+    expect("ANE probe enabled", options["HybridANERootProbe"] == "true")
+    expect("ANE weights option", options["HybridANEWeights"] == "networks/t1.pb.gz")
+    expect("ANE model option", options["HybridANEModelPath"] == "build/coreml/t1.mlmodelc")
+    expect("ANE compute units", options["HybridANEComputeUnits"] == "cpu-ne")
+    expect("ANE hint count", options["HybridANERootHintCount"] == "12")
+    expect("ANE wait", options["HybridANERootHintWaitMs"] == "50")
+    expect("ANE min budget", options["HybridANEMinBudgetMs"] == "500")
+
+
+def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
+    args = puzzle_runner.parse_args(["--mode", "hybrid", "--hybrid-ane-root-probe"])
+    options = puzzle_runner.engine_options(args)
+
+    expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "250")
+    expect("ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "2000")
+
+
+def test_search_info_parser_tracks_ane_hints() -> None:
+    answer = SearchAnswer(bestmove="0000")
+    update_answer_from_info(
+        "info depth 7 nodes 123 nps 456 string not-a-real-format",
+        answer,
+    )
+    update_answer_from_info(
+        "info string Hybrid: AB root hints from ANE e2e4 d2d4 g1f3",
+        answer,
+    )
+    update_answer_from_info(
+        "info string Hybrid: ANE root probe failed: synthetic",
+        answer,
+    )
+    expect("nodes parsed", answer.nodes == 123)
+    expect("nps parsed", answer.nps == 456)
+    expect("depth parsed", answer.depth == 7)
+    expect("ANE hint event counted", answer.ane_hints == 1)
+    expect("ANE hint moves counted", answer.ane_hint_moves == 3)
+    expect("ANE failure counted", answer.ane_failures == 1)
+
+
+def test_repeat_result_ids_are_comparable() -> None:
+    base = {"id": "abc", "solved": True}
+    single = tag_repeat_result(base, 0, 1)
+    repeated = tag_repeat_result(base, 1, 3)
+
+    expect("single repeat leaves result unchanged", single == base)
+    expect("repeat result keeps original puzzle id", repeated["puzzle_id"] == "abc")
+    expect("repeat result stores pass number", repeated["repeat"] == 2)
+    expect("repeat result id is unique", repeated["id"] == "abc#r2")
 
 
 def test_compare_puzzle_runs_detects_regression() -> None:
@@ -172,6 +256,55 @@ def test_compare_puzzle_runs_detects_regression() -> None:
     expect("puzzle compare fails excessive drop", bad == 1)
 
 
+def test_filter_puzzle_csv_can_skip_and_exclude_ids() -> None:
+    csv_text = (
+        "PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,GameUrl,OpeningTags\n"
+        "a,8/8/8/8/8/8/8/K6k w - - 0 1,a1a2,2500,80,90,1,advantage,,\n"
+        "b,8/8/8/8/8/8/8/K6k w - - 0 1,a1a2,2501,80,90,1,advantage,,\n"
+        "c,8/8/8/8/8/8/8/K6k w - - 0 1,a1a2,2502,80,90,1,advantage,,\n"
+        "d,8/8/8/8/8/8/8/K6k w - - 0 1,a1a2,2503,80,90,1,advantage,,\n"
+    )
+    old_stdin = filter_puzzle_csv.sys.stdin
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        exclude = root / "exclude.csv"
+        out = root / "out.csv"
+        exclude.write_text(
+            "PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,GameUrl,OpeningTags\n"
+            "b,,,,,,,,,\n"
+        )
+        try:
+            filter_puzzle_csv.sys.stdin = io.StringIO(csv_text)
+            with redirect_stdout(io.StringIO()):
+                rc = filter_puzzle_csv.run(
+                    filter_puzzle_csv.parse_args(
+                        [
+                            "--out",
+                            str(out),
+                            "--max-puzzles",
+                            "2",
+                            "--min-puzzles",
+                            "2",
+                            "--min-rating",
+                            "2400",
+                            "--min-popularity",
+                            "80",
+                            "--skip-matches",
+                            "1",
+                            "--exclude-ids-csv",
+                            str(exclude),
+                        ]
+                    )
+                )
+        finally:
+            filter_puzzle_csv.sys.stdin = old_stdin
+
+        with out.open(newline="") as f:
+            ids = [row["PuzzleId"] for row in csv.DictReader(f)]
+    expect("filter exits successfully", rc == 0)
+    expect("filter skipped a and excluded b", ids == ["c", "d"])
+
+
 def test_rate_limit_wait_respects_budget() -> None:
     old_monotonic = puzzle_runner.time.monotonic
     old_sleep = puzzle_runner.time.sleep
@@ -211,7 +344,12 @@ def main() -> int:
     test_batch_puzzle_position_applies_initial_ply_plus_one()
     test_csv_puzzle_position_applies_opponent_move()
     test_csv_filter_and_setoption_parsing()
+    test_hybrid_ane_flags_set_uci_options()
+    test_hybrid_ane_default_wait_uses_benchmarked_profile()
+    test_search_info_parser_tracks_ane_hints()
+    test_repeat_result_ids_are_comparable()
     test_compare_puzzle_runs_detects_regression()
+    test_filter_puzzle_csv_can_skip_and_exclude_ids()
     test_rate_limit_wait_respects_budget()
     print("Lichess puzzle runner tests: OK")
     return 0

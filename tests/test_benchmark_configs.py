@@ -289,6 +289,7 @@ def main() -> int:
             'options.add("HybridRootPawnLeverTieBreak"',
             'options.add("HybridANERootProbe"',
             'options.add("HybridANEModelPath"',
+            'options.add("HybridANEMinBudgetMs"',
         ],
     )
     assert_file_contains(
@@ -310,6 +311,7 @@ def main() -> int:
             '"HybridRootPawnLeverTieBreak"',
             '"HybridANERootProbe"',
             '"HybridANEModelPath"',
+            '"HybridANEMinBudgetMs"',
         ],
     )
 
@@ -512,6 +514,7 @@ def main() -> int:
             "--mcts-parallel-search",
             "--hybrid-ab-root-reject-mcts",
             "--hybrid-mcts-minibatch-size",
+            "--hybrid-ane-root-probe",
             'sess.setoption("MCTSMaxThreads", str(mcts_threads))',
             '"MCTSParallelSearch", "true" if mcts_parallel_search else "false"',
             'sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))',
