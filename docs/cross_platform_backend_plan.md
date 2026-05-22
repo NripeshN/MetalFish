@@ -85,7 +85,7 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `885e7aa7-19ca-47c0-80f7-842d2c934b0b` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `132c1c7a-347f-4834-8b36-6d6e1d90d813` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `b87bc7a8-607f-4069-82f9-fc261726dbe4` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-002213-graph`, L4, 2026-05-21 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |

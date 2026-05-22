@@ -115,6 +115,7 @@ write_summary() {
     echo "- Single reuse stress: ${METALFISH_NN_SINGLE_REUSE_STRESS:-1}"
     echo "- Batch reuse stress: ${METALFISH_NN_BATCH_REUSE_STRESS:-1}"
     echo "- CUDA full buffer clear: ${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}"
+    echo "- CUDA graph execution: ${METALFISH_CUDA_GRAPH:-${METALFISH_CUDA_GRAPH_EXECUTION:-0}}"
     echo "- CUDA release single workspace each run: ${METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN:-0}"
     echo "- CUDA release workspace each run: ${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}"
     echo "- CUDA stable execution batch size: ${METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
