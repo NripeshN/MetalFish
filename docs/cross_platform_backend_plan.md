@@ -87,10 +87,12 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `8b8e3e4c-0114-4df6-9270-f8d4709e8f53` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `406b215d-3628-4171-a861-1e7cb2810cf3` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-015228-graphsafe`, L4, 2026-05-22 |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-134923`, L4, 2026-05-22 |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26288509048` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26288509047` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26288508918` |
 
 Current CUDA backend boundary:
 
@@ -431,21 +433,22 @@ Current CUDA backend boundary:
   `157-170ms`). It was reverted as a speed regression; future attention work
   should target a custom kernel or graph-captured strided path instead of
   pointer-array cuBLAS.
-- CUDA resolved execution has an opt-in graph replay path behind
-  `METALFISH_CUDA_GRAPH=1` or `METALFISH_CUDA_GRAPH_EXECUTION=1`. The first
-  inference for a batch/workspace generation primes the normal path, the second
-  captures the existing workspace clear, resolved stage sequence, and output
-  mapping without changing math, and later same-key calls replay the graph.
-  The path is disabled when CUDA profiling, stage tracing, attention tracing,
-  dynamic PE tracing, or per-run workspace release knobs are active. The
-  graph key includes batch size, workspace generation, inference-buffer
-  generation, stream, and device output pointers; graph API failures reset the
-  cache and fall back to uncaptured execution. The 2026-05-22 L4 gate
-  `metalfish-cuda-gate-20260522-015228-graphsafe` accepted the hardened opt-in
-  path with `CUDA graph replay observed: yes`, CUDA unit tests, fixed BT4
-  references, batch parity, single/batch reuse stress, auto/CUDA/hybrid UCI
-  smokes, and batch timings of `b1=6.843ms`, `b16=51.053ms`, and
-  `b32=97.467ms`.
+- CUDA resolved execution uses graph replay by default when the run is
+  compatible, matching Metal's persistent graph execution model more closely.
+  Set `METALFISH_CUDA_GRAPH=0` or `METALFISH_CUDA_GRAPH_EXECUTION=0` to force
+  the uncaptured path. The first inference for a batch/workspace generation
+  primes the normal path, the second captures the existing workspace clear,
+  resolved stage sequence, and output mapping without changing math, and later
+  same-key calls replay the graph. The path is disabled when CUDA profiling,
+  stage tracing, attention tracing, dynamic PE tracing, or per-run workspace
+  release knobs are active. The graph key includes batch size, workspace
+  generation, inference-buffer generation, stream, and device output pointers;
+  graph API failures reset the cache and fall back to uncaptured execution.
+  The 2026-05-22 L4 gate `metalfish-cuda-gate-20260522-134923` accepted the
+  default graph path with `CUDA graph replay observed: yes`, CUDA unit tests,
+  fixed BT4 references, batch parity, single/batch reuse stress,
+  auto/CUDA/hybrid UCI smokes, and batch timings of `b1=6.812ms`,
+  `b16=52.909ms`, and `b32=99.213ms`.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
@@ -550,11 +553,11 @@ Portable CI now builds Linux CPU and Windows MinGW CPU artifacts. Both jobs run
 AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds
 verify the MCTS construction path without downloading BT4 weights. The uploaded
 artifacts include a generated manifest that makes this backend scope explicit.
-On branch tip `45d0766`, Linux CPU, Windows MinGW CPU, macOS Metal, and the
+On branch tip `ac92606`, Linux CPU, Windows MinGW CPU, macOS Metal, and the
 bounded hybrid regression gate were green. The hybrid gate now uses a bounded
 300-puzzle offline sample for PR runs; the accepted run scored candidate BK
-repeats `[22, 22, 22]` versus baseline `[21, 22, 22]`, and candidate puzzles
-`297/300` versus baseline `298/300` with zero candidate errors.
+repeats `[22, 22, 21]` versus baseline `[22, 22, 22]`, and candidate puzzles
+`298/300` versus baseline `298/300` with zero candidate errors.
 
 ## First Milestones
 
