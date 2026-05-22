@@ -657,13 +657,8 @@ def build_engine_options(active_peer_engines: int = 0) -> tuple[dict[str, str], 
 def ane_engine_options(args) -> dict[str, str]:
     if not getattr(args, "hybrid_ane_root_probe", HYBRID_ANE_ROOT_PROBE):
         return {}
-    return {
+    options = {
         "HybridANERootProbe": "true",
-        "HybridANERootHints": (
-            "true"
-            if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
-            else "false"
-        ),
         "HybridANEConfirmMCTSOverride": (
             "true"
             if getattr(
@@ -692,6 +687,9 @@ def ane_engine_options(args) -> dict[str, str]:
             getattr(args, "hybrid_ane_min_budget_ms", HYBRID_ANE_MIN_BUDGET_MS)
         ),
     }
+    if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS):
+        options["HybridANERootHints"] = "true"
+    return options
 
 
 def normalize_ane_args(args):
