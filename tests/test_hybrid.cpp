@@ -743,6 +743,28 @@ void test_hybrid_config() {
                    -32001, 585, 1339424, 2, 80, 0.520f, 0.634f));
   }
   {
+    TestCase tc("Compact fixed-budget MCTS override stays narrowly gated");
+
+    EXPECT(tc, HybridMCTSCompactFixedBudgetOverride(
+                   true, true, false, 65, 56, 0.862f, 0.660f, 169, 169, -1,
+                   -1));
+    EXPECT(tc, HybridMCTSCompactFixedBudgetOverride(
+                   true, true, false, 71, 66, 0.930f, 1.004f, 294, 294, -1,
+                   -1));
+    EXPECT(tc, HybridMCTSCompactFixedBudgetOverride(
+                   true, true, false, 58, 49, 0.845f, 0.607f, 148, 150, -29,
+                   -115));
+    EXPECT(tc, !HybridMCTSCompactFixedBudgetOverride(
+                   true, true, true, 70, 36, 0.514f, 0.731f, 120, 178, -225,
+                   -272));
+    EXPECT(tc, !HybridMCTSCompactFixedBudgetOverride(
+                   true, true, false, 143, 72, 0.503f, 0.000f, 266, 257, 1,
+                   30));
+    EXPECT(tc, !HybridMCTSCompactFixedBudgetOverride(
+                   true, true, false, 190, 120, 0.632f, 0.500f, 220, 180, 0,
+                   0));
+  }
+  {
     TestCase tc("Root Q gap ignores unvisited placeholders");
 
     const uint32_t visits[] = {141, 96, 0, 0};

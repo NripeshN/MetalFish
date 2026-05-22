@@ -606,6 +606,21 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
          clear_root_q_confident;
 }
 
+bool HybridMCTSCompactFixedBudgetOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score) {
+  if (!fixed_budget || !visit_evidence_sane || ab_has_clear_preference ||
+      mcts_root_visits < 50 || mcts_root_visits >= 180 ||
+      mcts_best_visits < 48 || visit_share < 0.82f || root_q_gap < 0.55f ||
+      mcts_cp < 140 || eval_delta < 140) {
+    return false;
+  }
+
+  return ab_average_score - mcts_average_score <= 90;
+}
+
 bool HybridMCTSCrossRootConfidenceOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
@@ -2093,6 +2108,8 @@ Move ParallelHybridSearch::make_final_decision() {
     int score = 0;
     int average_score = 0;
     uint64_t effort = 0;
+    bool score_lowerbound = false;
+    bool score_upperbound = false;
   };
   const auto find_ab_root_move = [&](Move target) {
     ABRootLookup result;
@@ -2109,6 +2126,8 @@ Move ParallelHybridSearch::make_final_decision() {
       result.score = ab_root_moves_[i].score;
       result.average_score = ab_root_moves_[i].average_score;
       result.effort = ab_root_moves_[i].effort;
+      result.score_lowerbound = ab_root_moves_[i].score_lowerbound;
+      result.score_upperbound = ab_root_moves_[i].score_upperbound;
       break;
     }
     return result;
@@ -2163,7 +2182,9 @@ Move ParallelHybridSearch::make_final_decision() {
        << ab_in_mcts.policy << " MCTSInABRank=" << mcts_in_ab.rank
        << " MCTSInABScore=" << mcts_in_ab.score
        << " MCTSInABAvg=" << mcts_in_ab.average_score
-       << " MCTSInABEffort=" << mcts_in_ab.effort;
+       << " MCTSInABEffort=" << mcts_in_ab.effort
+       << " MCTSInABLB=" << (mcts_in_ab.score_lowerbound ? 1 : 0)
+       << " MCTSInABUB=" << (mcts_in_ab.score_upperbound ? 1 : 0);
   };
   const auto root_q_gap_for_best = [&]() {
     const int count =
@@ -2443,6 +2464,12 @@ Move ParallelHybridSearch::make_final_decision() {
       HybridMCTSRootConfidenceFixedBudgetOverride(
           mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
           mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta);
+  const bool mcts_compact_fixed_budget =
+      HybridMCTSCompactFixedBudgetOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          ab_has_clear_preference, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          ab_in_ab.average_score, mcts_in_ab.average_score);
   const bool mcts_cross_root_confidence_fixed_budget =
       mcts_visit_evidence_sane &&
       HybridMCTSCrossRootConfidenceOverride(
@@ -2495,8 +2522,8 @@ Move ParallelHybridSearch::make_final_decision() {
   }
   const bool mcts_override_allowed =
       !ab_root_rejects_mcts || ane_confirmed_mcts_override ||
-      mcts_cross_root_confidence_fixed_budget || mcts_root_rejects_ab ||
-      (mcts_overwhelming && eval_delta >= 250);
+      mcts_compact_fixed_budget || mcts_cross_root_confidence_fixed_budget ||
+      mcts_root_rejects_ab || (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
@@ -2539,6 +2566,9 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_root_confidence_fixed_budget";
+    } else if (mcts_compact_fixed_budget) {
+      choose_mcts = true;
+      reason = "mcts_compact_fixed_budget";
     } else if (mcts_cross_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_cross_root_confidence_fixed_budget";
@@ -2585,6 +2615,7 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSRootDominant=" << (mcts_root_dominant_fixed_budget ? 1 : 0)
        << " MCTSTacticalGap=" << (mcts_tactical_gap_fixed_budget ? 1 : 0)
        << " MCTSRootConfidence=" << (mcts_root_confidence_fixed_budget ? 1 : 0)
+       << " MCTSCompact=" << (mcts_compact_fixed_budget ? 1 : 0)
        << " MCTSCrossRootConfidence="
        << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)

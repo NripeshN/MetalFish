@@ -431,6 +431,12 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
     int eval_delta);
 
+bool HybridMCTSCompactFixedBudgetOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score);
+
 bool HybridMCTSCrossRootConfidenceOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
