@@ -66,7 +66,7 @@ cloud spend controlled.
 | macOS arm64 Metal | GitHub-hosted macOS | Release path and Apple parity |
 | Linux x86-64 CPU | GitHub Ubuntu or GCP C3/N2 | AB build/test and portable UCI |
 | Linux x86-64 CUDA | GCP `g2-standard-8` + NVIDIA L4 | CUDA backend correctness and NPS |
-| Windows x86-64 CPU | GitHub Windows | Portable build/UCI package |
+| Windows x86-64 CPU | GitHub Windows MinGW + MSVC | Portable build/UCI package and MSVC host-toolchain coverage |
 | Windows x86-64 CUDA | Ephemeral Windows GPU VM | CUDA/DirectML smoke before release |
 
 Cloud GPU runners should be created only for a benchmark run, write logs and
@@ -562,15 +562,18 @@ Current portable CPU transformer boundary:
   used by CUDA/Metal; the next CPU milestone is a bounded real-BT4 smoke that
   proves full execution is practical enough to keep enabled in CI.
 
-Portable CI now builds Linux CPU and Windows MinGW CPU artifacts. Both jobs run
-AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds
-verify the MCTS construction path without downloading BT4 weights. The uploaded
-artifacts include a generated manifest that makes this backend scope explicit.
-On branch tip `ac92606`, Linux CPU, Windows MinGW CPU, macOS Metal, and the
-bounded hybrid regression gate were green. The hybrid gate now uses a bounded
-300-puzzle offline sample for PR runs; the accepted run scored candidate BK
-repeats `[22, 22, 21]` versus baseline `[22, 22, 22]`, and candidate puzzles
-`298/300` versus baseline `298/300` with zero candidate errors.
+Portable CI builds Linux CPU, Windows MinGW CPU, and Windows MSVC CPU
+artifacts. The MSVC leg is included because Windows CUDA uses the MSVC host
+toolchain; it is the CPU prerequisite before adding a Windows NVIDIA runtime
+gate. Each job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke,
+so portable builds verify the MCTS construction path without downloading BT4
+weights. The uploaded artifacts include a generated manifest that makes this
+backend scope explicit. Before adding the MSVC leg, branch tip `f434a34` had
+Linux CPU, Windows MinGW CPU, macOS Metal, CUDA L4 runtime, and the bounded
+hybrid regression gate green. The hybrid gate uses a bounded 300-puzzle offline
+sample for PR runs; the accepted run scored candidate BK repeats `[22, 22, 21]`
+versus baseline `[22, 22, 22]`, and candidate puzzles `298/300` versus baseline
+`298/300` with zero candidate errors.
 
 ## First Milestones
 

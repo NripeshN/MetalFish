@@ -622,8 +622,12 @@ def main() -> int:
             "tools/write_portable_manifest.py",
             "--output build-linux/PORTABLE_ARTIFACT.md",
             "--output build-windows/PORTABLE_ARTIFACT.md",
+            "--output build-windows-msvc/PORTABLE_ARTIFACT.md",
             "build-linux/PORTABLE_ARTIFACT.md",
             "cp build-windows/PORTABLE_ARTIFACT.md",
+            "Windows MSVC CPU",
+            "metalfish-windows-x86_64-msvc-cpu",
+            "MSVC is the required host toolchain for future Windows CUDA builds.",
             "CPU AB plus diagnostic stub MCTS",
         ],
     )

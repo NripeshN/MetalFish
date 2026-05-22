@@ -205,9 +205,116 @@ jobs:
           path: metalfish*windows-x86_64-mingw-cpu.zip
           if-no-files-found: error
 
+  windows-msvc-cpu:
+    name: Windows MSVC CPU
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          cl
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
+          }
+          vcpkg install protobuf zlib abseil --triplet x64-windows
+          python -m pip install -r tests/requirements.txt
+
+      - name: Download NNUE files
+        shell: pwsh
+        run: python tools/download_engine_networks.py --nnue-only
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
+          }
+          cmake -S . -B build-windows-msvc -G Ninja `
+            -DCMAKE_BUILD_TYPE="${env:BUILD_TYPE}" `
+            -DUSE_METAL=OFF `
+            -DBUILD_TESTS=ON `
+            -DMETALFISH_ENABLE_IPO=OFF `
+            "-DCMAKE_TOOLCHAIN_FILE=${env:VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build-windows-msvc --target metalfish metalfish_tests
+
+      - name: Test
+        shell: pwsh
+        run: |
+          .\build-windows-msvc\metalfish_tests.exe
+          python -m py_compile `
+            tests/paper_benchmarks.py `
+            tests/test_benchmark_configs.py `
+            tools/run_tournament_live.py `
+            tools/lichess_puzzle_runner.py `
+            tools/download_engine_networks.py `
+            tools/write_portable_manifest.py `
+            tools/uci_smoke.py
+          python tests/test_benchmark_configs.py
+          python tests/test_lichess_bot.py
+          python tests/test_lichess_puzzle_runner.py
+          python tests/test_hybrid_regression_compare.py
+          python tools/uci_smoke.py --engine build-windows-msvc/metalfish.exe --go "depth 3"
+          python tools/uci_smoke.py `
+            --engine build-windows-msvc/metalfish.exe `
+            --setoption NNBackend=stub `
+            --setoption UseMCTS=true `
+            --go "nodes 8"
+          python tools/write_portable_manifest.py `
+            --platform "Windows x86_64 MSVC" `
+            --backend "CPU AB plus diagnostic stub MCTS; CUDA not included in this artifact" `
+            --binary "metalfish.exe" `
+            --output build-windows-msvc/PORTABLE_ARTIFACT.md `
+            --notes "This portable artifact is a CPU MSVC build for Windows CI coverage." `
+            --notes "MSVC is the required host toolchain for future Windows CUDA builds."
+
+      - name: Package Windows MSVC artifact
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $packageName = "metalfish-$env:GITHUB_REF_NAME-windows-x86_64-msvc-cpu"
+          } else {
+            $packageName = "metalfish-windows-x86_64-msvc-cpu"
+          }
+          New-Item -ItemType Directory -Force portable-windows-msvc | Out-Null
+          Copy-Item build-windows-msvc/metalfish.exe portable-windows-msvc/
+          Copy-Item build-windows-msvc/PORTABLE_ARTIFACT.md portable-windows-msvc/
+          Copy-Item README.md,CHANGELOG.md,LICENSE portable-windows-msvc/
+          Copy-Item build-windows-msvc/*.dll portable-windows-msvc/ -ErrorAction SilentlyContinue
+          if (Test-Path "${packageName}.zip") {
+            Remove-Item "${packageName}.zip"
+          }
+          Compress-Archive -Path portable-windows-msvc/* -DestinationPath "${packageName}.zip"
+
+      - name: Upload Windows MSVC artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: metalfish-windows-x86_64-msvc-cpu
+          path: metalfish*windows-x86_64-msvc-cpu.zip
+          if-no-files-found: error
+
   portable-release:
     name: Attach Portable Release Artifacts
-    needs: [linux-cpu, windows-mingw-cpu]
+    needs: [linux-cpu, windows-mingw-cpu, windows-msvc-cpu]
     runs-on: ubuntu-24.04
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
@@ -225,6 +332,7 @@ jobs:
         run: |
           test -f "portable-release/metalfish-linux-x86_64-cpu/metalfish-${GITHUB_REF_NAME}-linux-x86_64-cpu.tar.gz"
           test -f "portable-release/metalfish-windows-x86_64-mingw-cpu/metalfish-${GITHUB_REF_NAME}-windows-x86_64-mingw-cpu.zip"
+          test -f "portable-release/metalfish-windows-x86_64-msvc-cpu/metalfish-${GITHUB_REF_NAME}-windows-x86_64-msvc-cpu.zip"
 
       - name: Attach artifacts to GitHub release
         uses: softprops/action-gh-release@v2
@@ -232,6 +340,7 @@ jobs:
           files: |
             portable-release/metalfish-linux-x86_64-cpu/metalfish-${{ github.ref_name }}-linux-x86_64-cpu.tar.gz
             portable-release/metalfish-windows-x86_64-mingw-cpu/metalfish-${{ github.ref_name }}-windows-x86_64-mingw-cpu.zip
+            portable-release/metalfish-windows-x86_64-msvc-cpu/metalfish-${{ github.ref_name }}-windows-x86_64-msvc-cpu.zip
           draft: false
           prerelease: true
           fail_on_unmatched_files: true
