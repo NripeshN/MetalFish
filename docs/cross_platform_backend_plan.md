@@ -67,7 +67,8 @@ cloud spend controlled.
 | Linux x86-64 CPU | GitHub Ubuntu or GCP C3/N2 | AB build/test and portable UCI |
 | Linux x86-64 CUDA | GCP `g2-standard-8` + NVIDIA L4 | CUDA backend correctness and NPS |
 | Windows x86-64 CPU | GitHub Windows MinGW + MSVC | Portable build/UCI package and MSVC host-toolchain coverage |
-| Windows x86-64 CUDA | Ephemeral Windows GPU VM | CUDA/DirectML smoke before release |
+| Windows x86-64 CUDA compile | GitHub Windows MSVC + CUDA Toolkit | NVCC/MSVC compile coverage before runtime GPU gates |
+| Windows x86-64 CUDA runtime | Ephemeral Windows GPU VM | CUDA/DirectML smoke before release |
 
 Cloud GPU runners should be created only for a benchmark run, write logs and
 artifacts to Cloud Storage, and then stop/delete themselves. The GitHub
@@ -101,9 +102,10 @@ Current remote gates:
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-final-e370951`, L4, 2026-05-22 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26308351194` |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26308351195` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26308351186` |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | Manual dispatch, pending first run |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26311252685` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26311252680` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26311252679` |
 
 Current CUDA backend boundary:
 
@@ -564,16 +566,19 @@ Current portable CPU transformer boundary:
 
 Portable CI builds Linux CPU, Windows MinGW CPU, and Windows MSVC CPU
 artifacts. The MSVC leg is included because Windows CUDA uses the MSVC host
-toolchain; it is the CPU prerequisite before adding a Windows NVIDIA runtime
-gate. Each job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke,
-so portable builds verify the MCTS construction path without downloading BT4
-weights. The uploaded artifacts include a generated manifest that makes this
-backend scope explicit. Branch tip `e3709510` had Linux CPU, Windows MinGW CPU,
-Windows MSVC CPU, macOS Metal, CUDA L4 runtime, and the bounded hybrid
-regression gate green after merging `origin/main`. The hybrid gate uses a
-bounded 300-puzzle offline sample for PR runs; the accepted run scored
-candidate BK repeats `[22, 22, 21]` versus baseline `[22, 22, 22]`, and
-candidate puzzles `298/300` versus baseline `298/300` with zero candidate
+toolchain. The separate Windows CUDA compile gate installs the CUDA Toolkit on
+`windows-2022`, configures `USE_CUDA=ON`, and builds `metalfish`,
+`metalfish_tests`, `test_nn_comparison`, and `metalfish_nn_probe` without
+requiring a hosted NVIDIA GPU. Each portable CPU job runs AB UCI smoke plus an
+explicit `NNBackend=stub` MCTS smoke, so portable builds verify the MCTS
+construction path without downloading BT4 weights. The uploaded artifacts
+include a generated manifest that makes this backend scope explicit. Branch tip
+`67d180e9` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, macOS Metal,
+CUDA L4 runtime, and the bounded hybrid regression gate green after merging
+`origin/main`. The hybrid gate uses a bounded 300-puzzle offline sample for PR
+runs; the accepted rerun scored candidate BK repeats `[22, 22, 22]` versus
+baseline `[22, 22, 22]`, and candidate puzzles `300/300` versus baseline
+`300/300` with zero candidate
 errors.
 
 ## First Milestones
