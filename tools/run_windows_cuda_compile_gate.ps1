@@ -34,6 +34,7 @@ $Cmake = Require-Command "cmake"
 $Ninja = Require-Command "ninja"
 $Nvcc = Require-Command "nvcc"
 $Cl = Require-Command "cl.exe"
+$ClForCmake = $Cl -replace "\\", "/"
 
 if (-not $env:CUDA_PATH) {
   throw "CUDA_PATH is not set; install the CUDA Toolkit before running this gate"
@@ -67,7 +68,7 @@ $ConfigureArgs = @(
   "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
   "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile",
   "-DVCPKG_TARGET_TRIPLET=x64-windows",
-  "-DCMAKE_CUDA_HOST_COMPILER=$Cl"
+  "-DCMAKE_CUDA_HOST_COMPILER=$ClForCmake"
 )
 
 & $Cmake @ConfigureArgs
