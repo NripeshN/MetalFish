@@ -7,8 +7,8 @@
 
 #include "cuda_kernels.h"
 
-#include "../metal/tables/attention_policy_map.h"
 #include "../network_tensor_plan.h"
+#include "../tables/attention_policy_map.h"
 #include "cuda_runtime_probe.h"
 
 #include <cublas_v2.h>
@@ -117,7 +117,7 @@ const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
     std::array<int, kNetworkPolicyOutputs> indices{};
     indices.fill(-1);
     for (int raw = 0; raw < kNetworkAttentionPolicyScratch; ++raw) {
-      const short mapped = Metal::kAttnPolicyMap[raw];
+      const short mapped = Tables::kAttnPolicyMap[raw];
       if (mapped >= 0)
         indices[static_cast<std::size_t>(mapped)] = raw;
     }

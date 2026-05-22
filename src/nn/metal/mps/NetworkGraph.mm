@@ -7,7 +7,7 @@
 
 #import "NetworkGraph.h"
 #import "../../weights.h"
-#import "../tables/attention_policy_map.h"
+#import "../../tables/attention_policy_map.h"
 #import "../tables/policy_map.h"
 #import <algorithm>
 #import <vector>
@@ -1773,7 +1773,7 @@ static const NSInteger kMinSubBatchSize = 20;
 
     policy = [self
         addPolicyMapLayerWithParent:policy
-                          policyMap:&MetalFish::NN::Metal::kAttnPolicyMap[0]
+                          policyMap:&MetalFish::NN::Tables::kAttnPolicyMap[0]
                             mapSize:(64 * 64 + 8 * 24)
                               label:[NSString
                                         stringWithFormat:@"%@/policy_mapping",

@@ -8,10 +8,10 @@
 #include "cpu_network.h"
 
 #include "../input_plane_packing.h"
-#include "../metal/tables/attention_policy_map.h"
 #include "../network_attention_plan.h"
 #include "../network_output_decoder.h"
 #include "../network_tensor_plan.h"
+#include "../tables/attention_policy_map.h"
 #include "../weights.h"
 
 #include <algorithm>
@@ -101,7 +101,7 @@ const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
     std::array<int, kNetworkPolicyOutputs> indices{};
     indices.fill(-1);
     for (int raw = 0; raw < kNetworkAttentionPolicyScratch; ++raw) {
-      const short mapped = Metal::kAttnPolicyMap[raw];
+      const short mapped = Tables::kAttnPolicyMap[raw];
       if (mapped >= 0)
         indices[static_cast<std::size_t>(mapped)] = raw;
     }

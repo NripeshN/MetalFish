@@ -31,6 +31,8 @@ Common code owns:
 - `tests/nn_input_fixture.*`: backend-neutral packed input fixture with
   explicit plane masks/values for regression tests.
 - `src/nn/policy_map.*`: 1858-policy move mapping.
+- `src/nn/tables/attention_policy_map.h`: attention-policy scratch-to-1858
+  gather table shared by Metal, CUDA, and portable CPU execution.
 - `src/nn/loader.*` and `src/nn/weights.*`: protobuf weight loading.
 - `src/nn/network.h`: platform-neutral `NN::Network` inference interface.
 - `src/nn/network_weight_inventory.*`: selected policy/value/moves-left tensor
@@ -85,8 +87,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `24488b01-b508-4c71-9447-08bdff81c8da` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `f8418c93-248a-42aa-89d9-1b4f10a67713` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `8b8e3e4c-0114-4df6-9270-f8d4709e8f53` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `406b215d-3628-4171-a861-1e7cb2810cf3` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-015228-graphsafe`, L4, 2026-05-22 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
