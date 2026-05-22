@@ -89,6 +89,48 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     )
 
 
+def test_verbose_runtime_enables_trace_without_forcing_ane_hints() -> None:
+    base_options, _ = lichess_bot.build_engine_options()
+    args = types.SimpleNamespace(
+        ponder=True,
+        verbose=True,
+        hybrid_ane_root_probe=True,
+        hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
+        hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
+        hybrid_ane_compute_units="cpu-ne",
+        hybrid_ane_root_hint_count=10,
+        hybrid_ane_root_hint_wait_ms=0,
+        hybrid_ane_min_budget_ms=1000,
+    )
+
+    options = lichess_bot.apply_runtime_engine_options(base_options, args)
+
+    expect("verbose enables HybridTrace", options["HybridTrace"] == "true")
+    expect("verbose does not force ANE root hints", "HybridANERootHints" not in options)
+    expect("ANE root probe stays enabled", options["HybridANERootProbe"] == "true")
+
+
+def test_verbose_uci_option_tracking_filters_useful_options() -> None:
+    engine = object.__new__(lichess_bot.UCIEngine)
+    engine.verbose = True
+    engine.label = "test"
+    engine._uci_options_seen = set()
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        engine._record_uci_option(
+            "option name HybridANERootProbe type check default false"
+        )
+        engine._verbose_engine_line(
+            "option name HybridANERootProbe type check default false"
+        )
+        engine._debug_ane_uci_support()
+
+    text = out.getvalue()
+    expect("verbose prints useful option", "HybridANERootProbe" in text)
+    expect("verbose reports missing ANE options", "ANE UCI options missing" in text)
+
+
 def test_ane_runtime_values_are_clamped_to_uci_bounds() -> None:
     args = types.SimpleNamespace(
         hybrid_ane_root_hint_count=999,
