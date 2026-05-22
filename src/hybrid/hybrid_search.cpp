@@ -623,12 +623,11 @@ bool HybridMCTSCompactFixedBudgetOverride(
 
 bool HybridMCTSCompactClearPreferenceOverride(
     bool fixed_budget, bool visit_evidence_sane, uint64_t mcts_root_visits,
-    uint32_t mcts_best_visits, float visit_share, float root_q_gap,
-    int mcts_cp, int eval_delta, int ab_score, int mcts_in_ab_rank,
-    int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
-    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
-    float ab_in_mcts_q, float mcts_q) {
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
   if (!fixed_budget || !visit_evidence_sane)
     return false;
 
@@ -707,8 +706,8 @@ bool HybridMCTSReusedRootConfidenceOverride(
     float absolute_visit_share, float current_visit_share, int mcts_cp,
     int eval_delta, int ab_average_score, int mcts_average_score,
     int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_in_ab_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
-    float ab_in_mcts_q, float mcts_q) {
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q,
+    float mcts_q) {
   if (!fixed_budget)
     return false;
 
@@ -719,9 +718,8 @@ bool HybridMCTSReusedRootConfidenceOverride(
   }
 
   if (mcts_root_visits < 3 * std::max<uint64_t>(1, mcts_root_current_visits) ||
-      mcts_best_visits <
-          3 * static_cast<uint32_t>(std::max<uint32_t>(
-                  1, mcts_best_current_visits))) {
+      mcts_best_visits < 3 * static_cast<uint32_t>(std::max<uint32_t>(
+                                 1, mcts_best_current_visits))) {
     return false;
   }
 
@@ -749,9 +747,8 @@ bool HybridMCTSReusedRootCurrentOverride(
     uint32_t mcts_best_current_visits, float absolute_visit_share,
     float current_visit_share, float root_q_gap, int mcts_cp, int eval_delta,
     int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
-    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
-    float ab_in_mcts_q, float mcts_q) {
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
   if (!fixed_budget || !visit_evidence_sane || ab_has_clear_preference)
     return false;
 
@@ -763,9 +760,8 @@ bool HybridMCTSReusedRootCurrentOverride(
   }
 
   if (mcts_root_visits < 3 * std::max<uint64_t>(1, mcts_root_current_visits) ||
-      mcts_best_visits <
-          3 * static_cast<uint32_t>(std::max<uint32_t>(
-                  1, mcts_best_current_visits))) {
+      mcts_best_visits < 3 * static_cast<uint32_t>(std::max<uint32_t>(
+                                 1, mcts_best_current_visits))) {
     return false;
   }
 
@@ -2608,12 +2604,11 @@ Move ParallelHybridSearch::make_final_decision() {
       HybridMCTSRootConfidenceFixedBudgetOverride(
           mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
           mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta);
-  const bool mcts_compact_fixed_budget =
-      HybridMCTSCompactFixedBudgetOverride(
-          mcts_decision_budget, mcts_visit_evidence_sane,
-          ab_has_clear_preference, mcts_confidence_total_nodes,
-          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
-          ab_in_ab.average_score, mcts_in_ab.average_score);
+  const bool mcts_compact_fixed_budget = HybridMCTSCompactFixedBudgetOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane, ab_has_clear_preference,
+      mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+      root_q_gap, mcts_cp, eval_delta, ab_in_ab.average_score,
+      mcts_in_ab.average_score);
   const bool mcts_compact_clear_preference =
       HybridMCTSCompactClearPreferenceOverride(
           mcts_decision_budget, mcts_visit_evidence_sane,
@@ -2645,15 +2640,14 @@ Move ParallelHybridSearch::make_final_decision() {
           mcts_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
           mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
           ab_in_mcts.q, mcts_q);
-  const bool mcts_reused_root_current =
-      HybridMCTSReusedRootCurrentOverride(
-          mcts_decision_budget, mcts_visit_evidence_sane,
-          ab_has_clear_preference, ab_root_rejects_mcts, mcts_total_nodes,
-          mcts_visits, mcts_total_current_nodes, mcts_current_visits,
-          absolute_visit_share, visit_share, root_q_gap, mcts_cp, eval_delta,
-          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.score_lowerbound,
-          mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
-          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_reused_root_current = HybridMCTSReusedRootCurrentOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane, ab_has_clear_preference,
+      ab_root_rejects_mcts, mcts_total_nodes, mcts_visits,
+      mcts_total_current_nodes, mcts_current_visits, absolute_visit_share,
+      visit_share, root_q_gap, mcts_cp, eval_delta, mcts_in_ab.rank,
+      mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+      mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
+      ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   ane_confirmed_mcts_override = HybridANEConfirmedMCTSOverride(
       config_.ane_confirm_mcts_override, ane_agrees_mcts, mcts_decision_budget,
       mcts_visit_evidence_sane, mcts_confidence_total_nodes,
@@ -2805,13 +2799,11 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSRootConfidence=" << (mcts_root_confidence_fixed_budget ? 1 : 0)
        << " MCTSCompact=" << (mcts_compact_fixed_budget ? 1 : 0)
        << " MCTSCompactClearPreference="
-       << (mcts_compact_clear_preference ? 1 : 0)
-       << " MCTSCrossRootConfidence="
+       << (mcts_compact_clear_preference ? 1 : 0) << " MCTSCrossRootConfidence="
        << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
        << " MCTSRootConfidenceRejectOverride="
        << (mcts_root_confidence_reject_override ? 1 : 0)
-       << " MCTSReusedRootConfidence="
-       << (mcts_reused_root_confidence ? 1 : 0)
+       << " MCTSReusedRootConfidence=" << (mcts_reused_root_confidence ? 1 : 0)
        << " MCTSReusedRootCurrent=" << (mcts_reused_root_current ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
        << " ABVerified=" << (ab_verified ? 1 : 0)

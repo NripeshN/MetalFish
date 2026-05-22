@@ -505,9 +505,7 @@ def initial_ane_stats(args) -> dict[str, object]:
     requested = bool(getattr(args, "hybrid_ane_root_probe", False))
     return {
         "ane_probe_requested": requested,
-        "ane_root_hints_requested": bool(
-            getattr(args, "hybrid_ane_root_hints", False)
-        ),
+        "ane_root_hints_requested": bool(getattr(args, "hybrid_ane_root_hints", False)),
         "ane_compute_units": (
             str(getattr(args, "hybrid_ane_compute_units", "")) if requested else ""
         ),
@@ -561,9 +559,7 @@ def update_ane_stats(stats: dict[str, object], result: dict) -> None:
         if agrees == "1":
             stats["ane_agrees_mcts"] = int(stats.get("ane_agrees_mcts", 0)) + 1
         if confirmed == "1":
-            stats["ane_confirmed_mcts"] = int(
-                stats.get("ane_confirmed_mcts", 0)
-            ) + 1
+            stats["ane_confirmed_mcts"] = int(stats.get("ane_confirmed_mcts", 0)) + 1
 
 
 def parse_setoptions(items: list[str]) -> dict[str, str]:
