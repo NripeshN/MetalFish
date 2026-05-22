@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <iomanip>
 #include <initializer_list>
 #include <iostream>
@@ -144,6 +145,7 @@ cudaError_t InstantiateCudaGraph(cudaGraphExec_t *graph_exec,
 struct CudaGraphExecutionKey {
   int batch_size = 0;
   std::uint64_t workspace_generation = 0;
+  std::uint64_t buffer_generation = 0;
   cudaStream_t stream = nullptr;
   std::uintptr_t input_masks = 0;
   std::uintptr_t input_values = 0;
@@ -157,6 +159,7 @@ struct CudaGraphExecutionKey {
   bool operator==(const CudaGraphExecutionKey &other) const {
     return batch_size == other.batch_size &&
            workspace_generation == other.workspace_generation &&
+           buffer_generation == other.buffer_generation &&
            stream == other.stream && input_masks == other.input_masks &&
            input_values == other.input_values && policy == other.policy &&
            value == other.value && moves_left == other.moves_left &&
@@ -169,11 +172,13 @@ std::uintptr_t DevicePtrKey(const void *ptr) {
 }
 
 CudaGraphExecutionKey MakeCudaGraphExecutionKey(
-    int batch_size, std::uint64_t workspace_generation, cudaStream_t stream,
+    int batch_size, std::uint64_t workspace_generation,
+    std::uint64_t buffer_generation, cudaStream_t stream,
     const CudaInferenceBuffers &buffers) {
   return CudaGraphExecutionKey{
       batch_size,
       workspace_generation,
+      buffer_generation,
       stream,
       DevicePtrKey(buffers.input_masks),
       DevicePtrKey(buffers.input_values),
@@ -391,7 +396,24 @@ public:
   }
 
   std::string Name() const override {
-    return graph_requested_ ? "resolved+graph" : "resolved";
+    if (!graph_requested_)
+      return "resolved";
+    if (!CudaGraphExecutionCompatible())
+      return "resolved+graph-incompatible";
+    if (graph_disabled_) {
+      if (EnvFlagEnabled("METALFISH_CUDA_GRAPH_STATUS_DETAIL") &&
+          !graph_disabled_reason_.empty()) {
+        return "resolved+graph-fallback(" + graph_disabled_reason_ + ")";
+      }
+      return "resolved+graph-fallback";
+    }
+    if (graph_replay_count_ > 0)
+      return "resolved+graph-replay";
+    if (graph_capture_count_ > 0)
+      return "resolved+graph-captured";
+    if (graph_primed_key_.IsValid())
+      return "resolved+graph-primed";
+    return "resolved+graph";
   }
 
 private:
@@ -457,7 +479,26 @@ private:
   }
 
   bool GraphExecutionEnabled() const {
-    return graph_requested_ && CudaGraphExecutionCompatible();
+    return graph_requested_ && !graph_disabled_ &&
+           CudaGraphExecutionCompatible();
+  }
+
+  void DisableGraphExecution(const std::string &reason) {
+    graph_cache_.Reset();
+    graph_primed_key_ = {};
+    graph_disabled_ = true;
+    graph_disabled_reason_ = reason;
+    cudaGetLastError();
+  }
+
+  void ExecuteGraphFallback(const NetworkResolvedExecutionPlan &execution_plan,
+                            const CudaWeightBuffers &weights,
+                            CudaInferenceBuffers &buffers,
+                            CudaExecutionWorkspace &workspace, int batch_size,
+                            const std::string &reason) {
+    DisableGraphExecution(reason);
+    ExecuteUncaptured(execution_plan, weights, buffers, workspace, batch_size,
+                      false);
   }
 
   void ExecuteCapturedWork(const NetworkResolvedExecutionPlan &execution_plan,
@@ -481,12 +522,28 @@ private:
     ReserveExecutionWorkspace(tape, workspace);
     cudaStream_t stream = workspace.Stream();
     const auto key = MakeCudaGraphExecutionKey(
-        batch_size, workspace.Generation(), stream, buffers);
+        batch_size, workspace.Generation(), buffers.Generation(), stream,
+        buffers);
 
     if (graph_cache_.Matches(key)) {
-      CheckCudaSuccess("cudaGraphLaunch",
-                       cudaGraphLaunch(graph_cache_.graph_exec, stream));
-      workspace.Synchronize();
+      const cudaError_t launch_status =
+          cudaGraphLaunch(graph_cache_.graph_exec, stream);
+      if (launch_status != cudaSuccess) {
+        ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                             batch_size,
+                             CudaErrorMessage("cudaGraphLaunch", launch_status));
+        return;
+      }
+      try {
+        workspace.Synchronize();
+        ++graph_replay_count_;
+      } catch (const std::exception &e) {
+        ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                             batch_size, e.what());
+      } catch (...) {
+        ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                             batch_size, "cudaGraphLaunch failed");
+      }
       return;
     }
 
@@ -502,45 +559,87 @@ private:
       return;
     }
 
-    CheckCudaSuccess("cudaStreamBeginCapture",
-                     cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+    const cudaError_t capture_status =
+        cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal);
+    if (capture_status != cudaSuccess) {
+      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                           batch_size,
+                           CudaErrorMessage("cudaStreamBeginCapture",
+                                            capture_status));
+      return;
+    }
     try {
       ExecuteCapturedWork(execution_plan, weights, buffers, workspace,
                           batch_size, tape);
+    } catch (const std::exception &e) {
+      EndFailedCudaGraphCapture(stream);
+      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                           batch_size, e.what());
+      return;
     } catch (...) {
       EndFailedCudaGraphCapture(stream);
-      graph_cache_.Reset();
-      graph_primed_key_ = {};
-      throw;
+      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                           batch_size,
+                           "CUDA graph capture work failed");
+      return;
     }
 
     cudaGraph_t graph = nullptr;
-    try {
-      CheckCudaSuccess("cudaStreamEndCapture",
-                       cudaStreamEndCapture(stream, &graph));
-      cudaGraphExec_t graph_exec = nullptr;
-      CheckCudaSuccess("cudaGraphInstantiate",
-                       InstantiateCudaGraph(&graph_exec, graph));
-      graph_cache_.Reset();
-      graph_cache_.graph = graph;
-      graph_cache_.graph_exec = graph_exec;
-      graph_cache_.key = key;
-    } catch (...) {
+    cudaError_t graph_status = cudaStreamEndCapture(stream, &graph);
+    if (graph_status != cudaSuccess) {
       if (graph)
         cudaGraphDestroy(graph);
-      graph_cache_.Reset();
-      graph_primed_key_ = {};
-      throw;
+      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                           batch_size,
+                           CudaErrorMessage("cudaStreamEndCapture",
+                                            graph_status));
+      return;
     }
 
-    CheckCudaSuccess("cudaGraphLaunch",
-                     cudaGraphLaunch(graph_cache_.graph_exec, stream));
-    workspace.Synchronize();
+    cudaGraphExec_t graph_exec = nullptr;
+    graph_status = InstantiateCudaGraph(&graph_exec, graph);
+    if (graph_status != cudaSuccess) {
+      if (graph)
+        cudaGraphDestroy(graph);
+      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                           batch_size,
+                           CudaErrorMessage("cudaGraphInstantiate",
+                                            graph_status));
+      return;
+    }
+
+    graph_cache_.Reset();
+    graph_cache_.graph = graph;
+    graph_cache_.graph_exec = graph_exec;
+    graph_cache_.key = key;
+
+    const cudaError_t launch_status =
+        cudaGraphLaunch(graph_cache_.graph_exec, stream);
+    if (launch_status != cudaSuccess) {
+      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                           batch_size,
+                           CudaErrorMessage("cudaGraphLaunch", launch_status));
+      return;
+    }
+    try {
+      workspace.Synchronize();
+      ++graph_capture_count_;
+    } catch (const std::exception &e) {
+      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                           batch_size, e.what());
+    } catch (...) {
+      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
+                           batch_size, "cudaGraphLaunch failed");
+    }
   }
 
   CudaExecutionSchedule schedule_;
   CudaOutputMapping output_mapping_;
   bool graph_requested_ = false;
+  bool graph_disabled_ = false;
+  std::uint64_t graph_capture_count_ = 0;
+  std::uint64_t graph_replay_count_ = 0;
+  std::string graph_disabled_reason_;
   CudaGraphExecutionKey graph_primed_key_;
   CudaGraphExecutionCache graph_cache_;
 };

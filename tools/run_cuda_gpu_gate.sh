@@ -13,6 +13,11 @@ SUMMARY="${METALFISH_CUDA_SUMMARY:-${BUILD_DIR}/cuda-gpu-summary.md}"
 PARITY_REPORT="${METALFISH_NN_PARITY_REPORT:-${BUILD_DIR}/cuda-gpu-parity-report.md}"
 CUDA_PROFILE_REQUESTED="${METALFISH_CUDA_PROFILE:-0}"
 CUDA_PROFILE_LIMIT="${METALFISH_CUDA_PROFILE_LIMIT:-8}"
+CUDA_GRAPH_REQUESTED=0
+if [[ "${METALFISH_CUDA_GRAPH:-0}" != "0" ||
+      "${METALFISH_CUDA_GRAPH_EXECUTION:-0}" != "0" ]]; then
+  CUDA_GRAPH_REQUESTED=1
+fi
 
 export PATH="/usr/local/cuda/bin:/usr/local/cuda-12.9/bin:/usr/local/cuda-12.8/bin:/usr/local/cuda-12.4/bin:${PATH}"
 export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda-12.9/lib64:/usr/local/cuda-12.8/lib64:/usr/local/cuda-12.4/lib64:${LD_LIBRARY_PATH:-}"
@@ -98,6 +103,12 @@ summary_failure_lines() {
 
 write_summary() {
   local gate_status="${1:-passed}"
+  local graph_replay_observed="no"
+  if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+     grep -q "executor=resolved+graph-replay" \
+       "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+    graph_replay_observed="yes"
+  fi
   mkdir -p "$(dirname "${SUMMARY}")"
   {
     echo "# MetalFish CUDA GPU Gate Summary"
@@ -115,7 +126,8 @@ write_summary() {
     echo "- Single reuse stress: ${METALFISH_NN_SINGLE_REUSE_STRESS:-1}"
     echo "- Batch reuse stress: ${METALFISH_NN_BATCH_REUSE_STRESS:-1}"
     echo "- CUDA full buffer clear: ${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}"
-    echo "- CUDA graph execution: ${METALFISH_CUDA_GRAPH:-${METALFISH_CUDA_GRAPH_EXECUTION:-0}}"
+    echo "- CUDA graph execution: ${CUDA_GRAPH_REQUESTED}"
+    echo "- CUDA graph replay observed: ${graph_replay_observed}"
     echo "- CUDA release single workspace each run: ${METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN:-0}"
     echo "- CUDA release workspace each run: ${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}"
     echo "- CUDA stable execution batch size: ${METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
@@ -165,6 +177,11 @@ write_summary() {
       true
     else
       echo "- not reached"
+    fi
+    if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
+       grep -m1 "backend_after: CUDA transformer backend" \
+         "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+      true
     fi
     echo
     echo "## Batch Timings"
@@ -381,6 +398,18 @@ if ! grep -q "backend: CUDA transformer backend" \
    ! grep -q "^- Backend: CUDA transformer backend" "${PARITY_REPORT}"; then
   echo "CUDA transformer backend marker not found in NN comparison output" >&2
   exit 1
+fi
+if [[ -n "${CUDA_GRAPH_REQUESTED}" && "${CUDA_GRAPH_REQUESTED}" != "0" &&
+      "${METALFISH_CUDA_TRACE_STAGE_OUTPUTS:-0}" == "0" &&
+      "${METALFISH_CUDA_TRACE_ATTENTION_INTERNALS:-0}" == "0" &&
+      "${METALFISH_CUDA_TRACE_DYNAMIC_PE_INTERNALS:-0}" == "0" &&
+      "${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}" == "0" &&
+      "${METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN:-0}" == "0" ]]; then
+  if ! grep -q "executor=resolved+graph-replay" \
+         "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
+    echo "CUDA graph execution was requested but no graph replay was observed" >&2
+    exit 1
+  fi
 fi
 
 python3 tools/uci_smoke.py \

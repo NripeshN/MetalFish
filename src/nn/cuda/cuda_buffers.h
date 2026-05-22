@@ -74,6 +74,7 @@ public:
 
   const CudaBufferLayout &Layout() const { return layout_; }
   size_t AllocationBytes() const { return allocation_bytes_; }
+  std::uint64_t Generation() const { return generation_; }
 
   std::uint64_t *input_masks = nullptr;
   float *input_values = nullptr;
@@ -85,6 +86,7 @@ public:
 private:
   CudaBufferLayout layout_;
   size_t allocation_bytes_ = 0;
+  std::uint64_t generation_ = 1;
 };
 
 struct CudaBufferSmokeResult {

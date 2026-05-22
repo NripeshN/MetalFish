@@ -1552,6 +1552,8 @@ bool benchmark_nn_batch_optional() {
                 << std::setprecision(4) << eval_ms << "ms_eval";
     }
     std::cout << " checksum=" << std::setprecision(6) << checksum << std::endl;
+    std::cout << "    backend_after: " << network->GetNetworkInfo()
+              << std::endl;
     return true;
   } catch (const std::exception &e) {
     std::cout << "    FAIL: exception: " << e.what() << std::endl;

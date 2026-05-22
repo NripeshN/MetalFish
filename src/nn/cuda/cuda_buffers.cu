@@ -172,6 +172,7 @@ CudaInferenceBuffers::operator=(CudaInferenceBuffers &&other) noexcept {
 
   layout_ = other.layout_;
   allocation_bytes_ = other.allocation_bytes_;
+  generation_ = other.generation_;
   input_masks = other.input_masks;
   input_values = other.input_values;
   policy = other.policy;
@@ -181,6 +182,7 @@ CudaInferenceBuffers::operator=(CudaInferenceBuffers &&other) noexcept {
 
   other.layout_ = {};
   other.allocation_bytes_ = 0;
+  other.generation_ = 1;
   other.input_masks = nullptr;
   other.input_values = nullptr;
   other.policy = nullptr;
@@ -198,9 +200,11 @@ void CudaInferenceBuffers::Allocate(const CudaBufferLayout &layout) {
     throw std::runtime_error("CUDA buffer max batch size must be positive");
   }
 
+  const std::uint64_t next_generation = generation_ + 1;
   CudaInferenceBuffers next;
   next.layout_ = layout;
   next.allocation_bytes_ = layout.TotalBytes();
+  next.generation_ = next_generation;
 
   try {
     AllocateDevice(&next.input_masks, layout.InputPlaneEntries(),
@@ -308,6 +312,9 @@ CudaInferenceBuffers::DownloadOutputs(int batch_size,
 }
 
 void CudaInferenceBuffers::Release() {
+  const bool had_state = allocation_bytes_ != 0 || input_masks ||
+                         input_values || policy || value || moves_left ||
+                         raw_policy;
   FreeDevice(input_masks);
   FreeDevice(input_values);
   FreeDevice(policy);
@@ -323,6 +330,8 @@ void CudaInferenceBuffers::Release() {
   raw_policy = nullptr;
   layout_ = {};
   allocation_bytes_ = 0;
+  if (had_state)
+    ++generation_;
 }
 
 CudaBufferSmokeResult RunInferenceBufferSmoke() {
@@ -345,6 +354,7 @@ CudaBufferSmokeResult RunInferenceBufferSmoke() {
   try {
     CudaInferenceBuffers buffers;
     buffers.Allocate(layout);
+    const std::uint64_t generation_after_allocate = buffers.Generation();
     CudaExecutionWorkspace workspace;
     cudaStream_t stream = workspace.Stream();
     buffers.ClearOutputs(4, stream);
@@ -365,6 +375,17 @@ CudaBufferSmokeResult RunInferenceBufferSmoke() {
         !AllZero(output.moves_left) || !AllZero(output.raw_policy)) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA output buffer clear/download mismatch";
+      return result;
+    }
+    if (generation_after_allocate <= 1) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA buffer allocation generation did not advance";
+      return result;
+    }
+    buffers.Release();
+    if (buffers.Generation() <= generation_after_allocate) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA buffer release generation did not advance";
       return result;
     }
   } catch (const std::exception &e) {
