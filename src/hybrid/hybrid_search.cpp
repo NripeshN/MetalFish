@@ -673,38 +673,6 @@ bool HybridMCTSRootConfidenceRejectOverride(
   return mcts_q - ab_in_mcts_q >= 0.60f;
 }
 
-bool HybridMCTSCompactRejectOverride(
-    bool fixed_budget, bool ab_root_rejects_mcts, uint64_t mcts_root_visits,
-    uint32_t mcts_best_visits, float visit_share, float root_q_gap,
-    int mcts_cp, int eval_delta, int ab_average_score, int mcts_average_score,
-    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
-    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
-    float mcts_q) {
-  if (!fixed_budget || !ab_root_rejects_mcts)
-    return false;
-
-  if (mcts_root_visits < 140 || mcts_best_visits < 110 ||
-      visit_share < 0.75f || root_q_gap < 0.75f || mcts_cp < 180 ||
-      eval_delta < 220) {
-    return false;
-  }
-
-  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
-      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
-      mcts_in_ab_upperbound || mcts_in_ab_effort > 10000) {
-    return false;
-  }
-
-  if (ab_average_score - mcts_average_score > 80)
-    return false;
-
-  if (ab_in_mcts_rank <= 1 || ab_in_mcts_visits < 16)
-    return false;
-
-  return mcts_q - ab_in_mcts_q >= 0.75f;
-}
-
 bool HybridMCTSReusedRootConfidenceOverride(
     bool fixed_budget, uint64_t mcts_root_visits, uint32_t mcts_best_visits,
     uint64_t mcts_root_current_visits, uint32_t mcts_best_current_visits,
@@ -2582,15 +2550,6 @@ Move ParallelHybridSearch::make_final_decision() {
           mcts_in_ab.score_upperbound, mcts_in_ab.effort,
           ab_in_ab.average_score, mcts_in_ab.average_score, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
-  const bool mcts_compact_reject =
-      HybridMCTSCompactRejectOverride(
-          mcts_decision_budget, ab_root_rejects_mcts,
-          mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
-          root_q_gap, mcts_cp, eval_delta, ab_in_ab.average_score,
-          mcts_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
-          mcts_in_ab.score_lowerbound, mcts_in_ab.score_upperbound,
-          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
-          ab_in_mcts.q, mcts_q);
   const bool mcts_reused_root_confidence =
       HybridMCTSReusedRootConfidenceOverride(
           mcts_decision_budget, mcts_total_nodes, mcts_visits,
@@ -2644,8 +2603,8 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool mcts_override_allowed =
       !ab_root_rejects_mcts || ane_confirmed_mcts_override ||
       mcts_compact_fixed_budget || mcts_cross_root_confidence_fixed_budget ||
-      mcts_root_confidence_reject_override || mcts_compact_reject ||
-      mcts_reused_root_confidence || mcts_root_rejects_ab ||
+      mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
+      mcts_root_rejects_ab ||
       (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
@@ -2689,9 +2648,6 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_root_confidence_fixed_budget";
-    } else if (mcts_compact_reject) {
-      choose_mcts = true;
-      reason = "mcts_compact_reject";
     } else if (mcts_reused_root_confidence) {
       choose_mcts = true;
       reason = "mcts_reused_root_confidence";
@@ -2749,7 +2705,6 @@ Move ParallelHybridSearch::make_final_decision() {
        << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
        << " MCTSRootConfidenceRejectOverride="
        << (mcts_root_confidence_reject_override ? 1 : 0)
-       << " MCTSCompactReject=" << (mcts_compact_reject ? 1 : 0)
        << " MCTSReusedRootConfidence="
        << (mcts_reused_root_confidence ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
