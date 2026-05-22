@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `ebd05531-6ce8-41df-b6b2-b3a1d05c3e83` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `7f7fe2e4-cfaa-4bc0-b849-297925b12f37` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `513a356c-f620-4c4f-bca1-caa44eb8e352` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `e2456312-f7c8-4cd2-8968-f73875f7d629` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-015228-graphsafe`, L4, 2026-05-22 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
@@ -528,8 +528,9 @@ Current portable CPU transformer boundary:
   tensor-plan, weight-inventory, execution-plan, and resolved-plan code. This
   keeps Linux and Windows aligned with Metal/CUDA network parsing and resolved
   tensor shape inference.
-- The backend now owns resolved tensor copies and executes simple dense and
-  layernorm resolved plans, including batched output decoding through the shared
+- The backend now owns resolved tensor copies and executes simple dense,
+  layernorm, gate, and feed-forward resolved plans, including adjacent
+  feed-forward residual layernorm and batched output decoding through the shared
   policy/value decoder. This gives portable builds a real non-stub transformer
   execution path for minimal classical fixtures.
 - BT4 execution still fails loudly with the first unsupported resolved stage

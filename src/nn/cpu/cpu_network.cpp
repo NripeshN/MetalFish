@@ -32,6 +32,11 @@ bool StartsWith(std::string_view value, std::string_view prefix) {
          value.substr(0, prefix.size()) == prefix;
 }
 
+bool EndsWith(std::string_view value, std::string_view suffix) {
+  return value.size() >= suffix.size() &&
+         value.substr(value.size() - suffix.size()) == suffix;
+}
+
 const NetworkResolvedTensorRef *
 FindTensorKind(const NetworkResolvedExecutionStep &step,
                NetworkWeightTensorKind kind) {
@@ -40,6 +45,24 @@ FindTensorKind(const NetworkResolvedExecutionStep &step,
       return &tensor;
   }
   return nullptr;
+}
+
+const NetworkResolvedTensorRef *
+FindTensorSuffix(const NetworkResolvedExecutionStep &step,
+                 std::string_view suffix) {
+  for (const auto &tensor : step.tensors) {
+    if (EndsWith(tensor.name, suffix))
+      return &tensor;
+  }
+  return nullptr;
+}
+
+bool IsMultiplyGate(std::string_view name) {
+  return name.find("mult_gate") != std::string_view::npos;
+}
+
+bool IsAddGate(std::string_view name) {
+  return name.find("add_gate") != std::string_view::npos;
 }
 
 bool IsSimpleDenseStep(const NetworkResolvedExecutionStep &step) {
@@ -68,6 +91,25 @@ bool IsSimpleLayerNormStep(const NetworkResolvedExecutionStep &step) {
     }
   }
   return true;
+}
+
+bool IsSimpleGateStep(const NetworkResolvedExecutionStep &step) {
+  if (step.tensors.empty())
+    return false;
+  for (const auto &tensor : step.tensors) {
+    if (tensor.kind != NetworkWeightTensorKind::Gate ||
+        (!IsMultiplyGate(tensor.name) && !IsAddGate(tensor.name))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsSimpleFeedForwardStep(const NetworkResolvedExecutionStep &step) {
+  return FindTensorSuffix(step, ".dense1_w") &&
+         FindTensorSuffix(step, ".dense1_b") &&
+         FindTensorSuffix(step, ".dense2_w") &&
+         FindTensorSuffix(step, ".dense2_b");
 }
 
 std::string FirstUnsupportedExecutionStep(
@@ -103,6 +145,22 @@ std::string FirstUnsupportedExecutionStep(
       if (!IsSimpleLayerNormStep(step)) {
         return "CPU transformer backend does not support compound layernorm "
                "stage yet: " +
+               step.name;
+      }
+      continue;
+    }
+    if (step.kind == NetworkExecutionOpKind::Gate) {
+      if (!IsSimpleGateStep(step)) {
+        return "CPU transformer backend does not support compound gate "
+               "stage yet: " +
+               step.name;
+      }
+      continue;
+    }
+    if (step.kind == NetworkExecutionOpKind::FeedForward) {
+      if (!IsSimpleFeedForwardStep(step)) {
+        return "CPU transformer backend does not support compound "
+               "feed-forward stage yet: " +
                step.name;
       }
       continue;
@@ -253,6 +311,111 @@ struct CpuBuffer {
   int width = 0;
 };
 
+std::size_t
+BodyEncoderLayerCount(const NetworkResolvedExecutionPlan &execution_plan) {
+  std::size_t max_layer = 0;
+  bool found = false;
+  constexpr std::string_view prefix = "body.encoder.";
+  for (const auto &step : execution_plan.steps) {
+    if (!StartsWith(step.name, prefix))
+      continue;
+    const std::string_view suffix =
+        std::string_view(step.name).substr(prefix.size());
+    const std::size_t dot = suffix.find('.');
+    if (dot == std::string_view::npos)
+      continue;
+    std::size_t layer = 0;
+    bool has_digit = false;
+    for (char ch : suffix.substr(0, dot)) {
+      if (ch < '0' || ch > '9') {
+        has_digit = false;
+        break;
+      }
+      has_digit = true;
+      layer = layer * 10 + static_cast<std::size_t>(ch - '0');
+    }
+    if (!has_digit)
+      continue;
+    max_layer = std::max(max_layer, layer + 1);
+    found = true;
+  }
+  return found ? max_layer : 0;
+}
+
+float FeedForwardResidualScale(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::string_view stage_name) {
+  if (!StartsWith(stage_name, "body.input_embedding_ffn") &&
+      !StartsWith(stage_name, "body.encoder.")) {
+    return 1.0f;
+  }
+  const std::size_t layer_count = BodyEncoderLayerCount(execution_plan);
+  if (layer_count == 0)
+    return 1.0f;
+  return std::pow(2.0f * static_cast<float>(layer_count), -0.25f);
+}
+
+float FeedForwardLayerNormEpsilon(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::string_view stage_name) {
+  if (StartsWith(stage_name, "body.input_embedding_ffn"))
+    return 1e-3f;
+  if (StartsWith(stage_name, "body.encoder.")) {
+    return execution_plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE
+               ? 1e-3f
+               : 1e-6f;
+  }
+  return 1e-5f;
+}
+
+float DenseLayerNormEpsilon(const NetworkResolvedExecutionPlan &execution_plan,
+                            std::string_view stage_name) {
+  if (stage_name == "body.input_embedding_norm" &&
+      execution_plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE) {
+    return 1e-3f;
+  }
+  return 1e-5f;
+}
+
+void ApplyLayerNorm(const float *input, const float *residual_parent,
+                    float residual_scale, const std::vector<float> &scale,
+                    const std::vector<float> &bias, std::vector<float> &output,
+                    int rows, int width, float epsilon) {
+  for (int row = 0; row < rows; ++row) {
+    const float *input_row =
+        input + static_cast<std::size_t>(row) * width;
+    const float *parent_row =
+        residual_parent
+            ? residual_parent + static_cast<std::size_t>(row) * width
+            : nullptr;
+    float *output_row = output.data() + static_cast<std::size_t>(row) * width;
+
+    float sum = 0.0f;
+    float square_sum = 0.0f;
+    for (int col = 0; col < width; ++col) {
+      const float value = parent_row ? parent_row[col] + input_row[col] *
+                                                         residual_scale
+                                     : input_row[col];
+      sum += value;
+      square_sum += value * value;
+    }
+
+    const float mean = sum / static_cast<float>(width);
+    float variance = square_sum / static_cast<float>(width) - mean * mean;
+    if (variance < 0.0f)
+      variance = 0.0f;
+    const float inv_std = 1.0f / std::sqrt(variance + epsilon);
+
+    for (int col = 0; col < width; ++col) {
+      const float value = parent_row ? parent_row[col] + input_row[col] *
+                                                         residual_scale
+                                     : input_row[col];
+      const std::size_t idx = static_cast<std::size_t>(col);
+      output_row[col] = (value - mean) * inv_std * scale[idx] + bias[idx];
+    }
+  }
+}
+
 const CpuBuffer &RequireBuffer(const std::unordered_map<std::string, CpuBuffer>
                                    &outputs,
                                const std::string &name) {
@@ -340,7 +503,7 @@ std::string CpuNetwork::GetNetworkInfo() const {
       << ", execution: " << resolved_execution_plan_.Summary()
       << ", weight_bytes=" << weight_bytes_
       << ", executor="
-      << (unsupported_execution_reason_.empty() ? "dense-layernorm"
+      << (unsupported_execution_reason_.empty() ? "dense-layernorm-gate-ffn"
                                                 : "unsupported")
       << ")";
   return out.str();
@@ -390,6 +553,9 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
   std::string last_policy;
   std::string last_value;
   std::string last_moves_left;
+  std::string last_executed_step;
+  std::string last_feed_forward_step;
+  std::unordered_map<std::string, CpuBuffer> feed_forward_sources;
 
   const auto source_for = [&](const std::string &name) -> const CpuBuffer & {
     const std::string policy_prefix =
@@ -503,6 +669,140 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
                            DenseStageActivationForName(resolved_execution_plan_,
                                                        step.name));
       remember_output(step, std::move(output));
+      last_executed_step = step.name;
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::Gate) {
+      CpuBuffer output;
+      output.width = source.width;
+      output.values = source.values;
+
+      for (const auto &tensor_ref : step.tensors) {
+        const auto &tensor = TensorAt(tensor_ref.inventory_index);
+        int gate_rows = 0;
+        if (tensor.data.size() == static_cast<std::size_t>(source.width)) {
+          gate_rows = 1;
+        } else if (tensor.data.size() %
+                       static_cast<std::size_t>(source.width) ==
+                   0) {
+          gate_rows = static_cast<int>(
+              tensor.data.size() / static_cast<std::size_t>(source.width));
+        }
+        if (gate_rows <= 0 || rows % gate_rows != 0) {
+          throw std::runtime_error("CPU gate stage tensor dimensions mismatch: " +
+                                   step.name);
+        }
+
+        std::vector<float> next(output.values.size(), 0.0f);
+        for (int row = 0; row < rows; ++row) {
+          const int gate_row = gate_rows == 1 ? 0 : row % gate_rows;
+          for (int col = 0; col < source.width; ++col) {
+            const float gate =
+                gate_rows == 1
+                    ? tensor.data[static_cast<std::size_t>(col)]
+                    : tensor.data[static_cast<std::size_t>(col) * gate_rows +
+                                  gate_row];
+            const std::size_t idx =
+                static_cast<std::size_t>(row) * source.width + col;
+            if (IsMultiplyGate(tensor_ref.name)) {
+              next[idx] = output.values[idx] * gate;
+            } else if (IsAddGate(tensor_ref.name)) {
+              next[idx] = output.values[idx] + gate;
+            } else {
+              throw std::runtime_error("CPU gate stage tensor is unknown: " +
+                                       tensor_ref.name);
+            }
+          }
+        }
+        output.values = std::move(next);
+      }
+
+      remember_output(step, std::move(output));
+      last_executed_step = step.name;
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::FeedForward) {
+      const auto *dense1_w_ref = FindTensorSuffix(step, ".dense1_w");
+      const auto *dense1_b_ref = FindTensorSuffix(step, ".dense1_b");
+      const auto *dense2_w_ref = FindTensorSuffix(step, ".dense2_w");
+      const auto *dense2_b_ref = FindTensorSuffix(step, ".dense2_b");
+      if (!dense1_w_ref || !dense1_b_ref || !dense2_w_ref || !dense2_b_ref) {
+        throw std::runtime_error("CPU feed-forward stage has missing tensors: " +
+                                 step.name);
+      }
+
+      const auto &dense1_w = TensorAt(dense1_w_ref->inventory_index);
+      const auto &dense1_b = TensorAt(dense1_b_ref->inventory_index);
+      const auto &dense2_w = TensorAt(dense2_w_ref->inventory_index);
+      const auto &dense2_b = TensorAt(dense2_b_ref->inventory_index);
+      if (dense1_w.dims.size() != 2 || dense1_b.dims.size() != 1 ||
+          dense2_w.dims.size() != 2 || dense2_b.dims.size() != 1) {
+        throw std::runtime_error("CPU feed-forward tensor shape is invalid: " +
+                                 step.name);
+      }
+
+      const int input_width = static_cast<int>(dense1_w.dims[1]);
+      const int hidden_width = static_cast<int>(dense1_w.dims[0]);
+      const int dense2_input_width = static_cast<int>(dense2_w.dims[1]);
+      const int output_width = static_cast<int>(dense2_w.dims[0]);
+      if (input_width != source.width || dense2_input_width != hidden_width ||
+          dense1_b.data.size() != static_cast<std::size_t>(hidden_width) ||
+          dense2_b.data.size() != static_cast<std::size_t>(output_width)) {
+        throw std::runtime_error(
+            "CPU feed-forward tensor dimensions mismatch: " + step.name);
+      }
+
+      std::vector<float> hidden(static_cast<std::size_t>(rows) *
+                                    static_cast<std::size_t>(hidden_width),
+                                0.0f);
+      for (int row = 0; row < rows; ++row) {
+        const float *input_row =
+            source.values.data() + static_cast<std::size_t>(row) * input_width;
+        float *hidden_row =
+            hidden.data() + static_cast<std::size_t>(row) * hidden_width;
+        for (int out = 0; out < hidden_width; ++out) {
+          const float *weight_row =
+              dense1_w.data.data() + static_cast<std::size_t>(out) *
+                                         input_width;
+          float sum = dense1_b.data[static_cast<std::size_t>(out)];
+          for (int in = 0; in < input_width; ++in)
+            sum += input_row[in] * weight_row[in];
+          hidden_row[out] = sum;
+        }
+      }
+      ApplyDenseActivation(
+          hidden, rows, hidden_width,
+          ActivationFromName(resolved_execution_plan_.format.activations
+                                 .ffn_activation));
+
+      CpuBuffer output;
+      output.width = output_width;
+      output.values.assign(static_cast<std::size_t>(rows) *
+                               static_cast<std::size_t>(output_width),
+                           0.0f);
+      for (int row = 0; row < rows; ++row) {
+        const float *hidden_row =
+            hidden.data() + static_cast<std::size_t>(row) * hidden_width;
+        float *output_row =
+            output.values.data() + static_cast<std::size_t>(row) *
+                                       output_width;
+        for (int out = 0; out < output_width; ++out) {
+          const float *weight_row =
+              dense2_w.data.data() + static_cast<std::size_t>(out) *
+                                         hidden_width;
+          float sum = dense2_b.data[static_cast<std::size_t>(out)];
+          for (int in = 0; in < hidden_width; ++in)
+            sum += hidden_row[in] * weight_row[in];
+          output_row[out] = sum;
+        }
+      }
+
+      feed_forward_sources[step.name] = source;
+      last_feed_forward_step = step.name;
+      remember_output(step, std::move(output));
+      last_executed_step = step.name;
       continue;
     }
 
@@ -525,32 +825,32 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       CpuBuffer output;
       output.width = source.width;
       output.values.assign(source.values.size(), 0.0f);
-      for (int row = 0; row < rows; ++row) {
-        const float *input_row =
-            source.values.data() + static_cast<std::size_t>(row) * source.width;
-        float *output_row =
-            output.values.data() + static_cast<std::size_t>(row) * source.width;
-        float mean = 0.0f;
-        for (int col = 0; col < source.width; ++col)
-          mean += input_row[col];
-        mean /= static_cast<float>(source.width);
 
-        float variance = 0.0f;
-        for (int col = 0; col < source.width; ++col) {
-          const float delta = input_row[col] - mean;
-          variance += delta * delta;
-        }
-        variance /= static_cast<float>(source.width);
-        const float inv_std = 1.0f / std::sqrt(variance + 1e-5f);
-
-        for (int col = 0; col < source.width; ++col) {
-          const std::size_t idx = static_cast<std::size_t>(col);
-          output_row[col] =
-              (input_row[col] - mean) * inv_std * scale.data[idx] +
-              bias.data[idx];
+      const CpuBuffer *residual_parent = nullptr;
+      float residual_scale = 1.0f;
+      float epsilon = DenseLayerNormEpsilon(resolved_execution_plan_,
+                                            step.name);
+      if (!last_feed_forward_step.empty() &&
+          last_executed_step == last_feed_forward_step) {
+        const auto parent_it =
+            feed_forward_sources.find(last_feed_forward_step);
+        if (parent_it != feed_forward_sources.end() &&
+            parent_it->second.width == source.width &&
+            parent_it->second.values.size() == source.values.size()) {
+          residual_parent = &parent_it->second;
+          residual_scale = FeedForwardResidualScale(resolved_execution_plan_,
+                                                    last_feed_forward_step);
+          epsilon = FeedForwardLayerNormEpsilon(resolved_execution_plan_,
+                                                last_feed_forward_step);
         }
       }
+
+      ApplyLayerNorm(source.values.data(),
+                     residual_parent ? residual_parent->values.data() : nullptr,
+                     residual_scale, scale.data, bias.data, output.values, rows,
+                     source.width, epsilon);
       remember_output(step, std::move(output));
+      last_executed_step = step.name;
       continue;
     }
 

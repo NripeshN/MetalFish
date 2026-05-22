@@ -172,6 +172,69 @@ NN::WeightsFile make_dense_only_cpu_weights_file() {
   return file;
 }
 
+NN::WeightsFile make_gate_ffn_cpu_weights_file() {
+  NN::WeightsFile file;
+  auto *nf = file.mutable_format()->mutable_network_format();
+  nf->set_network(
+      MetalFishNN::
+          NetworkFormat_NetworkStructure_NETWORK_CLASSICAL_WITH_HEADFORMAT);
+  nf->set_policy(MetalFishNN::NetworkFormat_PolicyFormat_POLICY_CLASSICAL);
+  nf->set_value(MetalFishNN::NetworkFormat_ValueFormat_VALUE_CLASSICAL);
+  nf->set_moves_left(
+      MetalFishNN::NetworkFormat_MovesLeftFormat_MOVES_LEFT_NONE);
+  nf->set_input_embedding(
+      MetalFishNN::NetworkFormat_InputEmbeddingFormat_INPUT_EMBEDDING_NONE);
+  nf->set_default_activation(
+      MetalFishNN::NetworkFormat_DefaultActivation_DEFAULT_ACTIVATION_RELU);
+  nf->set_ffn_activation(
+      MetalFishNN::NetworkFormat_ActivationFunction_ACTIVATION_RELU);
+
+  auto *weights = file.mutable_weights();
+  std::vector<float> embedding_w(2 * NN::kPackedInputPlaneCount, 0.0f);
+  std::vector<float> embedding_b = {1.0f, 2.0f};
+  set_test_float_layer_values(weights->mutable_ip_emb_w(), embedding_w,
+                              {2, NN::kPackedInputPlaneCount});
+  set_test_float_layer_values(weights->mutable_ip_emb_b(), embedding_b, {2});
+
+  set_test_float_layer_values(weights->mutable_ip_mult_gate(), {2.0f, 3.0f},
+                              {2});
+  set_test_float_layer_values(weights->mutable_ip_add_gate(), {1.0f, -1.0f},
+                              {2});
+
+  set_test_float_layer_values(weights->mutable_ip_emb_ffn()->mutable_dense1_w(),
+                              {1.0f, 0.0f, 0.0f, 1.0f}, {2, 2});
+  set_test_float_layer_values(weights->mutable_ip_emb_ffn()->mutable_dense1_b(),
+                              {0.0f, 0.0f}, {2});
+  set_test_float_layer_values(weights->mutable_ip_emb_ffn()->mutable_dense2_w(),
+                              {1.0f, 0.0f, 0.0f, 1.0f}, {2, 2});
+  set_test_float_layer_values(weights->mutable_ip_emb_ffn()->mutable_dense2_b(),
+                              {1.0f, -1.0f}, {2});
+  set_test_float_layer_values(weights->mutable_ip_emb_ffn_ln_gammas(),
+                              {1.0f, 1.0f}, {2});
+  set_test_float_layer_values(weights->mutable_ip_emb_ffn_ln_betas(),
+                              {0.0f, 0.0f}, {2});
+
+  std::vector<float> policy_w(NN::kPolicyOutputs * 2, 0.0f);
+  policy_w[0] = 1.0f;
+  policy_w[10 * 2 + 1] = 1.0f;
+  std::vector<float> policy_b(NN::kPolicyOutputs, 0.0f);
+  set_test_float_layer_values(
+      weights->mutable_policy_heads()->mutable_vanilla()->mutable_ip_pol_w(),
+      policy_w, {NN::kPolicyOutputs, 2});
+  set_test_float_layer_values(
+      weights->mutable_policy_heads()->mutable_vanilla()->mutable_ip_pol_b(),
+      policy_b, {NN::kPolicyOutputs});
+
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_w(),
+      {0.0f, 0.0f}, {1, 2});
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_b(),
+      {0.75f}, {1});
+
+  return file;
+}
+
 void test_node_basics(TestCounter &tc) {
   std::cout << "  Node basics..." << std::endl;
   constexpr size_t node_size_budget =
@@ -913,6 +976,32 @@ void test_cpu_backend_dense_execution(TestCounter &tc) {
          "CPU dense batch should preserve policy logits", tc);
   expect(batch.size() == 2 && std::abs(batch[1].value - 0.25f) < 1e-6f,
          "CPU dense batch should preserve scalar value", tc);
+}
+
+void test_cpu_backend_gate_ffn_execution(TestCounter &tc) {
+  std::cout << "  CPU backend gate/FFN execution..." << std::endl;
+
+  auto cpu = NN::CreateNetwork(make_gate_ffn_cpu_weights_file(), "cpu");
+  expect(cpu->GetNetworkInfo().find("executor=dense-layernorm-gate-ffn") !=
+             std::string::npos,
+         "explicit cpu backend should enable gate/FFN execution", tc);
+
+  NN::InputPlanes input{};
+  const auto output = cpu->Evaluate(input);
+  expect(output.policy[0] < -0.99f && output.policy[0] > -1.01f,
+         "CPU gate/FFN path should preserve first normalized policy logit",
+         tc);
+  expect(output.policy[10] > 0.99f && output.policy[10] < 1.01f,
+         "CPU gate/FFN path should preserve second normalized policy logit",
+         tc);
+  expect(std::abs(output.value - 0.75f) < 1e-6f,
+         "CPU gate/FFN path should decode scalar value", tc);
+
+  const auto batch = cpu->EvaluateBatch({input, input});
+  expect(batch.size() == 2, "CPU gate/FFN batch should emit two outputs", tc);
+  expect(batch.size() == 2 && batch[1].policy[10] > 0.99f &&
+             batch[1].policy[10] < 1.01f,
+         "CPU gate/FFN batch should preserve normalized logits", tc);
 }
 
 #ifdef USE_CUDA
@@ -2558,6 +2647,7 @@ bool test_mcts_all() {
   test_network_output_decoder(tc);
   test_nn_backend_selector_contract(tc);
   test_cpu_backend_dense_execution(tc);
+  test_cpu_backend_gate_ffn_execution(tc);
 #ifdef USE_CUDA
   test_cuda_input_packing(tc);
   test_cuda_inference_buffers(tc);
