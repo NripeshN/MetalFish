@@ -12,6 +12,7 @@
 #include "../network_format.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,12 +30,23 @@ public:
   std::string GetNetworkInfo() const override;
 
 private:
+  struct CpuTensor {
+    std::string name;
+    std::vector<float> data;
+    std::vector<std::uint32_t> dims;
+    NetworkWeightTensorKind kind = NetworkWeightTensorKind::Generic;
+  };
+
   std::string UnsupportedExecutionMessage() const;
+  const CpuTensor &TensorAt(std::size_t index) const;
+  std::vector<NetworkOutput>
+  RunBatch(const std::vector<InputPlanes> &inputs) const;
 
   NetworkFormatDescriptor format_;
   NetworkTensorPlan tensor_plan_;
   NetworkExecutionPlan execution_plan_;
   NetworkResolvedExecutionPlan resolved_execution_plan_;
+  std::vector<CpuTensor> tensors_;
   std::size_t weight_bytes_ = 0;
   std::string unsupported_execution_reason_;
 };

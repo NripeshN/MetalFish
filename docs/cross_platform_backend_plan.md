@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `c3c5b167-46ed-4c2c-9f50-b03205a9ca26` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `cef6817e-940b-4e0c-b098-56851b4a7b29` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `ebd05531-6ce8-41df-b6b2-b3a1d05c3e83` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `7f7fe2e4-cfaa-4bc0-b849-297925b12f37` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-015228-graphsafe`, L4, 2026-05-22 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
@@ -522,15 +522,20 @@ Current CUDA backend boundary:
 
 Current portable CPU transformer boundary:
 
-- `NNBackend=cpu` is an explicit validation-only transformer backend. It is
-  compiled on every platform, but `auto` does not select it yet.
+- `NNBackend=cpu` is an explicit portable transformer backend. It is compiled
+  on every platform, but `auto` does not select it yet.
 - The backend loads real protobuf weights through the shared descriptor,
   tensor-plan, weight-inventory, execution-plan, and resolved-plan code. This
-  keeps Linux and Windows aligned with Metal/CUDA network parsing before CPU
-  kernels exist.
-- Execution currently fails loudly with the first unsupported resolved stage
-  instead of falling back to the diagnostic stub. For BT4 that names the body
-  attention stage, which is the next CPU-kernel milestone.
+  keeps Linux and Windows aligned with Metal/CUDA network parsing and resolved
+  tensor shape inference.
+- The backend now owns resolved tensor copies and executes simple dense and
+  layernorm resolved plans, including batched output decoding through the shared
+  policy/value decoder. This gives portable builds a real non-stub transformer
+  execution path for minimal classical fixtures.
+- BT4 execution still fails loudly with the first unsupported resolved stage
+  instead of falling back to the diagnostic stub. For current BT4 weights that
+  names the body attention stage, so attention remains the next CPU-kernel
+  milestone.
 
 Portable CI now builds Linux CPU and Windows MinGW CPU artifacts. Both jobs run
 AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds

@@ -44,6 +44,7 @@
 #include <cstring>
 #include <exception>
 #include <functional>
+#include <initializer_list>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -81,6 +82,19 @@ void set_test_float_layer(MetalFishNN::Weights::Layer *layer) {
   layer->add_dims(1);
 }
 
+void set_test_float_layer_values(MetalFishNN::Weights::Layer *layer,
+                                 const std::vector<float> &values,
+                                 std::initializer_list<std::uint32_t> dims) {
+  std::string bytes(values.size() * sizeof(float), '\0');
+  if (!values.empty())
+    std::memcpy(bytes.data(), values.data(), bytes.size());
+  layer->set_encoding(MetalFishNN::Weights::Layer::FLOAT32);
+  layer->set_params(bytes);
+  layer->clear_dims();
+  for (std::uint32_t dim : dims)
+    layer->add_dims(dim);
+}
+
 std::size_t
 find_resolved_step_index(const NN::NetworkResolvedExecutionPlan &plan,
                          const std::string &name) {
@@ -115,6 +129,46 @@ NN::WeightsFile make_minimal_attention_weights_file() {
   set_test_float_layer(
       weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_w());
   set_test_float_layer(weights->mutable_moves_left()->mutable_weights());
+  return file;
+}
+
+NN::WeightsFile make_dense_only_cpu_weights_file() {
+  NN::WeightsFile file;
+  auto *nf = file.mutable_format()->mutable_network_format();
+  nf->set_network(
+      MetalFishNN::
+          NetworkFormat_NetworkStructure_NETWORK_CLASSICAL_WITH_HEADFORMAT);
+  nf->set_policy(MetalFishNN::NetworkFormat_PolicyFormat_POLICY_CLASSICAL);
+  nf->set_value(MetalFishNN::NetworkFormat_ValueFormat_VALUE_CLASSICAL);
+  nf->set_moves_left(
+      MetalFishNN::NetworkFormat_MovesLeftFormat_MOVES_LEFT_NONE);
+  nf->set_input_embedding(
+      MetalFishNN::NetworkFormat_InputEmbeddingFormat_INPUT_EMBEDDING_NONE);
+  nf->set_default_activation(
+      MetalFishNN::NetworkFormat_DefaultActivation_DEFAULT_ACTIVATION_RELU);
+
+  auto *weights = file.mutable_weights();
+  std::vector<float> policy_w(NN::kPolicyOutputs * NN::kPackedInputPlaneCount,
+                              0.0f);
+  std::vector<float> policy_b(NN::kPolicyOutputs, 0.0f);
+  policy_b[0] = 1.25f;
+  policy_b[10] = 0.5f;
+  set_test_float_layer_values(
+      weights->mutable_policy_heads()->mutable_vanilla()->mutable_ip_pol_w(),
+      policy_w, {NN::kPolicyOutputs, NN::kPackedInputPlaneCount});
+  set_test_float_layer_values(
+      weights->mutable_policy_heads()->mutable_vanilla()->mutable_ip_pol_b(),
+      policy_b, {NN::kPolicyOutputs});
+
+  std::vector<float> value_w(NN::kPackedInputPlaneCount, 0.0f);
+  std::vector<float> value_b = {0.25f};
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_w(),
+      value_w, {1, NN::kPackedInputPlaneCount});
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_b(),
+      value_b, {1});
+
   return file;
 }
 
@@ -822,7 +876,7 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
       cpu_eval_error = e.what();
     }
     expect(cpu_eval_threw,
-           "validation-only cpu backend should reject execution clearly", tc);
+           "BT4 cpu backend should reject unsupported execution clearly", tc);
     expect(cpu_eval_error.find("CPU transformer backend does not support "
                                "attention yet") != std::string::npos,
            "BT4 cpu execution failure should name the unsupported attention "
@@ -831,6 +885,34 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
   } else {
     MetalFish::Test::print_missing_nn_weights_skip();
   }
+}
+
+void test_cpu_backend_dense_execution(TestCounter &tc) {
+  std::cout << "  CPU backend dense execution..." << std::endl;
+
+  auto cpu = NN::CreateNetwork(make_dense_only_cpu_weights_file(), "cpu");
+  expect(cpu->GetNetworkInfo().find("executor=dense-layernorm") !=
+             std::string::npos,
+         "explicit cpu backend should enable dense/layernorm execution", tc);
+
+  NN::InputPlanes input{};
+  const auto output = cpu->Evaluate(input);
+  expect(std::abs(output.policy[0] - 1.25f) < 1e-6f,
+         "CPU dense policy output should decode first logit", tc);
+  expect(std::abs(output.policy[10] - 0.5f) < 1e-6f,
+         "CPU dense policy output should decode selected logit", tc);
+  expect(std::abs(output.value - 0.25f) < 1e-6f,
+         "CPU dense value output should decode scalar value", tc);
+  expect(!output.has_wdl, "CPU dense fixture should not mark WDL", tc);
+  expect(!output.has_moves_left,
+         "CPU dense fixture should not mark moves-left", tc);
+
+  const auto batch = cpu->EvaluateBatch({input, input});
+  expect(batch.size() == 2, "CPU dense batch should emit two outputs", tc);
+  expect(batch.size() == 2 && std::abs(batch[1].policy[0] - 1.25f) < 1e-6f,
+         "CPU dense batch should preserve policy logits", tc);
+  expect(batch.size() == 2 && std::abs(batch[1].value - 0.25f) < 1e-6f,
+         "CPU dense batch should preserve scalar value", tc);
 }
 
 #ifdef USE_CUDA
@@ -2475,6 +2557,7 @@ bool test_mcts_all() {
   test_network_execution_plan(tc);
   test_network_output_decoder(tc);
   test_nn_backend_selector_contract(tc);
+  test_cpu_backend_dense_execution(tc);
 #ifdef USE_CUDA
   test_cuda_input_packing(tc);
   test_cuda_inference_buffers(tc);
