@@ -7,6 +7,8 @@
 
 #include "network_weight_inventory.h"
 
+#include "weights.h"
+
 #include <sstream>
 #include <stdexcept>
 #include <string_view>

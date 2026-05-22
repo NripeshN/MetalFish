@@ -12,10 +12,12 @@
 #include <vector>
 
 #include "input_plane_packing.h"
-#include "network_format.h"
 
 namespace MetalFish {
 namespace NN {
+
+struct MultiHeadWeights;
+struct NetworkFormatDescriptor;
 
 constexpr int kNetworkPolicyOutputs = 1858;
 constexpr int kNetworkAttentionPolicyScratch = 64 * 64 + 8 * 24;

@@ -7,6 +7,9 @@
 
 #include "network_tensor_plan.h"
 
+#include "network_format.h"
+#include "weights.h"
+
 #include <sstream>
 #include <string>
 

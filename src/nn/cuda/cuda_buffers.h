@@ -14,6 +14,7 @@
 
 #include <cuda_runtime_api.h>
 
+#include "../network_format_types.h"
 #include "../network_tensor_plan.h"
 #include "cuda_input_packing.h"
 

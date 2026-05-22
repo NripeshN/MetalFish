@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "network_format_types.h"
 #include "proto/net.pb.h"
 
 namespace MetalFish {
@@ -208,12 +209,6 @@ private:
 public:
   std::unordered_map<std::string, ValueHead> value_heads;
   std::unordered_map<std::string, PolicyHead> policy_heads;
-};
-
-enum InputEmbedding {
-  INPUT_EMBEDDING_NONE = 0,
-  INPUT_EMBEDDING_PE_MAP = 1,
-  INPUT_EMBEDDING_PE_DENSE = 2,
 };
 
 } // namespace NN
