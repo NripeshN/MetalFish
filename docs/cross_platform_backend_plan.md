@@ -86,8 +86,8 @@ Current remote gates:
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `132c1c7a-347f-4834-8b36-6d6e1d90d813` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `b87bc7a8-607f-4069-82f9-fc261726dbe4` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-002213-graph`, L4, 2026-05-21 |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `62e555fc-3aa7-4ca7-b441-465dfd45e3e2` |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-015228-graphsafe`, L4, 2026-05-22 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
 Current CUDA backend boundary:
@@ -435,10 +435,14 @@ Current CUDA backend boundary:
   mapping without changing math, and later same-key calls replay the graph.
   The path is disabled when CUDA profiling, stage tracing, attention tracing,
   dynamic PE tracing, or per-run workspace release knobs are active. The
-  2026-05-21 L4 gate `metalfish-cuda-gate-20260522-002213-graph` accepted the
-  opt-in path with CUDA unit tests, fixed BT4 references, batch parity,
-  single/batch reuse stress, auto/CUDA/hybrid UCI smokes, and batch timings of
-  `b1=6.797ms`, `b16=50.906ms`, and `b32=94.860ms`.
+  graph key includes batch size, workspace generation, inference-buffer
+  generation, stream, and device output pointers; graph API failures reset the
+  cache and fall back to uncaptured execution. The 2026-05-22 L4 gate
+  `metalfish-cuda-gate-20260522-015228-graphsafe` accepted the hardened opt-in
+  path with `CUDA graph replay observed: yes`, CUDA unit tests, fixed BT4
+  references, batch parity, single/batch reuse stress, auto/CUDA/hybrid UCI
+  smokes, and batch timings of `b1=6.843ms`, `b16=51.053ms`, and
+  `b32=97.467ms`.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
