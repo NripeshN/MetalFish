@@ -437,6 +437,15 @@ bool HybridMCTSCompactFixedBudgetOverride(
     float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
     int mcts_average_score);
 
+bool HybridMCTSCompactClearPreferenceOverride(
+    bool fixed_budget, bool visit_evidence_sane, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap,
+    int mcts_cp, int eval_delta, int ab_score, int mcts_in_ab_rank,
+    int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
+    float ab_in_mcts_q, float mcts_q);
+
 bool HybridMCTSCrossRootConfidenceOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,

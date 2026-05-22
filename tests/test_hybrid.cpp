@@ -917,6 +917,58 @@ void test_hybrid_config() {
                    0));
   }
   {
+    TestCase tc("Compact clear-preference MCTS override stays narrowly gated");
+
+    EXPECT(tc, HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 291, 318, -27, 2,
+                   -32001, false, true, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 101, 97, 0.960f, 0.793f, 282, 307, -25, 2,
+                   -32001, false, true, 142554, 2, 1, -0.057f, 0.736f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   false, true, 113, 109, 0.965f, 0.806f, 291, 318, -27, 2,
+                   -32001, false, true, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, false, 113, 109, 0.965f, 0.806f, 291, 318, -27, 2,
+                   -32001, false, true, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 80, 46, 0.575f, 0.589f, 73, 134, -61, 3,
+                   -32001, false, false, 1234, 2, 24, -0.349f, 0.240f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.899f, 0.806f, 291, 318, -27, 2,
+                   -32001, false, true, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.749f, 291, 318, -27, 2,
+                   -32001, false, true, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 279, 318, -27, 2,
+                   -32001, false, true, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 291, 299, -27, 2,
+                   -32001, false, true, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 291, 318, -41, 2,
+                   -32001, false, true, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 291, 318, -27, 2,
+                   -32001, false, false, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 291, 318, -27, 2,
+                   -32001, false, true, 19999, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 291, 318, -27, 2,
+                   -32001, false, true, 200001, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 291, 318, -27, 1,
+                   -32001, false, true, 28629, 2, 1, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 291, 318, -27, 2,
+                   -32001, false, true, 28629, 2, 3, -0.057f, 0.750f));
+    EXPECT(tc, !HybridMCTSCompactClearPreferenceOverride(
+                   true, true, 113, 109, 0.965f, 0.806f, 291, 318, -27, 2,
+                   -32001, false, true, 28629, 2, 1, 0.010f, 0.750f));
+  }
+  {
     TestCase tc("Root Q gap ignores unvisited placeholders");
 
     const uint32_t visits[] = {141, 96, 0, 0};
