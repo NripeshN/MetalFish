@@ -162,10 +162,9 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
             config_.ane_compute_units);
         StateInfo warmup_state;
         Position warmup_pos;
-        warmup_pos.set(
-            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/"
-            "RNBQKBNR w KQkq - 0 1",
-            false, &warmup_state);
+        warmup_pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/"
+                       "RNBQKBNR w KQkq - 0 1",
+                       false, &warmup_state);
         (void)ane_evaluator_->Evaluate(warmup_pos);
       } catch (const std::exception &e) {
         std::cerr << "[HYB] ANE root probe disabled: " << e.what() << std::endl;
@@ -236,6 +235,11 @@ void ParallelHybridSearch::start_search(
   {
     std::lock_guard<std::mutex> lock(ab_root_mutex_);
     ab_root_moves_.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+    ane_root_hints_.clear();
+    ane_root_hint_infos_.clear();
   }
 
   root_fen_ = pos.fen();
@@ -417,6 +421,11 @@ void ParallelHybridSearch::new_game() {
     std::lock_guard<std::mutex> lock(ab_root_mutex_);
     ab_root_moves_.clear();
   }
+  {
+    std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+    ane_root_hints_.clear();
+    ane_root_hint_infos_.clear();
+  }
 
   if (mcts_search_) {
     mcts_search_->NewGame();
@@ -597,6 +606,48 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
          clear_root_q_confident;
 }
 
+bool HybridMCTSCompactFixedBudgetOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score) {
+  if (!fixed_budget || !visit_evidence_sane || ab_has_clear_preference ||
+      mcts_root_visits < 50 || mcts_root_visits >= 180 ||
+      mcts_best_visits < 48 || visit_share < 0.82f || root_q_gap < 0.55f ||
+      mcts_cp < 140 || eval_delta < 140) {
+    return false;
+  }
+
+  return ab_average_score - mcts_average_score <= 90;
+}
+
+bool HybridMCTSCompactClearPreferenceOverride(
+    bool fixed_budget, bool visit_evidence_sane, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane)
+    return false;
+
+  if (mcts_root_visits < 50 || mcts_root_visits >= 180 ||
+      mcts_best_visits < 48 || visit_share < 0.90f || root_q_gap < 0.75f ||
+      mcts_cp < 280 || eval_delta < 300 || std::abs(ab_score) > 40) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank <= 1 || ab_in_mcts_current_visits > 2)
+    return false;
+
+  if (mcts_q - ab_in_mcts_q < 0.75f)
+    return false;
+
+  return mcts_in_ab_rank == 2 && mcts_in_ab_score == -VALUE_INFINITE &&
+         !mcts_in_ab_lowerbound && mcts_in_ab_upperbound &&
+         mcts_in_ab_effort >= 20000 && mcts_in_ab_effort <= 200000;
+}
+
 bool HybridMCTSCrossRootConfidenceOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
@@ -625,6 +676,119 @@ bool HybridMCTSCrossRootConfidenceOverride(
          mcts_q - ab_in_mcts_q >= 0.20f;
 }
 
+bool HybridMCTSRootConfidenceRejectOverride(
+    bool root_confidence_fixed_budget, bool ab_root_rejects_mcts,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort,
+    int ab_average_score, int mcts_average_score, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!root_confidence_fixed_budget || !ab_root_rejects_mcts)
+    return false;
+
+  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
+      mcts_in_ab_upperbound || mcts_in_ab_effort > 10000) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 120)
+    return false;
+
+  if (ab_in_mcts_rank <= 1 || ab_in_mcts_visits < 10)
+    return false;
+
+  return mcts_q - ab_in_mcts_q >= 0.60f;
+}
+
+bool HybridMCTSReusedRootConfidenceOverride(
+    bool fixed_budget, uint64_t mcts_root_visits, uint32_t mcts_best_visits,
+    uint64_t mcts_root_current_visits, uint32_t mcts_best_current_visits,
+    float absolute_visit_share, float current_visit_share, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_in_ab_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q,
+    float mcts_q) {
+  if (!fixed_budget)
+    return false;
+
+  if (mcts_root_visits < 200 || mcts_best_visits < 180 ||
+      mcts_root_current_visits < 24 || mcts_best_current_visits < 24 ||
+      absolute_visit_share < 0.90f || current_visit_share < 0.90f) {
+    return false;
+  }
+
+  if (mcts_root_visits < 3 * std::max<uint64_t>(1, mcts_root_current_visits) ||
+      mcts_best_visits < 3 * static_cast<uint32_t>(std::max<uint32_t>(
+                                 1, mcts_best_current_visits))) {
+    return false;
+  }
+
+  if (mcts_cp < 300 || eval_delta < 300)
+    return false;
+
+  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_effort > 250000) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 75)
+    return false;
+
+  if (ab_in_mcts_rank <= 1 || ab_in_mcts_current_visits > 2)
+    return false;
+
+  return mcts_q - ab_in_mcts_q >= 0.75f;
+}
+
+bool HybridMCTSReusedRootCurrentOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    bool ab_root_rejects_mcts, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, uint64_t mcts_root_current_visits,
+    uint32_t mcts_best_current_visits, float absolute_visit_share,
+    float current_visit_share, float root_q_gap, int mcts_cp, int eval_delta,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || ab_has_clear_preference)
+    return false;
+
+  if (mcts_root_visits < 350 || mcts_best_visits < 300 ||
+      mcts_root_current_visits < 24 || mcts_best_current_visits < 24 ||
+      absolute_visit_share < 0.84f || current_visit_share < 0.92f ||
+      mcts_cp < 300 || eval_delta < 300) {
+    return false;
+  }
+
+  if (mcts_root_visits < 3 * std::max<uint64_t>(1, mcts_root_current_visits) ||
+      mcts_best_visits < 3 * static_cast<uint32_t>(std::max<uint32_t>(
+                                 1, mcts_best_current_visits))) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank <= 1 || ab_in_mcts_current_visits > 1)
+    return false;
+
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+  if (q_gap_to_ab < 0.47f)
+    return false;
+
+  const bool ab_searched_lower_bound =
+      mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 && mcts_in_ab_lowerbound &&
+      !mcts_in_ab_upperbound && mcts_in_ab_score >= 300 &&
+      mcts_in_ab_effort >= 250000;
+  const bool late_lower_bound =
+      mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 && mcts_in_ab_lowerbound &&
+      !mcts_in_ab_upperbound && mcts_in_ab_score >= 0 &&
+      mcts_in_ab_effort >= 250000 && absolute_visit_share >= 0.93f &&
+      mcts_cp >= 400 && q_gap_to_ab >= 0.58f;
+  const bool ab_barely_touched_mcts =
+      ab_root_rejects_mcts && mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 4 &&
+      mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 10000 &&
+      root_q_gap >= 0.75f && q_gap_to_ab >= 0.50f;
+
+  return ab_searched_lower_bound || late_lower_bound || ab_barely_touched_mcts;
+}
+
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits) {
   if (mcts_playouts == 0) {
@@ -644,6 +808,31 @@ bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
   const uint64_t best_eval_limit = std::max<uint64_t>(512, mcts_evals * 64);
   const uint64_t root_eval_limit = std::max<uint64_t>(1024, mcts_evals * 96);
   return best_visits <= best_eval_limit && root_visits <= root_eval_limit;
+}
+
+bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
+                                    bool fixed_budget, bool visit_evidence_sane,
+                                    uint64_t mcts_root_visits,
+                                    uint32_t mcts_best_visits,
+                                    float visit_share, float root_q_gap,
+                                    int mcts_cp, int eval_delta,
+                                    float ane_score_margin) {
+  if (!enabled || !ane_agrees_mcts || !fixed_budget || !visit_evidence_sane ||
+      root_q_gap < 0.20f || mcts_cp < 120 || eval_delta < 60) {
+    return false;
+  }
+  if (mcts_best_visits > mcts_root_visits)
+    return false;
+
+  if (mcts_root_visits >= 80 && mcts_best_visits >= 64 &&
+      visit_share >= 0.70f && ane_score_margin >= 0.02f) {
+    return true;
+  }
+
+  return mcts_root_visits < 80 && mcts_root_visits >= 50 &&
+         mcts_best_visits >= 50 && visit_share >= 0.90f &&
+         root_q_gap >= 0.50f && mcts_cp >= 200 && eval_delta >= 150 &&
+         ane_score_margin >= 0.10f;
 }
 
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
@@ -1260,20 +1449,39 @@ std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
 
     const int hint_count = std::clamp(config_.ane_root_hint_count, 1, 32);
     hints.reserve(std::min<int>(hint_count, static_cast<int>(order.size())));
+    std::vector<ANERootHintInfo> hint_infos;
+    hint_infos.reserve(
+        std::min<int>(hint_count, static_cast<int>(order.size())));
     for (size_t idx : order) {
       if (should_stop())
         break;
       hints.push_back(children[idx]->move);
+      hint_infos.push_back({children[idx]->move, children[idx]->score});
       if (static_cast<int>(hints.size()) >= hint_count)
         break;
     }
+    {
+      std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+      ane_root_hints_ = hints;
+      ane_root_hint_infos_ = hint_infos;
+    }
   } catch (const std::exception &e) {
+    {
+      std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+      ane_root_hints_.clear();
+      ane_root_hint_infos_.clear();
+    }
     if (config_.trace_decisions) {
       send_info_string(std::string("Hybrid: ANE root probe failed: ") +
                        e.what());
     }
     return {};
   } catch (...) {
+    {
+      std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+      ane_root_hints_.clear();
+      ane_root_hint_infos_.clear();
+    }
     if (config_.trace_decisions)
       send_info_string("Hybrid: ANE root probe failed: unknown error");
     return {};
@@ -1296,6 +1504,16 @@ std::vector<Move> ParallelHybridSearch::collect_ane_root_order_hints() {
     return hints;
 
   hints = ane_root_hints_future_.get();
+  {
+    std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+    ane_root_hints_ = hints;
+    if (ane_root_hint_infos_.size() != ane_root_hints_.size()) {
+      ane_root_hint_infos_.clear();
+      ane_root_hint_infos_.reserve(ane_root_hints_.size());
+      for (Move move : ane_root_hints_)
+        ane_root_hint_infos_.push_back({move, 0.0f});
+    }
+  }
   if (config_.trace_decisions && !hints.empty()) {
     std::ostringstream ss;
     ss << "Hybrid: AB root hints from ANE";
@@ -1317,12 +1535,15 @@ std::vector<Move> ParallelHybridSearch::collect_root_order_hints() {
 
   for (Move move : collect_mcts_root_order_hints())
     add_hint(move);
-  for (Move move : collect_ane_root_order_hints())
-    add_hint(move);
+  if (config_.ane_root_hints) {
+    for (Move move : collect_ane_root_order_hints())
+      add_hint(move);
+  }
 
   const int max_hints =
       std::clamp(config_.mcts_ab_root_hint_count, 1, 16) +
-      std::clamp(config_.ane_root_hint_count, 1, 32);
+      (config_.ane_root_hints ? std::clamp(config_.ane_root_hint_count, 1, 32)
+                              : 0);
   if (static_cast<int>(hints.size()) > max_hints)
     hints.resize(max_hints);
   return hints;
@@ -1600,6 +1821,8 @@ void ParallelHybridSearch::run_ab_search() {
         item.score = rm.score;
         item.previous_score = rm.previous_score;
         item.average_score = rm.average_score;
+        item.score_lowerbound = rm.score_lowerbound;
+        item.score_upperbound = rm.score_upperbound;
         item.effort = rm.effort;
         ab_root_moves_.push_back(item);
       }
@@ -1981,6 +2204,8 @@ Move ParallelHybridSearch::make_final_decision() {
       ss << move_to_string(root_moves[i].move) << ":s=" << root_moves[i].score
          << ":ps=" << root_moves[i].previous_score
          << ":avg=" << root_moves[i].average_score
+         << ":lb=" << (root_moves[i].score_lowerbound ? 1 : 0)
+         << ":ub=" << (root_moves[i].score_upperbound ? 1 : 0)
          << ":eff=" << root_moves[i].effort;
     }
     ss << "]";
@@ -2023,6 +2248,8 @@ Move ParallelHybridSearch::make_final_decision() {
     int score = 0;
     int average_score = 0;
     uint64_t effort = 0;
+    bool score_lowerbound = false;
+    bool score_upperbound = false;
   };
   const auto find_ab_root_move = [&](Move target) {
     ABRootLookup result;
@@ -2039,9 +2266,50 @@ Move ParallelHybridSearch::make_final_decision() {
       result.score = ab_root_moves_[i].score;
       result.average_score = ab_root_moves_[i].average_score;
       result.effort = ab_root_moves_[i].effort;
+      result.score_lowerbound = ab_root_moves_[i].score_lowerbound;
+      result.score_upperbound = ab_root_moves_[i].score_upperbound;
       break;
     }
     return result;
+  };
+  std::vector<Move> ane_root_hints_snapshot;
+  std::vector<ANERootHintInfo> ane_root_hint_infos_snapshot;
+  {
+    std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+    ane_root_hints_snapshot = ane_root_hints_;
+    ane_root_hint_infos_snapshot = ane_root_hint_infos_;
+  }
+  const Move ane_top = ane_root_hints_snapshot.empty()
+                           ? Move::none()
+                           : ane_root_hints_snapshot.front();
+  const bool ane_agrees_mcts = config_.ane_root_probe && ane_top == mcts_best &&
+                               mcts_best != Move::none();
+  const float ane_top_score = ane_root_hint_infos_snapshot.empty()
+                                  ? 0.0f
+                                  : ane_root_hint_infos_snapshot[0].score;
+  const float ane_second_score = ane_root_hint_infos_snapshot.size() < 2
+                                     ? ane_top_score
+                                     : ane_root_hint_infos_snapshot[1].score;
+  const float ane_score_margin = ane_root_hint_infos_snapshot.empty()
+                                     ? 0.0f
+                                     : ane_top_score - ane_second_score;
+  bool ane_confirmed_mcts_override = false;
+  const auto ane_root_hints_to_string = [&]() {
+    std::ostringstream ss;
+    ss << "[";
+    const bool has_scores =
+        ane_root_hint_infos_snapshot.size() == ane_root_hints_snapshot.size();
+    for (size_t i = 0; i < ane_root_hints_snapshot.size(); ++i) {
+      if (i > 0)
+        ss << ",";
+      ss << move_to_string(ane_root_hints_snapshot[i]);
+      if (has_scores) {
+        ss << ":v=" << std::fixed << std::setprecision(3)
+           << ane_root_hint_infos_snapshot[i].score;
+      }
+    }
+    ss << "]";
+    return ss.str();
   };
   const auto append_cross_root_trace = [&](std::ostringstream &ss) {
     const MCTSRootLookup ab_in_mcts = find_mcts_root_move(ab_best);
@@ -2054,7 +2322,9 @@ Move ParallelHybridSearch::make_final_decision() {
        << ab_in_mcts.policy << " MCTSInABRank=" << mcts_in_ab.rank
        << " MCTSInABScore=" << mcts_in_ab.score
        << " MCTSInABAvg=" << mcts_in_ab.average_score
-       << " MCTSInABEffort=" << mcts_in_ab.effort;
+       << " MCTSInABEffort=" << mcts_in_ab.effort
+       << " MCTSInABLB=" << (mcts_in_ab.score_lowerbound ? 1 : 0)
+       << " MCTSInABUB=" << (mcts_in_ab.score_upperbound ? 1 : 0);
   };
   const auto root_q_gap_for_best = [&]() {
     const int count =
@@ -2171,6 +2441,12 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSConfidenceRootVisits=" << mcts_confidence_total_nodes
        << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
        << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
+       << " ANETop=" << move_to_string(ane_top)
+       << " ANEAgreesMCTS=" << (ane_agrees_mcts ? 1 : 0)
+       << " ANEConfirmedMCTS=" << (ane_confirmed_mcts_override ? 1 : 0)
+       << " ANETopScore=" << std::fixed << std::setprecision(3) << ane_top_score
+       << " ANEScoreMargin=" << std::fixed << std::setprecision(3)
+       << ane_score_margin << " ANERoot=" << ane_root_hints_to_string()
        << " MCTSTop=" << top_moves_to_string();
     append_cross_root_trace(ss);
     ss << " ABRoot=" << ab_root_moves_to_string();
@@ -2328,6 +2604,19 @@ Move ParallelHybridSearch::make_final_decision() {
       HybridMCTSRootConfidenceFixedBudgetOverride(
           mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
           mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta);
+  const bool mcts_compact_fixed_budget = HybridMCTSCompactFixedBudgetOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane, ab_has_clear_preference,
+      mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+      root_q_gap, mcts_cp, eval_delta, ab_in_ab.average_score,
+      mcts_in_ab.average_score);
+  const bool mcts_compact_clear_preference =
+      HybridMCTSCompactClearPreferenceOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
+          root_q_gap, mcts_cp, eval_delta, ab_score, mcts_in_ab.rank,
+          mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+          mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   const bool mcts_cross_root_confidence_fixed_budget =
       mcts_visit_evidence_sane &&
       HybridMCTSCrossRootConfidenceOverride(
@@ -2336,6 +2625,34 @@ Move ParallelHybridSearch::make_final_decision() {
           ab_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
           mcts_in_ab.average_score, mcts_in_ab.effort, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_root_confidence_reject_override =
+      HybridMCTSRootConfidenceRejectOverride(
+          mcts_root_confidence_fixed_budget, ab_root_rejects_mcts,
+          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+          mcts_in_ab.score_upperbound, mcts_in_ab.effort,
+          ab_in_ab.average_score, mcts_in_ab.average_score, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_reused_root_confidence =
+      HybridMCTSReusedRootConfidenceOverride(
+          mcts_decision_budget, mcts_total_nodes, mcts_visits,
+          mcts_total_current_nodes, mcts_current_visits, absolute_visit_share,
+          visit_share, mcts_cp, eval_delta, ab_in_ab.average_score,
+          mcts_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+          ab_in_mcts.q, mcts_q);
+  const bool mcts_reused_root_current = HybridMCTSReusedRootCurrentOverride(
+      mcts_decision_budget, mcts_visit_evidence_sane, ab_has_clear_preference,
+      ab_root_rejects_mcts, mcts_total_nodes, mcts_visits,
+      mcts_total_current_nodes, mcts_current_visits, absolute_visit_share,
+      visit_share, root_q_gap, mcts_cp, eval_delta, mcts_in_ab.rank,
+      mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+      mcts_in_ab.score_upperbound, mcts_in_ab.effort, ab_in_mcts.rank,
+      ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  ane_confirmed_mcts_override = HybridANEConfirmedMCTSOverride(
+      config_.ane_confirm_mcts_override, ane_agrees_mcts, mcts_decision_budget,
+      mcts_visit_evidence_sane, mcts_confidence_total_nodes,
+      mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+      ane_score_margin);
   bool mcts_root_rejects_ab = false;
   {
     const int top_count =
@@ -2374,17 +2691,24 @@ Move ParallelHybridSearch::make_final_decision() {
     }
   }
   const bool mcts_override_allowed =
-      !ab_root_rejects_mcts || mcts_cross_root_confidence_fixed_budget ||
-      mcts_root_rejects_ab || (mcts_overwhelming && eval_delta >= 250);
+      !ab_root_rejects_mcts || ane_confirmed_mcts_override ||
+      mcts_compact_fixed_budget || mcts_compact_clear_preference ||
+      mcts_cross_root_confidence_fixed_budget ||
+      mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
+      mcts_reused_root_current || mcts_root_rejects_ab ||
+      (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
   switch (config_.decision_mode) {
   case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
-    choose_mcts = mcts_override_allowed && mcts_reliable &&
-                  (!ab_has_clear_preference || eval_delta >= 180);
+    choose_mcts =
+        mcts_override_allowed &&
+        (ane_confirmed_mcts_override ||
+         (mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180)));
     if (choose_mcts)
-      reason = "mcts_primary_reliable";
+      reason = ane_confirmed_mcts_override ? "ane_confirmed_mcts"
+                                           : "mcts_primary_reliable";
     break;
   case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
     choose_mcts =
@@ -2396,6 +2720,9 @@ Move ParallelHybridSearch::make_final_decision() {
   case ParallelHybridConfig::DecisionMode::DYNAMIC:
     if (!mcts_override_allowed) {
       reason = "ab_root_rejects_mcts";
+    } else if (ane_confirmed_mcts_override) {
+      choose_mcts = true;
+      reason = "ane_confirmed_mcts";
     } else if (mcts_visit_evidence_sane && mcts_overwhelming &&
                eval_delta >= 180) {
       choose_mcts = true;
@@ -2412,6 +2739,18 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_root_confidence_fixed_budget";
+    } else if (mcts_reused_root_confidence) {
+      choose_mcts = true;
+      reason = "mcts_reused_root_confidence";
+    } else if (mcts_reused_root_current) {
+      choose_mcts = true;
+      reason = "mcts_reused_root_current";
+    } else if (mcts_compact_fixed_budget) {
+      choose_mcts = true;
+      reason = "mcts_compact_fixed_budget";
+    } else if (mcts_compact_clear_preference) {
+      choose_mcts = true;
+      reason = "mcts_compact_clear_preference";
     } else if (mcts_cross_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_cross_root_confidence_fixed_budget";
@@ -2458,14 +2797,26 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSRootDominant=" << (mcts_root_dominant_fixed_budget ? 1 : 0)
        << " MCTSTacticalGap=" << (mcts_tactical_gap_fixed_budget ? 1 : 0)
        << " MCTSRootConfidence=" << (mcts_root_confidence_fixed_budget ? 1 : 0)
-       << " MCTSCrossRootConfidence="
+       << " MCTSCompact=" << (mcts_compact_fixed_budget ? 1 : 0)
+       << " MCTSCompactClearPreference="
+       << (mcts_compact_clear_preference ? 1 : 0) << " MCTSCrossRootConfidence="
        << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
+       << " MCTSRootConfidenceRejectOverride="
+       << (mcts_root_confidence_reject_override ? 1 : 0)
+       << " MCTSReusedRootConfidence=" << (mcts_reused_root_confidence ? 1 : 0)
+       << " MCTSReusedRootCurrent=" << (mcts_reused_root_current ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
        << " ABVerified=" << (ab_verified ? 1 : 0)
        << " ABClearPreference=" << (ab_has_clear_preference ? 1 : 0)
        << " ABRootRejectsMCTS=" << (ab_root_rejects_mcts ? 1 : 0)
        << " MCTSOverrideAllowed=" << (mcts_override_allowed ? 1 : 0)
        << " MCTSRootRejectsAB=" << (mcts_root_rejects_ab ? 1 : 0)
+       << " ANETop=" << move_to_string(ane_top)
+       << " ANEAgreesMCTS=" << (ane_agrees_mcts ? 1 : 0)
+       << " ANEConfirmedMCTS=" << (ane_confirmed_mcts_override ? 1 : 0)
+       << " ANETopScore=" << std::fixed << std::setprecision(3) << ane_top_score
+       << " ANEScoreMargin=" << std::fixed << std::setprecision(3)
+       << ane_score_margin << " ANERoot=" << ane_root_hints_to_string()
        << " MCTSTop=" << top_moves_to_string();
     append_cross_root_trace(ss);
     ss << " ABRoot=" << ab_root_moves_to_string();

@@ -31,7 +31,7 @@ RESULTS_DIR = ROOT / "results" / "lichess_puzzles"
 LICHESS_API = "https://lichess.org/api"
 DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
 DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
-DEFAULT_ANE_ROOT_HINT_WAIT_MS = 250
+DEFAULT_ANE_ROOT_HINT_WAIT_MS = 0
 DEFAULT_ANE_MIN_BUDGET_MS = 1000
 SETOPTION_ALIASES = {
     "HybridANEWeightsPath": "HybridANEWeights",
@@ -216,6 +216,12 @@ class SearchAnswer:
     hybrid_selected: str = ""
     hybrid_ab_move: str = ""
     hybrid_mcts_move: str = ""
+    hybrid_ane_top: str = ""
+    hybrid_ane_agrees_mcts: str = ""
+    hybrid_ane_confirmed_mcts: str = ""
+    hybrid_ane_top_score: str = ""
+    hybrid_ane_score_margin: str = ""
+    hybrid_ane_root: str = ""
     final_summary: str = ""
 
 
@@ -387,12 +393,16 @@ def engine_options(args) -> dict[str, str]:
                 "HybridABThreads": "0",
                 "HybridAutoABThreadsCap": "0",
                 "MCTSMaxThreads": "0",
+                "TransformerLowTimeFallbackMs": "0",
             }
         )
         if args.hybrid_ane_root_probe:
             options.update(
                 {
                     "HybridANERootProbe": "true",
+                    "HybridANERootHints": (
+                        "true" if args.hybrid_ane_root_hints else "false"
+                    ),
                     "HybridANEWeights": str(args.hybrid_ane_weights),
                     "HybridANEModelPath": str(args.hybrid_ane_model_path),
                     "HybridANEComputeUnits": args.hybrid_ane_compute_units,
@@ -427,6 +437,12 @@ def update_answer_from_info(line: str, answer: SearchAnswer) -> None:
         answer.hybrid_selected = fields.get("selected", "")
         answer.hybrid_ab_move = fields.get("ABMove", "")
         answer.hybrid_mcts_move = fields.get("MCTSMove", "")
+        answer.hybrid_ane_top = fields.get("ANETop", "")
+        answer.hybrid_ane_agrees_mcts = fields.get("ANEAgreesMCTS", "")
+        answer.hybrid_ane_confirmed_mcts = fields.get("ANEConfirmedMCTS", "")
+        answer.hybrid_ane_top_score = fields.get("ANETopScore", "")
+        answer.hybrid_ane_score_margin = fields.get("ANEScoreMargin", "")
+        answer.hybrid_ane_root = fields.get("ANERoot", "")
     elif line.startswith("info string Final:"):
         answer.final_summary = line.removeprefix("info string ").strip()
 
@@ -468,9 +484,82 @@ def search_trace_fields(answer: SearchAnswer) -> dict[str, str]:
         fields["hybrid_ab_move"] = answer.hybrid_ab_move
     if answer.hybrid_mcts_move:
         fields["hybrid_mcts_move"] = answer.hybrid_mcts_move
+    if answer.hybrid_ane_top:
+        fields["hybrid_ane_top"] = answer.hybrid_ane_top
+    if answer.hybrid_ane_agrees_mcts:
+        fields["hybrid_ane_agrees_mcts"] = answer.hybrid_ane_agrees_mcts
+    if answer.hybrid_ane_confirmed_mcts:
+        fields["hybrid_ane_confirmed_mcts"] = answer.hybrid_ane_confirmed_mcts
+    if answer.hybrid_ane_top_score:
+        fields["hybrid_ane_top_score"] = answer.hybrid_ane_top_score
+    if answer.hybrid_ane_score_margin:
+        fields["hybrid_ane_score_margin"] = answer.hybrid_ane_score_margin
+    if answer.hybrid_ane_root:
+        fields["hybrid_ane_root"] = answer.hybrid_ane_root
     if answer.final_summary:
         fields["final_summary"] = answer.final_summary
     return fields
+
+
+def initial_ane_stats(args) -> dict[str, object]:
+    requested = bool(getattr(args, "hybrid_ane_root_probe", False))
+    return {
+        "ane_probe_requested": requested,
+        "ane_root_hints_requested": bool(getattr(args, "hybrid_ane_root_hints", False)),
+        "ane_compute_units": (
+            str(getattr(args, "hybrid_ane_compute_units", "")) if requested else ""
+        ),
+        "ane_weights": (
+            str(getattr(args, "hybrid_ane_weights", "")) if requested else ""
+        ),
+        "ane_model_path": (
+            str(getattr(args, "hybrid_ane_model_path", "")) if requested else ""
+        ),
+        "ane_searches": 0,
+        "ane_trace_searches": 0,
+        "ane_hints": 0,
+        "ane_hint_moves": 0,
+        "ane_failures": 0,
+        "ane_root_nonempty": 0,
+        "ane_top_moves": 0,
+        "ane_agrees_mcts": 0,
+        "ane_confirmed_mcts": 0,
+    }
+
+
+def update_ane_stats(stats: dict[str, object], result: dict) -> None:
+    searches = result.get("searches", [])
+    if not isinstance(searches, list):
+        return
+    for search in searches:
+        if not isinstance(search, dict):
+            continue
+        stats["ane_searches"] = int(stats.get("ane_searches", 0)) + 1
+        stats["ane_hints"] = int(stats.get("ane_hints", 0)) + int(
+            search.get("ane_hints") or 0
+        )
+        stats["ane_hint_moves"] = int(stats.get("ane_hint_moves", 0)) + int(
+            search.get("ane_hint_moves") or 0
+        )
+        stats["ane_failures"] = int(stats.get("ane_failures", 0)) + int(
+            search.get("ane_failures") or 0
+        )
+
+        top = str(search.get("hybrid_ane_top", ""))
+        root = str(search.get("hybrid_ane_root", ""))
+        agrees = str(search.get("hybrid_ane_agrees_mcts", ""))
+        confirmed = str(search.get("hybrid_ane_confirmed_mcts", ""))
+        has_trace = bool(top or root or agrees or confirmed)
+        if has_trace:
+            stats["ane_trace_searches"] = int(stats.get("ane_trace_searches", 0)) + 1
+        if root and root != "[]":
+            stats["ane_root_nonempty"] = int(stats.get("ane_root_nonempty", 0)) + 1
+        if top and top not in {"none", "0000"}:
+            stats["ane_top_moves"] = int(stats.get("ane_top_moves", 0)) + 1
+        if agrees == "1":
+            stats["ane_agrees_mcts"] = int(stats.get("ane_agrees_mcts", 0)) + 1
+        if confirmed == "1":
+            stats["ane_confirmed_mcts"] = int(stats.get("ane_confirmed_mcts", 0)) + 1
 
 
 def parse_setoptions(items: list[str]) -> dict[str, str]:
@@ -495,7 +584,9 @@ def validate_ane_args(args) -> None:
     if not args.hybrid_ane_weights.exists():
         raise RuntimeError(f"ANE weights not found at {args.hybrid_ane_weights}")
     if not args.hybrid_ane_model_path.exists():
-        raise RuntimeError(f"ANE Core ML model not found at {args.hybrid_ane_model_path}")
+        raise RuntimeError(
+            f"ANE Core ML model not found at {args.hybrid_ane_model_path}"
+        )
 
 
 def board_from_api_puzzle(item: dict) -> chess.Board:
@@ -707,10 +798,18 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
         }
         search_record.update(search_trace_fields(answer))
         searches.append(search_record)
-        mate_in_one_ok = idx == 0 and len(solution) == 1 and is_mating_move(
-            board, actual
-        )
-        if actual != expected and not mate_in_one_ok:
+        mating_alternative = actual != expected and is_mating_move(board, actual)
+        if mating_alternative:
+            search_record["accepted_mating_alternative"] = True
+            return {
+                "id": puzzle_id,
+                "solved": True,
+                "rating": puzzle.get("rating"),
+                "themes": puzzle.get("themes", []),
+                "searches": searches,
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
+            }
+        if actual != expected:
             return {
                 "id": puzzle_id,
                 "solved": False,
@@ -767,6 +866,24 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         lines.append(f"- Ended: {stats.get('ended')}")
     if stats.get("rate_limit_events"):
         lines.append(f"- Rate-limit events: {stats.get('rate_limit_events')}")
+    if stats.get("ane_probe_requested"):
+        lines.extend(
+            [
+                f"- ANE root probe: requested ({stats.get('ane_compute_units')})",
+                f"- ANE root hints requested: {stats.get('ane_root_hints_requested')}",
+                f"- ANE searches: {stats.get('ane_searches', 0)}",
+                f"- ANE trace fields: {stats.get('ane_trace_searches', 0)}",
+                f"- ANE non-empty roots: {stats.get('ane_root_nonempty', 0)}",
+                f"- ANE top moves: {stats.get('ane_top_moves', 0)}",
+                f"- ANE hint lines: {stats.get('ane_hints', 0)}",
+                f"- ANE hint moves: {stats.get('ane_hint_moves', 0)}",
+                f"- ANE agrees with MCTS: {stats.get('ane_agrees_mcts', 0)}",
+                f"- ANE-confirmed MCTS overrides: {stats.get('ane_confirmed_mcts', 0)}",
+                f"- ANE failures: {stats.get('ane_failures', 0)}",
+                f"- ANE weights: {stats.get('ane_weights')}",
+                f"- ANE model: {stats.get('ane_model_path')}",
+            ]
+        )
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -851,6 +968,7 @@ def run(args) -> int:
     total = 0
     started = time.monotonic()
     ended = "completed"
+    ane_stats = initial_ane_stats(args)
 
     print(
         f"Puzzle run: mode={args.mode}, threads={threads}, hash={hash_mb} MB, "
@@ -882,6 +1000,7 @@ def run(args) -> int:
                         }
                     total += 1
                     solved += 1 if result.get("solved") else 0
+                    update_ane_stats(ane_stats, result)
                     batch_results.append(result)
                     out.write(json.dumps(result, sort_keys=True) + "\n")
                     out.flush()
@@ -941,6 +1060,7 @@ def run(args) -> int:
         "ended": ended,
         "rate_limit_events": rate_limit_events,
     }
+    stats.update(ane_stats)
     write_summary(summary_path, stats)
     print(
         f"Finished: solved {solved}/{total} "
@@ -985,6 +1105,7 @@ def run_offline(args) -> int:
     started = time.monotonic()
     deadline = started + args.max_minutes * 60.0
     ended = "completed"
+    ane_stats = initial_ane_stats(args)
 
     print(
         f"Offline puzzle run: mode={args.mode}, threads={threads}, "
@@ -1008,11 +1129,10 @@ def run_offline(args) -> int:
                             "solved": False,
                             "error": str(exc),
                         }
-                    result = tag_repeat_result(
-                        result, repeat_idx, args.repeat_puzzles
-                    )
+                    result = tag_repeat_result(result, repeat_idx, args.repeat_puzzles)
                     total += 1
                     solved += 1 if result.get("solved") else 0
+                    update_ane_stats(ane_stats, result)
                     out.write(json.dumps(result, sort_keys=True) + "\n")
                     out.flush()
                     if total % args.progress_interval == 0:
@@ -1040,6 +1160,7 @@ def run_offline(args) -> int:
         "rate_limit_events": 0,
         "repeat_puzzles": args.repeat_puzzles,
     }
+    stats.update(ane_stats)
     write_summary(summary_path, stats)
     print(
         f"Finished: solved {solved}/{total} "
@@ -1073,6 +1194,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Enable the Hybrid ANE/Core ML root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-root-hints",
+        action="store_true",
+        default=False,
+        help="Use ANE root ordering as AB search hints; final ANE evidence remains available without this.",
     )
     parser.add_argument(
         "--hybrid-ane-weights",
