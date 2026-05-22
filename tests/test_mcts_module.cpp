@@ -435,6 +435,70 @@ NN::WeightsFile make_attention_cpu_weights_file() {
   return file;
 }
 
+NN::WeightsFile make_attention_policy_cpu_weights_file() {
+  NN::WeightsFile file;
+  auto *nf = file.mutable_format()->mutable_network_format();
+  nf->set_network(
+      MetalFishNN::
+          NetworkFormat_NetworkStructure_NETWORK_ATTENTIONBODY_WITH_HEADFORMAT);
+  nf->set_policy(MetalFishNN::NetworkFormat_PolicyFormat_POLICY_ATTENTION);
+  nf->set_value(MetalFishNN::NetworkFormat_ValueFormat_VALUE_CLASSICAL);
+  nf->set_moves_left(
+      MetalFishNN::NetworkFormat_MovesLeftFormat_MOVES_LEFT_NONE);
+  nf->set_input_embedding(
+      MetalFishNN::NetworkFormat_InputEmbeddingFormat_INPUT_EMBEDDING_PE_DENSE);
+  nf->set_default_activation(
+      MetalFishNN::NetworkFormat_DefaultActivation_DEFAULT_ACTIVATION_RELU);
+
+  auto *weights = file.mutable_weights();
+  constexpr int kPeWidth = 1;
+  constexpr int kBodyWidth = 2;
+  constexpr int kFlattenedBody = NN::kPackedInputSquareCount * kBodyWidth;
+  constexpr int kPositionInput = 12 * NN::kPackedInputSquareCount;
+  constexpr int kPositionOutput = kPeWidth * NN::kPackedInputSquareCount;
+  constexpr int kConcatWidth = NN::kPackedInputPlaneCount + kPeWidth;
+
+  set_test_float_layer_values(
+      weights->mutable_ip_emb_preproc_w(),
+      std::vector<float>(kPositionOutput * kPositionInput, 0.0f),
+      {kPositionOutput, kPositionInput});
+  set_test_float_layer_values(weights->mutable_ip_emb_preproc_b(),
+                              std::vector<float>(kPositionOutput, 0.0f),
+                              {kPositionOutput});
+
+  std::vector<float> body_w(kBodyWidth * kConcatWidth, 0.0f);
+  body_w[0 * kConcatWidth + 0] = 1.0f;
+  body_w[1 * kConcatWidth + 1] = 1.0f;
+  set_test_float_layer_values(weights->mutable_ip_emb_w(), body_w,
+                              {kBodyWidth, kConcatWidth});
+  set_test_float_layer_values(weights->mutable_ip_emb_b(), {0.0f, 0.0f},
+                              {kBodyWidth});
+
+  auto *policy = weights->mutable_policy_heads()->mutable_vanilla();
+  std::vector<float> embed_w = {1.0f, 0.0f, 0.0f, 1.0f};
+  set_test_float_layer_values(policy->mutable_ip_pol_w(), embed_w, {2, 2});
+  set_test_float_layer_values(policy->mutable_ip_pol_b(), {0.0f, 0.0f}, {2});
+  set_test_float_layer_values(policy->mutable_ip2_pol_w(), {1.0f, 0.0f},
+                              {1, 2});
+  set_test_float_layer_values(policy->mutable_ip2_pol_b(), {0.0f}, {1});
+  set_test_float_layer_values(policy->mutable_ip3_pol_w(), {0.0f, 1.0f},
+                              {1, 2});
+  set_test_float_layer_values(policy->mutable_ip3_pol_b(), {0.0f}, {1});
+  set_test_float_layer_values(policy->mutable_ip4_pol_w(),
+                              {0.0f, 0.0f, 0.0f, 0.0f}, {4, 1});
+
+  std::vector<float> value_w(kFlattenedBody, 0.0f);
+  value_w[0] = 1.0f;
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_w(),
+      value_w, {1, kFlattenedBody});
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_b(),
+      {0.0f}, {1});
+
+  return file;
+}
+
 void test_node_basics(TestCounter &tc) {
   std::cout << "  Node basics..." << std::endl;
   constexpr size_t node_size_budget =
@@ -1232,22 +1296,6 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
     expect(cpu->GetNetworkInfo().find("CPU transformer backend") !=
                std::string::npos,
            "explicit cpu backend should validate real transformer weights", tc);
-    bool cpu_eval_threw = false;
-    std::string cpu_eval_error;
-    try {
-      NN::InputPlanes input{};
-      cpu->Evaluate(input);
-    } catch (const std::exception &e) {
-      cpu_eval_threw = true;
-      cpu_eval_error = e.what();
-    }
-    expect(cpu_eval_threw,
-           "BT4 cpu backend should reject unsupported execution clearly", tc);
-    expect(cpu_eval_error.find("CPU transformer backend does not support "
-                               "policy mapping yet") != std::string::npos,
-           "BT4 cpu execution failure should move past attention and name the "
-           "unsupported policy map",
-           tc);
   } else {
     MetalFish::Test::print_missing_nn_weights_skip();
   }
@@ -1388,6 +1436,31 @@ void test_cpu_backend_attention_execution(TestCounter &tc) {
   expect(batch.size() == 2 &&
              std::abs(batch[1].policy[0] - (2.0f / 64.0f)) < 1e-5f,
          "CPU attention batch should preserve attention logits", tc);
+}
+
+void test_cpu_backend_attention_policy_map_execution(TestCounter &tc) {
+  std::cout << "  CPU backend attention policy map..." << std::endl;
+
+  auto cpu = NN::CreateNetwork(make_attention_policy_cpu_weights_file(), "cpu");
+  expect(cpu->GetNetworkInfo().find("attention") != std::string::npos,
+         "explicit cpu backend should expose attention policy execution", tc);
+
+  NN::InputPlanes input{};
+  input[0][0] = 2.0f;
+  input[1][1] = 5.0f;
+
+  const auto output = cpu->Evaluate(input);
+  expect(std::abs(output.policy[0] - 10.0f) < 1e-5f,
+         "CPU attention policy map should gather q0-k1 raw logits", tc);
+  expect(std::abs(output.value - 2.0f) < 1e-5f,
+         "CPU attention policy map fixture should preserve scalar value head",
+         tc);
+
+  const auto batch = cpu->EvaluateBatch({input, input});
+  expect(batch.size() == 2,
+         "CPU attention policy map batch should emit two outputs", tc);
+  expect(batch.size() == 2 && std::abs(batch[1].policy[0] - 10.0f) < 1e-5f,
+         "CPU attention policy map batch should preserve gathered logits", tc);
 }
 
 #ifdef USE_CUDA
@@ -3038,6 +3111,7 @@ bool test_mcts_all() {
   test_cpu_backend_positional_metadata_execution(tc);
   test_cpu_backend_dynamic_pe_execution(tc);
   test_cpu_backend_attention_execution(tc);
+  test_cpu_backend_attention_policy_map_execution(tc);
 #ifdef USE_CUDA
   test_cuda_input_packing(tc);
   test_cuda_inference_buffers(tc);

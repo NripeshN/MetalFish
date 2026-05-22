@@ -8,12 +8,14 @@
 #include "cpu_network.h"
 
 #include "../input_plane_packing.h"
+#include "../metal/tables/attention_policy_map.h"
 #include "../network_attention_plan.h"
 #include "../network_output_decoder.h"
 #include "../network_tensor_plan.h"
 #include "../weights.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -78,6 +80,13 @@ bool IsAttentionSmolgenNormName(std::string_view name) {
   return EndsWith(name, ".mha.smolgen.norm");
 }
 
+bool IsAttentionPolicyMapStep(const NetworkResolvedExecutionPlan &plan,
+                              const NetworkResolvedExecutionStep &step) {
+  return plan.format.attention_policy &&
+         step.kind == NetworkExecutionOpKind::PolicyMap &&
+         !step.tensors.empty();
+}
+
 int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
                        std::string_view name) {
   if (StartsWith(name, "body.encoder."))
@@ -85,6 +94,20 @@ int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
   if (StartsWith(name, "policy."))
     return plan.format.policy_attention_heads;
   return 0;
+}
+
+const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
+  static const auto gather = [] {
+    std::array<int, kNetworkPolicyOutputs> indices{};
+    indices.fill(-1);
+    for (int raw = 0; raw < kNetworkAttentionPolicyScratch; ++raw) {
+      const short mapped = Metal::kAttnPolicyMap[raw];
+      if (mapped >= 0)
+        indices[static_cast<std::size_t>(mapped)] = raw;
+    }
+    return indices;
+  }();
+  return gather;
 }
 
 bool IsSimpleDenseStep(const NetworkResolvedExecutionStep &step) {
@@ -169,12 +192,18 @@ std::string FirstUnsupportedExecutionStep(
   }
   for (const auto &step : plan.steps) {
     if (step.kind == NetworkExecutionOpKind::PolicyMap) {
+      if (IsAttentionPolicyMapStep(plan, step))
+        continue;
       return "CPU transformer backend does not support policy mapping yet: " +
              step.name;
     }
   }
   for (const auto &step : plan.steps) {
     if (step.kind == NetworkExecutionOpKind::Attention) {
+      continue;
+    }
+    if (step.kind == NetworkExecutionOpKind::PolicyMap &&
+        IsAttentionPolicyMapStep(plan, step)) {
       continue;
     }
     if (step.kind == NetworkExecutionOpKind::Dense) {
@@ -670,6 +699,7 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
   std::string last_attention_step;
   std::unordered_map<std::string, CpuBuffer> feed_forward_sources;
   std::unordered_map<std::string, CpuBuffer> attention_sources;
+  std::unordered_map<std::string, CpuBuffer> attention_policy_sources;
 
   const auto source_for = [&](const std::string &name) -> const CpuBuffer & {
     const std::string policy_prefix =
@@ -678,6 +708,12 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
         "value." + resolved_execution_plan_.value_head + ".";
 
     if (StartsWith(name, policy_prefix)) {
+      if (resolved_execution_plan_.format.attention_policy &&
+          name == policy_prefix + "dense3") {
+        const auto branch_it = attention_policy_sources.find(policy_prefix);
+        if (branch_it != attention_policy_sources.end())
+          return branch_it->second;
+      }
       if (!last_policy.empty())
         return RequireBuffer(outputs, last_policy);
       if (!last_body.empty())
@@ -909,6 +945,12 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
         throw std::runtime_error("CPU dense stage shape mismatch: " +
                                  step.name);
       }
+      if (resolved_execution_plan_.format.attention_policy) {
+        const std::string policy_prefix =
+            "policy." + resolved_execution_plan_.policy_head + ".";
+        if (step.name == policy_prefix + "dense2")
+          attention_policy_sources[policy_prefix] = *dense_source;
+      }
 
       CpuBuffer output;
       output.width = out_width;
@@ -933,6 +975,137 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       ApplyDenseActivation(output.values, dense_rows, output.width,
                            DenseStageActivationForName(resolved_execution_plan_,
                                                        step.name));
+      remember_output(step, std::move(output));
+      last_executed_step = step.name;
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::PolicyMap) {
+      if (!IsAttentionPolicyMapStep(resolved_execution_plan_, step)) {
+        throw std::runtime_error("CPU policy map stage is unsupported: " +
+                                 step.name);
+      }
+      constexpr std::string_view kSuffix = ".policy_map";
+      if (!EndsWith(step.name, kSuffix)) {
+        throw std::runtime_error("CPU policy map stage name is invalid: " +
+                                 step.name);
+      }
+      const std::string policy_prefix =
+          step.name.substr(0, step.name.size() - kSuffix.size());
+      const CpuBuffer &query = RequireBuffer(outputs, policy_prefix + ".dense2");
+      const CpuBuffer &key = RequireBuffer(outputs, policy_prefix + ".dense3");
+      if (query.width <= 0 || query.width != key.width ||
+          query.values.size() != key.values.size() ||
+          query.values.size() !=
+              static_cast<std::size_t>(batch_size) * kPackedInputSquareCount *
+                  static_cast<std::size_t>(query.width)) {
+        std::ostringstream out;
+        out << "CPU attention policy Q/K shape mismatch: " << step.name
+            << " query_width=" << query.width
+            << " key_width=" << key.width
+            << " query_values=" << query.values.size()
+            << " key_values=" << key.values.size()
+            << " expected="
+            << static_cast<std::size_t>(batch_size) *
+                   kPackedInputSquareCount *
+                   static_cast<std::size_t>(std::max(0, query.width));
+        throw std::runtime_error(out.str());
+      }
+      const auto &promotion = TensorAt(step.tensors[0].inventory_index);
+      if (promotion.data.size() != static_cast<std::size_t>(4 * query.width)) {
+        throw std::runtime_error(
+            "CPU attention policy promotion tensor dimensions mismatch: " +
+            step.name);
+      }
+
+      std::vector<float> raw_policy(
+          static_cast<std::size_t>(batch_size) *
+              kNetworkAttentionPolicyScratch,
+          0.0f);
+      const float scale = 1.0f / std::sqrt(static_cast<float>(query.width));
+      for (int batch = 0; batch < batch_size; ++batch) {
+        for (int query_square = 0; query_square < kPackedInputSquareCount;
+             ++query_square) {
+          const float *query_row =
+              query.values.data() +
+              (static_cast<std::size_t>(batch) * kPackedInputSquareCount +
+               query_square) *
+                  query.width;
+          for (int key_square = 0; key_square < kPackedInputSquareCount;
+               ++key_square) {
+            const float *key_row =
+                key.values.data() +
+                (static_cast<std::size_t>(batch) * kPackedInputSquareCount +
+                 key_square) *
+                    key.width;
+            float sum = 0.0f;
+            for (int channel = 0; channel < query.width; ++channel)
+              sum += query_row[channel] * key_row[channel];
+            raw_policy[static_cast<std::size_t>(batch) *
+                           kNetworkAttentionPolicyScratch +
+                       static_cast<std::size_t>(query_square) *
+                           kPackedInputSquareCount +
+                       key_square] = sum * scale;
+          }
+        }
+      }
+
+      constexpr int kPromotionCount =
+          kNetworkAttentionPolicyScratch -
+          kPackedInputSquareCount * kPackedInputSquareCount;
+      for (int batch = 0; batch < batch_size; ++batch) {
+        for (int promo = 0; promo < kPromotionCount; ++promo) {
+          const int query_square = 48 + promo / 24;
+          const int key_square = 56 + (promo % 24) / 3;
+          const int promotion_row = promo % 3;
+          const float *query_row =
+              query.values.data() +
+              (static_cast<std::size_t>(batch) * kPackedInputSquareCount +
+               query_square) *
+                  query.width;
+          const float *key_row =
+              key.values.data() +
+              (static_cast<std::size_t>(batch) * kPackedInputSquareCount +
+               key_square) *
+                  key.width;
+          float value = 0.0f;
+          for (int channel = 0; channel < query.width; ++channel) {
+            value += query_row[channel] * key_row[channel] * scale;
+            value += key_row[channel] *
+                     (promotion.data[static_cast<std::size_t>(promotion_row) *
+                                         query.width +
+                                     channel] +
+                      promotion.data[static_cast<std::size_t>(3) *
+                                         query.width +
+                                     channel]);
+          }
+          raw_policy[static_cast<std::size_t>(batch) *
+                         kNetworkAttentionPolicyScratch +
+                     kPackedInputSquareCount * kPackedInputSquareCount +
+                     promo] = value;
+        }
+      }
+
+      CpuBuffer output;
+      output.width = kNetworkPolicyOutputs;
+      output.values.assign(static_cast<std::size_t>(batch_size) *
+                               kNetworkPolicyOutputs,
+                           0.0f);
+      const auto &gather = AttentionPolicyGatherMap();
+      for (int batch = 0; batch < batch_size; ++batch) {
+        for (int policy = 0; policy < kNetworkPolicyOutputs; ++policy) {
+          const int raw = gather[static_cast<std::size_t>(policy)];
+          if (raw >= 0) {
+            output.values[static_cast<std::size_t>(batch) *
+                              kNetworkPolicyOutputs +
+                          policy] =
+                raw_policy[static_cast<std::size_t>(batch) *
+                               kNetworkAttentionPolicyScratch +
+                           raw];
+          }
+        }
+      }
+
       remember_output(step, std::move(output));
       last_executed_step = step.name;
       continue;
