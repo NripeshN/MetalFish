@@ -32,12 +32,12 @@ namespace {
 
 bool StartsWith(std::string_view value, std::string_view prefix) {
   return value.size() >= prefix.size() &&
-         value.substr(0, prefix.size()) == prefix;
+         std::equal(prefix.begin(), prefix.end(), value.begin());
 }
 
 bool EndsWith(std::string_view value, std::string_view suffix) {
   return value.size() >= suffix.size() &&
-         value.substr(value.size() - suffix.size()) == suffix;
+         std::equal(suffix.rbegin(), suffix.rend(), value.rbegin());
 }
 
 const NetworkResolvedTensorRef *
