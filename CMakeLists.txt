@@ -204,6 +204,7 @@ set(NN_SOURCES
     src/nn/policy_map.cpp
     src/nn/network_format.cpp
     src/nn/network_execution_plan.cpp
+    src/nn/network_attention_plan.cpp
     src/nn/network_tensor_plan.cpp
     src/nn/network_weight_inventory.cpp
     src/nn/network_output_decoder.cpp

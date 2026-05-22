@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `119519c7-bd18-4951-802c-0dbca8311b5a` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `854f0cba-97fa-4255-ae52-a2bb2d176f32` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `09717e01-cf36-45e3-8d35-5ca879f9b9af` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `212d6416-b1d0-4efd-b6f4-630c45f6b374` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-015228-graphsafe`, L4, 2026-05-22 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
@@ -152,9 +152,10 @@ Current CUDA backend boundary:
   resolved stage groups, dense stage widths, value-error exclusion, and last
   body/head stage discovery. Stage execution and output mapping use this helper
   so head branching and output source selection stay aligned.
-- `src/nn/cuda/cuda_attention_plan.*` validates resolved MHA tensor shapes,
+- `src/nn/network_attention_plan.*` validates resolved MHA tensor shapes,
   head/depth geometry, smolgen branch dimensions, and global smolgen positional
-  weights before attention kernels are allowed into the executor path.
+  weights without depending on CUDA. `src/nn/cuda/cuda_attention_plan.*` keeps
+  CUDA compatibility wrappers around that common plan.
 - `src/nn/cuda/cuda_stage_executor.*` owns reusable dense/activation/layernorm
   stage execution, input-embedding gate execution, feed-forward residual
   layernorm execution, attention Q/K/V projection launches, attention
@@ -538,8 +539,8 @@ Current portable CPU transformer boundary:
   body attention starts.
 - BT4 execution still fails loudly with the first unsupported resolved stage
   instead of falling back to the diagnostic stub. For current BT4 weights that
-  names the body attention stage, so attention remains the next CPU-kernel
-  milestone.
+  names the body attention stage, and CPU now shares CUDA's attention/smolgen
+  shape resolver so attention execution remains the next CPU-kernel milestone.
 
 Portable CI now builds Linux CPU and Windows MinGW CPU artifacts. Both jobs run
 AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds
