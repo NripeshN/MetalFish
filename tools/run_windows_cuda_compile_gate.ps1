@@ -109,7 +109,7 @@ $TargetsText = $Targets -join ", "
   "",
   "## Toolchain",
   "",
-  "```text",
+  '```text',
   $CmakeVersion,
   "",
   "ninja $NinjaVersion",
@@ -117,7 +117,7 @@ $TargetsText = $Targets -join ", "
   $NvccVersion,
   "",
   $ClVersion,
-  "```"
+  '```'
 ) | Set-Content -Path $Summary -Encoding UTF8
 
 Write-Host "Windows CUDA compile gate passed"
