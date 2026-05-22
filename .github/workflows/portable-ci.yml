@@ -69,6 +69,9 @@ jobs:
             tools/write_portable_manifest.py \
             tools/uci_smoke.py
           python3 tests/test_benchmark_configs.py
+          python3 tests/test_lichess_bot.py
+          python3 tests/test_lichess_puzzle_runner.py
+          python3 tests/test_hybrid_regression_compare.py
           python3 tools/uci_smoke.py --engine build-linux/metalfish --go "depth 3"
           python3 tools/uci_smoke.py \
             --engine build-linux/metalfish \
@@ -159,6 +162,9 @@ jobs:
             tools/write_portable_manifest.py \
             tools/uci_smoke.py
           python tests/test_benchmark_configs.py
+          python tests/test_lichess_bot.py
+          python tests/test_lichess_puzzle_runner.py
+          python tests/test_hybrid_regression_compare.py
           python tools/uci_smoke.py --engine build-windows/metalfish.exe --go "depth 3"
           python tools/uci_smoke.py \
             --engine build-windows/metalfish.exe \

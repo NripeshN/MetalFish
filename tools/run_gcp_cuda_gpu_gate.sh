@@ -157,6 +157,7 @@ collect_remote_artifacts() {
     cuda-gpu-uci-auto-smoke.log \
     cuda-gpu-uci-smoke.log \
     cuda-gpu-uci-hybrid-smoke.log \
+    cuda-gpu-uci-hybrid-ane-smoke.log \
     cuda-gpu-profile.log; do
     if gcloud compute scp \
       "${INSTANCE}:~/metalfish/build-cuda-gpu/${file}" \

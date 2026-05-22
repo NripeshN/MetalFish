@@ -65,6 +65,8 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     enabled = types.SimpleNamespace(
         ponder=True,
         hybrid_ane_root_probe=True,
+        hybrid_ane_root_hints=True,
+        hybrid_ane_confirm_mcts_override=False,
         hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
         hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
         hybrid_ane_compute_units="cpu-ne",
@@ -78,6 +80,11 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
 
     expect("ANE probe is opt-in", "HybridANERootProbe" not in no_ane)
     expect("ANE probe option enabled", with_ane["HybridANERootProbe"] == "true")
+    expect("ANE root hints passed", with_ane["HybridANERootHints"] == "true")
+    expect(
+        "ANE confirmation toggle passed",
+        with_ane["HybridANEConfirmMCTSOverride"] == "false",
+    )
     expect("ANE weights passed", with_ane["HybridANEWeights"] == "networks/t1.pb.gz")
     expect(
         "ANE model passed", with_ane["HybridANEModelPath"] == "build/coreml/t1.mlmodelc"

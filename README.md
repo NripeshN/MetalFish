@@ -310,7 +310,7 @@ Use precise language when discussing results:
 ```text
 src/core/      Board representation and move generation
 src/eval/      NNUE evaluation and Apple Silicon CPU kernels
-src/nn/        BT4 transformer loader, encoder, Metal/MPSGraph backend
+src/nn/        BT4 transformer loader, encoder, Metal/MPSGraph, CUDA backends
 src/search/    Alpha-beta search
 src/mcts/      Lc0-style MCTS search
 src/hybrid/    Parallel Hybrid coordinator

@@ -152,6 +152,7 @@ write_summary() {
     echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
+    echo "- hybrid ANE-disable smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log")"
     echo "- CUDA profile: $(summary_log_status "${BUILD_DIR}/cuda-gpu-profile.log")"
     echo
     echo "## Failures"
@@ -164,6 +165,8 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
     summary_failure_lines "hybrid CUDA UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
+    summary_failure_lines "hybrid ANE-disable smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log"
     summary_failure_lines "CUDA profile" "${BUILD_DIR}/cuda-gpu-profile.log"
     echo
     echo "## Backend"
@@ -453,6 +456,32 @@ python3 tools/uci_smoke.py \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "CUDA transformer backend" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
+
+mkdir -p "${BUILD_DIR}/dummy-coreml.mlmodelc"
+python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption Threads=3 \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption UseMCTS=false \
+  --setoption UseHybridSearch=true \
+  --setoption HybridMCTSThreads=1 \
+  --setoption HybridABThreads=2 \
+  --setoption HybridAutoABThreadsCap=0 \
+  --setoption HybridANERootProbe=true \
+  --setoption HybridANERootHints=true \
+  --setoption HybridANEWeights="${WEIGHTS}" \
+  --setoption HybridANEModelPath="${BUILD_DIR}/dummy-coreml.mlmodelc" \
+  --setoption HybridANEComputeUnits=all \
+  --setoption HybridANERootHintWaitMs=0 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=1 \
+  --go "nodes 8" \
+  --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "ANE root probe disabled" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log"
 
 if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; then
   METALFISH_CUDA_PROFILE=1 \

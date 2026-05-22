@@ -1,0 +1,94 @@
+name: CUDA GPU Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      zones:
+        description: Space-separated GCP zones to try for the L4 VM
+        required: false
+        default: ""
+      machine:
+        description: GCP machine type
+        required: false
+        default: "g2-standard-8"
+      cuda_archs:
+        description: CMAKE_CUDA_ARCHITECTURES value
+        required: false
+        default: "89"
+      uci_go:
+        description: UCI go command for CUDA smokes
+        required: false
+        default: "nodes 8"
+      stable_batch_size:
+        description: CUDA stable execution batch size
+        required: false
+        default: "16"
+      profile:
+        description: Run the optional CUDA profile smoke
+        required: false
+        default: false
+        type: boolean
+      gcs_prefix:
+        description: Optional gs:// prefix for gate artifacts
+        required: false
+        default: ""
+
+concurrency:
+  group: metalfish-cuda-gpu-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  METALFISH_BT4_WEIGHTS_URL: https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz
+
+jobs:
+  cuda-gpu-gate:
+    name: CUDA L4 Runtime Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run CUDA GPU gate
+        env:
+          METALFISH_GCP_PROJECT: ${{ vars.METALFISH_GCP_PROJECT }}
+          METALFISH_GCP_ZONES: ${{ inputs.zones }}
+          METALFISH_GCP_MACHINE: ${{ inputs.machine }}
+          METALFISH_GCP_INSTANCE: metalfish-cuda-gh-${{ github.run_id }}-${{ github.run_attempt }}
+          METALFISH_GCP_ARTIFACT_DIR: ${{ github.workspace }}/results/cuda_gpu_gate
+          METALFISH_GCP_GCS_PREFIX: ${{ inputs.gcs_prefix }}
+          METALFISH_GCP_COLLECT_ARTIFACTS: "1"
+          METALFISH_CUDA_ARCHS: ${{ inputs.cuda_archs }}
+          METALFISH_CUDA_UCI_GO: ${{ inputs.uci_go }}
+          METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
+          CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+        run: |
+          set -euo pipefail
+          : "${METALFISH_GCP_PROJECT:=metalfish}"
+          if [ "${{ inputs.profile }}" = "true" ]; then
+            export METALFISH_CUDA_PROFILE=1
+          else
+            export METALFISH_CUDA_PROFILE=0
+          fi
+          tools/run_gcp_cuda_gpu_gate.sh
+
+      - name: Upload CUDA gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: cuda-gpu-gate-${{ github.run_id }}
+          path: results/cuda_gpu_gate/
+          if-no-files-found: warn

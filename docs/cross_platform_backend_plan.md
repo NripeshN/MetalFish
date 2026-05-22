@@ -70,7 +70,10 @@ cloud spend controlled.
 | Windows x86-64 CUDA | Ephemeral Windows GPU VM | CUDA/DirectML smoke before release |
 
 Cloud GPU runners should be created only for a benchmark run, write logs and
-artifacts to Cloud Storage, and then stop/delete themselves.
+artifacts to Cloud Storage, and then stop/delete themselves. The GitHub
+`CUDA GPU Gate` workflow is manual on purpose: every pull request still gets
+Linux/Windows portable coverage, while real NVIDIA runtime validation can be
+started when CUDA code or backend contracts change.
 
 Current GCP scaffolding:
 
@@ -83,6 +86,13 @@ Current GCP scaffolding:
 | Runner service account | `metalfish-runner@metalfish.iam.gserviceaccount.com` |
 | Enabled APIs | Compute Engine, Cloud Build, Cloud Run, Artifact Registry, Secret Manager |
 
+GitHub CUDA gate secrets/config:
+
+| Name | Kind | Purpose |
+| --- | --- | --- |
+| `GCP_CREDENTIALS_JSON` | Secret | Service-account JSON used by `google-github-actions/auth` |
+| `METALFISH_GCP_PROJECT` | Repository variable | Optional override; defaults to `metalfish` |
+
 Current remote gates:
 
 | Gate | Build config | Last passing build |
@@ -90,6 +100,7 @@ Current remote gates:
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-134923`, L4, 2026-05-22 |
+| GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26288509048` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26288509047` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26288508918` |

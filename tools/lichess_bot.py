@@ -150,6 +150,12 @@ HYBRID_MCTS_MINIBATCH = max(0, min(4096, env_int("METALFISH_HYBRID_MCTS_MINIBATC
 HYBRID_ANE_ROOT_PROBE = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_PROBE", False) == "true"
 )
+HYBRID_ANE_ROOT_HINTS = (
+    env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", False) == "true"
+)
+HYBRID_ANE_CONFIRM_MCTS_OVERRIDE = (
+    env_bool_string("METALFISH_HYBRID_ANE_CONFIRM_MCTS_OVERRIDE", True) == "true"
+)
 HYBRID_ANE_WEIGHTS = pathlib.Path(
     os.environ.get("METALFISH_HYBRID_ANE_WEIGHTS", str(DEFAULT_ANE_WEIGHTS))
 )
@@ -538,6 +544,20 @@ def ane_engine_options(args) -> dict[str, str]:
         return {}
     return {
         "HybridANERootProbe": "true",
+        "HybridANERootHints": (
+            "true"
+            if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
+            else "false"
+        ),
+        "HybridANEConfirmMCTSOverride": (
+            "true"
+            if getattr(
+                args,
+                "hybrid_ane_confirm_mcts_override",
+                HYBRID_ANE_CONFIRM_MCTS_OVERRIDE,
+            )
+            else "false"
+        ),
         "HybridANEWeights": str(
             getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS)
         ),
@@ -4168,6 +4188,18 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=HYBRID_ANE_ROOT_PROBE,
         help="Enable the experimental Core ML/ANE root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-root-hints",
+        action=argparse.BooleanOptionalAction,
+        default=HYBRID_ANE_ROOT_HINTS,
+        help="Use ANE root ordering as AB root-order hints.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-confirm-mcts-override",
+        action=argparse.BooleanOptionalAction,
+        default=HYBRID_ANE_CONFIRM_MCTS_OVERRIDE,
+        help="Allow ANE agreement to confirm narrowly gated MCTS overrides.",
     )
     parser.add_argument(
         "--hybrid-ane-weights",
