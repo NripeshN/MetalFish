@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import atexit
 import email.utils
 import gc
 import hashlib
@@ -150,6 +151,69 @@ def file_summary(path: pathlib.Path) -> str:
         return f"{mtime}, {size_mb:.1f} MB, sha256={short_file_digest(path)}"
     except OSError:
         return "present, metadata unavailable"
+
+
+class TeeStream:
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for stream in self._streams:
+            stream.write(data)
+        return len(data)
+
+    def flush(self):
+        for stream in self._streams:
+            stream.flush()
+
+    def isatty(self):
+        return any(
+            getattr(stream, "isatty", lambda: False)() for stream in self._streams
+        )
+
+
+def verbose_log_path(args) -> pathlib.Path | None:
+    value = getattr(args, "verbose", False)
+    if value is True or value is False or value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    path = pathlib.Path(text).expanduser()
+    return path if path.is_absolute() else pathlib.Path.cwd() / path
+
+
+def install_verbose_log(args):
+    path = verbose_log_path(args)
+    if path is None:
+        return None
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("w", encoding="utf-8", buffering=1)
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    sys.stdout = TeeStream(original_stdout, handle)
+    sys.stderr = TeeStream(original_stderr, handle)
+    args.verbose_output = path
+
+    closed = False
+
+    def close_log():
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+        try:
+            handle.close()
+        except OSError:
+            pass
+
+    args._verbose_log_close = close_log
+    atexit.register(close_log)
+    print(f"  Verbose log: {path}", flush=True)
+    return handle
 
 
 PERFORMANCE_CORES = apple_performance_cores()
@@ -3263,12 +3327,15 @@ class LichessBot:
                     **self._audit_context(moves),
                 )
                 try:
+                    ponderhit_start = time.time()
                     best, ponder = engine.ponderhit(timeout=search_timeout)
+                    ponderhit_ms = int((time.time() - ponderhit_start) * 1000)
                     self._audit(
                         game_id,
                         "ponderhit_result",
                         best=best,
                         ponder=ponder,
+                        elapsed_ms=ponderhit_ms,
                         **self._audit_context(moves),
                     )
                 except (TimeoutError, RuntimeError) as e:
@@ -4013,7 +4080,12 @@ class LichessBot:
             f"{' + Ponder' if self.args.ponder else ''})"
         )
         if getattr(self.args, "verbose", False):
-            print(f"  Debug:    verbose | Engine build {file_summary(ENGINE)}")
+            verbose_output = getattr(self.args, "verbose_output", None)
+            output_suffix = f" | log {verbose_output}" if verbose_output else ""
+            print(
+                f"  Debug:    verbose{output_suffix} | Engine build "
+                f"{file_summary(ENGINE)}"
+            )
             print(
                 f"  Debug:    HybridTrace={header_options.get('HybridTrace', 'false')}"
             )
@@ -4288,11 +4360,14 @@ def main():
     )
     parser.add_argument(
         "--verbose",
-        action="store_true",
+        nargs="?",
+        const=True,
         default=False,
+        metavar="LOG_PATH",
         help=(
             "Print engine build identity, UCI option setup, engine info/stderr, "
-            "HybridTrace/ANE root diagnostics, and Lichess API status lines."
+            "HybridTrace/ANE root diagnostics, and Lichess API status lines. "
+            "Optionally tee the full run to LOG_PATH."
         ),
     )
     parser.add_argument(
@@ -4458,6 +4533,7 @@ def main():
         ),
     )
     args = parser.parse_args()
+    install_verbose_log(args)
     normalize_ane_args(args)
 
     needs_engine = (
