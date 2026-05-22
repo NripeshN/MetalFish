@@ -57,6 +57,21 @@ jobs:
         with:
           arch: x64
 
+      - name: Validate gate script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path tools/run_windows_cuda_compile_gate.ps1),
+            [ref]$tokens,
+            [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -ne 0) {
+            $parseErrors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
       - name: Install CUDA Toolkit
         id: cuda-toolkit
         uses: Jimver/cuda-toolkit@v0.2.35
