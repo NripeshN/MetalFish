@@ -16,8 +16,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from tools import lc0_coreml_position_parity as parity  # noqa: E402
 import bk_parity  # noqa: E402
+
+from tools import lc0_coreml_position_parity as parity  # noqa: E402
 
 
 def model_args(args: argparse.Namespace) -> argparse.Namespace:
@@ -48,7 +49,9 @@ def wdl_value(wdl: np.ndarray) -> float:
     return float(flat[0] - flat[2])
 
 
-def score_child_for_root(board: chess.Board, move: chess.Move, child_wdl: np.ndarray) -> float:
+def score_child_for_root(
+    board: chess.Board, move: chess.Move, child_wdl: np.ndarray
+) -> float:
     child = board.copy(stack=False)
     child.push(move)
     if child.is_checkmate():
@@ -58,7 +61,9 @@ def score_child_for_root(board: chess.Board, move: chess.Move, child_wdl: np.nda
     return -wdl_value(child_wdl)
 
 
-def best_expected_rank(ranked: Sequence[dict[str, Any]], expected: set[str]) -> int | None:
+def best_expected_rank(
+    ranked: Sequence[dict[str, Any]], expected: set[str]
+) -> int | None:
     ranks = [int(item["rank"]) for item in ranked if item["move"] in expected]
     return min(ranks) if ranks else None
 
@@ -188,9 +193,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "top3": top3,
             "top5": top5,
             "top10": top10,
-            "median_expected_rank": statistics.median(ranked_values)
-            if ranked_values
-            else None,
+            "median_expected_rank": (
+                statistics.median(ranked_values) if ranked_values else None
+            ),
             "mean_prediction_ms": statistics.fmean(latencies) if latencies else 0.0,
             "median_prediction_ms": statistics.median(latencies) if latencies else 0.0,
             "build_ms": build_ms,
@@ -211,8 +216,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--compute-unit", choices=["all", "cpu", "cpu-gpu", "cpu-ne"], default="cpu-ne"
     )
     parser.add_argument("--precision", choices=["fp16", "fp32"], default="fp16")
-    parser.add_argument("--value-head-fp32", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--policy-head-fp32", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--value-head-fp32", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument(
+        "--policy-head-fp32", action=argparse.BooleanOptionalAction, default=False
+    )
     parser.add_argument("--positions", default="all")
     parser.add_argument("--top", type=int, default=5)
     parser.add_argument("--warmup", type=int, default=2)

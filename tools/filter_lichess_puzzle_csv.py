@@ -16,7 +16,6 @@ from tools.lichess_puzzle_runner import (  # noqa: E402
     parse_theme_filter,
 )
 
-
 FIELDS = [
     "PuzzleId",
     "FEN",

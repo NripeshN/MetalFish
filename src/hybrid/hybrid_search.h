@@ -215,11 +215,13 @@ struct ParallelHybridConfig {
   int ab_candidate_verify_count = 4;
   bool root_pawn_lever_tiebreak = true;
   bool ane_root_probe = false;
+  bool ane_root_hints = false;
+  bool ane_confirm_mcts_override = true;
   std::string ane_weights_path;
   std::string ane_model_path;
   std::string ane_compute_units = "cpu-ne";
   int ane_root_hint_count = 10;
-  int ane_root_hint_wait_ms = 75;
+  int ane_root_hint_wait_ms = 0;
   int ane_min_budget_ms = 1000;
 
   enum class DecisionMode {
@@ -273,7 +275,14 @@ private:
     int score = 0;
     int previous_score = 0;
     int average_score = 0;
+    bool score_lowerbound = false;
+    bool score_upperbound = false;
     uint64_t effort = 0;
+  };
+
+  struct ANERootHintInfo {
+    Move move = Move::none();
+    float score = 0.0f;
   };
 
   bool initialized_ = false;
@@ -321,6 +330,9 @@ private:
   std::atomic<bool> mcts_search_started_{false};
   std::atomic<bool> ab_search_started_{false};
   std::future<std::vector<Move>> ane_root_hints_future_;
+  std::mutex ane_root_hints_mutex_;
+  std::vector<Move> ane_root_hints_;
+  std::vector<ANERootHintInfo> ane_root_hint_infos_;
 
   std::string root_fen_;
   ::MetalFish::Search::LimitsType limits_;
@@ -419,6 +431,20 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
     int eval_delta);
 
+bool HybridMCTSCompactFixedBudgetOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score);
+
+bool HybridMCTSCompactClearPreferenceOverride(
+    bool fixed_budget, bool visit_evidence_sane, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q);
+
 bool HybridMCTSCrossRootConfidenceOverride(
     bool fixed_budget, bool mcts_strong, uint64_t mcts_total_nodes,
     uint32_t mcts_visits, float visit_share, float root_q_gap, int mcts_cp,
@@ -427,8 +453,42 @@ bool HybridMCTSCrossRootConfidenceOverride(
     int ab_in_mcts_rank, uint32_t ab_in_mcts_visits, float ab_in_mcts_q,
     float mcts_q);
 
+bool HybridMCTSRootConfidenceRejectOverride(
+    bool root_confidence_fixed_budget, bool ab_root_rejects_mcts,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort,
+    int ab_average_score, int mcts_average_score, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_visits, float ab_in_mcts_q, float mcts_q);
+
+bool HybridMCTSReusedRootConfidenceOverride(
+    bool fixed_budget, uint64_t mcts_root_visits, uint32_t mcts_best_visits,
+    uint64_t mcts_root_current_visits, uint32_t mcts_best_current_visits,
+    float absolute_visit_share, float current_visit_share, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_in_ab_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q,
+    float mcts_q);
+
+bool HybridMCTSReusedRootCurrentOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    bool ab_root_rejects_mcts, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, uint64_t mcts_root_current_visits,
+    uint32_t mcts_best_current_visits, float absolute_visit_share,
+    float current_visit_share, float root_q_gap, int mcts_cp, int eval_delta,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q);
+
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits);
+
+bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
+                                    bool fixed_budget, bool visit_evidence_sane,
+                                    uint64_t mcts_root_visits,
+                                    uint32_t mcts_best_visits,
+                                    float visit_share, float root_q_gap,
+                                    int mcts_cp, int eval_delta,
+                                    float ane_score_margin);
 
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
                              int ab_average_score, int mcts_average_score,

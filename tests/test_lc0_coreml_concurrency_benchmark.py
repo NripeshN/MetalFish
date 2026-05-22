@@ -71,7 +71,9 @@ def test_metal_probe_command_can_use_separate_metal_weights() -> None:
         ]
     )
     command = bench.metal_probe_command(args, 5)
-    expect("separate metal weights", command[command.index("--weights") + 1] == "bt4.pb")
+    expect(
+        "separate metal weights", command[command.index("--weights") + 1] == "bt4.pb"
+    )
 
 
 def test_metal_probe_command_can_add_signal_files() -> None:

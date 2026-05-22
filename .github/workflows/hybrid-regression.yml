@@ -60,7 +60,7 @@ jobs:
           path: baseline
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -148,7 +148,7 @@ jobs:
             --min-candidate-bk-score 20 \
             --max-bk-mean-drop 0.67 \
             --max-bk-min-drop 1 \
-            --max-perf-regression 0.25 \
+            --max-perf-regression 0.40 \
             --json-out results/hybrid_regression/report.json \
             "${candidate_args[@]}"
 

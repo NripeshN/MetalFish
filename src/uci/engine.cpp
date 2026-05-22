@@ -161,11 +161,13 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridABCandidateVerifyCount", Option(4, 1, 10));
   options.add("HybridRootPawnLeverTieBreak", Option(true));
   options.add("HybridANERootProbe", Option(false));
+  options.add("HybridANERootHints", Option(false));
+  options.add("HybridANEConfirmMCTSOverride", Option(true));
   options.add("HybridANEWeights", Option(""));
   options.add("HybridANEModelPath", Option(""));
   options.add("HybridANEComputeUnits", Option("cpu-ne"));
   options.add("HybridANERootHintCount", Option(10, 1, 32));
-  options.add("HybridANERootHintWaitMs", Option(75, 0, 1000));
+  options.add("HybridANERootHintWaitMs", Option(0, 0, 1000));
   options.add("HybridANEMinBudgetMs", Option(1000, 0, 30000));
   options.add("HybridTrace", Option(false));
   options.add("TransformerLowTimeFallbackMs", Option(3000, 0, 30000));
@@ -541,6 +543,8 @@ Engine::root_move_snapshot(size_t max_moves) const {
     item.score = rm.score;
     item.previous_score = rm.previousScore;
     item.average_score = rm.averageScore;
+    item.score_lowerbound = rm.scoreLowerbound;
+    item.score_upperbound = rm.scoreUpperbound;
     item.effort = rm.effort;
     item.sel_depth = rm.selDepth;
     item.pv = rm.pv;

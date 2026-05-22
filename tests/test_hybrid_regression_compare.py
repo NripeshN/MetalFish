@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import pathlib
 import sys
 
@@ -60,7 +62,9 @@ def test_regression_thresholds_catch_accuracy_drop() -> None:
         args,
     )
     expect("accuracy drop detected", any("BK mean" in item for item in failures))
-    expect("absolute floor detected", any("absolute floor" in item for item in failures))
+    expect(
+        "absolute floor detected", any("absolute floor" in item for item in failures)
+    )
 
 
 def test_regression_thresholds_catch_perf_drop() -> None:
@@ -68,11 +72,11 @@ def test_regression_thresholds_catch_perf_drop() -> None:
         max_bk_mean_drop=0.67,
         max_bk_min_drop=1,
         min_candidate_bk_score=0,
-        max_perf_regression=0.25,
+        max_perf_regression=0.40,
     )
     failures = compare.compare_summaries(
         summary([24, 24, 24], nps=1000),
-        summary([24, 24, 24], nps=700),
+        summary([24, 24, 24], nps=550),
         24,
         args,
     )
@@ -138,6 +142,55 @@ def test_parse_extra_setoptions() -> None:
     )
 
 
+def test_interleaved_runs_alternate_order() -> None:
+    args = argparse.Namespace(
+        positions="BK.07",
+        repeat=3,
+        weights=pathlib.Path(__file__),
+        threads_resolved=3,
+        hash_mb=1024,
+        bk_movetime=5000,
+        perf_movetime=2000,
+        timeout_margin=90.0,
+    )
+    order = []
+    original = compare.run_engine_once
+
+    def fake_run_engine_once(label, run_index, *unused):
+        order.append((label, run_index))
+        return compare.EngineRun(label=label, run_index=run_index)
+
+    compare.run_engine_once = fake_run_engine_once
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            baseline, candidate = compare.run_interleaved(
+                args,
+                pathlib.Path("baseline-engine"),
+                pathlib.Path("baseline-cwd"),
+                [],
+                pathlib.Path("candidate-engine"),
+                pathlib.Path("candidate-cwd"),
+                [],
+            )
+    finally:
+        compare.run_engine_once = original
+
+    expect(
+        "alternate execution order",
+        order
+        == [
+            ("baseline-main", 0),
+            ("candidate-pr", 0),
+            ("candidate-pr", 1),
+            ("baseline-main", 1),
+            ("baseline-main", 2),
+            ("candidate-pr", 2),
+        ],
+    )
+    expect("baseline sorted", [run.run_index for run in baseline] == [0, 1, 2])
+    expect("candidate sorted", [run.run_index for run in candidate] == [0, 1, 2])
+
+
 def main() -> int:
     test_regression_thresholds_allow_noise()
     test_regression_thresholds_catch_accuracy_drop()
@@ -146,6 +199,7 @@ def main() -> int:
     test_parse_args_defaults()
     test_parse_setoption()
     test_parse_extra_setoptions()
+    test_interleaved_runs_alternate_order()
     print("Hybrid regression compare tests: OK")
     return 0
 

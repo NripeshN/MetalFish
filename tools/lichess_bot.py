@@ -156,14 +156,14 @@ HYBRID_ANE_WEIGHTS = pathlib.Path(
 HYBRID_ANE_MODEL = pathlib.Path(
     os.environ.get("METALFISH_HYBRID_ANE_MODEL", str(DEFAULT_ANE_MODEL))
 )
-HYBRID_ANE_COMPUTE_UNITS = os.environ.get(
-    "METALFISH_HYBRID_ANE_COMPUTE_UNITS", "cpu-ne"
-).strip().lower()
+HYBRID_ANE_COMPUTE_UNITS = (
+    os.environ.get("METALFISH_HYBRID_ANE_COMPUTE_UNITS", "cpu-ne").strip().lower()
+)
 HYBRID_ANE_ROOT_HINT_COUNT = max(
     1, min(32, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_COUNT", 10))
 )
 HYBRID_ANE_ROOT_HINT_WAIT_MS = max(
-    0, min(1000, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_WAIT_MS", 250))
+    0, min(1000, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_WAIT_MS", 0))
 )
 HYBRID_ANE_MIN_BUDGET_MS = max(
     0, min(30000, env_int("METALFISH_HYBRID_ANE_MIN_BUDGET_MS", 1000))
@@ -538,7 +538,9 @@ def ane_engine_options(args) -> dict[str, str]:
         return {}
     return {
         "HybridANERootProbe": "true",
-        "HybridANEWeights": str(getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS)),
+        "HybridANEWeights": str(
+            getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS)
+        ),
         "HybridANEModelPath": str(
             getattr(args, "hybrid_ane_model_path", HYBRID_ANE_MODEL)
         ),
@@ -562,7 +564,7 @@ def normalize_ane_args(args):
         1, min(32, int(getattr(args, "hybrid_ane_root_hint_count", 10)))
     )
     args.hybrid_ane_root_hint_wait_ms = max(
-        0, min(1000, int(getattr(args, "hybrid_ane_root_hint_wait_ms", 250)))
+        0, min(1000, int(getattr(args, "hybrid_ane_root_hint_wait_ms", 0)))
     )
     args.hybrid_ane_min_budget_ms = max(
         0, min(30000, int(getattr(args, "hybrid_ane_min_budget_ms", 1000)))
@@ -583,7 +585,9 @@ def ane_status_label(args) -> str:
     weights = pathlib.Path(getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS))
     model = pathlib.Path(getattr(args, "hybrid_ane_model_path", HYBRID_ANE_MODEL))
     compute = getattr(args, "hybrid_ane_compute_units", HYBRID_ANE_COMPUTE_UNITS)
-    wait_ms = getattr(args, "hybrid_ane_root_hint_wait_ms", HYBRID_ANE_ROOT_HINT_WAIT_MS)
+    wait_ms = getattr(
+        args, "hybrid_ane_root_hint_wait_ms", HYBRID_ANE_ROOT_HINT_WAIT_MS
+    )
     min_budget = getattr(args, "hybrid_ane_min_budget_ms", HYBRID_ANE_MIN_BUDGET_MS)
     status = "ready" if weights.exists() and model.exists() else "missing files"
     return (
@@ -4180,9 +4184,11 @@ def main():
     parser.add_argument(
         "--hybrid-ane-compute-units",
         choices=("cpu", "cpu-gpu", "cpu-ne", "all"),
-        default=HYBRID_ANE_COMPUTE_UNITS
-        if HYBRID_ANE_COMPUTE_UNITS in {"cpu", "cpu-gpu", "cpu-ne", "all"}
-        else "cpu-ne",
+        default=(
+            HYBRID_ANE_COMPUTE_UNITS
+            if HYBRID_ANE_COMPUTE_UNITS in {"cpu", "cpu-gpu", "cpu-ne", "all"}
+            else "cpu-ne"
+        ),
     )
     parser.add_argument(
         "--hybrid-ane-root-hint-count",
