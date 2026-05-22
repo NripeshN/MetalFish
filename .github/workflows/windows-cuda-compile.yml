@@ -1,16 +1,6 @@
 name: Windows CUDA Compile Gate
 
 on:
-  push:
-    branches: [cuda-support]
-    paths:
-      - ".github/workflows/windows-cuda-compile.yml"
-      - "tools/run_windows_cuda_compile_gate.ps1"
-      - "CMakeLists.txt"
-      - "src/nn/cuda/**"
-      - "src/nn/network*.cpp"
-      - "src/nn/network*.h"
-      - "tests/test_nn_comparison.cpp"
   pull_request:
     branches: [main]
     paths:
@@ -71,7 +61,7 @@ jobs:
         id: cuda-toolkit
         uses: Jimver/cuda-toolkit@v0.2.35
         with:
-          cuda: ${{ inputs.cuda_version }}
+          cuda: ${{ inputs.cuda_version || '12.9.1' }}
           method: network
           sub-packages: '["nvcc","cudart","cublas","cublas_dev","visual_studio_integration"]'
 
@@ -91,9 +81,9 @@ jobs:
       - name: Compile CUDA backend
         shell: pwsh
         env:
-          METALFISH_CUDA_ARCHS: ${{ inputs.cuda_archs }}
+          METALFISH_CUDA_ARCHS: ${{ inputs.cuda_archs || '89' }}
         run: |
-          $buildTests = if ("${{ inputs.build_tests }}" -eq "true") { "ON" } else { "OFF" }
+          $buildTests = if ("${{ inputs.build_tests }}" -eq "false") { "OFF" } else { "ON" }
           tools/run_windows_cuda_compile_gate.ps1 `
             -BuildDir build-windows-cuda `
             -BuildType "${env:BUILD_TYPE}" `
