@@ -1,6 +1,26 @@
 name: Windows CUDA Compile Gate
 
 on:
+  push:
+    branches: [cuda-support]
+    paths:
+      - ".github/workflows/windows-cuda-compile.yml"
+      - "tools/run_windows_cuda_compile_gate.ps1"
+      - "CMakeLists.txt"
+      - "src/nn/cuda/**"
+      - "src/nn/network*.cpp"
+      - "src/nn/network*.h"
+      - "tests/test_nn_comparison.cpp"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-cuda-compile.yml"
+      - "tools/run_windows_cuda_compile_gate.ps1"
+      - "CMakeLists.txt"
+      - "src/nn/cuda/**"
+      - "src/nn/network*.cpp"
+      - "src/nn/network*.h"
+      - "tests/test_nn_comparison.cpp"
   workflow_dispatch:
     inputs:
       cuda_version:

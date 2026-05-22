@@ -102,7 +102,7 @@ Current remote gates:
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-final-e370951`, L4, 2026-05-22 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | Manual dispatch, pending first run |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | Branch/path dispatch, pending first run |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26311252685` |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26311252680` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26311252679` |
