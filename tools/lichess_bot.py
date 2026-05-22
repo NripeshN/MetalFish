@@ -3994,7 +3994,9 @@ class LichessBot:
         )
         if getattr(self.args, "verbose", False):
             print(f"  Debug:    verbose | Engine build {file_summary(ENGINE)}")
-            print(f"  Debug:    HybridTrace={header_options.get('HybridTrace', 'false')}")
+            print(
+                f"  Debug:    HybridTrace={header_options.get('HybridTrace', 'false')}"
+            )
         print(
             f"  Workers:  dynamic up to {MAX_SEARCH_WORKERS} search + 1 coordinator "
             f"| CPU: {LOGICAL_CORES} logical"
