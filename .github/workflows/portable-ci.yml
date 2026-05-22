@@ -1,6 +1,9 @@
 name: Portable CI
 
 on:
+  push:
+    tags:
+      - "v*"
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
@@ -80,16 +83,23 @@ jobs:
             --notes "This portable artifact is a CPU build for Linux CI coverage." \
             --notes "For CUDA transformer testing, use a USE_CUDA=ON build and the CUDA GPU gate."
 
+      - name: Package Linux artifact
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            package_name="metalfish-${GITHUB_REF_NAME}-linux-x86_64-cpu"
+          else
+            package_name="metalfish-linux-x86_64-cpu"
+          fi
+          mkdir -p portable-linux
+          cp build-linux/metalfish portable-linux/
+          cp build-linux/PORTABLE_ARTIFACT.md README.md CHANGELOG.md LICENSE portable-linux/
+          tar -czf "${package_name}.tar.gz" -C portable-linux .
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v6
         with:
           name: metalfish-linux-x86_64-cpu
-          path: |
-            build-linux/metalfish
-            build-linux/PORTABLE_ARTIFACT.md
-            README.md
-            CHANGELOG.md
-            LICENSE
+          path: metalfish*linux-x86_64-cpu.tar.gz
           if-no-files-found: error
 
   windows-mingw-cpu:
@@ -165,6 +175,11 @@ jobs:
 
       - name: Package Windows artifact
         run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            package_name="metalfish-${GITHUB_REF_NAME}-windows-x86_64-mingw-cpu"
+          else
+            package_name="metalfish-windows-x86_64-mingw-cpu"
+          fi
           mkdir -p portable-windows
           cp build-windows/metalfish.exe portable-windows/
           cp build-windows/PORTABLE_ARTIFACT.md README.md CHANGELOG.md LICENSE portable-windows/
@@ -173,13 +188,44 @@ jobs:
             | sort -u \
             | while read -r dll; do
                 [ -n "$dll" ] && cp "$dll" portable-windows/
-              done
-          rm -f metalfish-windows-x86_64-mingw-cpu.zip
-          bsdtar -a -cf metalfish-windows-x86_64-mingw-cpu.zip -C portable-windows .
+          done
+          rm -f "${package_name}.zip"
+          bsdtar -a -cf "${package_name}.zip" -C portable-windows .
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v6
         with:
           name: metalfish-windows-x86_64-mingw-cpu
-          path: metalfish-windows-x86_64-mingw-cpu.zip
+          path: metalfish*windows-x86_64-mingw-cpu.zip
           if-no-files-found: error
+
+  portable-release:
+    name: Attach Portable Release Artifacts
+    needs: [linux-cpu, windows-mingw-cpu]
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download portable artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: portable-release
+
+      - name: Check release artifacts
+        run: |
+          test -f "portable-release/metalfish-linux-x86_64-cpu/metalfish-${GITHUB_REF_NAME}-linux-x86_64-cpu.tar.gz"
+          test -f "portable-release/metalfish-windows-x86_64-mingw-cpu/metalfish-${GITHUB_REF_NAME}-windows-x86_64-mingw-cpu.zip"
+
+      - name: Attach artifacts to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            portable-release/metalfish-linux-x86_64-cpu/metalfish-${{ github.ref_name }}-linux-x86_64-cpu.tar.gz
+            portable-release/metalfish-windows-x86_64-mingw-cpu/metalfish-${{ github.ref_name }}-windows-x86_64-mingw-cpu.zip
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: true
