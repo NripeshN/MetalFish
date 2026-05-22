@@ -91,12 +91,13 @@ $NvccVersion = (& $Nvcc --version) -join "`n"
 $CmakeVersion = (& $Cmake --version) -join "`n"
 $NinjaVersion = (& $Ninja --version) -join "`n"
 $ClVersion = (& $Cl 2>&1) -join "`n"
+$TimestampUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
 @(
   "# MetalFish Windows CUDA Compile Gate",
   "",
   "- Gate status: passed",
-  "- Timestamp UTC: $((Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"))",
+  "- Timestamp UTC: $TimestampUtc",
   "- Source: $SourceDir",
   "- Build directory: $BuildDir",
   "- Build type: $BuildType",
