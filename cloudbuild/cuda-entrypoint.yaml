@@ -31,7 +31,7 @@ steps:
           -DCMAKE_CUDA_ARCHITECTURES=75\;80\;86\;89 \
           -DBUILD_TESTS=ON \
           -DMETALFISH_ENABLE_IPO=OFF
-        cmake --build build-cuda-entry --target metalfish metalfish_tests
+        cmake --build build-cuda-entry --target metalfish metalfish_tests metalfish_nn_probe
         ./build-cuda-entry/metalfish_tests | tee /tmp/metalfish-cuda-tests.txt
         grep -q "CUDA runtime" /tmp/metalfish-cuda-tests.txt
         python3 tools/uci_smoke.py --engine build-cuda-entry/metalfish --go "depth 2"

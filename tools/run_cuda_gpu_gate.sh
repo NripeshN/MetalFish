@@ -149,6 +149,7 @@ write_summary() {
     echo
     echo "- CUDA tests: $(summary_log_status "${BUILD_DIR}/cuda-gpu-tests.log")"
     echo "- NN comparison: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-comparison.log")"
+    echo "- NN probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-probe.log")"
     echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
@@ -159,6 +160,7 @@ write_summary() {
     summary_failure_lines "CUDA tests" "${BUILD_DIR}/cuda-gpu-tests.log"
     summary_failure_lines "NN comparison" \
       "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
+    summary_failure_lines "NN probe" "${BUILD_DIR}/cuda-gpu-nn-probe.log"
     summary_failure_lines "auto UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
     summary_failure_lines "explicit CUDA UCI smoke" \
@@ -379,7 +381,8 @@ cmake -S . -B "${BUILD_DIR}" -G Ninja \
   -DBUILD_TESTS=ON \
   -DMETALFISH_ENABLE_IPO=OFF
 
-cmake --build "${BUILD_DIR}" --target metalfish metalfish_tests test_nn_comparison -j"${JOBS}"
+cmake --build "${BUILD_DIR}" --target metalfish metalfish_tests \
+  test_nn_comparison metalfish_nn_probe -j"${JOBS}"
 
 METALFISH_CUDA_TRACE_STAGE_OUTPUTS=0 \
   METALFISH_CUDA_PROFILE=0 \
@@ -414,6 +417,15 @@ if [[ -n "${CUDA_GRAPH_REQUESTED}" && "${CUDA_GRAPH_REQUESTED}" != "0" &&
     exit 1
   fi
 fi
+
+"${BUILD_DIR}/metalfish_nn_probe" \
+  --weights "${WEIGHTS}" \
+  --backend cuda \
+  --top 3 \
+  --warmup 0 \
+  --iterations 1 \
+  2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-probe.log"
+grep -q '"network_info":"CUDA transformer backend' "${BUILD_DIR}/cuda-gpu-nn-probe.log"
 
 python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \

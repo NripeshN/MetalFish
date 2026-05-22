@@ -488,7 +488,7 @@ if(BUILD_TESTS)
                                     ${NN_SOURCES})
   target_link_libraries(
     metalfish_nn_probe Threads::Threads ${METALFISH_PROTOBUF_LIB}
-    ${ZLIB_LIBRARIES} ${ABSL_LIBS})
+    ${METALFISH_ZLIB_LIB} ${ABSL_LIBS} ${METALFISH_CUDA_LIBS})
 
   if(APPLE AND ACCELERATE_FRAMEWORK)
     target_link_libraries(metalfish_nn_probe ${ACCELERATE_FRAMEWORK})
