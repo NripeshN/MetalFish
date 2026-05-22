@@ -737,10 +737,18 @@ def solve_puzzle(engine: UCIEngine, item: dict, movetime_ms: int) -> dict:
         }
         search_record.update(search_trace_fields(answer))
         searches.append(search_record)
-        mate_in_one_ok = (
-            idx == 0 and len(solution) == 1 and is_mating_move(board, actual)
-        )
-        if actual != expected and not mate_in_one_ok:
+        mating_alternative = actual != expected and is_mating_move(board, actual)
+        if mating_alternative:
+            search_record["accepted_mating_alternative"] = True
+            return {
+                "id": puzzle_id,
+                "solved": True,
+                "rating": puzzle.get("rating"),
+                "themes": puzzle.get("themes", []),
+                "searches": searches,
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
+            }
+        if actual != expected:
             return {
                 "id": puzzle_id,
                 "solved": False,

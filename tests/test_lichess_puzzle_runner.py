@@ -221,6 +221,46 @@ def test_hybrid_ane_low_time_fallback_can_be_overridden() -> None:
     )
 
 
+def test_solver_accepts_alternate_mating_move() -> None:
+    class ScriptedEngine:
+        def __init__(self, moves: list[str]) -> None:
+            self.moves = moves
+            self.index = 0
+
+        def new_game(self) -> None:
+            self.index = 0
+
+        def search(self, board: chess.Board, movetime_ms: int) -> SearchAnswer:
+            del board, movetime_ms
+            move = self.moves[self.index]
+            self.index += 1
+            return SearchAnswer(bestmove=move)
+
+    row = {
+        "PuzzleId": "02yab",
+        "FEN": "8/8/8/8/8/2R1bk1p/5Np1/6K1 w - - 6 62",
+        "Moves": "c3c2 f3g3 c2c8 h3h2",
+        "Rating": "2201",
+        "RatingDeviation": "79",
+        "Popularity": "87",
+        "NbPlays": "488",
+        "Themes": "advancedPawn endgame master mate mateIn2 short",
+        "GameUrl": "https://lichess.org/9wLtXMET#123",
+        "OpeningTags": "",
+    }
+
+    result = puzzle_runner.solve_puzzle(
+        ScriptedEngine(["f3g3", "e3f2"]), csv_puzzle_item(row), 1000
+    )
+
+    expect("alternate checkmate solves puzzle", result["solved"])
+    expect("alternate mate recorded", result["searches"][-1]["actual"] == "e3f2")
+    expect(
+        "alternate mate marker recorded",
+        result["searches"][-1]["accepted_mating_alternative"],
+    )
+
+
 def test_search_info_parser_tracks_ane_hints() -> None:
     answer = SearchAnswer(bestmove="0000")
     update_answer_from_info(
