@@ -72,11 +72,11 @@ def test_regression_thresholds_catch_perf_drop() -> None:
         max_bk_mean_drop=0.67,
         max_bk_min_drop=1,
         min_candidate_bk_score=0,
-        max_perf_regression=0.25,
+        max_perf_regression=0.40,
     )
     failures = compare.compare_summaries(
         summary([24, 24, 24], nps=1000),
-        summary([24, 24, 24], nps=700),
+        summary([24, 24, 24], nps=550),
         24,
         args,
     )

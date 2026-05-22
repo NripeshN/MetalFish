@@ -452,6 +452,15 @@ bool HybridMCTSRootConfidenceRejectOverride(
     int ab_average_score, int mcts_average_score, int ab_in_mcts_rank,
     uint32_t ab_in_mcts_visits, float ab_in_mcts_q, float mcts_q);
 
+bool HybridMCTSReusedRootConfidenceOverride(
+    bool fixed_budget, uint64_t mcts_root_visits, uint32_t mcts_best_visits,
+    uint64_t mcts_root_current_visits, uint32_t mcts_best_current_visits,
+    float absolute_visit_share, float current_visit_share, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, uint64_t mcts_in_ab_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
+    float ab_in_mcts_q, float mcts_q);
+
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits);
 

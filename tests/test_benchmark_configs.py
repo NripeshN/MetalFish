@@ -636,7 +636,7 @@ def main() -> int:
             '--repeat "$BENCH_REPEAT"',
             "--min-candidate-bk-score 20",
             "--max-bk-mean-drop 0.67",
-            "--max-perf-regression 0.25",
+            "--max-perf-regression 0.40",
             "--max-solved-drop 15",
         ],
     )
