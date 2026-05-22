@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `14657f0d-a818-4abc-88f6-abcf754102f1` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `d0a48a1d-a678-4fa7-a933-229f82f76462` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `119519c7-bd18-4951-802c-0dbca8311b5a` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `854f0cba-97fa-4255-ae52-a2bb2d176f32` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-015228-graphsafe`, L4, 2026-05-22 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
@@ -529,11 +529,13 @@ Current portable CPU transformer boundary:
   keeps Linux and Windows aligned with Metal/CUDA network parsing and resolved
   tensor shape inference.
 - The backend now owns resolved tensor copies and executes simple dense,
-  layernorm, gate, feed-forward, and non-output positional metadata resolved
-  plans, including adjacent feed-forward residual layernorm and batched output
-  decoding through the shared policy/value decoder. This gives portable builds
-  a real non-stub transformer execution path for minimal classical fixtures and
-  keeps global smolgen positional tensors on the shared resolved-plan path.
+  layernorm, gate, feed-forward, non-output positional metadata, and dynamic
+  position input-preprocessing resolved plans, including adjacent feed-forward
+  residual layernorm and batched output decoding through the shared policy/value
+  decoder. It mirrors CUDA's packed-plane expansion into square rows for
+  `body.input_embedding_preprocess`, so minimal PE-dense fixtures now exercise
+  the same `[batch*64, input_planes + pe_width]` contract used by BT4 before
+  body attention starts.
 - BT4 execution still fails loudly with the first unsupported resolved stage
   instead of falling back to the diagnostic stub. For current BT4 weights that
   names the body attention stage, so attention remains the next CPU-kernel

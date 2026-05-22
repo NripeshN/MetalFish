@@ -284,6 +284,78 @@ NN::WeightsFile make_positional_metadata_cpu_weights_file() {
   return file;
 }
 
+NN::WeightsFile make_dynamic_pe_cpu_weights_file() {
+  NN::WeightsFile file;
+  auto *nf = file.mutable_format()->mutable_network_format();
+  nf->set_network(
+      MetalFishNN::
+          NetworkFormat_NetworkStructure_NETWORK_CLASSICAL_WITH_HEADFORMAT);
+  nf->set_policy(MetalFishNN::NetworkFormat_PolicyFormat_POLICY_CLASSICAL);
+  nf->set_value(MetalFishNN::NetworkFormat_ValueFormat_VALUE_CLASSICAL);
+  nf->set_moves_left(
+      MetalFishNN::NetworkFormat_MovesLeftFormat_MOVES_LEFT_NONE);
+  nf->set_input_embedding(
+      MetalFishNN::NetworkFormat_InputEmbeddingFormat_INPUT_EMBEDDING_PE_DENSE);
+  nf->set_default_activation(
+      MetalFishNN::NetworkFormat_DefaultActivation_DEFAULT_ACTIVATION_RELU);
+
+  auto *weights = file.mutable_weights();
+  constexpr int kPeWidth = 1;
+  constexpr int kEmbeddingWidth = 2;
+  constexpr int kFlattenedEmbedding =
+      NN::kPackedInputSquareCount * kEmbeddingWidth;
+  constexpr int kPositionInput = 12 * NN::kPackedInputSquareCount;
+  constexpr int kPositionOutput = kPeWidth * NN::kPackedInputSquareCount;
+  constexpr int kConcatWidth = NN::kPackedInputPlaneCount + kPeWidth;
+
+  std::vector<float> preproc_w(
+      static_cast<std::size_t>(kPositionOutput) * kPositionInput, 0.0f);
+  std::vector<float> preproc_b(kPositionOutput, 0.0f);
+  for (int square = 0; square < NN::kPackedInputSquareCount; ++square) {
+    preproc_w[static_cast<std::size_t>(square) * kPositionInput +
+              square * 12 + 0] = 0.25f;
+    preproc_w[static_cast<std::size_t>(square) * kPositionInput +
+              square * 12 + 11] = 0.50f;
+    preproc_b[static_cast<std::size_t>(square)] =
+        0.01f * static_cast<float>(square);
+  }
+  set_test_float_layer_values(weights->mutable_ip_emb_preproc_w(), preproc_w,
+                              {kPositionOutput, kPositionInput});
+  set_test_float_layer_values(weights->mutable_ip_emb_preproc_b(), preproc_b,
+                              {kPositionOutput});
+
+  std::vector<float> embedding_w(kEmbeddingWidth * kConcatWidth, 0.0f);
+  embedding_w[0 * kConcatWidth + 0] = 1.0f;
+  embedding_w[0 * kConcatWidth + NN::kPackedInputPlaneCount] = 1.0f;
+  embedding_w[1 * kConcatWidth + 12] = 0.10f;
+  set_test_float_layer_values(weights->mutable_ip_emb_w(), embedding_w,
+                              {kEmbeddingWidth, kConcatWidth});
+  set_test_float_layer_values(weights->mutable_ip_emb_b(), {0.0f, 0.0f},
+                              {kEmbeddingWidth});
+
+  std::vector<float> policy_w(NN::kPolicyOutputs * kFlattenedEmbedding, 0.0f);
+  policy_w[0] = 1.0f;
+  policy_w[10 * kFlattenedEmbedding + 5 * kEmbeddingWidth + 0] = 1.0f;
+  std::vector<float> policy_b(NN::kPolicyOutputs, 0.0f);
+  set_test_float_layer_values(
+      weights->mutable_policy_heads()->mutable_vanilla()->mutable_ip_pol_w(),
+      policy_w, {NN::kPolicyOutputs, kFlattenedEmbedding});
+  set_test_float_layer_values(
+      weights->mutable_policy_heads()->mutable_vanilla()->mutable_ip_pol_b(),
+      policy_b, {NN::kPolicyOutputs});
+
+  std::vector<float> value_w(kFlattenedEmbedding, 0.0f);
+  value_w[1] = 1.0f;
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_w(),
+      value_w, {1, kFlattenedEmbedding});
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_b(),
+      {0.0f}, {1});
+
+  return file;
+}
+
 void test_node_basics(TestCounter &tc) {
   std::cout << "  Node basics..." << std::endl;
   constexpr size_t node_size_budget =
@@ -1078,6 +1150,35 @@ void test_cpu_backend_positional_metadata_execution(TestCounter &tc) {
          "CPU positional metadata batch should emit two outputs", tc);
   expect(batch.size() == 2 && std::abs(batch[1].policy[10] - 0.50f) < 1e-6f,
          "CPU positional metadata batch should preserve logits", tc);
+}
+
+void test_cpu_backend_dynamic_pe_execution(TestCounter &tc) {
+  std::cout << "  CPU backend dynamic positional encoding..." << std::endl;
+
+  auto cpu = NN::CreateNetwork(make_dynamic_pe_cpu_weights_file(), "cpu");
+  expect(cpu->GetNetworkInfo().find("dynamic-pe") != std::string::npos,
+         "explicit cpu backend should expose dynamic PE execution", tc);
+
+  NN::InputPlanes input{};
+  input[0][0] = 2.0f;
+  input[0][5] = 2.0f;
+  input[11][0] = -1.5f;
+  input[12][0] = 7.0f;
+
+  const auto output = cpu->Evaluate(input);
+  expect(std::abs(output.policy[0] - 1.75f) < 1e-5f,
+         "CPU dynamic PE should concatenate square-zero plane and PE channel",
+         tc);
+  expect(std::abs(output.policy[10] - 2.55f) < 1e-5f,
+         "CPU dynamic PE should preserve square-specific flattened logits",
+         tc);
+  expect(std::abs(output.value - 0.70f) < 1e-5f,
+         "CPU dynamic PE flattened value head should consume square rows", tc);
+
+  const auto batch = cpu->EvaluateBatch({input, input});
+  expect(batch.size() == 2, "CPU dynamic PE batch should emit two outputs", tc);
+  expect(batch.size() == 2 && std::abs(batch[1].policy[10] - 2.55f) < 1e-5f,
+         "CPU dynamic PE batch should preserve flattened logits", tc);
 }
 
 #ifdef USE_CUDA
@@ -2725,6 +2826,7 @@ bool test_mcts_all() {
   test_cpu_backend_dense_execution(tc);
   test_cpu_backend_gate_ffn_execution(tc);
   test_cpu_backend_positional_metadata_execution(tc);
+  test_cpu_backend_dynamic_pe_execution(tc);
 #ifdef USE_CUDA
   test_cuda_input_packing(tc);
   test_cuda_inference_buffers(tc);

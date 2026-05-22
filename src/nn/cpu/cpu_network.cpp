@@ -65,6 +65,10 @@ bool IsAddGate(std::string_view name) {
   return name.find("add_gate") != std::string_view::npos;
 }
 
+bool IsDynamicPositionPreprocessName(std::string_view name) {
+  return name == "body.input_embedding_preprocess";
+}
+
 bool IsSimpleDenseStep(const NetworkResolvedExecutionStep &step) {
   if (!FindTensorKind(step, NetworkWeightTensorKind::DenseWeight) ||
       !FindTensorKind(step, NetworkWeightTensorKind::DenseBias)) {
@@ -524,8 +528,9 @@ std::string CpuNetwork::GetNetworkInfo() const {
       << ", execution: " << resolved_execution_plan_.Summary()
       << ", weight_bytes=" << weight_bytes_
       << ", executor="
-      << (unsupported_execution_reason_.empty() ? "dense-layernorm-gate-ffn-positional"
-                                                : "unsupported")
+      << (unsupported_execution_reason_.empty()
+              ? "dense-layernorm-gate-ffn-positional-dynamic-pe"
+              : "unsupported")
       << ")";
   return out.str();
 }
@@ -562,11 +567,11 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
   }
 
   std::vector<std::uint64_t> masks;
-  std::vector<float> values;
-  PackInputPlanesRaw(raw_inputs.data(), batch_size, masks, values);
+  std::vector<float> packed_values;
+  PackInputPlanesRaw(raw_inputs.data(), batch_size, masks, packed_values);
 
   CpuBuffer base;
-  base.values = std::move(values);
+  base.values = packed_values;
   base.width = kPackedInputPlaneCount;
 
   std::unordered_map<std::string, CpuBuffer> outputs;
@@ -635,6 +640,121 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       continue;
     }
 
+    if (step.kind == NetworkExecutionOpKind::Dense &&
+        IsDynamicPositionPreprocessName(step.name)) {
+      const auto *weight_ref =
+          FindTensorKind(step, NetworkWeightTensorKind::DenseWeight);
+      const auto *bias_ref =
+          FindTensorKind(step, NetworkWeightTensorKind::DenseBias);
+      if (!weight_ref || !bias_ref) {
+        throw std::runtime_error("CPU dynamic PE stage has missing tensors: " +
+                                 step.name);
+      }
+      const auto &weight = TensorAt(weight_ref->inventory_index);
+      const auto &bias = TensorAt(bias_ref->inventory_index);
+      constexpr int kPositionPlanes = 12;
+      const int input_planes = resolved_execution_plan_.tensors.input_planes;
+      const int squares = resolved_execution_plan_.tensors.input_squares;
+      if (resolved_execution_plan_.format.input_embedding !=
+              INPUT_EMBEDDING_PE_DENSE ||
+          input_planes <= 0 || squares <= 0 || squares > 64 ||
+          input_planes < kPositionPlanes ||
+          masks.size() != static_cast<std::size_t>(batch_size) *
+                              static_cast<std::size_t>(input_planes) ||
+          packed_values.size() != masks.size()) {
+        throw std::runtime_error("CPU dynamic PE tensor plan is invalid: " +
+                                 step.name);
+      }
+      if (weight.dims.size() != 2 || bias.dims.size() != 1) {
+        throw std::runtime_error("CPU dynamic PE tensor shape is invalid: " +
+                                 step.name);
+      }
+      const int out_width = static_cast<int>(weight.dims[0]);
+      const int in_width = static_cast<int>(weight.dims[1]);
+      if (in_width != squares * kPositionPlanes || out_width <= 0 ||
+          out_width % squares != 0 ||
+          bias.data.size() != static_cast<std::size_t>(out_width) ||
+          weight.data.size() !=
+              static_cast<std::size_t>(out_width) *
+                  static_cast<std::size_t>(in_width)) {
+        throw std::runtime_error("CPU dynamic PE tensor dimensions mismatch: " +
+                                 step.name);
+      }
+
+      std::vector<float> position_input(
+          static_cast<std::size_t>(batch_size) *
+              static_cast<std::size_t>(in_width),
+          0.0f);
+      for (int batch = 0; batch < batch_size; ++batch) {
+        for (int square = 0; square < squares; ++square) {
+          const std::uint64_t bit = 1ULL << square;
+          for (int plane = 0; plane < kPositionPlanes; ++plane) {
+            const std::size_t packed_index =
+                static_cast<std::size_t>(batch) * input_planes + plane;
+            position_input[static_cast<std::size_t>(batch) * in_width +
+                           static_cast<std::size_t>(square) *
+                               kPositionPlanes +
+                           plane] =
+                (masks[packed_index] & bit) ? packed_values[packed_index]
+                                            : 0.0f;
+          }
+        }
+      }
+
+      std::vector<float> position_output(
+          static_cast<std::size_t>(batch_size) *
+              static_cast<std::size_t>(out_width),
+          0.0f);
+      for (int batch = 0; batch < batch_size; ++batch) {
+        const float *input_row =
+            position_input.data() + static_cast<std::size_t>(batch) * in_width;
+        float *output_row = position_output.data() +
+                            static_cast<std::size_t>(batch) * out_width;
+        for (int out = 0; out < out_width; ++out) {
+          const float *weight_row =
+              weight.data.data() + static_cast<std::size_t>(out) * in_width;
+          float sum = bias.data[static_cast<std::size_t>(out)];
+          for (int in = 0; in < in_width; ++in)
+            sum += input_row[in] * weight_row[in];
+          output_row[out] = sum;
+        }
+      }
+
+      const int pe_width = out_width / squares;
+      CpuBuffer output;
+      output.width = input_planes + pe_width;
+      output.values.assign(static_cast<std::size_t>(batch_size) *
+                               static_cast<std::size_t>(squares) *
+                               static_cast<std::size_t>(output.width),
+                           0.0f);
+      for (int batch = 0; batch < batch_size; ++batch) {
+        for (int square = 0; square < squares; ++square) {
+          const std::uint64_t bit = 1ULL << square;
+          float *output_row =
+              output.values.data() +
+              (static_cast<std::size_t>(batch) * squares + square) *
+                  output.width;
+          for (int plane = 0; plane < input_planes; ++plane) {
+            const std::size_t packed_index =
+                static_cast<std::size_t>(batch) * input_planes + plane;
+            output_row[plane] =
+                (masks[packed_index] & bit) ? packed_values[packed_index]
+                                            : 0.0f;
+          }
+          const float *pe_row =
+              position_output.data() + static_cast<std::size_t>(batch) *
+                                           out_width +
+              static_cast<std::size_t>(square) * pe_width;
+          for (int col = 0; col < pe_width; ++col)
+            output_row[input_planes + col] = pe_row[col];
+        }
+      }
+
+      remember_output(step, std::move(output));
+      last_executed_step = step.name;
+      continue;
+    }
+
     const CpuBuffer &source = source_for(step.name);
     if (source.width <= 0 || source.values.size() % source.width != 0) {
       throw std::runtime_error("CPU transformer backend source shape mismatch: " +
@@ -671,8 +791,21 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       }
       const int out_width = static_cast<int>(weight.dims[0]);
       const int in_width = static_cast<int>(weight.dims[1]);
-      if (in_width != source.width ||
-          bias.data.size() != static_cast<std::size_t>(out_width) ||
+      const CpuBuffer *dense_source = &source;
+      CpuBuffer flattened_source;
+      int dense_rows = rows;
+      if (in_width != source.width) {
+        if (batch_size <= 0 || rows % batch_size != 0 ||
+            in_width != (rows / batch_size) * source.width) {
+          throw std::runtime_error("CPU dense stage shape mismatch: " +
+                                   step.name);
+        }
+        flattened_source.width = in_width;
+        flattened_source.values = source.values;
+        dense_source = &flattened_source;
+        dense_rows = batch_size;
+      }
+      if (bias.data.size() != static_cast<std::size_t>(out_width) ||
           weight.data.size() !=
               static_cast<std::size_t>(out_width) *
                   static_cast<std::size_t>(in_width)) {
@@ -683,11 +816,12 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       CpuBuffer output;
       output.width = out_width;
       output.values.assign(
-          static_cast<std::size_t>(rows) * static_cast<std::size_t>(out_width),
+          static_cast<std::size_t>(dense_rows) *
+              static_cast<std::size_t>(out_width),
           0.0f);
-      for (int row = 0; row < rows; ++row) {
-        const float *input_row =
-            source.values.data() + static_cast<std::size_t>(row) * in_width;
+      for (int row = 0; row < dense_rows; ++row) {
+        const float *input_row = dense_source->values.data() +
+                                 static_cast<std::size_t>(row) * in_width;
         float *output_row =
             output.values.data() + static_cast<std::size_t>(row) * out_width;
         for (int out = 0; out < out_width; ++out) {
@@ -699,7 +833,7 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
           output_row[out] = sum;
         }
       }
-      ApplyDenseActivation(output.values, rows, output.width,
+      ApplyDenseActivation(output.values, dense_rows, output.width,
                            DenseStageActivationForName(resolved_execution_plan_,
                                                        step.name));
       remember_output(step, std::move(output));
