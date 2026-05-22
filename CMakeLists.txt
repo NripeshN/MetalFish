@@ -207,6 +207,7 @@ set(NN_SOURCES
     src/nn/network_tensor_plan.cpp
     src/nn/network_weight_inventory.cpp
     src/nn/network_output_decoder.cpp
+    src/nn/cpu/cpu_network.cpp
     src/nn/network.cpp)
 
 if(APPLE AND USE_COREML)

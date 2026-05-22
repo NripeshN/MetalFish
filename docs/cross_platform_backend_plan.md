@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `132c1c7a-347f-4834-8b36-6d6e1d90d813` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `62e555fc-3aa7-4ca7-b441-465dfd45e3e2` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `c3c5b167-46ed-4c2c-9f50-b03205a9ca26` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `cef6817e-940b-4e0c-b098-56851b4a7b29` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-015228-graphsafe`, L4, 2026-05-22 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
@@ -519,6 +519,18 @@ Current CUDA backend boundary:
 - `CreateNullCudaExecutorForSmoke()` exercises packed inputs, device buffers,
   output downloads, and shared output decoding without pretending strength
   inference is implemented.
+
+Current portable CPU transformer boundary:
+
+- `NNBackend=cpu` is an explicit validation-only transformer backend. It is
+  compiled on every platform, but `auto` does not select it yet.
+- The backend loads real protobuf weights through the shared descriptor,
+  tensor-plan, weight-inventory, execution-plan, and resolved-plan code. This
+  keeps Linux and Windows aligned with Metal/CUDA network parsing before CPU
+  kernels exist.
+- Execution currently fails loudly with the first unsupported resolved stage
+  instead of falling back to the diagnostic stub. For BT4 that names the body
+  attention stage, which is the next CPU-kernel milestone.
 
 Portable CI now builds Linux CPU and Windows MinGW CPU artifacts. Both jobs run
 AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds

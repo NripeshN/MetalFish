@@ -7,6 +7,8 @@
 
 #include "network.h"
 
+#include "cpu/cpu_network.h"
+
 #ifdef USE_COREML
 #include "coreml/coreml_network.h"
 #endif
@@ -103,6 +105,10 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
     throw std::runtime_error("CUDA backend was not compiled into this build");
   }
 #endif
+
+  if (backend == "cpu") {
+    return std::make_unique<Cpu::CpuNetwork>(weights);
+  }
 
   if (backend == "stub") {
     return std::make_unique<StubNetwork>(weights);

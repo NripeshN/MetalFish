@@ -788,6 +788,49 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
   expect(explicit_cuda_error.find("CUDA runtime") != std::string::npos,
          "explicit cuda failure should include runtime diagnostics", tc);
 #endif
+
+  bool explicit_cpu_returned_stub = false;
+  bool explicit_cpu_threw = false;
+  std::string explicit_cpu_error;
+  try {
+    auto cpu = NN::CreateNetwork(empty_weights, "cpu");
+    explicit_cpu_returned_stub =
+        cpu->GetNetworkInfo().find("Stub network") != std::string::npos;
+  } catch (const std::exception &e) {
+    explicit_cpu_threw = true;
+    explicit_cpu_error = e.what();
+  }
+  expect(explicit_cpu_threw || !explicit_cpu_returned_stub,
+         "explicit cpu backend must not fall back to stub", tc);
+  expect(explicit_cpu_error.find("CPU transformer backend") !=
+             std::string::npos,
+         "explicit cpu failure should include CPU backend diagnostics", tc);
+
+  const std::string weights_path = MetalFish::Test::find_nn_weights_path();
+  if (!weights_path.empty()) {
+    auto cpu = NN::CreateNetwork(weights_path, "cpu");
+    expect(cpu->GetNetworkInfo().find("CPU transformer backend") !=
+               std::string::npos,
+           "explicit cpu backend should validate real transformer weights", tc);
+    bool cpu_eval_threw = false;
+    std::string cpu_eval_error;
+    try {
+      NN::InputPlanes input{};
+      cpu->Evaluate(input);
+    } catch (const std::exception &e) {
+      cpu_eval_threw = true;
+      cpu_eval_error = e.what();
+    }
+    expect(cpu_eval_threw,
+           "validation-only cpu backend should reject execution clearly", tc);
+    expect(cpu_eval_error.find("CPU transformer backend does not support "
+                               "attention yet") != std::string::npos,
+           "BT4 cpu execution failure should name the unsupported attention "
+           "stage",
+           tc);
+  } else {
+    MetalFish::Test::print_missing_nn_weights_skip();
+  }
 }
 
 #ifdef USE_CUDA
