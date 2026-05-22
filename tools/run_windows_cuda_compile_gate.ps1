@@ -92,6 +92,7 @@ $CmakeVersion = (& $Cmake --version) -join "`n"
 $NinjaVersion = (& $Ninja --version) -join "`n"
 $ClVersion = (& $Cl 2>&1) -join "`n"
 $TimestampUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$TargetsText = $Targets -join ", "
 
 @(
   "# MetalFish Windows CUDA Compile Gate",
@@ -104,7 +105,7 @@ $TimestampUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   "- CUDA architectures: $CudaArchs",
   "- CUDA_PATH: $env:CUDA_PATH",
   "- Build tests: $BuildTests",
-  "- Targets: $($Targets -join ", ")",
+  "- Targets: $TargetsText",
   "",
   "## Toolchain",
   "",
