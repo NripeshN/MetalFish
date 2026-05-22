@@ -357,6 +357,84 @@ NN::WeightsFile make_dynamic_pe_cpu_weights_file() {
   return file;
 }
 
+NN::WeightsFile make_attention_cpu_weights_file() {
+  NN::WeightsFile file;
+  auto *nf = file.mutable_format()->mutable_network_format();
+  nf->set_network(
+      MetalFishNN::
+          NetworkFormat_NetworkStructure_NETWORK_ATTENTIONBODY_WITH_HEADFORMAT);
+  nf->set_policy(MetalFishNN::NetworkFormat_PolicyFormat_POLICY_CLASSICAL);
+  nf->set_value(MetalFishNN::NetworkFormat_ValueFormat_VALUE_CLASSICAL);
+  nf->set_moves_left(
+      MetalFishNN::NetworkFormat_MovesLeftFormat_MOVES_LEFT_NONE);
+  nf->set_input_embedding(
+      MetalFishNN::NetworkFormat_InputEmbeddingFormat_INPUT_EMBEDDING_PE_DENSE);
+  nf->set_default_activation(
+      MetalFishNN::NetworkFormat_DefaultActivation_DEFAULT_ACTIVATION_RELU);
+
+  auto *weights = file.mutable_weights();
+  weights->set_headcount(1);
+
+  constexpr int kPeWidth = 1;
+  constexpr int kEmbeddingWidth = 2;
+  constexpr int kFlattenedEmbedding =
+      NN::kPackedInputSquareCount * kEmbeddingWidth;
+  constexpr int kPositionInput = 12 * NN::kPackedInputSquareCount;
+  constexpr int kPositionOutput = kPeWidth * NN::kPackedInputSquareCount;
+  constexpr int kConcatWidth = NN::kPackedInputPlaneCount + kPeWidth;
+
+  set_test_float_layer_values(
+      weights->mutable_ip_emb_preproc_w(),
+      std::vector<float>(kPositionOutput * kPositionInput, 0.0f),
+      {kPositionOutput, kPositionInput});
+  set_test_float_layer_values(weights->mutable_ip_emb_preproc_b(),
+                              std::vector<float>(kPositionOutput, 0.0f),
+                              {kPositionOutput});
+
+  std::vector<float> embedding_w(kEmbeddingWidth * kConcatWidth, 0.0f);
+  embedding_w[0 * kConcatWidth + 0] = 1.0f;
+  embedding_w[1 * kConcatWidth + 1] = 1.0f;
+  set_test_float_layer_values(weights->mutable_ip_emb_w(), embedding_w,
+                              {kEmbeddingWidth, kConcatWidth});
+  set_test_float_layer_values(weights->mutable_ip_emb_b(), {0.0f, 0.0f},
+                              {kEmbeddingWidth});
+
+  auto *encoder = weights->add_encoder();
+  auto *mha = encoder->mutable_mha();
+  std::vector<float> zeros4(4, 0.0f);
+  std::vector<float> zeros2(2, 0.0f);
+  std::vector<float> identity2 = {1.0f, 0.0f, 0.0f, 1.0f};
+  set_test_float_layer_values(mha->mutable_q_w(), zeros4, {2, 2});
+  set_test_float_layer_values(mha->mutable_q_b(), zeros2, {2});
+  set_test_float_layer_values(mha->mutable_k_w(), zeros4, {2, 2});
+  set_test_float_layer_values(mha->mutable_k_b(), zeros2, {2});
+  set_test_float_layer_values(mha->mutable_v_w(), identity2, {2, 2});
+  set_test_float_layer_values(mha->mutable_v_b(), zeros2, {2});
+  set_test_float_layer_values(mha->mutable_dense_w(), identity2, {2, 2});
+  set_test_float_layer_values(mha->mutable_dense_b(), zeros2, {2});
+
+  std::vector<float> policy_w(NN::kPolicyOutputs * kFlattenedEmbedding, 0.0f);
+  policy_w[0] = 1.0f;
+  policy_w[kFlattenedEmbedding + 1] = 1.0f;
+  set_test_float_layer_values(
+      weights->mutable_policy_heads()->mutable_vanilla()->mutable_ip_pol_w(),
+      policy_w, {NN::kPolicyOutputs, kFlattenedEmbedding});
+  set_test_float_layer_values(
+      weights->mutable_policy_heads()->mutable_vanilla()->mutable_ip_pol_b(),
+      std::vector<float>(NN::kPolicyOutputs, 0.0f), {NN::kPolicyOutputs});
+
+  std::vector<float> value_w(kFlattenedEmbedding, 0.0f);
+  value_w[1] = 1.0f;
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_w(),
+      value_w, {1, kFlattenedEmbedding});
+  set_test_float_layer_values(
+      weights->mutable_value_heads()->mutable_winner()->mutable_ip_val_b(),
+      {0.0f}, {1});
+
+  return file;
+}
+
 void test_node_basics(TestCounter &tc) {
   std::cout << "  Node basics..." << std::endl;
   constexpr size_t node_size_budget =
@@ -1166,9 +1244,9 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
     expect(cpu_eval_threw,
            "BT4 cpu backend should reject unsupported execution clearly", tc);
     expect(cpu_eval_error.find("CPU transformer backend does not support "
-                               "attention yet") != std::string::npos,
-           "BT4 cpu execution failure should name the unsupported attention "
-           "stage",
+                               "policy mapping yet") != std::string::npos,
+           "BT4 cpu execution failure should move past attention and name the "
+           "unsupported policy map",
            tc);
   } else {
     MetalFish::Test::print_missing_nn_weights_skip();
@@ -1283,6 +1361,33 @@ void test_cpu_backend_dynamic_pe_execution(TestCounter &tc) {
   expect(batch.size() == 2, "CPU dynamic PE batch should emit two outputs", tc);
   expect(batch.size() == 2 && std::abs(batch[1].policy[10] - 2.55f) < 1e-5f,
          "CPU dynamic PE batch should preserve flattened logits", tc);
+}
+
+void test_cpu_backend_attention_execution(TestCounter &tc) {
+  std::cout << "  CPU backend attention execution..." << std::endl;
+
+  auto cpu = NN::CreateNetwork(make_attention_cpu_weights_file(), "cpu");
+  expect(cpu->GetNetworkInfo().find("attention") != std::string::npos,
+         "explicit cpu backend should expose attention execution", tc);
+
+  NN::InputPlanes input{};
+  input[0][0] = 2.0f;
+  input[1][1] = 4.0f;
+
+  const auto output = cpu->Evaluate(input);
+  expect(std::abs(output.policy[0] - (2.0f / 64.0f)) < 1e-5f,
+         "CPU attention should average value channel zero across keys", tc);
+  expect(std::abs(output.policy[1] - (4.0f / 64.0f)) < 1e-5f,
+         "CPU attention should average value channel one across keys", tc);
+  expect(std::abs(output.value - (4.0f / 64.0f)) < 1e-5f,
+         "CPU attention flattened value head should consume attention output",
+         tc);
+
+  const auto batch = cpu->EvaluateBatch({input, input});
+  expect(batch.size() == 2, "CPU attention batch should emit two outputs", tc);
+  expect(batch.size() == 2 &&
+             std::abs(batch[1].policy[0] - (2.0f / 64.0f)) < 1e-5f,
+         "CPU attention batch should preserve attention logits", tc);
 }
 
 #ifdef USE_CUDA
@@ -2932,6 +3037,7 @@ bool test_mcts_all() {
   test_cpu_backend_gate_ffn_execution(tc);
   test_cpu_backend_positional_metadata_execution(tc);
   test_cpu_backend_dynamic_pe_execution(tc);
+  test_cpu_backend_attention_execution(tc);
 #ifdef USE_CUDA
   test_cuda_input_packing(tc);
   test_cuda_inference_buffers(tc);

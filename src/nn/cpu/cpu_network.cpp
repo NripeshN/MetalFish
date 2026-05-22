@@ -8,6 +8,7 @@
 #include "cpu_network.h"
 
 #include "../input_plane_packing.h"
+#include "../network_attention_plan.h"
 #include "../network_output_decoder.h"
 #include "../network_tensor_plan.h"
 #include "../weights.h"
@@ -67,6 +68,23 @@ bool IsAddGate(std::string_view name) {
 
 bool IsDynamicPositionPreprocessName(std::string_view name) {
   return name == "body.input_embedding_preprocess";
+}
+
+bool IsAttentionSmolgenDenseName(std::string_view name) {
+  return EndsWith(name, ".mha.smolgen.dense");
+}
+
+bool IsAttentionSmolgenNormName(std::string_view name) {
+  return EndsWith(name, ".mha.smolgen.norm");
+}
+
+int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
+                       std::string_view name) {
+  if (StartsWith(name, "body.encoder."))
+    return plan.format.body_attention_heads;
+  if (StartsWith(name, "policy."))
+    return plan.format.policy_attention_heads;
+  return 0;
 }
 
 bool IsSimpleDenseStep(const NetworkResolvedExecutionStep &step) {
@@ -131,10 +149,16 @@ bool IsSimplePositionalEncodingStep(
 
 std::string FirstUnsupportedExecutionStep(
     const NetworkResolvedExecutionPlan &plan) {
-  for (const auto &step : plan.steps) {
+  for (std::size_t index = 0; index < plan.steps.size(); ++index) {
+    const auto &step = plan.steps[index];
     if (step.kind == NetworkExecutionOpKind::Attention) {
-      return "CPU transformer backend does not support attention yet: " +
-             step.name;
+      try {
+        (void)ResolveAttentionStagePlan(plan, index,
+                                        AttentionHeadCount(plan, step.name));
+      } catch (const std::exception &e) {
+        return "CPU transformer backend does not support attention stage " +
+               step.name + ": " + e.what();
+      }
     }
   }
   for (const auto &step : plan.steps) {
@@ -150,7 +174,12 @@ std::string FirstUnsupportedExecutionStep(
     }
   }
   for (const auto &step : plan.steps) {
+    if (step.kind == NetworkExecutionOpKind::Attention) {
+      continue;
+    }
     if (step.kind == NetworkExecutionOpKind::Dense) {
+      if (IsAttentionSmolgenDenseName(step.name))
+        continue;
       if (!IsSimpleDenseStep(step)) {
         return "CPU transformer backend does not support compound dense "
                "stage yet: " +
@@ -159,6 +188,8 @@ std::string FirstUnsupportedExecutionStep(
       continue;
     }
     if (step.kind == NetworkExecutionOpKind::LayerNorm) {
+      if (IsAttentionSmolgenNormName(step.name))
+        continue;
       if (!IsSimpleLayerNormStep(step)) {
         return "CPU transformer backend does not support compound layernorm "
                "stage yet: " +
@@ -402,6 +433,61 @@ float DenseLayerNormEpsilon(const NetworkResolvedExecutionPlan &execution_plan,
   return 1e-5f;
 }
 
+float AttentionLayerNormEpsilon(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::string_view stage_name) {
+  if (StartsWith(stage_name, "body.encoder.")) {
+    return execution_plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE
+               ? 1e-3f
+               : 1e-6f;
+  }
+  if (StartsWith(stage_name, "policy."))
+    return 1e-6f;
+  return 1e-5f;
+}
+
+void DenseAffine(const float *input, int rows, int input_width,
+                 const std::vector<float> &weight,
+                 const std::vector<float> *bias, int output_width,
+                 std::vector<float> &output) {
+  output.assign(static_cast<std::size_t>(rows) *
+                    static_cast<std::size_t>(output_width),
+                0.0f);
+  for (int row = 0; row < rows; ++row) {
+    const float *input_row =
+        input + static_cast<std::size_t>(row) * input_width;
+    float *output_row =
+        output.data() + static_cast<std::size_t>(row) * output_width;
+    for (int out = 0; out < output_width; ++out) {
+      const float *weight_row =
+          weight.data() + static_cast<std::size_t>(out) * input_width;
+      float sum = bias ? (*bias)[static_cast<std::size_t>(out)] : 0.0f;
+      for (int in = 0; in < input_width; ++in)
+        sum += input_row[in] * weight_row[in];
+      output_row[out] = sum;
+    }
+  }
+}
+
+void ApplySoftmaxRows(std::vector<float> &values, int rows, int width) {
+  for (int row = 0; row < rows; ++row) {
+    float *base = values.data() + static_cast<std::size_t>(row) * width;
+    float max_value = -std::numeric_limits<float>::infinity();
+    for (int col = 0; col < width; ++col)
+      max_value = std::max(max_value, base[col]);
+    float sum = 0.0f;
+    for (int col = 0; col < width; ++col) {
+      base[col] = std::exp(base[col] - max_value);
+      sum += base[col];
+    }
+    if (sum == 0.0f)
+      continue;
+    const float inv_sum = 1.0f / sum;
+    for (int col = 0; col < width; ++col)
+      base[col] *= inv_sum;
+  }
+}
+
 void ApplyLayerNorm(const float *input, const float *residual_parent,
                     float residual_scale, const std::vector<float> &scale,
                     const std::vector<float> &bias, std::vector<float> &output,
@@ -529,7 +615,7 @@ std::string CpuNetwork::GetNetworkInfo() const {
       << ", weight_bytes=" << weight_bytes_
       << ", executor="
       << (unsupported_execution_reason_.empty()
-              ? "dense-layernorm-gate-ffn-positional-dynamic-pe"
+              ? "dense-layernorm-gate-ffn-positional-dynamic-pe-attention"
               : "unsupported")
       << ")";
   return out.str();
@@ -581,7 +667,9 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
   std::string last_moves_left;
   std::string last_executed_step;
   std::string last_feed_forward_step;
+  std::string last_attention_step;
   std::unordered_map<std::string, CpuBuffer> feed_forward_sources;
+  std::unordered_map<std::string, CpuBuffer> attention_sources;
 
   const auto source_for = [&](const std::string &name) -> const CpuBuffer & {
     const std::string policy_prefix =
@@ -634,9 +722,18 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
     }
   };
 
-  for (const auto &step : resolved_execution_plan_.steps) {
+  for (std::size_t step_index = 0;
+       step_index < resolved_execution_plan_.steps.size(); ++step_index) {
+    const auto &step = resolved_execution_plan_.steps[step_index];
     if (step.kind == NetworkExecutionOpKind::InputPack ||
         step.kind == NetworkExecutionOpKind::OutputDecode) {
+      continue;
+    }
+
+    if ((step.kind == NetworkExecutionOpKind::Dense &&
+         IsAttentionSmolgenDenseName(step.name)) ||
+        (step.kind == NetworkExecutionOpKind::LayerNorm &&
+         IsAttentionSmolgenNormName(step.name))) {
       continue;
     }
 
@@ -841,6 +938,254 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       continue;
     }
 
+    if (step.kind == NetworkExecutionOpKind::Attention) {
+      const auto attention = ResolveAttentionStagePlan(
+          resolved_execution_plan_, step_index,
+          AttentionHeadCount(resolved_execution_plan_, step.name));
+      if (source.width != attention.input_width ||
+          rows != batch_size * attention.squares) {
+        throw std::runtime_error("CPU attention source shape mismatch: " +
+                                 step.name);
+      }
+
+      const auto tensor_by_suffix = [&](std::string_view suffix)
+          -> const CpuNetwork::CpuTensor & {
+        const auto *ref = FindTensorSuffix(step, suffix);
+        if (!ref)
+          throw std::runtime_error("CPU attention stage has missing tensor: " +
+                                   step.name);
+        return TensorAt(ref->inventory_index);
+      };
+      const auto &q_w = tensor_by_suffix(".q_w");
+      const auto &q_b = tensor_by_suffix(".q_b");
+      const auto &k_w = tensor_by_suffix(".k_w");
+      const auto &k_b = tensor_by_suffix(".k_b");
+      const auto &v_w = tensor_by_suffix(".v_w");
+      const auto &v_b = tensor_by_suffix(".v_b");
+      const auto &dense_w = tensor_by_suffix(".dense_w");
+      const auto &dense_b = tensor_by_suffix(".dense_b");
+
+      std::vector<float> query;
+      std::vector<float> key;
+      std::vector<float> value;
+      DenseAffine(source.values.data(), rows, attention.input_width, q_w.data,
+                  &q_b.data, attention.qkv_width, query);
+      DenseAffine(source.values.data(), rows, attention.input_width, k_w.data,
+                  &k_b.data, attention.qkv_width, key);
+      DenseAffine(source.values.data(), rows, attention.input_width, v_w.data,
+                  &v_b.data, attention.qkv_width, value);
+
+      std::vector<float> attention_bias;
+      if (attention.smolgen.present) {
+        if (!attention.smolgen.has_global_positional_weights) {
+          throw std::runtime_error(
+              "CPU attention smolgen requires global positional weights: " +
+              step.name);
+        }
+        const auto smolgen_dense_name = step.name + ".smolgen.dense";
+        const auto smolgen_norm_name = step.name + ".smolgen.norm";
+        const auto *smolgen_dense_step = [&]() {
+          for (const auto &candidate : resolved_execution_plan_.steps) {
+            if (candidate.name == smolgen_dense_name)
+              return &candidate;
+          }
+          return static_cast<const NetworkResolvedExecutionStep *>(nullptr);
+        }();
+        const auto *smolgen_norm_step = [&]() {
+          for (const auto &candidate : resolved_execution_plan_.steps) {
+            if (candidate.name == smolgen_norm_name)
+              return &candidate;
+          }
+          return static_cast<const NetworkResolvedExecutionStep *>(nullptr);
+        }();
+        const auto *global_step =
+            FindGlobalPositionalEncodingStep(resolved_execution_plan_);
+        if (!smolgen_dense_step || !smolgen_norm_step || !global_step) {
+          throw std::runtime_error("CPU attention smolgen steps missing: " +
+                                   step.name);
+        }
+
+        const auto smolgen_tensor =
+            [&](const NetworkResolvedExecutionStep &owner,
+                std::string_view suffix) -> const CpuNetwork::CpuTensor & {
+          const auto *ref = FindTensorSuffix(owner, suffix);
+          if (!ref) {
+            throw std::runtime_error(
+                "CPU attention smolgen stage has missing tensor: " +
+                owner.name);
+          }
+          return TensorAt(ref->inventory_index);
+        };
+        const auto &compress = smolgen_tensor(*smolgen_dense_step, ".compress");
+        const auto &dense1_w = smolgen_tensor(*smolgen_dense_step, ".dense1_w");
+        const auto &dense1_b = smolgen_tensor(*smolgen_dense_step, ".dense1_b");
+        const auto &dense2_w = smolgen_tensor(*smolgen_dense_step, ".dense2_w");
+        const auto &dense2_b = smolgen_tensor(*smolgen_dense_step, ".dense2_b");
+        const auto &ln1_gamma =
+            smolgen_tensor(*smolgen_norm_step, ".ln1_gammas");
+        const auto &ln1_beta =
+            smolgen_tensor(*smolgen_norm_step, ".ln1_betas");
+        const auto &ln2_gamma =
+            smolgen_tensor(*smolgen_norm_step, ".ln2_gammas");
+        const auto &ln2_beta =
+            smolgen_tensor(*smolgen_norm_step, ".ln2_betas");
+        const auto &global = smolgen_tensor(*global_step, "body.smolgen_w");
+
+        std::vector<float> compressed;
+        DenseAffine(source.values.data(), rows, attention.input_width,
+                    compress.data, nullptr,
+                    attention.smolgen.compressed_channels, compressed);
+
+        const int flattened_width =
+            attention.squares * attention.smolgen.compressed_channels;
+        std::vector<float> dense1;
+        DenseAffine(compressed.data(), batch_size, flattened_width,
+                    dense1_w.data, nullptr, attention.smolgen.dense1_width,
+                    dense1);
+        for (int row = 0; row < batch_size; ++row) {
+          for (int col = 0; col < attention.smolgen.dense1_width; ++col) {
+            const std::size_t idx =
+                static_cast<std::size_t>(row) *
+                    attention.smolgen.dense1_width +
+                col;
+            dense1[idx] += dense1_b.data[static_cast<std::size_t>(col)];
+          }
+        }
+        ApplyDenseActivation(
+            dense1, batch_size, attention.smolgen.dense1_width,
+            ActivationFromName(resolved_execution_plan_.format.activations
+                                   .smolgen_activation));
+
+        std::vector<float> norm1(dense1.size(), 0.0f);
+        ApplyLayerNorm(dense1.data(), nullptr, 1.0f, ln1_gamma.data,
+                       ln1_beta.data, norm1, batch_size,
+                       attention.smolgen.dense1_width, 1e-3f);
+
+        std::vector<float> dense2;
+        DenseAffine(norm1.data(), batch_size,
+                    attention.smolgen.dense1_width, dense2_w.data, nullptr,
+                    attention.smolgen.dense2_width, dense2);
+        for (int row = 0; row < batch_size; ++row) {
+          for (int col = 0; col < attention.smolgen.dense2_width; ++col) {
+            const std::size_t idx =
+                static_cast<std::size_t>(row) *
+                    attention.smolgen.dense2_width +
+                col;
+            dense2[idx] += dense2_b.data[static_cast<std::size_t>(col)];
+          }
+        }
+        ApplyDenseActivation(
+            dense2, batch_size, attention.smolgen.dense2_width,
+            ActivationFromName(resolved_execution_plan_.format.activations
+                                   .smolgen_activation));
+
+        std::vector<float> norm2(dense2.size(), 0.0f);
+        ApplyLayerNorm(dense2.data(), nullptr, 1.0f, ln2_gamma.data,
+                       ln2_beta.data, norm2, batch_size,
+                       attention.smolgen.dense2_width, 1e-3f);
+
+        DenseAffine(norm2.data(), batch_size * attention.heads,
+                    attention.smolgen.dense2_width_per_head, global.data,
+                    nullptr, attention.squares * attention.squares,
+                    attention_bias);
+      }
+
+      const int score_rows =
+          batch_size * attention.heads * attention.squares;
+      std::vector<float> scores(
+          static_cast<std::size_t>(score_rows) * attention.squares, 0.0f);
+      const float scale =
+          1.0f / std::sqrt(static_cast<float>(attention.head_depth));
+      for (int batch = 0; batch < batch_size; ++batch) {
+        for (int head = 0; head < attention.heads; ++head) {
+          for (int query_square = 0; query_square < attention.squares;
+               ++query_square) {
+            const int score_row =
+                ((batch * attention.heads + head) * attention.squares) +
+                query_square;
+            for (int key_square = 0; key_square < attention.squares;
+                 ++key_square) {
+              float sum = 0.0f;
+              for (int depth = 0; depth < attention.head_depth; ++depth) {
+                const int channel = head * attention.head_depth + depth;
+                const std::size_t query_index =
+                    (static_cast<std::size_t>(batch) * attention.squares +
+                     query_square) *
+                        attention.qkv_width +
+                    channel;
+                const std::size_t key_index =
+                    (static_cast<std::size_t>(batch) * attention.squares +
+                     key_square) *
+                        attention.qkv_width +
+                    channel;
+                sum += query[query_index] * key[key_index];
+              }
+              sum *= scale;
+              if (!attention_bias.empty()) {
+                const std::size_t bias_index =
+                    (static_cast<std::size_t>(batch) * attention.heads + head) *
+                        attention.squares * attention.squares +
+                    static_cast<std::size_t>(query_square) *
+                        attention.squares +
+                    key_square;
+                sum += attention_bias[bias_index];
+              }
+              scores[static_cast<std::size_t>(score_row) * attention.squares +
+                     key_square] = sum;
+            }
+          }
+        }
+      }
+      ApplySoftmaxRows(scores, score_rows, attention.squares);
+
+      std::vector<float> context(static_cast<std::size_t>(rows) *
+                                     attention.qkv_width,
+                                 0.0f);
+      for (int batch = 0; batch < batch_size; ++batch) {
+        for (int query_square = 0; query_square < attention.squares;
+             ++query_square) {
+          float *context_row =
+              context.data() +
+              (static_cast<std::size_t>(batch) * attention.squares +
+               query_square) *
+                  attention.qkv_width;
+          for (int head = 0; head < attention.heads; ++head) {
+            const int score_row =
+                ((batch * attention.heads + head) * attention.squares) +
+                query_square;
+            const float *prob_row =
+                scores.data() +
+                static_cast<std::size_t>(score_row) * attention.squares;
+            for (int depth = 0; depth < attention.head_depth; ++depth) {
+              const int channel = head * attention.head_depth + depth;
+              float sum = 0.0f;
+              for (int key_square = 0; key_square < attention.squares;
+                   ++key_square) {
+                const std::size_t value_index =
+                    (static_cast<std::size_t>(batch) * attention.squares +
+                     key_square) *
+                        attention.qkv_width +
+                    channel;
+                sum += prob_row[key_square] * value[value_index];
+              }
+              context_row[channel] = sum;
+            }
+          }
+        }
+      }
+
+      CpuBuffer output;
+      output.width = attention.output_width;
+      DenseAffine(context.data(), rows, attention.qkv_width, dense_w.data,
+                  &dense_b.data, attention.output_width, output.values);
+
+      attention_sources[step.name] = source;
+      last_attention_step = step.name;
+      remember_output(step, std::move(output));
+      last_executed_step = step.name;
+      continue;
+    }
+
     if (step.kind == NetworkExecutionOpKind::Gate) {
       CpuBuffer output;
       output.width = source.width;
@@ -1010,6 +1355,18 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
                                                     last_feed_forward_step);
           epsilon = FeedForwardLayerNormEpsilon(resolved_execution_plan_,
                                                 last_feed_forward_step);
+        }
+      } else if (!last_attention_step.empty() &&
+                 last_executed_step == last_attention_step) {
+        const auto parent_it = attention_sources.find(last_attention_step);
+        if (parent_it != attention_sources.end() &&
+            parent_it->second.width == source.width &&
+            parent_it->second.values.size() == source.values.size()) {
+          residual_parent = &parent_it->second;
+          residual_scale =
+              FeedForwardResidualScale(resolved_execution_plan_, step.name);
+          epsilon = AttentionLayerNormEpsilon(resolved_execution_plan_,
+                                              step.name);
         }
       }
 

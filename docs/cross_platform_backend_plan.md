@@ -85,8 +85,8 @@ Current remote gates:
 
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
-| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `09717e01-cf36-45e3-8d35-5ca879f9b9af` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `212d6416-b1d0-4efd-b6f4-630c45f6b374` |
+| Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `a0d57039-7a55-4ea3-b5c8-730310cc1caf` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `fbd609bb-dd80-4434-b105-9b22de1057e3` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-015228-graphsafe`, L4, 2026-05-22 |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26143477459` |
 
@@ -530,17 +530,18 @@ Current portable CPU transformer boundary:
   keeps Linux and Windows aligned with Metal/CUDA network parsing and resolved
   tensor shape inference.
 - The backend now owns resolved tensor copies and executes simple dense,
-  layernorm, gate, feed-forward, non-output positional metadata, and dynamic
-  position input-preprocessing resolved plans, including adjacent feed-forward
-  residual layernorm and batched output decoding through the shared policy/value
-  decoder. It mirrors CUDA's packed-plane expansion into square rows for
-  `body.input_embedding_preprocess`, so minimal PE-dense fixtures now exercise
-  the same `[batch*64, input_planes + pe_width]` contract used by BT4 before
-  body attention starts.
+  layernorm, gate, feed-forward, non-output positional metadata, dynamic
+  position input-preprocessing, and body attention resolved plans, including
+  adjacent feed-forward and attention residual layernorm plus batched output
+  decoding through the shared policy/value decoder. It mirrors CUDA's
+  packed-plane expansion into square rows for `body.input_embedding_preprocess`,
+  so minimal PE-dense fixtures exercise the same
+  `[batch*64, input_planes + pe_width]` contract used by BT4 before body
+  attention starts.
 - BT4 execution still fails loudly with the first unsupported resolved stage
   instead of falling back to the diagnostic stub. For current BT4 weights that
-  names the body attention stage, and CPU now shares CUDA's attention/smolgen
-  shape resolver so attention execution remains the next CPU-kernel milestone.
+  now names the attention policy-map stage, so policy-map decoding remains the
+  next CPU-kernel milestone before a complete portable BT4 transformer path.
 
 Portable CI now builds Linux CPU and Windows MinGW CPU artifacts. Both jobs run
 AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds
