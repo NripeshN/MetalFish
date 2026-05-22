@@ -13,10 +13,10 @@ SUMMARY="${METALFISH_CUDA_SUMMARY:-${BUILD_DIR}/cuda-gpu-summary.md}"
 PARITY_REPORT="${METALFISH_NN_PARITY_REPORT:-${BUILD_DIR}/cuda-gpu-parity-report.md}"
 CUDA_PROFILE_REQUESTED="${METALFISH_CUDA_PROFILE:-0}"
 CUDA_PROFILE_LIMIT="${METALFISH_CUDA_PROFILE_LIMIT:-8}"
-CUDA_GRAPH_REQUESTED=0
-if [[ "${METALFISH_CUDA_GRAPH:-0}" != "0" ||
-      "${METALFISH_CUDA_GRAPH_EXECUTION:-0}" != "0" ]]; then
-  CUDA_GRAPH_REQUESTED=1
+CUDA_GRAPH_REQUESTED=1
+if [[ "${METALFISH_CUDA_GRAPH:-}" == "0" ||
+      "${METALFISH_CUDA_GRAPH_EXECUTION:-}" == "0" ]]; then
+  CUDA_GRAPH_REQUESTED=0
 fi
 
 export PATH="/usr/local/cuda/bin:/usr/local/cuda-12.9/bin:/usr/local/cuda-12.8/bin:/usr/local/cuda-12.4/bin:${PATH}"

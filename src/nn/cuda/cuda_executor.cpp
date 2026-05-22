@@ -108,8 +108,15 @@ void CheckCudaSuccess(const char *op, cudaError_t status) {
 }
 
 bool CudaGraphExecutionRequested() {
-  return EnvAnyFlagEnabled(
-      {"METALFISH_CUDA_GRAPH", "METALFISH_CUDA_GRAPH_EXECUTION"});
+  if (const char *value = std::getenv("METALFISH_CUDA_GRAPH");
+      value && std::string(value) == "0") {
+    return false;
+  }
+  if (const char *value = std::getenv("METALFISH_CUDA_GRAPH_EXECUTION");
+      value && std::string(value) == "0") {
+    return false;
+  }
+  return true;
 }
 
 bool CudaGraphExecutionCompatible() {
