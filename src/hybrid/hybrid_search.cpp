@@ -324,6 +324,7 @@ void ParallelHybridSearch::ponderhit() {
 
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
   time_budget_ms_.store(calculate_time_budget(), std::memory_order_release);
+  start_ane_root_probe();
 
   if (mcts_search_) {
     std::lock_guard<std::mutex> lock(mcts_start_mutex_);

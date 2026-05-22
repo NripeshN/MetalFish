@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import email.utils
 import gc
+import hashlib
 import json
 import os
 import pathlib
@@ -57,6 +58,33 @@ HTTP_USER_AGENT = os.environ.get(
 )
 
 LOGICAL_CORES = os.cpu_count() or 4
+VERBOSE_OPTION_MARKERS = (
+    "Threads",
+    "Hash",
+    "Ponder",
+    "UseGPU",
+    "UseHybridSearch",
+    "UseMCTS",
+    "NNWeights",
+    "NNBackend",
+    "NNCoreML",
+    "Hybrid",
+    "MCTS",
+    "Syzygy",
+    "Move Overhead",
+    "Transformer",
+)
+ANE_UCI_OPTIONS = (
+    "HybridANERootProbe",
+    "HybridANERootHints",
+    "HybridANEConfirmMCTSOverride",
+    "HybridANEWeights",
+    "HybridANEModelPath",
+    "HybridANEComputeUnits",
+    "HybridANERootHintCount",
+    "HybridANERootHintWaitMs",
+    "HybridANEMinBudgetMs",
+)
 
 
 def apple_performance_cores() -> int | None:
@@ -99,6 +127,29 @@ def env_bool_string(name: str, default: bool) -> str:
     if value in {"0", "false", "no", "off"}:
         return "false"
     return "true" if default else "false"
+
+
+def short_file_digest(path: pathlib.Path, length: int = 12) -> str:
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()[:length]
+    except OSError:
+        return "unavailable"
+
+
+def file_summary(path: pathlib.Path) -> str:
+    if not path.exists():
+        return "missing"
+    try:
+        stat = path.stat()
+        mtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
+        size_mb = stat.st_size / (1024 * 1024)
+        return f"{mtime}, {size_mb:.1f} MB, sha256={short_file_digest(path)}"
+    except OSError:
+        return "present, metadata unavailable"
 
 
 PERFORMANCE_CORES = apple_performance_cores()
@@ -595,6 +646,8 @@ def normalize_ane_args(args):
 def apply_runtime_engine_options(options: dict[str, str], args) -> dict[str, str]:
     options = dict(options)
     options["Ponder"] = "true" if getattr(args, "ponder", True) else "false"
+    if getattr(args, "verbose", False):
+        options["HybridTrace"] = "true"
     options.update(ane_engine_options(args))
     return options
 
@@ -711,7 +764,9 @@ def print_config_check(args) -> None:
     print("MetalFish Lichess Bot config check")
     print(f"  Engine path: {ENGINE}")
     print(f"  Engine present: {ENGINE.exists()}")
+    print(f"  Engine build: {file_summary(ENGINE)}")
     print(f"  Weights present: {WEIGHTS.exists()}")
+    print(f"  Weights build: {file_summary(WEIGHTS)}")
     print(f"  Accepts: rated={args.accept_rated} | casual={args.accept_casual}")
     print(f"  Seek: {checker._seek_policy_label()}")
     print(f"  Incoming rated: {checker._rated_policy_label()}")
@@ -727,6 +782,7 @@ def print_config_check(args) -> None:
     print(f"  Resource gate allows new game: {checker._resources_allow_new_game()}")
     print(f"  Syzygy: {syzygy}")
     print(f"  ANE: {ane_status_label(args)}")
+    print(f"  HybridTrace: {options.get('HybridTrace', 'false')}")
     paths = configured_book_paths()
     if paths:
         print(
@@ -803,15 +859,20 @@ class UCIEngine:
         options: dict,
         *,
         preload_transformer: bool = False,
+        verbose: bool = False,
+        label: str = "engine",
     ):
         self.path = path
         self.options = dict(options)
         self.preload_transformer = preload_transformer
+        self.verbose = verbose
+        self.label = label
         self.proc: subprocess.Popen | None = None
         self._output: queue.Queue[str | None] = queue.Queue()
         self._reader_thread: threading.Thread | None = None
         self._stderr_tail: list[str] = []
         self._stderr_thread: threading.Thread | None = None
+        self._uci_options_seen: set[str] = set()
         self._pondering = False
         self._ponder_move: str | None = None
         self._active_search: str | None = None
@@ -819,9 +880,18 @@ class UCIEngine:
         self._uci_lock = threading.RLock()
         self._launch()
 
+    def _debug(self, message: str) -> None:
+        if getattr(self, "verbose", False):
+            label = getattr(self, "label", "engine")
+            print(f"  [debug:{label}] {message}", flush=True)
+
     def _launch(self):
         env = os.environ.copy()
         env["METALFISH_PRELOAD_TRANSFORMER"] = "1" if self.preload_transformer else "0"
+        if self.verbose:
+            env["METALFISH_UCI_TRACE"] = "1"
+            self._debug(f"launch {self.path} ({file_summary(self.path)})")
+            self._debug(f"preload_transformer={self.preload_transformer}")
         proc: subprocess.Popen | None = None
         try:
             proc = subprocess.Popen(
@@ -846,13 +916,15 @@ class UCIEngine:
             self._reader_thread.start()
             self._stderr_thread = threading.Thread(
                 target=self._read_stderr,
-                args=(proc.stderr, stderr_tail),
+                args=(proc.stderr, stderr_tail, self.verbose, self.label),
                 daemon=True,
             )
             self._stderr_thread.start()
             self._send("uci")
             self._wait_for("uciok")
+            self._debug_ane_uci_support()
             for name, value in self.options.items():
+                self._debug(f"setoption {name}={value}")
                 self._send(f"setoption name {name} value {value}")
             self._send("isready")
             self._wait_for("readyok", timeout=120)
@@ -888,13 +960,53 @@ class UCIEngine:
             output.put(None)
 
     @staticmethod
-    def _read_stderr(stream, tail: list[str]):
+    def _read_stderr(
+        stream,
+        tail: list[str],
+        verbose: bool = False,
+        label: str = "engine",
+    ):
         if stream is None:
             return
         for line in stream:
-            tail.append(line.strip())
+            text = line.strip()
+            tail.append(text)
             if len(tail) > 20:
                 tail.pop(0)
+            if verbose and text:
+                print(f"  [debug:{label}] stderr: {text}", flush=True)
+
+    def _record_uci_option(self, line: str) -> None:
+        if not line.startswith("option name "):
+            return
+        if not hasattr(self, "_uci_options_seen"):
+            self._uci_options_seen = set()
+        rest = line[len("option name ") :]
+        name = rest.split(" type ", 1)[0].strip()
+        if name:
+            self._uci_options_seen.add(name)
+
+    def _verbose_engine_line(self, line: str) -> None:
+        if not getattr(self, "verbose", False) or not line:
+            return
+        if line.startswith("option name "):
+            name = line[len("option name ") :].split(" type ", 1)[0].strip()
+            if not any(marker in name for marker in VERBOSE_OPTION_MARKERS):
+                return
+        self._debug(f"stdout: {line}")
+
+    def _debug_ane_uci_support(self) -> None:
+        if not getattr(self, "verbose", False):
+            return
+        if not hasattr(self, "_uci_options_seen"):
+            self._uci_options_seen = set()
+        missing = [
+            name for name in ANE_UCI_OPTIONS if name not in self._uci_options_seen
+        ]
+        if missing:
+            self._debug("ANE UCI options missing: " + ", ".join(missing))
+        else:
+            self._debug("ANE UCI options: present")
 
     def _diagnostic_tail(self) -> str:
         parts = []
@@ -915,6 +1027,12 @@ class UCIEngine:
             self._active_search = "ponder" if self._pondering else None
         if not hasattr(self, "_position_key"):
             self._position_key = None
+        if not hasattr(self, "verbose"):
+            self.verbose = False
+        if not hasattr(self, "label"):
+            self.label = "engine"
+        if not hasattr(self, "_uci_options_seen"):
+            self._uci_options_seen = set()
 
     def _send(self, cmd: str, *, ignore_errors: bool = False):
         try:
@@ -950,6 +1068,8 @@ class UCIEngine:
                 continue
             if line is None:
                 raise RuntimeError(f"Engine closed stdout{self._diagnostic_tail()}")
+            self._record_uci_option(line)
+            self._verbose_engine_line(line)
             if line.startswith(prefix):
                 return line
         raise TimeoutError(f"Timeout waiting for '{prefix}'")
@@ -957,9 +1077,13 @@ class UCIEngine:
     def _drain_available_output(self):
         while True:
             try:
-                self._output.get_nowait()
+                line = self._output.get_nowait()
             except queue.Empty:
                 return
+            if line is None:
+                return
+            self._record_uci_option(line)
+            self._verbose_engine_line(line)
 
     def _parse_bestmove(self, line: str) -> tuple[str, str | None]:
         parts = line.split()
@@ -1013,6 +1137,7 @@ class UCIEngine:
                 value = str(value)
                 if self.options.get(name) == value:
                     continue
+                self._debug(f"setoption {name}={value}")
                 self._send(f"setoption name {name} value {value}")
                 changed = True
             self.options = dict(options)
@@ -1084,6 +1209,7 @@ class UCIEngine:
                     movestogo=movestogo,
                 )
             )
+            self._debug(f"go started: {self._active_search or 'search'}")
             self._active_search = "search"
             line = None
             try:
@@ -1122,6 +1248,7 @@ class UCIEngine:
                     binc=binc,
                 )
             )
+            self._debug(f"ponder started after {ponder_move}")
             self._pondering = True
             self._ponder_move = ponder_move
             self._active_search = "ponder"
@@ -1166,6 +1293,7 @@ class UCIEngine:
             line = None
             try:
                 self._send("ponderhit")
+                self._debug("ponderhit sent")
                 try:
                     line = self._wait_for("bestmove", timeout=timeout)
                 except TimeoutError:
@@ -1190,6 +1318,7 @@ class UCIEngine:
             ok = True
             try:
                 self._send("stop")
+                self._debug("stop sent")
                 self._wait_for("bestmove", timeout=timeout)
             except (TimeoutError, RuntimeError):
                 ok = False
@@ -1550,11 +1679,23 @@ class LichessBot:
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
+    def _debug(self, message: str) -> None:
+        if getattr(self.args, "verbose", False):
+            print(f"  [debug:bot] {message}", flush=True)
+
     def api_get(self, path: str, **kwargs):
-        return self.http.get(f"{LICHESS_API}{path}", **kwargs)
+        params = kwargs.get("params")
+        detail = f" params={params}" if params else ""
+        self._debug(f"GET {path}{detail}")
+        response = self.http.get(f"{LICHESS_API}{path}", **kwargs)
+        self._debug(f"GET {path} -> {response.status_code}")
+        return response
 
     def api_post(self, path: str, **kwargs):
-        return self.http.post(f"{LICHESS_API}{path}", **kwargs)
+        self._debug(f"POST {path}")
+        response = self.http.post(f"{LICHESS_API}{path}", **kwargs)
+        self._debug(f"POST {path} -> {response.status_code}")
+        return response
 
     def _audit_path(self, game_id: str) -> pathlib.Path:
         safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(game_id))[:64]
@@ -1825,13 +1966,17 @@ class LichessBot:
                 f"available {before} -> {after}"
             )
 
-    def _create_engine(self, *, preload_transformer: bool) -> UCIEngine:
+    def _create_engine(
+        self, *, preload_transformer: bool, label: str = "engine"
+    ) -> UCIEngine:
         options, profile = self._live_engine_options()
         self._last_resource_profile = profile
         return UCIEngine(
             ENGINE,
             options,
             preload_transformer=preload_transformer,
+            verbose=getattr(self.args, "verbose", False),
+            label=label,
         )
 
     def _prepare_warm_engine(self):
@@ -1840,7 +1985,9 @@ class LichessBot:
         print("  Preparing engine: transformer preload + NNUE replicas...")
         start = time.time()
         try:
-            self._warm_engine = self._create_engine(preload_transformer=True)
+            self._warm_engine = self._create_engine(
+                preload_transformer=True, label="warm"
+            )
         except Exception as e:
             print(f"  Engine warmup failed, will initialize on game start: {e}")
             self._warm_engine = None
@@ -1865,13 +2012,21 @@ class LichessBot:
                     ENGINE,
                     options,
                     preload_transformer=True,
+                    verbose=getattr(self.args, "verbose", False),
+                    label=game_id or "game",
                 )
             self._last_resource_profile = profile
             self._print_resource_profile(game_id, profile)
             return engine
         self._last_resource_profile = profile
         self._print_resource_profile(game_id, profile)
-        return UCIEngine(ENGINE, options, preload_transformer=False)
+        return UCIEngine(
+            ENGINE,
+            options,
+            preload_transformer=False,
+            verbose=getattr(self.args, "verbose", False),
+            label=game_id or "game",
+        )
 
     def _close_warm_engine(self):
         if self._warm_engine is None:
@@ -3857,6 +4012,11 @@ class LichessBot:
             f"  Engine:   Hybrid ({hybrid_split}"
             f"{' + Ponder' if self.args.ponder else ''})"
         )
+        if getattr(self.args, "verbose", False):
+            print(f"  Debug:    verbose | Engine build {file_summary(ENGINE)}")
+            print(
+                f"  Debug:    HybridTrace={header_options.get('HybridTrace', 'false')}"
+            )
         print(
             f"  Workers:  dynamic up to {MAX_SEARCH_WORKERS} search + 1 coordinator "
             f"| CPU: {LOGICAL_CORES} logical"
@@ -4125,6 +4285,15 @@ def main():
         action="store_true",
         default=False,
         help="Print resolved bot policy/resources and exit without engine/API access",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help=(
+            "Print engine build identity, UCI option setup, engine info/stderr, "
+            "HybridTrace/ANE root diagnostics, and Lichess API status lines."
+        ),
     )
     parser.add_argument(
         "--tc",
