@@ -823,6 +823,78 @@ void test_hybrid_config() {
                    -83, -77, 2, -32001, 129846, 2, 1, 0.090f, 0.828f));
   }
   {
+    TestCase tc("Reused root current confirmation stays narrowly gated");
+
+    EXPECT(tc, HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 414, 354, 59, 59, 0.855f,
+                   1.000f, 0.000f, 323, 318, 2, 1070, true, false, 1501742,
+                   2, 0, 0.311f, 0.793f));
+    EXPECT(tc, HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 541, 480, 52, 52, 0.887f,
+                   1.000f, 0.000f, 353, 340, 2, 369, true, false, 488229, 3,
+                   0, 0.243f, 0.827f));
+    EXPECT(tc, HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, true, 758, 685, 40, 39, 0.904f, 0.975f,
+                   0.831f, 370, 367, 4, -32001, false, false, 60, 2, 0,
+                   0.311f, 0.844f));
+    EXPECT(tc, HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 2309, 2203, 27, 26, 0.954f,
+                   0.963f, 0.710f, 429, 429, 2, 56, true, false, 359378, 3,
+                   0, 0.273f, 0.892f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   false, true, false, false, 414, 354, 59, 59, 0.855f,
+                   1.000f, 0.000f, 323, 318, 2, 1070, true, false, 1501742,
+                   2, 0, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, false, false, false, 414, 354, 59, 59, 0.855f,
+                   1.000f, 0.000f, 323, 318, 2, 1070, true, false, 1501742,
+                   2, 0, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, true, false, 414, 354, 59, 59, 0.855f, 1.000f,
+                   0.000f, 323, 318, 2, 1070, true, false, 1501742, 2, 0,
+                   0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 349, 354, 59, 59, 0.855f,
+                   1.000f, 0.000f, 323, 318, 2, 1070, true, false, 1501742,
+                   2, 0, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 414, 354, 23, 23, 0.855f,
+                   1.000f, 0.000f, 323, 318, 2, 1070, true, false, 1501742,
+                   2, 0, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 414, 354, 59, 59, 0.839f,
+                   1.000f, 0.000f, 323, 318, 2, 1070, true, false, 1501742,
+                   2, 0, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 414, 354, 59, 59, 0.855f,
+                   0.919f, 0.000f, 323, 318, 2, 1070, true, false, 1501742,
+                   2, 0, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 414, 354, 59, 59, 0.855f,
+                   1.000f, 0.000f, 299, 318, 2, 1070, true, false, 1501742,
+                   2, 0, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 414, 354, 59, 59, 0.855f,
+                   1.000f, 0.000f, 323, 299, 2, 1070, true, false, 1501742,
+                   2, 0, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 414, 354, 59, 59, 0.855f,
+                   1.000f, 0.000f, 323, 318, 2, 1070, true, false, 249999, 2,
+                   0, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 414, 354, 59, 59, 0.855f,
+                   1.000f, 0.000f, 323, 318, 2, 1070, true, false, 1501742,
+                   2, 2, 0.311f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, false, 414, 354, 59, 59, 0.855f,
+                   1.000f, 0.000f, 323, 318, 2, 1070, true, false, 1501742,
+                   2, 0, 0.330f, 0.793f));
+    EXPECT(tc, !HybridMCTSReusedRootCurrentOverride(
+                   true, true, false, true, 758, 685, 40, 39, 0.904f, 0.975f,
+                   0.740f, 370, 367, 4, -32001, false, false, 60, 2, 0,
+                   0.311f, 0.844f));
+  }
+  {
     TestCase tc("Compact fixed-budget MCTS override stays narrowly gated");
 
     EXPECT(tc, HybridMCTSCompactFixedBudgetOverride(
