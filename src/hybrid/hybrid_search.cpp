@@ -649,6 +649,30 @@ bool HybridMCTSCrossRootConfidenceOverride(
          mcts_q - ab_in_mcts_q >= 0.20f;
 }
 
+bool HybridMCTSRootConfidenceRejectOverride(
+    bool root_confidence_fixed_budget, bool ab_root_rejects_mcts,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort,
+    int ab_average_score, int mcts_average_score, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!root_confidence_fixed_budget || !ab_root_rejects_mcts)
+    return false;
+
+  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
+      mcts_in_ab_upperbound || mcts_in_ab_effort > 10000) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 120)
+    return false;
+
+  if (ab_in_mcts_rank <= 1 || ab_in_mcts_visits < 10)
+    return false;
+
+  return mcts_q - ab_in_mcts_q >= 0.60f;
+}
+
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
                                  uint64_t root_visits, uint32_t best_visits) {
   if (mcts_playouts == 0) {
@@ -2478,6 +2502,13 @@ Move ParallelHybridSearch::make_final_decision() {
           ab_in_ab.average_score, mcts_in_ab.rank, mcts_in_ab.score,
           mcts_in_ab.average_score, mcts_in_ab.effort, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
+  const bool mcts_root_confidence_reject_override =
+      HybridMCTSRootConfidenceRejectOverride(
+          mcts_root_confidence_fixed_budget, ab_root_rejects_mcts,
+          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.score_lowerbound,
+          mcts_in_ab.score_upperbound, mcts_in_ab.effort,
+          ab_in_ab.average_score, mcts_in_ab.average_score, ab_in_mcts.rank,
+          ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   ane_confirmed_mcts_override = HybridANEConfirmedMCTSOverride(
       config_.ane_confirm_mcts_override, ane_agrees_mcts, mcts_decision_budget,
       mcts_visit_evidence_sane, mcts_confidence_total_nodes,
@@ -2523,7 +2554,8 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool mcts_override_allowed =
       !ab_root_rejects_mcts || ane_confirmed_mcts_override ||
       mcts_compact_fixed_budget || mcts_cross_root_confidence_fixed_budget ||
-      mcts_root_rejects_ab || (mcts_overwhelming && eval_delta >= 250);
+      mcts_root_confidence_reject_override || mcts_root_rejects_ab ||
+      (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
@@ -2618,6 +2650,8 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSCompact=" << (mcts_compact_fixed_budget ? 1 : 0)
        << " MCTSCrossRootConfidence="
        << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
+       << " MCTSRootConfidenceRejectOverride="
+       << (mcts_root_confidence_reject_override ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)
        << " ABVerified=" << (ab_verified ? 1 : 0)
        << " ABClearPreference=" << (ab_has_clear_preference ? 1 : 0)

@@ -743,6 +743,40 @@ void test_hybrid_config() {
                    -32001, 585, 1339424, 2, 80, 0.520f, 0.634f));
   }
   {
+    TestCase tc("Root-confidence MCTS can bypass unbounded low-effort AB reject");
+
+    EXPECT(tc, HybridMCTSRootConfidenceRejectOverride(
+                   true, true, 2, -32001, false, false, 3292, -232, -352, 2,
+                   24, -0.349f, 0.717f));
+    EXPECT(tc, HybridMCTSRootConfidenceRejectOverride(
+                   true, true, 2, -32001, false, false, 6159, -227, -270, 2,
+                   20, -0.349f, 0.736f));
+    EXPECT(tc, !HybridMCTSRootConfidenceRejectOverride(
+                   false, true, 2, -32001, false, false, 3292, -232, -352, 2,
+                   24, -0.349f, 0.717f));
+    EXPECT(tc, !HybridMCTSRootConfidenceRejectOverride(
+                   true, false, 2, -32001, false, false, 3292, -232, -352, 2,
+                   24, -0.349f, 0.717f));
+    EXPECT(tc, !HybridMCTSRootConfidenceRejectOverride(
+                   true, true, 4, -32001, false, false, 3292, -232, -352, 2,
+                   24, -0.349f, 0.717f));
+    EXPECT(tc, !HybridMCTSRootConfidenceRejectOverride(
+                   true, true, 2, -32001, false, true, 3292, -232, -352, 2,
+                   24, -0.349f, 0.717f));
+    EXPECT(tc, !HybridMCTSRootConfidenceRejectOverride(
+                   true, true, 2, -32001, false, false, 10001, -232, -352, 2,
+                   24, -0.349f, 0.717f));
+    EXPECT(tc, !HybridMCTSRootConfidenceRejectOverride(
+                   true, true, 2, -32001, false, false, 3292, -220, -350, 2,
+                   24, -0.349f, 0.717f));
+    EXPECT(tc, !HybridMCTSRootConfidenceRejectOverride(
+                   true, true, 2, -32001, false, false, 3292, -232, -352, 2,
+                   9, -0.349f, 0.717f));
+    EXPECT(tc, !HybridMCTSRootConfidenceRejectOverride(
+                   true, true, 2, -32001, false, false, 3292, -232, -352, 2,
+                   24, 0.130f, 0.717f));
+  }
+  {
     TestCase tc("Compact fixed-budget MCTS override stays narrowly gated");
 
     EXPECT(tc, HybridMCTSCompactFixedBudgetOverride(
