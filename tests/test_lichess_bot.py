@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import types
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -108,6 +108,43 @@ def test_verbose_runtime_enables_trace_without_forcing_ane_hints() -> None:
     expect("verbose enables HybridTrace", options["HybridTrace"] == "true")
     expect("verbose does not force ANE root hints", "HybridANERootHints" not in options)
     expect("ANE root probe stays enabled", options["HybridANERootProbe"] == "true")
+
+
+def test_verbose_path_enables_trace_and_resolves_log_path() -> None:
+    base_options, _ = lichess_bot.build_engine_options()
+    args = types.SimpleNamespace(
+        ponder=True,
+        verbose="results/lichess_verbose/run.log",
+        hybrid_ane_root_probe=False,
+    )
+
+    options = lichess_bot.apply_runtime_engine_options(base_options, args)
+    path = lichess_bot.verbose_log_path(args)
+
+    expect("verbose path enables HybridTrace", options["HybridTrace"] == "true")
+    expect("verbose path resolved", path is not None)
+    expect("verbose path filename", path.name == "run.log")
+    expect("verbose path absolute", path.is_absolute())
+
+
+def test_verbose_log_tees_stdout_and_stderr() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "verbose.log"
+        args = types.SimpleNamespace(verbose=str(path))
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            lichess_bot.install_verbose_log(args)
+            try:
+                print("stdout marker", flush=True)
+                sys.stderr.write("stderr marker\n")
+                sys.stderr.flush()
+            finally:
+                args._verbose_log_close()
+
+        text = path.read_text()
+        expect("stdout tee captured", "stdout marker" in text)
+        expect("stderr tee captured", "stderr marker" in text)
+        expect("verbose log announced", "Verbose log:" in text)
 
 
 def test_verbose_uci_option_tracking_filters_useful_options() -> None:
@@ -1305,6 +1342,45 @@ def test_stale_move_rejection_suppresses_duplicate_turn() -> None:
     expect("stale rejected turn recorded", bot._already_submitted_for_turn("game", []))
 
 
+def test_ponderhit_audit_records_elapsed_ms() -> None:
+    class Args:
+        ponder = True
+
+    class Book:
+        def lookup(self, fen: str) -> None:
+            return None
+
+    class Engine:
+        ponder_move = "e2e4"
+
+        def ponderhit(self, timeout: float = 0) -> tuple[str, None]:
+            return "e7e5", None
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.book = Book()
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._ponder_disabled_games = set()
+    bot._ponder_disabled_lock = threading.Lock()
+    bot._last_move_failure_detail = ""
+    records: list[dict] = []
+
+    def audit(game_id: str, event: str, **fields) -> None:
+        records.append({"event": event, **fields})
+
+    bot._audit = audit
+    bot.make_move = lambda game_id, move: True
+    state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
+
+    with redirect_stdout(io.StringIO()):
+        bot._try_move("game", Engine(), "startpos", ["e2e4"], "black", state)
+
+    result = next(record for record in records if record["event"] == "ponderhit_result")
+    expect("ponderhit elapsed recorded", isinstance(result.get("elapsed_ms"), int))
+    expect("ponderhit elapsed non-negative", result["elapsed_ms"] >= 0)
+
+
 def test_elo_seek_does_not_fallback_to_random_low_rated_bots() -> None:
     class Args:
         elo_seek = True
@@ -2363,6 +2439,10 @@ def main() -> int:
     test_reader_uses_launch_queue()
     test_live_defaults_avoid_crash_prone_resources()
     test_runtime_ane_options_are_explicitly_opt_in()
+    test_verbose_runtime_enables_trace_without_forcing_ane_hints()
+    test_verbose_path_enables_trace_and_resolves_log_path()
+    test_verbose_log_tees_stdout_and_stderr()
+    test_verbose_uci_option_tracking_filters_useful_options()
     test_ane_runtime_values_are_clamped_to_uci_bounds()
     test_ane_config_validation_requires_existing_files()
     test_load_adjusted_workers_preserves_floor()
@@ -2404,6 +2484,7 @@ def main() -> int:
     test_duplicate_game_state_does_not_resubmit()
     test_stale_stream_ply_does_not_search_old_position()
     test_stale_move_rejection_suppresses_duplicate_turn()
+    test_ponderhit_audit_records_elapsed_ms()
     test_elo_seek_does_not_fallback_to_random_low_rated_bots()
     test_rated_seek_rating_floor()
     test_rated_challenge_rating_floor_uses_direct_rating()

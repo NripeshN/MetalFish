@@ -1344,20 +1344,38 @@ void ParallelHybridSearch::start_ane_root_probe() {
   if (ane_root_hints_future_.valid())
     ane_root_hints_future_.wait();
 
-  if (!config_.ane_root_probe || !ane_evaluator_)
+  auto trace_skip = [&](const std::string &reason) {
+    if (config_.trace_decisions)
+      send_info_string("Hybrid: ANE root probe skipped: " + reason);
+  };
+
+  if (!config_.ane_root_probe)
     return;
+  if (!ane_evaluator_) {
+    trace_skip("no evaluator");
+    return;
+  }
   if (limits_.ponderMode &&
-      !ponderhit_received_.load(std::memory_order_acquire))
+      !ponderhit_received_.load(std::memory_order_acquire)) {
+    trace_skip("speculative ponder");
     return;
+  }
   const int min_budget = std::max(0, config_.ane_min_budget_ms);
   const int time_budget = time_budget_ms_.load(std::memory_order_acquire);
-  if (min_budget > 0 && time_budget > 0 && time_budget < min_budget)
+  if (min_budget > 0 && time_budget > 0 && time_budget < min_budget) {
+    trace_skip("budget " + std::to_string(time_budget) + "ms < minimum " +
+               std::to_string(min_budget) + "ms");
     return;
+  }
   if (min_budget > 0 && time_budget == 0 &&
       (limits_.nodes > 0 || limits_.infinite || limits_.depth > 0 ||
-       limits_.mate > 0))
+       limits_.mate > 0)) {
+    trace_skip("fixed search budget");
     return;
+  }
 
+  if (config_.trace_decisions)
+    send_info_string("Hybrid: ANE root probe started");
   ane_root_hints_future_ =
       std::async(std::launch::async,
                  &ParallelHybridSearch::compute_ane_root_order_hints, this);
@@ -1365,8 +1383,14 @@ void ParallelHybridSearch::start_ane_root_probe() {
 
 std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
   std::vector<Move> hints;
-  if (!ane_evaluator_ || should_stop())
+  const int64_t start_ms = SteadyNowMs();
+  if (!ane_evaluator_)
     return hints;
+  if (should_stop()) {
+    if (config_.trace_decisions)
+      send_info_string("Hybrid: ANE root probe aborted before evaluation");
+    return hints;
+  }
 
   try {
     StateInfo root_state;
@@ -1389,8 +1413,11 @@ std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
       for (Move move : legal_moves)
         candidate_moves.push_back(move);
     }
-    if (candidate_moves.empty())
+    if (candidate_moves.empty()) {
+      if (config_.trace_decisions)
+        send_info_string("Hybrid: ANE root probe found no legal candidates");
       return hints;
+    }
 
     struct ChildInput {
       Move move = Move::none();
@@ -1425,11 +1452,17 @@ std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
       children.push_back(std::move(child));
     }
 
-    if (!pending_positions.empty() && !should_stop()) {
+    size_t result_count = 0;
+    if (!pending_positions.empty()) {
+      if (should_stop()) {
+        if (config_.trace_decisions)
+          send_info_string(
+              "Hybrid: ANE root probe aborted before Core ML batch");
+        return hints;
+      }
       auto results = ane_evaluator_->EvaluateBatch(pending_positions.data(),
                                                    pending_positions.size());
-      const size_t result_count =
-          std::min(results.size(), pending_indices.size());
+      result_count = std::min(results.size(), pending_indices.size());
       for (size_t i = 0; i < result_count; ++i) {
         auto &child = *children[pending_indices[i]];
         const float root_score = -results[i].value;
@@ -1465,6 +1498,18 @@ std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
       std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
       ane_root_hints_ = hints;
       ane_root_hint_infos_ = hint_infos;
+    }
+    if (config_.trace_decisions) {
+      std::ostringstream ss;
+      ss << "Hybrid: ANE root probe completed " << hints.size() << "/"
+         << candidate_moves.size() << " moves";
+      if (!hints.empty()) {
+        ss << " top " << UCIEngine::move(hints.front(), false) << " score "
+           << std::fixed << std::setprecision(3) << hint_infos.front().score;
+      }
+      ss << " evals " << result_count << " time "
+         << std::max<int64_t>(0, SteadyNowMs() - start_ms) << "ms";
+      send_info_string(ss.str());
     }
   } catch (const std::exception &e) {
     {
@@ -1517,7 +1562,8 @@ std::vector<Move> ParallelHybridSearch::collect_ane_root_order_hints() {
   }
   if (config_.trace_decisions && !hints.empty()) {
     std::ostringstream ss;
-    ss << "Hybrid: AB root hints from ANE";
+    ss << (config_.ane_root_hints ? "Hybrid: AB root hints from ANE"
+                                  : "Hybrid: ANE root probe ready");
     for (Move hint : hints)
       ss << " " << UCIEngine::move(hint, false);
     send_info_string(ss.str());
@@ -1956,6 +2002,8 @@ void ParallelHybridSearch::coordinator_thread_main() {
   }
 
   const bool external_stop = stop_flag_.load(std::memory_order_acquire);
+  if (!external_stop && config_.ane_root_probe)
+    collect_ane_root_order_hints();
   stop_flag_.store(true, std::memory_order_release);
 
   if (mcts_search_)
@@ -2103,6 +2151,36 @@ void ParallelHybridSearch::refresh_final_state(Move final_move) {
 
   if (final_move != Move::none() && (pv.empty() || pv.front() != final_move)) {
     pv.insert(pv.begin(), final_move);
+  }
+
+  if (!pv.empty()) {
+    Position pv_pos;
+    StateInfo root_state;
+    pv_pos.set(root_fen_, false, &root_state);
+
+    std::vector<StateInfo> states(pv.size());
+    std::vector<Move> legal_pv;
+    legal_pv.reserve(pv.size());
+
+    for (size_t i = 0; i < pv.size(); ++i) {
+      Move move = pv[i];
+      if (move == Move::none())
+        break;
+
+      MoveList<LEGAL> legal_moves(pv_pos);
+      if (!legal_moves.contains(move)) {
+        if (config_.trace_decisions) {
+          send_info_string("Hybrid: final PV truncated before illegal move " +
+                           UCIEngine::move(move, false));
+        }
+        break;
+      }
+
+      legal_pv.push_back(move);
+      pv_pos.do_move(move, states[i], nullptr);
+    }
+
+    pv = std::move(legal_pv);
   }
 
   {
