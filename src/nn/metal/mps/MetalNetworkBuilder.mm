@@ -124,7 +124,7 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
       } else {
         layer = [graph positionEncodingWithTensor:layer
                                         withShape:@[ @64, @64 ]
-                                          weights:&kPosEncoding[0][0]
+                                          weights:&Tables::kPosEncoding[0][0]
                                              type:nil
                                             label:@"input/position_encoding"];
       }
