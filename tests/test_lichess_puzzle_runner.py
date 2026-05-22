@@ -221,6 +221,63 @@ def test_hybrid_ane_low_time_fallback_can_be_overridden() -> None:
     )
 
 
+def test_hybrid_ane_stats_distinguish_configured_from_active() -> None:
+    args = puzzle_runner.parse_args(
+        [
+            "--mode",
+            "hybrid",
+            "--hybrid-ane-root-probe",
+            "--hybrid-ane-root-hints",
+            "--hybrid-ane-weights",
+            "networks/t1.pb.gz",
+            "--hybrid-ane-model-path",
+            "build/coreml/t1.mlmodelc",
+            "--hybrid-ane-compute-units",
+            "cpu-ne",
+        ]
+    )
+    stats = puzzle_runner.initial_ane_stats(args)
+    expect("ANE requested", stats["ane_probe_requested"] is True)
+    expect("ANE hints requested", stats["ane_root_hints_requested"] is True)
+    expect("ANE starts inactive", stats["ane_root_nonempty"] == 0)
+
+    puzzle_runner.update_ane_stats(
+        stats,
+        {
+            "searches": [
+                {
+                    "ane_hints": 1,
+                    "ane_hint_moves": 3,
+                    "ane_failures": 0,
+                    "hybrid_ane_top": "e2e4",
+                    "hybrid_ane_root": "[e2e4:0.52,d2d4:0.22]",
+                    "hybrid_ane_agrees_mcts": "1",
+                    "hybrid_ane_confirmed_mcts": "0",
+                },
+                {
+                    "ane_hints": 0,
+                    "ane_hint_moves": 0,
+                    "ane_failures": 1,
+                    "hybrid_ane_top": "none",
+                    "hybrid_ane_root": "[]",
+                    "hybrid_ane_agrees_mcts": "0",
+                    "hybrid_ane_confirmed_mcts": "1",
+                },
+            ]
+        },
+    )
+
+    expect("ANE searches counted", stats["ane_searches"] == 2)
+    expect("ANE trace searches counted", stats["ane_trace_searches"] == 2)
+    expect("ANE nonempty roots counted", stats["ane_root_nonempty"] == 1)
+    expect("ANE top moves counted", stats["ane_top_moves"] == 1)
+    expect("ANE hints counted", stats["ane_hints"] == 1)
+    expect("ANE hint moves counted", stats["ane_hint_moves"] == 3)
+    expect("ANE failures counted", stats["ane_failures"] == 1)
+    expect("ANE agrees counted", stats["ane_agrees_mcts"] == 1)
+    expect("ANE confirmations counted", stats["ane_confirmed_mcts"] == 1)
+
+
 def test_solver_accepts_alternate_mating_move() -> None:
     class ScriptedEngine:
         def __init__(self, moves: list[str]) -> None:

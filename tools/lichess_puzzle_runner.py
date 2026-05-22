@@ -501,6 +501,71 @@ def search_trace_fields(answer: SearchAnswer) -> dict[str, str]:
     return fields
 
 
+def initial_ane_stats(args) -> dict[str, object]:
+    requested = bool(getattr(args, "hybrid_ane_root_probe", False))
+    return {
+        "ane_probe_requested": requested,
+        "ane_root_hints_requested": bool(
+            getattr(args, "hybrid_ane_root_hints", False)
+        ),
+        "ane_compute_units": (
+            str(getattr(args, "hybrid_ane_compute_units", "")) if requested else ""
+        ),
+        "ane_weights": (
+            str(getattr(args, "hybrid_ane_weights", "")) if requested else ""
+        ),
+        "ane_model_path": (
+            str(getattr(args, "hybrid_ane_model_path", "")) if requested else ""
+        ),
+        "ane_searches": 0,
+        "ane_trace_searches": 0,
+        "ane_hints": 0,
+        "ane_hint_moves": 0,
+        "ane_failures": 0,
+        "ane_root_nonempty": 0,
+        "ane_top_moves": 0,
+        "ane_agrees_mcts": 0,
+        "ane_confirmed_mcts": 0,
+    }
+
+
+def update_ane_stats(stats: dict[str, object], result: dict) -> None:
+    searches = result.get("searches", [])
+    if not isinstance(searches, list):
+        return
+    for search in searches:
+        if not isinstance(search, dict):
+            continue
+        stats["ane_searches"] = int(stats.get("ane_searches", 0)) + 1
+        stats["ane_hints"] = int(stats.get("ane_hints", 0)) + int(
+            search.get("ane_hints") or 0
+        )
+        stats["ane_hint_moves"] = int(stats.get("ane_hint_moves", 0)) + int(
+            search.get("ane_hint_moves") or 0
+        )
+        stats["ane_failures"] = int(stats.get("ane_failures", 0)) + int(
+            search.get("ane_failures") or 0
+        )
+
+        top = str(search.get("hybrid_ane_top", ""))
+        root = str(search.get("hybrid_ane_root", ""))
+        agrees = str(search.get("hybrid_ane_agrees_mcts", ""))
+        confirmed = str(search.get("hybrid_ane_confirmed_mcts", ""))
+        has_trace = bool(top or root or agrees or confirmed)
+        if has_trace:
+            stats["ane_trace_searches"] = int(stats.get("ane_trace_searches", 0)) + 1
+        if root and root != "[]":
+            stats["ane_root_nonempty"] = int(stats.get("ane_root_nonempty", 0)) + 1
+        if top and top not in {"none", "0000"}:
+            stats["ane_top_moves"] = int(stats.get("ane_top_moves", 0)) + 1
+        if agrees == "1":
+            stats["ane_agrees_mcts"] = int(stats.get("ane_agrees_mcts", 0)) + 1
+        if confirmed == "1":
+            stats["ane_confirmed_mcts"] = int(
+                stats.get("ane_confirmed_mcts", 0)
+            ) + 1
+
+
 def parse_setoptions(items: list[str]) -> dict[str, str]:
     options: dict[str, str] = {}
     for item in items:
@@ -805,6 +870,24 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         lines.append(f"- Ended: {stats.get('ended')}")
     if stats.get("rate_limit_events"):
         lines.append(f"- Rate-limit events: {stats.get('rate_limit_events')}")
+    if stats.get("ane_probe_requested"):
+        lines.extend(
+            [
+                f"- ANE root probe: requested ({stats.get('ane_compute_units')})",
+                f"- ANE root hints requested: {stats.get('ane_root_hints_requested')}",
+                f"- ANE searches: {stats.get('ane_searches', 0)}",
+                f"- ANE trace fields: {stats.get('ane_trace_searches', 0)}",
+                f"- ANE non-empty roots: {stats.get('ane_root_nonempty', 0)}",
+                f"- ANE top moves: {stats.get('ane_top_moves', 0)}",
+                f"- ANE hint lines: {stats.get('ane_hints', 0)}",
+                f"- ANE hint moves: {stats.get('ane_hint_moves', 0)}",
+                f"- ANE agrees with MCTS: {stats.get('ane_agrees_mcts', 0)}",
+                f"- ANE-confirmed MCTS overrides: {stats.get('ane_confirmed_mcts', 0)}",
+                f"- ANE failures: {stats.get('ane_failures', 0)}",
+                f"- ANE weights: {stats.get('ane_weights')}",
+                f"- ANE model: {stats.get('ane_model_path')}",
+            ]
+        )
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -889,6 +972,7 @@ def run(args) -> int:
     total = 0
     started = time.monotonic()
     ended = "completed"
+    ane_stats = initial_ane_stats(args)
 
     print(
         f"Puzzle run: mode={args.mode}, threads={threads}, hash={hash_mb} MB, "
@@ -920,6 +1004,7 @@ def run(args) -> int:
                         }
                     total += 1
                     solved += 1 if result.get("solved") else 0
+                    update_ane_stats(ane_stats, result)
                     batch_results.append(result)
                     out.write(json.dumps(result, sort_keys=True) + "\n")
                     out.flush()
@@ -979,6 +1064,7 @@ def run(args) -> int:
         "ended": ended,
         "rate_limit_events": rate_limit_events,
     }
+    stats.update(ane_stats)
     write_summary(summary_path, stats)
     print(
         f"Finished: solved {solved}/{total} "
@@ -1023,6 +1109,7 @@ def run_offline(args) -> int:
     started = time.monotonic()
     deadline = started + args.max_minutes * 60.0
     ended = "completed"
+    ane_stats = initial_ane_stats(args)
 
     print(
         f"Offline puzzle run: mode={args.mode}, threads={threads}, "
@@ -1049,6 +1136,7 @@ def run_offline(args) -> int:
                     result = tag_repeat_result(result, repeat_idx, args.repeat_puzzles)
                     total += 1
                     solved += 1 if result.get("solved") else 0
+                    update_ane_stats(ane_stats, result)
                     out.write(json.dumps(result, sort_keys=True) + "\n")
                     out.flush()
                     if total % args.progress_interval == 0:
@@ -1076,6 +1164,7 @@ def run_offline(args) -> int:
         "rate_limit_events": 0,
         "repeat_puzzles": args.repeat_puzzles,
     }
+    stats.update(ane_stats)
     write_summary(summary_path, stats)
     print(
         f"Finished: solved {solved}/{total} "
