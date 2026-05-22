@@ -112,6 +112,19 @@ bool IsSimpleFeedForwardStep(const NetworkResolvedExecutionStep &step) {
          FindTensorSuffix(step, ".dense2_b");
 }
 
+bool IsSimplePositionalEncodingStep(
+    const NetworkResolvedExecutionStep &step) {
+  if (step.tensors.empty())
+    return false;
+  for (const auto &tensor : step.tensors) {
+    if (tensor.kind != NetworkWeightTensorKind::PositionalEncoding ||
+        tensor.elements == 0 || tensor.dims.empty()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::string FirstUnsupportedExecutionStep(
     const NetworkResolvedExecutionPlan &plan) {
   for (const auto &step : plan.steps) {
@@ -161,6 +174,14 @@ std::string FirstUnsupportedExecutionStep(
       if (!IsSimpleFeedForwardStep(step)) {
         return "CPU transformer backend does not support compound "
                "feed-forward stage yet: " +
+               step.name;
+      }
+      continue;
+    }
+    if (step.kind == NetworkExecutionOpKind::PositionalEncoding) {
+      if (!IsSimplePositionalEncodingStep(step)) {
+        return "CPU transformer backend does not support malformed positional "
+               "metadata stage: " +
                step.name;
       }
       continue;
@@ -503,7 +524,7 @@ std::string CpuNetwork::GetNetworkInfo() const {
       << ", execution: " << resolved_execution_plan_.Summary()
       << ", weight_bytes=" << weight_bytes_
       << ", executor="
-      << (unsupported_execution_reason_.empty() ? "dense-layernorm-gate-ffn"
+      << (unsupported_execution_reason_.empty() ? "dense-layernorm-gate-ffn-positional"
                                                 : "unsupported")
       << ")";
   return out.str();
@@ -620,6 +641,19 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
                                step.name);
     }
     const int rows = static_cast<int>(source.values.size() / source.width);
+
+    if (step.kind == NetworkExecutionOpKind::PositionalEncoding) {
+      for (const auto &tensor_ref : step.tensors) {
+        const auto &tensor = TensorAt(tensor_ref.inventory_index);
+        if (tensor.kind != NetworkWeightTensorKind::PositionalEncoding ||
+            tensor.data.empty() || tensor.dims.empty()) {
+          throw std::runtime_error(
+              "CPU positional metadata tensor is invalid: " + step.name);
+        }
+      }
+      last_executed_step = step.name;
+      continue;
+    }
 
     if (step.kind == NetworkExecutionOpKind::Dense) {
       const auto *weight_ref =
