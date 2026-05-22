@@ -68,8 +68,7 @@ void RequireBiasWidth(const NetworkResolvedTensorRef &bias, int width,
 
 void ResolveSmolgenPlan(const NetworkResolvedExecutionPlan &execution_plan,
                         const NetworkResolvedExecutionStep &attention,
-                        int input_width, int heads,
-                        SmolgenStagePlan &smolgen) {
+                        int input_width, int heads, SmolgenStagePlan &smolgen) {
   const auto *dense =
       FindStep(execution_plan, attention.name + ".smolgen.dense");
   if (!dense)
@@ -153,9 +152,9 @@ const NetworkResolvedExecutionStep *FindGlobalPositionalEncodingStep(
   return nullptr;
 }
 
-AttentionStagePlan ResolveAttentionStagePlan(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    std::size_t attention_step_index, int head_count) {
+AttentionStagePlan
+ResolveAttentionStagePlan(const NetworkResolvedExecutionPlan &execution_plan,
+                          std::size_t attention_step_index, int head_count) {
   if (attention_step_index >= execution_plan.steps.size())
     throw std::runtime_error("attention plan step index is out of range");
   if (head_count <= 0)

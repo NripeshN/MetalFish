@@ -258,9 +258,8 @@ NN::WeightsFile make_positional_metadata_cpu_weights_file() {
                               {2, NN::kPackedInputPlaneCount});
   set_test_float_layer_values(weights->mutable_ip_emb_b(), embedding_b, {2});
 
-  std::vector<float> smolgen_w(NN::kPackedInputSquareCount *
-                                   NN::kPackedInputSquareCount,
-                               0.0f);
+  std::vector<float> smolgen_w(
+      NN::kPackedInputSquareCount * NN::kPackedInputSquareCount, 0.0f);
   set_test_float_layer_values(weights->mutable_smolgen_w(), smolgen_w,
                               {static_cast<std::uint32_t>(smolgen_w.size())});
 
@@ -313,10 +312,10 @@ NN::WeightsFile make_dynamic_pe_cpu_weights_file() {
       static_cast<std::size_t>(kPositionOutput) * kPositionInput, 0.0f);
   std::vector<float> preproc_b(kPositionOutput, 0.0f);
   for (int square = 0; square < NN::kPackedInputSquareCount; ++square) {
-    preproc_w[static_cast<std::size_t>(square) * kPositionInput +
-              square * 12 + 0] = 0.25f;
-    preproc_w[static_cast<std::size_t>(square) * kPositionInput +
-              square * 12 + 11] = 0.50f;
+    preproc_w[static_cast<std::size_t>(square) * kPositionInput + square * 12 +
+              0] = 0.25f;
+    preproc_w[static_cast<std::size_t>(square) * kPositionInput + square * 12 +
+              11] = 0.50f;
     preproc_b[static_cast<std::size_t>(square)] =
         0.01f * static_cast<float>(square);
   }
@@ -949,9 +948,9 @@ void test_network_execution_plan(TestCounter &tc) {
               "promotion rows");
   const auto first_body_attention =
       find_resolved_step_index(loaded_resolved_plan, "body.encoder.0.mha");
-  const auto loaded_attention_plan = NN::ResolveAttentionStagePlan(
-      loaded_resolved_plan, first_body_attention,
-      loaded_weights.encoder_head_count);
+  const auto loaded_attention_plan =
+      NN::ResolveAttentionStagePlan(loaded_resolved_plan, first_body_attention,
+                                    loaded_weights.encoder_head_count);
   expect(loaded_attention_plan.heads == loaded_weights.encoder_head_count,
          "loaded attention plan should preserve body head count", tc);
   expect(loaded_attention_plan.squares == NN::kAttentionSquares,
@@ -994,9 +993,8 @@ void test_network_execution_plan(TestCounter &tc) {
          "loaded CUDA tape should allocate one query buffer per attention", tc);
   const auto &loaded_scores =
       loaded_tape.RequireName("body.encoder.0.mha.scores");
-  expect(loaded_scores.rows ==
-                 loaded_cuda_attention_plan.heads *
-                     loaded_cuda_attention_plan.squares &&
+  expect(loaded_scores.rows == loaded_cuda_attention_plan.heads *
+                                   loaded_cuda_attention_plan.squares &&
              loaded_scores.width == loaded_cuda_attention_plan.squares,
          "loaded CUDA tape should shape attention score matrices by head and "
          "square",
@@ -1318,8 +1316,8 @@ void test_cpu_backend_dense_execution(TestCounter &tc) {
   expect(std::abs(output.value - 0.25f) < 1e-6f,
          "CPU dense value output should decode scalar value", tc);
   expect(!output.has_wdl, "CPU dense fixture should not mark WDL", tc);
-  expect(!output.has_moves_left,
-         "CPU dense fixture should not mark moves-left", tc);
+  expect(!output.has_moves_left, "CPU dense fixture should not mark moves-left",
+         tc);
 
   const auto batch = cpu->EvaluateBatch({input, input});
   expect(batch.size() == 2, "CPU dense batch should emit two outputs", tc);
@@ -1340,8 +1338,7 @@ void test_cpu_backend_gate_ffn_execution(TestCounter &tc) {
   NN::InputPlanes input{};
   const auto output = cpu->Evaluate(input);
   expect(output.policy[0] < -0.99f && output.policy[0] > -1.01f,
-         "CPU gate/FFN path should preserve first normalized policy logit",
-         tc);
+         "CPU gate/FFN path should preserve first normalized policy logit", tc);
   expect(output.policy[10] > 0.99f && output.policy[10] < 1.01f,
          "CPU gate/FFN path should preserve second normalized policy logit",
          tc);
@@ -1400,8 +1397,7 @@ void test_cpu_backend_dynamic_pe_execution(TestCounter &tc) {
          "CPU dynamic PE should concatenate square-zero plane and PE channel",
          tc);
   expect(std::abs(output.policy[10] - 2.55f) < 1e-5f,
-         "CPU dynamic PE should preserve square-specific flattened logits",
-         tc);
+         "CPU dynamic PE should preserve square-specific flattened logits", tc);
   expect(std::abs(output.value - 0.70f) < 1e-5f,
          "CPU dynamic PE flattened value head should consume square rows", tc);
 

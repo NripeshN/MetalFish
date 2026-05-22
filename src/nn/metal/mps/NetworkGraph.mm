@@ -6,8 +6,8 @@
 */
 
 #import "NetworkGraph.h"
-#import "../../weights.h"
 #import "../../tables/attention_policy_map.h"
+#import "../../weights.h"
 #import "../tables/policy_map.h"
 #import <algorithm>
 #import <vector>

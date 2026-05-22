@@ -42,9 +42,9 @@ struct AttentionStagePlan {
 const NetworkResolvedExecutionStep *FindGlobalPositionalEncodingStep(
     const NetworkResolvedExecutionPlan &execution_plan);
 
-AttentionStagePlan ResolveAttentionStagePlan(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    std::size_t attention_step_index, int head_count);
+AttentionStagePlan
+ResolveAttentionStagePlan(const NetworkResolvedExecutionPlan &execution_plan,
+                          std::size_t attention_step_index, int head_count);
 
 } // namespace NN
 } // namespace MetalFish

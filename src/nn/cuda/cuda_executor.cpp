@@ -21,8 +21,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
-#include <iomanip>
 #include <initializer_list>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -178,10 +178,10 @@ std::uintptr_t DevicePtrKey(const void *ptr) {
   return reinterpret_cast<std::uintptr_t>(ptr);
 }
 
-CudaGraphExecutionKey MakeCudaGraphExecutionKey(
-    int batch_size, std::uint64_t workspace_generation,
-    std::uint64_t buffer_generation, cudaStream_t stream,
-    const CudaInferenceBuffers &buffers) {
+CudaGraphExecutionKey
+MakeCudaGraphExecutionKey(int batch_size, std::uint64_t workspace_generation,
+                          std::uint64_t buffer_generation, cudaStream_t stream,
+                          const CudaInferenceBuffers &buffers) {
   return CudaGraphExecutionKey{
       batch_size,
       workspace_generation,
@@ -442,12 +442,11 @@ private:
     }
   }
 
-  CudaDenseStageSequenceOutput
-  RunSequence(const NetworkResolvedExecutionPlan &execution_plan,
-              const CudaWeightBuffers &weights,
-              const CudaInferenceBuffers &buffers,
-              const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
-              int batch_size, CudaStageTimingCollector *timing_collector) const {
+  CudaDenseStageSequenceOutput RunSequence(
+      const NetworkResolvedExecutionPlan &execution_plan,
+      const CudaWeightBuffers &weights, const CudaInferenceBuffers &buffers,
+      const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+      int batch_size, CudaStageTimingCollector *timing_collector) const {
     const auto stage_inputs =
         CreateCudaStageInputBindings(execution_plan, schedule_);
     return ExecuteDenseActivationLayerNormSequence(
@@ -514,9 +513,8 @@ private:
                            CudaExecutionWorkspace &workspace, int batch_size,
                            const CudaExecutionTape &tape) const {
     PrepareExecutionWorkspace(tape, workspace);
-    const auto sequence =
-        RunSequence(execution_plan, weights, buffers, tape, workspace,
-                    batch_size, nullptr);
+    const auto sequence = RunSequence(execution_plan, weights, buffers, tape,
+                                      workspace, batch_size, nullptr);
     CopyMappedOutputs(output_mapping_, sequence, buffers, workspace,
                       batch_size);
   }
@@ -528,17 +526,17 @@ private:
     const auto tape = CreateResolvedExecutionTape(execution_plan, batch_size);
     ReserveExecutionWorkspace(tape, workspace);
     cudaStream_t stream = workspace.Stream();
-    const auto key = MakeCudaGraphExecutionKey(
-        batch_size, workspace.Generation(), buffers.Generation(), stream,
-        buffers);
+    const auto key =
+        MakeCudaGraphExecutionKey(batch_size, workspace.Generation(),
+                                  buffers.Generation(), stream, buffers);
 
     if (graph_cache_.Matches(key)) {
       const cudaError_t launch_status =
           cudaGraphLaunch(graph_cache_.graph_exec, stream);
       if (launch_status != cudaSuccess) {
-        ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
-                             batch_size,
-                             CudaErrorMessage("cudaGraphLaunch", launch_status));
+        ExecuteGraphFallback(
+            execution_plan, weights, buffers, workspace, batch_size,
+            CudaErrorMessage("cudaGraphLaunch", launch_status));
         return;
       }
       try {
@@ -560,8 +558,8 @@ private:
     }
 
     if (!(graph_primed_key_ == key)) {
-      ExecuteUncaptured(execution_plan, weights, buffers, workspace,
-                        batch_size, false);
+      ExecuteUncaptured(execution_plan, weights, buffers, workspace, batch_size,
+                        false);
       graph_primed_key_ = key;
       return;
     }
@@ -569,10 +567,9 @@ private:
     const cudaError_t capture_status =
         cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal);
     if (capture_status != cudaSuccess) {
-      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
-                           batch_size,
-                           CudaErrorMessage("cudaStreamBeginCapture",
-                                            capture_status));
+      ExecuteGraphFallback(
+          execution_plan, weights, buffers, workspace, batch_size,
+          CudaErrorMessage("cudaStreamBeginCapture", capture_status));
       return;
     }
     try {
@@ -586,8 +583,7 @@ private:
     } catch (...) {
       EndFailedCudaGraphCapture(stream);
       ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
-                           batch_size,
-                           "CUDA graph capture work failed");
+                           batch_size, "CUDA graph capture work failed");
       return;
     }
 
@@ -596,10 +592,9 @@ private:
     if (graph_status != cudaSuccess) {
       if (graph)
         cudaGraphDestroy(graph);
-      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
-                           batch_size,
-                           CudaErrorMessage("cudaStreamEndCapture",
-                                            graph_status));
+      ExecuteGraphFallback(
+          execution_plan, weights, buffers, workspace, batch_size,
+          CudaErrorMessage("cudaStreamEndCapture", graph_status));
       return;
     }
 
@@ -608,10 +603,9 @@ private:
     if (graph_status != cudaSuccess) {
       if (graph)
         cudaGraphDestroy(graph);
-      ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
-                           batch_size,
-                           CudaErrorMessage("cudaGraphInstantiate",
-                                            graph_status));
+      ExecuteGraphFallback(
+          execution_plan, weights, buffers, workspace, batch_size,
+          CudaErrorMessage("cudaGraphInstantiate", graph_status));
       return;
     }
 

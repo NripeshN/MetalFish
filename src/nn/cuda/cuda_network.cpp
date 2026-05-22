@@ -119,8 +119,8 @@ void TraceRawOutputs(const CudaOutputDownload &downloaded,
   const int run = run_counter.fetch_add(1, std::memory_order_relaxed);
   const int limit =
       EnvIntOrDefault("METALFISH_CUDA_TRACE_RAW_LIMIT", 64, 1, 100000);
-  const int target_entry = EnvIntOrDefault(
-      "METALFISH_CUDA_TRACE_RAW_ENTRY", 0, -1, std::max(0, batch_size - 1));
+  const int target_entry = EnvIntOrDefault("METALFISH_CUDA_TRACE_RAW_ENTRY", 0,
+                                           -1, std::max(0, batch_size - 1));
 
   for (int b = 0; b < batch_size; ++b) {
     if (target_entry >= 0 && b != target_entry)
@@ -137,14 +137,12 @@ void TraceRawOutputs(const CudaOutputDownload &downloaded,
         static_cast<std::size_t>(b) * plan.raw_policy_outputs;
     const TensorTopEntry policy_top =
         TopEntry(downloaded.policy, policy_offset, plan.policy_outputs);
-    const TensorTopEntry raw_policy_top =
-        TopEntry(downloaded.raw_policy, raw_policy_offset,
-                 plan.raw_policy_outputs);
+    const TensorTopEntry raw_policy_top = TopEntry(
+        downloaded.raw_policy, raw_policy_offset, plan.raw_policy_outputs);
 
     std::ostringstream out;
-    out << std::fixed << std::setprecision(6)
-        << "CUDA_RAW_TRACE run=" << run << " trace=" << trace
-        << " batch=" << batch_size << " entry=" << b;
+    out << std::fixed << std::setprecision(6) << "CUDA_RAW_TRACE run=" << run
+        << " trace=" << trace << " batch=" << batch_size << " entry=" << b;
     if (plan.wdl && value_offset + 2 < downloaded.value.size()) {
       out << " wdl=[" << downloaded.value[value_offset] << ','
           << downloaded.value[value_offset + 1] << ','
@@ -328,8 +326,7 @@ NetworkOutput CudaNetwork::Evaluate(const InputPlanes &input) {
 
 std::vector<NetworkOutput>
 CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
-  const auto max_stable_batch =
-      static_cast<size_t>(StableExecutionBatchSize());
+  const auto max_stable_batch = static_cast<size_t>(StableExecutionBatchSize());
   if (inputs.size() > max_stable_batch) {
     std::vector<NetworkOutput> outputs;
     outputs.reserve(inputs.size());

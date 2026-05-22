@@ -185,17 +185,16 @@ CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
     const CudaWeightBuffers &weights, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size);
 
-CudaAttentionCoreOutput
-ExecuteAttentionCoreStage(const NetworkResolvedExecutionPlan &execution_plan,
-                          std::size_t attention_step_index,
-                          const CudaAttentionProjectionOutput &projections,
-                          const CudaExecutionTape &tape,
-                          CudaExecutionWorkspace &workspace, int batch_size,
-                          const CudaWeightBuffers *weights = nullptr,
-                          const float *parent = nullptr, int trace_run = -1,
-                          int trace_stage_index = -1,
-                          CudaExecutionScheduleKind trace_kind =
-                              CudaExecutionScheduleKind::AttentionLayerNormStage);
+CudaAttentionCoreOutput ExecuteAttentionCoreStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::size_t attention_step_index,
+    const CudaAttentionProjectionOutput &projections,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size, const CudaWeightBuffers *weights = nullptr,
+    const float *parent = nullptr, int trace_run = -1,
+    int trace_stage_index = -1,
+    CudaExecutionScheduleKind trace_kind =
+        CudaExecutionScheduleKind::AttentionLayerNormStage);
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,

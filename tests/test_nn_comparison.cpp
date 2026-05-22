@@ -1301,9 +1301,8 @@ bool test_mcts_evaluator_single_repeat_stress_optional() {
       tolerances.policy = 7.5e-2f;
     }
 
-    const int iterations =
-        env_int_or_default("METALFISH_NN_SINGLE_REPEAT_STRESS_ITERS", 8, 1,
-                           128);
+    const int iterations = env_int_or_default(
+        "METALFISH_NN_SINGLE_REPEAT_STRESS_ITERS", 8, 1, 128);
     EvalDiffMetrics worst;
     bool worst_set = false;
     std::string worst_line;
@@ -1316,8 +1315,7 @@ bool test_mcts_evaluator_single_repeat_stress_optional() {
         const auto replay = eval.EvaluateWithHistory(histories[i]);
         std::ostringstream label;
         label << "single repeat probe " << probes[i] << " iter " << iter;
-        const auto metrics =
-            measure_eval_result(baseline, replay, label.str());
+        const auto metrics = measure_eval_result(baseline, replay, label.str());
         std::cout << "    SINGLE_REPEAT_STRESS_STEP: probe=" << probes[i]
                   << " iter=" << iter << " line="
                   << move_line_string(lines[probes[i] % lines.size()])
@@ -1590,8 +1588,8 @@ int main() {
   const bool ok9 = test_mcts_evaluator_batch_reuse_stress_optional();
   const bool ok10 = benchmark_nn_batch_optional();
   const bool ok11 = !parity_report || write_parity_report(*parity_report);
-  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 &&
-          ok10 && ok11)
+  return (ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 &&
+          ok11)
              ? 0
              : 1;
 }

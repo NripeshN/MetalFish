@@ -462,8 +462,9 @@ __global__ void AttentionSoftmaxDeterministic64Kernel(const float *scores,
   probability_row[lane + 32] = value1 * scale;
 }
 
-__global__ void AttentionBiasSoftmaxDeterministic64Kernel(
-    float *scores, const float *bias, float *probabilities) {
+__global__ void
+AttentionBiasSoftmaxDeterministic64Kernel(float *scores, const float *bias,
+                                          float *probabilities) {
   const int row = blockIdx.x;
   const int lane = threadIdx.x;
   float *score_row = scores + static_cast<std::size_t>(row) * 64;
@@ -531,8 +532,8 @@ __global__ void AttentionSoftmaxDeterministicKernel(const float *scores,
 
   for (int col = threadIdx.x; col < width; col += blockDim.x) {
     probability_row[col] =
-        sum > 0.0 ? static_cast<float>(static_cast<double>(probability_row[col]) /
-                                       sum)
+        sum > 0.0 ? static_cast<float>(
+                        static_cast<double>(probability_row[col]) / sum)
                   : 0.0f;
   }
 }
@@ -560,9 +561,9 @@ __global__ void AttentionBiasSoftmaxDeterministicKernel(float *scores,
 
   for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
     if (threadIdx.x < stride) {
-      bias_softmax_deterministic_reductions[threadIdx.x] = fmax(
-          bias_softmax_deterministic_reductions[threadIdx.x],
-          bias_softmax_deterministic_reductions[threadIdx.x + stride]);
+      bias_softmax_deterministic_reductions[threadIdx.x] =
+          fmax(bias_softmax_deterministic_reductions[threadIdx.x],
+               bias_softmax_deterministic_reductions[threadIdx.x + stride]);
     }
     __syncthreads();
   }
@@ -587,8 +588,8 @@ __global__ void AttentionBiasSoftmaxDeterministicKernel(float *scores,
 
   for (int col = threadIdx.x; col < width; col += blockDim.x) {
     probability_row[col] =
-        sum > 0.0 ? static_cast<float>(static_cast<double>(probability_row[col]) /
-                                       sum)
+        sum > 0.0 ? static_cast<float>(
+                        static_cast<double>(probability_row[col]) / sum)
                   : 0.0f;
   }
 }
@@ -1069,8 +1070,8 @@ void LaunchAttentionBiasSoftmaxKernel(float *scores, const float *bias,
       const int threads = width <= 64 ? 64 : 128;
       const std::size_t shared_bytes = threads * sizeof(double);
       AttentionBiasSoftmaxDeterministicKernel<<<rows, threads, shared_bytes,
-                                                stream>>>(
-          scores, bias, probabilities, width);
+                                                stream>>>(scores, bias,
+                                                          probabilities, width);
     }
   } else {
     constexpr int kThreads = 128;

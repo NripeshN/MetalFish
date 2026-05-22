@@ -6,8 +6,8 @@
 */
 
 #import "MetalNetworkBuilder.h"
-#import "../../weights.h"
 #import "../../tables/attention_policy_map.h"
+#import "../../weights.h"
 #import "NetworkGraph.h"
 
 namespace MetalFish {

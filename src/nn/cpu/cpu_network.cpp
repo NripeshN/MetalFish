@@ -157,8 +157,7 @@ bool IsSimpleFeedForwardStep(const NetworkResolvedExecutionStep &step) {
          FindTensorSuffix(step, ".dense2_b");
 }
 
-bool IsSimplePositionalEncodingStep(
-    const NetworkResolvedExecutionStep &step) {
+bool IsSimplePositionalEncodingStep(const NetworkResolvedExecutionStep &step) {
   if (step.tensors.empty())
     return false;
   for (const auto &tensor : step.tensors) {
@@ -170,8 +169,8 @@ bool IsSimplePositionalEncodingStep(
   return true;
 }
 
-std::string FirstUnsupportedExecutionStep(
-    const NetworkResolvedExecutionPlan &plan) {
+std::string
+FirstUnsupportedExecutionStep(const NetworkResolvedExecutionPlan &plan) {
   for (std::size_t index = 0; index < plan.steps.size(); ++index) {
     const auto &step = plan.steps[index];
     if (step.kind == NetworkExecutionOpKind::Attention) {
@@ -312,9 +311,9 @@ DenseStageActivationForName(const NetworkResolvedExecutionPlan &plan,
     if (name == policy_prefix + "output") {
       if (!plan.format.attention_policy)
         return {};
-      return ActivationFromName(
-          plan.format.attention_body ? plan.format.activations.default_activation
-                                     : std::string("selu"));
+      return ActivationFromName(plan.format.attention_body
+                                    ? plan.format.activations.default_activation
+                                    : std::string("selu"));
     }
   }
 
@@ -522,8 +521,7 @@ void ApplyLayerNorm(const float *input, const float *residual_parent,
                     const std::vector<float> &bias, std::vector<float> &output,
                     int rows, int width, float epsilon) {
   for (int row = 0; row < rows; ++row) {
-    const float *input_row =
-        input + static_cast<std::size_t>(row) * width;
+    const float *input_row = input + static_cast<std::size_t>(row) * width;
     const float *parent_row =
         residual_parent
             ? residual_parent + static_cast<std::size_t>(row) * width
@@ -533,9 +531,9 @@ void ApplyLayerNorm(const float *input, const float *residual_parent,
     float sum = 0.0f;
     float square_sum = 0.0f;
     for (int col = 0; col < width; ++col) {
-      const float value = parent_row ? parent_row[col] + input_row[col] *
-                                                         residual_scale
-                                     : input_row[col];
+      const float value =
+          parent_row ? parent_row[col] + input_row[col] * residual_scale
+                     : input_row[col];
       sum += value;
       square_sum += value * value;
     }
@@ -547,18 +545,18 @@ void ApplyLayerNorm(const float *input, const float *residual_parent,
     const float inv_std = 1.0f / std::sqrt(variance + epsilon);
 
     for (int col = 0; col < width; ++col) {
-      const float value = parent_row ? parent_row[col] + input_row[col] *
-                                                         residual_scale
-                                     : input_row[col];
+      const float value =
+          parent_row ? parent_row[col] + input_row[col] * residual_scale
+                     : input_row[col];
       const std::size_t idx = static_cast<std::size_t>(col);
       output_row[col] = (value - mean) * inv_std * scale[idx] + bias[idx];
     }
   }
 }
 
-const CpuBuffer &RequireBuffer(const std::unordered_map<std::string, CpuBuffer>
-                                   &outputs,
-                               const std::string &name) {
+const CpuBuffer &
+RequireBuffer(const std::unordered_map<std::string, CpuBuffer> &outputs,
+              const std::string &name) {
   const auto it = outputs.find(name);
   if (it == outputs.end())
     throw std::runtime_error("CPU transformer backend missing stage output: " +
@@ -595,9 +593,8 @@ CpuNetwork::CpuNetwork(const WeightsFile &weights)
     }
     resolved_execution_plan_ =
         ResolveNetworkExecutionPlan(execution_plan_, inventory);
-    const auto resolved_inventory =
-        CreateResolvedNetworkWeightInventory(inventory,
-                                             resolved_execution_plan_);
+    const auto resolved_inventory = CreateResolvedNetworkWeightInventory(
+        inventory, resolved_execution_plan_);
     weight_bytes_ = resolved_inventory.TotalBytes();
     tensors_.reserve(resolved_inventory.tensors.size());
     for (const auto &tensor : resolved_inventory.tensors) {
@@ -615,8 +612,9 @@ CpuNetwork::CpuNetwork(const WeightsFile &weights)
       tensors_.push_back(std::move(copy));
     }
   } catch (const std::exception &e) {
-    throw std::runtime_error("CPU transformer backend weight validation failed: " +
-                             std::string(e.what()));
+    throw std::runtime_error(
+        "CPU transformer backend weight validation failed: " +
+        std::string(e.what()));
   }
 
   unsupported_execution_reason_ =
@@ -638,11 +636,10 @@ CpuNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
 
 std::string CpuNetwork::GetNetworkInfo() const {
   std::ostringstream out;
-  out << "CPU transformer backend (format: "
-      << format_.Summary() << ", tensors: " << tensor_plan_.Summary()
+  out << "CPU transformer backend (format: " << format_.Summary()
+      << ", tensors: " << tensor_plan_.Summary()
       << ", execution: " << resolved_execution_plan_.Summary()
-      << ", weight_bytes=" << weight_bytes_
-      << ", executor="
+      << ", weight_bytes=" << weight_bytes_ << ", executor="
       << (unsupported_execution_reason_.empty()
               ? "dense-layernorm-gate-ffn-positional-dynamic-pe-attention"
               : "unsupported")
@@ -658,7 +655,8 @@ std::string CpuNetwork::UnsupportedExecutionMessage() const {
 
 const CpuNetwork::CpuTensor &CpuNetwork::TensorAt(std::size_t index) const {
   if (index >= tensors_.size())
-    throw std::runtime_error("CPU transformer backend tensor index out of range");
+    throw std::runtime_error(
+        "CPU transformer backend tensor index out of range");
   return tensors_[index];
 }
 
@@ -668,15 +666,15 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
     throw std::runtime_error(UnsupportedExecutionMessage());
 
   const int batch_size = static_cast<int>(inputs.size());
-  std::vector<float> raw_inputs(
-      static_cast<std::size_t>(batch_size) * kPackedInputPlaneCount *
-      kPackedInputSquareCount);
+  std::vector<float> raw_inputs(static_cast<std::size_t>(batch_size) *
+                                kPackedInputPlaneCount *
+                                kPackedInputSquareCount);
   const std::size_t input_plane_floats =
       static_cast<std::size_t>(kPackedInputPlaneCount) *
       kPackedInputSquareCount;
   for (int b = 0; b < batch_size; ++b) {
-    std::memcpy(raw_inputs.data() + static_cast<std::size_t>(b) *
-                                      input_plane_floats,
+    std::memcpy(raw_inputs.data() +
+                    static_cast<std::size_t>(b) * input_plane_floats,
                 inputs[static_cast<std::size_t>(b)][0].data(),
                 input_plane_floats * sizeof(float));
   }
@@ -807,17 +805,15 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       if (in_width != squares * kPositionPlanes || out_width <= 0 ||
           out_width % squares != 0 ||
           bias.data.size() != static_cast<std::size_t>(out_width) ||
-          weight.data.size() !=
-              static_cast<std::size_t>(out_width) *
-                  static_cast<std::size_t>(in_width)) {
+          weight.data.size() != static_cast<std::size_t>(out_width) *
+                                    static_cast<std::size_t>(in_width)) {
         throw std::runtime_error("CPU dynamic PE tensor dimensions mismatch: " +
                                  step.name);
       }
 
-      std::vector<float> position_input(
-          static_cast<std::size_t>(batch_size) *
-              static_cast<std::size_t>(in_width),
-          0.0f);
+      std::vector<float> position_input(static_cast<std::size_t>(batch_size) *
+                                            static_cast<std::size_t>(in_width),
+                                        0.0f);
       for (int batch = 0; batch < batch_size; ++batch) {
         for (int square = 0; square < squares; ++square) {
           const std::uint64_t bit = 1ULL << square;
@@ -825,11 +821,10 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
             const std::size_t packed_index =
                 static_cast<std::size_t>(batch) * input_planes + plane;
             position_input[static_cast<std::size_t>(batch) * in_width +
-                           static_cast<std::size_t>(square) *
-                               kPositionPlanes +
-                           plane] =
-                (masks[packed_index] & bit) ? packed_values[packed_index]
-                                            : 0.0f;
+                           static_cast<std::size_t>(square) * kPositionPlanes +
+                           plane] = (masks[packed_index] & bit)
+                                        ? packed_values[packed_index]
+                                        : 0.0f;
           }
         }
       }
@@ -870,14 +865,13 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
           for (int plane = 0; plane < input_planes; ++plane) {
             const std::size_t packed_index =
                 static_cast<std::size_t>(batch) * input_planes + plane;
-            output_row[plane] =
-                (masks[packed_index] & bit) ? packed_values[packed_index]
-                                            : 0.0f;
+            output_row[plane] = (masks[packed_index] & bit)
+                                    ? packed_values[packed_index]
+                                    : 0.0f;
           }
-          const float *pe_row =
-              position_output.data() + static_cast<std::size_t>(batch) *
-                                           out_width +
-              static_cast<std::size_t>(square) * pe_width;
+          const float *pe_row = position_output.data() +
+                                static_cast<std::size_t>(batch) * out_width +
+                                static_cast<std::size_t>(square) * pe_width;
           for (int col = 0; col < pe_width; ++col)
             output_row[input_planes + col] = pe_row[col];
         }
@@ -890,8 +884,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
 
     const CpuBuffer &source = source_for(step.name);
     if (source.width <= 0 || source.values.size() % source.width != 0) {
-      throw std::runtime_error("CPU transformer backend source shape mismatch: " +
-                               step.name);
+      throw std::runtime_error(
+          "CPU transformer backend source shape mismatch: " + step.name);
     }
     const int rows = static_cast<int>(source.values.size() / source.width);
 
@@ -919,8 +913,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       const auto &weight = TensorAt(weight_ref->inventory_index);
       const auto &bias = TensorAt(bias_ref->inventory_index);
       if (weight.dims.size() != 2 || bias.dims.size() != 1) {
-        throw std::runtime_error("CPU dense stage has unresolved tensor shape: " +
-                                 step.name);
+        throw std::runtime_error(
+            "CPU dense stage has unresolved tensor shape: " + step.name);
       }
       const int out_width = static_cast<int>(weight.dims[0]);
       const int in_width = static_cast<int>(weight.dims[1]);
@@ -939,9 +933,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
         dense_rows = batch_size;
       }
       if (bias.data.size() != static_cast<std::size_t>(out_width) ||
-          weight.data.size() !=
-              static_cast<std::size_t>(out_width) *
-                  static_cast<std::size_t>(in_width)) {
+          weight.data.size() != static_cast<std::size_t>(out_width) *
+                                    static_cast<std::size_t>(in_width)) {
         throw std::runtime_error("CPU dense stage shape mismatch: " +
                                  step.name);
       }
@@ -954,10 +947,9 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
 
       CpuBuffer output;
       output.width = out_width;
-      output.values.assign(
-          static_cast<std::size_t>(dense_rows) *
-              static_cast<std::size_t>(out_width),
-          0.0f);
+      output.values.assign(static_cast<std::size_t>(dense_rows) *
+                               static_cast<std::size_t>(out_width),
+                           0.0f);
       for (int row = 0; row < dense_rows; ++row) {
         const float *input_row = dense_source->values.data() +
                                  static_cast<std::size_t>(row) * in_width;
@@ -972,9 +964,9 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
           output_row[out] = sum;
         }
       }
-      ApplyDenseActivation(output.values, dense_rows, output.width,
-                           DenseStageActivationForName(resolved_execution_plan_,
-                                                       step.name));
+      ApplyDenseActivation(
+          output.values, dense_rows, output.width,
+          DenseStageActivationForName(resolved_execution_plan_, step.name));
       remember_output(step, std::move(output));
       last_executed_step = step.name;
       continue;
@@ -992,22 +984,20 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       }
       const std::string policy_prefix =
           step.name.substr(0, step.name.size() - kSuffix.size());
-      const CpuBuffer &query = RequireBuffer(outputs, policy_prefix + ".dense2");
+      const CpuBuffer &query =
+          RequireBuffer(outputs, policy_prefix + ".dense2");
       const CpuBuffer &key = RequireBuffer(outputs, policy_prefix + ".dense3");
       if (query.width <= 0 || query.width != key.width ||
           query.values.size() != key.values.size() ||
-          query.values.size() !=
-              static_cast<std::size_t>(batch_size) * kPackedInputSquareCount *
-                  static_cast<std::size_t>(query.width)) {
+          query.values.size() != static_cast<std::size_t>(batch_size) *
+                                     kPackedInputSquareCount *
+                                     static_cast<std::size_t>(query.width)) {
         std::ostringstream out;
         out << "CPU attention policy Q/K shape mismatch: " << step.name
-            << " query_width=" << query.width
-            << " key_width=" << key.width
+            << " query_width=" << query.width << " key_width=" << key.width
             << " query_values=" << query.values.size()
-            << " key_values=" << key.values.size()
-            << " expected="
-            << static_cast<std::size_t>(batch_size) *
-                   kPackedInputSquareCount *
+            << " key_values=" << key.values.size() << " expected="
+            << static_cast<std::size_t>(batch_size) * kPackedInputSquareCount *
                    static_cast<std::size_t>(std::max(0, query.width));
         throw std::runtime_error(out.str());
       }
@@ -1018,10 +1008,9 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
             step.name);
       }
 
-      std::vector<float> raw_policy(
-          static_cast<std::size_t>(batch_size) *
-              kNetworkAttentionPolicyScratch,
-          0.0f);
+      std::vector<float> raw_policy(static_cast<std::size_t>(batch_size) *
+                                        kNetworkAttentionPolicyScratch,
+                                    0.0f);
       const float scale = 1.0f / std::sqrt(static_cast<float>(query.width));
       for (int batch = 0; batch < batch_size; ++batch) {
         for (int query_square = 0; query_square < kPackedInputSquareCount;
@@ -1075,8 +1064,7 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
                      (promotion.data[static_cast<std::size_t>(promotion_row) *
                                          query.width +
                                      channel] +
-                      promotion.data[static_cast<std::size_t>(3) *
-                                         query.width +
+                      promotion.data[static_cast<std::size_t>(3) * query.width +
                                      channel]);
           }
           raw_policy[static_cast<std::size_t>(batch) *
@@ -1088,9 +1076,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
 
       CpuBuffer output;
       output.width = kNetworkPolicyOutputs;
-      output.values.assign(static_cast<std::size_t>(batch_size) *
-                               kNetworkPolicyOutputs,
-                           0.0f);
+      output.values.assign(
+          static_cast<std::size_t>(batch_size) * kNetworkPolicyOutputs, 0.0f);
       const auto &gather = AttentionPolicyGatherMap();
       for (int batch = 0; batch < batch_size; ++batch) {
         for (int policy = 0; policy < kNetworkPolicyOutputs; ++policy) {
@@ -1121,8 +1108,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
                                  step.name);
       }
 
-      const auto tensor_by_suffix = [&](std::string_view suffix)
-          -> const CpuNetwork::CpuTensor & {
+      const auto tensor_by_suffix =
+          [&](std::string_view suffix) -> const CpuNetwork::CpuTensor & {
         const auto *ref = FindTensorSuffix(step, suffix);
         if (!ref)
           throw std::runtime_error("CPU attention stage has missing tensor: " +
@@ -1196,12 +1183,10 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
         const auto &dense2_b = smolgen_tensor(*smolgen_dense_step, ".dense2_b");
         const auto &ln1_gamma =
             smolgen_tensor(*smolgen_norm_step, ".ln1_gammas");
-        const auto &ln1_beta =
-            smolgen_tensor(*smolgen_norm_step, ".ln1_betas");
+        const auto &ln1_beta = smolgen_tensor(*smolgen_norm_step, ".ln1_betas");
         const auto &ln2_gamma =
             smolgen_tensor(*smolgen_norm_step, ".ln2_gammas");
-        const auto &ln2_beta =
-            smolgen_tensor(*smolgen_norm_step, ".ln2_betas");
+        const auto &ln2_beta = smolgen_tensor(*smolgen_norm_step, ".ln2_betas");
         const auto &global = smolgen_tensor(*global_step, "body.smolgen_w");
 
         std::vector<float> compressed;
@@ -1218,8 +1203,7 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
         for (int row = 0; row < batch_size; ++row) {
           for (int col = 0; col < attention.smolgen.dense1_width; ++col) {
             const std::size_t idx =
-                static_cast<std::size_t>(row) *
-                    attention.smolgen.dense1_width +
+                static_cast<std::size_t>(row) * attention.smolgen.dense1_width +
                 col;
             dense1[idx] += dense1_b.data[static_cast<std::size_t>(col)];
           }
@@ -1235,14 +1219,13 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
                        attention.smolgen.dense1_width, 1e-3f);
 
         std::vector<float> dense2;
-        DenseAffine(norm1.data(), batch_size,
-                    attention.smolgen.dense1_width, dense2_w.data, nullptr,
-                    attention.smolgen.dense2_width, dense2);
+        DenseAffine(norm1.data(), batch_size, attention.smolgen.dense1_width,
+                    dense2_w.data, nullptr, attention.smolgen.dense2_width,
+                    dense2);
         for (int row = 0; row < batch_size; ++row) {
           for (int col = 0; col < attention.smolgen.dense2_width; ++col) {
             const std::size_t idx =
-                static_cast<std::size_t>(row) *
-                    attention.smolgen.dense2_width +
+                static_cast<std::size_t>(row) * attention.smolgen.dense2_width +
                 col;
             dense2[idx] += dense2_b.data[static_cast<std::size_t>(col)];
           }
@@ -1263,8 +1246,7 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
                     attention_bias);
       }
 
-      const int score_rows =
-          batch_size * attention.heads * attention.squares;
+      const int score_rows = batch_size * attention.heads * attention.squares;
       std::vector<float> scores(
           static_cast<std::size_t>(score_rows) * attention.squares, 0.0f);
       const float scale =
@@ -1298,8 +1280,7 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
                 const std::size_t bias_index =
                     (static_cast<std::size_t>(batch) * attention.heads + head) *
                         attention.squares * attention.squares +
-                    static_cast<std::size_t>(query_square) *
-                        attention.squares +
+                    static_cast<std::size_t>(query_square) * attention.squares +
                     key_square;
                 sum += attention_bias[bias_index];
               }
@@ -1311,9 +1292,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       }
       ApplySoftmaxRows(scores, score_rows, attention.squares);
 
-      std::vector<float> context(static_cast<std::size_t>(rows) *
-                                     attention.qkv_width,
-                                 0.0f);
+      std::vector<float> context(
+          static_cast<std::size_t>(rows) * attention.qkv_width, 0.0f);
       for (int batch = 0; batch < batch_size; ++batch) {
         for (int query_square = 0; query_square < attention.squares;
              ++query_square) {
@@ -1372,12 +1352,12 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
         } else if (tensor.data.size() %
                        static_cast<std::size_t>(source.width) ==
                    0) {
-          gate_rows = static_cast<int>(
-              tensor.data.size() / static_cast<std::size_t>(source.width));
+          gate_rows = static_cast<int>(tensor.data.size() /
+                                       static_cast<std::size_t>(source.width));
         }
         if (gate_rows <= 0 || rows % gate_rows != 0) {
-          throw std::runtime_error("CPU gate stage tensor dimensions mismatch: " +
-                                   step.name);
+          throw std::runtime_error(
+              "CPU gate stage tensor dimensions mismatch: " + step.name);
         }
 
         std::vector<float> next(output.values.size(), 0.0f);
@@ -1415,8 +1395,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       const auto *dense2_w_ref = FindTensorSuffix(step, ".dense2_w");
       const auto *dense2_b_ref = FindTensorSuffix(step, ".dense2_b");
       if (!dense1_w_ref || !dense1_b_ref || !dense2_w_ref || !dense2_b_ref) {
-        throw std::runtime_error("CPU feed-forward stage has missing tensors: " +
-                                 step.name);
+        throw std::runtime_error(
+            "CPU feed-forward stage has missing tensors: " + step.name);
       }
 
       const auto &dense1_w = TensorAt(dense1_w_ref->inventory_index);
@@ -1449,9 +1429,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
         float *hidden_row =
             hidden.data() + static_cast<std::size_t>(row) * hidden_width;
         for (int out = 0; out < hidden_width; ++out) {
-          const float *weight_row =
-              dense1_w.data.data() + static_cast<std::size_t>(out) *
-                                         input_width;
+          const float *weight_row = dense1_w.data.data() +
+                                    static_cast<std::size_t>(out) * input_width;
           float sum = dense1_b.data[static_cast<std::size_t>(out)];
           for (int in = 0; in < input_width; ++in)
             sum += input_row[in] * weight_row[in];
@@ -1460,8 +1439,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       }
       ApplyDenseActivation(
           hidden, rows, hidden_width,
-          ActivationFromName(resolved_execution_plan_.format.activations
-                                 .ffn_activation));
+          ActivationFromName(
+              resolved_execution_plan_.format.activations.ffn_activation));
 
       CpuBuffer output;
       output.width = output_width;
@@ -1472,12 +1451,11 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
         const float *hidden_row =
             hidden.data() + static_cast<std::size_t>(row) * hidden_width;
         float *output_row =
-            output.values.data() + static_cast<std::size_t>(row) *
-                                       output_width;
+            output.values.data() + static_cast<std::size_t>(row) * output_width;
         for (int out = 0; out < output_width; ++out) {
           const float *weight_row =
-              dense2_w.data.data() + static_cast<std::size_t>(out) *
-                                         hidden_width;
+              dense2_w.data.data() +
+              static_cast<std::size_t>(out) * hidden_width;
           float sum = dense2_b.data[static_cast<std::size_t>(out)];
           for (int in = 0; in < hidden_width; ++in)
             sum += hidden_row[in] * weight_row[in];
@@ -1514,8 +1492,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
 
       const CpuBuffer *residual_parent = nullptr;
       float residual_scale = 1.0f;
-      float epsilon = DenseLayerNormEpsilon(resolved_execution_plan_,
-                                            step.name);
+      float epsilon =
+          DenseLayerNormEpsilon(resolved_execution_plan_, step.name);
       if (!last_feed_forward_step.empty() &&
           last_executed_step == last_feed_forward_step) {
         const auto parent_it =
@@ -1538,8 +1516,8 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
           residual_parent = &parent_it->second;
           residual_scale =
               FeedForwardResidualScale(resolved_execution_plan_, step.name);
-          epsilon = AttentionLayerNormEpsilon(resolved_execution_plan_,
-                                              step.name);
+          epsilon =
+              AttentionLayerNormEpsilon(resolved_execution_plan_, step.name);
         }
       }
 
@@ -1561,17 +1539,17 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
       "policy." + resolved_execution_plan_.policy_head + ".";
   const std::string value_prefix =
       "value." + resolved_execution_plan_.value_head + ".";
-  const std::string policy_stage =
-      outputs.count(policy_prefix + "policy_map") ? policy_prefix + "policy_map"
-                                                  : policy_prefix + "output";
+  const std::string policy_stage = outputs.count(policy_prefix + "policy_map")
+                                       ? policy_prefix + "policy_map"
+                                       : policy_prefix + "output";
   const std::string value_stage =
       outputs.count(value_prefix + "dense2")
           ? value_prefix + "dense2"
           : (outputs.count(value_prefix + "output") ? value_prefix + "output"
                                                     : last_value);
-  const std::string moves_stage =
-      outputs.count("moves_left.output") ? "moves_left.output"
-                                         : last_moves_left;
+  const std::string moves_stage = outputs.count("moves_left.output")
+                                      ? "moves_left.output"
+                                      : last_moves_left;
 
   const CpuBuffer &policy = RequireBuffer(outputs, policy_stage);
   const CpuBuffer &value = RequireBuffer(outputs, value_stage);

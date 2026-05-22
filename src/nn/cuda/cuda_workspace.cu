@@ -253,9 +253,7 @@ std::size_t CudaExecutionWorkspace::TotalBytes() const {
   return total;
 }
 
-std::uint64_t CudaExecutionWorkspace::Generation() const {
-  return generation_;
-}
+std::uint64_t CudaExecutionWorkspace::Generation() const { return generation_; }
 
 void CudaExecutionWorkspace::Clear(cudaStream_t stream) {
   for (std::size_t i = 0; i < buffers_.size(); ++i) {
