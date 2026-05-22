@@ -99,11 +99,11 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-134923`, L4, 2026-05-22 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-branch-e6fca3a`, L4, 2026-05-22 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26288509048` |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26288509047` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26288508918` |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26297438407` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26297438410` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26294200501` |
 
 Current CUDA backend boundary:
 
@@ -455,11 +455,11 @@ Current CUDA backend boundary:
   release knobs are active. The graph key includes batch size, workspace
   generation, inference-buffer generation, stream, and device output pointers;
   graph API failures reset the cache and fall back to uncaptured execution.
-  The 2026-05-22 L4 gate `metalfish-cuda-gate-20260522-134923` accepted the
+  The 2026-05-22 L4 gate `metalfish-cuda-gate-20260522-branch-e6fca3a` accepted the
   default graph path with `CUDA graph replay observed: yes`, CUDA unit tests,
   fixed BT4 references, batch parity, single/batch reuse stress,
-  auto/CUDA/hybrid UCI smokes, and batch timings of `b1=6.812ms`,
-  `b16=52.909ms`, and `b32=99.213ms`.
+  auto/CUDA/hybrid UCI smokes, the non-Apple ANE-disable hybrid smoke, and
+  batch timings of `b1=6.927ms`, `b16=53.091ms`, and `b32=98.751ms`.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
