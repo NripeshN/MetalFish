@@ -228,10 +228,24 @@ Current ANE findings:
   support final MCTS overrides, but AB does not pause for ANE root ordering.
   This preserved the ANE-sensitive repeat gate and improved the local hard-200
   sample from 199/200 to 200/200 at 3s.
+- ANE is retained as a confirming sidecar, not as a third equal engine. Puzzle
+  summaries report `ANE searches`, non-empty roots, top moves, failures,
+  agreement with MCTS, and ANE-confirmed MCTS overrides so runs distinguish
+  “configured” from “actually contributed.”
 
 Useful local probes:
 
 ```bash
+python3 tools/lichess_puzzle_runner.py \
+  --offline-csv results/judge_ane_broad_1000ms/hard200_sample.csv \
+  --engine build/metalfish --mode hybrid \
+  --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+  --hybrid-ane-root-probe \
+  --hybrid-ane-weights networks/t1-512x15x8h-distilled-swa-3395000.pb.gz \
+  --hybrid-ane-model-path build/coreml/compiled/t1-512-heads-b8.mlmodelc \
+  --hybrid-ane-compute-units cpu-ne \
+  --threads 8 --hash-mb 4096 --movetime-ms 3000
+
 python3 tools/lc0_coreml_concurrency_benchmark.py \
   networks/t1-512x15x8h-distilled-swa-3395000.pb.gz \
   --metal-probe build/metalfish_nn_probe \
