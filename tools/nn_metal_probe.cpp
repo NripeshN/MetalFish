@@ -108,13 +108,14 @@ std::string MoveString(Move move) {
 }
 
 void PrintUsage(const char *argv0) {
-  std::cerr << "Usage: " << argv0
-            << " --weights <file.pb[.gz]> [--backend auto|metal|cuda|cpu|coreml]"
-               " [--coreml-model model.mlpackage]"
-               " [--coreml-compute-units cpu|cpu-gpu|cpu-ne|all]"
-               " [--fen <fen>] [--top n] [--batch-size n] [--warmup n]"
-               " [--iterations n] [--full-input] [--full-policy]"
-               " [--ready-file path] [--start-file path]\n";
+  std::cerr
+      << "Usage: " << argv0
+      << " --weights <file.pb[.gz]> [--backend auto|metal|cuda|cpu|coreml]"
+         " [--coreml-model model.mlpackage]"
+         " [--coreml-compute-units cpu|cpu-gpu|cpu-ne|all]"
+         " [--fen <fen>] [--top n] [--batch-size n] [--warmup n]"
+         " [--iterations n] [--full-input] [--full-policy]"
+         " [--ready-file path] [--start-file path]\n";
 }
 
 Options ParseArgs(int argc, char **argv) {

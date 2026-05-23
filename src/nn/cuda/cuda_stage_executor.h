@@ -199,8 +199,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     int batch_size, const CudaStageInputBindings &input_bindings,
     CudaStageTimingCollector *timings = nullptr);
 
-CudaDenseStageSequenceOutput
-ExecuteDenseActivationLayerNormSequence(
+CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,
     const std::uint64_t *input_masks, const float *input_values,
