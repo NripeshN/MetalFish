@@ -2379,6 +2379,13 @@ void test_cuda_dense_kernels(TestCounter &tc) {
              residual_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA residual add kernel should pass or skip without a device", tc);
 
+  auto residual_norm_smoke = NN::Cuda::RunResidualLayerNormKernelSmoke();
+  std::cout << "    " << residual_norm_smoke.message << std::endl;
+  expect(residual_norm_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             residual_norm_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA residual layernorm kernel should pass or skip without a device",
+         tc);
+
   auto attention_core_smoke = NN::Cuda::RunAttentionCoreKernelSmoke();
   std::cout << "    " << attention_core_smoke.message << std::endl;
   expect(attention_core_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||

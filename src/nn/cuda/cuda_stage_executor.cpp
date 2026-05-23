@@ -1029,17 +1029,17 @@ CudaDenseStageOutput ExecuteGateStage(const NetworkResolvedExecutionStep &gate,
   return output;
 }
 
-CudaDenseStageOutput
-ExecuteFeedForwardStage(const NetworkResolvedExecutionPlan &execution_plan,
-                        const NetworkResolvedExecutionStep &ffn,
-                        const CudaWeightBuffers &weights, const float *input,
-                        const CudaExecutionTape &tape,
-                        CudaExecutionWorkspace &workspace, int rows) {
+static CudaDenseStageOutput
+ExecuteFeedForwardStageImpl(const NetworkResolvedExecutionPlan &execution_plan,
+                            const NetworkResolvedExecutionStep &ffn,
+                            const CudaFeedForwardTensors &tensors,
+                            const float *input, const CudaExecutionTape &tape,
+                            CudaExecutionWorkspace &workspace, int rows,
+                            bool defer_dense2_bias) {
   if (rows <= 0)
     throw std::runtime_error("CUDA feed-forward stage received empty batch");
   if (!input)
     throw std::runtime_error("CUDA feed-forward stage input is missing");
-  const auto tensors = ResolveFeedForwardTensors(ffn, weights);
 
   const auto &dense1_binding = tape.RequireName(ffn.name + ".dense1");
   const auto &activation_binding = tape.RequireName(ffn.name + ".activation");
@@ -1074,10 +1074,23 @@ ExecuteFeedForwardStage(const NetworkResolvedExecutionPlan &execution_plan,
       tensors.hidden_width,
       ActivationFromString(execution_plan.format.activations.ffn_activation),
       stream);
+  const float *dense2_bias =
+      defer_dense2_bias ? nullptr : tensors.dense2_bias.data;
   LaunchDenseAffineKernel(output.activation, tensors.dense2_weight.data,
-                          tensors.dense2_bias.data, output.feed_forward, rows,
+                          dense2_bias, output.feed_forward, rows,
                           tensors.hidden_width, tensors.output_width, stream);
   return output;
+}
+
+CudaDenseStageOutput
+ExecuteFeedForwardStage(const NetworkResolvedExecutionPlan &execution_plan,
+                        const NetworkResolvedExecutionStep &ffn,
+                        const CudaWeightBuffers &weights, const float *input,
+                        const CudaExecutionTape &tape,
+                        CudaExecutionWorkspace &workspace, int rows) {
+  const auto tensors = ResolveFeedForwardTensors(ffn, weights);
+  return ExecuteFeedForwardStageImpl(execution_plan, ffn, tensors, input, tape,
+                                     workspace, rows, false);
 }
 
 CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
@@ -1088,8 +1101,9 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
     CudaExecutionWorkspace &workspace, int rows) {
   RequireLayerNormTensors(norm);
 
-  CudaDenseStageOutput output = ExecuteFeedForwardStage(
-      execution_plan, ffn, weights, input, tape, workspace, rows);
+  const auto tensors = ResolveFeedForwardTensors(ffn, weights);
+  CudaDenseStageOutput output = ExecuteFeedForwardStageImpl(
+      execution_plan, ffn, tensors, input, tape, workspace, rows, true);
   if (output.input_width != output.output_width) {
     throw std::runtime_error("CUDA feed-forward residual width mismatch");
   }
@@ -1116,9 +1130,10 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
   output.output = output.normalized;
 
   cudaStream_t stream = workspace.Stream();
-  LaunchResidualLayerNormKernel(
-      input, output.feed_forward, gamma.data, beta.data, output.residual,
-      output.normalized, rows, output.output_width,
+  LaunchResidualBiasLayerNormKernel(
+      input, output.feed_forward, tensors.dense2_bias.data, gamma.data,
+      beta.data, output.feed_forward, output.residual, output.normalized, rows,
+      output.output_width,
       FeedForwardResidualScale(execution_plan, ffn.name),
       FeedForwardLayerNormEpsilon(execution_plan, ffn.name), stream);
   return output;

@@ -332,6 +332,60 @@ __global__ void ResidualLayerNormKernel(const float *parent,
   }
 }
 
+__global__ void ResidualBiasLayerNormKernel(
+    const float *parent, const float *secondary, const float *secondary_bias,
+    const float *gamma, const float *beta, float *biased_secondary,
+    float *residual, float *output, int width, float secondary_scale,
+    float epsilon) {
+  extern __shared__ float reductions[];
+  float *sum_storage = reductions;
+  float *square_storage = reductions + blockDim.x;
+
+  const int row = blockIdx.x;
+  const std::size_t row_offset = static_cast<std::size_t>(row) * width;
+  const float *parent_row = parent + row_offset;
+  const float *secondary_row = secondary + row_offset;
+  float *biased_secondary_row = biased_secondary + row_offset;
+  float *residual_row = residual + row_offset;
+  float *output_row = output + row_offset;
+
+  float sum = 0.0f;
+  float square_sum = 0.0f;
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float biased = secondary_row[col] + secondary_bias[col];
+    const float value = parent_row[col] + biased * secondary_scale;
+    sum += value;
+    square_sum += value * value;
+  }
+
+  sum_storage[threadIdx.x] = sum;
+  square_storage[threadIdx.x] = square_sum;
+  __syncthreads();
+
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      sum_storage[threadIdx.x] += sum_storage[threadIdx.x + stride];
+      square_storage[threadIdx.x] += square_storage[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+
+  const float mean = sum_storage[0] / static_cast<float>(width);
+  float variance = square_storage[0] / static_cast<float>(width) - mean * mean;
+  if (variance < 0.0f)
+    variance = 0.0f;
+  const float inv_std = rsqrtf(variance + epsilon);
+
+  for (int col = threadIdx.x; col < width; col += blockDim.x) {
+    const float biased = secondary_row[col] + secondary_bias[col];
+    const float value = parent_row[col] + biased * secondary_scale;
+    biased_secondary_row[col] = biased;
+    residual_row[col] = value;
+    const float normalized = (value - mean) * inv_std;
+    output_row[col] = normalized * gamma[col] + beta[col];
+  }
+}
+
 __global__ void AttentionBiasAddKernel(float *scores, const float *bias,
                                        int total) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -940,6 +994,40 @@ void LaunchResidualLayerNormKernel(const float *parent, const float *secondary,
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("ResidualLayerNormKernel synchronize", status));
+  }
+}
+
+void LaunchResidualBiasLayerNormKernel(
+    const float *parent, const float *secondary, const float *secondary_bias,
+    const float *gamma, const float *beta, float *biased_secondary,
+    float *residual, float *output, int rows, int width, float secondary_scale,
+    float epsilon, cudaStream_t stream) {
+  if (!parent || !secondary || !secondary_bias || !gamma || !beta ||
+      !biased_secondary || !residual || !output) {
+    throw std::runtime_error(
+        "CUDA residual bias layernorm kernel received null buffer");
+  }
+  if (rows <= 0 || width <= 0 || epsilon <= 0.0f) {
+    throw std::runtime_error(
+        "CUDA residual bias layernorm kernel dimensions are invalid");
+  }
+
+  constexpr int kThreads = 256;
+  const std::size_t shared_bytes = 2 * kThreads * sizeof(float);
+  ResidualBiasLayerNormKernel<<<rows, kThreads, shared_bytes, stream>>>(
+      parent, secondary, secondary_bias, gamma, beta, biased_secondary, residual,
+      output, width, secondary_scale, epsilon);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("ResidualBiasLayerNormKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "ResidualBiasLayerNormKernel synchronize", status));
   }
 }
 
@@ -1710,6 +1798,130 @@ CudaKernelSmokeResult RunResidualAddKernelSmoke() {
 
   if (result.message.empty())
     result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunResidualLayerNormKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kRows = 2;
+  constexpr int kWidth = 4;
+  constexpr float kScale = 0.5f;
+  constexpr float kEpsilon = 1e-5f;
+  const std::vector<float> parent = {
+      1.0f, -2.0f, 0.5f, 3.0f, -1.0f, 0.25f, 2.0f, -0.5f,
+  };
+  const std::vector<float> secondary = {
+      2.0f, 0.5f, -4.0f, 1.5f, -2.5f, 3.0f, 0.25f, -1.0f,
+  };
+  const std::vector<float> bias = {0.25f, -0.5f, 1.0f, 0.125f};
+  const std::vector<float> gamma = {1.0f, 0.5f, -1.25f, 2.0f};
+  const std::vector<float> beta = {0.0f, -0.25f, 0.5f, 1.0f};
+  std::vector<float> expected_biased(kRows * kWidth, 0.0f);
+  std::vector<float> expected_residual(kRows * kWidth, 0.0f);
+  std::vector<float> expected_output(kRows * kWidth, 0.0f);
+  for (int row = 0; row < kRows; ++row) {
+    const std::size_t row_offset = static_cast<std::size_t>(row) * kWidth;
+    float sum = 0.0f;
+    float square_sum = 0.0f;
+    for (int col = 0; col < kWidth; ++col) {
+      const std::size_t index = row_offset + col;
+      const float biased = secondary[index] + bias[col];
+      const float value = parent[index] + biased * kScale;
+      expected_biased[index] = biased;
+      expected_residual[index] = value;
+      sum += value;
+      square_sum += value * value;
+    }
+    const float mean = sum / static_cast<float>(kWidth);
+    float variance = square_sum / static_cast<float>(kWidth) - mean * mean;
+    if (variance < 0.0f)
+      variance = 0.0f;
+    const float inv_std = 1.0f / std::sqrt(variance + kEpsilon);
+    for (int col = 0; col < kWidth; ++col) {
+      const std::size_t index = row_offset + col;
+      const float normalized = (expected_residual[index] - mean) * inv_std;
+      expected_output[index] = normalized * gamma[col] + beta[col];
+    }
+  }
+
+  std::vector<float> actual_biased(kRows * kWidth, 0.0f);
+  std::vector<float> actual_residual(kRows * kWidth, 0.0f);
+  std::vector<float> actual_output(kRows * kWidth, 0.0f);
+
+  float *device_parent = nullptr;
+  float *device_secondary = nullptr;
+  float *device_bias = nullptr;
+  float *device_gamma = nullptr;
+  float *device_beta = nullptr;
+  float *device_residual = nullptr;
+  float *device_output = nullptr;
+  try {
+    AllocateDevice(&device_parent, parent.size(),
+                   "cudaMalloc(residual_norm_parent)");
+    AllocateDevice(&device_secondary, secondary.size(),
+                   "cudaMalloc(residual_norm_secondary)");
+    AllocateDevice(&device_bias, bias.size(), "cudaMalloc(residual_norm_bias)");
+    AllocateDevice(&device_gamma, gamma.size(),
+                   "cudaMalloc(residual_norm_gamma)");
+    AllocateDevice(&device_beta, beta.size(), "cudaMalloc(residual_norm_beta)");
+    AllocateDevice(&device_residual, actual_residual.size(),
+                   "cudaMalloc(residual_norm_residual)");
+    AllocateDevice(&device_output, actual_output.size(),
+                   "cudaMalloc(residual_norm_output)");
+    UploadFloats(device_parent, parent, "cudaMemcpy(residual_norm_parent)");
+    UploadFloats(device_secondary, secondary,
+                 "cudaMemcpy(residual_norm_secondary)");
+    UploadFloats(device_bias, bias, "cudaMemcpy(residual_norm_bias)");
+    UploadFloats(device_gamma, gamma, "cudaMemcpy(residual_norm_gamma)");
+    UploadFloats(device_beta, beta, "cudaMemcpy(residual_norm_beta)");
+
+    LaunchResidualBiasLayerNormKernel(
+        device_parent, device_secondary, device_bias, device_gamma, device_beta,
+        device_secondary, device_residual, device_output, kRows, kWidth, kScale,
+        kEpsilon);
+    DownloadFloats(actual_biased, device_secondary,
+                   "cudaMemcpy(residual_norm_biased)");
+    DownloadFloats(actual_residual, device_residual,
+                   "cudaMemcpy(residual_norm_residual)");
+    DownloadFloats(actual_output, device_output,
+                   "cudaMemcpy(residual_norm_output)");
+  } catch (const std::exception &e) {
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+  }
+
+  FreeDevice(device_parent);
+  FreeDevice(device_secondary);
+  FreeDevice(device_bias);
+  FreeDevice(device_gamma);
+  FreeDevice(device_beta);
+  FreeDevice(device_residual);
+  FreeDevice(device_output);
+
+  if (!result.message.empty()) {
+    return result;
+  }
+
+  for (std::size_t i = 0; i < expected_output.size(); ++i) {
+    if (std::fabs(actual_biased[i] - expected_biased[i]) > 1e-6f ||
+        std::fabs(actual_residual[i] - expected_residual[i]) > 1e-6f ||
+        std::fabs(actual_output[i] - expected_output[i]) > 1e-5f) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA residual bias layernorm kernel output mismatch";
+      return result;
+    }
+  }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
   return result;
 }
 
