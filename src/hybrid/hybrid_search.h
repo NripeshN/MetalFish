@@ -359,7 +359,7 @@ private:
   void update_mcts_policy_from_ab();
   void publish_mcts_state();
   std::vector<Move> collect_mcts_root_order_hints();
-  void start_ane_root_probe();
+  void start_ane_root_probe(bool reuse_existing = false);
   std::vector<Move> compute_ane_root_order_hints();
   std::vector<Move> collect_ane_root_order_hints();
   std::vector<Move> collect_root_order_hints();

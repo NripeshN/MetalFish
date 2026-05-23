@@ -324,7 +324,7 @@ void ParallelHybridSearch::ponderhit() {
 
   search_start_ms_.store(SteadyNowMs(), std::memory_order_release);
   time_budget_ms_.store(calculate_time_budget(), std::memory_order_release);
-  start_ane_root_probe();
+  start_ane_root_probe(true);
 
   if (mcts_search_) {
     std::lock_guard<std::mutex> lock(mcts_start_mutex_);
@@ -1340,24 +1340,35 @@ std::vector<Move> ParallelHybridSearch::collect_mcts_root_order_hints() {
   return hints;
 }
 
-void ParallelHybridSearch::start_ane_root_probe() {
-  if (ane_root_hints_future_.valid())
-    ane_root_hints_future_.wait();
-
+void ParallelHybridSearch::start_ane_root_probe(bool reuse_existing) {
   auto trace_skip = [&](const std::string &reason) {
     if (config_.trace_decisions)
       send_info_string("Hybrid: ANE root probe skipped: " + reason);
   };
 
+  if (ane_root_hints_future_.valid()) {
+    if (reuse_existing) {
+      const auto status =
+          ane_root_hints_future_.wait_for(std::chrono::milliseconds(0));
+      if (status != std::future_status::ready) {
+        trace_skip("already running");
+        return;
+      }
+      {
+        std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+        if (!ane_root_hints_.empty()) {
+          trace_skip("already ready");
+          return;
+        }
+      }
+    }
+    ane_root_hints_future_.wait();
+  }
+
   if (!config_.ane_root_probe)
     return;
   if (!ane_evaluator_) {
     trace_skip("no evaluator");
-    return;
-  }
-  if (limits_.ponderMode &&
-      !ponderhit_received_.load(std::memory_order_acquire)) {
-    trace_skip("speculative ponder");
     return;
   }
   const int min_budget = std::max(0, config_.ane_min_budget_ms);

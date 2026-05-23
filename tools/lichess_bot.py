@@ -395,7 +395,20 @@ BOT_ONLINE_FETCH_LIMIT = max(
     1, min(512, env_int("METALFISH_BOT_ONLINE_FETCH_LIMIT", 512))
 )
 BOT_ONLINE_CACHE_TTL_S = env_float("METALFISH_BOT_ONLINE_CACHE_TTL_S", 20.0)
+SEEK_NO_CANDIDATE_RETRY_S = max(
+    5.0, min(300.0, env_float("METALFISH_SEEK_NO_CANDIDATE_RETRY_S", 30.0))
+)
+SEEK_COOLDOWN_RETRY_MIN_S = max(
+    1.0, min(60.0, env_float("METALFISH_SEEK_COOLDOWN_RETRY_MIN_S", 5.0))
+)
+SEEK_COOLDOWN_RETRY_MAX_S = max(
+    SEEK_COOLDOWN_RETRY_MIN_S,
+    min(900.0, env_float("METALFISH_SEEK_COOLDOWN_RETRY_MAX_S", 120.0)),
+)
 PLAYING_STATUS_CACHE_TTL_S = env_float("METALFISH_PLAYING_STATUS_CACHE_TTL_S", 5.0)
+ACCEPTED_CHALLENGE_RESERVE_TTL_S = max(
+    5.0, min(60.0, env_float("METALFISH_ACCEPTED_CHALLENGE_RESERVE_TTL_S", 30.0))
+)
 TIME_CONTROL_DECLINE_COOLDOWN_S = max(
     600, min(86_400, env_int("METALFISH_TIME_CONTROL_DECLINE_COOLDOWN_S", 21_600))
 )
@@ -1743,6 +1756,7 @@ class LichessBot:
         self._pending_challenge_id: str | None = None
         self._pending_challenge_target: str | None = None
         self._pending_challenge_speed: str | None = None
+        self._accepted_challenge_reservations: dict[str, float] = {}
         self._challenge_sent_at: float = 0
         self._challenge_retries = 0
         self.book = OpeningBook(
@@ -1892,10 +1906,12 @@ class LichessBot:
         r.raise_for_status()
         return r.json()
 
-    def accept_challenge(self, challenge_id: str):
+    def accept_challenge(self, challenge_id: str) -> bool:
         r = self.api_post(f"/challenge/{challenge_id}/accept")
         if r.status_code != 200:
             print(f"  Could not accept {challenge_id}: {r.status_code}")
+            return False
+        return True
 
     def decline_challenge(self, challenge_id: str, reason: str = "generic"):
         self.api_post(f"/challenge/{challenge_id}/decline", json={"reason": reason})
@@ -1924,6 +1940,23 @@ class LichessBot:
         return min(len(lhs), len(rhs)) >= 8 and (
             lhs.startswith(rhs) or rhs.startswith(lhs)
         )
+
+    def _pending_challenge_matches_game_start(
+        self,
+        pending_id: str | None,
+        pending_target: str | None,
+        pending_speed: str | None,
+        game_id: str | None,
+        event_opponent: str | None,
+        event_speed: str | None,
+    ) -> bool:
+        if self._same_game_id(pending_id, game_id):
+            return True
+        if not pending_target or not event_opponent:
+            return False
+        if self._cooldown_key(pending_target) != self._cooldown_key(event_opponent):
+            return False
+        return not pending_speed or not event_speed or pending_speed == event_speed
 
     def _game_active_status(self, game_id: str) -> bool | None:
         now = time.time()
@@ -2432,7 +2465,38 @@ class LichessBot:
 
     def _reserved_games(self) -> int:
         pending = 1 if self._pending_challenge_id else 0
-        return len(self.active_games) + pending
+        return len(self.active_games) + pending + self._accepted_challenge_reserve_count()
+
+    def _cleanup_accepted_challenge_reservations(self) -> None:
+        reservations = getattr(self, "_accepted_challenge_reservations", {})
+        now = time.time()
+        self._accepted_challenge_reservations = {
+            challenge_id: expires_at
+            for challenge_id, expires_at in reservations.items()
+            if expires_at > now
+        }
+
+    def _accepted_challenge_reserve_count(self) -> int:
+        self._cleanup_accepted_challenge_reservations()
+        return len(getattr(self, "_accepted_challenge_reservations", {}))
+
+    def _reserve_accepted_challenge(self, challenge_id: str | None) -> None:
+        if not challenge_id:
+            return
+        self._cleanup_accepted_challenge_reservations()
+        self._accepted_challenge_reservations[str(challenge_id)] = (
+            time.time() + ACCEPTED_CHALLENGE_RESERVE_TTL_S
+        )
+
+    def _clear_accepted_challenge_reservations(self) -> None:
+        self._accepted_challenge_reservations = {}
+
+    def _clear_accepted_challenge_reservation(self, challenge_id: str | None) -> None:
+        if not challenge_id:
+            return
+        reservations = getattr(self, "_accepted_challenge_reservations", {})
+        reservations.pop(str(challenge_id), None)
+        self._accepted_challenge_reservations = reservations
 
     def _completed_limit_reached(self) -> bool:
         limit = getattr(self.args, "quit_after_games", 0) or 0
@@ -2597,6 +2661,7 @@ class LichessBot:
             self._seek_timer.cancel()
             self._seek_timer = None
         self._cancel_pending_challenge("drain requested")
+        self._clear_accepted_challenge_reservations()
         self._close_warm_engine()
         if not self.active_games:
             self._shutdown.set()
@@ -2880,12 +2945,19 @@ class LichessBot:
             b
             for b in bots
             if not self._bot_on_cooldown(str(b.get("id") or b.get("name") or ""), now)
-            and not self._bot_speed_on_cooldown(
+        ]
+        if not bots:
+            return [], "All eligible bots are cooling down after prior refusals"
+
+        bots = [
+            b
+            for b in bots
+            if not self._bot_speed_on_cooldown(
                 str(b.get("id") or b.get("name") or ""), speed, now
             )
         ]
         if not bots:
-            return [], "All eligible bots are cooling down after declines/timeouts"
+            return [], f"All eligible bots are cooling down for {speed}"
 
         if getattr(self.args, "avoid_repeat_format", False):
             bots = [
@@ -2898,6 +2970,10 @@ class LichessBot:
             if not bots:
                 return [], f"All eligible bots were already played in {speed}"
 
+        bots = [b for b in bots if self._bot_plays_speed(b, speed)]
+        if not bots:
+            return [], f"No eligible bots active in {speed}"
+
         if rated:
             bots = [b for b in bots if self._rated_opponent_allowed(b, speed)]
             if not bots:
@@ -2907,12 +2983,81 @@ class LichessBot:
         if not candidates:
             if self.args.elo_seek:
                 return [], "No opponents inside Elo seek range"
-            candidates = [b.get("id", "") for b in bots if b.get("id")]
-            random.shuffle(candidates)
+            return [], f"No eligible bots active in {speed}"
 
         if not candidates:
             return [], "No eligible bots online"
         return candidates, None
+
+    def _next_cooldown_retry_delay(
+        self,
+        speed: str | None,
+        *,
+        include_global: bool = True,
+        include_speed: bool = True,
+    ) -> float:
+        now = time.time()
+        expires_at: list[float] = []
+
+        raw_global = getattr(self, "_declined_cooldown", {})
+        if include_global and isinstance(raw_global, dict):
+            for expires in raw_global.values():
+                try:
+                    expires_f = float(expires)
+                except (TypeError, ValueError):
+                    continue
+                if expires_f > now:
+                    expires_at.append(expires_f)
+
+        raw_speed = getattr(self, "_speed_declined_cooldown", {})
+        if include_speed and speed in ACCEPTED_SPEEDS and isinstance(raw_speed, dict):
+            entries = raw_speed.get(speed, {})
+            if isinstance(entries, dict):
+                for expires in entries.values():
+                    try:
+                        expires_f = float(expires)
+                    except (TypeError, ValueError):
+                        continue
+                    if expires_f > now:
+                        expires_at.append(expires_f)
+
+        if not expires_at:
+            return SEEK_NO_CANDIDATE_RETRY_S
+        wait = min(expires_at) - now
+        return max(
+            SEEK_COOLDOWN_RETRY_MIN_S,
+            min(SEEK_COOLDOWN_RETRY_MAX_S, wait),
+        )
+
+    def _seek_no_candidate_retry_delay(
+        self, reason: str | None, speed: str | None
+    ) -> float:
+        reason_text = (reason or "").lower()
+        if bool(speed) and f"cooling down for {speed}".lower() in reason_text:
+            return self._next_cooldown_retry_delay(
+                speed, include_global=False, include_speed=True
+            )
+        if "cooling down" in reason_text:
+            return self._next_cooldown_retry_delay(
+                speed, include_global=True, include_speed=False
+            )
+        if "already played" in reason_text:
+            return min(SEEK_COOLDOWN_RETRY_MAX_S, max(SEEK_NO_CANDIDATE_RETRY_S, 60.0))
+        return SEEK_NO_CANDIDATE_RETRY_S
+
+    def _seek_no_candidate_should_rotate(
+        self, reason: str | None, speed: str | None
+    ) -> bool:
+        if not getattr(self.args, "rotate", False):
+            return False
+        reason_text = (reason or "").lower()
+        return bool(speed) and (
+            "already played" in reason_text
+            or f"active in {speed}".lower() in reason_text
+            or f"cooling down for {speed}".lower() in reason_text
+            or "elo seek range" in reason_text
+            or "rating floor" in reason_text
+        )
 
     def preview_seek_once(self, show_config: bool = True) -> bool:
         if show_config:
@@ -2990,15 +3135,30 @@ class LichessBot:
 
             candidates, reason = self._seek_candidates(bots, speed, rated)
             if reason:
-                print(f"  {reason}, retrying in 30s...")
+                rotated = False
+                if self._seek_no_candidate_should_rotate(reason, speed):
+                    rotated = self._advance_rotation_to_new_speed(speed)
+                retry_s = (
+                    max(1.0, CHALLENGE_CANCEL_GRACE_S)
+                    if rotated
+                    else self._seek_no_candidate_retry_delay(reason, speed)
+                )
+                if rotated:
+                    print(f"  {reason}, trying next speed...")
+                else:
+                    print(
+                        f"  {reason}, retrying in "
+                        f"{self._format_duration(int(round(retry_s)))}..."
+                    )
                 self._audit_seek(
                     "seek_no_candidates",
                     speed=speed,
                     rated=rated,
                     reason=reason,
-                    retry_s=30,
+                    retry_s=round(float(retry_s), 3),
+                    rotated=rotated,
                 )
-                self._schedule_retry(30)
+                self._schedule_retry(retry_s)
                 return
 
             target = candidates[0]
@@ -3288,6 +3448,16 @@ class LichessBot:
         if self._pending_challenge_id:
             target = self._pending_challenge_target or self._pending_challenge_id
             speed = getattr(self, "_pending_challenge_speed", None)
+            if len(self.active_games) >= self.args.max_games:
+                self._audit_seek(
+                    "challenge_canceled_slot_filled",
+                    target=target,
+                    speed=speed,
+                    active_games=len(self.active_games),
+                    max_games=self.args.max_games,
+                )
+                self._cancel_pending_challenge("slot filled")
+                return None
             print(f"  Challenge to {target} timed out")
             self._cooldown_bot(target, duration=600)
             self._audit_seek("challenge_timeout", target=target, speed=speed)
@@ -3328,6 +3498,21 @@ class LichessBot:
     def _advance_rotation(self):
         rotation_tcs = self._rotation_tcs()
         self._rotation_idx = (self._rotation_idx + 1) % len(rotation_tcs)
+
+    def _advance_rotation_to_new_speed(self, current_speed: str | None) -> bool:
+        if not self.args.rotate:
+            return False
+        rotation_tcs = self._rotation_tcs()
+        if len(rotation_tcs) <= 1:
+            return False
+        start_idx = self._rotation_idx
+        for _ in range(len(rotation_tcs)):
+            self._advance_rotation()
+            limit, inc = rotation_tcs[self._rotation_idx % len(rotation_tcs)]
+            if self._tc_to_speed(limit, inc) != current_speed:
+                return True
+        self._rotation_idx = start_idx
+        return False
 
     def _tc_to_speed(self, limit: int, inc: int) -> str:
         estimated_duration = limit + 40 * inc
@@ -3399,10 +3584,11 @@ class LichessBot:
 
         if not getattr(self.args, "elo_seek", False):
             # Still filter by speed activity even without elo-seek
-            active = [b for b in bots if self._bot_plays_speed(b, speed)]
-            if not active:
-                active = bots
-            ids = [str(b.get("id", "")) for b in active if b.get("id")]
+            ids = [
+                str(b.get("id", ""))
+                for b in bots
+                if b.get("id") and self._bot_plays_speed(b, speed)
+            ]
             random.shuffle(ids)
             return ids
 
@@ -3508,6 +3694,8 @@ class LichessBot:
         speed = ch.get("speed", "")
         if speed not in ACCEPTED_SPEEDS:
             return f"unsupported speed {speed or '?'}"
+        if self._reserved_games() >= self.args.max_games:
+            return "max games reached"
         if not self._resources_allow_new_game():
             return "resources busy"
         if rated:
@@ -3527,8 +3715,6 @@ class LichessBot:
                 return "bullet disabled"
             if increment == 0 and not self.args.include_zero_increment:
                 return "zero increment disabled"
-        if self._reserved_games() >= self.args.max_games:
-            return "max games reached"
         return None
 
     def should_accept(self, challenge: dict) -> bool:
@@ -3609,6 +3795,12 @@ class LichessBot:
                     print(f"  [{game_id}] Stream error: {e}")
                     self._audit(game_id, "stream_error", error=str(e))
                 if finished:
+                    break
+
+                if self._game_was_completed(game_id):
+                    finished = True
+                    inferred_finished = True
+                    self._audit(game_id, "stream_completed_from_event", attempt=attempt)
                     break
 
                 active_status = self._game_active_status(game_id)
@@ -4838,7 +5030,14 @@ class LichessBot:
         pending_target = self._pending_challenge_target
         pending_speed = getattr(self, "_pending_challenge_speed", None)
         if pending_id:
-            if self._same_game_id(pending_id, game_id):
+            if self._pending_challenge_matches_game_start(
+                pending_id,
+                pending_target,
+                pending_speed,
+                game_id,
+                event_opponent,
+                event_speed,
+            ):
                 self._mark_seek_opponent_played(pending_target, pending_speed)
                 self._cancel_pending_challenge("game started")
             else:
@@ -4852,6 +5051,7 @@ class LichessBot:
                     speed=event_speed,
                 )
                 self._cancel_pending_challenge("game started elsewhere")
+        self._clear_accepted_challenge_reservations()
 
         self._reset_elo_range()
         self._tc_failures = 0
@@ -4900,54 +5100,146 @@ class LichessBot:
         self.active_games[game_id] = t
         t.start()
 
+    def _handle_challenge_event(self, event: dict) -> None:
+        ch = event.get("challenge", {})
+        if not isinstance(ch, dict):
+            return
+        challenger_user = ch.get("challenger", {})
+        challenger = (
+            challenger_user.get("name") or challenger_user.get("id") or "?"
+            if isinstance(challenger_user, dict)
+            else str(challenger_user or "?")
+        )
+        challenger_id = self._user_id(challenger_user)
+        tc = ch.get("timeControl", {})
+        if isinstance(tc, dict) and tc.get("type") == "clock":
+            try:
+                limit = int(tc.get("limit", 0) or 0)
+                increment = int(tc.get("increment", 0) or 0)
+            except (TypeError, ValueError):
+                limit = 0
+                increment = 0
+            tc_str = f"{limit//60}+{increment}"
+        elif isinstance(tc, dict):
+            tc_str = str(tc.get("type", "?"))
+        else:
+            tc_str = str(tc or "?")
+        rated = "rated" if ch.get("rated") else "casual"
+
+        if challenger_id == self.bot_id:
+            return
+
+        challenge_id = ch.get("id")
+        reason = self._challenge_reject_reason(event)
+        if reason is None:
+            if not challenge_id:
+                print(f"  Could not accept challenge from {challenger}: missing id")
+                return
+            print(f"  Accepting {rated} from {challenger} ({tc_str})")
+            if self.accept_challenge(challenge_id):
+                self._reserve_accepted_challenge(challenge_id)
+        else:
+            print(f"  Declining from {challenger} ({tc_str}, {rated}): {reason}")
+            if challenge_id:
+                self.decline_challenge(challenge_id)
+
+    def _handle_challenge_resolution_event(self, event: dict, etype: str) -> None:
+        challenge_id, event_target = self._challenge_event_identity(event)
+        event_reason = self._challenge_event_reason(event)
+        event_speed = self._challenge_event_speed(event)
+        label = "declined" if etype == "challengeDeclined" else "canceled"
+        if challenge_id:
+            self._clear_accepted_challenge_reservation(challenge_id)
+        if not self._pending_challenge_id:
+            self._cooldown_challenge_failure(
+                event_target, event_speed, event_reason, duration=600
+            )
+            self._audit_seek(
+                "challenge_event_untracked",
+                label=label,
+                challenge_id=challenge_id,
+                target=event_target,
+                speed=event_speed,
+                reason=event_reason,
+            )
+            return
+        if challenge_id and challenge_id != self._pending_challenge_id:
+            self._cooldown_challenge_failure(
+                event_target, event_speed, event_reason, duration=600
+            )
+            self._audit_seek(
+                "challenge_event_stale",
+                label=label,
+                challenge_id=challenge_id,
+                pending_id=self._pending_challenge_id,
+                target=event_target,
+                speed=event_speed,
+                reason=event_reason,
+            )
+            return
+        if self._pending_challenge_id and not challenge_id:
+            pending_target = self._pending_challenge_target
+            pending_speed = getattr(self, "_pending_challenge_speed", None)
+            target_matches = bool(
+                pending_target
+                and event_target
+                and self._cooldown_key(pending_target)
+                == self._cooldown_key(event_target)
+            )
+            speed_matches = (
+                not event_speed or not pending_speed or event_speed == pending_speed
+            )
+            if target_matches and speed_matches:
+                challenge_id = self._pending_challenge_id
+            else:
+                self._audit_seek(
+                    "challenge_event_unidentified",
+                    label=label,
+                    target=event_target,
+                    speed=event_speed,
+                    reason=event_reason,
+                )
+                return
+
+        target = self._pending_challenge_target or event_target
+        reason_suffix = f": {event_reason}" if event_reason else ""
+        print(f"  Challenge to {target} {label}{reason_suffix}")
+        self._cooldown_challenge_failure(
+            target,
+            getattr(self, "_pending_challenge_speed", None),
+            event_reason,
+            duration=600,
+        )
+        self._audit_seek(
+            "challenge_event",
+            label=label,
+            challenge_id=challenge_id,
+            target=target,
+            speed=getattr(self, "_pending_challenge_speed", None),
+            reason=event_reason,
+        )
+        self._clear_pending_challenge()
+        self._tc_failures += 1
+        if self._tc_failures >= 5 and self.args.rotate:
+            print(f"  TC getting too many declines, trying next format...")
+            self._advance_rotation()
+            self._tc_failures = 0
+            self._cleanup_cooldowns()
+        if self._should_seek():
+            self._schedule_retry(2)
+
     def _handle_event(self, event: dict):
         if not isinstance(event, dict):
             return
         etype = event.get("type", "")
 
         if etype == "challenge":
-            ch = event.get("challenge", {})
-            if not isinstance(ch, dict):
-                return
-            challenger_user = ch.get("challenger", {})
-            challenger = (
-                challenger_user.get("name") or challenger_user.get("id") or "?"
-                if isinstance(challenger_user, dict)
-                else str(challenger_user or "?")
-            )
-            challenger_id = self._user_id(challenger_user)
-            tc = ch.get("timeControl", {})
-            if isinstance(tc, dict) and tc.get("type") == "clock":
-                try:
-                    limit = int(tc.get("limit", 0) or 0)
-                    increment = int(tc.get("increment", 0) or 0)
-                except (TypeError, ValueError):
-                    limit = 0
-                    increment = 0
-                tc_str = f"{limit//60}+{increment}"
-            elif isinstance(tc, dict):
-                tc_str = str(tc.get("type", "?"))
+            seek_lock = getattr(self, "_seek_lock", None)
+            if seek_lock is None:
+                self._handle_challenge_event(event)
             else:
-                tc_str = str(tc or "?")
-            rated = "rated" if ch.get("rated") else "casual"
-
-            if challenger_id == self.bot_id:
-                return
-
-            challenge_id = ch.get("id")
-            reason = self._challenge_reject_reason(event)
-            if reason is None:
-                if not challenge_id:
-                    print(f"  Could not accept challenge from {challenger}: missing id")
-                    return
-                print(f"  Accepting {rated} from {challenger} ({tc_str})")
-                self.accept_challenge(challenge_id)
-            else:
-                print(
-                    f"  Declining from {challenger} ({tc_str}, {rated}): " f"{reason}"
-                )
-                if challenge_id:
-                    self.decline_challenge(challenge_id)
+                with seek_lock:
+                    self._handle_challenge_event(event)
 
         elif etype == "gameStart":
             game_id = self._event_game_id(event)
@@ -4962,77 +5254,19 @@ class LichessBot:
             game_id = self._event_game_id(event)
             if game_id:
                 self._mark_game_completed(game_id)
+                cache = getattr(self, "_playing_status_cache", {})
+                cache[game_id] = (time.time() + PLAYING_STATUS_CACHE_TTL_S, False)
+                self._playing_status_cache = cache
             if self._draining.is_set() and not self.active_games:
                 self._shutdown.set()
 
         elif etype in ("challengeDeclined", "challengeCanceled"):
-            challenge_id, event_target = self._challenge_event_identity(event)
-            event_reason = self._challenge_event_reason(event)
-            event_speed = self._challenge_event_speed(event)
-            label = "declined" if etype == "challengeDeclined" else "canceled"
-            if not self._pending_challenge_id:
-                self._cooldown_challenge_failure(
-                    event_target, event_speed, event_reason, duration=600
-                )
-                self._audit_seek(
-                    "challenge_event_untracked",
-                    label=label,
-                    challenge_id=challenge_id,
-                    target=event_target,
-                    speed=event_speed,
-                    reason=event_reason,
-                )
-                return
-            if challenge_id and challenge_id != self._pending_challenge_id:
-                self._cooldown_challenge_failure(
-                    event_target, event_speed, event_reason, duration=600
-                )
-                self._audit_seek(
-                    "challenge_event_stale",
-                    label=label,
-                    challenge_id=challenge_id,
-                    pending_id=self._pending_challenge_id,
-                    target=event_target,
-                    speed=event_speed,
-                    reason=event_reason,
-                )
-                return
-            if self._pending_challenge_id and not challenge_id:
-                self._audit_seek(
-                    "challenge_event_unidentified",
-                    label=label,
-                    target=event_target,
-                    speed=event_speed,
-                    reason=event_reason,
-                )
-                return
-
-            target = self._pending_challenge_target or event_target
-            reason_suffix = f": {event_reason}" if event_reason else ""
-            print(f"  Challenge to {target} {label}{reason_suffix}")
-            self._cooldown_challenge_failure(
-                target,
-                getattr(self, "_pending_challenge_speed", None),
-                event_reason,
-                duration=600,
-            )
-            self._audit_seek(
-                "challenge_event",
-                label=label,
-                challenge_id=challenge_id,
-                target=target,
-                speed=getattr(self, "_pending_challenge_speed", None),
-                reason=event_reason,
-            )
-            self._clear_pending_challenge()
-            self._tc_failures += 1
-            if self._tc_failures >= 5 and self.args.rotate:
-                print(f"  TC getting too many declines, trying next format...")
-                self._advance_rotation()
-                self._tc_failures = 0
-                self._cleanup_cooldowns()
-            if self._should_seek():
-                self._schedule_retry(2)
+            seek_lock = getattr(self, "_seek_lock", None)
+            if seek_lock is None:
+                self._handle_challenge_resolution_event(event, etype)
+            else:
+                with seek_lock:
+                    self._handle_challenge_resolution_event(event, etype)
 
 
 def main():
