@@ -1342,6 +1342,74 @@ def test_stale_move_rejection_suppresses_duplicate_turn() -> None:
     expect("stale rejected turn recorded", bot._already_submitted_for_turn("game", []))
 
 
+def test_pre_submit_active_check_skips_inactive_draw_state() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    records: list[dict] = []
+    submitted: list[str] = []
+
+    def audit(game_id: str, event: str, **fields) -> None:
+        records.append({"event": event, **fields})
+
+    bot._audit = audit
+    bot._pre_submit_active_check_needed = lambda board: True
+    bot._game_active_status = lambda game_id: False
+    bot.make_move = lambda game_id, move: submitted.append(move) or True
+
+    with redirect_stdout(io.StringIO()):
+        result = bot._submit_move_if_active(
+            "game", [], "e2e4", lichess_bot.chess.Board()
+        )
+
+    expect("inactive draw state not submitted", not result)
+    expect("move API not called", submitted == [])
+    expect(
+        "turn recorded after inactive skip",
+        bot._already_submitted_for_turn("game", []),
+    )
+    expect(
+        "active check audited",
+        any(
+            record["event"] == "pre_submit_active_check"
+            and record.get("active") is False
+            for record in records
+        ),
+    )
+    expect(
+        "inactive skip audited",
+        any(record["event"] == "move_submit_skipped_inactive" for record in records),
+    )
+
+
+def test_pre_submit_active_check_is_not_used_for_normal_state() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._last_move_failure_detail = ""
+    records: list[dict] = []
+    active_checks: list[str] = []
+
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    bot._pre_submit_active_check_needed = lambda board: False
+    bot._game_active_status = lambda game_id: active_checks.append(game_id) or True
+    bot.make_move = lambda game_id, move: True
+
+    result = bot._submit_move_if_active("game", [], "e2e4", lichess_bot.chess.Board())
+
+    expect("normal state submitted", result)
+    expect("active endpoint not called", active_checks == [])
+    expect(
+        "normal submit audited",
+        any(
+            record["event"] == "move_submit" and record["result"] == "accepted"
+            for record in records
+        ),
+    )
+
+
 def test_ponderhit_audit_records_elapsed_ms() -> None:
     class Args:
         ponder = True
@@ -2484,6 +2552,8 @@ def main() -> int:
     test_duplicate_game_state_does_not_resubmit()
     test_stale_stream_ply_does_not_search_old_position()
     test_stale_move_rejection_suppresses_duplicate_turn()
+    test_pre_submit_active_check_skips_inactive_draw_state()
+    test_pre_submit_active_check_is_not_used_for_normal_state()
     test_ponderhit_audit_records_elapsed_ms()
     test_elo_seek_does_not_fallback_to_random_low_rated_bots()
     test_rated_seek_rating_floor()

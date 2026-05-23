@@ -1939,6 +1939,41 @@ class LichessBot:
         )
         return False
 
+    def _pre_submit_active_check_needed(self, board: chess.Board) -> bool:
+        return (
+            board.is_insufficient_material()
+            or board.is_seventyfive_moves()
+            or board.is_fivefold_repetition()
+            or board.can_claim_draw()
+        )
+
+    def _submit_move_if_active(
+        self, game_id: str, moves: list[str], move: str, board: chess.Board
+    ) -> bool:
+        if self._pre_submit_active_check_needed(board):
+            active = self._game_active_status(game_id)
+            self._audit(
+                game_id,
+                "pre_submit_active_check",
+                active=active,
+                move=move,
+                **self._audit_context(moves),
+            )
+            if active is False:
+                self._record_submitted_turn(game_id, moves)
+                print(
+                    f"  [{game_id}] Skipping stale move {move}: "
+                    "game no longer active"
+                )
+                self._audit(
+                    game_id,
+                    "move_submit_skipped_inactive",
+                    move=move,
+                    **self._audit_context(moves),
+                )
+                return False
+        return self._submit_move(game_id, moves, move)
+
     def _ponder_allowed_for_game(self, game_id: str) -> bool:
         with self._ponder_disabled_lock:
             return game_id not in self._ponder_disabled_games
@@ -3341,7 +3376,9 @@ class LichessBot:
                             **self._audit_context(moves),
                         )
                         engine.restart()
-                    elif self._submit_move(game_id, moves, parsed.uci()):
+                    elif self._submit_move_if_active(
+                        game_id, moves, parsed.uci(), board
+                    ):
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Ponderhit! {move_uci}")
                         self._start_pondering_if_legal(
@@ -3385,7 +3422,7 @@ class LichessBot:
                 )
                 parsed = self._parse_legal_move(game_id, book_move, board, "book")
                 if parsed is not None:
-                    if self._submit_move(game_id, moves, parsed.uci()):
+                    if self._submit_move_if_active(game_id, moves, parsed.uci(), board):
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Book: {move_uci}")
                         self._start_book_pondering(
@@ -3416,7 +3453,9 @@ class LichessBot:
                     **self._audit_context(moves),
                 )
                 fallback = self._fallback_move(board)
-                if fallback and self._submit_move(game_id, moves, fallback):
+                if fallback and self._submit_move_if_active(
+                    game_id, moves, fallback, board
+                ):
                     print(f"  [{game_id}] Fallback legal move: {fallback}")
                 return
 
@@ -3497,7 +3536,9 @@ class LichessBot:
                     )
                     return
             parsed = self._parse_legal_move(game_id, best, board, "engine")
-            if parsed is not None and self._submit_move(game_id, moves, parsed.uci()):
+            if parsed is not None and self._submit_move_if_active(
+                game_id, moves, parsed.uci(), board
+            ):
                 move_uci = parsed.uci()
                 print(f"  [{game_id}] Engine: {move_uci}")
                 ponder_wtime, ponder_btime = self._after_search_clock(
@@ -3538,7 +3579,9 @@ class LichessBot:
             if not best:
                 return
             parsed = self._parse_legal_move(game_id, best, board, "recovery")
-            if parsed is not None and self._submit_move(game_id, moves, parsed.uci()):
+            if parsed is not None and self._submit_move_if_active(
+                game_id, moves, parsed.uci(), board
+            ):
                 print(f"  [{game_id}] Recovery: {parsed.uci()}")
 
     def _build_board(
