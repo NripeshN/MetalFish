@@ -1973,9 +1973,30 @@ class LichessBot:
             or board.can_claim_draw()
         )
 
+    def _skip_completed_game_submit(
+        self, game_id: str, moves: list[str], move: str
+    ) -> bool:
+        if not self._game_was_completed(game_id):
+            return False
+        self._record_submitted_turn(game_id, moves)
+        print(
+            f"  [{game_id}] Skipping stale move {move}: "
+            "game already completed"
+        )
+        self._audit(
+            game_id,
+            "move_submit_skipped_inactive",
+            move=move,
+            source="local_completed",
+            **self._audit_context(moves),
+        )
+        return True
+
     def _submit_move_if_active(
         self, game_id: str, moves: list[str], move: str, board: chess.Board
     ) -> bool:
+        if self._skip_completed_game_submit(game_id, moves, move):
+            return False
         if self._pre_submit_active_check_needed(board):
             active = self._game_active_status(game_id)
             self._audit(
@@ -1995,6 +2016,7 @@ class LichessBot:
                     game_id,
                     "move_submit_skipped_inactive",
                     move=move,
+                    source="playing_status",
                     **self._audit_context(moves),
                 )
                 return False
@@ -3254,6 +3276,7 @@ class LichessBot:
                         state = {}
                     status = state.get("status", "started")
                     if status != "started":
+                        self._mark_game_completed(game_id)
                         print(f"  [{game_id}] Game already ended: {status}")
                         self._audit(game_id, "stream_game_full", status=status)
                         return True
@@ -3275,6 +3298,7 @@ class LichessBot:
                         result = f"{status}"
                         if winner:
                             result += f" ({winner} wins)"
+                        self._mark_game_completed(game_id)
                         print(f"  [{game_id}] Game over: {result}, {len(moves)} moves")
                         self._audit(
                             game_id,

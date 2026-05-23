@@ -1471,6 +1471,44 @@ def test_pre_submit_active_check_is_not_used_for_normal_state() -> None:
     )
 
 
+def test_submit_skips_locally_completed_game_without_api_call() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    records: list[dict] = []
+    active_checks: list[str] = []
+    submitted: list[str] = []
+
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    bot._pre_submit_active_check_needed = lambda board: False
+    bot._game_active_status = lambda game_id: active_checks.append(game_id) or True
+    bot.make_move = lambda game_id, move: submitted.append(move) or True
+    bot._mark_game_completed("game")
+
+    with redirect_stdout(io.StringIO()):
+        result = bot._submit_move_if_active(
+            "game", [], "e2e4", lichess_bot.chess.Board()
+        )
+
+    expect("completed game submit skipped", not result)
+    expect("completed game did not call move API", submitted == [])
+    expect("completed game did not call active API", active_checks == [])
+    expect(
+        "completed skip recorded submitted turn",
+        bot._already_submitted_for_turn("game", []),
+    )
+    expect(
+        "completed skip audited",
+        any(
+            record["event"] == "move_submit_skipped_inactive"
+            and record.get("source") == "local_completed"
+            for record in records
+        ),
+    )
+
+
 def test_ponderhit_audit_records_elapsed_ms() -> None:
     class Args:
         ponder = True
@@ -2474,6 +2512,7 @@ def test_game_loop_skips_malformed_stream_frames() -> None:
 
     expect("malformed stream frames still reach terminal state", finished)
     expect("malformed move fields become empty move lists", calls == [[], []])
+    expect("terminal stream frame marks game completed", bot._game_was_completed("g1"))
 
 
 def test_audit_writes_bounded_jsonl() -> None:
@@ -2630,6 +2669,7 @@ def main() -> int:
     test_challenge_handler_tolerates_malformed_time_control()
     test_transient_move_rejection_remains_retryable()
     test_ponder_game_circuit_breaker()
+    test_submit_skips_locally_completed_game_without_api_call()
     test_stale_challenge_event_preserves_current_pending()
     test_matching_challenge_event_clears_pending()
     test_unrelated_challenge_event_without_pending_is_ignored()
