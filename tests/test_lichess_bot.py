@@ -670,6 +670,67 @@ def test_challenge_failure_ratelimit_sets_long_cooldown() -> None:
     expect("ratelimit cooldown includes server seconds", cooldown == 50267)
 
 
+def test_retry_after_can_use_structured_ratelimit_body_for_challenges() -> None:
+    class Response:
+        headers = {}
+
+        def json(self) -> dict:
+            return {"ratelimit": {"seconds": 50207}}
+
+    expect(
+        "generic 429 keeps minimum backoff",
+        int(lichess_bot._retry_after_seconds(Response()))
+        == int(lichess_bot.LICHESS_429_BACKOFF_S),
+    )
+    expect(
+        "challenge 429 honors structured ratelimit seconds",
+        int(lichess_bot._retry_after_seconds(Response(), include_body=True)) == 50207,
+    )
+
+
+def test_retry_after_prefers_header_when_larger_than_body() -> None:
+    class Response:
+        headers = {"retry-after": "120"}
+
+        def json(self) -> dict:
+            return {"ratelimit": {"seconds": 30}}
+
+    expect(
+        "lower-case retry-after header is honored",
+        int(lichess_bot._retry_after_seconds(Response(), include_body=True)) == 120,
+    )
+
+
+def test_seek_rate_limit_uses_server_backoff_body() -> None:
+    class Response:
+        status_code = 429
+        headers = {}
+        text = '{"ratelimit":{"seconds":600}}'
+
+        def json(self) -> dict:
+            return {"ratelimit": {"seconds": 600}}
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._rate_limit_count = 0
+    bot._pending_challenge_id = None
+    bot._challenge_sent_at = 0.0
+    bot._resources_allow_new_game = lambda: True
+    bot._should_seek = lambda: True
+    bot._next_tc = lambda: (300, 3)
+    bot._tc_to_speed = lambda limit, inc: "blitz"
+    bot._seek_is_rated = lambda: False
+    bot._online_bots = lambda: ([{"id": "targetbot"}], None)
+    bot._seek_candidates = lambda bots, speed, rated: (["targetbot"], None)
+    bot.api_post = lambda path, **kwargs: Response()
+    scheduled: list[float] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    expect("seek 429 schedules server body backoff", scheduled == [600])
+
+
 def test_opening_book_does_not_send_bot_token_to_explorer() -> None:
     class Response:
         status_code = 200
@@ -2530,6 +2591,9 @@ def main() -> int:
     test_avoid_repeat_format_filters_only_matching_speed()
     test_online_bots_uses_documented_fetch_limit()
     test_challenge_failure_ratelimit_sets_long_cooldown()
+    test_retry_after_can_use_structured_ratelimit_body_for_challenges()
+    test_retry_after_prefers_header_when_larger_than_body()
+    test_seek_rate_limit_uses_server_backoff_body()
     test_opening_book_does_not_send_bot_token_to_explorer()
     test_opening_book_scores_for_side_to_move()
     test_opening_book_local_reader_uses_entry_move_attribute()

@@ -1412,19 +1412,45 @@ class UCIEngine:
                             pass
 
 
-def _retry_after_seconds(response) -> float:
-    header = getattr(response, "headers", {}).get("Retry-After")
-    if not header:
-        return LICHESS_429_BACKOFF_S
+def _response_ratelimit_seconds(response) -> float | None:
     try:
-        return max(LICHESS_429_BACKOFF_S, float(header))
+        data = response.json()
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    ratelimit = data.get("ratelimit")
+    if not isinstance(ratelimit, dict):
+        return None
+    try:
+        seconds = float(ratelimit.get("seconds", 0) or 0)
     except (TypeError, ValueError):
-        pass
-    try:
-        retry_time = email.utils.parsedate_to_datetime(header)
-        return max(LICHESS_429_BACKOFF_S, retry_time.timestamp() - time.time())
-    except (TypeError, ValueError, IndexError, OverflowError):
-        return LICHESS_429_BACKOFF_S
+        return None
+    if seconds <= 0:
+        return None
+    return min(86_400.0, seconds)
+
+
+def _retry_after_seconds(response, *, include_body: bool = False) -> float:
+    retry_after = LICHESS_429_BACKOFF_S
+    headers = getattr(response, "headers", {}) or {}
+    header = None
+    if hasattr(headers, "get"):
+        header = headers.get("Retry-After") or headers.get("retry-after")
+    if header:
+        try:
+            retry_after = max(retry_after, float(header))
+        except (TypeError, ValueError):
+            try:
+                retry_time = email.utils.parsedate_to_datetime(header)
+                retry_after = max(retry_after, retry_time.timestamp() - time.time())
+            except (TypeError, ValueError, IndexError, OverflowError):
+                pass
+    if include_body:
+        body_seconds = _response_ratelimit_seconds(response)
+        if body_seconds is not None:
+            retry_after = max(retry_after, body_seconds)
+    return retry_after
 
 
 class SerializedHttpClient:
@@ -2666,16 +2692,36 @@ class LichessBot:
             elif r.status_code == 429:
                 print("  Rate limited, backing off...")
                 self._rate_limit_count += 1
-                retry_after = _retry_after_seconds(r)
-                if self._rate_limit_count >= 3:
-                    backoff = max(900, retry_after)
+                retry_after = _retry_after_seconds(r, include_body=True)
+                if (
+                    self._rate_limit_count >= 3
+                    and retry_after <= LICHESS_429_BACKOFF_S
+                ):
+                    backoff = min(
+                        3600.0,
+                        max(
+                            900.0,
+                            LICHESS_429_BACKOFF_S
+                            * (2 ** min(5, self._rate_limit_count - 1)),
+                        ),
+                    )
+                    print(
+                        "  Possible challenge cap hit. "
+                        f"Waiting {self._format_duration(int(backoff))} "
+                        "before retrying."
+                    )
+                elif self._rate_limit_count >= 3:
+                    backoff = retry_after
                     print(
                         "  Possible daily cap hit. "
-                        f"Waiting {int(backoff) // 60}min before retrying."
+                        f"Waiting {self._format_duration(int(backoff))} "
+                        "before retrying."
                     )
                 else:
-                    backoff = max(65, retry_after)
-                    print(f"  Waiting {int(backoff)}s...")
+                    backoff = max(LICHESS_429_BACKOFF_S, retry_after)
+                    print(
+                        f"  Waiting {self._format_duration(int(backoff))}..."
+                    )
                 self._schedule_retry(backoff)
             else:
                 detail = (r.text or "").strip().replace("\n", " ")[:180]
@@ -2694,20 +2740,9 @@ class LichessBot:
 
     def _challenge_failure_cooldown_seconds(self, response: requests.Response) -> int:
         cooldown = 300
-        try:
-            data = response.json()
-        except ValueError:
-            return cooldown
-        if not isinstance(data, dict):
-            return cooldown
-        ratelimit = data.get("ratelimit")
-        if isinstance(ratelimit, dict):
-            try:
-                seconds = int(float(ratelimit.get("seconds", 0) or 0))
-            except (TypeError, ValueError):
-                seconds = 0
-            if seconds > 0:
-                cooldown = max(cooldown, min(86_400, seconds + 60))
+        seconds = _response_ratelimit_seconds(response)
+        if seconds is not None:
+            cooldown = max(cooldown, min(86_400, int(seconds) + 60))
         return cooldown
 
     def _format_duration(self, seconds: int) -> str:
