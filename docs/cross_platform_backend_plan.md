@@ -104,12 +104,12 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-final-e370951`, L4, 2026-05-22 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-012e24a9`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26320286663` |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26320286658` |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26320286675` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26320286672` |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26332004114` |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26332004122` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26332004107` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26332004134` |
 
 Current CUDA backend boundary:
 
@@ -481,6 +481,11 @@ Current CUDA backend boundary:
   batch parity, single/batch reuse stress, the standalone CUDA NN probe,
   auto/CUDA/hybrid UCI smokes, the non-Apple ANE-disable hybrid smoke, and
   batch timings of `b1=6.923ms`, `b16=51.499ms`, and `b32=97.210ms`.
+  The 2026-05-23 L4 branch-tip gate
+  `metalfish-cuda-gate-20260523-012e24a9` revalidated the same coverage after
+  the CUDA smoke-header split, with graph replay observed, zero reuse-stress
+  drift beyond tolerance, and batch timings of `b1=6.854ms`,
+  `b16=51.630ms`, and `b32=96.762ms`.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
@@ -591,9 +596,10 @@ requiring a hosted NVIDIA GPU. Each portable CPU job runs AB UCI smoke plus an
 explicit `NNBackend=stub` MCTS smoke, so portable builds verify the MCTS
 construction path without downloading BT4 weights. The uploaded artifacts
 include a generated manifest that makes this backend scope explicit. Branch tip
-`579962d` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, Windows CUDA
+`012e24a9` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, Windows CUDA
 compile, macOS Metal, CUDA L4 runtime, and the bounded hybrid regression gate
-green after merging `origin/main`. The hybrid gate uses a bounded 300-puzzle
+green while remaining current with `origin/main`. The hybrid gate uses a
+bounded 300-puzzle
 offline sample for PR runs; the accepted rerun scored candidate BK repeats
 `[22, 22, 22]` versus baseline `[22, 22, 22]`, and candidate puzzles `300/300`
 versus baseline `300/300` with zero candidate errors.
