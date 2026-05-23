@@ -1538,6 +1538,73 @@ def test_stale_move_rejection_suppresses_duplicate_turn() -> None:
     expect("stale rejected turn recorded", bot._already_submitted_for_turn("game", []))
 
 
+def test_game_over_move_rejection_marks_completed() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._playing_status_cache = {}
+    bot._last_move_failure_detail = ""
+    records: list[dict] = []
+
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
+        bot._last_move_failure_detail = (
+            '400: {"error":"Not your turn, or game already over"}'
+        )
+        return False
+
+    bot.make_move = make_move
+
+    with redirect_stdout(io.StringIO()):
+        result = bot._submit_move("game", [], "e2e4")
+
+    expect("game-over submit rejected", not result)
+    expect("game-over rejection marks completed", bot._game_was_completed("game"))
+    expect(
+        "game-over rejection caches inactive",
+        bot._playing_status_cache.get("game", (0, True))[1] is False,
+    )
+    expect(
+        "game-over rejection audited as stale",
+        any(
+            record["event"] == "move_submit"
+            and record.get("stale") is True
+            and record.get("result") == "rejected"
+            for record in records
+        ),
+    )
+
+
+def test_completed_game_turn_is_not_searched() -> None:
+    class Engine:
+        ponder_move = None
+
+        def go(self, **kwargs):
+            raise AssertionError("completed game should not search")
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._max_seen_ply = {}
+    records: list[dict] = []
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
+    bot._mark_game_completed("game")
+    state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
+
+    with redirect_stdout(io.StringIO()):
+        bot._try_move("game", Engine(), "startpos", [], "white", state)
+
+    expect(
+        "completed turn skip audited",
+        any(record["event"] == "turn_completed_skip" for record in records),
+    )
+
+
 def test_pre_submit_active_check_skips_inactive_draw_state() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     bot._submitted_turns = {}
@@ -3233,6 +3300,8 @@ def main() -> int:
     test_duplicate_game_state_does_not_resubmit()
     test_stale_stream_ply_does_not_search_old_position()
     test_stale_move_rejection_suppresses_duplicate_turn()
+    test_game_over_move_rejection_marks_completed()
+    test_completed_game_turn_is_not_searched()
     test_pre_submit_active_check_skips_inactive_draw_state()
     test_pre_submit_active_check_is_not_used_for_normal_state()
     test_ponderhit_audit_records_elapsed_ms()

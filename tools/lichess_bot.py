@@ -2008,6 +2008,9 @@ class LichessBot:
             )
         )
 
+    def _move_failure_looks_game_over(self) -> bool:
+        return "game already over" in self._last_move_failure_detail.lower()
+
     def _submit_move(
         self,
         game_id: str,
@@ -2032,6 +2035,11 @@ class LichessBot:
 
         if self._move_failure_looks_stale():
             self._record_submitted_turn(game_id, moves)
+            if self._move_failure_looks_game_over():
+                self._mark_game_completed(game_id)
+                cache = getattr(self, "_playing_status_cache", {})
+                cache[game_id] = (time.time() + PLAYING_STATUS_CACHE_TTL_S, False)
+                self._playing_status_cache = cache
             print(
                 f"  [{game_id}] Suppressing retries for stale turn after "
                 f"rejected move {move}"
@@ -3847,6 +3855,10 @@ class LichessBot:
 
         if self._already_submitted_for_turn(game_id, moves):
             self._audit(game_id, "turn_duplicate", **self._audit_context(moves))
+            return
+
+        if self._game_was_completed(game_id):
+            self._audit(game_id, "turn_completed_skip", **self._audit_context(moves))
             return
 
         search_timeout = self._search_timeout_seconds(
