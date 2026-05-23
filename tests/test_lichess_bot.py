@@ -600,6 +600,29 @@ def test_seek_candidates_filter_time_control_cooldown_by_speed_only() -> None:
     expect("target returns for different speed", candidates[0] == "targetbot")
 
 
+def test_speed_challenge_cooldowns_persist_between_runs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "speed-cooldowns.json"
+        old_path = lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH
+        try:
+            lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH = path
+
+            bot = object.__new__(lichess_bot.LichessBot)
+            bot._persist_challenge_cooldowns = True
+            bot._speed_declined_cooldown = {}
+            bot._cooldown_bot_speed("TargetBot", "rapid", duration=600)
+
+            loaded_bot = object.__new__(lichess_bot.LichessBot)
+            loaded = loaded_bot._load_speed_challenge_cooldowns()
+            file_created = path.exists()
+        finally:
+            lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH = old_path
+
+    expect("speed cooldown file created", file_created)
+    expect("rapid cooldown persisted", "targetbot" in loaded.get("rapid", {}))
+    expect("global speeds not invented", "blitz" not in loaded)
+
+
 def test_highest_rated_seek_orders_candidates_descending() -> None:
     class Args:
         elo_seek = False
@@ -2807,6 +2830,7 @@ def main() -> int:
     test_seek_candidates_tolerate_malformed_perf_records()
     test_seek_candidates_filter_cached_cooldowns_case_insensitively()
     test_seek_candidates_filter_time_control_cooldown_by_speed_only()
+    test_speed_challenge_cooldowns_persist_between_runs()
     test_highest_rated_seek_orders_candidates_descending()
     test_avoid_repeat_format_filters_only_matching_speed()
     test_online_bots_uses_documented_fetch_limit()

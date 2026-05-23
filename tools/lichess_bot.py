@@ -402,6 +402,12 @@ CHALLENGE_COOLDOWN_PATH = pathlib.Path(
         str(PROJ / "results" / "lichess_challenge_cooldowns.json"),
     )
 )
+SPEED_CHALLENGE_COOLDOWN_PATH = pathlib.Path(
+    os.environ.get(
+        "METALFISH_SPEED_CHALLENGE_COOLDOWN_FILE",
+        str(PROJ / "results" / "lichess_challenge_speed_cooldowns.json"),
+    )
+)
 PLAYED_FORMAT_HISTORY_PATH = pathlib.Path(
     os.environ.get(
         "METALFISH_PLAYED_FORMAT_FILE",
@@ -1731,7 +1737,9 @@ class LichessBot:
         self._elo_widen_steps = 0
         self._persist_challenge_cooldowns = True
         self._declined_cooldown: dict[str, float] = self._load_challenge_cooldowns()
-        self._speed_declined_cooldown: dict[str, dict[str, float]] = {}
+        self._speed_declined_cooldown: dict[str, dict[str, float]] = (
+            self._load_speed_challenge_cooldowns()
+        )
         self._persist_played_format_history = True
         self._played_by_speed: dict[str, dict[str, float]] = (
             self._load_played_format_history()
@@ -2572,6 +2580,58 @@ class LichessBot:
         except Exception:
             pass
 
+    def _load_speed_challenge_cooldowns(self) -> dict[str, dict[str, float]]:
+        try:
+            data = json.loads(SPEED_CHALLENGE_COOLDOWN_PATH.read_text())
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+
+        now = time.time()
+        cooldowns: dict[str, dict[str, float]] = {}
+        for speed, entries in data.items():
+            if speed not in ACCEPTED_SPEEDS or not isinstance(entries, dict):
+                continue
+            clean_entries: dict[str, float] = {}
+            for key, value in entries.items():
+                norm_key = self._cooldown_key(str(key))
+                if not norm_key:
+                    continue
+                try:
+                    expires = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if expires > now:
+                    clean_entries[norm_key] = expires
+            if clean_entries:
+                cooldowns[str(speed)] = clean_entries
+        return cooldowns
+
+    def _save_speed_challenge_cooldowns(self) -> None:
+        if not getattr(self, "_persist_challenge_cooldowns", False):
+            return
+        cooldowns = getattr(self, "_speed_declined_cooldown", {})
+        if not isinstance(cooldowns, dict):
+            return
+        now = time.time()
+        data: dict[str, dict[str, float]] = {}
+        for speed, entries in sorted(cooldowns.items()):
+            if speed not in ACCEPTED_SPEEDS or not isinstance(entries, dict):
+                continue
+            clean_entries = {
+                key: expires
+                for key, expires in sorted(entries.items())
+                if key and expires > now
+            }
+            if clean_entries:
+                data[str(speed)] = clean_entries
+        try:
+            SPEED_CHALLENGE_COOLDOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SPEED_CHALLENGE_COOLDOWN_PATH.write_text(json.dumps(data, indent=2))
+        except Exception:
+            pass
+
     def _load_played_format_history(self) -> dict[str, dict[str, float]]:
         try:
             data = json.loads(PLAYED_FORMAT_HISTORY_PATH.read_text())
@@ -2934,6 +2994,7 @@ class LichessBot:
             self._speed_declined_cooldown = {}
         entries = self._speed_declined_cooldown.setdefault(str(speed), {})
         entries[key] = max(entries.get(key, 0), time.time() + duration)
+        self._save_speed_challenge_cooldowns()
 
     def _time_control_rejection(self, reason: str | None) -> bool:
         text = (reason or "").lower()
@@ -2976,6 +3037,7 @@ class LichessBot:
             if entries
         }
         self._save_challenge_cooldowns()
+        self._save_speed_challenge_cooldowns()
 
     def _schedule_retry(self, delay: float = 10):
         if self._seek_timer:
