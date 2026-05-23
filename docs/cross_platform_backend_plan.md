@@ -39,6 +39,8 @@ Common code owns:
 - `src/nn/network.h`: platform-neutral `NN::Network` inference interface.
 - `src/nn/network_weight_inventory.*`: selected policy/value/moves-left tensor
   inventory shared by platform backends before device upload.
+- `src/nn/network_output.h`: backend-neutral policy/value/moves-left result
+  record.
 - `src/nn/network_output_decoder.*`: shared policy/value/moves-left output
   decoding used by Metal and future CUDA/Windows backends.
 - `src/mcts/*`: MCTS search, cache, stoppers, and backend adapter.

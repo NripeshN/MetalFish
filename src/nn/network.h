@@ -7,25 +7,16 @@
 
 #pragma once
 
-#include <array>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "input_planes.h"
+#include "network_output.h"
 #include "weights_file.h"
 
 namespace MetalFish {
 namespace NN {
-
-struct NetworkOutput {
-  std::array<float, kPolicyOutputs> policy{};
-  float value;
-  float wdl[3];
-  bool has_wdl;
-  float moves_left = 0.0f;
-  bool has_moves_left = false;
-};
 
 class Network {
 public:

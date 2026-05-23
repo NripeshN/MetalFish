@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <vector>
 
-#include "network.h"
+#include "network_output.h"
 #include "network_tensor_plan.h"
 
 namespace MetalFish {
