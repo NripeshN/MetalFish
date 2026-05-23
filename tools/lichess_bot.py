@@ -396,6 +396,9 @@ BOT_ONLINE_FETCH_LIMIT = max(
 )
 BOT_ONLINE_CACHE_TTL_S = env_float("METALFISH_BOT_ONLINE_CACHE_TTL_S", 20.0)
 PLAYING_STATUS_CACHE_TTL_S = env_float("METALFISH_PLAYING_STATUS_CACHE_TTL_S", 5.0)
+TIME_CONTROL_DECLINE_COOLDOWN_S = max(
+    600, min(86_400, env_int("METALFISH_TIME_CONTROL_DECLINE_COOLDOWN_S", 21_600))
+)
 CHALLENGE_COOLDOWN_PATH = pathlib.Path(
     os.environ.get(
         "METALFISH_CHALLENGE_COOLDOWN_FILE",
@@ -3017,7 +3020,11 @@ class LichessBot:
         duration: int = 600,
     ) -> None:
         if self._time_control_rejection(reason):
-            self._cooldown_bot_speed(bot_id, speed, duration=duration)
+            self._cooldown_bot_speed(
+                bot_id,
+                speed,
+                duration=max(duration, TIME_CONTROL_DECLINE_COOLDOWN_S),
+            )
         else:
             self._cooldown_bot(bot_id, duration=duration)
 

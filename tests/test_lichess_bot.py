@@ -8,6 +8,7 @@ import queue
 import sys
 import tempfile
 import threading
+import time
 import types
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -2133,6 +2134,11 @@ def test_time_control_decline_uses_speed_cooldown() -> None:
     expect(
         "target cooled only for rapid",
         "targetbot" in bot._speed_declined_cooldown.get("rapid", {}),
+    )
+    expires = bot._speed_declined_cooldown["rapid"]["targetbot"]
+    expect(
+        "time control cooldown is long enough",
+        expires - time.time() >= lichess_bot.TIME_CONTROL_DECLINE_COOLDOWN_S - 5,
     )
     expect("retry scheduled", scheduled == [2])
     expect("tc failure counted", bot._tc_failures == 1)
