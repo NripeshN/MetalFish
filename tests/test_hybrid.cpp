@@ -464,6 +464,40 @@ void test_hybrid_config() {
                    true, true, 262, 137, 0.523f, 0.066f, 20, 20));
   }
   {
+    TestCase tc("Short-root tactical MCTS override");
+
+    EXPECT(tc, HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 172, 104, 0.605f, 0.173f, 234, 67, 598,
+                   563, 2, -32001, false, 520856, 5, 10, 0.381f, 0.653f));
+    EXPECT(tc, HybridMCTSShortRootTacticalOverride(
+                   true, true, false, 172, 104, 0.605f, 0.173f, 234, 80, 572,
+                   565, 2, -32001, false, 965531, 5, 10, 0.381f, 0.653f));
+    EXPECT(tc, HybridMCTSShortRootTacticalOverride(
+                   true, true, false, 172, 104, 0.605f, 0.173f, 234, 68, 601,
+                   579, 2, -32001, false, 1051908, 5, 10, 0.381f, 0.653f));
+    EXPECT(tc, HybridMCTSShortRootTacticalOverride(
+                   true, true, false, 161, 98, 0.609f, 0.177f, 236, 80, 579,
+                   555, 2, -32001, false, 1144870, 4, 10, 0.381f, 0.657f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 172, 94, 0.605f, 0.173f, 234, 67, 598,
+                   563, 2, -32001, false, 520856, 5, 10, 0.381f, 0.653f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 172, 104, 0.605f, 0.159f, 234, 67, 598,
+                   563, 2, -32001, false, 520856, 5, 10, 0.381f, 0.653f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 172, 104, 0.605f, 0.173f, 234, 67, 634,
+                   563, 2, -32001, false, 520856, 5, 10, 0.381f, 0.653f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, false, 172, 104, 0.605f, 0.173f, 234, 80, 591,
+                   565, 2, -32001, false, 965531, 5, 10, 0.381f, 0.653f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 172, 104, 0.605f, 0.173f, 234, 67, 598,
+                   563, 2, -32001, false, 520856, 3, 10, 0.381f, 0.653f));
+    EXPECT(tc, !HybridMCTSShortRootTacticalOverride(
+                   true, true, true, 172, 104, 0.605f, 0.173f, 234, 67, 598,
+                   563, 2, -32001, false, 520856, 5, 10, 0.420f, 0.653f));
+  }
+  {
     TestCase tc("Fixed-budget root policy tie-break predicate");
 
     EXPECT(tc, HybridRootPolicyTieBreak(true, 698, 339, 0.747f, 0.170f, 300,

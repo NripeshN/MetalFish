@@ -607,6 +607,39 @@ bool HybridMCTSRootConfidenceFixedBudgetOverride(
          clear_root_q_confident;
 }
 
+bool HybridMCTSShortRootTacticalOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, uint64_t mcts_in_ab_effort,
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
+    float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane)
+    return false;
+
+  if (mcts_root_visits < 150 || mcts_root_visits >= 230 ||
+      mcts_best_visits < 95 || visit_share < 0.58f || root_q_gap < 0.16f ||
+      mcts_cp < 200 || eval_delta < 45) {
+    return false;
+  }
+
+  const int max_average_gap = ab_root_rejects_mcts ? 70 : 25;
+  if (ab_average_score - mcts_average_score > max_average_gap)
+    return false;
+
+  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
+      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
+      mcts_in_ab_effort < 200000 || mcts_in_ab_effort > 1500000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank < 4 || ab_in_mcts_current_visits > 16)
+    return false;
+
+  return mcts_q - ab_in_mcts_q >= 0.24f;
+}
+
 bool HybridMCTSCompactFixedBudgetOverride(
     bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
     uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
@@ -2741,6 +2774,14 @@ Move ParallelHybridSearch::make_final_decision() {
       HybridMCTSRootConfidenceFixedBudgetOverride(
           mcts_decision_budget, mcts_strong, mcts_confidence_total_nodes,
           mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta);
+  const bool mcts_short_root_tactical =
+      HybridMCTSShortRootTacticalOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane,
+          ab_root_rejects_mcts, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          ab_in_ab.average_score, mcts_in_ab.average_score, mcts_in_ab.rank,
+          mcts_in_ab.score, mcts_in_ab.score_lowerbound, mcts_in_ab.effort,
+          ab_in_mcts.rank, ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   const bool mcts_compact_fixed_budget = HybridMCTSCompactFixedBudgetOverride(
       mcts_decision_budget, mcts_visit_evidence_sane, ab_has_clear_preference,
       mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
@@ -2829,7 +2870,8 @@ Move ParallelHybridSearch::make_final_decision() {
   }
   const bool mcts_override_allowed =
       !ab_root_rejects_mcts || ane_confirmed_mcts_override ||
-      mcts_compact_fixed_budget || mcts_compact_clear_preference ||
+      mcts_short_root_tactical || mcts_compact_fixed_budget ||
+      mcts_compact_clear_preference ||
       mcts_cross_root_confidence_fixed_budget ||
       mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
       mcts_reused_root_current || mcts_root_rejects_ab ||
@@ -2876,6 +2918,9 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_root_confidence_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_root_confidence_fixed_budget";
+    } else if (mcts_short_root_tactical) {
+      choose_mcts = true;
+      reason = "mcts_short_root_tactical";
     } else if (mcts_reused_root_confidence) {
       choose_mcts = true;
       reason = "mcts_reused_root_confidence";
@@ -2934,6 +2979,8 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSRootDominant=" << (mcts_root_dominant_fixed_budget ? 1 : 0)
        << " MCTSTacticalGap=" << (mcts_tactical_gap_fixed_budget ? 1 : 0)
        << " MCTSRootConfidence=" << (mcts_root_confidence_fixed_budget ? 1 : 0)
+       << " MCTSShortRootTactical="
+       << (mcts_short_root_tactical ? 1 : 0)
        << " MCTSCompact=" << (mcts_compact_fixed_budget ? 1 : 0)
        << " MCTSCompactClearPreference="
        << (mcts_compact_clear_preference ? 1 : 0) << " MCTSCrossRootConfidence="
