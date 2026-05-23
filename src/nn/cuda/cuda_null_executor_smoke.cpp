@@ -863,7 +863,7 @@ CudaBufferSmokeResult RunAttentionProjectionSmoke() {
                                   workspace, kBatch, &weights, device_input);
     const auto projection_output = ExecuteAttentionOutputProjectionStage(
         execution_plan, 1, weights, core_output.context, tape, workspace,
-        kBatch);
+        kBatch, true);
     const auto norm_output = ExecuteAttentionResidualLayerNormStage(
         execution_plan, execution_plan.steps[4], device_input,
         projection_output, weights, tape, workspace, kBatch);

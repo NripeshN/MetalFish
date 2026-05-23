@@ -1257,7 +1257,8 @@ CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     std::size_t attention_step_index, const CudaWeightBuffers &weights,
     const float *context, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size) {
+    CudaExecutionWorkspace &workspace, int batch_size,
+    bool defer_projection_bias) {
   if (batch_size <= 0)
     throw std::runtime_error("CUDA attention output received empty batch");
   if (!context)
@@ -1284,8 +1285,10 @@ CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
   output.output_width = attention.output_width;
   output.heads = attention.heads;
   output.head_depth = attention.head_depth;
+  output.projection_bias = defer_projection_bias ? dense_bias.data : nullptr;
 
-  LaunchDenseAffineKernel(context, dense_weight.data, dense_bias.data,
+  LaunchDenseAffineKernel(context, dense_weight.data,
+                          defer_projection_bias ? nullptr : dense_bias.data,
                           output.projection, rows, attention.qkv_width,
                           attention.output_width, workspace.Stream());
   return output;
@@ -1458,11 +1461,20 @@ CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
   output.rows = rows;
 
   cudaStream_t stream = workspace.Stream();
-  LaunchResidualLayerNormKernel(
-      parent, attention_output.projection, gamma.data, beta.data,
-      output.residual, output.normalized, rows, width,
-      FeedForwardResidualScale(execution_plan, norm.name),
-      AttentionLayerNormEpsilon(execution_plan, norm.name), stream);
+  if (attention_output.projection_bias) {
+    LaunchResidualBiasLayerNormKernel(
+        parent, attention_output.projection, attention_output.projection_bias,
+        gamma.data, beta.data, attention_output.projection, output.residual,
+        output.normalized, rows, width,
+        FeedForwardResidualScale(execution_plan, norm.name),
+        AttentionLayerNormEpsilon(execution_plan, norm.name), stream);
+  } else {
+    LaunchResidualLayerNormKernel(
+        parent, attention_output.projection, gamma.data, beta.data,
+        output.residual, output.normalized, rows, width,
+        FeedForwardResidualScale(execution_plan, norm.name),
+        AttentionLayerNormEpsilon(execution_plan, norm.name), stream);
+  }
   return output;
 }
 
@@ -1747,14 +1759,14 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
                                workspace.Stream());
       const auto output_projection = ExecuteAttentionOutputProjectionStage(
           execution_plan, entry.first_step, weights, core.context, tape,
-          workspace, batch_size);
+          workspace, batch_size, true);
+      stage = ExecuteAttentionResidualLayerNormStage(
+          execution_plan, execution_plan.steps[entry.second_step], stage_input,
+          output_projection, weights, tape, workspace, batch_size);
       TraceCudaAttentionBuffer(
           stage_trace_run, traced_stage_index, 13, step.name + ".projection",
           entry.kind, output_projection.projection, output_projection.rows,
           output_projection.output_width, batch_size, workspace.Stream());
-      stage = ExecuteAttentionResidualLayerNormStage(
-          execution_plan, execution_plan.steps[entry.second_step], stage_input,
-          output_projection, weights, tape, workspace, batch_size);
     } else if (entry.kind ==
                CudaExecutionScheduleKind::FeedForwardLayerNormStage) {
       stage = ExecuteFeedForwardLayerNormStage(

@@ -55,6 +55,7 @@ struct CudaAttentionProjectionOutput {
   float *key = nullptr;
   float *value = nullptr;
   float *projection = nullptr;
+  const float *projection_bias = nullptr;
   int rows = 0;
   int input_width = 0;
   int qkv_width = 0;
@@ -158,7 +159,8 @@ CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     std::size_t attention_step_index, const CudaWeightBuffers &weights,
     const float *context, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size);
+    CudaExecutionWorkspace &workspace, int batch_size,
+    bool defer_projection_bias = false);
 
 CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
     const NetworkResolvedExecutionPlan &execution_plan,
