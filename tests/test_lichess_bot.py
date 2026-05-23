@@ -2267,6 +2267,75 @@ def test_unrelated_challenge_event_without_pending_is_ignored() -> None:
     expect("unrelated event does not count tc failure", bot._tc_failures == 0)
 
 
+def test_untracked_static_challenge_event_uses_reason_cooldown() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._challenge_sent_at = 0
+    bot._tc_failures = 0
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._draining = threading.Event()
+
+    event = {
+        "type": "challengeDeclined",
+        "challenge": {
+            "id": "late",
+            "destUser": {"id": "targetbot"},
+            "reason": "I'm not accepting challenges from bots.",
+        },
+    }
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event)
+
+    expect("target globally cooled", "targetbot" in bot._declined_cooldown)
+    expires = bot._declined_cooldown["targetbot"]
+    expect(
+        "untracked static rejection cooldown is long enough",
+        expires - time.time() >= lichess_bot.STATIC_CHALLENGE_DECLINE_COOLDOWN_S - 5,
+    )
+    expect("untracked static event does not count tc failure", bot._tc_failures == 0)
+
+
+def test_untracked_time_control_event_uses_event_speed_cooldown() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._challenge_sent_at = 0
+    bot._tc_failures = 0
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._draining = threading.Event()
+
+    event = {
+        "type": "challengeDeclined",
+        "challenge": {
+            "id": "late",
+            "destUser": {"id": "targetbot"},
+            "reason": "This time control is too slow for me.",
+            "timeControl": {"type": "clock", "limit": 600, "increment": 5},
+        },
+    }
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event)
+
+    expect("target not globally cooled", "targetbot" not in bot._declined_cooldown)
+    expect(
+        "target speed cooled from event clock",
+        "targetbot" in bot._speed_declined_cooldown.get("rapid", {}),
+    )
+    expires = bot._speed_declined_cooldown["rapid"]["targetbot"]
+    expect(
+        "untracked time-control cooldown is long enough",
+        expires - time.time() >= lichess_bot.TIME_CONTROL_DECLINE_COOLDOWN_S - 5,
+    )
+    expect("untracked tc event does not count tc failure", bot._tc_failures == 0)
+
+
 def test_challenge_event_identity_accepts_string_users() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     bot.bot_id = "metalfish"
@@ -2980,6 +3049,8 @@ def main() -> int:
     test_static_decline_event_uses_global_long_cooldown()
     test_time_control_decline_uses_speed_cooldown()
     test_unrelated_challenge_event_without_pending_is_ignored()
+    test_untracked_static_challenge_event_uses_reason_cooldown()
+    test_untracked_time_control_event_uses_event_speed_cooldown()
     test_challenge_event_identity_accepts_string_users()
     test_challenge_timeout_cancels_server_side_challenge()
     test_game_start_claims_slot_and_clears_pending()

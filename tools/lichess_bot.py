@@ -2465,6 +2465,25 @@ class LichessBot:
                     return str(value)
         return ""
 
+    def _challenge_event_speed(self, event: dict) -> str | None:
+        ch = event.get("challenge") if isinstance(event.get("challenge"), dict) else {}
+        for source in (event, ch):
+            if not isinstance(source, dict):
+                continue
+            speed = source.get("speed")
+            if isinstance(speed, str) and speed in ACCEPTED_SPEEDS:
+                return speed
+
+        tc = ch.get("timeControl") if isinstance(ch, dict) else None
+        if not isinstance(tc, dict) or tc.get("type") != "clock":
+            return None
+        try:
+            limit = int(tc.get("limit", 0) or 0)
+            increment = int(tc.get("increment", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        return self._tc_to_speed(limit, increment)
+
     def _clear_pending_challenge(self):
         self._pending_challenge_id = None
         self._pending_challenge_target = None
@@ -4712,11 +4731,16 @@ class LichessBot:
         elif etype in ("challengeDeclined", "challengeCanceled"):
             challenge_id, event_target = self._challenge_event_identity(event)
             event_reason = self._challenge_event_reason(event)
+            event_speed = self._challenge_event_speed(event)
             if not self._pending_challenge_id:
-                self._cooldown_bot(event_target, duration=600)
+                self._cooldown_challenge_failure(
+                    event_target, event_speed, event_reason, duration=600
+                )
                 return
             if challenge_id and challenge_id != self._pending_challenge_id:
-                self._cooldown_bot(event_target, duration=600)
+                self._cooldown_challenge_failure(
+                    event_target, event_speed, event_reason, duration=600
+                )
                 return
             if self._pending_challenge_id and not challenge_id:
                 return
