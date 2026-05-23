@@ -11,6 +11,7 @@
 #include "cuda_execution_schedule.h"
 #include "cuda_execution_tape.h"
 #include "cuda_output_mapping.h"
+#include "cuda_stage_bindings.h"
 #include "cuda_stage_executor.h"
 #include "cuda_weight_buffers.h"
 #include "cuda_workspace.h"
