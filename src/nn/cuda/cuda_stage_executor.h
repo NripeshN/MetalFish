@@ -7,14 +7,7 @@
 
 #pragma once
 
-#include "../network_execution_plan.h"
 #include "cuda_execution_schedule.h"
-#include "cuda_execution_tape.h"
-#include "cuda_stage_bindings.h"
-#include "cuda_weight_buffers.h"
-#include "cuda_workspace.h"
-
-#include <cuda_runtime_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -25,7 +18,14 @@
 
 namespace MetalFish {
 namespace NN {
+struct NetworkResolvedExecutionPlan;
+struct NetworkResolvedExecutionStep;
+
 namespace Cuda {
+class CudaExecutionTape;
+class CudaExecutionWorkspace;
+class CudaStageInputBindings;
+class CudaWeightBuffers;
 
 struct CudaDenseStageOutput {
   float *dense = nullptr;
@@ -199,7 +199,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     int batch_size, const CudaStageInputBindings &input_bindings,
     CudaStageTimingCollector *timings = nullptr);
 
-CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
+CudaDenseStageSequenceOutput
+ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
     const CudaWeightBuffers &weights, const float *input,
     const std::uint64_t *input_masks, const float *input_values,
@@ -207,10 +208,6 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     int batch_size, const CudaStageInputBindings &input_bindings,
     const CudaExecutionSchedule &schedule,
     CudaStageTimingCollector *timings = nullptr);
-
-void CopyDeviceFloatRows(float *dst, int dst_stride, const float *src,
-                         int src_stride, int rows, int width,
-                         std::string_view name, cudaStream_t stream);
 
 } // namespace Cuda
 } // namespace NN

@@ -8,9 +8,14 @@
 #include "cuda_stage_executor.h"
 
 #include "cuda_attention_plan.h"
+#include "cuda_device_copy.h"
 #include "cuda_execution_schedule.h"
+#include "cuda_execution_tape.h"
 #include "cuda_kernels.h"
 #include "cuda_plan_analysis.h"
+#include "cuda_stage_bindings.h"
+#include "cuda_weight_buffers.h"
+#include "cuda_workspace.h"
 
 #include <algorithm>
 #include <atomic>

@@ -188,13 +188,14 @@ Current CUDA backend boundary:
   layernorm execution, attention Q/K/V projection launches, attention
   score/softmax/context execution, attention output projection launches,
   attention residual layernorm execution, smolgen compress/dense/layernorm
-  execution with global positional bias injection, attention-policy map
-  execution, and strided device-row
-  copies, so smoke and production CUDA executors share the same launch path. It
-  derives CUDA-local stage input bindings from the
-  resolved plan and schedule, allowing independent heads to branch from the
-  last supported body output instead of forcing every stage into one linear
-  chain.
+  execution with global positional bias injection, and attention-policy map
+  execution, so smoke and production CUDA executors share the same launch path.
+  Its public header forward-declares workspace, weights, tape, and input
+  bindings; stream-level row-copy declarations live in
+  `src/nn/cuda/cuda_device_copy.h` with the CUDA runtime dependency. It derives
+  CUDA-local stage input bindings from the resolved plan and schedule, allowing
+  independent heads to branch from the last supported body output instead of
+  forcing every stage into one linear chain.
 - `src/nn/cuda/cuda_output_mapping.*` maps named executed CUDA stages to
   policy, value, moves-left, and raw-policy output buffers. This keeps output
   ownership explicit instead of treating the last executed stage as every

@@ -15,6 +15,7 @@
 #include "cuda_output_mapping.h"
 #include "cuda_runtime_probe.h"
 #include "cuda_stage_executor.h"
+#include "cuda_weight_buffers.h"
 #include "cuda_workspace.h"
 
 #include <cuda_runtime_api.h>
