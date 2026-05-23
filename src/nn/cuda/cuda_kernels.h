@@ -8,20 +8,12 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 
 #include <cuda_runtime_api.h>
-
-#include "cuda_smoke_status.h"
 
 namespace MetalFish {
 namespace NN {
 namespace Cuda {
-
-struct CudaKernelSmokeResult {
-  CudaSmokeStatus status = CudaSmokeStatus::RuntimeError;
-  std::string message;
-};
 
 enum class CudaActivationKind {
   Relu,
@@ -121,14 +113,6 @@ void LaunchDynamicPositionEncodingConcatKernel(const float *expanded,
                                                int input_planes,
                                                int position_width, int squares,
                                                cudaStream_t stream = nullptr);
-
-CudaKernelSmokeResult RunDenseAffineKernelSmoke();
-CudaKernelSmokeResult RunLayerNormKernelSmoke();
-CudaKernelSmokeResult RunActivationKernelSmoke();
-CudaKernelSmokeResult RunGateKernelSmoke();
-CudaKernelSmokeResult RunResidualAddKernelSmoke();
-CudaKernelSmokeResult RunAttentionCoreKernelSmoke();
-CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke();
 
 } // namespace Cuda
 } // namespace NN

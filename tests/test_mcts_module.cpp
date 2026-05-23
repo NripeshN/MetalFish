@@ -29,6 +29,7 @@
 #include "nn/cuda/cuda_execution_schedule.h"
 #include "nn/cuda/cuda_execution_tape.h"
 #include "nn/cuda/cuda_input_packing.h"
+#include "nn/cuda/cuda_kernel_smoke.h"
 #include "nn/cuda/cuda_kernels.h"
 #include "nn/cuda/cuda_output_mapping.h"
 #include "nn/cuda/cuda_plan_analysis.h"

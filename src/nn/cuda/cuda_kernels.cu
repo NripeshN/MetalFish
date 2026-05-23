@@ -9,6 +9,7 @@
 
 #include "../network_tensor_plan.h"
 #include "../tables/attention_policy_map.h"
+#include "cuda_kernel_smoke.h"
 #include "cuda_runtime_probe.h"
 
 #include <cublas_v2.h>

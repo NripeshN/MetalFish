@@ -148,9 +148,9 @@ Current CUDA backend boundary:
   synchronization between adjacent inference stages.
 - CUDA smoke status and diagnostic result records live in dedicated smoke
   headers (`cuda_smoke_status.h`, `cuda_buffer_smoke.h`,
-  `cuda_weight_buffer_smoke.h`, and `cuda_workspace_smoke.h`) so production
-  buffer, workspace, and weight-upload users do not inherit diagnostic-only
-  input-packing dependencies.
+  `cuda_kernel_smoke.h`, `cuda_weight_buffer_smoke.h`, and
+  `cuda_workspace_smoke.h`) so production buffer, kernel, workspace, and
+  weight-upload users do not inherit diagnostic-only dependencies.
 - `src/nn/cuda/cuda_buffers.*` exposes stream-aware packed-input upload,
   output clear, and output download paths while preserving synchronous defaults
   for fallback call sites. Buffer smoke declarations live in
