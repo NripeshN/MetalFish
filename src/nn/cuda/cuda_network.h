@@ -10,6 +10,7 @@
 #include "cuda_buffers.h"
 #include "cuda_executor.h"
 #include "cuda_weight_buffers.h"
+#include "cuda_workspace.h"
 
 #include "../network.h"
 #include "../network_execution_plan.h"
