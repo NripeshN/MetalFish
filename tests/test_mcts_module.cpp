@@ -32,6 +32,7 @@
 #include "nn/cuda/cuda_output_mapping.h"
 #include "nn/cuda/cuda_plan_analysis.h"
 #include "nn/cuda/cuda_runtime_probe.h"
+#include "nn/cuda/cuda_stage_executor.h"
 #include "nn/cuda/cuda_weight_buffers.h"
 #include "nn/cuda/cuda_workspace.h"
 #endif
