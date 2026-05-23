@@ -572,6 +572,34 @@ def test_seek_candidates_filter_cached_cooldowns_case_insensitively() -> None:
     expect("non-cooldown candidate remains", candidates == ["otherbot"])
 
 
+def test_seek_candidates_filter_time_control_cooldown_by_speed_only() -> None:
+    class Args:
+        elo_seek = False
+        seek_highest_rated = True
+        avoid_repeat_format = False
+        min_rated_opponent_elo = 0
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._cooldown_bot_speed("TargetBot", "rapid", duration=600)
+    bots = [
+        {"id": "targetbot", "perfs": {"rapid": {"games": 20, "rating": 2800}}},
+        {"id": "freshbot", "perfs": {"rapid": {"games": 20, "rating": 2600}}},
+    ]
+
+    candidates, reason = bot._seek_candidates(bots, "rapid", rated=False)
+    expect("rapid speed cooldown filters target", reason is None)
+    expect("fresh rapid remains after speed cooldown", candidates == ["freshbot"])
+
+    bots[0]["perfs"]["blitz"] = {"games": 20, "rating": 2800}
+    bots[1]["perfs"]["blitz"] = {"games": 20, "rating": 2600}
+    candidates, reason = bot._seek_candidates(bots, "blitz", rated=False)
+    expect("speed cooldown does not filter blitz", reason is None)
+    expect("target returns for different speed", candidates[0] == "targetbot")
+
+
 def test_highest_rated_seek_orders_candidates_descending() -> None:
     class Args:
         elo_seek = False
@@ -2043,6 +2071,50 @@ def test_matching_challenge_event_clears_pending() -> None:
     expect("tc failure counted", bot._tc_failures == 1)
 
 
+def test_time_control_decline_uses_speed_cooldown() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        rotate = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._completed_games = 0
+    bot._pending_challenge_id = "current"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_sent_at = 0
+    bot._tc_failures = 0
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._draining = threading.Event()
+
+    scheduled: list[float] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    event = {
+        "type": "challengeDeclined",
+        "challenge": {
+            "id": "current",
+            "destUser": {"id": "targetbot"},
+            "reason": "This time control is too slow for me.",
+        },
+    }
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event)
+
+    expect("pending cleared", bot._pending_challenge_id is None)
+    expect("target not globally cooled", "targetbot" not in bot._declined_cooldown)
+    expect(
+        "target cooled only for rapid",
+        "targetbot" in bot._speed_declined_cooldown.get("rapid", {}),
+    )
+    expect("retry scheduled", scheduled == [2])
+    expect("tc failure counted", bot._tc_failures == 1)
+
+
 def test_unrelated_challenge_event_without_pending_is_ignored() -> None:
     class Args:
         seek = True
@@ -2734,6 +2806,7 @@ def main() -> int:
     test_seek_dry_run_reports_rating_floor_block()
     test_seek_candidates_tolerate_malformed_perf_records()
     test_seek_candidates_filter_cached_cooldowns_case_insensitively()
+    test_seek_candidates_filter_time_control_cooldown_by_speed_only()
     test_highest_rated_seek_orders_candidates_descending()
     test_avoid_repeat_format_filters_only_matching_speed()
     test_online_bots_uses_documented_fetch_limit()
@@ -2783,6 +2856,7 @@ def main() -> int:
     test_draw_offer_caps_search_and_marks_move_request()
     test_stale_challenge_event_preserves_current_pending()
     test_matching_challenge_event_clears_pending()
+    test_time_control_decline_uses_speed_cooldown()
     test_unrelated_challenge_event_without_pending_is_ignored()
     test_challenge_event_identity_accepts_string_users()
     test_challenge_timeout_cancels_server_side_challenge()

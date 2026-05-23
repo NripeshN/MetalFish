@@ -1731,6 +1731,7 @@ class LichessBot:
         self._elo_widen_steps = 0
         self._persist_challenge_cooldowns = True
         self._declined_cooldown: dict[str, float] = self._load_challenge_cooldowns()
+        self._speed_declined_cooldown: dict[str, dict[str, float]] = {}
         self._persist_played_format_history = True
         self._played_by_speed: dict[str, dict[str, float]] = (
             self._load_played_format_history()
@@ -2630,6 +2631,16 @@ class LichessBot:
         cooldowns = getattr(self, "_declined_cooldown", {})
         return (now or time.time()) < cooldowns.get(key, 0)
 
+    def _bot_speed_on_cooldown(
+        self, bot_id: str | None, speed: str, now: float | None = None
+    ) -> bool:
+        key = self._cooldown_key(bot_id)
+        if not key or speed not in ACCEPTED_SPEEDS:
+            return False
+        cooldowns = getattr(self, "_speed_declined_cooldown", {})
+        entries = cooldowns.get(speed, {}) if isinstance(cooldowns, dict) else {}
+        return (now or time.time()) < entries.get(key, 0)
+
     def _bot_played_in_speed(self, bot_id: str | None, speed: str) -> bool:
         if not getattr(self.args, "avoid_repeat_format", False):
             return False
@@ -2699,6 +2710,9 @@ class LichessBot:
             b
             for b in bots
             if not self._bot_on_cooldown(str(b.get("id") or b.get("name") or ""), now)
+            and not self._bot_speed_on_cooldown(
+                str(b.get("id") or b.get("name") or ""), speed, now
+            )
         ]
         if not bots:
             return [], "All eligible bots are cooling down after declines/timeouts"
@@ -2872,7 +2886,9 @@ class LichessBot:
                     print(
                         f"  Cooling down {target} for {self._format_duration(cooldown_s)}"
                     )
-                self._cooldown_bot(target, duration=cooldown_s)
+                self._cooldown_challenge_failure(
+                    target, speed, detail, duration=cooldown_s
+                )
                 self._schedule_retry(2)
         except Exception as e:
             print(f"  Seek error: {e}")
@@ -2905,10 +2921,59 @@ class LichessBot:
             )
             self._save_challenge_cooldowns()
 
+    def _cooldown_bot_speed(
+        self, bot_id: str | None, speed: str | None, duration: int = 600
+    ):
+        key = self._cooldown_key(bot_id)
+        if not key or speed not in ACCEPTED_SPEEDS:
+            self._cooldown_bot(bot_id, duration=duration)
+            return
+        if not hasattr(self, "_speed_declined_cooldown") or not isinstance(
+            self._speed_declined_cooldown, dict
+        ):
+            self._speed_declined_cooldown = {}
+        entries = self._speed_declined_cooldown.setdefault(str(speed), {})
+        entries[key] = max(entries.get(key, 0), time.time() + duration)
+
+    def _time_control_rejection(self, reason: str | None) -> bool:
+        text = (reason or "").lower()
+        return any(
+            phrase in text
+            for phrase in (
+                "time control",
+                "too slow",
+                "too fast",
+                "faster game",
+                "slower game",
+            )
+        )
+
+    def _cooldown_challenge_failure(
+        self,
+        bot_id: str | None,
+        speed: str | None,
+        reason: str | None,
+        duration: int = 600,
+    ) -> None:
+        if self._time_control_rejection(reason):
+            self._cooldown_bot_speed(bot_id, speed, duration=duration)
+        else:
+            self._cooldown_bot(bot_id, duration=duration)
+
     def _cleanup_cooldowns(self):
         now = time.time()
         self._declined_cooldown = {
             k: v for k, v in self._declined_cooldown.items() if v > now
+        }
+        self._speed_declined_cooldown = {
+            speed: {k: v for k, v in entries.items() if v > now}
+            for speed, entries in getattr(self, "_speed_declined_cooldown", {}).items()
+            if speed in ACCEPTED_SPEEDS
+        }
+        self._speed_declined_cooldown = {
+            speed: entries
+            for speed, entries in self._speed_declined_cooldown.items()
+            if entries
         }
         self._save_challenge_cooldowns()
 
@@ -4562,7 +4627,12 @@ class LichessBot:
             label = "declined" if etype == "challengeDeclined" else "canceled"
             reason_suffix = f": {event_reason}" if event_reason else ""
             print(f"  Challenge to {target} {label}{reason_suffix}")
-            self._cooldown_bot(target, duration=600)
+            self._cooldown_challenge_failure(
+                target,
+                getattr(self, "_pending_challenge_speed", None),
+                event_reason,
+                duration=600,
+            )
             self._clear_pending_challenge()
             self._tc_failures += 1
             if self._tc_failures >= 5 and self.args.rotate:
