@@ -7,6 +7,7 @@
 
 #include "cuda_executor.h"
 
+#include "cuda_buffers.h"
 #include "cuda_execution_schedule.h"
 #include "cuda_execution_tape.h"
 #include "cuda_output_mapping.h"

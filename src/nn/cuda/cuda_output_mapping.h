@@ -7,19 +7,20 @@
 
 #pragma once
 
-#include "../network_execution_plan.h"
-#include "../network_tensor_plan.h"
-#include "cuda_buffers.h"
-#include "cuda_execution_schedule.h"
-#include "cuda_stage_executor.h"
-#include "cuda_workspace.h"
-
 #include <string>
 #include <vector>
 
 namespace MetalFish {
 namespace NN {
+struct NetworkResolvedExecutionPlan;
+struct NetworkTensorPlan;
+
 namespace Cuda {
+
+struct CudaDenseStageSequenceOutput;
+struct CudaExecutionSchedule;
+class CudaInferenceBuffers;
+class CudaExecutionWorkspace;
 
 enum class CudaOutputTarget {
   Policy,
