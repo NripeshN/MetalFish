@@ -72,6 +72,8 @@ class SeekSummary:
     challenge_rate_limited: int = 0
     challenge_timeout: int = 0
     challenge_events: int = 0
+    game_started: int = 0
+    game_start_aborted: int = 0
     no_candidates: int = 0
     deferred: int = 0
     total_retry_s: float = 0.0
@@ -321,6 +323,10 @@ def parse_seek_audit(path: pathlib.Path, since_ts: float | None = None) -> SeekS
             summary.challenge_timeout += 1
         elif event.startswith("challenge_event"):
             summary.challenge_events += 1
+        elif event == "game_started":
+            summary.game_started += 1
+        elif event == "game_start_aborted":
+            summary.game_start_aborted += 1
         elif event == "seek_no_candidates":
             summary.no_candidates += 1
         elif event == "seek_deferred":
@@ -469,6 +475,11 @@ def print_seek_report(summary: SeekSummary) -> None:
         f"{summary.challenge_events} async events"
     )
     print(
+        "Game starts: "
+        f"{summary.game_started} started, "
+        f"{summary.game_start_aborted} aborted before play"
+    )
+    print(
         "Seek waits: "
         f"{summary.no_candidates} no-candidate cycles, "
         f"{summary.deferred} resource deferrals, "
@@ -529,6 +540,8 @@ def seek_summary_to_json(summary: SeekSummary) -> dict:
         "challenge_rate_limited": summary.challenge_rate_limited,
         "challenge_timeout": summary.challenge_timeout,
         "challenge_events": summary.challenge_events,
+        "game_started": summary.game_started,
+        "game_start_aborted": summary.game_start_aborted,
         "no_candidates": summary.no_candidates,
         "deferred": summary.deferred,
         "total_retry_s": summary.total_retry_s,

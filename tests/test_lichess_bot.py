@@ -2475,6 +2475,58 @@ def test_game_start_cancels_unrelated_pending_challenge() -> None:
     expect("seek blocked after race", not bot._should_seek())
 
 
+def test_overflow_game_start_is_audited_and_marks_format_played() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        include_zero_increment = False
+        include_bullet = False
+        avoid_repeat_format = True
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {"active": object()}
+    bot._pending_challenge_id = None
+    bot._pending_challenge_target = None
+    bot._pending_challenge_speed = None
+    bot._challenge_sent_at = 0.0
+    bot._rotation_idx = 0
+    bot._tc_failures = 2
+    bot._draining = threading.Event()
+    bot._shutdown = threading.Event()
+    bot._seek_timer = None
+    bot._played_by_speed = {}
+    bot._persist_played_format_history = False
+
+    aborted: list[str] = []
+    audit: list[tuple[str, dict]] = []
+    bot.abort_or_resign = lambda game_id: aborted.append(game_id)
+    bot._audit_seek = lambda event, **fields: audit.append((event, fields))
+
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(
+            {
+                "type": "gameStart",
+                "game": {
+                    "gameId": "overflow",
+                    "speed": "blitz",
+                    "opponent": {"id": "latebot"},
+                },
+            }
+        )
+
+    expect("overflow game aborted", aborted == ["overflow"])
+    expect("overflow game not started", "overflow" not in bot.active_games)
+    expect("overflow event audited", audit and audit[0][0] == "game_start_aborted")
+    expect("overflow audit reason", audit[0][1]["reason"] == "max_games")
+    expect("overflow audit target", audit[0][1]["target"] == "latebot")
+    expect("overflow audit speed", audit[0][1]["speed"] == "blitz")
+    expect(
+        "overflow target marked as played",
+        "latebot" in bot._played_by_speed.get("blitz", {}),
+    )
+
+
 def test_malformed_global_events_are_ignored() -> None:
     bot = object.__new__(lichess_bot.LichessBot)
     bot.active_games = {}
@@ -3090,6 +3142,7 @@ def main() -> int:
     test_challenge_timeout_cancels_server_side_challenge()
     test_game_start_claims_slot_and_clears_pending()
     test_game_start_cancels_unrelated_pending_challenge()
+    test_overflow_game_start_is_audited_and_marks_format_played()
     test_malformed_global_events_are_ignored()
     test_game_finish_marks_game_completed()
     test_stale_game_start_for_completed_game_is_ignored()

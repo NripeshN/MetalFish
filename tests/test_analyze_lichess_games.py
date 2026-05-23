@@ -199,21 +199,29 @@ def test_parse_seek_audit_counts_challenge_efficiency() -> None:
                     "reason": "All eligible bots are cooling down",
                     "retry_s": 30,
                 },
+                {
+                    "ts": 1004.0,
+                    "event": "game_start_aborted",
+                    "target": "bot-c",
+                    "speed": "rapid",
+                    "reason": "max_games",
+                },
                 {"ts": 900.0, "event": "challenge_timeout", "target": "old"},
             ],
         )
 
         summary = analyzer.parse_seek_audit(path, since_ts=1000.0)
 
-    expect("seek events filtered by since", summary.events == 4)
+    expect("seek events filtered by since", summary.events == 5)
     expect("seek challenge sent counted", summary.challenge_sent == 1)
     expect("seek challenge failure counted", summary.challenge_failed == 1)
     expect("seek rate limit counted", summary.challenge_rate_limited == 1)
     expect("seek no candidates counted", summary.no_candidates == 1)
+    expect("seek aborted starts counted", summary.game_start_aborted == 1)
     expect("seek retry seconds accumulated", summary.total_retry_s == 630)
     expect("seek cooldown seconds accumulated", summary.total_cooldown_s == 21600)
     expect("seek target counted", summary.target_counts["bot-a"] == 2)
-    expect("seek speed counted", summary.speed_counts["rapid"] == 2)
+    expect("seek speed counted", summary.speed_counts["rapid"] == 3)
 
 
 def test_print_report_includes_stability_summary() -> None:
@@ -271,6 +279,8 @@ def test_print_seek_report_includes_efficiency_summary() -> None:
         challenge_sent=1,
         challenge_failed=1,
         challenge_timeout=1,
+        game_started=1,
+        game_start_aborted=1,
         total_retry_s=30,
         total_cooldown_s=600,
     )
@@ -287,6 +297,7 @@ def test_print_seek_report_includes_efficiency_summary() -> None:
 
     expect("seek audit header", "Seek audit: seek.jsonl" in text)
     expect("seek challenge summary", "1 sent, 1 failed, 1 timed out" in text)
+    expect("seek start summary", "1 started, 1 aborted before play" in text)
     expect("seek waits summary", "30s retry delay, 600s new cooldowns" in text)
     expect("seek target summary", "bot-a" in text)
 

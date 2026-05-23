@@ -2457,6 +2457,41 @@ class LichessBot:
         game_id = event.get("gameId") or event.get("id")
         return str(game_id) if game_id else ""
 
+    def _event_game_opponent(self, event: dict) -> str | None:
+        game = event.get("game", {}) if isinstance(event, dict) else {}
+        sources = [event]
+        if isinstance(game, dict):
+            sources.insert(0, game)
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            opponent = source.get("opponent")
+            if isinstance(opponent, dict):
+                value = opponent.get("id") or opponent.get("username") or opponent.get(
+                    "name"
+                )
+            elif isinstance(opponent, str):
+                value = opponent
+            else:
+                value = source.get("opponentId")
+            key = self._cooldown_key(str(value)) if value else None
+            if key and key != self._cooldown_key(getattr(self, "bot_id", "")):
+                return str(value)
+        return None
+
+    def _event_game_speed(self, event: dict) -> str | None:
+        game = event.get("game", {}) if isinstance(event, dict) else {}
+        sources = [event]
+        if isinstance(game, dict):
+            sources.insert(0, game)
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            speed = source.get("speed") or source.get("perf")
+            if isinstance(speed, str) and speed in ACCEPTED_SPEEDS:
+                return speed
+        return None
+
     def _challenge_id_from_response(self, response: requests.Response) -> str | None:
         try:
             data = response.json()
@@ -4713,16 +4748,33 @@ class LichessBot:
                     print(f"  Event loop error: {e}")
                     time.sleep(5)
 
-    def _handle_game_start(self, game_id: str) -> None:
+    def _handle_game_start(self, game_id: str, event: dict | None = None) -> None:
         if not game_id:
             return
+        event = event if isinstance(event, dict) else {}
+        event_opponent = self._event_game_opponent(event)
+        event_speed = self._event_game_speed(event)
         if self._game_was_completed(game_id):
             print(f"  [{game_id}] Ignoring stale gameStart for completed game")
+            self._audit_seek(
+                "game_start_ignored",
+                game_id=game_id,
+                reason="completed",
+                target=event_opponent,
+                speed=event_speed,
+            )
             return
         if self._seek_timer:
             self._seek_timer.cancel()
             self._seek_timer = None
         if game_id in self.active_games:
+            self._audit_seek(
+                "game_start_ignored",
+                game_id=game_id,
+                reason="already_active",
+                target=event_opponent,
+                speed=event_speed,
+            )
             return
 
         pending_id = self._pending_challenge_id
@@ -4733,21 +4785,60 @@ class LichessBot:
                 self._mark_seek_opponent_played(pending_target, pending_speed)
                 self._cancel_pending_challenge("game started")
             else:
+                self._audit_seek(
+                    "game_start_cancel_pending",
+                    game_id=game_id,
+                    pending_id=pending_id,
+                    pending_target=pending_target,
+                    pending_speed=pending_speed,
+                    target=event_opponent,
+                    speed=event_speed,
+                )
                 self._cancel_pending_challenge("game started elsewhere")
 
         self._reset_elo_range()
         self._tc_failures = 0
         if self._draining.is_set():
             print(f"  [{game_id}] Drain mode active, aborting new game")
+            if event_opponent and event_speed:
+                self._mark_seek_opponent_played(event_opponent, event_speed)
+            self._audit_seek(
+                "game_start_aborted",
+                game_id=game_id,
+                reason="drain_mode",
+                target=event_opponent,
+                speed=event_speed,
+                active_games=len(self.active_games),
+                max_games=self.args.max_games,
+            )
             self.abort_or_resign(game_id)
             if not self.active_games:
                 self._shutdown.set()
             return
         if len(self.active_games) >= self.args.max_games:
             print(f"  [{game_id}] Max games reached, aborting overflow game")
+            if event_opponent and event_speed:
+                self._mark_seek_opponent_played(event_opponent, event_speed)
+            self._audit_seek(
+                "game_start_aborted",
+                game_id=game_id,
+                reason="max_games",
+                target=event_opponent,
+                speed=event_speed,
+                active_games=len(self.active_games),
+                max_games=self.args.max_games,
+            )
             self.abort_or_resign(game_id)
             return
         self._advance_rotation()
+        self._audit_seek(
+            "game_started",
+            game_id=game_id,
+            target=pending_target or event_opponent,
+            speed=pending_speed or event_speed,
+            active_games=len(self.active_games) + 1,
+            max_games=self.args.max_games,
+        )
         t = threading.Thread(target=self.play_game, args=(game_id,), daemon=True)
         self.active_games[game_id] = t
         t.start()
@@ -4805,10 +4896,10 @@ class LichessBot:
             game_id = self._event_game_id(event)
             seek_lock = getattr(self, "_seek_lock", None)
             if seek_lock is None:
-                self._handle_game_start(game_id)
+                self._handle_game_start(game_id, event)
             else:
                 with seek_lock:
-                    self._handle_game_start(game_id)
+                    self._handle_game_start(game_id, event)
 
         elif etype == "gameFinish":
             game_id = self._event_game_id(event)
