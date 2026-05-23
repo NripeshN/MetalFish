@@ -1500,20 +1500,30 @@ std::vector<Move> ParallelHybridSearch::compute_ane_root_order_hints() {
 
     size_t result_count = 0;
     if (!pending_positions.empty()) {
-      if (should_stop()) {
-        if (config_.trace_decisions)
-          send_info_string(
-              "Hybrid: ANE root probe aborted before Core ML batch");
-        return hints;
-      }
-      auto results = ane_evaluator_->EvaluateBatch(pending_positions.data(),
-                                                   pending_positions.size());
-      result_count = std::min(results.size(), pending_indices.size());
-      for (size_t i = 0; i < result_count; ++i) {
-        auto &child = *children[pending_indices[i]];
-        const float root_score = -results[i].value;
-        child.score = std::isfinite(root_score) ? root_score : 0.0f;
-        child.scored = true;
+      constexpr size_t kANERootProbeChunkSize = 8;
+      for (size_t offset = 0; offset < pending_positions.size();
+           offset += kANERootProbeChunkSize) {
+        if (should_stop()) {
+          if (config_.trace_decisions)
+            send_info_string(
+                "Hybrid: ANE root probe aborted before Core ML batch");
+          break;
+        }
+        const size_t chunk_size =
+            std::min(kANERootProbeChunkSize, pending_positions.size() - offset);
+        auto results = ane_evaluator_->EvaluateBatch(pending_positions.data() +
+                                                         offset,
+                                                     chunk_size);
+        const size_t chunk_count = std::min(results.size(), chunk_size);
+        for (size_t i = 0; i < chunk_count; ++i) {
+          auto &child = *children[pending_indices[offset + i]];
+          const float root_score = -results[i].value;
+          child.score = std::isfinite(root_score) ? root_score : 0.0f;
+          child.scored = true;
+        }
+        result_count += chunk_count;
+        if (chunk_count < chunk_size)
+          break;
       }
     }
 
