@@ -2091,7 +2091,7 @@ def test_challenge_event_identity_accepts_string_users() -> None:
     expect("string target parsed", target == "targetbot")
 
 
-def test_challenge_timeout_does_not_post_cancel_after_auto_expiry() -> None:
+def test_challenge_timeout_cancels_server_side_challenge() -> None:
     class Args:
         seek = False
         rotate = False
@@ -2109,15 +2109,14 @@ def test_challenge_timeout_does_not_post_cancel_after_auto_expiry() -> None:
     bot._declined_cooldown = {}
     bot._persist_challenge_cooldowns = False
 
-    def api_post(*args, **kwargs):
-        raise AssertionError("timed-out challenges should auto-expire")
-
-    bot.api_post = api_post
+    posted: list[str] = []
+    bot.api_post = lambda path, **kwargs: posted.append(path)
 
     with redirect_stdout(io.StringIO()):
         bot._challenge_timed_out()
 
     expect("timeout clears pending challenge", bot._pending_challenge_id is None)
+    expect("timeout posts cancel", posted == ["/challenge/challenge/cancel"])
     expect("timeout cools target", "targetbot" in bot._declined_cooldown)
     expect("timeout counts tc failure", bot._tc_failures == 1)
 
@@ -2786,7 +2785,7 @@ def main() -> int:
     test_matching_challenge_event_clears_pending()
     test_unrelated_challenge_event_without_pending_is_ignored()
     test_challenge_event_identity_accepts_string_users()
-    test_challenge_timeout_does_not_post_cancel_after_auto_expiry()
+    test_challenge_timeout_cancels_server_side_challenge()
     test_game_start_claims_slot_and_clears_pending()
     test_game_start_cancels_unrelated_pending_challenge()
     test_malformed_global_events_are_ignored()

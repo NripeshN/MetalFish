@@ -2935,7 +2935,7 @@ class LichessBot:
             target = self._pending_challenge_target or self._pending_challenge_id
             print(f"  Challenge to {target} timed out")
             self._cooldown_bot(target, duration=600)
-            self._clear_pending_challenge()
+            self._cancel_pending_challenge("timeout")
             self._challenge_retries += 1
             self._tc_failures += 1
             if self._tc_failures >= 3 and self.args.rotate:
