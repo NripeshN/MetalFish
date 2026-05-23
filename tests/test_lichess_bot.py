@@ -2916,6 +2916,41 @@ def test_audit_writes_bounded_jsonl() -> None:
     expect("audit list bounded", len(records[1]["moves"]) == 32)
 
 
+def test_seek_audit_writes_bounded_jsonl() -> None:
+    old_path = lichess_bot.LICHESS_SEEK_AUDIT_PATH
+    old_limit = lichess_bot.LICHESS_AUDIT_EVENT_LIMIT
+    old_field_limit = lichess_bot.LICHESS_AUDIT_FIELD_LIMIT
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            lichess_bot.LICHESS_SEEK_AUDIT_PATH = pathlib.Path(tmp) / "seek.jsonl"
+            lichess_bot.LICHESS_AUDIT_EVENT_LIMIT = 2
+            lichess_bot.LICHESS_AUDIT_FIELD_LIMIT = 16
+
+            bot = object.__new__(lichess_bot.LichessBot)
+            bot._audit_enabled = True
+            bot._audit_lock = threading.Lock()
+            bot._audit_counts = {}
+            bot._seek_audit_count = 0
+
+            bot._audit_seek("challenge_sent", target="targetbot")
+            bot._audit_seek("challenge_failed", reason="x" * 64)
+            bot._audit_seek("dropped")
+
+            records = [
+                json.loads(line)
+                for line in lichess_bot.LICHESS_SEEK_AUDIT_PATH.read_text().splitlines()
+            ]
+    finally:
+        lichess_bot.LICHESS_SEEK_AUDIT_PATH = old_path
+        lichess_bot.LICHESS_AUDIT_EVENT_LIMIT = old_limit
+        lichess_bot.LICHESS_AUDIT_FIELD_LIMIT = old_field_limit
+
+    expect("seek audit event limit enforced", len(records) == 2)
+    expect("seek audit event serialized", records[0]["event"] == "challenge_sent")
+    expect("seek audit field truncated", records[1]["reason"].endswith("..."))
+
+
 def test_submit_move_writes_audit_result() -> None:
     old_dir = lichess_bot.LICHESS_AUDIT_DIR
 
@@ -3068,6 +3103,7 @@ def main() -> int:
     test_game_loop_uses_long_read_timeout_tuple()
     test_game_loop_skips_malformed_stream_frames()
     test_audit_writes_bounded_jsonl()
+    test_seek_audit_writes_bounded_jsonl()
     test_submit_move_writes_audit_result()
     test_quit_after_games_limit()
     print("Lichess bot tests: OK")

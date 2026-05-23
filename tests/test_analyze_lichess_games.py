@@ -165,6 +165,57 @@ def test_parse_since_accepts_unix_and_iso_values() -> None:
     )
 
 
+def test_parse_seek_audit_counts_challenge_efficiency() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "seek.jsonl"
+        write_audit(
+            path,
+            [
+                {
+                    "ts": 1000.0,
+                    "event": "challenge_sent",
+                    "target": "bot-a",
+                    "speed": "rapid",
+                },
+                {
+                    "ts": 1001.0,
+                    "event": "challenge_failed",
+                    "target": "bot-a",
+                    "speed": "rapid",
+                    "status": 400,
+                    "reason": "Please send me a casual challenge instead.",
+                    "cooldown_s": 21600,
+                },
+                {
+                    "ts": 1002.0,
+                    "event": "challenge_rate_limited",
+                    "target": "bot-b",
+                    "speed": "blitz",
+                    "retry_s": 600,
+                },
+                {
+                    "ts": 1003.0,
+                    "event": "seek_no_candidates",
+                    "reason": "All eligible bots are cooling down",
+                    "retry_s": 30,
+                },
+                {"ts": 900.0, "event": "challenge_timeout", "target": "old"},
+            ],
+        )
+
+        summary = analyzer.parse_seek_audit(path, since_ts=1000.0)
+
+    expect("seek events filtered by since", summary.events == 4)
+    expect("seek challenge sent counted", summary.challenge_sent == 1)
+    expect("seek challenge failure counted", summary.challenge_failed == 1)
+    expect("seek rate limit counted", summary.challenge_rate_limited == 1)
+    expect("seek no candidates counted", summary.no_candidates == 1)
+    expect("seek retry seconds accumulated", summary.total_retry_s == 630)
+    expect("seek cooldown seconds accumulated", summary.total_cooldown_s == 21600)
+    expect("seek target counted", summary.target_counts["bot-a"] == 2)
+    expect("seek speed counted", summary.speed_counts["rapid"] == 2)
+
+
 def test_print_report_includes_stability_summary() -> None:
     audit = analyzer.AuditSummary(
         game_id="gameid",
@@ -213,13 +264,42 @@ def test_print_report_includes_stability_summary() -> None:
     expect("game line reported", "OpponentBot" in text)
 
 
+def test_print_seek_report_includes_efficiency_summary() -> None:
+    summary = analyzer.SeekSummary(
+        path=pathlib.Path("seek.jsonl"),
+        events=3,
+        challenge_sent=1,
+        challenge_failed=1,
+        challenge_timeout=1,
+        total_retry_s=30,
+        total_cooldown_s=600,
+    )
+    summary.event_counts.update({"challenge_sent": 1, "challenge_failed": 1})
+    summary.speed_counts.update({"rapid": 2})
+    summary.target_counts.update({"bot-a": 2})
+    summary.reason_counts.update({"too slow": 1})
+    summary.status_counts.update({"400": 1})
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        analyzer.print_seek_report(summary)
+    text = output.getvalue()
+
+    expect("seek audit header", "Seek audit: seek.jsonl" in text)
+    expect("seek challenge summary", "1 sent, 1 failed, 1 timed out" in text)
+    expect("seek waits summary", "30s retry delay, 600s new cooldowns" in text)
+    expect("seek target summary", "bot-a" in text)
+
+
 def main() -> int:
     test_parse_audit_counts_stale_rejects_and_ponder_metrics()
     test_game_summary_from_export_scores_bot_color()
     test_infer_speed_from_audit_clock()
     test_latest_audit_files_can_filter_by_since_time()
     test_parse_since_accepts_unix_and_iso_values()
+    test_parse_seek_audit_counts_challenge_efficiency()
     test_print_report_includes_stability_summary()
+    test_print_seek_report_includes_efficiency_summary()
     print("Lichess game analyzer tests: OK")
     return 0
 

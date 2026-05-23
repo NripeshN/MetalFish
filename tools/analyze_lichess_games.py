@@ -16,6 +16,7 @@ from typing import Iterable
 
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_AUDIT_DIR = PROJ / "results" / "lichess_audit"
+DEFAULT_SEEK_AUDIT = PROJ / "results" / "lichess_seek_audit.jsonl"
 BOT_ID = "nripesh-metalfish"
 
 
@@ -60,6 +61,26 @@ class GameSummary:
     plies: int = 0
     opening: str = ""
     url: str = ""
+
+
+@dataclass
+class SeekSummary:
+    path: pathlib.Path
+    events: int = 0
+    challenge_sent: int = 0
+    challenge_failed: int = 0
+    challenge_rate_limited: int = 0
+    challenge_timeout: int = 0
+    challenge_events: int = 0
+    no_candidates: int = 0
+    deferred: int = 0
+    total_retry_s: float = 0.0
+    total_cooldown_s: float = 0.0
+    event_counts: Counter[str] = field(default_factory=Counter)
+    target_counts: Counter[str] = field(default_factory=Counter)
+    speed_counts: Counter[str] = field(default_factory=Counter)
+    reason_counts: Counter[str] = field(default_factory=Counter)
+    status_counts: Counter[str] = field(default_factory=Counter)
 
 
 def parse_since(value: str | None) -> float | None:
@@ -262,6 +283,66 @@ def infer_speed(initial_clock_ms: int | None, increment_ms: int | None) -> str:
     return "classical"
 
 
+def _float_field(row: dict, key: str) -> float:
+    try:
+        return float(row.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def parse_seek_audit(path: pathlib.Path, since_ts: float | None = None) -> SeekSummary:
+    summary = SeekSummary(path=path)
+    if not path.exists():
+        return summary
+
+    for raw in path.read_text(errors="replace").splitlines():
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            summary.event_counts["seek_audit_json_decode"] += 1
+            continue
+        if since_ts is not None:
+            ts = _float_field(row, "ts")
+            if ts and ts < since_ts:
+                continue
+
+        event = str(row.get("event", ""))
+        if not event:
+            continue
+        summary.events += 1
+        summary.event_counts[event] += 1
+        if event == "challenge_sent":
+            summary.challenge_sent += 1
+        elif event == "challenge_failed":
+            summary.challenge_failed += 1
+        elif event == "challenge_rate_limited":
+            summary.challenge_rate_limited += 1
+        elif event == "challenge_timeout":
+            summary.challenge_timeout += 1
+        elif event.startswith("challenge_event"):
+            summary.challenge_events += 1
+        elif event == "seek_no_candidates":
+            summary.no_candidates += 1
+        elif event == "seek_deferred":
+            summary.deferred += 1
+
+        target = str(row.get("target") or "")
+        if target:
+            summary.target_counts[target] += 1
+        speed = str(row.get("speed") or "")
+        if speed:
+            summary.speed_counts[speed] += 1
+        reason = str(row.get("reason") or "")
+        if reason:
+            summary.reason_counts[reason] += 1
+        status = str(row.get("status") or "")
+        if status:
+            summary.status_counts[status] += 1
+        summary.total_retry_s += _float_field(row, "retry_s")
+        summary.total_cooldown_s += _float_field(row, "cooldown_s")
+    return summary
+
+
 def collect_games(
     audit_files: Iterable[pathlib.Path],
     *,
@@ -375,6 +456,32 @@ def print_report(games: list[GameSummary]) -> None:
         )
 
 
+def print_seek_report(summary: SeekSummary) -> None:
+    print()
+    print(f"Seek audit: {summary.path}")
+    print(f"Seek events: {summary.events}")
+    print(
+        "Challenges: "
+        f"{summary.challenge_sent} sent, "
+        f"{summary.challenge_failed} failed, "
+        f"{summary.challenge_timeout} timed out, "
+        f"{summary.challenge_rate_limited} rate-limited, "
+        f"{summary.challenge_events} async events"
+    )
+    print(
+        "Seek waits: "
+        f"{summary.no_candidates} no-candidate cycles, "
+        f"{summary.deferred} resource deferrals, "
+        f"{summary.total_retry_s:.0f}s retry delay, "
+        f"{summary.total_cooldown_s:.0f}s new cooldowns"
+    )
+    print(f"By event: {dict(summary.event_counts)}")
+    print(f"By speed: {dict(summary.speed_counts)}")
+    print(f"Top targets: {dict(summary.target_counts.most_common(10))}")
+    print(f"Statuses: {dict(summary.status_counts)}")
+    print(f"Top reasons: {dict(summary.reason_counts.most_common(5))}")
+
+
 def summaries_to_json(games: list[GameSummary]) -> list[dict]:
     return [
         {
@@ -413,6 +520,27 @@ def summaries_to_json(games: list[GameSummary]) -> list[dict]:
     ]
 
 
+def seek_summary_to_json(summary: SeekSummary) -> dict:
+    return {
+        "path": str(summary.path),
+        "events": summary.events,
+        "challenge_sent": summary.challenge_sent,
+        "challenge_failed": summary.challenge_failed,
+        "challenge_rate_limited": summary.challenge_rate_limited,
+        "challenge_timeout": summary.challenge_timeout,
+        "challenge_events": summary.challenge_events,
+        "no_candidates": summary.no_candidates,
+        "deferred": summary.deferred,
+        "total_retry_s": summary.total_retry_s,
+        "total_cooldown_s": summary.total_cooldown_s,
+        "event_counts": dict(summary.event_counts),
+        "target_counts": dict(summary.target_counts),
+        "speed_counts": dict(summary.speed_counts),
+        "reason_counts": dict(summary.reason_counts),
+        "status_counts": dict(summary.status_counts),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Summarize recent MetalFish Lichess audit logs."
@@ -437,6 +565,20 @@ def main() -> int:
         default=0.1,
         help="Delay between public Lichess export requests.",
     )
+    parser.add_argument(
+        "--seek-audit",
+        type=pathlib.Path,
+        default=None,
+        help=(
+            "Also summarize the bot seek audit JSONL file "
+            f"(default path: {DEFAULT_SEEK_AUDIT})."
+        ),
+    )
+    parser.add_argument(
+        "--seek-only",
+        action="store_true",
+        help="Only print the seek audit summary.",
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON output.")
     args = parser.parse_args()
 
@@ -445,12 +587,31 @@ def main() -> int:
     except ValueError as exc:
         parser.error(f"invalid --since value: {exc}")
 
-    files = latest_audit_files(args.audit_dir, max(0, args.limit), since_ts=since_ts)
-    games = collect_games(files, fetch=args.fetch_lichess, pause_s=args.fetch_pause)
+    seek_summary = (
+        parse_seek_audit(args.seek_audit or DEFAULT_SEEK_AUDIT, since_ts=since_ts)
+        if args.seek_audit or args.seek_only
+        else None
+    )
+    files = []
+    games: list[GameSummary] = []
+    if not args.seek_only:
+        files = latest_audit_files(args.audit_dir, max(0, args.limit), since_ts=since_ts)
+        games = collect_games(files, fetch=args.fetch_lichess, pause_s=args.fetch_pause)
     if args.json:
-        print(json.dumps(summaries_to_json(games), indent=2, sort_keys=True))
+        payload: object
+        if seek_summary is not None:
+            payload = {
+                "games": summaries_to_json(games),
+                "seek": seek_summary_to_json(seek_summary),
+            }
+        else:
+            payload = summaries_to_json(games)
+        print(json.dumps(payload, indent=2, sort_keys=True))
     else:
-        print_report(games)
+        if not args.seek_only:
+            print_report(games)
+        if seek_summary is not None:
+            print_seek_report(seek_summary)
     return 0
 
 

@@ -445,6 +445,12 @@ LICHESS_AUDIT_DIR = pathlib.Path(
         str(PROJ / "results" / "lichess_audit"),
     )
 )
+LICHESS_SEEK_AUDIT_PATH = pathlib.Path(
+    os.environ.get(
+        "METALFISH_LICHESS_SEEK_AUDIT_FILE",
+        str(PROJ / "results" / "lichess_seek_audit.jsonl"),
+    )
+)
 LICHESS_AUDIT_EVENT_LIMIT = max(
     128, min(20000, env_int("METALFISH_LICHESS_AUDIT_EVENT_LIMIT", 4096))
 )
@@ -863,6 +869,8 @@ def print_config_check(args) -> None:
         f"  Audit: {'enabled' if LICHESS_AUDIT_ENABLED else 'disabled'} "
         f"({LICHESS_AUDIT_DIR})"
     )
+    if LICHESS_AUDIT_ENABLED:
+        print(f"  Seek audit: {LICHESS_SEEK_AUDIT_PATH}")
     print(f"  Ponder: {args.ponder}")
 
 
@@ -1777,6 +1785,7 @@ class LichessBot:
         self._audit_enabled = LICHESS_AUDIT_ENABLED
         self._audit_lock = threading.Lock()
         self._audit_counts: dict[str, int] = {}
+        self._seek_audit_count = 0
         self._draining = threading.Event()
         self._shutdown = threading.Event()
 
@@ -1846,6 +1855,32 @@ class LichessBot:
                 with self._audit_path(game_id).open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps(record, separators=(",", ":")) + "\n")
                 self._audit_counts[game_id] = count + 1
+            except OSError:
+                return
+
+    def _audit_seek(self, event: str, **fields) -> None:
+        if not event or not getattr(self, "_audit_enabled", False):
+            return
+        if not hasattr(self, "_audit_lock"):
+            self._audit_lock = threading.Lock()
+            self._audit_counts = {}
+        if not hasattr(self, "_seek_audit_count"):
+            self._seek_audit_count = 0
+
+        with self._audit_lock:
+            if self._seek_audit_count >= LICHESS_AUDIT_EVENT_LIMIT:
+                return
+            record = {
+                "ts": round(time.time(), 3),
+                "event": event,
+            }
+            for key, value in fields.items():
+                record[str(key)] = self._audit_value(value)
+            try:
+                LICHESS_SEEK_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+                with LICHESS_SEEK_AUDIT_PATH.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+                self._seek_audit_count += 1
             except OSError:
                 return
 
@@ -2873,6 +2908,7 @@ class LichessBot:
 
         if not self._resources_allow_new_game():
             print("  Resources busy, deferring seek for 30s...")
+            self._audit_seek("seek_deferred", reason="resources_busy", retry_s=30)
             self._schedule_retry(30)
             return
 
@@ -2883,8 +2919,10 @@ class LichessBot:
 
         if self._pending_challenge_id:
             target = self._pending_challenge_target
+            speed = getattr(self, "_pending_challenge_speed", None)
             self._cancel_pending_challenge("expired")
             self._cooldown_bot(target)
+            self._audit_seek("challenge_expired", target=target, speed=speed)
 
         limit, inc = self._next_tc()
         tc_label = f"{limit//60}+{inc}"
@@ -2895,12 +2933,22 @@ class LichessBot:
             bots, status_code = self._online_bots()
             if bots is None:
                 print(f"  /bot/online failed with {status_code}, retrying...")
+                self._audit_seek(
+                    "online_failed", status=status_code, retry_s=10
+                )
                 self._schedule_retry()
                 return
 
             candidates, reason = self._seek_candidates(bots, speed, rated)
             if reason:
                 print(f"  {reason}, retrying in 30s...")
+                self._audit_seek(
+                    "seek_no_candidates",
+                    speed=speed,
+                    rated=rated,
+                    reason=reason,
+                    retry_s=30,
+                )
                 self._schedule_retry(30)
                 return
 
@@ -2918,6 +2966,14 @@ class LichessBot:
                 if not challenge_id:
                     print(f"  Could not read challenge id for {target}")
                     self._cooldown_bot(target, duration=60)
+                    self._audit_seek(
+                        "challenge_bad_response",
+                        target=target,
+                        speed=speed,
+                        rated=rated,
+                        tc=tc_label,
+                        status=r.status_code,
+                    )
                     self._schedule_retry(5)
                     return
                 self._pending_challenge_id = challenge_id
@@ -2930,6 +2986,15 @@ class LichessBot:
                     f"  Challenged {target} "
                     f"({tc_label}, {'rated' if rated else 'casual'}, "
                     f"candidates={len(candidates)})"
+                )
+                self._audit_seek(
+                    "challenge_sent",
+                    challenge_id=challenge_id,
+                    target=target,
+                    speed=speed,
+                    rated=rated,
+                    tc=tc_label,
+                    candidates=len(candidates),
                 )
                 self._schedule_challenge_timeout()
             elif r.status_code == 429:
@@ -2965,6 +3030,15 @@ class LichessBot:
                     print(
                         f"  Waiting {self._format_duration(int(backoff))}..."
                     )
+                self._audit_seek(
+                    "challenge_rate_limited",
+                    target=target,
+                    speed=speed,
+                    rated=rated,
+                    tc=tc_label,
+                    retry_s=round(float(backoff), 3),
+                    rate_limit_count=self._rate_limit_count,
+                )
                 self._schedule_retry(backoff)
             else:
                 detail = (r.text or "").strip().replace("\n", " ")[:180]
@@ -2978,9 +3052,20 @@ class LichessBot:
                 self._cooldown_challenge_failure(
                     target, speed, detail, duration=cooldown_s
                 )
+                self._audit_seek(
+                    "challenge_failed",
+                    target=target,
+                    speed=speed,
+                    rated=rated,
+                    tc=tc_label,
+                    status=r.status_code,
+                    reason=detail,
+                    cooldown_s=cooldown_s,
+                )
                 self._schedule_retry(2)
         except Exception as e:
             print(f"  Seek error: {e}")
+            self._audit_seek("seek_error", error=str(e), retry_s=15)
             self._schedule_retry(15)
 
     def _challenge_failure_cooldown_seconds(self, response: requests.Response) -> int:
@@ -3115,8 +3200,10 @@ class LichessBot:
     def _challenge_timed_out(self):
         if self._pending_challenge_id:
             target = self._pending_challenge_target or self._pending_challenge_id
+            speed = getattr(self, "_pending_challenge_speed", None)
             print(f"  Challenge to {target} timed out")
             self._cooldown_bot(target, duration=600)
+            self._audit_seek("challenge_timeout", target=target, speed=speed)
             self._cancel_pending_challenge("timeout")
             self._challenge_retries += 1
             self._tc_failures += 1
@@ -4537,6 +4624,8 @@ class LichessBot:
             f"  Audit:    {'enabled' if LICHESS_AUDIT_ENABLED else 'disabled'} "
             f"| {LICHESS_AUDIT_DIR}"
         )
+        if LICHESS_AUDIT_ENABLED:
+            print(f"  Seek log: {LICHESS_SEEK_AUDIT_PATH}")
         print(
             f"  Clock:    Move overhead {BASE_ENGINE_OPTIONS['Move Overhead']} ms "
             f"| hard cap {MAX_SEARCH_TIMEOUT_S:.0f}s"
@@ -4732,21 +4821,45 @@ class LichessBot:
             challenge_id, event_target = self._challenge_event_identity(event)
             event_reason = self._challenge_event_reason(event)
             event_speed = self._challenge_event_speed(event)
+            label = "declined" if etype == "challengeDeclined" else "canceled"
             if not self._pending_challenge_id:
                 self._cooldown_challenge_failure(
                     event_target, event_speed, event_reason, duration=600
+                )
+                self._audit_seek(
+                    "challenge_event_untracked",
+                    label=label,
+                    challenge_id=challenge_id,
+                    target=event_target,
+                    speed=event_speed,
+                    reason=event_reason,
                 )
                 return
             if challenge_id and challenge_id != self._pending_challenge_id:
                 self._cooldown_challenge_failure(
                     event_target, event_speed, event_reason, duration=600
                 )
+                self._audit_seek(
+                    "challenge_event_stale",
+                    label=label,
+                    challenge_id=challenge_id,
+                    pending_id=self._pending_challenge_id,
+                    target=event_target,
+                    speed=event_speed,
+                    reason=event_reason,
+                )
                 return
             if self._pending_challenge_id and not challenge_id:
+                self._audit_seek(
+                    "challenge_event_unidentified",
+                    label=label,
+                    target=event_target,
+                    speed=event_speed,
+                    reason=event_reason,
+                )
                 return
 
             target = self._pending_challenge_target or event_target
-            label = "declined" if etype == "challengeDeclined" else "canceled"
             reason_suffix = f": {event_reason}" if event_reason else ""
             print(f"  Challenge to {target} {label}{reason_suffix}")
             self._cooldown_challenge_failure(
@@ -4754,6 +4867,14 @@ class LichessBot:
                 getattr(self, "_pending_challenge_speed", None),
                 event_reason,
                 duration=600,
+            )
+            self._audit_seek(
+                "challenge_event",
+                label=label,
+                challenge_id=challenge_id,
+                target=target,
+                speed=getattr(self, "_pending_challenge_speed", None),
+                reason=event_reason,
             )
             self._clear_pending_challenge()
             self._tc_failures += 1
