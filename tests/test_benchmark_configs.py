@@ -615,6 +615,7 @@ def main() -> int:
         PROJ / ".github/workflows/ci.yml",
         [
             "python3 tools/download_engine_networks.py",
+            "python3 tests/test_benchmark_configs.py",
             "python3 tools/uci_smoke.py",
             "Run Hybrid clock safety smoke",
             "Move\\ Overhead=500",
@@ -624,7 +625,10 @@ def main() -> int:
             '--expect-output "Time safety: estimated move budget"',
             '--reject-output "Time safety:"',
             "Run MCTS low-node tactical smoke",
+            'go "movetime 1000"',
+            '--expect-output "Starting Multi-Threaded MCTS Search"',
             "MCTSParallelSearch=false",
+            "TransformerLowTimeFallbackMs=0",
             'go "nodes 50"',
             "--expect-bestmove h5f6",
             "Run Apple accelerator tool tests",
