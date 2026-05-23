@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -138,6 +139,32 @@ def test_infer_speed_from_audit_clock() -> None:
     expect("missing speed unknown", analyzer.infer_speed(None, None) == "?")
 
 
+def test_latest_audit_files_can_filter_by_since_time() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        old = root / "old.jsonl"
+        new = root / "new.jsonl"
+        write_audit(old, [{"event": "stream_game_over", "status": "draw"}])
+        write_audit(new, [{"event": "stream_game_over", "status": "draw"}])
+        os.utime(old, (1000, 1000))
+        os.utime(new, (2000, 2000))
+
+        files = analyzer.latest_audit_files(root, 10, since_ts=1500)
+
+    expect(
+        "since filter keeps only new audit",
+        [path.name for path in files] == ["new.jsonl"],
+    )
+
+
+def test_parse_since_accepts_unix_and_iso_values() -> None:
+    expect("unix since parsed", analyzer.parse_since("1234.5") == 1234.5)
+    expect(
+        "iso since parsed",
+        analyzer.parse_since("1970-01-01T00:00:01+00:00") == 1.0,
+    )
+
+
 def test_print_report_includes_stability_summary() -> None:
     audit = analyzer.AuditSummary(
         game_id="gameid",
@@ -190,6 +217,8 @@ def main() -> int:
     test_parse_audit_counts_stale_rejects_and_ponder_metrics()
     test_game_summary_from_export_scores_bot_color()
     test_infer_speed_from_audit_clock()
+    test_latest_audit_files_can_filter_by_since_time()
+    test_parse_since_accepts_unix_and_iso_values()
     test_print_report_includes_stability_summary()
     print("Lichess game analyzer tests: OK")
     return 0

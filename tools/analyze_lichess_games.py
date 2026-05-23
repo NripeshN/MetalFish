@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import pathlib
 import time
@@ -61,12 +62,28 @@ class GameSummary:
     url: str = ""
 
 
-def latest_audit_files(audit_dir: pathlib.Path, limit: int) -> list[pathlib.Path]:
-    files = sorted(
-        audit_dir.glob("*.jsonl"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
+def parse_since(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    parsed = dt.datetime.fromisoformat(text)
+    return parsed.timestamp()
+
+
+def latest_audit_files(
+    audit_dir: pathlib.Path, limit: int, since_ts: float | None = None
+) -> list[pathlib.Path]:
+    files = list(audit_dir.glob("*.jsonl"))
+    if since_ts is not None:
+        files = [path for path in files if path.stat().st_mtime >= since_ts]
+    files = sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)
     return files[:limit]
 
 
@@ -403,6 +420,13 @@ def main() -> int:
     parser.add_argument("--audit-dir", type=pathlib.Path, default=DEFAULT_AUDIT_DIR)
     parser.add_argument("--limit", type=int, default=30)
     parser.add_argument(
+        "--since",
+        help=(
+            "Only include audit files modified at or after this Unix timestamp "
+            "or ISO-8601 time."
+        ),
+    )
+    parser.add_argument(
         "--fetch-lichess",
         action="store_true",
         help="Fetch public Lichess exports to include result, opponent, and opening data.",
@@ -416,7 +440,12 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print JSON output.")
     args = parser.parse_args()
 
-    files = latest_audit_files(args.audit_dir, max(0, args.limit))
+    try:
+        since_ts = parse_since(args.since)
+    except ValueError as exc:
+        parser.error(f"invalid --since value: {exc}")
+
+    files = latest_audit_files(args.audit_dir, max(0, args.limit), since_ts=since_ts)
     games = collect_games(files, fetch=args.fetch_lichess, pause_s=args.fetch_pause)
     if args.json:
         print(json.dumps(summaries_to_json(games), indent=2, sort_keys=True))
