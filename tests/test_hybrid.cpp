@@ -559,6 +559,9 @@ void test_hybrid_config() {
            !HybridANEConfirmedMCTSOverride(true, true, true, true, 102, 93,
                                            0.912f, 0.817f, 242, 242, 0.019f));
     EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 203, 170,
+                                           0.837f, 0.262f, 123, 112, 0.047f));
+    EXPECT(tc,
            !HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
                                            0.899f, 0.918f, 424, 437, 0.401f));
     EXPECT(tc,

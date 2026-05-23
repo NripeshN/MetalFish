@@ -826,7 +826,7 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
     return false;
 
   if (mcts_root_visits >= 80 && mcts_best_visits >= 64 &&
-      visit_share >= 0.70f && ane_score_margin >= 0.02f) {
+      visit_share >= 0.70f && ane_score_margin >= 0.10f) {
     return true;
   }
 
