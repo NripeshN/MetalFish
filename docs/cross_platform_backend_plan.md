@@ -102,10 +102,10 @@ Current remote gates:
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260522-final-e370951`, L4, 2026-05-22 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | PR path dispatch, pending first run |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26311252685` |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26311252680` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26311252679` |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26317363416` |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26317363418` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26317363408` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26317363417` |
 
 Current CUDA backend boundary:
 
@@ -573,13 +573,12 @@ requiring a hosted NVIDIA GPU. Each portable CPU job runs AB UCI smoke plus an
 explicit `NNBackend=stub` MCTS smoke, so portable builds verify the MCTS
 construction path without downloading BT4 weights. The uploaded artifacts
 include a generated manifest that makes this backend scope explicit. Branch tip
-`67d180e9` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, macOS Metal,
-CUDA L4 runtime, and the bounded hybrid regression gate green after merging
-`origin/main`. The hybrid gate uses a bounded 300-puzzle offline sample for PR
-runs; the accepted rerun scored candidate BK repeats `[22, 22, 22]` versus
-baseline `[22, 22, 22]`, and candidate puzzles `300/300` versus baseline
-`300/300` with zero candidate
-errors.
+`9d3dfef` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, Windows CUDA
+compile, macOS Metal, CUDA L4 runtime, and the bounded hybrid regression gate
+green after merging `origin/main`. The hybrid gate uses a bounded 300-puzzle
+offline sample for PR runs; the accepted rerun scored candidate BK repeats
+`[22, 22, 22]` versus baseline `[22, 22, 22]`, and candidate puzzles `300/300`
+versus baseline `300/300` with zero candidate errors.
 
 ## First Milestones
 
