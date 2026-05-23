@@ -1286,7 +1286,7 @@ def test_duplicate_game_state_does_not_resubmit() -> None:
     bot._ponder_disabled_lock = threading.Lock()
     submitted: list[str] = []
 
-    def make_move(game_id: str, move: str) -> bool:
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
         submitted.append(move)
         return True
 
@@ -1337,7 +1337,7 @@ def test_stale_stream_ply_does_not_search_old_position() -> None:
     bot._ponder_disabled_lock = threading.Lock()
     submitted: list[str] = []
 
-    bot.make_move = lambda game_id, move: submitted.append(move) or True
+    bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
     engine = Engine()
     state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
 
@@ -1385,7 +1385,7 @@ def test_stale_move_rejection_suppresses_duplicate_turn() -> None:
     bot._last_move_failure_detail = ""
     submitted: list[str] = []
 
-    def make_move(game_id: str, move: str) -> bool:
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
         submitted.append(move)
         bot._last_move_failure_detail = '400: {"error":"Not your turn"}'
         return False
@@ -1416,7 +1416,7 @@ def test_pre_submit_active_check_skips_inactive_draw_state() -> None:
     bot._audit = audit
     bot._pre_submit_active_check_needed = lambda board: True
     bot._game_active_status = lambda game_id: False
-    bot.make_move = lambda game_id, move: submitted.append(move) or True
+    bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
 
     with redirect_stdout(io.StringIO()):
         result = bot._submit_move_if_active(
@@ -1456,7 +1456,7 @@ def test_pre_submit_active_check_is_not_used_for_normal_state() -> None:
     )
     bot._pre_submit_active_check_needed = lambda board: False
     bot._game_active_status = lambda game_id: active_checks.append(game_id) or True
-    bot.make_move = lambda game_id, move: True
+    bot.make_move = lambda game_id, move, **kwargs: True
 
     result = bot._submit_move_if_active("game", [], "e2e4", lichess_bot.chess.Board())
 
@@ -1484,7 +1484,7 @@ def test_submit_skips_locally_completed_game_without_api_call() -> None:
     )
     bot._pre_submit_active_check_needed = lambda board: False
     bot._game_active_status = lambda game_id: active_checks.append(game_id) or True
-    bot.make_move = lambda game_id, move: submitted.append(move) or True
+    bot.make_move = lambda game_id, move, **kwargs: submitted.append(move) or True
     bot._mark_game_completed("game")
 
     with redirect_stdout(io.StringIO()):
@@ -1506,6 +1506,103 @@ def test_submit_skips_locally_completed_game_without_api_call() -> None:
             and record.get("source") == "local_completed"
             for record in records
         ),
+    )
+
+
+def test_make_move_can_offer_draw_on_same_request() -> None:
+    class Response:
+        status_code = 200
+        text = ""
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    calls: list[dict] = []
+
+    def api_post(path: str, **kwargs):
+        calls.append({"path": path, **kwargs})
+        return Response()
+
+    bot.api_post = api_post
+
+    expect("draw offer move accepted", bot.make_move("game", "e2e4", offering_draw=True))
+    expect(
+        "draw offer uses move endpoint",
+        calls == [
+            {
+                "path": "/bot/game/game/move/e2e4",
+                "params": {"offeringDraw": "true"},
+            }
+        ],
+    )
+
+
+def test_draw_offer_reason_requires_claim_and_tablebase_draw() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    board = lichess_bot.chess.Board()
+
+    bot._draw_claim_available = lambda candidate: True
+    bot._tablebase_wdl = lambda candidate: 0
+    expect("tb draw claim offers draw", bot._draw_offer_reason(board) == "tb_draw_claim")
+
+    bot._tablebase_wdl = lambda candidate: 2
+    expect("tb win does not offer draw", bot._draw_offer_reason(board) is None)
+
+    bot._draw_claim_available = lambda candidate: False
+    bot._tablebase_wdl = lambda candidate: 0
+    expect("no claim does not offer draw", bot._draw_offer_reason(board) is None)
+
+
+def test_draw_offer_caps_search_and_marks_move_request() -> None:
+    class Engine:
+        ponder_move = None
+
+        def __init__(self) -> None:
+            self.timeout: float | None = None
+
+        def alive(self) -> bool:
+            return True
+
+        def stop_pondering(self, timeout: float) -> bool:
+            return True
+
+        def set_position(self, initial_fen: str, moves: list[str]) -> None:
+            return None
+
+        def go(self, **kwargs):
+            self.timeout = kwargs.get("timeout")
+            return "e2e4", None
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._submitted_turns = {}
+    bot._max_seen_ply = {}
+    bot._submitted_turns_lock = threading.Lock()
+    bot._completed_game_ids = set()
+    bot._completed_game_order = []
+    bot._audit = lambda game_id, event, **fields: None
+    bot._should_query_book = lambda board, my_color, wtime, btime: False
+    bot._draw_offer_reason = lambda board: "tb_draw_claim"
+    bot._pre_submit_active_check_needed = lambda board: False
+
+    submitted: list[dict] = []
+
+    def make_move(game_id: str, move: str, *, offering_draw: bool = False) -> bool:
+        submitted.append({"move": move, "offering_draw": offering_draw})
+        return True
+
+    bot.make_move = make_move
+    engine = Engine()
+    state = {"wtime": 600000, "btime": 600000, "winc": 10000, "binc": 10000}
+
+    with redirect_stdout(io.StringIO()):
+        bot._try_move("game", engine, "startpos", [], "white", state)
+
+    expect(
+        "draw offer search capped",
+        engine.timeout is not None
+        and engine.timeout <= lichess_bot.DRAW_OFFER_SEARCH_CAP_MS / 1000.0,
+    )
+    expect(
+        "draw offer submitted on move request",
+        submitted == [{"move": "e2e4", "offering_draw": True}],
     )
 
 
@@ -1537,7 +1634,7 @@ def test_ponderhit_audit_records_elapsed_ms() -> None:
         records.append({"event": event, **fields})
 
     bot._audit = audit
-    bot.make_move = lambda game_id, move: True
+    bot.make_move = lambda game_id, move, **kwargs: True
     state = {"wtime": 900000, "btime": 900000, "winc": 10000, "binc": 10000}
 
     with redirect_stdout(io.StringIO()):
@@ -1840,7 +1937,7 @@ def test_transient_move_rejection_remains_retryable() -> None:
     bot._last_move_failure_detail = "503: service unavailable"
     submitted: list[str] = []
 
-    def make_move(game_id: str, move: str) -> bool:
+    def make_move(game_id: str, move: str, **kwargs) -> bool:
         submitted.append(move)
         return False
 
@@ -2564,7 +2661,7 @@ def test_submit_move_writes_audit_result() -> None:
             bot._last_move_failure_detail = ""
             calls = iter([True, False])
 
-            def make_move(game_id: str, move: str) -> bool:
+            def make_move(game_id: str, move: str, **kwargs) -> bool:
                 ok = next(calls)
                 if not ok:
                     bot._last_move_failure_detail = '400: {"error":"Not your turn"}'
@@ -2670,6 +2767,9 @@ def main() -> int:
     test_transient_move_rejection_remains_retryable()
     test_ponder_game_circuit_breaker()
     test_submit_skips_locally_completed_game_without_api_call()
+    test_make_move_can_offer_draw_on_same_request()
+    test_draw_offer_reason_requires_claim_and_tablebase_draw()
+    test_draw_offer_caps_search_and_marks_move_request()
     test_stale_challenge_event_preserves_current_pending()
     test_matching_challenge_event_clears_pending()
     test_unrelated_challenge_event_without_pending_is_ignored()

@@ -290,6 +290,15 @@ TRANSFORMER_MIN_MOVE_BUDGET_MS = max(
     0, min(5000, env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 400))
 )
 DEFAULT_SYZYGY_PATH = PROJ / "syzygy"
+DRAW_OFFER_TABLEBASE = (
+    env_bool_string("METALFISH_DRAW_OFFER_TABLEBASE", True) == "true"
+)
+DRAW_OFFER_SEARCH_CAP_MS = max(
+    0, min(30_000, env_int("METALFISH_DRAW_OFFER_SEARCH_CAP_MS", 1500))
+)
+DRAW_OFFER_MAX_SYZYGY_PIECES = max(
+    2, min(7, env_int("METALFISH_DRAW_OFFER_MAX_SYZYGY_PIECES", 7))
+)
 
 
 def syzygy_path_is_safe(path: pathlib.Path) -> bool:
@@ -1743,6 +1752,9 @@ class LichessBot:
         self._playing_status_cache: dict[str, tuple[float, bool | None]] = {}
         self._last_game_stream_status: int | None = None
         self._last_game_stream_error = ""
+        self._python_tablebase = None
+        self._python_tablebase_failed = False
+        self._python_tablebase_lock = threading.Lock()
         self._audit_enabled = LICHESS_AUDIT_ENABLED
         self._audit_lock = threading.Lock()
         self._audit_counts: dict[str, int] = {}
@@ -1831,9 +1843,12 @@ class LichessBot:
     def decline_challenge(self, challenge_id: str, reason: str = "generic"):
         self.api_post(f"/challenge/{challenge_id}/decline", json={"reason": reason})
 
-    def make_move(self, game_id: str, move: str) -> bool:
+    def make_move(
+        self, game_id: str, move: str, *, offering_draw: bool = False
+    ) -> bool:
         self._last_move_failure_detail = ""
-        r = self.api_post(f"/bot/game/{game_id}/move/{move}")
+        kwargs = {"params": {"offeringDraw": "true"}} if offering_draw else {}
+        r = self.api_post(f"/bot/game/{game_id}/move/{move}", **kwargs)
         if r.status_code != 200:
             detail = r.text.strip().replace("\n", " ")[:200]
             suffix = f": {detail}" if detail else ""
@@ -1936,14 +1951,24 @@ class LichessBot:
             )
         )
 
-    def _submit_move(self, game_id: str, moves: list[str], move: str) -> bool:
-        if self.make_move(game_id, move):
+    def _submit_move(
+        self,
+        game_id: str,
+        moves: list[str],
+        move: str,
+        *,
+        offering_draw: bool = False,
+        draw_offer_reason: str | None = None,
+    ) -> bool:
+        if self.make_move(game_id, move, offering_draw=offering_draw):
             self._record_submitted_turn(game_id, moves)
             self._audit(
                 game_id,
                 "move_submit",
                 move=move,
                 result="accepted",
+                offering_draw=offering_draw,
+                draw_offer_reason=draw_offer_reason or "",
                 **self._audit_context(moves),
             )
             return True
@@ -1961,6 +1986,8 @@ class LichessBot:
             result="rejected",
             detail=self._last_move_failure_detail,
             stale=self._move_failure_looks_stale(),
+            offering_draw=offering_draw,
+            draw_offer_reason=draw_offer_reason or "",
             **self._audit_context(moves),
         )
         return False
@@ -1972,6 +1999,47 @@ class LichessBot:
             or board.is_fivefold_repetition()
             or board.can_claim_draw()
         )
+
+    def _draw_claim_available(self, board: chess.Board) -> bool:
+        try:
+            return (
+                board.is_seventyfive_moves()
+                or board.is_fivefold_repetition()
+                or board.can_claim_draw()
+            )
+        except Exception:
+            return False
+
+    def _tablebase_wdl(self, board: chess.Board) -> int | None:
+        if not DRAW_OFFER_TABLEBASE or not SYZYGY_PATH:
+            return None
+        if len(board.piece_map()) > DRAW_OFFER_MAX_SYZYGY_PIECES:
+            return None
+        if getattr(self, "_python_tablebase_failed", False):
+            return None
+        lock = getattr(self, "_python_tablebase_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._python_tablebase_lock = lock
+        try:
+            with lock:
+                tablebase = getattr(self, "_python_tablebase", None)
+                if tablebase is None:
+                    import chess.syzygy
+
+                    tablebase = chess.syzygy.open_tablebase(SYZYGY_PATH)
+                    self._python_tablebase = tablebase
+                return int(tablebase.probe_wdl(board))
+        except Exception:
+            self._python_tablebase_failed = True
+            return None
+
+    def _draw_offer_reason(self, board: chess.Board) -> str | None:
+        if not self._draw_claim_available(board):
+            return None
+        if self._tablebase_wdl(board) == 0:
+            return "tb_draw_claim"
+        return None
 
     def _skip_completed_game_submit(
         self, game_id: str, moves: list[str], move: str
@@ -1993,7 +2061,14 @@ class LichessBot:
         return True
 
     def _submit_move_if_active(
-        self, game_id: str, moves: list[str], move: str, board: chess.Board
+        self,
+        game_id: str,
+        moves: list[str],
+        move: str,
+        board: chess.Board,
+        *,
+        offering_draw: bool = False,
+        draw_offer_reason: str | None = None,
     ) -> bool:
         if self._skip_completed_game_submit(game_id, moves, move):
             return False
@@ -2017,10 +2092,18 @@ class LichessBot:
                     "move_submit_skipped_inactive",
                     move=move,
                     source="playing_status",
+                    offering_draw=offering_draw,
+                    draw_offer_reason=draw_offer_reason or "",
                     **self._audit_context(moves),
                 )
                 return False
-        return self._submit_move(game_id, moves, move)
+        return self._submit_move(
+            game_id,
+            moves,
+            move,
+            offering_draw=offering_draw,
+            draw_offer_reason=draw_offer_reason,
+        )
 
     def _ponder_allowed_for_game(self, game_id: str) -> bool:
         with self._ponder_disabled_lock:
@@ -3388,6 +3471,21 @@ class LichessBot:
         ponder_stop_timeout = self._ponder_stop_timeout_seconds(
             my_color, wtime, btime, winc, binc
         )
+        draw_offer_reason = self._draw_offer_reason(board)
+        offering_draw = draw_offer_reason is not None
+        if offering_draw:
+            if DRAW_OFFER_SEARCH_CAP_MS > 0:
+                cap_s = DRAW_OFFER_SEARCH_CAP_MS / 1000.0
+                search_timeout = min(search_timeout, cap_s)
+                ponder_stop_timeout = min(ponder_stop_timeout, cap_s)
+            self._audit(
+                game_id,
+                "draw_offer_candidate",
+                reason=draw_offer_reason,
+                search_timeout=round(search_timeout, 3),
+                fen=board.fen(),
+                **self._audit_context(moves),
+            )
 
         if engine.ponder_move:
             if self._last_move_matches_ponder(
@@ -3436,7 +3534,12 @@ class LichessBot:
                         )
                         engine.restart()
                     elif self._submit_move_if_active(
-                        game_id, moves, parsed.uci(), board
+                        game_id,
+                        moves,
+                        parsed.uci(),
+                        board,
+                        offering_draw=offering_draw,
+                        draw_offer_reason=draw_offer_reason,
                     ):
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Ponderhit! {move_uci}")
@@ -3481,7 +3584,14 @@ class LichessBot:
                 )
                 parsed = self._parse_legal_move(game_id, book_move, board, "book")
                 if parsed is not None:
-                    if self._submit_move_if_active(game_id, moves, parsed.uci(), board):
+                    if self._submit_move_if_active(
+                        game_id,
+                        moves,
+                        parsed.uci(),
+                        board,
+                        offering_draw=offering_draw,
+                        draw_offer_reason=draw_offer_reason,
+                    ):
                         move_uci = parsed.uci()
                         print(f"  [{game_id}] Book: {move_uci}")
                         self._start_book_pondering(
@@ -3513,7 +3623,12 @@ class LichessBot:
                 )
                 fallback = self._fallback_move(board)
                 if fallback and self._submit_move_if_active(
-                    game_id, moves, fallback, board
+                    game_id,
+                    moves,
+                    fallback,
+                    board,
+                    offering_draw=offering_draw,
+                    draw_offer_reason=draw_offer_reason,
                 ):
                     print(f"  [{game_id}] Fallback legal move: {fallback}")
                 return
@@ -3596,7 +3711,12 @@ class LichessBot:
                     return
             parsed = self._parse_legal_move(game_id, best, board, "engine")
             if parsed is not None and self._submit_move_if_active(
-                game_id, moves, parsed.uci(), board
+                game_id,
+                moves,
+                parsed.uci(),
+                board,
+                offering_draw=offering_draw,
+                draw_offer_reason=draw_offer_reason,
             ):
                 move_uci = parsed.uci()
                 print(f"  [{game_id}] Engine: {move_uci}")
@@ -3639,7 +3759,12 @@ class LichessBot:
                 return
             parsed = self._parse_legal_move(game_id, best, board, "recovery")
             if parsed is not None and self._submit_move_if_active(
-                game_id, moves, parsed.uci(), board
+                game_id,
+                moves,
+                parsed.uci(),
+                board,
+                offering_draw=offering_draw,
+                draw_offer_reason=draw_offer_reason,
             ):
                 print(f"  [{game_id}] Recovery: {parsed.uci()}")
 

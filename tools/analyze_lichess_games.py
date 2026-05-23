@@ -29,6 +29,8 @@ class AuditSummary:
     accepted_moves: int = 0
     rejected_moves: int = 0
     stale_rejects: int = 0
+    draw_offer_candidates: int = 0
+    draw_offer_moves: int = 0
     book_moves: int = 0
     engine_searches: int = 0
     ponder_starts: int = 0
@@ -99,6 +101,8 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
         if event == "stream_game_full":
             summary.color = str(row.get("color") or summary.color)
         elif event == "move_submit":
+            if row.get("offering_draw"):
+                summary.draw_offer_moves += 1
             if row.get("result") == "accepted":
                 summary.accepted_moves += 1
             else:
@@ -109,6 +113,8 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
                     summary.issue_counts["move_rejected"] += 1
         elif event == "book_candidate":
             summary.book_moves += 1
+        elif event == "draw_offer_candidate":
+            summary.draw_offer_candidates += 1
         elif event == "engine_search_result":
             summary.engine_searches += 1
             summary.max_engine_ms = max(
@@ -311,6 +317,10 @@ def print_report(games: list[GameSummary]) -> None:
         f"{sum(g.audit.ponderhits for g in games)} ponderhits, "
         f"{sum(g.audit.ponder_starts for g in games)} ponder starts"
     )
+    draw_candidates = sum(g.audit.draw_offer_candidates for g in games)
+    draw_moves = sum(g.audit.draw_offer_moves for g in games)
+    if draw_candidates or draw_moves:
+        print(f"Draw offers: {draw_candidates} candidates, {draw_moves} move requests")
     print(
         "Max elapsed: "
         f"search {max((g.audit.max_engine_ms for g in games), default=0)} ms, "
@@ -352,6 +362,8 @@ def summaries_to_json(games: list[GameSummary]) -> list[dict]:
             "accepted_moves": game.audit.accepted_moves,
             "rejected_moves": game.audit.rejected_moves,
             "stale_rejects": game.audit.stale_rejects,
+            "draw_offer_candidates": game.audit.draw_offer_candidates,
+            "draw_offer_moves": game.audit.draw_offer_moves,
             "book_moves": game.audit.book_moves,
             "engine_searches": game.audit.engine_searches,
             "ponder_starts": game.audit.ponder_starts,

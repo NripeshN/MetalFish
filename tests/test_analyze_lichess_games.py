@@ -40,7 +40,14 @@ def test_parse_audit_counts_stale_rejects_and_ponder_metrics() -> None:
                     "binc": 3000,
                 },
                 {"event": "book_candidate", "move": "e2e4"},
-                {"event": "move_submit", "move": "e2e4", "result": "accepted"},
+                {"event": "draw_offer_candidate", "reason": "tb_draw_claim"},
+                {
+                    "event": "move_submit",
+                    "move": "e2e4",
+                    "result": "accepted",
+                    "offering_draw": True,
+                    "draw_offer_reason": "tb_draw_claim",
+                },
                 {"event": "ponder_start", "best": "e2e4", "ponder": "e7e5"},
                 {
                     "event": "ponderhit_result",
@@ -72,6 +79,8 @@ def test_parse_audit_counts_stale_rejects_and_ponder_metrics() -> None:
     expect("accepted moves", summary.accepted_moves == 1)
     expect("rejected moves", summary.rejected_moves == 1)
     expect("stale rejects", summary.stale_rejects == 1)
+    expect("draw offer candidates", summary.draw_offer_candidates == 1)
+    expect("draw offer moves", summary.draw_offer_moves == 1)
     expect("book moves", summary.book_moves == 1)
     expect("ponder starts", summary.ponder_starts == 1)
     expect("ponderhits", summary.ponderhits == 1)
@@ -128,6 +137,8 @@ def test_print_report_includes_stability_summary() -> None:
         accepted_moves=10,
         rejected_moves=1,
         stale_rejects=1,
+        draw_offer_candidates=2,
+        draw_offer_moves=1,
         engine_searches=3,
         ponderhits=7,
         ponder_starts=9,
@@ -155,6 +166,7 @@ def test_print_report_includes_stability_summary() -> None:
 
     expect("score reported", "Score: 0.5/1" in text)
     expect("stale reject reported", "1 rejected (1 stale after game end)" in text)
+    expect("draw offers reported", "Draw offers: 2 candidates, 1 move requests" in text)
     expect("search reported", "3 engine searches, 7 ponderhits" in text)
     expect("game line reported", "OpponentBot" in text)
 
