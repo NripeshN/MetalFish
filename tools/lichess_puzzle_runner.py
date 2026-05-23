@@ -396,6 +396,8 @@ def engine_options(args) -> dict[str, str]:
                 "TransformerLowTimeFallbackMs": "0",
             }
         )
+        if args.hybrid_trace:
+            options["HybridTrace"] = "true"
         if args.hybrid_ane_root_probe:
             options.update(
                 {
@@ -505,6 +507,7 @@ def initial_ane_stats(args) -> dict[str, object]:
     requested = bool(getattr(args, "hybrid_ane_root_probe", False))
     return {
         "ane_probe_requested": requested,
+        "hybrid_trace_requested": bool(getattr(args, "hybrid_trace", False)),
         "ane_root_hints_requested": bool(getattr(args, "hybrid_ane_root_hints", False)),
         "ane_compute_units": (
             str(getattr(args, "hybrid_ane_compute_units", "")) if requested else ""
@@ -870,6 +873,7 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
         lines.extend(
             [
                 f"- ANE root probe: requested ({stats.get('ane_compute_units')})",
+                f"- HybridTrace requested: {stats.get('hybrid_trace_requested')}",
                 f"- ANE root hints requested: {stats.get('ane_root_hints_requested')}",
                 f"- ANE searches: {stats.get('ane_searches', 0)}",
                 f"- ANE trace fields: {stats.get('ane_trace_searches', 0)}",
@@ -1200,6 +1204,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Use ANE root ordering as AB search hints; final ANE evidence remains available without this.",
+    )
+    parser.add_argument(
+        "--hybrid-trace",
+        action="store_true",
+        default=False,
+        help="Enable HybridTrace so puzzle reports include AB/MCTS/ANE arbitration fields.",
     )
     parser.add_argument(
         "--hybrid-ane-weights",

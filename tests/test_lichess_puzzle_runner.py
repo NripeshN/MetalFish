@@ -145,6 +145,7 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
             "hybrid",
             "--hybrid-ane-root-probe",
             "--hybrid-ane-root-hints",
+            "--hybrid-trace",
             "--hybrid-ane-weights",
             "networks/t1.pb.gz",
             "--hybrid-ane-model-path",
@@ -164,6 +165,7 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
 
     expect("ANE probe enabled", options["HybridANERootProbe"] == "true")
     expect("ANE root hints enabled", options["HybridANERootHints"] == "true")
+    expect("HybridTrace enabled", options["HybridTrace"] == "true")
     expect("ANE weights option", options["HybridANEWeights"] == "networks/t1.pb.gz")
     expect(
         "ANE model option", options["HybridANEModelPath"] == "build/coreml/t1.mlmodelc"
@@ -194,6 +196,7 @@ def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
 
     expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "0")
     expect("ANE root hints default off", options["HybridANERootHints"] == "false")
+    expect("HybridTrace default off", "HybridTrace" not in options)
     expect(
         "ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "1000"
     )
@@ -238,6 +241,7 @@ def test_hybrid_ane_stats_distinguish_configured_from_active() -> None:
     )
     stats = puzzle_runner.initial_ane_stats(args)
     expect("ANE requested", stats["ane_probe_requested"] is True)
+    expect("HybridTrace starts off", stats["hybrid_trace_requested"] is False)
     expect("ANE hints requested", stats["ane_root_hints_requested"] is True)
     expect("ANE starts inactive", stats["ane_root_nonempty"] == 0)
 

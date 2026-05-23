@@ -265,6 +265,9 @@ HYBRID_MCTS_MINIBATCH = max(0, min(4096, env_int("METALFISH_HYBRID_MCTS_MINIBATC
 HYBRID_ANE_ROOT_PROBE = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_PROBE", False) == "true"
 )
+HYBRID_ANE_ROOT_HINTS = (
+    env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", False) == "true"
+)
 HYBRID_ANE_WEIGHTS = pathlib.Path(
     os.environ.get("METALFISH_HYBRID_ANE_WEIGHTS", str(DEFAULT_ANE_WEIGHTS))
 )
@@ -697,6 +700,9 @@ def ane_engine_options(args) -> dict[str, str]:
         return {}
     return {
         "HybridANERootProbe": "true",
+        "HybridANERootHints": "true"
+        if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
+        else "false",
         "HybridANEWeights": str(
             getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS)
         ),
@@ -750,9 +756,15 @@ def ane_status_label(args) -> str:
         args, "hybrid_ane_root_hint_wait_ms", HYBRID_ANE_ROOT_HINT_WAIT_MS
     )
     min_budget = getattr(args, "hybrid_ane_min_budget_ms", HYBRID_ANE_MIN_BUDGET_MS)
+    hints = (
+        "hints on"
+        if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
+        else "hints off"
+    )
     status = "ready" if weights.exists() and model.exists() else "missing files"
     return (
-        f"{status} | {compute}, wait {wait_ms} ms, min budget {min_budget} ms, "
+        f"{status} | {compute}, {hints}, wait {wait_ms} ms, "
+        f"min budget {min_budget} ms, "
         f"weights={weights.name}, model={model.name}"
     )
 
@@ -5378,6 +5390,12 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=HYBRID_ANE_ROOT_PROBE,
         help="Enable the experimental Core ML/ANE root hint probe.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-root-hints",
+        action=argparse.BooleanOptionalAction,
+        default=HYBRID_ANE_ROOT_HINTS,
+        help="Allow ANE root probe ordering to feed AB root-order hints.",
     )
     parser.add_argument(
         "--hybrid-ane-weights",
