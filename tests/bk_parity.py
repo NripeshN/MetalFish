@@ -501,6 +501,29 @@ def select_positions(selection: str) -> List[Tuple[str, List[str], str]]:
     return selected
 
 
+def hybrid_time_safety_fallback_active(args: argparse.Namespace) -> bool:
+    want_hybrid = args.engine in ("hybrid", "metalfish-hybrid", "all")
+    return (
+        want_hybrid
+        and args.nodes <= 0
+        and args.hybrid_low_time_fallback_ms > 0
+        and args.movetime < args.hybrid_low_time_fallback_ms
+    )
+
+
+def hybrid_time_safety_fallback_warning(args: argparse.Namespace) -> str:
+    if not hybrid_time_safety_fallback_active(args):
+        return ""
+    return (
+        "WARNING: Hybrid movetime "
+        f"{args.movetime}ms is below TransformerLowTimeFallbackMs="
+        f"{args.hybrid_low_time_fallback_ms}ms; this run measures the AB "
+        "time-safety fallback, not full Hybrid MCTS. Use "
+        "--hybrid-low-time-fallback-ms 0 or a larger --movetime for true "
+        "Hybrid benchmarking."
+    )
+
+
 def parse_keyed_int(text: str, key: str) -> Optional[int]:
     prefix = key + "="
     for token in text.split():
@@ -646,6 +669,9 @@ def write_json_report(
         "nodes": args.nodes,
         "threads": args.threads,
         "deterministic": args.deterministic,
+        "hybrid_time_safety_fallback_active": hybrid_time_safety_fallback_active(
+            args
+        ),
         "positions": [bk_id for _, _, bk_id in positions],
         "options": {
             "engine": args.engine,
@@ -1030,6 +1056,10 @@ def main() -> int:
         help="Write a machine-readable per-position report",
     )
     args = parser.parse_args()
+
+    warning = hybrid_time_safety_fallback_warning(args)
+    if warning:
+        print(warning, file=sys.stderr, flush=True)
 
     aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = (
         {} if args.repeat_summary or args.repeat > 1 else None

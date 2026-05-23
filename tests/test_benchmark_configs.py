@@ -12,6 +12,7 @@ PROJ = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ / "tests"))
 
 import paper_benchmarks  # noqa: E402
+import bk_parity  # noqa: E402
 
 sys.path.insert(0, str(PROJ / "tools"))
 import analyze_hybrid_trace  # noqa: E402
@@ -164,6 +165,25 @@ def assert_transformer_low_time_warnings_cover_mcts() -> None:
         raise AssertionError("low-time warning did not cover pure MCTS fallback")
 
 
+def assert_bk_hybrid_fallback_warning() -> None:
+    args = type(
+        "Args",
+        (),
+        {
+            "engine": "hybrid",
+            "nodes": 0,
+            "movetime": 2000,
+            "hybrid_low_time_fallback_ms": 3000,
+        },
+    )()
+    warning = bk_parity.hybrid_time_safety_fallback_warning(args)
+    if "not full Hybrid MCTS" not in warning:
+        raise AssertionError("BK parity did not warn for Hybrid fallback benchmarks")
+    args.hybrid_low_time_fallback_ms = 0
+    if bk_parity.hybrid_time_safety_fallback_warning(args):
+        raise AssertionError("BK parity warned after fallback was disabled")
+
+
 def assert_tactical_fail_under_guard() -> None:
     selected = ["metalfish-hybrid"]
     if paper_benchmarks.parse_tactical_fail_under("", selected) != {}:
@@ -295,6 +315,7 @@ def main() -> int:
     assert_hybrid_trace_final_decision_only()
     assert_tournament_draw_reason_precision()
     assert_transformer_low_time_warnings_cover_mcts()
+    assert_bk_hybrid_fallback_warning()
 
     assert_file_contains(
         PROJ / "src/uci/engine.cpp",
@@ -532,6 +553,9 @@ def main() -> int:
             "def warmup_movetime_ms",
             "HYBRID_LOW_TIME_FALLBACK_MS",
             "warmup_movetime_ms(movetime_ms, hybrid=True)",
+            "def hybrid_time_safety_fallback_warning",
+            "hybrid_time_safety_fallback_active",
+            "not full Hybrid MCTS",
             "METALFISH_MCTS_ROOT_TRACE_MOVES",
             "--root-trace-moves",
             "--mcts-minibatch-size",
