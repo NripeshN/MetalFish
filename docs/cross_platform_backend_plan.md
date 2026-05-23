@@ -173,6 +173,9 @@ Current CUDA backend boundary:
   resolved stage groups, dense stage widths, value-error exclusion, and last
   body/head stage discovery. Stage execution and output mapping use this helper
   so head branching and output source selection stay aligned.
+- `src/nn/cuda/cuda_stage_bindings.*` derives lightweight head/body input
+  bindings from the resolved plan and CUDA schedule without exposing the full
+  kernel-launch executor interface to planning tests.
 - `src/nn/network_attention_plan.*` validates resolved MHA tensor shapes,
   head/depth geometry, smolgen branch dimensions, and global smolgen positional
   weights without depending on CUDA. `src/nn/cuda/cuda_attention_plan.*` keeps

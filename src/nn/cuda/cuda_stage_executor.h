@@ -10,6 +10,7 @@
 #include "../network_execution_plan.h"
 #include "cuda_execution_schedule.h"
 #include "cuda_execution_tape.h"
+#include "cuda_stage_bindings.h"
 #include "cuda_weight_buffers.h"
 #include "cuda_workspace.h"
 
@@ -82,11 +83,6 @@ struct CudaAttentionCoreOutput {
   int head_depth = 0;
 };
 
-struct CudaStageInputBinding {
-  std::string stage_name;
-  std::string source_stage_name;
-};
-
 struct CudaStageTimingRecord {
   std::string name;
   CudaExecutionScheduleKind kind = CudaExecutionScheduleKind::Unsupported;
@@ -102,20 +98,6 @@ public:
 private:
   std::vector<CudaStageTimingRecord> records_;
 };
-
-class CudaStageInputBindings {
-public:
-  void Add(std::string stage_name, std::string source_stage_name);
-  const std::string *FindSource(std::string_view stage_name) const;
-  std::size_t Size() const { return bindings_.size(); }
-
-private:
-  std::vector<CudaStageInputBinding> bindings_;
-};
-
-CudaStageInputBindings
-CreateCudaStageInputBindings(const NetworkResolvedExecutionPlan &execution_plan,
-                             const CudaExecutionSchedule &schedule);
 
 CudaDenseStageOutput
 ExecuteDenseActivationStage(const NetworkResolvedExecutionPlan &execution_plan,

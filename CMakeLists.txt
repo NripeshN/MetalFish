@@ -264,6 +264,7 @@ if(USE_CUDA)
       src/nn/cuda/cuda_output_mapping.cpp
       src/nn/cuda/cuda_plan_analysis.cpp
       src/nn/cuda/cuda_attention_plan.cpp
+      src/nn/cuda/cuda_stage_bindings.cpp
       src/nn/cuda/cuda_stage_executor.cpp
       src/nn/cuda/cuda_runtime_probe.cu
       src/nn/cuda/cuda_input_packing.cu
