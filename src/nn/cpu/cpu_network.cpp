@@ -9,6 +9,7 @@
 
 #include "../input_plane_packing.h"
 #include "../network_attention_plan.h"
+#include "../network_format.h"
 #include "../network_output_decoder.h"
 #include "../network_tensor_plan.h"
 #include "../tables/attention_policy_map.h"

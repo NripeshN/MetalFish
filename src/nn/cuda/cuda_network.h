@@ -13,7 +13,6 @@
 
 #include "../network.h"
 #include "../network_execution_plan.h"
-#include "../network_format.h"
 
 #include <memory>
 #include <mutex>

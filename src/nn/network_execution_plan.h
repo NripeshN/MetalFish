@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-#include "network_format.h"
+#include "network_format_types.h"
 #include "network_tensor_plan.h"
 #include "network_weight_inventory.h"
 

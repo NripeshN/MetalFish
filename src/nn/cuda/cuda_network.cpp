@@ -8,6 +8,7 @@
 #include "cuda_network.h"
 
 #include "../network_execution_plan.h"
+#include "../network_format.h"
 #include "../network_output_decoder.h"
 #include "../network_weight_inventory.h"
 #include "cuda_execution_schedule.h"
