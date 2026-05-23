@@ -2423,6 +2423,83 @@ def test_challenge_timeout_cancels_server_side_challenge() -> None:
     expect("timeout counts tc failure", bot._tc_failures == 1)
 
 
+def test_challenge_timeout_waits_for_cancel_grace_before_retry() -> None:
+    class Args:
+        seek = True
+        rotate = False
+        max_games = 1
+        quit_after_games = 0
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.active_games = {}
+    bot._pending_challenge_id = "challenge"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_retries = 0
+    bot._tc_failures = 0
+    bot._completed_games = 0
+    bot._draining = threading.Event()
+    bot._declined_cooldown = {}
+    bot._persist_challenge_cooldowns = False
+    bot._seek_lock = threading.Lock()
+
+    posted: list[str] = []
+    scheduled: list[float] = []
+    bot.api_post = lambda path, **kwargs: posted.append(path)
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+    bot._audit_seek = lambda event, **fields: None
+
+    with redirect_stdout(io.StringIO()):
+        bot._challenge_timed_out()
+
+    expect("timeout cancel posted", posted == ["/challenge/challenge/cancel"])
+    expect("timeout pending cleared", bot._pending_challenge_id is None)
+    expect(
+        "timeout retry delayed by cancel grace",
+        scheduled == [lichess_bot.CHALLENGE_CANCEL_GRACE_S],
+    )
+
+
+def test_expired_challenge_waits_for_cancel_grace_before_next_api_call() -> None:
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot._pending_challenge_id = "challenge"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_sent_at = time.time() - lichess_bot.CHALLENGE_TIMEOUT - 1
+    bot._seek_timer = None
+
+    posted: list[str] = []
+    cooled: list[str | None] = []
+    scheduled: list[float] = []
+    audited: list[tuple[str, dict]] = []
+
+    bot._should_seek = lambda: True
+    bot._cleanup_cooldowns = lambda: False
+    bot._resources_allow_new_game = lambda: True
+    bot.api_post = lambda path, **kwargs: posted.append(path)
+    bot._cooldown_bot = lambda target, duration=600: cooled.append(target)
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+    bot._audit_seek = lambda event, **fields: audited.append((event, fields))
+
+    def fail_online_bots(*args, **kwargs):
+        raise AssertionError("expired challenge should not fetch online bots immediately")
+
+    bot._online_bots = fail_online_bots
+
+    with redirect_stdout(io.StringIO()):
+        bot._seek_game_once()
+
+    expect("expired cancel posted", posted == ["/challenge/challenge/cancel"])
+    expect("expired challenge cooled", cooled == ["targetbot"])
+    expect("expired pending cleared", bot._pending_challenge_id is None)
+    expect(
+        "expired retry delayed by cancel grace",
+        scheduled == [lichess_bot.CHALLENGE_CANCEL_GRACE_S],
+    )
+    expect("expired event audited", audited and audited[0][0] == "challenge_expired")
+
+
 def test_game_start_claims_slot_and_clears_pending() -> None:
     class Args:
         seek = True
@@ -3183,6 +3260,8 @@ def main() -> int:
     test_untracked_time_control_event_uses_event_speed_cooldown()
     test_challenge_event_identity_accepts_string_users()
     test_challenge_timeout_cancels_server_side_challenge()
+    test_challenge_timeout_waits_for_cancel_grace_before_retry()
+    test_expired_challenge_waits_for_cancel_grace_before_next_api_call()
     test_game_start_claims_slot_and_clears_pending()
     test_game_start_cancels_unrelated_pending_challenge()
     test_overflow_game_start_is_audited_and_marks_format_played()

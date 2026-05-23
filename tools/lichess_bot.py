@@ -764,6 +764,9 @@ BULLET_ROTATION_TCS = [
 
 ACCEPTED_SPEEDS = {"bullet", "blitz", "rapid", "classical", "correspondence"}
 CHALLENGE_TIMEOUT = max(20.0, env_float("METALFISH_CHALLENGE_TIMEOUT_S", 21.0))
+CHALLENGE_CANCEL_GRACE_S = max(
+    0.0, min(10.0, env_float("METALFISH_CHALLENGE_CANCEL_GRACE_S", 2.0))
+)
 MAX_CHALLENGE_RETRIES = 3
 
 
@@ -2959,6 +2962,8 @@ class LichessBot:
             self._cancel_pending_challenge("expired")
             self._cooldown_bot(target)
             self._audit_seek("challenge_expired", target=target, speed=speed)
+            self._schedule_retry(CHALLENGE_CANCEL_GRACE_S)
+            return
 
         limit, inc = self._next_tc()
         tc_label = f"{limit//60}+{inc}"
@@ -3262,6 +3267,16 @@ class LichessBot:
         self._seek_timer.start()
 
     def _challenge_timed_out(self):
+        seek_lock = getattr(self, "_seek_lock", None)
+        if seek_lock is None:
+            retry_delay = self._challenge_timed_out_locked()
+        else:
+            with seek_lock:
+                retry_delay = self._challenge_timed_out_locked()
+        if retry_delay is not None and self._should_seek():
+            self._schedule_retry(retry_delay)
+
+    def _challenge_timed_out_locked(self) -> float | None:
         if self._pending_challenge_id:
             target = self._pending_challenge_target or self._pending_challenge_id
             speed = getattr(self, "_pending_challenge_speed", None)
@@ -3278,11 +3293,12 @@ class LichessBot:
                 self._challenge_retries = 0
                 self._cleanup_cooldowns()
             if self._challenge_retries < MAX_CHALLENGE_RETRIES and self._should_seek():
-                self.seek_game()
+                return CHALLENGE_CANCEL_GRACE_S
             elif self._should_seek():
                 self._challenge_retries = 0
                 self._cleanup_cooldowns()
-                self._schedule_retry(15)
+                return 15
+        return None
 
     def _next_tc(self) -> tuple[int, int]:
         if self.args.tc:
