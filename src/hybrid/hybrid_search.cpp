@@ -830,6 +830,14 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
     return true;
   }
 
+  if (mcts_root_visits < 80 && mcts_root_visits >= 55 &&
+      mcts_best_visits >= 45 && mcts_best_visits <= 49 &&
+      visit_share >= 0.85f &&
+      root_q_gap >= 0.55f && mcts_cp >= 130 && eval_delta >= 120 &&
+      ane_score_margin >= 0.20f) {
+    return true;
+  }
+
   return mcts_root_visits < 80 && mcts_root_visits >= 50 &&
          mcts_best_visits >= 50 && visit_share >= 0.90f &&
          root_q_gap >= 0.50f && mcts_cp >= 200 && eval_delta >= 150 &&

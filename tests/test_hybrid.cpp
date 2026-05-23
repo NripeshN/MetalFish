@@ -526,6 +526,9 @@ void test_hybrid_config() {
            HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
                                           0.981f, 0.918f, 424, 437, 0.401f));
     EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 55, 47,
+                                          0.855f, 0.584f, 139, 139, 0.248f));
+    EXPECT(tc,
            !HybridANEConfirmedMCTSOverride(false, true, true, true, 102, 93,
                                            0.912f, 0.817f, 242, 242, 0.100f));
     EXPECT(tc,
@@ -564,6 +567,24 @@ void test_hybrid_config() {
     EXPECT(tc,
            !HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
                                            0.899f, 0.918f, 424, 437, 0.401f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 55, 44,
+                                           0.855f, 0.584f, 139, 139, 0.248f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 55, 47,
+                                           0.849f, 0.584f, 139, 139, 0.248f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 55, 47,
+                                           0.855f, 0.549f, 139, 139, 0.248f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 55, 47,
+                                           0.855f, 0.584f, 129, 139, 0.248f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 55, 47,
+                                           0.855f, 0.584f, 139, 119, 0.248f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 55, 47,
+                                           0.855f, 0.584f, 139, 139, 0.199f));
     EXPECT(tc,
            !HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
                                            0.981f, 0.499f, 424, 437, 0.401f));
