@@ -190,6 +190,16 @@ def test_hybrid_mode_keeps_transformer_active() -> None:
     )
 
 
+def test_mcts_mode_keeps_transformer_active() -> None:
+    args = puzzle_runner.parse_args(["--mode", "mcts"])
+    options = puzzle_runner.engine_options(args)
+
+    expect(
+        "mcts benchmark disables low-time fallback",
+        options["TransformerLowTimeFallbackMs"] == "0",
+    )
+
+
 def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
     args = puzzle_runner.parse_args(["--mode", "hybrid", "--hybrid-ane-root-probe"])
     options = puzzle_runner.engine_options(args)
@@ -684,6 +694,8 @@ def main() -> int:
     test_csv_puzzle_position_applies_opponent_move()
     test_csv_filter_and_setoption_parsing()
     test_hybrid_ane_flags_set_uci_options()
+    test_hybrid_mode_keeps_transformer_active()
+    test_mcts_mode_keeps_transformer_active()
     test_hybrid_ane_default_wait_uses_benchmarked_profile()
     test_hybrid_ane_low_time_fallback_can_be_overridden()
     test_search_info_parser_tracks_ane_hints()

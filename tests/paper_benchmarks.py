@@ -450,6 +450,7 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "UseHybridSearch": "false",
             "UseMCTS": "true",
             "NNWeights": w,
+            "TransformerLowTimeFallbackMs": "0",
             "Threads": str(threads),
             "Hash": str(hash_mb),
             "MultiPV": "1",

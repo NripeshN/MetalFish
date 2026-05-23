@@ -1353,6 +1353,22 @@ void ParallelHybridSearch::start_ane_root_probe(bool reuse_existing) {
     if (config_.trace_decisions)
       send_info_string("Hybrid: ANE root probe skipped: " + reason);
   };
+  auto consume_existing_future = [&]() -> std::vector<Move> {
+    if (!ane_root_hints_future_.valid())
+      return {};
+    try {
+      return ane_root_hints_future_.get();
+    } catch (const std::exception &e) {
+      if (config_.trace_decisions) {
+        send_info_string(std::string("Hybrid: ANE root probe failed: ") +
+                         e.what());
+      }
+    } catch (...) {
+      if (config_.trace_decisions)
+        send_info_string("Hybrid: ANE root probe failed: unknown error");
+    }
+    return {};
+  };
 
   if (ane_root_hints_future_.valid()) {
     if (reuse_existing) {
@@ -1370,7 +1386,18 @@ void ParallelHybridSearch::start_ane_root_probe(bool reuse_existing) {
         }
       }
     }
-    ane_root_hints_future_.wait();
+    std::vector<Move> existing_hints = consume_existing_future();
+    if (reuse_existing && !existing_hints.empty()) {
+      std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+      ane_root_hints_ = std::move(existing_hints);
+      trace_skip("already ready");
+      return;
+    }
+    if (!reuse_existing) {
+      std::lock_guard<std::mutex> lock(ane_root_hints_mutex_);
+      ane_root_hints_.clear();
+      ane_root_hint_infos_.clear();
+    }
   }
 
   if (!config_.ane_root_probe)

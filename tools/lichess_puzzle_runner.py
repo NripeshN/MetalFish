@@ -371,6 +371,7 @@ def engine_options(args) -> dict[str, str]:
                 "MCTSAddDirichletNoise": "false",
                 "MCTSParityPreset": "false",
                 "MCTSMaxThreads": "0",
+                "TransformerLowTimeFallbackMs": "0",
             }
         )
     else:

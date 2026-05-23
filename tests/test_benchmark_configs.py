@@ -146,6 +146,24 @@ def assert_tournament_draw_reason_precision() -> None:
         raise AssertionError("actual repetition reason was not precise")
 
 
+def assert_transformer_low_time_warnings_cover_mcts() -> None:
+    engines_cfg = {
+        "MetalFish-MCTS": {
+            "options": {
+                "UseMCTS": "true",
+                "UseHybridSearch": "false",
+                "TransformerLowTimeFallbackMs": "3000",
+            }
+        },
+        "MetalFish-AB": {"options": {"UseMCTS": "false", "UseHybridSearch": "false"}},
+    }
+    warnings = run_tournament_live.hybrid_low_time_warnings(
+        [("MetalFish-MCTS", "MetalFish-AB")], engines_cfg, movetime_ms=1000
+    )
+    if not warnings or "MetalFish-MCTS" not in warnings[0]:
+        raise AssertionError("low-time warning did not cover pure MCTS fallback")
+
+
 def assert_tactical_fail_under_guard() -> None:
     selected = ["metalfish-hybrid"]
     if paper_benchmarks.parse_tactical_fail_under("", selected) != {}:
@@ -212,6 +230,7 @@ def main() -> int:
             "UseHybridSearch": "false",
             "UseMCTS": "true",
             "MultiPV": "1",
+            "TransformerLowTimeFallbackMs": "0",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
             "MCTSMinimumKLDGainPerNode": "0.00005",
@@ -227,6 +246,7 @@ def main() -> int:
             "MCTSParallelSearch": "false",
             "UseHybridSearch": "false",
             "UseMCTS": "true",
+            "TransformerLowTimeFallbackMs": "0",
         },
     )
 
@@ -274,6 +294,7 @@ def main() -> int:
     assert_paper_hybrid_env_overrides()
     assert_hybrid_trace_final_decision_only()
     assert_tournament_draw_reason_precision()
+    assert_transformer_low_time_warnings_cover_mcts()
 
     assert_file_contains(
         PROJ / "src/uci/engine.cpp",
@@ -342,6 +363,7 @@ def main() -> int:
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
             "MCTSMinimumKLDGainPerNode": "0.00005",
+            "TransformerLowTimeFallbackMs": "0",
         },
     )
     assert_options_include(
@@ -379,6 +401,7 @@ def main() -> int:
         "option.MCTSParityPreset=false",
         "option.MCTSAddDirichletNoise=false",
         "option.MCTSMinimumKLDGainPerNode=0.00005",
+        "option.TransformerLowTimeFallbackMs=0",
         "option.MCTSParallelSearch=$MCTS_PARALLEL_SEARCH",
         "option.HybridMCTSMinimumKLDGainPerNode=$HYBRID_MCTS_KLD",
         "option.HybridABRootRejectMCTS=$HYBRID_AB_ROOT_REJECT_MCTS",
@@ -554,7 +577,7 @@ def main() -> int:
             '"HYBRID_MCTS_MAX_PREFETCH": "MCTSMaxPrefetch"',
             "def hybrid_low_time_warnings",
             "TransformerLowTimeFallbackMs=",
-            "AB time-safety fallback rather than full Hybrid MCTS",
+            "AB time-safety fallback rather than transformer search",
             'help="Games per match (default: 6)"',
             "max-moves below 100 can mask long conversion wins",
             '"--max-plies"',
