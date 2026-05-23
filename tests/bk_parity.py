@@ -319,6 +319,7 @@ def setup_metalfish(
     sess.setoption("UseHybridSearch", "false")
     sess.setoption("UseMCTS", "true")
     sess.setoption("NNWeights", str(weights))
+    sess.setoption("TransformerLowTimeFallbackMs", "0")
     sess.setoption("Threads", str(threads))
     sess.setoption("MultiPV", str(multipv))
     sess.setoption("MCTSMaxThreads", str(mcts_threads))

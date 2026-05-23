@@ -517,6 +517,7 @@ def main() -> int:
             "--hybrid-ab-root-reject-mcts",
             "--hybrid-mcts-minibatch-size",
             "--hybrid-ane-root-probe",
+            'sess.setoption("TransformerLowTimeFallbackMs", "0")',
             'sess.setoption("MCTSMaxThreads", str(mcts_threads))',
             '"MCTSParallelSearch", "true" if mcts_parallel_search else "false"',
             'sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))',
