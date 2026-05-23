@@ -7,13 +7,14 @@
 
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "../core/position.h"
-#include "../nn/encoder.h"
-#include "../nn/network.h"
 
 namespace MetalFish {
 namespace MCTS {

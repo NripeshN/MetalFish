@@ -17,7 +17,7 @@
 */
 
 #include "policy_map.h"
-#include "encoder.h"
+#include "input_planes.h"
 #include "tables/attention_policy_map.h"
 
 #include <array>

@@ -25,7 +25,8 @@ If a change regresses the relevant baseline, revert it before continuing.
 
 Common code owns:
 
-- `src/nn/encoder.*`: Lc0-compatible input planes.
+- `src/nn/input_planes.h`: backend-neutral input and policy-output dimensions.
+- `src/nn/encoder.*`: Lc0-compatible position-to-plane encoding.
 - `src/nn/input_plane_packing.h`: shared packed sparse input contract used by
   Metal and CUDA.
 - `tests/nn_input_fixture.*`: backend-neutral packed input fixture with
@@ -33,7 +34,8 @@ Common code owns:
 - `src/nn/policy_map.*`: 1858-policy move mapping.
 - `src/nn/tables/attention_policy_map.h`: attention-policy scratch-to-1858
   gather table shared by Metal, CUDA, and portable CPU execution.
-- `src/nn/loader.*` and `src/nn/weights.*`: protobuf weight loading.
+- `src/nn/weights_file.h`, `src/nn/loader.*`, and `src/nn/weights.*`:
+  protobuf weight loading behind a lightweight forward-declared handle.
 - `src/nn/network.h`: platform-neutral `NN::Network` inference interface.
 - `src/nn/network_weight_inventory.*`: selected policy/value/moves-left tensor
   inventory shared by platform backends before device upload.

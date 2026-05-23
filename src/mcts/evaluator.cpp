@@ -7,7 +7,9 @@
 
 #include "evaluator.h"
 #include "../core/movegen.h"
+#include "../nn/encoder.h"
 #include "../nn/loader.h"
+#include "../nn/network.h"
 #include "../nn/policy_map.h"
 #include <algorithm>
 

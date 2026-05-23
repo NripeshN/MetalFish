@@ -7,11 +7,11 @@
 
 #pragma once
 
-#include <array>
 #include <span>
 #include <vector>
 
 #include "../core/position.h"
+#include "input_planes.h"
 #include "proto/net.pb.h"
 
 namespace MetalFish {
@@ -23,16 +23,6 @@ enum BoardTransform {
   kMirrorTransform = 2,
   kTransposeTransform = 4
 };
-
-constexpr int kMoveHistory = 8;
-constexpr int kPlanesPerBoard = 13;
-constexpr int kAuxPlaneBase = kPlanesPerBoard * kMoveHistory;
-constexpr int kTotalPlanes = 112;
-
-// 1792 regular moves + 66 underpromotions (22 directions * 3 piece types)
-constexpr int kPolicyOutputs = 1858;
-
-using InputPlanes = std::array<std::array<float, 64>, kTotalPlanes>;
 
 enum class FillEmptyHistory { NO, FEN_ONLY, ALWAYS };
 

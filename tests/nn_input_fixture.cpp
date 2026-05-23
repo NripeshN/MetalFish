@@ -8,6 +8,7 @@
 #include "nn_input_fixture.h"
 
 #include "core/position.h"
+#include "nn/encoder.h"
 #include "nn/input_plane_packing.h"
 
 #include <cmath>

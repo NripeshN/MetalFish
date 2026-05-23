@@ -12,8 +12,8 @@
 #include <string>
 #include <vector>
 
-#include "encoder.h"
-#include "loader.h"
+#include "input_planes.h"
+#include "weights_file.h"
 
 namespace MetalFish {
 namespace NN {

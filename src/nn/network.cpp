@@ -8,6 +8,7 @@
 #include "network.h"
 
 #include "cpu/cpu_network.h"
+#include "loader.h"
 
 #ifdef USE_COREML
 #include "coreml/coreml_network.h"
