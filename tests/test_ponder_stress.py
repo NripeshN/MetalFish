@@ -22,6 +22,8 @@ import tempfile
 import threading
 import time
 
+import chess
+
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 ENGINE = PROJ / "build" / "metalfish"
 WEIGHTS = PROJ / "networks" / "BT4-1024x15x32h-swa-6147500.pb"
@@ -38,6 +40,21 @@ POSITIONS = [
     (
         "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",
         "d2d3 d7d6",
+    ),
+]
+
+PONDER_LEGALITY_REGRESSIONS = [
+    (
+        "ZcBZ0qcT-ply30",
+        "r2q2k1/ppp2ppp/3n1b2/3p1b2/3P1B2/2P1Q3/PP1N1PPP/R4BK1 w - - 4 16",
+    ),
+    (
+        "ZcBZ0qcT-ply32",
+        "r2q2k1/p1p2ppp/1p1n1b2/3p1b2/3P1B2/1NP1Q3/PP3PPP/R4BK1 w - - 0 17",
+    ),
+    (
+        "OD8KhLoq-ply18",
+        "r1bqkb1r/3n1pp1/p2p1n2/1p1Np2p/4P3/6PP/PPP1NP2/R1BQKB1R w KQkq - 2 10",
     ),
 ]
 
@@ -197,6 +214,34 @@ def main():
                 return line
         return None
 
+    def bestmove_ponder_legal(fen, line):
+        parts = line.split()
+        if len(parts) < 2:
+            return False, "missing bestmove token"
+
+        best = parts[1]
+        try:
+            board = chess.Board(fen)
+            best_move = chess.Move.from_uci(best)
+        except ValueError as exc:
+            return False, str(exc)
+
+        if best_move not in board.legal_moves:
+            return False, f"bestmove {best} is illegal"
+
+        ponder = parts[3] if len(parts) > 3 and parts[2] == "ponder" else None
+        if not ponder:
+            return True, ""
+
+        board.push(best_move)
+        try:
+            ponder_move = chess.Move.from_uci(ponder)
+        except ValueError as exc:
+            return False, str(exc)
+        if ponder_move not in board.legal_moves:
+            return False, f"ponder {ponder} is illegal after {best}"
+        return True, ""
+
     def alive():
         if proc.poll() is not None:
             return False
@@ -257,6 +302,7 @@ def main():
         "pure_mcts_ponder_ok": 0,
         "early_bestmove": 0,
         "ponder_mcts_active": 0,
+        "ponder_legality_ok": 0,
         "low_clock_ponder_mcts_ok": 0,
         "nbcejrue_regression_ok": 0,
         "filqkzru_regression_ok": 0,
@@ -264,6 +310,49 @@ def main():
         "timeouts": 0,
         "total": 0,
     }
+
+    print("Ponder legality regressions:")
+    for label, fen in PONDER_LEGALITY_REGRESSIONS:
+        send(f"position fen {fen}")
+        send("go ponder movetime 1000")
+        time.sleep(0.25)
+
+        early = read_bestmove_for(0.05)
+        if early:
+            print(f"  {label}: EARLY bestmove before ponderhit: {early}")
+            stats["early_bestmove"] += 1
+            break
+
+        send("ponderhit")
+        r = read_until("bestmove", TIMEOUT_BESTMOVE)
+        if not alive():
+            print(f"  {label}: CRASH after ponderhit (exit {proc.returncode})")
+            stats["crashes"] += 1
+            break
+        if r is None or r == "TIMEOUT":
+            print(f"  {label}: TIMEOUT after ponderhit")
+            stats["timeouts"] += 1
+            send("stop")
+            read_until("bestmove", 5)
+            continue
+
+        ok, reason = bestmove_ponder_legal(fen, r)
+        if not ok:
+            print(f"  {label}: ILLEGAL {reason}: {r}")
+            stats["timeouts"] += 1
+            break
+
+        stats["ponder_legality_ok"] += 1
+        print(f"  {label}: OK {r}")
+
+    if (
+        stats["ponder_legality_ok"] != len(PONDER_LEGALITY_REGRESSIONS)
+        or stats["crashes"]
+        or stats["timeouts"]
+        or stats["early_bestmove"]
+    ):
+        close_failed_startup()
+        return 1
 
     for i in range(iterations):
         pos_fen, moves = POSITIONS[i % len(POSITIONS)]
