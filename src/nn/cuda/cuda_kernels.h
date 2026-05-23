@@ -35,12 +35,6 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
                              int input_width, int output_width,
                              cudaStream_t stream = nullptr);
 
-void LaunchAttentionQkvBiasAddKernel(float *query, const float *query_bias,
-                                     float *key, const float *key_bias,
-                                     float *value, const float *value_bias,
-                                     int rows, int width,
-                                     cudaStream_t stream = nullptr);
-
 void LaunchLayerNormKernel(const float *input, const float *gamma,
                            const float *beta, float *output, int rows,
                            int width, float epsilon,
