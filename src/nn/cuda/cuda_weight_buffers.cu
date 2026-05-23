@@ -8,6 +8,7 @@
 #include "cuda_weight_buffers.h"
 
 #include "cuda_runtime_probe.h"
+#include "cuda_weight_buffer_smoke.h"
 
 #include <cuda_runtime_api.h>
 

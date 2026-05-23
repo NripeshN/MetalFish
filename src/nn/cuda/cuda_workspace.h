@@ -16,8 +16,6 @@
 
 #include <cuda_runtime_api.h>
 
-#include "cuda_input_packing.h"
-
 namespace MetalFish {
 namespace NN {
 namespace Cuda {
@@ -74,14 +72,6 @@ private:
   cudaStream_t stream_ = nullptr;
   std::uint64_t generation_ = 1;
 };
-
-struct CudaWorkspaceSmokeResult {
-  CudaSmokeStatus status = CudaSmokeStatus::RuntimeError;
-  std::string message;
-  std::size_t allocation_bytes = 0;
-};
-
-CudaWorkspaceSmokeResult RunExecutionWorkspaceSmoke();
 
 } // namespace Cuda
 } // namespace NN

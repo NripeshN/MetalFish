@@ -7,11 +7,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include <cuda_runtime_api.h>
 
-#include "cuda_input_packing.h"
+#include "cuda_smoke_status.h"
 
 namespace MetalFish {
 namespace NN {

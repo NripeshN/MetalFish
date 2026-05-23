@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "cuda_input_packing.h"
+#include "cuda_smoke_status.h"
 
 #include <cstddef>
 #include <string>

@@ -35,7 +35,9 @@
 #include "nn/cuda/cuda_runtime_probe.h"
 #include "nn/cuda/cuda_stage_bindings.h"
 #include "nn/cuda/cuda_weight_buffers.h"
+#include "nn/cuda/cuda_weight_buffer_smoke.h"
 #include "nn/cuda/cuda_workspace.h"
+#include "nn/cuda/cuda_workspace_smoke.h"
 #endif
 #include "syzygy/tbprobe.h"
 #include "test_common.h"

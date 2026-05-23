@@ -12,17 +12,11 @@
 #include <vector>
 
 #include "../input_plane_packing.h"
+#include "cuda_smoke_status.h"
 
 namespace MetalFish {
 namespace NN {
 namespace Cuda {
-
-enum class CudaSmokeStatus {
-  Success,
-  NoDevice,
-  RuntimeError,
-  Mismatch,
-};
 
 struct CudaInputPackingSmokeResult {
   CudaSmokeStatus status = CudaSmokeStatus::RuntimeError;

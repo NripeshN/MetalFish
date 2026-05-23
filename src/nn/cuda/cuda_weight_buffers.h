@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "../network_weight_inventory.h"
-#include "cuda_input_packing.h"
 
 namespace MetalFish {
 namespace NN {
@@ -55,16 +54,6 @@ private:
   std::vector<DeviceTensor> device_tensors_;
   std::size_t allocation_bytes_ = 0;
 };
-
-struct CudaWeightBufferSmokeResult {
-  CudaSmokeStatus status = CudaSmokeStatus::RuntimeError;
-  std::string message;
-  std::size_t allocation_bytes = 0;
-  std::size_t tensor_count = 0;
-};
-
-CudaWeightBufferSmokeResult
-RunWeightUploadSmoke(const NetworkWeightInventory &inventory);
 
 } // namespace Cuda
 } // namespace NN
