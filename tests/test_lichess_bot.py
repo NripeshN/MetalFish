@@ -722,6 +722,47 @@ def test_challenge_failure_ratelimit_sets_long_cooldown() -> None:
     expect("ratelimit cooldown includes server seconds", cooldown == 50267)
 
 
+def test_challenge_failure_static_rejections_set_long_cooldowns() -> None:
+    class FriendsOnlyResponse:
+        status_code = 400
+        text = '{"error":"BOT Classic_BOT-v2 only accepts challenges from friends."}'
+
+        def json(self) -> dict:
+            return {"error": "BOT Classic_BOT-v2 only accepts challenges from friends."}
+
+    class StaticPolicyResponse:
+        status_code = 400
+        text = '{"error":"Please send me a casual challenge instead."}'
+
+        def json(self) -> dict:
+            return {"error": "Please send me a casual challenge instead."}
+
+    class TemporarilyClosedResponse:
+        status_code = 400
+        text = '{"error":"I am not accepting challenges at the moment."}'
+
+        def json(self) -> dict:
+            return {"error": "I am not accepting challenges at the moment."}
+
+    bot = object.__new__(lichess_bot.LichessBot)
+
+    expect(
+        "friends-only rejection uses day cooldown",
+        bot._challenge_failure_cooldown_seconds(FriendsOnlyResponse())
+        == lichess_bot.FRIENDS_ONLY_CHALLENGE_COOLDOWN_S,
+    )
+    expect(
+        "mode-preference rejection uses static cooldown",
+        bot._challenge_failure_cooldown_seconds(StaticPolicyResponse())
+        == lichess_bot.STATIC_CHALLENGE_DECLINE_COOLDOWN_S,
+    )
+    expect(
+        "closed-challenges rejection uses static cooldown",
+        bot._challenge_failure_cooldown_seconds(TemporarilyClosedResponse())
+        == lichess_bot.STATIC_CHALLENGE_DECLINE_COOLDOWN_S,
+    )
+
+
 def test_retry_after_can_use_structured_ratelimit_body_for_challenges() -> None:
     class Response:
         headers = {}
@@ -2095,6 +2136,55 @@ def test_matching_challenge_event_clears_pending() -> None:
     expect("tc failure counted", bot._tc_failures == 1)
 
 
+def test_static_decline_event_uses_global_long_cooldown() -> None:
+    class Args:
+        seek = True
+        max_games = 1
+        rotate = False
+
+    bot = object.__new__(lichess_bot.LichessBot)
+    bot.args = Args()
+    bot.bot_id = "metalfish"
+    bot.active_games = {}
+    bot._completed_games = 0
+    bot._pending_challenge_id = "current"
+    bot._pending_challenge_target = "targetbot"
+    bot._pending_challenge_speed = "rapid"
+    bot._challenge_sent_at = 0
+    bot._tc_failures = 0
+    bot._declined_cooldown = {}
+    bot._speed_declined_cooldown = {}
+    bot._draining = threading.Event()
+
+    scheduled: list[float] = []
+    bot._schedule_retry = lambda delay=10: scheduled.append(delay)
+
+    event = {
+        "type": "challengeDeclined",
+        "challenge": {
+            "id": "current",
+            "destUser": {"id": "targetbot"},
+            "reason": "I'm not accepting challenges from bots.",
+        },
+    }
+    with redirect_stdout(io.StringIO()):
+        bot._handle_event(event)
+
+    expect("pending cleared", bot._pending_challenge_id is None)
+    expect("target globally cooled", "targetbot" in bot._declined_cooldown)
+    expect(
+        "target not speed cooled",
+        "targetbot" not in bot._speed_declined_cooldown.get("rapid", {}),
+    )
+    expires = bot._declined_cooldown["targetbot"]
+    expect(
+        "static rejection cooldown is long enough",
+        expires - time.time() >= lichess_bot.STATIC_CHALLENGE_DECLINE_COOLDOWN_S - 5,
+    )
+    expect("retry scheduled", scheduled == [2])
+    expect("tc failure counted", bot._tc_failures == 1)
+
+
 def test_time_control_decline_uses_speed_cooldown() -> None:
     class Args:
         seek = True
@@ -2841,6 +2931,7 @@ def main() -> int:
     test_avoid_repeat_format_filters_only_matching_speed()
     test_online_bots_uses_documented_fetch_limit()
     test_challenge_failure_ratelimit_sets_long_cooldown()
+    test_challenge_failure_static_rejections_set_long_cooldowns()
     test_retry_after_can_use_structured_ratelimit_body_for_challenges()
     test_retry_after_prefers_header_when_larger_than_body()
     test_seek_rate_limit_uses_server_backoff_body()
@@ -2886,6 +2977,7 @@ def main() -> int:
     test_draw_offer_caps_search_and_marks_move_request()
     test_stale_challenge_event_preserves_current_pending()
     test_matching_challenge_event_clears_pending()
+    test_static_decline_event_uses_global_long_cooldown()
     test_time_control_decline_uses_speed_cooldown()
     test_unrelated_challenge_event_without_pending_is_ignored()
     test_challenge_event_identity_accepts_string_users()

@@ -399,6 +399,13 @@ PLAYING_STATUS_CACHE_TTL_S = env_float("METALFISH_PLAYING_STATUS_CACHE_TTL_S", 5
 TIME_CONTROL_DECLINE_COOLDOWN_S = max(
     600, min(86_400, env_int("METALFISH_TIME_CONTROL_DECLINE_COOLDOWN_S", 21_600))
 )
+STATIC_CHALLENGE_DECLINE_COOLDOWN_S = max(
+    600, min(86_400, env_int("METALFISH_STATIC_CHALLENGE_DECLINE_COOLDOWN_S", 21_600))
+)
+FRIENDS_ONLY_CHALLENGE_COOLDOWN_S = max(
+    3_600,
+    min(86_400, env_int("METALFISH_FRIENDS_ONLY_CHALLENGE_COOLDOWN_S", 86_400)),
+)
 CHALLENGE_COOLDOWN_PATH = pathlib.Path(
     os.environ.get(
         "METALFISH_CHALLENGE_COOLDOWN_FILE",
@@ -2962,6 +2969,9 @@ class LichessBot:
         seconds = _response_ratelimit_seconds(response)
         if seconds is not None:
             cooldown = max(cooldown, min(86_400, int(seconds) + 60))
+        cooldown = self._reason_specific_cooldown_seconds(
+            getattr(response, "text", ""), cooldown
+        )
         return cooldown
 
     def _format_duration(self, seconds: int) -> str:
@@ -3012,6 +3022,24 @@ class LichessBot:
             )
         )
 
+    def _reason_specific_cooldown_seconds(
+        self, reason: str | None, default: int
+    ) -> int:
+        text = (reason or "").lower()
+        if "friends" in text:
+            return max(default, FRIENDS_ONLY_CHALLENGE_COOLDOWN_S)
+        if any(
+            phrase in text
+            for phrase in (
+                "not accepting challenges from bots",
+                "not accepting challenges at the moment",
+                "please send me a casual challenge",
+                "please send me a rated challenge",
+            )
+        ):
+            return max(default, STATIC_CHALLENGE_DECLINE_COOLDOWN_S)
+        return default
+
     def _cooldown_challenge_failure(
         self,
         bot_id: str | None,
@@ -3019,6 +3047,7 @@ class LichessBot:
         reason: str | None,
         duration: int = 600,
     ) -> None:
+        duration = self._reason_specific_cooldown_seconds(reason, duration)
         if self._time_control_rejection(reason):
             self._cooldown_bot_speed(
                 bot_id,
