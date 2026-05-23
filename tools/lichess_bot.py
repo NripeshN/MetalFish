@@ -2041,6 +2041,41 @@ class LichessBot:
             return "tb_draw_claim"
         return None
 
+    def _draw_state_fields(self, board: chess.Board) -> dict:
+        try:
+            insufficient = board.is_insufficient_material()
+            seventyfive = board.is_seventyfive_moves()
+            fivefold = board.is_fivefold_repetition()
+            can_claim = board.can_claim_draw()
+        except Exception:
+            return {
+                "piece_count": len(getattr(board, "piece_map", lambda: {})()),
+                "draw_state_error": True,
+            }
+
+        claim_available = self._draw_claim_available(board)
+        wdl = self._tablebase_wdl(board) if claim_available else None
+        reason = "tb_draw_claim" if claim_available and wdl == 0 else ""
+        return {
+            "piece_count": len(board.piece_map()),
+            "insufficient_material": insufficient,
+            "seventyfive_moves": seventyfive,
+            "fivefold_repetition": fivefold,
+            "can_claim_draw": can_claim,
+            "draw_claim_available": claim_available,
+            "tablebase_wdl": wdl if wdl is not None else "",
+            "draw_offer_reason": reason,
+            "draw_offer_eligible": bool(reason),
+        }
+
+    def _should_audit_draw_state(self, fields: dict) -> bool:
+        return bool(
+            fields.get("draw_claim_available")
+            or fields.get("insufficient_material")
+            or fields.get("draw_offer_eligible")
+            or int(fields.get("piece_count") or 64) <= DRAW_OFFER_MAX_SYZYGY_PIECES
+        )
+
     def _skip_completed_game_submit(
         self, game_id: str, moves: list[str], move: str
     ) -> bool:
@@ -3471,7 +3506,16 @@ class LichessBot:
         ponder_stop_timeout = self._ponder_stop_timeout_seconds(
             my_color, wtime, btime, winc, binc
         )
-        draw_offer_reason = self._draw_offer_reason(board)
+        draw_state = self._draw_state_fields(board)
+        if self._should_audit_draw_state(draw_state):
+            self._audit(
+                game_id,
+                "draw_state",
+                fen=board.fen(),
+                **draw_state,
+                **self._audit_context(moves),
+            )
+        draw_offer_reason = str(draw_state.get("draw_offer_reason") or "") or None
         offering_draw = draw_offer_reason is not None
         if offering_draw:
             if DRAW_OFFER_SEARCH_CAP_MS > 0:

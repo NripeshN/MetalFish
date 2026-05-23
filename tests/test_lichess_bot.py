@@ -1577,9 +1577,13 @@ def test_draw_offer_caps_search_and_marks_move_request() -> None:
     bot._submitted_turns_lock = threading.Lock()
     bot._completed_game_ids = set()
     bot._completed_game_order = []
-    bot._audit = lambda game_id, event, **fields: None
+    records: list[dict] = []
+    bot._audit = lambda game_id, event, **fields: records.append(
+        {"event": event, **fields}
+    )
     bot._should_query_book = lambda board, my_color, wtime, btime: False
-    bot._draw_offer_reason = lambda board: "tb_draw_claim"
+    bot._draw_claim_available = lambda board: True
+    bot._tablebase_wdl = lambda board: 0
     bot._pre_submit_active_check_needed = lambda board: False
 
     submitted: list[dict] = []
@@ -1603,6 +1607,14 @@ def test_draw_offer_caps_search_and_marks_move_request() -> None:
     expect(
         "draw offer submitted on move request",
         submitted == [{"move": "e2e4", "offering_draw": True}],
+    )
+    expect(
+        "draw state audited",
+        any(
+            record["event"] == "draw_state"
+            and record.get("draw_offer_eligible") is True
+            for record in records
+        ),
     )
 
 

@@ -31,6 +31,9 @@ class AuditSummary:
     stale_rejects: int = 0
     draw_offer_candidates: int = 0
     draw_offer_moves: int = 0
+    draw_state_samples: int = 0
+    draw_claimable_turns: int = 0
+    tablebase_draw_turns: int = 0
     book_moves: int = 0
     engine_searches: int = 0
     ponder_starts: int = 0
@@ -113,6 +116,12 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
                     summary.issue_counts["move_rejected"] += 1
         elif event == "book_candidate":
             summary.book_moves += 1
+        elif event == "draw_state":
+            summary.draw_state_samples += 1
+            if row.get("draw_claim_available"):
+                summary.draw_claimable_turns += 1
+            if row.get("tablebase_wdl") == 0:
+                summary.tablebase_draw_turns += 1
         elif event == "draw_offer_candidate":
             summary.draw_offer_candidates += 1
         elif event == "engine_search_result":
@@ -319,8 +328,16 @@ def print_report(games: list[GameSummary]) -> None:
     )
     draw_candidates = sum(g.audit.draw_offer_candidates for g in games)
     draw_moves = sum(g.audit.draw_offer_moves for g in games)
-    if draw_candidates or draw_moves:
-        print(f"Draw offers: {draw_candidates} candidates, {draw_moves} move requests")
+    draw_samples = sum(g.audit.draw_state_samples for g in games)
+    draw_claims = sum(g.audit.draw_claimable_turns for g in games)
+    tb_draws = sum(g.audit.tablebase_draw_turns for g in games)
+    if draw_candidates or draw_moves or draw_samples:
+        print(
+            "Draw telemetry: "
+            f"{draw_samples} samples, {draw_claims} claimable, "
+            f"{tb_draws} TB-drawn, {draw_candidates} offer candidates, "
+            f"{draw_moves} move requests"
+        )
     print(
         "Max elapsed: "
         f"search {max((g.audit.max_engine_ms for g in games), default=0)} ms, "
@@ -364,6 +381,9 @@ def summaries_to_json(games: list[GameSummary]) -> list[dict]:
             "stale_rejects": game.audit.stale_rejects,
             "draw_offer_candidates": game.audit.draw_offer_candidates,
             "draw_offer_moves": game.audit.draw_offer_moves,
+            "draw_state_samples": game.audit.draw_state_samples,
+            "draw_claimable_turns": game.audit.draw_claimable_turns,
+            "tablebase_draw_turns": game.audit.tablebase_draw_turns,
             "book_moves": game.audit.book_moves,
             "engine_searches": game.audit.engine_searches,
             "ponder_starts": game.audit.ponder_starts,

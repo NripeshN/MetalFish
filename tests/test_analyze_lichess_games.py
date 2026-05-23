@@ -40,6 +40,11 @@ def test_parse_audit_counts_stale_rejects_and_ponder_metrics() -> None:
                     "binc": 3000,
                 },
                 {"event": "book_candidate", "move": "e2e4"},
+                {
+                    "event": "draw_state",
+                    "draw_claim_available": True,
+                    "tablebase_wdl": 0,
+                },
                 {"event": "draw_offer_candidate", "reason": "tb_draw_claim"},
                 {
                     "event": "move_submit",
@@ -79,6 +84,9 @@ def test_parse_audit_counts_stale_rejects_and_ponder_metrics() -> None:
     expect("accepted moves", summary.accepted_moves == 1)
     expect("rejected moves", summary.rejected_moves == 1)
     expect("stale rejects", summary.stale_rejects == 1)
+    expect("draw state samples", summary.draw_state_samples == 1)
+    expect("draw claimable turns", summary.draw_claimable_turns == 1)
+    expect("tablebase draw turns", summary.tablebase_draw_turns == 1)
     expect("draw offer candidates", summary.draw_offer_candidates == 1)
     expect("draw offer moves", summary.draw_offer_moves == 1)
     expect("book moves", summary.book_moves == 1)
@@ -137,6 +145,9 @@ def test_print_report_includes_stability_summary() -> None:
         accepted_moves=10,
         rejected_moves=1,
         stale_rejects=1,
+        draw_state_samples=3,
+        draw_claimable_turns=2,
+        tablebase_draw_turns=1,
         draw_offer_candidates=2,
         draw_offer_moves=1,
         engine_searches=3,
@@ -166,7 +177,11 @@ def test_print_report_includes_stability_summary() -> None:
 
     expect("score reported", "Score: 0.5/1" in text)
     expect("stale reject reported", "1 rejected (1 stale after game end)" in text)
-    expect("draw offers reported", "Draw offers: 2 candidates, 1 move requests" in text)
+    expect(
+        "draw telemetry reported",
+        "Draw telemetry: 3 samples, 2 claimable, 1 TB-drawn, 2 offer candidates, 1 move requests"
+        in text,
+    )
     expect("search reported", "3 engine searches, 7 ponderhits" in text)
     expect("game line reported", "OpponentBot" in text)
 
