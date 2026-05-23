@@ -2940,6 +2940,7 @@ class LichessBot:
     def _seek_game_once(self):
         if not self._should_seek():
             return
+        self._cleanup_cooldowns()
 
         if not self._resources_allow_new_game():
             print("  Resources busy, deferring seek for 30s...")
@@ -3196,23 +3197,51 @@ class LichessBot:
         else:
             self._cooldown_bot(bot_id, duration=duration)
 
-    def _cleanup_cooldowns(self):
+    def _cleanup_cooldowns(self) -> bool:
         now = time.time()
-        self._declined_cooldown = {
-            k: v for k, v in self._declined_cooldown.items() if v > now
-        }
-        self._speed_declined_cooldown = {
-            speed: {k: v for k, v in entries.items() if v > now}
-            for speed, entries in getattr(self, "_speed_declined_cooldown", {}).items()
-            if speed in ACCEPTED_SPEEDS
-        }
-        self._speed_declined_cooldown = {
-            speed: entries
-            for speed, entries in self._speed_declined_cooldown.items()
-            if entries
-        }
-        self._save_challenge_cooldowns()
-        self._save_speed_challenge_cooldowns()
+        raw_global = getattr(self, "_declined_cooldown", {})
+        if not isinstance(raw_global, dict):
+            raw_global = {}
+        clean_global: dict[str, float] = {}
+        for key, expires in raw_global.items():
+            norm_key = self._cooldown_key(str(key))
+            if not norm_key:
+                continue
+            try:
+                expires_f = float(expires)
+            except (TypeError, ValueError):
+                continue
+            if expires_f > now:
+                clean_global[norm_key] = expires_f
+
+        raw_speed = getattr(self, "_speed_declined_cooldown", {})
+        if not isinstance(raw_speed, dict):
+            raw_speed = {}
+        clean_speed: dict[str, dict[str, float]] = {}
+        for speed, entries in raw_speed.items():
+            if speed not in ACCEPTED_SPEEDS or not isinstance(entries, dict):
+                continue
+            clean_entries: dict[str, float] = {}
+            for key, expires in entries.items():
+                norm_key = self._cooldown_key(str(key))
+                if not norm_key:
+                    continue
+                try:
+                    expires_f = float(expires)
+                except (TypeError, ValueError):
+                    continue
+                if expires_f > now:
+                    clean_entries[norm_key] = expires_f
+            if clean_entries:
+                clean_speed[str(speed)] = clean_entries
+
+        changed = clean_global != raw_global or clean_speed != raw_speed
+        self._declined_cooldown = clean_global
+        self._speed_declined_cooldown = clean_speed
+        if changed:
+            self._save_challenge_cooldowns()
+            self._save_speed_challenge_cooldowns()
+        return changed
 
     def _schedule_retry(self, delay: float = 10):
         if self._seek_timer:

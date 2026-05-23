@@ -624,6 +624,48 @@ def test_speed_challenge_cooldowns_persist_between_runs() -> None:
     expect("global speeds not invented", "blitz" not in loaded)
 
 
+def test_cleanup_cooldowns_prunes_and_persists_expired_entries() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        global_path = pathlib.Path(tmp) / "global-cooldowns.json"
+        speed_path = pathlib.Path(tmp) / "speed-cooldowns.json"
+        old_global_path = lichess_bot.CHALLENGE_COOLDOWN_PATH
+        old_speed_path = lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH
+        now = time.time()
+        try:
+            lichess_bot.CHALLENGE_COOLDOWN_PATH = global_path
+            lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH = speed_path
+
+            bot = object.__new__(lichess_bot.LichessBot)
+            bot._persist_challenge_cooldowns = True
+            bot._declined_cooldown = {
+                "ExpiredBot": now - 10,
+                "LiveBot": now + 600,
+                "broken": "not-a-time",
+            }
+            bot._speed_declined_cooldown = {
+                "rapid": {
+                    "ExpiredSpeedBot": now - 10,
+                    "LiveSpeedBot": now + 600,
+                },
+                "unsupported": {"other": now + 600},
+            }
+
+            changed = bot._cleanup_cooldowns()
+            global_data = json.loads(global_path.read_text())
+            speed_data = json.loads(speed_path.read_text())
+        finally:
+            lichess_bot.CHALLENGE_COOLDOWN_PATH = old_global_path
+            lichess_bot.SPEED_CHALLENGE_COOLDOWN_PATH = old_speed_path
+
+    expect("cleanup changed dirty cooldowns", changed)
+    expect("expired global pruned", "expiredbot" not in bot._declined_cooldown)
+    expect("live global normalized", "livebot" in bot._declined_cooldown)
+    expect("expired speed pruned", "expiredspeedbot" not in speed_data.get("rapid", {}))
+    expect("live speed normalized", "livespeedbot" in speed_data.get("rapid", {}))
+    expect("unsupported speed pruned", "unsupported" not in speed_data)
+    expect("global cooldown persisted clean", list(global_data) == ["livebot"])
+
+
 def test_highest_rated_seek_orders_candidates_descending() -> None:
     class Args:
         elo_seek = False
@@ -3083,6 +3125,7 @@ def main() -> int:
     test_seek_candidates_filter_cached_cooldowns_case_insensitively()
     test_seek_candidates_filter_time_control_cooldown_by_speed_only()
     test_speed_challenge_cooldowns_persist_between_runs()
+    test_cleanup_cooldowns_prunes_and_persists_expired_entries()
     test_highest_rated_seek_orders_candidates_descending()
     test_avoid_repeat_format_filters_only_matching_speed()
     test_online_bots_uses_documented_fetch_limit()
