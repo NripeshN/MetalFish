@@ -908,7 +908,9 @@ bool HybridRootPawnLeverCandidate(
       selected_mcts_rank > 0 && candidate_mcts_policy >= 0.25f &&
       candidate_mcts_policy >= selected_mcts_policy * 1.15f;
   const int max_average_gap = high_policy_lever ? 80 : 60;
-  if (mcts_rank <= 0 || mcts_rank > 8 || mcts_current_visits < 8 ||
+  const uint32_t min_current_visits = mcts_rank >= 5 ? 7 : 8;
+  if (mcts_rank <= 0 || mcts_rank > 8 ||
+      mcts_current_visits < min_current_visits ||
       selected_average_score - candidate_average_score > max_average_gap ||
       (!high_policy_lever && candidate_effort < 150)) {
     return false;
