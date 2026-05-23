@@ -31,6 +31,14 @@ def test_parse_audit_counts_stale_rejects_and_ponder_metrics() -> None:
             [
                 {"event": "game_start"},
                 {"event": "stream_game_full", "status": "started", "color": "white"},
+                {
+                    "event": "turn_seen",
+                    "ply": 12,
+                    "wtime": 300000,
+                    "btime": 299000,
+                    "winc": 3000,
+                    "binc": 3000,
+                },
                 {"event": "book_candidate", "move": "e2e4"},
                 {"event": "move_submit", "move": "e2e4", "result": "accepted"},
                 {"event": "ponder_start", "best": "e2e4", "ponder": "e7e5"},
@@ -58,6 +66,9 @@ def test_parse_audit_counts_stale_rejects_and_ponder_metrics() -> None:
 
     expect("game id from filename", summary.game_id == "abc12345")
     expect("color from full event", summary.color == "white")
+    expect("offline max ply inferred", summary.max_ply == 12)
+    expect("offline speed inferred", game.speed == "blitz")
+    expect("offline plies inferred", game.plies == 12)
     expect("accepted moves", summary.accepted_moves == 1)
     expect("rejected moves", summary.rejected_moves == 1)
     expect("stale rejects", summary.stale_rejects == 1)
@@ -103,6 +114,13 @@ def test_game_summary_from_export_scores_bot_color() -> None:
     expect("plies", summary.plies == 4)
 
 
+def test_infer_speed_from_audit_clock() -> None:
+    expect("3+2 blitz", analyzer.infer_speed(180000, 2000) == "blitz")
+    expect("10+5 rapid", analyzer.infer_speed(600000, 5000) == "rapid")
+    expect("30+20 classical", analyzer.infer_speed(1800000, 20000) == "classical")
+    expect("missing speed unknown", analyzer.infer_speed(None, None) == "?")
+
+
 def test_print_report_includes_stability_summary() -> None:
     audit = analyzer.AuditSummary(
         game_id="gameid",
@@ -144,6 +162,7 @@ def test_print_report_includes_stability_summary() -> None:
 def main() -> int:
     test_parse_audit_counts_stale_rejects_and_ponder_metrics()
     test_game_summary_from_export_scores_bot_color()
+    test_infer_speed_from_audit_clock()
     test_print_report_includes_stability_summary()
     print("Lichess game analyzer tests: OK")
     return 0

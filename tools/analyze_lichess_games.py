@@ -23,6 +23,9 @@ class AuditSummary:
     game_id: str
     path: pathlib.Path
     color: str = "?"
+    max_ply: int = 0
+    initial_clock_ms: int | None = None
+    increment_ms: int | None = None
     accepted_moves: int = 0
     rejected_moves: int = 0
     stale_rejects: int = 0
@@ -72,6 +75,27 @@ def parse_audit(path: pathlib.Path) -> AuditSummary:
             continue
 
         event = str(row.get("event", ""))
+        try:
+            summary.max_ply = max(summary.max_ply, int(row.get("ply") or 0))
+        except (TypeError, ValueError):
+            pass
+        if summary.initial_clock_ms is None:
+            clocks = [
+                value
+                for value in (row.get("wtime"), row.get("btime"))
+                if isinstance(value, int) and value > 0
+            ]
+            if clocks:
+                summary.initial_clock_ms = max(clocks)
+        if summary.increment_ms is None:
+            increments = [
+                value
+                for value in (row.get("winc"), row.get("binc"))
+                if isinstance(value, int) and value >= 0
+            ]
+            if increments:
+                summary.increment_ms = max(increments)
+
         if event == "stream_game_full":
             summary.color = str(row.get("color") or summary.color)
         elif event == "move_submit":
@@ -183,8 +207,27 @@ def game_summary_from_audit(audit: AuditSummary) -> GameSummary:
         audit=audit,
         result=result,
         color=audit.color,
+        speed=infer_speed(audit.initial_clock_ms, audit.increment_ms),
+        plies=audit.max_ply,
         url=f"https://lichess.org/{audit.game_id}",
     )
+
+
+def infer_speed(initial_clock_ms: int | None, increment_ms: int | None) -> str:
+    if initial_clock_ms is None:
+        return "?"
+    estimated_seconds = initial_clock_ms / 1000.0
+    if increment_ms is not None:
+        estimated_seconds += 40.0 * increment_ms / 1000.0
+    if estimated_seconds < 29:
+        return "ultraBullet"
+    if estimated_seconds < 179:
+        return "bullet"
+    if estimated_seconds < 479:
+        return "blitz"
+    if estimated_seconds < 1499:
+        return "rapid"
+    return "classical"
 
 
 def collect_games(
@@ -295,6 +338,9 @@ def summaries_to_json(games: list[GameSummary]) -> list[dict]:
             "url": game.url,
             "result": game.result,
             "color": game.color,
+            "max_ply": game.audit.max_ply,
+            "initial_clock_ms": game.audit.initial_clock_ms,
+            "increment_ms": game.audit.increment_ms,
             "opponent": game.opponent,
             "opponent_rating": game.opponent_rating,
             "our_rating": game.our_rating,
