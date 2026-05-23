@@ -157,11 +157,14 @@ Current CUDA backend boundary:
   intermediate device buffers. The current smoke executor uses it for
   dense/activation/normalization intermediates, including multi-stage
   dense/layernorm, gate, and feed-forward/layernorm sequences; production CUDA
-  layers should extend this rather than allocating anonymous scratch. Attention
-  tape bindings now reserve explicit Q/K/V, score, probability, context, output
-  projection, residual, and smolgen compress/dense/norm/global-bias scratch
-  using resolved head and square geometry. Attention-policy heads reserve both
-  raw scratch logits and mapped 1858-policy logits.
+  layers should extend this rather than allocating anonymous scratch. The tape
+  header stays planning-only and takes the workspace by forward declaration, so
+  non-CUDA host tooling can inspect buffer layouts without including CUDA
+  runtime headers. Attention tape bindings now reserve explicit Q/K/V, score,
+  probability, context, output projection, residual, and smolgen
+  compress/dense/norm/global-bias scratch using resolved head and square
+  geometry. Attention-policy heads reserve both raw scratch logits and mapped
+  1858-policy logits.
 - `src/nn/cuda/cuda_execution_schedule.*` classifies resolved plan steps into
   supported dense/activation stages, supported dense/layernorm stages,
   supported gate stages, supported adjacent attention/layernorm stages,

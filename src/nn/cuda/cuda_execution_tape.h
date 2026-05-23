@@ -14,11 +14,13 @@
 
 #include "../network_execution_plan.h"
 #include "../network_tensor_plan.h"
-#include "cuda_workspace.h"
 
 namespace MetalFish {
 namespace NN {
 namespace Cuda {
+
+class CudaExecutionWorkspace;
+struct CudaWorkspaceSmokeResult;
 
 enum class CudaExecutionBufferRole {
   DenseOutput,

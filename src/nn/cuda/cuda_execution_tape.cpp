@@ -9,6 +9,7 @@
 
 #include "cuda_attention_plan.h"
 #include "cuda_runtime_probe.h"
+#include "cuda_workspace.h"
 
 #include <sstream>
 #include <stdexcept>
