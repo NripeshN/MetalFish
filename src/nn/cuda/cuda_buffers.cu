@@ -7,6 +7,8 @@
 
 #include "cuda_buffers.h"
 
+#include "cuda_buffer_smoke.h"
+#include "cuda_input_packing.h"
 #include "cuda_runtime_probe.h"
 #include "cuda_workspace.h"
 

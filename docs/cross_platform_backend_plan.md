@@ -148,7 +148,9 @@ Current CUDA backend boundary:
   synchronization between adjacent inference stages.
 - `src/nn/cuda/cuda_buffers.*` exposes stream-aware packed-input upload,
   output clear, and output download paths while preserving synchronous defaults
-  for smoke tests and fallback call sites.
+  for fallback call sites. Buffer smoke declarations live in
+  `src/nn/cuda/cuda_buffer_smoke.h`, keeping production buffer layout users
+  independent from input-packing smoke helpers.
 - `src/nn/cuda/cuda_input_packing.*` has both contiguous raw packing for
   fixtures and per-position host batch packing for `Network::EvaluateBatch()`,
   so CUDA batching does not depend on unrelated `InputPlanes` objects sharing

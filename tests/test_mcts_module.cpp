@@ -24,6 +24,7 @@
 #include "nn_input_fixture.h"
 #ifdef USE_CUDA
 #include "nn/cuda/cuda_attention_plan.h"
+#include "nn/cuda/cuda_buffer_smoke.h"
 #include "nn/cuda/cuda_buffers.h"
 #include "nn/cuda/cuda_execution_schedule.h"
 #include "nn/cuda/cuda_execution_tape.h"

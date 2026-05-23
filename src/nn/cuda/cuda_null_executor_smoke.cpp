@@ -10,6 +10,7 @@
 #include "../network_output_decoder.h"
 #include "../network_weight_inventory.h"
 #include "cuda_attention_plan.h"
+#include "cuda_buffer_smoke.h"
 #include "cuda_executor.h"
 #include "cuda_execution_tape.h"
 #include "cuda_kernels.h"

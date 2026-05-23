@@ -9,14 +9,12 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 #include <cuda_runtime_api.h>
 
 #include "../network_format_types.h"
 #include "../network_tensor_plan.h"
-#include "cuda_input_packing.h"
 
 namespace MetalFish {
 namespace NN {
@@ -89,20 +87,6 @@ private:
   size_t allocation_bytes_ = 0;
   std::uint64_t generation_ = 1;
 };
-
-struct CudaBufferSmokeResult {
-  CudaSmokeStatus status = CudaSmokeStatus::RuntimeError;
-  std::string message;
-  size_t allocation_bytes = 0;
-};
-
-CudaBufferSmokeResult RunInferenceBufferSmoke();
-CudaBufferSmokeResult RunPackedInputUploadSmokeRaw(const float *input);
-CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
-                                                      int batch_size);
-CudaBufferSmokeResult RunPlanExecutorPipelineSmoke();
-CudaBufferSmokeResult RunAttentionProjectionSmoke();
-CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke();
 
 } // namespace Cuda
 } // namespace NN
