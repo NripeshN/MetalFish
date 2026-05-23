@@ -1244,12 +1244,15 @@ CudaAttentionProjectionOutput ExecuteAttentionInputProjectionStage(
   output.head_depth = attention.head_depth;
 
   cudaStream_t stream = workspace.Stream();
-  LaunchDenseAffineKernel(input, q_weight.data, q_bias.data, output.query, rows,
+  LaunchDenseAffineKernel(input, q_weight.data, nullptr, output.query, rows,
                           attention.input_width, attention.qkv_width, stream);
-  LaunchDenseAffineKernel(input, k_weight.data, k_bias.data, output.key, rows,
+  LaunchDenseAffineKernel(input, k_weight.data, nullptr, output.key, rows,
                           attention.input_width, attention.qkv_width, stream);
-  LaunchDenseAffineKernel(input, v_weight.data, v_bias.data, output.value, rows,
+  LaunchDenseAffineKernel(input, v_weight.data, nullptr, output.value, rows,
                           attention.input_width, attention.qkv_width, stream);
+  LaunchAttentionQkvBiasAddKernel(output.query, q_bias.data, output.key,
+                                  k_bias.data, output.value, v_bias.data, rows,
+                                  attention.qkv_width, stream);
   return output;
 }
 

@@ -171,6 +171,18 @@ __global__ void BiasAddKernel(float *output, const float *bias,
   output[index] += bias[index % output_width];
 }
 
+__global__ void AttentionQkvBiasAddKernel(
+    float *query, const float *query_bias, float *key, const float *key_bias,
+    float *value, const float *value_bias, int width, int total_outputs) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total_outputs)
+    return;
+  const int column = index % width;
+  query[index] += query_bias[column];
+  key[index] += key_bias[column];
+  value[index] += value_bias[column];
+}
+
 __global__ void LayerNormKernel(const float *input, const float *gamma,
                                 const float *beta, float *output, int width,
                                 float epsilon) {
@@ -839,6 +851,40 @@ void LaunchDenseAffineKernel(const float *input, const float *weights,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("DenseAffineKernel synchronize", status));
+}
+
+void LaunchAttentionQkvBiasAddKernel(float *query, const float *query_bias,
+                                     float *key, const float *key_bias,
+                                     float *value, const float *value_bias,
+                                     int rows, int width,
+                                     cudaStream_t stream) {
+  if (!query || !query_bias || !key || !key_bias || !value || !value_bias) {
+    throw std::runtime_error(
+        "CUDA attention QKV bias kernel received null buffer");
+  }
+  if (rows <= 0 || width <= 0) {
+    throw std::runtime_error(
+        "CUDA attention QKV bias kernel dimensions are invalid");
+  }
+
+  constexpr int kThreads = 256;
+  const int total_outputs = rows * width;
+  const int blocks = (total_outputs + kThreads - 1) / kThreads;
+  AttentionQkvBiasAddKernel<<<blocks, kThreads, 0, stream>>>(
+      query, query_bias, key, key_bias, value, value_bias, width,
+      total_outputs);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionQkvBiasAddKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("AttentionQkvBiasAddKernel synchronize", status));
+  }
 }
 
 void LaunchLayerNormKernel(const float *input, const float *gamma,
