@@ -12,6 +12,13 @@
 namespace MetalFish {
 namespace NN {
 
+enum BoardTransform {
+  kNoTransform = 0,
+  kFlipTransform = 1,
+  kMirrorTransform = 2,
+  kTransposeTransform = 4
+};
+
 constexpr int kMoveHistory = 8;
 constexpr int kPlanesPerBoard = 13;
 constexpr int kAuxPlaneBase = kPlanesPerBoard * kMoveHistory;

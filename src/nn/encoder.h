@@ -17,13 +17,6 @@
 namespace MetalFish {
 namespace NN {
 
-enum BoardTransform {
-  kNoTransform = 0,
-  kFlipTransform = 1,
-  kMirrorTransform = 2,
-  kTransposeTransform = 4
-};
-
 enum class FillEmptyHistory { NO, FEN_ONLY, ALWAYS };
 
 void EncodePositionForNN(MetalFishNN::NetworkFormat::InputFormat input_format,
