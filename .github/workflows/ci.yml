@@ -67,6 +67,7 @@ jobs:
           python3 tests/testing.py --quick
           python3 tests/test_lichess_bot.py
           python3 tests/test_lichess_puzzle_runner.py
+          python3 tests/test_analyze_lichess_games.py
           python3 tests/test_hybrid_regression_compare.py
 
       - name: Run ANE option/config smoke
