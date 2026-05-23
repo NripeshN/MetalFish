@@ -13,6 +13,7 @@
 #include "cuda_buffer_smoke.h"
 #include "cuda_execution_tape.h"
 #include "cuda_executor.h"
+#include "cuda_input_packing.h"
 #include "cuda_kernels.h"
 #include "cuda_output_mapping.h"
 #include "cuda_runtime_probe.h"

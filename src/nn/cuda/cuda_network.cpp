@@ -12,6 +12,7 @@
 #include "../network_output_decoder.h"
 #include "../network_weight_inventory.h"
 #include "cuda_execution_schedule.h"
+#include "cuda_input_packing.h"
 #include "cuda_output_mapping.h"
 #include "cuda_runtime_probe.h"
 
