@@ -666,6 +666,7 @@ def main() -> int:
             "tests/test_lc0_coreml_root_value_probe.py",
             "tests/test_lc0_coreml_value_export.py",
             "tools/check_nn_backend_artifacts.py",
+            "tools/compare_nn_backend_outputs.py",
             "Run Metal NN parity report",
             "METALFISH_NN_PARITY_REPORT=build/metal-nn-parity-report.md",
             "metal-nn-comparison.log",
@@ -673,6 +674,7 @@ def main() -> int:
             "metal-nn-artifact-manifest.json",
             "check_nn_backend_artifacts.py",
             "--backend metal",
+            "--full-policy",
             "Metal (MPSGraph) backend",
             "Run ANE option/config smoke",
             "--hybrid-ane-root-probe",
@@ -784,6 +786,18 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / "tools/compare_nn_backend_outputs.py",
+        [
+            "Compare two NN backend probe JSON artifacts",
+            "--expected-log",
+            "--actual-log",
+            "--require-full-policy",
+            "NN backend output compare: PASS",
+            "top policy move",
+            "full policy max delta",
+        ],
+    )
+    assert_file_contains(
         PROJ / "cloudbuild/cuda-entrypoint.yaml",
         [
             "test_nn_comparison",
@@ -811,6 +825,7 @@ def main() -> int:
             "cuda-gpu-uci-smoke.log",
             "check_nn_backend_artifacts.py",
             '--backend-label "CUDA transformer backend"',
+            "--full-policy",
             "Parity Report",
             "Batch Timings",
             "UCI Smokes",

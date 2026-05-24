@@ -419,6 +419,7 @@ fi
   --top 3 \
   --warmup 0 \
   --iterations 1 \
+  --full-policy \
   2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-probe.log"
 python3 tools/check_nn_backend_artifacts.py \
   --backend-label "CUDA transformer backend" \

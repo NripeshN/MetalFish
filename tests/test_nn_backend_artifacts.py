@@ -11,6 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
+from tools import compare_nn_backend_outputs as comparer  # noqa: E402
 
 
 def expect(name: str, condition: bool) -> None:
@@ -69,6 +70,43 @@ def write_artifacts(
         encoding="utf-8",
     )
     return report, compare, probe, manifest
+
+
+def write_probe(
+    path: pathlib.Path,
+    *,
+    backend: str,
+    label: str,
+    top_moves: list[str] | None = None,
+    value: float = 0.25,
+    policy_shift: float = 0.0,
+) -> None:
+    moves = top_moves or ["e2e4", "d2d4", "g1f3"]
+    policy = [1.0 + policy_shift, 0.5, -0.25, -1.0]
+    path.write_text(
+        "info string warmup\n"
+        + json.dumps(
+            {
+                "fen": "8/8/8/8/8/8/8/K6k w - - 0 1",
+                "backend": backend,
+                "network_info": f"{label} synthetic",
+                "transform": 0,
+                "value": value,
+                "has_wdl": True,
+                "wdl": [0.2, 0.7, 0.1],
+                "has_moves_left": True,
+                "moves_left": 12.5,
+                "policy_top": [
+                    {"move": moves[0], "logit": 1.0 + policy_shift},
+                    {"move": moves[1], "logit": 0.5},
+                    {"move": moves[2], "logit": -0.25},
+                ],
+                "policy": policy,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_checker_writes_manifest() -> None:
@@ -131,9 +169,79 @@ def test_checker_rejects_missing_wdl() -> None:
     raise AssertionError("expected missing WDL to fail")
 
 
+def test_backend_output_compare_accepts_close_outputs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal.log"
+        actual = root / "cuda.log"
+        summary = root / "summary.json"
+        write_probe(expected, backend="metal", label="Metal (MPSGraph) backend")
+        write_probe(
+            actual,
+            backend="cuda",
+            label="CUDA transformer backend",
+            value=0.2505,
+            policy_shift=0.0005,
+        )
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--expected-label",
+                "Metal (MPSGraph) backend",
+                "--actual-label",
+                "CUDA transformer backend",
+                "--summary-out",
+                str(summary),
+                "--require-full-policy",
+            ]
+        ):
+            expect("compare success", comparer.main() == 0)
+        data = json.loads(summary.read_text(encoding="utf-8"))
+        expect("summary actual backend", data["actual_backend"] == "cuda")
+        expect(
+            "summary policy delta",
+            abs(data["policy_max_delta"] - 0.0005) < 1e-9,
+        )
+
+
+def test_backend_output_compare_rejects_top_move_drift() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal.log"
+        actual = root / "cuda.log"
+        write_probe(expected, backend="metal", label="Metal (MPSGraph) backend")
+        write_probe(
+            actual,
+            backend="cuda",
+            label="CUDA transformer backend",
+            top_moves=["d2d4", "e2e4", "g1f3"],
+        )
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--top-count",
+                "2",
+            ]
+        ):
+            try:
+                comparer.main()
+            except RuntimeError as exc:
+                expect("top drift error", "top policy move 0 mismatch" in str(exc))
+                return
+    raise AssertionError("expected top move drift to fail")
+
+
 def main() -> int:
     test_checker_writes_manifest()
     test_checker_rejects_missing_wdl()
+    test_backend_output_compare_accepts_close_outputs()
+    test_backend_output_compare_rejects_top_move_drift()
     print("NN backend artifact tests: OK")
     return 0
 
