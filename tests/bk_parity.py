@@ -1194,7 +1194,7 @@ def main() -> int:
     )
     parser.add_argument("--hybrid-ane-compute-units", default="cpu-ne")
     parser.add_argument("--hybrid-ane-root-hint-count", type=int, default=10)
-    parser.add_argument("--hybrid-ane-root-hint-wait-ms", type=int, default=250)
+    parser.add_argument("--hybrid-ane-root-hint-wait-ms", type=int, default=0)
     parser.add_argument("--hybrid-ane-min-budget-ms", type=int, default=1000)
     parser.add_argument("--multipv", type=int, default=1)
     parser.add_argument("--backend", default="metal")
