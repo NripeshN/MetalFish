@@ -713,6 +713,37 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridRootPawnLeverCandidate(-1, -1, 57350, 3, 74, 1, -0.047f,
                                              0.070f, -0.084f, -0.123f, 0.219f));
 
+    EXPECT(tc, HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -258, -282, 214, 1, -0.181f,
+                   5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   false, 4, -0.297f, 2, -0.271f, -258, -282, 214, 1, -0.181f,
+                   5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 3, -0.271f, -258, -282, 214, 1, -0.181f,
+                   5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 2, -0.297f, 4, -0.271f, -258, -282, 214, 1, -0.181f,
+                   5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.283f, -258, -282, 214, 1, -0.181f,
+                   5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -258, -282, 214, 1, -0.181f,
+                   5, 1, -0.259f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -258, -282, 214, 1, -0.181f,
+                   5, 2, -0.259f, 0.034f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -258, -299, 214, 1, -0.181f,
+                   5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -258, -282, 149, 1, -0.181f,
+                   5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -258, -282, 214, 1, -0.181f,
+                   5, 2, -0.272f, 0.038f));
+
     Position pos;
     StateInfo st;
     pos.set("2q1rr1k/3bbnnp/p2p1pp1/2pPp3/PpP1P1P1/1P2BNNP/2BQ1PRK/7R b - -",

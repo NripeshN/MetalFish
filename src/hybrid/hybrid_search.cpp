@@ -1012,6 +1012,32 @@ bool HybridRootPawnLeverCandidate(
   return true;
 }
 
+bool HybridANERootPawnLeverCandidate(
+    bool ane_root_probe, int selected_ane_rank, float selected_ane_score,
+    int candidate_ane_rank, float candidate_ane_score,
+    int selected_average_score, int candidate_average_score,
+    uint64_t candidate_effort, int selected_mcts_rank, float selected_mcts_q,
+    int candidate_mcts_rank, uint32_t candidate_mcts_current_visits,
+    float candidate_mcts_q, float candidate_mcts_policy) {
+  if (!ane_root_probe || selected_ane_rank <= 0 || candidate_ane_rank <= 0)
+    return false;
+  if (selected_mcts_rank != 1)
+    return false;
+  if (candidate_ane_rank > 2 || candidate_ane_rank >= selected_ane_rank)
+    return false;
+  if (candidate_ane_score - selected_ane_score < 0.015f)
+    return false;
+  if (candidate_mcts_rank <= 0 || candidate_mcts_rank > 6 ||
+      candidate_mcts_current_visits < 2 || candidate_mcts_policy < 0.035f) {
+    return false;
+  }
+  if (candidate_effort < 150)
+    return false;
+  if (selected_average_score - candidate_average_score > 40)
+    return false;
+  return selected_mcts_q - candidate_mcts_q <= 0.09f;
+}
+
 bool HybridIsPawnLever(const Position &pos, Move move) {
   if (move == Move::none() || move.type_of() != NORMAL)
     return false;
@@ -2526,6 +2552,26 @@ Move ParallelHybridSearch::make_final_decision() {
     ss << "]";
     return ss.str();
   };
+  struct ANERootLookup {
+    int rank = -1;
+    float score = 0.0f;
+  };
+  const auto find_ane_root_move = [&](Move target) {
+    ANERootLookup result;
+    if (!config_.ane_root_probe || target == Move::none())
+      return result;
+
+    const bool has_scores =
+        ane_root_hint_infos_snapshot.size() == ane_root_hints_snapshot.size();
+    for (size_t i = 0; i < ane_root_hints_snapshot.size(); ++i) {
+      if (ane_root_hints_snapshot[i] != target)
+        continue;
+      result.rank = static_cast<int>(i) + 1;
+      result.score = has_scores ? ane_root_hint_infos_snapshot[i].score : 0.0f;
+      break;
+    }
+    return result;
+  };
   const auto append_cross_root_trace = [&](std::ostringstream &ss) {
     const MCTSRootLookup ab_in_mcts = find_mcts_root_move(ab_best);
     const ABRootLookup mcts_in_ab = find_ab_root_move(mcts_best);
@@ -2605,6 +2651,7 @@ Move ParallelHybridSearch::make_final_decision() {
       return Move::none();
     const MCTSRootLookup selected_mcts = find_mcts_root_move(selected);
     const MCTSRootLookup best_mcts = find_mcts_root_move(mcts_best);
+    const ANERootLookup selected_ane = find_ane_root_move(selected);
     const float best_mcts_q =
         best_mcts.rank > 0 ? best_mcts.q : selected_mcts.q;
 
@@ -2626,11 +2673,19 @@ Move ParallelHybridSearch::make_final_decision() {
       if (!HybridIsKingsidePawnLever(root_pos, candidate.move))
         continue;
       const MCTSRootLookup mcts_lookup = find_mcts_root_move(candidate.move);
-      if (!HybridRootPawnLeverCandidate(
+      const bool mcts_confirms_lever = HybridRootPawnLeverCandidate(
               selected_ab.average_score, candidate.average_score,
               candidate.effort, mcts_lookup.rank, mcts_lookup.current_visits,
               selected_mcts.rank, selected_mcts.q, selected_mcts.policy,
-              best_mcts_q, mcts_lookup.q, mcts_lookup.policy))
+              best_mcts_q, mcts_lookup.q, mcts_lookup.policy);
+      const ANERootLookup candidate_ane = find_ane_root_move(candidate.move);
+      const bool ane_confirms_lever = HybridANERootPawnLeverCandidate(
+          config_.ane_root_probe, selected_ane.rank, selected_ane.score,
+          candidate_ane.rank, candidate_ane.score, selected_ab.average_score,
+          candidate.average_score, candidate.effort, selected_mcts.rank,
+          selected_mcts.q, mcts_lookup.rank, mcts_lookup.current_visits,
+          mcts_lookup.q, mcts_lookup.policy);
+      if (!mcts_confirms_lever && !ane_confirms_lever)
         continue;
 
       if (candidate.average_score > best_lever_average ||
