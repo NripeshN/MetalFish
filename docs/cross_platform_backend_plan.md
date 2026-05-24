@@ -107,10 +107,10 @@ Current remote gates:
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26346824601` |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26346824606` |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26346824607` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26346824608` |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26352864713` |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26352864680` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26352864693` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26352864694` |
 
 Current CUDA backend boundary:
 
@@ -640,7 +640,7 @@ construction path cheaply. The Linux and MSVC legs additionally download BT4
 for the metadata/backend-construction probe; MinGW stays lightweight package
 coverage. The uploaded artifacts include a generated manifest that makes this
 backend scope explicit. Branch tip
-`483b996b` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, Windows CUDA
+`dfe61ba7` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, Windows CUDA
 compile, macOS Metal, CUDA L4 runtime, and the bounded hybrid regression gate
 green while remaining current with `origin/main`. Linux portable CI also runs a
 real BT4 metadata/backend-construction probe, and Windows MSVC runs the same
