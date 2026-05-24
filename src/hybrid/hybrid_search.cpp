@@ -971,7 +971,7 @@ bool HybridRootPawnLeverCandidate(
   const int max_average_gap = high_policy_lever ? 80 : 60;
   const uint32_t min_current_visits = mcts_rank >= 5 ? 7 : 8;
   const bool low_visit_agreement_lever =
-      !high_policy_lever && selected_mcts_rank > 0 && selected_mcts_rank <= 2 &&
+      !high_policy_lever && selected_mcts_rank > 0 && selected_mcts_rank <= 3 &&
       mcts_rank >= 5 &&
       mcts_rank <= 6 && mcts_current_visits >= 3 &&
       selected_average_score - candidate_average_score <= 40 &&
