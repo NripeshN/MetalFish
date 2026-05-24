@@ -660,9 +660,12 @@ versus baseline `300/300` with zero candidate errors.
 The macOS Metal CI now builds `test_nn_comparison` and `metalfish_nn_probe`
 alongside the engine, emits `metal-nn-parity-report.md`, records
 `metal-nn-comparison.log`, and runs a one-position BT4
-`metalfish_nn_probe --backend metal` smoke. This mirrors the CUDA GPU gate's
-parity-report/probe artifact shape, giving Metal, CUDA, and portable backends a
-shared diagnostic contract while keeping runtime strength tests separate.
+`metalfish_nn_probe --backend metal` smoke. Metal CI and the CUDA GPU gate both
+validate those files through `tools/check_nn_backend_artifacts.py`, which checks
+the backend label, WDL, moves-left, top-policy decoding, and batch benchmark
+presence before writing a compact JSON manifest. This keeps Metal, CUDA, and
+portable backends on one diagnostic artifact contract while leaving runtime
+strength tests separate.
 
 ## First Milestones
 

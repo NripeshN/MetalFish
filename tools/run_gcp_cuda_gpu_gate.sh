@@ -154,6 +154,7 @@ collect_remote_artifacts() {
     cuda-gpu-tests.log \
     cuda-gpu-nn-comparison.log \
     cuda-gpu-nn-probe.log \
+    cuda-gpu-nn-artifact-manifest.json \
     cuda-gpu-parity-report.md \
     cuda-gpu-uci-auto-smoke.log \
     cuda-gpu-uci-smoke.log \

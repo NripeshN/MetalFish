@@ -150,6 +150,7 @@ write_summary() {
     echo "- CUDA tests: $(summary_log_status "${BUILD_DIR}/cuda-gpu-tests.log")"
     echo "- NN comparison: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-comparison.log")"
     echo "- NN probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-probe.log")"
+    echo "- NN artifact manifest: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-artifact-manifest.json")"
     echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
@@ -399,12 +400,6 @@ METALFISH_NN_WEIGHTS="${WEIGHTS}" \
   METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
   METALFISH_CUDA_PROFILE=0 \
   "${BUILD_DIR}/test_nn_comparison" 2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
-if ! grep -q "backend: CUDA transformer backend" \
-       "${BUILD_DIR}/cuda-gpu-nn-comparison.log" &&
-   ! grep -q "^- Backend: CUDA transformer backend" "${PARITY_REPORT}"; then
-  echo "CUDA transformer backend marker not found in NN comparison output" >&2
-  exit 1
-fi
 if [[ -n "${CUDA_GRAPH_REQUESTED}" && "${CUDA_GRAPH_REQUESTED}" != "0" &&
       "${METALFISH_CUDA_TRACE_STAGE_OUTPUTS:-0}" == "0" &&
       "${METALFISH_CUDA_TRACE_ATTENTION_INTERNALS:-0}" == "0" &&
@@ -425,7 +420,14 @@ fi
   --warmup 0 \
   --iterations 1 \
   2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-probe.log"
-grep -q '"network_info":"CUDA transformer backend' "${BUILD_DIR}/cuda-gpu-nn-probe.log"
+python3 tools/check_nn_backend_artifacts.py \
+  --backend-label "CUDA transformer backend" \
+  --parity-report "${PARITY_REPORT}" \
+  --comparison-log "${BUILD_DIR}/cuda-gpu-nn-comparison.log" \
+  --probe-log "${BUILD_DIR}/cuda-gpu-nn-probe.log" \
+  --manifest-out "${BUILD_DIR}/cuda-gpu-nn-artifact-manifest.json" \
+  --min-policy-top 3 \
+  --require-batch-benchmark
 
 python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \

@@ -89,6 +89,7 @@ jobs:
             tools/compare_puzzle_runs.py \
             tools/filter_lichess_puzzle_csv.py \
             tools/apple_coreml_microbench.py \
+            tools/check_nn_backend_artifacts.py \
             tools/lc0_coreml_bk_policy_probe.py \
             tools/lc0_coreml_concurrency_benchmark.py \
             tools/lc0_coreml_position_parity.py \
@@ -111,8 +112,6 @@ jobs:
           METALFISH_NN_BENCH_ITERS=2 \
           METALFISH_NN_BENCH_MAX_BATCH=16 \
           ./build/test_nn_comparison 2>&1 | tee build/metal-nn-comparison.log
-          grep -q "Metal (MPSGraph) backend" build/metal-nn-comparison.log
-          grep -q "^- Backend: Metal (MPSGraph) backend" build/metal-nn-parity-report.md
           ./build/metalfish_nn_probe \
             --weights networks/BT4-1024x15x32h-swa-6147500.pb \
             --backend metal \
@@ -120,7 +119,14 @@ jobs:
             --warmup 0 \
             --iterations 1 \
             2>&1 | tee build/metal-nn-probe.log
-          grep -q '"network_info":"Metal (MPSGraph) backend' build/metal-nn-probe.log
+          python3 tools/check_nn_backend_artifacts.py \
+            --backend-label "Metal (MPSGraph) backend" \
+            --parity-report build/metal-nn-parity-report.md \
+            --comparison-log build/metal-nn-comparison.log \
+            --probe-log build/metal-nn-probe.log \
+            --manifest-out build/metal-nn-artifact-manifest.json \
+            --min-policy-top 3 \
+            --require-batch-benchmark
 
       - name: Run UCI smoke
         run: |
@@ -185,6 +191,7 @@ jobs:
             build/metal-nn-comparison.log
             build/metal-nn-parity-report.md
             build/metal-nn-probe.log
+            build/metal-nn-artifact-manifest.json
             README.md
             CHANGELOG.md
             LICENSE
