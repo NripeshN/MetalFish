@@ -312,14 +312,13 @@ void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
   std::cout << ",\"format\":\"" << JsonEscape(descriptor.Summary()) << '"';
   std::cout << ",\"input_format\":"
             << static_cast<int>(weights.format().network_format().input());
-  std::cout << ",\"tensor_plan\":\""
-            << JsonEscape(tensor_plan.Summary()) << '"';
+  std::cout << ",\"tensor_plan\":\"" << JsonEscape(tensor_plan.Summary())
+            << '"';
   std::cout << ",\"policy_head\":\"" << JsonEscape(policy_head) << '"';
   std::cout << ",\"value_head\":\"" << JsonEscape(value_head) << '"';
-  std::cout << ",\"inventory\":\"" << JsonEscape(inventory.Summary())
+  std::cout << ",\"inventory\":\"" << JsonEscape(inventory.Summary()) << '"';
+  std::cout << ",\"execution_plan\":\"" << JsonEscape(resolved_plan.Summary())
             << '"';
-  std::cout << ",\"execution_plan\":\""
-            << JsonEscape(resolved_plan.Summary()) << '"';
   std::cout << ",\"tensor_count\":" << inventory.tensors.size();
   std::cout << ",\"parameter_elements\":" << inventory.TotalElements();
   std::cout << ",\"parameter_bytes\":" << inventory.TotalBytes();
