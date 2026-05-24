@@ -262,6 +262,7 @@ def engine_options(weights: pathlib.Path, threads: int, hash_mb: int) -> Dict[st
         "UseHybridSearch": "true",
         "NNWeights": str(weights),
         "MCTSAddDirichletNoise": "false",
+        "TransformerLowTimeFallbackMs": "0",
         "HybridTrace": "false",
     }
 

@@ -68,6 +68,7 @@ jobs:
           python3 tests/test_lichess_bot.py
           python3 tests/test_lichess_puzzle_runner.py
           python3 tests/test_hybrid_regression_compare.py
+          python3 tests/test_benchmark_configs.py
           python3 tests/test_nn_backend_artifacts.py
 
       - name: Run ANE option/config smoke
@@ -177,6 +178,22 @@ jobs:
             --setoption Threads=8 \
             --setoption MCTSMaxThreads=1 \
             --setoption MCTSParallelSearch=true \
+            --setoption MCTSMinibatchSize=0 \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --go "movetime 1000" \
+            --expect-output "Starting Multi-Threaded MCTS Search" \
+            --reject-output "Time safety:" \
+            --reject-output "Falling back to Alpha-Beta"
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSParallelSearch=false \
             --setoption MCTSMinibatchSize=0 \
             --setoption MCTSAddDirichletNoise=false \
             --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \

@@ -124,13 +124,17 @@ def hybrid_low_time_warnings(
         return []
 
     warnings: List[str] = []
-    hybrid_names = {
+    transformer_names = {
         name
         for match in matches
         for name in match
-        if engines_cfg.get(name, {}).get("options", {}).get("UseHybridSearch") == "true"
+        if (
+            engines_cfg.get(name, {}).get("options", {}).get("UseHybridSearch")
+            == "true"
+            or engines_cfg.get(name, {}).get("options", {}).get("UseMCTS") == "true"
+        )
     }
-    for name in sorted(hybrid_names):
+    for name in sorted(transformer_names):
         options = dict(engines_cfg[name].get("options", {}))
         apply_hybrid_env_options(options, force_trace=False)
         fallback_ms = parse_int_option(options.get("TransformerLowTimeFallbackMs"), 0)
@@ -138,7 +142,7 @@ def hybrid_low_time_warnings(
             warnings.append(
                 f"{name}: --movetime {movetime_ms}ms is below "
                 f"TransformerLowTimeFallbackMs={fallback_ms}ms; this run will "
-                "exercise the AB time-safety fallback rather than full Hybrid MCTS."
+                "exercise the AB time-safety fallback rather than transformer search."
             )
     return warnings
 

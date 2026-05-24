@@ -13,6 +13,7 @@ PROJ = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ / "tests"))
 
 import paper_benchmarks  # noqa: E402
+import bk_parity  # noqa: E402
 
 sys.path.insert(0, str(PROJ / "tools"))
 import analyze_hybrid_trace  # noqa: E402
@@ -147,6 +148,43 @@ def assert_tournament_draw_reason_precision() -> None:
         raise AssertionError("actual repetition reason was not precise")
 
 
+def assert_transformer_low_time_warnings_cover_mcts() -> None:
+    engines_cfg = {
+        "MetalFish-MCTS": {
+            "options": {
+                "UseMCTS": "true",
+                "UseHybridSearch": "false",
+                "TransformerLowTimeFallbackMs": "3000",
+            }
+        },
+        "MetalFish-AB": {"options": {"UseMCTS": "false", "UseHybridSearch": "false"}},
+    }
+    warnings = run_tournament_live.hybrid_low_time_warnings(
+        [("MetalFish-MCTS", "MetalFish-AB")], engines_cfg, movetime_ms=1000
+    )
+    if not warnings or "MetalFish-MCTS" not in warnings[0]:
+        raise AssertionError("low-time warning did not cover pure MCTS fallback")
+
+
+def assert_bk_hybrid_fallback_warning() -> None:
+    args = type(
+        "Args",
+        (),
+        {
+            "engine": "hybrid",
+            "nodes": 0,
+            "movetime": 2000,
+            "hybrid_low_time_fallback_ms": 3000,
+        },
+    )()
+    warning = bk_parity.hybrid_time_safety_fallback_warning(args)
+    if "not full Hybrid MCTS" not in warning:
+        raise AssertionError("BK parity did not warn for Hybrid fallback benchmarks")
+    args.hybrid_low_time_fallback_ms = 0
+    if bk_parity.hybrid_time_safety_fallback_warning(args):
+        raise AssertionError("BK parity warned after fallback was disabled")
+
+
 def assert_tactical_fail_under_guard() -> None:
     selected = ["metalfish-hybrid"]
     if paper_benchmarks.parse_tactical_fail_under("", selected) != {}:
@@ -229,6 +267,7 @@ def main() -> int:
             "MCTSParallelSearch": "false",
             "UseHybridSearch": "false",
             "UseMCTS": "true",
+            "TransformerLowTimeFallbackMs": "0",
         },
     )
 
@@ -276,6 +315,8 @@ def main() -> int:
     assert_paper_hybrid_env_overrides()
     assert_hybrid_trace_final_decision_only()
     assert_tournament_draw_reason_precision()
+    assert_transformer_low_time_warnings_cover_mcts()
+    assert_bk_hybrid_fallback_warning()
 
     assert_file_contains(
         PROJ / "src/uci/engine.cpp",
@@ -344,6 +385,7 @@ def main() -> int:
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
             "MCTSMinimumKLDGainPerNode": "0.00005",
+            "TransformerLowTimeFallbackMs": "0",
         },
     )
     assert_options_include(
@@ -381,6 +423,7 @@ def main() -> int:
         "option.MCTSParityPreset=false",
         "option.MCTSAddDirichletNoise=false",
         "option.MCTSMinimumKLDGainPerNode=0.00005",
+        "option.TransformerLowTimeFallbackMs=0",
         "option.MCTSParallelSearch=$MCTS_PARALLEL_SEARCH",
         "option.HybridMCTSMinimumKLDGainPerNode=$HYBRID_MCTS_KLD",
         "option.HybridABRootRejectMCTS=$HYBRID_AB_ROOT_REJECT_MCTS",
@@ -511,6 +554,9 @@ def main() -> int:
             "def warmup_movetime_ms",
             "HYBRID_LOW_TIME_FALLBACK_MS",
             "warmup_movetime_ms(movetime_ms, hybrid=True)",
+            "def hybrid_time_safety_fallback_warning",
+            "hybrid_time_safety_fallback_active",
+            "not full Hybrid MCTS",
             "METALFISH_MCTS_ROOT_TRACE_MOVES",
             "--root-trace-moves",
             "--mcts-minibatch-size",
@@ -519,6 +565,7 @@ def main() -> int:
             "--hybrid-ab-root-reject-mcts",
             "--hybrid-mcts-minibatch-size",
             "--hybrid-ane-root-probe",
+            'sess.setoption("TransformerLowTimeFallbackMs", "0")',
             'sess.setoption("MCTSMaxThreads", str(mcts_threads))',
             '"MCTSParallelSearch", "true" if mcts_parallel_search else "false"',
             'sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))',
@@ -555,7 +602,7 @@ def main() -> int:
             '"HYBRID_MCTS_MAX_PREFETCH": "MCTSMaxPrefetch"',
             "def hybrid_low_time_warnings",
             "TransformerLowTimeFallbackMs=",
-            "AB time-safety fallback rather than full Hybrid MCTS",
+            "AB time-safety fallback rather than transformer search",
             'help="Games per match (default: 6)"',
             "max-moves below 100 can mask long conversion wins",
             '"--max-plies"',
@@ -595,6 +642,7 @@ def main() -> int:
             "python3 tools/download_engine_networks.py",
             "test_nn_comparison",
             "metalfish_nn_probe",
+            "python3 tests/test_benchmark_configs.py",
             "python3 tools/uci_smoke.py",
             "python3 tests/test_nn_backend_artifacts.py",
             "Run Hybrid clock safety smoke",
@@ -607,6 +655,10 @@ def main() -> int:
             "Run MCTS low-node tactical smoke",
             "MCTSMaxThreads=1",
             "MCTSParallelSearch=true",
+            'go "movetime 1000"',
+            '--expect-output "Starting Multi-Threaded MCTS Search"',
+            "MCTSParallelSearch=false",
+            "TransformerLowTimeFallbackMs=0",
             'go "nodes 50"',
             "--expect-bestmove h5f6",
             "Run Apple accelerator tool tests",
@@ -674,6 +726,8 @@ def main() -> int:
             "--candidate-setoption",
             "puzzle_count",
             "puzzle_movetime",
+            "puzzle_run_max_minutes",
+            '--max-minutes "$PUZZLE_RUN_MAX_MINUTES"',
             '--repeat "$BENCH_REPEAT"',
             "--min-candidate-bk-score 20",
             "--max-bk-mean-drop 0.67",

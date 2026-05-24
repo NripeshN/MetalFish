@@ -142,6 +142,18 @@ def test_parse_extra_setoptions() -> None:
     )
 
 
+def test_regression_engines_keep_hybrid_active() -> None:
+    options = compare.engine_options(
+        pathlib.Path("weights.pb"), threads=4, hash_mb=1024
+    )
+
+    expect("hybrid enabled", options["UseHybridSearch"] == "true")
+    expect(
+        "hybrid regression disables low-time fallback",
+        options["TransformerLowTimeFallbackMs"] == "0",
+    )
+
+
 def test_interleaved_runs_alternate_order() -> None:
     args = argparse.Namespace(
         positions="BK.07",
@@ -199,6 +211,7 @@ def main() -> int:
     test_parse_args_defaults()
     test_parse_setoption()
     test_parse_extra_setoptions()
+    test_regression_engines_keep_hybrid_active()
     test_interleaved_runs_alternate_order()
     print("Hybrid regression compare tests: OK")
     return 0

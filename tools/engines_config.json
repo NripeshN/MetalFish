@@ -28,7 +28,8 @@
         "MCTSMinibatchSize": "0",
         "MCTSParityPreset": "false",
         "MCTSAddDirichletNoise": "false",
-        "MCTSMinimumKLDGainPerNode": "0.00005"
+        "MCTSMinimumKLDGainPerNode": "0.00005",
+        "TransformerLowTimeFallbackMs": "0"
       }
     },
     "MetalFish-Hybrid": {

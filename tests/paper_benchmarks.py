@@ -459,6 +459,7 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
             "MCTSMinimumKLDGainPerNode": "0.00005",
+            "TransformerLowTimeFallbackMs": "0",
         },
     )
 
