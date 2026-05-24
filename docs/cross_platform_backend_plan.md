@@ -104,12 +104,12 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-5d67146`, L4, 2026-05-23 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26344433014` |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26344433066` |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26344432947` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26344432827` |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26346824601` |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26346824606` |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26346824607` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26346824608` |
 
 Current CUDA backend boundary:
 
@@ -504,6 +504,15 @@ Current CUDA backend boundary:
   smokes, ANE-disable hybrid smoke, graph replay, and profiling with batch
   timings of `b1=6.770ms`, `b16=51.299ms`, and `b32=94.987ms`. The profiled
   attention/layernorm bucket improved to `4.200ms/15` stages.
+- CUDA dynamic positional encoding now expands packed input planes and copies
+  the position-input prefix in one kernel. Two 2026-05-23 L4 gates,
+  `metalfish-cuda-gate-20260523-483b996` and confirmation gate
+  `metalfish-cuda-gate-20260523-483b996b`, accepted CUDA unit tests, fixed BT4
+  references, batch parity, single/batch reuse stress, auto/CUDA/hybrid UCI
+  smokes, ANE-disable hybrid smoke, graph replay, and profiling. The confirmed
+  batch timings were `b1=6.790ms`, `b16=50.480ms`, and `b32=94.900ms`, improving
+  batched MCTS throughput versus the previous accepted `5d67146` gate while
+  keeping the single-position latency change below one percent.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
@@ -614,7 +623,7 @@ requiring a hosted NVIDIA GPU. Each portable CPU job runs AB UCI smoke plus an
 explicit `NNBackend=stub` MCTS smoke, so portable builds verify the MCTS
 construction path without downloading BT4 weights. The uploaded artifacts
 include a generated manifest that makes this backend scope explicit. Branch tip
-`5d67146` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, Windows CUDA
+`483b996b` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, Windows CUDA
 compile, macOS Metal, CUDA L4 runtime, and the bounded hybrid regression gate
 green while remaining current with `origin/main`. The hybrid gate uses a
 bounded 300-puzzle
