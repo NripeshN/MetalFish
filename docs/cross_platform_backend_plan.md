@@ -464,6 +464,14 @@ Current CUDA backend boundary:
   `157-170ms`). It was reverted as a speed regression; future attention work
   should target a custom kernel or graph-captured strided path instead of
   pointer-array cuBLAS.
+- A direct one-thread-per-score/context CUDA attention-core attempt passed the
+  2026-05-24 L4 correctness gate
+  `metalfish-cuda-gate-20260524-customattn-6e970d0`, but it regressed the kept
+  L4 baseline from `b16=50.480ms`, `b32=94.900ms` to `b16=56.976ms`,
+  `b32=110.644ms`, with the attention bucket rising from about `4.20ms/15` to
+  `4.675ms/15`. It was discarded before push. Future custom attention work
+  needs a tiled/shared-memory kernel or library path that beats the current
+  strided cuBLAS baseline.
 - CUDA resolved execution uses graph replay by default when the run is
   compatible, matching Metal's persistent graph execution model more closely.
   Set `METALFISH_CUDA_GRAPH=0` or `METALFISH_CUDA_GRAPH_EXECUTION=0` to force
