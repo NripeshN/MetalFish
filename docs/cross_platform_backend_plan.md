@@ -637,14 +637,16 @@ artifacts. The MSVC leg is included because Windows CUDA uses the MSVC host
 toolchain. The separate Windows CUDA compile gate installs the CUDA Toolkit on
 `windows-2022`, configures `USE_CUDA=ON`, builds `metalfish`,
 `metalfish_tests`, `test_nn_comparison`, and `metalfish_nn_probe`, then runs
-the CUDA-linked MCTS module tests plus a tiny AB UCI smoke from the CUDA-linked
-engine with downloaded NNUE files. These smokes require no hosted NVIDIA GPU,
-but they catch host-link, runtime-DLL, no-device fallback, and CUDA-compiled
-MCTS contract regressions that a compile-only gate would miss. Each portable
-CPU job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so
-portable builds verify the MCTS construction path cheaply. The Linux and MSVC
-legs additionally download BT4 for the metadata/backend-construction probe;
-MinGW stays lightweight package
+the CUDA-linked MCTS module tests, a BT4 metadata-only probe through
+`metalfish_nn_probe --backend cuda`, and a tiny AB UCI smoke from the
+CUDA-linked engine with downloaded NNUE files. These smokes require no hosted
+NVIDIA GPU, but they catch host-link, runtime-DLL, protobuf load, tensor-plan,
+weight-inventory, no-device fallback, and CUDA-compiled MCTS contract
+regressions that a compile-only gate would miss. Each portable CPU job runs AB
+UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds
+verify the MCTS construction path cheaply. The Linux and MSVC legs additionally
+download BT4 for the metadata/backend-construction probe; MinGW stays
+lightweight package
 coverage. The uploaded artifacts include a generated manifest that makes this
 backend scope explicit. Recent branch-tip gates had Linux CPU, Windows MinGW
 CPU, Windows MSVC CPU, Windows CUDA compile, macOS Metal, CUDA L4 runtime, and

@@ -103,6 +103,7 @@ if ($BuildTests -eq "ON") {
 $NetworksDir = Join-Path $SourceDir "networks"
 $NnueBigPath = Join-Path $NetworksDir "nn-c288c895ea92.nnue"
 $NnueSmallPath = Join-Path $NetworksDir "nn-37f18f62d772.nnue"
+$Bt4Path = Join-Path $NetworksDir "BT4-1024x15x32h-swa-6147500.pb"
 if (-not ((Test-Path $NnueBigPath) -and (Test-Path $NnueSmallPath))) {
   Write-Host "Downloading NNUE files for CUDA-linked AB UCI smoke"
   & $Python (Join-Path $SourceDir "tools\download_engine_networks.py") `
@@ -111,6 +112,41 @@ if (-not ((Test-Path $NnueBigPath) -and (Test-Path $NnueSmallPath))) {
   if ($LASTEXITCODE -ne 0) {
     throw "NNUE download failed with exit code $LASTEXITCODE"
   }
+}
+
+if ($BuildTests -eq "ON") {
+  if (-not (Test-Path $Bt4Path)) {
+    Write-Host "Downloading BT4 weights for CUDA-linked metadata probe"
+    & $Python (Join-Path $SourceDir "tools\download_engine_networks.py") `
+      --dest $NetworksDir `
+      --bt4-only
+    if ($LASTEXITCODE -ne 0) {
+      throw "BT4 download failed with exit code $LASTEXITCODE"
+    }
+  }
+
+  $ProbePath = (Resolve-Path (Join-Path $BuildDir "metalfish_nn_probe.exe")).Path
+  $ProbeLog = Join-Path $BuildDir "windows-cuda-bt4-metadata-probe.json"
+  Write-Host "Running CUDA-linked BT4 metadata probe"
+  & $ProbePath `
+    --weights $Bt4Path `
+    --backend cuda `
+    --metadata-only `
+    --top 3 `
+    2>&1 | Tee-Object -FilePath $ProbeLog
+  if ($LASTEXITCODE -ne 0) {
+    throw "CUDA-linked BT4 metadata probe failed with exit code $LASTEXITCODE"
+  }
+
+  $ProbeText = Get-Content -Path $ProbeLog -Raw
+  foreach ($RequiredText in @('"metadata_only":true', '"backend":"cuda"',
+                              '"policy_head":"', '"value_head":"',
+                              '"execution_plan":"')) {
+    if ($ProbeText -notlike "*$RequiredText*") {
+      throw "CUDA-linked BT4 metadata probe missing expected output: $RequiredText"
+    }
+  }
+  $SmokeSteps += "metalfish_nn_probe.exe --metadata-only --backend cuda"
 }
 
 $UciSmoke = Join-Path $SourceDir "tools\uci_smoke.py"
