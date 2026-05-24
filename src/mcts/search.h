@@ -416,6 +416,13 @@ bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
                                       float best_policy, float best_q,
                                       float candidate_policy,
                                       float candidate_q);
+bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits,
+                                     uint32_t best_visits,
+                                     uint32_t candidate_visits,
+                                     int candidate_rank,
+                                     float best_policy, float best_q,
+                                     float candidate_policy,
+                                     float candidate_q);
 
 std::unique_ptr<Search> CreateSearch(const SearchParams &config);
 

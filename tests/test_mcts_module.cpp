@@ -191,6 +191,8 @@ void test_search_params_defaults(TestCounter &tc) {
          "temperature value cutoff default aligned", tc);
   expect(params.high_policy_root_lever_selection,
          "pure MCTS high-policy lever rescue default", tc);
+  expect(params.low_policy_root_lever_selection,
+         "pure MCTS low-policy lever rescue default", tc);
   expect(params.GetCpuctBase(true) == params.cpuct_base_at_root,
          "root cpuct base getter", tc);
   expect(params.GetFpuValue(true) == params.fpu_value_at_root,
@@ -228,6 +230,30 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootHighPolicyLeverCandidate(900, 220, 80, 0.208f, -0.426f,
                                            0.260f, -0.612f),
          "mature root blocked", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(87, 25, 3, 6, 0.206f, 0.932f,
+                                         0.050f, 0.888f),
+         "BK.09 low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(98, 29, 4, 7, 0.206f, 0.931f,
+                                         0.050f, 0.881f),
+         "BK.09 rank-seven low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(82, 41, 2, 5, 0.314f, -0.189f,
+                                         0.038f, -0.259f),
+         "BK.17 defensive low-policy lever passes", tc);
+  expect(MCTSRootLowPolicyLeverCandidate(87, 44, 3, 5, 0.314f, -0.188f,
+                                         0.038f, -0.270f),
+         "BK.17 post-rescue low-policy lever passes", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(96, 17, 39, 1, 0.260f, -0.612f,
+                                          0.208f, -0.426f),
+         "already-dominant non-low-policy move blocked", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(87, 25, 1, 6, 0.206f, 0.932f,
+                                          0.050f, 0.888f),
+         "single-visit low-policy lever blocked", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(87, 25, 3, 7, 0.206f, 0.932f,
+                                          0.050f, 0.888f),
+         "thin late-ranked low-policy lever blocked", tc);
+  expect(!MCTSRootLowPolicyLeverCandidate(98, 29, 4, 7, 0.206f, 0.931f,
+                                          0.040f, 0.881f),
+         "weak rank-seven low-policy lever blocked", tc);
 }
 
 void test_shared_nn_input_contract(TestCounter &tc) {

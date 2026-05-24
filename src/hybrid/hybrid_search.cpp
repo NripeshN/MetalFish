@@ -51,6 +51,7 @@ ParallelHybridSearch::ParallelHybridSearch() {
   config_.mcts_config.cpuct_base = 38739.0f;
   config_.mcts_config.cpuct_factor = 3.894f;
   config_.mcts_config.high_policy_root_lever_selection = false;
+  config_.mcts_config.low_policy_root_lever_selection = false;
 
   config_.ab_min_depth = 8;
   config_.agreement_threshold = 0.3f;

@@ -423,6 +423,25 @@ bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
          best_q - candidate_q <= 0.20f;
 }
 
+bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits,
+                                     uint32_t best_visits,
+                                     uint32_t candidate_visits,
+                                     int candidate_rank,
+                                     float best_policy, float best_q,
+                                     float candidate_policy,
+                                     float candidate_q) {
+  const bool rank_ok =
+      (candidate_rank >= 5 && candidate_rank <= 6) ||
+      (candidate_rank == 7 && candidate_visits >= 4 &&
+       candidate_policy >= 0.045f);
+  return root_visits >= 64 && root_visits <= 600 && rank_ok &&
+         candidate_visits >= 2 &&
+         candidate_visits * 3 < std::max<uint32_t>(1, best_visits) &&
+         candidate_policy >= 0.035f && candidate_policy <= 0.08f &&
+         candidate_policy <= best_policy * 0.35f &&
+         best_q - candidate_q <= 0.09f;
+}
+
 namespace {
 float ExponentialDecay(float from, float to, float halflife_steps,
                        float steps) {
@@ -1975,6 +1994,67 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       best_idx = lever_idx;
       best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
       best_q = lever_q;
+    }
+  }
+
+  if (params_.low_policy_root_lever_selection && best_idx >= 0 &&
+      !best_is_terminal_win) {
+    Position root_pos;
+    StateInfo root_state;
+    root_pos.set(tree_.RootFen(), false, &root_state);
+    if (!MCTSIsKingsidePawnLever(root_pos, edges[best_idx].move)) {
+      struct RankedRootMove {
+        int idx;
+        uint32_t visits;
+        float q;
+        float policy;
+      };
+      std::vector<RankedRootMove> ranked;
+      ranked.reserve(static_cast<size_t>(num_edges));
+      for (int i = 0; i < num_edges; ++i) {
+        Node *child = edges[i].child.load(std::memory_order_acquire);
+        if (!child)
+          continue;
+        ranked.push_back({i, child->GetN(), child->GetWL(), edges[i].GetP()});
+      }
+      std::sort(ranked.begin(), ranked.end(),
+                [](const RankedRootMove &a, const RankedRootMove &b) {
+                  if (a.visits != b.visits)
+                    return a.visits > b.visits;
+                  if (std::abs(a.q - b.q) > 0.001f)
+                    return a.q > b.q;
+                  return a.policy > b.policy;
+                });
+
+      const float best_policy = edges[best_idx].GetP();
+      int lever_idx = -1;
+      float lever_policy = 0.0f;
+      float lever_q = -2.0f;
+      for (size_t rank_pos = 0; rank_pos < ranked.size(); ++rank_pos) {
+        const int i = ranked[rank_pos].idx;
+        if (i == best_idx)
+          continue;
+        if (!MCTSIsKingsidePawnLever(root_pos, edges[i].move))
+          continue;
+        if (!MCTSRootLowPolicyLeverCandidate(
+                total_child_visits, best_n, ranked[rank_pos].visits,
+                static_cast<int>(rank_pos + 1), best_policy, best_q,
+                ranked[rank_pos].policy, ranked[rank_pos].q)) {
+          continue;
+        }
+        if (lever_idx < 0 || ranked[rank_pos].q > lever_q ||
+            (std::abs(ranked[rank_pos].q - lever_q) <= 0.000001f &&
+             ranked[rank_pos].policy > lever_policy)) {
+          lever_idx = i;
+          lever_policy = ranked[rank_pos].policy;
+          lever_q = ranked[rank_pos].q;
+        }
+      }
+      if (lever_idx >= 0) {
+        best_idx = lever_idx;
+        best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
+        best_q = lever_q;
+      }
     }
   }
 

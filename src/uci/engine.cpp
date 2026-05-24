@@ -190,6 +190,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSPolicySoftmaxTemp", Option("1.359"));
   options.add("MCTSPolicyTemperature", Option("1.359"));
   options.add("MCTSHighPolicyRootLever", Option(true));
+  options.add("MCTSLowPolicyRootLever", Option(true));
   options.add("MCTSMovesLeftMaxEffect", Option("0.0345"));
   options.add("MCTSMovesLeftThreshold", Option("0.8"));
   options.add("MCTSMovesLeftSlope", Option("0.0027"));
