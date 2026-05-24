@@ -319,6 +319,7 @@ def setup_metalfish(
     sess.setoption("UseHybridSearch", "false")
     sess.setoption("UseMCTS", "true")
     sess.setoption("NNWeights", str(weights))
+    sess.setoption("TransformerLowTimeFallbackMs", "0")
     sess.setoption("Threads", str(threads))
     sess.setoption("MultiPV", str(multipv))
     sess.setoption("MCTSMaxThreads", str(mcts_threads))
@@ -496,6 +497,29 @@ def select_positions(selection: str) -> List[Tuple[str, List[str], str]]:
     if missing:
         raise ValueError(f"Unknown BK position(s): {', '.join(missing)}")
     return selected
+
+
+def hybrid_time_safety_fallback_active(args: argparse.Namespace) -> bool:
+    want_hybrid = args.engine in ("hybrid", "metalfish-hybrid", "all")
+    return (
+        want_hybrid
+        and args.nodes <= 0
+        and args.hybrid_low_time_fallback_ms > 0
+        and args.movetime < args.hybrid_low_time_fallback_ms
+    )
+
+
+def hybrid_time_safety_fallback_warning(args: argparse.Namespace) -> str:
+    if not hybrid_time_safety_fallback_active(args):
+        return ""
+    return (
+        "WARNING: Hybrid movetime "
+        f"{args.movetime}ms is below TransformerLowTimeFallbackMs="
+        f"{args.hybrid_low_time_fallback_ms}ms; this run measures the AB "
+        "time-safety fallback, not full Hybrid MCTS. Use "
+        "--hybrid-low-time-fallback-ms 0 or a larger --movetime for true "
+        "Hybrid benchmarking."
+    )
 
 
 def parse_keyed_int(text: str, key: str) -> Optional[int]:
@@ -1020,6 +1044,10 @@ def main() -> int:
         help="Write a machine-readable per-position report",
     )
     args = parser.parse_args()
+
+    warning = hybrid_time_safety_fallback_warning(args)
+    if warning:
+        print(warning, file=sys.stderr, flush=True)
 
     aggregate: Optional[Dict[str, Dict[str, AggregateStats]]] = (
         {} if args.repeat_summary or args.repeat > 1 else None
