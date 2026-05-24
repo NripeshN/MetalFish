@@ -138,6 +138,30 @@ bool IsSmolgenNormName(std::string_view name) {
   return EndsWith(name, ".smolgen.norm");
 }
 
+std::string ResidualBlockName(std::string_view name) {
+  if (EndsWith(name, ".conv1"))
+    return std::string(name.substr(0, name.size() - 6));
+  if (EndsWith(name, ".conv2"))
+    return std::string(name.substr(0, name.size() - 6));
+  return {};
+}
+
+bool IsResidualConv1Name(std::string_view name) {
+  return StartsWith(name, "body.residual.") && EndsWith(name, ".conv1");
+}
+
+bool IsResidualConv2For(const NetworkResolvedExecutionStep &step,
+                        std::string_view block_name) {
+  return step.kind == NetworkExecutionOpKind::Convolution &&
+         step.name == std::string(block_name) + ".conv2";
+}
+
+bool IsResidualSqueezeExciteFor(const NetworkResolvedExecutionStep &step,
+                                std::string_view block_name) {
+  return step.kind == NetworkExecutionOpKind::Dense &&
+         step.name == std::string(block_name) + ".se";
+}
+
 bool IsDynamicPositionPreprocessName(std::string_view name) {
   return name == "body.input_embedding_preprocess";
 }
@@ -339,6 +363,35 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
     const auto &step = plan.steps[step_index];
     switch (step.kind) {
     case NetworkExecutionOpKind::Convolution: {
+      if (IsResidualConv1Name(step.name)) {
+        const std::string block_name = ResidualBlockName(step.name);
+        const std::size_t conv2_index = step_index + 1;
+        const std::size_t se_index = conv2_index + 1;
+        if (conv2_index < plan.steps.size() &&
+            IsResidualConv2For(plan.steps[conv2_index], block_name) &&
+            (se_index >= plan.steps.size() ||
+             !IsResidualSqueezeExciteFor(plan.steps[se_index], block_name))) {
+          const int conv1_channels = ConvolutionOutputChannels(step);
+          const int conv2_channels =
+              ConvolutionOutputChannels(plan.steps[conv2_index]);
+          tape.Add(step.name + ".convolution",
+                   CudaExecutionBufferRole::ConvolutionOutput,
+                   batch_size * conv1_channels, kCudaAttentionSquares);
+          tape.Add(plan.steps[conv2_index].name + ".convolution",
+                   CudaExecutionBufferRole::ConvolutionOutput,
+                   batch_size * conv2_channels, kCudaAttentionSquares);
+          tape.Add(block_name + ".residual",
+                   CudaExecutionBufferRole::ResidualOutput,
+                   batch_size * conv2_channels, kCudaAttentionSquares);
+          tape.Add(block_name + ".activation",
+                   CudaExecutionBufferRole::ActivationOutput,
+                   batch_size * conv2_channels, kCudaAttentionSquares);
+          current_rows = batch_size * conv2_channels;
+          current_width = kCudaAttentionSquares;
+          step_index = conv2_index;
+          break;
+        }
+      }
       const int width = ConvolutionOutputChannels(step);
       if (step.name == "body.input") {
         tape.Add(step.name + ".expanded",

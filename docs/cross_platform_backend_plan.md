@@ -153,9 +153,10 @@ Current CUDA backend boundary:
   shared 64-channel positional table before `body.input_embedding`, matching
   the Metal transformer input path. Classical convolution stages now have NCHW
   input expansion and same-padding 1x1/3x3 CUDA kernels wired through the shared
-  stage executor; residual convolution blocks, SE units, and non-attention
-  policy maps remain explicit unsupported schedule entries until their fused
-  CUDA path is complete.
+  stage executor. Residual convolution blocks without squeeze-excite now execute
+  as fused `conv1 -> activation -> conv2 -> skip-add -> activation` stages in
+  NCHW layout; SE units and non-attention policy maps remain explicit
+  unsupported schedule entries until their fused CUDA path is complete.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production

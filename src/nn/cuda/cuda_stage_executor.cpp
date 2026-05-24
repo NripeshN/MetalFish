@@ -534,6 +534,14 @@ bool ConvolutionUsesPackedInput(std::string_view name) {
   return name == "body.input";
 }
 
+std::string ResidualBlockName(std::string_view name) {
+  if (EndsWith(name, ".conv1"))
+    return std::string(name.substr(0, name.size() - 6));
+  if (EndsWith(name, ".conv2"))
+    return std::string(name.substr(0, name.size() - 6));
+  return {};
+}
+
 bool ConvolutionAppliesActivation(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &step) {
@@ -880,6 +888,100 @@ ExecuteConvolutionStage(const NetworkResolvedExecutionPlan &execution_plan,
       ActivationFromString(execution_plan.format.activations.default_activation),
       ConvolutionAppliesActivation(execution_plan, convolution),
       workspace.Stream());
+  return output;
+}
+
+CudaDenseStageOutput ExecuteResidualConvolutionStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &conv1,
+    const NetworkResolvedExecutionStep &conv2, const CudaWeightBuffers &weights,
+    const float *input, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size, int input_rows,
+    int input_width) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA residual convolution received empty batch");
+  if (!input)
+    throw std::runtime_error("CUDA residual convolution input is missing");
+  RequireConvolutionTensors(conv1);
+  RequireConvolutionTensors(conv2);
+
+  const std::string block_name = ResidualBlockName(conv1.name);
+  if (block_name.empty() || conv2.name != block_name + ".conv2") {
+    throw std::runtime_error("CUDA residual convolution block names mismatch");
+  }
+  if (input_rows <= 0 || input_width != kCudaAttentionSquares ||
+      input_rows % batch_size != 0) {
+    throw std::runtime_error("CUDA residual convolution input shape mismatch");
+  }
+
+  const int skip_channels = input_rows / batch_size;
+  const auto conv1_weight = TensorBySuffix(conv1, weights, ".weights");
+  const auto conv1_bias = TensorBySuffix(conv1, weights, ".biases");
+  const auto conv2_weight = TensorBySuffix(conv2, weights, ".weights");
+  const auto conv2_bias = TensorBySuffix(conv2, weights, ".biases");
+  if (conv1_weight.dims.size() != 4 || conv1_bias.dims.size() != 1 ||
+      conv2_weight.dims.size() != 4 || conv2_bias.dims.size() != 1) {
+    throw std::runtime_error("CUDA residual convolution tensor shape is invalid");
+  }
+
+  const int conv1_channels = static_cast<int>(conv1_weight.dims[0]);
+  const int conv1_input_channels = static_cast<int>(conv1_weight.dims[1]);
+  const int conv1_kernel = static_cast<int>(conv1_weight.dims[2]);
+  const int conv1_kernel_width = static_cast<int>(conv1_weight.dims[3]);
+  const int conv2_channels = static_cast<int>(conv2_weight.dims[0]);
+  const int conv2_input_channels = static_cast<int>(conv2_weight.dims[1]);
+  const int conv2_kernel = static_cast<int>(conv2_weight.dims[2]);
+  const int conv2_kernel_width = static_cast<int>(conv2_weight.dims[3]);
+  if (conv1_channels <= 0 || conv1_input_channels != skip_channels ||
+      conv1_kernel <= 0 || conv1_kernel != conv1_kernel_width ||
+      conv1_bias.elements != static_cast<std::size_t>(conv1_channels) ||
+      conv2_channels != skip_channels ||
+      conv2_input_channels != conv1_channels || conv2_kernel <= 0 ||
+      conv2_kernel != conv2_kernel_width ||
+      conv2_bias.elements != static_cast<std::size_t>(conv2_channels)) {
+    throw std::runtime_error(
+        "CUDA residual convolution tensor dimensions mismatch");
+  }
+
+  const auto &conv1_binding = tape.RequireName(conv1.name + ".convolution");
+  const auto &conv2_binding = tape.RequireName(conv2.name + ".convolution");
+  const auto &residual_binding = tape.RequireName(block_name + ".residual");
+  const auto &activation_binding = tape.RequireName(block_name + ".activation");
+  RequireTapeShape(conv1_binding, batch_size * conv1_channels,
+                   kCudaAttentionSquares, "residual conv1 output");
+  RequireTapeShape(conv2_binding, batch_size * conv2_channels,
+                   kCudaAttentionSquares, "residual conv2 output");
+  RequireTapeShape(residual_binding, input_rows, input_width,
+                   "residual convolution add");
+  RequireTapeShape(activation_binding, input_rows, input_width,
+                   "residual convolution activation");
+
+  CudaDenseStageOutput output;
+  output.dense = tape.Reserve(workspace, conv1_binding);
+  output.convolution = tape.Reserve(workspace, conv2_binding);
+  output.residual = tape.Reserve(workspace, residual_binding);
+  output.activation = tape.Reserve(workspace, activation_binding);
+  output.output = output.activation;
+  output.input_width = input_width;
+  output.output_width = input_width;
+  output.rows = input_rows;
+
+  const CudaActivationKind activation =
+      ActivationFromString(execution_plan.format.activations.default_activation);
+  cudaStream_t stream = workspace.Stream();
+  LaunchConvolution2DKernel(input, conv1_weight.data, conv1_bias.data,
+                            output.dense, batch_size, kCudaAttentionSquares,
+                            conv1_input_channels, conv1_channels, conv1_kernel,
+                            activation, true, stream);
+  LaunchConvolution2DKernel(output.dense, conv2_weight.data, conv2_bias.data,
+                            output.convolution, batch_size,
+                            kCudaAttentionSquares, conv2_input_channels,
+                            conv2_channels, conv2_kernel, activation, false,
+                            stream);
+  LaunchResidualAddKernel(input, output.convolution, output.residual, input_rows,
+                          input_width, 1.0f, stream);
+  LaunchActivationKernel(output.residual, output.activation,
+                         input_rows * input_width, activation, stream);
   return output;
 }
 
@@ -1779,6 +1881,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
   int traced_stage_index = 0;
   for (const auto &entry : schedule.entries) {
     if (entry.kind != CudaExecutionScheduleKind::ConvolutionStage &&
+        entry.kind != CudaExecutionScheduleKind::ResidualConvolutionStage &&
         entry.kind != CudaExecutionScheduleKind::DenseLayerNormStage &&
         entry.kind != CudaExecutionScheduleKind::DenseActivationStage &&
         entry.kind != CudaExecutionScheduleKind::GateStage &&
@@ -1828,6 +1931,16 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
       stage = ExecuteConvolutionStage(
           execution_plan, step, weights, stage_input, input_masks, input_values,
           tape, workspace, batch_size, stage_input_rows, stage_input_width);
+    } else if (entry.kind ==
+               CudaExecutionScheduleKind::ResidualConvolutionStage) {
+      if (entry.second_step >= execution_plan.steps.size()) {
+        throw std::runtime_error(
+            "CUDA residual convolution schedule index is invalid");
+      }
+      stage = ExecuteResidualConvolutionStage(
+          execution_plan, step, execution_plan.steps[entry.second_step],
+          weights, stage_input, tape, workspace, batch_size, stage_input_rows,
+          stage_input_width);
     } else if (entry.kind == CudaExecutionScheduleKind::DenseActivationStage &&
         IsDynamicPositionPreprocessName(step.name)) {
       stage = ExecuteDynamicPositionEncodingStage(execution_plan, step, weights,

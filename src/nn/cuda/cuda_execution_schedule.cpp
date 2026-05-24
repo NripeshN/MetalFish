@@ -8,6 +8,7 @@
 #include "cuda_execution_schedule.h"
 
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace MetalFish {
@@ -42,6 +43,19 @@ ConvolutionEntry(const NetworkResolvedExecutionPlan &plan,
                                     convolution.kind,
                                     convolution.name,
                                     "standalone convolution"};
+}
+
+CudaExecutionScheduleEntry
+ResidualConvolutionEntry(const NetworkResolvedExecutionPlan &plan,
+                         std::size_t conv1_index, std::size_t conv2_index) {
+  const auto &conv1 = plan.steps[conv1_index];
+  return CudaExecutionScheduleEntry{
+      CudaExecutionScheduleKind::ResidualConvolutionStage,
+      conv1_index,
+      conv2_index,
+      conv1.kind,
+      conv1.name + " -> " + plan.steps[conv2_index].name,
+      "residual convolution block"};
 }
 
 CudaExecutionScheduleEntry
@@ -173,6 +187,35 @@ bool IsResidualConvolution(const NetworkResolvedExecutionStep &step) {
          step.name.rfind("body.residual.", 0) == 0;
 }
 
+bool EndsWith(std::string_view value, std::string_view suffix) {
+  return value.size() >= suffix.size() &&
+         value.substr(value.size() - suffix.size()) == suffix;
+}
+
+std::string ResidualBlockName(std::string_view name) {
+  if (EndsWith(name, ".conv1"))
+    return std::string(name.substr(0, name.size() - 6));
+  if (EndsWith(name, ".conv2"))
+    return std::string(name.substr(0, name.size() - 6));
+  return {};
+}
+
+bool IsResidualConv1(const NetworkResolvedExecutionStep &step) {
+  return IsResidualConvolution(step) && EndsWith(step.name, ".conv1");
+}
+
+bool IsResidualConv2For(const NetworkResolvedExecutionStep &step,
+                        std::string_view block_name) {
+  return IsResidualConvolution(step) &&
+         step.name == std::string(block_name) + ".conv2";
+}
+
+bool IsResidualSqueezeExciteFor(const NetworkResolvedExecutionStep &step,
+                                std::string_view block_name) {
+  return step.kind == NetworkExecutionOpKind::Dense &&
+         step.name == std::string(block_name) + ".se";
+}
+
 void AddEntry(CudaExecutionSchedule &schedule,
               CudaExecutionScheduleEntry entry) {
   switch (entry.kind) {
@@ -181,6 +224,9 @@ void AddEntry(CudaExecutionSchedule &schedule,
     break;
   case CudaExecutionScheduleKind::ConvolutionStage:
     ++schedule.convolution_stage_count;
+    break;
+  case CudaExecutionScheduleKind::ResidualConvolutionStage:
+    ++schedule.residual_convolution_stage_count;
     break;
   case CudaExecutionScheduleKind::DenseActivationStage:
     ++schedule.dense_activation_stage_count;
@@ -221,6 +267,8 @@ std::string CudaExecutionScheduleKindName(CudaExecutionScheduleKind kind) {
     return "boundary";
   case CudaExecutionScheduleKind::ConvolutionStage:
     return "convolution_stage";
+  case CudaExecutionScheduleKind::ResidualConvolutionStage:
+    return "residual_convolution_stage";
   case CudaExecutionScheduleKind::DenseActivationStage:
     return "dense_activation_stage";
   case CudaExecutionScheduleKind::DenseLayerNormStage:
@@ -256,6 +304,7 @@ std::string CudaExecutionSchedule::Summary() const {
   std::ostringstream out;
   out << entries.size() << " CUDA schedule entries, "
       << convolution_stage_count << " convolution stages, "
+      << residual_convolution_stage_count << " residual convolution stages, "
       << dense_activation_stage_count << " dense/activation stages, "
       << dense_layernorm_stage_count << " dense/layernorm stages, "
       << gate_stage_count << " gate stages, " << attention_layernorm_stage_count
@@ -284,7 +333,30 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
     }
 
     if (step.kind == NetworkExecutionOpKind::Convolution) {
-      if (IsResidualConvolution(step)) {
+      if (IsResidualConv1(step)) {
+        const std::string block_name = ResidualBlockName(step.name);
+        const std::size_t conv2_index = i + 1;
+        if (conv2_index >= plan.steps.size() ||
+            !IsResidualConv2For(plan.steps[conv2_index], block_name)) {
+          AddEntry(schedule,
+                   UnsupportedEntry(plan, i,
+                                    "CUDA residual convolution block is "
+                                    "missing conv2"));
+          continue;
+        }
+        const std::size_t se_index = conv2_index + 1;
+        if (se_index < plan.steps.size() &&
+            IsResidualSqueezeExciteFor(plan.steps[se_index], block_name)) {
+          AddEntry(schedule,
+                   UnsupportedEntry(plan, i,
+                                    "CUDA residual squeeze-excite block not "
+                                    "implemented yet"));
+          i = se_index;
+          continue;
+        }
+        AddEntry(schedule, ResidualConvolutionEntry(plan, i, conv2_index));
+        i = conv2_index;
+      } else if (IsResidualConvolution(step)) {
         AddEntry(schedule,
                  UnsupportedEntry(plan, i,
                                   "CUDA residual convolution block not "

@@ -1802,6 +1802,71 @@ void test_cuda_execution_schedule(TestCounter &tc) {
                  NN::kPackedInputSquareCount,
          "CUDA tape should store convolution outputs as NCHW rows", tc);
 
+  NN::NetworkResolvedExecutionPlan residual;
+  residual.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Convolution,
+      "body.residual.0.conv1",
+      {
+          {0,
+           "body.residual.0.conv1.weights",
+           4 * 4 * 3 * 3,
+           {4, 4, 3, 3},
+           NN::NetworkWeightTensorKind::ConvWeight},
+          {1,
+           "body.residual.0.conv1.biases",
+           4,
+           {4},
+           NN::NetworkWeightTensorKind::ConvBias},
+      }});
+  residual.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Convolution,
+      "body.residual.0.conv2",
+      {
+          {2,
+           "body.residual.0.conv2.weights",
+           4 * 4 * 3 * 3,
+           {4, 4, 3, 3},
+           NN::NetworkWeightTensorKind::ConvWeight},
+          {3,
+           "body.residual.0.conv2.biases",
+           4,
+           {4},
+           NN::NetworkWeightTensorKind::ConvBias},
+      }});
+  const auto residual_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(residual);
+  expect(residual_schedule.FullySupported(),
+         "residual convolution schedule without SE should be supported", tc);
+  expect(residual_schedule.residual_convolution_stage_count == 1,
+         "CUDA schedule should count residual convolution stages", tc);
+  expect(residual_schedule.entries.size() == 1 &&
+             residual_schedule.entries[0].kind ==
+                 NN::Cuda::CudaExecutionScheduleKind::ResidualConvolutionStage,
+         "CUDA schedule should fuse residual convolution stages", tc);
+  const auto residual_tape =
+      NN::Cuda::CreateResolvedExecutionTape(residual, 2);
+  expect(residual_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::ConvolutionOutput) == 2,
+         "CUDA tape should allocate residual conv1/conv2 scratch", tc);
+  expect(residual_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::ResidualOutput) == 1,
+         "CUDA tape should allocate residual add scratch", tc);
+  expect(residual_tape.RequireName("body.residual.0.activation").rows ==
+             2 * 4,
+         "CUDA tape should store residual block outputs as NCHW rows", tc);
+
+  NN::NetworkResolvedExecutionPlan residual_se = residual;
+  residual_se.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense, "body.residual.0.se", {}});
+  const auto residual_se_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(residual_se);
+  expect(!residual_se_schedule.FullySupported(),
+         "residual convolution schedule with SE should stay gated", tc);
+  expect(residual_se_schedule.FirstUnsupported() &&
+             residual_se_schedule.FirstUnsupported()->reason.find(
+                 "squeeze-excite") != std::string::npos,
+         "CUDA schedule should explain residual SE unsupported status", tc);
+
   NN::NetworkResolvedExecutionPlan static_pe;
   static_pe.format.input_embedding = NN::INPUT_EMBEDDING_PE_MAP;
   static_pe.tensors.input_planes = NN::kPackedInputPlaneCount;
