@@ -1031,9 +1031,12 @@ bool HybridANERootPawnLeverCandidate(
       candidate_mcts_current_visits < 2 || candidate_mcts_policy < 0.035f) {
     return false;
   }
-  if (candidate_effort < 150)
+  const bool defensive_position = selected_average_score <= -100;
+  const uint64_t min_effort = defensive_position ? 75 : 150;
+  const int max_average_gap = defensive_position ? 50 : 40;
+  if (candidate_effort < min_effort)
     return false;
-  if (selected_average_score - candidate_average_score > 40)
+  if (selected_average_score - candidate_average_score > max_average_gap)
     return false;
   return selected_mcts_q - candidate_mcts_q <= 0.09f;
 }

@@ -716,6 +716,12 @@ void test_hybrid_config() {
     EXPECT(tc, HybridANERootPawnLeverCandidate(
                    true, 4, -0.297f, 2, -0.271f, -258, -282, 214, 1, -0.181f,
                    5, 2, -0.259f, 0.038f));
+    EXPECT(tc, HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -246, -267, 83, 1, -0.189f,
+                   5, 3, -0.270f, 0.038f));
+    EXPECT(tc, HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -256, -300, 4207, 1, -0.189f,
+                   5, 3, -0.270f, 0.038f));
     EXPECT(tc, !HybridANERootPawnLeverCandidate(
                    false, 4, -0.297f, 2, -0.271f, -258, -282, 214, 1, -0.181f,
                    5, 2, -0.259f, 0.038f));
@@ -735,11 +741,17 @@ void test_hybrid_config() {
                    true, 4, -0.297f, 2, -0.271f, -258, -282, 214, 1, -0.181f,
                    5, 2, -0.259f, 0.034f));
     EXPECT(tc, !HybridANERootPawnLeverCandidate(
-                   true, 4, -0.297f, 2, -0.271f, -258, -299, 214, 1, -0.181f,
+                   true, 4, -0.297f, 2, -0.271f, -258, -309, 214, 1, -0.181f,
                    5, 2, -0.259f, 0.038f));
     EXPECT(tc, !HybridANERootPawnLeverCandidate(
-                   true, 4, -0.297f, 2, -0.271f, -258, -282, 149, 1, -0.181f,
+                   true, 4, -0.297f, 2, -0.271f, -258, -282, 74, 1, -0.181f,
                    5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -246, -267, 74, 1, -0.189f,
+                   5, 3, -0.270f, 0.038f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                   true, 4, -0.297f, 2, -0.271f, -256, -307, 4207, 1, -0.189f,
+                   5, 3, -0.270f, 0.038f));
     EXPECT(tc, !HybridANERootPawnLeverCandidate(
                    true, 4, -0.297f, 2, -0.271f, -258, -282, 214, 1, -0.181f,
                    5, 2, -0.272f, 0.038f));
