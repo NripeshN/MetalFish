@@ -316,6 +316,12 @@ def setup_metalfish(
     mcts_parallel_search: bool,
     mcts_policy_temperature: Optional[float],
     mcts_cpuct_at_root: Optional[float],
+    mcts_fpu_reduction: Optional[float],
+    mcts_fpu_reduction_at_root: Optional[float],
+    mcts_fpu_value: Optional[float],
+    mcts_fpu_value_at_root: Optional[float],
+    mcts_fpu_absolute: Optional[bool],
+    mcts_fpu_absolute_at_root: Optional[bool],
     mcts_cache_history_length: Optional[int],
     mcts_nn_cache_size: Optional[int],
 ) -> None:
@@ -337,6 +343,21 @@ def setup_metalfish(
         sess.setoption("MCTSPolicySoftmaxTemp", str(mcts_policy_temperature))
     if mcts_cpuct_at_root is not None:
         sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
+    if mcts_fpu_reduction is not None:
+        sess.setoption("MCTSFpuReduction", str(mcts_fpu_reduction))
+    if mcts_fpu_reduction_at_root is not None:
+        sess.setoption("MCTSFpuReductionAtRoot", str(mcts_fpu_reduction_at_root))
+    if mcts_fpu_value is not None:
+        sess.setoption("MCTSFpuValue", str(mcts_fpu_value))
+    if mcts_fpu_value_at_root is not None:
+        sess.setoption("MCTSFpuValueAtRoot", str(mcts_fpu_value_at_root))
+    if mcts_fpu_absolute is not None:
+        sess.setoption("MCTSFpuAbsolute", "true" if mcts_fpu_absolute else "false")
+    if mcts_fpu_absolute_at_root is not None:
+        sess.setoption(
+            "MCTSFpuAbsoluteAtRoot",
+            "true" if mcts_fpu_absolute_at_root else "false",
+        )
     if mcts_cache_history_length is not None:
         sess.setoption("MCTSCacheHistoryLength", str(mcts_cache_history_length))
     if mcts_nn_cache_size is not None:
@@ -386,6 +407,12 @@ def setup_metalfish_hybrid(
     ane_min_budget_ms: int,
     mcts_policy_temperature: Optional[float],
     mcts_cpuct_at_root: Optional[float],
+    mcts_fpu_reduction: Optional[float],
+    mcts_fpu_reduction_at_root: Optional[float],
+    mcts_fpu_value: Optional[float],
+    mcts_fpu_value_at_root: Optional[float],
+    mcts_fpu_absolute: Optional[bool],
+    mcts_fpu_absolute_at_root: Optional[bool],
     mcts_cache_history_length: Optional[int],
     mcts_nn_cache_size: Optional[int],
 ) -> None:
@@ -409,6 +436,21 @@ def setup_metalfish_hybrid(
         sess.setoption("MCTSPolicySoftmaxTemp", str(mcts_policy_temperature))
     if mcts_cpuct_at_root is not None:
         sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
+    if mcts_fpu_reduction is not None:
+        sess.setoption("MCTSFpuReduction", str(mcts_fpu_reduction))
+    if mcts_fpu_reduction_at_root is not None:
+        sess.setoption("MCTSFpuReductionAtRoot", str(mcts_fpu_reduction_at_root))
+    if mcts_fpu_value is not None:
+        sess.setoption("MCTSFpuValue", str(mcts_fpu_value))
+    if mcts_fpu_value_at_root is not None:
+        sess.setoption("MCTSFpuValueAtRoot", str(mcts_fpu_value_at_root))
+    if mcts_fpu_absolute is not None:
+        sess.setoption("MCTSFpuAbsolute", "true" if mcts_fpu_absolute else "false")
+    if mcts_fpu_absolute_at_root is not None:
+        sess.setoption(
+            "MCTSFpuAbsoluteAtRoot",
+            "true" if mcts_fpu_absolute_at_root else "false",
+        )
     if mcts_cache_history_length is not None:
         sess.setoption("MCTSCacheHistoryLength", str(mcts_cache_history_length))
     if mcts_nn_cache_size is not None:
@@ -729,6 +771,12 @@ def write_json_report(
             "hybrid_ane_min_budget_ms": args.hybrid_ane_min_budget_ms,
             "mcts_policy_temperature": args.mcts_policy_temperature,
             "mcts_cpuct_at_root": args.mcts_cpuct_at_root,
+            "mcts_fpu_reduction": args.mcts_fpu_reduction,
+            "mcts_fpu_reduction_at_root": args.mcts_fpu_reduction_at_root,
+            "mcts_fpu_value": args.mcts_fpu_value,
+            "mcts_fpu_value_at_root": args.mcts_fpu_value_at_root,
+            "mcts_fpu_absolute": args.mcts_fpu_absolute,
+            "mcts_fpu_absolute_at_root": args.mcts_fpu_absolute_at_root,
             "mcts_cache_history_length": args.mcts_cache_history_length,
             "mcts_nn_cache_size": args.mcts_nn_cache_size,
             "mcts_parallel_search": args.mcts_parallel_search,
@@ -824,6 +872,12 @@ def run_once(
                 args.mcts_parallel_search,
                 args.mcts_policy_temperature,
                 args.mcts_cpuct_at_root,
+                args.mcts_fpu_reduction,
+                args.mcts_fpu_reduction_at_root,
+                args.mcts_fpu_value,
+                args.mcts_fpu_value_at_root,
+                args.mcts_fpu_absolute,
+                args.mcts_fpu_absolute_at_root,
                 args.mcts_cache_history_length,
                 args.mcts_nn_cache_size,
             )
@@ -871,6 +925,12 @@ def run_once(
                 args.hybrid_ane_min_budget_ms,
                 args.mcts_policy_temperature,
                 args.mcts_cpuct_at_root,
+                args.mcts_fpu_reduction,
+                args.mcts_fpu_reduction_at_root,
+                args.mcts_fpu_value,
+                args.mcts_fpu_value_at_root,
+                args.mcts_fpu_absolute,
+                args.mcts_fpu_absolute_at_root,
                 args.mcts_cache_history_length,
                 args.mcts_nn_cache_size,
             )
@@ -1045,6 +1105,42 @@ def main() -> int:
         type=float,
         default=None,
         help="Override MCTSCPuctAtRoot for root allocation probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-reduction",
+        type=float,
+        default=None,
+        help="Override MCTSFpuReduction for FPU allocation probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-reduction-at-root",
+        type=float,
+        default=None,
+        help="Override MCTSFpuReductionAtRoot for root FPU probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-value",
+        type=float,
+        default=None,
+        help="Override MCTSFpuValue for absolute-FPU probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-value-at-root",
+        type=float,
+        default=None,
+        help="Override MCTSFpuValueAtRoot for root absolute-FPU probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-absolute",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override MCTSFpuAbsolute for FPU probes",
+    )
+    parser.add_argument(
+        "--mcts-fpu-absolute-at-root",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override MCTSFpuAbsoluteAtRoot for root FPU probes",
     )
     parser.add_argument(
         "--mcts-cache-history-length",
