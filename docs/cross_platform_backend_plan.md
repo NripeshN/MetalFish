@@ -104,13 +104,13 @@ Current remote gates:
 | Gate | Build config | Last passing build |
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
-| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `0c0ba5ab-5d55-44a0-a71f-0934c3c495e8` |
+| CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92ed1973-1772-4ae4-abb9-1b94ea5efabf` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26352864713` |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26352864680`, adding Metal NN parity artifact |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26352864693` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26352864694` |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26366784935` |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26366784933`, Metal NN parity artifact and BK.07 smoke |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26366784932` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26366784934` |
 
 Current CUDA backend boundary:
 
