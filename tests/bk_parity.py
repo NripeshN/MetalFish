@@ -991,7 +991,7 @@ def main() -> int:
     )
     parser.add_argument("--hybrid-ab-policy-weight", type=float, default=0.0)
     parser.add_argument("--hybrid-root-hint-delay-ms", type=int, default=25)
-    parser.add_argument("--hybrid-root-hint-count", type=int, default=4)
+    parser.add_argument("--hybrid-root-hint-count", type=int, default=8)
     parser.add_argument("--hybrid-ab-candidate-verify-ms", type=int, default=120)
     parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=4)
     parser.add_argument("--mcts-minibatch-size", type=int, default=0)
