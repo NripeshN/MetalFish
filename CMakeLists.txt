@@ -164,8 +164,21 @@ set(HYBRID_SOURCES src/hybrid/hybrid_search.cpp src/hybrid/position_adapter.cpp
                    src/hybrid/classifier.cpp)
 
 # Protobuf generation for transformer network weights
-find_package(Protobuf REQUIRED)
-include_directories(${Protobuf_INCLUDE_DIRS})
+find_package(Protobuf CONFIG QUIET)
+if(NOT Protobuf_FOUND)
+  find_package(Protobuf REQUIRED)
+endif()
+
+if(Protobuf_INCLUDE_DIRS)
+  include_directories(${Protobuf_INCLUDE_DIRS})
+endif()
+if(TARGET protobuf::libprotobuf)
+  get_target_property(METALFISH_PROTOBUF_INCLUDE_DIRS protobuf::libprotobuf
+                      INTERFACE_INCLUDE_DIRECTORIES)
+  if(METALFISH_PROTOBUF_INCLUDE_DIRS)
+    include_directories(${METALFISH_PROTOBUF_INCLUDE_DIRS})
+  endif()
+endif()
 
 if(TARGET protobuf::libprotobuf)
   set(METALFISH_PROTOBUF_LIB protobuf::libprotobuf)
@@ -173,6 +186,25 @@ elseif(TARGET libprotobuf)
   set(METALFISH_PROTOBUF_LIB libprotobuf)
 else()
   set(METALFISH_PROTOBUF_LIB ${Protobuf_LIBRARIES})
+endif()
+
+if(NOT Protobuf_PROTOC_EXECUTABLE AND TARGET protobuf::protoc)
+  foreach(PROTOC_LOCATION_PROPERTY
+          IMPORTED_LOCATION_RELEASE
+          IMPORTED_LOCATION_RELWITHDEBINFO
+          IMPORTED_LOCATION_MINSIZEREL
+          IMPORTED_LOCATION_DEBUG
+          IMPORTED_LOCATION)
+    get_target_property(METALFISH_PROTOC_LOCATION protobuf::protoc
+                        ${PROTOC_LOCATION_PROPERTY})
+    if(METALFISH_PROTOC_LOCATION)
+      set(Protobuf_PROTOC_EXECUTABLE ${METALFISH_PROTOC_LOCATION})
+      break()
+    endif()
+  endforeach()
+endif()
+if(NOT Protobuf_PROTOC_EXECUTABLE)
+  find_program(Protobuf_PROTOC_EXECUTABLE protoc REQUIRED)
 endif()
 
 set(PROTO_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/nn/proto/net.proto)
