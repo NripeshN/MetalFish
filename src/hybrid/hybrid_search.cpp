@@ -942,8 +942,16 @@ bool HybridRootPawnLeverCandidate(
       candidate_mcts_policy >= selected_mcts_policy * 1.15f;
   const int max_average_gap = high_policy_lever ? 80 : 60;
   const uint32_t min_current_visits = mcts_rank >= 5 ? 7 : 8;
+  const bool low_visit_agreement_lever =
+      !high_policy_lever && selected_mcts_rank == 1 && mcts_rank >= 5 &&
+      mcts_rank <= 6 && mcts_current_visits >= 4 &&
+      selected_average_score - candidate_average_score <= 40 &&
+      candidate_effort >= 300 && candidate_mcts_policy >= 0.035f &&
+      selected_mcts_q - candidate_mcts_q <= 0.07f &&
+      best_mcts_q - candidate_mcts_q <= 0.07f;
   if (mcts_rank <= 0 || mcts_rank > 8 ||
-      mcts_current_visits < min_current_visits ||
+      (mcts_current_visits < min_current_visits &&
+       !low_visit_agreement_lever) ||
       selected_average_score - candidate_average_score > max_average_gap ||
       (!high_policy_lever && candidate_effort < 150)) {
     return false;
@@ -957,7 +965,7 @@ bool HybridRootPawnLeverCandidate(
     if (mcts_rank < selected_mcts_rank &&
         candidate_mcts_policy < selected_mcts_policy && q_gap > -0.07f)
       return false;
-    if (mcts_rank > 4 && q_gap > 0.055f)
+    if (mcts_rank > 4 && q_gap > 0.055f && !low_visit_agreement_lever)
       return false;
     if (candidate_average_score < selected_average_score && mcts_rank <= 4 &&
         q_gap > 0.05f && candidate_mcts_policy <= selected_mcts_policy)
