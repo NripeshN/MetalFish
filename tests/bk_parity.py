@@ -316,6 +316,8 @@ def setup_metalfish(
     mcts_parallel_search: bool,
     mcts_policy_temperature: Optional[float],
     mcts_cpuct_at_root: Optional[float],
+    mcts_cache_history_length: Optional[int],
+    mcts_nn_cache_size: Optional[int],
 ) -> None:
     mcts_threads = max(1, threads) if mcts_parallel_search else 1
     sess.setoption("UseHybridSearch", "false")
@@ -335,6 +337,10 @@ def setup_metalfish(
         sess.setoption("MCTSPolicySoftmaxTemp", str(mcts_policy_temperature))
     if mcts_cpuct_at_root is not None:
         sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
+    if mcts_cache_history_length is not None:
+        sess.setoption("MCTSCacheHistoryLength", str(mcts_cache_history_length))
+    if mcts_nn_cache_size is not None:
+        sess.setoption("MCTSNNCacheSize", str(mcts_nn_cache_size))
     sess.send("isready")
     sess.wait_for("readyok", 120)
 
@@ -380,6 +386,8 @@ def setup_metalfish_hybrid(
     ane_min_budget_ms: int,
     mcts_policy_temperature: Optional[float],
     mcts_cpuct_at_root: Optional[float],
+    mcts_cache_history_length: Optional[int],
+    mcts_nn_cache_size: Optional[int],
 ) -> None:
     total_threads = max(3, threads, mcts_threads + ab_threads)
     sess.setoption("UseMCTS", "false")
@@ -401,6 +409,10 @@ def setup_metalfish_hybrid(
         sess.setoption("MCTSPolicySoftmaxTemp", str(mcts_policy_temperature))
     if mcts_cpuct_at_root is not None:
         sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
+    if mcts_cache_history_length is not None:
+        sess.setoption("MCTSCacheHistoryLength", str(mcts_cache_history_length))
+    if mcts_nn_cache_size is not None:
+        sess.setoption("MCTSNNCacheSize", str(mcts_nn_cache_size))
     sess.setoption("HybridMCTSMinimumKLDGainPerNode", str(hybrid_mcts_kld))
     sess.setoption(
         "HybridABRootRejectMCTS",
@@ -717,6 +729,8 @@ def write_json_report(
             "hybrid_ane_min_budget_ms": args.hybrid_ane_min_budget_ms,
             "mcts_policy_temperature": args.mcts_policy_temperature,
             "mcts_cpuct_at_root": args.mcts_cpuct_at_root,
+            "mcts_cache_history_length": args.mcts_cache_history_length,
+            "mcts_nn_cache_size": args.mcts_nn_cache_size,
             "mcts_parallel_search": args.mcts_parallel_search,
         },
         "engines": {},
@@ -810,6 +824,8 @@ def run_once(
                 args.mcts_parallel_search,
                 args.mcts_policy_temperature,
                 args.mcts_cpuct_at_root,
+                args.mcts_cache_history_length,
+                args.mcts_nn_cache_size,
             )
             s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
             sessions["metalfish-mcts"] = s
@@ -855,6 +871,8 @@ def run_once(
                 args.hybrid_ane_min_budget_ms,
                 args.mcts_policy_temperature,
                 args.mcts_cpuct_at_root,
+                args.mcts_cache_history_length,
+                args.mcts_nn_cache_size,
             )
             s.warmup(
                 mode,
@@ -1027,6 +1045,18 @@ def main() -> int:
         type=float,
         default=None,
         help="Override MCTSCPuctAtRoot for root allocation probes",
+    )
+    parser.add_argument(
+        "--mcts-cache-history-length",
+        type=int,
+        default=None,
+        help="Override MCTSCacheHistoryLength for cache-key breadth probes",
+    )
+    parser.add_argument(
+        "--mcts-nn-cache-size",
+        type=int,
+        default=None,
+        help="Override MCTSNNCacheSize for cache pressure probes",
     )
     parser.add_argument(
         "--mcts-parallel-search",

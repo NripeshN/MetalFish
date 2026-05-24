@@ -562,6 +562,8 @@ def main() -> int:
             "--mcts-kld",
             "--mcts-policy-temperature",
             "--mcts-cpuct-at-root",
+            "--mcts-cache-history-length",
+            "--mcts-nn-cache-size",
             "--mcts-parallel-search",
             "--hybrid-ab-root-reject-mcts",
             "--hybrid-mcts-minibatch-size",
@@ -573,6 +575,8 @@ def main() -> int:
             'sess.setoption("MCTSMinibatchSize", str(minibatch_size))',
             'sess.setoption("MCTSPolicyTemperature", str(mcts_policy_temperature))',
             'sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))',
+            'sess.setoption("MCTSCacheHistoryLength", str(mcts_cache_history_length))',
+            'sess.setoption("MCTSNNCacheSize", str(mcts_nn_cache_size))',
             '"HybridABRootRejectMCTS"',
         ],
     )
