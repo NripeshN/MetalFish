@@ -29,6 +29,7 @@ CudaBufferSmokeResult RunNullExecutorPipelineSmokeRaw(const float *inputs,
 CudaBufferSmokeResult RunPlanExecutorPipelineSmoke();
 CudaBufferSmokeResult RunAttentionProjectionSmoke();
 CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke();
+CudaBufferSmokeResult RunStaticPositionEncodingStageSmoke();
 
 } // namespace Cuda
 } // namespace NN

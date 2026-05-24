@@ -41,6 +41,16 @@ int DenseOutputWidth(const NetworkResolvedExecutionStep &dense) {
   return static_cast<int>(width);
 }
 
+int DenseInputWidth(const NetworkResolvedExecutionStep &dense) {
+  if (dense.kind != NetworkExecutionOpKind::Dense || dense.tensors.empty() ||
+      dense.tensors[0].dims.size() != 2)
+    throw std::runtime_error("CUDA execution tape dense tensor is invalid");
+  const auto width = dense.tensors[0].dims[1];
+  if (width == 0)
+    throw std::runtime_error("CUDA execution tape dense input width is zero");
+  return static_cast<int>(width);
+}
+
 int LayerNormWidth(const NetworkResolvedExecutionStep &norm) {
   if (norm.kind != NetworkExecutionOpKind::LayerNorm || norm.tensors.empty() ||
       norm.tensors[0].dims.size() != 1)
@@ -108,6 +118,12 @@ bool IsSmolgenNormName(std::string_view name) {
 
 bool IsDynamicPositionPreprocessName(std::string_view name) {
   return name == "body.input_embedding_preprocess";
+}
+
+bool IsStaticPositionEmbeddingName(const NetworkResolvedExecutionPlan &plan,
+                                   std::string_view name) {
+  return plan.format.input_embedding == INPUT_EMBEDDING_PE_MAP &&
+         name == "body.input_embedding";
 }
 
 int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
@@ -203,6 +219,8 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
     return "attention_residual_output";
   case CudaExecutionBufferRole::InputPlaneExpanded:
     return "input_plane_expanded";
+  case CudaExecutionBufferRole::StaticPositionOutput:
+    return "static_position_output";
   case CudaExecutionBufferRole::DynamicPositionInput:
     return "dynamic_position_input";
   case CudaExecutionBufferRole::DynamicPositionOutput:
@@ -300,6 +318,17 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
       if (IsSmolgenDenseName(step.name))
         break;
       const int width = DenseOutputWidth(step);
+      if (IsStaticPositionEmbeddingName(plan, step.name)) {
+        const int input_width = DenseInputWidth(step);
+        if (plan.tensors.input_planes <= 0 || plan.tensors.input_squares <= 0 ||
+            input_width <= plan.tensors.input_planes) {
+          throw std::runtime_error(
+              "CUDA execution tape static PE input shape is invalid");
+        }
+        tape.Add(step.name + ".static_pe_concat",
+                 CudaExecutionBufferRole::StaticPositionOutput,
+                 batch_size * plan.tensors.input_squares, input_width);
+      }
       if (IsDynamicPositionPreprocessName(step.name)) {
         if (plan.tensors.input_squares <= 0 ||
             width % plan.tensors.input_squares != 0) {

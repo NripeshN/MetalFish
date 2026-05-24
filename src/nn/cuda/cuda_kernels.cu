@@ -332,11 +332,12 @@ __global__ void ResidualLayerNormKernel(const float *parent,
   }
 }
 
-__global__ void ResidualBiasLayerNormKernel(
-    const float *parent, const float *secondary, const float *secondary_bias,
-    const float *gamma, const float *beta, float *biased_secondary,
-    float *residual, float *output, int width, float secondary_scale,
-    float epsilon) {
+__global__ void
+ResidualBiasLayerNormKernel(const float *parent, const float *secondary,
+                            const float *secondary_bias, const float *gamma,
+                            const float *beta, float *biased_secondary,
+                            float *residual, float *output, int width,
+                            float secondary_scale, float epsilon) {
   extern __shared__ float reductions[];
   float *sum_storage = reductions;
   float *square_storage = reductions + blockDim.x;
@@ -650,6 +651,9 @@ __global__ void AttentionBiasSoftmaxDeterministicKernel(float *scores,
 }
 
 __device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
+__device__ __constant__ float
+    kStaticPositionEncodingDevice[kPackedInputSquareCount *
+                                  Tables::kNumPosEncodingChannels];
 
 void EnsureAttentionPolicyGatherMapUploaded() {
   int device = 0;
@@ -675,6 +679,35 @@ void EnsureAttentionPolicyGatherMapUploaded() {
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("AttentionPolicyGather table upload", status));
+  }
+  uploaded_devices.push_back(device);
+}
+
+void EnsureStaticPositionEncodingUploaded() {
+  int device = 0;
+  cudaError_t status = cudaGetDevice(&device);
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("cudaGetDevice(static_position_encoding)", status));
+  }
+
+  static std::mutex mutex;
+  static std::vector<int> uploaded_devices;
+
+  std::lock_guard<std::mutex> lock(mutex);
+  if (std::find(uploaded_devices.begin(), uploaded_devices.end(), device) !=
+      uploaded_devices.end()) {
+    return;
+  }
+
+  status = cudaMemcpyToSymbol(
+      kStaticPositionEncodingDevice, &Tables::kPosEncoding[0][0],
+      kPackedInputSquareCount * Tables::kNumPosEncodingChannels *
+          sizeof(float),
+      0, cudaMemcpyHostToDevice);
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("static position encoding table upload", status));
   }
   uploaded_devices.push_back(device);
 }
@@ -813,6 +846,30 @@ __global__ void DynamicPositionEncodingConcatKernel(
       position_encoding[(static_cast<std::size_t>(batch) * squares + square) *
                             position_width +
                         pe_channel];
+}
+
+__global__ void StaticPositionEncodingConcatKernel(
+    const std::uint64_t *masks, const float *values, float *output,
+    int input_planes, int position_width, int squares, int output_width,
+    int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int channel = index % output_width;
+  const int square = (index / output_width) % squares;
+  const int batch = index / (output_width * squares);
+  if (channel < input_planes) {
+    const int packed_index = batch * input_planes + channel;
+    const std::uint64_t bit = 1ULL << square;
+    output[index] =
+        (masks[packed_index] & bit) ? values[packed_index] : 0.0f;
+    return;
+  }
+
+  const int pe_channel = channel - input_planes;
+  output[index] = kStaticPositionEncodingDevice[square * position_width +
+                                                pe_channel];
 }
 
 } // namespace
@@ -1037,8 +1094,8 @@ void LaunchResidualBiasLayerNormKernel(
   constexpr int kThreads = 256;
   const std::size_t shared_bytes = 2 * kThreads * sizeof(float);
   ResidualBiasLayerNormKernel<<<rows, kThreads, shared_bytes, stream>>>(
-      parent, secondary, secondary_bias, gamma, beta, biased_secondary, residual,
-      output, width, secondary_scale, epsilon);
+      parent, secondary, secondary_bias, gamma, beta, biased_secondary,
+      residual, output, width, secondary_scale, epsilon);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess) {
     throw std::runtime_error(
@@ -1048,8 +1105,8 @@ void LaunchResidualBiasLayerNormKernel(
     return;
   status = cudaDeviceSynchronize();
   if (status != cudaSuccess) {
-    throw std::runtime_error(CudaErrorMessage(
-        "ResidualBiasLayerNormKernel synchronize", status));
+    throw std::runtime_error(
+        CudaErrorMessage("ResidualBiasLayerNormKernel synchronize", status));
   }
 }
 
@@ -1381,6 +1438,43 @@ void LaunchExpandPackedInputPlanesWithPositionInputKernel(
   if (status != cudaSuccess) {
     throw std::runtime_error(CudaErrorMessage(
         "ExpandPackedInputPlanesWithPositionInputKernel synchronize", status));
+  }
+}
+
+void LaunchStaticPositionEncodingConcatKernel(
+    const std::uint64_t *masks, const float *values, float *output,
+    int batch_size, int input_planes, int position_width, int squares,
+    cudaStream_t stream) {
+  if (!masks || !values || !output) {
+    throw std::runtime_error(
+        "CUDA static position concat kernel received null buffer");
+  }
+  if (batch_size <= 0 || input_planes <= 0 || position_width <= 0 ||
+      position_width > Tables::kNumPosEncodingChannels || squares <= 0 ||
+      squares > kPackedInputSquareCount) {
+    throw std::runtime_error(
+        "CUDA static position concat dimensions are invalid");
+  }
+
+  EnsureStaticPositionEncodingUploaded();
+  const int output_width = input_planes + position_width;
+  const int total = batch_size * squares * output_width;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  StaticPositionEncodingConcatKernel<<<blocks, kThreads, 0, stream>>>(
+      masks, values, output, input_planes, position_width, squares,
+      output_width, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("StaticPositionEncodingConcatKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "StaticPositionEncodingConcatKernel synchronize", status));
   }
 }
 
@@ -2170,6 +2264,8 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
   constexpr int kPositionPlanes = 12;
   constexpr int kPositionWidth = 5;
   constexpr int kOutputWidth = kPlanes + kPositionWidth;
+  constexpr int kStaticPositionWidth = Tables::kNumPosEncodingChannels;
+  constexpr int kStaticOutputWidth = kPlanes + kStaticPositionWidth;
 
   std::vector<std::uint64_t> masks(kBatch * kPlanes, 0);
   std::vector<float> values(kBatch * kPlanes, 0.0f);
@@ -2249,12 +2345,37 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
   std::vector<float> actual_position_input(expected_position_input.size(),
                                            0.0f);
   std::vector<float> actual_output(expected_output.size(), 0.0f);
+  std::vector<float> expected_static_output(
+      kBatch * kSquares * kStaticOutputWidth, 0.0f);
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int square = 0; square < kSquares; ++square) {
+      for (int channel = 0; channel < kStaticOutputWidth; ++channel) {
+        const std::size_t output_index =
+            (static_cast<std::size_t>(batch) * kSquares + square) *
+                kStaticOutputWidth +
+            channel;
+        if (channel < kPlanes) {
+          expected_static_output[output_index] =
+              expected_expanded[(static_cast<std::size_t>(batch) * kSquares +
+                                 square) *
+                                    kPlanes +
+                                channel];
+        } else {
+          expected_static_output[output_index] =
+              Tables::kPosEncoding[square][channel - kPlanes];
+        }
+      }
+    }
+  }
+  std::vector<float> actual_static_output(expected_static_output.size(),
+                                          0.0f);
   std::uint64_t *device_masks = nullptr;
   float *device_values = nullptr;
   float *device_expanded = nullptr;
   float *device_position_input = nullptr;
   float *device_position_encoding = nullptr;
   float *device_output = nullptr;
+  float *device_static_output = nullptr;
 
   try {
     AllocateDevice(&device_masks, masks.size(), "cudaMalloc(dynamic_masks)");
@@ -2267,6 +2388,8 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
                    "cudaMalloc(dynamic_position_encoding)");
     AllocateDevice(&device_output, actual_output.size(),
                    "cudaMalloc(dynamic_position_output)");
+    AllocateDevice(&device_static_output, actual_static_output.size(),
+                   "cudaMalloc(static_position_output)");
 
     cudaError_t status = cudaMemcpy(device_masks, masks.data(),
                                     masks.size() * sizeof(std::uint64_t),
@@ -2284,6 +2407,9 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
     LaunchDynamicPositionEncodingConcatKernel(
         device_expanded, device_position_encoding, device_output, kBatch,
         kPlanes, kPositionWidth, kSquares);
+    LaunchStaticPositionEncodingConcatKernel(
+        device_masks, device_values, device_static_output, kBatch, kPlanes,
+        kStaticPositionWidth, kSquares);
 
     DownloadFloats(actual_expanded, device_expanded,
                    "cudaMemcpy(dynamic_expanded)");
@@ -2291,6 +2417,8 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
                    "cudaMemcpy(dynamic_position_input)");
     DownloadFloats(actual_output, device_output,
                    "cudaMemcpy(dynamic_position_output)");
+    DownloadFloats(actual_static_output, device_static_output,
+                   "cudaMemcpy(static_position_output)");
   } catch (const std::exception &e) {
     FreeDevice(device_masks);
     FreeDevice(device_values);
@@ -2298,6 +2426,7 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
     FreeDevice(device_position_input);
     FreeDevice(device_position_encoding);
     FreeDevice(device_output);
+    FreeDevice(device_static_output);
     result.status = CudaSmokeStatus::RuntimeError;
     result.message = e.what();
     return result;
@@ -2309,6 +2438,7 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
   FreeDevice(device_position_input);
   FreeDevice(device_position_encoding);
   FreeDevice(device_output);
+  FreeDevice(device_static_output);
 
   for (std::size_t i = 0; i < expected_expanded.size(); ++i) {
     if (actual_expanded[i] != expected_expanded[i]) {
@@ -2328,6 +2458,13 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
     if (actual_output[i] != expected_output[i]) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA dynamic position concat mismatch";
+      return result;
+    }
+  }
+  for (std::size_t i = 0; i < expected_static_output.size(); ++i) {
+    if (actual_static_output[i] != expected_static_output[i]) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA static position concat mismatch";
       return result;
     }
   }

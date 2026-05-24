@@ -112,6 +112,11 @@ void LaunchExpandPackedInputPlanesWithPositionInputKernel(
     float *position_input, int batch_size, int planes, int position_planes,
     int squares, cudaStream_t stream = nullptr);
 
+void LaunchStaticPositionEncodingConcatKernel(
+    const std::uint64_t *masks, const float *values, float *output,
+    int batch_size, int input_planes, int position_width, int squares,
+    cudaStream_t stream = nullptr);
+
 void LaunchDynamicPositionEncodingInputKernel(const float *expanded,
                                               float *position_input,
                                               int batch_size, int input_planes,

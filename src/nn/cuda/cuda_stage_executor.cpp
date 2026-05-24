@@ -516,6 +516,13 @@ bool IsDynamicPositionPreprocessName(std::string_view name) {
   return name == "body.input_embedding_preprocess";
 }
 
+bool IsStaticPositionEmbeddingStage(const NetworkResolvedExecutionPlan &plan,
+                                    const NetworkResolvedExecutionStep &step) {
+  return plan.format.input_embedding == INPUT_EMBEDDING_PE_MAP &&
+         step.kind == NetworkExecutionOpKind::Dense &&
+         step.name == "body.input_embedding";
+}
+
 int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
                        std::string_view name) {
   if (StartsWith(name, "body.encoder."))
@@ -961,6 +968,47 @@ CudaDenseStageOutput ExecuteDynamicPositionEncodingStage(
   return output;
 }
 
+float *PrepareStaticPositionEncodingInput(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &dense, const std::uint64_t *input_masks,
+    const float *input_values, const CudaExecutionTape &tape,
+    CudaExecutionWorkspace &workspace, int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA static PE stage received empty batch");
+  if (!input_masks || !input_values)
+    throw std::runtime_error("CUDA static PE stage input is missing");
+  if (!IsStaticPositionEmbeddingStage(execution_plan, dense))
+    throw std::runtime_error("CUDA static PE stage name is invalid");
+  RequireDenseTensors(dense);
+
+  const int input_planes = execution_plan.tensors.input_planes;
+  const int squares = execution_plan.tensors.input_squares;
+  if (input_planes <= 0 || squares != kCudaAttentionSquares) {
+    throw std::runtime_error("CUDA static PE tensor plan is invalid");
+  }
+
+  const auto &dense_ref = dense.tensors[0];
+  if (dense_ref.dims.size() != 2)
+    throw std::runtime_error("CUDA static PE dense tensor shape is invalid");
+  const int input_width = static_cast<int>(dense_ref.dims[1]);
+  constexpr int kStaticPositionWidth = kCudaAttentionSquares;
+  if (input_width != input_planes + kStaticPositionWidth) {
+    throw std::runtime_error("CUDA static PE dense tensor dimensions mismatch");
+  }
+
+  const int square_rows = batch_size * squares;
+  const auto &concat_binding =
+      tape.RequireName(dense.name + ".static_pe_concat");
+  RequireTapeShape(concat_binding, square_rows, input_width,
+                   "static PE concat output");
+
+  float *output = tape.Reserve(workspace, concat_binding);
+  LaunchStaticPositionEncodingConcatKernel(
+      input_masks, input_values, output, batch_size, input_planes,
+      kStaticPositionWidth, squares, workspace.Stream());
+  return output;
+}
+
 CudaDenseStageOutput ExecuteGateStage(const NetworkResolvedExecutionStep &gate,
                                       const CudaWeightBuffers &weights,
                                       const float *input, int input_width,
@@ -1130,8 +1178,7 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
   LaunchResidualBiasLayerNormKernel(
       input, output.feed_forward, tensors.dense2_bias.data, gamma.data,
       beta.data, output.feed_forward, output.residual, output.normalized, rows,
-      output.output_width,
-      FeedForwardResidualScale(execution_plan, ffn.name),
+      output.output_width, FeedForwardResidualScale(execution_plan, ffn.name),
       FeedForwardLayerNormEpsilon(execution_plan, ffn.name), stream);
   return output;
 }
@@ -1665,6 +1712,16 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     }
     MaybeFlattenSquareRowsForDenseStage(step, entry.kind, batch_size,
                                         stage_input_rows, stage_input_width);
+    float *static_position_input = nullptr;
+    if (IsStaticPositionEmbeddingStage(execution_plan, step)) {
+      static_position_input = PrepareStaticPositionEncodingInput(
+          execution_plan, step, input_masks, input_values, tape, workspace,
+          batch_size);
+      stage_input = static_position_input;
+      stage_input_width = execution_plan.tensors.input_planes +
+                          kCudaAttentionSquares;
+      stage_input_rows = batch_size * execution_plan.tensors.input_squares;
+    }
 
     CudaDenseStageOutput stage;
     CudaStageTimer timer(timings, step.name, entry.kind, workspace.Stream());
@@ -1785,6 +1842,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
                                           stage_input, tape, workspace,
                                           stage_input_rows);
     }
+    if (static_position_input)
+      stage.expanded_input = static_position_input;
     timer.Stop();
     TraceCudaStageOutput(stage_trace_run, traced_stage_index, step.name,
                          entry.kind, stage, batch_size, workspace.Stream());

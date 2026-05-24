@@ -148,6 +148,9 @@ Current CUDA backend boundary:
   dynamic-position-input kernels that expand packed plane masks/values to NHWC
   board rows, gather the first 12 planes for dense positional encoding, and
   concatenate generated positional channels back onto the 112 input channels.
+  It also supports the static `INPUT_EMBEDDING_PE_MAP` path by appending the
+  shared 64-channel positional table before `body.input_embedding`, matching
+  the Metal transformer input path.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production

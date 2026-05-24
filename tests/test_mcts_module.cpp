@@ -35,8 +35,8 @@
 #include "nn/cuda/cuda_plan_analysis.h"
 #include "nn/cuda/cuda_runtime_probe.h"
 #include "nn/cuda/cuda_stage_bindings.h"
-#include "nn/cuda/cuda_weight_buffers.h"
 #include "nn/cuda/cuda_weight_buffer_smoke.h"
+#include "nn/cuda/cuda_weight_buffers.h"
 #include "nn/cuda/cuda_workspace.h"
 #include "nn/cuda/cuda_workspace_smoke.h"
 #endif
@@ -1661,6 +1661,12 @@ void test_cuda_inference_buffers(TestCounter &tc) {
   expect(dynamic_stage_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              dynamic_stage_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA dynamic PE stage should pass or skip without a device", tc);
+
+  auto static_stage_smoke = NN::Cuda::RunStaticPositionEncodingStageSmoke();
+  std::cout << "    " << static_stage_smoke.message << std::endl;
+  expect(static_stage_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             static_stage_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA static PE stage should pass or skip without a device", tc);
 }
 
 void test_cuda_execution_schedule(TestCounter &tc) {
@@ -1750,6 +1756,46 @@ void test_cuda_execution_schedule(TestCounter &tc) {
              dense_only_schedule.entries[0].kind ==
                  NN::Cuda::CudaExecutionScheduleKind::DenseActivationStage,
          "CUDA schedule should classify dense-only stages explicitly", tc);
+
+  NN::NetworkResolvedExecutionPlan static_pe;
+  static_pe.format.input_embedding = NN::INPUT_EMBEDDING_PE_MAP;
+  static_pe.tensors.input_planes = NN::kPackedInputPlaneCount;
+  static_pe.tensors.input_squares = NN::kPackedInputSquareCount;
+  static_pe.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense,
+      "body.input_embedding",
+      {
+          {0,
+           "body.input_embedding_w",
+           4 * (NN::kPackedInputPlaneCount + NN::kPackedInputSquareCount),
+           {4, NN::kPackedInputPlaneCount + NN::kPackedInputSquareCount},
+           NN::NetworkWeightTensorKind::DenseWeight},
+          {1,
+           "body.input_embedding_b",
+           4,
+           {4},
+           NN::NetworkWeightTensorKind::DenseBias},
+      }});
+  const auto static_pe_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(static_pe);
+  expect(static_pe_schedule.FullySupported(),
+         "static PE input embedding schedule should be supported", tc);
+  const auto static_pe_tape =
+      NN::Cuda::CreateResolvedExecutionTape(static_pe, 2);
+  const auto &static_pe_concat =
+      static_pe_tape.RequireName("body.input_embedding.static_pe_concat");
+  expect(static_pe_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::StaticPositionOutput) == 1,
+         "CUDA tape should allocate static PE concat scratch", tc);
+  expect(static_pe_concat.rows ==
+                 2 * NN::Cuda::kCudaAttentionSquares &&
+             static_pe_concat.width ==
+                 NN::kPackedInputPlaneCount + NN::kPackedInputSquareCount,
+         "CUDA tape should shape static PE concat by board-square rows", tc);
+  expect(static_pe_tape.RequireName("body.input_embedding.dense").rows ==
+             2 * NN::Cuda::kCudaAttentionSquares,
+         "CUDA tape should run static PE input embedding on board-square rows",
+         tc);
 
   NN::NetworkResolvedExecutionPlan gated = plan;
   gated.steps.insert(

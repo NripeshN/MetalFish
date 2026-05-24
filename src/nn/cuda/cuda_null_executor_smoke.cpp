@@ -9,6 +9,7 @@
 
 #include "../network_output_decoder.h"
 #include "../network_weight_inventory.h"
+#include "../tables/attention_policy_map.h"
 #include "cuda_attention_plan.h"
 #include "cuda_buffer_smoke.h"
 #include "cuda_execution_tape.h"
@@ -1480,6 +1481,148 @@ CudaBufferSmokeResult RunDynamicPositionEncodingStageSmoke() {
     result.allocation_bytes =
         buffers.AllocationBytes() + workspace.TotalBytes() +
         sequence_workspace.TotalBytes() + weights.AllocationBytes();
+  } catch (const std::exception &e) {
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaBufferSmokeResult RunStaticPositionEncodingStageSmoke() {
+  CudaBufferSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 1;
+  constexpr int kPlanes = kPackedInputPlaneCount;
+  constexpr int kSquares = kPackedInputSquareCount;
+  constexpr int kPositionWidth = Tables::kNumPosEncodingChannels;
+  constexpr int kConcatWidth = kPlanes + kPositionWidth;
+  constexpr int kEmbeddingWidth = 3;
+
+  std::vector<std::uint64_t> masks(kBatch * kPlanes, 0);
+  std::vector<float> values(kBatch * kPlanes, 0.0f);
+  auto set_plane = [&](int plane, std::uint64_t mask, float value) {
+    masks[plane] = mask;
+    values[plane] = value;
+  };
+  set_plane(0, (1ULL << 0) | (1ULL << 7), 2.0f);
+  set_plane(12, ~0ULL, -0.5f);
+  set_plane(111, 1ULL << 63, 3.0f);
+
+  std::vector<float> expected_input(kSquares * kConcatWidth, 0.0f);
+  for (int square = 0; square < kSquares; ++square) {
+    for (int plane = 0; plane < kPlanes; ++plane) {
+      expected_input[static_cast<std::size_t>(square) * kConcatWidth + plane] =
+          (masks[plane] & (1ULL << square)) ? values[plane] : 0.0f;
+    }
+    for (int channel = 0; channel < kPositionWidth; ++channel) {
+      expected_input[static_cast<std::size_t>(square) * kConcatWidth + kPlanes +
+                     channel] = Tables::kPosEncoding[square][channel];
+    }
+  }
+
+  std::vector<float> embedding_weights(
+      static_cast<std::size_t>(kEmbeddingWidth) * kConcatWidth, 0.0f);
+  std::vector<float> embedding_bias = {0.25f, -0.5f, 0.75f};
+  embedding_weights[0 * kConcatWidth + 0] = 0.5f;
+  embedding_weights[0 * kConcatWidth + kPlanes] = 1.0f;
+  embedding_weights[1 * kConcatWidth + 12] = -0.25f;
+  embedding_weights[1 * kConcatWidth + kPlanes + 7] = 0.75f;
+  embedding_weights[2 * kConcatWidth + 111] = 0.5f;
+  embedding_weights[2 * kConcatWidth + kPlanes + 63] = -0.25f;
+  const auto expected_embedding =
+      DenseAffineHost(expected_input, embedding_weights, embedding_bias,
+                      kSquares, kConcatWidth, kEmbeddingWidth);
+
+  NetworkTensorPlan tensor_plan;
+  tensor_plan.input_planes = kPlanes;
+  tensor_plan.input_squares = kSquares;
+
+  NetworkResolvedExecutionPlan execution_plan;
+  execution_plan.format.input_embedding = INPUT_EMBEDDING_PE_MAP;
+  execution_plan.tensors = tensor_plan;
+  execution_plan.steps.push_back(
+      NetworkResolvedExecutionStep{NetworkExecutionOpKind::Dense,
+                                   "body.input_embedding",
+                                   {
+                                       {0,
+                                        "body.input_embedding_w",
+                                        embedding_weights.size(),
+                                        {kEmbeddingWidth, kConcatWidth},
+                                        NetworkWeightTensorKind::DenseWeight},
+                                       {1,
+                                        "body.input_embedding_b",
+                                        embedding_bias.size(),
+                                        {kEmbeddingWidth},
+                                        NetworkWeightTensorKind::DenseBias},
+                                   }});
+
+  NetworkWeightInventory inventory;
+  inventory.tensors = {
+      {"body.input_embedding_w",
+       embedding_weights.data(),
+       embedding_weights.size(),
+       {kEmbeddingWidth, kConcatWidth},
+       NetworkWeightTensorKind::DenseWeight},
+      {"body.input_embedding_b",
+       embedding_bias.data(),
+       embedding_bias.size(),
+       {kEmbeddingWidth},
+       NetworkWeightTensorKind::DenseBias},
+  };
+
+  try {
+    CudaInferenceBuffers buffers;
+    buffers.Allocate(LayoutFromTensorPlan(tensor_plan, kBatch));
+    CudaExecutionWorkspace workspace;
+    buffers.UploadPackedInputs(masks, values, kBatch, workspace.Stream());
+
+    CudaWeightBuffers weights;
+    weights.Upload(inventory);
+    const auto tape = CreateResolvedExecutionTape(execution_plan, kBatch);
+    const CudaStageInputBindings input_bindings;
+    const auto sequence = ExecuteDenseActivationLayerNormSequence(
+        execution_plan, weights, buffers.input_values, buffers.input_masks,
+        buffers.input_values, tape, workspace, kBatch, input_bindings);
+    workspace.Synchronize();
+
+    const auto *embedding_stage = sequence.FindStage("body.input_embedding");
+    if (sequence.stage_count != 1 || !embedding_stage ||
+        !embedding_stage->expanded_input || !embedding_stage->output ||
+        embedding_stage->rows != kSquares ||
+        embedding_stage->input_width != kConcatWidth ||
+        embedding_stage->output_width != kEmbeddingWidth) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA static PE sequence metadata mismatch";
+      return result;
+    }
+
+    std::vector<float> actual_input(expected_input.size(), 0.0f);
+    std::vector<float> actual_embedding(expected_embedding.size(), 0.0f);
+    DownloadFloats(actual_input, embedding_stage->expanded_input,
+                   "cudaMemcpy(static_sequence_input)");
+    DownloadFloats(actual_embedding, embedding_stage->output,
+                   "cudaMemcpy(static_sequence_embedding)");
+    if (!AlmostEqual(actual_input, expected_input, 1e-5f) ||
+        !AlmostEqual(actual_embedding, expected_embedding, 1e-5f)) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA static PE sequence output mismatch";
+      return result;
+    }
+
+    result.allocation_bytes =
+        buffers.AllocationBytes() + workspace.TotalBytes() +
+        weights.AllocationBytes();
   } catch (const std::exception &e) {
     result.status = CudaSmokeStatus::RuntimeError;
     result.message = e.what();

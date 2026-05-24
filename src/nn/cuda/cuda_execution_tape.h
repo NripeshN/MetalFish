@@ -40,6 +40,7 @@ enum class CudaExecutionBufferRole {
   AttentionSmolgenBias,
   AttentionResidualOutput,
   InputPlaneExpanded,
+  StaticPositionOutput,
   DynamicPositionInput,
   DynamicPositionOutput,
   PolicyMapRawOutput,
