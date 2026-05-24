@@ -68,6 +68,7 @@ struct SearchParams {
   float temp_winpct_cutoff = 100.0f;
   bool high_policy_root_lever_selection = true;
   bool low_policy_root_lever_selection = true;
+  bool root_tactical_capture_probe = true;
 
   // Contempt (positive = avoid draws, negative = prefer draws)
   float contempt = 0.0f;

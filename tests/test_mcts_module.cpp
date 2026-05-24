@@ -193,6 +193,8 @@ void test_search_params_defaults(TestCounter &tc) {
          "pure MCTS high-policy lever rescue default", tc);
   expect(params.low_policy_root_lever_selection,
          "pure MCTS low-policy lever rescue default", tc);
+  expect(params.root_tactical_capture_probe,
+         "pure MCTS root tactical capture probe default", tc);
   expect(params.GetCpuctBase(true) == params.cpuct_base_at_root,
          "root cpuct base getter", tc);
   expect(params.GetFpuValue(true) == params.fpu_value_at_root,
@@ -254,6 +256,24 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootLowPolicyLeverCandidate(98, 29, 4, 7, 0.206f, 0.931f,
                                           0.040f, 0.881f),
          "weak rank-seven low-policy lever blocked", tc);
+
+  Position bk22;
+  StateInfo bk22_st;
+  bk22.set("2r2rk1/1bqnbpp1/1p1ppn1p/pP6/N1P1P3/P2B1N1P/"
+           "1B2QPP1/R2R2K1 b - -",
+           false, &bk22_st);
+  const Move bishop_capture = UCIEngine::to_move(bk22, "b7e4");
+  const Move knight_quiet = UCIEngine::to_move(bk22, "d7c5");
+  expect(MCTSIsMinorCentralPawnCapture(bk22, bishop_capture),
+         "BK.22 bishop sacrifice is a central pawn capture", tc);
+  expect(!MCTSIsMinorCentralPawnCapture(bk22, knight_quiet),
+         "BK.22 quiet knight move is not a capture", tc);
+  expect(MCTSRootTacticalCaptureProbeCandidate(87, 14, 0.010f),
+         "BK.22 low-policy capture probe passes", tc);
+  expect(!MCTSRootTacticalCaptureProbeCandidate(87, 17, 0.010f),
+         "late low-policy capture probe blocked", tc);
+  expect(!MCTSRootTacticalCaptureProbeCandidate(87, 14, 0.030f),
+         "high-policy capture probe blocked", tc);
 }
 
 void test_shared_nn_input_contract(TestCounter &tc) {

@@ -411,6 +411,25 @@ bool MCTSIsKingsidePawnLever(const Position &pos, Move move) {
   return bool(attacks_bb<PAWN>(to, us) & pos.pieces(~us, PAWN));
 }
 
+bool MCTSIsMinorCentralPawnCapture(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || !pos.capture(move))
+    return false;
+
+  const Piece piece = pos.piece_on(move.from_sq());
+  const Piece captured = pos.piece_on(move.to_sq());
+  if (piece == NO_PIECE || captured == NO_PIECE)
+    return false;
+
+  const PieceType pt = type_of(piece);
+  if (pt != KNIGHT && pt != BISHOP)
+    return false;
+  if (type_of(captured) != PAWN)
+    return false;
+
+  const File target_file = file_of(move.to_sq());
+  return target_file == FILE_D || target_file == FILE_E;
+}
+
 bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
                                       uint32_t best_visits,
                                       uint32_t candidate_visits,
@@ -440,6 +459,14 @@ bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits,
          candidate_policy >= 0.035f && candidate_policy <= 0.08f &&
          candidate_policy <= best_policy * 0.35f &&
          best_q - candidate_q <= 0.09f;
+}
+
+bool MCTSRootTacticalCaptureProbeCandidate(uint32_t root_visits,
+                                           int candidate_policy_rank,
+                                           float candidate_policy) {
+  return root_visits >= 32 && root_visits <= 600 &&
+         candidate_policy_rank >= 10 && candidate_policy_rank <= 16 &&
+         candidate_policy >= 0.006f && candidate_policy <= 0.020f;
 }
 
 namespace {
@@ -1597,6 +1624,40 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
     } else if (score > second_best_score) {
       second_best_score = score;
     }
+  }
+
+  if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
+      children_visits >= 32 && children_visits <= 600 &&
+      !ctx.pos.capture(edges[best_idx].move)) {
+    bool already_probed = false;
+    int probe_idx = -1;
+    float probe_policy = 0.0f;
+    const int policy_rank_limit = std::min(num_edges, 16);
+    for (int i = 0; i < policy_rank_limit; ++i) {
+      if (!MCTSIsMinorCentralPawnCapture(ctx.pos, edges[i].move))
+        continue;
+
+      Node *child = edges[i].child.load(std::memory_order_acquire);
+      if (child && child->GetN() >= 16) {
+        already_probed = true;
+        break;
+      }
+      if (child && child->GetNInFlight() > 0)
+        continue;
+
+      const float policy = edges[i].GetP();
+      if (!MCTSRootTacticalCaptureProbeCandidate(children_visits, i + 1,
+                                                policy)) {
+        continue;
+      }
+      if (probe_idx < 0 || policy > probe_policy) {
+        probe_idx = i;
+        probe_policy = policy;
+      }
+    }
+
+    if (!already_probed && probe_idx >= 0)
+      return {probe_idx, 1};
   }
 
   int visits_to_assign = 1;
