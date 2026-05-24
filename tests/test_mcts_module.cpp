@@ -1246,6 +1246,13 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
   expect_throws([&]() { NN::CreateNetwork(empty_weights, "not-a-backend"); },
                 "unknown backend should fail loudly");
 
+#if !defined(USE_METAL) && !defined(USE_CUDA)
+  auto auto_cpu = NN::CreateNetwork(make_dense_only_cpu_weights_file(), "auto");
+  expect(auto_cpu->GetNetworkInfo().find("CPU transformer backend") !=
+             std::string::npos,
+         "auto backend should select CPU when no GPU backend is compiled", tc);
+#endif
+
   bool explicit_metal_returned_stub = false;
   bool explicit_metal_threw = false;
   try {

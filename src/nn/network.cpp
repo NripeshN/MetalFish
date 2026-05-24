@@ -111,12 +111,18 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
     return std::make_unique<Cpu::CpuNetwork>(weights);
   }
 
-  if (backend == "stub") {
-    return std::make_unique<StubNetwork>(weights);
+  if (backend == "auto") {
+    try {
+      return std::make_unique<Cpu::CpuNetwork>(weights);
+    } catch (const std::exception &e) {
+      std::cerr << "CPU backend unavailable: " << e.what() << std::endl;
+      throw std::runtime_error("No functional NN backend available: " +
+                               std::string(e.what()));
+    }
   }
 
-  if (backend == "auto") {
-    throw std::runtime_error("No functional NN backend available");
+  if (backend == "stub") {
+    return std::make_unique<StubNetwork>(weights);
   }
 
   throw std::runtime_error("Unknown NN backend: " + backend);

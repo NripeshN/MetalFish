@@ -53,12 +53,13 @@ Platform code should own only the implementation of `NN::Network`:
 | `metal` | macOS/Apple Silicon | Production | MPSGraph BT4 inference |
 | `cuda` | Linux/Windows NVIDIA | Toolchain-gated entrypoint | CUDA/TensorRT or ONNX Runtime CUDA BT4 inference |
 | `directml` | Windows GPUs | Planned | Windows fallback where CUDA is unavailable |
-| `cpu` | Any | Planned | Correctness fallback, not strength target |
+| `cpu` | Any | Portable fallback | Correctness fallback, not strength target |
 | `stub` | Any | Existing diagnostic fallback | Tests only; never a strength backend |
 
-The UCI option `NNBackend` is the common selector. `auto` should choose the
-strongest available backend for the host. Explicit backend names are for
-benchmarking and diagnostics.
+The UCI option `NNBackend` is the common selector. `auto` chooses the strongest
+available backend for the host, then falls back to the portable CPU transformer
+backend when no GPU backend is compiled or usable. Explicit backend names are
+for benchmarking and diagnostics.
 
 ## Cloud Test Matrix
 

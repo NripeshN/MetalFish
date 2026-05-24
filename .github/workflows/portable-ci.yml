@@ -80,10 +80,11 @@ jobs:
             --go "nodes 8"
           python3 tools/write_portable_manifest.py \
             --platform "Linux x86_64" \
-            --backend "CPU AB plus diagnostic stub MCTS; CUDA not included in this artifact" \
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact" \
             --binary "metalfish" \
             --output build-linux/PORTABLE_ARTIFACT.md \
             --notes "This portable artifact is a CPU build for Linux CI coverage." \
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires USE_CUDA=ON and the CUDA GPU gate." \
             --notes "For CUDA transformer testing, use a USE_CUDA=ON build and the CUDA GPU gate."
 
       - name: Package Linux artifact
@@ -173,10 +174,11 @@ jobs:
             --go "nodes 8"
           python tools/write_portable_manifest.py \
             --platform "Windows x86_64 MinGW" \
-            --backend "CPU AB plus diagnostic stub MCTS; CUDA not included in this artifact" \
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact" \
             --binary "metalfish.exe" \
             --output build-windows/PORTABLE_ARTIFACT.md \
             --notes "This portable artifact is a CPU MinGW build for Windows CI coverage." \
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires a CUDA build and runtime gate." \
             --notes "CUDA and DirectML Windows backends are not packaged in this artifact."
 
       - name: Package Windows artifact
@@ -281,10 +283,11 @@ jobs:
             --go "nodes 8"
           python tools/write_portable_manifest.py `
             --platform "Windows x86_64 MSVC" `
-            --backend "CPU AB plus diagnostic stub MCTS; CUDA not included in this artifact" `
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact" `
             --binary "metalfish.exe" `
             --output build-windows-msvc/PORTABLE_ARTIFACT.md `
             --notes "This portable artifact is a CPU MSVC build for Windows CI coverage." `
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires a CUDA build and runtime gate." `
             --notes "MSVC is the required host toolchain for future Windows CUDA builds."
 
       - name: Package Windows MSVC artifact
