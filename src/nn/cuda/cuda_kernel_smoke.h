@@ -21,6 +21,7 @@ struct CudaKernelSmokeResult {
 };
 
 CudaKernelSmokeResult RunDenseAffineKernelSmoke();
+CudaKernelSmokeResult RunConvolutionKernelSmoke();
 CudaKernelSmokeResult RunLayerNormKernelSmoke();
 CudaKernelSmokeResult RunActivationKernelSmoke();
 CudaKernelSmokeResult RunGateKernelSmoke();

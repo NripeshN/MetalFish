@@ -286,9 +286,57 @@ void InferDenseStepShapes(NetworkResolvedExecutionStep &step) {
     return;
   if (EndsWith(step.name, ".smolgen.dense"))
     return;
+  if (EndsWith(step.name, ".se"))
+    return;
 
   InferMatrixFromBias(FindTensorSuffix(step, "_w"),
                       FindTensorSuffix(step, "_b"));
+}
+
+void InferConvolutionStepShapes(NetworkResolvedExecutionStep &step) {
+  if (step.kind != NetworkExecutionOpKind::Convolution)
+    return;
+
+  auto *weight = FindTensorSuffix(step, ".weights");
+  auto *bias = FindTensorSuffix(step, ".biases");
+  if (!weight || !bias || bias->elements == 0 ||
+      weight->elements % bias->elements != 0) {
+    return;
+  }
+
+  const std::uint32_t output_channels =
+      static_cast<std::uint32_t>(bias->elements);
+  const std::size_t per_output = weight->elements / bias->elements;
+  std::uint32_t kernel = 1;
+  if (per_output % 9 == 0)
+    kernel = 3;
+  if (per_output % (kernel * kernel) != 0)
+    return;
+  const std::uint32_t input_channels =
+      static_cast<std::uint32_t>(per_output / (kernel * kernel));
+  SetFlatShape(*weight, {output_channels, input_channels, kernel, kernel});
+  SetFlatShape(*bias, {output_channels});
+}
+
+void InferSqueezeExciteStepShapes(NetworkResolvedExecutionStep &step) {
+  if (step.kind != NetworkExecutionOpKind::Dense || !EndsWith(step.name, ".se"))
+    return;
+
+  auto *w1 = FindTensorSuffix(step, ".w1");
+  auto *b1 = FindTensorSuffix(step, ".b1");
+  auto *w2 = FindTensorSuffix(step, ".w2");
+  auto *b2 = FindTensorSuffix(step, ".b2");
+  if (!w1 || !b1 || !w2 || !b2 || b1->elements == 0 || b2->elements == 0)
+    return;
+
+  InferMatrixFromBias(w1, b1);
+  if (w2->elements == b2->elements * b1->elements) {
+    SetFlatShape(*w2, {static_cast<std::uint32_t>(b2->elements),
+                       static_cast<std::uint32_t>(b1->elements)});
+    SetFlatShape(*b2, {static_cast<std::uint32_t>(b2->elements)});
+  } else {
+    InferMatrixFromBias(w2, b2);
+  }
 }
 
 void InferFeedForwardStepShapes(NetworkResolvedExecutionStep &step) {
@@ -413,6 +461,8 @@ void InferPositionalEncodingShapes(NetworkResolvedExecutionPlan &plan) {
 
 void InferResolvedExecutionTensorShapes(NetworkResolvedExecutionPlan &plan) {
   for (auto &step : plan.steps) {
+    InferConvolutionStepShapes(step);
+    InferSqueezeExciteStepShapes(step);
     InferDenseStepShapes(step);
     InferFeedForwardStepShapes(step);
     InferAttentionStepShapes(step);

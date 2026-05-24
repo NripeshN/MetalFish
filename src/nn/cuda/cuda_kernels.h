@@ -48,6 +48,14 @@ void LaunchBiasActivationKernel(float *input, const float *bias, float *output,
                                 int rows, int width, CudaActivationKind kind,
                                 cudaStream_t stream = nullptr);
 
+void LaunchConvolution2DKernel(const float *input, const float *weights,
+                               const float *bias, float *output,
+                               int batch_size, int squares,
+                               int input_channels, int output_channels,
+                               int kernel_size, CudaActivationKind activation,
+                               bool apply_activation,
+                               cudaStream_t stream = nullptr);
+
 void LaunchGateKernel(const float *input, const float *weights, float *output,
                       int rows, int width, int gate_rows, CudaGateKind kind,
                       cudaStream_t stream = nullptr);
@@ -106,6 +114,12 @@ void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
                                          int batch_size, int planes,
                                          int squares,
                                          cudaStream_t stream = nullptr);
+
+void LaunchExpandPackedInputPlanesNchwKernel(const std::uint64_t *masks,
+                                             const float *values,
+                                             float *expanded, int batch_size,
+                                             int planes, int squares,
+                                             cudaStream_t stream = nullptr);
 
 void LaunchExpandPackedInputPlanesWithPositionInputKernel(
     const std::uint64_t *masks, const float *values, float *expanded,

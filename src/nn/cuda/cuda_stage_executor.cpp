@@ -78,6 +78,13 @@ void RequireDenseTensors(const NetworkResolvedExecutionStep &dense) {
   }
 }
 
+void RequireConvolutionTensors(const NetworkResolvedExecutionStep &convolution) {
+  if (convolution.kind != NetworkExecutionOpKind::Convolution ||
+      convolution.tensors.size() < 2) {
+    throw std::runtime_error("CUDA convolution stage has missing tensors");
+  }
+}
+
 void RequireLayerNormTensors(const NetworkResolvedExecutionStep &norm) {
   if (norm.kind != NetworkExecutionOpKind::LayerNorm ||
       norm.tensors.size() < 2) {
@@ -523,6 +530,18 @@ bool IsStaticPositionEmbeddingStage(const NetworkResolvedExecutionPlan &plan,
          step.name == "body.input_embedding";
 }
 
+bool ConvolutionUsesPackedInput(std::string_view name) {
+  return name == "body.input";
+}
+
+bool ConvolutionAppliesActivation(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &step) {
+  const std::string conv_policy_output =
+      "policy." + execution_plan.policy_head + ".policy";
+  return !(execution_plan.format.conv_policy && step.name == conv_policy_output);
+}
+
 int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
                        std::string_view name) {
   if (StartsWith(name, "body.encoder."))
@@ -783,6 +802,85 @@ void CudaStageTimingCollector::Add(std::string name,
                                    CudaExecutionScheduleKind kind,
                                    float millis) {
   records_.push_back(CudaStageTimingRecord{std::move(name), kind, millis});
+}
+
+CudaDenseStageOutput
+ExecuteConvolutionStage(const NetworkResolvedExecutionPlan &execution_plan,
+                        const NetworkResolvedExecutionStep &convolution,
+                        const CudaWeightBuffers &weights, const float *input,
+                        const std::uint64_t *input_masks,
+                        const float *input_values,
+                        const CudaExecutionTape &tape,
+                        CudaExecutionWorkspace &workspace, int batch_size,
+                        int input_rows, int input_width) {
+  if (batch_size <= 0)
+    throw std::runtime_error("CUDA convolution stage received empty batch");
+  RequireConvolutionTensors(convolution);
+
+  const auto conv_weight = TensorBySuffix(convolution, weights, ".weights");
+  const auto conv_bias = TensorBySuffix(convolution, weights, ".biases");
+  if (conv_weight.dims.size() != 4 || conv_bias.dims.size() != 1) {
+    throw std::runtime_error("CUDA convolution tensor shape is invalid");
+  }
+
+  const int output_channels = static_cast<int>(conv_weight.dims[0]);
+  const int input_channels = static_cast<int>(conv_weight.dims[1]);
+  const int kernel_size = static_cast<int>(conv_weight.dims[2]);
+  const int kernel_width = static_cast<int>(conv_weight.dims[3]);
+  const int squares = kCudaAttentionSquares;
+  if (output_channels <= 0 || input_channels <= 0 || kernel_size <= 0 ||
+      kernel_size != kernel_width || conv_bias.elements !=
+                                      static_cast<std::size_t>(output_channels)) {
+    throw std::runtime_error("CUDA convolution tensor dimensions mismatch");
+  }
+
+  const bool uses_packed_input = ConvolutionUsesPackedInput(convolution.name);
+  float *stage_input = const_cast<float *>(input);
+  if (uses_packed_input) {
+    if (!input_masks || !input_values) {
+      throw std::runtime_error(
+          "CUDA convolution input stage requires packed input buffers");
+    }
+    if (execution_plan.tensors.input_planes != input_channels ||
+        execution_plan.tensors.input_squares != squares) {
+      throw std::runtime_error("CUDA convolution input tensor plan mismatch");
+    }
+    const auto &expanded_binding =
+        tape.RequireName(convolution.name + ".expanded");
+    RequireTapeShape(expanded_binding, batch_size * input_channels, squares,
+                     "convolution input expansion");
+    stage_input = tape.Reserve(workspace, expanded_binding);
+    LaunchExpandPackedInputPlanesNchwKernel(
+        input_masks, input_values, stage_input, batch_size, input_channels,
+        squares, workspace.Stream());
+  } else {
+    if (!stage_input)
+      throw std::runtime_error("CUDA convolution stage input is missing");
+    if (input_rows != batch_size * input_channels || input_width != squares) {
+      throw std::runtime_error("CUDA convolution stage input shape mismatch");
+    }
+  }
+
+  const auto &conv_binding =
+      tape.RequireName(convolution.name + ".convolution");
+  RequireTapeShape(conv_binding, batch_size * output_channels, squares,
+                   "convolution output");
+
+  CudaDenseStageOutput output;
+  output.expanded_input = uses_packed_input ? stage_input : nullptr;
+  output.convolution = tape.Reserve(workspace, conv_binding);
+  output.output = output.convolution;
+  output.input_width = squares;
+  output.output_width = squares;
+  output.rows = batch_size * output_channels;
+
+  LaunchConvolution2DKernel(
+      stage_input, conv_weight.data, conv_bias.data, output.convolution,
+      batch_size, squares, input_channels, output_channels, kernel_size,
+      ActivationFromString(execution_plan.format.activations.default_activation),
+      ConvolutionAppliesActivation(execution_plan, convolution),
+      workspace.Stream());
+  return output;
 }
 
 CudaDenseStageOutput
@@ -1680,7 +1778,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
   const int stage_trace_run = ReserveCudaStageTraceReport(batch_size);
   int traced_stage_index = 0;
   for (const auto &entry : schedule.entries) {
-    if (entry.kind != CudaExecutionScheduleKind::DenseLayerNormStage &&
+    if (entry.kind != CudaExecutionScheduleKind::ConvolutionStage &&
+        entry.kind != CudaExecutionScheduleKind::DenseLayerNormStage &&
         entry.kind != CudaExecutionScheduleKind::DenseActivationStage &&
         entry.kind != CudaExecutionScheduleKind::GateStage &&
         entry.kind != CudaExecutionScheduleKind::AttentionLayerNormStage &&
@@ -1725,7 +1824,11 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
 
     CudaDenseStageOutput stage;
     CudaStageTimer timer(timings, step.name, entry.kind, workspace.Stream());
-    if (entry.kind == CudaExecutionScheduleKind::DenseActivationStage &&
+    if (entry.kind == CudaExecutionScheduleKind::ConvolutionStage) {
+      stage = ExecuteConvolutionStage(
+          execution_plan, step, weights, stage_input, input_masks, input_values,
+          tape, workspace, batch_size, stage_input_rows, stage_input_width);
+    } else if (entry.kind == CudaExecutionScheduleKind::DenseActivationStage &&
         IsDynamicPositionPreprocessName(step.name)) {
       stage = ExecuteDynamicPositionEncodingStage(execution_plan, step, weights,
                                                   input_masks, input_values,

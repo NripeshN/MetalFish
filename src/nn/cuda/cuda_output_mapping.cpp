@@ -93,6 +93,8 @@ SelectCompatibleStage(const NetworkTensorPlan &tensor_plan,
         entry.first_step >= execution_plan.steps.size()) {
       continue;
     }
+    if (entry.kind == CudaExecutionScheduleKind::ConvolutionStage)
+      continue;
     const auto &step = execution_plan.steps[entry.first_step];
     if (ClassifyCudaPlanStage(execution_plan, step.name) != group)
       continue;

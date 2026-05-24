@@ -123,9 +123,10 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_executor.*` is the inference execution seam.
 - `src/nn/network_execution_plan.*` builds the shared ordered and resolved
   tensor/stage plan that CUDA and future portable backends will execute.
-  Resolution now infers dense, attention, feed-forward, smolgen, positional,
-  and attention-policy matrix shapes from flat BT4 protobuf tensors while
-  preserving explicit tensor dimensions when present.
+  Resolution now infers convolution, squeeze-excite, dense, attention,
+  feed-forward, smolgen, positional, and attention-policy matrix shapes from
+  flat protobuf tensors while preserving explicit tensor dimensions when
+  present.
 - The CUDA executor seam receives the resolved plan and uploaded weight buffers,
   so real kernels can index device tensors without backend-local name lookups.
 - CUDA weight upload preserves empty optional inventory entries as zero-byte
@@ -150,7 +151,11 @@ Current CUDA backend boundary:
   concatenate generated positional channels back onto the 112 input channels.
   It also supports the static `INPUT_EMBEDDING_PE_MAP` path by appending the
   shared 64-channel positional table before `body.input_embedding`, matching
-  the Metal transformer input path.
+  the Metal transformer input path. Classical convolution stages now have NCHW
+  input expansion and same-padding 1x1/3x3 CUDA kernels wired through the shared
+  stage executor; residual convolution blocks, SE units, and non-attention
+  policy maps remain explicit unsupported schedule entries until their fused
+  CUDA path is complete.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production
@@ -173,8 +178,9 @@ Current CUDA backend boundary:
 - `src/nn/cuda/cuda_execution_tape.*` binds resolved execution steps to named
   intermediate device buffers. The current smoke executor uses it for
   dense/activation/normalization intermediates, including multi-stage
-  dense/layernorm, gate, and feed-forward/layernorm sequences; production CUDA
-  layers should extend this rather than allocating anonymous scratch. The tape
+  convolution, dense/layernorm, gate, and feed-forward/layernorm sequences;
+  production CUDA layers should extend this rather than allocating anonymous
+  scratch. The tape
   header stays planning-only and takes the workspace by forward declaration, so
   non-CUDA host tooling can inspect buffer layouts without including CUDA
   runtime headers. Attention tape bindings now reserve explicit Q/K/V, score,
@@ -183,9 +189,9 @@ Current CUDA backend boundary:
   geometry. Attention-policy heads reserve both raw scratch logits and mapped
   1858-policy logits.
 - `src/nn/cuda/cuda_execution_schedule.*` classifies resolved plan steps into
-  supported dense/activation stages, supported dense/layernorm stages,
-  supported gate stages, supported adjacent attention/layernorm stages,
-  supported attention/smolgen/layernorm stages,
+  supported convolution stages, supported dense/activation stages, supported
+  dense/layernorm stages, supported gate stages, supported adjacent
+  attention/layernorm stages, supported attention/smolgen/layernorm stages,
   supported feed-forward stages, supported non-output positional encoding
   metadata stages, supported attention-policy map stages, CUDA-managed
   boundaries, and explicit unsupported operations before any kernels launch.
@@ -201,8 +207,9 @@ Current CUDA backend boundary:
   weights without depending on CUDA. `src/nn/cuda/cuda_attention_plan.*` keeps
   CUDA compatibility wrappers around that common plan.
 - `src/nn/cuda/cuda_stage_executor.*` owns reusable dense/activation/layernorm
-  stage execution, input-embedding gate execution, feed-forward residual
-  layernorm execution, attention Q/K/V projection launches, attention
+  stage execution, standalone convolution execution, input-embedding gate
+  execution, feed-forward residual layernorm execution, attention Q/K/V
+  projection launches, attention
   score/softmax/context execution, attention output projection launches,
   attention residual layernorm execution, smolgen compress/dense/layernorm
   execution with global positional bias injection, and attention-policy map

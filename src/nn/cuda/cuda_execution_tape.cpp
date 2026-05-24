@@ -41,6 +41,28 @@ int DenseOutputWidth(const NetworkResolvedExecutionStep &dense) {
   return static_cast<int>(width);
 }
 
+int ConvolutionOutputChannels(const NetworkResolvedExecutionStep &convolution) {
+  if (convolution.kind != NetworkExecutionOpKind::Convolution)
+    throw std::runtime_error("CUDA execution tape convolution tensor is invalid");
+  const NetworkResolvedTensorRef *weights = nullptr;
+  for (const auto &tensor : convolution.tensors) {
+    constexpr std::string_view kWeightSuffix = ".weights";
+    if (tensor.name.size() >= kWeightSuffix.size() &&
+        std::string_view(tensor.name).substr(tensor.name.size() -
+                                             kWeightSuffix.size()) ==
+            kWeightSuffix) {
+      weights = &tensor;
+      break;
+    }
+  }
+  if (!weights || weights->dims.size() != 4)
+    throw std::runtime_error("CUDA execution tape convolution tensor is invalid");
+  const auto channels = weights->dims[0];
+  if (channels == 0)
+    throw std::runtime_error("CUDA execution tape convolution channels is zero");
+  return static_cast<int>(channels);
+}
+
 int DenseInputWidth(const NetworkResolvedExecutionStep &dense) {
   if (dense.kind != NetworkExecutionOpKind::Dense || dense.tensors.empty() ||
       dense.tensors[0].dims.size() != 2)
@@ -187,6 +209,8 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
   switch (role) {
   case CudaExecutionBufferRole::DenseOutput:
     return "dense_output";
+  case CudaExecutionBufferRole::ConvolutionOutput:
+    return "convolution_output";
   case CudaExecutionBufferRole::ActivationOutput:
     return "activation_output";
   case CudaExecutionBufferRole::NormalizedOutput:
@@ -314,6 +338,21 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
        ++step_index) {
     const auto &step = plan.steps[step_index];
     switch (step.kind) {
+    case NetworkExecutionOpKind::Convolution: {
+      const int width = ConvolutionOutputChannels(step);
+      if (step.name == "body.input") {
+        tape.Add(step.name + ".expanded",
+                 CudaExecutionBufferRole::InputPlaneExpanded,
+                 batch_size * plan.tensors.input_planes,
+                 plan.tensors.input_squares);
+      }
+      tape.Add(step.name + ".convolution",
+               CudaExecutionBufferRole::ConvolutionOutput,
+               batch_size * width, kCudaAttentionSquares);
+      current_rows = batch_size * width;
+      current_width = kCudaAttentionSquares;
+      break;
+    }
     case NetworkExecutionOpKind::Dense: {
       if (IsSmolgenDenseName(step.name))
         break;

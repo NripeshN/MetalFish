@@ -24,6 +24,7 @@ struct CudaWorkspaceSmokeResult;
 
 enum class CudaExecutionBufferRole {
   DenseOutput,
+  ConvolutionOutput,
   ActivationOutput,
   NormalizedOutput,
   GateOutput,

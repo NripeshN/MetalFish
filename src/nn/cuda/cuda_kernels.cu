@@ -256,6 +256,53 @@ __global__ void BiasActivationKernel(float *input, const float *bias,
   output[index] = ApplyActivationValue(value, kind);
 }
 
+__global__ void Convolution2DKernel(const float *input, const float *weights,
+                                    const float *bias, float *output,
+                                    int squares, int input_channels,
+                                    int output_channels, int kernel_size,
+                                    CudaActivationKind activation,
+                                    bool apply_activation, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  constexpr int kBoardSide = 8;
+  const int square = index % squares;
+  const int out_channel = (index / squares) % output_channels;
+  const int batch = index / (output_channels * squares);
+  const int rank = square / kBoardSide;
+  const int file = square % kBoardSide;
+  const int radius = kernel_size / 2;
+
+  float sum = bias ? bias[out_channel] : 0.0f;
+  for (int in_channel = 0; in_channel < input_channels; ++in_channel) {
+    for (int ky = 0; ky < kernel_size; ++ky) {
+      const int src_rank = rank + ky - radius;
+      if (src_rank < 0 || src_rank >= kBoardSide)
+        continue;
+      for (int kx = 0; kx < kernel_size; ++kx) {
+        const int src_file = file + kx - radius;
+        if (src_file < 0 || src_file >= kBoardSide)
+          continue;
+        const int src_square = src_rank * kBoardSide + src_file;
+        const std::size_t input_index =
+            (static_cast<std::size_t>(batch) * input_channels + in_channel) *
+                squares +
+            src_square;
+        const std::size_t weight_index =
+            (((static_cast<std::size_t>(out_channel) * input_channels +
+               in_channel) *
+                  kernel_size +
+              ky) *
+                 kernel_size +
+             kx);
+        sum += input[input_index] * weights[weight_index];
+      }
+    }
+  }
+  output[index] = apply_activation ? ApplyActivationValue(sum, activation) : sum;
+}
+
 __global__ void GateKernel(const float *input, const float *weights,
                            float *output, int width, int total, int gate_rows,
                            CudaGateKind kind) {
@@ -782,6 +829,22 @@ __global__ void ExpandPackedInputPlanesKernel(const std::uint64_t *masks,
   expanded[index] = (masks[packed_index] & bit) ? values[packed_index] : 0.0f;
 }
 
+__global__ void ExpandPackedInputPlanesNchwKernel(const std::uint64_t *masks,
+                                                  const float *values,
+                                                  float *expanded, int planes,
+                                                  int squares, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int square = index % squares;
+  const int plane = (index / squares) % planes;
+  const int batch = index / (planes * squares);
+  const int packed_index = batch * planes + plane;
+  const std::uint64_t bit = 1ULL << square;
+  expanded[index] = (masks[packed_index] & bit) ? values[packed_index] : 0.0f;
+}
+
 __global__ void ExpandPackedInputPlanesWithPositionInputKernel(
     const std::uint64_t *masks, const float *values, float *expanded,
     float *position_input, int planes, int position_planes, int squares,
@@ -1073,6 +1136,40 @@ void LaunchResidualLayerNormKernel(const float *parent, const float *secondary,
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("ResidualLayerNormKernel synchronize", status));
+  }
+}
+
+void LaunchConvolution2DKernel(const float *input, const float *weights,
+                               const float *bias, float *output,
+                               int batch_size, int squares,
+                               int input_channels, int output_channels,
+                               int kernel_size, CudaActivationKind activation,
+                               bool apply_activation, cudaStream_t stream) {
+  if (!input || !weights || !output)
+    throw std::runtime_error("CUDA convolution kernel received null buffer");
+  if (batch_size <= 0 || squares != 64 || input_channels <= 0 ||
+      output_channels <= 0 ||
+      (kernel_size != 1 && kernel_size != 3)) {
+    throw std::runtime_error("CUDA convolution dimensions are invalid");
+  }
+
+  const int total = batch_size * squares * output_channels;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  Convolution2DKernel<<<blocks, kThreads, 0, stream>>>(
+      input, weights, bias, output, squares, input_channels, output_channels,
+      kernel_size, activation, apply_activation, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("Convolution2DKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("Convolution2DKernel synchronize", status));
   }
 }
 
@@ -1407,6 +1504,37 @@ void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
   }
 }
 
+void LaunchExpandPackedInputPlanesNchwKernel(const std::uint64_t *masks,
+                                             const float *values,
+                                             float *expanded, int batch_size,
+                                             int planes, int squares,
+                                             cudaStream_t stream) {
+  if (!masks || !values || !expanded)
+    throw std::runtime_error(
+        "CUDA NCHW input expansion kernel received null buffer");
+  if (batch_size <= 0 || planes <= 0 || squares <= 0 || squares > 64) {
+    throw std::runtime_error("CUDA NCHW input expansion dimensions are invalid");
+  }
+
+  const int total = batch_size * planes * squares;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  ExpandPackedInputPlanesNchwKernel<<<blocks, kThreads, 0, stream>>>(
+      masks, values, expanded, planes, squares, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("ExpandPackedInputPlanesNchwKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "ExpandPackedInputPlanesNchwKernel synchronize", status));
+  }
+}
+
 void LaunchExpandPackedInputPlanesWithPositionInputKernel(
     const std::uint64_t *masks, const float *values, float *expanded,
     float *position_input, int batch_size, int planes, int position_planes,
@@ -1716,6 +1844,92 @@ CudaKernelSmokeResult RunActivationKernelSmoke() {
 
   FreeDevice(device_input);
   FreeDevice(device_output);
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunConvolutionKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 1;
+  constexpr int kSquares = 64;
+  constexpr int kInputChannels = 1;
+  constexpr int kOutputChannels = 1;
+  constexpr int kKernel = 3;
+  const std::vector<float> input(kBatch * kInputChannels * kSquares, 1.0f);
+  const std::vector<float> weights(
+      kOutputChannels * kInputChannels * kKernel * kKernel, 1.0f);
+  const std::vector<float> bias(kOutputChannels, 0.0f);
+  std::vector<float> actual(kBatch * kOutputChannels * kSquares, 0.0f);
+  std::vector<float> expected(actual.size(), 0.0f);
+
+  for (int square = 0; square < kSquares; ++square) {
+    const int rank = square / 8;
+    const int file = square % 8;
+    int count = 0;
+    for (int dy = -1; dy <= 1; ++dy) {
+      const int src_rank = rank + dy;
+      if (src_rank < 0 || src_rank >= 8)
+        continue;
+      for (int dx = -1; dx <= 1; ++dx) {
+        const int src_file = file + dx;
+        if (src_file >= 0 && src_file < 8)
+          ++count;
+      }
+    }
+    expected[static_cast<std::size_t>(square)] = static_cast<float>(count);
+  }
+
+  float *device_input = nullptr;
+  float *device_weights = nullptr;
+  float *device_bias = nullptr;
+  float *device_output = nullptr;
+  try {
+    AllocateDevice(&device_input, input.size(), "cudaMalloc(conv_input)");
+    AllocateDevice(&device_weights, weights.size(), "cudaMalloc(conv_weights)");
+    AllocateDevice(&device_bias, bias.size(), "cudaMalloc(conv_bias)");
+    AllocateDevice(&device_output, actual.size(), "cudaMalloc(conv_output)");
+
+    UploadFloats(device_input, input, "cudaMemcpy(conv_input)");
+    UploadFloats(device_weights, weights, "cudaMemcpy(conv_weights)");
+    UploadFloats(device_bias, bias, "cudaMemcpy(conv_bias)");
+
+    LaunchConvolution2DKernel(
+        device_input, device_weights, device_bias, device_output, kBatch,
+        kSquares, kInputChannels, kOutputChannels, kKernel,
+        CudaActivationKind::Relu, false);
+    DownloadFloats(actual, device_output, "cudaMemcpy(conv_output)");
+  } catch (const std::exception &e) {
+    FreeDevice(device_input);
+    FreeDevice(device_weights);
+    FreeDevice(device_bias);
+    FreeDevice(device_output);
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  FreeDevice(device_input);
+  FreeDevice(device_weights);
+  FreeDevice(device_bias);
+  FreeDevice(device_output);
+
+  for (std::size_t i = 0; i < expected.size(); ++i) {
+    if (std::fabs(actual[i] - expected[i]) > 1e-5f) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA convolution kernel output mismatch";
+      return result;
+    }
+  }
 
   result.status = CudaSmokeStatus::Success;
   result.message = RuntimeCudaDeviceSummary();

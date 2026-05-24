@@ -29,6 +29,7 @@ class CudaWeightBuffers;
 
 struct CudaDenseStageOutput {
   float *dense = nullptr;
+  float *convolution = nullptr;
   float *activation = nullptr;
   float *normalized = nullptr;
   float *gated = nullptr;
@@ -99,6 +100,16 @@ public:
 private:
   std::vector<CudaStageTimingRecord> records_;
 };
+
+CudaDenseStageOutput
+ExecuteConvolutionStage(const NetworkResolvedExecutionPlan &execution_plan,
+                        const NetworkResolvedExecutionStep &convolution,
+                        const CudaWeightBuffers &weights, const float *input,
+                        const std::uint64_t *input_masks,
+                        const float *input_values,
+                        const CudaExecutionTape &tape,
+                        CudaExecutionWorkspace &workspace, int batch_size,
+                        int input_rows, int input_width);
 
 CudaDenseStageOutput
 ExecuteDenseActivationStage(const NetworkResolvedExecutionPlan &execution_plan,

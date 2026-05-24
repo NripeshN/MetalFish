@@ -33,6 +33,18 @@ BoundaryEntry(const NetworkResolvedExecutionPlan &plan,
 }
 
 CudaExecutionScheduleEntry
+ConvolutionEntry(const NetworkResolvedExecutionPlan &plan,
+                 std::size_t convolution_index) {
+  const auto &convolution = plan.steps[convolution_index];
+  return CudaExecutionScheduleEntry{CudaExecutionScheduleKind::ConvolutionStage,
+                                    convolution_index,
+                                    std::numeric_limits<std::size_t>::max(),
+                                    convolution.kind,
+                                    convolution.name,
+                                    "standalone convolution"};
+}
+
+CudaExecutionScheduleEntry
 DenseLayerNormEntry(const NetworkResolvedExecutionPlan &plan,
                     std::size_t dense_index, std::size_t norm_index) {
   const auto &dense = plan.steps[dense_index];
@@ -156,11 +168,19 @@ bool IsSmolgenNormFor(const NetworkResolvedExecutionStep &step,
          step.name == attention.name + ".smolgen.norm";
 }
 
+bool IsResidualConvolution(const NetworkResolvedExecutionStep &step) {
+  return step.kind == NetworkExecutionOpKind::Convolution &&
+         step.name.rfind("body.residual.", 0) == 0;
+}
+
 void AddEntry(CudaExecutionSchedule &schedule,
               CudaExecutionScheduleEntry entry) {
   switch (entry.kind) {
   case CudaExecutionScheduleKind::Boundary:
     ++schedule.boundary_count;
+    break;
+  case CudaExecutionScheduleKind::ConvolutionStage:
+    ++schedule.convolution_stage_count;
     break;
   case CudaExecutionScheduleKind::DenseActivationStage:
     ++schedule.dense_activation_stage_count;
@@ -199,6 +219,8 @@ std::string CudaExecutionScheduleKindName(CudaExecutionScheduleKind kind) {
   switch (kind) {
   case CudaExecutionScheduleKind::Boundary:
     return "boundary";
+  case CudaExecutionScheduleKind::ConvolutionStage:
+    return "convolution_stage";
   case CudaExecutionScheduleKind::DenseActivationStage:
     return "dense_activation_stage";
   case CudaExecutionScheduleKind::DenseLayerNormStage:
@@ -233,6 +255,7 @@ CudaExecutionSchedule::FirstUnsupported() const {
 std::string CudaExecutionSchedule::Summary() const {
   std::ostringstream out;
   out << entries.size() << " CUDA schedule entries, "
+      << convolution_stage_count << " convolution stages, "
       << dense_activation_stage_count << " dense/activation stages, "
       << dense_layernorm_stage_count << " dense/layernorm stages, "
       << gate_stage_count << " gate stages, " << attention_layernorm_stage_count
@@ -257,6 +280,18 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
     const auto &step = plan.steps[i];
     if (IsBoundary(step.kind)) {
       AddEntry(schedule, BoundaryEntry(plan, i));
+      continue;
+    }
+
+    if (step.kind == NetworkExecutionOpKind::Convolution) {
+      if (IsResidualConvolution(step)) {
+        AddEntry(schedule,
+                 UnsupportedEntry(plan, i,
+                                  "CUDA residual convolution block not "
+                                  "implemented yet"));
+      } else {
+        AddEntry(schedule, ConvolutionEntry(plan, i));
+      }
       continue;
     }
 

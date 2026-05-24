@@ -1757,6 +1757,51 @@ void test_cuda_execution_schedule(TestCounter &tc) {
                  NN::Cuda::CudaExecutionScheduleKind::DenseActivationStage,
          "CUDA schedule should classify dense-only stages explicitly", tc);
 
+  NN::NetworkResolvedExecutionPlan convolution;
+  convolution.tensors.input_planes = 3;
+  convolution.tensors.input_squares = NN::kPackedInputSquareCount;
+  convolution.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Convolution,
+      "body.input",
+      {
+          {0,
+           "body.input.weights",
+           4 * 3 * 3 * 3,
+           {4, 3, 3, 3},
+           NN::NetworkWeightTensorKind::ConvWeight},
+          {1,
+           "body.input.biases",
+           4,
+           {4},
+           NN::NetworkWeightTensorKind::ConvBias},
+      }});
+  const auto convolution_schedule =
+      NN::Cuda::CreateCudaExecutionSchedule(convolution);
+  expect(convolution_schedule.FullySupported(),
+         "standalone convolution schedule should be supported", tc);
+  expect(convolution_schedule.convolution_stage_count == 1,
+         "CUDA schedule should count convolution stages", tc);
+  expect(convolution_schedule.entries.size() == 1 &&
+             convolution_schedule.entries[0].kind ==
+                 NN::Cuda::CudaExecutionScheduleKind::ConvolutionStage,
+         "CUDA schedule should classify convolution stages explicitly", tc);
+  const auto convolution_tape =
+      NN::Cuda::CreateResolvedExecutionTape(convolution, 2);
+  expect(convolution_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::InputPlaneExpanded) == 1,
+         "CUDA tape should allocate convolution input expansion scratch", tc);
+  expect(convolution_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::ConvolutionOutput) == 1,
+         "CUDA tape should allocate convolution output scratch", tc);
+  expect(convolution_tape.RequireName("body.input.expanded").rows == 2 * 3 &&
+             convolution_tape.RequireName("body.input.expanded").width ==
+                 NN::kPackedInputSquareCount,
+         "CUDA tape should store convolution input expansion as NCHW rows", tc);
+  expect(convolution_tape.RequireName("body.input.convolution").rows == 2 * 4 &&
+             convolution_tape.RequireName("body.input.convolution").width ==
+                 NN::kPackedInputSquareCount,
+         "CUDA tape should store convolution outputs as NCHW rows", tc);
+
   NN::NetworkResolvedExecutionPlan static_pe;
   static_pe.format.input_embedding = NN::INPUT_EMBEDDING_PE_MAP;
   static_pe.tensors.input_planes = NN::kPackedInputPlaneCount;
@@ -2407,6 +2452,12 @@ void test_cuda_dense_kernels(TestCounter &tc) {
   expect(smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA dense affine kernel should pass or skip without a device", tc);
+
+  auto convolution_smoke = NN::Cuda::RunConvolutionKernelSmoke();
+  std::cout << "    " << convolution_smoke.message << std::endl;
+  expect(convolution_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             convolution_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA convolution kernel should pass or skip without a device", tc);
 
   auto layernorm_smoke = NN::Cuda::RunLayerNormKernelSmoke();
   std::cout << "    " << layernorm_smoke.message << std::endl;
