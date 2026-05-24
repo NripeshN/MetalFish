@@ -2046,10 +2046,10 @@ void test_cuda_execution_schedule(TestCounter &tc) {
              NN::Cuda::CudaExecutionScheduleKind::PolicyMapStage,
          "CUDA schedule should classify policy-map stages explicitly", tc);
 
-  NN::NetworkResolvedExecutionPlan conv_policy_map = policy_map;
-  conv_policy_map.format.attention_policy = false;
+  NN::NetworkResolvedExecutionPlan conv_policy_map;
   conv_policy_map.format.conv_policy = true;
-  conv_policy_map.steps.back().tensors.clear();
+  conv_policy_map.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::PolicyMap, "policy.smoke.policy_map", {}});
   const auto conv_policy_map_schedule =
       NN::Cuda::CreateCudaExecutionSchedule(conv_policy_map);
   expect(conv_policy_map_schedule.FullySupported(),
