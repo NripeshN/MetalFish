@@ -1067,7 +1067,11 @@ void test_hybrid_config() {
     EXPECT(tc, HybridUseMCTSPrimaryForFixedNodeBudget(limits));
     EXPECT(tc, HybridLowNodeABProbeNodes(limits.nodes) == 64);
 
-    limits.nodes = 513;
+    limits.nodes = 1024;
+    EXPECT(tc, HybridUseMCTSPrimaryForFixedNodeBudget(limits));
+    EXPECT(tc, HybridLowNodeABProbeNodes(limits.nodes) == 64);
+
+    limits.nodes = 1025;
     EXPECT(tc, !HybridUseMCTSPrimaryForFixedNodeBudget(limits));
 
     limits.nodes = 50;
