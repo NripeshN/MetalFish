@@ -10,7 +10,10 @@
 #include "nn/encoder.h"
 #include "nn/loader.h"
 #include "nn/network.h"
+#include "nn/network_execution_plan.h"
 #include "nn/network_format.h"
+#include "nn/network_tensor_plan.h"
+#include "nn/network_weight_inventory.h"
 #include "nn/policy_map.h"
 #include "search/tt.h"
 #include "syzygy/tbprobe.h"
@@ -48,6 +51,7 @@ struct Options {
   int iterations = 1;
   bool full_input = false;
   bool full_policy = false;
+  bool metadata_only = false;
   std::string ready_file;
   std::string start_file;
 };
@@ -115,6 +119,7 @@ void PrintUsage(const char *argv0) {
          " [--coreml-compute-units cpu|cpu-gpu|cpu-ne|all]"
          " [--fen <fen>] [--top n] [--batch-size n] [--warmup n]"
          " [--iterations n] [--full-input] [--full-policy]"
+         " [--metadata-only]"
          " [--ready-file path] [--start-file path]\n";
 }
 
@@ -150,6 +155,8 @@ Options ParseArgs(int argc, char **argv) {
       options.full_input = true;
     } else if (arg == "--full-policy") {
       options.full_policy = true;
+    } else if (arg == "--metadata-only") {
+      options.metadata_only = true;
     } else if (arg == "--ready-file") {
       options.ready_file = require_value("--ready-file");
     } else if (arg == "--start-file") {
@@ -174,7 +181,8 @@ Options ParseArgs(int argc, char **argv) {
     throw std::runtime_error("--iterations must be positive");
   if (options.backend.empty())
     throw std::runtime_error("--backend must be non-empty");
-  if (options.backend == "coreml" && options.coreml_model.empty())
+  if (!options.metadata_only && options.backend == "coreml" &&
+      options.coreml_model.empty())
     throw std::runtime_error("--coreml-model is required for backend coreml");
   return options;
 }
@@ -249,6 +257,64 @@ void WaitForFile(const std::string &path) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 }
 
+void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
+                       const NN::NetworkFormatDescriptor &descriptor) {
+  const auto tensor_plan = NN::CreateNetworkTensorPlan(descriptor);
+  NN::MultiHeadWeights decoded_weights(weights.weights());
+  const std::string policy_head = NN::SelectPolicyHeadName(decoded_weights);
+  const std::string value_head = NN::SelectValueHeadName(decoded_weights);
+
+  const auto tensor_validation = NN::ValidateNetworkTensorPlan(
+      tensor_plan, decoded_weights, policy_head, value_head);
+  if (!tensor_validation.ok())
+    throw std::runtime_error("tensor plan validation failed: " +
+                             tensor_validation.Summary());
+
+  const auto inventory = NN::CreateNetworkWeightInventory(
+      decoded_weights, policy_head, value_head, tensor_plan);
+  std::string shape_error;
+  if (!inventory.AllShapesMatchElements(&shape_error))
+    throw std::runtime_error("weight inventory shape validation failed: " +
+                             shape_error);
+
+  const auto execution_plan = NN::CreateNetworkExecutionPlan(
+      descriptor, tensor_plan, policy_head, value_head, inventory);
+  const auto execution_validation =
+      execution_plan.ValidateAgainstInventory(inventory);
+  if (!execution_validation.ok())
+    throw std::runtime_error("execution plan validation failed: " +
+                             execution_validation.Summary());
+
+  const auto resolved_plan =
+      NN::ResolveNetworkExecutionPlan(execution_plan, inventory);
+
+  std::cout << std::setprecision(9);
+  std::cout << '{';
+  std::cout << "\"weights\":\"" << JsonEscape(options.weights) << '"';
+  std::cout << ",\"backend\":\"" << JsonEscape(options.backend) << '"';
+  std::cout << ",\"metadata_only\":true";
+  std::cout << ",\"format\":\"" << JsonEscape(descriptor.Summary()) << '"';
+  std::cout << ",\"input_format\":"
+            << static_cast<int>(weights.format().network_format().input());
+  std::cout << ",\"tensor_plan\":\""
+            << JsonEscape(tensor_plan.Summary()) << '"';
+  std::cout << ",\"policy_head\":\"" << JsonEscape(policy_head) << '"';
+  std::cout << ",\"value_head\":\"" << JsonEscape(value_head) << '"';
+  std::cout << ",\"inventory\":\"" << JsonEscape(inventory.Summary())
+            << '"';
+  std::cout << ",\"execution_plan\":\""
+            << JsonEscape(resolved_plan.Summary()) << '"';
+  std::cout << ",\"tensor_count\":" << inventory.tensors.size();
+  std::cout << ",\"parameter_elements\":" << inventory.TotalElements();
+  std::cout << ",\"parameter_bytes\":" << inventory.TotalBytes();
+  std::cout << ",\"steps\":" << resolved_plan.steps.size();
+  std::cout << ",\"attention_steps\":"
+            << resolved_plan.StepCount(NN::NetworkExecutionOpKind::Attention);
+  std::cout << ",\"feed_forward_steps\":"
+            << resolved_plan.StepCount(NN::NetworkExecutionOpKind::FeedForward);
+  std::cout << "}\n";
+}
+
 void RunProbe(const Options &options) {
   Bitboards::init();
   Position::init();
@@ -257,6 +323,11 @@ void RunProbe(const Options &options) {
   NN::WeightsFile weights = NN::LoadWeightsFromFile(options.weights);
   const auto input_format = weights.format().network_format().input();
   const auto descriptor = NN::DescribeNetworkFormat(weights);
+
+  if (options.metadata_only) {
+    PrintMetadataOnly(options, weights, descriptor);
+    return;
+  }
 
   StateInfo state;
   Position position;

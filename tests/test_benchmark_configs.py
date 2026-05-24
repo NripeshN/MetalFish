@@ -630,6 +630,9 @@ def main() -> int:
             "MSVC is the required host toolchain for future Windows CUDA builds.",
             "portable CPU transformer fallback",
             "CPU transformer backend is for correctness/fallback only",
+            "metalfish_nn_probe",
+            "--metadata-only",
+            "BT4-1024x15x32h-swa-6147500.pb",
         ],
     )
     assert_file_contains(

@@ -55,7 +55,7 @@ jobs:
             -DMETALFISH_ENABLE_IPO=OFF
 
       - name: Build
-        run: cmake --build build-linux --target metalfish metalfish_tests
+        run: cmake --build build-linux --target metalfish metalfish_tests metalfish_nn_probe
 
       - name: Test
         run: |
@@ -72,6 +72,11 @@ jobs:
           python3 tests/test_lichess_bot.py
           python3 tests/test_lichess_puzzle_runner.py
           python3 tests/test_hybrid_regression_compare.py
+          python3 tools/download_engine_networks.py --bt4-only
+          ./build-linux/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend cpu \
+            --metadata-only
           python3 tools/uci_smoke.py --engine build-linux/metalfish --go "depth 3"
           python3 tools/uci_smoke.py \
             --engine build-linux/metalfish \
