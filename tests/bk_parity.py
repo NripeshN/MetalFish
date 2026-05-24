@@ -314,6 +314,8 @@ def setup_metalfish(
     minibatch_size: int,
     mcts_kld: float,
     mcts_parallel_search: bool,
+    mcts_policy_temperature: Optional[float],
+    mcts_cpuct_at_root: Optional[float],
 ) -> None:
     mcts_threads = max(1, threads) if mcts_parallel_search else 1
     sess.setoption("UseHybridSearch", "false")
@@ -328,6 +330,11 @@ def setup_metalfish(
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
     sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))
+    if mcts_policy_temperature is not None:
+        sess.setoption("MCTSPolicyTemperature", str(mcts_policy_temperature))
+        sess.setoption("MCTSPolicySoftmaxTemp", str(mcts_policy_temperature))
+    if mcts_cpuct_at_root is not None:
+        sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
     sess.send("isready")
     sess.wait_for("readyok", 120)
 
@@ -371,6 +378,8 @@ def setup_metalfish_hybrid(
     ane_root_hint_count: int,
     ane_root_hint_wait_ms: int,
     ane_min_budget_ms: int,
+    mcts_policy_temperature: Optional[float],
+    mcts_cpuct_at_root: Optional[float],
 ) -> None:
     total_threads = max(3, threads, mcts_threads + ab_threads)
     sess.setoption("UseMCTS", "false")
@@ -387,6 +396,11 @@ def setup_metalfish_hybrid(
     sess.setoption("MCTSMinibatchSize", str(mcts_minibatch))
     sess.setoption("MCTSParityPreset", "true" if deterministic else "false")
     sess.setoption("MCTSAddDirichletNoise", "false")
+    if mcts_policy_temperature is not None:
+        sess.setoption("MCTSPolicyTemperature", str(mcts_policy_temperature))
+        sess.setoption("MCTSPolicySoftmaxTemp", str(mcts_policy_temperature))
+    if mcts_cpuct_at_root is not None:
+        sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))
     sess.setoption("HybridMCTSMinimumKLDGainPerNode", str(hybrid_mcts_kld))
     sess.setoption(
         "HybridABRootRejectMCTS",
@@ -701,6 +715,8 @@ def write_json_report(
             "hybrid_ane_root_hint_count": args.hybrid_ane_root_hint_count,
             "hybrid_ane_root_hint_wait_ms": args.hybrid_ane_root_hint_wait_ms,
             "hybrid_ane_min_budget_ms": args.hybrid_ane_min_budget_ms,
+            "mcts_policy_temperature": args.mcts_policy_temperature,
+            "mcts_cpuct_at_root": args.mcts_cpuct_at_root,
             "mcts_parallel_search": args.mcts_parallel_search,
         },
         "engines": {},
@@ -792,6 +808,8 @@ def run_once(
                 args.mcts_minibatch_size,
                 args.mcts_kld,
                 args.mcts_parallel_search,
+                args.mcts_policy_temperature,
+                args.mcts_cpuct_at_root,
             )
             s.warmup(mode, warmup_movetime_ms(movetime_ms), min(200, nodes))
             sessions["metalfish-mcts"] = s
@@ -835,6 +853,8 @@ def run_once(
                 args.hybrid_ane_root_hint_count,
                 args.hybrid_ane_root_hint_wait_ms,
                 args.hybrid_ane_min_budget_ms,
+                args.mcts_policy_temperature,
+                args.mcts_cpuct_at_root,
             )
             s.warmup(
                 mode,
@@ -996,6 +1016,18 @@ def main() -> int:
     parser.add_argument("--hybrid-ab-candidate-verify-count", type=int, default=4)
     parser.add_argument("--mcts-minibatch-size", type=int, default=0)
     parser.add_argument("--mcts-kld", type=float, default=0.00005)
+    parser.add_argument(
+        "--mcts-policy-temperature",
+        type=float,
+        default=None,
+        help="Override MCTSPolicyTemperature/MCTSPolicySoftmaxTemp for allocation probes",
+    )
+    parser.add_argument(
+        "--mcts-cpuct-at-root",
+        type=float,
+        default=None,
+        help="Override MCTSCPuctAtRoot for root allocation probes",
+    )
     parser.add_argument(
         "--mcts-parallel-search",
         action="store_true",

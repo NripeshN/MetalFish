@@ -560,6 +560,8 @@ def main() -> int:
             "--root-trace-moves",
             "--mcts-minibatch-size",
             "--mcts-kld",
+            "--mcts-policy-temperature",
+            "--mcts-cpuct-at-root",
             "--mcts-parallel-search",
             "--hybrid-ab-root-reject-mcts",
             "--hybrid-mcts-minibatch-size",
@@ -569,6 +571,8 @@ def main() -> int:
             '"MCTSParallelSearch", "true" if mcts_parallel_search else "false"',
             'sess.setoption("MCTSMinimumKLDGainPerNode", str(mcts_kld))',
             'sess.setoption("MCTSMinibatchSize", str(minibatch_size))',
+            'sess.setoption("MCTSPolicyTemperature", str(mcts_policy_temperature))',
+            'sess.setoption("MCTSCPuctAtRoot", str(mcts_cpuct_at_root))',
             '"HybridABRootRejectMCTS"',
         ],
     )
