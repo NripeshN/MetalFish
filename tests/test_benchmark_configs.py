@@ -633,6 +633,9 @@ def main() -> int:
             "metalfish_nn_probe",
             "--metadata-only",
             "--construct-backend",
+            "cpu-bt4-eval-smoke.json",
+            '"has_wdl":true',
+            '"has_moves_left":true',
             "BT4-1024x15x32h-swa-6147500.pb",
         ],
     )

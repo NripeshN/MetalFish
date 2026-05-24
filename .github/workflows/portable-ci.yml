@@ -78,6 +78,15 @@ jobs:
             --backend cpu \
             --metadata-only \
             --construct-backend
+          timeout 120 ./build-linux/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend cpu \
+            --warmup 0 \
+            --iterations 1 \
+            --top 3 \
+            > build-linux/cpu-bt4-eval-smoke.json
+          grep -q '"has_wdl":true' build-linux/cpu-bt4-eval-smoke.json
+          grep -q '"has_moves_left":true' build-linux/cpu-bt4-eval-smoke.json
           python3 tools/uci_smoke.py --engine build-linux/metalfish --go "depth 3"
           python3 tools/uci_smoke.py \
             --engine build-linux/metalfish \

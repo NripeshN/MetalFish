@@ -623,11 +623,14 @@ Current portable CPU transformer boundary:
   loading, shared tensor/inventory/execution-plan resolution, portable CPU
   backend construction, resolved tensor copies, and backend diagnostics without
   running slow BT4 inference.
-- BT4 execution still fails loudly with the first unsupported resolved stage
-  instead of falling back to the diagnostic stub. Current CPU fixture coverage
-  reaches the same attention-policy raw scratch plus 1858-logit gather contract
-  used by CUDA/Metal; the next CPU milestone is a bounded real-BT4 eval smoke
-  that proves full execution is practical enough to keep enabled in CI.
+- Linux portable CI also runs one bounded real-BT4 CPU eval through
+  `metalfish_nn_probe`, requiring decoded WDL and moves-left outputs. This is a
+  correctness/fallback smoke only; the portable CPU transformer is not a
+  strength backend.
+- Current CPU fixture coverage reaches the same attention-policy raw scratch
+  plus 1858-logit gather contract used by CUDA/Metal. Future CPU work should be
+  targeted at keeping fallback correctness cheap and portable, not at competing
+  with Metal or CUDA throughput.
 
 Portable CI builds Linux CPU, Windows MinGW CPU, and Windows MSVC CPU
 artifacts. The MSVC leg is included because Windows CUDA uses the MSVC host
@@ -644,8 +647,9 @@ backend scope explicit. Branch tip
 compile, macOS Metal, CUDA L4 runtime, and the bounded hybrid regression gate
 green while remaining current with `origin/main`. Linux portable CI also runs a
 real BT4 metadata/backend-construction probe, and Windows MSVC runs the same
-probe because it is the Windows CUDA host toolchain. The hybrid gate uses a
-bounded 300-puzzle
+probe because it is the Windows CUDA host toolchain. Linux additionally runs a
+single real BT4 CPU eval smoke capped by a 120-second timeout. The hybrid gate
+uses a bounded 300-puzzle
 offline sample for PR runs; the accepted rerun scored candidate BK repeats
 `[22, 22, 22]` versus baseline `[22, 22, 22]`, and candidate puzzles `300/300`
 versus baseline `300/300` with zero candidate errors.
