@@ -1180,7 +1180,7 @@ def main() -> int:
     parser.add_argument(
         "--hybrid-ane-root-hints",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
     )
     parser.add_argument(
         "--hybrid-ane-weights",

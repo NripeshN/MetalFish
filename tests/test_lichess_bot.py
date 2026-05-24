@@ -63,6 +63,16 @@ def test_live_defaults_avoid_crash_prone_resources() -> None:
 def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     base_options, _ = lichess_bot.build_engine_options()
     disabled = types.SimpleNamespace(ponder=True, hybrid_ane_root_probe=False)
+    default_hints = types.SimpleNamespace(
+        ponder=True,
+        hybrid_ane_root_probe=True,
+        hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
+        hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
+        hybrid_ane_compute_units="cpu-ne",
+        hybrid_ane_root_hint_count=10,
+        hybrid_ane_root_hint_wait_ms=250,
+        hybrid_ane_min_budget_ms=1000,
+    )
     enabled = types.SimpleNamespace(
         ponder=True,
         hybrid_ane_root_probe=True,
@@ -76,9 +86,16 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     )
 
     no_ane = lichess_bot.apply_runtime_engine_options(base_options, disabled)
+    with_default_hints = lichess_bot.apply_runtime_engine_options(
+        base_options, default_hints
+    )
     with_ane = lichess_bot.apply_runtime_engine_options(base_options, enabled)
 
     expect("ANE probe is opt-in", "HybridANERootProbe" not in no_ane)
+    expect(
+        "ANE root hints default off",
+        with_default_hints["HybridANERootHints"] == "false",
+    )
     expect("ANE probe option enabled", with_ane["HybridANERootProbe"] == "true")
     expect("ANE root hints option enabled", with_ane["HybridANERootHints"] == "true")
     expect("ANE weights passed", with_ane["HybridANEWeights"] == "networks/t1.pb.gz")

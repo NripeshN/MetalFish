@@ -250,7 +250,7 @@ void test_hybrid_config() {
     EXPECT(tc, config.ab_candidate_verify_count == 4);
     EXPECT(tc, config.root_pawn_lever_tiebreak);
     EXPECT(tc, !config.ane_root_probe);
-    EXPECT(tc, config.ane_root_hints);
+    EXPECT(tc, !config.ane_root_hints);
     EXPECT(tc, config.ane_compute_units == "cpu-ne");
     EXPECT(tc, config.ane_root_hint_count == 10);
     EXPECT(tc, config.ane_root_hint_wait_ms == 250);

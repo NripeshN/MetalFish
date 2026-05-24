@@ -161,7 +161,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridABCandidateVerifyCount", Option(4, 1, 10));
   options.add("HybridRootPawnLeverTieBreak", Option(true));
   options.add("HybridANERootProbe", Option(false));
-  options.add("HybridANERootHints", Option(true));
+  options.add("HybridANERootHints", Option(false));
   options.add("HybridANEConfirmMCTSOverride", Option(true));
   options.add("HybridANEWeights", Option(""));
   options.add("HybridANEModelPath", Option(""));
