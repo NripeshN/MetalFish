@@ -2,14 +2,15 @@ name: Windows CUDA Compile Gate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - ".github/workflows/windows-cuda-compile.yml"
       - "tools/run_windows_cuda_compile_gate.ps1"
+      - "tools/download_engine_networks.py"
       - "tools/uci_smoke.py"
       - "CMakeLists.txt"
-      - "src/mcts/backend_adapter.*"
-      - "src/mcts/evaluator.*"
+      - "src/hybrid/**"
+      - "src/mcts/**"
       - "src/nn/cuda/**"
       - "src/nn/encoder.*"
       - "src/nn/input_plane_packing.h"
@@ -22,6 +23,9 @@ on:
       - "src/nn/tables/**"
       - "src/nn/weights.*"
       - "src/nn/weights_file.h"
+      - "src/uci/**"
+      - "tests/nn_input_fixture.*"
+      - "tests/requirements.txt"
       - "tests/test_main.cpp"
       - "tests/test_mcts_module.cpp"
       - "tests/test_nn_comparison.cpp"

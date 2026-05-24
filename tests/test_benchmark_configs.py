@@ -790,13 +790,19 @@ def main() -> int:
     assert_file_contains(
         PROJ / ".github/workflows/windows-cuda-compile.yml",
         [
+            "branches: [main, dev]",
+            "tools/download_engine_networks.py",
             "tools/uci_smoke.py",
+            "src/hybrid/**",
+            "src/mcts/**",
             "src/nn/input_plane_packing.h",
             "src/nn/policy_map.*",
             "src/nn/proto/net.proto",
             "src/nn/tables/**",
             "src/nn/weights_file.h",
-            "src/mcts/evaluator.*",
+            "src/uci/**",
+            "tests/nn_input_fixture.*",
+            "tests/requirements.txt",
             "tests/test_mcts_module.cpp",
         ],
     )
