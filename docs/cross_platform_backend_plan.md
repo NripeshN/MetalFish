@@ -623,10 +623,10 @@ Current portable CPU transformer boundary:
   loading, shared tensor/inventory/execution-plan resolution, portable CPU
   backend construction, resolved tensor copies, and backend diagnostics without
   running slow BT4 inference.
-- Linux portable CI also runs one bounded real-BT4 CPU eval through
-  `metalfish_nn_probe`, requiring decoded WDL and moves-left outputs. This is a
-  correctness/fallback smoke only; the portable CPU transformer is not a
-  strength backend.
+- Linux portable CI and Windows MSVC portable CI also run one bounded real-BT4
+  CPU eval through `metalfish_nn_probe`, requiring decoded WDL and moves-left
+  outputs. This is a correctness/fallback smoke only; the portable CPU
+  transformer is not a strength backend.
 - Current CPU fixture coverage reaches the same attention-policy raw scratch
   plus 1858-logit gather contract used by CUDA/Metal. Future CPU work should be
   targeted at keeping fallback correctness cheap and portable, not at competing
@@ -642,14 +642,13 @@ explicit `NNBackend=stub` MCTS smoke, so portable builds verify the MCTS
 construction path cheaply. The Linux and MSVC legs additionally download BT4
 for the metadata/backend-construction probe; MinGW stays lightweight package
 coverage. The uploaded artifacts include a generated manifest that makes this
-backend scope explicit. Branch tip
-`dfe61ba7` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, Windows CUDA
-compile, macOS Metal, CUDA L4 runtime, and the bounded hybrid regression gate
-green while remaining current with `origin/main`. Linux portable CI also runs a
-real BT4 metadata/backend-construction probe, and Windows MSVC runs the same
-probe because it is the Windows CUDA host toolchain. Linux additionally runs a
-single real BT4 CPU eval smoke capped by a 120-second timeout. The hybrid gate
-uses a bounded 300-puzzle
+backend scope explicit. Recent branch-tip gates had Linux CPU, Windows MinGW
+CPU, Windows MSVC CPU, Windows CUDA compile, macOS Metal, CUDA L4 runtime, and
+the bounded hybrid regression gate green while remaining current with
+`origin/main`. Linux portable CI and Windows MSVC both run real BT4
+metadata/backend-construction and single-eval CPU fallback smokes; MSVC uses a
+180-second timeout because it is the Windows CUDA host toolchain. The hybrid
+gate uses a bounded 300-puzzle
 offline sample for PR runs; the accepted rerun scored candidate BK repeats
 `[22, 22, 22]` versus baseline `[22, 22, 22]`, and candidate puzzles `300/300`
 versus baseline `300/300` with zero candidate errors.

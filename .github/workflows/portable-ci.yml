@@ -296,6 +296,31 @@ jobs:
             --backend cpu `
             --metadata-only `
             --construct-backend
+          $cpuBt4Eval = Start-Process `
+            -FilePath ".\build-windows-msvc\metalfish_nn_probe.exe" `
+            -ArgumentList @(
+              "--weights", "networks/BT4-1024x15x32h-swa-6147500.pb",
+              "--backend", "cpu",
+              "--warmup", "0",
+              "--iterations", "1",
+              "--top", "3"
+            ) `
+            -RedirectStandardOutput "build-windows-msvc/cpu-bt4-eval-smoke.json" `
+            -NoNewWindow `
+            -PassThru
+          if (-not $cpuBt4Eval.WaitForExit(180000)) {
+            $cpuBt4Eval.Kill()
+            throw "CPU BT4 eval smoke timed out"
+          }
+          if ($cpuBt4Eval.ExitCode -ne 0) {
+            throw "CPU BT4 eval smoke failed with exit $($cpuBt4Eval.ExitCode)"
+          }
+          if (-not (Select-String -Path build-windows-msvc/cpu-bt4-eval-smoke.json -Pattern '"has_wdl":true' -Quiet)) {
+            throw "CPU BT4 eval smoke did not decode WDL"
+          }
+          if (-not (Select-String -Path build-windows-msvc/cpu-bt4-eval-smoke.json -Pattern '"has_moves_left":true' -Quiet)) {
+            throw "CPU BT4 eval smoke did not decode moves-left"
+          }
           python tools/uci_smoke.py --engine build-windows-msvc/metalfish.exe --go "depth 3"
           python tools/uci_smoke.py `
             --engine build-windows-msvc/metalfish.exe `
