@@ -56,7 +56,7 @@ jobs:
 
       - name: Build
         run: |
-          cmake --build build --target metalfish metalfish_tests \
+          cmake --build build --target metalfish metalfish_tests test_nn_comparison metalfish_nn_probe \
             -j"$(sysctl -n hw.ncpu)"
 
       - name: Run C++ tests
@@ -102,6 +102,25 @@ jobs:
           python3 tests/test_lc0_coreml_root_value_probe.py
           python3 tests/test_lc0_coreml_value_export.py
           python3 tests/test_lc0_mlx_value_benchmark.py
+
+      - name: Run Metal NN parity report
+        run: |
+          METALFISH_NN_WEIGHTS=networks/BT4-1024x15x32h-swa-6147500.pb \
+          METALFISH_NN_PARITY_REPORT=build/metal-nn-parity-report.md \
+          METALFISH_NN_BATCH_BENCH=1 \
+          METALFISH_NN_BENCH_ITERS=2 \
+          METALFISH_NN_BENCH_MAX_BATCH=16 \
+          ./build/test_nn_comparison 2>&1 | tee build/metal-nn-comparison.log
+          grep -q "Metal (MPSGraph) backend" build/metal-nn-comparison.log
+          grep -q "^- Backend: Metal (MPSGraph) backend" build/metal-nn-parity-report.md
+          ./build/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend metal \
+            --top 3 \
+            --warmup 0 \
+            --iterations 1 \
+            2>&1 | tee build/metal-nn-probe.log
+          grep -q '"network_info":"Metal (MPSGraph) backend' build/metal-nn-probe.log
 
       - name: Run UCI smoke
         run: |
@@ -163,6 +182,9 @@ jobs:
           name: metalfish-macos-arm64
           path: |
             build/metalfish
+            build/metal-nn-comparison.log
+            build/metal-nn-parity-report.md
+            build/metal-nn-probe.log
             README.md
             CHANGELOG.md
             LICENSE

@@ -68,7 +68,7 @@ cloud spend controlled.
 
 | Matrix leg | Suggested runner | Purpose |
 | --- | --- | --- |
-| macOS arm64 Metal | GitHub-hosted macOS | Release path and Apple parity |
+| macOS arm64 Metal | GitHub-hosted macOS | Release path, Apple parity, and Metal NN artifact |
 | Linux x86-64 CPU | GitHub Ubuntu or GCP C3/N2 | AB build/test and portable UCI |
 | Linux x86-64 CUDA | GCP `g2-standard-8` + NVIDIA L4 | CUDA backend correctness and NPS |
 | Windows x86-64 CPU | GitHub Windows MinGW + MSVC | Portable build/UCI package and MSVC host-toolchain coverage |
@@ -108,7 +108,7 @@ Current remote gates:
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
 | GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26352864713` |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26352864680` |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26352864680`, adding Metal NN parity artifact |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26352864693` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26352864694` |
 
@@ -656,6 +656,13 @@ gate uses a bounded 300-puzzle
 offline sample for PR runs; the accepted rerun scored candidate BK repeats
 `[22, 22, 22]` versus baseline `[22, 22, 22]`, and candidate puzzles `300/300`
 versus baseline `300/300` with zero candidate errors.
+
+The macOS Metal CI now builds `test_nn_comparison` and `metalfish_nn_probe`
+alongside the engine, emits `metal-nn-parity-report.md`, records
+`metal-nn-comparison.log`, and runs a one-position BT4
+`metalfish_nn_probe --backend metal` smoke. This mirrors the CUDA GPU gate's
+parity-report/probe artifact shape, giving Metal, CUDA, and portable backends a
+shared diagnostic contract while keeping runtime strength tests separate.
 
 ## First Milestones
 
