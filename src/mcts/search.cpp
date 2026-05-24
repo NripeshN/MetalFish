@@ -390,6 +390,39 @@ void Search::PonderHit() {
   ConfigureStopper();
 }
 
+bool MCTSIsKingsidePawnLever(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL)
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || type_of(piece) != PAWN || !pos.empty(to))
+    return false;
+  if (file_of(from) < FILE_F || file_of(from) != file_of(to))
+    return false;
+
+  const Color us = color_of(piece);
+  const Direction push = pawn_push(us);
+  if (to != from + push && to != from + push + push)
+    return false;
+  if (relative_rank(us, to) < RANK_4)
+    return false;
+  return bool(attacks_bb<PAWN>(to, us) & pos.pieces(~us, PAWN));
+}
+
+bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
+                                      uint32_t best_visits,
+                                      uint32_t candidate_visits,
+                                      float best_policy, float best_q,
+                                      float candidate_policy,
+                                      float candidate_q) {
+  return root_visits >= 64 && root_visits <= 600 && candidate_visits >= 8 &&
+         candidate_visits * 2 < std::max<uint32_t>(1, best_visits) &&
+         candidate_policy >= 0.20f && candidate_policy >= best_policy * 1.15f &&
+         best_q - candidate_q <= 0.20f;
+}
+
 namespace {
 float ExponentialDecay(float from, float to, float halflife_steps,
                        float steps) {
@@ -1905,6 +1938,43 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       best_idx = q_idx;
       best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
       best_q = q_best;
+    }
+  }
+
+  if (params_.high_policy_root_lever_selection && best_idx >= 0 &&
+      !best_is_terminal_win) {
+    Position root_pos;
+    StateInfo root_state;
+    root_pos.set(tree_.RootFen(), false, &root_state);
+    const float best_policy = edges[best_idx].GetP();
+    int lever_idx = -1;
+    float lever_policy = 0.0f;
+    float lever_q = -2.0f;
+    for (int i = 0; i < num_edges; ++i) {
+      if (i == best_idx)
+        continue;
+      Node *child = edges[i].child.load(std::memory_order_acquire);
+      if (!child)
+        continue;
+      const uint32_t cn = child->GetN();
+      const float cq = child->GetWL();
+      const float policy = edges[i].GetP();
+      if (!MCTSIsKingsidePawnLever(root_pos, edges[i].move))
+        continue;
+      if (!MCTSRootHighPolicyLeverCandidate(total_child_visits, best_n, cn,
+                                            best_policy, best_q, policy, cq))
+        continue;
+      if (lever_idx < 0 || policy > lever_policy ||
+          (std::abs(policy - lever_policy) <= 0.000001f && cq > lever_q)) {
+        lever_idx = i;
+        lever_policy = policy;
+        lever_q = cq;
+      }
+    }
+    if (lever_idx >= 0) {
+      best_idx = lever_idx;
+      best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
+      best_q = lever_q;
     }
   }
 

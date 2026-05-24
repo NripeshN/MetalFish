@@ -66,6 +66,7 @@ struct SearchParams {
   // Temperature for final move selection (0 = always best, >0 = sample)
   float temperature = 0.0f;
   float temp_winpct_cutoff = 100.0f;
+  bool high_policy_root_lever_selection = true;
 
   // Contempt (positive = avoid draws, negative = prefer draws)
   float contempt = 0.0f;

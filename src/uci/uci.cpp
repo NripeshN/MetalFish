@@ -915,6 +915,8 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
   config.policy_softmax_temp = get_float_option_alias(
       engine, "MCTSPolicyTemperature", "MCTSPolicySoftmaxTemp",
       config.policy_softmax_temp);
+  config.high_policy_root_lever_selection =
+      engine.get_options()["MCTSHighPolicyRootLever"];
   config.moves_left_max_effect = get_float_option(
       engine, "MCTSMovesLeftMaxEffect", config.moves_left_max_effect);
   config.moves_left_threshold = get_float_option(
@@ -1069,6 +1071,7 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   auto split = compute_hybrid_thread_split(engine, limits);
 
   config.mcts_config = make_mcts_config(engine, nn_weights, split.mcts_threads);
+  config.mcts_config.high_policy_root_lever_selection = false;
   config.mcts_config.kld_gain_min =
       get_float_option(engine, "HybridMCTSMinimumKLDGainPerNode", 0.0f);
   config.mcts_threads = split.mcts_threads;
@@ -1319,7 +1322,9 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.moves_left_constant_factor << "|"
       << config.moves_left_scaled_factor << "|"
       << config.moves_left_quadratic_factor << "|" << config.temperature << "|"
-      << config.temp_winpct_cutoff << "|" << config.draw_score << "|"
+      << config.temp_winpct_cutoff << "|"
+      << config.high_policy_root_lever_selection << "|" << config.draw_score
+      << "|"
       << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff << "|"
       << config.two_fold_draws << "|" << config.sticky_endgames << "|"
       << config.virtual_loss << "|" << config.minibatch_size << "|"

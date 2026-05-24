@@ -189,10 +189,45 @@ void test_search_params_defaults(TestCounter &tc) {
          "moves-left quadratic factor default aligned", tc);
   expect(params.temp_winpct_cutoff == 100.0f,
          "temperature value cutoff default aligned", tc);
+  expect(params.high_policy_root_lever_selection,
+         "pure MCTS high-policy lever rescue default", tc);
   expect(params.GetCpuctBase(true) == params.cpuct_base_at_root,
          "root cpuct base getter", tc);
   expect(params.GetFpuValue(true) == params.fpu_value_at_root,
          "root fpu value getter", tc);
+}
+
+void test_root_high_policy_lever_candidate(TestCounter &tc) {
+  std::cout << "  Root high-policy lever candidate..." << std::endl;
+
+  Position pos;
+  StateInfo st;
+  pos.set("2q1rr1k/3bbnnp/p2p1pp1/2pPp3/PpP1P1P1/1P2BNNP/2BQ1PRK/7R b - -",
+          false, &st);
+  const Move lever = UCIEngine::to_move(pos, "f6f5");
+  const Move quiet = UCIEngine::to_move(pos, "e7d8");
+
+  expect(MCTSIsKingsidePawnLever(pos, lever), "f6f5 is a kingside lever", tc);
+  expect(!MCTSIsKingsidePawnLever(pos, quiet), "quiet bishop move is not lever",
+         tc);
+  expect(MCTSRootHighPolicyLeverCandidate(96, 43, 17, 0.208f, -0.426f,
+                                          0.260f, -0.612f),
+         "BK.03 low-node high-policy lever passes", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(96, 43, 7, 0.208f, -0.426f, 0.260f,
+                                           -0.612f),
+         "insufficient visits blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(96, 43, 17, 0.208f, -0.426f,
+                                           0.230f, -0.612f),
+         "weak policy edge blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(96, 43, 17, 0.208f, -0.426f,
+                                           0.260f, -0.640f),
+         "large value gap blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(96, 52, 28, 0.143f, 0.022f,
+                                           0.269f, -0.101f),
+         "BK.18 examined lever is blocked", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(900, 220, 80, 0.208f, -0.426f,
+                                           0.260f, -0.612f),
+         "mature root blocked", tc);
 }
 
 void test_shared_nn_input_contract(TestCounter &tc) {
@@ -926,6 +961,7 @@ bool test_mcts_all() {
   test_node_basics(tc);
   test_tablebase_wdl_conversion(tc);
   test_search_params_defaults(tc);
+  test_root_high_policy_lever_candidate(tc);
   test_shared_nn_input_contract(tc);
   test_shared_nn_output_decoder(tc);
   test_lc0_stoppers(tc);
