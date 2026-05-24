@@ -52,6 +52,7 @@ struct Options {
   bool full_input = false;
   bool full_policy = false;
   bool metadata_only = false;
+  bool construct_backend = false;
   std::string ready_file;
   std::string start_file;
 };
@@ -119,7 +120,7 @@ void PrintUsage(const char *argv0) {
          " [--coreml-compute-units cpu|cpu-gpu|cpu-ne|all]"
          " [--fen <fen>] [--top n] [--batch-size n] [--warmup n]"
          " [--iterations n] [--full-input] [--full-policy]"
-         " [--metadata-only]"
+         " [--metadata-only] [--construct-backend]"
          " [--ready-file path] [--start-file path]\n";
 }
 
@@ -157,6 +158,8 @@ Options ParseArgs(int argc, char **argv) {
       options.full_policy = true;
     } else if (arg == "--metadata-only") {
       options.metadata_only = true;
+    } else if (arg == "--construct-backend") {
+      options.construct_backend = true;
     } else if (arg == "--ready-file") {
       options.ready_file = require_value("--ready-file");
     } else if (arg == "--start-file") {
@@ -181,7 +184,9 @@ Options ParseArgs(int argc, char **argv) {
     throw std::runtime_error("--iterations must be positive");
   if (options.backend.empty())
     throw std::runtime_error("--backend must be non-empty");
-  if (!options.metadata_only && options.backend == "coreml" &&
+  const bool backend_will_construct =
+      !options.metadata_only || options.construct_backend;
+  if (backend_will_construct && options.backend == "coreml" &&
       options.coreml_model.empty())
     throw std::runtime_error("--coreml-model is required for backend coreml");
   return options;
@@ -287,12 +292,23 @@ void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
 
   const auto resolved_plan =
       NN::ResolveNetworkExecutionPlan(execution_plan, inventory);
+  std::string network_info;
+  if (options.construct_backend) {
+    auto network =
+        NN::CreateNetwork(weights, options.backend, options.coreml_model,
+                          options.coreml_compute_units);
+    network_info = network->GetNetworkInfo();
+  }
 
   std::cout << std::setprecision(9);
   std::cout << '{';
   std::cout << "\"weights\":\"" << JsonEscape(options.weights) << '"';
   std::cout << ",\"backend\":\"" << JsonEscape(options.backend) << '"';
   std::cout << ",\"metadata_only\":true";
+  std::cout << ",\"backend_constructed\":"
+            << (options.construct_backend ? "true" : "false");
+  if (options.construct_backend)
+    std::cout << ",\"network_info\":\"" << JsonEscape(network_info) << '"';
   std::cout << ",\"format\":\"" << JsonEscape(descriptor.Summary()) << '"';
   std::cout << ",\"input_format\":"
             << static_cast<int>(weights.format().network_format().input());

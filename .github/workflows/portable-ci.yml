@@ -76,7 +76,8 @@ jobs:
           ./build-linux/metalfish_nn_probe \
             --weights networks/BT4-1024x15x32h-swa-6147500.pb \
             --backend cpu \
-            --metadata-only
+            --metadata-only \
+            --construct-backend
           python3 tools/uci_smoke.py --engine build-linux/metalfish --go "depth 3"
           python3 tools/uci_smoke.py \
             --engine build-linux/metalfish \
@@ -262,7 +263,7 @@ jobs:
 
       - name: Build
         shell: pwsh
-        run: cmake --build build-windows-msvc --target metalfish metalfish_tests
+        run: cmake --build build-windows-msvc --target metalfish metalfish_tests metalfish_nn_probe
 
       - name: Test
         shell: pwsh
@@ -280,6 +281,12 @@ jobs:
           python tests/test_lichess_bot.py
           python tests/test_lichess_puzzle_runner.py
           python tests/test_hybrid_regression_compare.py
+          python tools/download_engine_networks.py --bt4-only
+          .\build-windows-msvc\metalfish_nn_probe.exe `
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb `
+            --backend cpu `
+            --metadata-only `
+            --construct-backend
           python tools/uci_smoke.py --engine build-windows-msvc/metalfish.exe --go "depth 3"
           python tools/uci_smoke.py `
             --engine build-windows-msvc/metalfish.exe `

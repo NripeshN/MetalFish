@@ -603,7 +603,8 @@ Current CUDA backend boundary:
 Current portable CPU transformer boundary:
 
 - `NNBackend=cpu` is an explicit portable transformer backend. It is compiled
-  on every platform, but `auto` does not select it yet.
+  on every platform, and `auto` selects it as the last fallback when no compiled
+  GPU backend is available or usable.
 - The backend loads real protobuf weights through the shared descriptor,
   tensor-plan, weight-inventory, execution-plan, and resolved-plan code. This
   keeps Linux and Windows aligned with Metal/CUDA network parsing and resolved
@@ -617,11 +618,16 @@ Current portable CPU transformer boundary:
   `body.input_embedding_preprocess`, so minimal PE-dense fixtures exercise the
   same `[batch*64, input_planes + pe_width]` contract used by BT4 before body
   attention starts.
+- Portable CI uses `metalfish_nn_probe --metadata-only --construct-backend`
+  with real BT4 weights on Linux and Windows MSVC. This validates protobuf
+  loading, shared tensor/inventory/execution-plan resolution, portable CPU
+  backend construction, resolved tensor copies, and backend diagnostics without
+  running slow BT4 inference.
 - BT4 execution still fails loudly with the first unsupported resolved stage
   instead of falling back to the diagnostic stub. Current CPU fixture coverage
   reaches the same attention-policy raw scratch plus 1858-logit gather contract
-  used by CUDA/Metal; the next CPU milestone is a bounded real-BT4 smoke that
-  proves full execution is practical enough to keep enabled in CI.
+  used by CUDA/Metal; the next CPU milestone is a bounded real-BT4 eval smoke
+  that proves full execution is practical enough to keep enabled in CI.
 
 Portable CI builds Linux CPU, Windows MinGW CPU, and Windows MSVC CPU
 artifacts. The MSVC leg is included because Windows CUDA uses the MSVC host
@@ -630,11 +636,15 @@ toolchain. The separate Windows CUDA compile gate installs the CUDA Toolkit on
 `metalfish_tests`, `test_nn_comparison`, and `metalfish_nn_probe` without
 requiring a hosted NVIDIA GPU. Each portable CPU job runs AB UCI smoke plus an
 explicit `NNBackend=stub` MCTS smoke, so portable builds verify the MCTS
-construction path without downloading BT4 weights. The uploaded artifacts
-include a generated manifest that makes this backend scope explicit. Branch tip
+construction path cheaply. The Linux and MSVC legs additionally download BT4
+for the metadata/backend-construction probe; MinGW stays lightweight package
+coverage. The uploaded artifacts include a generated manifest that makes this
+backend scope explicit. Branch tip
 `483b996b` had Linux CPU, Windows MinGW CPU, Windows MSVC CPU, Windows CUDA
 compile, macOS Metal, CUDA L4 runtime, and the bounded hybrid regression gate
-green while remaining current with `origin/main`. The hybrid gate uses a
+green while remaining current with `origin/main`. Linux portable CI also runs a
+real BT4 metadata/backend-construction probe, and Windows MSVC runs the same
+probe because it is the Windows CUDA host toolchain. The hybrid gate uses a
 bounded 300-puzzle
 offline sample for PR runs; the accepted rerun scored candidate BK repeats
 `[22, 22, 22]` versus baseline `[22, 22, 22]`, and candidate puzzles `300/300`

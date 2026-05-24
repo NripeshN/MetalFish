@@ -632,6 +632,7 @@ def main() -> int:
             "CPU transformer backend is for correctness/fallback only",
             "metalfish_nn_probe",
             "--metadata-only",
+            "--construct-backend",
             "BT4-1024x15x32h-swa-6147500.pb",
         ],
     )
