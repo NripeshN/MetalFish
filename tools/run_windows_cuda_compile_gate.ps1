@@ -100,11 +100,26 @@ if ($BuildTests -eq "ON") {
   $SmokeSteps += "metalfish_tests.exe mcts"
 }
 
+$NetworksDir = Join-Path $SourceDir "networks"
+$NnueBigPath = Join-Path $NetworksDir "nn-c288c895ea92.nnue"
+$NnueSmallPath = Join-Path $NetworksDir "nn-37f18f62d772.nnue"
+if (-not ((Test-Path $NnueBigPath) -and (Test-Path $NnueSmallPath))) {
+  Write-Host "Downloading NNUE files for CUDA-linked AB UCI smoke"
+  & $Python (Join-Path $SourceDir "tools\download_engine_networks.py") `
+    --dest $NetworksDir `
+    --nnue-only
+  if ($LASTEXITCODE -ne 0) {
+    throw "NNUE download failed with exit code $LASTEXITCODE"
+  }
+}
+
 $UciSmoke = Join-Path $SourceDir "tools\uci_smoke.py"
 Write-Host "Running CUDA-linked AB UCI smoke"
 & $Python $UciSmoke `
   --engine $EnginePath `
   --timeout 45 `
+  --setoption "EvalFile=$NnueBigPath" `
+  --setoption "EvalFileSmall=$NnueSmallPath" `
   --setoption "UseMCTS=false" `
   --setoption "UseHybridSearch=false" `
   --setoption "Threads=1" `
