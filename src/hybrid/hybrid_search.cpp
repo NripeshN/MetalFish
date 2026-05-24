@@ -505,7 +505,7 @@ bool HybridHasMCTSDecisionBudget(const ::MetalFish::Search::LimitsType &limits,
 
 bool HybridUseMCTSPrimaryForFixedNodeBudget(
     const ::MetalFish::Search::LimitsType &limits) {
-  return limits.nodes > 0 && limits.nodes <= 256 && limits.movetime <= 0 &&
+  return limits.nodes > 0 && limits.nodes <= 512 && limits.movetime <= 0 &&
          limits.depth <= 0 && limits.mate <= 0 && !limits.infinite &&
          !limits.ponderMode;
 }
