@@ -30,6 +30,7 @@ CudaKernelSmokeResult RunSqueezeExciteKernelSmoke();
 CudaKernelSmokeResult RunResidualLayerNormKernelSmoke();
 CudaKernelSmokeResult RunAttentionCoreKernelSmoke();
 CudaKernelSmokeResult RunConvolutionPolicyMapKernelSmoke();
+CudaKernelSmokeResult RunAttentionPolicyMapKernelSmoke();
 CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke();
 
 } // namespace Cuda

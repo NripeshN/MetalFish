@@ -1045,9 +1045,13 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
           kPackedInputSquareCount * kPackedInputSquareCount;
       for (int batch = 0; batch < batch_size; ++batch) {
         for (int promo = 0; promo < kPromotionCount; ++promo) {
-          const int query_square = 48 + promo / 24;
-          const int key_square = 56 + (promo % 24) / 3;
+          // Mirrors the Metal graph reshape: QK uses the 3x64 view while the
+          // learned promotion offset keeps the 8x8x3 flattened order.
           const int promotion_row = promo % 3;
+          const int promotion_key_square = 56 + (promo % 24) / 3;
+          const int square_pair = promo % kPackedInputSquareCount;
+          const int query_square = 48 + square_pair / 8;
+          const int key_square = 56 + square_pair % 8;
           const float *query_row =
               query.values.data() +
               (static_cast<std::size_t>(batch) * kPackedInputSquareCount +
@@ -1058,10 +1062,15 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
               (static_cast<std::size_t>(batch) * kPackedInputSquareCount +
                key_square) *
                   key.width;
+          const float *promotion_key_row =
+              key.values.data() +
+              (static_cast<std::size_t>(batch) * kPackedInputSquareCount +
+               promotion_key_square) *
+                  key.width;
           float value = 0.0f;
           for (int channel = 0; channel < query.width; ++channel) {
             value += query_row[channel] * key_row[channel] * scale;
-            value += key_row[channel] *
+            value += promotion_key_row[channel] *
                      (promotion.data[static_cast<std::size_t>(promotion_row) *
                                          query.width +
                                      channel] +

@@ -489,7 +489,7 @@ NN::WeightsFile make_attention_policy_cpu_weights_file() {
                               {1, 2});
   set_test_float_layer_values(policy->mutable_ip3_pol_b(), {0.0f}, {1});
   set_test_float_layer_values(policy->mutable_ip4_pol_w(),
-                              {0.0f, 0.0f, 0.0f, 0.0f}, {4, 1});
+                              {1.0f, 3.0f, 5.0f, 0.0f}, {4, 1});
 
   std::vector<float> value_w(kFlattenedBody, 0.0f);
   value_w[0] = 1.0f;
@@ -1456,10 +1456,15 @@ void test_cpu_backend_attention_policy_map_execution(TestCounter &tc) {
   NN::InputPlanes input{};
   input[0][0] = 2.0f;
   input[1][1] = 5.0f;
+  input[0][48] = 2.0f;
+  input[1][56] = 7.0f;
 
   const auto output = cpu->Evaluate(input);
   expect(std::abs(output.policy[0] - 10.0f) < 1e-5f,
          "CPU attention policy map should gather q0-k1 raw logits", tc);
+  expect(std::abs(output.policy[1793] - 15.0f) < 1e-5f,
+         "CPU attention policy map should gather mixed Metal promotion logits",
+         tc);
   expect(std::abs(output.value - 2.0f) < 1e-5f,
          "CPU attention policy map fixture should preserve scalar value head",
          tc);
@@ -1469,6 +1474,10 @@ void test_cpu_backend_attention_policy_map_execution(TestCounter &tc) {
          "CPU attention policy map batch should emit two outputs", tc);
   expect(batch.size() == 2 && std::abs(batch[1].policy[0] - 10.0f) < 1e-5f,
          "CPU attention policy map batch should preserve gathered logits", tc);
+  expect(batch.size() == 2 &&
+             std::abs(batch[1].policy[1793] - 15.0f) < 1e-5f,
+         "CPU attention policy map batch should preserve promotion logits",
+         tc);
 }
 
 #ifdef USE_CUDA
@@ -2657,6 +2666,17 @@ void test_cuda_dense_kernels(TestCounter &tc) {
   expect(conv_policy_map_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              conv_policy_map_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA convolution policy map kernel should pass or skip without a "
+         "device",
+         tc);
+
+  auto attention_policy_map_smoke =
+      NN::Cuda::RunAttentionPolicyMapKernelSmoke();
+  std::cout << "    " << attention_policy_map_smoke.message << std::endl;
+  expect(attention_policy_map_smoke.status ==
+                 NN::Cuda::CudaSmokeStatus::Success ||
+             attention_policy_map_smoke.status ==
+                 NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA attention policy map kernel should pass or skip without a "
          "device",
          tc);
 

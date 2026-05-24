@@ -853,21 +853,29 @@ __global__ void AttentionPolicyPromotionKernel(const float *query,
       kPackedInputSquareCount * kPackedInputSquareCount;
   const int promo_index = index % kPromotionCount;
   const int batch = index / kPromotionCount;
-  const int query_square = 48 + promo_index / 24;
-  const int key_square = 56 + (promo_index % 24) / 3;
+  // Mirrors the Metal graph reshape: QK uses the 3x64 view while the learned
+  // promotion offset keeps the 8x8x3 flattened order.
   const int promotion_row = promo_index % 3;
+  const int promotion_key_square = 56 + (promo_index % 24) / 3;
+  const int square_pair = promo_index % kSquares;
+  const int query_square = 48 + square_pair / 8;
+  const int key_square = 56 + square_pair % 8;
   const float *query_row =
       query +
       (static_cast<std::size_t>(batch) * kSquares + query_square) * channels;
   const float *key_row =
       key +
       (static_cast<std::size_t>(batch) * kSquares + key_square) * channels;
+  const float *promotion_key_row =
+      key + (static_cast<std::size_t>(batch) * kSquares +
+             promotion_key_square) *
+                channels;
 
   float value = 0.0f;
   const float scale = rsqrtf(static_cast<float>(channels));
   for (int channel = 0; channel < channels; ++channel) {
     value += query_row[channel] * key_row[channel] * scale;
-    value += key_row[channel] *
+    value += promotion_key_row[channel] *
              (promotion_weights[promotion_row * channels + channel] +
               promotion_weights[3 * channels + channel]);
   }
@@ -2828,6 +2836,138 @@ CudaKernelSmokeResult RunConvolutionPolicyMapKernelSmoke() {
     if (std::fabs(actual[i] - expected[i]) > 1e-6f) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA convolution policy map output mismatch";
+      return result;
+    }
+  }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunAttentionPolicyMapKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 2;
+  constexpr int kSquares = kPackedInputSquareCount;
+  constexpr int kChannels = 1;
+  constexpr int kPromotionCount =
+      kNetworkAttentionPolicyScratch - kSquares * kSquares;
+  std::vector<float> query(kBatch * kSquares * kChannels, 0.0f);
+  std::vector<float> key(kBatch * kSquares * kChannels, 0.0f);
+  std::vector<float> promotion_weights(4 * kChannels, 0.0f);
+  promotion_weights[0] = 1.0f;
+  promotion_weights[1] = 3.0f;
+  promotion_weights[2] = 5.0f;
+
+  for (int batch = 0; batch < kBatch; ++batch) {
+    query[static_cast<std::size_t>(batch) * kSquares + 0] =
+        2.0f + static_cast<float>(batch);
+    key[static_cast<std::size_t>(batch) * kSquares + 1] = 5.0f;
+    query[static_cast<std::size_t>(batch) * kSquares + 48] =
+        3.0f + static_cast<float>(batch);
+    key[static_cast<std::size_t>(batch) * kSquares + 56] = 7.0f;
+    key[static_cast<std::size_t>(batch) * kSquares + 57] = 11.0f;
+  }
+
+  std::vector<float> raw_policy(kBatch * kNetworkAttentionPolicyScratch, 0.0f);
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int query_square = 0; query_square < kSquares; ++query_square) {
+      for (int key_square = 0; key_square < kSquares; ++key_square) {
+        raw_policy[static_cast<std::size_t>(batch) *
+                       kNetworkAttentionPolicyScratch +
+                   query_square * kSquares + key_square] =
+            query[static_cast<std::size_t>(batch) * kSquares + query_square] *
+            key[static_cast<std::size_t>(batch) * kSquares + key_square];
+      }
+    }
+    for (int promo = 0; promo < kPromotionCount; ++promo) {
+      const int promotion_row = promo % 3;
+      const int promotion_key_square = 56 + (promo % 24) / 3;
+      const int square_pair = promo % kSquares;
+      const int query_square = 48 + square_pair / 8;
+      const int key_square = 56 + square_pair % 8;
+      raw_policy[static_cast<std::size_t>(batch) *
+                     kNetworkAttentionPolicyScratch +
+                 kSquares * kSquares + promo] =
+          query[static_cast<std::size_t>(batch) * kSquares + query_square] *
+          key[static_cast<std::size_t>(batch) * kSquares + key_square] +
+          key[static_cast<std::size_t>(batch) * kSquares +
+              promotion_key_square] *
+              (promotion_weights[static_cast<std::size_t>(promotion_row)] +
+               promotion_weights[3]);
+    }
+  }
+
+  std::vector<float> expected(kBatch * kNetworkPolicyOutputs, 0.0f);
+  const auto &gather = AttentionPolicyGatherMap();
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int policy = 0; policy < kNetworkPolicyOutputs; ++policy) {
+      const int raw = gather[static_cast<std::size_t>(policy)];
+      expected[static_cast<std::size_t>(batch) * kNetworkPolicyOutputs +
+               policy] =
+          raw >= 0 ? raw_policy[static_cast<std::size_t>(batch) *
+                                    kNetworkAttentionPolicyScratch +
+                                raw]
+                   : 0.0f;
+    }
+  }
+
+  std::vector<float> actual(expected.size(), 0.0f);
+  float *device_query = nullptr;
+  float *device_key = nullptr;
+  float *device_promotion = nullptr;
+  float *device_raw = nullptr;
+  float *device_policy = nullptr;
+  try {
+    AllocateDevice(&device_query, query.size(),
+                   "cudaMalloc(attention_policy_query)");
+    AllocateDevice(&device_key, key.size(),
+                   "cudaMalloc(attention_policy_key)");
+    AllocateDevice(&device_promotion, promotion_weights.size(),
+                   "cudaMalloc(attention_policy_promotion)");
+    AllocateDevice(&device_raw, raw_policy.size(),
+                   "cudaMalloc(attention_policy_raw)");
+    AllocateDevice(&device_policy, actual.size(),
+                   "cudaMalloc(attention_policy_mapped)");
+    UploadFloats(device_query, query, "cudaMemcpy(attention_policy_query)");
+    UploadFloats(device_key, key, "cudaMemcpy(attention_policy_key)");
+    UploadFloats(device_promotion, promotion_weights,
+                 "cudaMemcpy(attention_policy_promotion)");
+
+    LaunchAttentionPolicyMapKernel(device_query, device_key, device_promotion,
+                                   device_raw, device_policy, kBatch,
+                                   kChannels);
+    DownloadFloats(actual, device_policy,
+                   "cudaMemcpy(attention_policy_mapped)");
+  } catch (const std::exception &e) {
+    FreeDevice(device_query);
+    FreeDevice(device_key);
+    FreeDevice(device_promotion);
+    FreeDevice(device_raw);
+    FreeDevice(device_policy);
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  FreeDevice(device_query);
+  FreeDevice(device_key);
+  FreeDevice(device_promotion);
+  FreeDevice(device_raw);
+  FreeDevice(device_policy);
+
+  for (std::size_t i = 0; i < expected.size(); ++i) {
+    if (std::fabs(actual[i] - expected[i]) > 1e-6f) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA attention policy map output mismatch";
       return result;
     }
   }
