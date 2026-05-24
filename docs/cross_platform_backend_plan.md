@@ -114,6 +114,12 @@ Current remote gates:
 
 Current CUDA backend boundary:
 
+- The Linux CUDA entrypoint Cloud Build compiles `test_nn_comparison` alongside
+  the CUDA-linked engine, tests, and NN probe, then downloads BT4 and runs
+  `metalfish_nn_probe --backend cuda --metadata-only`. This catches
+  protobuf/schema, policy-table, tensor-plan, weight-inventory, and resolved
+  execution-plan regressions in a no-GPU Linux CUDA toolchain before the runtime
+  L4 gate spends GPU time.
 - `src/nn/cuda/cuda_executor.*` is the inference execution seam.
 - `src/nn/network_execution_plan.*` builds the shared ordered and resolved
   tensor/stage plan that CUDA and future portable backends will execute.

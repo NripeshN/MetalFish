@@ -730,6 +730,21 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / "cloudbuild/cuda-entrypoint.yaml",
+        [
+            "test_nn_comparison",
+            "python3 tools/download_engine_networks.py --bt4-only",
+            "metalfish_nn_probe",
+            "--backend cuda",
+            "--metadata-only",
+            "metalfish-cuda-bt4-metadata.json",
+            '"metadata_only":true',
+            '"backend":"cuda"',
+            '"format":"attention_body=yes',
+            '"execution_plan":"109 resolved execution steps',
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/run_cuda_gpu_gate.sh",
         [
             "METALFISH_CUDA_SUMMARY",
