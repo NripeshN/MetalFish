@@ -31,6 +31,7 @@ RESULTS_DIR = ROOT / "results" / "lichess_puzzles"
 LICHESS_API = "https://lichess.org/api"
 DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
 DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
+DEFAULT_ANE_ROOT_HINTS = True
 DEFAULT_ANE_ROOT_HINT_WAIT_MS = 250
 DEFAULT_ANE_MIN_BUDGET_MS = 1000
 SETOPTION_ALIASES = {
@@ -1203,7 +1204,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--hybrid-ane-root-hints",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=DEFAULT_ANE_ROOT_HINTS,
         help="Use ANE root ordering as AB search hints; final ANE evidence remains available without this.",
     )
     parser.add_argument(

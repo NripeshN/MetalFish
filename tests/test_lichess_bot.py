@@ -93,8 +93,8 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
 
     expect("ANE probe is opt-in", "HybridANERootProbe" not in no_ane)
     expect(
-        "ANE root hints default off",
-        with_default_hints["HybridANERootHints"] == "false",
+        "ANE root hints default on with ANE probe",
+        with_default_hints["HybridANERootHints"] == "true",
     )
     expect("ANE probe option enabled", with_ane["HybridANERootProbe"] == "true")
     expect("ANE root hints option enabled", with_ane["HybridANERootHints"] == "true")
