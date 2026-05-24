@@ -1053,6 +1053,28 @@ void test_hybrid_config() {
                    0.0f);
   }
   {
+    TestCase tc("Low-node Hybrid uses MCTS-primary budget");
+
+    MetalFish::Search::LimitsType limits;
+    limits.nodes = 50;
+    EXPECT(tc, HybridUseMCTSPrimaryForFixedNodeBudget(limits));
+    EXPECT(tc, HybridLowNodeABProbeNodes(limits.nodes) == 12);
+    EXPECT(tc, HybridLowNodeMCTSPrimaryReady(true, limits.nodes, 38, 5, true));
+    EXPECT(tc,
+           !HybridLowNodeMCTSPrimaryReady(true, limits.nodes, 37, 4, false));
+
+    limits.nodes = 257;
+    EXPECT(tc, !HybridUseMCTSPrimaryForFixedNodeBudget(limits));
+
+    limits.nodes = 50;
+    limits.movetime = 1000;
+    EXPECT(tc, !HybridUseMCTSPrimaryForFixedNodeBudget(limits));
+
+    limits.movetime = 0;
+    limits.ponderMode = true;
+    EXPECT(tc, !HybridUseMCTSPrimaryForFixedNodeBudget(limits));
+  }
+  {
     TestCase tc("Subsearch stop grace stays under bot stop timeout");
 
     EXPECT(tc, HybridSubsearchJoinGraceMs(true, 30000) == 2500);

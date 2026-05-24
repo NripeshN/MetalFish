@@ -401,6 +401,16 @@ bool HybridCanStopEarlyOnAgreement(
 bool HybridHasMCTSDecisionBudget(const ::MetalFish::Search::LimitsType &limits,
                                  int time_budget_ms, bool ponderhit_received);
 
+bool HybridUseMCTSPrimaryForFixedNodeBudget(
+    const ::MetalFish::Search::LimitsType &limits);
+
+uint64_t HybridLowNodeABProbeNodes(uint64_t requested_nodes);
+
+bool HybridLowNodeMCTSPrimaryReady(bool enabled, uint64_t requested_nodes,
+                                   uint64_t mcts_root_current_nodes,
+                                   uint32_t mcts_best_current_visits,
+                                   bool visit_evidence_sane);
+
 ::MetalFish::Search::LimitsType
 HybridBuildMCTSLimits(const ::MetalFish::Search::LimitsType &limits,
                       int time_budget_ms, bool waiting_for_ponderhit);

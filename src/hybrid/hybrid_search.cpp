@@ -503,6 +503,34 @@ bool HybridHasMCTSDecisionBudget(const ::MetalFish::Search::LimitsType &limits,
   return limits.time[WHITE] > 0 || limits.time[BLACK] > 0;
 }
 
+bool HybridUseMCTSPrimaryForFixedNodeBudget(
+    const ::MetalFish::Search::LimitsType &limits) {
+  return limits.nodes > 0 && limits.nodes <= 256 && limits.movetime <= 0 &&
+         limits.depth <= 0 && limits.mate <= 0 && !limits.infinite &&
+         !limits.ponderMode;
+}
+
+uint64_t HybridLowNodeABProbeNodes(uint64_t requested_nodes) {
+  if (requested_nodes == 0)
+    return 0;
+  return std::clamp<uint64_t>(requested_nodes / 4, 1, 64);
+}
+
+bool HybridLowNodeMCTSPrimaryReady(bool enabled, uint64_t requested_nodes,
+                                   uint64_t mcts_root_current_nodes,
+                                   uint32_t mcts_best_current_visits,
+                                   bool visit_evidence_sane) {
+  if (!enabled || requested_nodes == 0 || !visit_evidence_sane)
+    return false;
+
+  const uint64_t root_min =
+      std::max<uint64_t>(8, (requested_nodes * 3) / 4);
+  const uint32_t best_min =
+      static_cast<uint32_t>(std::max<uint64_t>(4, requested_nodes / 10));
+  return mcts_root_current_nodes >= root_min &&
+         mcts_best_current_visits >= best_min;
+}
+
 int HybridABCandidateVerifyBudgetMs(
     const ::MetalFish::Search::LimitsType &limits, int time_budget_ms,
     int requested_ms, bool waiting_for_ponderhit) {
@@ -1086,6 +1114,11 @@ bool ParallelHybridSearch::should_stop() const {
         mcts_search_
             ? mcts_search_->Stats().total_nodes.load(std::memory_order_relaxed)
             : 0;
+    if (HybridUseMCTSPrimaryForFixedNodeBudget(limits_) && mcts_search_) {
+      if (mcts_n >= limits_.nodes)
+        return true;
+      return false;
+    }
     uint64_t total =
         mcts_n + ab_state_.nodes_searched.load(std::memory_order_relaxed);
     if (total >= limits_.nodes)
@@ -1838,6 +1871,9 @@ void ParallelHybridSearch::run_ab_search() {
 
   ::MetalFish::Search::LimitsType ab_limits = limits_;
   ab_limits.startTime = now();
+  if (HybridUseMCTSPrimaryForFixedNodeBudget(limits_)) {
+    ab_limits.nodes = HybridLowNodeABProbeNodes(limits_.nodes);
+  }
   if (limits_.ponderMode &&
       ponderhit_received_.load(std::memory_order_acquire)) {
     ab_limits.ponderMode = false;
@@ -2540,10 +2576,16 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool mcts_visit_evidence_sane = HybridMCTSVisitEvidenceSane(
       mcts_playouts, mcts_evals, mcts_confidence_total_nodes,
       mcts_confidence_visits);
+  const bool low_node_mcts_primary =
+      HybridUseMCTSPrimaryForFixedNodeBudget(limits_);
+  const bool low_node_mcts_primary_ready = HybridLowNodeMCTSPrimaryReady(
+      low_node_mcts_primary, limits_.nodes, mcts_confidence_total_nodes,
+      mcts_confidence_visits, mcts_visit_evidence_sane);
   const auto find_root_pawn_lever_tiebreak = [&](Move selected,
                                                  bool allow_non_pawn_selected) {
     if (!config_.root_pawn_lever_tiebreak || selected == Move::none() ||
-        !mcts_decision_budget || !mcts_visit_evidence_sane) {
+        low_node_mcts_primary || !mcts_decision_budget ||
+        !mcts_visit_evidence_sane) {
       return Move::none();
     }
 
@@ -2619,6 +2661,8 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSConfidenceRootVisits=" << mcts_confidence_total_nodes
        << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
        << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
+       << " LowNodeMCTSPrimary=" << (low_node_mcts_primary ? 1 : 0)
+       << " LowNodeMCTSReady=" << (low_node_mcts_primary_ready ? 1 : 0)
        << " ANETop=" << move_to_string(ane_top)
        << " ANEAgreesMCTS=" << (ane_agrees_mcts ? 1 : 0)
        << " ANEConfirmedMCTS=" << (ane_confirmed_mcts_override ? 1 : 0)
@@ -2877,7 +2921,8 @@ Move ParallelHybridSearch::make_final_decision() {
     }
   }
   const bool mcts_override_allowed =
-      !ab_root_rejects_mcts || ane_confirmed_mcts_override ||
+      low_node_mcts_primary_ready || !ab_root_rejects_mcts ||
+      ane_confirmed_mcts_override ||
       mcts_short_root_tactical || mcts_compact_fixed_budget ||
       mcts_compact_clear_preference ||
       mcts_cross_root_confidence_fixed_budget ||
@@ -2891,11 +2936,13 @@ Move ParallelHybridSearch::make_final_decision() {
   case ParallelHybridConfig::DecisionMode::MCTS_PRIMARY:
     choose_mcts =
         mcts_override_allowed &&
-        (ane_confirmed_mcts_override ||
+        (low_node_mcts_primary_ready || ane_confirmed_mcts_override ||
          (mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180)));
     if (choose_mcts)
-      reason = ane_confirmed_mcts_override ? "ane_confirmed_mcts"
-                                           : "mcts_primary_reliable";
+      reason = low_node_mcts_primary_ready
+                   ? "low_node_mcts_primary"
+                   : ane_confirmed_mcts_override ? "ane_confirmed_mcts"
+                                                 : "mcts_primary_reliable";
     break;
   case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
     choose_mcts =
@@ -2907,6 +2954,9 @@ Move ParallelHybridSearch::make_final_decision() {
   case ParallelHybridConfig::DecisionMode::DYNAMIC:
     if (!mcts_override_allowed) {
       reason = "ab_root_rejects_mcts";
+    } else if (low_node_mcts_primary_ready) {
+      choose_mcts = true;
+      reason = "low_node_mcts_primary";
     } else if (ane_confirmed_mcts_override) {
       choose_mcts = true;
       reason = "ane_confirmed_mcts";
@@ -2980,6 +3030,8 @@ Move ParallelHybridSearch::make_final_decision() {
        << " VisitShare=" << visit_share
        << " MCTSDecisionBudget=" << (mcts_decision_budget ? 1 : 0)
        << " MCTSVisitEvidenceSane=" << (mcts_visit_evidence_sane ? 1 : 0)
+       << " LowNodeMCTSPrimary=" << (low_node_mcts_primary ? 1 : 0)
+       << " LowNodeMCTSReady=" << (low_node_mcts_primary_ready ? 1 : 0)
        << " RootQGap=" << root_q_gap
        << " MCTSReliable=" << (mcts_reliable ? 1 : 0)
        << " MCTSStrong=" << (mcts_strong ? 1 : 0)

@@ -1510,7 +1510,11 @@ void MetalFish::cleanup_parallel_hybrid_search() {
 namespace MetalFish {
 
 void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
-  Search::LimitsType limits = parse_limits(is);
+  std::string args;
+  std::getline(is, args, '\0');
+
+  std::istringstream limit_args(args);
+  Search::LimitsType limits = parse_limits(limit_args);
 
   if (!limits.ponderMode) {
     if (auto reason = transformer_low_time_fallback_reason(engine, limits)) {
@@ -1519,6 +1523,15 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
       engine.go(limits);
       return;
     }
+  }
+
+  if (MCTS::HybridUseMCTSPrimaryForFixedNodeBudget(limits)) {
+    sync_cout << "info string Hybrid fixed-node budget is tiny; using "
+                 "MCTS-primary route"
+              << sync_endl;
+    std::istringstream mcts_args(args);
+    mcts_mt_go(mcts_args);
+    return;
   }
 
   sync_cout << "info string Starting Parallel Hybrid Search (MCTS + AB)..."
