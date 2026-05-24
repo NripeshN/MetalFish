@@ -628,7 +628,8 @@ def main() -> int:
             "Windows MSVC CPU",
             "metalfish-windows-x86_64-msvc-cpu",
             "MSVC is the required host toolchain for future Windows CUDA builds.",
-            "CPU AB plus diagnostic stub MCTS",
+            "portable CPU transformer fallback",
+            "CPU transformer backend is for correctness/fallback only",
         ],
     )
     assert_file_contains(
