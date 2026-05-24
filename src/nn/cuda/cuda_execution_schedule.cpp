@@ -434,13 +434,13 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
     }
 
     if (step.kind == NetworkExecutionOpKind::PolicyMap) {
-      if (plan.format.attention_policy) {
+      if (plan.format.attention_policy || plan.format.conv_policy) {
         AddEntry(schedule, PolicyMapEntry(plan, i));
       } else {
         AddEntry(schedule,
                  UnsupportedEntry(
                      plan, i,
-                     "CUDA policy map currently supports attention policy"));
+                     "CUDA policy map requires attention or convolution policy"));
       }
       continue;
     }

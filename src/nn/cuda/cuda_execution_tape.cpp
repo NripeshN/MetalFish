@@ -593,10 +593,13 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
       break;
     }
     case NetworkExecutionOpKind::PolicyMap: {
-      if (!plan.format.attention_policy)
+      if (!plan.format.attention_policy && !plan.format.conv_policy)
         break;
-      tape.Add(step.name + ".raw", CudaExecutionBufferRole::PolicyMapRawOutput,
-               batch_size, kNetworkAttentionPolicyScratch);
+      if (plan.format.attention_policy) {
+        tape.Add(step.name + ".raw",
+                 CudaExecutionBufferRole::PolicyMapRawOutput, batch_size,
+                 kNetworkAttentionPolicyScratch);
+      }
       tape.Add(step.name + ".mapped", CudaExecutionBufferRole::PolicyMapOutput,
                batch_size, kNetworkPolicyOutputs);
       break;

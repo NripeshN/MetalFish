@@ -157,7 +157,7 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
     const float *input, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int rows);
 
-CudaDenseStageOutput ExecuteAttentionPolicyMapStage(
+CudaDenseStageOutput ExecutePolicyMapStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &policy_map,
     const CudaWeightBuffers &weights,

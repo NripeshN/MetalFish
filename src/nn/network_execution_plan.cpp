@@ -198,9 +198,16 @@ void AddPolicy(NetworkExecutionPlan &plan,
   AddDense(plan, inventory, prefix + ".ip_pol", name + ".output");
   AddDense(plan, inventory, prefix + ".ip2_pol", name + ".dense2");
   AddDense(plan, inventory, prefix + ".ip3_pol", name + ".dense3");
-  AddStepIfAny(plan, inventory, NetworkExecutionOpKind::PolicyMap,
-               name + ".policy_map",
-               std::vector<std::string>{prefix + ".ip4_pol_w"});
+  if (plan.format.conv_policy && plan.ContainsStep(name + ".policy")) {
+    plan.steps.push_back(
+        NetworkExecutionStep{NetworkExecutionOpKind::PolicyMap,
+                             name + ".policy_map",
+                             {}});
+  } else {
+    AddStepIfAny(plan, inventory, NetworkExecutionOpKind::PolicyMap,
+                 name + ".policy_map",
+                 std::vector<std::string>{prefix + ".ip4_pol_w"});
+  }
 }
 
 void AddValue(NetworkExecutionPlan &plan,

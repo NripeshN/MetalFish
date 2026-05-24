@@ -9,6 +9,7 @@
 
 #include "../network_tensor_plan.h"
 #include "../tables/attention_policy_map.h"
+#include "../tables/conv_policy_map.h"
 #include "cuda_kernel_smoke.h"
 #include "cuda_runtime_probe.h"
 
@@ -119,6 +120,20 @@ const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
     indices.fill(-1);
     for (int raw = 0; raw < kNetworkAttentionPolicyScratch; ++raw) {
       const short mapped = Tables::kAttnPolicyMap[raw];
+      if (mapped >= 0)
+        indices[static_cast<std::size_t>(mapped)] = raw;
+    }
+    return indices;
+  }();
+  return gather;
+}
+
+const std::array<int, kNetworkPolicyOutputs> &ConvolutionPolicyGatherMap() {
+  static const auto gather = [] {
+    std::array<int, kNetworkPolicyOutputs> indices{};
+    indices.fill(-1);
+    for (int raw = 0; raw < kNetworkConvPolicyScratch; ++raw) {
+      const short mapped = Tables::kConvPolicyMap[raw];
       if (mapped >= 0)
         indices[static_cast<std::size_t>(mapped)] = raw;
     }
@@ -731,6 +746,8 @@ __global__ void AttentionBiasSoftmaxDeterministicKernel(float *scores,
 }
 
 __device__ __constant__ int kAttentionPolicyGatherDevice[kNetworkPolicyOutputs];
+__device__ __constant__ int
+    kConvolutionPolicyGatherDevice[kNetworkPolicyOutputs];
 __device__ __constant__ float
     kStaticPositionEncodingDevice[kPackedInputSquareCount *
                                   Tables::kNumPosEncodingChannels];
@@ -759,6 +776,35 @@ void EnsureAttentionPolicyGatherMapUploaded() {
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("AttentionPolicyGather table upload", status));
+  }
+  uploaded_devices.push_back(device);
+}
+
+void EnsureConvolutionPolicyGatherMapUploaded() {
+  int device = 0;
+  cudaError_t status = cudaGetDevice(&device);
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("cudaGetDevice(conv_policy_gather)", status));
+  }
+
+  static std::mutex mutex;
+  static std::vector<int> uploaded_devices;
+
+  std::lock_guard<std::mutex> lock(mutex);
+  if (std::find(uploaded_devices.begin(), uploaded_devices.end(), device) !=
+      uploaded_devices.end()) {
+    return;
+  }
+
+  const auto &gather_map = ConvolutionPolicyGatherMap();
+  status =
+      cudaMemcpyToSymbol(kConvolutionPolicyGatherDevice, gather_map.data(),
+                         gather_map.size() * sizeof(int), 0,
+                         cudaMemcpyHostToDevice);
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("ConvolutionPolicyGather table upload", status));
   }
   uploaded_devices.push_back(device);
 }
@@ -842,6 +888,22 @@ __global__ void AttentionPolicyGatherKernel(const float *raw_policy,
   policy[index] = raw_index >= 0
                       ? raw_policy[static_cast<std::size_t>(batch) *
                                        kNetworkAttentionPolicyScratch +
+                                   raw_index]
+                      : 0.0f;
+}
+
+__global__ void ConvolutionPolicyGatherKernel(const float *raw_policy,
+                                              float *policy, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int policy_index = index % kNetworkPolicyOutputs;
+  const int batch = index / kNetworkPolicyOutputs;
+  const int raw_index = kConvolutionPolicyGatherDevice[policy_index];
+  policy[index] = raw_index >= 0
+                      ? raw_policy[static_cast<std::size_t>(batch) *
+                                       kNetworkConvPolicyScratch +
                                    raw_index]
                       : 0.0f;
 }
@@ -1563,6 +1625,38 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("AttentionPolicyGatherKernel synchronize", status));
+  }
+}
+
+void LaunchConvolutionPolicyMapKernel(const float *raw_policy, float *policy,
+                                      int batch_size, cudaStream_t stream) {
+  if (!raw_policy || !policy) {
+    throw std::runtime_error(
+        "CUDA convolution policy map kernel received null buffer");
+  }
+  if (batch_size <= 0) {
+    throw std::runtime_error(
+        "CUDA convolution policy map dimensions are invalid");
+  }
+
+  EnsureConvolutionPolicyGatherMapUploaded();
+
+  constexpr int kThreads = 256;
+  const int total = batch_size * kNetworkPolicyOutputs;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  ConvolutionPolicyGatherKernel<<<blocks, kThreads, 0, stream>>>(
+      raw_policy, policy, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(
+        CudaErrorMessage("ConvolutionPolicyGatherKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "ConvolutionPolicyGatherKernel synchronize", status));
   }
 }
 
@@ -2668,6 +2762,72 @@ CudaKernelSmokeResult RunAttentionCoreKernelSmoke() {
     if (std::fabs(actual_context[i] - expected_context[i]) > 1e-5f) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA attention context output mismatch";
+      return result;
+    }
+  }
+
+  result.status = CudaSmokeStatus::Success;
+  result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunConvolutionPolicyMapKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 2;
+  std::vector<float> raw_policy(kBatch * kNetworkConvPolicyScratch, 0.0f);
+  for (std::size_t i = 0; i < raw_policy.size(); ++i)
+    raw_policy[i] = static_cast<float>(static_cast<int>(i % 997) - 498) *
+                    0.00390625f;
+
+  std::vector<float> expected(kBatch * kNetworkPolicyOutputs, 0.0f);
+  const auto &gather = ConvolutionPolicyGatherMap();
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int policy = 0; policy < kNetworkPolicyOutputs; ++policy) {
+      const int raw = gather[static_cast<std::size_t>(policy)];
+      expected[static_cast<std::size_t>(batch) * kNetworkPolicyOutputs +
+               policy] =
+          raw >= 0 ? raw_policy[static_cast<std::size_t>(batch) *
+                                    kNetworkConvPolicyScratch +
+                                raw]
+                   : 0.0f;
+    }
+  }
+
+  std::vector<float> actual(expected.size(), 0.0f);
+  float *device_raw = nullptr;
+  float *device_policy = nullptr;
+  try {
+    AllocateDevice(&device_raw, raw_policy.size(),
+                   "cudaMalloc(conv_policy_raw)");
+    AllocateDevice(&device_policy, actual.size(),
+                   "cudaMalloc(conv_policy_mapped)");
+    UploadFloats(device_raw, raw_policy, "cudaMemcpy(conv_policy_raw)");
+
+    LaunchConvolutionPolicyMapKernel(device_raw, device_policy, kBatch);
+    DownloadFloats(actual, device_policy, "cudaMemcpy(conv_policy_mapped)");
+  } catch (const std::exception &e) {
+    FreeDevice(device_raw);
+    FreeDevice(device_policy);
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+    return result;
+  }
+
+  FreeDevice(device_raw);
+  FreeDevice(device_policy);
+
+  for (std::size_t i = 0; i < expected.size(); ++i) {
+    if (std::fabs(actual[i] - expected[i]) > 1e-6f) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA convolution policy map output mismatch";
       return result;
     }
   }

@@ -1476,7 +1476,7 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
   return output;
 }
 
-CudaDenseStageOutput ExecuteAttentionPolicyMapStage(
+CudaDenseStageOutput ExecutePolicyMapStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &policy_map,
     const CudaWeightBuffers &weights,
@@ -1484,11 +1484,11 @@ CudaDenseStageOutput ExecuteAttentionPolicyMapStage(
     CudaExecutionWorkspace &workspace, int batch_size) {
   if (batch_size <= 0)
     throw std::runtime_error("CUDA policy-map stage received empty batch");
-  if (!execution_plan.format.attention_policy) {
+  if (!execution_plan.format.attention_policy &&
+      !execution_plan.format.conv_policy) {
     throw std::runtime_error(
-        "CUDA policy-map stage requires attention policy format");
+        "CUDA policy-map stage requires attention or convolution policy format");
   }
-  RequirePolicyMapTensors(policy_map);
 
   const std::string suffix = ".policy_map";
   if (!EndsWith(policy_map.name, suffix)) {
@@ -1496,6 +1496,38 @@ CudaDenseStageOutput ExecuteAttentionPolicyMapStage(
   }
   const std::string policy_prefix =
       policy_map.name.substr(0, policy_map.name.size() - suffix.size());
+
+  if (execution_plan.format.conv_policy) {
+    const CudaDenseStageOutput *raw_stage =
+        sequence.FindStage(policy_prefix + ".policy");
+    if (!raw_stage || !raw_stage->output) {
+      throw std::runtime_error("CUDA convolution policy-map source is missing");
+    }
+    constexpr int kConvPolicyChannels =
+        kNetworkConvPolicyScratch / kPackedInputSquareCount;
+    if (raw_stage->rows != batch_size * kConvPolicyChannels ||
+        raw_stage->output_width != kPackedInputSquareCount) {
+      throw std::runtime_error(
+          "CUDA convolution policy-map source dimensions mismatch");
+    }
+
+    const auto &mapped_binding = tape.RequireName(policy_map.name + ".mapped");
+    RequireTapeShape(mapped_binding, batch_size, kNetworkPolicyOutputs,
+                     "convolution policy mapped logits");
+
+    CudaDenseStageOutput output;
+    output.activation = tape.Reserve(workspace, mapped_binding);
+    output.output = output.activation;
+    output.input_width = kNetworkConvPolicyScratch;
+    output.output_width = kNetworkPolicyOutputs;
+    output.rows = batch_size;
+
+    LaunchConvolutionPolicyMapKernel(raw_stage->output, output.output,
+                                     batch_size, workspace.Stream());
+    return output;
+  }
+
+  RequirePolicyMapTensors(policy_map);
   const CudaDenseStageOutput *query_stage =
       sequence.FindStage(policy_prefix + ".dense2");
   const CudaDenseStageOutput *key_stage =
@@ -2147,7 +2179,7 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
           ExecuteFeedForwardStage(execution_plan, step, weights, stage_input,
                                   tape, workspace, stage_input_rows);
     } else if (entry.kind == CudaExecutionScheduleKind::PolicyMapStage) {
-      stage = ExecuteAttentionPolicyMapStage(
+      stage = ExecutePolicyMapStage(
           execution_plan, step, weights, sequence, tape, workspace, batch_size);
     } else if (entry.kind == CudaExecutionScheduleKind::DenseLayerNormStage) {
       stage = ExecuteDenseActivationLayerNormStage(

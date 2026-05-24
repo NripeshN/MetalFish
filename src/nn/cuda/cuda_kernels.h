@@ -122,6 +122,10 @@ void LaunchAttentionPolicyMapKernel(const float *query, const float *key,
                                     int batch_size, int channels,
                                     cudaStream_t stream = nullptr);
 
+void LaunchConvolutionPolicyMapKernel(const float *raw_policy, float *policy,
+                                      int batch_size,
+                                      cudaStream_t stream = nullptr);
+
 void LaunchExpandPackedInputPlanesKernel(const std::uint64_t *masks,
                                          const float *values, float *expanded,
                                          int batch_size, int planes,

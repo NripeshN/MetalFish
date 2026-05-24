@@ -2048,14 +2048,24 @@ void test_cuda_execution_schedule(TestCounter &tc) {
 
   NN::NetworkResolvedExecutionPlan conv_policy_map = policy_map;
   conv_policy_map.format.attention_policy = false;
+  conv_policy_map.format.conv_policy = true;
+  conv_policy_map.steps.back().tensors.clear();
   const auto conv_policy_map_schedule =
       NN::Cuda::CreateCudaExecutionSchedule(conv_policy_map);
-  expect(!conv_policy_map_schedule.FullySupported(),
-         "non-attention policy-map schedule should stay unsupported", tc);
-  expect(conv_policy_map_schedule.FirstUnsupported() &&
-             conv_policy_map_schedule.FirstUnsupported()->op_kind ==
-                 NN::NetworkExecutionOpKind::PolicyMap,
-         "CUDA schedule should preserve unsupported policy-map op kind", tc);
+  expect(conv_policy_map_schedule.FullySupported(),
+         "convolution policy-map schedule should be supported", tc);
+  expect(conv_policy_map_schedule.policy_map_stage_count == 1,
+         "CUDA schedule should count convolution policy-map stages", tc);
+  const auto conv_policy_map_tape =
+      NN::Cuda::CreateResolvedExecutionTape(conv_policy_map, 2);
+  expect(!conv_policy_map_tape.FindName("policy.smoke.policy_map.raw"),
+         "CUDA tape should not allocate attention raw policy for conv maps",
+         tc);
+  expect(conv_policy_map_tape.RequireName("policy.smoke.policy_map.mapped")
+                 .rows == 2 &&
+             conv_policy_map_tape.RequireName("policy.smoke.policy_map.mapped")
+                     .width == NN::kNetworkPolicyOutputs,
+         "CUDA tape should allocate mapped convolution policy logits", tc);
 
   auto tensor = [](std::size_t index, const std::string &name,
                    std::size_t elements, std::vector<std::uint32_t> dims,
@@ -2303,6 +2313,31 @@ void test_cuda_output_mapping(TestCounter &tc) {
          "CUDA output mapping should expose mapped policy width", tc);
   expect(!mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
          "CUDA output mapping should not require raw policy after GPU mapping",
+         tc);
+
+  NN::NetworkTensorPlan conv_tensor_plan = tensor_plan;
+  conv_tensor_plan.attention_policy = false;
+  conv_tensor_plan.conv_policy = true;
+  conv_tensor_plan.raw_policy_outputs = NN::kNetworkConvPolicyScratch;
+  NN::NetworkResolvedExecutionPlan conv_mapped_policy = plan;
+  conv_mapped_policy.format.conv_policy = true;
+  conv_mapped_policy.steps.insert(conv_mapped_policy.steps.begin() + 1,
+                                  NN::NetworkResolvedExecutionStep{
+                                      NN::NetworkExecutionOpKind::PolicyMap,
+                                      "policy.smoke.policy_map",
+                                      {}});
+  const auto conv_policy_mapping = NN::Cuda::CreateCudaOutputMapping(
+      conv_tensor_plan, conv_mapped_policy,
+      NN::Cuda::CreateCudaExecutionSchedule(conv_mapped_policy), options);
+  expect(conv_policy_mapping.ok(),
+         "CUDA output mapping should accept mapped convolution policy", tc);
+  expect(conv_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
+             conv_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy)
+                     ->source_stage == "policy.smoke.policy_map",
+         "CUDA output mapping should prefer convolution policy-map logits", tc);
+  expect(!conv_policy_mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
+         "CUDA output mapping should not require raw convolution policy after "
+         "GPU mapping",
          tc);
 
   NN::NetworkResolvedExecutionPlan renamed = plan;
@@ -2615,6 +2650,14 @@ void test_cuda_dense_kernels(TestCounter &tc) {
   expect(attention_core_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              attention_core_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA attention core kernels should pass or skip without a device",
+         tc);
+
+  auto conv_policy_map_smoke = NN::Cuda::RunConvolutionPolicyMapKernelSmoke();
+  std::cout << "    " << conv_policy_map_smoke.message << std::endl;
+  expect(conv_policy_map_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             conv_policy_map_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA convolution policy map kernel should pass or skip without a "
+         "device",
          tc);
 
   auto dynamic_pe_smoke = NN::Cuda::RunDynamicPositionEncodingKernelSmoke();
