@@ -210,6 +210,7 @@ to run on Metal/MPSGraph:
 
 ```text
 setoption name HybridANERootProbe value true
+setoption name HybridANERootHints value true
 setoption name HybridANEWeights value networks/t1-512x15x8h-distilled-swa-3395000.pb.gz
 setoption name HybridANEModelPath value build/coreml/compiled/t1-512-heads-b8.mlmodelc
 setoption name HybridANEComputeUnits value cpu-ne

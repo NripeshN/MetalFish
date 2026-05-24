@@ -1202,8 +1202,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--hybrid-ane-root-hints",
-        action="store_true",
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Use ANE root ordering as AB search hints; final ANE evidence remains available without this.",
     )
     parser.add_argument(

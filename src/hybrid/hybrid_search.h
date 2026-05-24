@@ -215,7 +215,7 @@ struct ParallelHybridConfig {
   int ab_candidate_verify_count = 4;
   bool root_pawn_lever_tiebreak = true;
   bool ane_root_probe = false;
-  bool ane_root_hints = false;
+  bool ane_root_hints = true;
   bool ane_confirm_mcts_override = true;
   std::string ane_weights_path;
   std::string ane_model_path;

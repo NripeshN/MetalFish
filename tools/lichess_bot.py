@@ -266,7 +266,7 @@ HYBRID_ANE_ROOT_PROBE = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_PROBE", False) == "true"
 )
 HYBRID_ANE_ROOT_HINTS = (
-    env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", False) == "true"
+    env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", True) == "true"
 )
 HYBRID_ANE_WEIGHTS = pathlib.Path(
     os.environ.get("METALFISH_HYBRID_ANE_WEIGHTS", str(DEFAULT_ANE_WEIGHTS))
