@@ -34,6 +34,7 @@ $Cmake = Require-Command "cmake"
 $Ninja = Require-Command "ninja"
 $Nvcc = Require-Command "nvcc"
 $Cl = Require-Command "cl.exe"
+$Python = Require-Command "python"
 $ClForCmake = $Cl -replace "\\", "/"
 
 if (-not $env:CUDA_PATH) {
@@ -87,6 +88,33 @@ if ($LASTEXITCODE -ne 0) {
   throw "CMake build failed with exit code $LASTEXITCODE"
 }
 
+$EnginePath = (Resolve-Path (Join-Path $BuildDir "metalfish.exe")).Path
+$SmokeSteps = @()
+if ($BuildTests -eq "ON") {
+  $TestsPath = (Resolve-Path (Join-Path $BuildDir "metalfish_tests.exe")).Path
+  Write-Host "Running CUDA-linked MCTS module smoke"
+  & $TestsPath mcts
+  if ($LASTEXITCODE -ne 0) {
+    throw "CUDA-linked MCTS module smoke failed with exit code $LASTEXITCODE"
+  }
+  $SmokeSteps += "metalfish_tests.exe mcts"
+}
+
+$UciSmoke = Join-Path $SourceDir "tools\uci_smoke.py"
+Write-Host "Running CUDA-linked AB UCI smoke"
+& $Python $UciSmoke `
+  --engine $EnginePath `
+  --timeout 45 `
+  --setoption "UseMCTS=false" `
+  --setoption "UseHybridSearch=false" `
+  --setoption "Threads=1" `
+  --setoption "Hash=16" `
+  --go "depth 1"
+if ($LASTEXITCODE -ne 0) {
+  throw "CUDA-linked AB UCI smoke failed with exit code $LASTEXITCODE"
+}
+$SmokeSteps += "tools/uci_smoke.py depth 1"
+
 $Summary = Join-Path $BuildDir "windows-cuda-compile-summary.md"
 $NvccVersion = (& $Nvcc --version) -join "`n"
 $CmakeVersion = (& $Cmake --version) -join "`n"
@@ -94,6 +122,7 @@ $NinjaVersion = (& $Ninja --version) -join "`n"
 $ClVersion = (& $Cl 2>&1) -join "`n"
 $TimestampUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $TargetsText = $Targets -join ", "
+$SmokeText = $SmokeSteps -join ", "
 
 @(
   "# MetalFish Windows CUDA Compile Gate",
@@ -107,6 +136,7 @@ $TargetsText = $Targets -join ", "
   "- CUDA_PATH: $env:CUDA_PATH",
   "- Build tests: $BuildTests",
   "- Targets: $TargetsText",
+  "- Smoke tests: $SmokeText",
   "",
   "## Toolchain",
   "",

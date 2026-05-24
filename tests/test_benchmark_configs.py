@@ -718,6 +718,29 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / "tools/run_windows_cuda_compile_gate.ps1",
+        [
+            'Require-Command "python"',
+            "Running CUDA-linked MCTS module smoke",
+            "metalfish_tests.exe mcts",
+            "Running CUDA-linked AB UCI smoke",
+            "UseMCTS=false",
+            "UseHybridSearch=false",
+            "depth 1",
+            "- Smoke tests: $SmokeText",
+        ],
+    )
+    assert_file_contains(
+        PROJ / ".github/workflows/windows-cuda-compile.yml",
+        [
+            "tools/uci_smoke.py",
+            "src/nn/input_plane_packing.h",
+            "src/nn/policy_map.*",
+            "src/mcts/evaluator.*",
+            "tests/test_mcts_module.cpp",
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/run_gcp_cuda_gpu_gate.sh",
         [
             "METALFISH_GCP_COLLECT_ARTIFACTS",

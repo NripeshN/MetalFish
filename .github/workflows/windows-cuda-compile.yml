@@ -6,10 +6,21 @@ on:
     paths:
       - ".github/workflows/windows-cuda-compile.yml"
       - "tools/run_windows_cuda_compile_gate.ps1"
+      - "tools/uci_smoke.py"
       - "CMakeLists.txt"
+      - "src/mcts/backend_adapter.*"
+      - "src/mcts/evaluator.*"
       - "src/nn/cuda/**"
+      - "src/nn/encoder.*"
+      - "src/nn/input_plane_packing.h"
+      - "src/nn/input_planes.h"
+      - "src/nn/loader.*"
       - "src/nn/network*.cpp"
       - "src/nn/network*.h"
+      - "src/nn/policy_map.*"
+      - "src/nn/weights.*"
+      - "tests/test_main.cpp"
+      - "tests/test_mcts_module.cpp"
       - "tests/test_nn_comparison.cpp"
   workflow_dispatch:
     inputs:
