@@ -1857,15 +1857,63 @@ void test_cuda_execution_schedule(TestCounter &tc) {
 
   NN::NetworkResolvedExecutionPlan residual_se = residual;
   residual_se.steps.push_back(NN::NetworkResolvedExecutionStep{
-      NN::NetworkExecutionOpKind::Dense, "body.residual.0.se", {}});
+      NN::NetworkExecutionOpKind::Dense,
+      "body.residual.0.se",
+      {
+          {4,
+           "body.residual.0.se.w1",
+           2 * 4,
+           {2, 4},
+           NN::NetworkWeightTensorKind::DenseWeight},
+          {5,
+           "body.residual.0.se.b1",
+           2,
+           {2},
+           NN::NetworkWeightTensorKind::DenseBias},
+          {6,
+           "body.residual.0.se.w2",
+           8 * 2,
+           {8, 2},
+           NN::NetworkWeightTensorKind::DenseWeight},
+          {7,
+           "body.residual.0.se.b2",
+           8,
+           {8},
+           NN::NetworkWeightTensorKind::DenseBias},
+      }});
   const auto residual_se_schedule =
       NN::Cuda::CreateCudaExecutionSchedule(residual_se);
-  expect(!residual_se_schedule.FullySupported(),
-         "residual convolution schedule with SE should stay gated", tc);
-  expect(residual_se_schedule.FirstUnsupported() &&
-             residual_se_schedule.FirstUnsupported()->reason.find(
-                 "squeeze-excite") != std::string::npos,
-         "CUDA schedule should explain residual SE unsupported status", tc);
+  expect(residual_se_schedule.FullySupported(),
+         "residual convolution schedule with SE should be supported", tc);
+  expect(residual_se_schedule.residual_convolution_stage_count == 1,
+         "CUDA schedule should count residual SE convolution stages", tc);
+  expect(residual_se_schedule.entries.size() == 1 &&
+             residual_se_schedule.entries[0].kind ==
+                 NN::Cuda::CudaExecutionScheduleKind::ResidualConvolutionStage,
+         "CUDA schedule should fuse residual SE convolution stages", tc);
+  const auto residual_se_tape =
+      NN::Cuda::CreateResolvedExecutionTape(residual_se, 2);
+  expect(residual_se_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::SqueezeExcitePoolOutput) == 1,
+         "CUDA tape should allocate residual SE pool scratch", tc);
+  expect(residual_se_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::SqueezeExciteHiddenOutput) == 2,
+         "CUDA tape should allocate residual SE hidden scratch", tc);
+  expect(residual_se_tape.CountRole(
+             NN::Cuda::CudaExecutionBufferRole::SqueezeExciteOutput) == 1,
+         "CUDA tape should allocate residual SE output scratch", tc);
+  expect(residual_se_tape.RequireName("body.residual.0.se.pool").rows == 2 &&
+             residual_se_tape.RequireName("body.residual.0.se.pool").width ==
+                 4,
+         "CUDA tape should store residual SE pool as batch-channel rows", tc);
+  expect(residual_se_tape.RequireName("body.residual.0.se.fc2.dense").rows ==
+             2 &&
+             residual_se_tape.RequireName("body.residual.0.se.fc2.dense")
+                     .width == 8,
+         "CUDA tape should store residual SE gamma/beta output", tc);
+  expect(residual_se_tape.RequireName("body.residual.0.activation").rows ==
+             2 * 4,
+         "CUDA tape should store residual SE outputs as NCHW rows", tc);
 
   NN::NetworkResolvedExecutionPlan static_pe;
   static_pe.format.input_embedding = NN::INPUT_EMBEDDING_PE_MAP;
@@ -2547,6 +2595,13 @@ void test_cuda_dense_kernels(TestCounter &tc) {
   expect(residual_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
              residual_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA residual add kernel should pass or skip without a device", tc);
+
+  auto squeeze_excite_smoke = NN::Cuda::RunSqueezeExciteKernelSmoke();
+  std::cout << "    " << squeeze_excite_smoke.message << std::endl;
+  expect(squeeze_excite_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
+             squeeze_excite_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+         "CUDA squeeze-excite kernels should pass or skip without a device",
+         tc);
 
   auto residual_norm_smoke = NN::Cuda::RunResidualLayerNormKernelSmoke();
   std::cout << "    " << residual_norm_smoke.message << std::endl;

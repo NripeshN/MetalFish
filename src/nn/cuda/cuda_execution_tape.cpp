@@ -73,6 +73,22 @@ int DenseInputWidth(const NetworkResolvedExecutionStep &dense) {
   return static_cast<int>(width);
 }
 
+int SqueezeExciteOutputWidth(const NetworkResolvedExecutionStep &se) {
+  if (se.kind != NetworkExecutionOpKind::Dense)
+    throw std::runtime_error("CUDA execution tape squeeze-excite tensor is invalid");
+  for (const auto &tensor : se.tensors) {
+    if (tensor.name.ends_with(".w2") && tensor.dims.size() == 2 &&
+        tensor.dims[0] > 0)
+      return static_cast<int>(tensor.dims[0]);
+  }
+  for (const auto &tensor : se.tensors) {
+    if (tensor.name.ends_with(".b2") && tensor.dims.size() == 1 &&
+        tensor.dims[0] > 0)
+      return static_cast<int>(tensor.dims[0]);
+  }
+  throw std::runtime_error("CUDA execution tape squeeze-excite tensor is invalid");
+}
+
 int LayerNormWidth(const NetworkResolvedExecutionStep &norm) {
   if (norm.kind != NetworkExecutionOpKind::LayerNorm || norm.tensors.empty() ||
       norm.tensors[0].dims.size() != 1)
@@ -247,6 +263,12 @@ std::string CudaExecutionBufferRoleName(CudaExecutionBufferRole role) {
     return "feed_forward_output";
   case CudaExecutionBufferRole::ResidualOutput:
     return "residual_output";
+  case CudaExecutionBufferRole::SqueezeExcitePoolOutput:
+    return "squeeze_excite_pool_output";
+  case CudaExecutionBufferRole::SqueezeExciteHiddenOutput:
+    return "squeeze_excite_hidden_output";
+  case CudaExecutionBufferRole::SqueezeExciteOutput:
+    return "squeeze_excite_output";
   case CudaExecutionBufferRole::AttentionQuery:
     return "attention_query";
   case CudaExecutionBufferRole::AttentionKey:
@@ -368,9 +390,7 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
         const std::size_t conv2_index = step_index + 1;
         const std::size_t se_index = conv2_index + 1;
         if (conv2_index < plan.steps.size() &&
-            IsResidualConv2For(plan.steps[conv2_index], block_name) &&
-            (se_index >= plan.steps.size() ||
-             !IsResidualSqueezeExciteFor(plan.steps[se_index], block_name))) {
+            IsResidualConv2For(plan.steps[conv2_index], block_name)) {
           const int conv1_channels = ConvolutionOutputChannels(step);
           const int conv2_channels =
               ConvolutionOutputChannels(plan.steps[conv2_index]);
@@ -383,12 +403,32 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
           tape.Add(block_name + ".residual",
                    CudaExecutionBufferRole::ResidualOutput,
                    batch_size * conv2_channels, kCudaAttentionSquares);
+          if (se_index < plan.steps.size() &&
+              IsResidualSqueezeExciteFor(plan.steps[se_index], block_name)) {
+            const auto &se = plan.steps[se_index];
+            const int se_hidden = DenseOutputWidth(se);
+            const int se_output = SqueezeExciteOutputWidth(se);
+            tape.Add(se.name + ".pool",
+                     CudaExecutionBufferRole::SqueezeExcitePoolOutput,
+                     batch_size, conv2_channels);
+            tape.Add(se.name + ".fc1.dense",
+                     CudaExecutionBufferRole::SqueezeExciteHiddenOutput,
+                     batch_size, se_hidden);
+            tape.Add(se.name + ".fc1.activation",
+                     CudaExecutionBufferRole::SqueezeExciteHiddenOutput,
+                     batch_size, se_hidden);
+            tape.Add(se.name + ".fc2.dense",
+                     CudaExecutionBufferRole::SqueezeExciteOutput, batch_size,
+                     se_output);
+            step_index = se_index;
+          } else {
+            step_index = conv2_index;
+          }
           tape.Add(block_name + ".activation",
                    CudaExecutionBufferRole::ActivationOutput,
                    batch_size * conv2_channels, kCudaAttentionSquares);
           current_rows = batch_size * conv2_channels;
           current_width = kCudaAttentionSquares;
-          step_index = conv2_index;
           break;
         }
       }

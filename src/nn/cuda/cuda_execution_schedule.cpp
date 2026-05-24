@@ -47,14 +47,18 @@ ConvolutionEntry(const NetworkResolvedExecutionPlan &plan,
 
 CudaExecutionScheduleEntry
 ResidualConvolutionEntry(const NetworkResolvedExecutionPlan &plan,
-                         std::size_t conv1_index, std::size_t conv2_index) {
+                         std::size_t conv1_index, std::size_t conv2_index,
+                         std::size_t se_index) {
   const auto &conv1 = plan.steps[conv1_index];
+  std::string name = conv1.name + " -> " + plan.steps[conv2_index].name;
+  if (se_index < plan.steps.size())
+    name += " -> " + plan.steps[se_index].name;
   return CudaExecutionScheduleEntry{
       CudaExecutionScheduleKind::ResidualConvolutionStage,
       conv1_index,
       conv2_index,
       conv1.kind,
-      conv1.name + " -> " + plan.steps[conv2_index].name,
+      name,
       "residual convolution block"};
 }
 
@@ -345,16 +349,18 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
           continue;
         }
         const std::size_t se_index = conv2_index + 1;
-        if (se_index < plan.steps.size() &&
-            IsResidualSqueezeExciteFor(plan.steps[se_index], block_name)) {
-          AddEntry(schedule,
-                   UnsupportedEntry(plan, i,
-                                    "CUDA residual squeeze-excite block not "
-                                    "implemented yet"));
+        const bool has_se =
+            se_index < plan.steps.size() &&
+            IsResidualSqueezeExciteFor(plan.steps[se_index], block_name);
+        AddEntry(schedule,
+                 ResidualConvolutionEntry(
+                     plan, i, conv2_index,
+                     has_se ? se_index
+                            : std::numeric_limits<std::size_t>::max()));
+        if (has_se) {
           i = se_index;
           continue;
         }
-        AddEntry(schedule, ResidualConvolutionEntry(plan, i, conv2_index));
         i = conv2_index;
       } else if (IsResidualConvolution(step)) {
         AddEntry(schedule,

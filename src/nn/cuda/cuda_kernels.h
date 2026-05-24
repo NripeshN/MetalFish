@@ -65,6 +65,19 @@ void LaunchResidualAddKernel(const float *parent, const float *secondary,
                              float secondary_scale,
                              cudaStream_t stream = nullptr);
 
+void LaunchGlobalAveragePoolNchwKernel(const float *input, float *output,
+                                       int batch_size, int channels,
+                                       int squares,
+                                       cudaStream_t stream = nullptr);
+
+void LaunchSqueezeExciteResidualKernel(const float *skip,
+                                       const float *convolution,
+                                       const float *se_output, float *residual,
+                                       float *output, int batch_size,
+                                       int channels, int squares,
+                                       CudaActivationKind activation,
+                                       cudaStream_t stream = nullptr);
+
 void LaunchResidualLayerNormKernel(const float *parent, const float *secondary,
                                    const float *gamma, const float *beta,
                                    float *residual, float *output, int rows,

@@ -542,6 +542,12 @@ std::string ResidualBlockName(std::string_view name) {
   return {};
 }
 
+bool IsResidualSqueezeExciteFor(const NetworkResolvedExecutionStep &step,
+                                std::string_view block_name) {
+  return step.kind == NetworkExecutionOpKind::Dense &&
+         step.name == std::string(block_name) + ".se";
+}
+
 bool ConvolutionAppliesActivation(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &step) {
@@ -894,8 +900,10 @@ ExecuteConvolutionStage(const NetworkResolvedExecutionPlan &execution_plan,
 CudaDenseStageOutput ExecuteResidualConvolutionStage(
     const NetworkResolvedExecutionPlan &execution_plan,
     const NetworkResolvedExecutionStep &conv1,
-    const NetworkResolvedExecutionStep &conv2, const CudaWeightBuffers &weights,
-    const float *input, const CudaExecutionTape &tape,
+    const NetworkResolvedExecutionStep &conv2,
+    const NetworkResolvedExecutionStep *squeeze_excite,
+    const CudaWeightBuffers &weights, const float *input,
+    const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int batch_size, int input_rows,
     int input_width) {
   if (batch_size <= 0)
@@ -919,6 +927,20 @@ CudaDenseStageOutput ExecuteResidualConvolutionStage(
   const auto conv1_bias = TensorBySuffix(conv1, weights, ".biases");
   const auto conv2_weight = TensorBySuffix(conv2, weights, ".weights");
   const auto conv2_bias = TensorBySuffix(conv2, weights, ".biases");
+  CudaDeviceTensorView se_w1;
+  CudaDeviceTensorView se_b1;
+  CudaDeviceTensorView se_w2;
+  CudaDeviceTensorView se_b2;
+  const bool has_se = squeeze_excite != nullptr;
+  if (has_se) {
+    if (!IsResidualSqueezeExciteFor(*squeeze_excite, block_name))
+      throw std::runtime_error(
+          "CUDA residual convolution squeeze-excite name mismatch");
+    se_w1 = TensorBySuffix(*squeeze_excite, weights, ".w1");
+    se_b1 = TensorBySuffix(*squeeze_excite, weights, ".b1");
+    se_w2 = TensorBySuffix(*squeeze_excite, weights, ".w2");
+    se_b2 = TensorBySuffix(*squeeze_excite, weights, ".b2");
+  }
   if (conv1_weight.dims.size() != 4 || conv1_bias.dims.size() != 1 ||
       conv2_weight.dims.size() != 4 || conv2_bias.dims.size() != 1) {
     throw std::runtime_error("CUDA residual convolution tensor shape is invalid");
@@ -942,11 +964,46 @@ CudaDenseStageOutput ExecuteResidualConvolutionStage(
     throw std::runtime_error(
         "CUDA residual convolution tensor dimensions mismatch");
   }
+  int se_hidden = 0;
+  int se_output_channels = 0;
+  if (has_se) {
+    if (se_w1.dims.size() != 2 || se_b1.dims.size() != 1 ||
+        se_w2.dims.size() != 2 || se_b2.dims.size() != 1) {
+      throw std::runtime_error(
+          "CUDA residual squeeze-excite tensor shape is invalid");
+    }
+    se_hidden = static_cast<int>(se_w1.dims[0]);
+    const int se_input_channels = static_cast<int>(se_w1.dims[1]);
+    se_output_channels = static_cast<int>(se_w2.dims[0]);
+    const int se_fc2_input = static_cast<int>(se_w2.dims[1]);
+    if (se_hidden <= 0 || se_input_channels != skip_channels ||
+        se_b1.elements != static_cast<std::size_t>(se_hidden) ||
+        se_output_channels != skip_channels * 2 ||
+        se_fc2_input != se_hidden ||
+        se_b2.elements != static_cast<std::size_t>(se_output_channels)) {
+      throw std::runtime_error(
+          "CUDA residual squeeze-excite tensor dimensions mismatch");
+    }
+  }
 
   const auto &conv1_binding = tape.RequireName(conv1.name + ".convolution");
   const auto &conv2_binding = tape.RequireName(conv2.name + ".convolution");
   const auto &residual_binding = tape.RequireName(block_name + ".residual");
   const auto &activation_binding = tape.RequireName(block_name + ".activation");
+  const CudaExecutionBufferBinding *se_pool_binding = nullptr;
+  const CudaExecutionBufferBinding *se_fc1_binding = nullptr;
+  const CudaExecutionBufferBinding *se_activation_binding = nullptr;
+  const CudaExecutionBufferBinding *se_fc2_binding = nullptr;
+  if (has_se) {
+    se_pool_binding =
+        &tape.RequireName(squeeze_excite->name + ".pool");
+    se_fc1_binding =
+        &tape.RequireName(squeeze_excite->name + ".fc1.dense");
+    se_activation_binding =
+        &tape.RequireName(squeeze_excite->name + ".fc1.activation");
+    se_fc2_binding =
+        &tape.RequireName(squeeze_excite->name + ".fc2.dense");
+  }
   RequireTapeShape(conv1_binding, batch_size * conv1_channels,
                    kCudaAttentionSquares, "residual conv1 output");
   RequireTapeShape(conv2_binding, batch_size * conv2_channels,
@@ -955,11 +1012,28 @@ CudaDenseStageOutput ExecuteResidualConvolutionStage(
                    "residual convolution add");
   RequireTapeShape(activation_binding, input_rows, input_width,
                    "residual convolution activation");
+  if (has_se) {
+    RequireTapeShape(*se_pool_binding, batch_size, skip_channels,
+                     "residual squeeze-excite pool");
+    RequireTapeShape(*se_fc1_binding, batch_size, se_hidden,
+                     "residual squeeze-excite fc1");
+    RequireTapeShape(*se_activation_binding, batch_size, se_hidden,
+                     "residual squeeze-excite activation");
+    RequireTapeShape(*se_fc2_binding, batch_size, se_output_channels,
+                     "residual squeeze-excite fc2");
+  }
 
   CudaDenseStageOutput output;
   output.dense = tape.Reserve(workspace, conv1_binding);
   output.convolution = tape.Reserve(workspace, conv2_binding);
   output.residual = tape.Reserve(workspace, residual_binding);
+  if (has_se) {
+    output.squeeze_excite_pool = tape.Reserve(workspace, *se_pool_binding);
+    output.squeeze_excite_hidden = tape.Reserve(workspace, *se_fc1_binding);
+    output.squeeze_excite_activation =
+        tape.Reserve(workspace, *se_activation_binding);
+    output.squeeze_excite_output = tape.Reserve(workspace, *se_fc2_binding);
+  }
   output.activation = tape.Reserve(workspace, activation_binding);
   output.output = output.activation;
   output.input_width = input_width;
@@ -978,10 +1052,29 @@ CudaDenseStageOutput ExecuteResidualConvolutionStage(
                             kCudaAttentionSquares, conv2_input_channels,
                             conv2_channels, conv2_kernel, activation, false,
                             stream);
-  LaunchResidualAddKernel(input, output.convolution, output.residual, input_rows,
-                          input_width, 1.0f, stream);
-  LaunchActivationKernel(output.residual, output.activation,
-                         input_rows * input_width, activation, stream);
+  if (has_se) {
+    LaunchGlobalAveragePoolNchwKernel(output.convolution,
+                                      output.squeeze_excite_pool, batch_size,
+                                      skip_channels, input_width, stream);
+    LaunchDenseAffineKernel(output.squeeze_excite_pool, se_w1.data, se_b1.data,
+                            output.squeeze_excite_hidden, batch_size,
+                            skip_channels, se_hidden, stream);
+    LaunchActivationKernel(output.squeeze_excite_hidden,
+                           output.squeeze_excite_activation,
+                           batch_size * se_hidden, activation, stream);
+    LaunchDenseAffineKernel(output.squeeze_excite_activation, se_w2.data,
+                            se_b2.data, output.squeeze_excite_output,
+                            batch_size, se_hidden, se_output_channels, stream);
+    LaunchSqueezeExciteResidualKernel(
+        input, output.convolution, output.squeeze_excite_output,
+        output.residual, output.activation, batch_size, skip_channels,
+        input_width, activation, stream);
+  } else {
+    LaunchResidualAddKernel(input, output.convolution, output.residual,
+                            input_rows, input_width, 1.0f, stream);
+    LaunchActivationKernel(output.residual, output.activation,
+                           input_rows * input_width, activation, stream);
+  }
   return output;
 }
 
@@ -1937,10 +2030,17 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
         throw std::runtime_error(
             "CUDA residual convolution schedule index is invalid");
       }
+      const NetworkResolvedExecutionStep *squeeze_excite = nullptr;
+      const std::size_t se_index = entry.second_step + 1;
+      if (se_index < execution_plan.steps.size() &&
+          IsResidualSqueezeExciteFor(execution_plan.steps[se_index],
+                                     ResidualBlockName(step.name))) {
+        squeeze_excite = &execution_plan.steps[se_index];
+      }
       stage = ExecuteResidualConvolutionStage(
           execution_plan, step, execution_plan.steps[entry.second_step],
-          weights, stage_input, tape, workspace, batch_size, stage_input_rows,
-          stage_input_width);
+          squeeze_excite, weights, stage_input, tape, workspace, batch_size,
+          stage_input_rows, stage_input_width);
     } else if (entry.kind == CudaExecutionScheduleKind::DenseActivationStage &&
         IsDynamicPositionPreprocessName(step.name)) {
       stage = ExecuteDynamicPositionEncodingStage(execution_plan, step, weights,

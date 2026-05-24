@@ -35,6 +35,10 @@ struct CudaDenseStageOutput {
   float *gated = nullptr;
   float *feed_forward = nullptr;
   float *residual = nullptr;
+  float *squeeze_excite_pool = nullptr;
+  float *squeeze_excite_hidden = nullptr;
+  float *squeeze_excite_activation = nullptr;
+  float *squeeze_excite_output = nullptr;
   float *expanded_input = nullptr;
   float *position_input = nullptr;
   float *output = nullptr;

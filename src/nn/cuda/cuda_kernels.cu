@@ -328,6 +328,39 @@ __global__ void ResidualAddKernel(const float *parent, const float *secondary,
   output[index] = parent[index] + secondary[index] * secondary_scale;
 }
 
+__global__ void GlobalAveragePoolNchwKernel(const float *input, float *output,
+                                            int channels, int squares,
+                                            int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+  const int batch = index / channels;
+  const int channel = index % channels;
+  const std::size_t offset =
+      (static_cast<std::size_t>(batch) * channels + channel) * squares;
+  float sum = 0.0f;
+  for (int square = 0; square < squares; ++square)
+    sum += input[offset + square];
+  output[index] = sum / static_cast<float>(squares);
+}
+
+__global__ void SqueezeExciteResidualKernel(
+    const float *skip, const float *convolution, const float *se_output,
+    float *residual, float *output, int channels, int squares, int total,
+    CudaActivationKind activation) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+  const int channel = (index / squares) % channels;
+  const int batch = index / (channels * squares);
+  const int se_offset = batch * channels * 2 + channel;
+  const float gamma = 1.0f / (1.0f + expf(-se_output[se_offset]));
+  const float beta = se_output[se_offset + channels];
+  const float value = skip[index] + convolution[index] * gamma + beta;
+  residual[index] = value;
+  output[index] = ApplyActivationValue(value, activation);
+}
+
 __global__ void ResidualLayerNormKernel(const float *parent,
                                         const float *secondary,
                                         const float *gamma, const float *beta,
@@ -1104,6 +1137,65 @@ void LaunchResidualAddKernel(const float *parent, const float *secondary,
   if (status != cudaSuccess)
     throw std::runtime_error(
         CudaErrorMessage("ResidualAddKernel synchronize", status));
+}
+
+void LaunchGlobalAveragePoolNchwKernel(const float *input, float *output,
+                                       int batch_size, int channels,
+                                       int squares, cudaStream_t stream) {
+  if (!input || !output)
+    throw std::runtime_error(
+        "CUDA global average pool kernel received null buffer");
+  if (batch_size <= 0 || channels <= 0 || squares <= 0)
+    throw std::runtime_error(
+        "CUDA global average pool kernel dimensions are invalid");
+
+  const int total = batch_size * channels;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  GlobalAveragePoolNchwKernel<<<blocks, kThreads, 0, stream>>>(
+      input, output, channels, squares, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("GlobalAveragePoolNchwKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("GlobalAveragePoolNchwKernel synchronize", status));
+}
+
+void LaunchSqueezeExciteResidualKernel(const float *skip,
+                                       const float *convolution,
+                                       const float *se_output, float *residual,
+                                       float *output, int batch_size,
+                                       int channels, int squares,
+                                       CudaActivationKind activation,
+                                       cudaStream_t stream) {
+  if (!skip || !convolution || !se_output || !residual || !output)
+    throw std::runtime_error(
+        "CUDA squeeze-excite residual kernel received null buffer");
+  if (batch_size <= 0 || channels <= 0 || squares <= 0)
+    throw std::runtime_error(
+        "CUDA squeeze-excite residual kernel dimensions are invalid");
+
+  const int total = batch_size * channels * squares;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  SqueezeExciteResidualKernel<<<blocks, kThreads, 0, stream>>>(
+      skip, convolution, se_output, residual, output, channels, squares, total,
+      activation);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess)
+    throw std::runtime_error(
+        CudaErrorMessage("SqueezeExciteResidualKernel launch", status));
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess)
+    throw std::runtime_error(CudaErrorMessage(
+        "SqueezeExciteResidualKernel synchronize", status));
 }
 
 void LaunchResidualLayerNormKernel(const float *parent, const float *secondary,
@@ -2158,6 +2250,129 @@ CudaKernelSmokeResult RunResidualAddKernelSmoke() {
 
   FreeDevice(device_parent);
   FreeDevice(device_secondary);
+  FreeDevice(device_output);
+
+  if (result.message.empty())
+    result.message = RuntimeCudaDeviceSummary();
+  return result;
+}
+
+CudaKernelSmokeResult RunSqueezeExciteKernelSmoke() {
+  CudaKernelSmokeResult result;
+
+  const int device_count = RuntimeCudaDeviceCount();
+  if (device_count <= 0) {
+    result.status = CudaSmokeStatus::NoDevice;
+    result.message = RuntimeCudaDeviceSummary();
+    return result;
+  }
+
+  constexpr int kBatch = 2;
+  constexpr int kChannels = 2;
+  constexpr int kSquares = 4;
+  const std::vector<float> skip = {
+      0.25f, -0.5f, 1.0f, 0.75f, -1.0f, 0.5f, 0.25f, -0.25f,
+      1.25f, -0.75f, 0.0f, 0.5f, -0.5f, 1.5f, -1.25f, 0.25f,
+  };
+  const std::vector<float> convolution = {
+      1.0f, 2.0f, -1.0f, 0.0f, 0.5f, -0.5f, 1.5f, 2.5f,
+      -1.5f, 0.25f, 0.75f, 1.25f, 2.0f, -2.0f, 0.5f, -0.5f,
+  };
+  const std::vector<float> se_output = {
+      0.0f, 1.0f, 0.25f, -0.5f, -1.0f, 0.5f, 0.75f, 0.125f,
+  };
+  std::vector<float> actual_pool(kBatch * kChannels, 0.0f);
+  std::vector<float> actual_residual(skip.size(), 0.0f);
+  std::vector<float> actual_output(skip.size(), 0.0f);
+  std::vector<float> expected_pool(actual_pool.size(), 0.0f);
+  std::vector<float> expected_residual(skip.size(), 0.0f);
+  std::vector<float> expected_output(skip.size(), 0.0f);
+
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int channel = 0; channel < kChannels; ++channel) {
+      const std::size_t pool_index =
+          static_cast<std::size_t>(batch) * kChannels + channel;
+      const std::size_t plane_offset = pool_index * kSquares;
+      float sum = 0.0f;
+      for (int square = 0; square < kSquares; ++square)
+        sum += convolution[plane_offset + square];
+      expected_pool[pool_index] = sum / static_cast<float>(kSquares);
+
+      const std::size_t gamma_index =
+          static_cast<std::size_t>(batch) * kChannels * 2 + channel;
+      const float gamma =
+          1.0f / (1.0f + std::exp(-se_output[gamma_index]));
+      const float beta = se_output[gamma_index + kChannels];
+      for (int square = 0; square < kSquares; ++square) {
+        const std::size_t index = plane_offset + square;
+        const float value = skip[index] + convolution[index] * gamma + beta;
+        expected_residual[index] = value;
+        expected_output[index] = std::max(value, 0.0f);
+      }
+    }
+  }
+
+  float *device_skip = nullptr;
+  float *device_convolution = nullptr;
+  float *device_se_output = nullptr;
+  float *device_pool = nullptr;
+  float *device_residual = nullptr;
+  float *device_output = nullptr;
+  try {
+    AllocateDevice(&device_skip, skip.size(), "cudaMalloc(se_skip)");
+    AllocateDevice(&device_convolution, convolution.size(),
+                   "cudaMalloc(se_convolution)");
+    AllocateDevice(&device_se_output, se_output.size(),
+                   "cudaMalloc(se_output)");
+    AllocateDevice(&device_pool, actual_pool.size(), "cudaMalloc(se_pool)");
+    AllocateDevice(&device_residual, actual_residual.size(),
+                   "cudaMalloc(se_residual)");
+    AllocateDevice(&device_output, actual_output.size(),
+                   "cudaMalloc(se_activation)");
+    UploadFloats(device_skip, skip, "cudaMemcpy(se_skip)");
+    UploadFloats(device_convolution, convolution,
+                 "cudaMemcpy(se_convolution)");
+    UploadFloats(device_se_output, se_output, "cudaMemcpy(se_output)");
+
+    LaunchGlobalAveragePoolNchwKernel(device_convolution, device_pool, kBatch,
+                                      kChannels, kSquares);
+    LaunchSqueezeExciteResidualKernel(
+        device_skip, device_convolution, device_se_output, device_residual,
+        device_output, kBatch, kChannels, kSquares, CudaActivationKind::Relu);
+    DownloadFloats(actual_pool, device_pool, "cudaMemcpy(se_pool)");
+    DownloadFloats(actual_residual, device_residual,
+                   "cudaMemcpy(se_residual)");
+    DownloadFloats(actual_output, device_output, "cudaMemcpy(se_activation)");
+
+    for (std::size_t i = 0; i < expected_pool.size(); ++i) {
+      if (std::fabs(actual_pool[i] - expected_pool[i]) > 1e-6f) {
+        result.status = CudaSmokeStatus::Mismatch;
+        result.message = "CUDA squeeze-excite pool output mismatch";
+        break;
+      }
+    }
+    for (std::size_t i = 0; result.message.empty() &&
+                            i < expected_residual.size();
+         ++i) {
+      if (std::fabs(actual_residual[i] - expected_residual[i]) > 1e-6f ||
+          std::fabs(actual_output[i] - expected_output[i]) > 1e-6f) {
+        result.status = CudaSmokeStatus::Mismatch;
+        result.message = "CUDA squeeze-excite residual output mismatch";
+        break;
+      }
+    }
+    if (result.message.empty())
+      result.status = CudaSmokeStatus::Success;
+  } catch (const std::exception &e) {
+    result.status = CudaSmokeStatus::RuntimeError;
+    result.message = e.what();
+  }
+
+  FreeDevice(device_skip);
+  FreeDevice(device_convolution);
+  FreeDevice(device_se_output);
+  FreeDevice(device_pool);
+  FreeDevice(device_residual);
   FreeDevice(device_output);
 
   if (result.message.empty())

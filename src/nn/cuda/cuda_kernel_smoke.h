@@ -26,6 +26,7 @@ CudaKernelSmokeResult RunLayerNormKernelSmoke();
 CudaKernelSmokeResult RunActivationKernelSmoke();
 CudaKernelSmokeResult RunGateKernelSmoke();
 CudaKernelSmokeResult RunResidualAddKernelSmoke();
+CudaKernelSmokeResult RunSqueezeExciteKernelSmoke();
 CudaKernelSmokeResult RunResidualLayerNormKernelSmoke();
 CudaKernelSmokeResult RunAttentionCoreKernelSmoke();
 CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke();
