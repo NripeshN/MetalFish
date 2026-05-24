@@ -596,6 +596,7 @@ def main() -> int:
             "test_nn_comparison",
             "metalfish_nn_probe",
             "python3 tools/uci_smoke.py",
+            "python3 tests/test_nn_backend_artifacts.py",
             "Run Hybrid clock safety smoke",
             "Move\\ Overhead=500",
             'go "wtime 1000 btime 1000 winc 3000 binc 3000"',
