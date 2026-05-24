@@ -253,7 +253,7 @@ void test_hybrid_config() {
     EXPECT(tc, !config.ane_root_hints);
     EXPECT(tc, config.ane_compute_units == "cpu-ne");
     EXPECT(tc, config.ane_root_hint_count == 10);
-    EXPECT(tc, config.ane_root_hint_wait_ms == 0);
+    EXPECT(tc, config.ane_root_hint_wait_ms == 250);
     EXPECT(tc, config.ane_min_budget_ms == 1000);
   }
   {

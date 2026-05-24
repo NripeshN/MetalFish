@@ -214,7 +214,7 @@ setoption name HybridANEWeights value networks/t1-512x15x8h-distilled-swa-339500
 setoption name HybridANEModelPath value build/coreml/compiled/t1-512-heads-b8.mlmodelc
 setoption name HybridANEComputeUnits value cpu-ne
 setoption name HybridANERootHintCount value 10
-setoption name HybridANERootHintWaitMs value 0
+setoption name HybridANERootHintWaitMs value 250
 setoption name HybridANEMinBudgetMs value 1000
 ```
 
@@ -224,10 +224,11 @@ Current ANE findings:
   `cpu-gpu` are faster in isolation but compete with Metal inference.
 - T1-512 is retained over T1-256. T1-256 is lower latency, but it regressed the
   ANE-sensitive repeat gate.
-- The retained wait profile is `0 ms`: the ANE probe runs concurrently and can
-  support final MCTS overrides, but AB does not pause for ANE root ordering.
-  This preserved the ANE-sensitive repeat gate and improved the local hard-200
-  sample from 199/200 to 200/200 at 3s.
+- The retained wait profile is `250 ms` when ANE root hints are enabled. The
+  ANE probe still runs as a sidecar, but the coordinator gives it a short
+  window to provide root ordering before AB settles its move order. This
+  improved the local 1s BK repeat from 66/72 to 67/72-68/72 in retained
+  trials without changing the default non-ANE Hybrid path.
 - ANE is retained as a confirming sidecar, not as a third equal engine. Puzzle
   summaries report `ANE searches`, non-empty roots, top moves, failures,
   agreement with MCTS, and ANE-confirmed MCTS overrides so runs distinguish

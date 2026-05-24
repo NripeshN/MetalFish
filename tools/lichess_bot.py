@@ -281,7 +281,7 @@ HYBRID_ANE_ROOT_HINT_COUNT = max(
     1, min(32, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_COUNT", 10))
 )
 HYBRID_ANE_ROOT_HINT_WAIT_MS = max(
-    0, min(1000, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_WAIT_MS", 0))
+    0, min(1000, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_WAIT_MS", 250))
 )
 HYBRID_ANE_MIN_BUDGET_MS = max(
     0, min(30000, env_int("METALFISH_HYBRID_ANE_MIN_BUDGET_MS", 1000))
@@ -729,7 +729,17 @@ def normalize_ane_args(args):
         1, min(32, int(getattr(args, "hybrid_ane_root_hint_count", 10)))
     )
     args.hybrid_ane_root_hint_wait_ms = max(
-        0, min(1000, int(getattr(args, "hybrid_ane_root_hint_wait_ms", 0)))
+        0,
+        min(
+            1000,
+            int(
+                getattr(
+                    args,
+                    "hybrid_ane_root_hint_wait_ms",
+                    HYBRID_ANE_ROOT_HINT_WAIT_MS,
+                )
+            ),
+        ),
     )
     args.hybrid_ane_min_budget_ms = max(
         0, min(30000, int(getattr(args, "hybrid_ane_min_budget_ms", 1000)))
