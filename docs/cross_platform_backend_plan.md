@@ -107,7 +107,7 @@ Current remote gates:
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92ed1973-1772-4ae4-abb9-1b94ea5efabf` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default so the CUDA suite hard-compares against macOS Metal BT4 and legacy artifacts |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26392093857`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26392093857`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact plus a structured compile/package manifest |
 | GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Direct GCP pass `direct-20260525-positive-hybrid-metrics`, Windows Server 2022 G2/L4 vWS, packaged CUDA probe, MCTS smoke, and metric-asserted Hybrid CUDA search smoke |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26392093917`, Metal NN parity artifact and BK.07 smoke |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26392093912` |
@@ -689,7 +689,11 @@ host-link, runtime-DLL, protobuf load, tensor-plan, weight-inventory, no-device
 fallback, and CUDA-compiled MCTS contract regressions that a compile-only gate
 would miss. The Windows CUDA package now ships `metalfish_nn_probe.exe` when
 tests are built, and the compile gate extracts the package and re-runs a
-packaged BT4 metadata probe before upload.
+packaged BT4 metadata probe before upload. It also writes
+`windows-cuda-compile-artifact-manifest.json`, which asserts CUDA metadata probe
+fields, compares the packaged BT4 probe against the build-tree BT4 probe, lists
+packaged runtime DLL coverage, and marks real GPU execution as belonging to the
+separate Windows GCP runtime gate.
 Each portable CPU job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS
 smoke, so portable builds verify the MCTS construction path cheaply. The Linux
 and MSVC legs additionally download BT4 for the metadata/backend-construction

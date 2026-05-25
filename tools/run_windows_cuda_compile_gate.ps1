@@ -57,6 +57,54 @@ function Copy-MatchingFiles {
   return $Count
 }
 
+function Read-ProbeJson {
+  param([string]$Path)
+  if (-not (Test-Path $Path)) {
+    throw "Probe JSON file not found: $Path"
+  }
+  $Text = Get-Content -Path $Path -Raw
+  $JsonLine = $Text -split "\r?\n" |
+    Where-Object { $_.TrimStart().StartsWith("{") } |
+    Select-Object -First 1
+  if (-not $JsonLine) {
+    throw "Probe JSON file does not contain a JSON object: $Path"
+  }
+  return $JsonLine | ConvertFrom-Json
+}
+
+function Assert-CudaMetadataProbe {
+  param(
+    [string]$Name,
+    [object]$Probe
+  )
+  if (-not $Probe.metadata_only) {
+    throw "$Name did not run in metadata-only mode"
+  }
+  if ($Probe.backend -ne "cuda") {
+    throw "$Name backend was not cuda: $($Probe.backend)"
+  }
+  if (-not $Probe.cuda_schedule_fully_supported) {
+    throw "$Name CUDA schedule is not fully supported"
+  }
+  if (-not $Probe.cuda_output_mapping_ok) {
+    throw "$Name CUDA output mapping is not valid"
+  }
+  foreach ($Field in @("tensor_plan", "execution_plan", "cuda_schedule",
+                       "cuda_output_mapping", "parameter_elements", "steps")) {
+    if ($null -eq $Probe.$Field) {
+      throw "$Name missing metadata field: $Field"
+    }
+  }
+}
+
+function Test-PackageFile {
+  param(
+    [string]$Directory,
+    [string]$Pattern
+  )
+  return @(Get-ChildItem -Path (Join-Path $Directory $Pattern) -File -ErrorAction SilentlyContinue).Count -gt 0
+}
+
 $MsvcEnvScript = Join-Path $SourceDir "tools\import_msvc_dev_env.ps1"
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue) -and
     (Test-Path $MsvcEnvScript)) {
@@ -348,6 +396,7 @@ if ($BuildTests -eq "ON") {
 }
 
 $Summary = Join-Path $BuildDir "windows-cuda-compile-summary.md"
+$ArtifactManifest = Join-Path $BuildDir "windows-cuda-compile-artifact-manifest.json"
 $NvccVersion = (& $Nvcc --version) -join "`n"
 $CmakeVersion = (& $Cmake --version) -join "`n"
 $NinjaVersion = (& $Ninja --version) -join "`n"
@@ -355,6 +404,94 @@ $ClVersion = (& $Cl 2>&1) -join "`n"
 $TimestampUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $TargetsText = $Targets -join ", "
 $SmokeText = $SmokeSteps -join ", "
+
+$ManifestProbeChecks = $null
+if ($BuildTests -eq "ON") {
+  $Bt4Probe = Read-ProbeJson $ProbeLog
+  $LegacyProbe = Read-ProbeJson $LegacyProbeLog
+  $PackagedBt4Probe = Read-ProbeJson $PackagedProbeLog
+
+  Assert-CudaMetadataProbe "BT4 metadata probe" $Bt4Probe
+  Assert-CudaMetadataProbe "legacy metadata probe" $LegacyProbe
+  Assert-CudaMetadataProbe "packaged BT4 metadata probe" $PackagedBt4Probe
+
+  $ComparableProbeFields = @(
+    "tensor_plan",
+    "execution_plan",
+    "cuda_schedule",
+    "cuda_output_mapping",
+    "parameter_elements",
+    "steps"
+  )
+  foreach ($Field in $ComparableProbeFields) {
+    if ($Bt4Probe.$Field -ne $PackagedBt4Probe.$Field) {
+      throw "Packaged BT4 probe does not match build-tree BT4 probe field: $Field"
+    }
+  }
+
+  $ManifestProbeChecks = [ordered]@{
+    bt4 = [ordered]@{
+      metadata_only = [bool]$Bt4Probe.metadata_only
+      backend = $Bt4Probe.backend
+      policy_head = $Bt4Probe.policy_head
+      value_head = $Bt4Probe.value_head
+      tensor_plan = $Bt4Probe.tensor_plan
+      execution_plan = $Bt4Probe.execution_plan
+      cuda_schedule_fully_supported = [bool]$Bt4Probe.cuda_schedule_fully_supported
+      cuda_output_mapping_ok = [bool]$Bt4Probe.cuda_output_mapping_ok
+      parameter_elements = [int64]$Bt4Probe.parameter_elements
+      steps = [int64]$Bt4Probe.steps
+    }
+    legacy = [ordered]@{
+      metadata_only = [bool]$LegacyProbe.metadata_only
+      backend = $LegacyProbe.backend
+      format = $LegacyProbe.format
+      policy_head = $LegacyProbe.policy_head
+      value_head = $LegacyProbe.value_head
+      tensor_plan = $LegacyProbe.tensor_plan
+      execution_plan = $LegacyProbe.execution_plan
+      cuda_schedule_fully_supported = [bool]$LegacyProbe.cuda_schedule_fully_supported
+      cuda_output_mapping_ok = [bool]$LegacyProbe.cuda_output_mapping_ok
+      parameter_elements = [int64]$LegacyProbe.parameter_elements
+      steps = [int64]$LegacyProbe.steps
+    }
+    packaged_bt4_matches_build_tree = $true
+    compared_fields = $ComparableProbeFields
+  }
+}
+
+$PackageFiles = @(
+  Get-ChildItem -Path $PackageDir -File |
+    Select-Object -ExpandProperty Name |
+    Sort-Object
+)
+$ManifestObject = [ordered]@{
+  gate_status = "passed"
+  timestamp_utc = $TimestampUtc
+  source = $SourceDir
+  build_directory = $BuildDir
+  build_type = $BuildType
+  cuda_architectures = $CudaArchs
+  cuda_path = $env:CUDA_PATH
+  build_tests = $BuildTests
+  targets = $Targets
+  smoke_tests = $SmokeSteps
+  package = $PackageZip
+  packaged_runtime_dll_count = $CopiedRuntimeDlls
+  package_contents = [ordered]@{
+    metalfish_exe = Test-PackageFile $PackageDir "metalfish.exe"
+    metalfish_nn_probe_exe = Test-PackageFile $PackageDir "metalfish_nn_probe.exe"
+    portable_artifact_md = Test-PackageFile $PackageDir "PORTABLE_ARTIFACT.md"
+    cudart = Test-PackageFile $PackageDir "cudart64_*.dll"
+    cublas = Test-PackageFile $PackageDir "cublas64_*.dll"
+    cublaslt = Test-PackageFile $PackageDir "cublasLt64_*.dll"
+    files = $PackageFiles
+  }
+  probe_checks = $ManifestProbeChecks
+  gpu_runtime_smoke = "not_run_in_github_windows_ci"
+  runtime_gate = "tools/run_gcp_windows_cuda_runtime_gate.sh"
+}
+$ManifestObject | ConvertTo-Json -Depth 12 | Set-Content -Path $ArtifactManifest -Encoding UTF8
 
 @(
   "# MetalFish Windows CUDA Compile Gate",
@@ -371,6 +508,7 @@ $SmokeText = $SmokeSteps -join ", "
   "- Smoke tests: $SmokeText",
   "- Package: $PackageZip",
   "- Packaged runtime DLLs: $CopiedRuntimeDlls",
+  "- Artifact manifest: $ArtifactManifest",
   "",
   "## Toolchain",
   "",
