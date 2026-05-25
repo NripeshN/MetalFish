@@ -159,6 +159,11 @@ def compare_probe(
         expected.get("fen") == actual.get("fen"),
         f"FEN mismatch: {expected.get('fen')!r} != {actual.get('fen')!r}",
     )
+    for key in ("moves", "final_fen"):
+        require(
+            expected.get(key) == actual.get(key),
+            f"{key} mismatch: {expected.get(key)!r} != {actual.get(key)!r}",
+        )
     require(
         expected.get("transform") == actual.get("transform"),
         "policy transform mismatch",

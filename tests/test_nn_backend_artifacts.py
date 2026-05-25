@@ -460,6 +460,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--weights", required=True)
 parser.add_argument("--backend", required=True)
 parser.add_argument("--fen", required=True)
+parser.add_argument("--moves", default="")
 parser.add_argument("--top")
 parser.add_argument("--warmup")
 parser.add_argument("--iterations")
@@ -467,6 +468,8 @@ parser.add_argument("--full-policy", action="store_true")
 args = parser.parse_args()
 print(json.dumps({
     "fen": args.fen,
+    "moves": args.moves,
+    "final_fen": args.fen,
     "backend": args.backend,
     "network_info": f"{args.backend} synthetic",
     "transform": 0,
@@ -501,15 +504,18 @@ print(json.dumps({
                 "one=8/8/8/8/8/8/8/K6k w - - 0 1",
                 "--position",
                 "two=6bk/P7/8/8/8/8/8/K7 w - - 0 1",
+                "--line",
+                "three=8/8/8/8/8/8/4P3/K6k w - - 0 1|e2e4",
                 "--full-policy",
             ]
         ):
             expect("probe suite success", probe_suite.main() == 0)
 
         probes = comparer.load_probe_jsons(output)
-        expect("probe suite count", len(probes) == 2)
+        expect("probe suite count", len(probes) == 3)
         expect("probe suite first fen", probes[0]["fen"].startswith("8/8/8"))
         expect("probe suite second fen", probes[1]["fen"].startswith("6bk/P7"))
+        expect("probe suite line moves", probes[2]["moves"] == "e2e4")
 
 
 def main() -> int:

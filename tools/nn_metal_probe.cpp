@@ -29,6 +29,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -52,6 +53,7 @@ struct Options {
   std::string coreml_model;
   std::string coreml_compute_units = "cpu-ne";
   std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  std::vector<std::string> moves;
   int top = 8;
   int batch_size = 1;
   int warmup = 1;
@@ -103,6 +105,25 @@ std::string JsonEscape(const std::string &input) {
   return out.str();
 }
 
+std::vector<std::string> SplitMoves(const std::string &line) {
+  std::istringstream stream(line);
+  std::vector<std::string> moves;
+  std::string move;
+  while (stream >> move)
+    moves.push_back(move);
+  return moves;
+}
+
+std::string JoinMoves(const std::vector<std::string> &moves) {
+  std::ostringstream out;
+  for (std::size_t i = 0; i < moves.size(); ++i) {
+    if (i != 0)
+      out << ' ';
+    out << moves[i];
+  }
+  return out.str();
+}
+
 std::string SquareString(Square square) {
   return std::string{static_cast<char>('a' + file_of(square)),
                      static_cast<char>('1' + rank_of(square))};
@@ -126,7 +147,8 @@ void PrintUsage(const char *argv0) {
       << " --weights <file.pb[.gz]> [--backend auto|metal|cuda|cpu|coreml]"
          " [--coreml-model model.mlpackage]"
          " [--coreml-compute-units cpu|cpu-gpu|cpu-ne|all]"
-         " [--fen <fen>] [--top n] [--batch-size n] [--warmup n]"
+         " [--fen <fen>] [--moves \"uci...\"] [--top n]"
+         " [--batch-size n] [--warmup n]"
          " [--iterations n] [--full-input] [--full-policy]"
          " [--metadata-only] [--construct-backend]"
          " [--isolation-weights file.pb[.gz]]"
@@ -153,6 +175,8 @@ Options ParseArgs(int argc, char **argv) {
       options.coreml_compute_units = require_value("--coreml-compute-units");
     } else if (arg == "--fen") {
       options.fen = require_value("--fen");
+    } else if (arg == "--moves") {
+      options.moves = SplitMoves(require_value("--moves"));
     } else if (arg == "--top") {
       options.top = std::stoi(require_value("--top"));
     } else if (arg == "--batch-size") {
@@ -505,6 +529,41 @@ void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
   std::cout << "}\n";
 }
 
+struct ProbePositionHistory {
+  std::deque<StateInfo> states;
+  std::deque<Position> positions;
+  std::vector<const Position *> ptrs;
+};
+
+ProbePositionHistory BuildProbePositionHistory(const Options &options) {
+  ProbePositionHistory history;
+  history.states.emplace_back();
+
+  Position current;
+  current.set(options.fen, false, &history.states.back());
+  history.positions.push_back(current);
+
+  for (const std::string &move_text : options.moves) {
+    const Move move = UCIEngine::to_move(current, move_text);
+    if (move == Move::none()) {
+      throw std::runtime_error("Illegal probe move " + move_text +
+                               " from FEN: " + current.fen());
+    }
+    history.states.emplace_back();
+    current.do_move(move, history.states.back());
+    history.positions.push_back(current);
+  }
+
+  return history;
+}
+
+void RefreshProbeHistoryPointers(ProbePositionHistory &history) {
+  history.ptrs.clear();
+  history.ptrs.reserve(history.positions.size());
+  for (const Position &position : history.positions)
+    history.ptrs.push_back(&position);
+}
+
 void RunProbe(const Options &options) {
   Bitboards::init();
   Position::init();
@@ -524,12 +583,11 @@ void RunProbe(const Options &options) {
     return;
   }
 
-  StateInfo state;
-  Position position;
-  position.set(options.fen, false, &state);
-
-  const Position *history_storage[] = {&position};
-  std::span<const Position *const> history(history_storage, 1);
+  auto position_history = BuildProbePositionHistory(options);
+  RefreshProbeHistoryPointers(position_history);
+  const Position &position = *position_history.ptrs.back();
+  const std::span<const Position *const> history(position_history.ptrs.data(),
+                                                position_history.ptrs.size());
   int transform = 0;
   const auto planes =
       NN::EncodePositionForNN(input_format, history, NN::kMoveHistory,
@@ -561,6 +619,8 @@ void RunProbe(const Options &options) {
   std::cout << std::setprecision(9);
   std::cout << '{';
   std::cout << "\"fen\":\"" << JsonEscape(options.fen) << '"';
+  std::cout << ",\"moves\":\"" << JsonEscape(JoinMoves(options.moves)) << '"';
+  std::cout << ",\"final_fen\":\"" << JsonEscape(position.fen()) << '"';
   std::cout << ",\"weights\":\"" << JsonEscape(options.weights) << '"';
   std::cout << ",\"backend\":\"" << JsonEscape(options.backend) << '"';
   std::cout << ",\"network_info\":\"" << JsonEscape(network->GetNetworkInfo())

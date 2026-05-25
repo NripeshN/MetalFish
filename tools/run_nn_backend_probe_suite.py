@@ -4,29 +4,53 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import subprocess
 from pathlib import Path
 
-DEFAULT_POSITIONS: list[tuple[str, str]] = [
-    (
+
+@dataclass(frozen=True)
+class ProbePosition:
+    name: str
+    fen: str
+    moves: str = ""
+
+
+DEFAULT_POSITIONS: list[ProbePosition] = [
+    ProbePosition(
         "startpos",
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     ),
-    (
+    ProbePosition(
         "bk07",
         "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - - 0 1",
     ),
-    (
+    ProbePosition(
         "kiwipete",
         "r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1",
     ),
-    (
+    ProbePosition(
         "white-promotion",
         "6bk/P7/8/8/8/8/8/K7 w - - 0 1",
     ),
-    (
+    ProbePosition(
         "black-promotion",
         "k7/8/8/8/8/8/6p1/KB6 b - - 0 1",
+    ),
+    ProbePosition(
+        "history-repetition",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "g1f3 g8f6 f3g1 f6g8",
+    ),
+    ProbePosition(
+        "canonical-black-to-move",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "e2e4",
+    ),
+    ProbePosition(
+        "castling-history",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 e1g1",
     ),
 ]
 
@@ -51,23 +75,36 @@ def parse_args() -> argparse.Namespace:
         metavar="NAME=FEN",
         help="Override or extend the suite with a named FEN.",
     )
+    parser.add_argument(
+        "--line",
+        action="append",
+        default=[],
+        metavar="NAME=FEN|UCI_MOVES",
+        help="Override the suite with a named FEN plus UCI move history.",
+    )
     return parser.parse_args()
 
 
-def parse_positions(values: list[str]) -> list[tuple[str, str]]:
-    if not values:
+def parse_positions(values: list[str], lines: list[str]) -> list[ProbePosition]:
+    if not values and not lines:
         return DEFAULT_POSITIONS
 
-    positions: list[tuple[str, str]] = []
+    positions: list[ProbePosition] = []
     for value in values:
         name, separator, fen = value.partition("=")
         if not separator or not name or not fen:
             raise RuntimeError(f"invalid --position value: {value!r}")
-        positions.append((name, fen))
+        positions.append(ProbePosition(name, fen))
+    for value in lines:
+        name, separator, payload = value.partition("=")
+        fen, move_separator, moves = payload.partition("|")
+        if not separator or not move_separator or not name or not fen:
+            raise RuntimeError(f"invalid --line value: {value!r}")
+        positions.append(ProbePosition(name, fen, moves.strip()))
     return positions
 
 
-def probe_command(args: argparse.Namespace, fen: str) -> list[str]:
+def probe_command(args: argparse.Namespace, position: ProbePosition) -> list[str]:
     command = [
         args.probe,
         "--weights",
@@ -75,7 +112,7 @@ def probe_command(args: argparse.Namespace, fen: str) -> list[str]:
         "--backend",
         args.backend,
         "--fen",
-        fen,
+        position.fen,
         "--top",
         str(args.top),
         "--warmup",
@@ -83,6 +120,8 @@ def probe_command(args: argparse.Namespace, fen: str) -> list[str]:
         "--iterations",
         str(args.iterations),
     ]
+    if position.moves:
+        command.extend(["--moves", position.moves])
     if args.coreml_model:
         command.extend(["--coreml-model", args.coreml_model])
         command.extend(["--coreml-compute-units", args.coreml_compute_units])
@@ -101,19 +140,19 @@ def subprocess_output_text(value: str | bytes | None) -> str:
 
 def main() -> int:
     args = parse_args()
-    positions = parse_positions(args.position)
+    positions = parse_positions(args.position, args.line)
     output = Path(args.out)
     output.parent.mkdir(parents=True, exist_ok=True)
 
     with output.open("w", encoding="utf-8") as handle:
-        for index, (name, fen) in enumerate(positions, start=1):
+        for index, position in enumerate(positions, start=1):
             handle.write(
-                f"info string probe-suite {index}/{len(positions)} name={name}\n"
+                f"info string probe-suite {index}/{len(positions)} name={position.name}\n"
             )
             handle.flush()
             try:
                 result = subprocess.run(
-                    probe_command(args, fen),
+                    probe_command(args, position),
                     check=False,
                     capture_output=True,
                     text=True,
