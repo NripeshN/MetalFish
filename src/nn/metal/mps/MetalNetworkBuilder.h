@@ -38,7 +38,8 @@ public:
                    std::vector<float *> output_mems);
 
 private:
-  int gpu_id;
+  int gpu_id = -1;
+  int graph_id = -1;
 };
 
 } // namespace Metal

@@ -83,10 +83,12 @@ static const NSInteger kMinSubBatchSize = 20;
   return graphs;
 }
 
-+ (MetalNetworkGraph *_Nonnull)getGraphAt:(NSNumber *_Nonnull)index {
++ (MetalNetworkGraph *_Nullable)getGraphAt:(NSNumber *_Nonnull)index {
   NSMutableDictionary *graphs = [MetalNetworkGraph getGraphs];
 
-  return graphs[index];
+  @synchronized(self) {
+    return graphs[index];
+  }
 }
 
 + (void)graphWithDevice:(id<MTLDevice> __nonnull)device
@@ -97,6 +99,14 @@ static const NSInteger kMinSubBatchSize = 20;
     if (graphs[index] == nil) {
       graphs[index] = [[MetalNetworkGraph alloc] initWithDevice:device];
     }
+  }
+}
+
++ (void)removeGraphAt:(NSNumber *_Nonnull)index {
+  NSMutableDictionary *graphs = [MetalNetworkGraph getGraphs];
+
+  @synchronized(self) {
+    [graphs removeObjectForKey:index];
   }
 }
 

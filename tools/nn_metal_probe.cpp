@@ -23,12 +23,14 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -53,6 +55,7 @@ struct Options {
   bool full_policy = false;
   bool metadata_only = false;
   bool construct_backend = false;
+  std::string isolation_weights;
   std::string ready_file;
   std::string start_file;
 };
@@ -121,6 +124,7 @@ void PrintUsage(const char *argv0) {
          " [--fen <fen>] [--top n] [--batch-size n] [--warmup n]"
          " [--iterations n] [--full-input] [--full-policy]"
          " [--metadata-only] [--construct-backend]"
+         " [--isolation-weights file.pb[.gz]]"
          " [--ready-file path] [--start-file path]\n";
 }
 
@@ -160,6 +164,8 @@ Options ParseArgs(int argc, char **argv) {
       options.metadata_only = true;
     } else if (arg == "--construct-backend") {
       options.construct_backend = true;
+    } else if (arg == "--isolation-weights") {
+      options.isolation_weights = require_value("--isolation-weights");
     } else if (arg == "--ready-file") {
       options.ready_file = require_value("--ready-file");
     } else if (arg == "--start-file") {
@@ -189,6 +195,9 @@ Options ParseArgs(int argc, char **argv) {
   if (backend_will_construct && options.backend == "coreml" &&
       options.coreml_model.empty())
     throw std::runtime_error("--coreml-model is required for backend coreml");
+  if (options.metadata_only && !options.isolation_weights.empty())
+    throw std::runtime_error("--isolation-weights cannot be used with "
+                             "--metadata-only");
   return options;
 }
 
@@ -260,6 +269,134 @@ void TouchFile(const std::string &path) {
 void WaitForFile(const std::string &path) {
   while (!std::filesystem::exists(path))
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
+}
+
+struct ProbeInstance {
+  std::string weights_path;
+  std::string format_summary;
+  int input_format = 0;
+  int transform = 0;
+  std::vector<NN::InputPlanes> inputs;
+  std::unique_ptr<NN::Network> network;
+};
+
+ProbeInstance CreateProbeInstance(const Options &options,
+                                  const std::string &weights_path,
+                                  const Position &position) {
+  NN::WeightsFile weights = NN::LoadWeightsFromFile(weights_path);
+  const auto input_format = weights.format().network_format().input();
+  const auto descriptor = NN::DescribeNetworkFormat(weights);
+
+  const Position *history_storage[] = {&position};
+  std::span<const Position *const> history(history_storage, 1);
+  int transform = 0;
+  const auto planes =
+      NN::EncodePositionForNN(input_format, history, NN::kMoveHistory,
+                              NN::FillEmptyHistory::FEN_ONLY, &transform);
+
+  ProbeInstance instance;
+  instance.weights_path = weights_path;
+  instance.format_summary = descriptor.Summary();
+  instance.input_format = static_cast<int>(input_format);
+  instance.transform = transform;
+  instance.inputs = std::vector<NN::InputPlanes>(options.batch_size, planes);
+  instance.network =
+      NN::CreateNetwork(weights, options.backend, options.coreml_model,
+                        options.coreml_compute_units);
+  return instance;
+}
+
+NN::NetworkOutput EvaluateInstance(ProbeInstance &instance, int warmup) {
+  for (int i = 0; i < warmup; ++i)
+    (void)instance.network->EvaluateBatch(instance.inputs);
+  return instance.network->EvaluateBatch(instance.inputs).front();
+}
+
+struct OutputDelta {
+  float value = 0.0f;
+  float wdl = 0.0f;
+  float moves_left = 0.0f;
+  float policy = 0.0f;
+};
+
+OutputDelta CompareOutputs(const NN::NetworkOutput &baseline,
+                           const NN::NetworkOutput &repeated) {
+  if (baseline.has_wdl != repeated.has_wdl)
+    throw std::runtime_error("isolation probe WDL flag changed");
+  if (baseline.has_moves_left != repeated.has_moves_left)
+    throw std::runtime_error("isolation probe moves-left flag changed");
+
+  OutputDelta delta;
+  delta.value = std::fabs(baseline.value - repeated.value);
+  if (baseline.has_wdl) {
+    for (int i = 0; i < 3; ++i) {
+      const float wdl_delta = std::fabs(baseline.wdl[i] - repeated.wdl[i]);
+      delta.wdl = std::max(delta.wdl, wdl_delta);
+    }
+  }
+  if (baseline.has_moves_left) {
+    delta.moves_left = std::fabs(baseline.moves_left - repeated.moves_left);
+  }
+  for (int i = 0; i < NN::kPolicyOutputs; ++i) {
+    const float policy_delta =
+        std::fabs(baseline.policy[i] - repeated.policy[i]);
+    delta.policy = std::max(delta.policy, policy_delta);
+  }
+  return delta;
+}
+
+void RequireIsolationStable(const OutputDelta &delta) {
+  constexpr float kValueTolerance = 1e-4f;
+  constexpr float kWdlTolerance = 1e-4f;
+  constexpr float kMovesLeftTolerance = 1e-3f;
+  constexpr float kPolicyTolerance = 1e-4f;
+  if (delta.value > kValueTolerance || delta.wdl > kWdlTolerance ||
+      delta.moves_left > kMovesLeftTolerance || delta.policy > kPolicyTolerance) {
+    std::ostringstream out;
+    out << "backend isolation output drift value=" << delta.value
+        << " wdl=" << delta.wdl << " moves_left=" << delta.moves_left
+        << " policy=" << delta.policy;
+    throw std::runtime_error(out.str());
+  }
+}
+
+void PrintIsolationProbe(const Options &options) {
+  StateInfo state;
+  Position position;
+  position.set(options.fen, false, &state);
+
+  auto primary = CreateProbeInstance(options, options.weights, position);
+  const NN::NetworkOutput baseline = EvaluateInstance(primary, options.warmup);
+  auto secondary =
+      CreateProbeInstance(options, options.isolation_weights, position);
+  const NN::NetworkOutput secondary_output =
+      EvaluateInstance(secondary, options.warmup);
+  const NN::NetworkOutput repeated = EvaluateInstance(primary, 0);
+  const OutputDelta delta = CompareOutputs(baseline, repeated);
+  RequireIsolationStable(delta);
+
+  std::cout << std::setprecision(9);
+  std::cout << '{';
+  std::cout << "\"isolation\":true";
+  std::cout << ",\"backend\":\"" << JsonEscape(options.backend) << '"';
+  std::cout << ",\"primary_weights\":\""
+            << JsonEscape(primary.weights_path) << '"';
+  std::cout << ",\"secondary_weights\":\""
+            << JsonEscape(secondary.weights_path) << '"';
+  std::cout << ",\"primary_format\":\""
+            << JsonEscape(primary.format_summary) << '"';
+  std::cout << ",\"secondary_format\":\""
+            << JsonEscape(secondary.format_summary) << '"';
+  std::cout << ",\"primary_network_info\":\""
+            << JsonEscape(primary.network->GetNetworkInfo()) << '"';
+  std::cout << ",\"secondary_network_info\":\""
+            << JsonEscape(secondary.network->GetNetworkInfo()) << '"';
+  std::cout << ",\"secondary_value\":" << secondary_output.value;
+  std::cout << ",\"delta\":{\"value\":" << delta.value
+            << ",\"wdl\":" << delta.wdl
+            << ",\"moves_left\":" << delta.moves_left
+            << ",\"policy\":" << delta.policy << '}';
+  std::cout << "}\n";
 }
 
 void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
@@ -338,6 +475,11 @@ void RunProbe(const Options &options) {
   NN::WeightsFile weights = NN::LoadWeightsFromFile(options.weights);
   const auto input_format = weights.format().network_format().input();
   const auto descriptor = NN::DescribeNetworkFormat(weights);
+
+  if (!options.isolation_weights.empty()) {
+    PrintIsolationProbe(options);
+    return;
+  }
 
   if (options.metadata_only) {
     PrintMetadataOnly(options, weights, descriptor);

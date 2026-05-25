@@ -10,12 +10,43 @@
 #import "../../weights.h"
 #import "NetworkGraph.h"
 
+#include <atomic>
+#include <stdexcept>
+
 namespace MetalFish {
 namespace NN {
 namespace Metal {
 
+namespace {
+
+int NextGraphId() {
+  static std::atomic<int> next_graph_id{0};
+  return next_graph_id.fetch_add(1, std::memory_order_relaxed);
+}
+
+MetalNetworkGraph *GraphOrThrow(int graph_id, const char *operation) {
+  if (graph_id < 0) {
+    throw std::runtime_error(std::string(operation) +
+                             " called before Metal graph initialization");
+  }
+
+  MetalNetworkGraph *graph =
+      [MetalNetworkGraph getGraphAt:[NSNumber numberWithInt:graph_id]];
+  if (graph == nil) {
+    throw std::runtime_error(std::string("Metal graph missing during ") +
+                             operation);
+  }
+  return graph;
+}
+
+} // namespace
+
 MetalNetworkBuilder::MetalNetworkBuilder(void) {}
-MetalNetworkBuilder::~MetalNetworkBuilder(void) {}
+MetalNetworkBuilder::~MetalNetworkBuilder(void) {
+  if (graph_id >= 0) {
+    [MetalNetworkGraph removeGraphAt:[NSNumber numberWithInt:graph_id]];
+  }
+}
 
 std::string MetalNetworkBuilder::init(int gpu_id) {
   NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
@@ -27,8 +58,13 @@ std::string MetalNetworkBuilder::init(int gpu_id) {
     return "";
   }
 
+  if (this->graph_id >= 0) {
+    [MetalNetworkGraph removeGraphAt:[NSNumber numberWithInt:this->graph_id]];
+  }
+  this->graph_id = NextGraphId();
+
   [MetalNetworkGraph graphWithDevice:devices[gpu_id]
-                               index:[NSNumber numberWithInt:gpu_id]];
+                               index:[NSNumber numberWithInt:this->graph_id]];
 
   this->gpu_id = gpu_id;
 
@@ -41,8 +77,7 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                 bool moves_left, Activations &activations,
                                 std::string &policy_head,
                                 std::string &value_head) {
-  MetalNetworkGraph *graph =
-      [MetalNetworkGraph getGraphAt:[NSNumber numberWithInt:this->gpu_id]];
+  MetalNetworkGraph *graph = GraphOrThrow(this->graph_id, "Metal graph build");
   NSString *defaultActivation =
       [NSString stringWithUTF8String:activations.default_activation.c_str()];
   NSString *smolgenActivation =
@@ -294,7 +329,7 @@ void MetalNetworkBuilder::forwardEval(float *inputs, uint64_t *masks,
                                       std::vector<float *> output_mems) {
   @autoreleasepool {
     MetalNetworkGraph *graph =
-        [MetalNetworkGraph getGraphAt:[NSNumber numberWithInt:this->gpu_id]];
+        GraphOrThrow(this->graph_id, "Metal graph inference");
     [graph runInferenceWithBatchSize:batchSize
                               inputs:inputs
                                masks:masks

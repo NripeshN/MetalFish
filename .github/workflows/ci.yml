@@ -145,6 +145,22 @@ jobs:
             --warmup 0 \
             --iterations 1 \
             --full-policy
+          ./build/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --isolation-weights networks/legacy-42850.pb.gz \
+            --backend metal \
+            --top 3 \
+            --warmup 0 \
+            --iterations 1 \
+            2>&1 | tee build/metal-nn-isolation-bt4-legacy.log
+          ./build/metalfish_nn_probe \
+            --weights networks/legacy-42850.pb.gz \
+            --isolation-weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend metal \
+            --top 3 \
+            --warmup 0 \
+            --iterations 1 \
+            2>&1 | tee build/metal-nn-isolation-legacy-bt4.log
           python3 tools/check_nn_backend_artifacts.py \
             --backend-label "Metal (MPSGraph) backend" \
             --parity-report build/metal-nn-parity-report.md \
@@ -235,6 +251,8 @@ jobs:
             build/metal-nn-probe.log
             build/metal-nn-probe-suite.log
             build/metal-legacy-nn-probe-suite.log
+            build/metal-nn-isolation-bt4-legacy.log
+            build/metal-nn-isolation-legacy-bt4.log
             build/metal-nn-artifact-manifest.json
             README.md
             CHANGELOG.md

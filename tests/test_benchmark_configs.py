@@ -674,9 +674,12 @@ def main() -> int:
             "metal-nn-probe.log",
             "metal-nn-probe-suite.log",
             "metal-legacy-nn-probe-suite.log",
+            "metal-nn-isolation-bt4-legacy.log",
+            "metal-nn-isolation-legacy-bt4.log",
             "metal-nn-artifact-manifest.json",
             "check_nn_backend_artifacts.py",
             "--backend metal",
+            "--isolation-weights",
             "--full-policy",
             "Metal (MPSGraph) backend",
             "Run ANE option/config smoke",
@@ -840,6 +843,17 @@ def main() -> int:
             "black-promotion",
             "--full-policy",
             "NN backend probe suite: PASS",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/nn_metal_probe.cpp",
+        [
+            "--isolation-weights",
+            "CreateProbeInstance",
+            "EvaluateInstance",
+            "RequireIsolationStable",
+            "backend isolation output drift",
+            "\\\"isolation\\\":true",
         ],
     )
     assert_file_contains(
