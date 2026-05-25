@@ -108,7 +108,7 @@ Current remote gates:
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default so the CUDA suite hard-compares against macOS Metal BT4 and legacy artifacts |
 | GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26392093857`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact plus a structured compile/package manifest |
-| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Direct GCP pass `direct-20260525-positive-hybrid-metrics`, Windows Server 2022 G2/L4 vWS, packaged CUDA probe, MCTS smoke, and metric-asserted Hybrid CUDA search smoke |
+| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Direct GCP pass `direct-20260525-positive-hybrid-metrics`, Windows Server 2022 G2/L4 vWS, packaged CUDA probe, MCTS smoke, metric-asserted Hybrid CUDA search smoke, and runtime manifest |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26392093917`, Metal NN parity artifact and BK.07 smoke |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26392093912` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26392093916` |
@@ -718,7 +718,8 @@ verifies `nvidia-smi`, installs the VC++ runtime, and runs packaged
 `metalfish_nn_probe.exe --backend cuda` plus `NNBackend=cuda` MCTS and Hybrid
 UCI smokes with BT4 weights. It tries `g2-standard-8` and then `g2-standard-4`
 by default so transient L4 stockouts do not fail the release gate before the
-engine runs. The VM is deleted by default and logs are collected under
+engine runs. The VM is deleted by default and logs plus
+`windows-cuda-runtime-manifest.json` are collected under
 `results/windows_cuda_runtime_gate/`.
 The gate explicitly bootstraps OpenSSH on the Windows guest with a temporary
 `metalfish` administrator user and the caller's SSH key, because stock GCE
@@ -727,7 +728,11 @@ drains stdout/stderr asynchronously so the large UCI option block cannot fill a
 pipe and stall the engine before `uciok`; the Hybrid smoke writes commands
 line-by-line, waits after `go` so it does not abort a timed search with an
 immediate `quit`, and asserts positive `MCTSPlayouts`, `MCTSEvals`, and
-`ABDepth` in the final line. The 2026-05-25 direct GCP pass
+`ABDepth` in the final line. The runtime manifest records the compile workflow
+run id, package hash, VM shape, CUDA graph/profile settings, packaged probe
+backend/latency/top-policy move, pure CUDA MCTS bestmove, and Hybrid final
+metrics so release artifacts can be audited without scraping UCI logs manually.
+The 2026-05-25 direct GCP pass
 `direct-20260525-positive-hybrid-metrics` verified the production CUDA graph path
 on an L4: the packaged CUDA probe decoded BT4 policy/value/moves-left with
 `executor=resolved+graph-replay`, pure CUDA MCTS returned `bestmove d2d4` at

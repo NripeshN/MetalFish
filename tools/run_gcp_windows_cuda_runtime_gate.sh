@@ -32,6 +32,7 @@ UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
 CUDA_GRAPH="${METALFISH_WINDOWS_CUDA_GRAPH:-}"
 CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
 CUDA_PROFILE_LIMIT="${METALFISH_WINDOWS_CUDA_PROFILE_LIMIT:-2}"
+WINDOWS_CUDA_COMPILE_RUN_ID="${METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID:-}"
 DRIVER_SCRIPT_URL="${METALFISH_WINDOWS_GPU_DRIVER_SCRIPT_URL:-https://github.com/GoogleCloudPlatform/compute-gpu-installation/raw/main/windows/install_gpu_driver.ps1}"
 CREATED_INSTANCE=0
 SSH_READY=0
@@ -397,6 +398,95 @@ function Assert-PositiveMetric {
   }
 }
 
+function Read-LogText {
+  param([string]\$Name)
+  \$path = Join-Path \$Logs \$Name
+  if (-not (Test-Path \$path)) {
+    return ""
+  }
+  return (Get-Content -Path \$path -Raw -Encoding UTF8).TrimStart([char]0xFEFF)
+}
+
+function Read-ProbeJson {
+  param([string]\$Name)
+  \$text = Read-LogText \$Name
+  if ([string]::IsNullOrWhiteSpace(\$text)) {
+    throw "Probe log was empty: \$Name"
+  }
+  return \$text | ConvertFrom-Json
+}
+
+function Find-BestMove {
+  param([string]\$Text)
+  \$matches = [regex]::Matches(\$Text, "(?m)^bestmove\s+(\S+)")
+  if (\$matches.Count -eq 0) {
+    return \$null
+  }
+  return \$matches[\$matches.Count - 1].Groups[1].Value
+}
+
+function Find-Executor {
+  param([string]\$Text)
+  \$match = [regex]::Match(\$Text, "executor=([^,)]+(?:\([^)]*\))?)")
+  if (-not \$match.Success) {
+    return \$null
+  }
+  return \$match.Groups[1].Value
+}
+
+function Test-BackendSelected {
+  param([string]\$Text)
+  return \$Text -like "*CUDA transformer backend*"
+}
+
+function Find-FinalMetrics {
+  param([string]\$Text)
+  \$metrics = [ordered]@{}
+  \$matches = [regex]::Matches(\$Text, "(?m)^info string Final:\s+(.*)$")
+  if (\$matches.Count -eq 0) {
+    return \$metrics
+  }
+  \$line = \$matches[\$matches.Count - 1].Groups[1].Value
+  foreach (\$match in [regex]::Matches(\$line, "([A-Za-z0-9]+)=([^\s]+)")) {
+    \$key = \$match.Groups[1].Value
+    \$raw = \$match.Groups[2].Value
+    \$intValue = 0L
+    \$doubleValue = 0.0
+    if ([int64]::TryParse(\$raw, [ref]\$intValue)) {
+      \$metrics[\$key] = \$intValue
+    } elseif ([double]::TryParse(\$raw, [ref]\$doubleValue)) {
+      \$metrics[\$key] = \$doubleValue
+    } else {
+      \$metrics[\$key] = \$raw
+    }
+  }
+  return \$metrics
+}
+
+function Get-GpuInfo {
+  \$gpu = [ordered]@{
+    nvidia_smi_log = "nvidia-smi-runtime.log"
+  }
+  try {
+    \$query = & nvidia-smi --query-gpu=name,driver_version,memory.total,compute_cap --format=csv,noheader,nounits 2>\$null
+    if (\$LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(\$query)) {
+      \$fields = @(\$query)[0].Split(",") | ForEach-Object { \$_.Trim() }
+      if (\$fields.Count -ge 1) { \$gpu["name"] = \$fields[0] }
+      if (\$fields.Count -ge 2) { \$gpu["driver_version"] = \$fields[1] }
+      if (\$fields.Count -ge 3) {
+        \$memoryTotalMiB = 0
+        if ([int]::TryParse(\$fields[2], [ref]\$memoryTotalMiB)) {
+          \$gpu["memory_total_mib"] = \$memoryTotalMiB
+        } else {
+          \$gpu["memory_total"] = \$fields[2]
+        }
+      }
+      if (\$fields.Count -ge 4) { \$gpu["compute_capability"] = \$fields[3] }
+    }
+  } catch {}
+  return \$gpu
+}
+
 function Invoke-UciSmoke {
   param(
     [string]\$Name,
@@ -505,13 +595,80 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "quit"
 ) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove") -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
+\$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
+\$MctsText = Read-LogText "cuda-mcts.stdout.log"
+\$HybridText = Read-LogText "hybrid-cuda.stdout.log"
+\$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
+\$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
+\$Manifest = [ordered]@{
+  schema_version = 1
+  gate_status = "passed"
+  timestamp_utc = (Get-Date).ToUniversalTime().ToString("o")
+  package = [ordered]@{
+    basename = "${PACKAGE_BASENAME}"
+    remote_zip = \$RemoteZip
+    sha256 = \$PackageHash
+    compile_run_id = \$(if ("${WINDOWS_CUDA_COMPILE_RUN_ID}" -eq "") { \$null } else { "${WINDOWS_CUDA_COMPILE_RUN_ID}" })
+  }
+  gcp = [ordered]@{
+    instance = "${INSTANCE}"
+    zone = "${ZONE}"
+    machine = "${MACHINE}"
+    accelerator = "${ACCELERATOR}"
+    image_project = "${IMAGE_PROJECT}"
+    image_family = "${IMAGE_FAMILY}"
+  }
+  config = [ordered]@{
+    uci_go = "${UCI_GO}"
+    hybrid_uci_go = "${HYBRID_UCI_GO}"
+    uci_timeout_seconds = ${UCI_TIMEOUT_SECONDS}
+    probe_timeout_seconds = ${PROBE_TIMEOUT_SECONDS}
+    cuda_graph = \$(if ("${CUDA_GRAPH}" -eq "") { \$null } else { "${CUDA_GRAPH}" })
+    cuda_profile = \$(if ("${CUDA_PROFILE}" -eq "") { \$null } else { "${CUDA_PROFILE}" })
+    cuda_profile_limit = ${CUDA_PROFILE_LIMIT}
+  }
+  gpu = (Get-GpuInfo)
+  probe = [ordered]@{
+    backend = \$ProbeJson.backend
+    executor = (Find-Executor \$ProbeJson.network_info)
+    network_info = \$ProbeJson.network_info
+    format = \$ProbeJson.format
+    has_wdl = \$ProbeJson.has_wdl
+    has_moves_left = \$ProbeJson.has_moves_left
+    moves_left = \$ProbeJson.moves_left
+    latency = \$ProbeJson.latency
+    policy_top = \$ProbeJson.policy_top
+    stdout_log = "cuda-probe.stdout.log"
+    stderr_log = "cuda-probe.stderr.log"
+  }
+  uci_smokes = [ordered]@{
+    cuda_mcts = [ordered]@{
+      go = "${UCI_GO}"
+      bestmove = (Find-BestMove \$MctsText)
+      backend_selected = (Test-BackendSelected \$MctsText)
+      stdout_log = "cuda-mcts.stdout.log"
+      stderr_log = "cuda-mcts.stderr.log"
+    }
+    hybrid_cuda = [ordered]@{
+      go = "${HYBRID_UCI_GO}"
+      bestmove = (Find-BestMove \$HybridText)
+      backend_selected = (Test-BackendSelected \$HybridText)
+      metrics = (Find-FinalMetrics \$HybridText)
+      stdout_log = "hybrid-cuda.stdout.log"
+      stderr_log = "hybrid-cuda.stderr.log"
+    }
+  }
+}
+\$Manifest | ConvertTo-Json -Depth 12 | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-manifest.json") -Encoding UTF8
+
 @(
   "# MetalFish Windows CUDA Runtime Gate",
   "",
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-mcts, hybrid-cuda"
+  "- Smokes: cuda-probe, cuda-mcts, hybrid-cuda",
+  "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"
 POWERSHELL

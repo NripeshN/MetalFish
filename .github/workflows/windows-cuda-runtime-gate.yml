@@ -90,6 +90,7 @@ jobs:
           METALFISH_GCP_GCS_PREFIX: ${{ inputs.gcs_prefix }}
           METALFISH_GCP_COLLECT_ARTIFACTS: "1"
           METALFISH_WINDOWS_CUDA_UCI_GO: ${{ inputs.uci_go }}
+          METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID: ${{ inputs.windows_cuda_run_id }}
         run: |
           set -euo pipefail
           : "${METALFISH_GCP_PROJECT:=metalfish}"
