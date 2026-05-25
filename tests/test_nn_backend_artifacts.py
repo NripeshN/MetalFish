@@ -518,6 +518,48 @@ print(json.dumps({
         expect("probe suite line moves", probes[2]["moves"] == "e2e4")
 
 
+def test_probe_suite_runner_reports_failing_probe_name() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        fake_probe = root / "fake_probe.py"
+        fake_probe.write_text(
+            """#!/usr/bin/env python3
+import sys
+
+print("synthetic probe failure", file=sys.stderr)
+sys.exit(7)
+""",
+            encoding="utf-8",
+        )
+        fake_probe.chmod(0o755)
+        output = root / "suite.log"
+        with argv(
+            [
+                "--probe",
+                str(fake_probe),
+                "--weights",
+                str(root / "weights.pb"),
+                "--backend",
+                "cuda",
+                "--out",
+                str(output),
+                "--line",
+                "badline=8/8/8/8/8/8/4P3/K6k w - - 0 1|e2e4",
+            ]
+        ):
+            try:
+                probe_suite.main()
+            except RuntimeError as exc:
+                expect("probe suite failure name", "badline" in str(exc))
+                expect("probe suite failure code", "exit code 7" in str(exc))
+                expect(
+                    "probe suite stderr captured",
+                    "synthetic probe failure" in output.read_text(encoding="utf-8"),
+                )
+                return
+    raise AssertionError("expected probe suite failure to be reported")
+
+
 def main() -> int:
     test_checker_writes_manifest()
     test_checker_rejects_missing_wdl()
@@ -527,6 +569,7 @@ def main() -> int:
     test_backend_output_compare_rejects_probe_suite_mismatch()
     test_backend_output_compare_rejects_top_move_drift()
     test_probe_suite_runner_writes_multiple_json_probes()
+    test_probe_suite_runner_reports_failing_probe_name()
     print("NN backend artifact tests: OK")
     return 0
 

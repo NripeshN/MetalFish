@@ -161,13 +161,15 @@ def main() -> int:
             except subprocess.TimeoutExpired as exc:
                 handle.write(subprocess_output_text(exc.stdout))
                 handle.write(subprocess_output_text(exc.stderr))
-                raise RuntimeError(f"{name}: probe timed out after {args.timeout}s")
+                raise RuntimeError(
+                    f"{position.name}: probe timed out after {args.timeout}s"
+                )
 
             handle.write(result.stdout)
             handle.write(result.stderr)
             if result.returncode != 0:
                 raise RuntimeError(
-                    f"{name}: probe failed with exit code {result.returncode}"
+                    f"{position.name}: probe failed with exit code {result.returncode}"
                 )
 
     print(f"NN backend probe suite: PASS probes={len(positions)} log={output}")

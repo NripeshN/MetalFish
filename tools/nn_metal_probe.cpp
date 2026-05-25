@@ -130,13 +130,18 @@ std::string SquareString(Square square) {
                      static_cast<char>('1' + rank_of(square))};
 }
 
-std::string MoveString(Move move) {
+std::string MoveString(Move move, bool chess960 = false) {
   if (move == Move::none())
     return "(none)";
   if (move == Move::null())
     return "0000";
 
-  std::string out = SquareString(move.from_sq()) + SquareString(move.to_sq());
+  Square from = move.from_sq();
+  Square to = move.to_sq();
+  if (move.type_of() == CASTLING && !chess960)
+    to = make_square(to > from ? FILE_G : FILE_C, rank_of(from));
+
+  std::string out = SquareString(from) + SquareString(to);
   if (move.type_of() == PROMOTION)
     out += " pnbrqk"[move.promotion_type()];
   return out;
@@ -151,7 +156,7 @@ std::string Lowercase(std::string value) {
 Move ParseProbeMove(const Position &position, std::string text) {
   text = Lowercase(std::move(text));
   for (const Move move : MoveList<LEGAL>(position)) {
-    if (text == MoveString(move))
+    if (text == MoveString(move, position.is_chess960()))
       return move;
   }
   return Move::none();
