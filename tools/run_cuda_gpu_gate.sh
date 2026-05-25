@@ -202,6 +202,8 @@ write_summary() {
     echo
     summary_line_or_missing "batches:" \
       "${BUILD_DIR}/cuda-gpu-nn-comparison.log" "- skipped"
+    summary_line_or_missing "graph_reuse_probe:" \
+      "${BUILD_DIR}/cuda-gpu-nn-comparison.log" "- skipped"
     if [[ -s "${BUILD_DIR}/cuda-gpu-nn-comparison.log" ]] &&
        grep -q "TRACE_WORST:" "${BUILD_DIR}/cuda-gpu-nn-comparison.log"; then
       echo
@@ -412,6 +414,7 @@ METALFISH_NN_WEIGHTS="${WEIGHTS}" \
   METALFISH_NN_BENCH_ITERS="${METALFISH_NN_BENCH_ITERS:-2}" \
   METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
   METALFISH_NN_BENCH_WARMUP_ITERS="${METALFISH_NN_BENCH_WARMUP_ITERS:-3}" \
+  METALFISH_NN_BENCH_GRAPH_REUSE_PROBE="${METALFISH_NN_BENCH_GRAPH_REUSE_PROBE:-1}" \
   METALFISH_CUDA_GRAPH_STATUS_DETAIL="${METALFISH_CUDA_GRAPH_STATUS_DETAIL:-1}" \
   METALFISH_CUDA_PROFILE=0 \
   "${BUILD_DIR}/test_nn_comparison" 2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-comparison.log"

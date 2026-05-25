@@ -1562,6 +1562,32 @@ bool benchmark_nn_batch_optional() {
                 << std::setprecision(4) << eval_ms << "ms_eval";
     }
     std::cout << " checksum=" << std::setprecision(6) << checksum << std::endl;
+
+    if (env_flag_enabled("METALFISH_NN_BENCH_GRAPH_REUSE_PROBE")) {
+      const int half_batch = std::max(1, max_batch / 2);
+      const std::array<int, 6> reuse_batches = {
+          max_batch, 1, half_batch, max_batch, 1, half_batch};
+      std::cout << "    graph_reuse_probe:";
+      for (const int batch_size : reuse_batches) {
+        std::vector<NN::InputPlanes> batch(planes.begin(),
+                                           planes.begin() + batch_size);
+        for (int iter = 0; iter < warmup_iterations; ++iter) {
+          const auto outputs = network->EvaluateBatch(batch);
+          if (outputs.size() != static_cast<size_t>(batch_size)) {
+            std::cout << std::endl
+                      << "    FAIL: graph reuse batch " << batch_size
+                      << " returned " << outputs.size() << " outputs"
+                      << std::endl;
+            return false;
+          }
+          checksum += outputs.front().value + outputs.back().policy[0];
+        }
+        std::cout << " b" << batch_size;
+      }
+      std::cout << " checksum=" << std::setprecision(6) << checksum
+                << std::endl;
+    }
+
     std::cout << "    backend_after: " << network->GetNetworkInfo()
               << std::endl;
     return true;

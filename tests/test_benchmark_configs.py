@@ -846,6 +846,7 @@ def main() -> int:
             "comparison_executor_after",
             "comparison_profile_enabled",
             "benchmark_warmup_line",
+            "benchmark_graph_reuse_line",
             "probe",
             "executor",
             "profile_enabled",
@@ -858,7 +859,9 @@ def main() -> int:
         PROJ / "tests/test_nn_comparison.cpp",
         [
             "METALFISH_NN_BENCH_WARMUP_ITERS",
+            "METALFISH_NN_BENCH_GRAPH_REUSE_PROBE",
             "benchmark_warmups:",
+            "graph_reuse_probe:",
         ],
     )
     assert_file_contains(
@@ -939,6 +942,7 @@ def main() -> int:
             "run_nn_backend_probe_suite.py",
             "METALFISH_CUDA_PROFILE=0",
             "METALFISH_NN_BENCH_WARMUP_ITERS",
+            "METALFISH_NN_BENCH_GRAPH_REUSE_PROBE",
             "METALFISH_CUDA_GRAPH_STATUS_DETAIL",
             '--backend-label "CUDA transformer backend"',
             "--full-policy",
@@ -1111,6 +1115,7 @@ def main() -> int:
             "METALFISH_GCP_GCS_PREFIX",
             "METALFISH_METAL_PROBE_SUITE_LOG",
             "METALFISH_NN_BENCH_WARMUP_ITERS",
+            "METALFISH_NN_BENCH_GRAPH_REUSE_PROBE",
             "METALFISH_CUDA_GRAPH_STATUS_DETAIL",
             "collect_remote_artifacts",
             "compare_collected_probe_suite",

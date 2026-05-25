@@ -90,6 +90,7 @@ def main() -> int:
 
     batch_line = None
     warmup_line = None
+    graph_reuse_line = None
     comparison_backend_line = None
     comparison_backend_after_line = None
     comparison_executor_before = None
@@ -121,6 +122,9 @@ def main() -> int:
         comparison_profile_enabled = "CUDA profile report=" in comparison_text
         warmup_line = find_prefixed_line(
             stripped_comparison_lines, "benchmark_warmups:"
+        )
+        graph_reuse_line = find_prefixed_line(
+            stripped_comparison_lines, "graph_reuse_probe:"
         )
         batch_line = find_prefixed_line(stripped_comparison_lines, "batches:")
         if args.require_batch_benchmark:
@@ -162,6 +166,7 @@ def main() -> int:
         "comparison_executor_after": comparison_executor_after,
         "comparison_profile_enabled": comparison_profile_enabled,
         "benchmark_warmup_line": warmup_line,
+        "benchmark_graph_reuse_line": graph_reuse_line,
         "batch_line": batch_line,
         "probe": {
             "backend": probe.get("backend"),
