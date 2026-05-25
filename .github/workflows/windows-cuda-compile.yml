@@ -11,6 +11,7 @@ on:
       - "CMakeLists.txt"
       - "src/hybrid/**"
       - "src/mcts/**"
+      - "src/nn/cpu/**"
       - "src/nn/cuda/**"
       - "src/nn/encoder.*"
       - "src/nn/input_plane_packing.h"

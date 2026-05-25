@@ -17,6 +17,10 @@ NNUE_URLS = {
     "nn-c288c895ea92.nnue": "https://tests.stockfishchess.org/api/nn/nn-c288c895ea92.nnue",
     "nn-37f18f62d772.nnue": "https://tests.stockfishchess.org/api/nn/nn-37f18f62d772.nnue",
 }
+NNUE_URL_ENV = {
+    "nn-c288c895ea92.nnue": "METALFISH_NNUE_BIG_URL",
+    "nn-37f18f62d772.nnue": "METALFISH_NNUE_SMALL_URL",
+}
 
 BT4_FILENAME = "BT4-1024x15x32h-swa-6147500.pb"
 BT4_GZ_FILENAME = f"{BT4_FILENAME}.gz"
@@ -112,7 +116,8 @@ def main() -> int:
     want_legacy = args.legacy_only or args.include_legacy
 
     if want_nnue:
-        for filename, url in NNUE_URLS.items():
+        for filename, default_url in NNUE_URLS.items():
+            url = os.environ.get(NNUE_URL_ENV[filename], default_url)
             download(url, dest / filename, args.retries, args.force)
 
     if want_bt4:

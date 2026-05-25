@@ -97,6 +97,8 @@ NetworkOutput MetalNetwork::Evaluate(const InputPlanes &input) {
 
 std::vector<NetworkOutput>
 MetalNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
+  if (inputs.empty())
+    return {};
   std::vector<NetworkOutput> outputs(inputs.size());
   RunBatch(inputs, outputs);
   return outputs;
@@ -104,6 +106,9 @@ MetalNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
 
 void MetalNetwork::RunBatch(std::span<const InputPlanes> inputs,
                             std::vector<NetworkOutput> &outputs) {
+  if (inputs.empty())
+    return;
+
   const int batch = static_cast<int>(inputs.size());
   if (batch > max_batch_size_) {
     throw std::runtime_error("Batch size exceeds configured max batch size");
