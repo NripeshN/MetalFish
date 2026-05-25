@@ -987,6 +987,37 @@ __global__ void DynamicPositionEncodingInputKernel(const float *expanded,
                channel];
 }
 
+__global__ void DynamicPositionEncodingSparseDenseKernel(
+    const std::uint64_t *masks, const float *values, const float *weights,
+    const float *bias, float *output, int input_planes, int position_planes,
+    int squares, int input_width, int output_width, int total) {
+  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= total)
+    return;
+
+  const int output_channel = index % output_width;
+  const int batch = index / output_width;
+  const float *weight_row =
+      weights + static_cast<std::size_t>(output_channel) * input_width;
+  float sum = bias ? bias[output_channel] : 0.0f;
+  const std::uint64_t valid_squares =
+      squares >= 64 ? ~0ULL : ((1ULL << squares) - 1ULL);
+  for (int plane = 0; plane < position_planes; ++plane) {
+    const int packed_index = batch * input_planes + plane;
+    std::uint64_t mask = masks[packed_index] & valid_squares;
+    if (!mask)
+      continue;
+    const float value = values[packed_index];
+    while (mask) {
+      const int square = __ffsll(static_cast<long long>(mask)) - 1;
+      const int input_channel = square * position_planes + plane;
+      sum += value * weight_row[input_channel];
+      mask &= mask - 1;
+    }
+  }
+  output[index] = sum;
+}
+
 __global__ void DynamicPositionEncodingConcatKernel(
     const float *expanded, const float *position_encoding, float *output,
     int input_planes, int position_width, int squares, int output_width,
@@ -1756,6 +1787,42 @@ void LaunchExpandPackedInputPlanesWithPositionInputKernel(
   if (status != cudaSuccess) {
     throw std::runtime_error(CudaErrorMessage(
         "ExpandPackedInputPlanesWithPositionInputKernel synchronize", status));
+  }
+}
+
+void LaunchDynamicPositionEncodingSparseDenseKernel(
+    const std::uint64_t *masks, const float *values, const float *weights,
+    const float *bias, float *output, int batch_size, int input_planes,
+    int position_planes, int squares, int input_width, int output_width,
+    cudaStream_t stream) {
+  if (!masks || !values || !weights || !output) {
+    throw std::runtime_error(
+        "CUDA dynamic position sparse dense kernel received null buffer");
+  }
+  if (batch_size <= 0 || input_planes <= 0 || position_planes <= 0 ||
+      position_planes > input_planes || squares <= 0 || squares > 64 ||
+      input_width != squares * position_planes || output_width <= 0) {
+    throw std::runtime_error(
+        "CUDA dynamic position sparse dense dimensions are invalid");
+  }
+
+  const int total = batch_size * output_width;
+  constexpr int kThreads = 256;
+  const int blocks = (total + kThreads - 1) / kThreads;
+  DynamicPositionEncodingSparseDenseKernel<<<blocks, kThreads, 0, stream>>>(
+      masks, values, weights, bias, output, input_planes, position_planes,
+      squares, input_width, output_width, total);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "DynamicPositionEncodingSparseDenseKernel launch", status));
+  }
+  if (stream)
+    return;
+  status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    throw std::runtime_error(CudaErrorMessage(
+        "DynamicPositionEncodingSparseDenseKernel synchronize", status));
   }
 }
 
@@ -3039,6 +3106,44 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
         static_cast<float>(static_cast<int>(i % 17) - 8) * 0.125f;
   }
 
+  constexpr int kSparseDenseInputWidth = kSquares * kPositionPlanes;
+  constexpr int kSparseDenseOutputWidth = 7;
+  std::vector<float> sparse_weights(kSparseDenseOutputWidth *
+                                        kSparseDenseInputWidth,
+                                    0.0f);
+  std::vector<float> sparse_bias(kSparseDenseOutputWidth, 0.0f);
+  for (std::size_t i = 0; i < sparse_weights.size(); ++i) {
+    sparse_weights[i] =
+        static_cast<float>(static_cast<int>(i % 23) - 11) * 0.03125f;
+  }
+  for (std::size_t i = 0; i < sparse_bias.size(); ++i) {
+    sparse_bias[i] = static_cast<float>(i) * 0.125f - 0.25f;
+  }
+
+  std::vector<float> expected_sparse_dense(
+      kBatch * kSparseDenseOutputWidth, 0.0f);
+  for (int batch = 0; batch < kBatch; ++batch) {
+    for (int output = 0; output < kSparseDenseOutputWidth; ++output) {
+      float sum = sparse_bias[output];
+      for (int plane = 0; plane < kPositionPlanes; ++plane) {
+        const std::size_t packed =
+            static_cast<std::size_t>(batch) * kPlanes + plane;
+        for (int square = 0; square < kSquares; ++square) {
+          if ((masks[packed] & (1ULL << square)) == 0)
+            continue;
+          const int input_index = square * kPositionPlanes + plane;
+          sum += values[packed] *
+                 sparse_weights[static_cast<std::size_t>(output) *
+                                    kSparseDenseInputWidth +
+                                input_index];
+        }
+      }
+      expected_sparse_dense[static_cast<std::size_t>(batch) *
+                                kSparseDenseOutputWidth +
+                            output] = sum;
+    }
+  }
+
   std::vector<float> expected_output(kBatch * kSquares * kOutputWidth, 0.0f);
   for (int batch = 0; batch < kBatch; ++batch) {
     for (int square = 0; square < kSquares; ++square) {
@@ -3065,6 +3170,7 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
   std::vector<float> actual_expanded(expected_expanded.size(), 0.0f);
   std::vector<float> actual_position_input(expected_position_input.size(),
                                            0.0f);
+  std::vector<float> actual_sparse_dense(expected_sparse_dense.size(), 0.0f);
   std::vector<float> actual_output(expected_output.size(), 0.0f);
   std::vector<float> expected_static_output(
       kBatch * kSquares * kStaticOutputWidth, 0.0f);
@@ -3092,6 +3198,9 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
   float *device_expanded = nullptr;
   float *device_position_input = nullptr;
   float *device_position_encoding = nullptr;
+  float *device_sparse_weights = nullptr;
+  float *device_sparse_bias = nullptr;
+  float *device_sparse_output = nullptr;
   float *device_output = nullptr;
   float *device_static_output = nullptr;
 
@@ -3104,6 +3213,12 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
                    "cudaMalloc(dynamic_position_input)");
     AllocateDevice(&device_position_encoding, position_encoding.size(),
                    "cudaMalloc(dynamic_position_encoding)");
+    AllocateDevice(&device_sparse_weights, sparse_weights.size(),
+                   "cudaMalloc(dynamic_sparse_weights)");
+    AllocateDevice(&device_sparse_bias, sparse_bias.size(),
+                   "cudaMalloc(dynamic_sparse_bias)");
+    AllocateDevice(&device_sparse_output, actual_sparse_dense.size(),
+                   "cudaMalloc(dynamic_sparse_output)");
     AllocateDevice(&device_output, actual_output.size(),
                    "cudaMalloc(dynamic_position_output)");
     AllocateDevice(&device_static_output, actual_static_output.size(),
@@ -3118,10 +3233,18 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
     UploadFloats(device_values, values, "cudaMemcpy(dynamic_values)");
     UploadFloats(device_position_encoding, position_encoding,
                  "cudaMemcpy(dynamic_position_encoding)");
+    UploadFloats(device_sparse_weights, sparse_weights,
+                 "cudaMemcpy(dynamic_sparse_weights)");
+    UploadFloats(device_sparse_bias, sparse_bias,
+                 "cudaMemcpy(dynamic_sparse_bias)");
 
     LaunchExpandPackedInputPlanesWithPositionInputKernel(
         device_masks, device_values, device_expanded, device_position_input,
         kBatch, kPlanes, kPositionPlanes, kSquares);
+    LaunchDynamicPositionEncodingSparseDenseKernel(
+        device_masks, device_values, device_sparse_weights, device_sparse_bias,
+        device_sparse_output, kBatch, kPlanes, kPositionPlanes, kSquares,
+        kSparseDenseInputWidth, kSparseDenseOutputWidth);
     LaunchDynamicPositionEncodingConcatKernel(
         device_expanded, device_position_encoding, device_output, kBatch,
         kPlanes, kPositionWidth, kSquares);
@@ -3133,6 +3256,8 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
                    "cudaMemcpy(dynamic_expanded)");
     DownloadFloats(actual_position_input, device_position_input,
                    "cudaMemcpy(dynamic_position_input)");
+    DownloadFloats(actual_sparse_dense, device_sparse_output,
+                   "cudaMemcpy(dynamic_sparse_output)");
     DownloadFloats(actual_output, device_output,
                    "cudaMemcpy(dynamic_position_output)");
     DownloadFloats(actual_static_output, device_static_output,
@@ -3143,6 +3268,9 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
     FreeDevice(device_expanded);
     FreeDevice(device_position_input);
     FreeDevice(device_position_encoding);
+    FreeDevice(device_sparse_weights);
+    FreeDevice(device_sparse_bias);
+    FreeDevice(device_sparse_output);
     FreeDevice(device_output);
     FreeDevice(device_static_output);
     result.status = CudaSmokeStatus::RuntimeError;
@@ -3155,6 +3283,9 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
   FreeDevice(device_expanded);
   FreeDevice(device_position_input);
   FreeDevice(device_position_encoding);
+  FreeDevice(device_sparse_weights);
+  FreeDevice(device_sparse_bias);
+  FreeDevice(device_sparse_output);
   FreeDevice(device_output);
   FreeDevice(device_static_output);
 
@@ -3169,6 +3300,13 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
     if (actual_position_input[i] != expected_position_input[i]) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA dynamic position input mismatch";
+      return result;
+    }
+  }
+  for (std::size_t i = 0; i < expected_sparse_dense.size(); ++i) {
+    if (std::fabs(actual_sparse_dense[i] - expected_sparse_dense[i]) > 1e-6f) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA dynamic sparse position dense mismatch";
       return result;
     }
   }
