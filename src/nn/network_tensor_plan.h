@@ -45,6 +45,19 @@ struct NetworkTensorPlan {
   std::string Summary() const;
 };
 
+enum class NetworkOutputTarget {
+  Policy,
+  Value,
+  MovesLeft,
+  RawPolicy,
+};
+
+std::string NetworkOutputTargetName(NetworkOutputTarget target);
+int NetworkOutputTargetStride(const NetworkTensorPlan &plan,
+                              NetworkOutputTarget target);
+bool NetworkOutputTargetEnabled(const NetworkTensorPlan &plan,
+                                NetworkOutputTarget target);
+
 NetworkTensorPlan
 CreateNetworkTensorPlan(const NetworkFormatDescriptor &format);
 

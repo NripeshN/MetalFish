@@ -688,6 +688,57 @@ void test_network_format_descriptor(TestCounter &tc) {
          "tensor plan should expose moves-left width", tc);
   expect(tensor_plan.raw_policy_outputs == NN::kNetworkAttentionPolicyScratch,
          "tensor plan should expose attention policy scratch width", tc);
+  expect(NN::NetworkOutputTargetName(NN::NetworkOutputTarget::Policy) ==
+             "policy",
+         "network output target name should identify policy", tc);
+  expect(NN::NetworkOutputTargetStride(tensor_plan,
+                                       NN::NetworkOutputTarget::Policy) ==
+             NN::kPolicyOutputs,
+         "network output target stride should expose decoded policy width", tc);
+  expect(NN::NetworkOutputTargetStride(tensor_plan,
+                                       NN::NetworkOutputTarget::Value) == 3,
+         "network output target stride should expose WDL width", tc);
+  expect(NN::NetworkOutputTargetStride(tensor_plan,
+                                       NN::NetworkOutputTarget::MovesLeft) == 1,
+         "network output target stride should expose moves-left width", tc);
+  expect(NN::NetworkOutputTargetStride(tensor_plan,
+                                       NN::NetworkOutputTarget::RawPolicy) ==
+             NN::kNetworkAttentionPolicyScratch,
+         "network output target stride should expose attention scratch width",
+         tc);
+  expect(NN::NetworkOutputTargetEnabled(tensor_plan,
+                                        NN::NetworkOutputTarget::MovesLeft),
+         "network output target should enable present moves-left output", tc);
+  expect(NN::NetworkOutputTargetEnabled(tensor_plan,
+                                        NN::NetworkOutputTarget::RawPolicy),
+         "network output target should enable present raw policy output", tc);
+
+  NN::NetworkFormatDescriptor scalar_descriptor;
+  const auto scalar_plan = NN::CreateNetworkTensorPlan(scalar_descriptor);
+  expect(NN::NetworkOutputTargetStride(scalar_plan,
+                                       NN::NetworkOutputTarget::Value) == 1,
+         "network output target stride should expose scalar value width", tc);
+  expect(NN::NetworkOutputTargetStride(scalar_plan,
+                                       NN::NetworkOutputTarget::MovesLeft) == 0,
+         "disabled moves-left target should have zero stride", tc);
+  expect(!NN::NetworkOutputTargetEnabled(scalar_plan,
+                                         NN::NetworkOutputTarget::MovesLeft),
+         "disabled moves-left target should not be enabled", tc);
+  expect(NN::NetworkOutputTargetStride(scalar_plan,
+                                       NN::NetworkOutputTarget::RawPolicy) == 0,
+         "disabled raw policy target should have zero stride", tc);
+  expect(!NN::NetworkOutputTargetEnabled(scalar_plan,
+                                         NN::NetworkOutputTarget::RawPolicy),
+         "disabled raw policy target should not be enabled", tc);
+
+  NN::NetworkFormatDescriptor conv_descriptor;
+  conv_descriptor.conv_policy = true;
+  const auto conv_plan = NN::CreateNetworkTensorPlan(conv_descriptor);
+  expect(NN::NetworkOutputTargetStride(conv_plan,
+                                       NN::NetworkOutputTarget::RawPolicy) ==
+             NN::kNetworkConvPolicyScratch,
+         "network output target stride should expose convolution scratch width",
+         tc);
 
   MetalFishNN::Weights minimal_proto = file.weights();
   NN::MultiHeadWeights minimal_weights(minimal_proto);
@@ -1322,14 +1373,14 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_cuda_output_mapping.ok(),
          "loaded CUDA output mapping should bind BT4 policy/value/moves-left",
          tc);
-  expect(loaded_cuda_output_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) !=
+  expect(loaded_cuda_output_mapping.Find(NN::NetworkOutputTarget::Policy) !=
              nullptr,
          "loaded CUDA output mapping should expose decoded policy output", tc);
-  expect(loaded_cuda_output_mapping.Find(NN::Cuda::CudaOutputTarget::Value) !=
+  expect(loaded_cuda_output_mapping.Find(NN::NetworkOutputTarget::Value) !=
              nullptr,
          "loaded CUDA output mapping should expose value output", tc);
   expect(loaded_cuda_output_mapping.Find(
-             NN::Cuda::CudaOutputTarget::MovesLeft) != nullptr,
+             NN::NetworkOutputTarget::MovesLeft) != nullptr,
          "loaded CUDA output mapping should expose moves-left output", tc);
 #endif
 }
@@ -2586,16 +2637,16 @@ void test_cuda_output_mapping(TestCounter &tc) {
   expect(mapping.ok(), "CUDA output mapping should accept smoke outputs", tc);
   expect(mapping.bindings.size() == 4,
          "CUDA output mapping should bind policy/value/moves/raw outputs", tc);
-  expect(mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
-             mapping.Find(NN::Cuda::CudaOutputTarget::Policy)->source_width ==
+  expect(mapping.Find(NN::NetworkOutputTarget::Policy) &&
+             mapping.Find(NN::NetworkOutputTarget::Policy)->source_width ==
                  2,
          "CUDA output mapping should retain policy source width", tc);
-  expect(mapping.Find(NN::Cuda::CudaOutputTarget::Value) &&
-             mapping.Find(NN::Cuda::CudaOutputTarget::Value)->source_width == 3,
+  expect(mapping.Find(NN::NetworkOutputTarget::Value) &&
+             mapping.Find(NN::NetworkOutputTarget::Value)->source_width == 3,
          "CUDA output mapping should bind WDL value width", tc);
-  expect(mapping.Find(NN::Cuda::CudaOutputTarget::MovesLeft),
+  expect(mapping.Find(NN::NetworkOutputTarget::MovesLeft),
          "CUDA output mapping should bind moves-left output", tc);
-  expect(mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
+  expect(mapping.Find(NN::NetworkOutputTarget::RawPolicy),
          "CUDA output mapping should bind raw policy scratch source", tc);
 
   NN::NetworkResolvedExecutionPlan mapped_policy = plan;
@@ -2616,15 +2667,15 @@ void test_cuda_output_mapping(TestCounter &tc) {
       NN::Cuda::CreateCudaExecutionSchedule(mapped_policy), options);
   expect(mapped_policy_mapping.ok(),
          "CUDA output mapping should accept mapped attention policy", tc);
-  expect(mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
-             mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy)
+  expect(mapped_policy_mapping.Find(NN::NetworkOutputTarget::Policy) &&
+             mapped_policy_mapping.Find(NN::NetworkOutputTarget::Policy)
                      ->source_stage == "policy.smoke.policy_map",
          "CUDA output mapping should prefer policy-map logits", tc);
-  expect(mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
-             mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy)
+  expect(mapped_policy_mapping.Find(NN::NetworkOutputTarget::Policy) &&
+             mapped_policy_mapping.Find(NN::NetworkOutputTarget::Policy)
                      ->source_width == NN::kNetworkPolicyOutputs,
          "CUDA output mapping should expose mapped policy width", tc);
-  expect(!mapped_policy_mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
+  expect(!mapped_policy_mapping.Find(NN::NetworkOutputTarget::RawPolicy),
          "CUDA output mapping should not require raw policy after GPU mapping",
          tc);
 
@@ -2644,11 +2695,11 @@ void test_cuda_output_mapping(TestCounter &tc) {
       NN::Cuda::CreateCudaExecutionSchedule(conv_mapped_policy), options);
   expect(conv_policy_mapping.ok(),
          "CUDA output mapping should accept mapped convolution policy", tc);
-  expect(conv_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
-             conv_policy_mapping.Find(NN::Cuda::CudaOutputTarget::Policy)
+  expect(conv_policy_mapping.Find(NN::NetworkOutputTarget::Policy) &&
+             conv_policy_mapping.Find(NN::NetworkOutputTarget::Policy)
                      ->source_stage == "policy.smoke.policy_map",
          "CUDA output mapping should prefer convolution policy-map logits", tc);
-  expect(!conv_policy_mapping.Find(NN::Cuda::CudaOutputTarget::RawPolicy),
+  expect(!conv_policy_mapping.Find(NN::NetworkOutputTarget::RawPolicy),
          "CUDA output mapping should not require raw convolution policy after "
          "GPU mapping",
          tc);
@@ -2662,16 +2713,16 @@ void test_cuda_output_mapping(TestCounter &tc) {
       options);
   expect(renamed_mapping.ok(),
          "CUDA output mapping should derive sources from head prefixes", tc);
-  expect(renamed_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) &&
-             renamed_mapping.Find(NN::Cuda::CudaOutputTarget::Policy)
+  expect(renamed_mapping.Find(NN::NetworkOutputTarget::Policy) &&
+             renamed_mapping.Find(NN::NetworkOutputTarget::Policy)
                      ->source_stage == "policy.smoke.primary_logits",
          "CUDA output mapping should bind renamed policy source", tc);
-  expect(renamed_mapping.Find(NN::Cuda::CudaOutputTarget::Value) &&
-             renamed_mapping.Find(NN::Cuda::CudaOutputTarget::Value)
+  expect(renamed_mapping.Find(NN::NetworkOutputTarget::Value) &&
+             renamed_mapping.Find(NN::NetworkOutputTarget::Value)
                      ->source_stage == "value.smoke.wdl_logits",
          "CUDA output mapping should bind renamed value source", tc);
-  expect(renamed_mapping.Find(NN::Cuda::CudaOutputTarget::MovesLeft) &&
-             renamed_mapping.Find(NN::Cuda::CudaOutputTarget::MovesLeft)
+  expect(renamed_mapping.Find(NN::NetworkOutputTarget::MovesLeft) &&
+             renamed_mapping.Find(NN::NetworkOutputTarget::MovesLeft)
                      ->source_stage == "moves_left.final_logits",
          "CUDA output mapping should bind renamed moves-left source", tc);
 
@@ -2854,8 +2905,8 @@ void test_cuda_output_mapping(TestCounter &tc) {
       NN::Cuda::CreateCudaExecutionSchedule(value_with_error), options);
   expect(value_with_error_mapping.ok(),
          "CUDA output mapping should ignore value error heads", tc);
-  expect(value_with_error_mapping.Find(NN::Cuda::CudaOutputTarget::Value) &&
-             value_with_error_mapping.Find(NN::Cuda::CudaOutputTarget::Value)
+  expect(value_with_error_mapping.Find(NN::NetworkOutputTarget::Value) &&
+             value_with_error_mapping.Find(NN::NetworkOutputTarget::Value)
                      ->source_stage == "value.smoke.dense2",
          "CUDA output mapping should keep primary value source before error",
          tc);

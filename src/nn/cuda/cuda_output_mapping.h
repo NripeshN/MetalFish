@@ -7,13 +7,14 @@
 
 #pragma once
 
+#include "../network_tensor_plan.h"
+
 #include <string>
 #include <vector>
 
 namespace MetalFish {
 namespace NN {
 struct NetworkResolvedExecutionPlan;
-struct NetworkTensorPlan;
 
 namespace Cuda {
 
@@ -22,22 +23,13 @@ struct CudaExecutionSchedule;
 class CudaInferenceBuffers;
 class CudaExecutionWorkspace;
 
-enum class CudaOutputTarget {
-  Policy,
-  Value,
-  MovesLeft,
-  RawPolicy,
-};
-
-std::string CudaOutputTargetName(CudaOutputTarget target);
-
 struct CudaOutputMappingOptions {
   bool allow_partial_policy_rows = false;
   bool allow_partial_raw_policy_rows = false;
 };
 
 struct CudaOutputBinding {
-  CudaOutputTarget target = CudaOutputTarget::Policy;
+  NetworkOutputTarget target = NetworkOutputTarget::Policy;
   std::string source_stage;
   int source_width = 0;
   int target_stride = 0;
@@ -48,7 +40,7 @@ struct CudaOutputMapping {
   std::vector<std::string> errors;
 
   bool ok() const { return errors.empty(); }
-  const CudaOutputBinding *Find(CudaOutputTarget target) const;
+  const CudaOutputBinding *Find(NetworkOutputTarget target) const;
   std::string Summary() const;
 };
 

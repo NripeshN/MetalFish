@@ -26,51 +26,36 @@ namespace NN {
 namespace Cuda {
 namespace {
 
-float *TargetPointer(CudaInferenceBuffers &buffers, CudaOutputTarget target) {
+float *TargetPointer(CudaInferenceBuffers &buffers, NetworkOutputTarget target) {
   switch (target) {
-  case CudaOutputTarget::Policy:
+  case NetworkOutputTarget::Policy:
     return buffers.policy;
-  case CudaOutputTarget::Value:
+  case NetworkOutputTarget::Value:
     return buffers.value;
-  case CudaOutputTarget::MovesLeft:
+  case NetworkOutputTarget::MovesLeft:
     return buffers.moves_left;
-  case CudaOutputTarget::RawPolicy:
+  case NetworkOutputTarget::RawPolicy:
     return buffers.raw_policy;
   }
   return nullptr;
 }
 
-int TargetStride(const NetworkTensorPlan &tensor_plan,
-                 CudaOutputTarget target) {
-  switch (target) {
-  case CudaOutputTarget::Policy:
-    return tensor_plan.policy_outputs;
-  case CudaOutputTarget::Value:
-    return tensor_plan.value_outputs;
-  case CudaOutputTarget::MovesLeft:
-    return tensor_plan.moves_left_outputs;
-  case CudaOutputTarget::RawPolicy:
-    return tensor_plan.raw_policy_outputs;
-  }
-  return 0;
-}
-
-bool AllowsPartialRows(CudaOutputTarget target,
+bool AllowsPartialRows(NetworkOutputTarget target,
                        const CudaOutputMappingOptions &options) {
   switch (target) {
-  case CudaOutputTarget::Policy:
+  case NetworkOutputTarget::Policy:
     return options.allow_partial_policy_rows;
-  case CudaOutputTarget::RawPolicy:
+  case NetworkOutputTarget::RawPolicy:
     return options.allow_partial_raw_policy_rows;
-  case CudaOutputTarget::Value:
-  case CudaOutputTarget::MovesLeft:
+  case NetworkOutputTarget::Value:
+  case NetworkOutputTarget::MovesLeft:
     return false;
   }
   return false;
 }
 
 bool StageWidthFitsTarget(int source_width, int target_stride,
-                          CudaOutputTarget target,
+                          NetworkOutputTarget target,
                           const CudaOutputMappingOptions &options) {
   if (target_stride <= 0 || source_width <= 0)
     return false;
@@ -84,9 +69,9 @@ SelectCompatibleStage(const NetworkTensorPlan &tensor_plan,
                       const NetworkResolvedExecutionPlan &execution_plan,
                       const CudaExecutionSchedule &schedule,
                       const CudaOutputMappingOptions &options,
-                      CudaOutputTarget target, CudaPlanStageGroup group,
+                      NetworkOutputTarget target, CudaPlanStageGroup group,
                       bool first_match) {
-  const int target_stride = TargetStride(tensor_plan, target);
+  const int target_stride = NetworkOutputTargetStride(tensor_plan, target);
   std::string selected;
   for (const auto &entry : schedule.entries) {
     if (!IsCudaOutputScheduleEntry(entry.kind) ||
@@ -98,7 +83,7 @@ SelectCompatibleStage(const NetworkTensorPlan &tensor_plan,
     const auto &step = execution_plan.steps[entry.first_step];
     if (ClassifyCudaPlanStage(execution_plan, step.name) != group)
       continue;
-    if (target == CudaOutputTarget::Value && IsCudaValueErrorStage(step.name))
+    if (target == NetworkOutputTarget::Value && IsCudaValueErrorStage(step.name))
       continue;
 
     const int source_width = CudaOutputStageWidth(execution_plan, entry);
@@ -129,7 +114,7 @@ SelectPolicyStage(const NetworkTensorPlan &tensor_plan,
     }
   }
   return SelectCompatibleStage(tensor_plan, execution_plan, schedule, options,
-                               CudaOutputTarget::Policy,
+                               NetworkOutputTarget::Policy,
                                CudaPlanStageGroup::Policy, true);
 }
 
@@ -142,19 +127,19 @@ void AddBinding(CudaOutputMapping &mapping,
                 const NetworkResolvedExecutionPlan &execution_plan,
                 const CudaExecutionSchedule &schedule,
                 const CudaOutputMappingOptions &options,
-                CudaOutputTarget target, const std::string &source_stage,
+                NetworkOutputTarget target, const std::string &source_stage,
                 bool required) {
-  const int target_stride = TargetStride(tensor_plan, target);
+  const int target_stride = NetworkOutputTargetStride(tensor_plan, target);
   if (target_stride == 0) {
     if (required)
-      AddError(mapping, CudaOutputTargetName(target) + " output is disabled");
+      AddError(mapping, NetworkOutputTargetName(target) + " output is disabled");
     return;
   }
 
   if (source_stage.empty()) {
     if (required) {
       AddError(mapping, "missing CUDA output source for " +
-                            CudaOutputTargetName(target));
+                            NetworkOutputTargetName(target));
     }
     return;
   }
@@ -164,7 +149,8 @@ void AddBinding(CudaOutputMapping &mapping,
   if (!entry) {
     if (required) {
       AddError(mapping, "missing CUDA output source for " +
-                            CudaOutputTargetName(target) + ": " + source_stage);
+                            NetworkOutputTargetName(target) + ": " +
+                            source_stage);
     }
     return;
   }
@@ -175,7 +161,7 @@ void AddBinding(CudaOutputMapping &mapping,
       (!partial && source_width != target_stride)) {
     std::ostringstream out;
     out << "CUDA output source width mismatch for "
-        << CudaOutputTargetName(target) << ": " << source_stage << " has "
+        << NetworkOutputTargetName(target) << ": " << source_stage << " has "
         << source_width << ", target stride is " << target_stride;
     AddError(mapping, out.str());
     return;
@@ -187,22 +173,8 @@ void AddBinding(CudaOutputMapping &mapping,
 
 } // namespace
 
-std::string CudaOutputTargetName(CudaOutputTarget target) {
-  switch (target) {
-  case CudaOutputTarget::Policy:
-    return "policy";
-  case CudaOutputTarget::Value:
-    return "value";
-  case CudaOutputTarget::MovesLeft:
-    return "moves_left";
-  case CudaOutputTarget::RawPolicy:
-    return "raw_policy";
-  }
-  return "unknown";
-}
-
 const CudaOutputBinding *
-CudaOutputMapping::Find(CudaOutputTarget target) const {
+CudaOutputMapping::Find(NetworkOutputTarget target) const {
   for (const auto &binding : bindings) {
     if (binding.target == target)
       return &binding;
@@ -237,25 +209,25 @@ CreateCudaOutputMapping(const NetworkTensorPlan &tensor_plan,
   const std::string policy_source =
       SelectPolicyStage(tensor_plan, execution_plan, schedule, options);
   const std::string value_source = SelectCompatibleStage(
-      tensor_plan, execution_plan, schedule, options, CudaOutputTarget::Value,
+      tensor_plan, execution_plan, schedule, options, NetworkOutputTarget::Value,
       CudaPlanStageGroup::Value, false);
   AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
-             CudaOutputTarget::Policy, policy_source, true);
+             NetworkOutputTarget::Policy, policy_source, true);
   AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
-             CudaOutputTarget::Value, value_source, true);
+             NetworkOutputTarget::Value, value_source, true);
   if (tensor_plan.moves_left) {
     const std::string moves_left_source = SelectCompatibleStage(
         tensor_plan, execution_plan, schedule, options,
-        CudaOutputTarget::MovesLeft, CudaPlanStageGroup::MovesLeft, false);
+        NetworkOutputTarget::MovesLeft, CudaPlanStageGroup::MovesLeft, false);
     AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
-               CudaOutputTarget::MovesLeft, moves_left_source, true);
+               NetworkOutputTarget::MovesLeft, moves_left_source, true);
   }
   const auto *policy_entry =
       FindCudaStageEntry(execution_plan, schedule, policy_source);
   if (tensor_plan.raw_policy_outputs > 0 && policy_entry &&
       policy_entry->kind != CudaExecutionScheduleKind::PolicyMapStage) {
     AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
-               CudaOutputTarget::RawPolicy, policy_source, true);
+               NetworkOutputTarget::RawPolicy, policy_source, true);
   }
   return mapping;
 }
@@ -285,7 +257,7 @@ void CopyMappedOutputs(const CudaOutputMapping &mapping,
     CopyDeviceFloatRows(
         TargetPointer(buffers, binding.target), binding.target_stride,
         stage->output, stage->output_width, batch_size, binding.source_width,
-        "cudaMemcpy(" + CudaOutputTargetName(binding.target) + ")", stream);
+        "cudaMemcpy(" + NetworkOutputTargetName(binding.target) + ")", stream);
   }
 }
 
