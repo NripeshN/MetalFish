@@ -129,6 +129,7 @@ $NetworksDir = Join-Path $SourceDir "networks"
 $NnueBigPath = Join-Path $NetworksDir "nn-c288c895ea92.nnue"
 $NnueSmallPath = Join-Path $NetworksDir "nn-37f18f62d772.nnue"
 $Bt4Path = Join-Path $NetworksDir "BT4-1024x15x32h-swa-6147500.pb"
+$LegacyPath = Join-Path $NetworksDir "legacy-42850.pb.gz"
 if (-not ((Test-Path $NnueBigPath) -and (Test-Path $NnueSmallPath))) {
   Write-Host "Downloading NNUE files for CUDA-linked AB UCI smoke"
   & $Python (Join-Path $SourceDir "tools\download_engine_networks.py") `
@@ -147,6 +148,15 @@ if ($BuildTests -eq "ON") {
       --bt4-only
     if ($LASTEXITCODE -ne 0) {
       throw "BT4 download failed with exit code $LASTEXITCODE"
+    }
+  }
+  if (-not (Test-Path $LegacyPath)) {
+    Write-Host "Downloading legacy 42850 weights for CUDA-linked metadata probe"
+    & $Python (Join-Path $SourceDir "tools\download_engine_networks.py") `
+      --dest $NetworksDir `
+      --legacy-only
+    if ($LASTEXITCODE -ne 0) {
+      throw "legacy 42850 download failed with exit code $LASTEXITCODE"
     }
   }
 
@@ -172,6 +182,29 @@ if ($BuildTests -eq "ON") {
     }
   }
   $SmokeSteps += "metalfish_nn_probe.exe --metadata-only --backend cuda"
+
+  $LegacyProbeLog = Join-Path $BuildDir "windows-cuda-legacy-metadata-probe.json"
+  Write-Host "Running CUDA-linked legacy metadata probe"
+  & $ProbePath `
+    --weights $LegacyPath `
+    --backend cuda `
+    --metadata-only `
+    --top 3 `
+    2>&1 | Tee-Object -FilePath $LegacyProbeLog
+  if ($LASTEXITCODE -ne 0) {
+    throw "CUDA-linked legacy metadata probe failed with exit code $LASTEXITCODE"
+  }
+
+  $LegacyProbeText = Get-Content -Path $LegacyProbeLog -Raw
+  foreach ($RequiredText in @('"metadata_only":true', '"backend":"cuda"',
+                              '"format":"attention_body=no',
+                              '"policy_head":"', '"value_head":"',
+                              '"execution_plan":"')) {
+    if ($LegacyProbeText -notlike "*$RequiredText*") {
+      throw "CUDA-linked legacy metadata probe missing expected output: $RequiredText"
+    }
+  }
+  $SmokeSteps += "metalfish_nn_probe.exe --metadata-only --backend cuda legacy"
 }
 
 $UciSmoke = Join-Path $SourceDir "tools\uci_smoke.py"

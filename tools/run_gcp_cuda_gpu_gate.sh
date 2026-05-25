@@ -17,9 +17,17 @@ ARTIFACT_DIR="${METALFISH_GCP_ARTIFACT_DIR:-${ROOT_DIR}/results/cuda_gpu_gate/${
 GCS_PREFIX="${METALFISH_GCP_GCS_PREFIX:-}"
 METAL_PROBE_SUITE_LOG="${METALFISH_METAL_PROBE_SUITE_LOG:-}"
 METAL_LEGACY_PROBE_SUITE_LOG="${METALFISH_METAL_LEGACY_PROBE_SUITE_LOG:-}"
+REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 ARCHIVE="$(mktemp -t metalfish-cuda-gate.XXXXXX.tar.gz)"
 CREATED_INSTANCE=0
 ZONE=""
+
+require_metal_compare() {
+  case "${REQUIRE_METAL_COMPARE}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 cleanup() {
   rm -f "${ARCHIVE}"
@@ -191,7 +199,19 @@ collect_remote_artifacts() {
 }
 
 compare_collected_probe_suite() {
-  if [[ "${COLLECT_ARTIFACTS}" != "1" || -z "${METAL_PROBE_SUITE_LOG}" ]]; then
+  if [[ "${COLLECT_ARTIFACTS}" != "1" ]]; then
+    if require_metal_compare; then
+      echo "Metal/CUDA comparison requires METALFISH_GCP_COLLECT_ARTIFACTS=1" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ -z "${METAL_PROBE_SUITE_LOG}" ]]; then
+    if require_metal_compare; then
+      echo "Metal probe suite log is required; set METALFISH_METAL_PROBE_SUITE_LOG" >&2
+      return 1
+    fi
     return 0
   fi
 
@@ -218,8 +238,19 @@ compare_collected_probe_suite() {
 }
 
 compare_collected_legacy_probe_suite() {
-  if [[ "${COLLECT_ARTIFACTS}" != "1" ||
-        -z "${METAL_LEGACY_PROBE_SUITE_LOG}" ]]; then
+  if [[ "${COLLECT_ARTIFACTS}" != "1" ]]; then
+    if require_metal_compare; then
+      echo "Legacy Metal/CUDA comparison requires METALFISH_GCP_COLLECT_ARTIFACTS=1" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ -z "${METAL_LEGACY_PROBE_SUITE_LOG}" ]]; then
+    if require_metal_compare; then
+      echo "Metal legacy probe suite log is required; set METALFISH_METAL_LEGACY_PROBE_SUITE_LOG" >&2
+      return 1
+    fi
     return 0
   fi
 

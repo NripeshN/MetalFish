@@ -33,9 +33,14 @@ on:
         required: false
         default: ""
       metal_ci_run_id:
-        description: Optional MetalFish CI run ID whose macOS artifact supplies the Metal probe suite
+        description: MetalFish CI run ID whose macOS artifact supplies the Metal probe suite
         required: false
         default: ""
+      require_metal_compare:
+        description: Fail unless Metal probe artifacts are supplied and compared
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
   group: metalfish-cuda-gpu-gate-${{ github.ref }}
@@ -59,6 +64,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Validate Metal comparison inputs
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.require_metal_compare }}" = "true" ] && \
+             [ -z "${{ inputs.metal_ci_run_id }}" ]; then
+            echo "metal_ci_run_id is required when require_metal_compare=true" >&2
+            exit 2
+          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -93,6 +107,7 @@ jobs:
           METALFISH_CUDA_ARCHS: ${{ inputs.cuda_archs }}
           METALFISH_CUDA_UCI_GO: ${{ inputs.uci_go }}
           METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
+          METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
           CUBLAS_WORKSPACE_CONFIG: ":4096:8"
         run: |
           set -euo pipefail

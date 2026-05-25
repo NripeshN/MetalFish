@@ -45,6 +45,17 @@ steps:
         grep -q '"backend":"cuda"' /tmp/metalfish-cuda-bt4-metadata.json
         grep -q '"format":"attention_body=yes' /tmp/metalfish-cuda-bt4-metadata.json
         grep -q '"execution_plan":"109 resolved execution steps' /tmp/metalfish-cuda-bt4-metadata.json
+        python3 tools/download_engine_networks.py --legacy-only
+        ./build-cuda-entry/metalfish_nn_probe \
+          --weights networks/legacy-42850.pb.gz \
+          --backend cuda \
+          --metadata-only \
+          --top 3 \
+          | tee /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"metadata_only":true' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"backend":"cuda"' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"format":"attention_body=no' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"execution_plan":"' /tmp/metalfish-cuda-legacy-metadata.json
         python3 tools/uci_smoke.py --engine build-cuda-entry/metalfish --go "depth 2"
         printf "uci\nisready\nsetoption name NNBackend value cuda\nisready\nquit\n" \
           | ./build-cuda-entry/metalfish \

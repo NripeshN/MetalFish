@@ -106,7 +106,7 @@ Current remote gates:
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92ed1973-1772-4ae4-abb9-1b94ea5efabf` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
-| GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; pass `metal_ci_run_id` to hard-compare the CUDA suite against a macOS Metal artifact |
+| GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default so the CUDA suite hard-compares against macOS Metal BT4 and legacy artifacts |
 | GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26366784935`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26366784933`, Metal NN parity artifact and BK.07 smoke |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26366784932` |
@@ -115,11 +115,12 @@ Current remote gates:
 Current CUDA backend boundary:
 
 - The Linux CUDA entrypoint Cloud Build compiles `test_nn_comparison` alongside
-  the CUDA-linked engine, tests, and NN probe, then downloads BT4 and runs
-  `metalfish_nn_probe --backend cuda --metadata-only`. This catches
-  protobuf/schema, policy-table, tensor-plan, weight-inventory, and resolved
-  execution-plan regressions in a no-GPU Linux CUDA toolchain before the runtime
-  L4 gate spends GPU time.
+  the CUDA-linked engine, tests, and NN probe, then downloads BT4 and legacy
+  42850 weights and runs `metalfish_nn_probe --backend cuda --metadata-only` on
+  both. This catches protobuf/schema, policy-table, tensor-plan,
+  weight-inventory, and resolved execution-plan regressions across transformer
+  and classical-convolution network families in a no-GPU Linux CUDA toolchain
+  before the runtime L4 gate spends GPU time.
 - `src/nn/cuda/cuda_executor.*` is the inference execution seam.
 - `src/nn/network_execution_plan.*` builds the shared ordered and resolved
   tensor/stage plan that CUDA and future portable backends will execute.
