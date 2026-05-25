@@ -381,11 +381,28 @@ function Invoke-ProbeSmoke {
   }
 }
 
+function Assert-PositiveMetric {
+  param(
+    [string]\$Name,
+    [string]\$Text,
+    [string]\$Metric
+  )
+  \$match = [regex]::Match(\$Text, \$Metric + "=([0-9]+)")
+  if (-not \$match.Success) {
+    throw "\$Name missing metric: \$Metric"
+  }
+  \$value = [int64]\$match.Groups[1].Value
+  if (\$value -le 0) {
+    throw "\$Name metric \$Metric was not positive: \$value"
+  }
+}
+
 function Invoke-UciSmoke {
   param(
     [string]\$Name,
     [string[]]\$Commands,
     [string[]]\$RequiredText,
+    [string[]]\$PositiveMetrics = @(),
     [int]\$GoWaitMs = 0
   )
   \$stdout = Join-Path \$Logs "\$Name.stdout.log"
@@ -439,6 +456,9 @@ function Invoke-UciSmoke {
       throw "\$Name missing expected output: \$needle"
     }
   }
+  foreach (\$metric in \$PositiveMetrics) {
+    Assert-PositiveMetric -Name \$Name -Text (\$out + \$err) -Metric \$metric
+  }
 }
 
 \$Bt4 = Join-Path \$Networks "BT4-1024x15x32h-swa-6147500.pb"
@@ -483,7 +503,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove") -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
 @(
   "# MetalFish Windows CUDA Runtime Gate",
