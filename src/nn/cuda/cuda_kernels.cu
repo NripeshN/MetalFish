@@ -315,7 +315,8 @@ __global__ void Convolution2DKernel(const float *input, const float *weights,
       }
     }
   }
-  output[index] = apply_activation ? ApplyActivationValue(sum, activation) : sum;
+  output[index] =
+      apply_activation ? ApplyActivationValue(sum, activation) : sum;
 }
 
 __global__ void GateKernel(const float *input, const float *weights,
@@ -359,10 +360,11 @@ __global__ void GlobalAveragePoolNchwKernel(const float *input, float *output,
   output[index] = sum / static_cast<float>(squares);
 }
 
-__global__ void SqueezeExciteResidualKernel(
-    const float *skip, const float *convolution, const float *se_output,
-    float *residual, float *output, int channels, int squares, int total,
-    CudaActivationKind activation) {
+__global__ void
+SqueezeExciteResidualKernel(const float *skip, const float *convolution,
+                            const float *se_output, float *residual,
+                            float *output, int channels, int squares, int total,
+                            CudaActivationKind activation) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index >= total)
     return;
@@ -798,10 +800,9 @@ void EnsureConvolutionPolicyGatherMapUploaded() {
   }
 
   const auto &gather_map = ConvolutionPolicyGatherMap();
-  status =
-      cudaMemcpyToSymbol(kConvolutionPolicyGatherDevice, gather_map.data(),
-                         gather_map.size() * sizeof(int), 0,
-                         cudaMemcpyHostToDevice);
+  status = cudaMemcpyToSymbol(kConvolutionPolicyGatherDevice, gather_map.data(),
+                              gather_map.size() * sizeof(int), 0,
+                              cudaMemcpyHostToDevice);
   if (status != cudaSuccess) {
     throw std::runtime_error(
         CudaErrorMessage("ConvolutionPolicyGather table upload", status));
@@ -828,8 +829,7 @@ void EnsureStaticPositionEncodingUploaded() {
 
   status = cudaMemcpyToSymbol(
       kStaticPositionEncodingDevice, &Tables::kPosEncoding[0][0],
-      kPackedInputSquareCount * Tables::kNumPosEncodingChannels *
-          sizeof(float),
+      kPackedInputSquareCount * Tables::kNumPosEncodingChannels * sizeof(float),
       0, cudaMemcpyHostToDevice);
   if (status != cudaSuccess) {
     throw std::runtime_error(
@@ -867,9 +867,9 @@ __global__ void AttentionPolicyPromotionKernel(const float *query,
       key +
       (static_cast<std::size_t>(batch) * kSquares + key_square) * channels;
   const float *promotion_key_row =
-      key + (static_cast<std::size_t>(batch) * kSquares +
-             promotion_key_square) *
-                channels;
+      key +
+      (static_cast<std::size_t>(batch) * kSquares + promotion_key_square) *
+          channels;
 
   float value = 0.0f;
   const float scale = rsqrtf(static_cast<float>(channels));
@@ -909,11 +909,10 @@ __global__ void ConvolutionPolicyGatherKernel(const float *raw_policy,
   const int policy_index = index % kNetworkPolicyOutputs;
   const int batch = index / kNetworkPolicyOutputs;
   const int raw_index = kConvolutionPolicyGatherDevice[policy_index];
-  policy[index] = raw_index >= 0
-                      ? raw_policy[static_cast<std::size_t>(batch) *
-                                       kNetworkConvPolicyScratch +
-                                   raw_index]
-                      : 0.0f;
+  policy[index] = raw_index >= 0 ? raw_policy[static_cast<std::size_t>(batch) *
+                                                  kNetworkConvPolicyScratch +
+                                              raw_index]
+                                 : 0.0f;
 }
 
 __global__ void ExpandPackedInputPlanesKernel(const std::uint64_t *masks,
@@ -1014,10 +1013,11 @@ __global__ void DynamicPositionEncodingConcatKernel(
                         pe_channel];
 }
 
-__global__ void StaticPositionEncodingConcatKernel(
-    const std::uint64_t *masks, const float *values, float *output,
-    int input_planes, int position_width, int squares, int output_width,
-    int total) {
+__global__ void
+StaticPositionEncodingConcatKernel(const std::uint64_t *masks,
+                                   const float *values, float *output,
+                                   int input_planes, int position_width,
+                                   int squares, int output_width, int total) {
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index >= total)
     return;
@@ -1028,14 +1028,13 @@ __global__ void StaticPositionEncodingConcatKernel(
   if (channel < input_planes) {
     const int packed_index = batch * input_planes + channel;
     const std::uint64_t bit = 1ULL << square;
-    output[index] =
-        (masks[packed_index] & bit) ? values[packed_index] : 0.0f;
+    output[index] = (masks[packed_index] & bit) ? values[packed_index] : 0.0f;
     return;
   }
 
   const int pe_channel = channel - input_planes;
-  output[index] = kStaticPositionEncodingDevice[square * position_width +
-                                                pe_channel];
+  output[index] =
+      kStaticPositionEncodingDevice[square * position_width + pe_channel];
 }
 
 } // namespace
@@ -1236,13 +1235,10 @@ void LaunchGlobalAveragePoolNchwKernel(const float *input, float *output,
         CudaErrorMessage("GlobalAveragePoolNchwKernel synchronize", status));
 }
 
-void LaunchSqueezeExciteResidualKernel(const float *skip,
-                                       const float *convolution,
-                                       const float *se_output, float *residual,
-                                       float *output, int batch_size,
-                                       int channels, int squares,
-                                       CudaActivationKind activation,
-                                       cudaStream_t stream) {
+void LaunchSqueezeExciteResidualKernel(
+    const float *skip, const float *convolution, const float *se_output,
+    float *residual, float *output, int batch_size, int channels, int squares,
+    CudaActivationKind activation, cudaStream_t stream) {
   if (!skip || !convolution || !se_output || !residual || !output)
     throw std::runtime_error(
         "CUDA squeeze-excite residual kernel received null buffer");
@@ -1264,8 +1260,8 @@ void LaunchSqueezeExciteResidualKernel(const float *skip,
     return;
   status = cudaDeviceSynchronize();
   if (status != cudaSuccess)
-    throw std::runtime_error(CudaErrorMessage(
-        "SqueezeExciteResidualKernel synchronize", status));
+    throw std::runtime_error(
+        CudaErrorMessage("SqueezeExciteResidualKernel synchronize", status));
 }
 
 void LaunchResidualLayerNormKernel(const float *parent, const float *secondary,
@@ -1302,16 +1298,15 @@ void LaunchResidualLayerNormKernel(const float *parent, const float *secondary,
 }
 
 void LaunchConvolution2DKernel(const float *input, const float *weights,
-                               const float *bias, float *output,
-                               int batch_size, int squares,
-                               int input_channels, int output_channels,
-                               int kernel_size, CudaActivationKind activation,
+                               const float *bias, float *output, int batch_size,
+                               int squares, int input_channels,
+                               int output_channels, int kernel_size,
+                               CudaActivationKind activation,
                                bool apply_activation, cudaStream_t stream) {
   if (!input || !weights || !output)
     throw std::runtime_error("CUDA convolution kernel received null buffer");
   if (batch_size <= 0 || squares != 64 || input_channels <= 0 ||
-      output_channels <= 0 ||
-      (kernel_size != 1 && kernel_size != 3)) {
+      output_channels <= 0 || (kernel_size != 1 && kernel_size != 3)) {
     throw std::runtime_error("CUDA convolution dimensions are invalid");
   }
 
@@ -1652,8 +1647,8 @@ void LaunchConvolutionPolicyMapKernel(const float *raw_policy, float *policy,
   constexpr int kThreads = 256;
   const int total = batch_size * kNetworkPolicyOutputs;
   const int blocks = (total + kThreads - 1) / kThreads;
-  ConvolutionPolicyGatherKernel<<<blocks, kThreads, 0, stream>>>(
-      raw_policy, policy, total);
+  ConvolutionPolicyGatherKernel<<<blocks, kThreads, 0, stream>>>(raw_policy,
+                                                                 policy, total);
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess) {
     throw std::runtime_error(
@@ -1663,8 +1658,8 @@ void LaunchConvolutionPolicyMapKernel(const float *raw_policy, float *policy,
     return;
   status = cudaDeviceSynchronize();
   if (status != cudaSuccess) {
-    throw std::runtime_error(CudaErrorMessage(
-        "ConvolutionPolicyGatherKernel synchronize", status));
+    throw std::runtime_error(
+        CudaErrorMessage("ConvolutionPolicyGatherKernel synchronize", status));
   }
 }
 
@@ -1707,7 +1702,8 @@ void LaunchExpandPackedInputPlanesNchwKernel(const std::uint64_t *masks,
     throw std::runtime_error(
         "CUDA NCHW input expansion kernel received null buffer");
   if (batch_size <= 0 || planes <= 0 || squares <= 0 || squares > 64) {
-    throw std::runtime_error("CUDA NCHW input expansion dimensions are invalid");
+    throw std::runtime_error(
+        "CUDA NCHW input expansion dimensions are invalid");
   }
 
   const int total = batch_size * planes * squares;
@@ -1763,10 +1759,12 @@ void LaunchExpandPackedInputPlanesWithPositionInputKernel(
   }
 }
 
-void LaunchStaticPositionEncodingConcatKernel(
-    const std::uint64_t *masks, const float *values, float *output,
-    int batch_size, int input_planes, int position_width, int squares,
-    cudaStream_t stream) {
+void LaunchStaticPositionEncodingConcatKernel(const std::uint64_t *masks,
+                                              const float *values,
+                                              float *output, int batch_size,
+                                              int input_planes,
+                                              int position_width, int squares,
+                                              cudaStream_t stream) {
   if (!masks || !values || !output) {
     throw std::runtime_error(
         "CUDA static position concat kernel received null buffer");
@@ -2097,10 +2095,10 @@ CudaKernelSmokeResult RunConvolutionKernelSmoke() {
     UploadFloats(device_weights, weights, "cudaMemcpy(conv_weights)");
     UploadFloats(device_bias, bias, "cudaMemcpy(conv_bias)");
 
-    LaunchConvolution2DKernel(
-        device_input, device_weights, device_bias, device_output, kBatch,
-        kSquares, kInputChannels, kOutputChannels, kKernel,
-        CudaActivationKind::Relu, false);
+    LaunchConvolution2DKernel(device_input, device_weights, device_bias,
+                              device_output, kBatch, kSquares, kInputChannels,
+                              kOutputChannels, kKernel,
+                              CudaActivationKind::Relu, false);
     DownloadFloats(actual, device_output, "cudaMemcpy(conv_output)");
   } catch (const std::exception &e) {
     FreeDevice(device_input);
@@ -2373,11 +2371,11 @@ CudaKernelSmokeResult RunSqueezeExciteKernelSmoke() {
   constexpr int kChannels = 2;
   constexpr int kSquares = 4;
   const std::vector<float> skip = {
-      0.25f, -0.5f, 1.0f, 0.75f, -1.0f, 0.5f, 0.25f, -0.25f,
-      1.25f, -0.75f, 0.0f, 0.5f, -0.5f, 1.5f, -1.25f, 0.25f,
+      0.25f, -0.5f,  1.0f, 0.75f, -1.0f, 0.5f, 0.25f,  -0.25f,
+      1.25f, -0.75f, 0.0f, 0.5f,  -0.5f, 1.5f, -1.25f, 0.25f,
   };
   const std::vector<float> convolution = {
-      1.0f, 2.0f, -1.0f, 0.0f, 0.5f, -0.5f, 1.5f, 2.5f,
+      1.0f,  2.0f,  -1.0f, 0.0f,  0.5f, -0.5f, 1.5f, 2.5f,
       -1.5f, 0.25f, 0.75f, 1.25f, 2.0f, -2.0f, 0.5f, -0.5f,
   };
   const std::vector<float> se_output = {
@@ -2402,8 +2400,7 @@ CudaKernelSmokeResult RunSqueezeExciteKernelSmoke() {
 
       const std::size_t gamma_index =
           static_cast<std::size_t>(batch) * kChannels * 2 + channel;
-      const float gamma =
-          1.0f / (1.0f + std::exp(-se_output[gamma_index]));
+      const float gamma = 1.0f / (1.0f + std::exp(-se_output[gamma_index]));
       const float beta = se_output[gamma_index + kChannels];
       for (int square = 0; square < kSquares; ++square) {
         const std::size_t index = plane_offset + square;
@@ -2432,8 +2429,7 @@ CudaKernelSmokeResult RunSqueezeExciteKernelSmoke() {
     AllocateDevice(&device_output, actual_output.size(),
                    "cudaMalloc(se_activation)");
     UploadFloats(device_skip, skip, "cudaMemcpy(se_skip)");
-    UploadFloats(device_convolution, convolution,
-                 "cudaMemcpy(se_convolution)");
+    UploadFloats(device_convolution, convolution, "cudaMemcpy(se_convolution)");
     UploadFloats(device_se_output, se_output, "cudaMemcpy(se_output)");
 
     LaunchGlobalAveragePoolNchwKernel(device_convolution, device_pool, kBatch,
@@ -2442,8 +2438,7 @@ CudaKernelSmokeResult RunSqueezeExciteKernelSmoke() {
         device_skip, device_convolution, device_se_output, device_residual,
         device_output, kBatch, kChannels, kSquares, CudaActivationKind::Relu);
     DownloadFloats(actual_pool, device_pool, "cudaMemcpy(se_pool)");
-    DownloadFloats(actual_residual, device_residual,
-                   "cudaMemcpy(se_residual)");
+    DownloadFloats(actual_residual, device_residual, "cudaMemcpy(se_residual)");
     DownloadFloats(actual_output, device_output, "cudaMemcpy(se_activation)");
 
     for (std::size_t i = 0; i < expected_pool.size(); ++i) {
@@ -2453,9 +2448,8 @@ CudaKernelSmokeResult RunSqueezeExciteKernelSmoke() {
         break;
       }
     }
-    for (std::size_t i = 0; result.message.empty() &&
-                            i < expected_residual.size();
-         ++i) {
+    for (std::size_t i = 0;
+         result.message.empty() && i < expected_residual.size(); ++i) {
       if (std::fabs(actual_residual[i] - expected_residual[i]) > 1e-6f ||
           std::fabs(actual_output[i] - expected_output[i]) > 1e-6f) {
         result.status = CudaSmokeStatus::Mismatch;
@@ -2792,8 +2786,8 @@ CudaKernelSmokeResult RunConvolutionPolicyMapKernelSmoke() {
   constexpr int kBatch = 2;
   std::vector<float> raw_policy(kBatch * kNetworkConvPolicyScratch, 0.0f);
   for (std::size_t i = 0; i < raw_policy.size(); ++i)
-    raw_policy[i] = static_cast<float>(static_cast<int>(i % 997) - 498) *
-                    0.00390625f;
+    raw_policy[i] =
+        static_cast<float>(static_cast<int>(i % 997) - 498) * 0.00390625f;
 
   std::vector<float> expected(kBatch * kNetworkPolicyOutputs, 0.0f);
   const auto &gather = ConvolutionPolicyGatherMap();
@@ -2801,11 +2795,10 @@ CudaKernelSmokeResult RunConvolutionPolicyMapKernelSmoke() {
     for (int policy = 0; policy < kNetworkPolicyOutputs; ++policy) {
       const int raw = gather[static_cast<std::size_t>(policy)];
       expected[static_cast<std::size_t>(batch) * kNetworkPolicyOutputs +
-               policy] =
-          raw >= 0 ? raw_policy[static_cast<std::size_t>(batch) *
-                                    kNetworkConvPolicyScratch +
-                                raw]
-                   : 0.0f;
+               policy] = raw >= 0 ? raw_policy[static_cast<std::size_t>(batch) *
+                                                   kNetworkConvPolicyScratch +
+                                               raw]
+                                  : 0.0f;
     }
   }
 
@@ -2898,7 +2891,7 @@ CudaKernelSmokeResult RunAttentionPolicyMapKernelSmoke() {
                      kNetworkAttentionPolicyScratch +
                  kSquares * kSquares + promo] =
           query[static_cast<std::size_t>(batch) * kSquares + query_square] *
-          key[static_cast<std::size_t>(batch) * kSquares + key_square] +
+              key[static_cast<std::size_t>(batch) * kSquares + key_square] +
           key[static_cast<std::size_t>(batch) * kSquares +
               promotion_key_square] *
               (promotion_weights[static_cast<std::size_t>(promotion_row)] +
@@ -2912,11 +2905,11 @@ CudaKernelSmokeResult RunAttentionPolicyMapKernelSmoke() {
     for (int policy = 0; policy < kNetworkPolicyOutputs; ++policy) {
       const int raw = gather[static_cast<std::size_t>(policy)];
       expected[static_cast<std::size_t>(batch) * kNetworkPolicyOutputs +
-               policy] =
-          raw >= 0 ? raw_policy[static_cast<std::size_t>(batch) *
-                                    kNetworkAttentionPolicyScratch +
-                                raw]
-                   : 0.0f;
+               policy] = raw >= 0
+                             ? raw_policy[static_cast<std::size_t>(batch) *
+                                              kNetworkAttentionPolicyScratch +
+                                          raw]
+                             : 0.0f;
     }
   }
 
@@ -2929,8 +2922,7 @@ CudaKernelSmokeResult RunAttentionPolicyMapKernelSmoke() {
   try {
     AllocateDevice(&device_query, query.size(),
                    "cudaMalloc(attention_policy_query)");
-    AllocateDevice(&device_key, key.size(),
-                   "cudaMalloc(attention_policy_key)");
+    AllocateDevice(&device_key, key.size(), "cudaMalloc(attention_policy_key)");
     AllocateDevice(&device_promotion, promotion_weights.size(),
                    "cudaMalloc(attention_policy_promotion)");
     AllocateDevice(&device_raw, raw_policy.size(),
@@ -3084,11 +3076,9 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
                 kStaticOutputWidth +
             channel;
         if (channel < kPlanes) {
-          expected_static_output[output_index] =
-              expected_expanded[(static_cast<std::size_t>(batch) * kSquares +
-                                 square) *
-                                    kPlanes +
-                                channel];
+          expected_static_output[output_index] = expected_expanded
+              [(static_cast<std::size_t>(batch) * kSquares + square) * kPlanes +
+               channel];
         } else {
           expected_static_output[output_index] =
               Tables::kPosEncoding[square][channel - kPlanes];
@@ -3096,8 +3086,7 @@ CudaKernelSmokeResult RunDynamicPositionEncodingKernelSmoke() {
       }
     }
   }
-  std::vector<float> actual_static_output(expected_static_output.size(),
-                                          0.0f);
+  std::vector<float> actual_static_output(expected_static_output.size(), 0.0f);
   std::uint64_t *device_masks = nullptr;
   float *device_values = nullptr;
   float *device_expanded = nullptr;

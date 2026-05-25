@@ -7,7 +7,6 @@ import argparse
 import subprocess
 from pathlib import Path
 
-
 DEFAULT_POSITIONS: list[tuple[str, str]] = [
     (
         "startpos",

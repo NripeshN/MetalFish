@@ -356,7 +356,8 @@ void RequireIsolationStable(const OutputDelta &delta) {
   constexpr float kMovesLeftTolerance = 1e-3f;
   constexpr float kPolicyTolerance = 1e-4f;
   if (delta.value > kValueTolerance || delta.wdl > kWdlTolerance ||
-      delta.moves_left > kMovesLeftTolerance || delta.policy > kPolicyTolerance) {
+      delta.moves_left > kMovesLeftTolerance ||
+      delta.policy > kPolicyTolerance) {
     std::ostringstream out;
     out << "backend isolation output drift value=" << delta.value
         << " wdl=" << delta.wdl << " moves_left=" << delta.moves_left
@@ -384,12 +385,12 @@ void PrintIsolationProbe(const Options &options) {
   std::cout << '{';
   std::cout << "\"isolation\":true";
   std::cout << ",\"backend\":\"" << JsonEscape(options.backend) << '"';
-  std::cout << ",\"primary_weights\":\""
-            << JsonEscape(primary.weights_path) << '"';
-  std::cout << ",\"secondary_weights\":\""
-            << JsonEscape(secondary.weights_path) << '"';
-  std::cout << ",\"primary_format\":\""
-            << JsonEscape(primary.format_summary) << '"';
+  std::cout << ",\"primary_weights\":\"" << JsonEscape(primary.weights_path)
+            << '"';
+  std::cout << ",\"secondary_weights\":\"" << JsonEscape(secondary.weights_path)
+            << '"';
+  std::cout << ",\"primary_format\":\"" << JsonEscape(primary.format_summary)
+            << '"';
   std::cout << ",\"secondary_format\":\""
             << JsonEscape(secondary.format_summary) << '"';
   std::cout << ",\"primary_network_info\":\""
@@ -485,8 +486,8 @@ void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
   if (cuda_schedule_checked) {
     std::cout << ",\"cuda_schedule_fully_supported\":"
               << (cuda_schedule_fully_supported ? "true" : "false");
-    std::cout << ",\"cuda_schedule\":\""
-              << JsonEscape(cuda_schedule_summary) << '"';
+    std::cout << ",\"cuda_schedule\":\"" << JsonEscape(cuda_schedule_summary)
+              << '"';
     std::cout << ",\"cuda_output_mapping_ok\":"
               << (cuda_output_mapping_ok ? "true" : "false");
     std::cout << ",\"cuda_output_mapping\":\""

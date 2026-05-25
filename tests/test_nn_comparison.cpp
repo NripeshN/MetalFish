@@ -1565,8 +1565,8 @@ bool benchmark_nn_batch_optional() {
 
     if (env_flag_enabled("METALFISH_NN_BENCH_GRAPH_REUSE_PROBE")) {
       const int half_batch = std::max(1, max_batch / 2);
-      const std::array<int, 6> reuse_batches = {
-          max_batch, 1, half_batch, max_batch, 1, half_batch};
+      const std::array<int, 6> reuse_batches = {max_batch, 1, half_batch,
+                                                max_batch, 1, half_batch};
       std::cout << "    graph_reuse_probe:";
       for (const int batch_size : reuse_batches) {
         std::vector<NN::InputPlanes> batch(planes.begin(),

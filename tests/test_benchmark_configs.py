@@ -12,8 +12,8 @@ import tempfile
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJ / "tests"))
 
-import paper_benchmarks  # noqa: E402
 import bk_parity  # noqa: E402
+import paper_benchmarks  # noqa: E402
 
 sys.path.insert(0, str(PROJ / "tools"))
 import analyze_hybrid_trace  # noqa: E402
@@ -900,7 +900,7 @@ def main() -> int:
             "EvaluateInstance",
             "RequireIsolationStable",
             "backend isolation output drift",
-            "\\\"isolation\\\":true",
+            '\\"isolation\\":true',
         ],
     )
     assert_file_contains(

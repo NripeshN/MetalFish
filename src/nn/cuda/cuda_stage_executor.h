@@ -105,15 +105,13 @@ private:
   std::vector<CudaStageTimingRecord> records_;
 };
 
-CudaDenseStageOutput
-ExecuteConvolutionStage(const NetworkResolvedExecutionPlan &execution_plan,
-                        const NetworkResolvedExecutionStep &convolution,
-                        const CudaWeightBuffers &weights, const float *input,
-                        const std::uint64_t *input_masks,
-                        const float *input_values,
-                        const CudaExecutionTape &tape,
-                        CudaExecutionWorkspace &workspace, int batch_size,
-                        int input_rows, int input_width);
+CudaDenseStageOutput ExecuteConvolutionStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    const NetworkResolvedExecutionStep &convolution,
+    const CudaWeightBuffers &weights, const float *input,
+    const std::uint64_t *input_masks, const float *input_values,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size, int input_rows, int input_width);
 
 CudaDenseStageOutput
 ExecuteDenseActivationStage(const NetworkResolvedExecutionPlan &execution_plan,
@@ -157,12 +155,13 @@ CudaDenseStageOutput ExecuteFeedForwardLayerNormStage(
     const float *input, const CudaExecutionTape &tape,
     CudaExecutionWorkspace &workspace, int rows);
 
-CudaDenseStageOutput ExecutePolicyMapStage(
-    const NetworkResolvedExecutionPlan &execution_plan,
-    const NetworkResolvedExecutionStep &policy_map,
-    const CudaWeightBuffers &weights,
-    const CudaDenseStageSequenceOutput &sequence, const CudaExecutionTape &tape,
-    CudaExecutionWorkspace &workspace, int batch_size);
+CudaDenseStageOutput
+ExecutePolicyMapStage(const NetworkResolvedExecutionPlan &execution_plan,
+                      const NetworkResolvedExecutionStep &policy_map,
+                      const CudaWeightBuffers &weights,
+                      const CudaDenseStageSequenceOutput &sequence,
+                      const CudaExecutionTape &tape,
+                      CudaExecutionWorkspace &workspace, int batch_size);
 
 CudaAttentionProjectionOutput ExecuteAttentionInputProjectionStage(
     const NetworkResolvedExecutionPlan &execution_plan,

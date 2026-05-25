@@ -49,10 +49,10 @@ void LaunchBiasActivationKernel(float *input, const float *bias, float *output,
                                 cudaStream_t stream = nullptr);
 
 void LaunchConvolution2DKernel(const float *input, const float *weights,
-                               const float *bias, float *output,
-                               int batch_size, int squares,
-                               int input_channels, int output_channels,
-                               int kernel_size, CudaActivationKind activation,
+                               const float *bias, float *output, int batch_size,
+                               int squares, int input_channels,
+                               int output_channels, int kernel_size,
+                               CudaActivationKind activation,
                                bool apply_activation,
                                cudaStream_t stream = nullptr);
 
@@ -70,13 +70,10 @@ void LaunchGlobalAveragePoolNchwKernel(const float *input, float *output,
                                        int squares,
                                        cudaStream_t stream = nullptr);
 
-void LaunchSqueezeExciteResidualKernel(const float *skip,
-                                       const float *convolution,
-                                       const float *se_output, float *residual,
-                                       float *output, int batch_size,
-                                       int channels, int squares,
-                                       CudaActivationKind activation,
-                                       cudaStream_t stream = nullptr);
+void LaunchSqueezeExciteResidualKernel(
+    const float *skip, const float *convolution, const float *se_output,
+    float *residual, float *output, int batch_size, int channels, int squares,
+    CudaActivationKind activation, cudaStream_t stream = nullptr);
 
 void LaunchResidualLayerNormKernel(const float *parent, const float *secondary,
                                    const float *gamma, const float *beta,
@@ -143,10 +140,12 @@ void LaunchExpandPackedInputPlanesWithPositionInputKernel(
     float *position_input, int batch_size, int planes, int position_planes,
     int squares, cudaStream_t stream = nullptr);
 
-void LaunchStaticPositionEncodingConcatKernel(
-    const std::uint64_t *masks, const float *values, float *output,
-    int batch_size, int input_planes, int position_width, int squares,
-    cudaStream_t stream = nullptr);
+void LaunchStaticPositionEncodingConcatKernel(const std::uint64_t *masks,
+                                              const float *values,
+                                              float *output, int batch_size,
+                                              int input_planes,
+                                              int position_width, int squares,
+                                              cudaStream_t stream = nullptr);
 
 void LaunchDynamicPositionEncodingInputKernel(const float *expanded,
                                               float *position_input,

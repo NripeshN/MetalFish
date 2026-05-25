@@ -118,7 +118,9 @@ def main() -> int:
             stripped_comparison_lines, "backend_after:"
         )
         comparison_executor_before = extract_executor(comparison_backend_line or "")
-        comparison_executor_after = extract_executor(comparison_backend_after_line or "")
+        comparison_executor_after = extract_executor(
+            comparison_backend_after_line or ""
+        )
         comparison_profile_enabled = "CUDA profile report=" in comparison_text
         warmup_line = find_prefixed_line(
             stripped_comparison_lines, "benchmark_warmups:"

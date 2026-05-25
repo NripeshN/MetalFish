@@ -43,23 +43,26 @@ int DenseOutputWidth(const NetworkResolvedExecutionStep &dense) {
 
 int ConvolutionOutputChannels(const NetworkResolvedExecutionStep &convolution) {
   if (convolution.kind != NetworkExecutionOpKind::Convolution)
-    throw std::runtime_error("CUDA execution tape convolution tensor is invalid");
+    throw std::runtime_error(
+        "CUDA execution tape convolution tensor is invalid");
   const NetworkResolvedTensorRef *weights = nullptr;
   for (const auto &tensor : convolution.tensors) {
     constexpr std::string_view kWeightSuffix = ".weights";
     if (tensor.name.size() >= kWeightSuffix.size() &&
-        std::string_view(tensor.name).substr(tensor.name.size() -
-                                             kWeightSuffix.size()) ==
+        std::string_view(tensor.name)
+                .substr(tensor.name.size() - kWeightSuffix.size()) ==
             kWeightSuffix) {
       weights = &tensor;
       break;
     }
   }
   if (!weights || weights->dims.size() != 4)
-    throw std::runtime_error("CUDA execution tape convolution tensor is invalid");
+    throw std::runtime_error(
+        "CUDA execution tape convolution tensor is invalid");
   const auto channels = weights->dims[0];
   if (channels == 0)
-    throw std::runtime_error("CUDA execution tape convolution channels is zero");
+    throw std::runtime_error(
+        "CUDA execution tape convolution channels is zero");
   return static_cast<int>(channels);
 }
 
@@ -75,7 +78,8 @@ int DenseInputWidth(const NetworkResolvedExecutionStep &dense) {
 
 int SqueezeExciteOutputWidth(const NetworkResolvedExecutionStep &se) {
   if (se.kind != NetworkExecutionOpKind::Dense)
-    throw std::runtime_error("CUDA execution tape squeeze-excite tensor is invalid");
+    throw std::runtime_error(
+        "CUDA execution tape squeeze-excite tensor is invalid");
   for (const auto &tensor : se.tensors) {
     if (tensor.name.ends_with(".w2") && tensor.dims.size() == 2 &&
         tensor.dims[0] > 0)
@@ -86,7 +90,8 @@ int SqueezeExciteOutputWidth(const NetworkResolvedExecutionStep &se) {
         tensor.dims[0] > 0)
       return static_cast<int>(tensor.dims[0]);
   }
-  throw std::runtime_error("CUDA execution tape squeeze-excite tensor is invalid");
+  throw std::runtime_error(
+      "CUDA execution tape squeeze-excite tensor is invalid");
 }
 
 int LayerNormWidth(const NetworkResolvedExecutionStep &norm) {
@@ -440,8 +445,8 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
                  plan.tensors.input_squares);
       }
       tape.Add(step.name + ".convolution",
-               CudaExecutionBufferRole::ConvolutionOutput,
-               batch_size * width, kCudaAttentionSquares);
+               CudaExecutionBufferRole::ConvolutionOutput, batch_size * width,
+               kCudaAttentionSquares);
       current_rows = batch_size * width;
       current_width = kCudaAttentionSquares;
       break;

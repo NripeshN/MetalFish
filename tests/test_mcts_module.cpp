@@ -1474,10 +1474,8 @@ void test_cpu_backend_attention_policy_map_execution(TestCounter &tc) {
          "CPU attention policy map batch should emit two outputs", tc);
   expect(batch.size() == 2 && std::abs(batch[1].policy[0] - 10.0f) < 1e-5f,
          "CPU attention policy map batch should preserve gathered logits", tc);
-  expect(batch.size() == 2 &&
-             std::abs(batch[1].policy[1793] - 15.0f) < 1e-5f,
-         "CPU attention policy map batch should preserve promotion logits",
-         tc);
+  expect(batch.size() == 2 && std::abs(batch[1].policy[1793] - 15.0f) < 1e-5f,
+         "CPU attention policy map batch should preserve promotion logits", tc);
 }
 
 #ifdef USE_CUDA
@@ -1852,16 +1850,14 @@ void test_cuda_execution_schedule(TestCounter &tc) {
              residual_schedule.entries[0].kind ==
                  NN::Cuda::CudaExecutionScheduleKind::ResidualConvolutionStage,
          "CUDA schedule should fuse residual convolution stages", tc);
-  const auto residual_tape =
-      NN::Cuda::CreateResolvedExecutionTape(residual, 2);
+  const auto residual_tape = NN::Cuda::CreateResolvedExecutionTape(residual, 2);
   expect(residual_tape.CountRole(
              NN::Cuda::CudaExecutionBufferRole::ConvolutionOutput) == 2,
          "CUDA tape should allocate residual conv1/conv2 scratch", tc);
   expect(residual_tape.CountRole(
              NN::Cuda::CudaExecutionBufferRole::ResidualOutput) == 1,
          "CUDA tape should allocate residual add scratch", tc);
-  expect(residual_tape.RequireName("body.residual.0.activation").rows ==
-             2 * 4,
+  expect(residual_tape.RequireName("body.residual.0.activation").rows == 2 * 4,
          "CUDA tape should store residual block outputs as NCHW rows", tc);
 
   NN::NetworkResolvedExecutionPlan residual_se = residual;
@@ -1912,14 +1908,13 @@ void test_cuda_execution_schedule(TestCounter &tc) {
              NN::Cuda::CudaExecutionBufferRole::SqueezeExciteOutput) == 1,
          "CUDA tape should allocate residual SE output scratch", tc);
   expect(residual_se_tape.RequireName("body.residual.0.se.pool").rows == 2 &&
-             residual_se_tape.RequireName("body.residual.0.se.pool").width ==
-                 4,
+             residual_se_tape.RequireName("body.residual.0.se.pool").width == 4,
          "CUDA tape should store residual SE pool as batch-channel rows", tc);
-  expect(residual_se_tape.RequireName("body.residual.0.se.fc2.dense").rows ==
-             2 &&
-             residual_se_tape.RequireName("body.residual.0.se.fc2.dense")
-                     .width == 8,
-         "CUDA tape should store residual SE gamma/beta output", tc);
+  expect(
+      residual_se_tape.RequireName("body.residual.0.se.fc2.dense").rows == 2 &&
+          residual_se_tape.RequireName("body.residual.0.se.fc2.dense").width ==
+              8,
+      "CUDA tape should store residual SE gamma/beta output", tc);
   expect(residual_se_tape.RequireName("body.residual.0.activation").rows ==
              2 * 4,
          "CUDA tape should store residual SE outputs as NCHW rows", tc);
@@ -1954,8 +1949,7 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   expect(static_pe_tape.CountRole(
              NN::Cuda::CudaExecutionBufferRole::StaticPositionOutput) == 1,
          "CUDA tape should allocate static PE concat scratch", tc);
-  expect(static_pe_concat.rows ==
-                 2 * NN::Cuda::kCudaAttentionSquares &&
+  expect(static_pe_concat.rows == 2 * NN::Cuda::kCudaAttentionSquares &&
              static_pe_concat.width ==
                  NN::kPackedInputPlaneCount + NN::kPackedInputSquareCount,
          "CUDA tape should shape static PE concat by board-square rows", tc);
@@ -2070,11 +2064,12 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   expect(!conv_policy_map_tape.FindName("policy.smoke.policy_map.raw"),
          "CUDA tape should not allocate attention raw policy for conv maps",
          tc);
-  expect(conv_policy_map_tape.RequireName("policy.smoke.policy_map.mapped")
-                 .rows == 2 &&
-             conv_policy_map_tape.RequireName("policy.smoke.policy_map.mapped")
-                     .width == NN::kNetworkPolicyOutputs,
-         "CUDA tape should allocate mapped convolution policy logits", tc);
+  expect(
+      conv_policy_map_tape.RequireName("policy.smoke.policy_map.mapped").rows ==
+              2 &&
+          conv_policy_map_tape.RequireName("policy.smoke.policy_map.mapped")
+                  .width == NN::kNetworkPolicyOutputs,
+      "CUDA tape should allocate mapped convolution policy logits", tc);
 
   auto tensor = [](std::size_t index, const std::string &name,
                    std::size_t elements, std::vector<std::uint32_t> dims,
@@ -2330,11 +2325,11 @@ void test_cuda_output_mapping(TestCounter &tc) {
   conv_tensor_plan.raw_policy_outputs = NN::kNetworkConvPolicyScratch;
   NN::NetworkResolvedExecutionPlan conv_mapped_policy = plan;
   conv_mapped_policy.format.conv_policy = true;
-  conv_mapped_policy.steps.insert(conv_mapped_policy.steps.begin() + 1,
-                                  NN::NetworkResolvedExecutionStep{
-                                      NN::NetworkExecutionOpKind::PolicyMap,
-                                      "policy.smoke.policy_map",
-                                      {}});
+  conv_mapped_policy.steps.insert(
+      conv_mapped_policy.steps.begin() + 1,
+      NN::NetworkResolvedExecutionStep{NN::NetworkExecutionOpKind::PolicyMap,
+                                       "policy.smoke.policy_map",
+                                       {}});
   const auto conv_policy_mapping = NN::Cuda::CreateCudaOutputMapping(
       conv_tensor_plan, conv_mapped_policy,
       NN::Cuda::CreateCudaExecutionSchedule(conv_mapped_policy), options);
@@ -2664,7 +2659,8 @@ void test_cuda_dense_kernels(TestCounter &tc) {
   auto conv_policy_map_smoke = NN::Cuda::RunConvolutionPolicyMapKernelSmoke();
   std::cout << "    " << conv_policy_map_smoke.message << std::endl;
   expect(conv_policy_map_smoke.status == NN::Cuda::CudaSmokeStatus::Success ||
-             conv_policy_map_smoke.status == NN::Cuda::CudaSmokeStatus::NoDevice,
+             conv_policy_map_smoke.status ==
+                 NN::Cuda::CudaSmokeStatus::NoDevice,
          "CUDA convolution policy map kernel should pass or skip without a "
          "device",
          tc);

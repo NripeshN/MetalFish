@@ -163,8 +163,7 @@ def compare_probe(
         expected.get("transform") == actual.get("transform"),
         "policy transform mismatch",
     )
-    value_delta = abs(finite_number(expected, "value") -
-                      finite_number(actual, "value"))
+    value_delta = abs(finite_number(expected, "value") - finite_number(actual, "value"))
     require(
         value_delta <= args.value_tolerance,
         f"value delta {value_delta:.9g} exceeds {args.value_tolerance}",
@@ -182,8 +181,9 @@ def compare_probe(
 
     wdl_delta: float | None = None
     if expected_has_wdl and actual_has_wdl:
-        wdl_delta = max_abs_delta(finite_list(expected, "wdl"),
-                                  finite_list(actual, "wdl"))
+        wdl_delta = max_abs_delta(
+            finite_list(expected, "wdl"), finite_list(actual, "wdl")
+        )
         require(
             wdl_delta <= args.wdl_tolerance,
             f"WDL delta {wdl_delta:.9g} exceeds {args.wdl_tolerance}",
@@ -205,8 +205,7 @@ def compare_probe(
     moves_left_delta: float | None = None
     if expected_has_moves_left and actual_has_moves_left:
         moves_left_delta = abs(
-            finite_number(expected, "moves_left") -
-            finite_number(actual, "moves_left")
+            finite_number(expected, "moves_left") - finite_number(actual, "moves_left")
         )
         require(
             moves_left_delta <= args.moves_left_tolerance,
@@ -279,9 +278,7 @@ def aggregate_summary(
         "probe_count": len(probes),
         "probes": probes,
         "max_value_delta": max((probe["value_delta"] for probe in probes), default=0.0),
-        "max_wdl_delta": max_optional(
-            [probe["wdl_delta"] for probe in probes]
-        ),
+        "max_wdl_delta": max_optional([probe["wdl_delta"] for probe in probes]),
         "max_moves_left_delta": max_optional(
             [probe["moves_left_delta"] for probe in probes]
         ),

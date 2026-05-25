@@ -520,8 +520,7 @@ private:
       return base;
     std::ostringstream out;
     out << base << "(captures=" << graph_capture_count_
-        << ",replays=" << graph_replay_count_
-        << ",caches=" << GraphCacheCount()
+        << ",replays=" << graph_replay_count_ << ",caches=" << GraphCacheCount()
         << ",primed=" << graph_primed_keys_.size() << ")";
     return out.str();
   }
@@ -647,8 +646,7 @@ private:
     cache.graph_exec = graph_exec;
     cache.key = key;
 
-    const cudaError_t launch_status =
-        cudaGraphLaunch(cache.graph_exec, stream);
+    const cudaError_t launch_status = cudaGraphLaunch(cache.graph_exec, stream);
     if (launch_status != cudaSuccess) {
       ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
                            batch_size,
@@ -682,7 +680,7 @@ private:
     }
 
     auto &cache = graph_caches_[graph_cache_next_evict_ %
-                               kMaxCudaGraphExecutionCacheEntries];
+                                kMaxCudaGraphExecutionCacheEntries];
     graph_cache_next_evict_ =
         (graph_cache_next_evict_ + 1) % kMaxCudaGraphExecutionCacheEntries;
     return cache;
@@ -710,10 +708,9 @@ private:
   }
 
   bool GraphKeyPrimed(const CudaGraphExecutionKey &key) const {
-    return std::any_of(graph_primed_keys_.begin(), graph_primed_keys_.end(),
-                       [&](const CudaGraphExecutionKey &primed) {
-                         return primed == key;
-                       });
+    return std::any_of(
+        graph_primed_keys_.begin(), graph_primed_keys_.end(),
+        [&](const CudaGraphExecutionKey &primed) { return primed == key; });
   }
 
   void MarkGraphKeyPrimed(const CudaGraphExecutionKey &key) {

@@ -306,14 +306,14 @@ CudaExecutionSchedule::FirstUnsupported() const {
 
 std::string CudaExecutionSchedule::Summary() const {
   std::ostringstream out;
-  out << entries.size() << " CUDA schedule entries, "
-      << convolution_stage_count << " convolution stages, "
-      << residual_convolution_stage_count << " residual convolution stages, "
-      << dense_activation_stage_count << " dense/activation stages, "
-      << dense_layernorm_stage_count << " dense/layernorm stages, "
-      << gate_stage_count << " gate stages, " << attention_layernorm_stage_count
-      << " attention/layernorm stages, " << feed_forward_stage_count
-      << " feed-forward stages, " << feed_forward_layernorm_stage_count
+  out << entries.size() << " CUDA schedule entries, " << convolution_stage_count
+      << " convolution stages, " << residual_convolution_stage_count
+      << " residual convolution stages, " << dense_activation_stage_count
+      << " dense/activation stages, " << dense_layernorm_stage_count
+      << " dense/layernorm stages, " << gate_stage_count << " gate stages, "
+      << attention_layernorm_stage_count << " attention/layernorm stages, "
+      << feed_forward_stage_count << " feed-forward stages, "
+      << feed_forward_layernorm_stage_count
       << " feed-forward/layernorm stages, " << policy_map_stage_count
       << " policy-map stages, " << positional_encoding_stage_count
       << " positional encoding stages, " << boundary_count << " boundaries, "
@@ -352,11 +352,11 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
         const bool has_se =
             se_index < plan.steps.size() &&
             IsResidualSqueezeExciteFor(plan.steps[se_index], block_name);
-        AddEntry(schedule,
-                 ResidualConvolutionEntry(
-                     plan, i, conv2_index,
-                     has_se ? se_index
-                            : std::numeric_limits<std::size_t>::max()));
+        AddEntry(
+            schedule,
+            ResidualConvolutionEntry(
+                plan, i, conv2_index,
+                has_se ? se_index : std::numeric_limits<std::size_t>::max()));
         if (has_se) {
           i = se_index;
           continue;
@@ -437,10 +437,11 @@ CreateCudaExecutionSchedule(const NetworkResolvedExecutionPlan &plan) {
       if (plan.format.attention_policy || plan.format.conv_policy) {
         AddEntry(schedule, PolicyMapEntry(plan, i));
       } else {
-        AddEntry(schedule,
-                 UnsupportedEntry(
-                     plan, i,
-                     "CUDA policy map requires attention or convolution policy"));
+        AddEntry(
+            schedule,
+            UnsupportedEntry(
+                plan, i,
+                "CUDA policy map requires attention or convolution policy"));
       }
       continue;
     }

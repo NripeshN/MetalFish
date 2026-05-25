@@ -1620,9 +1620,9 @@ CudaBufferSmokeResult RunStaticPositionEncodingStageSmoke() {
       return result;
     }
 
-    result.allocation_bytes =
-        buffers.AllocationBytes() + workspace.TotalBytes() +
-        weights.AllocationBytes();
+    result.allocation_bytes = buffers.AllocationBytes() +
+                              workspace.TotalBytes() +
+                              weights.AllocationBytes();
   } catch (const std::exception &e) {
     result.status = CudaSmokeStatus::RuntimeError;
     result.message = e.what();

@@ -159,7 +159,8 @@ int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
   }
   if (entry.kind == CudaExecutionScheduleKind::ResidualConvolutionStage) {
     if (entry.second_step >= execution_plan.steps.size())
-      throw std::runtime_error("CUDA residual convolution stage index is invalid");
+      throw std::runtime_error(
+          "CUDA residual convolution stage index is invalid");
     const auto &conv2 = execution_plan.steps[entry.second_step];
     if (conv2.kind != NetworkExecutionOpKind::Convolution ||
         conv2.tensors.empty() || conv2.tensors[0].dims.size() != 4) {
