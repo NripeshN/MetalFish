@@ -257,6 +257,7 @@ jobs:
           if (-not $env:VCPKG_INSTALLATION_ROOT) {
             $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
           }
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
           vcpkg install protobuf zlib abseil --triplet x64-windows
           python -m pip install -r tests/requirements.txt
 
@@ -271,6 +272,7 @@ jobs:
           if (-not $env:VCPKG_INSTALLATION_ROOT) {
             $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
           }
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
           cmake -S . -B build-windows-msvc -G Ninja `
             -DCMAKE_BUILD_TYPE="${env:BUILD_TYPE}" `
             -DUSE_METAL=OFF `

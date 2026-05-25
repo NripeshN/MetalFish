@@ -658,8 +658,11 @@ toolchain. Windows MSVC jobs import the Visual Studio developer environment
 through `tools/import_msvc_dev_env.ps1` and do not rely on an external
 Node-backed MSVC setup action. The Windows MSVC and CUDA jobs use a local
 vcpkg binary cache for the `x64-windows` protobuf/zlib/Abseil dependencies, so
-repeat branch pushes do not spend the full dependency build/install cost. The
-separate Windows CUDA compile gate installs the CUDA Toolkit on `windows-2022`,
+repeat branch pushes do not spend the full dependency build/install cost, and
+they pin `VCPKG_ROOT` to the hosted `C:\vcpkg` tree after importing the Visual
+Studio environment so the package manager does not drift to Visual Studio's
+embedded vcpkg copy. The separate Windows CUDA compile gate installs the CUDA
+Toolkit on `windows-2022`,
 configures `USE_CUDA=ON`, builds `metalfish`, `metalfish_tests`,
 `test_nn_comparison`, and `metalfish_nn_probe`, then runs the CUDA-linked MCTS
 module tests, BT4 and legacy metadata-only probes through

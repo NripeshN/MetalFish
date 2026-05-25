@@ -20,6 +20,8 @@ if (-not $CudaArchs) {
 if (-not $VcpkgRoot) {
   $VcpkgRoot = "C:\vcpkg"
 }
+$env:VCPKG_INSTALLATION_ROOT = $VcpkgRoot
+$env:VCPKG_ROOT = $VcpkgRoot
 
 function Require-Command {
   param([string]$Name)
