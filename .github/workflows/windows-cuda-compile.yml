@@ -132,5 +132,6 @@ jobs:
             build-windows-cuda/CMakeCache.txt
             build-windows-cuda/compile_commands.json
             build-windows-cuda/windows-cuda-compile-summary.md
+            build-windows-cuda/metalfish*windows-x86_64-msvc-cuda.zip
             build-windows-cuda/**/*.log
           if-no-files-found: warn

@@ -32,12 +32,17 @@ on:
         description: Optional gs:// prefix for gate artifacts
         required: false
         default: ""
+      metal_ci_run_id:
+        description: Optional MetalFish CI run ID whose macOS artifact supplies the Metal probe suite
+        required: false
+        default: ""
 
 concurrency:
   group: metalfish-cuda-gpu-gate-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 
@@ -62,6 +67,18 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Download Metal probe suite artifact
+        if: ${{ inputs.metal_ci_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p metal-artifacts
+          gh run download "${{ inputs.metal_ci_run_id }}" \
+            --name metalfish-macos-arm64 \
+            --dir metal-artifacts
+          test -s metal-artifacts/build/metal-nn-probe-suite.log
+
       - name: Run CUDA GPU gate
         env:
           METALFISH_GCP_PROJECT: ${{ vars.METALFISH_GCP_PROJECT }}
@@ -82,6 +99,9 @@ jobs:
             export METALFISH_CUDA_PROFILE=1
           else
             export METALFISH_CUDA_PROFILE=0
+          fi
+          if [ -s "${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log" ]; then
+            export METALFISH_METAL_PROBE_SUITE_LOG="${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log"
           fi
           tools/run_gcp_cuda_gpu_gate.sh
 

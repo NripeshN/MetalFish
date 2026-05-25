@@ -30,6 +30,31 @@ function Require-Command {
   return $Command.Source
 }
 
+function Copy-ExistingFile {
+  param(
+    [string]$Path,
+    [string]$Destination
+  )
+  if (Test-Path $Path) {
+    Copy-Item $Path $Destination -Force
+    return 1
+  }
+  return 0
+}
+
+function Copy-MatchingFiles {
+  param(
+    [string]$Pattern,
+    [string]$Destination
+  )
+  $Count = 0
+  foreach ($File in Get-ChildItem -Path $Pattern -File -ErrorAction SilentlyContinue) {
+    Copy-Item $File.FullName $Destination -Force
+    $Count += 1
+  }
+  return $Count
+}
+
 $Cmake = Require-Command "cmake"
 $Ninja = Require-Command "ninja"
 $Nvcc = Require-Command "nvcc"
@@ -166,6 +191,82 @@ if ($LASTEXITCODE -ne 0) {
 }
 $SmokeSteps += "tools/uci_smoke.py depth 1"
 
+$PackageName = "metalfish-windows-x86_64-msvc-cuda"
+if ($env:GITHUB_REF_TYPE -eq "tag") {
+  $PackageName = "metalfish-$env:GITHUB_REF_NAME-windows-x86_64-msvc-cuda"
+}
+$PackageDir = Join-Path $BuildDir $PackageName
+$PackageSmokeDir = Join-Path $BuildDir "$PackageName-smoke"
+$PackageZip = Join-Path $BuildDir "$PackageName.zip"
+Remove-Item $PackageDir, $PackageSmokeDir -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $PackageZip -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $PackageDir | Out-Null
+
+Copy-Item $EnginePath $PackageDir -Force
+foreach ($DocName in @("README.md", "CHANGELOG.md", "LICENSE")) {
+  Copy-ExistingFile (Join-Path $SourceDir $DocName) $PackageDir | Out-Null
+}
+
+& $Python (Join-Path $SourceDir "tools\write_portable_manifest.py") `
+  --platform "Windows x86_64 MSVC CUDA" `
+  --backend "CPU AB plus CUDA transformer MCTS/Hybrid when NVIDIA CUDA runtime and BT4 weights are available" `
+  --binary "metalfish.exe" `
+  --output (Join-Path $PackageDir "PORTABLE_ARTIFACT.md") `
+  --notes "This artifact is built by the Windows CUDA compile gate with MSVC and the NVIDIA CUDA Toolkit." `
+  --notes "The package includes CUDA and vcpkg runtime DLLs required by the linked engine." `
+  --notes "Run a real Windows NVIDIA runtime smoke before calling this artifact strength-ready."
+if ($LASTEXITCODE -ne 0) {
+  throw "portable manifest generation failed with exit code $LASTEXITCODE"
+}
+
+$CopiedRuntimeDlls = 0
+$CopiedRuntimeDlls += Copy-MatchingFiles (Join-Path $BuildDir "*.dll") $PackageDir
+$VcpkgBin = Join-Path $VcpkgRoot "installed\x64-windows\bin"
+if (Test-Path $VcpkgBin) {
+  $CopiedRuntimeDlls += Copy-MatchingFiles (Join-Path $VcpkgBin "*.dll") $PackageDir
+}
+$CudaBin = Join-Path $env:CUDA_PATH "bin"
+foreach ($Pattern in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+  $CopiedRuntimeDlls += Copy-MatchingFiles (Join-Path $CudaBin $Pattern) $PackageDir
+}
+if ($CopiedRuntimeDlls -eq 0) {
+  throw "No runtime DLLs were copied into the Windows CUDA package"
+}
+
+Compress-Archive -Path (Join-Path $PackageDir "*") -DestinationPath $PackageZip
+if (-not (Test-Path $PackageZip)) {
+  throw "Windows CUDA package was not created: $PackageZip"
+}
+
+New-Item -ItemType Directory -Force $PackageSmokeDir | Out-Null
+Expand-Archive -Path $PackageZip -DestinationPath $PackageSmokeDir -Force
+$PackagedEngine = Join-Path $PackageSmokeDir "metalfish.exe"
+if (-not (Test-Path $PackagedEngine)) {
+  throw "Packaged engine not found after extraction: $PackagedEngine"
+}
+
+$OriginalPath = $env:PATH
+try {
+  $env:PATH = "$PackageSmokeDir;C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
+  Write-Host "Running packaged Windows CUDA AB self-smoke"
+  & $Python $UciSmoke `
+    --engine $PackagedEngine `
+    --timeout 45 `
+    --setoption "EvalFile=$NnueBigPath" `
+    --setoption "EvalFileSmall=$NnueSmallPath" `
+    --setoption "UseMCTS=false" `
+    --setoption "UseHybridSearch=false" `
+    --setoption "Threads=1" `
+    --setoption "Hash=16" `
+    --go "depth 1"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Packaged Windows CUDA AB self-smoke failed with exit code $LASTEXITCODE"
+  }
+} finally {
+  $env:PATH = $OriginalPath
+}
+$SmokeSteps += "$PackageName.zip extracted AB self-smoke"
+
 $Summary = Join-Path $BuildDir "windows-cuda-compile-summary.md"
 $NvccVersion = (& $Nvcc --version) -join "`n"
 $CmakeVersion = (& $Cmake --version) -join "`n"
@@ -188,6 +289,8 @@ $SmokeText = $SmokeSteps -join ", "
   "- Build tests: $BuildTests",
   "- Targets: $TargetsText",
   "- Smoke tests: $SmokeText",
+  "- Package: $PackageZip",
+  "- Packaged runtime DLLs: $CopiedRuntimeDlls",
   "",
   "## Toolchain",
   "",

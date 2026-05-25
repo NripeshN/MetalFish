@@ -740,6 +740,24 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / ".github/workflows/cuda-gpu-gate.yml",
+        [
+            "CUDA GPU Gate",
+            "CUDA L4 Runtime Gate",
+            "workflow_dispatch",
+            "metal_ci_run_id",
+            "actions: read",
+            "google-github-actions/auth",
+            "GCP_CREDENTIALS_JSON",
+            "gh run download",
+            "metalfish-macos-arm64",
+            "metal-nn-probe-suite.log",
+            "METALFISH_METAL_PROBE_SUITE_LOG",
+            "tools/run_gcp_cuda_gpu_gate.sh",
+            "cuda-gpu-gate-${{ github.run_id }}",
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/uci_smoke.py",
         [
             "queue.Queue",
@@ -871,6 +889,13 @@ def main() -> int:
             "UseMCTS=false",
             "UseHybridSearch=false",
             "depth 1",
+            "metalfish-windows-x86_64-msvc-cuda",
+            "write_portable_manifest.py",
+            "cudart64_*.dll",
+            "cublas64_*.dll",
+            "cublasLt64_*.dll",
+            "Running packaged Windows CUDA AB self-smoke",
+            "Packaged runtime DLLs",
             "- Smoke tests: $SmokeText",
         ],
     )
@@ -878,6 +903,7 @@ def main() -> int:
         PROJ / ".github/workflows/windows-cuda-compile.yml",
         [
             "branches: [main, dev]",
+            "metalfish*windows-x86_64-msvc-cuda.zip",
             "tools/download_engine_networks.py",
             "tools/uci_smoke.py",
             "src/hybrid/**",

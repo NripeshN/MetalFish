@@ -72,7 +72,7 @@ cloud spend controlled.
 | Linux x86-64 CPU | GitHub Ubuntu or GCP C3/N2 | AB build/test and portable UCI |
 | Linux x86-64 CUDA | GCP `g2-standard-8` + NVIDIA L4 | CUDA backend correctness and NPS |
 | Windows x86-64 CPU | GitHub Windows MinGW + MSVC | Portable build/UCI package and MSVC host-toolchain coverage |
-| Windows x86-64 CUDA compile | GitHub Windows MSVC + CUDA Toolkit | NVCC/MSVC compile coverage before runtime GPU gates |
+| Windows x86-64 CUDA compile | GitHub Windows MSVC + CUDA Toolkit | NVCC/MSVC compile coverage plus release-candidate CUDA package smoke before runtime GPU gates |
 | Windows x86-64 CUDA runtime | Ephemeral Windows GPU VM | CUDA/DirectML smoke before release |
 
 Cloud GPU runners should be created only for a benchmark run, write logs and
@@ -106,8 +106,8 @@ Current remote gates:
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92ed1973-1772-4ae4-abb9-1b94ea5efabf` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
-| GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch, pending first run |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26366784935` |
+| GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; pass `metal_ci_run_id` to hard-compare the CUDA suite against a macOS Metal artifact |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26366784935`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26366784933`, Metal NN parity artifact and BK.07 smoke |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26366784932` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26366784934` |
