@@ -656,19 +656,22 @@ Portable CI builds Linux CPU, Windows MinGW CPU, and Windows MSVC CPU
 artifacts. The MSVC leg is included because Windows CUDA uses the MSVC host
 toolchain. Windows MSVC jobs import the Visual Studio developer environment
 through `tools/import_msvc_dev_env.ps1` and do not rely on an external
-Node-backed MSVC setup action. The separate Windows CUDA compile gate installs
-the CUDA Toolkit on `windows-2022`, configures `USE_CUDA=ON`, builds `metalfish`,
-`metalfish_tests`, `test_nn_comparison`, and `metalfish_nn_probe`, then runs
-the CUDA-linked MCTS module tests, BT4 and legacy metadata-only probes through
-`metalfish_nn_probe --backend cuda`, and a tiny AB UCI smoke from the
-CUDA-linked engine with downloaded NNUE files. The metadata probes require CUDA
-schedule support and named output mapping to resolve successfully. These smokes
-require no hosted NVIDIA GPU, but they catch host-link, runtime-DLL, protobuf
-load, tensor-plan, weight-inventory, no-device fallback, and CUDA-compiled MCTS
+Node-backed MSVC setup action. The Windows MSVC and CUDA jobs use a local
+vcpkg binary cache for the `x64-windows` protobuf/zlib/Abseil dependencies, so
+repeat branch pushes do not spend the full dependency build/install cost. The
+separate Windows CUDA compile gate installs the CUDA Toolkit on `windows-2022`,
+configures `USE_CUDA=ON`, builds `metalfish`, `metalfish_tests`,
+`test_nn_comparison`, and `metalfish_nn_probe`, then runs the CUDA-linked MCTS
+module tests, BT4 and legacy metadata-only probes through
+`metalfish_nn_probe --backend cuda`, and a tiny AB UCI smoke from the CUDA-linked
+engine with downloaded NNUE files. The metadata probes require CUDA schedule
+support and named output mapping to resolve successfully. These smokes require
+no hosted NVIDIA GPU, but they catch host-link, runtime-DLL, protobuf load,
+tensor-plan, weight-inventory, no-device fallback, and CUDA-compiled MCTS
 contract regressions that a compile-only gate would miss. The Windows CUDA
-package now ships `metalfish_nn_probe.exe` when tests are built, and the
-compile gate extracts the package and re-runs a packaged BT4 metadata probe
-before upload.
+package now ships `metalfish_nn_probe.exe` when tests are built, and the compile
+gate extracts the package and re-runs a packaged BT4 metadata probe before
+upload.
 Each portable CPU job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS
 smoke, so portable builds verify the MCTS construction path cheaply. The Linux
 and MSVC legs additionally download BT4 for the metadata/backend-construction

@@ -100,10 +100,22 @@ jobs:
           method: network
           sub-packages: '["nvcc","cudart","cublas","cublas_dev","visual_studio_integration"]'
 
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v5
+        with:
+          path: .vcpkg-bincache
+          key: ${{ runner.os }}-vcpkg-x64-windows-protobuf-zlib-abseil-${{ hashFiles('.github/workflows/portable-ci.yml', '.github/workflows/windows-cuda-compile.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-x64-windows-protobuf-zlib-abseil-
+
       - name: Install dependencies
         shell: pwsh
         run: |
           & .\tools\import_msvc_dev_env.ps1 -Arch x64 -HostArch x64
+          $VcpkgCache = Join-Path (Get-Location).Path ".vcpkg-bincache"
+          New-Item -ItemType Directory -Force $VcpkgCache | Out-Null
+          $env:VCPKG_DEFAULT_BINARY_CACHE = $VcpkgCache
+          $env:VCPKG_BINARY_SOURCES = "clear;files,$VcpkgCache,readwrite"
           cmake --version
           ninja --version
           nvcc --version
