@@ -518,22 +518,11 @@ bool ConvolutionAppliesActivation(
            step.name == conv_policy_output);
 }
 
-int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
-                       std::string_view name) {
-  if (StartsWith(name, "body.encoder."))
-    return plan.format.body_attention_heads;
-  if (StartsWith(name, "policy."))
-    return plan.format.policy_attention_heads;
-  return 0;
-}
-
 const NetworkResolvedTensorRef &
 RequireTensorSuffix(const NetworkResolvedExecutionStep &step,
                     std::string_view suffix) {
-  for (const auto &tensor : step.tensors) {
-    if (EndsWith(tensor.name, suffix))
-      return tensor;
-  }
+  if (const auto *tensor = FindNetworkTensorSuffix(step, suffix))
+    return *tensor;
   throw std::runtime_error("CUDA stage is missing tensor " +
                            std::string(suffix) + " in " + step.name);
 }
@@ -1476,7 +1465,7 @@ CudaAttentionProjectionOutput ExecuteAttentionInputProjectionStage(
   const auto &step = execution_plan.steps[attention_step_index];
   const auto attention = ResolveCudaAttentionStagePlan(
       execution_plan, attention_step_index,
-      AttentionHeadCount(execution_plan, step.name));
+      NetworkAttentionHeadCount(execution_plan, step.name));
   const int rows = batch_size * attention.squares;
 
   const auto q_weight = TensorBySuffix(step, weights, ".q_w");
@@ -1529,7 +1518,7 @@ CudaAttentionProjectionOutput ExecuteAttentionOutputProjectionStage(
   const auto &step = execution_plan.steps[attention_step_index];
   const auto attention = ResolveCudaAttentionStagePlan(
       execution_plan, attention_step_index,
-      AttentionHeadCount(execution_plan, step.name));
+      NetworkAttentionHeadCount(execution_plan, step.name));
   const int rows = batch_size * attention.squares;
   const auto dense_weight = TensorBySuffix(step, weights, ".dense_w");
   const auto dense_bias = TensorBySuffix(step, weights, ".dense_b");
@@ -1757,7 +1746,7 @@ ExecuteAttentionCoreStage(const NetworkResolvedExecutionPlan &execution_plan,
   const auto &step = execution_plan.steps[attention_step_index];
   const auto attention = ResolveCudaAttentionStagePlan(
       execution_plan, attention_step_index,
-      AttentionHeadCount(execution_plan, step.name));
+      NetworkAttentionHeadCount(execution_plan, step.name));
   const int square_rows = batch_size * attention.squares;
   const int score_rows = batch_size * attention.heads * attention.squares;
   if (projections.rows != square_rows ||

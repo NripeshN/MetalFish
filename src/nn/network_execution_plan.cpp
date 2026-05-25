@@ -865,6 +865,221 @@ NetworkPositionEncodingGeometry ResolveStaticPositionEncodingGeometry(
   return geometry;
 }
 
+const NetworkResolvedTensorRef *
+FindNetworkTensorSuffix(const NetworkResolvedExecutionStep &step,
+                        std::string_view suffix) {
+  return FindTensorSuffix(step, suffix);
+}
+
+std::string NetworkPlanStagePrefix(const NetworkResolvedExecutionPlan &plan,
+                                   NetworkPlanStageGroup group) {
+  switch (group) {
+  case NetworkPlanStageGroup::Body:
+    return "body.";
+  case NetworkPlanStageGroup::Policy:
+    return "policy." + plan.policy_head + ".";
+  case NetworkPlanStageGroup::Value:
+    return "value." + plan.value_head + ".";
+  case NetworkPlanStageGroup::MovesLeft:
+    return "moves_left.";
+  case NetworkPlanStageGroup::Other:
+    return {};
+  }
+  return {};
+}
+
+NetworkPlanStageGroup
+ClassifyNetworkPlanStage(const NetworkResolvedExecutionPlan &plan,
+                         std::string_view stage_name) {
+  if (StartsWith(stage_name,
+                 NetworkPlanStagePrefix(plan, NetworkPlanStageGroup::Body))) {
+    return NetworkPlanStageGroup::Body;
+  }
+  if (StartsWith(
+          stage_name,
+          NetworkPlanStagePrefix(plan, NetworkPlanStageGroup::Policy))) {
+    return NetworkPlanStageGroup::Policy;
+  }
+  if (StartsWith(stage_name,
+                 NetworkPlanStagePrefix(plan, NetworkPlanStageGroup::Value))) {
+    return NetworkPlanStageGroup::Value;
+  }
+  if (StartsWith(
+          stage_name,
+          NetworkPlanStagePrefix(plan, NetworkPlanStageGroup::MovesLeft))) {
+    return NetworkPlanStageGroup::MovesLeft;
+  }
+  return NetworkPlanStageGroup::Other;
+}
+
+bool IsNetworkValueErrorStage(std::string_view stage_name) {
+  return EndsWith(stage_name, ".error");
+}
+
+int NetworkDenseStageOutputWidth(const NetworkResolvedExecutionStep &dense) {
+  if (dense.kind != NetworkExecutionOpKind::Dense) {
+    throw std::runtime_error("NN dense stage tensor is invalid");
+  }
+  const auto *weight = FindNetworkTensorSuffix(dense, "_w");
+  if (!weight)
+    weight = FindNetworkTensorSuffix(dense, ".w1");
+  if (!weight && !dense.tensors.empty())
+    weight = &dense.tensors[0];
+  if (!weight || weight->dims.size() != 2 || weight->dims[0] == 0) {
+    throw std::runtime_error("NN dense stage tensor is invalid");
+  }
+  return static_cast<int>(weight->dims[0]);
+}
+
+int NetworkConvolutionStageOutputChannels(
+    const NetworkResolvedExecutionStep &convolution) {
+  if (convolution.kind != NetworkExecutionOpKind::Convolution) {
+    throw std::runtime_error("NN convolution stage tensor is invalid");
+  }
+  const auto *weight = FindNetworkTensorSuffix(convolution, ".weights");
+  if (!weight && !convolution.tensors.empty())
+    weight = &convolution.tensors[0];
+  if (!weight || weight->dims.size() != 4 || weight->dims[0] == 0) {
+    throw std::runtime_error("NN convolution stage tensor is invalid");
+  }
+  return static_cast<int>(weight->dims[0]);
+}
+
+int NetworkSqueezeExciteStageOutputWidth(
+    const NetworkResolvedExecutionStep &se) {
+  return NetworkSqueezeExciteStageWidthsFor(se).output;
+}
+
+NetworkSqueezeExciteStageWidths
+NetworkSqueezeExciteStageWidthsFor(const NetworkResolvedExecutionStep &se) {
+  if (se.kind != NetworkExecutionOpKind::Dense) {
+    throw std::runtime_error("NN squeeze-excite stage tensor is invalid");
+  }
+  const auto *w1 = FindNetworkTensorSuffix(se, ".w1");
+  const auto *w2 = FindNetworkTensorSuffix(se, ".w2");
+  if (w1 && w2 && w1->dims.size() == 2 && w2->dims.size() == 2 &&
+      w1->dims[0] > 0 && w2->dims[0] > 0) {
+    return NetworkSqueezeExciteStageWidths{static_cast<int>(w1->dims[0]),
+                                           static_cast<int>(w2->dims[0])};
+  }
+  const auto *b1 = FindNetworkTensorSuffix(se, ".b1");
+  const auto *b2 = FindNetworkTensorSuffix(se, ".b2");
+  if (b1 && b2 && b1->dims.size() == 1 && b2->dims.size() == 1 &&
+      b1->dims[0] > 0 && b2->dims[0] > 0) {
+    return NetworkSqueezeExciteStageWidths{static_cast<int>(b1->dims[0]),
+                                           static_cast<int>(b2->dims[0])};
+  }
+  throw std::runtime_error("NN squeeze-excite stage tensor is invalid");
+}
+
+int NetworkLayerNormStageWidth(const NetworkResolvedExecutionStep &norm) {
+  if (norm.kind != NetworkExecutionOpKind::LayerNorm) {
+    throw std::runtime_error("NN layernorm stage tensor is invalid");
+  }
+  const auto *scale = FindNetworkTensorSuffix(norm, "_gammas");
+  if (scale && scale->dims.size() == 1 && scale->dims[0] > 0)
+    return static_cast<int>(scale->dims[0]);
+  if (norm.tensors.empty() || norm.tensors[0].dims.size() != 1 ||
+      norm.tensors[0].dims[0] == 0) {
+    throw std::runtime_error("NN layernorm stage tensor is invalid");
+  }
+  return static_cast<int>(norm.tensors[0].dims[0]);
+}
+
+int NetworkGateStageWidth(const NetworkResolvedExecutionStep &gate) {
+  if (gate.kind != NetworkExecutionOpKind::Gate || gate.tensors.empty() ||
+      gate.tensors[0].elements == 0) {
+    throw std::runtime_error("NN gate stage tensor is invalid");
+  }
+  return static_cast<int>(gate.tensors[0].elements);
+}
+
+NetworkFeedForwardStageWidths
+NetworkFeedForwardStageWidthsFor(const NetworkResolvedExecutionStep &ffn) {
+  if (ffn.kind != NetworkExecutionOpKind::FeedForward) {
+    throw std::runtime_error("NN feed-forward stage tensor is invalid");
+  }
+  const auto *dense1 = FindNetworkTensorSuffix(ffn, ".dense1_w");
+  const auto *dense2 = FindNetworkTensorSuffix(ffn, ".dense2_w");
+  if (!dense1 || !dense2 || dense1->dims.size() != 2 ||
+      dense2->dims.size() != 2 || dense1->dims[0] == 0 ||
+      dense2->dims[0] == 0) {
+    throw std::runtime_error("NN feed-forward stage tensor is invalid");
+  }
+  return NetworkFeedForwardStageWidths{static_cast<int>(dense1->dims[0]),
+                                       static_cast<int>(dense2->dims[0])};
+}
+
+int NetworkAttentionStageOutputWidth(
+    const NetworkResolvedExecutionStep &attention) {
+  if (attention.kind != NetworkExecutionOpKind::Attention) {
+    throw std::runtime_error("NN attention stage tensor is invalid");
+  }
+  const auto *dense = FindNetworkTensorSuffix(attention, ".dense_w");
+  if (!dense || dense->dims.size() != 2 || dense->dims[0] == 0) {
+    throw std::runtime_error("NN attention stage tensor is invalid");
+  }
+  return static_cast<int>(dense->dims[0]);
+}
+
+int NetworkAttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
+                              std::string_view stage_name) {
+  if (StartsWith(stage_name, "body.encoder."))
+    return plan.format.body_attention_heads;
+  if (StartsWith(stage_name, "policy."))
+    return plan.format.policy_attention_heads;
+  return 0;
+}
+
+bool NetworkIsAttentionLayerNormStage(
+    const NetworkResolvedExecutionPlan &, std::string_view stage_name) {
+  if (!EndsWith(stage_name, ".ln1"))
+    return false;
+  if (StartsWith(stage_name, "body.encoder."))
+    return true;
+  return StartsWith(stage_name, "policy.") &&
+         stage_name.find(".encoder.") != std::string_view::npos;
+}
+
+bool NetworkStageUsesSquareRows(const NetworkResolvedExecutionPlan &plan,
+                                std::string_view stage_name) {
+  if (StartsWith(stage_name, "body.encoder."))
+    return plan.format.body_attention_heads > 0;
+  if (plan.ContainsStep("body.input_embedding") &&
+      (stage_name == "body.input_embedding" ||
+       StartsWith(stage_name, "body.input_embedding_"))) {
+    return true;
+  }
+  if (plan.format.attention_policy) {
+    const std::string prefix = "policy." + plan.policy_head + ".";
+    if (StartsWith(stage_name, prefix) &&
+        plan.ContainsStep(prefix + "policy_map") &&
+        (stage_name == prefix + "output" ||
+         stage_name == prefix + "dense2" ||
+         stage_name == prefix + "dense3" ||
+         stage_name.find(".encoder.") != std::string_view::npos)) {
+      return true;
+    }
+  }
+  if (plan.format.attention_body &&
+      stage_name == "value." + plan.value_head + ".output") {
+    return true;
+  }
+  return plan.format.attention_body && stage_name == "moves_left.dense0";
+}
+
+int NetworkDenseLikeRows(const NetworkResolvedExecutionPlan &plan,
+                         std::string_view stage_name, int batch_size) {
+  if (batch_size <= 0)
+    throw std::runtime_error("NN dense-like row count needs positive batch");
+  if (!NetworkStageUsesSquareRows(plan, stage_name))
+    return batch_size;
+  const int squares = plan.tensors.input_squares > 0
+                          ? plan.tensors.input_squares
+                          : static_cast<int>(kPackedInputSquareCount);
+  return batch_size * squares;
+}
+
 std::string NetworkDenseStageActivationName(
     const NetworkResolvedExecutionPlan &plan, std::string_view stage_name) {
   const std::string policy_prefix = "policy." + plan.policy_head + ".";

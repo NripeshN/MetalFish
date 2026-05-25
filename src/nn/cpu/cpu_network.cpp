@@ -88,15 +88,6 @@ bool IsAttentionPolicyMapStep(const NetworkResolvedExecutionPlan &plan,
          !step.tensors.empty();
 }
 
-int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
-                       std::string_view name) {
-  if (StartsWith(name, "body.encoder."))
-    return plan.format.body_attention_heads;
-  if (StartsWith(name, "policy."))
-    return plan.format.policy_attention_heads;
-  return 0;
-}
-
 const std::array<int, kNetworkPolicyOutputs> &AttentionPolicyGatherMap() {
   static const auto gather = [] {
     std::array<int, kNetworkPolicyOutputs> indices{};
@@ -177,7 +168,8 @@ FirstUnsupportedExecutionStep(const NetworkResolvedExecutionPlan &plan) {
     if (step.kind == NetworkExecutionOpKind::Attention) {
       try {
         (void)ResolveAttentionStagePlan(plan, index,
-                                        AttentionHeadCount(plan, step.name));
+                                        NetworkAttentionHeadCount(plan,
+                                                                  step.name));
       } catch (const std::exception &e) {
         return "CPU transformer backend does not support attention stage " +
                step.name + ": " + e.what();
@@ -1028,7 +1020,7 @@ CpuNetwork::RunBatch(const std::vector<InputPlanes> &inputs) const {
     if (step.kind == NetworkExecutionOpKind::Attention) {
       const auto attention = ResolveAttentionStagePlan(
           resolved_execution_plan_, step_index,
-          AttentionHeadCount(resolved_execution_plan_, step.name));
+          NetworkAttentionHeadCount(resolved_execution_plan_, step.name));
       if (source.width != attention.input_width ||
           rows != batch_size * attention.squares) {
         throw std::runtime_error("CPU attention source shape mismatch: " +

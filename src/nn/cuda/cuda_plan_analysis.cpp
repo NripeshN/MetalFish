@@ -12,6 +12,41 @@
 namespace MetalFish {
 namespace NN {
 namespace Cuda {
+namespace {
+
+CudaPlanStageGroup ToCudaStageGroup(NetworkPlanStageGroup group) {
+  switch (group) {
+  case NetworkPlanStageGroup::Body:
+    return CudaPlanStageGroup::Body;
+  case NetworkPlanStageGroup::Policy:
+    return CudaPlanStageGroup::Policy;
+  case NetworkPlanStageGroup::Value:
+    return CudaPlanStageGroup::Value;
+  case NetworkPlanStageGroup::MovesLeft:
+    return CudaPlanStageGroup::MovesLeft;
+  case NetworkPlanStageGroup::Other:
+    return CudaPlanStageGroup::Other;
+  }
+  return CudaPlanStageGroup::Other;
+}
+
+NetworkPlanStageGroup ToNetworkStageGroup(CudaPlanStageGroup group) {
+  switch (group) {
+  case CudaPlanStageGroup::Body:
+    return NetworkPlanStageGroup::Body;
+  case CudaPlanStageGroup::Policy:
+    return NetworkPlanStageGroup::Policy;
+  case CudaPlanStageGroup::Value:
+    return NetworkPlanStageGroup::Value;
+  case CudaPlanStageGroup::MovesLeft:
+    return NetworkPlanStageGroup::MovesLeft;
+  case CudaPlanStageGroup::Other:
+    return NetworkPlanStageGroup::Other;
+  }
+  return NetworkPlanStageGroup::Other;
+}
+
+} // namespace
 
 bool IsCudaDenseScheduleEntry(CudaExecutionScheduleKind kind) {
   return kind == CudaExecutionScheduleKind::DenseActivationStage ||
@@ -42,49 +77,17 @@ bool CudaStageNameEndsWith(std::string_view value, std::string_view suffix) {
 std::string
 CudaPlanStagePrefix(const NetworkResolvedExecutionPlan &execution_plan,
                     CudaPlanStageGroup group) {
-  switch (group) {
-  case CudaPlanStageGroup::Body:
-    return "body.";
-  case CudaPlanStageGroup::Policy:
-    return "policy." + execution_plan.policy_head + ".";
-  case CudaPlanStageGroup::Value:
-    return "value." + execution_plan.value_head + ".";
-  case CudaPlanStageGroup::MovesLeft:
-    return "moves_left.";
-  case CudaPlanStageGroup::Other:
-    return {};
-  }
-  return {};
+  return NetworkPlanStagePrefix(execution_plan, ToNetworkStageGroup(group));
 }
 
 CudaPlanStageGroup
 ClassifyCudaPlanStage(const NetworkResolvedExecutionPlan &execution_plan,
                       std::string_view stage_name) {
-  if (CudaStageNameStartsWith(
-          stage_name,
-          CudaPlanStagePrefix(execution_plan, CudaPlanStageGroup::Body))) {
-    return CudaPlanStageGroup::Body;
-  }
-  if (CudaStageNameStartsWith(
-          stage_name,
-          CudaPlanStagePrefix(execution_plan, CudaPlanStageGroup::Policy))) {
-    return CudaPlanStageGroup::Policy;
-  }
-  if (CudaStageNameStartsWith(
-          stage_name,
-          CudaPlanStagePrefix(execution_plan, CudaPlanStageGroup::Value))) {
-    return CudaPlanStageGroup::Value;
-  }
-  if (CudaStageNameStartsWith(
-          stage_name,
-          CudaPlanStagePrefix(execution_plan, CudaPlanStageGroup::MovesLeft))) {
-    return CudaPlanStageGroup::MovesLeft;
-  }
-  return CudaPlanStageGroup::Other;
+  return ToCudaStageGroup(ClassifyNetworkPlanStage(execution_plan, stage_name));
 }
 
 bool IsCudaValueErrorStage(std::string_view stage_name) {
-  return CudaStageNameEndsWith(stage_name, ".error");
+  return IsNetworkValueErrorStage(stage_name);
 }
 
 const CudaExecutionScheduleEntry *
@@ -106,26 +109,16 @@ int PreviousCudaOutputWidth(const NetworkResolvedExecutionPlan &execution_plan,
                             std::size_t step_index) {
   for (std::size_t i = step_index; i-- > 0;) {
     const auto &step = execution_plan.steps[i];
-    if (step.kind == NetworkExecutionOpKind::Dense && !step.tensors.empty() &&
-        step.tensors[0].dims.size() == 2) {
-      return static_cast<int>(step.tensors[0].dims[0]);
-    }
-    if (step.kind == NetworkExecutionOpKind::Convolution &&
-        !step.tensors.empty() && step.tensors[0].dims.size() == 4) {
-      return static_cast<int>(step.tensors[0].dims[0]);
-    }
-    if (step.kind == NetworkExecutionOpKind::LayerNorm &&
-        !step.tensors.empty() && step.tensors[0].dims.size() == 1) {
-      return static_cast<int>(step.tensors[0].dims[0]);
-    }
-    if (step.kind == NetworkExecutionOpKind::Attention &&
-        step.tensors.size() >= 8 && step.tensors[6].dims.size() == 2) {
-      return static_cast<int>(step.tensors[6].dims[0]);
-    }
-    if (step.kind == NetworkExecutionOpKind::FeedForward &&
-        step.tensors.size() >= 4 && step.tensors[2].dims.size() == 2) {
-      return static_cast<int>(step.tensors[2].dims[0]);
-    }
+    if (step.kind == NetworkExecutionOpKind::Dense)
+      return NetworkDenseStageOutputWidth(step);
+    if (step.kind == NetworkExecutionOpKind::Convolution)
+      return NetworkConvolutionStageOutputChannels(step);
+    if (step.kind == NetworkExecutionOpKind::LayerNorm)
+      return NetworkLayerNormStageWidth(step);
+    if (step.kind == NetworkExecutionOpKind::Attention)
+      return NetworkAttentionStageOutputWidth(step);
+    if (step.kind == NetworkExecutionOpKind::FeedForward)
+      return NetworkFeedForwardStageWidthsFor(step).output;
     if (step.kind == NetworkExecutionOpKind::Gate && !step.tensors.empty()) {
       return static_cast<int>(step.tensors[0].elements);
     }
@@ -138,11 +131,10 @@ int CudaDenseStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
   if (entry.first_step >= execution_plan.steps.size())
     throw std::runtime_error("CUDA dense stage index is invalid");
   const auto &step = execution_plan.steps[entry.first_step];
-  if (step.kind != NetworkExecutionOpKind::Dense || step.tensors.empty() ||
-      step.tensors[0].dims.size() != 2) {
+  if (step.kind != NetworkExecutionOpKind::Dense) {
     throw std::runtime_error("CUDA dense stage tensor is invalid");
   }
-  return static_cast<int>(step.tensors[0].dims[0]);
+  return NetworkDenseStageOutputWidth(step);
 }
 
 int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
@@ -151,23 +143,21 @@ int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
     throw std::runtime_error("CUDA output stage index is invalid");
   const auto &step = execution_plan.steps[entry.first_step];
   if (entry.kind == CudaExecutionScheduleKind::ConvolutionStage) {
-    if (step.kind != NetworkExecutionOpKind::Convolution ||
-        step.tensors.empty() || step.tensors[0].dims.size() != 4) {
+    if (step.kind != NetworkExecutionOpKind::Convolution) {
       throw std::runtime_error("CUDA convolution stage tensor is invalid");
     }
-    return static_cast<int>(step.tensors[0].dims[0]);
+    return NetworkConvolutionStageOutputChannels(step);
   }
   if (entry.kind == CudaExecutionScheduleKind::ResidualConvolutionStage) {
     if (entry.second_step >= execution_plan.steps.size())
       throw std::runtime_error(
           "CUDA residual convolution stage index is invalid");
     const auto &conv2 = execution_plan.steps[entry.second_step];
-    if (conv2.kind != NetworkExecutionOpKind::Convolution ||
-        conv2.tensors.empty() || conv2.tensors[0].dims.size() != 4) {
+    if (conv2.kind != NetworkExecutionOpKind::Convolution) {
       throw std::runtime_error(
           "CUDA residual convolution stage tensor is invalid");
     }
-    return static_cast<int>(conv2.tensors[0].dims[0]);
+    return NetworkConvolutionStageOutputChannels(conv2);
   }
   if (IsCudaDenseScheduleEntry(entry.kind))
     return CudaDenseStageWidth(execution_plan, entry);
@@ -181,22 +171,20 @@ int CudaOutputStageWidth(const NetworkResolvedExecutionPlan &execution_plan,
             0) {
       return previous_width;
     }
-    return static_cast<int>(step.tensors[0].elements);
+    return NetworkGateStageWidth(step);
   }
   if (entry.kind == CudaExecutionScheduleKind::AttentionLayerNormStage) {
-    if (step.kind != NetworkExecutionOpKind::Attention ||
-        step.tensors.size() < 8 || step.tensors[6].dims.size() != 2) {
+    if (step.kind != NetworkExecutionOpKind::Attention) {
       throw std::runtime_error("CUDA attention stage tensor is invalid");
     }
-    return static_cast<int>(step.tensors[6].dims[0]);
+    return NetworkAttentionStageOutputWidth(step);
   }
   if (entry.kind == CudaExecutionScheduleKind::FeedForwardStage ||
       entry.kind == CudaExecutionScheduleKind::FeedForwardLayerNormStage) {
-    if (step.kind != NetworkExecutionOpKind::FeedForward ||
-        step.tensors.size() < 4 || step.tensors[2].dims.size() != 2) {
+    if (step.kind != NetworkExecutionOpKind::FeedForward) {
       throw std::runtime_error("CUDA feed-forward stage tensor is invalid");
     }
-    return static_cast<int>(step.tensors[2].dims[0]);
+    return NetworkFeedForwardStageWidthsFor(step).output;
   }
   if (entry.kind == CudaExecutionScheduleKind::PolicyMapStage) {
     if (step.kind != NetworkExecutionOpKind::PolicyMap)

@@ -107,6 +107,24 @@ struct NetworkPositionEncodingGeometry {
   int concat_width = 0;
 };
 
+enum class NetworkPlanStageGroup {
+  Other,
+  Body,
+  Policy,
+  Value,
+  MovesLeft,
+};
+
+struct NetworkFeedForwardStageWidths {
+  int hidden = 0;
+  int output = 0;
+};
+
+struct NetworkSqueezeExciteStageWidths {
+  int hidden = 0;
+  int output = 0;
+};
+
 std::string NetworkExecutionOpKindName(NetworkExecutionOpKind kind);
 
 NetworkExecutionPlan CreateNetworkExecutionPlan(
@@ -129,6 +147,52 @@ NetworkPositionEncodingGeometry ResolveDynamicPositionEncodingGeometry(
 NetworkPositionEncodingGeometry ResolveStaticPositionEncodingGeometry(
     const NetworkResolvedExecutionPlan &plan,
     const NetworkResolvedExecutionStep &dense);
+
+const NetworkResolvedTensorRef *
+FindNetworkTensorSuffix(const NetworkResolvedExecutionStep &step,
+                        std::string_view suffix);
+
+std::string NetworkPlanStagePrefix(const NetworkResolvedExecutionPlan &plan,
+                                   NetworkPlanStageGroup group);
+
+NetworkPlanStageGroup
+ClassifyNetworkPlanStage(const NetworkResolvedExecutionPlan &plan,
+                         std::string_view stage_name);
+
+bool IsNetworkValueErrorStage(std::string_view stage_name);
+
+int NetworkDenseStageOutputWidth(const NetworkResolvedExecutionStep &dense);
+
+int NetworkConvolutionStageOutputChannels(
+    const NetworkResolvedExecutionStep &convolution);
+
+int NetworkSqueezeExciteStageOutputWidth(
+    const NetworkResolvedExecutionStep &se);
+
+NetworkSqueezeExciteStageWidths
+NetworkSqueezeExciteStageWidthsFor(const NetworkResolvedExecutionStep &se);
+
+int NetworkLayerNormStageWidth(const NetworkResolvedExecutionStep &norm);
+
+int NetworkGateStageWidth(const NetworkResolvedExecutionStep &gate);
+
+NetworkFeedForwardStageWidths
+NetworkFeedForwardStageWidthsFor(const NetworkResolvedExecutionStep &ffn);
+
+int NetworkAttentionStageOutputWidth(
+    const NetworkResolvedExecutionStep &attention);
+
+int NetworkAttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
+                              std::string_view stage_name);
+
+bool NetworkIsAttentionLayerNormStage(
+    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name);
+
+bool NetworkStageUsesSquareRows(const NetworkResolvedExecutionPlan &plan,
+                                std::string_view stage_name);
+
+int NetworkDenseLikeRows(const NetworkResolvedExecutionPlan &plan,
+                         std::string_view stage_name, int batch_size);
 
 std::string NetworkDenseStageActivationName(
     const NetworkResolvedExecutionPlan &plan, std::string_view stage_name);

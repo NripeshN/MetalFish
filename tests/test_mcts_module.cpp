@@ -896,6 +896,109 @@ void test_network_execution_plan(TestCounter &tc) {
                   1e-6f) < 1e-12f,
          "shared math contract should use attention policy epsilon", tc);
 
+  auto tensor = [](std::size_t index, const std::string &name,
+                   std::size_t elements, std::vector<std::uint32_t> dims,
+                   NN::NetworkWeightTensorKind kind) {
+    return NN::NetworkResolvedTensorRef{index, name, elements, std::move(dims),
+                                        kind};
+  };
+  NN::NetworkResolvedExecutionPlan traits_plan;
+  traits_plan.policy_head = "smoke";
+  traits_plan.value_head = "winner";
+  traits_plan.format.attention_body = true;
+  traits_plan.format.attention_policy = true;
+  traits_plan.format.body_attention_heads = 2;
+  traits_plan.format.policy_attention_heads = 4;
+  traits_plan.tensors.input_planes = NN::kPackedInputPlaneCount;
+  traits_plan.tensors.input_squares = NN::kPackedInputSquareCount;
+  traits_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense,
+      "body.input_embedding",
+      {tensor(0, "body.ip_emb_b", 8, {8}, NN::NetworkWeightTensorKind::DenseBias),
+       tensor(1, "body.ip_emb_w", 8 * 16, {8, 16},
+              NN::NetworkWeightTensorKind::DenseWeight)}});
+  traits_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::PolicyMap,
+      "policy.smoke.policy_map",
+      {tensor(2, "policy.smoke.ip4_pol_w", 32, {4, 8},
+              NN::NetworkWeightTensorKind::DenseWeight)}});
+  expect(NN::ClassifyNetworkPlanStage(traits_plan, "policy.smoke.output") ==
+             NN::NetworkPlanStageGroup::Policy,
+         "shared traits should classify selected policy stages", tc);
+  expect(NN::ClassifyNetworkPlanStage(traits_plan, "policy.other.output") ==
+             NN::NetworkPlanStageGroup::Other,
+         "shared traits should reject non-selected policy stages", tc);
+  expect(NN::ClassifyNetworkPlanStage(traits_plan, "moves_left.output") ==
+             NN::NetworkPlanStageGroup::MovesLeft,
+         "shared traits should classify moves-left stages", tc);
+  expect(NN::NetworkStageUsesSquareRows(traits_plan,
+                                        "body.input_embedding_ffn"),
+         "shared traits should run input embedding continuations on square "
+         "rows",
+         tc);
+  expect(NN::NetworkStageUsesSquareRows(traits_plan, "policy.smoke.dense2"),
+         "shared traits should run attention-policy Q/K stages on square rows",
+         tc);
+  expect(NN::NetworkDenseLikeRows(traits_plan, "policy.smoke.dense2", 3) ==
+             3 * NN::kPackedInputSquareCount,
+         "shared traits should derive square-row batch sizes", tc);
+  expect(!NN::NetworkStageUsesSquareRows(traits_plan, "moves_left.output"),
+         "shared traits should keep final moves-left output at batch rows", tc);
+
+  NN::NetworkResolvedExecutionStep reordered_ffn{
+      NN::NetworkExecutionOpKind::FeedForward,
+      "body.encoder.0.ffn",
+      {
+          tensor(3, "body.encoder.0.ffn.dense2_b", 8, {8},
+                 NN::NetworkWeightTensorKind::DenseBias),
+          tensor(4, "body.encoder.0.ffn.dense2_w", 8 * 6, {8, 6},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(5, "body.encoder.0.ffn.dense1_b", 6, {6},
+                 NN::NetworkWeightTensorKind::DenseBias),
+          tensor(6, "body.encoder.0.ffn.dense1_w", 6 * 4, {6, 4},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+      }};
+  const auto ffn_widths = NN::NetworkFeedForwardStageWidthsFor(reordered_ffn);
+  expect(ffn_widths.hidden == 6 && ffn_widths.output == 8,
+         "shared traits should find FFN tensor roles by suffix", tc);
+  expect(NN::FindNetworkTensorSuffix(reordered_ffn, ".dense1_w") &&
+             NN::FindNetworkTensorSuffix(reordered_ffn, ".dense1_w")
+                     ->dims[0] == 6,
+         "shared traits should expose suffix tensor lookup", tc);
+  NN::NetworkResolvedExecutionStep reordered_attention{
+      NN::NetworkExecutionOpKind::Attention,
+      "body.encoder.0.mha",
+      {
+          tensor(7, "body.encoder.0.mha.dense_b", 8, {8},
+                 NN::NetworkWeightTensorKind::DenseBias),
+          tensor(8, "body.encoder.0.mha.dense_w", 8 * 8, {8, 8},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+      }};
+  expect(NN::NetworkAttentionStageOutputWidth(reordered_attention) == 8,
+         "shared traits should find attention output projection by suffix", tc);
+  NN::NetworkResolvedExecutionStep reordered_se{
+      NN::NetworkExecutionOpKind::Dense,
+      "body.residual.0.se",
+      {
+          tensor(9, "body.residual.0.se.b2", 8, {8},
+                 NN::NetworkWeightTensorKind::DenseBias),
+          tensor(10, "body.residual.0.se.w2", 8 * 6, {8, 6},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+          tensor(11, "body.residual.0.se.b1", 6, {6},
+                 NN::NetworkWeightTensorKind::DenseBias),
+          tensor(12, "body.residual.0.se.w1", 6 * 4, {6, 4},
+                 NN::NetworkWeightTensorKind::DenseWeight),
+      }};
+  const auto se_widths = NN::NetworkSqueezeExciteStageWidthsFor(reordered_se);
+  expect(se_widths.hidden == 6 && se_widths.output == 8,
+         "shared traits should find squeeze-excite tensor roles by suffix",
+         tc);
+  expect(NN::NetworkAttentionHeadCount(traits_plan, "body.encoder.0.mha") == 2,
+         "shared traits should select body attention head count", tc);
+  expect(NN::NetworkAttentionHeadCount(traits_plan,
+                                       "policy.smoke.encoder.0.mha") == 4,
+         "shared traits should select policy attention head count", tc);
+
   auto expect_throws = [&](const std::function<void()> &fn, const char *msg) {
     bool rejected = false;
     try {
@@ -2111,6 +2214,11 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   expect(residual_se_tape.RequireName("body.residual.0.se.pool").rows == 2 &&
              residual_se_tape.RequireName("body.residual.0.se.pool").width == 4,
          "CUDA tape should store residual SE pool as batch-channel rows", tc);
+  expect(residual_se_tape.RequireName("body.residual.0.se.fc1.dense").rows ==
+             2 &&
+             residual_se_tape.RequireName("body.residual.0.se.fc1.dense")
+                     .width == 2,
+         "CUDA tape should store residual SE hidden output", tc);
   expect(
       residual_se_tape.RequireName("body.residual.0.se.fc2.dense").rows == 2 &&
           residual_se_tape.RequireName("body.residual.0.se.fc2.dense").width ==

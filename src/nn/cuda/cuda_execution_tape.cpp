@@ -32,95 +32,19 @@ FindStep(const NetworkResolvedExecutionPlan &execution_plan,
 }
 
 int DenseOutputWidth(const NetworkResolvedExecutionStep &dense) {
-  if (dense.kind != NetworkExecutionOpKind::Dense || dense.tensors.empty() ||
-      dense.tensors[0].dims.size() != 2)
-    throw std::runtime_error("CUDA execution tape dense tensor is invalid");
-  const auto width = dense.tensors[0].dims[0];
-  if (width == 0)
-    throw std::runtime_error("CUDA execution tape dense width is zero");
-  return static_cast<int>(width);
+  return NetworkDenseStageOutputWidth(dense);
 }
 
 int ConvolutionOutputChannels(const NetworkResolvedExecutionStep &convolution) {
-  if (convolution.kind != NetworkExecutionOpKind::Convolution)
-    throw std::runtime_error(
-        "CUDA execution tape convolution tensor is invalid");
-  const NetworkResolvedTensorRef *weights = nullptr;
-  for (const auto &tensor : convolution.tensors) {
-    constexpr std::string_view kWeightSuffix = ".weights";
-    if (tensor.name.size() >= kWeightSuffix.size() &&
-        std::string_view(tensor.name)
-                .substr(tensor.name.size() - kWeightSuffix.size()) ==
-            kWeightSuffix) {
-      weights = &tensor;
-      break;
-    }
-  }
-  if (!weights || weights->dims.size() != 4)
-    throw std::runtime_error(
-        "CUDA execution tape convolution tensor is invalid");
-  const auto channels = weights->dims[0];
-  if (channels == 0)
-    throw std::runtime_error(
-        "CUDA execution tape convolution channels is zero");
-  return static_cast<int>(channels);
-}
-
-int SqueezeExciteOutputWidth(const NetworkResolvedExecutionStep &se) {
-  if (se.kind != NetworkExecutionOpKind::Dense)
-    throw std::runtime_error(
-        "CUDA execution tape squeeze-excite tensor is invalid");
-  for (const auto &tensor : se.tensors) {
-    if (tensor.name.ends_with(".w2") && tensor.dims.size() == 2 &&
-        tensor.dims[0] > 0)
-      return static_cast<int>(tensor.dims[0]);
-  }
-  for (const auto &tensor : se.tensors) {
-    if (tensor.name.ends_with(".b2") && tensor.dims.size() == 1 &&
-        tensor.dims[0] > 0)
-      return static_cast<int>(tensor.dims[0]);
-  }
-  throw std::runtime_error(
-      "CUDA execution tape squeeze-excite tensor is invalid");
+  return NetworkConvolutionStageOutputChannels(convolution);
 }
 
 int LayerNormWidth(const NetworkResolvedExecutionStep &norm) {
-  if (norm.kind != NetworkExecutionOpKind::LayerNorm || norm.tensors.empty() ||
-      norm.tensors[0].dims.size() != 1)
-    throw std::runtime_error("CUDA execution tape layernorm tensor is invalid");
-  const auto width = norm.tensors[0].dims[0];
-  if (width == 0)
-    throw std::runtime_error("CUDA execution tape layernorm width is zero");
-  return static_cast<int>(width);
+  return NetworkLayerNormStageWidth(norm);
 }
 
 int GateWidth(const NetworkResolvedExecutionStep &gate) {
-  if (gate.kind != NetworkExecutionOpKind::Gate || gate.tensors.empty())
-    throw std::runtime_error("CUDA execution tape gate tensor is invalid");
-  const auto width = gate.tensors[0].elements;
-  if (width == 0)
-    throw std::runtime_error("CUDA execution tape gate width is zero");
-  return static_cast<int>(width);
-}
-
-struct FeedForwardWidths {
-  int hidden = 0;
-  int output = 0;
-};
-
-FeedForwardWidths
-FeedForwardOutputWidths(const NetworkResolvedExecutionStep &ffn) {
-  if (ffn.kind != NetworkExecutionOpKind::FeedForward ||
-      ffn.tensors.size() < 4 || ffn.tensors[0].dims.size() != 2 ||
-      ffn.tensors[2].dims.size() != 2) {
-    throw std::runtime_error(
-        "CUDA execution tape feed-forward tensor is invalid");
-  }
-  const auto hidden = ffn.tensors[0].dims[0];
-  const auto output = ffn.tensors[2].dims[0];
-  if (hidden == 0 || output == 0)
-    throw std::runtime_error("CUDA execution tape feed-forward width is zero");
-  return FeedForwardWidths{static_cast<int>(hidden), static_cast<int>(output)};
+  return NetworkGateStageWidth(gate);
 }
 
 bool StartsWith(std::string_view value, std::string_view prefix) {
@@ -130,15 +54,6 @@ bool StartsWith(std::string_view value, std::string_view prefix) {
 
 bool EndsWith(std::string_view value, std::string_view suffix) {
   return value.ends_with(suffix);
-}
-
-bool IsAttentionLayerNormName(std::string_view name) {
-  if (!EndsWith(name, ".ln1"))
-    return false;
-  if (StartsWith(name, "body.encoder."))
-    return true;
-  return StartsWith(name, "policy.") &&
-         name.find(".encoder.") != std::string_view::npos;
 }
 
 bool IsSmolgenDenseName(std::string_view name) {
@@ -181,61 +96,6 @@ bool IsStaticPositionEmbeddingName(const NetworkResolvedExecutionPlan &plan,
                                    std::string_view name) {
   return plan.format.input_embedding == INPUT_EMBEDDING_PE_MAP &&
          name == "body.input_embedding";
-}
-
-int AttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
-                       std::string_view name) {
-  if (StartsWith(name, "body.encoder."))
-    return plan.format.body_attention_heads;
-  if (StartsWith(name, "policy."))
-    return plan.format.policy_attention_heads;
-  return 0;
-}
-
-bool HasStepNamed(const NetworkResolvedExecutionPlan &plan,
-                  std::string_view name) {
-  for (const auto &step : plan.steps) {
-    if (step.name == name)
-      return true;
-  }
-  return false;
-}
-
-bool IsAttentionPolicySquareRowStage(const NetworkResolvedExecutionPlan &plan,
-                                     std::string_view name) {
-  if (!plan.format.attention_policy)
-    return false;
-  const std::string prefix = "policy." + plan.policy_head + ".";
-  if (!StartsWith(name, prefix) || !HasStepNamed(plan, prefix + "policy_map"))
-    return false;
-  return name == prefix + "output" || name == prefix + "dense2" ||
-         name == prefix + "dense3" ||
-         name.find(".encoder.") != std::string_view::npos;
-}
-
-bool IsSquareRowStage(const NetworkResolvedExecutionPlan &plan,
-                      std::string_view name) {
-  if (StartsWith(name, "body.encoder."))
-    return plan.format.body_attention_heads > 0;
-  if (HasStepNamed(plan, "body.input_embedding") &&
-      (name == "body.input_embedding" ||
-       StartsWith(name, "body.input_embedding_"))) {
-    return true;
-  }
-  if (IsAttentionPolicySquareRowStage(plan, name))
-    return true;
-  if (plan.format.attention_body &&
-      name == "value." + plan.value_head + ".output") {
-    return true;
-  }
-  return plan.format.attention_body && name == "moves_left.dense0";
-}
-
-int DenseLikeRows(const NetworkResolvedExecutionPlan &plan,
-                  std::string_view name, int batch_size) {
-  if (IsSquareRowStage(plan, name))
-    return batch_size * kCudaAttentionSquares;
-  return batch_size;
 }
 
 } // namespace
@@ -401,20 +261,19 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
           if (se_index < plan.steps.size() &&
               IsResidualSqueezeExciteFor(plan.steps[se_index], block_name)) {
             const auto &se = plan.steps[se_index];
-            const int se_hidden = DenseOutputWidth(se);
-            const int se_output = SqueezeExciteOutputWidth(se);
+            const auto se_widths = NetworkSqueezeExciteStageWidthsFor(se);
             tape.Add(se.name + ".pool",
                      CudaExecutionBufferRole::SqueezeExcitePoolOutput,
                      batch_size, conv2_channels);
             tape.Add(se.name + ".fc1.dense",
                      CudaExecutionBufferRole::SqueezeExciteHiddenOutput,
-                     batch_size, se_hidden);
+                     batch_size, se_widths.hidden);
             tape.Add(se.name + ".fc1.activation",
                      CudaExecutionBufferRole::SqueezeExciteHiddenOutput,
-                     batch_size, se_hidden);
+                     batch_size, se_widths.hidden);
             tape.Add(se.name + ".fc2.dense",
                      CudaExecutionBufferRole::SqueezeExciteOutput, batch_size,
-                     se_output);
+                     se_widths.output);
             step_index = se_index;
           } else {
             step_index = conv2_index;
@@ -470,7 +329,7 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
         current_width = geometry.concat_width;
         break;
       }
-      const int rows = DenseLikeRows(plan, step.name, batch_size);
+      const int rows = NetworkDenseLikeRows(plan, step.name, batch_size);
       tape.Add(step.name + ".dense", CudaExecutionBufferRole::DenseOutput, rows,
                width);
       tape.Add(step.name + ".activation",
@@ -483,9 +342,7 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
       if (IsSmolgenNormName(step.name))
         break;
       const int width = LayerNormWidth(step);
-      const int rows = IsAttentionLayerNormName(step.name)
-                           ? batch_size * kCudaAttentionSquares
-                           : DenseLikeRows(plan, step.name, batch_size);
+      const int rows = NetworkDenseLikeRows(plan, step.name, batch_size);
       tape.Add(step.name + ".normalized",
                CudaExecutionBufferRole::NormalizedOutput, rows, width);
       current_rows = rows;
@@ -501,7 +358,7 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
       }
       const int rows = current_width > 0
                            ? current_rows
-                           : DenseLikeRows(plan, step.name, batch_size);
+                           : NetworkDenseLikeRows(plan, step.name, batch_size);
       tape.Add(step.name + ".gated", CudaExecutionBufferRole::GateOutput, rows,
                width);
       current_rows = rows;
@@ -509,8 +366,8 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
       break;
     }
     case NetworkExecutionOpKind::FeedForward: {
-      const auto widths = FeedForwardOutputWidths(step);
-      const int rows = DenseLikeRows(plan, step.name, batch_size);
+      const auto widths = NetworkFeedForwardStageWidthsFor(step);
+      const int rows = NetworkDenseLikeRows(plan, step.name, batch_size);
       tape.Add(step.name + ".dense1",
                CudaExecutionBufferRole::FeedForwardHiddenOutput, rows,
                widths.hidden);
@@ -523,7 +380,7 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
       break;
     }
     case NetworkExecutionOpKind::Attention: {
-      const int head_count = AttentionHeadCount(plan, step.name);
+      const int head_count = NetworkAttentionHeadCount(plan, step.name);
       const auto attention =
           ResolveCudaAttentionStagePlan(plan, step_index, head_count);
       const int square_rows = batch_size * attention.squares;
@@ -601,20 +458,20 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
       continue;
     }
     const int width = LayerNormWidth(step);
-    const int rows = DenseLikeRows(plan, step.name, batch_size);
+    const int rows = NetworkDenseLikeRows(plan, step.name, batch_size);
     tape.Add(step.name + ".residual", CudaExecutionBufferRole::ResidualOutput,
              rows, width);
   }
   for (std::size_t i = 1; i < plan.steps.size(); ++i) {
     const auto &step = plan.steps[i];
     if (step.kind != NetworkExecutionOpKind::LayerNorm ||
-        !IsAttentionLayerNormName(step.name)) {
+        !NetworkIsAttentionLayerNormStage(plan, step.name)) {
       continue;
     }
     const int width = LayerNormWidth(step);
     tape.Add(step.name + ".attention_residual",
              CudaExecutionBufferRole::AttentionResidualOutput,
-             batch_size * kCudaAttentionSquares, width);
+             NetworkDenseLikeRows(plan, step.name, batch_size), width);
   }
   return tape;
 }
