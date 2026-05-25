@@ -47,7 +47,10 @@ def write_artifacts(
         encoding="utf-8",
     )
     compare.write_text(
-        f"backend: {backend_label}\n    batches: b1=1.0ms checksum=0\n",
+        f"backend: {backend_label}\n"
+        "    benchmark_warmups: 3\n"
+        "    batches: b1=1.0ms checksum=0\n"
+        f"backend_after: {backend_label}\n",
         encoding="utf-8",
     )
     probe.write_text(
@@ -156,6 +159,7 @@ def test_checker_writes_manifest() -> None:
 
         data = json.loads(manifest.read_text(encoding="utf-8"))
         expect("manifest backend", data["backend_label"] == "Metal (MPSGraph) backend")
+        expect("manifest warmup", data["benchmark_warmup_line"] == "benchmark_warmups: 3")
         expect("manifest batch", "batches:" in data["batch_line"])
         expect("manifest wdl", data["probe"]["has_wdl"] is True)
         expect("manifest moves-left", data["probe"]["has_moves_left"] is True)
