@@ -726,7 +726,10 @@ smoke, so portable builds verify the MCTS construction path cheaply. The Linux
 and MSVC legs additionally download BT4 for the metadata/backend-construction
 probe; MinGW stays lightweight package
 coverage. The uploaded artifacts include a generated manifest that makes this
-backend scope explicit. Recent branch-tip gates had Linux CPU, Windows MinGW
+backend scope explicit, and each portable job now extracts its archive before
+upload to assert the shipped executable, manifest, README, changelog, license,
+and Windows runtime DLL packaging where applicable. Recent branch-tip gates had
+Linux CPU, Windows MinGW
 CPU, Windows MSVC CPU, Windows CUDA compile, macOS Metal, CUDA L4 runtime, and
 the bounded hybrid regression gate green while remaining current with
 `origin/main`. Linux portable CI and Windows MSVC both run real BT4

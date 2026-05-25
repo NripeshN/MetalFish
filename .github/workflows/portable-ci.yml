@@ -114,6 +114,22 @@ jobs:
           cp build-linux/PORTABLE_ARTIFACT.md README.md CHANGELOG.md LICENSE portable-linux/
           tar -czf "${package_name}.tar.gz" -C portable-linux .
 
+      - name: Smoke Linux artifact contents
+        run: |
+          package="$(find . -maxdepth 1 -name 'metalfish*linux-x86_64-cpu.tar.gz' -print -quit)"
+          test -n "${package}"
+          rm -rf portable-linux-check
+          mkdir -p portable-linux-check
+          tar -xzf "${package}" -C portable-linux-check
+          test -x portable-linux-check/metalfish
+          test -s portable-linux-check/PORTABLE_ARTIFACT.md
+          test -s portable-linux-check/README.md
+          test -s portable-linux-check/CHANGELOG.md
+          test -s portable-linux-check/LICENSE
+          grep -q -- "- Platform: Linux x86_64" portable-linux-check/PORTABLE_ARTIFACT.md
+          grep -q -- '- Binary: `metalfish`' portable-linux-check/PORTABLE_ARTIFACT.md
+          grep -q "portable CPU transformer fallback" portable-linux-check/PORTABLE_ARTIFACT.md
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v6
         with:
@@ -214,6 +230,26 @@ jobs:
           done
           rm -f "${package_name}.zip"
           bsdtar -a -cf "${package_name}.zip" -C portable-windows .
+
+      - name: Smoke Windows MinGW artifact contents
+        run: |
+          package="$(find . -maxdepth 1 -name 'metalfish*windows-x86_64-mingw-cpu.zip' -print -quit)"
+          test -n "${package}"
+          rm -rf portable-windows-check
+          mkdir -p portable-windows-check
+          bsdtar -xf "${package}" -C portable-windows-check
+          test -s portable-windows-check/metalfish.exe
+          test -s portable-windows-check/PORTABLE_ARTIFACT.md
+          test -s portable-windows-check/README.md
+          test -s portable-windows-check/CHANGELOG.md
+          test -s portable-windows-check/LICENSE
+          grep -q -- "- Platform: Windows x86_64 MinGW" portable-windows-check/PORTABLE_ARTIFACT.md
+          grep -q -- '- Binary: `metalfish.exe`' portable-windows-check/PORTABLE_ARTIFACT.md
+          grep -q "portable CPU transformer fallback" portable-windows-check/PORTABLE_ARTIFACT.md
+          if [ -z "$(find portable-windows-check -maxdepth 1 -name '*.dll' -size +0c -print -quit)" ]; then
+            echo "Packaged MinGW runtime DLL missing" >&2
+            exit 2
+          fi
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v6
@@ -366,6 +402,47 @@ jobs:
             Remove-Item "${packageName}.zip"
           }
           Compress-Archive -Path portable-windows-msvc/* -DestinationPath "${packageName}.zip"
+
+      - name: Smoke Windows MSVC artifact contents
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem -Path . -Filter "metalfish*windows-x86_64-msvc-cpu.zip" | Select-Object -First 1
+          if (-not $package) {
+            throw "Windows MSVC package zip not found"
+          }
+          Remove-Item -Recurse -Force portable-windows-msvc-check -ErrorAction SilentlyContinue
+          Expand-Archive -Path $package.FullName -DestinationPath portable-windows-msvc-check
+          $requiredFiles = @(
+            "metalfish.exe",
+            "PORTABLE_ARTIFACT.md",
+            "README.md",
+            "CHANGELOG.md",
+            "LICENSE"
+          )
+          foreach ($file in $requiredFiles) {
+            $path = Join-Path "portable-windows-msvc-check" $file
+            if (-not (Test-Path $path)) {
+              throw "Missing packaged file: $file"
+            }
+            if ((Get-Item $path).Length -le 0) {
+              throw "Packaged file is empty: $file"
+            }
+          }
+          $manifest = Get-Content portable-windows-msvc-check/PORTABLE_ARTIFACT.md -Raw
+          if (-not $manifest.Contains("- Platform: Windows x86_64 MSVC")) {
+            throw "MSVC portable manifest is missing the platform label"
+          }
+          if (-not $manifest.Contains('- Binary: `metalfish.exe`')) {
+            throw "MSVC portable manifest is missing the binary label"
+          }
+          if (-not $manifest.Contains("portable CPU transformer fallback")) {
+            throw "MSVC portable manifest is missing backend scope"
+          }
+          Get-ChildItem portable-windows-msvc-check -Filter "*.dll" | ForEach-Object {
+            if ($_.Length -le 0) {
+              throw "Packaged runtime DLL is empty: $($_.Name)"
+            }
+          }
 
       - name: Upload Windows MSVC artifact
         uses: actions/upload-artifact@v6
