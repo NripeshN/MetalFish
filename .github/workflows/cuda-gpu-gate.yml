@@ -23,6 +23,10 @@ on:
         description: CUDA stable execution batch size
         required: false
         default: "16"
+      cublas_workspace_config:
+        description: Optional CUBLAS_WORKSPACE_CONFIG diagnostic override
+        required: false
+        default: ""
       profile:
         description: Run the optional CUDA profile smoke
         required: false
@@ -108,7 +112,7 @@ jobs:
           METALFISH_CUDA_UCI_GO: ${{ inputs.uci_go }}
           METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
           METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
-          CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+          CUBLAS_WORKSPACE_CONFIG: ${{ inputs.cublas_workspace_config }}
         run: |
           set -euo pipefail
           : "${METALFISH_GCP_PROJECT:=metalfish}"
