@@ -1352,6 +1352,8 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
   expect(static_cast<bool>(stub), "explicit stub backend should construct", tc);
   expect(stub->GetNetworkInfo().find("Stub network") != std::string::npos,
          "explicit stub backend should not select a platform backend", tc);
+  expect(!stub->HasWDL() && !stub->HasMovesLeft(),
+         "stub backend should not advertise WDL or moves-left heads", tc);
   auto path_stub = NN::CreateNetwork("", "stub");
   expect(static_cast<bool>(path_stub),
          "explicit stub backend should not require a weights path", tc);
@@ -1365,6 +1367,11 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
   expect(stub_eval.policy_priors.size() == 20,
          "stub evaluator should generate legal root priors without weights",
          tc);
+  expect(!stub_evaluator.HasWDL() && !stub_evaluator.HasMovesLeft(),
+         "MCTS evaluator should expose stub backend output capabilities", tc);
+  Backend stub_backend("", 4, "stub");
+  expect(!stub_backend.HasWDL() && !stub_backend.HasMovesLeft(),
+         "MCTS backend should expose evaluator output capabilities", tc);
 
   auto expect_throws = [&](const std::function<void()> &fn, const char *msg) {
     bool threw = false;
@@ -1439,6 +1446,8 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
     expect(cpu->GetNetworkInfo().find("CPU transformer backend") !=
                std::string::npos,
            "explicit cpu backend should validate real transformer weights", tc);
+    expect(cpu->HasWDL() && cpu->HasMovesLeft(),
+           "BT4 CPU backend should advertise WDL and moves-left heads", tc);
   } else {
     MetalFish::Test::print_missing_nn_weights_skip();
   }
@@ -1451,6 +1460,8 @@ void test_cpu_backend_dense_execution(TestCounter &tc) {
   expect(cpu->GetNetworkInfo().find("executor=dense-layernorm") !=
              std::string::npos,
          "explicit cpu backend should enable dense/layernorm execution", tc);
+  expect(!cpu->HasWDL() && !cpu->HasMovesLeft(),
+         "scalar CPU fixture should not advertise WDL or moves-left heads", tc);
 
   NN::InputPlanes input{};
   const auto output = cpu->Evaluate(input);

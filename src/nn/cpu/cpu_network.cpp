@@ -648,6 +648,10 @@ std::string CpuNetwork::GetNetworkInfo() const {
   return out.str();
 }
 
+bool CpuNetwork::HasWDL() const { return tensor_plan_.wdl; }
+
+bool CpuNetwork::HasMovesLeft() const { return tensor_plan_.moves_left; }
+
 std::string CpuNetwork::UnsupportedExecutionMessage() const {
   return unsupported_execution_reason_.empty()
              ? "CPU transformer backend execution is not implemented yet"

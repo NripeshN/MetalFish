@@ -70,6 +70,8 @@ public:
       const std::vector<LegalMovesView> &legal_moves);
 
   std::string GetNetworkInfo() const;
+  bool HasWDL() const;
+  bool HasMovesLeft() const;
 
 private:
   class Impl;

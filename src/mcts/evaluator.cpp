@@ -174,6 +174,8 @@ public:
   }
 
   std::string GetNetworkInfo() const { return network_->GetNetworkInfo(); }
+  bool HasWDL() const { return network_->HasWDL(); }
+  bool HasMovesLeft() const { return network_->HasMovesLeft(); }
 
 private:
   EvaluationResult
@@ -279,6 +281,10 @@ std::vector<EvaluationResult> NNMCTSEvaluator::EvaluateBatchWithHistoryViews(
 std::string NNMCTSEvaluator::GetNetworkInfo() const {
   return impl_->GetNetworkInfo();
 }
+
+bool NNMCTSEvaluator::HasWDL() const { return impl_->HasWDL(); }
+
+bool NNMCTSEvaluator::HasMovesLeft() const { return impl_->HasMovesLeft(); }
 
 } // namespace MCTS
 } // namespace MetalFish

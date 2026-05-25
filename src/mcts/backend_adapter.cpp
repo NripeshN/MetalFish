@@ -313,9 +313,9 @@ std::unique_ptr<BackendComputation> Backend::CreateComputation() {
   return std::make_unique<BackendComputation>(evaluator_.get(), &cache_);
 }
 
-bool Backend::HasWDL() const { return true; }
+bool Backend::HasWDL() const { return evaluator_->HasWDL(); }
 
-bool Backend::HasMovesLeft() const { return true; }
+bool Backend::HasMovesLeft() const { return evaluator_->HasMovesLeft(); }
 
 } // namespace MCTS
 } // namespace MetalFish

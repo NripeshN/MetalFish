@@ -54,6 +54,9 @@ public:
     return "Stub network (not functional)";
   }
 
+  bool HasWDL() const override { return false; }
+  bool HasMovesLeft() const override { return false; }
+
 private:
   WeightsFile weights_;
 };

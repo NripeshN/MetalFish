@@ -28,6 +28,8 @@ public:
   EvaluateBatch(const std::vector<InputPlanes> &inputs) = 0;
 
   virtual std::string GetNetworkInfo() const = 0;
+  virtual bool HasWDL() const { return false; }
+  virtual bool HasMovesLeft() const { return false; }
 };
 
 std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,

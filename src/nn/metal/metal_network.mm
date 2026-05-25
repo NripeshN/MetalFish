@@ -168,6 +168,10 @@ std::string MetalNetwork::GetNetworkInfo() const {
   return oss.str();
 }
 
+bool MetalNetwork::HasWDL() const { return wdl_; }
+
+bool MetalNetwork::HasMovesLeft() const { return moves_left_; }
+
 } // namespace Metal
 } // namespace NN
 } // namespace MetalFish

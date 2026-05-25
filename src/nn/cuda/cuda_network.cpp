@@ -437,6 +437,10 @@ std::string CudaNetwork::GetNetworkInfo() const {
   return out.str();
 }
 
+bool CudaNetwork::HasWDL() const { return tensor_plan_.wdl; }
+
+bool CudaNetwork::HasMovesLeft() const { return tensor_plan_.moves_left; }
+
 } // namespace Cuda
 } // namespace NN
 } // namespace MetalFish
