@@ -381,6 +381,17 @@ CudaBufferSmokeResult RunInferenceBufferSmoke() {
       result.message = "CUDA output buffer clear/download mismatch";
       return result;
     }
+    const auto decoded_output = buffers.DownloadOutputs(4, stream, false);
+    if (decoded_output.policy.size() != layout.PolicyEntries() ||
+        decoded_output.value.size() != layout.ValueEntries() ||
+        decoded_output.moves_left.size() != layout.MovesLeftEntries() ||
+        !decoded_output.raw_policy.empty() || !AllZero(decoded_output.policy) ||
+        !AllZero(decoded_output.value) ||
+        !AllZero(decoded_output.moves_left)) {
+      result.status = CudaSmokeStatus::Mismatch;
+      result.message = "CUDA decoded-only output download mismatch";
+      return result;
+    }
     if (generation_after_allocate <= 1) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA buffer allocation generation did not advance";

@@ -569,7 +569,12 @@ Current CUDA backend boundary:
   outputs by default. The raw policy scratch tensor remains available when
   `METALFISH_CUDA_TRACE_RAW_OUTPUTS=1` is set and low-level buffer smokes keep
   the full-download default, but ordinary CUDA MCTS avoids an unused
-  device-to-host transfer from the policy-map scratch buffer.
+  device-to-host transfer from the policy-map scratch buffer. The 2026-05-25
+  L4 gate `metalfish-cuda-gate-20260525-raw-policy-skip` accepted CUDA unit
+  tests, fixed BT4 references, batch parity, single/batch reuse stress,
+  auto/CUDA/hybrid UCI smokes, ANE-disable hybrid smoke, and graph replay; the
+  run is recorded as a correctness gate rather than a speed claim because it
+  used a different GCP region than the preceding dense A/B runs.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.

@@ -973,12 +973,8 @@ void test_network_execution_plan(TestCounter &tc) {
       NN::Cuda::CreateCudaExecutionSchedule(loaded_resolved_plan);
   expect(loaded_cuda_schedule.positional_encoding_stage_count > 0,
          "loaded CUDA schedule should classify smolgen positional weights", tc);
-  expect(loaded_cuda_schedule.FirstUnsupported() &&
-             loaded_cuda_schedule.FirstUnsupported()->op_kind ==
-                 NN::NetworkExecutionOpKind::Attention,
-         "loaded CUDA schedule should now reach attention as first unsupported "
-         "operator",
-         tc);
+  expect(loaded_cuda_schedule.FullySupported(),
+         "loaded CUDA schedule should support the full BT4 execution plan", tc);
   const auto loaded_cuda_attention_plan =
       NN::Cuda::ResolveCudaAttentionStagePlan(
           loaded_resolved_plan, first_body_attention,
@@ -1038,6 +1034,20 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_tape_batch2.RequireName("body.encoder.0.ffn.dense1").rows ==
              2 * NN::Cuda::kCudaAttentionSquares,
          "loaded CUDA tape should run encoder FFN on board-square rows", tc);
+  const auto loaded_cuda_output_mapping = NN::Cuda::CreateCudaOutputMapping(
+      loaded_tensor_plan, loaded_resolved_plan, loaded_cuda_schedule);
+  expect(loaded_cuda_output_mapping.ok(),
+         "loaded CUDA output mapping should bind BT4 policy/value/moves-left",
+         tc);
+  expect(loaded_cuda_output_mapping.Find(NN::Cuda::CudaOutputTarget::Policy) !=
+             nullptr,
+         "loaded CUDA output mapping should expose decoded policy output", tc);
+  expect(loaded_cuda_output_mapping.Find(NN::Cuda::CudaOutputTarget::Value) !=
+             nullptr,
+         "loaded CUDA output mapping should expose value output", tc);
+  expect(loaded_cuda_output_mapping.Find(
+             NN::Cuda::CudaOutputTarget::MovesLeft) != nullptr,
+         "loaded CUDA output mapping should expose moves-left output", tc);
 #endif
 }
 
