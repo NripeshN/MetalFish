@@ -158,14 +158,16 @@ jobs:
             "${candidate_args[@]}"
 
       - name: Download large offline puzzle sample
+        id: puzzle-sample
         working-directory: candidate
         env:
           PUZZLE_COUNT: ${{ github.event.inputs.puzzle_count || '1000' }}
           LICHESS_PUZZLE_CSV_URL: https://database.lichess.org/lichess_db_puzzle.csv.zst
         run: |
+          set -o pipefail
           : "${PUZZLE_COUNT:=1000}"
           mkdir -p results/hybrid_regression/puzzles
-          curl -L --fail --silent --show-error "${LICHESS_PUZZLE_CSV_URL}" \
+          if curl -L --fail --silent --show-error "${LICHESS_PUZZLE_CSV_URL}" \
             | zstd -dc \
             | python3 tools/filter_lichess_puzzle_csv.py \
                 --out results/hybrid_regression/puzzles/sample.csv \
@@ -174,9 +176,21 @@ jobs:
                 --min-rating 1200 \
                 --max-rating 2800 \
                 --min-popularity 70 \
-                --themes "advantage,mate,fork,sacrifice,skewer,pin,discoveredAttack"
+                --themes "advantage,mate,fork,sacrifice,skewer,pin,discoveredAttack"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping large puzzle regression because the external Lichess puzzle database was unavailable."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            rm -f results/hybrid_regression/puzzles/sample.csv
+            {
+              echo "# Large Puzzle Regression"
+              echo ""
+              echo "Skipped: external Lichess puzzle database unavailable during CI."
+            } > results/hybrid_regression/puzzles/skipped.md
+          fi
 
       - name: Large offline puzzle regression
+        if: steps.puzzle-sample.outputs.available == 'true'
         working-directory: candidate
         env:
           PUZZLE_COUNT: ${{ github.event.inputs.puzzle_count || '1000' }}
