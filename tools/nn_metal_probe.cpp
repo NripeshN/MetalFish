@@ -529,39 +529,51 @@ void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
   std::cout << "}\n";
 }
 
-struct ProbePositionHistory {
+struct ProbePositionSnapshot {
   std::deque<StateInfo> states;
-  std::deque<Position> positions;
+  Position position;
+};
+
+struct ProbePositionHistory {
+  std::vector<std::unique_ptr<ProbePositionSnapshot>> snapshots;
   std::vector<const Position *> ptrs;
 };
 
-ProbePositionHistory BuildProbePositionHistory(const Options &options) {
-  ProbePositionHistory history;
-  history.states.emplace_back();
+std::unique_ptr<ProbePositionSnapshot>
+BuildProbePositionSnapshot(const Options &options, std::size_t move_count) {
+  auto snapshot = std::make_unique<ProbePositionSnapshot>();
+  snapshot->states.emplace_back();
+  snapshot->position.set(options.fen, false, &snapshot->states.back());
 
-  Position current;
-  current.set(options.fen, false, &history.states.back());
-  history.positions.push_back(current);
-
-  for (const std::string &move_text : options.moves) {
-    const Move move = UCIEngine::to_move(current, move_text);
+  for (std::size_t i = 0; i < move_count; ++i) {
+    const std::string &move_text = options.moves[i];
+    const Move move = UCIEngine::to_move(snapshot->position, move_text);
     if (move == Move::none()) {
       throw std::runtime_error("Illegal probe move " + move_text +
-                               " from FEN: " + current.fen());
+                               " from FEN: " + snapshot->position.fen());
     }
-    history.states.emplace_back();
-    current.do_move(move, history.states.back());
-    history.positions.push_back(current);
+    snapshot->states.emplace_back();
+    snapshot->position.do_move(move, snapshot->states.back());
   }
 
+  return snapshot;
+}
+
+ProbePositionHistory BuildProbePositionHistory(const Options &options) {
+  ProbePositionHistory history;
+  history.snapshots.reserve(options.moves.size() + 1);
+  for (std::size_t move_count = 0; move_count <= options.moves.size();
+       ++move_count) {
+    history.snapshots.push_back(BuildProbePositionSnapshot(options, move_count));
+  }
   return history;
 }
 
 void RefreshProbeHistoryPointers(ProbePositionHistory &history) {
   history.ptrs.clear();
-  history.ptrs.reserve(history.positions.size());
-  for (const Position &position : history.positions)
-    history.ptrs.push_back(&position);
+  history.ptrs.reserve(history.snapshots.size());
+  for (const auto &snapshot : history.snapshots)
+    history.ptrs.push_back(&snapshot->position);
 }
 
 void RunProbe(const Options &options) {
