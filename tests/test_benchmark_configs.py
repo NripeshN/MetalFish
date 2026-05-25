@@ -680,6 +680,7 @@ def main() -> int:
             "tools/run_nn_backend_probe_suite.py",
             "Run Metal NN parity report",
             "METALFISH_NN_PARITY_REPORT=build/metal-nn-parity-report.md",
+            "METALFISH_NN_BENCH_WARMUP_ITERS=3",
             "metal-nn-comparison.log",
             "metal-nn-probe.log",
             "metal-nn-probe-suite.log",
@@ -841,9 +842,23 @@ def main() -> int:
             "--comparison-log",
             "--manifest-out",
             "--require-batch-benchmark",
+            "comparison_executor_before",
+            "comparison_executor_after",
+            "comparison_profile_enabled",
+            "benchmark_warmup_line",
+            "probe",
+            "executor",
+            "profile_enabled",
             "NN artifact check: PASS",
             "probe output did not decode WDL",
             "probe output did not decode moves-left",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tests/test_nn_comparison.cpp",
+        [
+            "METALFISH_NN_BENCH_WARMUP_ITERS",
+            "benchmark_warmups:",
         ],
     )
     assert_file_contains(
@@ -923,6 +938,7 @@ def main() -> int:
             "check_nn_backend_artifacts.py",
             "run_nn_backend_probe_suite.py",
             "METALFISH_CUDA_PROFILE=0",
+            "METALFISH_NN_BENCH_WARMUP_ITERS",
             '--backend-label "CUDA transformer backend"',
             "--full-policy",
             "Parity Report",
@@ -1093,6 +1109,7 @@ def main() -> int:
             "METALFISH_GCP_ARTIFACT_DIR",
             "METALFISH_GCP_GCS_PREFIX",
             "METALFISH_METAL_PROBE_SUITE_LOG",
+            "METALFISH_NN_BENCH_WARMUP_ITERS",
             "collect_remote_artifacts",
             "compare_collected_probe_suite",
             "cuda-gpu-summary.md",

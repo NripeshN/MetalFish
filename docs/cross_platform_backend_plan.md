@@ -302,6 +302,11 @@ Current CUDA backend boundary:
   outputs, expanded batch parity, auto-backend UCI smoke, and explicit-CUDA UCI
   smoke green with `b1=16.948ms`, `b2=18.971ms`, `b4=30.237ms`,
   `b8=43.361ms`, `b16=83.492ms`, `b32=158.366ms` (`4.949ms/eval` at batch 32).
+- CUDA batch benchmark timings are replay-warmed before measurement, so graph
+  capture/setup is not folded into steady-state batch timings. The NN artifact
+  manifest records comparison executor state before and after the benchmark,
+  benchmark warmup count, and whether profile mode was enabled for the
+  comparison/probe logs.
 - CUDA cuBLAS handles now disable atomics in addition to pedantic math mode.
   The 2026-05-20 L4 gate kept CUDA smoke, fixed BT4 outputs, batch parity, and
   UCI smoke green while reducing the worst single-vs-batch policy drift in the
@@ -730,7 +735,10 @@ gate emits the matching `cuda-gpu-nn-probe-suite.log` and
 both validate the single-probe files
 through `tools/check_nn_backend_artifacts.py`, which checks the backend label,
 WDL, moves-left, top-policy decoding, and batch benchmark presence before
-writing a compact JSON manifest. The suite logs are intended for strict
+writing a compact JSON manifest. For CUDA runs, the manifest also records
+executor state before and after the comparison benchmark, making
+`resolved+graph-replay` versus capture/profile fallback visible in archived
+artifacts. The suite logs are intended for strict
 Metal-vs-CUDA comparison with `tools/compare_nn_backend_outputs.py
 --all-probes --require-full-policy`, covering startpos, BK.07, castling-rich
 middle-game geometry, and promotion policy encoding. Legacy comparisons pass

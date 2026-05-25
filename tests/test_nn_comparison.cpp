@@ -1504,6 +1504,8 @@ bool benchmark_nn_batch_optional() {
         env_int_or_default("METALFISH_NN_BENCH_MAX_BATCH", 32, 1, 128);
     const int iterations =
         env_int_or_default("METALFISH_NN_BENCH_ITERS", 2, 1, 20);
+    const int warmup_iterations =
+        env_int_or_default("METALFISH_NN_BENCH_WARMUP_ITERS", 3, 0, 20);
 
     const auto &lines = batch_parity_lines();
 
@@ -1522,12 +1524,22 @@ bool benchmark_nn_batch_optional() {
 
     auto network = NN::CreateNetwork(weights_path);
     std::cout << "    backend: " << network->GetNetworkInfo() << std::endl;
+    std::cout << "    benchmark_warmups: " << warmup_iterations << std::endl;
     std::cout << "    batches:";
     double checksum = 0.0;
     for (int batch_size = 1; batch_size <= max_batch; batch_size *= 2) {
       std::vector<NN::InputPlanes> batch(planes.begin(),
                                          planes.begin() + batch_size);
-      network->EvaluateBatch(batch);
+      for (int iter = 0; iter < warmup_iterations; ++iter) {
+        const auto outputs = network->EvaluateBatch(batch);
+        if (outputs.size() != static_cast<size_t>(batch_size)) {
+          std::cout << std::endl
+                    << "    FAIL: warmup batch " << batch_size << " returned "
+                    << outputs.size() << " outputs" << std::endl;
+          return false;
+        }
+        checksum += outputs.front().value + outputs.back().policy[0];
+      }
       const auto start = std::chrono::steady_clock::now();
       for (int iter = 0; iter < iterations; ++iter) {
         const auto outputs = network->EvaluateBatch(batch);

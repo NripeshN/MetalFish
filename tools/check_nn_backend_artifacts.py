@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -67,11 +68,19 @@ def require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
+def extract_executor(network_info: str) -> str | None:
+    match = re.search(r"executor=([^,()]+(?:\([^)]*\))?)", network_info)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
 def main() -> int:
     args = parse_args()
     backend_label = args.backend_label
 
     parity_text = read_text(args.parity_report)
+    probe_text = read_text(args.probe_log)
     backend_line = find_prefixed_line(parity_text, "- Backend:")
     require(backend_line is not None, "parity report is missing backend line")
     require(
@@ -80,6 +89,12 @@ def main() -> int:
     )
 
     batch_line = None
+    warmup_line = None
+    comparison_backend_line = None
+    comparison_backend_after_line = None
+    comparison_executor_before = None
+    comparison_executor_after = None
+    comparison_profile_enabled = False
     comparison_backend_found = False
     require(
         bool(args.comparison_log) or not args.require_batch_benchmark,
@@ -87,16 +102,33 @@ def main() -> int:
     )
     if args.comparison_log:
         comparison_text = read_text(args.comparison_log)
+        stripped_comparison_lines = [
+            line.strip() for line in comparison_text.splitlines()
+        ]
         comparison_backend_found = backend_label in comparison_text
         require(
             comparison_backend_found,
             f"comparison log does not mention backend {backend_label!r}",
         )
-        batch_line = find_prefixed_line(
-            (line.strip() for line in comparison_text.splitlines()), "batches:"
+        comparison_backend_line = find_prefixed_line(
+            stripped_comparison_lines, "backend:"
         )
+        comparison_backend_after_line = find_prefixed_line(
+            stripped_comparison_lines, "backend_after:"
+        )
+        comparison_executor_before = extract_executor(comparison_backend_line or "")
+        comparison_executor_after = extract_executor(comparison_backend_after_line or "")
+        comparison_profile_enabled = "CUDA profile report=" in comparison_text
+        warmup_line = find_prefixed_line(
+            stripped_comparison_lines, "benchmark_warmups:"
+        )
+        batch_line = find_prefixed_line(stripped_comparison_lines, "batches:")
         if args.require_batch_benchmark:
             require(batch_line is not None, "comparison log is missing batch benchmark")
+            require(
+                warmup_line is not None,
+                "comparison log is missing batch benchmark warmup count",
+            )
 
     probe = load_probe_json(args.probe_log)
     network_info = str(probe.get("network_info", ""))
@@ -124,10 +156,18 @@ def main() -> int:
         "comparison_log": str(args.comparison_log) if args.comparison_log else None,
         "parity_backend_line": backend_line,
         "comparison_backend_found": comparison_backend_found,
+        "comparison_backend_line": comparison_backend_line,
+        "comparison_backend_after_line": comparison_backend_after_line,
+        "comparison_executor_before": comparison_executor_before,
+        "comparison_executor_after": comparison_executor_after,
+        "comparison_profile_enabled": comparison_profile_enabled,
+        "benchmark_warmup_line": warmup_line,
         "batch_line": batch_line,
         "probe": {
             "backend": probe.get("backend"),
             "network_info": network_info,
+            "executor": extract_executor(network_info),
+            "profile_enabled": "CUDA profile report=" in probe_text,
             "format": probe.get("format"),
             "has_wdl": bool(probe.get("has_wdl")),
             "wdl": probe.get("wdl"),

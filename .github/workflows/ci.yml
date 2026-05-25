@@ -118,6 +118,7 @@ jobs:
           METALFISH_NN_BATCH_BENCH=1 \
           METALFISH_NN_BENCH_ITERS=2 \
           METALFISH_NN_BENCH_MAX_BATCH=16 \
+          METALFISH_NN_BENCH_WARMUP_ITERS=3 \
           ./build/test_nn_comparison 2>&1 | tee build/metal-nn-comparison.log
           ./build/metalfish_nn_probe \
             --weights networks/BT4-1024x15x32h-swa-6147500.pb \
