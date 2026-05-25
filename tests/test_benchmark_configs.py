@@ -939,6 +939,7 @@ def main() -> int:
             "run_nn_backend_probe_suite.py",
             "METALFISH_CUDA_PROFILE=0",
             "METALFISH_NN_BENCH_WARMUP_ITERS",
+            "METALFISH_CUDA_GRAPH_STATUS_DETAIL",
             '--backend-label "CUDA transformer backend"',
             "--full-policy",
             "Parity Report",
@@ -1110,6 +1111,7 @@ def main() -> int:
             "METALFISH_GCP_GCS_PREFIX",
             "METALFISH_METAL_PROBE_SUITE_LOG",
             "METALFISH_NN_BENCH_WARMUP_ITERS",
+            "METALFISH_CUDA_GRAPH_STATUS_DETAIL",
             "collect_remote_artifacts",
             "compare_collected_probe_suite",
             "cuda-gpu-summary.md",
@@ -1126,6 +1128,15 @@ def main() -> int:
             "metal-cuda-legacy-nn-probe-suite-summary.json",
             "--all-probes",
             "REMOTE_STATUS",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "src/nn/cuda/cuda_executor.cpp",
+        [
+            "kMaxCudaGraphExecutionCacheEntries",
+            "SameCudaGraphResourceState",
+            "PruneGraphResourceState",
+            "GraphStatusName",
         ],
     )
     assert_file_contains(

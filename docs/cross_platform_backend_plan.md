@@ -307,6 +307,11 @@ Current CUDA backend boundary:
   manifest records comparison executor state before and after the benchmark,
   benchmark warmup count, and whether profile mode was enabled for the
   comparison/probe logs.
+- CUDA graph execution now keeps workspace allocations across ordinary
+  batch-size changes and caches several captured graph shapes behind generation
+  and device-pointer keys. This lets common MCTS batch transitions reuse graph
+  replay once workspace capacity has stabilized, while stale graphs are pruned
+  whenever workspace or inference buffer storage changes.
 - CUDA cuBLAS handles now disable atomics in addition to pedantic math mode.
   The 2026-05-20 L4 gate kept CUDA smoke, fixed BT4 outputs, batch parity, and
   UCI smoke green while reducing the worst single-vs-batch policy drift in the

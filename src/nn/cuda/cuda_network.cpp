@@ -299,11 +299,8 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
 void CudaNetwork::WarmupExecution() {
   constexpr int kWarmupBatchSize = 1;
 
-  const bool batch_size_changed = workspace_batch_size_ != kWarmupBatchSize;
-  if (batch_size_changed) {
-    workspace_.Release();
+  if (workspace_batch_size_ != kWarmupBatchSize)
     workspace_batch_size_ = kWarmupBatchSize;
-  }
 
   cudaStream_t stream = workspace_.Stream();
   buffers_.ClearAll(stream);
@@ -380,10 +377,8 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
     }
 
     const bool batch_size_changed = workspace_batch_size_ != batch_size;
-    if (batch_size_changed) {
-      workspace_.Release();
+    if (batch_size_changed)
       workspace_batch_size_ = batch_size;
-    }
     cudaStream_t stream = workspace_.Stream();
     if (batch_size_changed || force_full_buffer_clear)
       buffers_.ClearAll(stream);

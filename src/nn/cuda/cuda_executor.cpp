@@ -19,6 +19,7 @@
 #include <cuda_runtime_api.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -178,6 +179,16 @@ struct CudaGraphExecutionKey {
   }
 };
 
+bool SameCudaGraphResourceState(const CudaGraphExecutionKey &lhs,
+                                const CudaGraphExecutionKey &rhs) {
+  return lhs.workspace_generation == rhs.workspace_generation &&
+         lhs.buffer_generation == rhs.buffer_generation &&
+         lhs.stream == rhs.stream && lhs.input_masks == rhs.input_masks &&
+         lhs.input_values == rhs.input_values && lhs.policy == rhs.policy &&
+         lhs.value == rhs.value && lhs.moves_left == rhs.moves_left &&
+         lhs.raw_policy == rhs.raw_policy;
+}
+
 std::uintptr_t DevicePtrKey(const void *ptr) {
   return reinterpret_cast<std::uintptr_t>(ptr);
 }
@@ -227,6 +238,8 @@ struct CudaGraphExecutionCache {
     key = {};
   }
 };
+
+constexpr std::size_t kMaxCudaGraphExecutionCacheEntries = 8;
 
 struct CudaProfileBucket {
   CudaExecutionScheduleKind kind = CudaExecutionScheduleKind::Unsupported;
@@ -419,12 +432,12 @@ public:
       return "resolved+graph-fallback";
     }
     if (graph_replay_count_ > 0)
-      return "resolved+graph-replay";
+      return GraphStatusName("resolved+graph-replay");
     if (graph_capture_count_ > 0)
-      return "resolved+graph-captured";
-    if (graph_primed_key_.IsValid())
-      return "resolved+graph-primed";
-    return "resolved+graph";
+      return GraphStatusName("resolved+graph-captured");
+    if (!graph_primed_keys_.empty())
+      return GraphStatusName("resolved+graph-primed");
+    return GraphStatusName("resolved+graph");
   }
 
 private:
@@ -493,9 +506,27 @@ private:
            CudaGraphExecutionCompatible();
   }
 
+  std::size_t GraphCacheCount() const {
+    return static_cast<std::size_t>(
+        std::count_if(graph_caches_.begin(), graph_caches_.end(),
+                      [](const CudaGraphExecutionCache &cache) {
+                        return cache.graph_exec != nullptr;
+                      }));
+  }
+
+  std::string GraphStatusName(const std::string &base) const {
+    if (!EnvFlagEnabled("METALFISH_CUDA_GRAPH_STATUS_DETAIL"))
+      return base;
+    std::ostringstream out;
+    out << base << "(captures=" << graph_capture_count_
+        << ",replays=" << graph_replay_count_
+        << ",caches=" << GraphCacheCount()
+        << ",primed=" << graph_primed_keys_.size() << ")";
+    return out.str();
+  }
+
   void DisableGraphExecution(const std::string &reason) {
-    graph_cache_.Reset();
-    graph_primed_key_ = {};
+    ResetGraphCaches();
     graph_disabled_ = true;
     graph_disabled_reason_ = reason;
     cudaGetLastError();
@@ -533,10 +564,11 @@ private:
     const auto key =
         MakeCudaGraphExecutionKey(batch_size, workspace.Generation(),
                                   buffers.Generation(), stream, buffers);
+    PruneGraphResourceState(key);
 
-    if (graph_cache_.Matches(key)) {
+    if (auto *cache = FindGraphCache(key)) {
       const cudaError_t launch_status =
-          cudaGraphLaunch(graph_cache_.graph_exec, stream);
+          cudaGraphLaunch(cache->graph_exec, stream);
       if (launch_status != cudaSuccess) {
         ExecuteGraphFallback(
             execution_plan, weights, buffers, workspace, batch_size,
@@ -556,15 +588,10 @@ private:
       return;
     }
 
-    if (graph_cache_.graph_exec && !graph_cache_.Matches(key)) {
-      graph_cache_.Reset();
-      graph_primed_key_ = {};
-    }
-
-    if (!(graph_primed_key_ == key)) {
+    if (!GraphKeyPrimed(key)) {
       ExecuteUncaptured(execution_plan, weights, buffers, workspace, batch_size,
                         false);
-      graph_primed_key_ = key;
+      MarkGraphKeyPrimed(key);
       return;
     }
 
@@ -613,13 +640,14 @@ private:
       return;
     }
 
-    graph_cache_.Reset();
-    graph_cache_.graph = graph;
-    graph_cache_.graph_exec = graph_exec;
-    graph_cache_.key = key;
+    auto &cache = SelectGraphCacheSlot();
+    cache.Reset();
+    cache.graph = graph;
+    cache.graph_exec = graph_exec;
+    cache.key = key;
 
     const cudaError_t launch_status =
-        cudaGraphLaunch(graph_cache_.graph_exec, stream);
+        cudaGraphLaunch(cache.graph_exec, stream);
     if (launch_status != cudaSuccess) {
       ExecuteGraphFallback(execution_plan, weights, buffers, workspace,
                            batch_size,
@@ -638,6 +666,63 @@ private:
     }
   }
 
+  CudaGraphExecutionCache *FindGraphCache(const CudaGraphExecutionKey &key) {
+    for (auto &cache : graph_caches_) {
+      if (cache.Matches(key))
+        return &cache;
+    }
+    return nullptr;
+  }
+
+  CudaGraphExecutionCache &SelectGraphCacheSlot() {
+    for (auto &cache : graph_caches_) {
+      if (!cache.graph_exec)
+        return cache;
+    }
+
+    auto &cache = graph_caches_[graph_cache_next_evict_ %
+                               kMaxCudaGraphExecutionCacheEntries];
+    graph_cache_next_evict_ =
+        (graph_cache_next_evict_ + 1) % kMaxCudaGraphExecutionCacheEntries;
+    return cache;
+  }
+
+  void ResetGraphCaches() {
+    for (auto &cache : graph_caches_)
+      cache.Reset();
+    graph_primed_keys_.clear();
+    graph_cache_next_evict_ = 0;
+  }
+
+  void PruneGraphResourceState(const CudaGraphExecutionKey &key) {
+    for (auto &cache : graph_caches_) {
+      if (cache.graph_exec && !SameCudaGraphResourceState(cache.key, key))
+        cache.Reset();
+    }
+
+    graph_primed_keys_.erase(
+        std::remove_if(graph_primed_keys_.begin(), graph_primed_keys_.end(),
+                       [&](const CudaGraphExecutionKey &primed) {
+                         return !SameCudaGraphResourceState(primed, key);
+                       }),
+        graph_primed_keys_.end());
+  }
+
+  bool GraphKeyPrimed(const CudaGraphExecutionKey &key) const {
+    return std::any_of(graph_primed_keys_.begin(), graph_primed_keys_.end(),
+                       [&](const CudaGraphExecutionKey &primed) {
+                         return primed == key;
+                       });
+  }
+
+  void MarkGraphKeyPrimed(const CudaGraphExecutionKey &key) {
+    if (GraphKeyPrimed(key))
+      return;
+    if (graph_primed_keys_.size() >= kMaxCudaGraphExecutionCacheEntries)
+      graph_primed_keys_.erase(graph_primed_keys_.begin());
+    graph_primed_keys_.push_back(key);
+  }
+
   CudaExecutionSchedule schedule_;
   CudaOutputMapping output_mapping_;
   bool graph_requested_ = false;
@@ -645,8 +730,10 @@ private:
   std::uint64_t graph_capture_count_ = 0;
   std::uint64_t graph_replay_count_ = 0;
   std::string graph_disabled_reason_;
-  CudaGraphExecutionKey graph_primed_key_;
-  CudaGraphExecutionCache graph_cache_;
+  std::vector<CudaGraphExecutionKey> graph_primed_keys_;
+  std::array<CudaGraphExecutionCache, kMaxCudaGraphExecutionCacheEntries>
+      graph_caches_;
+  std::size_t graph_cache_next_evict_ = 0;
 };
 
 } // namespace
