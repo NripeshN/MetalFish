@@ -31,6 +31,7 @@ MetalNetwork::MetalNetwork(const WeightsFile &file, int gpu_id, int max_batch,
   conv_policy_ = descriptor.conv_policy;
   attn_policy_ = descriptor.attention_policy;
   tensor_plan_ = CreateNetworkTensorPlan(descriptor);
+  decoded_output_targets_ = NetworkDecodedOutputTargets(tensor_plan_);
 
   MultiHeadWeights weights(file.weights());
 
@@ -53,7 +54,8 @@ MetalNetwork::MetalNetwork(const WeightsFile &file, int gpu_id, int max_batch,
 
   builder_->build(kInputPlanes, weights, descriptor.input_embedding,
                   descriptor.attention_body, attn_policy_, conv_policy_, wdl_,
-                  moves_left_, activations, policy_head, value_head);
+                  moves_left_, activations, policy_head, value_head,
+                  decoded_output_targets_);
 }
 
 MetalNetwork::~MetalNetwork() = default;
@@ -128,17 +130,15 @@ void MetalNetwork::RunBatch(std::span<const InputPlanes> inputs,
   }
 
   {
-    std::lock_guard<std::mutex> lock(gpu_mutex_);
-    if (moves_left_) {
-      builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
-                            batch,
-                            {&io->op_policy_mem_[0], &io->op_value_mem_[0],
-                             &io->op_moves_left_mem_[0]});
-    } else {
-      builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
-                            batch,
-                            {&io->op_policy_mem_[0], &io->op_value_mem_[0]});
+    std::vector<float *> output_mems;
+    output_mems.reserve(decoded_output_targets_.size());
+    for (NetworkOutputTarget target : decoded_output_targets_) {
+      output_mems.push_back(io->OutputBuffer(target).data());
     }
+
+    std::lock_guard<std::mutex> lock(gpu_mutex_);
+    builder_->forwardEval(&io->input_val_mem_[0], &io->input_masks_mem_[0],
+                          batch, std::move(output_mems));
   }
 
   const float *moves_left = moves_left_ && !io->op_moves_left_mem_.empty()

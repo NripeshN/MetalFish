@@ -125,6 +125,19 @@ bool NetworkOutputTargetEnabled(const NetworkTensorPlan &plan,
   return NetworkOutputTargetStride(plan, target) > 0;
 }
 
+std::vector<NetworkOutputTarget>
+NetworkDecodedOutputTargets(const NetworkTensorPlan &plan) {
+  std::vector<NetworkOutputTarget> targets;
+  targets.reserve(3);
+  if (NetworkOutputTargetEnabled(plan, NetworkOutputTarget::Policy))
+    targets.push_back(NetworkOutputTarget::Policy);
+  if (NetworkOutputTargetEnabled(plan, NetworkOutputTarget::Value))
+    targets.push_back(NetworkOutputTarget::Value);
+  if (NetworkOutputTargetEnabled(plan, NetworkOutputTarget::MovesLeft))
+    targets.push_back(NetworkOutputTarget::MovesLeft);
+  return targets;
+}
+
 NetworkTensorPlan
 CreateNetworkTensorPlan(const NetworkFormatDescriptor &format) {
   NetworkTensorPlan plan;

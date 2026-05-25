@@ -9,6 +9,7 @@
 #include "../network_tensor_plan.h"
 
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 namespace MetalFish {
@@ -28,25 +29,28 @@ struct InputsOutputs {
     if (plan.moves_left) {
       op_moves_left_mem_.resize(plan.MovesLeftEntries(maxBatchSize));
     };
-
-    /**
-     * @todo policy map implementation has bug in MPSGraph (GatherND not working
-     * in graph). Implementation of policy map to be done in CPU for now.
-     *
-     * Remove this op_policy_raw_mem_ memory allocation when bug is fixed.
-     */
-    if (plan.raw_policy_outputs > 0) {
-      op_policy_raw_mem_.resize(plan.RawPolicyEntries(maxBatchSize));
-    }
   }
   ~InputsOutputs() {}
+
+  std::vector<float> &OutputBuffer(NetworkOutputTarget target) {
+    switch (target) {
+    case NetworkOutputTarget::Policy:
+      return op_policy_mem_;
+    case NetworkOutputTarget::Value:
+      return op_value_mem_;
+    case NetworkOutputTarget::MovesLeft:
+      return op_moves_left_mem_;
+    case NetworkOutputTarget::RawPolicy:
+      break;
+    }
+    throw std::runtime_error("Metal decoded output buffer is unavailable");
+  }
 
   std::vector<uint64_t> input_masks_mem_;
   std::vector<float> input_val_mem_;
   std::vector<float> op_policy_mem_;
   std::vector<float> op_value_mem_;
   std::vector<float> op_moves_left_mem_;
-  std::vector<float> op_policy_raw_mem_;
 };
 
 } // namespace Metal

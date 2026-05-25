@@ -43,6 +43,7 @@
 #include "syzygy/tbprobe.h"
 #include "test_common.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -712,6 +713,17 @@ void test_network_format_descriptor(TestCounter &tc) {
   expect(NN::NetworkOutputTargetEnabled(tensor_plan,
                                         NN::NetworkOutputTarget::RawPolicy),
          "network output target should enable present raw policy output", tc);
+  const auto decoded_targets = NN::NetworkDecodedOutputTargets(tensor_plan);
+  expect(decoded_targets.size() == 3 &&
+             decoded_targets[0] == NN::NetworkOutputTarget::Policy &&
+             decoded_targets[1] == NN::NetworkOutputTarget::Value &&
+             decoded_targets[2] == NN::NetworkOutputTarget::MovesLeft,
+         "decoded output targets should keep policy/value/moves-left order",
+         tc);
+  expect(std::find(decoded_targets.begin(), decoded_targets.end(),
+                   NN::NetworkOutputTarget::RawPolicy) ==
+             decoded_targets.end(),
+         "decoded output targets should exclude raw policy scratch", tc);
 
   NN::NetworkFormatDescriptor scalar_descriptor;
   const auto scalar_plan = NN::CreateNetworkTensorPlan(scalar_descriptor);
@@ -730,6 +742,12 @@ void test_network_format_descriptor(TestCounter &tc) {
   expect(!NN::NetworkOutputTargetEnabled(scalar_plan,
                                          NN::NetworkOutputTarget::RawPolicy),
          "disabled raw policy target should not be enabled", tc);
+  const auto scalar_decoded_targets =
+      NN::NetworkDecodedOutputTargets(scalar_plan);
+  expect(scalar_decoded_targets.size() == 2 &&
+             scalar_decoded_targets[0] == NN::NetworkOutputTarget::Policy &&
+             scalar_decoded_targets[1] == NN::NetworkOutputTarget::Value,
+         "scalar decoded output targets should omit moves-left", tc);
 
   NN::NetworkFormatDescriptor conv_descriptor;
   conv_descriptor.conv_policy = true;
@@ -739,6 +757,11 @@ void test_network_format_descriptor(TestCounter &tc) {
              NN::kNetworkConvPolicyScratch,
          "network output target stride should expose convolution scratch width",
          tc);
+  const auto conv_decoded_targets = NN::NetworkDecodedOutputTargets(conv_plan);
+  expect(std::find(conv_decoded_targets.begin(), conv_decoded_targets.end(),
+                   NN::NetworkOutputTarget::RawPolicy) ==
+             conv_decoded_targets.end(),
+         "convolution decoded targets should exclude raw policy scratch", tc);
 
   MetalFishNN::Weights minimal_proto = file.weights();
   NN::MultiHeadWeights minimal_weights(minimal_proto);

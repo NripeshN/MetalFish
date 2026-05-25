@@ -57,6 +57,8 @@ int NetworkOutputTargetStride(const NetworkTensorPlan &plan,
                               NetworkOutputTarget target);
 bool NetworkOutputTargetEnabled(const NetworkTensorPlan &plan,
                                 NetworkOutputTarget target);
+std::vector<NetworkOutputTarget>
+NetworkDecodedOutputTargets(const NetworkTensorPlan &plan);
 
 NetworkTensorPlan
 CreateNetworkTensorPlan(const NetworkFormatDescriptor &format);

@@ -76,7 +76,9 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                 bool attn_policy, bool conv_policy, bool wdl,
                                 bool moves_left, Activations &activations,
                                 std::string &policy_head,
-                                std::string &value_head) {
+                                std::string &value_head,
+                                const std::vector<NetworkOutputTarget>
+                                    &decoded_output_targets) {
   MetalNetworkGraph *graph = GraphOrThrow(this->graph_id, "Metal graph build");
   NSString *defaultActivation =
       [NSString stringWithUTF8String:activations.default_activation.c_str()];
@@ -280,7 +282,7 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                label:[NSString stringWithFormat:@"value/%@",
                                                                 valueHead]];
 
-  MPSGraphTensor *mlh;
+  MPSGraphTensor *mlh = nil;
   if (moves_left) {
     if (attn_body) {
       mlh = [graph addFullyConnectedLayerWithParent:layer
@@ -317,11 +319,29 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                             label:@"moves_left/fc2"];
   }
 
-  if (moves_left) {
-    [graph setResultTensors:@[ policy, value, mlh ]];
-  } else {
-    [graph setResultTensors:@[ policy, value ]];
+  NSMutableArray<MPSGraphTensor *> *resultTensors =
+      [NSMutableArray arrayWithCapacity:decoded_output_targets.size()];
+  for (NetworkOutputTarget target : decoded_output_targets) {
+    switch (target) {
+    case NetworkOutputTarget::Policy:
+      [resultTensors addObject:policy];
+      break;
+    case NetworkOutputTarget::Value:
+      [resultTensors addObject:value];
+      break;
+    case NetworkOutputTarget::MovesLeft:
+      if (mlh == nil) {
+        throw std::runtime_error(
+            "Metal graph requested moves-left output without a moves-left head");
+      }
+      [resultTensors addObject:mlh];
+      break;
+    case NetworkOutputTarget::RawPolicy:
+      throw std::runtime_error(
+          "Metal graph does not expose raw policy as a decoded output");
+    }
   }
+  [graph setResultTensors:resultTensors];
 }
 
 void MetalNetworkBuilder::forwardEval(float *inputs, uint64_t *masks,
