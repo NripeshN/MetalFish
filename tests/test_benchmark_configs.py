@@ -961,6 +961,34 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / ".github/workflows/windows-cuda-runtime-gate.yml",
+        [
+            "Windows CUDA Runtime Gate",
+            "windows_cuda_run_id",
+            "windows-cuda-compile-*",
+            "metalfish*windows-x86_64-msvc-cuda.zip",
+            "tools/run_gcp_windows_cuda_runtime_gate.sh",
+            "windows-cuda-runtime-${{ github.run_id }}",
+            "METALFISH_GCP_INSTANCE",
+            "METALFISH_WINDOWS_CUDA_PACKAGE",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/run_gcp_windows_cuda_runtime_gate.sh",
+        [
+            "nvidia-l4-vws",
+            "windows-cloud",
+            "windows-2022",
+            "install_gpu_driver.ps1",
+            "vc_redist.x64.exe",
+            "C:/metalfish/metalfish-windows-cuda.zip",
+            "CUDA transformer backend",
+            "Starting Parallel Hybrid Search",
+            "windows-cuda-runtime-summary.md",
+            "collect_remote_artifacts",
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/run_gcp_cuda_gpu_gate.sh",
         [
             "METALFISH_GCP_COLLECT_ARTIFACTS",

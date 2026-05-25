@@ -73,7 +73,7 @@ cloud spend controlled.
 | Linux x86-64 CUDA | GCP `g2-standard-8` + NVIDIA L4 | CUDA backend correctness and NPS |
 | Windows x86-64 CPU | GitHub Windows MinGW + MSVC | Portable build/UCI package and MSVC host-toolchain coverage |
 | Windows x86-64 CUDA compile | GitHub Windows MSVC + CUDA Toolkit | NVCC/MSVC compile coverage plus release-candidate CUDA package smoke before runtime GPU gates |
-| Windows x86-64 CUDA runtime | Ephemeral Windows GPU VM | CUDA/DirectML smoke before release |
+| Windows x86-64 CUDA runtime | Ephemeral Windows G2/L4 vWS VM | Packaged CUDA/Hybrid smoke before release |
 
 Cloud GPU runners should be created only for a benchmark run, write logs and
 artifacts to Cloud Storage, and then stop/delete themselves. The GitHub
@@ -108,6 +108,7 @@ Current remote gates:
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default so the CUDA suite hard-compares against macOS Metal BT4 and legacy artifacts |
 | GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26366784935`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact |
+| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Manual dispatch; consumes a Windows CUDA compile artifact and runs packaged CUDA/MCTS plus Hybrid smokes on an ephemeral Windows Server 2022 G2/L4 vWS VM |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26366784933`, Metal NN parity artifact and BK.07 smoke |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26366784932` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26366784934` |
@@ -676,6 +677,14 @@ gate uses a bounded 300-puzzle
 offline sample for PR runs; the accepted rerun scored candidate BK repeats
 `[22, 22, 22]` versus baseline `[22, 22, 22]`, and candidate puzzles `300/300`
 versus baseline `300/300` with zero candidate errors.
+
+The Windows CUDA runtime gate is manual and release-facing. It downloads a
+`metalfish-windows-x86_64-msvc-cuda` package produced by the Windows CUDA
+compile gate, creates an ephemeral Windows Server 2022 `g2-standard-8` VM with
+an `nvidia-l4-vws` accelerator, installs the Google Cloud NVIDIA driver script,
+verifies `nvidia-smi`, installs the VC++ runtime, and runs packaged
+`NNBackend=cuda` MCTS plus Hybrid UCI smokes with BT4 weights. The VM is deleted
+by default and logs are collected under `results/windows_cuda_runtime_gate/`.
 
 The macOS Metal CI now builds `test_nn_comparison` and `metalfish_nn_probe`
 alongside the engine, emits `metal-nn-parity-report.md`, records
