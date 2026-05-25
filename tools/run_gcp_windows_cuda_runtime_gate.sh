@@ -16,21 +16,29 @@ DELETE_ON_EXIT="${METALFISH_GCP_DELETE_ON_EXIT:-1}"
 COLLECT_ARTIFACTS="${METALFISH_GCP_COLLECT_ARTIFACTS:-1}"
 ARTIFACT_DIR="${METALFISH_GCP_ARTIFACT_DIR:-${ROOT_DIR}/results/windows_cuda_runtime_gate/${INSTANCE}}"
 GCS_PREFIX="${METALFISH_GCP_GCS_PREFIX:-}"
+REMOTE_USER="${METALFISH_GCP_WINDOWS_USER:-metalfish}"
+SSH_KEY="${METALFISH_GCP_SSH_KEY:-${HOME}/.ssh/google_compute_engine}"
+SSH_PUB_KEY="${METALFISH_GCP_SSH_PUB_KEY:-${SSH_KEY}.pub}"
 PACKAGE_ZIP="${METALFISH_WINDOWS_CUDA_PACKAGE:-}"
 WEIGHTS="${METALFISH_BT4_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-6147500.pb}"
 NNUE_BIG="${METALFISH_NNUE_BIG:-${ROOT_DIR}/networks/nn-c288c895ea92.nnue}"
 NNUE_SMALL="${METALFISH_NNUE_SMALL:-${ROOT_DIR}/networks/nn-37f18f62d772.nnue}"
-UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-180}"
+UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420}"
 UCI_GO="${METALFISH_WINDOWS_CUDA_UCI_GO:-nodes 1}"
+UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
+CUDA_GRAPH="${METALFISH_WINDOWS_CUDA_GRAPH:-}"
+CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
+CUDA_PROFILE_LIMIT="${METALFISH_WINDOWS_CUDA_PROFILE_LIMIT:-2}"
 DRIVER_SCRIPT_URL="${METALFISH_WINDOWS_GPU_DRIVER_SCRIPT_URL:-https://github.com/GoogleCloudPlatform/compute-gpu-installation/raw/main/windows/install_gpu_driver.ps1}"
 CREATED_INSTANCE=0
+SSH_READY=0
 ZONE=""
 RUN_DIR="$(mktemp -d -t metalfish-windows-cuda.XXXXXX)"
 PACKAGE_BASENAME="$(basename "${PACKAGE_ZIP}")"
 
 cleanup() {
   local status=$?
-  if [[ "${COLLECT_ARTIFACTS}" == "1" && "${CREATED_INSTANCE}" == "1" && -n "${ZONE}" ]]; then
+  if [[ "${COLLECT_ARTIFACTS}" == "1" && "${SSH_READY}" == "1" && -n "${ZONE}" ]]; then
     collect_remote_artifacts || true
   fi
   rm -rf "${RUN_DIR}"
@@ -53,13 +61,31 @@ require_file() {
   fi
 }
 
+ensure_ssh_key() {
+  mkdir -p "$(dirname "${SSH_KEY}")"
+  if [[ ! -s "${SSH_KEY}" ]]; then
+    ssh-keygen -t rsa -b 3072 -f "${SSH_KEY}" -N "" -C "${USER:-metalfish}@metalfish-windows-cuda-gate" >/dev/null
+  fi
+  if [[ ! -s "${SSH_PUB_KEY}" ]]; then
+    ssh-keygen -y -f "${SSH_KEY}" >"${SSH_PUB_KEY}"
+  fi
+  chmod 600 "${SSH_KEY}" || true
+}
+
+ssh_target() {
+  printf "%s@%s" "${REMOTE_USER}" "${INSTANCE}"
+}
+
 wait_for_ssh() {
   local attempts="${1:-90}"
   for attempt in $(seq 1 "${attempts}"); do
-    if gcloud compute ssh "${INSTANCE}" \
+    if gcloud compute ssh "$(ssh_target)" \
       --project "${PROJECT}" \
       --zone "${ZONE}" \
+      --ssh-flag="-o ConnectTimeout=10" \
+      --ssh-flag="-o ConnectionAttempts=1" \
       --command "hostname" >/dev/null 2>&1; then
+      SSH_READY=1
       return 0
     fi
     sleep 10
@@ -69,7 +95,7 @@ wait_for_ssh() {
 }
 
 remote_cmd() {
-  gcloud compute ssh "${INSTANCE}" \
+  gcloud compute ssh "$(ssh_target)" \
     --project "${PROJECT}" \
     --zone "${ZONE}" \
     --command "$1"
@@ -78,7 +104,7 @@ remote_cmd() {
 copy_to_remote() {
   local src="$1"
   local dst="$2"
-  gcloud compute scp "${src}" "${INSTANCE}:${dst}" \
+  gcloud compute scp "${src}" "$(ssh_target):${dst}" \
     --project "${PROJECT}" \
     --zone "${ZONE}"
 }
@@ -93,7 +119,7 @@ run_remote_ps() {
 collect_remote_artifacts() {
   mkdir -p "${ARTIFACT_DIR}"
   gcloud compute scp --recurse \
-    "${INSTANCE}:C:/metalfish/logs" \
+    "$(ssh_target):C:/metalfish/logs" \
     "${ARTIFACT_DIR}/" \
     --project "${PROJECT}" \
     --zone "${ZONE}" >/dev/null 2>&1 || true
@@ -107,8 +133,91 @@ require_file "${PACKAGE_ZIP}" "Windows CUDA package"
 require_file "${WEIGHTS}" "BT4 weights"
 require_file "${NNUE_BIG}" "large NNUE"
 require_file "${NNUE_SMALL}" "small NNUE"
+ensure_ssh_key
+require_file "${SSH_PUB_KEY}" "SSH public key"
 
 cd "${ROOT_DIR}"
+
+cat >"${RUN_DIR}/enable-openssh.ps1" <<'POWERSHELL'
+$ErrorActionPreference = "Stop"
+New-Item -ItemType Directory -Force C:\metalfish\logs | Out-Null
+Start-Transcript -Path C:\metalfish\logs\openssh-bootstrap.log -Append
+try {
+  $metadataHeaders = @{ "Metadata-Flavor" = "Google" }
+  $remoteUser = Invoke-RestMethod `
+    -Headers $metadataHeaders `
+    -Uri "http://metadata.google.internal/computeMetadata/v1/instance/attributes/metalfish-windows-user"
+  $publicKey = Invoke-RestMethod `
+    -Headers $metadataHeaders `
+    -Uri "http://metadata.google.internal/computeMetadata/v1/instance/attributes/metalfish-ssh-pubkey"
+  if ([string]::IsNullOrWhiteSpace($remoteUser)) {
+    throw "Missing metalfish-windows-user metadata"
+  }
+  if ([string]::IsNullOrWhiteSpace($publicKey)) {
+    throw "Missing metalfish-ssh-pubkey metadata"
+  }
+  $capability = Get-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+  if ($capability.State -ne "Installed") {
+    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-String | Write-Host
+  }
+  if (-not (Get-LocalUser -Name $remoteUser -ErrorAction SilentlyContinue)) {
+    $password = ConvertTo-SecureString `
+      -String ([Guid]::NewGuid().ToString("N") + "aA1!") `
+      -AsPlainText `
+      -Force
+    New-LocalUser `
+      -Name $remoteUser `
+      -Password $password `
+      -PasswordNeverExpires `
+      -UserMayNotChangePassword | Out-Null
+  }
+  Enable-LocalUser -Name $remoteUser
+  try {
+    Add-LocalGroupMember -Group "Administrators" -Member $remoteUser
+  } catch {
+    if ($_.Exception.Message -notmatch "already") {
+      throw
+    }
+  }
+  $programDataSsh = Join-Path $env:ProgramData "ssh"
+  New-Item -ItemType Directory -Force $programDataSsh | Out-Null
+  $adminKeys = Join-Path $programDataSsh "administrators_authorized_keys"
+  Set-Content -Path $adminKeys -Value $publicKey -Encoding ascii
+  & icacls.exe $adminKeys /inheritance:r | Out-String | Write-Host
+  & icacls.exe $adminKeys /grant "Administrators:F" /grant "SYSTEM:F" | Out-String | Write-Host
+  $userSshDir = "C:\Users\$remoteUser\.ssh"
+  New-Item -ItemType Directory -Force $userSshDir | Out-Null
+  Set-Content -Path (Join-Path $userSshDir "authorized_keys") -Value $publicKey -Encoding ascii
+  & icacls.exe "C:\Users\$remoteUser" /grant "${remoteUser}:(OI)(CI)F" /T | Out-String | Write-Host
+  & icacls.exe $userSshDir /inheritance:r /grant "${remoteUser}:F" /grant "Administrators:F" /grant "SYSTEM:F" /T | Out-String | Write-Host
+  New-Item -Path "HKLM:\SOFTWARE\OpenSSH" -Force | Out-Null
+  New-ItemProperty `
+    -Path "HKLM:\SOFTWARE\OpenSSH" `
+    -Name DefaultShell `
+    -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" `
+    -PropertyType String `
+    -Force | Out-Null
+  Set-Service -Name sshd -StartupType Automatic
+  if ((Get-Service -Name sshd).Status -eq "Running") {
+    Restart-Service sshd
+  } else {
+    Start-Service sshd
+  }
+  if (-not (Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule `
+      -Name "OpenSSH-Server-In-TCP" `
+      -DisplayName "OpenSSH Server (sshd)" `
+      -Enabled True `
+      -Direction Inbound `
+      -Protocol TCP `
+      -Action Allow `
+      -LocalPort 22 | Out-Null
+  }
+  Write-Host "OpenSSH server is ready"
+} finally {
+  Stop-Transcript
+}
+POWERSHELL
 
 for candidate_zone in ${ZONES}; do
   echo "Creating ${INSTANCE} in ${candidate_zone}"
@@ -123,6 +232,8 @@ for candidate_zone in ${ZONES}; do
     --image-family "${IMAGE_FAMILY}" \
     --boot-disk-size "${BOOT_DISK_SIZE}" \
     --boot-disk-type "${BOOT_DISK_TYPE}" \
+    --metadata "metalfish-windows-user=${REMOTE_USER}" \
+    --metadata-from-file "windows-startup-script-ps1=${RUN_DIR}/enable-openssh.ps1,metalfish-ssh-pubkey=${SSH_PUB_KEY}" \
     --scopes https://www.googleapis.com/auth/cloud-platform; then
     ZONE="${candidate_zone}"
     CREATED_INSTANCE=1
@@ -199,7 +310,7 @@ Expand-Archive -Path (Join-Path \$Root "metalfish-windows-cuda.zip") -Destinatio
 Invoke-WebRequest "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile \$VcRedist
 \$vc = Start-Process -FilePath \$VcRedist -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
 if (\$vc.ExitCode -ne 0 -and \$vc.ExitCode -ne 3010) {
-  throw "VC++ redistributable install failed with exit code \$($vc.ExitCode)"
+  throw ("VC++ redistributable install failed with exit code " + \$vc.ExitCode)
 }
 \$Engine = Join-Path \$PackageDir "metalfish.exe"
 if (-not (Test-Path \$Engine)) {
@@ -224,19 +335,35 @@ function Invoke-UciSmoke {
   \$psi.RedirectStandardError = \$true
   \$psi.UseShellExecute = \$false
   \$psi.CreateNoWindow = \$true
+  if ("${UCI_TRACE}" -ne "") {
+    \$psi.Environment["METALFISH_UCI_TRACE"] = "${UCI_TRACE}"
+  }
+  if ("${CUDA_GRAPH}" -ne "") {
+    \$psi.Environment["METALFISH_CUDA_GRAPH"] = "${CUDA_GRAPH}"
+  }
+  if ("${CUDA_PROFILE}" -ne "") {
+    \$psi.Environment["METALFISH_CUDA_PROFILE"] = "${CUDA_PROFILE}"
+    \$psi.Environment["METALFISH_CUDA_PROFILE_LIMIT"] = "${CUDA_PROFILE_LIMIT}"
+  }
   \$proc = [System.Diagnostics.Process]::Start(\$psi)
+  \$stdoutTask = \$proc.StandardOutput.ReadToEndAsync()
+  \$stderrTask = \$proc.StandardError.ReadToEndAsync()
   \$proc.StandardInput.WriteLine((\$Commands -join "\`n"))
   \$proc.StandardInput.Close()
-  if (-not \$proc.WaitForExit(${UCI_TIMEOUT_SECONDS} * 1000)) {
+  \$timedOut = -not \$proc.WaitForExit(${UCI_TIMEOUT_SECONDS} * 1000)
+  if (\$timedOut) {
     try { \$proc.Kill() } catch {}
-    throw "\$Name timed out after ${UCI_TIMEOUT_SECONDS}s"
+    try { \$proc.WaitForExit(10000) | Out-Null } catch {}
   }
-  \$out = \$proc.StandardOutput.ReadToEnd()
-  \$err = \$proc.StandardError.ReadToEnd()
+  \$out = \$stdoutTask.GetAwaiter().GetResult()
+  \$err = \$stderrTask.GetAwaiter().GetResult()
   Set-Content -Path \$stdout -Value \$out -Encoding UTF8
   Set-Content -Path \$stderr -Value \$err -Encoding UTF8
+  if (\$timedOut) {
+    throw (\$Name + " timed out after ${UCI_TIMEOUT_SECONDS}s")
+  }
   if (\$proc.ExitCode -ne 0) {
-    throw "\$Name exited with code \$($proc.ExitCode)"
+    throw (\$Name + " exited with code " + \$proc.ExitCode)
   }
   foreach (\$needle in \$RequiredText) {
     if ((\$out + \$err) -notlike "*\$needle*") {

@@ -108,7 +108,7 @@ Current remote gates:
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default so the CUDA suite hard-compares against macOS Metal BT4 and legacy artifacts |
 | GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26366784935`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact |
-| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Manual dispatch; consumes a Windows CUDA compile artifact and runs packaged CUDA/MCTS plus Hybrid smokes on an ephemeral Windows Server 2022 G2/L4 vWS VM |
+| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Direct GCP pass `direct-20260525-084150`, Windows Server 2022 G2/L4 vWS, packaged CUDA MCTS plus Hybrid smokes |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26366784933`, Metal NN parity artifact and BK.07 smoke |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26366784932` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26366784934` |
@@ -685,6 +685,14 @@ an `nvidia-l4-vws` accelerator, installs the Google Cloud NVIDIA driver script,
 verifies `nvidia-smi`, installs the VC++ runtime, and runs packaged
 `NNBackend=cuda` MCTS plus Hybrid UCI smokes with BT4 weights. The VM is deleted
 by default and logs are collected under `results/windows_cuda_runtime_gate/`.
+The gate explicitly bootstraps OpenSSH on the Windows guest with a temporary
+`metalfish` administrator user and the caller's SSH key, because stock GCE
+Windows images do not expose the Linux-style metadata SSH path. The UCI harness
+drains stdout/stderr asynchronously so the large UCI option block cannot fill a
+pipe and stall the engine before `uciok`. The 2026-05-25 direct GCP pass
+`direct-20260525-084150` verified the production CUDA graph path on an L4:
+pure CUDA MCTS returned `bestmove d2d4` at `go nodes 1`, and Hybrid loaded the
+same CUDA transformer backend with `executor=resolved+graph-primed`.
 
 The macOS Metal CI now builds `test_nn_comparison` and `metalfish_nn_probe`
 alongside the engine, emits `metal-nn-parity-report.md`, records
