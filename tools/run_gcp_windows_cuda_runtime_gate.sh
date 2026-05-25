@@ -26,6 +26,8 @@ NNUE_SMALL="${METALFISH_NNUE_SMALL:-${ROOT_DIR}/networks/nn-37f18f62d772.nnue}"
 UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420}"
 PROBE_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420}"
 UCI_GO="${METALFISH_WINDOWS_CUDA_UCI_GO:-nodes 1}"
+HYBRID_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_UCI_GO:-movetime 8000}"
+HYBRID_POST_GO_SLEEP_MS="${METALFISH_WINDOWS_CUDA_HYBRID_POST_GO_SLEEP_MS:-10000}"
 UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
 CUDA_GRAPH="${METALFISH_WINDOWS_CUDA_GRAPH:-}"
 CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
@@ -383,7 +385,8 @@ function Invoke-UciSmoke {
   param(
     [string]\$Name,
     [string[]]\$Commands,
-    [string[]]\$RequiredText
+    [string[]]\$RequiredText,
+    [int]\$GoWaitMs = 0
   )
   \$stdout = Join-Path \$Logs "\$Name.stdout.log"
   \$stderr = Join-Path \$Logs "\$Name.stderr.log"
@@ -408,7 +411,13 @@ function Invoke-UciSmoke {
   \$proc = [System.Diagnostics.Process]::Start(\$psi)
   \$stdoutTask = \$proc.StandardOutput.ReadToEndAsync()
   \$stderrTask = \$proc.StandardError.ReadToEndAsync()
-  \$proc.StandardInput.WriteLine((\$Commands -join "\`n"))
+  foreach (\$command in \$Commands) {
+    \$proc.StandardInput.WriteLine(\$command)
+    \$proc.StandardInput.Flush()
+    if (\$command -like "go *" -and \$GoWaitMs -gt 0) {
+      Start-Sleep -Milliseconds \$GoWaitMs
+    }
+  }
   \$proc.StandardInput.Close()
   \$timedOut = -not \$proc.WaitForExit(${UCI_TIMEOUT_SECONDS} * 1000)
   if (\$timedOut) {
@@ -436,10 +445,8 @@ function Invoke-UciSmoke {
 \$NnueBig = Join-Path \$Networks "nn-c288c895ea92.nnue"
 \$NnueSmall = Join-Path \$Networks "nn-37f18f62d772.nnue"
 
-Invoke-ProbeSmoke `
-  -Name "cuda-probe" `
-  -Arguments "--weights `"\$Bt4`" --backend cuda --batch-size 1 --warmup 1 --iterations 1 --top 3" `
-  -RequiredText @("`"backend`":`"cuda`"", "CUDA transformer backend", "`"value`":", "`"policy_top`":")
+\$ProbeArgs = "--weights " + [char]34 + \$Bt4 + [char]34 + " --backend cuda --batch-size 1 --warmup 1 --iterations 1 --top 3"
+Invoke-ProbeSmoke -Name "cuda-probe" -Arguments \$ProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"value":', '"policy_top":')
 
 Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "uci",
@@ -472,10 +479,11 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "setoption name HybridAutoABThreadsCap value 0",
   "setoption name MCTSMaxThreads value 1",
   "setoption name MCTSMinibatchSize value 1",
+  "setoption name TransformerLowTimeFallbackMs value 0",
   "position startpos",
-  "go nodes 8",
+  "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "bestmove")
+) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
 @(
   "# MetalFish Windows CUDA Runtime Gate",

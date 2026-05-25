@@ -107,11 +107,11 @@ Current remote gates:
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92ed1973-1772-4ae4-abb9-1b94ea5efabf` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default so the CUDA suite hard-compares against macOS Metal BT4 and legacy artifacts |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26366784935`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact |
-| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Direct GCP pass `direct-20260525-084150`, Windows Server 2022 G2/L4 vWS, packaged CUDA MCTS plus Hybrid smokes; packaged CUDA probe is added in branch and pending rerun |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26366784933`, Metal NN parity artifact and BK.07 smoke |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26366784932` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26366784934` |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26392093857`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact |
+| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Direct GCP pass `direct-20260525-5143c36-hybrid-search`, Windows Server 2022 G2/L4 vWS, packaged CUDA probe, MCTS smoke, and Hybrid CUDA search smoke |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26392093917`, Metal NN parity artifact and BK.07 smoke |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26392093912` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26392093916` |
 
 Current CUDA backend boundary:
 
@@ -694,10 +694,15 @@ The gate explicitly bootstraps OpenSSH on the Windows guest with a temporary
 `metalfish` administrator user and the caller's SSH key, because stock GCE
 Windows images do not expose the Linux-style metadata SSH path. The UCI harness
 drains stdout/stderr asynchronously so the large UCI option block cannot fill a
-pipe and stall the engine before `uciok`. The 2026-05-25 direct GCP pass
-`direct-20260525-084150` verified the production CUDA graph path on an L4:
-pure CUDA MCTS returned `bestmove d2d4` at `go nodes 1`, and Hybrid loaded the
-same CUDA transformer backend with `executor=resolved+graph-primed`.
+pipe and stall the engine before `uciok`; the Hybrid smoke writes commands
+line-by-line and waits after `go` so it does not abort a timed search with an
+immediate `quit`. The 2026-05-25 direct GCP pass
+`direct-20260525-5143c36-hybrid-search` verified the production CUDA graph path
+on an L4: the packaged CUDA probe decoded BT4 policy/value/moves-left with
+`executor=resolved+graph-replay`, pure CUDA MCTS returned `bestmove d2d4` at
+`go nodes 1`, and Hybrid loaded the same CUDA transformer backend with
+`executor=resolved+graph-primed` while completing 232 MCTS playouts and 214 NN
+evals alongside AB depth 15.
 
 The macOS Metal CI now builds `test_nn_comparison` and `metalfish_nn_probe`
 alongside the engine, emits `metal-nn-parity-report.md`, records

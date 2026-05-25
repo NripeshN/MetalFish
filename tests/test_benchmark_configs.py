@@ -41,6 +41,16 @@ def assert_file_contains(path: pathlib.Path, required: list[str]) -> None:
         )
 
 
+def assert_file_not_contains(path: pathlib.Path, forbidden: list[str]) -> None:
+    text = path.read_text()
+    present = [token for token in forbidden if token in text]
+    if present:
+        raise AssertionError(
+            f"{path.relative_to(PROJ)} contains forbidden tokens:\n"
+            + "\n".join(present)
+        )
+
+
 def with_clean_hybrid_env(callback):
     env_names = paper_benchmarks.HYBRID_ENV_OPTION_OVERRIDES.keys()
     old_values = {key: os.environ.get(key) for key in env_names}
@@ -996,7 +1006,14 @@ def main() -> int:
             "METALFISH_WINDOWS_CUDA_PROFILE",
             "METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420",
             "METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420",
+            "METALFISH_WINDOWS_CUDA_HYBRID_UCI_GO:-movetime 8000",
+            "METALFISH_WINDOWS_CUDA_HYBRID_POST_GO_SLEEP_MS:-10000",
             "metalfish_nn_probe.exe",
+            '$ProbeArgs = "--weights "',
+            'Invoke-ProbeSmoke -Name "cuda-probe"',
+            "Start-Sleep -Milliseconds \\$GoWaitMs",
+            "TransformerLowTimeFallbackMs value 0",
+            "Final: MCTSPlayouts=",
             "cuda-probe",
             "install_gpu_driver.ps1",
             "vc_redist.x64.exe",
@@ -1005,6 +1022,12 @@ def main() -> int:
             "Starting Parallel Hybrid Search",
             "windows-cuda-runtime-summary.md",
             "collect_remote_artifacts",
+        ],
+    )
+    assert_file_not_contains(
+        PROJ / "tools/run_gcp_windows_cuda_runtime_gate.sh",
+        [
+            "Invoke-ProbeSmoke `",
         ],
     )
     assert_file_contains(
