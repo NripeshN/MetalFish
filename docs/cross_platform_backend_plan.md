@@ -106,9 +106,9 @@ Current remote gates:
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92ed1973-1772-4ae4-abb9-1b94ea5efabf` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260525-pe-geometry`, L4, 2026-05-25 |
-| GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default so the CUDA suite hard-compares against macOS Metal BT4 and legacy artifacts; `CUBLAS_WORKSPACE_CONFIG` is unset by default and only forwarded through the diagnostic `cublas_workspace_config` input |
+| GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default and must be a successful same-commit `MetalFish CI` run, so the CUDA suite hard-compares against current macOS Metal BT4 and legacy artifacts before spending L4 VM time; `CUBLAS_WORKSPACE_CONFIG` is unset by default and only forwarded through the diagnostic `cublas_workspace_config` input |
 | GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26417227513`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact plus a structured compile/package manifest |
-| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Direct GCP pass `direct-20260525-positive-hybrid-metrics`, Windows Server 2022 G2/L4 vWS, packaged CUDA probe, MCTS smoke, metric-asserted Hybrid CUDA search smoke, and runtime manifest |
+| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Requires `windows_cuda_run_id` from a successful same-commit `Windows CUDA Compile Gate` run before creating the Windows L4 VM; direct GCP pass `direct-20260525-positive-hybrid-metrics`, Windows Server 2022 G2/L4 vWS, packaged CUDA probe, MCTS smoke, metric-asserted Hybrid CUDA search smoke, and runtime manifest |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26417227478`, Metal NN parity artifact and BK.07 smoke |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26417227498` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26417227496` |
