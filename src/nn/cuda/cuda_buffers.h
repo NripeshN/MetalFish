@@ -68,7 +68,8 @@ public:
   void ClearAll(cudaStream_t stream = nullptr);
   void ClearOutputs(int batch_size, cudaStream_t stream = nullptr);
   CudaOutputDownload DownloadOutputs(int batch_size,
-                                     cudaStream_t stream = nullptr) const;
+                                     cudaStream_t stream = nullptr,
+                                     bool include_raw_policy = true) const;
   void Release();
 
   const CudaBufferLayout &Layout() const { return layout_; }

@@ -295,8 +295,8 @@ void CudaInferenceBuffers::ClearOutputs(int batch_size, cudaStream_t stream) {
 }
 
 CudaOutputDownload
-CudaInferenceBuffers::DownloadOutputs(int batch_size,
-                                      cudaStream_t stream) const {
+CudaInferenceBuffers::DownloadOutputs(int batch_size, cudaStream_t stream,
+                                      bool include_raw_policy) const {
   ValidateBatchSize(layout_, batch_size);
   CudaOutputDownload output;
   DownloadDeviceFloats(policy, layout_.tensor_plan.PolicyEntries(batch_size),
@@ -306,9 +306,11 @@ CudaInferenceBuffers::DownloadOutputs(int batch_size,
   DownloadDeviceFloats(moves_left,
                        layout_.tensor_plan.MovesLeftEntries(batch_size),
                        output.moves_left, "cudaMemcpy(moves_left)", stream);
-  DownloadDeviceFloats(raw_policy,
-                       layout_.tensor_plan.RawPolicyEntries(batch_size),
-                       output.raw_policy, "cudaMemcpy(raw_policy)", stream);
+  if (include_raw_policy) {
+    DownloadDeviceFloats(raw_policy,
+                         layout_.tensor_plan.RawPolicyEntries(batch_size),
+                         output.raw_policy, "cudaMemcpy(raw_policy)", stream);
+  }
   SyncStream(stream, "cudaStreamSynchronize(download_outputs)");
   return output;
 }

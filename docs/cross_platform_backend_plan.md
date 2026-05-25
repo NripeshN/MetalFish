@@ -355,6 +355,14 @@ Current CUDA backend boundary:
   stress (`moves_left_delta=0.197540` on
   `e2e4 e7e6 d2d4 d7d5`). The change reduced CPU allocation churn but made
   repeated singleton CUDA evals less stable, so it was reverted.
+- A sparse dynamic positional-encoding preprocess attempt was rejected after
+  same-branch 2026-05-25 L4 A/B gates showed it was slower than the existing
+  dense fallback at every measured batch size. Sparse passed CUDA unit tests,
+  fixed BT4 references, batch parity, reuse stress, graph replay, and
+  auto/CUDA/hybrid UCI smokes, but the dense fallback measured
+  `b1=6.865ms`, `b16=48.023ms`, and `b32=97.306ms` versus sparse
+  `b1=6.929ms`, `b16=50.357ms`, and `b32=100.883ms`, so the default path was
+  reverted instead of carrying a latent throughput regression.
 - `test_nn_comparison` has an opt-in targeted batch probe
   (`METALFISH_NN_BATCH_TRACE_PAIR=1`) that prints the delta for one selected
   entry as both a single eval and a member of a larger batch. This is the safe
@@ -557,6 +565,11 @@ Current CUDA backend boundary:
   batch timings were `b1=6.790ms`, `b16=50.480ms`, and `b32=94.900ms`, improving
   batched MCTS throughput versus the previous accepted `5d67146` gate while
   keeping the single-position latency change below one percent.
+- Production CUDA inference now downloads only decoded policy/value/moves-left
+  outputs by default. The raw policy scratch tensor remains available when
+  `METALFISH_CUDA_TRACE_RAW_OUTPUTS=1` is set and low-level buffer smokes keep
+  the full-download default, but ordinary CUDA MCTS avoids an unused
+  device-to-host transfer from the policy-map scratch buffer.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.

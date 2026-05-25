@@ -387,7 +387,10 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
     executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
                        buffers_, workspace_, batch_size);
 
-    const auto downloaded = buffers_.DownloadOutputs(batch_size, stream);
+    const bool trace_raw_outputs =
+        EnvFlagEnabled("METALFISH_CUDA_TRACE_RAW_OUTPUTS");
+    const auto downloaded =
+        buffers_.DownloadOutputs(batch_size, stream, trace_raw_outputs);
     TraceRawOutputs(downloaded, tensor_plan_, batch_size);
     return DecodeNetworkOutputBatch(
         tensor_plan_, downloaded.policy.data(), downloaded.policy.size(),
