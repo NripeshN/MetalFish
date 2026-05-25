@@ -18,6 +18,7 @@
 #include "nn/policy_map.h"
 #include "search/tt.h"
 #include "syzygy/tbprobe.h"
+#include "uci/uci.h"
 
 #ifdef USE_CUDA
 #include "nn/cuda/cuda_execution_schedule.h"
@@ -684,6 +685,8 @@ void RunProbe(const Options &options) {
 } // namespace
 
 namespace MetalFish {
+
+std::string UCIEngine::square(Square square) { return SquareString(square); }
 
 TTEntry *TranspositionTable::first_entry(const Key) const { return nullptr; }
 
