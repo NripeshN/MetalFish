@@ -492,7 +492,8 @@ private:
     const auto output_start = std::chrono::steady_clock::now();
     CopyMappedOutputs(output_mapping_, sequence, buffers, workspace,
                       batch_size);
-    workspace.Synchronize();
+    if (profile_index >= 0)
+      workspace.Synchronize();
     const double output_ms =
         profile_index >= 0 ? MillisSince(output_start) : 0.0;
     if (profile_index >= 0) {
