@@ -414,48 +414,8 @@ DenseStageActivation ActivationFromName(const std::string &activation) {
 DenseStageActivation
 DenseStageActivationForName(const NetworkResolvedExecutionPlan &execution_plan,
                             std::string_view name) {
-  const std::string policy_prefix =
-      "policy." + execution_plan.policy_head + ".";
-  if (StartsWith(name, policy_prefix)) {
-    if (name == policy_prefix + "dense2" || name == policy_prefix + "dense3") {
-      return {};
-    }
-    if (name == policy_prefix + "output") {
-      if (!execution_plan.format.attention_policy)
-        return {};
-      return ActivationFromName(
-          execution_plan.format.attention_body
-              ? execution_plan.format.activations.default_activation
-              : std::string("selu"));
-    }
-  }
-
-  const std::string value_prefix = "value." + execution_plan.value_head + ".";
-  if (StartsWith(name, value_prefix)) {
-    if (name == value_prefix + "dense2") {
-      return ActivationFromName(execution_plan.format.wdl ? "softmax" : "tanh");
-    }
-    if (name == value_prefix + "output" || name == value_prefix + "dense1") {
-      return ActivationFromName(
-          execution_plan.format.activations.default_activation);
-    }
-  }
-
-  if (name == "moves_left.output")
-    return ActivationFromName("relu");
-  if (name == "moves_left.dense0" || name == "moves_left.dense1") {
-    return ActivationFromName(
-        execution_plan.format.activations.default_activation);
-  }
-
-  if (name == "body.input_embedding_preprocess")
-    return {};
-  if (name == "body.input_embedding") {
-    return ActivationFromName(
-        execution_plan.format.activations.default_activation);
-  }
-
-  return ActivationFromName(execution_plan.format.activations.ffn_activation);
+  return ActivationFromName(
+      NetworkDenseStageActivationName(execution_plan, name));
 }
 
 void CreateTimingEvent(cudaEvent_t *event) {
@@ -685,82 +645,27 @@ ResolveFeedForwardTensors(const NetworkResolvedExecutionStep &ffn,
   return resolved;
 }
 
-std::size_t
-BodyEncoderLayerCount(const NetworkResolvedExecutionPlan &execution_plan) {
-  std::size_t max_layer = 0;
-  bool found = false;
-  constexpr std::string_view kPrefix = "body.encoder.";
-  for (const auto &step : execution_plan.steps) {
-    if (!CudaStageNameStartsWith(step.name, kPrefix))
-      continue;
-    const std::string_view rest(step.name.data() + kPrefix.size(),
-                                step.name.size() - kPrefix.size());
-    const std::size_t dot = rest.find('.');
-    if (dot == std::string_view::npos || dot == 0)
-      continue;
-    bool numeric = true;
-    for (std::size_t i = 0; i < dot; ++i) {
-      if (rest[i] < '0' || rest[i] > '9') {
-        numeric = false;
-        break;
-      }
-    }
-    if (!numeric)
-      continue;
-    const std::size_t layer =
-        static_cast<std::size_t>(std::stoul(std::string(rest.substr(0, dot))));
-    max_layer = std::max(max_layer, layer + 1);
-    found = true;
-  }
-  return found ? max_layer : 0;
-}
-
 float FeedForwardResidualScale(
     const NetworkResolvedExecutionPlan &execution_plan,
     std::string_view stage_name) {
-  if (!CudaStageNameStartsWith(stage_name, "body.input_embedding_ffn") &&
-      !CudaStageNameStartsWith(stage_name, "body.encoder.")) {
-    return 1.0f;
-  }
-  const std::size_t layer_count = BodyEncoderLayerCount(execution_plan);
-  if (layer_count == 0)
-    return 1.0f;
-  return std::pow(2.0f * static_cast<float>(layer_count), -0.25f);
+  return NetworkFeedForwardResidualScale(execution_plan, stage_name);
 }
 
 float FeedForwardLayerNormEpsilon(
     const NetworkResolvedExecutionPlan &execution_plan,
     std::string_view stage_name) {
-  if (CudaStageNameStartsWith(stage_name, "body.input_embedding_ffn"))
-    return 1e-3f;
-  if (CudaStageNameStartsWith(stage_name, "body.encoder.")) {
-    return execution_plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE
-               ? 1e-3f
-               : 1e-6f;
-  }
-  return 1e-5f;
+  return NetworkFeedForwardLayerNormEpsilon(execution_plan, stage_name);
 }
 
 float DenseLayerNormEpsilon(const NetworkResolvedExecutionPlan &execution_plan,
                             std::string_view stage_name) {
-  if (stage_name == "body.input_embedding_norm" &&
-      execution_plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE) {
-    return 1e-3f;
-  }
-  return 1e-5f;
+  return NetworkDenseLayerNormEpsilon(execution_plan, stage_name);
 }
 
 float AttentionLayerNormEpsilon(
     const NetworkResolvedExecutionPlan &execution_plan,
     std::string_view stage_name) {
-  if (CudaStageNameStartsWith(stage_name, "body.encoder.")) {
-    return execution_plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE
-               ? 1e-3f
-               : 1e-6f;
-  }
-  if (CudaStageNameStartsWith(stage_name, "policy."))
-    return 1e-6f;
-  return 1e-5f;
+  return NetworkAttentionLayerNormEpsilon(execution_plan, stage_name);
 }
 
 const NetworkResolvedExecutionStep *

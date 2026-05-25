@@ -130,5 +130,23 @@ NetworkPositionEncodingGeometry ResolveStaticPositionEncodingGeometry(
     const NetworkResolvedExecutionPlan &plan,
     const NetworkResolvedExecutionStep &dense);
 
+std::string NetworkDenseStageActivationName(
+    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name);
+
+std::size_t
+NetworkBodyEncoderLayerCount(const NetworkResolvedExecutionPlan &plan);
+
+float NetworkFeedForwardResidualScale(
+    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name);
+
+float NetworkFeedForwardLayerNormEpsilon(
+    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name);
+
+float NetworkDenseLayerNormEpsilon(const NetworkResolvedExecutionPlan &plan,
+                                   std::string_view stage_name);
+
+float NetworkAttentionLayerNormEpsilon(const NetworkResolvedExecutionPlan &plan,
+                                       std::string_view stage_name);
+
 } // namespace NN
 } // namespace MetalFish

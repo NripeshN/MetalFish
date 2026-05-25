@@ -7,6 +7,8 @@
 
 #include "network_execution_plan.h"
 
+#include <algorithm>
+#include <cmath>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -861,6 +863,120 @@ NetworkPositionEncodingGeometry ResolveStaticPositionEncodingGeometry(
         "static position encoding geometry is inconsistent");
   }
   return geometry;
+}
+
+std::string NetworkDenseStageActivationName(
+    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name) {
+  const std::string policy_prefix = "policy." + plan.policy_head + ".";
+  if (StartsWith(stage_name, policy_prefix)) {
+    if (stage_name == policy_prefix + "dense2" ||
+        stage_name == policy_prefix + "dense3") {
+      return {};
+    }
+    if (stage_name == policy_prefix + "output") {
+      if (!plan.format.attention_policy)
+        return {};
+      return plan.format.attention_body
+                 ? plan.format.activations.default_activation
+                 : std::string("selu");
+    }
+  }
+
+  const std::string value_prefix = "value." + plan.value_head + ".";
+  if (StartsWith(stage_name, value_prefix)) {
+    if (stage_name == value_prefix + "dense2")
+      return plan.format.wdl ? "softmax" : "tanh";
+    if (stage_name == value_prefix + "output" ||
+        stage_name == value_prefix + "dense1") {
+      return plan.format.activations.default_activation;
+    }
+  }
+
+  if (stage_name == "moves_left.output")
+    return "relu";
+  if (stage_name == "moves_left.dense0" || stage_name == "moves_left.dense1")
+    return plan.format.activations.default_activation;
+
+  if (stage_name == "body.input_embedding_preprocess")
+    return {};
+  if (stage_name == "body.input_embedding")
+    return plan.format.activations.default_activation;
+
+  return plan.format.activations.ffn_activation;
+}
+
+std::size_t
+NetworkBodyEncoderLayerCount(const NetworkResolvedExecutionPlan &plan) {
+  std::size_t max_layer = 0;
+  bool found = false;
+  constexpr std::string_view prefix = "body.encoder.";
+  for (const auto &step : plan.steps) {
+    if (!StartsWith(step.name, prefix))
+      continue;
+    const std::string_view suffix =
+        std::string_view(step.name).substr(prefix.size());
+    const std::size_t dot = suffix.find('.');
+    if (dot == std::string_view::npos)
+      continue;
+    std::size_t layer = 0;
+    bool has_digit = false;
+    for (char ch : suffix.substr(0, dot)) {
+      if (ch < '0' || ch > '9') {
+        has_digit = false;
+        break;
+      }
+      has_digit = true;
+      layer = layer * 10 + static_cast<std::size_t>(ch - '0');
+    }
+    if (!has_digit)
+      continue;
+    max_layer = std::max(max_layer, layer + 1);
+    found = true;
+  }
+  return found ? max_layer : 0;
+}
+
+float NetworkFeedForwardResidualScale(
+    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name) {
+  if (!StartsWith(stage_name, "body.input_embedding_ffn") &&
+      !StartsWith(stage_name, "body.encoder.")) {
+    return 1.0f;
+  }
+  const std::size_t layer_count = NetworkBodyEncoderLayerCount(plan);
+  if (layer_count == 0)
+    return 1.0f;
+  return std::pow(2.0f * static_cast<float>(layer_count), -0.25f);
+}
+
+float NetworkFeedForwardLayerNormEpsilon(
+    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name) {
+  if (StartsWith(stage_name, "body.input_embedding_ffn"))
+    return 1e-3f;
+  if (StartsWith(stage_name, "body.encoder.")) {
+    return plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE ? 1e-3f
+                                                                   : 1e-6f;
+  }
+  return 1e-5f;
+}
+
+float NetworkDenseLayerNormEpsilon(const NetworkResolvedExecutionPlan &plan,
+                                   std::string_view stage_name) {
+  if (stage_name == "body.input_embedding_norm" &&
+      plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE) {
+    return 1e-3f;
+  }
+  return 1e-5f;
+}
+
+float NetworkAttentionLayerNormEpsilon(
+    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name) {
+  if (StartsWith(stage_name, "body.encoder.")) {
+    return plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE ? 1e-3f
+                                                                   : 1e-6f;
+  }
+  if (StartsWith(stage_name, "policy."))
+    return 1e-6f;
+  return 1e-5f;
 }
 
 } // namespace NN

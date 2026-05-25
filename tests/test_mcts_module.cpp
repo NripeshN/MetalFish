@@ -838,6 +838,63 @@ void test_network_execution_plan(TestCounter &tc) {
          "resolved execution plan byte accounting should match inventory", tc);
   expect(resolved_plan.StepCount(NN::NetworkExecutionOpKind::Dense) == 2,
          "minimal resolved plan should expose dense policy/value outputs", tc);
+  expect(NN::NetworkDenseStageActivationName(
+             resolved_plan, "policy." + policy_head + ".dense2")
+             .empty(),
+         "shared activation contract should keep policy dense2 linear", tc);
+  expect(NN::NetworkDenseStageActivationName(
+             resolved_plan, "policy." + policy_head + ".output") == "mish",
+         "shared activation contract should use default attention policy "
+         "activation",
+         tc);
+  expect(NN::NetworkDenseStageActivationName(
+             resolved_plan, "value." + value_head + ".dense2") == "softmax",
+         "shared activation contract should use softmax for WDL output", tc);
+  expect(NN::NetworkDenseStageActivationName(resolved_plan,
+                                            "moves_left.output") == "relu",
+         "shared activation contract should use ReLU for moves-left output",
+         tc);
+  expect(NN::NetworkDenseStageActivationName(
+             resolved_plan, "body.input_embedding_preprocess")
+             .empty(),
+         "shared activation contract should keep dynamic PE preprocess linear",
+         tc);
+  expect(NN::NetworkDenseStageActivationName(resolved_plan,
+                                            "body.input_embedding") == "mish",
+         "shared activation contract should use default input embedding "
+         "activation",
+         tc);
+  expect(NN::NetworkDenseStageActivationName(resolved_plan,
+                                            "body.encoder.0.ffn.dense1") ==
+             "swish",
+         "shared activation contract should use FFN activation for body "
+         "dense stages",
+         tc);
+  auto math_plan = resolved_plan;
+  math_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Attention, "body.encoder.0.mha", {}});
+  math_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::FeedForward, "body.encoder.1.ffn", {}});
+  expect(NN::NetworkBodyEncoderLayerCount(math_plan) == 2,
+         "shared math contract should derive body encoder layer count", tc);
+  const float expected_residual_scale = std::pow(4.0f, -0.25f);
+  expect(std::abs(NN::NetworkFeedForwardResidualScale(
+                      math_plan, "body.encoder.1.ffn") -
+                  expected_residual_scale) < 1e-6f,
+         "shared math contract should derive transformer residual scale", tc);
+  expect(std::abs(NN::NetworkFeedForwardLayerNormEpsilon(
+                      math_plan, "body.encoder.1.ffn_norm") -
+                  1e-3f) < 1e-9f,
+         "shared math contract should use PE_DENSE FFN epsilon", tc);
+  expect(std::abs(NN::NetworkDenseLayerNormEpsilon(
+                      math_plan, "body.input_embedding_norm") -
+                  1e-3f) < 1e-9f,
+         "shared math contract should use PE_DENSE input embedding epsilon",
+         tc);
+  expect(std::abs(NN::NetworkAttentionLayerNormEpsilon(
+                      math_plan, "policy." + policy_head + ".norm") -
+                  1e-6f) < 1e-12f,
+         "shared math contract should use attention policy epsilon", tc);
 
   auto expect_throws = [&](const std::function<void()> &fn, const char *msg) {
     bool rejected = false;
