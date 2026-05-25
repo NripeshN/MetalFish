@@ -1047,6 +1047,8 @@ def main() -> int:
             "build-windows-cuda/**/*.json",
             "tools/download_engine_networks.py",
             "tools/import_msvc_dev_env.ps1",
+            "tools/nn_metal_probe.cpp",
+            "tools/write_portable_manifest.py",
             "actions/cache@v5",
             ".vcpkg-bincache",
             "VCPKG_DEFAULT_BINARY_CACHE",
