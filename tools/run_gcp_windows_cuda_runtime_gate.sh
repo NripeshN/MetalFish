@@ -21,6 +21,7 @@ SSH_KEY="${METALFISH_GCP_SSH_KEY:-${HOME}/.ssh/google_compute_engine}"
 SSH_PUB_KEY="${METALFISH_GCP_SSH_PUB_KEY:-${SSH_KEY}.pub}"
 PACKAGE_ZIP="${METALFISH_WINDOWS_CUDA_PACKAGE:-}"
 WEIGHTS="${METALFISH_BT4_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-6147500.pb}"
+LEGACY_WEIGHTS="${METALFISH_LEGACY_NN_WEIGHTS:-${ROOT_DIR}/networks/legacy-42850.pb.gz}"
 NNUE_BIG="${METALFISH_NNUE_BIG:-${ROOT_DIR}/networks/nn-c288c895ea92.nnue}"
 NNUE_SMALL="${METALFISH_NNUE_SMALL:-${ROOT_DIR}/networks/nn-37f18f62d772.nnue}"
 UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420}"
@@ -136,6 +137,7 @@ collect_remote_artifacts() {
 
 require_file "${PACKAGE_ZIP}" "Windows CUDA package"
 require_file "${WEIGHTS}" "BT4 weights"
+require_file "${LEGACY_WEIGHTS}" "legacy 42850 weights"
 require_file "${NNUE_BIG}" "large NNUE"
 require_file "${NNUE_SMALL}" "small NNUE"
 ensure_ssh_key
@@ -304,6 +306,7 @@ done
 
 copy_to_remote "${PACKAGE_ZIP}" "C:/metalfish/metalfish-windows-cuda.zip"
 copy_to_remote "${WEIGHTS}" "C:/metalfish/networks/BT4-1024x15x32h-swa-6147500.pb"
+copy_to_remote "${LEGACY_WEIGHTS}" "C:/metalfish/networks/legacy-42850.pb.gz"
 copy_to_remote "${NNUE_BIG}" "C:/metalfish/networks/nn-c288c895ea92.nnue"
 copy_to_remote "${NNUE_SMALL}" "C:/metalfish/networks/nn-37f18f62d772.nnue"
 
@@ -552,11 +555,14 @@ function Invoke-UciSmoke {
 }
 
 \$Bt4 = Join-Path \$Networks "BT4-1024x15x32h-swa-6147500.pb"
+\$Legacy = Join-Path \$Networks "legacy-42850.pb.gz"
 \$NnueBig = Join-Path \$Networks "nn-c288c895ea92.nnue"
 \$NnueSmall = Join-Path \$Networks "nn-37f18f62d772.nnue"
 
 \$ProbeArgs = "--weights " + [char]34 + \$Bt4 + [char]34 + " --backend cuda --batch-size 1 --warmup 1 --iterations 1 --top 3"
 Invoke-ProbeSmoke -Name "cuda-probe" -Arguments \$ProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"value":', '"policy_top":')
+\$LegacyProbeArgs = "--weights " + [char]34 + \$Legacy + [char]34 + " --backend cuda --batch-size 1 --warmup 1 --iterations 1 --top 3"
+Invoke-ProbeSmoke -Name "cuda-legacy-probe" -Arguments \$LegacyProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"has_wdl":false', '"has_moves_left":false', '"policy_top":')
 
 Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "uci",
@@ -596,6 +602,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
 ) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove") -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
 \$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
+\$LegacyProbeJson = Read-ProbeJson "cuda-legacy-probe.stdout.log"
 \$MctsText = Read-LogText "cuda-mcts.stdout.log"
 \$HybridText = Read-LogText "hybrid-cuda.stdout.log"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
@@ -641,6 +648,19 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
     stdout_log = "cuda-probe.stdout.log"
     stderr_log = "cuda-probe.stderr.log"
   }
+  legacy_probe = [ordered]@{
+    backend = \$LegacyProbeJson.backend
+    executor = (Find-Executor \$LegacyProbeJson.network_info)
+    network_info = \$LegacyProbeJson.network_info
+    format = \$LegacyProbeJson.format
+    has_wdl = \$LegacyProbeJson.has_wdl
+    has_moves_left = \$LegacyProbeJson.has_moves_left
+    value = \$LegacyProbeJson.value
+    latency = \$LegacyProbeJson.latency
+    policy_top = \$LegacyProbeJson.policy_top
+    stdout_log = "cuda-legacy-probe.stdout.log"
+    stderr_log = "cuda-legacy-probe.stderr.log"
+  }
   uci_smokes = [ordered]@{
     cuda_mcts = [ordered]@{
       go = "${UCI_GO}"
@@ -667,7 +687,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-mcts, hybrid-cuda",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-mcts, hybrid-cuda",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"
