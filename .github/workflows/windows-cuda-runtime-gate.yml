@@ -11,9 +11,9 @@ on:
         required: false
         default: ""
       machine:
-        description: GCP machine type
+        description: Space-separated GCP machine types to try for the Windows L4 VM
         required: false
-        default: "g2-standard-8"
+        default: "g2-standard-8 g2-standard-4"
       uci_go:
         description: UCI go command for the packaged CUDA MCTS smoke
         required: false
@@ -84,7 +84,7 @@ jobs:
         env:
           METALFISH_GCP_PROJECT: ${{ vars.METALFISH_GCP_PROJECT }}
           METALFISH_GCP_ZONES: ${{ inputs.zones }}
-          METALFISH_GCP_MACHINE: ${{ inputs.machine }}
+          METALFISH_GCP_MACHINES: ${{ inputs.machine }}
           METALFISH_GCP_INSTANCE: metalfish-win-cuda-gh-${{ github.run_id }}-${{ github.run_attempt }}
           METALFISH_GCP_ARTIFACT_DIR: ${{ github.workspace }}/results/windows_cuda_runtime_gate
           METALFISH_GCP_GCS_PREFIX: ${{ inputs.gcs_prefix }}

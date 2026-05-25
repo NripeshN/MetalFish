@@ -680,11 +680,13 @@ versus baseline `300/300` with zero candidate errors.
 
 The Windows CUDA runtime gate is manual and release-facing. It downloads a
 `metalfish-windows-x86_64-msvc-cuda` package produced by the Windows CUDA
-compile gate, creates an ephemeral Windows Server 2022 `g2-standard-8` VM with
-an `nvidia-l4-vws` accelerator, installs the Google Cloud NVIDIA driver script,
+compile gate, creates an ephemeral Windows Server 2022 G2 VM with an
+`nvidia-l4-vws` accelerator, installs the Google Cloud NVIDIA driver script,
 verifies `nvidia-smi`, installs the VC++ runtime, and runs packaged
-`NNBackend=cuda` MCTS plus Hybrid UCI smokes with BT4 weights. The VM is deleted
-by default and logs are collected under `results/windows_cuda_runtime_gate/`.
+`NNBackend=cuda` MCTS plus Hybrid UCI smokes with BT4 weights. It tries
+`g2-standard-8` and then `g2-standard-4` by default so transient L4 stockouts
+do not fail the release gate before the engine runs. The VM is deleted by
+default and logs are collected under `results/windows_cuda_runtime_gate/`.
 The gate explicitly bootstraps OpenSSH on the Windows guest with a temporary
 `metalfish` administrator user and the caller's SSH key, because stock GCE
 Windows images do not expose the Linux-style metadata SSH path. The UCI harness

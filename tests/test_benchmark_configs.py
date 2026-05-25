@@ -966,10 +966,12 @@ def main() -> int:
             "Windows CUDA Runtime Gate",
             "windows_cuda_run_id",
             "windows-cuda-compile-*",
+            "g2-standard-8 g2-standard-4",
             "metalfish*windows-x86_64-msvc-cuda.zip",
             "tools/run_gcp_windows_cuda_runtime_gate.sh",
             "windows-cuda-runtime-${{ github.run_id }}",
             "METALFISH_GCP_INSTANCE",
+            "METALFISH_GCP_MACHINES",
             "METALFISH_WINDOWS_CUDA_PACKAGE",
         ],
     )
@@ -977,6 +979,8 @@ def main() -> int:
         PROJ / "tools/run_gcp_windows_cuda_runtime_gate.sh",
         [
             "nvidia-l4-vws",
+            "METALFISH_GCP_MACHINES",
+            "g2-standard-8 g2-standard-4",
             "windows-cloud",
             "windows-2022",
             "windows-startup-script-ps1",

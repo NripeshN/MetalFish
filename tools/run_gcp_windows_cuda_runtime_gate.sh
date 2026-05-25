@@ -6,7 +6,7 @@ PROJECT="${METALFISH_GCP_PROJECT:-metalfish}"
 DEFAULT_ZONES="us-central1-a us-central1-b us-central1-c us-west1-a us-west1-b us-west1-c us-east1-b us-east1-c us-east1-d us-east4-a us-east4-c us-west4-a us-west4-c"
 ZONES="${METALFISH_GCP_ZONES:-${METALFISH_GCP_ZONE:-${DEFAULT_ZONES}}}"
 INSTANCE="${METALFISH_GCP_INSTANCE:-metalfish-win-cuda-gate-$(date +%Y%m%d-%H%M%S)}"
-MACHINE="${METALFISH_GCP_MACHINE:-g2-standard-8}"
+MACHINES="${METALFISH_GCP_MACHINES:-${METALFISH_GCP_MACHINE:-g2-standard-8 g2-standard-4}}"
 ACCELERATOR="${METALFISH_GCP_ACCELERATOR:-type=nvidia-l4-vws,count=1}"
 IMAGE_PROJECT="${METALFISH_GCP_IMAGE_PROJECT:-windows-cloud}"
 IMAGE_FAMILY="${METALFISH_GCP_IMAGE_FAMILY:-windows-2022}"
@@ -33,6 +33,7 @@ DRIVER_SCRIPT_URL="${METALFISH_WINDOWS_GPU_DRIVER_SCRIPT_URL:-https://github.com
 CREATED_INSTANCE=0
 SSH_READY=0
 ZONE=""
+MACHINE=""
 RUN_DIR="$(mktemp -d -t metalfish-windows-cuda.XXXXXX)"
 PACKAGE_BASENAME="$(basename "${PACKAGE_ZIP}")"
 
@@ -219,31 +220,37 @@ try {
 }
 POWERSHELL
 
-for candidate_zone in ${ZONES}; do
-  echo "Creating ${INSTANCE} in ${candidate_zone}"
-  if gcloud compute instances create "${INSTANCE}" \
-    --project "${PROJECT}" \
-    --zone "${candidate_zone}" \
-    --machine-type "${MACHINE}" \
-    --accelerator "${ACCELERATOR}" \
-    --maintenance-policy TERMINATE \
-    --restart-on-failure \
-    --image-project "${IMAGE_PROJECT}" \
-    --image-family "${IMAGE_FAMILY}" \
-    --boot-disk-size "${BOOT_DISK_SIZE}" \
-    --boot-disk-type "${BOOT_DISK_TYPE}" \
-    --metadata "metalfish-windows-user=${REMOTE_USER}" \
-    --metadata-from-file "windows-startup-script-ps1=${RUN_DIR}/enable-openssh.ps1,metalfish-ssh-pubkey=${SSH_PUB_KEY}" \
-    --scopes https://www.googleapis.com/auth/cloud-platform; then
-    ZONE="${candidate_zone}"
-    CREATED_INSTANCE=1
+for candidate_machine in ${MACHINES}; do
+  for candidate_zone in ${ZONES}; do
+    echo "Creating ${INSTANCE} as ${candidate_machine} in ${candidate_zone}"
+    if gcloud compute instances create "${INSTANCE}" \
+      --project "${PROJECT}" \
+      --zone "${candidate_zone}" \
+      --machine-type "${candidate_machine}" \
+      --accelerator "${ACCELERATOR}" \
+      --maintenance-policy TERMINATE \
+      --restart-on-failure \
+      --image-project "${IMAGE_PROJECT}" \
+      --image-family "${IMAGE_FAMILY}" \
+      --boot-disk-size "${BOOT_DISK_SIZE}" \
+      --boot-disk-type "${BOOT_DISK_TYPE}" \
+      --metadata "metalfish-windows-user=${REMOTE_USER}" \
+      --metadata-from-file "windows-startup-script-ps1=${RUN_DIR}/enable-openssh.ps1,metalfish-ssh-pubkey=${SSH_PUB_KEY}" \
+      --scopes https://www.googleapis.com/auth/cloud-platform; then
+      MACHINE="${candidate_machine}"
+      ZONE="${candidate_zone}"
+      CREATED_INSTANCE=1
+      break
+    fi
+    echo "Zone ${candidate_zone} could not allocate ${candidate_machine} with ${ACCELERATOR}" >&2
+  done
+  if [[ "${CREATED_INSTANCE}" == "1" ]]; then
     break
   fi
-  echo "Zone ${candidate_zone} could not allocate ${MACHINE} with ${ACCELERATOR}" >&2
 done
 
 if [[ "${CREATED_INSTANCE}" != "1" ]]; then
-  echo "failed to create a Windows CUDA runtime VM in zones: ${ZONES}" >&2
+  echo "failed to create a Windows CUDA runtime VM; machines: ${MACHINES}; zones: ${ZONES}" >&2
   exit 1
 fi
 
