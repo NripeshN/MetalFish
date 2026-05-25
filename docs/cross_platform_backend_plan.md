@@ -105,13 +105,13 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92ed1973-1772-4ae4-abb9-1b94ea5efabf` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260525-pe-geometry`, L4, 2026-05-25 |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260525-output-target`, L4, 2026-05-25 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default and must be a successful same-commit `MetalFish CI` run, so the CUDA suite hard-compares against current macOS Metal BT4 and legacy artifacts before spending L4 VM time; `CUBLAS_WORKSPACE_CONFIG` is unset by default and only forwarded through the diagnostic `cublas_workspace_config` input |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26417227513`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact plus a structured compile/package manifest |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26422057223`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact plus a structured compile/package manifest |
 | GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Requires `windows_cuda_run_id` from a successful same-commit `Windows CUDA Compile Gate` run before creating the Windows L4 VM; direct GCP pass `direct-20260525-positive-hybrid-metrics`, Windows Server 2022 G2/L4 vWS, packaged CUDA probe, MCTS smoke, metric-asserted Hybrid CUDA search smoke, and runtime manifest |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26417227478`, Metal NN parity artifact and BK.07 smoke |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26417227498` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26417227496` |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26422057225`, Metal NN parity artifact and BK.07 smoke |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26422057173` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26422057221` |
 
 Current CUDA backend boundary:
 
@@ -584,6 +584,15 @@ Current CUDA backend boundary:
   `b1=6.859ms`, `b16=49.578ms`, and `b32=101.654ms`; it is a correctness
   gate for the common Metal/CUDA geometry seam rather than a same-zone speed
   comparison.
+- Decoded policy, value, moves-left, and raw-policy output target metadata now
+  resolves through the shared tensor-plan contract instead of a CUDA-local enum.
+  The 2026-05-25 L4 gate `metalfish-cuda-gate-20260525-output-target` accepted
+  CUDA unit tests, fixed BT4 references, batch parity, single/batch reuse
+  stress, BT4 and legacy NN probe suites, hard Metal-vs-CUDA probe-suite
+  comparisons, auto/CUDA/hybrid UCI smokes, ANE-disable hybrid smoke, and graph
+  replay. That run reported `b1=6.862ms`, `b16=47.876ms`, and `b32=96.722ms`,
+  with worst full-policy Metal-vs-CUDA deltas below `3.8e-05` for BT4 and
+  `1.5e-05` for the legacy net.
 - The CUDA pipeline smoke now instantiates `CreateResolvedCudaExecutor()` with
   a resolved schedule and named output mapping, so a real NVIDIA-device test
   exercises the same executor class that `CudaNetwork` installs.
