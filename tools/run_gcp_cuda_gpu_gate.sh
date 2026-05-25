@@ -15,6 +15,7 @@ DELETE_ON_EXIT="${METALFISH_GCP_DELETE_ON_EXIT:-1}"
 COLLECT_ARTIFACTS="${METALFISH_GCP_COLLECT_ARTIFACTS:-1}"
 ARTIFACT_DIR="${METALFISH_GCP_ARTIFACT_DIR:-${ROOT_DIR}/results/cuda_gpu_gate/${INSTANCE}}"
 GCS_PREFIX="${METALFISH_GCP_GCS_PREFIX:-}"
+METAL_PROBE_SUITE_LOG="${METALFISH_METAL_PROBE_SUITE_LOG:-}"
 ARCHIVE="$(mktemp -t metalfish-cuda-gate.XXXXXX.tar.gz)"
 CREATED_INSTANCE=0
 ZONE=""
@@ -154,6 +155,7 @@ collect_remote_artifacts() {
     cuda-gpu-tests.log \
     cuda-gpu-nn-comparison.log \
     cuda-gpu-nn-probe.log \
+    cuda-gpu-nn-probe-suite.log \
     cuda-gpu-nn-artifact-manifest.json \
     cuda-gpu-parity-report.md \
     cuda-gpu-uci-auto-smoke.log \
@@ -182,6 +184,33 @@ collect_remote_artifacts() {
   fi
 }
 
+compare_collected_probe_suite() {
+  if [[ "${COLLECT_ARTIFACTS}" != "1" || -z "${METAL_PROBE_SUITE_LOG}" ]]; then
+    return 0
+  fi
+
+  if [[ ! -s "${METAL_PROBE_SUITE_LOG}" ]]; then
+    echo "Metal probe suite log not found: ${METAL_PROBE_SUITE_LOG}" >&2
+    return 1
+  fi
+
+  local cuda_suite="${ARTIFACT_DIR}/cuda-gpu-nn-probe-suite.log"
+  if [[ ! -s "${cuda_suite}" ]]; then
+    echo "CUDA probe suite log not found: ${cuda_suite}" >&2
+    return 1
+  fi
+
+  python3 tools/compare_nn_backend_outputs.py \
+    --expected-log "${METAL_PROBE_SUITE_LOG}" \
+    --actual-log "${cuda_suite}" \
+    --expected-label "Metal (MPSGraph) backend" \
+    --actual-label "CUDA transformer backend" \
+    --summary-out "${ARTIFACT_DIR}/metal-cuda-nn-probe-suite-summary.json" \
+    --require-full-policy \
+    --all-probes \
+    | tee "${ARTIFACT_DIR}/metal-cuda-nn-probe-suite-compare.log"
+}
+
 set +e
 gcloud compute ssh "${INSTANCE}" \
   --project "${PROJECT}" \
@@ -191,4 +220,12 @@ REMOTE_STATUS=$?
 set -e
 
 collect_remote_artifacts
-exit "${REMOTE_STATUS}"
+COMPARE_STATUS=0
+if [[ "${REMOTE_STATUS}" == "0" ]]; then
+  compare_collected_probe_suite || COMPARE_STATUS=$?
+fi
+
+if [[ "${REMOTE_STATUS}" != "0" ]]; then
+  exit "${REMOTE_STATUS}"
+fi
+exit "${COMPARE_STATUS}"

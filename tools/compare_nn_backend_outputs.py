@@ -25,13 +25,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--policy-max-tolerance", type=float, default=2e-2)
     parser.add_argument("--policy-mean-tolerance", type=float, default=2e-3)
     parser.add_argument("--require-full-policy", action="store_true")
+    parser.add_argument(
+        "--all-probes",
+        action="store_true",
+        help="Compare every JSON probe object in both logs, in order.",
+    )
     return parser.parse_args()
 
 
-def load_probe_json(path: str | Path) -> dict[str, Any]:
+def load_probe_jsons(path: str | Path) -> list[dict[str, Any]]:
     text = Path(path).read_text(encoding="utf-8")
     last_error: Exception | None = None
-    for line in reversed(text.splitlines()):
+    probes: list[dict[str, Any]] = []
+    for line in text.splitlines():
         line = line.strip()
         if not (line.startswith("{") and line.endswith("}")):
             continue
@@ -41,10 +47,29 @@ def load_probe_json(path: str | Path) -> dict[str, Any]:
             last_error = exc
             continue
         if isinstance(data, dict):
-            return data
+            probes.append(data)
+    if probes:
+        return probes
     if last_error is not None:
         raise RuntimeError(f"{path}: malformed JSON: {last_error}")
     raise RuntimeError(f"{path}: no JSON probe object found")
+
+
+def load_probe_json(path: str | Path) -> dict[str, Any]:
+    probes = load_probe_jsons(path)
+    return probes[-1]
+
+
+def load_selected_probes(path: str | Path, *, all_probes: bool) -> list[dict[str, Any]]:
+    probes = load_probe_jsons(path)
+    if all_probes:
+        return probes
+    return [probes[-1]]
+
+
+def probe_label(data: dict[str, Any], index: int) -> str:
+    fen = str(data.get("fen", "<missing-fen>"))
+    return f"probe {index + 1} ({fen})"
 
 
 def require(condition: bool, message: str) -> None:
@@ -110,10 +135,11 @@ def backend_check(data: dict[str, Any], label: str | None, role: str) -> None:
     )
 
 
-def main() -> int:
-    args = parse_args()
-    expected = load_probe_json(args.expected_log)
-    actual = load_probe_json(args.actual_log)
+def compare_probe(
+    expected: dict[str, Any],
+    actual: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
     backend_check(expected, args.expected_label, "expected")
     backend_check(actual, args.actual_label, "actual")
 
@@ -193,7 +219,7 @@ def main() -> int:
             f"{args.policy_mean_tolerance}",
         )
 
-    summary = {
+    return {
         "expected_backend": expected.get("backend"),
         "actual_backend": actual.get("backend"),
         "fen": expected.get("fen"),
@@ -205,22 +231,92 @@ def main() -> int:
         "policy_max_delta": policy_max_delta,
         "policy_mean_delta": policy_mean_delta,
     }
+
+
+def max_optional(values: list[float | None]) -> float | None:
+    finite_values = [value for value in values if value is not None]
+    if not finite_values:
+        return None
+    return max(finite_values)
+
+
+def aggregate_summary(
+    probes: list[dict[str, Any]],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "probe_count": len(probes),
+        "probes": probes,
+        "max_value_delta": max((probe["value_delta"] for probe in probes), default=0.0),
+        "max_wdl_delta": max((probe["wdl_delta"] for probe in probes), default=0.0),
+        "max_moves_left_delta": max(
+            (probe["moves_left_delta"] for probe in probes),
+            default=0.0,
+        ),
+        "max_top_logit_delta": max(
+            (probe["max_top_logit_delta"] for probe in probes),
+            default=0.0,
+        ),
+        "top_count": args.top_count,
+        "policy_max_delta": max_optional(
+            [probe["policy_max_delta"] for probe in probes]
+        ),
+        "policy_mean_delta": max_optional(
+            [probe["policy_mean_delta"] for probe in probes]
+        ),
+    }
+    if len(probes) == 1:
+        summary.update(probes[0])
+    return summary
+
+
+def main() -> int:
+    args = parse_args()
+    expected_probes = load_selected_probes(
+        args.expected_log,
+        all_probes=args.all_probes,
+    )
+    actual_probes = load_selected_probes(
+        args.actual_log,
+        all_probes=args.all_probes,
+    )
+    require(
+        len(expected_probes) == len(actual_probes),
+        f"probe count mismatch: {len(expected_probes)} != {len(actual_probes)}",
+    )
+
+    probe_summaries: list[dict[str, Any]] = []
+    for index, (expected, actual) in enumerate(zip(expected_probes, actual_probes)):
+        try:
+            probe_summaries.append(compare_probe(expected, actual, args))
+        except RuntimeError as exc:
+            raise RuntimeError(f"{probe_label(expected, index)}: {exc}") from exc
+
+    summary = aggregate_summary(probe_summaries, args)
     if args.summary_out:
         output = Path(args.summary_out)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
     policy_text = ""
-    if policy_max_delta is not None and policy_mean_delta is not None:
+    if (
+        summary["policy_max_delta"] is not None
+        and summary["policy_mean_delta"] is not None
+    ):
         policy_text = (
-            f" policy_max_delta={policy_max_delta:.6g}"
-            f" policy_mean_delta={policy_mean_delta:.6g}"
+            f" policy_max_delta={summary['policy_max_delta']:.6g}"
+            f" policy_mean_delta={summary['policy_mean_delta']:.6g}"
         )
+    probe_text = ""
+    if len(probe_summaries) > 1:
+        probe_text = f"probes={len(probe_summaries)} "
     print(
         "NN backend output compare: PASS "
-        f"value_delta={value_delta:.6g} wdl_delta={wdl_delta:.6g} "
-        f"moves_left_delta={moves_left_delta:.6g} "
-        f"top_logit_delta={max_top_logit_delta:.6g}{policy_text}"
+        f"{probe_text}"
+        f"value_delta={summary['max_value_delta']:.6g} "
+        f"wdl_delta={summary['max_wdl_delta']:.6g} "
+        f"moves_left_delta={summary['max_moves_left_delta']:.6g} "
+        f"top_logit_delta={summary['max_top_logit_delta']:.6g}{policy_text}"
     )
     return 0
 

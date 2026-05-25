@@ -150,6 +150,7 @@ write_summary() {
     echo "- CUDA tests: $(summary_log_status "${BUILD_DIR}/cuda-gpu-tests.log")"
     echo "- NN comparison: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-comparison.log")"
     echo "- NN probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-probe.log")"
+    echo "- NN probe suite: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log")"
     echo "- NN artifact manifest: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-artifact-manifest.json")"
     echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
@@ -162,6 +163,8 @@ write_summary() {
     summary_failure_lines "NN comparison" \
       "${BUILD_DIR}/cuda-gpu-nn-comparison.log"
     summary_failure_lines "NN probe" "${BUILD_DIR}/cuda-gpu-nn-probe.log"
+    summary_failure_lines "NN probe suite" \
+      "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log"
     summary_failure_lines "auto UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
     summary_failure_lines "explicit CUDA UCI smoke" \
@@ -429,6 +432,15 @@ python3 tools/check_nn_backend_artifacts.py \
   --manifest-out "${BUILD_DIR}/cuda-gpu-nn-artifact-manifest.json" \
   --min-policy-top 3 \
   --require-batch-benchmark
+python3 tools/run_nn_backend_probe_suite.py \
+  --probe "${BUILD_DIR}/metalfish_nn_probe" \
+  --weights "${WEIGHTS}" \
+  --backend cuda \
+  --out "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log" \
+  --top 3 \
+  --warmup 0 \
+  --iterations 1 \
+  --full-policy
 
 python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \

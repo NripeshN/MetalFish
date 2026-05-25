@@ -93,6 +93,7 @@ jobs:
             tools/apple_coreml_microbench.py \
             tools/check_nn_backend_artifacts.py \
             tools/compare_nn_backend_outputs.py \
+            tools/run_nn_backend_probe_suite.py \
             tools/lc0_coreml_bk_policy_probe.py \
             tools/lc0_coreml_concurrency_benchmark.py \
             tools/lc0_coreml_position_parity.py \
@@ -123,6 +124,15 @@ jobs:
             --iterations 1 \
             --full-policy \
             2>&1 | tee build/metal-nn-probe.log
+          python3 tools/run_nn_backend_probe_suite.py \
+            --probe ./build/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend metal \
+            --out build/metal-nn-probe-suite.log \
+            --top 3 \
+            --warmup 0 \
+            --iterations 1 \
+            --full-policy
           python3 tools/check_nn_backend_artifacts.py \
             --backend-label "Metal (MPSGraph) backend" \
             --parity-report build/metal-nn-parity-report.md \
@@ -211,6 +221,7 @@ jobs:
             build/metal-nn-comparison.log
             build/metal-nn-parity-report.md
             build/metal-nn-probe.log
+            build/metal-nn-probe-suite.log
             build/metal-nn-artifact-manifest.json
             README.md
             CHANGELOG.md
