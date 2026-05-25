@@ -16,6 +16,7 @@ concurrency:
 env:
   BUILD_TYPE: Release
   METALFISH_BT4_WEIGHTS_URL: https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz
+  METALFISH_LEGACY_WEIGHTS_URL: https://storage.lczero.org/files/networks/00af53b081e80147172e6f281c01daf5ca19ada173321438914c730370aa4267
 
 jobs:
   build-and-test:
@@ -45,7 +46,9 @@ jobs:
           python3 -m pip install -r tests/requirements.txt
 
       - name: Download engine networks
-        run: python3 tools/download_engine_networks.py
+        run: |
+          python3 tools/download_engine_networks.py
+          python3 tools/download_engine_networks.py --legacy-only
 
       - name: Configure
         run: |
@@ -129,6 +132,15 @@ jobs:
             --weights networks/BT4-1024x15x32h-swa-6147500.pb \
             --backend metal \
             --out build/metal-nn-probe-suite.log \
+            --top 3 \
+            --warmup 0 \
+            --iterations 1 \
+            --full-policy
+          python3 tools/run_nn_backend_probe_suite.py \
+            --probe ./build/metalfish_nn_probe \
+            --weights networks/legacy-42850.pb.gz \
+            --backend metal \
+            --out build/metal-legacy-nn-probe-suite.log \
             --top 3 \
             --warmup 0 \
             --iterations 1 \
@@ -222,6 +234,7 @@ jobs:
             build/metal-nn-parity-report.md
             build/metal-nn-probe.log
             build/metal-nn-probe-suite.log
+            build/metal-legacy-nn-probe-suite.log
             build/metal-nn-artifact-manifest.json
             README.md
             CHANGELOG.md

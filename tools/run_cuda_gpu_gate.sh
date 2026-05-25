@@ -8,6 +8,7 @@ JOBS="${METALFISH_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 UCI_GO="${METALFISH_CUDA_UCI_GO:-nodes 8}"
 UCI_TIMEOUT="${METALFISH_CUDA_UCI_TIMEOUT:-180}"
 WEIGHTS="${METALFISH_NN_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-6147500.pb}"
+LEGACY_WEIGHTS="${METALFISH_LEGACY_NN_WEIGHTS:-${ROOT_DIR}/networks/legacy-42850.pb.gz}"
 APT_LOCK_TIMEOUT="${METALFISH_APT_LOCK_TIMEOUT:-600}"
 SUMMARY="${METALFISH_CUDA_SUMMARY:-${BUILD_DIR}/cuda-gpu-summary.md}"
 PARITY_REPORT="${METALFISH_NN_PARITY_REPORT:-${BUILD_DIR}/cuda-gpu-parity-report.md}"
@@ -119,6 +120,7 @@ write_summary() {
     echo "- CUDA architectures: ${CUDA_ARCHS}"
     echo "- Build directory: ${BUILD_DIR}"
     echo "- Weights: ${WEIGHTS}"
+    echo "- Legacy weights: ${LEGACY_WEIGHTS}"
     echo "- Parity report: ${PARITY_REPORT}"
     echo "- Explicit CUDA UCI go: ${UCI_GO}"
     echo "- Batch worst trace: ${METALFISH_NN_BATCH_TRACE_WORST:-1}"
@@ -151,6 +153,7 @@ write_summary() {
     echo "- NN comparison: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-comparison.log")"
     echo "- NN probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-probe.log")"
     echo "- NN probe suite: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log")"
+    echo "- Legacy NN probe suite: $(summary_log_status "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log")"
     echo "- NN artifact manifest: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-artifact-manifest.json")"
     echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
@@ -165,6 +168,8 @@ write_summary() {
     summary_failure_lines "NN probe" "${BUILD_DIR}/cuda-gpu-nn-probe.log"
     summary_failure_lines "NN probe suite" \
       "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log"
+    summary_failure_lines "Legacy NN probe suite" \
+      "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log"
     summary_failure_lines "auto UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
     summary_failure_lines "explicit CUDA UCI smoke" \
@@ -371,6 +376,11 @@ python3 tools/download_engine_networks.py --nnue-only
 if [[ "${METALFISH_CUDA_DOWNLOAD_BT4:-1}" == "1" && ! -s "${WEIGHTS}" ]]; then
   python3 tools/download_engine_networks.py --bt4-only
 fi
+if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" &&
+      "${METALFISH_CUDA_DOWNLOAD_LEGACY:-1}" == "1" &&
+      ! -s "${LEGACY_WEIGHTS}" ]]; then
+  python3 tools/download_engine_networks.py --legacy-only
+fi
 
 if [[ ! -s "${WEIGHTS}" ]]; then
   echo "BT4 weights not found: ${WEIGHTS}" >&2
@@ -441,6 +451,21 @@ python3 tools/run_nn_backend_probe_suite.py \
   --warmup 0 \
   --iterations 1 \
   --full-policy
+if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
+  if [[ ! -s "${LEGACY_WEIGHTS}" ]]; then
+    echo "Legacy 42850 weights not found: ${LEGACY_WEIGHTS}" >&2
+    exit 2
+  fi
+  python3 tools/run_nn_backend_probe_suite.py \
+    --probe "${BUILD_DIR}/metalfish_nn_probe" \
+    --weights "${LEGACY_WEIGHTS}" \
+    --backend cuda \
+    --out "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log" \
+    --top 3 \
+    --warmup 0 \
+    --iterations 1 \
+    --full-policy
+fi
 
 python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \

@@ -680,18 +680,23 @@ The macOS Metal CI now builds `test_nn_comparison` and `metalfish_nn_probe`
 alongside the engine, emits `metal-nn-parity-report.md`, records
 `metal-nn-comparison.log`, and runs both a single BT4
 `metalfish_nn_probe --backend metal` smoke and a multi-position full-policy
-probe suite. The CUDA GPU gate emits the matching `cuda-gpu-nn-probe-suite.log`
-artifact. Metal CI and the CUDA GPU gate both validate the single-probe files
+probe suite for BT4. It also runs the same suite on the legacy 42850 classical
+convolution net, which has scalar value and no moves-left head. The CUDA GPU
+gate emits the matching `cuda-gpu-nn-probe-suite.log` and
+`cuda-gpu-legacy-nn-probe-suite.log` artifacts. Metal CI and the CUDA GPU gate
+both validate the single-probe files
 through `tools/check_nn_backend_artifacts.py`, which checks the backend label,
 WDL, moves-left, top-policy decoding, and batch benchmark presence before
 writing a compact JSON manifest. The suite logs are intended for strict
 Metal-vs-CUDA comparison with `tools/compare_nn_backend_outputs.py
 --all-probes --require-full-policy`, covering startpos, BK.07, castling-rich
-middle-game geometry, and promotion policy encoding. `tools/run_gcp_cuda_gpu_gate.sh`
-can promote this to a hard compare gate when `METALFISH_METAL_PROBE_SUITE_LOG`
-points at a locally generated Metal suite log. This keeps Metal, CUDA, and
-portable backends on one diagnostic artifact contract while leaving runtime
-strength tests separate.
+middle-game geometry, and promotion policy encoding. Legacy comparisons pass
+`--no-require-wdl --no-require-moves-left` while still checking scalar value,
+top moves, and full policy. `tools/run_gcp_cuda_gpu_gate.sh` can promote these
+to hard compare gates when `METALFISH_METAL_PROBE_SUITE_LOG` and
+`METALFISH_METAL_LEGACY_PROBE_SUITE_LOG` point at locally generated Metal suite
+logs. This keeps Metal, CUDA, and portable backends on one diagnostic artifact
+contract while leaving runtime strength tests separate.
 
 ## First Milestones
 

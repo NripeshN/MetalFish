@@ -85,6 +85,11 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                            label:@"input/conv"];
 
     for (size_t i = 0; i < weights.residual.size(); i++) {
+      const bool hasSe = weights.residual[i].has_se;
+      float *seWeights1 = hasSe ? weights.residual[i].se.w1.data() : nullptr;
+      float *seBiases1 = hasSe ? weights.residual[i].se.b1.data() : nullptr;
+      float *seWeights2 = hasSe ? weights.residual[i].se.w2.data() : nullptr;
+      float *seBiases2 = hasSe ? weights.residual[i].se.b2.data() : nullptr;
       layer = [graph
           addResidualBlockWithParent:layer
                       outputChannels:channelSize
@@ -94,11 +99,11 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                             weights2:&weights.residual[i].conv2.weights[0]
                              biases2:&weights.residual[i].conv2.biases[0]
                                label:[NSString stringWithFormat:@"block_%zu", i]
-                               hasSe:weights.residual[i].has_se ? YES : NO
-                          seWeights1:&weights.residual[i].se.w1[0]
-                           seBiases1:&weights.residual[i].se.b1[0]
-                          seWeights2:&weights.residual[i].se.w2[0]
-                           seBiases2:&weights.residual[i].se.b2[0]
+                               hasSe:hasSe ? YES : NO
+                          seWeights1:seWeights1
+                           seBiases1:seBiases1
+                          seWeights2:seWeights2
+                           seBiases2:seBiases2
                          seFcOutputs:weights.residual[i].se.b1.size()
                           activation:defaultActivation];
     }

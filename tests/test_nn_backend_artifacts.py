@@ -106,6 +106,8 @@ def probe_json(
     top_moves: list[str] | None = None,
     value: float = 0.25,
     policy_shift: float = 0.0,
+    has_wdl: bool = True,
+    has_moves_left: bool = True,
 ) -> str:
     moves = top_moves or ["e2e4", "d2d4", "g1f3"]
     policy = [1.0 + policy_shift, 0.5, -0.25, -1.0]
@@ -116,9 +118,9 @@ def probe_json(
             "network_info": f"{label} synthetic",
             "transform": 0,
             "value": value,
-            "has_wdl": True,
+            "has_wdl": has_wdl,
             "wdl": [0.2, 0.7, 0.1],
-            "has_moves_left": True,
+            "has_moves_left": has_moves_left,
             "moves_left": 12.5,
             "policy_top": [
                 {"move": moves[0], "logit": 1.0 + policy_shift},
@@ -304,6 +306,58 @@ def test_backend_output_compare_accepts_probe_suite() -> None:
         )
 
 
+def test_backend_output_compare_accepts_legacy_scalar_probe_suite() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal-legacy-suite.log"
+        actual = root / "cuda-legacy-suite.log"
+        summary = root / "summary.json"
+        expected.write_text(
+            probe_json(
+                backend="metal",
+                label="Metal (MPSGraph) backend",
+                has_wdl=False,
+                has_moves_left=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        actual.write_text(
+            probe_json(
+                backend="cuda",
+                label="CUDA transformer backend",
+                value=0.2504,
+                policy_shift=0.0004,
+                has_wdl=False,
+                has_moves_left=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--expected-label",
+                "Metal (MPSGraph) backend",
+                "--actual-label",
+                "CUDA transformer backend",
+                "--summary-out",
+                str(summary),
+                "--require-full-policy",
+                "--no-require-wdl",
+                "--no-require-moves-left",
+            ]
+        ):
+            expect("legacy compare success", comparer.main() == 0)
+        data = json.loads(summary.read_text(encoding="utf-8"))
+        expect("legacy wdl skipped", data["wdl_delta"] is None)
+        expect("legacy moves-left skipped", data["moves_left_delta"] is None)
+        expect("legacy value", abs(data["value_delta"] - 0.0004) < 1e-9)
+
+
 def test_backend_output_compare_rejects_probe_suite_mismatch() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -457,6 +511,7 @@ def main() -> int:
     test_checker_rejects_missing_wdl()
     test_backend_output_compare_accepts_close_outputs()
     test_backend_output_compare_accepts_probe_suite()
+    test_backend_output_compare_accepts_legacy_scalar_probe_suite()
     test_backend_output_compare_rejects_probe_suite_mismatch()
     test_backend_output_compare_rejects_top_move_drift()
     test_probe_suite_runner_writes_multiple_json_probes()

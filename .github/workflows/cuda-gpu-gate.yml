@@ -48,6 +48,7 @@ permissions:
 
 env:
   METALFISH_BT4_WEIGHTS_URL: https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz
+  METALFISH_LEGACY_WEIGHTS_URL: https://storage.lczero.org/files/networks/00af53b081e80147172e6f281c01daf5ca19ada173321438914c730370aa4267
 
 jobs:
   cuda-gpu-gate:
@@ -78,6 +79,7 @@ jobs:
             --name metalfish-macos-arm64 \
             --dir metal-artifacts
           test -s metal-artifacts/build/metal-nn-probe-suite.log
+          test -s metal-artifacts/build/metal-legacy-nn-probe-suite.log
 
       - name: Run CUDA GPU gate
         env:
@@ -102,6 +104,9 @@ jobs:
           fi
           if [ -s "${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log" ]; then
             export METALFISH_METAL_PROBE_SUITE_LOG="${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log"
+          fi
+          if [ -s "${GITHUB_WORKSPACE}/metal-artifacts/build/metal-legacy-nn-probe-suite.log" ]; then
+            export METALFISH_METAL_LEGACY_PROBE_SUITE_LOG="${GITHUB_WORKSPACE}/metal-artifacts/build/metal-legacy-nn-probe-suite.log"
           fi
           tools/run_gcp_cuda_gpu_gate.sh
 

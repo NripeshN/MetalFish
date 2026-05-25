@@ -16,6 +16,7 @@ COLLECT_ARTIFACTS="${METALFISH_GCP_COLLECT_ARTIFACTS:-1}"
 ARTIFACT_DIR="${METALFISH_GCP_ARTIFACT_DIR:-${ROOT_DIR}/results/cuda_gpu_gate/${INSTANCE}}"
 GCS_PREFIX="${METALFISH_GCP_GCS_PREFIX:-}"
 METAL_PROBE_SUITE_LOG="${METALFISH_METAL_PROBE_SUITE_LOG:-}"
+METAL_LEGACY_PROBE_SUITE_LOG="${METALFISH_METAL_LEGACY_PROBE_SUITE_LOG:-}"
 ARCHIVE="$(mktemp -t metalfish-cuda-gate.XXXXXX.tar.gz)"
 CREATED_INSTANCE=0
 ZONE=""
@@ -98,7 +99,11 @@ append_remote_env METALFISH_CUDA_ARCHS
 append_remote_env METALFISH_CUDA_UCI_GO
 append_remote_env METALFISH_CUDA_UCI_TIMEOUT
 append_remote_env METALFISH_CUDA_DOWNLOAD_BT4
+append_remote_env METALFISH_CUDA_DOWNLOAD_LEGACY
+append_remote_env METALFISH_CUDA_LEGACY_PROBE
 append_remote_env METALFISH_BT4_WEIGHTS_URL
+append_remote_env METALFISH_LEGACY_WEIGHTS_URL
+append_remote_env METALFISH_LEGACY_NN_WEIGHTS
 append_remote_env METALFISH_NNUE_BIG_URL
 append_remote_env METALFISH_NNUE_SMALL_URL
 append_remote_env METALFISH_NN_BATCH_BENCH
@@ -156,6 +161,7 @@ collect_remote_artifacts() {
     cuda-gpu-nn-comparison.log \
     cuda-gpu-nn-probe.log \
     cuda-gpu-nn-probe-suite.log \
+    cuda-gpu-legacy-nn-probe-suite.log \
     cuda-gpu-nn-artifact-manifest.json \
     cuda-gpu-parity-report.md \
     cuda-gpu-uci-auto-smoke.log \
@@ -211,6 +217,36 @@ compare_collected_probe_suite() {
     | tee "${ARTIFACT_DIR}/metal-cuda-nn-probe-suite-compare.log"
 }
 
+compare_collected_legacy_probe_suite() {
+  if [[ "${COLLECT_ARTIFACTS}" != "1" ||
+        -z "${METAL_LEGACY_PROBE_SUITE_LOG}" ]]; then
+    return 0
+  fi
+
+  if [[ ! -s "${METAL_LEGACY_PROBE_SUITE_LOG}" ]]; then
+    echo "Metal legacy probe suite log not found: ${METAL_LEGACY_PROBE_SUITE_LOG}" >&2
+    return 1
+  fi
+
+  local cuda_suite="${ARTIFACT_DIR}/cuda-gpu-legacy-nn-probe-suite.log"
+  if [[ ! -s "${cuda_suite}" ]]; then
+    echo "CUDA legacy probe suite log not found: ${cuda_suite}" >&2
+    return 1
+  fi
+
+  python3 tools/compare_nn_backend_outputs.py \
+    --expected-log "${METAL_LEGACY_PROBE_SUITE_LOG}" \
+    --actual-log "${cuda_suite}" \
+    --expected-label "Metal (MPSGraph) backend" \
+    --actual-label "CUDA transformer backend" \
+    --summary-out "${ARTIFACT_DIR}/metal-cuda-legacy-nn-probe-suite-summary.json" \
+    --require-full-policy \
+    --no-require-wdl \
+    --no-require-moves-left \
+    --all-probes \
+    | tee "${ARTIFACT_DIR}/metal-cuda-legacy-nn-probe-suite-compare.log"
+}
+
 set +e
 gcloud compute ssh "${INSTANCE}" \
   --project "${PROJECT}" \
@@ -223,6 +259,9 @@ collect_remote_artifacts
 COMPARE_STATUS=0
 if [[ "${REMOTE_STATUS}" == "0" ]]; then
   compare_collected_probe_suite || COMPARE_STATUS=$?
+  if [[ "${COMPARE_STATUS}" == "0" ]]; then
+    compare_collected_legacy_probe_suite || COMPARE_STATUS=$?
+  fi
 fi
 
 if [[ "${REMOTE_STATUS}" != "0" ]]; then

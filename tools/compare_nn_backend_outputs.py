@@ -24,6 +24,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--policy-logit-tolerance", type=float, default=2e-2)
     parser.add_argument("--policy-max-tolerance", type=float, default=2e-2)
     parser.add_argument("--policy-mean-tolerance", type=float, default=2e-3)
+    parser.add_argument(
+        "--require-wdl",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require and compare WDL heads. Disable for scalar-value legacy nets.",
+    )
+    parser.add_argument(
+        "--require-moves-left",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require and compare moves-left heads. Disable for legacy nets.",
+    )
     parser.add_argument("--require-full-policy", action="store_true")
     parser.add_argument(
         "--all-probes",
@@ -151,15 +163,6 @@ def compare_probe(
         expected.get("transform") == actual.get("transform"),
         "policy transform mismatch",
     )
-    require(
-        expected.get("has_wdl") and actual.get("has_wdl"),
-        "both probes must include WDL",
-    )
-    require(
-        expected.get("has_moves_left") and actual.get("has_moves_left"),
-        "both probes must include moves-left",
-    )
-
     value_delta = abs(finite_number(expected, "value") -
                       finite_number(actual, "value"))
     require(
@@ -167,21 +170,49 @@ def compare_probe(
         f"value delta {value_delta:.9g} exceeds {args.value_tolerance}",
     )
 
-    wdl_delta = max_abs_delta(finite_list(expected, "wdl"),
-                              finite_list(actual, "wdl"))
-    require(
-        wdl_delta <= args.wdl_tolerance,
-        f"WDL delta {wdl_delta:.9g} exceeds {args.wdl_tolerance}",
-    )
+    expected_has_wdl = bool(expected.get("has_wdl"))
+    actual_has_wdl = bool(actual.get("has_wdl"))
+    if args.require_wdl:
+        require(expected_has_wdl and actual_has_wdl, "both probes must include WDL")
+    else:
+        require(
+            expected_has_wdl == actual_has_wdl,
+            "WDL head presence mismatch",
+        )
 
-    moves_left_delta = abs(
-        finite_number(expected, "moves_left") - finite_number(actual, "moves_left")
-    )
-    require(
-        moves_left_delta <= args.moves_left_tolerance,
-        f"moves-left delta {moves_left_delta:.9g} exceeds "
-        f"{args.moves_left_tolerance}",
-    )
+    wdl_delta: float | None = None
+    if expected_has_wdl and actual_has_wdl:
+        wdl_delta = max_abs_delta(finite_list(expected, "wdl"),
+                                  finite_list(actual, "wdl"))
+        require(
+            wdl_delta <= args.wdl_tolerance,
+            f"WDL delta {wdl_delta:.9g} exceeds {args.wdl_tolerance}",
+        )
+
+    expected_has_moves_left = bool(expected.get("has_moves_left"))
+    actual_has_moves_left = bool(actual.get("has_moves_left"))
+    if args.require_moves_left:
+        require(
+            expected_has_moves_left and actual_has_moves_left,
+            "both probes must include moves-left",
+        )
+    else:
+        require(
+            expected_has_moves_left == actual_has_moves_left,
+            "moves-left head presence mismatch",
+        )
+
+    moves_left_delta: float | None = None
+    if expected_has_moves_left and actual_has_moves_left:
+        moves_left_delta = abs(
+            finite_number(expected, "moves_left") -
+            finite_number(actual, "moves_left")
+        )
+        require(
+            moves_left_delta <= args.moves_left_tolerance,
+            f"moves-left delta {moves_left_delta:.9g} exceeds "
+            f"{args.moves_left_tolerance}",
+        )
 
     expected_top = top_policy(expected, args.top_count)
     actual_top = top_policy(actual, args.top_count)
@@ -248,10 +279,11 @@ def aggregate_summary(
         "probe_count": len(probes),
         "probes": probes,
         "max_value_delta": max((probe["value_delta"] for probe in probes), default=0.0),
-        "max_wdl_delta": max((probe["wdl_delta"] for probe in probes), default=0.0),
-        "max_moves_left_delta": max(
-            (probe["moves_left_delta"] for probe in probes),
-            default=0.0,
+        "max_wdl_delta": max_optional(
+            [probe["wdl_delta"] for probe in probes]
+        ),
+        "max_moves_left_delta": max_optional(
+            [probe["moves_left_delta"] for probe in probes]
         ),
         "max_top_logit_delta": max(
             (probe["max_top_logit_delta"] for probe in probes),
@@ -268,6 +300,10 @@ def aggregate_summary(
     if len(probes) == 1:
         summary.update(probes[0])
     return summary
+
+
+def delta_text(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.6g}"
 
 
 def main() -> int:
@@ -314,8 +350,8 @@ def main() -> int:
         "NN backend output compare: PASS "
         f"{probe_text}"
         f"value_delta={summary['max_value_delta']:.6g} "
-        f"wdl_delta={summary['max_wdl_delta']:.6g} "
-        f"moves_left_delta={summary['max_moves_left_delta']:.6g} "
+        f"wdl_delta={delta_text(summary['max_wdl_delta'])} "
+        f"moves_left_delta={delta_text(summary['max_moves_left_delta'])} "
         f"top_logit_delta={summary['max_top_logit_delta']:.6g}{policy_text}"
     )
     return 0
