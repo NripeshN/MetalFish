@@ -6,6 +6,7 @@
 */
 
 #include "core/bitboard.h"
+#include "core/movegen.h"
 #include "core/position.h"
 #include "nn/encoder.h"
 #include "nn/loader.h"
@@ -17,7 +18,6 @@
 #include "nn/policy_map.h"
 #include "search/tt.h"
 #include "syzygy/tbprobe.h"
-#include "uci/uci.h"
 
 #ifdef USE_CUDA
 #include "nn/cuda/cuda_execution_schedule.h"
@@ -139,6 +139,21 @@ std::string MoveString(Move move) {
   if (move.type_of() == PROMOTION)
     out += " pnbrqk"[move.promotion_type()];
   return out;
+}
+
+std::string Lowercase(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return value;
+}
+
+Move ParseProbeMove(const Position &position, std::string text) {
+  text = Lowercase(std::move(text));
+  for (const Move move : MoveList<LEGAL>(position)) {
+    if (text == MoveString(move))
+      return move;
+  }
+  return Move::none();
 }
 
 void PrintUsage(const char *argv0) {
@@ -547,7 +562,7 @@ BuildProbePositionSnapshot(const Options &options, std::size_t move_count) {
 
   for (std::size_t i = 0; i < move_count; ++i) {
     const std::string &move_text = options.moves[i];
-    const Move move = UCIEngine::to_move(snapshot->position, move_text);
+    const Move move = ParseProbeMove(snapshot->position, move_text);
     if (move == Move::none()) {
       throw std::runtime_error("Illegal probe move " + move_text +
                                " from FEN: " + snapshot->position.fen());
@@ -669,8 +684,6 @@ void RunProbe(const Options &options) {
 } // namespace
 
 namespace MetalFish {
-
-std::string UCIEngine::square(Square square) { return SquareString(square); }
 
 TTEntry *TranspositionTable::first_entry(const Key) const { return nullptr; }
 
