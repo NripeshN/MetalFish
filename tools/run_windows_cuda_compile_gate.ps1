@@ -55,6 +55,12 @@ function Copy-MatchingFiles {
   return $Count
 }
 
+$MsvcEnvScript = Join-Path $SourceDir "tools\import_msvc_dev_env.ps1"
+if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue) -and
+    (Test-Path $MsvcEnvScript)) {
+  & $MsvcEnvScript -Arch x64 -HostArch x64
+}
+
 $Cmake = Require-Command "cmake"
 $Ninja = Require-Command "ninja"
 $Nvcc = Require-Command "nvcc"

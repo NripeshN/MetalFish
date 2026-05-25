@@ -235,14 +235,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
       - name: Install dependencies
         shell: pwsh
         run: |
+          & .\tools\import_msvc_dev_env.ps1 -Arch x64 -HostArch x64
           cmake --version
           ninja --version
           cl
@@ -259,6 +255,7 @@ jobs:
       - name: Configure
         shell: pwsh
         run: |
+          & .\tools\import_msvc_dev_env.ps1 -Arch x64 -HostArch x64
           if (-not $env:VCPKG_INSTALLATION_ROOT) {
             $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
           }
@@ -272,7 +269,9 @@ jobs:
 
       - name: Build
         shell: pwsh
-        run: cmake --build build-windows-msvc --target metalfish metalfish_tests metalfish_nn_probe
+        run: |
+          & .\tools\import_msvc_dev_env.ps1 -Arch x64 -HostArch x64
+          cmake --build build-windows-msvc --target metalfish metalfish_tests metalfish_nn_probe
 
       - name: Test
         shell: pwsh

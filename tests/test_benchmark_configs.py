@@ -702,6 +702,7 @@ def main() -> int:
         PROJ / ".github/workflows/portable-ci.yml",
         [
             "tools/write_portable_manifest.py",
+            "import_msvc_dev_env.ps1",
             "--output build-linux/PORTABLE_ARTIFACT.md",
             "--output build-windows/PORTABLE_ARTIFACT.md",
             "--output build-windows-msvc/PORTABLE_ARTIFACT.md",
@@ -722,6 +723,12 @@ def main() -> int:
             '"has_wdl":true',
             '"has_moves_left":true',
             "BT4-1024x15x32h-swa-6147500.pb",
+        ],
+    )
+    assert_file_not_contains(
+        PROJ / ".github/workflows/portable-ci.yml",
+        [
+            "ilammy/msvc-dev-cmd",
         ],
     )
     assert_file_contains(
@@ -916,6 +923,7 @@ def main() -> int:
         PROJ / "tools/run_windows_cuda_compile_gate.ps1",
         [
             'Require-Command "python"',
+            "import_msvc_dev_env.ps1",
             "Running CUDA-linked MCTS module smoke",
             "metalfish_tests.exe mcts",
             "Downloading NNUE files for CUDA-linked AB UCI smoke",
@@ -957,6 +965,7 @@ def main() -> int:
             "metalfish*windows-x86_64-msvc-cuda.zip",
             "build-windows-cuda/**/*.json",
             "tools/download_engine_networks.py",
+            "tools/import_msvc_dev_env.ps1",
             "tools/uci_smoke.py",
             "src/hybrid/**",
             "src/mcts/**",
@@ -970,6 +979,21 @@ def main() -> int:
             "tests/nn_input_fixture.*",
             "tests/requirements.txt",
             "tests/test_mcts_module.cpp",
+        ],
+    )
+    assert_file_not_contains(
+        PROJ / ".github/workflows/windows-cuda-compile.yml",
+        [
+            "ilammy/msvc-dev-cmd",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/import_msvc_dev_env.ps1",
+        [
+            "vswhere.exe",
+            "VsDevCmd.bat",
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "MSVC developer environment imported",
         ],
     )
     assert_file_contains(

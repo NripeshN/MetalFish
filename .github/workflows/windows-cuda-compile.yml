@@ -5,6 +5,7 @@ on:
     branches: [main, dev]
     paths:
       - ".github/workflows/windows-cuda-compile.yml"
+      - "tools/import_msvc_dev_env.ps1"
       - "tools/run_windows_cuda_compile_gate.ps1"
       - "tools/download_engine_networks.py"
       - "tools/uci_smoke.py"
@@ -71,24 +72,24 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
       - name: Validate gate script syntax
         shell: pwsh
         run: |
-          $tokens = $null
-          $parseErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path tools/run_windows_cuda_compile_gate.ps1),
-            [ref]$tokens,
-            [ref]$parseErrors
-          ) | Out-Null
-          if ($parseErrors.Count -ne 0) {
-            $parseErrors | Format-List | Out-String | Write-Error
-            exit 1
+          foreach ($script in @(
+            "tools/import_msvc_dev_env.ps1",
+            "tools/run_windows_cuda_compile_gate.ps1"
+          )) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$parseErrors
+            ) | Out-Null
+            if ($parseErrors.Count -ne 0) {
+              $parseErrors | Format-List | Out-String | Write-Error
+              exit 1
+            }
           }
 
       - name: Install CUDA Toolkit
@@ -102,6 +103,7 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
+          & .\tools\import_msvc_dev_env.ps1 -Arch x64 -HostArch x64
           cmake --version
           ninja --version
           nvcc --version

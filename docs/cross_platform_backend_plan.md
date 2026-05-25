@@ -653,8 +653,10 @@ Current portable CPU transformer boundary:
 
 Portable CI builds Linux CPU, Windows MinGW CPU, and Windows MSVC CPU
 artifacts. The MSVC leg is included because Windows CUDA uses the MSVC host
-toolchain. The separate Windows CUDA compile gate installs the CUDA Toolkit on
-`windows-2022`, configures `USE_CUDA=ON`, builds `metalfish`,
+toolchain. Windows MSVC jobs import the Visual Studio developer environment
+through `tools/import_msvc_dev_env.ps1` and do not rely on an external
+Node-backed MSVC setup action. The separate Windows CUDA compile gate installs
+the CUDA Toolkit on `windows-2022`, configures `USE_CUDA=ON`, builds `metalfish`,
 `metalfish_tests`, `test_nn_comparison`, and `metalfish_nn_probe`, then runs
 the CUDA-linked MCTS module tests, a BT4 metadata-only probe through
 `metalfish_nn_probe --backend cuda`, and a tiny AB UCI smoke from the
