@@ -114,6 +114,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $EnginePath = (Resolve-Path (Join-Path $BuildDir "metalfish.exe")).Path
+$ProbePath = ""
 $SmokeSteps = @()
 if ($BuildTests -eq "ON") {
   $TestsPath = (Resolve-Path (Join-Path $BuildDir "metalfish_tests.exe")).Path
@@ -236,6 +237,9 @@ Remove-Item $PackageZip -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $PackageDir | Out-Null
 
 Copy-Item $EnginePath $PackageDir -Force
+if ($ProbePath -and (Test-Path $ProbePath)) {
+  Copy-Item $ProbePath $PackageDir -Force
+}
 foreach ($DocName in @("README.md", "CHANGELOG.md", "LICENSE")) {
   Copy-ExistingFile (Join-Path $SourceDir $DocName) $PackageDir | Out-Null
 }
@@ -247,6 +251,7 @@ foreach ($DocName in @("README.md", "CHANGELOG.md", "LICENSE")) {
   --output (Join-Path $PackageDir "PORTABLE_ARTIFACT.md") `
   --notes "This artifact is built by the Windows CUDA compile gate with MSVC and the NVIDIA CUDA Toolkit." `
   --notes "The package includes CUDA and vcpkg runtime DLLs required by the linked engine." `
+  --notes "The package includes metalfish_nn_probe.exe when BUILD_TESTS=ON so runtime gates can verify packaged CUDA inference." `
   --notes "Run a real Windows NVIDIA runtime smoke before calling this artifact strength-ready."
 if ($LASTEXITCODE -ne 0) {
   throw "portable manifest generation failed with exit code $LASTEXITCODE"
@@ -277,6 +282,10 @@ $PackagedEngine = Join-Path $PackageSmokeDir "metalfish.exe"
 if (-not (Test-Path $PackagedEngine)) {
   throw "Packaged engine not found after extraction: $PackagedEngine"
 }
+$PackagedProbe = Join-Path $PackageSmokeDir "metalfish_nn_probe.exe"
+if ($BuildTests -eq "ON" -and -not (Test-Path $PackagedProbe)) {
+  throw "Packaged NN probe not found after extraction: $PackagedProbe"
+}
 
 $OriginalPath = $env:PATH
 try {
@@ -295,10 +304,33 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Packaged Windows CUDA AB self-smoke failed with exit code $LASTEXITCODE"
   }
+  if ($BuildTests -eq "ON") {
+    $PackagedProbeLog = Join-Path $BuildDir "windows-cuda-packaged-bt4-metadata-probe.json"
+    Write-Host "Running packaged Windows CUDA metadata probe"
+    & $PackagedProbe `
+      --weights $Bt4Path `
+      --backend cuda `
+      --metadata-only `
+      --top 3 `
+      2>&1 | Tee-Object -FilePath $PackagedProbeLog
+    if ($LASTEXITCODE -ne 0) {
+      throw "Packaged Windows CUDA metadata probe failed with exit code $LASTEXITCODE"
+    }
+    $PackagedProbeText = Get-Content -Path $PackagedProbeLog -Raw
+    foreach ($RequiredText in @('"metadata_only":true', '"backend":"cuda"',
+                                '"execution_plan":"')) {
+      if ($PackagedProbeText -notlike "*$RequiredText*") {
+        throw "Packaged Windows CUDA metadata probe missing expected output: $RequiredText"
+      }
+    }
+  }
 } finally {
   $env:PATH = $OriginalPath
 }
 $SmokeSteps += "$PackageName.zip extracted AB self-smoke"
+if ($BuildTests -eq "ON") {
+  $SmokeSteps += "$PackageName.zip extracted metadata probe"
+}
 
 $Summary = Join-Path $BuildDir "windows-cuda-compile-summary.md"
 $NvccVersion = (& $Nvcc --version) -join "`n"

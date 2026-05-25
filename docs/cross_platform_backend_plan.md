@@ -108,7 +108,7 @@ Current remote gates:
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260523-483b996b`, L4, 2026-05-23 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default so the CUDA suite hard-compares against macOS Metal BT4 and legacy artifacts |
 | GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26366784935`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact |
-| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Direct GCP pass `direct-20260525-084150`, Windows Server 2022 G2/L4 vWS, packaged CUDA MCTS plus Hybrid smokes |
+| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Direct GCP pass `direct-20260525-084150`, Windows Server 2022 G2/L4 vWS, packaged CUDA MCTS plus Hybrid smokes; packaged CUDA probe is added in branch and pending rerun |
 | GitHub macOS Metal | `.github/workflows/ci.yml` | `26366784933`, Metal NN parity artifact and BK.07 smoke |
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26366784932` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26366784934` |
@@ -661,11 +661,13 @@ the CUDA-linked MCTS module tests, a BT4 metadata-only probe through
 CUDA-linked engine with downloaded NNUE files. These smokes require no hosted
 NVIDIA GPU, but they catch host-link, runtime-DLL, protobuf load, tensor-plan,
 weight-inventory, no-device fallback, and CUDA-compiled MCTS contract
-regressions that a compile-only gate would miss. Each portable CPU job runs AB
-UCI smoke plus an explicit `NNBackend=stub` MCTS smoke, so portable builds
-verify the MCTS construction path cheaply. The Linux and MSVC legs additionally
-download BT4 for the metadata/backend-construction probe; MinGW stays
-lightweight package
+regressions that a compile-only gate would miss. The Windows CUDA package now
+ships `metalfish_nn_probe.exe` when tests are built, and the compile gate
+extracts the package and re-runs a packaged BT4 metadata probe before upload.
+Each portable CPU job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS
+smoke, so portable builds verify the MCTS construction path cheaply. The Linux
+and MSVC legs additionally download BT4 for the metadata/backend-construction
+probe; MinGW stays lightweight package
 coverage. The uploaded artifacts include a generated manifest that makes this
 backend scope explicit. Recent branch-tip gates had Linux CPU, Windows MinGW
 CPU, Windows MSVC CPU, Windows CUDA compile, macOS Metal, CUDA L4 runtime, and
@@ -683,10 +685,11 @@ The Windows CUDA runtime gate is manual and release-facing. It downloads a
 compile gate, creates an ephemeral Windows Server 2022 G2 VM with an
 `nvidia-l4-vws` accelerator, installs the Google Cloud NVIDIA driver script,
 verifies `nvidia-smi`, installs the VC++ runtime, and runs packaged
-`NNBackend=cuda` MCTS plus Hybrid UCI smokes with BT4 weights. It tries
-`g2-standard-8` and then `g2-standard-4` by default so transient L4 stockouts
-do not fail the release gate before the engine runs. The VM is deleted by
-default and logs are collected under `results/windows_cuda_runtime_gate/`.
+`metalfish_nn_probe.exe --backend cuda` plus `NNBackend=cuda` MCTS and Hybrid
+UCI smokes with BT4 weights. It tries `g2-standard-8` and then `g2-standard-4`
+by default so transient L4 stockouts do not fail the release gate before the
+engine runs. The VM is deleted by default and logs are collected under
+`results/windows_cuda_runtime_gate/`.
 The gate explicitly bootstraps OpenSSH on the Windows guest with a temporary
 `metalfish` administrator user and the caller's SSH key, because stock GCE
 Windows images do not expose the Linux-style metadata SSH path. The UCI harness

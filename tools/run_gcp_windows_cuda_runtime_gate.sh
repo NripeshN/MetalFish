@@ -24,6 +24,7 @@ WEIGHTS="${METALFISH_BT4_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-61475
 NNUE_BIG="${METALFISH_NNUE_BIG:-${ROOT_DIR}/networks/nn-c288c895ea92.nnue}"
 NNUE_SMALL="${METALFISH_NNUE_SMALL:-${ROOT_DIR}/networks/nn-37f18f62d772.nnue}"
 UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420}"
+PROBE_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420}"
 UCI_GO="${METALFISH_WINDOWS_CUDA_UCI_GO:-nodes 1}"
 UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
 CUDA_GRAPH="${METALFISH_WINDOWS_CUDA_GRAPH:-}"
@@ -323,8 +324,60 @@ if (\$vc.ExitCode -ne 0 -and \$vc.ExitCode -ne 3010) {
 if (-not (Test-Path \$Engine)) {
   throw "Packaged engine not found: \$Engine"
 }
+\$Probe = Join-Path \$PackageDir "metalfish_nn_probe.exe"
+if (-not (Test-Path \$Probe)) {
+  throw "Packaged NN probe not found: \$Probe"
+}
 \$env:PATH = "\$PackageDir;\$env:PATH"
 nvidia-smi 2>&1 | Tee-Object -FilePath (Join-Path \$Logs "nvidia-smi-runtime.log")
+
+function Invoke-ProbeSmoke {
+  param(
+    [string]\$Name,
+    [string]\$Arguments,
+    [string[]]\$RequiredText
+  )
+  \$stdout = Join-Path \$Logs "\$Name.stdout.log"
+  \$stderr = Join-Path \$Logs "\$Name.stderr.log"
+  \$psi = New-Object System.Diagnostics.ProcessStartInfo
+  \$psi.FileName = \$Probe
+  \$psi.Arguments = \$Arguments
+  \$psi.WorkingDirectory = \$PackageDir
+  \$psi.RedirectStandardOutput = \$true
+  \$psi.RedirectStandardError = \$true
+  \$psi.UseShellExecute = \$false
+  \$psi.CreateNoWindow = \$true
+  if ("${CUDA_GRAPH}" -ne "") {
+    \$psi.Environment["METALFISH_CUDA_GRAPH"] = "${CUDA_GRAPH}"
+  }
+  if ("${CUDA_PROFILE}" -ne "") {
+    \$psi.Environment["METALFISH_CUDA_PROFILE"] = "${CUDA_PROFILE}"
+    \$psi.Environment["METALFISH_CUDA_PROFILE_LIMIT"] = "${CUDA_PROFILE_LIMIT}"
+  }
+  \$proc = [System.Diagnostics.Process]::Start(\$psi)
+  \$stdoutTask = \$proc.StandardOutput.ReadToEndAsync()
+  \$stderrTask = \$proc.StandardError.ReadToEndAsync()
+  \$timedOut = -not \$proc.WaitForExit(${PROBE_TIMEOUT_SECONDS} * 1000)
+  if (\$timedOut) {
+    try { \$proc.Kill() } catch {}
+    try { \$proc.WaitForExit(10000) | Out-Null } catch {}
+  }
+  \$out = \$stdoutTask.GetAwaiter().GetResult()
+  \$err = \$stderrTask.GetAwaiter().GetResult()
+  Set-Content -Path \$stdout -Value \$out -Encoding UTF8
+  Set-Content -Path \$stderr -Value \$err -Encoding UTF8
+  if (\$timedOut) {
+    throw (\$Name + " timed out after ${PROBE_TIMEOUT_SECONDS}s")
+  }
+  if (\$proc.ExitCode -ne 0) {
+    throw (\$Name + " exited with code " + \$proc.ExitCode)
+  }
+  foreach (\$needle in \$RequiredText) {
+    if ((\$out + \$err) -notlike "*\$needle*") {
+      throw "\$Name missing expected output: \$needle"
+    }
+  }
+}
 
 function Invoke-UciSmoke {
   param(
@@ -383,6 +436,11 @@ function Invoke-UciSmoke {
 \$NnueBig = Join-Path \$Networks "nn-c288c895ea92.nnue"
 \$NnueSmall = Join-Path \$Networks "nn-37f18f62d772.nnue"
 
+Invoke-ProbeSmoke `
+  -Name "cuda-probe" `
+  -Arguments "--weights `"\$Bt4`" --backend cuda --batch-size 1 --warmup 1 --iterations 1 --top 3" `
+  -RequiredText @("`"backend`":`"cuda`"", "CUDA transformer backend", "`"value`":", "`"policy_top`":")
+
 Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "uci",
   "isready",
@@ -425,7 +483,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-mcts, hybrid-cuda"
+  "- Smokes: cuda-probe, cuda-mcts, hybrid-cuda"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"
 POWERSHELL
