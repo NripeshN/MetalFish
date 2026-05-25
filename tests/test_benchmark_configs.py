@@ -895,6 +895,8 @@ def main() -> int:
             '"format":"attention_body=yes',
             '"format":"attention_body=no',
             '"execution_plan":"109 resolved execution steps',
+            '"cuda_schedule_fully_supported":true',
+            '"cuda_output_mapping_ok":true',
         ],
     )
     assert_file_contains(
@@ -942,6 +944,8 @@ def main() -> int:
             '"backend":"cuda"',
             '"format":"attention_body=no',
             '"execution_plan":"',
+            '"cuda_schedule_fully_supported":true',
+            '"cuda_output_mapping_ok":true',
             "EvalFile=$NnueBigPath",
             "EvalFileSmall=$NnueSmallPath",
             "Running CUDA-linked AB UCI smoke",
@@ -956,6 +960,15 @@ def main() -> int:
             "Running packaged Windows CUDA AB self-smoke",
             "Packaged runtime DLLs",
             "- Smoke tests: $SmokeText",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/nn_metal_probe.cpp",
+        [
+            "cuda_schedule_fully_supported",
+            "CreateCudaExecutionSchedule",
+            "cuda_output_mapping_ok",
+            "CreateCudaOutputMapping",
         ],
     )
     assert_file_contains(

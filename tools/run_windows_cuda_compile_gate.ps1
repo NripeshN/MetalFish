@@ -183,7 +183,9 @@ if ($BuildTests -eq "ON") {
   $ProbeText = Get-Content -Path $ProbeLog -Raw
   foreach ($RequiredText in @('"metadata_only":true', '"backend":"cuda"',
                               '"policy_head":"', '"value_head":"',
-                              '"execution_plan":"')) {
+                              '"execution_plan":"',
+                              '"cuda_schedule_fully_supported":true',
+                              '"cuda_output_mapping_ok":true')) {
     if ($ProbeText -notlike "*$RequiredText*") {
       throw "CUDA-linked BT4 metadata probe missing expected output: $RequiredText"
     }
@@ -206,7 +208,9 @@ if ($BuildTests -eq "ON") {
   foreach ($RequiredText in @('"metadata_only":true', '"backend":"cuda"',
                               '"format":"attention_body=no',
                               '"policy_head":"', '"value_head":"',
-                              '"execution_plan":"')) {
+                              '"execution_plan":"',
+                              '"cuda_schedule_fully_supported":true',
+                              '"cuda_output_mapping_ok":true')) {
     if ($LegacyProbeText -notlike "*$RequiredText*") {
       throw "CUDA-linked legacy metadata probe missing expected output: $RequiredText"
     }
@@ -324,7 +328,9 @@ try {
     }
     $PackagedProbeText = Get-Content -Path $PackagedProbeLog -Raw
     foreach ($RequiredText in @('"metadata_only":true', '"backend":"cuda"',
-                                '"execution_plan":"')) {
+                                '"execution_plan":"',
+                                '"cuda_schedule_fully_supported":true',
+                                '"cuda_output_mapping_ok":true')) {
       if ($PackagedProbeText -notlike "*$RequiredText*") {
         throw "Packaged Windows CUDA metadata probe missing expected output: $RequiredText"
       }

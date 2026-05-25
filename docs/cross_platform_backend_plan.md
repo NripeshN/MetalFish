@@ -119,9 +119,10 @@ Current CUDA backend boundary:
   the CUDA-linked engine, tests, and NN probe, then downloads BT4 and legacy
   42850 weights and runs `metalfish_nn_probe --backend cuda --metadata-only` on
   both. This catches protobuf/schema, policy-table, tensor-plan,
-  weight-inventory, and resolved execution-plan regressions across transformer
-  and classical-convolution network families in a no-GPU Linux CUDA toolchain
-  before the runtime L4 gate spends GPU time.
+  weight-inventory, resolved execution-plan, CUDA schedule, and CUDA output
+  mapping regressions across transformer and classical-convolution network
+  families in a no-GPU Linux CUDA toolchain before the runtime L4 gate spends
+  GPU time.
 - `src/nn/cuda/cuda_executor.*` is the inference execution seam.
 - `src/nn/network_execution_plan.*` builds the shared ordered and resolved
   tensor/stage plan that CUDA and future portable backends will execute.
@@ -155,10 +156,10 @@ Current CUDA backend boundary:
   shared 64-channel positional table before `body.input_embedding`, matching
   the Metal transformer input path. Classical convolution stages now have NCHW
   input expansion and same-padding 1x1/3x3 CUDA kernels wired through the shared
-  stage executor. Residual convolution blocks without squeeze-excite now execute
-  as fused `conv1 -> activation -> conv2 -> skip-add -> activation` stages in
-  NCHW layout; SE units and non-attention policy maps remain explicit
-  unsupported schedule entries until their fused CUDA path is complete.
+  stage executor. Residual convolution blocks execute as fused
+  `conv1 -> activation -> conv2 -> skip-add -> activation` stages in NCHW
+  layout, with squeeze-excite and convolution-policy mapping handled by the
+  shared CUDA stage executor/output mapping path.
 - `src/nn/cuda/cuda_workspace.*` owns reusable per-network execution scratch
   slots for dense, activation, and normalization intermediates. The executor
   seam receives the workspace and its non-blocking stream so future production
@@ -658,14 +659,16 @@ through `tools/import_msvc_dev_env.ps1` and do not rely on an external
 Node-backed MSVC setup action. The separate Windows CUDA compile gate installs
 the CUDA Toolkit on `windows-2022`, configures `USE_CUDA=ON`, builds `metalfish`,
 `metalfish_tests`, `test_nn_comparison`, and `metalfish_nn_probe`, then runs
-the CUDA-linked MCTS module tests, a BT4 metadata-only probe through
+the CUDA-linked MCTS module tests, BT4 and legacy metadata-only probes through
 `metalfish_nn_probe --backend cuda`, and a tiny AB UCI smoke from the
-CUDA-linked engine with downloaded NNUE files. These smokes require no hosted
-NVIDIA GPU, but they catch host-link, runtime-DLL, protobuf load, tensor-plan,
-weight-inventory, no-device fallback, and CUDA-compiled MCTS contract
-regressions that a compile-only gate would miss. The Windows CUDA package now
-ships `metalfish_nn_probe.exe` when tests are built, and the compile gate
-extracts the package and re-runs a packaged BT4 metadata probe before upload.
+CUDA-linked engine with downloaded NNUE files. The metadata probes require CUDA
+schedule support and named output mapping to resolve successfully. These smokes
+require no hosted NVIDIA GPU, but they catch host-link, runtime-DLL, protobuf
+load, tensor-plan, weight-inventory, no-device fallback, and CUDA-compiled MCTS
+contract regressions that a compile-only gate would miss. The Windows CUDA
+package now ships `metalfish_nn_probe.exe` when tests are built, and the
+compile gate extracts the package and re-runs a packaged BT4 metadata probe
+before upload.
 Each portable CPU job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS
 smoke, so portable builds verify the MCTS construction path cheaply. The Linux
 and MSVC legs additionally download BT4 for the metadata/backend-construction

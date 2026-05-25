@@ -19,6 +19,11 @@
 #include "syzygy/tbprobe.h"
 #include "uci/uci.h"
 
+#ifdef USE_CUDA
+#include "nn/cuda/cuda_execution_schedule.h"
+#include "nn/cuda/cuda_output_mapping.h"
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -429,6 +434,26 @@ void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
 
   const auto resolved_plan =
       NN::ResolveNetworkExecutionPlan(execution_plan, inventory);
+
+#ifdef USE_CUDA
+  bool cuda_schedule_checked = false;
+  bool cuda_schedule_fully_supported = false;
+  std::string cuda_schedule_summary;
+  bool cuda_output_mapping_ok = false;
+  std::string cuda_output_mapping_summary;
+  if (options.backend == "cuda") {
+    cuda_schedule_checked = true;
+    const auto cuda_schedule =
+        NN::Cuda::CreateCudaExecutionSchedule(resolved_plan);
+    cuda_schedule_fully_supported = cuda_schedule.FullySupported();
+    cuda_schedule_summary = cuda_schedule.Summary();
+    const auto cuda_output_mapping = NN::Cuda::CreateCudaOutputMapping(
+        tensor_plan, resolved_plan, cuda_schedule);
+    cuda_output_mapping_ok = cuda_output_mapping.ok();
+    cuda_output_mapping_summary = cuda_output_mapping.Summary();
+  }
+#endif
+
   std::string network_info;
   if (options.construct_backend) {
     auto network =
@@ -456,6 +481,18 @@ void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
   std::cout << ",\"inventory\":\"" << JsonEscape(inventory.Summary()) << '"';
   std::cout << ",\"execution_plan\":\"" << JsonEscape(resolved_plan.Summary())
             << '"';
+#ifdef USE_CUDA
+  if (cuda_schedule_checked) {
+    std::cout << ",\"cuda_schedule_fully_supported\":"
+              << (cuda_schedule_fully_supported ? "true" : "false");
+    std::cout << ",\"cuda_schedule\":\""
+              << JsonEscape(cuda_schedule_summary) << '"';
+    std::cout << ",\"cuda_output_mapping_ok\":"
+              << (cuda_output_mapping_ok ? "true" : "false");
+    std::cout << ",\"cuda_output_mapping\":\""
+              << JsonEscape(cuda_output_mapping_summary) << '"';
+  }
+#endif
   std::cout << ",\"tensor_count\":" << inventory.tensors.size();
   std::cout << ",\"parameter_elements\":" << inventory.TotalElements();
   std::cout << ",\"parameter_bytes\":" << inventory.TotalBytes();
