@@ -97,6 +97,16 @@ struct NetworkExecutionPlan {
   ValidateAgainstInventory(const NetworkWeightInventory &inventory) const;
 };
 
+struct NetworkPositionEncodingGeometry {
+  int input_planes = 0;
+  int input_squares = 0;
+  int position_planes = 0;
+  int position_width = 0;
+  int dense_input_width = 0;
+  int dense_output_width = 0;
+  int concat_width = 0;
+};
+
 std::string NetworkExecutionOpKindName(NetworkExecutionOpKind kind);
 
 NetworkExecutionPlan CreateNetworkExecutionPlan(
@@ -111,6 +121,14 @@ ResolveNetworkExecutionPlan(const NetworkExecutionPlan &plan,
 NetworkWeightInventory CreateResolvedNetworkWeightInventory(
     const NetworkWeightInventory &inventory,
     const NetworkResolvedExecutionPlan &resolved_plan);
+
+NetworkPositionEncodingGeometry ResolveDynamicPositionEncodingGeometry(
+    const NetworkResolvedExecutionPlan &plan,
+    const NetworkResolvedExecutionStep &dense);
+
+NetworkPositionEncodingGeometry ResolveStaticPositionEncodingGeometry(
+    const NetworkResolvedExecutionPlan &plan,
+    const NetworkResolvedExecutionStep &dense);
 
 } // namespace NN
 } // namespace MetalFish

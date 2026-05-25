@@ -839,6 +839,112 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(resolved_plan.StepCount(NN::NetworkExecutionOpKind::Dense) == 2,
          "minimal resolved plan should expose dense policy/value outputs", tc);
 
+  auto expect_throws = [&](const std::function<void()> &fn, const char *msg) {
+    bool rejected = false;
+    try {
+      fn();
+    } catch (const std::exception &) {
+      rejected = true;
+    }
+    expect(rejected, msg, tc);
+  };
+
+  const auto dynamic_file = make_dynamic_pe_cpu_weights_file();
+  const auto dynamic_descriptor = NN::DescribeNetworkFormat(dynamic_file);
+  const auto dynamic_tensor_plan =
+      NN::CreateNetworkTensorPlan(dynamic_descriptor);
+  NN::MultiHeadWeights dynamic_weights(dynamic_file.weights());
+  const std::string dynamic_policy_head =
+      NN::SelectPolicyHeadName(dynamic_weights);
+  const std::string dynamic_value_head =
+      NN::SelectValueHeadName(dynamic_weights);
+  const auto dynamic_inventory =
+      NN::CreateNetworkWeightInventory(dynamic_weights, dynamic_policy_head,
+                                       dynamic_value_head, dynamic_tensor_plan);
+  const auto dynamic_execution_plan = NN::CreateNetworkExecutionPlan(
+      dynamic_descriptor, dynamic_tensor_plan, dynamic_policy_head,
+      dynamic_value_head, dynamic_inventory);
+  const auto dynamic_resolved_plan =
+      NN::ResolveNetworkExecutionPlan(dynamic_execution_plan,
+                                      dynamic_inventory);
+  const auto &dynamic_preprocess =
+      dynamic_resolved_plan.steps[find_resolved_step_index(
+          dynamic_resolved_plan, "body.input_embedding_preprocess")];
+  const auto dynamic_geometry = NN::ResolveDynamicPositionEncodingGeometry(
+      dynamic_resolved_plan, dynamic_preprocess);
+  expect(dynamic_geometry.position_planes == 12 &&
+             dynamic_geometry.position_width == 1 &&
+             dynamic_geometry.concat_width == NN::kPackedInputPlaneCount + 1,
+         "dynamic PE geometry should derive source and concat widths", tc);
+  expect(dynamic_geometry.dense_input_width ==
+             12 * NN::kPackedInputSquareCount,
+         "dynamic PE geometry should derive flattened position input", tc);
+  auto bad_dynamic_embedding = dynamic_resolved_plan;
+  auto &bad_embedding =
+      bad_dynamic_embedding
+          .steps[find_resolved_step_index(bad_dynamic_embedding,
+                                          "body.input_embedding")]
+          .tensors[0];
+  bad_embedding.dims[1] =
+      static_cast<std::uint32_t>(dynamic_geometry.concat_width + 1);
+  expect_throws(
+      [&]() {
+        (void)NN::ResolveDynamicPositionEncodingGeometry(
+            bad_dynamic_embedding,
+            bad_dynamic_embedding.steps[find_resolved_step_index(
+                bad_dynamic_embedding, "body.input_embedding_preprocess")]);
+      },
+      "dynamic PE geometry should reject embedding concat mismatch");
+  auto bad_dynamic_dense = dynamic_resolved_plan;
+  auto &bad_preprocess =
+      bad_dynamic_dense
+          .steps[find_resolved_step_index(bad_dynamic_dense,
+                                          "body.input_embedding_preprocess")]
+          .tensors[0];
+  bad_preprocess.dims[1] -= 1;
+  expect_throws(
+      [&]() {
+        (void)NN::ResolveDynamicPositionEncodingGeometry(
+            bad_dynamic_dense,
+            bad_dynamic_dense.steps[find_resolved_step_index(
+                bad_dynamic_dense, "body.input_embedding_preprocess")]);
+      },
+      "dynamic PE geometry should reject non-square position input");
+
+  NN::NetworkResolvedExecutionPlan static_pe;
+  static_pe.format.input_embedding = NN::INPUT_EMBEDDING_PE_MAP;
+  static_pe.tensors.input_planes = NN::kPackedInputPlaneCount;
+  static_pe.tensors.input_squares = NN::kPackedInputSquareCount;
+  static_pe.steps.push_back(NN::NetworkResolvedExecutionStep{
+      NN::NetworkExecutionOpKind::Dense,
+      "body.input_embedding",
+      {
+          {0,
+           "body.input_embedding_w",
+           4 * (NN::kPackedInputPlaneCount + NN::kPackedInputSquareCount),
+           {4, NN::kPackedInputPlaneCount + NN::kPackedInputSquareCount},
+           NN::NetworkWeightTensorKind::DenseWeight},
+          {1,
+           "body.input_embedding_b",
+           4,
+           {4},
+           NN::NetworkWeightTensorKind::DenseBias},
+      }});
+  const auto static_geometry =
+      NN::ResolveStaticPositionEncodingGeometry(static_pe, static_pe.steps[0]);
+  expect(static_geometry.position_width == NN::kPackedInputSquareCount &&
+             static_geometry.concat_width ==
+                 NN::kPackedInputPlaneCount + NN::kPackedInputSquareCount,
+         "static PE geometry should derive table and concat widths", tc);
+  auto bad_static_pe = static_pe;
+  bad_static_pe.steps[0].tensors[0].dims[1] = NN::kPackedInputPlaneCount;
+  expect_throws(
+      [&]() {
+        (void)NN::ResolveStaticPositionEncodingGeometry(bad_static_pe,
+                                                        bad_static_pe.steps[0]);
+      },
+      "static PE geometry should reject missing position channels");
+
   const char *weights_path = std::getenv("METALFISH_NN_WEIGHTS");
   if (!weights_path || std::string(weights_path).empty()) {
     std::cout << "    SKIP: METALFISH_NN_WEIGHTS not set" << std::endl;
@@ -922,6 +1028,16 @@ void test_network_execution_plan(TestCounter &tc) {
   expect_dims("body.input_embedding", "_w", {1024, 624},
               "resolved BT4 input embedding should infer post-PE channel "
               "shape");
+  const auto loaded_dynamic_geometry =
+      NN::ResolveDynamicPositionEncodingGeometry(
+          loaded_resolved_plan,
+          loaded_resolved_plan.steps[find_resolved_step_index(
+              loaded_resolved_plan, "body.input_embedding_preprocess")]);
+  expect(loaded_dynamic_geometry.position_planes == 12 &&
+             loaded_dynamic_geometry.position_width == 512 &&
+             loaded_dynamic_geometry.concat_width == 624,
+         "resolved BT4 dynamic PE geometry should match input embedding",
+         tc);
   const auto loaded_resolved_inventory =
       NN::CreateResolvedNetworkWeightInventory(loaded_inventory,
                                                loaded_resolved_plan);
@@ -1008,6 +1124,13 @@ void test_network_execution_plan(TestCounter &tc) {
          tc);
   const auto loaded_tape_batch2 =
       NN::Cuda::CreateResolvedExecutionTape(loaded_resolved_plan, 2);
+  expect(loaded_tape_batch2
+                 .RequireName("body.input_embedding_preprocess.position_input")
+                 .width == loaded_dynamic_geometry.dense_input_width,
+         "loaded CUDA tape should use resolved dynamic PE input width", tc);
+  expect(loaded_tape_batch2.RequireName("body.input_embedding_preprocess.concat")
+                 .width == loaded_dynamic_geometry.concat_width,
+         "loaded CUDA tape should use resolved dynamic PE concat width", tc);
   expect(loaded_tape_batch2.RequireName("body.input_embedding_preprocess.dense")
                  .rows == 2,
          "loaded CUDA tape should keep dynamic PE dense at batch rows", tc);

@@ -1197,41 +1197,36 @@ CudaDenseStageOutput ExecuteDynamicPositionEncodingStage(
     throw std::runtime_error("CUDA dynamic PE stage name is invalid");
   RequireDenseTensors(dense);
 
-  constexpr int kPositionPlanes = 12;
-  const int input_planes = execution_plan.tensors.input_planes;
-  const int squares = execution_plan.tensors.input_squares;
-  if (input_planes <= 0 || squares <= 0 || input_planes < kPositionPlanes)
-    throw std::runtime_error("CUDA dynamic PE tensor plan is invalid");
-
   const auto dense_weight = weights.TensorAt(dense.tensors[0].inventory_index);
   const auto dense_bias = weights.TensorAt(dense.tensors[1].inventory_index);
   if (dense_weight.dims.size() != 2 || dense_bias.dims.size() != 1)
     throw std::runtime_error("CUDA dynamic PE dense tensor shape is invalid");
 
-  const int output_width = static_cast<int>(dense_weight.dims[0]);
-  const int input_width = static_cast<int>(dense_weight.dims[1]);
-  if (input_width != squares * kPositionPlanes || output_width <= 0 ||
-      output_width % squares != 0 ||
-      dense_bias.elements != static_cast<std::size_t>(output_width)) {
-    throw std::runtime_error(
-        "CUDA dynamic PE dense tensor dimensions mismatch");
+  const auto geometry =
+      ResolveDynamicPositionEncodingGeometry(execution_plan, dense);
+  if (dense_weight.dims[0] !=
+          static_cast<std::uint32_t>(geometry.dense_output_width) ||
+      dense_weight.dims[1] !=
+          static_cast<std::uint32_t>(geometry.dense_input_width) ||
+      dense_bias.elements !=
+          static_cast<std::size_t>(geometry.dense_output_width)) {
+    throw std::runtime_error("CUDA dynamic PE resolved shape mismatch");
   }
-  const int pe_width = output_width / squares;
-  const int concat_width = input_planes + pe_width;
-  const int square_rows = batch_size * squares;
+  const int square_rows = batch_size * geometry.input_squares;
 
   const auto &expanded_binding = tape.RequireName(dense.name + ".expanded");
   const auto &position_input_binding =
       tape.RequireName(dense.name + ".position_input");
   const auto &dense_binding = tape.RequireName(dense.name + ".dense");
   const auto &concat_binding = tape.RequireName(dense.name + ".concat");
-  RequireTapeShape(expanded_binding, square_rows, input_planes,
+  RequireTapeShape(expanded_binding, square_rows, geometry.input_planes,
                    "dynamic PE expanded input");
-  RequireTapeShape(position_input_binding, batch_size, input_width,
+  RequireTapeShape(position_input_binding, batch_size,
+                   geometry.dense_input_width,
                    "dynamic PE dense input");
-  RequireTapeShape(dense_binding, batch_size, output_width,
+  RequireTapeShape(dense_binding, batch_size, geometry.dense_output_width,
                    "dynamic PE dense output");
-  RequireTapeShape(concat_binding, square_rows, concat_width,
+  RequireTapeShape(concat_binding, square_rows, geometry.concat_width,
                    "dynamic PE concat output");
 
   CudaDenseStageOutput output;
@@ -1240,20 +1235,23 @@ CudaDenseStageOutput ExecuteDynamicPositionEncodingStage(
   output.position_input = tape.Reserve(workspace, position_input_binding);
   output.normalized = tape.Reserve(workspace, concat_binding);
   output.output = output.normalized;
-  output.input_width = input_width;
-  output.output_width = concat_width;
+  output.input_width = geometry.dense_input_width;
+  output.output_width = geometry.concat_width;
   output.rows = square_rows;
 
   cudaStream_t stream = workspace.Stream();
   LaunchExpandPackedInputPlanesWithPositionInputKernel(
       input_masks, input_values, output.expanded_input, output.position_input,
-      batch_size, input_planes, kPositionPlanes, squares, stream);
+      batch_size, geometry.input_planes, geometry.position_planes,
+      geometry.input_squares, stream);
   LaunchDenseAffineKernel(output.position_input, dense_weight.data,
                           dense_bias.data, output.dense, batch_size,
-                          input_width, output_width, stream);
+                          geometry.dense_input_width,
+                          geometry.dense_output_width, stream);
   LaunchDynamicPositionEncodingConcatKernel(
       output.expanded_input, output.dense, output.output, batch_size,
-      input_planes, pe_width, squares, stream);
+      geometry.input_planes, geometry.position_width, geometry.input_squares,
+      stream);
   return output;
 }
 
@@ -1270,31 +1268,22 @@ float *PrepareStaticPositionEncodingInput(
     throw std::runtime_error("CUDA static PE stage name is invalid");
   RequireDenseTensors(dense);
 
-  const int input_planes = execution_plan.tensors.input_planes;
-  const int squares = execution_plan.tensors.input_squares;
-  if (input_planes <= 0 || squares != kCudaAttentionSquares) {
-    throw std::runtime_error("CUDA static PE tensor plan is invalid");
-  }
-
   const auto &dense_ref = dense.tensors[0];
   if (dense_ref.dims.size() != 2)
     throw std::runtime_error("CUDA static PE dense tensor shape is invalid");
-  const int input_width = static_cast<int>(dense_ref.dims[1]);
-  constexpr int kStaticPositionWidth = kCudaAttentionSquares;
-  if (input_width != input_planes + kStaticPositionWidth) {
-    throw std::runtime_error("CUDA static PE dense tensor dimensions mismatch");
-  }
+  const auto geometry =
+      ResolveStaticPositionEncodingGeometry(execution_plan, dense);
 
-  const int square_rows = batch_size * squares;
+  const int square_rows = batch_size * geometry.input_squares;
   const auto &concat_binding =
       tape.RequireName(dense.name + ".static_pe_concat");
-  RequireTapeShape(concat_binding, square_rows, input_width,
+  RequireTapeShape(concat_binding, square_rows, geometry.concat_width,
                    "static PE concat output");
 
   float *output = tape.Reserve(workspace, concat_binding);
   LaunchStaticPositionEncodingConcatKernel(
-      input_masks, input_values, output, batch_size, input_planes,
-      kStaticPositionWidth, squares, workspace.Stream());
+      input_masks, input_values, output, batch_size, geometry.input_planes,
+      geometry.position_width, geometry.input_squares, workspace.Stream());
   return output;
 }
 
@@ -2041,10 +2030,11 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
       static_position_input = PrepareStaticPositionEncodingInput(
           execution_plan, step, input_masks, input_values, tape, workspace,
           batch_size);
+      const auto geometry =
+          ResolveStaticPositionEncodingGeometry(execution_plan, step);
       stage_input = static_position_input;
-      stage_input_width =
-          execution_plan.tensors.input_planes + kCudaAttentionSquares;
-      stage_input_rows = batch_size * execution_plan.tensors.input_squares;
+      stage_input_width = geometry.concat_width;
+      stage_input_rows = batch_size * geometry.input_squares;
     }
 
     CudaDenseStageOutput stage;

@@ -66,16 +66,6 @@ int ConvolutionOutputChannels(const NetworkResolvedExecutionStep &convolution) {
   return static_cast<int>(channels);
 }
 
-int DenseInputWidth(const NetworkResolvedExecutionStep &dense) {
-  if (dense.kind != NetworkExecutionOpKind::Dense || dense.tensors.empty() ||
-      dense.tensors[0].dims.size() != 2)
-    throw std::runtime_error("CUDA execution tape dense tensor is invalid");
-  const auto width = dense.tensors[0].dims[1];
-  if (width == 0)
-    throw std::runtime_error("CUDA execution tape dense input width is zero");
-  return static_cast<int>(width);
-}
-
 int SqueezeExciteOutputWidth(const NetworkResolvedExecutionStep &se) {
   if (se.kind != NetworkExecutionOpKind::Dense)
     throw std::runtime_error(
@@ -456,38 +446,28 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
         break;
       const int width = DenseOutputWidth(step);
       if (IsStaticPositionEmbeddingName(plan, step.name)) {
-        const int input_width = DenseInputWidth(step);
-        if (plan.tensors.input_planes <= 0 || plan.tensors.input_squares <= 0 ||
-            input_width <= plan.tensors.input_planes) {
-          throw std::runtime_error(
-              "CUDA execution tape static PE input shape is invalid");
-        }
+        const auto geometry =
+            ResolveStaticPositionEncodingGeometry(plan, step);
         tape.Add(step.name + ".static_pe_concat",
                  CudaExecutionBufferRole::StaticPositionOutput,
-                 batch_size * plan.tensors.input_squares, input_width);
+                 batch_size * geometry.input_squares, geometry.concat_width);
       }
       if (IsDynamicPositionPreprocessName(step.name)) {
-        if (plan.tensors.input_squares <= 0 ||
-            width % plan.tensors.input_squares != 0) {
-          throw std::runtime_error(
-              "CUDA execution tape dynamic PE width is invalid");
-        }
+        const auto geometry =
+            ResolveDynamicPositionEncodingGeometry(plan, step);
         tape.Add(step.name + ".expanded",
                  CudaExecutionBufferRole::InputPlaneExpanded,
-                 batch_size * plan.tensors.input_squares,
-                 plan.tensors.input_planes);
+                 batch_size * geometry.input_squares, geometry.input_planes);
         tape.Add(step.name + ".position_input",
                  CudaExecutionBufferRole::DynamicPositionInput, batch_size,
-                 plan.tensors.input_squares * 12);
+                 geometry.dense_input_width);
         tape.Add(step.name + ".dense", CudaExecutionBufferRole::DenseOutput,
-                 batch_size, width);
-        const int pe_width = width / plan.tensors.input_squares;
+                 batch_size, geometry.dense_output_width);
         tape.Add(step.name + ".concat",
                  CudaExecutionBufferRole::DynamicPositionOutput,
-                 batch_size * plan.tensors.input_squares,
-                 plan.tensors.input_planes + pe_width);
-        current_rows = batch_size * plan.tensors.input_squares;
-        current_width = plan.tensors.input_planes + pe_width;
+                 batch_size * geometry.input_squares, geometry.concat_width);
+        current_rows = batch_size * geometry.input_squares;
+        current_width = geometry.concat_width;
         break;
       }
       const int rows = DenseLikeRows(plan, step.name, batch_size);

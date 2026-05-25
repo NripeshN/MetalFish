@@ -778,5 +778,90 @@ NetworkWeightInventory CreateResolvedNetworkWeightInventory(
   return resolved_inventory;
 }
 
+NetworkPositionEncodingGeometry ResolveDynamicPositionEncodingGeometry(
+    const NetworkResolvedExecutionPlan &plan,
+    const NetworkResolvedExecutionStep &dense) {
+  if (dense.kind != NetworkExecutionOpKind::Dense || dense.tensors.size() < 2) {
+    throw std::runtime_error("dynamic position encoding step is not dense");
+  }
+  const auto &weight = dense.tensors[0];
+  const auto &bias = dense.tensors[1];
+  if (weight.dims.size() != 2 || bias.dims.size() != 1) {
+    throw std::runtime_error(
+        "dynamic position encoding dense tensor shape is invalid");
+  }
+
+  NetworkPositionEncodingGeometry geometry;
+  geometry.input_planes = plan.tensors.input_planes;
+  geometry.input_squares = plan.tensors.input_squares;
+  geometry.dense_output_width = static_cast<int>(weight.dims[0]);
+  geometry.dense_input_width = static_cast<int>(weight.dims[1]);
+  if (geometry.input_planes <= 0 || geometry.input_squares <= 0 ||
+      geometry.dense_input_width <= 0 || geometry.dense_output_width <= 0 ||
+      geometry.dense_input_width % geometry.input_squares != 0 ||
+      geometry.dense_output_width % geometry.input_squares != 0 ||
+      bias.elements != static_cast<std::size_t>(geometry.dense_output_width)) {
+    throw std::runtime_error(
+        "dynamic position encoding dense dimensions mismatch");
+  }
+
+  geometry.position_planes =
+      geometry.dense_input_width / geometry.input_squares;
+  geometry.position_width =
+      geometry.dense_output_width / geometry.input_squares;
+  geometry.concat_width = geometry.input_planes + geometry.position_width;
+  if (geometry.position_planes <= 0 || geometry.position_width <= 0 ||
+      geometry.position_planes > geometry.input_planes) {
+    throw std::runtime_error(
+        "dynamic position encoding geometry is inconsistent");
+  }
+
+  if (const auto *embedding = FindResolvedStep(plan, "body.input_embedding")) {
+    if (embedding->kind == NetworkExecutionOpKind::Dense &&
+        !embedding->tensors.empty() && embedding->tensors[0].dims.size() == 2 &&
+        embedding->tensors[0].dims[1] !=
+            static_cast<std::uint32_t>(geometry.concat_width)) {
+      throw std::runtime_error(
+          "dynamic position encoding concat width does not match embedding");
+    }
+  }
+  return geometry;
+}
+
+NetworkPositionEncodingGeometry ResolveStaticPositionEncodingGeometry(
+    const NetworkResolvedExecutionPlan &plan,
+    const NetworkResolvedExecutionStep &dense) {
+  if (dense.kind != NetworkExecutionOpKind::Dense || dense.tensors.size() < 2) {
+    throw std::runtime_error("static position encoding step is not dense");
+  }
+  const auto &weight = dense.tensors[0];
+  const auto &bias = dense.tensors[1];
+  if (weight.dims.size() != 2 || bias.dims.size() != 1) {
+    throw std::runtime_error(
+        "static position encoding dense tensor shape is invalid");
+  }
+
+  NetworkPositionEncodingGeometry geometry;
+  geometry.input_planes = plan.tensors.input_planes;
+  geometry.input_squares = plan.tensors.input_squares;
+  geometry.dense_output_width = static_cast<int>(weight.dims[0]);
+  geometry.dense_input_width = static_cast<int>(weight.dims[1]);
+  geometry.concat_width = geometry.dense_input_width;
+  if (geometry.input_planes <= 0 || geometry.input_squares <= 0 ||
+      geometry.dense_input_width <= geometry.input_planes ||
+      geometry.dense_output_width <= 0 ||
+      bias.elements != static_cast<std::size_t>(geometry.dense_output_width)) {
+    throw std::runtime_error(
+        "static position encoding dense dimensions mismatch");
+  }
+
+  geometry.position_width = geometry.dense_input_width - geometry.input_planes;
+  if (geometry.position_width <= 0) {
+    throw std::runtime_error(
+        "static position encoding geometry is inconsistent");
+  }
+  return geometry;
+}
+
 } // namespace NN
 } // namespace MetalFish
