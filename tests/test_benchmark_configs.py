@@ -1138,7 +1138,6 @@ def main() -> int:
             "METALFISH_NN_BENCH_WARMUP_ITERS",
             "METALFISH_NN_BENCH_GRAPH_REUSE_PROBE",
             "METALFISH_CUDA_GRAPH_STATUS_DETAIL",
-            "METALFISH_CUDA_DYNAMIC_PE_SPARSE_DENSE",
             "collect_remote_artifacts",
             "compare_collected_probe_suite",
             "cuda-gpu-summary.md",

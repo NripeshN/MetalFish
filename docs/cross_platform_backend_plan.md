@@ -599,11 +599,9 @@ Current CUDA backend boundary:
   `7.370 ms` sequence time, `0.031 ms` output sync, and `77.229 MB` workspace.
   The dominant bucket is still attention/layernorm at `4.235 ms` across 15
   stages, followed by feed-forward/layernorm at `1.707 ms`; the slowest named
-  stage is `body.input_embedding_preprocess` at `0.546 ms`. The branch now has a
-  default-on `METALFISH_CUDA_DYNAMIC_PE_SPARSE_DENSE` path that computes the
-  dynamic position preprocess directly from packed piece masks instead of running
-  a dense 768-to-32768 GEMM over mostly-zero input; the old GEMM remains
-  available by setting the flag to `0` until the L4 parity/perf gate accepts it.
+  stage is `body.input_embedding_preprocess` at `0.546 ms`. The next CUDA
+  performance target should be stage orchestration, attention/layernorm launch
+  overhead, or a parity-safe input embedding rewrite.
 - CUDA warmup now synchronizes its stream before the backend constructor
   returns. That keeps cuBLAS work from one freshly-created evaluator from
   overlapping another evaluator on a different stream and prevents first-use

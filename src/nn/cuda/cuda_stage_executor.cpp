@@ -1248,16 +1248,9 @@ CudaDenseStageOutput ExecuteDynamicPositionEncodingStage(
   LaunchExpandPackedInputPlanesWithPositionInputKernel(
       input_masks, input_values, output.expanded_input, output.position_input,
       batch_size, input_planes, kPositionPlanes, squares, stream);
-  if (EnvFlagOrDefault("METALFISH_CUDA_DYNAMIC_PE_SPARSE_DENSE", true)) {
-    LaunchDynamicPositionEncodingSparseDenseKernel(
-        input_masks, input_values, dense_weight.data, dense_bias.data,
-        output.dense, batch_size, input_planes, kPositionPlanes, squares,
-        input_width, output_width, stream);
-  } else {
-    LaunchDenseAffineKernel(output.position_input, dense_weight.data,
-                            dense_bias.data, output.dense, batch_size,
-                            input_width, output_width, stream);
-  }
+  LaunchDenseAffineKernel(output.position_input, dense_weight.data,
+                          dense_bias.data, output.dense, batch_size,
+                          input_width, output_width, stream);
   LaunchDynamicPositionEncodingConcatKernel(
       output.expanded_input, output.dense, output.output, batch_size,
       input_planes, pe_width, squares, stream);
