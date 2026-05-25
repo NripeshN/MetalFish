@@ -426,7 +426,8 @@ if [[ -n "${CUDA_GRAPH_REQUESTED}" && "${CUDA_GRAPH_REQUESTED}" != "0" &&
   fi
 fi
 
-"${BUILD_DIR}/metalfish_nn_probe" \
+METALFISH_CUDA_PROFILE=0 \
+  "${BUILD_DIR}/metalfish_nn_probe" \
   --weights "${WEIGHTS}" \
   --backend cuda \
   --top 3 \
@@ -442,7 +443,8 @@ python3 tools/check_nn_backend_artifacts.py \
   --manifest-out "${BUILD_DIR}/cuda-gpu-nn-artifact-manifest.json" \
   --min-policy-top 3 \
   --require-batch-benchmark
-python3 tools/run_nn_backend_probe_suite.py \
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/run_nn_backend_probe_suite.py \
   --probe "${BUILD_DIR}/metalfish_nn_probe" \
   --weights "${WEIGHTS}" \
   --backend cuda \
@@ -456,7 +458,8 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     echo "Legacy 42850 weights not found: ${LEGACY_WEIGHTS}" >&2
     exit 2
   fi
-  python3 tools/run_nn_backend_probe_suite.py \
+  METALFISH_CUDA_PROFILE=0 \
+    python3 tools/run_nn_backend_probe_suite.py \
     --probe "${BUILD_DIR}/metalfish_nn_probe" \
     --weights "${LEGACY_WEIGHTS}" \
     --backend cuda \
@@ -467,7 +470,8 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --full-policy
 fi
 
-python3 tools/uci_smoke.py \
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \
   --timeout "${UCI_TIMEOUT}" \
   --setoption NNBackend=auto \
@@ -480,7 +484,8 @@ python3 tools/uci_smoke.py \
   --expect-output "CUDA transformer backend" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
 
-python3 tools/uci_smoke.py \
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \
   --timeout "${UCI_TIMEOUT}" \
   --setoption NNBackend=cuda \
@@ -491,7 +496,8 @@ python3 tools/uci_smoke.py \
   --setoption MCTSMinibatchSize=1 \
   --go "${UCI_GO}" | tee "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
 
-python3 tools/uci_smoke.py \
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \
   --timeout "${UCI_TIMEOUT}" \
   --setoption Threads=3 \
@@ -510,7 +516,8 @@ python3 tools/uci_smoke.py \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
 
 mkdir -p "${BUILD_DIR}/dummy-coreml.mlmodelc"
-python3 tools/uci_smoke.py \
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
   --engine "${BUILD_DIR}/metalfish" \
   --timeout "${UCI_TIMEOUT}" \
   --setoption Threads=3 \

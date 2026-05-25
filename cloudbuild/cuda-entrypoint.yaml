@@ -44,6 +44,8 @@ steps:
         grep -q '"metadata_only":true' /tmp/metalfish-cuda-bt4-metadata.json
         grep -q '"backend":"cuda"' /tmp/metalfish-cuda-bt4-metadata.json
         grep -q '"format":"attention_body=yes' /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"policy_head":"' /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"value_head":"' /tmp/metalfish-cuda-bt4-metadata.json
         grep -q '"execution_plan":"109 resolved execution steps' /tmp/metalfish-cuda-bt4-metadata.json
         grep -q '"cuda_schedule_fully_supported":true' /tmp/metalfish-cuda-bt4-metadata.json
         grep -q '"cuda_output_mapping_ok":true' /tmp/metalfish-cuda-bt4-metadata.json
@@ -57,6 +59,8 @@ steps:
         grep -q '"metadata_only":true' /tmp/metalfish-cuda-legacy-metadata.json
         grep -q '"backend":"cuda"' /tmp/metalfish-cuda-legacy-metadata.json
         grep -q '"format":"attention_body=no' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"policy_head":"' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"value_head":"' /tmp/metalfish-cuda-legacy-metadata.json
         grep -q '"execution_plan":"' /tmp/metalfish-cuda-legacy-metadata.json
         grep -q '"cuda_schedule_fully_supported":true' /tmp/metalfish-cuda-legacy-metadata.json
         grep -q '"cuda_output_mapping_ok":true' /tmp/metalfish-cuda-legacy-metadata.json

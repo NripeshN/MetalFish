@@ -504,6 +504,9 @@ Current CUDA backend boundary:
   release knobs are active. The graph key includes batch size, workspace
   generation, inference-buffer generation, stream, and device output pointers;
   graph API failures reset the cache and fall back to uncaptured execution.
+  The CUDA gate keeps the normal probe and UCI parity smokes unprofiled even
+  when profiling is requested, then runs a separate profile smoke, so the
+  production graph path and the diagnostic profile path are reported separately.
   The 2026-05-22 L4 gate `metalfish-cuda-gate-20260522-final-e370951` accepted
   the default graph path on the merged `main` tip with
   `CUDA graph replay observed: yes`, CUDA unit tests, fixed BT4 references,
@@ -667,14 +670,14 @@ configures `USE_CUDA=ON`, builds `metalfish`, `metalfish_tests`,
 `test_nn_comparison`, and `metalfish_nn_probe`, then runs the CUDA-linked MCTS
 module tests, BT4 and legacy metadata-only probes through
 `metalfish_nn_probe --backend cuda`, and a tiny AB UCI smoke from the CUDA-linked
-engine with downloaded NNUE files. The metadata probes require CUDA schedule
-support and named output mapping to resolve successfully. These smokes require
-no hosted NVIDIA GPU, but they catch host-link, runtime-DLL, protobuf load,
-tensor-plan, weight-inventory, no-device fallback, and CUDA-compiled MCTS
-contract regressions that a compile-only gate would miss. The Windows CUDA
-package now ships `metalfish_nn_probe.exe` when tests are built, and the compile
-gate extracts the package and re-runs a packaged BT4 metadata probe before
-upload.
+engine with downloaded NNUE files. The metadata probes require policy/value head
+selection, CUDA schedule support, and named output mapping to resolve
+successfully. These smokes require no hosted NVIDIA GPU, but they catch
+host-link, runtime-DLL, protobuf load, tensor-plan, weight-inventory, no-device
+fallback, and CUDA-compiled MCTS contract regressions that a compile-only gate
+would miss. The Windows CUDA package now ships `metalfish_nn_probe.exe` when
+tests are built, and the compile gate extracts the package and re-runs a
+packaged BT4 metadata probe before upload.
 Each portable CPU job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS
 smoke, so portable builds verify the MCTS construction path cheaply. The Linux
 and MSVC legs additionally download BT4 for the metadata/backend-construction

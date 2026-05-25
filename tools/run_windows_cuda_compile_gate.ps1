@@ -330,6 +330,7 @@ try {
     }
     $PackagedProbeText = Get-Content -Path $PackagedProbeLog -Raw
     foreach ($RequiredText in @('"metadata_only":true', '"backend":"cuda"',
+                                '"policy_head":"', '"value_head":"',
                                 '"execution_plan":"',
                                 '"cuda_schedule_fully_supported":true',
                                 '"cuda_output_mapping_ok":true')) {
