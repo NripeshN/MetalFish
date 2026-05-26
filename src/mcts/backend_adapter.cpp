@@ -327,5 +327,9 @@ bool Backend::HasWDL() const { return evaluator_->HasWDL(); }
 
 bool Backend::HasMovesLeft() const { return evaluator_->HasMovesLeft(); }
 
+std::string Backend::GetNetworkInfo() const {
+  return evaluator_ ? evaluator_->GetNetworkInfo() : "";
+}
+
 } // namespace MCTS
 } // namespace MetalFish

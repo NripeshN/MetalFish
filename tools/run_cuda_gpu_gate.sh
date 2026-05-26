@@ -39,9 +39,14 @@ UCI_CUDA_RUNTIME_EXPECT_ARGS=(
   --expect-output "cuda_deterministic_attention_softmax=true"
   --expect-output "cuda_full_buffer_clear_effective=true"
 )
+UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS=()
 if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
   UCI_CUDA_RUNTIME_EXPECT_ARGS+=(
     --expect-output "cuda_graph_effective=true"
+  )
+  UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS=(
+    --expect-output "MCTS backend warmup actual="
+    --expect-output "executor=resolved+graph-replay"
   )
 fi
 if [[ ! "${CUDA_STABLE_BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
@@ -650,6 +655,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "MCTS runtime: backend=accelerator" \
   --expect-output "minibatch=${CUDA_STABLE_BATCH_SIZE}" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
@@ -672,6 +678,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "MCTS runtime: backend=accelerator" \
   --expect-output "minibatch=${CUDA_STABLE_BATCH_SIZE}" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
@@ -694,6 +701,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "MCTS runtime: backend=cuda" \
   --expect-output "minibatch=1" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
@@ -722,6 +730,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "CUDA transformer backend" \
   --expect-output "Final: MCTSPlayouts=" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
@@ -751,6 +760,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "CUDA transformer backend" \
   --expect-output "Final: MCTSPlayouts=" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log"
 
 mkdir -p "${BUILD_DIR}/dummy-coreml.mlmodelc"
@@ -787,6 +797,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "ANE root probe disabled" \
   --expect-output "Final: MCTSPlayouts=" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log"
 
 if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; then

@@ -449,6 +449,13 @@ nvidia-smi 2>&1 | Tee-Object -FilePath (Join-Path \$Logs "nvidia-smi-runtime.log
 if ("${CUDA_GRAPH}" -ne "0") {
   \$CudaNetworkInfoRequiredText += "cuda_graph_effective=true"
 }
+\$CudaMctsWarmupRequiredText = @()
+if ("${CUDA_GRAPH}" -ne "0") {
+  \$CudaMctsWarmupRequiredText = @(
+    "MCTS backend warmup actual=",
+    "executor=resolved+graph-replay"
+  )
+}
 
 function Assert-CudaNetworkInfo {
   param(
@@ -852,7 +859,7 @@ Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "position startpos",
   "go ${UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove"))
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove"))
 
 Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "uci",
@@ -874,7 +881,7 @@ Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "position startpos",
   "go ${UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "bestmove"))
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "bestmove"))
 
 Invoke-UciSmoke -Name "cuda-accelerator-mcts" -Commands @(
   "uci",
@@ -895,7 +902,7 @@ Invoke-UciSmoke -Name "cuda-accelerator-mcts" -Commands @(
   "position startpos",
   "go ${UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "bestmove"))
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "bestmove"))
 
 Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "uci",
@@ -921,7 +928,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
 \$DummyCoreMl = Join-Path \$PackageDir "dummy-coreml.mlmodelc"
 New-Item -ItemType Directory -Force -Path \$DummyCoreMl | Out-Null
@@ -951,7 +958,7 @@ Invoke-UciSmoke -Name "hybrid-auto" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
 Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "uci",
@@ -983,7 +990,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
 \$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
 \$LegacyProbeJson = Read-ProbeJson "cuda-legacy-probe.stdout.log"

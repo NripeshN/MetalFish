@@ -199,6 +199,19 @@ void ApplyNNPolicyToNode(Node *node, const EvaluationResult &result,
   node->SortEdges();
 }
 
+bool ShouldReplayWarmCudaGraph(const SearchParams &params,
+                               const std::string &network_info) {
+#ifdef USE_CUDA
+  if (!params.cuda_graph_execution)
+    return false;
+  return network_info.find("CUDA transformer backend") != std::string::npos;
+#else
+  (void)params;
+  (void)network_info;
+  return false;
+#endif
+}
+
 } // anonymous namespace
 
 Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
@@ -233,26 +246,45 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
     warmup_pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                    false, &warmup_st);
     const uint64_t warmup_base = warmup_pos.raw_key();
-    {
-      auto comp = backend_->CreateComputation();
-      comp->AddInput(warmup_pos, warmup_base ^ 0x9e3779b97f4a7c15ULL);
-      comp->ComputeBlocking();
-    }
-    if (params_.GetNumThreads() > 1 && params_.minibatch_size > 1) {
-      const int warmup_batch = std::clamp(params_.minibatch_size, 8, 256);
-      auto comp = backend_->CreateComputation();
-      for (int i = 0; i < warmup_batch; ++i) {
-        comp->AddInput(warmup_pos,
-                       warmup_base ^ (0xd1b54a32d192ed03ULL +
-                                      static_cast<uint64_t>(i) * kFNVPrime));
+    const bool replay_warm_cuda_graph =
+        ShouldReplayWarmCudaGraph(params_, backend_->GetNetworkInfo());
+    auto warmup_batch = [&](int batch_size, int passes, uint64_t salt,
+                            bool update_latency_margin) {
+      for (int pass = 0; pass < passes; ++pass) {
+        auto comp = backend_->CreateComputation();
+        for (int i = 0; i < batch_size; ++i) {
+          comp->AddInput(warmup_pos,
+                         warmup_base ^
+                             (salt +
+                              static_cast<uint64_t>(pass) *
+                                  0x9e3779b97f4a7c15ULL +
+                              static_cast<uint64_t>(i) * kFNVPrime));
+        }
+        const auto batch_start = std::chrono::steady_clock::now();
+        comp->ComputeBlocking();
+        if (update_latency_margin) {
+          const auto batch_elapsed =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - batch_start)
+                  .count();
+          UpdateBackendLatencyMargin(batch_elapsed);
+        }
       }
-      const auto batch_start = std::chrono::steady_clock::now();
-      comp->ComputeBlocking();
-      const auto batch_elapsed =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now() - batch_start)
-              .count();
-      UpdateBackendLatencyMargin(batch_elapsed);
+    };
+
+    warmup_batch(1, replay_warm_cuda_graph ? 2 : 1, 0x9e3779b97f4a7c15ULL,
+                 false);
+    if (params_.minibatch_size > 1) {
+      const int warmup_batch_size =
+          replay_warm_cuda_graph ? std::clamp(params_.minibatch_size, 1, 256)
+                                 : std::clamp(params_.minibatch_size, 8, 256);
+      const int warmup_passes = replay_warm_cuda_graph ? 3 : 1;
+      warmup_batch(warmup_batch_size, warmup_passes, 0xd1b54a32d192ed03ULL,
+                   true);
+    }
+    if (replay_warm_cuda_graph) {
+      std::cerr << "info string MCTS backend warmup actual="
+                << backend_->GetNetworkInfo() << std::endl;
     }
     backend_->Cache().Clear();
   }

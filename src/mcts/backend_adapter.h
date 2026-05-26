@@ -133,6 +133,7 @@ public:
   NNCache &Cache() { return cache_; }
   bool HasWDL() const;
   bool HasMovesLeft() const;
+  std::string GetNetworkInfo() const;
 
 private:
   std::unique_ptr<NNMCTSEvaluator> evaluator_;
