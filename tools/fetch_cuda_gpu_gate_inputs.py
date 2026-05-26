@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import shutil
 import shlex
 import subprocess
 import sys
@@ -110,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
     expected_sha = None if args.no_expected_sha else (args.expected_sha or git_head())
     out_dir = pathlib.Path(args.out_dir).expanduser().resolve()
     metal_dir = out_dir / "metal"
+    if metal_dir.exists():
+        shutil.rmtree(metal_dir)
     metal_dir.mkdir(parents=True, exist_ok=True)
 
     metal_run = require_metal_run(repo, args.metal_ci_run_id, expected_sha)
