@@ -1317,6 +1317,24 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / "tools/fetch_cuda_gpu_gate_inputs.py",
+        [
+            "MetalFish CI",
+            "gh",
+            "run",
+            "download",
+            "metalfish-macos-arm64",
+            "metal-nn-probe-suite.log",
+            "metal-legacy-nn-probe-suite.log",
+            "METALFISH_METAL_PROBE_SUITE_LOG",
+            "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG",
+            "METALFISH_REQUIRE_METAL_COMPARE",
+            "cuda-gpu-gate-env.sh",
+            "cuda-gpu-gate-inputs-manifest.json",
+            "metalfish.cuda_gpu_gate_inputs",
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/run_gcp_windows_cuda_runtime_gate.sh",
         [
             "nvidia-l4-vws",

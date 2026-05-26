@@ -910,6 +910,9 @@ gates when `METALFISH_METAL_PROBE_SUITE_LOG` and
 logs. The Windows GitHub runtime workflow requires those Metal artifacts by
 default through `metal_ci_run_id`, keeping Metal, CUDA, and portable backends on
 one diagnostic artifact contract while leaving runtime strength tests separate.
+For direct Linux L4 runs, `tools/fetch_cuda_gpu_gate_inputs.py` validates a
+same-commit `MetalFish CI` run, downloads the macOS Metal artifact, writes
+`cuda-gpu-gate-env.sh`, and records `cuda-gpu-gate-inputs-manifest.json`.
 For branch-local validation before the workflow file exists on `main`,
 `tools/fetch_windows_cuda_runtime_inputs.py` downloads the same-commit Windows
 CUDA compile artifact and optional macOS Metal artifact, validates both run
