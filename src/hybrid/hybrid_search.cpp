@@ -156,6 +156,7 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
       std::cerr << "[HYB] ANE root probe disabled: weights/model path missing"
                 << std::endl;
     } else {
+#ifdef USE_COREML
       try {
         ane_evaluator_ = std::make_unique<NNMCTSEvaluator>(
             config_.ane_weights_path, "coreml", config_.ane_model_path,
@@ -174,6 +175,12 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
                   << std::endl;
         ane_evaluator_.reset();
       }
+#else
+      std::cerr
+          << "[HYB] ANE root probe disabled: Core ML backend was not compiled "
+             "into MetalFish"
+          << std::endl;
+#endif
     }
   }
 

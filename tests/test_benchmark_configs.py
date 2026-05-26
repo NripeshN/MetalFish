@@ -1244,6 +1244,13 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / "src/hybrid/hybrid_search.cpp",
+        [
+            "#ifdef USE_COREML",
+            "ANE root probe disabled: Core ML backend was not compiled",
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/analyze_hybrid_trace.py",
         [
             "HybridTrace:",
