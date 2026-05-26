@@ -156,9 +156,14 @@ Current CUDA backend boundary:
   `metalfish_nn_probe.exe --metadata-only --backend cuda` on both BT4 and
   legacy 42850 weights, verifies that the release zip also contains
   `test_nn_comparison.exe`, then compares the packaged metadata contract
-  against the build-tree probes. This catches missing packaged probe/test
-  binaries, DLL/runtime dependencies, and package-only metadata drift before
-  the Windows GPU VM gate.
+  against the build-tree probes. The package also carries
+  `windows-cuda-package-manifest.json`, generated through the same
+  `metalfish.portable_artifact` schema as Linux CUDA. The compile gate and the
+  Windows L4 runtime gate validate schema, package kind, required executables,
+  `PORTABLE_ARTIFACT.md`, and CUDA runtime DLL entries before accepting the
+  package. This catches missing packaged probe/test binaries, DLL/runtime
+  dependencies, and package-only metadata drift before and during the Windows
+  GPU VM gate.
 - `MCTSMinibatchSize=0` now keeps search-side CUDA auto batches aligned with the
   CUDA graph-replay stable batch size. CUDA builds use
   `MCTSCudaAutoMinibatchSize` when set, otherwise
@@ -801,13 +806,14 @@ selection, CUDA schedule support, and named output mapping to resolve
 successfully. These smokes require no hosted NVIDIA GPU, but they catch
 host-link, runtime-DLL, protobuf load, tensor-plan, weight-inventory, no-device
 fallback, and CUDA-compiled MCTS contract regressions that a compile-only gate
-would miss. The Windows CUDA package now ships `metalfish_nn_probe.exe` when
-tests are built, and the compile gate extracts the package and re-runs a
-packaged BT4 metadata probe before upload. It also writes
-`windows-cuda-compile-artifact-manifest.json`, which asserts CUDA metadata probe
-fields, compares the packaged BT4 probe against the build-tree BT4 probe, lists
-packaged runtime DLL coverage, and marks real GPU execution as belonging to the
-separate Windows GCP runtime gate.
+would miss. The Windows CUDA package now ships `metalfish_nn_probe.exe` and
+`test_nn_comparison.exe` when tests are built, carries
+`windows-cuda-package-manifest.json`, and the compile gate extracts the package
+and re-runs packaged BT4 and legacy metadata probes before upload. It also
+writes `windows-cuda-compile-artifact-manifest.json`, which asserts CUDA
+metadata probe fields, compares packaged probes against the build-tree probes,
+lists packaged runtime DLL coverage, and marks real GPU execution as belonging
+to the separate Windows GCP runtime gate.
 Each portable CPU job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS
 smoke, so portable builds verify the MCTS construction path cheaply. The Linux,
 MinGW, and MSVC legs additionally download BT4 for metadata/backend-construction
@@ -857,9 +863,10 @@ pipe and stall the engine before `uciok`; the Hybrid smoke writes commands
 line-by-line, waits after `go` so it does not abort a timed search with an
 immediate `quit`, and asserts positive `MCTSPlayouts`, `MCTSEvals`, and
 `ABDepth` in the final line. The runtime manifest records the compile workflow
-run id, package hash, VM shape, CUDA graph/profile settings, packaged probe
-backend/latency/top-policy move, pure CUDA MCTS bestmove, and Hybrid final
-metrics so release artifacts can be audited without scraping UCI logs manually.
+run id, package hash, package manifest schema/kind/file count, VM shape, CUDA
+graph/profile settings, packaged probe backend/latency/top-policy move, pure
+CUDA MCTS bestmove, and Hybrid final metrics so release artifacts can be
+audited without scraping UCI logs manually.
 The 2026-05-26 direct GCP pass `e707c7c` verified the packaged runtime path on
 a Windows Server 2022 `g2-standard-8` L4 VM in `us-west4-c` using compile run
 `26463904820`: the packaged BT4 and legacy 42850 probes reported

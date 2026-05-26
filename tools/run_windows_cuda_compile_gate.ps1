@@ -294,6 +294,8 @@ if ($env:GITHUB_REF_TYPE -eq "tag") {
 $PackageDir = Join-Path $BuildDir $PackageName
 $PackageSmokeDir = Join-Path $BuildDir "$PackageName-smoke"
 $PackageZip = Join-Path $BuildDir "$PackageName.zip"
+$PackagePortableManifest = Join-Path $PackageDir "PORTABLE_ARTIFACT.md"
+$PackageJsonManifest = Join-Path $PackageDir "windows-cuda-package-manifest.json"
 Remove-Item $PackageDir, $PackageSmokeDir -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $PackageZip -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $PackageDir | Out-Null
@@ -309,20 +311,6 @@ foreach ($DocName in @("README.md", "CHANGELOG.md", "LICENSE")) {
   Copy-ExistingFile (Join-Path $SourceDir $DocName) $PackageDir | Out-Null
 }
 
-& $Python (Join-Path $SourceDir "tools\write_portable_manifest.py") `
-  --platform "Windows x86_64 MSVC CUDA" `
-  --backend "CPU AB plus CUDA transformer MCTS/Hybrid when NVIDIA CUDA runtime and BT4 weights are available" `
-  --binary "metalfish.exe" `
-  --output (Join-Path $PackageDir "PORTABLE_ARTIFACT.md") `
-  --notes "This artifact is built by the Windows CUDA compile gate with MSVC and the NVIDIA CUDA Toolkit." `
-  --notes "The package includes CUDA and vcpkg runtime DLLs required by the linked engine." `
-  --notes "The package includes metalfish_nn_probe.exe when BUILD_TESTS=ON so runtime gates can verify packaged CUDA inference." `
-  --notes "The package includes test_nn_comparison.exe when BUILD_TESTS=ON so runtime gates can verify CUDA batch and reuse parity." `
-  --notes "Run a real Windows NVIDIA runtime smoke before calling this artifact strength-ready."
-if ($LASTEXITCODE -ne 0) {
-  throw "portable manifest generation failed with exit code $LASTEXITCODE"
-}
-
 $CopiedRuntimeDlls = 0
 $CopiedRuntimeDlls += Copy-MatchingFiles (Join-Path $BuildDir "*.dll") $PackageDir
 $VcpkgBin = Join-Path $VcpkgRoot "installed\x64-windows\bin"
@@ -336,6 +324,35 @@ foreach ($Pattern in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) 
 if ($CopiedRuntimeDlls -eq 0) {
   throw "No runtime DLLs were copied into the Windows CUDA package"
 }
+
+$ManifestArgs = @(
+  "--platform", "Windows x86_64 MSVC CUDA",
+  "--backend", "CPU AB plus CUDA transformer MCTS/Hybrid when NVIDIA CUDA runtime and BT4 weights are available",
+  "--binary", "metalfish.exe",
+  "--output", $PackagePortableManifest,
+  "--json-output", $PackageJsonManifest,
+  "--package-name", $PackageName,
+  "--package-kind", "windows-cuda"
+)
+foreach ($File in (Get-ChildItem -Path $PackageDir -File | Sort-Object Name)) {
+  $ManifestArgs += @("--file", $File.FullName)
+}
+$ManifestArgs += @("--file", $PackagePortableManifest)
+foreach ($Note in @(
+  "This artifact is built by the Windows CUDA compile gate with MSVC and the NVIDIA CUDA Toolkit.",
+  "The package includes CUDA and vcpkg runtime DLLs required by the linked engine.",
+  "The package includes metalfish_nn_probe.exe when BUILD_TESTS=ON so runtime gates can verify packaged CUDA inference.",
+  "The package includes test_nn_comparison.exe when BUILD_TESTS=ON so runtime gates can verify CUDA batch and reuse parity.",
+  "Run a real Windows NVIDIA runtime smoke before calling this artifact strength-ready."
+)) {
+  $ManifestArgs += @("--notes", $Note)
+}
+& $Python (Join-Path $SourceDir "tools\write_portable_manifest.py") @ManifestArgs
+if ($LASTEXITCODE -ne 0) {
+  throw "portable manifest generation failed with exit code $LASTEXITCODE"
+}
+Copy-Item $PackagePortableManifest (Join-Path $BuildDir "PORTABLE_ARTIFACT.md") -Force
+Copy-Item $PackageJsonManifest (Join-Path $BuildDir "windows-cuda-package-manifest.json") -Force
 
 Compress-Archive -Path (Join-Path $PackageDir "*") -DestinationPath $PackageZip
 if (-not (Test-Path $PackageZip)) {
@@ -355,6 +372,39 @@ if ($BuildTests -eq "ON" -and -not (Test-Path $PackagedProbe)) {
 $PackagedComparison = Join-Path $PackageSmokeDir "test_nn_comparison.exe"
 if ($BuildTests -eq "ON" -and -not (Test-Path $PackagedComparison)) {
   throw "Packaged NN comparison not found after extraction: $PackagedComparison"
+}
+$PackagedPortableManifest = Join-Path $PackageSmokeDir "PORTABLE_ARTIFACT.md"
+if (-not (Test-Path $PackagedPortableManifest)) {
+  throw "Packaged portable manifest not found after extraction: $PackagedPortableManifest"
+}
+$PackagedJsonManifest = Join-Path $PackageSmokeDir "windows-cuda-package-manifest.json"
+if (-not (Test-Path $PackagedJsonManifest)) {
+  throw "Packaged JSON manifest not found after extraction: $PackagedJsonManifest"
+}
+$PackagedManifest = Get-Content -Path $PackagedJsonManifest -Raw | ConvertFrom-Json
+if ($PackagedManifest.schema -ne "metalfish.portable_artifact") {
+  throw "Packaged JSON manifest has unexpected schema: $($PackagedManifest.schema)"
+}
+if ($PackagedManifest.package.kind -ne "windows-cuda") {
+  throw "Packaged JSON manifest has unexpected kind: $($PackagedManifest.package.kind)"
+}
+$PackagedManifestFiles = @($PackagedManifest.files | ForEach-Object { $_.name })
+foreach ($RequiredFile in @("metalfish.exe", "PORTABLE_ARTIFACT.md")) {
+  if ($PackagedManifestFiles -notcontains $RequiredFile) {
+    throw "Packaged JSON manifest missing file entry: $RequiredFile"
+  }
+}
+if ($BuildTests -eq "ON") {
+  foreach ($RequiredFile in @("metalfish_nn_probe.exe", "test_nn_comparison.exe")) {
+    if ($PackagedManifestFiles -notcontains $RequiredFile) {
+      throw "Packaged JSON manifest missing file entry: $RequiredFile"
+    }
+  }
+}
+foreach ($RequiredDll in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+  if (-not ($PackagedManifestFiles | Where-Object { $_ -like $RequiredDll })) {
+    throw "Packaged JSON manifest missing CUDA runtime DLL entry: $RequiredDll"
+  }
 }
 
 $OriginalPath = $env:PATH
@@ -518,12 +568,14 @@ $ManifestObject = [ordered]@{
   targets = $Targets
   smoke_tests = $SmokeSteps
   package = $PackageZip
+  package_manifest = $PackageJsonManifest
   packaged_runtime_dll_count = $CopiedRuntimeDlls
   package_contents = [ordered]@{
     metalfish_exe = Test-PackageFile $PackageDir "metalfish.exe"
     metalfish_nn_probe_exe = Test-PackageFile $PackageDir "metalfish_nn_probe.exe"
     test_nn_comparison_exe = Test-PackageFile $PackageDir "test_nn_comparison.exe"
     portable_artifact_md = Test-PackageFile $PackageDir "PORTABLE_ARTIFACT.md"
+    windows_cuda_package_manifest_json = Test-PackageFile $PackageDir "windows-cuda-package-manifest.json"
     cudart = Test-PackageFile $PackageDir "cudart64_*.dll"
     cublas = Test-PackageFile $PackageDir "cublas64_*.dll"
     cublaslt = Test-PackageFile $PackageDir "cublasLt64_*.dll"

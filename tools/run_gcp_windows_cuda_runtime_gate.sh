@@ -441,6 +441,37 @@ if (-not (Test-Path \$Probe)) {
 if (-not (Test-Path \$Comparison)) {
   throw "Packaged NN comparison not found: \$Comparison"
 }
+\$PortableManifest = Join-Path \$PackageDir "PORTABLE_ARTIFACT.md"
+if (-not (Test-Path \$PortableManifest)) {
+  throw "Packaged portable manifest not found: \$PortableManifest"
+}
+\$PackageJsonManifestPath = Join-Path \$PackageDir "windows-cuda-package-manifest.json"
+if (-not (Test-Path \$PackageJsonManifestPath)) {
+  throw "Packaged JSON manifest not found: \$PackageJsonManifestPath"
+}
+\$PackageJsonManifest = Get-Content -Path \$PackageJsonManifestPath -Raw | ConvertFrom-Json
+if (\$PackageJsonManifest.schema -ne "metalfish.portable_artifact") {
+  throw "Packaged JSON manifest has unexpected schema: \$(\$PackageJsonManifest.schema)"
+}
+if (\$PackageJsonManifest.package.kind -ne "windows-cuda") {
+  throw "Packaged JSON manifest has unexpected kind: \$(\$PackageJsonManifest.package.kind)"
+}
+\$PackageJsonManifestFiles = @(\$PackageJsonManifest.files | ForEach-Object { \$_.name })
+foreach (\$RequiredFile in @(
+  "metalfish.exe",
+  "metalfish_nn_probe.exe",
+  "test_nn_comparison.exe",
+  "PORTABLE_ARTIFACT.md"
+)) {
+  if (\$PackageJsonManifestFiles -notcontains \$RequiredFile) {
+    throw "Packaged JSON manifest missing file entry: \$RequiredFile"
+  }
+}
+foreach (\$RequiredDll in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+  if (-not (\$PackageJsonManifestFiles | Where-Object { \$_ -like \$RequiredDll })) {
+    throw "Packaged JSON manifest missing CUDA runtime DLL entry: \$RequiredDll"
+  }
+}
 \$env:PATH = "\$PackageDir;\$env:PATH"
 nvidia-smi 2>&1 | Tee-Object -FilePath (Join-Path \$Logs "nvidia-smi-runtime.log")
 
@@ -1259,6 +1290,12 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
     remote_zip = \$RemoteZip
     sha256 = \$PackageHash
     compile_run_id = \$(if ("${WINDOWS_CUDA_COMPILE_RUN_ID}" -eq "") { \$null } else { "${WINDOWS_CUDA_COMPILE_RUN_ID}" })
+    manifest = [ordered]@{
+      basename = "windows-cuda-package-manifest.json"
+      schema = \$PackageJsonManifest.schema
+      kind = \$PackageJsonManifest.package.kind
+      file_count = @(\$PackageJsonManifest.files).Count
+    }
   }
   gcp = [ordered]@{
     instance = "${INSTANCE}"
