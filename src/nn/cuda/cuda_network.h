@@ -49,6 +49,7 @@ private:
   CudaWeightBuffers weight_buffers_;
   CudaExecutionWorkspace workspace_;
   int workspace_batch_size_ = 0;
+  int selected_cuda_device_ = -1;
   std::string device_selection_summary_;
   std::unique_ptr<CudaExecutor> executor_;
   std::mutex execution_mutex_;

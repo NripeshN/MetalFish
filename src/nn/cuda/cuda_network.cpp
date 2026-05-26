@@ -80,6 +80,20 @@ int StableExecutionBatchSize(const BackendConfig &config) {
                          kDefaultMaxBatchSize);
 }
 
+const char *BoolText(bool value) { return value ? "true" : "false"; }
+
+bool CudaGraphEffective(const std::string &executor_name) {
+  if (executor_name.rfind("resolved+graph", 0) != 0)
+    return false;
+  return executor_name.find("fallback") == std::string::npos &&
+         executor_name.find("incompatible") == std::string::npos;
+}
+
+bool FullBufferClearEffective(const BackendConfig &config) {
+  return config.cuda_full_buffer_clear &&
+         EnvFlagOrDefault("METALFISH_CUDA_FULL_BUFFER_CLEAR", true);
+}
+
 struct TensorTopEntry {
   int index = -1;
   float value = 0.0f;
@@ -231,6 +245,7 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights, BackendConfig config)
         "; format: " + format_.Summary() + ") but " + device_selection.message);
   }
   device_selection_summary_ = device_selection.message;
+  selected_cuda_device_ = device_selection.device;
 
   std::unique_ptr<MultiHeadWeights> decoded_weights;
   std::string policy_head;
@@ -438,14 +453,29 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
 
 std::string CudaNetwork::GetNetworkInfo() const {
   std::ostringstream out;
+  const std::string executor_name = executor_->Name();
   out << "CUDA transformer backend (" << RuntimeCudaDeviceSummary()
       << ", selection=" << device_selection_summary_
+      << ", cuda_device_config=" << config_.cuda_device
+      << ", cuda_device_selected=" << selected_cuda_device_
+      << ", cuda_graph_config=" << BoolText(config_.cuda_graph_execution)
+      << ", cuda_graph_effective=" << BoolText(CudaGraphEffective(executor_name))
+      << ", cuda_stable_execution_batch_config="
+      << config_.cuda_stable_execution_batch_size
+      << ", cuda_stable_execution_batch_effective="
+      << StableExecutionBatchSize(config_)
+      << ", cuda_deterministic_attention_softmax="
+      << BoolText(config_.cuda_deterministic_attention_softmax)
+      << ", cuda_full_buffer_clear_config="
+      << BoolText(config_.cuda_full_buffer_clear)
+      << ", cuda_full_buffer_clear_effective="
+      << BoolText(FullBufferClearEffective(config_))
       << ", format: " << format_.Summary()
       << ", tensors: " << tensor_plan_.Summary()
       << ", execution: " << resolved_execution_plan_.Summary()
       << ", buffer_bytes=" << buffers_.AllocationBytes()
       << ", weight_bytes=" << weight_buffers_.AllocationBytes()
-      << ", executor=" << executor_->Name() << ")";
+      << ", executor=" << executor_name << ")";
   return out.str();
 }
 

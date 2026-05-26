@@ -440,6 +440,28 @@ if (-not (Test-Path \$Probe)) {
 \$env:PATH = "\$PackageDir;\$env:PATH"
 nvidia-smi 2>&1 | Tee-Object -FilePath (Join-Path \$Logs "nvidia-smi-runtime.log")
 
+\$CudaNetworkInfoRequiredText = @(
+  "cuda_device_config=-1",
+  "cuda_stable_execution_batch_effective=${CUDA_STABLE_BATCH_SIZE}",
+  "cuda_deterministic_attention_softmax=true",
+  "cuda_full_buffer_clear_effective=true"
+)
+if ("${CUDA_GRAPH}" -ne "0") {
+  \$CudaNetworkInfoRequiredText += "cuda_graph_effective=true"
+}
+
+function Assert-CudaNetworkInfo {
+  param(
+    [string]\$Name,
+    [string]\$NetworkInfo
+  )
+  foreach (\$needle in \$CudaNetworkInfoRequiredText) {
+    if (\$NetworkInfo -notlike "*\$needle*") {
+      throw "\$Name missing CUDA network info: \$needle"
+    }
+  }
+}
+
 function Invoke-ProbeSmoke {
   param(
     [string]\$Name,
@@ -582,10 +604,12 @@ function Invoke-ProbeSuiteSmoke {
     if (\$probeObject.backend -ne "cuda") {
       throw ("\$Name probe did not select CUDA backend")
     }
-    if ((\$probeObject.network_info -as [string]) -notlike "*CUDA transformer backend*") {
+    \$networkInfo = \$probeObject.network_info -as [string]
+    if (\$networkInfo -notlike "*CUDA transformer backend*") {
       throw ("\$Name probe did not report CUDA transformer backend")
     }
-    if ("${CUDA_GRAPH}" -ne "0" -and (\$probeObject.network_info -as [string]) -notlike "*executor=resolved+graph-replay*") {
+    Assert-CudaNetworkInfo -Name \$Name -NetworkInfo \$networkInfo
+    if ("${CUDA_GRAPH}" -ne "0" -and \$networkInfo -notlike "*executor=resolved+graph-replay*") {
       throw ("\$Name probe did not report CUDA graph replay")
     }
     if ([bool]\$probeObject.has_wdl -ne \$RequireWdl) {
@@ -791,12 +815,12 @@ function Invoke-UciSmoke {
   " --cuda-full-buffer-clear true"
 
 \$ProbeArgs = "--weights " + [char]34 + \$Bt4 + [char]34 + \$CudaProbeOptions + " --batch-size 1 --warmup 1 --iterations 1 --top 3"
-Invoke-ProbeSmoke -Name "cuda-probe" -Arguments \$ProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"value":', '"policy_top":')
+Invoke-ProbeSmoke -Name "cuda-probe" -Arguments \$ProbeArgs -RequiredText (\$CudaNetworkInfoRequiredText + @('"backend":"cuda"', "CUDA transformer backend", '"value":', '"policy_top":'))
 \$LegacyProbeArgs = "--weights " + [char]34 + \$Legacy + [char]34 + \$CudaProbeOptions + " --batch-size 1 --warmup 1 --iterations 1 --top 3"
-Invoke-ProbeSmoke -Name "cuda-legacy-probe" -Arguments \$LegacyProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"has_wdl":false', '"has_moves_left":false', '"policy_top":')
+Invoke-ProbeSmoke -Name "cuda-legacy-probe" -Arguments \$LegacyProbeArgs -RequiredText (\$CudaNetworkInfoRequiredText + @('"backend":"cuda"', "CUDA transformer backend", '"has_wdl":false', '"has_moves_left":false', '"policy_top":'))
 \$ProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-probe-suite" -Weights \$Bt4 -RequireWdl \$true -RequireMovesLeft \$true
 \$LegacyProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-legacy-probe-suite" -Weights \$Legacy -RequireWdl \$false -RequireMovesLeft \$false
-\$IsolationRequiredText = @('"isolation":true', '"backend":"cuda"', "CUDA transformer backend", '"delta":')
+\$IsolationRequiredText = \$CudaNetworkInfoRequiredText + @('"isolation":true', '"backend":"cuda"', "CUDA transformer backend", '"delta":')
 if ("${CUDA_GRAPH}" -ne "0") {
   \$IsolationRequiredText += "executor=resolved+graph-replay"
 }
@@ -828,7 +852,7 @@ Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "position startpos",
   "go ${UCI_GO}",
   "quit"
-) -RequiredText @("CUDA transformer backend", "bestmove")
+) -RequiredText (\$CudaNetworkInfoRequiredText + @("CUDA transformer backend", "bestmove"))
 
 Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "uci",
@@ -850,7 +874,7 @@ Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "position startpos",
   "go ${UCI_GO}",
   "quit"
-) -RequiredText @("CUDA transformer backend", "bestmove")
+) -RequiredText (\$CudaNetworkInfoRequiredText + @("CUDA transformer backend", "bestmove"))
 
 Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "uci",
@@ -876,7 +900,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove") -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
 \$DummyCoreMl = Join-Path \$PackageDir "dummy-coreml.mlmodelc"
 New-Item -ItemType Directory -Force -Path \$DummyCoreMl | Out-Null
@@ -906,7 +930,7 @@ Invoke-UciSmoke -Name "hybrid-auto" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove") -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
 Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "uci",
@@ -938,7 +962,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove") -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + @("Starting Parallel Hybrid Search", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
 \$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
 \$LegacyProbeJson = Read-ProbeJson "cuda-legacy-probe.stdout.log"

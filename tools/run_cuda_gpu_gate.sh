@@ -23,7 +23,25 @@ fi
 CUDA_GRAPH_REPLAY_REQUIRE_ARGS=()
 if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
   CUDA_GRAPH_REPLAY_REQUIRE_ARGS=(
+    --require-network-info-substring "cuda_graph_effective=true"
     --require-network-info-substring "executor=resolved+graph-replay"
+  )
+fi
+CUDA_RUNTIME_REQUIRE_ARGS=(
+  --require-network-info-substring "cuda_device_config=-1"
+  --require-network-info-substring "cuda_stable_execution_batch_effective=${CUDA_STABLE_BATCH_SIZE}"
+  --require-network-info-substring "cuda_deterministic_attention_softmax=true"
+  --require-network-info-substring "cuda_full_buffer_clear_effective=true"
+)
+UCI_CUDA_RUNTIME_EXPECT_ARGS=(
+  --expect-output "cuda_device_config=-1"
+  --expect-output "cuda_stable_execution_batch_effective=${CUDA_STABLE_BATCH_SIZE}"
+  --expect-output "cuda_deterministic_attention_softmax=true"
+  --expect-output "cuda_full_buffer_clear_effective=true"
+)
+if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
+  UCI_CUDA_RUNTIME_EXPECT_ARGS+=(
+    --expect-output "cuda_graph_effective=true"
   )
 fi
 if [[ ! "${CUDA_STABLE_BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
@@ -128,7 +146,27 @@ assert_cuda_isolation_probe_log() {
     echo "${name} did not report CUDA transformer backend" >&2
     exit 1
   }
+  grep -q 'cuda_device_config=-1' "${file}" || {
+    echo "${name} did not report requested CUDA device" >&2
+    exit 1
+  }
+  grep -q "cuda_stable_execution_batch_effective=${CUDA_STABLE_BATCH_SIZE}" "${file}" || {
+    echo "${name} did not report effective CUDA stable batch size" >&2
+    exit 1
+  }
+  grep -q 'cuda_deterministic_attention_softmax=true' "${file}" || {
+    echo "${name} did not report deterministic CUDA attention softmax" >&2
+    exit 1
+  }
+  grep -q 'cuda_full_buffer_clear_effective=true' "${file}" || {
+    echo "${name} did not report effective CUDA full-buffer clear" >&2
+    exit 1
+  }
   if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
+    grep -q 'cuda_graph_effective=true' "${file}" || {
+      echo "${name} did not report effective CUDA graph execution" >&2
+      exit 1
+    }
     grep -q 'executor=resolved+graph-replay' "${file}" || {
       echo "${name} did not report CUDA graph replay" >&2
       exit 1
@@ -517,6 +555,7 @@ METALFISH_CUDA_PROFILE=0 \
   --warmup 0 \
   --iterations 1 \
   --backend-label "CUDA transformer backend" \
+  "${CUDA_RUNTIME_REQUIRE_ARGS[@]}" \
   "${CUDA_GRAPH_REPLAY_REQUIRE_ARGS[@]}" \
   --require-wdl \
   --require-moves-left \
@@ -542,6 +581,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --warmup 0 \
     --iterations 1 \
     --backend-label "CUDA transformer backend" \
+    "${CUDA_RUNTIME_REQUIRE_ARGS[@]}" \
     "${CUDA_GRAPH_REPLAY_REQUIRE_ARGS[@]}" \
     --no-require-wdl \
     --no-require-moves-left \
@@ -603,6 +643,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSMinibatchSize=0 \
   --go "nodes 1" \
   --expect-output "CUDA transformer backend" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
@@ -622,6 +663,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSMinibatchSize=1 \
   --go "${UCI_GO}" \
   --expect-output "CUDA transformer backend" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
@@ -647,6 +689,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "CUDA transformer backend" \
   --expect-output "Final: MCTSPlayouts=" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
@@ -673,6 +716,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "CUDA transformer backend" \
   --expect-output "Final: MCTSPlayouts=" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log"
 
 mkdir -p "${BUILD_DIR}/dummy-coreml.mlmodelc"
@@ -706,6 +750,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "CUDA transformer backend" \
   --expect-output "ANE root probe disabled" \
   --expect-output "Final: MCTSPlayouts=" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log"
 
 if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; then

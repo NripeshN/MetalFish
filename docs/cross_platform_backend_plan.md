@@ -147,9 +147,11 @@ Current CUDA backend boundary:
   policy cannot reuse a stale loaded CUDA network. The standalone
   `metalfish_nn_probe` accepts the matching `--cuda-*` flags, so CUDA parity
   suites exercise the same graph, device, stable-batch, deterministic-softmax,
-  and buffer-clear policy as UCI searches. Pure MCTS and Hybrid both construct
-  their transformer backend from `SearchParams::GetBackendConfig()`, keeping
-  standalone MCTS, Hybrid MCTS, and probe runtime policy aligned.
+  and buffer-clear policy as UCI searches. CUDA `network_info` reports both the
+  requested and effective runtime settings, and Linux/Windows CUDA gates assert
+  those diagnostics in probe and UCI smoke logs. Pure MCTS and Hybrid both
+  construct their transformer backend from `SearchParams::GetBackendConfig()`,
+  keeping standalone MCTS, Hybrid MCTS, and probe runtime policy aligned.
 - The shared probe-suite runner now validates semantic probe output instead of
   only subprocess status. Linux CUDA gates require the CUDA backend label, graph
   replay executor string, WDL/moves-left presence for BT4, their absence for
