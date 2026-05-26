@@ -76,6 +76,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--full-policy", action="store_true")
     parser.add_argument("--backend-label")
+    parser.add_argument(
+        "--require-network-info-substring",
+        action="append",
+        default=[],
+        help="Require each probe network_info field to contain this substring.",
+    )
     parser.add_argument("--require-wdl", dest="require_wdl", action="store_true")
     parser.add_argument("--no-require-wdl", dest="require_wdl", action="store_false")
     parser.set_defaults(require_wdl=None)
@@ -210,6 +216,13 @@ def validate_probe(
             raise RuntimeError(
                 f"{position.name}: expected backend label "
                 f"{args.backend_label!r} in network_info={network_info!r}"
+            )
+    network_info = str(probe.get("network_info", ""))
+    for required in args.require_network_info_substring:
+        if required not in network_info:
+            raise RuntimeError(
+                f"{position.name}: expected network_info substring "
+                f"{required!r} in network_info={network_info!r}"
             )
     if args.require_wdl is not None and bool(probe.get("has_wdl")) != args.require_wdl:
         expected = "present" if args.require_wdl else "absent"

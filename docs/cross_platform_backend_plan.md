@@ -142,6 +142,10 @@ Current CUDA backend boundary:
   and buffer-clear policy as UCI searches. Pure MCTS and Hybrid both construct
   their transformer backend from `SearchParams::GetBackendConfig()`, keeping
   standalone MCTS, Hybrid MCTS, and probe runtime policy aligned.
+- The shared probe-suite runner now validates semantic probe output instead of
+  only subprocess status. Linux CUDA gates require the CUDA backend label, graph
+  replay executor string, WDL/moves-left presence for BT4, their absence for
+  legacy scalar nets, and a full 1858-entry policy on every parity position.
 - `NNBackendRequireAccelerator=true` maps `NNBackend=auto` to the strict
   `accelerator` selector for MCTS/Hybrid configs. That selector chooses the
   compiled Metal or CUDA backend and fails instead of falling through to the

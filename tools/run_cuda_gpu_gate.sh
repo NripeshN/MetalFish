@@ -474,6 +474,7 @@ METALFISH_CUDA_PROFILE=0 \
   --warmup 0 \
   --iterations 1 \
   --backend-label "CUDA transformer backend" \
+  --require-network-info-substring "executor=resolved+graph-replay" \
   --require-wdl \
   --require-moves-left \
   --expected-policy-count 1858 \
@@ -498,6 +499,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --warmup 0 \
     --iterations 1 \
     --backend-label "CUDA transformer backend" \
+    --require-network-info-substring "executor=resolved+graph-replay" \
     --no-require-wdl \
     --no-require-moves-left \
     --expected-policy-count 1858 \

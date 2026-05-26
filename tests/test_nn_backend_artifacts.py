@@ -471,7 +471,7 @@ print(json.dumps({
     "moves": args.moves,
     "final_fen": args.fen,
     "backend": args.backend,
-    "network_info": f"{args.backend} synthetic",
+    "network_info": f"{args.backend} synthetic executor=resolved+graph-replay",
     "transform": 0,
     "value": 0.0,
     "has_wdl": True,
@@ -508,6 +508,8 @@ print(json.dumps({
                 "three=8/8/8/8/8/8/4P3/K6k w - - 0 1|e2e4",
                 "--backend-label",
                 "cuda synthetic",
+                "--require-network-info-substring",
+                "executor=resolved+graph-replay",
                 "--require-wdl",
                 "--require-moves-left",
                 "--expected-policy-count",
@@ -587,6 +589,75 @@ print(json.dumps({
     raise AssertionError("expected semantic probe drift to fail")
 
 
+def test_probe_suite_runner_rejects_network_info_drift() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        fake_probe = root / "fake_probe.py"
+        fake_probe.write_text(
+            """#!/usr/bin/env python3
+import argparse
+import json
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--weights", required=True)
+parser.add_argument("--backend", required=True)
+parser.add_argument("--fen", required=True)
+parser.add_argument("--moves", default="")
+parser.add_argument("--top")
+parser.add_argument("--warmup")
+parser.add_argument("--iterations")
+parser.add_argument("--full-policy", action="store_true")
+args = parser.parse_args()
+print(json.dumps({
+    "fen": args.fen,
+    "moves": args.moves,
+    "backend": args.backend,
+    "network_info": f"{args.backend} synthetic executor=resolved",
+    "has_wdl": True,
+    "has_moves_left": True,
+    "policy": [1.0, 0.5, 0.25],
+}))
+""",
+            encoding="utf-8",
+        )
+        fake_probe.chmod(0o755)
+        output = root / "suite.log"
+        with argv(
+            [
+                "--probe",
+                str(fake_probe),
+                "--weights",
+                str(root / "weights.pb"),
+                "--backend",
+                "cuda",
+                "--out",
+                str(output),
+                "--position",
+                "executor=8/8/8/8/8/8/8/K6k w - - 0 1",
+                "--backend-label",
+                "cuda synthetic",
+                "--require-network-info-substring",
+                "executor=resolved+graph-replay",
+                "--require-wdl",
+                "--require-moves-left",
+                "--expected-policy-count",
+                "3",
+                "--full-policy",
+            ]
+        ):
+            try:
+                probe_suite.main()
+            except RuntimeError as exc:
+                message = str(exc)
+                expect("probe suite network-info failure name", "executor" in message)
+                expect(
+                    "probe suite network-info failure reason",
+                    "expected network_info substring" in message,
+                )
+                return
+    raise AssertionError("expected network-info probe drift to fail")
+
+
 def test_probe_suite_runner_reports_failing_probe_name() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -639,6 +710,7 @@ def main() -> int:
     test_backend_output_compare_rejects_top_move_drift()
     test_probe_suite_runner_writes_multiple_json_probes()
     test_probe_suite_runner_rejects_semantic_drift()
+    test_probe_suite_runner_rejects_network_info_drift()
     test_probe_suite_runner_reports_failing_probe_name()
     print("NN backend artifact tests: OK")
     return 0
