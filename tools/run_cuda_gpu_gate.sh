@@ -12,6 +12,8 @@ LEGACY_WEIGHTS="${METALFISH_LEGACY_NN_WEIGHTS:-${ROOT_DIR}/networks/legacy-42850
 APT_LOCK_TIMEOUT="${METALFISH_APT_LOCK_TIMEOUT:-600}"
 SUMMARY="${METALFISH_CUDA_SUMMARY:-${BUILD_DIR}/cuda-gpu-summary.md}"
 PARITY_REPORT="${METALFISH_NN_PARITY_REPORT:-${BUILD_DIR}/cuda-gpu-parity-report.md}"
+CUDA_PACKAGE_NAME="${METALFISH_CUDA_PACKAGE_NAME:-metalfish-linux-x86_64-cuda}"
+CUDA_PACKAGE="${METALFISH_CUDA_PACKAGE:-${BUILD_DIR}/${CUDA_PACKAGE_NAME}.tar.gz}"
 CUDA_PROFILE_REQUESTED="${METALFISH_CUDA_PROFILE:-0}"
 CUDA_PROFILE_LIMIT="${METALFISH_CUDA_PROFILE_LIMIT:-8}"
 CUDA_STABLE_BATCH_SIZE="${METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
@@ -203,6 +205,7 @@ write_summary() {
     echo "- Weights: ${WEIGHTS}"
     echo "- Legacy weights: ${LEGACY_WEIGHTS}"
     echo "- Parity report: ${PARITY_REPORT}"
+    echo "- Linux CUDA package: ${CUDA_PACKAGE}"
     echo "- Explicit CUDA UCI go: ${UCI_GO}"
     echo "- Batch worst trace: ${METALFISH_NN_BATCH_TRACE_WORST:-1}"
     echo "- Single repeat stress: ${METALFISH_NN_SINGLE_REPEAT_STRESS:-0}"
@@ -244,6 +247,9 @@ write_summary() {
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
     echo "- hybrid auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log")"
     echo "- hybrid ANE-disable smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log")"
+    echo "- Linux CUDA package: $(summary_log_status "${CUDA_PACKAGE}")"
+    echo "- packaged CUDA probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-probe.log")"
+    echo "- packaged CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-smoke.log")"
     echo "- CUDA profile: $(summary_log_status "${BUILD_DIR}/cuda-gpu-profile.log")"
     echo
     echo "## Failures"
@@ -271,6 +277,10 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log"
     summary_failure_lines "hybrid ANE-disable smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log"
+    summary_failure_lines "packaged CUDA probe" \
+      "${BUILD_DIR}/cuda-gpu-package-probe.log"
+    summary_failure_lines "packaged CUDA UCI smoke" \
+      "${BUILD_DIR}/cuda-gpu-package-uci-smoke.log"
     summary_failure_lines "CUDA profile" "${BUILD_DIR}/cuda-gpu-profile.log"
     echo
     echo "## Backend"
@@ -799,6 +809,73 @@ METALFISH_CUDA_PROFILE=0 \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log"
+
+CUDA_PACKAGE_DIR="${BUILD_DIR}/linux-cuda-package"
+CUDA_PACKAGE_CHECK_DIR="${BUILD_DIR}/linux-cuda-package-check"
+rm -rf "${CUDA_PACKAGE_DIR}" "${CUDA_PACKAGE_CHECK_DIR}"
+rm -f "${CUDA_PACKAGE}"
+mkdir -p "${CUDA_PACKAGE_DIR}" "${CUDA_PACKAGE_CHECK_DIR}"
+python3 tools/write_portable_manifest.py \
+  --platform "Linux x86_64 CUDA" \
+  --backend "CUDA transformer backend for BT4 MCTS/Hybrid plus CPU AB/NNUE" \
+  --binary "metalfish" \
+  --output "${BUILD_DIR}/PORTABLE_ARTIFACT.md" \
+  --notes "This package is smoke-tested on an NVIDIA L4 runtime gate before upload." \
+  --notes "The package includes metalfish_nn_probe so release artifacts can verify CUDA inference metadata." \
+  --notes "CUDA runtime libraries are expected from the host driver/toolkit installation."
+cp "${BUILD_DIR}/metalfish" "${CUDA_PACKAGE_DIR}/"
+cp "${BUILD_DIR}/metalfish_nn_probe" "${CUDA_PACKAGE_DIR}/"
+cp "${BUILD_DIR}/PORTABLE_ARTIFACT.md" "${CUDA_PACKAGE_DIR}/"
+cp README.md CHANGELOG.md LICENSE "${CUDA_PACKAGE_DIR}/"
+tar -czf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_DIR}" .
+tar -xzf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_CHECK_DIR}"
+test -x "${CUDA_PACKAGE_CHECK_DIR}/metalfish"
+test -x "${CUDA_PACKAGE_CHECK_DIR}/metalfish_nn_probe"
+test -s "${CUDA_PACKAGE_CHECK_DIR}/PORTABLE_ARTIFACT.md"
+grep -q -- "- Platform: Linux x86_64 CUDA" \
+  "${CUDA_PACKAGE_CHECK_DIR}/PORTABLE_ARTIFACT.md"
+grep -q "CUDA transformer backend" \
+  "${CUDA_PACKAGE_CHECK_DIR}/PORTABLE_ARTIFACT.md"
+METALFISH_CUDA_PROFILE=0 \
+  METALFISH_CUDA_GRAPH_STATUS_DETAIL="${METALFISH_CUDA_GRAPH_STATUS_DETAIL:-1}" \
+  "${CUDA_PACKAGE_CHECK_DIR}/metalfish_nn_probe" \
+  --weights "${WEIGHTS}" \
+  --backend cuda \
+  --cuda-device -1 \
+  --cuda-graph-execution true \
+  --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
+  --cuda-deterministic-attention-softmax true \
+  --cuda-full-buffer-clear true \
+  --top 3 \
+  --warmup 1 \
+  --iterations 1 \
+  2>&1 | tee "${BUILD_DIR}/cuda-gpu-package-probe.log"
+grep -q '"backend":"cuda"' "${BUILD_DIR}/cuda-gpu-package-probe.log"
+grep -q "CUDA transformer backend" "${BUILD_DIR}/cuda-gpu-package-probe.log"
+grep -q "executor=resolved+graph-replay" \
+  "${BUILD_DIR}/cuda-gpu-package-probe.log"
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${CUDA_PACKAGE_CHECK_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption NNBackend=accelerator \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=true \
+  --setoption UseHybridSearch=false \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=0 \
+  --go "nodes 1" \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "MCTS runtime: backend=accelerator" \
+  --expect-output "minibatch=${CUDA_STABLE_BATCH_SIZE}" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-package-uci-smoke.log"
 
 if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; then
   METALFISH_CUDA_PROFILE=1 \

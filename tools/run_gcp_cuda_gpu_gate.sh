@@ -180,7 +180,18 @@ collect_remote_artifacts() {
     cuda-gpu-uci-smoke.log \
     cuda-gpu-uci-hybrid-smoke.log \
     cuda-gpu-uci-hybrid-ane-smoke.log \
+    cuda-gpu-package-probe.log \
+    cuda-gpu-package-uci-smoke.log \
     cuda-gpu-profile.log; do
+    if gcloud compute scp \
+      "${INSTANCE}:~/metalfish/build-cuda-gpu/${file}" \
+      "${ARTIFACT_DIR}/${file}" \
+      --project "${PROJECT}" \
+      --zone "${ZONE}" >/dev/null 2>&1; then
+      copied=$((copied + 1))
+    fi
+  done
+  for file in metalfish-linux-x86_64-cuda.tar.gz PORTABLE_ARTIFACT.md; do
     if gcloud compute scp \
       "${INSTANCE}:~/metalfish/build-cuda-gpu/${file}" \
       "${ARTIFACT_DIR}/${file}" \
