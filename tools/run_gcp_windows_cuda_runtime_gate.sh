@@ -409,7 +409,7 @@ python3 - <<'PY' >"${RUN_DIR}/probe-positions.json"
 import json
 from tools.run_nn_backend_probe_suite import DEFAULT_POSITIONS
 
-print(json.dumps([position.__dict__ for position in DEFAULT_POSITIONS]))
+print(json.dumps({"positions": [position.__dict__ for position in DEFAULT_POSITIONS]}))
 PY
 copy_to_remote "${RUN_DIR}/probe-positions.json" "C:/metalfish/probe-positions.json"
 
@@ -535,7 +535,14 @@ function Invoke-ProbeSuiteSmoke {
   if (-not (Test-Path \$positionsPath)) {
     throw "Probe positions file not found: \$positionsPath"
   }
-  \$positions = @(Get-Content -Path \$positionsPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+  \$positionsDoc = Get-Content -Path \$positionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if (\$null -eq \$positionsDoc.positions) {
+    throw "Probe positions file did not contain a positions array: \$positionsPath"
+  }
+  \$positions = New-Object System.Collections.Generic.List[object]
+  foreach (\$entry in \$positionsDoc.positions) {
+    [void]\$positions.Add(\$entry)
+  }
   \$outBuilder = New-Object System.Text.StringBuilder
   \$errBuilder = New-Object System.Text.StringBuilder
   foreach (\$position in \$positions) {

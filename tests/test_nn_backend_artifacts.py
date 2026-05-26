@@ -708,7 +708,18 @@ def test_windows_cuda_probe_suite_positions_use_python_default() -> None:
         "windows probe suite imports python defaults",
         "from tools.run_nn_backend_probe_suite import DEFAULT_POSITIONS" in script,
     )
-    expect("windows probe suite writes positions json", "probe-positions.json" in script)
+    expect(
+        "windows probe suite writes positions json", "probe-positions.json" in script
+    )
+    expect(
+        "windows probe suite wraps json array",
+        '"positions": [position.__dict__ for position in DEFAULT_POSITIONS]' in script,
+    )
+    expect(
+        "windows probe suite enumerates positions explicitly",
+        "System.Collections.Generic.List[object]" in script
+        and "positionsDoc.positions" in script,
+    )
     expect("windows probe suite reads json", "ConvertFrom-Json" in script)
     expect(
         "windows probe suite does not duplicate position table",
