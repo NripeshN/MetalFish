@@ -7,6 +7,7 @@ CUDA_ARCHS="${METALFISH_CUDA_ARCHS:-89}"
 JOBS="${METALFISH_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 UCI_GO="${METALFISH_CUDA_UCI_GO:-nodes 8}"
 UCI_TIMEOUT="${METALFISH_CUDA_UCI_TIMEOUT:-180}"
+BK07_FEN="1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -"
 WEIGHTS="${METALFISH_NN_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-6147500.pb}"
 LEGACY_WEIGHTS="${METALFISH_LEGACY_NN_WEIGHTS:-${ROOT_DIR}/networks/legacy-42850.pb.gz}"
 APT_LOCK_TIMEOUT="${METALFISH_APT_LOCK_TIMEOUT:-600}"
@@ -244,6 +245,7 @@ write_summary() {
     echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
     echo "- accelerator UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
+    echo "- BK.07 CUDA tactical smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
     echo "- hybrid auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log")"
     echo "- hybrid ANE-disable smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log")"
@@ -271,6 +273,8 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log"
     summary_failure_lines "explicit CUDA UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
+    summary_failure_lines "BK.07 CUDA tactical smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log"
     summary_failure_lines "hybrid CUDA UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
     summary_failure_lines "hybrid auto UCI smoke" \
@@ -415,6 +419,7 @@ write_summary() {
     echo "- auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log" "not reached")"
     echo "- accelerator: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log" "not reached")"
     echo "- cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log" "not reached")"
+    echo "- cuda-bk07: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log" "not reached")"
     echo "- hybrid-cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log" "not reached")"
     echo "- hybrid-auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log" "not reached")"
     if [[ -s "${BUILD_DIR}/cuda-gpu-profile.log" ]]; then
@@ -713,6 +718,35 @@ METALFISH_CUDA_PROFILE=0 \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=true \
+  --setoption UseHybridSearch=false \
+  --setoption Threads=8 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSParallelSearch=false \
+  --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSAddDirichletNoise=false \
+  --setoption TransformerLowTimeFallbackMs=0 \
+  --position "fen ${BK07_FEN}" \
+  --go "nodes 50" \
+  --expect-bestmove h5f6 \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
   python3 tools/uci_smoke.py \

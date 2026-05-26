@@ -811,7 +811,8 @@ driver script, verifies `nvidia-smi`, installs the VC++ runtime, and runs
 packaged `metalfish_nn_probe.exe --backend cuda` probes for both BT4 and legacy
 42850 weights, runs eight-position full-policy probe suites for both nets with
 the same production CUDA runtime flags as UCI, and then runs `NNBackend=cuda`
-MCTS and Hybrid UCI smokes with BT4 weights. The Windows probe suites consume a
+MCTS, BK.07 tactical, and Hybrid UCI smokes with BT4 weights. The Windows probe
+suites consume a
 JSON copy of `tools/run_nn_backend_probe_suite.py`'s `DEFAULT_POSITIONS`, so
 Metal, Linux CUDA, and Windows CUDA stay on the same parity-position contract.
 It tries
@@ -885,9 +886,8 @@ repeatable instead of relying on hand-copied package and probe-suite paths.
 
 ## Remaining Release Checklist
 
-1. Add CUDA BK.07 tactical bestmove smokes matching the macOS Metal CI
-   sentinel, so Linux and Windows CUDA runtime gates prove more than backend
-   construction and `nodes 1` execution.
+1. Keep CUDA BK.07 tactical bestmove smokes matching the macOS Metal CI
+   sentinel green on both Linux and Windows runtime gates.
 2. Add CUDA Hybrid clock-safety smokes matching the Metal CI low-clock boundary:
    one search that starts Hybrid and one search that intentionally falls back
    before transformer time becomes unsafe.

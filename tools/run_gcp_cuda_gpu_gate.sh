@@ -178,6 +178,7 @@ collect_remote_artifacts() {
     cuda-gpu-uci-auto-smoke.log \
     cuda-gpu-uci-accelerator-smoke.log \
     cuda-gpu-uci-smoke.log \
+    cuda-gpu-uci-bk07-smoke.log \
     cuda-gpu-uci-hybrid-smoke.log \
     cuda-gpu-uci-hybrid-ane-smoke.log \
     cuda-gpu-package-probe.log \
