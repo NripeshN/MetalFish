@@ -1321,8 +1321,9 @@ def main() -> int:
         [
             "MetalFish CI",
             "gh",
-            "run",
-            "download",
+            "actions/runs/{run_id}/artifacts?per_page=100",
+            "actions/artifacts/{metal_artifact_id}/zip",
+            "safe_extract_zip",
             "metalfish-macos-arm64",
             "metal-nn-probe-suite.log",
             "metal-legacy-nn-probe-suite.log",

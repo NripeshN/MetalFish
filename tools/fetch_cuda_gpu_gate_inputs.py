@@ -10,6 +10,7 @@ import shutil
 import shlex
 import subprocess
 import sys
+import zipfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -26,6 +27,18 @@ def run_text(cmd: list[str]) -> str:
 
 def run_json(cmd: list[str]) -> dict:
     return json.loads(run_text(cmd))
+
+
+def run_to_file(cmd: list[str], path: pathlib.Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        subprocess.run(
+            cmd,
+            cwd=ROOT,
+            check=True,
+            stdout=handle,
+            stderr=subprocess.PIPE,
+        )
 
 
 def default_repo() -> str:
@@ -76,6 +89,40 @@ def require_metal_run(repo: str, run_id: str, expected_sha: str | None) -> dict:
     return data
 
 
+def artifact_id_for_name(repo: str, run_id: str, name: str) -> int:
+    data = run_json(
+        [
+            "gh",
+            "api",
+            f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
+        ]
+    )
+    matches = [
+        item
+        for item in data.get("artifacts", [])
+        if item.get("name") == name and not item.get("expired", False)
+    ]
+    if not matches:
+        available = ", ".join(
+            str(item.get("name")) for item in data.get("artifacts", [])
+        )
+        raise ValueError(f"artifact {name!r} not found; available: {available or '<none>'}")
+    if len(matches) > 1:
+        raise ValueError(f"artifact {name!r} matched multiple artifacts")
+    return int(matches[0]["id"])
+
+
+def safe_extract_zip(archive_path: pathlib.Path, dest: pathlib.Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    root = dest.resolve()
+    with zipfile.ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            target = (dest / member.filename).resolve()
+            if root != target and root not in target.parents:
+                raise ValueError(f"zip member escapes extraction root: {member.filename}")
+        archive.extractall(dest)
+
+
 def shell_exports(values: dict[str, str]) -> str:
     return "\n".join(
         f"export {key}={shlex.quote(value)}" for key, value in sorted(values.items())
@@ -110,28 +157,26 @@ def main(argv: list[str] | None = None) -> int:
     repo = args.repo or default_repo()
     expected_sha = None if args.no_expected_sha else (args.expected_sha or git_head())
     out_dir = pathlib.Path(args.out_dir).expanduser().resolve()
+    downloads_dir = out_dir / "downloads"
     metal_dir = out_dir / "metal"
     if metal_dir.exists():
         shutil.rmtree(metal_dir)
     metal_dir.mkdir(parents=True, exist_ok=True)
 
     metal_run = require_metal_run(repo, args.metal_ci_run_id, expected_sha)
-    subprocess.run(
+    metal_artifact_id = artifact_id_for_name(
+        repo, args.metal_ci_run_id, "metalfish-macos-arm64"
+    )
+    metal_archive = downloads_dir / "metalfish-macos-arm64.zip"
+    run_to_file(
         [
             "gh",
-            "run",
-            "download",
-            args.metal_ci_run_id,
-            "--repo",
-            repo,
-            "--name",
-            "metalfish-macos-arm64",
-            "--dir",
-            str(metal_dir),
+            "api",
+            f"repos/{repo}/actions/artifacts/{metal_artifact_id}/zip",
         ],
-        cwd=ROOT,
-        check=True,
+        metal_archive,
     )
+    safe_extract_zip(metal_archive, metal_dir)
 
     bt4_log = metal_dir / "build" / "metal-nn-probe-suite.log"
     legacy_log = metal_dir / "build" / "metal-legacy-nn-probe-suite.log"
