@@ -385,6 +385,120 @@ function Invoke-ProbeSmoke {
   }
 }
 
+function Quote-ProbeArgument {
+  param([string]\$Value)
+  return '"' + \$Value.Replace('"', '\"') + '"'
+}
+
+function Invoke-ProbeSuiteSmoke {
+  param(
+    [string]\$Name,
+    [string]\$Weights,
+    [bool]\$RequireWdl = \$true,
+    [bool]\$RequireMovesLeft = \$true
+  )
+  \$stdout = Join-Path \$Logs "\$Name.stdout.log"
+  \$stderr = Join-Path \$Logs "\$Name.stderr.log"
+  \$positions = @(
+    @{ name = "startpos"; fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"; moves = "" },
+    @{ name = "bk07"; fen = "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - - 0 1"; moves = "" },
+    @{ name = "kiwipete"; fen = "r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1"; moves = "" },
+    @{ name = "white-promotion"; fen = "6bk/P7/8/8/8/8/8/K7 w - - 0 1"; moves = "" },
+    @{ name = "black-promotion"; fen = "k7/8/8/8/8/8/6p1/KB6 b - - 0 1"; moves = "" },
+    @{ name = "history-repetition"; fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"; moves = "g1f3 g8f6 f3g1 f6g8" },
+    @{ name = "canonical-black-to-move"; fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"; moves = "e2e4" },
+    @{ name = "castling-history"; fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"; moves = "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 e1g1" }
+  )
+  \$outBuilder = New-Object System.Text.StringBuilder
+  \$errBuilder = New-Object System.Text.StringBuilder
+  foreach (\$position in \$positions) {
+    [void]\$outBuilder.AppendLine("info string windows-probe-suite name=" + \$position.name)
+    \$arguments = "--weights " + (Quote-ProbeArgument \$Weights) +
+      " --backend cuda --fen " + (Quote-ProbeArgument \$position.fen) +
+      " --top 3 --warmup 0 --iterations 1 --full-policy"
+    if (-not [string]::IsNullOrWhiteSpace(\$position.moves)) {
+      \$arguments += " --moves " + (Quote-ProbeArgument \$position.moves)
+    }
+    \$psi = New-Object System.Diagnostics.ProcessStartInfo
+    \$psi.FileName = \$Probe
+    \$psi.Arguments = \$arguments
+    \$psi.WorkingDirectory = \$PackageDir
+    \$psi.RedirectStandardOutput = \$true
+    \$psi.RedirectStandardError = \$true
+    \$psi.UseShellExecute = \$false
+    \$psi.CreateNoWindow = \$true
+    if ("${CUDA_GRAPH}" -ne "") {
+      \$psi.Environment["METALFISH_CUDA_GRAPH"] = "${CUDA_GRAPH}"
+    }
+    if ("${CUDA_PROFILE}" -ne "") {
+      \$psi.Environment["METALFISH_CUDA_PROFILE"] = "${CUDA_PROFILE}"
+      \$psi.Environment["METALFISH_CUDA_PROFILE_LIMIT"] = "${CUDA_PROFILE_LIMIT}"
+    }
+    \$proc = [System.Diagnostics.Process]::Start(\$psi)
+    \$stdoutTask = \$proc.StandardOutput.ReadToEndAsync()
+    \$stderrTask = \$proc.StandardError.ReadToEndAsync()
+    \$timedOut = -not \$proc.WaitForExit(${PROBE_TIMEOUT_SECONDS} * 1000)
+    if (\$timedOut) {
+      try { \$proc.Kill() } catch {}
+      try { \$proc.WaitForExit(10000) | Out-Null } catch {}
+    }
+    \$out = \$stdoutTask.GetAwaiter().GetResult()
+    \$err = \$stderrTask.GetAwaiter().GetResult()
+    [void]\$outBuilder.Append(\$out)
+    [void]\$errBuilder.Append(\$err)
+    if (\$timedOut) {
+      Set-Content -Path \$stdout -Value \$outBuilder.ToString() -Encoding UTF8
+      Set-Content -Path \$stderr -Value \$errBuilder.ToString() -Encoding UTF8
+      throw ("\$Name " + \$position.name + " timed out after ${PROBE_TIMEOUT_SECONDS}s")
+    }
+    if (\$proc.ExitCode -ne 0) {
+      Set-Content -Path \$stdout -Value \$outBuilder.ToString() -Encoding UTF8
+      Set-Content -Path \$stderr -Value \$errBuilder.ToString() -Encoding UTF8
+      throw ("\$Name " + \$position.name + " exited with code " + \$proc.ExitCode)
+    }
+  }
+  \$outText = \$outBuilder.ToString()
+  \$errText = \$errBuilder.ToString()
+  Set-Content -Path \$stdout -Value \$outText -Encoding UTF8
+  Set-Content -Path \$stderr -Value \$errText -Encoding UTF8
+
+  \$probeObjects = @()
+  foreach (\$line in \$outText -split "`r?`n") {
+    \$trimmed = \$line.Trim()
+    if (\$trimmed.StartsWith("{") -and \$trimmed.EndsWith("}")) {
+      \$probeObjects += @(\$trimmed | ConvertFrom-Json)
+    }
+  }
+  if (\$probeObjects.Count -ne \$positions.Count) {
+    throw ("\$Name expected " + \$positions.Count + " JSON probes, got " + \$probeObjects.Count)
+  }
+  foreach (\$probeObject in \$probeObjects) {
+    if (\$probeObject.backend -ne "cuda") {
+      throw ("\$Name probe did not select CUDA backend")
+    }
+    if ((\$probeObject.network_info -as [string]) -notlike "*CUDA transformer backend*") {
+      throw ("\$Name probe did not report CUDA transformer backend")
+    }
+    if ("${CUDA_GRAPH}" -ne "0" -and (\$probeObject.network_info -as [string]) -notlike "*executor=resolved+graph-replay*") {
+      throw ("\$Name probe did not report CUDA graph replay")
+    }
+    if ([bool]\$probeObject.has_wdl -ne \$RequireWdl) {
+      throw ("\$Name WDL presence mismatch")
+    }
+    if ([bool]\$probeObject.has_moves_left -ne \$RequireMovesLeft) {
+      throw ("\$Name moves-left presence mismatch")
+    }
+    if (\$null -eq \$probeObject.policy -or \$probeObject.policy.Count -ne 1858) {
+      throw ("\$Name missing full 1858-entry policy")
+    }
+  }
+  return [ordered]@{
+    probes = \$probeObjects.Count
+    stdout_log = "\$Name.stdout.log"
+    stderr_log = "\$Name.stderr.log"
+  }
+}
+
 function Assert-PositiveMetric {
   param(
     [string]\$Name,
@@ -563,6 +677,8 @@ function Invoke-UciSmoke {
 Invoke-ProbeSmoke -Name "cuda-probe" -Arguments \$ProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"value":', '"policy_top":')
 \$LegacyProbeArgs = "--weights " + [char]34 + \$Legacy + [char]34 + " --backend cuda --batch-size 1 --warmup 1 --iterations 1 --top 3"
 Invoke-ProbeSmoke -Name "cuda-legacy-probe" -Arguments \$LegacyProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"has_wdl":false', '"has_moves_left":false', '"policy_top":')
+\$ProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-probe-suite" -Weights \$Bt4 -RequireWdl \$true -RequireMovesLeft \$true
+\$LegacyProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-legacy-probe-suite" -Weights \$Legacy -RequireWdl \$false -RequireMovesLeft \$false
 
 Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "uci",
@@ -661,6 +777,10 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
     stdout_log = "cuda-legacy-probe.stdout.log"
     stderr_log = "cuda-legacy-probe.stderr.log"
   }
+  probe_suites = [ordered]@{
+    bt4 = \$ProbeSuite
+    legacy = \$LegacyProbeSuite
+  }
   uci_smokes = [ordered]@{
     cuda_mcts = [ordered]@{
       go = "${UCI_GO}"
@@ -687,7 +807,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-mcts, hybrid-cuda",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-mcts, hybrid-cuda",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"
