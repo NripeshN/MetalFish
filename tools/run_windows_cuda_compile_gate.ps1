@@ -171,6 +171,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $EnginePath = (Resolve-Path (Join-Path $BuildDir "metalfish.exe")).Path
 $ProbePath = ""
+$ComparisonPath = ""
 $SmokeSteps = @()
 if ($BuildTests -eq "ON") {
   $TestsPath = (Resolve-Path (Join-Path $BuildDir "metalfish_tests.exe")).Path
@@ -218,6 +219,7 @@ if ($BuildTests -eq "ON") {
   }
 
   $ProbePath = (Resolve-Path (Join-Path $BuildDir "metalfish_nn_probe.exe")).Path
+  $ComparisonPath = (Resolve-Path (Join-Path $BuildDir "test_nn_comparison.exe")).Path
   $ProbeLog = Join-Path $BuildDir "windows-cuda-bt4-metadata-probe.json"
   Write-Host "Running CUDA-linked BT4 metadata probe"
   & $ProbePath `
@@ -300,6 +302,9 @@ Copy-Item $EnginePath $PackageDir -Force
 if ($ProbePath -and (Test-Path $ProbePath)) {
   Copy-Item $ProbePath $PackageDir -Force
 }
+if ($ComparisonPath -and (Test-Path $ComparisonPath)) {
+  Copy-Item $ComparisonPath $PackageDir -Force
+}
 foreach ($DocName in @("README.md", "CHANGELOG.md", "LICENSE")) {
   Copy-ExistingFile (Join-Path $SourceDir $DocName) $PackageDir | Out-Null
 }
@@ -312,6 +317,7 @@ foreach ($DocName in @("README.md", "CHANGELOG.md", "LICENSE")) {
   --notes "This artifact is built by the Windows CUDA compile gate with MSVC and the NVIDIA CUDA Toolkit." `
   --notes "The package includes CUDA and vcpkg runtime DLLs required by the linked engine." `
   --notes "The package includes metalfish_nn_probe.exe when BUILD_TESTS=ON so runtime gates can verify packaged CUDA inference." `
+  --notes "The package includes test_nn_comparison.exe when BUILD_TESTS=ON so runtime gates can verify CUDA batch and reuse parity." `
   --notes "Run a real Windows NVIDIA runtime smoke before calling this artifact strength-ready."
 if ($LASTEXITCODE -ne 0) {
   throw "portable manifest generation failed with exit code $LASTEXITCODE"
@@ -345,6 +351,10 @@ if (-not (Test-Path $PackagedEngine)) {
 $PackagedProbe = Join-Path $PackageSmokeDir "metalfish_nn_probe.exe"
 if ($BuildTests -eq "ON" -and -not (Test-Path $PackagedProbe)) {
   throw "Packaged NN probe not found after extraction: $PackagedProbe"
+}
+$PackagedComparison = Join-Path $PackageSmokeDir "test_nn_comparison.exe"
+if ($BuildTests -eq "ON" -and -not (Test-Path $PackagedComparison)) {
+  throw "Packaged NN comparison not found after extraction: $PackagedComparison"
 }
 
 $OriginalPath = $env:PATH
@@ -417,6 +427,7 @@ $SmokeSteps += "$PackageName.zip extracted AB self-smoke"
 if ($BuildTests -eq "ON") {
   $SmokeSteps += "$PackageName.zip extracted BT4 metadata probe"
   $SmokeSteps += "$PackageName.zip extracted legacy metadata probe"
+  $SmokeSteps += "$PackageName.zip includes test_nn_comparison.exe"
 }
 
 $Summary = Join-Path $BuildDir "windows-cuda-compile-summary.md"
@@ -511,6 +522,7 @@ $ManifestObject = [ordered]@{
   package_contents = [ordered]@{
     metalfish_exe = Test-PackageFile $PackageDir "metalfish.exe"
     metalfish_nn_probe_exe = Test-PackageFile $PackageDir "metalfish_nn_probe.exe"
+    test_nn_comparison_exe = Test-PackageFile $PackageDir "test_nn_comparison.exe"
     portable_artifact_md = Test-PackageFile $PackageDir "PORTABLE_ARTIFACT.md"
     cudart = Test-PackageFile $PackageDir "cudart64_*.dll"
     cublas = Test-PackageFile $PackageDir "cublas64_*.dll"

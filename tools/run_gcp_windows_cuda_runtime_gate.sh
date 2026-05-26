@@ -29,6 +29,7 @@ NNUE_BIG="${METALFISH_NNUE_BIG:-${ROOT_DIR}/networks/nn-c288c895ea92.nnue}"
 NNUE_SMALL="${METALFISH_NNUE_SMALL:-${ROOT_DIR}/networks/nn-37f18f62d772.nnue}"
 UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420}"
 PROBE_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420}"
+COMPARISON_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_COMPARISON_TIMEOUT:-900}"
 UCI_GO="${METALFISH_WINDOWS_CUDA_UCI_GO:-nodes 1}"
 HYBRID_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_UCI_GO:-movetime 8000}"
 UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
@@ -436,6 +437,10 @@ if (-not (Test-Path \$Engine)) {
 if (-not (Test-Path \$Probe)) {
   throw "Packaged NN probe not found: \$Probe"
 }
+\$Comparison = Join-Path \$PackageDir "test_nn_comparison.exe"
+if (-not (Test-Path \$Comparison)) {
+  throw "Packaged NN comparison not found: \$Comparison"
+}
 \$env:PATH = "\$PackageDir;\$env:PATH"
 nvidia-smi 2>&1 | Tee-Object -FilePath (Join-Path \$Logs "nvidia-smi-runtime.log")
 
@@ -513,6 +518,65 @@ function Invoke-ProbeSmoke {
     if ((\$out + \$err) -notlike "*\$needle*") {
       throw "\$Name missing expected output: \$needle"
     }
+  }
+}
+
+function Invoke-ComparisonSmoke {
+  param(
+    [string]\$Name,
+    [string[]]\$RequiredText
+  )
+  \$stdout = Join-Path \$Logs "\$Name.stdout.log"
+  \$stderr = Join-Path \$Logs "\$Name.stderr.log"
+  \$parityReport = Join-Path \$Logs "\$Name-parity-report.md"
+  \$psi = New-Object System.Diagnostics.ProcessStartInfo
+  \$psi.FileName = \$Comparison
+  \$psi.WorkingDirectory = \$PackageDir
+  \$psi.RedirectStandardOutput = \$true
+  \$psi.RedirectStandardError = \$true
+  \$psi.UseShellExecute = \$false
+  \$psi.CreateNoWindow = \$true
+  \$psi.Environment["PATH"] = "\$PackageDir;" + \$psi.Environment["PATH"]
+  \$psi.Environment["METALFISH_NN_WEIGHTS"] = \$Bt4
+  \$psi.Environment["METALFISH_NN_PARITY_REPORT"] = \$parityReport
+  \$psi.Environment["METALFISH_NN_BATCH_BENCH"] = "1"
+  \$psi.Environment["METALFISH_NN_BATCH_TRACE_WORST"] = "1"
+  \$psi.Environment["METALFISH_NN_SINGLE_REUSE_STRESS"] = "1"
+  \$psi.Environment["METALFISH_NN_BATCH_REUSE_STRESS"] = "1"
+  \$psi.Environment["METALFISH_NN_BENCH_ITERS"] = "2"
+  \$psi.Environment["METALFISH_NN_BENCH_MAX_BATCH"] = "32"
+  \$psi.Environment["METALFISH_NN_BENCH_WARMUP_ITERS"] = "3"
+  \$psi.Environment["METALFISH_NN_BENCH_GRAPH_REUSE_PROBE"] = "1"
+  \$psi.Environment["METALFISH_CUDA_GRAPH_STATUS_DETAIL"] = "1"
+  \$psi.Environment["METALFISH_CUDA_PROFILE"] = "0"
+  if ("${CUDA_GRAPH}" -ne "") {
+    \$psi.Environment["METALFISH_CUDA_GRAPH"] = "${CUDA_GRAPH}"
+  }
+  \$proc = [System.Diagnostics.Process]::Start(\$psi)
+  \$stdoutTask = \$proc.StandardOutput.ReadToEndAsync()
+  \$stderrTask = \$proc.StandardError.ReadToEndAsync()
+  \$timedOut = -not \$proc.WaitForExit(${COMPARISON_TIMEOUT_SECONDS} * 1000)
+  if (\$timedOut) {
+    try { \$proc.Kill() } catch {}
+    try { \$proc.WaitForExit(10000) | Out-Null } catch {}
+  }
+  \$out = \$stdoutTask.GetAwaiter().GetResult()
+  \$err = \$stderrTask.GetAwaiter().GetResult()
+  Set-Content -Path \$stdout -Value \$out -Encoding UTF8
+  Set-Content -Path \$stderr -Value \$err -Encoding UTF8
+  if (\$timedOut) {
+    throw (\$Name + " timed out after ${COMPARISON_TIMEOUT_SECONDS}s")
+  }
+  if (\$proc.ExitCode -ne 0) {
+    throw (\$Name + " exited with code " + \$proc.ExitCode)
+  }
+  foreach (\$needle in \$RequiredText) {
+    if ((\$out + \$err) -notlike "*\$needle*") {
+      throw "\$Name missing expected output: \$needle"
+    }
+  }
+  if (-not (Test-Path \$parityReport)) {
+    throw "\$Name did not write parity report: \$parityReport"
   }
 }
 
@@ -928,6 +992,21 @@ Invoke-ProbeSmoke -Name "cuda-isolation-bt4-legacy" -Arguments \$IsolationBt4Leg
   \$CudaProbeOptions + " --warmup 1 --iterations 1 --top 3"
 Invoke-ProbeSmoke -Name "cuda-isolation-legacy-bt4" -Arguments \$IsolationLegacyBt4Args -RequiredText \$IsolationRequiredText
 
+\$ComparisonRequiredText = @(
+  "=== NN Comparison Smoke ===",
+  "MCTS evaluator batch parity",
+  "CUDA transformer backend",
+  "TRACE_WORST:",
+  "SINGLE_REUSE_STRESS_MAX:",
+  "REUSE_STRESS_MAX:",
+  "batches:",
+  "graph_reuse_probe:"
+)
+if ("${CUDA_GRAPH}" -ne "0") {
+  \$ComparisonRequiredText += "executor=resolved+graph-replay"
+}
+Invoke-ComparisonSmoke -Name "cuda-nn-comparison" -RequiredText \$ComparisonRequiredText
+
 Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "uci",
   "isready",
@@ -1168,6 +1247,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 \$HybridClockSafetyText = Read-SmokeText "hybrid-cuda-clock-safety"
 \$HybridAutoText = Read-SmokeText "hybrid-auto"
 \$HybridAneText = Read-SmokeText "hybrid-cuda-ane-disabled"
+\$ComparisonText = Read-SmokeText "cuda-nn-comparison"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
 \$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
 \$Manifest = [ordered]@{
@@ -1193,6 +1273,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
     hybrid_uci_go = "${HYBRID_UCI_GO}"
     uci_timeout_seconds = ${UCI_TIMEOUT_SECONDS}
     probe_timeout_seconds = ${PROBE_TIMEOUT_SECONDS}
+    comparison_timeout_seconds = ${COMPARISON_TIMEOUT_SECONDS}
     cuda_graph = \$(if ("${CUDA_GRAPH}" -eq "") { \$null } else { "${CUDA_GRAPH}" })
     cuda_profile = \$(if ("${CUDA_PROFILE}" -eq "") { \$null } else { "${CUDA_PROFILE}" })
     cuda_profile_limit = ${CUDA_PROFILE_LIMIT}
@@ -1248,6 +1329,12 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
       stdout_log = "cuda-isolation-legacy-bt4.stdout.log"
       stderr_log = "cuda-isolation-legacy-bt4.stderr.log"
     }
+  }
+  comparison = [ordered]@{
+    backend_selected = (Test-BackendSelected \$ComparisonText)
+    stdout_log = "cuda-nn-comparison.stdout.log"
+    stderr_log = "cuda-nn-comparison.stderr.log"
+    parity_report_log = "cuda-nn-comparison-parity-report.md"
   }
   uci_smokes = [ordered]@{
     cuda_mcts = [ordered]@{
@@ -1331,7 +1418,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, hybrid-cuda, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-nn-comparison, cuda-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, hybrid-cuda, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"
