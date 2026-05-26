@@ -1167,6 +1167,7 @@ def main() -> int:
             "Get-GpuInfo",
             "compile_run_id",
             "Read-ProbeJson",
+            "Read-SmokeText",
             "legacy_probe",
             "probe_suites",
             "cuda_auto_mcts",

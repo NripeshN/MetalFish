@@ -524,6 +524,12 @@ function Read-LogText {
   return (Get-Content -Path \$path -Raw -Encoding UTF8).TrimStart([char]0xFEFF)
 }
 
+function Read-SmokeText {
+  param([string]\$Name)
+  return ((Read-LogText "\$Name.stdout.log") + [Environment]::NewLine +
+          (Read-LogText "\$Name.stderr.log"))
+}
+
 function Read-ProbeJson {
   param([string]\$Name)
   \$text = Read-LogText \$Name
@@ -786,11 +792,11 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 
 \$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
 \$LegacyProbeJson = Read-ProbeJson "cuda-legacy-probe.stdout.log"
-\$MctsText = Read-LogText "cuda-mcts.stdout.log"
-\$AutoMctsText = Read-LogText "cuda-auto-mcts.stdout.log"
-\$HybridText = Read-LogText "hybrid-cuda.stdout.log"
-\$HybridAutoText = Read-LogText "hybrid-auto.stdout.log"
-\$HybridAneText = Read-LogText "hybrid-cuda-ane-disabled.stdout.log"
+\$MctsText = Read-SmokeText "cuda-mcts"
+\$AutoMctsText = Read-SmokeText "cuda-auto-mcts"
+\$HybridText = Read-SmokeText "hybrid-cuda"
+\$HybridAutoText = Read-SmokeText "hybrid-auto"
+\$HybridAneText = Read-SmokeText "hybrid-cuda-ane-disabled"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
 \$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
 \$Manifest = [ordered]@{
