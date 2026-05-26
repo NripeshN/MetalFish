@@ -1259,6 +1259,28 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / "tools/fetch_windows_cuda_runtime_inputs.py",
+        [
+            "Windows CUDA Compile Gate",
+            "MetalFish CI",
+            "actions/runs/{run_id}/artifacts?per_page=100",
+            "actions/artifacts/{artifact.artifact_id}/zip",
+            "windows-cuda-compile-*",
+            "metalfish-macos-arm64",
+            "metalfish*windows-x86_64-msvc-cuda.zip",
+            "metal-nn-probe-suite.log",
+            "metal-legacy-nn-probe-suite.log",
+            "METALFISH_WINDOWS_CUDA_PACKAGE",
+            "METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID",
+            "METALFISH_METAL_PROBE_SUITE_LOG",
+            "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG",
+            "METALFISH_REQUIRE_METAL_COMPARE",
+            "runtime-gate-env.sh",
+            "runtime-gate-inputs-manifest.json",
+            "tools/run_gcp_windows_cuda_runtime_gate.sh",
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/run_gcp_windows_cuda_runtime_gate.sh",
         [
             "nvidia-l4-vws",

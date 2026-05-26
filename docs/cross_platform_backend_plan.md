@@ -876,14 +876,25 @@ gates when `METALFISH_METAL_PROBE_SUITE_LOG` and
 logs. The Windows GitHub runtime workflow requires those Metal artifacts by
 default through `metal_ci_run_id`, keeping Metal, CUDA, and portable backends on
 one diagnostic artifact contract while leaving runtime strength tests separate.
+For branch-local validation before the workflow file exists on `main`,
+`tools/fetch_windows_cuda_runtime_inputs.py` downloads the same-commit Windows
+CUDA compile artifact and optional macOS Metal artifact, validates both run
+provenance records, writes `runtime-gate-env.sh`, and records a
+`runtime-gate-inputs-manifest.json`. That keeps direct GCP runtime checks
+repeatable instead of relying on hand-copied package and probe-suite paths.
 
-## First Milestones
+## Remaining Release Checklist
 
-1. Keep Apple Metal path green while adding `NNBackend` plumbing.
-2. Add Linux and Windows CPU CI jobs with `USE_METAL=OFF`.
-3. Add a CUDA backend shell that compiles with nvcc/CUDAToolkit and fails
-   clearly when requested before the actual implementation exists.
-4. Bring up Linux CUDA inference behind `NN::Network` without touching MCTS.
-5. Add CUDA parity tests: same position, same weights, policy/value close to
-   Metal/Lc0.
-6. Add Windows packaging and UCI smoke.
+1. Add CUDA BK.07 tactical bestmove smokes matching the macOS Metal CI
+   sentinel, so Linux and Windows CUDA runtime gates prove more than backend
+   construction and `nodes 1` execution.
+2. Add CUDA Hybrid clock-safety smokes matching the Metal CI low-clock boundary:
+   one search that starts Hybrid and one search that intentionally falls back
+   before transformer time becomes unsafe.
+3. Promote same-commit Linux CUDA and Windows CUDA packages through a
+   release-facing audit path with manifest and hash validation.
+4. Keep `directml` explicitly deferred until CUDA Linux/Windows gates remain
+   stable on package, numeric, tactical, and Hybrid smoke coverage.
+5. Before calling CUDA strength-ready, require green portable CPU CI, macOS
+   Metal CI, Linux L4 CUDA runtime, Windows CUDA compile, Windows L4 CUDA
+   runtime, and the bounded Hybrid regression gate on the same branch tip.

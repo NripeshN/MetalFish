@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
+from tools import fetch_windows_cuda_runtime_inputs as win_cuda_inputs  # noqa: E402
 from tools import run_nn_backend_probe_suite as probe_suite  # noqa: E402
 
 
@@ -727,6 +728,75 @@ def test_windows_cuda_probe_suite_positions_use_python_default() -> None:
     )
 
 
+def test_windows_cuda_runtime_input_helpers_validate_provenance() -> None:
+    run = win_cuda_inputs.RunInfo(
+        run_id="123",
+        workflow_name="Windows CUDA Compile Gate",
+        status="completed",
+        conclusion="success",
+        head_sha="abc",
+        url="https://example.invalid/run/123",
+    )
+    win_cuda_inputs.require_run_provenance(
+        run, expected_workflow="Windows CUDA Compile Gate", expected_sha="abc"
+    )
+
+    try:
+        win_cuda_inputs.require_run_provenance(
+            run, expected_workflow="MetalFish CI", expected_sha="abc"
+        )
+    except ValueError as exc:
+        expect("workflow mismatch message", "MetalFish CI" in str(exc))
+    else:
+        raise AssertionError("expected workflow provenance mismatch")
+
+    try:
+        win_cuda_inputs.require_run_provenance(
+            run, expected_workflow="Windows CUDA Compile Gate", expected_sha="def"
+        )
+    except ValueError as exc:
+        expect("sha mismatch message", "expected def" in str(exc))
+    else:
+        raise AssertionError("expected sha provenance mismatch")
+
+
+def test_windows_cuda_runtime_input_helpers_select_artifacts() -> None:
+    artifacts = [
+        win_cuda_inputs.ArtifactInfo(
+            artifact_id=1,
+            name="metalfish-macos-arm64",
+            size_in_bytes=100,
+            archive_download_url="https://example.invalid/a.zip",
+        ),
+        win_cuda_inputs.ArtifactInfo(
+            artifact_id=2,
+            name="windows-cuda-compile-123",
+            size_in_bytes=200,
+            archive_download_url="https://example.invalid/b.zip",
+        ),
+    ]
+    expect(
+        "metal artifact selected by name",
+        win_cuda_inputs.select_artifact(
+            artifacts, name="metalfish-macos-arm64"
+        ).artifact_id
+        == 1,
+    )
+    expect(
+        "windows artifact selected by pattern",
+        win_cuda_inputs.select_artifact(
+            artifacts, pattern="windows-cuda-compile-*"
+        ).artifact_id
+        == 2,
+    )
+    try:
+        win_cuda_inputs.select_artifact(artifacts, pattern="missing-*")
+    except ValueError as exc:
+        expect("missing artifact lists available", "windows-cuda-compile-123" in str(exc))
+    else:
+        raise AssertionError("expected missing artifact failure")
+
+
 def main() -> int:
     test_checker_writes_manifest()
     test_checker_rejects_missing_wdl()
@@ -740,6 +810,8 @@ def main() -> int:
     test_probe_suite_runner_rejects_network_info_drift()
     test_probe_suite_runner_reports_failing_probe_name()
     test_windows_cuda_probe_suite_positions_use_python_default()
+    test_windows_cuda_runtime_input_helpers_validate_provenance()
+    test_windows_cuda_runtime_input_helpers_select_artifacts()
     print("NN backend artifact tests: OK")
     return 0
 
