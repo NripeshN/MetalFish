@@ -775,6 +775,7 @@ def main() -> int:
             "Packaged MinGW runtime DLL missing",
             "Packaged MSVC runtime DLL missing",
             "Packaged runtime DLL is empty",
+            "compression-level: 0",
         ],
     )
     assert_file_not_contains(

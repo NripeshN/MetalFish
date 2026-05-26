@@ -137,6 +137,7 @@ jobs:
           name: metalfish-linux-x86_64-cpu
           path: metalfish*linux-x86_64-cpu.tar.gz
           if-no-files-found: error
+          compression-level: 0
 
   windows-mingw-cpu:
     name: Windows MinGW CPU
@@ -273,6 +274,7 @@ jobs:
           name: metalfish-windows-x86_64-mingw-cpu
           path: metalfish*windows-x86_64-mingw-cpu.zip
           if-no-files-found: error
+          compression-level: 0
 
   windows-msvc-cpu:
     name: Windows MSVC CPU
@@ -475,6 +477,7 @@ jobs:
           name: metalfish-windows-x86_64-msvc-cpu
           path: metalfish*windows-x86_64-msvc-cpu.zip
           if-no-files-found: error
+          compression-level: 0
 
   portable-release:
     name: Attach Portable Release Artifacts
