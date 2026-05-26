@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/windows-cuda-compile.yml"
       - "tools/import_msvc_dev_env.ps1"
+      - "tools/install_windows_cuda_toolkit.ps1"
       - "tools/run_windows_cuda_compile_gate.ps1"
       - "tools/download_engine_networks.py"
       - "tools/nn_metal_probe.cpp"
@@ -79,6 +80,7 @@ jobs:
         run: |
           foreach ($script in @(
             "tools/import_msvc_dev_env.ps1",
+            "tools/install_windows_cuda_toolkit.ps1",
             "tools/run_windows_cuda_compile_gate.ps1"
           )) {
             $tokens = $null
@@ -95,12 +97,12 @@ jobs:
           }
 
       - name: Install CUDA Toolkit
-        id: cuda-toolkit
-        uses: Jimver/cuda-toolkit@v0.2.35
-        with:
-          cuda: ${{ inputs.cuda_version || '12.9.1' }}
-          method: network
-          sub-packages: '["nvcc","cudart","cublas","cublas_dev","visual_studio_integration"]'
+        shell: pwsh
+        env:
+          METALFISH_CUDA_TOOLKIT_VERSION: ${{ inputs.cuda_version || '12.9.1' }}
+        run: |
+          tools/install_windows_cuda_toolkit.ps1 `
+            -Version "${env:METALFISH_CUDA_TOOLKIT_VERSION}"
 
       - name: Cache vcpkg binary packages
         uses: actions/cache@v5

@@ -1161,6 +1161,7 @@ def main() -> int:
             "build-windows-cuda/**/*.json",
             "tools/download_engine_networks.py",
             "tools/import_msvc_dev_env.ps1",
+            "tools/install_windows_cuda_toolkit.ps1",
             "tools/nn_metal_probe.cpp",
             "tools/write_portable_manifest.py",
             "actions/cache@v5",
@@ -1187,7 +1188,26 @@ def main() -> int:
     assert_file_not_contains(
         PROJ / ".github/workflows/windows-cuda-compile.yml",
         [
+            "Jimver/cuda-toolkit",
             "ilammy/msvc-dev-cmd",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/install_windows_cuda_toolkit.ps1",
+        [
+            "developer.download.nvidia.com/compute/cuda",
+            "network_installers/cuda_${Version}_windows_network.exe",
+            "nvcc_$MajorMinor",
+            "cudart_$MajorMinor",
+            "cublas_$MajorMinor",
+            "cublas_dev_$MajorMinor",
+            "thrust_$MajorMinor",
+            "visual_studio_integration_$MajorMinor",
+            "CUDA_PATH",
+            "GITHUB_PATH",
+            "Start-Process",
+            "nvcc.exe",
+            "cublas*.lib",
         ],
     )
     assert_file_contains(
