@@ -22,6 +22,15 @@ on:
         description: Optional gs:// prefix for gate artifacts
         required: false
         default: ""
+      metal_ci_run_id:
+        description: MetalFish CI run ID whose macOS artifact supplies Metal probe suites
+        required: false
+        default: ""
+      require_metal_compare:
+        description: Fail unless Metal probe artifacts are supplied and compared
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
   group: metalfish-windows-cuda-runtime-${{ github.ref }}
@@ -72,6 +81,43 @@ jobs:
             exit 2
           fi
 
+      - name: Validate Metal comparison inputs
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.require_metal_compare }}" = "true" ] && \
+             [ -z "${{ inputs.metal_ci_run_id }}" ]; then
+            echo "metal_ci_run_id is required when require_metal_compare=true" >&2
+            exit 2
+          fi
+
+      - name: Validate Metal artifact provenance
+        if: ${{ inputs.metal_ci_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          METALFISH_EXPECTED_SHA: ${{ github.sha }}
+          METALFISH_METAL_CI_RUN_ID: ${{ inputs.metal_ci_run_id }}
+        run: |
+          set -euo pipefail
+          run_json="$(gh run view "${METALFISH_METAL_CI_RUN_ID}" \
+            --json conclusion,headSha,status,url,workflowName)"
+          workflow_name="$(printf '%s' "${run_json}" | jq -r '.workflowName')"
+          status="$(printf '%s' "${run_json}" | jq -r '.status')"
+          conclusion="$(printf '%s' "${run_json}" | jq -r '.conclusion')"
+          head_sha="$(printf '%s' "${run_json}" | jq -r '.headSha')"
+          url="$(printf '%s' "${run_json}" | jq -r '.url')"
+          if [ "${workflow_name}" != "MetalFish CI" ]; then
+            echo "metal_ci_run_id must refer to MetalFish CI, got '${workflow_name}' (${url})" >&2
+            exit 2
+          fi
+          if [ "${status}" != "completed" ] || [ "${conclusion}" != "success" ]; then
+            echo "metal_ci_run_id must be a completed successful run, got status=${status} conclusion=${conclusion} (${url})" >&2
+            exit 2
+          fi
+          if [ "${head_sha}" != "${METALFISH_EXPECTED_SHA}" ]; then
+            echo "metal_ci_run_id is for ${head_sha}, expected ${METALFISH_EXPECTED_SHA} (${url})" >&2
+            exit 2
+          fi
+
       - name: Download Windows CUDA package artifact
         env:
           GH_TOKEN: ${{ github.token }}
@@ -88,6 +134,19 @@ jobs:
             exit 2
           fi
           echo "METALFISH_WINDOWS_CUDA_PACKAGE=${package}" >> "$GITHUB_ENV"
+
+      - name: Download Metal probe suite artifact
+        if: ${{ inputs.metal_ci_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p metal-artifacts
+          gh run download "${{ inputs.metal_ci_run_id }}" \
+            --name metalfish-macos-arm64 \
+            --dir metal-artifacts
+          test -s metal-artifacts/build/metal-nn-probe-suite.log
+          test -s metal-artifacts/build/metal-legacy-nn-probe-suite.log
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -119,9 +178,16 @@ jobs:
           METALFISH_GCP_COLLECT_ARTIFACTS: "1"
           METALFISH_WINDOWS_CUDA_UCI_GO: ${{ inputs.uci_go }}
           METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID: ${{ inputs.windows_cuda_run_id }}
+          METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
         run: |
           set -euo pipefail
           : "${METALFISH_GCP_PROJECT:=metalfish}"
+          if [ -s "${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log" ]; then
+            export METALFISH_METAL_PROBE_SUITE_LOG="${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log"
+          fi
+          if [ -s "${GITHUB_WORKSPACE}/metal-artifacts/build/metal-legacy-nn-probe-suite.log" ]; then
+            export METALFISH_METAL_LEGACY_PROBE_SUITE_LOG="${GITHUB_WORKSPACE}/metal-artifacts/build/metal-legacy-nn-probe-suite.log"
+          fi
           tools/run_gcp_windows_cuda_runtime_gate.sh
 
       - name: Upload Windows CUDA runtime artifacts

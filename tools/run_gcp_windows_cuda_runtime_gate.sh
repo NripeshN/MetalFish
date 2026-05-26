@@ -16,6 +16,9 @@ DELETE_ON_EXIT="${METALFISH_GCP_DELETE_ON_EXIT:-1}"
 COLLECT_ARTIFACTS="${METALFISH_GCP_COLLECT_ARTIFACTS:-1}"
 ARTIFACT_DIR="${METALFISH_GCP_ARTIFACT_DIR:-${ROOT_DIR}/results/windows_cuda_runtime_gate/${INSTANCE}}"
 GCS_PREFIX="${METALFISH_GCP_GCS_PREFIX:-}"
+METAL_PROBE_SUITE_LOG="${METALFISH_METAL_PROBE_SUITE_LOG:-}"
+METAL_LEGACY_PROBE_SUITE_LOG="${METALFISH_METAL_LEGACY_PROBE_SUITE_LOG:-}"
+REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REMOTE_USER="${METALFISH_GCP_WINDOWS_USER:-metalfish}"
 SSH_KEY="${METALFISH_GCP_SSH_KEY:-${HOME}/.ssh/google_compute_engine}"
 SSH_PUB_KEY="${METALFISH_GCP_SSH_PUB_KEY:-${SSH_KEY}.pub}"
@@ -42,6 +45,13 @@ MACHINE=""
 RUN_DIR="$(mktemp -d -t metalfish-windows-cuda.XXXXXX)"
 PACKAGE_BASENAME="$(basename "${PACKAGE_ZIP}")"
 
+require_metal_compare() {
+  case "${REQUIRE_METAL_COMPARE}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 cleanup() {
   local status=$?
   if [[ "${COLLECT_ARTIFACTS}" == "1" && "${SSH_READY}" == "1" && -n "${ZONE}" ]]; then
@@ -65,6 +75,86 @@ require_file() {
     echo "${label} not found: ${file}" >&2
     exit 2
   fi
+}
+
+compare_collected_probe_suite() {
+  if [[ "${COLLECT_ARTIFACTS}" != "1" ]]; then
+    if require_metal_compare; then
+      echo "Metal/Windows CUDA comparison requires METALFISH_GCP_COLLECT_ARTIFACTS=1" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ -z "${METAL_PROBE_SUITE_LOG}" ]]; then
+    if require_metal_compare; then
+      echo "Metal probe suite log is required; set METALFISH_METAL_PROBE_SUITE_LOG" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ ! -s "${METAL_PROBE_SUITE_LOG}" ]]; then
+    echo "Metal probe suite log not found: ${METAL_PROBE_SUITE_LOG}" >&2
+    return 1
+  fi
+
+  local cuda_suite="${ARTIFACT_DIR}/logs/cuda-probe-suite.stdout.log"
+  if [[ ! -s "${cuda_suite}" ]]; then
+    echo "Windows CUDA probe suite log not found: ${cuda_suite}" >&2
+    return 1
+  fi
+
+  python3 tools/compare_nn_backend_outputs.py \
+    --expected-log "${METAL_PROBE_SUITE_LOG}" \
+    --actual-log "${cuda_suite}" \
+    --expected-label "Metal (MPSGraph) backend" \
+    --actual-label "CUDA transformer backend" \
+    --summary-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-nn-probe-suite-summary.json" \
+    --require-full-policy \
+    --all-probes \
+    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-nn-probe-suite-compare.log"
+}
+
+compare_collected_legacy_probe_suite() {
+  if [[ "${COLLECT_ARTIFACTS}" != "1" ]]; then
+    if require_metal_compare; then
+      echo "Legacy Metal/Windows CUDA comparison requires METALFISH_GCP_COLLECT_ARTIFACTS=1" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ -z "${METAL_LEGACY_PROBE_SUITE_LOG}" ]]; then
+    if require_metal_compare; then
+      echo "Metal legacy probe suite log is required; set METALFISH_METAL_LEGACY_PROBE_SUITE_LOG" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ ! -s "${METAL_LEGACY_PROBE_SUITE_LOG}" ]]; then
+    echo "Metal legacy probe suite log not found: ${METAL_LEGACY_PROBE_SUITE_LOG}" >&2
+    return 1
+  fi
+
+  local cuda_suite="${ARTIFACT_DIR}/logs/cuda-legacy-probe-suite.stdout.log"
+  if [[ ! -s "${cuda_suite}" ]]; then
+    echo "Windows CUDA legacy probe suite log not found: ${cuda_suite}" >&2
+    return 1
+  fi
+
+  python3 tools/compare_nn_backend_outputs.py \
+    --expected-log "${METAL_LEGACY_PROBE_SUITE_LOG}" \
+    --actual-log "${cuda_suite}" \
+    --expected-label "Metal (MPSGraph) backend" \
+    --actual-label "CUDA transformer backend" \
+    --summary-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-legacy-nn-probe-suite-summary.json" \
+    --require-full-policy \
+    --no-require-wdl \
+    --no-require-moves-left \
+    --all-probes \
+    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-legacy-nn-probe-suite-compare.log"
 }
 
 ensure_ssh_key() {
@@ -913,8 +1003,26 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 Write-Host "Windows CUDA runtime gate passed"
 POWERSHELL
 
+set +e
 run_remote_ps "${RUN_DIR}/run-smokes.ps1"
+RUNTIME_STATUS=$?
+set -e
 collect_remote_artifacts
+
+COMPARE_STATUS=0
+if [[ "${RUNTIME_STATUS}" == "0" ]]; then
+  compare_collected_probe_suite || COMPARE_STATUS=$?
+  if [[ "${COMPARE_STATUS}" == "0" ]]; then
+    compare_collected_legacy_probe_suite || COMPARE_STATUS=$?
+  fi
+fi
+
+if [[ "${RUNTIME_STATUS}" != "0" ]]; then
+  exit "${RUNTIME_STATUS}"
+fi
+if [[ "${COMPARE_STATUS}" != "0" ]]; then
+  exit "${COMPARE_STATUS}"
+fi
 
 echo "Windows CUDA runtime gate passed"
 echo "Artifacts: ${ARTIFACT_DIR}"
