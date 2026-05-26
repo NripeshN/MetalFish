@@ -139,7 +139,9 @@ Current CUDA backend boundary:
   policy cannot reuse a stale loaded CUDA network. The standalone
   `metalfish_nn_probe` accepts the matching `--cuda-*` flags, so CUDA parity
   suites exercise the same graph, device, stable-batch, deterministic-softmax,
-  and buffer-clear policy as UCI searches.
+  and buffer-clear policy as UCI searches. Pure MCTS and Hybrid both construct
+  their transformer backend from `SearchParams::GetBackendConfig()`, keeping
+  standalone MCTS, Hybrid MCTS, and probe runtime policy aligned.
 - `NNBackendRequireAccelerator=true` maps `NNBackend=auto` to the strict
   `accelerator` selector for MCTS/Hybrid configs. That selector chooses the
   compiled Metal or CUDA backend and fails instead of falling through to the

@@ -660,6 +660,7 @@ def main() -> int:
     assert_file_contains(
         PROJ / "src/hybrid/hybrid_search.cpp",
         [
+            "config_.mcts_config.GetBackendConfig()",
             "ABInMCTSRank=",
             "ABInMCTSVisits=",
             "ABInMCTSQ=",
@@ -1019,6 +1020,11 @@ def main() -> int:
             "NNBackendRequireAccelerator=true",
             "NNCudaGraphExecution=true",
             "NNCudaStableExecutionBatchSize=16",
+            "--setoption NNCudaDevice=-1",
+            "--setoption NNCudaGraphExecution=true",
+            "--setoption NNCudaStableExecutionBatchSize=16",
+            "--setoption NNCudaDeterministicAttentionSoftmax=true",
+            "--setoption NNCudaFullBufferClear=true",
             "--cuda-device -1",
             "--cuda-graph-execution true",
             "--cuda-stable-execution-batch-size 16",

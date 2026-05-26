@@ -130,8 +130,7 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
     auto backend = std::make_unique<Backend>(
         config_.mcts_config.nn_weights_path,
         static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size)),
-        config_.mcts_config.nn_backend, config_.mcts_config.coreml_model_path,
-        config_.mcts_config.coreml_compute_units);
+        config_.mcts_config.GetBackendConfig());
     mcts_search_ =
         std::make_unique<Search>(config_.mcts_config, std::move(backend));
   } catch (const std::exception &e) {
