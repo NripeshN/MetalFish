@@ -109,11 +109,11 @@ Current remote gates:
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92ed1973-1772-4ae4-abb9-1b94ea5efabf` |
 | CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `metalfish-cuda-gate-20260525-output-target`, L4, 2026-05-25 |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default and must be a successful same-commit `MetalFish CI` run, so the CUDA suite hard-compares against current macOS Metal BT4 and legacy artifacts before spending L4 VM time; `CUBLAS_WORKSPACE_CONFIG` is unset by default and only forwarded through the diagnostic `cublas_workspace_config` input |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26424109261`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact plus a structured compile/package manifest |
-| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Requires `windows_cuda_run_id` from a successful same-commit `Windows CUDA Compile Gate` run before creating the Windows L4 VM; direct GCP pass `legacy-20260525-06b03d17` from compile run `26424109261`, Windows Server 2022 `g2-standard-8` L4 vWS in `us-west4-a`, packaged BT4 and legacy CUDA probes, MCTS smoke, metric-asserted Hybrid CUDA search smoke, and runtime manifest |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26424109260`, Metal NN parity artifact and BK.07 smoke |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26424109258` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26424109246` |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | `26426714784`; produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact plus a structured compile/package manifest |
+| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Requires `windows_cuda_run_id` from a successful same-commit `Windows CUDA Compile Gate` run before creating the Windows L4 VM; direct GCP pass `full-policy-fix-20260526-9f0961a8`, Windows Server 2022 `g2-standard-4` L4 vWS in `us-west4-a`, packaged BT4 and legacy full-policy CUDA probe suites, graph-replay assertions, MCTS smoke, metric-asserted Hybrid CUDA search smoke, and runtime manifest |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26426714785`, Metal NN parity artifact and BK.07 smoke |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26426714789` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26426714787` |
 
 Current CUDA backend boundary:
 
@@ -757,11 +757,11 @@ compile gate, creates an ephemeral Windows Server 2022 G2 VM with an
 `nvidia-l4-vws` accelerator, installs the Google Cloud NVIDIA driver script,
 verifies `nvidia-smi`, installs the VC++ runtime, and runs packaged
 `metalfish_nn_probe.exe --backend cuda` probes for both BT4 and legacy 42850
-weights plus `NNBackend=cuda` MCTS and Hybrid UCI smokes with BT4 weights. It
-tries `g2-standard-8` and then `g2-standard-4` by default so transient L4
-stockouts do not fail the release gate before the engine runs. The VM is
-deleted by default and logs plus `windows-cuda-runtime-manifest.json` are
-collected under
+weights, runs eight-position full-policy probe suites for both nets, and then
+runs `NNBackend=cuda` MCTS and Hybrid UCI smokes with BT4 weights. It tries
+`g2-standard-8` and then `g2-standard-4` by default so transient L4 stockouts do
+not fail the release gate before the engine runs. The VM is deleted by default
+and logs plus `windows-cuda-runtime-manifest.json` are collected under
 `results/windows_cuda_runtime_gate/`.
 The gate explicitly bootstraps OpenSSH on the Windows guest with a temporary
 `metalfish` administrator user and the caller's SSH key, because stock GCE
@@ -774,16 +774,17 @@ immediate `quit`, and asserts positive `MCTSPlayouts`, `MCTSEvals`, and
 run id, package hash, VM shape, CUDA graph/profile settings, packaged probe
 backend/latency/top-policy move, pure CUDA MCTS bestmove, and Hybrid final
 metrics so release artifacts can be audited without scraping UCI logs manually.
-The 2026-05-25 direct GCP pass `legacy-20260525-06b03d17` verified the packaged
-runtime path from Windows CUDA compile run `26424109261` on a Windows Server
-2022 L4 VM: the packaged CUDA probes decoded BT4 and legacy 42850 outputs with
-`executor=resolved+graph-replay`, the legacy probe decoded scalar value without
-WDL or moves-left heads, pure CUDA MCTS returned `bestmove d2d4` at
-`go nodes 1`, and Hybrid loaded the same CUDA transformer backend while
-returning `bestmove e2e4` with 271 MCTS playouts, 245 NN evals, and AB depth
-15. This is still a smoke/runtime gate; Windows does not yet run the full
-multi-position Metal-vs-CUDA numeric comparison suite that the Linux CUDA L4
-gate runs.
+The 2026-05-26 direct GCP pass `full-policy-fix-20260526-9f0961a8` verified the
+packaged runtime path on a Windows Server 2022 L4 VM: the packaged BT4 and
+legacy 42850 probes reported `executor=resolved+graph-replay`; both full-policy
+probe suites produced 8 JSON probes with 1858 policy logits each; the legacy
+suite decoded scalar value without WDL or moves-left heads; pure CUDA MCTS
+returned `bestmove d2d4` at `go nodes 1`; and Hybrid loaded the same CUDA
+transformer backend while returning `bestmove e2e4` with 194 MCTS playouts, 183
+NN evals, and AB depth 14. Windows still does not run the Linux gate's
+Metal-vs-CUDA numeric comparison, but it now catches full-policy scatter,
+history/FEN, promotion, graph-replay, and legacy-head regressions on the
+packaged Windows CUDA runtime.
 
 The macOS Metal CI now builds `test_nn_comparison` and `metalfish_nn_probe`
 alongside the engine, emits `metal-nn-parity-report.md`, records
