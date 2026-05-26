@@ -176,6 +176,7 @@ collect_remote_artifacts() {
     cuda-gpu-nn-artifact-manifest.json \
     cuda-gpu-parity-report.md \
     cuda-gpu-uci-auto-smoke.log \
+    cuda-gpu-uci-accelerator-smoke.log \
     cuda-gpu-uci-smoke.log \
     cuda-gpu-uci-hybrid-smoke.log \
     cuda-gpu-uci-hybrid-ane-smoke.log \

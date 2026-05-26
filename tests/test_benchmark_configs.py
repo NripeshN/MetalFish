@@ -1367,6 +1367,7 @@ def main() -> int:
             "cuda-gpu-legacy-nn-probe-suite.log",
             "cuda-gpu-nn-artifact-manifest.json",
             "cuda-gpu-parity-report.md",
+            "cuda-gpu-uci-accelerator-smoke.log",
             "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG",
             "METALFISH_REQUIRE_METAL_COMPARE",
             "require_metal_compare",
