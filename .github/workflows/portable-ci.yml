@@ -113,6 +113,24 @@ jobs:
           mkdir -p portable-linux
           cp build-linux/metalfish portable-linux/
           cp build-linux/PORTABLE_ARTIFACT.md README.md CHANGELOG.md LICENSE portable-linux/
+          manifest_args=(
+            --platform "Linux x86_64"
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact"
+            --binary "metalfish"
+            --output portable-linux/PORTABLE_ARTIFACT.md
+            --json-output portable-linux/linux-cpu-package-manifest.json
+            --package-name "${package_name}"
+            --package-kind "linux-cpu"
+          )
+          while IFS= read -r file; do
+            manifest_args+=(--file "${file}")
+          done < <(find portable-linux -maxdepth 1 -type f | sort)
+          manifest_args+=(
+            --notes "This portable artifact is a CPU build for Linux CI coverage."
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires USE_CUDA=ON and the CUDA GPU gate."
+            --notes "For CUDA transformer testing, use a USE_CUDA=ON build and the CUDA GPU gate."
+          )
+          python3 tools/write_portable_manifest.py "${manifest_args[@]}"
           tar -czf "${package_name}.tar.gz" -C portable-linux .
 
       - name: Smoke Linux artifact contents
@@ -127,9 +145,20 @@ jobs:
           test -s portable-linux-check/README.md
           test -s portable-linux-check/CHANGELOG.md
           test -s portable-linux-check/LICENSE
+          test -s portable-linux-check/linux-cpu-package-manifest.json
           grep -q -- "- Platform: Linux x86_64" portable-linux-check/PORTABLE_ARTIFACT.md
           grep -q -- '- Binary: `metalfish`' portable-linux-check/PORTABLE_ARTIFACT.md
           grep -q "portable CPU transformer fallback" portable-linux-check/PORTABLE_ARTIFACT.md
+          python3 - <<'PY'
+          import json
+          with open("portable-linux-check/linux-cpu-package-manifest.json", encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          assert manifest["schema"] == "metalfish.portable_artifact"
+          assert manifest["package"]["kind"] == "linux-cpu"
+          files = {entry["name"] for entry in manifest["files"]}
+          for required in ("metalfish", "PORTABLE_ARTIFACT.md", "README.md", "CHANGELOG.md", "LICENSE"):
+              assert required in files, required
+          PY
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v6
@@ -245,6 +274,24 @@ jobs:
             | while read -r dll; do
                 [ -n "$dll" ] && cp "$dll" portable-windows/
           done
+          manifest_args=(
+            --platform "Windows x86_64 MinGW"
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact"
+            --binary "metalfish.exe"
+            --output portable-windows/PORTABLE_ARTIFACT.md
+            --json-output portable-windows/windows-mingw-cpu-package-manifest.json
+            --package-name "${package_name}"
+            --package-kind "windows-mingw-cpu"
+          )
+          while IFS= read -r file; do
+            manifest_args+=(--file "${file}")
+          done < <(find portable-windows -maxdepth 1 -type f | sort)
+          manifest_args+=(
+            --notes "This portable artifact is a CPU MinGW build for Windows CI coverage."
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires a CUDA build and runtime gate."
+            --notes "CUDA and DirectML Windows backends are not packaged in this artifact."
+          )
+          python tools/write_portable_manifest.py "${manifest_args[@]}"
           rm -f "${package_name}.zip"
           bsdtar -a -cf "${package_name}.zip" -C portable-windows .
 
@@ -260,6 +307,7 @@ jobs:
           test -s portable-windows-check/README.md
           test -s portable-windows-check/CHANGELOG.md
           test -s portable-windows-check/LICENSE
+          test -s portable-windows-check/windows-mingw-cpu-package-manifest.json
           grep -q -- "- Platform: Windows x86_64 MinGW" portable-windows-check/PORTABLE_ARTIFACT.md
           grep -q -- '- Binary: `metalfish.exe`' portable-windows-check/PORTABLE_ARTIFACT.md
           grep -q "portable CPU transformer fallback" portable-windows-check/PORTABLE_ARTIFACT.md
@@ -267,6 +315,17 @@ jobs:
             echo "Packaged MinGW runtime DLL missing" >&2
             exit 2
           fi
+          python - <<'PY'
+          import json
+          with open("portable-windows-check/windows-mingw-cpu-package-manifest.json", encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          assert manifest["schema"] == "metalfish.portable_artifact"
+          assert manifest["package"]["kind"] == "windows-mingw-cpu"
+          files = {entry["name"] for entry in manifest["files"]}
+          for required in ("metalfish.exe", "PORTABLE_ARTIFACT.md", "README.md", "CHANGELOG.md", "LICENSE"):
+              assert required in files, required
+          assert any(name.lower().endswith(".dll") for name in files)
+          PY
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v6
@@ -421,6 +480,29 @@ jobs:
           if (Test-Path $vcpkgBin) {
             Copy-Item (Join-Path $vcpkgBin "*.dll") portable-windows-msvc/ -ErrorAction SilentlyContinue
           }
+          $manifestArgs = @(
+            "--platform", "Windows x86_64 MSVC",
+            "--backend", "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact",
+            "--binary", "metalfish.exe",
+            "--output", (Join-Path "portable-windows-msvc" "PORTABLE_ARTIFACT.md"),
+            "--json-output", (Join-Path "portable-windows-msvc" "windows-msvc-cpu-package-manifest.json"),
+            "--package-name", $packageName,
+            "--package-kind", "windows-msvc-cpu"
+          )
+          foreach ($file in (Get-ChildItem -Path portable-windows-msvc -File | Sort-Object Name)) {
+            $manifestArgs += @("--file", $file.FullName)
+          }
+          foreach ($note in @(
+            "This portable artifact is a CPU MSVC build for Windows CI coverage.",
+            "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires a CUDA build and runtime gate.",
+            "MSVC is the required host toolchain for future Windows CUDA builds."
+          )) {
+            $manifestArgs += @("--notes", $note)
+          }
+          python tools/write_portable_manifest.py @manifestArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "portable manifest generation failed with exit code $LASTEXITCODE"
+          }
           if (Test-Path "${packageName}.zip") {
             Remove-Item "${packageName}.zip"
           }
@@ -438,6 +520,7 @@ jobs:
           $requiredFiles = @(
             "metalfish.exe",
             "PORTABLE_ARTIFACT.md",
+            "windows-msvc-cpu-package-manifest.json",
             "README.md",
             "CHANGELOG.md",
             "LICENSE"
@@ -460,6 +543,19 @@ jobs:
           }
           if (-not $manifest.Contains("portable CPU transformer fallback")) {
             throw "MSVC portable manifest is missing backend scope"
+          }
+          $jsonManifest = Get-Content portable-windows-msvc-check/windows-msvc-cpu-package-manifest.json -Raw | ConvertFrom-Json
+          if ($jsonManifest.schema -ne "metalfish.portable_artifact") {
+            throw "MSVC package JSON manifest has unexpected schema: $($jsonManifest.schema)"
+          }
+          if ($jsonManifest.package.kind -ne "windows-msvc-cpu") {
+            throw "MSVC package JSON manifest has unexpected kind: $($jsonManifest.package.kind)"
+          }
+          $manifestFiles = @($jsonManifest.files | ForEach-Object { $_.name })
+          foreach ($required in @("metalfish.exe", "PORTABLE_ARTIFACT.md", "README.md", "CHANGELOG.md", "LICENSE")) {
+            if ($manifestFiles -notcontains $required) {
+              throw "MSVC package JSON manifest missing file entry: $required"
+            }
           }
           $runtimeDlls = @(Get-ChildItem portable-windows-msvc-check -Filter "*.dll")
           if ($runtimeDlls.Count -eq 0) {
