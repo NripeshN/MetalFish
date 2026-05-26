@@ -790,6 +790,18 @@ Invoke-ProbeSmoke -Name "cuda-probe" -Arguments \$ProbeArgs -RequiredText @('"ba
 Invoke-ProbeSmoke -Name "cuda-legacy-probe" -Arguments \$LegacyProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"has_wdl":false', '"has_moves_left":false', '"policy_top":')
 \$ProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-probe-suite" -Weights \$Bt4 -RequireWdl \$true -RequireMovesLeft \$true
 \$LegacyProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-legacy-probe-suite" -Weights \$Legacy -RequireWdl \$false -RequireMovesLeft \$false
+\$IsolationRequiredText = @('"isolation":true', '"backend":"cuda"', "CUDA transformer backend", '"delta":')
+if ("${CUDA_GRAPH}" -ne "0") {
+  \$IsolationRequiredText += "executor=resolved+graph-replay"
+}
+\$IsolationBt4LegacyArgs = "--weights " + [char]34 + \$Bt4 + [char]34 +
+  " --isolation-weights " + [char]34 + \$Legacy + [char]34 +
+  \$CudaProbeOptions + " --warmup 1 --iterations 1 --top 3"
+Invoke-ProbeSmoke -Name "cuda-isolation-bt4-legacy" -Arguments \$IsolationBt4LegacyArgs -RequiredText \$IsolationRequiredText
+\$IsolationLegacyBt4Args = "--weights " + [char]34 + \$Legacy + [char]34 +
+  " --isolation-weights " + [char]34 + \$Bt4 + [char]34 +
+  \$CudaProbeOptions + " --warmup 1 --iterations 1 --top 3"
+Invoke-ProbeSmoke -Name "cuda-isolation-legacy-bt4" -Arguments \$IsolationLegacyBt4Args -RequiredText \$IsolationRequiredText
 
 Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "uci",
@@ -924,6 +936,8 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 
 \$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
 \$LegacyProbeJson = Read-ProbeJson "cuda-legacy-probe.stdout.log"
+\$IsolationBt4LegacyJson = Read-ProbeJson "cuda-isolation-bt4-legacy.stdout.log"
+\$IsolationLegacyBt4Json = Read-ProbeJson "cuda-isolation-legacy-bt4.stdout.log"
 \$MctsText = Read-SmokeText "cuda-mcts"
 \$AutoMctsText = Read-SmokeText "cuda-auto-mcts"
 \$HybridText = Read-SmokeText "hybrid-cuda"
@@ -990,6 +1004,26 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
     bt4 = \$ProbeSuite
     legacy = \$LegacyProbeSuite
   }
+  isolation_probes = [ordered]@{
+    bt4_then_legacy = [ordered]@{
+      primary_network_info = \$IsolationBt4LegacyJson.primary_network_info
+      secondary_network_info = \$IsolationBt4LegacyJson.secondary_network_info
+      primary_executor = (Find-Executor \$IsolationBt4LegacyJson.primary_network_info)
+      secondary_executor = (Find-Executor \$IsolationBt4LegacyJson.secondary_network_info)
+      delta = \$IsolationBt4LegacyJson.delta
+      stdout_log = "cuda-isolation-bt4-legacy.stdout.log"
+      stderr_log = "cuda-isolation-bt4-legacy.stderr.log"
+    }
+    legacy_then_bt4 = [ordered]@{
+      primary_network_info = \$IsolationLegacyBt4Json.primary_network_info
+      secondary_network_info = \$IsolationLegacyBt4Json.secondary_network_info
+      primary_executor = (Find-Executor \$IsolationLegacyBt4Json.primary_network_info)
+      secondary_executor = (Find-Executor \$IsolationLegacyBt4Json.secondary_network_info)
+      delta = \$IsolationLegacyBt4Json.delta
+      stdout_log = "cuda-isolation-legacy-bt4.stdout.log"
+      stderr_log = "cuda-isolation-legacy-bt4.stderr.log"
+    }
+  }
   uci_smokes = [ordered]@{
     cuda_mcts = [ordered]@{
       go = "${UCI_GO}"
@@ -1040,7 +1074,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-mcts, cuda-auto-mcts, hybrid-cuda, hybrid-auto, hybrid-cuda-ane-disabled",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-mcts, cuda-auto-mcts, hybrid-cuda, hybrid-auto, hybrid-cuda-ane-disabled",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"

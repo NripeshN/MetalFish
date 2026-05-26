@@ -146,6 +146,10 @@ Current CUDA backend boundary:
   only subprocess status. Linux CUDA gates require the CUDA backend label, graph
   replay executor string, WDL/moves-left presence for BT4, their absence for
   legacy scalar nets, and a full 1858-entry policy on every parity position.
+- Linux and Windows CUDA runtime gates run same-process BT4/legacy isolation
+  probes in both load orders. This mirrors the Metal CI isolation smoke and
+  catches CUDA graph/workspace/weight-buffer contamination that separate probe
+  processes would miss.
 - `NNBackendRequireAccelerator=true` maps `NNBackend=auto` to the strict
   `accelerator` selector for MCTS/Hybrid configs. That selector chooses the
   compiled Metal or CUDA backend and fails instead of falling through to the

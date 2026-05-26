@@ -20,6 +20,12 @@ if [[ "${METALFISH_CUDA_GRAPH:-}" == "0" ||
       "${METALFISH_CUDA_GRAPH_EXECUTION:-}" == "0" ]]; then
   CUDA_GRAPH_REQUESTED=0
 fi
+CUDA_GRAPH_REPLAY_REQUIRE_ARGS=()
+if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
+  CUDA_GRAPH_REPLAY_REQUIRE_ARGS=(
+    --require-network-info-substring "executor=resolved+graph-replay"
+  )
+fi
 if [[ ! "${CUDA_STABLE_BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
   echo "METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE must be a positive integer" >&2
   exit 2
@@ -107,6 +113,33 @@ summary_failure_lines() {
   echo '```'
 }
 
+assert_cuda_isolation_probe_log() {
+  local name="$1"
+  local file="$2"
+  grep -q '"isolation":true' "${file}" || {
+    echo "${name} did not emit an isolation probe" >&2
+    exit 1
+  }
+  grep -q '"backend":"cuda"' "${file}" || {
+    echo "${name} did not select CUDA" >&2
+    exit 1
+  }
+  grep -q 'CUDA transformer backend' "${file}" || {
+    echo "${name} did not report CUDA transformer backend" >&2
+    exit 1
+  }
+  if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
+    grep -q 'executor=resolved+graph-replay' "${file}" || {
+      echo "${name} did not report CUDA graph replay" >&2
+      exit 1
+    }
+  fi
+  grep -q '"delta":' "${file}" || {
+    echo "${name} did not report isolation deltas" >&2
+    exit 1
+  }
+}
+
 write_summary() {
   local gate_status="${1:-passed}"
   local graph_replay_observed="no"
@@ -159,6 +192,8 @@ write_summary() {
     echo "- NN probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-probe.log")"
     echo "- NN probe suite: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log")"
     echo "- Legacy NN probe suite: $(summary_log_status "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log")"
+    echo "- BT4/legacy isolation probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-isolation-bt4-legacy.log")"
+    echo "- Legacy/BT4 isolation probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-isolation-legacy-bt4.log")"
     echo "- NN artifact manifest: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-artifact-manifest.json")"
     echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
@@ -175,6 +210,10 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log"
     summary_failure_lines "Legacy NN probe suite" \
       "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log"
+    summary_failure_lines "BT4/legacy isolation probe" \
+      "${BUILD_DIR}/cuda-gpu-nn-isolation-bt4-legacy.log"
+    summary_failure_lines "Legacy/BT4 isolation probe" \
+      "${BUILD_DIR}/cuda-gpu-nn-isolation-legacy-bt4.log"
     summary_failure_lines "auto UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
     summary_failure_lines "explicit CUDA UCI smoke" \
@@ -474,7 +513,7 @@ METALFISH_CUDA_PROFILE=0 \
   --warmup 0 \
   --iterations 1 \
   --backend-label "CUDA transformer backend" \
-  --require-network-info-substring "executor=resolved+graph-replay" \
+  "${CUDA_GRAPH_REPLAY_REQUIRE_ARGS[@]}" \
   --require-wdl \
   --require-moves-left \
   --expected-policy-count 1858 \
@@ -499,11 +538,47 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --warmup 0 \
     --iterations 1 \
     --backend-label "CUDA transformer backend" \
-    --require-network-info-substring "executor=resolved+graph-replay" \
+    "${CUDA_GRAPH_REPLAY_REQUIRE_ARGS[@]}" \
     --no-require-wdl \
     --no-require-moves-left \
     --expected-policy-count 1858 \
     --full-policy
+  METALFISH_CUDA_PROFILE=0 \
+    METALFISH_CUDA_GRAPH_STATUS_DETAIL="${METALFISH_CUDA_GRAPH_STATUS_DETAIL:-1}" \
+    "${BUILD_DIR}/metalfish_nn_probe" \
+    --weights "${WEIGHTS}" \
+    --isolation-weights "${LEGACY_WEIGHTS}" \
+    --backend cuda \
+    --cuda-device -1 \
+    --cuda-graph-execution true \
+    --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
+    --cuda-deterministic-attention-softmax true \
+    --cuda-full-buffer-clear true \
+    --top 3 \
+    --warmup 0 \
+    --iterations 1 \
+    2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-isolation-bt4-legacy.log"
+  assert_cuda_isolation_probe_log \
+    "BT4/legacy CUDA isolation probe" \
+    "${BUILD_DIR}/cuda-gpu-nn-isolation-bt4-legacy.log"
+  METALFISH_CUDA_PROFILE=0 \
+    METALFISH_CUDA_GRAPH_STATUS_DETAIL="${METALFISH_CUDA_GRAPH_STATUS_DETAIL:-1}" \
+    "${BUILD_DIR}/metalfish_nn_probe" \
+    --weights "${LEGACY_WEIGHTS}" \
+    --isolation-weights "${WEIGHTS}" \
+    --backend cuda \
+    --cuda-device -1 \
+    --cuda-graph-execution true \
+    --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
+    --cuda-deterministic-attention-softmax true \
+    --cuda-full-buffer-clear true \
+    --top 3 \
+    --warmup 0 \
+    --iterations 1 \
+    2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-isolation-legacy-bt4.log"
+  assert_cuda_isolation_probe_log \
+    "Legacy/BT4 CUDA isolation probe" \
+    "${BUILD_DIR}/cuda-gpu-nn-isolation-legacy-bt4.log"
 fi
 
 METALFISH_CUDA_PROFILE=0 \
