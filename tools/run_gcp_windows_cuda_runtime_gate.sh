@@ -30,9 +30,7 @@ NNUE_SMALL="${METALFISH_NNUE_SMALL:-${ROOT_DIR}/networks/nn-37f18f62d772.nnue}"
 UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420}"
 PROBE_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420}"
 UCI_GO="${METALFISH_WINDOWS_CUDA_UCI_GO:-nodes 1}"
-BK07_POST_GO_SLEEP_MS="${METALFISH_WINDOWS_CUDA_BK07_POST_GO_SLEEP_MS:-30000}"
 HYBRID_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_UCI_GO:-movetime 8000}"
-HYBRID_POST_GO_SLEEP_MS="${METALFISH_WINDOWS_CUDA_HYBRID_POST_GO_SLEEP_MS:-10000}"
 UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
 CUDA_GRAPH="${METALFISH_WINDOWS_CUDA_GRAPH:-}"
 CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
@@ -761,8 +759,7 @@ function Invoke-UciSmoke {
     [string[]]\$Commands,
     [string[]]\$RequiredText,
     [string[]]\$RejectedText = @(),
-    [string[]]\$PositiveMetrics = @(),
-    [int]\$GoWaitMs = 0
+    [string[]]\$PositiveMetrics = @()
   )
   \$stdout = Join-Path \$Logs "\$Name.stdout.log"
   \$stderr = Join-Path \$Logs "\$Name.stderr.log"
@@ -784,28 +781,104 @@ function Invoke-UciSmoke {
     \$psi.Environment["METALFISH_CUDA_PROFILE"] = "${CUDA_PROFILE}"
     \$psi.Environment["METALFISH_CUDA_PROFILE_LIMIT"] = "${CUDA_PROFILE_LIMIT}"
   }
-  \$proc = [System.Diagnostics.Process]::Start(\$psi)
-  \$stdoutTask = \$proc.StandardOutput.ReadToEndAsync()
-  \$stderrTask = \$proc.StandardError.ReadToEndAsync()
-  foreach (\$command in \$Commands) {
-    \$proc.StandardInput.WriteLine(\$command)
-    \$proc.StandardInput.Flush()
-    if (\$command -like "go *" -and \$GoWaitMs -gt 0) {
-      Start-Sleep -Milliseconds \$GoWaitMs
+
+  \$outBuilder = New-Object System.Text.StringBuilder
+  \$deadline = [DateTime]::UtcNow.AddSeconds(${UCI_TIMEOUT_SECONDS})
+
+  \$proc = \$null
+  \$stdoutTask = \$null
+  \$timedOut = \$false
+  \$failed = \$false
+  \$failureMessage = ""
+  try {
+    \$proc = New-Object System.Diagnostics.Process
+    \$proc.StartInfo = \$psi
+    [void]\$proc.Start()
+    foreach (\$command in \$Commands) {
+      \$isGoCommand = \$command -like "go *"
+      \$proc.StandardInput.WriteLine(\$command)
+      \$proc.StandardInput.Flush()
+      if (\$isGoCommand) {
+        \$bestMoveSeen = \$false
+        if (\$null -eq \$stdoutTask) {
+          \$stdoutTask = \$proc.StandardOutput.ReadLineAsync()
+        }
+        while ([DateTime]::UtcNow -lt \$deadline) {
+          if (\$proc.HasExited -and -not \$stdoutTask.IsCompleted) {
+            break
+          }
+          \$remainingMs = [Math]::Max(1, [Math]::Min(250, (\$deadline - [DateTime]::UtcNow).TotalMilliseconds))
+          if (-not \$stdoutTask.Wait([int]\$remainingMs)) {
+            continue
+          }
+          \$line = \$stdoutTask.GetAwaiter().GetResult()
+          if (\$null -eq \$line) {
+            break
+          }
+          [void]\$outBuilder.AppendLine(\$line)
+          if (\$line -match '^bestmove\s+') {
+            \$bestMoveSeen = \$true
+            break
+          }
+          \$stdoutTask = \$proc.StandardOutput.ReadLineAsync()
+        }
+        if (-not \$bestMoveSeen) {
+          \$timedOut = \$true
+          break
+        }
+      }
     }
+    if (-not \$timedOut) {
+      \$proc.StandardInput.Close()
+    }
+  } catch {
+    \$failed = \$true
+    \$failureMessage = \$_.Exception.Message
+    [void]\$outBuilder.AppendLine("")
   }
-  \$proc.StandardInput.Close()
-  \$timedOut = -not \$proc.WaitForExit(${UCI_TIMEOUT_SECONDS} * 1000)
+  if (\$failed) {
+    if (\$null -ne \$proc) {
+      try { \$proc.Kill() } catch {}
+      try { \$proc.WaitForExit(10000) | Out-Null } catch {}
+    }
+  } elseif (-not \$timedOut) {
+    \$timedOut = -not \$proc.WaitForExit(${UCI_TIMEOUT_SECONDS} * 1000)
+  }
   if (\$timedOut) {
     try { \$proc.Kill() } catch {}
     try { \$proc.WaitForExit(10000) | Out-Null } catch {}
+  } else {
+    try { \$proc.WaitForExit() } catch {}
   }
-  \$out = \$stdoutTask.GetAwaiter().GetResult()
-  \$err = \$stderrTask.GetAwaiter().GetResult()
+  if (-not \$timedOut -and -not \$failed) {
+    try {
+      while (-not \$proc.StandardOutput.EndOfStream) {
+        \$line = \$proc.StandardOutput.ReadLine()
+        if (\$null -eq \$line) { break }
+        [void]\$outBuilder.AppendLine(\$line)
+      }
+    } catch {}
+  }
+  \$out = \$outBuilder.ToString()
+  try {
+    if (\$null -ne \$proc) {
+      \$err = \$proc.StandardError.ReadToEnd()
+    } else {
+      \$err = ""
+    }
+  } catch {
+    \$err = \$_.Exception.ToString()
+  }
+  if (\$failed) {
+    \$err = \$err + [Environment]::NewLine + \$failureMessage
+  }
   Set-Content -Path \$stdout -Value \$out -Encoding UTF8
   Set-Content -Path \$stderr -Value \$err -Encoding UTF8
+  if (\$failed) {
+    throw (\$Name + " failed while driving UCI commands: " + \$failureMessage)
+  }
   if (\$timedOut) {
-    throw (\$Name + " timed out after ${UCI_TIMEOUT_SECONDS}s")
+    throw (\$Name + " timed out waiting for bestmove or exit after ${UCI_TIMEOUT_SECONDS}s")
   }
   if (\$proc.ExitCode -ne 0) {
     throw (\$Name + " exited with code " + \$proc.ExitCode)
@@ -942,7 +1015,7 @@ Invoke-UciSmoke -Name "cuda-bk07-mcts" -Commands @(
   "position fen \$Bk07Fen",
   "go nodes 50",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove h5f6")) -GoWaitMs ${BK07_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove h5f6"))
 
 Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "uci",
@@ -968,7 +1041,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth")
 
 Invoke-UciSmoke -Name "hybrid-cuda-clock-start" -Commands @(
   "uci",
@@ -1048,7 +1121,7 @@ Invoke-UciSmoke -Name "hybrid-auto" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth")
 
 Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "uci",
@@ -1080,7 +1153,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth")
 
 \$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
 \$LegacyProbeJson = Read-ProbeJson "cuda-legacy-probe.stdout.log"
