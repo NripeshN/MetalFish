@@ -247,6 +247,8 @@ write_summary() {
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
     echo "- BK.07 CUDA tactical smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
+    echo "- hybrid CUDA clock-start smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log")"
+    echo "- hybrid CUDA clock-safety smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-safety-smoke.log")"
     echo "- hybrid auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log")"
     echo "- hybrid ANE-disable smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log")"
     echo "- Linux CUDA package: $(summary_log_status "${CUDA_PACKAGE}")"
@@ -277,6 +279,10 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log"
     summary_failure_lines "hybrid CUDA UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
+    summary_failure_lines "hybrid CUDA clock-start smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log"
+    summary_failure_lines "hybrid CUDA clock-safety smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-safety-smoke.log"
     summary_failure_lines "hybrid auto UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log"
     summary_failure_lines "hybrid ANE-disable smoke" \
@@ -421,6 +427,8 @@ write_summary() {
     echo "- cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log" "not reached")"
     echo "- cuda-bk07: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log" "not reached")"
     echo "- hybrid-cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log" "not reached")"
+    echo "- hybrid-clock-start: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log" "not reached")"
+    echo "- hybrid-clock-safety: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-safety-smoke.log" "not reached")"
     echo "- hybrid-auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log" "not reached")"
     if [[ -s "${BUILD_DIR}/cuda-gpu-profile.log" ]]; then
       echo
@@ -776,6 +784,58 @@ METALFISH_CUDA_PROFILE=0 \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption Threads=3 \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=false \
+  --setoption UseHybridSearch=true \
+  --setoption HybridMCTSThreads=1 \
+  --setoption HybridABThreads=2 \
+  --setoption HybridAutoABThreadsCap=0 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=1 \
+  --setoption Move\ Overhead=500 \
+  --setoption TransformerLowTimeFallbackMs=3000 \
+  --setoption TransformerMinMoveBudgetMs=400 \
+  --setoption MCTSAddDirichletNoise=false \
+  --go "wtime 1000 btime 1000 winc 3000 binc 3000" \
+  --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "Hybrid MCTS runtime: backend=cuda" \
+  --expect-output "CUDA transformer backend" \
+  --reject-output "Time safety:" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption Threads=3 \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption UseMCTS=false \
+  --setoption UseHybridSearch=true \
+  --setoption HybridMCTSThreads=1 \
+  --setoption HybridABThreads=2 \
+  --setoption HybridAutoABThreadsCap=0 \
+  --setoption Move\ Overhead=500 \
+  --setoption TransformerLowTimeFallbackMs=3000 \
+  --setoption TransformerMinMoveBudgetMs=400 \
+  --go "wtime 800 btime 800 winc 3000 binc 3000" \
+  --expect-output "Time safety: estimated move budget" \
+  --reject-output "Starting Parallel Hybrid Search" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-safety-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
   python3 tools/uci_smoke.py \
