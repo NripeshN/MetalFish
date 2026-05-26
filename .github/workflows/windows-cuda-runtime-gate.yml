@@ -18,6 +18,10 @@ on:
         description: UCI go command for the packaged CUDA MCTS smoke
         required: false
         default: "nodes 1"
+      stable_batch_size:
+        description: CUDA stable execution batch size for packaged CUDA smokes
+        required: false
+        default: "16"
       gcs_prefix:
         description: Optional gs:// prefix for gate artifacts
         required: false
@@ -177,6 +181,7 @@ jobs:
           METALFISH_GCP_GCS_PREFIX: ${{ inputs.gcs_prefix }}
           METALFISH_GCP_COLLECT_ARTIFACTS: "1"
           METALFISH_WINDOWS_CUDA_UCI_GO: ${{ inputs.uci_go }}
+          METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
           METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID: ${{ inputs.windows_cuda_run_id }}
           METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
         run: |

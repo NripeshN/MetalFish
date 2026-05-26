@@ -14,10 +14,15 @@ SUMMARY="${METALFISH_CUDA_SUMMARY:-${BUILD_DIR}/cuda-gpu-summary.md}"
 PARITY_REPORT="${METALFISH_NN_PARITY_REPORT:-${BUILD_DIR}/cuda-gpu-parity-report.md}"
 CUDA_PROFILE_REQUESTED="${METALFISH_CUDA_PROFILE:-0}"
 CUDA_PROFILE_LIMIT="${METALFISH_CUDA_PROFILE_LIMIT:-8}"
+CUDA_STABLE_BATCH_SIZE="${METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
 CUDA_GRAPH_REQUESTED=1
 if [[ "${METALFISH_CUDA_GRAPH:-}" == "0" ||
       "${METALFISH_CUDA_GRAPH_EXECUTION:-}" == "0" ]]; then
   CUDA_GRAPH_REQUESTED=0
+fi
+if [[ ! "${CUDA_STABLE_BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE must be a positive integer" >&2
+  exit 2
 fi
 
 export PATH="/usr/local/cuda/bin:/usr/local/cuda-12.9/bin:/usr/local/cuda-12.8/bin:/usr/local/cuda-12.4/bin:${PATH}"
@@ -132,7 +137,7 @@ write_summary() {
     echo "- CUDA graph replay observed: ${graph_replay_observed}"
     echo "- CUDA release single workspace each run: ${METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN:-0}"
     echo "- CUDA release workspace each run: ${METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN:-0}"
-    echo "- CUDA stable execution batch size: ${METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
+    echo "- CUDA stable execution batch size: ${CUDA_STABLE_BATCH_SIZE}"
     echo "- CUDA deterministic attention softmax: ${METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX:-1}"
     echo "- CUDA raw output trace: ${METALFISH_CUDA_TRACE_RAW_OUTPUTS:-0}"
     echo "- CUDA stage output trace: ${METALFISH_CUDA_TRACE_STAGE_OUTPUTS:-0}"
@@ -438,7 +443,7 @@ METALFISH_CUDA_PROFILE=0 \
   --backend cuda \
   --cuda-device -1 \
   --cuda-graph-execution true \
-  --cuda-stable-execution-batch-size 16 \
+  --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
   --cuda-deterministic-attention-softmax true \
   --cuda-full-buffer-clear true \
   --top 3 \
@@ -461,7 +466,7 @@ METALFISH_CUDA_PROFILE=0 \
   --backend cuda \
   --cuda-device -1 \
   --cuda-graph-execution true \
-  --cuda-stable-execution-batch-size 16 \
+  --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
   --cuda-deterministic-attention-softmax true \
   --cuda-full-buffer-clear true \
   --out "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log" \
@@ -481,7 +486,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --backend cuda \
     --cuda-device -1 \
     --cuda-graph-execution true \
-    --cuda-stable-execution-batch-size 16 \
+    --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
     --out "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log" \
@@ -500,7 +505,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
   --setoption NNCudaGraphExecution=true \
-  --setoption NNCudaStableExecutionBatchSize=16 \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
   --setoption UseMCTS=true \
@@ -519,7 +524,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
   --setoption NNCudaGraphExecution=true \
-  --setoption NNCudaStableExecutionBatchSize=16 \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
   --setoption UseMCTS=true \
@@ -537,7 +542,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
   --setoption NNCudaGraphExecution=true \
-  --setoption NNCudaStableExecutionBatchSize=16 \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
   --setoption UseMCTS=false \
@@ -562,7 +567,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
   --setoption NNCudaGraphExecution=true \
-  --setoption NNCudaStableExecutionBatchSize=16 \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
   --setoption UseMCTS=false \
@@ -595,7 +600,7 @@ if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; t
       --setoption NNWeights="${WEIGHTS}" \
       --setoption NNCudaDevice=-1 \
       --setoption NNCudaGraphExecution=true \
-      --setoption NNCudaStableExecutionBatchSize=16 \
+      --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
       --setoption NNCudaDeterministicAttentionSoftmax=true \
       --setoption NNCudaFullBufferClear=true \
       --setoption UseMCTS=false \

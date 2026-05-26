@@ -414,6 +414,11 @@ jobs:
           Copy-Item build-windows-msvc/PORTABLE_ARTIFACT.md portable-windows-msvc/
           Copy-Item README.md,CHANGELOG.md,LICENSE portable-windows-msvc/
           Copy-Item build-windows-msvc/*.dll portable-windows-msvc/ -ErrorAction SilentlyContinue
+          $vcpkgRoot = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { "C:\vcpkg" }
+          $vcpkgBin = Join-Path $vcpkgRoot "installed\x64-windows\bin"
+          if (Test-Path $vcpkgBin) {
+            Copy-Item (Join-Path $vcpkgBin "*.dll") portable-windows-msvc/ -ErrorAction SilentlyContinue
+          }
           if (Test-Path "${packageName}.zip") {
             Remove-Item "${packageName}.zip"
           }
@@ -454,7 +459,11 @@ jobs:
           if (-not $manifest.Contains("portable CPU transformer fallback")) {
             throw "MSVC portable manifest is missing backend scope"
           }
-          Get-ChildItem portable-windows-msvc-check -Filter "*.dll" | ForEach-Object {
+          $runtimeDlls = @(Get-ChildItem portable-windows-msvc-check -Filter "*.dll")
+          if ($runtimeDlls.Count -eq 0) {
+            throw "Packaged MSVC runtime DLL missing"
+          }
+          $runtimeDlls | ForEach-Object {
             if ($_.Length -le 0) {
               throw "Packaged runtime DLL is empty: $($_.Name)"
             }

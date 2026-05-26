@@ -36,6 +36,7 @@ UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
 CUDA_GRAPH="${METALFISH_WINDOWS_CUDA_GRAPH:-}"
 CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
 CUDA_PROFILE_LIMIT="${METALFISH_WINDOWS_CUDA_PROFILE_LIMIT:-2}"
+CUDA_STABLE_BATCH_SIZE="${METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
 WINDOWS_CUDA_COMPILE_RUN_ID="${METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID:-}"
 DRIVER_SCRIPT_URL="${METALFISH_WINDOWS_GPU_DRIVER_SCRIPT_URL:-https://github.com/GoogleCloudPlatform/compute-gpu-installation/raw/main/windows/install_gpu_driver.ps1}"
 CREATED_INSTANCE=0
@@ -44,6 +45,11 @@ ZONE=""
 MACHINE=""
 RUN_DIR="$(mktemp -d -t metalfish-windows-cuda.XXXXXX)"
 PACKAGE_BASENAME="$(basename "${PACKAGE_ZIP}")"
+
+if [[ ! "${CUDA_STABLE_BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE must be a positive integer" >&2
+  exit 2
+fi
 
 require_metal_compare() {
   case "${REQUIRE_METAL_COMPARE}" in
@@ -506,7 +512,7 @@ function Invoke-ProbeSuiteSmoke {
     \$arguments = "--weights " + (Quote-ProbeArgument \$Weights) +
       " --backend cuda --fen " + (Quote-ProbeArgument \$position.fen) +
       " --cuda-device -1 --cuda-graph-execution true" +
-      " --cuda-stable-execution-batch-size 16" +
+      " --cuda-stable-execution-batch-size ${CUDA_STABLE_BATCH_SIZE}" +
       " --cuda-deterministic-attention-softmax true" +
       " --cuda-full-buffer-clear true" +
       " --top 3 --warmup 1 --iterations 1 --full-policy"
@@ -774,7 +780,7 @@ function Invoke-UciSmoke {
 \$NnueSmall = Join-Path \$Networks "nn-37f18f62d772.nnue"
 \$CudaProbeOptions = " --backend cuda" +
   " --cuda-device -1 --cuda-graph-execution true" +
-  " --cuda-stable-execution-batch-size 16" +
+  " --cuda-stable-execution-batch-size ${CUDA_STABLE_BATCH_SIZE}" +
   " --cuda-deterministic-attention-softmax true" +
   " --cuda-full-buffer-clear true"
 
@@ -794,7 +800,7 @@ Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
   "setoption name NNCudaGraphExecution value true",
-  "setoption name NNCudaStableExecutionBatchSize value 16",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
   "setoption name UseMCTS value true",
@@ -816,7 +822,7 @@ Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
   "setoption name NNCudaGraphExecution value true",
-  "setoption name NNCudaStableExecutionBatchSize value 16",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
   "setoption name UseMCTS value true",
@@ -838,7 +844,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
   "setoption name NNCudaGraphExecution value true",
-  "setoption name NNCudaStableExecutionBatchSize value 16",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
   "setoption name UseMCTS value false",
@@ -868,7 +874,7 @@ Invoke-UciSmoke -Name "hybrid-auto" -Commands @(
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
   "setoption name NNCudaGraphExecution value true",
-  "setoption name NNCudaStableExecutionBatchSize value 16",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
   "setoption name UseMCTS value false",
@@ -894,7 +900,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
   "setoption name NNCudaGraphExecution value true",
-  "setoption name NNCudaStableExecutionBatchSize value 16",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
   "setoption name UseMCTS value false",
@@ -951,6 +957,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
     cuda_graph = \$(if ("${CUDA_GRAPH}" -eq "") { \$null } else { "${CUDA_GRAPH}" })
     cuda_profile = \$(if ("${CUDA_PROFILE}" -eq "") { \$null } else { "${CUDA_PROFILE}" })
     cuda_profile_limit = ${CUDA_PROFILE_LIMIT}
+    cuda_stable_execution_batch_size = ${CUDA_STABLE_BATCH_SIZE}
   }
   gpu = (Get-GpuInfo)
   probe = [ordered]@{
