@@ -181,7 +181,7 @@ jobs:
             -DMETALFISH_ENABLE_IPO=OFF
 
       - name: Build
-        run: cmake --build build-windows --target metalfish metalfish_tests
+        run: cmake --build build-windows --target metalfish metalfish_tests metalfish_nn_probe
 
       - name: Test
         run: |
@@ -198,6 +198,21 @@ jobs:
           python tests/test_lichess_bot.py
           python tests/test_lichess_puzzle_runner.py
           python tests/test_hybrid_regression_compare.py
+          python tools/download_engine_networks.py --bt4-only
+          ./build-windows/metalfish_nn_probe.exe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend cpu \
+            --metadata-only \
+            --construct-backend
+          timeout 180 ./build-windows/metalfish_nn_probe.exe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend cpu \
+            --warmup 0 \
+            --iterations 1 \
+            --top 3 \
+            > build-windows/cpu-bt4-eval-smoke.json
+          grep -q '"has_wdl":true' build-windows/cpu-bt4-eval-smoke.json
+          grep -q '"has_moves_left":true' build-windows/cpu-bt4-eval-smoke.json
           python tools/uci_smoke.py --engine build-windows/metalfish.exe --go "depth 3"
           python tools/uci_smoke.py \
             --engine build-windows/metalfish.exe \

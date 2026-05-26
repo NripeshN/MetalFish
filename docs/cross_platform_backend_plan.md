@@ -702,14 +702,14 @@ Current portable CPU transformer boundary:
   same `[batch*64, input_planes + pe_width]` contract used by BT4 before body
   attention starts.
 - Portable CI uses `metalfish_nn_probe --metadata-only --construct-backend`
-  with real BT4 weights on Linux and Windows MSVC. This validates protobuf
-  loading, shared tensor/inventory/execution-plan resolution, portable CPU
-  backend construction, resolved tensor copies, and backend diagnostics without
-  running slow BT4 inference.
-- Linux portable CI and Windows MSVC portable CI also run one bounded real-BT4
-  CPU eval through `metalfish_nn_probe`, requiring decoded WDL and moves-left
-  outputs. This is a correctness/fallback smoke only; the portable CPU
-  transformer is not a strength backend.
+  with real BT4 weights on Linux, Windows MinGW, and Windows MSVC. This
+  validates protobuf loading, shared tensor/inventory/execution-plan resolution,
+  portable CPU backend construction, resolved tensor copies, and backend
+  diagnostics without running slow BT4 inference.
+- Linux portable CI, Windows MinGW portable CI, and Windows MSVC portable CI
+  also run one bounded real-BT4 CPU eval through `metalfish_nn_probe`, requiring
+  decoded WDL and moves-left outputs. This is a correctness/fallback smoke only;
+  the portable CPU transformer is not a strength backend.
 - Current CPU fixture coverage reaches the same attention-policy raw scratch
   plus 1858-logit gather contract used by CUDA/Metal. Future CPU work should be
   targeted at keeping fallback correctness cheap and portable, not at competing
@@ -744,19 +744,20 @@ fields, compares the packaged BT4 probe against the build-tree BT4 probe, lists
 packaged runtime DLL coverage, and marks real GPU execution as belonging to the
 separate Windows GCP runtime gate.
 Each portable CPU job runs AB UCI smoke plus an explicit `NNBackend=stub` MCTS
-smoke, so portable builds verify the MCTS construction path cheaply. The Linux
-and MSVC legs additionally download BT4 for the metadata/backend-construction
-probe; MinGW stays lightweight package
-coverage. The uploaded artifacts include a generated manifest that makes this
-backend scope explicit, and each portable job now extracts its archive before
-upload to assert the shipped executable, manifest, README, changelog, license,
-and Windows runtime DLL packaging where applicable. Recent branch-tip gates had
+smoke, so portable builds verify the MCTS construction path cheaply. The Linux,
+MinGW, and MSVC legs additionally download BT4 for metadata/backend-construction
+and single-eval CPU fallback probes. The uploaded artifacts include a generated
+manifest that makes this backend scope explicit, and each portable job now
+extracts its archive before upload to assert the shipped executable, manifest,
+README, changelog, license, and Windows runtime DLL packaging where applicable.
+Recent branch-tip gates had
 Linux CPU, Windows MinGW
 CPU, Windows MSVC CPU, Windows CUDA compile, macOS Metal, CUDA L4 runtime, and
 the bounded hybrid regression gate green while remaining current with
-`origin/main`. Linux portable CI and Windows MSVC both run real BT4
-metadata/backend-construction and single-eval CPU fallback smokes; MSVC uses a
-180-second timeout because it is the Windows CUDA host toolchain. The hybrid
+`origin/main`. Linux portable CI, Windows MinGW, and Windows MSVC all run real
+BT4 metadata/backend-construction and single-eval CPU fallback smokes; the
+Windows legs use a 180-second timeout, with MSVC covering the Windows CUDA host
+toolchain. The hybrid
 gate uses a bounded 300-puzzle
 offline sample for PR runs; the accepted rerun scored candidate BK repeats
 `[22, 22, 22]` versus baseline `[22, 22, 22]`, and candidate puzzles `300/300`
