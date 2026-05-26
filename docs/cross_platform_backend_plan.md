@@ -147,6 +147,11 @@ Current CUDA backend boundary:
   requested Metal comparison inputs, remote and comparison statuses, and hashes
   for collected logs and release packages. Optional GCS upload runs after that
   manifest is written so comparison logs and the manifest travel together.
+- The Linux CUDA release package now carries
+  `linux-cuda-package-manifest.json` beside `PORTABLE_ARTIFACT.md`. The JSON
+  manifest records package kind, source commit, package-relative file paths,
+  SHA-256 hashes, sizes, and executable bits, and the runtime gate validates the
+  manifest from the extracted tarball before accepting package smoke results.
 - The Windows CUDA compile package smoke runs packaged
   `metalfish_nn_probe.exe --metadata-only --backend cuda` on both BT4 and
   legacy 42850 weights, verifies that the release zip also contains

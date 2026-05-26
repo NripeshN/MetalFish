@@ -203,7 +203,10 @@ collect_remote_artifacts() {
       copied=$((copied + 1))
     fi
   done
-  for file in metalfish-linux-x86_64-cuda.tar.gz PORTABLE_ARTIFACT.md; do
+  for file in \
+    metalfish-linux-x86_64-cuda.tar.gz \
+    PORTABLE_ARTIFACT.md \
+    linux-cuda-package-manifest.json; do
     if gcloud compute scp \
       "${INSTANCE}:~/metalfish/build-cuda-gpu/${file}" \
       "${ARTIFACT_DIR}/${file}" \

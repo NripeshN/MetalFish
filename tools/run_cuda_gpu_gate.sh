@@ -259,6 +259,7 @@ write_summary() {
     echo "- packaged BT4/legacy isolation probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-nn-isolation-bt4-legacy.log")"
     echo "- packaged legacy/BT4 isolation probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-nn-isolation-legacy-bt4.log")"
     echo "- packaged CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-smoke.log")"
+    echo "- Linux CUDA package manifest: $(summary_log_status "${BUILD_DIR}/linux-cuda-package-manifest.json")"
     echo "- CUDA profile: $(summary_log_status "${BUILD_DIR}/cuda-gpu-profile.log")"
     echo
     echo "## Failures"
@@ -924,30 +925,51 @@ CUDA_PACKAGE_CHECK_DIR="${BUILD_DIR}/linux-cuda-package-check"
 rm -rf "${CUDA_PACKAGE_DIR}" "${CUDA_PACKAGE_CHECK_DIR}"
 rm -f "${CUDA_PACKAGE}"
 mkdir -p "${CUDA_PACKAGE_DIR}" "${CUDA_PACKAGE_CHECK_DIR}"
+cp "${BUILD_DIR}/metalfish" "${CUDA_PACKAGE_DIR}/"
+cp "${BUILD_DIR}/metalfish_nn_probe" "${CUDA_PACKAGE_DIR}/"
+cp "${BUILD_DIR}/test_nn_comparison" "${CUDA_PACKAGE_DIR}/"
+cp README.md CHANGELOG.md LICENSE "${CUDA_PACKAGE_DIR}/"
 python3 tools/write_portable_manifest.py \
   --platform "Linux x86_64 CUDA" \
   --backend "CUDA transformer backend for BT4 MCTS/Hybrid plus CPU AB/NNUE" \
   --binary "metalfish" \
-  --output "${BUILD_DIR}/PORTABLE_ARTIFACT.md" \
+  --output "${CUDA_PACKAGE_DIR}/PORTABLE_ARTIFACT.md" \
+  --json-output "${CUDA_PACKAGE_DIR}/linux-cuda-package-manifest.json" \
+  --package-name "${CUDA_PACKAGE_NAME}" \
+  --package-kind "linux-cuda" \
+  --file "${CUDA_PACKAGE_DIR}/metalfish" \
+  --file "${CUDA_PACKAGE_DIR}/metalfish_nn_probe" \
+  --file "${CUDA_PACKAGE_DIR}/test_nn_comparison" \
+  --file "${CUDA_PACKAGE_DIR}/README.md" \
+  --file "${CUDA_PACKAGE_DIR}/CHANGELOG.md" \
+  --file "${CUDA_PACKAGE_DIR}/LICENSE" \
+  --file "${CUDA_PACKAGE_DIR}/PORTABLE_ARTIFACT.md" \
   --notes "This package is smoke-tested on an NVIDIA L4 runtime gate before upload." \
   --notes "The package includes metalfish_nn_probe so release artifacts can verify CUDA inference metadata." \
   --notes "The package includes test_nn_comparison so release artifacts can verify CUDA batch and reuse parity." \
   --notes "CUDA runtime libraries are expected from the host driver/toolkit installation."
-cp "${BUILD_DIR}/metalfish" "${CUDA_PACKAGE_DIR}/"
-cp "${BUILD_DIR}/metalfish_nn_probe" "${CUDA_PACKAGE_DIR}/"
-cp "${BUILD_DIR}/test_nn_comparison" "${CUDA_PACKAGE_DIR}/"
-cp "${BUILD_DIR}/PORTABLE_ARTIFACT.md" "${CUDA_PACKAGE_DIR}/"
-cp README.md CHANGELOG.md LICENSE "${CUDA_PACKAGE_DIR}/"
+cp "${CUDA_PACKAGE_DIR}/PORTABLE_ARTIFACT.md" "${BUILD_DIR}/PORTABLE_ARTIFACT.md"
+cp "${CUDA_PACKAGE_DIR}/linux-cuda-package-manifest.json" \
+  "${BUILD_DIR}/linux-cuda-package-manifest.json"
 tar -czf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_DIR}" .
 tar -xzf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_CHECK_DIR}"
 test -x "${CUDA_PACKAGE_CHECK_DIR}/metalfish"
 test -x "${CUDA_PACKAGE_CHECK_DIR}/metalfish_nn_probe"
 test -x "${CUDA_PACKAGE_CHECK_DIR}/test_nn_comparison"
 test -s "${CUDA_PACKAGE_CHECK_DIR}/PORTABLE_ARTIFACT.md"
+test -s "${CUDA_PACKAGE_CHECK_DIR}/linux-cuda-package-manifest.json"
 grep -q -- "- Platform: Linux x86_64 CUDA" \
   "${CUDA_PACKAGE_CHECK_DIR}/PORTABLE_ARTIFACT.md"
 grep -q "CUDA transformer backend" \
   "${CUDA_PACKAGE_CHECK_DIR}/PORTABLE_ARTIFACT.md"
+python3 -m json.tool \
+  "${CUDA_PACKAGE_CHECK_DIR}/linux-cuda-package-manifest.json" >/dev/null
+grep -q '"schema": "metalfish.portable_artifact"' \
+  "${CUDA_PACKAGE_CHECK_DIR}/linux-cuda-package-manifest.json"
+grep -q '"kind": "linux-cuda"' \
+  "${CUDA_PACKAGE_CHECK_DIR}/linux-cuda-package-manifest.json"
+grep -q '"name": "metalfish"' \
+  "${CUDA_PACKAGE_CHECK_DIR}/linux-cuda-package-manifest.json"
 METALFISH_NN_WEIGHTS="${WEIGHTS}" \
   METALFISH_NN_PARITY_REPORT="${BUILD_DIR}/cuda-gpu-package-parity-report.md" \
   METALFISH_NN_BATCH_BENCH="${METALFISH_NN_BATCH_BENCH:-1}" \
