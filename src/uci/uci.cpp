@@ -856,6 +856,23 @@ static int auto_mcts_minibatch_size(Engine &engine, int num_threads) {
 #endif
 }
 
+static void log_mcts_runtime_config(const char *label,
+                                    const MCTS::SearchParams &config) {
+  sync_cout << "info string " << label << ": backend=" << config.nn_backend
+            << " minibatch=" << config.minibatch_size
+            << " cuda_device=" << config.cuda_device
+            << " cuda_graph="
+            << (config.cuda_graph_execution ? "true" : "false")
+            << " cuda_stable_batch="
+            << config.cuda_stable_execution_batch_size
+            << " cuda_deterministic_softmax="
+            << (config.cuda_deterministic_attention_softmax ? "true"
+                                                            : "false")
+            << " cuda_full_buffer_clear="
+            << (config.cuda_full_buffer_clear ? "true" : "false")
+            << sync_endl;
+}
+
 static std::optional<std::string>
 transformer_low_time_fallback_reason(Engine &engine,
                                      const Search::LimitsType &limits) {
@@ -1603,6 +1620,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   }
 
   auto config = make_hybrid_config(engine, nn_weights, &limits);
+  log_mcts_runtime_config("Hybrid MCTS runtime", config.mcts_config);
   sync_cout << "info string Hybrid thread split: MCTS=" << config.mcts_threads
             << " AB=" << config.ab_threads
             << " (search workers=" << (config.mcts_threads + config.ab_threads)
@@ -1713,6 +1731,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   }
 
   MCTS::SearchParams config = make_mcts_config(engine, nn_weights, num_threads);
+  log_mcts_runtime_config("MCTS runtime", config);
 
   std::shared_ptr<MCTS::Search> mcts;
   const std::string cache_key = make_mcts_cache_key(nn_weights, config);

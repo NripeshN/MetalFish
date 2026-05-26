@@ -647,6 +647,8 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSMinibatchSize=0 \
   --go "nodes 1" \
   --expect-output "CUDA transformer backend" \
+  --expect-output "MCTS runtime: backend=accelerator" \
+  --expect-output "minibatch=${CUDA_STABLE_BATCH_SIZE}" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
 
@@ -667,6 +669,8 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSMinibatchSize=0 \
   --go "nodes 1" \
   --expect-output "CUDA transformer backend" \
+  --expect-output "MCTS runtime: backend=accelerator" \
+  --expect-output "minibatch=${CUDA_STABLE_BATCH_SIZE}" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log"
 
@@ -687,6 +691,8 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSMinibatchSize=1 \
   --go "${UCI_GO}" \
   --expect-output "CUDA transformer backend" \
+  --expect-output "MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
 
@@ -711,6 +717,8 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSMinibatchSize=1 \
   --go "nodes 8" \
   --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "Hybrid MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
   --expect-output "CUDA transformer backend" \
   --expect-output "Final: MCTSPlayouts=" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
@@ -738,6 +746,8 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSMinibatchSize=0 \
   --go "nodes 8" \
   --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "Hybrid MCTS runtime: backend=accelerator" \
+  --expect-output "minibatch=${CUDA_STABLE_BATCH_SIZE}" \
   --expect-output "CUDA transformer backend" \
   --expect-output "Final: MCTSPlayouts=" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
@@ -771,6 +781,8 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSMinibatchSize=1 \
   --go "nodes 8" \
   --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "Hybrid MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
   --expect-output "CUDA transformer backend" \
   --expect-output "ANE root probe disabled" \
   --expect-output "Final: MCTSPlayouts=" \
