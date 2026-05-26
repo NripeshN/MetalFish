@@ -234,6 +234,7 @@ write_summary() {
     echo "- Legacy/BT4 isolation probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-isolation-legacy-bt4.log")"
     echo "- NN artifact manifest: $(summary_log_status "${BUILD_DIR}/cuda-gpu-nn-artifact-manifest.json")"
     echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
+    echo "- accelerator UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
     echo "- hybrid auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log")"
@@ -255,6 +256,8 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-nn-isolation-legacy-bt4.log"
     summary_failure_lines "auto UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
+    summary_failure_lines "accelerator UCI smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log"
     summary_failure_lines "explicit CUDA UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
     summary_failure_lines "hybrid CUDA UCI smoke" \
@@ -395,6 +398,7 @@ write_summary() {
     echo "## UCI Smokes"
     echo
     echo "- auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log" "not reached")"
+    echo "- accelerator: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log" "not reached")"
     echo "- cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log" "not reached")"
     echo "- hybrid-cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log" "not reached")"
     echo "- hybrid-auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log" "not reached")"
@@ -645,6 +649,26 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "CUDA transformer backend" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption NNBackend=accelerator \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=true \
+  --setoption UseHybridSearch=false \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=0 \
+  --go "nodes 1" \
+  --expect-output "CUDA transformer backend" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
   python3 tools/uci_smoke.py \

@@ -166,7 +166,9 @@ Current CUDA backend boundary:
   `accelerator` selector for MCTS/Hybrid configs. That selector chooses the
   compiled Metal or CUDA backend and fails instead of falling through to the
   portable CPU transformer, so CUDA strength gates cannot hide accelerator
-  setup failures behind a slow fallback.
+  setup failures behind a slow fallback. Linux and Windows CUDA runtime gates
+  now also run an explicit `NNBackend=accelerator` MCTS smoke so the strict
+  selector itself is covered outside the `auto` alias path.
 - `src/nn/cuda/cuda_executor.*` is the inference execution seam.
 - `src/nn/network_execution_plan.*` builds the shared ordered and resolved
   tensor/stage plan that CUDA and future portable backends will execute.

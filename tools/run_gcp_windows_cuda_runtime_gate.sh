@@ -876,6 +876,27 @@ Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "quit"
 ) -RequiredText (\$CudaNetworkInfoRequiredText + @("CUDA transformer backend", "bestmove"))
 
+Invoke-UciSmoke -Name "cuda-accelerator-mcts" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name NNBackend value accelerator",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name NNCudaDevice value -1",
+  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
+  "setoption name NNCudaDeterministicAttentionSoftmax value true",
+  "setoption name NNCudaFullBufferClear value true",
+  "setoption name UseMCTS value true",
+  "setoption name UseHybridSearch value false",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSMinibatchSize value 0",
+  "position startpos",
+  "go ${UCI_GO}",
+  "quit"
+) -RequiredText (\$CudaNetworkInfoRequiredText + @("CUDA transformer backend", "bestmove"))
+
 Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "uci",
   "isready",
@@ -970,6 +991,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 \$IsolationLegacyBt4Json = Read-ProbeJson "cuda-isolation-legacy-bt4.stdout.log"
 \$MctsText = Read-SmokeText "cuda-mcts"
 \$AutoMctsText = Read-SmokeText "cuda-auto-mcts"
+\$AcceleratorMctsText = Read-SmokeText "cuda-accelerator-mcts"
 \$HybridText = Read-SmokeText "hybrid-cuda"
 \$HybridAutoText = Read-SmokeText "hybrid-auto"
 \$HybridAneText = Read-SmokeText "hybrid-cuda-ane-disabled"
@@ -1069,6 +1091,13 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
       stdout_log = "cuda-auto-mcts.stdout.log"
       stderr_log = "cuda-auto-mcts.stderr.log"
     }
+    cuda_accelerator_mcts = [ordered]@{
+      go = "${UCI_GO}"
+      bestmove = (Find-BestMove \$AcceleratorMctsText)
+      backend_selected = (Test-BackendSelected \$AcceleratorMctsText)
+      stdout_log = "cuda-accelerator-mcts.stdout.log"
+      stderr_log = "cuda-accelerator-mcts.stderr.log"
+    }
     hybrid_cuda = [ordered]@{
       go = "${HYBRID_UCI_GO}"
       bestmove = (Find-BestMove \$HybridText)
@@ -1104,7 +1133,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-mcts, cuda-auto-mcts, hybrid-cuda, hybrid-auto, hybrid-cuda-ane-disabled",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-mcts, cuda-auto-mcts, cuda-accelerator-mcts, hybrid-cuda, hybrid-auto, hybrid-cuda-ane-disabled",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"
