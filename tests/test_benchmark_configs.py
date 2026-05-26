@@ -707,6 +707,7 @@ def main() -> int:
     assert_file_contains(
         PROJ / ".github/workflows/portable-ci.yml",
         [
+            "push:\n    branches: [main, dev]\n    tags:",
             "tools/write_portable_manifest.py",
             "import_msvc_dev_env.ps1",
             "actions/cache@v5",

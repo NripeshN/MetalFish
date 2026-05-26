@@ -711,8 +711,9 @@ Current portable CPU transformer boundary:
   with Metal or CUDA throughput.
 
 Portable CI builds Linux CPU, Windows MinGW CPU, and Windows MSVC CPU
-artifacts. The MSVC leg is included because Windows CUDA uses the MSVC host
-toolchain. Windows MSVC jobs import the Visual Studio developer environment
+artifacts on PRs, `main`/`dev` pushes, version tags, and manual dispatches. The
+MSVC leg is included because Windows CUDA uses the MSVC host toolchain.
+Windows MSVC jobs import the Visual Studio developer environment
 through `tools/import_msvc_dev_env.ps1` and do not rely on an external
 Node-backed MSVC setup action. The Windows MSVC and CUDA jobs use a local
 vcpkg binary cache for the `x64-windows` protobuf/zlib/Abseil dependencies, so
