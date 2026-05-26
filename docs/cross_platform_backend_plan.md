@@ -53,7 +53,7 @@ Platform code should own only the implementation of `NN::Network`:
 | Backend | Platform | Status | Intended role |
 | --- | --- | --- | --- |
 | `metal` | macOS/Apple Silicon | Production | MPSGraph BT4 inference |
-| `cuda` | Linux/Windows NVIDIA | Linux parity-gated, Windows package/runtime-smoked | CUDA BT4 and legacy inference with shared NN contract |
+| `cuda` | Linux/Windows NVIDIA | Linux and Windows parity-gated | CUDA BT4 and legacy inference with shared NN contract |
 | `directml` | Windows GPUs | Planned | Windows fallback where CUDA is unavailable |
 | `cpu` | Any | Portable fallback | Correctness fallback, not strength target |
 | `stub` | Any | Existing diagnostic fallback | Tests only; never a strength backend |
