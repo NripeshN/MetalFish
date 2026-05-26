@@ -125,6 +125,11 @@ Current CUDA backend boundary:
   mapping regressions across transformer and classical-convolution network
   families in a no-GPU Linux CUDA toolchain before the runtime L4 gate spends
   GPU time.
+- `MCTSMinibatchSize=0` now keeps search-side CUDA auto batches aligned with the
+  CUDA graph-replay stable batch size. CUDA builds use
+  `MCTSCudaAutoMinibatchSize` when set, otherwise
+  `METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE`, otherwise `16`; explicit
+  `MCTSMinibatchSize` still overrides this for experiments.
 - `src/nn/cuda/cuda_executor.*` is the inference execution seam.
 - `src/nn/network_execution_plan.*` builds the shared ordered and resolved
   tensor/stage plan that CUDA and future portable backends will execute.

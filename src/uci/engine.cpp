@@ -214,6 +214,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSVirtualLoss", Option(1, 1, 128));
   // 0 = auto; on Apple Silicon smaller batches are better at low thread counts.
   options.add("MCTSMinibatchSize", Option(0, 0, 4096));
+  options.add("MCTSCudaAutoMinibatchSize", Option(0, 0, 256));
   options.add("MCTSMaxThreads", Option(0, 0, MaxThreads));
   options.add("MCTSParallelSearch", Option(false));
   options.add("MCTSMaxOutOfOrderFactor", Option("4.0"));

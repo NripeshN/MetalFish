@@ -799,14 +799,48 @@ static float get_float_option_alias(Engine &engine, const char *preferred,
   return preferred_value;
 }
 
-static int auto_mcts_minibatch_size(int num_threads) {
+static int env_int_or_default(const char *name, int fallback, int min_value,
+                              int max_value) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  char *end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (!end || *end != '\0')
+    return fallback;
+  return std::clamp(static_cast<int>(parsed), min_value, max_value);
+}
+
+static bool backend_can_select_cuda(std::string_view backend) {
+#ifdef USE_CUDA
+  return backend == "auto" || backend == "cuda";
+#else
+  (void)backend;
+  return false;
+#endif
+}
+
+static int cuda_auto_mcts_minibatch_size(Engine &engine) {
+  const int requested =
+      static_cast<int>(engine.get_options()["MCTSCudaAutoMinibatchSize"]);
+  if (requested > 0)
+    return requested;
+  return env_int_or_default("METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE", 16, 1,
+                            256);
+}
+
+static int auto_mcts_minibatch_size(Engine &engine, int num_threads) {
 #ifdef __APPLE__
   // The current BT4/MPSGraph path is strongest and most predictable with
   // direct single-position evals. Explicit MCTSMinibatchSize values remain
   // available for throughput experiments.
+  (void)engine;
   (void)num_threads;
   return 1;
 #else
+  const std::string backend = std::string(engine.get_options()["NNBackend"]);
+  if (backend_can_select_cuda(backend))
+    return cuda_auto_mcts_minibatch_size(engine);
   return num_threads >= 8 ? 64 : 32;
 #endif
 }
@@ -968,7 +1002,7 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       static_cast<int>(engine.get_options()["MCTSMinibatchSize"]);
   config.minibatch_size = requested_minibatch > 0
                               ? requested_minibatch
-                              : auto_mcts_minibatch_size(num_threads);
+                              : auto_mcts_minibatch_size(engine, num_threads);
   config.max_out_of_order_evals_factor = get_float_option_alias(
       engine, "MCTSMaxOutOfOrderEvalsFactor", "MCTSMaxOutOfOrderFactor",
       config.max_out_of_order_evals_factor);
