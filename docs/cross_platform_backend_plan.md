@@ -129,7 +129,10 @@ Current CUDA backend boundary:
   `metalfish` and `metalfish_nn_probe`; the extracted package runs the same
   BT4 fixed-reference, batch-parity, single-reuse, batch-reuse, graph-reuse, and
   batch-benchmark smoke as the build-tree CUDA binary before the package is
-  accepted. The 2026-05-26 L4 pass `metalfish-cuda-gate-4a350ac-g4` on
+  accepted. It also runs packaged BT4 and legacy full-policy probe suites plus
+  packaged BT4/legacy isolation probes, and the GCP wrapper prefers those
+  package logs for Metal/CUDA comparison when they are available. The
+  2026-05-26 L4 pass `metalfish-cuda-gate-4a350ac-g4` on
   `g2-standard-4` in `us-west1-a` accepted the extracted package with
   `TRACE_WORST policy_delta=0.000006`, `REUSE_STRESS_MAX policy_delta=0.000007`,
   `SINGLE_REUSE_STRESS_MAX policy_delta=0.000000`, graph replay observed, and

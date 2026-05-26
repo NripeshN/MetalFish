@@ -189,6 +189,10 @@ collect_remote_artifacts() {
     cuda-gpu-package-nn-comparison.log \
     cuda-gpu-package-parity-report.md \
     cuda-gpu-package-probe.log \
+    cuda-gpu-package-nn-probe-suite.log \
+    cuda-gpu-package-legacy-nn-probe-suite.log \
+    cuda-gpu-package-nn-isolation-bt4-legacy.log \
+    cuda-gpu-package-nn-isolation-legacy-bt4.log \
     cuda-gpu-package-uci-smoke.log \
     cuda-gpu-profile.log; do
     if gcloud compute scp \
@@ -354,7 +358,10 @@ compare_collected_probe_suite() {
     return 1
   fi
 
-  local cuda_suite="${ARTIFACT_DIR}/cuda-gpu-nn-probe-suite.log"
+  local cuda_suite="${ARTIFACT_DIR}/cuda-gpu-package-nn-probe-suite.log"
+  if [[ ! -s "${cuda_suite}" ]]; then
+    cuda_suite="${ARTIFACT_DIR}/cuda-gpu-nn-probe-suite.log"
+  fi
   if [[ ! -s "${cuda_suite}" ]]; then
     echo "CUDA probe suite log not found: ${cuda_suite}" >&2
     return 1
@@ -393,7 +400,10 @@ compare_collected_legacy_probe_suite() {
     return 1
   fi
 
-  local cuda_suite="${ARTIFACT_DIR}/cuda-gpu-legacy-nn-probe-suite.log"
+  local cuda_suite="${ARTIFACT_DIR}/cuda-gpu-package-legacy-nn-probe-suite.log"
+  if [[ ! -s "${cuda_suite}" ]]; then
+    cuda_suite="${ARTIFACT_DIR}/cuda-gpu-legacy-nn-probe-suite.log"
+  fi
   if [[ ! -s "${cuda_suite}" ]]; then
     echo "CUDA legacy probe suite log not found: ${cuda_suite}" >&2
     return 1
