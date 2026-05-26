@@ -128,8 +128,15 @@ Current CUDA backend boundary:
 - `MCTSMinibatchSize=0` now keeps search-side CUDA auto batches aligned with the
   CUDA graph-replay stable batch size. CUDA builds use
   `MCTSCudaAutoMinibatchSize` when set, otherwise
+  `NNCudaStableExecutionBatchSize` when set, otherwise
   `METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE`, otherwise `16`; explicit
   `MCTSMinibatchSize` still overrides this for experiments.
+- Production CUDA backend controls now flow through the shared
+  `NN::BackendConfig` seam and UCI: `NNCudaDevice`, `NNCudaGraphExecution`,
+  `NNCudaStableExecutionBatchSize`, `NNCudaDeterministicAttentionSoftmax`, and
+  `NNCudaFullBufferClear`. Metal and portable CPU ignore those CUDA-specific
+  fields, while MCTS/Hybrid cache keys include them so changing backend runtime
+  policy cannot reuse a stale loaded CUDA network.
 - `NNBackendRequireAccelerator=true` maps `NNBackend=auto` to the strict
   `accelerator` selector for MCTS/Hybrid configs. That selector chooses the
   compiled Metal or CUDA backend and fails instead of falling through to the
@@ -527,15 +534,16 @@ Current CUDA backend boundary:
   strided cuBLAS baseline.
 - CUDA resolved execution uses graph replay by default when the run is
   compatible, matching Metal's persistent graph execution model more closely.
-  Set `METALFISH_CUDA_GRAPH=0` or `METALFISH_CUDA_GRAPH_EXECUTION=0` to force
-  the uncaptured path. The first inference for a batch/workspace generation
-  primes the normal path, the second captures the existing workspace clear,
-  resolved stage sequence, and output mapping without changing math, and later
-  same-key calls replay the graph. The path is disabled when CUDA profiling,
-  stage tracing, attention tracing, dynamic PE tracing, or per-run workspace
-  release knobs are active. The graph key includes batch size, workspace
-  generation, inference-buffer generation, stream, and device output pointers;
-  graph API failures reset the cache and fall back to uncaptured execution.
+  Set `NNCudaGraphExecution=false`, `METALFISH_CUDA_GRAPH=0`, or
+  `METALFISH_CUDA_GRAPH_EXECUTION=0` to force the uncaptured path. The first
+  inference for a batch/workspace generation primes the normal path, the second
+  captures the existing workspace clear, resolved stage sequence, and output
+  mapping without changing math, and later same-key calls replay the graph. The
+  path is disabled when CUDA profiling, stage tracing, attention tracing,
+  dynamic PE tracing, or per-run workspace release knobs are active. The graph
+  key includes batch size, workspace generation, inference-buffer generation,
+  stream, and device output pointers; graph API failures reset the cache and
+  fall back to uncaptured execution.
   The CUDA gate keeps the normal probe and UCI parity smokes unprofiled even
   when profiling is requested, then runs a separate profile smoke, so the
   production graph path and the diagnostic profile path are reported separately.

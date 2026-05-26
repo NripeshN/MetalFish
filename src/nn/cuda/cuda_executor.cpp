@@ -112,7 +112,9 @@ void CheckCudaSuccess(const char *op, cudaError_t status) {
     throw std::runtime_error(CudaErrorMessage(op, status));
 }
 
-bool CudaGraphExecutionRequested() {
+bool CudaGraphExecutionRequested(bool configured_graph_execution) {
+  if (!configured_graph_execution)
+    return false;
   if (const char *value = std::getenv("METALFISH_CUDA_GRAPH");
       value && std::string(value) == "0") {
     return false;
@@ -399,10 +401,14 @@ public:
 class ResolvedCudaExecutor final : public CudaExecutor {
 public:
   ResolvedCudaExecutor(CudaExecutionSchedule schedule,
-                       CudaOutputMapping output_mapping)
+                       CudaOutputMapping output_mapping,
+                       bool graph_execution_requested,
+                       CudaStageExecutionOptions stage_options)
       : schedule_(std::move(schedule)),
         output_mapping_(std::move(output_mapping)),
-        graph_requested_(CudaGraphExecutionRequested()) {}
+        stage_options_(stage_options),
+        graph_requested_(CudaGraphExecutionRequested(graph_execution_requested)) {
+  }
 
   void Execute(const NetworkTensorPlan &,
                const NetworkResolvedExecutionPlan &execution_plan,
@@ -469,7 +475,7 @@ private:
     return ExecuteDenseActivationLayerNormSequence(
         execution_plan, weights, buffers.input_values, buffers.input_masks,
         buffers.input_values, tape, workspace, batch_size, stage_inputs,
-        schedule_, timing_collector);
+        schedule_, timing_collector, stage_options_);
   }
 
   void ExecuteUncaptured(const NetworkResolvedExecutionPlan &execution_plan,
@@ -723,6 +729,7 @@ private:
 
   CudaExecutionSchedule schedule_;
   CudaOutputMapping output_mapping_;
+  CudaStageExecutionOptions stage_options_;
   bool graph_requested_ = false;
   bool graph_disabled_ = false;
   std::uint64_t graph_capture_count_ = 0;
@@ -759,9 +766,13 @@ std::unique_ptr<CudaExecutor> CreatePlanSmokeCudaExecutor() {
 
 std::unique_ptr<CudaExecutor>
 CreateResolvedCudaExecutor(CudaExecutionSchedule schedule,
-                           CudaOutputMapping output_mapping) {
+                           CudaOutputMapping output_mapping,
+                           bool graph_execution_requested,
+                           CudaStageExecutionOptions stage_options) {
   return std::make_unique<ResolvedCudaExecutor>(std::move(schedule),
-                                                std::move(output_mapping));
+                                                std::move(output_mapping),
+                                                graph_execution_requested,
+                                                stage_options);
 }
 
 } // namespace Cuda

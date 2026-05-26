@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "cuda_stage_executor.h"
+
 #include <memory>
 #include <string>
 
@@ -53,7 +55,9 @@ std::unique_ptr<CudaExecutor> CreateNullCudaExecutorForSmoke();
 std::unique_ptr<CudaExecutor> CreatePlanSmokeCudaExecutor();
 std::unique_ptr<CudaExecutor>
 CreateResolvedCudaExecutor(CudaExecutionSchedule schedule,
-                           CudaOutputMapping output_mapping);
+                           CudaOutputMapping output_mapping,
+                           bool graph_execution_requested = true,
+                           CudaStageExecutionOptions stage_options = {});
 
 } // namespace Cuda
 } // namespace NN

@@ -288,18 +288,16 @@ int BackendComputation::UsedBatchSize() const {
 int BackendComputation::TotalInputs() const { return total_inputs_; }
 
 Backend::Backend(const std::string &weights_path, size_t cache_entries,
-                 const std::string &backend,
-                 const std::string &coreml_model_path,
-                 const std::string &coreml_compute_units)
+                 NN::BackendConfig backend_config)
     : cache_(cache_entries) {
   try {
-    evaluator_ = std::make_unique<NNMCTSEvaluator>(
-        weights_path, backend, coreml_model_path, coreml_compute_units);
+    evaluator_ =
+        std::make_unique<NNMCTSEvaluator>(weights_path, backend_config);
     std::cerr << "info string Backend loaded weights: " << weights_path
-              << " backend=" << backend;
-    if (backend == "coreml") {
-      std::cerr << " model " << coreml_model_path << " units "
-                << coreml_compute_units;
+              << " backend=" << backend_config.backend;
+    if (backend_config.backend == "coreml") {
+      std::cerr << " model " << backend_config.coreml_model_path << " units "
+                << backend_config.coreml_compute_units;
     }
     std::cerr << " actual=" << evaluator_->GetNetworkInfo() << std::endl;
   } catch (const std::exception &e) {
@@ -308,6 +306,18 @@ Backend::Backend(const std::string &weights_path, size_t cache_entries,
     throw;
   }
 }
+
+Backend::Backend(const std::string &weights_path, size_t cache_entries,
+                 const std::string &backend,
+                 const std::string &coreml_model_path,
+                 const std::string &coreml_compute_units)
+    : Backend(weights_path, cache_entries, [&] {
+        NN::BackendConfig config;
+        config.backend = backend;
+        config.coreml_model_path = coreml_model_path;
+        config.coreml_compute_units = coreml_compute_units;
+        return config;
+      }()) {}
 
 std::unique_ptr<BackendComputation> Backend::CreateComputation() {
   return std::make_unique<BackendComputation>(evaluator_.get(), &cache_);

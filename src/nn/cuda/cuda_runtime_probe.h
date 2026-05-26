@@ -22,6 +22,7 @@ struct CudaDeviceSelection {
 int CompiledCudaRuntimeVersion();
 int RuntimeCudaDeviceCount();
 CudaDeviceSelection SelectCudaDevice();
+CudaDeviceSelection SelectCudaDevice(int requested_device);
 std::string RuntimeCudaDeviceSummary();
 
 } // namespace Cuda

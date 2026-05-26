@@ -25,7 +25,8 @@ namespace Cuda {
 
 class CudaNetwork : public Network {
 public:
-  explicit CudaNetwork(const WeightsFile &weights);
+  explicit CudaNetwork(const WeightsFile &weights,
+                       BackendConfig config = BackendConfig{});
 
   NetworkOutput Evaluate(const InputPlanes &input) override;
   std::vector<NetworkOutput>
@@ -39,6 +40,7 @@ private:
   std::vector<NetworkOutput> RunBatch(std::span<const InputPlanes> inputs);
 
   NetworkFormatDescriptor format_;
+  BackendConfig config_;
   NetworkTensorPlan tensor_plan_;
   NetworkExecutionPlan execution_plan_;
   NetworkResolvedExecutionPlan resolved_execution_plan_;

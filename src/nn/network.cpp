@@ -28,12 +28,11 @@ namespace NN {
 
 namespace {
 
-std::unique_ptr<Network> CreateRequiredAcceleratorNetwork(
-    const WeightsFile &weights, const std::string &model_path,
-    const std::string &compute_units) {
+std::unique_ptr<Network>
+CreateRequiredAcceleratorNetwork(const WeightsFile &weights,
+                                 const BackendConfig &config) {
 #ifdef USE_METAL
-  (void)model_path;
-  (void)compute_units;
+  (void)config;
   try {
     return std::make_unique<Metal::MetalNetwork>(weights);
   } catch (const std::exception &e) {
@@ -41,18 +40,15 @@ std::unique_ptr<Network> CreateRequiredAcceleratorNetwork(
                              std::string(e.what()));
   }
 #elif defined(USE_CUDA)
-  (void)model_path;
-  (void)compute_units;
   try {
-    return std::make_unique<Cuda::CudaNetwork>(weights);
+    return std::make_unique<Cuda::CudaNetwork>(weights, config);
   } catch (const std::exception &e) {
     throw std::runtime_error("Required CUDA accelerator backend unavailable: " +
                              std::string(e.what()));
   }
 #else
   (void)weights;
-  (void)model_path;
-  (void)compute_units;
+  (void)config;
   throw std::runtime_error("No accelerator NN backend was compiled into this "
                            "MetalFish build");
 #endif
@@ -96,17 +92,16 @@ private:
 };
 
 std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
-                                       const std::string &backend,
-                                       const std::string &model_path,
-                                       const std::string &compute_units) {
+                                       const BackendConfig &config) {
+  const std::string &backend = config.backend;
   if (backend == "accelerator") {
-    return CreateRequiredAcceleratorNetwork(weights, model_path, compute_units);
+    return CreateRequiredAcceleratorNetwork(weights, config);
   }
 
 #ifdef USE_COREML
   if (backend == "coreml") {
-    return std::make_unique<CoreML::CoreMLNetwork>(weights, model_path,
-                                                   compute_units);
+    return std::make_unique<CoreML::CoreMLNetwork>(
+        weights, config.coreml_model_path, config.coreml_compute_units);
   }
 #else
   if (backend == "coreml") {
@@ -134,7 +129,7 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
 #ifdef USE_CUDA
   if (backend == "auto" || backend == "cuda") {
     try {
-      return std::make_unique<Cuda::CudaNetwork>(weights);
+      return std::make_unique<Cuda::CudaNetwork>(weights, config);
     } catch (const std::exception &e) {
       std::cerr << "CUDA backend unavailable: " << e.what() << std::endl;
       if (backend == "cuda") {
@@ -170,8 +165,36 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
 }
 
 std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
+                                       const std::string &backend,
+                                       const std::string &model_path,
+                                       const std::string &compute_units) {
+  BackendConfig config;
+  config.backend = backend;
+  config.coreml_model_path = model_path;
+  config.coreml_compute_units = compute_units;
+  return CreateNetwork(weights, config);
+}
+
+std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
                                        const std::string &backend) {
   return CreateNetwork(weights, backend, "", "cpu-ne");
+}
+
+std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
+                                       const BackendConfig &config) {
+  if (config.backend == "stub") {
+    WeightsFile empty_weights;
+    return CreateNetwork(empty_weights, config);
+  }
+
+  auto weights_opt = LoadWeights(weights_path);
+
+  if (!weights_opt.has_value()) {
+    throw std::runtime_error("Could not load network weights from: " +
+                             weights_path);
+  }
+
+  return CreateNetwork(weights_opt.value(), config);
 }
 
 std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,

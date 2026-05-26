@@ -1582,6 +1582,20 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
 #endif
 
   NN::WeightsFile empty_weights;
+  NN::BackendConfig default_backend_config;
+  expect(default_backend_config.backend == "auto",
+         "backend config should default to auto", tc);
+  expect(default_backend_config.cuda_device == -1,
+         "CUDA backend config should default to automatic device selection",
+         tc);
+  expect(default_backend_config.cuda_graph_execution,
+         "CUDA backend config should default graph execution on", tc);
+  expect(default_backend_config.cuda_stable_execution_batch_size == 0,
+         "CUDA backend config should default stable batch to env/default", tc);
+  expect(default_backend_config.cuda_deterministic_attention_softmax,
+         "CUDA backend config should default deterministic softmax on", tc);
+  expect(default_backend_config.cuda_full_buffer_clear,
+         "CUDA backend config should default full buffer clear on", tc);
   auto stub = NN::CreateNetwork(empty_weights, "stub");
   expect(static_cast<bool>(stub), "explicit stub backend should construct", tc);
   expect(stub->GetNetworkInfo().find("Stub network") != std::string::npos,

@@ -95,6 +95,10 @@ struct CudaStageTimingRecord {
   float millis = 0.0f;
 };
 
+struct CudaStageExecutionOptions {
+  bool deterministic_attention_softmax = true;
+};
+
 class CudaStageTimingCollector {
 public:
   void Add(std::string name, CudaExecutionScheduleKind kind, float millis);
@@ -192,7 +196,8 @@ CudaAttentionCoreOutput ExecuteAttentionCoreStage(
     const float *parent = nullptr, int trace_run = -1,
     int trace_stage_index = -1,
     CudaExecutionScheduleKind trace_kind =
-        CudaExecutionScheduleKind::AttentionLayerNormStage);
+        CudaExecutionScheduleKind::AttentionLayerNormStage,
+    bool deterministic_attention_softmax = true);
 
 CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const NetworkResolvedExecutionPlan &execution_plan,
@@ -222,7 +227,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
     int batch_size, const CudaStageInputBindings &input_bindings,
     const CudaExecutionSchedule &schedule,
-    CudaStageTimingCollector *timings = nullptr);
+    CudaStageTimingCollector *timings = nullptr,
+    CudaStageExecutionOptions options = {});
 
 } // namespace Cuda
 } // namespace NN

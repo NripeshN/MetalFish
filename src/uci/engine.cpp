@@ -141,6 +141,11 @@ Engine::Engine(std::optional<std::string> path)
   options.add("NNBackendRequireAccelerator", Option(false));
   options.add("NNCoreMLModelPath", Option(""));
   options.add("NNCoreMLComputeUnits", Option("cpu-ne"));
+  options.add("NNCudaDevice", Option(-1, -1, 255));
+  options.add("NNCudaGraphExecution", Option(true));
+  options.add("NNCudaStableExecutionBatchSize", Option(0, 0, 256));
+  options.add("NNCudaDeterministicAttentionSoftmax", Option(true));
+  options.add("NNCudaFullBufferClear", Option(true));
 
   options.add("UseHybridSearch", Option(false));
 

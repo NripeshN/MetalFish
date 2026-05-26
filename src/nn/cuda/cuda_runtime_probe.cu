@@ -71,7 +71,7 @@ int RuntimeCudaDeviceCount() {
   return count;
 }
 
-CudaDeviceSelection SelectCudaDevice() {
+CudaDeviceSelection SelectCudaDevice(int requested_device) {
   int count = 0;
   cudaError_t status = cudaGetDeviceCount(&count);
   if (status != cudaSuccess) {
@@ -82,16 +82,25 @@ CudaDeviceSelection SelectCudaDevice() {
   if (count <= 0)
     return {false, -1, "no CUDA device is available"};
 
-  const char *requested_raw = std::getenv("METALFISH_CUDA_DEVICE");
-  if (requested_raw && *requested_raw) {
-    int requested = -1;
-    if (!ParseDeviceIndex(requested_raw, requested)) {
-      return {false, -1,
-              "METALFISH_CUDA_DEVICE must be a non-negative integer"};
+  bool requested_from_env = false;
+  if (requested_device < 0) {
+    const char *requested_raw = std::getenv("METALFISH_CUDA_DEVICE");
+    if (requested_raw && *requested_raw) {
+      requested_from_env = true;
+      if (!ParseDeviceIndex(requested_raw, requested_device)) {
+        return {false, -1,
+                "METALFISH_CUDA_DEVICE must be a non-negative integer"};
+      }
     }
+  }
+
+  if (requested_device >= 0) {
+    const int requested = requested_device;
     if (requested >= count) {
       std::ostringstream out;
-      out << "METALFISH_CUDA_DEVICE=" << requested
+      out << (requested_from_env ? "METALFISH_CUDA_DEVICE="
+                                 : "configured CUDA device ")
+          << requested
           << " is outside the visible CUDA device range 0.." << (count - 1);
       return {false, -1, out.str()};
     }
@@ -105,16 +114,19 @@ CudaDeviceSelection SelectCudaDevice() {
     cudaDeviceProp prop{};
     status = cudaGetDeviceProperties(&prop, requested);
     if (status == cudaSuccess) {
-      return {true, requested,
-              "selected CUDA device " + DeviceDescription(requested, prop) +
-                  " from METALFISH_CUDA_DEVICE"};
+      std::string message =
+          "selected CUDA device " + DeviceDescription(requested, prop);
+      message += requested_from_env ? " from METALFISH_CUDA_DEVICE"
+                                    : " from backend config";
+      return {true, requested, message};
     }
     const std::string error = CudaErrorText(status);
     cudaGetLastError();
-    return {
-        true, requested,
-        "selected CUDA device " + std::to_string(requested) +
-            " from METALFISH_CUDA_DEVICE; properties unavailable: " + error};
+    std::string message = "selected CUDA device " + std::to_string(requested);
+    message += requested_from_env ? " from METALFISH_CUDA_DEVICE"
+                                  : " from backend config";
+    message += "; properties unavailable: " + error;
+    return {true, requested, message};
   }
 
   int best_device = 0;
@@ -153,6 +165,8 @@ CudaDeviceSelection SelectCudaDevice() {
   return {true, best_device,
           "selected CUDA device 0; device properties unavailable"};
 }
+
+CudaDeviceSelection SelectCudaDevice() { return SelectCudaDevice(-1); }
 
 std::string RuntimeCudaDeviceSummary() {
   std::ostringstream out;

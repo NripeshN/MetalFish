@@ -832,6 +832,10 @@ static int cuda_auto_mcts_minibatch_size(Engine &engine) {
       static_cast<int>(engine.get_options()["MCTSCudaAutoMinibatchSize"]);
   if (requested > 0)
     return requested;
+  const int backend_stable_batch =
+      static_cast<int>(engine.get_options()["NNCudaStableExecutionBatchSize"]);
+  if (backend_stable_batch > 0)
+    return backend_stable_batch;
   return env_int_or_default("METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE", 16, 1,
                             256);
 }
@@ -930,6 +934,14 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       std::string(engine.get_options()["NNCoreMLModelPath"]);
   config.coreml_compute_units =
       std::string(engine.get_options()["NNCoreMLComputeUnits"]);
+  config.cuda_device = static_cast<int>(engine.get_options()["NNCudaDevice"]);
+  config.cuda_graph_execution = engine.get_options()["NNCudaGraphExecution"];
+  config.cuda_stable_execution_batch_size =
+      static_cast<int>(engine.get_options()["NNCudaStableExecutionBatchSize"]);
+  config.cuda_deterministic_attention_softmax =
+      engine.get_options()["NNCudaDeterministicAttentionSoftmax"];
+  config.cuda_full_buffer_clear =
+      engine.get_options()["NNCudaFullBufferClear"];
 
   config.cpuct = get_float_option(engine, "MCTSCPuct", config.cpuct);
   config.cpuct_at_root =
@@ -1348,6 +1360,10 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
   std::ostringstream key;
   key << nn_weights << "|" << config.nn_backend << "|"
       << config.coreml_model_path << "|" << config.coreml_compute_units << "|"
+      << config.cuda_device << "|" << config.cuda_graph_execution << "|"
+      << config.cuda_stable_execution_batch_size << "|"
+      << config.cuda_deterministic_attention_softmax << "|"
+      << config.cuda_full_buffer_clear << "|"
       << config.num_threads << "|" << config.cpuct << "|"
       << config.cpuct_at_root << "|" << config.cpuct_base << "|"
       << config.cpuct_factor << "|" << config.cpuct_base_at_root << "|"

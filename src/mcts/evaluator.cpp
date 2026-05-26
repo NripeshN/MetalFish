@@ -15,6 +15,7 @@
 
 #include <array>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace MetalFish {
@@ -49,14 +50,11 @@ BatchEncodeScratch &GetBatchEncodeScratch() {
 
 class NNMCTSEvaluator::Impl {
 public:
-  Impl(const std::string &weights_path, const std::string &backend,
-       const std::string &coreml_model_path,
-       const std::string &coreml_compute_units) {
-    if (backend == "stub" && weights_path.empty()) {
+  Impl(const std::string &weights_path, NN::BackendConfig backend_config) {
+    if (backend_config.backend == "stub" && weights_path.empty()) {
       input_format_ = MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE;
       NN::WeightsFile empty_weights;
-      network_ = NN::CreateNetwork(empty_weights, backend, coreml_model_path,
-                                   coreml_compute_units);
+      network_ = NN::CreateNetwork(empty_weights, backend_config);
       return;
     }
 
@@ -68,8 +66,7 @@ public:
     input_format_ = weights_.format().has_network_format()
                         ? weights_.format().network_format().input()
                         : MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE;
-    network_ = NN::CreateNetwork(weights_, backend, coreml_model_path,
-                                 coreml_compute_units);
+    network_ = NN::CreateNetwork(weights_, backend_config);
   }
 
   EvaluationResult Evaluate(const Position &pos) {
@@ -229,11 +226,20 @@ private:
 };
 
 NNMCTSEvaluator::NNMCTSEvaluator(const std::string &weights_path,
+                                 NN::BackendConfig backend_config)
+    : impl_(std::make_unique<Impl>(weights_path, std::move(backend_config))) {}
+
+NNMCTSEvaluator::NNMCTSEvaluator(const std::string &weights_path,
                                  const std::string &backend,
                                  const std::string &coreml_model_path,
                                  const std::string &coreml_compute_units)
-    : impl_(std::make_unique<Impl>(weights_path, backend, coreml_model_path,
-                                   coreml_compute_units)) {}
+    : NNMCTSEvaluator(weights_path, [&] {
+        NN::BackendConfig config;
+        config.backend = backend;
+        config.coreml_model_path = coreml_model_path;
+        config.coreml_compute_units = coreml_compute_units;
+        return config;
+      }()) {}
 
 NNMCTSEvaluator::~NNMCTSEvaluator() = default;
 

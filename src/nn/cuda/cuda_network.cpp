@@ -33,6 +33,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace MetalFish {
@@ -69,7 +70,11 @@ int EnvIntOrDefault(const char *name, int fallback, int min_value,
   return std::clamp(static_cast<int>(parsed), min_value, max_value);
 }
 
-int StableExecutionBatchSize() {
+int StableExecutionBatchSize(const BackendConfig &config) {
+  if (config.cuda_stable_execution_batch_size > 0) {
+    return std::clamp(config.cuda_stable_execution_batch_size, 1,
+                      kDefaultMaxBatchSize);
+  }
   return EnvIntOrDefault("METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE",
                          kDefaultStableExecutionBatchSize, 1,
                          kDefaultMaxBatchSize);
@@ -213,12 +218,13 @@ bool OutputsAreValid(const std::vector<NetworkOutput> &outputs,
 
 } // namespace
 
-CudaNetwork::CudaNetwork(const WeightsFile &weights)
+CudaNetwork::CudaNetwork(const WeightsFile &weights, BackendConfig config)
     : format_(DescribeNetworkFormat(weights)),
+      config_(std::move(config)),
       tensor_plan_(CreateNetworkTensorPlan(format_)),
       buffer_layout_(LayoutFromTensorPlan(tensor_plan_, kDefaultMaxBatchSize)),
       executor_(CreateMissingCudaExecutor()) {
-  const auto device_selection = SelectCudaDevice();
+  const auto device_selection = SelectCudaDevice(config_.cuda_device);
   if (!device_selection.ok) {
     throw std::runtime_error(
         "CUDA transformer backend is compiled (" + RuntimeCudaDeviceSummary() +
@@ -285,7 +291,11 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights)
     if (!output_mapping.ok()) {
       throw std::runtime_error(output_mapping.Summary());
     }
-    executor_ = CreateResolvedCudaExecutor(schedule, output_mapping);
+    CudaStageExecutionOptions stage_options;
+    stage_options.deterministic_attention_softmax =
+        config_.cuda_deterministic_attention_softmax;
+    executor_ = CreateResolvedCudaExecutor(
+        schedule, output_mapping, config_.cuda_graph_execution, stage_options);
     WarmupExecution();
   } catch (const std::exception &e) {
     throw std::runtime_error(
@@ -325,7 +335,8 @@ NetworkOutput CudaNetwork::Evaluate(const InputPlanes &input) {
 
 std::vector<NetworkOutput>
 CudaNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
-  const auto max_stable_batch = static_cast<size_t>(StableExecutionBatchSize());
+  const auto max_stable_batch =
+      static_cast<size_t>(StableExecutionBatchSize(config_));
   if (inputs.size() > max_stable_batch) {
     std::vector<NetworkOutput> outputs;
     outputs.reserve(inputs.size());
@@ -363,6 +374,7 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
   PackInputPlaneBatchHostRaw(input_plane_ptrs, input_masks, input_values);
 
   const bool force_full_buffer_clear =
+      config_.cuda_full_buffer_clear &&
       EnvFlagOrDefault("METALFISH_CUDA_FULL_BUFFER_CLEAR", true);
   const bool release_workspace_each_run =
       EnvFlagEnabled("METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN");

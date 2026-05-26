@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "../nn/network.h"
 #include "../core/position.h"
 
 namespace MetalFish {
@@ -44,9 +45,11 @@ public:
   using LegalMovesView = std::span<const Move>;
 
   explicit NNMCTSEvaluator(const std::string &weights_path,
-                           const std::string &backend = "auto",
-                           const std::string &coreml_model_path = "",
-                           const std::string &coreml_compute_units = "cpu-ne");
+                           NN::BackendConfig backend_config = {});
+  NNMCTSEvaluator(const std::string &weights_path,
+                  const std::string &backend,
+                  const std::string &coreml_model_path = "",
+                  const std::string &coreml_compute_units = "cpu-ne");
   ~NNMCTSEvaluator();
 
   EvaluationResult Evaluate(const Position &pos);

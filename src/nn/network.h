@@ -32,10 +32,25 @@ public:
   virtual bool HasMovesLeft() const { return false; }
 };
 
+struct BackendConfig {
+  std::string backend = "auto";
+  std::string coreml_model_path;
+  std::string coreml_compute_units = "cpu-ne";
+  int cuda_device = -1;
+  bool cuda_graph_execution = true;
+  int cuda_stable_execution_batch_size = 0;
+  bool cuda_deterministic_attention_softmax = true;
+  bool cuda_full_buffer_clear = true;
+};
+
 std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
                                        const std::string &backend = "auto");
+std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
+                                       const BackendConfig &config);
 std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
                                        const std::string &backend = "auto");
+std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
+                                       const BackendConfig &config);
 std::unique_ptr<Network>
 CreateNetwork(const WeightsFile &weights, const std::string &backend,
               const std::string &model_path,

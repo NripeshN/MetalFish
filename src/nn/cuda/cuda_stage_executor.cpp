@@ -1735,7 +1735,8 @@ ExecuteAttentionCoreStage(const NetworkResolvedExecutionPlan &execution_plan,
                           CudaExecutionWorkspace &workspace, int batch_size,
                           const CudaWeightBuffers *weights, const float *parent,
                           int trace_run, int trace_stage_index,
-                          CudaExecutionScheduleKind trace_kind) {
+                          CudaExecutionScheduleKind trace_kind,
+                          bool deterministic_attention_softmax) {
   if (batch_size <= 0)
     throw std::runtime_error("CUDA attention core received empty batch");
   if (!projections.query || !projections.key || !projections.value)
@@ -1786,7 +1787,8 @@ ExecuteAttentionCoreStage(const NetworkResolvedExecutionPlan &execution_plan,
       attention.heads, attention.squares, attention.head_depth,
       attention.qkv_width,
       1.0f / std::sqrt(static_cast<float>(attention.head_depth)), stream);
-  static const bool deterministic_softmax =
+  const bool deterministic_softmax =
+      deterministic_attention_softmax &&
       EnvFlagOrDefault("METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX", true);
   bool applied_bias_with_softmax = false;
   if (attention.smolgen.present) {
@@ -1869,7 +1871,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
     const std::uint64_t *input_masks, const float *input_values,
     const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
     int batch_size, const CudaStageInputBindings &input_bindings,
-    const CudaExecutionSchedule &schedule, CudaStageTimingCollector *timings) {
+    const CudaExecutionSchedule &schedule, CudaStageTimingCollector *timings,
+    CudaStageExecutionOptions options) {
   if (!input)
     throw std::runtime_error("CUDA dense stage sequence input is missing");
 
@@ -2002,7 +2005,8 @@ CudaDenseStageSequenceOutput ExecuteDenseActivationLayerNormSequence(
       const auto core = ExecuteAttentionCoreStage(
           execution_plan, entry.first_step, input_projection, tape, workspace,
           batch_size, &weights, stage_input, stage_trace_run,
-          traced_stage_index, entry.kind);
+          traced_stage_index, entry.kind,
+          options.deterministic_attention_softmax);
       TraceCudaAttentionBuffer(stage_trace_run, traced_stage_index, 4,
                                step.name + ".scores", entry.kind, core.scores,
                                core.score_rows, core.score_width, batch_size,
