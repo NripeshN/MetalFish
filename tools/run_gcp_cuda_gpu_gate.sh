@@ -173,6 +173,8 @@ collect_remote_artifacts() {
     cuda-gpu-nn-probe.log \
     cuda-gpu-nn-probe-suite.log \
     cuda-gpu-legacy-nn-probe-suite.log \
+    cuda-gpu-nn-isolation-bt4-legacy.log \
+    cuda-gpu-nn-isolation-legacy-bt4.log \
     cuda-gpu-nn-artifact-manifest.json \
     cuda-gpu-parity-report.md \
     cuda-gpu-uci-auto-smoke.log \
@@ -209,14 +211,125 @@ collect_remote_artifacts() {
 
   if ((copied > 0)); then
     echo "Collected ${copied} CUDA gate artifact(s) in ${ARTIFACT_DIR}"
-    if [[ -n "${GCS_PREFIX}" ]]; then
-      gcloud storage cp "${ARTIFACT_DIR}"/* \
-        "${GCS_PREFIX%/}/${INSTANCE}/"
-      echo "Uploaded CUDA gate artifacts to ${GCS_PREFIX%/}/${INSTANCE}/"
-    fi
   else
     echo "No CUDA gate artifacts were available to collect" >&2
   fi
+}
+
+write_runtime_manifest() {
+  if [[ "${COLLECT_ARTIFACTS}" != "1" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${ARTIFACT_DIR}"
+  REMOTE_STATUS_FOR_MANIFEST="$1" \
+    BT4_COMPARE_STATUS_FOR_MANIFEST="$2" \
+    LEGACY_COMPARE_STATUS_FOR_MANIFEST="$3" \
+    FINAL_COMPARE_STATUS_FOR_MANIFEST="$4" \
+    GIT_HEAD_SHA="$(git rev-parse HEAD)" \
+    GATE_ARCHIVE="${ARCHIVE}" \
+    GATE_ARTIFACT_DIR="${ARTIFACT_DIR}" \
+    GATE_PROJECT="${PROJECT}" \
+    GATE_INSTANCE="${INSTANCE}" \
+    GATE_ZONE="${ZONE}" \
+    GATE_MACHINE="${MACHINE}" \
+    GATE_ACCELERATOR="${ACCELERATOR}" \
+    GATE_IMAGE_PROJECT="${IMAGE_PROJECT}" \
+    GATE_IMAGE_FAMILY="${IMAGE_FAMILY}" \
+    GATE_BOOT_DISK_SIZE="${BOOT_DISK_SIZE}" \
+    GATE_DELETE_ON_EXIT="${DELETE_ON_EXIT}" \
+    GATE_GCS_PREFIX="${GCS_PREFIX}" \
+    GATE_REQUIRE_METAL_COMPARE="${REQUIRE_METAL_COMPARE}" \
+    GATE_METAL_PROBE_SUITE_LOG="${METAL_PROBE_SUITE_LOG}" \
+    GATE_METAL_LEGACY_PROBE_SUITE_LOG="${METAL_LEGACY_PROBE_SUITE_LOG}" \
+    python3 - "${ARTIFACT_DIR}/cuda-gpu-runtime-manifest.json" <<'PY'
+import datetime as _dt
+import hashlib
+import json
+import os
+import pathlib
+import sys
+
+
+def file_record(path: str) -> dict | None:
+    p = pathlib.Path(path)
+    if not p.is_file():
+        return None
+    digest = hashlib.sha256()
+    with p.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {
+        "path": str(p),
+        "size_bytes": p.stat().st_size,
+        "sha256": digest.hexdigest(),
+    }
+
+
+manifest_path = pathlib.Path(sys.argv[1])
+artifact_dir = pathlib.Path(os.environ["GATE_ARTIFACT_DIR"])
+artifacts = {}
+if artifact_dir.is_dir():
+    for candidate in sorted(artifact_dir.iterdir()):
+        if candidate.is_file() and candidate.name != manifest_path.name:
+            record = file_record(str(candidate))
+            if record is not None:
+                artifacts[candidate.name] = record
+
+manifest = {
+    "schema_version": 1,
+    "schema": "metalfish.cuda_gpu_runtime_gate",
+    "created_utc": _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat(),
+    "git": {
+        "head_sha": os.environ["GIT_HEAD_SHA"],
+        "archive": file_record(os.environ["GATE_ARCHIVE"]),
+    },
+    "gcp": {
+        "project": os.environ["GATE_PROJECT"],
+        "instance": os.environ["GATE_INSTANCE"],
+        "zone": os.environ["GATE_ZONE"],
+        "machine": os.environ["GATE_MACHINE"],
+        "accelerator": os.environ["GATE_ACCELERATOR"],
+        "image_project": os.environ["GATE_IMAGE_PROJECT"],
+        "image_family": os.environ["GATE_IMAGE_FAMILY"],
+        "boot_disk_size": os.environ["GATE_BOOT_DISK_SIZE"],
+        "delete_on_exit": os.environ["GATE_DELETE_ON_EXIT"] == "1",
+        "gcs_prefix": os.environ["GATE_GCS_PREFIX"],
+    },
+    "inputs": {
+        "require_metal_compare": os.environ["GATE_REQUIRE_METAL_COMPARE"],
+        "metal_probe_suite_log": file_record(os.environ["GATE_METAL_PROBE_SUITE_LOG"]),
+        "metal_legacy_probe_suite_log": file_record(
+            os.environ["GATE_METAL_LEGACY_PROBE_SUITE_LOG"]
+        ),
+    },
+    "status": {
+        "remote_status": os.environ["REMOTE_STATUS_FOR_MANIFEST"],
+        "bt4_compare_status": os.environ["BT4_COMPARE_STATUS_FOR_MANIFEST"],
+        "legacy_compare_status": os.environ["LEGACY_COMPARE_STATUS_FOR_MANIFEST"],
+        "final_compare_status": os.environ["FINAL_COMPARE_STATUS_FOR_MANIFEST"],
+    },
+    "artifacts": artifacts,
+}
+manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+print(f"Wrote CUDA runtime manifest: {manifest_path}")
+PY
+}
+
+upload_collected_artifacts() {
+  if [[ "${COLLECT_ARTIFACTS}" != "1" || -z "${GCS_PREFIX}" || ! -d "${ARTIFACT_DIR}" ]]; then
+    return 0
+  fi
+
+  shopt -s nullglob
+  local files=("${ARTIFACT_DIR}"/*)
+  shopt -u nullglob
+  if ((${#files[@]} == 0)); then
+    return 0
+  fi
+
+  gcloud storage cp "${files[@]}" "${GCS_PREFIX%/}/${INSTANCE}/"
+  echo "Uploaded CUDA gate artifacts to ${GCS_PREFIX%/}/${INSTANCE}/"
 }
 
 compare_collected_probe_suite() {
@@ -309,12 +422,29 @@ set -e
 
 collect_remote_artifacts
 COMPARE_STATUS=0
+BT4_COMPARE_STATUS="skipped"
+LEGACY_COMPARE_STATUS="skipped"
 if [[ "${REMOTE_STATUS}" == "0" ]]; then
-  compare_collected_probe_suite || COMPARE_STATUS=$?
-  if [[ "${COMPARE_STATUS}" == "0" ]]; then
-    compare_collected_legacy_probe_suite || COMPARE_STATUS=$?
+  BT4_COMPARE_STATUS=0
+  compare_collected_probe_suite || BT4_COMPARE_STATUS=$?
+  if [[ "${BT4_COMPARE_STATUS}" == "0" ]]; then
+    LEGACY_COMPARE_STATUS=0
+    compare_collected_legacy_probe_suite || LEGACY_COMPARE_STATUS=$?
   fi
 fi
+
+if [[ "${BT4_COMPARE_STATUS}" != "0" && "${BT4_COMPARE_STATUS}" != "skipped" ]]; then
+  COMPARE_STATUS="${BT4_COMPARE_STATUS}"
+elif [[ "${LEGACY_COMPARE_STATUS}" != "0" && "${LEGACY_COMPARE_STATUS}" != "skipped" ]]; then
+  COMPARE_STATUS="${LEGACY_COMPARE_STATUS}"
+fi
+
+write_runtime_manifest \
+  "${REMOTE_STATUS}" \
+  "${BT4_COMPARE_STATUS}" \
+  "${LEGACY_COMPARE_STATUS}" \
+  "${COMPARE_STATUS}"
+upload_collected_artifacts
 
 if [[ "${REMOTE_STATUS}" != "0" ]]; then
   exit "${REMOTE_STATUS}"

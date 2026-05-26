@@ -134,6 +134,12 @@ Current CUDA backend boundary:
   `TRACE_WORST policy_delta=0.000006`, `REUSE_STRESS_MAX policy_delta=0.000007`,
   `SINGLE_REUSE_STRESS_MAX policy_delta=0.000000`, graph replay observed, and
   BK.07 `bestmove h5f6`.
+- The Linux CUDA GCP gate now writes `cuda-gpu-runtime-manifest.json` after
+  remote artifact collection and optional Metal/CUDA comparison. The manifest
+  records the source archive hash, commit, VM shape, accelerator image,
+  requested Metal comparison inputs, remote and comparison statuses, and hashes
+  for collected logs and release packages. Optional GCS upload runs after that
+  manifest is written so comparison logs and the manifest travel together.
 - The Windows CUDA compile package smoke runs packaged
   `metalfish_nn_probe.exe --metadata-only --backend cuda` on both BT4 and
   legacy 42850 weights, verifies that the release zip also contains
