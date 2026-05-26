@@ -252,6 +252,7 @@ write_summary() {
     echo "- hybrid auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log")"
     echo "- hybrid ANE-disable smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log")"
     echo "- Linux CUDA package: $(summary_log_status "${CUDA_PACKAGE}")"
+    echo "- packaged NN comparison: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log")"
     echo "- packaged CUDA probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-probe.log")"
     echo "- packaged CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-smoke.log")"
     echo "- CUDA profile: $(summary_log_status "${BUILD_DIR}/cuda-gpu-profile.log")"
@@ -287,6 +288,8 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log"
     summary_failure_lines "hybrid ANE-disable smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log"
+    summary_failure_lines "packaged NN comparison" \
+      "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
     summary_failure_lines "packaged CUDA probe" \
       "${BUILD_DIR}/cuda-gpu-package-probe.log"
     summary_failure_lines "packaged CUDA UCI smoke" \
@@ -916,20 +919,53 @@ python3 tools/write_portable_manifest.py \
   --output "${BUILD_DIR}/PORTABLE_ARTIFACT.md" \
   --notes "This package is smoke-tested on an NVIDIA L4 runtime gate before upload." \
   --notes "The package includes metalfish_nn_probe so release artifacts can verify CUDA inference metadata." \
+  --notes "The package includes test_nn_comparison so release artifacts can verify CUDA batch and reuse parity." \
   --notes "CUDA runtime libraries are expected from the host driver/toolkit installation."
 cp "${BUILD_DIR}/metalfish" "${CUDA_PACKAGE_DIR}/"
 cp "${BUILD_DIR}/metalfish_nn_probe" "${CUDA_PACKAGE_DIR}/"
+cp "${BUILD_DIR}/test_nn_comparison" "${CUDA_PACKAGE_DIR}/"
 cp "${BUILD_DIR}/PORTABLE_ARTIFACT.md" "${CUDA_PACKAGE_DIR}/"
 cp README.md CHANGELOG.md LICENSE "${CUDA_PACKAGE_DIR}/"
 tar -czf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_DIR}" .
 tar -xzf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_CHECK_DIR}"
 test -x "${CUDA_PACKAGE_CHECK_DIR}/metalfish"
 test -x "${CUDA_PACKAGE_CHECK_DIR}/metalfish_nn_probe"
+test -x "${CUDA_PACKAGE_CHECK_DIR}/test_nn_comparison"
 test -s "${CUDA_PACKAGE_CHECK_DIR}/PORTABLE_ARTIFACT.md"
 grep -q -- "- Platform: Linux x86_64 CUDA" \
   "${CUDA_PACKAGE_CHECK_DIR}/PORTABLE_ARTIFACT.md"
 grep -q "CUDA transformer backend" \
   "${CUDA_PACKAGE_CHECK_DIR}/PORTABLE_ARTIFACT.md"
+METALFISH_NN_WEIGHTS="${WEIGHTS}" \
+  METALFISH_NN_PARITY_REPORT="${BUILD_DIR}/cuda-gpu-package-parity-report.md" \
+  METALFISH_NN_BATCH_BENCH="${METALFISH_NN_BATCH_BENCH:-1}" \
+  METALFISH_NN_BATCH_TRACE_WORST="${METALFISH_NN_BATCH_TRACE_WORST:-1}" \
+  METALFISH_NN_SINGLE_REUSE_STRESS="${METALFISH_NN_SINGLE_REUSE_STRESS:-1}" \
+  METALFISH_NN_BATCH_REUSE_STRESS="${METALFISH_NN_BATCH_REUSE_STRESS:-1}" \
+  METALFISH_NN_BENCH_ITERS="${METALFISH_NN_BENCH_ITERS:-2}" \
+  METALFISH_NN_BENCH_MAX_BATCH="${METALFISH_NN_BENCH_MAX_BATCH:-32}" \
+  METALFISH_NN_BENCH_WARMUP_ITERS="${METALFISH_NN_BENCH_WARMUP_ITERS:-3}" \
+  METALFISH_NN_BENCH_GRAPH_REUSE_PROBE="${METALFISH_NN_BENCH_GRAPH_REUSE_PROBE:-1}" \
+  METALFISH_CUDA_GRAPH_STATUS_DETAIL="${METALFISH_CUDA_GRAPH_STATUS_DETAIL:-1}" \
+  METALFISH_CUDA_PROFILE=0 \
+  "${CUDA_PACKAGE_CHECK_DIR}/test_nn_comparison" \
+  2>&1 | tee "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+grep -q "MCTS evaluator batch parity" \
+  "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+grep -q "TRACE_WORST:" "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+grep -q "SINGLE_REUSE_STRESS_MAX:" \
+  "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+grep -q "REUSE_STRESS_MAX:" \
+  "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+grep -q "batches:" "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+grep -q "graph_reuse_probe:" \
+  "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+grep -q "CUDA transformer backend" \
+  "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
+  grep -q "executor=resolved+graph-replay" \
+    "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+fi
 METALFISH_CUDA_PROFILE=0 \
   METALFISH_CUDA_GRAPH_STATUS_DETAIL="${METALFISH_CUDA_GRAPH_STATUS_DETAIL:-1}" \
   "${CUDA_PACKAGE_CHECK_DIR}/metalfish_nn_probe" \

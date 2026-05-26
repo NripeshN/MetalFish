@@ -125,6 +125,11 @@ Current CUDA backend boundary:
   mapping regressions across transformer and classical-convolution network
   families in a no-GPU Linux CUDA toolchain before the runtime L4 gate spends
   GPU time.
+- The Linux CUDA L4 runtime package now ships `test_nn_comparison` alongside
+  `metalfish` and `metalfish_nn_probe`; the extracted package runs the same
+  BT4 fixed-reference, batch-parity, single-reuse, batch-reuse, graph-reuse, and
+  batch-benchmark smoke as the build-tree CUDA binary before the package is
+  accepted.
 - The Windows CUDA compile package smoke runs packaged
   `metalfish_nn_probe.exe --metadata-only --backend cuda` on both BT4 and
   legacy 42850 weights, verifies that the release zip also contains

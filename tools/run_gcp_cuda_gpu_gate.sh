@@ -182,7 +182,10 @@ collect_remote_artifacts() {
     cuda-gpu-uci-hybrid-smoke.log \
     cuda-gpu-uci-hybrid-clock-start-smoke.log \
     cuda-gpu-uci-hybrid-clock-safety-smoke.log \
+    cuda-gpu-uci-hybrid-auto-smoke.log \
     cuda-gpu-uci-hybrid-ane-smoke.log \
+    cuda-gpu-package-nn-comparison.log \
+    cuda-gpu-package-parity-report.md \
     cuda-gpu-package-probe.log \
     cuda-gpu-package-uci-smoke.log \
     cuda-gpu-profile.log; do
