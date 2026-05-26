@@ -366,7 +366,7 @@ try {
   }
   if ($BuildTests -eq "ON") {
     $PackagedProbeLog = Join-Path $BuildDir "windows-cuda-packaged-bt4-metadata-probe.json"
-    Write-Host "Running packaged Windows CUDA metadata probe"
+    Write-Host "Running packaged Windows CUDA BT4 metadata probe"
     & $PackagedProbe `
       --weights $Bt4Path `
       --backend cuda `
@@ -383,7 +383,30 @@ try {
                                 '"cuda_schedule_fully_supported":true',
                                 '"cuda_output_mapping_ok":true')) {
       if ($PackagedProbeText -notlike "*$RequiredText*") {
-        throw "Packaged Windows CUDA metadata probe missing expected output: $RequiredText"
+        throw "Packaged Windows CUDA BT4 metadata probe missing expected output: $RequiredText"
+      }
+    }
+
+    $PackagedLegacyProbeLog = Join-Path $BuildDir "windows-cuda-packaged-legacy-metadata-probe.json"
+    Write-Host "Running packaged Windows CUDA legacy metadata probe"
+    & $PackagedProbe `
+      --weights $LegacyPath `
+      --backend cuda `
+      --metadata-only `
+      --top 3 `
+      2>&1 | Tee-Object -FilePath $PackagedLegacyProbeLog
+    if ($LASTEXITCODE -ne 0) {
+      throw "Packaged Windows CUDA legacy metadata probe failed with exit code $LASTEXITCODE"
+    }
+    $PackagedLegacyProbeText = Get-Content -Path $PackagedLegacyProbeLog -Raw
+    foreach ($RequiredText in @('"metadata_only":true', '"backend":"cuda"',
+                                '"format":"attention_body=no',
+                                '"policy_head":"', '"value_head":"',
+                                '"execution_plan":"',
+                                '"cuda_schedule_fully_supported":true',
+                                '"cuda_output_mapping_ok":true')) {
+      if ($PackagedLegacyProbeText -notlike "*$RequiredText*") {
+        throw "Packaged Windows CUDA legacy metadata probe missing expected output: $RequiredText"
       }
     }
   }
@@ -392,7 +415,8 @@ try {
 }
 $SmokeSteps += "$PackageName.zip extracted AB self-smoke"
 if ($BuildTests -eq "ON") {
-  $SmokeSteps += "$PackageName.zip extracted metadata probe"
+  $SmokeSteps += "$PackageName.zip extracted BT4 metadata probe"
+  $SmokeSteps += "$PackageName.zip extracted legacy metadata probe"
 }
 
 $Summary = Join-Path $BuildDir "windows-cuda-compile-summary.md"
@@ -410,10 +434,12 @@ if ($BuildTests -eq "ON") {
   $Bt4Probe = Read-ProbeJson $ProbeLog
   $LegacyProbe = Read-ProbeJson $LegacyProbeLog
   $PackagedBt4Probe = Read-ProbeJson $PackagedProbeLog
+  $PackagedLegacyProbe = Read-ProbeJson $PackagedLegacyProbeLog
 
   Assert-CudaMetadataProbe "BT4 metadata probe" $Bt4Probe
   Assert-CudaMetadataProbe "legacy metadata probe" $LegacyProbe
   Assert-CudaMetadataProbe "packaged BT4 metadata probe" $PackagedBt4Probe
+  Assert-CudaMetadataProbe "packaged legacy metadata probe" $PackagedLegacyProbe
 
   $ComparableProbeFields = @(
     "tensor_plan",
@@ -426,6 +452,9 @@ if ($BuildTests -eq "ON") {
   foreach ($Field in $ComparableProbeFields) {
     if ($Bt4Probe.$Field -ne $PackagedBt4Probe.$Field) {
       throw "Packaged BT4 probe does not match build-tree BT4 probe field: $Field"
+    }
+    if ($LegacyProbe.$Field -ne $PackagedLegacyProbe.$Field) {
+      throw "Packaged legacy probe does not match build-tree legacy probe field: $Field"
     }
   }
 
@@ -456,6 +485,7 @@ if ($BuildTests -eq "ON") {
       steps = [int64]$LegacyProbe.steps
     }
     packaged_bt4_matches_build_tree = $true
+    packaged_legacy_matches_build_tree = $true
     compared_fields = $ComparableProbeFields
   }
 }

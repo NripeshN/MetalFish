@@ -125,6 +125,11 @@ Current CUDA backend boundary:
   mapping regressions across transformer and classical-convolution network
   families in a no-GPU Linux CUDA toolchain before the runtime L4 gate spends
   GPU time.
+- The Windows CUDA compile package smoke runs packaged
+  `metalfish_nn_probe.exe --metadata-only --backend cuda` on both BT4 and
+  legacy 42850 weights, then compares the packaged metadata contract against
+  the build-tree probes. This catches missing packaged probe/DLL/runtime
+  dependencies and package-only metadata drift before the Windows GPU VM gate.
 - `MCTSMinibatchSize=0` now keeps search-side CUDA auto batches aligned with the
   CUDA graph-replay stable batch size. CUDA builds use
   `MCTSCudaAutoMinibatchSize` when set, otherwise
