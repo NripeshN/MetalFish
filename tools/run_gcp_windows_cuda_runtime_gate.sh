@@ -405,6 +405,13 @@ copy_to_remote "${WEIGHTS}" "C:/metalfish/networks/BT4-1024x15x32h-swa-6147500.p
 copy_to_remote "${LEGACY_WEIGHTS}" "C:/metalfish/networks/legacy-42850.pb.gz"
 copy_to_remote "${NNUE_BIG}" "C:/metalfish/networks/nn-c288c895ea92.nnue"
 copy_to_remote "${NNUE_SMALL}" "C:/metalfish/networks/nn-37f18f62d772.nnue"
+python3 - <<'PY' >"${RUN_DIR}/probe-positions.json"
+import json
+from tools.run_nn_backend_probe_suite import DEFAULT_POSITIONS
+
+print(json.dumps([position.__dict__ for position in DEFAULT_POSITIONS]))
+PY
+copy_to_remote "${RUN_DIR}/probe-positions.json" "C:/metalfish/probe-positions.json"
 
 cat >"${RUN_DIR}/run-smokes.ps1" <<POWERSHELL
 \$ErrorActionPreference = "Stop"
@@ -495,20 +502,19 @@ function Invoke-ProbeSuiteSmoke {
   )
   \$stdout = Join-Path \$Logs "\$Name.stdout.log"
   \$stderr = Join-Path \$Logs "\$Name.stderr.log"
-  \$positions = @(
-    @{ name = "startpos"; fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"; moves = "" },
-    @{ name = "bk07"; fen = "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - - 0 1"; moves = "" },
-    @{ name = "kiwipete"; fen = "r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1"; moves = "" },
-    @{ name = "white-promotion"; fen = "6bk/P7/8/8/8/8/8/K7 w - - 0 1"; moves = "" },
-    @{ name = "black-promotion"; fen = "k7/8/8/8/8/8/6p1/KB6 b - - 0 1"; moves = "" },
-    @{ name = "history-repetition"; fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"; moves = "g1f3 g8f6 f3g1 f6g8" },
-    @{ name = "canonical-black-to-move"; fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"; moves = "e2e4" },
-    @{ name = "castling-history"; fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"; moves = "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 e1g1" }
-  )
+  \$positionsPath = Join-Path \$Root "probe-positions.json"
+  if (-not (Test-Path \$positionsPath)) {
+    throw "Probe positions file not found: \$positionsPath"
+  }
+  \$positions = @(Get-Content -Path \$positionsPath -Raw -Encoding UTF8 | ConvertFrom-Json)
   \$outBuilder = New-Object System.Text.StringBuilder
   \$errBuilder = New-Object System.Text.StringBuilder
   foreach (\$position in \$positions) {
     [void]\$outBuilder.AppendLine("info string windows-probe-suite name=" + \$position.name)
+    \$moves = ""
+    if (\$null -ne \$position.moves) {
+      \$moves = [string]\$position.moves
+    }
     \$arguments = "--weights " + (Quote-ProbeArgument \$Weights) +
       " --backend cuda --fen " + (Quote-ProbeArgument \$position.fen) +
       " --cuda-device -1 --cuda-graph-execution true" +
@@ -516,8 +522,8 @@ function Invoke-ProbeSuiteSmoke {
       " --cuda-deterministic-attention-softmax true" +
       " --cuda-full-buffer-clear true" +
       " --top 3 --warmup 1 --iterations 1 --full-policy"
-    if (-not [string]::IsNullOrWhiteSpace(\$position.moves)) {
-      \$arguments += " --moves " + (Quote-ProbeArgument \$position.moves)
+    if (-not [string]::IsNullOrWhiteSpace(\$moves)) {
+      \$arguments += " --moves " + (Quote-ProbeArgument \$moves)
     }
     \$psi = New-Object System.Diagnostics.ProcessStartInfo
     \$psi.FileName = \$Probe
@@ -840,7 +846,7 @@ Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "setoption name UseMCTS value true",
   "setoption name UseHybridSearch value false",
   "setoption name MCTSMaxThreads value 1",
-  "setoption name MCTSMinibatchSize value 1",
+  "setoption name MCTSMinibatchSize value 0",
   "position startpos",
   "go ${UCI_GO}",
   "quit"
@@ -895,7 +901,7 @@ Invoke-UciSmoke -Name "hybrid-auto" -Commands @(
   "setoption name HybridABThreads value 2",
   "setoption name HybridAutoABThreadsCap value 0",
   "setoption name MCTSMaxThreads value 1",
-  "setoption name MCTSMinibatchSize value 1",
+  "setoption name MCTSMinibatchSize value 0",
   "setoption name TransformerLowTimeFallbackMs value 0",
   "position startpos",
   "go ${HYBRID_UCI_GO}",

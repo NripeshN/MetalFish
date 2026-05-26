@@ -135,7 +135,10 @@ Current CUDA backend boundary:
   `MCTSCudaAutoMinibatchSize` when set, otherwise
   `NNCudaStableExecutionBatchSize` when set, otherwise
   `METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE`, otherwise `16`; explicit
-  `MCTSMinibatchSize` still overrides this for experiments.
+  `MCTSMinibatchSize` still overrides this for experiments. Linux and Windows
+  CUDA runtime gates keep explicit `NNBackend=cuda` smokes at batch 1, and run
+  `NNBackend=auto` MCTS/Hybrid smokes with `MCTSMinibatchSize=0` so both the
+  fixed and production auto-minibatch paths are covered.
 - Production CUDA backend controls now flow through the shared
   `NN::BackendConfig` seam and UCI: `NNCudaDevice`, `NNCudaGraphExecution`,
   `NNCudaStableExecutionBatchSize`, `NNCudaDeterministicAttentionSoftmax`, and
@@ -802,7 +805,10 @@ driver script, verifies `nvidia-smi`, installs the VC++ runtime, and runs
 packaged `metalfish_nn_probe.exe --backend cuda` probes for both BT4 and legacy
 42850 weights, runs eight-position full-policy probe suites for both nets with
 the same production CUDA runtime flags as UCI, and then runs `NNBackend=cuda`
-MCTS and Hybrid UCI smokes with BT4 weights. It tries
+MCTS and Hybrid UCI smokes with BT4 weights. The Windows probe suites consume a
+JSON copy of `tools/run_nn_backend_probe_suite.py`'s `DEFAULT_POSITIONS`, so
+Metal, Linux CUDA, and Windows CUDA stay on the same parity-position contract.
+It tries
 `g2-standard-8` and then `g2-standard-4` by default so transient L4 stockouts do
 not fail the release gate before the engine runs. The VM is deleted by default
 and logs plus `windows-cuda-runtime-manifest.json` are collected under

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import pathlib
-import re
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -701,29 +700,20 @@ sys.exit(7)
     raise AssertionError("expected probe suite failure to be reported")
 
 
-def test_windows_cuda_probe_suite_positions_match_python_default() -> None:
+def test_windows_cuda_probe_suite_positions_use_python_default() -> None:
     script = (ROOT / "tools/run_gcp_windows_cuda_runtime_gate.sh").read_text(
         encoding="utf-8"
     )
-    marker = "  \\$positions = @(\n"
-    start = script.index(marker) + len(marker)
-    end = script.index("  \\$outBuilder", start)
-    lines = script[start:end].splitlines()
-    actual = []
-    for line in lines:
-        match = re.search(
-            r'@\{ name = "([^"]+)"; fen = "([^"]+)"; moves = "([^"]*)" \}',
-            line,
-        )
-        if match:
-            actual.append(match.groups())
-
-    expected = [
-        (position.name, position.fen, position.moves)
-        for position in probe_suite.DEFAULT_POSITIONS
-    ]
-    expect("windows probe suite position count", len(actual) == len(expected))
-    expect("windows probe suite positions", actual == expected)
+    expect(
+        "windows probe suite imports python defaults",
+        "from tools.run_nn_backend_probe_suite import DEFAULT_POSITIONS" in script,
+    )
+    expect("windows probe suite writes positions json", "probe-positions.json" in script)
+    expect("windows probe suite reads json", "ConvertFrom-Json" in script)
+    expect(
+        "windows probe suite does not duplicate position table",
+        '@{ name = "startpos"; fen =' not in script,
+    )
 
 
 def main() -> int:
@@ -738,7 +728,7 @@ def main() -> int:
     test_probe_suite_runner_rejects_semantic_drift()
     test_probe_suite_runner_rejects_network_info_drift()
     test_probe_suite_runner_reports_failing_probe_name()
-    test_windows_cuda_probe_suite_positions_match_python_default()
+    test_windows_cuda_probe_suite_positions_use_python_default()
     print("NN backend artifact tests: OK")
     return 0
 

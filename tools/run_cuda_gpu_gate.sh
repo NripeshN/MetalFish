@@ -198,6 +198,7 @@ write_summary() {
     echo "- auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
+    echo "- hybrid auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log")"
     echo "- hybrid ANE-disable smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log")"
     echo "- CUDA profile: $(summary_log_status "${BUILD_DIR}/cuda-gpu-profile.log")"
     echo
@@ -220,6 +221,8 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
     summary_failure_lines "hybrid CUDA UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
+    summary_failure_lines "hybrid auto UCI smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log"
     summary_failure_lines "hybrid ANE-disable smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log"
     summary_failure_lines "CUDA profile" "${BUILD_DIR}/cuda-gpu-profile.log"
@@ -356,6 +359,7 @@ write_summary() {
     echo "- auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log" "not reached")"
     echo "- cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log" "not reached")"
     echo "- hybrid-cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log" "not reached")"
+    echo "- hybrid-auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log" "not reached")"
     if [[ -s "${BUILD_DIR}/cuda-gpu-profile.log" ]]; then
       echo
       echo "## CUDA Profile"
@@ -596,7 +600,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption UseMCTS=true \
   --setoption UseHybridSearch=false \
   --setoption MCTSMaxThreads=1 \
-  --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSMinibatchSize=0 \
   --go "nodes 1" \
   --expect-output "CUDA transformer backend" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-auto-smoke.log"
@@ -616,7 +620,9 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption UseHybridSearch=false \
   --setoption MCTSMaxThreads=1 \
   --setoption MCTSMinibatchSize=1 \
-  --go "${UCI_GO}" | tee "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
+  --go "${UCI_GO}" \
+  --expect-output "CUDA transformer backend" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
   python3 tools/uci_smoke.py \
@@ -640,7 +646,34 @@ METALFISH_CUDA_PROFILE=0 \
   --go "nodes 8" \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "CUDA transformer backend" \
+  --expect-output "Final: MCTSPlayouts=" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption Threads=3 \
+  --setoption NNBackend=auto \
+  --setoption NNBackendRequireAccelerator=true \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=false \
+  --setoption UseHybridSearch=true \
+  --setoption HybridMCTSThreads=1 \
+  --setoption HybridABThreads=2 \
+  --setoption HybridAutoABThreadsCap=0 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=0 \
+  --go "nodes 8" \
+  --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "Final: MCTSPlayouts=" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log"
 
 mkdir -p "${BUILD_DIR}/dummy-coreml.mlmodelc"
 METALFISH_CUDA_PROFILE=0 \
@@ -672,6 +705,7 @@ METALFISH_CUDA_PROFILE=0 \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "CUDA transformer backend" \
   --expect-output "ANE root probe disabled" \
+  --expect-output "Final: MCTSPlayouts=" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-ane-smoke.log"
 
 if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; then
