@@ -552,7 +552,7 @@ METALFISH_CUDA_PROFILE=0 \
   --cuda-full-buffer-clear true \
   --out "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log" \
   --top 3 \
-  --warmup 0 \
+  --warmup 1 \
   --iterations 1 \
   --backend-label "CUDA transformer backend" \
   "${CUDA_RUNTIME_REQUIRE_ARGS[@]}" \
@@ -578,7 +578,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --cuda-full-buffer-clear true \
     --out "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log" \
     --top 3 \
-    --warmup 0 \
+    --warmup 1 \
     --iterations 1 \
     --backend-label "CUDA transformer backend" \
     "${CUDA_RUNTIME_REQUIRE_ARGS[@]}" \
@@ -599,7 +599,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
     --top 3 \
-    --warmup 0 \
+    --warmup 1 \
     --iterations 1 \
     2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-isolation-bt4-legacy.log"
   assert_cuda_isolation_probe_log \
@@ -617,7 +617,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
     --top 3 \
-    --warmup 0 \
+    --warmup 1 \
     --iterations 1 \
     2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-isolation-legacy-bt4.log"
   assert_cuda_isolation_probe_log \
