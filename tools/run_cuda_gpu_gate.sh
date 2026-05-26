@@ -473,6 +473,10 @@ METALFISH_CUDA_PROFILE=0 \
   --top 3 \
   --warmup 0 \
   --iterations 1 \
+  --backend-label "CUDA transformer backend" \
+  --require-wdl \
+  --require-moves-left \
+  --expected-policy-count 1858 \
   --full-policy
 if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
   if [[ ! -s "${LEGACY_WEIGHTS}" ]]; then
@@ -493,6 +497,10 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --top 3 \
     --warmup 0 \
     --iterations 1 \
+    --backend-label "CUDA transformer backend" \
+    --no-require-wdl \
+    --no-require-moves-left \
+    --expected-policy-count 1858 \
     --full-policy
 fi
 

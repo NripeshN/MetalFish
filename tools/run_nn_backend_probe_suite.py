@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--full-policy", action="store_true")
+    parser.add_argument("--backend-label")
+    parser.add_argument("--require-wdl", dest="require_wdl", action="store_true")
+    parser.add_argument("--no-require-wdl", dest="require_wdl", action="store_false")
+    parser.set_defaults(require_wdl=None)
+    parser.add_argument(
+        "--require-moves-left",
+        dest="require_moves_left",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--no-require-moves-left",
+        dest="require_moves_left",
+        action="store_false",
+    )
+    parser.set_defaults(require_moves_left=None)
+    parser.add_argument("--expected-policy-count", type=int)
     parser.add_argument(
         "--position",
         action="append",
@@ -163,6 +181,60 @@ def subprocess_output_text(value: str | bytes | None) -> str:
     return value
 
 
+def load_probe_jsons(text: str) -> list[dict[str, Any]]:
+    probes: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{") or not stripped.endswith("}"):
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            probes.append(payload)
+    return probes
+
+
+def validate_probe(
+    args: argparse.Namespace, position: ProbePosition, output: str
+) -> None:
+    probes = load_probe_jsons(output)
+    if not probes:
+        raise RuntimeError(f"{position.name}: probe did not emit JSON output")
+
+    probe = probes[-1]
+    if args.backend_label:
+        network_info = str(probe.get("network_info", ""))
+        if args.backend_label not in network_info:
+            raise RuntimeError(
+                f"{position.name}: expected backend label "
+                f"{args.backend_label!r} in network_info={network_info!r}"
+            )
+    if args.require_wdl is not None and bool(probe.get("has_wdl")) != args.require_wdl:
+        expected = "present" if args.require_wdl else "absent"
+        actual = "present" if probe.get("has_wdl") else "absent"
+        raise RuntimeError(f"{position.name}: expected WDL {expected}, got {actual}")
+    if (
+        args.require_moves_left is not None
+        and bool(probe.get("has_moves_left")) != args.require_moves_left
+    ):
+        expected = "present" if args.require_moves_left else "absent"
+        actual = "present" if probe.get("has_moves_left") else "absent"
+        raise RuntimeError(
+            f"{position.name}: expected moves-left {expected}, got {actual}"
+        )
+    if args.expected_policy_count is not None:
+        policy = probe.get("policy")
+        if not isinstance(policy, list):
+            raise RuntimeError(f"{position.name}: probe did not emit full policy")
+        if len(policy) != args.expected_policy_count:
+            raise RuntimeError(
+                f"{position.name}: expected policy length "
+                f"{args.expected_policy_count}, got {len(policy)}"
+            )
+
+
 def main() -> int:
     args = parse_args()
     positions = parse_positions(args.position, args.line)
@@ -196,6 +268,7 @@ def main() -> int:
                 raise RuntimeError(
                     f"{position.name}: probe failed with exit code {result.returncode}"
                 )
+            validate_probe(args, position, result.stdout + result.stderr)
 
     print(f"NN backend probe suite: PASS probes={len(positions)} log={output}")
     return 0
