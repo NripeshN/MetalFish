@@ -696,6 +696,22 @@ Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "quit"
 ) -RequiredText @("CUDA transformer backend", "bestmove")
 
+Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name NNBackend value auto",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name UseMCTS value true",
+  "setoption name UseHybridSearch value false",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSMinibatchSize value 1",
+  "position startpos",
+  "go ${UCI_GO}",
+  "quit"
+) -RequiredText @("CUDA transformer backend", "bestmove")
+
 Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "uci",
   "isready",
@@ -717,10 +733,64 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "quit"
 ) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove") -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
 
+\$DummyCoreMl = Join-Path \$PackageDir "dummy-coreml.mlmodelc"
+New-Item -ItemType Directory -Force -Path \$DummyCoreMl | Out-Null
+
+Invoke-UciSmoke -Name "hybrid-auto" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name Threads value 3",
+  "setoption name NNBackend value auto",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name UseMCTS value false",
+  "setoption name UseHybridSearch value true",
+  "setoption name HybridMCTSThreads value 1",
+  "setoption name HybridABThreads value 2",
+  "setoption name HybridAutoABThreadsCap value 0",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSMinibatchSize value 1",
+  "setoption name TransformerLowTimeFallbackMs value 0",
+  "position startpos",
+  "go ${HYBRID_UCI_GO}",
+  "quit"
+) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove") -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+
+Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name Threads value 3",
+  "setoption name NNBackend value cuda",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name UseMCTS value false",
+  "setoption name UseHybridSearch value true",
+  "setoption name HybridMCTSThreads value 1",
+  "setoption name HybridABThreads value 2",
+  "setoption name HybridAutoABThreadsCap value 0",
+  "setoption name HybridANERootProbe value true",
+  "setoption name HybridANERootHints value true",
+  "setoption name HybridANEWeights value \$Bt4",
+  "setoption name HybridANEModelPath value \$DummyCoreMl",
+  "setoption name HybridANEComputeUnits value all",
+  "setoption name HybridANERootHintWaitMs value 0",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSMinibatchSize value 1",
+  "setoption name TransformerLowTimeFallbackMs value 0",
+  "position startpos",
+  "go ${HYBRID_UCI_GO}",
+  "quit"
+) -RequiredText @("Starting Parallel Hybrid Search", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove") -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth") -GoWaitMs ${HYBRID_POST_GO_SLEEP_MS}
+
 \$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
 \$LegacyProbeJson = Read-ProbeJson "cuda-legacy-probe.stdout.log"
 \$MctsText = Read-LogText "cuda-mcts.stdout.log"
+\$AutoMctsText = Read-LogText "cuda-auto-mcts.stdout.log"
 \$HybridText = Read-LogText "hybrid-cuda.stdout.log"
+\$HybridAutoText = Read-LogText "hybrid-auto.stdout.log"
+\$HybridAneText = Read-LogText "hybrid-cuda-ane-disabled.stdout.log"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
 \$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
 \$Manifest = [ordered]@{
@@ -789,6 +859,13 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
       stdout_log = "cuda-mcts.stdout.log"
       stderr_log = "cuda-mcts.stderr.log"
     }
+    cuda_auto_mcts = [ordered]@{
+      go = "${UCI_GO}"
+      bestmove = (Find-BestMove \$AutoMctsText)
+      backend_selected = (Test-BackendSelected \$AutoMctsText)
+      stdout_log = "cuda-auto-mcts.stdout.log"
+      stderr_log = "cuda-auto-mcts.stderr.log"
+    }
     hybrid_cuda = [ordered]@{
       go = "${HYBRID_UCI_GO}"
       bestmove = (Find-BestMove \$HybridText)
@@ -796,6 +873,23 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
       metrics = (Find-FinalMetrics \$HybridText)
       stdout_log = "hybrid-cuda.stdout.log"
       stderr_log = "hybrid-cuda.stderr.log"
+    }
+    hybrid_auto = [ordered]@{
+      go = "${HYBRID_UCI_GO}"
+      bestmove = (Find-BestMove \$HybridAutoText)
+      backend_selected = (Test-BackendSelected \$HybridAutoText)
+      metrics = (Find-FinalMetrics \$HybridAutoText)
+      stdout_log = "hybrid-auto.stdout.log"
+      stderr_log = "hybrid-auto.stderr.log"
+    }
+    hybrid_cuda_ane_disabled = [ordered]@{
+      go = "${HYBRID_UCI_GO}"
+      bestmove = (Find-BestMove \$HybridAneText)
+      backend_selected = (Test-BackendSelected \$HybridAneText)
+      ane_disabled = (\$HybridAneText -like "*ANE root probe disabled*")
+      metrics = (Find-FinalMetrics \$HybridAneText)
+      stdout_log = "hybrid-cuda-ane-disabled.stdout.log"
+      stderr_log = "hybrid-cuda-ane-disabled.stderr.log"
     }
   }
 }
@@ -807,7 +901,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-mcts, hybrid-cuda",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-mcts, cuda-auto-mcts, hybrid-cuda, hybrid-auto, hybrid-cuda-ane-disabled",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"
