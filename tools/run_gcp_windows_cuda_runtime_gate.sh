@@ -415,7 +415,7 @@ function Invoke-ProbeSuiteSmoke {
     [void]\$outBuilder.AppendLine("info string windows-probe-suite name=" + \$position.name)
     \$arguments = "--weights " + (Quote-ProbeArgument \$Weights) +
       " --backend cuda --fen " + (Quote-ProbeArgument \$position.fen) +
-      " --top 3 --warmup 0 --iterations 1 --full-policy"
+      " --top 3 --warmup 1 --iterations 1 --full-policy"
     if (-not [string]::IsNullOrWhiteSpace(\$position.moves)) {
       \$arguments += " --moves " + (Quote-ProbeArgument \$position.moves)
     }
@@ -463,7 +463,7 @@ function Invoke-ProbeSuiteSmoke {
   Set-Content -Path \$stderr -Value \$errText -Encoding UTF8
 
   \$probeObjects = @()
-  foreach (\$line in \$outText -split "`r?`n") {
+  foreach (\$line in \$outText -split [char]10) {
     \$trimmed = \$line.Trim()
     if (\$trimmed.StartsWith("{") -and \$trimmed.EndsWith("}")) {
       \$probeObjects += @(\$trimmed | ConvertFrom-Json)
