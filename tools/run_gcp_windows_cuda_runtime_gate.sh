@@ -30,6 +30,7 @@ NNUE_SMALL="${METALFISH_NNUE_SMALL:-${ROOT_DIR}/networks/nn-37f18f62d772.nnue}"
 UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420}"
 PROBE_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420}"
 UCI_GO="${METALFISH_WINDOWS_CUDA_UCI_GO:-nodes 1}"
+BK07_POST_GO_SLEEP_MS="${METALFISH_WINDOWS_CUDA_BK07_POST_GO_SLEEP_MS:-30000}"
 HYBRID_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_UCI_GO:-movetime 8000}"
 HYBRID_POST_GO_SLEEP_MS="${METALFISH_WINDOWS_CUDA_HYBRID_POST_GO_SLEEP_MS:-10000}"
 UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
@@ -941,7 +942,7 @@ Invoke-UciSmoke -Name "cuda-bk07-mcts" -Commands @(
   "position fen \$Bk07Fen",
   "go nodes 50",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove h5f6"))
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove h5f6")) -GoWaitMs ${BK07_POST_GO_SLEEP_MS}
 
 Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "uci",
