@@ -136,7 +136,10 @@ Current CUDA backend boundary:
   `NNCudaStableExecutionBatchSize`, `NNCudaDeterministicAttentionSoftmax`, and
   `NNCudaFullBufferClear`. Metal and portable CPU ignore those CUDA-specific
   fields, while MCTS/Hybrid cache keys include them so changing backend runtime
-  policy cannot reuse a stale loaded CUDA network.
+  policy cannot reuse a stale loaded CUDA network. The standalone
+  `metalfish_nn_probe` accepts the matching `--cuda-*` flags, so CUDA parity
+  suites exercise the same graph, device, stable-batch, deterministic-softmax,
+  and buffer-clear policy as UCI searches.
 - `NNBackendRequireAccelerator=true` maps `NNBackend=auto` to the strict
   `accelerator` selector for MCTS/Hybrid configs. That selector chooses the
   compiled Metal or CUDA backend and fails instead of falling through to the
@@ -627,8 +630,9 @@ Current CUDA backend boundary:
   `nvidia-smi` and `nvcc`, builds CUDA with BT4 weights, runs CUDA unit tests,
   runs `test_nn_comparison` through `NNBackend=auto` on the CUDA host, asserts
   that auto selected the CUDA transformer backend, builds and runs the
-  standalone NN probe with `--backend cuda`, and runs one-thread MCTS UCI smokes
-  for `NNBackend=auto`, explicit `NNBackend=cuda`, and the production hybrid
+  standalone NN probe with `--backend cuda` plus the production CUDA runtime
+  flags, and runs one-thread MCTS UCI smokes for `NNBackend=auto`, explicit
+  `NNBackend=cuda`, and the production hybrid
   search path with CUDA-backed transformer MCTS. Dependency installation
   waits
   and retries around apt/dpkg locks and refreshes the package index before each
@@ -781,8 +785,9 @@ the current commit. The remote runner creates an ephemeral Windows Server 2022
 G2 VM with an `nvidia-l4-vws` accelerator, installs the Google Cloud NVIDIA
 driver script, verifies `nvidia-smi`, installs the VC++ runtime, and runs
 packaged `metalfish_nn_probe.exe --backend cuda` probes for both BT4 and legacy
-42850 weights, runs eight-position full-policy probe suites for both nets, and
-then runs `NNBackend=cuda` MCTS and Hybrid UCI smokes with BT4 weights. It tries
+42850 weights, runs eight-position full-policy probe suites for both nets with
+the same production CUDA runtime flags as UCI, and then runs `NNBackend=cuda`
+MCTS and Hybrid UCI smokes with BT4 weights. It tries
 `g2-standard-8` and then `g2-standard-4` by default so transient L4 stockouts do
 not fail the release gate before the engine runs. The VM is deleted by default
 and logs plus `windows-cuda-runtime-manifest.json` are collected under

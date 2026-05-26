@@ -436,6 +436,11 @@ METALFISH_CUDA_PROFILE=0 \
   "${BUILD_DIR}/metalfish_nn_probe" \
   --weights "${WEIGHTS}" \
   --backend cuda \
+  --cuda-device -1 \
+  --cuda-graph-execution true \
+  --cuda-stable-execution-batch-size 16 \
+  --cuda-deterministic-attention-softmax true \
+  --cuda-full-buffer-clear true \
   --top 3 \
   --warmup 0 \
   --iterations 1 \
@@ -454,6 +459,11 @@ METALFISH_CUDA_PROFILE=0 \
   --probe "${BUILD_DIR}/metalfish_nn_probe" \
   --weights "${WEIGHTS}" \
   --backend cuda \
+  --cuda-device -1 \
+  --cuda-graph-execution true \
+  --cuda-stable-execution-batch-size 16 \
+  --cuda-deterministic-attention-softmax true \
+  --cuda-full-buffer-clear true \
   --out "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log" \
   --top 3 \
   --warmup 0 \
@@ -469,6 +479,11 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --probe "${BUILD_DIR}/metalfish_nn_probe" \
     --weights "${LEGACY_WEIGHTS}" \
     --backend cuda \
+    --cuda-device -1 \
+    --cuda-graph-execution true \
+    --cuda-stable-execution-batch-size 16 \
+    --cuda-deterministic-attention-softmax true \
+    --cuda-full-buffer-clear true \
     --out "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log" \
     --top 3 \
     --warmup 0 \

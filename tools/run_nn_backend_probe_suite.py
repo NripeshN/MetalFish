@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", required=True)
     parser.add_argument("--coreml-model")
     parser.add_argument("--coreml-compute-units", default="cpu-ne")
+    parser.add_argument("--cuda-device", type=int)
+    parser.add_argument("--cuda-graph-execution")
+    parser.add_argument("--cuda-stable-execution-batch-size", type=int)
+    parser.add_argument("--cuda-deterministic-attention-softmax")
+    parser.add_argument("--cuda-full-buffer-clear")
     parser.add_argument("--top", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--iterations", type=int, default=1)
@@ -125,6 +130,26 @@ def probe_command(args: argparse.Namespace, position: ProbePosition) -> list[str
     if args.coreml_model:
         command.extend(["--coreml-model", args.coreml_model])
         command.extend(["--coreml-compute-units", args.coreml_compute_units])
+    if args.cuda_device is not None:
+        command.extend(["--cuda-device", str(args.cuda_device)])
+    if args.cuda_graph_execution is not None:
+        command.extend(["--cuda-graph-execution", args.cuda_graph_execution])
+    if args.cuda_stable_execution_batch_size is not None:
+        command.extend(
+            [
+                "--cuda-stable-execution-batch-size",
+                str(args.cuda_stable_execution_batch_size),
+            ]
+        )
+    if args.cuda_deterministic_attention_softmax is not None:
+        command.extend(
+            [
+                "--cuda-deterministic-attention-softmax",
+                args.cuda_deterministic_attention_softmax,
+            ]
+        )
+    if args.cuda_full_buffer_clear is not None:
+        command.extend(["--cuda-full-buffer-clear", args.cuda_full_buffer_clear])
     if args.full_policy:
         command.append("--full-policy")
     return command

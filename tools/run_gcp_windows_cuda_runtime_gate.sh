@@ -505,6 +505,10 @@ function Invoke-ProbeSuiteSmoke {
     [void]\$outBuilder.AppendLine("info string windows-probe-suite name=" + \$position.name)
     \$arguments = "--weights " + (Quote-ProbeArgument \$Weights) +
       " --backend cuda --fen " + (Quote-ProbeArgument \$position.fen) +
+      " --cuda-device -1 --cuda-graph-execution true" +
+      " --cuda-stable-execution-batch-size 16" +
+      " --cuda-deterministic-attention-softmax true" +
+      " --cuda-full-buffer-clear true" +
       " --top 3 --warmup 1 --iterations 1 --full-policy"
     if (-not [string]::IsNullOrWhiteSpace(\$position.moves)) {
       \$arguments += " --moves " + (Quote-ProbeArgument \$position.moves)
@@ -768,10 +772,15 @@ function Invoke-UciSmoke {
 \$Legacy = Join-Path \$Networks "legacy-42850.pb.gz"
 \$NnueBig = Join-Path \$Networks "nn-c288c895ea92.nnue"
 \$NnueSmall = Join-Path \$Networks "nn-37f18f62d772.nnue"
+\$CudaProbeOptions = " --backend cuda" +
+  " --cuda-device -1 --cuda-graph-execution true" +
+  " --cuda-stable-execution-batch-size 16" +
+  " --cuda-deterministic-attention-softmax true" +
+  " --cuda-full-buffer-clear true"
 
-\$ProbeArgs = "--weights " + [char]34 + \$Bt4 + [char]34 + " --backend cuda --batch-size 1 --warmup 1 --iterations 1 --top 3"
+\$ProbeArgs = "--weights " + [char]34 + \$Bt4 + [char]34 + \$CudaProbeOptions + " --batch-size 1 --warmup 1 --iterations 1 --top 3"
 Invoke-ProbeSmoke -Name "cuda-probe" -Arguments \$ProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"value":', '"policy_top":')
-\$LegacyProbeArgs = "--weights " + [char]34 + \$Legacy + [char]34 + " --backend cuda --batch-size 1 --warmup 1 --iterations 1 --top 3"
+\$LegacyProbeArgs = "--weights " + [char]34 + \$Legacy + [char]34 + \$CudaProbeOptions + " --batch-size 1 --warmup 1 --iterations 1 --top 3"
 Invoke-ProbeSmoke -Name "cuda-legacy-probe" -Arguments \$LegacyProbeArgs -RequiredText @('"backend":"cuda"', "CUDA transformer backend", '"has_wdl":false', '"has_moves_left":false', '"policy_top":')
 \$ProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-probe-suite" -Weights \$Bt4 -RequireWdl \$true -RequireMovesLeft \$true
 \$LegacyProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-legacy-probe-suite" -Weights \$Legacy -RequireWdl \$false -RequireMovesLeft \$false

@@ -42,6 +42,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace MetalFish;
@@ -53,6 +54,11 @@ struct Options {
   std::string backend = "metal";
   std::string coreml_model;
   std::string coreml_compute_units = "cpu-ne";
+  int cuda_device = -1;
+  bool cuda_graph_execution = true;
+  int cuda_stable_execution_batch_size = 0;
+  bool cuda_deterministic_attention_softmax = true;
+  bool cuda_full_buffer_clear = true;
   std::string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   std::vector<std::string> moves;
   int top = 8;
@@ -153,6 +159,31 @@ std::string Lowercase(std::string value) {
   return value;
 }
 
+bool ParseBool(std::string value, const char *name) {
+  value = Lowercase(std::move(value));
+  if (value == "1" || value == "true" || value == "yes" || value == "on")
+    return true;
+  if (value == "0" || value == "false" || value == "no" || value == "off")
+    return false;
+  throw std::runtime_error(std::string("Invalid boolean for ") + name + ": " +
+                           value);
+}
+
+NN::BackendConfig BackendConfigFromOptions(const Options &options) {
+  NN::BackendConfig config;
+  config.backend = options.backend;
+  config.coreml_model_path = options.coreml_model;
+  config.coreml_compute_units = options.coreml_compute_units;
+  config.cuda_device = options.cuda_device;
+  config.cuda_graph_execution = options.cuda_graph_execution;
+  config.cuda_stable_execution_batch_size =
+      options.cuda_stable_execution_batch_size;
+  config.cuda_deterministic_attention_softmax =
+      options.cuda_deterministic_attention_softmax;
+  config.cuda_full_buffer_clear = options.cuda_full_buffer_clear;
+  return config;
+}
+
 Move ParseProbeMove(const Position &position, std::string text) {
   text = Lowercase(std::move(text));
   for (const Move move : MoveList<LEGAL>(position)) {
@@ -168,6 +199,10 @@ void PrintUsage(const char *argv0) {
       << " --weights <file.pb[.gz]> [--backend auto|metal|cuda|cpu|coreml]"
          " [--coreml-model model.mlpackage]"
          " [--coreml-compute-units cpu|cpu-gpu|cpu-ne|all]"
+         " [--cuda-device n] [--cuda-graph-execution true|false]"
+         " [--cuda-stable-execution-batch-size n]"
+         " [--cuda-deterministic-attention-softmax true|false]"
+         " [--cuda-full-buffer-clear true|false]"
          " [--fen <fen>] [--moves \"uci...\"] [--top n]"
          " [--batch-size n] [--warmup n]"
          " [--iterations n] [--full-input] [--full-policy]"
@@ -194,6 +229,23 @@ Options ParseArgs(int argc, char **argv) {
       options.coreml_model = require_value("--coreml-model");
     } else if (arg == "--coreml-compute-units") {
       options.coreml_compute_units = require_value("--coreml-compute-units");
+    } else if (arg == "--cuda-device") {
+      options.cuda_device = std::stoi(require_value("--cuda-device"));
+    } else if (arg == "--cuda-graph-execution") {
+      options.cuda_graph_execution =
+          ParseBool(require_value("--cuda-graph-execution"),
+                    "--cuda-graph-execution");
+    } else if (arg == "--cuda-stable-execution-batch-size") {
+      options.cuda_stable_execution_batch_size =
+          std::stoi(require_value("--cuda-stable-execution-batch-size"));
+    } else if (arg == "--cuda-deterministic-attention-softmax") {
+      options.cuda_deterministic_attention_softmax =
+          ParseBool(require_value("--cuda-deterministic-attention-softmax"),
+                    "--cuda-deterministic-attention-softmax");
+    } else if (arg == "--cuda-full-buffer-clear") {
+      options.cuda_full_buffer_clear =
+          ParseBool(require_value("--cuda-full-buffer-clear"),
+                    "--cuda-full-buffer-clear");
     } else if (arg == "--fen") {
       options.fen = require_value("--fen");
     } else if (arg == "--moves") {
@@ -240,6 +292,11 @@ Options ParseArgs(int argc, char **argv) {
     throw std::runtime_error("--iterations must be positive");
   if (options.backend.empty())
     throw std::runtime_error("--backend must be non-empty");
+  if (options.cuda_device < -1)
+    throw std::runtime_error("--cuda-device must be -1 or non-negative");
+  if (options.cuda_stable_execution_batch_size < 0)
+    throw std::runtime_error(
+        "--cuda-stable-execution-batch-size must be non-negative");
   const bool backend_will_construct =
       !options.metadata_only || options.construct_backend;
   if (backend_will_construct && options.backend == "coreml" &&
@@ -351,8 +408,7 @@ ProbeInstance CreateProbeInstance(const Options &options,
   instance.transform = transform;
   instance.inputs = std::vector<NN::InputPlanes>(options.batch_size, planes);
   instance.network =
-      NN::CreateNetwork(weights, options.backend, options.coreml_model,
-                        options.coreml_compute_units);
+      NN::CreateNetwork(weights, BackendConfigFromOptions(options));
   return instance;
 }
 
@@ -502,9 +558,7 @@ void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
 
   std::string network_info;
   if (options.construct_backend) {
-    auto network =
-        NN::CreateNetwork(weights, options.backend, options.coreml_model,
-                          options.coreml_compute_units);
+    auto network = NN::CreateNetwork(weights, BackendConfigFromOptions(options));
     network_info = network->GetNetworkInfo();
   }
 
@@ -626,9 +680,7 @@ void RunProbe(const Options &options) {
       NN::EncodePositionForNN(input_format, history, NN::kMoveHistory,
                               NN::FillEmptyHistory::FEN_ONLY, &transform);
 
-  auto network =
-      NN::CreateNetwork(weights, options.backend, options.coreml_model,
-                        options.coreml_compute_units);
+  auto network = NN::CreateNetwork(weights, BackendConfigFromOptions(options));
   const std::vector<NN::InputPlanes> batch_inputs(options.batch_size, planes);
   for (int i = 0; i < options.warmup; ++i)
     (void)network->EvaluateBatch(batch_inputs);
