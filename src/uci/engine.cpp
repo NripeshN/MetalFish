@@ -138,6 +138,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("NNWeights",
               Option("", [](const Option &) { return std::nullopt; }));
   options.add("NNBackend", Option("auto"));
+  options.add("NNBackendRequireAccelerator", Option(false));
   options.add("NNCoreMLModelPath", Option(""));
   options.add("NNCoreMLComputeUnits", Option("cpu-ne"));
 

@@ -26,6 +26,40 @@
 namespace MetalFish {
 namespace NN {
 
+namespace {
+
+std::unique_ptr<Network> CreateRequiredAcceleratorNetwork(
+    const WeightsFile &weights, const std::string &model_path,
+    const std::string &compute_units) {
+#ifdef USE_METAL
+  (void)model_path;
+  (void)compute_units;
+  try {
+    return std::make_unique<Metal::MetalNetwork>(weights);
+  } catch (const std::exception &e) {
+    throw std::runtime_error("Required Metal accelerator backend unavailable: " +
+                             std::string(e.what()));
+  }
+#elif defined(USE_CUDA)
+  (void)model_path;
+  (void)compute_units;
+  try {
+    return std::make_unique<Cuda::CudaNetwork>(weights);
+  } catch (const std::exception &e) {
+    throw std::runtime_error("Required CUDA accelerator backend unavailable: " +
+                             std::string(e.what()));
+  }
+#else
+  (void)weights;
+  (void)model_path;
+  (void)compute_units;
+  throw std::runtime_error("No accelerator NN backend was compiled into this "
+                           "MetalFish build");
+#endif
+}
+
+} // namespace
+
 class StubNetwork : public Network {
 public:
   StubNetwork(const WeightsFile &weights) : weights_(weights) {}
@@ -65,6 +99,10 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
                                        const std::string &backend,
                                        const std::string &model_path,
                                        const std::string &compute_units) {
+  if (backend == "accelerator") {
+    return CreateRequiredAcceleratorNetwork(weights, model_path, compute_units);
+  }
+
 #ifdef USE_COREML
   if (backend == "coreml") {
     return std::make_unique<CoreML::CoreMLNetwork>(weights, model_path,

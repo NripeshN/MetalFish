@@ -130,6 +130,11 @@ Current CUDA backend boundary:
   `MCTSCudaAutoMinibatchSize` when set, otherwise
   `METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE`, otherwise `16`; explicit
   `MCTSMinibatchSize` still overrides this for experiments.
+- `NNBackendRequireAccelerator=true` maps `NNBackend=auto` to the strict
+  `accelerator` selector for MCTS/Hybrid configs. That selector chooses the
+  compiled Metal or CUDA backend and fails instead of falling through to the
+  portable CPU transformer, so CUDA strength gates cannot hide accelerator
+  setup failures behind a slow fallback.
 - `src/nn/cuda/cuda_executor.*` is the inference execution seam.
 - `src/nn/network_execution_plan.*` builds the shared ordered and resolved
   tensor/stage plan that CUDA and future portable backends will execute.

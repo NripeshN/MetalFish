@@ -813,11 +813,18 @@ static int env_int_or_default(const char *name, int fallback, int min_value,
 
 static bool backend_can_select_cuda(std::string_view backend) {
 #ifdef USE_CUDA
-  return backend == "auto" || backend == "cuda";
+  return backend == "auto" || backend == "cuda" || backend == "accelerator";
 #else
   (void)backend;
   return false;
 #endif
+}
+
+static std::string resolve_nn_backend(Engine &engine) {
+  std::string backend = std::string(engine.get_options()["NNBackend"]);
+  if (backend == "auto" && engine.get_options()["NNBackendRequireAccelerator"])
+    return "accelerator";
+  return backend;
 }
 
 static int cuda_auto_mcts_minibatch_size(Engine &engine) {
@@ -917,7 +924,7 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
                                            int num_threads) {
   MCTS::SearchParams config;
   config.nn_weights_path = nn_weights;
-  config.nn_backend = std::string(engine.get_options()["NNBackend"]);
+  config.nn_backend = resolve_nn_backend(engine);
   config.num_threads = num_threads;
   config.coreml_model_path =
       std::string(engine.get_options()["NNCoreMLModelPath"]);

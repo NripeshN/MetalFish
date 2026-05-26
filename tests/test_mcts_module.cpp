@@ -1620,6 +1620,30 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
   expect_throws([&]() { NN::CreateNetwork(empty_weights, "not-a-backend"); },
                 "unknown backend should fail loudly");
 
+  bool accelerator_returned_stub = false;
+  bool accelerator_threw = false;
+  std::string accelerator_error;
+  try {
+    auto accelerator = NN::CreateNetwork(empty_weights, "accelerator");
+    accelerator_returned_stub =
+        accelerator->GetNetworkInfo().find("Stub network") != std::string::npos;
+  } catch (const std::exception &e) {
+    accelerator_threw = true;
+    accelerator_error = e.what();
+  }
+  expect(accelerator_threw || !accelerator_returned_stub,
+         "required accelerator backend must not fall back to stub", tc);
+#if !defined(USE_METAL) && !defined(USE_CUDA)
+  expect(accelerator_threw,
+         "required accelerator backend should fail when no accelerator is "
+         "compiled",
+         tc);
+  expect(accelerator_error.find("No accelerator NN backend") !=
+             std::string::npos,
+         "required accelerator failure should explain missing accelerator build",
+         tc);
+#endif
+
 #if !defined(USE_METAL) && !defined(USE_CUDA)
   auto auto_cpu = NN::CreateNetwork(make_dense_only_cpu_weights_file(), "auto");
   expect(auto_cpu->GetNetworkInfo().find("CPU transformer backend") !=

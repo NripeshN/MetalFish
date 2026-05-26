@@ -481,6 +481,7 @@ METALFISH_CUDA_PROFILE=0 \
   --engine "${BUILD_DIR}/metalfish" \
   --timeout "${UCI_TIMEOUT}" \
   --setoption NNBackend=auto \
+  --setoption NNBackendRequireAccelerator=true \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption UseMCTS=true \
   --setoption UseHybridSearch=false \
