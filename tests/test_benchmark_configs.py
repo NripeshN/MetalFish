@@ -1331,6 +1331,12 @@ def main() -> int:
             "METALFISH_REQUIRE_METAL_COMPARE",
             "runtime-gate-env.sh",
             "runtime-gate-inputs-manifest.json",
+            "validate_package_manifest",
+            "windows-cuda-package-manifest.json",
+            "metalfish.portable_artifact",
+            "windows-cuda",
+            "cudart64_*.dll",
+            "package_manifest",
             "tools/run_gcp_windows_cuda_runtime_gate.sh",
         ],
     )

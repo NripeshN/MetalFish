@@ -929,9 +929,11 @@ same-commit `MetalFish CI` run, downloads the macOS Metal artifact, writes
 For branch-local validation before the workflow file exists on `main`,
 `tools/fetch_windows_cuda_runtime_inputs.py` downloads the same-commit Windows
 CUDA compile artifact and optional macOS Metal artifact, validates both run
-provenance records, writes `runtime-gate-env.sh`, and records a
-`runtime-gate-inputs-manifest.json`. That keeps direct GCP runtime checks
-repeatable instead of relying on hand-copied package and probe-suite paths.
+provenance records, opens the packaged Windows CUDA zip to validate
+`windows-cuda-package-manifest.json`, writes `runtime-gate-env.sh`, and records
+a `runtime-gate-inputs-manifest.json`. That keeps direct GCP runtime checks
+repeatable instead of relying on hand-copied package and probe-suite paths, and
+prevents a bad package from starting a Windows GPU VM.
 
 ## Remaining Release Checklist
 

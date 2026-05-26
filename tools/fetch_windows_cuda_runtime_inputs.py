@@ -194,6 +194,89 @@ def sha256_file(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def validate_package_manifest(package: pathlib.Path) -> dict:
+    required_entries = {
+        "metalfish.exe",
+        "metalfish_nn_probe.exe",
+        "test_nn_comparison.exe",
+        "PORTABLE_ARTIFACT.md",
+        "windows-cuda-package-manifest.json",
+    }
+    required_manifest_files = required_entries - {"windows-cuda-package-manifest.json"}
+    required_dll_patterns = ("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")
+
+    with zipfile.ZipFile(package) as archive:
+        zip_names = {
+            pathlib.PurePosixPath(info.filename).as_posix().lstrip("./")
+            for info in archive.infolist()
+            if not info.is_dir()
+        }
+        missing_entries = sorted(required_entries - zip_names)
+        if missing_entries:
+            raise ValueError(
+                f"Windows CUDA package is missing entries: {', '.join(missing_entries)}"
+            )
+        try:
+            raw_manifest = archive.read("windows-cuda-package-manifest.json")
+        except KeyError as exc:
+            raise ValueError(
+                "Windows CUDA package is missing windows-cuda-package-manifest.json"
+            ) from exc
+
+    manifest = json.loads(raw_manifest.decode("utf-8-sig"))
+    if manifest.get("schema") != "metalfish.portable_artifact":
+        raise ValueError(
+            "Windows CUDA package manifest has unexpected schema: "
+            f"{manifest.get('schema')!r}"
+        )
+    package_info = manifest.get("package") or {}
+    if package_info.get("kind") != "windows-cuda":
+        raise ValueError(
+            "Windows CUDA package manifest has unexpected kind: "
+            f"{package_info.get('kind')!r}"
+        )
+    manifest_files = {
+        str(item.get("name", ""))
+        for item in manifest.get("files", [])
+        if isinstance(item, dict)
+    }
+    missing_manifest_files = sorted(required_manifest_files - manifest_files)
+    if missing_manifest_files:
+        raise ValueError(
+            "Windows CUDA package manifest is missing file entries: "
+            + ", ".join(missing_manifest_files)
+        )
+
+    missing_dll_patterns = [
+        pattern
+        for pattern in required_dll_patterns
+        if not any(fnmatch.fnmatch(name, pattern) for name in manifest_files)
+    ]
+    if missing_dll_patterns:
+        raise ValueError(
+            "Windows CUDA package manifest is missing CUDA DLL entries: "
+            + ", ".join(missing_dll_patterns)
+        )
+    missing_zip_dll_patterns = [
+        pattern
+        for pattern in required_dll_patterns
+        if not any(fnmatch.fnmatch(name, pattern) for name in zip_names)
+    ]
+    if missing_zip_dll_patterns:
+        raise ValueError(
+            "Windows CUDA package zip is missing CUDA DLL entries: "
+            + ", ".join(missing_zip_dll_patterns)
+        )
+
+    return {
+        "schema": manifest["schema"],
+        "kind": package_info["kind"],
+        "package_name": package_info.get("name"),
+        "file_count": len(manifest.get("files", [])),
+        "zip_entry_count": len(zip_names),
+    }
+
+
 def shell_exports(values: dict[str, str]) -> str:
     return "\n".join(
         f"export {key}={shlex.quote(value)}" for key, value in sorted(values.items())
@@ -267,6 +350,7 @@ def main(argv: list[str] | None = None) -> int:
         "metalfish*windows-x86_64-msvc-cuda.zip",
         "Windows CUDA package zip",
     )
+    package_manifest = validate_package_manifest(package)
 
     metal_run = None
     metal_artifact = None
@@ -320,6 +404,7 @@ def main(argv: list[str] | None = None) -> int:
             "archive": str(windows_archive),
             "package": str(package),
             "package_sha256": sha256_file(package),
+            "package_manifest": package_manifest,
         },
         "metal": None,
         "env_file": str(env_path),
@@ -336,6 +421,11 @@ def main(argv: list[str] | None = None) -> int:
     write_manifest(manifest_path, manifest)
 
     print(f"Windows CUDA package: {package}")
+    print(
+        "Windows CUDA package manifest: "
+        f"{package_manifest['schema']} {package_manifest['kind']} "
+        f"files={package_manifest['file_count']}"
+    )
     if metal_probe_log and metal_legacy_probe_log:
         print(f"Metal BT4 probe suite: {metal_probe_log}")
         print(f"Metal legacy probe suite: {metal_legacy_probe_log}")
