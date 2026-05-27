@@ -1103,6 +1103,9 @@ def runtime_inputs(*, windows_package: pathlib.Path | None = None) -> dict:
         "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
         "metal_legacy_probe_suite_log": metal_log_record("metal-legacy.log"),
         "metal_mcts_bk07_search_json": metal_log_record("metal-mcts-bk07.json"),
+        "metal_mcts_kiwipete_search_json": metal_log_record(
+            "metal-mcts-kiwipete.json"
+        ),
         "metal_hybrid_startpos_search_json": metal_log_record(
             "metal-hybrid-startpos.json"
         ),
