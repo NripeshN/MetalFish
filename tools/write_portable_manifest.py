@@ -61,9 +61,14 @@ def main() -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    sha = os.environ.get("GITHUB_SHA") or git_value(["rev-parse", "HEAD"])
-    branch = os.environ.get("GITHUB_REF_NAME") or git_value(
-        ["rev-parse", "--abbrev-ref", "HEAD"]
+    sha = os.environ.get("METALFISH_SOURCE_COMMIT") or git_value(
+        ["rev-parse", "HEAD"], os.environ.get("GITHUB_SHA", "unknown")
+    )
+    branch = (
+        os.environ.get("METALFISH_SOURCE_BRANCH")
+        or os.environ.get("GITHUB_HEAD_REF")
+        or os.environ.get("GITHUB_REF_NAME")
+        or git_value(["rev-parse", "--abbrev-ref", "HEAD"])
     )
     build_type = os.environ.get("BUILD_TYPE", "Release")
     runner = os.environ.get("RUNNER_OS", platform.system() or "unknown")

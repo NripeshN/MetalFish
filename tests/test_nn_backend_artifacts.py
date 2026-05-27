@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import pathlib
 import sys
 import tarfile
@@ -21,6 +22,7 @@ from tools import fetch_cuda_gpu_gate_inputs as cuda_gpu_inputs  # noqa: E402
 from tools import fetch_cuda_release_artifacts as cuda_release  # noqa: E402
 from tools import fetch_windows_cuda_runtime_inputs as win_cuda_inputs  # noqa: E402
 from tools import run_nn_backend_probe_suite as probe_suite  # noqa: E402
+from tools import write_portable_manifest as portable_manifest  # noqa: E402
 
 
 def expect(name: str, condition: bool) -> None:
@@ -1190,6 +1192,57 @@ def test_network_downloader_validates_gzip_weights() -> None:
     raise AssertionError("expected invalid gzip weights to be rejected")
 
 
+def test_portable_manifest_uses_checked_out_commit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        binary = root / "metalfish"
+        output = root / "PORTABLE_ARTIFACT.md"
+        manifest = root / "manifest.json"
+        binary.write_text("synthetic", encoding="utf-8")
+
+        old_env = {
+            key: os.environ.get(key)
+            for key in ("GITHUB_SHA", "GITHUB_HEAD_REF", "GITHUB_REF_NAME")
+        }
+        os.environ["GITHUB_SHA"] = "merge-commit"
+        os.environ["GITHUB_HEAD_REF"] = "cuda-support"
+        os.environ["GITHUB_REF_NAME"] = "43/merge"
+        try:
+            with argv(
+                [
+                    "--platform",
+                    "Synthetic",
+                    "--backend",
+                    "Synthetic backend",
+                    "--binary",
+                    "metalfish",
+                    "--output",
+                    str(output),
+                    "--json-output",
+                    str(manifest),
+                    "--package-kind",
+                    "synthetic",
+                    "--file",
+                    str(binary),
+                ]
+            ):
+                expect("portable manifest", portable_manifest.main() == 0)
+        finally:
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        expect(
+            "actual checkout commit",
+            data["package"]["source_commit"]
+            == portable_manifest.git_value(["rev-parse", "HEAD"]),
+        )
+        expect("head branch", data["package"]["source_branch"] == "cuda-support")
+
+
 def main() -> int:
     test_checker_writes_manifest()
     test_checker_rejects_missing_wdl()
@@ -1213,6 +1266,7 @@ def main() -> int:
     test_cuda_package_validator_rejects_source_commit_drift()
     test_cuda_release_artifact_helpers_require_metal_compare()
     test_network_downloader_validates_gzip_weights()
+    test_portable_manifest_uses_checked_out_commit()
     print("NN backend artifact tests: OK")
     return 0
 
