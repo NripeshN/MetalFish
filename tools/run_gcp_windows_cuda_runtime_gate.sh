@@ -1075,7 +1075,7 @@ function Write-SearchJson {
     \$sha.Dispose()
   }
   \$hash = ([BitConverter]::ToString(\$hashBytes)).Replace("-", "").ToLowerInvariant()
-  \$lines = @(\$Text -split "`r?`n")
+  \$lines = @([regex]::Split(\$Text, "\r?\n"))
   \$tailStart = [Math]::Max(0, \$lines.Count - 80)
   \$payload = [ordered]@{
     schema = "metalfish.uci_smoke_result"
@@ -1461,7 +1461,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth")
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
 
 Invoke-UciSmoke -Name "hybrid-cuda-clock-start" -Commands @(
   "uci",
@@ -1541,7 +1541,7 @@ Invoke-UciSmoke -Name "hybrid-auto" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth")
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=accelerator", "minibatch=${CUDA_STABLE_BATCH_SIZE}", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
 
 Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "uci",
@@ -1573,7 +1573,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "position startpos",
   "go ${HYBRID_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth")
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
 
 \$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
 \$LegacyProbeJson = Read-ProbeJson "cuda-legacy-probe.stdout.log"

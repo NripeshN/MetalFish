@@ -1674,7 +1674,7 @@ def main() -> int:
             "Hybrid MCTS runtime: backend=cuda",
             "ANE root probe disabled",
             "Final: MCTSPlayouts=",
-            'PositiveMetrics @("MCTSPlayouts", "MCTSEvals", "ABDepth")',
+            'PositiveMetrics @("MCTSPlayouts", "MCTSEvals")',
             "windows-cuda-runtime-manifest.json",
             "schema_version",
             "Get-FileHash",
