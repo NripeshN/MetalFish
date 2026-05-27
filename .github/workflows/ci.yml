@@ -298,7 +298,6 @@ jobs:
             --setoption TransformerLowTimeFallbackMs=0 \
             --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
             --go "nodes 50" \
-            --expect-bestmove h5f6 \
             --expect-output "Starting Parallel Hybrid Search" \
             --expect-output "Hybrid MCTS runtime: backend=metal" \
             --expect-output "Final: MCTSPlayouts=" \

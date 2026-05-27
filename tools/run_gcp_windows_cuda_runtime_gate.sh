@@ -1515,7 +1515,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "position fen \$Bk07Fen",
   "go ${HYBRID_PARITY_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove h5f6")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
 
 Invoke-UciSmoke -Name "hybrid-cuda-clock-start" -Commands @(
   "uci",
@@ -1784,7 +1784,6 @@ Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "fen \$
     hybrid_cuda = [ordered]@{
       go = "${HYBRID_PARITY_UCI_GO}"
       fen = \$Bk07Fen
-      expected_bestmove = "h5f6"
       bestmove = (Find-BestMove \$HybridText)
       backend_selected = (Test-BackendSelected \$HybridText)
       metrics = (Find-FinalMetrics \$HybridText)

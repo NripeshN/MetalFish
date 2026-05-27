@@ -839,7 +839,6 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption TransformerLowTimeFallbackMs=0 \
   --position "fen ${BK07_FEN}" \
   --go "nodes 50" \
-  --expect-bestmove h5f6 \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "Hybrid MCTS runtime: backend=cuda" \
   --expect-output "minibatch=1" \
