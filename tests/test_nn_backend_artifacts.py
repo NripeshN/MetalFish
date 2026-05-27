@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import gzip
 import json
 import pathlib
 import sys
@@ -14,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
+from tools import download_engine_networks as downloader  # noqa: E402
 from tools import fetch_cuda_release_artifacts as cuda_release  # noqa: E402
 from tools import fetch_windows_cuda_runtime_inputs as win_cuda_inputs  # noqa: E402
 from tools import run_nn_backend_probe_suite as probe_suite  # noqa: E402
@@ -946,6 +948,25 @@ def test_cuda_release_artifact_helpers_reject_failed_runtime() -> None:
     raise AssertionError("expected failed runtime manifest to be rejected")
 
 
+def test_network_downloader_validates_gzip_weights() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        valid = root / "valid.pb.gz"
+        invalid = root / "invalid.pb.gz"
+        with gzip.open(valid, "wb") as handle:
+            handle.write(downloader.WEIGHTS_PROTO_MAGIC_PREFIX + b"synthetic")
+        with gzip.open(invalid, "wb") as handle:
+            handle.write(b"not-a-weights-protobuf")
+
+        downloader.validate_gzip_weights(valid)
+        try:
+            downloader.validate_gzip_weights(invalid)
+        except RuntimeError as exc:
+            expect("invalid magic rejected", "Lc0 protobuf" in str(exc))
+            return
+    raise AssertionError("expected invalid gzip weights to be rejected")
+
+
 def main() -> int:
     test_checker_writes_manifest()
     test_checker_rejects_missing_wdl()
@@ -963,6 +984,7 @@ def main() -> int:
     test_windows_cuda_runtime_input_helpers_select_artifacts()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
+    test_network_downloader_validates_gzip_weights()
     print("NN backend artifact tests: OK")
     return 0
 

@@ -11,6 +11,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 NNUE_URLS = {
@@ -28,12 +29,53 @@ BT4_URL = "https://storage.lczero.org/files/networks-contrib/big-transformers/BT
 
 LEGACY_42850_FILENAME = "legacy-42850.pb.gz"
 LEGACY_42850_URL = "https://storage.lczero.org/files/networks/00af53b081e80147172e6f281c01daf5ca19ada173321438914c730370aa4267"
+WEIGHTS_PROTO_MAGIC_PREFIX = b"\x0d\xc0\x01\x00\x00"
 
 
-def download(url: str, dest: Path, retries: int, force: bool) -> None:
+def validate_gzip_weights(path: Path) -> None:
+    total = 0
+    first_chunk = b""
+    with gzip.open(path, "rb") as gz:
+        while True:
+            chunk = gz.read(1024 * 1024)
+            if not chunk:
+                break
+            if not first_chunk:
+                first_chunk = chunk
+            total += len(chunk)
+    if total <= 0:
+        raise RuntimeError(f"Downloaded gzip weights are empty after decompression: {path}")
+    if not first_chunk.startswith(WEIGHTS_PROTO_MAGIC_PREFIX):
+        raise RuntimeError(f"Downloaded gzip weights do not look like an Lc0 protobuf: {path}")
+
+
+def validate_plain_weights(path: Path) -> None:
+    with path.open("rb") as handle:
+        prefix = handle.read(len(WEIGHTS_PROTO_MAGIC_PREFIX))
+    if prefix != WEIGHTS_PROTO_MAGIC_PREFIX:
+        raise RuntimeError(f"Downloaded weights do not look like an Lc0 protobuf: {path}")
+
+
+def download(
+    url: str,
+    dest: Path,
+    retries: int,
+    force: bool,
+    validator: Callable[[Path], None] | None = None,
+) -> None:
     if dest.exists() and dest.stat().st_size > 0 and not force:
-        print(f"Using cached {dest}")
-        return
+        if validator:
+            try:
+                validator(dest)
+            except RuntimeError as exc:
+                print(f"Cached {dest} failed validation: {exc}; re-downloading")
+                dest.unlink(missing_ok=True)
+            else:
+                print(f"Using cached {dest}")
+                return
+        else:
+            print(f"Using cached {dest}")
+            return
 
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     last_error: Exception | None = None
@@ -51,6 +93,8 @@ def download(url: str, dest: Path, retries: int, force: bool) -> None:
                     shutil.copyfileobj(response, out)
             if tmp.stat().st_size <= 0:
                 raise RuntimeError(f"Downloaded empty file: {url}")
+            if validator:
+                validator(tmp)
             tmp.replace(dest)
             return
         except (OSError, urllib.error.URLError, RuntimeError) as exc:
@@ -75,6 +119,7 @@ def decompress_gzip(src: Path, dest: Path, force: bool) -> None:
     if tmp.stat().st_size <= 0:
         tmp.unlink(missing_ok=True)
         raise RuntimeError(f"Decompressed empty file: {dest}")
+    validate_plain_weights(tmp)
     tmp.replace(dest)
 
 
@@ -124,12 +169,18 @@ def main() -> int:
         url = os.environ.get("METALFISH_BT4_WEIGHTS_URL", BT4_URL)
         gz_path = dest / BT4_GZ_FILENAME
         pb_path = dest / BT4_FILENAME
-        download(url, gz_path, args.retries, args.force)
+        download(url, gz_path, args.retries, args.force, validate_gzip_weights)
         decompress_gzip(gz_path, pb_path, args.force)
 
     if want_legacy:
         url = os.environ.get("METALFISH_LEGACY_WEIGHTS_URL", LEGACY_42850_URL)
-        download(url, dest / LEGACY_42850_FILENAME, args.retries, args.force)
+        download(
+            url,
+            dest / LEGACY_42850_FILENAME,
+            args.retries,
+            args.force,
+            validate_gzip_weights,
+        )
 
     return 0
 
