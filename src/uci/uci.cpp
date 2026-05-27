@@ -827,6 +827,15 @@ static std::string resolve_nn_backend(Engine &engine) {
   return backend;
 }
 
+static bool auto_mcts_can_scale_workers(Engine &engine) {
+#ifdef USE_CUDA
+  return backend_can_select_cuda(resolve_nn_backend(engine));
+#else
+  (void)engine;
+  return false;
+#endif
+}
+
 static int cuda_auto_mcts_minibatch_size(Engine &engine) {
   const int requested =
       static_cast<int>(engine.get_options()["MCTSCudaAutoMinibatchSize"]);
@@ -957,8 +966,7 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       static_cast<int>(engine.get_options()["NNCudaStableExecutionBatchSize"]);
   config.cuda_deterministic_attention_softmax =
       engine.get_options()["NNCudaDeterministicAttentionSoftmax"];
-  config.cuda_full_buffer_clear =
-      engine.get_options()["NNCudaFullBufferClear"];
+  config.cuda_full_buffer_clear = engine.get_options()["NNCudaFullBufferClear"];
 
   config.cpuct = get_float_option(engine, "MCTSCPuct", config.cpuct);
   config.cpuct_at_root =
@@ -1036,6 +1044,7 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       std::max(1, static_cast<int>(engine.get_options()["MCTSVirtualLoss"]));
   const int requested_minibatch =
       static_cast<int>(engine.get_options()["MCTSMinibatchSize"]);
+  config.minibatch_size_auto = requested_minibatch <= 0;
   config.minibatch_size = requested_minibatch > 0
                               ? requested_minibatch
                               : auto_mcts_minibatch_size(engine, num_threads);
@@ -1081,6 +1090,18 @@ static int auto_hybrid_ab_threads_cap(int available) {
   return 0;
 }
 
+static int auto_hybrid_mcts_threads(Engine &engine, int available) {
+  if (available <= 1)
+    return 1;
+  if (!auto_mcts_can_scale_workers(engine))
+    return 1;
+  if (available >= 12)
+    return std::clamp(available / 4, 2, 4);
+  if (available >= 6)
+    return 2;
+  return 1;
+}
+
 static HybridThreadSplit
 compute_hybrid_thread_split(Engine &engine,
                             const Search::LimitsType *limits = nullptr) {
@@ -1100,9 +1121,7 @@ compute_hybrid_thread_split(Engine &engine,
   if (mcts_override > 0) {
     mcts_threads = std::clamp(mcts_override, 1, available);
   } else {
-    // One transformer worker keeps the GPU side active while leaving the CPU
-    // search enough cores to finish tactical verification.
-    mcts_threads = 1;
+    mcts_threads = auto_hybrid_mcts_threads(engine, available);
   }
 
   int ab_threads = 0;
@@ -1352,11 +1371,8 @@ static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
   int mcts_thread_cap =
       static_cast<int>(engine.get_options()["MCTSMaxThreads"]);
   if (!explicit_threads_arg && mcts_thread_cap <= 0) {
-    // Strength-first auto mode:
-    // Apple Silicon MPSGraph latency is better with one MCTS worker for the
-    // current transformer. Higher worker counts require MCTSParallelSearch for
-    // explicit throughput tests.
-    mcts_thread_cap = 1;
+    mcts_thread_cap =
+        (allow_parallel_mcts || auto_mcts_can_scale_workers(engine)) ? 0 : 1;
   }
 
   if (!explicit_threads_arg && mcts_thread_cap > 0 &&
@@ -1380,10 +1396,9 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.cuda_device << "|" << config.cuda_graph_execution << "|"
       << config.cuda_stable_execution_batch_size << "|"
       << config.cuda_deterministic_attention_softmax << "|"
-      << config.cuda_full_buffer_clear << "|"
-      << config.num_threads << "|" << config.cpuct << "|"
-      << config.cpuct_at_root << "|" << config.cpuct_base << "|"
-      << config.cpuct_factor << "|" << config.cpuct_base_at_root << "|"
+      << config.cuda_full_buffer_clear << "|" << config.num_threads << "|"
+      << config.cpuct << "|" << config.cpuct_at_root << "|" << config.cpuct_base
+      << "|" << config.cpuct_factor << "|" << config.cpuct_base_at_root << "|"
       << config.cpuct_factor_at_root << "|" << config.fpu_absolute << "|"
       << config.fpu_absolute_at_root << "|" << config.fpu_value << "|"
       << config.fpu_value_at_root << "|" << config.fpu_reduction << "|"
@@ -1397,6 +1412,7 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff << "|"
       << config.two_fold_draws << "|" << config.sticky_endgames << "|"
       << config.virtual_loss << "|" << config.minibatch_size << "|"
+      << config.minibatch_size_auto << "|"
       << config.max_out_of_order_evals_factor << "|"
       << config.add_dirichlet_noise << "|" << config.noise_epsilon << "|"
       << config.noise_alpha << "|" << config.out_of_order_eval << "|"

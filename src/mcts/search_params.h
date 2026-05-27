@@ -76,6 +76,7 @@ struct SearchParams {
   int num_threads = 2;
   int virtual_loss = 1;
   int minibatch_size = 32;
+  bool minibatch_size_auto = false;
 
   // Time management (Lc0 defaults)
   std::string time_manager = "smooth";

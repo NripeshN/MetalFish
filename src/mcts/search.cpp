@@ -199,6 +199,24 @@ void ApplyNNPolicyToNode(Node *node, const EvaluationResult &result,
   node->SortEdges();
 }
 
+int ResolveAutoMinibatchSize(const SearchParams &params,
+                             const NN::BackendCapabilities &capabilities) {
+  if (capabilities.actual_backend == "cuda") {
+    if (capabilities.stable_execution_batch_size > 0) {
+      return std::clamp(capabilities.stable_execution_batch_size, 1, 256);
+    }
+    if (params.cuda_stable_execution_batch_size > 0)
+      return std::clamp(params.cuda_stable_execution_batch_size, 1, 256);
+    return 16;
+  }
+
+#ifdef __APPLE__
+  return 1;
+#else
+  return params.GetNumThreads() >= 8 ? 64 : 32;
+#endif
+}
+
 bool ShouldReplayWarmCudaGraph(const SearchParams &params,
                                const NN::BackendCapabilities &capabilities) {
 #ifdef USE_CUDA
@@ -241,13 +259,27 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
   }
 
   if (backend_) {
+    const NN::BackendCapabilities backend_capabilities =
+        backend_->GetBackendCapabilities();
+    if (params_.minibatch_size_auto) {
+      const int resolved_minibatch =
+          ResolveAutoMinibatchSize(params_, backend_capabilities);
+      if (resolved_minibatch != params_.minibatch_size) {
+        std::cerr << "[MCTS] Resolved auto minibatch: initial="
+                  << params_.minibatch_size
+                  << " actual=" << resolved_minibatch
+                  << " backend=" << backend_capabilities.actual_backend
+                  << std::endl;
+      }
+      params_.minibatch_size = resolved_minibatch;
+    }
     Position warmup_pos;
     StateInfo warmup_st;
     warmup_pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                    false, &warmup_st);
     const uint64_t warmup_base = warmup_pos.raw_key();
     const bool replay_warm_cuda_graph =
-        ShouldReplayWarmCudaGraph(params_, backend_->GetBackendCapabilities());
+        ShouldReplayWarmCudaGraph(params_, backend_capabilities);
     auto warmup_batch = [&](int batch_size, int passes, uint64_t salt,
                             bool update_latency_margin) {
       for (int pass = 0; pass < passes; ++pass) {
