@@ -41,7 +41,11 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "metal-cuda-legacy-nn-probe-suite-summary.json",
         "metal-cuda-nn-benchmark-summary.json",
         "metal-cuda-nn-benchmark-compare.log",
+        "metal-cuda-mcts-bk07-search-summary.json",
+        "metal-cuda-hybrid-startpos-search-summary.json",
         "cuda-gpu-uci-bk07-smoke.log",
+        "cuda-gpu-uci-bk07-search.json",
+        "cuda-gpu-uci-hybrid-search.json",
         "cuda-gpu-uci-hybrid-clock-safety-smoke.log",
     },
     "windows-cuda": {
@@ -55,7 +59,11 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "logs/metal-windows-cuda-legacy-nn-probe-suite-summary.json",
         "logs/metal-windows-cuda-nn-benchmark-summary.json",
         "logs/metal-windows-cuda-nn-benchmark-compare.log",
+        "logs/metal-windows-cuda-mcts-bk07-search-summary.json",
+        "logs/metal-windows-cuda-hybrid-startpos-search-summary.json",
         "logs/cuda-bk07-mcts.stdout.log",
+        "logs/cuda-bk07-mcts-search.json",
+        "logs/hybrid-cuda-search.json",
         "logs/hybrid-cuda-clock-safety.stdout.log",
     },
 }
@@ -80,7 +88,10 @@ def require_file_record(record: object, *, label: str) -> None:
 
 
 def validate_metal_compare_inputs(
-    inputs: object, *, require_benchmark_compare: bool = False
+    inputs: object,
+    *,
+    require_benchmark_compare: bool = False,
+    require_search_compare: bool = False,
 ) -> None:
     if not isinstance(inputs, dict):
         raise ValueError("runtime manifest is missing inputs object")
@@ -99,6 +110,17 @@ def validate_metal_compare_inputs(
             )
         require_file_record(
             inputs.get("metal_comparison_log"), label="Metal benchmark comparison"
+        )
+    if require_search_compare:
+        if not is_truthy(inputs.get("require_metal_search_compare")):
+            raise ValueError("runtime manifest did not require Metal search comparison")
+        require_file_record(
+            inputs.get("metal_mcts_bk07_search_json"),
+            label="Metal MCTS BK.07 search JSON",
+        )
+        require_file_record(
+            inputs.get("metal_hybrid_startpos_search_json"),
+            label="Metal Hybrid startpos search JSON",
         )
 
 
@@ -125,6 +147,7 @@ def validate_runtime_manifest(
     runtime_kind: str,
     require_metal_compare: bool = False,
     require_metal_benchmark_compare: bool = False,
+    require_metal_search_compare: bool = False,
     require_release_evidence: bool = False,
     expected_head_sha: str | None = None,
 ) -> dict:
@@ -152,11 +175,16 @@ def validate_runtime_manifest(
         require_zero_status(
             status.get("benchmark_compare_status"), label="benchmark compare status"
         )
+    if require_metal_search_compare:
+        require_zero_status(
+            status.get("search_compare_status"), label="search compare status"
+        )
     inputs = data.get("inputs") or {}
     if require_metal_compare:
         validate_metal_compare_inputs(
             inputs,
             require_benchmark_compare=require_metal_benchmark_compare,
+            require_search_compare=require_metal_search_compare,
         )
     if require_release_evidence:
         validate_release_artifacts(data, runtime_kind=runtime_kind)
@@ -179,6 +207,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--require-metal-compare", action="store_true")
     parser.add_argument("--require-metal-benchmark-compare", action="store_true")
+    parser.add_argument("--require-metal-search-compare", action="store_true")
     parser.add_argument("--require-release-evidence", action="store_true")
     parser.add_argument("--expected-head-sha", default="")
     parser.add_argument("--json-output", default="")
@@ -193,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_kind=args.runtime_kind,
         require_metal_compare=args.require_metal_compare,
         require_metal_benchmark_compare=args.require_metal_benchmark_compare,
+        require_metal_search_compare=args.require_metal_search_compare,
         require_release_evidence=args.require_release_evidence,
         expected_head_sha=args.expected_head_sha or None,
     )

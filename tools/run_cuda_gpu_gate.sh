@@ -246,7 +246,9 @@ write_summary() {
     echo "- accelerator UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log")"
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
     echo "- BK.07 CUDA tactical smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log")"
+    echo "- BK.07 CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-bk07-search.json")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
+    echo "- hybrid CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-search.json")"
     echo "- hybrid CUDA clock-start smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log")"
     echo "- hybrid CUDA clock-safety smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-safety-smoke.log")"
     echo "- hybrid auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log")"
@@ -760,11 +762,13 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSMaxThreads=1 \
   --setoption MCTSParallelSearch=false \
   --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSParityPreset=true \
   --setoption MCTSAddDirichletNoise=false \
   --setoption TransformerLowTimeFallbackMs=0 \
   --position "fen ${BK07_FEN}" \
   --go "nodes 50" \
   --expect-bestmove h5f6 \
+  --json-out "${BUILD_DIR}/cuda-gpu-uci-bk07-search.json" \
   --expect-output "CUDA transformer backend" \
   --expect-output "MCTS runtime: backend=cuda" \
   --expect-output "minibatch=1" \
@@ -791,12 +795,16 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption HybridAutoABThreadsCap=0 \
   --setoption MCTSMaxThreads=1 \
   --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSParityPreset=true \
+  --setoption MCTSAddDirichletNoise=false \
+  --setoption TransformerLowTimeFallbackMs=0 \
   --go "nodes 8" \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "Hybrid MCTS runtime: backend=cuda" \
   --expect-output "minibatch=1" \
   --expect-output "CUDA transformer backend" \
   --expect-output "Final: MCTSPlayouts=" \
+  --json-out "${BUILD_DIR}/cuda-gpu-uci-hybrid-search.json" \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"

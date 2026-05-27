@@ -482,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_kind="linux-cuda",
         require_metal_compare=True,
         require_metal_benchmark_compare=True,
+        require_metal_search_compare=True,
         require_release_evidence=True,
         expected_head_sha=expected_sha,
     )
@@ -490,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_kind="windows-cuda",
         require_metal_compare=True,
         require_metal_benchmark_compare=True,
+        require_metal_search_compare=True,
         require_release_evidence=True,
         expected_head_sha=expected_sha,
     )

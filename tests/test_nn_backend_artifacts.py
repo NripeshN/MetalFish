@@ -1098,9 +1098,14 @@ def runtime_inputs(*, windows_package: pathlib.Path | None = None) -> dict:
     inputs = {
         "require_metal_compare": "1",
         "require_metal_benchmark_compare": "1",
+        "require_metal_search_compare": "1",
         "metal_comparison_log": metal_log_record("metal-comparison.log"),
         "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
         "metal_legacy_probe_suite_log": metal_log_record("metal-legacy.log"),
+        "metal_mcts_bk07_search_json": metal_log_record("metal-mcts-bk07.json"),
+        "metal_hybrid_startpos_search_json": metal_log_record(
+            "metal-hybrid-startpos.json"
+        ),
     }
     if windows_package is not None:
         inputs["package"] = {
@@ -1153,6 +1158,7 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                         "bt4_compare_status": "0",
                         "legacy_compare_status": "0",
                         "benchmark_compare_status": "0",
+                        "search_compare_status": "0",
                         "final_compare_status": "0",
                     },
                     "artifacts": runtime_artifact_records(
@@ -1174,6 +1180,7 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                         "bt4_compare_status": "0",
                         "legacy_compare_status": "0",
                         "benchmark_compare_status": "0",
+                        "search_compare_status": "0",
                         "final_compare_status": "0",
                     },
                     "artifacts": runtime_artifact_records("windows-cuda"),
@@ -1188,6 +1195,7 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                 runtime_kind="linux-cuda",
                 require_metal_compare=True,
                 require_metal_benchmark_compare=True,
+                require_metal_search_compare=True,
                 require_release_evidence=True,
                 expected_head_sha="abc123",
             )["status"]["remote_status"]
@@ -1200,6 +1208,7 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                 runtime_kind="windows-cuda",
                 require_metal_compare=True,
                 require_metal_benchmark_compare=True,
+                require_metal_search_compare=True,
                 require_release_evidence=True,
                 expected_head_sha="abc123",
             )["status"]["runtime_status"]
@@ -1271,6 +1280,7 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                         "bt4_compare_status": "0",
                         "legacy_compare_status": "0",
                         "benchmark_compare_status": "0",
+                        "search_compare_status": "0",
                         "final_compare_status": "0",
                     },
                     "artifacts": runtime_artifact_records(
@@ -1292,6 +1302,7 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                         "bt4_compare_status": "0",
                         "legacy_compare_status": "0",
                         "benchmark_compare_status": "0",
+                        "search_compare_status": "0",
                         "final_compare_status": "0",
                     },
                     "artifacts": runtime_artifact_records("windows-cuda"),

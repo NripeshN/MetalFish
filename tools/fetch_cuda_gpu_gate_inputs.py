@@ -217,16 +217,27 @@ def main(argv: list[str] | None = None) -> int:
     bt4_log = metal_dir / "build" / "metal-nn-probe-suite.log"
     legacy_log = metal_dir / "build" / "metal-legacy-nn-probe-suite.log"
     comparison_log = metal_dir / "build" / "metal-nn-comparison.log"
-    for path in (bt4_log, legacy_log, comparison_log):
+    mcts_search_json = metal_dir / "build" / "metal-mcts-bk07-search.json"
+    hybrid_search_json = metal_dir / "build" / "metal-hybrid-startpos-search.json"
+    for path in (
+        bt4_log,
+        legacy_log,
+        comparison_log,
+        mcts_search_json,
+        hybrid_search_json,
+    ):
         if not path.is_file() or path.stat().st_size == 0:
             raise FileNotFoundError(path)
 
     env = {
         "METALFISH_REQUIRE_METAL_COMPARE": "1",
         "METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE": "1",
+        "METALFISH_REQUIRE_METAL_SEARCH_COMPARE": "1",
         "METALFISH_METAL_COMPARISON_LOG": str(comparison_log),
         "METALFISH_METAL_PROBE_SUITE_LOG": str(bt4_log),
         "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG": str(legacy_log),
+        "METALFISH_METAL_MCTS_BK07_SEARCH_JSON": str(mcts_search_json),
+        "METALFISH_METAL_HYBRID_STARTPOS_SEARCH_JSON": str(hybrid_search_json),
     }
     env_path = out_dir / "cuda-gpu-gate-env.sh"
     env_path.write_text(shell_exports(env) + "\n", encoding="utf-8")
@@ -253,6 +264,16 @@ def main(argv: list[str] | None = None) -> int:
                 "path": str(comparison_log),
                 "size_bytes": comparison_log.stat().st_size,
                 "sha256": sha256_file(comparison_log),
+            },
+            "metal_mcts_bk07_search_json": {
+                "path": str(mcts_search_json),
+                "size_bytes": mcts_search_json.stat().st_size,
+                "sha256": sha256_file(mcts_search_json),
+            },
+            "metal_hybrid_startpos_search_json": {
+                "path": str(hybrid_search_json),
+                "size_bytes": hybrid_search_json.stat().st_size,
+                "sha256": sha256_file(hybrid_search_json),
             },
         },
     }

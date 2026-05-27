@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import queue
 import subprocess
 import sys
@@ -37,6 +39,11 @@ def parse_args() -> argparse.Namespace:
         "--echo-output",
         action="store_true",
         help="Print the captured engine transcript instead of only the bestmove line",
+    )
+    parser.add_argument(
+        "--json-out",
+        type=Path,
+        help="Write a structured JSON record with the search result and transcript hash.",
     )
     parser.add_argument(
         "--setoption",
@@ -109,6 +116,36 @@ def set_option_command(raw: str) -> str:
     return f"setoption name {name.strip()} value {value.strip()}"
 
 
+def write_json_result(
+    path: Path,
+    *,
+    engine: Path,
+    position: str,
+    go: str,
+    options: list[str],
+    bestmove: str,
+    output: list[str],
+    elapsed_sec: float,
+    returncode: int | None,
+) -> None:
+    transcript = "\n".join(output)
+    payload = {
+        "schema": "metalfish.uci_smoke_result",
+        "schema_version": 1,
+        "engine": str(engine),
+        "position": position,
+        "go": go,
+        "setoptions": list(options),
+        "bestmove": bestmove,
+        "elapsed_sec": round(elapsed_sec, 6),
+        "returncode": returncode,
+        "transcript_sha256": hashlib.sha256(transcript.encode("utf-8")).hexdigest(),
+        "transcript_tail": output[-80:],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
 def main() -> int:
     args = parse_args()
     engine = Path(args.engine)
@@ -130,8 +167,10 @@ def main() -> int:
                 uci.send(f"position {args.position}")
             else:
                 uci.send(f"position fen {args.position}")
+            search_start = time.monotonic()
             uci.send(f"go {args.go}")
             uci.read_until(lambda line: line.startswith("bestmove "))
+            search_elapsed = time.monotonic() - search_start
         except (OSError, TimeoutError) as exc:
             print(str(exc), file=sys.stderr)
             return 1
@@ -147,6 +186,18 @@ def main() -> int:
         line for line in reversed(uci.output) if line.startswith("bestmove ")
     )
     bestmove = best_line.split()[1]
+    if args.json_out:
+        write_json_result(
+            args.json_out,
+            engine=engine,
+            position=args.position,
+            go=args.go,
+            options=args.setoption,
+            bestmove=bestmove,
+            output=uci.output,
+            elapsed_sec=search_elapsed,
+            returncode=returncode,
+        )
     if args.echo_output:
         print("\n".join(uci.output))
     else:

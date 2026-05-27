@@ -18,8 +18,11 @@ GCS_PREFIX="${METALFISH_GCP_GCS_PREFIX:-}"
 METAL_PROBE_SUITE_LOG="${METALFISH_METAL_PROBE_SUITE_LOG:-}"
 METAL_LEGACY_PROBE_SUITE_LOG="${METALFISH_METAL_LEGACY_PROBE_SUITE_LOG:-}"
 METAL_COMPARISON_LOG="${METALFISH_METAL_COMPARISON_LOG:-}"
+METAL_MCTS_BK07_SEARCH_JSON="${METALFISH_METAL_MCTS_BK07_SEARCH_JSON:-}"
+METAL_HYBRID_STARTPOS_SEARCH_JSON="${METALFISH_METAL_HYBRID_STARTPOS_SEARCH_JSON:-}"
 REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
+REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
 MAX_CUDA_METAL_EVAL_MS_RATIO="${METALFISH_MAX_CUDA_METAL_EVAL_MS_RATIO:-1.0}"
 ARCHIVE="$(mktemp -t metalfish-cuda-gate.XXXXXX.tar.gz)"
 CREATED_INSTANCE=0
@@ -27,6 +30,13 @@ ZONE=""
 
 require_metal_compare() {
   case "${REQUIRE_METAL_COMPARE}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+require_metal_search_compare() {
+  case "${REQUIRE_METAL_SEARCH_COMPARE}" in
     1|true|TRUE|yes|YES|on|ON) return 0 ;;
     *) return 1 ;;
   esac
@@ -188,7 +198,9 @@ collect_remote_artifacts() {
     cuda-gpu-uci-accelerator-smoke.log \
     cuda-gpu-uci-smoke.log \
     cuda-gpu-uci-bk07-smoke.log \
+    cuda-gpu-uci-bk07-search.json \
     cuda-gpu-uci-hybrid-smoke.log \
+    cuda-gpu-uci-hybrid-search.json \
     cuda-gpu-uci-hybrid-clock-start-smoke.log \
     cuda-gpu-uci-hybrid-clock-safety-smoke.log \
     cuda-gpu-uci-hybrid-auto-smoke.log \
@@ -240,7 +252,8 @@ write_runtime_manifest() {
     BT4_COMPARE_STATUS_FOR_MANIFEST="$2" \
     LEGACY_COMPARE_STATUS_FOR_MANIFEST="$3" \
     BENCHMARK_COMPARE_STATUS_FOR_MANIFEST="$4" \
-    FINAL_COMPARE_STATUS_FOR_MANIFEST="$5" \
+    SEARCH_COMPARE_STATUS_FOR_MANIFEST="$5" \
+    FINAL_COMPARE_STATUS_FOR_MANIFEST="$6" \
     GIT_HEAD_SHA="$(git rev-parse HEAD)" \
     GATE_ARCHIVE="${ARCHIVE}" \
     GATE_ARTIFACT_DIR="${ARTIFACT_DIR}" \
@@ -256,10 +269,13 @@ write_runtime_manifest() {
     GATE_GCS_PREFIX="${GCS_PREFIX}" \
     GATE_REQUIRE_METAL_COMPARE="${REQUIRE_METAL_COMPARE}" \
     GATE_REQUIRE_METAL_BENCHMARK_COMPARE="${REQUIRE_METAL_BENCHMARK_COMPARE}" \
+    GATE_REQUIRE_METAL_SEARCH_COMPARE="${REQUIRE_METAL_SEARCH_COMPARE}" \
     GATE_MAX_CUDA_METAL_EVAL_MS_RATIO="${MAX_CUDA_METAL_EVAL_MS_RATIO}" \
     GATE_METAL_COMPARISON_LOG="${METAL_COMPARISON_LOG}" \
     GATE_METAL_PROBE_SUITE_LOG="${METAL_PROBE_SUITE_LOG}" \
     GATE_METAL_LEGACY_PROBE_SUITE_LOG="${METAL_LEGACY_PROBE_SUITE_LOG}" \
+    GATE_METAL_MCTS_BK07_SEARCH_JSON="${METAL_MCTS_BK07_SEARCH_JSON}" \
+    GATE_METAL_HYBRID_STARTPOS_SEARCH_JSON="${METAL_HYBRID_STARTPOS_SEARCH_JSON}" \
     python3 - "${ARTIFACT_DIR}/cuda-gpu-runtime-manifest.json" <<'PY'
 import datetime as _dt
 import hashlib
@@ -319,6 +335,9 @@ manifest = {
         "require_metal_benchmark_compare": os.environ[
             "GATE_REQUIRE_METAL_BENCHMARK_COMPARE"
         ],
+        "require_metal_search_compare": os.environ[
+            "GATE_REQUIRE_METAL_SEARCH_COMPARE"
+        ],
         "max_cuda_metal_eval_ms_ratio": os.environ[
             "GATE_MAX_CUDA_METAL_EVAL_MS_RATIO"
         ],
@@ -326,6 +345,12 @@ manifest = {
         "metal_probe_suite_log": file_record(os.environ["GATE_METAL_PROBE_SUITE_LOG"]),
         "metal_legacy_probe_suite_log": file_record(
             os.environ["GATE_METAL_LEGACY_PROBE_SUITE_LOG"]
+        ),
+        "metal_mcts_bk07_search_json": file_record(
+            os.environ["GATE_METAL_MCTS_BK07_SEARCH_JSON"]
+        ),
+        "metal_hybrid_startpos_search_json": file_record(
+            os.environ["GATE_METAL_HYBRID_STARTPOS_SEARCH_JSON"]
         ),
     },
     "status": {
@@ -335,6 +360,7 @@ manifest = {
         "benchmark_compare_status": os.environ[
             "BENCHMARK_COMPARE_STATUS_FOR_MANIFEST"
         ],
+        "search_compare_status": os.environ["SEARCH_COMPARE_STATUS_FOR_MANIFEST"],
         "final_compare_status": os.environ["FINAL_COMPARE_STATUS_FOR_MANIFEST"],
     },
     "artifacts": artifacts,
@@ -488,6 +514,60 @@ compare_collected_benchmark_timings() {
     | tee "${ARTIFACT_DIR}/metal-cuda-nn-benchmark-compare.log"
 }
 
+compare_collected_search_results() {
+  if [[ "${COLLECT_ARTIFACTS}" != "1" ]]; then
+    if require_metal_search_compare; then
+      echo "Metal/CUDA search comparison requires METALFISH_GCP_COLLECT_ARTIFACTS=1" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_HYBRID_STARTPOS_SEARCH_JSON}" ]]; then
+    if require_metal_search_compare; then
+      echo "Metal search JSON inputs are required for search comparison" >&2
+      return 1
+    fi
+    return 0
+  fi
+  if [[ ! -s "${METAL_MCTS_BK07_SEARCH_JSON}" ]]; then
+    echo "Metal MCTS search JSON not found: ${METAL_MCTS_BK07_SEARCH_JSON}" >&2
+    return 1
+  fi
+  if [[ ! -s "${METAL_HYBRID_STARTPOS_SEARCH_JSON}" ]]; then
+    echo "Metal Hybrid search JSON not found: ${METAL_HYBRID_STARTPOS_SEARCH_JSON}" >&2
+    return 1
+  fi
+
+  local cuda_mcts="${ARTIFACT_DIR}/cuda-gpu-uci-bk07-search.json"
+  local cuda_hybrid="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-search.json"
+  if [[ ! -s "${cuda_mcts}" ]]; then
+    echo "CUDA MCTS search JSON not found: ${cuda_mcts}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cuda_hybrid}" ]]; then
+    echo "CUDA Hybrid search JSON not found: ${cuda_hybrid}" >&2
+    return 1
+  fi
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_MCTS_BK07_SEARCH_JSON}" \
+    --actual "${cuda_mcts}" \
+    --expected-label "Metal MCTS" \
+    --actual-label "CUDA MCTS" \
+    --json-out "${ARTIFACT_DIR}/metal-cuda-mcts-bk07-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/metal-cuda-mcts-bk07-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_HYBRID_STARTPOS_SEARCH_JSON}" \
+    --actual "${cuda_hybrid}" \
+    --expected-label "Metal Hybrid" \
+    --actual-label "CUDA Hybrid" \
+    --no-require-same-bestmove \
+    --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-startpos-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-startpos-search-compare.log"
+}
+
 set +e
 gcloud compute ssh "${INSTANCE}" \
   --project "${PROJECT}" \
@@ -501,6 +581,7 @@ COMPARE_STATUS=0
 BT4_COMPARE_STATUS="skipped"
 LEGACY_COMPARE_STATUS="skipped"
 BENCHMARK_COMPARE_STATUS="skipped"
+SEARCH_COMPARE_STATUS="skipped"
 if [[ "${REMOTE_STATUS}" == "0" ]]; then
   BT4_COMPARE_STATUS=0
   compare_collected_probe_suite || BT4_COMPARE_STATUS=$?
@@ -512,6 +593,10 @@ if [[ "${REMOTE_STATUS}" == "0" ]]; then
     BENCHMARK_COMPARE_STATUS=0
     compare_collected_benchmark_timings || BENCHMARK_COMPARE_STATUS=$?
   fi
+  if [[ "${BT4_COMPARE_STATUS}" == "0" && "${LEGACY_COMPARE_STATUS}" == "0" && "${BENCHMARK_COMPARE_STATUS}" == "0" ]]; then
+    SEARCH_COMPARE_STATUS=0
+    compare_collected_search_results || SEARCH_COMPARE_STATUS=$?
+  fi
 fi
 
 if [[ "${BT4_COMPARE_STATUS}" != "0" && "${BT4_COMPARE_STATUS}" != "skipped" ]]; then
@@ -520,6 +605,8 @@ elif [[ "${LEGACY_COMPARE_STATUS}" != "0" && "${LEGACY_COMPARE_STATUS}" != "skip
   COMPARE_STATUS="${LEGACY_COMPARE_STATUS}"
 elif [[ "${BENCHMARK_COMPARE_STATUS}" != "0" && "${BENCHMARK_COMPARE_STATUS}" != "skipped" ]]; then
   COMPARE_STATUS="${BENCHMARK_COMPARE_STATUS}"
+elif [[ "${SEARCH_COMPARE_STATUS}" != "0" && "${SEARCH_COMPARE_STATUS}" != "skipped" ]]; then
+  COMPARE_STATUS="${SEARCH_COMPARE_STATUS}"
 fi
 
 write_runtime_manifest \
@@ -527,6 +614,7 @@ write_runtime_manifest \
   "${BT4_COMPARE_STATUS}" \
   "${LEGACY_COMPARE_STATUS}" \
   "${BENCHMARK_COMPARE_STATUS}" \
+  "${SEARCH_COMPARE_STATUS}" \
   "${COMPARE_STATUS}"
 upload_collected_artifacts
 

@@ -99,6 +99,7 @@ jobs:
             tools/check_nn_backend_artifacts.py \
             tools/compare_nn_backend_benchmarks.py \
             tools/compare_nn_backend_outputs.py \
+            tools/compare_uci_search_results.py \
             tools/run_nn_backend_probe_suite.py \
             tools/lc0_coreml_bk_policy_probe.py \
             tools/lc0_coreml_concurrency_benchmark.py \
@@ -243,6 +244,45 @@ jobs:
             --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
             --go "nodes 50" \
             --expect-bestmove h5f6
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSParallelSearch=false \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
+            --go "nodes 50" \
+            --expect-bestmove h5f6 \
+            --json-out build/metal-mcts-bk07-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseMCTS=false \
+            --setoption UseHybridSearch=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=3 \
+            --setoption HybridMCTSThreads=1 \
+            --setoption HybridABThreads=2 \
+            --setoption HybridAutoABThreadsCap=0 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --go "nodes 8" \
+            --expect-output "Starting Parallel Hybrid Search" \
+            --expect-output "Hybrid MCTS runtime: backend=metal" \
+            --expect-output "Final: MCTSPlayouts=" \
+            --json-out build/metal-hybrid-startpos-search.json
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v6
@@ -258,6 +298,8 @@ jobs:
             build/metal-nn-isolation-bt4-legacy.log
             build/metal-nn-isolation-legacy-bt4.log
             build/metal-nn-artifact-manifest.json
+            build/metal-mcts-bk07-search.json
+            build/metal-hybrid-startpos-search.json
             README.md
             CHANGELOG.md
             LICENSE

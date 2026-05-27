@@ -332,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
     metal_probe_log = None
     metal_legacy_probe_log = None
     metal_comparison_log = None
+    metal_mcts_search_json = None
+    metal_hybrid_search_json = None
     if args.metal_ci_run_id:
         metal_run = read_run(repo, args.metal_ci_run_id)
         require_run_provenance(
@@ -354,6 +356,14 @@ def main(argv: list[str] | None = None) -> int:
         metal_comparison_log = find_one(
             metal_dir, "metal-nn-comparison.log", "Metal NN comparison log"
         )
+        metal_mcts_search_json = find_one(
+            metal_dir, "metal-mcts-bk07-search.json", "Metal MCTS search JSON"
+        )
+        metal_hybrid_search_json = find_one(
+            metal_dir,
+            "metal-hybrid-startpos-search.json",
+            "Metal Hybrid search JSON",
+        )
 
     env = {
         "METALFISH_WINDOWS_CUDA_PACKAGE": str(package),
@@ -363,9 +373,16 @@ def main(argv: list[str] | None = None) -> int:
         env.update(
             {
                 "METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE": "1",
+                "METALFISH_REQUIRE_METAL_SEARCH_COMPARE": "1",
                 "METALFISH_METAL_COMPARISON_LOG": str(metal_comparison_log),
                 "METALFISH_METAL_PROBE_SUITE_LOG": str(metal_probe_log),
                 "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG": str(metal_legacy_probe_log),
+                "METALFISH_METAL_MCTS_BK07_SEARCH_JSON": str(
+                    metal_mcts_search_json
+                ),
+                "METALFISH_METAL_HYBRID_STARTPOS_SEARCH_JSON": str(
+                    metal_hybrid_search_json
+                ),
                 "METALFISH_REQUIRE_METAL_COMPARE": "1",
             }
         )
@@ -397,6 +414,8 @@ def main(argv: list[str] | None = None) -> int:
             "comparison_log": str(metal_comparison_log),
             "probe_suite_log": str(metal_probe_log),
             "legacy_probe_suite_log": str(metal_legacy_probe_log),
+            "mcts_bk07_search_json": str(metal_mcts_search_json),
+            "hybrid_startpos_search_json": str(metal_hybrid_search_json),
         }
     manifest_path = out_dir / "runtime-gate-inputs-manifest.json"
     write_manifest(manifest_path, manifest)
