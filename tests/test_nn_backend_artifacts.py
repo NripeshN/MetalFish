@@ -343,6 +343,43 @@ def test_backend_benchmark_compare_requires_graph_reuse() -> None:
     raise AssertionError("expected missing graph reuse to fail")
 
 
+def test_backend_benchmark_compare_allows_expected_without_graph_reuse() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal.log"
+        actual = root / "cuda.log"
+        summary = root / "summary.json"
+        write_benchmark_log(
+            expected,
+            label="Metal (MPSGraph) backend",
+            include_graph_reuse=False,
+        )
+        write_benchmark_log(actual, label="CUDA transformer backend")
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--expected-label",
+                "Metal (MPSGraph) backend",
+                "--actual-label",
+                "CUDA transformer backend",
+                "--summary-out",
+                str(summary),
+                "--require-actual-graph-reuse",
+            ]
+        ):
+            expect("actual-only graph reuse success", benchmark_comparer.main() == 0)
+
+        data = json.loads(summary.read_text(encoding="utf-8"))
+        expect("expected graph reuse absent", data["expected"]["graph_reuse_batches"] == [])
+        expect(
+            "actual graph reuse present",
+            data["actual"]["graph_reuse_batches"] == [4, 1, 2, 4, 1, 2],
+        )
+
+
 def test_backend_output_compare_accepts_probe_suite() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -1470,6 +1507,7 @@ def main() -> int:
     test_backend_output_compare_accepts_close_outputs()
     test_backend_benchmark_compare_writes_summary()
     test_backend_benchmark_compare_requires_graph_reuse()
+    test_backend_benchmark_compare_allows_expected_without_graph_reuse()
     test_backend_output_compare_accepts_probe_suite()
     test_backend_output_compare_accepts_legacy_scalar_probe_suite()
     test_backend_output_compare_rejects_probe_suite_mismatch()

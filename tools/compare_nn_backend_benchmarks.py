@@ -48,6 +48,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-out")
     parser.add_argument("--min-common-batches", type=int, default=1)
     parser.add_argument("--require-graph-reuse", action="store_true")
+    parser.add_argument("--require-expected-graph-reuse", action="store_true")
+    parser.add_argument("--require-actual-graph-reuse", action="store_true")
     parser.add_argument(
         "--max-eval-ms-ratio",
         type=float,
@@ -164,11 +166,18 @@ def compare_logs(
         f"only {len(common_sizes)} common batch timing(s), expected at least "
         f"{args.min_common_batches}",
     )
-    if args.require_graph_reuse:
+    require_expected_graph_reuse = (
+        args.require_graph_reuse or args.require_expected_graph_reuse
+    )
+    require_actual_graph_reuse = (
+        args.require_graph_reuse or args.require_actual_graph_reuse
+    )
+    if require_expected_graph_reuse:
         require(
             bool(expected.graph_reuse_batches),
             f"{expected.path}: missing graph_reuse_probe",
         )
+    if require_actual_graph_reuse:
         require(
             bool(actual.graph_reuse_batches),
             f"{actual.path}: missing graph_reuse_probe",

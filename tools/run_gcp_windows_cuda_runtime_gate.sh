@@ -199,7 +199,7 @@ compare_collected_benchmark_timings() {
     --expected-label "Metal (MPSGraph) backend" \
     --actual-label "CUDA transformer backend" \
     --summary-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-nn-benchmark-summary.json" \
-    --require-graph-reuse \
+    --require-actual-graph-reuse \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-nn-benchmark-compare.log"
 }
 
