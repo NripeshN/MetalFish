@@ -92,9 +92,10 @@ def require_dispatchable_workflow(*, repo: str, workflow_file: str) -> None:
         f"workflow {workflow_file!r} is not dispatchable in {repo}. "
         "GitHub workflow_dispatch can only target workflows present on the "
         "repository default branch. If this workflow exists only on a PR branch, "
-        "use tools/fetch_cuda_gpu_gate_inputs.py plus tools/run_gcp_cuda_gpu_gate.sh "
-        "or tools/fetch_windows_cuda_runtime_inputs.py plus "
-        "tools/run_gcp_windows_cuda_runtime_gate.sh until the workflow file is "
+        "use tools/run_cuda_runtime_gates_direct.py, or the lower-level "
+        "tools/fetch_cuda_gpu_gate_inputs.py plus tools/run_gcp_cuda_gpu_gate.sh "
+        "and tools/fetch_windows_cuda_runtime_inputs.py plus "
+        "tools/run_gcp_windows_cuda_runtime_gate.sh, until the workflow file is "
         f"merged. gh said: {detail}"
     )
 

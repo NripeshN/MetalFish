@@ -129,7 +129,20 @@ calling `gh workflow run` for `cuda-gpu-gate.yml` and
 `windows-cuda-runtime-gate.yml`. Use `--dry-run` to print the resolved inputs
 without starting cloud VMs. GitHub can dispatch only workflows that already
 exist on the default branch, so pre-merge validation of newly added workflow
-files should use the direct fetch helper plus direct GCP wrapper pair instead.
+files should use the direct runner instead:
+
+```bash
+python3 tools/run_cuda_runtime_gates_direct.py --target both --ref cuda-support
+```
+
+The direct runner creates a clean detached worktree at the target SHA, resolves
+the same-commit macOS Metal and Windows CUDA compile artifacts, downloads the
+NNUE/BT4/legacy weights needed by the Windows package smoke, then calls
+`tools/run_gcp_cuda_gpu_gate.sh` and
+`tools/run_gcp_windows_cuda_runtime_gate.sh` with artifact collection enabled.
+Its default artifact root is `results/cuda_runtime_direct/<sha>/`; the detached
+worktree is removed after a successful run and preserved after a failure for
+debugging.
 
 Current CUDA backend boundary:
 
