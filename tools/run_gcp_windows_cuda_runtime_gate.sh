@@ -272,7 +272,7 @@ import pathlib
 import sys
 
 
-def file_record(path: str) -> dict | None:
+def file_record(path):
     if not path:
         return None
     p = pathlib.Path(path)
@@ -302,7 +302,7 @@ if artifact_dir.is_dir():
 manifest = {
     "schema": "metalfish.windows_cuda_runtime_gate",
     "schema_version": 1,
-    "created_utc": _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat(),
+    "created_utc": _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat(),
     "git": {
         "head_sha": os.environ["GIT_HEAD_SHA"],
     },

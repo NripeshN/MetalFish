@@ -258,7 +258,7 @@ import pathlib
 import sys
 
 
-def file_record(path: str) -> dict | None:
+def file_record(path):
     p = pathlib.Path(path)
     if not p.is_file():
         return None
@@ -286,7 +286,7 @@ if artifact_dir.is_dir():
 manifest = {
     "schema_version": 1,
     "schema": "metalfish.cuda_gpu_runtime_gate",
-    "created_utc": _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat(),
+    "created_utc": _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat(),
     "git": {
         "head_sha": os.environ["GIT_HEAD_SHA"],
         "archive": file_record(os.environ["GATE_ARCHIVE"]),

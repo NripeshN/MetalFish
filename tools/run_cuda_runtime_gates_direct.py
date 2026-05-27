@@ -214,6 +214,13 @@ def run_linux_gate(
     env["METALFISH_GCP_MACHINE"] = args.linux_machine
     env["METALFISH_CUDA_UCI_GO"] = args.linux_uci_go
     env["METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE"] = args.stable_batch_size
+    for key in (
+        "METALFISH_BT4_WEIGHTS",
+        "METALFISH_LEGACY_NN_WEIGHTS",
+        "METALFISH_NNUE_BIG",
+        "METALFISH_NNUE_SMALL",
+    ):
+        env.pop(key, None)
     if args.linux_zones:
         env["METALFISH_GCP_ZONES"] = args.linux_zones
     if linux_env_file is not None:
