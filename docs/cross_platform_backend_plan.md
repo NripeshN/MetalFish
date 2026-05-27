@@ -887,7 +887,12 @@ It tries
 `g2-standard-8` and then `g2-standard-4` by default so transient L4 stockouts do
 not fail the release gate before the engine runs. The VM is deleted by default
 and logs plus `windows-cuda-runtime-manifest.json` are collected under
-`results/windows_cuda_runtime_gate/`.
+`results/windows_cuda_runtime_gate/`. The host wrapper also writes
+`windows-cuda-runtime-gate-manifest.json` after the BT4 and legacy Metal
+comparisons finish, recording the runtime status, both comparison statuses,
+package and Metal input hashes, VM shape, and collected log hashes. If
+`METALFISH_GCP_GCS_PREFIX` is set, upload runs after the host-side comparisons
+so the bucket contains the compare summaries as well as the guest logs.
 The gate explicitly bootstraps OpenSSH on the Windows guest with a temporary
 `metalfish` administrator user and the caller's SSH key, because stock GCE
 Windows images do not expose the Linux-style metadata SSH path. The UCI harness
