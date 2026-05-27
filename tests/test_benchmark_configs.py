@@ -901,6 +901,7 @@ def main() -> int:
             "validate_windows_cuda_package",
             "runtime_kind=\"linux-cuda\"",
             "runtime_kind=\"windows-cuda\"",
+            "require_metal_compare=True",
         ],
     )
     assert_file_contains(
@@ -913,6 +914,10 @@ def main() -> int:
             "windows-cuda",
             "remote_status",
             "runtime_status",
+            "require_metal_compare",
+            "--require-metal-compare",
+            "Metal BT4 probe suite",
+            "Metal legacy probe suite",
             "bt4_compare_status",
             "legacy_compare_status",
             "final_compare_status",

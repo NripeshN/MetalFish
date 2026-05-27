@@ -35,7 +35,35 @@ def require_zero_status(status: object, *, label: str) -> None:
         raise ValueError(f"{label} must be 0, got {status!r}")
 
 
-def validate_runtime_manifest(manifest: pathlib.Path, *, runtime_kind: str) -> dict:
+def is_truthy(value: object) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def require_file_record(record: object, *, label: str) -> None:
+    if not isinstance(record, dict):
+        raise ValueError(f"{label} record is missing")
+    if int(record.get("size_bytes") or 0) <= 0:
+        raise ValueError(f"{label} record has invalid size")
+    if not str(record.get("sha256") or ""):
+        raise ValueError(f"{label} record is missing sha256")
+
+
+def validate_metal_compare_inputs(inputs: object) -> None:
+    if not isinstance(inputs, dict):
+        raise ValueError("runtime manifest is missing inputs object")
+    if not is_truthy(inputs.get("require_metal_compare")):
+        raise ValueError("runtime manifest did not require Metal comparison")
+    require_file_record(
+        inputs.get("metal_probe_suite_log"), label="Metal BT4 probe suite"
+    )
+    require_file_record(
+        inputs.get("metal_legacy_probe_suite_log"), label="Metal legacy probe suite"
+    )
+
+
+def validate_runtime_manifest(
+    manifest: pathlib.Path, *, runtime_kind: str, require_metal_compare: bool = False
+) -> dict:
     if runtime_kind not in RUNTIME_KINDS:
         raise ValueError(f"unsupported CUDA runtime kind: {runtime_kind}")
     spec = RUNTIME_KINDS[runtime_kind]
@@ -50,12 +78,15 @@ def validate_runtime_manifest(manifest: pathlib.Path, *, runtime_kind: str) -> d
         raise ValueError(f"runtime manifest {manifest} is missing status object")
     for field, label in spec["status_fields"].items():
         require_zero_status(status.get(field), label=label)
+    inputs = data.get("inputs") or {}
+    if require_metal_compare:
+        validate_metal_compare_inputs(inputs)
     return {
         "schema": data["schema"],
         "kind": runtime_kind,
         "status": status,
         "gcp": data.get("gcp") or {},
-        "inputs": data.get("inputs") or {},
+        "inputs": inputs,
     }
 
 
@@ -65,6 +96,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--runtime-kind", choices=tuple(RUNTIME_KINDS.keys()), required=True
     )
+    parser.add_argument("--require-metal-compare", action="store_true")
     parser.add_argument("--json-output", default="")
     return parser.parse_args(argv)
 
@@ -72,7 +104,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     manifest = pathlib.Path(args.manifest).expanduser().resolve()
-    summary = validate_runtime_manifest(manifest, runtime_kind=args.runtime_kind)
+    summary = validate_runtime_manifest(
+        manifest,
+        runtime_kind=args.runtime_kind,
+        require_metal_compare=args.require_metal_compare,
+    )
     if args.json_output:
         path = pathlib.Path(args.json_output).expanduser().resolve()
         path.parent.mkdir(parents=True, exist_ok=True)

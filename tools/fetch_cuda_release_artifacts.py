@@ -317,10 +317,14 @@ def main(argv: list[str] | None = None) -> int:
     linux_package_manifest = validate_linux_cuda_package(linux_package)
     windows_package_manifest = validate_windows_cuda_package(windows_package)
     linux_runtime = validate_runtime_manifest(
-        linux_runtime_manifest, runtime_kind="linux-cuda"
+        linux_runtime_manifest,
+        runtime_kind="linux-cuda",
+        require_metal_compare=True,
     )
     windows_runtime = validate_runtime_manifest(
-        windows_runtime_manifest, runtime_kind="windows-cuda"
+        windows_runtime_manifest,
+        runtime_kind="windows-cuda",
+        require_metal_compare=True,
     )
 
     packages_dir = out_dir / "packages"
