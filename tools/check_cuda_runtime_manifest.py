@@ -43,7 +43,7 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "metal-cuda-nn-benchmark-compare.log",
         "metal-cuda-mcts-bk07-search-summary.json",
         "metal-cuda-mcts-kiwipete-search-summary.json",
-        "metal-cuda-hybrid-startpos-search-summary.json",
+        "metal-cuda-hybrid-bk07-search-summary.json",
         "cuda-gpu-uci-bk07-smoke.log",
         "cuda-gpu-uci-bk07-search.json",
         "cuda-gpu-uci-kiwipete-smoke.log",
@@ -64,7 +64,7 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "logs/metal-windows-cuda-nn-benchmark-compare.log",
         "logs/metal-windows-cuda-mcts-bk07-search-summary.json",
         "logs/metal-windows-cuda-mcts-kiwipete-search-summary.json",
-        "logs/metal-windows-cuda-hybrid-startpos-search-summary.json",
+        "logs/metal-windows-cuda-hybrid-bk07-search-summary.json",
         "logs/cuda-bk07-mcts.stdout.log",
         "logs/cuda-bk07-mcts-search.json",
         "logs/cuda-kiwipete-mcts.stdout.log",
@@ -129,8 +129,8 @@ def validate_metal_compare_inputs(
             label="Metal MCTS kiwipete search JSON",
         )
         require_file_record(
-            inputs.get("metal_hybrid_startpos_search_json"),
-            label="Metal Hybrid startpos search JSON",
+            inputs.get("metal_hybrid_bk07_search_json"),
+            label="Metal Hybrid BK.07 search JSON",
         )
 
 

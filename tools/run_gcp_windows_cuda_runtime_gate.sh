@@ -21,7 +21,7 @@ METAL_LEGACY_PROBE_SUITE_LOG="${METALFISH_METAL_LEGACY_PROBE_SUITE_LOG:-}"
 METAL_COMPARISON_LOG="${METALFISH_METAL_COMPARISON_LOG:-}"
 METAL_MCTS_BK07_SEARCH_JSON="${METALFISH_METAL_MCTS_BK07_SEARCH_JSON:-}"
 METAL_MCTS_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON:-}"
-METAL_HYBRID_STARTPOS_SEARCH_JSON="${METALFISH_METAL_HYBRID_STARTPOS_SEARCH_JSON:-}"
+METAL_HYBRID_BK07_SEARCH_JSON="${METALFISH_METAL_HYBRID_BK07_SEARCH_JSON:-}"
 REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
@@ -39,6 +39,7 @@ PROBE_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420}"
 COMPARISON_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_COMPARISON_TIMEOUT:-900}"
 UCI_GO="${METALFISH_WINDOWS_CUDA_UCI_GO:-nodes 1}"
 HYBRID_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_UCI_GO:-nodes 8}"
+HYBRID_PARITY_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_PARITY_UCI_GO:-nodes 50}"
 UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
 CUDA_GRAPH="${METALFISH_WINDOWS_CUDA_GRAPH:-}"
 CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
@@ -225,7 +226,7 @@ compare_collected_search_results() {
     return 0
   fi
 
-  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_STARTPOS_SEARCH_JSON}" ]]; then
+  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" ]]; then
     if require_metal_search_compare; then
       echo "Metal search JSON inputs are required for Windows CUDA search comparison" >&2
       return 1
@@ -240,8 +241,8 @@ compare_collected_search_results() {
     echo "Metal MCTS kiwipete search JSON not found: ${METAL_MCTS_KIWIPETE_SEARCH_JSON}" >&2
     return 1
   fi
-  if [[ ! -s "${METAL_HYBRID_STARTPOS_SEARCH_JSON}" ]]; then
-    echo "Metal Hybrid search JSON not found: ${METAL_HYBRID_STARTPOS_SEARCH_JSON}" >&2
+  if [[ ! -s "${METAL_HYBRID_BK07_SEARCH_JSON}" ]]; then
+    echo "Metal Hybrid search JSON not found: ${METAL_HYBRID_BK07_SEARCH_JSON}" >&2
     return 1
   fi
 
@@ -278,13 +279,12 @@ compare_collected_search_results() {
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-kiwipete-search-compare.log"
 
   python3 tools/compare_uci_search_results.py \
-    --expected "${METAL_HYBRID_STARTPOS_SEARCH_JSON}" \
+    --expected "${METAL_HYBRID_BK07_SEARCH_JSON}" \
     --actual "${cuda_hybrid}" \
     --expected-label "Metal Hybrid" \
     --actual-label "Windows CUDA Hybrid" \
-    --no-require-same-bestmove \
-    --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-startpos-search-summary.json" \
-    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-startpos-search-compare.log"
+    --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-bk07-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-bk07-search-compare.log"
 }
 
 ensure_ssh_key() {
@@ -386,7 +386,7 @@ write_runtime_manifest() {
     GATE_METAL_LEGACY_PROBE_SUITE_LOG="${METAL_LEGACY_PROBE_SUITE_LOG}" \
     GATE_METAL_MCTS_BK07_SEARCH_JSON="${METAL_MCTS_BK07_SEARCH_JSON}" \
     GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON="${METAL_MCTS_KIWIPETE_SEARCH_JSON}" \
-    GATE_METAL_HYBRID_STARTPOS_SEARCH_JSON="${METAL_HYBRID_STARTPOS_SEARCH_JSON}" \
+    GATE_METAL_HYBRID_BK07_SEARCH_JSON="${METAL_HYBRID_BK07_SEARCH_JSON}" \
     GATE_PACKAGE_ZIP="${PACKAGE_ZIP}" \
     GATE_PACKAGE_BASENAME="${PACKAGE_BASENAME}" \
     GATE_WINDOWS_CUDA_COMPILE_RUN_ID="${WINDOWS_CUDA_COMPILE_RUN_ID}" \
@@ -480,8 +480,8 @@ manifest = {
         "metal_mcts_kiwipete_search_json": file_record(
             os.environ["GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON"]
         ),
-        "metal_hybrid_startpos_search_json": file_record(
-            os.environ["GATE_METAL_HYBRID_STARTPOS_SEARCH_JSON"]
+        "metal_hybrid_bk07_search_json": file_record(
+            os.environ["GATE_METAL_HYBRID_BK07_SEARCH_JSON"]
         ),
     },
     "runtime": {
@@ -493,6 +493,7 @@ manifest = {
         "cuda_profile_limit": os.environ["GATE_CUDA_PROFILE_LIMIT"],
         "uci_go": os.environ["GATE_UCI_GO"],
         "hybrid_uci_go": os.environ["GATE_HYBRID_UCI_GO"],
+        "hybrid_parity_uci_go": "${HYBRID_PARITY_UCI_GO}",
     },
     "status": {
         "runtime_status": os.environ["RUNTIME_STATUS_FOR_MANIFEST"],
@@ -1511,10 +1512,10 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "setoption name MCTSParityPreset value true",
   "setoption name MCTSAddDirichletNoise value false",
   "setoption name TransformerLowTimeFallbackMs value 0",
-  "position startpos",
-  "go ${HYBRID_UCI_GO}",
+  "position fen \$Bk07Fen",
+  "go ${HYBRID_PARITY_UCI_GO}",
   "quit"
-) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove h5f6")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
 
 Invoke-UciSmoke -Name "hybrid-cuda-clock-start" -Commands @(
   "uci",
@@ -1645,7 +1646,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 \$ComparisonText = Read-SmokeText "cuda-nn-comparison"
 Write-SearchJson -Name "cuda-bk07-mcts-search" -Text \$Bk07MctsText -Position "fen \$Bk07Fen" -Go "nodes 50"
 Write-SearchJson -Name "cuda-kiwipete-mcts-search" -Text \$KiwipeteMctsText -Position "fen \$KiwipeteFen" -Go "nodes 1"
-Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "startpos" -Go "${HYBRID_UCI_GO}"
+Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "fen \$Bk07Fen" -Go "${HYBRID_PARITY_UCI_GO}"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
 \$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
 \$Manifest = [ordered]@{
@@ -1675,6 +1676,7 @@ Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "startp
   config = [ordered]@{
     uci_go = "${UCI_GO}"
     hybrid_uci_go = "${HYBRID_UCI_GO}"
+    hybrid_parity_uci_go = "${HYBRID_PARITY_UCI_GO}"
     uci_timeout_seconds = ${UCI_TIMEOUT_SECONDS}
     probe_timeout_seconds = ${PROBE_TIMEOUT_SECONDS}
     comparison_timeout_seconds = ${COMPARISON_TIMEOUT_SECONDS}
@@ -1780,7 +1782,9 @@ Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "startp
       stderr_log = "cuda-kiwipete-mcts.stderr.log"
     }
     hybrid_cuda = [ordered]@{
-      go = "${HYBRID_UCI_GO}"
+      go = "${HYBRID_PARITY_UCI_GO}"
+      fen = \$Bk07Fen
+      expected_bestmove = "h5f6"
       bestmove = (Find-BestMove \$HybridText)
       backend_selected = (Test-BackendSelected \$HybridText)
       metrics = (Find-FinalMetrics \$HybridText)

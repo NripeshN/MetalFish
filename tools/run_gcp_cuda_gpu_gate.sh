@@ -20,7 +20,7 @@ METAL_LEGACY_PROBE_SUITE_LOG="${METALFISH_METAL_LEGACY_PROBE_SUITE_LOG:-}"
 METAL_COMPARISON_LOG="${METALFISH_METAL_COMPARISON_LOG:-}"
 METAL_MCTS_BK07_SEARCH_JSON="${METALFISH_METAL_MCTS_BK07_SEARCH_JSON:-}"
 METAL_MCTS_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON:-}"
-METAL_HYBRID_STARTPOS_SEARCH_JSON="${METALFISH_METAL_HYBRID_STARTPOS_SEARCH_JSON:-}"
+METAL_HYBRID_BK07_SEARCH_JSON="${METALFISH_METAL_HYBRID_BK07_SEARCH_JSON:-}"
 REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
@@ -279,7 +279,7 @@ write_runtime_manifest() {
     GATE_METAL_LEGACY_PROBE_SUITE_LOG="${METAL_LEGACY_PROBE_SUITE_LOG}" \
     GATE_METAL_MCTS_BK07_SEARCH_JSON="${METAL_MCTS_BK07_SEARCH_JSON}" \
     GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON="${METAL_MCTS_KIWIPETE_SEARCH_JSON}" \
-    GATE_METAL_HYBRID_STARTPOS_SEARCH_JSON="${METAL_HYBRID_STARTPOS_SEARCH_JSON}" \
+    GATE_METAL_HYBRID_BK07_SEARCH_JSON="${METAL_HYBRID_BK07_SEARCH_JSON}" \
     python3 - "${ARTIFACT_DIR}/cuda-gpu-runtime-manifest.json" <<'PY'
 import datetime as _dt
 import hashlib
@@ -356,8 +356,8 @@ manifest = {
         "metal_mcts_kiwipete_search_json": file_record(
             os.environ["GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON"]
         ),
-        "metal_hybrid_startpos_search_json": file_record(
-            os.environ["GATE_METAL_HYBRID_STARTPOS_SEARCH_JSON"]
+        "metal_hybrid_bk07_search_json": file_record(
+            os.environ["GATE_METAL_HYBRID_BK07_SEARCH_JSON"]
         ),
     },
     "status": {
@@ -530,7 +530,7 @@ compare_collected_search_results() {
     return 0
   fi
 
-  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_STARTPOS_SEARCH_JSON}" ]]; then
+  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" ]]; then
     if require_metal_search_compare; then
       echo "Metal search JSON inputs are required for search comparison" >&2
       return 1
@@ -545,8 +545,8 @@ compare_collected_search_results() {
     echo "Metal MCTS kiwipete search JSON not found: ${METAL_MCTS_KIWIPETE_SEARCH_JSON}" >&2
     return 1
   fi
-  if [[ ! -s "${METAL_HYBRID_STARTPOS_SEARCH_JSON}" ]]; then
-    echo "Metal Hybrid search JSON not found: ${METAL_HYBRID_STARTPOS_SEARCH_JSON}" >&2
+  if [[ ! -s "${METAL_HYBRID_BK07_SEARCH_JSON}" ]]; then
+    echo "Metal Hybrid search JSON not found: ${METAL_HYBRID_BK07_SEARCH_JSON}" >&2
     return 1
   fi
 
@@ -583,13 +583,12 @@ compare_collected_search_results() {
     | tee "${ARTIFACT_DIR}/metal-cuda-mcts-kiwipete-search-compare.log"
 
   python3 tools/compare_uci_search_results.py \
-    --expected "${METAL_HYBRID_STARTPOS_SEARCH_JSON}" \
+    --expected "${METAL_HYBRID_BK07_SEARCH_JSON}" \
     --actual "${cuda_hybrid}" \
     --expected-label "Metal Hybrid" \
     --actual-label "CUDA Hybrid" \
-    --no-require-same-bestmove \
-    --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-startpos-search-summary.json" \
-    | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-startpos-search-compare.log"
+    --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-bk07-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-bk07-search-compare.log"
 }
 
 set +e

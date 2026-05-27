@@ -221,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     mcts_kiwipete_search_json = (
         metal_dir / "build" / "metal-mcts-kiwipete-search.json"
     )
-    hybrid_search_json = metal_dir / "build" / "metal-hybrid-startpos-search.json"
+    hybrid_search_json = metal_dir / "build" / "metal-hybrid-bk07-search.json"
     for path in (
         bt4_log,
         legacy_log,
@@ -244,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         "METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON": str(
             mcts_kiwipete_search_json
         ),
-        "METALFISH_METAL_HYBRID_STARTPOS_SEARCH_JSON": str(hybrid_search_json),
+        "METALFISH_METAL_HYBRID_BK07_SEARCH_JSON": str(hybrid_search_json),
     }
     env_path = out_dir / "cuda-gpu-gate-env.sh"
     env_path.write_text(shell_exports(env) + "\n", encoding="utf-8")
@@ -282,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
                 "size_bytes": mcts_kiwipete_search_json.stat().st_size,
                 "sha256": sha256_file(mcts_kiwipete_search_json),
             },
-            "metal_hybrid_startpos_search_json": {
+            "metal_hybrid_bk07_search_json": {
                 "path": str(hybrid_search_json),
                 "size_bytes": hybrid_search_json.stat().st_size,
                 "sha256": sha256_file(hybrid_search_json),
