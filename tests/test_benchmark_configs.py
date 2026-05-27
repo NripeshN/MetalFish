@@ -1410,6 +1410,7 @@ def main() -> int:
             "validate_package_manifest",
             "check_cuda_package_artifacts",
             "validate_windows_cuda_package",
+            "expected_source_commit=expected_sha",
             "package_manifest",
             "tools/run_gcp_windows_cuda_runtime_gate.sh",
         ],

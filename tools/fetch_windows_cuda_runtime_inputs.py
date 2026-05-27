@@ -199,8 +199,13 @@ def sha256_file(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def validate_package_manifest(package: pathlib.Path) -> dict:
-    return validate_windows_cuda_package(package)
+def validate_package_manifest(
+    package: pathlib.Path, *, expected_source_commit: str | None = None
+) -> dict:
+    return validate_windows_cuda_package(
+        package,
+        expected_source_commit=expected_source_commit,
+    )
 
 
 def shell_exports(values: dict[str, str]) -> str:
@@ -276,7 +281,10 @@ def main(argv: list[str] | None = None) -> int:
         "metalfish*windows-x86_64-msvc-cuda.zip",
         "Windows CUDA package zip",
     )
-    package_manifest = validate_package_manifest(package)
+    package_manifest = validate_package_manifest(
+        package,
+        expected_source_commit=expected_sha,
+    )
 
     metal_run = None
     metal_artifact = None

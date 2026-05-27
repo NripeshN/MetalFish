@@ -210,11 +210,11 @@ Current CUDA backend boundary:
   against the build-tree probes. The package also carries
   `windows-cuda-package-manifest.json`, generated through the same
   `metalfish.portable_artifact` schema as Linux CUDA. The compile gate and the
-  Windows L4 runtime gate validate schema, package kind, required executables,
-  `PORTABLE_ARTIFACT.md`, and CUDA runtime DLL entries before accepting the
-  package. This catches missing packaged probe/test binaries, DLL/runtime
-  dependencies, and package-only metadata drift before and during the Windows
-  GPU VM gate.
+  Windows L4 runtime gate validate schema, package kind, source commit, required
+  executables, `PORTABLE_ARTIFACT.md`, and CUDA runtime DLL entries before
+  accepting the package. This catches missing packaged probe/test binaries,
+  DLL/runtime dependencies, stale package artifacts, and package-only metadata
+  drift before and during the Windows GPU VM gate.
 - `MCTSMinibatchSize=0` now keeps search-side CUDA auto batches aligned with the
   CUDA graph-replay stable batch size. CUDA builds use
   `MCTSCudaAutoMinibatchSize` when set, otherwise

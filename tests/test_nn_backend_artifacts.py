@@ -803,6 +803,37 @@ def test_windows_cuda_runtime_input_helpers_select_artifacts() -> None:
         raise AssertionError("expected missing artifact failure")
 
 
+def test_windows_cuda_runtime_input_helpers_validate_package_commit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        package_dir = root / "windows-package"
+        write_release_package_files(
+            package_dir,
+            package_kind="windows-cuda",
+            windows=True,
+            source_commit="compile-sha",
+        )
+        package = root / "metalfish-windows-x86_64-msvc-cuda.zip"
+        with zipfile.ZipFile(package, "w") as archive:
+            for path in sorted(package_dir.iterdir()):
+                archive.write(path, arcname=path.name)
+        summary = win_cuda_inputs.validate_package_manifest(
+            package,
+            expected_source_commit="compile-sha",
+        )
+        expect("windows runtime package commit", summary["source_commit"] == "compile-sha")
+
+        try:
+            win_cuda_inputs.validate_package_manifest(
+                package,
+                expected_source_commit="other-sha",
+            )
+        except ValueError as exc:
+            expect("windows package commit drift rejected", "source commit" in str(exc))
+            return
+    raise AssertionError("expected Windows package commit drift to be rejected")
+
+
 def write_release_package_files(
     root: pathlib.Path,
     *,
@@ -1111,6 +1142,7 @@ def main() -> int:
     test_windows_cuda_probe_suite_positions_use_python_default()
     test_windows_cuda_runtime_input_helpers_validate_provenance()
     test_windows_cuda_runtime_input_helpers_select_artifacts()
+    test_windows_cuda_runtime_input_helpers_validate_package_commit()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
     test_cuda_package_validator_rejects_source_commit_drift()
