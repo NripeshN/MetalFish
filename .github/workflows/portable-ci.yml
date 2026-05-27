@@ -66,6 +66,7 @@ jobs:
             tests/test_benchmark_configs.py \
             tools/run_tournament_live.py \
             tools/lichess_puzzle_runner.py \
+            tools/check_cuda_package_artifacts.py \
             tools/download_engine_networks.py \
             tools/fetch_cuda_release_artifacts.py \
             tools/write_portable_manifest.py \

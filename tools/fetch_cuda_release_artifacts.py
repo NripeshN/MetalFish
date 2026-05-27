@@ -11,23 +11,20 @@ import pathlib
 import shutil
 import subprocess
 import sys
-import tarfile
 import zipfile
 
+try:
+    from tools.check_cuda_package_artifacts import (
+        validate_linux_cuda_package,
+        validate_windows_cuda_package,
+    )
+except ModuleNotFoundError:
+    from check_cuda_package_artifacts import (
+        validate_linux_cuda_package,
+        validate_windows_cuda_package,
+    )
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-REQUIRED_PACKAGE_FILES = {
-    "metalfish",
-    "metalfish_nn_probe",
-    "test_nn_comparison",
-    "PORTABLE_ARTIFACT.md",
-}
-REQUIRED_WINDOWS_PACKAGE_FILES = {
-    "metalfish.exe",
-    "metalfish_nn_probe.exe",
-    "test_nn_comparison.exe",
-    "PORTABLE_ARTIFACT.md",
-}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -202,115 +199,6 @@ def file_record(path: pathlib.Path) -> dict:
         "path": str(path),
         "size_bytes": path.stat().st_size,
         "sha256": sha256_file(path),
-    }
-
-
-def normalize_archive_name(name: str) -> str:
-    return pathlib.PurePosixPath(name).as_posix().lstrip("./")
-
-
-def validate_portable_manifest(manifest: dict, *, package_kind: str) -> dict:
-    if manifest.get("schema") != "metalfish.portable_artifact":
-        raise ValueError(
-            "package manifest has unexpected schema: "
-            f"{manifest.get('schema')!r}"
-        )
-    package = manifest.get("package") or {}
-    if package.get("kind") != package_kind:
-        raise ValueError(
-            "package manifest has unexpected kind: " f"{package.get('kind')!r}"
-        )
-    return package
-
-
-def validate_linux_cuda_package(package: pathlib.Path) -> dict:
-    with tarfile.open(package, "r:gz") as archive:
-        names = {
-            normalize_archive_name(member.name)
-            for member in archive.getmembers()
-            if member.isfile()
-        }
-        try:
-            manifest_member = next(
-                member
-                for member in archive.getmembers()
-                if normalize_archive_name(member.name) == "linux-cuda-package-manifest.json"
-            )
-        except StopIteration as exc:
-            raise ValueError("Linux CUDA package is missing JSON manifest") from exc
-        manifest_file = archive.extractfile(manifest_member)
-        if manifest_file is None:
-            raise ValueError("Linux CUDA package manifest could not be read")
-        manifest = json.loads(manifest_file.read().decode("utf-8-sig"))
-
-    missing = sorted(REQUIRED_PACKAGE_FILES - names)
-    if missing:
-        raise ValueError("Linux CUDA package is missing entries: " + ", ".join(missing))
-    package_info = validate_portable_manifest(manifest, package_kind="linux-cuda")
-    manifest_files = {
-        str(item.get("name", ""))
-        for item in manifest.get("files", [])
-        if isinstance(item, dict)
-    }
-    missing_manifest = sorted(REQUIRED_PACKAGE_FILES - manifest_files)
-    if missing_manifest:
-        raise ValueError(
-            "Linux CUDA package manifest is missing file entries: "
-            + ", ".join(missing_manifest)
-        )
-    return {
-        "schema": manifest["schema"],
-        "kind": package_info["kind"],
-        "package_name": package_info.get("name"),
-        "file_count": len(manifest.get("files", [])),
-        "archive_entry_count": len(names),
-    }
-
-
-def validate_windows_cuda_package(package: pathlib.Path) -> dict:
-    required_dll_patterns = ("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")
-    with zipfile.ZipFile(package) as archive:
-        names = {
-            normalize_archive_name(info.filename)
-            for info in archive.infolist()
-            if not info.is_dir()
-        }
-        try:
-            raw_manifest = archive.read("windows-cuda-package-manifest.json")
-        except KeyError as exc:
-            raise ValueError("Windows CUDA package is missing JSON manifest") from exc
-    manifest = json.loads(raw_manifest.decode("utf-8-sig"))
-    missing = sorted(REQUIRED_WINDOWS_PACKAGE_FILES - names)
-    if missing:
-        raise ValueError("Windows CUDA package is missing entries: " + ", ".join(missing))
-    package_info = validate_portable_manifest(manifest, package_kind="windows-cuda")
-    manifest_files = {
-        str(item.get("name", ""))
-        for item in manifest.get("files", [])
-        if isinstance(item, dict)
-    }
-    missing_manifest = sorted(REQUIRED_WINDOWS_PACKAGE_FILES - manifest_files)
-    if missing_manifest:
-        raise ValueError(
-            "Windows CUDA package manifest is missing file entries: "
-            + ", ".join(missing_manifest)
-        )
-    missing_dlls = [
-        pattern
-        for pattern in required_dll_patterns
-        if not any(fnmatch.fnmatch(name, pattern) for name in manifest_files)
-    ]
-    if missing_dlls:
-        raise ValueError(
-            "Windows CUDA package manifest is missing CUDA DLL entries: "
-            + ", ".join(missing_dlls)
-        )
-    return {
-        "schema": manifest["schema"],
-        "kind": package_info["kind"],
-        "package_name": package_info.get("name"),
-        "file_count": len(manifest.get("files", [])),
-        "zip_entry_count": len(names),
     }
 
 
