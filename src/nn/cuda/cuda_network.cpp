@@ -233,8 +233,7 @@ bool OutputsAreValid(const std::vector<NetworkOutput> &outputs,
 } // namespace
 
 CudaNetwork::CudaNetwork(const WeightsFile &weights, BackendConfig config)
-    : format_(DescribeNetworkFormat(weights)),
-      config_(std::move(config)),
+    : format_(DescribeNetworkFormat(weights)), config_(std::move(config)),
       tensor_plan_(CreateNetworkTensorPlan(format_)),
       buffer_layout_(LayoutFromTensorPlan(tensor_plan_, kDefaultMaxBatchSize)),
       executor_(CreateMissingCudaExecutor()) {
@@ -459,7 +458,8 @@ std::string CudaNetwork::GetNetworkInfo() const {
       << ", cuda_device_config=" << config_.cuda_device
       << ", cuda_device_selected=" << selected_cuda_device_
       << ", cuda_graph_config=" << BoolText(config_.cuda_graph_execution)
-      << ", cuda_graph_effective=" << BoolText(CudaGraphEffective(executor_name))
+      << ", cuda_graph_effective="
+      << BoolText(CudaGraphEffective(executor_name))
       << ", cuda_stable_execution_batch_config="
       << config_.cuda_stable_execution_batch_size
       << ", cuda_stable_execution_batch_effective="
@@ -482,6 +482,23 @@ std::string CudaNetwork::GetNetworkInfo() const {
 bool CudaNetwork::HasWDL() const { return tensor_plan_.wdl; }
 
 bool CudaNetwork::HasMovesLeft() const { return tensor_plan_.moves_left; }
+
+BackendCapabilities CudaNetwork::GetBackendCapabilities() const {
+  BackendCapabilities capabilities;
+  capabilities.actual_backend = "cuda";
+  capabilities.has_wdl = tensor_plan_.wdl;
+  capabilities.has_moves_left = tensor_plan_.moves_left;
+  capabilities.max_batch_size = kDefaultMaxBatchSize;
+  capabilities.stable_execution_batch_size = StableExecutionBatchSize(config_);
+  capabilities.cuda_configured_device = config_.cuda_device;
+  capabilities.cuda_selected_device = selected_cuda_device_;
+  capabilities.cuda_graph_execution = CudaGraphEffective(executor_->Name());
+  capabilities.cuda_deterministic_attention_softmax =
+      config_.cuda_deterministic_attention_softmax;
+  capabilities.cuda_full_buffer_clear = FullBufferClearEffective(config_);
+  capabilities.device_name = device_selection_summary_;
+  return capabilities;
+}
 
 } // namespace Cuda
 } // namespace NN

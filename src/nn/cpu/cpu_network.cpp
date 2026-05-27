@@ -167,9 +167,8 @@ FirstUnsupportedExecutionStep(const NetworkResolvedExecutionPlan &plan) {
     const auto &step = plan.steps[index];
     if (step.kind == NetworkExecutionOpKind::Attention) {
       try {
-        (void)ResolveAttentionStagePlan(plan, index,
-                                        NetworkAttentionHeadCount(plan,
-                                                                  step.name));
+        (void)ResolveAttentionStagePlan(
+            plan, index, NetworkAttentionHeadCount(plan, step.name));
       } catch (const std::exception &e) {
         return "CPU transformer backend does not support attention stage " +
                step.name + ": " + e.what();
@@ -556,6 +555,14 @@ std::string CpuNetwork::GetNetworkInfo() const {
 bool CpuNetwork::HasWDL() const { return tensor_plan_.wdl; }
 
 bool CpuNetwork::HasMovesLeft() const { return tensor_plan_.moves_left; }
+
+BackendCapabilities CpuNetwork::GetBackendCapabilities() const {
+  BackendCapabilities capabilities;
+  capabilities.actual_backend = "cpu";
+  capabilities.has_wdl = tensor_plan_.wdl;
+  capabilities.has_moves_left = tensor_plan_.moves_left;
+  return capabilities;
+}
 
 std::string CpuNetwork::UnsupportedExecutionMessage() const {
   return unsupported_execution_reason_.empty()

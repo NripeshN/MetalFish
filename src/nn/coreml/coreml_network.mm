@@ -273,6 +273,16 @@ public:
 
   bool HasWDL() const { return has_wdl_; }
   bool HasMovesLeft() const { return has_moves_left_; }
+  BackendCapabilities GetBackendCapabilities() const {
+    BackendCapabilities capabilities;
+    capabilities.actual_backend = "coreml";
+    capabilities.has_wdl = has_wdl_;
+    capabilities.has_moves_left = has_moves_left_;
+    capabilities.max_batch_size = fixed_batch_;
+    capabilities.stable_execution_batch_size = fixed_batch_;
+    capabilities.compute_units = ComputeUnitsLabel(actual_compute_units_);
+    return capabilities;
+  }
 
 private:
   std::vector<NetworkOutput>
@@ -456,6 +466,10 @@ std::string CoreMLNetwork::GetNetworkInfo() const {
 bool CoreMLNetwork::HasWDL() const { return impl_->HasWDL(); }
 
 bool CoreMLNetwork::HasMovesLeft() const { return impl_->HasMovesLeft(); }
+
+BackendCapabilities CoreMLNetwork::GetBackendCapabilities() const {
+  return impl_->GetBackendCapabilities();
+}
 
 } // namespace CoreML
 } // namespace NN

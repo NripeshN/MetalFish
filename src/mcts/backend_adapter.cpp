@@ -299,7 +299,10 @@ Backend::Backend(const std::string &weights_path, size_t cache_entries,
       std::cerr << " model " << backend_config.coreml_model_path << " units "
                 << backend_config.coreml_compute_units;
     }
-    std::cerr << " actual=" << evaluator_->GetNetworkInfo() << std::endl;
+    const NN::BackendCapabilities capabilities =
+        evaluator_->GetBackendCapabilities();
+    std::cerr << " actual=" << evaluator_->GetNetworkInfo()
+              << " capabilities=" << capabilities.Summary() << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "info string Backend failed to load weights: " << e.what()
               << std::endl;
@@ -329,6 +332,12 @@ bool Backend::HasMovesLeft() const { return evaluator_->HasMovesLeft(); }
 
 std::string Backend::GetNetworkInfo() const {
   return evaluator_ ? evaluator_->GetNetworkInfo() : "";
+}
+
+NN::BackendCapabilities Backend::GetBackendCapabilities() const {
+  if (evaluator_)
+    return evaluator_->GetBackendCapabilities();
+  return {};
 }
 
 } // namespace MCTS

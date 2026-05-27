@@ -14,8 +14,8 @@
 #include <utility>
 #include <vector>
 
-#include "../nn/network.h"
 #include "../core/position.h"
+#include "../nn/network.h"
 
 namespace MetalFish {
 namespace MCTS {
@@ -46,8 +46,7 @@ public:
 
   explicit NNMCTSEvaluator(const std::string &weights_path,
                            NN::BackendConfig backend_config = {});
-  NNMCTSEvaluator(const std::string &weights_path,
-                  const std::string &backend,
+  NNMCTSEvaluator(const std::string &weights_path, const std::string &backend,
                   const std::string &coreml_model_path = "",
                   const std::string &coreml_compute_units = "cpu-ne");
   ~NNMCTSEvaluator();
@@ -73,6 +72,7 @@ public:
       const std::vector<LegalMovesView> &legal_moves);
 
   std::string GetNetworkInfo() const;
+  NN::BackendCapabilities GetBackendCapabilities() const;
   bool HasWDL() const;
   bool HasMovesLeft() const;
 

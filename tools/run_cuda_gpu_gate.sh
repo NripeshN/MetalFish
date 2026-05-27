@@ -42,12 +42,14 @@ UCI_CUDA_RUNTIME_EXPECT_ARGS=(
   --expect-output "cuda_deterministic_attention_softmax=true"
   --expect-output "cuda_full_buffer_clear_effective=true"
 )
-UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS=()
+UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS=(
+  --expect-output "capabilities=actual_backend=cuda"
+)
 if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
   UCI_CUDA_RUNTIME_EXPECT_ARGS+=(
     --expect-output "cuda_graph_effective=true"
   )
-  UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS=(
+  UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS+=(
     --expect-output "MCTS backend warmup actual="
     --expect-output "executor=resolved+graph-replay"
   )

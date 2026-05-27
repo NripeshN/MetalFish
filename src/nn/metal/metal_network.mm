@@ -172,6 +172,17 @@ bool MetalNetwork::HasWDL() const { return wdl_; }
 
 bool MetalNetwork::HasMovesLeft() const { return moves_left_; }
 
+BackendCapabilities MetalNetwork::GetBackendCapabilities() const {
+  BackendCapabilities capabilities;
+  capabilities.actual_backend = "metal";
+  capabilities.has_wdl = wdl_;
+  capabilities.has_moves_left = moves_left_;
+  capabilities.max_batch_size = max_batch_size_;
+  capabilities.stable_execution_batch_size = batch_size_;
+  capabilities.device_name = device_name_;
+  return capabilities;
+}
+
 } // namespace Metal
 } // namespace NN
 } // namespace MetalFish

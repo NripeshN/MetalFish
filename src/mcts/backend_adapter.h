@@ -125,8 +125,7 @@ public:
                    size_t cache_entries = NNCache::kDefaultEntries,
                    NN::BackendConfig backend_config = {});
   Backend(const std::string &weights_path, size_t cache_entries,
-          const std::string &backend,
-          const std::string &coreml_model_path = "",
+          const std::string &backend, const std::string &coreml_model_path = "",
           const std::string &coreml_compute_units = "cpu-ne");
 
   std::unique_ptr<BackendComputation> CreateComputation();
@@ -134,6 +133,7 @@ public:
   bool HasWDL() const;
   bool HasMovesLeft() const;
   std::string GetNetworkInfo() const;
+  NN::BackendCapabilities GetBackendCapabilities() const;
 
 private:
   std::unique_ptr<NNMCTSEvaluator> evaluator_;

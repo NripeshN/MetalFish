@@ -171,6 +171,9 @@ public:
   }
 
   std::string GetNetworkInfo() const { return network_->GetNetworkInfo(); }
+  NN::BackendCapabilities GetBackendCapabilities() const {
+    return network_->GetBackendCapabilities();
+  }
   bool HasWDL() const { return network_->HasWDL(); }
   bool HasMovesLeft() const { return network_->HasMovesLeft(); }
 
@@ -286,6 +289,10 @@ std::vector<EvaluationResult> NNMCTSEvaluator::EvaluateBatchWithHistoryViews(
 
 std::string NNMCTSEvaluator::GetNetworkInfo() const {
   return impl_->GetNetworkInfo();
+}
+
+NN::BackendCapabilities NNMCTSEvaluator::GetBackendCapabilities() const {
+  return impl_->GetBackendCapabilities();
 }
 
 bool NNMCTSEvaluator::HasWDL() const { return impl_->HasWDL(); }

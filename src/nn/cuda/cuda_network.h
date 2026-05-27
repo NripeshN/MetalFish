@@ -34,6 +34,7 @@ public:
   std::string GetNetworkInfo() const override;
   bool HasWDL() const override;
   bool HasMovesLeft() const override;
+  BackendCapabilities GetBackendCapabilities() const override;
 
 private:
   void WarmupExecution();

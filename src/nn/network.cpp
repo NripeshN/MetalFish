@@ -21,10 +21,48 @@
 #endif
 
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 namespace MetalFish {
 namespace NN {
+
+namespace {
+
+const char *BoolText(bool value) { return value ? "true" : "false"; }
+
+} // namespace
+
+std::string BackendCapabilities::Summary() const {
+  std::ostringstream out;
+  out << "actual_backend=" << actual_backend
+      << " has_wdl=" << BoolText(has_wdl)
+      << " has_moves_left=" << BoolText(has_moves_left);
+  if (max_batch_size > 0)
+    out << " max_batch=" << max_batch_size;
+  if (stable_execution_batch_size > 0)
+    out << " stable_batch=" << stable_execution_batch_size;
+  if (!device_name.empty())
+    out << " device=\"" << device_name << "\"";
+  if (!compute_units.empty())
+    out << " compute_units=" << compute_units;
+  if (actual_backend == "cuda") {
+    out << " cuda_configured_device=" << cuda_configured_device
+        << " cuda_selected_device=" << cuda_selected_device
+        << " cuda_graph=" << BoolText(cuda_graph_execution)
+        << " cuda_deterministic_softmax="
+        << BoolText(cuda_deterministic_attention_softmax)
+        << " cuda_full_buffer_clear=" << BoolText(cuda_full_buffer_clear);
+  }
+  return out.str();
+}
+
+BackendCapabilities Network::GetBackendCapabilities() const {
+  BackendCapabilities capabilities;
+  capabilities.has_wdl = HasWDL();
+  capabilities.has_moves_left = HasMovesLeft();
+  return capabilities;
+}
 
 namespace {
 
@@ -36,8 +74,9 @@ CreateRequiredAcceleratorNetwork(const WeightsFile &weights,
   try {
     return std::make_unique<Metal::MetalNetwork>(weights);
   } catch (const std::exception &e) {
-    throw std::runtime_error("Required Metal accelerator backend unavailable: " +
-                             std::string(e.what()));
+    throw std::runtime_error(
+        "Required Metal accelerator backend unavailable: " +
+        std::string(e.what()));
   }
 #elif defined(USE_CUDA)
   try {
@@ -86,6 +125,11 @@ public:
 
   bool HasWDL() const override { return false; }
   bool HasMovesLeft() const override { return false; }
+  BackendCapabilities GetBackendCapabilities() const override {
+    BackendCapabilities capabilities;
+    capabilities.actual_backend = "stub";
+    return capabilities;
+  }
 
 private:
   WeightsFile weights_;

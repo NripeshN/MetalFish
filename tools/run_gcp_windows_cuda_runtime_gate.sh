@@ -758,9 +758,11 @@ nvidia-smi 2>&1 | Tee-Object -FilePath (Join-Path \$Logs "nvidia-smi-runtime.log
 if ("${CUDA_GRAPH}" -ne "0") {
   \$CudaNetworkInfoRequiredText += "cuda_graph_effective=true"
 }
-\$CudaMctsWarmupRequiredText = @()
+\$CudaMctsWarmupRequiredText = @(
+  "capabilities=actual_backend=cuda"
+)
 if ("${CUDA_GRAPH}" -ne "0") {
-  \$CudaMctsWarmupRequiredText = @(
+  \$CudaMctsWarmupRequiredText += @(
     "MCTS backend warmup actual=",
     "executor=resolved+graph-replay"
   )

@@ -18,6 +18,23 @@
 namespace MetalFish {
 namespace NN {
 
+struct BackendCapabilities {
+  std::string actual_backend = "unknown";
+  bool has_wdl = false;
+  bool has_moves_left = false;
+  int max_batch_size = 0;
+  int stable_execution_batch_size = 0;
+  int cuda_configured_device = -1;
+  int cuda_selected_device = -1;
+  bool cuda_graph_execution = false;
+  bool cuda_deterministic_attention_softmax = false;
+  bool cuda_full_buffer_clear = false;
+  std::string device_name;
+  std::string compute_units;
+
+  std::string Summary() const;
+};
+
 class Network {
 public:
   virtual ~Network() = default;
@@ -30,6 +47,7 @@ public:
   virtual std::string GetNetworkInfo() const = 0;
   virtual bool HasWDL() const { return false; }
   virtual bool HasMovesLeft() const { return false; }
+  virtual BackendCapabilities GetBackendCapabilities() const;
 };
 
 struct BackendConfig {
