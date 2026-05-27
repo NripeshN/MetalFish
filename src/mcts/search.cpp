@@ -200,14 +200,14 @@ void ApplyNNPolicyToNode(Node *node, const EvaluationResult &result,
 }
 
 bool ShouldReplayWarmCudaGraph(const SearchParams &params,
-                               const std::string &network_info) {
+                               const NN::BackendCapabilities &capabilities) {
 #ifdef USE_CUDA
   if (!params.cuda_graph_execution)
     return false;
-  return network_info.find("CUDA transformer backend") != std::string::npos;
+  return capabilities.actual_backend == "cuda";
 #else
   (void)params;
-  (void)network_info;
+  (void)capabilities;
   return false;
 #endif
 }
@@ -247,7 +247,7 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
                    false, &warmup_st);
     const uint64_t warmup_base = warmup_pos.raw_key();
     const bool replay_warm_cuda_graph =
-        ShouldReplayWarmCudaGraph(params_, backend_->GetNetworkInfo());
+        ShouldReplayWarmCudaGraph(params_, backend_->GetBackendCapabilities());
     auto warmup_batch = [&](int batch_size, int passes, uint64_t salt,
                             bool update_latency_margin) {
       for (int pass = 0; pass < passes; ++pass) {
