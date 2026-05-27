@@ -1589,16 +1589,8 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 \$HybridAutoText = Read-SmokeText "hybrid-auto"
 \$HybridAneText = Read-SmokeText "hybrid-cuda-ane-disabled"
 \$ComparisonText = Read-SmokeText "cuda-nn-comparison"
-Write-SearchJson `
-  -Name "cuda-bk07-mcts-search" `
-  -Text \$Bk07MctsText `
-  -Position "fen \$Bk07Fen" `
-  -Go "nodes 50"
-Write-SearchJson `
-  -Name "hybrid-cuda-search" `
-  -Text \$HybridText `
-  -Position "startpos" `
-  -Go "${HYBRID_UCI_GO}"
+Write-SearchJson -Name "cuda-bk07-mcts-search" -Text \$Bk07MctsText -Position "fen \$Bk07Fen" -Go "nodes 50"
+Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "startpos" -Go "${HYBRID_UCI_GO}"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
 \$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
 \$Manifest = [ordered]@{
