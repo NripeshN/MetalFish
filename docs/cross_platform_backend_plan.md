@@ -164,7 +164,8 @@ whose remote/runtime, BT4, legacy, or final comparison status is not `0`. Releas
 promotion also requires `require_metal_compare=1` plus BT4 and legacy Metal probe
 suite records, so diagnostic CUDA-only runtime gates cannot be promoted. The
 CUDA package validator also checks each package manifest `source_commit` against
-the same successful gate SHA before release packaging.
+the same successful gate SHA before release packaging, and runtime manifests
+must report the same `git.head_sha`.
 
 Current CUDA backend boundary:
 

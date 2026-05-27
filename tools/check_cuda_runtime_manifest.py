@@ -62,7 +62,11 @@ def validate_metal_compare_inputs(inputs: object) -> None:
 
 
 def validate_runtime_manifest(
-    manifest: pathlib.Path, *, runtime_kind: str, require_metal_compare: bool = False
+    manifest: pathlib.Path,
+    *,
+    runtime_kind: str,
+    require_metal_compare: bool = False,
+    expected_head_sha: str | None = None,
 ) -> dict:
     if runtime_kind not in RUNTIME_KINDS:
         raise ValueError(f"unsupported CUDA runtime kind: {runtime_kind}")
@@ -72,6 +76,12 @@ def validate_runtime_manifest(
         raise ValueError(
             f"runtime manifest {manifest} has unexpected schema: "
             f"{data.get('schema')!r}"
+        )
+    git = data.get("git") or {}
+    if expected_head_sha and git.get("head_sha") != expected_head_sha:
+        raise ValueError(
+            f"runtime manifest {manifest} has unexpected git head: "
+            f"{git.get('head_sha')!r}; expected {expected_head_sha}"
         )
     status = data.get("status")
     if not isinstance(status, dict):
@@ -84,6 +94,7 @@ def validate_runtime_manifest(
     return {
         "schema": data["schema"],
         "kind": runtime_kind,
+        "head_sha": git.get("head_sha"),
         "status": status,
         "gcp": data.get("gcp") or {},
         "inputs": inputs,
@@ -97,6 +108,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--runtime-kind", choices=tuple(RUNTIME_KINDS.keys()), required=True
     )
     parser.add_argument("--require-metal-compare", action="store_true")
+    parser.add_argument("--expected-head-sha", default="")
     parser.add_argument("--json-output", default="")
     return parser.parse_args(argv)
 
@@ -108,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         manifest,
         runtime_kind=args.runtime_kind,
         require_metal_compare=args.require_metal_compare,
+        expected_head_sha=args.expected_head_sha or None,
     )
     if args.json_output:
         path = pathlib.Path(args.json_output).expanduser().resolve()

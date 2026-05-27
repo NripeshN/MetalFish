@@ -326,11 +326,13 @@ def main(argv: list[str] | None = None) -> int:
         linux_runtime_manifest,
         runtime_kind="linux-cuda",
         require_metal_compare=True,
+        expected_head_sha=expected_sha,
     )
     windows_runtime = validate_runtime_manifest(
         windows_runtime_manifest,
         runtime_kind="windows-cuda",
         require_metal_compare=True,
+        expected_head_sha=expected_sha,
     )
 
     packages_dir = out_dir / "packages"

@@ -929,6 +929,7 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
             json.dumps(
                 {
                     "schema": "metalfish.cuda_gpu_runtime_gate",
+                    "git": {"head_sha": "abc123"},
                     "inputs": {
                         "require_metal_compare": "1",
                         "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
@@ -951,6 +952,7 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
             json.dumps(
                 {
                     "schema": "metalfish.windows_cuda_runtime_gate",
+                    "git": {"head_sha": "abc123"},
                     "inputs": {
                         "require_metal_compare": "1",
                         "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
@@ -974,6 +976,7 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                 linux_runtime,
                 runtime_kind="linux-cuda",
                 require_metal_compare=True,
+                expected_head_sha="abc123",
             )["status"]["remote_status"]
             == "0",
         )
@@ -983,6 +986,7 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                 windows_runtime,
                 runtime_kind="windows-cuda",
                 require_metal_compare=True,
+                expected_head_sha="abc123",
             )["status"]["runtime_status"]
             == "0",
         )
@@ -1020,6 +1024,36 @@ def test_cuda_release_artifact_helpers_reject_failed_runtime() -> None:
             expect("bt4 compare failure", "BT4 compare status" in str(exc))
             return
     raise AssertionError("expected failed runtime manifest to be rejected")
+
+
+def test_cuda_runtime_manifest_rejects_head_sha_drift() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        manifest = pathlib.Path(tmp) / "runtime.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.cuda_gpu_runtime_gate",
+                    "git": {"head_sha": "old-sha"},
+                    "status": {
+                        "remote_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        try:
+            runtime_checker.validate_runtime_manifest(
+                manifest,
+                runtime_kind="linux-cuda",
+                expected_head_sha="new-sha",
+            )
+        except ValueError as exc:
+            expect("manifest head drift rejected", "git head" in str(exc))
+            return
+    raise AssertionError("expected runtime manifest head drift to be rejected")
 
 
 def test_cuda_package_validator_rejects_source_commit_drift() -> None:
@@ -1145,6 +1179,7 @@ def main() -> int:
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
+    test_cuda_runtime_manifest_rejects_head_sha_drift()
     test_cuda_package_validator_rejects_source_commit_drift()
     test_cuda_release_artifact_helpers_require_metal_compare()
     test_network_downloader_validates_gzip_weights()

@@ -903,6 +903,7 @@ def main() -> int:
             "runtime_kind=\"linux-cuda\"",
             "runtime_kind=\"windows-cuda\"",
             "require_metal_compare=True",
+            "expected_head_sha=expected_sha",
         ],
     )
     assert_file_contains(
@@ -917,6 +918,8 @@ def main() -> int:
             "runtime_status",
             "require_metal_compare",
             "--require-metal-compare",
+            "--expected-head-sha",
+            "head_sha",
             "Metal BT4 probe suite",
             "Metal legacy probe suite",
             "bt4_compare_status",
