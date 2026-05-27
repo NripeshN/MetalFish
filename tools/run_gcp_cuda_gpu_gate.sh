@@ -20,6 +20,7 @@ METAL_LEGACY_PROBE_SUITE_LOG="${METALFISH_METAL_LEGACY_PROBE_SUITE_LOG:-}"
 METAL_COMPARISON_LOG="${METALFISH_METAL_COMPARISON_LOG:-}"
 REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
+MAX_CUDA_METAL_EVAL_MS_RATIO="${METALFISH_MAX_CUDA_METAL_EVAL_MS_RATIO:-1.0}"
 ARCHIVE="$(mktemp -t metalfish-cuda-gate.XXXXXX.tar.gz)"
 CREATED_INSTANCE=0
 ZONE=""
@@ -255,6 +256,7 @@ write_runtime_manifest() {
     GATE_GCS_PREFIX="${GCS_PREFIX}" \
     GATE_REQUIRE_METAL_COMPARE="${REQUIRE_METAL_COMPARE}" \
     GATE_REQUIRE_METAL_BENCHMARK_COMPARE="${REQUIRE_METAL_BENCHMARK_COMPARE}" \
+    GATE_MAX_CUDA_METAL_EVAL_MS_RATIO="${MAX_CUDA_METAL_EVAL_MS_RATIO}" \
     GATE_METAL_COMPARISON_LOG="${METAL_COMPARISON_LOG}" \
     GATE_METAL_PROBE_SUITE_LOG="${METAL_PROBE_SUITE_LOG}" \
     GATE_METAL_LEGACY_PROBE_SUITE_LOG="${METAL_LEGACY_PROBE_SUITE_LOG}" \
@@ -316,6 +318,9 @@ manifest = {
         "require_metal_compare": os.environ["GATE_REQUIRE_METAL_COMPARE"],
         "require_metal_benchmark_compare": os.environ[
             "GATE_REQUIRE_METAL_BENCHMARK_COMPARE"
+        ],
+        "max_cuda_metal_eval_ms_ratio": os.environ[
+            "GATE_MAX_CUDA_METAL_EVAL_MS_RATIO"
         ],
         "metal_comparison_log": file_record(os.environ["GATE_METAL_COMPARISON_LOG"]),
         "metal_probe_suite_log": file_record(os.environ["GATE_METAL_PROBE_SUITE_LOG"]),
@@ -479,6 +484,7 @@ compare_collected_benchmark_timings() {
     --actual-label "CUDA transformer backend" \
     --summary-out "${ARTIFACT_DIR}/metal-cuda-nn-benchmark-summary.json" \
     --require-actual-graph-reuse \
+    --max-eval-ms-ratio "${MAX_CUDA_METAL_EVAL_MS_RATIO}" \
     | tee "${ARTIFACT_DIR}/metal-cuda-nn-benchmark-compare.log"
 }
 
