@@ -107,13 +107,13 @@ Current remote gates:
 | --- | --- | --- |
 | Linux CPU build/test | `cloudbuild/linux-cpu.yaml` | `21729e08-bf3c-4b34-84a2-0d4c722e0167` |
 | CUDA entrypoint compile/test | `cloudbuild/cuda-entrypoint.yaml` | `92ed1973-1772-4ae4-abb9-1b94ea5efabf` |
-| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `592f939`, `metalfish-cuda-gate-592f939-g4`, L4 `g2-standard-4` in `us-west4-c`, 2026-05-26; validates CUDA graph-replay MCTS warmup, extracted Linux CUDA package smoke and JSON package manifest, packaged `test_nn_comparison` batch/reuse/graph checks, packaged BT4/legacy full-policy probe suites and isolation probes, runtime manifest, BK.07 `h5f6`, Hybrid clock-safety smokes, and same-commit Metal BT4/legacy probe-suite comparison |
+| CUDA GPU runtime gate | `tools/run_gcp_cuda_gpu_gate.sh` | `4ca1bd3`, `metalfish-cuda-direct-4ca1bd3`, L4 `g2-standard-8` in `us-east1-b`, 2026-05-27; validates CUDA graph-replay MCTS warmup, extracted Linux CUDA package smoke and JSON package manifest, packaged `test_nn_comparison` batch/reuse/graph checks, packaged BT4/legacy full-policy probe suites and isolation probes, runtime manifest, BK.07 `h5f6`, Hybrid clock-safety smokes, and same-commit Metal BT4/legacy probe-suite comparison. Metal compare deltas: BT4 `value=4.77e-07`, `wdl=4.77e-07`, `moves_left=4.6e-05`, `top_logit=1.9432e-05`, `policy_max=3.7163e-05`; legacy `value=1.013e-06`, `top_logit=7.6e-06`, `policy_max=1.43e-05` |
 | GitHub CUDA GPU runtime gate | `.github/workflows/cuda-gpu-gate.yml` | Manual dispatch; `metal_ci_run_id` is required by default and `tools/fetch_cuda_gpu_gate_inputs.py` must fetch a successful same-commit `MetalFish CI` artifact before the L4 VM starts, so the CUDA suite hard-compares against current macOS Metal BT4 and legacy artifacts before spending GPU time; `CUBLAS_WORKSPACE_CONFIG` is unset by default and only forwarded through the diagnostic `cublas_workspace_config` input |
-| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | Latest branch pass `26475982955`; installs CUDA through the repo-owned NVIDIA network-installer script, then produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact with `metalfish.exe`, `metalfish_nn_probe.exe`, `test_nn_comparison.exe`, and structured compile/package manifests. Exact Windows runtime input pass: `26475982955` |
-| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Requires `windows_cuda_run_id`; `tools/fetch_windows_cuda_runtime_inputs.py` validates the same-commit Windows CUDA compile run, downloads and validates the package JSON manifest, and, when `require_metal_compare=true`, fetches same-commit Metal artifacts before creating the Windows L4 VM; `stable_batch_size` mirrors the Linux CUDA GPU gate and feeds every packaged probe/MCTS/Hybrid CUDA smoke; direct GCP pass `795c8d8`, `metalfish-win-cuda-795c8d8`, Windows Server 2022 `g2-standard-8` L4 vWS in `us-west1-a`, 2026-05-26, compile run `26475982955`, event-driven UCI `bestmove` wait, graph-replay assertions, packaged JSON manifest validation, packaged `test_nn_comparison` batch/reuse smoke, BK.07 `h5f6`, Hybrid clock-safety smokes, Metal comparison, and runtime manifest |
-| GitHub macOS Metal | `.github/workflows/ci.yml` | `26475982964`, Metal NN parity artifact and BK.07 smoke |
-| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26475982963` |
-| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26475982958` |
+| GitHub Windows CUDA compile gate | `.github/workflows/windows-cuda-compile.yml` | Latest branch pass `26483577901`; installs CUDA through the repo-owned NVIDIA network-installer script, then produces a self-smoked `metalfish-windows-x86_64-msvc-cuda` package artifact with `metalfish.exe`, `metalfish_nn_probe.exe`, `test_nn_comparison.exe`, and structured compile/package manifests. Exact Windows runtime input pass: `26483577901` |
+| GitHub Windows CUDA runtime gate | `.github/workflows/windows-cuda-runtime-gate.yml` | Requires `windows_cuda_run_id`; `tools/fetch_windows_cuda_runtime_inputs.py` validates the same-commit Windows CUDA compile run, downloads and validates the package JSON manifest, and, when `require_metal_compare=true`, fetches same-commit Metal artifacts before creating the Windows L4 VM; `stable_batch_size` mirrors the Linux CUDA GPU gate and feeds every packaged probe/MCTS/Hybrid CUDA smoke; direct GCP pass `4ca1bd3`, `metalfish-win-cuda-direct-4ca1bd3`, Windows Server 2022 `g2-standard-8` L4 vWS in `us-east1-b`, 2026-05-27, compile run `26483577901`, Metal run `26483577899`, event-driven UCI `bestmove` wait, graph-replay assertions, packaged JSON manifest validation with 15 package files, packaged `test_nn_comparison` batch/reuse smoke, BK.07 `h5f6`, Hybrid clock-safety smokes, Metal comparison, and runtime manifest. Metal compare deltas: BT4 `value=4.77e-07`, `wdl=4.77e-07`, `moves_left=4.6e-05`, `top_logit=1.9432e-05`, `policy_max=3.7163e-05`; legacy `value=1.013e-06`, `top_logit=7.6e-06`, `policy_max=1.43e-05` |
+| GitHub macOS Metal | `.github/workflows/ci.yml` | `26483577899`, Metal NN parity artifact and BK.07 smoke |
+| GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26483577902` |
+| GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26483577900` |
 
 Use `tools/dispatch_cuda_runtime_gates.py` after the normal PR checks are green
 to start the manual Linux and Windows CUDA runtime gates from the same branch
@@ -127,7 +127,9 @@ The dispatcher resolves the successful same-commit `MetalFish CI` run and, for
 Windows, the successful same-commit `Windows CUDA Compile Gate` run before
 calling `gh workflow run` for `cuda-gpu-gate.yml` and
 `windows-cuda-runtime-gate.yml`. Use `--dry-run` to print the resolved inputs
-without starting cloud VMs.
+without starting cloud VMs. GitHub can dispatch only workflows that already
+exist on the default branch, so pre-merge validation of newly added workflow
+files should use the direct fetch helper plus direct GCP wrapper pair instead.
 
 Current CUDA backend boundary:
 

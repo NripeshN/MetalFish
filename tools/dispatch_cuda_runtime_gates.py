@@ -78,6 +78,27 @@ def append_field(cmd: list[str], key: str, value: str | int | bool) -> None:
     cmd.extend(["-f", f"{key}={value}"])
 
 
+def require_dispatchable_workflow(*, repo: str, workflow_file: str) -> None:
+    proc = subprocess.run(
+        ["gh", "workflow", "view", workflow_file, "--repo", repo],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if proc.returncode == 0:
+        return
+    detail = (proc.stderr or proc.stdout).strip()
+    raise RuntimeError(
+        f"workflow {workflow_file!r} is not dispatchable in {repo}. "
+        "GitHub workflow_dispatch can only target workflows present on the "
+        "repository default branch. If this workflow exists only on a PR branch, "
+        "use tools/fetch_cuda_gpu_gate_inputs.py plus tools/run_gcp_cuda_gpu_gate.sh "
+        "or tools/fetch_windows_cuda_runtime_inputs.py plus "
+        "tools/run_gcp_windows_cuda_runtime_gate.sh until the workflow file is "
+        f"merged. gh said: {detail}"
+    )
+
+
 def dispatch_workflow(*, repo: str, workflow_file: str, ref: str, fields: dict) -> None:
     cmd = ["gh", "workflow", "run", workflow_file, "--repo", repo, "--ref", ref]
     for key, value in fields.items():
@@ -180,6 +201,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.require_metal and not metal_ci_run_id:
         raise RuntimeError("MetalFish CI run id is required with --require-metal")
+    if not args.dry_run:
+        if needs_linux:
+            require_dispatchable_workflow(repo=repo, workflow_file="cuda-gpu-gate.yml")
+        if needs_windows:
+            require_dispatchable_workflow(
+                repo=repo, workflow_file="windows-cuda-runtime-gate.yml"
+            )
 
     print(f"repo={repo}")
     print(f"ref={ref}")
