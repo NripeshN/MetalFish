@@ -58,33 +58,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Validate Windows CUDA package provenance
-        env:
-          GH_TOKEN: ${{ github.token }}
-          METALFISH_EXPECTED_SHA: ${{ github.sha }}
-          METALFISH_WINDOWS_CUDA_RUN_ID: ${{ inputs.windows_cuda_run_id }}
-        run: |
-          set -euo pipefail
-          run_json="$(gh run view "${METALFISH_WINDOWS_CUDA_RUN_ID}" \
-            --json conclusion,headSha,status,url,workflowName)"
-          workflow_name="$(printf '%s' "${run_json}" | jq -r '.workflowName')"
-          status="$(printf '%s' "${run_json}" | jq -r '.status')"
-          conclusion="$(printf '%s' "${run_json}" | jq -r '.conclusion')"
-          head_sha="$(printf '%s' "${run_json}" | jq -r '.headSha')"
-          url="$(printf '%s' "${run_json}" | jq -r '.url')"
-          if [ "${workflow_name}" != "Windows CUDA Compile Gate" ]; then
-            echo "windows_cuda_run_id must refer to Windows CUDA Compile Gate, got '${workflow_name}' (${url})" >&2
-            exit 2
-          fi
-          if [ "${status}" != "completed" ] || [ "${conclusion}" != "success" ]; then
-            echo "windows_cuda_run_id must be a completed successful run, got status=${status} conclusion=${conclusion} (${url})" >&2
-            exit 2
-          fi
-          if [ "${head_sha}" != "${METALFISH_EXPECTED_SHA}" ]; then
-            echo "windows_cuda_run_id is for ${head_sha}, expected ${METALFISH_EXPECTED_SHA} (${url})" >&2
-            exit 2
-          fi
-
       - name: Validate Metal comparison inputs
         run: |
           set -euo pipefail
@@ -94,68 +67,30 @@ jobs:
             exit 2
           fi
 
-      - name: Validate Metal artifact provenance
-        if: ${{ inputs.metal_ci_run_id != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          METALFISH_EXPECTED_SHA: ${{ github.sha }}
-          METALFISH_METAL_CI_RUN_ID: ${{ inputs.metal_ci_run_id }}
-        run: |
-          set -euo pipefail
-          run_json="$(gh run view "${METALFISH_METAL_CI_RUN_ID}" \
-            --json conclusion,headSha,status,url,workflowName)"
-          workflow_name="$(printf '%s' "${run_json}" | jq -r '.workflowName')"
-          status="$(printf '%s' "${run_json}" | jq -r '.status')"
-          conclusion="$(printf '%s' "${run_json}" | jq -r '.conclusion')"
-          head_sha="$(printf '%s' "${run_json}" | jq -r '.headSha')"
-          url="$(printf '%s' "${run_json}" | jq -r '.url')"
-          if [ "${workflow_name}" != "MetalFish CI" ]; then
-            echo "metal_ci_run_id must refer to MetalFish CI, got '${workflow_name}' (${url})" >&2
-            exit 2
-          fi
-          if [ "${status}" != "completed" ] || [ "${conclusion}" != "success" ]; then
-            echo "metal_ci_run_id must be a completed successful run, got status=${status} conclusion=${conclusion} (${url})" >&2
-            exit 2
-          fi
-          if [ "${head_sha}" != "${METALFISH_EXPECTED_SHA}" ]; then
-            echo "metal_ci_run_id is for ${head_sha}, expected ${METALFISH_EXPECTED_SHA} (${url})" >&2
-            exit 2
-          fi
-
-      - name: Download Windows CUDA package artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p windows-cuda-artifact
-          gh run download "${{ inputs.windows_cuda_run_id }}" \
-            --pattern "windows-cuda-compile-*" \
-            --dir windows-cuda-artifact
-          package="$(find windows-cuda-artifact -name 'metalfish*windows-x86_64-msvc-cuda.zip' -print -quit)"
-          if [ -z "${package}" ]; then
-            echo "Windows CUDA package zip not found in artifact" >&2
-            find windows-cuda-artifact -maxdepth 4 -type f -print >&2
-            exit 2
-          fi
-          echo "METALFISH_WINDOWS_CUDA_PACKAGE=${package}" >> "$GITHUB_ENV"
-
-      - name: Download Metal probe suite artifact
-        if: ${{ inputs.metal_ci_run_id != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p metal-artifacts
-          gh run download "${{ inputs.metal_ci_run_id }}" \
-            --name metalfish-macos-arm64 \
-            --dir metal-artifacts
-          test -s metal-artifacts/build/metal-nn-probe-suite.log
-          test -s metal-artifacts/build/metal-legacy-nn-probe-suite.log
-
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      - name: Fetch Windows CUDA runtime inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            --windows-cuda-run-id "${{ inputs.windows_cuda_run_id }}"
+            --expected-sha "${{ github.sha }}"
+            --out-dir "${GITHUB_WORKSPACE}/results/windows_cuda_runtime_inputs"
+          )
+          if [ -n "${{ inputs.metal_ci_run_id }}" ]; then
+            args+=(--metal-ci-run-id "${{ inputs.metal_ci_run_id }}")
+          fi
+          if [ "${{ inputs.require_metal_compare }}" = "true" ]; then
+            args+=(--require-metal)
+          fi
+          python3 tools/fetch_windows_cuda_runtime_inputs.py "${args[@]}"
+          python3 -m json.tool \
+            "${GITHUB_WORKSPACE}/results/windows_cuda_runtime_inputs/runtime-gate-inputs-manifest.json" >/dev/null
 
       - name: Download engine networks
         run: |
@@ -187,12 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${METALFISH_GCP_PROJECT:=metalfish}"
-          if [ -s "${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log" ]; then
-            export METALFISH_METAL_PROBE_SUITE_LOG="${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log"
-          fi
-          if [ -s "${GITHUB_WORKSPACE}/metal-artifacts/build/metal-legacy-nn-probe-suite.log" ]; then
-            export METALFISH_METAL_LEGACY_PROBE_SUITE_LOG="${GITHUB_WORKSPACE}/metal-artifacts/build/metal-legacy-nn-probe-suite.log"
-          fi
+          . "${GITHUB_WORKSPACE}/results/windows_cuda_runtime_inputs/runtime-gate-env.sh"
           tools/run_gcp_windows_cuda_runtime_gate.sh
 
       - name: Upload Windows CUDA runtime artifacts
@@ -200,5 +130,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: windows-cuda-runtime-${{ github.run_id }}
-          path: results/windows_cuda_runtime_gate/
+          path: |
+            results/windows_cuda_runtime_gate/
+            results/windows_cuda_runtime_inputs/
           if-no-files-found: warn

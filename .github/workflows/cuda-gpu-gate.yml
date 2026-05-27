@@ -78,46 +78,18 @@ jobs:
             exit 2
           fi
 
-      - name: Validate Metal artifact provenance
-        if: ${{ inputs.metal_ci_run_id != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          METALFISH_EXPECTED_SHA: ${{ github.sha }}
-          METALFISH_METAL_CI_RUN_ID: ${{ inputs.metal_ci_run_id }}
-        run: |
-          set -euo pipefail
-          run_json="$(gh run view "${METALFISH_METAL_CI_RUN_ID}" \
-            --json conclusion,headSha,status,url,workflowName)"
-          workflow_name="$(printf '%s' "${run_json}" | jq -r '.workflowName')"
-          status="$(printf '%s' "${run_json}" | jq -r '.status')"
-          conclusion="$(printf '%s' "${run_json}" | jq -r '.conclusion')"
-          head_sha="$(printf '%s' "${run_json}" | jq -r '.headSha')"
-          url="$(printf '%s' "${run_json}" | jq -r '.url')"
-          if [ "${workflow_name}" != "MetalFish CI" ]; then
-            echo "metal_ci_run_id must refer to MetalFish CI, got '${workflow_name}' (${url})" >&2
-            exit 2
-          fi
-          if [ "${status}" != "completed" ] || [ "${conclusion}" != "success" ]; then
-            echo "metal_ci_run_id must be a completed successful run, got status=${status} conclusion=${conclusion} (${url})" >&2
-            exit 2
-          fi
-          if [ "${head_sha}" != "${METALFISH_EXPECTED_SHA}" ]; then
-            echo "metal_ci_run_id is for ${head_sha}, expected ${METALFISH_EXPECTED_SHA} (${url})" >&2
-            exit 2
-          fi
-
-      - name: Download Metal probe suite artifact
+      - name: Fetch Metal comparison inputs
         if: ${{ inputs.metal_ci_run_id != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p metal-artifacts
-          gh run download "${{ inputs.metal_ci_run_id }}" \
-            --name metalfish-macos-arm64 \
-            --dir metal-artifacts
-          test -s metal-artifacts/build/metal-nn-probe-suite.log
-          test -s metal-artifacts/build/metal-legacy-nn-probe-suite.log
+          python3 tools/fetch_cuda_gpu_gate_inputs.py \
+            --metal-ci-run-id "${{ inputs.metal_ci_run_id }}" \
+            --expected-sha "${{ github.sha }}" \
+            --out-dir "${GITHUB_WORKSPACE}/results/cuda_gpu_gate_inputs"
+          python3 -m json.tool \
+            "${GITHUB_WORKSPACE}/results/cuda_gpu_gate_inputs/cuda-gpu-gate-inputs-manifest.json" >/dev/null
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -144,16 +116,13 @@ jobs:
         run: |
           set -euo pipefail
           : "${METALFISH_GCP_PROJECT:=metalfish}"
+          if [ -s "${GITHUB_WORKSPACE}/results/cuda_gpu_gate_inputs/cuda-gpu-gate-env.sh" ]; then
+            . "${GITHUB_WORKSPACE}/results/cuda_gpu_gate_inputs/cuda-gpu-gate-env.sh"
+          fi
           if [ "${{ inputs.profile }}" = "true" ]; then
             export METALFISH_CUDA_PROFILE=1
           else
             export METALFISH_CUDA_PROFILE=0
-          fi
-          if [ -s "${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log" ]; then
-            export METALFISH_METAL_PROBE_SUITE_LOG="${GITHUB_WORKSPACE}/metal-artifacts/build/metal-nn-probe-suite.log"
-          fi
-          if [ -s "${GITHUB_WORKSPACE}/metal-artifacts/build/metal-legacy-nn-probe-suite.log" ]; then
-            export METALFISH_METAL_LEGACY_PROBE_SUITE_LOG="${GITHUB_WORKSPACE}/metal-artifacts/build/metal-legacy-nn-probe-suite.log"
           fi
           tools/run_gcp_cuda_gpu_gate.sh
 
@@ -162,5 +131,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: cuda-gpu-gate-${{ github.run_id }}
-          path: results/cuda_gpu_gate/
+          path: |
+            results/cuda_gpu_gate/
+            results/cuda_gpu_gate_inputs/
           if-no-files-found: warn
