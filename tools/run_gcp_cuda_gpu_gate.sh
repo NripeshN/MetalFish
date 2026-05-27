@@ -47,6 +47,8 @@ git diff-index --quiet HEAD -- || {
   exit 2
 }
 
+SOURCE_COMMIT="${METALFISH_SOURCE_COMMIT:-$(git rev-parse HEAD)}"
+SOURCE_BRANCH="${METALFISH_SOURCE_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 git archive --format=tar.gz --output="${ARCHIVE}" HEAD
 
 for candidate_zone in ${ZONES}; do
@@ -95,6 +97,8 @@ gcloud compute scp "${ARCHIVE}" "${INSTANCE}:~/metalfish.tar.gz" \
   --zone "${ZONE}"
 
 REMOTE_ENV="METALFISH_INSTALL_DEPS=1"
+REMOTE_ENV+=" METALFISH_SOURCE_COMMIT=$(printf '%q' "${SOURCE_COMMIT}")"
+REMOTE_ENV+=" METALFISH_SOURCE_BRANCH=$(printf '%q' "${SOURCE_BRANCH}")"
 append_remote_env() {
   local key="$1"
   local value="${!key:-}"

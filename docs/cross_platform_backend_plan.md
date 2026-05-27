@@ -142,7 +142,9 @@ NNUE/BT4/legacy weights needed by the Windows package smoke, then calls
 `tools/run_gcp_windows_cuda_runtime_gate.sh` with artifact collection enabled.
 Its default artifact root is `results/cuda_runtime_direct/<sha>/`; the detached
 worktree is removed after a successful run and preserved after a failure for
-debugging.
+debugging. The Linux GCP archive path forwards `METALFISH_SOURCE_COMMIT` and
+`METALFISH_SOURCE_BRANCH` into the VM, so package manifests remain tied to the
+validated branch tip even though `git archive` does not include `.git`.
 
 Once both CUDA runtime gates have passed for the same SHA, use the CUDA release
 promotion workflow to fetch, validate, rename, and optionally attach the Linux

@@ -205,10 +205,14 @@ def run_linux_gate(
     artifact_root: pathlib.Path,
     linux_env_file: pathlib.Path | None,
     linux_instance: str,
+    source_commit: str,
+    source_branch: str,
     dry_run: bool,
 ) -> None:
     env = os.environ.copy()
     add_common_gcp_env(env, args)
+    env["METALFISH_SOURCE_COMMIT"] = source_commit
+    env["METALFISH_SOURCE_BRANCH"] = source_branch
     env["METALFISH_GCP_INSTANCE"] = linux_instance
     env["METALFISH_GCP_ARTIFACT_DIR"] = str(artifact_root / "linux")
     env["METALFISH_GCP_MACHINE"] = args.linux_machine
@@ -416,6 +420,8 @@ def main(argv: list[str] | None = None) -> int:
                 artifact_root=artifact_root,
                 linux_env_file=linux_env_file,
                 linux_instance=linux_instance,
+                source_commit=expected_sha,
+                source_branch=ref,
                 dry_run=args.dry_run,
             )
 
