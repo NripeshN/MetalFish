@@ -115,6 +115,20 @@ Current remote gates:
 | GitHub portable Linux/Windows CPU | `.github/workflows/portable-ci.yml` | `26475982963` |
 | GitHub hybrid regression | `.github/workflows/hybrid-regression.yml` | `26475982958` |
 
+Use `tools/dispatch_cuda_runtime_gates.py` after the normal PR checks are green
+to start the manual Linux and Windows CUDA runtime gates from the same branch
+tip without hand-copying run IDs:
+
+```bash
+python3 tools/dispatch_cuda_runtime_gates.py --target both --ref cuda-support
+```
+
+The dispatcher resolves the successful same-commit `MetalFish CI` run and, for
+Windows, the successful same-commit `Windows CUDA Compile Gate` run before
+calling `gh workflow run` for `cuda-gpu-gate.yml` and
+`windows-cuda-runtime-gate.yml`. Use `--dry-run` to print the resolved inputs
+without starting cloud VMs.
+
 Current CUDA backend boundary:
 
 - The Linux CUDA entrypoint Cloud Build compiles `test_nn_comparison` alongside

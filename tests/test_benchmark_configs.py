@@ -1348,6 +1348,32 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / "tools/dispatch_cuda_runtime_gates.py",
+        [
+            "CUDA GPU Gate",
+            "Windows CUDA Runtime Gate",
+            "cuda-gpu-gate.yml",
+            "windows-cuda-runtime-gate.yml",
+            "gh",
+            "workflow",
+            "run",
+            "MetalFish CI",
+            "Windows CUDA Compile Gate",
+            "find_successful_run",
+            "headSha",
+            "conclusion",
+            "status",
+            "--target",
+            "--metal-ci-run-id",
+            "--windows-cuda-run-id",
+            "--require-metal",
+            "--no-require-metal",
+            "--dry-run",
+            "stable_batch_size",
+            "g2-standard-8 g2-standard-4",
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/run_gcp_windows_cuda_runtime_gate.sh",
         [
             "nvidia-l4-vws",
