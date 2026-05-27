@@ -12,7 +12,7 @@ from typing import Any
 
 def load_result(path: pathlib.Path) -> dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"{path}: invalid JSON: {exc}") from exc
     if payload.get("schema") != "metalfish.uci_smoke_result":
