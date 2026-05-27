@@ -158,8 +158,9 @@ gh workflow run cuda-release.yml \
 ```
 
 `tools/fetch_cuda_release_artifacts.py` rejects failed runs, wrong workflow
-types, SHA mismatches, missing CUDA packages, package-manifest drift, and
-runtime manifests whose BT4 or legacy Metal comparison status is not `0`.
+types, SHA mismatches, missing CUDA packages, package-manifest drift, and uses
+`tools/check_cuda_runtime_manifest.py` to reject Linux/Windows runtime manifests
+whose remote/runtime, BT4, legacy, or final comparison status is not `0`.
 
 Current CUDA backend boundary:
 

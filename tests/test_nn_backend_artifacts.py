@@ -13,6 +13,7 @@ from contextlib import contextmanager
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from tools import check_cuda_runtime_manifest as runtime_checker  # noqa: E402
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
 from tools import download_engine_networks as downloader  # noqa: E402
@@ -900,15 +901,15 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
         )
         expect(
             "linux runtime status",
-            cuda_release.validate_runtime_manifest(
-                linux_runtime, schema="metalfish.cuda_gpu_runtime_gate"
+            runtime_checker.validate_runtime_manifest(
+                linux_runtime, runtime_kind="linux-cuda"
             )["status"]["remote_status"]
             == "0",
         )
         expect(
             "windows runtime status",
-            cuda_release.validate_runtime_manifest(
-                windows_runtime, schema="metalfish.windows_cuda_runtime_gate"
+            runtime_checker.validate_runtime_manifest(
+                windows_runtime, runtime_kind="windows-cuda"
             )["status"]["runtime_status"]
             == "0",
         )
@@ -939,8 +940,8 @@ def test_cuda_release_artifact_helpers_reject_failed_runtime() -> None:
             encoding="utf-8",
         )
         try:
-            cuda_release.validate_runtime_manifest(
-                manifest, schema="metalfish.windows_cuda_runtime_gate"
+            runtime_checker.validate_runtime_manifest(
+                manifest, runtime_kind="windows-cuda"
             )
         except ValueError as exc:
             expect("bt4 compare failure", "BT4 compare status" in str(exc))

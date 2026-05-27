@@ -14,11 +14,13 @@ import sys
 import zipfile
 
 try:
+    from tools.check_cuda_runtime_manifest import validate_runtime_manifest
     from tools.check_cuda_package_artifacts import (
         validate_linux_cuda_package,
         validate_windows_cuda_package,
     )
 except ModuleNotFoundError:
+    from check_cuda_runtime_manifest import validate_runtime_manifest
     from check_cuda_package_artifacts import (
         validate_linux_cuda_package,
         validate_windows_cuda_package,
@@ -202,33 +204,6 @@ def file_record(path: pathlib.Path) -> dict:
     }
 
 
-def require_zero_status(status: object, *, label: str) -> None:
-    if str(status) != "0":
-        raise ValueError(f"{label} must be 0 for release promotion, got {status!r}")
-
-
-def validate_runtime_manifest(path: pathlib.Path, *, schema: str) -> dict:
-    data = json.loads(path.read_text(encoding="utf-8-sig"))
-    if data.get("schema") != schema:
-        raise ValueError(
-            f"runtime manifest {path} has unexpected schema: {data.get('schema')!r}"
-        )
-    status = data.get("status") or {}
-    if schema == "metalfish.cuda_gpu_runtime_gate":
-        require_zero_status(status.get("remote_status"), label="Linux remote_status")
-    else:
-        require_zero_status(status.get("runtime_status"), label="Windows runtime_status")
-    require_zero_status(status.get("bt4_compare_status"), label="BT4 compare status")
-    require_zero_status(status.get("legacy_compare_status"), label="legacy compare status")
-    require_zero_status(status.get("final_compare_status"), label="final compare status")
-    return {
-        "schema": data["schema"],
-        "status": status,
-        "gcp": data.get("gcp") or {},
-        "inputs": data.get("inputs") or {},
-    }
-
-
 def release_package_name(path: pathlib.Path, *, tag_name: str, platform: str) -> str:
     if not tag_name:
         return path.name
@@ -342,10 +317,10 @@ def main(argv: list[str] | None = None) -> int:
     linux_package_manifest = validate_linux_cuda_package(linux_package)
     windows_package_manifest = validate_windows_cuda_package(windows_package)
     linux_runtime = validate_runtime_manifest(
-        linux_runtime_manifest, schema="metalfish.cuda_gpu_runtime_gate"
+        linux_runtime_manifest, runtime_kind="linux-cuda"
     )
     windows_runtime = validate_runtime_manifest(
-        windows_runtime_manifest, schema="metalfish.windows_cuda_runtime_gate"
+        windows_runtime_manifest, runtime_kind="windows-cuda"
     )
 
     packages_dir = out_dir / "packages"
