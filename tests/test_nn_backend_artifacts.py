@@ -1030,6 +1030,131 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
         )
 
 
+def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        direct = root / "direct"
+        linux_package_dir = root / "linux-package"
+        windows_package_dir = root / "windows-package"
+        write_release_package_files(
+            linux_package_dir,
+            package_kind="linux-cuda",
+            windows=False,
+            source_commit="abc123",
+        )
+        write_release_package_files(
+            windows_package_dir,
+            package_kind="windows-cuda",
+            windows=True,
+            source_commit="abc123",
+        )
+        linux_dir = direct / "linux"
+        windows_dir = direct / "windows"
+        windows_inputs_dir = direct / "windows_cuda_runtime_inputs" / "windows"
+        linux_dir.mkdir(parents=True)
+        windows_dir.mkdir(parents=True)
+        windows_inputs_dir.mkdir(parents=True)
+        linux_package = linux_dir / "metalfish-linux-x86_64-cuda.tar.gz"
+        with tarfile.open(linux_package, "w:gz") as archive:
+            for path in sorted(linux_package_dir.iterdir()):
+                archive.add(path, arcname=path.name)
+        windows_package = windows_inputs_dir / "metalfish-windows-x86_64-msvc-cuda.zip"
+        with zipfile.ZipFile(windows_package, "w") as archive:
+            for path in sorted(windows_package_dir.iterdir()):
+                archive.write(path, arcname=path.name)
+
+        (direct / "direct-runtime-gates-manifest.json").write_text(
+            json.dumps({"expected_sha": "abc123", "repo": "owner/repo"}) + "\n",
+            encoding="utf-8",
+        )
+        (linux_dir / "cuda-gpu-runtime-manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.cuda_gpu_runtime_gate",
+                    "git": {"head_sha": "abc123"},
+                    "inputs": {
+                        "require_metal_compare": "1",
+                        "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
+                        "metal_legacy_probe_suite_log": metal_log_record(
+                            "metal-legacy.log"
+                        ),
+                    },
+                    "status": {
+                        "remote_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (windows_dir / "windows-cuda-runtime-gate-manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.windows_cuda_runtime_gate",
+                    "git": {"head_sha": "abc123"},
+                    "inputs": {
+                        "require_metal_compare": "1",
+                        "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
+                        "metal_legacy_probe_suite_log": metal_log_record(
+                            "metal-legacy.log"
+                        ),
+                    },
+                    "status": {
+                        "runtime_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        out_dir = root / "release"
+        expect(
+            "direct release promotion",
+            cuda_release.main(
+                [
+                    "--direct-runtime-root",
+                    str(direct),
+                    "--out-dir",
+                    str(out_dir),
+                    "--tag-name",
+                    "v0.1.0-alpha",
+                ]
+            )
+            == 0,
+        )
+        manifest = json.loads(
+            (out_dir / "cuda-release-artifacts-manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        expect("direct repo", manifest["repo"] == "owner/repo")
+        expect("direct expected sha", manifest["expected_sha"] == "abc123")
+        expect(
+            "direct linux mode",
+            manifest["runs"]["linux_cuda"]["mode"] == "direct-runtime-root",
+        )
+        expect(
+            "direct windows source",
+            manifest["packages"]["windows_cuda"]["manifest"]["source_commit"]
+            == "abc123",
+        )
+        expect(
+            "direct release package",
+            (
+                out_dir
+                / "packages"
+                / "metalfish-v0.1.0-alpha-windows-x86_64-msvc-cuda.zip"
+            ).is_file(),
+        )
+
+
 def test_cuda_release_artifact_helpers_reject_failed_runtime() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         manifest = pathlib.Path(tmp) / "windows-cuda-runtime-gate-manifest.json"
@@ -1261,6 +1386,7 @@ def main() -> int:
     test_cuda_runtime_input_helpers_validate_complete_zip()
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
+    test_cuda_release_artifacts_promote_direct_runtime_root()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
     test_cuda_runtime_manifest_rejects_head_sha_drift()
     test_cuda_package_validator_rejects_source_commit_drift()

@@ -247,11 +247,67 @@ def fetch_gate_artifact(
     return run, artifact, extract_dir
 
 
+def read_direct_runtime_manifest(root: pathlib.Path) -> dict:
+    manifest = root / "direct-runtime-gates-manifest.json"
+    if not manifest.is_file():
+        return {}
+    return json.loads(manifest.read_text(encoding="utf-8-sig"))
+
+
+def fetch_direct_runtime_artifacts(
+    root: pathlib.Path,
+) -> tuple[dict, dict, pathlib.Path, pathlib.Path]:
+    if not root.is_dir():
+        raise FileNotFoundError(f"direct runtime root not found: {root}")
+    linux_dir = root / "linux"
+    windows_dir = root / "windows"
+    windows_inputs_dir = root / "windows_cuda_runtime_inputs"
+    linux_package = find_one(
+        linux_dir, "metalfish*linux-x86_64-cuda.tar.gz", "Linux CUDA package"
+    )
+    linux_runtime_manifest = find_one(
+        linux_dir, "cuda-gpu-runtime-manifest.json", "Linux CUDA runtime manifest"
+    )
+    windows_package = find_one(
+        windows_inputs_dir,
+        "metalfish*windows-x86_64-msvc-cuda.zip",
+        "Windows CUDA package",
+    )
+    windows_runtime_manifest = find_one(
+        windows_dir,
+        "windows-cuda-runtime-gate-manifest.json",
+        "Windows CUDA runtime manifest",
+    )
+    return (
+        {
+            "mode": "direct-runtime-root",
+            "root": str(root),
+            "runtime_manifest": str(linux_runtime_manifest),
+        },
+        {
+            "mode": "direct-runtime-root",
+            "root": str(root),
+            "runtime_manifest": str(windows_runtime_manifest),
+        },
+        linux_package,
+        windows_package,
+    )
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default="", help="GitHub repo, for example owner/name")
-    parser.add_argument("--linux-cuda-run-id", required=True)
-    parser.add_argument("--windows-cuda-runtime-run-id", required=True)
+    parser.add_argument("--linux-cuda-run-id", default="")
+    parser.add_argument("--windows-cuda-runtime-run-id", default="")
+    parser.add_argument(
+        "--direct-runtime-root",
+        default="",
+        help=(
+            "Promote packages from a direct runtime gate root, for example "
+            "results/cuda_runtime_direct/<sha>. This is mutually exclusive "
+            "with GitHub run IDs."
+        ),
+    )
     parser.add_argument("--out-dir", default="results/cuda_release_artifacts")
     parser.add_argument(
         "--expected-sha",
@@ -273,46 +329,84 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    repo = args.repo or default_repo()
-    expected_sha = None if args.no_expected_sha else (args.expected_sha or git_head())
+    direct_root = (
+        pathlib.Path(args.direct_runtime_root).expanduser().resolve()
+        if args.direct_runtime_root
+        else None
+    )
+    if direct_root and (args.linux_cuda_run_id or args.windows_cuda_runtime_run_id):
+        raise ValueError("--direct-runtime-root is mutually exclusive with run IDs")
+    if not direct_root and not (args.linux_cuda_run_id and args.windows_cuda_runtime_run_id):
+        raise ValueError(
+            "provide --direct-runtime-root or both --linux-cuda-run-id and "
+            "--windows-cuda-runtime-run-id"
+        )
+    direct_manifest = read_direct_runtime_manifest(direct_root) if direct_root else {}
+    repo = args.repo or str(direct_manifest.get("repo") or "") or default_repo()
+    direct_expected_sha = str(direct_manifest.get("expected_sha") or "")
+    expected_sha = (
+        None
+        if args.no_expected_sha
+        else (args.expected_sha or direct_expected_sha or git_head())
+    )
     out_dir = pathlib.Path(args.out_dir).expanduser().resolve()
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    linux_run, linux_artifact, linux_dir = fetch_gate_artifact(
-        repo=repo,
-        run_id=args.linux_cuda_run_id,
-        workflow="CUDA GPU Gate",
-        expected_sha=expected_sha,
-        artifact_pattern="cuda-gpu-gate-*",
-        out_dir=out_dir,
-    )
-    windows_run, windows_artifact, windows_dir = fetch_gate_artifact(
-        repo=repo,
-        run_id=args.windows_cuda_runtime_run_id,
-        workflow="Windows CUDA Runtime Gate",
-        expected_sha=expected_sha,
-        artifact_pattern="windows-cuda-runtime-*",
-        out_dir=out_dir,
-    )
-
-    linux_package = find_one(
-        linux_dir, "metalfish*linux-x86_64-cuda.tar.gz", "Linux CUDA package"
-    )
-    linux_runtime_manifest = find_one(
-        linux_dir, "cuda-gpu-runtime-manifest.json", "Linux CUDA runtime manifest"
-    )
-    windows_package = find_one(
-        windows_dir,
-        "metalfish*windows-x86_64-msvc-cuda.zip",
-        "Windows CUDA package",
-    )
-    windows_runtime_manifest = find_one(
-        windows_dir,
-        "windows-cuda-runtime-gate-manifest.json",
-        "Windows CUDA runtime manifest",
-    )
+    if direct_root:
+        linux_run, windows_run, linux_package, windows_package = (
+            fetch_direct_runtime_artifacts(direct_root)
+        )
+        linux_artifact = {
+            "mode": "direct-runtime-root",
+            "name": linux_package.name,
+            "record": file_record(linux_package),
+        }
+        windows_artifact = {
+            "mode": "direct-runtime-root",
+            "name": windows_package.name,
+            "record": file_record(windows_package),
+        }
+        linux_runtime_manifest = pathlib.Path(linux_run["runtime_manifest"])
+        windows_runtime_manifest = pathlib.Path(windows_run["runtime_manifest"])
+    else:
+        linux_run_info, linux_artifact_info, linux_dir = fetch_gate_artifact(
+            repo=repo,
+            run_id=args.linux_cuda_run_id,
+            workflow="CUDA GPU Gate",
+            expected_sha=expected_sha,
+            artifact_pattern="cuda-gpu-gate-*",
+            out_dir=out_dir,
+        )
+        windows_run_info, windows_artifact_info, windows_dir = fetch_gate_artifact(
+            repo=repo,
+            run_id=args.windows_cuda_runtime_run_id,
+            workflow="Windows CUDA Runtime Gate",
+            expected_sha=expected_sha,
+            artifact_pattern="windows-cuda-runtime-*",
+            out_dir=out_dir,
+        )
+        linux_run = dataclasses.asdict(linux_run_info)
+        windows_run = dataclasses.asdict(windows_run_info)
+        linux_artifact = dataclasses.asdict(linux_artifact_info)
+        windows_artifact = dataclasses.asdict(windows_artifact_info)
+        linux_package = find_one(
+            linux_dir, "metalfish*linux-x86_64-cuda.tar.gz", "Linux CUDA package"
+        )
+        linux_runtime_manifest = find_one(
+            linux_dir, "cuda-gpu-runtime-manifest.json", "Linux CUDA runtime manifest"
+        )
+        windows_package = find_one(
+            windows_dir,
+            "metalfish*windows-x86_64-msvc-cuda.zip",
+            "Windows CUDA package",
+        )
+        windows_runtime_manifest = find_one(
+            windows_dir,
+            "windows-cuda-runtime-gate-manifest.json",
+            "Windows CUDA runtime manifest",
+        )
 
     linux_package_manifest = validate_linux_cuda_package(
         linux_package,
@@ -355,12 +449,12 @@ def main(argv: list[str] | None = None) -> int:
         "expected_sha": expected_sha,
         "tag_name": args.tag_name,
         "runs": {
-            "linux_cuda": dataclasses.asdict(linux_run),
-            "windows_cuda_runtime": dataclasses.asdict(windows_run),
+            "linux_cuda": linux_run,
+            "windows_cuda_runtime": windows_run,
         },
         "source_artifacts": {
-            "linux_cuda": dataclasses.asdict(linux_artifact),
-            "windows_cuda_runtime": dataclasses.asdict(windows_artifact),
+            "linux_cuda": linux_artifact,
+            "windows_cuda_runtime": windows_artifact,
         },
         "packages": {
             "linux_cuda": {

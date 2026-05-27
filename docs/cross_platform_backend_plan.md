@@ -157,15 +157,26 @@ gh workflow run cuda-release.yml \
   -f attach_to_release=true
 ```
 
+For branch-local direct GCP validation, promote the same artifacts without
+GitHub runtime workflow run IDs:
+
+```bash
+python3 tools/fetch_cuda_release_artifacts.py \
+  --direct-runtime-root results/cuda_runtime_direct/<sha> \
+  --tag-name v0.1.0-alpha \
+  --out-dir results/cuda_release_artifacts/<sha>
+```
+
 `tools/fetch_cuda_release_artifacts.py` rejects failed runs, wrong workflow
 types, SHA mismatches, missing CUDA packages, package-manifest drift, and uses
 `tools/check_cuda_runtime_manifest.py` to reject Linux/Windows runtime manifests
 whose remote/runtime, BT4, legacy, or final comparison status is not `0`. Release
 promotion also requires `require_metal_compare=1` plus BT4 and legacy Metal probe
 suite records, so diagnostic CUDA-only runtime gates cannot be promoted. The
-CUDA package validator also checks each package manifest `source_commit` against
-the same successful gate SHA before release packaging, and runtime manifests
-must report the same `git.head_sha`.
+same validator path is used for GitHub workflow artifacts and direct runtime
+roots. The CUDA package validator also checks each package manifest
+`source_commit` against the same successful gate SHA before release packaging,
+and runtime manifests must report the same `git.head_sha`.
 
 Current CUDA backend boundary:
 
@@ -370,7 +381,8 @@ Current CUDA backend boundary:
   missing placeholder. The executor uses the same resolved tape, stage input
   derivation, packed input mask/value buffers, stage sequence launcher, and
   named output copier as the smoke path. GPU-device parity against Metal/Lc0 is
-  still a release-blocking gate before CUDA can be called strength-ready.
+  now covered by the Linux and Windows L4 runtime gates before CUDA packages can
+  be promoted as strength-ready release artifacts.
 - `CudaNetwork` runs a suppressed-profile batch-1 warmup immediately after
   installing the resolved executor. This primes CUDA kernels, cuBLAS handles,
   and fixed-shape workspaces before the first real search eval. On the 2026-05-20
