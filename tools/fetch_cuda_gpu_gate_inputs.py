@@ -216,12 +216,15 @@ def main(argv: list[str] | None = None) -> int:
 
     bt4_log = metal_dir / "build" / "metal-nn-probe-suite.log"
     legacy_log = metal_dir / "build" / "metal-legacy-nn-probe-suite.log"
-    for path in (bt4_log, legacy_log):
+    comparison_log = metal_dir / "build" / "metal-nn-comparison.log"
+    for path in (bt4_log, legacy_log, comparison_log):
         if not path.is_file() or path.stat().st_size == 0:
             raise FileNotFoundError(path)
 
     env = {
         "METALFISH_REQUIRE_METAL_COMPARE": "1",
+        "METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE": "1",
+        "METALFISH_METAL_COMPARISON_LOG": str(comparison_log),
         "METALFISH_METAL_PROBE_SUITE_LOG": str(bt4_log),
         "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG": str(legacy_log),
     }
@@ -245,6 +248,11 @@ def main(argv: list[str] | None = None) -> int:
                 "path": str(legacy_log),
                 "size_bytes": legacy_log.stat().st_size,
                 "sha256": sha256_file(legacy_log),
+            },
+            "metal_comparison_log": {
+                "path": str(comparison_log),
+                "size_bytes": comparison_log.stat().st_size,
+                "sha256": sha256_file(comparison_log),
             },
         },
     }

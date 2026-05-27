@@ -97,6 +97,7 @@ jobs:
             tools/filter_lichess_puzzle_csv.py \
             tools/apple_coreml_microbench.py \
             tools/check_nn_backend_artifacts.py \
+            tools/compare_nn_backend_benchmarks.py \
             tools/compare_nn_backend_outputs.py \
             tools/run_nn_backend_probe_suite.py \
             tools/lc0_coreml_bk_policy_probe.py \

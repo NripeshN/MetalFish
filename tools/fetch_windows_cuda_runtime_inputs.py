@@ -331,6 +331,7 @@ def main(argv: list[str] | None = None) -> int:
     metal_archive = None
     metal_probe_log = None
     metal_legacy_probe_log = None
+    metal_comparison_log = None
     if args.metal_ci_run_id:
         metal_run = read_run(repo, args.metal_ci_run_id)
         require_run_provenance(
@@ -350,6 +351,9 @@ def main(argv: list[str] | None = None) -> int:
             "metal-legacy-nn-probe-suite.log",
             "Metal legacy probe suite log",
         )
+        metal_comparison_log = find_one(
+            metal_dir, "metal-nn-comparison.log", "Metal NN comparison log"
+        )
 
     env = {
         "METALFISH_WINDOWS_CUDA_PACKAGE": str(package),
@@ -358,6 +362,8 @@ def main(argv: list[str] | None = None) -> int:
     if metal_probe_log and metal_legacy_probe_log:
         env.update(
             {
+                "METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE": "1",
+                "METALFISH_METAL_COMPARISON_LOG": str(metal_comparison_log),
                 "METALFISH_METAL_PROBE_SUITE_LOG": str(metal_probe_log),
                 "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG": str(metal_legacy_probe_log),
                 "METALFISH_REQUIRE_METAL_COMPARE": "1",
@@ -388,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:
             "run": dataclasses.asdict(metal_run),
             "artifact": dataclasses.asdict(metal_artifact),
             "archive": str(metal_archive),
+            "comparison_log": str(metal_comparison_log),
             "probe_suite_log": str(metal_probe_log),
             "legacy_probe_suite_log": str(metal_legacy_probe_log),
         }
@@ -401,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
         f"files={package_manifest['file_count']}"
     )
     if metal_probe_log and metal_legacy_probe_log:
+        print(f"Metal NN comparison: {metal_comparison_log}")
         print(f"Metal BT4 probe suite: {metal_probe_log}")
         print(f"Metal legacy probe suite: {metal_legacy_probe_log}")
     print(f"Environment file: {env_path}")

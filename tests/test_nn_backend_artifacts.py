@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools import check_cuda_runtime_manifest as runtime_checker  # noqa: E402
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
+from tools import compare_nn_backend_benchmarks as benchmark_comparer  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
 from tools import download_engine_networks as downloader  # noqa: E402
 from tools import fetch_cuda_gpu_gate_inputs as cuda_gpu_inputs  # noqa: E402
@@ -145,6 +146,29 @@ def probe_json(
     )
 
 
+def write_benchmark_log(
+    path: pathlib.Path,
+    *,
+    label: str,
+    include_graph_reuse: bool = True,
+) -> None:
+    graph_line = (
+        "    graph_reuse_probe: b4 b1 b2 b4 b1 b2 checksum=2\n"
+        if include_graph_reuse
+        else ""
+    )
+    path.write_text(
+        f"backend: {label}\n"
+        "    benchmark_warmups: 3\n"
+        "    batches: b1=6.000ms/6.0000ms_eval "
+        "b2=9.000ms/4.5000ms_eval "
+        "b4=16.000ms/4.0000ms_eval checksum=1\n"
+        f"{graph_line}"
+        f"backend_after: {label} executor=resolved+graph-replay(captures=1)\n",
+        encoding="utf-8",
+    )
+
+
 def test_checker_writes_manifest() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         report, compare, probe, manifest = write_artifacts(pathlib.Path(tmp))
@@ -245,6 +269,78 @@ def test_backend_output_compare_accepts_close_outputs() -> None:
             abs(data["policy_max_delta"] - 0.0005) < 1e-9,
         )
         expect("summary probe count", data["probe_count"] == 1)
+
+
+def test_backend_benchmark_compare_writes_summary() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal.log"
+        actual = root / "cuda.log"
+        summary = root / "summary.json"
+        write_benchmark_log(expected, label="Metal (MPSGraph) backend")
+        write_benchmark_log(actual, label="CUDA transformer backend")
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--expected-label",
+                "Metal (MPSGraph) backend",
+                "--actual-label",
+                "CUDA transformer backend",
+                "--summary-out",
+                str(summary),
+                "--min-common-batches",
+                "3",
+                "--require-graph-reuse",
+            ]
+        ):
+            expect("benchmark compare success", benchmark_comparer.main() == 0)
+
+        data = json.loads(summary.read_text(encoding="utf-8"))
+        expect("benchmark common count", data["common_batch_count"] == 3)
+        expect("benchmark best common", data["best_common_actual"]["batch_size"] == 4)
+        expect(
+            "benchmark actual label",
+            data["actual"]["label"] == "CUDA transformer backend",
+        )
+        expect(
+            "benchmark graph reuse",
+            data["actual"]["graph_reuse_batches"] == [4, 1, 2, 4, 1, 2],
+        )
+
+
+def test_backend_benchmark_compare_requires_graph_reuse() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal.log"
+        actual = root / "cuda.log"
+        write_benchmark_log(expected, label="Metal (MPSGraph) backend")
+        write_benchmark_log(
+            actual,
+            label="CUDA transformer backend",
+            include_graph_reuse=False,
+        )
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--expected-label",
+                "Metal (MPSGraph) backend",
+                "--actual-label",
+                "CUDA transformer backend",
+                "--require-graph-reuse",
+            ]
+        ):
+            try:
+                benchmark_comparer.main()
+            except RuntimeError as exc:
+                expect("graph reuse error", "missing graph_reuse_probe" in str(exc))
+                return
+    raise AssertionError("expected missing graph reuse to fail")
 
 
 def test_backend_output_compare_accepts_probe_suite() -> None:
@@ -1372,6 +1468,8 @@ def main() -> int:
     test_checker_writes_manifest()
     test_checker_rejects_missing_wdl()
     test_backend_output_compare_accepts_close_outputs()
+    test_backend_benchmark_compare_writes_summary()
+    test_backend_benchmark_compare_requires_graph_reuse()
     test_backend_output_compare_accepts_probe_suite()
     test_backend_output_compare_accepts_legacy_scalar_probe_suite()
     test_backend_output_compare_rejects_probe_suite_mismatch()

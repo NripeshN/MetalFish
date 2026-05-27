@@ -18,7 +18,9 @@ ARTIFACT_DIR="${METALFISH_GCP_ARTIFACT_DIR:-${ROOT_DIR}/results/windows_cuda_run
 GCS_PREFIX="${METALFISH_GCP_GCS_PREFIX:-}"
 METAL_PROBE_SUITE_LOG="${METALFISH_METAL_PROBE_SUITE_LOG:-}"
 METAL_LEGACY_PROBE_SUITE_LOG="${METALFISH_METAL_LEGACY_PROBE_SUITE_LOG:-}"
+METAL_COMPARISON_LOG="${METALFISH_METAL_COMPARISON_LOG:-}"
 REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
+REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REMOTE_USER="${METALFISH_GCP_WINDOWS_USER:-metalfish}"
 SSH_KEY="${METALFISH_GCP_SSH_KEY:-${HOME}/.ssh/google_compute_engine}"
 SSH_PUB_KEY="${METALFISH_GCP_SSH_PUB_KEY:-${SSH_KEY}.pub}"
@@ -163,6 +165,44 @@ compare_collected_legacy_probe_suite() {
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-legacy-nn-probe-suite-compare.log"
 }
 
+compare_collected_benchmark_timings() {
+  if [[ "${COLLECT_ARTIFACTS}" != "1" ]]; then
+    if [[ "${REQUIRE_METAL_BENCHMARK_COMPARE}" == "1" ]]; then
+      echo "Metal/Windows CUDA benchmark comparison requires METALFISH_GCP_COLLECT_ARTIFACTS=1" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ -z "${METAL_COMPARISON_LOG}" ]]; then
+    if [[ "${REQUIRE_METAL_BENCHMARK_COMPARE}" == "1" ]]; then
+      echo "Metal comparison log is required; set METALFISH_METAL_COMPARISON_LOG" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ ! -s "${METAL_COMPARISON_LOG}" ]]; then
+    echo "Metal comparison log not found: ${METAL_COMPARISON_LOG}" >&2
+    return 1
+  fi
+
+  local cuda_comparison="${ARTIFACT_DIR}/logs/cuda-nn-comparison.stdout.log"
+  if [[ ! -s "${cuda_comparison}" ]]; then
+    echo "Windows CUDA comparison log not found: ${cuda_comparison}" >&2
+    return 1
+  fi
+
+  python3 tools/compare_nn_backend_benchmarks.py \
+    --expected-log "${METAL_COMPARISON_LOG}" \
+    --actual-log "${cuda_comparison}" \
+    --expected-label "Metal (MPSGraph) backend" \
+    --actual-label "CUDA transformer backend" \
+    --summary-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-nn-benchmark-summary.json" \
+    --require-graph-reuse \
+    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-nn-benchmark-compare.log"
+}
+
 ensure_ssh_key() {
   mkdir -p "$(dirname "${SSH_KEY}")"
   if [[ ! -s "${SSH_KEY}" ]]; then
@@ -236,7 +276,8 @@ write_runtime_manifest() {
   RUNTIME_STATUS_FOR_MANIFEST="$1" \
     BT4_COMPARE_STATUS_FOR_MANIFEST="$2" \
     LEGACY_COMPARE_STATUS_FOR_MANIFEST="$3" \
-    FINAL_COMPARE_STATUS_FOR_MANIFEST="$4" \
+    BENCHMARK_COMPARE_STATUS_FOR_MANIFEST="$4" \
+    FINAL_COMPARE_STATUS_FOR_MANIFEST="$5" \
     GIT_HEAD_SHA="$(git rev-parse HEAD)" \
     GATE_ARTIFACT_DIR="${ARTIFACT_DIR}" \
     GATE_PROJECT="${PROJECT}" \
@@ -252,6 +293,8 @@ write_runtime_manifest() {
     GATE_DELETE_ON_EXIT="${DELETE_ON_EXIT}" \
     GATE_GCS_PREFIX="${GCS_PREFIX}" \
     GATE_REQUIRE_METAL_COMPARE="${REQUIRE_METAL_COMPARE}" \
+    GATE_REQUIRE_METAL_BENCHMARK_COMPARE="${REQUIRE_METAL_BENCHMARK_COMPARE}" \
+    GATE_METAL_COMPARISON_LOG="${METAL_COMPARISON_LOG}" \
     GATE_METAL_PROBE_SUITE_LOG="${METAL_PROBE_SUITE_LOG}" \
     GATE_METAL_LEGACY_PROBE_SUITE_LOG="${METAL_LEGACY_PROBE_SUITE_LOG}" \
     GATE_PACKAGE_ZIP="${PACKAGE_ZIP}" \
@@ -322,11 +365,15 @@ manifest = {
     },
     "inputs": {
         "require_metal_compare": os.environ["GATE_REQUIRE_METAL_COMPARE"],
+        "require_metal_benchmark_compare": os.environ[
+            "GATE_REQUIRE_METAL_BENCHMARK_COMPARE"
+        ],
         "windows_cuda_compile_run_id": os.environ["GATE_WINDOWS_CUDA_COMPILE_RUN_ID"],
         "package": {
             "name": os.environ["GATE_PACKAGE_BASENAME"],
             "record": file_record(os.environ["GATE_PACKAGE_ZIP"]),
         },
+        "metal_comparison_log": file_record(os.environ["GATE_METAL_COMPARISON_LOG"]),
         "metal_probe_suite_log": file_record(os.environ["GATE_METAL_PROBE_SUITE_LOG"]),
         "metal_legacy_probe_suite_log": file_record(
             os.environ["GATE_METAL_LEGACY_PROBE_SUITE_LOG"]
@@ -346,6 +393,9 @@ manifest = {
         "runtime_status": os.environ["RUNTIME_STATUS_FOR_MANIFEST"],
         "bt4_compare_status": os.environ["BT4_COMPARE_STATUS_FOR_MANIFEST"],
         "legacy_compare_status": os.environ["LEGACY_COMPARE_STATUS_FOR_MANIFEST"],
+        "benchmark_compare_status": os.environ[
+            "BENCHMARK_COMPARE_STATUS_FOR_MANIFEST"
+        ],
         "final_compare_status": os.environ["FINAL_COMPARE_STATUS_FOR_MANIFEST"],
     },
     "artifacts": artifacts,
@@ -1610,6 +1660,7 @@ collect_remote_artifacts
 COMPARE_STATUS=0
 BT4_COMPARE_STATUS="skipped"
 LEGACY_COMPARE_STATUS="skipped"
+BENCHMARK_COMPARE_STATUS="skipped"
 if [[ "${RUNTIME_STATUS}" == "0" ]]; then
   BT4_COMPARE_STATUS=0
   compare_collected_probe_suite || BT4_COMPARE_STATUS=$?
@@ -1617,18 +1668,25 @@ if [[ "${RUNTIME_STATUS}" == "0" ]]; then
     LEGACY_COMPARE_STATUS=0
     compare_collected_legacy_probe_suite || LEGACY_COMPARE_STATUS=$?
   fi
+  if [[ "${BT4_COMPARE_STATUS}" == "0" && "${LEGACY_COMPARE_STATUS}" == "0" ]]; then
+    BENCHMARK_COMPARE_STATUS=0
+    compare_collected_benchmark_timings || BENCHMARK_COMPARE_STATUS=$?
+  fi
 fi
 
 if [[ "${BT4_COMPARE_STATUS}" != "0" && "${BT4_COMPARE_STATUS}" != "skipped" ]]; then
   COMPARE_STATUS="${BT4_COMPARE_STATUS}"
 elif [[ "${LEGACY_COMPARE_STATUS}" != "0" && "${LEGACY_COMPARE_STATUS}" != "skipped" ]]; then
   COMPARE_STATUS="${LEGACY_COMPARE_STATUS}"
+elif [[ "${BENCHMARK_COMPARE_STATUS}" != "0" && "${BENCHMARK_COMPARE_STATUS}" != "skipped" ]]; then
+  COMPARE_STATUS="${BENCHMARK_COMPARE_STATUS}"
 fi
 
 write_runtime_manifest \
   "${RUNTIME_STATUS}" \
   "${BT4_COMPARE_STATUS}" \
   "${LEGACY_COMPARE_STATUS}" \
+  "${BENCHMARK_COMPARE_STATUS}" \
   "${COMPARE_STATUS}"
 upload_collected_artifacts
 
