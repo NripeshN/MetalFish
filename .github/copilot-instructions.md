@@ -1,17 +1,20 @@
 # MetalFish Copilot Instructions
 
-MetalFish v0.1.0-alpha is an Apple Silicon ARM chess engine. Treat the Hybrid
-engine as the primary product surface.
+MetalFish v0.1.0-alpha is a hybrid UCI chess engine. Treat the Hybrid engine
+as the primary product surface.
 
-## Release Target
+## Platform Surface
 
-- macOS on Apple Silicon ARM64
-- C++20 and Objective-C++ for Metal/MPSGraph
+- macOS on Apple Silicon ARM64 with Metal/MPSGraph is the primary release path.
+- Linux x86-64 NVIDIA CUDA and Windows x86-64 MSVC/CUDA are parity-gated
+  platform paths.
+- Portable Linux/Windows CPU builds are correctness and fallback targets, not
+  transformer strength targets.
+- C++20, Objective-C++ for Metal/MPSGraph, and CUDA C++ for NVIDIA backends
 - CMake 3.20+
-- Homebrew dependencies: `protobuf zlib abseil`
+- Platform dependencies: `protobuf zlib abseil`, plus CUDA/cuBLAS for CUDA
+  builds
 - Python tooling dependencies: `python3 -m pip install -r tests/requirements.txt`
-
-Do not advertise Linux, Windows, CUDA, or x86 as supported release targets.
 
 ## Build
 
@@ -35,6 +38,9 @@ Build:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_METAL=ON
 cmake --build build --target metalfish metalfish_tests -j"$(sysctl -n hw.ncpu)"
 ```
+
+For CUDA backend work, use the CI/GCP gate scripts and `-DUSE_CUDA=ON` builds.
+Do not treat the portable CPU transformer as a CUDA strength substitute.
 
 ## Required Checks
 
@@ -64,5 +70,6 @@ setoption name UseHybridSearch value true
 setoption name NNWeights value networks/BT4-1024x15x32h-swa-6147500.pb
 ```
 
-Do not touch `src/nn/metal/` unless the change is specifically about
-transformer inference.
+Do not touch platform-specific backend directories unless the change is
+specifically about that backend. Shared NN/search contracts should stay in the
+platform-neutral `src/nn/`, `src/mcts/`, and `src/hybrid/` seams.

@@ -42,7 +42,7 @@ Common code owns:
 - `src/nn/network_output.h`: backend-neutral policy/value/moves-left result
   record.
 - `src/nn/network_output_decoder.*`: shared policy/value/moves-left output
-  decoding used by Metal and future CUDA/Windows backends.
+  decoding used by Metal, CUDA, and portable backends.
 - `src/nn/network_tensor_plan.*`: tensor layout, shape metadata, and decoded
   output target ordering shared by Metal and exposed to CUDA/Windows backends.
 - `src/mcts/*`: MCTS search, cache, stoppers, and backend adapter.

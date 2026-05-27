@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-# MetalFish - A GPU-accelerated UCI chess engine for Apple Silicon
+# MetalFish - A GPU-accelerated UCI chess engine
 if(APPLE)
   project(metalfish CXX OBJCXX)
 else()
@@ -59,7 +59,7 @@ else()
   option(USE_METAL "Enable Metal transformer acceleration" OFF)
   option(USE_COREML "Enable Core ML transformer acceleration" OFF)
 endif()
-option(USE_CUDA "Enable CUDA transformer backend entry point" OFF)
+option(USE_CUDA "Enable CUDA transformer backend" OFF)
 set(METALFISH_CUDA_LIBS "")
 
 # Metal-cpp headers
@@ -304,7 +304,7 @@ if(USE_CUDA)
       src/nn/cuda/cuda_weight_buffers.cu)
   set(METALFISH_CUDA_LIBS CUDA::cudart CUDA::cublas)
   add_compile_definitions(USE_CUDA)
-  message(STATUS "CUDA transformer backend: ENABLED (entry point)")
+  message(STATUS "CUDA transformer backend: ENABLED")
 endif()
 
 # ============================================================================
@@ -554,6 +554,10 @@ message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Metal transformer: ${USE_METAL}")
 message(STATUS "  Core ML transformer: ${USE_COREML}")
+message(STATUS "  CUDA transformer: ${USE_CUDA}")
+if(USE_CUDA)
+  message(STATUS "  CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+endif()
 message(STATUS "  Native arch tuning: ${METALFISH_ENABLE_NATIVE_ARCH}")
 message(STATUS "  IPO/LTO: ${METALFISH_IPO_SUPPORTED}")
 message(STATUS "  Tests: ${BUILD_TESTS}")
