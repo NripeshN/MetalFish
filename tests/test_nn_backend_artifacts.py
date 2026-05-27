@@ -804,7 +804,11 @@ def test_windows_cuda_runtime_input_helpers_select_artifacts() -> None:
 
 
 def write_release_package_files(
-    root: pathlib.Path, *, package_kind: str, windows: bool
+    root: pathlib.Path,
+    *,
+    package_kind: str,
+    windows: bool,
+    source_commit: str = "abc123",
 ) -> pathlib.Path:
     root.mkdir(parents=True, exist_ok=True)
     if windows:
@@ -837,7 +841,11 @@ def write_release_package_files(
         path.write_text(f"{name}\n", encoding="utf-8")
     manifest = {
         "schema": "metalfish.portable_artifact",
-        "package": {"kind": package_kind, "name": f"metalfish-{package_kind}"},
+        "package": {
+            "kind": package_kind,
+            "name": f"metalfish-{package_kind}",
+            "source_commit": source_commit,
+        },
         "files": [{"name": name} for name in [*required, manifest_name]],
     }
     (root / manifest_name).write_text(
@@ -872,10 +880,18 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
             for path in sorted(windows_dir.iterdir()):
                 archive.write(path, arcname=path.name)
 
-        linux_summary = cuda_release.validate_linux_cuda_package(linux_package)
-        windows_summary = cuda_release.validate_windows_cuda_package(windows_package)
+        linux_summary = cuda_release.validate_linux_cuda_package(
+            linux_package,
+            expected_source_commit="abc123",
+        )
+        windows_summary = cuda_release.validate_windows_cuda_package(
+            windows_package,
+            expected_source_commit="abc123",
+        )
         expect("linux cuda kind", linux_summary["kind"] == "linux-cuda")
         expect("windows cuda kind", windows_summary["kind"] == "windows-cuda")
+        expect("linux source commit", linux_summary["source_commit"] == "abc123")
+        expect("windows source commit", windows_summary["source_commit"] == "abc123")
 
         linux_runtime = root / "cuda-gpu-runtime-manifest.json"
         linux_runtime.write_text(
@@ -975,6 +991,31 @@ def test_cuda_release_artifact_helpers_reject_failed_runtime() -> None:
     raise AssertionError("expected failed runtime manifest to be rejected")
 
 
+def test_cuda_package_validator_rejects_source_commit_drift() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        package_dir = root / "linux-package"
+        write_release_package_files(
+            package_dir,
+            package_kind="linux-cuda",
+            windows=False,
+            source_commit="old-sha",
+        )
+        package = root / "metalfish-linux-x86_64-cuda.tar.gz"
+        with tarfile.open(package, "w:gz") as archive:
+            for path in sorted(package_dir.iterdir()):
+                archive.add(path, arcname=path.name)
+        try:
+            cuda_release.validate_linux_cuda_package(
+                package,
+                expected_source_commit="new-sha",
+            )
+        except ValueError as exc:
+            expect("source commit drift rejected", "source commit" in str(exc))
+            return
+    raise AssertionError("expected source commit drift to be rejected")
+
+
 def test_cuda_release_artifact_helpers_require_metal_compare() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -1072,6 +1113,7 @@ def main() -> int:
     test_windows_cuda_runtime_input_helpers_select_artifacts()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
+    test_cuda_package_validator_rejects_source_commit_drift()
     test_cuda_release_artifact_helpers_require_metal_compare()
     test_network_downloader_validates_gzip_weights()
     print("NN backend artifact tests: OK")

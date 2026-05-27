@@ -34,7 +34,9 @@ def normalize_archive_name(name: str) -> str:
     return pathlib.PurePosixPath(name).as_posix().lstrip("./")
 
 
-def validate_portable_manifest(manifest: dict, *, package_kind: str) -> dict:
+def validate_portable_manifest(
+    manifest: dict, *, package_kind: str, expected_source_commit: str | None = None
+) -> dict:
     if manifest.get("schema") != "metalfish.portable_artifact":
         raise ValueError(
             "package manifest has unexpected schema: "
@@ -44,6 +46,11 @@ def validate_portable_manifest(manifest: dict, *, package_kind: str) -> dict:
     if package.get("kind") != package_kind:
         raise ValueError(
             "package manifest has unexpected kind: " f"{package.get('kind')!r}"
+        )
+    if expected_source_commit and package.get("source_commit") != expected_source_commit:
+        raise ValueError(
+            "package manifest has unexpected source commit: "
+            f"{package.get('source_commit')!r}; expected {expected_source_commit}"
         )
     return package
 
@@ -56,7 +63,9 @@ def manifest_file_names(manifest: dict) -> set[str]:
     }
 
 
-def validate_linux_cuda_package(package: pathlib.Path) -> dict:
+def validate_linux_cuda_package(
+    package: pathlib.Path, *, expected_source_commit: str | None = None
+) -> dict:
     with tarfile.open(package, "r:gz") as archive:
         names = {
             normalize_archive_name(member.name)
@@ -79,7 +88,11 @@ def validate_linux_cuda_package(package: pathlib.Path) -> dict:
     missing = sorted(REQUIRED_LINUX_CUDA_FILES - names)
     if missing:
         raise ValueError("Linux CUDA package is missing entries: " + ", ".join(missing))
-    package_info = validate_portable_manifest(manifest, package_kind="linux-cuda")
+    package_info = validate_portable_manifest(
+        manifest,
+        package_kind="linux-cuda",
+        expected_source_commit=expected_source_commit,
+    )
     missing_manifest = sorted(REQUIRED_LINUX_CUDA_FILES - manifest_file_names(manifest))
     if missing_manifest:
         raise ValueError(
@@ -90,12 +103,15 @@ def validate_linux_cuda_package(package: pathlib.Path) -> dict:
         "schema": manifest["schema"],
         "kind": package_info["kind"],
         "package_name": package_info.get("name"),
+        "source_commit": package_info.get("source_commit"),
         "file_count": len(manifest.get("files", [])),
         "archive_entry_count": len(names),
     }
 
 
-def validate_windows_cuda_package(package: pathlib.Path) -> dict:
+def validate_windows_cuda_package(
+    package: pathlib.Path, *, expected_source_commit: str | None = None
+) -> dict:
     with zipfile.ZipFile(package) as archive:
         names = {
             normalize_archive_name(info.filename)
@@ -110,7 +126,11 @@ def validate_windows_cuda_package(package: pathlib.Path) -> dict:
     missing = sorted(REQUIRED_WINDOWS_CUDA_FILES - names)
     if missing:
         raise ValueError("Windows CUDA package is missing entries: " + ", ".join(missing))
-    package_info = validate_portable_manifest(manifest, package_kind="windows-cuda")
+    package_info = validate_portable_manifest(
+        manifest,
+        package_kind="windows-cuda",
+        expected_source_commit=expected_source_commit,
+    )
     manifest_files = manifest_file_names(manifest)
     missing_manifest = sorted(REQUIRED_WINDOWS_CUDA_FILES - manifest_files)
     if missing_manifest:
@@ -142,16 +162,28 @@ def validate_windows_cuda_package(package: pathlib.Path) -> dict:
         "schema": manifest["schema"],
         "kind": package_info["kind"],
         "package_name": package_info.get("name"),
+        "source_commit": package_info.get("source_commit"),
         "file_count": len(manifest.get("files", [])),
         "archive_entry_count": len(names),
     }
 
 
-def validate_package(package: pathlib.Path, *, package_kind: str) -> dict:
+def validate_package(
+    package: pathlib.Path,
+    *,
+    package_kind: str,
+    expected_source_commit: str | None = None,
+) -> dict:
     if package_kind == "linux-cuda":
-        return validate_linux_cuda_package(package)
+        return validate_linux_cuda_package(
+            package,
+            expected_source_commit=expected_source_commit,
+        )
     if package_kind == "windows-cuda":
-        return validate_windows_cuda_package(package)
+        return validate_windows_cuda_package(
+            package,
+            expected_source_commit=expected_source_commit,
+        )
     raise ValueError(f"unsupported CUDA package kind: {package_kind}")
 
 
@@ -159,6 +191,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", required=True)
     parser.add_argument("--package-kind", choices=("linux-cuda", "windows-cuda"), required=True)
+    parser.add_argument("--expected-source-commit", default="")
     parser.add_argument("--json-output", default="")
     return parser.parse_args(argv)
 
@@ -166,7 +199,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     package = pathlib.Path(args.package).expanduser().resolve()
-    summary = validate_package(package, package_kind=args.package_kind)
+    summary = validate_package(
+        package,
+        package_kind=args.package_kind,
+        expected_source_commit=args.expected_source_commit or None,
+    )
     if args.json_output:
         path = pathlib.Path(args.json_output).expanduser().resolve()
         path.parent.mkdir(parents=True, exist_ok=True)

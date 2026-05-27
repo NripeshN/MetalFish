@@ -314,8 +314,14 @@ def main(argv: list[str] | None = None) -> int:
         "Windows CUDA runtime manifest",
     )
 
-    linux_package_manifest = validate_linux_cuda_package(linux_package)
-    windows_package_manifest = validate_windows_cuda_package(windows_package)
+    linux_package_manifest = validate_linux_cuda_package(
+        linux_package,
+        expected_source_commit=expected_sha,
+    )
+    windows_package_manifest = validate_windows_cuda_package(
+        windows_package,
+        expected_source_commit=expected_sha,
+    )
     linux_runtime = validate_runtime_manifest(
         linux_runtime_manifest,
         runtime_kind="linux-cuda",

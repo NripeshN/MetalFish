@@ -899,6 +899,7 @@ def main() -> int:
             "check_cuda_runtime_manifest",
             "validate_linux_cuda_package",
             "validate_windows_cuda_package",
+            "expected_source_commit=expected_sha",
             "runtime_kind=\"linux-cuda\"",
             "runtime_kind=\"windows-cuda\"",
             "require_metal_compare=True",
@@ -938,6 +939,8 @@ def main() -> int:
             "cublasLt64_*.dll",
             "validate_linux_cuda_package",
             "validate_windows_cuda_package",
+            "--expected-source-commit",
+            "source_commit",
             "CUDA package artifact check: PASS",
         ],
     )
