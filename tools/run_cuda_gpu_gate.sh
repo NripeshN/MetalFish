@@ -8,6 +8,7 @@ JOBS="${METALFISH_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 UCI_GO="${METALFISH_CUDA_UCI_GO:-nodes 8}"
 UCI_TIMEOUT="${METALFISH_CUDA_UCI_TIMEOUT:-180}"
 BK07_FEN="1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -"
+KIWIPETE_FEN="r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1"
 WEIGHTS="${METALFISH_NN_WEIGHTS:-${ROOT_DIR}/networks/BT4-1024x15x32h-swa-6147500.pb}"
 LEGACY_WEIGHTS="${METALFISH_LEGACY_NN_WEIGHTS:-${ROOT_DIR}/networks/legacy-42850.pb.gz}"
 APT_LOCK_TIMEOUT="${METALFISH_APT_LOCK_TIMEOUT:-600}"
@@ -249,6 +250,8 @@ write_summary() {
     echo "- explicit CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-smoke.log")"
     echo "- BK.07 CUDA tactical smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log")"
     echo "- BK.07 CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-bk07-search.json")"
+    echo "- kiwipete CUDA search smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-kiwipete-smoke.log")"
+    echo "- kiwipete CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-kiwipete-search.json")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
     echo "- hybrid CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-search.json")"
     echo "- hybrid CUDA clock-start smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log")"
@@ -287,6 +290,8 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-uci-smoke.log"
     summary_failure_lines "BK.07 CUDA tactical smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log"
+    summary_failure_lines "kiwipete CUDA search smoke" \
+      "${BUILD_DIR}/cuda-gpu-uci-kiwipete-smoke.log"
     summary_failure_lines "hybrid CUDA UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
     summary_failure_lines "hybrid CUDA clock-start smoke" \
@@ -446,6 +451,7 @@ write_summary() {
     echo "- accelerator: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-accelerator-smoke.log" "not reached")"
     echo "- cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-smoke.log" "not reached")"
     echo "- cuda-bk07: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log" "not reached")"
+    echo "- cuda-kiwipete: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-kiwipete-smoke.log" "not reached")"
     echo "- hybrid-cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log" "not reached")"
     echo "- hybrid-clock-start: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log" "not reached")"
     echo "- hybrid-clock-safety: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-safety-smoke.log" "not reached")"
@@ -777,6 +783,36 @@ METALFISH_CUDA_PROFILE=0 \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=true \
+  --setoption UseHybridSearch=false \
+  --setoption Threads=8 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSParallelSearch=false \
+  --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSParityPreset=true \
+  --setoption MCTSAddDirichletNoise=false \
+  --setoption TransformerLowTimeFallbackMs=0 \
+  --position "fen ${KIWIPETE_FEN}" \
+  --go "nodes 1" \
+  --json-out "${BUILD_DIR}/cuda-gpu-uci-kiwipete-search.json" \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-kiwipete-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
   python3 tools/uci_smoke.py \

@@ -333,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     metal_legacy_probe_log = None
     metal_comparison_log = None
     metal_mcts_search_json = None
+    metal_mcts_kiwipete_search_json = None
     metal_hybrid_search_json = None
     if args.metal_ci_run_id:
         metal_run = read_run(repo, args.metal_ci_run_id)
@@ -359,6 +360,11 @@ def main(argv: list[str] | None = None) -> int:
         metal_mcts_search_json = find_one(
             metal_dir, "metal-mcts-bk07-search.json", "Metal MCTS search JSON"
         )
+        metal_mcts_kiwipete_search_json = find_one(
+            metal_dir,
+            "metal-mcts-kiwipete-search.json",
+            "Metal MCTS kiwipete search JSON",
+        )
         metal_hybrid_search_json = find_one(
             metal_dir,
             "metal-hybrid-startpos-search.json",
@@ -379,6 +385,9 @@ def main(argv: list[str] | None = None) -> int:
                 "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG": str(metal_legacy_probe_log),
                 "METALFISH_METAL_MCTS_BK07_SEARCH_JSON": str(
                     metal_mcts_search_json
+                ),
+                "METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON": str(
+                    metal_mcts_kiwipete_search_json
                 ),
                 "METALFISH_METAL_HYBRID_STARTPOS_SEARCH_JSON": str(
                     metal_hybrid_search_json
@@ -415,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
             "probe_suite_log": str(metal_probe_log),
             "legacy_probe_suite_log": str(metal_legacy_probe_log),
             "mcts_bk07_search_json": str(metal_mcts_search_json),
+            "mcts_kiwipete_search_json": str(metal_mcts_kiwipete_search_json),
             "hybrid_startpos_search_json": str(metal_hybrid_search_json),
         }
     manifest_path = out_dir / "runtime-gate-inputs-manifest.json"
