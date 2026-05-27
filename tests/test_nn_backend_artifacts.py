@@ -17,6 +17,7 @@ from tools import check_cuda_runtime_manifest as runtime_checker  # noqa: E402
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
 from tools import download_engine_networks as downloader  # noqa: E402
+from tools import fetch_cuda_gpu_gate_inputs as cuda_gpu_inputs  # noqa: E402
 from tools import fetch_cuda_release_artifacts as cuda_release  # noqa: E402
 from tools import fetch_windows_cuda_runtime_inputs as win_cuda_inputs  # noqa: E402
 from tools import run_nn_backend_probe_suite as probe_suite  # noqa: E402
@@ -803,6 +804,34 @@ def test_windows_cuda_runtime_input_helpers_select_artifacts() -> None:
         raise AssertionError("expected missing artifact failure")
 
 
+def test_cuda_runtime_input_helpers_validate_complete_zip() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        archive = root / "artifact.zip"
+        with zipfile.ZipFile(archive, "w") as handle:
+            handle.writestr("payload.txt", "synthetic")
+        expected_size = archive.stat().st_size
+        partial = root / "artifact.zip.part"
+        partial.write_bytes(archive.read_bytes()[: max(1, expected_size // 2)])
+
+        expect(
+            "windows complete zip",
+            win_cuda_inputs.complete_zip(archive, expected_size=expected_size),
+        )
+        expect(
+            "linux complete zip",
+            cuda_gpu_inputs.complete_zip(archive, expected_size=expected_size),
+        )
+        expect(
+            "windows rejects wrong size",
+            not win_cuda_inputs.complete_zip(archive, expected_size=expected_size + 1),
+        )
+        expect(
+            "linux rejects partial",
+            not cuda_gpu_inputs.complete_zip(partial, expected_size=expected_size),
+        )
+
+
 def test_windows_cuda_runtime_input_helpers_validate_package_commit() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -1176,6 +1205,7 @@ def main() -> int:
     test_windows_cuda_probe_suite_positions_use_python_default()
     test_windows_cuda_runtime_input_helpers_validate_provenance()
     test_windows_cuda_runtime_input_helpers_select_artifacts()
+    test_cuda_runtime_input_helpers_validate_complete_zip()
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_release_artifact_helpers_reject_failed_runtime()

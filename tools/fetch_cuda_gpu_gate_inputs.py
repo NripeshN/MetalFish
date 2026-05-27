@@ -10,10 +10,12 @@ import shutil
 import shlex
 import subprocess
 import sys
+import time
 import zipfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+DOWNLOAD_RETRIES = 3
 
 
 def run_text(cmd: list[str]) -> str:
@@ -29,16 +31,49 @@ def run_json(cmd: list[str]) -> dict:
     return json.loads(run_text(cmd))
 
 
-def run_to_file(cmd: list[str], path: pathlib.Path) -> None:
+def complete_zip(path: pathlib.Path, *, expected_size: int) -> bool:
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    if expected_size > 0 and path.stat().st_size != expected_size:
+        return False
+    return zipfile.is_zipfile(path)
+
+
+def run_to_file(cmd: list[str], path: pathlib.Path, *, expected_size: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as handle:
-        subprocess.run(
-            cmd,
-            cwd=ROOT,
-            check=True,
-            stdout=handle,
-            stderr=subprocess.PIPE,
-        )
+    if complete_zip(path, expected_size=expected_size):
+        return
+    tmp_path = path.with_name(f"{path.name}.part")
+    last_error = ""
+    for attempt in range(1, DOWNLOAD_RETRIES + 1):
+        if tmp_path.exists():
+            tmp_path.unlink()
+        with tmp_path.open("wb") as handle:
+            proc = subprocess.run(
+                cmd,
+                cwd=ROOT,
+                stdout=handle,
+                stderr=subprocess.PIPE,
+            )
+        if proc.returncode == 0 and complete_zip(tmp_path, expected_size=expected_size):
+            tmp_path.replace(path)
+            return
+        stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+        if proc.returncode != 0:
+            last_error = f"gh api exited {proc.returncode}: {stderr}"
+        else:
+            last_error = (
+                f"downloaded {tmp_path.stat().st_size} bytes, expected "
+                f"{expected_size} byte ZIP"
+            )
+        if tmp_path.exists():
+            tmp_path.unlink()
+        if attempt < DOWNLOAD_RETRIES:
+            time.sleep(min(2 * attempt, 5))
+    raise RuntimeError(
+        f"failed to download {path.name} after {DOWNLOAD_RETRIES} attempts: "
+        f"{last_error}"
+    )
 
 
 def default_repo() -> str:
@@ -89,7 +124,7 @@ def require_metal_run(repo: str, run_id: str, expected_sha: str | None) -> dict:
     return data
 
 
-def artifact_id_for_name(repo: str, run_id: str, name: str) -> int:
+def artifact_for_name(repo: str, run_id: str, name: str) -> tuple[int, int]:
     data = run_json(
         [
             "gh",
@@ -109,7 +144,7 @@ def artifact_id_for_name(repo: str, run_id: str, name: str) -> int:
         raise ValueError(f"artifact {name!r} not found; available: {available or '<none>'}")
     if len(matches) > 1:
         raise ValueError(f"artifact {name!r} matched multiple artifacts")
-    return int(matches[0]["id"])
+    return int(matches[0]["id"]), int(matches[0]["size_in_bytes"])
 
 
 def safe_extract_zip(archive_path: pathlib.Path, dest: pathlib.Path) -> None:
@@ -164,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     metal_dir.mkdir(parents=True, exist_ok=True)
 
     metal_run = require_metal_run(repo, args.metal_ci_run_id, expected_sha)
-    metal_artifact_id = artifact_id_for_name(
+    metal_artifact_id, metal_artifact_size = artifact_for_name(
         repo, args.metal_ci_run_id, "metalfish-macos-arm64"
     )
     metal_archive = downloads_dir / "metalfish-macos-arm64.zip"
@@ -175,6 +210,7 @@ def main(argv: list[str] | None = None) -> int:
             f"repos/{repo}/actions/artifacts/{metal_artifact_id}/zip",
         ],
         metal_archive,
+        expected_size=metal_artifact_size,
     )
     safe_extract_zip(metal_archive, metal_dir)
 

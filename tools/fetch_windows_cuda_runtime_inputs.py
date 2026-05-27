@@ -11,6 +11,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
+import time
 import zipfile
 
 try:
@@ -20,6 +21,7 @@ except ModuleNotFoundError:
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+DOWNLOAD_RETRIES = 3
 
 
 @dataclasses.dataclass(frozen=True)
@@ -155,17 +157,55 @@ def select_artifact(
     return matches[0]
 
 
+def complete_zip(path: pathlib.Path, *, expected_size: int) -> bool:
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    if expected_size > 0 and path.stat().st_size != expected_size:
+        return False
+    return zipfile.is_zipfile(path)
+
+
 def download_artifact(repo: str, artifact: ArtifactInfo, archive_path: pathlib.Path) -> None:
     archive_path.parent.mkdir(parents=True, exist_ok=True)
-    with archive_path.open("wb") as handle:
-        run_text(
-            [
-                "gh",
-                "api",
-                f"repos/{repo}/actions/artifacts/{artifact.artifact_id}/zip",
-            ],
-            stdout=handle,
-        )
+    if complete_zip(archive_path, expected_size=artifact.size_in_bytes):
+        return
+    tmp_path = archive_path.with_name(f"{archive_path.name}.part")
+    last_error = ""
+    for attempt in range(1, DOWNLOAD_RETRIES + 1):
+        if tmp_path.exists():
+            tmp_path.unlink()
+        with tmp_path.open("wb") as handle:
+            proc = subprocess.run(
+                [
+                    "gh",
+                    "api",
+                    f"repos/{repo}/actions/artifacts/{artifact.artifact_id}/zip",
+                ],
+                cwd=ROOT,
+                stdout=handle,
+                stderr=subprocess.PIPE,
+            )
+        if proc.returncode == 0 and complete_zip(
+            tmp_path, expected_size=artifact.size_in_bytes
+        ):
+            tmp_path.replace(archive_path)
+            return
+        stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+        if proc.returncode != 0:
+            last_error = f"gh api exited {proc.returncode}: {stderr}"
+        else:
+            last_error = (
+                f"downloaded {tmp_path.stat().st_size} bytes, expected "
+                f"{artifact.size_in_bytes} byte ZIP"
+            )
+        if tmp_path.exists():
+            tmp_path.unlink()
+        if attempt < DOWNLOAD_RETRIES:
+            time.sleep(min(2 * attempt, 5))
+    raise RuntimeError(
+        f"failed to download artifact {artifact.name!r} after "
+        f"{DOWNLOAD_RETRIES} attempts: {last_error}"
+    )
 
 
 def safe_extract_zip(archive_path: pathlib.Path, dest: pathlib.Path) -> None:
