@@ -870,6 +870,7 @@ function Invoke-ComparisonSmoke {
   \$psi.Environment["METALFISH_NN_PARITY_REPORT"] = \$parityReport
   \$psi.Environment["METALFISH_NN_BATCH_BENCH"] = "1"
   \$psi.Environment["METALFISH_NN_BATCH_TRACE_WORST"] = "1"
+  \$psi.Environment["METALFISH_NN_SINGLE_REPEAT_STRESS"] = "1"
   \$psi.Environment["METALFISH_NN_SINGLE_REUSE_STRESS"] = "1"
   \$psi.Environment["METALFISH_NN_BATCH_REUSE_STRESS"] = "1"
   \$psi.Environment["METALFISH_NN_BENCH_ITERS"] = "2"
@@ -1360,6 +1361,7 @@ Invoke-ProbeSmoke -Name "cuda-isolation-legacy-bt4" -Arguments \$IsolationLegacy
   "MCTS evaluator batch parity",
   "CUDA transformer backend",
   "TRACE_WORST:",
+  "SINGLE_REPEAT_STRESS_MAX:",
   "SINGLE_REUSE_STRESS_MAX:",
   "REUSE_STRESS_MAX:",
   "batches:",
