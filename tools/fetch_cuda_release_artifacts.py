@@ -204,6 +204,43 @@ def file_record(path: pathlib.Path) -> dict:
     }
 
 
+def require_matching_file_record(actual: dict, expected: object, *, label: str) -> None:
+    if not isinstance(expected, dict):
+        raise ValueError(f"{label} expected record is missing")
+    for field in ("size_bytes", "sha256"):
+        if actual.get(field) != expected.get(field):
+            raise ValueError(
+                f"{label} record mismatch for {field}: "
+                f"{actual.get(field)!r} != {expected.get(field)!r}"
+            )
+
+
+def require_linux_runtime_package_record(runtime: dict, package: pathlib.Path) -> None:
+    artifacts = runtime.get("artifacts") or {}
+    matches = [
+        record
+        for name, record in artifacts.items()
+        if name.startswith("metalfish-linux-x86_64-cuda") and name.endswith(".tar.gz")
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "Linux runtime manifest must contain exactly one Linux CUDA package "
+            f"artifact, got {len(matches)}"
+        )
+    require_matching_file_record(
+        file_record(package), matches[0], label="Linux runtime package"
+    )
+
+
+def require_windows_runtime_package_record(runtime: dict, package: pathlib.Path) -> None:
+    package_input = (runtime.get("inputs") or {}).get("package") or {}
+    require_matching_file_record(
+        file_record(package),
+        package_input.get("record"),
+        label="Windows runtime package",
+    )
+
+
 def release_package_name(path: pathlib.Path, *, tag_name: str, platform: str) -> str:
     if not tag_name:
         return path.name
@@ -250,8 +287,30 @@ def fetch_gate_artifact(
 def read_direct_runtime_manifest(root: pathlib.Path) -> dict:
     manifest = root / "direct-runtime-gates-manifest.json"
     if not manifest.is_file():
-        return {}
+        raise FileNotFoundError(f"direct runtime manifest not found: {manifest}")
     return json.loads(manifest.read_text(encoding="utf-8-sig"))
+
+
+def validate_direct_runtime_manifest(
+    manifest: dict, *, expected_sha: str | None = None
+) -> None:
+    if manifest.get("schema") != "metalfish.cuda_runtime_gates_direct":
+        raise ValueError(
+            "direct runtime manifest has unexpected schema: "
+            f"{manifest.get('schema')!r}"
+        )
+    if manifest.get("target") != "both":
+        raise ValueError(
+            "direct runtime manifest must target both gates, got "
+            f"{manifest.get('target')!r}"
+        )
+    if manifest.get("require_metal") is not True:
+        raise ValueError("direct runtime manifest did not require Metal comparison")
+    if expected_sha and manifest.get("expected_sha") != expected_sha:
+        raise ValueError(
+            "direct runtime manifest has unexpected expected_sha: "
+            f"{manifest.get('expected_sha')!r}; expected {expected_sha}"
+        )
 
 
 def fetch_direct_runtime_artifacts(
@@ -353,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    if direct_root:
+        validate_direct_runtime_manifest(direct_manifest, expected_sha=expected_sha)
 
     if direct_root:
         linux_run, windows_run, linux_package, windows_package = (
@@ -420,14 +481,20 @@ def main(argv: list[str] | None = None) -> int:
         linux_runtime_manifest,
         runtime_kind="linux-cuda",
         require_metal_compare=True,
+        require_metal_benchmark_compare=True,
+        require_release_evidence=True,
         expected_head_sha=expected_sha,
     )
     windows_runtime = validate_runtime_manifest(
         windows_runtime_manifest,
         runtime_kind="windows-cuda",
         require_metal_compare=True,
+        require_metal_benchmark_compare=True,
+        require_release_evidence=True,
         expected_head_sha=expected_sha,
     )
+    require_linux_runtime_package_record(linux_runtime, linux_package)
+    require_windows_runtime_package_record(windows_runtime, windows_package)
 
     packages_dir = out_dir / "packages"
     release_linux_package = copy_release_package(
@@ -456,6 +523,7 @@ def main(argv: list[str] | None = None) -> int:
             "linux_cuda": linux_artifact,
             "windows_cuda_runtime": windows_artifact,
         },
+        "direct_runtime": direct_manifest if direct_root else None,
         "packages": {
             "linux_cuda": {
                 "source": file_record(linux_package),

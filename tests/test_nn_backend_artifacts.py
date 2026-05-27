@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import os
 import pathlib
@@ -1034,6 +1035,25 @@ def write_release_package_files(
     for name in required:
         path = root / name
         path.write_text(f"{name}\n", encoding="utf-8")
+        if not windows and name in {
+            "metalfish",
+            "metalfish_nn_probe",
+            "test_nn_comparison",
+        }:
+            path.chmod(0o755)
+    file_records = []
+    for name in required:
+        path = root / name
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        file_records.append(
+            {
+                "name": name,
+                "path": name,
+                "size_bytes": path.stat().st_size,
+                "sha256": digest,
+                "executable": os.access(path, os.X_OK),
+            }
+        )
     manifest = {
         "schema": "metalfish.portable_artifact",
         "package": {
@@ -1041,7 +1061,7 @@ def write_release_package_files(
             "name": f"metalfish-{package_kind}",
             "source_commit": source_commit,
         },
-        "files": [{"name": name} for name in [*required, manifest_name]],
+        "files": file_records,
     }
     (root / manifest_name).write_text(
         json.dumps(manifest, sort_keys=True) + "\n", encoding="utf-8"
@@ -1055,6 +1075,39 @@ def metal_log_record(name: str) -> dict:
         "size_bytes": 128,
         "sha256": "f" * 64,
     }
+
+
+def runtime_artifact_records(
+    runtime_kind: str, *, linux_package: pathlib.Path | None = None
+) -> dict:
+    records = {
+        name: metal_log_record(name)
+        for name in runtime_checker.REQUIRED_RELEASE_ARTIFACTS[runtime_kind]
+    }
+    if runtime_kind == "linux-cuda":
+        if linux_package is None:
+            records["metalfish-linux-x86_64-cuda.tar.gz"] = metal_log_record(
+                "metalfish-linux-x86_64-cuda.tar.gz"
+            )
+        else:
+            records[linux_package.name] = cuda_release.file_record(linux_package)
+    return records
+
+
+def runtime_inputs(*, windows_package: pathlib.Path | None = None) -> dict:
+    inputs = {
+        "require_metal_compare": "1",
+        "require_metal_benchmark_compare": "1",
+        "metal_comparison_log": metal_log_record("metal-comparison.log"),
+        "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
+        "metal_legacy_probe_suite_log": metal_log_record("metal-legacy.log"),
+    }
+    if windows_package is not None:
+        inputs["package"] = {
+            "name": windows_package.name,
+            "record": cuda_release.file_record(windows_package),
+        }
+    return inputs
 
 
 def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None:
@@ -1094,19 +1147,17 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                 {
                     "schema": "metalfish.cuda_gpu_runtime_gate",
                     "git": {"head_sha": "abc123"},
-                    "inputs": {
-                        "require_metal_compare": "1",
-                        "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
-                        "metal_legacy_probe_suite_log": metal_log_record(
-                            "metal-legacy.log"
-                        ),
-                    },
+                    "inputs": runtime_inputs(),
                     "status": {
                         "remote_status": "0",
                         "bt4_compare_status": "0",
                         "legacy_compare_status": "0",
+                        "benchmark_compare_status": "0",
                         "final_compare_status": "0",
                     },
+                    "artifacts": runtime_artifact_records(
+                        "linux-cuda", linux_package=linux_package
+                    ),
                 }
             ),
             encoding="utf-8",
@@ -1117,19 +1168,15 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                 {
                     "schema": "metalfish.windows_cuda_runtime_gate",
                     "git": {"head_sha": "abc123"},
-                    "inputs": {
-                        "require_metal_compare": "1",
-                        "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
-                        "metal_legacy_probe_suite_log": metal_log_record(
-                            "metal-legacy.log"
-                        ),
-                    },
+                    "inputs": runtime_inputs(windows_package=windows_package),
                     "status": {
                         "runtime_status": "0",
                         "bt4_compare_status": "0",
                         "legacy_compare_status": "0",
+                        "benchmark_compare_status": "0",
                         "final_compare_status": "0",
                     },
+                    "artifacts": runtime_artifact_records("windows-cuda"),
                 }
             ),
             encoding="utf-8",
@@ -1140,6 +1187,8 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                 linux_runtime,
                 runtime_kind="linux-cuda",
                 require_metal_compare=True,
+                require_metal_benchmark_compare=True,
+                require_release_evidence=True,
                 expected_head_sha="abc123",
             )["status"]["remote_status"]
             == "0",
@@ -1150,6 +1199,8 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
                 windows_runtime,
                 runtime_kind="windows-cuda",
                 require_metal_compare=True,
+                require_metal_benchmark_compare=True,
+                require_release_evidence=True,
                 expected_head_sha="abc123",
             )["status"]["runtime_status"]
             == "0",
@@ -1197,7 +1248,16 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                 archive.write(path, arcname=path.name)
 
         (direct / "direct-runtime-gates-manifest.json").write_text(
-            json.dumps({"expected_sha": "abc123", "repo": "owner/repo"}) + "\n",
+            json.dumps(
+                {
+                    "schema": "metalfish.cuda_runtime_gates_direct",
+                    "expected_sha": "abc123",
+                    "repo": "owner/repo",
+                    "target": "both",
+                    "require_metal": True,
+                }
+            )
+            + "\n",
             encoding="utf-8",
         )
         (linux_dir / "cuda-gpu-runtime-manifest.json").write_text(
@@ -1205,19 +1265,17 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                 {
                     "schema": "metalfish.cuda_gpu_runtime_gate",
                     "git": {"head_sha": "abc123"},
-                    "inputs": {
-                        "require_metal_compare": "1",
-                        "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
-                        "metal_legacy_probe_suite_log": metal_log_record(
-                            "metal-legacy.log"
-                        ),
-                    },
+                    "inputs": runtime_inputs(),
                     "status": {
                         "remote_status": "0",
                         "bt4_compare_status": "0",
                         "legacy_compare_status": "0",
+                        "benchmark_compare_status": "0",
                         "final_compare_status": "0",
                     },
+                    "artifacts": runtime_artifact_records(
+                        "linux-cuda", linux_package=linux_package
+                    ),
                 }
             )
             + "\n",
@@ -1228,19 +1286,15 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                 {
                     "schema": "metalfish.windows_cuda_runtime_gate",
                     "git": {"head_sha": "abc123"},
-                    "inputs": {
-                        "require_metal_compare": "1",
-                        "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
-                        "metal_legacy_probe_suite_log": metal_log_record(
-                            "metal-legacy.log"
-                        ),
-                    },
+                    "inputs": runtime_inputs(windows_package=windows_package),
                     "status": {
                         "runtime_status": "0",
                         "bt4_compare_status": "0",
                         "legacy_compare_status": "0",
+                        "benchmark_compare_status": "0",
                         "final_compare_status": "0",
                     },
+                    "artifacts": runtime_artifact_records("windows-cuda"),
                 }
             )
             + "\n",
@@ -1370,6 +1424,32 @@ def test_cuda_package_validator_rejects_source_commit_drift() -> None:
     raise AssertionError("expected source commit drift to be rejected")
 
 
+def test_cuda_package_validator_rejects_hash_drift() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        package_dir = root / "linux-package"
+        write_release_package_files(
+            package_dir,
+            package_kind="linux-cuda",
+            windows=False,
+            source_commit="abc123",
+        )
+        (package_dir / "metalfish").write_text("tampered!\n", encoding="utf-8")
+        package = root / "metalfish-linux-x86_64-cuda.tar.gz"
+        with tarfile.open(package, "w:gz") as archive:
+            for path in sorted(package_dir.iterdir()):
+                archive.add(path, arcname=path.name)
+        try:
+            cuda_release.validate_linux_cuda_package(
+                package,
+                expected_source_commit="abc123",
+            )
+        except ValueError as exc:
+            expect("package hash drift rejected", "sha256 mismatch" in str(exc))
+            return
+    raise AssertionError("expected package hash drift to be rejected")
+
+
 def test_cuda_release_artifact_helpers_require_metal_compare() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -1429,6 +1509,74 @@ def test_cuda_release_artifact_helpers_require_metal_compare() -> None:
             expect("legacy metal rejected", "Metal legacy probe suite" in str(exc))
             return
     raise AssertionError("expected incomplete Metal comparison to be rejected")
+
+
+def test_cuda_runtime_manifest_requires_benchmark_compare() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        missing_status = root / "missing-benchmark-status.json"
+        missing_status.write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.cuda_gpu_runtime_gate",
+                    "inputs": runtime_inputs(),
+                    "status": {
+                        "remote_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        try:
+            runtime_checker.validate_runtime_manifest(
+                missing_status,
+                runtime_kind="linux-cuda",
+                require_metal_compare=True,
+                require_metal_benchmark_compare=True,
+            )
+        except ValueError as exc:
+            expect("benchmark status rejected", "benchmark compare status" in str(exc))
+        else:
+            raise AssertionError("expected missing benchmark status to be rejected")
+
+        missing_input = root / "missing-benchmark-input.json"
+        missing_input.write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.windows_cuda_runtime_gate",
+                    "inputs": {
+                        "require_metal_compare": "1",
+                        "require_metal_benchmark_compare": "0",
+                        "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
+                        "metal_legacy_probe_suite_log": metal_log_record(
+                            "metal-legacy.log"
+                        ),
+                    },
+                    "status": {
+                        "runtime_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "benchmark_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        try:
+            runtime_checker.validate_runtime_manifest(
+                missing_input,
+                runtime_kind="windows-cuda",
+                require_metal_compare=True,
+                require_metal_benchmark_compare=True,
+            )
+        except ValueError as exc:
+            expect("benchmark input rejected", "benchmark comparison" in str(exc))
+            return
+    raise AssertionError("expected missing benchmark input to be rejected")
 
 
 def test_network_downloader_validates_gzip_weights() -> None:
@@ -1526,7 +1674,9 @@ def main() -> int:
     test_cuda_release_artifact_helpers_reject_failed_runtime()
     test_cuda_runtime_manifest_rejects_head_sha_drift()
     test_cuda_package_validator_rejects_source_commit_drift()
+    test_cuda_package_validator_rejects_hash_drift()
     test_cuda_release_artifact_helpers_require_metal_compare()
+    test_cuda_runtime_manifest_requires_benchmark_compare()
     test_network_downloader_validates_gzip_weights()
     test_portable_manifest_uses_checked_out_commit()
     print("NN backend artifact tests: OK")

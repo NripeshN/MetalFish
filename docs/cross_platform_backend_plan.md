@@ -172,13 +172,15 @@ python3 tools/fetch_cuda_release_artifacts.py \
 `tools/fetch_cuda_release_artifacts.py` rejects failed runs, wrong workflow
 types, SHA mismatches, missing CUDA packages, package-manifest drift, and uses
 `tools/check_cuda_runtime_manifest.py` to reject Linux/Windows runtime manifests
-whose remote/runtime, BT4, legacy, or final comparison status is not `0`. Release
-promotion also requires `require_metal_compare=1` plus BT4 and legacy Metal probe
-suite records, so diagnostic CUDA-only runtime gates cannot be promoted. The
-same validator path is used for GitHub workflow artifacts and direct runtime
-roots. The CUDA package validator also checks each package manifest
-`source_commit` against the same successful gate SHA before release packaging,
-and runtime manifests must report the same `git.head_sha`.
+whose remote/runtime, BT4, legacy, benchmark, or final comparison status is not
+`0`. Release promotion also requires `require_metal_compare=1`,
+`require_metal_benchmark_compare=1`, BT4 and legacy Metal probe records, Metal
+benchmark records, and archived package/probe/isolation/benchmark evidence, so
+diagnostic CUDA-only runtime gates cannot be promoted. The same validator path
+is used for GitHub workflow artifacts and direct runtime roots. The CUDA package
+validator checks package manifest `source_commit`, size, SHA-256, and required
+Linux executable bits against the same successful gate SHA before release
+packaging, and runtime manifests must report the same `git.head_sha`.
 
 Current CUDA backend boundary:
 

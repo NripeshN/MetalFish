@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import pathlib
 import sys
@@ -16,12 +17,18 @@ REQUIRED_LINUX_CUDA_FILES = {
     "metalfish_nn_probe",
     "test_nn_comparison",
     "PORTABLE_ARTIFACT.md",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
 }
 REQUIRED_WINDOWS_CUDA_FILES = {
     "metalfish.exe",
     "metalfish_nn_probe.exe",
     "test_nn_comparison.exe",
     "PORTABLE_ARTIFACT.md",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
 }
 REQUIRED_WINDOWS_CUDA_DLL_PATTERNS = (
     "cudart64_*.dll",
@@ -63,15 +70,96 @@ def manifest_file_names(manifest: dict) -> set[str]:
     }
 
 
+def manifest_file_records(manifest: dict) -> dict[str, dict]:
+    records: dict[str, dict] = {}
+    for item in manifest.get("files", []):
+        if not isinstance(item, dict):
+            continue
+        name = normalize_archive_name(str(item.get("path") or item.get("name") or ""))
+        if not name:
+            raise ValueError("package manifest contains a file record without a name")
+        if name in records:
+            raise ValueError(f"package manifest contains duplicate file record: {name}")
+        records[name] = item
+    return records
+
+
+def sha256_stream(handle) -> str:
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def require_manifest_hashes(
+    manifest: dict,
+    archive_records: dict[str, dict],
+    *,
+    executable_required: set[str] = frozenset(),
+) -> None:
+    for name, record in manifest_file_records(manifest).items():
+        archive_record = archive_records.get(name)
+        if archive_record is None:
+            raise ValueError(f"package manifest references missing archive entry: {name}")
+        expected_size = int(record.get("size_bytes") or -1)
+        if expected_size != archive_record["size_bytes"]:
+            raise ValueError(
+                f"package manifest size mismatch for {name}: "
+                f"{expected_size} != {archive_record['size_bytes']}"
+            )
+        expected_sha = str(record.get("sha256") or "")
+        if expected_sha != archive_record["sha256"]:
+            raise ValueError(
+                f"package manifest sha256 mismatch for {name}: "
+                f"{expected_sha!r} != {archive_record['sha256']!r}"
+            )
+        if name in executable_required:
+            if record.get("executable") is not True:
+                raise ValueError(f"package manifest does not mark {name} executable")
+            if archive_record.get("executable") is not True:
+                raise ValueError(f"Linux CUDA archive entry is not executable: {name}")
+
+
+def read_tar_records(archive: tarfile.TarFile) -> dict[str, dict]:
+    records: dict[str, dict] = {}
+    for member in archive.getmembers():
+        if not member.isfile():
+            continue
+        name = normalize_archive_name(member.name)
+        extracted = archive.extractfile(member)
+        if extracted is None:
+            raise ValueError(f"Linux CUDA package entry could not be read: {name}")
+        with extracted:
+            digest = sha256_stream(extracted)
+        records[name] = {
+            "size_bytes": member.size,
+            "sha256": digest,
+            "executable": bool(member.mode & 0o111),
+        }
+    return records
+
+
+def read_zip_records(archive: zipfile.ZipFile) -> dict[str, dict]:
+    records: dict[str, dict] = {}
+    for info in archive.infolist():
+        if info.is_dir():
+            continue
+        name = normalize_archive_name(info.filename)
+        with archive.open(info, "r") as handle:
+            digest = sha256_stream(handle)
+        records[name] = {
+            "size_bytes": info.file_size,
+            "sha256": digest,
+        }
+    return records
+
+
 def validate_linux_cuda_package(
     package: pathlib.Path, *, expected_source_commit: str | None = None
 ) -> dict:
     with tarfile.open(package, "r:gz") as archive:
-        names = {
-            normalize_archive_name(member.name)
-            for member in archive.getmembers()
-            if member.isfile()
-        }
+        archive_records = read_tar_records(archive)
+        names = set(archive_records)
         try:
             manifest_member = next(
                 member
@@ -99,6 +187,11 @@ def validate_linux_cuda_package(
             "Linux CUDA package manifest is missing file entries: "
             + ", ".join(missing_manifest)
         )
+    require_manifest_hashes(
+        manifest,
+        archive_records,
+        executable_required={"metalfish", "metalfish_nn_probe", "test_nn_comparison"},
+    )
     return {
         "schema": manifest["schema"],
         "kind": package_info["kind"],
@@ -113,11 +206,8 @@ def validate_windows_cuda_package(
     package: pathlib.Path, *, expected_source_commit: str | None = None
 ) -> dict:
     with zipfile.ZipFile(package) as archive:
-        names = {
-            normalize_archive_name(info.filename)
-            for info in archive.infolist()
-            if not info.is_dir()
-        }
+        archive_records = read_zip_records(archive)
+        names = set(archive_records)
         try:
             raw_manifest = archive.read("windows-cuda-package-manifest.json")
         except KeyError as exc:
@@ -158,6 +248,7 @@ def validate_windows_cuda_package(
             "Windows CUDA package zip is missing CUDA DLL entries: "
             + ", ".join(missing_zip_dlls)
         )
+    require_manifest_hashes(manifest, archive_records)
     return {
         "schema": manifest["schema"],
         "kind": package_info["kind"],

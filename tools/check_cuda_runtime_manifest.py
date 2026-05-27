@@ -29,6 +29,37 @@ RUNTIME_KINDS = {
     },
 }
 
+REQUIRED_RELEASE_ARTIFACTS = {
+    "linux-cuda": {
+        "linux-cuda-package-manifest.json",
+        "cuda-gpu-package-nn-comparison.log",
+        "cuda-gpu-package-nn-probe-suite.log",
+        "cuda-gpu-package-legacy-nn-probe-suite.log",
+        "cuda-gpu-package-nn-isolation-bt4-legacy.log",
+        "cuda-gpu-package-nn-isolation-legacy-bt4.log",
+        "metal-cuda-nn-probe-suite-summary.json",
+        "metal-cuda-legacy-nn-probe-suite-summary.json",
+        "metal-cuda-nn-benchmark-summary.json",
+        "metal-cuda-nn-benchmark-compare.log",
+        "cuda-gpu-uci-bk07-smoke.log",
+        "cuda-gpu-uci-hybrid-clock-safety-smoke.log",
+    },
+    "windows-cuda": {
+        "logs/windows-cuda-runtime-manifest.json",
+        "logs/cuda-nn-comparison.stdout.log",
+        "logs/cuda-probe-suite.stdout.log",
+        "logs/cuda-legacy-probe-suite.stdout.log",
+        "logs/cuda-isolation-bt4-legacy.stdout.log",
+        "logs/cuda-isolation-legacy-bt4.stdout.log",
+        "logs/metal-windows-cuda-nn-probe-suite-summary.json",
+        "logs/metal-windows-cuda-legacy-nn-probe-suite-summary.json",
+        "logs/metal-windows-cuda-nn-benchmark-summary.json",
+        "logs/metal-windows-cuda-nn-benchmark-compare.log",
+        "logs/cuda-bk07-mcts.stdout.log",
+        "logs/hybrid-cuda-clock-safety.stdout.log",
+    },
+}
+
 
 def require_zero_status(status: object, *, label: str) -> None:
     if str(status) != "0":
@@ -48,7 +79,9 @@ def require_file_record(record: object, *, label: str) -> None:
         raise ValueError(f"{label} record is missing sha256")
 
 
-def validate_metal_compare_inputs(inputs: object) -> None:
+def validate_metal_compare_inputs(
+    inputs: object, *, require_benchmark_compare: bool = False
+) -> None:
     if not isinstance(inputs, dict):
         raise ValueError("runtime manifest is missing inputs object")
     if not is_truthy(inputs.get("require_metal_compare")):
@@ -59,6 +92,31 @@ def validate_metal_compare_inputs(inputs: object) -> None:
     require_file_record(
         inputs.get("metal_legacy_probe_suite_log"), label="Metal legacy probe suite"
     )
+    if require_benchmark_compare:
+        if not is_truthy(inputs.get("require_metal_benchmark_compare")):
+            raise ValueError(
+                "runtime manifest did not require Metal benchmark comparison"
+            )
+        require_file_record(
+            inputs.get("metal_comparison_log"), label="Metal benchmark comparison"
+        )
+
+
+def validate_release_artifacts(data: dict, *, runtime_kind: str) -> None:
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError("runtime manifest is missing artifacts object")
+    package_records = [
+        name
+        for name in artifacts
+        if runtime_kind == "linux-cuda"
+        and name.startswith("metalfish-linux-x86_64-cuda")
+        and name.endswith(".tar.gz")
+    ]
+    if runtime_kind == "linux-cuda" and not package_records:
+        raise ValueError("runtime manifest is missing Linux CUDA package artifact")
+    for name in sorted(REQUIRED_RELEASE_ARTIFACTS[runtime_kind]):
+        require_file_record(artifacts.get(name), label=f"artifact {name}")
 
 
 def validate_runtime_manifest(
@@ -66,6 +124,8 @@ def validate_runtime_manifest(
     *,
     runtime_kind: str,
     require_metal_compare: bool = False,
+    require_metal_benchmark_compare: bool = False,
+    require_release_evidence: bool = False,
     expected_head_sha: str | None = None,
 ) -> dict:
     if runtime_kind not in RUNTIME_KINDS:
@@ -88,9 +148,18 @@ def validate_runtime_manifest(
         raise ValueError(f"runtime manifest {manifest} is missing status object")
     for field, label in spec["status_fields"].items():
         require_zero_status(status.get(field), label=label)
+    if require_metal_benchmark_compare:
+        require_zero_status(
+            status.get("benchmark_compare_status"), label="benchmark compare status"
+        )
     inputs = data.get("inputs") or {}
     if require_metal_compare:
-        validate_metal_compare_inputs(inputs)
+        validate_metal_compare_inputs(
+            inputs,
+            require_benchmark_compare=require_metal_benchmark_compare,
+        )
+    if require_release_evidence:
+        validate_release_artifacts(data, runtime_kind=runtime_kind)
     return {
         "schema": data["schema"],
         "kind": runtime_kind,
@@ -98,6 +167,7 @@ def validate_runtime_manifest(
         "status": status,
         "gcp": data.get("gcp") or {},
         "inputs": inputs,
+        "artifacts": data.get("artifacts") or {},
     }
 
 
@@ -108,6 +178,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--runtime-kind", choices=tuple(RUNTIME_KINDS.keys()), required=True
     )
     parser.add_argument("--require-metal-compare", action="store_true")
+    parser.add_argument("--require-metal-benchmark-compare", action="store_true")
+    parser.add_argument("--require-release-evidence", action="store_true")
     parser.add_argument("--expected-head-sha", default="")
     parser.add_argument("--json-output", default="")
     return parser.parse_args(argv)
@@ -120,6 +192,8 @@ def main(argv: list[str] | None = None) -> int:
         manifest,
         runtime_kind=args.runtime_kind,
         require_metal_compare=args.require_metal_compare,
+        require_metal_benchmark_compare=args.require_metal_benchmark_compare,
+        require_release_evidence=args.require_release_evidence,
         expected_head_sha=args.expected_head_sha or None,
     )
     if args.json_output:

@@ -89,7 +89,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release-inputs.outputs.tag_name }}
-          files: cuda-release/packages/*
+          files: |
+            cuda-release/packages/*
+            cuda-release/cuda-release-artifacts-manifest.json
           draft: false
           prerelease: true
           fail_on_unmatched_files: true
