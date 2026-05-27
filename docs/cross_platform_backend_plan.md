@@ -144,6 +144,23 @@ Its default artifact root is `results/cuda_runtime_direct/<sha>/`; the detached
 worktree is removed after a successful run and preserved after a failure for
 debugging.
 
+Once both CUDA runtime gates have passed for the same SHA, use the CUDA release
+promotion workflow to fetch, validate, rename, and optionally attach the Linux
+and Windows CUDA packages:
+
+```bash
+gh workflow run cuda-release.yml \
+  -f linux_cuda_run_id=<cuda-gpu-gate-run> \
+  -f windows_cuda_runtime_run_id=<windows-runtime-run> \
+  -f expected_sha=<commit-sha> \
+  -f tag_name=v0.1.0-alpha \
+  -f attach_to_release=true
+```
+
+`tools/fetch_cuda_release_artifacts.py` rejects failed runs, wrong workflow
+types, SHA mismatches, missing CUDA packages, package-manifest drift, and
+runtime manifests whose BT4 or legacy Metal comparison status is not `0`.
+
 Current CUDA backend boundary:
 
 - The Linux CUDA entrypoint Cloud Build compiles `test_nn_comparison` alongside

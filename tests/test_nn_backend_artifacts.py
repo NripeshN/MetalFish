@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+import tarfile
 import tempfile
+import zipfile
 from contextlib import contextmanager
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -12,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
+from tools import fetch_cuda_release_artifacts as cuda_release  # noqa: E402
 from tools import fetch_windows_cuda_runtime_inputs as win_cuda_inputs  # noqa: E402
 from tools import run_nn_backend_probe_suite as probe_suite  # noqa: E402
 
@@ -797,6 +800,152 @@ def test_windows_cuda_runtime_input_helpers_select_artifacts() -> None:
         raise AssertionError("expected missing artifact failure")
 
 
+def write_release_package_files(
+    root: pathlib.Path, *, package_kind: str, windows: bool
+) -> pathlib.Path:
+    root.mkdir(parents=True, exist_ok=True)
+    if windows:
+        required = [
+            "metalfish.exe",
+            "metalfish_nn_probe.exe",
+            "test_nn_comparison.exe",
+            "PORTABLE_ARTIFACT.md",
+            "README.md",
+            "CHANGELOG.md",
+            "LICENSE",
+            "cudart64_12.dll",
+            "cublas64_12.dll",
+            "cublasLt64_12.dll",
+        ]
+        manifest_name = "windows-cuda-package-manifest.json"
+    else:
+        required = [
+            "metalfish",
+            "metalfish_nn_probe",
+            "test_nn_comparison",
+            "PORTABLE_ARTIFACT.md",
+            "README.md",
+            "CHANGELOG.md",
+            "LICENSE",
+        ]
+        manifest_name = "linux-cuda-package-manifest.json"
+    for name in required:
+        path = root / name
+        path.write_text(f"{name}\n", encoding="utf-8")
+    manifest = {
+        "schema": "metalfish.portable_artifact",
+        "package": {"kind": package_kind, "name": f"metalfish-{package_kind}"},
+        "files": [{"name": name} for name in [*required, manifest_name]],
+    }
+    (root / manifest_name).write_text(
+        json.dumps(manifest, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return root / manifest_name
+
+
+def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        linux_dir = root / "linux-package"
+        windows_dir = root / "windows-package"
+        write_release_package_files(linux_dir, package_kind="linux-cuda", windows=False)
+        write_release_package_files(
+            windows_dir, package_kind="windows-cuda", windows=True
+        )
+        linux_package = root / "metalfish-linux-x86_64-cuda.tar.gz"
+        with tarfile.open(linux_package, "w:gz") as archive:
+            for path in sorted(linux_dir.iterdir()):
+                archive.add(path, arcname=path.name)
+        windows_package = root / "metalfish-windows-x86_64-msvc-cuda.zip"
+        with zipfile.ZipFile(windows_package, "w") as archive:
+            for path in sorted(windows_dir.iterdir()):
+                archive.write(path, arcname=path.name)
+
+        linux_summary = cuda_release.validate_linux_cuda_package(linux_package)
+        windows_summary = cuda_release.validate_windows_cuda_package(windows_package)
+        expect("linux cuda kind", linux_summary["kind"] == "linux-cuda")
+        expect("windows cuda kind", windows_summary["kind"] == "windows-cuda")
+
+        linux_runtime = root / "cuda-gpu-runtime-manifest.json"
+        linux_runtime.write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.cuda_gpu_runtime_gate",
+                    "status": {
+                        "remote_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        windows_runtime = root / "windows-cuda-runtime-gate-manifest.json"
+        windows_runtime.write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.windows_cuda_runtime_gate",
+                    "status": {
+                        "runtime_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        expect(
+            "linux runtime status",
+            cuda_release.validate_runtime_manifest(
+                linux_runtime, schema="metalfish.cuda_gpu_runtime_gate"
+            )["status"]["remote_status"]
+            == "0",
+        )
+        expect(
+            "windows runtime status",
+            cuda_release.validate_runtime_manifest(
+                windows_runtime, schema="metalfish.windows_cuda_runtime_gate"
+            )["status"]["runtime_status"]
+            == "0",
+        )
+        expect(
+            "release package tag",
+            cuda_release.release_package_name(
+                linux_package, tag_name="v0.1.0-alpha", platform="linux-x86_64-cuda"
+            )
+            == "metalfish-v0.1.0-alpha-linux-x86_64-cuda.tar.gz",
+        )
+
+
+def test_cuda_release_artifact_helpers_reject_failed_runtime() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        manifest = pathlib.Path(tmp) / "windows-cuda-runtime-gate-manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.windows_cuda_runtime_gate",
+                    "status": {
+                        "runtime_status": "0",
+                        "bt4_compare_status": "1",
+                        "legacy_compare_status": "0",
+                        "final_compare_status": "1",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        try:
+            cuda_release.validate_runtime_manifest(
+                manifest, schema="metalfish.windows_cuda_runtime_gate"
+            )
+        except ValueError as exc:
+            expect("bt4 compare failure", "BT4 compare status" in str(exc))
+            return
+    raise AssertionError("expected failed runtime manifest to be rejected")
+
+
 def main() -> int:
     test_checker_writes_manifest()
     test_checker_rejects_missing_wdl()
@@ -812,6 +961,8 @@ def main() -> int:
     test_windows_cuda_probe_suite_positions_use_python_default()
     test_windows_cuda_runtime_input_helpers_validate_provenance()
     test_windows_cuda_runtime_input_helpers_select_artifacts()
+    test_cuda_release_artifact_helpers_validate_packages_and_manifests()
+    test_cuda_release_artifact_helpers_reject_failed_runtime()
     print("NN backend artifact tests: OK")
     return 0
 

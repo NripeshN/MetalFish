@@ -67,6 +67,7 @@ jobs:
             tools/run_tournament_live.py \
             tools/lichess_puzzle_runner.py \
             tools/download_engine_networks.py \
+            tools/fetch_cuda_release_artifacts.py \
             tools/write_portable_manifest.py \
             tools/uci_smoke.py
           python3 tests/test_benchmark_configs.py
