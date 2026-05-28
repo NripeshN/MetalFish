@@ -963,6 +963,10 @@ def main() -> int:
             "expected_head_sha=expected_sha",
         ],
     )
+    assert_file_not_contains(
+        PROJ / "tools/fetch_cuda_release_artifacts.py",
+        ["--no-expected-sha", "no_expected_sha"],
+    )
     assert_file_contains(
         PROJ / "tools/check_cuda_runtime_manifest.py",
         [

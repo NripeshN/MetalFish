@@ -389,11 +389,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Expected commit SHA. Defaults to the current checkout HEAD.",
     )
     parser.add_argument(
-        "--no-expected-sha",
-        action="store_true",
-        help="Skip same-commit provenance checks.",
-    )
-    parser.add_argument(
         "--tag-name",
         default="",
         help="Optional release tag used to rename promoted packages.",
@@ -418,11 +413,7 @@ def main(argv: list[str] | None = None) -> int:
     direct_manifest = read_direct_runtime_manifest(direct_root) if direct_root else {}
     repo = args.repo or str(direct_manifest.get("repo") or "") or default_repo()
     direct_expected_sha = str(direct_manifest.get("expected_sha") or "")
-    expected_sha = (
-        None
-        if args.no_expected_sha
-        else (args.expected_sha or direct_expected_sha or git_head())
-    )
+    expected_sha = args.expected_sha or direct_expected_sha or git_head()
     out_dir = pathlib.Path(args.out_dir).expanduser().resolve()
     if out_dir.exists():
         shutil.rmtree(out_dir)

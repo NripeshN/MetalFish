@@ -1542,6 +1542,112 @@ def test_cuda_release_artifacts_reject_direct_runtime_single_target() -> None:
     raise AssertionError("expected single-target direct runtime manifest to fail")
 
 
+def test_cuda_release_artifacts_reject_direct_runtime_commit_drift() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        direct = root / "direct"
+        linux_package_dir = root / "linux-package"
+        windows_package_dir = root / "windows-package"
+        write_release_package_files(
+            linux_package_dir,
+            package_kind="linux-cuda",
+            windows=False,
+            source_commit="linux-sha",
+        )
+        write_release_package_files(
+            windows_package_dir,
+            package_kind="windows-cuda",
+            windows=True,
+            source_commit="windows-sha",
+        )
+        linux_dir = direct / "linux"
+        windows_dir = direct / "windows"
+        windows_inputs_dir = direct / "windows_cuda_runtime_inputs" / "windows"
+        linux_dir.mkdir(parents=True)
+        windows_dir.mkdir(parents=True)
+        windows_inputs_dir.mkdir(parents=True)
+        linux_package = linux_dir / "metalfish-linux-x86_64-cuda.tar.gz"
+        with tarfile.open(linux_package, "w:gz") as archive:
+            for path in sorted(linux_package_dir.iterdir()):
+                archive.add(path, arcname=path.name)
+        windows_package = windows_inputs_dir / "metalfish-windows-x86_64-msvc-cuda.zip"
+        with zipfile.ZipFile(windows_package, "w") as archive:
+            for path in sorted(windows_package_dir.iterdir()):
+                archive.write(path, arcname=path.name)
+
+        (direct / "direct-runtime-gates-manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.cuda_runtime_gates_direct",
+                    "expected_sha": "linux-sha",
+                    "repo": "owner/repo",
+                    "target": "both",
+                    "require_metal": True,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (linux_dir / "cuda-gpu-runtime-manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.cuda_gpu_runtime_gate",
+                    "git": {"head_sha": "linux-sha"},
+                    "inputs": runtime_inputs(),
+                    "status": {
+                        "remote_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "benchmark_compare_status": "0",
+                        "search_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                    "artifacts": runtime_artifact_records(
+                        "linux-cuda", linux_package=linux_package
+                    ),
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (windows_dir / "windows-cuda-runtime-gate-manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.windows_cuda_runtime_gate",
+                    "git": {"head_sha": "windows-sha"},
+                    "inputs": runtime_inputs(windows_package=windows_package),
+                    "status": {
+                        "runtime_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "benchmark_compare_status": "0",
+                        "search_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                    "artifacts": runtime_artifact_records("windows-cuda"),
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        try:
+            cuda_release.main(
+                [
+                    "--direct-runtime-root",
+                    str(direct),
+                    "--out-dir",
+                    str(root / "release"),
+                    "--tag-name",
+                    "v0.1.0-alpha",
+                ]
+            )
+        except ValueError as exc:
+            expect("direct commit drift rejected", "source commit" in str(exc))
+            return
+    raise AssertionError("expected direct runtime commit drift to be rejected")
+
+
 def test_cuda_release_dispatch_direct_root_uses_manifest_sha_default() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -2055,6 +2161,7 @@ def main() -> int:
     test_cuda_package_validator_rejects_unmanifested_archive_entries()
     test_cuda_release_artifacts_promote_direct_runtime_root()
     test_cuda_release_artifacts_reject_direct_runtime_single_target()
+    test_cuda_release_artifacts_reject_direct_runtime_commit_drift()
     test_cuda_release_dispatch_direct_root_uses_manifest_sha_default()
     test_cuda_release_artifacts_accept_split_direct_runtime_manifest()
     test_direct_runtime_manifest_merge_preserves_split_targets()
