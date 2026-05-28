@@ -1958,6 +1958,7 @@ def main() -> int:
             "metalfish-linux-x86_64-cuda.tar.gz",
             "PORTABLE_ARTIFACT.md",
             "linux-cuda-package-manifest.json",
+            "linux-cuda-package-check.json",
             "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG",
             "METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE",
             "METALFISH_REQUIRE_METAL_SEARCH_COMPARE",

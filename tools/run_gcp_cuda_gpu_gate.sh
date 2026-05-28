@@ -241,7 +241,8 @@ collect_remote_artifacts() {
   for file in \
     metalfish-linux-x86_64-cuda.tar.gz \
     PORTABLE_ARTIFACT.md \
-    linux-cuda-package-manifest.json; do
+    linux-cuda-package-manifest.json \
+    linux-cuda-package-check.json; do
     if gcloud compute scp \
       "${INSTANCE}:~/metalfish/build-cuda-gpu/${file}" \
       "${ARTIFACT_DIR}/${file}" \
