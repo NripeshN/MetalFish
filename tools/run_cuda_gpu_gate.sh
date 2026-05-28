@@ -630,6 +630,7 @@ METALFISH_CUDA_PROFILE=0 \
   --cuda-full-buffer-clear true \
   --out "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log" \
   --top 3 \
+  --batch-size 2 \
   --warmup 1 \
   --iterations 1 \
   --backend-label "CUDA transformer backend" \
@@ -656,6 +657,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --cuda-full-buffer-clear true \
     --out "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log" \
     --top 3 \
+    --batch-size 2 \
     --warmup 1 \
     --iterations 1 \
     --backend-label "CUDA transformer backend" \
@@ -1134,6 +1136,7 @@ METALFISH_CUDA_PROFILE=0 \
   --cuda-full-buffer-clear true \
   --out "${BUILD_DIR}/cuda-gpu-package-nn-probe-suite.log" \
   --top 3 \
+  --batch-size 2 \
   --warmup 1 \
   --iterations 1 \
   --backend-label "CUDA transformer backend" \
@@ -1156,6 +1159,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --cuda-full-buffer-clear true \
     --out "${BUILD_DIR}/cuda-gpu-package-legacy-nn-probe-suite.log" \
     --top 3 \
+    --batch-size 2 \
     --warmup 1 \
     --iterations 1 \
     --backend-label "CUDA transformer backend" \

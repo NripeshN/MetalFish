@@ -147,27 +147,11 @@ def backend_check(data: dict[str, Any], label: str | None, role: str) -> None:
     )
 
 
-def compare_probe(
+def compare_output(
     expected: dict[str, Any],
     actual: dict[str, Any],
     args: argparse.Namespace,
 ) -> dict[str, Any]:
-    backend_check(expected, args.expected_label, "expected")
-    backend_check(actual, args.actual_label, "actual")
-
-    require(
-        expected.get("fen") == actual.get("fen"),
-        f"FEN mismatch: {expected.get('fen')!r} != {actual.get('fen')!r}",
-    )
-    for key in ("moves", "final_fen"):
-        require(
-            expected.get(key) == actual.get(key),
-            f"{key} mismatch: {expected.get(key)!r} != {actual.get(key)!r}",
-        )
-    require(
-        expected.get("transform") == actual.get("transform"),
-        "policy transform mismatch",
-    )
     value_delta = abs(finite_number(expected, "value") - finite_number(actual, "value"))
     require(
         value_delta <= args.value_tolerance,
@@ -255,9 +239,6 @@ def compare_probe(
         )
 
     return {
-        "expected_backend": expected.get("backend"),
-        "actual_backend": actual.get("backend"),
-        "fen": expected.get("fen"),
         "value_delta": value_delta,
         "wdl_delta": wdl_delta,
         "moves_left_delta": moves_left_delta,
@@ -266,6 +247,110 @@ def compare_probe(
         "policy_max_delta": policy_max_delta,
         "policy_mean_delta": policy_mean_delta,
     }
+
+
+def max_result_delta(
+    results: list[dict[str, Any]], key: str
+) -> float | None:
+    return max_optional([result[key] for result in results])
+
+
+def compare_batch_outputs(
+    expected: dict[str, Any],
+    actual: dict[str, Any],
+    args: argparse.Namespace,
+) -> tuple[int, dict[str, Any] | None]:
+    if "batch_outputs" not in expected and "batch_outputs" not in actual:
+        return 0, None
+    require("batch_outputs" in expected, "expected probe is missing batch_outputs")
+    require("batch_outputs" in actual, "actual probe is missing batch_outputs")
+    expected_batch = expected["batch_outputs"]
+    actual_batch = actual["batch_outputs"]
+    require(isinstance(expected_batch, list), "expected batch_outputs is not a list")
+    require(isinstance(actual_batch, list), "actual batch_outputs is not a list")
+    require(
+        len(expected_batch) == len(actual_batch),
+        f"batch output count mismatch: {len(expected_batch)} != {len(actual_batch)}",
+    )
+
+    batch_results: list[dict[str, Any]] = []
+    for index, (expected_output, actual_output) in enumerate(
+        zip(expected_batch, actual_batch)
+    ):
+        require(
+            isinstance(expected_output, dict),
+            f"expected batch_outputs[{index}] is not an object",
+        )
+        require(
+            isinstance(actual_output, dict),
+            f"actual batch_outputs[{index}] is not an object",
+        )
+        expected_index = expected_output.get("index", index)
+        actual_index = actual_output.get("index", index)
+        require(
+            expected_index == actual_index,
+            f"batch_outputs[{index}] index mismatch: "
+            f"{expected_index!r} != {actual_index!r}",
+        )
+        try:
+            batch_results.append(compare_output(expected_output, actual_output, args))
+        except RuntimeError as exc:
+            raise RuntimeError(f"batch_outputs[{index}]: {exc}") from exc
+
+    return len(batch_results), {
+        "value_delta": max_result_delta(batch_results, "value_delta") or 0.0,
+        "wdl_delta": max_result_delta(batch_results, "wdl_delta"),
+        "moves_left_delta": max_result_delta(batch_results, "moves_left_delta"),
+        "max_top_logit_delta": (
+            max_result_delta(batch_results, "max_top_logit_delta") or 0.0
+        ),
+        "policy_max_delta": max_result_delta(batch_results, "policy_max_delta"),
+        "policy_mean_delta": max_result_delta(batch_results, "policy_mean_delta"),
+    }
+
+
+def compare_probe(
+    expected: dict[str, Any],
+    actual: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    backend_check(expected, args.expected_label, "expected")
+    backend_check(actual, args.actual_label, "actual")
+
+    require(
+        expected.get("fen") == actual.get("fen"),
+        f"FEN mismatch: {expected.get('fen')!r} != {actual.get('fen')!r}",
+    )
+    for key in ("moves", "final_fen"):
+        require(
+            expected.get(key) == actual.get(key),
+            f"{key} mismatch: {expected.get(key)!r} != {actual.get(key)!r}",
+        )
+    require(
+        expected.get("transform") == actual.get("transform"),
+        "policy transform mismatch",
+    )
+
+    output_result = compare_output(expected, actual, args)
+    batch_output_count, batch_result = compare_batch_outputs(expected, actual, args)
+    result = {
+        "expected_backend": expected.get("backend"),
+        "actual_backend": actual.get("backend"),
+        "fen": expected.get("fen"),
+        "top_count": args.top_count,
+        "batch_output_count": batch_output_count,
+        **output_result,
+    }
+    if batch_result is None:
+        return result
+
+    for key, value in batch_result.items():
+        current = result[key]
+        if current is None:
+            result[key] = value
+        elif value is not None:
+            result[key] = max(current, value)
+    return result
 
 
 def max_optional(values: list[float | None]) -> float | None:
@@ -281,6 +366,7 @@ def aggregate_summary(
 ) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "probe_count": len(probes),
+        "batch_output_count": sum(probe["batch_output_count"] for probe in probes),
         "probes": probes,
         "max_value_delta": max((probe["value_delta"] for probe in probes), default=0.0),
         "max_wdl_delta": max_optional([probe["wdl_delta"] for probe in probes]),
@@ -348,9 +434,13 @@ def main() -> int:
     probe_text = ""
     if len(probe_summaries) > 1:
         probe_text = f"probes={len(probe_summaries)} "
+    batch_text = ""
+    if summary["batch_output_count"]:
+        batch_text = f"batch_outputs={summary['batch_output_count']} "
     print(
         "NN backend output compare: PASS "
         f"{probe_text}"
+        f"{batch_text}"
         f"value_delta={summary['max_value_delta']:.6g} "
         f"wdl_delta={delta_text(summary['max_wdl_delta'])} "
         f"moves_left_delta={delta_text(summary['max_moves_left_delta'])} "

@@ -139,6 +139,7 @@ jobs:
             --backend metal \
             --out build/metal-nn-probe-suite.log \
             --top 3 \
+            --batch-size 2 \
             --warmup 0 \
             --iterations 1 \
             --full-policy
@@ -148,6 +149,7 @@ jobs:
             --backend metal \
             --out build/metal-legacy-nn-probe-suite.log \
             --top 3 \
+            --batch-size 2 \
             --warmup 0 \
             --iterations 1 \
             --full-policy

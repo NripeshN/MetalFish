@@ -124,28 +124,46 @@ def probe_json(
     policy_shift: float = 0.0,
     has_wdl: bool = True,
     has_moves_left: bool = True,
+    batch_policy_shifts: list[float] | None = None,
 ) -> str:
     moves = top_moves or ["e2e4", "d2d4", "g1f3"]
     policy = [1.0 + policy_shift, 0.5, -0.25, -1.0]
-    return json.dumps(
-        {
-            "fen": fen,
-            "backend": backend,
-            "network_info": f"{label} synthetic",
-            "transform": 0,
-            "value": value,
-            "has_wdl": has_wdl,
-            "wdl": [0.2, 0.7, 0.1],
-            "has_moves_left": has_moves_left,
-            "moves_left": 12.5,
-            "policy_top": [
-                {"move": moves[0], "logit": 1.0 + policy_shift},
-                {"move": moves[1], "logit": 0.5},
-                {"move": moves[2], "logit": -0.25},
-            ],
-            "policy": policy,
-        }
-    )
+    payload = {
+        "fen": fen,
+        "backend": backend,
+        "network_info": f"{label} synthetic",
+        "transform": 0,
+        "value": value,
+        "has_wdl": has_wdl,
+        "wdl": [0.2, 0.7, 0.1],
+        "has_moves_left": has_moves_left,
+        "moves_left": 12.5,
+        "policy_top": [
+            {"move": moves[0], "logit": 1.0 + policy_shift},
+            {"move": moves[1], "logit": 0.5},
+            {"move": moves[2], "logit": -0.25},
+        ],
+        "policy": policy,
+    }
+    if batch_policy_shifts is not None:
+        payload["batch_outputs"] = [
+            {
+                "index": index,
+                "value": value + shift,
+                "has_wdl": has_wdl,
+                "wdl": [0.2, 0.7, 0.1],
+                "has_moves_left": has_moves_left,
+                "moves_left": 12.5,
+                "policy_top": [
+                    {"move": moves[0], "logit": 1.0 + shift},
+                    {"move": moves[1], "logit": 0.5},
+                    {"move": moves[2], "logit": -0.25},
+                ],
+                "policy": [1.0 + shift, 0.5, -0.25, -1.0],
+            }
+            for index, shift in enumerate(batch_policy_shifts)
+        ]
+    return json.dumps(payload)
 
 
 def write_benchmark_log(
@@ -271,6 +289,55 @@ def test_backend_output_compare_accepts_close_outputs() -> None:
             abs(data["policy_max_delta"] - 0.0005) < 1e-9,
         )
         expect("summary probe count", data["probe_count"] == 1)
+
+
+def test_backend_output_compare_accepts_batched_outputs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal-batch.log"
+        actual = root / "cuda-batch.log"
+        summary = root / "summary.json"
+        expected.write_text(
+            probe_json(
+                backend="metal",
+                label="Metal (MPSGraph) backend",
+                batch_policy_shifts=[0.0, 0.001],
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        actual.write_text(
+            probe_json(
+                backend="cuda",
+                label="CUDA transformer backend",
+                batch_policy_shifts=[0.0004, 0.0017],
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--expected-label",
+                "Metal (MPSGraph) backend",
+                "--actual-label",
+                "CUDA transformer backend",
+                "--summary-out",
+                str(summary),
+                "--require-full-policy",
+            ]
+        ):
+            expect("batch compare success", comparer.main() == 0)
+        data = json.loads(summary.read_text(encoding="utf-8"))
+        expect("batch output count", data["batch_output_count"] == 2)
+        expect("batch aggregate value", abs(data["max_value_delta"] - 0.0007) < 1e-9)
+        expect(
+            "batch aggregate policy",
+            abs(data["policy_max_delta"] - 0.0007) < 1e-9,
+        )
 
 
 def test_backend_benchmark_compare_writes_summary() -> None:
@@ -562,6 +629,48 @@ def test_backend_output_compare_rejects_probe_suite_mismatch() -> None:
     raise AssertionError("expected suite FEN drift to fail")
 
 
+def test_backend_output_compare_rejects_batched_top_move_drift() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal-batch.log"
+        actual = root / "cuda-batch.log"
+        expected_payload = json.loads(
+            probe_json(
+                backend="metal",
+                label="Metal (MPSGraph) backend",
+                batch_policy_shifts=[0.0, 0.0],
+            )
+        )
+        actual_payload = json.loads(
+            probe_json(
+                backend="cuda",
+                label="CUDA transformer backend",
+                batch_policy_shifts=[0.0, 0.0],
+            )
+        )
+        actual_payload["batch_outputs"][1]["policy_top"][0]["move"] = "d2d4"
+        expected.write_text(json.dumps(expected_payload) + "\n", encoding="utf-8")
+        actual.write_text(json.dumps(actual_payload) + "\n", encoding="utf-8")
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--top-count",
+                "1",
+            ]
+        ):
+            try:
+                comparer.main()
+            except RuntimeError as exc:
+                message = str(exc)
+                expect("batch drift error", "batch_outputs[1]" in message)
+                expect("batch top move drift", "top policy move 0 mismatch" in message)
+                return
+    raise AssertionError("expected batched top move drift to fail")
+
+
 def test_backend_output_compare_rejects_top_move_drift() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -607,15 +716,18 @@ parser.add_argument("--backend", required=True)
 parser.add_argument("--fen", required=True)
 parser.add_argument("--moves", default="")
 parser.add_argument("--top")
+parser.add_argument("--batch-size")
 parser.add_argument("--warmup")
 parser.add_argument("--iterations")
 parser.add_argument("--full-policy", action="store_true")
 args = parser.parse_args()
+batch_size = int(args.batch_size or 1)
 print(json.dumps({
     "fen": args.fen,
     "moves": args.moves,
     "final_fen": args.fen,
     "backend": args.backend,
+    "batch_size_seen": args.batch_size,
     "network_info": f"{args.backend} synthetic executor=resolved+graph-replay",
     "transform": 0,
     "value": 0.0,
@@ -629,6 +741,23 @@ print(json.dumps({
         {"move": "g1f3", "logit": 0.25},
     ],
     "policy": [1.0, 0.5, 0.25],
+    "batch_outputs": [
+        {
+            "index": index,
+            "value": 0.0,
+            "has_wdl": True,
+            "wdl": [0.1, 0.8, 0.1],
+            "has_moves_left": True,
+            "moves_left": 1.0,
+            "policy_top": [
+                {"move": "e2e4", "logit": 1.0},
+                {"move": "d2d4", "logit": 0.5},
+                {"move": "g1f3", "logit": 0.25},
+            ],
+            "policy": [1.0, 0.5, 0.25],
+        }
+        for index in range(batch_size)
+    ],
 }))
 """,
             encoding="utf-8",
@@ -645,6 +774,8 @@ print(json.dumps({
                 "cuda",
                 "--out",
                 str(output),
+                "--batch-size",
+                "2",
                 "--position",
                 "one=8/8/8/8/8/8/8/K6k w - - 0 1",
                 "--position",
@@ -667,6 +798,7 @@ print(json.dumps({
         probes = comparer.load_probe_jsons(output)
         expect("probe suite count", len(probes) == 3)
         expect("probe suite first fen", probes[0]["fen"].startswith("8/8/8"))
+        expect("probe suite forwards batch size", probes[0]["batch_size_seen"] == "2")
         expect("probe suite second fen", probes[1]["fen"].startswith("6bk/P7"))
         expect("probe suite line moves", probes[2]["moves"] == "e2e4")
 
@@ -686,6 +818,7 @@ parser.add_argument("--backend", required=True)
 parser.add_argument("--fen", required=True)
 parser.add_argument("--moves", default="")
 parser.add_argument("--top")
+parser.add_argument("--batch-size")
 parser.add_argument("--warmup")
 parser.add_argument("--iterations")
 parser.add_argument("--full-policy", action="store_true")
@@ -749,6 +882,7 @@ parser.add_argument("--backend", required=True)
 parser.add_argument("--fen", required=True)
 parser.add_argument("--moves", default="")
 parser.add_argument("--top")
+parser.add_argument("--batch-size")
 parser.add_argument("--warmup")
 parser.add_argument("--iterations")
 parser.add_argument("--full-policy", action="store_true")
@@ -1747,12 +1881,14 @@ def main() -> int:
     test_checker_writes_manifest()
     test_checker_rejects_missing_wdl()
     test_backend_output_compare_accepts_close_outputs()
+    test_backend_output_compare_accepts_batched_outputs()
     test_backend_benchmark_compare_writes_summary()
     test_backend_benchmark_compare_requires_graph_reuse()
     test_backend_benchmark_compare_allows_expected_without_graph_reuse()
     test_backend_output_compare_accepts_probe_suite()
     test_backend_output_compare_accepts_legacy_scalar_probe_suite()
     test_backend_output_compare_rejects_probe_suite_mismatch()
+    test_backend_output_compare_rejects_batched_top_move_drift()
     test_backend_output_compare_rejects_top_move_drift()
     test_probe_suite_runner_writes_multiple_json_probes()
     test_probe_suite_runner_rejects_semantic_drift()

@@ -1040,7 +1040,7 @@ function Invoke-ProbeSuiteSmoke {
       " --cuda-stable-execution-batch-size ${CUDA_STABLE_BATCH_SIZE}" +
       " --cuda-deterministic-attention-softmax true" +
       " --cuda-full-buffer-clear true" +
-      " --top 3 --warmup 1 --iterations 1 --full-policy"
+      " --top 3 --batch-size 2 --warmup 1 --iterations 1 --full-policy"
     if (-not [string]::IsNullOrWhiteSpace(\$moves)) {
       \$arguments += " --moves " + (Quote-ProbeArgument \$moves)
     }

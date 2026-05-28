@@ -353,6 +353,20 @@ void PrintTopPolicy(const std::array<float, NN::kPolicyOutputs> &policy,
   std::cout << ']';
 }
 
+void PrintOutputFields(const NN::NetworkOutput &output, int transform, int top,
+                       bool full_policy) {
+  std::cout << "\"value\":" << output.value;
+  std::cout << ",\"has_wdl\":" << (output.has_wdl ? "true" : "false");
+  std::cout << ",\"wdl\":[" << output.wdl[0] << ',' << output.wdl[1] << ','
+            << output.wdl[2] << ']';
+  std::cout << ",\"has_moves_left\":"
+            << (output.has_moves_left ? "true" : "false");
+  std::cout << ",\"moves_left\":" << output.moves_left;
+  PrintTopPolicy(output.policy, transform, top);
+  if (full_policy)
+    PrintPolicyArray(output.policy);
+}
+
 double Mean(const std::vector<double> &values) {
   double sum = 0.0;
   for (double value : values)
@@ -690,12 +704,16 @@ void RunProbe(const Options &options) {
     WaitForFile(options.start_file);
 
   NN::NetworkOutput output;
+  std::vector<NN::NetworkOutput> batch_outputs;
   std::vector<double> latencies;
   latencies.reserve(options.iterations);
   for (int i = 0; i < options.iterations; ++i) {
     const auto start = std::chrono::steady_clock::now();
     const auto outputs = network->EvaluateBatch(batch_inputs);
     const auto end = std::chrono::steady_clock::now();
+    if (outputs.empty())
+      throw std::runtime_error("Network returned no outputs");
+    batch_outputs = outputs;
     output = outputs.front();
     latencies.push_back(
         std::chrono::duration<double, std::milli>(end - start).count());
@@ -713,13 +731,20 @@ void RunProbe(const Options &options) {
   std::cout << ",\"format\":\"" << JsonEscape(descriptor.Summary()) << '"';
   std::cout << ",\"input_format\":" << static_cast<int>(input_format);
   std::cout << ",\"transform\":" << transform;
-  std::cout << ",\"value\":" << output.value;
-  std::cout << ",\"has_wdl\":" << (output.has_wdl ? "true" : "false");
-  std::cout << ",\"wdl\":[" << output.wdl[0] << ',' << output.wdl[1] << ','
-            << output.wdl[2] << ']';
-  std::cout << ",\"has_moves_left\":"
-            << (output.has_moves_left ? "true" : "false");
-  std::cout << ",\"moves_left\":" << output.moves_left;
+  std::cout << ',';
+  PrintOutputFields(output, transform, options.top, options.full_policy);
+  if (batch_outputs.size() > 1) {
+    std::cout << ",\"batch_outputs\":[";
+    for (std::size_t i = 0; i < batch_outputs.size(); ++i) {
+      if (i != 0)
+        std::cout << ',';
+      std::cout << "{\"index\":" << i << ',';
+      PrintOutputFields(batch_outputs[i], transform, options.top,
+                        options.full_policy);
+      std::cout << '}';
+    }
+    std::cout << ']';
+  }
   std::cout << ",\"latency\":{\"warmup\":" << options.warmup
             << ",\"iterations\":" << options.iterations
             << ",\"batch_size\":" << options.batch_size
@@ -731,11 +756,8 @@ void RunProbe(const Options &options) {
             << *std::min_element(latencies.begin(), latencies.end())
             << ",\"max_ms\":"
             << *std::max_element(latencies.begin(), latencies.end()) << '}';
-  PrintTopPolicy(output.policy, transform, options.top);
   if (options.full_input)
     PrintInputArray(planes);
-  if (options.full_policy)
-    PrintPolicyArray(output.policy);
   std::cout << "}\n";
 }
 

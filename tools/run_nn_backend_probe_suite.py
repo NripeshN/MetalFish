@@ -71,6 +71,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cuda-deterministic-attention-softmax")
     parser.add_argument("--cuda-full-buffer-clear")
     parser.add_argument("--top", type=int, default=3)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=180.0)
@@ -144,6 +145,8 @@ def probe_command(args: argparse.Namespace, position: ProbePosition) -> list[str
         position.fen,
         "--top",
         str(args.top),
+        "--batch-size",
+        str(args.batch_size),
         "--warmup",
         str(args.warmup),
         "--iterations",
@@ -245,6 +248,15 @@ def validate_probe(
             raise RuntimeError(
                 f"{position.name}: expected policy length "
                 f"{args.expected_policy_count}, got {len(policy)}"
+            )
+    if args.batch_size > 1:
+        batch_outputs = probe.get("batch_outputs")
+        if not isinstance(batch_outputs, list):
+            raise RuntimeError(f"{position.name}: probe did not emit batch_outputs")
+        if len(batch_outputs) != args.batch_size:
+            raise RuntimeError(
+                f"{position.name}: expected {args.batch_size} batch outputs, "
+                f"got {len(batch_outputs)}"
             )
 
 
