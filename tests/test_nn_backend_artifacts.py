@@ -1872,6 +1872,7 @@ def test_direct_runtime_clears_only_selected_artifact_dir() -> None:
                         "--target",
                         "linux",
                         "--no-require-metal",
+                        "--no-cuda-graph-execution",
                         "--artifact-root",
                         str(artifact_root),
                         "--worktree-dir",
@@ -1894,6 +1895,13 @@ def test_direct_runtime_clears_only_selected_artifact_dir() -> None:
             any(
                 env is not None
                 and env.get("METALFISH_GCP_ARTIFACT_DIR") == str(linux_dir.resolve())
+                for _, _, env in calls
+            ),
+        )
+        expect(
+            "direct runtime graph disable propagated",
+            any(
+                env is not None and env.get("METALFISH_CUDA_GRAPH_EXECUTION") == "0"
                 for _, _, env in calls
             ),
         )

@@ -292,6 +292,7 @@ def run_linux_gate(
     env["METALFISH_GCP_MACHINE"] = args.linux_machine
     env["METALFISH_CUDA_UCI_GO"] = args.linux_uci_go
     env["METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE"] = args.stable_batch_size
+    env["METALFISH_CUDA_GRAPH_EXECUTION"] = bool_env(args.cuda_graph_execution)
     for key in (
         "METALFISH_BT4_WEIGHTS",
         "METALFISH_LEGACY_NN_WEIGHTS",
@@ -324,6 +325,7 @@ def run_windows_gate(
     env["METALFISH_GCP_MACHINES"] = args.windows_machines
     env["METALFISH_WINDOWS_CUDA_UCI_GO"] = args.windows_uci_go
     env["METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE"] = args.stable_batch_size
+    env["METALFISH_CUDA_GRAPH_EXECUTION"] = bool_env(args.cuda_graph_execution)
     if args.windows_zones:
         env["METALFISH_GCP_ZONES"] = args.windows_zones
     run_command(
@@ -355,6 +357,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--lookup-limit", type=int, default=30)
     parser.add_argument("--stable-batch-size", default="16")
+    parser.add_argument(
+        "--cuda-graph-execution",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable CUDA graph execution in direct Linux and Windows runtime gates.",
+    )
     parser.add_argument("--gcp-project", default=os.environ.get("METALFISH_GCP_PROJECT", "metalfish"))
     parser.add_argument("--instance-prefix", default="metalfish-cuda-direct")
     parser.add_argument("--linux-instance", default="")
@@ -531,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:
             "linux_instance": linux_instance if needs_linux else None,
             "windows_instance": windows_instance if needs_windows else None,
             "stable_batch_size": args.stable_batch_size,
+            "cuda_graph_execution": args.cuda_graph_execution,
             "linux_machine": args.linux_machine if needs_linux else None,
             "windows_machines": args.windows_machines if needs_windows else None,
         }

@@ -495,6 +495,7 @@ write_runtime_manifest() {
     GATE_MCTS_PONDER_UCI_GO="${MCTS_PONDER_UCI_GO}" \
     GATE_MCTS_PONDER_SETTLE_MS="${MCTS_PONDER_SETTLE_MS}" \
     GATE_HYBRID_UCI_GO="${HYBRID_UCI_GO}" \
+    GATE_HYBRID_PARITY_UCI_GO="${HYBRID_PARITY_UCI_GO}" \
     python3 - "${ARTIFACT_DIR}/windows-cuda-runtime-gate-manifest.json" <<'PY'
 import datetime as _dt
 import hashlib
@@ -598,7 +599,7 @@ manifest = {
         "mcts_ponder_uci_go": os.environ["GATE_MCTS_PONDER_UCI_GO"],
         "mcts_ponder_settle_ms": os.environ["GATE_MCTS_PONDER_SETTLE_MS"],
         "hybrid_uci_go": os.environ["GATE_HYBRID_UCI_GO"],
-        "hybrid_parity_uci_go": "${HYBRID_PARITY_UCI_GO}",
+        "hybrid_parity_uci_go": os.environ["GATE_HYBRID_PARITY_UCI_GO"],
     },
     "status": {
         "runtime_status": os.environ["RUNTIME_STATUS_FOR_MANIFEST"],
