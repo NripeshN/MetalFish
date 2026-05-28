@@ -303,6 +303,15 @@ write_runtime_manifest() {
     GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON="${METAL_MCTS_KIWIPETE_SEARCH_JSON}" \
     GATE_METAL_HYBRID_BK07_SEARCH_JSON="${METAL_HYBRID_BK07_SEARCH_JSON}" \
     GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON="${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" \
+    GATE_CUDA_UCI_GO="${METALFISH_CUDA_UCI_GO:-nodes 8}" \
+    GATE_CUDA_MCTS_PONDER_GO="${METALFISH_CUDA_MCTS_PONDER_GO:-wtime 60000 btime 60000 winc 1000 binc 1000}" \
+    GATE_CUDA_MCTS_PONDER_SETTLE_SEC="${METALFISH_CUDA_MCTS_PONDER_SETTLE_SEC:-0.6}" \
+    GATE_CUDA_STABLE_BATCH_SIZE="${METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}" \
+    GATE_CUDA_GRAPH="${METALFISH_CUDA_GRAPH:-${METALFISH_CUDA_GRAPH_EXECUTION:-}}" \
+    GATE_CUDA_GRAPH_EXECUTION="${METALFISH_CUDA_GRAPH_EXECUTION:-}" \
+    GATE_CUDA_PROFILE="${METALFISH_CUDA_PROFILE:-}" \
+    GATE_CUDA_PROFILE_LIMIT="${METALFISH_CUDA_PROFILE_LIMIT:-2}" \
+    GATE_CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-}" \
     python3 - "${ARTIFACT_DIR}/cuda-gpu-runtime-manifest.json" <<'PY'
 import datetime as _dt
 import hashlib
@@ -385,6 +394,19 @@ manifest = {
         "metal_hybrid_kiwipete_search_json": file_record(
             os.environ["GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON"]
         ),
+    },
+    "runtime": {
+        "uci_go": os.environ["GATE_CUDA_UCI_GO"],
+        "mcts_ponder_uci_go": os.environ["GATE_CUDA_MCTS_PONDER_GO"],
+        "mcts_ponder_settle_sec": os.environ["GATE_CUDA_MCTS_PONDER_SETTLE_SEC"],
+        "cuda_stable_execution_batch_size": os.environ[
+            "GATE_CUDA_STABLE_BATCH_SIZE"
+        ],
+        "cuda_graph": os.environ["GATE_CUDA_GRAPH"],
+        "cuda_graph_execution": os.environ["GATE_CUDA_GRAPH_EXECUTION"],
+        "cuda_profile": os.environ["GATE_CUDA_PROFILE"],
+        "cuda_profile_limit": os.environ["GATE_CUDA_PROFILE_LIMIT"],
+        "cublas_workspace_config": os.environ["GATE_CUBLAS_WORKSPACE_CONFIG"],
     },
     "status": {
         "remote_status": os.environ["REMOTE_STATUS_FOR_MANIFEST"],
@@ -582,18 +604,34 @@ compare_collected_search_results() {
 
   local cuda_mcts="${ARTIFACT_DIR}/cuda-gpu-package-uci-bk07-search.json"
   if [[ ! -s "${cuda_mcts}" ]]; then
+    if require_metal_search_compare; then
+      echo "Packaged CUDA MCTS search JSON not found: ${cuda_mcts}" >&2
+      return 1
+    fi
     cuda_mcts="${ARTIFACT_DIR}/cuda-gpu-uci-bk07-search.json"
   fi
   local cuda_mcts_kiwipete="${ARTIFACT_DIR}/cuda-gpu-package-uci-kiwipete-search.json"
   if [[ ! -s "${cuda_mcts_kiwipete}" ]]; then
+    if require_metal_search_compare; then
+      echo "Packaged CUDA MCTS kiwipete search JSON not found: ${cuda_mcts_kiwipete}" >&2
+      return 1
+    fi
     cuda_mcts_kiwipete="${ARTIFACT_DIR}/cuda-gpu-uci-kiwipete-search.json"
   fi
   local cuda_hybrid="${ARTIFACT_DIR}/cuda-gpu-package-uci-hybrid-search.json"
   if [[ ! -s "${cuda_hybrid}" ]]; then
+    if require_metal_search_compare; then
+      echo "Packaged CUDA Hybrid search JSON not found: ${cuda_hybrid}" >&2
+      return 1
+    fi
     cuda_hybrid="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-search.json"
   fi
   local cuda_hybrid_kiwipete="${ARTIFACT_DIR}/cuda-gpu-package-uci-hybrid-kiwipete-search.json"
   if [[ ! -s "${cuda_hybrid_kiwipete}" ]]; then
+    if require_metal_search_compare; then
+      echo "Packaged CUDA Hybrid kiwipete search JSON not found: ${cuda_hybrid_kiwipete}" >&2
+      return 1
+    fi
     cuda_hybrid_kiwipete="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-kiwipete-search.json"
   fi
   if [[ ! -s "${cuda_mcts}" ]]; then
