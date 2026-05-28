@@ -71,11 +71,22 @@ jobs:
             tools/check_cuda_package_artifacts.py \
             tools/check_cuda_runtime_manifest.py \
             tools/compare_uci_search_results.py \
+            tools/compare_nn_backend_outputs.py \
+            tools/dispatch_cuda_release_artifacts.py \
+            tools/dispatch_cuda_runtime_gates.py \
             tools/download_engine_networks.py \
+            tools/fetch_cuda_gpu_gate_inputs.py \
             tools/fetch_cuda_release_artifacts.py \
+            tools/fetch_windows_cuda_runtime_inputs.py \
+            tools/run_cuda_runtime_gates_direct.py \
+            tools/run_nn_backend_probe_suite.py \
             tools/write_portable_manifest.py \
             tools/uci_smoke.py \
             tests/test_uci_search_result_tools.py
+          bash -n \
+            tools/run_cuda_gpu_gate.sh \
+            tools/run_gcp_cuda_gpu_gate.sh \
+            tools/run_gcp_windows_cuda_runtime_gate.sh
           python3 tests/test_benchmark_configs.py
           python3 tests/test_lichess_bot.py
           python3 tests/test_lichess_puzzle_runner.py
