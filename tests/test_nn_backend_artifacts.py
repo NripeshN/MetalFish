@@ -23,6 +23,7 @@ from tools import download_engine_networks as downloader  # noqa: E402
 from tools import fetch_cuda_gpu_gate_inputs as cuda_gpu_inputs  # noqa: E402
 from tools import fetch_cuda_release_artifacts as cuda_release  # noqa: E402
 from tools import fetch_windows_cuda_runtime_inputs as win_cuda_inputs  # noqa: E402
+from tools import run_cuda_runtime_gates_direct as direct_runtime  # noqa: E402
 from tools import run_nn_backend_probe_suite as probe_suite  # noqa: E402
 from tools import write_portable_manifest as portable_manifest  # noqa: E402
 
@@ -1359,6 +1360,53 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
         )
 
 
+def test_direct_runtime_manifest_merge_preserves_split_targets() -> None:
+    existing = {
+        "schema": "metalfish.cuda_runtime_gates_direct",
+        "schema_version": 1,
+        "created_at_unix": 100,
+        "repo": "owner/repo",
+        "ref": "cuda-support",
+        "expected_sha": "abc123",
+        "target": "linux",
+        "require_metal": True,
+        "metal_ci_run_id": "1",
+        "windows_cuda_run_id": None,
+        "linux_instance": "linux-vm",
+        "linux_machine": "g2-standard-8",
+        "windows_instance": None,
+        "windows_machines": None,
+    }
+    current = {
+        "schema": "metalfish.cuda_runtime_gates_direct",
+        "schema_version": 1,
+        "created_at_unix": 200,
+        "repo": "owner/repo",
+        "ref": "cuda-support",
+        "expected_sha": "abc123",
+        "target": "windows",
+        "require_metal": True,
+        "metal_ci_run_id": "1",
+        "windows_cuda_run_id": "2",
+        "linux_instance": None,
+        "linux_machine": None,
+        "windows_instance": "windows-vm",
+        "windows_machines": "g2-standard-8 g2-standard-4",
+    }
+
+    merged = direct_runtime.merge_direct_runtime_manifest(existing, current)
+    expect("merged direct target", merged["target"] == "both")
+    expect(
+        "merged completed targets",
+        merged["completed_targets"] == ["linux", "windows"],
+    )
+    expect("merged linux instance", merged["linux_instance"] == "linux-vm")
+    expect("merged windows instance", merged["windows_instance"] == "windows-vm")
+    expect("merged windows run id", merged["windows_cuda_run_id"] == "2")
+    expect("merged created preserved", merged["created_at_unix"] == 100)
+    expect("merged updated recorded", merged["updated_at_unix"] == 200)
+
+
 def test_cuda_release_artifact_helpers_reject_failed_runtime() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         manifest = pathlib.Path(tmp) / "windows-cuda-runtime-gate-manifest.json"
@@ -1688,6 +1736,7 @@ def main() -> int:
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_release_artifacts_promote_direct_runtime_root()
+    test_direct_runtime_manifest_merge_preserves_split_targets()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
     test_cuda_runtime_manifest_rejects_head_sha_drift()
     test_cuda_package_validator_rejects_source_commit_drift()

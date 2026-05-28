@@ -12,7 +12,10 @@ import subprocess
 import sys
 import time
 
-import dispatch_cuda_runtime_gates as dispatch
+try:
+    import dispatch_cuda_runtime_gates as dispatch
+except ModuleNotFoundError:
+    from tools import dispatch_cuda_runtime_gates as dispatch
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -66,6 +69,68 @@ def remove_tree(path: pathlib.Path) -> None:
 def write_manifest(path: pathlib.Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def targets_for_manifest(value: str | None) -> set[str]:
+    if value == "both":
+        return {"linux", "windows"}
+    if value in {"linux", "windows"}:
+        return {value}
+    return set()
+
+
+def read_existing_manifest(path: pathlib.Path) -> dict:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def merged_manifest_target(targets: set[str]) -> str:
+    if targets == {"linux", "windows"}:
+        return "both"
+    if targets == {"linux"}:
+        return "linux"
+    if targets == {"windows"}:
+        return "windows"
+    return "both"
+
+
+def merge_direct_runtime_manifest(existing: dict, current: dict) -> dict:
+    if existing.get("schema") != current.get("schema"):
+        return current
+    if existing.get("expected_sha") != current.get("expected_sha"):
+        return current
+    if existing.get("repo") != current.get("repo"):
+        return current
+
+    completed_targets = set(existing.get("completed_targets") or [])
+    completed_targets.update(targets_for_manifest(existing.get("target")))
+    completed_targets.update(targets_for_manifest(current.get("target")))
+
+    merged = dict(existing)
+    merged.update(current)
+    merged["target"] = merged_manifest_target(completed_targets)
+    merged["completed_targets"] = sorted(completed_targets)
+    if "created_at_unix" in existing:
+        merged["created_at_unix"] = existing["created_at_unix"]
+        merged["updated_at_unix"] = current.get("created_at_unix")
+
+    for key in (
+        "linux_instance",
+        "linux_machine",
+        "windows_instance",
+        "windows_machines",
+        "metal_ci_run_id",
+        "windows_cuda_run_id",
+    ):
+        if merged.get(key) in (None, "") and existing.get(key) not in (None, ""):
+            merged[key] = existing[key]
+
+    return merged
 
 
 def shell_source_command(env_file: pathlib.Path, tool: str) -> list[str]:
@@ -456,6 +521,9 @@ def main(argv: list[str] | None = None) -> int:
             "windows_machines": args.windows_machines if needs_windows else None,
         }
         if not args.dry_run:
+            manifest = merge_direct_runtime_manifest(
+                read_existing_manifest(manifest_path), manifest
+            )
             write_manifest(manifest_path, manifest)
             print(f"Wrote {manifest_path}")
         else:
