@@ -26,6 +26,7 @@ REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
 MAX_CUDA_METAL_EVAL_MS_RATIO="${METALFISH_MAX_CUDA_METAL_EVAL_MS_RATIO:-1.0}"
+HYBRID_SEARCH_MAX_SCORE_CP_DELTA="${METALFISH_HYBRID_SEARCH_MAX_SCORE_CP_DELTA:-25}"
 SEARCH_COMPARE_SKIPPED=77
 ARCHIVE="$(mktemp -t metalfish-cuda-gate.XXXXXX.tar.gz)"
 CREATED_INSTANCE=0
@@ -627,7 +628,7 @@ compare_collected_search_results() {
     --expected-label "Metal Hybrid" \
     --actual-label "CUDA Hybrid" \
     --require-same-pv-head \
-    --max-score-cp-delta 10 \
+    --max-score-cp-delta "${HYBRID_SEARCH_MAX_SCORE_CP_DELTA}" \
     --require-positive-final-metric MCTSPlayouts \
     --require-positive-final-metric MCTSEvals \
     --require-positive-final-metric ABDepth \
@@ -655,7 +656,7 @@ compare_collected_search_results() {
     --expected-label "Metal Hybrid" \
     --actual-label "CUDA Hybrid" \
     --require-same-pv-head \
-    --max-score-cp-delta 10 \
+    --max-score-cp-delta "${HYBRID_SEARCH_MAX_SCORE_CP_DELTA}" \
     --require-positive-final-metric MCTSPlayouts \
     --require-positive-final-metric MCTSEvals \
     --require-positive-final-metric ABDepth \

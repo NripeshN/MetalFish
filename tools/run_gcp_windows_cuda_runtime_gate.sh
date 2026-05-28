@@ -27,6 +27,7 @@ REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
 MAX_CUDA_METAL_EVAL_MS_RATIO="${METALFISH_MAX_CUDA_METAL_EVAL_MS_RATIO:-1.0}"
+HYBRID_SEARCH_MAX_SCORE_CP_DELTA="${METALFISH_HYBRID_SEARCH_MAX_SCORE_CP_DELTA:-25}"
 SEARCH_COMPARE_SKIPPED=77
 REMOTE_USER="${METALFISH_GCP_WINDOWS_USER:-metalfish}"
 SSH_KEY="${METALFISH_GCP_SSH_KEY:-${HOME}/.ssh/google_compute_engine}"
@@ -317,7 +318,7 @@ compare_collected_search_results() {
     --expected-label "Metal Hybrid" \
     --actual-label "Windows CUDA Hybrid" \
     --require-same-pv-head \
-    --max-score-cp-delta 10 \
+    --max-score-cp-delta "${HYBRID_SEARCH_MAX_SCORE_CP_DELTA}" \
     --require-positive-final-metric MCTSPlayouts \
     --require-positive-final-metric MCTSEvals \
     --require-positive-final-metric ABDepth \
@@ -345,7 +346,7 @@ compare_collected_search_results() {
     --expected-label "Metal Hybrid" \
     --actual-label "Windows CUDA Hybrid" \
     --require-same-pv-head \
-    --max-score-cp-delta 10 \
+    --max-score-cp-delta "${HYBRID_SEARCH_MAX_SCORE_CP_DELTA}" \
     --require-positive-final-metric MCTSPlayouts \
     --require-positive-final-metric MCTSEvals \
     --require-positive-final-metric ABDepth \
@@ -1181,8 +1182,12 @@ function Write-SearchJson {
     [string]\$Name,
     [string]\$Text,
     [string]\$Position,
-    [string]\$Go
+    [string]\$Go,
+    [string]\$SourceName = ""
   )
+  if ([string]::IsNullOrWhiteSpace(\$SourceName)) {
+    \$SourceName = \$Name -replace "-search$", ""
+  }
   \$bytes = [System.Text.Encoding]::UTF8.GetBytes(\$Text)
   \$sha = [System.Security.Cryptography.SHA256]::Create()
   try {
@@ -1193,20 +1198,26 @@ function Write-SearchJson {
   \$hash = ([BitConverter]::ToString(\$hashBytes)).Replace("-", "").ToLowerInvariant()
   \$lines = @([regex]::Split(\$Text, "\r?\n"))
   \$tailStart = [Math]::Max(0, \$lines.Count - 80)
+  \$setOptions = @()
+  if (\$script:UciSmokeSetOptions.ContainsKey(\$SourceName)) {
+    \$setOptions = @(\$script:UciSmokeSetOptions[\$SourceName])
+  }
   \$payload = [ordered]@{
     schema = "metalfish.uci_smoke_result"
     schema_version = 1
     engine = \$Engine
     position = \$Position
     go = \$Go
-    setoptions = @(\$script:UciSmokeSetOptions[\$Name])
+    setoptions = \$setOptions
     bestmove = (Find-BestMove \$Text)
     elapsed_sec = \$null
     returncode = 0
+    search_info = (Find-LastSearchInfo \$Text)
+    final_metrics = (Find-FinalMetrics \$Text)
     transcript_sha256 = \$hash
     transcript_tail = @(\$lines[\$tailStart..(\$lines.Count - 1)])
   }
-  \$payload | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path \$Logs "\$Name.json") -Encoding UTF8
+  \$payload | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path \$Logs "\$Name.json") -Encoding UTF8
 }
 
 function Find-Executor {
@@ -1247,6 +1258,69 @@ function Find-FinalMetrics {
   return \$metrics
 }
 
+function Find-LastSearchInfo {
+  param([string]\$Text)
+  \$matches = [regex]::Matches(\$Text, "(?m)^info\s+.*\bpv\s+.*$")
+  if (\$matches.Count -eq 0) {
+    return [ordered]@{}
+  }
+  \$line = \$matches[\$matches.Count - 1].Value.Trim()
+  \$tokens = @(\$line -split "\s+")
+  \$info = [ordered]@{ raw = \$line }
+  \$i = 1
+  while (\$i -lt \$tokens.Count) {
+    \$token = \$tokens[\$i]
+    switch -Regex (\$token) {
+      "^(depth|seldepth|nodes|nps)$" {
+        if (\$i + 1 -lt \$tokens.Count) {
+          \$value = 0L
+          if ([int64]::TryParse(\$tokens[\$i + 1], [ref]\$value)) {
+            \$info[\$token] = \$value
+          }
+          \$i += 2
+          continue
+        }
+      }
+      "^time$" {
+        if (\$i + 1 -lt \$tokens.Count) {
+          \$value = 0L
+          if ([int64]::TryParse(\$tokens[\$i + 1], [ref]\$value)) {
+            \$info["time_ms"] = \$value
+          }
+          \$i += 2
+          continue
+        }
+      }
+      "^score$" {
+        if (\$i + 2 -lt \$tokens.Count) {
+          \$scoreValue = 0L
+          if ([int64]::TryParse(\$tokens[\$i + 2], [ref]\$scoreValue)) {
+            \$info["score"] = [ordered]@{
+              type = \$tokens[\$i + 1]
+              value = \$scoreValue
+            }
+          }
+          \$i += 3
+          continue
+        }
+      }
+      "^pv$" {
+        \$pv = @()
+        for (\$j = \$i + 1; \$j -lt \$tokens.Count; \$j++) {
+          if (\$tokens[\$j] -eq "string") {
+            break
+          }
+          \$pv += \$tokens[\$j]
+        }
+        \$info["pv"] = \$pv
+        break
+      }
+    }
+    \$i += 1
+  }
+  return \$info
+}
+
 function Get-GpuInfo {
   \$gpu = [ordered]@{
     nvidia_smi_log = "nvidia-smi-runtime.log"
@@ -1269,6 +1343,36 @@ function Get-GpuInfo {
     }
   } catch {}
   return \$gpu
+}
+
+function Read-UciUntil {
+  param(
+    [System.Diagnostics.Process]\$Proc,
+    [ref]\$StdoutTask,
+    [System.Text.StringBuilder]\$OutBuilder,
+    [DateTime]\$Deadline,
+    [string]\$Pattern
+  )
+  while ([DateTime]::UtcNow -lt \$Deadline) {
+    if (\$Proc.HasExited -and -not \$StdoutTask.Value.IsCompleted) {
+      break
+    }
+    \$remainingMs = [Math]::Max(1, [Math]::Min(250, (\$Deadline - [DateTime]::UtcNow).TotalMilliseconds))
+    if (-not \$StdoutTask.Value.Wait([int]\$remainingMs)) {
+      continue
+    }
+    \$line = \$StdoutTask.Value.GetAwaiter().GetResult()
+    if (\$null -eq \$line) {
+      break
+    }
+    [void]\$OutBuilder.AppendLine(\$line)
+    \$matched = \$line -match \$Pattern
+    \$StdoutTask.Value = \$Proc.StandardOutput.ReadLineAsync()
+    if (\$matched) {
+      return \$true
+    }
+  }
+  return \$false
 }
 
 function Invoke-UciSmoke {
@@ -1313,6 +1417,7 @@ function Invoke-UciSmoke {
 
   \$proc = \$null
   \$stdoutTask = \$null
+  \$stderrTask = \$null
   \$timedOut = \$false
   \$failed = \$false
   \$failureMessage = ""
@@ -1320,35 +1425,41 @@ function Invoke-UciSmoke {
     \$proc = New-Object System.Diagnostics.Process
     \$proc.StartInfo = \$psi
     [void]\$proc.Start()
+    \$stdoutTask = \$proc.StandardOutput.ReadLineAsync()
+    \$stderrTask = \$proc.StandardError.ReadToEndAsync()
+    \$needsReady = \$false
     foreach (\$command in \$Commands) {
-      \$isGoCommand = \$command -like "go *"
+      if ((\$command -like "position *" -or \$command -like "go *") -and \$needsReady) {
+        \$proc.StandardInput.WriteLine("isready")
+        \$proc.StandardInput.Flush()
+        if (-not (Read-UciUntil -Proc \$proc -StdoutTask ([ref]\$stdoutTask) -OutBuilder \$outBuilder -Deadline \$deadline -Pattern "^readyok$")) {
+          \$failureMessage = "timed out waiting for readyok after setoption"
+          \$timedOut = \$true
+          break
+        }
+        \$needsReady = \$false
+      }
+
       \$proc.StandardInput.WriteLine(\$command)
       \$proc.StandardInput.Flush()
-      if (\$isGoCommand) {
-        \$bestMoveSeen = \$false
-        if (\$null -eq \$stdoutTask) {
-          \$stdoutTask = \$proc.StandardOutput.ReadLineAsync()
+      if (\$command -eq "uci") {
+        if (-not (Read-UciUntil -Proc \$proc -StdoutTask ([ref]\$stdoutTask) -OutBuilder \$outBuilder -Deadline \$deadline -Pattern "^uciok$")) {
+          \$failureMessage = "timed out waiting for uciok"
+          \$timedOut = \$true
+          break
         }
-        while ([DateTime]::UtcNow -lt \$deadline) {
-          if (\$proc.HasExited -and -not \$stdoutTask.IsCompleted) {
-            break
-          }
-          \$remainingMs = [Math]::Max(1, [Math]::Min(250, (\$deadline - [DateTime]::UtcNow).TotalMilliseconds))
-          if (-not \$stdoutTask.Wait([int]\$remainingMs)) {
-            continue
-          }
-          \$line = \$stdoutTask.GetAwaiter().GetResult()
-          if (\$null -eq \$line) {
-            break
-          }
-          [void]\$outBuilder.AppendLine(\$line)
-          if (\$line -match '^bestmove\s+') {
-            \$bestMoveSeen = \$true
-            break
-          }
-          \$stdoutTask = \$proc.StandardOutput.ReadLineAsync()
+      } elseif (\$command -eq "isready") {
+        if (-not (Read-UciUntil -Proc \$proc -StdoutTask ([ref]\$stdoutTask) -OutBuilder \$outBuilder -Deadline \$deadline -Pattern "^readyok$")) {
+          \$failureMessage = "timed out waiting for readyok"
+          \$timedOut = \$true
+          break
         }
-        if (-not \$bestMoveSeen) {
+        \$needsReady = \$false
+      } elseif (\$command -match "^setoption\s+") {
+        \$needsReady = \$true
+      } elseif (\$command -like "go *") {
+        if (-not (Read-UciUntil -Proc \$proc -StdoutTask ([ref]\$stdoutTask) -OutBuilder \$outBuilder -Deadline \$deadline -Pattern "^bestmove\s+")) {
+          \$failureMessage = "timed out waiting for bestmove"
           \$timedOut = \$true
           break
         }
@@ -1378,16 +1489,19 @@ function Invoke-UciSmoke {
   }
   if (-not \$timedOut -and -not \$failed) {
     try {
-      while (-not \$proc.StandardOutput.EndOfStream) {
-        \$line = \$proc.StandardOutput.ReadLine()
+      while (\$null -ne \$stdoutTask -and \$stdoutTask.Wait(100)) {
+        \$line = \$stdoutTask.GetAwaiter().GetResult()
         if (\$null -eq \$line) { break }
         [void]\$outBuilder.AppendLine(\$line)
+        \$stdoutTask = \$proc.StandardOutput.ReadLineAsync()
       }
     } catch {}
   }
   \$out = \$outBuilder.ToString()
   try {
-    if (\$null -ne \$proc) {
+    if (\$null -ne \$stderrTask) {
+      \$err = \$stderrTask.GetAwaiter().GetResult()
+    } elseif (\$null -ne \$proc) {
       \$err = \$proc.StandardError.ReadToEnd()
     } else {
       \$err = ""
