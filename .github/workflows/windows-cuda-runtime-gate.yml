@@ -30,6 +30,11 @@ on:
         description: CUDA stable execution batch size for packaged CUDA smokes
         required: false
         default: "16"
+      cuda_graph_execution:
+        description: Enable CUDA graph execution in packaged CUDA smokes
+        required: false
+        default: true
+        type: boolean
       gcs_prefix:
         description: Optional gs:// prefix for gate artifacts
         required: false
@@ -129,6 +134,7 @@ jobs:
           METALFISH_WINDOWS_CUDA_MCTS_PONDER_UCI_GO: ${{ inputs.mcts_ponder_go }}
           METALFISH_WINDOWS_CUDA_MCTS_PONDER_SETTLE_MS: ${{ inputs.mcts_ponder_settle_ms }}
           METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
+          METALFISH_CUDA_GRAPH_EXECUTION: ${{ inputs.cuda_graph_execution && '1' || '0' }}
           METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID: ${{ inputs.windows_cuda_run_id }}
           METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
         run: |

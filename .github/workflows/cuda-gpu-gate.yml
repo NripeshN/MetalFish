@@ -31,6 +31,11 @@ on:
         description: CUDA stable execution batch size
         required: false
         default: "16"
+      cuda_graph_execution:
+        description: Enable CUDA graph execution in runtime smokes
+        required: false
+        default: true
+        type: boolean
       cublas_workspace_config:
         description: Optional CUBLAS_WORKSPACE_CONFIG diagnostic override
         required: false
@@ -123,6 +128,7 @@ jobs:
           METALFISH_CUDA_MCTS_PONDER_GO: ${{ inputs.mcts_ponder_go }}
           METALFISH_CUDA_MCTS_PONDER_SETTLE_SEC: ${{ inputs.mcts_ponder_settle_sec }}
           METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
+          METALFISH_CUDA_GRAPH_EXECUTION: ${{ inputs.cuda_graph_execution && '1' || '0' }}
           METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
           CUBLAS_WORKSPACE_CONFIG: ${{ inputs.cublas_workspace_config }}
         run: |

@@ -148,6 +148,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--stable-batch-size", default="16")
+    parser.add_argument(
+        "--cuda-graph-execution",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable CUDA graph execution in dispatched Linux and Windows runtime gates.",
+    )
     parser.add_argument("--linux-machine", default="g2-standard-8")
     parser.add_argument("--linux-zones", default="")
     parser.add_argument("--linux-uci-go", default="nodes 8")
@@ -226,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             "zones": args.linux_zones,
             "uci_go": args.linux_uci_go,
             "stable_batch_size": args.stable_batch_size,
+            "cuda_graph_execution": bool_input(args.cuda_graph_execution),
         }
         print(f"Dispatch CUDA GPU Gate with {fields}")
         if not args.dry_run:
@@ -245,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             "zones": args.windows_zones,
             "uci_go": args.windows_uci_go,
             "stable_batch_size": args.stable_batch_size,
+            "cuda_graph_execution": bool_input(args.cuda_graph_execution),
         }
         print(f"Dispatch Windows CUDA Runtime Gate with {fields}")
         if not args.dry_run:
