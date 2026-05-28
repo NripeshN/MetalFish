@@ -201,6 +201,8 @@ collect_remote_artifacts() {
     cuda-gpu-uci-auto-smoke.log \
     cuda-gpu-uci-accelerator-smoke.log \
     cuda-gpu-uci-smoke.log \
+    cuda-gpu-uci-timed-mcts-smoke.log \
+    cuda-gpu-uci-timed-mcts-search.json \
     cuda-gpu-uci-bk07-smoke.log \
     cuda-gpu-uci-bk07-search.json \
     cuda-gpu-uci-kiwipete-smoke.log \

@@ -41,6 +41,7 @@ UCI_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_UCI_TIMEOUT:-420}"
 PROBE_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420}"
 COMPARISON_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_COMPARISON_TIMEOUT:-900}"
 UCI_GO="${METALFISH_WINDOWS_CUDA_UCI_GO:-nodes 1}"
+MCTS_TIMED_UCI_GO="${METALFISH_WINDOWS_CUDA_MCTS_TIMED_UCI_GO:-movetime 500}"
 HYBRID_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_UCI_GO:-nodes 8}"
 HYBRID_PARITY_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_PARITY_UCI_GO:-nodes 50}"
 UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
@@ -483,6 +484,7 @@ write_runtime_manifest() {
     GATE_CUDA_PROFILE="${CUDA_PROFILE}" \
     GATE_CUDA_PROFILE_LIMIT="${CUDA_PROFILE_LIMIT}" \
     GATE_UCI_GO="${UCI_GO}" \
+    GATE_MCTS_TIMED_UCI_GO="${MCTS_TIMED_UCI_GO}" \
     GATE_HYBRID_UCI_GO="${HYBRID_UCI_GO}" \
     python3 - "${ARTIFACT_DIR}/windows-cuda-runtime-gate-manifest.json" <<'PY'
 import datetime as _dt
@@ -583,6 +585,7 @@ manifest = {
         "cuda_profile": os.environ["GATE_CUDA_PROFILE"],
         "cuda_profile_limit": os.environ["GATE_CUDA_PROFILE_LIMIT"],
         "uci_go": os.environ["GATE_UCI_GO"],
+        "mcts_timed_uci_go": os.environ["GATE_MCTS_TIMED_UCI_GO"],
         "hybrid_uci_go": os.environ["GATE_HYBRID_UCI_GO"],
         "hybrid_parity_uci_go": "${HYBRID_PARITY_UCI_GO}",
     },
@@ -1602,6 +1605,31 @@ Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "quit"
 ) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove"))
 
+Invoke-UciSmoke -Name "cuda-timed-mcts" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name NNBackend value cuda",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name NNCudaDevice value -1",
+  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
+  "setoption name NNCudaDeterministicAttentionSoftmax value true",
+  "setoption name NNCudaFullBufferClear value true",
+  "setoption name UseMCTS value true",
+  "setoption name UseHybridSearch value false",
+  "setoption name Threads value 8",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSParallelSearch value true",
+  "setoption name MCTSMinibatchSize value 0",
+  "setoption name MCTSAddDirichletNoise value false",
+  "setoption name TransformerLowTimeFallbackMs value 0",
+  "position startpos",
+  "go ${MCTS_TIMED_UCI_GO}",
+  "quit"
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Multi-Threaded MCTS Search", "CUDA transformer backend", "MCTS runtime: backend=cuda", "bestmove")) -RejectedText @("Time safety:", "Falling back to Alpha-Beta")
+
 Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "uci",
   "isready",
@@ -1870,6 +1898,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 \$IsolationBt4LegacyJson = Read-ProbeJson "cuda-isolation-bt4-legacy.stdout.log"
 \$IsolationLegacyBt4Json = Read-ProbeJson "cuda-isolation-legacy-bt4.stdout.log"
 \$MctsText = Read-SmokeText "cuda-mcts"
+\$TimedMctsText = Read-SmokeText "cuda-timed-mcts"
 \$AutoMctsText = Read-SmokeText "cuda-auto-mcts"
 \$AcceleratorMctsText = Read-SmokeText "cuda-accelerator-mcts"
 \$Bk07MctsText = Read-SmokeText "cuda-bk07-mcts"
@@ -1988,6 +2017,13 @@ Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText 
       stdout_log = "cuda-mcts.stdout.log"
       stderr_log = "cuda-mcts.stderr.log"
     }
+    cuda_timed_mcts = [ordered]@{
+      go = "${MCTS_TIMED_UCI_GO}"
+      bestmove = (Find-BestMove \$TimedMctsText)
+      backend_selected = (Test-BackendSelected \$TimedMctsText)
+      stdout_log = "cuda-timed-mcts.stdout.log"
+      stderr_log = "cuda-timed-mcts.stderr.log"
+    }
     cuda_auto_mcts = [ordered]@{
       go = "${UCI_GO}"
       bestmove = (Find-BestMove \$AutoMctsText)
@@ -2080,7 +2116,7 @@ Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText 
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-nn-comparison, cuda-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, cuda-kiwipete-mcts, hybrid-cuda, hybrid-cuda-kiwipete, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-nn-comparison, cuda-mcts, cuda-timed-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, cuda-kiwipete-mcts, hybrid-cuda, hybrid-cuda-kiwipete, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"
