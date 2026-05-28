@@ -45,6 +45,10 @@ on:
         required: false
         default: false
         type: boolean
+      profile_limit:
+        description: Maximum profiled CUDA events to print during optional profile smoke
+        required: false
+        default: "2"
       gcs_prefix:
         description: Optional gs:// prefix for gate artifacts
         required: false
@@ -130,6 +134,7 @@ jobs:
           METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
           METALFISH_CUDA_GRAPH_EXECUTION: ${{ inputs.cuda_graph_execution && '1' || '0' }}
           METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
+          METALFISH_CUDA_PROFILE_LIMIT: ${{ inputs.profile_limit }}
           CUBLAS_WORKSPACE_CONFIG: ${{ inputs.cublas_workspace_config }}
         run: |
           set -euo pipefail

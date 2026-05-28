@@ -57,6 +57,7 @@ CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
 CUDA_PROFILE_LIMIT="${METALFISH_WINDOWS_CUDA_PROFILE_LIMIT:-2}"
 CUDA_STABLE_BATCH_SIZE="${METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
 CUDA_GRAPH_REPLAY_WARMUP="${METALFISH_WINDOWS_CUDA_GRAPH_REPLAY_WARMUP:-2}"
+CUBLAS_WORKSPACE_CONFIG_VALUE="${CUBLAS_WORKSPACE_CONFIG:-${METALFISH_WINDOWS_CUBLAS_WORKSPACE_CONFIG:-}}"
 WINDOWS_CUDA_COMPILE_RUN_ID="${METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID:-}"
 DRIVER_SCRIPT_URL="${METALFISH_WINDOWS_GPU_DRIVER_SCRIPT_URL:-https://github.com/GoogleCloudPlatform/compute-gpu-installation/raw/main/windows/install_gpu_driver.ps1}"
 CREATED_INSTANCE=0
@@ -490,6 +491,7 @@ write_runtime_manifest() {
     GATE_CUDA_GRAPH="${CUDA_GRAPH}" \
     GATE_CUDA_PROFILE="${CUDA_PROFILE}" \
     GATE_CUDA_PROFILE_LIMIT="${CUDA_PROFILE_LIMIT}" \
+    GATE_CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG_VALUE}" \
     GATE_UCI_GO="${UCI_GO}" \
     GATE_MCTS_TIMED_UCI_GO="${MCTS_TIMED_UCI_GO}" \
     GATE_MCTS_PONDER_UCI_GO="${MCTS_PONDER_UCI_GO}" \
@@ -594,6 +596,7 @@ manifest = {
         "cuda_graph": os.environ["GATE_CUDA_GRAPH"],
         "cuda_profile": os.environ["GATE_CUDA_PROFILE"],
         "cuda_profile_limit": os.environ["GATE_CUDA_PROFILE_LIMIT"],
+        "cublas_workspace_config": os.environ["GATE_CUBLAS_WORKSPACE_CONFIG"],
         "uci_go": os.environ["GATE_UCI_GO"],
         "mcts_timed_uci_go": os.environ["GATE_MCTS_TIMED_UCI_GO"],
         "mcts_ponder_uci_go": os.environ["GATE_MCTS_PONDER_UCI_GO"],
@@ -827,6 +830,9 @@ cat >"${RUN_DIR}/run-smokes.ps1" <<POWERSHELL
 \$PackageDir = Join-Path \$Root "package"
 \$Networks = Join-Path \$Root "networks"
 New-Item -ItemType Directory -Force \$Logs | Out-Null
+if ("${CUBLAS_WORKSPACE_CONFIG_VALUE}" -ne "") {
+  [Environment]::SetEnvironmentVariable("CUBLAS_WORKSPACE_CONFIG", "${CUBLAS_WORKSPACE_CONFIG_VALUE}", "Process")
+}
 Remove-Item \$PackageDir -Recurse -Force -ErrorAction SilentlyContinue
 Expand-Archive -Path (Join-Path \$Root "metalfish-windows-cuda.zip") -DestinationPath \$PackageDir -Force
 \$Engine = Join-Path \$PackageDir "metalfish.exe"
@@ -2192,6 +2198,7 @@ Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText 
     cuda_graph = \$(if ("${CUDA_GRAPH}" -eq "") { \$null } else { "${CUDA_GRAPH}" })
     cuda_profile = \$(if ("${CUDA_PROFILE}" -eq "") { \$null } else { "${CUDA_PROFILE}" })
     cuda_profile_limit = ${CUDA_PROFILE_LIMIT}
+    cublas_workspace_config = \$(if ("${CUBLAS_WORKSPACE_CONFIG_VALUE}" -eq "") { \$null } else { "${CUBLAS_WORKSPACE_CONFIG_VALUE}" })
     cuda_stable_execution_batch_size = ${CUDA_STABLE_BATCH_SIZE}
   }
   gpu = (Get-GpuInfo)

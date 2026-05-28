@@ -293,6 +293,10 @@ def run_linux_gate(
     env["METALFISH_CUDA_UCI_GO"] = args.linux_uci_go
     env["METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE"] = args.stable_batch_size
     env["METALFISH_CUDA_GRAPH_EXECUTION"] = bool_env(args.cuda_graph_execution)
+    env["METALFISH_CUDA_PROFILE"] = bool_env(args.profile)
+    env["METALFISH_CUDA_PROFILE_LIMIT"] = args.profile_limit
+    if args.cublas_workspace_config:
+        env["CUBLAS_WORKSPACE_CONFIG"] = args.cublas_workspace_config
     for key in (
         "METALFISH_BT4_WEIGHTS",
         "METALFISH_LEGACY_NN_WEIGHTS",
@@ -326,6 +330,10 @@ def run_windows_gate(
     env["METALFISH_WINDOWS_CUDA_UCI_GO"] = args.windows_uci_go
     env["METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE"] = args.stable_batch_size
     env["METALFISH_CUDA_GRAPH_EXECUTION"] = bool_env(args.cuda_graph_execution)
+    env["METALFISH_WINDOWS_CUDA_PROFILE"] = bool_env(args.profile)
+    env["METALFISH_WINDOWS_CUDA_PROFILE_LIMIT"] = args.profile_limit
+    if args.cublas_workspace_config:
+        env["CUBLAS_WORKSPACE_CONFIG"] = args.cublas_workspace_config
     if args.windows_zones:
         env["METALFISH_GCP_ZONES"] = args.windows_zones
     run_command(
@@ -363,6 +371,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=True,
         help="Enable CUDA graph execution in direct Linux and Windows runtime gates.",
     )
+    parser.add_argument(
+        "--profile",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Run optional CUDA profile smoke in direct Linux and Windows gates.",
+    )
+    parser.add_argument("--profile-limit", default="2")
+    parser.add_argument("--cublas-workspace-config", default="")
     parser.add_argument("--gcp-project", default=os.environ.get("METALFISH_GCP_PROJECT", "metalfish"))
     parser.add_argument("--instance-prefix", default="metalfish-cuda-direct")
     parser.add_argument("--linux-instance", default="")
@@ -540,6 +556,9 @@ def main(argv: list[str] | None = None) -> int:
             "windows_instance": windows_instance if needs_windows else None,
             "stable_batch_size": args.stable_batch_size,
             "cuda_graph_execution": args.cuda_graph_execution,
+            "profile": args.profile,
+            "profile_limit": args.profile_limit,
+            "cublas_workspace_config": args.cublas_workspace_config,
             "linux_machine": args.linux_machine if needs_linux else None,
             "windows_machines": args.windows_machines if needs_windows else None,
         }

@@ -35,6 +35,19 @@ on:
         required: false
         default: true
         type: boolean
+      cublas_workspace_config:
+        description: Optional CUBLAS_WORKSPACE_CONFIG diagnostic override
+        required: false
+        default: ""
+      profile:
+        description: Run the optional CUDA profile smoke
+        required: false
+        default: false
+        type: boolean
+      profile_limit:
+        description: Maximum profiled CUDA events to print during optional profile smoke
+        required: false
+        default: "2"
       gcs_prefix:
         description: Optional gs:// prefix for gate artifacts
         required: false
@@ -135,8 +148,11 @@ jobs:
           METALFISH_WINDOWS_CUDA_MCTS_PONDER_SETTLE_MS: ${{ inputs.mcts_ponder_settle_ms }}
           METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
           METALFISH_CUDA_GRAPH_EXECUTION: ${{ inputs.cuda_graph_execution && '1' || '0' }}
+          METALFISH_WINDOWS_CUDA_PROFILE: ${{ inputs.profile && '1' || '0' }}
+          METALFISH_WINDOWS_CUDA_PROFILE_LIMIT: ${{ inputs.profile_limit }}
           METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID: ${{ inputs.windows_cuda_run_id }}
           METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
+          CUBLAS_WORKSPACE_CONFIG: ${{ inputs.cublas_workspace_config }}
         run: |
           set -euo pipefail
           : "${METALFISH_GCP_PROJECT:=metalfish}"

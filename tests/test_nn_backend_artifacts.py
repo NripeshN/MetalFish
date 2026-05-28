@@ -1909,6 +1909,11 @@ def test_direct_runtime_clears_only_selected_artifact_dir() -> None:
                         "linux",
                         "--no-require-metal",
                         "--no-cuda-graph-execution",
+                        "--profile",
+                        "--profile-limit",
+                        "3",
+                        "--cublas-workspace-config",
+                        ":4096:8",
                         "--artifact-root",
                         str(artifact_root),
                         "--worktree-dir",
@@ -1938,6 +1943,22 @@ def test_direct_runtime_clears_only_selected_artifact_dir() -> None:
             "direct runtime graph disable propagated",
             any(
                 env is not None and env.get("METALFISH_CUDA_GRAPH_EXECUTION") == "0"
+                for _, _, env in calls
+            ),
+        )
+        expect(
+            "direct runtime profile propagated",
+            any(
+                env is not None
+                and env.get("METALFISH_CUDA_PROFILE") == "1"
+                and env.get("METALFISH_CUDA_PROFILE_LIMIT") == "3"
+                for _, _, env in calls
+            ),
+        )
+        expect(
+            "direct runtime cublas config propagated",
+            any(
+                env is not None and env.get("CUBLAS_WORKSPACE_CONFIG") == ":4096:8"
                 for _, _, env in calls
             ),
         )

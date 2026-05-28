@@ -154,6 +154,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=True,
         help="Enable CUDA graph execution in dispatched Linux and Windows runtime gates.",
     )
+    parser.add_argument(
+        "--profile",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Run optional CUDA profile smoke in dispatched Linux and Windows gates.",
+    )
+    parser.add_argument("--profile-limit", default="2")
+    parser.add_argument("--cublas-workspace-config", default="")
     parser.add_argument("--linux-machine", default="g2-standard-8")
     parser.add_argument("--linux-zones", default="")
     parser.add_argument("--linux-uci-go", default="nodes 8")
@@ -233,6 +241,9 @@ def main(argv: list[str] | None = None) -> int:
             "uci_go": args.linux_uci_go,
             "stable_batch_size": args.stable_batch_size,
             "cuda_graph_execution": bool_input(args.cuda_graph_execution),
+            "profile": bool_input(args.profile),
+            "profile_limit": args.profile_limit,
+            "cublas_workspace_config": args.cublas_workspace_config,
         }
         print(f"Dispatch CUDA GPU Gate with {fields}")
         if not args.dry_run:
@@ -253,6 +264,9 @@ def main(argv: list[str] | None = None) -> int:
             "uci_go": args.windows_uci_go,
             "stable_batch_size": args.stable_batch_size,
             "cuda_graph_execution": bool_input(args.cuda_graph_execution),
+            "profile": bool_input(args.profile),
+            "profile_limit": args.profile_limit,
+            "cublas_workspace_config": args.cublas_workspace_config,
         }
         print(f"Dispatch Windows CUDA Runtime Gate with {fields}")
         if not args.dry_run:
