@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -116,6 +117,81 @@ def set_option_command(raw: str) -> str:
     return f"setoption name {name.strip()} value {value.strip()}"
 
 
+def parse_int_token(value: str) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_info_line(line: str) -> dict:
+    tokens = line.split()
+    result: dict = {"raw": line}
+    for key, field in (
+        ("depth", "depth"),
+        ("seldepth", "seldepth"),
+        ("nodes", "nodes"),
+        ("nps", "nps"),
+        ("time", "time_ms"),
+    ):
+        if key in tokens:
+            index = tokens.index(key)
+            if index + 1 < len(tokens):
+                parsed = parse_int_token(tokens[index + 1])
+                if parsed is not None:
+                    result[field] = parsed
+    if "score" in tokens:
+        index = tokens.index("score")
+        if index + 2 < len(tokens):
+            score_value = parse_int_token(tokens[index + 2])
+            if score_value is not None:
+                result["score"] = {"type": tokens[index + 1], "value": score_value}
+    if "pv" in tokens:
+        index = tokens.index("pv")
+        pv: list[str] = []
+        for token in tokens[index + 1 :]:
+            if token == "string":
+                break
+            pv.append(token)
+        if pv:
+            result["pv"] = pv
+    return result
+
+
+def extract_last_search_info(output: list[str]) -> dict | None:
+    for line in reversed(output):
+        if line.startswith("info ") and (" pv " in f" {line} " or " score " in line):
+            parsed = parse_info_line(line)
+            if parsed.get("pv") or parsed.get("score"):
+                return parsed
+    return None
+
+
+FINAL_METRIC_RE = re.compile(r"([A-Za-z][A-Za-z0-9_]*)=([^\s]+)")
+
+
+def parse_metric_value(raw: str) -> int | float | str:
+    parsed_int = parse_int_token(raw)
+    if parsed_int is not None:
+        return parsed_int
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
+def extract_final_metrics(output: list[str]) -> dict:
+    for line in reversed(output):
+        marker = "info string Final:"
+        if not line.startswith(marker):
+            continue
+        return {
+            key: parse_metric_value(value)
+            for key, value in FINAL_METRIC_RE.findall(line[len(marker) :])
+        }
+    return {}
+
+
 def write_json_result(
     path: Path,
     *,
@@ -142,6 +218,12 @@ def write_json_result(
         "transcript_sha256": hashlib.sha256(transcript.encode("utf-8")).hexdigest(),
         "transcript_tail": output[-80:],
     }
+    search_info = extract_last_search_info(output)
+    if search_info:
+        payload["search_info"] = search_info
+    final_metrics = extract_final_metrics(output)
+    if final_metrics:
+        payload["final_metrics"] = final_metrics
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 

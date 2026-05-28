@@ -277,6 +277,8 @@ compare_collected_search_results() {
     --actual "${cuda_mcts}" \
     --expected-label "Metal MCTS" \
     --actual-label "Windows CUDA MCTS" \
+    --require-same-pv-head \
+    --max-score-cp-delta 10 \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-bk07-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-bk07-search-compare.log"
 
@@ -285,6 +287,8 @@ compare_collected_search_results() {
     --actual "${cuda_mcts_kiwipete}" \
     --expected-label "Metal MCTS" \
     --actual-label "Windows CUDA MCTS" \
+    --require-same-pv-head \
+    --max-score-cp-delta 10 \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-kiwipete-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-kiwipete-search-compare.log"
 
@@ -293,6 +297,13 @@ compare_collected_search_results() {
     --actual "${cuda_hybrid}" \
     --expected-label "Metal Hybrid" \
     --actual-label "Windows CUDA Hybrid" \
+    --require-same-pv-head \
+    --max-score-cp-delta 10 \
+    --require-positive-final-metric MCTSPlayouts \
+    --require-positive-final-metric MCTSEvals \
+    --require-positive-final-metric ABDepth \
+    --require-final-metric ABMove \
+    --require-final-metric MCTSMove \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-bk07-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-bk07-search-compare.log"
 
@@ -301,6 +312,13 @@ compare_collected_search_results() {
     --actual "${cuda_hybrid_kiwipete}" \
     --expected-label "Metal Hybrid" \
     --actual-label "Windows CUDA Hybrid" \
+    --require-same-pv-head \
+    --max-score-cp-delta 10 \
+    --require-positive-final-metric MCTSPlayouts \
+    --require-positive-final-metric MCTSEvals \
+    --require-positive-final-metric ABDepth \
+    --require-final-metric ABMove \
+    --require-final-metric MCTSMove \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-kiwipete-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-kiwipete-search-compare.log"
 }

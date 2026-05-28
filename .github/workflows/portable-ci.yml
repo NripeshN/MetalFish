@@ -70,14 +70,17 @@ jobs:
             tools/lichess_puzzle_runner.py \
             tools/check_cuda_package_artifacts.py \
             tools/check_cuda_runtime_manifest.py \
+            tools/compare_uci_search_results.py \
             tools/download_engine_networks.py \
             tools/fetch_cuda_release_artifacts.py \
             tools/write_portable_manifest.py \
-            tools/uci_smoke.py
+            tools/uci_smoke.py \
+            tests/test_uci_search_result_tools.py
           python3 tests/test_benchmark_configs.py
           python3 tests/test_lichess_bot.py
           python3 tests/test_lichess_puzzle_runner.py
           python3 tests/test_hybrid_regression_compare.py
+          python3 tests/test_uci_search_result_tools.py
           python3 tools/download_engine_networks.py --bt4-only
           ./build-linux/metalfish_nn_probe \
             --weights networks/BT4-1024x15x32h-swa-6147500.pb \
@@ -231,14 +234,17 @@ jobs:
             tools/lichess_puzzle_runner.py \
             tools/check_cuda_package_artifacts.py \
             tools/check_cuda_runtime_manifest.py \
+            tools/compare_uci_search_results.py \
             tools/fetch_cuda_release_artifacts.py \
             tools/download_engine_networks.py \
             tools/write_portable_manifest.py \
-            tools/uci_smoke.py
+            tools/uci_smoke.py \
+            tests/test_uci_search_result_tools.py
           python tests/test_benchmark_configs.py
           python tests/test_lichess_bot.py
           python tests/test_lichess_puzzle_runner.py
           python tests/test_hybrid_regression_compare.py
+          python tests/test_uci_search_result_tools.py
           python tools/download_engine_networks.py --bt4-only
           ./build-windows/metalfish_nn_probe.exe \
             --weights networks/BT4-1024x15x32h-swa-6147500.pb \
@@ -424,14 +430,17 @@ jobs:
             tools/lichess_puzzle_runner.py `
             tools/check_cuda_package_artifacts.py `
             tools/check_cuda_runtime_manifest.py `
+            tools/compare_uci_search_results.py `
             tools/fetch_cuda_release_artifacts.py `
             tools/download_engine_networks.py `
             tools/write_portable_manifest.py `
-            tools/uci_smoke.py
+            tools/uci_smoke.py `
+            tests/test_uci_search_result_tools.py
           python tests/test_benchmark_configs.py
           python tests/test_lichess_bot.py
           python tests/test_lichess_puzzle_runner.py
           python tests/test_hybrid_regression_compare.py
+          python tests/test_uci_search_result_tools.py
           python tools/download_engine_networks.py --bt4-only
           .\build-windows-msvc\metalfish_nn_probe.exe `
             --weights networks/BT4-1024x15x32h-swa-6147500.pb `
