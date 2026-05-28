@@ -57,6 +57,33 @@ function Copy-MatchingFiles {
   return $Count
 }
 
+function Copy-MsvcRuntimeDlls {
+  param([string]$Destination)
+  $Count = 0
+  $Patterns = @()
+  if ($env:VCToolsRedistDir) {
+    $Patterns += (Join-Path $env:VCToolsRedistDir "x64\Microsoft.VC*.CRT\*.dll")
+  }
+  if ($env:VCINSTALLDIR) {
+    $Patterns += (Join-Path $env:VCINSTALLDIR "Redist\MSVC\*\x64\Microsoft.VC*.CRT\*.dll")
+  }
+  $VsWhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+  if (Test-Path $VsWhere) {
+    $VsInstallPath = & $VsWhere `
+      -latest `
+      -products * `
+      -requires Microsoft.VisualStudio.Component.VC.Redist.14.Latest `
+      -property installationPath
+    if ($LASTEXITCODE -eq 0 -and $VsInstallPath) {
+      $Patterns += (Join-Path ($VsInstallPath | Select-Object -First 1).Trim() "VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT\*.dll")
+    }
+  }
+  foreach ($Pattern in ($Patterns | Select-Object -Unique)) {
+    $Count += Copy-MatchingFiles $Pattern $Destination
+  }
+  return $Count
+}
+
 function Read-ProbeJson {
   param([string]$Path)
   if (-not (Test-Path $Path)) {
@@ -312,6 +339,8 @@ foreach ($DocName in @("README.md", "CHANGELOG.md", "LICENSE")) {
 }
 
 $CopiedRuntimeDlls = 0
+$CopiedMsvcRuntimeDlls = Copy-MsvcRuntimeDlls $PackageDir
+$CopiedRuntimeDlls += $CopiedMsvcRuntimeDlls
 $CopiedRuntimeDlls += Copy-MatchingFiles (Join-Path $BuildDir "*.dll") $PackageDir
 $VcpkgBin = Join-Path $VcpkgRoot "installed\x64-windows\bin"
 if (Test-Path $VcpkgBin) {
@@ -323,6 +352,9 @@ foreach ($Pattern in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) 
 }
 if ($CopiedRuntimeDlls -eq 0) {
   throw "No runtime DLLs were copied into the Windows CUDA package"
+}
+if ($CopiedMsvcRuntimeDlls -eq 0) {
+  throw "No MSVC runtime DLLs were copied into the Windows CUDA package"
 }
 
 $ManifestArgs = @(
@@ -340,7 +372,7 @@ foreach ($File in (Get-ChildItem -Path $PackageDir -File | Sort-Object Name)) {
 $ManifestArgs += @("--file", $PackagePortableManifest)
 foreach ($Note in @(
   "This artifact is built by the Windows CUDA compile gate with MSVC and the NVIDIA CUDA Toolkit.",
-  "The package includes CUDA and vcpkg runtime DLLs required by the linked engine.",
+  "The package includes CUDA, MSVC, and vcpkg runtime DLLs required by the linked engine.",
   "The package includes metalfish_nn_probe.exe when BUILD_TESTS=ON so runtime gates can verify packaged CUDA inference.",
   "The package includes test_nn_comparison.exe when BUILD_TESTS=ON so runtime gates can verify CUDA batch and reuse parity.",
   "Run a real Windows NVIDIA runtime smoke before calling this artifact strength-ready."
@@ -401,9 +433,15 @@ if ($BuildTests -eq "ON") {
     }
   }
 }
-foreach ($RequiredDll in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+foreach ($RequiredDll in @(
+  "cudart64_*.dll",
+  "cublas64_*.dll",
+  "cublasLt64_*.dll",
+  "msvcp140*.dll",
+  "vcruntime140*.dll"
+)) {
   if (-not ($PackagedManifestFiles | Where-Object { $_ -like $RequiredDll })) {
-    throw "Packaged JSON manifest missing CUDA runtime DLL entry: $RequiredDll"
+    throw "Packaged JSON manifest missing runtime DLL entry: $RequiredDll"
   }
 }
 
@@ -570,6 +608,7 @@ $ManifestObject = [ordered]@{
   package = $PackageZip
   package_manifest = $PackageJsonManifest
   packaged_runtime_dll_count = $CopiedRuntimeDlls
+  packaged_msvc_runtime_dll_count = $CopiedMsvcRuntimeDlls
   package_contents = [ordered]@{
     metalfish_exe = Test-PackageFile $PackageDir "metalfish.exe"
     metalfish_nn_probe_exe = Test-PackageFile $PackageDir "metalfish_nn_probe.exe"
@@ -579,6 +618,8 @@ $ManifestObject = [ordered]@{
     cudart = Test-PackageFile $PackageDir "cudart64_*.dll"
     cublas = Test-PackageFile $PackageDir "cublas64_*.dll"
     cublaslt = Test-PackageFile $PackageDir "cublasLt64_*.dll"
+    msvcp = Test-PackageFile $PackageDir "msvcp140*.dll"
+    vcruntime = Test-PackageFile $PackageDir "vcruntime140*.dll"
     files = $PackageFiles
   }
   probe_checks = $ManifestProbeChecks
@@ -602,6 +643,7 @@ $ManifestObject | ConvertTo-Json -Depth 12 | Set-Content -Path $ArtifactManifest
   "- Smoke tests: $SmokeText",
   "- Package: $PackageZip",
   "- Packaged runtime DLLs: $CopiedRuntimeDlls",
+  "- Packaged MSVC runtime DLLs: $CopiedMsvcRuntimeDlls",
   "- Artifact manifest: $ArtifactManifest",
   "",
   "## Toolchain",

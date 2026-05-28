@@ -759,13 +759,6 @@ cat >"${RUN_DIR}/run-smokes.ps1" <<POWERSHELL
 New-Item -ItemType Directory -Force \$Logs | Out-Null
 Remove-Item \$PackageDir -Recurse -Force -ErrorAction SilentlyContinue
 Expand-Archive -Path (Join-Path \$Root "metalfish-windows-cuda.zip") -DestinationPath \$PackageDir -Force
-\$VcRedist = Join-Path \$Root "vc_redist.x64.exe"
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile \$VcRedist
-\$vc = Start-Process -FilePath \$VcRedist -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
-if (\$vc.ExitCode -ne 0 -and \$vc.ExitCode -ne 3010) {
-  throw ("VC++ redistributable install failed with exit code " + \$vc.ExitCode)
-}
 \$Engine = Join-Path \$PackageDir "metalfish.exe"
 if (-not (Test-Path \$Engine)) {
   throw "Packaged engine not found: \$Engine"
@@ -804,9 +797,15 @@ foreach (\$RequiredFile in @(
     throw "Packaged JSON manifest missing file entry: \$RequiredFile"
   }
 }
-foreach (\$RequiredDll in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+foreach (\$RequiredDll in @(
+  "cudart64_*.dll",
+  "cublas64_*.dll",
+  "cublasLt64_*.dll",
+  "msvcp140*.dll",
+  "vcruntime140*.dll"
+)) {
   if (-not (\$PackageJsonManifestFiles | Where-Object { \$_ -like \$RequiredDll })) {
-    throw "Packaged JSON manifest missing CUDA runtime DLL entry: \$RequiredDll"
+    throw "Packaged JSON manifest missing runtime DLL entry: \$RequiredDll"
   }
 }
 \$env:PATH = "\$PackageDir;\$env:PATH"

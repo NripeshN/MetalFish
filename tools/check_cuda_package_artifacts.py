@@ -40,6 +40,10 @@ REQUIRED_WINDOWS_VCPKG_DLL_PATTERNS = (
     "libprotobuf*.dll",
     "z*.dll",
 )
+REQUIRED_WINDOWS_MSVC_DLL_PATTERNS = (
+    "msvcp140*.dll",
+    "vcruntime140*.dll",
+)
 
 
 def normalize_archive_name(name: str) -> str:
@@ -263,7 +267,9 @@ def validate_windows_cuda_package(
             + ", ".join(missing_manifest)
         )
     required_dll_patterns = (
-        REQUIRED_WINDOWS_CUDA_DLL_PATTERNS + REQUIRED_WINDOWS_VCPKG_DLL_PATTERNS
+        REQUIRED_WINDOWS_CUDA_DLL_PATTERNS
+        + REQUIRED_WINDOWS_VCPKG_DLL_PATTERNS
+        + REQUIRED_WINDOWS_MSVC_DLL_PATTERNS
     )
     missing_manifest_dlls = [
         pattern

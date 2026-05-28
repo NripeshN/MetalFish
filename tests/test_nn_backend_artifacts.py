@@ -1022,6 +1022,8 @@ def write_release_package_files(
             "cublasLt64_12.dll",
             "abseil_dll.dll",
             "libprotobuf.dll",
+            "msvcp140.dll",
+            "vcruntime140.dll",
             "z.dll",
         ]
         manifest_name = "windows-cuda-package-manifest.json"
