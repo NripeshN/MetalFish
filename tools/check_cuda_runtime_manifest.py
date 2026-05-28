@@ -33,6 +33,7 @@ REQUIRED_RELEASE_ARTIFACTS = {
     "linux-cuda": {
         "linux-cuda-package-manifest.json",
         "cuda-gpu-package-nn-comparison.log",
+        "linux-cuda-package-check.json",
         "cuda-gpu-package-nn-probe-suite.log",
         "cuda-gpu-package-legacy-nn-probe-suite.log",
         "cuda-gpu-package-nn-isolation-bt4-legacy.log",

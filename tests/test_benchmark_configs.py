@@ -968,6 +968,7 @@ def main() -> int:
             "runtime_status",
             "require_metal_compare",
             "require_metal_search_compare",
+            "linux-cuda-package-check.json",
             "--require-metal-compare",
             "--require-metal-search-compare",
             "--expected-head-sha",
