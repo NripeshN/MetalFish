@@ -104,6 +104,14 @@ def is_truthy(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def is_falsey_or_empty(value: object) -> bool:
+    return str(value or "").strip().lower() in {"", "0", "false", "no", "off"}
+
+
+def is_explicitly_disabled(value: object) -> bool:
+    return str(value or "").strip().lower() in {"0", "false", "no", "off"}
+
+
 def require_file_record(record: object, *, label: str) -> None:
     if not isinstance(record, dict):
         raise ValueError(f"{label} record is missing")
@@ -236,6 +244,30 @@ def validate_release_artifacts(data: dict, *, runtime_kind: str) -> None:
         require_file_record(artifacts.get(name), label=f"artifact {name}")
 
 
+def validate_release_runtime_policy(
+    runtime: object,
+    *,
+    stable_batch_size: str,
+) -> None:
+    if not isinstance(runtime, dict):
+        raise ValueError("runtime manifest is missing runtime object")
+    stable_batch = str(runtime.get("cuda_stable_execution_batch_size") or "")
+    if stable_batch != stable_batch_size:
+        raise ValueError(
+            "release runtime policy requires CUDA stable batch "
+            f"{stable_batch_size}, got {stable_batch!r}"
+        )
+    for field in ("cuda_graph", "cuda_graph_execution"):
+        if field in runtime and is_explicitly_disabled(runtime.get(field)):
+            raise ValueError(f"release runtime policy requires graph enabled: {field}")
+    if not is_falsey_or_empty(runtime.get("cuda_profile")):
+        raise ValueError("release runtime policy requires CUDA profiling disabled")
+    if str(runtime.get("cublas_workspace_config") or "").strip():
+        raise ValueError(
+            "release runtime policy requires empty CUBLAS_WORKSPACE_CONFIG"
+        )
+
+
 def validate_runtime_manifest(
     manifest: pathlib.Path,
     *,
@@ -244,6 +276,8 @@ def validate_runtime_manifest(
     require_metal_benchmark_compare: bool = False,
     require_metal_search_compare: bool = False,
     require_release_evidence: bool = False,
+    require_release_policy: bool = False,
+    release_stable_batch_size: str = "16",
     require_artifact_files: bool = False,
     artifact_root: pathlib.Path | None = None,
     expected_head_sha: str | None = None,
@@ -285,6 +319,12 @@ def validate_runtime_manifest(
         )
     if require_release_evidence:
         validate_release_artifacts(data, runtime_kind=runtime_kind)
+    runtime = data.get("runtime") or {}
+    if require_release_policy:
+        validate_release_runtime_policy(
+            runtime,
+            stable_batch_size=release_stable_batch_size,
+        )
     if require_artifact_files:
         validate_artifact_files(
             data.get("artifacts"),
@@ -297,6 +337,7 @@ def validate_runtime_manifest(
         "status": status,
         "gcp": data.get("gcp") or {},
         "inputs": inputs,
+        "runtime": runtime,
         "artifacts": data.get("artifacts") or {},
     }
 
@@ -311,6 +352,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--require-metal-benchmark-compare", action="store_true")
     parser.add_argument("--require-metal-search-compare", action="store_true")
     parser.add_argument("--require-release-evidence", action="store_true")
+    parser.add_argument("--require-release-policy", action="store_true")
+    parser.add_argument("--release-stable-batch-size", default="16")
     parser.add_argument("--require-artifact-files", action="store_true")
     parser.add_argument(
         "--artifact-root",
@@ -332,6 +375,8 @@ def main(argv: list[str] | None = None) -> int:
         require_metal_benchmark_compare=args.require_metal_benchmark_compare,
         require_metal_search_compare=args.require_metal_search_compare,
         require_release_evidence=args.require_release_evidence,
+        require_release_policy=args.require_release_policy,
+        release_stable_batch_size=args.release_stable_batch_size,
         require_artifact_files=args.require_artifact_files,
         artifact_root=(
             pathlib.Path(args.artifact_root).expanduser().resolve()

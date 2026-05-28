@@ -1328,6 +1328,22 @@ def runtime_inputs(*, windows_package: pathlib.Path | None = None) -> dict:
     return inputs
 
 
+def runtime_policy(
+    *,
+    graph: str = "1",
+    profile: str = "0",
+    stable_batch: str = "16",
+    cublas_workspace: str = "",
+) -> dict:
+    return {
+        "cuda_graph": graph,
+        "cuda_graph_execution": graph,
+        "cuda_profile": profile,
+        "cuda_stable_execution_batch_size": stable_batch,
+        "cublas_workspace_config": cublas_workspace,
+    }
+
+
 def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -1520,6 +1536,7 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                         "search_compare_status": "0",
                         "final_compare_status": "0",
                     },
+                    "runtime": runtime_policy(),
                     "artifacts": runtime_artifact_records(
                         "linux-cuda",
                         linux_package=linux_package,
@@ -1544,6 +1561,7 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                         "search_compare_status": "0",
                         "final_compare_status": "0",
                     },
+                    "runtime": runtime_policy(),
                     "artifacts": runtime_artifact_records(
                         "windows-cuda",
                         artifact_root=windows_dir,
@@ -2109,6 +2127,47 @@ def test_cuda_runtime_manifest_rejects_artifacts_outside_root() -> None:
     raise AssertionError("expected outside-root artifact path to be rejected")
 
 
+def test_cuda_runtime_manifest_enforces_release_policy() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        manifest = pathlib.Path(tmp) / "runtime.json"
+        base = {
+            "schema": "metalfish.windows_cuda_runtime_gate",
+            "git": {"head_sha": "abc123"},
+            "status": {
+                "runtime_status": "0",
+                "bt4_compare_status": "0",
+                "legacy_compare_status": "0",
+                "final_compare_status": "0",
+            },
+        }
+        good = dict(base)
+        good["runtime"] = runtime_policy()
+        manifest.write_text(json.dumps(good), encoding="utf-8")
+        summary = runtime_checker.validate_runtime_manifest(
+            manifest,
+            runtime_kind="windows-cuda",
+            require_release_policy=True,
+        )
+        expect(
+            "release runtime policy accepted",
+            summary["runtime"]["cuda_stable_execution_batch_size"] == "16",
+        )
+
+        bad = dict(base)
+        bad["runtime"] = runtime_policy(profile="1")
+        manifest.write_text(json.dumps(bad), encoding="utf-8")
+        try:
+            runtime_checker.validate_runtime_manifest(
+                manifest,
+                runtime_kind="windows-cuda",
+                require_release_policy=True,
+            )
+        except ValueError as exc:
+            expect("release profile policy rejected", "profiling disabled" in str(exc))
+            return
+    raise AssertionError("expected profiled release runtime manifest rejection")
+
+
 def test_cuda_package_validator_rejects_source_commit_drift() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -2437,6 +2496,7 @@ def main() -> int:
     test_cuda_runtime_manifest_rejects_head_sha_drift()
     test_cuda_runtime_manifest_validates_artifact_files()
     test_cuda_runtime_manifest_rejects_artifacts_outside_root()
+    test_cuda_runtime_manifest_enforces_release_policy()
     test_cuda_package_validator_rejects_source_commit_drift()
     test_cuda_package_validator_rejects_hash_drift()
     test_cuda_release_artifact_helpers_require_metal_compare()
