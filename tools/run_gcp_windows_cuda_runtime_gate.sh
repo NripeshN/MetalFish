@@ -2161,6 +2161,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 \$HybridAutoText = Read-SmokeText "hybrid-auto"
 \$HybridAneText = Read-SmokeText "hybrid-cuda-ane-disabled"
 \$ComparisonText = Read-SmokeText "cuda-nn-comparison"
+Write-SearchJson -Name "cuda-timed-mcts-search" -Text \$TimedMctsText -Position "startpos" -Go "${MCTS_TIMED_UCI_GO}"
 Write-SearchJson -Name "cuda-bk07-mcts-search" -Text \$Bk07MctsText -Position "fen \$Bk07Fen" -Go "nodes 50"
 Write-SearchJson -Name "cuda-kiwipete-mcts-search" -Text \$KiwipeteMctsText -Position "fen \$KiwipeteFen" -Go "nodes 1"
 Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "fen \$Bk07Fen" -Go "${HYBRID_PARITY_UCI_GO}"
@@ -2278,6 +2279,7 @@ Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText 
       backend_selected = (Test-BackendSelected \$TimedMctsText)
       stdout_log = "cuda-timed-mcts.stdout.log"
       stderr_log = "cuda-timed-mcts.stderr.log"
+      search_json = "cuda-timed-mcts-search.json"
     }
     cuda_ponder_mcts = [ordered]@{
       ponder_go = "${MCTS_PONDER_UCI_GO}"

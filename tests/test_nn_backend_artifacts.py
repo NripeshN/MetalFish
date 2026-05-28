@@ -1372,6 +1372,22 @@ def runtime_policy(
     }
 
 
+def test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts() -> None:
+    linux_required = runtime_checker.REQUIRED_RELEASE_ARTIFACTS["linux-cuda"]
+    windows_required = runtime_checker.REQUIRED_RELEASE_ARTIFACTS["windows-cuda"]
+    for name in (
+        "cuda-gpu-uci-timed-mcts-smoke.log",
+        "cuda-gpu-uci-timed-mcts-search.json",
+    ):
+        expect(f"linux release requires {name}", name in linux_required)
+    for name in (
+        "logs/cuda-timed-mcts.stdout.log",
+        "logs/cuda-timed-mcts.stderr.log",
+        "logs/cuda-timed-mcts-search.json",
+    ):
+        expect(f"windows release requires {name}", name in windows_required)
+
+
 def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -2511,6 +2527,7 @@ def main() -> int:
     test_cuda_runtime_input_helpers_validate_complete_zip()
     test_cuda_release_artifact_download_retries_truncated_zip()
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
+    test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_package_validator_rejects_unmanifested_archive_entries()
     test_cuda_release_artifacts_promote_direct_runtime_root()
