@@ -151,13 +151,18 @@ promotion workflow to fetch, validate, rename, and optionally attach the Linux
 and Windows CUDA packages:
 
 ```bash
-gh workflow run cuda-release.yml \
-  -f linux_cuda_run_id=<cuda-gpu-gate-run> \
-  -f windows_cuda_runtime_run_id=<windows-runtime-run> \
-  -f expected_sha=<commit-sha> \
-  -f tag_name=v0.1.0-alpha \
-  -f attach_to_release=true
+python3 tools/dispatch_cuda_release_artifacts.py \
+  --ref main \
+  --gate-ref main \
+  --expected-sha <commit-sha> \
+  --tag-name v0.1.0-alpha \
+  --attach-to-release
 ```
+
+The dispatcher resolves the successful same-commit `CUDA GPU Gate` and
+`Windows CUDA Runtime Gate` run IDs before calling `cuda-release.yml`. Use
+`--dry-run` first to print the resolved run IDs without starting the release
+promotion.
 
 For branch-local direct GCP validation, promote the same artifacts without
 GitHub runtime workflow run IDs:

@@ -896,6 +896,25 @@ def main() -> int:
         ],
     )
     assert_file_contains(
+        PROJ / "tools/dispatch_cuda_release_artifacts.py",
+        [
+            "Dispatch same-commit CUDA release artifact promotion",
+            "CUDA GPU Gate",
+            "Windows CUDA Runtime Gate",
+            "cuda-release.yml",
+            "linux_cuda_run_id",
+            "windows_cuda_runtime_run_id",
+            "expected_sha",
+            "tag_name",
+            "attach_to_release",
+            "--gate-ref",
+            "--attach-to-release",
+            "--dry-run",
+            "find_successful_run",
+            "require_dispatchable_workflow",
+        ],
+    )
+    assert_file_contains(
         PROJ / "tools/fetch_cuda_release_artifacts.py",
         [
             "Fetch and validate same-commit CUDA release packages",
