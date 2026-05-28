@@ -1103,6 +1103,63 @@ def test_cuda_runtime_input_helpers_validate_complete_zip() -> None:
             "linux rejects partial",
             not cuda_gpu_inputs.complete_zip(partial, expected_size=expected_size),
         )
+        expect(
+            "release complete zip",
+            cuda_release.complete_zip(archive, expected_size=expected_size),
+        )
+        expect(
+            "release rejects wrong size",
+            not cuda_release.complete_zip(archive, expected_size=expected_size + 1),
+        )
+
+
+def test_cuda_release_artifact_download_retries_truncated_zip() -> None:
+    valid_zip = io.BytesIO()
+    with zipfile.ZipFile(valid_zip, "w") as archive:
+        archive.writestr("payload.txt", "synthetic")
+    valid_payload = valid_zip.getvalue()
+    truncated_payload = valid_payload[: max(1, len(valid_payload) // 2)]
+    artifact = cuda_release.ArtifactInfo(
+        artifact_id=123,
+        name="cuda-release-artifact",
+        size_in_bytes=len(valid_payload),
+        archive_download_url="https://example.invalid/artifact.zip",
+    )
+    old_run = cuda_release.subprocess.run
+    old_sleep = cuda_release.time.sleep
+    calls: list[list[str]] = []
+
+    class FakeProc:
+        returncode = 0
+        stderr = b""
+
+    def fake_run(cmd, *, cwd, stdout, stderr):
+        calls.append(list(cmd))
+        stdout.write(truncated_payload if len(calls) == 1 else valid_payload)
+        return FakeProc()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        archive_path = pathlib.Path(tmp) / "artifact.zip"
+        try:
+            cuda_release.subprocess.run = fake_run
+            cuda_release.time.sleep = lambda _: None
+            cuda_release.download_artifact("owner/repo", artifact, archive_path)
+        finally:
+            cuda_release.subprocess.run = old_run
+            cuda_release.time.sleep = old_sleep
+        expect("release download retried", len(calls) == 2)
+        expect("release archive exists", archive_path.is_file())
+        expect("release archive size", archive_path.stat().st_size == len(valid_payload))
+        expect(
+            "release archive valid",
+            cuda_release.complete_zip(archive_path, expected_size=len(valid_payload)),
+        )
+        expect("release part cleaned", not archive_path.with_name("artifact.zip.part").exists())
+        with zipfile.ZipFile(archive_path) as archive:
+            expect(
+                "release archive payload",
+                archive.read("payload.txt").decode("utf-8") == "synthetic",
+            )
 
 
 def test_windows_cuda_runtime_input_helpers_validate_package_commit() -> None:
@@ -2198,6 +2255,7 @@ def main() -> int:
     test_windows_cuda_runtime_input_helpers_validate_provenance()
     test_windows_cuda_runtime_input_helpers_select_artifacts()
     test_cuda_runtime_input_helpers_validate_complete_zip()
+    test_cuda_release_artifact_download_retries_truncated_zip()
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_package_validator_rejects_unmanifested_archive_entries()
