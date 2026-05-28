@@ -299,10 +299,25 @@ def validate_direct_runtime_manifest(
             "direct runtime manifest has unexpected schema: "
             f"{manifest.get('schema')!r}"
         )
-    if manifest.get("target") not in {"both", "linux", "windows"}:
+    target = manifest.get("target")
+    if target not in {"both", "linux", "windows"}:
         raise ValueError(
             "direct runtime manifest has unexpected target "
-            f"{manifest.get('target')!r}"
+            f"{target!r}"
+        )
+    completed_targets = set()
+    if target == "both":
+        completed_targets.update({"linux", "windows"})
+    elif target in {"linux", "windows"}:
+        completed_targets.add(target)
+    completed_targets.update(
+        target
+        for target in manifest.get("completed_targets") or []
+        if target in {"linux", "windows"}
+    )
+    if not {"linux", "windows"}.issubset(completed_targets):
+        raise ValueError(
+            "direct runtime manifest did not complete both Linux and Windows gates"
         )
     if manifest.get("require_metal") is not True:
         raise ValueError("direct runtime manifest did not require Metal comparison")

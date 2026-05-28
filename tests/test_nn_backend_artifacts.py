@@ -1432,7 +1432,7 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                     "schema": "metalfish.cuda_runtime_gates_direct",
                     "expected_sha": "abc123",
                     "repo": "owner/repo",
-                    "target": "windows",
+                    "target": "both",
                     "require_metal": True,
                 }
             )
@@ -1521,6 +1521,38 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                 / "metalfish-v0.1.0-alpha-windows-x86_64-msvc-cuda.zip"
             ).is_file(),
         )
+
+
+def test_cuda_release_artifacts_reject_direct_runtime_single_target() -> None:
+    try:
+        cuda_release.validate_direct_runtime_manifest(
+            {
+                "schema": "metalfish.cuda_runtime_gates_direct",
+                "expected_sha": "abc123",
+                "repo": "owner/repo",
+                "target": "windows",
+                "require_metal": True,
+            },
+            expected_sha="abc123",
+        )
+    except ValueError as exc:
+        expect("direct single-target failure", "both Linux and Windows" in str(exc))
+        return
+    raise AssertionError("expected single-target direct runtime manifest to fail")
+
+
+def test_cuda_release_artifacts_accept_split_direct_runtime_manifest() -> None:
+    cuda_release.validate_direct_runtime_manifest(
+        {
+            "schema": "metalfish.cuda_runtime_gates_direct",
+            "expected_sha": "abc123",
+            "repo": "owner/repo",
+            "target": "windows",
+            "completed_targets": ["linux", "windows"],
+            "require_metal": True,
+        },
+        expected_sha="abc123",
+    )
 
 
 def test_direct_runtime_manifest_merge_preserves_split_targets() -> None:
@@ -1902,6 +1934,8 @@ def main() -> int:
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_package_validator_rejects_unmanifested_archive_entries()
     test_cuda_release_artifacts_promote_direct_runtime_root()
+    test_cuda_release_artifacts_reject_direct_runtime_single_target()
+    test_cuda_release_artifacts_accept_split_direct_runtime_manifest()
     test_direct_runtime_manifest_merge_preserves_split_targets()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
     test_cuda_runtime_manifest_rejects_head_sha_drift()
