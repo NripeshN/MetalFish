@@ -967,8 +967,8 @@ CUDA self-consistency; Windows now shares the Metal-vs-CUDA numeric comparison
 contract with the Linux L4 gate and exercises the packaged NN comparison
 binary.
 
-The 2026-05-28 branch-tip direct pass `4d35693` revalidated the same contract
-on both CUDA runtime targets from detached clean checkouts. Linux ran
+The 2026-05-28 direct pass `4d35693` revalidated the same contract on both
+CUDA runtime targets from detached clean checkouts. Linux ran
 `metalfish-cuda-direct-linux-4d356936` on `g2-standard-8` L4 in `us-east1-d`;
 Windows ran `metalfish-cuda-direct-win-4d356936` on Windows Server 2022
 `g2-standard-8` L4 vWS in `us-central1-a`. The run used Metal CI

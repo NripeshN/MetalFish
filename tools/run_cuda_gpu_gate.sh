@@ -212,7 +212,7 @@ write_summary() {
     echo "- Linux CUDA package: ${CUDA_PACKAGE}"
     echo "- Explicit CUDA UCI go: ${UCI_GO}"
     echo "- Batch worst trace: ${METALFISH_NN_BATCH_TRACE_WORST:-1}"
-    echo "- Single repeat stress: ${METALFISH_NN_SINGLE_REPEAT_STRESS:-0}"
+    echo "- Single repeat stress: ${METALFISH_NN_SINGLE_REPEAT_STRESS:-1}"
     echo "- Single reuse stress: ${METALFISH_NN_SINGLE_REUSE_STRESS:-1}"
     echo "- Batch reuse stress: ${METALFISH_NN_BATCH_REUSE_STRESS:-1}"
     echo "- CUDA full buffer clear: ${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}"
