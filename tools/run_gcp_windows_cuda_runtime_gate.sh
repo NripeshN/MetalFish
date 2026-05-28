@@ -1563,7 +1563,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-kiwipete" -Commands @(
   "setoption name MCTSAddDirichletNoise value false",
   "setoption name TransformerLowTimeFallbackMs value 0",
   "position fen \$KiwipeteFen",
-  "go nodes 8",
+  "go nodes 50",
   "quit"
 ) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
 
@@ -1698,7 +1698,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 Write-SearchJson -Name "cuda-bk07-mcts-search" -Text \$Bk07MctsText -Position "fen \$Bk07Fen" -Go "nodes 50"
 Write-SearchJson -Name "cuda-kiwipete-mcts-search" -Text \$KiwipeteMctsText -Position "fen \$KiwipeteFen" -Go "nodes 1"
 Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "fen \$Bk07Fen" -Go "${HYBRID_PARITY_UCI_GO}"
-Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText -Position "fen \$KiwipeteFen" -Go "nodes 8"
+Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText -Position "fen \$KiwipeteFen" -Go "nodes 50"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
 \$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
 \$Manifest = [ordered]@{
@@ -1843,7 +1843,7 @@ Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText 
       stderr_log = "hybrid-cuda.stderr.log"
     }
     hybrid_cuda_kiwipete = [ordered]@{
-      go = "nodes 8"
+      go = "nodes 50"
       fen = \$KiwipeteFen
       bestmove = (Find-BestMove \$HybridKiwipeteText)
       backend_selected = (Test-BackendSelected \$HybridKiwipeteText)

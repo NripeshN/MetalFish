@@ -875,7 +875,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSAddDirichletNoise=false \
   --setoption TransformerLowTimeFallbackMs=0 \
   --position "fen ${KIWIPETE_FEN}" \
-  --go "nodes 8" \
+  --go "nodes 50" \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "Hybrid MCTS runtime: backend=cuda" \
   --expect-output "minibatch=1" \

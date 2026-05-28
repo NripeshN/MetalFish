@@ -319,7 +319,7 @@ jobs:
             --setoption MCTSAddDirichletNoise=false \
             --setoption TransformerLowTimeFallbackMs=0 \
             --position "fen r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1" \
-            --go "nodes 8" \
+            --go "nodes 50" \
             --expect-output "Starting Parallel Hybrid Search" \
             --expect-output "Hybrid MCTS runtime: backend=metal" \
             --expect-output "Final: MCTSPlayouts=" \
