@@ -268,6 +268,10 @@ write_summary() {
     echo "- packaged BT4/legacy isolation probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-nn-isolation-bt4-legacy.log")"
     echo "- packaged legacy/BT4 isolation probe: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-nn-isolation-legacy-bt4.log")"
     echo "- packaged CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-smoke.log")"
+    echo "- packaged BK.07 CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-bk07-search.json")"
+    echo "- packaged kiwipete CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-kiwipete-search.json")"
+    echo "- packaged hybrid CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-search.json")"
+    echo "- packaged hybrid kiwipete CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-kiwipete-search.json")"
     echo "- Linux CUDA package manifest: $(summary_log_status "${BUILD_DIR}/linux-cuda-package-manifest.json")"
     echo "- CUDA profile: $(summary_log_status "${BUILD_DIR}/cuda-gpu-profile.log")"
     echo
@@ -318,6 +322,14 @@ write_summary() {
       "${BUILD_DIR}/cuda-gpu-package-nn-isolation-legacy-bt4.log"
     summary_failure_lines "packaged CUDA UCI smoke" \
       "${BUILD_DIR}/cuda-gpu-package-uci-smoke.log"
+    summary_failure_lines "packaged BK.07 CUDA search smoke" \
+      "${BUILD_DIR}/cuda-gpu-package-uci-bk07-smoke.log"
+    summary_failure_lines "packaged kiwipete CUDA search smoke" \
+      "${BUILD_DIR}/cuda-gpu-package-uci-kiwipete-smoke.log"
+    summary_failure_lines "packaged hybrid CUDA UCI smoke" \
+      "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-smoke.log"
+    summary_failure_lines "packaged hybrid kiwipete CUDA UCI smoke" \
+      "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-kiwipete-smoke.log"
     summary_failure_lines "CUDA profile" "${BUILD_DIR}/cuda-gpu-profile.log"
     echo
     echo "## Backend"
@@ -459,6 +471,10 @@ write_summary() {
     echo "- hybrid-clock-start: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log" "not reached")"
     echo "- hybrid-clock-safety: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-safety-smoke.log" "not reached")"
     echo "- hybrid-auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log" "not reached")"
+    echo "- packaged-cuda-bk07: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-package-uci-bk07-smoke.log" "not reached")"
+    echo "- packaged-cuda-kiwipete: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-package-uci-kiwipete-smoke.log" "not reached")"
+    echo "- packaged-hybrid-cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-smoke.log" "not reached")"
+    echo "- packaged-hybrid-kiwipete: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-kiwipete-smoke.log" "not reached")"
     if [[ -s "${BUILD_DIR}/cuda-gpu-profile.log" ]]; then
       echo
       echo "## CUDA Profile"
@@ -1208,6 +1224,135 @@ METALFISH_CUDA_PROFILE=0 \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-package-uci-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${CUDA_PACKAGE_CHECK_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=true \
+  --setoption UseHybridSearch=false \
+  --setoption Threads=8 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSParallelSearch=false \
+  --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSParityPreset=true \
+  --setoption MCTSAddDirichletNoise=false \
+  --setoption TransformerLowTimeFallbackMs=0 \
+  --position "fen ${BK07_FEN}" \
+  --go "nodes 50" \
+  --expect-bestmove h5f6 \
+  --json-out "${BUILD_DIR}/cuda-gpu-package-uci-bk07-search.json" \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-package-uci-bk07-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${CUDA_PACKAGE_CHECK_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=true \
+  --setoption UseHybridSearch=false \
+  --setoption Threads=8 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSParallelSearch=false \
+  --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSParityPreset=true \
+  --setoption MCTSAddDirichletNoise=false \
+  --setoption TransformerLowTimeFallbackMs=0 \
+  --position "fen ${KIWIPETE_FEN}" \
+  --go "nodes 1" \
+  --json-out "${BUILD_DIR}/cuda-gpu-package-uci-kiwipete-search.json" \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-package-uci-kiwipete-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${CUDA_PACKAGE_CHECK_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption Threads=3 \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=false \
+  --setoption UseHybridSearch=true \
+  --setoption HybridMCTSThreads=1 \
+  --setoption HybridABThreads=2 \
+  --setoption HybridAutoABThreadsCap=0 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSParityPreset=true \
+  --setoption MCTSAddDirichletNoise=false \
+  --setoption TransformerLowTimeFallbackMs=0 \
+  --position "fen ${BK07_FEN}" \
+  --go "nodes 50" \
+  --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "Hybrid MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "Final: MCTSPlayouts=" \
+  --json-out "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-search.json" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${CUDA_PACKAGE_CHECK_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption Threads=3 \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=false \
+  --setoption UseHybridSearch=true \
+  --setoption HybridMCTSThreads=1 \
+  --setoption HybridABThreads=2 \
+  --setoption HybridAutoABThreadsCap=0 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSParityPreset=true \
+  --setoption MCTSAddDirichletNoise=false \
+  --setoption TransformerLowTimeFallbackMs=0 \
+  --position "fen ${KIWIPETE_FEN}" \
+  --go "nodes 50" \
+  --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "Hybrid MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "Final: MCTSPlayouts=" \
+  --json-out "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-kiwipete-search.json" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-kiwipete-smoke.log"
 
 if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; then
   METALFISH_CUDA_PROFILE=1 \

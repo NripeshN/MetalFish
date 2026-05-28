@@ -221,6 +221,14 @@ collect_remote_artifacts() {
     cuda-gpu-package-nn-isolation-bt4-legacy.log \
     cuda-gpu-package-nn-isolation-legacy-bt4.log \
     cuda-gpu-package-uci-smoke.log \
+    cuda-gpu-package-uci-bk07-smoke.log \
+    cuda-gpu-package-uci-bk07-search.json \
+    cuda-gpu-package-uci-kiwipete-smoke.log \
+    cuda-gpu-package-uci-kiwipete-search.json \
+    cuda-gpu-package-uci-hybrid-smoke.log \
+    cuda-gpu-package-uci-hybrid-search.json \
+    cuda-gpu-package-uci-hybrid-kiwipete-smoke.log \
+    cuda-gpu-package-uci-hybrid-kiwipete-search.json \
     cuda-gpu-profile.log; do
     if gcloud compute scp \
       "${INSTANCE}:~/metalfish/build-cuda-gpu/${file}" \
@@ -563,10 +571,22 @@ compare_collected_search_results() {
     return 1
   fi
 
-  local cuda_mcts="${ARTIFACT_DIR}/cuda-gpu-uci-bk07-search.json"
-  local cuda_mcts_kiwipete="${ARTIFACT_DIR}/cuda-gpu-uci-kiwipete-search.json"
-  local cuda_hybrid="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-search.json"
-  local cuda_hybrid_kiwipete="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-kiwipete-search.json"
+  local cuda_mcts="${ARTIFACT_DIR}/cuda-gpu-package-uci-bk07-search.json"
+  if [[ ! -s "${cuda_mcts}" ]]; then
+    cuda_mcts="${ARTIFACT_DIR}/cuda-gpu-uci-bk07-search.json"
+  fi
+  local cuda_mcts_kiwipete="${ARTIFACT_DIR}/cuda-gpu-package-uci-kiwipete-search.json"
+  if [[ ! -s "${cuda_mcts_kiwipete}" ]]; then
+    cuda_mcts_kiwipete="${ARTIFACT_DIR}/cuda-gpu-uci-kiwipete-search.json"
+  fi
+  local cuda_hybrid="${ARTIFACT_DIR}/cuda-gpu-package-uci-hybrid-search.json"
+  if [[ ! -s "${cuda_hybrid}" ]]; then
+    cuda_hybrid="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-search.json"
+  fi
+  local cuda_hybrid_kiwipete="${ARTIFACT_DIR}/cuda-gpu-package-uci-hybrid-kiwipete-search.json"
+  if [[ ! -s "${cuda_hybrid_kiwipete}" ]]; then
+    cuda_hybrid_kiwipete="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-kiwipete-search.json"
+  fi
   if [[ ! -s "${cuda_mcts}" ]]; then
     echo "CUDA MCTS search JSON not found: ${cuda_mcts}" >&2
     return 1
