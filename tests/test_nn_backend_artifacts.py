@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -2082,6 +2083,47 @@ def test_network_downloader_validates_gzip_weights() -> None:
             expect("invalid magic rejected", "Lc0 protobuf" in str(exc))
             return
     raise AssertionError("expected invalid gzip weights to be rejected")
+
+
+def test_network_downloader_retries_truncated_gzip() -> None:
+    valid_payload = gzip.compress(downloader.WEIGHTS_PROTO_MAGIC_PREFIX + b"synthetic")
+    truncated_payload = valid_payload[:-8]
+    calls = 0
+
+    class Response(io.BytesIO):
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            self.close()
+
+    old_urlopen = downloader.urllib.request.urlopen
+
+    def fake_urlopen(_request: object, timeout: int) -> Response:
+        nonlocal calls
+        expect("download timeout forwarded", timeout == 60)
+        calls += 1
+        return Response(truncated_payload if calls == 1 else valid_payload)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        dest = root / "weights.pb.gz"
+        downloader.urllib.request.urlopen = fake_urlopen
+        try:
+            downloader.download(
+                "https://example.invalid/weights.pb.gz",
+                dest,
+                retries=2,
+                force=False,
+                validator=downloader.validate_gzip_weights,
+            )
+        finally:
+            downloader.urllib.request.urlopen = old_urlopen
+
+        expect("retried after truncated gzip", calls == 2)
+        expect("downloaded destination exists", dest.exists())
+        expect("temporary file cleaned", not dest.with_suffix(dest.suffix + ".tmp").exists())
+        downloader.validate_gzip_weights(dest)
 
 
 def test_portable_manifest_uses_checked_out_commit() -> None:

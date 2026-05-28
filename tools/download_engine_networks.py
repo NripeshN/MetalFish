@@ -67,7 +67,7 @@ def download(
         if validator:
             try:
                 validator(dest)
-            except RuntimeError as exc:
+            except (EOFError, OSError, RuntimeError) as exc:
                 print(f"Cached {dest} failed validation: {exc}; re-downloading")
                 dest.unlink(missing_ok=True)
             else:
@@ -97,10 +97,11 @@ def download(
                 validator(tmp)
             tmp.replace(dest)
             return
-        except (OSError, urllib.error.URLError, RuntimeError) as exc:
+        except (EOFError, OSError, urllib.error.URLError, RuntimeError) as exc:
             last_error = exc
             tmp.unlink(missing_ok=True)
             if attempt != retries:
+                print(f"Download attempt {attempt} failed validation: {exc}; retrying")
                 time.sleep(min(10, 2 * attempt))
 
     raise RuntimeError(f"Failed to download {url}: {last_error}")
