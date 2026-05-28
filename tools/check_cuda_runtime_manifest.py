@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import sys
@@ -104,6 +105,61 @@ def require_file_record(record: object, *, label: str) -> None:
         raise ValueError(f"{label} record is missing sha256")
 
 
+def sha256_file(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def resolve_record_path(
+    *,
+    key: str,
+    record: dict,
+    artifact_root: pathlib.Path,
+) -> pathlib.Path:
+    candidates: list[pathlib.Path] = []
+    record_path = str(record.get("path") or "")
+    if record_path:
+        path = pathlib.Path(record_path)
+        candidates.append(path if path.is_absolute() else artifact_root / path)
+    candidates.append(artifact_root / key)
+
+    checked: list[str] = []
+    for candidate in candidates:
+        if str(candidate) in checked:
+            continue
+        checked.append(str(candidate))
+        if candidate.is_file():
+            return candidate
+    raise ValueError(f"artifact {key} file is missing; checked: {', '.join(checked)}")
+
+
+def validate_artifact_files(
+    artifacts: object,
+    *,
+    artifact_root: pathlib.Path,
+) -> None:
+    if not isinstance(artifacts, dict) or not artifacts:
+        raise ValueError("runtime manifest is missing artifacts object")
+    for key, record in sorted(artifacts.items()):
+        require_file_record(record, label=f"artifact {key}")
+        path = resolve_record_path(key=key, record=record, artifact_root=artifact_root)
+        expected_size = int(record["size_bytes"])
+        actual_size = path.stat().st_size
+        if actual_size != expected_size:
+            raise ValueError(
+                f"artifact {key} size mismatch: {actual_size} != {expected_size}"
+            )
+        expected_sha = str(record["sha256"])
+        actual_sha = sha256_file(path)
+        if actual_sha != expected_sha:
+            raise ValueError(
+                f"artifact {key} sha256 mismatch: {actual_sha} != {expected_sha}"
+            )
+
+
 def validate_metal_compare_inputs(
     inputs: object,
     *,
@@ -174,6 +230,8 @@ def validate_runtime_manifest(
     require_metal_benchmark_compare: bool = False,
     require_metal_search_compare: bool = False,
     require_release_evidence: bool = False,
+    require_artifact_files: bool = False,
+    artifact_root: pathlib.Path | None = None,
     expected_head_sha: str | None = None,
 ) -> dict:
     if runtime_kind not in RUNTIME_KINDS:
@@ -213,6 +271,11 @@ def validate_runtime_manifest(
         )
     if require_release_evidence:
         validate_release_artifacts(data, runtime_kind=runtime_kind)
+    if require_artifact_files:
+        validate_artifact_files(
+            data.get("artifacts"),
+            artifact_root=(artifact_root or manifest.parent).resolve(),
+        )
     return {
         "schema": data["schema"],
         "kind": runtime_kind,
@@ -234,6 +297,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--require-metal-benchmark-compare", action="store_true")
     parser.add_argument("--require-metal-search-compare", action="store_true")
     parser.add_argument("--require-release-evidence", action="store_true")
+    parser.add_argument("--require-artifact-files", action="store_true")
+    parser.add_argument(
+        "--artifact-root",
+        default="",
+        help="Directory used to resolve artifact manifest paths; defaults to manifest parent.",
+    )
     parser.add_argument("--expected-head-sha", default="")
     parser.add_argument("--json-output", default="")
     return parser.parse_args(argv)
@@ -249,6 +318,12 @@ def main(argv: list[str] | None = None) -> int:
         require_metal_benchmark_compare=args.require_metal_benchmark_compare,
         require_metal_search_compare=args.require_metal_search_compare,
         require_release_evidence=args.require_release_evidence,
+        require_artifact_files=args.require_artifact_files,
+        artifact_root=(
+            pathlib.Path(args.artifact_root).expanduser().resolve()
+            if args.artifact_root
+            else None
+        ),
         expected_head_sha=args.expected_head_sha or None,
     )
     if args.json_output:

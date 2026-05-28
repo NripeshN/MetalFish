@@ -535,6 +535,8 @@ def main(argv: list[str] | None = None) -> int:
         require_metal_benchmark_compare=True,
         require_metal_search_compare=True,
         require_release_evidence=True,
+        require_artifact_files=True,
+        artifact_root=linux_runtime_manifest.parent,
         expected_head_sha=expected_sha,
     )
     windows_runtime = validate_runtime_manifest(
@@ -544,6 +546,8 @@ def main(argv: list[str] | None = None) -> int:
         require_metal_benchmark_compare=True,
         require_metal_search_compare=True,
         require_release_evidence=True,
+        require_artifact_files=True,
+        artifact_root=windows_runtime_manifest.parent,
         expected_head_sha=expected_sha,
     )
     require_linux_runtime_package_record(linux_runtime, linux_package)

@@ -1277,12 +1277,20 @@ def metal_log_record(name: str) -> dict:
 
 
 def runtime_artifact_records(
-    runtime_kind: str, *, linux_package: pathlib.Path | None = None
+    runtime_kind: str,
+    *,
+    linux_package: pathlib.Path | None = None,
+    artifact_root: pathlib.Path | None = None,
 ) -> dict:
-    records = {
-        name: metal_log_record(name)
-        for name in runtime_checker.REQUIRED_RELEASE_ARTIFACTS[runtime_kind]
-    }
+    records = {}
+    for name in runtime_checker.REQUIRED_RELEASE_ARTIFACTS[runtime_kind]:
+        if artifact_root is None:
+            records[name] = metal_log_record(name)
+        else:
+            path = artifact_root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"{runtime_kind}:{name}\n", encoding="utf-8")
+            records[name] = cuda_release.file_record(path)
     if runtime_kind == "linux-cuda":
         if linux_package is None:
             records["metalfish-linux-x86_64-cuda.tar.gz"] = metal_log_record(
@@ -1513,7 +1521,9 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                         "final_compare_status": "0",
                     },
                     "artifacts": runtime_artifact_records(
-                        "linux-cuda", linux_package=linux_package
+                        "linux-cuda",
+                        linux_package=linux_package,
+                        artifact_root=linux_dir,
                     ),
                 }
             )
@@ -1534,7 +1544,10 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                         "search_compare_status": "0",
                         "final_compare_status": "0",
                     },
-                    "artifacts": runtime_artifact_records("windows-cuda"),
+                    "artifacts": runtime_artifact_records(
+                        "windows-cuda",
+                        artifact_root=windows_dir,
+                    ),
                 }
             )
             + "\n",
@@ -1943,6 +1956,57 @@ def test_cuda_runtime_manifest_rejects_head_sha_drift() -> None:
     raise AssertionError("expected runtime manifest head drift to be rejected")
 
 
+def test_cuda_runtime_manifest_validates_artifact_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        artifact_root = root / "artifacts"
+        payload = artifact_root / "logs" / "cuda-bk07-mcts-search.json"
+        payload.parent.mkdir(parents=True)
+        payload.write_text('{"bestmove":"h5f6"}\n', encoding="utf-8")
+        record = cuda_release.file_record(payload)
+        record["path"] = "original-runner-path/cuda-bk07-mcts-search.json"
+        manifest = root / "runtime.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.windows_cuda_runtime_gate",
+                    "git": {"head_sha": "abc123"},
+                    "status": {
+                        "runtime_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                    "artifacts": {"logs/cuda-bk07-mcts-search.json": record},
+                }
+            ),
+            encoding="utf-8",
+        )
+        summary = runtime_checker.validate_runtime_manifest(
+            manifest,
+            runtime_kind="windows-cuda",
+            require_artifact_files=True,
+            artifact_root=artifact_root,
+            expected_head_sha="abc123",
+        )
+        expect(
+            "artifact file validation summary",
+            "logs/cuda-bk07-mcts-search.json" in summary["artifacts"],
+        )
+        payload.write_text('{"bestmove":"a1a1"}\n', encoding="utf-8")
+        try:
+            runtime_checker.validate_runtime_manifest(
+                manifest,
+                runtime_kind="windows-cuda",
+                require_artifact_files=True,
+                artifact_root=artifact_root,
+            )
+        except ValueError as exc:
+            expect("artifact hash mismatch rejected", "sha256 mismatch" in str(exc))
+            return
+    raise AssertionError("expected artifact hash drift to be rejected")
+
+
 def test_cuda_package_validator_rejects_source_commit_drift() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -2268,6 +2332,7 @@ def main() -> int:
     test_direct_runtime_clears_only_selected_artifact_dir()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
     test_cuda_runtime_manifest_rejects_head_sha_drift()
+    test_cuda_runtime_manifest_validates_artifact_files()
     test_cuda_package_validator_rejects_source_commit_drift()
     test_cuda_package_validator_rejects_hash_drift()
     test_cuda_release_artifact_helpers_require_metal_compare()

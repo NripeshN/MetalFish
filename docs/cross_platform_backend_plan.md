@@ -196,7 +196,11 @@ manifests remain the release authority for each package. The CUDA package
 validator checks package manifest `source_commit`, exact archive file coverage,
 size, SHA-256, required Windows CUDA/MSVC/vcpkg runtime DLLs, and required
 Linux executable bits against the same successful gate SHA before release
-packaging, and runtime manifests must report the same `git.head_sha`.
+packaging. Release promotion also re-resolves every runtime manifest artifact
+against the extracted artifact root and checks on-disk size plus SHA-256, so a
+manifest record cannot pass if the downloaded artifact archive is missing,
+truncated, or silently drifted. Runtime manifests must report the same
+`git.head_sha`.
 
 Current CUDA backend boundary:
 
