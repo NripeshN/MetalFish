@@ -28,6 +28,12 @@ if [[ "${METALFISH_CUDA_GRAPH:-}" == "0" ||
       "${METALFISH_CUDA_GRAPH_EXECUTION:-}" == "0" ]]; then
   CUDA_GRAPH_REQUESTED=0
 fi
+CUDA_GRAPH_CLI_VALUE=true
+CUDA_GRAPH_UCI_VALUE=true
+if [[ "${CUDA_GRAPH_REQUESTED}" == "0" ]]; then
+  CUDA_GRAPH_CLI_VALUE=false
+  CUDA_GRAPH_UCI_VALUE=false
+fi
 CUDA_GRAPH_REPLAY_REQUIRE_ARGS=()
 if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
   CUDA_GRAPH_REPLAY_REQUIRE_ARGS=(
@@ -626,7 +632,7 @@ METALFISH_CUDA_PROFILE=0 \
   --weights "${WEIGHTS}" \
   --backend cuda \
   --cuda-device -1 \
-  --cuda-graph-execution true \
+  --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
   --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
   --cuda-deterministic-attention-softmax true \
   --cuda-full-buffer-clear true \
@@ -649,7 +655,7 @@ METALFISH_CUDA_PROFILE=0 \
   --weights "${WEIGHTS}" \
   --backend cuda \
   --cuda-device -1 \
-  --cuda-graph-execution true \
+  --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
   --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
   --cuda-deterministic-attention-softmax true \
   --cuda-full-buffer-clear true \
@@ -676,7 +682,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --weights "${LEGACY_WEIGHTS}" \
     --backend cuda \
     --cuda-device -1 \
-    --cuda-graph-execution true \
+    --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
     --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
@@ -699,7 +705,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --isolation-weights "${LEGACY_WEIGHTS}" \
     --backend cuda \
     --cuda-device -1 \
-    --cuda-graph-execution true \
+    --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
     --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
@@ -717,7 +723,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --isolation-weights "${WEIGHTS}" \
     --backend cuda \
     --cuda-device -1 \
-    --cuda-graph-execution true \
+    --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
     --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
@@ -738,7 +744,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackendRequireAccelerator=true \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -761,7 +767,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=accelerator \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -784,7 +790,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -807,7 +813,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -839,7 +845,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -869,7 +875,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -900,7 +906,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -931,7 +937,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -965,7 +971,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -999,7 +1005,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -1052,7 +1058,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackendRequireAccelerator=true \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -1082,7 +1088,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -1204,7 +1210,7 @@ METALFISH_CUDA_PROFILE=0 \
   --weights "${WEIGHTS}" \
   --backend cuda \
   --cuda-device -1 \
-  --cuda-graph-execution true \
+  --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
   --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
   --cuda-deterministic-attention-softmax true \
   --cuda-full-buffer-clear true \
@@ -1214,15 +1220,17 @@ METALFISH_CUDA_PROFILE=0 \
   2>&1 | tee "${BUILD_DIR}/cuda-gpu-package-probe.log"
 grep -q '"backend":"cuda"' "${BUILD_DIR}/cuda-gpu-package-probe.log"
 grep -q "CUDA transformer backend" "${BUILD_DIR}/cuda-gpu-package-probe.log"
-grep -q "executor=resolved+graph-replay" \
-  "${BUILD_DIR}/cuda-gpu-package-probe.log"
+if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
+  grep -q "executor=resolved+graph-replay" \
+    "${BUILD_DIR}/cuda-gpu-package-probe.log"
+fi
 METALFISH_CUDA_PROFILE=0 \
   python3 tools/run_nn_backend_probe_suite.py \
   --probe "${CUDA_PACKAGE_CHECK_DIR}/metalfish_nn_probe" \
   --weights "${WEIGHTS}" \
   --backend cuda \
   --cuda-device -1 \
-  --cuda-graph-execution true \
+  --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
   --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
   --cuda-deterministic-attention-softmax true \
   --cuda-full-buffer-clear true \
@@ -1245,7 +1253,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --weights "${LEGACY_WEIGHTS}" \
     --backend cuda \
     --cuda-device -1 \
-    --cuda-graph-execution true \
+    --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
     --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
@@ -1268,7 +1276,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --isolation-weights "${LEGACY_WEIGHTS}" \
     --backend cuda \
     --cuda-device -1 \
-    --cuda-graph-execution true \
+    --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
     --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
@@ -1286,7 +1294,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --isolation-weights "${WEIGHTS}" \
     --backend cuda \
     --cuda-device -1 \
-    --cuda-graph-execution true \
+    --cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}" \
     --cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}" \
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
@@ -1305,7 +1313,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=accelerator \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -1330,7 +1338,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -1360,7 +1368,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -1391,7 +1399,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -1422,7 +1430,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -1456,7 +1464,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption NNBackend=cuda \
   --setoption NNWeights="${WEIGHTS}" \
   --setoption NNCudaDevice=-1 \
-  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
   --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
   --setoption NNCudaDeterministicAttentionSoftmax=true \
   --setoption NNCudaFullBufferClear=true \
@@ -1492,7 +1500,7 @@ if [[ -n "${CUDA_PROFILE_REQUESTED}" && "${CUDA_PROFILE_REQUESTED}" != "0" ]]; t
       --setoption NNBackend=cuda \
       --setoption NNWeights="${WEIGHTS}" \
       --setoption NNCudaDevice=-1 \
-      --setoption NNCudaGraphExecution=true \
+      --setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}" \
       --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
       --setoption NNCudaDeterministicAttentionSoftmax=true \
       --setoption NNCudaFullBufferClear=true \

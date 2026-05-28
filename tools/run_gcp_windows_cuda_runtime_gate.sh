@@ -53,6 +53,12 @@ if [[ "${METALFISH_WINDOWS_CUDA_GRAPH:-}" == "0" ||
       "${METALFISH_CUDA_GRAPH_EXECUTION:-}" == "0" ]]; then
   CUDA_GRAPH=0
 fi
+CUDA_GRAPH_CLI_VALUE=true
+CUDA_GRAPH_UCI_VALUE=true
+if [[ "${CUDA_GRAPH}" == "0" ]]; then
+  CUDA_GRAPH_CLI_VALUE=false
+  CUDA_GRAPH_UCI_VALUE=false
+fi
 CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
 CUDA_PROFILE_LIMIT="${METALFISH_WINDOWS_CUDA_PROFILE_LIMIT:-2}"
 CUDA_STABLE_BATCH_SIZE="${METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
@@ -1062,7 +1068,7 @@ function Invoke-ProbeSuiteSmoke {
     }
     \$arguments = "--weights " + (Quote-ProbeArgument \$Weights) +
       " --backend cuda --fen " + (Quote-ProbeArgument \$position.fen) +
-      " --cuda-device -1 --cuda-graph-execution true" +
+      " --cuda-device -1 --cuda-graph-execution ${CUDA_GRAPH_CLI_VALUE}" +
       " --cuda-stable-execution-batch-size ${CUDA_STABLE_BATCH_SIZE}" +
       " --cuda-deterministic-attention-softmax true" +
       " --cuda-full-buffer-clear true" +
@@ -1767,7 +1773,7 @@ function Invoke-UciPonderSmoke {
 \$Bk07Fen = "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -"
 \$KiwipeteFen = "r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1"
 \$CudaProbeOptions = " --backend cuda" +
-  " --cuda-device -1 --cuda-graph-execution true" +
+  " --cuda-device -1 --cuda-graph-execution ${CUDA_GRAPH_CLI_VALUE}" +
   " --cuda-stable-execution-batch-size ${CUDA_STABLE_BATCH_SIZE}" +
   " --cuda-deterministic-attention-softmax true" +
   " --cuda-full-buffer-clear true"
@@ -1815,7 +1821,7 @@ Invoke-UciSmoke -Name "cuda-mcts" -Commands @(
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -1836,7 +1842,7 @@ Invoke-UciSmoke -Name "cuda-timed-mcts" -Commands @(
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -1859,7 +1865,7 @@ Invoke-UciPonderSmoke -Name "cuda-ponder-mcts" -Options @(
   "NNBackend value cuda",
   "NNWeights value \$Bt4",
   "NNCudaDevice value -1",
-  "NNCudaGraphExecution value true",
+  "NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "NNCudaDeterministicAttentionSoftmax value true",
   "NNCudaFullBufferClear value true",
@@ -1883,7 +1889,7 @@ Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "setoption name NNBackendRequireAccelerator value true",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -1904,7 +1910,7 @@ Invoke-UciSmoke -Name "cuda-accelerator-mcts" -Commands @(
   "setoption name NNBackend value accelerator",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -1925,7 +1931,7 @@ Invoke-UciSmoke -Name "cuda-bk07-mcts" -Commands @(
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -1951,7 +1957,7 @@ Invoke-UciSmoke -Name "cuda-kiwipete-mcts" -Commands @(
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -1978,7 +1984,7 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -2006,7 +2012,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-kiwipete" -Commands @(
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -2034,7 +2040,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-clock-start" -Commands @(
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -2088,7 +2094,7 @@ Invoke-UciSmoke -Name "hybrid-auto" -Commands @(
   "setoption name NNBackendRequireAccelerator value true",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",
@@ -2114,7 +2120,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "setoption name NNBackend value cuda",
   "setoption name NNWeights value \$Bt4",
   "setoption name NNCudaDevice value -1",
-  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
   "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
   "setoption name NNCudaDeterministicAttentionSoftmax value true",
   "setoption name NNCudaFullBufferClear value true",

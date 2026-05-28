@@ -1320,9 +1320,10 @@ def main() -> int:
             "METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE must be a positive integer",
             "NNBackendRequireAccelerator=true",
             "--setoption NNBackend=accelerator",
-            "NNCudaGraphExecution=true",
+            "CUDA_GRAPH_CLI_VALUE",
+            "CUDA_GRAPH_UCI_VALUE",
             "--setoption NNCudaDevice=-1",
-            "--setoption NNCudaGraphExecution=true",
+            '--setoption NNCudaGraphExecution="${CUDA_GRAPH_UCI_VALUE}"',
             '--setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}"',
             "--setoption NNCudaDeterministicAttentionSoftmax=true",
             "--setoption NNCudaFullBufferClear=true",
@@ -1379,7 +1380,7 @@ def main() -> int:
             "METALFISH_CUDA_GRAPH_REPLAY_WARMUP must be a positive integer",
             '--warmup "${CUDA_GRAPH_REPLAY_WARMUP}"',
             "--cuda-device -1",
-            "--cuda-graph-execution true",
+            '--cuda-graph-execution "${CUDA_GRAPH_CLI_VALUE}"',
             '--cuda-stable-execution-batch-size "${CUDA_STABLE_BATCH_SIZE}"',
             "--cuda-deterministic-attention-softmax true",
             "--cuda-full-buffer-clear true",
@@ -1883,11 +1884,13 @@ def main() -> int:
             "cuda_stable_execution_batch_effective=${CUDA_STABLE_BATCH_SIZE}",
             "cuda_deterministic_attention_softmax=true",
             "cuda_full_buffer_clear_effective=true",
-            "NNCudaGraphExecution value true",
+            "CUDA_GRAPH_CLI_VALUE",
+            "CUDA_GRAPH_UCI_VALUE",
+            "NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
             "NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
             "$CudaProbeOptions",
             "--cuda-device -1",
-            "--cuda-graph-execution true",
+            "--cuda-graph-execution ${CUDA_GRAPH_CLI_VALUE}",
             "--cuda-stable-execution-batch-size ${CUDA_STABLE_BATCH_SIZE}",
             "--cuda-deterministic-attention-softmax true",
             "--cuda-full-buffer-clear true",
@@ -2118,6 +2121,20 @@ def main() -> int:
             "SameCudaGraphResourceState",
             "PruneGraphResourceState",
             "GraphStatusName",
+        ],
+    )
+    assert_file_not_contains(
+        PROJ / "tools/run_cuda_gpu_gate.sh",
+        [
+            "--cuda-graph-execution true",
+            "NNCudaGraphExecution=true",
+        ],
+    )
+    assert_file_not_contains(
+        PROJ / "tools/run_gcp_windows_cuda_runtime_gate.sh",
+        [
+            "--cuda-graph-execution true",
+            "NNCudaGraphExecution value true",
         ],
     )
     assert_file_contains(
