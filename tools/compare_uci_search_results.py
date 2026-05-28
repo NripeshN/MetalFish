@@ -9,6 +9,11 @@ import pathlib
 import sys
 from typing import Any
 
+try:
+    from tools.uci_smoke import extract_final_metrics, extract_last_search_info
+except ModuleNotFoundError:
+    from uci_smoke import extract_final_metrics, extract_last_search_info
+
 
 def load_result(path: pathlib.Path) -> dict[str, Any]:
     try:
@@ -21,6 +26,16 @@ def load_result(path: pathlib.Path) -> dict[str, Any]:
         raise ValueError(f"{path}: unsupported schema_version")
     if not payload.get("bestmove"):
         raise ValueError(f"{path}: missing bestmove")
+    transcript_tail = payload.get("transcript_tail") or []
+    if isinstance(transcript_tail, list):
+        if "search_info" not in payload:
+            search_info = extract_last_search_info(transcript_tail)
+            if search_info:
+                payload["search_info"] = search_info
+        if "final_metrics" not in payload:
+            final_metrics = extract_final_metrics(transcript_tail)
+            if final_metrics:
+                payload["final_metrics"] = final_metrics
     return payload
 
 

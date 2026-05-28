@@ -48,6 +48,13 @@ def run_comparer(args: list[str]) -> int:
         return comparer.main(args)
 
 
+def remove_parsed_search_fields(path: pathlib.Path) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.pop("search_info", None)
+    payload.pop("final_metrics", None)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
 def test_uci_smoke_extracts_search_fields() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         result_path = pathlib.Path(tmp) / "result.json"
@@ -66,6 +73,7 @@ def test_compare_uci_search_result_enforces_shape() -> None:
         actual = root / "actual.json"
         write_result(expected, score=96, pv_head="a3b4")
         write_result(actual, score=99, pv_head="a3b4")
+        remove_parsed_search_fields(actual)
         expect(
             "comparison passes",
             run_comparer(
