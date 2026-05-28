@@ -45,11 +45,6 @@ on:
         description: CMAKE_CUDA_ARCHITECTURES value
         required: false
         default: "89"
-      build_tests:
-        description: Compile CUDA-backed test/probe targets; required for release packages
-        required: false
-        default: true
-        type: boolean
 
 concurrency:
   group: metalfish-windows-cuda-compile-${{ github.ref }}
@@ -139,12 +134,11 @@ jobs:
         env:
           METALFISH_CUDA_ARCHS: ${{ inputs.cuda_archs || '89' }}
         run: |
-          $buildTests = if ("${{ inputs.build_tests }}" -eq "false") { "OFF" } else { "ON" }
           tools/run_windows_cuda_compile_gate.ps1 `
             -BuildDir build-windows-cuda `
             -BuildType "${env:BUILD_TYPE}" `
             -CudaArchs "${env:METALFISH_CUDA_ARCHS}" `
-            -BuildTests $buildTests
+            -BuildTests ON
 
       - name: Upload compile artifacts
         if: always()

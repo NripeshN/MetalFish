@@ -943,10 +943,7 @@ function Invoke-ProbeSmoke {
   if ("${CUDA_GRAPH}" -ne "") {
     \$psi.Environment["METALFISH_CUDA_GRAPH"] = "${CUDA_GRAPH}"
   }
-  if ("${CUDA_PROFILE}" -ne "") {
-    \$psi.Environment["METALFISH_CUDA_PROFILE"] = "${CUDA_PROFILE}"
-    \$psi.Environment["METALFISH_CUDA_PROFILE_LIMIT"] = "${CUDA_PROFILE_LIMIT}"
-  }
+  \$psi.Environment["METALFISH_CUDA_PROFILE"] = "0"
   \$proc = [System.Diagnostics.Process]::Start(\$psi)
   \$stdoutTask = \$proc.StandardOutput.ReadToEndAsync()
   \$stderrTask = \$proc.StandardError.ReadToEndAsync()
@@ -1087,10 +1084,7 @@ function Invoke-ProbeSuiteSmoke {
     if ("${CUDA_GRAPH}" -ne "") {
       \$psi.Environment["METALFISH_CUDA_GRAPH"] = "${CUDA_GRAPH}"
     }
-    if ("${CUDA_PROFILE}" -ne "") {
-      \$psi.Environment["METALFISH_CUDA_PROFILE"] = "${CUDA_PROFILE}"
-      \$psi.Environment["METALFISH_CUDA_PROFILE_LIMIT"] = "${CUDA_PROFILE_LIMIT}"
-    }
+    \$psi.Environment["METALFISH_CUDA_PROFILE"] = "0"
     \$proc = [System.Diagnostics.Process]::Start(\$psi)
     \$stdoutTask = \$proc.StandardOutput.ReadToEndAsync()
     \$stderrTask = \$proc.StandardError.ReadToEndAsync()
@@ -1404,7 +1398,8 @@ function Invoke-UciSmoke {
     [string[]]\$Commands,
     [string[]]\$RequiredText,
     [string[]]\$RejectedText = @(),
-    [string[]]\$PositiveMetrics = @()
+    [string[]]\$PositiveMetrics = @(),
+    [bool]\$Profile = \$false
   )
   \$setOptions = @()
   foreach (\$command in \$Commands) {
@@ -1430,9 +1425,11 @@ function Invoke-UciSmoke {
   if ("${CUDA_GRAPH}" -ne "") {
     \$psi.Environment["METALFISH_CUDA_GRAPH"] = "${CUDA_GRAPH}"
   }
-  if ("${CUDA_PROFILE}" -ne "") {
+  if (\$Profile) {
     \$psi.Environment["METALFISH_CUDA_PROFILE"] = "${CUDA_PROFILE}"
     \$psi.Environment["METALFISH_CUDA_PROFILE_LIMIT"] = "${CUDA_PROFILE_LIMIT}"
+  } else {
+    \$psi.Environment["METALFISH_CUDA_PROFILE"] = "0"
   }
 
   \$outBuilder = New-Object System.Text.StringBuilder
@@ -1589,10 +1586,7 @@ function Invoke-UciPonderSmoke {
   if ("${CUDA_GRAPH}" -ne "") {
     \$psi.Environment["METALFISH_CUDA_GRAPH"] = "${CUDA_GRAPH}"
   }
-  if ("${CUDA_PROFILE}" -ne "") {
-    \$psi.Environment["METALFISH_CUDA_PROFILE"] = "${CUDA_PROFILE}"
-    \$psi.Environment["METALFISH_CUDA_PROFILE_LIMIT"] = "${CUDA_PROFILE_LIMIT}"
-  }
+  \$psi.Environment["METALFISH_CUDA_PROFILE"] = "0"
 
   \$outBuilder = New-Object System.Text.StringBuilder
   \$proc = \$null
@@ -2142,6 +2136,34 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
   "go ${HYBRID_UCI_GO}",
   "quit"
 ) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "ANE root probe disabled", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
+
+if ("${CUDA_PROFILE}" -ne "" -and "${CUDA_PROFILE}" -ne "0") {
+  Invoke-UciSmoke -Name "cuda-profile" -Commands @(
+    "uci",
+    "isready",
+    "setoption name EvalFile value \$NnueBig",
+    "setoption name EvalFileSmall value \$NnueSmall",
+    "setoption name Threads value 3",
+    "setoption name NNBackend value cuda",
+    "setoption name NNWeights value \$Bt4",
+    "setoption name NNCudaDevice value -1",
+    "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
+    "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
+    "setoption name NNCudaDeterministicAttentionSoftmax value true",
+    "setoption name NNCudaFullBufferClear value true",
+    "setoption name UseMCTS value false",
+    "setoption name UseHybridSearch value true",
+    "setoption name HybridMCTSThreads value 1",
+    "setoption name HybridABThreads value 2",
+    "setoption name HybridAutoABThreadsCap value 0",
+    "setoption name MCTSMaxThreads value 1",
+    "setoption name MCTSMinibatchSize value 1",
+    "setoption name TransformerLowTimeFallbackMs value 0",
+    "position startpos",
+    "go nodes 8",
+    "quit"
+  ) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "CUDA transformer backend", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals") -Profile \$true
+}
 
 \$ProbeJson = Read-ProbeJson "cuda-probe.stdout.log"
 \$LegacyProbeJson = Read-ProbeJson "cuda-legacy-probe.stdout.log"

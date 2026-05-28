@@ -1521,11 +1521,14 @@ def main() -> int:
             "tests/nn_input_fixture.*",
             "tests/requirements.txt",
             "tests/test_mcts_module.cpp",
+            "-BuildTests ON",
         ],
     )
     assert_file_not_contains(
         PROJ / ".github/workflows/windows-cuda-compile.yml",
         [
+            "build_tests",
+            "$buildTests",
             "Jimver/cuda-toolkit",
             "ilammy/msvc-dev-cmd",
         ],
@@ -1849,6 +1852,10 @@ def main() -> int:
             "cuda-timed-mcts-search.json",
             'Write-SearchJson -Name "cuda-timed-mcts-search"',
             "cuda-ponder-mcts",
+            "cuda-profile",
+            "-Profile \\$true",
+            "[bool]\\$Profile = \\$false",
+            '\\$psi.Environment["METALFISH_CUDA_PROFILE"] = "0"',
             "METALFISH_NN_BATCH_REUSE_STRESS",
             "SINGLE_REUSE_STRESS_MAX:",
             "REUSE_STRESS_MAX:",
