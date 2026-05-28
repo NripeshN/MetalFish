@@ -273,6 +273,7 @@ write_summary() {
     echo "- packaged hybrid CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-search.json")"
     echo "- packaged hybrid kiwipete CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-package-uci-hybrid-kiwipete-search.json")"
     echo "- Linux CUDA package manifest: $(summary_log_status "${BUILD_DIR}/linux-cuda-package-manifest.json")"
+    echo "- Linux CUDA package check: $(summary_log_status "${BUILD_DIR}/linux-cuda-package-check.json")"
     echo "- CUDA profile: $(summary_log_status "${BUILD_DIR}/cuda-gpu-profile.log")"
     echo
     echo "## Failures"
@@ -1055,6 +1056,11 @@ cp "${CUDA_PACKAGE_DIR}/PORTABLE_ARTIFACT.md" "${BUILD_DIR}/PORTABLE_ARTIFACT.md
 cp "${CUDA_PACKAGE_DIR}/linux-cuda-package-manifest.json" \
   "${BUILD_DIR}/linux-cuda-package-manifest.json"
 tar -czf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_DIR}" .
+python3 tools/check_cuda_package_artifacts.py \
+  --package "${CUDA_PACKAGE}" \
+  --package-kind linux-cuda \
+  --expected-source-commit "$(git rev-parse HEAD)" \
+  --json-output "${BUILD_DIR}/linux-cuda-package-check.json"
 tar -xzf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_CHECK_DIR}"
 test -x "${CUDA_PACKAGE_CHECK_DIR}/metalfish"
 test -x "${CUDA_PACKAGE_CHECK_DIR}/metalfish_nn_probe"
