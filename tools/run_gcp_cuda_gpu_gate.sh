@@ -21,6 +21,7 @@ METAL_COMPARISON_LOG="${METALFISH_METAL_COMPARISON_LOG:-}"
 METAL_MCTS_BK07_SEARCH_JSON="${METALFISH_METAL_MCTS_BK07_SEARCH_JSON:-}"
 METAL_MCTS_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON:-}"
 METAL_HYBRID_BK07_SEARCH_JSON="${METALFISH_METAL_HYBRID_BK07_SEARCH_JSON:-}"
+METAL_HYBRID_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON:-}"
 REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
@@ -204,6 +205,8 @@ collect_remote_artifacts() {
     cuda-gpu-uci-kiwipete-search.json \
     cuda-gpu-uci-hybrid-smoke.log \
     cuda-gpu-uci-hybrid-search.json \
+    cuda-gpu-uci-hybrid-kiwipete-smoke.log \
+    cuda-gpu-uci-hybrid-kiwipete-search.json \
     cuda-gpu-uci-hybrid-clock-start-smoke.log \
     cuda-gpu-uci-hybrid-clock-safety-smoke.log \
     cuda-gpu-uci-hybrid-auto-smoke.log \
@@ -280,6 +283,7 @@ write_runtime_manifest() {
     GATE_METAL_MCTS_BK07_SEARCH_JSON="${METAL_MCTS_BK07_SEARCH_JSON}" \
     GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON="${METAL_MCTS_KIWIPETE_SEARCH_JSON}" \
     GATE_METAL_HYBRID_BK07_SEARCH_JSON="${METAL_HYBRID_BK07_SEARCH_JSON}" \
+    GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON="${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" \
     python3 - "${ARTIFACT_DIR}/cuda-gpu-runtime-manifest.json" <<'PY'
 import datetime as _dt
 import hashlib
@@ -358,6 +362,9 @@ manifest = {
         ),
         "metal_hybrid_bk07_search_json": file_record(
             os.environ["GATE_METAL_HYBRID_BK07_SEARCH_JSON"]
+        ),
+        "metal_hybrid_kiwipete_search_json": file_record(
+            os.environ["GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON"]
         ),
     },
     "status": {
@@ -530,7 +537,7 @@ compare_collected_search_results() {
     return 0
   fi
 
-  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" ]]; then
+  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" || -z "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" ]]; then
     if require_metal_search_compare; then
       echo "Metal search JSON inputs are required for search comparison" >&2
       return 1
@@ -549,10 +556,15 @@ compare_collected_search_results() {
     echo "Metal Hybrid search JSON not found: ${METAL_HYBRID_BK07_SEARCH_JSON}" >&2
     return 1
   fi
+  if [[ ! -s "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" ]]; then
+    echo "Metal Hybrid kiwipete search JSON not found: ${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" >&2
+    return 1
+  fi
 
   local cuda_mcts="${ARTIFACT_DIR}/cuda-gpu-uci-bk07-search.json"
   local cuda_mcts_kiwipete="${ARTIFACT_DIR}/cuda-gpu-uci-kiwipete-search.json"
   local cuda_hybrid="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-search.json"
+  local cuda_hybrid_kiwipete="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-kiwipete-search.json"
   if [[ ! -s "${cuda_mcts}" ]]; then
     echo "CUDA MCTS search JSON not found: ${cuda_mcts}" >&2
     return 1
@@ -563,6 +575,10 @@ compare_collected_search_results() {
   fi
   if [[ ! -s "${cuda_hybrid}" ]]; then
     echo "CUDA Hybrid search JSON not found: ${cuda_hybrid}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cuda_hybrid_kiwipete}" ]]; then
+    echo "CUDA Hybrid kiwipete search JSON not found: ${cuda_hybrid_kiwipete}" >&2
     return 1
   fi
 
@@ -589,6 +605,14 @@ compare_collected_search_results() {
     --actual-label "CUDA Hybrid" \
     --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-bk07-search-summary.json" \
     | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-bk07-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" \
+    --actual "${cuda_hybrid_kiwipete}" \
+    --expected-label "Metal Hybrid" \
+    --actual-label "CUDA Hybrid" \
+    --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-kiwipete-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-kiwipete-search-compare.log"
 }
 
 set +e

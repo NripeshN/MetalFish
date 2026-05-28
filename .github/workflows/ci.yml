@@ -302,6 +302,28 @@ jobs:
             --expect-output "Hybrid MCTS runtime: backend=metal" \
             --expect-output "Final: MCTSPlayouts=" \
             --json-out build/metal-hybrid-bk07-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseMCTS=false \
+            --setoption UseHybridSearch=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=3 \
+            --setoption HybridMCTSThreads=1 \
+            --setoption HybridABThreads=2 \
+            --setoption HybridAutoABThreadsCap=0 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1" \
+            --go "nodes 8" \
+            --expect-output "Starting Parallel Hybrid Search" \
+            --expect-output "Hybrid MCTS runtime: backend=metal" \
+            --expect-output "Final: MCTSPlayouts=" \
+            --json-out build/metal-hybrid-kiwipete-search.json
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v6
@@ -320,6 +342,7 @@ jobs:
             build/metal-mcts-bk07-search.json
             build/metal-mcts-kiwipete-search.json
             build/metal-hybrid-bk07-search.json
+            build/metal-hybrid-kiwipete-search.json
             README.md
             CHANGELOG.md
             LICENSE

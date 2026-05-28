@@ -22,6 +22,7 @@ METAL_COMPARISON_LOG="${METALFISH_METAL_COMPARISON_LOG:-}"
 METAL_MCTS_BK07_SEARCH_JSON="${METALFISH_METAL_MCTS_BK07_SEARCH_JSON:-}"
 METAL_MCTS_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON:-}"
 METAL_HYBRID_BK07_SEARCH_JSON="${METALFISH_METAL_HYBRID_BK07_SEARCH_JSON:-}"
+METAL_HYBRID_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON:-}"
 REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
@@ -226,7 +227,7 @@ compare_collected_search_results() {
     return 0
   fi
 
-  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" ]]; then
+  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" || -z "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" ]]; then
     if require_metal_search_compare; then
       echo "Metal search JSON inputs are required for Windows CUDA search comparison" >&2
       return 1
@@ -245,10 +246,15 @@ compare_collected_search_results() {
     echo "Metal Hybrid search JSON not found: ${METAL_HYBRID_BK07_SEARCH_JSON}" >&2
     return 1
   fi
+  if [[ ! -s "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" ]]; then
+    echo "Metal Hybrid kiwipete search JSON not found: ${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" >&2
+    return 1
+  fi
 
   local cuda_mcts="${ARTIFACT_DIR}/logs/cuda-bk07-mcts-search.json"
   local cuda_mcts_kiwipete="${ARTIFACT_DIR}/logs/cuda-kiwipete-mcts-search.json"
   local cuda_hybrid="${ARTIFACT_DIR}/logs/hybrid-cuda-search.json"
+  local cuda_hybrid_kiwipete="${ARTIFACT_DIR}/logs/hybrid-cuda-kiwipete-search.json"
   if [[ ! -s "${cuda_mcts}" ]]; then
     echo "Windows CUDA MCTS search JSON not found: ${cuda_mcts}" >&2
     return 1
@@ -259,6 +265,10 @@ compare_collected_search_results() {
   fi
   if [[ ! -s "${cuda_hybrid}" ]]; then
     echo "Windows CUDA Hybrid search JSON not found: ${cuda_hybrid}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cuda_hybrid_kiwipete}" ]]; then
+    echo "Windows CUDA Hybrid kiwipete search JSON not found: ${cuda_hybrid_kiwipete}" >&2
     return 1
   fi
 
@@ -285,6 +295,14 @@ compare_collected_search_results() {
     --actual-label "Windows CUDA Hybrid" \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-bk07-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-bk07-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" \
+    --actual "${cuda_hybrid_kiwipete}" \
+    --expected-label "Metal Hybrid" \
+    --actual-label "Windows CUDA Hybrid" \
+    --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-kiwipete-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-kiwipete-search-compare.log"
 }
 
 ensure_ssh_key() {
@@ -387,6 +405,7 @@ write_runtime_manifest() {
     GATE_METAL_MCTS_BK07_SEARCH_JSON="${METAL_MCTS_BK07_SEARCH_JSON}" \
     GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON="${METAL_MCTS_KIWIPETE_SEARCH_JSON}" \
     GATE_METAL_HYBRID_BK07_SEARCH_JSON="${METAL_HYBRID_BK07_SEARCH_JSON}" \
+    GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON="${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" \
     GATE_PACKAGE_ZIP="${PACKAGE_ZIP}" \
     GATE_PACKAGE_BASENAME="${PACKAGE_BASENAME}" \
     GATE_WINDOWS_CUDA_COMPILE_RUN_ID="${WINDOWS_CUDA_COMPILE_RUN_ID}" \
@@ -482,6 +501,9 @@ manifest = {
         ),
         "metal_hybrid_bk07_search_json": file_record(
             os.environ["GATE_METAL_HYBRID_BK07_SEARCH_JSON"]
+        ),
+        "metal_hybrid_kiwipete_search_json": file_record(
+            os.environ["GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON"]
         ),
     },
     "runtime": {
@@ -1517,6 +1539,34 @@ Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "quit"
 ) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
 
+Invoke-UciSmoke -Name "hybrid-cuda-kiwipete" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name Threads value 3",
+  "setoption name NNBackend value cuda",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name NNCudaDevice value -1",
+  "setoption name NNCudaGraphExecution value true",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
+  "setoption name NNCudaDeterministicAttentionSoftmax value true",
+  "setoption name NNCudaFullBufferClear value true",
+  "setoption name UseMCTS value false",
+  "setoption name UseHybridSearch value true",
+  "setoption name HybridMCTSThreads value 1",
+  "setoption name HybridABThreads value 2",
+  "setoption name HybridAutoABThreadsCap value 0",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSMinibatchSize value 1",
+  "setoption name MCTSParityPreset value true",
+  "setoption name MCTSAddDirichletNoise value false",
+  "setoption name TransformerLowTimeFallbackMs value 0",
+  "position fen \$KiwipeteFen",
+  "go nodes 8",
+  "quit"
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
+
 Invoke-UciSmoke -Name "hybrid-cuda-clock-start" -Commands @(
   "uci",
   "isready",
@@ -1639,6 +1689,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 \$Bk07MctsText = Read-SmokeText "cuda-bk07-mcts"
 \$KiwipeteMctsText = Read-SmokeText "cuda-kiwipete-mcts"
 \$HybridText = Read-SmokeText "hybrid-cuda"
+\$HybridKiwipeteText = Read-SmokeText "hybrid-cuda-kiwipete"
 \$HybridClockStartText = Read-SmokeText "hybrid-cuda-clock-start"
 \$HybridClockSafetyText = Read-SmokeText "hybrid-cuda-clock-safety"
 \$HybridAutoText = Read-SmokeText "hybrid-auto"
@@ -1647,6 +1698,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 Write-SearchJson -Name "cuda-bk07-mcts-search" -Text \$Bk07MctsText -Position "fen \$Bk07Fen" -Go "nodes 50"
 Write-SearchJson -Name "cuda-kiwipete-mcts-search" -Text \$KiwipeteMctsText -Position "fen \$KiwipeteFen" -Go "nodes 1"
 Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "fen \$Bk07Fen" -Go "${HYBRID_PARITY_UCI_GO}"
+Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText -Position "fen \$KiwipeteFen" -Go "nodes 8"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
 \$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
 \$Manifest = [ordered]@{
@@ -1790,6 +1842,15 @@ Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "fen \$
       stdout_log = "hybrid-cuda.stdout.log"
       stderr_log = "hybrid-cuda.stderr.log"
     }
+    hybrid_cuda_kiwipete = [ordered]@{
+      go = "nodes 8"
+      fen = \$KiwipeteFen
+      bestmove = (Find-BestMove \$HybridKiwipeteText)
+      backend_selected = (Test-BackendSelected \$HybridKiwipeteText)
+      metrics = (Find-FinalMetrics \$HybridKiwipeteText)
+      stdout_log = "hybrid-cuda-kiwipete.stdout.log"
+      stderr_log = "hybrid-cuda-kiwipete.stderr.log"
+    }
     hybrid_cuda_clock_start = [ordered]@{
       go = "wtime 1000 btime 1000 winc 3000 binc 3000"
       bestmove = (Find-BestMove \$HybridClockStartText)
@@ -1833,7 +1894,7 @@ Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "fen \$
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-nn-comparison, cuda-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, cuda-kiwipete-mcts, hybrid-cuda, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-nn-comparison, cuda-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, cuda-kiwipete-mcts, hybrid-cuda, hybrid-cuda-kiwipete, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"

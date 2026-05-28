@@ -1109,6 +1109,9 @@ def runtime_inputs(*, windows_package: pathlib.Path | None = None) -> dict:
         "metal_hybrid_bk07_search_json": metal_log_record(
             "metal-hybrid-bk07.json"
         ),
+        "metal_hybrid_kiwipete_search_json": metal_log_record(
+            "metal-hybrid-kiwipete.json"
+        ),
     }
     if windows_package is not None:
         inputs["package"] = {

@@ -254,6 +254,8 @@ write_summary() {
     echo "- kiwipete CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-kiwipete-search.json")"
     echo "- hybrid CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log")"
     echo "- hybrid CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-search.json")"
+    echo "- hybrid kiwipete CUDA UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-kiwipete-smoke.log")"
+    echo "- hybrid kiwipete CUDA search JSON: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-kiwipete-search.json")"
     echo "- hybrid CUDA clock-start smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log")"
     echo "- hybrid CUDA clock-safety smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-safety-smoke.log")"
     echo "- hybrid auto UCI smoke: $(summary_log_status "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log")"
@@ -453,6 +455,7 @@ write_summary() {
     echo "- cuda-bk07: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-bk07-smoke.log" "not reached")"
     echo "- cuda-kiwipete: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-kiwipete-smoke.log" "not reached")"
     echo "- hybrid-cuda: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log" "not reached")"
+    echo "- hybrid-kiwipete: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-kiwipete-smoke.log" "not reached")"
     echo "- hybrid-clock-start: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-start-smoke.log" "not reached")"
     echo "- hybrid-clock-safety: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-clock-safety-smoke.log" "not reached")"
     echo "- hybrid-auto: $(summary_line_or_missing '^bestmove ' "${BUILD_DIR}/cuda-gpu-uci-hybrid-auto-smoke.log" "not reached")"
@@ -848,6 +851,40 @@ METALFISH_CUDA_PROFILE=0 \
   "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
   "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
   | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-smoke.log"
+
+METALFISH_CUDA_PROFILE=0 \
+  python3 tools/uci_smoke.py \
+  --engine "${BUILD_DIR}/metalfish" \
+  --timeout "${UCI_TIMEOUT}" \
+  --setoption Threads=3 \
+  --setoption NNBackend=cuda \
+  --setoption NNWeights="${WEIGHTS}" \
+  --setoption NNCudaDevice=-1 \
+  --setoption NNCudaGraphExecution=true \
+  --setoption NNCudaStableExecutionBatchSize="${CUDA_STABLE_BATCH_SIZE}" \
+  --setoption NNCudaDeterministicAttentionSoftmax=true \
+  --setoption NNCudaFullBufferClear=true \
+  --setoption UseMCTS=false \
+  --setoption UseHybridSearch=true \
+  --setoption HybridMCTSThreads=1 \
+  --setoption HybridABThreads=2 \
+  --setoption HybridAutoABThreadsCap=0 \
+  --setoption MCTSMaxThreads=1 \
+  --setoption MCTSMinibatchSize=1 \
+  --setoption MCTSParityPreset=true \
+  --setoption MCTSAddDirichletNoise=false \
+  --setoption TransformerLowTimeFallbackMs=0 \
+  --position "fen ${KIWIPETE_FEN}" \
+  --go "nodes 8" \
+  --expect-output "Starting Parallel Hybrid Search" \
+  --expect-output "Hybrid MCTS runtime: backend=cuda" \
+  --expect-output "minibatch=1" \
+  --expect-output "CUDA transformer backend" \
+  --expect-output "Final: MCTSPlayouts=" \
+  --json-out "${BUILD_DIR}/cuda-gpu-uci-hybrid-kiwipete-search.json" \
+  "${UCI_CUDA_RUNTIME_EXPECT_ARGS[@]}" \
+  "${UCI_CUDA_MCTS_WARMUP_EXPECT_ARGS[@]}" \
+  | tee "${BUILD_DIR}/cuda-gpu-uci-hybrid-kiwipete-smoke.log"
 
 METALFISH_CUDA_PROFILE=0 \
   python3 tools/uci_smoke.py \

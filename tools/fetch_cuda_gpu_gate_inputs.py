@@ -222,6 +222,9 @@ def main(argv: list[str] | None = None) -> int:
         metal_dir / "build" / "metal-mcts-kiwipete-search.json"
     )
     hybrid_search_json = metal_dir / "build" / "metal-hybrid-bk07-search.json"
+    hybrid_kiwipete_search_json = (
+        metal_dir / "build" / "metal-hybrid-kiwipete-search.json"
+    )
     for path in (
         bt4_log,
         legacy_log,
@@ -229,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
         mcts_search_json,
         mcts_kiwipete_search_json,
         hybrid_search_json,
+        hybrid_kiwipete_search_json,
     ):
         if not path.is_file() or path.stat().st_size == 0:
             raise FileNotFoundError(path)
@@ -245,6 +249,9 @@ def main(argv: list[str] | None = None) -> int:
             mcts_kiwipete_search_json
         ),
         "METALFISH_METAL_HYBRID_BK07_SEARCH_JSON": str(hybrid_search_json),
+        "METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON": str(
+            hybrid_kiwipete_search_json
+        ),
     }
     env_path = out_dir / "cuda-gpu-gate-env.sh"
     env_path.write_text(shell_exports(env) + "\n", encoding="utf-8")
@@ -286,6 +293,11 @@ def main(argv: list[str] | None = None) -> int:
                 "path": str(hybrid_search_json),
                 "size_bytes": hybrid_search_json.stat().st_size,
                 "sha256": sha256_file(hybrid_search_json),
+            },
+            "metal_hybrid_kiwipete_search_json": {
+                "path": str(hybrid_kiwipete_search_json),
+                "size_bytes": hybrid_kiwipete_search_json.stat().st_size,
+                "sha256": sha256_file(hybrid_kiwipete_search_json),
             },
         },
     }
