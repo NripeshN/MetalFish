@@ -66,6 +66,15 @@ def remove_tree(path: pathlib.Path) -> None:
         shutil.rmtree(path)
 
 
+def clear_selected_artifact_dirs(
+    *, artifact_root: pathlib.Path, needs_linux: bool, needs_windows: bool
+) -> None:
+    if needs_linux:
+        remove_tree(artifact_root / "linux")
+    if needs_windows:
+        remove_tree(artifact_root / "windows")
+
+
 def write_manifest(path: pathlib.Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -448,6 +457,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         created_worktree = True
         artifact_root.mkdir(parents=True, exist_ok=True)
+        clear_selected_artifact_dirs(
+            artifact_root=artifact_root,
+            needs_linux=needs_linux,
+            needs_windows=needs_windows,
+        )
     else:
         print("+ dry-run: skip git worktree add and GCP execution", flush=True)
 

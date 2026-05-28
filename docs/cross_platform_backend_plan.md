@@ -168,11 +168,18 @@ For branch-local direct GCP validation, promote the same artifacts without
 GitHub runtime workflow run IDs:
 
 ```bash
-python3 tools/fetch_cuda_release_artifacts.py \
+python3 tools/dispatch_cuda_release_artifacts.py \
   --direct-runtime-root results/cuda_runtime_direct/<sha> \
   --tag-name v0.1.0-alpha \
   --out-dir results/cuda_release_artifacts/<sha>
 ```
+
+Direct-root promotion intentionally defaults the expected SHA from
+`direct-runtime-gates-manifest.json` rather than the current checkout. That
+keeps a docs-only branch tip from invalidating already completed runtime
+evidence for the engine commit it records. Add `--expected-sha <commit-sha>` to
+pin the check explicitly, or `--attach-to-release` to upload the validated
+packages and manifest to an existing GitHub release.
 
 `tools/fetch_cuda_release_artifacts.py` rejects failed runs, wrong workflow
 types, SHA mismatches, missing CUDA packages, package-manifest drift, and uses

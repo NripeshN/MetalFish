@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
+import subprocess
 import sys
 import time
 
 try:
     import dispatch_cuda_runtime_gates as dispatch
+    import fetch_cuda_release_artifacts as cuda_release
 except ModuleNotFoundError:
     from tools import dispatch_cuda_runtime_gates as dispatch
+    from tools import fetch_cuda_release_artifacts as cuda_release
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -32,6 +36,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--linux-cuda-run-id", default="")
     parser.add_argument("--windows-cuda-runtime-run-id", default="")
+    parser.add_argument(
+        "--direct-runtime-root",
+        default="",
+        help=(
+            "Promote packages locally from a direct runtime root, for example "
+            "results/cuda_runtime_direct/<sha>, instead of dispatching the "
+            "GitHub release workflow."
+        ),
+    )
+    parser.add_argument(
+        "--out-dir",
+        default="results/cuda_release_artifacts",
+        help="Output directory used with --direct-runtime-root.",
+    )
     parser.add_argument("--tag-name", default="")
     parser.add_argument("--lookup-limit", type=int, default=30)
     parser.add_argument(
@@ -45,6 +63,83 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Resolve inputs and print dispatch without starting the workflow.",
     )
     return parser.parse_args(argv)
+
+
+def attach_local_release_artifacts(
+    *, repo: str, tag_name: str, out_dir: pathlib.Path, dry_run: bool
+) -> None:
+    package_dir = out_dir / "packages"
+    files = [
+        *sorted(package_dir.glob("*")),
+        out_dir / "cuda-release-artifacts-manifest.json",
+    ]
+    missing = [str(path) for path in files if not path.is_file()]
+    if missing:
+        raise RuntimeError("release artifacts missing: " + ", ".join(missing))
+    cmd = [
+        "gh",
+        "release",
+        "upload",
+        tag_name,
+        *[str(path) for path in files],
+        "--repo",
+        repo,
+        "--clobber",
+    ]
+    if dry_run:
+        print("+ " + " ".join(cmd))
+        return
+    subprocess.run(cmd, check=True)
+
+
+def promote_direct_runtime_root(args: argparse.Namespace) -> int:
+    if args.linux_cuda_run_id or args.windows_cuda_runtime_run_id:
+        raise RuntimeError("--direct-runtime-root is mutually exclusive with run IDs")
+    if args.attach_to_release and not args.tag_name:
+        raise RuntimeError("--tag-name is required with --attach-to-release")
+
+    out_dir = pathlib.Path(args.out_dir).expanduser().resolve()
+    promote_args = [
+        "--direct-runtime-root",
+        args.direct_runtime_root,
+        "--out-dir",
+        str(out_dir),
+    ]
+    if args.expected_sha:
+        promote_args.extend(["--expected-sha", args.expected_sha])
+    if args.tag_name:
+        promote_args.extend(["--tag-name", args.tag_name])
+
+    print("Local direct CUDA release promotion")
+    print(f"direct_runtime_root={args.direct_runtime_root}")
+    print(f"out_dir={out_dir}")
+    if args.expected_sha:
+        print(f"expected_sha={args.expected_sha}")
+    else:
+        print("expected_sha=<from direct runtime manifest>")
+    if args.dry_run:
+        print("dry_run=true")
+        print("+ python3 tools/fetch_cuda_release_artifacts.py " + " ".join(promote_args))
+        return 0
+
+    result = cuda_release.main(promote_args)
+    if result != 0:
+        return result
+
+    manifest_path = out_dir / "cuda-release-artifacts-manifest.json"
+    print("Validated CUDA release manifest:")
+    print(f"  {manifest_path}")
+    print("Release packages:")
+    for package in sorted((out_dir / "packages").glob("*")):
+        print(f"  {package}")
+
+    if args.attach_to_release:
+        repo = args.repo or dispatch.default_repo()
+        attach_local_release_artifacts(
+            repo=repo, tag_name=args.tag_name, out_dir=out_dir, dry_run=False
+        )
+        print(f"Attached CUDA packages to GitHub release {args.tag_name}")
+    return 0
 
 
 def run_successful_gate(
@@ -69,6 +164,9 @@ def run_successful_gate(
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.direct_runtime_root:
+        return promote_direct_runtime_root(args)
+
     repo = args.repo or dispatch.default_repo()
     ref = args.ref or dispatch.git_value(["rev-parse", "--abbrev-ref", "HEAD"])
     gate_ref = args.gate_ref or ref

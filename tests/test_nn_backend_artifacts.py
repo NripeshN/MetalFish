@@ -20,6 +20,7 @@ from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_benchmarks as benchmark_comparer  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
 from tools import download_engine_networks as downloader  # noqa: E402
+from tools import dispatch_cuda_release_artifacts as cuda_release_dispatch  # noqa: E402
 from tools import fetch_cuda_gpu_gate_inputs as cuda_gpu_inputs  # noqa: E402
 from tools import fetch_cuda_release_artifacts as cuda_release  # noqa: E402
 from tools import fetch_windows_cuda_runtime_inputs as win_cuda_inputs  # noqa: E402
@@ -1541,6 +1542,48 @@ def test_cuda_release_artifacts_reject_direct_runtime_single_target() -> None:
     raise AssertionError("expected single-target direct runtime manifest to fail")
 
 
+def test_cuda_release_dispatch_direct_root_uses_manifest_sha_default() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        direct_root = root / "direct"
+        out_dir = root / "release"
+        direct_root.mkdir()
+        calls: list[list[str]] = []
+        old_main = cuda_release_dispatch.cuda_release.main
+
+        def fake_promote(args: list[str]) -> int:
+            calls.append(list(args))
+            return 0
+
+        cuda_release_dispatch.cuda_release.main = fake_promote
+        try:
+            expect(
+                "direct dispatch promotion",
+                cuda_release_dispatch.main(
+                    [
+                        "--direct-runtime-root",
+                        str(direct_root),
+                        "--out-dir",
+                        str(out_dir),
+                        "--tag-name",
+                        "v0.1.0-alpha",
+                    ]
+                )
+                == 0,
+            )
+        finally:
+            cuda_release_dispatch.cuda_release.main = old_main
+
+        expect("direct dispatch called promote", len(calls) == 1)
+        expect("direct root forwarded", "--direct-runtime-root" in calls[0])
+        expect("out dir forwarded", "--out-dir" in calls[0])
+        expect("tag forwarded", "--tag-name" in calls[0])
+        expect(
+            "direct dispatch does not default to checkout head",
+            "--expected-sha" not in calls[0],
+        )
+
+
 def test_cuda_release_artifacts_accept_split_direct_runtime_manifest() -> None:
     cuda_release.validate_direct_runtime_manifest(
         {
@@ -1600,6 +1643,83 @@ def test_direct_runtime_manifest_merge_preserves_split_targets() -> None:
     expect("merged windows run id", merged["windows_cuda_run_id"] == "2")
     expect("merged created preserved", merged["created_at_unix"] == 100)
     expect("merged updated recorded", merged["updated_at_unix"] == 200)
+
+
+def test_direct_runtime_clears_only_selected_artifact_dir() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        artifact_root = root / "artifacts"
+        linux_dir = artifact_root / "linux"
+        windows_dir = artifact_root / "windows"
+        linux_dir.mkdir(parents=True)
+        windows_dir.mkdir(parents=True)
+        (linux_dir / "stale-package.tar.gz").write_text("old", encoding="utf-8")
+        (windows_dir / "kept-package.zip").write_text("old", encoding="utf-8")
+
+        calls: list[tuple[list[str], pathlib.Path, dict[str, str] | None]] = []
+        old_resolve_runs = direct_runtime.resolve_runs
+        old_run_command = direct_runtime.run_command
+
+        def fake_resolve_runs(
+            args: object, repo: str, ref: str, expected_sha: str
+        ) -> dict:
+            return {
+                "metal_ci_run_id": "",
+                "windows_cuda_run_id": "",
+                "metal_run": None,
+                "windows_run": None,
+            }
+
+        def fake_run_command(
+            cmd: list[str],
+            *,
+            cwd: pathlib.Path,
+            env: dict[str, str] | None = None,
+            dry_run: bool,
+        ) -> None:
+            calls.append((list(cmd), cwd, None if env is None else dict(env)))
+
+        direct_runtime.resolve_runs = fake_resolve_runs
+        direct_runtime.run_command = fake_run_command
+        try:
+            expect(
+                "direct runtime selected cleanup",
+                direct_runtime.main(
+                    [
+                        "--repo",
+                        "owner/repo",
+                        "--ref",
+                        "cuda-support",
+                        "--expected-sha",
+                        "abc123",
+                        "--target",
+                        "linux",
+                        "--no-require-metal",
+                        "--artifact-root",
+                        str(artifact_root),
+                        "--worktree-dir",
+                        str(root / "worktree"),
+                    ]
+                )
+                == 0,
+            )
+        finally:
+            direct_runtime.resolve_runs = old_resolve_runs
+            direct_runtime.run_command = old_run_command
+
+        expect("selected linux artifacts cleared", not linux_dir.exists())
+        expect(
+            "non-selected windows artifacts kept",
+            (windows_dir / "kept-package.zip").is_file(),
+        )
+        expect(
+            "linux gate still targeted selected dir",
+            any(
+                env is not None
+                and env.get("METALFISH_GCP_ARTIFACT_DIR") == str(linux_dir.resolve())
+                for _, _, env in calls
+            ),
+        )
 
 
 def test_cuda_release_artifact_helpers_reject_failed_runtime() -> None:
@@ -1935,8 +2055,10 @@ def main() -> int:
     test_cuda_package_validator_rejects_unmanifested_archive_entries()
     test_cuda_release_artifacts_promote_direct_runtime_root()
     test_cuda_release_artifacts_reject_direct_runtime_single_target()
+    test_cuda_release_dispatch_direct_root_uses_manifest_sha_default()
     test_cuda_release_artifacts_accept_split_direct_runtime_manifest()
     test_direct_runtime_manifest_merge_preserves_split_targets()
+    test_direct_runtime_clears_only_selected_artifact_dir()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
     test_cuda_runtime_manifest_rejects_head_sha_drift()
     test_cuda_package_validator_rejects_source_commit_drift()
