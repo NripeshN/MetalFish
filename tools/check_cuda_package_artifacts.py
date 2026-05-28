@@ -35,6 +35,11 @@ REQUIRED_WINDOWS_CUDA_DLL_PATTERNS = (
     "cublas64_*.dll",
     "cublasLt64_*.dll",
 )
+REQUIRED_WINDOWS_VCPKG_DLL_PATTERNS = (
+    "abseil_dll.dll",
+    "libprotobuf*.dll",
+    "z*.dll",
+)
 
 
 def normalize_archive_name(name: str) -> str:
@@ -120,6 +125,25 @@ def require_manifest_hashes(
                 raise ValueError(f"Linux CUDA archive entry is not executable: {name}")
 
 
+def require_manifest_file_set(
+    manifest: dict, archive_records: dict[str, dict], *, manifest_name: str
+) -> None:
+    expected = manifest_file_names(manifest) | {manifest_name}
+    actual = set(archive_records)
+    missing = sorted(expected - actual)
+    if missing:
+        raise ValueError(
+            "CUDA package archive is missing manifest-covered entries: "
+            + ", ".join(missing)
+        )
+    extra = sorted(actual - expected)
+    if extra:
+        raise ValueError(
+            "CUDA package archive contains unmanifested entries: "
+            + ", ".join(extra)
+        )
+
+
 def read_tar_records(archive: tarfile.TarFile) -> dict[str, dict]:
     records: dict[str, dict] = {}
     for member in archive.getmembers():
@@ -181,6 +205,11 @@ def validate_linux_cuda_package(
         package_kind="linux-cuda",
         expected_source_commit=expected_source_commit,
     )
+    require_manifest_file_set(
+        manifest,
+        archive_records,
+        manifest_name="linux-cuda-package-manifest.json",
+    )
     missing_manifest = sorted(REQUIRED_LINUX_CUDA_FILES - manifest_file_names(manifest))
     if missing_manifest:
         raise ValueError(
@@ -221,6 +250,11 @@ def validate_windows_cuda_package(
         package_kind="windows-cuda",
         expected_source_commit=expected_source_commit,
     )
+    require_manifest_file_set(
+        manifest,
+        archive_records,
+        manifest_name="windows-cuda-package-manifest.json",
+    )
     manifest_files = manifest_file_names(manifest)
     missing_manifest = sorted(REQUIRED_WINDOWS_CUDA_FILES - manifest_files)
     if missing_manifest:
@@ -228,24 +262,27 @@ def validate_windows_cuda_package(
             "Windows CUDA package manifest is missing file entries: "
             + ", ".join(missing_manifest)
         )
+    required_dll_patterns = (
+        REQUIRED_WINDOWS_CUDA_DLL_PATTERNS + REQUIRED_WINDOWS_VCPKG_DLL_PATTERNS
+    )
     missing_manifest_dlls = [
         pattern
-        for pattern in REQUIRED_WINDOWS_CUDA_DLL_PATTERNS
+        for pattern in required_dll_patterns
         if not any(fnmatch.fnmatch(name, pattern) for name in manifest_files)
     ]
     if missing_manifest_dlls:
         raise ValueError(
-            "Windows CUDA package manifest is missing CUDA DLL entries: "
+            "Windows CUDA package manifest is missing runtime DLL entries: "
             + ", ".join(missing_manifest_dlls)
         )
     missing_zip_dlls = [
         pattern
-        for pattern in REQUIRED_WINDOWS_CUDA_DLL_PATTERNS
+        for pattern in required_dll_patterns
         if not any(fnmatch.fnmatch(name, pattern) for name in names)
     ]
     if missing_zip_dlls:
         raise ValueError(
-            "Windows CUDA package zip is missing CUDA DLL entries: "
+            "Windows CUDA package zip is missing runtime DLL entries: "
             + ", ".join(missing_zip_dlls)
         )
     require_manifest_hashes(manifest, archive_records)

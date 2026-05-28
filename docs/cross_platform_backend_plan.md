@@ -186,9 +186,10 @@ is used for GitHub workflow artifacts and direct runtime roots. Direct runtime
 promotion accepts either a single `--target both` root or a root populated by
 separate same-SHA Linux and Windows direct runs; the Linux and Windows runtime
 manifests remain the release authority for each package. The CUDA package
-validator checks package manifest `source_commit`, size, SHA-256, and required
-Linux executable bits against the same successful gate SHA before release
-packaging, and runtime manifests must report the same `git.head_sha`.
+validator checks package manifest `source_commit`, exact archive file coverage,
+size, SHA-256, required Windows runtime DLLs, and required Linux executable bits
+against the same successful gate SHA before release packaging, and runtime
+manifests must report the same `git.head_sha`.
 
 Current CUDA backend boundary:
 

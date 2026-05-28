@@ -1020,6 +1020,9 @@ def write_release_package_files(
             "cudart64_12.dll",
             "cublas64_12.dll",
             "cublasLt64_12.dll",
+            "abseil_dll.dll",
+            "libprotobuf.dll",
+            "z.dll",
         ]
         manifest_name = "windows-cuda-package-manifest.json"
     else:
@@ -1228,6 +1231,30 @@ def test_cuda_release_artifact_helpers_validate_packages_and_manifests() -> None
             )
             == "metalfish-v0.1.0-alpha-linux-x86_64-cuda.tar.gz",
         )
+
+
+def test_cuda_package_validator_rejects_unmanifested_archive_entries() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        windows_dir = root / "windows-package"
+        write_release_package_files(
+            windows_dir, package_kind="windows-cuda", windows=True
+        )
+        extra = windows_dir / "unexpected.dll"
+        extra.write_text("unmanifested\n", encoding="utf-8")
+        windows_package = root / "metalfish-windows-x86_64-msvc-cuda.zip"
+        with zipfile.ZipFile(windows_package, "w") as archive:
+            for path in sorted(windows_dir.iterdir()):
+                archive.write(path, arcname=path.name)
+        try:
+            cuda_release.validate_windows_cuda_package(
+                windows_package,
+                expected_source_commit="abc123",
+            )
+        except ValueError as exc:
+            expect("unmanifested entry rejected", "unmanifested entries" in str(exc))
+            return
+    raise AssertionError("expected unmanifested Windows CUDA archive entry rejection")
 
 
 def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
@@ -1735,6 +1762,7 @@ def main() -> int:
     test_cuda_runtime_input_helpers_validate_complete_zip()
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
+    test_cuda_package_validator_rejects_unmanifested_archive_entries()
     test_cuda_release_artifacts_promote_direct_runtime_root()
     test_direct_runtime_manifest_merge_preserves_split_targets()
     test_cuda_release_artifact_helpers_reject_failed_runtime()
