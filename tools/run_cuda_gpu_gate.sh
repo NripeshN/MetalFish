@@ -19,6 +19,7 @@ CUDA_PACKAGE="${METALFISH_CUDA_PACKAGE:-${BUILD_DIR}/${CUDA_PACKAGE_NAME}.tar.gz
 CUDA_PROFILE_REQUESTED="${METALFISH_CUDA_PROFILE:-0}"
 CUDA_PROFILE_LIMIT="${METALFISH_CUDA_PROFILE_LIMIT:-8}"
 CUDA_STABLE_BATCH_SIZE="${METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
+CUDA_GRAPH_REPLAY_WARMUP="${METALFISH_CUDA_GRAPH_REPLAY_WARMUP:-2}"
 CUDA_GRAPH_REQUESTED=1
 if [[ "${METALFISH_CUDA_GRAPH:-}" == "0" ||
       "${METALFISH_CUDA_GRAPH_EXECUTION:-}" == "0" ]]; then
@@ -57,6 +58,10 @@ if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
 fi
 if [[ ! "${CUDA_STABLE_BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
   echo "METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "${CUDA_GRAPH_REPLAY_WARMUP}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "METALFISH_CUDA_GRAPH_REPLAY_WARMUP must be a positive integer" >&2
   exit 2
 fi
 
@@ -213,6 +218,7 @@ write_summary() {
     echo "- Explicit CUDA UCI go: ${UCI_GO}"
     echo "- Batch worst trace: ${METALFISH_NN_BATCH_TRACE_WORST:-1}"
     echo "- Single repeat stress: ${METALFISH_NN_SINGLE_REPEAT_STRESS:-1}"
+    echo "- CUDA graph replay warmup: ${CUDA_GRAPH_REPLAY_WARMUP}"
     echo "- Single reuse stress: ${METALFISH_NN_SINGLE_REUSE_STRESS:-1}"
     echo "- Batch reuse stress: ${METALFISH_NN_BATCH_REUSE_STRESS:-1}"
     echo "- CUDA full buffer clear: ${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}"
@@ -632,7 +638,7 @@ METALFISH_CUDA_PROFILE=0 \
   --out "${BUILD_DIR}/cuda-gpu-nn-probe-suite.log" \
   --top 3 \
   --batch-size 2 \
-  --warmup 1 \
+  --warmup "${CUDA_GRAPH_REPLAY_WARMUP}" \
   --iterations 1 \
   --backend-label "CUDA transformer backend" \
   "${CUDA_RUNTIME_REQUIRE_ARGS[@]}" \
@@ -659,7 +665,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --out "${BUILD_DIR}/cuda-gpu-legacy-nn-probe-suite.log" \
     --top 3 \
     --batch-size 2 \
-    --warmup 1 \
+    --warmup "${CUDA_GRAPH_REPLAY_WARMUP}" \
     --iterations 1 \
     --backend-label "CUDA transformer backend" \
     "${CUDA_RUNTIME_REQUIRE_ARGS[@]}" \
@@ -680,7 +686,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
     --top 3 \
-    --warmup 1 \
+    --warmup "${CUDA_GRAPH_REPLAY_WARMUP}" \
     --iterations 1 \
     2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-isolation-bt4-legacy.log"
   assert_cuda_isolation_probe_log \
@@ -698,7 +704,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
     --top 3 \
-    --warmup 1 \
+    --warmup "${CUDA_GRAPH_REPLAY_WARMUP}" \
     --iterations 1 \
     2>&1 | tee "${BUILD_DIR}/cuda-gpu-nn-isolation-legacy-bt4.log"
   assert_cuda_isolation_probe_log \
@@ -1123,7 +1129,7 @@ METALFISH_CUDA_PROFILE=0 \
   --cuda-deterministic-attention-softmax true \
   --cuda-full-buffer-clear true \
   --top 3 \
-  --warmup 1 \
+  --warmup "${CUDA_GRAPH_REPLAY_WARMUP}" \
   --iterations 1 \
   2>&1 | tee "${BUILD_DIR}/cuda-gpu-package-probe.log"
 grep -q '"backend":"cuda"' "${BUILD_DIR}/cuda-gpu-package-probe.log"
@@ -1143,7 +1149,7 @@ METALFISH_CUDA_PROFILE=0 \
   --out "${BUILD_DIR}/cuda-gpu-package-nn-probe-suite.log" \
   --top 3 \
   --batch-size 2 \
-  --warmup 1 \
+  --warmup "${CUDA_GRAPH_REPLAY_WARMUP}" \
   --iterations 1 \
   --backend-label "CUDA transformer backend" \
   "${CUDA_RUNTIME_REQUIRE_ARGS[@]}" \
@@ -1166,7 +1172,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --out "${BUILD_DIR}/cuda-gpu-package-legacy-nn-probe-suite.log" \
     --top 3 \
     --batch-size 2 \
-    --warmup 1 \
+    --warmup "${CUDA_GRAPH_REPLAY_WARMUP}" \
     --iterations 1 \
     --backend-label "CUDA transformer backend" \
     "${CUDA_RUNTIME_REQUIRE_ARGS[@]}" \
@@ -1187,7 +1193,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
     --top 3 \
-    --warmup 1 \
+    --warmup "${CUDA_GRAPH_REPLAY_WARMUP}" \
     --iterations 1 \
     2>&1 | tee "${BUILD_DIR}/cuda-gpu-package-nn-isolation-bt4-legacy.log"
   assert_cuda_isolation_probe_log \
@@ -1205,7 +1211,7 @@ if [[ "${METALFISH_CUDA_LEGACY_PROBE:-1}" == "1" ]]; then
     --cuda-deterministic-attention-softmax true \
     --cuda-full-buffer-clear true \
     --top 3 \
-    --warmup 1 \
+    --warmup "${CUDA_GRAPH_REPLAY_WARMUP}" \
     --iterations 1 \
     2>&1 | tee "${BUILD_DIR}/cuda-gpu-package-nn-isolation-legacy-bt4.log"
   assert_cuda_isolation_probe_log \

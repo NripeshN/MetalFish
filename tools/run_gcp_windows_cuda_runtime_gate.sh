@@ -48,6 +48,7 @@ CUDA_GRAPH="${METALFISH_WINDOWS_CUDA_GRAPH:-}"
 CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
 CUDA_PROFILE_LIMIT="${METALFISH_WINDOWS_CUDA_PROFILE_LIMIT:-2}"
 CUDA_STABLE_BATCH_SIZE="${METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
+CUDA_GRAPH_REPLAY_WARMUP="${METALFISH_WINDOWS_CUDA_GRAPH_REPLAY_WARMUP:-2}"
 WINDOWS_CUDA_COMPILE_RUN_ID="${METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID:-}"
 DRIVER_SCRIPT_URL="${METALFISH_WINDOWS_GPU_DRIVER_SCRIPT_URL:-https://github.com/GoogleCloudPlatform/compute-gpu-installation/raw/main/windows/install_gpu_driver.ps1}"
 CREATED_INSTANCE=0
@@ -59,6 +60,10 @@ PACKAGE_BASENAME="$(basename "${PACKAGE_ZIP}")"
 
 if [[ ! "${CUDA_STABLE_BATCH_SIZE}" =~ ^[1-9][0-9]*$ ]]; then
   echo "METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "${CUDA_GRAPH_REPLAY_WARMUP}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "METALFISH_WINDOWS_CUDA_GRAPH_REPLAY_WARMUP must be a positive integer" >&2
   exit 2
 fi
 
@@ -1040,7 +1045,7 @@ function Invoke-ProbeSuiteSmoke {
       " --cuda-stable-execution-batch-size ${CUDA_STABLE_BATCH_SIZE}" +
       " --cuda-deterministic-attention-softmax true" +
       " --cuda-full-buffer-clear true" +
-      " --top 3 --batch-size 2 --warmup 1 --iterations 1 --full-policy"
+      " --top 3 --batch-size 2 --warmup ${CUDA_GRAPH_REPLAY_WARMUP} --iterations 1 --full-policy"
     if (-not [string]::IsNullOrWhiteSpace(\$moves)) {
       \$arguments += " --moves " + (Quote-ProbeArgument \$moves)
     }
@@ -1541,9 +1546,9 @@ function Invoke-UciSmoke {
   " --cuda-deterministic-attention-softmax true" +
   " --cuda-full-buffer-clear true"
 
-\$ProbeArgs = "--weights " + [char]34 + \$Bt4 + [char]34 + \$CudaProbeOptions + " --batch-size 1 --warmup 1 --iterations 1 --top 3"
+\$ProbeArgs = "--weights " + [char]34 + \$Bt4 + [char]34 + \$CudaProbeOptions + " --batch-size 1 --warmup ${CUDA_GRAPH_REPLAY_WARMUP} --iterations 1 --top 3"
 Invoke-ProbeSmoke -Name "cuda-probe" -Arguments \$ProbeArgs -RequiredText (\$CudaNetworkInfoRequiredText + @('"backend":"cuda"', "CUDA transformer backend", '"value":', '"policy_top":'))
-\$LegacyProbeArgs = "--weights " + [char]34 + \$Legacy + [char]34 + \$CudaProbeOptions + " --batch-size 1 --warmup 1 --iterations 1 --top 3"
+\$LegacyProbeArgs = "--weights " + [char]34 + \$Legacy + [char]34 + \$CudaProbeOptions + " --batch-size 1 --warmup ${CUDA_GRAPH_REPLAY_WARMUP} --iterations 1 --top 3"
 Invoke-ProbeSmoke -Name "cuda-legacy-probe" -Arguments \$LegacyProbeArgs -RequiredText (\$CudaNetworkInfoRequiredText + @('"backend":"cuda"', "CUDA transformer backend", '"has_wdl":false', '"has_moves_left":false', '"policy_top":'))
 \$ProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-probe-suite" -Weights \$Bt4 -RequireWdl \$true -RequireMovesLeft \$true
 \$LegacyProbeSuite = Invoke-ProbeSuiteSmoke -Name "cuda-legacy-probe-suite" -Weights \$Legacy -RequireWdl \$false -RequireMovesLeft \$false
@@ -1553,11 +1558,11 @@ if ("${CUDA_GRAPH}" -ne "0") {
 }
 \$IsolationBt4LegacyArgs = "--weights " + [char]34 + \$Bt4 + [char]34 +
   " --isolation-weights " + [char]34 + \$Legacy + [char]34 +
-  \$CudaProbeOptions + " --warmup 1 --iterations 1 --top 3"
+  \$CudaProbeOptions + " --warmup ${CUDA_GRAPH_REPLAY_WARMUP} --iterations 1 --top 3"
 Invoke-ProbeSmoke -Name "cuda-isolation-bt4-legacy" -Arguments \$IsolationBt4LegacyArgs -RequiredText \$IsolationRequiredText
 \$IsolationLegacyBt4Args = "--weights " + [char]34 + \$Legacy + [char]34 +
   " --isolation-weights " + [char]34 + \$Bt4 + [char]34 +
-  \$CudaProbeOptions + " --warmup 1 --iterations 1 --top 3"
+  \$CudaProbeOptions + " --warmup ${CUDA_GRAPH_REPLAY_WARMUP} --iterations 1 --top 3"
 Invoke-ProbeSmoke -Name "cuda-isolation-legacy-bt4" -Arguments \$IsolationLegacyBt4Args -RequiredText \$IsolationRequiredText
 
 \$ComparisonRequiredText = @(
