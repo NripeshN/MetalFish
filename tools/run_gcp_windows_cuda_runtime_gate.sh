@@ -1265,58 +1265,49 @@ function Find-LastSearchInfo {
     return [ordered]@{}
   }
   \$line = \$matches[\$matches.Count - 1].Value.Trim()
-  \$tokens = @(\$line -split "\s+")
   \$info = [ordered]@{ raw = \$line }
-  \$i = 1
-  while (\$i -lt \$tokens.Count) {
-    \$token = \$tokens[\$i]
-    switch -Regex (\$token) {
-      "^(depth|seldepth|nodes|nps)$" {
-        if (\$i + 1 -lt \$tokens.Count) {
-          \$value = 0L
-          if ([int64]::TryParse(\$tokens[\$i + 1], [ref]\$value)) {
-            \$info[\$token] = \$value
-          }
-          \$i += 2
-          continue
-        }
-      }
-      "^time$" {
-        if (\$i + 1 -lt \$tokens.Count) {
-          \$value = 0L
-          if ([int64]::TryParse(\$tokens[\$i + 1], [ref]\$value)) {
-            \$info["time_ms"] = \$value
-          }
-          \$i += 2
-          continue
-        }
-      }
-      "^score$" {
-        if (\$i + 2 -lt \$tokens.Count) {
-          \$scoreValue = 0L
-          if ([int64]::TryParse(\$tokens[\$i + 2], [ref]\$scoreValue)) {
-            \$info["score"] = [ordered]@{
-              type = \$tokens[\$i + 1]
-              value = \$scoreValue
-            }
-          }
-          \$i += 3
-          continue
-        }
-      }
-      "^pv$" {
-        \$pv = @()
-        for (\$j = \$i + 1; \$j -lt \$tokens.Count; \$j++) {
-          if (\$tokens[\$j] -eq "string") {
-            break
-          }
-          \$pv += \$tokens[\$j]
-        }
-        \$info["pv"] = \$pv
-        break
+
+  foreach (\$name in @("depth", "seldepth", "nodes", "nps")) {
+    \$match = [regex]::Match(\$line, "\b" + \$name + "\s+(-?\d+)\b")
+    if (\$match.Success) {
+      \$value = 0L
+      if ([int64]::TryParse(\$match.Groups[1].Value, [ref]\$value)) {
+        \$info[\$name] = \$value
       }
     }
-    \$i += 1
+  }
+
+  \$timeMatch = [regex]::Match(\$line, "\btime\s+(-?\d+)\b")
+  if (\$timeMatch.Success) {
+    \$value = 0L
+    if ([int64]::TryParse(\$timeMatch.Groups[1].Value, [ref]\$value)) {
+      \$info["time_ms"] = \$value
+    }
+  }
+
+  \$scoreMatch = [regex]::Match(\$line, "\bscore\s+(\S+)\s+(-?\d+)\b")
+  if (\$scoreMatch.Success) {
+    \$scoreValue = 0L
+    if ([int64]::TryParse(\$scoreMatch.Groups[2].Value, [ref]\$scoreValue)) {
+      \$info["score"] = [ordered]@{
+        type = \$scoreMatch.Groups[1].Value
+        value = \$scoreValue
+      }
+    }
+  }
+
+  \$pvMatch = [regex]::Match(\$line, "\bpv\s+(.+)$")
+  if (\$pvMatch.Success) {
+    \$pv = @()
+    foreach (\$move in @(\$pvMatch.Groups[1].Value -split "\s+")) {
+      if (\$move -eq "string") {
+        break
+      }
+      if (-not [string]::IsNullOrWhiteSpace(\$move)) {
+        \$pv += \$move
+      }
+    }
+    \$info["pv"] = \$pv
   }
   return \$info
 }
