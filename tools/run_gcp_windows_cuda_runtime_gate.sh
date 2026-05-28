@@ -42,6 +42,8 @@ PROBE_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_PROBE_TIMEOUT:-420}"
 COMPARISON_TIMEOUT_SECONDS="${METALFISH_WINDOWS_CUDA_COMPARISON_TIMEOUT:-900}"
 UCI_GO="${METALFISH_WINDOWS_CUDA_UCI_GO:-nodes 1}"
 MCTS_TIMED_UCI_GO="${METALFISH_WINDOWS_CUDA_MCTS_TIMED_UCI_GO:-movetime 500}"
+MCTS_PONDER_UCI_GO="${METALFISH_WINDOWS_CUDA_MCTS_PONDER_UCI_GO:-wtime 60000 btime 60000 winc 1000 binc 1000}"
+MCTS_PONDER_SETTLE_MS="${METALFISH_WINDOWS_CUDA_MCTS_PONDER_SETTLE_MS:-600}"
 HYBRID_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_UCI_GO:-nodes 8}"
 HYBRID_PARITY_UCI_GO="${METALFISH_WINDOWS_CUDA_HYBRID_PARITY_UCI_GO:-nodes 50}"
 UCI_TRACE="${METALFISH_WINDOWS_UCI_TRACE:-1}"
@@ -485,6 +487,8 @@ write_runtime_manifest() {
     GATE_CUDA_PROFILE_LIMIT="${CUDA_PROFILE_LIMIT}" \
     GATE_UCI_GO="${UCI_GO}" \
     GATE_MCTS_TIMED_UCI_GO="${MCTS_TIMED_UCI_GO}" \
+    GATE_MCTS_PONDER_UCI_GO="${MCTS_PONDER_UCI_GO}" \
+    GATE_MCTS_PONDER_SETTLE_MS="${MCTS_PONDER_SETTLE_MS}" \
     GATE_HYBRID_UCI_GO="${HYBRID_UCI_GO}" \
     python3 - "${ARTIFACT_DIR}/windows-cuda-runtime-gate-manifest.json" <<'PY'
 import datetime as _dt
@@ -586,6 +590,8 @@ manifest = {
         "cuda_profile_limit": os.environ["GATE_CUDA_PROFILE_LIMIT"],
         "uci_go": os.environ["GATE_UCI_GO"],
         "mcts_timed_uci_go": os.environ["GATE_MCTS_TIMED_UCI_GO"],
+        "mcts_ponder_uci_go": os.environ["GATE_MCTS_PONDER_UCI_GO"],
+        "mcts_ponder_settle_ms": os.environ["GATE_MCTS_PONDER_SETTLE_MS"],
         "hybrid_uci_go": os.environ["GATE_HYBRID_UCI_GO"],
         "hybrid_parity_uci_go": "${HYBRID_PARITY_UCI_GO}",
     },
@@ -1537,6 +1543,211 @@ function Invoke-UciSmoke {
   }
 }
 
+function Invoke-UciPonderSmoke {
+  param(
+    [string]\$Name,
+    [string[]]\$Options,
+    [string]\$Position,
+    [string]\$PonderGo,
+    [int]\$SettleMs,
+    [string]\$FollowupGo,
+    [string[]]\$RequiredText,
+    [string[]]\$RejectedText = @()
+  )
+  \$script:UciSmokeSetOptions[\$Name] = \$Options
+  \$stdout = Join-Path \$Logs "\$Name.stdout.log"
+  \$stderr = Join-Path \$Logs "\$Name.stderr.log"
+  \$psi = New-Object System.Diagnostics.ProcessStartInfo
+  \$psi.FileName = \$Engine
+  \$psi.WorkingDirectory = \$PackageDir
+  \$psi.RedirectStandardInput = \$true
+  \$psi.RedirectStandardOutput = \$true
+  \$psi.RedirectStandardError = \$true
+  \$psi.UseShellExecute = \$false
+  \$psi.CreateNoWindow = \$true
+  if ("${UCI_TRACE}" -ne "") {
+    \$psi.Environment["METALFISH_UCI_TRACE"] = "${UCI_TRACE}"
+  }
+  if ("${CUDA_GRAPH}" -ne "") {
+    \$psi.Environment["METALFISH_CUDA_GRAPH"] = "${CUDA_GRAPH}"
+  }
+  if ("${CUDA_PROFILE}" -ne "") {
+    \$psi.Environment["METALFISH_CUDA_PROFILE"] = "${CUDA_PROFILE}"
+    \$psi.Environment["METALFISH_CUDA_PROFILE_LIMIT"] = "${CUDA_PROFILE_LIMIT}"
+  }
+
+  \$outBuilder = New-Object System.Text.StringBuilder
+  \$proc = \$null
+  \$stdoutTask = \$null
+  \$stderrTask = \$null
+  \$failed = \$false
+  \$timedOut = \$false
+  \$failureMessage = ""
+
+  try {
+    \$proc = New-Object System.Diagnostics.Process
+    \$proc.StartInfo = \$psi
+    [void]\$proc.Start()
+    \$stdoutTask = \$proc.StandardOutput.ReadLineAsync()
+    \$stderrTask = \$proc.StandardError.ReadToEndAsync()
+    \$deadline = [DateTime]::UtcNow.AddSeconds(${UCI_TIMEOUT_SECONDS})
+
+    \$proc.StandardInput.WriteLine("uci")
+    \$proc.StandardInput.Flush()
+    if (-not (Read-UciUntil -Proc \$proc -StdoutTask ([ref]\$stdoutTask) -OutBuilder \$outBuilder -Deadline \$deadline -Pattern "^uciok$")) {
+      \$failureMessage = "timed out waiting for uciok"
+      \$timedOut = \$true
+    }
+
+    if (-not \$timedOut) {
+      foreach (\$option in \$Options) {
+        \$proc.StandardInput.WriteLine("setoption name " + \$option)
+      }
+      \$proc.StandardInput.WriteLine("isready")
+      \$proc.StandardInput.Flush()
+      if (-not (Read-UciUntil -Proc \$proc -StdoutTask ([ref]\$stdoutTask) -OutBuilder \$outBuilder -Deadline \$deadline -Pattern "^readyok$")) {
+        \$failureMessage = "timed out waiting for readyok"
+        \$timedOut = \$true
+      }
+    }
+
+    foreach (\$action in @("ponderhit", "stop")) {
+      if (\$timedOut) { break }
+      \$proc.StandardInput.WriteLine("ucinewgame")
+      \$proc.StandardInput.WriteLine("isready")
+      \$proc.StandardInput.Flush()
+      if (-not (Read-UciUntil -Proc \$proc -StdoutTask ([ref]\$stdoutTask) -OutBuilder \$outBuilder -Deadline \$deadline -Pattern "^readyok$")) {
+        \$failureMessage = "timed out waiting for readyok before " + \$action
+        \$timedOut = \$true
+        break
+      }
+      \$proc.StandardInput.WriteLine("position " + \$Position)
+      \$proc.StandardInput.WriteLine("go ponder " + \$PonderGo)
+      \$proc.StandardInput.Flush()
+
+      \$settleDeadline = [DateTime]::UtcNow.AddMilliseconds(\$SettleMs)
+      while ([DateTime]::UtcNow -lt \$settleDeadline) {
+        if (\$proc.HasExited -and -not \$stdoutTask.IsCompleted) {
+          \$failureMessage = "engine exited during ponder " + \$action
+          \$failed = \$true
+          break
+        }
+        \$remainingMs = [Math]::Max(1, [Math]::Min(100, (\$settleDeadline - [DateTime]::UtcNow).TotalMilliseconds))
+        if (-not \$stdoutTask.Wait([int]\$remainingMs)) {
+          continue
+        }
+        \$line = \$stdoutTask.GetAwaiter().GetResult()
+        if (\$null -eq \$line) {
+          break
+        }
+        [void]\$outBuilder.AppendLine(\$line)
+        if (\$line -match "^bestmove\s+") {
+          \$failureMessage = "early bestmove before " + \$action + ": " + \$line
+          \$failed = \$true
+          break
+        }
+        \$stdoutTask = \$proc.StandardOutput.ReadLineAsync()
+      }
+      if (\$failed) { break }
+
+      \$proc.StandardInput.WriteLine(\$action)
+      \$proc.StandardInput.Flush()
+      if (-not (Read-UciUntil -Proc \$proc -StdoutTask ([ref]\$stdoutTask) -OutBuilder \$outBuilder -Deadline \$deadline -Pattern "^bestmove\s+")) {
+        \$failureMessage = "timed out waiting for bestmove after " + \$action
+        \$timedOut = \$true
+        break
+      }
+    }
+
+    if (-not \$timedOut -and -not \$failed) {
+      \$proc.StandardInput.WriteLine("position " + \$Position)
+      \$proc.StandardInput.WriteLine("go " + \$FollowupGo)
+      \$proc.StandardInput.Flush()
+      if (-not (Read-UciUntil -Proc \$proc -StdoutTask ([ref]\$stdoutTask) -OutBuilder \$outBuilder -Deadline \$deadline -Pattern "^bestmove\s+")) {
+        \$failureMessage = "timed out waiting for follow-up bestmove"
+        \$timedOut = \$true
+      }
+    }
+
+    if (-not \$timedOut -and -not \$failed) {
+      \$proc.StandardInput.WriteLine("quit")
+      \$proc.StandardInput.Flush()
+      \$proc.StandardInput.Close()
+    }
+  } catch {
+    \$failed = \$true
+    \$failureMessage = \$_.Exception.Message
+  }
+
+  if (\$failed) {
+    if (\$null -ne \$proc) {
+      try { \$proc.Kill() } catch {}
+      try { \$proc.WaitForExit(10000) | Out-Null } catch {}
+    }
+  } elseif (-not \$timedOut) {
+    \$timedOut = -not \$proc.WaitForExit(${UCI_TIMEOUT_SECONDS} * 1000)
+  }
+  if (\$timedOut) {
+    try { \$proc.Kill() } catch {}
+    try { \$proc.WaitForExit(10000) | Out-Null } catch {}
+  } else {
+    try { \$proc.WaitForExit() } catch {}
+  }
+  if (-not \$timedOut -and -not \$failed) {
+    try {
+      while (\$null -ne \$stdoutTask -and \$stdoutTask.Wait(100)) {
+        \$line = \$stdoutTask.GetAwaiter().GetResult()
+        if (\$null -eq \$line) { break }
+        [void]\$outBuilder.AppendLine(\$line)
+        \$stdoutTask = \$proc.StandardOutput.ReadLineAsync()
+      }
+    } catch {}
+  }
+  \$out = \$outBuilder.ToString()
+  try {
+    if (\$null -ne \$stderrTask) {
+      \$err = \$stderrTask.GetAwaiter().GetResult()
+    } elseif (\$null -ne \$proc) {
+      \$err = \$proc.StandardError.ReadToEnd()
+    } else {
+      \$err = ""
+    }
+  } catch {
+    \$err = \$_.Exception.ToString()
+  }
+  if (\$failed -or \$timedOut) {
+    \$err = \$err + [Environment]::NewLine + \$failureMessage
+  }
+  Set-Content -Path \$stdout -Value \$out -Encoding UTF8
+  Set-Content -Path \$stderr -Value \$err -Encoding UTF8
+
+  if (\$failed) {
+    throw (\$Name + " failed while driving ponder commands: " + \$failureMessage)
+  }
+  if (\$timedOut) {
+    throw (\$Name + " timed out while driving ponder commands: " + \$failureMessage)
+  }
+  if (\$proc.ExitCode -ne 0) {
+    throw (\$Name + " exited with code " + \$proc.ExitCode)
+  }
+
+  \$combined = \$out + \$err
+  foreach (\$needle in \$RequiredText) {
+    if (\$combined -notlike "*\$needle*") {
+      throw "\$Name missing expected output: \$needle"
+    }
+  }
+  foreach (\$needle in \$RejectedText) {
+    if (\$combined -like "*\$needle*") {
+      throw "\$Name contained rejected output: \$needle"
+    }
+  }
+  \$bestmoveCount = [regex]::Matches(\$out, "(?m)^bestmove\s+").Count
+  if (\$bestmoveCount -lt 3) {
+    throw "\$Name expected at least 3 bestmove lines, saw \$bestmoveCount"
+  }
+}
+
 \$Bt4 = Join-Path \$Networks "BT4-1024x15x32h-swa-6147500.pb"
 \$Legacy = Join-Path \$Networks "legacy-42850.pb.gz"
 \$NnueBig = Join-Path \$Networks "nn-c288c895ea92.nnue"
@@ -1629,6 +1840,27 @@ Invoke-UciSmoke -Name "cuda-timed-mcts" -Commands @(
   "go ${MCTS_TIMED_UCI_GO}",
   "quit"
 ) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Multi-Threaded MCTS Search", "CUDA transformer backend", "MCTS runtime: backend=cuda", "bestmove")) -RejectedText @("Time safety:", "Falling back to Alpha-Beta")
+
+Invoke-UciPonderSmoke -Name "cuda-ponder-mcts" -Options @(
+  "EvalFile value \$NnueBig",
+  "EvalFileSmall value \$NnueSmall",
+  "NNBackend value cuda",
+  "NNWeights value \$Bt4",
+  "NNCudaDevice value -1",
+  "NNCudaGraphExecution value true",
+  "NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
+  "NNCudaDeterministicAttentionSoftmax value true",
+  "NNCudaFullBufferClear value true",
+  "Ponder value true",
+  "UseMCTS value true",
+  "UseHybridSearch value false",
+  "Threads value 8",
+  "MCTSMaxThreads value 1",
+  "MCTSParallelSearch value true",
+  "MCTSMinibatchSize value 0",
+  "MCTSAddDirichletNoise value false",
+  "TransformerLowTimeFallbackMs value 0"
+) -Position "startpos" -PonderGo "${MCTS_PONDER_UCI_GO}" -SettleMs ${MCTS_PONDER_SETTLE_MS} -FollowupGo "movetime 150" -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Multi-Threaded MCTS Search", "CUDA transformer backend", "MCTS runtime: backend=cuda", "bestmove")) -RejectedText @("Time safety:", "Falling back to Alpha-Beta", "bestmove 0000")
 
 Invoke-UciSmoke -Name "cuda-auto-mcts" -Commands @(
   "uci",
@@ -1899,6 +2131,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-ane-disabled" -Commands @(
 \$IsolationLegacyBt4Json = Read-ProbeJson "cuda-isolation-legacy-bt4.stdout.log"
 \$MctsText = Read-SmokeText "cuda-mcts"
 \$TimedMctsText = Read-SmokeText "cuda-timed-mcts"
+\$PonderMctsText = Read-SmokeText "cuda-ponder-mcts"
 \$AutoMctsText = Read-SmokeText "cuda-auto-mcts"
 \$AcceleratorMctsText = Read-SmokeText "cuda-accelerator-mcts"
 \$Bk07MctsText = Read-SmokeText "cuda-bk07-mcts"
@@ -1942,6 +2175,9 @@ Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText 
   }
   config = [ordered]@{
     uci_go = "${UCI_GO}"
+    mcts_timed_uci_go = "${MCTS_TIMED_UCI_GO}"
+    mcts_ponder_uci_go = "${MCTS_PONDER_UCI_GO}"
+    mcts_ponder_settle_ms = ${MCTS_PONDER_SETTLE_MS}
     hybrid_uci_go = "${HYBRID_UCI_GO}"
     hybrid_parity_uci_go = "${HYBRID_PARITY_UCI_GO}"
     uci_timeout_seconds = ${UCI_TIMEOUT_SECONDS}
@@ -2023,6 +2259,15 @@ Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText 
       backend_selected = (Test-BackendSelected \$TimedMctsText)
       stdout_log = "cuda-timed-mcts.stdout.log"
       stderr_log = "cuda-timed-mcts.stderr.log"
+    }
+    cuda_ponder_mcts = [ordered]@{
+      ponder_go = "${MCTS_PONDER_UCI_GO}"
+      settle_ms = ${MCTS_PONDER_SETTLE_MS}
+      bestmove = (Find-BestMove \$PonderMctsText)
+      backend_selected = (Test-BackendSelected \$PonderMctsText)
+      bestmove_count = [regex]::Matches(\$PonderMctsText, "(?m)^bestmove\s+").Count
+      stdout_log = "cuda-ponder-mcts.stdout.log"
+      stderr_log = "cuda-ponder-mcts.stderr.log"
     }
     cuda_auto_mcts = [ordered]@{
       go = "${UCI_GO}"
@@ -2116,7 +2361,7 @@ Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText 
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-nn-comparison, cuda-mcts, cuda-timed-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, cuda-kiwipete-mcts, hybrid-cuda, hybrid-cuda-kiwipete, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-nn-comparison, cuda-mcts, cuda-timed-mcts, cuda-ponder-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, cuda-kiwipete-mcts, hybrid-cuda, hybrid-cuda-kiwipete, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"

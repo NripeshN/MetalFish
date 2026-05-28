@@ -127,6 +127,8 @@ append_remote_env METALFISH_JOBS
 append_remote_env METALFISH_CUDA_ARCHS
 append_remote_env METALFISH_CUDA_UCI_GO
 append_remote_env METALFISH_CUDA_UCI_TIMEOUT
+append_remote_env METALFISH_CUDA_MCTS_PONDER_GO
+append_remote_env METALFISH_CUDA_MCTS_PONDER_SETTLE_SEC
 append_remote_env METALFISH_CUDA_DOWNLOAD_BT4
 append_remote_env METALFISH_CUDA_DOWNLOAD_LEGACY
 append_remote_env METALFISH_CUDA_LEGACY_PROBE
@@ -203,6 +205,8 @@ collect_remote_artifacts() {
     cuda-gpu-uci-smoke.log \
     cuda-gpu-uci-timed-mcts-smoke.log \
     cuda-gpu-uci-timed-mcts-search.json \
+    cuda-gpu-uci-ponder-mcts-smoke.log \
+    cuda-gpu-uci-ponder-mcts.json \
     cuda-gpu-uci-bk07-smoke.log \
     cuda-gpu-uci-bk07-search.json \
     cuda-gpu-uci-kiwipete-smoke.log \
@@ -223,6 +227,8 @@ collect_remote_artifacts() {
     cuda-gpu-package-nn-isolation-bt4-legacy.log \
     cuda-gpu-package-nn-isolation-legacy-bt4.log \
     cuda-gpu-package-uci-smoke.log \
+    cuda-gpu-package-uci-ponder-mcts-smoke.log \
+    cuda-gpu-package-uci-ponder-mcts.json \
     cuda-gpu-package-uci-bk07-smoke.log \
     cuda-gpu-package-uci-bk07-search.json \
     cuda-gpu-package-uci-kiwipete-smoke.log \

@@ -19,6 +19,14 @@ on:
         description: UCI go command for CUDA smokes
         required: false
         default: "nodes 8"
+      mcts_ponder_go:
+        description: UCI clock fields for the CUDA MCTS ponder lifecycle smoke
+        required: false
+        default: "wtime 60000 btime 60000 winc 1000 binc 1000"
+      mcts_ponder_settle_sec:
+        description: Seconds to wait before ponderhit/stop in the CUDA MCTS ponder smoke
+        required: false
+        default: "0.6"
       stable_batch_size:
         description: CUDA stable execution batch size
         required: false
@@ -112,6 +120,8 @@ jobs:
           METALFISH_GCP_COLLECT_ARTIFACTS: "1"
           METALFISH_CUDA_ARCHS: ${{ inputs.cuda_archs }}
           METALFISH_CUDA_UCI_GO: ${{ inputs.uci_go }}
+          METALFISH_CUDA_MCTS_PONDER_GO: ${{ inputs.mcts_ponder_go }}
+          METALFISH_CUDA_MCTS_PONDER_SETTLE_SEC: ${{ inputs.mcts_ponder_settle_sec }}
           METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
           METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
           CUBLAS_WORKSPACE_CONFIG: ${{ inputs.cublas_workspace_config }}
