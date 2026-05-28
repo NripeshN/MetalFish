@@ -177,7 +177,10 @@ whose remote/runtime, BT4, legacy, benchmark, or final comparison status is not
 `require_metal_benchmark_compare=1`, BT4 and legacy Metal probe records, Metal
 benchmark records, and archived package/probe/isolation/benchmark evidence, so
 diagnostic CUDA-only runtime gates cannot be promoted. The same validator path
-is used for GitHub workflow artifacts and direct runtime roots. The CUDA package
+is used for GitHub workflow artifacts and direct runtime roots. Direct runtime
+promotion accepts either a single `--target both` root or a root populated by
+separate same-SHA Linux and Windows direct runs; the Linux and Windows runtime
+manifests remain the release authority for each package. The CUDA package
 validator checks package manifest `source_commit`, size, SHA-256, and required
 Linux executable bits against the same successful gate SHA before release
 packaging, and runtime manifests must report the same `git.head_sha`.

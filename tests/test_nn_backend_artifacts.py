@@ -1268,7 +1268,7 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                     "schema": "metalfish.cuda_runtime_gates_direct",
                     "expected_sha": "abc123",
                     "repo": "owner/repo",
-                    "target": "both",
+                    "target": "windows",
                     "require_metal": True,
                 }
             )

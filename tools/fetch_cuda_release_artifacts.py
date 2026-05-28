@@ -299,9 +299,9 @@ def validate_direct_runtime_manifest(
             "direct runtime manifest has unexpected schema: "
             f"{manifest.get('schema')!r}"
         )
-    if manifest.get("target") != "both":
+    if manifest.get("target") not in {"both", "linux", "windows"}:
         raise ValueError(
-            "direct runtime manifest must target both gates, got "
+            "direct runtime manifest has unexpected target "
             f"{manifest.get('target')!r}"
         )
     if manifest.get("require_metal") is not True:
