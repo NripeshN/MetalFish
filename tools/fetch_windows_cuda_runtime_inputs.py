@@ -239,6 +239,14 @@ def sha256_file(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def file_record(path: pathlib.Path) -> dict:
+    return {
+        "path": str(path),
+        "size_bytes": path.stat().st_size,
+        "sha256": sha256_file(path),
+    }
+
+
 def validate_package_manifest(
     package: pathlib.Path, *, expected_source_commit: str | None = None
 ) -> dict:
@@ -410,32 +418,39 @@ def main(argv: list[str] | None = None) -> int:
     env_path.write_text(shell_exports(env) + "\n", encoding="utf-8")
 
     manifest = {
+        "schema": "metalfish.windows_cuda_runtime_inputs",
         "schema_version": 1,
         "repo": repo,
         "expected_sha": expected_sha,
         "windows_cuda": {
             "run": dataclasses.asdict(windows_run),
             "artifact": dataclasses.asdict(windows_artifact),
-            "archive": str(windows_archive),
-            "package": str(package),
-            "package_sha256": sha256_file(package),
+            "archive": file_record(windows_archive),
+            "package": file_record(package),
             "package_manifest": package_manifest,
         },
         "metal": None,
+        "env": env,
         "env_file": str(env_path),
     }
     if metal_run and metal_artifact and metal_archive and metal_probe_log:
         manifest["metal"] = {
             "run": dataclasses.asdict(metal_run),
             "artifact": dataclasses.asdict(metal_artifact),
-            "archive": str(metal_archive),
-            "comparison_log": str(metal_comparison_log),
-            "probe_suite_log": str(metal_probe_log),
-            "legacy_probe_suite_log": str(metal_legacy_probe_log),
-            "mcts_bk07_search_json": str(metal_mcts_search_json),
-            "mcts_kiwipete_search_json": str(metal_mcts_kiwipete_search_json),
-            "hybrid_bk07_search_json": str(metal_hybrid_search_json),
-            "hybrid_kiwipete_search_json": str(metal_hybrid_kiwipete_search_json),
+            "archive": file_record(metal_archive),
+            "files": {
+                "comparison_log": file_record(metal_comparison_log),
+                "probe_suite_log": file_record(metal_probe_log),
+                "legacy_probe_suite_log": file_record(metal_legacy_probe_log),
+                "mcts_bk07_search_json": file_record(metal_mcts_search_json),
+                "mcts_kiwipete_search_json": file_record(
+                    metal_mcts_kiwipete_search_json
+                ),
+                "hybrid_bk07_search_json": file_record(metal_hybrid_search_json),
+                "hybrid_kiwipete_search_json": file_record(
+                    metal_hybrid_kiwipete_search_json
+                ),
+            },
         }
     manifest_path = out_dir / "runtime-gate-inputs-manifest.json"
     write_manifest(manifest_path, manifest)

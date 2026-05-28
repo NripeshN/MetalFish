@@ -1077,6 +1077,34 @@ def test_windows_cuda_runtime_input_helpers_select_artifacts() -> None:
         raise AssertionError("expected missing artifact failure")
 
 
+def test_windows_cuda_runtime_input_manifest_records_file_hashes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        payload = pathlib.Path(tmp) / "payload.log"
+        payload.write_text("windows cuda input provenance\n", encoding="utf-8")
+        record = win_cuda_inputs.file_record(payload)
+        expect("windows input file path", record["path"] == str(payload))
+        expect("windows input file size", record["size_bytes"] == payload.stat().st_size)
+        expect(
+            "windows input file sha",
+            record["sha256"]
+            == hashlib.sha256(payload.read_bytes()).hexdigest(),
+        )
+
+    script = (ROOT / "tools/fetch_windows_cuda_runtime_inputs.py").read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        '"schema": "metalfish.windows_cuda_runtime_inputs"',
+        '"archive": file_record(windows_archive)',
+        '"package": file_record(package)',
+        '"archive": file_record(metal_archive)',
+        '"files": {',
+        '"mcts_bk07_search_json": file_record(metal_mcts_search_json)',
+        '"env": env',
+    ):
+        expect(f"windows input manifest records {token}", token in script)
+
+
 def test_cuda_runtime_input_helpers_validate_complete_zip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -2479,6 +2507,7 @@ def main() -> int:
     test_windows_cuda_probe_suite_positions_use_python_default()
     test_windows_cuda_runtime_input_helpers_validate_provenance()
     test_windows_cuda_runtime_input_helpers_select_artifacts()
+    test_windows_cuda_runtime_input_manifest_records_file_hashes()
     test_cuda_runtime_input_helpers_validate_complete_zip()
     test_cuda_release_artifact_download_retries_truncated_zip()
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
