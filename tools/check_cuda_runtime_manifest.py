@@ -41,6 +41,14 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "cuda-gpu-package-nn-isolation-legacy-bt4.log",
         "cuda-gpu-package-uci-ponder-mcts-smoke.log",
         "cuda-gpu-package-uci-ponder-mcts.json",
+        "cuda-gpu-package-uci-bk07-smoke.log",
+        "cuda-gpu-package-uci-bk07-search.json",
+        "cuda-gpu-package-uci-kiwipete-smoke.log",
+        "cuda-gpu-package-uci-kiwipete-search.json",
+        "cuda-gpu-package-uci-hybrid-smoke.log",
+        "cuda-gpu-package-uci-hybrid-search.json",
+        "cuda-gpu-package-uci-hybrid-kiwipete-smoke.log",
+        "cuda-gpu-package-uci-hybrid-kiwipete-search.json",
         "metal-cuda-nn-probe-suite-summary.json",
         "metal-cuda-legacy-nn-probe-suite-summary.json",
         "metal-cuda-nn-benchmark-summary.json",
@@ -120,10 +128,16 @@ def resolve_record_path(
     artifact_root: pathlib.Path,
 ) -> pathlib.Path:
     candidates: list[pathlib.Path] = []
+    root = artifact_root.resolve()
     record_path = str(record.get("path") or "")
     if record_path:
         path = pathlib.Path(record_path)
-        candidates.append(path if path.is_absolute() else artifact_root / path)
+        candidate = path if path.is_absolute() else artifact_root / path
+        try:
+            candidate.resolve().relative_to(root)
+            candidates.append(candidate)
+        except ValueError:
+            pass
     candidates.append(artifact_root / key)
 
     checked: list[str] = []

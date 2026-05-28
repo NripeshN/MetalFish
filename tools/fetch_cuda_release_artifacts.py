@@ -460,6 +460,15 @@ def main(argv: list[str] | None = None) -> int:
     direct_expected_sha = str(direct_manifest.get("expected_sha") or "")
     expected_sha = args.expected_sha or direct_expected_sha or git_head()
     out_dir = pathlib.Path(args.out_dir).expanduser().resolve()
+    if direct_root:
+        if out_dir == direct_root:
+            raise ValueError("--out-dir must not equal --direct-runtime-root")
+        try:
+            direct_root.relative_to(out_dir)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("--out-dir must not contain --direct-runtime-root")
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

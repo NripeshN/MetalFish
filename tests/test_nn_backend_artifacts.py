@@ -1595,6 +1595,42 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
         )
 
 
+def test_cuda_release_artifacts_rejects_direct_output_inside_input() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        direct = root / "direct"
+        direct.mkdir()
+        (direct / "direct-runtime-gates-manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.cuda_runtime_gates_direct",
+                    "expected_sha": "abc123",
+                    "repo": "owner/repo",
+                    "target": "both",
+                    "require_metal": True,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        for out_dir in (direct, root):
+            try:
+                cuda_release.main(
+                    [
+                        "--direct-runtime-root",
+                        str(direct),
+                        "--out-dir",
+                        str(out_dir),
+                        "--expected-sha",
+                        "abc123",
+                    ]
+                )
+            except ValueError as exc:
+                expect("direct output overlap rejected", "--out-dir" in str(exc))
+            else:
+                raise AssertionError("expected direct runtime output overlap rejection")
+
+
 def test_cuda_release_artifacts_reject_direct_runtime_single_target() -> None:
     try:
         cuda_release.validate_direct_runtime_manifest(
@@ -2015,6 +2051,43 @@ def test_cuda_runtime_manifest_validates_artifact_files() -> None:
     raise AssertionError("expected artifact hash drift to be rejected")
 
 
+def test_cuda_runtime_manifest_rejects_artifacts_outside_root() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        outside = root / "outside" / "cuda-bk07-mcts-search.json"
+        outside.parent.mkdir(parents=True)
+        outside.write_text('{"bestmove":"h5f6"}\n', encoding="utf-8")
+        record = cuda_release.file_record(outside)
+        manifest = root / "runtime.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "metalfish.windows_cuda_runtime_gate",
+                    "git": {"head_sha": "abc123"},
+                    "status": {
+                        "runtime_status": "0",
+                        "bt4_compare_status": "0",
+                        "legacy_compare_status": "0",
+                        "final_compare_status": "0",
+                    },
+                    "artifacts": {"logs/cuda-bk07-mcts-search.json": record},
+                }
+            ),
+            encoding="utf-8",
+        )
+        try:
+            runtime_checker.validate_runtime_manifest(
+                manifest,
+                runtime_kind="windows-cuda",
+                require_artifact_files=True,
+                artifact_root=root / "artifacts",
+            )
+        except ValueError as exc:
+            expect("outside artifact rejected", "file is missing" in str(exc))
+            return
+    raise AssertionError("expected outside-root artifact path to be rejected")
+
+
 def test_cuda_package_validator_rejects_source_commit_drift() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -2332,6 +2405,7 @@ def main() -> int:
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_package_validator_rejects_unmanifested_archive_entries()
     test_cuda_release_artifacts_promote_direct_runtime_root()
+    test_cuda_release_artifacts_rejects_direct_output_inside_input()
     test_cuda_release_artifacts_reject_direct_runtime_single_target()
     test_cuda_release_artifacts_reject_direct_runtime_commit_drift()
     test_cuda_release_dispatch_direct_root_uses_manifest_sha_default()
@@ -2341,6 +2415,7 @@ def main() -> int:
     test_cuda_release_artifact_helpers_reject_failed_runtime()
     test_cuda_runtime_manifest_rejects_head_sha_drift()
     test_cuda_runtime_manifest_validates_artifact_files()
+    test_cuda_runtime_manifest_rejects_artifacts_outside_root()
     test_cuda_package_validator_rejects_source_commit_drift()
     test_cuda_package_validator_rejects_hash_drift()
     test_cuda_release_artifact_helpers_require_metal_compare()
