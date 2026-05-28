@@ -20,6 +20,9 @@ if (-not $CudaArchs) {
 if (-not $VcpkgRoot) {
   $VcpkgRoot = "C:\vcpkg"
 }
+if ($BuildTests -ne "ON") {
+  throw "BuildTests=ON is required for Windows CUDA release packages and runtime gates"
+}
 $env:VCPKG_INSTALLATION_ROOT = $VcpkgRoot
 $env:VCPKG_ROOT = $VcpkgRoot
 
@@ -144,6 +147,15 @@ $Nvcc = Require-Command "nvcc"
 $Cl = Require-Command "cl.exe"
 $Python = Require-Command "python"
 $ClForCmake = $Cl -replace "\\", "/"
+if ($env:METALFISH_SOURCE_COMMIT) {
+  $SourceCommit = $env:METALFISH_SOURCE_COMMIT
+} else {
+  $SourceCommit = (& git -C $SourceDir rev-parse HEAD).Trim()
+}
+if (-not $SourceCommit) {
+  throw "Could not resolve source commit for Windows CUDA package manifest"
+}
+$env:METALFISH_SOURCE_COMMIT = $SourceCommit
 
 if (-not $env:CUDA_PATH) {
   throw "CUDA_PATH is not set; install the CUDA Toolkit before running this gate"
@@ -389,6 +401,13 @@ Copy-Item $PackageJsonManifest (Join-Path $BuildDir "windows-cuda-package-manife
 Compress-Archive -Path (Join-Path $PackageDir "*") -DestinationPath $PackageZip
 if (-not (Test-Path $PackageZip)) {
   throw "Windows CUDA package was not created: $PackageZip"
+}
+& $Python (Join-Path $SourceDir "tools\check_cuda_package_artifacts.py") `
+  --package $PackageZip `
+  --package-kind windows-cuda `
+  --expected-source-commit $SourceCommit
+if ($LASTEXITCODE -ne 0) {
+  throw "Windows CUDA package artifact validation failed with exit code $LASTEXITCODE"
 }
 
 New-Item -ItemType Directory -Force $PackageSmokeDir | Out-Null

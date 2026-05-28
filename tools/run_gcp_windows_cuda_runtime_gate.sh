@@ -27,6 +27,7 @@ REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
 MAX_CUDA_METAL_EVAL_MS_RATIO="${METALFISH_MAX_CUDA_METAL_EVAL_MS_RATIO:-1.0}"
+SEARCH_COMPARE_SKIPPED=77
 REMOTE_USER="${METALFISH_GCP_WINDOWS_USER:-metalfish}"
 SSH_KEY="${METALFISH_GCP_SSH_KEY:-${HOME}/.ssh/google_compute_engine}"
 SSH_PUB_KEY="${METALFISH_GCP_SSH_PUB_KEY:-${SSH_KEY}.pub}"
@@ -224,7 +225,7 @@ compare_collected_search_results() {
       echo "Metal/Windows CUDA search comparison requires METALFISH_GCP_COLLECT_ARTIFACTS=1" >&2
       return 1
     fi
-    return 0
+    return "${SEARCH_COMPARE_SKIPPED}"
   fi
 
   if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" || -z "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" ]]; then
@@ -232,7 +233,7 @@ compare_collected_search_results() {
       echo "Metal search JSON inputs are required for Windows CUDA search comparison" >&2
       return 1
     fi
-    return 0
+    return "${SEARCH_COMPARE_SKIPPED}"
   fi
   if [[ ! -s "${METAL_MCTS_BK07_SEARCH_JSON}" ]]; then
     echo "Metal MCTS search JSON not found: ${METAL_MCTS_BK07_SEARCH_JSON}" >&2
@@ -279,6 +280,15 @@ compare_collected_search_results() {
     --actual-label "Windows CUDA MCTS" \
     --require-same-pv-head \
     --max-score-cp-delta 10 \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSParallelSearch \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-bk07-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-bk07-search-compare.log"
 
@@ -289,6 +299,15 @@ compare_collected_search_results() {
     --actual-label "Windows CUDA MCTS" \
     --require-same-pv-head \
     --max-score-cp-delta 10 \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSParallelSearch \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-kiwipete-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-kiwipete-search-compare.log"
 
@@ -304,6 +323,19 @@ compare_collected_search_results() {
     --require-positive-final-metric ABDepth \
     --require-final-metric ABMove \
     --require-final-metric MCTSMove \
+    --require-same-final-metric ABMove \
+    --require-same-final-metric MCTSMove \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption HybridMCTSThreads \
+    --require-same-setoption HybridABThreads \
+    --require-same-setoption HybridAutoABThreadsCap \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-bk07-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-bk07-search-compare.log"
 
@@ -319,6 +351,19 @@ compare_collected_search_results() {
     --require-positive-final-metric ABDepth \
     --require-final-metric ABMove \
     --require-final-metric MCTSMove \
+    --require-same-final-metric ABMove \
+    --require-same-final-metric MCTSMove \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption HybridMCTSThreads \
+    --require-same-setoption HybridABThreads \
+    --require-same-setoption HybridAutoABThreadsCap \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-kiwipete-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-kiwipete-search-compare.log"
 }
@@ -569,6 +614,10 @@ upload_collected_artifacts() {
 }
 
 require_file "${PACKAGE_ZIP}" "Windows CUDA package"
+python3 tools/check_cuda_package_artifacts.py \
+  --package "${PACKAGE_ZIP}" \
+  --package-kind windows-cuda \
+  --expected-source-commit "$(git rev-parse HEAD)"
 require_file "${WEIGHTS}" "BT4 weights"
 require_file "${LEGACY_WEIGHTS}" "legacy 42850 weights"
 require_file "${NNUE_BIG}" "large NNUE"
@@ -1116,6 +1165,8 @@ function Read-ProbeJson {
   return \$text | ConvertFrom-Json
 }
 
+\$script:UciSmokeSetOptions = @{}
+
 function Find-BestMove {
   param([string]\$Text)
   \$matches = [regex]::Matches(\$Text, "(?m)^bestmove\s+(\S+)")
@@ -1148,7 +1199,7 @@ function Write-SearchJson {
     engine = \$Engine
     position = \$Position
     go = \$Go
-    setoptions = @()
+    setoptions = @(\$script:UciSmokeSetOptions[\$Name])
     bestmove = (Find-BestMove \$Text)
     elapsed_sec = \$null
     returncode = 0
@@ -1228,6 +1279,14 @@ function Invoke-UciSmoke {
     [string[]]\$RejectedText = @(),
     [string[]]\$PositiveMetrics = @()
   )
+  \$setOptions = @()
+  foreach (\$command in \$Commands) {
+    \$match = [regex]::Match(\$command, "^setoption\s+name\s+(.+?)\s+value\s+(.*)$", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (\$match.Success) {
+      \$setOptions += (\$match.Groups[1].Value.Trim() + "=" + \$match.Groups[2].Value.Trim())
+    }
+  }
+  \$script:UciSmokeSetOptions[\$Name] = \$setOptions
   \$stdout = Join-Path \$Logs "\$Name.stdout.log"
   \$stderr = Join-Path \$Logs "\$Name.stderr.log"
   \$psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -1940,8 +1999,14 @@ if [[ "${RUNTIME_STATUS}" == "0" ]]; then
     compare_collected_benchmark_timings || BENCHMARK_COMPARE_STATUS=$?
   fi
   if [[ "${BT4_COMPARE_STATUS}" == "0" && "${LEGACY_COMPARE_STATUS}" == "0" && "${BENCHMARK_COMPARE_STATUS}" == "0" ]]; then
-    SEARCH_COMPARE_STATUS=0
-    compare_collected_search_results || SEARCH_COMPARE_STATUS=$?
+    if compare_collected_search_results; then
+      SEARCH_COMPARE_STATUS=0
+    else
+      SEARCH_COMPARE_STATUS=$?
+      if [[ "${SEARCH_COMPARE_STATUS}" == "${SEARCH_COMPARE_SKIPPED}" ]]; then
+        SEARCH_COMPARE_STATUS="skipped"
+      fi
+    fi
   fi
 fi
 

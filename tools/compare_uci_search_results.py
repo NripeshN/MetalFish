@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import sys
 from typing import Any
 
@@ -37,6 +38,32 @@ def load_result(path: pathlib.Path) -> dict[str, Any]:
             if final_metrics:
                 payload["final_metrics"] = final_metrics
     return payload
+
+
+SETOPTION_RE = re.compile(r"^setoption\s+name\s+(.+?)\s+value\s+(.*)$", re.I)
+
+
+def parse_setoption(raw: str) -> tuple[str, str] | None:
+    match = SETOPTION_RE.match(raw.strip())
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    if "=" not in raw:
+        return None
+    name, value = raw.split("=", 1)
+    return name.strip(), value.strip()
+
+
+def setoption_map(payload: dict[str, Any]) -> dict[str, tuple[str, str]]:
+    result: dict[str, tuple[str, str]] = {}
+    for raw in payload.get("setoptions") or []:
+        if not isinstance(raw, str):
+            continue
+        parsed = parse_setoption(raw)
+        if parsed is None:
+            continue
+        name, value = parsed
+        result[name.casefold()] = (name, value)
+    return result
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -75,11 +102,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Require a final metric key to exist in both payloads; may be repeated.",
     )
     parser.add_argument(
+        "--require-same-final-metric",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Require a final metric key to exist and match exactly in both payloads.",
+    )
+    parser.add_argument(
         "--require-positive-final-metric",
         action="append",
         default=[],
         metavar="NAME",
         help="Require a final metric key to exist and be positive in both payloads.",
+    )
+    parser.add_argument(
+        "--require-same-setoption",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Require a UCI setoption value to exist and match exactly in both payloads.",
     )
     parser.add_argument(
         "--json-out",
@@ -109,6 +150,27 @@ def main(argv: list[str] | None = None) -> int:
             f"{args.expected_label}={expected.get('bestmove')} "
             f"{args.actual_label}={actual.get('bestmove')}"
         )
+
+    expected_options = setoption_map(expected)
+    actual_options = setoption_map(actual)
+    for option in args.require_same_setoption:
+        key = option.casefold()
+        expected_option = expected_options.get(key)
+        actual_option = actual_options.get(key)
+        if expected_option is None or actual_option is None:
+            expected_value = None if expected_option is None else expected_option[1]
+            actual_value = None if actual_option is None else actual_option[1]
+            failures.append(
+                f"setoption {option!r} missing: "
+                f"{args.expected_label}={expected_value!r} "
+                f"{args.actual_label}={actual_value!r}"
+            )
+        elif expected_option[1] != actual_option[1]:
+            failures.append(
+                f"setoption {option!r} differs: "
+                f"{args.expected_label}={expected_option[1]!r} "
+                f"{args.actual_label}={actual_option[1]!r}"
+            )
 
     expected_info = expected.get("search_info") or {}
     actual_info = actual.get("search_info") or {}
@@ -157,6 +219,21 @@ def main(argv: list[str] | None = None) -> int:
                 f"{args.expected_label}={expected_metrics.get(metric)!r} "
                 f"{args.actual_label}={actual_metrics.get(metric)!r}"
             )
+    for metric in args.require_same_final_metric:
+        expected_value = expected_metrics.get(metric)
+        actual_value = actual_metrics.get(metric)
+        if metric not in expected_metrics or metric not in actual_metrics:
+            failures.append(
+                f"final metric {metric!r} missing: "
+                f"{args.expected_label}={expected_value!r} "
+                f"{args.actual_label}={actual_value!r}"
+            )
+        elif expected_value != actual_value:
+            failures.append(
+                f"final metric {metric!r} differs: "
+                f"{args.expected_label}={expected_value!r} "
+                f"{args.actual_label}={actual_value!r}"
+            )
     for metric in args.require_positive_final_metric:
         expected_value = expected_metrics.get(metric)
         actual_value = actual_metrics.get(metric)
@@ -182,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
             "position": expected.get("position"),
             "go": expected.get("go"),
             "elapsed_sec": expected.get("elapsed_sec"),
+            "setoptions": expected.get("setoptions") or [],
             "search_info": expected_info,
             "final_metrics": expected_metrics,
             "transcript_sha256": expected.get("transcript_sha256"),
@@ -192,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
             "position": actual.get("position"),
             "go": actual.get("go"),
             "elapsed_sec": actual.get("elapsed_sec"),
+            "setoptions": actual.get("setoptions") or [],
             "search_info": actual_info,
             "final_metrics": actual_metrics,
             "transcript_sha256": actual.get("transcript_sha256"),
@@ -200,7 +279,9 @@ def main(argv: list[str] | None = None) -> int:
         "require_same_pv_head": args.require_same_pv_head,
         "require_same_pv_prefix": args.require_same_pv_prefix,
         "max_score_cp_delta": args.max_score_cp_delta,
+        "require_same_setoption": args.require_same_setoption,
         "require_final_metric": args.require_final_metric,
+        "require_same_final_metric": args.require_same_final_metric,
         "require_positive_final_metric": args.require_positive_final_metric,
         "status": "passed" if not failures else "failed",
         "failures": failures,

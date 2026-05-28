@@ -26,6 +26,7 @@ REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
 MAX_CUDA_METAL_EVAL_MS_RATIO="${METALFISH_MAX_CUDA_METAL_EVAL_MS_RATIO:-1.0}"
+SEARCH_COMPARE_SKIPPED=77
 ARCHIVE="$(mktemp -t metalfish-cuda-gate.XXXXXX.tar.gz)"
 CREATED_INSTANCE=0
 ZONE=""
@@ -534,7 +535,7 @@ compare_collected_search_results() {
       echo "Metal/CUDA search comparison requires METALFISH_GCP_COLLECT_ARTIFACTS=1" >&2
       return 1
     fi
-    return 0
+    return "${SEARCH_COMPARE_SKIPPED}"
   fi
 
   if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" || -z "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" ]]; then
@@ -542,7 +543,7 @@ compare_collected_search_results() {
       echo "Metal search JSON inputs are required for search comparison" >&2
       return 1
     fi
-    return 0
+    return "${SEARCH_COMPARE_SKIPPED}"
   fi
   if [[ ! -s "${METAL_MCTS_BK07_SEARCH_JSON}" ]]; then
     echo "Metal MCTS search JSON not found: ${METAL_MCTS_BK07_SEARCH_JSON}" >&2
@@ -589,6 +590,15 @@ compare_collected_search_results() {
     --actual-label "CUDA MCTS" \
     --require-same-pv-head \
     --max-score-cp-delta 10 \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSParallelSearch \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/metal-cuda-mcts-bk07-search-summary.json" \
     | tee "${ARTIFACT_DIR}/metal-cuda-mcts-bk07-search-compare.log"
 
@@ -599,6 +609,15 @@ compare_collected_search_results() {
     --actual-label "CUDA MCTS" \
     --require-same-pv-head \
     --max-score-cp-delta 10 \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSParallelSearch \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/metal-cuda-mcts-kiwipete-search-summary.json" \
     | tee "${ARTIFACT_DIR}/metal-cuda-mcts-kiwipete-search-compare.log"
 
@@ -614,6 +633,19 @@ compare_collected_search_results() {
     --require-positive-final-metric ABDepth \
     --require-final-metric ABMove \
     --require-final-metric MCTSMove \
+    --require-same-final-metric ABMove \
+    --require-same-final-metric MCTSMove \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption HybridMCTSThreads \
+    --require-same-setoption HybridABThreads \
+    --require-same-setoption HybridAutoABThreadsCap \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-bk07-search-summary.json" \
     | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-bk07-search-compare.log"
 
@@ -629,6 +661,19 @@ compare_collected_search_results() {
     --require-positive-final-metric ABDepth \
     --require-final-metric ABMove \
     --require-final-metric MCTSMove \
+    --require-same-final-metric ABMove \
+    --require-same-final-metric MCTSMove \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption HybridMCTSThreads \
+    --require-same-setoption HybridABThreads \
+    --require-same-setoption HybridAutoABThreadsCap \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-kiwipete-search-summary.json" \
     | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-kiwipete-search-compare.log"
 }
@@ -659,8 +704,14 @@ if [[ "${REMOTE_STATUS}" == "0" ]]; then
     compare_collected_benchmark_timings || BENCHMARK_COMPARE_STATUS=$?
   fi
   if [[ "${BT4_COMPARE_STATUS}" == "0" && "${LEGACY_COMPARE_STATUS}" == "0" && "${BENCHMARK_COMPARE_STATUS}" == "0" ]]; then
-    SEARCH_COMPARE_STATUS=0
-    compare_collected_search_results || SEARCH_COMPARE_STATUS=$?
+    if compare_collected_search_results; then
+      SEARCH_COMPARE_STATUS=0
+    else
+      SEARCH_COMPARE_STATUS=$?
+      if [[ "${SEARCH_COMPARE_STATUS}" == "${SEARCH_COMPARE_SKIPPED}" ]]; then
+        SEARCH_COMPARE_STATUS="skipped"
+      fi
+    fi
   fi
 fi
 

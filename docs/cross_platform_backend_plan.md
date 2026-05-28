@@ -187,9 +187,9 @@ promotion accepts either a single `--target both` root or a root populated by
 separate same-SHA Linux and Windows direct runs; the Linux and Windows runtime
 manifests remain the release authority for each package. The CUDA package
 validator checks package manifest `source_commit`, exact archive file coverage,
-size, SHA-256, required Windows runtime DLLs, and required Linux executable bits
-against the same successful gate SHA before release packaging, and runtime
-manifests must report the same `git.head_sha`.
+size, SHA-256, required Windows CUDA/MSVC/vcpkg runtime DLLs, and required
+Linux executable bits against the same successful gate SHA before release
+packaging, and runtime manifests must report the same `git.head_sha`.
 
 Current CUDA backend boundary:
 
@@ -236,10 +236,11 @@ Current CUDA backend boundary:
   `windows-cuda-package-manifest.json`, generated through the same
   `metalfish.portable_artifact` schema as Linux CUDA. The compile gate and the
   Windows L4 runtime gate validate schema, package kind, source commit, required
-  executables, `PORTABLE_ARTIFACT.md`, and CUDA runtime DLL entries before
-  accepting the package. This catches missing packaged probe/test binaries,
-  DLL/runtime dependencies, stale package artifacts, and package-only metadata
-  drift before and during the Windows GPU VM gate.
+  executables, `PORTABLE_ARTIFACT.md`, exact manifest coverage, and packaged
+  CUDA/MSVC/vcpkg runtime DLL entries before accepting the package. This catches
+  missing packaged probe/test binaries, DLL/runtime dependencies, stale package
+  artifacts, and package-only metadata drift before and during the Windows GPU
+  VM gate.
 - `MCTSMinibatchSize=0` now keeps search-side CUDA auto batches aligned with the
   CUDA graph-replay stable batch size. CUDA builds use
   `MCTSCudaAutoMinibatchSize` when set, otherwise
@@ -923,10 +924,11 @@ GCP VM: `windows_cuda_run_id` must come from `Windows CUDA Compile Gate`, and
 `metal_ci_run_id` must come from `MetalFish CI`, both completed successfully at
 the current commit. The remote runner creates an ephemeral Windows Server 2022
 G2 VM with an `nvidia-l4-vws` accelerator, installs the Google Cloud NVIDIA
-driver script, verifies `nvidia-smi`, installs the VC++ runtime, and runs
-packaged `metalfish_nn_probe.exe --backend cuda` probes for both BT4 and legacy
-42850 weights, runs eight-position full-policy probe suites for both nets with
-the same production CUDA runtime flags as UCI, and then runs `NNBackend=cuda`
+driver script, verifies `nvidia-smi`, validates packaged MSVC runtime coverage,
+puts the package directory first on `PATH`, and runs packaged
+`metalfish_nn_probe.exe --backend cuda` probes for both BT4 and legacy 42850
+weights, runs eight-position full-policy probe suites for both nets with the
+same production CUDA runtime flags as UCI, and then runs `NNBackend=cuda`
 MCTS, BK.07 tactical, Hybrid, and Hybrid clock-safety UCI smokes with BT4
 weights. The Windows probe suites consume a
 JSON copy of `tools/run_nn_backend_probe_suite.py`'s `DEFAULT_POSITIONS`, so

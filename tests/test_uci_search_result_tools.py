@@ -20,14 +20,24 @@ def expect(name: str, condition: bool) -> None:
         raise AssertionError(name)
 
 
-def write_result(path: pathlib.Path, *, score: int = 96, pv_head: str = "a3b4") -> None:
+def write_result(
+    path: pathlib.Path,
+    *,
+    score: int = 96,
+    pv_head: str = "a3b4",
+    mcts_move: str = "a3d6",
+    options: list[str] | None = None,
+) -> None:
     output = [
         "info string Starting Parallel Hybrid Search (MCTS + AB)...",
         (
             f"info depth 2 score cp {score} nodes 149 time 659 nps 226 "
             f"pv {pv_head} string hybrid-final"
         ),
-        "info string Final: MCTSPlayouts=1 MCTSEvals=1 ABDepth=2 ABMove=a3b4 MCTSMove=a3d6",
+        (
+            "info string Final: MCTSPlayouts=1 MCTSEvals=1 "
+            f"ABDepth=2 ABMove=a3b4 MCTSMove={mcts_move}"
+        ),
         f"bestmove {pv_head}",
     ]
     uci_smoke.write_json_result(
@@ -35,7 +45,7 @@ def write_result(path: pathlib.Path, *, score: int = 96, pv_head: str = "a3b4") 
         engine=pathlib.Path("metalfish"),
         position="startpos",
         go="nodes 50",
-        options=[],
+        options=options or ["UseHybridSearch=true", "MCTSMinibatchSize=1"],
         bestmove=pv_head,
         output=output,
         elapsed_sec=0.1,
@@ -89,6 +99,10 @@ def test_compare_uci_search_result_enforces_shape() -> None:
                     "MCTSPlayouts",
                     "--require-final-metric",
                     "ABMove",
+                    "--require-same-final-metric",
+                    "MCTSMove",
+                    "--require-same-setoption",
+                    "MCTSMinibatchSize",
                 ]
             )
             == 0,
@@ -106,6 +120,43 @@ def test_compare_uci_search_result_enforces_shape() -> None:
                     "--require-same-pv-head",
                     "--max-score-cp-delta",
                     "5",
+                ]
+            )
+            == 1,
+        )
+
+        write_result(actual, score=99, pv_head="a3b4", mcts_move="h5f6")
+        expect(
+            "comparison rejects final metric drift",
+            run_comparer(
+                [
+                    "--expected",
+                    str(expected),
+                    "--actual",
+                    str(actual),
+                    "--require-same-final-metric",
+                    "MCTSMove",
+                ]
+            )
+            == 1,
+        )
+
+        write_result(
+            actual,
+            score=99,
+            pv_head="a3b4",
+            options=["UseHybridSearch=true", "MCTSMinibatchSize=2"],
+        )
+        expect(
+            "comparison rejects setoption drift",
+            run_comparer(
+                [
+                    "--expected",
+                    str(expected),
+                    "--actual",
+                    str(actual),
+                    "--require-same-setoption",
+                    "MCTSMinibatchSize",
                 ]
             )
             == 1,

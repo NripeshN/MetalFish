@@ -8,6 +8,7 @@ on:
       - "tools/import_msvc_dev_env.ps1"
       - "tools/install_windows_cuda_toolkit.ps1"
       - "tools/run_windows_cuda_compile_gate.ps1"
+      - "tools/check_cuda_package_artifacts.py"
       - "tools/download_engine_networks.py"
       - "tools/nn_metal_probe.cpp"
       - "tools/uci_smoke.py"
@@ -45,7 +46,7 @@ on:
         required: false
         default: "89"
       build_tests:
-        description: Compile CUDA-backed test/probe targets
+        description: Compile CUDA-backed test/probe targets; required for release packages
         required: false
         default: true
         type: boolean
