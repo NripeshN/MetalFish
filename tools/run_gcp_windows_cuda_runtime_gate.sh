@@ -495,6 +495,7 @@ write_runtime_manifest() {
     GATE_WINDOWS_CUDA_COMPILE_RUN_ID="${WINDOWS_CUDA_COMPILE_RUN_ID}" \
     GATE_CUDA_STABLE_BATCH_SIZE="${CUDA_STABLE_BATCH_SIZE}" \
     GATE_CUDA_GRAPH="${CUDA_GRAPH}" \
+    GATE_CUDA_GRAPH_EXECUTION="${CUDA_GRAPH}" \
     GATE_CUDA_PROFILE="${CUDA_PROFILE}" \
     GATE_CUDA_PROFILE_LIMIT="${CUDA_PROFILE_LIMIT}" \
     GATE_CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG_VALUE}" \
@@ -600,6 +601,7 @@ manifest = {
             "GATE_CUDA_STABLE_BATCH_SIZE"
         ],
         "cuda_graph": os.environ["GATE_CUDA_GRAPH"],
+        "cuda_graph_execution": os.environ["GATE_CUDA_GRAPH_EXECUTION"],
         "cuda_profile": os.environ["GATE_CUDA_PROFILE"],
         "cuda_profile_limit": os.environ["GATE_CUDA_PROFILE_LIMIT"],
         "cublas_workspace_config": os.environ["GATE_CUBLAS_WORKSPACE_CONFIG"],
