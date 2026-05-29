@@ -73,6 +73,7 @@ permissions:
 
 env:
   METALFISH_BT4_WEIGHTS_URL: https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
 
 jobs:
   windows-cuda-runtime:
@@ -119,6 +120,15 @@ jobs:
           python3 tools/fetch_windows_cuda_runtime_inputs.py "${args[@]}"
           python3 -m json.tool \
             "${GITHUB_WORKSPACE}/results/windows_cuda_runtime_inputs/runtime-gate-inputs-manifest.json" >/dev/null
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-6147500-legacy42850-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
 
       - name: Download engine networks
         run: |

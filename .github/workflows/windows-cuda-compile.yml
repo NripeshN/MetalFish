@@ -55,6 +55,7 @@ permissions:
 
 env:
   BUILD_TYPE: Release
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
 
 jobs:
   windows-cuda-compile:
@@ -128,6 +129,15 @@ jobs:
           $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
           vcpkg install protobuf zlib abseil --triplet x64-windows
           python -m pip install -r tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-6147500-legacy42850-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
 
       - name: Compile CUDA backend
         shell: pwsh

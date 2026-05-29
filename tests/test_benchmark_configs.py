@@ -697,6 +697,10 @@ def main() -> int:
     assert_file_contains(
         PROJ / ".github/workflows/ci.yml",
         [
+            "METALFISH_NETWORK_CACHE_DIR",
+            "Cache engine networks",
+            "engine-networks-bt4-6147500-legacy42850-nnue-v2",
+            "engine-networks-bt4-nnue-v2",
             "python3 tools/download_engine_networks.py",
             "test_nn_comparison",
             "metalfish_nn_probe",
@@ -762,6 +766,9 @@ def main() -> int:
         PROJ / ".github/workflows/portable-ci.yml",
         [
             "push:\n    branches: [main, dev]\n    tags:",
+            "METALFISH_NETWORK_CACHE_DIR",
+            "Cache engine networks",
+            "engine-networks-bt4-nnue-v2",
             "tools/write_portable_manifest.py",
             "import_msvc_dev_env.ps1",
             "actions/cache@v5",
@@ -847,12 +854,18 @@ def main() -> int:
     )
     assert_file_contains(
         PROJ / ".github/workflows/lichess-puzzles.yml",
-        ["python3 tools/download_engine_networks.py"],
+        [
+            "Cache engine networks",
+            "METALFISH_NETWORK_CACHE_DIR",
+            "python3 tools/download_engine_networks.py",
+        ],
     )
     assert_file_contains(
         PROJ / ".github/workflows/hybrid-regression.yml",
         [
             "Hybrid Regression Benchmarks",
+            "METALFISH_NETWORK_CACHE_DIR",
+            "Cache engine networks",
             "Checkout main baseline",
             "Repeated hybrid regression benchmark",
             "Download large offline puzzle sample",
@@ -1133,6 +1146,7 @@ def main() -> int:
             "WEIGHTS_PROTO_MAGIC_PREFIX",
             "re-downloading",
             "METALFISH_NETWORK_CACHE_DIR",
+            "save_to_cache",
             "--cache-dir",
             "--nnue-only",
             "--bt4-only",
@@ -1520,6 +1534,8 @@ def main() -> int:
         PROJ / ".github/workflows/windows-cuda-compile.yml",
         [
             "branches: [main, dev]",
+            "METALFISH_NETWORK_CACHE_DIR",
+            "Cache engine networks",
             "metalfish*windows-x86_64-msvc-cuda.zip",
             "build-windows-cuda/**/*.json",
             "tools/check_cuda_package_artifacts.py",
@@ -1590,6 +1606,8 @@ def main() -> int:
         PROJ / ".github/workflows/windows-cuda-runtime-gate.yml",
         [
             "Windows CUDA Runtime Gate",
+            "METALFISH_NETWORK_CACHE_DIR",
+            "Cache engine networks",
             "windows_cuda_run_id",
             "metal_ci_run_id",
             "require_metal_compare",

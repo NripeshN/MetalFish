@@ -41,6 +41,7 @@ concurrency:
 
 env:
   BUILD_TYPE: Release
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
 
 jobs:
   compare-main:
@@ -78,6 +79,14 @@ jobs:
           brew install protobuf zlib abseil zstd
           python3 -m pip install --upgrade pip
           python3 -m pip install -r candidate/tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-
 
       - name: Download shared engine networks
         working-directory: candidate

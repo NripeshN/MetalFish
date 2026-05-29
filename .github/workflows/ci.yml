@@ -17,6 +17,7 @@ env:
   BUILD_TYPE: Release
   METALFISH_BT4_WEIGHTS_URL: https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz
   METALFISH_LEGACY_WEIGHTS_URL: https://storage.lczero.org/files/networks/00af53b081e80147172e6f281c01daf5ca19ada173321438914c730370aa4267
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
 
 jobs:
   build-and-test:
@@ -46,6 +47,15 @@ jobs:
           brew install protobuf zlib abseil
           python3 -m pip install --upgrade pip
           python3 -m pip install -r tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-6147500-legacy42850-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
 
       - name: Download engine networks
         run: |
@@ -368,6 +378,14 @@ jobs:
 
       - name: Install dependencies
         run: brew install protobuf zlib abseil
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-
 
       - name: Download engine networks
         run: python3 tools/download_engine_networks.py

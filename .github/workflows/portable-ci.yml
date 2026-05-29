@@ -18,6 +18,7 @@ permissions:
 
 env:
   BUILD_TYPE: Release
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
 
 jobs:
   linux-cpu:
@@ -45,6 +46,14 @@ jobs:
             python3-pip
           python3 -m pip install -r tests/requirements.txt || \
             python3 -m pip install --break-system-packages -r tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-
 
       - name: Download NNUE files
         run: python3 tools/download_engine_networks.py --nnue-only
@@ -221,6 +230,14 @@ jobs:
 
       - name: Install Python dependencies
         run: python -m pip install -r tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-
 
       - name: Download NNUE files
         run: python tools/download_engine_networks.py --nnue-only
@@ -405,6 +422,14 @@ jobs:
           $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
           vcpkg install protobuf zlib abseil --triplet x64-windows
           python -m pip install -r tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-
 
       - name: Download NNUE files
         shell: pwsh

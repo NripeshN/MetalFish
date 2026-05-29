@@ -64,6 +64,22 @@ def download(
     validator: Callable[[Path], None] | None = None,
     cache_dirs: list[Path] | None = None,
 ) -> None:
+    def save_to_cache(path: Path) -> None:
+        for cache_dir in cache_dirs or []:
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                target = cache_dir / path.name
+                try:
+                    if target.resolve() == path.resolve():
+                        continue
+                except FileNotFoundError:
+                    pass
+                tmp_cache = target.with_suffix(target.suffix + ".tmp")
+                shutil.copyfile(path, tmp_cache)
+                tmp_cache.replace(target)
+            except OSError as exc:
+                print(f"Could not update network cache {cache_dir}: {exc}", file=sys.stderr)
+
     if dest.exists() and dest.stat().st_size > 0 and not force:
         if validator:
             try:
@@ -118,6 +134,7 @@ def download(
             if validator:
                 validator(tmp)
             tmp.replace(dest)
+            save_to_cache(dest)
             return
         except (EOFError, OSError, urllib.error.URLError, RuntimeError) as exc:
             last_error = exc
