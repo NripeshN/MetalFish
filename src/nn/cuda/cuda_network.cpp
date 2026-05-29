@@ -321,24 +321,24 @@ CudaNetwork::CudaNetwork(const WeightsFile &weights, BackendConfig config)
 }
 
 void CudaNetwork::WarmupExecution() {
-  constexpr int kWarmupBatchSize = 1;
+  const int warmup_batch_size = StableExecutionBatchSize(config_);
 
-  if (workspace_batch_size_ != kWarmupBatchSize)
-    workspace_batch_size_ = kWarmupBatchSize;
+  if (workspace_batch_size_ != warmup_batch_size)
+    workspace_batch_size_ = warmup_batch_size;
 
   cudaStream_t stream = workspace_.Stream();
   buffers_.ClearAll(stream);
   std::vector<std::uint64_t> input_masks(
-      tensor_plan_.InputMaskEntries(kWarmupBatchSize), 0);
+      tensor_plan_.InputMaskEntries(warmup_batch_size), 0);
   std::vector<float> input_values(
-      tensor_plan_.InputValueEntries(kWarmupBatchSize), 0.0f);
-  buffers_.UploadPackedInputs(input_masks, input_values, kWarmupBatchSize,
+      tensor_plan_.InputValueEntries(warmup_batch_size), 0.0f);
+  buffers_.UploadPackedInputs(input_masks, input_values, warmup_batch_size,
                               stream);
-  buffers_.ClearOutputs(kWarmupBatchSize, stream);
+  buffers_.ClearOutputs(warmup_batch_size, stream);
 
   CudaProfileSuppressionScope suppress_profile;
   executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
-                     buffers_, workspace_, kWarmupBatchSize);
+                     buffers_, workspace_, warmup_batch_size);
   workspace_.Synchronize();
 }
 
@@ -373,15 +373,20 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
   if (inputs.empty())
     return {};
 
-  const int batch_size = static_cast<int>(inputs.size());
-  if (batch_size > buffer_layout_.max_batch_size) {
+  const int requested_batch_size = static_cast<int>(inputs.size());
+  const int execution_batch_size =
+      std::max(requested_batch_size, StableExecutionBatchSize(config_));
+  if (execution_batch_size > buffer_layout_.max_batch_size) {
     throw std::runtime_error("CUDA batch size exceeds configured max batch");
   }
 
   std::vector<const float *> input_plane_ptrs;
-  input_plane_ptrs.reserve(inputs.size());
+  input_plane_ptrs.reserve(static_cast<size_t>(execution_batch_size));
   for (const auto &input : inputs)
     input_plane_ptrs.push_back(input[0].data());
+  const float *padding_input = input_plane_ptrs.back();
+  while (static_cast<int>(input_plane_ptrs.size()) < execution_batch_size)
+    input_plane_ptrs.push_back(padding_input);
 
   std::vector<std::uint64_t> input_masks;
   std::vector<float> input_values;
@@ -393,7 +398,7 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
   const bool release_workspace_each_run =
       EnvFlagEnabled("METALFISH_CUDA_RELEASE_WORKSPACE_EACH_RUN");
   const bool release_single_workspace_each_run =
-      batch_size == 1 &&
+      requested_batch_size == 1 &&
       EnvFlagEnabled("METALFISH_CUDA_RELEASE_SINGLE_WORKSPACE_EACH_RUN");
 
   auto run_once = [&]() {
@@ -402,26 +407,29 @@ CudaNetwork::RunBatch(std::span<const InputPlanes> inputs) {
       workspace_batch_size_ = 0;
     }
 
-    const bool batch_size_changed = workspace_batch_size_ != batch_size;
+    const bool batch_size_changed =
+        workspace_batch_size_ != execution_batch_size;
     if (batch_size_changed)
-      workspace_batch_size_ = batch_size;
+      workspace_batch_size_ = execution_batch_size;
     cudaStream_t stream = workspace_.Stream();
     if (batch_size_changed || force_full_buffer_clear)
       buffers_.ClearAll(stream);
-    buffers_.UploadPackedInputs(input_masks, input_values, batch_size, stream);
-    buffers_.ClearOutputs(batch_size, stream);
+    buffers_.UploadPackedInputs(input_masks, input_values, execution_batch_size,
+                                stream);
+    buffers_.ClearOutputs(execution_batch_size, stream);
     executor_->Execute(tensor_plan_, resolved_execution_plan_, weight_buffers_,
-                       buffers_, workspace_, batch_size);
+                       buffers_, workspace_, execution_batch_size);
 
     const bool trace_raw_outputs =
         EnvFlagEnabled("METALFISH_CUDA_TRACE_RAW_OUTPUTS");
-    const auto downloaded =
-        buffers_.DownloadOutputs(batch_size, stream, trace_raw_outputs);
-    TraceRawOutputs(downloaded, tensor_plan_, batch_size);
+    const auto downloaded = buffers_.DownloadOutputs(requested_batch_size,
+                                                     stream, trace_raw_outputs);
+    TraceRawOutputs(downloaded, tensor_plan_, requested_batch_size);
     return DecodeNetworkOutputBatch(
         tensor_plan_, downloaded.policy.data(), downloaded.policy.size(),
         downloaded.value.data(), downloaded.value.size(),
-        downloaded.moves_left.data(), downloaded.moves_left.size(), batch_size);
+        downloaded.moves_left.data(), downloaded.moves_left.size(),
+        requested_batch_size);
   };
 
   auto release_single_workspace_if_requested = [&]() {

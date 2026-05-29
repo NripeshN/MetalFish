@@ -1806,6 +1806,7 @@ Invoke-ProbeSmoke -Name "cuda-isolation-legacy-bt4" -Arguments \$IsolationLegacy
 )
 if ("${CUDA_GRAPH}" -ne "0") {
   \$ComparisonRequiredText += "executor=resolved+graph-replay"
+  \$ComparisonRequiredText += "caches=1"
 }
 Invoke-ComparisonSmoke -Name "cuda-nn-comparison" -RequiredText \$ComparisonRequiredText
 

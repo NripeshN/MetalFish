@@ -564,15 +564,19 @@ Current CUDA backend boundary:
   the parity tests because the test compares two separate CUDA inference calls
   for the same position; exact equality remains required for Metal and stub
   backends.
-- CUDA inference now chunks execution batches above 16 and prepares execution
-  scratch inside the executor by reserving all tape buffers before clearing the
-  workspace on the network stream. This keeps same-size chunk reuse from
-  leaking stale intermediate state, also covers first allocation/growth of named
-  scratch buffers, and preserves allocated device buffers. The 2026-05-20 L4
-  gate `metalfish-cuda-gate-20260520-230541` accepted CUDA unit tests, fixed
-  BT4 references, expanded batch parity, reuse stress, auto/CUDA UCI smokes, and
+- CUDA inference now chunks execution batches above 16, pads smaller CUDA
+  requests to the configured stable execution batch before graph execution, and
+  decodes only the requested rows. The stable-shape path primes the release
+  graph shape during backend warmup, keeps CUDA graph cache churn out of
+  low-latency MCTS batches, and prepares execution scratch inside the executor
+  by reserving all tape buffers before clearing the workspace on the network
+  stream. This keeps same-size chunk reuse from leaking stale intermediate
+  state, also covers first allocation/growth of named scratch buffers, and
+  preserves allocated device buffers. The 2026-05-20 L4 gate
+  `metalfish-cuda-gate-20260520-230541` accepted CUDA unit tests, fixed BT4
+  references, expanded batch parity, reuse stress, auto/CUDA UCI smokes, and
   hybrid-CUDA smoke. `METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE` can raise the
-  chunk size for experiments, but the production default remains 16: the
+  stable graph shape for experiments, but the production default remains 16: the
   2026-05-21 L4 fallback gate
   `metalfish-cuda-gate-20260521-164547-stable32-g2s4` accepted a batch-32
   experiment with `REUSE_STRESS_MAX policy_delta=0.000007`, but batch-32 timing

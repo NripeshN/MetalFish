@@ -399,6 +399,23 @@ def main() -> int:
             '"HybridANEMinBudgetMs"',
         ],
     )
+    assert_file_contains(
+        PROJ / "src/nn/cuda/cuda_network.cpp",
+        [
+            "const int warmup_batch_size = StableExecutionBatchSize(config_);",
+            "const int requested_batch_size = static_cast<int>(inputs.size());",
+            "const int execution_batch_size =",
+            "std::max(requested_batch_size, StableExecutionBatchSize(config_))",
+            "input_plane_ptrs.reserve(static_cast<size_t>(execution_batch_size))",
+            "while (static_cast<int>(input_plane_ptrs.size()) < execution_batch_size)",
+            "buffers_.UploadPackedInputs(input_masks, input_values, execution_batch_size",
+            "buffers_.ClearOutputs(execution_batch_size",
+            "workspace_, execution_batch_size)",
+            "buffers_.DownloadOutputs(requested_batch_size",
+            "TraceRawOutputs(downloaded, tensor_plan_, requested_batch_size)",
+            "requested_batch_size)",
+        ],
+    )
 
     engines_config = json.loads((PROJ / "tools/engines_config.json").read_text())
     engine_options = engines_config["engines"]
@@ -1392,6 +1409,7 @@ def main() -> int:
             "--isolation-weights",
             '--backend-label "CUDA transformer backend"',
             '--require-network-info-substring "executor=resolved+graph-replay"',
+            'grep -q "caches=1"',
             "--require-wdl",
             "--require-moves-left",
             "--no-require-wdl",
@@ -1851,6 +1869,7 @@ def main() -> int:
             "cuda-isolation-legacy-bt4",
             "Invoke-ComparisonSmoke",
             "cuda-nn-comparison",
+            'ComparisonRequiredText += "caches=1"',
             "cuda-timed-mcts",
             "cuda-timed-mcts-search.json",
             'Write-SearchJson -Name "cuda-timed-mcts-search"',

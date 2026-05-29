@@ -1203,6 +1203,8 @@ grep -q "CUDA transformer backend" \
 if [[ "${CUDA_GRAPH_REQUESTED}" == "1" ]]; then
   grep -q "executor=resolved+graph-replay" \
     "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
+  grep -q "caches=1" \
+    "${BUILD_DIR}/cuda-gpu-package-nn-comparison.log"
 fi
 METALFISH_CUDA_PROFILE=0 \
   METALFISH_CUDA_GRAPH_STATUS_DETAIL="${METALFISH_CUDA_GRAPH_STATUS_DETAIL:-1}" \
