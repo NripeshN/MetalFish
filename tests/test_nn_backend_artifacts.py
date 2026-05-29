@@ -2849,6 +2849,48 @@ def test_network_downloader_retries_truncated_gzip() -> None:
         downloader.validate_gzip_weights(dest)
 
 
+def test_network_downloader_uses_validated_cache_before_network() -> None:
+    valid_payload = gzip.compress(downloader.WEIGHTS_PROTO_MAGIC_PREFIX + b"synthetic")
+
+    class Response(io.BytesIO):
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            self.close()
+
+    old_urlopen = downloader.urllib.request.urlopen
+
+    def fake_urlopen(_request: object, timeout: int) -> Response:
+        raise AssertionError("cache hit should not open network URL")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        cache = root / "cache"
+        output = root / "output"
+        cache.mkdir()
+        output.mkdir()
+        source = cache / "weights.pb.gz"
+        dest = output / "weights.pb.gz"
+        source.write_bytes(valid_payload)
+
+        downloader.urllib.request.urlopen = fake_urlopen
+        try:
+            downloader.download(
+                "https://example.invalid/weights.pb.gz",
+                dest,
+                retries=1,
+                force=False,
+                validator=downloader.validate_gzip_weights,
+                cache_dirs=[cache],
+            )
+        finally:
+            downloader.urllib.request.urlopen = old_urlopen
+
+        expect("cached network copied", dest.read_bytes() == valid_payload)
+        downloader.validate_gzip_weights(dest)
+
+
 def test_portable_manifest_uses_checked_out_commit() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -2949,6 +2991,8 @@ def main() -> int:
     test_cuda_release_artifact_helpers_require_metal_compare()
     test_cuda_runtime_manifest_requires_benchmark_compare()
     test_network_downloader_validates_gzip_weights()
+    test_network_downloader_retries_truncated_gzip()
+    test_network_downloader_uses_validated_cache_before_network()
     test_portable_manifest_uses_checked_out_commit()
     print("NN backend artifact tests: OK")
     return 0

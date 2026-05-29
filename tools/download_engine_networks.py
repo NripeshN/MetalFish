@@ -62,6 +62,7 @@ def download(
     retries: int,
     force: bool,
     validator: Callable[[Path], None] | None = None,
+    cache_dirs: list[Path] | None = None,
 ) -> None:
     if dest.exists() and dest.stat().st_size > 0 and not force:
         if validator:
@@ -76,6 +77,27 @@ def download(
         else:
             print(f"Using cached {dest}")
             return
+
+    for cache_dir in cache_dirs or []:
+        source = cache_dir / dest.name
+        if not source.exists() or source.stat().st_size <= 0:
+            continue
+        try:
+            if source.resolve() == dest.resolve():
+                continue
+        except FileNotFoundError:
+            continue
+        if validator:
+            try:
+                validator(source)
+            except (EOFError, OSError, RuntimeError) as exc:
+                print(f"Cached {source} failed validation: {exc}; skipping")
+                continue
+        print(f"Using cached {source} -> {dest}")
+        tmp = dest.with_suffix(dest.suffix + ".tmp")
+        shutil.copyfile(source, tmp)
+        tmp.replace(dest)
+        return
 
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     last_error: Exception | None = None
@@ -132,6 +154,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nnue-only", action="store_true")
     parser.add_argument("--bt4-only", action="store_true")
     parser.add_argument(
+        "--cache-dir",
+        action="append",
+        default=[],
+        help="directory to check for validated network files before downloading",
+    )
+    parser.add_argument(
         "--legacy-only",
         action="store_true",
         help="download the legacy 42850 classical convolution Lc0 net only",
@@ -156,6 +184,13 @@ def main() -> int:
 
     dest = Path(args.dest)
     dest.mkdir(parents=True, exist_ok=True)
+    env_cache_dirs = [
+        path
+        for var in ("METALFISH_NETWORK_CACHE_DIR", "METALFISH_NETWORK_CACHE_DIRS")
+        for path in os.environ.get(var, "").split(os.pathsep)
+        if path
+    ]
+    cache_dirs = [Path(path).expanduser() for path in [*args.cache_dir, *env_cache_dirs]]
 
     want_nnue = not (args.bt4_only or args.legacy_only)
     want_bt4 = not (args.nnue_only or args.legacy_only)
@@ -164,13 +199,20 @@ def main() -> int:
     if want_nnue:
         for filename, default_url in NNUE_URLS.items():
             url = os.environ.get(NNUE_URL_ENV[filename], default_url)
-            download(url, dest / filename, args.retries, args.force)
+            download(url, dest / filename, args.retries, args.force, cache_dirs=cache_dirs)
 
     if want_bt4:
         url = os.environ.get("METALFISH_BT4_WEIGHTS_URL", BT4_URL)
         gz_path = dest / BT4_GZ_FILENAME
         pb_path = dest / BT4_FILENAME
-        download(url, gz_path, args.retries, args.force, validate_gzip_weights)
+        download(
+            url,
+            gz_path,
+            args.retries,
+            args.force,
+            validate_gzip_weights,
+            cache_dirs=cache_dirs,
+        )
         decompress_gzip(gz_path, pb_path, args.force)
 
     if want_legacy:
@@ -181,6 +223,7 @@ def main() -> int:
             args.retries,
             args.force,
             validate_gzip_weights,
+            cache_dirs=cache_dirs,
         )
 
     return 0

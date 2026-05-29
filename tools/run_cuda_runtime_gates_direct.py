@@ -265,11 +265,11 @@ def run_network_downloads(
 ) -> None:
     if args.skip_network_download:
         return
-    run_command(
-        [sys.executable, "tools/download_engine_networks.py", "--include-legacy"],
-        cwd=worktree,
-        dry_run=dry_run,
-    )
+    cmd = [sys.executable, "tools/download_engine_networks.py", "--include-legacy"]
+    local_network_cache = ROOT / "networks"
+    if local_network_cache.is_dir():
+        cmd.extend(["--cache-dir", str(local_network_cache)])
+    run_command(cmd, cwd=worktree, dry_run=dry_run)
 
 
 def run_linux_gate(
