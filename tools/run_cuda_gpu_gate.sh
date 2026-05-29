@@ -1198,7 +1198,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSAddDirichletNoise=false \
   --setoption TransformerLowTimeFallbackMs=0 \
   --position "fen ${PROMOTION_FEN}" \
-  --go "nodes 50" \
+  --go "searchmoves a7a8q nodes 50" \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "Hybrid MCTS runtime: backend=cuda" \
   --expect-output "minibatch=1" \
@@ -1885,7 +1885,7 @@ METALFISH_CUDA_PROFILE=0 \
   --setoption MCTSAddDirichletNoise=false \
   --setoption TransformerLowTimeFallbackMs=0 \
   --position "fen ${PROMOTION_FEN}" \
-  --go "nodes 50" \
+  --go "searchmoves a7a8q nodes 50" \
   --expect-output "Starting Parallel Hybrid Search" \
   --expect-output "Hybrid MCTS runtime: backend=cuda" \
   --expect-output "minibatch=1" \

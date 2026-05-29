@@ -2262,7 +2262,7 @@ Invoke-UciSmoke -Name "hybrid-cuda-promotion" -Commands @(
   "setoption name MCTSAddDirichletNoise value false",
   "setoption name TransformerLowTimeFallbackMs value 0",
   "position fen \$PromotionFen",
-  "go nodes 50",
+  "go searchmoves a7a8q nodes 50",
   "quit"
 ) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
 
@@ -2467,7 +2467,7 @@ Write-SearchJson -Name "cuda-en-passant-mcts-search" -Text \$EnPassantMctsText -
 Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "fen \$Bk07Fen" -Go "${HYBRID_PARITY_UCI_GO}"
 Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText -Position "fen \$KiwipeteFen" -Go "nodes 50"
 Write-SearchJson -Name "hybrid-cuda-after-e4-search" -Text \$HybridAfterE4Text -Position "fen \$AfterE4Fen" -Go "nodes 50"
-Write-SearchJson -Name "hybrid-cuda-promotion-search" -Text \$HybridPromotionText -Position "fen \$PromotionFen" -Go "nodes 50"
+Write-SearchJson -Name "hybrid-cuda-promotion-search" -Text \$HybridPromotionText -Position "fen \$PromotionFen" -Go "searchmoves a7a8q nodes 50"
 Write-SearchJson -Name "hybrid-cuda-en-passant-search" -Text \$HybridEnPassantText -Position "fen \$EnPassantFen" -Go "nodes 50"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
 \$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -2678,7 +2678,7 @@ Write-SearchJson -Name "hybrid-cuda-en-passant-search" -Text \$HybridEnPassantTe
       stderr_log = "hybrid-cuda-after-e4.stderr.log"
     }
     hybrid_cuda_promotion = [ordered]@{
-      go = "nodes 50"
+      go = "searchmoves a7a8q nodes 50"
       fen = \$PromotionFen
       bestmove = (Find-BestMove \$HybridPromotionText)
       backend_selected = (Test-BackendSelected \$HybridPromotionText)
