@@ -822,6 +822,7 @@ def main() -> int:
             "tools/fetch_cuda_release_artifacts.py",
             "tools/fetch_cuda_gpu_gate_inputs.py",
             "tools/fetch_windows_cuda_runtime_inputs.py",
+            "tools/github_cli.py",
             "tools/run_cuda_runtime_gates_direct.py",
             "tools/run_nn_backend_probe_suite.py",
             "tools/uci_ponder_smoke.py",

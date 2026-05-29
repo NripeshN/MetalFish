@@ -23,6 +23,7 @@ from tools.cuda_runtime_search_contract import (  # noqa: E402
     SEARCH_COMPARISONS,
     metal_artifact_paths,
 )
+from tools.github_cli import gh_cmd  # noqa: E402
 
 
 def run_text(cmd: list[str]) -> str:
@@ -84,7 +85,11 @@ def run_to_file(cmd: list[str], path: pathlib.Path, *, expected_size: int) -> No
 
 
 def default_repo() -> str:
-    return str(run_json(["gh", "repo", "view", "--json", "nameWithOwner"])["nameWithOwner"])
+    return str(
+        run_json(gh_cmd("repo", "view", "--json", "nameWithOwner"))[
+            "nameWithOwner"
+        ]
+    )
 
 
 def git_head() -> str:
@@ -101,8 +106,7 @@ def sha256_file(path: pathlib.Path) -> str:
 
 def require_metal_run(repo: str, run_id: str, expected_sha: str | None) -> dict:
     data = run_json(
-        [
-            "gh",
+        gh_cmd(
             "run",
             "view",
             run_id,
@@ -110,7 +114,7 @@ def require_metal_run(repo: str, run_id: str, expected_sha: str | None) -> dict:
             repo,
             "--json",
             "conclusion,headSha,status,url,workflowName",
-        ]
+        )
     )
     workflow_name = str(data["workflowName"])
     status = str(data["status"])
@@ -133,11 +137,10 @@ def require_metal_run(repo: str, run_id: str, expected_sha: str | None) -> dict:
 
 def artifact_for_name(repo: str, run_id: str, name: str) -> tuple[int, int]:
     data = run_json(
-        [
-            "gh",
+        gh_cmd(
             "api",
             f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
-        ]
+        )
     )
     matches = [
         item
@@ -211,11 +214,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     metal_archive = downloads_dir / "metalfish-macos-arm64.zip"
     run_to_file(
-        [
-            "gh",
+        gh_cmd(
             "api",
             f"repos/{repo}/actions/artifacts/{metal_artifact_id}/zip",
-        ],
+        ),
         metal_archive,
         expected_size=metal_artifact_size,
     )

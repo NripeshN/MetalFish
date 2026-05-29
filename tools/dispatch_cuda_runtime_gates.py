@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import subprocess
 import sys
 import time
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.github_cli import gh_cmd  # noqa: E402
 
 
 def run_text(cmd: list[str]) -> str:
@@ -19,7 +26,7 @@ def run_json(cmd: list[str]) -> object:
 
 
 def default_repo() -> str:
-    data = run_json(["gh", "repo", "view", "--json", "nameWithOwner"])
+    data = run_json(gh_cmd("repo", "view", "--json", "nameWithOwner"))
     if not isinstance(data, dict):
         raise RuntimeError("gh repo view returned invalid JSON")
     return str(data["nameWithOwner"])
@@ -38,8 +45,7 @@ def find_successful_run(
     limit: int,
 ) -> dict:
     data = run_json(
-        [
-            "gh",
+        gh_cmd(
             "run",
             "list",
             "--repo",
@@ -52,7 +58,7 @@ def find_successful_run(
             str(limit),
             "--json",
             "conclusion,createdAt,databaseId,headSha,status,url,workflowName",
-        ]
+        )
     )
     if not isinstance(data, list):
         raise RuntimeError(f"gh run list returned invalid JSON for {workflow}")
@@ -80,7 +86,7 @@ def append_field(cmd: list[str], key: str, value: str | int | bool) -> None:
 
 def require_dispatchable_workflow(*, repo: str, workflow_file: str) -> None:
     proc = subprocess.run(
-        ["gh", "workflow", "view", workflow_file, "--repo", repo],
+        gh_cmd("workflow", "view", workflow_file, "--repo", repo),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -101,7 +107,7 @@ def require_dispatchable_workflow(*, repo: str, workflow_file: str) -> None:
 
 
 def dispatch_workflow(*, repo: str, workflow_file: str, ref: str, fields: dict) -> None:
-    cmd = ["gh", "workflow", "run", workflow_file, "--repo", repo, "--ref", ref]
+    cmd = gh_cmd("workflow", "run", workflow_file, "--repo", repo, "--ref", ref)
     for key, value in fields.items():
         if value is None or value == "":
             continue

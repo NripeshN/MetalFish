@@ -43,10 +43,7 @@ def git_value(args: list[str], *, cwd: pathlib.Path = ROOT) -> str:
 
 
 def default_repo() -> str:
-    data = dispatch.run_json(["gh", "repo", "view", "--json", "nameWithOwner"])
-    if not isinstance(data, dict):
-        raise RuntimeError("gh repo view returned invalid JSON")
-    return str(data["nameWithOwner"])
+    return dispatch.default_repo()
 
 
 def bool_env(value: bool) -> str:

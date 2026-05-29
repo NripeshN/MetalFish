@@ -17,9 +17,11 @@ import zipfile
 try:
     from tools.check_cuda_package_artifacts import validate_windows_cuda_package
     from tools.cuda_runtime_search_contract import SEARCH_COMPARISONS
+    from tools.github_cli import gh_cmd
 except ModuleNotFoundError:
     from check_cuda_package_artifacts import validate_windows_cuda_package
     from cuda_runtime_search_contract import SEARCH_COMPARISONS
+    from github_cli import gh_cmd
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -63,7 +65,7 @@ def run_json(cmd: list[str]) -> dict:
 
 
 def default_repo() -> str:
-    data = run_json(["gh", "repo", "view", "--json", "nameWithOwner"])
+    data = run_json(gh_cmd("repo", "view", "--json", "nameWithOwner"))
     return str(data["nameWithOwner"])
 
 
@@ -73,8 +75,7 @@ def git_head() -> str:
 
 def read_run(repo: str, run_id: str) -> RunInfo:
     data = run_json(
-        [
-            "gh",
+        gh_cmd(
             "run",
             "view",
             run_id,
@@ -82,7 +83,7 @@ def read_run(repo: str, run_id: str) -> RunInfo:
             repo,
             "--json",
             "conclusion,headSha,status,url,workflowName",
-        ]
+        )
     )
     return RunInfo(
         run_id=run_id,
@@ -116,11 +117,10 @@ def require_run_provenance(
 
 def list_artifacts(repo: str, run_id: str) -> list[ArtifactInfo]:
     data = run_json(
-        [
-            "gh",
+        gh_cmd(
             "api",
             f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
-        ]
+        )
     )
     return [
         ArtifactInfo(
@@ -178,11 +178,10 @@ def download_artifact(repo: str, artifact: ArtifactInfo, archive_path: pathlib.P
             tmp_path.unlink()
         with tmp_path.open("wb") as handle:
             proc = subprocess.run(
-                [
-                    "gh",
+                gh_cmd(
                     "api",
                     f"repos/{repo}/actions/artifacts/{artifact.artifact_id}/zip",
-                ],
+                ),
                 cwd=ROOT,
                 stdout=handle,
                 stderr=subprocess.PIPE,
