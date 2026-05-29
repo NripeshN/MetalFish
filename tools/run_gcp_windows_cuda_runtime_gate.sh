@@ -61,6 +61,8 @@ if [[ "${CUDA_GRAPH}" == "0" ]]; then
 fi
 CUDA_PROFILE="${METALFISH_WINDOWS_CUDA_PROFILE:-}"
 CUDA_PROFILE_LIMIT="${METALFISH_WINDOWS_CUDA_PROFILE_LIMIT:-2}"
+CUDA_DETERMINISTIC_ATTENTION_SOFTMAX="${METALFISH_WINDOWS_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX:-${METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX:-1}}"
+CUDA_FULL_BUFFER_CLEAR="${METALFISH_WINDOWS_CUDA_FULL_BUFFER_CLEAR:-${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}}"
 CUDA_STABLE_BATCH_SIZE="${METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}"
 CUDA_GRAPH_REPLAY_WARMUP="${METALFISH_WINDOWS_CUDA_GRAPH_REPLAY_WARMUP:-2}"
 CUBLAS_WORKSPACE_CONFIG_VALUE="${CUBLAS_WORKSPACE_CONFIG:-${METALFISH_WINDOWS_CUBLAS_WORKSPACE_CONFIG:-}}"
@@ -496,6 +498,8 @@ write_runtime_manifest() {
     GATE_CUDA_STABLE_BATCH_SIZE="${CUDA_STABLE_BATCH_SIZE}" \
     GATE_CUDA_GRAPH="${CUDA_GRAPH}" \
     GATE_CUDA_GRAPH_EXECUTION="${CUDA_GRAPH}" \
+    GATE_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX="${CUDA_DETERMINISTIC_ATTENTION_SOFTMAX}" \
+    GATE_CUDA_FULL_BUFFER_CLEAR="${CUDA_FULL_BUFFER_CLEAR}" \
     GATE_CUDA_PROFILE="${CUDA_PROFILE}" \
     GATE_CUDA_PROFILE_LIMIT="${CUDA_PROFILE_LIMIT}" \
     GATE_CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG_VALUE}" \
@@ -602,6 +606,10 @@ manifest = {
         ],
         "cuda_graph": os.environ["GATE_CUDA_GRAPH"],
         "cuda_graph_execution": os.environ["GATE_CUDA_GRAPH_EXECUTION"],
+        "cuda_deterministic_attention_softmax": os.environ[
+            "GATE_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX"
+        ],
+        "cuda_full_buffer_clear": os.environ["GATE_CUDA_FULL_BUFFER_CLEAR"],
         "cuda_profile": os.environ["GATE_CUDA_PROFILE"],
         "cuda_profile_limit": os.environ["GATE_CUDA_PROFILE_LIMIT"],
         "cublas_workspace_config": os.environ["GATE_CUBLAS_WORKSPACE_CONFIG"],
@@ -2230,6 +2238,8 @@ Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText 
     cuda_graph = \$(if ("${CUDA_GRAPH}" -eq "") { \$null } else { "${CUDA_GRAPH}" })
     cuda_profile = \$(if ("${CUDA_PROFILE}" -eq "") { \$null } else { "${CUDA_PROFILE}" })
     cuda_profile_limit = ${CUDA_PROFILE_LIMIT}
+    cuda_deterministic_attention_softmax = "${CUDA_DETERMINISTIC_ATTENTION_SOFTMAX}"
+    cuda_full_buffer_clear = "${CUDA_FULL_BUFFER_CLEAR}"
     cublas_workspace_config = \$(if ("${CUBLAS_WORKSPACE_CONFIG_VALUE}" -eq "") { \$null } else { "${CUBLAS_WORKSPACE_CONFIG_VALUE}" })
     cuda_stable_execution_batch_size = ${CUDA_STABLE_BATCH_SIZE}
   }

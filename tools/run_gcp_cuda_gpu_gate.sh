@@ -309,6 +309,8 @@ write_runtime_manifest() {
     GATE_CUDA_STABLE_BATCH_SIZE="${METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}" \
     GATE_CUDA_GRAPH="${METALFISH_CUDA_GRAPH:-${METALFISH_CUDA_GRAPH_EXECUTION:-}}" \
     GATE_CUDA_GRAPH_EXECUTION="${METALFISH_CUDA_GRAPH_EXECUTION:-}" \
+    GATE_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX="${METALFISH_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX:-1}" \
+    GATE_CUDA_FULL_BUFFER_CLEAR="${METALFISH_CUDA_FULL_BUFFER_CLEAR:-1}" \
     GATE_CUDA_PROFILE="${METALFISH_CUDA_PROFILE:-}" \
     GATE_CUDA_PROFILE_LIMIT="${METALFISH_CUDA_PROFILE_LIMIT:-2}" \
     GATE_CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-}" \
@@ -404,6 +406,10 @@ manifest = {
         ],
         "cuda_graph": os.environ["GATE_CUDA_GRAPH"],
         "cuda_graph_execution": os.environ["GATE_CUDA_GRAPH_EXECUTION"],
+        "cuda_deterministic_attention_softmax": os.environ[
+            "GATE_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX"
+        ],
+        "cuda_full_buffer_clear": os.environ["GATE_CUDA_FULL_BUFFER_CLEAR"],
         "cuda_profile": os.environ["GATE_CUDA_PROFILE"],
         "cuda_profile_limit": os.environ["GATE_CUDA_PROFILE_LIMIT"],
         "cublas_workspace_config": os.environ["GATE_CUBLAS_WORKSPACE_CONFIG"],

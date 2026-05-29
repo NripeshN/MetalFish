@@ -1359,6 +1359,8 @@ def runtime_inputs(*, windows_package: pathlib.Path | None = None) -> dict:
 def runtime_policy(
     *,
     graph: str = "1",
+    deterministic_attention_softmax: str = "1",
+    full_buffer_clear: str = "1",
     profile: str = "0",
     stable_batch: str = "16",
     cublas_workspace: str = "",
@@ -1366,6 +1368,8 @@ def runtime_policy(
     return {
         "cuda_graph": graph,
         "cuda_graph_execution": graph,
+        "cuda_deterministic_attention_softmax": deterministic_attention_softmax,
+        "cuda_full_buffer_clear": full_buffer_clear,
         "cuda_profile": profile,
         "cuda_stable_execution_batch_size": stable_batch,
         "cublas_workspace_config": cublas_workspace,
@@ -2197,31 +2201,31 @@ def test_cuda_runtime_manifest_enforces_release_policy() -> None:
             summary["runtime"]["cuda_stable_execution_batch_size"] == "16",
         )
 
-        bad = dict(base)
-        bad["runtime"] = runtime_policy(profile="1")
-        manifest.write_text(json.dumps(bad), encoding="utf-8")
-        try:
-            runtime_checker.validate_runtime_manifest(
-                manifest,
-                runtime_kind="windows-cuda",
-                require_release_policy=True,
-            )
-        except ValueError as exc:
-            expect("release profile policy rejected", "profiling disabled" in str(exc))
+        def expect_policy_rejection(policy: dict, text: str) -> None:
+            bad = dict(base)
+            bad["runtime"] = policy
+            manifest.write_text(json.dumps(bad), encoding="utf-8")
+            try:
+                runtime_checker.validate_runtime_manifest(
+                    manifest,
+                    runtime_kind="windows-cuda",
+                    require_release_policy=True,
+                )
+            except ValueError as exc:
+                expect(f"release policy rejected {text}", text in str(exc))
+                return
+            raise AssertionError(f"expected release runtime policy rejection: {text}")
 
-        bad = dict(base)
-        bad["runtime"] = runtime_policy(graph="")
-        manifest.write_text(json.dumps(bad), encoding="utf-8")
-        try:
-            runtime_checker.validate_runtime_manifest(
-                manifest,
-                runtime_kind="windows-cuda",
-                require_release_policy=True,
-            )
-        except ValueError as exc:
-            expect("release graph policy rejected", "graph enabled" in str(exc))
-            return
-    raise AssertionError("expected release runtime manifest graph rejection")
+        expect_policy_rejection(runtime_policy(profile="1"), "profiling disabled")
+        expect_policy_rejection(runtime_policy(graph=""), "graph enabled")
+        expect_policy_rejection(
+            runtime_policy(deterministic_attention_softmax="0"),
+            "cuda_deterministic_attention_softmax",
+        )
+        expect_policy_rejection(
+            runtime_policy(full_buffer_clear="0"),
+            "cuda_full_buffer_clear",
+        )
 
 
 def test_cuda_package_validator_rejects_source_commit_drift() -> None:

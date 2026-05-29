@@ -265,6 +265,9 @@ def validate_release_runtime_policy(
     for field in ("cuda_graph", "cuda_graph_execution"):
         if not is_truthy(runtime.get(field)):
             raise ValueError(f"release runtime policy requires graph enabled: {field}")
+    for field in ("cuda_deterministic_attention_softmax", "cuda_full_buffer_clear"):
+        if not is_truthy(runtime.get(field)):
+            raise ValueError(f"release runtime policy requires enabled: {field}")
     if not is_falsey_or_empty(runtime.get("cuda_profile")):
         raise ValueError("release runtime policy requires CUDA profiling disabled")
     if str(runtime.get("cublas_workspace_config") or "").strip():
