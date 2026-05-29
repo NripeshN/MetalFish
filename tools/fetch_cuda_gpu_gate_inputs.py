@@ -15,7 +15,14 @@ import zipfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 DOWNLOAD_RETRIES = 3
+
+from tools.cuda_runtime_search_contract import (  # noqa: E402
+    SEARCH_COMPARISONS,
+    metal_artifact_paths,
+)
 
 
 def run_text(cmd: list[str]) -> str:
@@ -217,22 +224,12 @@ def main(argv: list[str] | None = None) -> int:
     bt4_log = metal_dir / "build" / "metal-nn-probe-suite.log"
     legacy_log = metal_dir / "build" / "metal-legacy-nn-probe-suite.log"
     comparison_log = metal_dir / "build" / "metal-nn-comparison.log"
-    mcts_search_json = metal_dir / "build" / "metal-mcts-bk07-search.json"
-    mcts_kiwipete_search_json = (
-        metal_dir / "build" / "metal-mcts-kiwipete-search.json"
-    )
-    hybrid_search_json = metal_dir / "build" / "metal-hybrid-bk07-search.json"
-    hybrid_kiwipete_search_json = (
-        metal_dir / "build" / "metal-hybrid-kiwipete-search.json"
-    )
+    metal_search_paths = metal_artifact_paths(metal_dir / "build")
     for path in (
         bt4_log,
         legacy_log,
         comparison_log,
-        mcts_search_json,
-        mcts_kiwipete_search_json,
-        hybrid_search_json,
-        hybrid_kiwipete_search_json,
+        *metal_search_paths.values(),
     ):
         if not path.is_file() or path.stat().st_size == 0:
             raise FileNotFoundError(path)
@@ -244,15 +241,13 @@ def main(argv: list[str] | None = None) -> int:
         "METALFISH_METAL_COMPARISON_LOG": str(comparison_log),
         "METALFISH_METAL_PROBE_SUITE_LOG": str(bt4_log),
         "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG": str(legacy_log),
-        "METALFISH_METAL_MCTS_BK07_SEARCH_JSON": str(mcts_search_json),
-        "METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON": str(
-            mcts_kiwipete_search_json
-        ),
-        "METALFISH_METAL_HYBRID_BK07_SEARCH_JSON": str(hybrid_search_json),
-        "METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON": str(
-            hybrid_kiwipete_search_json
-        ),
     }
+    env.update(
+        {
+            spec.metalfish_env_var: str(metal_search_paths[spec.key])
+            for spec in SEARCH_COMPARISONS
+        }
+    )
     env_path = out_dir / "cuda-gpu-gate-env.sh"
     env_path.write_text(shell_exports(env) + "\n", encoding="utf-8")
 
@@ -279,25 +274,13 @@ def main(argv: list[str] | None = None) -> int:
                 "size_bytes": comparison_log.stat().st_size,
                 "sha256": sha256_file(comparison_log),
             },
-            "metal_mcts_bk07_search_json": {
-                "path": str(mcts_search_json),
-                "size_bytes": mcts_search_json.stat().st_size,
-                "sha256": sha256_file(mcts_search_json),
-            },
-            "metal_mcts_kiwipete_search_json": {
-                "path": str(mcts_kiwipete_search_json),
-                "size_bytes": mcts_kiwipete_search_json.stat().st_size,
-                "sha256": sha256_file(mcts_kiwipete_search_json),
-            },
-            "metal_hybrid_bk07_search_json": {
-                "path": str(hybrid_search_json),
-                "size_bytes": hybrid_search_json.stat().st_size,
-                "sha256": sha256_file(hybrid_search_json),
-            },
-            "metal_hybrid_kiwipete_search_json": {
-                "path": str(hybrid_kiwipete_search_json),
-                "size_bytes": hybrid_kiwipete_search_json.stat().st_size,
-                "sha256": sha256_file(hybrid_kiwipete_search_json),
+            **{
+                spec.metal_input_key: {
+                    "path": str(metal_search_paths[spec.key]),
+                    "size_bytes": metal_search_paths[spec.key].stat().st_size,
+                    "sha256": sha256_file(metal_search_paths[spec.key]),
+                }
+                for spec in SEARCH_COMPARISONS
             },
         },
     }

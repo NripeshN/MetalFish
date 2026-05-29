@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.cuda_runtime_observed import collect_observed_runtime_facts  # noqa: E402
+from tools.cuda_runtime_search_contract import SEARCH_COMPARISONS  # noqa: E402
 
 
 SCHEMAS = {
@@ -78,7 +79,7 @@ def env_value(env: Mapping[str, str], name: str) -> str:
 
 
 def metal_input_records(env: Mapping[str, str]) -> dict[str, Any]:
-    return {
+    records = {
         "require_metal_compare": env_value(env, "GATE_REQUIRE_METAL_COMPARE"),
         "require_metal_benchmark_compare": env_value(
             env, "GATE_REQUIRE_METAL_BENCHMARK_COMPARE"
@@ -96,19 +97,10 @@ def metal_input_records(env: Mapping[str, str]) -> dict[str, Any]:
         "metal_legacy_probe_suite_log": file_record(
             env_value(env, "GATE_METAL_LEGACY_PROBE_SUITE_LOG")
         ),
-        "metal_mcts_bk07_search_json": file_record(
-            env_value(env, "GATE_METAL_MCTS_BK07_SEARCH_JSON")
-        ),
-        "metal_mcts_kiwipete_search_json": file_record(
-            env_value(env, "GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON")
-        ),
-        "metal_hybrid_bk07_search_json": file_record(
-            env_value(env, "GATE_METAL_HYBRID_BK07_SEARCH_JSON")
-        ),
-        "metal_hybrid_kiwipete_search_json": file_record(
-            env_value(env, "GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON")
-        ),
     }
+    for spec in SEARCH_COMPARISONS:
+        records[spec.metal_input_key] = file_record(env_value(env, spec.gate_env_var))
+    return records
 
 
 def common_runtime(env: Mapping[str, str]) -> dict[str, str]:

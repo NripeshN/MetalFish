@@ -16,8 +16,10 @@ import zipfile
 
 try:
     from tools.check_cuda_package_artifacts import validate_windows_cuda_package
+    from tools.cuda_runtime_search_contract import SEARCH_COMPARISONS
 except ModuleNotFoundError:
     from check_cuda_package_artifacts import validate_windows_cuda_package
+    from cuda_runtime_search_contract import SEARCH_COMPARISONS
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -340,10 +342,7 @@ def main(argv: list[str] | None = None) -> int:
     metal_probe_log = None
     metal_legacy_probe_log = None
     metal_comparison_log = None
-    metal_mcts_search_json = None
-    metal_mcts_kiwipete_search_json = None
-    metal_hybrid_search_json = None
-    metal_hybrid_kiwipete_search_json = None
+    metal_search_paths: dict[str, pathlib.Path] = {}
     if args.metal_ci_run_id:
         metal_run = read_run(repo, args.metal_ci_run_id)
         require_run_provenance(
@@ -366,24 +365,10 @@ def main(argv: list[str] | None = None) -> int:
         metal_comparison_log = find_one(
             metal_dir, "metal-nn-comparison.log", "Metal NN comparison log"
         )
-        metal_mcts_search_json = find_one(
-            metal_dir, "metal-mcts-bk07-search.json", "Metal MCTS search JSON"
-        )
-        metal_mcts_kiwipete_search_json = find_one(
-            metal_dir,
-            "metal-mcts-kiwipete-search.json",
-            "Metal MCTS kiwipete search JSON",
-        )
-        metal_hybrid_search_json = find_one(
-            metal_dir,
-            "metal-hybrid-bk07-search.json",
-            "Metal Hybrid search JSON",
-        )
-        metal_hybrid_kiwipete_search_json = find_one(
-            metal_dir,
-            "metal-hybrid-kiwipete-search.json",
-            "Metal Hybrid kiwipete search JSON",
-        )
+        metal_search_paths = {
+            spec.key: find_one(metal_dir, spec.metal_artifact, spec.metal_input_label)
+            for spec in SEARCH_COMPARISONS
+        }
 
     env = {
         "METALFISH_WINDOWS_CUDA_PACKAGE": str(package),
@@ -397,19 +382,13 @@ def main(argv: list[str] | None = None) -> int:
                 "METALFISH_METAL_COMPARISON_LOG": str(metal_comparison_log),
                 "METALFISH_METAL_PROBE_SUITE_LOG": str(metal_probe_log),
                 "METALFISH_METAL_LEGACY_PROBE_SUITE_LOG": str(metal_legacy_probe_log),
-                "METALFISH_METAL_MCTS_BK07_SEARCH_JSON": str(
-                    metal_mcts_search_json
-                ),
-                "METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON": str(
-                    metal_mcts_kiwipete_search_json
-                ),
-                "METALFISH_METAL_HYBRID_BK07_SEARCH_JSON": str(
-                    metal_hybrid_search_json
-                ),
-                "METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON": str(
-                    metal_hybrid_kiwipete_search_json
-                ),
                 "METALFISH_REQUIRE_METAL_COMPARE": "1",
+            }
+        )
+        env.update(
+            {
+                spec.metalfish_env_var: str(metal_search_paths[spec.key])
+                for spec in SEARCH_COMPARISONS
             }
         )
 
@@ -442,14 +421,12 @@ def main(argv: list[str] | None = None) -> int:
                 "comparison_log": file_record(metal_comparison_log),
                 "probe_suite_log": file_record(metal_probe_log),
                 "legacy_probe_suite_log": file_record(metal_legacy_probe_log),
-                "mcts_bk07_search_json": file_record(metal_mcts_search_json),
-                "mcts_kiwipete_search_json": file_record(
-                    metal_mcts_kiwipete_search_json
-                ),
-                "hybrid_bk07_search_json": file_record(metal_hybrid_search_json),
-                "hybrid_kiwipete_search_json": file_record(
-                    metal_hybrid_kiwipete_search_json
-                ),
+                **{
+                    spec.metal_manifest_key: file_record(
+                        metal_search_paths[spec.key]
+                    )
+                    for spec in SEARCH_COMPARISONS
+                },
             },
         }
     manifest_path = out_dir / "runtime-gate-inputs-manifest.json"

@@ -9,38 +9,56 @@ from pathlib import Path
 @dataclass(frozen=True)
 class SearchComparisonSpec:
     key: str
+    metal_artifact: str
     metal_input_key: str
     metal_input_label: str
+    metalfish_env_var: str
     linux_summary: str
     windows_summary: str
+
+    @property
+    def gate_env_var(self) -> str:
+        return self.metalfish_env_var.replace("METALFISH_", "GATE_", 1)
+
+    @property
+    def metal_manifest_key(self) -> str:
+        return self.metal_input_key.removeprefix("metal_")
 
 
 SEARCH_COMPARISONS: tuple[SearchComparisonSpec, ...] = (
     SearchComparisonSpec(
         key="mcts_bk07",
+        metal_artifact="metal-mcts-bk07-search.json",
         metal_input_key="metal_mcts_bk07_search_json",
         metal_input_label="Metal MCTS BK.07 search JSON",
+        metalfish_env_var="METALFISH_METAL_MCTS_BK07_SEARCH_JSON",
         linux_summary="metal-cuda-mcts-bk07-search-summary.json",
         windows_summary="metal-windows-cuda-mcts-bk07-search-summary.json",
     ),
     SearchComparisonSpec(
         key="mcts_kiwipete",
+        metal_artifact="metal-mcts-kiwipete-search.json",
         metal_input_key="metal_mcts_kiwipete_search_json",
         metal_input_label="Metal MCTS kiwipete search JSON",
+        metalfish_env_var="METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON",
         linux_summary="metal-cuda-mcts-kiwipete-search-summary.json",
         windows_summary="metal-windows-cuda-mcts-kiwipete-search-summary.json",
     ),
     SearchComparisonSpec(
         key="hybrid_bk07",
+        metal_artifact="metal-hybrid-bk07-search.json",
         metal_input_key="metal_hybrid_bk07_search_json",
         metal_input_label="Metal Hybrid BK.07 search JSON",
+        metalfish_env_var="METALFISH_METAL_HYBRID_BK07_SEARCH_JSON",
         linux_summary="metal-cuda-hybrid-bk07-search-summary.json",
         windows_summary="metal-windows-cuda-hybrid-bk07-search-summary.json",
     ),
     SearchComparisonSpec(
         key="hybrid_kiwipete",
+        metal_artifact="metal-hybrid-kiwipete-search.json",
         metal_input_key="metal_hybrid_kiwipete_search_json",
         metal_input_label="Metal Hybrid kiwipete search JSON",
+        metalfish_env_var="METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON",
         linux_summary="metal-cuda-hybrid-kiwipete-search-summary.json",
         windows_summary="metal-windows-cuda-hybrid-kiwipete-search-summary.json",
     ),
@@ -58,3 +76,7 @@ def search_summary_paths(root: Path, *, runtime_kind: str) -> dict[str, Path]:
         logs = root / "logs"
         return {spec.key: logs / spec.windows_summary for spec in SEARCH_COMPARISONS}
     raise ValueError(f"unsupported CUDA runtime kind: {runtime_kind}")
+
+
+def metal_artifact_paths(build_dir: Path) -> dict[str, Path]:
+    return {spec.key: build_dir / spec.metal_artifact for spec in SEARCH_COMPARISONS}
