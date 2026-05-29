@@ -1451,11 +1451,17 @@ def runtime_inputs(*, windows_package: pathlib.Path | None = None) -> dict:
         "metal_mcts_kiwipete_search_json": metal_log_record(
             "metal-mcts-kiwipete.json"
         ),
+        "metal_mcts_after_e4_search_json": metal_log_record(
+            "metal-mcts-after-e4.json"
+        ),
         "metal_hybrid_bk07_search_json": metal_log_record(
             "metal-hybrid-bk07.json"
         ),
         "metal_hybrid_kiwipete_search_json": metal_log_record(
             "metal-hybrid-kiwipete.json"
+        ),
+        "metal_hybrid_after_e4_search_json": metal_log_record(
+            "metal-hybrid-after-e4.json"
         ),
     }
     if windows_package is not None:
@@ -1528,8 +1534,10 @@ def observed_runtime_facts(
         "search_compare": {
             "mcts_bk07": dict(search),
             "mcts_kiwipete": dict(search),
+            "mcts_after_e4": dict(search),
             "hybrid_bk07": dict(search),
             "hybrid_kiwipete": dict(search),
+            "hybrid_after_e4": dict(search),
         },
     }
 
@@ -1620,7 +1628,14 @@ def test_cuda_runtime_search_contract_paths() -> None:
     expect(
         "search contract keys",
         search_contract.search_comparison_keys()
-        == ("mcts_bk07", "mcts_kiwipete", "hybrid_bk07", "hybrid_kiwipete"),
+        == (
+            "mcts_bk07",
+            "mcts_kiwipete",
+            "mcts_after_e4",
+            "hybrid_bk07",
+            "hybrid_kiwipete",
+            "hybrid_after_e4",
+        ),
     )
     expect(
         "search contract metal inputs",
@@ -1628,8 +1643,10 @@ def test_cuda_runtime_search_contract_paths() -> None:
         == [
             "metal_mcts_bk07_search_json",
             "metal_mcts_kiwipete_search_json",
+            "metal_mcts_after_e4_search_json",
             "metal_hybrid_bk07_search_json",
             "metal_hybrid_kiwipete_search_json",
+            "metal_hybrid_after_e4_search_json",
         ],
     )
     expect(
@@ -1638,8 +1655,10 @@ def test_cuda_runtime_search_contract_paths() -> None:
         == [
             "metal-mcts-bk07-search.json",
             "metal-mcts-kiwipete-search.json",
+            "metal-mcts-after-e4-search.json",
             "metal-hybrid-bk07-search.json",
             "metal-hybrid-kiwipete-search.json",
+            "metal-hybrid-after-e4-search.json",
         ],
     )
     expect(
@@ -1648,8 +1667,10 @@ def test_cuda_runtime_search_contract_paths() -> None:
         == [
             "METALFISH_METAL_MCTS_BK07_SEARCH_JSON",
             "METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON",
+            "METALFISH_METAL_MCTS_AFTER_E4_SEARCH_JSON",
             "METALFISH_METAL_HYBRID_BK07_SEARCH_JSON",
             "METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON",
+            "METALFISH_METAL_HYBRID_AFTER_E4_SEARCH_JSON",
         ],
     )
     expect(
@@ -1658,8 +1679,10 @@ def test_cuda_runtime_search_contract_paths() -> None:
         == [
             "GATE_METAL_MCTS_BK07_SEARCH_JSON",
             "GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON",
+            "GATE_METAL_MCTS_AFTER_E4_SEARCH_JSON",
             "GATE_METAL_HYBRID_BK07_SEARCH_JSON",
             "GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON",
+            "GATE_METAL_HYBRID_AFTER_E4_SEARCH_JSON",
         ],
     )
     linux = search_contract.search_summary_paths(root, runtime_kind="linux-cuda")
@@ -1769,11 +1792,17 @@ def runtime_manifest_writer_env(
         "GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON": write_input(
             "metal-mcts-kiwipete.json"
         ),
+        "GATE_METAL_MCTS_AFTER_E4_SEARCH_JSON": write_input(
+            "metal-mcts-after-e4.json"
+        ),
         "GATE_METAL_HYBRID_BK07_SEARCH_JSON": write_input(
             "metal-hybrid-bk07.json"
         ),
         "GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON": write_input(
             "metal-hybrid-kiwipete.json"
+        ),
+        "GATE_METAL_HYBRID_AFTER_E4_SEARCH_JSON": write_input(
+            "metal-hybrid-after-e4.json"
         ),
         "GATE_CUDA_STABLE_BATCH_SIZE": "16",
         "GATE_CUDA_GRAPH": "1",
@@ -1859,6 +1888,10 @@ def test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts() -> None:
     for name in (
         "cuda-gpu-uci-timed-mcts-smoke.log",
         "cuda-gpu-uci-timed-mcts-search.json",
+        "cuda-gpu-uci-after-e4-smoke.log",
+        "cuda-gpu-uci-after-e4-search.json",
+        "cuda-gpu-uci-hybrid-after-e4-smoke.log",
+        "cuda-gpu-uci-hybrid-after-e4-search.json",
         "cuda-gpu-uci-hybrid-clock-start-smoke.log",
         "cuda-gpu-uci-hybrid-clock-safety-smoke.log",
     ):
@@ -1867,6 +1900,10 @@ def test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts() -> None:
         "logs/cuda-timed-mcts.stdout.log",
         "logs/cuda-timed-mcts.stderr.log",
         "logs/cuda-timed-mcts-search.json",
+        "logs/cuda-after-e4-mcts.stdout.log",
+        "logs/cuda-after-e4-mcts-search.json",
+        "logs/hybrid-cuda-after-e4.stdout.log",
+        "logs/hybrid-cuda-after-e4-search.json",
         "logs/hybrid-cuda-clock-start.stdout.log",
         "logs/hybrid-cuda-clock-start.stderr.log",
         "logs/hybrid-cuda-clock-safety.stdout.log",

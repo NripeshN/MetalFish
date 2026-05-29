@@ -45,6 +45,15 @@ SEARCH_COMPARISONS: tuple[SearchComparisonSpec, ...] = (
         windows_summary="metal-windows-cuda-mcts-kiwipete-search-summary.json",
     ),
     SearchComparisonSpec(
+        key="mcts_after_e4",
+        metal_artifact="metal-mcts-after-e4-search.json",
+        metal_input_key="metal_mcts_after_e4_search_json",
+        metal_input_label="Metal MCTS after-e4 search JSON",
+        metalfish_env_var="METALFISH_METAL_MCTS_AFTER_E4_SEARCH_JSON",
+        linux_summary="metal-cuda-mcts-after-e4-search-summary.json",
+        windows_summary="metal-windows-cuda-mcts-after-e4-search-summary.json",
+    ),
+    SearchComparisonSpec(
         key="hybrid_bk07",
         metal_artifact="metal-hybrid-bk07-search.json",
         metal_input_key="metal_hybrid_bk07_search_json",
@@ -61,6 +70,15 @@ SEARCH_COMPARISONS: tuple[SearchComparisonSpec, ...] = (
         metalfish_env_var="METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON",
         linux_summary="metal-cuda-hybrid-kiwipete-search-summary.json",
         windows_summary="metal-windows-cuda-hybrid-kiwipete-search-summary.json",
+    ),
+    SearchComparisonSpec(
+        key="hybrid_after_e4",
+        metal_artifact="metal-hybrid-after-e4-search.json",
+        metal_input_key="metal_hybrid_after_e4_search_json",
+        metal_input_label="Metal Hybrid after-e4 search JSON",
+        metalfish_env_var="METALFISH_METAL_HYBRID_AFTER_E4_SEARCH_JSON",
+        linux_summary="metal-cuda-hybrid-after-e4-search-summary.json",
+        windows_summary="metal-windows-cuda-hybrid-after-e4-search-summary.json",
     ),
 )
 
