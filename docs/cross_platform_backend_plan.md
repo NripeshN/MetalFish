@@ -185,11 +185,12 @@ evidence for the engine commit it records. Add `--expected-sha <commit-sha>` to
 pin the check explicitly, or `--attach-to-release` to upload the validated
 packages and manifest to an existing GitHub release.
 
-Last direct-root promotion validation used runtime root `209239bd` and produced
-`metalfish-linux-x86_64-cuda.tar.gz` at `154936793` bytes, SHA-256
-`760c6b58fac8cc428154722a74b2a91d21cbd5c3fc97fe1ed90df4f28ed2981c`, and
-`metalfish-windows-x86_64-msvc-cuda.zip` at `561958387` bytes, SHA-256
-`10ecdf909fddf13650c52395d62da5d8b1b55b5050a10afce6f399354e0e1935`.
+Last direct-root promotion validation used runtime root `1f001b8` and produced
+`metalfish-v0.1.0-alpha-linux-x86_64-cuda.tar.gz` at `154936735` bytes,
+SHA-256 `aae90256f755dfc3964cfff36f0d242bfa7b2a73ba24189500a34b69eea29bec`,
+and `metalfish-v0.1.0-alpha-windows-x86_64-msvc-cuda.zip` at `561958385`
+bytes, SHA-256
+`c8b62900c966112751d6018c54f5f44d684bdfeb09d0b566a4b3a2d26ea75107`.
 
 `tools/fetch_cuda_release_artifacts.py` rejects failed runs, wrong workflow
 types, SHA mismatches, missing CUDA packages, package-manifest drift, and uses
@@ -1111,7 +1112,12 @@ Metal `12.4127 ms/eval` (`3.758x`), and Windows CUDA measured `3.1992 ms/eval`
 versus Metal `12.4127 ms/eval` (`3.880x`). Direct runtime artifacts are under
 `results/cuda_runtime_direct/1f001b8/` with
 `direct-runtime-gates-manifest.json` tied to
-`1f001b87951752a4b81d1a8fbcdb1e791a65eba4`.
+`1f001b87951752a4b81d1a8fbcdb1e791a65eba4`. Direct release promotion from
+that root produced `metalfish-v0.1.0-alpha-linux-x86_64-cuda.tar.gz` and
+`metalfish-v0.1.0-alpha-windows-x86_64-msvc-cuda.zip` under
+`results/cuda_release_direct/1f001b8/`, with
+`cuda-release-artifacts-manifest.json` validating both package manifests and
+runtime manifests against the same SHA.
 
 The macOS Metal CI now builds `test_nn_comparison` and `metalfish_nn_probe`
 alongside the engine, emits `metal-nn-parity-report.md`, records
