@@ -11,6 +11,7 @@ import sys
 from tools.cuda_runtime_search_contract import (
     SEARCH_COMPARISONS,
     search_comparison_keys,
+    search_summary_artifact_names,
 )
 
 
@@ -35,7 +36,7 @@ RUNTIME_KINDS = {
     },
 }
 
-REQUIRED_RELEASE_ARTIFACTS = {
+BASE_REQUIRED_RELEASE_ARTIFACTS = {
     "linux-cuda": {
         "linux-cuda-package-manifest.json",
         "cuda-gpu-package-nn-comparison.log",
@@ -62,12 +63,6 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "metal-cuda-legacy-nn-probe-suite-summary.json",
         "metal-cuda-nn-benchmark-summary.json",
         "metal-cuda-nn-benchmark-compare.log",
-        "metal-cuda-mcts-bk07-search-summary.json",
-        "metal-cuda-mcts-kiwipete-search-summary.json",
-        "metal-cuda-mcts-after-e4-search-summary.json",
-        "metal-cuda-hybrid-bk07-search-summary.json",
-        "metal-cuda-hybrid-kiwipete-search-summary.json",
-        "metal-cuda-hybrid-after-e4-search-summary.json",
         "cuda-gpu-uci-bk07-smoke.log",
         "cuda-gpu-uci-timed-mcts-smoke.log",
         "cuda-gpu-uci-timed-mcts-search.json",
@@ -101,12 +96,6 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "logs/metal-windows-cuda-legacy-nn-probe-suite-summary.json",
         "logs/metal-windows-cuda-nn-benchmark-summary.json",
         "logs/metal-windows-cuda-nn-benchmark-compare.log",
-        "logs/metal-windows-cuda-mcts-bk07-search-summary.json",
-        "logs/metal-windows-cuda-mcts-kiwipete-search-summary.json",
-        "logs/metal-windows-cuda-mcts-after-e4-search-summary.json",
-        "logs/metal-windows-cuda-hybrid-bk07-search-summary.json",
-        "logs/metal-windows-cuda-hybrid-kiwipete-search-summary.json",
-        "logs/metal-windows-cuda-hybrid-after-e4-search-summary.json",
         "logs/cuda-bk07-mcts.stdout.log",
         "logs/cuda-bk07-mcts-search.json",
         "logs/cuda-kiwipete-mcts.stdout.log",
@@ -122,6 +111,13 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "logs/hybrid-cuda-clock-safety.stdout.log",
         "logs/hybrid-cuda-clock-safety.stderr.log",
     },
+}
+
+
+REQUIRED_RELEASE_ARTIFACTS = {
+    runtime_kind: artifacts
+    | search_summary_artifact_names(runtime_kind=runtime_kind)
+    for runtime_kind, artifacts in BASE_REQUIRED_RELEASE_ARTIFACTS.items()
 }
 
 

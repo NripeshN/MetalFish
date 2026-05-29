@@ -96,5 +96,12 @@ def search_summary_paths(root: Path, *, runtime_kind: str) -> dict[str, Path]:
     raise ValueError(f"unsupported CUDA runtime kind: {runtime_kind}")
 
 
+def search_summary_artifact_names(*, runtime_kind: str) -> set[str]:
+    return {
+        path.as_posix()
+        for path in search_summary_paths(Path(), runtime_kind=runtime_kind).values()
+    }
+
+
 def metal_artifact_paths(build_dir: Path) -> dict[str, Path]:
     return {spec.key: build_dir / spec.metal_artifact for spec in SEARCH_COMPARISONS}

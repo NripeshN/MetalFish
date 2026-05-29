@@ -1689,6 +1689,30 @@ def test_cuda_runtime_search_contract_paths() -> None:
     windows = search_contract.search_summary_paths(root, runtime_kind="windows-cuda")
     metal = search_contract.metal_artifact_paths(root / "build")
     expect(
+        "linux search summary artifact names",
+        search_contract.search_summary_artifact_names(runtime_kind="linux-cuda")
+        == {
+            "metal-cuda-mcts-bk07-search-summary.json",
+            "metal-cuda-mcts-kiwipete-search-summary.json",
+            "metal-cuda-mcts-after-e4-search-summary.json",
+            "metal-cuda-hybrid-bk07-search-summary.json",
+            "metal-cuda-hybrid-kiwipete-search-summary.json",
+            "metal-cuda-hybrid-after-e4-search-summary.json",
+        },
+    )
+    expect(
+        "windows search summary artifact names",
+        search_contract.search_summary_artifact_names(runtime_kind="windows-cuda")
+        == {
+            "logs/metal-windows-cuda-mcts-bk07-search-summary.json",
+            "logs/metal-windows-cuda-mcts-kiwipete-search-summary.json",
+            "logs/metal-windows-cuda-mcts-after-e4-search-summary.json",
+            "logs/metal-windows-cuda-hybrid-bk07-search-summary.json",
+            "logs/metal-windows-cuda-hybrid-kiwipete-search-summary.json",
+            "logs/metal-windows-cuda-hybrid-after-e4-search-summary.json",
+        },
+    )
+    expect(
         "linux mcts bk07 path",
         linux["mcts_bk07"]
         == root / "metal-cuda-mcts-bk07-search-summary.json",
