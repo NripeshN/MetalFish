@@ -1009,6 +1009,7 @@ def main() -> int:
             "resolve_record_path",
             "validate_artifact_files",
             "validate_release_runtime_policy",
+            "release runtime policy requires graph enabled",
             "sha256 mismatch",
             "Metal BT4 probe suite",
             "Metal legacy probe suite",

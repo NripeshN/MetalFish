@@ -2208,8 +2208,20 @@ def test_cuda_runtime_manifest_enforces_release_policy() -> None:
             )
         except ValueError as exc:
             expect("release profile policy rejected", "profiling disabled" in str(exc))
+
+        bad = dict(base)
+        bad["runtime"] = runtime_policy(graph="")
+        manifest.write_text(json.dumps(bad), encoding="utf-8")
+        try:
+            runtime_checker.validate_runtime_manifest(
+                manifest,
+                runtime_kind="windows-cuda",
+                require_release_policy=True,
+            )
+        except ValueError as exc:
+            expect("release graph policy rejected", "graph enabled" in str(exc))
             return
-    raise AssertionError("expected profiled release runtime manifest rejection")
+    raise AssertionError("expected release runtime manifest graph rejection")
 
 
 def test_cuda_package_validator_rejects_source_commit_drift() -> None:

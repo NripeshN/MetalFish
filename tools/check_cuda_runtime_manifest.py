@@ -263,7 +263,7 @@ def validate_release_runtime_policy(
             f"{stable_batch_size}, got {stable_batch!r}"
         )
     for field in ("cuda_graph", "cuda_graph_execution"):
-        if field in runtime and is_explicitly_disabled(runtime.get(field)):
+        if not is_truthy(runtime.get(field)):
             raise ValueError(f"release runtime policy requires graph enabled: {field}")
     if not is_falsey_or_empty(runtime.get("cuda_profile")):
         raise ValueError("release runtime policy requires CUDA profiling disabled")
