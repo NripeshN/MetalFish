@@ -181,6 +181,14 @@ evidence for the engine commit it records. Add `--expected-sha <commit-sha>` to
 pin the check explicitly, or `--attach-to-release` to upload the validated
 packages and manifest to an existing GitHub release.
 
+Last direct-root promotion validation used runtime root `6836c26f` with
+`--tag-name v0.1.0-alpha` and produced
+`metalfish-v0.1.0-alpha-linux-x86_64-cuda.tar.gz` at `154936771` bytes,
+SHA-256 `1f2c6e85e7074373c0eceba42f2afadd712b18cba37bb9459a3d50d9f38f3039`,
+and `metalfish-v0.1.0-alpha-windows-x86_64-msvc-cuda.zip` at `561958382`
+bytes, SHA-256
+`de0ba5bd6c23eb0906cbd47c7ffdd24a2347db762688e61887eb394530b224df`.
+
 `tools/fetch_cuda_release_artifacts.py` rejects failed runs, wrong workflow
 types, SHA mismatches, missing CUDA packages, package-manifest drift, and uses
 `tools/check_cuda_runtime_manifest.py` to reject Linux/Windows runtime manifests
