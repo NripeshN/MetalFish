@@ -931,6 +931,7 @@ def main() -> int:
             "CUBLAS_WORKSPACE_CONFIG",
             "tools/run_gcp_cuda_gpu_gate.sh",
             "cuda-gpu-gate-${{ github.run_id }}",
+            "if-no-files-found: error",
         ],
     )
     assert_file_contains(
@@ -1557,6 +1558,7 @@ def main() -> int:
             "tools/install_windows_cuda_toolkit.ps1",
             "tools/nn_metal_probe.cpp",
             "tools/write_portable_manifest.py",
+            "if-no-files-found: error",
             "actions/cache@v5",
             ".vcpkg-bincache",
             "VCPKG_DEFAULT_BINARY_CACHE",
@@ -1645,6 +1647,7 @@ def main() -> int:
             "g2-standard-8 g2-standard-4",
             "tools/run_gcp_windows_cuda_runtime_gate.sh",
             "windows-cuda-runtime-${{ github.run_id }}",
+            "if-no-files-found: error",
             "METALFISH_GCP_INSTANCE",
             "METALFISH_GCP_MACHINES",
             ". \"${GITHUB_WORKSPACE}/results/windows_cuda_runtime_inputs/runtime-gate-env.sh\"",

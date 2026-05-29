@@ -162,4 +162,4 @@ jobs:
             build-windows-cuda/metalfish*windows-x86_64-msvc-cuda.zip
             build-windows-cuda/**/*.json
             build-windows-cuda/**/*.log
-          if-no-files-found: warn
+          if-no-files-found: error

@@ -157,4 +157,4 @@ jobs:
           path: |
             results/cuda_gpu_gate/
             results/cuda_gpu_gate_inputs/
-          if-no-files-found: warn
+          if-no-files-found: error

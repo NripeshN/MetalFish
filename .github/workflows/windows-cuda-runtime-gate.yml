@@ -177,4 +177,4 @@ jobs:
           path: |
             results/windows_cuda_runtime_gate/
             results/windows_cuda_runtime_inputs/
-          if-no-files-found: warn
+          if-no-files-found: error
