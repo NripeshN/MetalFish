@@ -195,8 +195,10 @@ types, SHA mismatches, missing CUDA packages, package-manifest drift, and uses
 whose remote/runtime, BT4, legacy, benchmark, or final comparison status is not
 `0`. Release promotion also requires `require_metal_compare=1`,
 `require_metal_benchmark_compare=1`, BT4 and legacy Metal probe records, Metal
-benchmark records, and archived package/probe/isolation/benchmark evidence, so
-diagnostic CUDA-only runtime gates cannot be promoted. The same validator path
+benchmark records, the non-relaxed `max_cuda_metal_eval_ms_ratio` release
+threshold, both Hybrid low-clock smokes, and archived
+package/probe/isolation/benchmark evidence, so diagnostic CUDA-only or
+diagnostic-threshold runtime gates cannot be promoted. The same validator path
 is used for GitHub workflow artifacts and direct runtime roots. Direct runtime
 promotion accepts either a single `--target both` root or a root populated by
 separate same-SHA Linux and Windows direct runs; the Linux and Windows runtime
@@ -1129,15 +1131,16 @@ a `runtime-gate-inputs-manifest.json`. That keeps direct GCP runtime checks
 repeatable instead of relying on hand-copied package and probe-suite paths, and
 prevents a bad package from starting a Windows GPU VM.
 
-## Remaining Release Checklist
+## Release Promotion Checklist
 
 1. Keep CUDA BK.07 tactical bestmove smokes matching the macOS Metal CI
    sentinel green on both Linux and Windows runtime gates.
 2. Keep CUDA Hybrid clock-safety smokes matching the Metal CI low-clock
    boundary green: one search that starts Hybrid and one search that
    intentionally falls back before transformer time becomes unsafe.
-3. Promote same-commit Linux CUDA and Windows CUDA packages through a
-   release-facing audit path with manifest and hash validation.
+3. Promote same-commit Linux CUDA and Windows CUDA packages through the
+   release-facing audit path with manifest, hash, runtime-policy, Metal
+   comparison, and Hybrid clock-evidence validation.
 4. Keep `directml` explicitly deferred until CUDA Linux/Windows gates remain
    stable on package, numeric, tactical, and Hybrid smoke coverage.
 5. Before calling CUDA strength-ready, require green portable CPU CI, macOS

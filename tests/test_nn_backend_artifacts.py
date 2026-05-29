@@ -1334,6 +1334,7 @@ def runtime_inputs(*, windows_package: pathlib.Path | None = None) -> dict:
         "require_metal_compare": "1",
         "require_metal_benchmark_compare": "1",
         "require_metal_search_compare": "1",
+        "max_cuda_metal_eval_ms_ratio": "1.0",
         "metal_comparison_log": metal_log_record("metal-comparison.log"),
         "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
         "metal_legacy_probe_suite_log": metal_log_record("metal-legacy.log"),
@@ -1382,12 +1383,18 @@ def test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts() -> None:
     for name in (
         "cuda-gpu-uci-timed-mcts-smoke.log",
         "cuda-gpu-uci-timed-mcts-search.json",
+        "cuda-gpu-uci-hybrid-clock-start-smoke.log",
+        "cuda-gpu-uci-hybrid-clock-safety-smoke.log",
     ):
         expect(f"linux release requires {name}", name in linux_required)
     for name in (
         "logs/cuda-timed-mcts.stdout.log",
         "logs/cuda-timed-mcts.stderr.log",
         "logs/cuda-timed-mcts-search.json",
+        "logs/hybrid-cuda-clock-start.stdout.log",
+        "logs/hybrid-cuda-clock-start.stderr.log",
+        "logs/hybrid-cuda-clock-safety.stdout.log",
+        "logs/hybrid-cuda-clock-safety.stderr.log",
     ):
         expect(f"windows release requires {name}", name in windows_required)
 
@@ -1863,6 +1870,42 @@ def test_cuda_release_dispatch_direct_root_uses_manifest_sha_default() -> None:
         )
 
 
+def test_cuda_release_dispatch_validates_explicit_run_ids() -> None:
+    calls: list[list[str]] = []
+    old_run_json = cuda_release_dispatch.dispatch.run_json
+
+    def fake_run_json(cmd: list[str]) -> dict:
+        calls.append(list(cmd))
+        return {
+            "conclusion": "success",
+            "createdAt": "2026-05-29T00:00:00Z",
+            "databaseId": 12345,
+            "headSha": "abc123",
+            "status": "completed",
+            "url": "https://example.invalid/run/12345",
+            "workflowName": "CUDA GPU Gate",
+        }
+
+    cuda_release_dispatch.dispatch.run_json = fake_run_json
+    try:
+        run = cuda_release_dispatch.run_successful_gate(
+            repo="owner/repo",
+            workflow="CUDA GPU Gate",
+            gate_ref="cuda-support",
+            expected_sha="abc123",
+            run_id="12345",
+            lookup_limit=30,
+        )
+    finally:
+        cuda_release_dispatch.dispatch.run_json = old_run_json
+
+    expect("explicit run validated", run["databaseId"] == 12345)
+    expect(
+        "explicit run uses gh view",
+        calls and calls[0][0:3] == ["gh", "run", "view"],
+    )
+
+
 def test_cuda_release_artifacts_accept_split_direct_runtime_manifest() -> None:
     cuda_release.validate_direct_runtime_manifest(
         {
@@ -2181,6 +2224,7 @@ def test_cuda_runtime_manifest_enforces_release_policy() -> None:
         base = {
             "schema": "metalfish.windows_cuda_runtime_gate",
             "git": {"head_sha": "abc123"},
+            "inputs": runtime_inputs(),
             "status": {
                 "runtime_status": "0",
                 "bt4_compare_status": "0",
@@ -2226,6 +2270,26 @@ def test_cuda_runtime_manifest_enforces_release_policy() -> None:
             runtime_policy(full_buffer_clear="0"),
             "cuda_full_buffer_clear",
         )
+        expect_policy_rejection(
+            runtime_policy(cublas_workspace=":4096:8"),
+            "CUBLAS_WORKSPACE_CONFIG",
+        )
+
+        bad = dict(base)
+        bad["inputs"] = dict(runtime_inputs())
+        bad["inputs"]["max_cuda_metal_eval_ms_ratio"] = "1.25"
+        bad["runtime"] = runtime_policy()
+        manifest.write_text(json.dumps(bad), encoding="utf-8")
+        try:
+            runtime_checker.validate_runtime_manifest(
+                manifest,
+                runtime_kind="windows-cuda",
+                require_release_policy=True,
+            )
+        except ValueError as exc:
+            expect("relaxed ratio rejected", "Metal comparison ratio" in str(exc))
+        else:
+            raise AssertionError("expected relaxed Metal comparison ratio rejection")
 
 
 def test_cuda_package_validator_rejects_source_commit_drift() -> None:
@@ -2551,6 +2615,7 @@ def main() -> int:
     test_cuda_release_artifacts_reject_direct_runtime_single_target()
     test_cuda_release_artifacts_reject_direct_runtime_commit_drift()
     test_cuda_release_dispatch_direct_root_uses_manifest_sha_default()
+    test_cuda_release_dispatch_validates_explicit_run_ids()
     test_cuda_release_artifacts_accept_split_direct_runtime_manifest()
     test_direct_runtime_manifest_merge_preserves_split_targets()
     test_direct_runtime_clears_only_selected_artifact_dir()

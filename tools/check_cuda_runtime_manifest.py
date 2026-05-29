@@ -67,6 +67,7 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "cuda-gpu-uci-kiwipete-search.json",
         "cuda-gpu-uci-hybrid-search.json",
         "cuda-gpu-uci-hybrid-kiwipete-search.json",
+        "cuda-gpu-uci-hybrid-clock-start-smoke.log",
         "cuda-gpu-uci-hybrid-clock-safety-smoke.log",
     },
     "windows-cuda": {
@@ -95,7 +96,10 @@ REQUIRED_RELEASE_ARTIFACTS = {
         "logs/cuda-kiwipete-mcts-search.json",
         "logs/hybrid-cuda-search.json",
         "logs/hybrid-cuda-kiwipete-search.json",
+        "logs/hybrid-cuda-clock-start.stdout.log",
+        "logs/hybrid-cuda-clock-start.stderr.log",
         "logs/hybrid-cuda-clock-safety.stdout.log",
+        "logs/hybrid-cuda-clock-safety.stderr.log",
     },
 }
 
@@ -276,6 +280,38 @@ def validate_release_runtime_policy(
         )
 
 
+def validate_release_compare_policy(
+    inputs: object,
+    *,
+    max_cuda_metal_eval_ms_ratio: str,
+) -> None:
+    if not isinstance(inputs, dict):
+        raise ValueError("runtime manifest is missing inputs object")
+    value = str(inputs.get("max_cuda_metal_eval_ms_ratio") or "").strip()
+    if not value:
+        raise ValueError(
+            "release comparison policy requires max_cuda_metal_eval_ms_ratio"
+        )
+    try:
+        actual = float(value)
+        maximum = float(max_cuda_metal_eval_ms_ratio)
+    except ValueError as exc:
+        raise ValueError(
+            "release comparison policy requires numeric "
+            "max_cuda_metal_eval_ms_ratio"
+        ) from exc
+    if actual <= 0.0:
+        raise ValueError(
+            "release comparison policy requires positive "
+            "max_cuda_metal_eval_ms_ratio"
+        )
+    if actual > maximum:
+        raise ValueError(
+            "release comparison policy rejects relaxed Metal comparison ratio: "
+            f"{actual:g} > {maximum:g}"
+        )
+
+
 def validate_runtime_manifest(
     manifest: pathlib.Path,
     *,
@@ -286,6 +322,7 @@ def validate_runtime_manifest(
     require_release_evidence: bool = False,
     require_release_policy: bool = False,
     release_stable_batch_size: str = "16",
+    release_max_cuda_metal_eval_ms_ratio: str = "1.0",
     require_artifact_files: bool = False,
     artifact_root: pathlib.Path | None = None,
     expected_head_sha: str | None = None,
@@ -333,6 +370,10 @@ def validate_runtime_manifest(
             runtime,
             stable_batch_size=release_stable_batch_size,
         )
+        validate_release_compare_policy(
+            inputs,
+            max_cuda_metal_eval_ms_ratio=release_max_cuda_metal_eval_ms_ratio,
+        )
     if require_artifact_files:
         validate_artifact_files(
             data.get("artifacts"),
@@ -362,6 +403,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--require-release-evidence", action="store_true")
     parser.add_argument("--require-release-policy", action="store_true")
     parser.add_argument("--release-stable-batch-size", default="16")
+    parser.add_argument("--release-max-cuda-metal-eval-ms-ratio", default="1.0")
     parser.add_argument("--require-artifact-files", action="store_true")
     parser.add_argument(
         "--artifact-root",
@@ -385,6 +427,9 @@ def main(argv: list[str] | None = None) -> int:
         require_release_evidence=args.require_release_evidence,
         require_release_policy=args.require_release_policy,
         release_stable_batch_size=args.release_stable_batch_size,
+        release_max_cuda_metal_eval_ms_ratio=(
+            args.release_max_cuda_metal_eval_ms_ratio
+        ),
         require_artifact_files=args.require_artifact_files,
         artifact_root=(
             pathlib.Path(args.artifact_root).expanduser().resolve()

@@ -152,7 +152,37 @@ def run_successful_gate(
     lookup_limit: int,
 ) -> dict:
     if run_id:
-        return {"databaseId": run_id, "headSha": expected_sha, "workflowName": workflow}
+        data = dispatch.run_json(
+            [
+                "gh",
+                "run",
+                "view",
+                str(run_id),
+                "--repo",
+                repo,
+                "--json",
+                "conclusion,createdAt,databaseId,headSha,status,url,workflowName",
+            ]
+        )
+        if not isinstance(data, dict):
+            raise RuntimeError(f"gh run view returned invalid JSON for {workflow}")
+        if data.get("workflowName") != workflow:
+            raise RuntimeError(
+                f"run {run_id} is {data.get('workflowName')!r}, "
+                f"expected {workflow!r}"
+            )
+        if data.get("headSha") != expected_sha:
+            raise RuntimeError(
+                f"run {run_id} is for {data.get('headSha')!r}, "
+                f"expected {expected_sha!r}"
+            )
+        if data.get("status") != "completed" or data.get("conclusion") != "success":
+            raise RuntimeError(
+                f"run {run_id} is not successful: "
+                f"status={data.get('status')!r} "
+                f"conclusion={data.get('conclusion')!r}"
+            )
+        return data
     return dispatch.find_successful_run(
         repo=repo,
         workflow=workflow,
