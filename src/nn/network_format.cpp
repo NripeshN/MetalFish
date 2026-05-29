@@ -89,6 +89,10 @@ NetworkFormatDescriptor DescribeNetworkFormat(const WeightsFile &file) {
       nf.network() ==
           MetalFishNN::
               NetworkFormat_NetworkStructure_NETWORK_ATTENTIONBODY_WITH_MULTIHEADFORMAT;
+  descriptor.body_attention_heads =
+      static_cast<int>(file.weights().headcount());
+  descriptor.policy_attention_heads =
+      static_cast<int>(file.weights().pol_headcount());
 
   descriptor.input_embedding = static_cast<InputEmbedding>(
       nf.has_input_embedding()
@@ -128,6 +132,8 @@ std::string NetworkFormatDescriptor::Summary() const {
       << (attention_policy ? "attention" : (conv_policy ? "conv" : "classical"))
       << ", value=" << (wdl ? "wdl" : "scalar")
       << ", moves_left=" << BoolString(moves_left)
+      << ", body_heads=" << body_attention_heads
+      << ", policy_heads=" << policy_attention_heads
       << ", input_embedding=" << InputEmbeddingToString(input_embedding)
       << ", activations=" << activations.default_activation << "/"
       << activations.smolgen_activation << "/" << activations.ffn_activation;

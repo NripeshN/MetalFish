@@ -17,7 +17,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 PROTO = ROOT / "src" / "nn" / "proto" / "net.proto"
-POS_TABLE = ROOT / "src" / "nn" / "metal" / "tables" / "attention_policy_map.h"
+ATTENTION_TABLE = ROOT / "src" / "nn" / "tables" / "attention_policy_map.h"
 OUTPUT_STAGES = (
     "body",
     "value-embed",
@@ -258,7 +258,7 @@ def slice_by_index_mb(
 
 
 def parse_pos_encoding(np: Any) -> Any:
-    text = POS_TABLE.read_text(encoding="utf-8")
+    text = ATTENTION_TABLE.read_text(encoding="utf-8")
     marker = "const float kPosEncoding[64][kNumPosEncodingChannels] = {"
     start = text.index(marker) + len(marker)
     end = text.index("};", start)
@@ -276,7 +276,7 @@ def parse_pos_encoding(np: Any) -> Any:
 
 
 def parse_attention_policy_map(np: Any) -> Any:
-    text = POS_TABLE.read_text(encoding="utf-8")
+    text = ATTENTION_TABLE.read_text(encoding="utf-8")
     marker = "const short kAttnPolicyMap[] = {"
     start = text.index(marker) + len(marker)
     end = text.index("};", start)

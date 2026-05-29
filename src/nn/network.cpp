@@ -7,18 +7,93 @@
 
 #include "network.h"
 
+#include "cpu/cpu_network.h"
+#include "loader.h"
+
 #ifdef USE_COREML
 #include "coreml/coreml_network.h"
 #endif
 #ifdef USE_METAL
 #include "metal/metal_network.h"
 #endif
+#ifdef USE_CUDA
+#include "cuda/cuda_network.h"
+#endif
 
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 namespace MetalFish {
 namespace NN {
+
+namespace {
+
+const char *BoolText(bool value) { return value ? "true" : "false"; }
+
+} // namespace
+
+std::string BackendCapabilities::Summary() const {
+  std::ostringstream out;
+  out << "actual_backend=" << actual_backend
+      << " has_wdl=" << BoolText(has_wdl)
+      << " has_moves_left=" << BoolText(has_moves_left);
+  if (max_batch_size > 0)
+    out << " max_batch=" << max_batch_size;
+  if (stable_execution_batch_size > 0)
+    out << " stable_batch=" << stable_execution_batch_size;
+  if (!device_name.empty())
+    out << " device=\"" << device_name << "\"";
+  if (!compute_units.empty())
+    out << " compute_units=" << compute_units;
+  if (actual_backend == "cuda") {
+    out << " cuda_configured_device=" << cuda_configured_device
+        << " cuda_selected_device=" << cuda_selected_device
+        << " cuda_graph=" << BoolText(cuda_graph_execution)
+        << " cuda_deterministic_softmax="
+        << BoolText(cuda_deterministic_attention_softmax)
+        << " cuda_full_buffer_clear=" << BoolText(cuda_full_buffer_clear);
+  }
+  return out.str();
+}
+
+BackendCapabilities Network::GetBackendCapabilities() const {
+  BackendCapabilities capabilities;
+  capabilities.has_wdl = HasWDL();
+  capabilities.has_moves_left = HasMovesLeft();
+  return capabilities;
+}
+
+namespace {
+
+std::unique_ptr<Network>
+CreateRequiredAcceleratorNetwork(const WeightsFile &weights,
+                                 const BackendConfig &config) {
+#ifdef USE_METAL
+  (void)config;
+  try {
+    return std::make_unique<Metal::MetalNetwork>(weights);
+  } catch (const std::exception &e) {
+    throw std::runtime_error(
+        "Required Metal accelerator backend unavailable: " +
+        std::string(e.what()));
+  }
+#elif defined(USE_CUDA)
+  try {
+    return std::make_unique<Cuda::CudaNetwork>(weights, config);
+  } catch (const std::exception &e) {
+    throw std::runtime_error("Required CUDA accelerator backend unavailable: " +
+                             std::string(e.what()));
+  }
+#else
+  (void)weights;
+  (void)config;
+  throw std::runtime_error("No accelerator NN backend was compiled into this "
+                           "MetalFish build");
+#endif
+}
+
+} // namespace
 
 class StubNetwork : public Network {
 public:
@@ -48,18 +123,29 @@ public:
     return "Stub network (not functional)";
   }
 
+  bool HasWDL() const override { return false; }
+  bool HasMovesLeft() const override { return false; }
+  BackendCapabilities GetBackendCapabilities() const override {
+    BackendCapabilities capabilities;
+    capabilities.actual_backend = "stub";
+    return capabilities;
+  }
+
 private:
   WeightsFile weights_;
 };
 
 std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
-                                       const std::string &backend,
-                                       const std::string &model_path,
-                                       const std::string &compute_units) {
+                                       const BackendConfig &config) {
+  const std::string &backend = config.backend;
+  if (backend == "accelerator") {
+    return CreateRequiredAcceleratorNetwork(weights, config);
+  }
+
 #ifdef USE_COREML
   if (backend == "coreml") {
-    return std::make_unique<CoreML::CoreMLNetwork>(weights, model_path,
-                                                   compute_units);
+    return std::make_unique<CoreML::CoreMLNetwork>(
+        weights, config.coreml_model_path, config.coreml_compute_units);
   }
 #else
   if (backend == "coreml") {
@@ -78,9 +164,59 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
       }
     }
   }
+#else
+  if (backend == "metal") {
+    throw std::runtime_error("Metal backend was not compiled into this build");
+  }
 #endif
 
-  return std::make_unique<StubNetwork>(weights);
+#ifdef USE_CUDA
+  if (backend == "auto" || backend == "cuda") {
+    try {
+      return std::make_unique<Cuda::CudaNetwork>(weights, config);
+    } catch (const std::exception &e) {
+      std::cerr << "CUDA backend unavailable: " << e.what() << std::endl;
+      if (backend == "cuda") {
+        throw;
+      }
+    }
+  }
+#else
+  if (backend == "cuda") {
+    throw std::runtime_error("CUDA backend was not compiled into this build");
+  }
+#endif
+
+  if (backend == "cpu") {
+    return std::make_unique<Cpu::CpuNetwork>(weights);
+  }
+
+  if (backend == "auto") {
+    try {
+      return std::make_unique<Cpu::CpuNetwork>(weights);
+    } catch (const std::exception &e) {
+      std::cerr << "CPU backend unavailable: " << e.what() << std::endl;
+      throw std::runtime_error("No functional NN backend available: " +
+                               std::string(e.what()));
+    }
+  }
+
+  if (backend == "stub") {
+    return std::make_unique<StubNetwork>(weights);
+  }
+
+  throw std::runtime_error("Unknown NN backend: " + backend);
+}
+
+std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
+                                       const std::string &backend,
+                                       const std::string &model_path,
+                                       const std::string &compute_units) {
+  BackendConfig config;
+  config.backend = backend;
+  config.coreml_model_path = model_path;
+  config.coreml_compute_units = compute_units;
+  return CreateNetwork(weights, config);
 }
 
 std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
@@ -89,7 +225,29 @@ std::unique_ptr<Network> CreateNetwork(const WeightsFile &weights,
 }
 
 std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
+                                       const BackendConfig &config) {
+  if (config.backend == "stub") {
+    WeightsFile empty_weights;
+    return CreateNetwork(empty_weights, config);
+  }
+
+  auto weights_opt = LoadWeights(weights_path);
+
+  if (!weights_opt.has_value()) {
+    throw std::runtime_error("Could not load network weights from: " +
+                             weights_path);
+  }
+
+  return CreateNetwork(weights_opt.value(), config);
+}
+
+std::unique_ptr<Network> CreateNetwork(const std::string &weights_path,
                                        const std::string &backend) {
+  if (backend == "stub") {
+    WeightsFile empty_weights;
+    return CreateNetwork(empty_weights, backend);
+  }
+
   auto weights_opt = LoadWeights(weights_path);
 
   if (!weights_opt.has_value()) {

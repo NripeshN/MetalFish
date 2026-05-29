@@ -45,10 +45,12 @@ static MPSImageFeatureChannelFormat fcFormat =
   float *__nullable _globalSmolgenWeights;
 }
 
-+ (MetalNetworkGraph *_Nonnull)getGraphAt:(NSNumber *_Nonnull)index;
++ (MetalNetworkGraph *_Nullable)getGraphAt:(NSNumber *_Nonnull)index;
 
 + (void)graphWithDevice:(id<MTLDevice> __nonnull)device
                   index:(NSNumber *_Nonnull)index;
+
++ (void)removeGraphAt:(NSNumber *_Nonnull)index;
 
 - (nonnull instancetype)initWithDevice:(id<MTLDevice> __nonnull)device;
 

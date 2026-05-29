@@ -1,11 +1,18 @@
 # MetalFish
 
-MetalFish is a UCI chess engine for Apple Silicon ARM Macs. The v0.1.0-alpha
-release is focused on the hybrid engine: CPU alpha-beta with NNUE and GPU MCTS
-with an Lc0-compatible transformer running through Metal/MPSGraph.
+MetalFish is a UCI chess engine built around a hybrid search: CPU alpha-beta
+with NNUE plus GPU MCTS with an Lc0-compatible transformer. The mature path is
+Apple Silicon with Metal/MPSGraph, and the CUDA branch brings the same shared
+NN/search contracts to NVIDIA Linux and Windows hosts.
 
-This alpha is intentionally Apple Silicon first. Linux, Windows, CUDA, and x86
-builds are not release targets.
+Current platform surface:
+
+| Platform | Backend | Status |
+| --- | --- | --- |
+| macOS Apple Silicon | Metal/MPSGraph + CPU NNUE | Primary v0.1.0-alpha release path |
+| Linux x86-64 NVIDIA | CUDA + CPU NNUE | Parity-gated in CI/GCP runtime gates |
+| Windows x86-64 NVIDIA | CUDA + CPU NNUE | MSVC/NVCC compile gate plus L4 runtime gate |
+| Portable Linux/Windows CPU | CPU AB and transformer fallback | Correctness/fallback, not a strength target |
 
 ## Project Status
 
@@ -25,8 +32,10 @@ signals, and use a coordinator to select the final move.
 | MCTS | `UseMCTS true` | Transformer search diagnostics |
 
 Hybrid runs AB and MCTS in parallel. AB uses CPU NNUE and the transposition
-table; MCTS uses the BT4 transformer on the Apple GPU. The two searches share
-root signals and the coordinator chooses the final move from both engines.
+table; MCTS uses the BT4 transformer through `NNBackend`: Metal/MPSGraph on
+Apple Silicon, CUDA on supported NVIDIA Linux/Windows hosts, and portable CPU
+only as a fallback/correctness path. The two searches share root signals and
+the coordinator chooses the final move from both engines.
 
 ## Benchmarking Policy
 
@@ -126,9 +135,12 @@ THREADS=8 HASH=4096 ./tools/run_cutechess_tournament.sh \
   --games=20 --tc=300+0.1 --concurrency=1
 ```
 
-## Apple Silicon Optimizations
+## Platform Acceleration
 
+- Shared NN execution-plan, tensor-layout, output-decoding, and policy-map
+  contracts across Metal and CUDA
 - Metal/MPSGraph transformer inference
+- CUDA transformer inference on NVIDIA Linux/Windows hosts
 - Unified-memory CPU/GPU search architecture
 - Accelerate/vDSP policy softmax
 - NEON and ARM dot-product NNUE kernels
@@ -140,17 +152,34 @@ THREADS=8 HASH=4096 ./tools/run_cutechess_tournament.sh \
 
 ## Requirements
 
+Common:
+
+- CMake 3.20 or newer
+- C++20 compiler
+- Python 3.11+ for bot and benchmark tooling
+
+macOS Metal:
+
 - Apple Silicon Mac, arm64
 - macOS 13 or newer
 - Xcode Command Line Tools
-- CMake 3.20 or newer
 - Homebrew packages: `protobuf zlib abseil`
-- Python 3.11+ for bot and benchmark tooling
 
 ```bash
 brew install cmake protobuf zlib abseil
 python3 -m pip install -r tests/requirements.txt
 ```
+
+Linux CUDA:
+
+- NVIDIA GPU with a supported CUDA toolkit
+- CUDA Toolkit 12.x, cuBLAS, protobuf, zlib, and Abseil development packages
+
+Windows CUDA:
+
+- Windows x86-64 with Visual Studio 2022/MSVC
+- CUDA Toolkit 12.x
+- vcpkg or the repository CI scripts for protobuf/zlib/Abseil dependencies
 
 ## Network Files
 
@@ -176,10 +205,23 @@ gzip -dc networks/BT4-1024x15x32h-swa-6147500.pb.gz \
 
 ## Build
 
+macOS Metal:
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_METAL=ON
 cmake --build build --target metalfish -j"$(sysctl -n hw.ncpu)"
 ```
+
+Linux CUDA:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_CUDA=ON
+cmake --build build --target metalfish --parallel
+```
+
+Windows CUDA builds are validated through the MSVC/NVCC gate scripts and
+GitHub workflow. For release-candidate packages, use the CUDA compile/runtime
+gates documented in `docs/cross_platform_backend_plan.md`.
 
 ## Run Hybrid
 
@@ -281,6 +323,8 @@ by default; enable it only when needed with `METALFISH_BOOK_ALLOW_ONLINE=true`.
 
 ## Tests
 
+macOS:
+
 ```bash
 cmake --build build --target metalfish_tests -j"$(sysctl -n hw.ncpu)"
 ./build/metalfish_tests
@@ -292,6 +336,11 @@ python3 tests/paper_benchmarks.py --tactical --movetime 5000 \
   --threads auto --hash auto
 ```
 
+Portable Linux/Windows CPU and CUDA builds are covered by the GitHub workflows
+and GCP runtime gates. CUDA strength checks should use the same-commit Metal,
+Linux CUDA, and Windows CUDA artifacts so backend parity is measured against
+the same weights, search options, and source SHA.
+
 ## Strength Claims
 
 Use precise language when discussing results:
@@ -299,7 +348,8 @@ Use precise language when discussing results:
 - Valid: "MetalFish Hybrid solved X/24 Bratko-Kopec positions at 5s/position on
   an M2 Max using the fair benchmark script."
 - Valid: "MetalFish MCTS loads the same BT4 Lc0 weights and uses compatible
-  input/policy mapping, but has its own Metal runtime and search controls."
+  input/policy mapping, but has its own Metal/CUDA runtimes and search
+  controls."
 - Valid: "The hybrid engine combines CPU alpha-beta and GPU MCTS with live
   root-signal sharing and evidence-based final arbitration."
 - Invalid without larger testing: "MetalFish is stronger than Stockfish" or
@@ -310,7 +360,7 @@ Use precise language when discussing results:
 ```text
 src/core/      Board representation and move generation
 src/eval/      NNUE evaluation and Apple Silicon CPU kernels
-src/nn/        BT4 transformer loader, encoder, Metal/MPSGraph backend
+src/nn/        BT4 transformer loader, encoder, Metal/MPSGraph, CUDA backends
 src/search/    Alpha-beta search
 src/mcts/      Lc0-style MCTS search
 src/hybrid/    Parallel Hybrid coordinator

@@ -1,0 +1,76 @@
+steps:
+  - name: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    id: cuda-entrypoint-build
+    entrypoint: bash
+    args:
+      - -lc
+      - |
+        set -euo pipefail
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y \
+          build-essential \
+          cmake \
+          curl \
+          ninja-build \
+          pkg-config \
+          protobuf-compiler \
+          libprotobuf-dev \
+          zlib1g-dev \
+          libabsl-dev \
+          python3 \
+          python3-pip
+        nvcc --version
+        python3 -m pip install -r tests/requirements.txt || \
+          python3 -m pip install --break-system-packages -r tests/requirements.txt
+        python3 tools/download_engine_networks.py --nnue-only
+        cmake -S . -B build-cuda-entry -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DUSE_METAL=OFF \
+          -DUSE_CUDA=ON \
+          -DCMAKE_CUDA_ARCHITECTURES=75\;80\;86\;89 \
+          -DBUILD_TESTS=ON \
+          -DMETALFISH_ENABLE_IPO=OFF
+        cmake --build build-cuda-entry --target metalfish metalfish_tests test_nn_comparison metalfish_nn_probe
+        ./build-cuda-entry/metalfish_tests | tee /tmp/metalfish-cuda-tests.txt
+        grep -q "CUDA runtime" /tmp/metalfish-cuda-tests.txt
+        python3 tools/download_engine_networks.py --bt4-only
+        ./build-cuda-entry/metalfish_nn_probe \
+          --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+          --backend cuda \
+          --metadata-only \
+          --top 3 \
+          | tee /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"metadata_only":true' /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"backend":"cuda"' /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"format":"attention_body=yes' /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"policy_head":"' /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"value_head":"' /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"execution_plan":"109 resolved execution steps' /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"cuda_schedule_fully_supported":true' /tmp/metalfish-cuda-bt4-metadata.json
+        grep -q '"cuda_output_mapping_ok":true' /tmp/metalfish-cuda-bt4-metadata.json
+        python3 tools/download_engine_networks.py --legacy-only
+        ./build-cuda-entry/metalfish_nn_probe \
+          --weights networks/legacy-42850.pb.gz \
+          --backend cuda \
+          --metadata-only \
+          --top 3 \
+          | tee /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"metadata_only":true' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"backend":"cuda"' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"format":"attention_body=no' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"policy_head":"' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"value_head":"' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"execution_plan":"' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"cuda_schedule_fully_supported":true' /tmp/metalfish-cuda-legacy-metadata.json
+        grep -q '"cuda_output_mapping_ok":true' /tmp/metalfish-cuda-legacy-metadata.json
+        python3 tools/uci_smoke.py --engine build-cuda-entry/metalfish --go "depth 2"
+        printf "uci\nisready\nsetoption name NNBackend value cuda\nisready\nquit\n" \
+          | ./build-cuda-entry/metalfish \
+          | tee /tmp/metalfish-cuda-uci.txt
+        grep -q "option name NNBackend" /tmp/metalfish-cuda-uci.txt
+
+timeout: 3600s
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY

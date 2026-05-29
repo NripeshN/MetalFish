@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -23,13 +26,25 @@ def parse_args() -> argparse.Namespace:
         "--expect-output",
         action="append",
         default=[],
-        help="Substring that must appear in engine output; may be repeated",
+        metavar="TEXT",
+        help="Substring that must appear in combined engine stdout/stderr; may be repeated",
     )
     parser.add_argument(
         "--reject-output",
         action="append",
         default=[],
-        help="Substring that must not appear in engine output; may be repeated",
+        metavar="TEXT",
+        help="Substring that must not appear in combined engine stdout/stderr; may be repeated",
+    )
+    parser.add_argument(
+        "--echo-output",
+        action="store_true",
+        help="Print the captured engine transcript instead of only the bestmove line",
+    )
+    parser.add_argument(
+        "--json-out",
+        type=Path,
+        help="Write a structured JSON record with the search result and transcript hash.",
     )
     parser.add_argument(
         "--setoption",
@@ -102,6 +117,117 @@ def set_option_command(raw: str) -> str:
     return f"setoption name {name.strip()} value {value.strip()}"
 
 
+def parse_int_token(value: str) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_info_line(line: str) -> dict:
+    tokens = line.split()
+    result: dict = {"raw": line}
+    for key, field in (
+        ("depth", "depth"),
+        ("seldepth", "seldepth"),
+        ("nodes", "nodes"),
+        ("nps", "nps"),
+        ("time", "time_ms"),
+    ):
+        if key in tokens:
+            index = tokens.index(key)
+            if index + 1 < len(tokens):
+                parsed = parse_int_token(tokens[index + 1])
+                if parsed is not None:
+                    result[field] = parsed
+    if "score" in tokens:
+        index = tokens.index("score")
+        if index + 2 < len(tokens):
+            score_value = parse_int_token(tokens[index + 2])
+            if score_value is not None:
+                result["score"] = {"type": tokens[index + 1], "value": score_value}
+    if "pv" in tokens:
+        index = tokens.index("pv")
+        pv: list[str] = []
+        for token in tokens[index + 1 :]:
+            if token == "string":
+                break
+            pv.append(token)
+        if pv:
+            result["pv"] = pv
+    return result
+
+
+def extract_last_search_info(output: list[str]) -> dict | None:
+    for line in reversed(output):
+        if line.startswith("info ") and (" pv " in f" {line} " or " score " in line):
+            parsed = parse_info_line(line)
+            if parsed.get("pv") or parsed.get("score"):
+                return parsed
+    return None
+
+
+FINAL_METRIC_RE = re.compile(r"([A-Za-z][A-Za-z0-9_]*)=([^\s]+)")
+
+
+def parse_metric_value(raw: str) -> int | float | str:
+    parsed_int = parse_int_token(raw)
+    if parsed_int is not None:
+        return parsed_int
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
+def extract_final_metrics(output: list[str]) -> dict:
+    for line in reversed(output):
+        marker = "info string Final:"
+        if not line.startswith(marker):
+            continue
+        return {
+            key: parse_metric_value(value)
+            for key, value in FINAL_METRIC_RE.findall(line[len(marker) :])
+        }
+    return {}
+
+
+def write_json_result(
+    path: Path,
+    *,
+    engine: Path,
+    position: str,
+    go: str,
+    options: list[str],
+    bestmove: str,
+    output: list[str],
+    elapsed_sec: float,
+    returncode: int | None,
+) -> None:
+    transcript = "\n".join(output)
+    payload = {
+        "schema": "metalfish.uci_smoke_result",
+        "schema_version": 1,
+        "engine": str(engine),
+        "position": position,
+        "go": go,
+        "setoptions": list(options),
+        "bestmove": bestmove,
+        "elapsed_sec": round(elapsed_sec, 6),
+        "returncode": returncode,
+        "transcript_sha256": hashlib.sha256(transcript.encode("utf-8")).hexdigest(),
+        "transcript_tail": output[-80:],
+    }
+    search_info = extract_last_search_info(output)
+    if search_info:
+        payload["search_info"] = search_info
+    final_metrics = extract_final_metrics(output)
+    if final_metrics:
+        payload["final_metrics"] = final_metrics
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
 def main() -> int:
     args = parse_args()
     engine = Path(args.engine)
@@ -123,8 +249,10 @@ def main() -> int:
                 uci.send(f"position {args.position}")
             else:
                 uci.send(f"position fen {args.position}")
+            search_start = time.monotonic()
             uci.send(f"go {args.go}")
             uci.read_until(lambda line: line.startswith("bestmove "))
+            search_elapsed = time.monotonic() - search_start
         except (OSError, TimeoutError) as exc:
             print(str(exc), file=sys.stderr)
             return 1
@@ -140,7 +268,22 @@ def main() -> int:
         line for line in reversed(uci.output) if line.startswith("bestmove ")
     )
     bestmove = best_line.split()[1]
-    print(best_line)
+    if args.json_out:
+        write_json_result(
+            args.json_out,
+            engine=engine,
+            position=args.position,
+            go=args.go,
+            options=args.setoption,
+            bestmove=bestmove,
+            output=uci.output,
+            elapsed_sec=search_elapsed,
+            returncode=returncode,
+        )
+    if args.echo_output:
+        print("\n".join(uci.output))
+    else:
+        print(best_line)
     if args.expect_bestmove and bestmove != args.expect_bestmove:
         print(
             f"Expected bestmove {args.expect_bestmove}, got {bestmove}",
@@ -153,7 +296,7 @@ def main() -> int:
         if expected not in output:
             tail = "\n".join(uci.output[-80:])
             print(
-                f"Expected output containing {expected!r}. Tail:\n{tail}",
+                f"Expected engine output containing {expected!r}. Tail:\n{tail}",
                 file=sys.stderr,
             )
             return 1
@@ -161,7 +304,7 @@ def main() -> int:
         if rejected in output:
             tail = "\n".join(uci.output[-80:])
             print(
-                f"Rejected output containing {rejected!r}. Tail:\n{tail}",
+                f"Rejected engine output containing {rejected!r}. Tail:\n{tail}",
                 file=sys.stderr,
             )
             return 1

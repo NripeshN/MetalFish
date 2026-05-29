@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include "../nn/network.h"
+
 #include <algorithm>
 #include <string>
 #include <thread>
@@ -74,6 +76,7 @@ struct SearchParams {
   int num_threads = 2;
   int virtual_loss = 1;
   int minibatch_size = 32;
+  bool minibatch_size_auto = false;
 
   // Time management (Lc0 defaults)
   std::string time_manager = "smooth";
@@ -105,6 +108,11 @@ struct SearchParams {
   std::string nn_backend = "auto";
   std::string coreml_model_path;
   std::string coreml_compute_units = "cpu-ne";
+  int cuda_device = -1;
+  bool cuda_graph_execution = true;
+  int cuda_stable_execution_batch_size = 0;
+  bool cuda_deterministic_attention_softmax = true;
+  bool cuda_full_buffer_clear = true;
 
   int GetNumThreads() const {
     if (num_threads <= 0) {
@@ -130,6 +138,20 @@ struct SearchParams {
 
   float GetFpuValue(bool is_root) const {
     return is_root ? fpu_value_at_root : fpu_value;
+  }
+
+  NN::BackendConfig GetBackendConfig() const {
+    NN::BackendConfig config;
+    config.backend = nn_backend;
+    config.coreml_model_path = coreml_model_path;
+    config.coreml_compute_units = coreml_compute_units;
+    config.cuda_device = cuda_device;
+    config.cuda_graph_execution = cuda_graph_execution;
+    config.cuda_stable_execution_batch_size = cuda_stable_execution_batch_size;
+    config.cuda_deterministic_attention_softmax =
+        cuda_deterministic_attention_softmax;
+    config.cuda_full_buffer_clear = cuda_full_buffer_clear;
+    return config;
   }
 };
 

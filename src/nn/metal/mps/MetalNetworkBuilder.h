@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "../../network_tensor_plan.h"
 #include "../../weights.h"
 #include <string>
 #include <vector>
@@ -32,13 +33,15 @@ public:
              InputEmbedding embedding, bool attn_body, bool attn_policy,
              bool conv_policy, bool wdl, bool moves_left,
              Activations &activations, std::string &policy_head,
-             std::string &value_head);
+             std::string &value_head,
+             const std::vector<NetworkOutputTarget> &decoded_output_targets);
 
   void forwardEval(float *values, uint64_t *masks, int batchSize,
                    std::vector<float *> output_mems);
 
 private:
-  int gpu_id;
+  int gpu_id = -1;
+  int graph_id = -1;
 };
 
 } // namespace Metal

@@ -14,10 +14,11 @@
 #include <vector>
 
 #include "network_tensor_plan.h"
-#include "weights.h"
 
 namespace MetalFish {
 namespace NN {
+
+struct MultiHeadWeights;
 
 enum class NetworkWeightTensorKind {
   Generic,

@@ -7,6 +7,9 @@
 
 #include "network_tensor_plan.h"
 
+#include "network_format.h"
+#include "weights.h"
+
 #include <sstream>
 #include <string>
 
@@ -86,6 +89,53 @@ std::string NetworkTensorPlan::Summary() const {
       << ", moves_left=" << moves_left_outputs
       << ", raw_policy=" << raw_policy_outputs;
   return out.str();
+}
+
+std::string NetworkOutputTargetName(NetworkOutputTarget target) {
+  switch (target) {
+  case NetworkOutputTarget::Policy:
+    return "policy";
+  case NetworkOutputTarget::Value:
+    return "value";
+  case NetworkOutputTarget::MovesLeft:
+    return "moves_left";
+  case NetworkOutputTarget::RawPolicy:
+    return "raw_policy";
+  }
+  return "unknown";
+}
+
+int NetworkOutputTargetStride(const NetworkTensorPlan &plan,
+                              NetworkOutputTarget target) {
+  switch (target) {
+  case NetworkOutputTarget::Policy:
+    return plan.policy_outputs;
+  case NetworkOutputTarget::Value:
+    return plan.value_outputs;
+  case NetworkOutputTarget::MovesLeft:
+    return plan.moves_left_outputs;
+  case NetworkOutputTarget::RawPolicy:
+    return plan.raw_policy_outputs;
+  }
+  return 0;
+}
+
+bool NetworkOutputTargetEnabled(const NetworkTensorPlan &plan,
+                                NetworkOutputTarget target) {
+  return NetworkOutputTargetStride(plan, target) > 0;
+}
+
+std::vector<NetworkOutputTarget>
+NetworkDecodedOutputTargets(const NetworkTensorPlan &plan) {
+  std::vector<NetworkOutputTarget> targets;
+  targets.reserve(3);
+  if (NetworkOutputTargetEnabled(plan, NetworkOutputTarget::Policy))
+    targets.push_back(NetworkOutputTarget::Policy);
+  if (NetworkOutputTargetEnabled(plan, NetworkOutputTarget::Value))
+    targets.push_back(NetworkOutputTarget::Value);
+  if (NetworkOutputTargetEnabled(plan, NetworkOutputTarget::MovesLeft))
+    targets.push_back(NetworkOutputTarget::MovesLeft);
+  return targets;
 }
 
 NetworkTensorPlan

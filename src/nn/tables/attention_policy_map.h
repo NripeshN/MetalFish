@@ -9,7 +9,7 @@
 
 namespace MetalFish {
 namespace NN {
-namespace Metal {
+namespace Tables {
 
 // 64*64 + 8x24
 const short kAttnPolicyMap[] = {
@@ -696,6 +696,6 @@ const float kPosEncoding[64][kNumPosEncodingChannels] = {
      1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0,
      0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0}};
 
-} // namespace Metal
+} // namespace Tables
 } // namespace NN
 } // namespace MetalFish

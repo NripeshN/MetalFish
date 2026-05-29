@@ -138,8 +138,14 @@ Engine::Engine(std::optional<std::string> path)
   options.add("NNWeights",
               Option("", [](const Option &) { return std::nullopt; }));
   options.add("NNBackend", Option("auto"));
+  options.add("NNBackendRequireAccelerator", Option(false));
   options.add("NNCoreMLModelPath", Option(""));
   options.add("NNCoreMLComputeUnits", Option("cpu-ne"));
+  options.add("NNCudaDevice", Option(-1, -1, 255));
+  options.add("NNCudaGraphExecution", Option(true));
+  options.add("NNCudaStableExecutionBatchSize", Option(0, 0, 256));
+  options.add("NNCudaDeterministicAttentionSoftmax", Option(true));
+  options.add("NNCudaFullBufferClear", Option(true));
 
   options.add("UseHybridSearch", Option(false));
 
@@ -214,6 +220,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSVirtualLoss", Option(1, 1, 128));
   // 0 = auto; on Apple Silicon smaller batches are better at low thread counts.
   options.add("MCTSMinibatchSize", Option(0, 0, 4096));
+  options.add("MCTSCudaAutoMinibatchSize", Option(0, 0, 256));
   options.add("MCTSMaxThreads", Option(0, 0, MaxThreads));
   options.add("MCTSParallelSearch", Option(false));
   options.add("MCTSMaxOutOfOrderFactor", Option("4.0"));

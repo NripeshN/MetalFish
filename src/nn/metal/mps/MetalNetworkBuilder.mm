@@ -6,16 +6,47 @@
 */
 
 #import "MetalNetworkBuilder.h"
+#import "../../tables/attention_policy_map.h"
 #import "../../weights.h"
-#import "../tables/attention_policy_map.h"
 #import "NetworkGraph.h"
+
+#include <atomic>
+#include <stdexcept>
 
 namespace MetalFish {
 namespace NN {
 namespace Metal {
 
+namespace {
+
+int NextGraphId() {
+  static std::atomic<int> next_graph_id{0};
+  return next_graph_id.fetch_add(1, std::memory_order_relaxed);
+}
+
+MetalNetworkGraph *GraphOrThrow(int graph_id, const char *operation) {
+  if (graph_id < 0) {
+    throw std::runtime_error(std::string(operation) +
+                             " called before Metal graph initialization");
+  }
+
+  MetalNetworkGraph *graph =
+      [MetalNetworkGraph getGraphAt:[NSNumber numberWithInt:graph_id]];
+  if (graph == nil) {
+    throw std::runtime_error(std::string("Metal graph missing during ") +
+                             operation);
+  }
+  return graph;
+}
+
+} // namespace
+
 MetalNetworkBuilder::MetalNetworkBuilder(void) {}
-MetalNetworkBuilder::~MetalNetworkBuilder(void) {}
+MetalNetworkBuilder::~MetalNetworkBuilder(void) {
+  if (graph_id >= 0) {
+    [MetalNetworkGraph removeGraphAt:[NSNumber numberWithInt:graph_id]];
+  }
+}
 
 std::string MetalNetworkBuilder::init(int gpu_id) {
   NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
@@ -27,8 +58,13 @@ std::string MetalNetworkBuilder::init(int gpu_id) {
     return "";
   }
 
+  if (this->graph_id >= 0) {
+    [MetalNetworkGraph removeGraphAt:[NSNumber numberWithInt:this->graph_id]];
+  }
+  this->graph_id = NextGraphId();
+
   [MetalNetworkGraph graphWithDevice:devices[gpu_id]
-                               index:[NSNumber numberWithInt:gpu_id]];
+                               index:[NSNumber numberWithInt:this->graph_id]];
 
   this->gpu_id = gpu_id;
 
@@ -40,9 +76,10 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                 bool attn_policy, bool conv_policy, bool wdl,
                                 bool moves_left, Activations &activations,
                                 std::string &policy_head,
-                                std::string &value_head) {
-  MetalNetworkGraph *graph =
-      [MetalNetworkGraph getGraphAt:[NSNumber numberWithInt:this->gpu_id]];
+                                std::string &value_head,
+                                const std::vector<NetworkOutputTarget>
+                                    &decoded_output_targets) {
+  MetalNetworkGraph *graph = GraphOrThrow(this->graph_id, "Metal graph build");
   NSString *defaultActivation =
       [NSString stringWithUTF8String:activations.default_activation.c_str()];
   NSString *smolgenActivation =
@@ -85,6 +122,11 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                            label:@"input/conv"];
 
     for (size_t i = 0; i < weights.residual.size(); i++) {
+      const bool hasSe = weights.residual[i].has_se;
+      float *seWeights1 = hasSe ? weights.residual[i].se.w1.data() : nullptr;
+      float *seBiases1 = hasSe ? weights.residual[i].se.b1.data() : nullptr;
+      float *seWeights2 = hasSe ? weights.residual[i].se.w2.data() : nullptr;
+      float *seBiases2 = hasSe ? weights.residual[i].se.b2.data() : nullptr;
       layer = [graph
           addResidualBlockWithParent:layer
                       outputChannels:channelSize
@@ -94,11 +136,11 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                             weights2:&weights.residual[i].conv2.weights[0]
                              biases2:&weights.residual[i].conv2.biases[0]
                                label:[NSString stringWithFormat:@"block_%zu", i]
-                               hasSe:weights.residual[i].has_se ? YES : NO
-                          seWeights1:&weights.residual[i].se.w1[0]
-                           seBiases1:&weights.residual[i].se.b1[0]
-                          seWeights2:&weights.residual[i].se.w2[0]
-                           seBiases2:&weights.residual[i].se.b2[0]
+                               hasSe:hasSe ? YES : NO
+                          seWeights1:seWeights1
+                           seBiases1:seBiases1
+                          seWeights2:seWeights2
+                           seBiases2:seBiases2
                          seFcOutputs:weights.residual[i].se.b1.size()
                           activation:defaultActivation];
     }
@@ -124,7 +166,7 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
       } else {
         layer = [graph positionEncodingWithTensor:layer
                                         withShape:@[ @64, @64 ]
-                                          weights:&kPosEncoding[0][0]
+                                          weights:&Tables::kPosEncoding[0][0]
                                              type:nil
                                             label:@"input/position_encoding"];
       }
@@ -240,7 +282,7 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                label:[NSString stringWithFormat:@"value/%@",
                                                                 valueHead]];
 
-  MPSGraphTensor *mlh;
+  MPSGraphTensor *mlh = nil;
   if (moves_left) {
     if (attn_body) {
       mlh = [graph addFullyConnectedLayerWithParent:layer
@@ -277,11 +319,29 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
                                             label:@"moves_left/fc2"];
   }
 
-  if (moves_left) {
-    [graph setResultTensors:@[ policy, value, mlh ]];
-  } else {
-    [graph setResultTensors:@[ policy, value ]];
+  NSMutableArray<MPSGraphTensor *> *resultTensors =
+      [NSMutableArray arrayWithCapacity:decoded_output_targets.size()];
+  for (NetworkOutputTarget target : decoded_output_targets) {
+    switch (target) {
+    case NetworkOutputTarget::Policy:
+      [resultTensors addObject:policy];
+      break;
+    case NetworkOutputTarget::Value:
+      [resultTensors addObject:value];
+      break;
+    case NetworkOutputTarget::MovesLeft:
+      if (mlh == nil) {
+        throw std::runtime_error(
+            "Metal graph requested moves-left output without a moves-left head");
+      }
+      [resultTensors addObject:mlh];
+      break;
+    case NetworkOutputTarget::RawPolicy:
+      throw std::runtime_error(
+          "Metal graph does not expose raw policy as a decoded output");
+    }
   }
+  [graph setResultTensors:resultTensors];
 }
 
 void MetalNetworkBuilder::forwardEval(float *inputs, uint64_t *masks,
@@ -289,7 +349,7 @@ void MetalNetworkBuilder::forwardEval(float *inputs, uint64_t *masks,
                                       std::vector<float *> output_mems) {
   @autoreleasepool {
     MetalNetworkGraph *graph =
-        [MetalNetworkGraph getGraphAt:[NSNumber numberWithInt:this->gpu_id]];
+        GraphOrThrow(this->graph_id, "Metal graph inference");
     [graph runInferenceWithBatchSize:batchSize
                               inputs:inputs
                                masks:masks
