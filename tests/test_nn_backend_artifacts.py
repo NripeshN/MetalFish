@@ -22,6 +22,7 @@ from tools import audit_cuda_gcp_resources as gcp_audit  # noqa: E402
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_benchmarks as benchmark_comparer  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
+from tools import cuda_runtime_manifest_writer as runtime_writer  # noqa: E402
 from tools import cuda_runtime_observed as runtime_observed  # noqa: E402
 from tools import download_engine_networks as downloader  # noqa: E402
 from tools import dispatch_cuda_release_artifacts as cuda_release_dispatch  # noqa: E402
@@ -1650,6 +1651,141 @@ def test_cuda_runtime_observed_parser_extracts_release_facts() -> None:
         )
 
 
+def runtime_manifest_writer_env(
+    root: pathlib.Path,
+    *,
+    runtime_kind: str,
+) -> tuple[pathlib.Path, dict[str, str]]:
+    artifact_dir = root / "artifacts"
+    artifact_dir.mkdir(parents=True)
+    write_observed_runtime_inputs(artifact_dir, runtime_kind=runtime_kind)
+    if runtime_kind == "linux-cuda":
+        (artifact_dir / "cuda-gpu-tests.log").write_text("passed\n", encoding="utf-8")
+    else:
+        (artifact_dir / "logs" / "cuda-bk07-mcts.stdout.log").write_text(
+            "bestmove h5f6\n", encoding="utf-8"
+        )
+
+    metal_dir = root / "metal"
+    metal_dir.mkdir()
+
+    def write_input(name: str) -> str:
+        path = metal_dir / name
+        path.write_text("ok\n", encoding="utf-8")
+        return str(path)
+
+    package = root / "metalfish-windows-x86_64-msvc-cuda.zip"
+    package.write_bytes(b"package")
+    archive = root / "metalfish.tar.gz"
+    archive.write_bytes(b"archive")
+    env = {
+        "GIT_HEAD_SHA": "abc123",
+        "GATE_ARTIFACT_DIR": str(artifact_dir),
+        "GATE_PROJECT": "metalfish",
+        "GATE_INSTANCE": "metalfish-cuda-test",
+        "GATE_ZONE": "us-central1-a",
+        "GATE_MACHINE": "g2-standard-8",
+        "GATE_ACCELERATOR": "type=nvidia-l4,count=1",
+        "GATE_IMAGE_PROJECT": "ubuntu-os-cloud",
+        "GATE_IMAGE_FAMILY": "ubuntu-2204-lts",
+        "GATE_BOOT_DISK_SIZE": "200GB",
+        "GATE_DELETE_ON_EXIT": "1",
+        "GATE_GCS_PREFIX": "",
+        "GATE_REQUIRE_METAL_COMPARE": "1",
+        "GATE_REQUIRE_METAL_BENCHMARK_COMPARE": "1",
+        "GATE_REQUIRE_METAL_SEARCH_COMPARE": "1",
+        "GATE_MAX_CUDA_METAL_EVAL_MS_RATIO": "1.0",
+        "GATE_METAL_COMPARISON_LOG": write_input("metal-nn-comparison.log"),
+        "GATE_METAL_PROBE_SUITE_LOG": write_input("metal-bt4.log"),
+        "GATE_METAL_LEGACY_PROBE_SUITE_LOG": write_input("metal-legacy.log"),
+        "GATE_METAL_MCTS_BK07_SEARCH_JSON": write_input("metal-mcts-bk07.json"),
+        "GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON": write_input(
+            "metal-mcts-kiwipete.json"
+        ),
+        "GATE_METAL_HYBRID_BK07_SEARCH_JSON": write_input(
+            "metal-hybrid-bk07.json"
+        ),
+        "GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON": write_input(
+            "metal-hybrid-kiwipete.json"
+        ),
+        "GATE_CUDA_STABLE_BATCH_SIZE": "16",
+        "GATE_CUDA_GRAPH": "1",
+        "GATE_CUDA_GRAPH_EXECUTION": "1",
+        "GATE_CUDA_DETERMINISTIC_ATTENTION_SOFTMAX": "1",
+        "GATE_CUDA_FULL_BUFFER_CLEAR": "1",
+        "GATE_CUDA_PROFILE": "0",
+        "GATE_CUDA_PROFILE_LIMIT": "2",
+        "GATE_CUBLAS_WORKSPACE_CONFIG": "",
+        "BT4_COMPARE_STATUS_FOR_MANIFEST": "0",
+        "LEGACY_COMPARE_STATUS_FOR_MANIFEST": "0",
+        "BENCHMARK_COMPARE_STATUS_FOR_MANIFEST": "0",
+        "SEARCH_COMPARE_STATUS_FOR_MANIFEST": "0",
+        "FINAL_COMPARE_STATUS_FOR_MANIFEST": "0",
+        "GATE_ARCHIVE": str(archive),
+        "REMOTE_STATUS_FOR_MANIFEST": "0",
+        "GATE_CUDA_UCI_GO": "nodes 8",
+        "GATE_CUDA_MCTS_PONDER_GO": "wtime 60000 btime 60000",
+        "GATE_CUDA_MCTS_PONDER_SETTLE_SEC": "0.6",
+        "RUNTIME_STATUS_FOR_MANIFEST": "0",
+        "GATE_MACHINES": "g2-standard-8 g2-standard-4",
+        "GATE_BOOT_DISK_TYPE": "pd-balanced",
+        "GATE_PACKAGE_ZIP": str(package),
+        "GATE_PACKAGE_BASENAME": package.name,
+        "GATE_WINDOWS_CUDA_COMPILE_RUN_ID": "12345",
+        "GATE_UCI_GO": "nodes 8",
+        "GATE_MCTS_TIMED_UCI_GO": "movetime 500",
+        "GATE_MCTS_PONDER_UCI_GO": "wtime 60000 btime 60000",
+        "GATE_MCTS_PONDER_SETTLE_MS": "600",
+        "GATE_HYBRID_UCI_GO": "nodes 8",
+        "GATE_HYBRID_PARITY_UCI_GO": "nodes 50",
+    }
+    return artifact_dir, env
+
+
+def test_cuda_runtime_manifest_writer_keeps_linux_windows_schema_parity() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        for runtime_kind, manifest_name, expected_artifact in (
+            ("linux-cuda", "cuda-gpu-runtime-manifest.json", "cuda-gpu-tests.log"),
+            (
+                "windows-cuda",
+                "windows-cuda-runtime-gate-manifest.json",
+                "logs/cuda-bk07-mcts.stdout.log",
+            ),
+        ):
+            artifact_dir, env = runtime_manifest_writer_env(
+                root / runtime_kind,
+                runtime_kind=runtime_kind,
+            )
+            manifest = artifact_dir / manifest_name
+            data = runtime_writer.write_manifest_from_env(
+                runtime_kind=runtime_kind,
+                manifest_path=manifest,
+                env=env,
+            )
+            expect(
+                f"{runtime_kind} artifact recorded",
+                expected_artifact in data["artifacts"],
+            )
+            summary = runtime_checker.validate_runtime_manifest(
+                manifest,
+                runtime_kind=runtime_kind,
+                require_metal_compare=True,
+                require_metal_benchmark_compare=True,
+                require_metal_search_compare=True,
+                require_release_policy=True,
+                require_observed_runtime=True,
+                require_artifact_files=True,
+                artifact_root=artifact_dir,
+                expected_head_sha="abc123",
+            )
+            expect(f"{runtime_kind} schema", summary["kind"] == runtime_kind)
+            expect(
+                f"{runtime_kind} graph policy",
+                summary["runtime"]["cuda_graph_execution"] == "1",
+            )
+
+
 def test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts() -> None:
     linux_required = runtime_checker.REQUIRED_RELEASE_ARTIFACTS["linux-cuda"]
     windows_required = runtime_checker.REQUIRED_RELEASE_ARTIFACTS["windows-cuda"]
@@ -3060,6 +3196,7 @@ def main() -> int:
     test_cuda_release_artifact_download_retries_truncated_zip()
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
     test_cuda_runtime_observed_parser_extracts_release_facts()
+    test_cuda_runtime_manifest_writer_keeps_linux_windows_schema_parity()
     test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_package_validator_rejects_unmanifested_archive_entries()
