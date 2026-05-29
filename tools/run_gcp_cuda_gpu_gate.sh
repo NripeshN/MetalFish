@@ -21,9 +21,13 @@ METAL_COMPARISON_LOG="${METALFISH_METAL_COMPARISON_LOG:-}"
 METAL_MCTS_BK07_SEARCH_JSON="${METALFISH_METAL_MCTS_BK07_SEARCH_JSON:-}"
 METAL_MCTS_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON:-}"
 METAL_MCTS_AFTER_E4_SEARCH_JSON="${METALFISH_METAL_MCTS_AFTER_E4_SEARCH_JSON:-}"
+METAL_MCTS_PROMOTION_SEARCH_JSON="${METALFISH_METAL_MCTS_PROMOTION_SEARCH_JSON:-}"
+METAL_MCTS_EN_PASSANT_SEARCH_JSON="${METALFISH_METAL_MCTS_EN_PASSANT_SEARCH_JSON:-}"
 METAL_HYBRID_BK07_SEARCH_JSON="${METALFISH_METAL_HYBRID_BK07_SEARCH_JSON:-}"
 METAL_HYBRID_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON:-}"
 METAL_HYBRID_AFTER_E4_SEARCH_JSON="${METALFISH_METAL_HYBRID_AFTER_E4_SEARCH_JSON:-}"
+METAL_HYBRID_PROMOTION_SEARCH_JSON="${METALFISH_METAL_HYBRID_PROMOTION_SEARCH_JSON:-}"
+METAL_HYBRID_EN_PASSANT_SEARCH_JSON="${METALFISH_METAL_HYBRID_EN_PASSANT_SEARCH_JSON:-}"
 REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
@@ -215,12 +219,20 @@ collect_remote_artifacts() {
     cuda-gpu-uci-kiwipete-search.json \
     cuda-gpu-uci-after-e4-smoke.log \
     cuda-gpu-uci-after-e4-search.json \
+    cuda-gpu-uci-promotion-smoke.log \
+    cuda-gpu-uci-promotion-search.json \
+    cuda-gpu-uci-en-passant-smoke.log \
+    cuda-gpu-uci-en-passant-search.json \
     cuda-gpu-uci-hybrid-smoke.log \
     cuda-gpu-uci-hybrid-search.json \
     cuda-gpu-uci-hybrid-kiwipete-smoke.log \
     cuda-gpu-uci-hybrid-kiwipete-search.json \
     cuda-gpu-uci-hybrid-after-e4-smoke.log \
     cuda-gpu-uci-hybrid-after-e4-search.json \
+    cuda-gpu-uci-hybrid-promotion-smoke.log \
+    cuda-gpu-uci-hybrid-promotion-search.json \
+    cuda-gpu-uci-hybrid-en-passant-smoke.log \
+    cuda-gpu-uci-hybrid-en-passant-search.json \
     cuda-gpu-uci-hybrid-clock-start-smoke.log \
     cuda-gpu-uci-hybrid-clock-safety-smoke.log \
     cuda-gpu-uci-hybrid-auto-smoke.log \
@@ -241,12 +253,20 @@ collect_remote_artifacts() {
     cuda-gpu-package-uci-kiwipete-search.json \
     cuda-gpu-package-uci-after-e4-smoke.log \
     cuda-gpu-package-uci-after-e4-search.json \
+    cuda-gpu-package-uci-promotion-smoke.log \
+    cuda-gpu-package-uci-promotion-search.json \
+    cuda-gpu-package-uci-en-passant-smoke.log \
+    cuda-gpu-package-uci-en-passant-search.json \
     cuda-gpu-package-uci-hybrid-smoke.log \
     cuda-gpu-package-uci-hybrid-search.json \
     cuda-gpu-package-uci-hybrid-kiwipete-smoke.log \
     cuda-gpu-package-uci-hybrid-kiwipete-search.json \
     cuda-gpu-package-uci-hybrid-after-e4-smoke.log \
     cuda-gpu-package-uci-hybrid-after-e4-search.json \
+    cuda-gpu-package-uci-hybrid-promotion-smoke.log \
+    cuda-gpu-package-uci-hybrid-promotion-search.json \
+    cuda-gpu-package-uci-hybrid-en-passant-smoke.log \
+    cuda-gpu-package-uci-hybrid-en-passant-search.json \
     cuda-gpu-profile.log; do
     if gcloud compute scp \
       "${INSTANCE}:~/metalfish/build-cuda-gpu/${file}" \
@@ -312,9 +332,13 @@ write_runtime_manifest() {
     GATE_METAL_MCTS_BK07_SEARCH_JSON="${METAL_MCTS_BK07_SEARCH_JSON}" \
     GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON="${METAL_MCTS_KIWIPETE_SEARCH_JSON}" \
     GATE_METAL_MCTS_AFTER_E4_SEARCH_JSON="${METAL_MCTS_AFTER_E4_SEARCH_JSON}" \
+    GATE_METAL_MCTS_PROMOTION_SEARCH_JSON="${METAL_MCTS_PROMOTION_SEARCH_JSON}" \
+    GATE_METAL_MCTS_EN_PASSANT_SEARCH_JSON="${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" \
     GATE_METAL_HYBRID_BK07_SEARCH_JSON="${METAL_HYBRID_BK07_SEARCH_JSON}" \
     GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON="${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" \
     GATE_METAL_HYBRID_AFTER_E4_SEARCH_JSON="${METAL_HYBRID_AFTER_E4_SEARCH_JSON}" \
+    GATE_METAL_HYBRID_PROMOTION_SEARCH_JSON="${METAL_HYBRID_PROMOTION_SEARCH_JSON}" \
+    GATE_METAL_HYBRID_EN_PASSANT_SEARCH_JSON="${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" \
     GATE_CUDA_UCI_GO="${METALFISH_CUDA_UCI_GO:-nodes 8}" \
     GATE_CUDA_MCTS_PONDER_GO="${METALFISH_CUDA_MCTS_PONDER_GO:-wtime 60000 btime 60000 winc 1000 binc 1000}" \
     GATE_CUDA_MCTS_PONDER_SETTLE_SEC="${METALFISH_CUDA_MCTS_PONDER_SETTLE_SEC:-0.6}" \
@@ -484,7 +508,7 @@ compare_collected_search_results() {
     return "${SEARCH_COMPARE_SKIPPED}"
   fi
 
-  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_MCTS_AFTER_E4_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" || -z "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_AFTER_E4_SEARCH_JSON}" ]]; then
+  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_MCTS_AFTER_E4_SEARCH_JSON}" || -z "${METAL_MCTS_PROMOTION_SEARCH_JSON}" || -z "${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" || -z "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_AFTER_E4_SEARCH_JSON}" || -z "${METAL_HYBRID_PROMOTION_SEARCH_JSON}" || -z "${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" ]]; then
     if require_metal_search_compare; then
       echo "Metal search JSON inputs are required for search comparison" >&2
       return 1
@@ -503,6 +527,14 @@ compare_collected_search_results() {
     echo "Metal MCTS after-e4 search JSON not found: ${METAL_MCTS_AFTER_E4_SEARCH_JSON}" >&2
     return 1
   fi
+  if [[ ! -s "${METAL_MCTS_PROMOTION_SEARCH_JSON}" ]]; then
+    echo "Metal MCTS promotion search JSON not found: ${METAL_MCTS_PROMOTION_SEARCH_JSON}" >&2
+    return 1
+  fi
+  if [[ ! -s "${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" ]]; then
+    echo "Metal MCTS en-passant search JSON not found: ${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" >&2
+    return 1
+  fi
   if [[ ! -s "${METAL_HYBRID_BK07_SEARCH_JSON}" ]]; then
     echo "Metal Hybrid search JSON not found: ${METAL_HYBRID_BK07_SEARCH_JSON}" >&2
     return 1
@@ -513,6 +545,14 @@ compare_collected_search_results() {
   fi
   if [[ ! -s "${METAL_HYBRID_AFTER_E4_SEARCH_JSON}" ]]; then
     echo "Metal Hybrid after-e4 search JSON not found: ${METAL_HYBRID_AFTER_E4_SEARCH_JSON}" >&2
+    return 1
+  fi
+  if [[ ! -s "${METAL_HYBRID_PROMOTION_SEARCH_JSON}" ]]; then
+    echo "Metal Hybrid promotion search JSON not found: ${METAL_HYBRID_PROMOTION_SEARCH_JSON}" >&2
+    return 1
+  fi
+  if [[ ! -s "${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" ]]; then
+    echo "Metal Hybrid en-passant search JSON not found: ${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" >&2
     return 1
   fi
 
@@ -540,6 +580,22 @@ compare_collected_search_results() {
     fi
     cuda_mcts_after_e4="${ARTIFACT_DIR}/cuda-gpu-uci-after-e4-search.json"
   fi
+  local cuda_mcts_promotion="${ARTIFACT_DIR}/cuda-gpu-package-uci-promotion-search.json"
+  if [[ ! -s "${cuda_mcts_promotion}" ]]; then
+    if require_metal_search_compare; then
+      echo "Packaged CUDA MCTS promotion search JSON not found: ${cuda_mcts_promotion}" >&2
+      return 1
+    fi
+    cuda_mcts_promotion="${ARTIFACT_DIR}/cuda-gpu-uci-promotion-search.json"
+  fi
+  local cuda_mcts_en_passant="${ARTIFACT_DIR}/cuda-gpu-package-uci-en-passant-search.json"
+  if [[ ! -s "${cuda_mcts_en_passant}" ]]; then
+    if require_metal_search_compare; then
+      echo "Packaged CUDA MCTS en-passant search JSON not found: ${cuda_mcts_en_passant}" >&2
+      return 1
+    fi
+    cuda_mcts_en_passant="${ARTIFACT_DIR}/cuda-gpu-uci-en-passant-search.json"
+  fi
   local cuda_hybrid="${ARTIFACT_DIR}/cuda-gpu-package-uci-hybrid-search.json"
   if [[ ! -s "${cuda_hybrid}" ]]; then
     if require_metal_search_compare; then
@@ -564,6 +620,22 @@ compare_collected_search_results() {
     fi
     cuda_hybrid_after_e4="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-after-e4-search.json"
   fi
+  local cuda_hybrid_promotion="${ARTIFACT_DIR}/cuda-gpu-package-uci-hybrid-promotion-search.json"
+  if [[ ! -s "${cuda_hybrid_promotion}" ]]; then
+    if require_metal_search_compare; then
+      echo "Packaged CUDA Hybrid promotion search JSON not found: ${cuda_hybrid_promotion}" >&2
+      return 1
+    fi
+    cuda_hybrid_promotion="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-promotion-search.json"
+  fi
+  local cuda_hybrid_en_passant="${ARTIFACT_DIR}/cuda-gpu-package-uci-hybrid-en-passant-search.json"
+  if [[ ! -s "${cuda_hybrid_en_passant}" ]]; then
+    if require_metal_search_compare; then
+      echo "Packaged CUDA Hybrid en-passant search JSON not found: ${cuda_hybrid_en_passant}" >&2
+      return 1
+    fi
+    cuda_hybrid_en_passant="${ARTIFACT_DIR}/cuda-gpu-uci-hybrid-en-passant-search.json"
+  fi
   if [[ ! -s "${cuda_mcts}" ]]; then
     echo "CUDA MCTS search JSON not found: ${cuda_mcts}" >&2
     return 1
@@ -576,6 +648,14 @@ compare_collected_search_results() {
     echo "CUDA MCTS after-e4 search JSON not found: ${cuda_mcts_after_e4}" >&2
     return 1
   fi
+  if [[ ! -s "${cuda_mcts_promotion}" ]]; then
+    echo "CUDA MCTS promotion search JSON not found: ${cuda_mcts_promotion}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cuda_mcts_en_passant}" ]]; then
+    echo "CUDA MCTS en-passant search JSON not found: ${cuda_mcts_en_passant}" >&2
+    return 1
+  fi
   if [[ ! -s "${cuda_hybrid}" ]]; then
     echo "CUDA Hybrid search JSON not found: ${cuda_hybrid}" >&2
     return 1
@@ -586,6 +666,14 @@ compare_collected_search_results() {
   fi
   if [[ ! -s "${cuda_hybrid_after_e4}" ]]; then
     echo "CUDA Hybrid after-e4 search JSON not found: ${cuda_hybrid_after_e4}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cuda_hybrid_promotion}" ]]; then
+    echo "CUDA Hybrid promotion search JSON not found: ${cuda_hybrid_promotion}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cuda_hybrid_en_passant}" ]]; then
+    echo "CUDA Hybrid en-passant search JSON not found: ${cuda_hybrid_en_passant}" >&2
     return 1
   fi
 
@@ -645,6 +733,44 @@ compare_collected_search_results() {
     --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/metal-cuda-mcts-after-e4-search-summary.json" \
     | tee "${ARTIFACT_DIR}/metal-cuda-mcts-after-e4-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_MCTS_PROMOTION_SEARCH_JSON}" \
+    --actual "${cuda_mcts_promotion}" \
+    --expected-label "Metal MCTS" \
+    --actual-label "CUDA MCTS" \
+    --require-same-pv-head \
+    --max-score-cp-delta 10 \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSParallelSearch \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
+    --json-out "${ARTIFACT_DIR}/metal-cuda-mcts-promotion-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/metal-cuda-mcts-promotion-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" \
+    --actual "${cuda_mcts_en_passant}" \
+    --expected-label "Metal MCTS" \
+    --actual-label "CUDA MCTS" \
+    --require-same-pv-head \
+    --max-score-cp-delta 10 \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSParallelSearch \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
+    --json-out "${ARTIFACT_DIR}/metal-cuda-mcts-en-passant-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/metal-cuda-mcts-en-passant-search-compare.log"
 
   python3 tools/compare_uci_search_results.py \
     --expected "${METAL_HYBRID_BK07_SEARCH_JSON}" \
@@ -729,6 +855,62 @@ compare_collected_search_results() {
     --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-after-e4-search-summary.json" \
     | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-after-e4-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_HYBRID_PROMOTION_SEARCH_JSON}" \
+    --actual "${cuda_hybrid_promotion}" \
+    --expected-label "Metal Hybrid" \
+    --actual-label "CUDA Hybrid" \
+    --require-same-pv-head \
+    --max-score-cp-delta "${HYBRID_SEARCH_MAX_SCORE_CP_DELTA}" \
+    --require-positive-final-metric MCTSPlayouts \
+    --require-positive-final-metric MCTSEvals \
+    --require-positive-final-metric ABDepth \
+    --require-final-metric ABMove \
+    --require-final-metric MCTSMove \
+    --require-same-final-metric ABMove \
+    --require-same-final-metric MCTSMove \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption HybridMCTSThreads \
+    --require-same-setoption HybridABThreads \
+    --require-same-setoption HybridAutoABThreadsCap \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
+    --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-promotion-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-promotion-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" \
+    --actual "${cuda_hybrid_en_passant}" \
+    --expected-label "Metal Hybrid" \
+    --actual-label "CUDA Hybrid" \
+    --require-same-pv-head \
+    --max-score-cp-delta "${HYBRID_SEARCH_MAX_SCORE_CP_DELTA}" \
+    --require-positive-final-metric MCTSPlayouts \
+    --require-positive-final-metric MCTSEvals \
+    --require-positive-final-metric ABDepth \
+    --require-final-metric ABMove \
+    --require-final-metric MCTSMove \
+    --require-same-final-metric ABMove \
+    --require-same-final-metric MCTSMove \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption HybridMCTSThreads \
+    --require-same-setoption HybridABThreads \
+    --require-same-setoption HybridAutoABThreadsCap \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
+    --json-out "${ARTIFACT_DIR}/metal-cuda-hybrid-en-passant-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/metal-cuda-hybrid-en-passant-search-compare.log"
 }
 
 set +e

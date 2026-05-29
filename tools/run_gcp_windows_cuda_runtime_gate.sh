@@ -31,9 +31,13 @@ METAL_COMPARISON_LOG="${METALFISH_METAL_COMPARISON_LOG:-}"
 METAL_MCTS_BK07_SEARCH_JSON="${METALFISH_METAL_MCTS_BK07_SEARCH_JSON:-}"
 METAL_MCTS_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_MCTS_KIWIPETE_SEARCH_JSON:-}"
 METAL_MCTS_AFTER_E4_SEARCH_JSON="${METALFISH_METAL_MCTS_AFTER_E4_SEARCH_JSON:-}"
+METAL_MCTS_PROMOTION_SEARCH_JSON="${METALFISH_METAL_MCTS_PROMOTION_SEARCH_JSON:-}"
+METAL_MCTS_EN_PASSANT_SEARCH_JSON="${METALFISH_METAL_MCTS_EN_PASSANT_SEARCH_JSON:-}"
 METAL_HYBRID_BK07_SEARCH_JSON="${METALFISH_METAL_HYBRID_BK07_SEARCH_JSON:-}"
 METAL_HYBRID_KIWIPETE_SEARCH_JSON="${METALFISH_METAL_HYBRID_KIWIPETE_SEARCH_JSON:-}"
 METAL_HYBRID_AFTER_E4_SEARCH_JSON="${METALFISH_METAL_HYBRID_AFTER_E4_SEARCH_JSON:-}"
+METAL_HYBRID_PROMOTION_SEARCH_JSON="${METALFISH_METAL_HYBRID_PROMOTION_SEARCH_JSON:-}"
+METAL_HYBRID_EN_PASSANT_SEARCH_JSON="${METALFISH_METAL_HYBRID_EN_PASSANT_SEARCH_JSON:-}"
 REQUIRE_METAL_COMPARE="${METALFISH_REQUIRE_METAL_COMPARE:-0}"
 REQUIRE_METAL_BENCHMARK_COMPARE="${METALFISH_REQUIRE_METAL_BENCHMARK_COMPARE:-0}"
 REQUIRE_METAL_SEARCH_COMPARE="${METALFISH_REQUIRE_METAL_SEARCH_COMPARE:-0}"
@@ -262,7 +266,7 @@ compare_collected_search_results() {
     return "${SEARCH_COMPARE_SKIPPED}"
   fi
 
-  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_MCTS_AFTER_E4_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" || -z "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_AFTER_E4_SEARCH_JSON}" ]]; then
+  if [[ -z "${METAL_MCTS_BK07_SEARCH_JSON}" || -z "${METAL_MCTS_KIWIPETE_SEARCH_JSON}" || -z "${METAL_MCTS_AFTER_E4_SEARCH_JSON}" || -z "${METAL_MCTS_PROMOTION_SEARCH_JSON}" || -z "${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" || -z "${METAL_HYBRID_BK07_SEARCH_JSON}" || -z "${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" || -z "${METAL_HYBRID_AFTER_E4_SEARCH_JSON}" || -z "${METAL_HYBRID_PROMOTION_SEARCH_JSON}" || -z "${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" ]]; then
     if require_metal_search_compare; then
       echo "Metal search JSON inputs are required for Windows CUDA search comparison" >&2
       return 1
@@ -281,6 +285,14 @@ compare_collected_search_results() {
     echo "Metal MCTS after-e4 search JSON not found: ${METAL_MCTS_AFTER_E4_SEARCH_JSON}" >&2
     return 1
   fi
+  if [[ ! -s "${METAL_MCTS_PROMOTION_SEARCH_JSON}" ]]; then
+    echo "Metal MCTS promotion search JSON not found: ${METAL_MCTS_PROMOTION_SEARCH_JSON}" >&2
+    return 1
+  fi
+  if [[ ! -s "${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" ]]; then
+    echo "Metal MCTS en-passant search JSON not found: ${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" >&2
+    return 1
+  fi
   if [[ ! -s "${METAL_HYBRID_BK07_SEARCH_JSON}" ]]; then
     echo "Metal Hybrid search JSON not found: ${METAL_HYBRID_BK07_SEARCH_JSON}" >&2
     return 1
@@ -293,13 +305,25 @@ compare_collected_search_results() {
     echo "Metal Hybrid after-e4 search JSON not found: ${METAL_HYBRID_AFTER_E4_SEARCH_JSON}" >&2
     return 1
   fi
+  if [[ ! -s "${METAL_HYBRID_PROMOTION_SEARCH_JSON}" ]]; then
+    echo "Metal Hybrid promotion search JSON not found: ${METAL_HYBRID_PROMOTION_SEARCH_JSON}" >&2
+    return 1
+  fi
+  if [[ ! -s "${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" ]]; then
+    echo "Metal Hybrid en-passant search JSON not found: ${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" >&2
+    return 1
+  fi
 
   local cuda_mcts="${ARTIFACT_DIR}/logs/cuda-bk07-mcts-search.json"
   local cuda_mcts_kiwipete="${ARTIFACT_DIR}/logs/cuda-kiwipete-mcts-search.json"
   local cuda_mcts_after_e4="${ARTIFACT_DIR}/logs/cuda-after-e4-mcts-search.json"
+  local cuda_mcts_promotion="${ARTIFACT_DIR}/logs/cuda-promotion-mcts-search.json"
+  local cuda_mcts_en_passant="${ARTIFACT_DIR}/logs/cuda-en-passant-mcts-search.json"
   local cuda_hybrid="${ARTIFACT_DIR}/logs/hybrid-cuda-search.json"
   local cuda_hybrid_kiwipete="${ARTIFACT_DIR}/logs/hybrid-cuda-kiwipete-search.json"
   local cuda_hybrid_after_e4="${ARTIFACT_DIR}/logs/hybrid-cuda-after-e4-search.json"
+  local cuda_hybrid_promotion="${ARTIFACT_DIR}/logs/hybrid-cuda-promotion-search.json"
+  local cuda_hybrid_en_passant="${ARTIFACT_DIR}/logs/hybrid-cuda-en-passant-search.json"
   if [[ ! -s "${cuda_mcts}" ]]; then
     echo "Windows CUDA MCTS search JSON not found: ${cuda_mcts}" >&2
     return 1
@@ -312,6 +336,14 @@ compare_collected_search_results() {
     echo "Windows CUDA MCTS after-e4 search JSON not found: ${cuda_mcts_after_e4}" >&2
     return 1
   fi
+  if [[ ! -s "${cuda_mcts_promotion}" ]]; then
+    echo "Windows CUDA MCTS promotion search JSON not found: ${cuda_mcts_promotion}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cuda_mcts_en_passant}" ]]; then
+    echo "Windows CUDA MCTS en-passant search JSON not found: ${cuda_mcts_en_passant}" >&2
+    return 1
+  fi
   if [[ ! -s "${cuda_hybrid}" ]]; then
     echo "Windows CUDA Hybrid search JSON not found: ${cuda_hybrid}" >&2
     return 1
@@ -322,6 +354,14 @@ compare_collected_search_results() {
   fi
   if [[ ! -s "${cuda_hybrid_after_e4}" ]]; then
     echo "Windows CUDA Hybrid after-e4 search JSON not found: ${cuda_hybrid_after_e4}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cuda_hybrid_promotion}" ]]; then
+    echo "Windows CUDA Hybrid promotion search JSON not found: ${cuda_hybrid_promotion}" >&2
+    return 1
+  fi
+  if [[ ! -s "${cuda_hybrid_en_passant}" ]]; then
+    echo "Windows CUDA Hybrid en-passant search JSON not found: ${cuda_hybrid_en_passant}" >&2
     return 1
   fi
 
@@ -381,6 +421,44 @@ compare_collected_search_results() {
     --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-after-e4-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-after-e4-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_MCTS_PROMOTION_SEARCH_JSON}" \
+    --actual "${cuda_mcts_promotion}" \
+    --expected-label "Metal MCTS" \
+    --actual-label "Windows CUDA MCTS" \
+    --require-same-pv-head \
+    --max-score-cp-delta 10 \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSParallelSearch \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
+    --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-promotion-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-promotion-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" \
+    --actual "${cuda_mcts_en_passant}" \
+    --expected-label "Metal MCTS" \
+    --actual-label "Windows CUDA MCTS" \
+    --require-same-pv-head \
+    --max-score-cp-delta 10 \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSParallelSearch \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
+    --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-en-passant-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-mcts-en-passant-search-compare.log"
 
   python3 tools/compare_uci_search_results.py \
     --expected "${METAL_HYBRID_BK07_SEARCH_JSON}" \
@@ -465,6 +543,62 @@ compare_collected_search_results() {
     --require-same-setoption TransformerLowTimeFallbackMs \
     --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-after-e4-search-summary.json" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-after-e4-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_HYBRID_PROMOTION_SEARCH_JSON}" \
+    --actual "${cuda_hybrid_promotion}" \
+    --expected-label "Metal Hybrid" \
+    --actual-label "Windows CUDA Hybrid" \
+    --require-same-pv-head \
+    --max-score-cp-delta "${HYBRID_SEARCH_MAX_SCORE_CP_DELTA}" \
+    --require-positive-final-metric MCTSPlayouts \
+    --require-positive-final-metric MCTSEvals \
+    --require-positive-final-metric ABDepth \
+    --require-final-metric ABMove \
+    --require-final-metric MCTSMove \
+    --require-same-final-metric ABMove \
+    --require-same-final-metric MCTSMove \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption HybridMCTSThreads \
+    --require-same-setoption HybridABThreads \
+    --require-same-setoption HybridAutoABThreadsCap \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
+    --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-promotion-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-promotion-search-compare.log"
+
+  python3 tools/compare_uci_search_results.py \
+    --expected "${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" \
+    --actual "${cuda_hybrid_en_passant}" \
+    --expected-label "Metal Hybrid" \
+    --actual-label "Windows CUDA Hybrid" \
+    --require-same-pv-head \
+    --max-score-cp-delta "${HYBRID_SEARCH_MAX_SCORE_CP_DELTA}" \
+    --require-positive-final-metric MCTSPlayouts \
+    --require-positive-final-metric MCTSEvals \
+    --require-positive-final-metric ABDepth \
+    --require-final-metric ABMove \
+    --require-final-metric MCTSMove \
+    --require-same-final-metric ABMove \
+    --require-same-final-metric MCTSMove \
+    --require-same-setoption UseMCTS \
+    --require-same-setoption UseHybridSearch \
+    --require-same-setoption Threads \
+    --require-same-setoption HybridMCTSThreads \
+    --require-same-setoption HybridABThreads \
+    --require-same-setoption HybridAutoABThreadsCap \
+    --require-same-setoption MCTSMaxThreads \
+    --require-same-setoption MCTSMinibatchSize \
+    --require-same-setoption MCTSParityPreset \
+    --require-same-setoption MCTSAddDirichletNoise \
+    --require-same-setoption TransformerLowTimeFallbackMs \
+    --json-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-en-passant-search-summary.json" \
+    | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-hybrid-en-passant-search-compare.log"
 }
 
 ensure_ssh_key() {
@@ -567,9 +701,13 @@ write_runtime_manifest() {
     GATE_METAL_MCTS_BK07_SEARCH_JSON="${METAL_MCTS_BK07_SEARCH_JSON}" \
     GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON="${METAL_MCTS_KIWIPETE_SEARCH_JSON}" \
     GATE_METAL_MCTS_AFTER_E4_SEARCH_JSON="${METAL_MCTS_AFTER_E4_SEARCH_JSON}" \
+    GATE_METAL_MCTS_PROMOTION_SEARCH_JSON="${METAL_MCTS_PROMOTION_SEARCH_JSON}" \
+    GATE_METAL_MCTS_EN_PASSANT_SEARCH_JSON="${METAL_MCTS_EN_PASSANT_SEARCH_JSON}" \
     GATE_METAL_HYBRID_BK07_SEARCH_JSON="${METAL_HYBRID_BK07_SEARCH_JSON}" \
     GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON="${METAL_HYBRID_KIWIPETE_SEARCH_JSON}" \
     GATE_METAL_HYBRID_AFTER_E4_SEARCH_JSON="${METAL_HYBRID_AFTER_E4_SEARCH_JSON}" \
+    GATE_METAL_HYBRID_PROMOTION_SEARCH_JSON="${METAL_HYBRID_PROMOTION_SEARCH_JSON}" \
+    GATE_METAL_HYBRID_EN_PASSANT_SEARCH_JSON="${METAL_HYBRID_EN_PASSANT_SEARCH_JSON}" \
     GATE_PACKAGE_ZIP="${PACKAGE_ZIP}" \
     GATE_PACKAGE_BASENAME="${PACKAGE_BASENAME}" \
     GATE_WINDOWS_CUDA_COMPILE_RUN_ID="${WINDOWS_CUDA_COMPILE_RUN_ID}" \
@@ -1732,6 +1870,8 @@ function Invoke-UciPonderSmoke {
 \$Bk07Fen = "1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -"
 \$KiwipeteFen = "r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1"
 \$AfterE4Fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+\$PromotionFen = "7k/P7/8/8/8/8/8/7K w - - 0 1"
+\$EnPassantFen = "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2"
 \$CudaProbeOptions = " --backend cuda" +
   " --cuda-device -1 --cuda-graph-execution ${CUDA_GRAPH_CLI_VALUE}" +
   " --cuda-stable-execution-batch-size ${CUDA_STABLE_BATCH_SIZE}" +
@@ -1962,6 +2102,58 @@ Invoke-UciSmoke -Name "cuda-after-e4-mcts" -Commands @(
   "quit"
 ) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove"))
 
+Invoke-UciSmoke -Name "cuda-promotion-mcts" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name NNBackend value cuda",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name NNCudaDevice value -1",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
+  "setoption name NNCudaDeterministicAttentionSoftmax value true",
+  "setoption name NNCudaFullBufferClear value true",
+  "setoption name UseMCTS value true",
+  "setoption name UseHybridSearch value false",
+  "setoption name Threads value 8",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSParallelSearch value false",
+  "setoption name MCTSMinibatchSize value 1",
+  "setoption name MCTSParityPreset value true",
+  "setoption name MCTSAddDirichletNoise value false",
+  "setoption name TransformerLowTimeFallbackMs value 0",
+  "position fen \$PromotionFen",
+  "go nodes 1",
+  "quit"
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove"))
+
+Invoke-UciSmoke -Name "cuda-en-passant-mcts" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name NNBackend value cuda",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name NNCudaDevice value -1",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
+  "setoption name NNCudaDeterministicAttentionSoftmax value true",
+  "setoption name NNCudaFullBufferClear value true",
+  "setoption name UseMCTS value true",
+  "setoption name UseHybridSearch value false",
+  "setoption name Threads value 8",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSParallelSearch value false",
+  "setoption name MCTSMinibatchSize value 1",
+  "setoption name MCTSParityPreset value true",
+  "setoption name MCTSAddDirichletNoise value false",
+  "setoption name TransformerLowTimeFallbackMs value 0",
+  "position fen \$EnPassantFen",
+  "go nodes 1",
+  "quit"
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("CUDA transformer backend", "MCTS runtime: backend=cuda", "minibatch=1", "bestmove"))
+
 Invoke-UciSmoke -Name "hybrid-cuda" -Commands @(
   "uci",
   "isready",
@@ -2042,6 +2234,62 @@ Invoke-UciSmoke -Name "hybrid-cuda-after-e4" -Commands @(
   "setoption name MCTSAddDirichletNoise value false",
   "setoption name TransformerLowTimeFallbackMs value 0",
   "position fen \$AfterE4Fen",
+  "go nodes 50",
+  "quit"
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
+
+Invoke-UciSmoke -Name "hybrid-cuda-promotion" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name Threads value 3",
+  "setoption name NNBackend value cuda",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name NNCudaDevice value -1",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
+  "setoption name NNCudaDeterministicAttentionSoftmax value true",
+  "setoption name NNCudaFullBufferClear value true",
+  "setoption name UseMCTS value false",
+  "setoption name UseHybridSearch value true",
+  "setoption name HybridMCTSThreads value 1",
+  "setoption name HybridABThreads value 2",
+  "setoption name HybridAutoABThreadsCap value 0",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSMinibatchSize value 1",
+  "setoption name MCTSParityPreset value true",
+  "setoption name MCTSAddDirichletNoise value false",
+  "setoption name TransformerLowTimeFallbackMs value 0",
+  "position fen \$PromotionFen",
+  "go nodes 50",
+  "quit"
+) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
+
+Invoke-UciSmoke -Name "hybrid-cuda-en-passant" -Commands @(
+  "uci",
+  "isready",
+  "setoption name EvalFile value \$NnueBig",
+  "setoption name EvalFileSmall value \$NnueSmall",
+  "setoption name Threads value 3",
+  "setoption name NNBackend value cuda",
+  "setoption name NNWeights value \$Bt4",
+  "setoption name NNCudaDevice value -1",
+  "setoption name NNCudaGraphExecution value ${CUDA_GRAPH_UCI_VALUE}",
+  "setoption name NNCudaStableExecutionBatchSize value ${CUDA_STABLE_BATCH_SIZE}",
+  "setoption name NNCudaDeterministicAttentionSoftmax value true",
+  "setoption name NNCudaFullBufferClear value true",
+  "setoption name UseMCTS value false",
+  "setoption name UseHybridSearch value true",
+  "setoption name HybridMCTSThreads value 1",
+  "setoption name HybridABThreads value 2",
+  "setoption name HybridAutoABThreadsCap value 0",
+  "setoption name MCTSMaxThreads value 1",
+  "setoption name MCTSMinibatchSize value 1",
+  "setoption name MCTSParityPreset value true",
+  "setoption name MCTSAddDirichletNoise value false",
+  "setoption name TransformerLowTimeFallbackMs value 0",
+  "position fen \$EnPassantFen",
   "go nodes 50",
   "quit"
 ) -RequiredText (\$CudaNetworkInfoRequiredText + \$CudaMctsWarmupRequiredText + @("Starting Parallel Hybrid Search", "Hybrid MCTS runtime: backend=cuda", "minibatch=1", "CUDA transformer backend", "Final: MCTSPlayouts=", "bestmove")) -PositiveMetrics @("MCTSPlayouts", "MCTSEvals")
@@ -2198,9 +2446,13 @@ if ("${CUDA_PROFILE}" -ne "" -and "${CUDA_PROFILE}" -ne "0") {
 \$Bk07MctsText = Read-SmokeText "cuda-bk07-mcts"
 \$KiwipeteMctsText = Read-SmokeText "cuda-kiwipete-mcts"
 \$AfterE4MctsText = Read-SmokeText "cuda-after-e4-mcts"
+\$PromotionMctsText = Read-SmokeText "cuda-promotion-mcts"
+\$EnPassantMctsText = Read-SmokeText "cuda-en-passant-mcts"
 \$HybridText = Read-SmokeText "hybrid-cuda"
 \$HybridKiwipeteText = Read-SmokeText "hybrid-cuda-kiwipete"
 \$HybridAfterE4Text = Read-SmokeText "hybrid-cuda-after-e4"
+\$HybridPromotionText = Read-SmokeText "hybrid-cuda-promotion"
+\$HybridEnPassantText = Read-SmokeText "hybrid-cuda-en-passant"
 \$HybridClockStartText = Read-SmokeText "hybrid-cuda-clock-start"
 \$HybridClockSafetyText = Read-SmokeText "hybrid-cuda-clock-safety"
 \$HybridAutoText = Read-SmokeText "hybrid-auto"
@@ -2210,9 +2462,13 @@ Write-SearchJson -Name "cuda-timed-mcts-search" -Text \$TimedMctsText -Position 
 Write-SearchJson -Name "cuda-bk07-mcts-search" -Text \$Bk07MctsText -Position "fen \$Bk07Fen" -Go "nodes 50"
 Write-SearchJson -Name "cuda-kiwipete-mcts-search" -Text \$KiwipeteMctsText -Position "fen \$KiwipeteFen" -Go "nodes 1"
 Write-SearchJson -Name "cuda-after-e4-mcts-search" -Text \$AfterE4MctsText -Position "fen \$AfterE4Fen" -Go "nodes 1"
+Write-SearchJson -Name "cuda-promotion-mcts-search" -Text \$PromotionMctsText -Position "fen \$PromotionFen" -Go "nodes 1"
+Write-SearchJson -Name "cuda-en-passant-mcts-search" -Text \$EnPassantMctsText -Position "fen \$EnPassantFen" -Go "nodes 1"
 Write-SearchJson -Name "hybrid-cuda-search" -Text \$HybridText -Position "fen \$Bk07Fen" -Go "${HYBRID_PARITY_UCI_GO}"
 Write-SearchJson -Name "hybrid-cuda-kiwipete-search" -Text \$HybridKiwipeteText -Position "fen \$KiwipeteFen" -Go "nodes 50"
 Write-SearchJson -Name "hybrid-cuda-after-e4-search" -Text \$HybridAfterE4Text -Position "fen \$AfterE4Fen" -Go "nodes 50"
+Write-SearchJson -Name "hybrid-cuda-promotion-search" -Text \$HybridPromotionText -Position "fen \$PromotionFen" -Go "nodes 50"
+Write-SearchJson -Name "hybrid-cuda-en-passant-search" -Text \$HybridEnPassantText -Position "fen \$EnPassantFen" -Go "nodes 50"
 \$RemoteZip = Join-Path \$Root "metalfish-windows-cuda.zip"
 \$PackageHash = (Get-FileHash -Path \$RemoteZip -Algorithm SHA256).Hash.ToLowerInvariant()
 \$Manifest = [ordered]@{
@@ -2378,6 +2634,22 @@ Write-SearchJson -Name "hybrid-cuda-after-e4-search" -Text \$HybridAfterE4Text -
       stdout_log = "cuda-after-e4-mcts.stdout.log"
       stderr_log = "cuda-after-e4-mcts.stderr.log"
     }
+    cuda_promotion_mcts = [ordered]@{
+      go = "nodes 1"
+      fen = \$PromotionFen
+      bestmove = (Find-BestMove \$PromotionMctsText)
+      backend_selected = (Test-BackendSelected \$PromotionMctsText)
+      stdout_log = "cuda-promotion-mcts.stdout.log"
+      stderr_log = "cuda-promotion-mcts.stderr.log"
+    }
+    cuda_en_passant_mcts = [ordered]@{
+      go = "nodes 1"
+      fen = \$EnPassantFen
+      bestmove = (Find-BestMove \$EnPassantMctsText)
+      backend_selected = (Test-BackendSelected \$EnPassantMctsText)
+      stdout_log = "cuda-en-passant-mcts.stdout.log"
+      stderr_log = "cuda-en-passant-mcts.stderr.log"
+    }
     hybrid_cuda = [ordered]@{
       go = "${HYBRID_PARITY_UCI_GO}"
       fen = \$Bk07Fen
@@ -2404,6 +2676,24 @@ Write-SearchJson -Name "hybrid-cuda-after-e4-search" -Text \$HybridAfterE4Text -
       metrics = (Find-FinalMetrics \$HybridAfterE4Text)
       stdout_log = "hybrid-cuda-after-e4.stdout.log"
       stderr_log = "hybrid-cuda-after-e4.stderr.log"
+    }
+    hybrid_cuda_promotion = [ordered]@{
+      go = "nodes 50"
+      fen = \$PromotionFen
+      bestmove = (Find-BestMove \$HybridPromotionText)
+      backend_selected = (Test-BackendSelected \$HybridPromotionText)
+      metrics = (Find-FinalMetrics \$HybridPromotionText)
+      stdout_log = "hybrid-cuda-promotion.stdout.log"
+      stderr_log = "hybrid-cuda-promotion.stderr.log"
+    }
+    hybrid_cuda_en_passant = [ordered]@{
+      go = "nodes 50"
+      fen = \$EnPassantFen
+      bestmove = (Find-BestMove \$HybridEnPassantText)
+      backend_selected = (Test-BackendSelected \$HybridEnPassantText)
+      metrics = (Find-FinalMetrics \$HybridEnPassantText)
+      stdout_log = "hybrid-cuda-en-passant.stdout.log"
+      stderr_log = "hybrid-cuda-en-passant.stderr.log"
     }
     hybrid_cuda_clock_start = [ordered]@{
       go = "wtime 1000 btime 1000 winc 3000 binc 3000"
@@ -2448,7 +2738,7 @@ Write-SearchJson -Name "hybrid-cuda-after-e4-search" -Text \$HybridAfterE4Text -
   "- Gate status: passed",
   "- Package: ${PACKAGE_BASENAME}",
   "- GPU: see nvidia-smi-runtime.log",
-  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-nn-comparison, cuda-mcts, cuda-timed-mcts, cuda-ponder-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, cuda-kiwipete-mcts, cuda-after-e4-mcts, hybrid-cuda, hybrid-cuda-kiwipete, hybrid-cuda-after-e4, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
+  "- Smokes: cuda-probe, cuda-legacy-probe, cuda-probe-suite, cuda-legacy-probe-suite, cuda-isolation-bt4-legacy, cuda-isolation-legacy-bt4, cuda-nn-comparison, cuda-mcts, cuda-timed-mcts, cuda-ponder-mcts, cuda-auto-mcts, cuda-accelerator-mcts, cuda-bk07-mcts, cuda-kiwipete-mcts, cuda-after-e4-mcts, cuda-promotion-mcts, cuda-en-passant-mcts, hybrid-cuda, hybrid-cuda-kiwipete, hybrid-cuda-after-e4, hybrid-cuda-promotion, hybrid-cuda-en-passant, hybrid-cuda-clock-start, hybrid-cuda-clock-safety, hybrid-auto, hybrid-cuda-ane-disabled",
   "- Manifest: windows-cuda-runtime-manifest.json"
 ) | Set-Content -Path (Join-Path \$Logs "windows-cuda-runtime-summary.md") -Encoding UTF8
 Write-Host "Windows CUDA runtime gate passed"
