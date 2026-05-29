@@ -24,6 +24,7 @@ from tools import compare_nn_backend_benchmarks as benchmark_comparer  # noqa: E
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
 from tools import cuda_runtime_manifest_writer as runtime_writer  # noqa: E402
 from tools import cuda_runtime_observed as runtime_observed  # noqa: E402
+from tools import cuda_runtime_search_contract as search_contract  # noqa: E402
 from tools import download_engine_networks as downloader  # noqa: E402
 from tools import dispatch_cuda_release_artifacts as cuda_release_dispatch  # noqa: E402
 from tools import fetch_cuda_gpu_gate_inputs as cuda_gpu_inputs  # noqa: E402
@@ -1539,24 +1540,16 @@ def write_observed_runtime_inputs(
 ) -> None:
     if runtime_kind == "linux-cuda":
         prefix = root
-        names = {
-            "benchmark": "metal-cuda-nn-benchmark-summary.json",
-            "mcts_bk07": "metal-cuda-mcts-bk07-search-summary.json",
-            "mcts_kiwipete": "metal-cuda-mcts-kiwipete-search-summary.json",
-            "hybrid_bk07": "metal-cuda-hybrid-bk07-search-summary.json",
-            "hybrid_kiwipete": "metal-cuda-hybrid-kiwipete-search-summary.json",
-        }
+        benchmark_name = "metal-cuda-nn-benchmark-summary.json"
     else:
         prefix = root / "logs"
-        names = {
-            "benchmark": "metal-windows-cuda-nn-benchmark-summary.json",
-            "mcts_bk07": "metal-windows-cuda-mcts-bk07-search-summary.json",
-            "mcts_kiwipete": "metal-windows-cuda-mcts-kiwipete-search-summary.json",
-            "hybrid_bk07": "metal-windows-cuda-hybrid-bk07-search-summary.json",
-            "hybrid_kiwipete": "metal-windows-cuda-hybrid-kiwipete-search-summary.json",
-        }
+        benchmark_name = "metal-windows-cuda-nn-benchmark-summary.json"
+    search_paths = search_contract.search_summary_paths(
+        root,
+        runtime_kind=runtime_kind,
+    )
     prefix.mkdir(parents=True, exist_ok=True)
-    (prefix / names["benchmark"]).write_text(
+    (prefix / benchmark_name).write_text(
         json.dumps(
             {
                 "actual": {
@@ -1600,8 +1593,9 @@ def write_observed_runtime_inputs(
         ),
         encoding="utf-8",
     )
-    for key in ("mcts_bk07", "mcts_kiwipete", "hybrid_bk07", "hybrid_kiwipete"):
-        (prefix / names[key]).write_text(
+    for path in search_paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
             json.dumps(
                 {
                     "status": "passed",
@@ -1618,6 +1612,43 @@ def write_observed_runtime_inputs(
             ),
             encoding="utf-8",
         )
+
+
+def test_cuda_runtime_search_contract_paths() -> None:
+    root = pathlib.Path("/tmp/metalfish-runtime")
+    expect(
+        "search contract keys",
+        search_contract.search_comparison_keys()
+        == ("mcts_bk07", "mcts_kiwipete", "hybrid_bk07", "hybrid_kiwipete"),
+    )
+    expect(
+        "search contract metal inputs",
+        [spec.metal_input_key for spec in search_contract.SEARCH_COMPARISONS]
+        == [
+            "metal_mcts_bk07_search_json",
+            "metal_mcts_kiwipete_search_json",
+            "metal_hybrid_bk07_search_json",
+            "metal_hybrid_kiwipete_search_json",
+        ],
+    )
+    linux = search_contract.search_summary_paths(root, runtime_kind="linux-cuda")
+    windows = search_contract.search_summary_paths(root, runtime_kind="windows-cuda")
+    expect(
+        "linux mcts bk07 path",
+        linux["mcts_bk07"]
+        == root / "metal-cuda-mcts-bk07-search-summary.json",
+    )
+    expect(
+        "windows mcts bk07 path",
+        windows["mcts_bk07"]
+        == root / "logs" / "metal-windows-cuda-mcts-bk07-search-summary.json",
+    )
+    try:
+        search_contract.search_summary_paths(root, runtime_kind="metal")
+    except ValueError as exc:
+        expect("unsupported search contract runtime", "unsupported" in str(exc))
+        return
+    raise AssertionError("expected unsupported runtime kind to be rejected")
 
 
 def test_cuda_runtime_observed_parser_extracts_release_facts() -> None:
@@ -3195,6 +3226,7 @@ def main() -> int:
     test_cuda_runtime_input_helpers_validate_complete_zip()
     test_cuda_release_artifact_download_retries_truncated_zip()
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
+    test_cuda_runtime_search_contract_paths()
     test_cuda_runtime_observed_parser_extracts_release_facts()
     test_cuda_runtime_manifest_writer_keeps_linux_windows_schema_parity()
     test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts()

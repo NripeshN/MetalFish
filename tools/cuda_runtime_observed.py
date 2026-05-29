@@ -7,6 +7,8 @@ import pathlib
 import re
 from typing import Any
 
+from tools.cuda_runtime_search_contract import search_summary_paths
+
 
 _BOOL_RE = {
     "1": True,
@@ -158,27 +160,12 @@ def collect_observed_runtime_facts(
     root = pathlib.Path(artifact_dir)
     if runtime_kind == "linux-cuda":
         benchmark = root / "metal-cuda-nn-benchmark-summary.json"
-        searches = {
-            "mcts_bk07": root / "metal-cuda-mcts-bk07-search-summary.json",
-            "mcts_kiwipete": root / "metal-cuda-mcts-kiwipete-search-summary.json",
-            "hybrid_bk07": root / "metal-cuda-hybrid-bk07-search-summary.json",
-            "hybrid_kiwipete": root / "metal-cuda-hybrid-kiwipete-search-summary.json",
-        }
     elif runtime_kind == "windows-cuda":
         logs = root / "logs"
         benchmark = logs / "metal-windows-cuda-nn-benchmark-summary.json"
-        searches = {
-            "mcts_bk07": logs / "metal-windows-cuda-mcts-bk07-search-summary.json",
-            "mcts_kiwipete": (
-                logs / "metal-windows-cuda-mcts-kiwipete-search-summary.json"
-            ),
-            "hybrid_bk07": logs / "metal-windows-cuda-hybrid-bk07-search-summary.json",
-            "hybrid_kiwipete": (
-                logs / "metal-windows-cuda-hybrid-kiwipete-search-summary.json"
-            ),
-        }
     else:
         raise ValueError(f"unsupported CUDA runtime kind: {runtime_kind}")
+    searches = search_summary_paths(root, runtime_kind=runtime_kind)
 
     return {
         "schema_version": 1,

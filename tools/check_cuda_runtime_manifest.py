@@ -8,6 +8,11 @@ import json
 import pathlib
 import sys
 
+from tools.cuda_runtime_search_contract import (
+    SEARCH_COMPARISONS,
+    search_comparison_keys,
+)
+
 
 RUNTIME_KINDS = {
     "linux-cuda": {
@@ -218,22 +223,11 @@ def validate_metal_compare_inputs(
     if require_search_compare:
         if not is_truthy(inputs.get("require_metal_search_compare")):
             raise ValueError("runtime manifest did not require Metal search comparison")
-        require_file_record(
-            inputs.get("metal_mcts_bk07_search_json"),
-            label="Metal MCTS BK.07 search JSON",
-        )
-        require_file_record(
-            inputs.get("metal_mcts_kiwipete_search_json"),
-            label="Metal MCTS kiwipete search JSON",
-        )
-        require_file_record(
-            inputs.get("metal_hybrid_bk07_search_json"),
-            label="Metal Hybrid BK.07 search JSON",
-        )
-        require_file_record(
-            inputs.get("metal_hybrid_kiwipete_search_json"),
-            label="Metal Hybrid kiwipete search JSON",
-        )
+        for spec in SEARCH_COMPARISONS:
+            require_file_record(
+                inputs.get(spec.metal_input_key),
+                label=spec.metal_input_label,
+            )
 
 
 def validate_release_artifacts(data: dict, *, runtime_kind: str) -> None:
@@ -376,7 +370,7 @@ def validate_observed_runtime_facts(
     searches = observed.get("search_compare")
     if not isinstance(searches, dict):
         raise ValueError("observed runtime is missing search comparison facts")
-    for name in ("mcts_bk07", "mcts_kiwipete", "hybrid_bk07", "hybrid_kiwipete"):
+    for name in search_comparison_keys():
         search = searches.get(name)
         if not isinstance(search, dict) or not search.get("present"):
             raise ValueError(f"observed runtime is missing {name} search facts")

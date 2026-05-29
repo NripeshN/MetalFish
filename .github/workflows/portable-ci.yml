@@ -81,6 +81,7 @@ jobs:
             tools/check_cuda_package_artifacts.py \
             tools/check_cuda_runtime_manifest.py \
             tools/cuda_runtime_manifest_writer.py \
+            tools/cuda_runtime_search_contract.py \
             tools/compare_uci_search_results.py \
             tools/compare_nn_backend_outputs.py \
             tools/dispatch_cuda_release_artifacts.py \
@@ -267,6 +268,7 @@ jobs:
             tools/check_cuda_package_artifacts.py \
             tools/check_cuda_runtime_manifest.py \
             tools/cuda_runtime_manifest_writer.py \
+            tools/cuda_runtime_search_contract.py \
             tools/compare_uci_search_results.py \
             tools/fetch_cuda_release_artifacts.py \
             tools/download_engine_networks.py \
@@ -474,6 +476,7 @@ jobs:
             tools/check_cuda_package_artifacts.py `
             tools/check_cuda_runtime_manifest.py `
             tools/cuda_runtime_manifest_writer.py `
+            tools/cuda_runtime_search_contract.py `
             tools/compare_uci_search_results.py `
             tools/fetch_cuda_release_artifacts.py `
             tools/download_engine_networks.py `
