@@ -1053,6 +1053,7 @@ def main() -> int:
             "sha256 mismatch",
             "Metal BT4 probe suite",
             "Metal legacy probe suite",
+            "ROOT = pathlib.Path(__file__).resolve().parent.parent",
             "SEARCH_COMPARISONS",
             "search_comparison_keys",
             "search_summary_artifact_names",
