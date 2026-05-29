@@ -2,6 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOURCE_COMMIT="${METALFISH_SOURCE_COMMIT:-}"
+if [[ -z "${SOURCE_COMMIT}" ]]; then
+  SOURCE_COMMIT="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || true)"
+fi
+if [[ -z "${SOURCE_COMMIT}" ]]; then
+  echo "METALFISH_SOURCE_COMMIT is required when ${ROOT_DIR} is not a git checkout" >&2
+  exit 2
+fi
+export METALFISH_SOURCE_COMMIT="${SOURCE_COMMIT}"
 PROJECT="${METALFISH_GCP_PROJECT:-metalfish}"
 DEFAULT_ZONES="us-central1-a us-central1-b us-central1-c us-west1-a us-west1-b us-west1-c us-east1-b us-east1-c us-east1-d us-east4-a us-east4-c us-west4-a us-west4-c"
 ZONES="${METALFISH_GCP_ZONES:-${METALFISH_GCP_ZONE:-${DEFAULT_ZONES}}}"
@@ -467,7 +476,7 @@ write_runtime_manifest() {
     BENCHMARK_COMPARE_STATUS_FOR_MANIFEST="$4" \
     SEARCH_COMPARE_STATUS_FOR_MANIFEST="$5" \
     FINAL_COMPARE_STATUS_FOR_MANIFEST="$6" \
-    GIT_HEAD_SHA="$(git rev-parse HEAD)" \
+    GIT_HEAD_SHA="${SOURCE_COMMIT}" \
     GATE_ARTIFACT_DIR="${ARTIFACT_DIR}" \
     GATE_PROJECT="${PROJECT}" \
     GATE_INSTANCE="${INSTANCE}" \
@@ -662,7 +671,7 @@ require_file "${PACKAGE_ZIP}" "Windows CUDA package"
 python3 tools/check_cuda_package_artifacts.py \
   --package "${PACKAGE_ZIP}" \
   --package-kind windows-cuda \
-  --expected-source-commit "$(git rev-parse HEAD)"
+  --expected-source-commit "${SOURCE_COMMIT}"
 require_file "${WEIGHTS}" "BT4 weights"
 require_file "${LEGACY_WEIGHTS}" "legacy 42850 weights"
 require_file "${NNUE_BIG}" "large NNUE"

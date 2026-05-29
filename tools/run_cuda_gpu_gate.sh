@@ -2,6 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="${METALFISH_SOURCE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SOURCE_COMMIT="${METALFISH_SOURCE_COMMIT:-}"
+if [[ -z "${SOURCE_COMMIT}" ]]; then
+  SOURCE_COMMIT="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || true)"
+fi
+if [[ -z "${SOURCE_COMMIT}" ]]; then
+  echo "METALFISH_SOURCE_COMMIT is required when ${ROOT_DIR} is not a git checkout" >&2
+  exit 2
+fi
+export METALFISH_SOURCE_COMMIT="${SOURCE_COMMIT}"
 BUILD_DIR="${METALFISH_CUDA_BUILD_DIR:-${ROOT_DIR}/build-cuda-gpu}"
 CUDA_ARCHS="${METALFISH_CUDA_ARCHS:-89}"
 JOBS="${METALFISH_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
@@ -1151,7 +1160,7 @@ tar -czf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_DIR}" .
 python3 tools/check_cuda_package_artifacts.py \
   --package "${CUDA_PACKAGE}" \
   --package-kind linux-cuda \
-  --expected-source-commit "$(git rev-parse HEAD)" \
+  --expected-source-commit "${SOURCE_COMMIT}" \
   --json-output "${BUILD_DIR}/linux-cuda-package-check.json"
 tar -xzf "${CUDA_PACKAGE}" -C "${CUDA_PACKAGE_CHECK_DIR}"
 test -x "${CUDA_PACKAGE_CHECK_DIR}/metalfish"
