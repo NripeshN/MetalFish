@@ -12,11 +12,13 @@ import tarfile
 import tempfile
 import zipfile
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tools import check_cuda_runtime_manifest as runtime_checker  # noqa: E402
+from tools import audit_cuda_gcp_resources as gcp_audit  # noqa: E402
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_benchmarks as benchmark_comparer  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
@@ -2939,6 +2941,47 @@ def test_network_downloader_writes_valid_download_to_cache() -> None:
         downloader.validate_gzip_weights(cache / "weights.pb.gz")
 
 
+def test_gcp_cuda_resource_audit_filters_instances() -> None:
+    payload = json.dumps(
+        [
+            {
+                "name": "metalfish-cuda-direct-linux-old",
+                "zone": (
+                    "https://www.googleapis.com/compute/v1/projects/p/"
+                    "zones/us-central1-a"
+                ),
+                "status": "RUNNING",
+                "creationTimestamp": "2026-05-29T02:00:00.000-00:00",
+            },
+            {
+                "name": "metalfish-win-cuda-gh-new",
+                "zone": "us-central1-b",
+                "status": "TERMINATED",
+                "creationTimestamp": "2026-05-29T06:45:00Z",
+            },
+            {
+                "name": "unrelated",
+                "zone": "us-central1-c",
+                "status": "RUNNING",
+                "creationTimestamp": "2026-05-29T01:00:00Z",
+            },
+        ]
+    )
+    instances = gcp_audit.parse_instances(payload)
+    matches = gcp_audit.filter_instances(
+        instances,
+        name_regex=gcp_audit.DEFAULT_NAME_REGEX,
+        older_than_hours=2,
+        now=datetime(2026, 5, 29, 7, 0, tzinfo=timezone.utc),
+    )
+
+    expect(
+        "old CUDA instance selected",
+        [instance.name for instance in matches] == ["metalfish-cuda-direct-linux-old"],
+    )
+    expect("zone URL normalized", matches[0].zone == "us-central1-a")
+
+
 def test_portable_manifest_uses_checked_out_commit() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -3042,6 +3085,7 @@ def main() -> int:
     test_network_downloader_retries_truncated_gzip()
     test_network_downloader_uses_validated_cache_before_network()
     test_network_downloader_writes_valid_download_to_cache()
+    test_gcp_cuda_resource_audit_filters_instances()
     test_portable_manifest_uses_checked_out_commit()
     print("NN backend artifact tests: OK")
     return 0

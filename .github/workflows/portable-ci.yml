@@ -75,6 +75,7 @@ jobs:
           python3 -m py_compile \
             tests/paper_benchmarks.py \
             tests/test_benchmark_configs.py \
+            tools/audit_cuda_gcp_resources.py \
             tools/run_tournament_live.py \
             tools/lichess_puzzle_runner.py \
             tools/check_cuda_package_artifacts.py \
@@ -259,6 +260,7 @@ jobs:
           python -m py_compile \
             tests/paper_benchmarks.py \
             tests/test_benchmark_configs.py \
+            tools/audit_cuda_gcp_resources.py \
             tools/run_tournament_live.py \
             tools/lichess_puzzle_runner.py \
             tools/check_cuda_package_artifacts.py \
@@ -464,6 +466,7 @@ jobs:
           python -m py_compile `
             tests/paper_benchmarks.py `
             tests/test_benchmark_configs.py `
+            tools/audit_cuda_gcp_resources.py `
             tools/run_tournament_live.py `
             tools/lichess_puzzle_runner.py `
             tools/check_cuda_package_artifacts.py `

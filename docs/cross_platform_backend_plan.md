@@ -145,6 +145,10 @@ worktree is removed after a successful run and preserved after a failure for
 debugging. The Linux GCP archive path forwards `METALFISH_SOURCE_COMMIT` and
 `METALFISH_SOURCE_BRANCH` into the VM, so package manifests remain tied to the
 validated branch tip even though `git archive` does not include `.git`.
+Use `tools/audit_cuda_gcp_resources.py --project metalfish` before or after
+direct runtime experiments to list matching CUDA gate VMs, and add
+`--older-than-hours <hours> --delete` only when stale instances should be
+removed.
 
 Once both CUDA runtime gates have passed for the same SHA, use the CUDA release
 promotion workflow to fetch, validate, rename, and optionally attach the Linux

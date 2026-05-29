@@ -769,6 +769,7 @@ def main() -> int:
             "METALFISH_NETWORK_CACHE_DIR",
             "Cache engine networks",
             "engine-networks-bt4-nnue-v2",
+            "tools/audit_cuda_gcp_resources.py",
             "tools/write_portable_manifest.py",
             "import_msvc_dev_env.ps1",
             "actions/cache@v5",
@@ -1151,6 +1152,18 @@ def main() -> int:
             "--nnue-only",
             "--bt4-only",
             "--legacy-only",
+        ],
+    )
+    assert_file_contains(
+        PROJ / "tools/audit_cuda_gcp_resources.py",
+        [
+            "DEFAULT_NAME_REGEX",
+            "metalfish-(cuda|win-cuda)",
+            "older-than-hours",
+            "gcloud",
+            "compute",
+            "instances",
+            "delete",
         ],
     )
     assert_file_contains(
