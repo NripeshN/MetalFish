@@ -20,6 +20,7 @@ from tools import check_cuda_runtime_manifest as runtime_checker  # noqa: E402
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_benchmarks as benchmark_comparer  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
+from tools import cuda_runtime_observed as runtime_observed  # noqa: E402
 from tools import download_engine_networks as downloader  # noqa: E402
 from tools import dispatch_cuda_release_artifacts as cuda_release_dispatch  # noqa: E402
 from tools import fetch_cuda_gpu_gate_inputs as cuda_gpu_inputs  # noqa: E402
@@ -1377,6 +1378,146 @@ def runtime_policy(
     }
 
 
+def observed_runtime_facts(
+    *,
+    runtime_kind: str = "windows-cuda",
+    graph_replay: bool = True,
+    stable_batch: int = 16,
+    deterministic_attention_softmax: bool = True,
+    full_buffer_clear: bool = True,
+    worst_eval_ms_ratio: float = 0.75,
+    search_status: str = "passed",
+    same_bestmove_required: bool = True,
+    bestmove_matches: bool = True,
+) -> dict:
+    backend_after = {
+        "backend_is_cuda": True,
+        "cuda_graph_effective": graph_replay,
+        "cuda_stable_execution_batch_effective": stable_batch,
+        "cuda_deterministic_attention_softmax": deterministic_attention_softmax,
+        "cuda_full_buffer_clear_effective": full_buffer_clear,
+        "executor_graph_replay": graph_replay,
+        "graph_replays": 8 if graph_replay else 0,
+    }
+    search = {
+        "present": True,
+        "status": search_status,
+        "same_bestmove_required": same_bestmove_required,
+        "cuda_bestmove": "h5f6",
+        "metal_bestmove": "h5f6" if bestmove_matches else "a3b4",
+    }
+    return {
+        "schema_version": 1,
+        "runtime_kind": runtime_kind,
+        "benchmark_compare": {
+            "present": True,
+            "cuda_backend_after": backend_after,
+            "worst_eval_ms_ratio": worst_eval_ms_ratio,
+        },
+        "search_compare": {
+            "mcts_bk07": dict(search),
+            "mcts_kiwipete": dict(search),
+            "hybrid_bk07": dict(search),
+            "hybrid_kiwipete": dict(search),
+        },
+    }
+
+
+def write_observed_runtime_inputs(
+    root: pathlib.Path,
+    *,
+    runtime_kind: str,
+) -> None:
+    if runtime_kind == "linux-cuda":
+        prefix = root
+        names = {
+            "benchmark": "metal-cuda-nn-benchmark-summary.json",
+            "mcts_bk07": "metal-cuda-mcts-bk07-search-summary.json",
+            "mcts_kiwipete": "metal-cuda-mcts-kiwipete-search-summary.json",
+            "hybrid_bk07": "metal-cuda-hybrid-bk07-search-summary.json",
+            "hybrid_kiwipete": "metal-cuda-hybrid-kiwipete-search-summary.json",
+        }
+    else:
+        prefix = root / "logs"
+        names = {
+            "benchmark": "metal-windows-cuda-nn-benchmark-summary.json",
+            "mcts_bk07": "metal-windows-cuda-mcts-bk07-search-summary.json",
+            "mcts_kiwipete": "metal-windows-cuda-mcts-kiwipete-search-summary.json",
+            "hybrid_bk07": "metal-windows-cuda-hybrid-bk07-search-summary.json",
+            "hybrid_kiwipete": "metal-windows-cuda-hybrid-kiwipete-search-summary.json",
+        }
+    prefix.mkdir(parents=True, exist_ok=True)
+    (prefix / names["benchmark"]).write_text(
+        json.dumps(
+            {
+                "actual": {
+                    "backend_after_line": (
+                        "backend_after: CUDA transformer backend "
+                        "cuda_graph_effective=true, "
+                        "cuda_stable_execution_batch_effective=16, "
+                        "cuda_deterministic_attention_softmax=true, "
+                        "cuda_full_buffer_clear_effective=true, "
+                        "executor=resolved+graph-replay"
+                        "(captures=1,replays=58,caches=1,primed=1))"
+                    ),
+                    "best_batch": {"batch_size": 16, "eval_ms": 3.0},
+                },
+                "expected": {"label": "Metal (MPSGraph) backend"},
+                "best_common_actual": {
+                    "batch_size": 16,
+                    "actual_eval_ms": 3.0,
+                    "expected_eval_ms": 12.0,
+                    "actual_speedup_vs_expected": 4.0,
+                },
+                "common_batch_count": 5,
+                "worst_eval_ms_ratio": 0.75,
+            }
+        ),
+        encoding="utf-8",
+    )
+    for key in ("mcts_bk07", "mcts_kiwipete", "hybrid_bk07", "hybrid_kiwipete"):
+        (prefix / names[key]).write_text(
+            json.dumps(
+                {
+                    "status": "passed",
+                    "require_same_bestmove": True,
+                    "actual": {
+                        "bestmove": "h5f6",
+                        "search_info": {"nodes": 50},
+                    },
+                    "expected": {
+                        "bestmove": "h5f6",
+                        "search_info": {"nodes": 50},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+
+def test_cuda_runtime_observed_parser_extracts_release_facts() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        write_observed_runtime_inputs(root, runtime_kind="linux-cuda")
+        observed = runtime_observed.collect_observed_runtime_facts(
+            root,
+            runtime_kind="linux-cuda",
+        )
+        benchmark = observed["benchmark_compare"]
+        backend_after = benchmark["cuda_backend_after"]
+        expect("observed benchmark present", benchmark["present"] is True)
+        expect("observed graph replay", backend_after["executor_graph_replay"] is True)
+        expect("observed replay count", backend_after["graph_replays"] == 58)
+        expect(
+            "observed stable batch",
+            backend_after["cuda_stable_execution_batch_effective"] == 16,
+        )
+        expect(
+            "observed search bestmove",
+            observed["search_compare"]["mcts_bk07"]["cuda_bestmove"] == "h5f6",
+        )
+
+
 def test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts() -> None:
     linux_required = runtime_checker.REQUIRED_RELEASE_ARTIFACTS["linux-cuda"]
     windows_required = runtime_checker.REQUIRED_RELEASE_ARTIFACTS["windows-cuda"]
@@ -1592,6 +1733,9 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                         "final_compare_status": "0",
                     },
                     "runtime": runtime_policy(),
+                    "observed_runtime": observed_runtime_facts(
+                        runtime_kind="linux-cuda"
+                    ),
                     "artifacts": runtime_artifact_records(
                         "linux-cuda",
                         linux_package=linux_package,
@@ -1617,6 +1761,9 @@ def test_cuda_release_artifacts_promote_direct_runtime_root() -> None:
                         "final_compare_status": "0",
                     },
                     "runtime": runtime_policy(),
+                    "observed_runtime": observed_runtime_facts(
+                        runtime_kind="windows-cuda"
+                    ),
                     "artifacts": runtime_artifact_records(
                         "windows-cuda",
                         artifact_root=windows_dir,
@@ -2234,11 +2381,13 @@ def test_cuda_runtime_manifest_enforces_release_policy() -> None:
         }
         good = dict(base)
         good["runtime"] = runtime_policy()
+        good["observed_runtime"] = observed_runtime_facts()
         manifest.write_text(json.dumps(good), encoding="utf-8")
         summary = runtime_checker.validate_runtime_manifest(
             manifest,
             runtime_kind="windows-cuda",
             require_release_policy=True,
+            require_observed_runtime=True,
         )
         expect(
             "release runtime policy accepted",
@@ -2254,6 +2403,7 @@ def test_cuda_runtime_manifest_enforces_release_policy() -> None:
                     manifest,
                     runtime_kind="windows-cuda",
                     require_release_policy=True,
+                    require_observed_runtime=True,
                 )
             except ValueError as exc:
                 expect(f"release policy rejected {text}", text in str(exc))
@@ -2279,17 +2429,51 @@ def test_cuda_runtime_manifest_enforces_release_policy() -> None:
         bad["inputs"] = dict(runtime_inputs())
         bad["inputs"]["max_cuda_metal_eval_ms_ratio"] = "1.25"
         bad["runtime"] = runtime_policy()
+        bad["observed_runtime"] = observed_runtime_facts()
         manifest.write_text(json.dumps(bad), encoding="utf-8")
         try:
             runtime_checker.validate_runtime_manifest(
                 manifest,
                 runtime_kind="windows-cuda",
                 require_release_policy=True,
+                require_observed_runtime=True,
             )
         except ValueError as exc:
             expect("relaxed ratio rejected", "Metal comparison ratio" in str(exc))
         else:
             raise AssertionError("expected relaxed Metal comparison ratio rejection")
+
+        for observed, text in (
+            (observed_runtime_facts(graph_replay=False), "cuda_graph_effective"),
+            (observed_runtime_facts(stable_batch=8), "stable batch"),
+            (
+                observed_runtime_facts(deterministic_attention_softmax=False),
+                "deterministic attention softmax",
+            ),
+            (observed_runtime_facts(full_buffer_clear=False), "full buffer clear"),
+            (observed_runtime_facts(worst_eval_ms_ratio=1.01), "eval-ms ratio"),
+            (observed_runtime_facts(search_status="failed"), "search did not pass"),
+            (
+                observed_runtime_facts(same_bestmove_required=False),
+                "same bestmove",
+            ),
+            (observed_runtime_facts(bestmove_matches=False), "bestmove mismatch"),
+        ):
+            bad = dict(base)
+            bad["runtime"] = runtime_policy()
+            bad["observed_runtime"] = observed
+            manifest.write_text(json.dumps(bad), encoding="utf-8")
+            try:
+                runtime_checker.validate_runtime_manifest(
+                    manifest,
+                    runtime_kind="windows-cuda",
+                    require_release_policy=True,
+                    require_observed_runtime=True,
+                )
+            except ValueError as exc:
+                expect(f"observed runtime rejected {text}", text in str(exc))
+            else:
+                raise AssertionError(f"expected observed runtime rejection: {text}")
 
 
 def test_cuda_package_validator_rejects_source_commit_drift() -> None:
@@ -2607,6 +2791,7 @@ def main() -> int:
     test_cuda_runtime_input_helpers_validate_complete_zip()
     test_cuda_release_artifact_download_retries_truncated_zip()
     test_windows_cuda_runtime_input_helpers_validate_package_commit()
+    test_cuda_runtime_observed_parser_extracts_release_facts()
     test_cuda_runtime_manifest_requires_timed_mcts_release_artifacts()
     test_cuda_release_artifact_helpers_validate_packages_and_manifests()
     test_cuda_package_validator_rejects_unmanifested_archive_entries()

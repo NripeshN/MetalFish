@@ -312,6 +312,78 @@ def validate_release_compare_policy(
         )
 
 
+def validate_observed_runtime_facts(
+    observed: object,
+    *,
+    runtime_kind: str,
+    stable_batch_size: str,
+    max_cuda_metal_eval_ms_ratio: str,
+) -> None:
+    if not isinstance(observed, dict):
+        raise ValueError("runtime manifest is missing observed_runtime object")
+    if observed.get("runtime_kind") != runtime_kind:
+        raise ValueError(
+            "observed runtime kind mismatch: "
+            f"{observed.get('runtime_kind')!r} != {runtime_kind!r}"
+        )
+    benchmark = observed.get("benchmark_compare")
+    if not isinstance(benchmark, dict) or not benchmark.get("present"):
+        raise ValueError("observed runtime is missing benchmark comparison facts")
+    backend_after = benchmark.get("cuda_backend_after")
+    if not isinstance(backend_after, dict):
+        raise ValueError("observed runtime is missing CUDA backend_after facts")
+    if backend_after.get("backend_is_cuda") is not True:
+        raise ValueError("observed runtime backend_after is not CUDA")
+    if backend_after.get("cuda_graph_effective") is not True:
+        raise ValueError("observed runtime did not prove cuda_graph_effective=true")
+    if backend_after.get("executor_graph_replay") is not True:
+        raise ValueError("observed runtime did not prove graph replay executor")
+    if int(backend_after.get("graph_replays") or 0) <= 0:
+        raise ValueError("observed runtime did not prove graph replay count")
+    expected_batch = int(stable_batch_size)
+    if backend_after.get("cuda_stable_execution_batch_effective") != expected_batch:
+        raise ValueError(
+            "observed runtime stable batch mismatch: "
+            f"{backend_after.get('cuda_stable_execution_batch_effective')!r} "
+            f"!= {expected_batch}"
+        )
+    if backend_after.get("cuda_deterministic_attention_softmax") is not True:
+        raise ValueError(
+            "observed runtime did not prove deterministic attention softmax"
+        )
+    if backend_after.get("cuda_full_buffer_clear_effective") is not True:
+        raise ValueError("observed runtime did not prove full buffer clear")
+    ratio = benchmark.get("worst_eval_ms_ratio")
+    if ratio is None:
+        raise ValueError("observed runtime is missing worst eval-ms ratio")
+    try:
+        actual_ratio = float(ratio)
+        maximum_ratio = float(max_cuda_metal_eval_ms_ratio)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("observed runtime eval-ms ratio is not numeric") from exc
+    if actual_ratio > maximum_ratio:
+        raise ValueError(
+            "observed runtime exceeds CUDA-vs-Metal eval-ms ratio: "
+            f"{actual_ratio:g} > {maximum_ratio:g}"
+        )
+    searches = observed.get("search_compare")
+    if not isinstance(searches, dict):
+        raise ValueError("observed runtime is missing search comparison facts")
+    for name in ("mcts_bk07", "mcts_kiwipete", "hybrid_bk07", "hybrid_kiwipete"):
+        search = searches.get(name)
+        if not isinstance(search, dict) or not search.get("present"):
+            raise ValueError(f"observed runtime is missing {name} search facts")
+        if search.get("status") != "passed":
+            raise ValueError(f"observed runtime {name} search did not pass")
+        if search.get("same_bestmove_required") is not True:
+            raise ValueError(f"observed runtime {name} did not require same bestmove")
+        if search.get("cuda_bestmove") != search.get("metal_bestmove"):
+            raise ValueError(
+                f"observed runtime {name} bestmove mismatch: "
+                f"{search.get('cuda_bestmove')!r} != {search.get('metal_bestmove')!r}"
+            )
+
+
 def validate_runtime_manifest(
     manifest: pathlib.Path,
     *,
@@ -321,6 +393,7 @@ def validate_runtime_manifest(
     require_metal_search_compare: bool = False,
     require_release_evidence: bool = False,
     require_release_policy: bool = False,
+    require_observed_runtime: bool = False,
     release_stable_batch_size: str = "16",
     release_max_cuda_metal_eval_ms_ratio: str = "1.0",
     require_artifact_files: bool = False,
@@ -374,6 +447,13 @@ def validate_runtime_manifest(
             inputs,
             max_cuda_metal_eval_ms_ratio=release_max_cuda_metal_eval_ms_ratio,
         )
+    if require_observed_runtime:
+        validate_observed_runtime_facts(
+            data.get("observed_runtime"),
+            runtime_kind=runtime_kind,
+            stable_batch_size=release_stable_batch_size,
+            max_cuda_metal_eval_ms_ratio=release_max_cuda_metal_eval_ms_ratio,
+        )
     if require_artifact_files:
         validate_artifact_files(
             data.get("artifacts"),
@@ -387,6 +467,7 @@ def validate_runtime_manifest(
         "gcp": data.get("gcp") or {},
         "inputs": inputs,
         "runtime": runtime,
+        "observed_runtime": data.get("observed_runtime") or {},
         "artifacts": data.get("artifacts") or {},
     }
 
@@ -402,6 +483,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--require-metal-search-compare", action="store_true")
     parser.add_argument("--require-release-evidence", action="store_true")
     parser.add_argument("--require-release-policy", action="store_true")
+    parser.add_argument("--require-observed-runtime", action="store_true")
     parser.add_argument("--release-stable-batch-size", default="16")
     parser.add_argument("--release-max-cuda-metal-eval-ms-ratio", default="1.0")
     parser.add_argument("--require-artifact-files", action="store_true")
@@ -426,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
         require_metal_search_compare=args.require_metal_search_compare,
         require_release_evidence=args.require_release_evidence,
         require_release_policy=args.require_release_policy,
+        require_observed_runtime=args.require_observed_runtime,
         release_stable_batch_size=args.release_stable_batch_size,
         release_max_cuda_metal_eval_ms_ratio=(
             args.release_max_cuda_metal_eval_ms_ratio

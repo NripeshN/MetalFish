@@ -322,6 +322,8 @@ import os
 import pathlib
 import sys
 
+from tools.cuda_runtime_observed import collect_observed_runtime_facts
+
 
 def file_record(path):
     p = pathlib.Path(path)
@@ -424,6 +426,9 @@ manifest = {
         "search_compare_status": os.environ["SEARCH_COMPARE_STATUS_FOR_MANIFEST"],
         "final_compare_status": os.environ["FINAL_COMPARE_STATUS_FOR_MANIFEST"],
     },
+    "observed_runtime": collect_observed_runtime_facts(
+        artifact_dir, runtime_kind="linux-cuda"
+    ),
     "artifacts": artifacts,
 }
 manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
