@@ -95,10 +95,18 @@ def _benchmark_facts(summary: dict[str, Any] | None) -> dict[str, Any]:
     expected = summary.get("expected") or {}
     best_common = summary.get("best_common_actual") or {}
     actual_best = actual.get("best_batch") or {}
+    cuda_backend_after = parse_cuda_backend_line(actual.get("backend_after_line"))
+    stable_batch = cuda_backend_after.get("cuda_stable_execution_batch_effective")
+    stable_common = None
+    if stable_batch is not None:
+        for row in summary.get("common_batches") or []:
+            if row.get("batch_size") == stable_batch:
+                stable_common = row
+                break
     return {
         "present": True,
         "cuda_backend": parse_cuda_backend_line(actual.get("backend_line")),
-        "cuda_backend_after": parse_cuda_backend_line(actual.get("backend_after_line")),
+        "cuda_backend_after": cuda_backend_after,
         "metal_backend_label": expected.get("label"),
         "common_batch_count": summary.get("common_batch_count"),
         "best_common_batch": best_common.get("batch_size"),
@@ -108,6 +116,19 @@ def _benchmark_facts(summary: dict[str, Any] | None) -> dict[str, Any]:
             best_common.get("actual_speedup_vs_expected")
         ),
         "worst_eval_ms_ratio": _float_or_none(summary.get("worst_eval_ms_ratio")),
+        "stable_batch": stable_batch,
+        "stable_batch_cuda_eval_ms": _float_or_none(
+            (stable_common or {}).get("actual_eval_ms")
+        ),
+        "stable_batch_metal_eval_ms": _float_or_none(
+            (stable_common or {}).get("expected_eval_ms")
+        ),
+        "stable_batch_eval_ms_ratio": _float_or_none(
+            (stable_common or {}).get("eval_ms_ratio")
+        ),
+        "stable_batch_speedup_vs_metal": _float_or_none(
+            (stable_common or {}).get("actual_speedup_vs_expected")
+        ),
         "fastest_cuda_batch": actual_best.get("batch_size"),
         "fastest_cuda_eval_ms": _float_or_none(actual_best.get("eval_ms")),
     }

@@ -353,17 +353,24 @@ def validate_observed_runtime_facts(
         )
     if backend_after.get("cuda_full_buffer_clear_effective") is not True:
         raise ValueError("observed runtime did not prove full buffer clear")
-    ratio = benchmark.get("worst_eval_ms_ratio")
+    if benchmark.get("stable_batch") != expected_batch:
+        raise ValueError(
+            "observed runtime stable benchmark batch mismatch: "
+            f"{benchmark.get('stable_batch')!r} != {expected_batch}"
+        )
+    ratio = benchmark.get("stable_batch_eval_ms_ratio")
     if ratio is None:
-        raise ValueError("observed runtime is missing worst eval-ms ratio")
+        raise ValueError("observed runtime is missing stable batch eval-ms ratio")
     try:
         actual_ratio = float(ratio)
         maximum_ratio = float(max_cuda_metal_eval_ms_ratio)
     except (TypeError, ValueError) as exc:
-        raise ValueError("observed runtime eval-ms ratio is not numeric") from exc
+        raise ValueError(
+            "observed runtime stable batch eval-ms ratio is not numeric"
+        ) from exc
     if actual_ratio > maximum_ratio:
         raise ValueError(
-            "observed runtime exceeds CUDA-vs-Metal eval-ms ratio: "
+            "observed runtime stable batch exceeds CUDA-vs-Metal eval-ms ratio: "
             f"{actual_ratio:g} > {maximum_ratio:g}"
         )
     searches = observed.get("search_compare")

@@ -192,6 +192,24 @@ def write_benchmark_log(
     )
 
 
+def write_selected_batch_benchmark_log(
+    path: pathlib.Path,
+    *,
+    label: str,
+    b1_eval_ms: float,
+    b16_eval_ms: float,
+) -> None:
+    path.write_text(
+        f"backend: {label}\n"
+        "    benchmark_warmups: 3\n"
+        f"    batches: b1={b1_eval_ms:.3f}ms/{b1_eval_ms:.4f}ms_eval "
+        f"b16={b16_eval_ms * 16.0:.3f}ms/{b16_eval_ms:.4f}ms_eval checksum=1\n"
+        "    graph_reuse_probe: b16 b16 checksum=2\n"
+        f"backend_after: {label} executor=resolved+graph-replay(captures=1)\n",
+        encoding="utf-8",
+    )
+
+
 def test_checker_writes_manifest() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         report, compare, probe, manifest = write_artifacts(pathlib.Path(tmp))
@@ -381,6 +399,91 @@ def test_backend_benchmark_compare_writes_summary() -> None:
             "benchmark graph reuse",
             data["actual"]["graph_reuse_batches"] == [4, 1, 2, 4, 1, 2],
         )
+
+
+def test_backend_benchmark_compare_checks_selected_release_batch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal.log"
+        actual = root / "cuda.log"
+        summary = root / "summary.json"
+        write_selected_batch_benchmark_log(
+            expected,
+            label="Metal (MPSGraph) backend",
+            b1_eval_ms=10.0,
+            b16_eval_ms=10.0,
+        )
+        write_selected_batch_benchmark_log(
+            actual,
+            label="CUDA transformer backend",
+            b1_eval_ms=12.0,
+            b16_eval_ms=5.0,
+        )
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--expected-label",
+                "Metal (MPSGraph) backend",
+                "--actual-label",
+                "CUDA transformer backend",
+                "--summary-out",
+                str(summary),
+                "--require-actual-graph-reuse",
+                "--max-batch-eval-ms-ratio",
+                "16:1.0",
+            ]
+        ):
+            expect("selected batch compare success", benchmark_comparer.main() == 0)
+
+        data = json.loads(summary.read_text(encoding="utf-8"))
+        expect(
+            "selected limit recorded",
+            data["selected_eval_ms_ratio_limits"]["16"] == 1.0,
+        )
+        expect("diagnostic worst retained", data["worst_eval_ms_ratio"] > 1.0)
+
+
+def test_backend_benchmark_compare_rejects_selected_release_batch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        expected = root / "metal.log"
+        actual = root / "cuda.log"
+        write_selected_batch_benchmark_log(
+            expected,
+            label="Metal (MPSGraph) backend",
+            b1_eval_ms=10.0,
+            b16_eval_ms=10.0,
+        )
+        write_selected_batch_benchmark_log(
+            actual,
+            label="CUDA transformer backend",
+            b1_eval_ms=8.0,
+            b16_eval_ms=12.0,
+        )
+        with argv(
+            [
+                "--expected-log",
+                str(expected),
+                "--actual-log",
+                str(actual),
+                "--expected-label",
+                "Metal (MPSGraph) backend",
+                "--actual-label",
+                "CUDA transformer backend",
+                "--require-actual-graph-reuse",
+                "--max-batch-eval-ms-ratio",
+                "16:1.0",
+            ]
+        ):
+            try:
+                benchmark_comparer.main()
+            except RuntimeError as exc:
+                expect("selected batch rejection", "b16 eval-ms ratio" in str(exc))
+                return
+    raise AssertionError("expected selected release batch ratio rejection")
 
 
 def test_backend_benchmark_compare_requires_graph_reuse() -> None:
@@ -1385,7 +1488,8 @@ def observed_runtime_facts(
     stable_batch: int = 16,
     deterministic_attention_softmax: bool = True,
     full_buffer_clear: bool = True,
-    worst_eval_ms_ratio: float = 0.75,
+    stable_batch_eval_ms_ratio: float = 0.75,
+    worst_eval_ms_ratio: float = 1.25,
     search_status: str = "passed",
     same_bestmove_required: bool = True,
     bestmove_matches: bool = True,
@@ -1412,6 +1516,8 @@ def observed_runtime_facts(
         "benchmark_compare": {
             "present": True,
             "cuda_backend_after": backend_after,
+            "stable_batch": stable_batch,
+            "stable_batch_eval_ms_ratio": stable_batch_eval_ms_ratio,
             "worst_eval_ms_ratio": worst_eval_ms_ratio,
         },
         "search_compare": {
@@ -1469,8 +1575,24 @@ def write_observed_runtime_inputs(
                     "expected_eval_ms": 12.0,
                     "actual_speedup_vs_expected": 4.0,
                 },
+                "common_batches": [
+                    {
+                        "batch_size": 1,
+                        "actual_eval_ms": 14.0,
+                        "expected_eval_ms": 12.0,
+                        "eval_ms_ratio": 1.1666666667,
+                        "actual_speedup_vs_expected": 0.8571428571,
+                    },
+                    {
+                        "batch_size": 16,
+                        "actual_eval_ms": 3.0,
+                        "expected_eval_ms": 12.0,
+                        "eval_ms_ratio": 0.25,
+                        "actual_speedup_vs_expected": 4.0,
+                    },
+                ],
                 "common_batch_count": 5,
-                "worst_eval_ms_ratio": 0.75,
+                "worst_eval_ms_ratio": 1.1666666667,
             }
         ),
         encoding="utf-8",
@@ -1511,6 +1633,14 @@ def test_cuda_runtime_observed_parser_extracts_release_facts() -> None:
         expect(
             "observed stable batch",
             backend_after["cuda_stable_execution_batch_effective"] == 16,
+        )
+        expect(
+            "observed stable batch ratio",
+            abs(benchmark["stable_batch_eval_ms_ratio"] - 0.25) < 1e-9,
+        )
+        expect(
+            "observed batch-one retained",
+            benchmark["worst_eval_ms_ratio"] > 1.0,
         )
         expect(
             "observed search bestmove",
@@ -2451,7 +2581,10 @@ def test_cuda_runtime_manifest_enforces_release_policy() -> None:
                 "deterministic attention softmax",
             ),
             (observed_runtime_facts(full_buffer_clear=False), "full buffer clear"),
-            (observed_runtime_facts(worst_eval_ms_ratio=1.01), "eval-ms ratio"),
+            (
+                observed_runtime_facts(stable_batch_eval_ms_ratio=1.01),
+                "eval-ms ratio",
+            ),
             (observed_runtime_facts(search_status="failed"), "search did not pass"),
             (
                 observed_runtime_facts(same_bestmove_required=False),
@@ -2773,6 +2906,8 @@ def main() -> int:
     test_backend_output_compare_accepts_close_outputs()
     test_backend_output_compare_accepts_batched_outputs()
     test_backend_benchmark_compare_writes_summary()
+    test_backend_benchmark_compare_checks_selected_release_batch()
+    test_backend_benchmark_compare_rejects_selected_release_batch()
     test_backend_benchmark_compare_requires_graph_reuse()
     test_backend_benchmark_compare_allows_expected_without_graph_reuse()
     test_backend_output_compare_accepts_probe_suite()

@@ -59,6 +59,17 @@ def parse_args() -> argparse.Namespace:
             "common batch. A value of 0 records data without failing on speed."
         ),
     )
+    parser.add_argument(
+        "--max-batch-eval-ms-ratio",
+        action="append",
+        default=None,
+        metavar="BATCH:RATIO",
+        help=(
+            "Optional hard ceiling for one common batch, for example 16:1.0. "
+            "May be passed multiple times. This records all batches but only "
+            "fails speed policy on selected release batches."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -155,6 +166,30 @@ def best_batch(batches: dict[int, BatchTiming]) -> BatchTiming:
     return min(batches.values(), key=lambda timing: timing.eval_ms)
 
 
+def parse_batch_eval_ms_ratio_limits(values: list[str] | None) -> dict[int, float]:
+    limits: dict[int, float] = {}
+    for value in values or []:
+        batch_text, sep, ratio_text = value.partition(":")
+        require(
+            bool(sep),
+            f"invalid --max-batch-eval-ms-ratio {value!r}; expected BATCH:RATIO",
+        )
+        try:
+            batch_size = int(batch_text)
+            ratio = float(ratio_text)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"invalid --max-batch-eval-ms-ratio {value!r}; expected numeric "
+                "BATCH:RATIO"
+            ) from exc
+        require(
+            batch_size > 0 and ratio > 0.0,
+            f"invalid --max-batch-eval-ms-ratio {value!r}; values must be positive",
+        )
+        limits[batch_size] = ratio
+    return limits
+
+
 def compare_logs(
     expected: BenchmarkLog,
     actual: BenchmarkLog,
@@ -183,6 +218,16 @@ def compare_logs(
             f"{actual.path}: missing graph_reuse_probe",
         )
 
+    batch_eval_ratio_limits = parse_batch_eval_ms_ratio_limits(
+        args.max_batch_eval_ms_ratio
+    )
+    missing_limited_batches = sorted(set(batch_eval_ratio_limits) - set(common_sizes))
+    require(
+        not missing_limited_batches,
+        "selected eval-ms ratio batch(es) are not common to both logs: "
+        + ", ".join(f"b{size}" for size in missing_limited_batches),
+    )
+
     common: list[dict[str, float | int]] = []
     for batch_size in common_sizes:
         left = expected.batches[batch_size]
@@ -194,6 +239,13 @@ def compare_logs(
                 eval_ratio <= args.max_eval_ms_ratio,
                 f"b{batch_size} eval-ms ratio {eval_ratio:.6g} exceeds "
                 f"{args.max_eval_ms_ratio}",
+            )
+        selected_ratio_limit = batch_eval_ratio_limits.get(batch_size)
+        if selected_ratio_limit is not None:
+            require(
+                eval_ratio <= selected_ratio_limit,
+                f"b{batch_size} eval-ms ratio {eval_ratio:.6g} exceeds "
+                f"{selected_ratio_limit}",
             )
         common.append(
             {
@@ -247,6 +299,9 @@ def compare_logs(
         "common_batch_count": len(common),
         "best_common_actual": min(common, key=lambda row: float(row["actual_eval_ms"])),
         "worst_eval_ms_ratio": max(float(row["eval_ms_ratio"]) for row in common),
+        "selected_eval_ms_ratio_limits": {
+            str(size): ratio for size, ratio in sorted(batch_eval_ratio_limits.items())
+        },
     }
 
 

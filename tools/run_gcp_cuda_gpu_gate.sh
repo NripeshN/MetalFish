@@ -576,7 +576,7 @@ compare_collected_benchmark_timings() {
     --actual-label "CUDA transformer backend" \
     --summary-out "${ARTIFACT_DIR}/metal-cuda-nn-benchmark-summary.json" \
     --require-actual-graph-reuse \
-    --max-eval-ms-ratio "${MAX_CUDA_METAL_EVAL_MS_RATIO}" \
+    --max-batch-eval-ms-ratio "${METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE:-16}:${MAX_CUDA_METAL_EVAL_MS_RATIO}" \
     | tee "${ARTIFACT_DIR}/metal-cuda-nn-benchmark-compare.log"
 }
 

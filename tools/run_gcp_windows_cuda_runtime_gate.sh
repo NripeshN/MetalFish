@@ -238,7 +238,7 @@ compare_collected_benchmark_timings() {
     --actual-label "CUDA transformer backend" \
     --summary-out "${ARTIFACT_DIR}/logs/metal-windows-cuda-nn-benchmark-summary.json" \
     --require-actual-graph-reuse \
-    --max-eval-ms-ratio "${MAX_CUDA_METAL_EVAL_MS_RATIO}" \
+    --max-batch-eval-ms-ratio "${CUDA_STABLE_BATCH_SIZE}:${MAX_CUDA_METAL_EVAL_MS_RATIO}" \
     | tee "${ARTIFACT_DIR}/logs/metal-windows-cuda-nn-benchmark-compare.log"
 }
 
