@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Shared CUDA-vs-Metal runtime search artifact contract."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

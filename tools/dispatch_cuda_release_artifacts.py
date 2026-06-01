@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Dispatch same-commit CUDA release artifact promotion."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,7 +19,9 @@ except ModuleNotFoundError:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="", help="GitHub repo, for example owner/name")
+    parser.add_argument(
+        "--repo", default="", help="GitHub repo, for example owner/name"
+    )
     parser.add_argument(
         "--ref",
         default="",
@@ -119,7 +122,9 @@ def promote_direct_runtime_root(args: argparse.Namespace) -> int:
         print("expected_sha=<from direct runtime manifest>")
     if args.dry_run:
         print("dry_run=true")
-        print("+ python3 tools/fetch_cuda_release_artifacts.py " + " ".join(promote_args))
+        print(
+            "+ python3 tools/fetch_cuda_release_artifacts.py " + " ".join(promote_args)
+        )
         return 0
 
     result = cuda_release.main(promote_args)

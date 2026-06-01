@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run same-commit CUDA runtime gates directly from a clean worktree."""
+
 from __future__ import annotations
 
 import argparse
@@ -22,7 +23,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def run_text(cmd: list[str], *, cwd: pathlib.Path = ROOT) -> str:
-    return subprocess.check_output(cmd, cwd=cwd, stderr=subprocess.PIPE, text=True).strip()
+    return subprocess.check_output(
+        cmd, cwd=cwd, stderr=subprocess.PIPE, text=True
+    ).strip()
 
 
 def run_command(
@@ -154,7 +157,9 @@ def add_common_gcp_env(env: dict[str, str], args: argparse.Namespace) -> None:
     env["METALFISH_GCP_DELETE_ON_EXIT"] = "0" if args.keep_vms else "1"
 
 
-def resolve_runs(args: argparse.Namespace, repo: str, ref: str, expected_sha: str) -> dict:
+def resolve_runs(
+    args: argparse.Namespace, repo: str, ref: str, expected_sha: str
+) -> dict:
     needs_windows = args.target in {"windows", "both"}
     metal_run = None
     windows_run = None
@@ -334,7 +339,9 @@ def run_windows_gate(
     if args.windows_zones:
         env["METALFISH_GCP_ZONES"] = args.windows_zones
     run_command(
-        shell_source_command(windows_env_file, "tools/run_gcp_windows_cuda_runtime_gate.sh"),
+        shell_source_command(
+            windows_env_file, "tools/run_gcp_windows_cuda_runtime_gate.sh"
+        ),
         cwd=worktree,
         env=env,
         dry_run=dry_run,
@@ -343,7 +350,9 @@ def run_windows_gate(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="", help="GitHub repo, for example owner/name")
+    parser.add_argument(
+        "--repo", default="", help="GitHub repo, for example owner/name"
+    )
     parser.add_argument("--ref", default="", help="Branch to inspect for CI runs")
     parser.add_argument("--expected-sha", default="", help="Source SHA to validate")
     parser.add_argument(
@@ -376,7 +385,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--profile-limit", default="2")
     parser.add_argument("--cublas-workspace-config", default="")
-    parser.add_argument("--gcp-project", default=os.environ.get("METALFISH_GCP_PROJECT", "metalfish"))
+    parser.add_argument(
+        "--gcp-project", default=os.environ.get("METALFISH_GCP_PROJECT", "metalfish")
+    )
     parser.add_argument("--instance-prefix", default="metalfish-cuda-direct")
     parser.add_argument("--linux-instance", default="")
     parser.add_argument("--windows-instance", default="")
@@ -569,12 +580,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(manifest, indent=2, sort_keys=True))
         success = True
     finally:
-        if (
-            success
-            and created_worktree
-            and args.cleanup_worktree
-            and not args.dry_run
-        ):
+        if success and created_worktree and args.cleanup_worktree and not args.dry_run:
             run_command(
                 ["git", "worktree", "remove", "--force", str(worktree)],
                 cwd=ROOT,

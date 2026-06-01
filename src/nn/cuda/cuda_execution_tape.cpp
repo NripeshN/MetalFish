@@ -305,8 +305,7 @@ CreateResolvedExecutionTape(const NetworkResolvedExecutionPlan &plan,
         break;
       const int width = DenseOutputWidth(step);
       if (IsStaticPositionEmbeddingName(plan, step.name)) {
-        const auto geometry =
-            ResolveStaticPositionEncodingGeometry(plan, step);
+        const auto geometry = ResolveStaticPositionEncodingGeometry(plan, step);
         tape.Add(step.name + ".static_pe_concat",
                  CudaExecutionBufferRole::StaticPositionOutput,
                  batch_size * geometry.input_squares, geometry.concat_width);

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Resolve the GitHub CLI consistently for local and CI helper scripts."""
+
 from __future__ import annotations
 
 import os
@@ -16,9 +17,7 @@ def gh_executable() -> str:
         "/usr/local/bin/gh",
         "/usr/bin/gh",
         pathlib.Path(os.environ.get("ProgramFiles", "")) / "GitHub CLI" / "gh.exe",
-        pathlib.Path(os.environ.get("ProgramFiles(x86)", ""))
-        / "GitHub CLI"
-        / "gh.exe",
+        pathlib.Path(os.environ.get("ProgramFiles(x86)", "")) / "GitHub CLI" / "gh.exe",
     ]
     for candidate in candidates:
         if not candidate:

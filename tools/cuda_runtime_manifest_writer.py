@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Write Linux and Windows CUDA runtime gate manifests from gate environment."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,7 +19,6 @@ if str(ROOT) not in sys.path:
 
 from tools.cuda_runtime_observed import collect_observed_runtime_facts  # noqa: E402
 from tools.cuda_runtime_search_contract import SEARCH_COMPARISONS  # noqa: E402
-
 
 SCHEMAS = {
     "linux-cuda": "metalfish.cuda_gpu_runtime_gate",
@@ -62,11 +62,7 @@ def artifact_records(
         record = file_record(candidate)
         if record is None:
             continue
-        key = (
-            str(candidate.relative_to(artifact_dir))
-            if recursive
-            else candidate.name
-        )
+        key = str(candidate.relative_to(artifact_dir)) if recursive else candidate.name
         artifacts[key] = record
     return artifacts
 
@@ -90,7 +86,9 @@ def metal_input_records(env: Mapping[str, str]) -> dict[str, Any]:
         "max_cuda_metal_eval_ms_ratio": env_value(
             env, "GATE_MAX_CUDA_METAL_EVAL_MS_RATIO"
         ),
-        "metal_comparison_log": file_record(env_value(env, "GATE_METAL_COMPARISON_LOG")),
+        "metal_comparison_log": file_record(
+            env_value(env, "GATE_METAL_COMPARISON_LOG")
+        ),
         "metal_probe_suite_log": file_record(
             env_value(env, "GATE_METAL_PROBE_SUITE_LOG")
         ),
@@ -172,9 +170,7 @@ def linux_manifest(
             "search_compare_status": env_value(
                 env, "SEARCH_COMPARE_STATUS_FOR_MANIFEST"
             ),
-            "final_compare_status": env_value(
-                env, "FINAL_COMPARE_STATUS_FOR_MANIFEST"
-            ),
+            "final_compare_status": env_value(env, "FINAL_COMPARE_STATUS_FOR_MANIFEST"),
         },
         "observed_runtime": collect_observed_runtime_facts(
             artifact_dir, runtime_kind="linux-cuda"
@@ -251,9 +247,7 @@ def windows_manifest(
             "search_compare_status": env_value(
                 env, "SEARCH_COMPARE_STATUS_FOR_MANIFEST"
             ),
-            "final_compare_status": env_value(
-                env, "FINAL_COMPARE_STATUS_FOR_MANIFEST"
-            ),
+            "final_compare_status": env_value(env, "FINAL_COMPARE_STATUS_FOR_MANIFEST"),
         },
         "observed_runtime": collect_observed_runtime_facts(
             artifact_dir, runtime_kind="windows-cuda"

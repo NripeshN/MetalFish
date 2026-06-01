@@ -18,11 +18,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", required=True, help="engine executable")
     parser.add_argument("--position", default="startpos")
-    parser.add_argument("--ponder-go", default="wtime 60000 btime 60000 winc 1000 binc 1000")
+    parser.add_argument(
+        "--ponder-go", default="wtime 60000 btime 60000 winc 1000 binc 1000"
+    )
     parser.add_argument("--followup-go", default="movetime 150")
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--settle-sec", type=float, default=0.6)
-    parser.add_argument("--setoption", action="append", default=[], metavar="NAME=VALUE")
+    parser.add_argument(
+        "--setoption", action="append", default=[], metavar="NAME=VALUE"
+    )
     parser.add_argument("--expect-output", action="append", default=[], metavar="TEXT")
     parser.add_argument("--reject-output", action="append", default=[], metavar="TEXT")
     parser.add_argument("--json-out", type=Path)
@@ -112,7 +116,11 @@ class UCI:
 
 
 def send_position(uci: UCI, position: str) -> None:
-    if position == "startpos" or position.startswith("fen ") or position.startswith("startpos "):
+    if (
+        position == "startpos"
+        or position.startswith("fen ")
+        or position.startswith("startpos ")
+    ):
         uci.send(f"position {position}")
     else:
         uci.send(f"position fen {position}")
@@ -132,7 +140,9 @@ def run_ponder_cycle(
     send_position(uci, position)
     uci.send(f"go ponder {ponder_go}")
     early_lines = uci.read_for(settle_sec)
-    early_bestmove = next((line for line in early_lines if line.startswith("bestmove ")), None)
+    early_bestmove = next(
+        (line for line in early_lines if line.startswith("bestmove ")), None
+    )
     if early_bestmove:
         raise RuntimeError(f"early bestmove before {action}: {early_bestmove}")
     uci.send(action)
@@ -196,12 +206,18 @@ def main() -> int:
     for expected in args.expect_output:
         if expected not in output:
             tail = "\n".join(uci.output[-80:])
-            print(f"Expected output containing {expected!r}. Tail:\n{tail}", file=sys.stderr)
+            print(
+                f"Expected output containing {expected!r}. Tail:\n{tail}",
+                file=sys.stderr,
+            )
             return 1
     for rejected in args.reject_output:
         if rejected in output:
             tail = "\n".join(uci.output[-80:])
-            print(f"Rejected output containing {rejected!r}. Tail:\n{tail}", file=sys.stderr)
+            print(
+                f"Rejected output containing {rejected!r}. Tail:\n{tail}",
+                file=sys.stderr,
+            )
             return 1
 
     elapsed_sec = time.monotonic() - start

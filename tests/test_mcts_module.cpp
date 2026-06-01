@@ -721,8 +721,7 @@ void test_network_format_descriptor(TestCounter &tc) {
          "decoded output targets should keep policy/value/moves-left order",
          tc);
   expect(std::find(decoded_targets.begin(), decoded_targets.end(),
-                   NN::NetworkOutputTarget::RawPolicy) ==
-             decoded_targets.end(),
+                   NN::NetworkOutputTarget::RawPolicy) == decoded_targets.end(),
          "decoded output targets should exclude raw policy scratch", tc);
 
   NN::NetworkFormatDescriptor scalar_descriptor;
@@ -925,22 +924,21 @@ void test_network_execution_plan(TestCounter &tc) {
              resolved_plan, "value." + value_head + ".dense2") == "softmax",
          "shared activation contract should use softmax for WDL output", tc);
   expect(NN::NetworkDenseStageActivationName(resolved_plan,
-                                            "moves_left.output") == "relu",
+                                             "moves_left.output") == "relu",
          "shared activation contract should use ReLU for moves-left output",
          tc);
-  expect(NN::NetworkDenseStageActivationName(
-             resolved_plan, "body.input_embedding_preprocess")
+  expect(NN::NetworkDenseStageActivationName(resolved_plan,
+                                             "body.input_embedding_preprocess")
              .empty(),
          "shared activation contract should keep dynamic PE preprocess linear",
          tc);
   expect(NN::NetworkDenseStageActivationName(resolved_plan,
-                                            "body.input_embedding") == "mish",
+                                             "body.input_embedding") == "mish",
          "shared activation contract should use default input embedding "
          "activation",
          tc);
-  expect(NN::NetworkDenseStageActivationName(resolved_plan,
-                                            "body.encoder.0.ffn.dense1") ==
-             "swish",
+  expect(NN::NetworkDenseStageActivationName(
+             resolved_plan, "body.encoder.0.ffn.dense1") == "swish",
          "shared activation contract should use FFN activation for body "
          "dense stages",
          tc);
@@ -952,8 +950,8 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(NN::NetworkBodyEncoderLayerCount(math_plan) == 2,
          "shared math contract should derive body encoder layer count", tc);
   const float expected_residual_scale = std::pow(4.0f, -0.25f);
-  expect(std::abs(NN::NetworkFeedForwardResidualScale(
-                      math_plan, "body.encoder.1.ffn") -
+  expect(std::abs(NN::NetworkFeedForwardResidualScale(math_plan,
+                                                      "body.encoder.1.ffn") -
                   expected_residual_scale) < 1e-6f,
          "shared math contract should derive transformer residual scale", tc);
   expect(std::abs(NN::NetworkFeedForwardLayerNormEpsilon(
@@ -988,7 +986,8 @@ void test_network_execution_plan(TestCounter &tc) {
   traits_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
       NN::NetworkExecutionOpKind::Dense,
       "body.input_embedding",
-      {tensor(0, "body.ip_emb_b", 8, {8}, NN::NetworkWeightTensorKind::DenseBias),
+      {tensor(0, "body.ip_emb_b", 8, {8},
+              NN::NetworkWeightTensorKind::DenseBias),
        tensor(1, "body.ip_emb_w", 8 * 16, {8, 16},
               NN::NetworkWeightTensorKind::DenseWeight)}});
   traits_plan.steps.push_back(NN::NetworkResolvedExecutionStep{
@@ -1005,11 +1004,11 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(NN::ClassifyNetworkPlanStage(traits_plan, "moves_left.output") ==
              NN::NetworkPlanStageGroup::MovesLeft,
          "shared traits should classify moves-left stages", tc);
-  expect(NN::NetworkStageUsesSquareRows(traits_plan,
-                                        "body.input_embedding_ffn"),
-         "shared traits should run input embedding continuations on square "
-         "rows",
-         tc);
+  expect(
+      NN::NetworkStageUsesSquareRows(traits_plan, "body.input_embedding_ffn"),
+      "shared traits should run input embedding continuations on square "
+      "rows",
+      tc);
   expect(NN::NetworkStageUsesSquareRows(traits_plan, "policy.smoke.dense2"),
          "shared traits should run attention-policy Q/K stages on square rows",
          tc);
@@ -1036,8 +1035,8 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(ffn_widths.hidden == 6 && ffn_widths.output == 8,
          "shared traits should find FFN tensor roles by suffix", tc);
   expect(NN::FindNetworkTensorSuffix(reordered_ffn, ".dense1_w") &&
-             NN::FindNetworkTensorSuffix(reordered_ffn, ".dense1_w")
-                     ->dims[0] == 6,
+             NN::FindNetworkTensorSuffix(reordered_ffn, ".dense1_w")->dims[0] ==
+                 6,
          "shared traits should expose suffix tensor lookup", tc);
   NN::NetworkResolvedExecutionStep reordered_attention{
       NN::NetworkExecutionOpKind::Attention,
@@ -1065,8 +1064,7 @@ void test_network_execution_plan(TestCounter &tc) {
       }};
   const auto se_widths = NN::NetworkSqueezeExciteStageWidthsFor(reordered_se);
   expect(se_widths.hidden == 6 && se_widths.output == 8,
-         "shared traits should find squeeze-excite tensor roles by suffix",
-         tc);
+         "shared traits should find squeeze-excite tensor roles by suffix", tc);
   expect(NN::NetworkAttentionHeadCount(traits_plan, "body.encoder.0.mha") == 2,
          "shared traits should select body attention head count", tc);
   expect(NN::NetworkAttentionHeadCount(traits_plan,
@@ -1098,9 +1096,8 @@ void test_network_execution_plan(TestCounter &tc) {
   const auto dynamic_execution_plan = NN::CreateNetworkExecutionPlan(
       dynamic_descriptor, dynamic_tensor_plan, dynamic_policy_head,
       dynamic_value_head, dynamic_inventory);
-  const auto dynamic_resolved_plan =
-      NN::ResolveNetworkExecutionPlan(dynamic_execution_plan,
-                                      dynamic_inventory);
+  const auto dynamic_resolved_plan = NN::ResolveNetworkExecutionPlan(
+      dynamic_execution_plan, dynamic_inventory);
   const auto &dynamic_preprocess =
       dynamic_resolved_plan.steps[find_resolved_step_index(
           dynamic_resolved_plan, "body.input_embedding_preprocess")];
@@ -1110,15 +1107,13 @@ void test_network_execution_plan(TestCounter &tc) {
              dynamic_geometry.position_width == 1 &&
              dynamic_geometry.concat_width == NN::kPackedInputPlaneCount + 1,
          "dynamic PE geometry should derive source and concat widths", tc);
-  expect(dynamic_geometry.dense_input_width ==
-             12 * NN::kPackedInputSquareCount,
+  expect(dynamic_geometry.dense_input_width == 12 * NN::kPackedInputSquareCount,
          "dynamic PE geometry should derive flattened position input", tc);
   auto bad_dynamic_embedding = dynamic_resolved_plan;
-  auto &bad_embedding =
-      bad_dynamic_embedding
-          .steps[find_resolved_step_index(bad_dynamic_embedding,
-                                          "body.input_embedding")]
-          .tensors[0];
+  auto &bad_embedding = bad_dynamic_embedding
+                            .steps[find_resolved_step_index(
+                                bad_dynamic_embedding, "body.input_embedding")]
+                            .tensors[0];
   bad_embedding.dims[1] =
       static_cast<std::uint32_t>(dynamic_geometry.concat_width + 1);
   expect_throws(
@@ -1270,8 +1265,7 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_dynamic_geometry.position_planes == 12 &&
              loaded_dynamic_geometry.position_width == 512 &&
              loaded_dynamic_geometry.concat_width == 624,
-         "resolved BT4 dynamic PE geometry should match input embedding",
-         tc);
+         "resolved BT4 dynamic PE geometry should match input embedding", tc);
   const auto loaded_resolved_inventory =
       NN::CreateResolvedNetworkWeightInventory(loaded_inventory,
                                                loaded_resolved_plan);
@@ -1362,9 +1356,10 @@ void test_network_execution_plan(TestCounter &tc) {
                  .RequireName("body.input_embedding_preprocess.position_input")
                  .width == loaded_dynamic_geometry.dense_input_width,
          "loaded CUDA tape should use resolved dynamic PE input width", tc);
-  expect(loaded_tape_batch2.RequireName("body.input_embedding_preprocess.concat")
-                 .width == loaded_dynamic_geometry.concat_width,
-         "loaded CUDA tape should use resolved dynamic PE concat width", tc);
+  expect(
+      loaded_tape_batch2.RequireName("body.input_embedding_preprocess.concat")
+              .width == loaded_dynamic_geometry.concat_width,
+      "loaded CUDA tape should use resolved dynamic PE concat width", tc);
   expect(loaded_tape_batch2.RequireName("body.input_embedding_preprocess.dense")
                  .rows == 2,
          "loaded CUDA tape should keep dynamic PE dense at batch rows", tc);
@@ -1402,8 +1397,8 @@ void test_network_execution_plan(TestCounter &tc) {
   expect(loaded_cuda_output_mapping.Find(NN::NetworkOutputTarget::Value) !=
              nullptr,
          "loaded CUDA output mapping should expose value output", tc);
-  expect(loaded_cuda_output_mapping.Find(
-             NN::NetworkOutputTarget::MovesLeft) != nullptr,
+  expect(loaded_cuda_output_mapping.Find(NN::NetworkOutputTarget::MovesLeft) !=
+             nullptr,
          "loaded CUDA output mapping should expose moves-left output", tc);
 #endif
 }
@@ -1652,10 +1647,10 @@ void test_nn_backend_selector_contract(TestCounter &tc) {
          "required accelerator backend should fail when no accelerator is "
          "compiled",
          tc);
-  expect(accelerator_error.find("No accelerator NN backend") !=
-             std::string::npos,
-         "required accelerator failure should explain missing accelerator build",
-         tc);
+  expect(
+      accelerator_error.find("No accelerator NN backend") != std::string::npos,
+      "required accelerator failure should explain missing accelerator build",
+      tc);
 #endif
 
 #if !defined(USE_METAL) && !defined(USE_CUDA)
@@ -2326,11 +2321,11 @@ void test_cuda_execution_schedule(TestCounter &tc) {
   expect(residual_se_tape.RequireName("body.residual.0.se.pool").rows == 2 &&
              residual_se_tape.RequireName("body.residual.0.se.pool").width == 4,
          "CUDA tape should store residual SE pool as batch-channel rows", tc);
-  expect(residual_se_tape.RequireName("body.residual.0.se.fc1.dense").rows ==
-             2 &&
-             residual_se_tape.RequireName("body.residual.0.se.fc1.dense")
-                     .width == 2,
-         "CUDA tape should store residual SE hidden output", tc);
+  expect(
+      residual_se_tape.RequireName("body.residual.0.se.fc1.dense").rows == 2 &&
+          residual_se_tape.RequireName("body.residual.0.se.fc1.dense").width ==
+              2,
+      "CUDA tape should store residual SE hidden output", tc);
   expect(
       residual_se_tape.RequireName("body.residual.0.se.fc2.dense").rows == 2 &&
           residual_se_tape.RequireName("body.residual.0.se.fc2.dense").width ==
@@ -2699,8 +2694,7 @@ void test_cuda_output_mapping(TestCounter &tc) {
   expect(mapping.bindings.size() == 4,
          "CUDA output mapping should bind policy/value/moves/raw outputs", tc);
   expect(mapping.Find(NN::NetworkOutputTarget::Policy) &&
-             mapping.Find(NN::NetworkOutputTarget::Policy)->source_width ==
-                 2,
+             mapping.Find(NN::NetworkOutputTarget::Policy)->source_width == 2,
          "CUDA output mapping should retain policy source width", tc);
   expect(mapping.Find(NN::NetworkOutputTarget::Value) &&
              mapping.Find(NN::NetworkOutputTarget::Value)->source_width == 3,
@@ -2774,14 +2768,16 @@ void test_cuda_output_mapping(TestCounter &tc) {
       options);
   expect(renamed_mapping.ok(),
          "CUDA output mapping should derive sources from head prefixes", tc);
-  expect(renamed_mapping.Find(NN::NetworkOutputTarget::Policy) &&
-             renamed_mapping.Find(NN::NetworkOutputTarget::Policy)
-                     ->source_stage == "policy.smoke.primary_logits",
-         "CUDA output mapping should bind renamed policy source", tc);
-  expect(renamed_mapping.Find(NN::NetworkOutputTarget::Value) &&
-             renamed_mapping.Find(NN::NetworkOutputTarget::Value)
-                     ->source_stage == "value.smoke.wdl_logits",
-         "CUDA output mapping should bind renamed value source", tc);
+  expect(
+      renamed_mapping.Find(NN::NetworkOutputTarget::Policy) &&
+          renamed_mapping.Find(NN::NetworkOutputTarget::Policy)->source_stage ==
+              "policy.smoke.primary_logits",
+      "CUDA output mapping should bind renamed policy source", tc);
+  expect(
+      renamed_mapping.Find(NN::NetworkOutputTarget::Value) &&
+          renamed_mapping.Find(NN::NetworkOutputTarget::Value)->source_stage ==
+              "value.smoke.wdl_logits",
+      "CUDA output mapping should bind renamed value source", tc);
   expect(renamed_mapping.Find(NN::NetworkOutputTarget::MovesLeft) &&
              renamed_mapping.Find(NN::NetworkOutputTarget::MovesLeft)
                      ->source_stage == "moves_left.final_logits",

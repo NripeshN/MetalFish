@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
-
 DEFAULT_NAME_REGEX = r"^metalfish-(cuda|win-cuda)"
 
 
@@ -101,7 +100,9 @@ def list_instances(project: str) -> list[GcpInstance]:
         ]
     )
     if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or "gcloud compute instances list failed")
+        raise RuntimeError(
+            proc.stderr.strip() or "gcloud compute instances list failed"
+        )
     return parse_instances(proc.stdout)
 
 
@@ -161,7 +162,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     if args.json:
-        print(json.dumps([instance_to_json(instance) for instance in matches], indent=2))
+        print(
+            json.dumps([instance_to_json(instance) for instance in matches], indent=2)
+        )
     elif not matches:
         print("No matching CUDA GCP instances.")
     else:
@@ -173,7 +176,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         for instance in matches:
             delete_instance(args.project, instance)
         if matches:
-            print(f"Deleted {len(matches)} matching CUDA GCP instance(s).", file=sys.stderr)
+            print(
+                f"Deleted {len(matches)} matching CUDA GCP instance(s).",
+                file=sys.stderr,
+            )
 
     return 0
 

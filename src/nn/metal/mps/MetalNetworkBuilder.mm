@@ -71,14 +71,12 @@ std::string MetalNetworkBuilder::init(int gpu_id) {
   return std::string([devices[gpu_id].name UTF8String]);
 }
 
-void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
-                                InputEmbedding embedding, bool attn_body,
-                                bool attn_policy, bool conv_policy, bool wdl,
-                                bool moves_left, Activations &activations,
-                                std::string &policy_head,
-                                std::string &value_head,
-                                const std::vector<NetworkOutputTarget>
-                                    &decoded_output_targets) {
+void MetalNetworkBuilder::build(
+    int kInputPlanes, MultiHeadWeights &weights, InputEmbedding embedding,
+    bool attn_body, bool attn_policy, bool conv_policy, bool wdl,
+    bool moves_left, Activations &activations, std::string &policy_head,
+    std::string &value_head,
+    const std::vector<NetworkOutputTarget> &decoded_output_targets) {
   MetalNetworkGraph *graph = GraphOrThrow(this->graph_id, "Metal graph build");
   NSString *defaultActivation =
       [NSString stringWithUTF8String:activations.default_activation.c_str()];
@@ -331,8 +329,8 @@ void MetalNetworkBuilder::build(int kInputPlanes, MultiHeadWeights &weights,
       break;
     case NetworkOutputTarget::MovesLeft:
       if (mlh == nil) {
-        throw std::runtime_error(
-            "Metal graph requested moves-left output without a moves-left head");
+        throw std::runtime_error("Metal graph requested moves-left output "
+                                 "without a moves-left head");
       }
       [resultTensors addObject:mlh];
       break;

@@ -1116,8 +1116,7 @@ CudaDenseStageOutput ExecuteDynamicPositionEncodingStage(
   RequireTapeShape(expanded_binding, square_rows, geometry.input_planes,
                    "dynamic PE expanded input");
   RequireTapeShape(position_input_binding, batch_size,
-                   geometry.dense_input_width,
-                   "dynamic PE dense input");
+                   geometry.dense_input_width, "dynamic PE dense input");
   RequireTapeShape(dense_binding, batch_size, geometry.dense_output_width,
                    "dynamic PE dense output");
   RequireTapeShape(concat_binding, square_rows, geometry.concat_width,
@@ -1727,16 +1726,14 @@ CudaDenseStageOutput ExecuteAttentionResidualLayerNormStage(
   return output;
 }
 
-CudaAttentionCoreOutput
-ExecuteAttentionCoreStage(const NetworkResolvedExecutionPlan &execution_plan,
-                          std::size_t attention_step_index,
-                          const CudaAttentionProjectionOutput &projections,
-                          const CudaExecutionTape &tape,
-                          CudaExecutionWorkspace &workspace, int batch_size,
-                          const CudaWeightBuffers *weights, const float *parent,
-                          int trace_run, int trace_stage_index,
-                          CudaExecutionScheduleKind trace_kind,
-                          bool deterministic_attention_softmax) {
+CudaAttentionCoreOutput ExecuteAttentionCoreStage(
+    const NetworkResolvedExecutionPlan &execution_plan,
+    std::size_t attention_step_index,
+    const CudaAttentionProjectionOutput &projections,
+    const CudaExecutionTape &tape, CudaExecutionWorkspace &workspace,
+    int batch_size, const CudaWeightBuffers *weights, const float *parent,
+    int trace_run, int trace_stage_index, CudaExecutionScheduleKind trace_kind,
+    bool deterministic_attention_softmax) {
   if (batch_size <= 0)
     throw std::runtime_error("CUDA attention core received empty batch");
   if (!projections.query || !projections.key || !projections.value)

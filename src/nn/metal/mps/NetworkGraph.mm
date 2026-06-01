@@ -253,7 +253,7 @@ static const NSInteger kMinSubBatchSize = 20;
         continue;
       }
       [[resultDictionary
-        [_resultTensors [rsIdx]] mpsndarray] readBytes : outputBuffers [rsIdx] +
+        [_resultTensors[rsIdx]] mpsndarray] readBytes : outputBuffers[rsIdx] +
        outputSampleOffset * elementsPerSample strideBytes : nil];
       outputSampleOffset += subBatchSizes[subBatch];
     }

@@ -386,8 +386,7 @@ CudaBufferSmokeResult RunInferenceBufferSmoke() {
         decoded_output.value.size() != layout.ValueEntries() ||
         decoded_output.moves_left.size() != layout.MovesLeftEntries() ||
         !decoded_output.raw_policy.empty() || !AllZero(decoded_output.policy) ||
-        !AllZero(decoded_output.value) ||
-        !AllZero(decoded_output.moves_left)) {
+        !AllZero(decoded_output.value) || !AllZero(decoded_output.moves_left)) {
       result.status = CudaSmokeStatus::Mismatch;
       result.message = "CUDA decoded-only output download mismatch";
       return result;

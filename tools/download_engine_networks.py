@@ -44,16 +44,22 @@ def validate_gzip_weights(path: Path) -> None:
                 first_chunk = chunk
             total += len(chunk)
     if total <= 0:
-        raise RuntimeError(f"Downloaded gzip weights are empty after decompression: {path}")
+        raise RuntimeError(
+            f"Downloaded gzip weights are empty after decompression: {path}"
+        )
     if not first_chunk.startswith(WEIGHTS_PROTO_MAGIC_PREFIX):
-        raise RuntimeError(f"Downloaded gzip weights do not look like an Lc0 protobuf: {path}")
+        raise RuntimeError(
+            f"Downloaded gzip weights do not look like an Lc0 protobuf: {path}"
+        )
 
 
 def validate_plain_weights(path: Path) -> None:
     with path.open("rb") as handle:
         prefix = handle.read(len(WEIGHTS_PROTO_MAGIC_PREFIX))
     if prefix != WEIGHTS_PROTO_MAGIC_PREFIX:
-        raise RuntimeError(f"Downloaded weights do not look like an Lc0 protobuf: {path}")
+        raise RuntimeError(
+            f"Downloaded weights do not look like an Lc0 protobuf: {path}"
+        )
 
 
 def download(
@@ -78,7 +84,10 @@ def download(
                 shutil.copyfile(path, tmp_cache)
                 tmp_cache.replace(target)
             except OSError as exc:
-                print(f"Could not update network cache {cache_dir}: {exc}", file=sys.stderr)
+                print(
+                    f"Could not update network cache {cache_dir}: {exc}",
+                    file=sys.stderr,
+                )
 
     if dest.exists() and dest.stat().st_size > 0 and not force:
         if validator:
@@ -207,7 +216,9 @@ def main() -> int:
         for path in os.environ.get(var, "").split(os.pathsep)
         if path
     ]
-    cache_dirs = [Path(path).expanduser() for path in [*args.cache_dir, *env_cache_dirs]]
+    cache_dirs = [
+        Path(path).expanduser() for path in [*args.cache_dir, *env_cache_dirs]
+    ]
 
     want_nnue = not (args.bt4_only or args.legacy_only)
     want_bt4 = not (args.nnue_only or args.legacy_only)
@@ -216,7 +227,9 @@ def main() -> int:
     if want_nnue:
         for filename, default_url in NNUE_URLS.items():
             url = os.environ.get(NNUE_URL_ENV[filename], default_url)
-            download(url, dest / filename, args.retries, args.force, cache_dirs=cache_dirs)
+            download(
+                url, dest / filename, args.retries, args.force, cache_dirs=cache_dirs
+            )
 
     if want_bt4:
         url = os.environ.get("METALFISH_BT4_WEIGHTS_URL", BT4_URL)

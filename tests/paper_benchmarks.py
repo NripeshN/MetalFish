@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Paper benchmark suite -- collects all data needed for the MetalFish paper."""
+
 from __future__ import annotations
 
 import argparse
