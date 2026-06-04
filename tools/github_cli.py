@@ -16,9 +16,7 @@ def gh_executable() -> str:
         "/usr/local/bin/gh",
         "/usr/bin/gh",
         pathlib.Path(os.environ.get("ProgramFiles", "")) / "GitHub CLI" / "gh.exe",
-        pathlib.Path(os.environ.get("ProgramFiles(x86)", ""))
-        / "GitHub CLI"
-        / "gh.exe",
+        pathlib.Path(os.environ.get("ProgramFiles(x86)", "")) / "GitHub CLI" / "gh.exe",
     ]
     for candidate in candidates:
         if not candidate:

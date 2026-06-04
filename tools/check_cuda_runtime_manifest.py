@@ -18,7 +18,6 @@ from tools.cuda_runtime_search_contract import (
     search_summary_artifact_names,
 )
 
-
 RUNTIME_KINDS = {
     "linux-cuda": {
         "schema": "metalfish.cuda_gpu_runtime_gate",
@@ -143,8 +142,7 @@ BASE_REQUIRED_RELEASE_ARTIFACTS = {
 
 
 REQUIRED_RELEASE_ARTIFACTS = {
-    runtime_kind: artifacts
-    | search_summary_artifact_names(runtime_kind=runtime_kind)
+    runtime_kind: artifacts | search_summary_artifact_names(runtime_kind=runtime_kind)
     for runtime_kind, artifacts in BASE_REQUIRED_RELEASE_ARTIFACTS.items()
 }
 
@@ -331,8 +329,7 @@ def validate_release_compare_policy(
         maximum = float(max_cuda_metal_eval_ms_ratio)
     except ValueError as exc:
         raise ValueError(
-            "release comparison policy requires numeric "
-            "max_cuda_metal_eval_ms_ratio"
+            "release comparison policy requires numeric " "max_cuda_metal_eval_ms_ratio"
         ) from exc
     if actual <= 0.0:
         raise ValueError(

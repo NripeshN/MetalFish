@@ -456,8 +456,8 @@ bool HybridMCTSABLowerBoundConfirmedOverride(
     bool fixed_budget, bool visit_evidence_sane, uint64_t mcts_root_visits,
     uint32_t mcts_best_visits, float visit_share, float root_q_gap,
     int ab_score, int mcts_in_ab_rank, int mcts_in_ab_score,
-    bool mcts_in_ab_lowerbound, uint64_t mcts_in_ab_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits);
+    bool mcts_in_ab_lowerbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits);
 
 bool HybridMCTSCompactFixedBudgetOverride(
     bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
@@ -566,9 +566,8 @@ bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
                               float candidate_q, float candidate_policy);
 
 bool HybridRootQConflictTieBreak(bool fixed_budget, bool visit_evidence_sane,
-                                 uint64_t root_visits,
-                                 uint32_t selected_visits, float selected_q,
-                                 float selected_policy,
+                                 uint64_t root_visits, uint32_t selected_visits,
+                                 float selected_q, float selected_policy,
                                  uint32_t candidate_visits, float candidate_q,
                                  float candidate_policy,
                                  int selected_average_score,
@@ -653,12 +652,11 @@ bool HybridIsPawnOnlyPawnCaptureCandidate(const Position &pos, Move selected,
 bool HybridPawnOnlyANEMCTSOverride(
     bool enabled, bool ane_agrees_mcts, bool fixed_budget,
     bool visit_evidence_sane, bool candidate_shape, bool king_recapture_shape,
-    bool pawn_lever_shape, uint64_t mcts_root_visits,
-    uint32_t mcts_best_visits, uint64_t mcts_current_root_visits,
-    uint32_t mcts_current_best_visits, uint32_t ab_mcts_visits,
-    float visit_share, float root_q_gap, float q_gap_to_ab, int mcts_cp,
-    int eval_delta, int ab_average_score, int mcts_average_score,
-    float ane_score_margin);
+    bool pawn_lever_shape, uint64_t mcts_root_visits, uint32_t mcts_best_visits,
+    uint64_t mcts_current_root_visits, uint32_t mcts_current_best_visits,
+    uint32_t ab_mcts_visits, float visit_share, float root_q_gap,
+    float q_gap_to_ab, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score, float ane_score_margin);
 
 bool HybridIsPawnLever(const Position &pos, Move move);
 

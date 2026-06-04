@@ -11,7 +11,6 @@ import sys
 import tarfile
 import zipfile
 
-
 REQUIRED_LINUX_CUDA_FILES = {
     "metalfish",
     "metalfish_nn_probe",
@@ -55,15 +54,17 @@ def validate_portable_manifest(
 ) -> dict:
     if manifest.get("schema") != "metalfish.portable_artifact":
         raise ValueError(
-            "package manifest has unexpected schema: "
-            f"{manifest.get('schema')!r}"
+            "package manifest has unexpected schema: " f"{manifest.get('schema')!r}"
         )
     package = manifest.get("package") or {}
     if package.get("kind") != package_kind:
         raise ValueError(
             "package manifest has unexpected kind: " f"{package.get('kind')!r}"
         )
-    if expected_source_commit and package.get("source_commit") != expected_source_commit:
+    if (
+        expected_source_commit
+        and package.get("source_commit") != expected_source_commit
+    ):
         raise ValueError(
             "package manifest has unexpected source commit: "
             f"{package.get('source_commit')!r}; expected {expected_source_commit}"
@@ -109,7 +110,9 @@ def require_manifest_hashes(
     for name, record in manifest_file_records(manifest).items():
         archive_record = archive_records.get(name)
         if archive_record is None:
-            raise ValueError(f"package manifest references missing archive entry: {name}")
+            raise ValueError(
+                f"package manifest references missing archive entry: {name}"
+            )
         expected_size = int(record.get("size_bytes") or -1)
         if expected_size != archive_record["size_bytes"]:
             raise ValueError(
@@ -143,8 +146,7 @@ def require_manifest_file_set(
     extra = sorted(actual - expected)
     if extra:
         raise ValueError(
-            "CUDA package archive contains unmanifested entries: "
-            + ", ".join(extra)
+            "CUDA package archive contains unmanifested entries: " + ", ".join(extra)
         )
 
 
@@ -192,7 +194,8 @@ def validate_linux_cuda_package(
             manifest_member = next(
                 member
                 for member in archive.getmembers()
-                if normalize_archive_name(member.name) == "linux-cuda-package-manifest.json"
+                if normalize_archive_name(member.name)
+                == "linux-cuda-package-manifest.json"
             )
         except StopIteration as exc:
             raise ValueError("Linux CUDA package is missing JSON manifest") from exc
@@ -248,7 +251,9 @@ def validate_windows_cuda_package(
     manifest = json.loads(raw_manifest.decode("utf-8-sig"))
     missing = sorted(REQUIRED_WINDOWS_CUDA_FILES - names)
     if missing:
-        raise ValueError("Windows CUDA package is missing entries: " + ", ".join(missing))
+        raise ValueError(
+            "Windows CUDA package is missing entries: " + ", ".join(missing)
+        )
     package_info = validate_portable_manifest(
         manifest,
         package_kind="windows-cuda",
@@ -324,7 +329,9 @@ def validate_package(
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", required=True)
-    parser.add_argument("--package-kind", choices=("linux-cuda", "windows-cuda"), required=True)
+    parser.add_argument(
+        "--package-kind", choices=("linux-cuda", "windows-cuda"), required=True
+    )
     parser.add_argument("--expected-source-commit", default="")
     parser.add_argument("--json-output", default="")
     return parser.parse_args(argv)

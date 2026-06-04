@@ -125,7 +125,9 @@ def print_run(label: str, run: dict) -> None:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="", help="GitHub repo, for example owner/name")
+    parser.add_argument(
+        "--repo", default="", help="GitHub repo, for example owner/name"
+    )
     parser.add_argument(
         "--ref",
         default="",

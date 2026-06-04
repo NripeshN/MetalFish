@@ -185,8 +185,8 @@ int NetworkAttentionStageOutputWidth(
 int NetworkAttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
                               std::string_view stage_name);
 
-bool NetworkIsAttentionLayerNormStage(
-    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name);
+bool NetworkIsAttentionLayerNormStage(const NetworkResolvedExecutionPlan &plan,
+                                      std::string_view stage_name);
 
 bool NetworkStageUsesSquareRows(const NetworkResolvedExecutionPlan &plan,
                                 std::string_view stage_name);
@@ -194,14 +194,15 @@ bool NetworkStageUsesSquareRows(const NetworkResolvedExecutionPlan &plan,
 int NetworkDenseLikeRows(const NetworkResolvedExecutionPlan &plan,
                          std::string_view stage_name, int batch_size);
 
-std::string NetworkDenseStageActivationName(
-    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name);
+std::string
+NetworkDenseStageActivationName(const NetworkResolvedExecutionPlan &plan,
+                                std::string_view stage_name);
 
 std::size_t
 NetworkBodyEncoderLayerCount(const NetworkResolvedExecutionPlan &plan);
 
-float NetworkFeedForwardResidualScale(
-    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name);
+float NetworkFeedForwardResidualScale(const NetworkResolvedExecutionPlan &plan,
+                                      std::string_view stage_name);
 
 float NetworkFeedForwardLayerNormEpsilon(
     const NetworkResolvedExecutionPlan &plan, std::string_view stage_name);

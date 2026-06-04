@@ -35,8 +35,7 @@ const char *BoolText(bool value) { return value ? "true" : "false"; }
 
 std::string BackendCapabilities::Summary() const {
   std::ostringstream out;
-  out << "actual_backend=" << actual_backend
-      << " has_wdl=" << BoolText(has_wdl)
+  out << "actual_backend=" << actual_backend << " has_wdl=" << BoolText(has_wdl)
       << " has_moves_left=" << BoolText(has_moves_left);
   if (max_batch_size > 0)
     out << " max_batch=" << max_batch_size;

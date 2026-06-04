@@ -705,9 +705,11 @@ def ane_engine_options(args) -> dict[str, str]:
         return {}
     options = {
         "HybridANERootProbe": "true",
-        "HybridANERootHints": "true"
-        if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
-        else "false",
+        "HybridANERootHints": (
+            "true"
+            if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
+            else "false"
+        ),
         "HybridANEConfirmMCTSOverride": (
             "true"
             if getattr(
@@ -797,9 +799,7 @@ def ane_status_label(args) -> str:
     )
     scope = (
         "pawn-only"
-        if getattr(
-            args, "hybrid_ane_only_pawn_endgames", HYBRID_ANE_ONLY_PAWN_ENDGAMES
-        )
+        if getattr(args, "hybrid_ane_only_pawn_endgames", HYBRID_ANE_ONLY_PAWN_ENDGAMES)
         else "all roots"
     )
     status = "ready" if weights.exists() and model.exists() else "missing files"

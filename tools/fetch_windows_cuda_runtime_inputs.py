@@ -135,7 +135,10 @@ def list_artifacts(repo: str, run_id: str) -> list[ArtifactInfo]:
 
 
 def select_artifact(
-    artifacts: list[ArtifactInfo], *, name: str | None = None, pattern: str | None = None
+    artifacts: list[ArtifactInfo],
+    *,
+    name: str | None = None,
+    pattern: str | None = None,
 ) -> ArtifactInfo:
     if bool(name) == bool(pattern):
         raise ValueError("select exactly one of name or pattern")
@@ -145,7 +148,9 @@ def select_artifact(
     else:
         assert pattern is not None
         matches = [
-            artifact for artifact in artifacts if fnmatch.fnmatch(artifact.name, pattern)
+            artifact
+            for artifact in artifacts
+            if fnmatch.fnmatch(artifact.name, pattern)
         ]
         label = pattern
     if not matches:
@@ -167,7 +172,9 @@ def complete_zip(path: pathlib.Path, *, expected_size: int) -> bool:
     return zipfile.is_zipfile(path)
 
 
-def download_artifact(repo: str, artifact: ArtifactInfo, archive_path: pathlib.Path) -> None:
+def download_artifact(
+    repo: str, artifact: ArtifactInfo, archive_path: pathlib.Path
+) -> None:
     archive_path.parent.mkdir(parents=True, exist_ok=True)
     if complete_zip(archive_path, expected_size=artifact.size_in_bytes):
         return
@@ -216,7 +223,9 @@ def safe_extract_zip(archive_path: pathlib.Path, dest: pathlib.Path) -> None:
         for member in archive.infolist():
             target = (dest / member.filename).resolve()
             if root != target and root not in target.parents:
-                raise ValueError(f"zip member escapes extraction root: {member.filename}")
+                raise ValueError(
+                    f"zip member escapes extraction root: {member.filename}"
+                )
         archive.extractall(dest)
 
 
@@ -274,7 +283,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "suite logs needed by tools/run_gcp_windows_cuda_runtime_gate.sh."
         )
     )
-    parser.add_argument("--repo", default="", help="GitHub repo, for example owner/name")
+    parser.add_argument(
+        "--repo", default="", help="GitHub repo, for example owner/name"
+    )
     parser.add_argument("--windows-cuda-run-id", required=True)
     parser.add_argument("--metal-ci-run-id", default="")
     parser.add_argument("--out-dir", default="/tmp/metalfish-win-cuda-runtime-inputs")
@@ -421,9 +432,7 @@ def main(argv: list[str] | None = None) -> int:
                 "probe_suite_log": file_record(metal_probe_log),
                 "legacy_probe_suite_log": file_record(metal_legacy_probe_log),
                 **{
-                    spec.metal_manifest_key: file_record(
-                        metal_search_paths[spec.key]
-                    )
+                    spec.metal_manifest_key: file_record(metal_search_paths[spec.key])
                     for spec in SEARCH_COMPARISONS
                 },
             },

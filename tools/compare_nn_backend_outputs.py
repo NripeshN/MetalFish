@@ -249,9 +249,7 @@ def compare_output(
     }
 
 
-def max_result_delta(
-    results: list[dict[str, Any]], key: str
-) -> float | None:
+def max_result_delta(results: list[dict[str, Any]], key: str) -> float | None:
     return max_optional([result[key] for result in results])
 
 

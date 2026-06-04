@@ -266,8 +266,7 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
           ResolveAutoMinibatchSize(params_, backend_capabilities);
       if (resolved_minibatch != params_.minibatch_size) {
         std::cerr << "[MCTS] Resolved auto minibatch: initial="
-                  << params_.minibatch_size
-                  << " actual=" << resolved_minibatch
+                  << params_.minibatch_size << " actual=" << resolved_minibatch
                   << " backend=" << backend_capabilities.actual_backend
                   << std::endl;
       }
@@ -285,12 +284,11 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
       for (int pass = 0; pass < passes; ++pass) {
         auto comp = backend_->CreateComputation();
         for (int i = 0; i < batch_size; ++i) {
-          comp->AddInput(warmup_pos,
-                         warmup_base ^
-                             (salt +
-                              static_cast<uint64_t>(pass) *
-                                  0x9e3779b97f4a7c15ULL +
-                              static_cast<uint64_t>(i) * kFNVPrime));
+          comp->AddInput(
+              warmup_pos,
+              warmup_base ^
+                  (salt + static_cast<uint64_t>(pass) * 0x9e3779b97f4a7c15ULL +
+                   static_cast<uint64_t>(i) * kFNVPrime));
         }
         const auto batch_start = std::chrono::steady_clock::now();
         comp->ComputeBlocking();
@@ -656,15 +654,14 @@ bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
                                       float candidate_q) {
   const uint32_t safe_best_visits = std::max<uint32_t>(1, best_visits);
   const bool underexplored =
-      root_visits <= 80
-          ? candidate_visits * 2 <= safe_best_visits
-          : static_cast<uint64_t>(candidate_visits) * 5 <=
-                static_cast<uint64_t>(safe_best_visits) * 2;
+      root_visits <= 80 ? candidate_visits * 2 <= safe_best_visits
+                        : static_cast<uint64_t>(candidate_visits) * 5 <=
+                              static_cast<uint64_t>(safe_best_visits) * 2;
   if (best_q >= 0.0f && candidate_q < 0.0f)
     return false;
   return root_visits >= 40 && root_visits <= 600 && candidate_visits >= 8 &&
-         underexplored &&
-         candidate_policy >= 0.20f && candidate_policy >= best_policy * 1.15f &&
+         underexplored && candidate_policy >= 0.20f &&
+         candidate_policy >= best_policy * 1.15f &&
          best_q - candidate_q <= 0.20f;
 }
 
@@ -705,16 +702,16 @@ bool MCTSRootHighValueCaptureProbeCandidate(uint32_t root_visits,
 bool MCTSRootTacticalQuietProbeCandidate(uint32_t root_visits,
                                          int candidate_policy_rank,
                                          float candidate_policy) {
-  return root_visits >= 32 && root_visits <= 80 &&
-         candidate_policy_rank >= 5 && candidate_policy_rank <= 10 &&
-         candidate_policy >= 0.025f && candidate_policy <= 0.070f;
+  return root_visits >= 32 && root_visits <= 80 && candidate_policy_rank >= 5 &&
+         candidate_policy_rank <= 10 && candidate_policy >= 0.025f &&
+         candidate_policy <= 0.070f;
 }
 
 bool MCTSRootQuietMajorAttackProbeCandidate(uint32_t root_visits,
                                             int candidate_policy_rank,
                                             float candidate_policy) {
-  if (root_visits < 32 || root_visits > 180 ||
-      candidate_policy_rank < 1 || candidate_policy_rank > 10)
+  if (root_visits < 32 || root_visits > 180 || candidate_policy_rank < 1 ||
+      candidate_policy_rank > 10)
     return false;
 
   if (candidate_policy_rank <= 4)
@@ -726,8 +723,8 @@ bool MCTSRootQuietMajorAttackProbeCandidate(uint32_t root_visits,
 bool MCTSRootDeepTacticalQuietProbeCandidate(uint32_t root_visits,
                                              int candidate_policy_rank,
                                              float candidate_policy) {
-  if (root_visits < 32 || root_visits > 180 ||
-      candidate_policy_rank < 2 || candidate_policy_rank > 10)
+  if (root_visits < 32 || root_visits > 180 || candidate_policy_rank < 2 ||
+      candidate_policy_rank > 10)
     return false;
 
   if (candidate_policy_rank <= 4)
@@ -736,10 +733,12 @@ bool MCTSRootDeepTacticalQuietProbeCandidate(uint32_t root_visits,
   return candidate_policy >= 0.018f && candidate_policy <= 0.080f;
 }
 
-bool MCTSRootAdvancedPromotionSupportCandidate(
-    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
-    float best_policy, float best_q, float candidate_policy,
-    float candidate_q) {
+bool MCTSRootAdvancedPromotionSupportCandidate(uint32_t root_visits,
+                                               uint32_t best_visits,
+                                               uint32_t candidate_visits,
+                                               float best_policy, float best_q,
+                                               float candidate_policy,
+                                               float candidate_q) {
   return root_visits >= 48 && root_visits <= 220 && candidate_visits >= 16 &&
          candidate_visits * 2 >= std::max<uint32_t>(1, best_visits) &&
          candidate_policy >= 0.120f &&
@@ -755,9 +754,9 @@ bool MCTSRootLowVisitQOverrideCandidate(uint32_t best_visits,
                                         bool allow_strong_gap_candidate) {
   const bool near_visit_candidate =
       candidate_visits >= 6 && candidate_visits * 2 >= best_visits;
-  const bool decisive_low_visit_candidate =
-      candidate_visits >= 3 && candidate_q >= 0.95f &&
-      candidate_q > best_q + 0.50f;
+  const bool decisive_low_visit_candidate = candidate_visits >= 3 &&
+                                            candidate_q >= 0.95f &&
+                                            candidate_q > best_q + 0.50f;
   const bool strong_gap_candidate =
       allow_strong_gap_candidate && candidate_visits >= 16 &&
       candidate_visits * 3 >= std::max<uint32_t>(1, best_visits) &&
@@ -774,7 +773,7 @@ bool MCTSRootLowVisitQOverrideCandidate(uint32_t best_visits,
                  : (candidate_visits * 9 >= best_visits * 8
                         ? near_equal_required_gap
                         : (candidate_visits * 4 >= best_visits * 3 ? 0.05f
-                                                                    : 0.07f)));
+                                                                   : 0.07f)));
   return candidate_q > best_q + required_gap;
 }
 
@@ -885,9 +884,8 @@ void Search::ConfigureStopper() {
     }
     if (!node_only_limit && params_.kld_gain_min > 0.0f) {
       const int64_t kld_min_elapsed_ms =
-          time_budget_ms > 0
-              ? std::min<int64_t>(500, (time_budget_ms * 2) / 3)
-              : 0;
+          time_budget_ms > 0 ? std::min<int64_t>(500, (time_budget_ms * 2) / 3)
+                             : 0;
       stopper->Add(std::make_unique<KLDGainStopper>(
           params_.kld_gain_min, params_.kld_gain_average_interval,
           kld_min_elapsed_ms));
@@ -1950,7 +1948,8 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       const bool low_policy_capture =
           MCTSIsMinorCentralPawnCapture(ctx.pos, edges[i].move) ||
           MCTSIsMinorKingPawnCheckCapture(ctx.pos, edges[i].move);
-      const bool high_value_capture = limits_.movetime > 0 &&
+      const bool high_value_capture =
+          limits_.movetime > 0 &&
           MCTSIsMinorHighValueCapture(ctx.pos, edges[i].move);
       if (!low_policy_capture && !high_value_capture)
         continue;
@@ -1963,12 +1962,11 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
         continue;
 
       const float policy = edges[i].GetP();
-      const bool candidate_ok =
-          high_value_capture
-              ? MCTSRootHighValueCaptureProbeCandidate(children_visits, i + 1,
-                                                       policy)
-              : MCTSRootTacticalCaptureProbeCandidate(children_visits, i + 1,
-                                                      policy);
+      const bool candidate_ok = high_value_capture
+                                    ? MCTSRootHighValueCaptureProbeCandidate(
+                                          children_visits, i + 1, policy)
+                                    : MCTSRootTacticalCaptureProbeCandidate(
+                                          children_visits, i + 1, policy);
       if (!candidate_ok)
         continue;
       if (probe_idx < 0 || policy > probe_policy) {
@@ -2016,8 +2014,7 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
   }
 
   if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
-      limits_.movetime > 0 &&
-      children_visits >= 32 && children_visits <= 180) {
+      limits_.movetime > 0 && children_visits >= 32 && children_visits <= 180) {
     int probe_idx = -1;
     float probe_policy = 0.0f;
     const int policy_rank_limit = std::min(num_edges, 10);
@@ -2025,11 +2022,10 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       const bool attacks_major =
           MCTSIsMinorQuietAttacksMajor(ctx.pos, edges[i].move);
       const Piece moving_piece = ctx.pos.piece_on(edges[i].move.from_sq());
-      const bool fifth_rank = moving_piece != NO_PIECE &&
-                              MCTSIsMinorFifthRankQuietMove(ctx.pos,
-                                                            edges[i].move) &&
-                              MCTSHasHeavyPieceOnSeventh(
-                                  ctx.pos, color_of(moving_piece));
+      const bool fifth_rank =
+          moving_piece != NO_PIECE &&
+          MCTSIsMinorFifthRankQuietMove(ctx.pos, edges[i].move) &&
+          MCTSHasHeavyPieceOnSeventh(ctx.pos, color_of(moving_piece));
       if (!attacks_major && !fifth_rank)
         continue;
 
@@ -2044,12 +2040,11 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
       if (child && child->GetNInFlight() > 0)
         continue;
 
-      const bool candidate_ok =
-          attacks_major
-              ? MCTSRootQuietMajorAttackProbeCandidate(children_visits, i + 1,
-                                                       policy)
-              : MCTSRootDeepTacticalQuietProbeCandidate(children_visits, i + 1,
-                                                        policy);
+      const bool candidate_ok = attacks_major
+                                    ? MCTSRootQuietMajorAttackProbeCandidate(
+                                          children_visits, i + 1, policy)
+                                    : MCTSRootDeepTacticalQuietProbeCandidate(
+                                          children_visits, i + 1, policy);
       if (!candidate_ok) {
         continue;
       }
@@ -2406,10 +2401,9 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
   const bool fixed_low_root_visit_search =
       fixed_node_limited_search || fixed_movetime_search;
   const uint32_t q_override_visit_cap =
-      fixed_movetime_search
-          ? static_cast<uint32_t>(
-                std::max(0, params_.fixed_movetime_q_override_cap))
-          : 96;
+      fixed_movetime_search ? static_cast<uint32_t>(std::max(
+                                  0, params_.fixed_movetime_q_override_cap))
+                            : 96;
   const float near_equal_required_gap = fixed_movetime_search ? 0.02f : 0.05f;
   if (fixed_low_root_visit_search && best_idx >= 0 && !best_is_terminal_win &&
       total_child_visits <= q_override_visit_cap) {
@@ -2427,14 +2421,12 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       const bool protects_high_policy_capture =
           root_pos.capture(edges[q_idx].move) &&
           !root_pos.capture(edges[i].move) && edges[q_idx].GetP() >= 0.50f &&
-          edges[i].GetP() <= edges[q_idx].GetP() * 0.60f &&
-          cq < q_best + 0.10f;
+          edges[i].GetP() <= edges[q_idx].GetP() * 0.60f && cq < q_best + 0.10f;
       if (protects_high_policy_capture)
         continue;
-      if (MCTSRootLowVisitQOverrideCandidate(best_n, cn, q_best, cq,
-                                             near_equal_required_gap,
-                                             edges[i].GetP(),
-                                             fixed_movetime_search)) {
+      if (MCTSRootLowVisitQOverrideCandidate(
+              best_n, cn, q_best, cq, near_equal_required_gap, edges[i].GetP(),
+              fixed_movetime_search)) {
         q_idx = i;
         q_best = cq;
       }
@@ -2467,14 +2459,13 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       const uint32_t cn = child->GetN();
       const float cq = child->GetWL();
       const float policy = edges[i].GetP();
-      if (!MCTSRootAdvancedPromotionSupportCandidate(
-              total_child_visits, best_n, cn, best_policy, best_q, policy,
-              cq)) {
+      if (!MCTSRootAdvancedPromotionSupportCandidate(total_child_visits, best_n,
+                                                     cn, best_policy, best_q,
+                                                     policy, cq)) {
         continue;
       }
       if (support_idx < 0 || policy > support_policy ||
-          (std::abs(policy - support_policy) <= 0.000001f &&
-           cq > support_q)) {
+          (std::abs(policy - support_policy) <= 0.000001f && cq > support_q)) {
         support_idx = i;
         support_policy = policy;
         support_q = cq;

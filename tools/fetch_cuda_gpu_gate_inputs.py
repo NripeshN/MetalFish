@@ -6,13 +6,12 @@ import argparse
 import hashlib
 import json
 import pathlib
-import shutil
 import shlex
+import shutil
 import subprocess
 import sys
 import time
 import zipfile
-
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -86,9 +85,7 @@ def run_to_file(cmd: list[str], path: pathlib.Path, *, expected_size: int) -> No
 
 def default_repo() -> str:
     return str(
-        run_json(gh_cmd("repo", "view", "--json", "nameWithOwner"))[
-            "nameWithOwner"
-        ]
+        run_json(gh_cmd("repo", "view", "--json", "nameWithOwner"))["nameWithOwner"]
     )
 
 
@@ -131,7 +128,9 @@ def require_metal_run(repo: str, run_id: str, expected_sha: str | None) -> dict:
             f"status={status} conclusion={conclusion}: {url}"
         )
     if expected_sha and head_sha != expected_sha:
-        raise ValueError(f"run {run_id} is for {head_sha}, expected {expected_sha}: {url}")
+        raise ValueError(
+            f"run {run_id} is for {head_sha}, expected {expected_sha}: {url}"
+        )
     return data
 
 
@@ -151,7 +150,9 @@ def artifact_for_name(repo: str, run_id: str, name: str) -> tuple[int, int]:
         available = ", ".join(
             str(item.get("name")) for item in data.get("artifacts", [])
         )
-        raise ValueError(f"artifact {name!r} not found; available: {available or '<none>'}")
+        raise ValueError(
+            f"artifact {name!r} not found; available: {available or '<none>'}"
+        )
     if len(matches) > 1:
         raise ValueError(f"artifact {name!r} matched multiple artifacts")
     return int(matches[0]["id"]), int(matches[0]["size_in_bytes"])
@@ -164,7 +165,9 @@ def safe_extract_zip(archive_path: pathlib.Path, dest: pathlib.Path) -> None:
         for member in archive.infolist():
             target = (dest / member.filename).resolve()
             if root != target and root not in target.parents:
-                raise ValueError(f"zip member escapes extraction root: {member.filename}")
+                raise ValueError(
+                    f"zip member escapes extraction root: {member.filename}"
+                )
         archive.extractall(dest)
 
 
@@ -176,7 +179,9 @@ def shell_exports(values: dict[str, str]) -> str:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="", help="GitHub repo, for example owner/name")
+    parser.add_argument(
+        "--repo", default="", help="GitHub repo, for example owner/name"
+    )
     parser.add_argument("--metal-ci-run-id", required=True)
     parser.add_argument("--out-dir", default="/tmp/metalfish-cuda-gpu-gate-inputs")
     parser.add_argument(

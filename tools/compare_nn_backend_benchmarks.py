@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 BATCH_RE = re.compile(r"\bb(?P<size>\d+)=(?P<batch>[0-9.]+)ms/(?P<eval>[0-9.]+)ms_eval")
 GRAPH_REUSE_RE = re.compile(r"\bb(?P<size>\d+)\b")
 EXECUTOR_RE = re.compile(r"executor=([^,()]+(?:\([^)]*\))?)")

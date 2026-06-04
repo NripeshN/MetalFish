@@ -177,7 +177,9 @@ def main(argv: list[str] | None = None) -> int:
     expected_pv = expected_info.get("pv") or []
     actual_pv = actual_info.get("pv") or []
     if args.require_same_pv_head or args.require_same_pv_prefix > 0:
-        prefix_len = max(1 if args.require_same_pv_head else 0, args.require_same_pv_prefix)
+        prefix_len = max(
+            1 if args.require_same_pv_head else 0, args.require_same_pv_prefix
+        )
         if len(expected_pv) < prefix_len or len(actual_pv) < prefix_len:
             failures.append(
                 f"PV prefix of {prefix_len} move(s) missing: "
@@ -200,9 +202,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{args.actual_label}={actual_score!r}"
             )
         else:
-            score_delta = abs(
-                int(expected_score["value"]) - int(actual_score["value"])
-            )
+            score_delta = abs(int(expected_score["value"]) - int(actual_score["value"]))
             if score_delta > args.max_score_cp_delta:
                 failures.append(
                     f"cp score delta {score_delta} exceeds {args.max_score_cp_delta}: "

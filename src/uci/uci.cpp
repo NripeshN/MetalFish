@@ -869,17 +869,13 @@ static void log_mcts_runtime_config(const char *label,
                                     const MCTS::SearchParams &config) {
   sync_cout << "info string " << label << ": backend=" << config.nn_backend
             << " minibatch=" << config.minibatch_size
-            << " cuda_device=" << config.cuda_device
-            << " cuda_graph="
+            << " cuda_device=" << config.cuda_device << " cuda_graph="
             << (config.cuda_graph_execution ? "true" : "false")
-            << " cuda_stable_batch="
-            << config.cuda_stable_execution_batch_size
+            << " cuda_stable_batch=" << config.cuda_stable_execution_batch_size
             << " cuda_deterministic_softmax="
-            << (config.cuda_deterministic_attention_softmax ? "true"
-                                                            : "false")
+            << (config.cuda_deterministic_attention_softmax ? "true" : "false")
             << " cuda_full_buffer_clear="
-            << (config.cuda_full_buffer_clear ? "true" : "false")
-            << sync_endl;
+            << (config.cuda_full_buffer_clear ? "true" : "false") << sync_endl;
 }
 
 static std::optional<std::string>
@@ -1257,11 +1253,10 @@ make_hybrid_cache_key(const std::string &nn_weights,
       << config.ab_candidate_verify_count << "|"
       << config.root_pawn_lever_tiebreak << "|" << config.ane_root_probe << "|"
       << config.ane_root_hints << "|" << config.ane_confirm_mcts_override << "|"
-      << config.ane_only_pawn_endgames << "|"
-      << config.ane_weights_path << "|" << config.ane_model_path << "|"
-      << config.ane_compute_units << "|" << config.ane_root_hint_count << "|"
-      << config.ane_root_hint_wait_ms << "|" << config.ane_min_budget_ms << "|"
-      << config.trace_decisions;
+      << config.ane_only_pawn_endgames << "|" << config.ane_weights_path << "|"
+      << config.ane_model_path << "|" << config.ane_compute_units << "|"
+      << config.ane_root_hint_count << "|" << config.ane_root_hint_wait_ms
+      << "|" << config.ane_min_budget_ms << "|" << config.trace_decisions;
   return key.str();
 }
 

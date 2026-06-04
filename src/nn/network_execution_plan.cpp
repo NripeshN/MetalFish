@@ -895,18 +895,16 @@ ClassifyNetworkPlanStage(const NetworkResolvedExecutionPlan &plan,
                  NetworkPlanStagePrefix(plan, NetworkPlanStageGroup::Body))) {
     return NetworkPlanStageGroup::Body;
   }
-  if (StartsWith(
-          stage_name,
-          NetworkPlanStagePrefix(plan, NetworkPlanStageGroup::Policy))) {
+  if (StartsWith(stage_name,
+                 NetworkPlanStagePrefix(plan, NetworkPlanStageGroup::Policy))) {
     return NetworkPlanStageGroup::Policy;
   }
   if (StartsWith(stage_name,
                  NetworkPlanStagePrefix(plan, NetworkPlanStageGroup::Value))) {
     return NetworkPlanStageGroup::Value;
   }
-  if (StartsWith(
-          stage_name,
-          NetworkPlanStagePrefix(plan, NetworkPlanStageGroup::MovesLeft))) {
+  if (StartsWith(stage_name, NetworkPlanStagePrefix(
+                                 plan, NetworkPlanStageGroup::MovesLeft))) {
     return NetworkPlanStageGroup::MovesLeft;
   }
   return NetworkPlanStageGroup::Other;
@@ -1031,8 +1029,8 @@ int NetworkAttentionHeadCount(const NetworkResolvedExecutionPlan &plan,
   return 0;
 }
 
-bool NetworkIsAttentionLayerNormStage(
-    const NetworkResolvedExecutionPlan &, std::string_view stage_name) {
+bool NetworkIsAttentionLayerNormStage(const NetworkResolvedExecutionPlan &,
+                                      std::string_view stage_name) {
   if (!EndsWith(stage_name, ".ln1"))
     return false;
   if (StartsWith(stage_name, "body.encoder."))
@@ -1054,8 +1052,7 @@ bool NetworkStageUsesSquareRows(const NetworkResolvedExecutionPlan &plan,
     const std::string prefix = "policy." + plan.policy_head + ".";
     if (StartsWith(stage_name, prefix) &&
         plan.ContainsStep(prefix + "policy_map") &&
-        (stage_name == prefix + "output" ||
-         stage_name == prefix + "dense2" ||
+        (stage_name == prefix + "output" || stage_name == prefix + "dense2" ||
          stage_name == prefix + "dense3" ||
          stage_name.find(".encoder.") != std::string_view::npos)) {
       return true;
@@ -1080,8 +1077,9 @@ int NetworkDenseLikeRows(const NetworkResolvedExecutionPlan &plan,
   return batch_size * squares;
 }
 
-std::string NetworkDenseStageActivationName(
-    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name) {
+std::string
+NetworkDenseStageActivationName(const NetworkResolvedExecutionPlan &plan,
+                                std::string_view stage_name) {
   const std::string policy_prefix = "policy." + plan.policy_head + ".";
   if (StartsWith(stage_name, policy_prefix)) {
     if (stage_name == policy_prefix + "dense2" ||
@@ -1151,8 +1149,8 @@ NetworkBodyEncoderLayerCount(const NetworkResolvedExecutionPlan &plan) {
   return found ? max_layer : 0;
 }
 
-float NetworkFeedForwardResidualScale(
-    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name) {
+float NetworkFeedForwardResidualScale(const NetworkResolvedExecutionPlan &plan,
+                                      std::string_view stage_name) {
   if (!StartsWith(stage_name, "body.input_embedding_ffn") &&
       !StartsWith(stage_name, "body.encoder.")) {
     return 1.0f;
@@ -1183,8 +1181,8 @@ float NetworkDenseLayerNormEpsilon(const NetworkResolvedExecutionPlan &plan,
   return 1e-5f;
 }
 
-float NetworkAttentionLayerNormEpsilon(
-    const NetworkResolvedExecutionPlan &plan, std::string_view stage_name) {
+float NetworkAttentionLayerNormEpsilon(const NetworkResolvedExecutionPlan &plan,
+                                       std::string_view stage_name) {
   if (StartsWith(stage_name, "body.encoder.")) {
     return plan.format.input_embedding == INPUT_EMBEDDING_PE_DENSE ? 1e-3f
                                                                    : 1e-6f;

@@ -26,7 +26,8 @@ namespace NN {
 namespace Cuda {
 namespace {
 
-float *TargetPointer(CudaInferenceBuffers &buffers, NetworkOutputTarget target) {
+float *TargetPointer(CudaInferenceBuffers &buffers,
+                     NetworkOutputTarget target) {
   switch (target) {
   case NetworkOutputTarget::Policy:
     return buffers.policy;
@@ -83,7 +84,8 @@ SelectCompatibleStage(const NetworkTensorPlan &tensor_plan,
     const auto &step = execution_plan.steps[entry.first_step];
     if (ClassifyCudaPlanStage(execution_plan, step.name) != group)
       continue;
-    if (target == NetworkOutputTarget::Value && IsCudaValueErrorStage(step.name))
+    if (target == NetworkOutputTarget::Value &&
+        IsCudaValueErrorStage(step.name))
       continue;
 
     const int source_width = CudaOutputStageWidth(execution_plan, entry);
@@ -132,7 +134,8 @@ void AddBinding(CudaOutputMapping &mapping,
   const int target_stride = NetworkOutputTargetStride(tensor_plan, target);
   if (target_stride == 0) {
     if (required)
-      AddError(mapping, NetworkOutputTargetName(target) + " output is disabled");
+      AddError(mapping,
+               NetworkOutputTargetName(target) + " output is disabled");
     return;
   }
 
@@ -209,8 +212,8 @@ CreateCudaOutputMapping(const NetworkTensorPlan &tensor_plan,
   const std::string policy_source =
       SelectPolicyStage(tensor_plan, execution_plan, schedule, options);
   const std::string value_source = SelectCompatibleStage(
-      tensor_plan, execution_plan, schedule, options, NetworkOutputTarget::Value,
-      CudaPlanStageGroup::Value, false);
+      tensor_plan, execution_plan, schedule, options,
+      NetworkOutputTarget::Value, CudaPlanStageGroup::Value, false);
   AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
              NetworkOutputTarget::Policy, policy_source, true);
   AddBinding(mapping, tensor_plan, execution_plan, schedule, options,
