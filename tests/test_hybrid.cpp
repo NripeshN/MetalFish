@@ -465,6 +465,58 @@ void test_hybrid_config() {
                    true, true, 262, 137, 0.523f, 0.066f, 20, 20));
   }
   {
+    TestCase tc("Low-node root-confidence MCTS override stays narrow");
+
+    EXPECT(tc, HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 73, 53, 0.726f, 0.354f, 239, 236, 15,
+                   -1, 4, -32001, false, false, 23, 3, 9, 0.242f, 0.663f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   false, true, false, 52, 42, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, false, false, 52, 42, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, true, 52, 42, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 49, 42, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 39, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.699f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.808f, 0.299f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.808f, 0.586f, 179, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.808f, 0.586f, 198, 149, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.808f, 0.586f, 198, 192, 30,
+                   -7, 2, -9, true, false, 71601, 2, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 1, 5, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 13, -0.007f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 71601, 2, 5, 0.190f, 0.579f));
+    EXPECT(tc, !HybridMCTSLowNodeRootConfidenceOverride(
+                   true, true, false, 52, 42, 0.808f, 0.586f, 198, 192, -11,
+                   -7, 2, -9, true, false, 49999, 2, 5, -0.007f, 0.579f));
+  }
+  {
     TestCase tc("Short-root tactical MCTS override");
 
     EXPECT(tc, HybridMCTSShortRootTacticalOverride(
