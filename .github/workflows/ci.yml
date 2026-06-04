@@ -448,9 +448,9 @@ jobs:
             --setoption TransformerLowTimeFallbackMs=0 \
             --position "fen 7k/P7/8/8/8/8/8/7K w - - 0 1" \
             --go "searchmoves a7a8q nodes 50" \
-            --expect-output "Hybrid fixed-node budget is tiny" \
-            --expect-output "Starting Multi-Threaded MCTS Search" \
-            --expect-output "MCTS runtime: backend=metal" \
+            --expect-output "Starting Parallel Hybrid Search" \
+            --expect-output "Hybrid MCTS runtime: backend=metal" \
+            --expect-output "Final: MCTSPlayouts=" \
             --json-out build/metal-hybrid-promotion-search.json
           python3 tools/uci_smoke.py \
             --engine build/metalfish \

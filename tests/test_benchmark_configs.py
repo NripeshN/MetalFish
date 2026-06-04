@@ -752,6 +752,8 @@ def main() -> int:
             '--expect-output "Hybrid fixed-node budget is tiny"',
             '--expect-output "MCTS runtime: backend=metal"',
             "--expect-bestmove h5f6",
+            '--expect-output "Hybrid MCTS runtime: backend=metal"',
+            '--expect-output "Final: MCTSPlayouts="',
             "Run Apple accelerator tool tests",
             "tools/lc0_coreml_root_value_probe.py",
             "tests/test_lc0_coreml_root_value_probe.py",
