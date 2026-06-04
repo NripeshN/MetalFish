@@ -749,6 +749,8 @@ def main() -> int:
             "MCTSParallelSearch=false",
             "TransformerLowTimeFallbackMs=0",
             'go "nodes 50"',
+            '--expect-output "Hybrid fixed-node budget is tiny"',
+            '--expect-output "MCTS runtime: backend=metal"',
             "--expect-bestmove h5f6",
             "Run Apple accelerator tool tests",
             "tools/lc0_coreml_root_value_probe.py",

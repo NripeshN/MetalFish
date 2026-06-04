@@ -382,9 +382,9 @@ jobs:
             --setoption TransformerLowTimeFallbackMs=0 \
             --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
             --go "nodes 50" \
-            --expect-output "Starting Parallel Hybrid Search" \
-            --expect-output "Hybrid MCTS runtime: backend=metal" \
-            --expect-output "Final: MCTSPlayouts=" \
+            --expect-output "Hybrid fixed-node budget is tiny" \
+            --expect-output "Starting Multi-Threaded MCTS Search" \
+            --expect-output "MCTS runtime: backend=metal" \
             --json-out build/metal-hybrid-bk07-search.json
           python3 tools/uci_smoke.py \
             --engine build/metalfish \
@@ -404,9 +404,9 @@ jobs:
             --setoption TransformerLowTimeFallbackMs=0 \
             --position "fen r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1" \
             --go "nodes 50" \
-            --expect-output "Starting Parallel Hybrid Search" \
-            --expect-output "Hybrid MCTS runtime: backend=metal" \
-            --expect-output "Final: MCTSPlayouts=" \
+            --expect-output "Hybrid fixed-node budget is tiny" \
+            --expect-output "Starting Multi-Threaded MCTS Search" \
+            --expect-output "MCTS runtime: backend=metal" \
             --json-out build/metal-hybrid-kiwipete-search.json
           python3 tools/uci_smoke.py \
             --engine build/metalfish \
@@ -426,9 +426,9 @@ jobs:
             --setoption TransformerLowTimeFallbackMs=0 \
             --position "fen rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1" \
             --go "nodes 50" \
-            --expect-output "Starting Parallel Hybrid Search" \
-            --expect-output "Hybrid MCTS runtime: backend=metal" \
-            --expect-output "Final: MCTSPlayouts=" \
+            --expect-output "Hybrid fixed-node budget is tiny" \
+            --expect-output "Starting Multi-Threaded MCTS Search" \
+            --expect-output "MCTS runtime: backend=metal" \
             --json-out build/metal-hybrid-after-e4-search.json
           python3 tools/uci_smoke.py \
             --engine build/metalfish \
@@ -448,9 +448,9 @@ jobs:
             --setoption TransformerLowTimeFallbackMs=0 \
             --position "fen 7k/P7/8/8/8/8/8/7K w - - 0 1" \
             --go "searchmoves a7a8q nodes 50" \
-            --expect-output "Starting Parallel Hybrid Search" \
-            --expect-output "Hybrid MCTS runtime: backend=metal" \
-            --expect-output "Final: MCTSPlayouts=" \
+            --expect-output "Hybrid fixed-node budget is tiny" \
+            --expect-output "Starting Multi-Threaded MCTS Search" \
+            --expect-output "MCTS runtime: backend=metal" \
             --json-out build/metal-hybrid-promotion-search.json
           python3 tools/uci_smoke.py \
             --engine build/metalfish \
@@ -470,9 +470,9 @@ jobs:
             --setoption TransformerLowTimeFallbackMs=0 \
             --position "fen rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2" \
             --go "nodes 50" \
-            --expect-output "Starting Parallel Hybrid Search" \
-            --expect-output "Hybrid MCTS runtime: backend=metal" \
-            --expect-output "Final: MCTSPlayouts=" \
+            --expect-output "Hybrid fixed-node budget is tiny" \
+            --expect-output "Starting Multi-Threaded MCTS Search" \
+            --expect-output "MCTS runtime: backend=metal" \
             --json-out build/metal-hybrid-en-passant-search.json
 
       - name: Upload macOS artifact
