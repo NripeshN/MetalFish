@@ -680,10 +680,9 @@ bool HybridMCTSLowNodeRootConfidenceOverride(
       mcts_in_ab_score == -VALUE_INFINITE && !mcts_in_ab_lowerbound &&
       !mcts_in_ab_upperbound && mcts_in_ab_effort <= 1000;
   const bool ab_shallow_lower_bound =
-      mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 3 &&
-      mcts_in_ab_lowerbound && !mcts_in_ab_upperbound &&
-      mcts_in_ab_score >= -50 && mcts_in_ab_effort >= 50000 &&
-      mcts_in_ab_effort <= 250000;
+      mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 3 && mcts_in_ab_lowerbound &&
+      !mcts_in_ab_upperbound && mcts_in_ab_score >= -50 &&
+      mcts_in_ab_effort >= 50000 && mcts_in_ab_effort <= 250000;
 
   return ab_barely_touched_mcts || ab_shallow_lower_bound;
 }
@@ -3929,7 +3928,8 @@ Move ParallelHybridSearch::make_final_decision() {
       ane_confirmed_mcts_override || pawn_only_ane_mcts_override ||
       mcts_short_root_tactical || mcts_compact_fixed_budget ||
       mcts_ab_lowerbound_confirmed || mcts_low_node_root_confidence ||
-      mcts_compact_clear_preference || mcts_cross_root_confidence_fixed_budget ||
+      mcts_compact_clear_preference ||
+      mcts_cross_root_confidence_fixed_budget ||
       mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
       mcts_root_reject_low_material_push || mcts_root_reject_rook_pawn_push ||
       mcts_root_reject_quiet_queen_move || mcts_bishop_endgame_retreat ||
@@ -3956,8 +3956,7 @@ Move ParallelHybridSearch::make_final_decision() {
           : ane_confirmed_mcts_override        ? "ane_confirmed_mcts"
           : pawn_only_ane_mcts_override        ? "pawn_only_ane_mcts"
           : mcts_ab_lowerbound_confirmed       ? "mcts_ab_lowerbound_confirmed"
-          : mcts_low_node_root_confidence
-              ? "mcts_low_node_root_confidence"
+          : mcts_low_node_root_confidence      ? "mcts_low_node_root_confidence"
           : mcts_discovered_pawn_push_override ? "mcts_discovered_pawn_push"
           : mcts_root_reject_low_material_push
               ? "mcts_root_reject_low_material_push"
