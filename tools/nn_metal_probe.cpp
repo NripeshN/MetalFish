@@ -232,9 +232,8 @@ Options ParseArgs(int argc, char **argv) {
     } else if (arg == "--cuda-device") {
       options.cuda_device = std::stoi(require_value("--cuda-device"));
     } else if (arg == "--cuda-graph-execution") {
-      options.cuda_graph_execution =
-          ParseBool(require_value("--cuda-graph-execution"),
-                    "--cuda-graph-execution");
+      options.cuda_graph_execution = ParseBool(
+          require_value("--cuda-graph-execution"), "--cuda-graph-execution");
     } else if (arg == "--cuda-stable-execution-batch-size") {
       options.cuda_stable_execution_batch_size =
           std::stoi(require_value("--cuda-stable-execution-batch-size"));
@@ -572,7 +571,8 @@ void PrintMetadataOnly(const Options &options, const NN::WeightsFile &weights,
 
   std::string network_info;
   if (options.construct_backend) {
-    auto network = NN::CreateNetwork(weights, BackendConfigFromOptions(options));
+    auto network =
+        NN::CreateNetwork(weights, BackendConfigFromOptions(options));
     network_info = network->GetNetworkInfo();
   }
 
@@ -653,7 +653,8 @@ ProbePositionHistory BuildProbePositionHistory(const Options &options) {
   history.snapshots.reserve(options.moves.size() + 1);
   for (std::size_t move_count = 0; move_count <= options.moves.size();
        ++move_count) {
-    history.snapshots.push_back(BuildProbePositionSnapshot(options, move_count));
+    history.snapshots.push_back(
+        BuildProbePositionSnapshot(options, move_count));
   }
   return history;
 }
@@ -688,7 +689,7 @@ void RunProbe(const Options &options) {
   RefreshProbeHistoryPointers(position_history);
   const Position &position = *position_history.ptrs.back();
   const std::span<const Position *const> history(position_history.ptrs.data(),
-                                                position_history.ptrs.size());
+                                                 position_history.ptrs.size());
   int transform = 0;
   const auto planes =
       NN::EncodePositionForNN(input_format, history, NN::kMoveHistory,

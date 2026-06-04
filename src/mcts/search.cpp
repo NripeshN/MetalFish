@@ -266,8 +266,7 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
           ResolveAutoMinibatchSize(params_, backend_capabilities);
       if (resolved_minibatch != params_.minibatch_size) {
         std::cerr << "[MCTS] Resolved auto minibatch: initial="
-                  << params_.minibatch_size
-                  << " actual=" << resolved_minibatch
+                  << params_.minibatch_size << " actual=" << resolved_minibatch
                   << " backend=" << backend_capabilities.actual_backend
                   << std::endl;
       }
@@ -285,12 +284,11 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
       for (int pass = 0; pass < passes; ++pass) {
         auto comp = backend_->CreateComputation();
         for (int i = 0; i < batch_size; ++i) {
-          comp->AddInput(warmup_pos,
-                         warmup_base ^
-                             (salt +
-                              static_cast<uint64_t>(pass) *
-                                  0x9e3779b97f4a7c15ULL +
-                              static_cast<uint64_t>(i) * kFNVPrime));
+          comp->AddInput(
+              warmup_pos,
+              warmup_base ^
+                  (salt + static_cast<uint64_t>(pass) * 0x9e3779b97f4a7c15ULL +
+                   static_cast<uint64_t>(i) * kFNVPrime));
         }
         const auto batch_start = std::chrono::steady_clock::now();
         comp->ComputeBlocking();

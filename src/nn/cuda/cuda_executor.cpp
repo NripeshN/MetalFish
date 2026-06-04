@@ -407,8 +407,8 @@ public:
       : schedule_(std::move(schedule)),
         output_mapping_(std::move(output_mapping)),
         stage_options_(stage_options),
-        graph_requested_(CudaGraphExecutionRequested(graph_execution_requested)) {
-  }
+        graph_requested_(
+            CudaGraphExecutionRequested(graph_execution_requested)) {}
 
   void Execute(const NetworkTensorPlan &,
                const NetworkResolvedExecutionPlan &execution_plan,
@@ -764,15 +764,12 @@ std::unique_ptr<CudaExecutor> CreatePlanSmokeCudaExecutor() {
   return std::make_unique<PlanSmokeCudaExecutor>();
 }
 
-std::unique_ptr<CudaExecutor>
-CreateResolvedCudaExecutor(CudaExecutionSchedule schedule,
-                           CudaOutputMapping output_mapping,
-                           bool graph_execution_requested,
-                           CudaStageExecutionOptions stage_options) {
-  return std::make_unique<ResolvedCudaExecutor>(std::move(schedule),
-                                                std::move(output_mapping),
-                                                graph_execution_requested,
-                                                stage_options);
+std::unique_ptr<CudaExecutor> CreateResolvedCudaExecutor(
+    CudaExecutionSchedule schedule, CudaOutputMapping output_mapping,
+    bool graph_execution_requested, CudaStageExecutionOptions stage_options) {
+  return std::make_unique<ResolvedCudaExecutor>(
+      std::move(schedule), std::move(output_mapping), graph_execution_requested,
+      stage_options);
 }
 
 } // namespace Cuda

@@ -100,8 +100,8 @@ CudaDeviceSelection SelectCudaDevice(int requested_device) {
       std::ostringstream out;
       out << (requested_from_env ? "METALFISH_CUDA_DEVICE="
                                  : "configured CUDA device ")
-          << requested
-          << " is outside the visible CUDA device range 0.." << (count - 1);
+          << requested << " is outside the visible CUDA device range 0.."
+          << (count - 1);
       return {false, -1, out.str()};
     }
     status = cudaSetDevice(requested);

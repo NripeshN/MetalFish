@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fetch and validate same-commit CUDA release packages."""
+
 from __future__ import annotations
 
 import argparse
@@ -15,18 +16,18 @@ import time
 import zipfile
 
 try:
-    from tools.check_cuda_runtime_manifest import validate_runtime_manifest
     from tools.check_cuda_package_artifacts import (
         validate_linux_cuda_package,
         validate_windows_cuda_package,
     )
+    from tools.check_cuda_runtime_manifest import validate_runtime_manifest
     from tools.github_cli import gh_cmd
 except ModuleNotFoundError:
-    from check_cuda_runtime_manifest import validate_runtime_manifest
     from check_cuda_package_artifacts import (
         validate_linux_cuda_package,
         validate_windows_cuda_package,
     )
+    from check_cuda_runtime_manifest import validate_runtime_manifest
     from github_cli import gh_cmd
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -141,7 +142,9 @@ def list_artifacts(repo: str, run_id: str) -> list[ArtifactInfo]:
 
 
 def select_artifact(artifacts: list[ArtifactInfo], *, pattern: str) -> ArtifactInfo:
-    matches = [artifact for artifact in artifacts if fnmatch.fnmatch(artifact.name, pattern)]
+    matches = [
+        artifact for artifact in artifacts if fnmatch.fnmatch(artifact.name, pattern)
+    ]
     if not matches:
         available = ", ".join(artifact.name for artifact in artifacts) or "<none>"
         raise ValueError(f"artifact {pattern!r} not found; available: {available}")
@@ -164,7 +167,9 @@ def complete_zip(path: pathlib.Path, *, expected_size: int) -> bool:
         return False
 
 
-def download_artifact(repo: str, artifact: ArtifactInfo, archive_path: pathlib.Path) -> None:
+def download_artifact(
+    repo: str, artifact: ArtifactInfo, archive_path: pathlib.Path
+) -> None:
     archive_path.parent.mkdir(parents=True, exist_ok=True)
     if complete_zip(archive_path, expected_size=artifact.size_in_bytes):
         return
@@ -215,7 +220,9 @@ def safe_extract_zip(archive_path: pathlib.Path, dest: pathlib.Path) -> None:
         for member in archive.infolist():
             target = (dest / member.filename).resolve()
             if root != target and root not in target.parents:
-                raise ValueError(f"zip member escapes extraction root: {member.filename}")
+                raise ValueError(
+                    f"zip member escapes extraction root: {member.filename}"
+                )
         archive.extractall(dest)
 
 
@@ -276,7 +283,9 @@ def require_linux_runtime_package_record(runtime: dict, package: pathlib.Path) -
     )
 
 
-def require_windows_runtime_package_record(runtime: dict, package: pathlib.Path) -> None:
+def require_windows_runtime_package_record(
+    runtime: dict, package: pathlib.Path
+) -> None:
     package_input = (runtime.get("inputs") or {}).get("package") or {}
     require_matching_file_record(
         file_record(package),
@@ -345,10 +354,7 @@ def validate_direct_runtime_manifest(
         )
     target = manifest.get("target")
     if target not in {"both", "linux", "windows"}:
-        raise ValueError(
-            "direct runtime manifest has unexpected target "
-            f"{target!r}"
-        )
+        raise ValueError("direct runtime manifest has unexpected target " f"{target!r}")
     completed_targets = set()
     if target == "both":
         completed_targets.update({"linux", "windows"})
@@ -414,7 +420,9 @@ def fetch_direct_runtime_artifacts(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default="", help="GitHub repo, for example owner/name")
+    parser.add_argument(
+        "--repo", default="", help="GitHub repo, for example owner/name"
+    )
     parser.add_argument("--linux-cuda-run-id", default="")
     parser.add_argument("--windows-cuda-runtime-run-id", default="")
     parser.add_argument(
@@ -449,7 +457,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     if direct_root and (args.linux_cuda_run_id or args.windows_cuda_runtime_run_id):
         raise ValueError("--direct-runtime-root is mutually exclusive with run IDs")
-    if not direct_root and not (args.linux_cuda_run_id and args.windows_cuda_runtime_run_id):
+    if not direct_root and not (
+        args.linux_cuda_run_id and args.windows_cuda_runtime_run_id
+    ):
         raise ValueError(
             "provide --direct-runtime-root or both --linux-cuda-run-id and "
             "--windows-cuda-runtime-run-id"

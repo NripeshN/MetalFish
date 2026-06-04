@@ -17,16 +17,16 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tools import check_cuda_runtime_manifest as runtime_checker  # noqa: E402
 from tools import audit_cuda_gcp_resources as gcp_audit  # noqa: E402
+from tools import check_cuda_runtime_manifest as runtime_checker  # noqa: E402
 from tools import check_nn_backend_artifacts as checker  # noqa: E402
 from tools import compare_nn_backend_benchmarks as benchmark_comparer  # noqa: E402
 from tools import compare_nn_backend_outputs as comparer  # noqa: E402
 from tools import cuda_runtime_manifest_writer as runtime_writer  # noqa: E402
 from tools import cuda_runtime_observed as runtime_observed  # noqa: E402
 from tools import cuda_runtime_search_contract as search_contract  # noqa: E402
-from tools import download_engine_networks as downloader  # noqa: E402
 from tools import dispatch_cuda_release_artifacts as cuda_release_dispatch  # noqa: E402
+from tools import download_engine_networks as downloader  # noqa: E402
 from tools import fetch_cuda_gpu_gate_inputs as cuda_gpu_inputs  # noqa: E402
 from tools import fetch_cuda_release_artifacts as cuda_release  # noqa: E402
 from tools import fetch_windows_cuda_runtime_inputs as win_cuda_inputs  # noqa: E402
@@ -552,7 +552,9 @@ def test_backend_benchmark_compare_allows_expected_without_graph_reuse() -> None
             expect("actual-only graph reuse success", benchmark_comparer.main() == 0)
 
         data = json.loads(summary.read_text(encoding="utf-8"))
-        expect("expected graph reuse absent", data["expected"]["graph_reuse_batches"] == [])
+        expect(
+            "expected graph reuse absent", data["expected"]["graph_reuse_batches"] == []
+        )
         expect(
             "actual graph reuse present",
             data["actual"]["graph_reuse_batches"] == [4, 1, 2, 4, 1, 2],
@@ -1180,7 +1182,9 @@ def test_windows_cuda_runtime_input_helpers_select_artifacts() -> None:
     try:
         win_cuda_inputs.select_artifact(artifacts, pattern="missing-*")
     except ValueError as exc:
-        expect("missing artifact lists available", "windows-cuda-compile-123" in str(exc))
+        expect(
+            "missing artifact lists available", "windows-cuda-compile-123" in str(exc)
+        )
     else:
         raise AssertionError("expected missing artifact failure")
 
@@ -1191,11 +1195,12 @@ def test_windows_cuda_runtime_input_manifest_records_file_hashes() -> None:
         payload.write_text("windows cuda input provenance\n", encoding="utf-8")
         record = win_cuda_inputs.file_record(payload)
         expect("windows input file path", record["path"] == str(payload))
-        expect("windows input file size", record["size_bytes"] == payload.stat().st_size)
+        expect(
+            "windows input file size", record["size_bytes"] == payload.stat().st_size
+        )
         expect(
             "windows input file sha",
-            record["sha256"]
-            == hashlib.sha256(payload.read_bytes()).hexdigest(),
+            record["sha256"] == hashlib.sha256(payload.read_bytes()).hexdigest(),
         )
 
     script = (ROOT / "tools/fetch_windows_cuda_runtime_inputs.py").read_text(
@@ -1286,12 +1291,17 @@ def test_cuda_release_artifact_download_retries_truncated_zip() -> None:
             cuda_release.time.sleep = old_sleep
         expect("release download retried", len(calls) == 2)
         expect("release archive exists", archive_path.is_file())
-        expect("release archive size", archive_path.stat().st_size == len(valid_payload))
+        expect(
+            "release archive size", archive_path.stat().st_size == len(valid_payload)
+        )
         expect(
             "release archive valid",
             cuda_release.complete_zip(archive_path, expected_size=len(valid_payload)),
         )
-        expect("release part cleaned", not archive_path.with_name("artifact.zip.part").exists())
+        expect(
+            "release part cleaned",
+            not archive_path.with_name("artifact.zip.part").exists(),
+        )
         with zipfile.ZipFile(archive_path) as archive:
             expect(
                 "release archive payload",
@@ -1317,7 +1327,9 @@ def test_windows_cuda_runtime_input_helpers_validate_package_commit() -> None:
             package,
             expected_source_commit="compile-sha",
         )
-        expect("windows runtime package commit", summary["source_commit"] == "compile-sha")
+        expect(
+            "windows runtime package commit", summary["source_commit"] == "compile-sha"
+        )
 
         try:
             win_cuda_inputs.validate_package_manifest(
@@ -1448,21 +1460,15 @@ def runtime_inputs(*, windows_package: pathlib.Path | None = None) -> dict:
         "metal_probe_suite_log": metal_log_record("metal-bt4.log"),
         "metal_legacy_probe_suite_log": metal_log_record("metal-legacy.log"),
         "metal_mcts_bk07_search_json": metal_log_record("metal-mcts-bk07.json"),
-        "metal_mcts_kiwipete_search_json": metal_log_record(
-            "metal-mcts-kiwipete.json"
-        ),
-        "metal_mcts_after_e4_search_json": metal_log_record(
-            "metal-mcts-after-e4.json"
-        ),
+        "metal_mcts_kiwipete_search_json": metal_log_record("metal-mcts-kiwipete.json"),
+        "metal_mcts_after_e4_search_json": metal_log_record("metal-mcts-after-e4.json"),
         "metal_mcts_promotion_search_json": metal_log_record(
             "metal-mcts-promotion.json"
         ),
         "metal_mcts_en_passant_search_json": metal_log_record(
             "metal-mcts-en-passant.json"
         ),
-        "metal_hybrid_bk07_search_json": metal_log_record(
-            "metal-hybrid-bk07.json"
-        ),
+        "metal_hybrid_bk07_search_json": metal_log_record("metal-hybrid-bk07.json"),
         "metal_hybrid_kiwipete_search_json": metal_log_record(
             "metal-hybrid-kiwipete.json"
         ),
@@ -1758,8 +1764,7 @@ def test_cuda_runtime_search_contract_paths() -> None:
     )
     expect(
         "linux mcts bk07 path",
-        linux["mcts_bk07"]
-        == root / "metal-cuda-mcts-bk07-search-summary.json",
+        linux["mcts_bk07"] == root / "metal-cuda-mcts-bk07-search-summary.json",
     )
     expect(
         "windows mcts bk07 path",
@@ -1857,21 +1862,15 @@ def runtime_manifest_writer_env(
         "GATE_METAL_PROBE_SUITE_LOG": write_input("metal-bt4.log"),
         "GATE_METAL_LEGACY_PROBE_SUITE_LOG": write_input("metal-legacy.log"),
         "GATE_METAL_MCTS_BK07_SEARCH_JSON": write_input("metal-mcts-bk07.json"),
-        "GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON": write_input(
-            "metal-mcts-kiwipete.json"
-        ),
-        "GATE_METAL_MCTS_AFTER_E4_SEARCH_JSON": write_input(
-            "metal-mcts-after-e4.json"
-        ),
+        "GATE_METAL_MCTS_KIWIPETE_SEARCH_JSON": write_input("metal-mcts-kiwipete.json"),
+        "GATE_METAL_MCTS_AFTER_E4_SEARCH_JSON": write_input("metal-mcts-after-e4.json"),
         "GATE_METAL_MCTS_PROMOTION_SEARCH_JSON": write_input(
             "metal-mcts-promotion.json"
         ),
         "GATE_METAL_MCTS_EN_PASSANT_SEARCH_JSON": write_input(
             "metal-mcts-en-passant.json"
         ),
-        "GATE_METAL_HYBRID_BK07_SEARCH_JSON": write_input(
-            "metal-hybrid-bk07.json"
-        ),
+        "GATE_METAL_HYBRID_BK07_SEARCH_JSON": write_input("metal-hybrid-bk07.json"),
         "GATE_METAL_HYBRID_KIWIPETE_SEARCH_JSON": write_input(
             "metal-hybrid-kiwipete.json"
         ),
@@ -3191,7 +3190,10 @@ def test_network_downloader_retries_truncated_gzip() -> None:
 
         expect("retried after truncated gzip", calls == 2)
         expect("downloaded destination exists", dest.exists())
-        expect("temporary file cleaned", not dest.with_suffix(dest.suffix + ".tmp").exists())
+        expect(
+            "temporary file cleaned",
+            not dest.with_suffix(dest.suffix + ".tmp").exists(),
+        )
         downloader.validate_gzip_weights(dest)
 
 

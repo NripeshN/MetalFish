@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Extract semantic CUDA runtime facts from gate artifacts."""
+
 from __future__ import annotations
 
 import json
@@ -8,7 +9,6 @@ import re
 from typing import Any
 
 from tools.cuda_runtime_search_contract import search_summary_paths
-
 
 _BOOL_RE = {
     "1": True,
@@ -113,7 +113,9 @@ def _benchmark_facts(summary: dict[str, Any] | None) -> dict[str, Any]:
         "common_batch_count": summary.get("common_batch_count"),
         "best_common_batch": best_common.get("batch_size"),
         "best_common_cuda_eval_ms": _float_or_none(best_common.get("actual_eval_ms")),
-        "best_common_metal_eval_ms": _float_or_none(best_common.get("expected_eval_ms")),
+        "best_common_metal_eval_ms": _float_or_none(
+            best_common.get("expected_eval_ms")
+        ),
         "best_common_speedup_vs_metal": _float_or_none(
             best_common.get("actual_speedup_vs_expected")
         ),
