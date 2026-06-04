@@ -7,6 +7,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -122,14 +123,17 @@ class Backend {
 public:
   explicit Backend(const std::string &weights_path,
                    size_t cache_entries = NNCache::kDefaultEntries,
-                   const std::string &backend = "auto",
-                   const std::string &coreml_model_path = "",
-                   const std::string &coreml_compute_units = "cpu-ne");
+                   NN::BackendConfig backend_config = {});
+  Backend(const std::string &weights_path, size_t cache_entries,
+          const std::string &backend, const std::string &coreml_model_path = "",
+          const std::string &coreml_compute_units = "cpu-ne");
 
   std::unique_ptr<BackendComputation> CreateComputation();
   NNCache &Cache() { return cache_; }
   bool HasWDL() const;
   bool HasMovesLeft() const;
+  std::string GetNetworkInfo() const;
+  NN::BackendCapabilities GetBackendCapabilities() const;
 
 private:
   std::unique_ptr<NNMCTSEvaluator> evaluator_;

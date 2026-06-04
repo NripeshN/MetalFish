@@ -133,8 +133,7 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
     auto backend = std::make_unique<Backend>(
         config_.mcts_config.nn_weights_path,
         static_cast<size_t>(std::max(1, config_.mcts_config.nn_cache_size)),
-        config_.mcts_config.nn_backend, config_.mcts_config.coreml_model_path,
-        config_.mcts_config.coreml_compute_units);
+        config_.mcts_config.GetBackendConfig());
     mcts_search_ =
         std::make_unique<Search>(config_.mcts_config, std::move(backend));
   } catch (const std::exception &e) {
@@ -159,6 +158,7 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
       std::cerr << "[HYB] ANE root probe disabled: weights/model path missing"
                 << std::endl;
     } else {
+#ifdef USE_COREML
       try {
         ane_evaluator_ = std::make_unique<NNMCTSEvaluator>(
             config_.ane_weights_path, "coreml", config_.ane_model_path,
@@ -177,6 +177,12 @@ bool ParallelHybridSearch::initialize(Engine *engine) {
                   << std::endl;
         ane_evaluator_.reset();
       }
+#else
+      std::cerr
+          << "[HYB] ANE root probe disabled: Core ML backend was not compiled "
+             "into MetalFish"
+          << std::endl;
+#endif
     }
   }
 

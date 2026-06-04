@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "nn/encoder.h"
+#include "nn/input_planes.h"
 
 #include <array>
 #include <cstddef>

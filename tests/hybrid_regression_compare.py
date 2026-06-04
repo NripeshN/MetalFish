@@ -5,9 +5,11 @@ import argparse
 import json
 import os
 import pathlib
+import queue
 import statistics
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -33,6 +35,8 @@ PERF_POSITIONS: List[Tuple[str, str]] = [
     ),
     ("endgame", "8/5pk1/5p1p/2R5/pp6/1P4PP/P4PK1/2r5 w - - 0 36"),
 ]
+
+_READ_TIMEOUT = object()
 
 
 @dataclass
@@ -90,6 +94,7 @@ class UCISession:
         self.label = label
         self.cwd = cwd
         self.timeout = timeout
+        self._stdout_queue: queue.Queue[Optional[str]] = queue.Queue()
         self.output_tail: List[str] = []
         self.proc = subprocess.Popen(
             [str(engine)],
@@ -100,8 +105,23 @@ class UCISession:
             text=True,
             bufsize=1,
         )
+        self._stdout_thread = threading.Thread(
+            target=self._read_stdout,
+            name=f"{label}-uci-stdout",
+            daemon=True,
+        )
+        self._stdout_thread.start()
         self.send("uci")
         self.wait_for("uciok", 120)
+
+    def _read_stdout(self) -> None:
+        try:
+            if not self.proc.stdout:
+                return
+            for line in self.proc.stdout:
+                self._stdout_queue.put(line.rstrip("\n"))
+        finally:
+            self._stdout_queue.put(None)
 
     def send(self, command: str) -> None:
         if not self.proc.stdin:
@@ -109,21 +129,36 @@ class UCISession:
         self.proc.stdin.write(command + "\n")
         self.proc.stdin.flush()
 
+    def read_line_until(self, deadline: float):
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return _READ_TIMEOUT
+            if self.proc.poll() is not None and self._stdout_queue.empty():
+                return None
+            try:
+                return self._stdout_queue.get(timeout=min(0.25, remaining))
+            except queue.Empty:
+                continue
+
     def wait_for(self, prefix: str, timeout: float) -> str:
         deadline = time.monotonic() + timeout
-        if not self.proc.stdout:
-            raise RuntimeError(f"{self.label}: engine stdout closed")
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:
                 raise RuntimeError(
                     f"{self.label}: process died while waiting for {prefix} "
                     f"(exit={self.proc.returncode}); tail={self.tail()}"
                 )
-            line = self.proc.stdout.readline()
-            if not line:
-                time.sleep(0.01)
+            text = self.read_line_until(deadline)
+            if text is None:
+                raise RuntimeError(
+                    f"{self.label}: stdout closed while waiting for {prefix} "
+                    f"(exit={self.proc.returncode}); tail={self.tail()}"
+                )
+            if text is _READ_TIMEOUT:
+                break
+            if text == "":
                 continue
-            text = line.strip()
             self.remember(text)
             if text.startswith(prefix):
                 return text
@@ -155,8 +190,6 @@ class UCISession:
         result = SearchResult(position=name, bestmove="0000")
         deadline = time.monotonic() + max(90.0, movetime_ms / 1000.0 + self.timeout)
         start = time.monotonic()
-        if not self.proc.stdout:
-            raise RuntimeError(f"{self.label}: engine stdout closed")
 
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:
@@ -164,11 +197,18 @@ class UCISession:
                     f"{self.label}: process died during {name} "
                     f"(exit={self.proc.returncode}); tail={self.tail()}"
                 )
-            line = self.proc.stdout.readline()
-            if not line:
-                time.sleep(0.01)
+            text = self.read_line_until(deadline)
+            if text is None:
+                raise RuntimeError(
+                    f"{self.label}: stdout closed during {name} "
+                    f"(exit={self.proc.returncode}); tail={self.tail()}"
+                )
+            if text is _READ_TIMEOUT:
+                raise TimeoutError(
+                    f"{self.label}: search timeout on {name}; {self.tail()}"
+                )
+            if text == "":
                 continue
-            text = line.strip()
             self.remember(text)
             if text.startswith("bestmove"):
                 parts = text.split()

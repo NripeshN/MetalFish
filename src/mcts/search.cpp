@@ -199,6 +199,37 @@ void ApplyNNPolicyToNode(Node *node, const EvaluationResult &result,
   node->SortEdges();
 }
 
+int ResolveAutoMinibatchSize(const SearchParams &params,
+                             const NN::BackendCapabilities &capabilities) {
+  if (capabilities.actual_backend == "cuda") {
+    if (capabilities.stable_execution_batch_size > 0) {
+      return std::clamp(capabilities.stable_execution_batch_size, 1, 256);
+    }
+    if (params.cuda_stable_execution_batch_size > 0)
+      return std::clamp(params.cuda_stable_execution_batch_size, 1, 256);
+    return 16;
+  }
+
+#ifdef __APPLE__
+  return 1;
+#else
+  return params.GetNumThreads() >= 8 ? 64 : 32;
+#endif
+}
+
+bool ShouldReplayWarmCudaGraph(const SearchParams &params,
+                               const NN::BackendCapabilities &capabilities) {
+#ifdef USE_CUDA
+  if (!params.cuda_graph_execution)
+    return false;
+  return capabilities.actual_backend == "cuda";
+#else
+  (void)params;
+  (void)capabilities;
+  return false;
+#endif
+}
+
 } // anonymous namespace
 
 Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
@@ -214,8 +245,7 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
       try {
         backend_ = std::make_unique<Backend>(
             path, static_cast<size_t>(std::max(1, params_.nn_cache_size)),
-            params_.nn_backend, params_.coreml_model_path,
-            params_.coreml_compute_units);
+            params_.GetBackendConfig());
         std::cerr << "[MCTS] Loaded transformer weights: " << path << std::endl;
       } catch (const std::exception &e) {
         std::cerr << "[MCTS] Failed to load weights (" << path
@@ -229,31 +259,64 @@ Search::Search(const SearchParams &params, std::unique_ptr<Backend> backend)
   }
 
   if (backend_) {
+    const NN::BackendCapabilities backend_capabilities =
+        backend_->GetBackendCapabilities();
+    if (params_.minibatch_size_auto) {
+      const int resolved_minibatch =
+          ResolveAutoMinibatchSize(params_, backend_capabilities);
+      if (resolved_minibatch != params_.minibatch_size) {
+        std::cerr << "[MCTS] Resolved auto minibatch: initial="
+                  << params_.minibatch_size
+                  << " actual=" << resolved_minibatch
+                  << " backend=" << backend_capabilities.actual_backend
+                  << std::endl;
+      }
+      params_.minibatch_size = resolved_minibatch;
+    }
     Position warmup_pos;
     StateInfo warmup_st;
     warmup_pos.set("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
                    false, &warmup_st);
     const uint64_t warmup_base = warmup_pos.raw_key();
-    {
-      auto comp = backend_->CreateComputation();
-      comp->AddInput(warmup_pos, warmup_base ^ 0x9e3779b97f4a7c15ULL);
-      comp->ComputeBlocking();
-    }
-    if (params_.GetNumThreads() > 1 && params_.minibatch_size > 1) {
-      const int warmup_batch = std::clamp(params_.minibatch_size, 8, 256);
-      auto comp = backend_->CreateComputation();
-      for (int i = 0; i < warmup_batch; ++i) {
-        comp->AddInput(warmup_pos,
-                       warmup_base ^ (0xd1b54a32d192ed03ULL +
-                                      static_cast<uint64_t>(i) * kFNVPrime));
+    const bool replay_warm_cuda_graph =
+        ShouldReplayWarmCudaGraph(params_, backend_capabilities);
+    auto warmup_batch = [&](int batch_size, int passes, uint64_t salt,
+                            bool update_latency_margin) {
+      for (int pass = 0; pass < passes; ++pass) {
+        auto comp = backend_->CreateComputation();
+        for (int i = 0; i < batch_size; ++i) {
+          comp->AddInput(warmup_pos,
+                         warmup_base ^
+                             (salt +
+                              static_cast<uint64_t>(pass) *
+                                  0x9e3779b97f4a7c15ULL +
+                              static_cast<uint64_t>(i) * kFNVPrime));
+        }
+        const auto batch_start = std::chrono::steady_clock::now();
+        comp->ComputeBlocking();
+        if (update_latency_margin) {
+          const auto batch_elapsed =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - batch_start)
+                  .count();
+          UpdateBackendLatencyMargin(batch_elapsed);
+        }
       }
-      const auto batch_start = std::chrono::steady_clock::now();
-      comp->ComputeBlocking();
-      const auto batch_elapsed =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now() - batch_start)
-              .count();
-      UpdateBackendLatencyMargin(batch_elapsed);
+    };
+
+    warmup_batch(1, replay_warm_cuda_graph ? 2 : 1, 0x9e3779b97f4a7c15ULL,
+                 false);
+    if (params_.minibatch_size > 1) {
+      const int warmup_batch_size =
+          replay_warm_cuda_graph ? std::clamp(params_.minibatch_size, 1, 256)
+                                 : std::clamp(params_.minibatch_size, 8, 256);
+      const int warmup_passes = replay_warm_cuda_graph ? 3 : 1;
+      warmup_batch(warmup_batch_size, warmup_passes, 0xd1b54a32d192ed03ULL,
+                   true);
+    }
+    if (replay_warm_cuda_graph) {
+      std::cerr << "info string MCTS backend warmup actual="
+                << backend_->GetNetworkInfo() << std::endl;
     }
     backend_->Cache().Clear();
   }
@@ -2504,11 +2567,11 @@ std::unique_ptr<Search> CreateSearch(const SearchParams &config) {
       backend = std::make_unique<Backend>(
           config.nn_weights_path,
           static_cast<size_t>(std::max(1, config.nn_cache_size)),
-          config.nn_backend, config.coreml_model_path,
-          config.coreml_compute_units);
+          config.GetBackendConfig());
     } catch (const std::exception &e) {
       std::cerr << "[MCTS] CreateSearch: backend creation failed: " << e.what()
                 << std::endl;
+      return nullptr;
     }
   }
   return std::make_unique<Search>(config, std::move(backend));

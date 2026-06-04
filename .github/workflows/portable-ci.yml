@@ -1,0 +1,685 @@
+name: Portable CI
+
+on:
+  push:
+    branches: [main, dev]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: metalfish-portable-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: Release
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
+
+jobs:
+  linux-cpu:
+    name: Linux CPU
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            protobuf-compiler \
+            libprotobuf-dev \
+            zlib1g-dev \
+            libabsl-dev \
+            python3-pip
+          python3 -m pip install -r tests/requirements.txt || \
+            python3 -m pip install --break-system-packages -r tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-
+
+      - name: Download NNUE files
+        run: python3 tools/download_engine_networks.py --nnue-only
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-linux -G Ninja \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DUSE_METAL=OFF \
+            -DBUILD_TESTS=ON \
+            -DMETALFISH_ENABLE_IPO=OFF
+
+      - name: Build
+        run: cmake --build build-linux --target metalfish metalfish_tests metalfish_nn_probe
+
+      - name: Test
+        run: |
+          ./build-linux/metalfish_tests
+          python3 -m py_compile \
+            tests/paper_benchmarks.py \
+            tests/test_benchmark_configs.py \
+            tools/audit_cuda_gcp_resources.py \
+            tools/run_tournament_live.py \
+            tools/lichess_puzzle_runner.py \
+            tools/check_cuda_package_artifacts.py \
+            tools/check_cuda_runtime_manifest.py \
+            tools/cuda_runtime_manifest_writer.py \
+            tools/cuda_runtime_search_contract.py \
+            tools/compare_uci_search_results.py \
+            tools/compare_nn_backend_outputs.py \
+            tools/dispatch_cuda_release_artifacts.py \
+            tools/dispatch_cuda_runtime_gates.py \
+            tools/download_engine_networks.py \
+            tools/fetch_cuda_gpu_gate_inputs.py \
+            tools/fetch_cuda_release_artifacts.py \
+            tools/fetch_windows_cuda_runtime_inputs.py \
+            tools/github_cli.py \
+            tools/run_cuda_runtime_gates_direct.py \
+            tools/run_nn_backend_probe_suite.py \
+            tools/write_portable_manifest.py \
+            tools/uci_ponder_smoke.py \
+            tools/uci_smoke.py \
+            tests/test_uci_search_result_tools.py
+          bash -n \
+            tools/run_cuda_gpu_gate.sh \
+            tools/run_gcp_cuda_gpu_gate.sh \
+            tools/run_gcp_windows_cuda_runtime_gate.sh
+          python3 tests/test_benchmark_configs.py
+          python3 tests/test_lichess_bot.py
+          python3 tests/test_lichess_puzzle_runner.py
+          python3 tests/test_hybrid_regression_compare.py
+          python3 tests/test_uci_search_result_tools.py
+          python3 tools/download_engine_networks.py --bt4-only
+          ./build-linux/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend cpu \
+            --metadata-only \
+            --construct-backend
+          timeout 120 ./build-linux/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend cpu \
+            --warmup 0 \
+            --iterations 1 \
+            --top 3 \
+            > build-linux/cpu-bt4-eval-smoke.json
+          grep -q '"has_wdl":true' build-linux/cpu-bt4-eval-smoke.json
+          grep -q '"has_moves_left":true' build-linux/cpu-bt4-eval-smoke.json
+          python3 tools/uci_smoke.py --engine build-linux/metalfish --go "depth 3"
+          python3 tools/uci_smoke.py \
+            --engine build-linux/metalfish \
+            --setoption NNBackend=stub \
+            --setoption UseMCTS=true \
+            --go "nodes 8"
+          python3 tools/write_portable_manifest.py \
+            --platform "Linux x86_64" \
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact" \
+            --binary "metalfish" \
+            --output build-linux/PORTABLE_ARTIFACT.md \
+            --notes "This portable artifact is a CPU build for Linux CI coverage." \
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires USE_CUDA=ON and the CUDA GPU gate." \
+            --notes "For CUDA transformer testing, use a USE_CUDA=ON build and the CUDA GPU gate."
+
+      - name: Package Linux artifact
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            package_name="metalfish-${GITHUB_REF_NAME}-linux-x86_64-cpu"
+          else
+            package_name="metalfish-linux-x86_64-cpu"
+          fi
+          mkdir -p portable-linux
+          cp build-linux/metalfish portable-linux/
+          cp build-linux/PORTABLE_ARTIFACT.md README.md CHANGELOG.md LICENSE portable-linux/
+          manifest_args=(
+            --platform "Linux x86_64"
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact"
+            --binary "metalfish"
+            --output portable-linux/PORTABLE_ARTIFACT.md
+            --json-output portable-linux/linux-cpu-package-manifest.json
+            --package-name "${package_name}"
+            --package-kind "linux-cpu"
+          )
+          while IFS= read -r file; do
+            manifest_args+=(--file "${file}")
+          done < <(find portable-linux -maxdepth 1 -type f | sort)
+          manifest_args+=(
+            --notes "This portable artifact is a CPU build for Linux CI coverage."
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires USE_CUDA=ON and the CUDA GPU gate."
+            --notes "For CUDA transformer testing, use a USE_CUDA=ON build and the CUDA GPU gate."
+          )
+          python3 tools/write_portable_manifest.py "${manifest_args[@]}"
+          tar -czf "${package_name}.tar.gz" -C portable-linux .
+
+      - name: Smoke Linux artifact contents
+        run: |
+          package="$(find . -maxdepth 1 -name 'metalfish*linux-x86_64-cpu.tar.gz' -print -quit)"
+          test -n "${package}"
+          rm -rf portable-linux-check
+          mkdir -p portable-linux-check
+          tar -xzf "${package}" -C portable-linux-check
+          test -x portable-linux-check/metalfish
+          test -s portable-linux-check/PORTABLE_ARTIFACT.md
+          test -s portable-linux-check/README.md
+          test -s portable-linux-check/CHANGELOG.md
+          test -s portable-linux-check/LICENSE
+          test -s portable-linux-check/linux-cpu-package-manifest.json
+          grep -q -- "- Platform: Linux x86_64" portable-linux-check/PORTABLE_ARTIFACT.md
+          grep -q -- '- Binary: `metalfish`' portable-linux-check/PORTABLE_ARTIFACT.md
+          grep -q "portable CPU transformer fallback" portable-linux-check/PORTABLE_ARTIFACT.md
+          python3 - <<'PY'
+          import json
+          with open("portable-linux-check/linux-cpu-package-manifest.json", encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          assert manifest["schema"] == "metalfish.portable_artifact"
+          assert manifest["package"]["kind"] == "linux-cpu"
+          files = {entry["name"] for entry in manifest["files"]}
+          for required in ("metalfish", "PORTABLE_ARTIFACT.md", "README.md", "CHANGELOG.md", "LICENSE"):
+              assert required in files, required
+          PY
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: metalfish-linux-x86_64-cpu
+          path: metalfish*linux-x86_64-cpu.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  windows-mingw-cpu:
+    name: Windows MinGW CPU
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          cache: false
+          install: >-
+            base-devel
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-protobuf
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-abseil-cpp
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+
+      - name: Install Python dependencies
+        run: python -m pip install -r tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-
+
+      - name: Download NNUE files
+        run: python tools/download_engine_networks.py --nnue-only
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-windows -G Ninja \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DUSE_METAL=OFF \
+            -DBUILD_TESTS=ON \
+            -DMETALFISH_ENABLE_IPO=OFF
+
+      - name: Build
+        run: cmake --build build-windows --target metalfish metalfish_tests metalfish_nn_probe
+
+      - name: Test
+        run: |
+          ./build-windows/metalfish_tests.exe
+          python -m py_compile \
+            tests/paper_benchmarks.py \
+            tests/test_benchmark_configs.py \
+            tools/audit_cuda_gcp_resources.py \
+            tools/run_tournament_live.py \
+            tools/lichess_puzzle_runner.py \
+            tools/check_cuda_package_artifacts.py \
+            tools/check_cuda_runtime_manifest.py \
+            tools/cuda_runtime_manifest_writer.py \
+            tools/cuda_runtime_search_contract.py \
+            tools/compare_uci_search_results.py \
+            tools/fetch_cuda_release_artifacts.py \
+            tools/github_cli.py \
+            tools/download_engine_networks.py \
+            tools/write_portable_manifest.py \
+            tools/uci_ponder_smoke.py \
+            tools/uci_smoke.py \
+            tests/test_uci_search_result_tools.py
+          python tests/test_benchmark_configs.py
+          python tests/test_lichess_bot.py
+          python tests/test_lichess_puzzle_runner.py
+          python tests/test_hybrid_regression_compare.py
+          python tests/test_uci_search_result_tools.py
+          python tools/download_engine_networks.py --bt4-only
+          ./build-windows/metalfish_nn_probe.exe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend cpu \
+            --metadata-only \
+            --construct-backend
+          timeout 180 ./build-windows/metalfish_nn_probe.exe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend cpu \
+            --warmup 0 \
+            --iterations 1 \
+            --top 3 \
+            > build-windows/cpu-bt4-eval-smoke.json
+          grep -q '"has_wdl":true' build-windows/cpu-bt4-eval-smoke.json
+          grep -q '"has_moves_left":true' build-windows/cpu-bt4-eval-smoke.json
+          python tools/uci_smoke.py --engine build-windows/metalfish.exe --go "depth 3"
+          python tools/uci_smoke.py \
+            --engine build-windows/metalfish.exe \
+            --setoption NNBackend=stub \
+            --setoption UseMCTS=true \
+            --go "nodes 8"
+          python tools/write_portable_manifest.py \
+            --platform "Windows x86_64 MinGW" \
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact" \
+            --binary "metalfish.exe" \
+            --output build-windows/PORTABLE_ARTIFACT.md \
+            --notes "This portable artifact is a CPU MinGW build for Windows CI coverage." \
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires a CUDA build and runtime gate." \
+            --notes "CUDA and DirectML Windows backends are not packaged in this artifact."
+
+      - name: Package Windows artifact
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            package_name="metalfish-${GITHUB_REF_NAME}-windows-x86_64-mingw-cpu"
+          else
+            package_name="metalfish-windows-x86_64-mingw-cpu"
+          fi
+          mkdir -p portable-windows
+          cp build-windows/metalfish.exe portable-windows/
+          cp build-windows/PORTABLE_ARTIFACT.md README.md CHANGELOG.md LICENSE portable-windows/
+          ldd build-windows/metalfish.exe \
+            | awk '/=> \/ucrt64\// {print $3} /^\/ucrt64\// {print $1}' \
+            | sort -u \
+            | while read -r dll; do
+                [ -n "$dll" ] && cp "$dll" portable-windows/
+          done
+          manifest_args=(
+            --platform "Windows x86_64 MinGW"
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact"
+            --binary "metalfish.exe"
+            --output portable-windows/PORTABLE_ARTIFACT.md
+            --json-output portable-windows/windows-mingw-cpu-package-manifest.json
+            --package-name "${package_name}"
+            --package-kind "windows-mingw-cpu"
+          )
+          while IFS= read -r file; do
+            manifest_args+=(--file "${file}")
+          done < <(find portable-windows -maxdepth 1 -type f | sort)
+          manifest_args+=(
+            --notes "This portable artifact is a CPU MinGW build for Windows CI coverage."
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires a CUDA build and runtime gate."
+            --notes "CUDA and DirectML Windows backends are not packaged in this artifact."
+          )
+          python tools/write_portable_manifest.py "${manifest_args[@]}"
+          rm -f "${package_name}.zip"
+          bsdtar -a -cf "${package_name}.zip" -C portable-windows .
+
+      - name: Smoke Windows MinGW artifact contents
+        run: |
+          package="$(find . -maxdepth 1 -name 'metalfish*windows-x86_64-mingw-cpu.zip' -print -quit)"
+          test -n "${package}"
+          rm -rf portable-windows-check
+          mkdir -p portable-windows-check
+          bsdtar -xf "${package}" -C portable-windows-check
+          test -s portable-windows-check/metalfish.exe
+          test -s portable-windows-check/PORTABLE_ARTIFACT.md
+          test -s portable-windows-check/README.md
+          test -s portable-windows-check/CHANGELOG.md
+          test -s portable-windows-check/LICENSE
+          test -s portable-windows-check/windows-mingw-cpu-package-manifest.json
+          grep -q -- "- Platform: Windows x86_64 MinGW" portable-windows-check/PORTABLE_ARTIFACT.md
+          grep -q -- '- Binary: `metalfish.exe`' portable-windows-check/PORTABLE_ARTIFACT.md
+          grep -q "portable CPU transformer fallback" portable-windows-check/PORTABLE_ARTIFACT.md
+          if [ -z "$(find portable-windows-check -maxdepth 1 -name '*.dll' -size +0c -print -quit)" ]; then
+            echo "Packaged MinGW runtime DLL missing" >&2
+            exit 2
+          fi
+          python - <<'PY'
+          import json
+          with open("portable-windows-check/windows-mingw-cpu-package-manifest.json", encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          assert manifest["schema"] == "metalfish.portable_artifact"
+          assert manifest["package"]["kind"] == "windows-mingw-cpu"
+          files = {entry["name"] for entry in manifest["files"]}
+          for required in ("metalfish.exe", "PORTABLE_ARTIFACT.md", "README.md", "CHANGELOG.md", "LICENSE"):
+              assert required in files, required
+          assert any(name.lower().endswith(".dll") for name in files)
+          PY
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: metalfish-windows-x86_64-mingw-cpu
+          path: metalfish*windows-x86_64-mingw-cpu.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  windows-msvc-cpu:
+    name: Windows MSVC CPU
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v5
+        with:
+          path: .vcpkg-bincache
+          key: ${{ runner.os }}-vcpkg-x64-windows-protobuf-zlib-abseil-${{ hashFiles('.github/workflows/portable-ci.yml', '.github/workflows/windows-cuda-compile.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-x64-windows-protobuf-zlib-abseil-
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          & .\tools\import_msvc_dev_env.ps1 -Arch x64 -HostArch x64
+          $VcpkgCache = Join-Path (Get-Location).Path ".vcpkg-bincache"
+          New-Item -ItemType Directory -Force $VcpkgCache | Out-Null
+          $env:VCPKG_DEFAULT_BINARY_CACHE = $VcpkgCache
+          $env:VCPKG_BINARY_SOURCES = "clear;files,$VcpkgCache,readwrite"
+          cmake --version
+          ninja --version
+          cl
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
+          }
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          vcpkg install protobuf zlib abseil --triplet x64-windows
+          python -m pip install -r tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-
+
+      - name: Download NNUE files
+        shell: pwsh
+        run: python tools/download_engine_networks.py --nnue-only
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          & .\tools\import_msvc_dev_env.ps1 -Arch x64 -HostArch x64
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
+          }
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          cmake -S . -B build-windows-msvc -G Ninja `
+            -DCMAKE_BUILD_TYPE="${env:BUILD_TYPE}" `
+            -DUSE_METAL=OFF `
+            -DBUILD_TESTS=ON `
+            -DMETALFISH_ENABLE_IPO=OFF `
+            "-DCMAKE_TOOLCHAIN_FILE=${env:VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build
+        shell: pwsh
+        run: |
+          & .\tools\import_msvc_dev_env.ps1 -Arch x64 -HostArch x64
+          cmake --build build-windows-msvc --target metalfish metalfish_tests metalfish_nn_probe
+
+      - name: Test
+        shell: pwsh
+        run: |
+          .\build-windows-msvc\metalfish_tests.exe
+          python -m py_compile `
+            tests/paper_benchmarks.py `
+            tests/test_benchmark_configs.py `
+            tools/audit_cuda_gcp_resources.py `
+            tools/run_tournament_live.py `
+            tools/lichess_puzzle_runner.py `
+            tools/check_cuda_package_artifacts.py `
+            tools/check_cuda_runtime_manifest.py `
+            tools/cuda_runtime_manifest_writer.py `
+            tools/cuda_runtime_search_contract.py `
+            tools/compare_uci_search_results.py `
+            tools/fetch_cuda_release_artifacts.py `
+            tools/github_cli.py `
+            tools/download_engine_networks.py `
+            tools/write_portable_manifest.py `
+            tools/uci_ponder_smoke.py `
+            tools/uci_smoke.py `
+            tests/test_uci_search_result_tools.py
+          python tests/test_benchmark_configs.py
+          python tests/test_lichess_bot.py
+          python tests/test_lichess_puzzle_runner.py
+          python tests/test_hybrid_regression_compare.py
+          python tests/test_uci_search_result_tools.py
+          python tools/download_engine_networks.py --bt4-only
+          .\build-windows-msvc\metalfish_nn_probe.exe `
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb `
+            --backend cpu `
+            --metadata-only `
+            --construct-backend
+          $cpuBt4Eval = Start-Process `
+            -FilePath ".\build-windows-msvc\metalfish_nn_probe.exe" `
+            -ArgumentList @(
+              "--weights", "networks/BT4-1024x15x32h-swa-6147500.pb",
+              "--backend", "cpu",
+              "--warmup", "0",
+              "--iterations", "1",
+              "--top", "3"
+            ) `
+            -RedirectStandardOutput "build-windows-msvc/cpu-bt4-eval-smoke.json" `
+            -NoNewWindow `
+            -PassThru
+          if (-not $cpuBt4Eval.WaitForExit(180000)) {
+            $cpuBt4Eval.Kill()
+            throw "CPU BT4 eval smoke timed out"
+          }
+          if ($cpuBt4Eval.ExitCode -ne 0) {
+            throw "CPU BT4 eval smoke failed with exit $($cpuBt4Eval.ExitCode)"
+          }
+          if (-not (Select-String -Path build-windows-msvc/cpu-bt4-eval-smoke.json -Pattern '"has_wdl":true' -Quiet)) {
+            throw "CPU BT4 eval smoke did not decode WDL"
+          }
+          if (-not (Select-String -Path build-windows-msvc/cpu-bt4-eval-smoke.json -Pattern '"has_moves_left":true' -Quiet)) {
+            throw "CPU BT4 eval smoke did not decode moves-left"
+          }
+          python tools/uci_smoke.py --engine build-windows-msvc/metalfish.exe --go "depth 3"
+          python tools/uci_smoke.py `
+            --engine build-windows-msvc/metalfish.exe `
+            --setoption NNBackend=stub `
+            --setoption UseMCTS=true `
+            --go "nodes 8"
+          python tools/write_portable_manifest.py `
+            --platform "Windows x86_64 MSVC" `
+            --backend "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact" `
+            --binary "metalfish.exe" `
+            --output build-windows-msvc/PORTABLE_ARTIFACT.md `
+            --notes "This portable artifact is a CPU MSVC build for Windows CI coverage." `
+            --notes "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires a CUDA build and runtime gate." `
+            --notes "MSVC is the required host toolchain for future Windows CUDA builds."
+
+      - name: Package Windows MSVC artifact
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $packageName = "metalfish-$env:GITHUB_REF_NAME-windows-x86_64-msvc-cpu"
+          } else {
+            $packageName = "metalfish-windows-x86_64-msvc-cpu"
+          }
+          New-Item -ItemType Directory -Force portable-windows-msvc | Out-Null
+          Copy-Item build-windows-msvc/metalfish.exe portable-windows-msvc/
+          Copy-Item build-windows-msvc/PORTABLE_ARTIFACT.md portable-windows-msvc/
+          Copy-Item README.md,CHANGELOG.md,LICENSE portable-windows-msvc/
+          Copy-Item build-windows-msvc/*.dll portable-windows-msvc/ -ErrorAction SilentlyContinue
+          $vcpkgRoot = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { "C:\vcpkg" }
+          $vcpkgBin = Join-Path $vcpkgRoot "installed\x64-windows\bin"
+          if (Test-Path $vcpkgBin) {
+            Copy-Item (Join-Path $vcpkgBin "*.dll") portable-windows-msvc/ -ErrorAction SilentlyContinue
+          }
+          $manifestArgs = @(
+            "--platform", "Windows x86_64 MSVC",
+            "--backend", "CPU AB plus portable CPU transformer fallback when BT4 weights are provided; CUDA not included in this artifact",
+            "--binary", "metalfish.exe",
+            "--output", (Join-Path "portable-windows-msvc" "PORTABLE_ARTIFACT.md"),
+            "--json-output", (Join-Path "portable-windows-msvc" "windows-msvc-cpu-package-manifest.json"),
+            "--package-name", $packageName,
+            "--package-kind", "windows-msvc-cpu"
+          )
+          foreach ($file in (Get-ChildItem -Path portable-windows-msvc -File | Sort-Object Name)) {
+            $manifestArgs += @("--file", $file.FullName)
+          }
+          foreach ($note in @(
+            "This portable artifact is a CPU MSVC build for Windows CI coverage.",
+            "The CPU transformer backend is for correctness/fallback only; strength CUDA testing requires a CUDA build and runtime gate.",
+            "MSVC is the required host toolchain for future Windows CUDA builds."
+          )) {
+            $manifestArgs += @("--notes", $note)
+          }
+          python tools/write_portable_manifest.py @manifestArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "portable manifest generation failed with exit code $LASTEXITCODE"
+          }
+          if (Test-Path "${packageName}.zip") {
+            Remove-Item "${packageName}.zip"
+          }
+          Compress-Archive -Path portable-windows-msvc/* -DestinationPath "${packageName}.zip"
+
+      - name: Smoke Windows MSVC artifact contents
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem -Path . -Filter "metalfish*windows-x86_64-msvc-cpu.zip" | Select-Object -First 1
+          if (-not $package) {
+            throw "Windows MSVC package zip not found"
+          }
+          Remove-Item -Recurse -Force portable-windows-msvc-check -ErrorAction SilentlyContinue
+          Expand-Archive -Path $package.FullName -DestinationPath portable-windows-msvc-check
+          $requiredFiles = @(
+            "metalfish.exe",
+            "PORTABLE_ARTIFACT.md",
+            "windows-msvc-cpu-package-manifest.json",
+            "README.md",
+            "CHANGELOG.md",
+            "LICENSE"
+          )
+          foreach ($file in $requiredFiles) {
+            $path = Join-Path "portable-windows-msvc-check" $file
+            if (-not (Test-Path $path)) {
+              throw "Missing packaged file: $file"
+            }
+            if ((Get-Item $path).Length -le 0) {
+              throw "Packaged file is empty: $file"
+            }
+          }
+          $manifest = Get-Content portable-windows-msvc-check/PORTABLE_ARTIFACT.md -Raw
+          if (-not $manifest.Contains("- Platform: Windows x86_64 MSVC")) {
+            throw "MSVC portable manifest is missing the platform label"
+          }
+          if (-not $manifest.Contains('- Binary: `metalfish.exe`')) {
+            throw "MSVC portable manifest is missing the binary label"
+          }
+          if (-not $manifest.Contains("portable CPU transformer fallback")) {
+            throw "MSVC portable manifest is missing backend scope"
+          }
+          $jsonManifest = Get-Content portable-windows-msvc-check/windows-msvc-cpu-package-manifest.json -Raw | ConvertFrom-Json
+          if ($jsonManifest.schema -ne "metalfish.portable_artifact") {
+            throw "MSVC package JSON manifest has unexpected schema: $($jsonManifest.schema)"
+          }
+          if ($jsonManifest.package.kind -ne "windows-msvc-cpu") {
+            throw "MSVC package JSON manifest has unexpected kind: $($jsonManifest.package.kind)"
+          }
+          $manifestFiles = @($jsonManifest.files | ForEach-Object { $_.name })
+          foreach ($required in @("metalfish.exe", "PORTABLE_ARTIFACT.md", "README.md", "CHANGELOG.md", "LICENSE")) {
+            if ($manifestFiles -notcontains $required) {
+              throw "MSVC package JSON manifest missing file entry: $required"
+            }
+          }
+          $runtimeDlls = @(Get-ChildItem portable-windows-msvc-check -Filter "*.dll")
+          if ($runtimeDlls.Count -eq 0) {
+            throw "Packaged MSVC runtime DLL missing"
+          }
+          $runtimeDlls | ForEach-Object {
+            if ($_.Length -le 0) {
+              throw "Packaged runtime DLL is empty: $($_.Name)"
+            }
+          }
+
+      - name: Upload Windows MSVC artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: metalfish-windows-x86_64-msvc-cpu
+          path: metalfish*windows-x86_64-msvc-cpu.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  portable-release:
+    name: Attach Portable Release Artifacts
+    needs: [linux-cpu, windows-mingw-cpu, windows-msvc-cpu]
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download portable artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: portable-release
+
+      - name: Check release artifacts
+        run: |
+          test -f "portable-release/metalfish-linux-x86_64-cpu/metalfish-${GITHUB_REF_NAME}-linux-x86_64-cpu.tar.gz"
+          test -f "portable-release/metalfish-windows-x86_64-mingw-cpu/metalfish-${GITHUB_REF_NAME}-windows-x86_64-mingw-cpu.zip"
+          test -f "portable-release/metalfish-windows-x86_64-msvc-cpu/metalfish-${GITHUB_REF_NAME}-windows-x86_64-msvc-cpu.zip"
+
+      - name: Attach artifacts to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            portable-release/metalfish-linux-x86_64-cpu/metalfish-${{ github.ref_name }}-linux-x86_64-cpu.tar.gz
+            portable-release/metalfish-windows-x86_64-mingw-cpu/metalfish-${{ github.ref_name }}-windows-x86_64-mingw-cpu.zip
+            portable-release/metalfish-windows-x86_64-msvc-cpu/metalfish-${{ github.ref_name }}-windows-x86_64-msvc-cpu.zip
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: true

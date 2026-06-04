@@ -38,6 +38,9 @@ public:
   std::vector<NetworkOutput>
   EvaluateBatch(const std::vector<InputPlanes> &inputs) override;
   std::string GetNetworkInfo() const override;
+  bool HasWDL() const override;
+  bool HasMovesLeft() const override;
+  BackendCapabilities GetBackendCapabilities() const override;
 
 private:
   void RunBatch(std::span<const InputPlanes> inputs,
@@ -51,6 +54,8 @@ private:
   bool moves_left_;
   bool conv_policy_;
   bool attn_policy_;
+  NetworkTensorPlan tensor_plan_;
+  std::vector<NetworkOutputTarget> decoded_output_targets_;
   int max_batch_size_;
   int batch_size_;
   std::string device_name_;

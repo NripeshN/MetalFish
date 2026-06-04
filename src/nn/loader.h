@@ -13,13 +13,13 @@
 #include <vector>
 
 #include "proto/net.pb.h"
+#include "weights_file.h"
 
 namespace MetalFish {
 namespace NN {
 
 using FloatVector = std::vector<float>;
 using FloatVectors = std::vector<FloatVector>;
-using WeightsFile = MetalFishNN::Net;
 
 WeightsFile LoadWeightsFromFile(const std::string &filename);
 

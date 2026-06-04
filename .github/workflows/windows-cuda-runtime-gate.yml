@@ -1,0 +1,180 @@
+name: Windows CUDA Runtime Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows_cuda_run_id:
+        description: Windows CUDA Compile workflow run ID whose artifact supplies the package
+        required: true
+      zones:
+        description: Space-separated GCP zones to try for the Windows L4 VM
+        required: false
+        default: ""
+      machine:
+        description: Space-separated GCP machine types to try for the Windows L4 VM
+        required: false
+        default: "g2-standard-8 g2-standard-4"
+      uci_go:
+        description: UCI go command for the packaged CUDA MCTS smoke
+        required: false
+        default: "nodes 1"
+      mcts_ponder_go:
+        description: UCI clock fields for the packaged CUDA MCTS ponder lifecycle smoke
+        required: false
+        default: "wtime 60000 btime 60000 winc 1000 binc 1000"
+      mcts_ponder_settle_ms:
+        description: Milliseconds to wait before ponderhit/stop in the CUDA MCTS ponder smoke
+        required: false
+        default: "600"
+      stable_batch_size:
+        description: CUDA stable execution batch size for packaged CUDA smokes
+        required: false
+        default: "16"
+      cuda_graph_execution:
+        description: Enable CUDA graph execution in packaged CUDA smokes
+        required: false
+        default: true
+        type: boolean
+      cublas_workspace_config:
+        description: Optional CUBLAS_WORKSPACE_CONFIG diagnostic override
+        required: false
+        default: ""
+      profile:
+        description: Run the optional CUDA profile smoke
+        required: false
+        default: false
+        type: boolean
+      profile_limit:
+        description: Maximum profiled CUDA events to print during optional profile smoke
+        required: false
+        default: "2"
+      gcs_prefix:
+        description: Optional gs:// prefix for gate artifacts
+        required: false
+        default: ""
+      metal_ci_run_id:
+        description: MetalFish CI run ID whose macOS artifact supplies Metal probe suites
+        required: false
+        default: ""
+      require_metal_compare:
+        description: Fail unless Metal probe artifacts are supplied and compared
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: metalfish-windows-cuda-runtime-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+env:
+  METALFISH_BT4_WEIGHTS_URL: https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
+
+jobs:
+  windows-cuda-runtime:
+    name: Windows L4 CUDA Runtime Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Validate Metal comparison inputs
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.require_metal_compare }}" = "true" ] && \
+             [ -z "${{ inputs.metal_ci_run_id }}" ]; then
+            echo "metal_ci_run_id is required when require_metal_compare=true" >&2
+            exit 2
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Fetch Windows CUDA runtime inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            --windows-cuda-run-id "${{ inputs.windows_cuda_run_id }}"
+            --expected-sha "${{ github.sha }}"
+            --out-dir "${GITHUB_WORKSPACE}/results/windows_cuda_runtime_inputs"
+          )
+          if [ -n "${{ inputs.metal_ci_run_id }}" ]; then
+            args+=(--metal-ci-run-id "${{ inputs.metal_ci_run_id }}")
+          fi
+          if [ "${{ inputs.require_metal_compare }}" = "true" ]; then
+            args+=(--require-metal)
+          fi
+          python3 tools/fetch_windows_cuda_runtime_inputs.py "${args[@]}"
+          python3 -m json.tool \
+            "${GITHUB_WORKSPACE}/results/windows_cuda_runtime_inputs/runtime-gate-inputs-manifest.json" >/dev/null
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-6147500-legacy42850-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
+
+      - name: Download engine networks
+        run: |
+          python3 tools/download_engine_networks.py --nnue-only
+          python3 tools/download_engine_networks.py --bt4-only
+          python3 tools/download_engine_networks.py --legacy-only
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run Windows CUDA runtime gate
+        env:
+          METALFISH_GCP_PROJECT: ${{ vars.METALFISH_GCP_PROJECT }}
+          METALFISH_GCP_ZONES: ${{ inputs.zones }}
+          METALFISH_GCP_MACHINES: ${{ inputs.machine }}
+          METALFISH_GCP_INSTANCE: metalfish-win-cuda-gh-${{ github.run_id }}-${{ github.run_attempt }}
+          METALFISH_GCP_ARTIFACT_DIR: ${{ github.workspace }}/results/windows_cuda_runtime_gate
+          METALFISH_GCP_GCS_PREFIX: ${{ inputs.gcs_prefix }}
+          METALFISH_GCP_COLLECT_ARTIFACTS: "1"
+          METALFISH_WINDOWS_CUDA_UCI_GO: ${{ inputs.uci_go }}
+          METALFISH_WINDOWS_CUDA_MCTS_PONDER_UCI_GO: ${{ inputs.mcts_ponder_go }}
+          METALFISH_WINDOWS_CUDA_MCTS_PONDER_SETTLE_MS: ${{ inputs.mcts_ponder_settle_ms }}
+          METALFISH_WINDOWS_CUDA_STABLE_EXECUTION_BATCH_SIZE: ${{ inputs.stable_batch_size }}
+          METALFISH_CUDA_GRAPH_EXECUTION: ${{ inputs.cuda_graph_execution && '1' || '0' }}
+          METALFISH_WINDOWS_CUDA_PROFILE: ${{ inputs.profile && '1' || '0' }}
+          METALFISH_WINDOWS_CUDA_PROFILE_LIMIT: ${{ inputs.profile_limit }}
+          METALFISH_WINDOWS_CUDA_COMPILE_RUN_ID: ${{ inputs.windows_cuda_run_id }}
+          METALFISH_REQUIRE_METAL_COMPARE: ${{ inputs.require_metal_compare }}
+          CUBLAS_WORKSPACE_CONFIG: ${{ inputs.cublas_workspace_config }}
+        run: |
+          set -euo pipefail
+          : "${METALFISH_GCP_PROJECT:=metalfish}"
+          . "${GITHUB_WORKSPACE}/results/windows_cuda_runtime_inputs/runtime-gate-env.sh"
+          tools/run_gcp_windows_cuda_runtime_gate.sh
+
+      - name: Upload Windows CUDA runtime artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-cuda-runtime-${{ github.run_id }}
+          path: |
+            results/windows_cuda_runtime_gate/
+            results/windows_cuda_runtime_inputs/
+          if-no-files-found: error

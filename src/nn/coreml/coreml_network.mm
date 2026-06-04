@@ -212,6 +212,31 @@ public:
     if (fixed_batch_ < 1 || squares != 64 || planes != kTotalPlanes)
       throw std::runtime_error(
           "Core ML model input must have shape [batch, 64, 112]");
+
+    for (NSString *name in model_.modelDescription.outputDescriptionsByName) {
+      MLFeatureDescription *output_desc =
+          model_.modelDescription.outputDescriptionsByName[name];
+      if (output_desc.type != MLFeatureTypeMultiArray)
+        continue;
+      NSArray<NSNumber *> *output_shape =
+          output_desc.multiArrayConstraint.shape;
+      if ([output_shape count] == 0)
+        continue;
+      const NSInteger last_dim =
+          ShapeValue(output_shape, [output_shape count] - 1, 0);
+      if (last_dim == 3) {
+        has_wdl_ = true;
+      } else if (last_dim == 1) {
+        std::string output_name = FromNSString(name);
+        std::transform(output_name.begin(), output_name.end(),
+                       output_name.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (output_name.find("moves") != std::string::npos ||
+            output_name.find("left") != std::string::npos) {
+          has_moves_left_ = true;
+        }
+      }
+    }
   }
 
   NetworkOutput Evaluate(const InputPlanes &input) {
@@ -244,6 +269,19 @@ public:
       oss << " (requested " << requested_compute_units_ << ")";
     oss << "\nBatch: " << fixed_batch_;
     return oss.str();
+  }
+
+  bool HasWDL() const { return has_wdl_; }
+  bool HasMovesLeft() const { return has_moves_left_; }
+  BackendCapabilities GetBackendCapabilities() const {
+    BackendCapabilities capabilities;
+    capabilities.actual_backend = "coreml";
+    capabilities.has_wdl = has_wdl_;
+    capabilities.has_moves_left = has_moves_left_;
+    capabilities.max_batch_size = fixed_batch_;
+    capabilities.stable_execution_batch_size = fixed_batch_;
+    capabilities.compute_units = ComputeUnitsLabel(actual_compute_units_);
+    return capabilities;
   }
 
 private:
@@ -401,6 +439,8 @@ private:
   std::string requested_compute_units_;
   MLComputeUnits actual_compute_units_ = MLComputeUnitsCPUOnly;
   NSInteger fixed_batch_ = 1;
+  bool has_wdl_ = false;
+  bool has_moves_left_ = false;
 };
 
 CoreMLNetwork::CoreMLNetwork(const WeightsFile &file,
@@ -421,6 +461,14 @@ CoreMLNetwork::EvaluateBatch(const std::vector<InputPlanes> &inputs) {
 
 std::string CoreMLNetwork::GetNetworkInfo() const {
   return impl_->GetNetworkInfo();
+}
+
+bool CoreMLNetwork::HasWDL() const { return impl_->HasWDL(); }
+
+bool CoreMLNetwork::HasMovesLeft() const { return impl_->HasMovesLeft(); }
+
+BackendCapabilities CoreMLNetwork::GetBackendCapabilities() const {
+  return impl_->GetBackendCapabilities();
 }
 
 } // namespace CoreML

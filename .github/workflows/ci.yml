@@ -16,6 +16,8 @@ concurrency:
 env:
   BUILD_TYPE: Release
   METALFISH_BT4_WEIGHTS_URL: https://storage.lczero.org/files/networks-contrib/big-transformers/BT4-1024x15x32h-swa-6147500.pb.gz
+  METALFISH_LEGACY_WEIGHTS_URL: https://storage.lczero.org/files/networks/00af53b081e80147172e6f281c01daf5ca19ada173321438914c730370aa4267
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
 
 jobs:
   build-and-test:
@@ -28,6 +30,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -44,8 +48,19 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install -r tests/requirements.txt
 
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-6147500-legacy42850-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
+
       - name: Download engine networks
-        run: python3 tools/download_engine_networks.py
+        run: |
+          python3 tools/download_engine_networks.py
+          python3 tools/download_engine_networks.py --legacy-only
 
       - name: Configure
         run: |
@@ -56,7 +71,7 @@ jobs:
 
       - name: Build
         run: |
-          cmake --build build --target metalfish metalfish_tests \
+          cmake --build build --target metalfish metalfish_tests test_nn_comparison metalfish_nn_probe \
             -j"$(sysctl -n hw.ncpu)"
 
       - name: Run C++ tests
@@ -70,6 +85,8 @@ jobs:
           python3 tests/test_analyze_lichess_games.py
           python3 tests/test_hybrid_regression_compare.py
           python3 tests/test_benchmark_configs.py
+          python3 tests/test_nn_backend_artifacts.py
+          python3 tests/test_uci_search_result_tools.py
 
       - name: Run ANE option/config smoke
         run: |
@@ -91,6 +108,11 @@ jobs:
             tools/compare_puzzle_runs.py \
             tools/filter_lichess_puzzle_csv.py \
             tools/apple_coreml_microbench.py \
+            tools/check_nn_backend_artifacts.py \
+            tools/compare_nn_backend_benchmarks.py \
+            tools/compare_nn_backend_outputs.py \
+            tools/compare_uci_search_results.py \
+            tools/run_nn_backend_probe_suite.py \
             tools/lc0_coreml_bk_policy_probe.py \
             tools/lc0_coreml_concurrency_benchmark.py \
             tools/lc0_coreml_position_parity.py \
@@ -105,10 +127,73 @@ jobs:
           python3 tests/test_lc0_coreml_value_export.py
           python3 tests/test_lc0_mlx_value_benchmark.py
 
+      - name: Run Metal NN parity report
+        run: |
+          METALFISH_NN_WEIGHTS=networks/BT4-1024x15x32h-swa-6147500.pb \
+          METALFISH_NN_PARITY_REPORT=build/metal-nn-parity-report.md \
+          METALFISH_NN_BATCH_BENCH=1 \
+          METALFISH_NN_BENCH_ITERS=2 \
+          METALFISH_NN_BENCH_MAX_BATCH=16 \
+          METALFISH_NN_BENCH_WARMUP_ITERS=3 \
+          ./build/test_nn_comparison 2>&1 | tee build/metal-nn-comparison.log
+          ./build/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend metal \
+            --top 3 \
+            --warmup 0 \
+            --iterations 1 \
+            --full-policy \
+            2>&1 | tee build/metal-nn-probe.log
+          python3 tools/run_nn_backend_probe_suite.py \
+            --probe ./build/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend metal \
+            --out build/metal-nn-probe-suite.log \
+            --top 3 \
+            --batch-size 2 \
+            --warmup 0 \
+            --iterations 1 \
+            --full-policy
+          python3 tools/run_nn_backend_probe_suite.py \
+            --probe ./build/metalfish_nn_probe \
+            --weights networks/legacy-42850.pb.gz \
+            --backend metal \
+            --out build/metal-legacy-nn-probe-suite.log \
+            --top 3 \
+            --batch-size 2 \
+            --warmup 0 \
+            --iterations 1 \
+            --full-policy
+          ./build/metalfish_nn_probe \
+            --weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --isolation-weights networks/legacy-42850.pb.gz \
+            --backend metal \
+            --top 3 \
+            --warmup 0 \
+            --iterations 1 \
+            2>&1 | tee build/metal-nn-isolation-bt4-legacy.log
+          ./build/metalfish_nn_probe \
+            --weights networks/legacy-42850.pb.gz \
+            --isolation-weights networks/BT4-1024x15x32h-swa-6147500.pb \
+            --backend metal \
+            --top 3 \
+            --warmup 0 \
+            --iterations 1 \
+            2>&1 | tee build/metal-nn-isolation-legacy-bt4.log
+          python3 tools/check_nn_backend_artifacts.py \
+            --backend-label "Metal (MPSGraph) backend" \
+            --parity-report build/metal-nn-parity-report.md \
+            --comparison-log build/metal-nn-comparison.log \
+            --probe-log build/metal-nn-probe.log \
+            --manifest-out build/metal-nn-artifact-manifest.json \
+            --min-policy-top 3 \
+            --require-batch-benchmark
+
       - name: Run UCI smoke
         run: |
           python3 tools/uci_smoke.py \
             --engine build/metalfish \
+            --timeout 120 \
             --setoption UseHybridSearch=true \
             --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
             --go "depth 4"
@@ -151,6 +236,22 @@ jobs:
             --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
             --setoption Threads=8 \
             --setoption MCTSMaxThreads=1 \
+            --setoption MCTSParallelSearch=true \
+            --setoption MCTSMinibatchSize=0 \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --go "movetime 1000" \
+            --expect-output "Starting Multi-Threaded MCTS Search" \
+            --reject-output "Time safety:" \
+            --reject-output "Falling back to Alpha-Beta"
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=1 \
             --setoption MCTSParallelSearch=false \
             --setoption MCTSMinibatchSize=0 \
             --setoption MCTSAddDirichletNoise=false \
@@ -173,6 +274,206 @@ jobs:
             --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
             --go "nodes 50" \
             --expect-bestmove h5f6
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSParallelSearch=false \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
+            --go "nodes 50" \
+            --expect-bestmove h5f6 \
+            --json-out build/metal-mcts-bk07-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSParallelSearch=false \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1" \
+            --go "nodes 1" \
+            --expect-output "MCTS runtime: backend=metal" \
+            --json-out build/metal-mcts-kiwipete-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSParallelSearch=false \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1" \
+            --go "nodes 1" \
+            --expect-output "MCTS runtime: backend=metal" \
+            --json-out build/metal-mcts-after-e4-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSParallelSearch=false \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen 7k/P7/8/8/8/8/8/7K w - - 0 1" \
+            --go "nodes 1" \
+            --expect-output "MCTS runtime: backend=metal" \
+            --json-out build/metal-mcts-promotion-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseHybridSearch=false \
+            --setoption UseMCTS=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=8 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSParallelSearch=false \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2" \
+            --go "nodes 1" \
+            --expect-output "MCTS runtime: backend=metal" \
+            --json-out build/metal-mcts-en-passant-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseMCTS=false \
+            --setoption UseHybridSearch=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=3 \
+            --setoption HybridMCTSThreads=1 \
+            --setoption HybridABThreads=2 \
+            --setoption HybridAutoABThreadsCap=0 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen 1nk1r1r1/pp2n1pp/4p3/q2pPp1N/b1pP1P2/B1P2R2/2P1B1PP/R2Q2K1 w - -" \
+            --go "nodes 50" \
+            --expect-output "Starting Parallel Hybrid Search" \
+            --expect-output "Hybrid MCTS runtime: backend=metal" \
+            --expect-output "Final: MCTSPlayouts=" \
+            --json-out build/metal-hybrid-bk07-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseMCTS=false \
+            --setoption UseHybridSearch=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=3 \
+            --setoption HybridMCTSThreads=1 \
+            --setoption HybridABThreads=2 \
+            --setoption HybridAutoABThreadsCap=0 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen r3k2r/p1ppqpb1/bn2pnp1/2P5/1p2P3/2N2N2/PP1PBPPP/R2QK2R w KQkq - 0 1" \
+            --go "nodes 50" \
+            --expect-output "Starting Parallel Hybrid Search" \
+            --expect-output "Hybrid MCTS runtime: backend=metal" \
+            --expect-output "Final: MCTSPlayouts=" \
+            --json-out build/metal-hybrid-kiwipete-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseMCTS=false \
+            --setoption UseHybridSearch=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=3 \
+            --setoption HybridMCTSThreads=1 \
+            --setoption HybridABThreads=2 \
+            --setoption HybridAutoABThreadsCap=0 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1" \
+            --go "nodes 50" \
+            --expect-output "Starting Parallel Hybrid Search" \
+            --expect-output "Hybrid MCTS runtime: backend=metal" \
+            --expect-output "Final: MCTSPlayouts=" \
+            --json-out build/metal-hybrid-after-e4-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseMCTS=false \
+            --setoption UseHybridSearch=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=3 \
+            --setoption HybridMCTSThreads=1 \
+            --setoption HybridABThreads=2 \
+            --setoption HybridAutoABThreadsCap=0 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen 7k/P7/8/8/8/8/8/7K w - - 0 1" \
+            --go "searchmoves a7a8q nodes 50" \
+            --expect-output "Starting Parallel Hybrid Search" \
+            --expect-output "Hybrid MCTS runtime: backend=metal" \
+            --expect-output "Final: MCTSPlayouts=" \
+            --json-out build/metal-hybrid-promotion-search.json
+          python3 tools/uci_smoke.py \
+            --engine build/metalfish \
+            --timeout 90 \
+            --setoption NNBackend=metal \
+            --setoption UseMCTS=false \
+            --setoption UseHybridSearch=true \
+            --setoption NNWeights=networks/BT4-1024x15x32h-swa-6147500.pb \
+            --setoption Threads=3 \
+            --setoption HybridMCTSThreads=1 \
+            --setoption HybridABThreads=2 \
+            --setoption HybridAutoABThreadsCap=0 \
+            --setoption MCTSMaxThreads=1 \
+            --setoption MCTSMinibatchSize=1 \
+            --setoption MCTSParityPreset=true \
+            --setoption MCTSAddDirichletNoise=false \
+            --setoption TransformerLowTimeFallbackMs=0 \
+            --position "fen rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2" \
+            --go "nodes 50" \
+            --expect-output "Starting Parallel Hybrid Search" \
+            --expect-output "Hybrid MCTS runtime: backend=metal" \
+            --expect-output "Final: MCTSPlayouts=" \
+            --json-out build/metal-hybrid-en-passant-search.json
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v6
@@ -180,6 +481,24 @@ jobs:
           name: metalfish-macos-arm64
           path: |
             build/metalfish
+            build/metal-nn-comparison.log
+            build/metal-nn-parity-report.md
+            build/metal-nn-probe.log
+            build/metal-nn-probe-suite.log
+            build/metal-legacy-nn-probe-suite.log
+            build/metal-nn-isolation-bt4-legacy.log
+            build/metal-nn-isolation-legacy-bt4.log
+            build/metal-nn-artifact-manifest.json
+            build/metal-mcts-bk07-search.json
+            build/metal-mcts-kiwipete-search.json
+            build/metal-mcts-after-e4-search.json
+            build/metal-mcts-promotion-search.json
+            build/metal-mcts-en-passant-search.json
+            build/metal-hybrid-bk07-search.json
+            build/metal-hybrid-kiwipete-search.json
+            build/metal-hybrid-after-e4-search.json
+            build/metal-hybrid-promotion-search.json
+            build/metal-hybrid-en-passant-search.json
             README.md
             CHANGELOG.md
             LICENSE
@@ -197,9 +516,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install dependencies
         run: brew install protobuf zlib abseil
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-
 
       - name: Download engine networks
         run: python3 tools/download_engine_networks.py

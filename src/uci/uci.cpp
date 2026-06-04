@@ -799,16 +799,87 @@ static float get_float_option_alias(Engine &engine, const char *preferred,
   return preferred_value;
 }
 
-static int auto_mcts_minibatch_size(int num_threads) {
+static int env_int_or_default(const char *name, int fallback, int min_value,
+                              int max_value) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0')
+    return fallback;
+  char *end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (!end || *end != '\0')
+    return fallback;
+  return std::clamp(static_cast<int>(parsed), min_value, max_value);
+}
+
+static bool backend_can_select_cuda(std::string_view backend) {
+#ifdef USE_CUDA
+  return backend == "auto" || backend == "cuda" || backend == "accelerator";
+#else
+  (void)backend;
+  return false;
+#endif
+}
+
+static std::string resolve_nn_backend(Engine &engine) {
+  std::string backend = std::string(engine.get_options()["NNBackend"]);
+  if (backend == "auto" && engine.get_options()["NNBackendRequireAccelerator"])
+    return "accelerator";
+  return backend;
+}
+
+static bool auto_mcts_can_scale_workers(Engine &engine) {
+#ifdef USE_CUDA
+  return backend_can_select_cuda(resolve_nn_backend(engine));
+#else
+  (void)engine;
+  return false;
+#endif
+}
+
+static int cuda_auto_mcts_minibatch_size(Engine &engine) {
+  const int requested =
+      static_cast<int>(engine.get_options()["MCTSCudaAutoMinibatchSize"]);
+  if (requested > 0)
+    return requested;
+  const int backend_stable_batch =
+      static_cast<int>(engine.get_options()["NNCudaStableExecutionBatchSize"]);
+  if (backend_stable_batch > 0)
+    return backend_stable_batch;
+  return env_int_or_default("METALFISH_CUDA_STABLE_EXECUTION_BATCH_SIZE", 16, 1,
+                            256);
+}
+
+static int auto_mcts_minibatch_size(Engine &engine, int num_threads) {
 #ifdef __APPLE__
   // The current BT4/MPSGraph path is strongest and most predictable with
   // direct single-position evals. Explicit MCTSMinibatchSize values remain
   // available for throughput experiments.
+  (void)engine;
   (void)num_threads;
   return 1;
 #else
+  const std::string backend = std::string(engine.get_options()["NNBackend"]);
+  if (backend_can_select_cuda(backend))
+    return cuda_auto_mcts_minibatch_size(engine);
   return num_threads >= 8 ? 64 : 32;
 #endif
+}
+
+static void log_mcts_runtime_config(const char *label,
+                                    const MCTS::SearchParams &config) {
+  sync_cout << "info string " << label << ": backend=" << config.nn_backend
+            << " minibatch=" << config.minibatch_size
+            << " cuda_device=" << config.cuda_device
+            << " cuda_graph="
+            << (config.cuda_graph_execution ? "true" : "false")
+            << " cuda_stable_batch="
+            << config.cuda_stable_execution_batch_size
+            << " cuda_deterministic_softmax="
+            << (config.cuda_deterministic_attention_softmax ? "true"
+                                                            : "false")
+            << " cuda_full_buffer_clear="
+            << (config.cuda_full_buffer_clear ? "true" : "false")
+            << sync_endl;
 }
 
 static std::optional<std::string>
@@ -883,12 +954,19 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
                                            int num_threads) {
   MCTS::SearchParams config;
   config.nn_weights_path = nn_weights;
+  config.nn_backend = resolve_nn_backend(engine);
   config.num_threads = num_threads;
-  config.nn_backend = std::string(engine.get_options()["NNBackend"]);
   config.coreml_model_path =
       std::string(engine.get_options()["NNCoreMLModelPath"]);
   config.coreml_compute_units =
       std::string(engine.get_options()["NNCoreMLComputeUnits"]);
+  config.cuda_device = static_cast<int>(engine.get_options()["NNCudaDevice"]);
+  config.cuda_graph_execution = engine.get_options()["NNCudaGraphExecution"];
+  config.cuda_stable_execution_batch_size =
+      static_cast<int>(engine.get_options()["NNCudaStableExecutionBatchSize"]);
+  config.cuda_deterministic_attention_softmax =
+      engine.get_options()["NNCudaDeterministicAttentionSoftmax"];
+  config.cuda_full_buffer_clear = engine.get_options()["NNCudaFullBufferClear"];
 
   config.cpuct = get_float_option(engine, "MCTSCPuct", config.cpuct);
   config.cpuct_at_root =
@@ -972,9 +1050,10 @@ static MCTS::SearchParams make_mcts_config(Engine &engine,
       std::max(1, static_cast<int>(engine.get_options()["MCTSVirtualLoss"]));
   const int requested_minibatch =
       static_cast<int>(engine.get_options()["MCTSMinibatchSize"]);
+  config.minibatch_size_auto = requested_minibatch <= 0;
   config.minibatch_size = requested_minibatch > 0
                               ? requested_minibatch
-                              : auto_mcts_minibatch_size(num_threads);
+                              : auto_mcts_minibatch_size(engine, num_threads);
   config.max_out_of_order_evals_factor = get_float_option_alias(
       engine, "MCTSMaxOutOfOrderEvalsFactor", "MCTSMaxOutOfOrderFactor",
       config.max_out_of_order_evals_factor);
@@ -1017,6 +1096,18 @@ static int auto_hybrid_ab_threads_cap(int available) {
   return 0;
 }
 
+static int auto_hybrid_mcts_threads(Engine &engine, int available) {
+  if (available <= 1)
+    return 1;
+  if (!auto_mcts_can_scale_workers(engine))
+    return 1;
+  if (available >= 12)
+    return std::clamp(available / 4, 2, 4);
+  if (available >= 6)
+    return 2;
+  return 1;
+}
+
 static HybridThreadSplit
 compute_hybrid_thread_split(Engine &engine,
                             const Search::LimitsType *limits = nullptr) {
@@ -1036,9 +1127,7 @@ compute_hybrid_thread_split(Engine &engine,
   if (mcts_override > 0) {
     mcts_threads = std::clamp(mcts_override, 1, available);
   } else {
-    // One transformer worker keeps the GPU side active while leaving the CPU
-    // search enough cores to finish tactical verification.
-    mcts_threads = 1;
+    mcts_threads = auto_hybrid_mcts_threads(engine, available);
   }
 
   int ab_threads = 0;
@@ -1291,11 +1380,8 @@ static int resolve_mcts_thread_count(Engine &engine, bool explicit_threads_arg,
   int mcts_thread_cap =
       static_cast<int>(engine.get_options()["MCTSMaxThreads"]);
   if (!explicit_threads_arg && mcts_thread_cap <= 0) {
-    // Strength-first auto mode:
-    // Apple Silicon MPSGraph latency is better with one MCTS worker for the
-    // current transformer. Higher worker counts require MCTSParallelSearch for
-    // explicit throughput tests.
-    mcts_thread_cap = 1;
+    mcts_thread_cap =
+        (allow_parallel_mcts || auto_mcts_can_scale_workers(engine)) ? 0 : 1;
   }
 
   if (!explicit_threads_arg && mcts_thread_cap > 0 &&
@@ -1316,9 +1402,12 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
   std::ostringstream key;
   key << nn_weights << "|" << config.nn_backend << "|"
       << config.coreml_model_path << "|" << config.coreml_compute_units << "|"
-      << config.num_threads << "|" << config.cpuct << "|"
-      << config.cpuct_at_root << "|" << config.cpuct_base << "|"
-      << config.cpuct_factor << "|" << config.cpuct_base_at_root << "|"
+      << config.cuda_device << "|" << config.cuda_graph_execution << "|"
+      << config.cuda_stable_execution_batch_size << "|"
+      << config.cuda_deterministic_attention_softmax << "|"
+      << config.cuda_full_buffer_clear << "|" << config.num_threads << "|"
+      << config.cpuct << "|" << config.cpuct_at_root << "|" << config.cpuct_base
+      << "|" << config.cpuct_factor << "|" << config.cpuct_base_at_root << "|"
       << config.cpuct_factor_at_root << "|" << config.fpu_absolute << "|"
       << config.fpu_absolute_at_root << "|" << config.fpu_value << "|"
       << config.fpu_value_at_root << "|" << config.fpu_reduction << "|"
@@ -1335,6 +1424,7 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff << "|"
       << config.two_fold_draws << "|" << config.sticky_endgames << "|"
       << config.virtual_loss << "|" << config.minibatch_size << "|"
+      << config.minibatch_size_auto << "|"
       << config.max_out_of_order_evals_factor << "|"
       << config.add_dirichlet_noise << "|" << config.noise_epsilon << "|"
       << config.noise_alpha << "|" << config.out_of_order_eval << "|"
@@ -1571,6 +1661,7 @@ void UCIEngine::parallel_hybrid_go(std::istringstream &is) {
   }
 
   auto config = make_hybrid_config(engine, nn_weights, &limits);
+  log_mcts_runtime_config("Hybrid MCTS runtime", config.mcts_config);
   sync_cout << "info string Hybrid thread split: MCTS=" << config.mcts_threads
             << " AB=" << config.ab_threads
             << " (search workers=" << (config.mcts_threads + config.ab_threads)
@@ -1681,6 +1772,7 @@ void UCIEngine::mcts_mt_go(std::istringstream &is) {
   }
 
   MCTS::SearchParams config = make_mcts_config(engine, nn_weights, num_threads);
+  log_mcts_runtime_config("MCTS runtime", config);
 
   std::shared_ptr<MCTS::Search> mcts;
   const std::string cache_key = make_mcts_cache_key(nn_weights, config);

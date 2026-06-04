@@ -1,0 +1,99 @@
+name: CUDA Release Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      linux_cuda_run_id:
+        description: CUDA GPU Gate run ID with the Linux CUDA package
+        required: true
+      windows_cuda_runtime_run_id:
+        description: Windows CUDA Runtime Gate run ID with the Windows CUDA package
+        required: true
+      expected_sha:
+        description: Commit SHA both runtime gates must match; defaults to this workflow SHA
+        required: false
+        default: ""
+      tag_name:
+        description: Optional release tag used to rename and attach packages
+        required: false
+        default: ""
+      attach_to_release:
+        description: Attach validated CUDA packages to the GitHub release named by tag_name
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  cuda-release-artifacts:
+    name: Validate CUDA Release Packages
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve release inputs
+        id: release-inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha="${{ inputs.expected_sha }}"
+          if [ -z "${expected_sha}" ]; then
+            expected_sha="${GITHUB_SHA}"
+          fi
+          tag_name="${{ inputs.tag_name }}"
+          if [ -z "${tag_name}" ] && [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag_name="${GITHUB_REF_NAME}"
+          fi
+          echo "expected_sha=${expected_sha}" >>"${GITHUB_OUTPUT}"
+          echo "tag_name=${tag_name}" >>"${GITHUB_OUTPUT}"
+          if [ "${{ inputs.attach_to_release }}" = "true" ] && [ -z "${tag_name}" ]; then
+            echo "tag_name is required when attach_to_release=true" >&2
+            exit 2
+          fi
+
+      - name: Fetch and validate CUDA packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            --linux-cuda-run-id "${{ inputs.linux_cuda_run_id }}"
+            --windows-cuda-runtime-run-id "${{ inputs.windows_cuda_runtime_run_id }}"
+            --expected-sha "${{ steps.release-inputs.outputs.expected_sha }}"
+            --out-dir "${GITHUB_WORKSPACE}/cuda-release"
+          )
+          if [ -n "${{ steps.release-inputs.outputs.tag_name }}" ]; then
+            args+=(--tag-name "${{ steps.release-inputs.outputs.tag_name }}")
+          fi
+          python3 tools/fetch_cuda_release_artifacts.py "${args[@]}"
+          python3 -m json.tool \
+            "${GITHUB_WORKSPACE}/cuda-release/cuda-release-artifacts-manifest.json" >/dev/null
+
+      - name: Upload validated CUDA release bundle
+        uses: actions/upload-artifact@v6
+        with:
+          name: cuda-release-artifacts-${{ github.run_id }}
+          path: cuda-release/
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Attach CUDA packages to GitHub release
+        if: ${{ inputs.attach_to_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release-inputs.outputs.tag_name }}
+          files: |
+            cuda-release/packages/*
+            cuda-release/cuda-release-artifacts-manifest.json
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

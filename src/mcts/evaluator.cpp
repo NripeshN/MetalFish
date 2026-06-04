@@ -7,12 +7,15 @@
 
 #include "evaluator.h"
 #include "../core/movegen.h"
+#include "../nn/encoder.h"
 #include "../nn/loader.h"
+#include "../nn/network.h"
 #include "../nn/policy_map.h"
 #include <algorithm>
 
 #include <array>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace MetalFish {
@@ -47,9 +50,14 @@ BatchEncodeScratch &GetBatchEncodeScratch() {
 
 class NNMCTSEvaluator::Impl {
 public:
-  Impl(const std::string &weights_path, const std::string &backend,
-       const std::string &coreml_model_path,
-       const std::string &coreml_compute_units) {
+  Impl(const std::string &weights_path, NN::BackendConfig backend_config) {
+    if (backend_config.backend == "stub" && weights_path.empty()) {
+      input_format_ = MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE;
+      NN::WeightsFile empty_weights;
+      network_ = NN::CreateNetwork(empty_weights, backend_config);
+      return;
+    }
+
     auto weights_opt = NN::LoadWeights(weights_path);
     if (!weights_opt.has_value()) {
       throw std::runtime_error("Could not load network weights");
@@ -58,8 +66,7 @@ public:
     input_format_ = weights_.format().has_network_format()
                         ? weights_.format().network_format().input()
                         : MetalFishNN::NetworkFormat::INPUT_CLASSICAL_112_PLANE;
-    network_ = NN::CreateNetwork(weights_, backend, coreml_model_path,
-                                 coreml_compute_units);
+    network_ = NN::CreateNetwork(weights_, backend_config);
   }
 
   EvaluationResult Evaluate(const Position &pos) {
@@ -164,6 +171,11 @@ public:
   }
 
   std::string GetNetworkInfo() const { return network_->GetNetworkInfo(); }
+  NN::BackendCapabilities GetBackendCapabilities() const {
+    return network_->GetBackendCapabilities();
+  }
+  bool HasWDL() const { return network_->HasWDL(); }
+  bool HasMovesLeft() const { return network_->HasMovesLeft(); }
 
 private:
   EvaluationResult
@@ -217,11 +229,20 @@ private:
 };
 
 NNMCTSEvaluator::NNMCTSEvaluator(const std::string &weights_path,
+                                 NN::BackendConfig backend_config)
+    : impl_(std::make_unique<Impl>(weights_path, std::move(backend_config))) {}
+
+NNMCTSEvaluator::NNMCTSEvaluator(const std::string &weights_path,
                                  const std::string &backend,
                                  const std::string &coreml_model_path,
                                  const std::string &coreml_compute_units)
-    : impl_(std::make_unique<Impl>(weights_path, backend, coreml_model_path,
-                                   coreml_compute_units)) {}
+    : NNMCTSEvaluator(weights_path, [&] {
+        NN::BackendConfig config;
+        config.backend = backend;
+        config.coreml_model_path = coreml_model_path;
+        config.coreml_compute_units = coreml_compute_units;
+        return config;
+      }()) {}
 
 NNMCTSEvaluator::~NNMCTSEvaluator() = default;
 
@@ -269,6 +290,14 @@ std::vector<EvaluationResult> NNMCTSEvaluator::EvaluateBatchWithHistoryViews(
 std::string NNMCTSEvaluator::GetNetworkInfo() const {
   return impl_->GetNetworkInfo();
 }
+
+NN::BackendCapabilities NNMCTSEvaluator::GetBackendCapabilities() const {
+  return impl_->GetBackendCapabilities();
+}
+
+bool NNMCTSEvaluator::HasWDL() const { return impl_->HasWDL(); }
+
+bool NNMCTSEvaluator::HasMovesLeft() const { return impl_->HasMovesLeft(); }
 
 } // namespace MCTS
 } // namespace MetalFish

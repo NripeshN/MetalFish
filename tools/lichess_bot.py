@@ -268,6 +268,9 @@ HYBRID_ANE_ROOT_PROBE = (
 HYBRID_ANE_ROOT_HINTS = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", True) == "true"
 )
+HYBRID_ANE_CONFIRM_MCTS_OVERRIDE = (
+    env_bool_string("METALFISH_HYBRID_ANE_CONFIRM_MCTS_OVERRIDE", True) == "true"
+)
 HYBRID_ANE_WEIGHTS = pathlib.Path(
     os.environ.get("METALFISH_HYBRID_ANE_WEIGHTS", str(DEFAULT_ANE_WEIGHTS))
 )
@@ -698,11 +701,20 @@ def build_engine_options(active_peer_engines: int = 0) -> tuple[dict[str, str], 
 def ane_engine_options(args) -> dict[str, str]:
     if not getattr(args, "hybrid_ane_root_probe", HYBRID_ANE_ROOT_PROBE):
         return {}
-    return {
+    options = {
         "HybridANERootProbe": "true",
         "HybridANERootHints": "true"
         if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
         else "false",
+        "HybridANEConfirmMCTSOverride": (
+            "true"
+            if getattr(
+                args,
+                "hybrid_ane_confirm_mcts_override",
+                HYBRID_ANE_CONFIRM_MCTS_OVERRIDE,
+            )
+            else "false"
+        ),
         "HybridANEWeights": str(
             getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS)
         ),
@@ -722,6 +734,9 @@ def ane_engine_options(args) -> dict[str, str]:
             getattr(args, "hybrid_ane_min_budget_ms", HYBRID_ANE_MIN_BUDGET_MS)
         ),
     }
+    if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS):
+        options["HybridANERootHints"] = "true"
+    return options
 
 
 def normalize_ane_args(args):
@@ -5406,6 +5421,12 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=HYBRID_ANE_ROOT_HINTS,
         help="Allow ANE root probe ordering to feed AB root-order hints.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-confirm-mcts-override",
+        action=argparse.BooleanOptionalAction,
+        default=HYBRID_ANE_CONFIRM_MCTS_OVERRIDE,
+        help="Allow ANE agreement to confirm narrowly gated MCTS overrides.",
     )
     parser.add_argument(
         "--hybrid-ane-weights",

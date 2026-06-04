@@ -9,7 +9,7 @@
 
 namespace MetalFish {
 namespace NN {
-namespace Metal {
+namespace Tables {
 
 // 73x8x8.
 const short kConvPolicyMap[] = {
@@ -404,6 +404,6 @@ const short kConvPolicyMap[] = {
     1795, 1804, 1813, 1822, 1831, 1840, 1849, -1,   -1,   -1,   -1,   -1,
     -1,   -1,   -1,   -1};
 
-} // namespace Metal
+} // namespace Tables
 } // namespace NN
 } // namespace MetalFish

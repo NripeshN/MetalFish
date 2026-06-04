@@ -1,0 +1,165 @@
+name: Windows CUDA Compile Gate
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - ".github/workflows/windows-cuda-compile.yml"
+      - "tools/import_msvc_dev_env.ps1"
+      - "tools/install_windows_cuda_toolkit.ps1"
+      - "tools/run_windows_cuda_compile_gate.ps1"
+      - "tools/check_cuda_package_artifacts.py"
+      - "tools/download_engine_networks.py"
+      - "tools/nn_metal_probe.cpp"
+      - "tools/uci_smoke.py"
+      - "tools/write_portable_manifest.py"
+      - "CMakeLists.txt"
+      - "src/hybrid/**"
+      - "src/mcts/**"
+      - "src/nn/cpu/**"
+      - "src/nn/cuda/**"
+      - "src/nn/encoder.*"
+      - "src/nn/input_plane_packing.h"
+      - "src/nn/input_planes.h"
+      - "src/nn/loader.*"
+      - "src/nn/network*.cpp"
+      - "src/nn/network*.h"
+      - "src/nn/policy_map.*"
+      - "src/nn/proto/net.proto"
+      - "src/nn/tables/**"
+      - "src/nn/weights.*"
+      - "src/nn/weights_file.h"
+      - "src/uci/**"
+      - "tests/nn_input_fixture.*"
+      - "tests/requirements.txt"
+      - "tests/test_main.cpp"
+      - "tests/test_mcts_module.cpp"
+      - "tests/test_nn_comparison.cpp"
+  workflow_dispatch:
+    inputs:
+      cuda_version:
+        description: CUDA Toolkit version to install
+        required: false
+        default: "12.9.1"
+      cuda_archs:
+        description: CMAKE_CUDA_ARCHITECTURES value
+        required: false
+        default: "89"
+
+concurrency:
+  group: metalfish-windows-cuda-compile-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: Release
+  METALFISH_NETWORK_CACHE_DIR: ~/.cache/metalfish/networks
+
+jobs:
+  windows-cuda-compile:
+    name: Windows CUDA Compile
+    runs-on: windows-2022
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate gate script syntax
+        shell: pwsh
+        run: |
+          foreach ($script in @(
+            "tools/import_msvc_dev_env.ps1",
+            "tools/install_windows_cuda_toolkit.ps1",
+            "tools/run_windows_cuda_compile_gate.ps1"
+          )) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$parseErrors
+            ) | Out-Null
+            if ($parseErrors.Count -ne 0) {
+              $parseErrors | Format-List | Out-String | Write-Error
+              exit 1
+            }
+          }
+
+      - name: Install CUDA Toolkit
+        shell: pwsh
+        env:
+          METALFISH_CUDA_TOOLKIT_VERSION: ${{ inputs.cuda_version || '12.9.1' }}
+        run: |
+          tools/install_windows_cuda_toolkit.ps1 `
+            -Version "${env:METALFISH_CUDA_TOOLKIT_VERSION}"
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v5
+        with:
+          path: .vcpkg-bincache
+          key: ${{ runner.os }}-vcpkg-x64-windows-protobuf-zlib-abseil-${{ hashFiles('.github/workflows/portable-ci.yml', '.github/workflows/windows-cuda-compile.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-x64-windows-protobuf-zlib-abseil-
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          & .\tools\import_msvc_dev_env.ps1 -Arch x64 -HostArch x64
+          $VcpkgCache = Join-Path (Get-Location).Path ".vcpkg-bincache"
+          New-Item -ItemType Directory -Force $VcpkgCache | Out-Null
+          $env:VCPKG_DEFAULT_BINARY_CACHE = $VcpkgCache
+          $env:VCPKG_BINARY_SOURCES = "clear;files,$VcpkgCache,readwrite"
+          cmake --version
+          ninja --version
+          nvcc --version
+          cl
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            $env:VCPKG_INSTALLATION_ROOT = "C:\vcpkg"
+          }
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          vcpkg install protobuf zlib abseil --triplet x64-windows
+          python -m pip install -r tests/requirements.txt
+
+      - name: Cache engine networks
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/metalfish/networks
+          key: ${{ runner.os }}-engine-networks-bt4-6147500-legacy42850-nnue-v2
+          restore-keys: |
+            ${{ runner.os }}-engine-networks-bt4-nnue-
+            ${{ runner.os }}-engine-networks-
+
+      - name: Compile CUDA backend
+        shell: pwsh
+        env:
+          METALFISH_CUDA_ARCHS: ${{ inputs.cuda_archs || '89' }}
+        run: |
+          tools/run_windows_cuda_compile_gate.ps1 `
+            -BuildDir build-windows-cuda `
+            -BuildType "${env:BUILD_TYPE}" `
+            -CudaArchs "${env:METALFISH_CUDA_ARCHS}" `
+            -BuildTests ON
+
+      - name: Upload compile artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-cuda-compile-${{ github.run_id }}
+          path: |
+            build-windows-cuda/CMakeCache.txt
+            build-windows-cuda/compile_commands.json
+            build-windows-cuda/windows-cuda-compile-summary.md
+            build-windows-cuda/metalfish*windows-x86_64-msvc-cuda.zip
+            build-windows-cuda/**/*.json
+            build-windows-cuda/**/*.log
+          if-no-files-found: error

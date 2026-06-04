@@ -288,20 +288,21 @@ int BackendComputation::UsedBatchSize() const {
 int BackendComputation::TotalInputs() const { return total_inputs_; }
 
 Backend::Backend(const std::string &weights_path, size_t cache_entries,
-                 const std::string &backend,
-                 const std::string &coreml_model_path,
-                 const std::string &coreml_compute_units)
+                 NN::BackendConfig backend_config)
     : cache_(cache_entries) {
   try {
-    evaluator_ = std::make_unique<NNMCTSEvaluator>(
-        weights_path, backend, coreml_model_path, coreml_compute_units);
-    std::cerr << "info string Backend loaded weights: " << weights_path;
-    if (backend != "auto")
-      std::cerr << " via " << backend;
-    if (backend == "coreml")
-      std::cerr << " model " << coreml_model_path << " units "
-                << coreml_compute_units;
-    std::cerr << std::endl;
+    evaluator_ =
+        std::make_unique<NNMCTSEvaluator>(weights_path, backend_config);
+    std::cerr << "info string Backend loaded weights: " << weights_path
+              << " backend=" << backend_config.backend;
+    if (backend_config.backend == "coreml") {
+      std::cerr << " model " << backend_config.coreml_model_path << " units "
+                << backend_config.coreml_compute_units;
+    }
+    const NN::BackendCapabilities capabilities =
+        evaluator_->GetBackendCapabilities();
+    std::cerr << " actual=" << evaluator_->GetNetworkInfo()
+              << " capabilities=" << capabilities.Summary() << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "info string Backend failed to load weights: " << e.what()
               << std::endl;
@@ -309,13 +310,35 @@ Backend::Backend(const std::string &weights_path, size_t cache_entries,
   }
 }
 
+Backend::Backend(const std::string &weights_path, size_t cache_entries,
+                 const std::string &backend,
+                 const std::string &coreml_model_path,
+                 const std::string &coreml_compute_units)
+    : Backend(weights_path, cache_entries, [&] {
+        NN::BackendConfig config;
+        config.backend = backend;
+        config.coreml_model_path = coreml_model_path;
+        config.coreml_compute_units = coreml_compute_units;
+        return config;
+      }()) {}
+
 std::unique_ptr<BackendComputation> Backend::CreateComputation() {
   return std::make_unique<BackendComputation>(evaluator_.get(), &cache_);
 }
 
-bool Backend::HasWDL() const { return true; }
+bool Backend::HasWDL() const { return evaluator_->HasWDL(); }
 
-bool Backend::HasMovesLeft() const { return true; }
+bool Backend::HasMovesLeft() const { return evaluator_->HasMovesLeft(); }
+
+std::string Backend::GetNetworkInfo() const {
+  return evaluator_ ? evaluator_->GetNetworkInfo() : "";
+}
+
+NN::BackendCapabilities Backend::GetBackendCapabilities() const {
+  if (evaluator_)
+    return evaluator_->GetBackendCapabilities();
+  return {};
+}
 
 } // namespace MCTS
 } // namespace MetalFish

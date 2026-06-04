@@ -12,10 +12,12 @@
 #include <vector>
 
 #include "input_plane_packing.h"
-#include "network_format.h"
 
 namespace MetalFish {
 namespace NN {
+
+struct MultiHeadWeights;
+struct NetworkFormatDescriptor;
 
 constexpr int kNetworkPolicyOutputs = 1858;
 constexpr int kNetworkAttentionPolicyScratch = 64 * 64 + 8 * 24;
@@ -42,6 +44,21 @@ struct NetworkTensorPlan {
   size_t RawPolicyEntries(int batch_size) const;
   std::string Summary() const;
 };
+
+enum class NetworkOutputTarget {
+  Policy,
+  Value,
+  MovesLeft,
+  RawPolicy,
+};
+
+std::string NetworkOutputTargetName(NetworkOutputTarget target);
+int NetworkOutputTargetStride(const NetworkTensorPlan &plan,
+                              NetworkOutputTarget target);
+bool NetworkOutputTargetEnabled(const NetworkTensorPlan &plan,
+                                NetworkOutputTarget target);
+std::vector<NetworkOutputTarget>
+NetworkDecodedOutputTargets(const NetworkTensorPlan &plan);
 
 NetworkTensorPlan
 CreateNetworkTensorPlan(const NetworkFormatDescriptor &format);
