@@ -13,7 +13,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Iterable
 
-
 PROJ = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_AUDIT_DIR = PROJ / "results" / "lichess_audit"
 DEFAULT_SEEK_AUDIT = PROJ / "results" / "lichess_seek_audit.jsonl"
@@ -364,7 +363,12 @@ def collect_games(
         try:
             data = lichess_export(audit.game_id)
             games.append(game_summary_from_export(audit, data))
-        except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError) as e:
+        except (
+            OSError,
+            TimeoutError,
+            urllib.error.URLError,
+            json.JSONDecodeError,
+        ) as e:
             fallback = game_summary_from_audit(audit)
             fallback.audit.issue_counts["lichess_fetch_failed"] += 1
             fallback.opening = str(e)
@@ -608,7 +612,9 @@ def main() -> int:
     files = []
     games: list[GameSummary] = []
     if not args.seek_only:
-        files = latest_audit_files(args.audit_dir, max(0, args.limit), since_ts=since_ts)
+        files = latest_audit_files(
+            args.audit_dir, max(0, args.limit), since_ts=since_ts
+        )
         games = collect_games(files, fetch=args.fetch_lichess, pause_s=args.fetch_pause)
     if args.json:
         payload: object

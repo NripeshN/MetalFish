@@ -209,20 +209,21 @@ struct ParallelHybridConfig {
   bool mcts_root_reject = true;
   bool use_shared_tt = false;
   bool mcts_ab_root_hints = true;
-  int mcts_ab_root_hint_delay_ms = 25;
+  int mcts_ab_root_hint_delay_ms = 0;
   int mcts_ab_root_hint_count = 8;
   int ab_candidate_verify_ms = 120;
   int ab_candidate_verify_count = 4;
   bool root_pawn_lever_tiebreak = true;
   bool ane_root_probe = false;
-  bool ane_root_hints = true;
+  bool ane_root_hints = false;
   bool ane_confirm_mcts_override = true;
+  bool ane_only_pawn_endgames = true;
   std::string ane_weights_path;
   std::string ane_model_path;
   std::string ane_compute_units = "cpu-ne";
   int ane_root_hint_count = 10;
   int ane_root_hint_wait_ms = 0;
-  int ane_min_budget_ms = 1000;
+  int ane_min_budget_ms = 0;
 
   enum class DecisionMode {
     MCTS_PRIMARY,  // Trust MCTS unless AB strongly disagrees
@@ -350,6 +351,8 @@ private:
   InfoCallback info_callback_;
   std::mutex ab_root_mutex_;
   std::vector<ABRootMoveInfo> ab_root_moves_;
+  std::vector<Move> ab_root_order_hints_;
+  std::vector<Move> ab_verified_root_order_hints_;
   std::atomic<bool> callback_invoked_{false};
 
   void mcts_thread_main();
@@ -446,9 +449,15 @@ bool HybridMCTSShortRootTacticalOverride(
     uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
     float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
     int mcts_average_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q);
+
+bool HybridMCTSABLowerBoundConfirmedOverride(
+    bool fixed_budget, bool visit_evidence_sane, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap,
+    int ab_score, int mcts_in_ab_rank, int mcts_in_ab_score,
     bool mcts_in_ab_lowerbound, uint64_t mcts_in_ab_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
-    float ab_in_mcts_q, float mcts_q);
+    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits);
 
 bool HybridMCTSCompactFixedBudgetOverride(
     bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
@@ -479,6 +488,32 @@ bool HybridMCTSRootConfidenceRejectOverride(
     int ab_average_score, int mcts_average_score, int ab_in_mcts_rank,
     uint32_t ab_in_mcts_visits, float ab_in_mcts_q, float mcts_q);
 
+bool HybridMCTSRootRejectLowMaterialPushOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    bool low_material_root, bool mcts_kingside_pawn_push,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int ab_average_score,
+    int mcts_average_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q);
+
+bool HybridMCTSRootRejectRookEndgamePawnPushOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    bool rook_endgame_root, bool mcts_quiet_central_pawn_push,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
+    int mcts_in_ab_score, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q);
+
+bool HybridMCTSRootRejectQuietQueenMoveOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    bool mcts_quiet_central_queen_move, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q);
+
 bool HybridMCTSReusedRootConfidenceOverride(
     bool fixed_budget, uint64_t mcts_root_visits, uint32_t mcts_best_visits,
     uint64_t mcts_root_current_visits, uint32_t mcts_best_current_visits,
@@ -496,6 +531,17 @@ bool HybridMCTSReusedRootCurrentOverride(
     float current_visit_share, float root_q_gap, int mcts_cp, int eval_delta,
     int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
     bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q);
+
+bool HybridMCTSBishopEndgameRetreatOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_has_clear_preference,
+    bool bishop_endgame_root, bool mcts_bishop_back_rank_retreat,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits,
+    uint64_t mcts_root_current_visits, uint32_t mcts_best_current_visits,
+    float absolute_visit_share, float current_visit_share, int mcts_cp,
+    int eval_delta, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
     uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q);
 
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
@@ -519,11 +565,45 @@ bool HybridRootPolicyTieBreak(bool fixed_budget, uint64_t root_visits,
                               float top_policy, uint32_t candidate_visits,
                               float candidate_q, float candidate_policy);
 
+bool HybridRootQConflictTieBreak(bool fixed_budget, bool visit_evidence_sane,
+                                 uint64_t root_visits,
+                                 uint32_t selected_visits, float selected_q,
+                                 float selected_policy,
+                                 uint32_t candidate_visits, float candidate_q,
+                                 float candidate_policy,
+                                 int selected_average_score,
+                                 int candidate_average_score);
+
 bool HybridMCTSRootRejectsAB(bool fixed_budget, bool visit_evidence_sane,
                              bool mcts_strong, bool ab_has_clear_preference,
                              uint32_t top_visits, uint32_t ab_visits,
                              float top_q, float ab_q, float visit_share,
                              int eval_delta);
+
+bool HybridMCTSRootRejectQGapOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
+    int mcts_in_ab_score, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q);
+
+bool HybridPreserveLeadingHintAfterABVerify(
+    bool fixed_budget, bool visit_evidence_sane, bool candidate_shape,
+    uint64_t mcts_current_root_visits, uint32_t mcts_current_best_visits,
+    float current_visit_share, float mcts_q, float displaced_q,
+    float mcts_policy, float displaced_policy, int displaced_average_score,
+    int mcts_average_score, int displaced_score, bool displaced_lowerbound,
+    int mcts_score, bool mcts_lowerbound, bool mcts_upperbound,
+    uint64_t mcts_effort);
+
+bool HybridMCTSDiscoveredPawnPushOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool candidate_shape,
+    uint64_t mcts_current_root_visits, uint32_t mcts_current_best_visits,
+    uint32_t ab_current_visits, float current_visit_share, float q_gap_to_ab,
+    int mcts_cp, int eval_delta, int ab_score, int ab_average_score,
+    int mcts_average_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort);
 
 bool HybridRootPawnLeverAgreementTieBreak(bool fixed_budget,
                                           bool visit_evidence_sane,
@@ -544,11 +624,49 @@ bool HybridANERootPawnLeverCandidate(
     int candidate_mcts_rank, uint32_t candidate_mcts_current_visits,
     float candidate_mcts_q, float candidate_mcts_policy);
 
+bool HybridIsPawnOnlyEndgame(const Position &pos);
+
+bool HybridANEProbeAllowedForPosition(const Position &pos,
+                                      bool only_pawn_endgames);
+
+bool HybridIsRookEndgame(const Position &pos);
+
+bool HybridIsQuietCentralPawnPush(const Position &pos, Move move);
+
+bool HybridIsQuietCentralQueenMove(const Position &pos, Move move);
+
+bool HybridIsQuietMinorMajorAttack(const Position &pos, Move move);
+
+bool HybridIsBishopOnlyEndgame(const Position &pos);
+
+bool HybridIsQuietBishopBackRankRetreat(const Position &pos, Move move);
+
+bool HybridIsPawnOnlyMCTSANECandidate(const Position &pos, Move selected,
+                                      Move candidate);
+
+bool HybridIsPawnOnlyKingRecaptureCandidate(const Position &pos, Move selected,
+                                            Move candidate);
+
+bool HybridIsPawnOnlyPawnCaptureCandidate(const Position &pos, Move selected,
+                                          Move candidate);
+
+bool HybridPawnOnlyANEMCTSOverride(
+    bool enabled, bool ane_agrees_mcts, bool fixed_budget,
+    bool visit_evidence_sane, bool candidate_shape, bool king_recapture_shape,
+    bool pawn_lever_shape, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, uint64_t mcts_current_root_visits,
+    uint32_t mcts_current_best_visits, uint32_t ab_mcts_visits,
+    float visit_share, float root_q_gap, float q_gap_to_ab, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    float ane_score_margin);
+
 bool HybridIsPawnLever(const Position &pos, Move move);
 
 bool HybridIsKingsidePawnLever(const Position &pos, Move move);
 
 bool HybridIsKingsidePawnPush(const Position &pos, Move move);
+
+bool HybridIsPawnDiscoveredKingAttack(const Position &pos, Move move);
 
 bool HybridRootPawnLeverCanChallengeSelected(const Position &pos, Move selected,
                                              bool allow_non_pawn_selected);

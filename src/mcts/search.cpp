@@ -493,30 +493,192 @@ bool MCTSIsMinorCentralPawnCapture(const Position &pos, Move move) {
   return target_file == FILE_D || target_file == FILE_E;
 }
 
+bool MCTSIsMinorKingPawnCheckCapture(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || !pos.capture(move))
+    return false;
+
+  const Piece piece = pos.piece_on(move.from_sq());
+  const Piece captured = pos.piece_on(move.to_sq());
+  if (piece == NO_PIECE || captured == NO_PIECE)
+    return false;
+
+  const PieceType pt = type_of(piece);
+  if (pt != KNIGHT && pt != BISHOP)
+    return false;
+  if (type_of(captured) != PAWN)
+    return false;
+  if (file_of(move.to_sq()) != FILE_F)
+    return false;
+  if (relative_rank(color_of(piece), move.to_sq()) != RANK_7)
+    return false;
+
+  return pos.gives_check(move);
+}
+
+bool MCTSIsMinorHighValueCapture(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || !pos.capture(move))
+    return false;
+
+  const Piece piece = pos.piece_on(move.from_sq());
+  const Piece captured = pos.piece_on(move.to_sq());
+  if (piece == NO_PIECE || captured == NO_PIECE)
+    return false;
+
+  const PieceType pt = type_of(piece);
+  if (pt != KNIGHT && pt != BISHOP)
+    return false;
+
+  const PieceType captured_pt = type_of(captured);
+  return captured_pt == ROOK || captured_pt == QUEEN;
+}
+
+bool MCTSIsMinorCentralQuietMove(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || pos.capture(move))
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || !pos.empty(to))
+    return false;
+
+  const PieceType pt = type_of(piece);
+  if (pt != KNIGHT && pt != BISHOP)
+    return false;
+
+  const File target_file = file_of(to);
+  if (target_file != FILE_D && target_file != FILE_E)
+    return false;
+
+  const Rank target_rank = relative_rank(color_of(piece), to);
+  return target_rank >= RANK_4 && target_rank <= RANK_5;
+}
+
+bool MCTSIsMinorQuietAttacksMajor(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || pos.capture(move))
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || !pos.empty(to))
+    return false;
+
+  const PieceType pt = type_of(piece);
+  if (pt != KNIGHT && pt != BISHOP)
+    return false;
+
+  const Bitboard occupied_after =
+      (pos.pieces() ^ square_bb(from)) | square_bb(to);
+  return bool(attacks_bb(pt, to, occupied_after) &
+              pos.pieces(~color_of(piece), ROOK, QUEEN));
+}
+
+bool MCTSIsMinorQuietAttacksQueen(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || pos.capture(move))
+    return false;
+
+  const Square from = move.from_sq();
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(from);
+  if (piece == NO_PIECE || !pos.empty(to))
+    return false;
+
+  const PieceType pt = type_of(piece);
+  if (pt != KNIGHT && pt != BISHOP)
+    return false;
+
+  const Bitboard occupied_after =
+      (pos.pieces() ^ square_bb(from)) | square_bb(to);
+  return bool(attacks_bb(pt, to, occupied_after) &
+              pos.pieces(~color_of(piece), QUEEN));
+}
+
+bool MCTSIsMinorFifthRankQuietMove(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || pos.capture(move))
+    return false;
+
+  const Square to = move.to_sq();
+  const Piece piece = pos.piece_on(move.from_sq());
+  if (piece == NO_PIECE || !pos.empty(to))
+    return false;
+
+  const PieceType pt = type_of(piece);
+  if (pt != KNIGHT && pt != BISHOP)
+    return false;
+
+  const File target_file = file_of(to);
+  if (target_file != FILE_C && target_file != FILE_F)
+    return false;
+
+  return relative_rank(color_of(piece), to) == RANK_5;
+}
+
+bool MCTSHasHeavyPieceOnSeventh(const Position &pos, Color us) {
+  Bitboard heavy = pos.pieces(us, ROOK, QUEEN);
+  while (heavy) {
+    if (relative_rank(us, pop_lsb(heavy)) == RANK_7)
+      return true;
+  }
+  return false;
+}
+
+bool MCTSIsAdvancedPromotionSupportQueenMove(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || pos.capture(move))
+    return false;
+
+  const Piece piece = pos.piece_on(move.from_sq());
+  if (piece == NO_PIECE || type_of(piece) != QUEEN || !pos.empty(move.to_sq()))
+    return false;
+
+  const Color us = color_of(piece);
+  const File target_file = file_of(move.to_sq());
+  const Rank target_rank = relative_rank(us, move.to_sq());
+  if (target_rank > RANK_5)
+    return false;
+
+  Bitboard pawns = pos.pieces(us, PAWN);
+  while (pawns) {
+    const Square pawn_sq = pop_lsb(pawns);
+    if (file_of(pawn_sq) == target_file &&
+        relative_rank(us, pawn_sq) == RANK_7) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
                                       uint32_t best_visits,
                                       uint32_t candidate_visits,
                                       float best_policy, float best_q,
                                       float candidate_policy,
                                       float candidate_q) {
-  return root_visits >= 64 && root_visits <= 600 && candidate_visits >= 8 &&
-         candidate_visits * 2 < std::max<uint32_t>(1, best_visits) &&
+  const uint32_t safe_best_visits = std::max<uint32_t>(1, best_visits);
+  const bool underexplored =
+      root_visits <= 80
+          ? candidate_visits * 2 <= safe_best_visits
+          : static_cast<uint64_t>(candidate_visits) * 5 <=
+                static_cast<uint64_t>(safe_best_visits) * 2;
+  if (best_q >= 0.0f && candidate_q < 0.0f)
+    return false;
+  return root_visits >= 40 && root_visits <= 600 && candidate_visits >= 8 &&
+         underexplored &&
          candidate_policy >= 0.20f && candidate_policy >= best_policy * 1.15f &&
          best_q - candidate_q <= 0.20f;
 }
 
-bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits,
-                                     uint32_t best_visits,
+bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits, uint32_t best_visits,
                                      uint32_t candidate_visits,
-                                     int candidate_rank,
-                                     float best_policy, float best_q,
-                                     float candidate_policy,
+                                     int candidate_rank, float best_policy,
+                                     float best_q, float candidate_policy,
                                      float candidate_q) {
-  const bool rank_ok =
-      (candidate_rank >= 5 && candidate_rank <= 6) ||
-      (candidate_rank == 7 && candidate_visits >= 4 &&
-       candidate_policy >= 0.045f);
-  return root_visits >= 64 && root_visits <= 600 && rank_ok &&
+  const bool rank_ok = (candidate_rank >= 5 && candidate_rank <= 6) ||
+                       (candidate_rank == 7 && candidate_visits >= 2 &&
+                        candidate_policy >= 0.045f) ||
+                       (candidate_rank == 4 && candidate_visits >= 2 &&
+                        candidate_policy >= 0.035f);
+  return root_visits >= 40 && root_visits <= 600 && rank_ok &&
          candidate_visits >= 2 &&
          candidate_visits * 3 < std::max<uint32_t>(1, best_visits) &&
          candidate_policy >= 0.035f && candidate_policy <= 0.08f &&
@@ -530,6 +692,90 @@ bool MCTSRootTacticalCaptureProbeCandidate(uint32_t root_visits,
   return root_visits >= 32 && root_visits <= 600 &&
          candidate_policy_rank >= 10 && candidate_policy_rank <= 16 &&
          candidate_policy >= 0.006f && candidate_policy <= 0.020f;
+}
+
+bool MCTSRootHighValueCaptureProbeCandidate(uint32_t root_visits,
+                                            int candidate_policy_rank,
+                                            float candidate_policy) {
+  return root_visits >= 24 && root_visits <= 180 &&
+         candidate_policy_rank >= 2 && candidate_policy_rank <= 8 &&
+         candidate_policy >= 0.045f && candidate_policy <= 0.200f;
+}
+
+bool MCTSRootTacticalQuietProbeCandidate(uint32_t root_visits,
+                                         int candidate_policy_rank,
+                                         float candidate_policy) {
+  return root_visits >= 32 && root_visits <= 80 &&
+         candidate_policy_rank >= 5 && candidate_policy_rank <= 10 &&
+         candidate_policy >= 0.025f && candidate_policy <= 0.070f;
+}
+
+bool MCTSRootQuietMajorAttackProbeCandidate(uint32_t root_visits,
+                                            int candidate_policy_rank,
+                                            float candidate_policy) {
+  if (root_visits < 32 || root_visits > 180 ||
+      candidate_policy_rank < 1 || candidate_policy_rank > 10)
+    return false;
+
+  if (candidate_policy_rank <= 4)
+    return candidate_policy >= 0.080f && candidate_policy <= 0.360f;
+
+  return candidate_policy >= 0.018f && candidate_policy <= 0.080f;
+}
+
+bool MCTSRootDeepTacticalQuietProbeCandidate(uint32_t root_visits,
+                                             int candidate_policy_rank,
+                                             float candidate_policy) {
+  if (root_visits < 32 || root_visits > 180 ||
+      candidate_policy_rank < 2 || candidate_policy_rank > 10)
+    return false;
+
+  if (candidate_policy_rank <= 4)
+    return candidate_policy >= 0.080f && candidate_policy <= 0.180f;
+
+  return candidate_policy >= 0.018f && candidate_policy <= 0.080f;
+}
+
+bool MCTSRootAdvancedPromotionSupportCandidate(
+    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
+    float best_policy, float best_q, float candidate_policy,
+    float candidate_q) {
+  return root_visits >= 48 && root_visits <= 220 && candidate_visits >= 16 &&
+         candidate_visits * 2 >= std::max<uint32_t>(1, best_visits) &&
+         candidate_policy >= 0.120f &&
+         candidate_policy >= best_policy * 1.25f &&
+         best_q - candidate_q <= 0.120f;
+}
+
+bool MCTSRootLowVisitQOverrideCandidate(uint32_t best_visits,
+                                        uint32_t candidate_visits, float best_q,
+                                        float candidate_q,
+                                        float near_equal_required_gap,
+                                        float candidate_policy,
+                                        bool allow_strong_gap_candidate) {
+  const bool near_visit_candidate =
+      candidate_visits >= 6 && candidate_visits * 2 >= best_visits;
+  const bool decisive_low_visit_candidate =
+      candidate_visits >= 3 && candidate_q >= 0.95f &&
+      candidate_q > best_q + 0.50f;
+  const bool strong_gap_candidate =
+      allow_strong_gap_candidate && candidate_visits >= 16 &&
+      candidate_visits * 3 >= std::max<uint32_t>(1, best_visits) &&
+      candidate_policy >= 0.045f && candidate_q > best_q + 0.35f;
+  if (!near_visit_candidate && !decisive_low_visit_candidate &&
+      !strong_gap_candidate)
+    return false;
+
+  const float required_gap =
+      decisive_low_visit_candidate
+          ? 0.0f
+          : (strong_gap_candidate
+                 ? 0.0f
+                 : (candidate_visits * 9 >= best_visits * 8
+                        ? near_equal_required_gap
+                        : (candidate_visits * 4 >= best_visits * 3 ? 0.05f
+                                                                    : 0.07f)));
+  return candidate_q > best_q + required_gap;
 }
 
 namespace {
@@ -638,8 +884,13 @@ void Search::ConfigureStopper() {
       stopper->Add(std::make_unique<NodeLimitStopper>(limits_.nodes));
     }
     if (!node_only_limit && params_.kld_gain_min > 0.0f) {
+      const int64_t kld_min_elapsed_ms =
+          time_budget_ms > 0
+              ? std::min<int64_t>(500, (time_budget_ms * 2) / 3)
+              : 0;
       stopper->Add(std::make_unique<KLDGainStopper>(
-          params_.kld_gain_min, params_.kld_gain_average_interval));
+          params_.kld_gain_min, params_.kld_gain_average_interval,
+          kld_min_elapsed_ms));
     }
     if (!node_only_limit && params_.smart_pruning_factor > 0.0f) {
       stopper->Add(std::make_unique<SmartPruningStopper>(
@@ -1692,16 +1943,57 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
   if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
       children_visits >= 32 && children_visits <= 600 &&
       !ctx.pos.capture(edges[best_idx].move)) {
-    bool already_probed = false;
     int probe_idx = -1;
     float probe_policy = 0.0f;
     const int policy_rank_limit = std::min(num_edges, 16);
     for (int i = 0; i < policy_rank_limit; ++i) {
-      if (!MCTSIsMinorCentralPawnCapture(ctx.pos, edges[i].move))
+      const bool low_policy_capture =
+          MCTSIsMinorCentralPawnCapture(ctx.pos, edges[i].move) ||
+          MCTSIsMinorKingPawnCheckCapture(ctx.pos, edges[i].move);
+      const bool high_value_capture = limits_.movetime > 0 &&
+          MCTSIsMinorHighValueCapture(ctx.pos, edges[i].move);
+      if (!low_policy_capture && !high_value_capture)
         continue;
 
       Node *child = edges[i].child.load(std::memory_order_acquire);
-      if (child && child->GetN() >= 16) {
+      const uint32_t target_visits = high_value_capture ? 32 : 16;
+      if (child && child->GetN() >= target_visits)
+        continue;
+      if (child && child->GetNInFlight() > 0)
+        continue;
+
+      const float policy = edges[i].GetP();
+      const bool candidate_ok =
+          high_value_capture
+              ? MCTSRootHighValueCaptureProbeCandidate(children_visits, i + 1,
+                                                       policy)
+              : MCTSRootTacticalCaptureProbeCandidate(children_visits, i + 1,
+                                                      policy);
+      if (!candidate_ok)
+        continue;
+      if (probe_idx < 0 || policy > probe_policy) {
+        probe_idx = i;
+        probe_policy = policy;
+      }
+    }
+
+    if (probe_idx >= 0)
+      return {probe_idx, 1};
+  }
+
+  if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
+      children_visits >= 32 && children_visits <= 80 &&
+      !ctx.pos.capture(edges[best_idx].move)) {
+    bool already_probed = false;
+    int probe_idx = -1;
+    float probe_policy = 0.0f;
+    const int policy_rank_limit = std::min(num_edges, 10);
+    for (int i = 0; i < policy_rank_limit; ++i) {
+      if (!MCTSIsMinorCentralQuietMove(ctx.pos, edges[i].move))
+        continue;
+
+      Node *child = edges[i].child.load(std::memory_order_acquire);
+      if (child && child->GetN() >= 8) {
         already_probed = true;
         break;
       }
@@ -1709,8 +2001,8 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
         continue;
 
       const float policy = edges[i].GetP();
-      if (!MCTSRootTacticalCaptureProbeCandidate(children_visits, i + 1,
-                                                policy)) {
+      if (!MCTSRootTacticalQuietProbeCandidate(children_visits, i + 1,
+                                               policy)) {
         continue;
       }
       if (probe_idx < 0 || policy > probe_policy) {
@@ -1720,6 +2012,54 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
     }
 
     if (!already_probed && probe_idx >= 0)
+      return {probe_idx, 1};
+  }
+
+  if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
+      limits_.movetime > 0 &&
+      children_visits >= 32 && children_visits <= 180) {
+    int probe_idx = -1;
+    float probe_policy = 0.0f;
+    const int policy_rank_limit = std::min(num_edges, 10);
+    for (int i = 0; i < policy_rank_limit; ++i) {
+      const bool attacks_major =
+          MCTSIsMinorQuietAttacksMajor(ctx.pos, edges[i].move);
+      const Piece moving_piece = ctx.pos.piece_on(edges[i].move.from_sq());
+      const bool fifth_rank = moving_piece != NO_PIECE &&
+                              MCTSIsMinorFifthRankQuietMove(ctx.pos,
+                                                            edges[i].move) &&
+                              MCTSHasHeavyPieceOnSeventh(
+                                  ctx.pos, color_of(moving_piece));
+      if (!attacks_major && !fifth_rank)
+        continue;
+
+      const float policy = edges[i].GetP();
+      Node *child = edges[i].child.load(std::memory_order_acquire);
+      const bool attacks_queen =
+          attacks_major && MCTSIsMinorQuietAttacksQueen(ctx.pos, edges[i].move);
+      const uint32_t target_visits =
+          (fifth_rank || (attacks_queen && policy >= 0.180f)) ? 48 : 32;
+      if (child && child->GetN() >= target_visits)
+        continue;
+      if (child && child->GetNInFlight() > 0)
+        continue;
+
+      const bool candidate_ok =
+          attacks_major
+              ? MCTSRootQuietMajorAttackProbeCandidate(children_visits, i + 1,
+                                                       policy)
+              : MCTSRootDeepTacticalQuietProbeCandidate(children_visits, i + 1,
+                                                        policy);
+      if (!candidate_ok) {
+        continue;
+      }
+      if (probe_idx < 0 || policy > probe_policy) {
+        probe_idx = i;
+        probe_policy = policy;
+      }
+    }
+
+    if (probe_idx >= 0)
       return {probe_idx, 1};
   }
 
@@ -2057,11 +2397,25 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
     }
   }
 
-  const bool tiny_node_limited_search =
-      limits_.nodes > 0 && limits_.nodes <= 100 && limits_.movetime <= 0 &&
-      !limits_.infinite && limits_.time[WHITE] <= 0 && limits_.time[BLACK] <= 0;
-  if (tiny_node_limited_search && best_idx >= 0 && !best_is_terminal_win &&
-      total_child_visits <= 96) {
+  const bool fixed_node_limited_search =
+      limits_.nodes > 0 && limits_.movetime <= 0 && !limits_.infinite &&
+      limits_.time[WHITE] <= 0 && limits_.time[BLACK] <= 0;
+  const bool fixed_movetime_search =
+      limits_.movetime > 0 && !limits_.infinite && limits_.time[WHITE] <= 0 &&
+      limits_.time[BLACK] <= 0;
+  const bool fixed_low_root_visit_search =
+      fixed_node_limited_search || fixed_movetime_search;
+  const uint32_t q_override_visit_cap =
+      fixed_movetime_search
+          ? static_cast<uint32_t>(
+                std::max(0, params_.fixed_movetime_q_override_cap))
+          : 96;
+  const float near_equal_required_gap = fixed_movetime_search ? 0.02f : 0.05f;
+  if (fixed_low_root_visit_search && best_idx >= 0 && !best_is_terminal_win &&
+      total_child_visits <= q_override_visit_cap) {
+    Position root_pos;
+    StateInfo root_state;
+    root_pos.set(tree_.RootFen(), false, &root_state);
     int q_idx = best_idx;
     float q_best = best_q;
     for (int i = 0; i < num_edges; ++i) {
@@ -2069,10 +2423,18 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       if (!child)
         continue;
       const uint32_t cn = child->GetN();
-      if (cn < 6 || cn * 2 < best_n)
-        continue;
       const float cq = child->GetWL();
-      if (cq > q_best + 0.07f) {
+      const bool protects_high_policy_capture =
+          root_pos.capture(edges[q_idx].move) &&
+          !root_pos.capture(edges[i].move) && edges[q_idx].GetP() >= 0.50f &&
+          edges[i].GetP() <= edges[q_idx].GetP() * 0.60f &&
+          cq < q_best + 0.10f;
+      if (protects_high_policy_capture)
+        continue;
+      if (MCTSRootLowVisitQOverrideCandidate(best_n, cn, q_best, cq,
+                                             near_equal_required_gap,
+                                             edges[i].GetP(),
+                                             fixed_movetime_search)) {
         q_idx = i;
         q_best = cq;
       }
@@ -2081,6 +2443,47 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       best_idx = q_idx;
       best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
       best_q = q_best;
+    }
+  }
+
+  if (fixed_movetime_search && best_idx >= 0 && !best_is_terminal_win &&
+      total_child_visits <= 220) {
+    Position root_pos;
+    StateInfo root_state;
+    root_pos.set(tree_.RootFen(), false, &root_state);
+
+    const float best_policy = edges[best_idx].GetP();
+    int support_idx = -1;
+    float support_policy = 0.0f;
+    float support_q = -2.0f;
+    for (int i = 0; i < num_edges; ++i) {
+      if (i == best_idx)
+        continue;
+      Node *child = edges[i].child.load(std::memory_order_acquire);
+      if (!child)
+        continue;
+      if (!MCTSIsAdvancedPromotionSupportQueenMove(root_pos, edges[i].move))
+        continue;
+      const uint32_t cn = child->GetN();
+      const float cq = child->GetWL();
+      const float policy = edges[i].GetP();
+      if (!MCTSRootAdvancedPromotionSupportCandidate(
+              total_child_visits, best_n, cn, best_policy, best_q, policy,
+              cq)) {
+        continue;
+      }
+      if (support_idx < 0 || policy > support_policy ||
+          (std::abs(policy - support_policy) <= 0.000001f &&
+           cq > support_q)) {
+        support_idx = i;
+        support_policy = policy;
+        support_q = cq;
+      }
+    }
+    if (support_idx >= 0) {
+      best_idx = support_idx;
+      best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
+      best_q = support_q;
     }
   }
 

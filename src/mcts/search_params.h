@@ -71,6 +71,7 @@ struct SearchParams {
   bool high_policy_root_lever_selection = true;
   bool low_policy_root_lever_selection = true;
   bool root_tactical_capture_probe = true;
+  int fixed_movetime_q_override_cap = 0;
 
   // Contempt (positive = avoid draws, negative = prefer draws)
   float contempt = 0.0f;

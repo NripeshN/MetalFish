@@ -31,9 +31,10 @@ RESULTS_DIR = ROOT / "results" / "lichess_puzzles"
 LICHESS_API = "https://lichess.org/api"
 DEFAULT_ANE_WEIGHTS = ROOT / "networks" / "t1-512x15x8h-distilled-swa-3395000.pb.gz"
 DEFAULT_ANE_MODEL = ROOT / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc"
-DEFAULT_ANE_ROOT_HINTS = True
+DEFAULT_ANE_ROOT_HINTS = False
+DEFAULT_ANE_ONLY_PAWN_ENDGAMES = True
 DEFAULT_ANE_ROOT_HINT_WAIT_MS = 0
-DEFAULT_ANE_MIN_BUDGET_MS = 1000
+DEFAULT_ANE_MIN_BUDGET_MS = 0
 SETOPTION_ALIASES = {
     "HybridANEWeightsPath": "HybridANEWeights",
 }
@@ -223,6 +224,8 @@ class SearchAnswer:
     hybrid_ane_top_score: str = ""
     hybrid_ane_score_margin: str = ""
     hybrid_ane_root: str = ""
+    hybrid_ab_hints: str = ""
+    hybrid_ab_verified_hints: str = ""
     final_summary: str = ""
 
 
@@ -385,7 +388,7 @@ def engine_options(args) -> dict[str, str]:
                 "HybridABRootRejectMCTS": "true",
                 "HybridMCTSRootReject": "true",
                 "HybridMCTSABRootHints": "true",
-                "HybridMCTSABRootHintDelayMs": "25",
+                "HybridMCTSABRootHintDelayMs": "0",
                 "HybridMCTSABRootHintCount": "8",
                 "HybridABCandidateVerifyMs": "120",
                 "HybridABCandidateVerifyCount": "4",
@@ -406,6 +409,9 @@ def engine_options(args) -> dict[str, str]:
                     "HybridANERootProbe": "true",
                     "HybridANERootHints": (
                         "true" if args.hybrid_ane_root_hints else "false"
+                    ),
+                    "HybridANEOnlyPawnEndgames": (
+                        "true" if args.hybrid_ane_only_pawn_endgames else "false"
                     ),
                     "HybridANEWeights": str(args.hybrid_ane_weights),
                     "HybridANEModelPath": str(args.hybrid_ane_model_path),
@@ -447,6 +453,8 @@ def update_answer_from_info(line: str, answer: SearchAnswer) -> None:
         answer.hybrid_ane_top_score = fields.get("ANETopScore", "")
         answer.hybrid_ane_score_margin = fields.get("ANEScoreMargin", "")
         answer.hybrid_ane_root = fields.get("ANERoot", "")
+        answer.hybrid_ab_hints = fields.get("ABHints", "")
+        answer.hybrid_ab_verified_hints = fields.get("ABVerifiedHints", "")
     elif line.startswith("info string Final:"):
         answer.final_summary = line.removeprefix("info string ").strip()
 
@@ -500,6 +508,10 @@ def search_trace_fields(answer: SearchAnswer) -> dict[str, str]:
         fields["hybrid_ane_score_margin"] = answer.hybrid_ane_score_margin
     if answer.hybrid_ane_root:
         fields["hybrid_ane_root"] = answer.hybrid_ane_root
+    if answer.hybrid_ab_hints:
+        fields["hybrid_ab_hints"] = answer.hybrid_ab_hints
+    if answer.hybrid_ab_verified_hints:
+        fields["hybrid_ab_verified_hints"] = answer.hybrid_ab_verified_hints
     if answer.final_summary:
         fields["final_summary"] = answer.final_summary
     return fields
@@ -511,6 +523,9 @@ def initial_ane_stats(args) -> dict[str, object]:
         "ane_probe_requested": requested,
         "hybrid_trace_requested": bool(getattr(args, "hybrid_trace", False)),
         "ane_root_hints_requested": bool(getattr(args, "hybrid_ane_root_hints", False)),
+        "ane_only_pawn_endgames": bool(
+            getattr(args, "hybrid_ane_only_pawn_endgames", True)
+        ),
         "ane_compute_units": (
             str(getattr(args, "hybrid_ane_compute_units", "")) if requested else ""
         ),
@@ -877,6 +892,7 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
                 f"- ANE root probe: requested ({stats.get('ane_compute_units')})",
                 f"- HybridTrace requested: {stats.get('hybrid_trace_requested')}",
                 f"- ANE root hints requested: {stats.get('ane_root_hints_requested')}",
+                f"- ANE pawn-only gate: {stats.get('ane_only_pawn_endgames')}",
                 f"- ANE searches: {stats.get('ane_searches', 0)}",
                 f"- ANE trace fields: {stats.get('ane_trace_searches', 0)}",
                 f"- ANE non-empty roots: {stats.get('ane_root_nonempty', 0)}",
@@ -1206,6 +1222,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=DEFAULT_ANE_ROOT_HINTS,
         help="Use ANE root ordering as AB search hints; final ANE evidence remains available without this.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-only-pawn-endgames",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_ANE_ONLY_PAWN_ENDGAMES,
+        help="Restrict ANE root probing to pawn-only endgames.",
     )
     parser.add_argument(
         "--hybrid-trace",

@@ -79,9 +79,11 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
         ponder=True,
         hybrid_ane_root_probe=True,
         hybrid_ane_root_hints=True,
+        hybrid_ane_confirm_mcts_override=False,
         hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
         hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
         hybrid_ane_compute_units="cpu-ne",
+        hybrid_ane_only_pawn_endgames=False,
         hybrid_ane_root_hint_count=10,
         hybrid_ane_root_hint_wait_ms=250,
         hybrid_ane_min_budget_ms=1000,
@@ -103,6 +105,14 @@ def test_runtime_ane_options_are_explicitly_opt_in() -> None:
     expect(
         "ANE confirmation toggle passed",
         with_ane["HybridANEConfirmMCTSOverride"] == "false",
+    )
+    expect(
+        "ANE default scope is all roots",
+        with_default_hints["HybridANEOnlyPawnEndgames"] == "false",
+    )
+    expect(
+        "ANE all-root override passed",
+        with_ane["HybridANEOnlyPawnEndgames"] == "false",
     )
     expect("ANE weights passed", with_ane["HybridANEWeights"] == "networks/t1.pb.gz")
     expect(
@@ -128,6 +138,7 @@ def test_verbose_runtime_enables_trace_without_forcing_ane_hints() -> None:
         hybrid_ane_weights=pathlib.Path("networks/t1.pb.gz"),
         hybrid_ane_model_path=pathlib.Path("build/coreml/t1.mlmodelc"),
         hybrid_ane_compute_units="cpu-ne",
+        hybrid_ane_only_pawn_endgames=True,
         hybrid_ane_root_hint_count=10,
         hybrid_ane_root_hint_wait_ms=250,
         hybrid_ane_min_budget_ms=1000,
@@ -836,7 +847,9 @@ def test_speed_cooldown_no_candidate_rotates_to_next_speed() -> None:
         "speed-cooldown retry is immediate enough",
         scheduled[0] == max(1.0, lichess_bot.CHALLENGE_CANCEL_GRACE_S),
     )
-    expect("speed-cooldown skips to next speed", bot._tc_to_speed(limit, inc) == "blitz")
+    expect(
+        "speed-cooldown skips to next speed", bot._tc_to_speed(limit, inc) == "blitz"
+    )
     expect(
         "speed-cooldown rotation audited",
         audit and audit[0][0] == "seek_no_candidates" and audit[0][1]["rotated"],
@@ -2131,10 +2144,13 @@ def test_make_move_can_offer_draw_on_same_request() -> None:
 
     bot.api_post = api_post
 
-    expect("draw offer move accepted", bot.make_move("game", "e2e4", offering_draw=True))
+    expect(
+        "draw offer move accepted", bot.make_move("game", "e2e4", offering_draw=True)
+    )
     expect(
         "draw offer uses move endpoint",
-        calls == [
+        calls
+        == [
             {
                 "path": "/bot/game/game/move/e2e4",
                 "params": {"offeringDraw": "true"},
@@ -2149,7 +2165,9 @@ def test_draw_offer_reason_requires_claim_and_tablebase_draw() -> None:
 
     bot._draw_claim_available = lambda candidate: True
     bot._tablebase_wdl = lambda candidate: 0
-    expect("tb draw claim offers draw", bot._draw_offer_reason(board) == "tb_draw_claim")
+    expect(
+        "tb draw claim offers draw", bot._draw_offer_reason(board) == "tb_draw_claim"
+    )
 
     bot._tablebase_wdl = lambda candidate: 2
     expect("tb win does not offer draw", bot._draw_offer_reason(board) is None)
@@ -2688,7 +2706,9 @@ def test_incoming_challenge_waits_for_seek_lock_before_accepting() -> None:
 
     expect("incoming challenge thread finished", not worker.is_alive())
     expect("incoming challenge waited for seek lock", accepted == [])
-    expect("incoming challenge declined after pending appeared", declined == ["incoming"])
+    expect(
+        "incoming challenge declined after pending appeared", declined == ["incoming"]
+    )
 
 
 def test_transient_move_rejection_remains_retryable() -> None:
@@ -3178,7 +3198,9 @@ def test_challenge_timeout_with_active_slot_does_not_cool_or_rotate() -> None:
         bot._challenge_timed_out()
 
     expect("slot-filled timeout clears pending", bot._pending_challenge_id is None)
-    expect("slot-filled timeout posts cancel", posted == ["/challenge/challenge/cancel"])
+    expect(
+        "slot-filled timeout posts cancel", posted == ["/challenge/challenge/cancel"]
+    )
     expect("slot-filled timeout does not cool target", bot._declined_cooldown == {})
     expect("slot-filled timeout does not count tc failure", bot._tc_failures == 2)
     expect("slot-filled timeout does not rotate", bot._rotation_idx == 0)
@@ -3249,7 +3271,9 @@ def test_expired_challenge_waits_for_cancel_grace_before_next_api_call() -> None
     bot._audit_seek = lambda event, **fields: audited.append((event, fields))
 
     def fail_online_bots(*args, **kwargs):
-        raise AssertionError("expired challenge should not fetch online bots immediately")
+        raise AssertionError(
+            "expired challenge should not fetch online bots immediately"
+        )
 
     bot._online_bots = fail_online_bots
 

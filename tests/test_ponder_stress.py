@@ -351,10 +351,7 @@ def main():
     }
 
     if args.ane_ponder_smoke:
-        send(
-            "position startpos moves "
-            "e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6"
-        )
+        send("position startpos moves " "e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6")
         send("go ponder wtime 60000 btime 60000 winc 1000 binc 1000")
         r = read_until("info string Hybrid: ANE root probe completed", 10)
         if not alive():
@@ -376,8 +373,7 @@ def main():
             )
             if not alive():
                 print(
-                    "  [ANE ponder] CRASH after ponderhit "
-                    f"(exit {proc.returncode})"
+                    "  [ANE ponder] CRASH after ponderhit " f"(exit {proc.returncode})"
                 )
                 stats["crashes"] += 1
             elif r is None or r == "TIMEOUT":

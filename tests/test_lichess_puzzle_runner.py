@@ -165,6 +165,10 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
 
     expect("ANE probe enabled", options["HybridANERootProbe"] == "true")
     expect("ANE root hints enabled", options["HybridANERootHints"] == "true")
+    expect(
+        "ANE scope defaults to pawn-only",
+        options["HybridANEOnlyPawnEndgames"] == "true",
+    )
     expect("HybridTrace enabled", options["HybridTrace"] == "true")
     expect("ANE weights option", options["HybridANEWeights"] == "networks/t1.pb.gz")
     expect(
@@ -177,6 +181,20 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
     expect(
         "ANE benchmark keeps transformer active",
         options["TransformerLowTimeFallbackMs"] == "0",
+    )
+
+    args = puzzle_runner.parse_args(
+        [
+            "--mode",
+            "hybrid",
+            "--hybrid-ane-root-probe",
+            "--no-hybrid-ane-only-pawn-endgames",
+        ]
+    )
+    options = puzzle_runner.engine_options(args)
+    expect(
+        "ANE all-root override",
+        options["HybridANEOnlyPawnEndgames"] == "false",
     )
 
 
@@ -205,11 +223,9 @@ def test_hybrid_ane_default_wait_uses_benchmarked_profile() -> None:
     options = puzzle_runner.engine_options(args)
 
     expect("ANE benchmark default wait", options["HybridANERootHintWaitMs"] == "0")
-    expect("ANE root hints default on", options["HybridANERootHints"] == "true")
+    expect("ANE root hints default off", options["HybridANERootHints"] == "false")
     expect("HybridTrace default off", "HybridTrace" not in options)
-    expect(
-        "ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "1000"
-    )
+    expect("ANE benchmark default min budget", options["HybridANEMinBudgetMs"] == "0")
     expect(
         "ANE benchmark disables low-time fallback",
         options["TransformerLowTimeFallbackMs"] == "0",
@@ -253,6 +269,7 @@ def test_hybrid_ane_stats_distinguish_configured_from_active() -> None:
     expect("ANE requested", stats["ane_probe_requested"] is True)
     expect("HybridTrace starts off", stats["hybrid_trace_requested"] is False)
     expect("ANE hints requested", stats["ane_root_hints_requested"] is True)
+    expect("ANE pawn-only scope tracked", stats["ane_only_pawn_endgames"] is True)
     expect("ANE starts inactive", stats["ane_root_nonempty"] == 0)
 
     puzzle_runner.update_ane_stats(
@@ -350,7 +367,8 @@ def test_search_info_parser_tracks_ane_hints() -> None:
         "info string HybridTrace: reason=ane_confirmed_mcts selected=c3c4 "
         "ABMove=h4h5 MCTSMove=c3c4 ANETop=c3c4 ANEAgreesMCTS=1 "
         "ANEConfirmedMCTS=1 ANETopScore=0.421 ANEScoreMargin=0.248 "
-        "ANERoot=[c3c4:v=0.421,h4h5:v=0.173]",
+        "ANERoot=[c3c4:v=0.421,h4h5:v=0.173] "
+        "ABHints=[c3c4,h4h5] ABVerifiedHints=[h4h5,c3c4]",
         answer,
     )
     update_answer_from_info(
@@ -377,6 +395,11 @@ def test_search_info_parser_tracks_ane_hints() -> None:
         "hybrid ANE root parsed",
         answer.hybrid_ane_root == "[c3c4:v=0.421,h4h5:v=0.173]",
     )
+    expect("hybrid AB hints parsed", answer.hybrid_ab_hints == "[c3c4,h4h5]")
+    expect(
+        "hybrid AB verified hints parsed",
+        answer.hybrid_ab_verified_hints == "[h4h5,c3c4]",
+    )
     expect("final summary retained", answer.final_summary.startswith("Final:"))
 
     trace_fields = puzzle_runner.search_trace_fields(answer)
@@ -391,6 +414,14 @@ def test_search_info_parser_tracks_ane_hints() -> None:
     expect(
         "trace fields include ANE margin",
         trace_fields["hybrid_ane_score_margin"] == "0.248",
+    )
+    expect(
+        "trace fields include AB hints",
+        trace_fields["hybrid_ab_hints"] == "[c3c4,h4h5]",
+    )
+    expect(
+        "trace fields include AB verified hints",
+        trace_fields["hybrid_ab_verified_hints"] == "[h4h5,c3c4]",
     )
 
 

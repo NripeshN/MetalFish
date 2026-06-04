@@ -14,7 +14,6 @@ sys.path.insert(0, str(PROJ / "tests"))
 
 import bk_parity  # noqa: E402
 import paper_benchmarks  # noqa: E402
-import bk_parity  # noqa: E402
 
 sys.path.insert(0, str(PROJ / "tools"))
 import analyze_hybrid_trace  # noqa: E402
@@ -266,6 +265,7 @@ def main() -> int:
             "TransformerLowTimeFallbackMs": "0",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
+            "PureMCTSSmartPruningFactor": "0.0",
             "MCTSMinimumKLDGainPerNode": "0.00005",
         },
     )
@@ -305,7 +305,7 @@ def main() -> int:
             "HybridMCTSRootReject": "true",
             "HybridMCTSUseSharedTT": "false",
             "HybridMCTSABRootHints": "true",
-            "HybridMCTSABRootHintDelayMs": "25",
+            "HybridMCTSABRootHintDelayMs": "0",
             "HybridMCTSABRootHintCount": "8",
             "HybridABCandidateVerifyMs": "120",
             "HybridABCandidateVerifyCount": "4",
@@ -351,6 +351,7 @@ def main() -> int:
             'options.add("HybridRootPawnLeverTieBreak"',
             'options.add("HybridANERootProbe"',
             'options.add("HybridANEConfirmMCTSOverride"',
+            'options.add("HybridANEOnlyPawnEndgames"',
             'options.add("HybridANEModelPath"',
             'options.add("HybridANEMinBudgetMs"',
         ],
@@ -397,6 +398,7 @@ def main() -> int:
             '"HybridRootPawnLeverTieBreak"',
             '"HybridANERootProbe"',
             '"HybridANEConfirmMCTSOverride"',
+            '"HybridANEOnlyPawnEndgames"',
             '"HybridANEModelPath"',
             '"HybridANEMinBudgetMs"',
         ],
@@ -443,6 +445,7 @@ def main() -> int:
             "MCTSParallelSearch": "false",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
+            "PureMCTSSmartPruningFactor": "0.0",
             "MCTSMinimumKLDGainPerNode": "0.00005",
             "TransformerLowTimeFallbackMs": "0",
         },
@@ -464,7 +467,7 @@ def main() -> int:
             "HybridMCTSRootReject": "true",
             "HybridMCTSUseSharedTT": "false",
             "HybridMCTSABRootHints": "true",
-            "HybridMCTSABRootHintDelayMs": "25",
+            "HybridMCTSABRootHintDelayMs": "0",
             "HybridMCTSABRootHintCount": "8",
             "HybridABCandidateVerifyMs": "120",
             "HybridABCandidateVerifyCount": "4",
@@ -484,6 +487,7 @@ def main() -> int:
         "option.MCTSMinimumKLDGainPerNode=0.00005",
         "option.TransformerLowTimeFallbackMs=0",
         "option.MCTSParallelSearch=$MCTS_PARALLEL_SEARCH",
+        "option.PureMCTSSmartPruningFactor=0.0",
         "option.HybridMCTSMinimumKLDGainPerNode=$HYBRID_MCTS_KLD",
         "option.HybridABRootRejectMCTS=$HYBRID_AB_ROOT_REJECT_MCTS",
         "option.HybridMCTSRootReject=$HYBRID_MCTS_ROOT_REJECT",
@@ -512,7 +516,7 @@ def main() -> int:
             'HYBRID_MCTS_ROOT_REJECT="${HYBRID_MCTS_ROOT_REJECT:-true}"',
             'HYBRID_MCTS_SHARED_TT="${HYBRID_MCTS_SHARED_TT:-false}"',
             'HYBRID_MCTS_AB_ROOT_HINTS="${HYBRID_MCTS_AB_ROOT_HINTS:-true}"',
-            'HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS="${HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS:-25}"',
+            'HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS="${HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS:-0}"',
             'HYBRID_MCTS_AB_ROOT_HINT_COUNT="${HYBRID_MCTS_AB_ROOT_HINT_COUNT:-8}"',
             'HYBRID_AB_POLICY_WEIGHT="${HYBRID_AB_POLICY_WEIGHT:-0.0}"',
             'HYBRID_ROOT_PAWN_LEVER_TIEBREAK="${HYBRID_ROOT_PAWN_LEVER_TIEBREAK:-true}"',
@@ -535,7 +539,7 @@ def main() -> int:
             '"METALFISH_HYBRID_MCTS_ROOT_REJECT", True',
             '"METALFISH_HYBRID_MCTS_SHARED_TT", False',
             '"METALFISH_HYBRID_MCTS_AB_ROOT_HINTS", True',
-            'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 25)',
+            'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 0)',
             'env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_COUNT", 8)',
             'env_float("METALFISH_HYBRID_AB_POLICY_WEIGHT", 0.0)',
             '"METALFISH_HYBRID_ROOT_PAWN_LEVER_TIEBREAK", True',

@@ -411,22 +411,46 @@ private:
 
 bool MCTSIsKingsidePawnLever(const Position &pos, Move move);
 bool MCTSIsMinorCentralPawnCapture(const Position &pos, Move move);
-bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
-                                      uint32_t best_visits,
-                                      uint32_t candidate_visits,
-                                      float best_policy, float best_q,
-                                      float candidate_policy,
-                                      float candidate_q);
-bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits,
-                                     uint32_t best_visits,
+bool MCTSIsMinorKingPawnCheckCapture(const Position &pos, Move move);
+bool MCTSIsMinorHighValueCapture(const Position &pos, Move move);
+bool MCTSIsMinorCentralQuietMove(const Position &pos, Move move);
+bool MCTSIsMinorQuietAttacksMajor(const Position &pos, Move move);
+bool MCTSIsMinorQuietAttacksQueen(const Position &pos, Move move);
+bool MCTSIsMinorFifthRankQuietMove(const Position &pos, Move move);
+bool MCTSHasHeavyPieceOnSeventh(const Position &pos, Color us);
+bool MCTSIsAdvancedPromotionSupportQueenMove(const Position &pos, Move move);
+bool MCTSRootHighPolicyLeverCandidate(
+    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
+    float best_policy, float best_q, float candidate_policy, float candidate_q);
+bool MCTSRootLowPolicyLeverCandidate(uint32_t root_visits, uint32_t best_visits,
                                      uint32_t candidate_visits,
-                                     int candidate_rank,
-                                     float best_policy, float best_q,
-                                     float candidate_policy,
+                                     int candidate_rank, float best_policy,
+                                     float best_q, float candidate_policy,
                                      float candidate_q);
 bool MCTSRootTacticalCaptureProbeCandidate(uint32_t root_visits,
                                            int candidate_policy_rank,
                                            float candidate_policy);
+bool MCTSRootHighValueCaptureProbeCandidate(uint32_t root_visits,
+                                            int candidate_policy_rank,
+                                            float candidate_policy);
+bool MCTSRootTacticalQuietProbeCandidate(uint32_t root_visits,
+                                         int candidate_policy_rank,
+                                         float candidate_policy);
+bool MCTSRootQuietMajorAttackProbeCandidate(uint32_t root_visits,
+                                            int candidate_policy_rank,
+                                            float candidate_policy);
+bool MCTSRootDeepTacticalQuietProbeCandidate(uint32_t root_visits,
+                                             int candidate_policy_rank,
+                                             float candidate_policy);
+bool MCTSRootAdvancedPromotionSupportCandidate(
+    uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
+    float best_policy, float best_q, float candidate_policy, float candidate_q);
+bool MCTSRootLowVisitQOverrideCandidate(uint32_t best_visits,
+                                        uint32_t candidate_visits, float best_q,
+                                        float candidate_q,
+                                        float near_equal_required_gap = 0.05f,
+                                        float candidate_policy = 1.0f,
+                                        bool allow_strong_gap_candidate = false);
 
 std::unique_ptr<Search> CreateSearch(const SearchParams &config);
 

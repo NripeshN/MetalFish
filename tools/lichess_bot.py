@@ -79,6 +79,7 @@ ANE_UCI_OPTIONS = (
     "HybridANERootProbe",
     "HybridANERootHints",
     "HybridANEConfirmMCTSOverride",
+    "HybridANEOnlyPawnEndgames",
     "HybridANEWeights",
     "HybridANEModelPath",
     "HybridANEComputeUnits",
@@ -243,7 +244,7 @@ HYBRID_MCTS_ROOT_REJECT = env_bool_string("METALFISH_HYBRID_MCTS_ROOT_REJECT", T
 HYBRID_MCTS_SHARED_TT = env_bool_string("METALFISH_HYBRID_MCTS_SHARED_TT", False)
 HYBRID_MCTS_AB_ROOT_HINTS = env_bool_string("METALFISH_HYBRID_MCTS_AB_ROOT_HINTS", True)
 HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS = max(
-    0, min(1000, env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 25))
+    0, min(1000, env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_DELAY_MS", 0))
 )
 HYBRID_MCTS_AB_ROOT_HINT_COUNT = max(
     1, min(16, env_int("METALFISH_HYBRID_MCTS_AB_ROOT_HINT_COUNT", 8))
@@ -268,6 +269,9 @@ HYBRID_ANE_ROOT_PROBE = (
 HYBRID_ANE_ROOT_HINTS = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", True) == "true"
 )
+HYBRID_ANE_ONLY_PAWN_ENDGAMES = (
+    env_bool_string("METALFISH_HYBRID_ANE_ONLY_PAWN_ENDGAMES", False) == "true"
+)
 HYBRID_ANE_CONFIRM_MCTS_OVERRIDE = (
     env_bool_string("METALFISH_HYBRID_ANE_CONFIRM_MCTS_OVERRIDE", True) == "true"
 )
@@ -287,7 +291,7 @@ HYBRID_ANE_ROOT_HINT_WAIT_MS = max(
     0, min(1000, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_WAIT_MS", 0))
 )
 HYBRID_ANE_MIN_BUDGET_MS = max(
-    0, min(30000, env_int("METALFISH_HYBRID_ANE_MIN_BUDGET_MS", 1000))
+    0, min(30000, env_int("METALFISH_HYBRID_ANE_MIN_BUDGET_MS", 0))
 )
 TRANSFORMER_LOW_TIME_FALLBACK_MS = max(
     0, min(30000, env_int("METALFISH_TRANSFORMER_LOW_TIME_FALLBACK_MS", 3000))
@@ -296,9 +300,7 @@ TRANSFORMER_MIN_MOVE_BUDGET_MS = max(
     0, min(5000, env_int("METALFISH_TRANSFORMER_MIN_MOVE_BUDGET_MS", 400))
 )
 DEFAULT_SYZYGY_PATH = PROJ / "syzygy"
-DRAW_OFFER_TABLEBASE = (
-    env_bool_string("METALFISH_DRAW_OFFER_TABLEBASE", True) == "true"
-)
+DRAW_OFFER_TABLEBASE = env_bool_string("METALFISH_DRAW_OFFER_TABLEBASE", True) == "true"
 DRAW_OFFER_SEARCH_CAP_MS = max(
     0, min(30_000, env_int("METALFISH_DRAW_OFFER_SEARCH_CAP_MS", 1500))
 )
@@ -715,6 +717,13 @@ def ane_engine_options(args) -> dict[str, str]:
             )
             else "false"
         ),
+        "HybridANEOnlyPawnEndgames": (
+            "true"
+            if getattr(
+                args, "hybrid_ane_only_pawn_endgames", HYBRID_ANE_ONLY_PAWN_ENDGAMES
+            )
+            else "false"
+        ),
         "HybridANEWeights": str(
             getattr(args, "hybrid_ane_weights", HYBRID_ANE_WEIGHTS)
         ),
@@ -757,7 +766,7 @@ def normalize_ane_args(args):
         ),
     )
     args.hybrid_ane_min_budget_ms = max(
-        0, min(30000, int(getattr(args, "hybrid_ane_min_budget_ms", 1000)))
+        0, min(30000, int(getattr(args, "hybrid_ane_min_budget_ms", 0)))
     )
     return args
 
@@ -786,9 +795,16 @@ def ane_status_label(args) -> str:
         if getattr(args, "hybrid_ane_root_hints", HYBRID_ANE_ROOT_HINTS)
         else "hints off"
     )
+    scope = (
+        "pawn-only"
+        if getattr(
+            args, "hybrid_ane_only_pawn_endgames", HYBRID_ANE_ONLY_PAWN_ENDGAMES
+        )
+        else "all roots"
+    )
     status = "ready" if weights.exists() and model.exists() else "missing files"
     return (
-        f"{status} | {compute}, {hints}, wait {wait_ms} ms, "
+        f"{status} | {compute}, {scope}, {hints}, wait {wait_ms} ms, "
         f"min budget {min_budget} ms, "
         f"weights={weights.name}, model={model.name}"
     )
@@ -2217,10 +2233,7 @@ class LichessBot:
         if not self._game_was_completed(game_id):
             return False
         self._record_submitted_turn(game_id, moves)
-        print(
-            f"  [{game_id}] Skipping stale move {move}: "
-            "game already completed"
-        )
+        print(f"  [{game_id}] Skipping stale move {move}: " "game already completed")
         self._audit(
             game_id,
             "move_submit_skipped_inactive",
@@ -2502,7 +2515,9 @@ class LichessBot:
 
     def _reserved_games(self) -> int:
         pending = 1 if self._pending_challenge_id else 0
-        return len(self.active_games) + pending + self._accepted_challenge_reserve_count()
+        return (
+            len(self.active_games) + pending + self._accepted_challenge_reserve_count()
+        )
 
     def _cleanup_accepted_challenge_reservations(self) -> None:
         reservations = getattr(self, "_accepted_challenge_reservations", {})
@@ -2579,8 +2594,10 @@ class LichessBot:
                 continue
             opponent = source.get("opponent")
             if isinstance(opponent, dict):
-                value = opponent.get("id") or opponent.get("username") or opponent.get(
-                    "name"
+                value = (
+                    opponent.get("id")
+                    or opponent.get("username")
+                    or opponent.get("name")
                 )
             elif isinstance(opponent, str):
                 value = opponent
@@ -3164,9 +3181,7 @@ class LichessBot:
             bots, status_code = self._online_bots()
             if bots is None:
                 print(f"  /bot/online failed with {status_code}, retrying...")
-                self._audit_seek(
-                    "online_failed", status=status_code, retry_s=10
-                )
+                self._audit_seek("online_failed", status=status_code, retry_s=10)
                 self._schedule_retry()
                 return
 
@@ -3247,10 +3262,7 @@ class LichessBot:
                 print("  Rate limited, backing off...")
                 self._rate_limit_count += 1
                 retry_after = _retry_after_seconds(r, include_body=True)
-                if (
-                    self._rate_limit_count >= 3
-                    and retry_after <= LICHESS_429_BACKOFF_S
-                ):
+                if self._rate_limit_count >= 3 and retry_after <= LICHESS_429_BACKOFF_S:
                     backoff = min(
                         3600.0,
                         max(
@@ -3273,9 +3285,7 @@ class LichessBot:
                     )
                 else:
                     backoff = max(LICHESS_429_BACKOFF_S, retry_after)
-                    print(
-                        f"  Waiting {self._format_duration(int(backoff))}..."
-                    )
+                    print(f"  Waiting {self._format_duration(int(backoff))}...")
                 self._audit_seek(
                     "challenge_rate_limited",
                     target=target,
@@ -5427,6 +5437,12 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=HYBRID_ANE_CONFIRM_MCTS_OVERRIDE,
         help="Allow ANE agreement to confirm narrowly gated MCTS overrides.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-only-pawn-endgames",
+        action=argparse.BooleanOptionalAction,
+        default=HYBRID_ANE_ONLY_PAWN_ENDGAMES,
+        help="Restrict ANE root probing to pawn-only endgames.",
     )
     parser.add_argument(
         "--hybrid-ane-weights",

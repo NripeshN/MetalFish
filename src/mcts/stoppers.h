@@ -103,12 +103,14 @@ private:
 
 class KLDGainStopper : public SearchStopper {
 public:
-  KLDGainStopper(float min_gain, int average_interval);
+  KLDGainStopper(float min_gain, int average_interval,
+                 int64_t min_elapsed_ms = 0);
   bool ShouldStop(const SearchStats &stats, StoppersHints *hints) override;
 
 private:
   float min_gain_;
   int average_interval_;
+  int64_t min_elapsed_ms_;
   std::vector<double> prev_visits_;
   double prev_child_nodes_ = 0.0;
   mutable std::mutex mutex_;

@@ -737,9 +737,7 @@ def write_json_report(
         "nodes": args.nodes,
         "threads": args.threads,
         "deterministic": args.deterministic,
-        "hybrid_time_safety_fallback_active": hybrid_time_safety_fallback_active(
-            args
-        ),
+        "hybrid_time_safety_fallback_active": hybrid_time_safety_fallback_active(args),
         "positions": [bk_id for _, _, bk_id in positions],
         "options": {
             "engine": args.engine,
