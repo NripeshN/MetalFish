@@ -590,9 +590,8 @@ bool HybridANEQSupportedRootOverride(
     float ane_in_mcts_policy, uint32_t selected_mcts_current_visits,
     float selected_mcts_q, int ab_in_mcts_rank,
     uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, int ane_in_ab_rank,
-    int ane_in_ab_score, int ane_in_ab_average_score,
-    bool ane_in_ab_upperbound, uint64_t ane_in_ab_effort,
-    int selected_ab_average_score);
+    int ane_in_ab_score, int ane_in_ab_average_score, bool ane_in_ab_upperbound,
+    uint64_t ane_in_ab_effort, int selected_ab_average_score);
 
 bool HybridABRootRejectsMCTS(bool ab_verified, int ab_rank, int mcts_rank,
                              int ab_average_score, int mcts_average_score,
