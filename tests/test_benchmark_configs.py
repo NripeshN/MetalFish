@@ -335,6 +335,7 @@ def main() -> int:
         [
             'options.add("MCTSPolicySoftmaxTemp"',
             'options.add("MCTSPolicyTemperature"',
+            'options.add("MCTSRootPolicySoftmaxTemp"',
             'options.add("MCTSMaxOutOfOrderFactor"',
             'options.add("MCTSMaxOutOfOrderEvalsFactor"',
             'options.add("MCTSCudaAutoMinibatchSize"',
@@ -362,6 +363,7 @@ def main() -> int:
             "get_float_option_alias(",
             '"MCTSPolicyTemperature"',
             '"MCTSPolicySoftmaxTemp"',
+            '"MCTSRootPolicySoftmaxTemp"',
             '"MCTSMaxOutOfOrderEvalsFactor"',
             '"MCTSMaxOutOfOrderFactor"',
             "backend_can_select_cuda",
@@ -572,6 +574,7 @@ def main() -> int:
             '"HybridRootPawnLeverTieBreak": HYBRID_ROOT_PAWN_LEVER_TIEBREAK',
             '"HybridTrace": HYBRID_TRACE',
             '"MCTSMinibatchSize": str(HYBRID_MCTS_MINIBATCH)',
+            '"MCTSRootPolicySoftmaxTemp": "1.6"',
             "if SYZYGY_PATH:",
             "dynamic up to {MAX_SEARCH_WORKERS}",
             "Syzygy:   {SYZYGY_PATH if SYZYGY_PATH else 'disabled'}",

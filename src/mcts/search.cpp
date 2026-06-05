@@ -1390,7 +1390,7 @@ void Search::RunIteration(SearchWorkerCtx &ctx) {
         std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
         if (leaf->NumEdges() == 0) {
           CreateLeafEdges(leaf, moves);
-          ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+          ApplyNNPolicyToNode(leaf, result, PolicySoftmaxTempForNode(leaf));
         }
         if (params_.add_dirichlet_noise && leaf == tree_.Root())
           AddDirichletNoise(leaf);
@@ -1661,7 +1661,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
         std::unique_lock<std::shared_mutex> lock(tree_structure_mutex_);
         if (leaf->NumEdges() == 0) {
           CreateLeafEdges(leaf, moves);
-          ApplyNNPolicyToNode(leaf, result, params_.policy_softmax_temp);
+          ApplyNNPolicyToNode(leaf, result, PolicySoftmaxTempForNode(leaf));
         }
         if (params_.add_dirichlet_noise && leaf == tree_.Root())
           AddDirichletNoise(leaf);
@@ -1758,12 +1758,14 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
               *entry.history->ptrs[entry.history->depth - 1];
           MoveList<LEGAL> leaf_moves(leaf_pos);
           CreateLeafEdges(entry.leaf, leaf_moves);
-          ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
+          ApplyNNPolicyToNode(entry.leaf, result,
+                              PolicySoftmaxTempForNode(entry.leaf));
           if (params_.add_dirichlet_noise)
             AddDirichletNoise(entry.leaf);
         } else if (!result.policy_priors.empty()) {
           entry.leaf->CreateEdges(result.policy_priors);
-          ApplyNNPolicyToNode(entry.leaf, result, params_.policy_softmax_temp);
+          ApplyNNPolicyToNode(entry.leaf, result,
+                              PolicySoftmaxTempForNode(entry.leaf));
           if (params_.add_dirichlet_noise && entry.leaf == tree_.Root())
             AddDirichletNoise(entry.leaf);
         } else {
@@ -1773,7 +1775,7 @@ void Search::RunIterationSemaphore(SearchWorkerCtx &ctx) {
           if (leaf_moves.size() > 0) {
             CreateLeafEdges(entry.leaf, leaf_moves);
             ApplyNNPolicyToNode(entry.leaf, result,
-                                params_.policy_softmax_temp);
+                                PolicySoftmaxTempForNode(entry.leaf));
             if (params_.add_dirichlet_noise && entry.leaf == tree_.Root())
               AddDirichletNoise(entry.leaf);
           }
@@ -2426,6 +2428,11 @@ uint32_t Search::RootVisitBaselineLocked(Move move) const {
 void Search::ApplyNNPolicy(Node *node, const EvaluationResult &result,
                            float softmax_temp) {
   ApplyNNPolicyToNode(node, result, softmax_temp);
+}
+
+float Search::PolicySoftmaxTempForNode(const Node *node) const {
+  return node == tree_.Root() ? params_.root_policy_softmax_temp
+                              : params_.policy_softmax_temp;
 }
 
 Search::RootMoveStats Search::GetBestMoveStatsLocked() const {

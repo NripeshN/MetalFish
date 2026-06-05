@@ -332,6 +332,7 @@ private:
 
   static void ApplyNNPolicy(Node *node, const EvaluationResult &result,
                             float softmax_temp);
+  float PolicySoftmaxTempForNode(const Node *node) const;
 
   SearchParams params_;
   std::unique_ptr<Backend> backend_;

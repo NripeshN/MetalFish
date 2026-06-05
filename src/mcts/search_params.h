@@ -37,6 +37,7 @@ struct SearchParams {
 
   // Policy softmax temperature
   float policy_softmax_temp = 1.359f;
+  float root_policy_softmax_temp = 1.6f;
 
   // Dirichlet exploration noise (disabled for competitive play)
   bool add_dirichlet_noise = false;

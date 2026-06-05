@@ -196,6 +196,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("MCTSFpuReductionAtRoot", Option("0.33"));
   options.add("MCTSPolicySoftmaxTemp", Option("1.359"));
   options.add("MCTSPolicyTemperature", Option("1.359"));
+  options.add("MCTSRootPolicySoftmaxTemp", Option("1.6"));
   options.add("MCTSHighPolicyRootLever", Option(true));
   options.add("MCTSLowPolicyRootLever", Option(true));
   options.add("MCTSRootTacticalCaptureProbe", Option(true));
