@@ -253,7 +253,7 @@ void test_hybrid_config() {
     EXPECT(tc, !config.ane_root_hints);
     EXPECT(tc, config.ane_only_pawn_endgames);
     EXPECT(tc, config.ane_compute_units == "cpu-ne");
-    EXPECT(tc, config.ane_root_hint_count == 10);
+    EXPECT(tc, config.ane_root_hint_count == 6);
     EXPECT(tc, config.ane_root_hint_wait_ms == 0);
     EXPECT(tc, config.ane_min_budget_ms == 0);
   }

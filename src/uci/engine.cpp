@@ -173,7 +173,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridANEWeights", Option(""));
   options.add("HybridANEModelPath", Option(""));
   options.add("HybridANEComputeUnits", Option("cpu-ne"));
-  options.add("HybridANERootHintCount", Option(10, 1, 32));
+  options.add("HybridANERootHintCount", Option(6, 1, 32));
   options.add("HybridANERootHintWaitMs", Option(0, 0, 1000));
   options.add("HybridANEMinBudgetMs", Option(0, 0, 30000));
   options.add("HybridTrace", Option(false));

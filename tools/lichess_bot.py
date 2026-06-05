@@ -285,7 +285,7 @@ HYBRID_ANE_COMPUTE_UNITS = (
     os.environ.get("METALFISH_HYBRID_ANE_COMPUTE_UNITS", "cpu-ne").strip().lower()
 )
 HYBRID_ANE_ROOT_HINT_COUNT = max(
-    1, min(32, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_COUNT", 10))
+    1, min(32, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_COUNT", 6))
 )
 HYBRID_ANE_ROOT_HINT_WAIT_MS = max(
     0, min(1000, env_int("METALFISH_HYBRID_ANE_ROOT_HINT_WAIT_MS", 0))
@@ -751,8 +751,11 @@ def ane_engine_options(args) -> dict[str, str]:
 
 
 def normalize_ane_args(args):
+    ane_root_hint_count = getattr(
+        args, "hybrid_ane_root_hint_count", HYBRID_ANE_ROOT_HINT_COUNT
+    )
     args.hybrid_ane_root_hint_count = max(
-        1, min(32, int(getattr(args, "hybrid_ane_root_hint_count", 10)))
+        1, min(32, int(ane_root_hint_count))
     )
     args.hybrid_ane_root_hint_wait_ms = max(
         0,
