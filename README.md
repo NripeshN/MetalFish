@@ -117,7 +117,9 @@ out on BK.24, which is why pure MCTS now caps Apple workers unless
 
 MetalFish's pure-MCTS strength profile intentionally uses a small
 `MCTSMinimumKLDGainPerNode=0.00005` tactical stopper and
-`PureMCTSSmartPruningFactor=1.33`. For an exact Lc0-style KLD-off diagnostic
+`PureMCTSSmartPruningFactor=0.0`. This keeps pure MCTS from freezing low-root
+alternatives too early while leaving Hybrid's MCTS worker on its separate
+hybrid profile. For an exact Lc0-style KLD-off diagnostic
 comparison, run:
 
 ```bash
