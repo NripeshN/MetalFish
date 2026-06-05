@@ -776,6 +776,40 @@ bool HybridMCTSCompactFixedBudgetOverride(
   return ab_average_score - mcts_average_score <= 90;
 }
 
+bool HybridMCTSCompactPawnEndgameOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool pawn_only_endgame,
+    bool ab_has_clear_preference, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_average_score, int mcts_average_score,
+    int mcts_in_ab_rank, int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !pawn_only_endgame ||
+      ab_has_clear_preference) {
+    return false;
+  }
+
+  if (mcts_root_visits < 35 || mcts_root_visits >= 80 ||
+      mcts_best_visits < 32 || visit_share < 0.88f ||
+      root_q_gap < 0.90f || mcts_cp < 220 || eval_delta < 220) {
+    return false;
+  }
+
+  if (ab_average_score - mcts_average_score > 90)
+    return false;
+
+  if (mcts_in_ab_rank != 2 || mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_lowerbound || mcts_in_ab_effort < 100000 ||
+      mcts_in_ab_effort > 600000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits > 2)
+    return false;
+
+  return mcts_q - ab_in_mcts_q >= 0.90f;
+}
+
 bool HybridMCTSCompactClearPreferenceOverride(
     bool fixed_budget, bool visit_evidence_sane, uint64_t mcts_root_visits,
     uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
@@ -3913,11 +3947,21 @@ Move ParallelHybridSearch::make_final_decision() {
           root_q_gap, ab_score, mcts_in_ab.rank, mcts_in_ab.score,
           mcts_in_ab.score_lowerbound, mcts_in_ab.effort, ab_in_mcts.rank,
           ab_in_mcts.current_visits);
+  const Position &decision_root = get_decision_root_pos();
+  const bool pawn_only_root = HybridIsPawnOnlyEndgame(decision_root);
   const bool mcts_compact_fixed_budget = HybridMCTSCompactFixedBudgetOverride(
       mcts_decision_budget, mcts_visit_evidence_sane, ab_has_clear_preference,
       mcts_confidence_total_nodes, mcts_confidence_visits, visit_share,
       root_q_gap, mcts_cp, eval_delta, ab_in_ab.average_score,
       mcts_in_ab.average_score);
+  const bool mcts_compact_pawn_endgame =
+      HybridMCTSCompactPawnEndgameOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, pawn_only_root,
+          ab_has_clear_preference, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          ab_in_ab.average_score, mcts_in_ab.average_score, mcts_in_ab.rank,
+          mcts_in_ab.score, mcts_in_ab.score_lowerbound, mcts_in_ab.effort,
+          ab_in_mcts.rank, ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   const bool mcts_compact_clear_preference =
       HybridMCTSCompactClearPreferenceOverride(
           mcts_decision_budget, mcts_visit_evidence_sane,
@@ -3941,7 +3985,6 @@ Move ParallelHybridSearch::make_final_decision() {
           mcts_in_ab.score_upperbound, mcts_in_ab.effort,
           ab_in_ab.average_score, mcts_in_ab.average_score, ab_in_mcts.rank,
           ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
-  const Position &decision_root = get_decision_root_pos();
   const bool low_material_root = decision_root.non_pawn_material() <= RookValue;
   const bool mcts_kingside_pawn_push =
       HybridIsKingsidePawnPush(decision_root, mcts_best);
@@ -4104,8 +4147,8 @@ Move ParallelHybridSearch::make_final_decision() {
       low_node_mcts_primary_ready || !ab_root_rejects_mcts ||
       ane_confirmed_mcts_override || pawn_only_ane_mcts_override ||
       mcts_short_root_tactical || mcts_compact_fixed_budget ||
-      mcts_ab_lowerbound_confirmed || mcts_low_node_root_confidence ||
-      mcts_compact_clear_preference ||
+      mcts_compact_pawn_endgame || mcts_ab_lowerbound_confirmed ||
+      mcts_low_node_root_confidence || mcts_compact_clear_preference ||
       mcts_cross_root_confidence_fixed_budget ||
       mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
       mcts_root_reject_low_material_push || mcts_root_reject_rook_pawn_push ||
@@ -4135,7 +4178,8 @@ Move ParallelHybridSearch::make_final_decision() {
       reason =
           low_node_mcts_primary_ready          ? "low_node_mcts_primary"
           : ane_confirmed_mcts_override        ? "ane_confirmed_mcts"
-          : pawn_only_ane_mcts_override        ? "pawn_only_ane_mcts"
+         : pawn_only_ane_mcts_override        ? "pawn_only_ane_mcts"
+          : mcts_compact_pawn_endgame         ? "mcts_compact_pawn_endgame"
           : mcts_ab_lowerbound_confirmed       ? "mcts_ab_lowerbound_confirmed"
           : mcts_low_node_root_confidence      ? "mcts_low_node_root_confidence"
           : mcts_discovered_pawn_push_override ? "mcts_discovered_pawn_push"
@@ -4228,6 +4272,9 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_compact_fixed_budget) {
       choose_mcts = true;
       reason = "mcts_compact_fixed_budget";
+    } else if (mcts_compact_pawn_endgame) {
+      choose_mcts = true;
+      reason = "mcts_compact_pawn_endgame";
     } else if (mcts_compact_clear_preference) {
       choose_mcts = true;
       reason = "mcts_compact_clear_preference";
@@ -4285,6 +4332,7 @@ Move ParallelHybridSearch::make_final_decision() {
        << " MCTSABLowerBoundConfirmed="
        << (mcts_ab_lowerbound_confirmed ? 1 : 0)
        << " MCTSCompact=" << (mcts_compact_fixed_budget ? 1 : 0)
+       << " MCTSCompactPawnEndgame=" << (mcts_compact_pawn_endgame ? 1 : 0)
        << " MCTSCompactClearPreference="
        << (mcts_compact_clear_preference ? 1 : 0) << " MCTSCrossRootConfidence="
        << (mcts_cross_root_confidence_fixed_budget ? 1 : 0)
