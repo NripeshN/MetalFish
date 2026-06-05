@@ -992,17 +992,16 @@ bool HybridMCTSRootRejectQuietMinorMajorAttackOverride(
     uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
     float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
     int mcts_in_ab_score, bool mcts_in_ab_lowerbound,
-    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort,
-    int ab_in_mcts_rank, uint32_t ab_in_mcts_current_visits,
-    float ab_in_mcts_q, float mcts_q) {
+    bool mcts_in_ab_upperbound, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
   if (!fixed_budget || !visit_evidence_sane || !ab_has_clear_preference ||
       !ab_root_rejects_mcts || !mcts_quiet_minor_major_attack) {
     return false;
   }
 
-  if (mcts_root_visits < 55 || mcts_root_visits > 90 ||
-      mcts_best_visits < 30 || visit_share < 0.50f || root_q_gap < 0.19f ||
-      mcts_cp < 180 || eval_delta < 75) {
+  if (mcts_root_visits < 55 || mcts_root_visits > 90 || mcts_best_visits < 30 ||
+      visit_share < 0.50f || root_q_gap < 0.19f || mcts_cp < 180 ||
+      eval_delta < 75) {
     return false;
   }
 
@@ -1013,9 +1012,9 @@ bool HybridMCTSRootRejectQuietMinorMajorAttackOverride(
   }
 
   const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
-  const bool outranks_ab =
-      ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
-      ab_in_mcts_current_visits <= 24 && q_gap_to_ab >= 0.19f;
+  const bool outranks_ab = ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
+                           ab_in_mcts_current_visits <= 24 &&
+                           q_gap_to_ab >= 0.19f;
   const bool lightly_sampled_ab =
       ab_in_mcts_rank >= 4 && ab_in_mcts_current_visits <= 4 &&
       mcts_best_visits >=
@@ -4111,10 +4110,11 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
       mcts_root_reject_low_material_push || mcts_root_reject_rook_pawn_push ||
       mcts_root_reject_quiet_queen_move ||
-      mcts_root_reject_quiet_minor_major_attack || mcts_bishop_endgame_retreat ||
-      mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
-      mcts_discovered_pawn_push_override || mcts_reused_root_current ||
-      mcts_root_rejects_ab || (mcts_overwhelming && eval_delta >= 250);
+      mcts_root_reject_quiet_minor_major_attack ||
+      mcts_bishop_endgame_retreat || mcts_root_reject_q_gap ||
+      mcts_clock_root_reject_q_gap || mcts_discovered_pawn_push_override ||
+      mcts_reused_root_current || mcts_root_rejects_ab ||
+      (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
   const char *reason = "ab_default";
