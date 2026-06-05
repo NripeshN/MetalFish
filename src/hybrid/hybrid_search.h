@@ -216,7 +216,7 @@ struct ParallelHybridConfig {
   bool root_pawn_lever_tiebreak = true;
   bool ane_root_probe = false;
   bool ane_root_hints = false;
-  bool ane_confirm_mcts_override = true;
+  bool ane_confirm_mcts_override = false;
   bool ane_only_pawn_endgames = true;
   std::string ane_weights_path;
   std::string ane_model_path;

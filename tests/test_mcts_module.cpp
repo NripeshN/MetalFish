@@ -697,6 +697,15 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootHighPolicyLeverCandidate(370, 258, 66, 0.143f, 0.012f, 0.269f,
                                            -0.108f),
          "BK.18 mature negative lever cannot override nonnegative leader", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(499, 230, 228, 0.170f, 0.748f, 0.410f,
+                                          0.704f),
+         "BK.11 near-visit high-policy lever passes", tc);
+  expect(MCTSRootHighPolicyLeverCandidate(789, 388, 337, 0.170f, 0.744f, 0.410f,
+                                          0.704f),
+         "BK.11 mature near-visit high-policy lever passes", tc);
+  expect(!MCTSRootHighPolicyLeverCandidate(499, 230, 228, 0.170f, 0.748f,
+                                           0.410f, 0.680f),
+         "near-visit high-policy lever needs tight value gap", tc);
   expect(!MCTSRootHighPolicyLeverCandidate(900, 220, 80, 0.208f, -0.426f,
                                            0.260f, -0.612f),
          "mature root blocked", tc);
@@ -793,6 +802,16 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "02I9S rook move is not a fifth-rank minor quiet probe", tc);
   expect(MCTSRootDeepTacticalQuietProbeCandidate(142, 5, 0.024f),
          "02I9S low-policy fifth-rank quiet probe passes", tc);
+  expect(MCTSRootFifthRankQuietProbeCandidate(86, 11, 0.021f),
+         "02I9S rank-11 fifth-rank quiet probe passes", tc);
+  expect(!MCTSRootDeepTacticalQuietProbeCandidate(86, 11, 0.021f),
+         "02I9S rank-11 case stays outside the generic quiet probe", tc);
+  expect(MCTSRootFifthRankCurrentOverrideCandidate(157, 20, 48, 0.372f, 0.412f,
+                                                   0.024f),
+         "02I9S current-search fifth-rank override passes", tc);
+  expect(!MCTSRootFifthRankCurrentOverrideCandidate(157, 40, 48, 0.372f, 0.412f,
+                                                    0.024f),
+         "02I9S override requires a clear current-visit lead", tc);
   expect(MCTSRootLowVisitQOverrideCandidate(53, 48, 0.390f, 0.412f, 0.02f),
          "02I9S near-equal visits can select the higher-Q Nf5", tc);
 
@@ -912,6 +931,27 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "late quiet probe blocked", tc);
   expect(!MCTSRootTacticalQuietProbeCandidate(49, 6, 0.080f),
          "high-policy quiet probe blocked", tc);
+  Position quiet_queen_check_pos;
+  StateInfo quiet_queen_check_st;
+  quiet_queen_check_pos.set(
+      "r1b4r/pp1k2p1/2nb2qp/1B1p2B1/3p3Q/8/PPP2PPP/3RR1K1 w - - 0 18", false,
+      &quiet_queen_check_st);
+  const Move quiet_queen_check =
+      UCIEngine::to_move(quiet_queen_check_pos, "h4g4");
+  const Move quiet_queen_non_check =
+      UCIEngine::to_move(quiet_queen_check_pos, "h4f4");
+  expect(MCTSIsQuietQueenCheck(quiet_queen_check_pos, quiet_queen_check),
+         "006fF quiet queen check is a root probe candidate", tc);
+  expect(!MCTSIsQuietQueenCheck(quiet_queen_check_pos, quiet_queen_non_check),
+         "non-checking queen quiet is blocked", tc);
+  expect(MCTSRootQuietQueenCheckProbeCandidate(105, 12, 0.030f),
+         "low-policy quiet queen check can be probed", tc);
+  expect(!MCTSRootQuietQueenCheckProbeCandidate(31, 12, 0.030f),
+         "early quiet queen check probe blocked", tc);
+  expect(!MCTSRootQuietQueenCheckProbeCandidate(105, 33, 0.030f),
+         "late-rank quiet queen check probe blocked", tc);
+  expect(!MCTSRootQuietQueenCheckProbeCandidate(105, 12, 0.003f),
+         "tiny-policy quiet queen check probe blocked", tc);
 }
 
 void test_network_format_descriptor(TestCounter &tc) {

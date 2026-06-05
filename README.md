@@ -116,8 +116,9 @@ out on BK.24, which is why pure MCTS now caps Apple workers unless
 `MCTSParallelSearch=true` is set.
 
 MetalFish's pure-MCTS strength profile intentionally uses a small
-`MCTSMinimumKLDGainPerNode=0.00005` tactical stopper. For an exact Lc0-style
-KLD-off diagnostic comparison, run:
+`MCTSMinimumKLDGainPerNode=0.00005` tactical stopper and
+`PureMCTSSmartPruningFactor=1.33`. For an exact Lc0-style KLD-off diagnostic
+comparison, run:
 
 ```bash
 python3 tests/bk_parity.py --engine both --movetime 5000 \

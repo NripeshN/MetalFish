@@ -1079,9 +1079,6 @@ static void apply_pure_mcts_strength_overrides(Engine &engine,
       get_float_option(engine, "PureMCTSSmartPruningFactor", -1.0f);
   if (pure_mcts_smart_pruning >= 0.0f) {
     config.smart_pruning_factor = pure_mcts_smart_pruning;
-  } else if (!float_option_is_non_default(engine, "MCTSSmartPruningFactor",
-                                          1.33f)) {
-    config.smart_pruning_factor = 0.0f;
   }
   config.fixed_movetime_q_override_cap = 384;
 }

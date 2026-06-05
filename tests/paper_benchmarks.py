@@ -459,7 +459,7 @@ def detect_engines(threads: int, hash_mb: int) -> Dict[str, EngineConfig]:
             "MCTSMinibatchSize": "0",
             "MCTSParityPreset": "false",
             "MCTSAddDirichletNoise": "false",
-            "PureMCTSSmartPruningFactor": "0.0",
+            "PureMCTSSmartPruningFactor": "1.33",
             "MCTSMinimumKLDGainPerNode": "0.00005",
             "TransformerLowTimeFallbackMs": "0",
         },

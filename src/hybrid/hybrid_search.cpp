@@ -841,19 +841,32 @@ bool HybridMCTSRootConfidenceRejectOverride(
   if (!root_confidence_fixed_budget || !ab_root_rejects_mcts)
     return false;
 
-  if (mcts_in_ab_rank <= 0 || mcts_in_ab_rank > 3 ||
-      mcts_in_ab_score != -VALUE_INFINITE || mcts_in_ab_lowerbound ||
-      mcts_in_ab_upperbound || mcts_in_ab_effort > 10000) {
+  if (mcts_in_ab_rank <= 0 || mcts_in_ab_score != -VALUE_INFINITE ||
+      mcts_in_ab_lowerbound || mcts_in_ab_upperbound ||
+      mcts_in_ab_effort > 10000) {
     return false;
   }
 
-  if (ab_average_score - mcts_average_score > 120)
+  const int average_gap = ab_average_score - mcts_average_score;
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+
+  if (mcts_in_ab_rank > 3) {
+    if (mcts_in_ab_rank > 10 || average_gap > 90 || ab_in_mcts_rank < 2 ||
+        ab_in_mcts_rank > 4 || ab_in_mcts_visits == 0 ||
+        ab_in_mcts_visits > 16) {
+      return false;
+    }
+
+    return q_gap_to_ab >= 0.75f;
+  }
+
+  if (average_gap > 120)
     return false;
 
   if (ab_in_mcts_rank <= 1 || ab_in_mcts_visits < 10)
     return false;
 
-  return mcts_q - ab_in_mcts_q >= 0.60f;
+  return q_gap_to_ab >= 0.60f;
 }
 
 bool HybridMCTSRootRejectLowMaterialPushOverride(
@@ -985,6 +998,29 @@ bool HybridMCTSReusedRootConfidenceOverride(
   if (!fixed_budget)
     return false;
 
+  const float q_gap_to_ab = mcts_q - ab_in_mcts_q;
+  const int average_gap = ab_average_score - mcts_average_score;
+  const bool high_cache_near_current =
+      mcts_root_visits >= 500 && mcts_best_visits >= 500 &&
+      mcts_root_current_visits >= 18 && mcts_best_current_visits >= 18 &&
+      mcts_in_ab_effort <= 100000;
+  const bool moderate_cache_current =
+      mcts_root_visits >= 400 && mcts_best_visits >= 400 &&
+      mcts_root_current_visits >= 20 && mcts_best_current_visits >= 20 &&
+      mcts_in_ab_effort <= 150000;
+  const bool cache_heavy_near_current =
+      (high_cache_near_current || moderate_cache_current) &&
+      mcts_root_visits >= 3 * std::max<uint64_t>(1, mcts_root_current_visits) &&
+      mcts_best_visits >= 3 * static_cast<uint32_t>(std::max<uint32_t>(
+                                  1, mcts_best_current_visits)) &&
+      absolute_visit_share >= 0.96f && current_visit_share >= 0.96f &&
+      mcts_cp >= 400 && eval_delta >= 400 && average_gap <= 75 &&
+      mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 &&
+      mcts_in_ab_score == -VALUE_INFINITE && ab_in_mcts_rank == 2 &&
+      ab_in_mcts_current_visits <= 1 && q_gap_to_ab >= 0.85f;
+  if (cache_heavy_near_current)
+    return true;
+
   if (mcts_root_visits < 200 || mcts_best_visits < 180 ||
       mcts_root_current_visits < 24 || mcts_best_current_visits < 24 ||
       absolute_visit_share < 0.90f || current_visit_share < 0.90f) {
@@ -1005,13 +1041,13 @@ bool HybridMCTSReusedRootConfidenceOverride(
     return false;
   }
 
-  if (ab_average_score - mcts_average_score > 75)
+  if (average_gap > 75)
     return false;
 
   if (ab_in_mcts_rank <= 1 || ab_in_mcts_current_visits > 2)
     return false;
 
-  return mcts_q - ab_in_mcts_q >= 0.75f;
+  return q_gap_to_ab >= 0.75f;
 }
 
 bool HybridMCTSReusedRootCurrentOverride(
@@ -1052,9 +1088,12 @@ bool HybridMCTSReusedRootCurrentOverride(
       mcts_in_ab_effort >= 250000;
   const bool late_lower_bound =
       mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 && mcts_in_ab_lowerbound &&
-      !mcts_in_ab_upperbound && mcts_in_ab_score >= 0 &&
-      mcts_in_ab_effort >= 250000 && absolute_visit_share >= 0.93f &&
-      mcts_cp >= 400 && q_gap_to_ab >= 0.58f;
+      !mcts_in_ab_upperbound && mcts_in_ab_effort >= 250000 &&
+      ((mcts_in_ab_score >= 0 && absolute_visit_share >= 0.93f &&
+        mcts_cp >= 400 && q_gap_to_ab >= 0.58f) ||
+       (mcts_in_ab_score >= -50 && absolute_visit_share >= 0.95f &&
+        current_visit_share >= 0.95f && mcts_cp >= 400 && eval_delta >= 400 &&
+        q_gap_to_ab >= 0.85f));
   const bool ab_barely_touched_mcts =
       ab_root_rejects_mcts && mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 4 &&
       mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 10000 &&
@@ -1084,34 +1123,65 @@ bool HybridMCTSBishopEndgameRetreatOverride(
     return false;
   }
 
-  const bool ab_barely_touched_mcts =
-      mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 4 &&
+  const bool barely_touched_score =
       mcts_in_ab_score == -VALUE_INFINITE && !mcts_in_ab_lowerbound &&
       !mcts_in_ab_upperbound && mcts_in_ab_effort <= 10000;
+  const bool low_node_barely_touched =
+      !ab_has_clear_preference && barely_touched_score && mcts_in_ab_rank > 0 &&
+      mcts_in_ab_rank <= 4 && mcts_root_visits >= 80 &&
+      mcts_root_visits <= 190 && mcts_best_visits >= 30 &&
+      mcts_root_current_visits >= 12 && mcts_best_current_visits >= 12 &&
+      absolute_visit_share >= 0.35f && current_visit_share >= 0.70f &&
+      mcts_cp >= 190 && eval_delta >= 180 && ab_in_mcts_rank >= 3 &&
+      ab_in_mcts_rank <= 4 && ab_in_mcts_current_visits <= 12 &&
+      q_gap_to_ab >= 0.30f;
+  if (low_node_barely_touched)
+    return true;
 
   if (mcts_root_visits < 200 || mcts_best_visits < 180 ||
-      mcts_root_current_visits < 24 || mcts_best_current_visits < 24 ||
-      absolute_visit_share < 0.75f || current_visit_share < 0.94f ||
-      mcts_cp < 280 || eval_delta < 210) {
+      mcts_root_current_visits < 24 || absolute_visit_share < 0.75f ||
+      current_visit_share < 0.94f || mcts_cp < 280 || eval_delta < 210) {
     return false;
   }
 
   if (ab_in_mcts_rank <= 1 || ab_in_mcts_current_visits > 1)
     return false;
 
-  if (q_gap_to_ab < 0.50f)
+  const bool high_confidence_one_visit_short =
+      mcts_best_current_visits >= 23 && mcts_root_current_visits >= 24 &&
+      mcts_cp >= 360 && eval_delta >= 360 && q_gap_to_ab >= 0.58f;
+  if (mcts_best_current_visits < 24 && !high_confidence_one_visit_short)
     return false;
 
+  const bool low_gap_barely_touched =
+      barely_touched_score && mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 4 &&
+      ab_in_mcts_current_visits == 0 && absolute_visit_share >= 0.80f &&
+      current_visit_share >= 0.99f && mcts_cp >= 300 && eval_delta >= 290;
+  if (q_gap_to_ab < (low_gap_barely_touched ? 0.46f : 0.50f))
+    return false;
+
+  const bool barely_touched_rank_ok =
+      mcts_in_ab_rank > 0 &&
+      (mcts_in_ab_rank <= 4 ||
+       (mcts_in_ab_rank == 5 && mcts_cp >= 360 && eval_delta >= 350));
+  const bool ab_barely_touched_mcts =
+      barely_touched_score && barely_touched_rank_ok;
   const bool ab_lowerbound_confirms_mcts =
       mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 && mcts_in_ab_lowerbound &&
       !mcts_in_ab_upperbound && mcts_in_ab_score >= 0 &&
       mcts_in_ab_effort >= 250000;
+  const bool ab_shallow_lowerbound_confirms_mcts =
+      mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 && mcts_in_ab_lowerbound &&
+      !mcts_in_ab_upperbound && mcts_in_ab_score >= 150 &&
+      mcts_in_ab_effort >= 150000 && absolute_visit_share >= 0.90f &&
+      mcts_cp >= 380 && eval_delta >= 360 && q_gap_to_ab >= 0.60f;
 
   if (ab_has_clear_preference)
     return ab_lowerbound_confirms_mcts && mcts_in_ab_score >= 300 &&
            eval_delta >= 220;
 
-  return ab_barely_touched_mcts || ab_lowerbound_confirms_mcts;
+  return ab_barely_touched_mcts || ab_lowerbound_confirms_mcts ||
+         ab_shallow_lowerbound_confirms_mcts;
 }
 
 bool HybridMCTSVisitEvidenceSane(uint64_t mcts_playouts, uint64_t mcts_evals,
@@ -1142,8 +1212,10 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
                                     float visit_share, float root_q_gap,
                                     int mcts_cp, int eval_delta,
                                     float ane_score_margin) {
+  const bool large_ane_margin_low_cp =
+      mcts_cp >= 80 && eval_delta >= 80 && ane_score_margin >= 0.45f;
   if (!enabled || !ane_agrees_mcts || !fixed_budget || root_q_gap < 0.20f ||
-      mcts_cp < 120 || eval_delta < 60) {
+      (!large_ane_margin_low_cp && mcts_cp < 120) || eval_delta < 60) {
     return false;
   }
   if (mcts_best_visits > mcts_root_visits)
@@ -1167,6 +1239,12 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
   if (mcts_root_visits < 80 && mcts_root_visits >= 56 &&
       mcts_best_visits >= 50 && visit_share >= 0.88f && root_q_gap >= 0.60f &&
       mcts_cp >= 300 && eval_delta >= 200 && ane_score_margin >= 0.12f) {
+    return true;
+  }
+
+  if (mcts_root_visits < 80 && mcts_root_visits >= 60 &&
+      mcts_best_visits >= 55 && visit_share >= 0.86f && root_q_gap >= 0.40f &&
+      mcts_cp >= 80 && eval_delta >= 80 && ane_score_margin >= 0.45f) {
     return true;
   }
 
@@ -1424,7 +1502,7 @@ bool HybridRootPawnLeverCandidate(
     if (mcts_rank < selected_mcts_rank &&
         candidate_mcts_policy < selected_mcts_policy && q_gap > -0.07f)
       return false;
-    if (mcts_rank > 4 && q_gap > 0.055f && !low_visit_lever)
+    if (mcts_rank > 4 && q_gap > 0.060f && !low_visit_lever)
       return false;
     if (candidate_average_score < selected_average_score && mcts_rank <= 4 &&
         q_gap > 0.05f && candidate_mcts_policy <= selected_mcts_policy)

@@ -267,13 +267,13 @@ HYBRID_ANE_ROOT_PROBE = (
     env_bool_string("METALFISH_HYBRID_ANE_ROOT_PROBE", False) == "true"
 )
 HYBRID_ANE_ROOT_HINTS = (
-    env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", True) == "true"
+    env_bool_string("METALFISH_HYBRID_ANE_ROOT_HINTS", False) == "true"
 )
 HYBRID_ANE_ONLY_PAWN_ENDGAMES = (
     env_bool_string("METALFISH_HYBRID_ANE_ONLY_PAWN_ENDGAMES", False) == "true"
 )
 HYBRID_ANE_CONFIRM_MCTS_OVERRIDE = (
-    env_bool_string("METALFISH_HYBRID_ANE_CONFIRM_MCTS_OVERRIDE", True) == "true"
+    env_bool_string("METALFISH_HYBRID_ANE_CONFIRM_MCTS_OVERRIDE", False) == "true"
 )
 HYBRID_ANE_WEIGHTS = pathlib.Path(
     os.environ.get("METALFISH_HYBRID_ANE_WEIGHTS", str(DEFAULT_ANE_WEIGHTS))

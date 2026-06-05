@@ -168,7 +168,7 @@ Engine::Engine(std::optional<std::string> path)
   options.add("HybridRootPawnLeverTieBreak", Option(true));
   options.add("HybridANERootProbe", Option(false));
   options.add("HybridANERootHints", Option(false));
-  options.add("HybridANEConfirmMCTSOverride", Option(true));
+  options.add("HybridANEConfirmMCTSOverride", Option(false));
   options.add("HybridANEOnlyPawnEndgames", Option(true));
   options.add("HybridANEWeights", Option(""));
   options.add("HybridANEModelPath", Option(""));
