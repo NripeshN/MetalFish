@@ -1377,6 +1377,22 @@ bool HybridMCTSRootRejectQGapOverride(
   return mcts_q - ab_in_mcts_q >= 0.55f;
 }
 
+bool HybridMCTSClockRootRejectQGapOverride(
+    bool clock_managed, bool visit_evidence_sane, bool ab_root_rejects_mcts,
+    uint64_t mcts_root_visits, uint32_t mcts_best_visits, float visit_share,
+    float root_q_gap, int mcts_cp, int eval_delta, int mcts_in_ab_rank,
+    int mcts_in_ab_score, uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  return clock_managed && visit_evidence_sane && ab_root_rejects_mcts &&
+         mcts_root_visits >= 100 && mcts_root_visits <= 300 &&
+         mcts_best_visits >= 72 && visit_share >= 0.65f &&
+         root_q_gap >= 0.90f && mcts_cp >= 220 && eval_delta >= 300 &&
+         mcts_in_ab_rank >= 2 && mcts_in_ab_rank <= 6 &&
+         mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 1000 &&
+         ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 6 &&
+         ab_in_mcts_current_visits <= 4 && mcts_q - ab_in_mcts_q >= 0.90f;
+}
+
 bool HybridPreserveLeadingHintAfterABVerify(
     bool fixed_budget, bool visit_evidence_sane, bool candidate_shape,
     uint64_t mcts_current_root_visits, uint32_t mcts_current_best_visits,
@@ -3524,6 +3540,10 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool mcts_decision_budget = HybridHasMCTSDecisionBudget(
       limits_, time_budget_ms_.load(std::memory_order_acquire),
       ponderhit_received_.load(std::memory_order_acquire));
+  const bool clock_managed_search =
+      limits_.movetime <= 0 && limits_.nodes <= 0 && limits_.depth <= 0 &&
+      limits_.mate <= 0 && !limits_.infinite &&
+      (limits_.time[WHITE] > 0 || limits_.time[BLACK] > 0);
   const uint32_t mcts_confidence_visits = mcts_current_visits;
   const uint64_t mcts_confidence_total_nodes = mcts_total_current_nodes;
   const bool mcts_visit_evidence_sane = HybridMCTSVisitEvidenceSane(
@@ -3941,6 +3961,13 @@ Move ParallelHybridSearch::make_final_decision() {
       root_q_gap, mcts_cp, eval_delta, mcts_in_ab.rank, mcts_in_ab.score,
       mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
       ab_in_mcts.q, mcts_q);
+  const bool mcts_clock_root_reject_q_gap =
+      HybridMCTSClockRootRejectQGapOverride(
+          clock_managed_search, mcts_visit_evidence_sane,
+          ab_root_rejects_mcts, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          mcts_in_ab.rank, mcts_in_ab.score, mcts_in_ab.effort,
+          ab_in_mcts.rank, ab_in_mcts.current_visits, ab_in_mcts.q, mcts_q);
   ane_confirmed_mcts_override = HybridANEConfirmedMCTSOverride(
       config_.ane_confirm_mcts_override, ane_agrees_mcts, mcts_decision_budget,
       mcts_visit_evidence_sane, mcts_confidence_total_nodes,
@@ -4010,8 +4037,9 @@ Move ParallelHybridSearch::make_final_decision() {
       mcts_root_confidence_reject_override || mcts_reused_root_confidence ||
       mcts_root_reject_low_material_push || mcts_root_reject_rook_pawn_push ||
       mcts_root_reject_quiet_queen_move || mcts_bishop_endgame_retreat ||
-      mcts_root_reject_q_gap || mcts_discovered_pawn_push_override ||
-      mcts_reused_root_current || mcts_root_rejects_ab ||
+      mcts_root_reject_q_gap || mcts_clock_root_reject_q_gap ||
+      mcts_discovered_pawn_push_override || mcts_reused_root_current ||
+      mcts_root_rejects_ab ||
       (mcts_overwhelming && eval_delta >= 250);
 
   bool choose_mcts = false;
@@ -4026,6 +4054,7 @@ Move ParallelHybridSearch::make_final_decision() {
          mcts_root_reject_low_material_push ||
          mcts_root_reject_rook_pawn_push || mcts_root_reject_quiet_queen_move ||
          mcts_bishop_endgame_retreat || mcts_root_reject_q_gap ||
+         mcts_clock_root_reject_q_gap ||
          (mcts_reliable && (!ab_has_clear_preference || eval_delta >= 180)));
     if (choose_mcts)
       reason =
@@ -4042,6 +4071,7 @@ Move ParallelHybridSearch::make_final_decision() {
               ? "mcts_root_reject_quiet_queen_move"
           : mcts_bishop_endgame_retreat ? "mcts_bishop_endgame_retreat"
           : mcts_root_reject_q_gap      ? "mcts_root_reject_q_gap"
+          : mcts_clock_root_reject_q_gap ? "mcts_clock_root_reject_q_gap"
                                         : "mcts_primary_reliable";
     break;
   case ParallelHybridConfig::DecisionMode::AB_PRIMARY:
@@ -4106,6 +4136,9 @@ Move ParallelHybridSearch::make_final_decision() {
     } else if (mcts_root_reject_q_gap) {
       choose_mcts = true;
       reason = "mcts_root_reject_q_gap";
+    } else if (mcts_clock_root_reject_q_gap) {
+      choose_mcts = true;
+      reason = "mcts_clock_root_reject_q_gap";
     } else if (mcts_reused_root_confidence) {
       choose_mcts = true;
       reason = "mcts_reused_root_confidence";
@@ -4187,6 +4220,8 @@ Move ParallelHybridSearch::make_final_decision() {
        << (mcts_root_reject_quiet_queen_move ? 1 : 0)
        << " MCTSBishopEndgameRetreat=" << (mcts_bishop_endgame_retreat ? 1 : 0)
        << " MCTSRootRejectQGap=" << (mcts_root_reject_q_gap ? 1 : 0)
+       << " MCTSClockRootRejectQGap="
+       << (mcts_clock_root_reject_q_gap ? 1 : 0)
        << " MCTSReusedRootConfidence=" << (mcts_reused_root_confidence ? 1 : 0)
        << " MCTSReusedRootCurrent=" << (mcts_reused_root_current ? 1 : 0)
        << " MCTSOverwhelming=" << (mcts_overwhelming ? 1 : 0)

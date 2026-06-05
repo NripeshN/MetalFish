@@ -835,6 +835,21 @@ bool MCTSRootLowVisitQOverrideCandidate(uint32_t best_visits,
   return candidate_q > best_q + required_gap;
 }
 
+bool MCTSRootClockLowVisitQOverrideCandidate(uint32_t root_current_visits,
+                                             uint32_t best_current_visits,
+                                             uint32_t candidate_current_visits,
+                                             float best_q, float candidate_q,
+                                             float candidate_policy) {
+  if (root_current_visits < 24 || root_current_visits > 160)
+    return false;
+  if (best_current_visits == 0 && candidate_current_visits < 8)
+    return false;
+
+  return MCTSRootLowVisitQOverrideCandidate(
+      std::max<uint32_t>(1, best_current_visits), candidate_current_visits,
+      best_q, candidate_q, 0.02f, candidate_policy, false);
+}
+
 namespace {
 float ExponentialDecay(float from, float to, float halflife_steps,
                        float steps) {
@@ -2431,6 +2446,7 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
   float best_q = -2.0f;
   float best_m = 999.0f;
   bool best_is_terminal_win = false;
+  uint32_t total_current_child_visits = 0;
 
   for (int i = 0; i < num_edges; ++i) {
     Node *child = edges[i].child.load(std::memory_order_acquire);
@@ -2441,6 +2457,8 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
     if (cn == 0)
       continue;
     total_child_visits += cn;
+    const uint32_t baseline = RootVisitBaselineLocked(edges[i].move);
+    total_current_child_visits += cn >= baseline ? cn - baseline : 0;
 
     float cq = child->GetWL();
     bool is_terminal = child->IsTerminal();
@@ -2492,6 +2510,10 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       limits_.time[BLACK] <= 0;
   const bool fixed_low_root_visit_search =
       fixed_node_limited_search || fixed_movetime_search;
+  const bool clock_managed_search =
+      limits_.movetime <= 0 && limits_.nodes <= 0 && limits_.depth <= 0 &&
+      limits_.mate <= 0 && !limits_.infinite &&
+      (limits_.time[WHITE] > 0 || limits_.time[BLACK] > 0);
   const uint32_t q_override_visit_cap =
       fixed_movetime_search ? static_cast<uint32_t>(std::max(
                                   0, params_.fixed_movetime_q_override_cap))
@@ -2521,6 +2543,38 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
               fixed_movetime_search)) {
         q_idx = i;
         q_best = cq;
+      }
+    }
+    if (q_idx != best_idx) {
+      best_idx = q_idx;
+      best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
+      best_q = q_best;
+    }
+  }
+
+  if (clock_managed_search && best_idx >= 0 && !best_is_terminal_win &&
+      total_current_child_visits > 0) {
+    int q_idx = best_idx;
+    float q_best = best_q;
+    const uint32_t best_baseline =
+        RootVisitBaselineLocked(edges[best_idx].move);
+    uint32_t q_best_current =
+        best_n >= best_baseline ? best_n - best_baseline : 0;
+
+    for (int i = 0; i < num_edges; ++i) {
+      Node *child = edges[i].child.load(std::memory_order_acquire);
+      if (!child)
+        continue;
+      const uint32_t cn = child->GetN();
+      const uint32_t baseline = RootVisitBaselineLocked(edges[i].move);
+      const uint32_t current_visits = cn >= baseline ? cn - baseline : 0;
+      const float cq = child->GetWL();
+      if (MCTSRootClockLowVisitQOverrideCandidate(
+              total_current_child_visits, q_best_current, current_visits,
+              q_best, cq, edges[i].GetP())) {
+        q_idx = i;
+        q_best = cq;
+        q_best_current = current_visits;
       }
     }
     if (q_idx != best_idx) {

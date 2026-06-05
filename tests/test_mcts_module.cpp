@@ -911,6 +911,15 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootLowVisitQOverrideCandidate(55, 12, -0.026f, 0.481f, 0.02f,
                                              0.066f, true),
          "strong-Q override still requires substantial visits", tc);
+  expect(MCTSRootClockLowVisitQOverrideCandidate(51, 26, 25, -0.861f, 0.759f,
+                                                 0.134f),
+         "012Fl clock root can rescue the near-tied high-Q queen move", tc);
+  expect(!MCTSRootClockLowVisitQOverrideCandidate(51, 26, 12, -0.861f, 0.759f,
+                                                  0.134f),
+         "clock root Q rescue still requires near-tied current visits", tc);
+  expect(!MCTSRootClockLowVisitQOverrideCandidate(220, 26, 25, -0.861f, 0.759f,
+                                                  0.134f),
+         "clock root Q rescue is limited to low-current roots", tc);
   Position bk16;
   StateInfo bk16_st;
   bk16.set("r1bqkb1r/4npp1/p1p4p/1p1pP1B1/8/1B6/PPPN1PPP/R2Q1RK1 w kq -", false,

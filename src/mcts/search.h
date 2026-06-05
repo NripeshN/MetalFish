@@ -460,6 +460,11 @@ bool MCTSRootLowVisitQOverrideCandidate(
     uint32_t best_visits, uint32_t candidate_visits, float best_q,
     float candidate_q, float near_equal_required_gap = 0.05f,
     float candidate_policy = 1.0f, bool allow_strong_gap_candidate = false);
+bool MCTSRootClockLowVisitQOverrideCandidate(uint32_t root_current_visits,
+                                             uint32_t best_current_visits,
+                                             uint32_t candidate_current_visits,
+                                             float best_q, float candidate_q,
+                                             float candidate_policy);
 
 std::unique_ptr<Search> CreateSearch(const SearchParams &config);
 

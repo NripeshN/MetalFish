@@ -737,6 +737,31 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
                    true, true, true, 54, 52, 0.963f, 1.463f, 603, 685, 2,
                    -VALUE_INFINITE, 55, 2, 1, -0.498f, 0.965f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 198, 158, 0.798f, 1.157f, 397, 408, 5,
+                   -VALUE_INFINITE, 69, 4, 1, -0.290f, 0.868f));
+  }
+  {
+    TestCase tc("Clock-managed MCTS root-reject Q-gap override predicate");
+
+    EXPECT(tc, HybridMCTSClockRootRejectQGapOverride(
+                   true, true, true, 198, 158, 0.798f, 1.157f, 397, 408, 5,
+                   -VALUE_INFINITE, 69, 4, 1, -0.290f, 0.868f));
+    EXPECT(tc, HybridMCTSClockRootRejectQGapOverride(
+                   true, true, true, 124, 85, 0.685f, 1.118f, 354, 373, 5,
+                   -VALUE_INFINITE, 387, 4, 1, -0.290f, 0.828f));
+    EXPECT(tc, !HybridMCTSClockRootRejectQGapOverride(
+                   false, true, true, 198, 158, 0.798f, 1.157f, 397, 408, 5,
+                   -VALUE_INFINITE, 69, 4, 1, -0.290f, 0.868f));
+    EXPECT(tc, !HybridMCTSClockRootRejectQGapOverride(
+                   true, true, true, 198, 158, 0.798f, 1.157f, 397, 408, 5,
+                   -VALUE_INFINITE, 1001, 4, 1, -0.290f, 0.868f));
+    EXPECT(tc, !HybridMCTSClockRootRejectQGapOverride(
+                   true, true, true, 198, 158, 0.798f, 1.157f, 397, 408, 5,
+                   -VALUE_INFINITE, 69, 4, 5, -0.290f, 0.868f));
+    EXPECT(tc, !HybridMCTSClockRootRejectQGapOverride(
+                   true, true, true, 198, 158, 0.798f, 0.899f, 397, 408, 5,
+                   -VALUE_INFINITE, 69, 4, 1, -0.290f, 0.868f));
   }
   {
     TestCase tc("Leading MCTS root hint survives inconclusive AB verify");
