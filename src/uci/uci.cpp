@@ -1422,8 +1422,8 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.fpu_value_at_root << "|" << config.fpu_reduction << "|"
       << config.fpu_reduction_at_root << "|" << config.policy_softmax_temp
       << "|" << config.root_policy_softmax_temp << "|"
-      << config.moves_left_max_effect << "|"
-      << config.moves_left_threshold << "|" << config.moves_left_slope << "|"
+      << config.moves_left_max_effect << "|" << config.moves_left_threshold
+      << "|" << config.moves_left_slope << "|"
       << config.moves_left_constant_factor << "|"
       << config.moves_left_scaled_factor << "|"
       << config.moves_left_quadratic_factor << "|" << config.temperature << "|"

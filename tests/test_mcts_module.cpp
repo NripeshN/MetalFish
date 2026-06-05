@@ -635,8 +635,8 @@ void test_search_params_defaults(TestCounter &tc) {
   expect(params.smart_pruning_factor == 1.33f, "smart pruning default aligned",
          tc);
   expect(params.kld_gain_min == 0.00005f, "KLD stopper tactical default", tc);
-  expect(params.policy_softmax_temp == 1.359f,
-         "policy softmax default aligned", tc);
+  expect(params.policy_softmax_temp == 1.359f, "policy softmax default aligned",
+         tc);
   expect(params.root_policy_softmax_temp == 1.6f,
          "root policy softmax default aligned", tc);
   expect(params.cache_history_length == 0,
