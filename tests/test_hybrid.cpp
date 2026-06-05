@@ -2195,86 +2195,86 @@ void test_hybrid_config() {
   {
     TestCase tc("Compact pawn endgame MCTS override stays narrowly gated");
 
-    EXPECT(tc, HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 36, 32, 0.889f, 0.959f, 229, 229,
-                   -2, -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f,
-                   0.643f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   false, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, false, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, false, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, true, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 34, 32, 0.889f, 0.959f, 229, 229,
-                   -2, -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f,
-                   0.643f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 36, 31, 0.889f, 0.959f, 229, 229,
-                   -2, -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f,
-                   0.643f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 36, 32, 0.879f, 0.959f, 229, 229,
-                   -2, -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f,
-                   0.643f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 36, 32, 0.889f, 0.899f, 229, 229,
-                   -2, -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f,
-                   0.643f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 36, 32, 0.889f, 0.959f, 219, 229,
-                   -2, -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f,
-                   0.643f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 36, 32, 0.889f, 0.959f, 229, 219,
-                   -2, -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f,
-                   0.643f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   100, -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 1, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, true, 141849, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 99999, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 600001, 2, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 141849, 3, 1, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 141849, 2, 3, -0.316f,
-                   0.705f));
-    EXPECT(tc, !HybridMCTSCompactPawnEndgameOverride(
-                   true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263,
-                   -1, -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.190f,
-                   0.705f));
+    EXPECT(tc,
+           HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 36, 32, 0.889f, 0.959f, 229, 229, -2,
+               -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f, 0.643f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               false, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, false, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, false, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, true, 47, 43, 0.915f, 1.021f, 263, 263, -1, -1,
+               2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 34, 32, 0.889f, 0.959f, 229, 229, -2,
+               -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f, 0.643f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 36, 31, 0.889f, 0.959f, 229, 229, -2,
+               -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f, 0.643f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 36, 32, 0.879f, 0.959f, 229, 229, -2,
+               -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f, 0.643f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 36, 32, 0.889f, 0.899f, 229, 229, -2,
+               -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f, 0.643f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 36, 32, 0.889f, 0.959f, 219, 229, -2,
+               -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f, 0.643f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 36, 32, 0.889f, 0.959f, 229, 219, -2,
+               -30, 2, -VALUE_INFINITE, false, 328718, 2, 1, -0.316f, 0.643f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, 100,
+               -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 1, -VALUE_INFINITE, false, 141849, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, true, 141849, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, false, 99999, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, false, 600001, 2, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, false, 141849, 3, 1, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, false, 141849, 2, 3, -0.316f, 0.705f));
+    EXPECT(tc,
+           !HybridMCTSCompactPawnEndgameOverride(
+               true, true, true, false, 47, 43, 0.915f, 1.021f, 263, 263, -1,
+               -1, 2, -VALUE_INFINITE, false, 141849, 2, 1, -0.190f, 0.705f));
   }
   {
     TestCase tc("Compact clear-preference MCTS override stays narrowly gated");
