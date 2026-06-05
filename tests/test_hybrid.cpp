@@ -848,6 +848,9 @@ void test_hybrid_config() {
                                           0.893f, 0.678f, 471, 252, 0.127f));
     EXPECT(tc, HybridANEConfirmedMCTSOverride(true, true, true, true, 68, 60,
                                               0.882f, 0.431f, 91, 89, 0.599f));
+    EXPECT(tc, HybridANEConfirmedMCTSOverride(true, true, true, true, 47, 25,
+                                              0.532f, 1.049f, 298, 317,
+                                              0.182f));
     EXPECT(tc,
            !HybridANEConfirmedMCTSOverride(false, true, true, true, 102, 93,
                                            0.912f, 0.817f, 242, 242, 0.100f));
@@ -936,6 +939,77 @@ void test_hybrid_config() {
     EXPECT(tc,
            !HybridANEConfirmedMCTSOverride(true, true, true, true, 54, 53,
                                            0.981f, 0.918f, 424, 149, 0.401f));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 47, 25,
+                                               0.439f, 1.049f, 298, 317,
+                                               0.182f));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 47, 25,
+                                               0.532f, 0.999f, 298, 317,
+                                               0.182f));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 47, 25,
+                                               0.532f, 1.049f, 279, 317,
+                                               0.182f));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 47, 25,
+                                               0.532f, 1.049f, 298, 299,
+                                               0.182f));
+    EXPECT(tc, !HybridANEConfirmedMCTSOverride(true, true, true, true, 47, 25,
+                                               0.532f, 1.049f, 298, 317,
+                                               0.149f));
+  }
+  {
+    TestCase tc("ANE Q-supported root override predicate");
+
+    EXPECT(tc, HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.182f, 53, 2, 28, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.182f, 58, 2, 25, 0.759f,
+                   0.134f, 27, -0.842f, 4, 1, -0.290f, 6, -VALUE_INFINITE,
+                   -550, false, 0, -71));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   false, true, true, true, 1, 0.182f, 53, 2, 28, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, false, 1, 0.182f, 53, 2, 28, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, true, 2, 0.182f, 53, 2, 28, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.149f, 53, 2, 28, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.182f, 121, 2, 28, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.182f, 53, 3, 28, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.182f, 53, 2, 19, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.182f, 53, 2, 28, 0.540f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.182f, 53, 2, 28, 0.785f,
+                   0.134f, 32, 0.100f, 4, 1, -0.290f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.182f, 53, 2, 28, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, 0.100f, 2, -VALUE_INFINITE,
+                   -164, true, 182, -65));
+    EXPECT(tc, !HybridANEQSupportedRootOverride(
+                   true, true, true, true, 1, 0.182f, 53, 2, 28, 0.785f,
+                   0.134f, 32, -0.803f, 4, 1, -0.290f, 2, -100, -200, true,
+                   182, 0));
   }
   {
     TestCase tc("Pawn-only ANE/MCTS override predicate");
