@@ -1723,6 +1723,99 @@ void test_hybrid_config() {
                    -32001, false, false, 4, 3, 1, -0.200f, 0.831f));
   }
   {
+    TestCase tc(
+        "Quiet minor major attack can bypass stale AB root reject narrowly");
+
+    EXPECT(tc, HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 63, 35, 0.556f, 0.210f, 191,
+                   107, 5, -VALUE_INFINITE, false, true, 2288, 7, 0, -0.446f,
+                   0.563f));
+    EXPECT(tc, HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 58, 30, 0.517f, 0.197f, 185,
+                   78, 6, -VALUE_INFINITE, false, true, 2088, 2, 22, 0.353f,
+                   0.550f));
+    EXPECT(tc, HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 60, 32, 0.533f, 0.224f, 197,
+                   164, 8, -VALUE_INFINITE, false, false, 5627, 5, 2, 0.021f,
+                   0.577f));
+    EXPECT(tc, HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 66, 37, 0.561f, 0.234f, 201,
+                   180, 11, -VALUE_INFINITE, false, false, 7117, 5, 2,
+                   0.021f, 0.586f));
+    EXPECT(tc, HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 66, 37, 0.561f, 0.234f, 201,
+                   179, 6, -VALUE_INFINITE, false, false, 9972, 2, 22, 0.353f,
+                   0.586f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   false, true, true, true, true, 67, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, false, true, true, true, 67, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, false, true, true, 67, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, false, true, 67, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, false, 67, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 54, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 29, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 38, 0.499f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 38, 0.567f, 0.189f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 38, 0.567f, 0.244f, 179,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 38, 0.567f, 0.244f, 206,
+                   74, 7, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 38, 0.567f, 0.244f, 206,
+                   107, 4, -VALUE_INFINITE, false, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, true, true, 6468, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 10001, 2, 22, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 67, 38, 0.567f, 0.244f, 206,
+                   107, 7, -VALUE_INFINITE, false, true, 6468, 2, 25, 0.353f,
+                   0.597f));
+    EXPECT(tc, !HybridMCTSRootRejectQuietMinorMajorAttackOverride(
+                   true, true, true, true, true, 63, 35, 0.556f, 0.210f, 191,
+                   107, 5, -VALUE_INFINITE, false, true, 2288, 7, 5, -0.446f,
+                   0.563f));
+  }
+  {
     TestCase tc("Reused root MCTS confidence stays tightly gated");
 
     EXPECT(tc, HybridMCTSReusedRootConfidenceOverride(
