@@ -556,6 +556,97 @@ def test_compare_puzzle_runs_summarizes_ane_trace() -> None:
     expect("unsolved blocked counted", summary["unsolved_blocked"] == 1)
 
 
+def test_compare_puzzle_runs_prints_changed_puzzles() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        baseline = root / "baseline.jsonl"
+        candidate = root / "candidate.jsonl"
+        baseline.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "id": "gain",
+                            "solved": False,
+                            "rating": 2400,
+                            "themes": ["middlegame", "short"],
+                            "searches": [
+                                {
+                                    "expected": "c3c4",
+                                    "actual": "h4h5",
+                                    "hybrid_selected": "h4h5",
+                                    "hybrid_reason": "ab_default",
+                                    "hybrid_mcts_move": "c3c4",
+                                    "hybrid_ab_move": "h4h5",
+                                }
+                            ],
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "id": "loss",
+                            "solved": True,
+                            "searches": [{"expected": "e2e4", "actual": "e2e4"}],
+                        }
+                    ),
+                ]
+            )
+            + "\n"
+        )
+        candidate.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "id": "gain",
+                            "solved": True,
+                            "searches": [{"expected": "c3c4", "actual": "c3c4"}],
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "id": "loss",
+                            "solved": False,
+                            "searches": [
+                                {
+                                    "expected": "e2e4",
+                                    "actual": "d2d4",
+                                    "hybrid_reason": "ane_confirmed_mcts",
+                                    "hybrid_ane_top": "d2d4",
+                                }
+                            ],
+                        }
+                    ),
+                ]
+            )
+            + "\n"
+        )
+
+        stdout = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+            rc = compare_puzzle_runs.run(
+                compare_puzzle_runs.parse_args(
+                    [
+                        "--baseline",
+                        str(baseline),
+                        "--candidate",
+                        str(candidate),
+                        "--show-changes",
+                        "--max-solved-drop",
+                        "1",
+                        "--max-accuracy-drop",
+                        "1.0",
+                    ]
+                )
+            )
+
+    output = stdout.getvalue()
+    expect("puzzle compare with changes succeeds", rc == 0)
+    expect("change summary printed", "Changed puzzles: gains=1, losses=1" in output)
+    expect("gain id printed", "gain:" in output)
+    expect("loss ANE detail printed", "ane=d2d4" in output)
+
+
 def test_compare_puzzle_runs_matches_repeat_ids() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
@@ -743,6 +834,7 @@ def main() -> int:
     test_repeat_result_ids_are_comparable()
     test_compare_puzzle_runs_detects_regression()
     test_compare_puzzle_runs_summarizes_ane_trace()
+    test_compare_puzzle_runs_prints_changed_puzzles()
     test_compare_puzzle_runs_matches_repeat_ids()
     test_compare_puzzle_runs_preserves_repeated_baseline_results()
     test_filter_puzzle_csv_can_skip_and_exclude_ids()
