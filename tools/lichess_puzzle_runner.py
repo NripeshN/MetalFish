@@ -411,9 +411,7 @@ def engine_options(args) -> dict[str, str]:
                         "true" if args.hybrid_ane_root_hints else "false"
                     ),
                     "HybridANEConfirmMCTSOverride": (
-                        "true"
-                        if args.hybrid_ane_confirm_mcts_override
-                        else "false"
+                        "true" if args.hybrid_ane_confirm_mcts_override else "false"
                     ),
                     "HybridANEOnlyPawnEndgames": (
                         "true" if args.hybrid_ane_only_pawn_endgames else "false"
