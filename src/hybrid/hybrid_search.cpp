@@ -1156,9 +1156,9 @@ bool HybridMCTSBishopEndgameRetreatOverride(
       mcts_root_visits >= 90 && mcts_root_visits <= 130 &&
       mcts_best_visits >= 40 && mcts_root_current_visits >= 50 &&
       mcts_best_current_visits >= 30 && absolute_visit_share >= 0.40f &&
-      current_visit_share >= 0.58f && mcts_cp >= 220 &&
-      eval_delta >= 210 && ab_in_mcts_rank >= 3 &&
-      ab_in_mcts_current_visits <= 12 && q_gap_to_ab >= 0.38f;
+      current_visit_share >= 0.58f && mcts_cp >= 220 && eval_delta >= 210 &&
+      ab_in_mcts_rank >= 3 && ab_in_mcts_current_visits <= 12 &&
+      q_gap_to_ab >= 0.38f;
   if (low_node_lowerbound_confirms)
     return true;
 
