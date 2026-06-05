@@ -754,9 +754,7 @@ def normalize_ane_args(args):
     ane_root_hint_count = getattr(
         args, "hybrid_ane_root_hint_count", HYBRID_ANE_ROOT_HINT_COUNT
     )
-    args.hybrid_ane_root_hint_count = max(
-        1, min(32, int(ane_root_hint_count))
-    )
+    args.hybrid_ane_root_hint_count = max(1, min(32, int(ane_root_hint_count)))
     args.hybrid_ane_root_hint_wait_ms = max(
         0,
         min(
