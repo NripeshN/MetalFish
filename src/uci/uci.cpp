@@ -1172,7 +1172,6 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.mcts_config = make_mcts_config(engine, nn_weights, split.mcts_threads);
   config.mcts_config.high_policy_root_lever_selection = false;
   config.mcts_config.low_policy_root_lever_selection = false;
-  config.mcts_config.root_tactical_capture_probe = false;
   config.mcts_config.kld_gain_min =
       get_float_option(engine, "HybridMCTSMinimumKLDGainPerNode", 0.0f);
   config.mcts_threads = split.mcts_threads;
