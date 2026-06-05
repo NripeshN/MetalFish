@@ -1953,6 +1953,18 @@ void test_hybrid_config() {
                true, true, false, true, true, 117, 62, 17, 17, 0.530f, 1.000f,
                226, 226, 3, -32001, false, false, 274, 4, 0, 0.012f, 0.638f));
     EXPECT(tc,
+           HybridMCTSBishopEndgameRetreatOverride(
+               true, true, false, true, true, 107, 48, 68, 40, 0.449f, 0.588f,
+               211, 207, 3, -32001, false, false, 6, 2, 12, 0.309f, 0.607f));
+    EXPECT(tc,
+           HybridMCTSBishopEndgameRetreatOverride(
+               true, true, false, true, true, 104, 45, 60, 36, 0.433f, 0.600f,
+               216, 215, 4, -32001, false, false, 102, 3, 11, 0.242f, 0.617f));
+    EXPECT(tc,
+           HybridMCTSBishopEndgameRetreatOverride(
+               true, true, false, true, true, 100, 41, 55, 32, 0.410f, 0.582f,
+               225, 218, 2, 150, true, false, 234308, 3, 11, 0.242f, 0.635f));
+    EXPECT(tc,
            !HybridMCTSBishopEndgameRetreatOverride(
                false, true, false, true, true, 265, 206, 80, 80, 0.777f, 1.000f,
                300, 294, 4, -32001, false, false, 144, 3, 0, 0.243f, 0.763f));
@@ -2040,6 +2052,30 @@ void test_hybrid_config() {
            !HybridMCTSBishopEndgameRetreatOverride(
                true, true, false, true, true, 86, 31, 25, 20, 0.360f, 0.800f,
                200, 191, 3, -32001, false, false, 47, 3, 13, 0.258f, 0.584f));
+    EXPECT(tc,
+           !HybridMCTSBishopEndgameRetreatOverride(
+               true, true, false, true, true, 107, 48, 68, 40, 0.429f, 0.588f,
+               211, 207, 3, -32001, false, false, 6, 2, 12, 0.309f, 0.607f));
+    EXPECT(tc,
+           !HybridMCTSBishopEndgameRetreatOverride(
+               true, true, false, true, true, 107, 48, 68, 40, 0.449f, 0.579f,
+               211, 207, 3, -32001, false, false, 6, 2, 12, 0.309f, 0.607f));
+    EXPECT(tc,
+           !HybridMCTSBishopEndgameRetreatOverride(
+               true, true, false, true, true, 107, 48, 68, 40, 0.449f, 0.588f,
+               211, 207, 3, -32001, false, false, 6, 2, 13, 0.309f, 0.607f));
+    EXPECT(tc,
+           !HybridMCTSBishopEndgameRetreatOverride(
+               true, true, true, true, true, 107, 48, 68, 40, 0.449f, 0.588f,
+               211, 207, 3, -32001, false, false, 6, 2, 12, 0.309f, 0.607f));
+    EXPECT(tc,
+           !HybridMCTSBishopEndgameRetreatOverride(
+               true, true, false, true, true, 100, 41, 55, 32, 0.410f, 0.582f,
+               219, 218, 2, 150, true, false, 234308, 3, 11, 0.242f, 0.635f));
+    EXPECT(tc,
+           !HybridMCTSBishopEndgameRetreatOverride(
+               true, true, false, true, true, 100, 41, 55, 32, 0.410f, 0.582f,
+               225, 209, 2, 150, true, false, 234308, 3, 11, 0.242f, 0.635f));
   }
   {
     TestCase tc("Compact fixed-budget MCTS override stays narrowly gated");

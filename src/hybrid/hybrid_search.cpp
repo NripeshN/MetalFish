@@ -1137,6 +1137,31 @@ bool HybridMCTSBishopEndgameRetreatOverride(
   if (low_node_barely_touched)
     return true;
 
+  const bool low_node_q_gap_barely_touched =
+      !ab_has_clear_preference && barely_touched_score && mcts_in_ab_rank > 0 &&
+      mcts_in_ab_rank <= 4 && mcts_root_visits >= 100 &&
+      mcts_root_visits <= 130 && mcts_best_visits >= 45 &&
+      mcts_root_current_visits >= 55 && mcts_best_current_visits >= 36 &&
+      absolute_visit_share >= 0.43f && current_visit_share >= 0.58f &&
+      mcts_cp >= 210 && eval_delta >= 200 && ab_in_mcts_rank >= 2 &&
+      ab_in_mcts_rank <= 3 && ab_in_mcts_current_visits <= 12 &&
+      q_gap_to_ab >= 0.29f;
+  if (low_node_q_gap_barely_touched)
+    return true;
+
+  const bool low_node_lowerbound_confirms =
+      !ab_has_clear_preference && mcts_in_ab_rank > 0 && mcts_in_ab_rank <= 2 &&
+      mcts_in_ab_lowerbound && !mcts_in_ab_upperbound &&
+      mcts_in_ab_score >= 140 && mcts_in_ab_effort >= 200000 &&
+      mcts_root_visits >= 90 && mcts_root_visits <= 130 &&
+      mcts_best_visits >= 40 && mcts_root_current_visits >= 50 &&
+      mcts_best_current_visits >= 30 && absolute_visit_share >= 0.40f &&
+      current_visit_share >= 0.58f && mcts_cp >= 220 &&
+      eval_delta >= 210 && ab_in_mcts_rank >= 3 &&
+      ab_in_mcts_current_visits <= 12 && q_gap_to_ab >= 0.38f;
+  if (low_node_lowerbound_confirms)
+    return true;
+
   if (mcts_root_visits < 200 || mcts_best_visits < 180 ||
       mcts_root_current_visits < 24 || absolute_visit_share < 0.75f ||
       current_visit_share < 0.94f || mcts_cp < 280 || eval_delta < 210) {
