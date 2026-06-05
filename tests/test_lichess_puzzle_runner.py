@@ -145,6 +145,7 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
             "hybrid",
             "--hybrid-ane-root-probe",
             "--hybrid-ane-root-hints",
+            "--hybrid-ane-confirm-mcts-override",
             "--hybrid-trace",
             "--hybrid-ane-weights",
             "networks/t1.pb.gz",
@@ -165,6 +166,10 @@ def test_hybrid_ane_flags_set_uci_options() -> None:
 
     expect("ANE probe enabled", options["HybridANERootProbe"] == "true")
     expect("ANE root hints enabled", options["HybridANERootHints"] == "true")
+    expect(
+        "ANE confirmation enabled",
+        options["HybridANEConfirmMCTSOverride"] == "true",
+    )
     expect(
         "ANE scope defaults to pawn-only",
         options["HybridANEOnlyPawnEndgames"] == "true",
@@ -257,6 +262,7 @@ def test_hybrid_ane_stats_distinguish_configured_from_active() -> None:
             "hybrid",
             "--hybrid-ane-root-probe",
             "--hybrid-ane-root-hints",
+            "--hybrid-ane-confirm-mcts-override",
             "--hybrid-ane-weights",
             "networks/t1.pb.gz",
             "--hybrid-ane-model-path",
@@ -269,6 +275,10 @@ def test_hybrid_ane_stats_distinguish_configured_from_active() -> None:
     expect("ANE requested", stats["ane_probe_requested"] is True)
     expect("HybridTrace starts off", stats["hybrid_trace_requested"] is False)
     expect("ANE hints requested", stats["ane_root_hints_requested"] is True)
+    expect(
+        "ANE confirmation requested",
+        stats["ane_confirm_mcts_override_requested"] is True,
+    )
     expect("ANE pawn-only scope tracked", stats["ane_only_pawn_endgames"] is True)
     expect("ANE starts inactive", stats["ane_root_nonempty"] == 0)
 

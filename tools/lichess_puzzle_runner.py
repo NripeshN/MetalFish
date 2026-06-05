@@ -410,6 +410,11 @@ def engine_options(args) -> dict[str, str]:
                     "HybridANERootHints": (
                         "true" if args.hybrid_ane_root_hints else "false"
                     ),
+                    "HybridANEConfirmMCTSOverride": (
+                        "true"
+                        if args.hybrid_ane_confirm_mcts_override
+                        else "false"
+                    ),
                     "HybridANEOnlyPawnEndgames": (
                         "true" if args.hybrid_ane_only_pawn_endgames else "false"
                     ),
@@ -523,6 +528,9 @@ def initial_ane_stats(args) -> dict[str, object]:
         "ane_probe_requested": requested,
         "hybrid_trace_requested": bool(getattr(args, "hybrid_trace", False)),
         "ane_root_hints_requested": bool(getattr(args, "hybrid_ane_root_hints", False)),
+        "ane_confirm_mcts_override_requested": bool(
+            getattr(args, "hybrid_ane_confirm_mcts_override", False)
+        ),
         "ane_only_pawn_endgames": bool(
             getattr(args, "hybrid_ane_only_pawn_endgames", True)
         ),
@@ -892,6 +900,8 @@ def write_summary(path: pathlib.Path, stats: dict) -> None:
                 f"- ANE root probe: requested ({stats.get('ane_compute_units')})",
                 f"- HybridTrace requested: {stats.get('hybrid_trace_requested')}",
                 f"- ANE root hints requested: {stats.get('ane_root_hints_requested')}",
+                "- ANE-confirm MCTS override requested: "
+                f"{stats.get('ane_confirm_mcts_override_requested')}",
                 f"- ANE pawn-only gate: {stats.get('ane_only_pawn_endgames')}",
                 f"- ANE searches: {stats.get('ane_searches', 0)}",
                 f"- ANE trace fields: {stats.get('ane_trace_searches', 0)}",
@@ -1222,6 +1232,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=DEFAULT_ANE_ROOT_HINTS,
         help="Use ANE root ordering as AB search hints; final ANE evidence remains available without this.",
+    )
+    parser.add_argument(
+        "--hybrid-ane-confirm-mcts-override",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Allow ANE agreement to confirm an MCTS override in hybrid arbitration.",
     )
     parser.add_argument(
         "--hybrid-ane-only-pawn-endgames",
