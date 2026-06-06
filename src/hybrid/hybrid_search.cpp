@@ -2123,6 +2123,18 @@ bool HybridPawnOnlyANEMCTSOverride(
   if (short_ane_king_recapture)
     return true;
 
+  const bool tiny_ane_king_recapture =
+      king_recapture_shape && mcts_root_visits >= 12 &&
+      mcts_root_visits <= 34 && mcts_best_visits >= 10 &&
+      mcts_current_root_visits >= 12 && mcts_current_best_visits >= 10 &&
+      visit_share >= 0.80f && root_q_gap >= 0.35f && q_gap_to_ab >= 0.35f &&
+      mcts_cp >= 80 && eval_delta >= 100 && ane_score_margin >= 0.35f &&
+      ab_mcts_visits <= 2 && std::abs(ab_average_score) <= 170 &&
+      std::abs(mcts_average_score) <= 170 &&
+      std::abs(ab_average_score - mcts_average_score) <= 130;
+  if (tiny_ane_king_recapture)
+    return true;
+
   const bool short_ane_pawn_lever =
       pawn_lever_shape && !king_recapture_shape && visit_evidence_sane &&
       mcts_root_visits >= 26 && mcts_root_visits <= 40 &&
@@ -2134,6 +2146,20 @@ bool HybridPawnOnlyANEMCTSOverride(
       std::abs(mcts_average_score) <= 100 &&
       std::abs(ab_average_score - mcts_average_score) <= 80;
   if (short_ane_pawn_lever)
+    return true;
+
+  const bool tiny_ane_pawn_lever =
+      pawn_lever_shape && !king_recapture_shape && visit_evidence_sane &&
+      mcts_root_visits >= 14 && mcts_root_visits <= 30 &&
+      mcts_best_visits >= 9 && mcts_current_root_visits >= 14 &&
+      mcts_current_best_visits >= 9 && visit_share >= 0.55f &&
+      root_q_gap >= 0.09f && q_gap_to_ab >= 0.10f &&
+      root_q_gap <= 0.45f && q_gap_to_ab <= 0.55f &&
+      mcts_cp >= -60 && eval_delta >= -60 && ane_score_margin >= 0.15f &&
+      ab_mcts_visits <= 4 && std::abs(ab_average_score) <= 120 &&
+      std::abs(mcts_average_score) <= 120 &&
+      std::abs(ab_average_score - mcts_average_score) <= 120;
+  if (tiny_ane_pawn_lever)
     return true;
 
   if (mcts_root_visits < 40 || mcts_best_visits < 32 ||
