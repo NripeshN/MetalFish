@@ -992,6 +992,40 @@ bool HybridMCTSRootRejectRookEndgamePawnPushOverride(
   return mcts_q - ab_in_mcts_q >= 0.60f;
 }
 
+bool HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+    bool fixed_budget, bool visit_evidence_sane, bool rook_endgame_root,
+    bool mcts_quiet_central_pawn_push, uint64_t mcts_root_visits,
+    uint32_t mcts_best_visits, float visit_share, float root_q_gap, int mcts_cp,
+    int eval_delta, int ab_score, int mcts_in_ab_rank, int mcts_in_ab_score,
+    bool mcts_in_ab_lowerbound, bool mcts_in_ab_upperbound,
+    uint64_t mcts_in_ab_effort, int ab_in_mcts_rank,
+    uint32_t ab_in_mcts_current_visits, float ab_in_mcts_q, float mcts_q) {
+  if (!fixed_budget || !visit_evidence_sane || !rook_endgame_root ||
+      !mcts_quiet_central_pawn_push || mcts_best_visits > mcts_root_visits) {
+    return false;
+  }
+
+  if (mcts_root_visits < 24 || mcts_root_visits > 64 ||
+      mcts_best_visits < 18 || visit_share < 0.70f || root_q_gap < 0.55f ||
+      mcts_cp < 180 || eval_delta < 160 || std::abs(ab_score) > 80) {
+    return false;
+  }
+
+  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 3 ||
+      !mcts_in_ab_lowerbound || mcts_in_ab_upperbound ||
+      mcts_in_ab_score < -50 || mcts_in_ab_score - ab_score < -30 ||
+      mcts_in_ab_effort < 50000 || mcts_in_ab_effort > 500000) {
+    return false;
+  }
+
+  if (ab_in_mcts_rank != 2 || ab_in_mcts_current_visits < 4 ||
+      ab_in_mcts_current_visits > 8) {
+    return false;
+  }
+
+  return mcts_q - ab_in_mcts_q >= 0.50f;
+}
+
 bool HybridMCTSRootRejectQuietQueenMoveOverride(
     bool fixed_budget, bool visit_evidence_sane, bool ab_root_rejects_mcts,
     bool mcts_quiet_central_queen_move, uint64_t mcts_root_visits,
@@ -1319,8 +1353,7 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
                                     float ane_score_margin) {
   const bool large_ane_margin_low_cp =
       mcts_cp >= 80 && eval_delta >= 80 && ane_score_margin >= 0.45f;
-  if (!enabled || !ane_agrees_mcts || !fixed_budget || root_q_gap < 0.20f ||
-      (!large_ane_margin_low_cp && mcts_cp < 120) || eval_delta < 60) {
+  if (!enabled || !ane_agrees_mcts || !fixed_budget) {
     return false;
   }
   if (mcts_best_visits > mcts_root_visits)
@@ -1328,6 +1361,61 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
 
   if (!visit_evidence_sane)
     return false;
+
+  const bool forced_single_line =
+      mcts_root_visits >= 50 && mcts_root_visits <= 70 &&
+      mcts_best_visits >= 50 && visit_share >= 0.95f &&
+      mcts_cp >= 800 && eval_delta >= 800 && ane_score_margin >= 1.0f;
+  if (root_q_gap < 0.20f && !forced_single_line)
+    return false;
+  if (!forced_single_line && !large_ane_margin_low_cp && mcts_cp < 120)
+    return false;
+  if (!forced_single_line && eval_delta < 60)
+    return false;
+
+  if (forced_single_line)
+    return true;
+
+  if (mcts_root_visits >= 16 && mcts_root_visits <= 35 &&
+      mcts_best_visits >= 13 && visit_share >= 0.80f &&
+      root_q_gap >= 0.40f && root_q_gap <= 0.68f && mcts_cp >= 380 &&
+      mcts_cp <= 460 && eval_delta >= 260 && ane_score_margin >= 0.10f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 18 && mcts_root_visits <= 32 &&
+      mcts_best_visits >= 16 && visit_share >= 0.80f &&
+      root_q_gap >= 0.70f && mcts_cp >= 450 && eval_delta >= 400 &&
+      ane_score_margin >= 0.35f) {
+    return true;
+  }
+
+  if (mcts_root_visits == 33 && mcts_best_visits >= 28 &&
+      visit_share >= 0.84f && root_q_gap >= 0.70f && mcts_cp >= 700 &&
+      eval_delta >= 650 && ane_score_margin >= 0.35f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 50 && mcts_root_visits <= 60 &&
+      mcts_best_visits >= 40 && visit_share >= 0.80f &&
+      root_q_gap >= 0.80f && mcts_cp >= 500 && eval_delta >= 500 &&
+      ane_score_margin >= 0.015f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 30 && mcts_root_visits < 50 &&
+      mcts_best_visits >= 24 && visit_share >= 0.80f &&
+      root_q_gap >= 0.90f && mcts_cp >= 200 && eval_delta >= 200 &&
+      ane_score_margin >= 0.45f) {
+    return true;
+  }
+
+  if (mcts_root_visits >= 35 && mcts_root_visits <= 45 &&
+      mcts_best_visits >= 30 && visit_share >= 0.80f &&
+      root_q_gap >= 0.65f && mcts_cp >= 450 && eval_delta >= 300 &&
+      ane_score_margin >= 0.10f) {
+    return true;
+  }
 
   if (mcts_root_visits >= 80 && mcts_best_visits >= 64 &&
       visit_share >= 0.70f && ane_score_margin >= 0.10f) {
@@ -1519,6 +1607,14 @@ bool HybridMCTSRootRejectQGapOverride(
         mcts_in_ab_effort <= 1000 && ab_in_mcts_rank >= 3 &&
         ab_in_mcts_rank <= 5 && ab_in_mcts_current_visits <= 2 &&
         mcts_q - ab_in_mcts_q >= 0.90f;
+    const bool tiny_root_dominance =
+        visit_evidence_sane && mcts_root_visits >= 18 &&
+        mcts_root_visits <= 32 && mcts_best_visits >= 16 &&
+        mcts_best_visits <= 24 && visit_share >= 0.80f && root_q_gap >= 0.70f &&
+        mcts_cp >= 250 && eval_delta >= 250 && mcts_in_ab_rank >= 2 &&
+        mcts_in_ab_rank <= 4 && mcts_in_ab_score == -VALUE_INFINITE &&
+        mcts_in_ab_effort <= 800 && ab_in_mcts_rank == 2 &&
+        ab_in_mcts_current_visits <= 2 && mcts_q - ab_in_mcts_q >= 0.70f;
     const bool medium_root_discovery =
         visit_evidence_sane && mcts_root_visits >= 90 &&
         mcts_root_visits <= 300 && mcts_best_visits >= 60 &&
@@ -1535,7 +1631,8 @@ bool HybridMCTSRootRejectQGapOverride(
         mcts_in_ab_score == -VALUE_INFINITE && mcts_in_ab_effort <= 2600 &&
         ab_in_mcts_rank == 2 && ab_in_mcts_current_visits >= 20 &&
         ab_in_mcts_current_visits <= 64 && mcts_q - ab_in_mcts_q >= 1.0f;
-    return low_ab_support_discovery || medium_root_discovery ||
+    return low_ab_support_discovery || tiny_root_dominance ||
+           medium_root_discovery ||
            cache_heavy_discovery;
   }
 
@@ -4147,7 +4244,7 @@ Move ParallelHybridSearch::make_final_decision() {
   const bool rook_endgame_root = HybridIsRookEndgame(decision_root);
   const bool mcts_quiet_central_pawn_push =
       HybridIsQuietCentralPawnPush(decision_root, mcts_best);
-  const bool mcts_root_reject_rook_pawn_push =
+  const bool mcts_root_reject_rook_pawn_push_sentinel =
       HybridMCTSRootRejectRookEndgamePawnPushOverride(
           mcts_decision_budget, mcts_visit_evidence_sane, ab_root_rejects_mcts,
           rook_endgame_root, mcts_quiet_central_pawn_push,
@@ -4155,6 +4252,18 @@ Move ParallelHybridSearch::make_final_decision() {
           root_q_gap, mcts_cp, eval_delta, mcts_in_ab.rank, mcts_in_ab.score,
           mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
           ab_in_mcts.q, mcts_q);
+  const bool mcts_root_reject_rook_pawn_push_lowerbound =
+      HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+          mcts_decision_budget, mcts_visit_evidence_sane, rook_endgame_root,
+          mcts_quiet_central_pawn_push, mcts_confidence_total_nodes,
+          mcts_confidence_visits, visit_share, root_q_gap, mcts_cp, eval_delta,
+          ab_score, mcts_in_ab.rank, mcts_in_ab.score,
+          mcts_in_ab.score_lowerbound, mcts_in_ab.score_upperbound,
+          mcts_in_ab.effort, ab_in_mcts.rank, ab_in_mcts.current_visits,
+          ab_in_mcts.q, mcts_q);
+  const bool mcts_root_reject_rook_pawn_push =
+      mcts_root_reject_rook_pawn_push_sentinel ||
+      mcts_root_reject_rook_pawn_push_lowerbound;
   const bool mcts_quiet_central_queen_move =
       HybridIsQuietCentralQueenMove(decision_root, mcts_best);
   const bool mcts_root_reject_quiet_queen_move =

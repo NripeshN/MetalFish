@@ -734,6 +734,9 @@ void test_hybrid_config() {
     EXPECT(tc, HybridMCTSRootRejectQGapOverride(
                    true, true, true, 38, 25, 0.658f, 1.049f, 298, 329, 4,
                    -VALUE_INFINITE, 4, 4, 1, -0.290f, 0.759f));
+    EXPECT(tc, HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 20, 18, 0.900f, 0.750f, 311, 312, 3,
+                   -VALUE_INFINITE, 394, 2, 1, 0.028f, 0.778f));
     EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
                    true, true, true, 38, 25, 0.658f, 0.899f, 298, 329, 4,
                    -VALUE_INFINITE, 4, 4, 1, -0.290f, 0.759f));
@@ -755,6 +758,9 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
                    true, true, true, 198, 158, 0.798f, 1.157f, 397, 408, 5,
                    -VALUE_INFINITE, 69, 4, 1, -0.290f, 0.868f));
+    EXPECT(tc, !HybridMCTSRootRejectQGapOverride(
+                   true, true, true, 40, 11, 0.275f, 0.072f, 111, 111, 3,
+                   -VALUE_INFINITE, 631, 4, 2, 0.002f, 0.356f));
   }
   {
     TestCase tc("Clock-managed MCTS root-reject Q-gap override predicate");
@@ -867,6 +873,27 @@ void test_hybrid_config() {
            HybridANEConfirmedMCTSOverride(true, true, true, true, 47, 25,
                                           0.532f, 1.049f, 298, 317, 0.182f));
     EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 20, 16,
+                                          0.800f, 0.772f, 742, 681, 0.409f));
+    EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 35, 31,
+                                          0.886f, 0.947f, 223, 223, 1.022f));
+    EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 43, 38,
+                                          0.884f, 0.685f, 485, 329, 0.127f));
+    EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 16, 13,
+                                          0.812f, 0.443f, 394, 322, 0.127f));
+    EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 33, 28,
+                                          0.848f, 0.712f, 783, 737, 0.409f));
+    EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 52, 43,
+                                          0.827f, 0.849f, 570, 586, 0.019f));
+    EXPECT(tc,
+           HybridANEConfirmedMCTSOverride(true, true, true, true, 57, 57,
+                                          1.000f, 0.000f, 1009, 1009, 1.663f));
+    EXPECT(tc,
            !HybridANEConfirmedMCTSOverride(false, true, true, true, 102, 93,
                                            0.912f, 0.817f, 242, 242, 0.100f));
     EXPECT(tc,
@@ -969,6 +996,45 @@ void test_hybrid_config() {
     EXPECT(tc,
            !HybridANEConfirmedMCTSOverride(true, true, true, true, 47, 25,
                                            0.532f, 1.049f, 298, 317, 0.149f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 20, 16,
+                                           0.800f, 0.699f, 742, 681, 0.409f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 35, 31,
+                                           0.886f, 0.899f, 223, 223, 1.022f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 43, 38,
+                                           0.884f, 0.685f, 449, 329, 0.127f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 16, 13,
+                                           0.812f, 0.399f, 394, 322, 0.127f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 16, 13,
+                                           0.812f, 0.443f, 379, 322, 0.127f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 16, 13,
+                                           0.812f, 0.443f, 394, 259, 0.127f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 16, 13,
+                                           0.812f, 0.443f, 394, 322, 0.099f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 33, 28,
+                                           0.839f, 0.712f, 783, 737, 0.409f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 33, 28,
+                                           0.848f, 0.699f, 783, 737, 0.409f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 52, 43,
+                                           0.827f, 0.799f, 570, 586, 0.019f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 52, 43,
+                                           0.827f, 0.849f, 570, 586, 0.014f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 57, 57,
+                                           0.949f, 0.000f, 1009, 1009, 1.663f));
+    EXPECT(tc,
+           !HybridANEConfirmedMCTSOverride(true, true, true, true, 57, 57,
+                                           1.000f, 0.000f, 1009, 1009, 0.999f));
   }
   {
     TestCase tc("ANE Q-supported root override predicate");
@@ -1801,6 +1867,58 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSRootRejectRookEndgamePawnPushOverride(
                    true, true, true, true, true, 53, 47, 0.887f, 0.677f, 468,
                    366, 3, -32001, 2429, 2, 3, 0.330f, 0.916f));
+  }
+  {
+    TestCase tc("Rook endgame central pawn push lower bound stays narrow");
+
+    EXPECT(tc, HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 57, 46, 0.807f, 0.583f, 196, 166,
+                   30, 2, 114, true, false, 277616, 2, 5, -0.007f, 0.576f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   false, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, false, true, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, false, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 23, 18, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.699f, 0.565f, 214, 214,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.549f, 214, 214,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 179, 214,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 159,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, false, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, true, true, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -51, true, false, 58884, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, true, false, 49999, 2, 4, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, true, false, 58884, 2, 3, 0.049f, 0.615f));
+    EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
+                   0, 2, -20, true, false, 58884, 2, 4, 0.116f, 0.615f));
   }
   {
     TestCase tc("Quiet queen move can bypass stale low-effort AB root reject");
