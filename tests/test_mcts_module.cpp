@@ -909,6 +909,29 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
                                                 0.100f),
          "pawn-endgame en-passant still needs near Q", tc);
 
+  Position minor_pawn_endgame_recapture;
+  StateInfo minor_pawn_endgame_recapture_st;
+  minor_pawn_endgame_recapture.set(
+      "8/7p/2p2pP1/8/1k1K4/p7/B4P2/8 b - - 0 43", false,
+      &minor_pawn_endgame_recapture_st);
+  const Move recapture =
+      UCIEngine::to_move(minor_pawn_endgame_recapture, "h7g6");
+  const Move quiet_pawn =
+      UCIEngine::to_move(minor_pawn_endgame_recapture, "c6c5");
+  expect(MCTSRootMinorPawnEndgameCaptureProtected(
+             minor_pawn_endgame_recapture, recapture, quiet_pawn, 0.670f,
+             0.211f, 0.265f, 0.319f),
+         "01abk high-policy pawn recapture resists a modest-Q quiet override",
+         tc);
+  expect(!MCTSRootMinorPawnEndgameCaptureProtected(
+             minor_pawn_endgame_recapture, recapture, quiet_pawn, 0.670f,
+             0.211f, 0.265f, 0.350f),
+         "01abk quiet override still passes when Q gap is decisive", tc);
+  expect(!MCTSRootMinorPawnEndgameCaptureProtected(
+             minor_pawn_endgame_recapture, recapture, quiet_pawn, 0.670f,
+             0.211f, 0.340f, 0.319f),
+         "01abk guard requires the quiet move to be much lower policy", tc);
+
   expect(MCTSRootLowVisitQOverrideCandidate(39, 38, 0.601f, 0.698f),
          "00GuG near-visit higher-Q king move can override", tc);
   expect(!MCTSRootLowVisitQOverrideCandidate(39, 19, 0.601f, 0.698f),

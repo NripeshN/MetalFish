@@ -463,6 +463,9 @@ bool MCTSRootPawnEndgameEnPassantCandidate(uint32_t root_visits,
                                            bool best_is_capture,
                                            bool candidate_is_en_passant,
                                            float best_q, float candidate_q);
+bool MCTSRootMinorPawnEndgameCaptureProtected(
+    const Position &pos, Move best_move, Move candidate_move, float best_policy,
+    float best_q, float candidate_policy, float candidate_q);
 bool MCTSRootLowVisitQOverrideCandidate(
     uint32_t best_visits, uint32_t candidate_visits, float best_q,
     float candidate_q, float near_equal_required_gap = 0.05f,

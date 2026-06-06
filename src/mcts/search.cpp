@@ -823,6 +823,27 @@ bool MCTSRootPawnEndgameEnPassantCandidate(uint32_t root_visits,
   return best_q - candidate_q <= 0.080f;
 }
 
+bool MCTSRootMinorPawnEndgameCaptureProtected(
+    const Position &pos, Move best_move, Move candidate_move, float best_policy,
+    float best_q, float candidate_policy, float candidate_q) {
+  if (pos.count<QUEEN>() != 0 || pos.count<ROOK>() != 0 ||
+      pos.count<KNIGHT>() != 0 || pos.count<BISHOP>() > 1) {
+    return false;
+  }
+  if (!pos.capture(best_move) || pos.capture(candidate_move))
+    return false;
+
+  const Piece best_piece = pos.piece_on(best_move.from_sq());
+  const Piece captured_piece = pos.piece_on(best_move.to_sq());
+  if (best_piece == NO_PIECE || type_of(best_piece) != PAWN ||
+      captured_piece == NO_PIECE || type_of(captured_piece) != PAWN) {
+    return false;
+  }
+
+  return best_policy >= 0.55f && candidate_policy <= best_policy * 0.45f &&
+         candidate_q <= best_q + 0.13f;
+}
+
 bool MCTSRootLowVisitQOverrideCandidate(uint32_t best_visits,
                                         uint32_t candidate_visits, float best_q,
                                         float candidate_q,
@@ -2562,7 +2583,11 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
           root_pos.capture(edges[q_idx].move) &&
           !root_pos.capture(edges[i].move) && edges[q_idx].GetP() >= 0.50f &&
           edges[i].GetP() <= edges[q_idx].GetP() * 0.60f && cq < q_best + 0.10f;
-      if (protects_high_policy_capture)
+      const bool protects_minor_pawn_endgame_capture =
+          MCTSRootMinorPawnEndgameCaptureProtected(
+              root_pos, edges[q_idx].move, edges[i].move, edges[q_idx].GetP(),
+              q_best, edges[i].GetP(), cq);
+      if (protects_high_policy_capture || protects_minor_pawn_endgame_capture)
         continue;
       if (MCTSRootLowVisitQOverrideCandidate(
               best_n, cn, q_best, cq, near_equal_required_gap, edges[i].GetP(),
