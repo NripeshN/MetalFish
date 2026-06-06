@@ -1987,6 +1987,19 @@ bool HybridPawnOnlyANEMCTSOverride(
     return false;
 
   const bool root_gap_ok = root_q_gap >= 0.25f || q_gap_to_ab >= 0.50f;
+  const bool short_ane_king_recapture =
+      king_recapture_shape && mcts_root_visits >= 35 &&
+      mcts_root_visits <= 60 && mcts_best_visits >= 32 &&
+      mcts_current_root_visits >= 20 && mcts_current_best_visits >= 20 &&
+      visit_share >= 0.95f && root_q_gap >= 0.40f &&
+      q_gap_to_ab >= 0.42f && mcts_cp >= 110 && eval_delta >= 130 &&
+      ane_score_margin >= 0.40f && ab_mcts_visits <= 1 &&
+      std::abs(ab_average_score) <= 110 &&
+      std::abs(mcts_average_score) <= 110 &&
+      std::abs(ab_average_score - mcts_average_score) <= 30;
+  if (short_ane_king_recapture)
+    return true;
+
   if (mcts_root_visits < 40 || mcts_best_visits < 32 ||
       mcts_current_root_visits < 20 || mcts_current_best_visits < 20 ||
       visit_share < 0.75f || !root_gap_ok || q_gap_to_ab < 0.25f ||

@@ -1046,6 +1046,12 @@ void test_hybrid_config() {
     EXPECT(tc, HybridPawnOnlyANEMCTSOverride(
                    true, true, true, true, true, true, false, 82, 79, 46, 46, 0,
                    1.000f, 0.000f, 0.765f, 257, 273, -75, -140, 0.401f));
+    EXPECT(tc, HybridPawnOnlyANEMCTSOverride(
+                   true, true, true, true, true, true, false, 36, 33, 23, 22, 1,
+                   0.957f, 0.446f, 0.446f, 119, 145, -94, -94, 0.444f));
+    EXPECT(tc, HybridPawnOnlyANEMCTSOverride(
+                   true, true, true, true, true, true, false, 49, 46, 31, 30, 1,
+                   0.968f, 0.608f, 0.607f, 180, 205, -93, -99, 0.444f));
     EXPECT(tc, HybridPawnOnlyANEMCTSOverride(true, true, true, false, true,
                                              false, false, 2090, 2054, 2090,
                                              2054, 13, 0.983f, 1.192f, 1.191f,
@@ -1098,6 +1104,18 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
                    true, true, true, true, true, true, false, 263, 256, 19, 19,
                    0, 1.000f, 0.000f, 0.875f, 361, 361, 0, -1, 0.401f));
+    EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
+                   true, true, true, true, true, true, false, 36, 33, 23, 22, 1,
+                   0.957f, 0.399f, 0.446f, 119, 145, -94, -94, 0.444f));
+    EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
+                   true, true, true, true, true, true, false, 36, 33, 23, 19, 1,
+                   0.957f, 0.446f, 0.446f, 119, 145, -94, -94, 0.444f));
+    EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
+                   true, true, true, true, true, true, false, 36, 33, 23, 22, 2,
+                   0.957f, 0.446f, 0.446f, 119, 145, -94, -94, 0.444f));
+    EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
+                   true, true, true, true, true, true, false, 36, 33, 23, 22, 1,
+                   0.957f, 0.446f, 0.446f, 119, 145, -94, -94, 0.399f));
     EXPECT(tc, !HybridPawnOnlyANEMCTSOverride(
                    true, true, true, true, true, false, false, 29, 25, 29, 25,
                    3, 0.862f, 0.443f, 0.456f, 91, 91, 0, 0, 0.248f));
