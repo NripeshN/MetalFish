@@ -899,6 +899,15 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootAdvancedPromotionSupportCandidate(70, 43, 20, 0.224f, 0.501f,
                                                     0.333f, 0.300f),
          "weak promotion support Q gap is blocked", tc);
+  expect(MCTSRootPawnEndgameEnPassantCandidate(54, 26, 12, false, true,
+                                               0.214f, 0.180f),
+         "pawn-endgame en-passant can replace quiet best when Q is near", tc);
+  expect(!MCTSRootPawnEndgameEnPassantCandidate(54, 26, 12, true, true, 0.214f,
+                                                0.180f),
+         "pawn-endgame en-passant does not replace capture best", tc);
+  expect(!MCTSRootPawnEndgameEnPassantCandidate(54, 26, 2, false, true, 0.214f,
+                                                0.100f),
+         "pawn-endgame en-passant still needs near Q", tc);
 
   expect(MCTSRootLowVisitQOverrideCandidate(39, 38, 0.601f, 0.698f),
          "00GuG near-visit higher-Q king move can override", tc);

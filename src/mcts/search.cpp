@@ -804,6 +804,25 @@ bool MCTSRootAdvancedPromotionSupportCandidate(uint32_t root_visits,
          best_q - candidate_q <= 0.120f;
 }
 
+bool MCTSRootPawnEndgameEnPassantCandidate(uint32_t root_visits,
+                                           uint32_t best_visits,
+                                           uint32_t candidate_visits,
+                                           bool best_is_capture,
+                                           bool candidate_is_en_passant,
+                                           float best_q, float candidate_q) {
+  if (best_is_capture || !candidate_is_en_passant)
+    return false;
+  if (root_visits < 16 || root_visits > 384)
+    return false;
+  if (candidate_visits < 2)
+    return false;
+  if (static_cast<uint64_t>(candidate_visits) * 8 <
+      static_cast<uint64_t>(std::max<uint32_t>(1, best_visits))) {
+    return false;
+  }
+  return best_q - candidate_q <= 0.080f;
+}
+
 bool MCTSRootLowVisitQOverrideCandidate(uint32_t best_visits,
                                         uint32_t candidate_visits, float best_q,
                                         float candidate_q,
@@ -2556,6 +2575,45 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
       best_idx = q_idx;
       best_n = edges[best_idx].child.load(std::memory_order_acquire)->GetN();
       best_q = q_best;
+    }
+  }
+
+  if (params_.low_policy_root_lever_selection && fixed_movetime_search &&
+      best_idx >= 0 && !best_is_terminal_win &&
+      total_child_visits <= q_override_visit_cap) {
+    Position root_pos;
+    StateInfo root_state;
+    root_pos.set(tree_.RootFen(), false, &root_state);
+    const bool best_is_capture = root_pos.capture(edges[best_idx].move);
+    if (root_pos.non_pawn_material() == VALUE_ZERO && !best_is_capture) {
+      int ep_idx = -1;
+      float ep_q = -2.0f;
+      uint32_t ep_visits = 0;
+      for (int i = 0; i < num_edges; ++i) {
+        if (i == best_idx || edges[i].move.type_of() != EN_PASSANT)
+          continue;
+        Node *child = edges[i].child.load(std::memory_order_acquire);
+        if (!child)
+          continue;
+        const uint32_t cn = child->GetN();
+        const float cq = child->GetWL();
+        if (!MCTSRootPawnEndgameEnPassantCandidate(
+                total_child_visits, best_n, cn, best_is_capture, true, best_q,
+                cq)) {
+          continue;
+        }
+        if (ep_idx < 0 || cq > ep_q ||
+            (std::abs(cq - ep_q) <= 0.000001f && cn > ep_visits)) {
+          ep_idx = i;
+          ep_q = cq;
+          ep_visits = cn;
+        }
+      }
+      if (ep_idx >= 0) {
+        best_idx = ep_idx;
+        best_n = ep_visits;
+        best_q = ep_q;
+      }
     }
   }
 
