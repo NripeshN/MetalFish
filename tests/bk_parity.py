@@ -402,6 +402,7 @@ def setup_metalfish_hybrid(
     root_pawn_lever_tiebreak: bool,
     ane_root_probe: bool,
     ane_root_hints: bool,
+    ane_confirm_mcts_override: bool,
     ane_only_pawn_endgames: bool,
     ane_weights: pathlib.Path,
     ane_model_path: pathlib.Path,
@@ -477,6 +478,10 @@ def setup_metalfish_hybrid(
     )
     sess.setoption("HybridANERootProbe", "true" if ane_root_probe else "false")
     sess.setoption("HybridANERootHints", "true" if ane_root_hints else "false")
+    sess.setoption(
+        "HybridANEConfirmMCTSOverride",
+        "true" if ane_confirm_mcts_override else "false",
+    )
     sess.setoption(
         "HybridANEOnlyPawnEndgames",
         "true" if ane_only_pawn_endgames else "false",
@@ -769,6 +774,7 @@ def write_json_report(
             "hybrid_root_pawn_lever_tiebreak": args.hybrid_root_pawn_lever_tiebreak,
             "hybrid_ane_root_probe": args.hybrid_ane_root_probe,
             "hybrid_ane_root_hints": args.hybrid_ane_root_hints,
+            "hybrid_ane_confirm_mcts_override": args.hybrid_ane_confirm_mcts_override,
             "hybrid_ane_only_pawn_endgames": args.hybrid_ane_only_pawn_endgames,
             "hybrid_ane_weights": str(args.hybrid_ane_weights),
             "hybrid_ane_model_path": str(args.hybrid_ane_model_path),
@@ -926,6 +932,7 @@ def run_once(
                 args.hybrid_root_pawn_lever_tiebreak,
                 args.hybrid_ane_root_probe,
                 args.hybrid_ane_root_hints,
+                args.hybrid_ane_confirm_mcts_override,
                 args.hybrid_ane_only_pawn_endgames,
                 args.hybrid_ane_weights,
                 args.hybrid_ane_model_path,
@@ -1199,6 +1206,11 @@ def main() -> int:
         default=True,
     )
     parser.add_argument(
+        "--hybrid-ane-confirm-mcts-override",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
         "--hybrid-ane-only-pawn-endgames",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -1211,7 +1223,7 @@ def main() -> int:
     parser.add_argument(
         "--hybrid-ane-model-path",
         type=pathlib.Path,
-        default=PROJ / "build" / "coreml" / "t1-512-heads-b8.mlpackage",
+        default=PROJ / "build" / "coreml" / "compiled" / "t1-512-heads-b8.mlmodelc",
     )
     parser.add_argument("--hybrid-ane-compute-units", default="cpu-ne")
     parser.add_argument("--hybrid-ane-root-hint-count", type=int, default=10)
