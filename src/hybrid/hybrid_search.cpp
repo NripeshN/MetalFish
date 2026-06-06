@@ -1706,8 +1706,8 @@ bool HybridMCTSRootSelectorConfirmsPawnLever(
 
   return MCTSRootHighPolicyLeverCandidate(
       static_cast<uint32_t>(root_current_visits), best_current_visits,
-      candidate_mcts_current_visits, best_policy, best_q,
-      candidate_mcts_policy, candidate_mcts_q);
+      candidate_mcts_current_visits, best_policy, best_q, candidate_mcts_policy,
+      candidate_mcts_q);
 }
 
 bool HybridANERootPawnLeverCandidate(
