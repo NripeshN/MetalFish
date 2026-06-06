@@ -818,6 +818,12 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(!MCTSRootFifthRankCurrentOverrideCandidate(157, 40, 48, 0.372f, 0.412f,
                                                     0.024f),
          "02I9S override requires a clear current-visit lead", tc);
+  expect(MCTSRootHighPolicyVisitLeaderProtected(49, 29, 0.301f, 0.294f, 0.039f,
+                                                0.500f),
+         "02I9S high-policy capture leader resists a low-policy Q flip", tc);
+  expect(!MCTSRootHighPolicyVisitLeaderProtected(49, 29, 0.301f, 0.294f, 0.039f,
+                                                 0.560f),
+         "02I9S guard still allows a much larger Q gap", tc);
   expect(MCTSRootLowVisitQOverrideCandidate(53, 48, 0.390f, 0.412f, 0.02f),
          "02I9S near-equal visits can select the higher-Q Nf5", tc);
   expect(!MCTSRootLowVisitQOverrideCandidate(32, 15, 0.022f, 0.662f, 0.02f,
@@ -905,6 +911,9 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
   expect(MCTSRootAdvancedPromotionSupportCandidate(70, 43, 27, 0.224f, 0.501f,
                                                    0.333f, 0.409f),
          "02Q6Q high-policy promotion support selection passes", tc);
+  expect(MCTSRootAdvancedPromotionSupportCandidate(79, 34, 24, 0.194f, 0.616f,
+                                                   0.271f, 0.477f),
+         "02Q6Q traced queen support survives a modest Q deficit", tc);
   expect(!MCTSRootAdvancedPromotionSupportCandidate(70, 43, 20, 0.224f, 0.501f,
                                                     0.333f, 0.300f),
          "weak promotion support Q gap is blocked", tc);

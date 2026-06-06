@@ -801,7 +801,7 @@ bool MCTSRootAdvancedPromotionSupportCandidate(uint32_t root_visits,
          candidate_visits * 2 >= std::max<uint32_t>(1, best_visits) &&
          candidate_policy >= 0.120f &&
          candidate_policy >= best_policy * 1.25f &&
-         best_q - candidate_q <= 0.120f;
+         best_q - candidate_q <= 0.150f;
 }
 
 bool MCTSRootPawnEndgameEnPassantCandidate(uint32_t root_visits,
@@ -873,6 +873,22 @@ bool MCTSRootLowVisitQOverrideCandidate(uint32_t best_visits,
                         : (candidate_visits * 4 >= best_visits * 3 ? 0.05f
                                                                    : 0.07f)));
   return candidate_q > best_q + required_gap;
+}
+
+bool MCTSRootHighPolicyVisitLeaderProtected(uint32_t best_visits,
+                                            uint32_t candidate_visits,
+                                            float best_policy, float best_q,
+                                            float candidate_policy,
+                                            float candidate_q) {
+  if (best_visits < 32 || candidate_visits < 8)
+    return false;
+  if (candidate_visits * 2 < std::max<uint32_t>(1, best_visits))
+    return false;
+  if (best_policy < 0.250f || candidate_policy > best_policy * 0.180f)
+    return false;
+  if (candidate_q >= 0.950f && candidate_q > best_q + 0.500f)
+    return false;
+  return candidate_q - best_q <= 0.250f;
 }
 
 bool MCTSRootClockLowVisitQOverrideCandidate(uint32_t root_current_visits,
@@ -2595,7 +2611,13 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
             MCTSRootMinorPawnEndgameCaptureProtected(
                 root_pos, edges[q_idx].move, edges[i].move, edges[q_idx].GetP(),
                 q_best, edges[i].GetP(), cq);
-        if (protects_high_policy_capture || protects_minor_pawn_endgame_capture)
+        const bool protects_high_policy_visit_leader =
+            MCTSRootHighPolicyVisitLeaderProtected(q_best_visits, cn,
+                                                   edges[q_idx].GetP(), q_best,
+                                                   edges[i].GetP(), cq);
+        if (protects_high_policy_capture ||
+            protects_minor_pawn_endgame_capture ||
+            protects_high_policy_visit_leader)
           continue;
         if (MCTSRootLowVisitQOverrideCandidate(
                 params_.low_visit_q_override_rescan ? q_best_visits : best_n,
