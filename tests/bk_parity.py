@@ -399,6 +399,7 @@ def setup_metalfish_hybrid(
     root_pawn_lever_tiebreak: bool,
     ane_root_probe: bool,
     ane_root_hints: bool,
+    ane_only_pawn_endgames: bool,
     ane_weights: pathlib.Path,
     ane_model_path: pathlib.Path,
     ane_compute_units: str,
@@ -473,6 +474,10 @@ def setup_metalfish_hybrid(
     )
     sess.setoption("HybridANERootProbe", "true" if ane_root_probe else "false")
     sess.setoption("HybridANERootHints", "true" if ane_root_hints else "false")
+    sess.setoption(
+        "HybridANEOnlyPawnEndgames",
+        "true" if ane_only_pawn_endgames else "false",
+    )
     sess.setoption("HybridANEWeights", str(ane_weights))
     sess.setoption("HybridANEModelPath", str(ane_model_path))
     sess.setoption("HybridANEComputeUnits", ane_compute_units)
@@ -761,6 +766,7 @@ def write_json_report(
             "hybrid_root_pawn_lever_tiebreak": args.hybrid_root_pawn_lever_tiebreak,
             "hybrid_ane_root_probe": args.hybrid_ane_root_probe,
             "hybrid_ane_root_hints": args.hybrid_ane_root_hints,
+            "hybrid_ane_only_pawn_endgames": args.hybrid_ane_only_pawn_endgames,
             "hybrid_ane_weights": str(args.hybrid_ane_weights),
             "hybrid_ane_model_path": str(args.hybrid_ane_model_path),
             "hybrid_ane_compute_units": args.hybrid_ane_compute_units,
@@ -915,6 +921,7 @@ def run_once(
                 args.hybrid_root_pawn_lever_tiebreak,
                 args.hybrid_ane_root_probe,
                 args.hybrid_ane_root_hints,
+                args.hybrid_ane_only_pawn_endgames,
                 args.hybrid_ane_weights,
                 args.hybrid_ane_model_path,
                 args.hybrid_ane_compute_units,
@@ -1177,6 +1184,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--hybrid-ane-root-hints",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--hybrid-ane-only-pawn-endgames",
         action=argparse.BooleanOptionalAction,
         default=True,
     )

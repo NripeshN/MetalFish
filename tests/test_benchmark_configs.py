@@ -641,6 +641,8 @@ def main() -> int:
             "--hybrid-ab-root-reject-mcts",
             "--hybrid-mcts-minibatch-size",
             "--hybrid-ane-root-probe",
+            "--hybrid-ane-only-pawn-endgames",
+            '"HybridANEOnlyPawnEndgames"',
             'sess.setoption("TransformerLowTimeFallbackMs", "0")',
             'sess.setoption("MCTSMaxThreads", str(mcts_threads))',
             '"MCTSParallelSearch", "true" if mcts_parallel_search else "false"',
