@@ -2828,9 +2828,9 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
         const uint32_t cn = child->GetN();
         const float cq = child->GetWL();
         const float policy = edges[i].GetP();
-        if (!MCTSRootAdvancedPromotionSupportCandidate(
-                total_child_visits, best_n, cn, best_policy, best_q, policy,
-                cq)) {
+        if (!MCTSRootAdvancedPromotionSupportCandidate(total_child_visits,
+                                                       best_n, cn, best_policy,
+                                                       best_q, policy, cq)) {
           continue;
         }
         if (support_idx < 0 || policy > support_policy ||
