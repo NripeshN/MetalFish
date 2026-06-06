@@ -1259,48 +1259,70 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridRootPawnLeverCandidate(-1, -1, 57350, 3, 74, 1, -0.047f,
                                              0.070f, -0.084f, -0.123f, 0.219f));
 
-    EXPECT(tc, HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                               -258, -282, 214, 1, -0.181f, 5,
-                                               2, -0.259f, 0.038f));
-    EXPECT(tc, HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                               -246, -267, 83, 1, -0.189f, 5, 3,
-                                               -0.270f, 0.038f));
-    EXPECT(tc, HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                               -256, -300, 4207, 1, -0.189f, 5,
-                                               3, -0.270f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(false, 4, -0.297f, 2, -0.271f,
-                                                -258, -282, 214, 1, -0.181f, 5,
-                                                2, -0.259f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 4, -0.297f, 3, -0.271f,
-                                                -258, -282, 214, 1, -0.181f, 5,
-                                                2, -0.259f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 2, -0.297f, 4, -0.271f,
-                                                -258, -282, 214, 1, -0.181f, 5,
-                                                2, -0.259f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.283f,
-                                                -258, -282, 214, 1, -0.181f, 5,
-                                                2, -0.259f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                                -258, -282, 214, 1, -0.181f, 5,
-                                                1, -0.259f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                                -258, -282, 214, 1, -0.181f, 5,
-                                                2, -0.259f, 0.034f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                                -258, -309, 214, 1, -0.181f, 5,
-                                                2, -0.259f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                                -258, -282, 74, 1, -0.181f, 5,
-                                                2, -0.259f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                                -246, -267, 74, 1, -0.189f, 5,
-                                                3, -0.270f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                                -256, -307, 4207, 1, -0.189f, 5,
-                                                3, -0.270f, 0.038f));
-    EXPECT(tc, !HybridANERootPawnLeverCandidate(true, 4, -0.297f, 2, -0.271f,
-                                                -258, -282, 214, 1, -0.181f, 5,
-                                                2, -0.272f, 0.038f));
+    const auto ane_lever =
+        [](bool ane_root_probe, int selected_ane_rank,
+           float selected_ane_score, int candidate_ane_rank,
+           float candidate_ane_score, int selected_average_score,
+           int candidate_average_score, uint64_t candidate_effort,
+           int selected_mcts_rank, float selected_mcts_q,
+           int candidate_mcts_rank, uint32_t candidate_mcts_current_visits,
+           float candidate_mcts_q, float candidate_mcts_policy) {
+          return HybridANERootPawnLeverCandidate(
+              ane_root_probe, selected_ane_rank, selected_ane_score,
+              candidate_ane_rank, candidate_ane_score, selected_average_score,
+              candidate_average_score, candidate_effort, selected_mcts_rank,
+              selected_mcts_q, 0.314f, selected_mcts_q, candidate_mcts_rank,
+              candidate_mcts_current_visits, candidate_mcts_q,
+              candidate_mcts_policy);
+        };
+
+    EXPECT(tc, ane_lever(true, 4, -0.297f, 2, -0.271f, -258, -282, 214,
+                         1, -0.181f, 5, 2, -0.259f, 0.038f));
+    EXPECT(tc, ane_lever(true, 4, -0.297f, 2, -0.271f, -246, -267, 83,
+                         1, -0.189f, 5, 3, -0.270f, 0.038f));
+    EXPECT(tc, ane_lever(true, 4, -0.297f, 2, -0.271f, -256, -300, 4207,
+                         1, -0.189f, 5, 3, -0.270f, 0.038f));
+    EXPECT(tc, !ane_lever(false, 4, -0.297f, 2, -0.271f, -258, -282, 214,
+                          1, -0.181f, 5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !ane_lever(true, 4, -0.297f, 3, -0.271f, -258, -282, 214,
+                          1, -0.181f, 5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !ane_lever(true, 2, -0.297f, 4, -0.271f, -258, -282, 214,
+                          1, -0.181f, 5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !ane_lever(true, 4, -0.297f, 2, -0.283f, -258, -282, 214,
+                          1, -0.181f, 5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !ane_lever(true, 4, -0.297f, 2, -0.271f, -258, -282, 214,
+                          1, -0.181f, 5, 1, -0.259f, 0.038f));
+    EXPECT(tc, !ane_lever(true, 4, -0.297f, 2, -0.271f, -258, -282, 214,
+                          1, -0.181f, 5, 2, -0.259f, 0.034f));
+    EXPECT(tc, !ane_lever(true, 4, -0.297f, 2, -0.271f, -258, -309, 214,
+                          1, -0.181f, 5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !ane_lever(true, 4, -0.297f, 2, -0.271f, -258, -282, 74,
+                          1, -0.181f, 5, 2, -0.259f, 0.038f));
+    EXPECT(tc, !ane_lever(true, 4, -0.297f, 2, -0.271f, -246, -267, 74,
+                          1, -0.189f, 5, 3, -0.270f, 0.038f));
+    EXPECT(tc, !ane_lever(true, 4, -0.297f, 2, -0.271f, -256, -307, 4207,
+                          1, -0.189f, 5, 3, -0.270f, 0.038f));
+    EXPECT(tc, !ane_lever(true, 4, -0.297f, 2, -0.271f, -258, -282, 214,
+                          1, -0.181f, 5, 2, -0.272f, 0.038f));
+
+    EXPECT(tc, HybridANERootPawnLeverCandidate(
+                   true, 7, -0.602f, 1, -0.520f, -496, -531, 83268, 6,
+                   -0.491f, 0.048f, -0.440f, 3, 27, -0.629f, 0.217f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                    true, 7, -0.602f, 1, -0.545f, -496, -531, 83268, 6,
+                    -0.491f, 0.048f, -0.440f, 3, 27, -0.629f, 0.217f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                    true, 7, -0.602f, 1, -0.520f, -496, -531, 83268, 1,
+                    -0.491f, 0.048f, -0.440f, 3, 27, -0.629f, 0.217f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                    true, 7, -0.602f, 1, -0.520f, -496, -531, 83268, 6,
+                    -0.491f, 0.080f, -0.440f, 3, 27, -0.629f, 0.217f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                    true, 7, -0.602f, 1, -0.520f, -496, -531, 83268, 6,
+                    -0.491f, 0.048f, -0.440f, 3, 23, -0.629f, 0.217f));
+    EXPECT(tc, !HybridANERootPawnLeverCandidate(
+                    true, 7, -0.602f, 1, -0.520f, -496, -537, 83268, 6,
+                    -0.491f, 0.048f, -0.440f, 3, 27, -0.629f, 0.217f));
 
     Position pos;
     StateInfo st;

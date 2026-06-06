@@ -1696,12 +1696,26 @@ bool HybridANERootPawnLeverCandidate(
     int candidate_ane_rank, float candidate_ane_score,
     int selected_average_score, int candidate_average_score,
     uint64_t candidate_effort, int selected_mcts_rank, float selected_mcts_q,
-    int candidate_mcts_rank, uint32_t candidate_mcts_current_visits,
-    float candidate_mcts_q, float candidate_mcts_policy) {
+    float selected_mcts_policy, float best_mcts_q, int candidate_mcts_rank,
+    uint32_t candidate_mcts_current_visits, float candidate_mcts_q,
+    float candidate_mcts_policy) {
   if (!ane_root_probe || selected_ane_rank <= 0 || candidate_ane_rank <= 0)
     return false;
-  if (selected_mcts_rank != 1)
-    return false;
+  if (selected_mcts_rank != 1) {
+    if (selected_mcts_rank < 4 || selected_mcts_rank > 8 ||
+        selected_ane_rank < 5 || candidate_ane_rank != 1 ||
+        candidate_ane_score - selected_ane_score < 0.060f ||
+        candidate_mcts_rank <= 0 || candidate_mcts_rank > 3 ||
+        candidate_mcts_current_visits < 24 || candidate_mcts_policy < 0.18f ||
+        candidate_mcts_policy < selected_mcts_policy * 3.0f ||
+        candidate_effort < 5000 ||
+        std::abs(selected_average_score) > 1000 ||
+        selected_average_score - candidate_average_score > 40) {
+      return false;
+    }
+    return selected_mcts_q - candidate_mcts_q <= 0.16f &&
+           best_mcts_q - candidate_mcts_q <= 0.22f;
+  }
   if (candidate_ane_rank > 2 || candidate_ane_rank >= selected_ane_rank)
     return false;
   if (candidate_ane_score - selected_ane_score < 0.015f)
@@ -3763,8 +3777,8 @@ Move ParallelHybridSearch::make_final_decision() {
           config_.ane_root_probe, selected_ane.rank, selected_ane.score,
           candidate_ane.rank, candidate_ane.score, selected_ab.average_score,
           candidate.average_score, candidate.effort, selected_mcts.rank,
-          selected_mcts.q, mcts_lookup.rank, mcts_lookup.current_visits,
-          mcts_lookup.q, mcts_lookup.policy);
+          selected_mcts.q, selected_mcts.policy, best_mcts_q, mcts_lookup.rank,
+          mcts_lookup.current_visits, mcts_lookup.q, mcts_lookup.policy);
       if (!mcts_confirms_lever && !ane_confirms_lever)
         continue;
 
