@@ -1708,8 +1708,7 @@ bool HybridANERootPawnLeverCandidate(
         candidate_mcts_rank <= 0 || candidate_mcts_rank > 3 ||
         candidate_mcts_current_visits < 24 || candidate_mcts_policy < 0.18f ||
         candidate_mcts_policy < selected_mcts_policy * 3.0f ||
-        candidate_effort < 5000 ||
-        std::abs(selected_average_score) > 1000 ||
+        candidate_effort < 5000 || std::abs(selected_average_score) > 1000 ||
         selected_average_score - candidate_average_score > 40) {
       return false;
     }
