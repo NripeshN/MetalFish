@@ -2162,6 +2162,32 @@ bool HybridPawnOnlyANEMCTSOverride(
   if (tiny_ane_pawn_lever)
     return true;
 
+  const bool pawn_capture_shape =
+      candidate_shape && !king_recapture_shape && !pawn_lever_shape;
+  const bool ultra_tiny_ane_pawn_capture =
+      pawn_capture_shape && visit_evidence_sane && mcts_root_visits >= 12 &&
+      mcts_root_visits <= 20 && mcts_best_visits >= 10 &&
+      mcts_current_root_visits >= 12 && mcts_current_root_visits <= 20 &&
+      mcts_current_best_visits >= 10 && visit_share >= 0.70f &&
+      root_q_gap >= 0.70f && q_gap_to_ab >= 0.70f && mcts_cp >= 130 &&
+      eval_delta >= 150 && ane_score_margin >= 1.0f && ab_mcts_visits <= 1 &&
+      std::abs(ab_average_score) <= 120 && std::abs(mcts_average_score) <= 220 &&
+      std::abs(ab_average_score - mcts_average_score) <= 160;
+  if (ultra_tiny_ane_pawn_capture)
+    return true;
+
+  const bool tiny_ane_pawn_capture =
+      pawn_capture_shape && visit_evidence_sane && mcts_root_visits >= 24 &&
+      mcts_root_visits <= 34 && mcts_best_visits >= 20 &&
+      mcts_current_root_visits >= 24 && mcts_current_best_visits >= 20 &&
+      visit_share >= 0.80f && root_q_gap >= 0.75f && q_gap_to_ab >= 0.75f &&
+      mcts_cp >= 180 && eval_delta >= 180 && ane_score_margin >= 0.75f &&
+      ab_mcts_visits <= 2 && std::abs(ab_average_score) <= 120 &&
+      std::abs(mcts_average_score) <= 120 &&
+      std::abs(ab_average_score - mcts_average_score) <= 120;
+  if (tiny_ane_pawn_capture)
+    return true;
+
   if (mcts_root_visits < 40 || mcts_best_visits < 32 ||
       mcts_current_root_visits < 20 || mcts_current_best_visits < 20 ||
       visit_share < 0.75f || !root_gap_ok || q_gap_to_ab < 0.25f ||
