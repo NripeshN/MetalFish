@@ -1082,6 +1082,11 @@ static void apply_pure_mcts_strength_overrides(Engine &engine,
   if (pure_mcts_smart_pruning >= 0.0f) {
     config.smart_pruning_factor = pure_mcts_smart_pruning;
   }
+  const float pure_mcts_cpuct_at_root =
+      get_float_option(engine, "PureMCTSCPuctAtRoot", -1.0f);
+  if (pure_mcts_cpuct_at_root >= 0.0f) {
+    config.cpuct_at_root = pure_mcts_cpuct_at_root;
+  }
   config.fixed_movetime_q_override_cap = 384;
 }
 
