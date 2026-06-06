@@ -421,6 +421,7 @@ bool MCTSIsMinorFifthRankQuietMove(const Position &pos, Move move);
 bool MCTSHasHeavyPieceOnSeventh(const Position &pos, Color us);
 bool MCTSIsAdvancedPromotionSupportQueenMove(const Position &pos, Move move);
 bool MCTSIsQuietQueenCheck(const Position &pos, Move move);
+bool MCTSIsQuietQueenKingNetMove(const Position &pos, Move move);
 bool MCTSRootHighPolicyLeverCandidate(
     uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
     float best_policy, float best_q, float candidate_policy, float candidate_q);
@@ -454,6 +455,9 @@ bool MCTSRootFifthRankCurrentOverrideCandidate(
 bool MCTSRootQuietQueenCheckProbeCandidate(uint32_t root_visits,
                                            int candidate_policy_rank,
                                            float candidate_policy);
+bool MCTSRootQuietQueenKingNetProbeCandidate(uint32_t root_visits,
+                                             int candidate_policy_rank,
+                                             float candidate_policy);
 bool MCTSRootAdvancedPromotionSupportCandidate(
     uint32_t root_visits, uint32_t best_visits, uint32_t candidate_visits,
     float best_policy, float best_q, float candidate_policy, float candidate_q);

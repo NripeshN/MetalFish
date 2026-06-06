@@ -660,6 +660,32 @@ bool MCTSIsQuietQueenCheck(const Position &pos, Move move) {
   return pos.gives_check(move);
 }
 
+bool MCTSIsQuietQueenKingNetMove(const Position &pos, Move move) {
+  if (move == Move::none() || move.type_of() != NORMAL || pos.capture(move))
+    return false;
+
+  const Piece piece = pos.piece_on(move.from_sq());
+  if (piece == NO_PIECE || type_of(piece) != QUEEN || !pos.empty(move.to_sq()))
+    return false;
+  if (pos.gives_check(move))
+    return false;
+
+  const Color us = color_of(piece);
+  const Square their_king = pos.square<KING>(~us);
+  const Square to = move.to_sq();
+  const int file_dist = std::abs(static_cast<int>(file_of(to)) -
+                                 static_cast<int>(file_of(their_king)));
+  const int rank_dist = std::abs(static_cast<int>(rank_of(to)) -
+                                 static_cast<int>(rank_of(their_king)));
+  if (std::max(file_dist, rank_dist) > 2)
+    return false;
+
+  const Bitboard occupied_after = (pos.pieces() ^ square_bb(move.from_sq())) |
+                                  square_bb(move.to_sq());
+  const Bitboard king_zone = attacks_bb<KING>(their_king);
+  return bool(attacks_bb<QUEEN>(to, occupied_after) & king_zone);
+}
+
 bool MCTSRootHighPolicyLeverCandidate(uint32_t root_visits,
                                       uint32_t best_visits,
                                       uint32_t candidate_visits,
@@ -789,6 +815,14 @@ bool MCTSRootQuietQueenCheckProbeCandidate(uint32_t root_visits,
     return candidate_policy >= 0.020f && candidate_policy <= 0.220f;
 
   return candidate_policy >= 0.004f && candidate_policy <= 0.080f;
+}
+
+bool MCTSRootQuietQueenKingNetProbeCandidate(uint32_t root_visits,
+                                             int candidate_policy_rank,
+                                             float candidate_policy) {
+  return root_visits >= 16 && root_visits <= 180 &&
+         candidate_policy_rank >= 2 && candidate_policy_rank <= 8 &&
+         candidate_policy >= 0.080f && candidate_policy <= 0.220f;
 }
 
 bool MCTSRootAdvancedPromotionSupportCandidate(uint32_t root_visits,
@@ -2211,6 +2245,40 @@ Search::PuctResult Search::SelectChildPuct(Node *node, bool is_root,
 
       if (!MCTSRootQuietQueenCheckProbeCandidate(children_visits, i + 1,
                                                  policy)) {
+        continue;
+      }
+      if (probe_idx < 0 || policy > probe_policy) {
+        probe_idx = i;
+        probe_policy = policy;
+      }
+    }
+
+    if (probe_idx >= 0)
+      return {probe_idx, 1};
+  }
+
+  if (params_.root_tactical_capture_probe && is_root && best_idx >= 0 &&
+      limits_.movetime > 0 && children_visits >= 16 &&
+      children_visits <= 180) {
+    int probe_idx = -1;
+    float probe_policy = 0.0f;
+    const int policy_rank_limit = std::min(num_edges, 8);
+    for (int i = 0; i < policy_rank_limit; ++i) {
+      if (i == best_idx)
+        continue;
+      if (!MCTSIsQuietQueenKingNetMove(ctx.pos, edges[i].move))
+        continue;
+
+      Node *child = edges[i].child.load(std::memory_order_acquire);
+      const float policy = edges[i].GetP();
+      const uint32_t target_visits = policy >= 0.120f ? 48 : 24;
+      if (child && child->GetN() >= target_visits)
+        continue;
+      if (child && child->GetNInFlight() > 0)
+        continue;
+
+      if (!MCTSRootQuietQueenKingNetProbeCandidate(children_visits, i + 1,
+                                                   policy)) {
         continue;
       }
       if (probe_idx < 0 || policy > probe_policy) {
