@@ -2573,28 +2573,42 @@ Search::RootMoveStats Search::GetBestMoveStatsLocked() const {
     root_pos.set(tree_.RootFen(), false, &root_state);
     int q_idx = best_idx;
     float q_best = best_q;
-    for (int i = 0; i < num_edges; ++i) {
-      Node *child = edges[i].child.load(std::memory_order_acquire);
-      if (!child)
-        continue;
-      const uint32_t cn = child->GetN();
-      const float cq = child->GetWL();
-      const bool protects_high_policy_capture =
-          root_pos.capture(edges[q_idx].move) &&
-          !root_pos.capture(edges[i].move) && edges[q_idx].GetP() >= 0.50f &&
-          edges[i].GetP() <= edges[q_idx].GetP() * 0.60f && cq < q_best + 0.10f;
-      const bool protects_minor_pawn_endgame_capture =
-          MCTSRootMinorPawnEndgameCaptureProtected(
-              root_pos, edges[q_idx].move, edges[i].move, edges[q_idx].GetP(),
-              q_best, edges[i].GetP(), cq);
-      if (protects_high_policy_capture || protects_minor_pawn_endgame_capture)
-        continue;
-      if (MCTSRootLowVisitQOverrideCandidate(
-              best_n, cn, q_best, cq, near_equal_required_gap, edges[i].GetP(),
-              fixed_movetime_search)) {
-        q_idx = i;
-        q_best = cq;
+    uint32_t q_best_visits = best_n;
+    const int q_pass_limit =
+        params_.low_visit_q_override_rescan ? num_edges : 1;
+    for (int q_pass = 0; q_pass < q_pass_limit; ++q_pass) {
+      bool q_changed = false;
+      for (int i = 0; i < num_edges; ++i) {
+        if (i == q_idx)
+          continue;
+        Node *child = edges[i].child.load(std::memory_order_acquire);
+        if (!child)
+          continue;
+        const uint32_t cn = child->GetN();
+        const float cq = child->GetWL();
+        const bool protects_high_policy_capture =
+            root_pos.capture(edges[q_idx].move) &&
+            !root_pos.capture(edges[i].move) && edges[q_idx].GetP() >= 0.50f &&
+            edges[i].GetP() <= edges[q_idx].GetP() * 0.60f &&
+            cq < q_best + 0.10f;
+        const bool protects_minor_pawn_endgame_capture =
+            MCTSRootMinorPawnEndgameCaptureProtected(
+                root_pos, edges[q_idx].move, edges[i].move, edges[q_idx].GetP(),
+                q_best, edges[i].GetP(), cq);
+        if (protects_high_policy_capture || protects_minor_pawn_endgame_capture)
+          continue;
+        if (MCTSRootLowVisitQOverrideCandidate(
+                params_.low_visit_q_override_rescan ? q_best_visits : best_n,
+                cn, q_best, cq, near_equal_required_gap, edges[i].GetP(),
+                fixed_movetime_search)) {
+          q_idx = i;
+          q_best = cq;
+          q_best_visits = cn;
+          q_changed = true;
+        }
       }
+      if (!q_changed)
+        break;
     }
     if (q_idx != best_idx) {
       best_idx = q_idx;

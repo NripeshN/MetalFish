@@ -232,6 +232,12 @@ struct ParallelHybridConfig {
     DYNAMIC        // Choose based on position type
   };
   DecisionMode decision_mode = DecisionMode::DYNAMIC;
+
+  ParallelHybridConfig() {
+    mcts_config.high_policy_root_lever_selection = false;
+    mcts_config.low_policy_root_lever_selection = false;
+    mcts_config.low_visit_q_override_rescan = false;
+  }
 };
 
 class ParallelHybridSearch {

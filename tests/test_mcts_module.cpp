@@ -656,6 +656,8 @@ void test_search_params_defaults(TestCounter &tc) {
          "pure MCTS low-policy lever rescue default", tc);
   expect(params.root_tactical_capture_probe,
          "pure MCTS root tactical capture probe default", tc);
+  expect(params.low_visit_q_override_rescan,
+         "pure MCTS low-visit Q override rescans by default", tc);
   expect(params.fixed_movetime_q_override_cap == 0,
          "fixed-movetime Q override defaults off for hybrid safety", tc);
   expect(params.GetCpuctBase(true) == params.cpuct_base_at_root,
@@ -818,6 +820,13 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
          "02I9S override requires a clear current-visit lead", tc);
   expect(MCTSRootLowVisitQOverrideCandidate(53, 48, 0.390f, 0.412f, 0.02f),
          "02I9S near-equal visits can select the higher-Q Nf5", tc);
+  expect(!MCTSRootLowVisitQOverrideCandidate(32, 15, 0.022f, 0.662f, 0.02f,
+                                             0.134f, true),
+         "03cYQ 15 visits cannot directly beat the original 32-visit leader",
+         tc);
+  expect(MCTSRootLowVisitQOverrideCandidate(18, 15, 0.022f, 0.662f, 0.02f,
+                                            0.134f, true),
+         "03cYQ 15 visits can beat an already-promoted 18-visit candidate", tc);
 
   Position high_value_capture_tactic;
   StateInfo high_value_capture_tactic_st;

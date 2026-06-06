@@ -52,6 +52,7 @@ ParallelHybridSearch::ParallelHybridSearch() {
   config_.mcts_config.cpuct_factor = 3.894f;
   config_.mcts_config.high_policy_root_lever_selection = false;
   config_.mcts_config.low_policy_root_lever_selection = false;
+  config_.mcts_config.low_visit_q_override_rescan = false;
 
   config_.ab_min_depth = 8;
   config_.agreement_threshold = 0.3f;
@@ -858,11 +859,22 @@ bool HybridMCTSCrossRootConfidenceOverride(
   if (ab_average_score - mcts_average_score > 80)
     return false;
 
-  if (ab_in_mcts_rank < 4 || ab_in_mcts_visits == 0)
+  const float mcts_q_edge = mcts_q - ab_in_mcts_q;
+  const bool ab_ranked_low_by_mcts = ab_in_mcts_rank >= 4;
+  const bool ab_rank2_or_3_rejected_by_mcts =
+      ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
+      ab_in_mcts_visits <= 48 &&
+      mcts_visits >= 6 * std::max<uint32_t>(1, ab_in_mcts_visits) &&
+      root_q_gap >= 0.12f && visit_share >= 0.64f && eval_delta >= 40 &&
+      mcts_q_edge >= 0.18f;
+  if ((!ab_ranked_low_by_mcts && !ab_rank2_or_3_rejected_by_mcts) ||
+      ab_in_mcts_visits == 0)
     return false;
 
+  const float required_q_edge =
+      ab_rank2_or_3_rejected_by_mcts ? 0.18f : 0.20f;
   return mcts_visits >= 3 * std::max<uint32_t>(1, ab_in_mcts_visits) &&
-         mcts_q - ab_in_mcts_q >= 0.20f;
+         mcts_q_edge >= required_q_edge;
 }
 
 bool HybridMCTSRootConfidenceRejectOverride(

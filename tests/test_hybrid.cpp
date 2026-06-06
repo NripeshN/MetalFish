@@ -244,6 +244,9 @@ void test_hybrid_config() {
     EXPECT(tc, config.ab_root_reject_mcts);
     EXPECT(tc, config.mcts_root_reject);
     EXPECT(tc, config.mcts_ab_root_hints);
+    EXPECT(tc, !config.mcts_config.high_policy_root_lever_selection);
+    EXPECT(tc, !config.mcts_config.low_policy_root_lever_selection);
+    EXPECT(tc, !config.mcts_config.low_visit_q_override_rescan);
     EXPECT(tc, config.mcts_ab_root_hint_delay_ms == 0);
     EXPECT(tc, config.mcts_ab_root_hint_count == 8);
     EXPECT(tc, config.ab_candidate_verify_ms == 120);
@@ -1571,6 +1574,12 @@ void test_hybrid_config() {
     EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
                    true, true, 265, 175, 0.660f, 0.145f, 226, 55, 619, 2,
                    -32001, 564, 2095896, 5, 16, 0.372f, 0.638f));
+    EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 306, 198, 0.647f, 0.167f, 223, 53, 634, 2,
+                   -32001, 611, 1019286, 2, 32, 0.421f, 0.632f));
+    EXPECT(tc, HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 418, 276, 0.660f, 0.127f, 216, 45, 636, 2,
+                   -32001, 619, 1436766, 3, 32, 0.421f, 0.619f));
     EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
                    true, true, 265, 169, 0.660f, 0.145f, 226, 55, 619, 2,
                    -32001, 564, 2095896, 5, 16, 0.372f, 0.638f));
@@ -1583,6 +1592,9 @@ void test_hybrid_config() {
     EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
                    true, true, 316, 203, 0.642f, 0.141f, 224, 61, 606, 2,
                    -32001, 585, 1339424, 2, 80, 0.520f, 0.634f));
+    EXPECT(tc, !HybridMCTSCrossRootConfidenceOverride(
+                   true, true, 418, 276, 0.660f, 0.127f, 216, 45, 636, 2,
+                   -32001, 619, 1436766, 3, 32, 0.445f, 0.619f));
   }
   {
     TestCase tc(

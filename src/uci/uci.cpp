@@ -1179,6 +1179,7 @@ make_hybrid_config(Engine &engine, const std::string &nn_weights,
   config.mcts_config = make_mcts_config(engine, nn_weights, split.mcts_threads);
   config.mcts_config.high_policy_root_lever_selection = false;
   config.mcts_config.low_policy_root_lever_selection = false;
+  config.mcts_config.low_visit_q_override_rescan = false;
   config.mcts_config.kld_gain_min =
       get_float_option(engine, "HybridMCTSMinimumKLDGainPerNode", 0.0f);
   config.mcts_threads = split.mcts_threads;
@@ -1436,9 +1437,10 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.high_policy_root_lever_selection << "|"
       << config.low_policy_root_lever_selection << "|"
       << config.root_tactical_capture_probe << "|"
-      << config.fixed_movetime_q_override_cap << "|" << config.draw_score << "|"
-      << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff << "|"
-      << config.two_fold_draws << "|" << config.sticky_endgames << "|"
+      << config.low_visit_q_override_rescan << "|"
+      << config.fixed_movetime_q_override_cap << "|" << config.draw_score
+      << "|" << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff
+      << "|" << config.two_fold_draws << "|" << config.sticky_endgames << "|"
       << config.virtual_loss << "|" << config.minibatch_size << "|"
       << config.minibatch_size_auto << "|"
       << config.max_out_of_order_evals_factor << "|"
