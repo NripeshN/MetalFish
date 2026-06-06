@@ -862,8 +862,7 @@ bool HybridMCTSCrossRootConfidenceOverride(
   const float mcts_q_edge = mcts_q - ab_in_mcts_q;
   const bool ab_ranked_low_by_mcts = ab_in_mcts_rank >= 4;
   const bool ab_rank2_or_3_rejected_by_mcts =
-      ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 &&
-      ab_in_mcts_visits <= 48 &&
+      ab_in_mcts_rank >= 2 && ab_in_mcts_rank <= 3 && ab_in_mcts_visits <= 48 &&
       mcts_visits >= 6 * std::max<uint32_t>(1, ab_in_mcts_visits) &&
       root_q_gap >= 0.12f && visit_share >= 0.64f && eval_delta >= 40 &&
       mcts_q_edge >= 0.18f;
@@ -871,8 +870,7 @@ bool HybridMCTSCrossRootConfidenceOverride(
       ab_in_mcts_visits == 0)
     return false;
 
-  const float required_q_edge =
-      ab_rank2_or_3_rejected_by_mcts ? 0.18f : 0.20f;
+  const float required_q_edge = ab_rank2_or_3_rejected_by_mcts ? 0.18f : 0.20f;
   return mcts_visits >= 3 * std::max<uint32_t>(1, ab_in_mcts_visits) &&
          mcts_q_edge >= required_q_edge;
 }

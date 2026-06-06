@@ -1438,9 +1438,9 @@ static std::string make_mcts_cache_key(const std::string &nn_weights,
       << config.low_policy_root_lever_selection << "|"
       << config.root_tactical_capture_probe << "|"
       << config.low_visit_q_override_rescan << "|"
-      << config.fixed_movetime_q_override_cap << "|" << config.draw_score
-      << "|" << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff
-      << "|" << config.two_fold_draws << "|" << config.sticky_endgames << "|"
+      << config.fixed_movetime_q_override_cap << "|" << config.draw_score << "|"
+      << config.wdl_rescale_ratio << "|" << config.wdl_rescale_diff << "|"
+      << config.two_fold_draws << "|" << config.sticky_endgames << "|"
       << config.virtual_loss << "|" << config.minibatch_size << "|"
       << config.minibatch_size_auto << "|"
       << config.max_out_of_order_evals_factor << "|"
