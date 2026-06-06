@@ -1384,16 +1384,14 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
   }
 
   if (mcts_root_visits >= 22 && mcts_root_visits <= 28 &&
-      mcts_best_visits >= 18 && visit_share >= 0.82f &&
-      root_q_gap >= 0.79f && mcts_cp >= 150 && eval_delta >= 160 &&
-      ane_score_margin >= 0.80f) {
+      mcts_best_visits >= 18 && visit_share >= 0.82f && root_q_gap >= 0.79f &&
+      mcts_cp >= 150 && eval_delta >= 160 && ane_score_margin >= 0.80f) {
     return true;
   }
 
   if (mcts_root_visits >= 16 && mcts_root_visits <= 20 &&
-      mcts_best_visits >= 12 && visit_share >= 0.75f &&
-      root_q_gap >= 0.70f && mcts_cp >= 650 && eval_delta >= 600 &&
-      ane_score_margin >= 0.35f) {
+      mcts_best_visits >= 12 && visit_share >= 0.75f && root_q_gap >= 0.70f &&
+      mcts_cp >= 650 && eval_delta >= 600 && ane_score_margin >= 0.35f) {
     return true;
   }
 
@@ -1404,9 +1402,8 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
   }
 
   if (mcts_root_visits >= 33 && mcts_root_visits <= 34 &&
-      mcts_best_visits >= 28 &&
-      visit_share >= 0.84f && root_q_gap >= 0.70f && mcts_cp >= 700 &&
-      eval_delta >= 650 && ane_score_margin >= 0.35f) {
+      mcts_best_visits >= 28 && visit_share >= 0.84f && root_q_gap >= 0.70f &&
+      mcts_cp >= 700 && eval_delta >= 650 && ane_score_margin >= 0.35f) {
     return true;
   }
 
