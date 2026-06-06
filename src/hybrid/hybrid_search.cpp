@@ -1005,16 +1005,16 @@ bool HybridMCTSRookEndgamePawnPushLowerBoundOverride(
     return false;
   }
 
-  if (mcts_root_visits < 24 || mcts_root_visits > 64 ||
-      mcts_best_visits < 18 || visit_share < 0.70f || root_q_gap < 0.55f ||
-      mcts_cp < 180 || eval_delta < 160 || std::abs(ab_score) > 80) {
+  if (mcts_root_visits < 24 || mcts_root_visits > 64 || mcts_best_visits < 18 ||
+      visit_share < 0.70f || root_q_gap < 0.55f || mcts_cp < 180 ||
+      eval_delta < 160 || std::abs(ab_score) > 80) {
     return false;
   }
 
-  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 3 ||
-      !mcts_in_ab_lowerbound || mcts_in_ab_upperbound ||
-      mcts_in_ab_score < -50 || mcts_in_ab_score - ab_score < -30 ||
-      mcts_in_ab_effort < 50000 || mcts_in_ab_effort > 500000) {
+  if (mcts_in_ab_rank <= 1 || mcts_in_ab_rank > 3 || !mcts_in_ab_lowerbound ||
+      mcts_in_ab_upperbound || mcts_in_ab_score < -50 ||
+      mcts_in_ab_score - ab_score < -30 || mcts_in_ab_effort < 50000 ||
+      mcts_in_ab_effort > 500000) {
     return false;
   }
 
@@ -1364,8 +1364,8 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
 
   const bool forced_single_line =
       mcts_root_visits >= 50 && mcts_root_visits <= 70 &&
-      mcts_best_visits >= 50 && visit_share >= 0.95f &&
-      mcts_cp >= 800 && eval_delta >= 800 && ane_score_margin >= 1.0f;
+      mcts_best_visits >= 50 && visit_share >= 0.95f && mcts_cp >= 800 &&
+      eval_delta >= 800 && ane_score_margin >= 1.0f;
   if (root_q_gap < 0.20f && !forced_single_line)
     return false;
   if (!forced_single_line && !large_ane_margin_low_cp && mcts_cp < 120)
@@ -1377,16 +1377,15 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
     return true;
 
   if (mcts_root_visits >= 16 && mcts_root_visits <= 35 &&
-      mcts_best_visits >= 13 && visit_share >= 0.80f &&
-      root_q_gap >= 0.40f && root_q_gap <= 0.68f && mcts_cp >= 380 &&
-      mcts_cp <= 460 && eval_delta >= 260 && ane_score_margin >= 0.10f) {
+      mcts_best_visits >= 13 && visit_share >= 0.80f && root_q_gap >= 0.40f &&
+      root_q_gap <= 0.68f && mcts_cp >= 380 && mcts_cp <= 460 &&
+      eval_delta >= 260 && ane_score_margin >= 0.10f) {
     return true;
   }
 
   if (mcts_root_visits >= 18 && mcts_root_visits <= 32 &&
-      mcts_best_visits >= 16 && visit_share >= 0.80f &&
-      root_q_gap >= 0.70f && mcts_cp >= 450 && eval_delta >= 400 &&
-      ane_score_margin >= 0.35f) {
+      mcts_best_visits >= 16 && visit_share >= 0.80f && root_q_gap >= 0.70f &&
+      mcts_cp >= 450 && eval_delta >= 400 && ane_score_margin >= 0.35f) {
     return true;
   }
 
@@ -1397,23 +1396,20 @@ bool HybridANEConfirmedMCTSOverride(bool enabled, bool ane_agrees_mcts,
   }
 
   if (mcts_root_visits >= 50 && mcts_root_visits <= 60 &&
-      mcts_best_visits >= 40 && visit_share >= 0.80f &&
-      root_q_gap >= 0.80f && mcts_cp >= 500 && eval_delta >= 500 &&
-      ane_score_margin >= 0.015f) {
+      mcts_best_visits >= 40 && visit_share >= 0.80f && root_q_gap >= 0.80f &&
+      mcts_cp >= 500 && eval_delta >= 500 && ane_score_margin >= 0.015f) {
     return true;
   }
 
   if (mcts_root_visits >= 30 && mcts_root_visits < 50 &&
-      mcts_best_visits >= 24 && visit_share >= 0.80f &&
-      root_q_gap >= 0.90f && mcts_cp >= 200 && eval_delta >= 200 &&
-      ane_score_margin >= 0.45f) {
+      mcts_best_visits >= 24 && visit_share >= 0.80f && root_q_gap >= 0.90f &&
+      mcts_cp >= 200 && eval_delta >= 200 && ane_score_margin >= 0.45f) {
     return true;
   }
 
   if (mcts_root_visits >= 35 && mcts_root_visits <= 45 &&
-      mcts_best_visits >= 30 && visit_share >= 0.80f &&
-      root_q_gap >= 0.65f && mcts_cp >= 450 && eval_delta >= 300 &&
-      ane_score_margin >= 0.10f) {
+      mcts_best_visits >= 30 && visit_share >= 0.80f && root_q_gap >= 0.65f &&
+      mcts_cp >= 450 && eval_delta >= 300 && ane_score_margin >= 0.10f) {
     return true;
   }
 
@@ -1632,8 +1628,7 @@ bool HybridMCTSRootRejectQGapOverride(
         ab_in_mcts_rank == 2 && ab_in_mcts_current_visits >= 20 &&
         ab_in_mcts_current_visits <= 64 && mcts_q - ab_in_mcts_q >= 1.0f;
     return low_ab_support_discovery || tiny_root_dominance ||
-           medium_root_discovery ||
-           cache_heavy_discovery;
+           medium_root_discovery || cache_heavy_discovery;
   }
 
   if ((mcts_in_ab_rank != 2 && mcts_in_ab_rank != 3) ||

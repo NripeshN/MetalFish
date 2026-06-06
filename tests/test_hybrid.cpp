@@ -1872,53 +1872,53 @@ void test_hybrid_config() {
     TestCase tc("Rook endgame central pawn push lower bound stays narrow");
 
     EXPECT(tc, HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 57, 46, 0.807f, 0.583f, 196, 166,
-                   30, 2, 114, true, false, 277616, 2, 5, -0.007f, 0.576f));
+                   true, true, true, true, 57, 46, 0.807f, 0.583f, 196, 166, 30,
+                   2, 114, true, false, 277616, 2, 5, -0.007f, 0.576f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   false, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   false, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, false, true, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, false, true, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, false, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, false, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 23, 18, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 23, 18, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.699f, 0.565f, 214, 214,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.699f, 0.565f, 214, 214, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.549f, 214, 214,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.549f, 214, 214, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.565f, 179, 214,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 179, 214, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 159,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 159, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, false, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, false, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, true, true, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, true, true, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -51, true, false, 58884, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -51, true, false, 58884, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, true, false, 49999, 2, 4, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, true, false, 49999, 2, 4, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, true, false, 58884, 2, 3, 0.049f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, true, false, 58884, 2, 3, 0.049f, 0.615f));
     EXPECT(tc, !HybridMCTSRookEndgamePawnPushLowerBoundOverride(
-                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214,
-                   0, 2, -20, true, false, 58884, 2, 4, 0.116f, 0.615f));
+                   true, true, true, true, 32, 24, 0.750f, 0.565f, 214, 214, 0,
+                   2, -20, true, false, 58884, 2, 4, 0.116f, 0.615f));
   }
   {
     TestCase tc("Quiet queen move can bypass stale low-effort AB root reject");
