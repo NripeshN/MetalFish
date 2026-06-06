@@ -911,16 +911,15 @@ void test_root_high_policy_lever_candidate(TestCounter &tc) {
 
   Position minor_pawn_endgame_recapture;
   StateInfo minor_pawn_endgame_recapture_st;
-  minor_pawn_endgame_recapture.set(
-      "8/7p/2p2pP1/8/1k1K4/p7/B4P2/8 b - - 0 43", false,
-      &minor_pawn_endgame_recapture_st);
+  minor_pawn_endgame_recapture.set("8/7p/2p2pP1/8/1k1K4/p7/B4P2/8 b - - 0 43",
+                                   false, &minor_pawn_endgame_recapture_st);
   const Move recapture =
       UCIEngine::to_move(minor_pawn_endgame_recapture, "h7g6");
   const Move quiet_pawn =
       UCIEngine::to_move(minor_pawn_endgame_recapture, "c6c5");
-  expect(MCTSRootMinorPawnEndgameCaptureProtected(
-             minor_pawn_endgame_recapture, recapture, quiet_pawn, 0.670f,
-             0.211f, 0.265f, 0.319f),
+  expect(MCTSRootMinorPawnEndgameCaptureProtected(minor_pawn_endgame_recapture,
+                                                  recapture, quiet_pawn, 0.670f,
+                                                  0.211f, 0.265f, 0.319f),
          "01abk high-policy pawn recapture resists a modest-Q quiet override",
          tc);
   expect(!MCTSRootMinorPawnEndgameCaptureProtected(
