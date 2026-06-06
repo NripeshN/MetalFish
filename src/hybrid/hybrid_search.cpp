@@ -1991,10 +1991,9 @@ bool HybridPawnOnlyANEMCTSOverride(
       king_recapture_shape && mcts_root_visits >= 35 &&
       mcts_root_visits <= 60 && mcts_best_visits >= 32 &&
       mcts_current_root_visits >= 20 && mcts_current_best_visits >= 20 &&
-      visit_share >= 0.95f && root_q_gap >= 0.40f &&
-      q_gap_to_ab >= 0.42f && mcts_cp >= 110 && eval_delta >= 130 &&
-      ane_score_margin >= 0.40f && ab_mcts_visits <= 1 &&
-      std::abs(ab_average_score) <= 110 &&
+      visit_share >= 0.95f && root_q_gap >= 0.40f && q_gap_to_ab >= 0.42f &&
+      mcts_cp >= 110 && eval_delta >= 130 && ane_score_margin >= 0.40f &&
+      ab_mcts_visits <= 1 && std::abs(ab_average_score) <= 110 &&
       std::abs(mcts_average_score) <= 110 &&
       std::abs(ab_average_score - mcts_average_score) <= 30;
   if (short_ane_king_recapture)
